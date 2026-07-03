@@ -1192,7 +1192,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			// the sibling credential and re-send in place (uncounted); the guard's failover closure
 			// also stickily redirects APIKeyFunc so the swap persists across turns. On no target,
 			// fall through to the terminal return with the honest message.
-			if classifyUpstream(resp.StatusCode, raw) == RemedyFailoverAccount && !triedFailover && p.AccountFailoverFunc != nil {
+			if classifyUpstream(resp.StatusCode, raw, resp.Header) == RemedyFailoverAccount && !triedFailover && p.AccountFailoverFunc != nil {
 				if call.failoverAccountCred(p, RemedyFailoverAccount.String()) {
 					triedFailover = true
 					failoverPending = true // confirmed-heal notify fires at the next 200, not here

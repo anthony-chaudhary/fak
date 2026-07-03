@@ -27,6 +27,8 @@ package agent
 import (
 	"net/http"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/accountobs"
 )
 
 // UpstreamRemedy is the closed set of automated responses to an upstream failure. Exactly
@@ -73,16 +75,29 @@ func (r UpstreamRemedy) String() string {
 	}
 }
 
-// classifyUpstream maps an upstream (status, body) to the single remedy that can address
-// it. The order matters: the transient/overload family is decided by status first (a 429
-// is always a backoff regardless of body); a 401 is always the token-refresh arm (the
-// existing 401 self-heal stays authoritative); and only the 403 family reads the body,
-// because that is the family whose remedy genuinely depends on WHICH denial it is. A body
-// signature that names an account-scoped wall (org/region/credit) yields FailoverAccount;
-// one that names a model-scoped entitlement yields SwitchModel; a permanent-but-unclassified
-// denial is Terminal; anything else on a 403 (no permanent signature) is a possibly-transient
-// abuse gate and gets Backoff, matching forbiddenRetryState's own transient arm.
-func classifyUpstream(status int, body []byte) UpstreamRemedy {
+// classifyUpstream maps an upstream (status, body, headers) to the single remedy that can
+// address it. The order matters: the transient/overload family is decided by status first (a
+// 429 is always a backoff regardless of body); a 401 is always the token-refresh arm (the
+// existing 401 self-heal stays authoritative); and only the 403/402 family reads the body AND
+// the headers, because that is the family whose remedy genuinely depends on WHICH denial it is.
+//
+// THE HEADERS ARE THE HONEST DISCRIMINATOR, not the body. A Claude subscription 403 body can say
+// "OAuth authentication is currently not allowed for this organization" for TWO very different
+// conditions: (a) a genuine standing org-OAuth-disable (the credential cannot serve at all —
+// failover to a permitted account is right), OR (b) a USAGE/OVERAGE rejection where the org has
+// overage disabled and THIS request would tip a rolling window past its cap (the credential is
+// otherwise fine — `unified-status: allowed`, sub-100% utilization — and RECOVERS on its own at
+// the 5h/7d reset). The body text is identical; only the anthropic-ratelimit-unified-* /
+// -overage-* headers tell them apart. Failing over on (b) is WRONG — it burns a second account's
+// bucket for a condition the original account clears at reset — so a 403 carrying an active
+// usage/overage rejection is routed to Backoff (the cap-aware wait toward the named reset, via
+// the classifyLimit429/unifiedResetFor machinery), NOT FailoverAccount. Only a 403 whose org body
+// carries NO usage/overage rejection is treated as a true org wall and failed over.
+//
+// Region/credit walls and model-entitlement refusals keep their body-only classification (they
+// carry no rolling-reset semantics). An unlabeled 403 stays a possibly-transient abuse gate
+// (Backoff), matching forbiddenRetryState's own transient arm.
+func classifyUpstream(status int, body []byte, h http.Header) UpstreamRemedy {
 	if retryableStatus(status) {
 		return RemedyBackoff
 	}
@@ -91,9 +106,16 @@ func classifyUpstream(status int, body []byte) UpstreamRemedy {
 		return RemedyRefreshToken
 	case http.StatusForbidden, http.StatusPaymentRequired: // 403, 402
 		switch {
+		case usageOrOverageRejected(h):
+			// A usage/overage rejection surfaced as a 403 (org overage disabled, a rolling
+			// window at its cap). The credential is fine and recovers at the named reset — wait
+			// for it, never fail over to a different account's bucket. This MUST precede the
+			// org-disable check: the same body text covers both, and the header is the only
+			// signal that separates a self-recovering cap from a standing org wall.
+			return RemedyBackoff
 		case orgOAuthDisabled(body), regionWalled(body), creditExhausted(body):
-			// Account-scoped wall: this credential's org/region/billing is denied, but a
-			// sibling account on a permitted org/region/plan is not. Fail over.
+			// Account-scoped wall with NO usage/overage signal: this credential's org/region/
+			// billing is genuinely denied, but a sibling account on a permitted org is not.
 			return RemedyFailoverAccount
 		case modelNotEntitled(body):
 			// Model-scoped: the account is fine, the model is not on it. Switch model.
@@ -110,6 +132,40 @@ func classifyUpstream(status int, body []byte) UpstreamRemedy {
 	default:
 		return RemedyTerminal
 	}
+}
+
+// usageOrOverageRejected reports whether a 403/402 response's rate-limit headers show a
+// USAGE/OVERAGE rejection — a rolling-window cap the account recovers from at its named reset,
+// NOT a standing wall. It is the honest discriminator that separates the two conditions the
+// org-disable body text conflates. It is true when the provider relayed either:
+//   - anthropic-ratelimit-unified-overage-status: rejected  (overage disabled and this request
+//     would exceed the cap — the exact header the live day30 probe showed), or
+//   - any unified window (top-level or 5h/7d) with status "rejected" (the window itself is over
+//     its limit right now).
+//
+// A response with no such header (a genuine org OAuth-disable carries none) returns false, so the
+// caller treats it as a real account wall. Reusing the accountobs parser keeps ONE header
+// taxonomy: the same leaf that feeds the cap-aware wait (unifiedResetFor) decides this.
+func usageOrOverageRejected(h http.Header) bool {
+	if len(h) == 0 {
+		return false
+	}
+	// The overage-status header is not a per-window field the Unified() parser surfaces, so read
+	// it directly (case-insensitively, as http.Header canonicalizes keys). "rejected" means the
+	// account hit its cap with overage disabled — a self-recovering usage boundary.
+	if strings.EqualFold(strings.TrimSpace(h.Get("Anthropic-Ratelimit-Unified-Overage-Status")), "rejected") {
+		return true
+	}
+	// Any unified window reporting status "rejected" (top-level, 5h, or 7d) is likewise a
+	// usage-cap rejection with a reset, not a permission wall.
+	t := accountobs.New()
+	t.Observe(http.StatusForbidden, h)
+	for _, w := range t.Snapshot().Unified() {
+		if strings.EqualFold(strings.TrimSpace(w.Status), "rejected") {
+			return true
+		}
+	}
+	return false
 }
 
 // bodyContainsAny reports whether the lowercased body contains any of the signatures. The

@@ -45,11 +45,61 @@ func TestClassifyUpstream(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := classifyUpstream(c.status, []byte(c.body)); got != c.want {
-				t.Fatalf("classifyUpstream(%d, %q) = %v, want %v", c.status, c.body, got, c.want)
+			// No rate-limit headers: the body-only classification path (a genuine org wall
+			// carries no usage/overage headers, which is exactly why the header check is the
+			// discriminator for the ambiguous org-disable body).
+			if got := classifyUpstream(c.status, []byte(c.body), nil); got != c.want {
+				t.Fatalf("classifyUpstream(%d, %q, nil) = %v, want %v", c.status, c.body, got, c.want)
 			}
 		})
 	}
+}
+
+// TestClassifyUpstreamUsageVsOrgWall pins the load-bearing distinction the first shipped version
+// got WRONG: the SAME org-disable 403 body means "fail over" only when there is NO usage/overage
+// rejection in the headers. With an overage-rejected header (the live day30 signal: overage
+// disabled, a rolling window at its cap, the account otherwise `allowed` and recovering at reset),
+// the very same body is a USAGE CAP → Backoff (wait for the reset), never a failover to another
+// account's bucket.
+func TestClassifyUpstreamUsageVsOrgWall(t *testing.T) {
+	orgBody := []byte(liveOrgOAuthDisabledBody)
+
+	t.Run("org-disable body with NO rate-limit headers => failover (true org wall)", func(t *testing.T) {
+		if got := classifyUpstream(http.StatusForbidden, orgBody, http.Header{}); got != RemedyFailoverAccount {
+			t.Fatalf("bare org-disable 403 = %v, want failover", got)
+		}
+	})
+
+	t.Run("org-disable body WITH overage-status rejected => backoff (usage cap, self-recovers)", func(t *testing.T) {
+		h := http.Header{}
+		h.Set("Anthropic-Ratelimit-Unified-Status", "allowed")
+		h.Set("Anthropic-Ratelimit-Unified-Overage-Status", "rejected")
+		h.Set("Anthropic-Ratelimit-Unified-Overage-Disabled-Reason", "org_level_disabled")
+		h.Set("Anthropic-Ratelimit-Unified-7d-Utilization", "0.54")
+		if got := classifyUpstream(http.StatusForbidden, orgBody, h); got != RemedyBackoff {
+			t.Fatalf("overage-rejected org-disable 403 = %v, want backoff (must NOT fail over on a self-recovering usage cap)", got)
+		}
+	})
+
+	t.Run("org-disable body WITH a unified window status rejected => backoff", func(t *testing.T) {
+		h := http.Header{}
+		h.Set("Anthropic-Ratelimit-Unified-5h-Status", "rejected")
+		h.Set("Anthropic-Ratelimit-Unified-5h-Reset", "1783120200")
+		if got := classifyUpstream(http.StatusForbidden, orgBody, h); got != RemedyBackoff {
+			t.Fatalf("window-rejected org-disable 403 = %v, want backoff", got)
+		}
+	})
+
+	t.Run("a genuinely allowed window on an org-disable body still fails over", func(t *testing.T) {
+		// Headers present but NOT a rejection (status allowed, no overage-rejected): this is the
+		// true org wall, not a cap — so failover remains correct.
+		h := http.Header{}
+		h.Set("Anthropic-Ratelimit-Unified-Status", "allowed")
+		h.Set("Anthropic-Ratelimit-Unified-7d-Utilization", "0.10")
+		if got := classifyUpstream(http.StatusForbidden, orgBody, h); got != RemedyFailoverAccount {
+			t.Fatalf("allowed-window org-disable 403 = %v, want failover", got)
+		}
+	})
 }
 
 // The org-OAuth-disabled body is classified PERMANENT by the pre-existing
@@ -65,7 +115,8 @@ func TestOrgOAuthDisabled_IsPermanentAndFailover(t *testing.T) {
 	if !forbiddenBodyIsPermanent(body) {
 		t.Fatal("forbiddenBodyIsPermanent must still see the live body as permanent (no wasted transient retries)")
 	}
-	if got := classifyUpstream(http.StatusForbidden, body); got != RemedyFailoverAccount {
+	// With NO rate-limit headers (a genuine org wall carries none), the live org body is a failover.
+	if got := classifyUpstream(http.StatusForbidden, body, nil); got != RemedyFailoverAccount {
 		t.Fatalf("the live org-disabled body must classify as failover, got %v", got)
 	}
 }
