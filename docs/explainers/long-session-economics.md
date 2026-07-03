@@ -117,6 +117,18 @@ the whole 100k prefix but pays a tenth for it — cheaper than the rewrite, and 
 cheap next turn because the prefix is still byte-identical. Keeping the discount beats
 shrinking the prompt.
 
+![Billed prompt tokens per turn over a 50-turn session: the naive full-price re-send line rises steeply while the fak prefix-preserving line stays shallow](../adoption/diagrams/cost-curve.svg)
+
+*The shape of the worked example above, plotted across a 50-turn session. The two
+lines are the **modeled** per-turn bill from
+[`cache_curve.py`](../../tools/cache_curve.py) (cache-read at 0.1× base, full price
+1×); the box marks the **witnessed** anchors — the 96.6% machine-wide cache-read share
+and the ~4.1× vs a *tuned* warm-cache fleet result. The naive line is what happens
+when the prefix match breaks (a summarize, or a cold provider cache): it pays full
+price for the whole growing transcript every turn. `fak` keeps the shallow line by
+splicing on the original bytes so the prefix stays byte-identical — it guarantees the
+prefix that makes the discount possible, not the discount itself.*
+
 The witnessed version of this at fleet scale: on a 50-turn × 5-agent run
 (Qwen2.5-1.5B, Apple M3 Pro), reuse did **~60.3× less work than the naive re-send loop**,
 and **~4.1× less than a *tuned* warm-cache stack** — the honest, few-fold headline, not

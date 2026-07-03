@@ -40,6 +40,11 @@ Subcommands:
   anchor   <session_audit.json>        the REAL measured ceiling, from session_audit.py --json
   validate <measured_decay.json>       compare modeled survival factors to measured anchors
   chart    [--turns N]                 an at-a-glance ASCII chart of the decay
+  costcurve [--turns N] [--delta D]    the COST CURVE SVG: billed tokens/turn over a session,
+            [--out PATH]               naive re-send vs fak prefix-preserving (cache held).
+                                       Generated from this tool's own model fns + measured ANCHOR,
+                                       stdlib-only, deterministic. Default out:
+                                       docs/adoption/diagrams/cost-curve.svg
   report   [--turns N] [--anchor J]    a full markdown report (curves + fanout + chart + anchors)
 
 Companion docs:
@@ -51,6 +56,7 @@ import sys
 import json
 import argparse
 import datetime
+from pathlib import Path
 
 # --- documented hosted-prompt-cache constants (flags, not magic) ---------------
 LOOKBACK_BLOCKS = 20      # a breakpoint walks back at most this many content blocks
@@ -120,6 +126,17 @@ def turn_cost(t, delta, read_mult=READ_MULT):
     if t < 1:
         return 0.0
     return delta * (1.0 + read_mult * (t - 1))
+
+
+def naive_turn_cost(t, delta):
+    """Billed cost of turn t with NO usable cache (the prefix match is broken -- a
+    summarize that rewrote the body, or a cold provider cache): the whole prefix
+    (t-1)*delta plus the fresh delta, re-sent at full (1x) base price. Grows linearly
+    with t at slope `delta` -- steeper than the cache-held line, which is the whole
+    point of the cost curve."""
+    if t < 1:
+        return 0.0
+    return delta * t
 
 
 def cum_cost(turns, delta, read_mult=READ_MULT):
@@ -631,6 +648,172 @@ def render_chart(turns=200):
     return "\n".join(L)
 
 
+# --- the cost curve SVG: billed tokens/turn, naive vs fak prefix-preserving ---------
+def _xml_esc(s):
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def render_costcurve_svg(turns=50, delta=2_000, read_mult=READ_MULT):
+    """A standalone, deterministic SVG of the long-session cost curve: billed prompt
+    tokens PER TURN over a `turns`-turn session, naive full-price re-send vs the fak
+    prefix-preserving (cache-held) line. Every plotted number is computed from
+    cache_curve's own model (turn_cost / naive_turn_cost / h_frozen) and the measured
+    ANCHOR, so the chart is generated from real cache_curve.py data, not hand-drawn.
+
+    Witnessed-vs-modeled is drawn explicitly: the two curves are the modeled per-turn
+    bill (illustrative shape at cache-read 0.1x base); the witnessed anchors (the 96.6%
+    machine-wide cache-read ceiling, the ~4.1x vs tuned warm-cache fleet result) sit in
+    a separate annotation box, never folded into the modeled lines. Axes and units are
+    labeled; the SVG carries real <text> (renders in any viewer) and explicit width/height."""
+    ts = list(range(1, turns + 1))
+    fak_line = [turn_cost(t, delta, read_mult) for t in ts]
+    naive_line = [naive_turn_cost(t, delta) for t in ts]
+    cum_fak = cum_cost(turns, delta, read_mult)
+    cum_naive = sum(naive_turn_cost(t, delta) for t in ts)
+    modeled_ceiling = h_frozen(turns)
+    witnessed_ceiling = ANCHOR["cache_read_share"]
+
+    # y-axis: round top tick with headroom above the tallest point (integer math).
+    step = 20000
+    ymax = step
+    top_needed = max(naive_line) * 1.08
+    while ymax < top_needed:
+        ymax += step
+    yticks = list(range(0, int(ymax) + 1, step))
+
+    # layout
+    W, H = 920, 580
+    ML, MR, MT, MB = 84, 40, 104, 84
+    px0, py1 = ML, H - MB
+    pw, ph = W - ML - MR, H - MT - MB
+
+    def xof(t):
+        return px0 + (t - 1) / max(1, turns - 1) * pw
+
+    def yof(v):
+        return py1 - v / ymax * ph
+
+    NAIVE_C = "#cf222e"
+    FAK_C = "#1a7f37"
+    GRID_C = "#d0d7de"
+    TEXT_C = "#24292f"
+    MUTED_C = "#57606a"
+    WIT_C = "#0969da"
+
+    pts_naive = " ".join(f"{xof(t):.1f},{yof(v):.1f}" for t, v in zip(ts, naive_line))
+    pts_fak = " ".join(f"{xof(t):.1f},{yof(v):.1f}" for t, v in zip(ts, fak_line))
+    area = (f"M {xof(1):.1f},{yof(fak_line[0]):.1f} "
+            + " ".join(f"L {xof(t):.1f},{yof(v):.1f}" for t, v in zip(ts, fak_line))
+            + " " + " ".join(f"L {xof(t):.1f},{yof(v):.1f}"
+                             for t, v in zip(reversed(ts), reversed(naive_line)))
+            + " Z")
+
+    L = []
+    L.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
+             f'viewBox="0 0 {W} {H}" '
+             f'font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" '
+             f'role="img" aria-labelledby="cc-title cc-desc">')
+    L.append(f'<title id="cc-title">{_xml_esc("Long-session cost curve: naive re-send vs fak prefix-preserving")}</title>')
+    L.append(f'<desc id="cc-desc">{_xml_esc("Billed prompt tokens per turn over a " + str(turns) + "-turn session. The naive full-price re-send line rises steeply; the fak prefix-preserving line (provider prompt-cache prefix kept byte-identical so the discount holds) stays shallow. Curves are the cache_curve.py modeled per-turn bill; witnessed anchors (96.6% machine-wide cache-read share; ~4.1x vs tuned warm-cache fleet) are annotated separately.")}</desc>')
+    L.append(f'<rect x="0" y="0" width="{W}" height="{H}" fill="#ffffff"/>')
+
+    # title + subtitle
+    L.append(f'<text x="{W // 2}" y="34" text-anchor="middle" font-size="20" '
+             f'font-weight="700" fill="{TEXT_C}">Long-session cost: naive re-send vs fak prefix-preserving</text>')
+    L.append(f'<text x="{W // 2}" y="58" text-anchor="middle" font-size="12.5" fill="{MUTED_C}">'
+             f'Billed prompt tokens per turn over a {turns}-turn session '
+             f'(delta={delta:,} tok/turn, cache-read {read_mult:g}&#215; base). '
+             f'Curves = modeled; box = witnessed.</text>')
+
+    # legend (horizontal, below subtitle)
+    ly = 80
+    L.append(f'<rect x="{ML}" y="{ly - 9}" width="22" height="10" fill="{NAIVE_C}"/>')
+    L.append(f'<text x="{ML + 28}" y="{ly}" font-size="12" fill="{TEXT_C}">naive re-send (no cache match) &#8212; modeled</text>')
+    nlabel_w = 300
+    L.append(f'<rect x="{ML + nlabel_w}" y="{ly - 9}" width="22" height="10" fill="{FAK_C}"/>')
+    L.append(f'<text x="{ML + nlabel_w + 28}" y="{ly}" font-size="12" fill="{TEXT_C}">fak prefix-preserving (cache held) &#8212; modeled</text>')
+    L.append(f'<rect x="{ML + 620}" y="{ly - 9}" width="22" height="10" fill="{WIT_C}" fill-opacity="0.25"/>')
+    L.append(f'<rect x="{ML + 620}" y="{ly - 9}" width="22" height="10" fill="none" stroke="{WIT_C}"/>')
+    L.append(f'<text x="{ML + 648}" y="{ly}" font-size="12" fill="{TEXT_C}">witnessed anchor</text>')
+
+    # gridlines + y ticks + value labels
+    for tk in yticks:
+        yy = yof(tk)
+        L.append(f'<line x1="{px0}" y1="{yy:.1f}" x2="{px0 + pw:.1f}" y2="{yy:.1f}" '
+                 f'stroke="{GRID_C}" stroke-width="1"/>')
+        L.append(f'<text x="{px0 - 10}" y="{yy + 4:.1f}" text-anchor="end" font-size="11" '
+                 f'fill="{MUTED_C}">{tk:,}</text>')
+    # x ticks (1, every 10, endpoint)
+    for t in range(1, turns + 1):
+        if t == 1 or t == turns or t % 10 == 0:
+            xx = xof(t)
+            L.append(f'<line x1="{xx:.1f}" y1="{py1}" x2="{xx:.1f}" y2="{py1 + 5}" '
+                     f'stroke="{MUTED_C}" stroke-width="1"/>')
+            L.append(f'<text x="{xx:.1f}" y="{py1 + 22}" text-anchor="middle" font-size="11" '
+                     f'fill="{MUTED_C}">{t}</text>')
+    # axes
+    L.append(f'<line x1="{px0}" y1="{MT}" x2="{px0}" y2="{py1}" stroke="{TEXT_C}" stroke-width="1.2"/>')
+    L.append(f'<line x1="{px0}" y1="{py1}" x2="{px0 + pw}" y2="{py1}" stroke="{TEXT_C}" stroke-width="1.2"/>')
+    # axis titles
+    L.append(f'<text x="{px0 + pw // 2}" y="{H - 22}" text-anchor="middle" font-size="12.5" '
+             f'font-weight="600" fill="{TEXT_C}">turn</text>')
+    L.append(f'<text transform="translate(24,{MT + ph // 2}) rotate(-90)" text-anchor="middle" '
+             f'font-size="12.5" font-weight="600" fill="{TEXT_C}">billed tokens / turn '
+             f'(&#215; base input price)</text>')
+
+    # area between curves (the saving) + the two curves
+    L.append(f'<path d="{area}" fill="{FAK_C}" fill-opacity="0.08" stroke="none"/>')
+    L.append(f'<polyline points="{pts_naive}" fill="none" stroke="{NAIVE_C}" stroke-width="2.6"/>')
+    L.append(f'<polyline points="{pts_fak}" fill="none" stroke="{FAK_C}" stroke-width="2.6"/>')
+
+    # endpoint dots + last-turn value annotations
+    ex = xof(turns)
+    n_lx, n_ly = ex, yof(naive_line[-1])
+    f_lx, f_ly = ex, yof(fak_line[-1])
+    L.append(f'<circle cx="{n_lx:.1f}" cy="{n_ly:.1f}" r="4" fill="{NAIVE_C}"/>')
+    L.append(f'<circle cx="{f_lx:.1f}" cy="{f_ly:.1f}" r="4" fill="{FAK_C}"/>')
+    L.append(f'<text x="{n_lx - 8:.1f}" y="{n_ly - 10:.1f}" text-anchor="end" font-size="12" '
+             f'font-weight="700" fill="{NAIVE_C}">{naive_line[-1]:,.0f}</text>')
+    L.append(f'<text x="{f_lx - 8:.1f}" y="{f_ly + 18:.1f}" text-anchor="end" font-size="12" '
+             f'font-weight="700" fill="{FAK_C}">{fak_line[-1]:,.0f}</text>')
+    L.append(f'<text x="{xof(1) + 8:.1f}" y="{yof(fak_line[0]) - 8:.1f}" font-size="11" '
+             f'fill="{MUTED_C}">turn 1: {fak_line[0]:,.0f} (both equal)</text>')
+    ratio_last = naive_line[-1] / fak_line[-1] if fak_line[-1] else 0.0
+    L.append(f'<text x="{ex - 8:.1f}" y="{(n_ly + f_ly) / 2:.0f}" text-anchor="end" '
+             f'font-size="12.5" font-weight="700" fill="{TEXT_C}">{ratio_last:.1f}&#215; at turn {turns}</text>')
+
+    # witness annotation box (top-left of plot, clear of both low-start lines)
+    bx0, by0, bw, bh = px0 + 14, MT + 14, 330, 132
+    L.append(f'<rect x="{bx0}" y="{by0}" width="{bw}" height="{bh}" rx="8" '
+             f'fill="{WIT_C}" fill-opacity="0.06" stroke="{WIT_C}" stroke-width="1"/>')
+    L.append(f'<text x="{bx0 + 12}" y="{by0 + 22}" font-size="11.5" font-weight="700" '
+             f'fill="{WIT_C}">WITNESSED (measured, not modeled)</text>')
+    wl = [
+        f'cache-read share: {witnessed_ceiling * 100:.1f}% machine-wide',
+        f'(session_audit.py, {ANCHOR["sessions"]} sessions; I:O {ANCHOR["io_ratio"]:.1f}:1)',
+        f'fleet reuse: ~4.1&#215; vs tuned warm-cache',
+        f'(50-turn &#215; 5-agent, M3 Pro); ~60&#215; vs naive*',
+    ]
+    for i, line in enumerate(wl):
+        L.append(f'<text x="{bx0 + 12}" y="{by0 + 46 + i * 20}" font-size="11" '
+                 f'fill="{TEXT_C}">{line}</text>')
+
+    # footer / fence notes
+    fy = H - MB + 40
+    L.append(f'<text x="{px0}" y="{fy}" font-size="10.5" fill="{MUTED_C}">'
+             f'modeled: per-turn bill from cache_curve.py (read {read_mult:g}&#215;, full price 1&#215;); '
+             f'illustrative shape, not a price quote. cumulative {turns} turns &#8594; '
+             f'naive {cum_naive:,.0f} vs fak {cum_fak:,.0f} billed tok.</text>')
+    L.append(f'<text x="{px0}" y="{fy + 15}" font-size="10.5" fill="{MUTED_C}">'
+             f'calibration: modeled frozen ceiling at T={turns} = {modeled_ceiling * 100:.1f}% '
+             f'&#8776; witnessed {witnessed_ceiling * 100:.1f}%. *naive-arm wall-clock modeled from '
+             f'prefill curve; token ratios exact. fak guarantees prefix byte-identity, not a cache hit.</text>')
+
+    L.append('</svg>')
+    return "\n".join(L)
+
+
 def render_report(turns, anchor_path, validate_path=None, tolerance=0.05):
     now = datetime.datetime.now().isoformat(timespec="seconds")
     c = curve_table(turns)
@@ -696,6 +879,11 @@ def main():
     qv.add_argument("json")
     qv.add_argument("--tolerance", type=float, default=0.05)
     qv.add_argument("--json", dest="json_output", action="store_true")
+    qc = sub.add_parser("costcurve", help="emit the cost-curve SVG (billed tokens/turn, naive vs fak)")
+    qc.add_argument("--turns", type=int, default=50, help="session length in turns")
+    qc.add_argument("--delta", type=int, default=2_000, help="new tokens appended per turn")
+    qc.add_argument("--out", default=None,
+                    help="output SVG path (default: docs/adoption/diagrams/cost-curve.svg)")
     qr = sub.add_parser("report")
     qr.add_argument("--turns", type=int, default=200)
     qr.add_argument("--anchor", default=None)
@@ -719,6 +907,15 @@ def main():
         return 0
     elif a.cmd == "chart":
         print(render_chart(a.turns))
+        return 0
+    elif a.cmd == "costcurve":
+        out = a.out or str(Path(__file__).resolve().parents[1] / "docs" / "adoption"
+                           / "diagrams" / "cost-curve.svg")
+        svg = render_costcurve_svg(a.turns, a.delta)
+        out_p = Path(out)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        out_p.write_text(svg, encoding="utf-8")
+        print(f"wrote {out_p}")
         return 0
     elif a.cmd == "anchor":
         print(render_anchor(load_anchor(a.json)))

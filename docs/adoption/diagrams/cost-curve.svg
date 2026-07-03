@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="580" viewBox="0 0 920 580" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" role="img" aria-labelledby="cc-title cc-desc">
+<title id="cc-title">Long-session cost curve: naive re-send vs fak prefix-preserving</title>
+<desc id="cc-desc">Billed prompt tokens per turn over a 50-turn session. The naive full-price re-send line rises steeply; the fak prefix-preserving line (provider prompt-cache prefix kept byte-identical so the discount holds) stays shallow. Curves are the cache_curve.py modeled per-turn bill; witnessed anchors (96.6% machine-wide cache-read share; ~4.1x vs tuned warm-cache fleet) are annotated separately.</desc>
+<rect x="0" y="0" width="920" height="580" fill="#ffffff"/>
+<text x="460" y="34" text-anchor="middle" font-size="20" font-weight="700" fill="#24292f">Long-session cost: naive re-send vs fak prefix-preserving</text>
+<text x="460" y="58" text-anchor="middle" font-size="12.5" fill="#57606a">Billed prompt tokens per turn over a 50-turn session (delta=2,000 tok/turn, cache-read 0.1&#215; base). Curves = modeled; box = witnessed.</text>
+<rect x="84" y="71" width="22" height="10" fill="#cf222e"/>
+<text x="112" y="80" font-size="12" fill="#24292f">naive re-send (no cache match) &#8212; modeled</text>
+<rect x="384" y="71" width="22" height="10" fill="#1a7f37"/>
+<text x="412" y="80" font-size="12" fill="#24292f">fak prefix-preserving (cache held) &#8212; modeled</text>
+<rect x="704" y="71" width="22" height="10" fill="#0969da" fill-opacity="0.25"/>
+<rect x="704" y="71" width="22" height="10" fill="none" stroke="#0969da"/>
+<text x="732" y="80" font-size="12" fill="#24292f">witnessed anchor</text>
+<line x1="84" y1="496.0" x2="880.0" y2="496.0" stroke="#d0d7de" stroke-width="1"/>
+<text x="74" y="500.0" text-anchor="end" font-size="11" fill="#57606a">0</text>
+<line x1="84" y1="430.7" x2="880.0" y2="430.7" stroke="#d0d7de" stroke-width="1"/>
+<text x="74" y="434.7" text-anchor="end" font-size="11" fill="#57606a">20,000</text>
+<line x1="84" y1="365.3" x2="880.0" y2="365.3" stroke="#d0d7de" stroke-width="1"/>
+<text x="74" y="369.3" text-anchor="end" font-size="11" fill="#57606a">40,000</text>
+<line x1="84" y1="300.0" x2="880.0" y2="300.0" stroke="#d0d7de" stroke-width="1"/>
+<text x="74" y="304.0" text-anchor="end" font-size="11" fill="#57606a">60,000</text>
+<line x1="84" y1="234.7" x2="880.0" y2="234.7" stroke="#d0d7de" stroke-width="1"/>
+<text x="74" y="238.7" text-anchor="end" font-size="11" fill="#57606a">80,000</text>
+<line x1="84" y1="169.3" x2="880.0" y2="169.3" stroke="#d0d7de" stroke-width="1"/>
+<text x="74" y="173.3" text-anchor="end" font-size="11" fill="#57606a">100,000</text>
+<line x1="84" y1="104.0" x2="880.0" y2="104.0" stroke="#d0d7de" stroke-width="1"/>
+<text x="74" y="108.0" text-anchor="end" font-size="11" fill="#57606a">120,000</text>
+<line x1="84.0" y1="496" x2="84.0" y2="501" stroke="#57606a" stroke-width="1"/>
+<text x="84.0" y="518" text-anchor="middle" font-size="11" fill="#57606a">1</text>
+<line x1="230.2" y1="496" x2="230.2" y2="501" stroke="#57606a" stroke-width="1"/>
+<text x="230.2" y="518" text-anchor="middle" font-size="11" fill="#57606a">10</text>
+<line x1="392.7" y1="496" x2="392.7" y2="501" stroke="#57606a" stroke-width="1"/>
+<text x="392.7" y="518" text-anchor="middle" font-size="11" fill="#57606a">20</text>
+<line x1="555.1" y1="496" x2="555.1" y2="501" stroke="#57606a" stroke-width="1"/>
+<text x="555.1" y="518" text-anchor="middle" font-size="11" fill="#57606a">30</text>
+<line x1="717.6" y1="496" x2="717.6" y2="501" stroke="#57606a" stroke-width="1"/>
+<text x="717.6" y="518" text-anchor="middle" font-size="11" fill="#57606a">40</text>
+<line x1="880.0" y1="496" x2="880.0" y2="501" stroke="#57606a" stroke-width="1"/>
+<text x="880.0" y="518" text-anchor="middle" font-size="11" fill="#57606a">50</text>
+<line x1="84" y1="104" x2="84" y2="496" stroke="#24292f" stroke-width="1.2"/>
+<line x1="84" y1="496" x2="880" y2="496" stroke="#24292f" stroke-width="1.2"/>
+<text x="482" y="558" text-anchor="middle" font-size="12.5" font-weight="600" fill="#24292f">turn</text>
+<text transform="translate(24,300) rotate(-90)" text-anchor="middle" font-size="12.5" font-weight="600" fill="#24292f">billed tokens / turn (&#215; base input price)</text>
+<path d="M 84.0,489.5 L 84.0,489.5 L 100.2,488.8 L 116.5,488.2 L 132.7,487.5 L 149.0,486.9 L 165.2,486.2 L 181.5,485.5 L 197.7,484.9 L 214.0,484.2 L 230.2,483.6 L 246.4,482.9 L 262.7,482.3 L 278.9,481.6 L 295.2,481.0 L 311.4,480.3 L 327.7,479.7 L 343.9,479.0 L 360.2,478.4 L 376.4,477.7 L 392.7,477.1 L 408.9,476.4 L 425.1,475.7 L 441.4,475.1 L 457.6,474.4 L 473.9,473.8 L 490.1,473.1 L 506.4,472.5 L 522.6,471.8 L 538.9,471.2 L 555.1,470.5 L 571.3,469.9 L 587.6,469.2 L 603.8,468.6 L 620.1,467.9 L 636.3,467.3 L 652.6,466.6 L 668.8,465.9 L 685.1,465.3 L 701.3,464.6 L 717.6,464.0 L 733.8,463.3 L 750.0,462.7 L 766.3,462.0 L 782.5,461.4 L 798.8,460.7 L 815.0,460.1 L 831.3,459.4 L 847.5,458.8 L 863.8,458.1 L 880.0,457.5 L 880.0,169.3 L 863.8,175.9 L 847.5,182.4 L 831.3,188.9 L 815.0,195.5 L 798.8,202.0 L 782.5,208.5 L 766.3,215.1 L 750.0,221.6 L 733.8,228.1 L 717.6,234.7 L 701.3,241.2 L 685.1,247.7 L 668.8,254.3 L 652.6,260.8 L 636.3,267.3 L 620.1,273.9 L 603.8,280.4 L 587.6,286.9 L 571.3,293.5 L 555.1,300.0 L 538.9,306.5 L 522.6,313.1 L 506.4,319.6 L 490.1,326.1 L 473.9,332.7 L 457.6,339.2 L 441.4,345.7 L 425.1,352.3 L 408.9,358.8 L 392.7,365.3 L 376.4,371.9 L 360.2,378.4 L 343.9,384.9 L 327.7,391.5 L 311.4,398.0 L 295.2,404.5 L 278.9,411.1 L 262.7,417.6 L 246.4,424.1 L 230.2,430.7 L 214.0,437.2 L 197.7,443.7 L 181.5,450.3 L 165.2,456.8 L 149.0,463.3 L 132.7,469.9 L 116.5,476.4 L 100.2,482.9 L 84.0,489.5 Z" fill="#1a7f37" fill-opacity="0.08" stroke="none"/>
+<polyline points="84.0,489.5 100.2,482.9 116.5,476.4 132.7,469.9 149.0,463.3 165.2,456.8 181.5,450.3 197.7,443.7 214.0,437.2 230.2,430.7 246.4,424.1 262.7,417.6 278.9,411.1 295.2,404.5 311.4,398.0 327.7,391.5 343.9,384.9 360.2,378.4 376.4,371.9 392.7,365.3 408.9,358.8 425.1,352.3 441.4,345.7 457.6,339.2 473.9,332.7 490.1,326.1 506.4,319.6 522.6,313.1 538.9,306.5 555.1,300.0 571.3,293.5 587.6,286.9 603.8,280.4 620.1,273.9 636.3,267.3 652.6,260.8 668.8,254.3 685.1,247.7 701.3,241.2 717.6,234.7 733.8,228.1 750.0,221.6 766.3,215.1 782.5,208.5 798.8,202.0 815.0,195.5 831.3,188.9 847.5,182.4 863.8,175.9 880.0,169.3" fill="none" stroke="#cf222e" stroke-width="2.6"/>
+<polyline points="84.0,489.5 100.2,488.8 116.5,488.2 132.7,487.5 149.0,486.9 165.2,486.2 181.5,485.5 197.7,484.9 214.0,484.2 230.2,483.6 246.4,482.9 262.7,482.3 278.9,481.6 295.2,481.0 311.4,480.3 327.7,479.7 343.9,479.0 360.2,478.4 376.4,477.7 392.7,477.1 408.9,476.4 425.1,475.7 441.4,475.1 457.6,474.4 473.9,473.8 490.1,473.1 506.4,472.5 522.6,471.8 538.9,471.2 555.1,470.5 571.3,469.9 587.6,469.2 603.8,468.6 620.1,467.9 636.3,467.3 652.6,466.6 668.8,465.9 685.1,465.3 701.3,464.6 717.6,464.0 733.8,463.3 750.0,462.7 766.3,462.0 782.5,461.4 798.8,460.7 815.0,460.1 831.3,459.4 847.5,458.8 863.8,458.1 880.0,457.5" fill="none" stroke="#1a7f37" stroke-width="2.6"/>
+<circle cx="880.0" cy="169.3" r="4" fill="#cf222e"/>
+<circle cx="880.0" cy="457.5" r="4" fill="#1a7f37"/>
+<text x="872.0" y="159.3" text-anchor="end" font-size="12" font-weight="700" fill="#cf222e">100,000</text>
+<text x="872.0" y="475.5" text-anchor="end" font-size="12" font-weight="700" fill="#1a7f37">11,800</text>
+<text x="92.0" y="481.5" font-size="11" fill="#57606a">turn 1: 2,000 (both equal)</text>
+<text x="872.0" y="313" text-anchor="end" font-size="12.5" font-weight="700" fill="#24292f">8.5&#215; at turn 50</text>
+<rect x="98" y="118" width="330" height="132" rx="8" fill="#0969da" fill-opacity="0.06" stroke="#0969da" stroke-width="1"/>
+<text x="110" y="140" font-size="11.5" font-weight="700" fill="#0969da">WITNESSED (measured, not modeled)</text>
+<text x="110" y="164" font-size="11" fill="#24292f">cache-read share: 96.6% machine-wide</text>
+<text x="110" y="184" font-size="11" fill="#24292f">(session_audit.py, 199 sessions; I:O 126.6:1)</text>
+<text x="110" y="204" font-size="11" fill="#24292f">fleet reuse: ~4.1&#215; vs tuned warm-cache</text>
+<text x="110" y="224" font-size="11" fill="#24292f">(50-turn &#215; 5-agent, M3 Pro); ~60&#215; vs naive*</text>
+<text x="84" y="536" font-size="10.5" fill="#57606a">modeled: per-turn bill from cache_curve.py (read 0.1&#215;, full price 1&#215;); illustrative shape, not a price quote. cumulative 50 turns &#8594; naive 2,550,000 vs fak 345,000 billed tok.</text>
+<text x="84" y="551" font-size="10.5" fill="#57606a">calibration: modeled frozen ceiling at T=50 = 96.1% &#8776; witnessed 96.6%. *naive-arm wall-clock modeled from prefill curve; token ratios exact. fak guarantees prefix byte-identity, not a cache hit.</text>
+</svg>
