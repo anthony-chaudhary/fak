@@ -20,9 +20,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
 
 const (
@@ -212,7 +213,7 @@ func launch(command []string, cwd string, env map[string]string, runner runnerFu
 func newLaunchCmd(ctx context.Context, resolved []string, cwd string, env map[string]string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, resolved[0], resolved[1:]...)
 	cmd.Dir = cwd
-	cmd.Env = envSlice(env)
+	cmd.Env = procguard.EnvSlice(env)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -225,15 +226,6 @@ func newLaunchCmd(ctx context.Context, resolved []string, cwd string, env map[st
 	configureProcTree(cmd)
 	cmd.WaitDelay = launchWaitDelay
 	return cmd
-}
-
-func envSlice(env map[string]string) []string {
-	out := make([]string, 0, len(env))
-	for k, v := range env {
-		out = append(out, k+"="+v)
-	}
-	sort.Strings(out) // deterministic order
-	return out
 }
 
 type payload struct {

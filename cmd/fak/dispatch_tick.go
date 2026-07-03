@@ -22,6 +22,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/regionadmit"
 )
 
@@ -1301,13 +1302,10 @@ func envMap(kvs []string) map[string]string {
 	return out
 }
 
+// envSliceFromMap stays as a package-local name for its many call sites; the
+// one shared implementation lives in internal/procguard (#1419).
 func envSliceFromMap(env map[string]string) []string {
-	out := make([]string, 0, len(env))
-	for k, v := range env {
-		out = append(out, k+"="+v)
-	}
-	sort.Strings(out)
-	return out
+	return procguard.EnvSlice(env)
 }
 
 func mapAt(m map[string]any, key string) map[string]any {
