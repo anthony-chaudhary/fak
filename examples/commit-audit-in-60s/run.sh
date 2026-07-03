@@ -11,6 +11,10 @@ if ! command -v "$DOS_BIN" >/dev/null 2>&1; then
   echo "  or set DOS_BIN=/path/to/dos" >&2
   exit 2
 fi
+if ! command -v git >/dev/null 2>&1; then
+  echo "commit-audit-in-60s: 'git' not found on PATH — install git and rerun." >&2
+  exit 2
+fi
 
 # A throwaway git repo so the demo never touches your real history. `dos commit-audit`
 # reads the commit FROM this workspace, so we pass --workspace explicitly — without it
