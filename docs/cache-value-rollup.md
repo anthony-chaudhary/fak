@@ -39,11 +39,30 @@ kernel reuse.
 (or caller-windowed with `--since`). It joins the two cache ledgers with
 `docs/nightrun/gateway-usage.jsonl` so long-horizon guard use has cumulative counters:
 
-- **Usage**: recorded guard/serve rows, exit sessions, uptime, kernel decisions, token axes.
+- **Usage** (WITNESSED operational): recorded guard/serve rows, exit sessions, uptime,
+  kernel decisions, and the operational token axes (input/output). This block is the
+  usage ledger's own view and is complete only since 2026-07-03, when the guard-teardown
+  usage-row writer shipped; it is labelled as such so its recency is never read as a true zero.
 - **Saved token-equivalent**: provider prompt-cache token-equivalent plus fak-authored
-  KV-prefix and compaction token-equivalent, with `fak_share`.
-- **API cost**: observed spend, uncached/uncompacted counterfactual, avoided dollars, and
-  percent reduction. Dollar rows remain dollar-blind when no trusted price is present.
+  KV-prefix and compaction token-equivalent, with `fak_share`. The `cache_read=` display
+  count is sourced from the Track-2 savings ledger (authoritative, complete back to the
+  first session) — not the back-incomplete usage-ledger counter — and the two provider-read
+  sources are kept in separate fields and never summed (a session can appear in both).
+- **API cost**: observed spend, uncached/uncompacted counterfactual, and avoided dollars
+  **split by owner** — `avoided=$X (provider $P + fak $F)`. Provider = read rebate net of
+  the cache-write premium (OBSERVED/provider-relayed); fak = the compaction saving fak
+  authored (WITNESSED shed, dollar value projected). The blended total stays their exact
+  sum, so percent reduction is unchanged. Today fak's slice is $0 — that is the honest
+  state, shown explicitly rather than blended away. Dollar rows remain dollar-blind when no
+  trusted price is present.
+- **Run-rate + projection** (long-horizon lens): the cumulative avoided dollars and saved
+  token-equivalent normalized into `$/day`, `$/week`, and a straight-line `30d`/`90d`
+  projection, over the span the SAVINGS rows cover (the rows that carry the dollars, kept
+  separate from the wider usage-row span so it cannot deflate the rate). Every rate is split
+  provider vs fak and labelled OBSERVED (provider-cache economics). A span under three days
+  is still rated but flagged `[PROVISIONAL]` so a short-window extrapolation is never read as
+  settled. This is the line that answers "over a long horizon, how much does this reduce API
+  cost per day, and whose cache is doing it?".
 - **Session extension**: WITNESSED compaction-shed context tokens only. Provider cache reads
   reduce spend/latency but do not enlarge the context window, so they are never counted as
   session-extension tokens. Pass `--context-budget-tokens N` to normalize shed tokens into
@@ -105,9 +124,13 @@ A cache-value card should be read top-down:
   the latest week, net dollars, rebate/compaction/write/spend components, and the
   provider/mechanism buckets so a provider rebate cannot hide fak-authored compaction.
 - **Fleet aggregate** is the cumulative long-horizon line: usage rows and exit sessions
-  from the gateway-usage ledger, total saved token-equivalent by owner, avoided API cost,
-  and context-extension tokens. With `--context-budget-tokens`, the extension line also
-  shows percent of one session window and window-equivalent.
+  from the gateway-usage ledger, total saved token-equivalent by owner, avoided API cost
+  **split provider vs fak**, a `$/day`+`$/week`+`30d`/`90d` run-rate (also split, marked
+  `[PROVISIONAL]` under a three-day span), and context-extension tokens. With
+  `--context-budget-tokens`, the extension line also shows percent of one session window
+  and window-equivalent. Read the provider/fak split before the headline: today every
+  avoided dollar is provider prompt-cache and fak's slice is `$0` — the split makes that
+  unmissable rather than crediting fak for the provider's cache.
 
 ## Reproduce
 
