@@ -925,7 +925,7 @@ func dispatchAttachOpencodePromptFile(command []string, promptPath string) []str
 	}
 	last := out[len(out)-1]
 	out = out[:len(out)-1]
-	out = append(out, "--file", promptPath, last)
+	out = append(out, "--file", promptPath, "--", last)
 	return out
 }
 

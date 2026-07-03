@@ -13,6 +13,7 @@ func TestDispatchAttachOpencodePromptFileKeepsPromptOutOfArgv(t *testing.T) {
 	want := []string{
 		"opencode", "run", "--print-logs", "-m", "glm",
 		"--file", `C:\work\fak\.dispatch-runs\resolve-2506.prompt.txt`,
+		"--",
 		dispatchtick.OpencodePromptNotice,
 	}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
