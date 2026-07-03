@@ -1,0 +1,27 @@
+{
+  "as_of": "2026-07-03T11:54:31Z",
+  "concept_rungs": {
+    "breakpoint_placement": "UNWIRED",
+    "compaction_shed": "SILENT_ZERO",
+    "guard_usage_plane": "CHANNEL_READY",
+    "kv_prefix_reuse": "EVIDENCED",
+    "provider_prompt_cache_passthrough": "EVIDENCED",
+    "ttl_upgrade_1h": "UNWIRED",
+    "uncached_remainder_shrink": "UNIMPLEMENTED"
+  },
+  "ledger_rows": {
+    "cache_savings": 59,
+    "cache_value": 9,
+    "gateway_usage": 400
+  },
+  "ledger_schemas": {
+    "cache_savings": "fak-cache-savings-ledger/1",
+    "cache_value": "fak-cache-value-ledger/1",
+    "gateway_usage": "fak-gateway-usage-ledger/1"
+  },
+  "savings_mechanism_rows": {
+    "provider_prompt_cache": 59
+  },
+  "schema": "fak-managed-cache-proving-ground/1",
+  "violation_count": 0
+}

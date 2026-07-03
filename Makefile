@@ -23,7 +23,7 @@ ARCHITEST_GATE_RE ?= ^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRoot
 # runs the model-free terminal witnesses from run-the-demos.md.
 # cuda-check is the GPU-free CUDA ABI/header preflight — deterministic, no CUDA toolkit,
 # so it joins the local gate the same way (the cuda-build.yml `static` job is its CI mirror).
-ci: build gofmt-check vet test claims-lint salience dos-lint index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke gated-tests cuda-check
+ci: build gofmt-check vet test claims-lint salience dos-lint index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet cache-proving demo-smoke demo-headless-smoke gated-tests cuda-check
 	@echo "CI OK"
 
 build:
@@ -346,6 +346,20 @@ scorecard-ratchet:
 	@python3 tools/scorecard_control_pane_test.py
 	@python3 tools/scorecard_control_pane.py --check
 	@echo "scorecard-ratchet OK"
+
+# cache-proving: the real-session regression floor for the managed-cache levers
+# (epic #1844). Validates the durable nightrun ledgers row-by-row (schema, closed
+# mechanism vocabulary, the 0.9r-0.25c savings identity), folds every cache concept
+# to a rung on the evidence ladder, and ratchets against the pinned baseline
+# (tools/managed_cache_proving_ground.data/baseline.json): counts may only grow,
+# rungs may only climb, violations may only shrink. Read-only and deterministic —
+# concurrent sessions appending ledger rows keep it green; a ledger rewrite, schema
+# drift, or a lever losing its durable witness turns it red. Re-pin after an
+# intentional rung climb with `--write-baseline`.
+cache-proving:
+	@python3 tools/managed_cache_proving_ground_test.py
+	@python3 tools/managed_cache_proving_ground.py --check
+	@echo "cache-proving OK"
 
 # demo-smoke: dynamic but hermetic. It builds the browser demos into a temp dir,
 # starts them on loopback, mounts each behind its documented base path, verifies
