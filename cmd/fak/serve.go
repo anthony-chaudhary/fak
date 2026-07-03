@@ -383,8 +383,8 @@ func gatewayUsageCounters(srv *gateway.Server) gatewayusageledger.Counters {
 // same append-only JSONL pattern persistCacheValueObservations already uses for the
 // narrower cache-value axis (#1303). Best-effort: a write failure never fails the
 // session. context is a free-form label (e.g. "http"/"stdio").
-func persistGatewayUsageObservation(srv *gateway.Server, sessionType, context string) {
-	row := gatewayusageledger.NewRow("exit", sessionType, context, "", 0, gatewayUsageCounters(srv), time.Now())
+func persistGatewayUsageObservation(srv *gateway.Server, sessionType, context string, uptime time.Duration) {
+	row := gatewayusageledger.NewRow("exit", sessionType, context, "", uptime, gatewayUsageCounters(srv), time.Now())
 	if err := gatewayusageledger.Append(gatewayusageledger.DefaultLedgerRel, row); err != nil {
 		fmt.Fprintf(os.Stderr, "fak: gateway-usage ledger append failed (non-fatal): %v\n", err)
 	}
@@ -397,7 +397,7 @@ func persistGatewayUsageObservation(srv *gateway.Server, sessionType, context st
 // returned stop func cancels the loop; it is safe to call even when the loop was
 // never started. The loop also exits on its own once ctx is done, so a caller that
 // forgets to invoke stop still cannot leak the goroutine past the serve lifecycle.
-func startGatewayUsageSnapshotLoop(ctx context.Context, srv *gateway.Server, interval time.Duration, sessionType string) func() {
+func startGatewayUsageSnapshotLoop(ctx context.Context, srv *gateway.Server, interval time.Duration, sessionType string, startedAt time.Time) func() {
 	if interval <= 0 {
 		return func() {}
 	}
@@ -410,7 +410,8 @@ func startGatewayUsageSnapshotLoop(ctx context.Context, srv *gateway.Server, int
 			case <-loopCtx.Done():
 				return
 			case <-t.C:
-				row := gatewayusageledger.NewRow("periodic", sessionType, "snapshot", "", 0, gatewayUsageCounters(srv), time.Now())
+				now := time.Now()
+				row := gatewayusageledger.NewRow("periodic", sessionType, "snapshot", "", now.Sub(startedAt), gatewayUsageCounters(srv), now)
 				if err := gatewayusageledger.Append(gatewayusageledger.DefaultLedgerRel, row); err != nil {
 					fmt.Fprintf(os.Stderr, "fak: gateway-usage periodic snapshot failed (non-fatal): %v\n", err)
 				}

@@ -1145,7 +1145,7 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 	// Until now only `fak serve` exits reached this ledger, so the per-session WHY
 	// behind a zero fak-slice (burst_unprofitable vs anchor-starved vs under_budget)
 	// was unrecoverable after exit on the flagship guard path (epic #1601 gap).
-	persistGatewayUsageObservation(srv, "guard", agentName)
+	persistGatewayUsageObservation(srv, "guard", agentName, sessionWindow)
 	if dojoMode {
 		_ = persistLiveDojoEpisode("guard", srv)
 	}

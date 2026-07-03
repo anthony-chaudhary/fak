@@ -480,7 +480,7 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 	// --metrics-snapshot tick so a crash before a clean exit still leaves a trail. Off
 	// (0 duration, the default) is a byte-for-byte no-op; the exit-time "exit" row below
 	// is always written regardless of this flag.
-	stopMetricsSnapshot := startGatewayUsageSnapshotLoop(ctx, rt.srv, *sf.metricsSnapshot, "serve")
+	stopMetricsSnapshot := startGatewayUsageSnapshotLoop(ctx, rt.srv, *sf.metricsSnapshot, "serve", rt.t0)
 	defer stopMetricsSnapshot()
 
 	if *sf.stdio {
@@ -495,7 +495,7 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 			_ = persistLiveDojoEpisode("serve", rt.srv)
 		}
 		// Append the full served-turn counter-family snapshot (#1610).
-		persistGatewayUsageObservation(rt.srv, "serve", "stdio")
+		persistGatewayUsageObservation(rt.srv, "serve", "stdio", time.Since(rt.t0))
 		dumpServeSessions(serveSessions, *sf.sessionStatePath) // #629: persist drive state for the next cold resume
 		return
 	}
@@ -512,6 +512,6 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 		_ = persistLiveDojoEpisode("serve", rt.srv)
 	}
 	// Append the full served-turn counter-family snapshot (#1610).
-	persistGatewayUsageObservation(rt.srv, "serve", "http")
+	persistGatewayUsageObservation(rt.srv, "serve", "http", time.Since(rt.t0))
 	dumpServeSessions(serveSessions, *sf.sessionStatePath) // #629: persist drive state for the next cold resume
 }
