@@ -35,6 +35,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/resume"
+	"github.com/anthony-chaudhary/fak/internal/sessionsignals"
 )
 
 // runResumeStatus walks the store, joins each session against the ledger, folds the
@@ -422,19 +423,6 @@ func scanTranscriptForStatus(r io.Reader) statusTranscript {
 	return out
 }
 
-// authWallRe is the auth/login/credit/access-wall vocabulary — the walls a re-resume
-// cannot fix (port of the fleet tooling's AUTH_RE, the is_auth_error signal).
-var authWallRe = regexp.MustCompile(`(?i)Login interrupted|please run /login|authentication_error|` +
-	`invalid x-api-key|invalid authentication credentials|` +
-	`API Error:\s*401|HTTP\s*401|401\s+(?:authentication required|unauthorized)|` +
-	`OAuth token has expired|credit balance is too low|` +
-	`organization has disabled Claude subscription access|` +
-	`Use an Anthropic API key instead|Not logged in`)
-
-// limitWallRe matches a usage-limit banner carrying a reset window ("…limit · resets
-// 8pm…") — the recoverable wall (port of LIMIT_RE's load-bearing prefix).
-var limitWallRe = regexp.MustCompile(`(?i)limit\s*[·:|.\-]?\s*resets?\s+`)
-
 // classifyTerminalSignal maps the terminal turn's text onto the closed TerminalSignal
 // facts the pure leaf classifies. Keyed off the TERMINAL record only — a session that
 // merely discusses an auth wall or a 529 five turns back is not in that state.
@@ -445,8 +433,8 @@ func classifyTerminalSignal(text string, found bool) resume.TerminalSignal {
 	low := strings.ToLower(text)
 	return resume.TerminalSignal{
 		Found:     true,
-		AuthWall:  authWallRe.MatchString(text),
-		LimitWall: limitWallRe.MatchString(text),
+		AuthWall:  sessionsignals.IsAuthError(text) || sessionsignals.NeedsLoginPrompt(text),
+		LimitWall: sessionsignals.IsLimitError(text),
 		TransientAPIError: strings.Contains(low, "overloaded") || strings.Contains(text, "529") ||
 			(strings.Contains(low, "api error") && strings.Contains(low, "rate")),
 	}
