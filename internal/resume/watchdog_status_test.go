@@ -135,6 +135,36 @@ func TestFoldWatchdogStatusOldLaunchWithoutProgressTurnsRed(t *testing.T) {
 	}
 }
 
+func TestFoldWatchdogStatusAuthPlanDoesNotMasqueradeAsUnproven(t *testing.T) {
+	got := FoldWatchdogStatus(WatchdogStatusInput{
+		Mode:            "LIVE",
+		NowUnix:         1_300,
+		SilentSeconds:   10_000,
+		UnprovenSeconds: 120,
+		MonotonicTicks:  3,
+		Plan:            []WatchdogPlanRow{{Session: "sid-auth", Account: ".claude-a", Disp: "INFRA_AUTH"}},
+		Events: []WatchdogStatusEvent{
+			{UnixSeconds: 1_000, Session: "sid-auth", Phase: "queued", Mode: "LIVE"},
+			{UnixSeconds: 1_100, Session: "sid-auth", Phase: "launched", Mode: "LIVE"},
+		},
+	})
+
+	if got.Verdict != WatchdogDrainRed {
+		t.Fatalf("verdict = %s, want red for auth-blocked row: %+v", got.Verdict, got)
+	}
+	row := watchdogTestRow(got.MTTRSessions, "sid-auth")
+	if row.Status != WatchdogMTTRAuthBlocked {
+		t.Fatalf("sid-auth row = %+v, want auth_blocked", row)
+	}
+	if row.UnprovenSeconds != 0 {
+		t.Fatalf("auth-blocked row should not count as launched-unproven: %+v", row)
+	}
+	joined := strings.Join(got.Reasons, "\n")
+	if !strings.Contains(joined, "auth/login") || strings.Contains(joined, "launched resume") {
+		t.Fatalf("reasons = %q, want auth/login without launched-unproven alarm", joined)
+	}
+}
+
 func TestFoldWatchdogStatusLegacyPhaseLessLaunchAndSettledRows(t *testing.T) {
 	got := FoldWatchdogStatus(WatchdogStatusInput{
 		Mode:           "LIVE",

@@ -23,6 +23,7 @@ type WatchdogMTTRStatus string
 const (
 	WatchdogMTTRQueued           WatchdogMTTRStatus = "queued"
 	WatchdogMTTRLaunchedUnproven WatchdogMTTRStatus = "launched_unproven"
+	WatchdogMTTRAuthBlocked      WatchdogMTTRStatus = "auth_blocked"
 	WatchdogMTTRRecovered        WatchdogMTTRStatus = "recovered"
 )
 
@@ -113,9 +114,11 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 	depthSamples := make([]watchdogDepthSample, 0)
 	currentDepth := len(in.Plan)
 	planSessions := map[string]bool{}
+	planDisps := map[string][]string{}
 	for _, row := range in.Plan {
 		if row.Session != "" {
 			planSessions[row.Session] = true
+			planDisps[row.Session] = append(planDisps[row.Session], row.Disp)
 		}
 	}
 	hasCurrentPlan := in.Plan != nil
@@ -178,6 +181,7 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 	var maxSilent int64
 	var maxUnproven int64
 	staleUnproven := 0
+	authBlocked := 0
 	for _, f := range bySession {
 		if f.closed {
 			continue
@@ -186,6 +190,12 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 			continue
 		}
 		row := foldWatchdogMTTRRow(*f, mode, now)
+		if hasCurrentPlan && planAuthBlocked(planDisps[f.session]) && row.Status != WatchdogMTTRRecovered {
+			row.Status = WatchdogMTTRAuthBlocked
+			row.UnprovenSeconds = 0
+			row.Evidence = "plan_disp:" + strings.Join(uniqueNonEmpty(planDisps[f.session]), ",")
+			authBlocked++
+		}
 		if row.SilentSeconds > maxSilent {
 			maxSilent = row.SilentSeconds
 		}
@@ -215,6 +225,9 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 	}
 	if in.UnprovenSeconds > 0 && staleUnproven > 0 {
 		reasons = append(reasons, fmt.Sprintf("%d launched resume(s) unproven for >= %.1fm", staleUnproven, float64(in.UnprovenSeconds)/60))
+	}
+	if authBlocked > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d AUTO_RESUME row(s) require auth/login before resume", authBlocked))
 	}
 	if mode == "DRY-RUN" && currentDepth > 0 {
 		reasons = append(reasons, "watchdog is DRY-RUN with queued AUTO_RESUME rows")
@@ -401,11 +414,43 @@ func watchdogMTTRRank(s WatchdogMTTRStatus) int {
 	switch s {
 	case WatchdogMTTRQueued:
 		return 0
-	case WatchdogMTTRLaunchedUnproven:
+	case WatchdogMTTRAuthBlocked:
 		return 1
-	default:
+	case WatchdogMTTRLaunchedUnproven:
 		return 2
+	default:
+		return 3
 	}
+}
+
+func planAuthBlocked(disps []string) bool {
+	seen := false
+	for _, disp := range disps {
+		disp = strings.ToUpper(strings.TrimSpace(disp))
+		if disp == "" {
+			continue
+		}
+		seen = true
+		if !strings.Contains(disp, "AUTH") {
+			return false
+		}
+	}
+	return seen
+}
+
+func uniqueNonEmpty(vals []string) []string {
+	out := make([]string, 0, len(vals))
+	seen := map[string]bool{}
+	for _, v := range vals {
+		v = strings.TrimSpace(v)
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func firstNonZero(vals ...int64) int64 {
