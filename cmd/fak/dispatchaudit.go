@@ -178,8 +178,3 @@ func openIssueTitles(stderr io.Writer) map[string]bool {
 	}
 	return out
 }
-
-// dispatchAuditUsageLine is appended to the dispatch usage banner.
-func dispatchAuditUsageLine() string {
-	return "  fak dispatch audit [--runs-dir DIR] [--json] [--file-issues] [--heartbeat] [--ledger PATH]\n"
-}
