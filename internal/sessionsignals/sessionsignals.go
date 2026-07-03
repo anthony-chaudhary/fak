@@ -29,6 +29,8 @@ import (
 // daily and the weekly window of a Claude throttle banner parse even when each ends in ".".
 var limitRE = regexp.MustCompile(`(?i)limit\s*[·:|.\-]?\s*resets?\s+([^()"` + "\n" + `]+?(?:\([^()` + "\n" + `]*\))?)\s*(?:["` + "\n" + `<]|$|\.(?:\s|$))`)
 
+var bareLimitRE = regexp.MustCompile(`(?i)\b(?:session|weekly|usage|fable\s+\d+)\s+limit\b|/usage-credits`)
+
 var authRE = regexp.MustCompile(`(?i)Login interrupted|please run /login|authentication_error|` +
 	`invalid x-api-key|invalid authentication credentials|` +
 	`API Error:\s*401|HTTP\s*401|401\s+(?:authentication required|unauthorized)|` +
@@ -94,6 +96,13 @@ func LimitReset(text string) string {
 		return w.Daily
 	}
 	return w.Weekly
+}
+
+// IsLimitError reports whether text is a provider quota/session cap, including
+// no-reset banners such as "Fable 5 limit" that require a different seat/model rather
+// than a same-seat blind retry.
+func IsLimitError(text string) bool {
+	return LimitReset(text) != "" || bareLimitRE.MatchString(text)
 }
 
 // WeeklyReset is just the weekly reset window, or "".
@@ -261,6 +270,9 @@ func TerminalFailure(errText string) (kind, detail string) {
 	}
 	if when := LimitReset(t); when != "" {
 		return FailureLimit, when
+	}
+	if IsLimitError(t) {
+		return FailureLimit, ""
 	}
 	if IsAPIError(t) {
 		return FailureAPIErr, ""

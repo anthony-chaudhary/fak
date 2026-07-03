@@ -459,7 +459,7 @@ func rwTerminalSignal(text string) resume.TerminalSignal {
 	return resume.TerminalSignal{
 		Found:             true,
 		AuthWall:          sessionsignals.IsAuthError(text) || sessionsignals.NeedsLoginPrompt(text),
-		LimitWall:         sessionsignals.LimitReset(text) != "",
+		LimitWall:         sessionsignals.IsLimitError(text),
 		TransientAPIError: sessionsignals.IsAPIError(text),
 	}
 }

@@ -31,6 +31,8 @@ func ClassifyLimitText(text string) (string, bool) {
 		strings.Contains(s, "429"):
 		return LimitRate, true
 	case strings.Contains(s, "usage limit"), strings.Contains(s, "usage cap"),
+		strings.Contains(s, "fable 5 limit"), strings.Contains(s, "fable limit"),
+		strings.Contains(s, "/usage-credits"),
 		strings.Contains(s, "quota exceeded"), strings.Contains(s, "insufficient_quota"):
 		return LimitUsage, true
 	default:

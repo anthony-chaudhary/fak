@@ -44,6 +44,25 @@ func TestLimitResetAbsent(t *testing.T) {
 	}
 }
 
+func TestBareFableLimitStillClassifiesAsLimit(t *testing.T) {
+	text := "You've reached your Fable 5 limit. Run /usage-credits to continue or switch models with /model."
+	if got := LimitReset(text); got != "" {
+		t.Fatalf("bare Fable limit should not invent a reset, got %q", got)
+	}
+	if !IsLimitError(text) {
+		t.Fatal("bare Fable limit must still classify as a limit")
+	}
+	if k, d := TerminalFailure(text); k != FailureLimit || d != "" {
+		t.Fatalf("TerminalFailure = (%q,%q), want LIMIT with no reset detail", k, d)
+	}
+}
+
+func TestBareUsageLimitStillClassifiesAsLimit(t *testing.T) {
+	if !IsLimitError("usage limit reached") {
+		t.Fatal("bare usage limit must classify as a limit")
+	}
+}
+
 // 2026-06-23T18:00Z == 11:00 PDT — the fixture time the Python sweep tests used.
 var now1100PDT = time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
 
