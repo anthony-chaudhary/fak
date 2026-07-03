@@ -1161,6 +1161,7 @@ func New(cfg Config) (*Server, error) {
 	if hp := unwrapHTTPPlanner(planner); hp != nil {
 		hp.RetryNotify = s.onUpstreamRetry
 		hp.AuthRefreshNotify = s.onAuthRefresh
+		hp.ForbiddenRetryNotify = s.onForbiddenRetry
 	}
 
 	// Build the in-kernel background-loop supervisor and register the built-in loops
@@ -1213,6 +1214,28 @@ func (s *Server) onAuthRefresh(outcome string, attempt int) {
 	}
 	if s.debugStatsf != nil {
 		s.debugStatsf("fak-turn auth-refresh outcome=%s attempt=%d", outcome, attempt)
+	}
+}
+
+// onForbiddenRetry is the planner's ForbiddenRetryNotify hook: surface a 403 transient-recovery
+// outcome. It is SEPARATE from onAuthRefresh (a 401 credential rotation) and onUpstreamRetry (a
+// 429/5xx backoff) so a transient-permission flap is its own signal, not conflated with the
+// other two. outcome is "recovered" (a retry within the short window returned 200 — a transient
+// abuse/capacity gate cleared and the live session healed in place instead of dropping into a
+// spurious /login) or "exhausted" (the bounded window/attempts elapsed still 403ing, so the
+// denial is the permanent entitlement kind now surfacing with the actionable answer). This is the
+// otherwise-INVISIBLE event the 2026-07-03 gem8 storm exposed: five sessions 403'd for ~9 minutes
+// then recovered on the same token — with this line an operator sees the flap self-heal, or sees
+// it give up on a real permission denial, instead of a silent session loss.
+func (s *Server) onForbiddenRetry(outcome string, attempt int) {
+	if s == nil {
+		return
+	}
+	if s.metrics != nil {
+		s.metrics.observeUpstreamForbiddenRetry(outcome)
+	}
+	if s.debugStatsf != nil {
+		s.debugStatsf("fak-turn forbidden-retry outcome=%s attempt=%d", outcome, attempt)
 	}
 }
 

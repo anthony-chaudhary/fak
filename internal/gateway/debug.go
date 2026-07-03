@@ -68,6 +68,18 @@ type debugUpstreamVars struct {
 	// the session's slowness was provider pushback fak absorbed.
 	RetryWaitSeconds     float64           `json:"retry_wait_seconds"`
 	AuthRefreshByOutcome map[string]uint64 `json:"auth_refresh_by_outcome"`
+	// ForbiddenRetryByOutcome mirrors the 403 transient-recovery family: recovered (a
+	// bounded retry cleared a transient abuse/capacity gate) vs exhausted (a permanent
+	// entitlement 403 surfaced). The permission-flap twin of AuthRefreshByOutcome.
+	ForbiddenRetryByOutcome map[string]uint64 `json:"forbidden_retry_by_outcome"`
+	// LastForbiddenDetail is a SCRUBBED, bounded snapshot of the most recent PERSISTENT 403's
+	// upstream body — the one operator-side signal that tells org-disabled apart from
+	// model-not-permitted apart from an abuse gate, which the 2026-07-03 gem8 storm proved was
+	// lost (the raw body never crosses to the client per #82/#346, and nothing recorded it for
+	// the operator). This surface is loopback-only, so the body stays operator-side; it is run
+	// through the same secret scrubber the logs use before it is stored, and empty until a
+	// persistent 403 lands.
+	LastForbiddenDetail string `json:"last_forbidden_detail,omitempty"`
 }
 
 type debugGatewayVars struct {
@@ -507,6 +519,10 @@ func (m *gatewayMetrics) debugUpstreamVars() debugUpstreamVars {
 			"recovered": 0,
 			"exhausted": 0,
 		},
+		ForbiddenRetryByOutcome: map[string]uint64{
+			"recovered": 0,
+			"exhausted": 0,
+		},
 	}
 	if m == nil {
 		return out
@@ -518,6 +534,10 @@ func (m *gatewayMetrics) debugUpstreamVars() debugUpstreamVars {
 	for k, v := range m.upstreamAuthRefreshes {
 		out.AuthRefreshByOutcome[k] = v
 	}
+	for k, v := range m.upstreamForbiddenRetries {
+		out.ForbiddenRetryByOutcome[k] = v
+	}
+	out.LastForbiddenDetail = m.lastForbiddenDetail
 	m.upstreamErrMu.Unlock()
 	out.Retries = atomic.LoadUint64(&m.upstreamRetries)
 	out.RetryWaitSeconds = time.Duration(atomic.LoadUint64(&m.upstreamRetryWaitNS)).Seconds()

@@ -710,8 +710,15 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 				return se.Status, "upstream_unauthorized",
 					"upstream rejected the credential (HTTP 401) — the upstream API key/token is missing, wrong, or expired (re-login or check --api-key-env)"
 			case http.StatusForbidden: // 403
+				// This 403 already SURVIVED fak's bounded transient-recovery arm (a few paced
+				// retries across a short window; see agent.forbiddenRetryState) — so it is the
+				// PERSISTENT kind, not a server-side abuse/capacity flap that would have cleared.
+				// The message says so and names the two real fixes, deliberately NOT leading with
+				// "run /login": on the 2026-07-03 gem8 storm the harness turned this into a
+				// spurious /login for a denial that was transient and login could not fix. Login is
+				// now ONE option (for an expired entitlement), not the headline.
 				return se.Status, "upstream_forbidden",
-					"upstream denied access (HTTP 403) — the credential is valid but lacks permission for this model, org, or region (a login/entitlement issue, not a bad key)"
+					"upstream denied access (HTTP 403), persisting past fak's retry window — the credential is valid but lacks permission for this model, org, or region. If this entitlement should exist, re-login or check the subscription/plan; if you meant a different model, switch to a permitted one. (A transient 403 would have self-healed; this one did not.)"
 			case http.StatusNotFound: // 404
 				return se.Status, "upstream_model_not_found",
 					"upstream does not know this model or endpoint (HTTP 404) — verify the model id and that --base-url targets the right API"
@@ -765,6 +772,15 @@ func (s *Server) plannerErrorStatus(err error) (status int, code, msg string) {
 		if _, _, _, ok := admissionErrorStatus(err); !ok {
 			s.metrics.observeInKernelOOM(err)
 			s.metrics.observeUpstreamError(err)
+			// A PERSISTENT 403 (one that survived the agent's bounded transient-recovery arm):
+			// snapshot its scrubbed body to the operator-only /debug/vars drilldown so the reason
+			// for the denial — org-disabled vs model-not-permitted vs abuse gate — is not lost.
+			// The body never crosses to the downstream client (upstreamErrorStatus builds the
+			// client message from fixed literals only); this is the operator's private copy.
+			var se *agent.UpstreamStatusError
+			if errors.As(err, &se) && se.Status == http.StatusForbidden {
+				s.metrics.recordForbiddenDetail(se.Body)
+			}
 		}
 	}
 	return upstreamErrorStatus(err)
@@ -913,6 +929,9 @@ func denySummary(adjs []ToolAdjudication) string {
 		if note := reversibilityGateNote(a); note != "" {
 			part += " " + note
 		}
+		if note := remedyNote(a); note != "" {
+			part += " " + note
+		}
 		if a.Livelock != nil {
 			part += " " + livelockInBandNote(a)
 		}
@@ -936,6 +955,9 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 		case !a.Admitted:
 			entry := fmt.Sprintf("%s (%s/%s)", a.Tool, reasonOrKind(a.Verdict), a.Verdict.Disposition)
 			if note := reversibilityGateNote(a); note != "" {
+				entry += " " + note
+			}
+			if note := remedyNote(a); note != "" {
 				entry += " " + note
 			}
 			if a.Livelock != nil {

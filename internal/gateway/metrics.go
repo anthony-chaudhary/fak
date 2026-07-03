@@ -232,6 +232,24 @@ type gatewayMetrics struct {
 	// the observability for the "fak guard gets stuck on login sometimes" event class.
 	upstreamAuthRefreshes map[string]uint64
 
+	// upstreamForbiddenRetries counts 403 transient-recovery outcomes, keyed by outcome
+	// ("recovered" = a retry within the short bounded window returned 200, so a transient
+	// abuse/capacity gate cleared and the live session healed in place; "exhausted" = the
+	// window/attempts elapsed still 403ing, so the denial is the permanent entitlement kind that
+	// surfaced with the actionable answer). SEPARATE from upstreamAuthRefreshes (a 401 credential
+	// rotation is a different cause) and from the forbidden bucket in upstreamErrors (which counts
+	// only the terminal 403 that surfaced, not the transient ones this arm absorbed). Guarded by
+	// upstreamErrMu. The metric twin of the `fak-turn forbidden-retry` line — the observability the
+	// 2026-07-03 gem8 transient-403 storm showed was missing.
+	upstreamForbiddenRetries map[string]uint64
+
+	// lastForbiddenDetail is a SCRUBBED, bounded snapshot of the most recent PERSISTENT 403's
+	// upstream body — the operator-only drilldown (loopback /debug/vars) that tells org-disabled
+	// apart from model-not-permitted apart from an abuse gate. Set through scrubForbiddenDetail
+	// (secrets removed, bounded) so a credential fragment an upstream echoes into an error body
+	// never persists. Guarded by upstreamErrMu; empty until a persistent 403 surfaces.
+	lastForbiddenDetail string
+
 	// servedInline counts read-only tool calls the vDSO served LOCALLY on a served turn
 	// (vDSO live in the hot path): a re-proposed read whose fresh cached answer fak folded
 	// into the assistant turn and dropped from the kept set, so the client never re-ran it —
@@ -342,27 +360,28 @@ type latencyCounter struct {
 
 func newGatewayMetrics(now time.Time) *gatewayMetrics {
 	return &gatewayMetrics{
-		start:                 now,
-		http:                  map[httpMetricKey]*latencyCounter{},
-		operations:            map[operationMetricKey]*latencyCounter{},
-		inflightReq:           map[uint64]inflightEntry{},
-		compactAttempts:       map[string]uint64{},
-		compactBailReasons:    map[string]uint64{},
-		ttlUpgrades:           map[string]uint64{},
-		reqMemoryObserved:     map[string]uint64{},
-		reqMemoryPlan:         map[requestMemoryMetricKey]*requestMemoryMetricStats{},
-		reqMemoryTokens:       map[requestMemoryTokenKey]*requestMemoryTokenStats{},
-		reqMemoryFit:          map[requestMemoryFitKey]*requestMemoryFitStats{},
-		inKernelOOM:           map[string]*inKernelOOMClassStats{},
-		upstreamErrors:        map[string]uint64{},
-		upstreamAuthRefreshes: map[string]uint64{},
-		harnessCoherence:      newHarnessCoherenceMetrics(compactcohere.DefaultProviderCacheTTL),
-		routing:               newRoutingMetrics(),
-		vcacheGovernor:        newVCacheGovernorDecisionJournal(),
-		vcacheWarmth:          newVCacheWarmthDemotionJournal(),
-		inferTTFTHist:         newLatencyCounter(),
-		inferTPOTHist:         newLatencyCounter(),
-		inferE2EHist:          newLatencyCounter(),
+		start:                    now,
+		http:                     map[httpMetricKey]*latencyCounter{},
+		operations:               map[operationMetricKey]*latencyCounter{},
+		inflightReq:              map[uint64]inflightEntry{},
+		compactAttempts:          map[string]uint64{},
+		compactBailReasons:       map[string]uint64{},
+		ttlUpgrades:              map[string]uint64{},
+		reqMemoryObserved:        map[string]uint64{},
+		reqMemoryPlan:            map[requestMemoryMetricKey]*requestMemoryMetricStats{},
+		reqMemoryTokens:          map[requestMemoryTokenKey]*requestMemoryTokenStats{},
+		reqMemoryFit:             map[requestMemoryFitKey]*requestMemoryFitStats{},
+		inKernelOOM:              map[string]*inKernelOOMClassStats{},
+		upstreamErrors:           map[string]uint64{},
+		upstreamAuthRefreshes:    map[string]uint64{},
+		upstreamForbiddenRetries: map[string]uint64{},
+		harnessCoherence:         newHarnessCoherenceMetrics(compactcohere.DefaultProviderCacheTTL),
+		routing:                  newRoutingMetrics(),
+		vcacheGovernor:           newVCacheGovernorDecisionJournal(),
+		vcacheWarmth:             newVCacheWarmthDemotionJournal(),
+		inferTTFTHist:            newLatencyCounter(),
+		inferTPOTHist:            newLatencyCounter(),
+		inferE2EHist:             newLatencyCounter(),
 	}
 }
 
@@ -463,6 +482,44 @@ func (m *gatewayMetrics) observeUpstreamAuthRefresh(outcome string) {
 		m.upstreamAuthRefreshes = map[string]uint64{}
 	}
 	m.upstreamAuthRefreshes[outcome]++
+	m.upstreamErrMu.Unlock()
+}
+
+// observeUpstreamForbiddenRetry counts one 403 transient-recovery outcome ("recovered" /
+// "exhausted"), called from the ForbiddenRetryNotify hook. Off the request path, guarded by the
+// shared upstreamErrMu. An unknown outcome is ignored so a future caller typo cannot create a
+// junk series. Mirrors observeUpstreamAuthRefresh — the two stay parallel so an operator reads
+// the 401 and 403 self-heals the same way.
+func (m *gatewayMetrics) observeUpstreamForbiddenRetry(outcome string) {
+	if m == nil {
+		return
+	}
+	if outcome != "recovered" && outcome != "exhausted" {
+		return
+	}
+	m.upstreamErrMu.Lock()
+	if m.upstreamForbiddenRetries == nil {
+		m.upstreamForbiddenRetries = map[string]uint64{}
+	}
+	m.upstreamForbiddenRetries[outcome]++
+	m.upstreamErrMu.Unlock()
+}
+
+// recordForbiddenDetail stores a scrubbed, bounded snapshot of a PERSISTENT 403's upstream body
+// for the operator-only /debug/vars drilldown. Called from the proxy/planner error path with the
+// raw truncated body; scrubForbiddenDetail strips secrets and bounds it before it is stored. A
+// body that scrubs to empty leaves the previous detail intact (a blank 403 body should not erase a
+// useful earlier one). Off the request path, guarded by the shared upstreamErrMu.
+func (m *gatewayMetrics) recordForbiddenDetail(body string) {
+	if m == nil {
+		return
+	}
+	scrubbed := scrubForbiddenDetail(body)
+	if scrubbed == "" {
+		return
+	}
+	m.upstreamErrMu.Lock()
+	m.lastForbiddenDetail = scrubbed
 	m.upstreamErrMu.Unlock()
 }
 
@@ -2287,6 +2344,10 @@ func (m *gatewayMetrics) writeUpstreamErrorMetrics(b *strings.Builder) {
 	for k, v := range m.upstreamAuthRefreshes {
 		authSnap[k] = v
 	}
+	fbSnap := make(map[string]uint64, len(m.upstreamForbiddenRetries))
+	for k, v := range m.upstreamForbiddenRetries {
+		fbSnap[k] = v
+	}
 	m.upstreamErrMu.Unlock()
 	writeHelpType(b, "fak_gateway_upstream_errors_total", "Upstream/planner turn failures, OBSERVED from the provider and relayed by fak (not a fak fault), by kind (stalled, unreachable, oom, rate_limited, auth, forbidden, status_4xx, status_5xx, other).", "counter")
 	kinds := make([]string, 0, len(snap))
@@ -2313,6 +2374,17 @@ func (m *gatewayMetrics) writeUpstreamErrorMetrics(b *strings.Builder) {
 	writeHelpType(b, "fak_gateway_upstream_auth_refresh_total", "401 token-rotation self-heals on the rotating Claude subscription path, by outcome: recovered (a fresh OAuth token was adopted mid-session and the call re-sent in place) or exhausted (no fresher token landed within the grace window, so the 401 surfaced).", "counter")
 	for _, outcome := range []string{"recovered", "exhausted"} {
 		fmt.Fprintf(b, "fak_gateway_upstream_auth_refresh_total{outcome=\"%s\"} %d\n", outcome, authSnap[outcome])
+	}
+	// The 403 transient-recovery family, the permission-flap twin of the 401 auth-refresh family:
+	// recovered = a retry within the short bounded window returned 200 (a transient abuse/capacity
+	// gate cleared and the live session healed in place instead of dropping into a spurious
+	// /login), exhausted = the window/attempts elapsed still 403ing (the denial is the permanent
+	// entitlement kind, now surfaced with the actionable answer). Both series always emitted (even
+	// at 0) so a "recovered N / exhausted 0" reads as "N transient flaps, all self-healed" from the
+	// first scrape. This is the metric the 2026-07-03 gem8 transient-403 storm proved was missing.
+	writeHelpType(b, "fak_gateway_upstream_forbidden_retry_total", "403 transient-permission recoveries, by outcome: recovered (a retry within the bounded window returned 200, so a transient abuse/capacity gate cleared and the session healed in place) or exhausted (the window/attempts elapsed still 403ing, so a permanent entitlement denial surfaced). OBSERVED from the provider, absorbed by fak.", "counter")
+	for _, outcome := range []string{"recovered", "exhausted"} {
+		fmt.Fprintf(b, "fak_gateway_upstream_forbidden_retry_total{outcome=\"%s\"} %d\n", outcome, fbSnap[outcome])
 	}
 	writeCounter(b, "fak_gateway_served_inline_total", "Read-only tool calls the vDSO served LOCALLY on a served turn (vDSO live in the hot path): a re-proposed read whose fresh cached answer fak folded into the assistant turn and dropped before the client could re-run it — each one a saved engine round-trip. WITNESSED (fak authored the serve), distinct from the kernel fak_kernel_vdso_hits_total which only the explicit k.Syscall path bumps.", int64(m.servedInlineSnapshot()))
 }

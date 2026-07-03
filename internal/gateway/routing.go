@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 )
 
 // routing.go — intelligent request routing and tiered serving (#398).
@@ -197,7 +198,9 @@ type Router struct {
 	strategy RoutingStrategy
 
 	mu        sync.RWMutex
-	unhealthy map[string]bool // tier name -> down
+	unhealthy map[string]bool      // tier name -> down (a hard, caller-managed health flag)
+	cooldown  map[string]time.Time // tier name -> demotion expiry (a self-recovering demotion)
+	now       func() time.Time     // injectable clock; nil => time.Now (kept testable)
 }
 
 // NewRouter validates cfg and returns a Router with every tier healthy.
@@ -209,7 +212,16 @@ func NewRouter(cfg RouterConfig) (*Router, error) {
 	if strategy == "" {
 		strategy = StrategySizeBased
 	}
-	return &Router{cfg: cfg, strategy: strategy, unhealthy: make(map[string]bool)}, nil
+	return &Router{cfg: cfg, strategy: strategy, unhealthy: make(map[string]bool), cooldown: make(map[string]time.Time)}, nil
+}
+
+// clock returns the Router's time source, defaulting to time.Now. Injectable so the cooldown
+// expiry is unit-testable without sleeping.
+func (r *Router) clock() time.Time {
+	if r.now != nil {
+		return r.now()
+	}
+	return time.Now()
 }
 
 // SetHealth marks a tier up (healthy=true) or down (healthy=false) for fallback. An
@@ -225,11 +237,52 @@ func (r *Router) SetHealth(name string, healthy bool) {
 	}
 }
 
-// Healthy reports whether the named tier is currently considered up.
+// DemoteModel routes around every tier serving `model` for `cooldown`, then LETS THEM BACK
+// automatically — the auto-model-switch response to a PERSISTENT entitlement 403. It is the
+// routing-side counterpart of the agent's transient-403 recovery arm: the arm rides out a
+// server-side flap in place (seconds), and when a 403 nonetheless PERSISTS for a specific model
+// (the credential genuinely is not entitled for it right now), this demotes that model so Route's
+// existing fallback chain serves the request from a PERMITTED rung instead of failing — the tiered
+// deployment auto-switches down the ladder rather than dying on the denial. Unlike SetHealth's
+// hard flag, the demotion SELF-EXPIRES after cooldown: an entitlement that comes back (a plan
+// change, a lifted abuse gate) is picked up automatically with no operator un-demote, so a
+// transient-but-slow 403 cannot strand a tier forever. A non-positive cooldown is a no-op (nothing
+// to demote for no time); an unknown model matches no tier and is harmless.
+func (r *Router) DemoteModel(model string, cooldown time.Duration) {
+	if model == "" || cooldown <= 0 {
+		return
+	}
+	until := r.clock().Add(cooldown)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.cfg.Tiers {
+		if t.Model == model {
+			// Extend, never shorten: a fresh 403 during an active cooldown pushes the expiry out,
+			// so a sustained denial keeps the tier demoted rather than flapping back mid-storm.
+			if cur, ok := r.cooldown[t.Name]; !ok || until.After(cur) {
+				r.cooldown[t.Name] = until
+			}
+		}
+	}
+}
+
+// demotedLocked reports whether a tier is currently under an unexpired cooldown demotion. Caller
+// holds r.mu. Expiry is lazy: a lapsed entry is treated as healthy (and left for the next write to
+// clean up) so a read never has to take the write lock.
+func (r *Router) demotedLocked(name string) bool {
+	until, ok := r.cooldown[name]
+	if !ok {
+		return false
+	}
+	return r.clock().Before(until)
+}
+
+// Healthy reports whether the named tier is currently considered up: neither hard-flagged down
+// (SetHealth) nor under an unexpired entitlement-403 cooldown (DemoteModel).
 func (r *Router) Healthy(name string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return !r.unhealthy[name]
+	return !r.unhealthy[name] && !r.demotedLocked(name)
 }
 
 // Route classifies and selects. It returns the chosen Decision or ErrNoTier when no
@@ -247,8 +300,8 @@ func (r *Router) Route(req RequestClass) (Decision, error) {
 	}
 	var cands []cand
 	for i, t := range r.cfg.Tiers {
-		if r.unhealthy[t.Name] {
-			continue
+		if r.unhealthy[t.Name] || r.demotedLocked(t.Name) {
+			continue // hard-down (SetHealth) or under an entitlement-403 cooldown (DemoteModel)
 		}
 		if i < floor {
 			continue // below the complexity floor
