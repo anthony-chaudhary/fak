@@ -6,7 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/simhash"
 )
 
 // ErrSealed is returned by a Backend.Materialize that refuses a page-in because the
@@ -88,6 +91,17 @@ type Refusal struct {
 	Reason string `json:"reason"`
 }
 
+// NearDupPair is one advisory near-duplicate pair (#2506): two cells with distinct
+// content addresses whose bodies are similar above the opt-in threshold (simhash
+// cosine). It is ADVISORY only — surfaced for a compactor (memory-compact) to consume
+// — never a collapse (a fuzzy signal never silently decides; the vdso/neardup.go
+// discipline). A is the smaller ID, B the larger, so a pair is canonically ordered.
+type NearDupPair struct {
+	A     string  `json:"a"`
+	B     string  `json:"b"`
+	Score float64 `json:"score"`
+}
+
 // Effect is one mutation/derivation the pipeline performed or proposed. Applied is
 // true only when a Caps grant let Run mutate durable backend state. Derived carries
 // a consolidation's artifact (its bytes are in DerivedBytes, json-excluded).
@@ -111,17 +125,25 @@ type Stats struct {
 	Refused         int   `json:"refused"`
 	EffectsProposed int   `json:"effects_proposed"`
 	EffectsApplied  int   `json:"effects_applied"`
+	// DedupCollapsed counts byte-identical cells folded by the read-side exact-digest
+	// collapse (#2506). It is the read-side dedup counter the dedup census fold reads
+	// alongside the write-side ledger (#2142).
+	DedupCollapsed int `json:"dedup_collapsed"`
+	// NearDupAdvisory counts body-similar pairs flagged by the opt-in simhash advisory
+	// (#2506) — the fuzzy near-dup counter for the dedup census fold.
+	NearDupAdvisory int `json:"near_dup_advisory"`
 }
 
 // Result is the outcome of Run.
 type Result struct {
-	Intent   string       `json:"intent,omitempty"`
-	Steps    []StepTrace  `json:"steps"`
-	Rendered []RenderItem `json:"rendered,omitempty"`
-	Effects  []Effect     `json:"effects,omitempty"`
-	Refused  []Refusal    `json:"refused,omitempty"`
-	Working  []Cell       `json:"working,omitempty"` // final working set (safe metadata only)
-	Stats    Stats        `json:"stats"`
+	Intent   string        `json:"intent,omitempty"`
+	Steps    []StepTrace   `json:"steps"`
+	Rendered []RenderItem  `json:"rendered,omitempty"`
+	Effects  []Effect      `json:"effects,omitempty"`
+	Refused  []Refusal     `json:"refused,omitempty"`
+	Advisory []NearDupPair `json:"advisory,omitempty"` // opt-in near-dup pairs (#2506); advisory, never collapsed
+	Working  []Cell        `json:"working,omitempty"`  // final working set (safe metadata only)
+	Stats    Stats         `json:"stats"`
 }
 
 // Run executes an authored query against a backend. It validates first (an invalid
@@ -173,6 +195,8 @@ func Run(ctx context.Context, b Backend, q Query, caps Caps) (Result, error) {
 			}
 		case OpBudget:
 			work, note = applyBudget(work, op.Bytes)
+		case OpDedup:
+			work, note = applyDedup(&res, work)
 		case OpRender:
 			note = renderInto(ctx, b, &res, work)
 		case OpTombstone:
@@ -185,6 +209,16 @@ func Run(ctx context.Context, b Backend, q Query, caps Caps) (Result, error) {
 			note = applyPrune(ctx, b, &res, caps)
 		}
 		res.Steps = append(res.Steps, StepTrace{Index: i, Kind: op.Kind, In: in, Out: len(work), Note: note})
+	}
+
+	// The opt-in near-dup advisory runs over the final working set, AFTER any
+	// exact-digest collapse: the byte-identical twins collapse handled are gone, so
+	// the advisory reports only the fuzzy near-dups that survived — the paraphrased
+	// pairs a lexical ranker misses (#2506). It pages bodies in through the trust
+	// gate; a sealed/stale body is skipped, never advised on.
+	if q.NearDupThreshold > 0 {
+		res.Advisory = computeNearDup(ctx, b, work, q.NearDupThreshold)
+		res.Stats.NearDupAdvisory = len(res.Advisory)
 	}
 
 	res.Working = work
@@ -245,6 +279,102 @@ func applyBudget(work []Cell, cap int64) ([]Cell, string) {
 		return kept, ""
 	}
 	return kept, fmt.Sprintf("dropped %d cell(s) over the %d-byte budget", dropped, cap)
+}
+
+// applyDedup is the read-side duplicate collapse (#2506): it folds byte-identical
+// cells — same content Digest — to a single representative, the smallest by (Step,
+// then ID) of each digest group, so the collapse is deterministic regardless of the
+// working-set order. The folded siblings never page into context again (recall is the
+// paid surface: each duplicate recalled burns context every session), but their IDs
+// ride on a conflation Effect so the provenance of what was collapsed stays auditable
+// — nothing is mutated, the store is read-only. Cells without a Digest (no content
+// address) are passed through unchanged. The conflation Note is the "N duplicates
+// collapsed" signal the agent sees in recall output.
+func applyDedup(res *Result, work []Cell) ([]Cell, string) {
+	first := map[string]int{} // digest -> index of the kept representative in `kept`
+	kept := make([]Cell, 0, len(work))
+	var collapsed []string
+	for _, c := range work {
+		if c.Digest == "" {
+			kept = append(kept, c)
+			continue
+		}
+		if idx, ok := first[c.Digest]; ok {
+			rep := kept[idx]
+			if c.Step < rep.Step || (c.Step == rep.Step && c.ID < rep.ID) {
+				// this cell is the smaller representative: keep it, fold the prior one
+				kept[idx] = c
+				collapsed = append(collapsed, rep.ID)
+			} else {
+				collapsed = append(collapsed, c.ID)
+			}
+		} else {
+			first[c.Digest] = len(kept)
+			kept = append(kept, c)
+		}
+	}
+	if len(collapsed) == 0 {
+		return kept, ""
+	}
+	sort.Strings(collapsed)
+	res.Effects = append(res.Effects, Effect{
+		Kind:  OpDedup,
+		Cells: collapsed,
+		Note:  fmt.Sprintf("%d byte-identical cell(s) collapsed by content digest (read-only; folded siblings: %s)", len(collapsed), strings.Join(collapsed, ", ")),
+	})
+	res.Stats.DedupCollapsed = len(collapsed)
+	return kept, fmt.Sprintf("collapsed %d duplicate cell(s) by content digest", len(collapsed))
+}
+
+// computeNearDup is the opt-in advisory near-duplicate signal (#2506). It pages each
+// non-sealed cell's body in through the backend's trust gate, embeds it via simhash,
+// and reports body-similar pairs whose cosine meets the threshold. Exact-digest twins
+// are skipped (the collapse handled them); a body that cannot be paged in (sealed or
+// stale) is skipped — the advisory never advises on poison. Pairs are sorted by
+// descending score (ties by A then B) for a deterministic, worst-first list.
+func computeNearDup(ctx context.Context, b Backend, work []Cell, threshold float64) []NearDupPair {
+	type cellVec struct {
+		id, digest string
+		vec        simhash.Vector
+	}
+	vecs := make([]cellVec, 0, len(work))
+	for _, c := range work {
+		if c.Sealed || c.Digest == "" {
+			continue
+		}
+		body, err := b.Materialize(ctx, c.ID)
+		if err != nil || len(body) == 0 {
+			continue
+		}
+		vecs = append(vecs, cellVec{id: c.ID, digest: c.Digest, vec: simhash.Embed(string(body))})
+	}
+	var pairs []NearDupPair
+	for i := 0; i < len(vecs); i++ {
+		for j := i + 1; j < len(vecs); j++ {
+			if vecs[i].digest == vecs[j].digest {
+				continue // exact twin — collapse's job, not the advisory's
+			}
+			c := simhash.Cosine(vecs[i].vec, vecs[j].vec)
+			if c < threshold {
+				continue
+			}
+			a, bb := vecs[i].id, vecs[j].id
+			if a > bb {
+				a, bb = bb, a
+			}
+			pairs = append(pairs, NearDupPair{A: a, B: bb, Score: c})
+		}
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i].Score != pairs[j].Score {
+			return pairs[i].Score > pairs[j].Score
+		}
+		if pairs[i].A != pairs[j].A {
+			return pairs[i].A < pairs[j].A
+		}
+		return pairs[i].B < pairs[j].B
+	})
+	return pairs
 }
 
 // pageIn routes one cell through the backend's trust gate for rendering/folding. It

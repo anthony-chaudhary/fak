@@ -65,6 +65,7 @@ const (
 	OpRank        = "rank"        // sort by By (ORDER BY)
 	OpLimit       = "limit"       // keep the first K (LIMIT)
 	OpBudget      = "budget"      // keep the prefix whose cumulative Bytes <= Bytes
+	OpDedup       = "dedup"       // collapse digest-identical cells to one (read-side recall dedup; #2506)
 	OpRender      = "render"      // materialize the set into context (read-only page-in via the gate)
 	OpTombstone   = "tombstone"   // negative-only suppression (recall.RequestContextChange)
 	OpConsolidate = "consolidate" // fold the set into one derived extractive disposition
@@ -120,13 +121,20 @@ type Op struct {
 // the default match terms) plus an ordered pipeline of Ops.
 type Query struct {
 	Intent string `json:"intent,omitempty"`
-	Ops    []Op   `json:"ops"`
+	// NearDupThreshold is the OPT-IN advisory near-duplicate flag (#2506). When > 0,
+	// Run pages each non-sealed cell's body in through the trust gate, embeds it via
+	// internal/simhash, and reports body-similar pairs (cosine >= threshold) on
+	// Result.Advisory for a compactor (memory-compact) to consume. It is ADVISORY
+	// only — a fuzzy signal never silently decides (the vdso/neardup.go discipline),
+	// so the pair is reported, never collapsed. Default 0 (off).
+	NearDupThreshold float64 `json:"near_dup_threshold,omitempty"`
+	Ops              []Op    `json:"ops"`
 }
 
 // effectKinds and mutationKinds classify ops. An effect reads/derives or mutates; a
 // mutation additionally requires a Caps grant to be APPLIED (otherwise it is proposed).
 var effectKinds = map[string]bool{
-	OpRender: true, OpTombstone: true, OpConsolidate: true, OpReclassify: true, OpPrune: true,
+	OpRender: true, OpTombstone: true, OpConsolidate: true, OpReclassify: true, OpPrune: true, OpDedup: true,
 }
 
 // mutationKinds are the effects that change durable backend state. They are
@@ -149,7 +157,7 @@ func IsMutation(kind string) bool { return mutationKinds[kind] }
 func Validate(q Query) error {
 	for i, op := range q.Ops {
 		switch op.Kind {
-		case OpScan, OpRender, OpTombstone, OpConsolidate, OpPrune:
+		case OpScan, OpRender, OpTombstone, OpConsolidate, OpPrune, OpDedup:
 			// no required parameters
 		case OpFilter:
 			if op.Pred == nil {
