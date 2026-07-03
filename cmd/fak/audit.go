@@ -78,19 +78,22 @@ func cmdAuditVerify(args []string) {
 	path := auditJournalPathArg("audit verify", "usage: fak audit verify <journal.jsonl>", args)
 	if isUsageLog(path) {
 		n, err := usagelog.Verify(path)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "fak audit verify: %s — TAMPERED/BROKEN after %d sound row(s): %v\n", path, n, err)
-			os.Exit(1)
-		}
-		fmt.Printf("fak audit verify: %s — OK: %d hash-chained usage row(s), chain intact (no edit since written)\n", path, n)
+		auditVerifyVerdict(path, "usage ", n, err)
 		return
 	}
 	n, err := journal.Verify(path)
+	auditVerifyVerdict(path, "", n, err)
+}
+
+// auditVerifyVerdict prints the shared TAMPERED/OK verdict for a chain
+// verifier's result and exits 1 on a broken chain; rowKind is "usage " for a
+// usagelog journal, "" for a decision journal.
+func auditVerifyVerdict(path, rowKind string, n int, err error) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fak audit verify: %s — TAMPERED/BROKEN after %d sound row(s): %v\n", path, n, err)
 		os.Exit(1)
 	}
-	fmt.Printf("fak audit verify: %s — OK: %d hash-chained row(s), chain intact (no edit since written)\n", path, n)
+	fmt.Printf("fak audit verify: %s — OK: %d hash-chained %srow(s), chain intact (no edit since written)\n", path, n, rowKind)
 }
 
 // isUsageLog peeks the first well-formed line of path to tell a usage journal
