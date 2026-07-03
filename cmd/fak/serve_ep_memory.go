@@ -26,14 +26,3 @@ func serveGGUFExpertParallelMemoryPlan(ws *ggufload.WeightSource, ranks, context
 	}
 	return appendServeGGUFDevicePlan(ws, plan, contextBudgetTokens, fit), nil
 }
-
-func fitAndPlanServeGGUFExpertParallelPathOnDevice(ggufPath string, be compute.Backend, ranks, contextBudgetTokens int) (compute.MemoryPlan, error) {
-	plan, err := serveGGUFExpertParallelPathMemoryPlan(ggufPath, ranks, contextBudgetTokens, serveDeviceFitBudget(be))
-	return refuseIfTooBigOnDevice(plan, err, be)
-}
-
-func serveGGUFExpertParallelPathMemoryPlan(ggufPath string, ranks, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
-	return withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
-		return serveGGUFExpertParallelMemoryPlan(ws, ranks, contextBudgetTokens, fit)
-	})
-}
