@@ -1,7 +1,7 @@
 package gateway
 
 import (
-	"regexp"
+	"encoding/json"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -16,18 +16,13 @@ type toolFailureNote struct {
 	Token      auditreason.ToolFailure
 }
 
-var runningCommandPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)\bwhile\s+running\s+(.+)$`),
-	regexp.MustCompile(`(?i)\brunning\s+command:?\s+(.+)$`),
-	regexp.MustCompile(`(?i)\bcommand\s+["']([^"']+)["']\s+(?:exited|failed|terminated)`),
-}
-
-// toolFailureNotes detects known tool-executor failures in replayed tool results. The
-// first shipped detector is intentionally narrow: a Bash/shell git or gh command that
-// came back with the exit-143 hang signature this Windows host sees when git/gh is routed
-// through the Bash tool instead of native PowerShell.
+// toolFailureNotes detects known tool-executor failures in replayed tool results.
+// A result body is only the failure witness: the command is recovered from the
+// paired assistant tool call by ToolCallID, so quoted transcripts cannot trigger
+// a recovery note.
 func toolFailureNotes(messages []agent.Message) []toolFailureNote {
-	nameByID := toolCallNamesByID(messages)
+	callByID := toolCallsByID(messages)
+	gitGhShellSucceeded := hasSuccessfulGitGhShellCall(messages, callByID)
 	out := make([]toolFailureNote, 0, 1)
 	for _, m := range messages {
 		if m.Role != agent.RoleTool {
@@ -37,22 +32,26 @@ func toolFailureNotes(messages []agent.Message) []toolFailureNote {
 		if !ok || spec.Token != auditreason.ToolFailureHangShellMismatch {
 			continue
 		}
-		command, ok := extractGitGhCommand(m.Content)
+		call, ok := callByID[m.ToolCallID]
 		if !ok {
 			continue
 		}
-		tool := m.Name
+		tool := call.Tool
 		if tool == "" {
-			tool = nameByID[m.ToolCallID]
+			tool = m.Name
 		}
 		if tool != "" && !isShellToolName(tool) {
+			continue
+		}
+		command, ok := normalizeGitGhCommand(call.Command)
+		if !ok {
 			continue
 		}
 		out = append(out, toolFailureNote{
 			ToolCallID: m.ToolCallID,
 			Tool:       tool,
 			Command:    command,
-			Recovery:   powershellRecoveryCommand(command),
+			Recovery:   exit143Recovery(command, m.Content, gitGhShellSucceeded),
 			Token:      spec.Token,
 		})
 	}
@@ -65,13 +64,13 @@ func toolFailureNoteText(notes []toolFailureNote) string {
 	}
 	token := string(notes[0].Token)
 	if len(notes) == 1 {
-		return "[fak] " + token + ": Bash git/gh command ended with exit 143; retry from native PowerShell: " + notes[0].Recovery
+		return "[fak] " + token + ": Bash git/gh command ended with exit 143; " + notes[0].Recovery
 	}
 	recoveries := make([]string, 0, len(notes))
 	for _, n := range notes {
 		recoveries = append(recoveries, n.Recovery)
 	}
-	return "[fak] " + token + ": " + itoa(uint64(len(notes))) + " Bash git/gh commands ended with exit 143; retry from native PowerShell: " + strings.Join(recoveries, " ; ")
+	return "[fak] " + token + ": " + itoa(uint64(len(notes))) + " Bash git/gh commands ended with exit 143; recovery: " + strings.Join(recoveries, " ; ")
 }
 
 func (s *Server) toolFailureNoteOnce(trace string, messages []agent.Message) string {
@@ -107,62 +106,76 @@ func (s *Server) toolFailureNoteOnce(trace string, messages []agent.Message) str
 	return toolFailureNoteText(fresh)
 }
 
-func toolCallNamesByID(messages []agent.Message) map[string]string {
-	names := map[string]string{}
+type toolCallFailureContext struct {
+	Tool    string
+	Command string
+}
+
+func toolCallsByID(messages []agent.Message) map[string]toolCallFailureContext {
+	calls := map[string]toolCallFailureContext{}
 	for _, m := range messages {
 		if m.Role != agent.RoleAssistant {
 			continue
 		}
 		for _, tc := range m.ToolCalls {
-			if tc.ID != "" && tc.Function.Name != "" {
-				names[tc.ID] = tc.Function.Name
+			if tc.ID == "" {
+				continue
 			}
+			command, _ := toolCallCommand(tc.Function.Arguments)
+			calls[tc.ID] = toolCallFailureContext{Tool: tc.Function.Name, Command: command}
 		}
 	}
-	return names
+	return calls
+}
+
+func toolCallCommand(args string) (string, bool) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(args), &obj); err != nil {
+		return "", false
+	}
+	for _, key := range []string{"command", "cmd"} {
+		raw := obj[key]
+		if len(raw) == 0 {
+			continue
+		}
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil && strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s), true
+		}
+	}
+	return "", false
+}
+
+func hasSuccessfulGitGhShellCall(messages []agent.Message, callByID map[string]toolCallFailureContext) bool {
+	for _, m := range messages {
+		if m.Role != agent.RoleTool || m.ToolCallID == "" {
+			continue
+		}
+		call, ok := callByID[m.ToolCallID]
+		if !ok {
+			continue
+		}
+		tool := m.Name
+		if tool == "" {
+			tool = call.Tool
+		}
+		if !isShellToolName(tool) {
+			continue
+		}
+		if _, ok := normalizeGitGhCommand(call.Command); !ok {
+			continue
+		}
+		if _, failed := auditreason.ToolFailureFromMessage(m.Content); failed {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func isShellToolName(name string) bool {
 	name = strings.ToLower(strings.TrimSpace(name))
 	return name == "bash" || name == "shell"
-}
-
-func extractGitGhCommand(text string) (string, bool) {
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		for _, candidate := range commandCandidates(line) {
-			if cmd, ok := normalizeGitGhCommand(candidate); ok {
-				return cmd, true
-			}
-		}
-	}
-	return "", false
-}
-
-func commandCandidates(line string) []string {
-	candidates := []string{line}
-	trimmed := strings.TrimLeft(line, "-* ")
-	for _, prefix := range []string{"command:", "cmd:", "$", ">"} {
-		if rest, ok := stripCasePrefix(trimmed, prefix); ok {
-			candidates = append(candidates, rest)
-		}
-	}
-	for _, re := range runningCommandPatterns {
-		if m := re.FindStringSubmatch(line); len(m) == 2 {
-			candidates = append(candidates, m[1])
-		}
-	}
-	return candidates
-}
-
-func stripCasePrefix(s, prefix string) (string, bool) {
-	if strings.HasPrefix(strings.ToLower(s), prefix) {
-		return strings.TrimSpace(s[len(prefix):]), true
-	}
-	return "", false
 }
 
 func normalizeGitGhCommand(candidate string) (string, bool) {
@@ -208,6 +221,36 @@ func startsGitGh(cmd string) bool {
 
 func powershellRecoveryCommand(command string) string {
 	return `powershell -NoProfile -Command "` + escapePowerShellDoubleQuoted(command) + `"`
+}
+
+func exit143Recovery(command, result string, gitGhShellSucceeded bool) string {
+	if hasShellMismatchEvidence(result) && !gitGhShellSucceeded {
+		return "retry from native PowerShell: " + powershellRecoveryCommand(command)
+	}
+	return lockLoadRecovery(command, gitGhShellSucceeded)
+}
+
+func hasShellMismatchEvidence(result string) bool {
+	low := strings.ToLower(result)
+	for _, needle := range []string{
+		"shell mismatch",
+		"syntax error near unexpected token",
+		"is not recognized as",
+		"running scripts is disabled",
+	} {
+		if strings.Contains(low, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func lockLoadRecovery(command string, gitGhShellSucceeded bool) string {
+	prefix := "check .git/*.lock and host load, stop wedged git/gh processes, then retry with a bounded timeout"
+	if gitGhShellSucceeded {
+		prefix = "git/gh also succeeded through Bash in this transcript; check .git/*.lock and host load, stop wedged git/gh processes, then retry with a bounded timeout"
+	}
+	return prefix + ": " + command
 }
 
 func escapePowerShellDoubleQuoted(s string) string {

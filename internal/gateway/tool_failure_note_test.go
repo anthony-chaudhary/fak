@@ -11,15 +11,26 @@ func TestToolFailureNotesDetectsBashGitExit143(t *testing.T) {
 	messages := []agent.Message{
 		{
 			Role: agent.RoleAssistant,
-			ToolCalls: []agent.ToolCall{{
-				ID: "call_git", Type: "function",
-				Function: agent.Func{Name: "Bash", Arguments: `{"command":"git status"}`},
-			}},
+			ToolCalls: []agent.ToolCall{
+				{
+					ID: "call_ok", Type: "function",
+					Function: agent.Func{Name: "Bash", Arguments: `{"command":"git branch --show-current"}`},
+				},
+				{
+					ID: "call_git", Type: "function",
+					Function: agent.Func{Name: "Bash", Arguments: `{"command":"git status"}`},
+				},
+			},
+		},
+		{
+			Role:       agent.RoleTool,
+			ToolCallID: "call_ok",
+			Content:    "main",
 		},
 		{
 			Role:       agent.RoleTool,
 			ToolCallID: "call_git",
-			Content:    "Command: git status\nError: process exited with exit status 143",
+			Content:    "Exit code 143\nCommand timed out after 2m 0s",
 		},
 	}
 
@@ -31,19 +42,31 @@ func TestToolFailureNotesDetectsBashGitExit143(t *testing.T) {
 		t.Fatalf("command = %q, want git status", notes[0].Command)
 	}
 	text := toolFailureNoteText(notes)
-	for _, want := range []string{"TOOL_HANG_SHELL_MISMATCH", `powershell -NoProfile -Command "git status"`} {
+	for _, want := range []string{"TOOL_HANG_SHELL_MISMATCH", "git status", "git/gh also succeeded through Bash", ".git/*.lock"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("note missing %q: %s", want, text)
 		}
 	}
+	if strings.Contains(text, "powershell -NoProfile") {
+		t.Fatalf("timeout without shell-mismatch evidence should not advise PowerShell: %s", text)
+	}
 }
 
 func TestToolFailureNotesDetectsWrappedGhCommand(t *testing.T) {
-	messages := []agent.Message{{
-		Role:    agent.RoleTool,
-		Name:    "Bash",
-		Content: "Command: bash -lc 'gh issue view 2128 --json state'\nterminated with 143",
-	}}
+	messages := []agent.Message{
+		{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{{
+				ID: "call_gh", Type: "function",
+				Function: agent.Func{Name: "Bash", Arguments: `{"command":"bash -lc 'gh issue view 2128 --json state'"}`},
+			}},
+		},
+		{
+			Role:       agent.RoleTool,
+			ToolCallID: "call_gh",
+			Content:    "terminated with 143",
+		},
+	}
 
 	notes := toolFailureNotes(messages)
 	if len(notes) != 1 {
@@ -52,8 +75,30 @@ func TestToolFailureNotesDetectsWrappedGhCommand(t *testing.T) {
 	if notes[0].Command != "gh issue view 2128 --json state" {
 		t.Fatalf("command = %q", notes[0].Command)
 	}
-	if !strings.Contains(notes[0].Recovery, `powershell -NoProfile -Command "gh issue view 2128 --json state"`) {
+	if !strings.Contains(notes[0].Recovery, `gh issue view 2128 --json state`) {
 		t.Fatalf("recovery command not pre-filled: %s", notes[0].Recovery)
+	}
+}
+
+func TestToolFailureNotesPowerShellOnlyWithShellMismatchEvidence(t *testing.T) {
+	messages := []agent.Message{
+		{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{{
+				ID: "call_git", Type: "function",
+				Function: agent.Func{Name: "Bash", Arguments: `{"command":"git status"}`},
+			}},
+		},
+		{
+			Role:       agent.RoleTool,
+			ToolCallID: "call_git",
+			Content:    "shell mismatch: git command exited with exit status 143",
+		},
+	}
+
+	text := toolFailureNoteText(toolFailureNotes(messages))
+	if !strings.Contains(text, `powershell -NoProfile -Command "git status"`) {
+		t.Fatalf("shell mismatch should advise native PowerShell: %s", text)
 	}
 }
 
@@ -74,6 +119,10 @@ func TestToolFailureNotesIgnoreNonMatchingFailures(t *testing.T) {
 			name: "non hang",
 			msg:  agent.Message{Role: agent.RoleTool, Name: "Bash", Content: "Command: git status\nexit status 1"},
 		},
+		{
+			name: "quoted transcript without paired tool call",
+			msg:  agent.Message{Role: agent.RoleTool, Name: "Bash", Content: "forensics dump\nCMD: git status\nExit code 143\nCommand timed out after 2m 0s"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -86,12 +135,20 @@ func TestToolFailureNotesIgnoreNonMatchingFailures(t *testing.T) {
 
 func TestToolFailureNoteOnceDedup(t *testing.T) {
 	s := &Server{}
-	messages := []agent.Message{{
-		Role:       agent.RoleTool,
-		ToolCallID: "call_gh",
-		Name:       "Bash",
-		Content:    "Command: gh issue list\nexit code 143",
-	}}
+	messages := []agent.Message{
+		{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{{
+				ID: "call_gh", Type: "function",
+				Function: agent.Func{Name: "Bash", Arguments: `{"command":"gh issue list"}`},
+			}},
+		},
+		{
+			Role:       agent.RoleTool,
+			ToolCallID: "call_gh",
+			Content:    "exit code 143",
+		},
+	}
 
 	if got := s.toolFailureNoteOnce("trace-a", messages); got == "" {
 		t.Fatal("first note should emit")
