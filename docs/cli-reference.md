@@ -167,7 +167,7 @@ fak policy    --dump | --check FILE                        # author/validate the
 fak route     --aspect tool_call --tool refund_payment [--manifest FILE] [--simulate "a,b,b"]   # which model/ensemble routes this aspect; --dump/--check author the routing manifest
 fak routebench [--corpus FILE] [--routed F] [--single F] [--json]            # offline routing benchmark: per-aspect+ensemble vs single-model on cost/latency/quality (no model in the loop)
 fak vcache    status | prove | prove-telemetry | actions | apply-actions | score   # virtual provider-cache status, planned/applied action ledgers, and token-savings proof/refutation scorecard
-fak cachevalue report|review|feed [--since DATE] [--json] [--append-ledger FILE] [--markdown-out FILE] # cache-effectiveness P&L plus generated cache-frontier review artifacts
+fak cachevalue report|review|feed [--since DATE] [--usage-ledger FILE] [--context-budget-tokens N] [--json] [--append-ledger FILE] [--markdown-out FILE] # cache-effectiveness P&L, cumulative fleet savings/session-extension aggregate, plus generated cache-frontier review artifacts
 fak callavoid prove-memo | account [--in FILE] [--json] [--gate]   # avoided-call economics: break-even memo proof + per-window amplification scorecard (JSON in/out)
 fak cadence   [--json] [--check] [--append-history] [--window N]   # consolidated regular-cadence report: folds scores + maturity + work-done + releases into one control-pane envelope, including the top public `fak maturity route` seed; --append-history writes the durable ledger with standing_score + difficulty fields (docs/cadence/history.jsonl)
 fak milestone report|post [--json] [--check] [--append-history]   # milestone report: the maturity CLIMB (model x backend M0-M7 grid) + the epic ROADMAP, split by WORK CLASS — DISCRETE epics on a completion % vs ONGOING optimization programs (kernel-opt, cache-opt) shown as frontier activity with NO % (they have no 100%). Trended in docs/milestones/history.jsonl
@@ -427,6 +427,24 @@ first, and a hit refuses the row terminally with the finding as its structured r
 `fak slack health` gains an `outbox` rung: dead rows or a pending backlog older than 2h grade
 the surface non-OK, so a wedged drain pages instead of rotting.
 
+**Triaging a `slack-watchdog` issue.** When the watchdog files its once-a-day deduped issue
+(labelled `slack-watchdog`, `triage-only` — e.g. [#1855](https://github.com/anthony-chaudhary/fak/issues/1855)),
+the fix is *operational* (host token / channel env / feeder cron), not a repo code change — that
+is what `triage-only` means. One issue covers ALL currently non-OK surfaces, so it closes only when
+`fak slack health` returns all-OK (exit 0), not per surface. Remediate by the verdict the report
+names:
+
+| Verdict | What it means | Remediation |
+|---|---|---|
+| `AUTH_FAIL` | the surface's token resolved but `auth.test` rejected it (bot rotated/revoked) | replace the surface's bot token on the host, then re-run `fak slack health` |
+| `INCOMPLETE` | token or channel unresolved — the feeder would post nowhere (config drift) | wire the surface's `FAK_*_CHANNEL` (or a `ChannelDefault`) **and** a valid token so it resolves; an *optional* surface with no channel is `DEFERRED`, not `INCOMPLETE`, and needs no action |
+| `STALE` | ready + auth OK but no post witnessed inside the cadence budget | check the feeder workflow's (`<surface>-feed.yml`) last scheduled run — a single missed/failed run self-heals on the next successful post; a persistent stale usually means the feeder is failing or the bot was removed from the channel (so `conversations.history` reads nothing) |
+
+Before closing, re-run `fak slack health` (or `--json`) and confirm it exits 0 — a self-authored
+"resolved" without that witness is not resolution. A surface whose condition is transient (a `STALE`
+feeder that has since posted) verifies clean on the next run; a config or token fix must be applied on
+the host first. Nothing here is fixed by a commit to this repo.
+
 ```bash
 fak slack check --auth   # resolution + does each token work? (offline-by-default)
 fak slack health         # + did a post actually land inside each feeder's cadence?
@@ -591,7 +609,7 @@ attaches through a registry.
 | session core-dump + debugger + dream cleanup | `internal/recall`,`internal/cdb` | persist a finished session as a page-table-over-CAS core image; `fak debug` attaches to it (incl. a REAL transcript) and demand-pages only the working set a question touches; agent/requester tombstones suppress unwanted memories from future context without deleting audit bytes; `fak dream` auto-cleans the sleeping image by re-screening, pre-sealing refuted witnesses, and pruning dead CAS bytes | `go test` + `recall-report.json`,`cdb-report.json`,`dream-report.json` |
  | in-kernel model | `internal/model` | a pure-Go forward pass the kernel owns (KV cache as a Go structure), with proven bit-for-bit correctness for SmolLM2-135M (Llama family) and first-token parity for Qwen3.6-27B (Gated-DeltaNet); an int8/Q8 SIMD lane at near-parity with llama.cpp Q8_0 is the active **in-flight** extension | `go test` (oracle argmax-exact); `MODEL-BASELINE-RESULTS.md`; `FAK-NATIVE-QWEN35-RESULTS.md` |
 | gateway | `internal/gateway` | `fak serve`: OpenAI-compatible HTTP (`/v1/chat/completions` adjudication proxy, `/v1/fak/*`) + MCP over stdio/HTTP, so any-language agents route tool calls through the syscall boundary; mints a tainted agent-scoped `Ref` from raw bytes (IFC/secret/self-modify rungs stay armed) | `go test`; v0.2.1 adversarial-review hardening |
-| model routing (decision) | `internal/modelroute` | `fak route`: per-aspect + ensemble model routing as a pure, deterministic policy — `Route(Subject)→Decision` (a tool call / sub-query / step routes to its own model or ensemble) + `Combine(reduction,votes)→Result` (`first`/`vote`/`best_of`/`all_reduce`/`concat`); version-tagged JSON manifest, `--dump`↔`--check`. Live dispatch is the wiring tracked in the model-routing epic | `go test` (`internal/modelroute`, `cmd/fak` route tests); `docs/model-routing.md` |
+| model routing + account binding | `internal/modelroute` | `fak route`: per-aspect + ensemble model routing as a pure, deterministic policy — `Route(Subject)→Decision` (a tool call / sub-query / step routes to its own model or ensemble) + `Combine(reduction,votes)→Result` (`first`/`vote`/`best_of`/`all_reduce`/`concat`); version-tagged JSON manifest, `--dump`↔`--check`; `--accounts` / `--accounts-dump` / `--accounts-check` bind abstract route model ids to provider accounts, upstream model names, and residency-honest engine routes. The served gateway path dispatches single picks and ensembles with `--route-manifest`; standalone `fak agent` route-manifest wiring remains the labeled follow-on | `go test` (`internal/modelroute`, `cmd/fak` route tests, gateway route-manifest tests); `docs/model-routing.md`; `docs/model-accounts.md` |
 | dispatch fusion | `internal/kernel` | one in-process chain; no `os/exec` on the hot path | `go test` (ABSENCE proof) |
 | KPI + A/B bench | `internal/metrics`,`internal/bench` | vDSO ablation; the primary gate; provenance + identical-workload guard | `report.json`, `baseline.json` |
 | turn-tax bench | `internal/turnbench` | `fak turntax`: prices the extra error-code MODEL turn (malformed/duplicate/poison) a SOTA loop fires vs the 1-shot kernel, per lever, safety floor on its own axis | `go test` (incl. happy-path=0 control); `TURN-TAX-RESULTS.md` |
