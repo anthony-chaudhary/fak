@@ -301,6 +301,85 @@ func secretShapedValue(v string) bool {
 		strings.Contains(lc, "secret=")
 }
 
+// secretShapedName reports whether an environment variable NAME carries a
+// credential a spawned child must never inherit as ambient state. It is the
+// conservative half of the #2358 secret floor: it matches the unambiguous
+// credential markers (token / secret / password / credential / cookie / a
+// private key) and the specific cloud/VCS/chat access tokens that are pure
+// exfiltration risk to a poisoned subagent, but it DELIBERATELY spares the
+// LLM-provider API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, …) a wrapped agent
+// or a `fak guard` child may legitimately need for its own upstream auth — a
+// blanket "*KEY*" strip would break API-billing operators. Those provider keys
+// are instead denied by the strict, opt-in InheritedTable.ResolveLaunch path
+// (value-shape default-deny), not by this always-on floor.
+func secretShapedName(name string) bool {
+	up := strings.ToUpper(strings.TrimSpace(name))
+	if up == "" {
+		return false
+	}
+	for _, needle := range []string{
+		"TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "COOKIE",
+		"PRIVATE_KEY", "PRIVATEKEY", "AUTHORIZATION", "SESSION_KEY",
+	} {
+		if strings.Contains(up, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// providerAPIKeyNames are the LLM-provider credential variables a wrapped agent
+// or a `fak guard` child may legitimately need to reach its own upstream when an
+// operator is on explicit API billing. Their VALUES are secret-shaped (sk-…), so
+// without this exemption the value-shape half of the floor would strip them and
+// break that operator. They are spared only from the VALUE check — their names
+// are not secret-shaped, so they survive — while the strict, opt-in
+// InheritedTable.ResolveLaunch default-deny path can still deny them for a
+// high-security deployment that authenticates the child some other way.
+var providerAPIKeyNames = map[string]bool{
+	"ANTHROPIC_API_KEY": true,
+	"OPENAI_API_KEY":    true,
+}
+
+// StripInheritedSecrets is the always-on #2358 secret floor: it removes the
+// credential-bearing variables from an ambient environment BEFORE it is handed
+// to a spawned child, closing the exfiltration path the epic names ("a child
+// can leak inherited credentials without requesting a sensitive tool"). It
+// generalizes the ad-hoc delete(env, "CLAUDE_CODE_OAUTH_TOKEN") the dispatch
+// launcher already performed by hand into one principled pass every spawn
+// surface can share.
+//
+// A "NAME=VALUE" entry is dropped when its NAME is credential-shaped
+// (secretShapedName) or its VALUE is secret-shaped (secretShapedValue) — except
+// a known LLM-provider API key (providerAPIKeyNames) is spared the value check
+// so an API-billing worker keeps the key it needs. Everything else — PATH, HOME,
+// the OS floor, and the non-secret FAK_/FLEET_/DISPATCH_ config a worker needs —
+// passes through unchanged and in the input order, so sanitizing an ambient set
+// never strands a spawned worker's config. A malformed entry with no '=' is
+// preserved (it is not a name/value pair this floor understands). kept holds the
+// surviving "NAME=VALUE" entries; stripped holds the dropped NAMES only (never
+// values) so a caller can audit or emit a LeakEnvStripped event without echoing
+// a secret.
+func StripInheritedSecrets(ambient []string) (kept []string, stripped []string) {
+	kept = make([]string, 0, len(ambient))
+	for _, kv := range ambient {
+		i := strings.IndexByte(kv, '=')
+		if i < 0 {
+			kept = append(kept, kv)
+			continue
+		}
+		name, value := kv[:i], kv[i+1:]
+		bySecretName := secretShapedName(name)
+		bySecretValue := secretShapedValue(value) && !providerAPIKeyNames[strings.ToUpper(strings.TrimSpace(name))]
+		if bySecretName || bySecretValue {
+			stripped = append(stripped, name)
+			continue
+		}
+		kept = append(kept, kv)
+	}
+	return kept, stripped
+}
+
 func intersectStrings(parent, requested []string) []string {
 	if len(parent) == 0 || len(requested) == 0 {
 		return nil
