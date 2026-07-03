@@ -1,0 +1,888 @@
+{
+  "rows": [
+    {
+      "id": "x-issue1420-context-ctx-contextevent",
+      "canonical": "contextEvent (gateway turn marker)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "contextEvent is the per-served-turn boolean that marks whether the gateway observed a context-management event, such as compaction or ctxview planning, while logging inference usage.",
+      "distinction": "It is the event flag for one gateway turn, not the aggregate ContextEvents counters used in vCache/session reports.",
+      "distinct_from": [
+        "x-ci-coverage-context-ctx-contextevents"
+      ],
+      "aliases": [],
+      "grounding": "contextevent",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-context-ctx-contextbaselinetokens",
+      "canonical": "ContextBaselineTokens (context savings denominator)",
+      "family": "context-ctx",
+      "kind": "metric",
+      "definition": "ContextBaselineTokens is the token count that would have been spent without the witnessed context-shedding event, used as the baseline side of vCache context savings reports.",
+      "distinction": "It is the without-context-control baseline, not ContextCostTokens, which is the after-control paid token count.",
+      "distinct_from": [
+        "ContextTokens (session usage)"
+      ],
+      "aliases": [],
+      "grounding": "contextbaselinetokens",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-context-ctx-contextcosttokens",
+      "canonical": "ContextCostTokens (context savings realized cost)",
+      "family": "context-ctx",
+      "kind": "metric",
+      "definition": "ContextCostTokens is the token count paid after context-control pruning or compaction has run, reported beside ContextBaselineTokens to compute realized context savings.",
+      "distinction": "It is the after-control cost, not ContextShedTokens, which counts the tokens removed by the context action.",
+      "distinct_from": [
+        "ContextTokens (session usage)"
+      ],
+      "aliases": [],
+      "grounding": "contextcosttokens",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-context-ctx-contextdroppedturns",
+      "canonical": "ContextDroppedTurns (context pruning count)",
+      "family": "context-ctx",
+      "kind": "metric",
+      "definition": "ContextDroppedTurns counts conversation turns removed or elided by a context-control event and carried into vCache/context witness summaries.",
+      "distinction": "It counts dropped turns, not ContextShedTokens, which counts token volume shed.",
+      "distinct_from": [
+        "ContextTokens (session usage)"
+      ],
+      "aliases": [],
+      "grounding": "contextdroppedturns",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-context-ctx-contextshedtokens",
+      "canonical": "ContextShedTokens (context token savings)",
+      "family": "context-ctx",
+      "kind": "metric",
+      "definition": "ContextShedTokens records the number of context tokens removed by compaction or ctxview-family controls and surfaced in vCache/context witness reports.",
+      "distinction": "It is the saved-token volume, not ContextCostTokens, which records the post-shed paid amount.",
+      "distinct_from": [
+        "ContextTokens (session usage)"
+      ],
+      "aliases": [],
+      "grounding": "contextshedtokens",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-context-ctx-toplongcontext",
+      "canonical": "TopLongContext (sessionaudit pressure rows)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "TopLongContext is the compact-session audit slice of the highest-pressure long-context sessions, ordered for reporting and action planning.",
+      "distinction": "It is the selected report rows for operator attention, not the longContextPressure recommendation that decides whether an action is warranted.",
+      "distinct_from": [
+        "context-window"
+      ],
+      "aliases": [],
+      "grounding": "toplongcontext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-context-ctx-compactionsnapshotdata",
+      "canonical": "CompactionSnapshotData (gateway context snapshot)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "CompactionSnapshotData is the gateway/debug snapshot payload that records compaction and context-view data for diagnostics and vCache family reporting.",
+      "distinction": "It is a serialized diagnostic snapshot, not the compaction operation itself.",
+      "distinct_from": [
+        "compaction"
+      ],
+      "aliases": [],
+      "grounding": "compactionsnapshotdata",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-context-ctx-defaultcontextpath",
+      "canonical": "DefaultContextPath (context witness snapshot path)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "DefaultContextPath resolves the well-known per-user path where the context witness snapshot is read or written for vCache status and snapshot helpers.",
+      "distinction": "It is a filesystem path resolver for context witness state, not the context window or context budget itself.",
+      "distinct_from": [
+        "context-window"
+      ],
+      "aliases": [],
+      "grounding": "defaultcontextpath",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-context-ctx-discussioncontext",
+      "canonical": "DiscussionContext (canonicalizer input channel)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "DiscussionContext is the canonicalizer/normgate notion of user discussion context, used to distinguish conversational content from other canonicalization inputs.",
+      "distinction": "It is a content-channel label for normalization, not the gateway's managed runtime context window.",
+      "distinct_from": [
+        "context-window"
+      ],
+      "aliases": [],
+      "grounding": "discussioncontext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-context-ctx-fakcontextvalue",
+      "canonical": "fakContextValue (gateway context-value route)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "fakContextValue is the gateway/MCP helper surface that returns the current fak context-value snapshot for status and context-view clients.",
+      "distinction": "It is the route/helper that serves context value state, not the ctxvalue package or the context value data model as a whole.",
+      "distinct_from": [
+        "x-goal25b-context-ctx-ctxvalue"
+      ],
+      "aliases": [],
+      "grounding": "fakcontextvalue",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-context-ctx-loginferenceturnwithcontextevent",
+      "canonical": "logInferenceTurnWithContextEvent (gateway usage logger)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "logInferenceTurnWithContextEvent is the gateway metrics helper that records one inference turn and includes whether a context event occurred on that turn.",
+      "distinction": "It logs the turn and context-event bit; it is not the contextEvent boolean itself nor the vCache aggregate counters.",
+      "distinct_from": [
+        "x-issue1420-context-ctx-contextevent"
+      ],
+      "aliases": [],
+      "grounding": "loginferenceturnwithcontextevent",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-context-ctx-longcontextpressure",
+      "canonical": "longContextPressure (sessionaudit recommendation)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "longContextPressure is the sessionaudit recommendation path that turns high long-context usage or I/O ratio into a compact-session action.",
+      "distinction": "It is the pressure classifier/recommendation, not the TopLongContext rows it reads from.",
+      "distinct_from": [
+        "x-issue1420-context-ctx-toplongcontext"
+      ],
+      "aliases": [],
+      "grounding": "longcontextpressure",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-context-ctx-totalcontexttokens",
+      "canonical": "TotalContextTokens (sessionaudit aggregate)",
+      "family": "context-ctx",
+      "kind": "metric",
+      "definition": "TotalContextTokens is the sessionaudit aggregate field summing context-token usage across the included sessions or turns.",
+      "distinction": "It is an aggregate total over sessions, not the per-turn ContextTokens usage field.",
+      "distinct_from": [
+        "ContextTokens (session usage)"
+      ],
+      "aliases": [],
+      "grounding": "totalcontexttokens",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-plan-compactactionplan",
+      "canonical": "CompactActionPlan (sessionaudit action list)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "CompactActionPlan is the sessionaudit action-plan object containing compact-session recommendations, counts, and optional gate output for recent session pressure.",
+      "distinction": "It is an operator action list derived from a compact report, not a ctxplan resident Plan or a model-routing plan.",
+      "distinct_from": [
+        "x-plan-plancells"
+      ],
+      "aliases": [],
+      "grounding": "compactactionplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-plan-buildcompactactionplan",
+      "canonical": "BuildCompactActionPlan (sessionaudit planner)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "BuildCompactActionPlan lowers a compact-session report into the concrete CompactActionPlan actions a CLI or gateway surface can render or gate.",
+      "distinction": "It builds session-audit actions, not a general BuildPlan action planner nor a ctxplan PlanCells resident view.",
+      "distinct_from": [
+        "x-plan-buildplan"
+      ],
+      "aliases": [],
+      "grounding": "buildcompactactionplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-plan-planauto",
+      "canonical": "PlanAuto (dispatch wave sizing)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "dispatchauto.PlanAuto folds live worker ceilings into an automatic dispatch-wave plan, including target, refill, binding ceiling, and per-worker context slice.",
+      "distinction": "It plans fleet dispatch capacity, not model memory placement or ctxplan conversation materialization.",
+      "distinct_from": [
+        "x-plan-memoryplan"
+      ],
+      "aliases": [],
+      "grounding": "planauto",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-plan-applyprovideractionplan",
+      "canonical": "ApplyProviderActionPlan (vCache manifest mutator)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "ApplyProviderActionPlan applies the local, no-provider-call effects of a vCache ProviderActionPlan to the fak-owned provider manifest and emits an apply report.",
+      "distinction": "It mutates local provider-cache policy rows, not the sessionaudit CompactActionPlan nor a ctxplan view.",
+      "distinct_from": [
+        "x-issue1420-plan-compactactionplan"
+      ],
+      "aliases": [],
+      "grounding": "applyprovideractionplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-plan-blockingcandidates",
+      "canonical": "BlockingCandidates (dispatch lease blockers)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "BlockingCandidates is the dispatch-status list of candidate work items that an active lease blocks from being launched safely.",
+      "distinction": "It is the concrete blocked-candidate list on a lease row, not the boolean BlocksCandidate summary flag.",
+      "distinct_from": [
+        "x-plan-candidatetaskids"
+      ],
+      "aliases": [],
+      "grounding": "blockingcandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-plan-blockscandidate",
+      "canonical": "BlocksCandidate (dispatch lease blocker flag)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "BlocksCandidate is the dispatch-status tri-state flag indicating whether a live lease blocks any currently available candidate work.",
+      "distinction": "It is the yes/no blocker flag, not the BlockingCandidates list that names which candidates are blocked.",
+      "distinct_from": [
+        "x-issue1420-plan-blockingcandidates"
+      ],
+      "aliases": [],
+      "grounding": "blockscandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-plan-candidatesourceavailable",
+      "canonical": "CandidateSourceAvailable (dispatch status input)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "CandidateSourceAvailable records whether dispatch-status had a candidate source to compare live leases against when classifying blockers.",
+      "distinction": "It is source-availability metadata for blocker classification, not a candidate item or candidate score.",
+      "distinct_from": [
+        "x-plan-candidatetaskids"
+      ],
+      "aliases": [],
+      "grounding": "candidatesourceavailable",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-plan-plannedcreates",
+      "canonical": "PlannedCreates (dogfood issue receipt count)",
+      "family": "plan",
+      "kind": "metric",
+      "definition": "PlannedCreates is the dogfood issue sync receipt count of issue records the planner intended to create.",
+      "distinction": "It is a planned creation count in the issue-sync receipt, not a Plan object or candidate planner.",
+      "distinct_from": [
+        "x-plan-buildplanwithoptions"
+      ],
+      "aliases": [],
+      "grounding": "plannedcreates",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-plan-planplacementfordisk",
+      "canonical": "PlanPlacementForDisk (disk-tier cache placement)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "PlanPlacementForDisk evaluates a cachemeta placement request against the filesystem-backed disk tier and returns the placement decision for that tier.",
+      "distinction": "It plans against the disk tier only, not PlanPlacementForLocalLadder, which evaluates the local HBM/DRAM/disk ladder together.",
+      "distinct_from": [
+        "x-plan-planplacementfordevice"
+      ],
+      "aliases": [],
+      "grounding": "planplacementfordisk",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-plan-planplacementforlocalladder",
+      "canonical": "PlanPlacementForLocalLadder (multi-tier local placement)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "PlanPlacementForLocalLadder evaluates a cachemeta placement request across the local HBM, DRAM, and disk tiers using live capacity probes.",
+      "distinction": "It plans across the local tier ladder, not the disk-only PlanPlacementForDisk helper.",
+      "distinct_from": [
+        "x-issue1420-plan-planplacementfordisk"
+      ],
+      "aliases": [],
+      "grounding": "planplacementforlocalladder",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-plan-planview",
+      "canonical": "PlanView (ctxplan query result)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "PlanView is the typed ctxplan query result returned to the model, carrying selected and elided spans, cost, releases, and assumption state around an embedded Plan.",
+      "distinction": "It is a projection of a planned view for model inspection, not the PlanCells selector itself.",
+      "distinct_from": [
+        "x-plan-plancells"
+      ],
+      "aliases": [],
+      "grounding": "planview",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-plan-refuseepplanifunfit",
+      "canonical": "refuseEPPlanIfUnfit (expert-parallel serve guard)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "refuseEPPlanIfUnfit checks whether an expert-parallel serving plan fits the selected serve configuration and refuses startup when the plan is not viable.",
+      "distinction": "It is a serve-time validation guard over an EP plan, not the planner that estimates model memory placement.",
+      "distinct_from": [
+        "x-plan-expertparallelperrankplan"
+      ],
+      "aliases": [],
+      "grounding": "refuseepplanifunfit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-guard-gate-toolprocgate",
+      "canonical": "toolprocgate (tool process revocation gate)",
+      "family": "guard-gate",
+      "kind": "subsystem",
+      "definition": "internal/toolprocgate is the in-kernel result-admission and supervisor gate that tracks spawned tool processes, session-end orphan boundaries, kills, and late-result quarantine.",
+      "distinction": "It is the tool-process lifecycle and result gate, not the generic ResultAdmitter interface nor repo-guard's filesystem write guard.",
+      "distinct_from": [
+        "result-admitter"
+      ],
+      "aliases": [],
+      "grounding": "toolprocgate",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-guard-gate-applycompactactiongate",
+      "canonical": "ApplyCompactActionGate (session action gate)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "ApplyCompactActionGate stamps a thresholded gate verdict onto a CompactActionPlan so high or medium session-audit actions can be refused or surfaced consistently.",
+      "distinction": "It gates compact-session actions, not generic tool-call admission and not the CompactActionPlan data itself.",
+      "distinct_from": [
+        "gate"
+      ],
+      "aliases": [],
+      "grounding": "applycompactactiongate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-guard-gate-actiongate",
+      "canonical": "ActionGate (session action threshold setting)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "ActionGate is the session-summary option or report field carrying the compact-action gate threshold used when rendering recent session actions.",
+      "distinction": "It is the threshold setting/value, not the ApplyCompactActionGate function that evaluates it.",
+      "distinct_from": [
+        "x-issue1420-guard-gate-applycompactactiongate"
+      ],
+      "aliases": [],
+      "grounding": "actiongate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-guard-gate-guardbannerbuildstamp",
+      "canonical": "guardBannerBuildStamp (guard banner provenance)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardBannerBuildStamp returns the embedded build provenance string printed in the fak guard startup banner.",
+      "distinction": "It is build identity text for the banner, not the guard decision floor or a gate verdict.",
+      "distinct_from": [
+        "guard-kernel"
+      ],
+      "aliases": [],
+      "grounding": "guardbannerbuildstamp",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-guard-gate-guardprecompactclaudecommand",
+      "canonical": "guardPreCompactClaudeCommand (Claude hook command row)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardPreCompactClaudeCommand is the JSON row shape for one Claude hook command written by the guard precompact/toolproc hook installers.",
+      "distinction": "It is the command leaf inside the Claude hook settings, not the matcher that owns its hooks nor the settings document.",
+      "distinct_from": [
+        "x-goal25b-guard-gate-guardprecompact"
+      ],
+      "aliases": [],
+      "grounding": "guardprecompactclaudecommand",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-guard-gate-guardprecompactclaudematcher",
+      "canonical": "guardPreCompactClaudeMatcher (Claude hook matcher row)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardPreCompactClaudeMatcher is the Claude hook settings matcher row that groups one or more guardPreCompactClaudeCommand entries for a hook event.",
+      "distinction": "It is the matcher container, not the individual command row and not the top-level settings map.",
+      "distinct_from": [
+        "x-issue1420-guard-gate-guardprecompactclaudecommand"
+      ],
+      "aliases": [],
+      "grounding": "guardprecompactclaudematcher",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-guard-gate-guardprecompactclaudesettings",
+      "canonical": "guardPreCompactClaudeSettings (Claude hook settings)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardPreCompactClaudeSettings is the top-level Claude settings structure whose hook map is updated by guard precompact, stop-hook, and toolproc-hook installation.",
+      "distinction": "It is the full settings document shape, not a matcher row or command row inside that document.",
+      "distinct_from": [
+        "x-issue1420-guard-gate-guardprecompactclaudematcher"
+      ],
+      "aliases": [],
+      "grounding": "guardprecompactclaudesettings",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-guard-gate-guardprecompacthookcommand",
+      "canonical": "guardPreCompactHookCommand (precompact hook shell)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardPreCompactHookCommand builds the concrete command line fak writes into Claude hook settings for the precompact hook path.",
+      "distinction": "It is command-line construction for a hook install, not the serialized Claude command row type.",
+      "distinct_from": [
+        "x-issue1420-guard-gate-guardprecompactclaudecommand"
+      ],
+      "aliases": [],
+      "grounding": "guardprecompacthookcommand",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-session-runtime-sessionend",
+      "canonical": "SessionEnd (toolproc session boundary hook)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "SessionEnd is the Claude/toolproc hook event that marks the owning agent session ending, letting toolprocgate classify descendants as orphans.",
+      "distinction": "It is the session-lifecycle boundary event, not a per-turn Stop event and not session reset.",
+      "distinct_from": [
+        "session-reset"
+      ],
+      "aliases": [],
+      "grounding": "sessionend",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-session-runtime-aggregatesessions",
+      "canonical": "AggregateSessions (sessionaudit fold)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "AggregateSessions folds sessionaudit Session rows into aggregate totals, top-model summaries, and pressure inputs for reports.",
+      "distinction": "It aggregates session rows for audit, not ListSessions, which enumerates sessions from a live API/store.",
+      "distinct_from": [
+        "list-sessions"
+      ],
+      "aliases": [],
+      "grounding": "aggregatesessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-session-runtime-evsessionend",
+      "canonical": "EvSessionEnd (toolproc journal event kind)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "EvSessionEnd is the internal/toolproc journal event kind for a session_end record emitted when the owning session ends.",
+      "distinction": "It is the journal event constant, not the Claude SessionEnd hook name that is translated into it.",
+      "distinct_from": [
+        "x-issue1420-session-runtime-sessionend"
+      ],
+      "aliases": [],
+      "grounding": "evsessionend",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-session-runtime-mttrsessions",
+      "canonical": "MTTRSessions (resume watchdog session metric)",
+      "family": "session-runtime",
+      "kind": "metric",
+      "definition": "MTTRSessions is the resume/operator-touches metric for the sessions included when estimating mean time to repair or recovery.",
+      "distinction": "It is an MTTR analysis metric over sessions, not the active session count or session list.",
+      "distinct_from": [
+        "x-ci-coverage-session-runtime-activesessions"
+      ],
+      "aliases": [],
+      "grounding": "mttrsessions",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-session-runtime-recentsessions",
+      "canonical": "RecentSessions (vCache status session summary)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "RecentSessions is the optional compact session-audit report embedded in vCache status output to summarize recent guarded session behavior.",
+      "distinction": "It is a vCache status summary payload, not the session list endpoint or the sessionaudit aggregator.",
+      "distinct_from": [
+        "list-sessions"
+      ],
+      "aliases": [],
+      "grounding": "recentsessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-session-runtime-sessiondesc",
+      "canonical": "sessiondesc (session descriptor package)",
+      "family": "session-runtime",
+      "kind": "subsystem",
+      "definition": "internal/sessiondesc holds helpers for writing and reading session descriptors, the small durable shape that points to a live guard session.",
+      "distinction": "It is the package for descriptor handling, not the leaseref.SessionDescriptor wire record itself.",
+      "distinct_from": [
+        "x-goal25-session-runtime-sessiondescriptor"
+      ],
+      "aliases": [],
+      "grounding": "sessiondesc",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-policy-capability-policydigest",
+      "canonical": "PolicyDigest (guard spawn provenance)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "PolicyDigest is the policy hash metadata carried through guard/accounts/toolproc spawn attempts and leak events to identify the capability floor in force.",
+      "distinction": "It is provenance for which policy was applied, not the policy manifest or capability floor itself.",
+      "distinct_from": [
+        "policy-manifest"
+      ],
+      "aliases": [],
+      "grounding": "policydigest",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-policy-capability-adjudicat",
+      "canonical": "adjudicat (adjudication stem token)",
+      "family": "policy-capability",
+      "kind": "doc-term",
+      "definition": "adjudicat is the normalized stem the scorecard sees across adjudicate/adjudicated/adjudication wording in guard, policy, and scorecard text.",
+      "distinction": "It is a discovered terminology stem, not the concrete adjudicator package or an individual adjudication verdict.",
+      "distinct_from": [
+        "adjudicator"
+      ],
+      "aliases": [],
+      "grounding": "adjudicat",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-policy-capability-capabilityenvelope",
+      "canonical": "CapabilityEnvelope (toolproc spawn capability set)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "CapabilityEnvelope is the structured set of capabilities attached to a toolproc/guard child spawn attempt before the broker admits or denies it.",
+      "distinction": "It is the per-spawn capability carrier, not the global capability floor or policy manifest.",
+      "distinct_from": [
+        "capability-floor"
+      ],
+      "aliases": [],
+      "grounding": "capabilityenvelope",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-policy-capability-preflightverdict",
+      "canonical": "PreflightVerdict (dispatch sweep admission result)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "PreflightVerdict is the dispatch sweep/status field that records the policy preflight result attached to a dispatch trial or candidate card.",
+      "distinction": "It is a recorded dispatch preflight outcome, not supportmaturity.FromPreflightVerdict's rung mapping.",
+      "distinct_from": [
+        "x2-policy-capability-dispatchpreflight"
+      ],
+      "aliases": [],
+      "grounding": "preflightverdict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-cache-coldcache",
+      "canonical": "ColdCache (rehydrate/compact cold prompt-cache reason)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "ColdCache is the rehydrate reason and compact option indicating that the prompt/message-span cache is cold, so a prompt-cache preserving path no longer has warm-cache value to protect.",
+      "distinction": "It is a cold-state reason/option, not a cache read counter or provider-cache transport capability.",
+      "distinct_from": [
+        "provider-cache"
+      ],
+      "aliases": [],
+      "grounding": "coldcache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-cache-coldmessagespancache",
+      "canonical": "coldMessageSpanCache (gateway idle-gap witness)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "coldMessageSpanCache is the gateway metrics helper that witnesses whether a trace's message-span cache has aged past the provider TTL.",
+      "distinction": "It is the observed idle-gap cold-cache check, not the ColdCache reason/option propagated into compaction or rehydrate decisions.",
+      "distinct_from": [
+        "x-issue1420-cache-coldcache"
+      ],
+      "aliases": [],
+      "grounding": "coldmessagespancache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-render-materialize-renderleakreport",
+      "canonical": "RenderLeakReport (toolproc leak report renderer)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "RenderLeakReport formats a parsed toolproc leak report for the fak toolproc CLI surface.",
+      "distinction": "It renders leak-report output, not generic renderReason text nor ctxplan materialization.",
+      "distinct_from": [
+        "x-render-materialize-renderreason"
+      ],
+      "aliases": [],
+      "grounding": "renderleakreport",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-render-materialize-rendersleepreason",
+      "canonical": "renderSleepReason (repo-guard sleep refusal text)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "renderSleepReason formats repo-guard foreground-sleep violations into a human-readable refusal block.",
+      "distinction": "It renders sleep-specific guard text, not the generic renderReason helper nor a UI render surface.",
+      "distinct_from": [
+        "x-render-materialize-renderreason"
+      ],
+      "aliases": [],
+      "grounding": "rendersleepreason",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-witness-proof-witnesscommands",
+      "canonical": "WitnessCommands (observed proof commands)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "WitnessCommands is the recorded list of build, test, or verification commands observed in fleet/session summaries as evidence for a claimed change.",
+      "distinction": "It records commands used as evidence, not the witness verdict itself.",
+      "distinct_from": [
+        "witness-outcome"
+      ],
+      "aliases": [],
+      "grounding": "witnesscommands",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-witness-proof-witnessok",
+      "canonical": "WitnessOK (diff-witnessed constant)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "WitnessOK is the dispatchtick constant value diff-witnessed that marks a claimed resolution as corroborated by the required witness rung.",
+      "distinction": "It is the accepted witness constant, not the list of commands that produced evidence.",
+      "distinct_from": [
+        "witness-outcome"
+      ],
+      "aliases": [],
+      "grounding": "witnessok",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-evict-evictmanifest",
+      "canonical": "evict_manifest (provider action)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "evict_manifest is the vCache provider action that removes a warm row from the fak-owned local provider manifest without claiming a provider-side deletion.",
+      "distinction": "It evicts a manifest row, not a KV span from a KV cache and not a cachemeta ActionEvict placement decision.",
+      "distinct_from": [
+        "x-evict-actionevict"
+      ],
+      "aliases": [],
+      "grounding": "evictmanifest",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-gateway-engine-inkerneltok",
+      "canonical": "inKernelTok (serve tokenizer handle)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "inKernelTok is the tokenizer handle resolved for an in-kernel GGUF model serve or guard run and stored on the serve runtime.",
+      "distinction": "It is the tokenizer instance used beside the in-kernel model, not the in-kernel engine id or model residency state.",
+      "distinct_from": [
+        "x-gateway-engine-inkernel"
+      ],
+      "aliases": [],
+      "grounding": "inkerneltok",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-support-maturity-correctnesslaw",
+      "canonical": "CorrectnessLaw (vCache cache-safety statement)",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "CorrectnessLaw is the vCache action/report field that states the correctness invariant: full uncached prompt execution remains the authoritative path and cache hits are only rebates.",
+      "distinction": "It is the explicit invariant statement in cache action reports, not the broader correctness concept or support-maturity rung.",
+      "distinct_from": [
+        "correctness"
+      ],
+      "aliases": [],
+      "grounding": "correctnesslaw",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
