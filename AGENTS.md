@@ -50,6 +50,14 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 > use WSL/CI for tests and the GPU/cloud nodes for a real serve. See
 > [`docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md`](docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md).
 
+> **Build *verification* must never write the in-tree binary.** A bare `go build ./cmd/fak`
+> drops `fak.exe` into the repo root; while a fleet process holds the old binary open, Windows
+> throws `open fak.exe: The process cannot access the file because it is being used by another
+> process` (#2373). To just check that `./cmd/fak` compiles, send the output elsewhere or don't
+> emit one: `go build -o $env:TEMP\fak-verify.exe ./cmd/fak` (PowerShell) / `go build -o
+> /tmp/fak-verify.exe ./cmd/fak` (bash), or `go vet ./cmd/fak`. The in-tree `go build -o fak`
+> above is for *producing* the binary you run, not for a compile check.
+
 ## The 60-second proof (no key, no model, no GPU — verified)
 
 This is the canonical first command. Run it before anything else:
