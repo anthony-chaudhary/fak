@@ -9,6 +9,8 @@ package main
 import (
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 func TestLcgIDs(t *testing.T) {
@@ -78,8 +80,8 @@ func TestArgmax(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := argmax(tt.v); got != tt.want {
-				t.Errorf("argmax(%v) = %d, want %d", tt.v, got, tt.want)
+			if got := mathx.ArgmaxF32(tt.v); got != tt.want {
+				t.Errorf("ArgmaxF32(%v) = %d, want %d", tt.v, got, tt.want)
 			}
 		})
 	}

@@ -30,6 +30,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/benchcli"
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
@@ -59,16 +60,6 @@ func minMS(ds []time.Duration) float64 {
 		}
 	}
 	return float64(mn.Nanoseconds()) / 1e6
-}
-
-func argmax(v []float32) int {
-	bi, bv := 0, v[0]
-	for i, x := range v {
-		if x > bv {
-			bv, bi = x, i
-		}
-	}
-	return bi
 }
 
 type prefillResult struct {
@@ -127,7 +118,7 @@ func checkPromptQuant(m *model.Model, dir string, p oraclePrompt, vocab int) pro
 	logits := s.Prefill(p.Ids[:1]) // logits at position 0
 	var lastLogits []float32
 	check := func(pos int, lg []float32) {
-		if pos < len(p.ArgmaxPos) && argmax(lg) == p.ArgmaxPos[pos] {
+		if pos < len(p.ArgmaxPos) && mathx.ArgmaxF32(lg) == p.ArgmaxPos[pos] {
 			pc.ArgmaxMatches++
 		}
 		lastLogits = lg
@@ -146,13 +137,13 @@ func checkPromptQuant(m *model.Model, dir string, p oraclePrompt, vocab int) pro
 			}
 		}
 		pc.LastMaxAbsDiff = mx
-		pc.LastArgmaxOK = argmax(lastLogits) == argmax(ref)
+		pc.LastArgmaxOK = mathx.ArgmaxF32(lastLogits) == mathx.ArgmaxF32(ref)
 	}
 	g := m.NewSession()
 	g.Quant = true
 	gl := g.Prefill(p.Ids)
 	for k := 0; k < len(p.GreedyIds); k++ {
-		nid := argmax(gl)
+		nid := mathx.ArgmaxF32(gl)
 		if nid != p.GreedyIds[k] {
 			break
 		}

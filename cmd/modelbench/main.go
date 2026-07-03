@@ -38,6 +38,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -109,17 +110,6 @@ func hfName(cfg model.Config, dir string) string {
 		return base
 	}
 	return fmt.Sprintf("%s (%s)", base, cfg.ModelType)
-}
-
-// argmax returns the index of the maximum logit (first on ties) — the greedy next token.
-func argmax(v []float32) int {
-	best, bi := float32(-math.MaxFloat32), 0
-	for i, x := range v {
-		if x > best {
-			best, bi = x, i
-		}
-	}
-	return bi
 }
 
 func logitTop2(v []float32) (top1Idx int, top1, top2 float32) {
@@ -558,7 +548,7 @@ func runVerify(f *benchFlags, m *model.Model, vocab int) {
 		sg.Metal = true
 		lg := sg.Prefill(ids)
 		var maxAbs float64
-		ac, ag := argmax(lc), argmax(lg)
+		ac, ag := mathx.ArgmaxF32(lc), mathx.ArgmaxF32(lg)
 		for i := range lc {
 			if d := math.Abs(float64(lc[i] - lg[i])); d > maxAbs {
 				maxAbs = d

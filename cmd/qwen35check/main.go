@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
@@ -65,16 +65,6 @@ type checkResult struct {
 	ExpectedIDs  []int        `json:"expected_ids,omitempty"`
 	ExpectMatch  *bool        `json:"expect_match,omitempty"`
 	Steps        []stepResult `json:"steps"`
-}
-
-func argmax(v []float32) int {
-	bi, best := 0, float32(-math.MaxFloat32)
-	for i, x := range v {
-		if x > best {
-			best, bi = x, i
-		}
-	}
-	return bi
 }
 
 func topKLogits(logits []float32, k int) []topLogit {
@@ -265,7 +255,7 @@ func main() {
 		if !*jsonOnly {
 			printTopK(top)
 		}
-		next := argmax(logits)
+		next := mathx.ArgmaxF32(logits)
 		res.GeneratedIDs = append(res.GeneratedIDs, next)
 		ids = append(ids, next)
 		eos := cfg.IsEOS(next)

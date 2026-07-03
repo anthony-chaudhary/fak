@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
@@ -150,7 +151,7 @@ func main() {
 		var out []int
 		for i := 0; i < *gen; i++ {
 			a := m.Forward(seq)
-			next := argmax(a.Logits[len(a.Logits)-1])
+			next := mathx.ArgmaxF32(a.Logits[len(a.Logits)-1])
 			out = append(out, next)
 			one, _ := tok.Decode([]int{next})
 			fmt.Printf("  gen %2d: id=%-7d decode=%q\n", i, next, one)
@@ -167,16 +168,6 @@ func setEnv(k string, v bool) {
 	} else {
 		os.Unsetenv(k)
 	}
-}
-
-func argmax(v []float32) int {
-	best, idx := float32(-math.MaxFloat32), 0
-	for i, x := range v {
-		if x > best {
-			best, idx = x, i
-		}
-	}
-	return idx
 }
 
 func printTopK(tok *tokenizer.Tokenizer, logits []float32, k int) {

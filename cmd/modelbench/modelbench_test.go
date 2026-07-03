@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
@@ -102,8 +103,8 @@ func TestArgmax(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := argmax(tt.in); got != tt.want {
-				t.Fatalf("argmax(%v) = %d, want %d", tt.in, got, tt.want)
+			if got := mathx.ArgmaxF32(tt.in); got != tt.want {
+				t.Fatalf("ArgmaxF32(%v) = %d, want %d", tt.in, got, tt.want)
 			}
 		})
 	}

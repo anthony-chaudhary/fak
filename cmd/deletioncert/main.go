@@ -36,6 +36,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/deletioncert"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/journal"
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
@@ -381,7 +382,7 @@ func continueGreedy(m *model.Model, ids []int, n int) []int {
 func stepGreedy(s *model.Session, logits []float32, n int) []int {
 	out := make([]int, 0, n)
 	for i := 0; i < n; i++ {
-		nx := argmax(logits)
+		nx := mathx.ArgmaxF32(logits)
 		out = append(out, nx)
 		if s.M.Cfg.IsEOS(nx) {
 			break
@@ -389,16 +390,6 @@ func stepGreedy(s *model.Session, logits []float32, n int) []int {
 		logits = s.Step(nx)
 	}
 	return out
-}
-
-func argmax(v []float32) int {
-	best, bi := float32(-1e30), 0
-	for i, x := range v {
-		if x > best {
-			best, bi = x, i
-		}
-	}
-	return bi
 }
 
 // ---- small utilities --------------------------------------------------------

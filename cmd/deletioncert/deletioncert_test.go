@@ -9,11 +9,13 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
-// TestArgmax pins argmax's exact contract: it scans with a strict '>' from an
-// initial best of -1e30 at index 0, so it returns the FIRST index of the maximum
-// value and returns 0 for an empty slice.
+// TestArgmax pins the greedy next-token pick this demonstrator relies on
+// (mathx.ArgmaxF32): a strict '>' scan that returns the FIRST index of the
+// maximum value and returns 0 for an empty slice.
 func TestArgmax(t *testing.T) {
 	tests := []struct {
 		name string
@@ -30,8 +32,8 @@ func TestArgmax(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := argmax(tt.in); got != tt.want {
-				t.Fatalf("argmax(%v) = %d, want %d", tt.in, got, tt.want)
+			if got := mathx.ArgmaxF32(tt.in); got != tt.want {
+				t.Fatalf("ArgmaxF32(%v) = %d, want %d", tt.in, got, tt.want)
 			}
 		})
 	}

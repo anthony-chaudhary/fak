@@ -9,25 +9,15 @@ package main
 import (
 	"flag"
 	"fmt"
-	"math"
 	"os"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
-
-func argmax(v []float32) int {
-	best, idx := float32(-math.MaxFloat32), 0
-	for i, x := range v {
-		if x > best {
-			best, idx = x, i
-		}
-	}
-	return idx
-}
 
 func main() {
 	gguf := flag.String("gguf", "", "gguf path")
@@ -114,7 +104,7 @@ func main() {
 		for i := 0; i < *n; i++ {
 			act := m.Forward(ids)
 			logits := act.Logits[len(act.Logits)-1]
-			next := argmax(logits)
+			next := mathx.ArgmaxF32(logits)
 			gen = append(gen, next)
 			one, _ := tok.Decode([]int{next})
 			fmt.Printf("  step %2d: id=%-7d decode=%q\n", i, next, one)
@@ -128,10 +118,10 @@ func main() {
 	s := m.NewSession()
 	s.Quant = *quant
 	logits := s.Prefill(pids)
-	fmt.Printf("[forward] vocab=%d  argmax0=%d  (top via argmax each step):\n", len(logits), argmax(logits))
+	fmt.Printf("[forward] vocab=%d  argmax0=%d  (top via argmax each step):\n", len(logits), mathx.ArgmaxF32(logits))
 	var gen []int
 	for i := 0; i < *n; i++ {
-		next := argmax(logits)
+		next := mathx.ArgmaxF32(logits)
 		gen = append(gen, next)
 		one, _ := tok.Decode([]int{next})
 		fmt.Printf("  step %2d: id=%-7d decode=%q\n", i, next, one)

@@ -1,6 +1,6 @@
-// Tests for the pure, deterministic argmax helper in cmd/diagtok.
+// Tests for the greedy next-token pick cmd/diagtok relies on (mathx.ArgmaxF32).
 //
-// argmax returns the index of the first maximal element (ties resolve to the
+// ArgmaxF32 returns the index of the first maximal element (ties resolve to the
 // lowest index because the comparison is strict `>`), and returns 0 for an
 // empty slice. These cases pin that contract.
 package main
@@ -8,6 +8,8 @@ package main
 import (
 	"math"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 func TestArgmax(t *testing.T) {
@@ -30,8 +32,8 @@ func TestArgmax(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := argmax(tt.in); got != tt.want {
-				t.Errorf("argmax(%v) = %d, want %d", tt.in, got, tt.want)
+			if got := mathx.ArgmaxF32(tt.in); got != tt.want {
+				t.Errorf("ArgmaxF32(%v) = %d, want %d", tt.in, got, tt.want)
 			}
 		})
 	}

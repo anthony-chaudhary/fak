@@ -1,6 +1,7 @@
-// Unit tests for the pure helpers in the gemma4diag command.
+// Unit tests for the greedy next-token pick the gemma4diag command relies on
+// (mathx.ArgmaxF32).
 //
-// argmax returns the index of the maximum float32 in a slice, scanning
+// ArgmaxF32 returns the index of the maximum float32 in a slice, scanning
 // left-to-right with a strict greater-than comparison so the FIRST maximum
 // wins on ties. These table-driven cases pin that contract: ordering,
 // tie-breaking, negatives, and single-element input.
@@ -9,6 +10,8 @@ package main
 import (
 	"math"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 func TestArgmax(t *testing.T) {
@@ -29,8 +32,8 @@ func TestArgmax(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := argmax(tt.in); got != tt.want {
-				t.Errorf("argmax(%v) = %d, want %d", tt.in, got, tt.want)
+			if got := mathx.ArgmaxF32(tt.in); got != tt.want {
+				t.Errorf("ArgmaxF32(%v) = %d, want %d", tt.in, got, tt.want)
 			}
 		})
 	}
@@ -41,7 +44,7 @@ func TestArgmax(t *testing.T) {
 // advancing on an equal value.
 func TestArgmaxFloorValues(t *testing.T) {
 	in := []float32{-math.MaxFloat32, -math.MaxFloat32}
-	if got := argmax(in); got != 0 {
-		t.Errorf("argmax(all -MaxFloat32) = %d, want 0", got)
+	if got := mathx.ArgmaxF32(in); got != 0 {
+		t.Errorf("ArgmaxF32(all -MaxFloat32) = %d, want 0", got)
 	}
 }

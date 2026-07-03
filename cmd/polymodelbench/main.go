@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/polymodel"
 )
@@ -155,7 +156,7 @@ func decodeOne(quiet bool) bool {
 		}
 		s := sessions[step.Model]
 		for t := 0; t < step.Tokens; t++ { // real decode work, one model at a time
-			logits[step.Model] = s.Step(argmax(logits[step.Model]))
+			logits[step.Model] = s.Step(mathx.ArgmaxF32(logits[step.Model]))
 		}
 		laneOrder = append(laneOrder, step.Model)
 	}
@@ -238,7 +239,7 @@ func greedyDecode(m *model.Model, prompt []int, n int) []int {
 	logits := s.Prefill(prompt)
 	out := make([]int, 0, n)
 	for i := 0; i < n; i++ {
-		t := argmax(logits)
+		t := mathx.ArgmaxF32(logits)
 		out = append(out, t)
 		logits = s.Step(t)
 	}
@@ -266,7 +267,7 @@ func specDecodeModel(target, draft *model.Model, prompt []int, n, k int) (out []
 		// 1. Draft proposes k tokens greedily from its own model, threading dl.
 		drafts := make([]int, 0, k)
 		for j := 0; j < k; j++ {
-			dj := argmax(dl)
+			dj := mathx.ArgmaxF32(dl)
 			drafts = append(drafts, dj)
 			dl = ds.Step(dj)
 		}
@@ -275,9 +276,9 @@ func specDecodeModel(target, draft *model.Model, prompt []int, n, k int) (out []
 		// 2. Target verifies: argmax at the current position (from tl) and after each
 		//    drafted token fed sequentially → k+1 argmaxes.
 		targetArgmax := make([]int, 0, k+1)
-		targetArgmax = append(targetArgmax, argmax(tl))
+		targetArgmax = append(targetArgmax, mathx.ArgmaxF32(tl))
 		for j := 0; j < k; j++ {
-			targetArgmax = append(targetArgmax, argmax(ts.Step(drafts[j])))
+			targetArgmax = append(targetArgmax, mathx.ArgmaxF32(ts.Step(drafts[j])))
 		}
 
 		// 3. Accept the longest matching prefix.
@@ -331,9 +332,9 @@ func specDecodeProposer(target *model.Model, prompt []int, n, k int, propose fun
 		drafted += k
 
 		targetArgmax := make([]int, 0, k+1)
-		targetArgmax = append(targetArgmax, argmax(tl))
+		targetArgmax = append(targetArgmax, mathx.ArgmaxF32(tl))
 		for j := 0; j < k; j++ {
-			targetArgmax = append(targetArgmax, argmax(ts.Step(drafts[j])))
+			targetArgmax = append(targetArgmax, mathx.ArgmaxF32(ts.Step(drafts[j])))
 		}
 
 		res := polymodel.AcceptGreedy(drafts, targetArgmax)
@@ -423,19 +424,6 @@ func bytesToIDs(b []byte) []int {
 		ids[i] = int(c)
 	}
 	return ids
-}
-
-func argmax(v []float32) int {
-	if len(v) == 0 {
-		return 0
-	}
-	bi, bv := 0, v[0]
-	for i, x := range v {
-		if x > bv {
-			bv, bi = x, i
-		}
-	}
-	return bi
 }
 
 func logf(quiet bool, format string, a ...any) {
