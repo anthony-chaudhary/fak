@@ -101,16 +101,9 @@ type Row struct {
 // superset copy. live is the set of sids a running `claude --resume` currently drives;
 // now drives the reset past/future verdict.
 func Classify(sid string, copies []Copy, live map[string]bool, now time.Time) Row {
-	best := 0
-	for i := 1; i < len(copies); i++ {
-		bTS, iTS := lastTS(copies[best].Records), lastTS(copies[i].Records)
-		// Superset = latest last-ts, then most records (NOT file mtime). ISO-8601 UTC
-		// timestamps compare correctly as strings, the same order the Python relied on.
-		if iTS > bTS || (iTS == bTS && len(copies[i].Records) > len(copies[best].Records)) {
-			best = i
-		}
-	}
-	bestCopy := copies[best]
+	// Superset = latest last-ts, then most records (NOT file mtime). ISO-8601 UTC
+	// timestamps compare correctly as strings, the same order the Python relied on.
+	bestCopy := copies[SupersetIndex(copies)]
 	bestUUIDs := uuidSet(bestCopy.Records)
 	isSuperset := true
 	for _, c := range copies {
