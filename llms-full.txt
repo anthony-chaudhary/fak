@@ -122,6 +122,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 - [Engineering is building loops (fak is the kernel)](docs/explainers/engineering-is-building-loops.md): the synthesis — modern engineering is increasingly the act of building agentic loops (observe → orient → decide → act → verify), and fak is the in-process kernel they run on, safe and fast for the same reason. The loops-all-the-way-down map from the inner tool-call syscall up through the turn, session, and fleet loops to the loop that improves the loop.
 - [Super loops](docs/super-loops.md): the operator-intent meta-loop above normal loops — walk member scorecards/loops/surfaces first, select worst-first what to enter, and use `manage-benchmarks` plus `fak bench-loop status|next|walk|run` for benchmark collection/publishing control.
 - [The tool call is a syscall](docs/explainers/tool-call-is-a-syscall.md): the keystone from-scratch explainer — an OS kernel never trusts a program's word; every dangerous action crosses a boundary the program does not control, and fak applies the same boundary to the LLM's tool calls. The model proposes, the kernel disposes.
+- [The fak/DOS glossary](docs/explainers/glossary.md): 12 one-line definitions of the newcomer vocabulary — syscall boundary, verdict, capability floor, quarantine, fail-closed, witness, refusal reason, lease/arbitration, recall re-verification, addressable KV cache, bit-exact eviction, prefix-cache discount — each linked to its full explainer.
 - [Policy in the kernel](docs/explainers/policy-in-the-kernel.md): why a default-deny check on the call path beats an external recognizer that fails open.
 - [Why default-deny beats a classifier](docs/explainers/default-deny-vs-classifier.md): one poisoned README walked through two designs — a classifier stack that must recognize the attack and can fail open, and fak's quarantine plus capability floor that refuses the effect without recognizing the prompt.
 - [Addressable KV cache](docs/explainers/addressable-kv-cache.md): how mid-run causal span eviction stays bit-exact (`max|Δ| = 0`).
@@ -7222,7 +7223,7 @@ The fences, stated plainly — `fak` is built to survive a skeptic reading the c
 
 ## Is the in-kernel model engine ready to serve production traffic?
 
-No, the in-kernel model engine is a bit-exact correctness reference, not a tuned production serving engine, and the README and claims ledger say so plainly. It is a from-scratch pure-Go forward pass whose load-bearing claim is oracle correctness versus a HuggingFace reference, not throughput, and it has no continuous batching, no paged attention, and no multi-tenant scheduler. Forward-pass parity is proven for the llama family (SmolLM2-135M, argmax-exact at every position, final-logit `max|Δ|` about 6e-5); non-llama family parity is open, real-GGUF end-to-end parity is open, and a Qwen3.6-27B multi-token greedy decode was refuted because it diverges from llama.cpp at token index 2. For real serving, run `fak serve` in front of vLLM, SGLang, or llama.cpp instead.
+No, the in-kernel model engine is a bit-exact correctness reference, not a tuned production serving engine, and the README and claims ledger say so plainly. It is a from-scratch pure-Go forward pass whose load-bearing claim is oracle correctness versus a HuggingFace reference, not throughput, and it has no continuous batching, no paged attention, and no multi-tenant scheduler. Forward-pass parity is proven for the llama family (SmolLM2-135M, argmax-exact at every position, final-logit `max|Δ|` about 6e-5); non-llama family parity is open, real-GGUF end-to-end parity is open, and a Qwen3.6-27B multi-token greedy decode was refuted because it diverges from llama.cpp at token index 2. For real serving, run `fak serve` in front of vLLM, SGLang, or llama.cpp instead. The [What fak is not](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/what-fak-is-not.md) explainer states this serving-engine boundary — and the 0/29-novel prior-art audit — plainly.
 
 ## Why do the cache-reuse savings only apply to self-hosted models?
 
@@ -17326,6 +17327,10 @@ fak's bet is that this scaffolding is a kernel, not a library you copy into each
 
 One last honest note, the one the repo leads with. A prior-art audit found 0 of 29 primitives here novel (CLAIMS.md). The contribution is not any single mechanism. It is the assembly: a fused, fail-closed, witness-gated kernel with the tool call promoted to an in-process syscall. The parts are old. Wiring them into one boundary that is safe and fast for the same reason is the thing.
 
+So build the loop. That part is yours, and it is the part that matters. Just don't build the floor under it a fifth time — the gate, the quarantine, the durable cache, the keep-bit — badly, the way every hand-rolled loop does. Inherit the floor and let it hold the line no narration can move.
+
+> **Engineering is building loops. fak is the floor they run on — the one decision, at every ring, that no participant can move by narrating a number.**
+
 ## Read next
 
 - [Policy in the kernel](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/policy-in-the-kernel.md) — why a default-deny check on the call path beats an external recognizer that fails open.
@@ -17654,6 +17659,67 @@ an operating system would: it isn't trusted; it's adjudicated.
 *Next:* [Policy in the kernel](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/policy-in-the-kernel.md) — the engineering depth ·
 [Engineering is building loops](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/engineering-is-building-loops.md) — the loop this
 syscall sits inside · [README](https://github.com/anthony-chaudhary/fak/blob/main/README.md) — the whole project in one read.
+
+---
+
+# The fak/DOS glossary
+
+> Source: `docs/explainers/glossary.md`
+
+---
+title: "The fak/DOS Glossary: 12 Terms in One Line Each"
+description: "Plain one-line definitions of the vocabulary a newcomer trips on — verdict, capability floor, quarantine, addressable KV cache, bit-exact eviction, witness, lease, refusal reason, recall re-verification, syscall boundary, prefix-cache discount, fail-closed — each linked to its full explainer."
+slug: glossary
+keywords:
+  - fak glossary
+  - DOS glossary
+  - agent kernel vocabulary
+  - verdict
+  - capability floor
+  - quarantine
+  - addressable KV cache
+  - bit-exact eviction
+  - witness
+  - refusal reason
+  - fail-closed
+  - syscall boundary
+date: 2026-07-03
+---
+
+# The fak/DOS glossary — 12 terms, one line each
+
+The vocabulary a newcomer trips on, defined plainly. Each term links to the
+explainer that earns the definition. People can only repeat what they can
+name — this page is the naming.
+
+## The boundary
+
+- **[Syscall boundary](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/tool-call-is-a-syscall.md)** — the line a tool call crosses out of the model's hands: like a user program calling the OS, the agent proposes an action and a kernel it does not control decides — the model proposes, the kernel disposes.
+- **[Verdict](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/tool-call-is-a-syscall.md)** — the kernel's ruling on one proposed tool call (allow, refuse, quarantine), produced by an inspectable check — never by asking the model whether its own call looks safe.
+- **[Capability floor](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/default-deny-vs-classifier.md)** — the default-deny list of what an agent may do at all: anything not explicitly granted is refused by structure, so an attack is stopped without having to be recognized.
+- **[Quarantine](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/default-deny-vs-classifier.md)** — where a suspicious tool result goes instead of straight into the model's context: held apart, screened, and admitted only if clean.
+- **[Fail-closed](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/policy-in-the-kernel.md)** — when a check cannot run or cannot decide, the answer is "no": an error means refusal, never a silent pass-through.
+
+## The trust substrate (DOS)
+
+- **[Witness](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/verify-dont-trust.md)** — evidence the system recorded (a git diff, a journal row) rather than a claim an agent narrated; a "done" counts only when a witness backs it.
+- **[Refusal reason](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/verify-dont-trust.md)** — a "no" carrying a token from a closed vocabulary (e.g. `LANE_DRAINED`) instead of free prose, so a peer can verify the condition and act on it.
+- **[Lease / arbitration](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/verify-dont-trust.md)** — how parallel agents avoid collisions: each declares the file region it will touch and is admitted only if that region is disjoint from every live lease.
+- **[Recall re-verification](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/memory-engineering.md)** — a saved memory is re-checked against git and the working tree at the moment it is read; a stale claim is withheld or hedged, never injected as fact.
+
+## The cache
+
+- **[Addressable KV cache](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/addressable-kv-cache-in-5-min.md)** — a context cache you can reach into the middle of, not just append to: one span can be removed after the fact instead of rebuilding everything behind it.
+- **[Bit-exact eviction](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/addressable-kv-cache.md)** — removing a span leaves the cache bit-for-bit identical to one that never contained it (`max|Δ| = 0`): provable forgetting, not best-effort deletion.
+- **[Prefix-cache discount](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/long-session-economics.md)** — the provider's cheaper rate for a prompt prefix that is byte-identical to what it has already processed; it survives only while those bytes do not change.
+
+## Related glossaries
+
+This page is the newcomer's on-ramp. Two sibling glossaries go deeper on
+different axes: [the canonical split of overloaded core words](https://github.com/anthony-chaudhary/fak/blob/main/docs/glossary.md)
+(session, agent, context, model, memory) and
+[the managed-context glossary](https://github.com/anthony-chaudhary/fak/blob/main/docs/managed-context-glossary.md) (the product
+contract for what fak manages automatically).
 
 ---
 
@@ -20189,14 +20255,9 @@ fak model routing is a way to route a single request at any aspect — the whole
 > **offline routing benchmark** (`fak routebench` — per-aspect + ensemble vs
 > single-model on cost/quality/latency, no model in the loop) is [SHIPPED]. The
 > **served gateway dispatch** path is [SHIPPED] for single-model picks and
-> ensembles through `--route-manifest`. The remaining tracked follow-ons are the
-> standalone `fak agent --route-manifest` CLI surface
-> ([#2529](https://github.com/anthony-chaudhary/fak/issues/2529)), live
-> account-resolved dispatch from model-account rosters
-> ([#2528](https://github.com/anthony-chaudhary/fak/issues/2528)), native
-> in-kernel scout binding ([#2207](https://github.com/anthony-chaudhary/fak/issues/2207)),
-> and learned routing ([#600](https://github.com/anthony-chaudhary/fak/issues/600)).
-> See [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
+> ensembles through `--route-manifest`. Standalone `fak agent` route-manifest
+> entry points, scout-model live classification, and learned routing remain
+> follow-ons. See [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
 
 ## The one-paragraph version
 
@@ -20467,9 +20528,6 @@ connectivity for each chosen member. The dedicated guides:
   dispatching *through* it) and what each means.
 - **[Routers & gateways](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/routers.md)** — OpenRouter, Portkey, LiteLLM
   Router, Unify, Martian: fak as a complement to request-level routers.
-- **[Model accounts](https://github.com/anthony-chaudhary/fak/blob/main/docs/model-accounts.md)** — the account-switcher roster that binds
-  abstract routed model ids to your provider accounts, plus the `fak api-host
-  --from-model-accounts` bridge for no-spend readiness/acceptance checks.
 
 **Residency is fail-closed across every backend.** The engine-residency PDP
 (`internal/engine`) treats any route it cannot prove is on-box — a provider wire, a
@@ -20560,26 +20618,18 @@ and re-asserts the documented numbers.
 
 ## Roadmap (the GitHub issue series)
 
-The decision spine, offline benchmark (`fak routebench`), served gateway dispatch
-for picks/ensembles, route observability, free-text `best_of`, and the
-`internal/polymodel` bridge are shipped. The current issue map is:
+The decision spine, offline benchmark (`fak routebench`), and served gateway
+dispatch for picks/ensembles are shipped. The remaining work is broader product
+surface and learning:
 
-| Issue | State | Scope |
-|---|---|---|
-| [#595](https://github.com/anthony-chaudhary/fak/issues/595) | open epic | Parent epic for the per-aspect + ensemble routing program. |
-| [#596](https://github.com/anthony-chaudhary/fak/issues/596) | closed | Single-model route writes `ToolCall.Engine` before adjudication. |
-| [#597](https://github.com/anthony-chaudhary/fak/issues/597) | closed | Gateway ensemble execution: N adjudicated submits plus `Combine`. |
-| [#598](https://github.com/anthony-chaudhary/fak/issues/598) | closed | In-process agent-loop route hook (`WithRouteManifest`). |
-| [#599](https://github.com/anthony-chaudhary/fak/issues/599) | closed | Scout classifier seam for filling route subject signals. |
-| [#600](https://github.com/anthony-chaudhary/fak/issues/600) | open | Telemetry to learned routing: live cost/latency/quality feedback feeding policy. |
-| [#601](https://github.com/anthony-chaudhary/fak/issues/601) | closed | `fak serve --route-manifest` plus hot reload. |
-| [#602](https://github.com/anthony-chaudhary/fak/issues/602) | closed | Free-text ensemble reductions with a judge/verifier model. |
-| [#603](https://github.com/anthony-chaudhary/fak/issues/603) | closed | Routing observability in `/metrics` and the decision journal. |
-| [#604](https://github.com/anthony-chaudhary/fak/issues/604) | closed | Drafter/verifier roles bridged to `internal/polymodel`. |
-| [#605](https://github.com/anthony-chaudhary/fak/issues/605) | closed | Industry-scorecard positioning vs surveyed routers. |
-| [#2207](https://github.com/anthony-chaudhary/fak/issues/2207) | open | Bind the scout classifier to the in-kernel engine for a native local micro-scout. |
-| [#2528](https://github.com/anthony-chaudhary/fak/issues/2528) | open | Dispatch account-resolved targets from a model-account roster through live gateway engines. |
-| [#2529](https://github.com/anthony-chaudhary/fak/issues/2529) | open | Expose `--route-manifest` on the standalone `fak agent` command. |
+- Per-tool-call routing inside the agent loop (`agent.execViaKernel`).
+- Scout-model live classification (a cheap model fills `Subject.Complexity`/labels).
+- Telemetry → learned routing (LIVE cost/latency/quality feedback feeding the
+  policy, RouteLLM-style but per-aspect — the offline benchmark measures a recorded
+  corpus; this is its live, self-improving counterpart).
+- Free-text ensemble reductions (a judge/verifier model for `best_of` beyond scalar scores).
+- Speculative/draft roles bridged to `internal/polymodel` (drafter/verifier members).
+- Industry-scorecard row positioning vs the surveyed routers.
 
 ---
 
@@ -20701,23 +20751,6 @@ accounts are `ready` only when their named env var is present and non-empty, oth
 `needs_credential` with the env var to set. This is intentionally an environment observation, not
 a live API probe or billing claim, and it still prints only env-var names.
 
-## API-host probe bridge
-
-The same model-account roster can feed the API-host no-spend probes:
-
-```bash
-fak api-host readiness  --from-model-accounts examples/model-accounts.example.json
-fak api-host acceptance --from-model-accounts examples/model-accounts.example.json
-```
-
-`readiness` converts only OpenAI-compatible or local accounts into `/models` probe targets
-(`openai`, `openai-responses`, `xai`, and `local`). Native provider accounts are not guessed into
-an OpenAI-shaped probe. `acceptance` keeps every account with a probeable base URL visible:
-OpenAI-compatible/local accounts can become `READY_FOR_LIVE_BRIDGE_RUN`, while native
-Anthropic/Gemini accounts are reported as `WIRE_SUPPORTED_UNPROBED`. Model hints come from the
-roster bindings, so the API-host report stays tied to the same abstract model ids the route policy
-uses.
-
 ## Residency is declared, not guessed
 
 fak's residency floor denies a tenant-scoped or sensitivity-tagged payload bound for a
@@ -20752,12 +20785,11 @@ residency-honest `EngineRoute`. The `fak route --accounts` path prints the bindi
 This is pure and deterministic, witnessed by `go test ./internal/modelroute` and the
 cross-package residency test.
 
-**Deferred:** live multi-account dispatch
-([#2528](https://github.com/anthony-chaudhary/fak/issues/2528)). v1 *resolves and prints*
-a binding; it does not yet send a request over the wire to your chosen account. Building
-the planners from the Targets and running an ensemble's members is the additive dispatch
-wiring, the same shipped-vs-deferred split the routing spine uses for the ensemble fold
-versus its execution. (Per-call routing into dispatch — writing the routed id to
+**Deferred:** live multi-account dispatch. v1 *resolves and prints* a binding; it does
+not yet send a request over the wire to your chosen account. Building the planners from
+the Targets and running an ensemble's members is the additive dispatch wiring, the same
+shipped-vs-deferred split the routing spine uses for the ensemble fold versus its
+execution. (Per-call routing into dispatch — writing the routed id to
 `abi.ToolCall.Engine` before submit — has landed for the single-model case; the
 account-resolved route is the next refinement of what that field carries.)
 
@@ -28579,6 +28611,7 @@ layer; the analysis is yours to build.
 Before the roll-up, cache-effectiveness evidence was scattered across five places:
 
 - `docs/nightrun/cache-value.jsonl`, the durable session ledger.
+- `docs/nightrun/gateway-usage.jsonl`, the durable guard/serve usage ledger.
 - `fak nightrun score`, the all-time regression gate over that ledger.
 - `internal/cachevaluereport`, the weekly Track-1 trend fold.
 - Benchmark packets such as `docs/benchmarks/GLM52-FAK-KERNEL-CACHE-VALUE-RESULTS.md`.
@@ -28602,6 +28635,41 @@ whether the mechanism saved money. A combined number would hide the failure mode
 reuse is real but not net-positive, or where dollars improve for a reason unrelated to
 kernel reuse.
 
+## Fleet Aggregate
+
+`fak cachevalue report` also prints `Fleet aggregate`, an all-time roll-up by default
+(or caller-windowed with `--since`). It joins the two cache ledgers with
+`docs/nightrun/gateway-usage.jsonl` so long-horizon guard use has cumulative counters:
+
+- **Usage** (WITNESSED operational): recorded guard/serve rows, exit sessions, uptime,
+  kernel decisions, and the operational token axes (input/output). This block is the
+  usage ledger's own view and is complete only since 2026-07-03, when the guard-teardown
+  usage-row writer shipped; it is labelled as such so its recency is never read as a true zero.
+- **Saved token-equivalent**: provider prompt-cache token-equivalent plus fak-authored
+  KV-prefix and compaction token-equivalent, with `fak_share`. The `cache_read=` display
+  count is sourced from the Track-2 savings ledger (authoritative, complete back to the
+  first session) — not the back-incomplete usage-ledger counter — and the two provider-read
+  sources are kept in separate fields and never summed (a session can appear in both).
+- **API cost**: observed spend, uncached/uncompacted counterfactual, and avoided dollars
+  **split by owner** — `avoided=$X (provider $P + fak $F)`. Provider = read rebate net of
+  the cache-write premium (OBSERVED/provider-relayed); fak = the compaction saving fak
+  authored (WITNESSED shed, dollar value projected). The blended total stays their exact
+  sum, so percent reduction is unchanged. Today fak's slice is $0 — that is the honest
+  state, shown explicitly rather than blended away. Dollar rows remain dollar-blind when no
+  trusted price is present.
+- **Run-rate + projection** (long-horizon lens): the cumulative avoided dollars and saved
+  token-equivalent normalized into `$/day`, `$/week`, and a straight-line `30d`/`90d`
+  projection, over the span the SAVINGS rows cover (the rows that carry the dollars, kept
+  separate from the wider usage-row span so it cannot deflate the rate). Every rate is split
+  provider vs fak and labelled OBSERVED (provider-cache economics). A span under three days
+  is still rated but flagged `[PROVISIONAL]` so a short-window extrapolation is never read as
+  settled. This is the line that answers "over a long horizon, how much does this reduce API
+  cost per day, and whose cache is doing it?".
+- **Session extension**: WITNESSED compaction-shed context tokens only. Provider cache reads
+  reduce spend/latency but do not enlarge the context window, so they are never counted as
+  session-extension tokens. Pass `--context-budget-tokens N` to normalize shed tokens into
+  percent/window-equivalent for a specific session budget.
+
 ## Honesty Fences
 
 - **#1066 marginal-over-warm-KV fence.** The published Track-1 number is realized
@@ -28615,6 +28683,9 @@ kernel reuse.
 - **Net, not gross.** Provider-dollar savings must be net of fak's own cost and any
   upstream cache behavior. A gross token drop is useful diagnostic evidence, not a
   publishable dollar-savings headline.
+- **Spend reduction is not session extension.** Provider prompt-cache rebates can reduce
+  API cost, but only fak-authored compaction-shed tokens extend a long-running session's
+  context budget in the aggregate report.
 - **Thin corpus falls open.** Single-turn cold runs have no reuse opportunity. A thin
   multi-turn corpus reports `INSUFFICIENT` instead of fabricating a regression or a win.
 
@@ -28654,6 +28725,14 @@ A cache-value card should be read top-down:
 - **Track 2 current** appears on the Slack feed when OBSERVED-$ rows exist. It names
   the latest week, net dollars, rebate/compaction/write/spend components, and the
   provider/mechanism buckets so a provider rebate cannot hide fak-authored compaction.
+- **Fleet aggregate** is the cumulative long-horizon line: usage rows and exit sessions
+  from the gateway-usage ledger, total saved token-equivalent by owner, avoided API cost
+  **split provider vs fak**, a `$/day`+`$/week`+`30d`/`90d` run-rate (also split, marked
+  `[PROVISIONAL]` under a three-day span), and context-extension tokens. With
+  `--context-budget-tokens`, the extension line also shows percent of one session window
+  and window-equivalent. Read the provider/fak split before the headline: today every
+  avoided dollar is provider prompt-cache and fak's slice is `$0` — the split makes that
+  unmissable rather than crediting fak for the provider's cache.
 
 ## Reproduce
 
@@ -28677,10 +28756,16 @@ The cachevalue front-door spelling for a dated operator report is:
 fak cachevalue report --since 2026-06-22
 ```
 
+To answer "how much longer did this extend a long-horizon session?" for a known budget:
+
+```bash
+fak cachevalue report --since 2026-06-22 --context-budget-tokens 150000
+```
+
 The Slack/feed spelling uses the same two ledgers and can be previewed without posting:
 
 ```bash
-fak cachevalue feed --since 2026-06-22 --dry-run
+fak cachevalue feed --since 2026-06-22 --context-budget-tokens 150000 --dry-run
 ```
 
 For the cache-frontier product review, generate the human note and appendable JSONL row
@@ -29179,6 +29264,8 @@ The lint witness (unit 96): every line beginning with `- [` carries one and only
 
 - [SHIPPED] `session.Table.Restore`: the durable-resume write — load a full drive `State` VERBATIM (Rev preserved, a terminal session restored terminal, never silently revived as Running), the load-time inverse of `Snapshot`. This closes the SESSION-CONTROL-STATE §5 "no persistence yet" fence: a session re-homed to another host/instance resumes at the budget/priority/run-state it held, not a default. Witness: `go test ./internal/session` (`TestRestoreRoundTripsSnapshotVerbatim`, `TestRestoreReestablishesTerminalSession`, `TestRestoreForcesTraceKey`).
 - [SHIPPED] Served-session long-context reset budget: `session.Budget.ContextTokensLeft` is debited from provider-normalized prompt/context usage (`prompt_tokens` plus Anthropic cache read/create counters), exhaustion moves the session to Draining, mints a deterministic `continuation_id`, and the gateway either returns `409` with `reset.action=restart_fresh_session` plus required dump/rehydrate actions, with `--reset-on-budget` distills a carryover seed and transparently re-arms the continuation trace with a fresh context budget, or with `fak guard --restart-on-budget` notifies the guard supervisor after the served turn so it recontinues the session, writes a seed JSON handoff, advances omitted-header callers to the continuation trace, and relaunches the child with `FAK_RESET_TRACE_ID` / `FAK_SESSION_ID` / `FAK_RESET_SEED_FILE`. `fak serve --session-id ID --context-budget-tokens N [--reset-on-budget]`, `fak guard --context-budget-tokens N [--reset-on-budget|--restart-on-budget]`, and `fak session budget --context-tokens N` expose the control surface; `guard` supplies a stable default trace id for clients that omit `X-Trace-Id`. MCP `fak_session_reset` exposes the cooperative variant for clients/wrappers that can report `context_tokens` and a transcript: it debits the budget, accepts only a budget-drained session, then returns the fresh continuation trace plus `seed_messages`. Honest fence: a generic relaunched child that ignores `FAK_RESET_SEED_FILE` starts under the fresh trace but does not automatically ingest the carryover seed. Witness: `go test ./internal/session ./internal/gateway ./cmd/fak -run "TestContextBudget|TestSessionContextBudget|TestTraceForUsesConfiguredDefaultTrace|TestSetDefaultTraceIDAdvancesOmittedCallerTrace|TestBudgetExhaustedCallbackReceivesServedTranscript|TestSessionCLIContextBudget|TestDebitSessionHookDebitsContextBudget|TestResetOnBudgetContinuesTransparently|TestResetServedSessionOnBudgetRecontinuesWithCarryover|TestMCPSessionResetDebitsAndRearmsContinuation|TestGuardBudgetRestarterRecontinuesAndEmitsSeed|TestBuildGuardChildIncludesRestartEnv|TestGuardRestartSeedFileAndEnv"`.
+- [SHIPPED] **Header-honest 403 disambiguation + account-failover self-heal — the mid-session cure for the "deceiving" auth error, where the SAME 403 body means two different things.** A Claude subscription `403 permission_error "OAuth authentication is currently not allowed for this organization"` is emitted by Anthropic for TWO very different conditions with byte-identical body text: (a) a genuine standing org-OAuth-disable (the credential cannot serve at all — the fix is a different account or an API key, never `/login`, which just re-mints a token for the same walled org), and (b) a USAGE/OVERAGE rejection where the org has overage disabled and this request would tip a rolling window past its cap — the credential is otherwise fine (`unified-status: allowed`, sub-100% utilization) and RECOVERS on its own at the 5h/7d reset. Only the `anthropic-ratelimit-unified-*` / `-overage-status` headers tell them apart; the body cannot. `internal/agent/upstream_remedy.go` adds the ONE-taxonomy classifier `classifyUpstream(status, body, headers) UpstreamRemedy` — `RefreshToken` (401 rotating token), `Backoff` (429/5xx/529, an unlabeled transient 403, AND an org-body 403 that carries a usage/overage rejection → the cap-aware wait toward its reset, via the existing `classifyLimit429`/`unifiedResetFor` machinery, NEVER a failover that would burn a second account's bucket for a self-recovering cap), `FailoverAccount` (an org/region/billing wall with NO usage/overage header), `SwitchModel` (model-not-entitled), `Terminal` — reusing `retryableStatus`/`forbiddenBodyIsPermanent`/`accountobs` so there is one header + one body taxonomy, not two that drift. The `usageOrOverageRejected(headers)` discriminator is checked FIRST in the 403 arm, so a capped account waits and an actually-walled account fails over. On a `FailoverAccount` verdict the planner's new `AccountFailoverFunc` hook (mirroring `APIKeyFunc`, wired into the buffered `Complete` loop beside the 401/transient-403 arms) swaps to a permitted SIBLING account's live credential and re-sends the SAME turn in place — so the walled session completes instead of surfacing to the wrapped agent; a confirmed-heal notify fires only on the following 200. `fak guard` builds the failover closure (`cmd/fak/guard_account_failover.go`): it walks the sibling config homes (`accounts.Discover`/`DeriveIdentity`), picks one on a different, non-demoted account that `CanServe` with a live (non-expired) token, and STICKILY advances the config dir the per-request `apiKeyFunc` reads from, so the swap persists across turns with no restart. Observability mirrors the auth-refresh family: `/metrics` `fak_gateway_upstream_account_failover_total{outcome}`, `/debug/vars` `account_failover_by_outcome`, and a `fak-turn account-failover` debug line. The client-facing 403 message now names the real cause and fixes (a different account, or a plain API key) and does NOT tell the operator to re-login when the body is org-OAuth-disabled. Honest fences: the demotion set keys on ACCOUNT (uuid/token-fingerprint), a correct proxy where each account is its own org — org-UUID-level keying, the streaming/passthrough loops (`streamConnect`/`StreamAnthropicRaw`), the guard-spawn-time pre-flight rung, and `SwitchModel` execution are named follow-ons; demotion is in-memory (boot re-derives from disk). Witness: `go test ./internal/agent -run 'ClassifyUpstream|OrgOAuthDisabled|AccountFailover|UpstreamRemedy|UsageVsOrgWall'` (the classifier table pinned to the exact live 403 body; `TestClassifyUpstreamUsageVsOrgWall` pinned to the exact live day30 overage headers — same org body ⇒ backoff when overage-rejected, failover when the window is allowed; the swap-carries-the-sibling-token behavior on `Complete`, the no-sibling terminal cap, the inert-when-unwired path); `go test ./cmd/fak -run 'ReadLiveAccessToken|PickFailoverAccount|AccountFailoverStickyAdvance'` (live-token freshness, permitted-sibling selection skipping the walled account, same-account-second-dir exclusion, sticky dir advance); `go test ./internal/gateway -run 'DebugVarsExposeAccountFailover'` (both series at zero, junk-outcome ignored). (fak agent)
+- [SHIPPED] **A 403-shaped usage/overage cap now WAITS for its reset instead of dying as a "permanent wall" — the deeper half of the deceiving-403 fix, found by auditing every surface that draws the cap-vs-wall line.** The classifier fix above returned the right verdict, but an audit found the conflation was structural, not isolated: the cap-aware wait (`classifyLimit429`→`unifiedResetFor`, which sleeps toward the 5h/7d reset) was invoked ONLY under `retryableStatus` (429/5xx), so a usage/overage cap arriving as a **403** (overage disabled, a rolling window at its cap — the exact live day30 signal, `unified-status: allowed`, `overage-status: rejected`) fell into the seconds-scale transient-403 arm and gave up ≤2 min before a reset fak already knew how to wait for; the gateway then told the user "re-login or check your plan" (futile), and the fleet roster filed the seat as a permanent `access` wall (excluded from dispatch, human paged). FIX, one shared header taxonomy: `accountobs.UsageOverageRejection(h)` folds the `anthropic-ratelimit-unified-*`/`-overage-status` headers into "is this a recovering cap, and which window" — consumed by BOTH `internal/agent` (live retry) and `internal/resume` (`ClassifyLimitResponseWithHeader`, which now classifies a 403/402 overage cap as session/weekly/usage_limit where the 429-only `ClassifyLimitResponse` saw nothing). `classifyLimit429` is header-aware, so a 403 cap flows into `unifiedResetFor` and gets a real cap-wait. All THREE upstream loops (`Complete`, `streamConnect`, `StreamAnthropicRaw`) route an overage-403/402 into `noteRetryableStatus` + the cap-aware backoff (or a one-shot seat rehome) BEFORE the transient-403 arm and BEFORE the org-wall failover — a cap is neither a flap nor a wall. The gateway (`internal/gateway/http.go`) gives a 403/402 whose `LimitReason` names a cap a distinct `upstream_usage_cap` message ("capped, recovers at reset — do NOT re-login") with the reset echoed as `Retry-After`, instead of the generic org-wall text. The fleet roster (`internal/fleetaccounts/authsignals.go` + the Python `tools/account_probe.py`/`fleet_session_signals.py`) checks a usage/reset signal BEFORE the access-wall regex, so a banner carrying BOTH the org-disable wording and a reset is filed `usage` (recoverable, `Throttled`, `CapacityBlockedUntil`) not `access` (permanently blocked). Honest fence: the fleet-probe taxonomy is TEXT-ONLY (`claude -p` never sees the headers) — a cap with no reset word in its text still cannot be disambiguated there; the header-aware path is the live gateway/agent one. Witness: `go test ./internal/accountobs -run 'UsageOverageRejection'` (the shared discriminator pinned to the live day30 headers + window shapes); `go test ./internal/resume -run 'ClassifyLimitResponseWithHeader'` (a 403 overage cap classifies where the 429-only path saw nothing; 5h→session, 7d→weekly; no-header 403 stays not-a-limit; 429 unchanged); `go test ./internal/agent -run 'Complete403OverageCapWaitsForReset'` (a 403 with a ~1s reset waits and recovers on retry, does NOT die in the transient arm) + the org-body-no-header case still fails over; `go test ./internal/gateway -run 'UsageCapIsNotAWall|RealWallStillReLogins'` (a cap gets the recovers-at-reset message, a real wall keeps its message); `go test ./internal/fleetaccounts -run 'AuthBlock'` and `python3 -m pytest tools/account_probe_test.py` (org-disable text + a reset ⇒ `usage`/`LIMIT`, not `access`/`ACCESS`). (fak agent)
 - [SHIPPED] `sessionimage`: a portable, versioned, **model-agnostic** SESSION image — composes the drive (`session.json`), the recall core image (`manifest.json`+`cas.json`+`index.json`), and the trajectory (`trajectory.jsonl`) into one bundle with a sha256 integrity index over every part, plus a deterministic single-file `.faksession` tar (`Pack`/`Unpack`, stdlib `archive/tar`, zero deps) for offload/archive across hosts, users, instances, and VMs. `Rehydrate` re-attaches the drive into a fresh table, reloads the gate-armed recall `Session` + ctxplan index, and logs a model/host `Migration`. Model-agnostic by design: it carries logical content only — no KV cache, no token ids — so a restore re-prefills on a DIFFERENT model. Witness: `go test ./internal/sessionimage` (`TestDumpLoadRoundTrip`, `TestTerminalSessionResumesStopped`, `TestPackIsDeterministic`, `TestRehydrateInPlaceRecordsNoMigration`, `TestDriveOnlyImage`).
 - [SHIPPED] The recall moat survives the OFFLOAD boundary: a page the gate sealed stays SEALED after the image is packed to a `.faksession`, shipped, unpacked into a fresh directory, and reloaded under a different model — and a witness `Clear()` still does not launder it (the content re-screen holds); a flipped byte fails the integrity check closed; a path-traversal tar entry is refused. Witness: `go test ./internal/sessionimage` (`TestPackUnpackPreservesQuarantineAcrossBoundary`, `TestLoadDirFailsClosedOnTamper`, `TestUnpackRejectsPathTraversal`).
 - [SHIPPED] `snapshot`: a UNIFORM dump/restore seam over any primitive on the loops ladder (turn → tool → session → fleet → rsi) — a sha256-integrity envelope (`Marshal`/`Parse`/`Into` over any JSON body, digest over the canonical-compacted bytes so a pretty-print round-trip stays verified and a content change fails closed) + a ladder registry (kind/level/desc) + typed codecs for the TURN level (a trajectory's `Turn` rows) and the FLEET level (a `session.Table`'s whole-fleet drive snapshot, restored verbatim via `session.Table.Restore`). The SESSION level has the richer multi-part `sessionimage`; rsi/tool ride the generic seam directly (`Marshal` over any body). Witness: `go test ./internal/snapshot` (`TestGenericRoundTripAnyBody`, `TestParseFailsClosedOnTamper`, `TestFleetRoundTripViaRestore`, `TestTraceRoundTrip`, `TestRegistryLadder`).
@@ -29289,7 +29376,8 @@ Honest ceiling, surfaced not hidden: the *detector* these drivers feed is ~100% 
 - [SHIPPED] Fail-closed engine-residency floor (`internal/engine` `residencyGate`): the PDP that denies a tenant-scoped / sensitivity-tagged payload routed to a REMOTE engine now classifies remoteness fail-closed — only a route it can PROVE is on-box (`inkernel` / `local` / `on-device` / `mock` / `cassette`, by family prefix) is local; EVERY other route is remote. This closes the integration hole the old allow-list-of-remote-names form left open: an ensemble member or upstream bound to a LiteLLM / OpenRouter / Portkey / Together / Groq aggregator, a direct provider wire, or a user's own gateway ("their thing") matched none of the known remote substrings and so a sensitive payload sailed past the floor; now an engine the kernel cannot prove local is assumed off-box and denied. The classification stays consistent with the account-switcher's structural engine route (`modelroute.IsRemoteRoute` mirrors the same on-box family list, pinned cross-package). This is the security half of "first-class router / LiteLLM support" — see [`docs/integrations/litellm.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/litellm.md), [`docs/integrations/routers.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/routers.md). Witness: `go test ./internal/engine` (`TestResidencyGate*` — tenant/sensitive→remote deny, on-box families defer under tenant scope, aggregator/custom routes deny).
 - [SHIPPED] LIVE gateway route dispatch executes routing decisions on real registered engines: `--route-manifest` makes the served path write a single-model `Decision`'s `Plan.Primary()` to `abi.ToolCall.Engine` before `Kernel.Submit`, so the residency PDP sees the real route before dispatch; ensemble Plans expand to N independently-adjudicated kernel submits and then fold surviving member outputs with `Combine` in member order. The route live holder hot-swaps manifests atomically. The llm-d integration is pinned as a first-class route target: a gateway route-manifest test drives an admitted tool call through the registered `llm-d` EngineDriver to an OpenAI-compatible llm-d frontend and verifies `engine="llm-d"` result identity. Witness: `go test ./internal/gateway -run "TestRoute(PickSetsEnginePreSubmit|SensitiveRemoteDeniedByResidency|DispatchesToRoutedEngine|ManifestDispatchesToLLMDEngine|LiveHotSwapAffectsBuildCall)|TestEnsemble"`; `go test ./internal/engine -run TestResidencyGate`.
 - [SHIPPED] Scout-model classify-first seam (`internal/modelroute`): `Manifest.ScoutRoute` runs an injected `Classifier`, validates its closed-vocabulary `ScoutLabel.Complexity`, additively folds complexity/labels into the original `Subject` without mutating caller state, re-routes the enriched subject, and records `DecisionRecord.ScoutCalls` so the extra scout call is priced/observable instead of hidden. This is the live classification seam with a bound classifier; the native in-kernel micro-scout binding is a separate follow-on. Witness: `go test ./internal/modelroute -run "TestScout|TestReviewDiffWithScout"`.
-- [STUB] Product/live model-routing gaps beyond the shipped served gateway path remain: direct `fak agent` does not yet expose the same operator `--route-manifest` entry point, model-account rosters do not yet drive live account-resolved gateway dispatch, the scout classifier is not yet bound to the in-kernel micro-model, and telemetry-to-learned-routing remains a follow-on. The offline `fak route` / `fak routebench` surfaces are still model-free policy oracles, not live quality/latency measurements.
+- [SHIPPED] Standalone `fak agent --route-manifest` installs the same model-routing policy on the A/B agent loop's fak arm: the command loads and validates a route manifest at startup, fails loudly with the flag name on malformed manifests, and passes `agent.WithRouteManifest` into `agent.Run` so each fak-arm tool call can bind the selected single-model route before kernel submit while the baseline arm stays the naive comparison. Witness: `go test ./cmd/fak -run TestLoadAgentRouteOptions`; `go test ./internal/agent -run "Test(RouteToolEngine|ExecViaKernel_Routes|RunRouteManifest)"`.
+- [STUB] Product/live model-routing gaps beyond the shipped served gateway and standalone-agent route-manifest paths remain: model-account rosters do not yet drive live account-resolved gateway dispatch, the scout classifier is not yet bound to the in-kernel micro-model, and telemetry-to-learned-routing remains a follow-on. The offline `fak route` / `fak routebench` surfaces are still model-free policy oracles, not live quality/latency measurements.
 
 ## Turn-tax benchmark (`fak turntax`)
 
@@ -30208,8 +30296,10 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 - [Verify, don't trust: what DOS actually checks](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/verify-dont-trust.md) — the DOS primer for a newcomer, the most transferable idea in `fak` (it works with zero fak internals): an agent narrates its own success, so the kernel re-checks the three things it will not take on the worker's word — a **done-claim** against git (`dos verify` / `dos commit-audit`, the subject is forgeable but the diff is not), a **refusal** against a closed reason vocabulary (`dos arbitrate` refuses with a token a peer can act on), and a **recalled memory** re-verified at read time (`dos memory recall`, `RECALL_FRESH`/`STALE`/`UNVERIFIABLE`). The sentence to keep: **the model proposes, the kernel disposes — and the kernel checks**; honest fence: it grades a claim against its own evidence, not code correctness. Sits under [the tool call is a syscall](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/tool-call-is-a-syscall.md).
 - [The addressable KV cache in 5 minutes](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/addressable-kv-cache-in-5-min.md) — the gentle on-ramp to the addressable cache for a first-time reader: one analogy (a shared notebook you can only append to vs one you can reach into and tear a page out of the middle), the KV-cache / append-only / addressable terms defined as they appear, and the one property that matters — evict a poisoned span and the cache stays bit-for-bit identical to one that never saw it (`max|Δ| = 0`). No code; honest fence (witnessed on a synthetic model, live loop not yet driving it, ~4.1× quoted as measured). The door to the dense [addressable KV cache](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/addressable-kv-cache.md) internals page.
 - [Why default-deny beats a classifier](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/default-deny-vs-classifier.md) — the prompt-injection explainer for the most common objection: a classifier has to recognize the attack and can fail open, while a default-deny capability floor and result quarantine stop the same injected prompt by structure. Walks one attack through both stacks, names the OWASP Agentic Top-10 / MCP Top-10 risks covered, and keeps the 5/5 live run framed as a small demonstration, not a benchmark sweep.
+- [What fak is not — the honest boundary](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/what-fak-is-not.md) — the disarming page for the skeptic: `fak` is **not** a serving engine and does not beat vLLM/SGLang/llama.cpp on raw tokens/sec — as a gateway fronting SGLang it *trails* raw SGLang 0.75× at peak (the ~3%-at-saturation adjudication tax), because its field is governance at the agent boundary, not throughput. States the 0/29-novel prior-art audit plainly and reframes it as the point (the contribution is the *assembly*, not an invented primitive), and names the detector as best-effort/evadable while the default-deny capability floor is the load-bearing guarantee. Honest fence: witnessed numbers only (~4.1× vs the *tuned* baseline, never the naive 60×; WebVoyager 8.8–9.7× labeled simulated). The volunteered-limits companion to [why default-deny beats a classifier](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/default-deny-vs-classifier.md).
 - [Long-session economics](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/long-session-economics.md) — the cost explainer for the largest audience (anyone paying for a long agent run): why a growing transcript re-sends everything each turn, why the provider's prompt-cache discount survives *only* while the prefix is byte-identical, and how `fak` keeps it alive by splicing on original bytes (a `memcpy`, never a re-marshal) rather than rewriting the prompt to shrink it. Carries a worked cost example and the honest fence — `fak` guarantees the byte-identical prefix and *relays the provider's own reuse number*, it never claims a saving it can't force. The economics angle beside the practical flag ([long sessions: keep the cache hit](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/long-sessions-keep-the-cache-hit.md)) and the theory ([addressable KV cache](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/addressable-kv-cache.md)).
 - [Memory engineering](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/memory-engineering.md) — the definitional page for the discipline after prompt and context engineering: what an agent remembers (write-time admission), where memory lives (the four layers), how recall is verified (integrity + verified recall), and when a memory is provably forgotten (bit-exact eviction) — each decided by an inspectable mechanism, never the model's judgment. The sentence to keep: **if it can't answer "why is this in memory, is it still true, can you prove it's gone" — that's memory features, not memory engineering**. Depth in [context-is-not-memory](https://github.com/anthony-chaudhary/fak/blob/main/docs/CONTEXT-IS-NOT-MEMORY.md), [memory-layers-explainer](https://github.com/anthony-chaudhary/fak/blob/main/docs/MEMORY-LAYERS-EXPLAINER.md), and [memory-ecc-integrity](https://github.com/anthony-chaudhary/fak/blob/main/docs/MEMORY-ECC-INTEGRITY.md).
+- [Engineering is building loops — the worldview page](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/engineering-is-building-loops.md) — the manifesto for the whole substrate: modern engineering is increasingly the act of building agentic loops (observe→orient→decide→act→verify), and `fak` is the in-process kernel they run on, **safe and fast for the same reason** — the gate that refuses a bad action is the one that lets a known-good action reuse work it already trusts. Traces the *same* observe/decide/act/verify shape at five nested scales (tool-call syscall → turn → session → fleet → RSI) and the orthogonal invariant recurring at every ring: **a decision no participant can move by narrating a number** (provable refusal → `Clear()`+rescreen quarantine → sealed session pages → per-SHA `dos commit-audit` → the non-forgeable keep-bit `shipgate.Evaluate`). Honest fences kept intact: 0/29 primitives novel (the contribution is the *assembly*), the detector is evadable while the default-deny capability floor is load-bearing, the ctxplan live loop is a guarded seam off by default, and the async / autonomous-meta-RSI-apply reaches are named unshipped. Closes on the quotable line — *engineering is building loops; `fak` is the floor they run on*. The scale axis beside the deployment axis ([cross-platform spine](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/cross-platform-spine.md)) and the by-part decomposition ([what is an agent?](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/EXPLAINER-what-is-an-agent-2026-06-24.md)).
 - [The cross-platform spine (IoT to hyperscaler)](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/cross-platform-spine.md) — why the same pure-Go kernel is the invariant spine across the whole deployment spectrum (IoT, edge, laptop, hyperscaler), the way Linux is one kernel under a phone and a datacenter: the hardware specifics change, the agentic workload shape and the kernel's invariants do not. The deployment-substrate axis, alongside the scale axis ([loops](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/engineering-is-building-loops.md)) and the hardware-depth axis ([HAL](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/hardware-portability.md)).
 - [Neo-silicon onboarding](https://github.com/anthony-chaudhary/fak/blob/main/docs/vendor/neo-silicon-onboarding.md) — vendor-facing path from a stable `compute.Backend` name through the compiling MatMul+Attention example and the planned backend conformance kit.
 - [Data residency & compliance](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/data-residency-and-compliance.md) — how the self-host-first, fail-closed, default-deny, audit-logged boundary maps to India's DPDP Act and China's PIPL/DSL/CSL: an enforcement control surface you run on infrastructure you control (not legal advice, not a certification). The residency lens on the same boundary; go-to-market context in the [emerging-market adoption note](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-EMERGING-MARKET-ADOPTION-2026-06-30.md).
