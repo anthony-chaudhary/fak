@@ -143,16 +143,45 @@ var registry = []Super{
 	{
 		Name:  "improve-loops",
 		Title: "improve the agentic + background loops",
-		About: "walk the loop-index scorecard + the live loop ledgers, then enter the worst-first loop that is in debt or has gone dark",
+		About: "walk the loop-index scorecard + goal-scoped issue dispatch + the live loop ledgers, then enter the worst-first loop that is in debt or has gone dark",
 		Floor: 0,
 		Members: []Member{
 			{Kind: KindScorecard, Ref: "loopindex", Why: "the agentic-coding loop-index: orient->plan->act->verify->ship->learn stages not yet witnessed at floor"},
 			{Kind: KindScorecard, Ref: "dogfood", Why: "dogfood-loop debt: are we running our own loops, and does packet friction reach the tracker before an outsider does?", Enter: "go run ./cmd/fak dogfood-score"},
 			{Kind: KindLoop, Ref: "loopmgr:recent-feature-dogfood", Why: "the recent-feature packet loop that probes fak like an outsider — dark means friction is found by outsiders, not by the loop", Enter: "make dogfood-recent && go run ./cmd/fak dogfood-issues --live"},
-			{Kind: KindLoop, Ref: "dispatch", Why: "the issue-resolve dispatch loop — dark means throughput stalled"},
+			{Kind: KindSuperloop, Ref: "drain-issues", Why: "issue dispatch has multiple operator goals now; descend to see throughput and high-priority loops separately"},
 			{Kind: KindLoop, Ref: "cadence", Why: "the regular-cadence report loop — dark means the pacing pulse stopped"},
 			{Kind: KindLoop, Ref: "dojo", Why: "the dojo gym loop — dark means calibration stopped"},
 			{Kind: KindGarden, Ref: "garden", Why: "the gardening bundle surfaces orphaned/unwitnessed runs across loops"},
+		},
+	},
+	{
+		Name:  "drain-issues",
+		Title: "drain the issue backlog by operator goal",
+		About: "walk aggregate dispatch progress plus the throughput and high-priority dispatch intents, then revive the goal whose loop is darkest",
+		Floor: 0,
+		Members: []Member{
+			{Kind: KindLoop, Ref: "dispatch", Why: "legacy aggregate issue-resolve progress ledger; keeps the historical backlog-drain signal visible"},
+			{Kind: KindSuperloop, Ref: "drain-throughput", Why: "the throughput issue-drain intent, with its own ledger and enter command"},
+			{Kind: KindSuperloop, Ref: "drain-high-priority", Why: "the high-priority issue-drain intent, with its own ledger and enter command"},
+		},
+	},
+	{
+		Name:  "drain-throughput",
+		Title: "drain open issues for throughput",
+		About: "walk the named throughput dispatch loop ledger and revive the step-budget lane-pressure picker when it goes dark or stale",
+		Floor: 0,
+		Members: []Member{
+			{Kind: KindLoop, Ref: "loopmgr:issue-resolve-dispatch/claude/throughput", Why: "the named throughput dispatch goal: move open tasks by lane pressure while preserving its own ledger identity", Enter: "go run ./cmd/fak dispatch tick --goal throughput"},
+		},
+	},
+	{
+		Name:  "drain-high-priority",
+		Title: "drain high-priority issues",
+		About: "walk the named high-priority dispatch loop ledger and revive the priority-label picker when it goes dark or stale",
+		Floor: 0,
+		Members: []Member{
+			{Kind: KindLoop, Ref: "loopmgr:issue-resolve-dispatch/claude/high-priority", Why: "the named high-priority dispatch goal: favor the strongest priority label while sharing the same lane/tree lease fabric", Enter: "go run ./cmd/fak dispatch tick --goal high-priority"},
 		},
 	},
 	{
@@ -539,6 +568,12 @@ func actionFor(st MemberStatus) string {
 		}
 		return fmt.Sprintf("enter the %s scorecard's reduce loop (its skill) to retire debt", st.Member.Ref)
 	case KindLoop:
+		if e := strings.TrimSpace(st.Member.Enter); e != "" {
+			if st.Dark {
+				return fmt.Sprintf("revive via `%s` — %s has gone dark", e, st.Member.Ref)
+			}
+			return fmt.Sprintf("drive via `%s`", e)
+		}
 		if st.Dark {
 			return fmt.Sprintf("revive the %s loop — it has gone dark", st.Member.Ref)
 		}

@@ -81,6 +81,78 @@ func TestManageBenchmarksBridgesToBenchLoop(t *testing.T) {
 	}
 }
 
+func TestDrainIssuesTracksGoalScopedDispatchLoops(t *testing.T) {
+	s, ok := Lookup("drain-issues")
+	if !ok {
+		t.Fatal("drain-issues not registered")
+	}
+	children := map[string]Member{}
+	aggregate := false
+	for _, m := range s.Members {
+		switch {
+		case m.Kind == KindLoop && m.Ref == "dispatch":
+			aggregate = true
+		case m.Kind == KindSuperloop && (m.Ref == "drain-throughput" || m.Ref == "drain-high-priority"):
+			children[m.Ref] = m
+		default:
+			t.Errorf("drain-issues member %q must be aggregate dispatch or a goal superloop, got %q", m.Ref, m.Kind)
+		}
+	}
+	if !aggregate {
+		t.Fatal("drain-issues must keep the legacy aggregate dispatch member visible")
+	}
+	for _, ref := range []string{"drain-throughput", "drain-high-priority"} {
+		if _, ok := children[ref]; !ok {
+			t.Fatalf("drain-issues missing goal superloop %q", ref)
+		}
+	}
+
+	goalLoops := map[string]struct {
+		ref  string
+		goal string
+	}{
+		"drain-throughput":    {ref: "loopmgr:issue-resolve-dispatch/claude/throughput", goal: "throughput"},
+		"drain-high-priority": {ref: "loopmgr:issue-resolve-dispatch/claude/high-priority", goal: "high-priority"},
+	}
+	for name, want := range goalLoops {
+		goalLoop, ok := Lookup(name)
+		if !ok {
+			t.Fatalf("%s not registered", name)
+		}
+		if v := Classify(FactsFor(goalLoop)); !v.IsSuper {
+			t.Fatalf("%s must classify as a first-class superloop: %s", name, v.Reason)
+		}
+		if len(goalLoop.Members) != 1 {
+			t.Fatalf("%s must walk exactly its goal ledger, got %d members", name, len(goalLoop.Members))
+		}
+		m := goalLoop.Members[0]
+		if m.Kind != KindLoop || m.Ref != want.ref {
+			t.Fatalf("%s member = %+v, want loop %q", name, m, want.ref)
+		}
+		if !strings.Contains(m.Enter, "--goal "+want.goal) {
+			t.Fatalf("%s enter hint = %q, want --goal %s", name, m.Enter, want.goal)
+		}
+		rep := Walk(goalLoop, []MemberStatus{{Member: m, Measured: true, Debt: 1}})
+		if len(rep.Worklist) != 1 || !strings.Contains(rep.Worklist[0].Action, m.Enter) {
+			t.Fatalf("%s must produce a directly runnable action for its goal loop, got %+v", name, rep.Worklist)
+		}
+	}
+
+	loops, ok := Lookup("improve-loops")
+	if !ok {
+		t.Fatal("improve-loops not registered")
+	}
+	found := false
+	for _, m := range loops.Members {
+		if m.Kind == KindSuperloop && m.Ref == "drain-issues" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("improve-loops must descend into drain-issues")
+	}
+}
+
 // TestClassifySuperVsNormal is the differentiation witness: a registered super loop
 // satisfies all five properties; a normal leaf loop satisfies none of the structural
 // ones and is classified NOT super, with the reason naming the first failing rung.
@@ -531,6 +603,35 @@ func TestWalkActionUsesEnterHint(t *testing.T) {
 	}
 	if strings.Contains(appealAction, "/appeal-score") || !strings.Contains(appealAction, "measure") {
 		t.Errorf("unmeasured member must keep the measure action, got %q", appealAction)
+	}
+}
+
+func TestWalkLoopActionUsesEnterHint(t *testing.T) {
+	s := Super{Name: "t", Title: "t", Floor: 0, Members: []Member{
+		{Kind: KindLoop, Ref: "loopmgr:issue-resolve-dispatch/claude/high-priority", Enter: "fak dispatch tick --goal high-priority"},
+	}}
+	rep := Walk(s, []MemberStatus{{
+		Member:   s.Members[0],
+		Measured: true,
+		Debt:     1,
+	}})
+	if len(rep.Worklist) != 1 {
+		t.Fatalf("worklist len = %d, want 1", len(rep.Worklist))
+	}
+	if action := rep.Worklist[0].Action; !strings.Contains(action, "fak dispatch tick --goal high-priority") {
+		t.Fatalf("loop action should carry Enter hint, got %q", action)
+	}
+
+	rep = Walk(s, []MemberStatus{{
+		Member:   s.Members[0],
+		Measured: true,
+		Dark:     true,
+	}})
+	if len(rep.Worklist) != 1 {
+		t.Fatalf("dark worklist len = %d, want 1", len(rep.Worklist))
+	}
+	if action := rep.Worklist[0].Action; !strings.Contains(action, "revive via") || !strings.Contains(action, "fak dispatch tick --goal high-priority") {
+		t.Fatalf("dark loop action should be a concrete revive hint, got %q", action)
 	}
 }
 
