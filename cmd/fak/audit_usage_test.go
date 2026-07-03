@@ -277,6 +277,20 @@ func TestMergeUsageInputs_MultiRootOrder(t *testing.T) {
 	if cvEmpty.Present || cvEmpty.Path != "" || len(cvEmpty.Rows) != 0 {
 		t.Errorf("cache: want absent over no roots, got %+v", cvEmpty)
 	}
+
+	called := false
+	present, path, rows := collectRootLedgerRows[int](nil,
+		func(string) string {
+			called = true
+			return ""
+		},
+		func(string) []int {
+			called = true
+			return []int{1}
+		})
+	if called || present || path != "" || rows != nil {
+		t.Errorf("helper: empty roots should not call callbacks or return data, called=%v present=%v path=%q rows=%v", called, present, path, rows)
+	}
 }
 
 func mustWriteJSONLRow(t *testing.T, path string, row map[string]any) {
