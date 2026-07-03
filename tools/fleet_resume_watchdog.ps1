@@ -456,15 +456,6 @@ foreach ($p in @($plan)) {
     $closedSids[$sid] = $true
     continue
   }
-  if ($liveResume.ContainsKey($sid)) {
-    Note "  SKIP $sid8 -- already live as pid $($liveResume[$sid]) (no duplicate resume)"
-    if ($Live) {
-      $rec = @{ ts = ([DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')); session = $sid; account = $p.account; phase = 'skipped'; cause = 'already_live'; live_pid = $liveResume[$sid] } | ConvertTo-Json -Compress
-      Add-Content -Path $ledgerPath -Value $rec
-    }
-    continue
-  }
-  $attempts = [int]$launchCount[$sid]
   $last = [int64]$lastLaunch[$sid]
   if ($attempts -gt 0) {
     $progress = TranscriptProgress $sid $last
@@ -481,6 +472,14 @@ foreach ($p in @($plan)) {
       $closedSids[$sid] = $true
       continue
     }
+  }
+  if ($liveResume.ContainsKey($sid)) {
+    Note "  SKIP $sid8 -- already live as pid $($liveResume[$sid]) (no duplicate resume)"
+    if ($Live) {
+      $rec = @{ ts = ([DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')); session = $sid; account = $p.account; phase = 'skipped'; cause = 'already_live'; live_pid = $liveResume[$sid] } | ConvertTo-Json -Compress
+      Add-Content -Path $ledgerPath -Value $rec
+    }
+    continue
   }
   $resumeCfg = if ($p.resume_config_dir) { $p.resume_config_dir } else { $p.config_dir }
   # Defense-in-depth like the worker-account re-check above: the planner has offered a
