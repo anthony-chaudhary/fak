@@ -4,9 +4,11 @@
 
 <!-- readme-verified: 2026-07-03 vs VERSION 0.37.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. 2026-07-03: release pin refreshed for v0.37.0. 2026-07-01: front page halved; overflow: docs/README-legacy.md. Same day: hero video + gallery/video links re-surfaced; examples generalized to the hardware/harness sweep (HARDWARE-MATRIX + supported/); guided tutorial surfaced (Pick-your-path + docs map). -->
 
-fak in one line: fak is a fused agent kernel. One Go binary sits in front of an agent's
-tool calls. It checks each call. It reuses the stable work in long sessions. The same agent
-loop comes out safer, cheaper, and faster.
+<!-- lead source: docs/adoption/pitch-ladder.md (rung 1). Edit the ladder first; keep this lead consistent with its one-sentence pitch. -->
+fak in one line: fak treats every agent tool call like a syscall — the model proposes, the
+kernel disposes. One static Go binary sits in front of an agent's tool calls. It checks
+each call. It reuses the stable work in long sessions. The same agent loop comes out
+safer, cheaper, and faster.
 
 Use one binary with the agent you already run. It works with Claude Code, Codex, Cursor,
 and OpenAI / Anthropic / MCP clients. `fak guard -- claude` wraps your normal agent in one
