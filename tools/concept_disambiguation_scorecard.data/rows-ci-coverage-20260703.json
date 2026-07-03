@@ -1,0 +1,42 @@
+{
+  "rows": [
+    {
+      "id": "x-ci-coverage-witness-proof-progresswitnessedat",
+      "canonical": "ProgressWitnessedAt (resume watchdog recovery timestamp)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "ProgressWitnessedAt is the resume watchdog MTTR timestamp proving a resumed session made independent progress after launch, derived from ledger progress, new turns, or a commit witness.",
+      "distinction": "It is the progress-evidence timestamp for watchdog recovery, not the resume launch timestamp ResumedAt and not a generic witness verdict.",
+      "distinct_from": [
+        "x-goal25-witness-proof-witnessclaim",
+        "x-witness-proof-witnessrecord"
+      ],
+      "aliases": [],
+      "grounding": "progresswitnessedat",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-render-materialize-renderlivemonitoroutputreason",
+      "canonical": "renderLiveMonitorOutputReason (repo-guard live Monitor refusal renderer)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "renderLiveMonitorOutputReason renders the repo-guard refusal text for attempts to read a live Monitor output path before the stream has materialized as a ready file.",
+      "distinction": "It renders a live-monitor read refusal message, not a general renderReason helper and not the monitor task-id classifier.",
+      "distinct_from": [
+        "x-render-materialize-renderreason",
+        "x-ci-coverage-render-materialize-renderers"
+      ],
+      "aliases": [],
+      "grounding": "renderlivemonitoroutputreason",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
