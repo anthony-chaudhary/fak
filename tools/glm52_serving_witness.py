@@ -80,16 +80,16 @@ def json_get(url: str, timeout_s: float) -> tuple[int, dict[str, Any] | None, st
 def json_post(url: str, payload: dict[str, Any], timeout_s: float) -> tuple[int, dict[str, Any] | None, str, float]:
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-    started = time.time()
+    started = time.perf_counter()
     try:
         with urllib.request.urlopen(req, timeout=timeout_s) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
-            return int(resp.status), parse_json(raw), raw[:2000], round(time.time() - started, 3)
+            return int(resp.status), parse_json(raw), raw[:2000], round(time.perf_counter() - started, 6)
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace")
-        return int(exc.code), parse_json(raw), raw[:2000], round(time.time() - started, 3)
+        return int(exc.code), parse_json(raw), raw[:2000], round(time.perf_counter() - started, 6)
     except OSError as exc:
-        return 0, None, str(exc), round(time.time() - started, 3)
+        return 0, None, str(exc), round(time.perf_counter() - started, 6)
 
 
 def number(value: Any) -> float | None:

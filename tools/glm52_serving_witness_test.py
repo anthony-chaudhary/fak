@@ -11,6 +11,7 @@ from contextlib import redirect_stdout
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -116,6 +117,25 @@ class Glm52ServingWitnessTest(unittest.TestCase):
         _, origin, info = witness.start_gateway(args, {})
         self.assertEqual(origin, "http://node:8000")
         self.assertEqual(info["url"], "http://node:8000")
+
+    def test_json_post_preserves_sub_millisecond_duration(self) -> None:
+        # Regression: the vLLM tax witness reuses json_post duration_s for the
+        # raw leg. Millisecond rounding can quantize a loopback sample to 0.0 on
+        # fast CI, making latency_tax unmeasurable even though the leg passed.
+        server = ThreadingHTTPServer(("127.0.0.1", 0), FakeOpenAIHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        url = f"http://127.0.0.1:{server.server_port}/v1/chat/completions"
+        payload = {"messages": [{"role": "user", "content": "hi"}]}
+
+        with mock.patch.object(witness.time, "perf_counter", side_effect=[100.0, 100.0004]):
+            status, data, _, duration = witness.json_post(url, payload, timeout_s=2.0)
+
+        self.assertEqual(status, 200)
+        self.assertIsNotNone(data)
+        self.assertEqual(duration, 0.0004)
 
     def test_help_explains_base_url_vs_upstream_base_url_flag_naming(self) -> None:
         # #918: a reader who met --upstream-base-url in a ship/run loop's parent
