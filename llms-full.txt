@@ -3583,6 +3583,12 @@ Hand-write the SyscallResponse JSON a client would receive (a) when ctxmmu quara
 
 **Read:** [`docs/fak/server-troubleshooting.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-troubleshooting.md), [`docs/cli-reference.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/cli-reference.md)
 
+**Operator verb map:** when the troubleshooting path points at the wider CLI, use
+`fak usage` for gateway/provider usage ledgers, `fak issue` for issue queue inspection,
+`fak workflow-audit` for workflow-policy drift, `fak fleetcap` for fleet capacity,
+`fak frontierswe` for FrontierSWE cache/score witnesses, `fak fused` for fused-turn
+diagnostics, and `fak ablate-arm` when you need an explicit ablation arm in a comparison.
+
 **Lab:**
 ```bash
 fak serve --gguf models/qwen.gguf --policy-check   # validate model+policy load without binding a listener
