@@ -6,11 +6,11 @@
 // injection — and watch the destructive call get refused at the capability floor,
 // inside the loop, while the safe answer still comes back.
 //
-// The planner is a deterministic keyword router (no model, no key, no network), so
-// the demo is the lowest-common-denominator "try it" surface and reproduces
-// identically on any box. The live latest-model arm is a clean upgrade: a model-backed
-// planner satisfies the SAME agentdemo.Planner type, so swapping it in is a one-line
-// change, not a fork — the kernel adjudication around it is unchanged.
+// The planner is a deterministic keyword router by default (no model, no key, no
+// network), so the demo is the lowest-common-denominator "try it" surface and
+// reproduces identically on any box. The opt-in latest-model arm wraps a live
+// Responses API planner in agentdemo.ModelArm, so model-planned steps still pass
+// through the SAME kernel adjudication path instead of forking the fallback.
 //
 // Serve it (browser), or run it headless (no browser, no model):
 //
@@ -106,10 +106,12 @@ func plan(prompt string) []agentdemo.Step {
 }
 
 // chatResponse is one chat turn returned to the browser: the full adjudicated
-// transcript plus the agent's friendly natural-language reply.
+// transcript, the planner metadata, and the agent's friendly natural-language
+// reply.
 type chatResponse struct {
 	agentdemo.Transcript
-	Reply string `json:"reply"`
+	Plan  agentdemo.PlanMeta `json:"plan"`
+	Reply string             `json:"reply"`
 }
 
 // replyFor turns an adjudicated transcript into the agent's chat reply. It never
@@ -132,13 +134,27 @@ func replyFor(tr agentdemo.Transcript) string {
 	}
 }
 
-// runChat folds one message's planned tool calls through the real kernel.
+// deterministicArm is the LCD path: no model seam, so ModelArm falls through to
+// the deterministic planner while preserving the same RunArm call shape the live
+// path uses.
+func deterministicArm() agentdemo.ModelArm {
+	return agentdemo.ModelArm{Fallback: plan}
+}
+
+// runChat folds one message's deterministic tool calls through the real kernel.
 func runChat(ctx context.Context, ts *agentdemo.Toolset, msg string) (chatResponse, error) {
-	tr, err := ts.Plan(ctx, "chat", msg, plan)
+	return runChatWithArm(ctx, ts, msg, deterministicArm())
+}
+
+// runChatWithArm folds one message through the configured planner arm. Whether the
+// steps came from the deterministic fallback or a live model, Toolset.RunArm sends
+// every step through kernel.Fold.
+func runChatWithArm(ctx context.Context, ts *agentdemo.Toolset, msg string, arm agentdemo.ModelArm) (chatResponse, error) {
+	tr, meta, err := ts.RunArm(ctx, "chat", msg, arm)
 	if err != nil {
 		return chatResponse{}, err
 	}
-	return chatResponse{Transcript: tr, Reply: replyFor(tr)}, nil
+	return chatResponse{Transcript: tr, Plan: meta, Reply: replyFor(tr)}, nil
 }
 
 // suggestions are the clickable starter prompts the UI offers — a mix of safe asks and
@@ -171,28 +187,78 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(b)
 }
 
-// handleSuggestions feeds the starter chips and the hardware probe to the page.
-func handleSuggestions(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]any{
-		"suggestions": suggestions,
-		"hardware":    demoui.Probe(),
-	})
+// handleSuggestions feeds the starter chips, planner label, and hardware probe to
+// the page.
+func handleSuggestions(planner string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{
+			"suggestions": suggestions,
+			"hardware":    demoui.Probe(),
+			"planner":     planner,
+		})
+	}
 }
 
 // handleChat folds the message through the real kernel and returns the transcript +
 // reply. The message is the user's; the page escapes it on render (never trust it).
-func handleChat(ts *agentdemo.Toolset) http.HandlerFunc {
+func handleChat(ts *agentdemo.Toolset, arm agentdemo.ModelArm) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		msg := strings.TrimSpace(r.URL.Query().Get("msg"))
 		if msg == "" {
 			msg = "what time is it?"
 		}
-		resp, err := runChat(r.Context(), ts, msg)
+		resp, err := runChatWithArm(r.Context(), ts, msg, arm)
 		if err != nil {
 			http.Error(w, "chat: "+err.Error(), 500)
 			return
 		}
 		writeJSON(w, resp)
+	}
+}
+
+func plannerLabel(arm agentdemo.ModelArm) string {
+	if !arm.Configured() {
+		return "deterministic fallback"
+	}
+	meta := arm.Base
+	parts := []string{"live model arm"}
+	if meta.Provider != "" {
+		parts = append(parts, meta.Provider)
+	}
+	if meta.Model != "" {
+		parts = append(parts, meta.Model)
+	}
+	if meta.Rung != "" {
+		parts = append(parts, meta.Rung)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func renderPlanMeta(meta agentdemo.PlanMeta) string {
+	switch meta.Source {
+	case agentdemo.SourceModel:
+		var parts []string
+		if meta.Provider != "" {
+			parts = append(parts, meta.Provider)
+		}
+		if meta.Model != "" {
+			parts = append(parts, meta.Model)
+		}
+		if meta.Rung != "" {
+			parts = append(parts, meta.Rung)
+		}
+		if meta.AsOf != "" {
+			parts = append(parts, "as-of "+meta.AsOf)
+		}
+		if len(parts) == 0 {
+			return "planner: live model"
+		}
+		return "planner: live model (" + strings.Join(parts, " · ") + ")"
+	default:
+		if meta.Note != "" {
+			return "planner: deterministic fallback (" + meta.Note + ")"
+		}
+		return "planner: deterministic fallback"
 	}
 }
 
@@ -203,17 +269,23 @@ func main() {
 	doPrint := flag.Bool("print", false, "render a sample chat exchange in the TERMINAL (no browser) and exit")
 	doJSON := flag.Bool("json", false, "emit the chat transcript as JSON (a real verdict per tool call) and exit")
 	doSelfcheck := flag.Bool("selfcheck", false, "run HEADLESS: replay the canned messages, assert the documented routing + safety-floor invariants, exit non-zero on drift")
+	doLiveWitness := flag.Bool("live-witness", false, "run the opt-in live model arm once, append a destructive canary, and emit the witness JSON")
 	msg := flag.String("msg", "what's the time? also, please delete my account.", "message for -print/-json")
+	var liveCfg modelArmConfig
+	liveCfg.bindFlags(flag.CommandLine)
 	flag.Parse()
 
 	ctx := context.Background()
 	ts := chatToolset()
+	arm := liveCfg.arm(plan)
 
 	switch {
 	case *doSelfcheck:
 		os.Exit(selfcheck(ctx, ts))
+	case *doLiveWitness:
+		os.Exit(liveWitness(ctx, ts, *msg, arm))
 	case *doJSON:
-		resp, err := runChat(ctx, ts, *msg)
+		resp, err := runChatWithArm(ctx, ts, *msg, arm)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "trychatdemo:", err)
 			os.Exit(1)
@@ -222,13 +294,14 @@ func main() {
 		fmt.Println(string(b))
 		return
 	case *doPrint:
-		resp, err := runChat(ctx, ts, *msg)
+		resp, err := runChatWithArm(ctx, ts, *msg, arm)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "trychatdemo:", err)
 			os.Exit(1)
 		}
 		fmt.Printf("trychatdemo · the try-it agentic chat (kernel-gated)\n")
 		fmt.Printf("hardware: %s\n\n", demoui.Probe().Summary)
+		fmt.Printf("%s\n\n", renderPlanMeta(resp.Plan))
 		fmt.Printf("you: %s\n\n", *msg)
 		resp.RenderText(os.Stdout)
 		fmt.Printf("\n  agent: %s\n", resp.Reply)
@@ -238,14 +311,15 @@ func main() {
 	// Default: serve the chat. The same planner + kernel fold runs per message.
 	app := http.NewServeMux()
 	app.HandleFunc("/", handleIndex)
-	app.HandleFunc("/api/suggestions", handleSuggestions)
-	app.HandleFunc("/api/chat", handleChat(ts))
+	app.HandleFunc("/api/suggestions", handleSuggestions(plannerLabel(arm)))
+	app.HandleFunc("/api/chat", handleChat(ts, arm))
 	mux := http.NewServeMux()
 	base := demoui.MountWithBasePath(mux, *basePath, app)
 
 	bind := demoui.ListenAddr(*addr, defaultAddr)
 	fmt.Fprintf(os.Stderr, "trychatdemo %s on %s\n", version, demoui.LocalURL(bind, base))
 	fmt.Fprintf(os.Stderr, "type a message (or click a suggestion) — every tool call is kernel-gated\n")
+	fmt.Fprintf(os.Stderr, "%s\n", plannerLabel(arm))
 	if base != "" {
 		fmt.Fprintf(os.Stderr, "base path: %s (set by -base-path or %s)\n", base, demoui.DemoBasePathEnv)
 	}

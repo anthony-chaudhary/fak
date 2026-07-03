@@ -10,6 +10,8 @@ byte-for-byte anywhere Go runs.
 trychatdemo · the try-it agentic chat (kernel-gated)
 hardware: 32 cores · 32 matmul workers · pure-Go Q8 CPU (no GPU backend in this build)
 
+planner: deterministic fallback
+
 you: what's the time? also, please delete my account.
 
 agent loop · chat

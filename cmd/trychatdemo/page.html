@@ -47,15 +47,17 @@
 <div class="wrap">
   <div class="top">
     <h1>fak · try it: an agentic chat</h1>
-    <span class="pill">kernel-gated · no model · no key</span>
+    <span class="pill">kernel-gated</span>
+    <span class="pill" id="plannerPill">planner: deterministic fallback</span>
     <span class="pill" id="hwPill" title="the compute surface this demo runs on">hardware: …</span>
   </div>
   <div class="sub">
     A <b>try-it agentic chat</b>: type a message and a tiny tool-using agent answers — but every tool
     call it makes is adjudicated by the <b>real fak kernel</b> first. Ask for the time or the weather and
     it answers; ask it to <i>delete your account</i> or paste a prompt injection and watch the destructive
-    call get <b>refused at the safety floor</b>, while the safe answer still comes back. The planner is a
-    deterministic keyword router — no model — so this runs anywhere; a latest-model planner is a drop-in upgrade.
+    call get <b>refused at the safety floor</b>, while the safe answer still comes back. The default planner is a
+    deterministic keyword router — no model — so this runs anywhere; an opt-in latest-model arm records the exact
+    provider/model/rung used for that run and still routes every proposed tool call through the same kernel path.
   </div>
 
   <div class="panel">
@@ -71,8 +73,8 @@
     Each tool call is a <b>real verdict from the fak kernel</b> (the same <code>kernel.Fold</code> path
     <code>fak preflight</code> uses), not a scripted reply: the read-only tools are allowed, a destructive
     <code>delete_account</code> is an explicit floor deny, and an off-floor <code>wipe_disk</code> falls to
-    fail-closed <code>DEFAULT_DENY</code>. Self-contained, no model weights. Headless self-check:
-    <code>go run ./cmd/trychatdemo -selfcheck</code>.
+    fail-closed <code>DEFAULT_DENY</code>. The default path is self-contained, with no model weights or API key.
+    Headless self-check: <code>go run ./cmd/trychatdemo -selfcheck</code>.
   </div>
 </div>
 
@@ -130,6 +132,7 @@ async function loadSuggestions(){
   });
   const hw=j.hardware||{};
   $('#hwPill').textContent='hardware: '+(hw.summary||'…');
+  $('#plannerPill').textContent='planner: '+(j.planner||'deterministic fallback');
   if(hw.accelerator){ $('#hwPill').style.borderColor='var(--good)'; $('#hwPill').style.color='var(--good)'; }
   addAgent("Hi! I'm a tiny tool-using agent. Ask me the time, the weather, or the date, or try one of the suggestions — including the two that probe the safety floor.");
 }
