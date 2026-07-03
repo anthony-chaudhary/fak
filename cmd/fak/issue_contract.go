@@ -26,6 +26,8 @@ func runIssue(stdout, stderr io.Writer, argv []string) int {
 		return runIssueContract(stdout, stderr, argv[1:])
 	case "cohort":
 		return runIssueCohort(stdout, stderr, argv[1:])
+	case "fanout":
+		return runIssueFanout(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		issueUsage(stdout)
 		return 0
@@ -1064,6 +1066,8 @@ func issueUsage(w io.Writer) {
   fak issue cohort   --from-plan PLAN.json [--json]
   fak issue cohort   --from-issues ISSUES.json [--json]
                      [--live --dedupe-checked --dedupe-cap N] [--max-wave N]
+  fak issue fanout   --title T --leaf L --spine REF [--parent REF]
+                     [--paths p1,p2] [--areas a1,a2] [--max N] [--json]
 
 The contract command reviews machine-created GitHub issue candidates before a
 producer syncs them. Exit 0 means dispatchable; exit 3 means the candidate is

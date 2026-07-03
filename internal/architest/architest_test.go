@@ -186,6 +186,7 @@ var tier = map[string]int{
 	"taskmgr":          1, // process-local task/step/resource/ETA snapshot fold; stdlib-only, off the hot path.
 	"issuecontract":    1, // pure spine-first GitHub issue candidate contract; stdlib-only, off the hot path.
 	"issuecohort":      1, // pure batch cohort planner: folds many issuecontract candidates into concurrency-safe waves (disjoint-tree), a split-first queue, triage, and duplicate-key groups; imports issuecontract(1)+stdlib, off the hot path.
+	"issuefanout":      1, // pure spine-first fan-out planner: expands one shipped working spine into contract-ready QA/dogfood/productization/observability/integration follow-on candidates; imports issuecontract(1)+stdlib, off the hot path.
 	"stopfailure":      1, // pure StopFailure marker planner/settler over JSON files and transcript existence; stdlib-only, off the hot path.
 	"dogfoodscore":     1, // pure dogfood-loop scorecard over transcripts/markers; imports stopfailure, off the hot path.
 	"conceptusage":     1, // pure concept-usage scorecard: folds git log + .dos journals into a dogfooding score; stdlib-only, off the hot path.
