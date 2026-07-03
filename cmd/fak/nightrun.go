@@ -136,13 +136,7 @@ func setupNightrunCmd(name string, stderr io.Writer, argv []string) (*nightrunFl
 }
 
 func (f *nightrunFlags) root() string {
-	if f.workspace == "" {
-		return repoRoot()
-	}
-	if abs, err := filepath.Abs(f.workspace); err == nil {
-		return abs
-	}
-	return f.workspace
+	return workspaceOrRepoRoot(f.workspace)
 }
 
 func (f *nightrunFlags) overlayPath(root string) string {
@@ -169,16 +163,7 @@ func (f *nightrunFlags) nowOrWall() (time.Time, error) {
 	if f.now == "" {
 		return time.Now().UTC(), nil
 	}
-	if t, err := time.Parse(time.RFC3339, f.now); err == nil {
-		return t.UTC(), nil
-	}
-	if t, err := time.Parse("20060102T150405Z", f.now); err == nil {
-		return t.UTC(), nil
-	}
-	if t, err := time.Parse("2006-01-02", f.now); err == nil {
-		return t.UTC(), nil
-	}
-	return time.Time{}, fmt.Errorf("--now %q is not RFC3339, compact (20060102T150405Z), or YYYY-MM-DD", f.now)
+	return parsePinnedTimeFlag("--now", f.now)
 }
 
 // load builds the capabilities, backlog, ledger, and now — the shared prelude of

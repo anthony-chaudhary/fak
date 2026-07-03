@@ -69,6 +69,48 @@ func TestBenchLoopWalk(t *testing.T) {
 	}
 }
 
+func TestWorkspaceOrRepoRoot(t *testing.T) {
+	if got, want := workspaceOrRepoRoot(""), repoRoot(); got != want {
+		t.Fatalf("empty workspace: got %q, want repo root %q", got, want)
+	}
+	abs := t.TempDir()
+	if got := workspaceOrRepoRoot(abs); got != abs {
+		t.Fatalf("absolute workspace: got %q, want %q", got, abs)
+	}
+	rel := filepath.Join("some", "rel")
+	got := workspaceOrRepoRoot(rel)
+	if !filepath.IsAbs(got) {
+		t.Fatalf("relative workspace not absolutized: %q", got)
+	}
+	if !strings.HasSuffix(got, rel) {
+		t.Fatalf("absolutized workspace %q lost the relative tail %q", got, rel)
+	}
+}
+
+func TestParsePinnedTime(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want string
+	}{
+		{"2026-06-30T05:00:00+02:00", "2026-06-30T03:00:00Z"}, // RFC3339, normalized to UTC
+		{"20260630T030000Z", "2026-06-30T03:00:00Z"},          // compact
+		{"2026-06-30", "2026-06-30T00:00:00Z"},                // date-only
+	} {
+		got, err := parsePinnedTimeFlag("--now", tc.in)
+		if err != nil {
+			t.Fatalf("parsePinnedTimeFlag(%q): %v", tc.in, err)
+		}
+		if got.Format("2006-01-02T15:04:05Z07:00") != tc.want {
+			t.Fatalf("parsePinnedTimeFlag(%q) = %s, want %s", tc.in, got, tc.want)
+		}
+	}
+	if _, err := parsePinnedTimeFlag("--now", "yesterday"); err == nil {
+		t.Fatal("bad stamp: want error, got nil")
+	} else if msg := err.Error(); !strings.Contains(msg, "--now") || !strings.Contains(msg, "YYYY-MM-DD") {
+		t.Fatalf("error message lost flag name or format hint: %s", msg)
+	}
+}
+
 func writeBenchLoopJSON(t *testing.T, path string, v any) {
 	t.Helper()
 	raw, err := json.MarshalIndent(v, "", "  ")

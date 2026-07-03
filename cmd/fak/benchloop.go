@@ -61,30 +61,39 @@ func parseBenchLoopFlags(name string, stderr io.Writer, argv []string) (*benchLo
 	return f, 0, true
 }
 
-func (f *benchLoopFlags) root() string {
-	if f.workspace == "" {
+// workspaceOrRepoRoot resolves an optional --workspace value: empty means the
+// repo root, anything else is absolutized when possible.
+func workspaceOrRepoRoot(workspace string) string {
+	if workspace == "" {
 		return repoRoot()
 	}
-	if abs, err := filepath.Abs(f.workspace); err == nil {
+	if abs, err := filepath.Abs(workspace); err == nil {
 		return abs
 	}
-	return f.workspace
+	return workspace
+}
+
+// parsePinnedTimeFlag parses a non-empty pinned-time flag value in RFC3339,
+// compact 20060102T150405Z, or YYYY-MM-DD form, normalized to UTC. The caller
+// owns the empty-value default (zero time vs wall clock).
+func parsePinnedTimeFlag(flagName, value string) (time.Time, error) {
+	for _, layout := range []string{time.RFC3339, "20060102T150405Z", "2006-01-02"} {
+		if t, err := time.Parse(layout, value); err == nil {
+			return t.UTC(), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("%s %q is not RFC3339, compact (20060102T150405Z), or YYYY-MM-DD", flagName, value)
+}
+
+func (f *benchLoopFlags) root() string {
+	return workspaceOrRepoRoot(f.workspace)
 }
 
 func (f *benchLoopFlags) nowOrZero() (time.Time, error) {
 	if f.now == "" {
 		return time.Time{}, nil
 	}
-	if t, err := time.Parse(time.RFC3339, f.now); err == nil {
-		return t.UTC(), nil
-	}
-	if t, err := time.Parse("20060102T150405Z", f.now); err == nil {
-		return t.UTC(), nil
-	}
-	if t, err := time.Parse("2006-01-02", f.now); err == nil {
-		return t.UTC(), nil
-	}
-	return time.Time{}, fmt.Errorf("--now %q is not RFC3339, compact (20060102T150405Z), or YYYY-MM-DD", f.now)
+	return parsePinnedTimeFlag("--now", f.now)
 }
 
 func benchLoopReport(stderr io.Writer, argv []string, name string) (benchloop.Report, *benchLoopFlags, int, bool) {
