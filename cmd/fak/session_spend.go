@@ -31,9 +31,6 @@ package main
 
 import (
 	"math"
-	"os"
-	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
@@ -91,16 +88,7 @@ func resolveSpendPricing(provider, context string) (gateway.CachePricing, string
 }
 
 func spendPriceFromEnv(name string) (float64, bool) {
-	raw, ok := os.LookupEnv(name)
-	raw = strings.TrimSpace(raw)
-	if !ok || raw == "" {
-		return 0, false
-	}
-	v, err := strconv.ParseFloat(raw, 64)
-	if err != nil || v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
-		return 0, true
-	}
-	return v, true
+	return priceFromEnv(name, true)
 }
 
 // servedTurnSpendMicroCents prices one served turn's provider-reported usage for

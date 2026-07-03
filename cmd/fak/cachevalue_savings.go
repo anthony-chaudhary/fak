@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -93,16 +92,7 @@ func cachevalueSavingsPricing(provider, context string) cachevaluereport.Savings
 }
 
 func cachevaluePriceFromEnv(name string) (float64, bool) {
-	raw, ok := os.LookupEnv(name)
-	raw = strings.TrimSpace(raw)
-	if !ok || raw == "" {
-		return 0, false
-	}
-	v, err := strconv.ParseFloat(raw, 64)
-	if err != nil || v < 0 {
-		return 0, true
-	}
-	return v, true
+	return priceFromEnv(name, false)
 }
 
 type cacheValuePersistenceReport struct {
