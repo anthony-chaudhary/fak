@@ -215,32 +215,68 @@ func TestDispatchCodexProcessPIDsCollapseNodeWrapperAndNativeChild(t *testing.T)
 	}
 }
 
-func TestDispatchCodexSeatIsSingleAmbientLogin(t *testing.T) {
+func TestDispatchCodexProcessPIDsExcludeSidecarAncestorChild(t *testing.T) {
+	rows := []dispatchCodexProcessRow{
+		{
+			PID:     10,
+			PPID:    5,
+			Name:    "node.exe",
+			Cmdline: `C:\Program Files\nodejs\node.exe C:\Users\USER\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js`,
+		},
+		{PID: 11, PPID: 10, Name: "codex.exe", Cmdline: `C:\...\codex.exe`},
+		{PID: 20, PPID: 1, Name: "codex.exe", Cmdline: `C:\...\codex.exe`},
+	}
+	got := dispatchCodexProcessPIDsExcludingParents(rows, map[int]bool{5: true})
+	if len(got) != 1 || !got[20] {
+		t.Fatalf("codex pids = %v, want only standalone native session 20", got)
+	}
+}
+
+func TestDispatchCodexSeatIsAmbientOAuthBucket(t *testing.T) {
+	t.Setenv("FAK_CODEX_OAUTH_SESSIONS", "10")
 	old := dispatchProbeCodexProcessRows
 	dispatchProbeCodexProcessRows = func() ([]dispatchCodexProcessRow, error) {
-		return []dispatchCodexProcessRow{{PID: 42, Name: "codex.exe"}}, nil
+		return []dispatchCodexProcessRow{
+			{PID: 42, Name: "codex.exe"},
+			{PID: 43, Name: "codex.exe"},
+			{PID: 44, Name: "codex.exe"},
+		}, nil
 	}
 	t.Cleanup(func() { dispatchProbeCodexProcessRows = old })
 
 	seat := dispatchPreflightSeat(t.TempDir(), io.Discard, "codex")
-	if seat.Total == nil || *seat.Total != 1 {
-		t.Fatalf("codex seat total = %v, want 1", seat.Total)
+	if seat.Total == nil || *seat.Total != 10 {
+		t.Fatalf("codex seat total = %v, want 10", seat.Total)
 	}
-	if seat.Free == nil || *seat.Free != 0 || seat.Leased == nil || *seat.Leased != 1 || !seat.Depleted {
-		t.Fatalf("codex seat = %+v, want free=0 leased=1 depleted", seat)
+	if seat.Free == nil || *seat.Free != 7 || seat.Leased == nil || *seat.Leased != 3 || seat.Depleted {
+		t.Fatalf("codex seat = %+v, want free=7 leased=3 not depleted", seat)
 	}
-	if got := dispatchProductWorkerCount(t.TempDir(), "codex"); got != 1 {
+	if got := dispatchProductWorkerCount(t.TempDir(), "codex"); got != 3 {
 		t.Fatalf("codex product worker count = %d, want ambient process to consume cap", got)
 	}
 }
 
-func TestDispatchCodexBusyAmbientSeatRefusesSpawn(t *testing.T) {
+func TestDispatchCodexAmbientOAuthBucketAdmitsUntilCap(t *testing.T) {
+	t.Setenv("FAK_CODEX_OAUTH_SESSIONS", "10")
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
+		t.Fatalf("mkdir codex auth dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".codex", "auth.json"), []byte(`{"ok":true}`), 0o644); err != nil {
+		t.Fatalf("write codex auth: %v", err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	withDispatchJSONHelper(t, func(root string, args ...string) (map[string]any, error) {
 		return map[string]any{"ok": true}, nil
 	})
 	old := dispatchProbeCodexProcessRows
 	dispatchProbeCodexProcessRows = func() ([]dispatchCodexProcessRow, error) {
-		return []dispatchCodexProcessRow{{PID: 42, Name: "codex.exe"}}, nil
+		return []dispatchCodexProcessRow{
+			{PID: 42, Name: "codex.exe"},
+			{PID: 43, Name: "codex.exe"},
+			{PID: 44, Name: "codex.exe"},
+		}, nil
 	}
 	t.Cleanup(func() { dispatchProbeCodexProcessRows = old })
 
@@ -248,11 +284,11 @@ func TestDispatchCodexBusyAmbientSeatRefusesSpawn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dispatchPreflight: %v", err)
 	}
-	if got["verdict"] != dispatchtick.PreflightRefuseNoSeat {
-		t.Fatalf("verdict = %v, want REFUSE_NO_SEAT; payload=%v", got["verdict"], got)
+	if got["verdict"] != dispatchtick.PreflightOKVerdict {
+		t.Fatalf("verdict = %v, want SPAWN_OK; payload=%v", got["verdict"], got)
 	}
-	if got["cap"] != 1 {
-		t.Fatalf("cap = %v, want 1", got["cap"])
+	if got["cap"] != 3 {
+		t.Fatalf("cap = %v, want 3", got["cap"])
 	}
 }
 
@@ -985,6 +1021,128 @@ func TestDispatchTickPreferNewestPicksNewest(t *testing.T) {
 	}
 }
 
+func TestDispatchTickHighPriorityGoalPicksPriorityLaneAcrossBacklog(t *testing.T) {
+	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	oldRoute := dispatchRouteIssues
+	dispatchRouteIssues = func(root string, _ io.Writer) (dispatchtick.RouterPayload, error) {
+		return dispatchtick.RouterPayload{
+			Schema: dispatchtick.RouterSchema,
+			OK:     true,
+			Lanes: map[string]dispatchtick.RouterLaneGroup{
+				"docs": {
+					Tree:       []string{"docs/**"},
+					Issues:     []int{10},
+					Count:      1,
+					StepBudget: 30,
+				},
+				"examples": {
+					Tree:       []string{"examples/**"},
+					Issues:     []int{20},
+					Count:      1,
+					StepBudget: 1,
+					Priority:   map[int]int{20: dispatchtick.PriorityWeightP0},
+				},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { dispatchRouteIssues = oldRoute })
+	root := t.TempDir()
+
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--goal", "high-priority", "--no-refresh", "--no-loop-ledger", "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out)
+	}
+	if got["goal"] != "high-priority" || got["goal_profile"] != "high-priority" {
+		t.Fatalf("goal fields = %v/%v, want high-priority/high-priority", got["goal"], got["goal_profile"])
+	}
+	if got["lane"] != "examples" || got["target_issue"] != float64(20) {
+		t.Fatalf("high-priority pick = lane %v target %v, want examples/#20 over higher-throughput docs lane", got["lane"], got["target_issue"])
+	}
+
+	out, errb, code = runDispatchAt("tick", "--workspace", root, "--no-refresh", "--no-loop-ledger", "--json")
+	if code != 0 {
+		t.Fatalf("default exit = %d, want 0 (stderr: %s)", code, errb)
+	}
+	got = map[string]any{}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("bad default json: %v\n%s", err, out)
+	}
+	if got["lane"] != "docs" || got["target_issue"] != float64(10) {
+		t.Fatalf("throughput pick = lane %v target %v, want docs/#10 by step budget", got["lane"], got["target_issue"])
+	}
+}
+
+func TestDispatchTickGoalScopesLoopLedgerIdentity(t *testing.T) {
+	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	oldRoute := dispatchRouteIssues
+	dispatchRouteIssues = func(root string, _ io.Writer) (dispatchtick.RouterPayload, error) {
+		return dispatchtick.RouterPayload{
+			Schema: dispatchtick.RouterSchema,
+			OK:     true,
+			Lanes: map[string]dispatchtick.RouterLaneGroup{
+				"docs": {Tree: []string{"docs/**"}, Issues: []int{20}, Count: 1, StepBudget: 1},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { dispatchRouteIssues = oldRoute })
+	root := t.TempDir()
+
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--goal", "high-priority", "--loop-ledger", "loops.jsonl", "--no-refresh", "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out)
+	}
+	ledger, _ := got["loop_ledger"].(map[string]any)
+	if ledger["loop_id"] != "issue-resolve-dispatch/claude/high-priority" {
+		t.Fatalf("loop_id = %v, want goal-scoped loop id", ledger["loop_id"])
+	}
+	if runID := fmt.Sprint(ledger["run_id"]); !strings.Contains(runID, "high-priority") {
+		t.Fatalf("run_id = %q, want goal token included", runID)
+	}
+
+	if got := dispatchTickLoopID("claude", "throughput"); got != "issue-resolve-dispatch/claude/throughput" {
+		t.Fatalf("throughput loop id = %q, want named throughput suffix", got)
+	}
+	if got := dispatchTickLoopID("claude", ""); got != "issue-resolve-dispatch/claude" {
+		t.Fatalf("empty-goal loop id = %q, want legacy id", got)
+	}
+}
+
+func TestDispatchLeaseHolderCarriesGoalIdentity(t *testing.T) {
+	t.Setenv("FAK_LEASE_OWNER", "owner-a")
+	if got := dispatchLeaseHolderForGoal("high priority"); got != "owner-a goal=high-priority" {
+		t.Fatalf("holder = %q, want goal-qualified holder", got)
+	}
+	if got := dispatchLeaseHolderForGoal(""); got != "owner-a" {
+		t.Fatalf("empty-goal holder = %q, want base holder", got)
+	}
+}
+
+func TestDispatchGoalNaturalAliasesNormalizeProfiles(t *testing.T) {
+	goal, profile, err := normalizeDispatchGoal("high priority", "")
+	if err != nil {
+		t.Fatalf("normalize high priority: %v", err)
+	}
+	if goal != dispatchGoalProfileHighPriority || profile != dispatchGoalProfileHighPriority {
+		t.Fatalf("high priority normalized to %q/%q, want high-priority/high-priority", goal, profile)
+	}
+
+	goal, profile, err = normalizeDispatchGoal("open tasks", "")
+	if err != nil {
+		t.Fatalf("normalize open tasks: %v", err)
+	}
+	if goal != dispatchGoalProfileThroughput || profile != dispatchGoalProfileThroughput {
+		t.Fatalf("open tasks normalized to %q/%q, want throughput/throughput", goal, profile)
+	}
+}
+
 func TestDispatchWaveDryRunAllocatesAccountsAndPlansFirstTick(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
 	// Disable the guard so this test exercises account allocation + pricing without the
@@ -1028,6 +1186,52 @@ func TestDispatchWaveDryRunAllocatesAccountsAndPlansFirstTick(t *testing.T) {
 	acct, _ := tick["account"].(map[string]any)
 	if tick["action"] != "would_spawn" || acct["tag"] != "acct-preflight" {
 		t.Fatalf("tick/account = %#v / %#v, want would_spawn/acct-preflight", tick, acct)
+	}
+}
+
+func TestDispatchWaveHighPriorityGoalPricesAndForwardsGoal(t *testing.T) {
+	router := dispatchtick.RouterPayload{
+		Schema: dispatchtick.RouterSchema,
+		OK:     true,
+		Lanes: map[string]dispatchtick.RouterLaneGroup{
+			"docs": {
+				Tree:       []string{"docs/**"},
+				Issues:     []int{10},
+				Count:      1,
+				StepBudget: 40,
+			},
+			"examples": {
+				Tree:       []string{"examples/**"},
+				Issues:     []int{20},
+				Count:      1,
+				StepBudget: 1,
+				Priority:   map[int]int{20: dispatchtick.PriorityWeightP0},
+			},
+		},
+	}
+	root := t.TempDir()
+	price, err := priceDispatchWavePayload(root, router, 1, 1, "", nil, 0, dispatchGoalProfileHighPriority)
+	if err != nil {
+		t.Fatalf("priceDispatchWavePayload: %v", err)
+	}
+	if len(price.RunTargets) != 1 || price.RunTargets[0].Lane != "examples" || price.RunTargets[0].Issue != 20 {
+		t.Fatalf("high-priority run targets = %+v, want examples/#20", price.RunTargets)
+	}
+
+	plan := dispatchWaveExecutionPlans(root, "claude", "engineering", "high-priority", dispatchGoalProfileHighPriority, "wave-goal", 0, price.RunTargets, []dispatchtick.AccountWaveLane{
+		{Tag: "acct-a", ConfigDir: filepath.Join(root, "acct-a"), ModelTier: 1, Model: "claude", Product: "claude"},
+	}, true)
+	if len(plan) != 1 {
+		t.Fatalf("plan len = %d, want 1", len(plan))
+	}
+	args := plan[0].DispatchTickArgs
+	for _, want := range []string{"--goal", "high-priority", "--goal-profile", "high-priority"} {
+		if !containsString(args, want) {
+			t.Fatalf("dispatch tick args = %#v, missing %q", args, want)
+		}
+	}
+	if plan[0].Goal != "high-priority" || plan[0].GoalProfile != dispatchGoalProfileHighPriority {
+		t.Fatalf("plan goal fields = %q/%q", plan[0].Goal, plan[0].GoalProfile)
 	}
 }
 

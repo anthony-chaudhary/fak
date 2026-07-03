@@ -367,7 +367,7 @@ func TestDispatchAcquireHonorsLaneTaxonomy(t *testing.T) {
 	dir := initRegionTestRepo(t)
 	acquireRegionTestLease(t, dir, "release-cut", "op", []string{"VERSION", "docs/releases/**"})
 
-	lease := acquireDispatchLaneLease(dir, "resolve-gateway", "gateway", []string{"internal/gateway/**"}, 600)
+	lease := acquireDispatchLaneLease(dir, "resolve-gateway", "gateway", []string{"internal/gateway/**"}, 600, "")
 	refused, _ := lease["refused"].(bool)
 	if !refused {
 		t.Fatalf("an exclusive-lane live lease must refuse every new region, got %+v", lease)
@@ -383,9 +383,45 @@ func TestDispatchAcquireHonorsLaneTaxonomy(t *testing.T) {
 		t.Fatal(err)
 	}
 	acquireRegionTestLease(t, dir, "loop-nightly", "loop:nightly@host", []string{"internal/gateway/**"})
-	lease = acquireDispatchLaneLease(dir, "resolve-gateway", "gateway", []string{"internal/gateway/**"}, 600)
+	lease = acquireDispatchLaneLease(dir, "resolve-gateway", "gateway", []string{"internal/gateway/**"}, 600, "")
 	if refused, _ := lease["refused"].(bool); !refused {
 		t.Fatalf("a loop-held region must refuse a dispatch spawn on the same tree, got %+v", lease)
+	}
+}
+
+// TestDispatchGoalScopedLeasesStillCollide pins the goal/deconflict contract:
+// different dispatch goals publish distinct holders for auditability, but the
+// shared region decision still refuses overlapping work on the same lane. Goal
+// labels separate loop identity; they do not bypass the lease fabric.
+func TestDispatchGoalScopedLeasesStillCollide(t *testing.T) {
+	dir := initRegionTestRepo(t)
+	t.Setenv("FAK_LEASE_OWNER", "owner-a")
+
+	first := acquireDispatchLaneLease(dir, "resolve-gateway-throughput", "gateway", []string{"internal/gateway/**"}, 600, "throughput")
+	if acquired, _ := first["acquired"].(bool); !acquired {
+		t.Fatalf("first goal-scoped dispatch lease must acquire, got %+v", first)
+	}
+	if first["holder"] != "owner-a goal=throughput" {
+		t.Fatalf("first holder = %v, want goal-qualified throughput holder", first["holder"])
+	}
+
+	second := acquireDispatchLaneLease(dir, "resolve-gateway-priority", "gateway", []string{"internal/gateway/**"}, 600, "high-priority")
+	if refused, _ := second["refused"].(bool); !refused {
+		t.Fatalf("overlapping high-priority goal must refuse on the live throughput lease, got %+v", second)
+	}
+	if second["holder"] != "owner-a goal=high-priority" {
+		t.Fatalf("second holder = %v, want goal-qualified priority holder", second["holder"])
+	}
+	if second["reason"] != "COLLISION_RISK" || second["rung"] != "same_lane_live" {
+		t.Fatalf("refusal must carry same_lane_live COLLISION_RISK, got %+v", second)
+	}
+	if detail := fmt.Sprint(second["detail"]); !strings.Contains(detail, "resolve-gateway-throughput") || !strings.Contains(detail, "goal=throughput") {
+		t.Fatalf("refusal detail must name the conflicting throughput lease, got %q", detail)
+	}
+
+	third := acquireDispatchLaneLease(dir, "resolve-docs-priority", "docs", []string{"docs/**"}, 600, "high-priority")
+	if acquired, _ := third["acquired"].(bool); !acquired {
+		t.Fatalf("a disjoint lane under the same high-priority goal must still acquire, got %+v", third)
 	}
 }
 
@@ -395,7 +431,7 @@ func TestDispatchAcquireHonorsLaneTaxonomy(t *testing.T) {
 // empty unknown-blast-radius record after a permissive admit.
 func TestDispatchAcquireRecordsDecidedTree(t *testing.T) {
 	dir := initRegionTestRepo(t)
-	lease := acquireDispatchLaneLease(dir, "resolve-docs", "docs", nil, 600)
+	lease := acquireDispatchLaneLease(dir, "resolve-docs", "docs", nil, 600, "")
 	if acquired, _ := lease["acquired"].(bool); !acquired {
 		t.Fatalf("free lane with empty tree must acquire on the lane's canonical tree, got %+v", lease)
 	}

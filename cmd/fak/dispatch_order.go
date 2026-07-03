@@ -252,8 +252,8 @@ func dispatchUsage(w io.Writer) {
   fak dispatch price [--workspace DIR] [--in FILE] [--json]
   fak dispatch route [--workspace DIR] [--json]
   fak dispatch skipped [--workspace DIR] [--channel C] [--repo-url URL] [--token T] [--dry-run]
-  fak dispatch tick  [--workspace DIR] [--backend claude|opencode|codex] [--live] [--json]
-  fak dispatch wave  [--workspace DIR] [--count N] [--backend claude|opencode|codex] [--live] [--json]
+  fak dispatch tick  [--workspace DIR] [--backend claude|opencode|codex] [--goal throughput|high-priority] [--live] [--json]
+  fak dispatch wave  [--workspace DIR] [--count N] [--backend claude|opencode|codex] [--goal throughput|high-priority] [--live] [--json]
   fak dispatch sweep [--workspace DIR] [--max-agents N] [--backend claude|opencode|codex] [--live] [--json]
   fak dispatch progress [--workspace DIR] [--target N] [--audit-json FILE] [--json]
   fak dispatch audit [--runs-dir DIR] [--json] [--file-issues]
@@ -298,9 +298,9 @@ the lanes JSON shape that tick consumes. skipped folds route's human-blocked ski
 BLOCKED_BY_HUMAN -- the witnessed blocked-by-human backlog no worker may take) into one compact
 card and posts it to a dedicated internal Slack channel ($FAK_SKIPPED_CHANNEL); --dry-run renders
 the card without posting. tick is the native issue-resolution dispatch tick:
-preflight the host/account/cap, route open issues to lanes, pick one fresh issue, and dry-run or spawn one guarded worker. price quotes a proposed
+preflight the host/account/cap, route open issues to lanes, pick one fresh issue, and dry-run or spawn one guarded worker. --goal scopes the loop ledger and lease holder for concurrent background loops; throughput keeps the historical step-budget lane pick, while high-priority picks the lane whose next eligible issue has the strongest priority label. price quotes a proposed
 fan-out before launch and emits plan_id, launch_plan, wave metrics, and repartition advice. wave allocates
-multiple account seats and drives ticks; sweep repeats ticks until the queue drains or preflight
+multiple account seats and drives goal-scoped ticks; sweep repeats ticks until the queue drains or preflight
 refuses. progress snapshots the open-issue curve, witnessed-open count, and loop ledger. Spawn
 commands are dry-run until --live. issue-smallness-lint is a filing/backlog dry-run report: it
 checks that each issue has one primary deliverable and exactly one witness, flagging bundled

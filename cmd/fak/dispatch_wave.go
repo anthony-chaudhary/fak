@@ -73,6 +73,8 @@ type dispatchWaveExecutionPlan struct {
 	Shortfall           int                  `json:"shortfall"`
 	Backend             string               `json:"backend"`
 	WorkKind            string               `json:"work_kind"`
+	Goal                string               `json:"goal,omitempty"`
+	GoalProfile         string               `json:"goal_profile,omitempty"`
 	Target              dispatchLaunchTarget `json:"target"`
 	Account             map[string]any       `json:"account"`
 	RecordLoop          bool                 `json:"record_loop"`
@@ -124,6 +126,8 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	maxWorkers := fs.Int("max-workers", dispatchtick.DefaultMaxWorkers, "hard cap on live workers, enforced by each tick's preflight")
 	backend := fs.String("backend", "claude", "worker backend (claude|opencode|codex)")
 	workKind := fs.String("work-kind", "", "switcher work kind (default follows --backend)")
+	goal := fs.String("goal", "", "durable dispatch loop goal id (for example throughput or high-priority); forwarded to each tick")
+	goalProfile := fs.String("goal-profile", "", "dispatch picker profile: throughput|high-priority (default follows --goal, else throughput)")
 	lane := fs.String("lane", "", "pin every tick to this repo lane (default: largest step-budget lane pick)")
 	excludeLane := fs.String("exclude-lane", "", "comma-separated lanes to drop from the step-budget pick")
 	settleS := fs.Float64("settle-s", 2.0, "seconds to wait after each live spawn")
@@ -155,6 +159,11 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak dispatch wave: --count must be > 0")
 		return 2
 	}
+	goalID, profile, goalErr := normalizeDispatchGoal(*goal, *goalProfile)
+	if goalErr != nil {
+		fmt.Fprintf(stderr, "fak dispatch wave: %v\n", goalErr)
+		return 2
+	}
 
 	rows, err := dispatchReadAccountRoster(root)
 	if err != nil {
@@ -171,34 +180,36 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	waveID := alloc.WaveID
 	shortfall := alloc.Shortfall
 	rec := map[string]any{
-		"schema":      "fleet-issue-dispatch-wave/1",
-		"workspace":   root,
-		"live":        *live,
-		"backend":     backendNorm,
-		"work_kind":   wk,
-		"requested":   *count,
-		"granted":     len(lanes),
-		"shortfall":   shortfall,
-		"wave_id":     waveID,
-		"allocation":  scrubDispatchSecrets(alloc.Map()),
-		"ticks":       []any{},
-		"spawned":     0,
-		"stop_reason": "",
-		"ok":          false,
+		"schema":       "fleet-issue-dispatch-wave/1",
+		"workspace":    root,
+		"live":         *live,
+		"backend":      backendNorm,
+		"work_kind":    wk,
+		"goal":         goalID,
+		"goal_profile": profile,
+		"requested":    *count,
+		"granted":      len(lanes),
+		"shortfall":    shortfall,
+		"wave_id":      waveID,
+		"allocation":   scrubDispatchSecrets(alloc.Map()),
+		"ticks":        []any{},
+		"spawned":      0,
+		"stop_reason":  "",
+		"ok":           false,
 	}
 	if len(lanes) == 0 {
 		rec["stop_reason"] = firstString(alloc.Reason, "no distinct account pools available")
 		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 	}
 
-	price, err := priceDispatchWave(root, stderr, *count, len(lanes), *lane, dispatchSplitCSV(*excludeLane), dispatchtick.DefaultCooldownMinutes)
+	price, err := priceDispatchWave(root, stderr, *count, len(lanes), *lane, dispatchSplitCSV(*excludeLane), dispatchtick.DefaultCooldownMinutes, profile)
 	if err != nil {
 		rec["stop_reason"] = "price fan-out: " + err.Error()
 		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 	}
 	rec["price"] = price
 	rec["planned_lanes"] = append([]string(nil), price.RunLanes...)
-	executionPlan := dispatchWaveExecutionPlans(root, backendNorm, wk, waveID, shortfall, price.RunTargets, lanes, !*noLedger)
+	executionPlan := dispatchWaveExecutionPlans(root, backendNorm, wk, goalID, profile, waveID, shortfall, price.RunTargets, lanes, !*noLedger)
 	executionPlanID := dispatchWaveExecutionPlanID(executionPlan)
 	rec["execution_plan_id"] = executionPlanID
 	rec["execution_plan"] = executionPlan
@@ -258,16 +269,17 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 }
 
-func priceDispatchWave(root string, stderr io.Writer, requested, granted int, explicitLane string, excluded []string, cooldownMin int) (dispatchWavePrice, error) {
+func priceDispatchWave(root string, stderr io.Writer, requested, granted int, explicitLane string, excluded []string, cooldownMin int, goalProfile ...string) (dispatchWavePrice, error) {
 	router, err := dispatchRouteIssues(root, stderr)
 	if err != nil {
 		return dispatchWavePrice{}, err
 	}
-	return priceDispatchWavePayload(root, router, requested, granted, explicitLane, excluded, cooldownMin)
+	return priceDispatchWavePayload(root, router, requested, granted, explicitLane, excluded, cooldownMin, goalProfile...)
 }
 
-func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, requested, granted int, explicitLane string, excluded []string, cooldownMin int) (dispatchWavePrice, error) {
+func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, requested, granted int, explicitLane string, excluded []string, cooldownMin int, goalProfile ...string) (dispatchWavePrice, error) {
 	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
+	profile := dispatchWaveGoalProfile(goalProfile)
 	held := liveResolutionLanes(runsDir)
 	liveIssues := liveResolutionIssues(runsDir)
 	cooled := recentlyAttemptedIssues(runsDir, cooldownMin)
@@ -323,6 +335,12 @@ func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, re
 		id := waveCandidateID(lane, route.Number)
 		leaseID := dispatchIssueLeaseID(lane, route.Number)
 		stepBudget := dispatchWaveRouteStepBudget(route)
+		priority := dispatchtick.PriorityWeightDefault
+		if grp, ok := router.Lanes[lane]; ok {
+			if w, ok := grp.Priority[route.Number]; ok {
+				priority = w
+			}
+		}
 		meta[id] = dispatchWaveCandidate{
 			ID:         id,
 			Lane:       lane,
@@ -338,7 +356,7 @@ func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, re
 			Lane:        leaseID,
 			Tree:        paths,
 			Mode:        "exclusive",
-			UpdatedUnix: int64(stepBudget),
+			UpdatedUnix: dispatchWaveOrderStamp(profile, priority, stepBudget),
 			CreatedUnix: int64(route.Number),
 		})
 	}
@@ -357,10 +375,14 @@ func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, re
 		if len(router.Issues) == 0 {
 			nums = append([]int(nil), grp.Issues...)
 		}
-		sort.Ints(nums)
+		nums = dispatchWaveOrderLaneIssues(nums, grp.Priority)
 		issue, ok := firstLaunchableIssue(nums, liveIssues, cooled)
 		if !ok {
 			continue
+		}
+		priority := dispatchtick.PriorityWeightDefault
+		if w, ok := grp.Priority[issue]; ok {
+			priority = w
 		}
 		id := waveCandidateID(lane, issue)
 		if _, exists := meta[id]; exists {
@@ -383,7 +405,7 @@ func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, re
 			Lane:        leaseID,
 			Tree:        grp.Tree,
 			Mode:        "exclusive",
-			UpdatedUnix: int64(stepBudget),
+			UpdatedUnix: dispatchWaveOrderStamp(profile, priority, stepBudget),
 			CreatedUnix: int64(grp.Count*len(lanes) + (len(lanes) - i)),
 		})
 	}
@@ -483,6 +505,35 @@ func dispatchWaveCandidateReason(row dispatchorder.Ranked, selected bool) string
 		return dispatchWaveReasonWaveCap
 	}
 	return row.Reason
+}
+
+func dispatchWaveGoalProfile(profiles []string) string {
+	if len(profiles) == 0 || strings.TrimSpace(profiles[0]) == "" {
+		return dispatchGoalProfileThroughput
+	}
+	if p, ok := dispatchGoalProfileAlias(profiles[0]); ok {
+		return p
+	}
+	return dispatchGoalProfileThroughput
+}
+
+func dispatchWaveOrderLaneIssues(nums []int, weights map[int]int) []int {
+	cands := make([]dispatchtick.LaneCandidate, len(nums))
+	for i, n := range nums {
+		weight := dispatchtick.PriorityWeightDefault
+		if w, ok := weights[n]; ok {
+			weight = w
+		}
+		cands[i] = dispatchtick.LaneCandidate{Number: n, Weight: weight}
+	}
+	return dispatchtick.OrderLaneCandidates(cands, false)
+}
+
+func dispatchWaveOrderStamp(profile string, priority, stepBudget int) int64 {
+	if profile == dispatchGoalProfileHighPriority {
+		return int64(priority)*1_000_000 + int64(stepBudget)
+	}
+	return int64(stepBudget)
 }
 
 func dispatchWaveAction(candidates, run, collisions, wasted int) (string, string) {
@@ -697,7 +748,7 @@ func dispatchWaveExecutionPlanID(plan []dispatchWaveExecutionPlan) string {
 	return dispatchStablePlanID(plan)
 }
 
-func dispatchWaveExecutionPlans(root, backend, workKind, waveID string, shortfall int, targets []dispatchWaveCandidate, lanes []dispatchtick.AccountWaveLane, recordLoop bool) []dispatchWaveExecutionPlan {
+func dispatchWaveExecutionPlans(root, backend, workKind, goal, goalProfile, waveID string, shortfall int, targets []dispatchWaveCandidate, lanes []dispatchtick.AccountWaveLane, recordLoop bool) []dispatchWaveExecutionPlan {
 	limit := minInt(len(targets), len(lanes))
 	if limit <= 0 {
 		return nil
@@ -707,7 +758,7 @@ func dispatchWaveExecutionPlans(root, backend, workKind, waveID string, shortfal
 		target := targets[i]
 		acct := accountFromWaveLane(lanes[i])
 		mem := dispatchtick.Membership{Rank: i, WaveID: waveID, Size: limit, Shortfall: shortfall}
-		args := dispatchWaveExecutionTickArgs(root, backend, workKind, target, acct, mem, recordLoop)
+		args := dispatchWaveExecutionTickArgs(root, backend, workKind, goal, goalProfile, target, acct, mem, recordLoop)
 		out = append(out, dispatchWaveExecutionPlan{
 			Rank:                i,
 			WaveID:              waveID,
@@ -715,6 +766,8 @@ func dispatchWaveExecutionPlans(root, backend, workKind, waveID string, shortfal
 			Shortfall:           shortfall,
 			Backend:             backend,
 			WorkKind:            workKind,
+			Goal:                goal,
+			GoalProfile:         goalProfile,
 			Target:              dispatchWaveLaunchTarget(target),
 			Account:             dispatchtick.AccountSidecar(acct),
 			RecordLoop:          recordLoop,
@@ -725,10 +778,16 @@ func dispatchWaveExecutionPlans(root, backend, workKind, waveID string, shortfal
 	return out
 }
 
-func dispatchWaveExecutionTickArgs(root, backend, workKind string, target dispatchWaveCandidate, account dispatchtick.Account, membership dispatchtick.Membership, recordLoop bool) []string {
+func dispatchWaveExecutionTickArgs(root, backend, workKind, goal, goalProfile string, target dispatchWaveCandidate, account dispatchtick.Account, membership dispatchtick.Membership, recordLoop bool) []string {
 	args := []string{"--workspace", root, "--backend", backend}
 	if strings.TrimSpace(workKind) != "" {
 		args = append(args, "--work-kind", workKind)
+	}
+	if strings.TrimSpace(goal) != "" {
+		args = append(args, "--goal", strings.TrimSpace(goal))
+	}
+	if strings.TrimSpace(goalProfile) != "" && strings.TrimSpace(goalProfile) != dispatchGoalProfileThroughput {
+		args = append(args, "--goal-profile", strings.TrimSpace(goalProfile))
 	}
 	args = append(args, dispatchTickArgsForLaunchTarget(target)...)
 	if !recordLoop {

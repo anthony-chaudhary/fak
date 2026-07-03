@@ -34,6 +34,8 @@ type dispatchTickOptions struct {
 	LeaseID        string
 	LeaseTree      []string
 	Backend        string
+	Goal           string
+	GoalProfile    string
 	ExcludeLanes   []string
 	Live           bool
 	Refresh        bool
@@ -121,6 +123,8 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	leaseID := fs.String("lease-id", "", "explicit lane/issue lease id")
 	leaseTree := fs.String("lease-tree", "", "comma-separated lease tree globs for the explicit lease")
 	backend := fs.String("backend", "claude", "worker backend (claude|opencode|codex)")
+	goal := fs.String("goal", "", "durable dispatch loop goal id (for example throughput or high-priority); known goal ids also select the default --goal-profile")
+	goalProfile := fs.String("goal-profile", "", "dispatch picker profile: throughput|high-priority (default follows --goal, else throughput)")
 	excludeLane := fs.String("exclude-lane", "", "comma-separated lanes to drop from the busiest pick")
 	live := fs.Bool("live", false, "actually spawn the issue-resolution worker")
 	noRefresh := fs.Bool("no-refresh", false, "skip the per-tick account-registry refresh")
@@ -163,6 +167,11 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	if wk == "" {
 		wk = dispatchtick.DefaultWorkKind(b)
 	}
+	goalID, profile, goalErr := normalizeDispatchGoal(*goal, *goalProfile)
+	if goalErr != nil {
+		fmt.Fprintf(stderr, "fak dispatch tick: %v\n", goalErr)
+		return dispatchTickOptions{}, false, 2
+	}
 	opts := dispatchTickOptions{
 		Workspace:      root,
 		MaxWorkers:     *maxWorkers,
@@ -172,6 +181,8 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 		LeaseID:        strings.TrimSpace(*leaseID),
 		LeaseTree:      dispatchSplitCSV(*leaseTree),
 		Backend:        b,
+		Goal:           goalID,
+		GoalProfile:    profile,
 		ExcludeLanes:   dispatchSplitCSV(*excludeLane),
 		Live:           *live,
 		Refresh:        !*noRefresh,
@@ -252,7 +263,7 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 			exclude[lane] = true
 		}
 	}
-	pick, err := pickDispatchLane(root, stderr, opts.Lane, exclude, opts.PreferNewest, opts.Generation)
+	pick, err := pickDispatchLane(root, stderr, opts.Lane, exclude, opts.PreferNewest, opts.Generation, opts.GoalProfile)
 	if err != nil {
 		return nil, err
 	}
@@ -292,6 +303,8 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		"workspace":        root,
 		"live":             opts.Live,
 		"backend":          opts.Backend,
+		"goal":             opts.Goal,
+		"goal_profile":     opts.GoalProfile,
 		"max_workers":      opts.MaxWorkers,
 		"registry_refresh": reg,
 		"preflight": map[string]any{
@@ -526,7 +539,7 @@ func dispatchLiveScopeMap(live dispatchLiveScope) map[string]any {
 // returns the shared payload through finish, mirroring the dry-run return sites it splits off.
 func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick dispatchLanePick, account dispatchtick.Account, model string, target int, promptRec, payload map[string]any, finish func(map[string]any) map[string]any) (map[string]any, error) {
 	leaseID := firstString(opts.LeaseID, dispatchLaneLeaseID(pick.Lane))
-	lease := acquireDispatchLaneLease(root, leaseID, pick.Lane, pick.Tree, opts.WorkerTimeoutS+dispatchtick.LeaseTTLMarginS)
+	lease := acquireDispatchLaneLease(root, leaseID, pick.Lane, pick.Tree, opts.WorkerTimeoutS+dispatchtick.LeaseTTLMarginS, opts.Goal)
 	payload["lease"] = lease
 	if bundle := mapAt(payload, "startup_bundle"); len(bundle) > 0 {
 		bundle["lease"] = lease
@@ -549,7 +562,7 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	if guarded {
 		augmentGuardEnvDefaults()
 	}
-	env, err := dispatchWorkerEnv(opts.Backend, pick.Lane, root, runsDir, account)
+	env, err := dispatchWorkerEnv(opts.Backend, pick.Lane, root, runsDir, account, opts.Goal, opts.GoalProfile)
 	if err != nil {
 		return nil, err
 	}
@@ -637,8 +650,8 @@ func dispatchRunPythonJSON(root string, stderr io.Writer, timeout time.Duration,
 	return nil, fmt.Errorf("python helper %s (tried %s): %w", strings.Join(args, " "), strings.Join(interps, ", "), lastErr)
 }
 
-func acquireDispatchLaneLease(root, id, lane string, tree []string, ttlS int) map[string]any {
-	holder := dispatchLeaseHolder()
+func acquireDispatchLaneLease(root, id, lane string, tree []string, ttlS int, goal string) map[string]any {
+	holder := dispatchLeaseHolderForGoal(goal)
 	store := leaseref.NewInDir(root)
 	now := time.Now()
 	live, _, liveErr := store.Live(context.Background(), now)
@@ -704,11 +717,18 @@ func dispatchLeaseHolder() string {
 	return fmt.Sprintf("%s:%d", host, os.Getpid())
 }
 
-func dispatchWorkerEnv(backend, lane, root, runsDir string, account dispatchtick.Account) (map[string]string, error) {
+func dispatchWorkerEnv(backend, lane, root, runsDir string, account dispatchtick.Account, goal, goalProfile string) (map[string]string, error) {
 	env := envMap(os.Environ())
 	env["DISPATCH_WORKSPACE"] = root
 	env["DISPATCH_LANE"] = lane
 	env["DISPATCH_BACKEND"] = backend
+	if strings.TrimSpace(goal) != "" {
+		env["DISPATCH_GOAL"] = strings.TrimSpace(goal)
+		env["FLEET_DISPATCH_GOAL"] = strings.TrimSpace(goal)
+	}
+	if strings.TrimSpace(goalProfile) != "" {
+		env["DISPATCH_GOAL_PROFILE"] = strings.TrimSpace(goalProfile)
+	}
 	switch backend {
 	case "claude":
 		if account.Dir != "" {
@@ -925,7 +945,11 @@ func dispatchStartupBundle(root string, opts dispatchTickOptions, pre map[string
 		"schema":    dispatchStartupBundleSchema,
 		"workspace": root,
 		"backend":   opts.Backend,
-		"route":     route,
+		"goal": map[string]any{
+			"id":      opts.Goal,
+			"profile": opts.GoalProfile,
+		},
+		"route": route,
 		"cap": map[string]any{
 			"cap":             pre["cap"],
 			"live":            pre["live"],
@@ -1073,7 +1097,7 @@ func recordDispatchTickLoop(root, ledger string, payload map[string]any) map[str
 		ledger = defaultLoopLedger()
 	}
 	runID := dispatchLoopRunID(payload)
-	loopID := "issue-resolve-dispatch/" + firstString(dispatchMapString(payload, "backend"), "claude")
+	loopID := dispatchTickLoopID(dispatchMapString(payload, "backend"), dispatchMapString(payload, "goal"))
 	pre := mapAt(payload, "preflight")
 	metrics := map[string]int64{
 		"live":             boolInt(payload["live"]),
@@ -1098,6 +1122,9 @@ func recordDispatchTickLoop(root, ledger string, payload map[string]any) map[str
 	}
 	if spawned := mapAt(payload, "spawned"); dispatchMapString(spawned, "startup_bundle") != "" {
 		evidence = append(evidence, loopmgr.EvidenceRef{Kind: "startup_bundle", Ref: dispatchMapString(spawned, "startup_bundle")})
+	}
+	if goal := dispatchMapString(payload, "goal"); goal != "" {
+		evidence = append(evidence, loopmgr.EvidenceRef{Kind: "goal", Ref: goal, Summary: "profile=" + dispatchMapString(payload, "goal_profile")})
 	}
 	account := mapAt(payload, "account")
 	if tag := dispatchMapString(account, "tag"); tag != "" {
@@ -1132,7 +1159,12 @@ func dispatchLoopRunID(payload map[string]any) string {
 	if spawned := mapAt(payload, "spawned"); dispatchMapInt(spawned, "pid") != 0 {
 		return fmt.Sprintf("resolve-%d-%d", dispatchMapInt(payload, "target_issue"), dispatchMapInt(spawned, "pid"))
 	}
-	return fmt.Sprintf("resolve-tick-%s-%s", firstString(dispatchMapString(payload, "backend"), "claude"), time.Now().UTC().Format("20060102T150405Z"))
+	parts := []string{"resolve-tick", firstString(dispatchMapString(payload, "backend"), "claude")}
+	if token := dispatchGoalToken(dispatchMapString(payload, "goal")); token != "" {
+		parts = append(parts, token)
+	}
+	parts = append(parts, time.Now().UTC().Format("20060102T150405Z"))
+	return strings.Join(parts, "-")
 }
 
 func chooseStatus(cond bool, yes, no loopmgr.RunStatus) loopmgr.RunStatus {
@@ -1161,6 +1193,9 @@ func renderDispatchTick(p map[string]any) string {
 		dispatchMapString(p, "verdict"), okWord(dispatchMapBool(p, "ok")), dispatchMapString(p, "backend"), p["live"])
 	fmt.Fprintf(&b, "  preflight : %s (%v/%v live)\n", dispatchMapString(pf, "verdict"), pf["live"], pf["cap"])
 	fmt.Fprintf(&b, "  account   : %s (t%v)  %s\n", firstString(dispatchMapString(a, "tag"), "-"), a["tier"], dispatchMapString(a, "model"))
+	if goal := dispatchMapString(p, "goal"); goal != "" {
+		fmt.Fprintf(&b, "  goal      : %s (%s)\n", goal, dispatchMapString(p, "goal_profile"))
+	}
 	fmt.Fprintf(&b, "  lane      : %s  (%d issues, %d steps)\n", firstString(dispatchMapString(p, "lane"), "-"), dispatchMapInt(p, "lane_issue_count"), dispatchMapInt(p, "lane_step_budget"))
 	if n := dispatchMapInt(p, "target_issue"); n != 0 {
 		fmt.Fprintf(&b, "  target    : #%d  %.54s\n", n, dispatchMapString(p, "issue_title"))

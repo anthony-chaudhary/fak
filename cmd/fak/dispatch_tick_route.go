@@ -195,18 +195,20 @@ func dispatchLastIssueStatus(state string) string {
 	return strings.ToUpper(state)
 }
 
-func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude map[string]bool, preferNewest bool, generation string) (dispatchLanePick, error) {
+func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude map[string]bool, preferNewest bool, generation, goalProfile string) (dispatchLanePick, error) {
 	router, err := dispatchRouteIssues(root, stderr)
 	if err != nil {
 		return dispatchLanePick{}, err
 	}
 	numsByLane := map[string][]int{}
 	treesByLane := map[string][]string{}
+	priorityByLane := map[string]map[int]int{}
 	counts := map[string]int{}
 	stepBudgets := map[string]int{}
 	for lane, info := range router.Lanes {
 		nums := append([]int(nil), info.Issues...)
 		treesByLane[lane] = append([]string(nil), info.Tree...)
+		priorityByLane[lane] = map[int]int{}
 		// Order the lane's open issues PRIORITY-first, then by recency (#1395), so
 		// PickTargetIssue (which takes the first not-skipped) drains the heaviest
 		// priority/P* work before newer unlabeled noise: an old priority/P1 outranks
@@ -231,6 +233,7 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 			if w, ok := info.Priority[n]; ok {
 				weight = w
 			}
+			priorityByLane[lane][n] = weight
 			cands[i] = dispatchtick.GenerationCandidate{Number: n, Weight: weight, Generation: info.Generation[n]}
 		}
 		numsByLane[lane] = dispatchtick.OrderEligibleGenerationCandidates(cands, generation, preferNewest)
@@ -255,6 +258,7 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 		guarded := !guardDisabled()
 		bestStepBudget := -1
 		bestCount := -1
+		bestPriority := -1
 		for lane, nums := range numsByLane {
 			if exclude[lane] {
 				continue
@@ -264,10 +268,10 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 				continue
 			}
 			stepBudget := stepBudgets[lane]
-			if stepBudget > bestStepBudget ||
-				(stepBudget == bestStepBudget && len(nums) > bestCount) ||
-				(stepBudget == bestStepBudget && len(nums) == bestCount && lane < chosen) {
+			priority := dispatchLaneTopPriority(nums, priorityByLane[lane])
+			if dispatchLaneBetterForGoal(goalProfile, priority, stepBudget, len(nums), lane, bestPriority, bestStepBudget, bestCount, chosen) {
 				chosen = lane
+				bestPriority = priority
 				bestStepBudget = stepBudget
 				bestCount = len(nums)
 			}
@@ -293,6 +297,43 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 		RouterError:      dispatchRouterError(router),
 		SelfSourceHeld:   selfSourceHeld,
 	}, nil
+}
+
+func dispatchLaneTopPriority(nums []int, weights map[int]int) int {
+	if len(nums) == 0 {
+		return -1
+	}
+	if w, ok := weights[nums[0]]; ok {
+		return w
+	}
+	return dispatchtick.PriorityWeightDefault
+}
+
+func dispatchLaneBetterForGoal(profile string, priority, stepBudget, count int, lane string, bestPriority, bestStepBudget, bestCount int, chosen string) bool {
+	if strings.TrimSpace(lane) == "" {
+		return false
+	}
+	if strings.TrimSpace(chosen) == "" {
+		return true
+	}
+	if profile == dispatchGoalProfileHighPriority {
+		if count <= 0 && bestCount > 0 {
+			return false
+		}
+		if count > 0 && bestCount <= 0 {
+			return true
+		}
+		if priority != bestPriority {
+			return priority > bestPriority
+		}
+	}
+	if stepBudget != bestStepBudget {
+		return stepBudget > bestStepBudget
+	}
+	if count != bestCount {
+		return count > bestCount
+	}
+	return lane < chosen
 }
 
 func dispatchRouteIssuesNative(root string, _ io.Writer) (dispatchtick.RouterPayload, error) {
