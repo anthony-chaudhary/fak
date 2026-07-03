@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/repoguard"
@@ -61,6 +62,7 @@ type hookPayload struct {
 	ToolName  string         `json:"tool_name"`
 	ToolInput map[string]any `json:"tool_input"`
 	Cwd       string         `json:"cwd"`
+	SessionID string         `json:"session_id"`
 }
 
 // runHook parses a PreToolUse payload and emits a deny decision on a violation.
@@ -93,7 +95,8 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 		workspaceRoot := repoguard.FindRepoRoot(cwd)
 		safeRoots := repoguard.SafeRootsForWorkspace(workspaceRoot)
-		return repoguard.Evaluate(payload.ToolName, payload.ToolInput, workspaceRoot, safeRoots), nil
+		liveMonitorIDs := liveMonitorIDsForRead(payload, workspaceRoot, stderr)
+		return repoguard.EvaluateWithLiveMonitorIDs(payload.ToolName, payload.ToolInput, workspaceRoot, safeRoots, liveMonitorIDs), nil
 	}()
 	if err != nil {
 		fmt.Fprintf(stderr, "repo_guard: internal error, allowing (%v)\n", err)
@@ -120,6 +123,11 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(advisory) > 0 {
 		fmt.Fprintf(stderr, "repo_guard (advisory): %s\n", repoguard.RenderReason(advisory))
 	}
+	// Durably record every finding we act on — deny AND advisory — so the value
+	// the guard delivered in a long session is a fact on disk, not an ephemeral
+	// stderr line the harness scrolls away. Fail-open: a journal error is logged
+	// and swallowed, never allowed to change the decision below.
+	recordDecisions(payload, append(denying, advisory...), stderr)
 	if len(denying) == 0 {
 		return 0
 	}
@@ -135,6 +143,43 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
 	}})
 	fmt.Fprintf(stderr, "repo_guard: DENY %s\n", reason)
 	return 0
+}
+
+func liveMonitorIDsForRead(payload hookPayload, workspaceRoot string, stderr io.Writer) map[string]bool {
+	if payload.ToolName != "Read" {
+		return nil
+	}
+	if _, ok := repoguard.LiveMonitorOutputTaskID(hookReadPath(payload.ToolInput)); !ok {
+		return nil
+	}
+	ids, err := repoguard.LiveMonitorTaskIDsFromJournalFile(repoGuardToolprocJournalPath(workspaceRoot), payload.SessionID)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			fmt.Fprintf(stderr, "repo_guard: live Monitor hint unavailable (%v)\n", err)
+		}
+		return nil
+	}
+	return ids
+}
+
+func repoGuardToolprocJournalPath(workspaceRoot string) string {
+	if p := strings.TrimSpace(os.Getenv("FAK_REPO_GUARD_TOOLPROC_JOURNAL")); p != "" {
+		return p
+	}
+	if p := strings.TrimSpace(os.Getenv("FAK_TOOLPROC_JOURNAL")); p != "" {
+		return p
+	}
+	return filepath.Join(workspaceRoot, ".fak", "toolproc", "journal.jsonl")
+}
+
+func hookReadPath(input map[string]any) string {
+	if v, ok := input["file_path"].(string); ok && v != "" {
+		return v
+	}
+	if v, ok := input["path"].(string); ok {
+		return v
+	}
+	return ""
 }
 
 // runCheck classifies a single Bash command and reports. Mirrors the --check arm

@@ -716,6 +716,10 @@ func dedup(in []string) []string {
 // --------------------------------------------------------------------------- //
 
 func evaluate(toolName string, toolInput map[string]any, workspaceRoot string, safeRoots []string) []Violation {
+	return evaluateWithLiveMonitorIDs(toolName, toolInput, workspaceRoot, safeRoots, nil)
+}
+
+func evaluateWithLiveMonitorIDs(toolName string, toolInput map[string]any, workspaceRoot string, safeRoots []string, liveMonitorIDs map[string]bool) []Violation {
 	switch toolName {
 	case "Bash":
 		command := stringField(toolInput, "command")
@@ -727,6 +731,8 @@ func evaluate(toolName string, toolInput map[string]any, workspaceRoot string, s
 		// out-of-tree and interactive classifiers parse POSIX shell syntax
 		// and would misread PowerShell forms.
 		return classifySleepWait(stringField(toolInput, "command"))
+	case "Read":
+		return classifyLiveMonitorOutputRead(readPath(toolInput), liveMonitorIDs)
 	case "Write", "Edit", "MultiEdit", "NotebookEdit":
 		fp := stringField(toolInput, "file_path")
 		if fp == "" {
@@ -742,6 +748,12 @@ func Evaluate(toolName string, toolInput map[string]any, workspaceRoot string, s
 	return evaluate(toolName, toolInput, workspaceRoot, safeRoots)
 }
 
+// EvaluateWithLiveMonitorIDs classifies one tool call and, for Read calls, refuses
+// a live Monitor's tasks/<id>.output path when the caller supplies live ids.
+func EvaluateWithLiveMonitorIDs(toolName string, toolInput map[string]any, workspaceRoot string, safeRoots []string, liveMonitorIDs map[string]bool) []Violation {
+	return evaluateWithLiveMonitorIDs(toolName, toolInput, workspaceRoot, safeRoots, liveMonitorIDs)
+}
+
 func stringField(m map[string]any, key string) string {
 	if m == nil {
 		return ""
@@ -752,14 +764,23 @@ func stringField(m map[string]any, key string) string {
 	return ""
 }
 
+func readPath(m map[string]any) string {
+	if fp := stringField(m, "file_path"); fp != "" {
+		return fp
+	}
+	return stringField(m, "path")
+}
+
 func renderReason(violations []Violation) string {
-	var outOfTree, interactive, sleeps []Violation
+	var outOfTree, interactive, sleeps, liveMonitorReads []Violation
 	for _, v := range violations {
 		switch v.Reason {
 		case ReasonInteractiveHang:
 			interactive = append(interactive, v)
 		case ReasonForegroundSleep:
 			sleeps = append(sleeps, v)
+		case ReasonLiveMonitorOutputRead:
+			liveMonitorReads = append(liveMonitorReads, v)
 		default:
 			outOfTree = append(outOfTree, v)
 		}
@@ -773,6 +794,9 @@ func renderReason(violations []Violation) string {
 	}
 	if len(sleeps) > 0 {
 		blocks = append(blocks, renderSleepReason(sleeps))
+	}
+	if len(liveMonitorReads) > 0 {
+		blocks = append(blocks, renderLiveMonitorOutputReason(liveMonitorReads))
 	}
 	return strings.Join(blocks, " | ")
 }
