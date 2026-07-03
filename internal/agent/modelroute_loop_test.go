@@ -29,6 +29,7 @@ import (
 // routed tool call actually dispatched to.
 type recordingEngine struct {
 	id   string
+	body []byte
 	mu   sync.Mutex
 	seen []string // the c.Engine value of every call dispatched here
 }
@@ -39,7 +40,11 @@ func (e *recordingEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.R
 	e.mu.Lock()
 	e.seen = append(e.seen, c.Engine)
 	e.mu.Unlock()
-	return engineResult(ctx, c, nil, []byte(`{"ok":true}`), false, e.id), nil
+	body := e.body
+	if body == nil {
+		body = []byte(`{"ok":true}`)
+	}
+	return engineResult(ctx, c, nil, body, false, e.id), nil
 }
 
 func (e *recordingEngine) calls() []string {
@@ -143,5 +148,38 @@ func TestExecViaKernel_RoutesNamedToolToDifferentEngine(t *testing.T) {
 	_, _ = execViaKernel(ctx, k, toolSearch, `{"origin":"LAX","destination":"BOS","date":"2026-08-02"}`, noRoute.routeToolEngine(toolSearch), traceEvent{})
 	if l := localtools.calls(); len(l) != 1 || l[0] != "" {
 		t.Fatalf("no-manifest unmatched tool %q: localtools default saw %v, want exactly one call with an UNSET Engine (\"\")", toolSearch, l)
+	}
+}
+
+func TestRunRouteManifestRoutesFakArmOnly(t *testing.T) {
+	Configure()
+	guard := &recordingEngine{id: "guard-engine-run", body: []byte(`{"confirmation":"RTE-1"}`)}
+	abi.RegisterEngine("guard-engine-run", guard)
+	manifest := &modelroute.Manifest{
+		Version: modelroute.Version,
+		Default: modelroute.Plan{Members: []modelroute.Member{{Model: "localtools", Role: "primary"}}},
+		Rules: []modelroute.Rule{
+			{
+				Name:  "book-to-run-guard",
+				Match: modelroute.Match{Aspect: modelroute.AspectToolCall, Tool: toolBook},
+				Plan:  modelroute.Plan{Members: []modelroute.Member{{Model: "guard-engine-run"}}},
+			},
+		},
+	}
+
+	res, trace, err := Run(context.Background(), NewMockPlanner("route"), DefaultTask, 12, WithRouteManifest(manifest))
+	if err != nil {
+		t.Fatalf("Run with route manifest: %v", err)
+	}
+	if !res.Fak.TaskCompleted {
+		t.Fatalf("fak arm should complete after routed book confirmation: %+v", res.Fak)
+	}
+	if g := guard.calls(); len(g) != 1 || g[0] != "guard-engine-run" {
+		t.Fatalf("routed Run fak arm dispatched to guard engine %v, want exactly one Engine=%q call", g, "guard-engine-run")
+	}
+	for _, ev := range trace {
+		if ev.Arm == "baseline" && ev.Tool == toolBook && ev.Verdict != "naive-exec" {
+			t.Fatalf("baseline book call should stay naive, got %+v", ev)
+		}
 	}
 }

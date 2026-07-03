@@ -216,11 +216,13 @@ func execNaive(tool, rawArgs string, m *ArmMetrics, ev traceEvent) (string, trac
 }
 
 // Run executes BOTH arms over the same task + planner and assembles the A/B
-// result. The fak arm runs first so its counters are clean.
-func Run(ctx context.Context, p Planner, task string, maxTurns int) (*RunResult, []traceEvent, error) {
+// result. The fak arm runs first so its counters are clean. Optional RunOptions
+// install fak-arm capabilities such as per-tool-call route manifests; the baseline
+// arm remains the naive "now" comparison path.
+func Run(ctx context.Context, p Planner, task string, maxTurns int, opts ...RunOption) (*RunResult, []traceEvent, error) {
 	var fakLog, baseLog []traceEvent
 
-	fakM, err := RunArm(ctx, p, task, true, maxTurns, &fakLog)
+	fakM, err := RunArm(ctx, p, task, true, maxTurns, &fakLog, opts...)
 	if err != nil {
 		return nil, nil, err
 	}
