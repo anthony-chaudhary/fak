@@ -579,6 +579,39 @@ class WorkerCountTest(unittest.TestCase):
                                              "name": "claude.exe", "cmdline": ""}
             self.assertEqual(mod.live_resolve_worker_pids(runs, alive={101}, probe=probe), {101})
 
+    def test_live_resolve_worker_pids_counts_guarded_fak_root(self) -> None:
+        # Guarded Claude workers record the `fak guard` root PID in the sidecar,
+        # not the claude child. If Windows hides that root cmdline, the image name
+        # plus spawn window must still count it as live.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            now = 1_000_000.0
+            side = runs / "resolve-2347-20260703-233432.pid"
+            side.write_text("27800", encoding="utf-8")
+            side.with_suffix(".backend").write_text("claude", encoding="utf-8")
+            os.utime(side, (now, now))
+            def probe(pid):
+                return {"alive": True, "create_time": now - 1,
+                        "name": "fak.exe", "cmdline": ""}
+            self.assertEqual(mod.live_resolve_worker_pids(runs, alive={27800}, probe=probe), {27800})
+
+    def test_live_resolve_worker_pids_rejects_old_fak_pid_after_sidecar(self) -> None:
+        # `fak.exe` is accepted only as a sidecar-authenticated guarded root.
+        # A stale sidecar whose pid was later reused by an unrelated fak command
+        # outside the spawn window must not pin capacity.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            now = 1_000_000.0
+            side = runs / "resolve-2347-20260703-233432.pid"
+            side.write_text("27800", encoding="utf-8")
+            os.utime(side, (now, now))
+            def probe(pid):
+                return {"alive": True, "create_time": now + 60 * 60,
+                        "name": "fak.exe", "cmdline": ""}
+            self.assertEqual(mod.live_resolve_worker_pids(runs, alive={27800}, probe=probe), set())
+
     def test_live_repair_worker_pid_counts_toward_cap(self) -> None:
         # A contract-repair worker (repair-<N>-<stamp>.pid, spawned by the
         # dispatcher when its whole contract-scan window fails the gate) burns

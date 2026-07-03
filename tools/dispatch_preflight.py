@@ -150,6 +150,12 @@ _SIDECAR_CREATE_AFTER_SLOP_SECONDS = 10
 # dispatcher at cap against ghosts. A bare shell image NEVER counts; only the
 # named agent backends do, and even then only inside the spawn window.
 _WORKER_BACKEND_IMAGES = ("claude", "opencode", "node")
+# A guarded issue worker's root process is ``fak guard -- <backend> ...``. The
+# backend child may be visible too, but the `.pid` sidecar records the root PID,
+# so the sidecar liveness fallback must accept a cmdline-hidden `fak.exe` inside
+# the spawn window. Keep this separate from `_WORKER_BACKEND_IMAGES` so a generic
+# command-line scan still requires an actual agent backend image.
+_SIDECAR_WORKER_IMAGES = (*_WORKER_BACKEND_IMAGES, "fak")
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -756,13 +762,14 @@ def _probe_image_is_worker_backend(probe: dict[str, Any]) -> bool:
     shell (cmd.exe / powershell / bash) is NEVER a worker, so it is rejected even
     inside the spawn window — that is what stops a recycled shell pid from pinning
     the cap. We match on the image stem so `claude.exe`, `opencode.exe`, `node`
-    all qualify; anything else does not.
+    all qualify. For sidecar-authenticated roots only, `fak` also qualifies
+    because guarded workers spawn as `fak guard -- <backend> ...`.
     """
     name = str(probe.get("name") or "").strip().lower()
     if not name:
         return False
     stem = name[:-4] if name.endswith(".exe") else name
-    return stem in _WORKER_BACKEND_IMAGES
+    return stem in _SIDECAR_WORKER_IMAGES
 
 
 def _sidecar_process_matches(pid: int, sidecar_mtime: float, *,
