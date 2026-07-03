@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -26,6 +27,13 @@ import (
 // `fak version` a reliable "is the fak/guard I'm running current?" check. The first line is
 // still appversion.Current() verbatim, so anything parsing line 1 is unaffected.
 func cmdVersion(w io.Writer) {
+	// `fak version modules` — the per-module version report (internal/modver).
+	// Dispatched here rather than in main.go so the contested dispatch table
+	// stays untouched; the bare `fak version` output below is unchanged (the
+	// self-update "build:" line parser depends on it).
+	if len(os.Args) > 2 && os.Args[2] == "modules" {
+		os.Exit(runVersionModules(os.Stdout, os.Stderr, os.Args[3:]))
+	}
 	fmt.Fprintln(w, appversion.Current())
 
 	bi, ok := debug.ReadBuildInfo()

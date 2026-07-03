@@ -149,6 +149,8 @@ front page.
 
 ### Latest working notes
 
+- [Version-everything backlog: epic + 44 contract-ready children (2026-07-03)](docs/notes/VERSION-EVERYTHING-BACKLOG-2026-07-03.md) -- auto-indexed dated note.
+- [Version everything: the per-module version spine (2026-07-03)](docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md) -- auto-indexed dated note.
 - [Userland intent controls: compile intent to knobs, react to witnessed progress (2026-07-03)](docs/notes/USERLAND-INTENT-CONTROLS-2026-07-03.md) — the control layer above the drive table: intent verbs (`retry --context less|equal|more`) compile to coherent multi-knob bundles (recall k, planner window, carryover classes, compaction budget) relative to the measured baseline, and a reactive policy algebra (`when stalled for 2 turns then checkpoint; retry(context=less)`) whose predicates are queries over WITNESSED signals only (ledger-verified progress delta, `step_advice`, touch-graph thrash cycles) with narrow-never-widen verbs and pre-authorized retry envelopes — absolute turn/token limits demoted to the outermost operator envelope.
 - [Pulling the project work apart: three layers, one verb each (2026-07-03)](docs/notes/PROJECT-WORK-THREE-LAYERS-2026-07-03.md) -- auto-indexed dated note.
 - [Least privilege across fak — one principle, many enforcement axes](docs/notes/EXPLAINER-least-privilege-across-fak-2026-07-02.md) -- auto-indexed dated note.

@@ -1,0 +1,1103 @@
+{
+  "candidates": [
+    {
+      "key": "modver-epic",
+      "title": "epic: version everything — per-module versions, score trends, and the versioned-growth program",
+      "why_now": "The spine shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger): 410 modules now carry derived versions. This epic tracks the program that grows around it: more key spaces, version-to-score trends, guard/dos integration, and productization.",
+      "in_scope": "Coordinating parent for the modver-* children; program-level decisions (key-space priorities, schema evolution).",
+      "out_of_scope": "Any single feature — every unit of work is a child issue.",
+      "done_condition": "All child issues closed or explicitly retired; per AGENTS.md worktype rules, classify as a discrete deliverable epic unless promoted to an ongoing program in internal/worktype.",
+      "witness": "fak milestone report shows the epic with all children resolved.",
+      "lane": "modver",
+      "labels": [
+        "version-everything",
+        "epic"
+      ],
+      "priority": "P1",
+      "parent_ref": "goal:version-everything-2026-07-03",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close."
+    },
+    {
+      "key": "modver-tools-keyspace",
+      "title": "modver: version the grandfathered tools/*.py scripts as modules",
+      "why_now": "tools/ holds ~460 frozen Python scripts the pythongate ratchet tracks; their churn is invisible to the module ledger, so porting-to-Go progress has no version trend.",
+      "in_scope": "Extend trackedRoots/moduleOf with a tools key space (tools/<name> per script or per family); ledger rows for tools modules.",
+      "done_condition": "fak version modules lists tools/* modules with revs; delta-stamp converges.",
+      "witness": "modver unit test covering tools moduleOf + a live stamp showing tools rows.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/",
+        "cmd/fak/version_modules.go"
+      ],
+      "labels": [
+        "version-everything"
+      ],
+      "priority": "P2",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-docs-keyspace",
+      "title": "modver: version docs/ pages so doc freshness is a rev, not a guess",
+      "why_now": "docfreshrsi and llms-full syncs reason about doc staleness with ad-hoc signals; a derived per-doc rev makes freshness mechanical.",
+      "in_scope": "docs/ key space (per top-level doc file or per docs/<dir>); integration hint for docfreshrsi.",
+      "done_condition": "docs modules appear in the report and ledger; docfreshrsi can read rev from the ledger.",
+      "witness": "unit test + one live stamp containing docs rows.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-skills-keyspace",
+      "title": "modver: version agent skills so skill drift is visible",
+      "why_now": "Skills steer agent behavior but have no version identity; a skill edited yesterday and a skill untouched for a month read the same.",
+      "in_scope": "Key space for the repo's skill/command definition files; rev + last-touch surfaced per skill.",
+      "done_condition": "Skills listed as modules with revs; a skills-drift query is one jq over the ledger.",
+      "witness": "unit test + live stamp with skill rows.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "skills"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-policy-keyspace",
+      "title": "modver: version policy manifests (examples/*.json, guard-default-policy)",
+      "why_now": "Policies are the deployable capability floor; an operator should be able to cite 'policy X at rev N' the way they cite a binary build.",
+      "in_scope": "Policy-manifest key space; rev surfaced beside policy name in fak policy output (advisory).",
+      "done_condition": "Policy files carry derived revs in the report/ledger.",
+      "witness": "unit test + live stamp with policy rows.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/",
+        "cmd/fak/policy.go"
+      ],
+      "labels": [
+        "version-everything",
+        "guard"
+      ],
+      "priority": "P2",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-dostoml-keyspace",
+      "title": "modver: version the dos.toml refusal vocabulary",
+      "why_now": "The closed reasons vocabulary evolves; agents recovering from refusals should be able to detect they hold a stale vocabulary rev.",
+      "in_scope": "dos.toml (and per-[reasons.*] block if cheap) as a versioned unit; rev exposed via dos check-reason plumbing.",
+      "done_condition": "dos.toml rev in ledger; dos doctor can report vocabulary rev.",
+      "witness": "unit test + ledger row for dos.toml.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/",
+        "dos.toml"
+      ],
+      "labels": [
+        "version-everything",
+        "dos"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-workflows-keyspace",
+      "title": "modver: version CI/cron/workflow units (.github/workflows, scheduled tasks)",
+      "why_now": "High-velocity processes are steered by workflow files whose drift is untracked; a workflow rev ties a CI behavior change to a date and commit mechanically.",
+      "in_scope": ".github/workflows/* key space; optionally tools/register_*.ps1 scheduled-task installers.",
+      "done_condition": "Workflow modules in report/ledger.",
+      "witness": "unit test + live stamp rows.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "ci"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-mcp-surface-rev",
+      "title": "modver: expose module versions through the MCP index (fak_index_leaves)",
+      "why_now": "Agents already query fak_index_leaves for the leaf map; adding version/rev makes staleness reasoning available in-context without shelling out.",
+      "in_scope": "Wire modver snapshot (or last ledger row) into the index leaves payload.",
+      "done_condition": "fak_index_leaves rows carry version r<rev>+g<sha>.",
+      "witness": "index test asserting the version field.",
+      "lane": "modver",
+      "paths": [
+        "internal/devindex/",
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "mcp"
+      ],
+      "priority": "P2",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-scorecard-adapter-slop",
+      "title": "modver: adapter folding slop/code scorecard output into {module: score}",
+      "why_now": "The spine joins flat {module: number} maps, but the scorecard fleet keys by metric; without an adapter the versions-to-scores lens has no automatic feed.",
+      "in_scope": "A fold (Go, internal/modver or a sibling leaf) from slop-score / code-slop scorecard per-file output to per-module aggregate scores; document the aggregation rule.",
+      "done_condition": "fak version modules --scores <(adapter) joins >0 scores mechanically in CI or a nightrun turn.",
+      "witness": "adapter unit test with fixture scorecard output.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/",
+        "tools/scorecard_control_pane.py"
+      ],
+      "labels": [
+        "version-everything",
+        "scorecards"
+      ],
+      "priority": "P1",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-coverage-join",
+      "title": "modver: join go test coverage per package as a module score",
+      "why_now": "Coverage is already computed per package (coverage.out artifacts exist in-tree); it is the cheapest real score to trend against module revs.",
+      "in_scope": "coverage.out -> {module: percent} fold; stamp rows carry coverage as score.",
+      "done_condition": "A ledger stamp with coverage joined lands from one command.",
+      "witness": "fold unit test with a coverage.out fixture.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "qa"
+      ],
+      "priority": "P2",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-maturity-join",
+      "title": "modver: join maturity/support-maturity grades per module",
+      "why_now": "internal/maturity and supportmaturityscore already grade surfaces; keying those grades by module makes 'is this leaf production-grade at its current rev' one query.",
+      "in_scope": "Maturity score -> module map adapter.",
+      "done_condition": "Maturity scores joined into a stamp.",
+      "witness": "adapter unit test.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/",
+        "internal/maturity/"
+      ],
+      "labels": [
+        "version-everything",
+        "scorecards"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-trend-verb",
+      "title": "fak version trend: rev-velocity and score series per module from the ledger",
+      "why_now": "The ledger accumulates history but nothing reads it back; the goal of mapping versions to scores over time needs a query verb, not jq folklore.",
+      "in_scope": "fak version trend [--module M] [--since T] [--json]: rev velocity (revs/week), score series, top movers, dormant list.",
+      "done_condition": "Trend output over the seeded ledger renders movers + dormants.",
+      "witness": "unit test over a fixture ledger.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/",
+        "cmd/fak/version_modules.go"
+      ],
+      "labels": [
+        "version-everything"
+      ],
+      "priority": "P1",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-score-regression-gate",
+      "title": "modver: advisory gate — flag a module whose score dropped across revs",
+      "why_now": "Once scores ride the ledger, a score regression between rev N and N+k is detectable at commit time; an advisory nudge closes the loop from measurement to steering.",
+      "in_scope": "An advisory (PRIOR_ART-style, never blocking at first) that compares the current joined score against the module's last ledger row.",
+      "done_condition": "Gate emits a warning on a fixture regression and stays silent otherwise.",
+      "witness": "gate unit test both directions.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/",
+        "internal/hooks/"
+      ],
+      "labels": [
+        "version-everything",
+        "guard"
+      ],
+      "priority": "P2",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-nightrun-stamp",
+      "title": "nightrun/super-loop turn: stamp the module-versions ledger nightly",
+      "why_now": "Trends need cadence; a nightly delta stamp is one cheap turn and makes the ledger a real time series instead of a manual artifact.",
+      "in_scope": "Wire fak version modules --stamp into the nightrun/super-loop turn list; commit discipline for the ledger rows it appends.",
+      "done_condition": "Two consecutive scheduled stamps land as commits with only-moved rows.",
+      "witness": "two dated ledger commits from the scheduled runner.",
+      "lane": "modver",
+      "paths": [
+        "docs/nightrun/module-versions.jsonl"
+      ],
+      "labels": [
+        "version-everything",
+        "super-loop",
+        "dogfood"
+      ],
+      "priority": "P1",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-doctor-movers",
+      "title": "fak doctor: report top fastest-moving and dormant modules",
+      "why_now": "Dogfooding surface: operators reading doctor output should see where the system is growing without asking.",
+      "in_scope": "A doctor section reading the ledger (or a live snapshot) for top-5 movers + dormant-with-open-issues candidates.",
+      "done_condition": "fak doctor renders the movers section.",
+      "witness": "doctor render test.",
+      "lane": "modver",
+      "paths": [
+        "cmd/fak/doctor.go",
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "dogfood"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-stamp-flock",
+      "title": "modver: advisory-lock the ledger append against concurrent stampers",
+      "why_now": "This is a multi-session tree; two agents stamping simultaneously interleave appends. Rows are line-atomic-ish today but nothing proves it.",
+      "in_scope": "Guard the append with internal/flock; a race test with two concurrent stampers.",
+      "done_condition": "Concurrent stamps produce a parseable ledger with no duplicate/no torn rows.",
+      "witness": "race test under WSL -race.",
+      "lane": "modver",
+      "paths": [
+        "cmd/fak/version_modules.go",
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "qa"
+      ],
+      "priority": "P2",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-ledger-compaction",
+      "title": "modver: ledger compaction/rotation policy so growth stays bounded",
+      "why_now": "Delta rows bound growth to real change, but over months the file still grows without bound; the repo needs a stated compaction rule before it becomes archaeology.",
+      "in_scope": "Decide + implement: keep-last-K-per-module compaction verb, or yearly rotation; document in the schema note.",
+      "done_condition": "Compaction verb exists with a converging test; policy documented.",
+      "witness": "compaction unit test.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "qa"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-merge-commit-semantics",
+      "title": "modver: decide and pin merge-commit counting semantics for rev",
+      "why_now": "git log default shows merges but --name-only on merges lists nothing by default; the rev semantics under shared-trunk merges must be a decided, tested fact, not an accident.",
+      "in_scope": "Decide (likely: first-parent, no-merges) and pin with a fixture test; document in package doc.",
+      "done_condition": "Semantics documented + tested; rev stable across an in-place trunk merge.",
+      "witness": "fixture test with a merge in history.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "qa"
+      ],
+      "priority": "P1",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-rename-follow",
+      "title": "modver: module rename/move continuity (renames should not reset rev)",
+      "why_now": "Leaves get renamed (renameconcept exists for concept renames); today a renamed module restarts at rev 1, breaking trend continuity.",
+      "in_scope": "Rename detection (git log --follow per flagged module, or a small alias map); decide continuity rule.",
+      "done_condition": "A renamed fixture module carries its rev across the rename.",
+      "witness": "fixture test.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "qa"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-ghost-report",
+      "title": "modver: tombstone report for deleted modules",
+      "why_now": "Deleted modules are excluded from the live report by design, but 'what died and when' is itself a growth-shape fact worth one query.",
+      "in_scope": "fak version modules --ghosts: history-only modules with final rev + deletion commit.",
+      "done_condition": "Ghost listing renders over the real repo.",
+      "witness": "unit test with deleted-module fixture.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/",
+        "cmd/fak/version_modules.go"
+      ],
+      "labels": [
+        "version-everything"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-parity-windows-wsl",
+      "title": "modver: Windows/WSL parity witness (separators, CRLF, date formats)",
+      "why_now": "The fleet runs the same repo natively and under WSL; moduleOf normalizes backslashes but nothing witnesses end-to-end parity of report output across hosts.",
+      "in_scope": "A parity test comparing snapshot output fields for fixture data under both path styles; CI wiring where feasible.",
+      "done_condition": "Parity test green under WSL; documented host caveats.",
+      "witness": "parity unit test.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "qa"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-monotonicity-property",
+      "title": "modver: property test — rev never decreases across successive HEADs",
+      "why_now": "Monotonicity is the load-bearing claim of derived versions; it deserves a property witness, not an assumption.",
+      "in_scope": "Property/fixture test: for a synthetic history, snapshot at each commit; assert per-module rev is nondecreasing.",
+      "done_condition": "Property test green.",
+      "witness": "the property test.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "qa"
+      ],
+      "priority": "P2",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-latency-budget",
+      "title": "modver: snapshot latency budget + bench on large histories",
+      "why_now": "One git log pass is fast at 4.8k commits; the turntaxmeter discipline says declare the envelope before the repo is 50k commits and the verb quietly becomes slow.",
+      "in_scope": "Bench the snapshot; declare an envelope (turntaxmeter style); optimize (e.g. --since incremental parse from last ledger head) only if the bench demands it.",
+      "done_condition": "Bench committed + envelope declared.",
+      "witness": "bench output in the issue + envelope test.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "perf"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-incremental-snapshot",
+      "title": "modver: incremental snapshot from the last ledger head (log since, not full history)",
+      "why_now": "The full-history pass is O(history); stamping only needs commits since the last stamped head plus prior revs from the ledger — O(delta) and the natural super-loop shape.",
+      "in_scope": "--since-ledger mode: parse last head per module from ledger, git log <head>..HEAD, add counts.",
+      "done_condition": "Incremental stamp equals full-history stamp on the real repo (equivalence witness).",
+      "witness": "equivalence test full vs incremental.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "perf"
+      ],
+      "priority": "P2",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-dos-verify-binding",
+      "title": "dos verify: bind shipped claims to module@rev, not just a SHA",
+      "why_now": "A claim 'gateway fix shipped' witnessed as internal/gateway@r653 is more precise and more human-legible than a bare commit hash, and survives history reading better.",
+      "in_scope": "dos verify output (and the MCP mirror) annotates verified claims with the touched modules' revs at the witnessing commit.",
+      "done_condition": "dos_verify response carries module@rev for a real commit.",
+      "witness": "verify test over a fixture commit.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "dos"
+      ],
+      "priority": "P2",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-stale-rev-token",
+      "title": "dos.toml: MODULE_REV_STALE refusal token — recall pinned to an old module rev",
+      "why_now": "STALE_RECALL exists for status/plan memory; the module-rev analogue is mechanical: a loop acting on analysis of internal/x@r40 while the tree holds r45 should be refused with a named reason.",
+      "in_scope": "New [reasons.MODULE_REV_STALE] with summary+fix; a checker comparing recalled rev vs live rev; wire into the recall gate advisory-first.",
+      "done_condition": "dos check-reason MODULE_REV_STALE resolves; gate fires on a fixture stale recall.",
+      "witness": "gate unit test.",
+      "lane": "modver",
+      "paths": [
+        "dos.toml",
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "dos",
+        "guard"
+      ],
+      "priority": "P2",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-guard-audit-rev",
+      "title": "guard audit journal: stamp rows with the module rev of the judged surface",
+      "why_now": "Post-hoc guard forensics ('which policy/module state produced this deny?') currently reconstructs from SHAs; carrying module@rev in the journal row makes the reconstruction free.",
+      "in_scope": "Audit journal row gains optional module_rev fields for policy + adjudicator modules at decision time (cheap cached lookup, never a per-call git run).",
+      "done_condition": "Journal rows carry revs; zero added per-call git cost (cached).",
+      "witness": "journal row test + a latency check.",
+      "lane": "modver",
+      "paths": [
+        "internal/guard/",
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "guard"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-collision-prior",
+      "title": "dispatch: use rev-velocity as a collision-risk prior for lane arbitration",
+      "why_now": "COLLISION_RISK arbitration is lease-based; a module moving 10 revs/week is a hotter collision surface than a dormant one, and the ledger already knows.",
+      "in_scope": "dos arbitrate / dispatch preflight reads rev velocity per lane and raises the collision prior for hot lanes (advisory signal, not a new refusal).",
+      "done_condition": "Arbitration output shows the velocity signal for a hot fixture lane.",
+      "witness": "arbitrate unit test.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/",
+        "internal/dispatchtick/"
+      ],
+      "labels": [
+        "version-everything",
+        "dispatch",
+        "super-loop"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-whatschanged-revs",
+      "title": "fak whats-changed: report module rev deltas alongside commits",
+      "why_now": "whats-changed lists peer commits under paths; saying 'internal/gateway moved r650→r653' compresses the same information into the unit agents will learn to think in.",
+      "in_scope": "whats-changed output gains a per-module rev-delta summary line.",
+      "done_condition": "Readout shows rev deltas for a fixture range.",
+      "witness": "whatschanged render test.",
+      "lane": "modver",
+      "paths": [
+        "internal/whatschanged/",
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-cli-reference-docs",
+      "title": "docs: fak version modules in cli-reference + LEARNING-PATH",
+      "why_now": "The verb shipped ahead of its reference docs; the doc map (llms.txt, cli-reference.md) must not lag the surface.",
+      "in_scope": "cli-reference entry, LEARNING-PATH placement, llms.txt pointer to the spine note.",
+      "done_condition": "Docs updated and index-synced.",
+      "witness": "docs commit + index-sync gate green.",
+      "lane": "docs",
+      "paths": [
+        "docs/cli-reference.md",
+        "LEARNING-PATH.md"
+      ],
+      "labels": [
+        "version-everything",
+        "docs"
+      ],
+      "priority": "P2",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-schema-doc",
+      "title": "docs: fak-module-versions/1 schema contract (a standards page)",
+      "why_now": "Ledger consumers (trend verb, dashboards, dos bindings) need a written contract before three readers invent three interpretations.",
+      "in_scope": "docs/standards page: row fields, delta semantics, compaction policy pointer, evolution rules (additive-only /1 -> /2 discipline).",
+      "done_condition": "Standards page committed and linked from the spine note.",
+      "witness": "docs commit.",
+      "lane": "docs",
+      "paths": [
+        "docs/standards/"
+      ],
+      "labels": [
+        "version-everything",
+        "docs"
+      ],
+      "priority": "P2",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-growth-viz",
+      "title": "demo: module-growth visualization page from the ledger",
+      "why_now": "The growth story ('watch the kernel grow module by module') is a marketing/demos asset; the ledger is already the data source.",
+      "in_scope": "A demos.html section or standalone page rendering rev timelines / top movers from module-versions.jsonl; static, no server.",
+      "done_condition": "Page renders from the committed ledger; linked from run-the-demos.",
+      "witness": "screenshot in the issue + committed page.",
+      "lane": "docs",
+      "paths": [
+        "docs/demos.html",
+        "docs/run-the-demos.md"
+      ],
+      "labels": [
+        "version-everything",
+        "demos",
+        "productize"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-cli-ergonomics",
+      "title": "fak version modules: --top/--sort/--only ergonomics",
+      "why_now": "410 rows is a wall; the human path needs top-N by rev/velocity and prefix filtering to be the report people actually read.",
+      "in_scope": "--top N, --sort name|rev|date, --only <prefix> flags.",
+      "done_condition": "Flags work with render tests.",
+      "witness": "render unit tests.",
+      "lane": "modver",
+      "paths": [
+        "cmd/fak/version_modules.go"
+      ],
+      "labels": [
+        "version-everything"
+      ],
+      "priority": "P2",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-info-pane",
+      "title": "fak info pane: show the active lane's module rev beside the binary stamp",
+      "why_now": "The info pane already shows the binary staleness tell; the lane's module rev is the working-set staleness tell for the session.",
+      "in_scope": "Info header gains 'lane internal/x@rN' when a lane is resolvable.",
+      "done_condition": "Pane renders the rev tag.",
+      "witness": "pane render test.",
+      "lane": "modver",
+      "paths": [
+        "cmd/fak/info.go",
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "dogfood"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-release-notes-gen",
+      "title": "release: generate the module-movement section of release notes from rev deltas",
+      "why_now": "Release notes hand-summarize movement; 'modules moved since v0.36: gateway r640→r653, …' is mechanical from the ledger and honest by construction.",
+      "in_scope": "release ship pipeline gains a generated module-delta section (tag-to-tag).",
+      "done_condition": "A cut release note carries the generated section.",
+      "witness": "release helper unit test + one real note.",
+      "lane": "release",
+      "paths": [
+        "internal/release/",
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "release"
+      ],
+      "priority": "P2",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-appversion-drift",
+      "title": "modver: detect VERSION-vs-ledger drift (release staleness per module)",
+      "why_now": "release-staleness measures tag lag for the whole binary; per-module 'moved N revs since the last tag' names WHAT is rotting behind @latest, not just that something is.",
+      "in_scope": "A drift readout joining tag history with module revs; feeds release-readiness.",
+      "done_condition": "Readout lists modules moved since last tag.",
+      "witness": "unit test over fixture tags.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/",
+        "internal/releasestale/"
+      ],
+      "labels": [
+        "version-everything",
+        "release"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-milestone-integration",
+      "title": "fak milestone report: show module revs/velocity for epic-linked lanes",
+      "why_now": "Epic progress bars say what closed; module velocity says where the code actually moved — both lenses on one report catches 'issues closing, code dormant' dissonance.",
+      "in_scope": "Milestone report rows gain lane rev velocity from the ledger.",
+      "done_condition": "Report renders velocity beside epics.",
+      "witness": "report render test.",
+      "lane": "modver",
+      "paths": [
+        "internal/milestonereport/",
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-commit-hook-advisory",
+      "title": "commit hook advisory: (fak leaf) stamp implies that module's rev is about to bump — cross-check",
+      "why_now": "The stamp/lane doctor checks path-lane consistency; the modver lens adds 'your subject claims leaf X, this commit bumps modules Y,Z' — a cheap mislabel catch at the only fixable moment.",
+      "in_scope": "Advisory line in fak commit --preview naming the modules the staged paths bump.",
+      "done_condition": "Preview shows bumped modules; zero added latency beyond budget.",
+      "witness": "preview unit test.",
+      "lane": "modver",
+      "paths": [
+        "internal/safecommit/",
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "guard",
+        "velocity"
+      ],
+      "priority": "P2",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-dormant-finder",
+      "title": "super-loop fuel: dormant-module finder (no rev movement but open issues reference it)",
+      "why_now": "Dispatch loops need fuel discovery; 'module untouched 30 days with open issues naming its paths' is a mechanical work-queue no one maintains by hand.",
+      "in_scope": "A readout joining ledger last-dates with open-issue path references; JSON for the dispatcher.",
+      "done_condition": "Finder lists dormant candidates on the real repo.",
+      "witness": "unit test over fixtures.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "super-loop",
+        "dispatch"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-trendreport-fold",
+      "title": "trend report: weekly module-growth digest through internal/trendreport",
+      "why_now": "trendreport already renders trend digests; module growth belongs in the same weekly surface operators already read.",
+      "in_scope": "Fold ledger series into the trendreport pipeline: top movers, new modules, deaths, score deltas.",
+      "done_condition": "Weekly digest section renders from the ledger.",
+      "witness": "fold unit test.",
+      "lane": "modver",
+      "paths": [
+        "internal/trendreport/",
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-score-provenance",
+      "title": "modver: score-join provenance labels (witnessed/observed/modeled) per net-true-value",
+      "why_now": "Joined scores will get quoted; the net-true-value standard requires provenance labels so a modeled score never masquerades as a witnessed one in a trend chart.",
+      "in_scope": "Optional score_provenance field on rows; LoadScores accepts {module: {score, provenance}} extended shape (back-compat with flat).",
+      "done_condition": "Rows carry provenance when supplied; flat maps still work.",
+      "witness": "unit tests for both shapes.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "honesty"
+      ],
+      "priority": "P2",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-plugin-abi-rev",
+      "title": "modver: surface the frozen ABI's rev as the plugin-compatibility tell",
+      "why_now": "internal/abi is the additive-only plugin seam; 'ABI at rev N' is the version a plugin/extension author actually needs to cite for compatibility claims.",
+      "in_scope": "ABI module rev surfaced in fak info/EXTENDING docs; a note on additive-only meaning revs are backward-compatible by construction.",
+      "done_condition": "ABI rev visible in one operator surface + doc line.",
+      "witness": "render test.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/",
+        "EXTENDING.md"
+      ],
+      "labels": [
+        "version-everything",
+        "plugins"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-claims-tagging",
+      "title": "CLAIMS.md: cite module@rev in claim lines for mechanical claim aging",
+      "why_now": "Claims rot silently; a claim citing internal/x@r40 while x sits at r60 is mechanically flagged as needing re-verification — claims-lint can do the aging.",
+      "in_scope": "Optional @rev suffix convention in CLAIMS.md lines + a claims-lint advisory comparing cited vs live rev.",
+      "done_condition": "Lint flags an aged fixture claim.",
+      "witness": "claims-lint unit test.",
+      "lane": "modver",
+      "paths": [
+        "CLAIMS.md",
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "honesty"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-first-class-semver",
+      "title": "modver: opt-in declared semver overlay for modules that graduate to contracts",
+      "why_now": "Derived rev is the default for all 410 modules, but a handful (abi, policy schema, ledger schemas) carry real compatibility contracts where MAJOR.MINOR semantics matter; those deserve an opt-in declared overlay reconciled against the derived rev.",
+      "in_scope": "A small declared map (module -> semver) validated at test time against derived history (a declared bump must coincide with real movement); render as v1.2.0+r47.",
+      "done_condition": "Overlay renders for one graduated module with validation test.",
+      "witness": "validation unit test.",
+      "lane": "modver",
+      "paths": [
+        "internal/modver/"
+      ],
+      "labels": [
+        "version-everything",
+        "productize"
+      ],
+      "priority": "P3",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    },
+    {
+      "key": "modver-agentsmd-doctrine",
+      "title": "AGENTS.md: the version-everything doctrine as a standing rule",
+      "why_now": "Agents adopt what the entry-point doc states; one paragraph (modules carry derived revs; cite module@rev in claims/handoffs; stamp on nightrun) turns the spine into a practice.",
+      "in_scope": "AGENTS.md section + llms.txt pointer.",
+      "done_condition": "Doctrine paragraph committed.",
+      "witness": "docs commit.",
+      "lane": "docs",
+      "paths": [
+        "AGENTS.md"
+      ],
+      "labels": [
+        "version-everything",
+        "docs"
+      ],
+      "priority": "P2",
+      "parent_ref": "modver-epic",
+      "current_state": "The version-everything spine is shipped (internal/modver + fak version modules + the fak-module-versions/1 ledger seeded with 410 modules); this unit does not exist yet.",
+      "working_spine": "internal/modver (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak version modules shell (cmd/fak/version_modules.go) are the working base to extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.",
+      "out_of_scope": "Everything not named in in_scope; other modver-* children; non-additive changes to the fak-module-versions/1 schema (a breaking row change is a /2 with its own contract).",
+      "acceptance_gate": "make ci green including the named witness test; fak commit --preview clean with the lane (fak <leaf>) stamp before committing.",
+      "closure_binding": "Closed only by a ship commit whose body carries 'Closes #<this issue>' and whose diff lands the named witness in the same commit; a bare (#N) subject reference is a mention, not a close.",
+      "expected_steps": 5
+    }
+  ]
+}
