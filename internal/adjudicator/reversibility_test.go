@@ -62,6 +62,72 @@ func TestReversibilityClassifiesCommands(t *testing.T) {
 			args: map[string]any{"file_path": "tmp/cache.bin"},
 			want: ReversibilityIrreversible,
 		},
+		{
+			name: "grep pattern mentioning git push is reversible",
+			tool: "Bash",
+			args: map[string]any{"command": `grep -rn "git push" docs/`},
+			want: ReversibilityReversible,
+		},
+		{
+			name: "commit message mentioning push is reversible",
+			tool: "Bash",
+			args: map[string]any{"command": `git commit -m "docs: explain when to push"`},
+			want: ReversibilityReversible,
+		},
+		{
+			name: "grep for mail is reversible",
+			tool: "Bash",
+			args: map[string]any{"command": "grep -c mail internal/gateway/*.go"},
+			want: ReversibilityReversible,
+		},
+		{
+			name: "echo mentioning rm -rf is reversible",
+			tool: "Bash",
+			args: map[string]any{"command": `echo "never run rm -rf blindly"`},
+			want: ReversibilityReversible,
+		},
+		{
+			name: "git log grep for npm publish is reversible",
+			tool: "Bash",
+			args: map[string]any{"command": `git log --grep "npm publish"`},
+			want: ReversibilityReversible,
+		},
+		{
+			name: "docker run --rm is reversible",
+			tool: "Bash",
+			args: map[string]any{"command": "docker run --rm -it ubuntu bash"},
+			want: ReversibilityReversible,
+		},
+		{
+			name: "push in second sequence segment is outward-facing",
+			tool: "Bash",
+			args: map[string]any{"command": `git commit -m "fix: gate" && git push`},
+			want: ReversibilityOutwardFacing,
+		},
+		{
+			name: "env assignment and sudo wrapper still expose rm",
+			tool: "Bash",
+			args: map[string]any{"command": "FOO=1 sudo rm -rf x"},
+			want: ReversibilityIrreversible,
+		},
+		{
+			name: "mail in second pipe segment is outward-facing",
+			tool: "Bash",
+			args: map[string]any{"command": "echo hi | mail bob"},
+			want: ReversibilityOutwardFacing,
+		},
+		{
+			name: "sql drop payload is still irreversible",
+			tool: "Bash",
+			args: map[string]any{"command": `psql -c "drop database x"`},
+			want: ReversibilityIrreversible,
+		},
+		{
+			name: "git reset hard is still irreversible",
+			tool: "Bash",
+			args: map[string]any{"command": "git reset --hard HEAD~1"},
+			want: ReversibilityIrreversible,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

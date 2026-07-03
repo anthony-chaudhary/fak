@@ -113,29 +113,26 @@ func hasDryRunPreview(cmd string, args map[string]any) bool {
 }
 
 func commandOutwardFacing(cmd string) bool {
-	words := commandWords(cmd)
-	if len(words) == 0 {
-		return false
-	}
+	segs := commandSegments(cmd)
 	lower := strings.ToLower(cmd)
 	switch {
-	case containsWord(words, "slack"), containsWord(words, "sendmail"), containsWord(words, "mail"), containsWord(words, "mutt"):
+	case segmentHeadIs(segs, "slack", "sendmail", "mail", "mutt"):
 		return true
 	case strings.Contains(lower, "webhook"):
 		return true
-	case orderedWords(words, "git", "push"):
+	case segmentHasPrefix(segs, "git", "push"):
 		return true
-	case orderedWords(words, "docker", "push"), orderedWords(words, "npm", "publish"),
-		orderedWords(words, "cargo", "publish"), orderedWords(words, "gem", "push"),
-		orderedWords(words, "twine", "upload"):
+	case segmentHasPrefix(segs, "docker", "push"), segmentHasPrefix(segs, "npm", "publish"),
+		segmentHasPrefix(segs, "cargo", "publish"), segmentHasPrefix(segs, "gem", "push"),
+		segmentHasPrefix(segs, "twine", "upload"):
 		return true
-	case orderedWords(words, "gh", "issue", "create"), orderedWords(words, "gh", "issue", "comment"),
-		orderedWords(words, "gh", "issue", "edit"), orderedWords(words, "gh", "issue", "close"),
-		orderedWords(words, "gh", "issue", "reopen"), orderedWords(words, "gh", "pr", "create"),
-		orderedWords(words, "gh", "pr", "comment"), orderedWords(words, "gh", "pr", "merge"),
-		orderedWords(words, "gh", "release", "create"), orderedWords(words, "gh", "release", "upload"):
+	case segmentHasPrefix(segs, "gh", "issue", "create"), segmentHasPrefix(segs, "gh", "issue", "comment"),
+		segmentHasPrefix(segs, "gh", "issue", "edit"), segmentHasPrefix(segs, "gh", "issue", "close"),
+		segmentHasPrefix(segs, "gh", "issue", "reopen"), segmentHasPrefix(segs, "gh", "pr", "create"),
+		segmentHasPrefix(segs, "gh", "pr", "comment"), segmentHasPrefix(segs, "gh", "pr", "merge"),
+		segmentHasPrefix(segs, "gh", "release", "create"), segmentHasPrefix(segs, "gh", "release", "upload"):
 		return true
-	case curlWrites(cmd), httpieWrites(words), ghAPIWrites(words):
+	case curlWrites(cmd), httpieWrites(segs), ghAPIWrites(segs):
 		return true
 	default:
 		return false
@@ -143,20 +140,18 @@ func commandOutwardFacing(cmd string) bool {
 }
 
 func commandIrreversible(cmd string) bool {
+	segs := commandSegments(cmd)
 	words := commandWords(cmd)
-	if len(words) == 0 {
-		return false
-	}
 	lower := strings.ToLower(cmd)
 	switch {
-	case containsAnyWord(words, "rm", "rmdir", "del", "erase", "shred", "truncate", "mkfs"):
+	case segmentHeadIs(segs, "rm", "rmdir", "del", "erase", "shred", "truncate", "mkfs", "remove-item"):
 		return true
-	case strings.Contains(lower, "remove-item"):
+	case segmentHasPrefix(segs, "git", "clean"), segmentHasPrefix(segs, "git", "reset", "hard"):
 		return true
-	case orderedWords(words, "git", "clean"), orderedWords(words, "git", "reset", "hard"):
+	case segmentHasPrefix(segs, "terraform", "destroy"), segmentHasPrefix(segs, "kubectl", "delete"):
 		return true
-	case orderedWords(words, "terraform", "destroy"), orderedWords(words, "kubectl", "delete"):
-		return true
+	// Payload scans stay whole-command on purpose: SQL statements and dd
+	// targets arrive as arguments to a client binary, never as the head.
 	case orderedWords(words, "drop", "database"), orderedWords(words, "drop", "table"):
 		return true
 	case containsWord(words, "dd") && strings.Contains(lower, "of=/dev/"):
@@ -193,25 +188,29 @@ func curlWrites(cmd string) bool {
 	return curlWriteFlagRE.MatchString(cmd)
 }
 
-func httpieWrites(words []string) bool {
-	if len(words) < 2 || (words[0] != "http" && words[0] != "https") {
-		return false
-	}
-	for _, w := range words[1:] {
-		if httpWriteVerb(w) {
-			return true
+func httpieWrites(segs [][]string) bool {
+	for _, seg := range segs {
+		if seg[0] != "http" && seg[0] != "https" {
+			continue
+		}
+		for _, w := range seg[1:] {
+			if httpWriteVerb(w) {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-func ghAPIWrites(words []string) bool {
-	if !orderedWords(words, "gh", "api") {
-		return false
-	}
-	for i, w := range words {
-		if (w == "x" || w == "method") && i+1 < len(words) && httpWriteVerb(words[i+1]) {
-			return true
+func ghAPIWrites(segs [][]string) bool {
+	for _, seg := range segs {
+		if len(seg) < 2 || seg[0] != "gh" || seg[1] != "api" {
+			continue
+		}
+		for i, w := range seg {
+			if (w == "x" || w == "method") && i+1 < len(seg) && httpWriteVerb(seg[i+1]) {
+				return true
+			}
 		}
 	}
 	return false
@@ -258,6 +257,75 @@ func previewSnippet(s string) string {
 	return s[:max-3] + "..."
 }
 
+var (
+	commandSegmentRE = regexp.MustCompile(`\|\||&&|[;|&\r\n]`)
+	envAssignmentRE  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+)
+
+var commandWrapperHeads = map[string]bool{
+	"sudo":    true,
+	"env":     true,
+	"nice":    true,
+	"time":    true,
+	"command": true,
+	"xargs":   true,
+	"doas":    true,
+}
+
+// commandSegments splits a shell command on sequencing/pipe operators and
+// returns each non-empty segment's word list with leading env assignments
+// (NAME=value) and wrapper heads (sudo, env, ...) stripped, so index 0 is the
+// command actually being invoked. Family matchers anchor here instead of
+// scanning the whole token stream, so trigger words inside quoted payloads
+// (grep patterns, commit messages) no longer classify.
+func commandSegments(cmd string) [][]string {
+	var segs [][]string
+	for _, raw := range commandSegmentRE.Split(cmd, -1) {
+		fields := strings.Fields(raw)
+		for len(fields) > 0 &&
+			(envAssignmentRE.MatchString(fields[0]) || commandWrapperHeads[strings.ToLower(fields[0])]) {
+			fields = fields[1:]
+		}
+		if len(fields) == 0 {
+			continue
+		}
+		if words := commandWords(strings.Join(fields, " ")); len(words) > 0 {
+			segs = append(segs, words)
+		}
+	}
+	return segs
+}
+
+func segmentHeadIs(segs [][]string, names ...string) bool {
+	for _, seg := range segs {
+		for _, name := range names {
+			if seg[0] == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func segmentHasPrefix(segs [][]string, want ...string) bool {
+	for _, seg := range segs {
+		if len(seg) < len(want) {
+			continue
+		}
+		match := true
+		for i, w := range want {
+			if seg[i] != w {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
 func commandWords(cmd string) []string {
 	var words []string
 	var b strings.Builder
@@ -286,15 +354,6 @@ func commandWords(cmd string) []string {
 func containsWord(words []string, want string) bool {
 	for _, w := range words {
 		if w == want {
-			return true
-		}
-	}
-	return false
-}
-
-func containsAnyWord(words []string, want ...string) bool {
-	for _, w := range want {
-		if containsWord(words, w) {
 			return true
 		}
 	}
