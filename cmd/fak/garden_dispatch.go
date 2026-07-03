@@ -341,7 +341,9 @@ func gardenDispatchSkipReason(verdict, action string) string {
 // to this bridge's own loop id, so an operator pause/cadence-floor/backoff policy
 // gates the whole run before a single candidate is touched.
 func evaluateGardenDispatchLoopAdmit(ledgerPath, policyPath string) (loopmgr.Decision, error) {
-	policies, err := loopmgr.LoadPolicies(policyPath)
+	// The garden bridge runs unattended; with no operator policy it inherits the
+	// embedded sane default (the garden/default 12h floor + the global storm cap).
+	policies, err := loopmgr.LoadPoliciesOrDefault(policyPath)
 	if err != nil {
 		return loopmgr.Decision{}, err
 	}

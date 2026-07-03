@@ -1,6 +1,7 @@
 package loopmgr
 
 import (
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,30 @@ import (
 	"strings"
 	"time"
 )
+
+// defaultPoliciesJSON is the sane background-process policy baked in at compile
+// time: a global cadence floor + refusal-storm cap that every unnamed loop
+// inherits, plus the read-only garden bundle's 12h floor. It is the shipped
+// answer to "what backpressure does a background loop get before an operator
+// writes a policy?" — see [LoadPoliciesOrDefault]. The operator-facing copy is
+// tools/loop-policy.default.json; a no-drift test pins the two in sync.
+//
+//go:embed default-policy.json
+var defaultPoliciesJSON []byte
+
+// DefaultPolicies returns the embedded sane default policy set: a cadence floor
+// (30s, below any legitimate fleet cadence — it only stops a flapping/doubled
+// scheduler storming one loop) and a refusal-storm cap (25 consecutive refusals
+// back a stuck loop off until an operator nudge), applied to EVERY loop with no
+// override. It panics only if the baked-in JSON is corrupt, which a test catches
+// at build time — a shipped binary always has a valid default.
+func DefaultPolicies() Policies {
+	var p Policies
+	if err := json.Unmarshal(defaultPoliciesJSON, &p); err != nil {
+		panic(fmt.Sprintf("loopmgr: embedded default policy is corrupt: %v", err))
+	}
+	return p
+}
 
 // Governor admission. loopmgr records events and folds them; it does not
 // schedule or authorize. Admit is the one pure exception to that rule by
@@ -190,6 +215,26 @@ func LoadPolicies(path string) (Policies, error) {
 		return Policies{}, fmt.Errorf("loop policy schema = %q, want %q", p.Schema, SchemaPolicies)
 	}
 	return p, nil
+}
+
+// LoadPoliciesOrDefault is [LoadPolicies] for an always-on BACKGROUND loop: when
+// the operator has written no policy (the file is absent), it returns the
+// embedded sane default ([DefaultPolicies]) instead of the empty permissive set,
+// so a background loop is braked by a cadence floor + refusal-storm cap out of
+// the box — never admit-always by accident. A present file wins whole (the
+// operator's config is authoritative; it is not merged with the default), and a
+// present-but-malformed file is still a loud error. Interactive/one-shot callers
+// that want the historical fail-open behavior keep using [LoadPolicies]; only the
+// background governors (the loops that run unattended) opt into this default.
+func LoadPoliciesOrDefault(path string) (Policies, error) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return DefaultPolicies(), nil
+	}
+	if _, err := os.Stat(trimmed); errors.Is(err, os.ErrNotExist) {
+		return DefaultPolicies(), nil
+	}
+	return LoadPolicies(trimmed)
 }
 
 // PolicyFor returns the effective policy for a loop id: the per-loop override

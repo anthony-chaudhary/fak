@@ -141,13 +141,16 @@ back:
   ```bash
   # one-off: skip the bundle on this host
   FAK_GARDEN=off make garden
-  # durable: pause the garden tick in the governor (live policy is .fak/loop-policy.json,
-  # seeded from the tracked template tools/loop-policy.default.json)
+  # durable: pause the garden tick in the governor (live policy is .fak/loop-policy.json;
+  # with no live file, background loops inherit the embedded sane default — a cadence
+  # floor + refusal-storm cap — mirrored by the tracked template tools/loop-policy.default.json)
   fak loop control --loop garden/default --pause     # or edit "paused": true in the policy
   ```
 
-  The `min_interval_seconds` floor (12h, from the template) is the cadence brake that keeps a
-  flapping scheduler from piling up ticks. Remove the tick entirely with
+  The `min_interval_seconds` floor (12h for `garden/default`, from the embedded default) is the
+  cadence brake that keeps a flapping scheduler from piling up ticks. Even with no live policy
+  file, every externally-scheduled background loop is braked by the embedded default (a 30s
+  global floor + a refusal-storm cap), never admit-always. Remove the tick entirely with
   `tools/register_control_pane_tick.sh remove --mode garden`.
 
 ## 6. Restore session / fleet state (`fak snapshot`)

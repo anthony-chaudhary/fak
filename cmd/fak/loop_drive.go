@@ -534,6 +534,12 @@ func loopDriveReviewEnv(env []string, opt loopDriveOptions, spec loopdrive.Spec,
 }
 
 func loopDriveAdmit(ledger, policyPath, loopID string, now time.Time) (loopmgr.Decision, error) {
+	// The drive loop is SELF-paced (an in-process Ralph loop that re-drives a goal
+	// as fast as each turn completes), NOT externally scheduled — so it must keep
+	// the permissive-when-unconfigured contract: a fast successful turn is not a
+	// storm, and the embedded default's cadence floor (aimed at doubled schedulers)
+	// would wrongly refuse a legitimate back-to-back turn. An operator who wants to
+	// brake a driven loop still writes an explicit policy file.
 	policies, err := loopmgr.LoadPolicies(policyPath)
 	if err != nil {
 		return loopmgr.Decision{}, err

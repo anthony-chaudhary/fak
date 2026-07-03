@@ -1030,7 +1030,10 @@ func runLoopAdmit(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	policies, err := loopmgr.LoadPolicies(*policyPath)
+	// A scheduler gates a background loop on this verb; with no operator policy it
+	// inherits the embedded sane default (cadence floor + refusal-storm cap) rather
+	// than admit-always, so an unconfigured always-on loop is still braked.
+	policies, err := loopmgr.LoadPoliciesOrDefault(*policyPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak loop admit: %v\n", err)
 		return 2

@@ -1,0 +1,13 @@
+{
+  "schema": "fak.loop-policy.v1",
+  "default": {
+    "min_interval_seconds": 30,
+    "max_consecutive_refusals": 25
+  },
+  "loops": {
+    "garden/default": {
+      "min_interval_seconds": 43200,
+      "max_consecutive_refusals": 25
+    }
+  }
+}

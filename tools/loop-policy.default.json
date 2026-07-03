@@ -1,11 +1,16 @@
 {
   "schema": "fak.loop-policy.v1",
-  "_doc": "Default governor policy TEMPLATE for fak loop admission. The live policy lives at .fak/loop-policy.json (gitignored, host-local); copy this there to start, or let `fak loop` create it. Edit the live copy to brake a loop: set a loop's `paused` true to hold it, `disabled` to retire it, `min_interval_seconds` to floor its cadence, `max_consecutive_refusals` to back it off after a refusal storm, `min_witness_rate` (+`min_runs_for_witness_gate`) to hold a loop whose proof rate collapses. Reason codes: LOOP_PAUSED / LOOP_DISABLED / CADENCE_FLOOR / REFUSAL_STORM / WITNESS_COLLAPSE. See internal/loopmgr/governor.go and docs/ROLLBACK.md.",
-  "default": {},
+  "_doc": "Default governor policy TEMPLATE for fak loop admission. The live policy lives at .fak/loop-policy.json (gitignored, host-local); copy this there to start, or let `fak loop` create it. The top-level `default` applies to EVERY loop that has no per-loop override; a per-loop entry under `loops` REPLACES the default whole (fields are not merged), so an override must restate any global brake it wants to keep. Edit a loop to brake it: set `paused` true to hold it, `disabled` to retire it, `min_interval_seconds` to floor its cadence, `max_consecutive_refusals` to back it off after a refusal storm, `min_witness_rate` (+`min_runs_for_witness_gate`) to hold a loop whose proof rate collapses. Reason codes: LOOP_PAUSED / LOOP_DISABLED / CADENCE_FLOOR / REFUSAL_STORM / WITNESS_COLLAPSE. See internal/loopmgr/governor.go and docs/ROLLBACK.md.",
+  "default": {
+    "_doc": "Sane backpressure for EVERY background loop that has no override. min_interval_seconds 30 is a floor no legitimate fleet loop reaches (the fastest real cadence is the ~10-min dispatch tick) - it exists solely to stop a flapping or doubled scheduler from storming one loop many times a second. max_consecutive_refusals 25 backs a loop off after it has been refused 25 times in a row with nothing admitted between - the anti-storm brake for the job-repo failure mode (re-firing one un-landable unit forever); once tripped, the loop needs an operator nudge or one successful admit to clear. Both gates are generous enough to be invisible in normal operation and only bite a genuinely stuck or runaway loop.",
+    "min_interval_seconds": 30,
+    "max_consecutive_refusals": 25
+  },
   "loops": {
     "garden/default": {
-      "_doc": "The default-on gardening bundle tick (make garden via fak_loop_run.sh). A 12h cadence floor so a flapping scheduler can't pile up ticks; the bundle is read-only so this is the only brake it needs today. To silence the garden entirely: set `paused` true here, or export FAK_GARDEN=off on the host (the env-side brake).",
-      "min_interval_seconds": 43200
+      "_doc": "The default-on gardening bundle tick (make garden via fak_loop_run.sh). A 12h cadence floor so a flapping scheduler can't pile up ticks; the bundle is read-only so this is the only brake it needs today. This override REPLACES the top-level default whole, so it restates the global refusal-storm cap. To silence the garden entirely: set `paused` true here, or export FAK_GARDEN=off on the host (the env-side brake).",
+      "min_interval_seconds": 43200,
+      "max_consecutive_refusals": 25
     }
   }
 }

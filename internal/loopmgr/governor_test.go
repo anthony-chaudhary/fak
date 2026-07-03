@@ -228,3 +228,81 @@ func TestAdmitAllStableOrder(t *testing.T) {
 		t.Fatalf("alpha should be refused (storm)")
 	}
 }
+
+// TestDefaultPoliciesShipsSaneBackpressure pins the embedded default's actual
+// gate values: a global cadence floor + refusal-storm cap on every unnamed loop,
+// and the garden bundle's 12h floor. This is the shipped answer to "what
+// backpressure does a background loop get before an operator writes a policy?".
+func TestDefaultPoliciesShipsSaneBackpressure(t *testing.T) {
+	dp := DefaultPolicies()
+	if dp.Schema != SchemaPolicies {
+		t.Fatalf("embedded default schema = %q, want %q", dp.Schema, SchemaPolicies)
+	}
+	// Global default: a cadence floor and a refusal-storm cap, both non-zero so
+	// an unnamed loop is never admit-always.
+	if dp.Default.MinIntervalSeconds <= 0 {
+		t.Fatalf("global default must carry a cadence floor, got %+v", dp.Default)
+	}
+	if dp.Default.MaxConsecutiveRefusals == 0 {
+		t.Fatalf("global default must carry a refusal-storm cap, got %+v", dp.Default)
+	}
+	// A never-configured loop inherits the global brake: a storm past the cap is
+	// refused, not admitted.
+	stormed := LoopSnapshot{LoopID: "some-new-loop", ConsecutiveRefusals: dp.Default.MaxConsecutiveRefusals}
+	if d := Admit(stormed, dp.PolicyFor("some-new-loop"), time.Unix(0, 0).UTC()); d.Admit {
+		t.Fatalf("a storming unnamed loop must be refused by the default cap, got %+v", d)
+	}
+	if d := Admit(stormed, dp.PolicyFor("some-new-loop"), time.Unix(0, 0).UTC()); d.Reason != ReasonRefusalStorm {
+		t.Fatalf("expected %s, got %q", ReasonRefusalStorm, d.Reason)
+	}
+	// The garden override still carries a storm cap (an override replaces the
+	// default whole, so it must restate the global brake it wants to keep).
+	garden := dp.PolicyFor("garden/default")
+	if garden.MaxConsecutiveRefusals == 0 {
+		t.Fatalf("garden override dropped the refusal-storm cap: %+v", garden)
+	}
+	if garden.MinIntervalSeconds <= dp.Default.MinIntervalSeconds {
+		t.Fatalf("garden override should floor cadence tighter than the global default: %+v", garden)
+	}
+}
+
+// TestLoadPoliciesOrDefaultUsesEmbeddedWhenAbsent proves the background governors'
+// loader falls back to the embedded sane default when no operator policy exists,
+// while a present file still wins whole.
+func TestLoadPoliciesOrDefaultUsesEmbeddedWhenAbsent(t *testing.T) {
+	// Absent file -> embedded default (braked), not the empty permissive set.
+	ps, err := LoadPoliciesOrDefault(filepath.Join(t.TempDir(), "nope.json"))
+	if err != nil {
+		t.Fatalf("absent file must not error: %v", err)
+	}
+	if ps.Default.MaxConsecutiveRefusals == 0 || ps.Default.MinIntervalSeconds <= 0 {
+		t.Fatalf("absent file must yield the braked default, got %+v", ps.Default)
+	}
+	// Empty path -> embedded default too.
+	if ps, err = LoadPoliciesOrDefault(""); err != nil || ps.Default.MaxConsecutiveRefusals == 0 {
+		t.Fatalf("empty path must yield the braked default, got %+v (err %v)", ps.Default, err)
+	}
+	// A present operator file wins whole (not merged with the default).
+	path := filepath.Join(t.TempDir(), "policy.json")
+	if err := os.WriteFile(path, []byte(`{"schema":"fak.loop-policy.v1","default":{"paused":true}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ps, err = LoadPoliciesOrDefault(path)
+	if err != nil {
+		t.Fatalf("present file load: %v", err)
+	}
+	if !ps.Default.Paused {
+		t.Fatalf("present file must win whole, got %+v", ps.Default)
+	}
+	if ps.Default.MaxConsecutiveRefusals != 0 {
+		t.Fatalf("present file must NOT be merged with the embedded default, got %+v", ps.Default)
+	}
+	// A present-but-malformed file is still a loud error (not silently defaulted).
+	bad := filepath.Join(t.TempDir(), "bad.json")
+	if err := os.WriteFile(bad, []byte(`{not json`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadPoliciesOrDefault(bad); err == nil {
+		t.Fatal("malformed present file must error, not silently default")
+	}
+}

@@ -880,16 +880,24 @@ func gotKinds(events []loopmgr.Event) string {
 	return strings.Join(parts, ",")
 }
 
-func TestLoopAdmitNoPolicyAdmits(t *testing.T) {
+// TestLoopAdmitNoPolicyUsesBrakedDefault pins the improved background-process
+// default: with NO operator policy file, `fak loop admit` no longer admits blindly
+// — it inherits the embedded sane default (a 30s cadence floor + refusal-storm
+// cap). A loop firing immediately after its last event is refused by the cadence
+// floor (exit 3), proving the default actually ships instead of admit-always.
+func TestLoopAdmitNoPolicyUsesBrakedDefault(t *testing.T) {
 	dir := t.TempDir()
 	ledger := filepath.Join(dir, "loops.jsonl")
-	appendLoopTestEvent(t, ledger, loopmgr.Event{LoopID: "issue-dispatch/default", Kind: loopmgr.EventFire})
+	// A fire event stamped ~now: admitting immediately after is inside the 30s floor.
+	// (admit reads time.Now(), so the last event must be near real now to trip it.)
+	appendLoopTestEventAt(t, ledger,
+		loopmgr.Event{LoopID: "issue-dispatch/default", Kind: loopmgr.EventFire}, time.Now().UnixNano())
 
 	var stdout, stderr bytes.Buffer
 	code := runLoop(&stdout, &stderr, []string{"admit", "--ledger", ledger,
-		"--policy", filepath.Join(dir, "absent-policy.json"), "--json"})
-	if code != 0 {
-		t.Fatalf("admit code=%d stderr=%s", code, stderr.String())
+		"--policy", filepath.Join(dir, "absent-policy.json"), "--loop", "issue-dispatch/default", "--json"})
+	if code != 3 {
+		t.Fatalf("admit code=%d, want 3 (cadence floor refuses a same-second re-fire) stderr=%s", code, stderr.String())
 	}
 	var out struct {
 		Schema    string             `json:"schema"`
@@ -901,8 +909,38 @@ func TestLoopAdmitNoPolicyAdmits(t *testing.T) {
 	if out.Schema != "fak.loop-admit.v1" {
 		t.Fatalf("schema = %q", out.Schema)
 	}
+	if len(out.Decisions) != 1 || out.Decisions[0].Admit {
+		t.Fatalf("expected the braked default to refuse a same-second re-fire, got %+v", out.Decisions)
+	}
+	if out.Decisions[0].Reason != loopmgr.ReasonCadenceFloor {
+		t.Fatalf("reason = %q, want %s", out.Decisions[0].Reason, loopmgr.ReasonCadenceFloor)
+	}
+}
+
+// TestLoopAdmitNoPolicyAdmitsPastFloor is the other half: the braked default is
+// invisible in normal operation — a loop whose last event is well past the 30s
+// floor still admits with no operator policy. The default brakes storms, not work.
+func TestLoopAdmitNoPolicyAdmitsPastFloor(t *testing.T) {
+	dir := t.TempDir()
+	ledger := filepath.Join(dir, "loops.jsonl")
+	old := time.Now().Add(-time.Hour)
+	appendLoopTestEventAt(t, ledger,
+		loopmgr.Event{LoopID: "issue-dispatch/default", Kind: loopmgr.EventFire}, old.UnixNano())
+
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{"admit", "--ledger", ledger,
+		"--policy", filepath.Join(dir, "absent-policy.json"), "--loop", "issue-dispatch/default", "--json"})
+	if code != 0 {
+		t.Fatalf("admit code=%d, want 0 (well past the floor should admit) stderr=%s", code, stderr.String())
+	}
+	var out struct {
+		Decisions []loopmgr.Decision `json:"decisions"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, stdout.String())
+	}
 	if len(out.Decisions) != 1 || !out.Decisions[0].Admit {
-		t.Fatalf("decisions = %+v", out.Decisions)
+		t.Fatalf("a loop past the cadence floor must admit under the default, got %+v", out.Decisions)
 	}
 }
 
