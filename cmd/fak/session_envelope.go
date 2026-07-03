@@ -105,14 +105,3 @@ func envelopeThroughputAxis(f float64) string {
 	}
 	return fmt.Sprintf("%.2f tok/s", f)
 }
-
-func sessionEnvelopeUsage(w io.Writer) {
-	fmt.Fprint(w, `fak session envelope -- parse a user budget envelope into the deterministic runtime budget
-
-  fak session envelope [--tokens N|unbounded] [--wall-clock DUR] [--turns N|unbounded]
-                        [--spend $D] [--throughput RATE] [--json]
-
-Every flag is optional; an unset axis is "not stated" and parses to the runtime's
-own unbounded default. This command is offline: it never dials a live gateway.
-`)
-}
