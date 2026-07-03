@@ -144,6 +144,10 @@ type Config struct {
 	// from the same source as the bearer token. nil preserves the static/no-extra-header
 	// path.
 	ExtraHeadersFunc func() map[string]string
+	// ForceResponsesStream asks an OpenAI Responses upstream for SSE while preserving the
+	// gateway's buffered/adjudicated client response. Used for Codex ChatGPT subscription
+	// upstreams, which reject non-streaming Responses requests.
+	ForceResponsesStream bool
 	// PinUpstreamCredential makes the gateway authenticate the upstream with its OWN
 	// configured APIKey and IGNORE the inbound client's credential — the subscription
 	// path, where fak holds the real OAuth token and the wrapped client only sends a
@@ -1419,6 +1423,7 @@ func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner
 		p.AccountFailoverFunc = cfg.AccountFailoverFunc
 		p.ExtraHeaders = cloneConfigHeaders(cfg.ExtraHeaders)
 		p.ExtraHeadersFunc = cfg.ExtraHeadersFunc
+		p.ForceResponsesStream = cfg.ForceResponsesStream
 		wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver)
 		return p, nil
 	}
@@ -1432,6 +1437,7 @@ func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner
 		p.AccountFailoverFunc = cfg.AccountFailoverFunc
 		p.ExtraHeaders = cloneConfigHeaders(cfg.ExtraHeaders)
 		p.ExtraHeadersFunc = cfg.ExtraHeadersFunc
+		p.ForceResponsesStream = cfg.ForceResponsesStream
 		wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver)
 		replicas = append(replicas, PlannerReplica{
 			Name:    fmt.Sprintf("replica-%d", i+1),
