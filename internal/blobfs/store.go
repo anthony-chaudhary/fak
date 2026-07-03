@@ -231,15 +231,16 @@ func (s *Store) writeBlob(digest string, b []byte) error {
 		return fmt.Errorf("blobfs: temp file in %s: %w", dir, err)
 	}
 	tmpName := tmp.Name()
-	if _, err := tmp.Write(b); err != nil {
+	discard := func(step string, err error) error {
 		tmp.Close()
 		os.Remove(tmpName)
-		return fmt.Errorf("blobfs: write %s: %w", tmpName, err)
+		return fmt.Errorf("blobfs: %s %s: %w", step, tmpName, err)
+	}
+	if _, err := tmp.Write(b); err != nil {
+		return discard("write", err)
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return fmt.Errorf("blobfs: fsync %s: %w", tmpName, err)
+		return discard("fsync", err)
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpName)
