@@ -17,6 +17,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/repoguard"
 )
 
 func cmdCron(argv []string) { os.Exit(runCron(os.Stdout, os.Stderr, argv)) }
@@ -282,69 +284,7 @@ func cronXMLEscape(s string) string {
 // only how we turn one string into a vector — each token is re-quoted faithfully by
 // the per-target renderer, so embedded spaces survive into the emitted unit.
 func cronShlexSplit(s string) (tokens []string, ok bool) {
-	var cur []rune
-	started := false // cur is a real token (including an empty quoted "")
-	r := []rune(s)
-	i, n := 0, len(r)
-	for i < n {
-		c := r[i]
-		switch {
-		case c == '\\':
-			if i+1 >= n {
-				return nil, false // dangling escape
-			}
-			cur = append(cur, r[i+1])
-			started = true
-			i += 2
-		case c == '\'':
-			j := i + 1
-			for j < n && r[j] != '\'' {
-				j++
-			}
-			if j >= n {
-				return nil, false // no closing single quote
-			}
-			cur = append(cur, r[i+1:j]...)
-			started = true
-			i = j + 1
-		case c == '"':
-			j := i + 1
-			closed := false
-			for j < n {
-				if r[j] == '\\' && j+1 < n && (r[j+1] == '"' || r[j+1] == '\\') {
-					cur = append(cur, r[j+1])
-					j += 2
-					continue
-				}
-				if r[j] == '"' {
-					closed = true
-					break
-				}
-				cur = append(cur, r[j])
-				j++
-			}
-			if !closed {
-				return nil, false // no closing double quote
-			}
-			started = true
-			i = j + 1
-		case c == ' ' || c == '\t' || c == '\r' || c == '\n':
-			if started {
-				tokens = append(tokens, string(cur))
-				cur = cur[:0]
-				started = false
-			}
-			i++
-		default:
-			cur = append(cur, c)
-			started = true
-			i++
-		}
-	}
-	if started {
-		tokens = append(tokens, string(cur))
-	}
-	return tokens, true
+	return repoguard.ShlexSplit(s)
 }
 
 // cronSanitizeLabel reduces a loop id to a safe unit/task basename (letters,

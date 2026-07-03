@@ -235,11 +235,10 @@ func splitSegments(command string) []string {
 	return res
 }
 
-// shlexSplit mirrors Python's shlex.split(s, posix=True) closely enough for
+// ShlexSplit mirrors Python's shlex.split(s, posix=True) closely enough for
 // command-target extraction. The bool is false on an unbalanced quote or a
-// dangling escape (Python raises ValueError there and the caller falls back to a
-// plain whitespace split).
-func shlexSplit(s string) ([]string, bool) {
+// dangling escape (Python raises ValueError there).
+func ShlexSplit(s string) ([]string, bool) {
 	var tokens []string
 	var cur []rune
 	started := false // cur is a real token (incl. an empty quoted "")
@@ -304,6 +303,10 @@ func shlexSplit(s string) ([]string, bool) {
 		tokens = append(tokens, string(cur))
 	}
 	return tokens, true
+}
+
+func shlexSplit(s string) ([]string, bool) {
+	return ShlexSplit(s)
 }
 
 // basename returns the final path component, splitting on both / and \ so the
