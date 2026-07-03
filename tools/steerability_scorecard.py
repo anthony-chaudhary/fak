@@ -363,8 +363,12 @@ def has_orientation_doc(text: str) -> bool:
 
 # ---------------------------------------------------------------------------
 # Per-KPI pure checks. Each returns
-#   {kpi, group, score (0-100 int), detail, defects: [str], soft: [str]}
+#   {kpi, group, score (0-100 int), pressure (unbounded lower-better), detail,
+#    defects: [str], soft: [str]}
 # defects = HARD units of steerability-debt; soft = score-only judgment nudges.
+# pressure = live instances or magnitude that remain to steer down. It is deliberately
+# unbounded: the 0-100 index answers "what letter is the shape today?", while pressure
+# answers "how much actual steering work is still visible?".
 # ---------------------------------------------------------------------------
 
 def kpi_file_size_dist(n_lines_list: list[int]) -> dict[str, Any]:
@@ -378,6 +382,7 @@ def kpi_file_size_dist(n_lines_list: list[int]) -> dict[str, Any]:
     over = max(0.0, p90 - P90_FILE_REF)
     score = _clamp(100 - over / P90_FILE_SLOPE)
     return {"kpi": "file_size_dist", "group": "modularity", "score": score,
+            "pressure": int(round(over)),
             "detail": f"file length p50={p50:.0f} p90={p90:.0f} (ref {P90_FILE_REF}) over {len(n_lines_list)} files",
             "defects": [], "soft": ([f"file-length p90 {p90:.0f} > ref {P90_FILE_REF} — "
                                      f"the typical file is drifting large"] if over > 0 else [])}
@@ -395,6 +400,7 @@ def kpi_func_size_dist(n_long: int, n_total: int) -> dict[str, Any]:
     # a healthy tree keeps long functions rare; the reference rate is the score floor.
     score = _clamp(100 - 100 * rate / FUNC_LONG_RATE_REF) if rate > 0 else 100
     return {"kpi": "func_size_dist", "group": "modularity", "score": score,
+            "pressure": n_long,
             "detail": (f"{n_long}/{n_total} functions over the soft length line (rate {rate:.2%})"
                        if n_total else "no functions scanned"),
             "defects": [], "soft": ([f"{rate:.1%} of functions are long (> soft line) — "
@@ -409,6 +415,7 @@ def kpi_god_file_rate(n_god: int, n_total: int) -> dict[str, Any]:
     rate = n_god / max(1, n_total)
     score = _clamp(100 - 100 * rate / GOD_FILE_RATE_REF) if rate > 0 else 100
     return {"kpi": "god_file_rate", "group": "modularity", "score": score,
+            "pressure": n_god,
             "detail": f"{n_god}/{n_total} files > {FILE_HARD_MAX} lines (rate {rate:.2%})",
             "defects": [],
             "soft": ([f"{n_god} god-file(s) (rate {rate:.2%}) — code_quality.architecture "
@@ -420,6 +427,7 @@ def kpi_god_func_rate(n_god: int, n_total: int) -> dict[str, Any]:
     rate = n_god / max(1, n_total)
     score = _clamp(100 - 100 * rate / GOD_FUNC_RATE_REF) if rate > 0 else 100
     return {"kpi": "god_func_rate", "group": "modularity", "score": score,
+            "pressure": n_god,
             "detail": f"{n_god}/{n_total} functions > {FUNC_HARD_MAX} lines (rate {rate:.2%})",
             "defects": [],
             "soft": ([f"{n_god} god-function(s) (rate {rate:.2%}) — code_quality owns the count"]
@@ -435,9 +443,11 @@ def kpi_fan_in_gini(fan_in: dict[str, int]) -> dict[str, Any]:
     g = gini([float(v) for v in fan_in.values()])
     span = max(1e-9, GINI_RED - GINI_GREEN)
     score = _clamp(100 - 100 * (g - GINI_GREEN) / span)
+    total_edges = sum(fan_in.values())
     top = sorted(fan_in.items(), key=lambda kv: -kv[1])[:5]
     top_s = ", ".join(f"{k}:{v}" for k, v in top)
     return {"kpi": "fan_in_gini", "group": "coupling", "score": score,
+            "pressure": int(round(max(0.0, g - GINI_GREEN) * total_edges)),
             "detail": f"fan-in Gini {g:.2f} over {len(fan_in)} packages (top {top_s})",
             "defects": [],
             "soft": ([f"fan-in Gini {g:.2f} > green {GINI_GREEN:.2f} — coupling concentrates "
@@ -451,12 +461,14 @@ def kpi_hub_share(fan_in: dict[str, int], n_packages: int) -> dict[str, Any]:
     — so it is advisory only, a snapshot of the current blast radius."""
     if not fan_in or n_packages <= 0:
         return {"kpi": "hub_share", "group": "coupling", "score": 100,
-                "detail": "no internal coupling edges", "defects": [], "soft": []}
+                "pressure": 0, "detail": "no internal coupling edges",
+                "defects": [], "soft": []}
     hub, importers = max(fan_in.items(), key=lambda kv: kv[1])
     share = importers / n_packages
     span = max(1e-9, HUB_SHARE_RED - HUB_SHARE_GREEN)
     score = _clamp(100 - 100 * (share - HUB_SHARE_GREEN) / span)
     return {"kpi": "hub_share", "group": "coupling", "score": score,
+            "pressure": max(0, importers - int(HUB_SHARE_GREEN * n_packages)),
             "detail": f"top hub '{hub}' imported by {importers}/{n_packages} packages ({share:.0%})",
             "defects": [],
             "soft": ([f"'{hub}' is a chokepoint: imported by {share:.0%} of packages — "
@@ -474,6 +486,7 @@ def kpi_dispatch_god_file(cmd_god_files: list[tuple[str, int]]) -> dict[str, Any
                f"table so a new command doesn't fight a monolith" for p, n in sorted(cmd_god_files)]
     return {"kpi": "dispatch_god_file", "group": "coupling",
             "score": _clamp(100 - 20 * len(defects)),
+            "pressure": len(defects),
             "detail": (f"{len(defects)} cmd dispatch god-file(s)" if defects
                        else "no cmd dispatch god-file"),
             "defects": defects, "soft": []}
@@ -489,6 +502,7 @@ def kpi_package_doc_frac(n_documented: int, n_packages: int) -> dict[str, Any]:
     frac = n_documented / max(1, n_packages)
     return {"kpi": "package_doc_frac", "group": "navigability",
             "score": _clamp(100 * frac),
+            "pressure": max(0, n_packages - n_documented),
             "detail": f"{n_documented}/{n_packages} packages carry an orientation doc-comment ({frac:.0%})",
             "defects": [],
             "soft": ([f"{n_packages - n_documented} package(s) without a doc-comment header — "
@@ -517,6 +531,7 @@ def kpi_ratchet_present(baseline: dict[str, Any] | None, wired: bool) -> dict[st
                             "(scorecard_control_pane.py)")
     return {"kpi": "ratchet_present", "group": "correction",
             "score": 100 if not problems else _clamp(100 - 50 * len(problems)),
+            "pressure": len(problems),
             "detail": ("control-pane ratchet present + this scorecard wired" if not problems
                        else f"{len(problems)} ratchet gap(s)"),
             "defects": problems, "soft": []}
@@ -530,6 +545,7 @@ def kpi_worst_pkg_drift(pkg_loc: dict[str, int], baseline_pkg_loc: dict[str, int
     `baseline_pkg_loc` empty (unpinned) -> a clean, informational read."""
     if not baseline_pkg_loc:
         return {"kpi": "worst_pkg_drift", "group": "correction", "score": 100,
+                "pressure": 0,
                 "detail": "no package-LOC baseline pinned (informational)",
                 "defects": [], "soft": []}
     drifts: list[tuple[str, float, int, int]] = []
@@ -545,6 +561,7 @@ def kpi_worst_pkg_drift(pkg_loc: dict[str, int], baseline_pkg_loc: dict[str, int
     soft = [f"package '{pkg}' grew {pct:.0f}% vs baseline ({base}->{loc} LOC)"
             for pkg, pct, base, loc in drifts[:SAMPLE_CAP]]
     return {"kpi": "worst_pkg_drift", "group": "correction", "score": score,
+            "pressure": len(drifts),
             "detail": (f"{len(drifts)} package(s) over +{DRIFT_WARN_PCT:.0f}% vs baseline "
                        f"(worst +{worst_pct:.0f}%)" if drifts else "no package over the drift line"),
             "defects": [], "soft": soft}
@@ -559,6 +576,7 @@ def kpi_churn_concentration(churn: dict[str, int], rng: str, available: bool) ->
     soft note), never a failure."""
     if not available:
         return {"kpi": "churn_concentration", "group": "correction", "score": 100,
+                "pressure": 0,
                 "detail": f"churn unavailable (no git / empty range {rng})",
                 "defects": [], "soft": [f"churn UNMEASURED for {rng} (git unavailable)"]}
     g = gini([float(v) for v in churn.values()])
@@ -567,6 +585,7 @@ def kpi_churn_concentration(churn: dict[str, int], rng: str, available: bool) ->
     top = sorted(churn.items(), key=lambda kv: -kv[1])[:5]
     top_s = ", ".join(f"{k}:{v}" for k, v in top)
     return {"kpi": "churn_concentration", "group": "correction", "score": score,
+            "pressure": (len(churn) if g > GINI_GREEN and churn else 0),
             "detail": f"churn Gini {g:.2f} over {len(churn)} files in {rng} (HEAD-relative)",
             "defects": [],
             "soft": ([f"recent change concentrates (churn Gini {g:.2f}) in {rng}: {top_s} — "
@@ -601,32 +620,37 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
     ratchet_index = weighted_index(by_name, exclude=RATCHET_EXCLUDED_KPIS)
     steerability_debt = sum(len(k["defects"]) for k in kpis)
     n_soft = sum(len(k["soft"]) for k in kpis)
+    steering_pressure = int(sum(max(0, int(k.get("pressure", 0))) for k in kpis))
     grade = grade_letter(index)
     ratchet_grade = grade_letter(ratchet_index)
     debt_by_group = {g: 0 for g in GROUPS}
+    pressure_by_group = {g: 0 for g in GROUPS}
     score_by_group: dict[str, list[int]] = {g: [] for g in GROUPS}
     for k in kpis:
         debt_by_group[k["group"]] += len(k["defects"])
+        pressure_by_group[k["group"]] += int(k.get("pressure", 0))
         score_by_group[k["group"]].append(k["score"])
     group_index = {g: (round(sum(v) / len(v), 1) if v else 100.0)
                    for g, v in score_by_group.items()}
     breakdown = sorted(
         ({"kpi": k["kpi"], "group": k["group"], "score": k["score"],
-          "debt": len(k["defects"]), "soft": len(k["soft"]), "detail": k["detail"],
+          "debt": len(k["defects"]), "soft": len(k["soft"]),
+          "pressure": int(k.get("pressure", 0)), "detail": k["detail"],
           "index_gain_to_clean": round(KPI_WEIGHTS.get(k["kpi"], 0) * max(0, 100 - k["score"]), 1)}
          for k in kpis),
-        key=lambda x: (-x["debt"], x["score"]))
+        key=lambda x: (-x["debt"], -x["pressure"], x["score"]))
     top_moves = [
         {
             "kpi": b["kpi"],
             "group": b["group"],
             "score": b["score"],
+            "pressure": b["pressure"],
             "index_gain_to_clean": b["index_gain_to_clean"],
             "detail": b["detail"],
             "why": move_reason(b["kpi"]),
         }
-        for b in sorted(breakdown, key=lambda x: (-x["index_gain_to_clean"], x["score"]))
-        if b["index_gain_to_clean"] > 0
+        for b in sorted(breakdown, key=lambda x: (-x["index_gain_to_clean"], -x["pressure"], x["score"]))
+        if b["index_gain_to_clean"] > 0 or b["pressure"] > 0
     ][:5]
 
     corpus = {
@@ -636,11 +660,16 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
         "ratchet_grade": ratchet_grade,
         "ratchet_excluded_kpis": sorted(RATCHET_EXCLUDED_KPIS),
         "steerability_debt": steerability_debt,
+        # Unbounded lower-better count/magnitude of live steering work. The index
+        # can stay A while this keeps growing; that is the point of carrying both.
+        "steering_pressure": steering_pressure,
         "soft_signals": n_soft,
         "debt_by_group": debt_by_group,
+        "pressure_by_group": pressure_by_group,
         "index_by_group": group_index,
         "kpi_scores": {k["kpi"]: k["score"] for k in kpis},
         "debt_by_kpi": {k["kpi"]: len(k["defects"]) for k in kpis},
+        "pressure_by_kpi": {k["kpi"]: int(k.get("pressure", 0)) for k in kpis},
         "breakdown": breakdown,
         "top_moves": top_moves,
     }
@@ -648,14 +677,16 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
     if steerability_debt == 0:
         ok, verdict, finding = True, "OK", "steerable"
         reason = (f"steerability index {index}/100 (grade {grade}), zero hard debt "
-                  f"across {len(kpis)} KPIs ({n_soft} advisory drift signal(s))")
+                  f"across {len(kpis)} KPIs ({n_soft} advisory drift signal(s), "
+                  f"pressure {steering_pressure})")
         next_action = ("hold the index; watch the SOFT drift signals (coupling hubs, p90 "
                        "sizes, package drift) and re-run after the next structural change")
     else:
         ok, verdict, finding = False, "ACTION", "steerability_debt"
         worst = breakdown[0]
         reason = (f"{steerability_debt} unit(s) of steerability-debt; index {index}/100 "
-                  f"(grade {grade}); heaviest: {worst['kpi']} ({worst['debt']} defect(s))")
+                  f"(grade {grade}); pressure {steering_pressure}; heaviest: "
+                  f"{worst['kpi']} ({worst['debt']} defect(s))")
         next_action = ("retire steerability-debt worst-first (see corpus.breakdown): split a "
                        "cmd dispatch god-file along its verb seams, or commit/wire the "
                        "control-pane ratchet; re-run to prove the index rose")
@@ -847,16 +878,17 @@ def render(payload: dict[str, Any]) -> str:
         f"  {payload.get('reason')}",
         "",
         (f"STEERABILITY INDEX {c.get('index', 0)}/100 (grade {c.get('grade', '?')}) "
-         f"· hard debt {c.get('steerability_debt', 0)} · {c.get('soft_signals', 0)} drift signal(s)"),
+         f"· pressure {c.get('steering_pressure', 0)} · hard debt {c.get('steerability_debt', 0)} "
+         f"· {c.get('soft_signals', 0)} drift signal(s)"),
         ("index by group: " + "  ".join(
             f"{g}:{c.get('index_by_group', {}).get(g, 0)}" for g in GROUPS)),
         "",
         "per-KPI (worst first):",
-        f"  {'score':>5} {'debt':>4} {'soft':>4}  {'group':<13} {'kpi':<18} detail",
+        f"  {'score':>5} {'press':>5} {'debt':>4} {'soft':>4}  {'group':<13} {'kpi':<18} detail",
     ]
     for b in c.get("breakdown", []):
-        lines.append(f"  {b['score']:>5} {b['debt']:>4} {b['soft']:>4}  {b['group']:<13} "
-                     f"{b['kpi']:<18} {b['detail']}")
+        lines.append(f"  {b['score']:>5} {b.get('pressure', 0):>5} {b['debt']:>4} {b['soft']:>4}  "
+                     f"{b['group']:<13} {b['kpi']:<18} {b['detail']}")
     lines.append("")
     lines.append("hard-debt work-list:")
     any_defect = False
@@ -883,7 +915,8 @@ def render(payload: dict[str, Any]) -> str:
         lines.append("")
         lines.append("highest-index moves:")
         for m in top_moves[:5]:
-            lines.append(f"      +{m['index_gain_to_clean']:.1f} pts  {m['kpi']} ({m['score']}/100): {m['why']}")
+            lines.append(f"      +{m['index_gain_to_clean']:.1f} pts  pressure {m.get('pressure', 0)}  "
+                         f"{m['kpi']} ({m['score']}/100): {m['why']}")
     lines.append("")
     lines.append(f"next: {payload.get('next_action')}")
     return "\n".join(lines)
@@ -924,6 +957,7 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     out.append("| Metric | Value |")
     out.append("|---|---|")
     out.append(f"| **Steerability index** | **{c.get('index', 0)}/100 (grade {c.get('grade', '?')})** |")
+    out.append(f"| **Steering pressure** | **{c.get('steering_pressure', 0)}** (unbounded, lower is better) |")
     out.append(f"| Hard steerability-debt | {c.get('steerability_debt', 0)} |")
     out.append(f"| Advisory drift signals | {c.get('soft_signals', 0)} |")
     gi = c.get("index_by_group", {})
@@ -940,10 +974,10 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
                "libraries and `// Command ...` docs for command packages. `churn_concentration` "
                "is HEAD-relative.")
     out.append("")
-    out.append("| Group | KPI | Score | Debt | Clean-gain | Detail |")
-    out.append("|---|---|---:|:--:|---:|---|")
+    out.append("| Group | KPI | Score | Pressure | Debt | Clean-gain | Detail |")
+    out.append("|---|---|---:|---:|:--:|---:|---|")
     for b in c.get("breakdown", []):
-        out.append(f"| {b['group']} | `{b['kpi']}` | {b['score']} | {b['debt']} | +{b.get('index_gain_to_clean', 0):.1f} | {b['detail']} |")
+        out.append(f"| {b['group']} | `{b['kpi']}` | {b['score']} | {b.get('pressure', 0)} | {b['debt']} | +{b.get('index_gain_to_clean', 0):.1f} | {b['detail']} |")
     out.append("")
     any_defect = any(k["defects"] for k in payload.get("kpis", []))
     if any_defect:

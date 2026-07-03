@@ -128,9 +128,10 @@ def test_kpi_file_size_dist_clean_and_drift() -> None:
 
 def test_kpi_func_size_dist_rate() -> None:
     clean = st.kpi_func_size_dist(0, 1000)
-    assert clean["score"] == 100 and clean["soft"] == []
+    assert clean["score"] == 100 and clean["soft"] == [] and clean["pressure"] == 0
     drift = st.kpi_func_size_dist(100, 1000)  # 10% long > 5% ref
     assert drift["score"] < 100 and drift["defects"] == [] and drift["soft"]
+    assert drift["pressure"] == 100
 
 
 def test_kpi_god_file_rate_is_soft() -> None:
@@ -172,8 +173,10 @@ def test_kpi_dispatch_god_file_is_hard() -> None:
 def test_kpi_package_doc_frac_is_soft() -> None:
     full = st.kpi_package_doc_frac(10, 10)
     assert full["score"] == 100 and full["defects"] == [] and full["soft"] == []
+    assert full["pressure"] == 0
     half = st.kpi_package_doc_frac(5, 10)
     assert half["score"] == 50 and half["defects"] == [] and half["soft"]
+    assert half["pressure"] == 5
 
 
 def test_kpi_ratchet_present_hard() -> None:
@@ -221,6 +224,7 @@ def _kpis(**overrides: dict) -> list[dict]:
         ov = overrides.get(name, {})
         out.append({"kpi": name, "group": st.KPI_GROUP[name],
                     "score": ov.get("score", score),
+                    "pressure": ov.get("pressure", 0),
                     "detail": "", "defects": ov.get("defects", []),
                     "soft": ov.get("soft", [])})
     return out
@@ -232,6 +236,19 @@ def test_fold_clean_is_steerable() -> None:
     assert p["corpus"]["index"] == 100.0
     assert p["corpus"]["grade"] == "A"
     assert p["corpus"]["steerability_debt"] == 0
+    assert p["corpus"]["steering_pressure"] == 0
+
+
+def test_fold_pressure_is_unbounded_and_not_the_grade() -> None:
+    p = st.build_payload(workspace="/x", kpis=_kpis(
+        func_size_dist={"score": 100, "pressure": 1200},
+        package_doc_frac={"score": 100, "pressure": 40},
+    ))
+    assert p["corpus"]["index"] == 100.0
+    assert p["corpus"]["grade"] == "A"
+    assert p["corpus"]["steerability_debt"] == 0
+    assert p["corpus"]["steering_pressure"] == 1240
+    assert p["corpus"]["pressure_by_kpi"]["func_size_dist"] == 1200
 
 
 def test_fold_debt_blocks_ok() -> None:
@@ -272,9 +289,10 @@ def test_fold_churn_stays_out_of_hard_ratchet_grade() -> None:
 
 def test_render_markdown_names_clean_gain_and_top_moves() -> None:
     p = st.build_payload(workspace="/x", kpis=_kpis(
-        package_doc_frac={"score": 50, "soft": ["half"]}))
+        package_doc_frac={"score": 50, "soft": ["half"], "pressure": 5}))
     md = st.render_markdown(p, stamp="2026-06-30")
     assert "Clean-gain" in md
+    assert "Steering pressure" in md
     assert "Highest-index moves" in md
     assert "`// Command ...` docs" in md
 

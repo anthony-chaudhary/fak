@@ -77,6 +77,18 @@ jobs:
           python tools/steerability_scorecard.py --json > steer.json
           test -s steer.json || { echo "steerability scorecard produced no JSON"; exit 1; }
 
+      # Dogfood is part of the guard card's actuals. The dogfood score exits non-zero
+      # when it reports ACTION, so capture the JSON payload and keep going as long as
+      # the payload exists; the steering card will carry the red/actionable state.
+      - name: generate dogfood actuals payload
+        run: |
+          set +e
+          go run ./cmd/fak dogfood-score --json > dogfood.json
+          code=$?
+          set -e
+          test -s dogfood.json || { echo "dogfood scorecard produced no JSON"; exit 1; }
+          echo "dogfood-score exit ${code} (payload captured for steering guard actuals)"
+
       # Pick the mode: a push fires the regression-gated alert; the daily schedule
       # posts the full report; a manual run uses the chosen input.
       - name: select mode
@@ -95,7 +107,7 @@ jobs:
       - name: render card (dry-run)
         run: |
           go run ./cmd/fak steering ${{ steps.mode.outputs.mode }} \
-            --scorecard-json steer.json --dry-run | tee steering-card.txt
+            --scorecard-json steer.json --dogfood-json dogfood.json --dry-run | tee steering-card.txt
           {
             echo "## steering-guard — ${{ steps.mode.outputs.mode }}"
             echo '```'
@@ -110,7 +122,7 @@ jobs:
         if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
         run: |
           go run ./cmd/fak steering ${{ steps.mode.outputs.mode }} \
-            --scorecard-json steer.json
+            --scorecard-json steer.json --dogfood-json dogfood.json
 
       - name: note when posting was skipped
         if: ${{ env.FAK_SCOREBOARD_TOKEN == '' }}
@@ -124,4 +136,5 @@ jobs:
           path: |
             steering-card.txt
             steer.json
+            dogfood.json
           if-no-files-found: ignore

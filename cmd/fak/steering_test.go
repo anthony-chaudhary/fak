@@ -103,17 +103,19 @@ const sampleSteerJSON = `{
   "schema": "fak-steerability-scorecard/1",
   "verdict": "OK",
   "finding": "no hard steerability-debt",
-  "corpus": {
+    "corpus": {
     "index": 89.9,
     "score": 89.9,
     "grade": "B",
     "steerability_debt": 0,
+    "steering_pressure": 65,
     "soft_signals": 5,
     "index_by_group": {"modularity": 81.5, "coupling": 99.0, "navigability": 68.0, "correction": 97.3},
+    "pressure_by_group": {"modularity": 57, "coupling": 0, "navigability": 8, "correction": 0},
     "breakdown": [
-      {"kpi": "func_size_dist", "group": "modularity", "score": 49, "debt": 0, "soft": 0, "detail": "no soft", "index_gain_to_clean": 5.1},
-      {"kpi": "package_doc_frac", "group": "navigability", "score": 68, "debt": 0, "soft": 1, "detail": "146/214 packages documented", "index_gain_to_clean": 3.2},
-      {"kpi": "god_file_rate", "group": "modularity", "score": 83, "debt": 0, "soft": 1, "detail": "3/858 files > 1500 lines", "index_gain_to_clean": 1.2}
+      {"kpi": "func_size_dist", "group": "modularity", "score": 49, "debt": 0, "soft": 0, "pressure": 57, "detail": "57/1000 functions over the soft length line", "index_gain_to_clean": 5.1},
+      {"kpi": "package_doc_frac", "group": "navigability", "score": 68, "debt": 0, "soft": 1, "pressure": 8, "detail": "146/214 packages documented", "index_gain_to_clean": 3.2},
+      {"kpi": "god_file_rate", "group": "modularity", "score": 83, "debt": 0, "soft": 1, "pressure": 3, "detail": "3/858 files > 1500 lines", "index_gain_to_clean": 1.2}
     ]
   },
   "kpis": [
@@ -127,17 +129,15 @@ func TestParseSteeringSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.index != 89.9 || s.debt != 0 || s.softSignal != 5 {
-		t.Fatalf("corpus fold wrong: index=%v debt=%v soft=%v", s.index, s.debt, s.softSignal)
+	if s.index != 89.9 || s.debt != 0 || s.pressure != 65 || s.softSignal != 5 {
+		t.Fatalf("corpus fold wrong: index=%v debt=%v pressure=%v soft=%v", s.index, s.debt, s.pressure, s.softSignal)
 	}
-	// drift keeps only KPIs with a soft signal, worst-first.
-	if len(s.drift) != 2 {
-		t.Fatalf("want 2 drift rows (soft>0), got %d: %+v", len(s.drift), s.drift)
+	// drift keeps rows with pressure/gain/soft signal, worst-first by clean gain.
+	if len(s.drift) != 3 {
+		t.Fatalf("want 3 drift rows (pressure/gain/soft), got %d: %+v", len(s.drift), s.drift)
 	}
-	for _, d := range s.drift {
-		if d.Soft <= 0 {
-			t.Fatalf("drift row with soft<=0 leaked in: %+v", d)
-		}
+	if s.drift[0].KPI != "func_size_dist" || s.drift[0].Pressure != 57 {
+		t.Fatalf("top drift should be func_size_dist by gain and carry pressure, got %+v", s.drift[0])
 	}
 }
 
@@ -176,35 +176,54 @@ func TestBuildSteeringUpdateModes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// status: headline, no actions, no group line.
-	st := buildSteeringUpdate(s, "status", "ci", "")
-	if st.Title != "steerability" || len(st.Actions) != 0 {
+	dog := &steeringDogfood{
+		Verdict:         "ACTION",
+		Grade:           "B",
+		Score:           "89",
+		Debt:            1,
+		RecentWedged:    36,
+		RecentMarkers:   267,
+		StopMarkers:     592,
+		ConflationTurns: 0,
+		TranscriptsSeen: 849,
+		ChainReports:    29,
+		ChainAgeHours:   138.4,
+		ReceiptMode:     "fetch-existing",
+		PendingCreates:  0,
+		NextAction:      "retire stop_hook_healthy",
+	}
+
+	// status: compact guard state, no actions, explicit color/actuals notes.
+	st := buildSteeringUpdate(s, dog, "status", "ci", "")
+	if st.Title != "steering guard" || len(st.Actions) != 0 {
 		t.Fatalf("status mode wrong: title=%q actions=%d", st.Title, len(st.Actions))
+	}
+	if st.Verdict != "ACTION" || !strings.Contains(st.Detail, "RED") {
+		t.Fatalf("dogfood ACTION should turn the guard card red/actionable: verdict=%q detail=%q", st.Verdict, st.Detail)
+	}
+	for _, want := range []string{"Color code", "RED = dogfood ACTION/debt", "YELLOW = passing with pressure", "Steering actuals", "pressure 65 (unbounded", "Dogfood actuals", "36/267 recent sessions wedged"} {
+		if !strings.Contains(st.Notes, want) {
+			t.Fatalf("status notes missing %q:\n%s", want, st.Notes)
+		}
 	}
 
 	// report: full snapshot with a per-group index line + actions.
-	rp := buildSteeringUpdate(s, "report", "ci", "")
-	if rp.Title != "steerability report" {
+	rp := buildSteeringUpdate(s, dog, "report", "ci", "")
+	if rp.Title != "steering guard report" {
 		t.Fatalf("report title wrong: %q", rp.Title)
 	}
 	if len(rp.Actions) == 0 {
 		t.Fatal("report should carry actions")
 	}
-	foundGroup := false
-	for _, l := range rp.Lines {
-		if strings.Contains(l, "modularity") && strings.Contains(l, "coupling") {
-			foundGroup = true
-		}
+	if len(rp.Lines) != 0 {
+		t.Fatalf("report should use readable Notes, not dense backtick Lines: %v", rp.Lines)
 	}
-	if !foundGroup {
-		t.Fatalf("report should include the per-group index line; lines=%v", rp.Lines)
-	}
-	if !strings.Contains(strings.Join(rp.Lines, "\n"), "+3.2 index pts") {
-		t.Fatalf("report should include clean-gain guidance; lines=%v", rp.Lines)
+	if !strings.Contains(rp.Notes, "Index by group") || !strings.Contains(rp.Notes, "+5.1 index pts") {
+		t.Fatalf("report should include group index + clean-gain guidance in notes:\n%s", rp.Notes)
 	}
 
 	// alert: ACTION verdict, reason folded into Detail, actions present.
-	al := buildSteeringUpdate(s, "alert", "ci", "index dropped")
+	al := buildSteeringUpdate(s, dog, "alert", "ci", "index dropped")
 	if al.Verdict != "ACTION" {
 		t.Fatalf("alert verdict should be ACTION, got %q", al.Verdict)
 	}

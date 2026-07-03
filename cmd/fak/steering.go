@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/dogfoodscore"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
@@ -58,6 +59,7 @@ type steeringSnapshot struct {
 	payload    scorecard.Payload
 	index      float64
 	debt       int
+	pressure   int
 	softSignal int
 	// drift is the per-KPI soft-signal detail, worst-first (most soft signals first),
 	// used to point the heaviest drift at the skill that retires it.
@@ -65,12 +67,30 @@ type steeringSnapshot struct {
 }
 
 type steeringDrift struct {
-	KPI    string
-	Group  string
-	Score  int
-	Soft   int
-	Gain   float64
-	Detail string
+	KPI      string
+	Group    string
+	Score    int
+	Soft     int
+	Pressure int
+	Gain     float64
+	Detail   string
+}
+
+type steeringDogfood struct {
+	Verdict         string
+	Grade           string
+	Score           string
+	Debt            int
+	RecentWedged    int
+	RecentMarkers   int
+	StopMarkers     int
+	ConflationTurns int
+	TranscriptsSeen int
+	ChainReports    int
+	ChainAgeHours   float64
+	ReceiptMode     string
+	PendingCreates  int
+	NextAction      string
 }
 
 func runSteering(stdout, stderr io.Writer, mode string, argv []string) int {
@@ -80,6 +100,7 @@ func runSteering(stdout, stderr io.Writer, mode string, argv []string) int {
 	token := fs.String("token", "", "override bot token (default: $FAK_SCOREBOARD_TOKEN / .env.slack.local)")
 	source := fs.String("source", "", "who is posting: ci | agent | <hostname> (default: $FAK_SCOREBOARD_SOURCE or hostname)")
 	scorecardJSON := fs.String("scorecard-json", "", "read the steerability payload from this file instead of running the scorecard (- for stdin)")
+	dogfoodJSON := fs.String("dogfood-json", "", "read the dogfood-score payload from this file instead of collecting live actuals (- for stdin)")
 	indexDelta := fs.Float64("index-delta", 2.0, "alert: minimum index drop vs the pinned floor to fire")
 	pin := fs.Bool("pin", false, "alert: ratchet the floor down when the read is an improvement")
 	dryRun := fs.Bool("dry-run", false, "render the card and print it; do not post to Slack")
@@ -115,11 +136,21 @@ func runSteering(stdout, stderr io.Writer, mode string, argv []string) int {
 			}
 			return 0
 		}
-		up := buildSteeringUpdate(snap, "alert", src, reason)
+		dog, err := loadSteeringDogfood(*dogfoodJSON)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak steering %s: %v\n", mode, err)
+			return 2
+		}
+		up := buildSteeringUpdate(snap, dog, "alert", src, reason)
 		return postSteering(stdout, stderr, up, *channel, *token, *dryRun)
 	}
 
-	up := buildSteeringUpdate(snap, mode, src, "")
+	dog, err := loadSteeringDogfood(*dogfoodJSON)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak steering %s: %v\n", mode, err)
+		return 2
+	}
+	up := buildSteeringUpdate(snap, dog, mode, src, "")
 	return postSteering(stdout, stderr, up, *channel, *token, *dryRun)
 }
 
@@ -210,10 +241,47 @@ func parseSteeringSnapshot(raw []byte) (steeringSnapshot, error) {
 	if p.Corpus != nil {
 		snap.index = corpusFloat(p.Corpus, "index")
 		snap.debt = int(corpusFloat(p.Corpus, "steerability_debt"))
+		snap.pressure = int(corpusFloat(p.Corpus, "steering_pressure"))
 		snap.softSignal = int(corpusFloat(p.Corpus, "soft_signals"))
 		snap.drift = corpusDrift(p.Corpus)
 	}
 	return snap, nil
+}
+
+func loadSteeringDogfood(path string) (*steeringDogfood, error) {
+	var p dogfoodscore.ScorecardPayload
+	if path != "" {
+		raw, err := readFromFile(path)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("parse dogfood-score payload: %w", err)
+		}
+	} else {
+		p = dogfoodscore.Build(dogfoodscore.Options{Root: repoRoot()})
+	}
+	return dogfoodFromPayload(p), nil
+}
+
+func dogfoodFromPayload(p dogfoodscore.ScorecardPayload) *steeringDogfood {
+	d := &steeringDogfood{
+		Verdict:         firstNonEmpty(p.Verdict, "UNKNOWN"),
+		Grade:           scoreValueString(p.Corpus["grade"]),
+		Score:           scoreValueString(p.Corpus["score"]),
+		Debt:            int(corpusFloat(p.Corpus, "dogfood_debt")),
+		RecentWedged:    int(corpusFloat(p.Corpus, "recent_wedged")),
+		StopMarkers:     int(corpusFloat(p.Corpus, "stop_markers")),
+		ConflationTurns: int(corpusFloat(p.Corpus, "conflation_turns")),
+		TranscriptsSeen: int(corpusFloat(p.Corpus, "transcripts_seen")),
+		NextAction:      p.NextAction,
+	}
+	d.RecentMarkers = p.Evidence.RecentMarkers
+	d.ChainReports = p.Evidence.Chain.Reports
+	d.ChainAgeHours = p.Evidence.Chain.NewestAgeHours
+	d.ReceiptMode = p.Evidence.Chain.ReceiptMode
+	d.PendingCreates = p.Evidence.Chain.PendingCreates
+	return d
 }
 
 // corpusFloat reads a numeric corpus field tolerant of int/float JSON decoding.
@@ -246,19 +314,28 @@ func corpusDrift(c map[string]any) []steeringDrift {
 			continue
 		}
 		soft := int(toFloat(m["soft"]))
-		if soft <= 0 {
+		pressure := int(toFloat(m["pressure"]))
+		gain := toFloat(m["index_gain_to_clean"])
+		if soft <= 0 && pressure <= 0 && gain <= 0 {
 			continue
 		}
 		out = append(out, steeringDrift{
-			KPI:    toString(m["kpi"]),
-			Group:  toString(m["group"]),
-			Score:  int(toFloat(m["score"])),
-			Soft:   soft,
-			Gain:   toFloat(m["index_gain_to_clean"]),
-			Detail: toString(m["detail"]),
+			KPI:      toString(m["kpi"]),
+			Group:    toString(m["group"]),
+			Score:    int(toFloat(m["score"])),
+			Soft:     soft,
+			Pressure: pressure,
+			Gain:     gain,
+			Detail:   toString(m["detail"]),
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Gain != out[j].Gain {
+			return out[i].Gain > out[j].Gain
+		}
+		if out[i].Pressure != out[j].Pressure {
+			return out[i].Pressure > out[j].Pressure
+		}
 		if out[i].Soft != out[j].Soft {
 			return out[i].Soft > out[j].Soft
 		}
@@ -286,6 +363,22 @@ func toString(v any) string {
 		return s
 	}
 	return ""
+}
+
+func scoreValueString(v any) string {
+	switch x := v.(type) {
+	case string:
+		return strings.TrimSpace(x)
+	case float64:
+		if x == float64(int(x)) {
+			return fmt.Sprintf("%d", int(x))
+		}
+		return fmt.Sprintf("%.1f", x)
+	case int:
+		return fmt.Sprintf("%d", x)
+	default:
+		return ""
+	}
 }
 
 // shouldAlert is the pure regression gate: fire when the hard debt is non-zero, the
@@ -320,42 +413,32 @@ func isImprovement(cur steeringSnapshot, base *steeringBaseline) bool {
 }
 
 // buildSteeringUpdate folds the snapshot into a scoreboard Update. mode tailors the
-// card: status = headline only; report = headline + per-group index + breakdown;
-// alert = headline + reason + actionable "do this next" buttons for the worst drift.
-func buildSteeringUpdate(snap steeringSnapshot, mode, source, reason string) scoreboard.Update {
-	title := "steerability"
+// card: status = compact guard state; report = full actuals + top moves; alert =
+// regression reason + actionable "do this next" buttons for the worst drift. The
+// card deliberately carries BOTH the bounded grade/index and the unbounded pressure
+// count, because a green 0-100 letter can hide growing live work.
+func buildSteeringUpdate(snap steeringSnapshot, dog *steeringDogfood, mode, source, reason string) scoreboard.Update {
+	title := "steering guard"
 	switch mode {
 	case "report":
-		title = "steerability report"
+		title = "steering guard report"
 	case "alert":
-		title = "steerability alert"
+		title = "steering guard alert"
 	}
 	up := scoreboard.FromPayload(title, snap.payload, "steerability_debt")
 	up.Source = source
+	up.Verdict = steeringOverallVerdict(snap, dog)
+	up.Detail = steeringStatusSummary(snap, dog)
+	up.Notes = steeringNotes(snap, dog, mode)
+	up.Lines = nil
 
 	if mode == "alert" && reason != "" {
 		up.Verdict = "ACTION"
-		if up.Detail != "" {
-			up.Detail = reason + " — " + up.Detail
-		} else {
-			up.Detail = reason
-		}
+		up.Detail = "alert: " + reason + " — " + steeringStatusSummary(snap, dog)
 		up.Actions = steeringActions(snap)
 	}
 
 	if mode == "report" {
-		// Replace the bare KPI score lines with a richer snapshot: per-group index
-		// first, then the worst drift details. FromPayload already sorted KPI lines.
-		var lines []string
-		if g := groupLine(snap.payload); g != "" {
-			lines = append(lines, g)
-		}
-		for _, d := range snap.drift {
-			lines = append(lines, steeringDriftLine(d))
-		}
-		if len(lines) > 0 {
-			up.Lines = lines
-		}
 		up.Actions = steeringActions(snap)
 	}
 	return up
@@ -363,10 +446,127 @@ func buildSteeringUpdate(snap steeringSnapshot, mode, source, reason string) sco
 
 func steeringDriftLine(d steeringDrift) string {
 	if d.Gain > 0 {
-		return fmt.Sprintf("%s (%s): score %d, +%.1f index pts if clean - %s",
-			d.KPI, d.Group, d.Score, d.Gain, d.Detail)
+		return fmt.Sprintf("%s (%s): score %d, pressure %d, +%.1f index pts if clean - %s",
+			d.KPI, d.Group, d.Score, d.Pressure, d.Gain, d.Detail)
 	}
-	return fmt.Sprintf("%s (%s): %s", d.KPI, d.Group, d.Detail)
+	return fmt.Sprintf("%s (%s): score %d, pressure %d - %s", d.KPI, d.Group, d.Score, d.Pressure, d.Detail)
+}
+
+func steeringOverallVerdict(snap steeringSnapshot, dog *steeringDogfood) string {
+	if snap.debt > 0 {
+		return "ACTION"
+	}
+	if dog != nil && (dog.Debt > 0 || strings.EqualFold(dog.Verdict, "ACTION")) {
+		return "ACTION"
+	}
+	return firstNonEmpty(snap.payload.Verdict, "OK")
+}
+
+func steeringBand(snap steeringSnapshot, dog *steeringDogfood) string {
+	if steeringOverallVerdict(snap, dog) == "ACTION" {
+		return "RED"
+	}
+	if snap.pressure > 0 || snap.softSignal > 0 || snap.index < 95 {
+		return "YELLOW"
+	}
+	return "GREEN"
+}
+
+func steeringStatusSummary(snap steeringSnapshot, dog *steeringDogfood) string {
+	band := steeringBand(snap, dog)
+	switch band {
+	case "RED":
+		if dog != nil && (dog.Debt > 0 || strings.EqualFold(dog.Verdict, "ACTION")) {
+			return fmt.Sprintf("RED — dogfood ACTION: %d/%d recent sessions wedged; steerability index %.1f, pressure %d",
+				dog.RecentWedged, dog.RecentMarkers, snap.index, snap.pressure)
+		}
+		return fmt.Sprintf("RED — steerability debt %d; index %.1f, pressure %d", snap.debt, snap.index, snap.pressure)
+	case "YELLOW":
+		return fmt.Sprintf("YELLOW — steerability is passing but has pressure %d and %d drift signal(s)", snap.pressure, snap.softSignal)
+	default:
+		return fmt.Sprintf("GREEN — steerability clean: index %.1f, pressure %d", snap.index, snap.pressure)
+	}
+}
+
+func steeringNotes(snap steeringSnapshot, dog *steeringDogfood, mode string) string {
+	lines := []string{
+		"*Color code:* " + steeringColorCodeLine(snap, dog),
+		fmt.Sprintf("*Steering actuals:* index %.1f/100; pressure %d (unbounded, lower is better); hard debt %d; soft signals %d",
+			snap.index, snap.pressure, snap.debt, snap.softSignal),
+	}
+	if p := pressureByGroupLine(snap.payload); p != "" {
+		lines = append(lines, "*Pressure by group:* "+p)
+	}
+	if g := groupLine(snap.payload); g != "" {
+		lines = append(lines, "*Index by group:* "+g)
+	}
+	if dog != nil {
+		lines = append(lines, "*Dogfood actuals:* "+dogfoodActualsLine(dog))
+	}
+	if mode != "status" && len(snap.drift) > 0 {
+		lines = append(lines, "*Top steering moves:*")
+		for i, d := range snap.drift {
+			if i == 3 {
+				break
+			}
+			lines = append(lines, "• "+steeringDriftLine(d))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func steeringColorCodeLine(snap steeringSnapshot, dog *steeringDogfood) string {
+	band := steeringBand(snap, dog)
+	reason := "clean"
+	switch band {
+	case "RED":
+		if dog != nil && (dog.Debt > 0 || strings.EqualFold(dog.Verdict, "ACTION")) {
+			reason = "dogfood ACTION/debt"
+		} else {
+			reason = "hard steering debt"
+		}
+	case "YELLOW":
+		reason = "passing, but pressure or drift remains"
+	}
+	return fmt.Sprintf("%s = %s; RED = action required, YELLOW = passing with pressure, GREEN = clean", band, reason)
+}
+
+func dogfoodActualsLine(d *steeringDogfood) string {
+	if d == nil {
+		return "unavailable"
+	}
+	parts := []string{
+		fmt.Sprintf("%s grade %s score %s, debt %d", firstNonEmpty(d.Verdict, "UNKNOWN"), firstNonEmpty(d.Grade, "?"), firstNonEmpty(d.Score, "?"), d.Debt),
+		fmt.Sprintf("%d/%d recent sessions wedged", d.RecentWedged, d.RecentMarkers),
+		fmt.Sprintf("%d conflation turn(s) / %d transcript(s)", d.ConflationTurns, d.TranscriptsSeen),
+		fmt.Sprintf("%d stop marker(s)", d.StopMarkers),
+	}
+	if d.ChainReports > 0 {
+		parts = append(parts, fmt.Sprintf("packet %.0fh old, receipt %s, pending creates %d",
+			d.ChainAgeHours, firstNonEmpty(d.ReceiptMode, "unknown"), d.PendingCreates))
+	}
+	if d.NextAction != "" && d.Debt > 0 {
+		parts = append(parts, "next: "+d.NextAction)
+	}
+	return strings.Join(parts, "; ")
+}
+
+func pressureByGroupLine(p scorecard.Payload) string {
+	if p.Corpus == nil {
+		return ""
+	}
+	m, ok := p.Corpus["pressure_by_group"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	order := []string{"modularity", "coupling", "navigability", "correction"}
+	var parts []string
+	for _, g := range order {
+		if v, ok := m[g]; ok {
+			parts = append(parts, fmt.Sprintf("%s %d", g, int(toFloat(v))))
+		}
+	}
+	return strings.Join(parts, " · ")
 }
 
 // groupLine renders the per-group index from corpus.index_by_group, e.g.
