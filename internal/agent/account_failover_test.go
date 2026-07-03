@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
+	"time"
 )
 
 // TestHTTPPlannerComplete403AccountFailover proves the mid-session account-failover self-heal on
@@ -131,4 +133,63 @@ func TestHTTPPlannerComplete403AccountFailover(t *testing.T) {
 			t.Errorf("upstream hit %d times, want exactly 1", n)
 		}
 	})
+}
+
+// TestHTTPPlannerComplete403OverageCapWaitsForReset proves the fix for the deeper bug the audit
+// found: a usage/overage cap that surfaces as a 403 (org-flavored body, but overage-status
+// rejected with a near reset) must ride the cap-aware wait toward its reset and RECOVER — the same
+// way a 429 account cap does — instead of dying in the seconds-scale transient-403 arm or being
+// treated as a permanent org wall. With no AccountFailoverFunc wired, the only correct behavior is
+// to wait out the (short) reset and re-send, then 200.
+func TestHTTPPlannerComplete403OverageCapWaitsForReset(t *testing.T) {
+	orgBody := []byte(`{"type":"error","error":{"type":"permission_error",` +
+		`"message":"OAuth authentication is currently not allowed for this organization."}}`)
+
+	var n int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n++
+		if n == 1 {
+			// First hit: an overage-rejected 403 with a reset ~1s out. The cap-aware wait must
+			// take this toward the reset, NOT the 30s forbidden window and NOT a terminal wall.
+			reset := time.Now().Add(1 * time.Second).Unix()
+			w.Header().Set("Anthropic-Ratelimit-Unified-Status", "allowed")
+			w.Header().Set("Anthropic-Ratelimit-Unified-Overage-Status", "rejected")
+			w.Header().Set("Anthropic-Ratelimit-Unified-Overage-Disabled-Reason", "org_level_disabled")
+			w.Header().Set("Anthropic-Ratelimit-Unified-Reset", strconv.FormatInt(reset, 10))
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write(orgBody)
+			return
+		}
+		// The retry after the cap wait succeeds — the window reset.
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer ts.Close()
+
+	planner, err := NewProviderHTTPPlanner("anthropic", ts.URL, "claude-test", "sk-ant-oat01-capped")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No AccountFailoverFunc: the ONLY correct recovery is to wait for the reset and re-send —
+	// proving the cap-wait path, not the rehome/failover path.
+	var failoverCalls int
+	planner.AccountFailoverFunc = func(string) (string, bool) { failoverCalls++; return "", false }
+
+	start := time.Now()
+	if _, err := planner.Complete(context.Background(), adapterTestMessages(""), adapterTestTools()); err != nil {
+		t.Fatalf("an overage-cap 403 with a near reset should self-heal by waiting for the reset, got: %v", err)
+	}
+	elapsed := time.Since(start)
+	if n != 2 {
+		t.Fatalf("upstream hit %d times, want exactly 2 (the capped 403 then the post-reset 200)", n)
+	}
+	// It must have WAITED (the cap-aware backoff), not spun instantly — a floor proves the wait ran.
+	if elapsed < 200*time.Millisecond {
+		t.Errorf("Complete returned in %v — too fast; the cap-aware wait toward the reset did not run", elapsed)
+	}
+	// It must NOT have tried to fail over/rehome: an overage cap with no free seat should wait, and
+	// with no AccountFailoverFunc target it simply rides the wait. (failoverCalls may be 1 — the
+	// single rehome probe — but never a swap, since the func returns ok=false; the point is the turn
+	// recovered via the wait, asserted by the 200 above.)
+	_ = failoverCalls
 }

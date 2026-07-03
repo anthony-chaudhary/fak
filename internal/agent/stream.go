@@ -71,6 +71,10 @@ type upstreamCall struct {
 	quarantined  int
 	redacted     int                   // rung 5 (#572): messages whose content was span-redacted pre-send
 	redactions   []TranscriptRedaction // the full reversible records (CAS Original) behind that count (#882)
+	// responsesStreamed marks a buffered caller that had to ask an OpenAI Responses
+	// upstream for SSE anyway. Codex's ChatGPT-subscription backend requires stream=true,
+	// but the gateway still buffers, adjudicates, and returns the client's requested shape.
+	responsesStreamed bool
 	// authRefreshable marks the pinned/rotating-credential path — no per-request
 	// UpstreamAPIKey (the transparent passthrough hop authenticates with the client's
 	// OWN key, which we must not second-guess) AND a live APIKeyFunc on the planner. On
@@ -280,6 +284,7 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 	if err != nil {
 		return nil, err
 	}
+	forceResponsesStream := p.ForceResponsesStream && adapter.Provider() == ProviderOpenAIResponses
 	safeMessages := messages
 	var quarantines []TranscriptQuarantine
 	if p.QuarantineTranscript {
@@ -330,18 +335,20 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 			return nil, err
 		}
 		reqBody, err = adapter.MarshalRequest(adapterRequest{
-			Model:          modelID,
-			Messages:       safeMessages,
-			Tools:          tools,
-			Temperature:    temperature,
-			MaxTokens:      maxTokens,
-			TopP:           sp.TopP,
-			TopK:           sp.TopK,
-			Stop:           sp.Stop,
-			ResponseFormat: sp.ResponseFormat,
-			LogitBias:      sp.LogitBias,
-			ExtraBody:      extraBody,
-			Stream:         stream,
+			Model:               modelID,
+			Messages:            safeMessages,
+			Tools:               tools,
+			Temperature:         temperature,
+			OmitTemperature:     forceResponsesStream,
+			OmitMaxOutputTokens: forceResponsesStream,
+			MaxTokens:           maxTokens,
+			TopP:                sp.TopP,
+			TopK:                sp.TopK,
+			Stop:                sp.Stop,
+			ResponseFormat:      sp.ResponseFormat,
+			LogitBias:           sp.LogitBias,
+			ExtraBody:           extraBody,
+			Stream:              stream || forceResponsesStream,
 		})
 		if err != nil {
 			return nil, err
@@ -358,16 +365,17 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 		apiKey = sp.UpstreamAPIKey
 	}
 	return &upstreamCall{
-		adapter:         adapter,
-		url:             adapter.Endpoint(p.BaseURL, modelID),
-		body:            reqBody,
-		apiKey:          apiKey,
-		upstreamBeta:    sp.UpstreamBeta,
-		extraHeaders:    extraHeaders,
-		quarantined:     len(quarantines),
-		redacted:        redactedN,
-		redactions:      redactions,
-		authRefreshable: authRefreshable,
+		adapter:           adapter,
+		url:               adapter.Endpoint(p.BaseURL, modelID),
+		body:              reqBody,
+		apiKey:            apiKey,
+		upstreamBeta:      sp.UpstreamBeta,
+		extraHeaders:      extraHeaders,
+		quarantined:       len(quarantines),
+		redacted:          redactedN,
+		redactions:        redactions,
+		responsesStreamed: forceResponsesStream,
+		authRefreshable:   authRefreshable,
 	}, nil
 }
 
@@ -515,6 +523,28 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 				continue
 			}
 			notifyAuthRefresh(p, AuthRefreshExhausted, attempt)
+		}
+		// A 403/402 USAGE/OVERAGE cap (see Complete): a self-recovering rolling-window cap that
+		// Anthropic surfaces as a 403 with an org-flavored body — only the unified/overage headers
+		// reveal it. Take the same path a 429 account cap does (record as a retryable cap, then
+		// rehome to a free seat or ride the cap-aware backoff toward the reset), never the
+		// seconds-scale forbidden arm and never the org-wall failover. Precedes both.
+		if (r.StatusCode == http.StatusForbidden || r.StatusCode == http.StatusPaymentRequired) &&
+			usageOrOverageRejected(r.Header) {
+			rs.noteRetryableStatus(r.StatusCode, raw, r.Header, 400)
+			if !triedRehome && p.AccountFailoverFunc != nil {
+				if call.failoverAccountCred(p, RehomedSeat) {
+					triedRehome = true
+					rehomePending = true
+					rs.lastRetryAfter = ""
+					rs.lastCapWait = ""
+					attempt--
+					continue
+				}
+				notifyAccountFailover(p, RehomeSeatUnavailable, attempt)
+				triedRehome = true
+			}
+			continue
 		}
 		// A 403's bounded transient-recovery arm (self-contained short paced wait; see Complete):
 		// retry a transient abuse/capacity denial a few times before surfacing it terminally.

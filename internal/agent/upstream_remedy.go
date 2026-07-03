@@ -147,25 +147,7 @@ func classifyUpstream(status int, body []byte, h http.Header) UpstreamRemedy {
 // caller treats it as a real account wall. Reusing the accountobs parser keeps ONE header
 // taxonomy: the same leaf that feeds the cap-aware wait (unifiedResetFor) decides this.
 func usageOrOverageRejected(h http.Header) bool {
-	if len(h) == 0 {
-		return false
-	}
-	// The overage-status header is not a per-window field the Unified() parser surfaces, so read
-	// it directly (case-insensitively, as http.Header canonicalizes keys). "rejected" means the
-	// account hit its cap with overage disabled — a self-recovering usage boundary.
-	if strings.EqualFold(strings.TrimSpace(h.Get("Anthropic-Ratelimit-Unified-Overage-Status")), "rejected") {
-		return true
-	}
-	// Any unified window reporting status "rejected" (top-level, 5h, or 7d) is likewise a
-	// usage-cap rejection with a reset, not a permission wall.
-	t := accountobs.New()
-	t.Observe(http.StatusForbidden, h)
-	for _, w := range t.Snapshot().Unified() {
-		if strings.EqualFold(strings.TrimSpace(w.Status), "rejected") {
-			return true
-		}
-	}
-	return false
+	return accountobs.UsageOverageRejection(h).Rejected
 }
 
 // bodyContainsAny reports whether the lowercased body contains any of the signatures. The

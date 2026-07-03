@@ -30,6 +30,52 @@ func TestUpstreamErrorStatus_StallIsDistinct504(t *testing.T) {
 	}
 }
 
+// TestUpstreamErrorStatus_UsageCapIsNotAWall proves a 403/402 that fak classified as a
+// self-recovering USAGE/OVERAGE cap (LimitReason set) gets the honest "capped, recovers at reset
+// — do NOT re-login" message and its own code, NOT the generic org-wall/permission message that
+// pushes the user toward a futile /login. This is the gateway symptom of the deeper overage bug.
+func TestUpstreamErrorStatus_UsageCapIsNotAWall(t *testing.T) {
+	for _, reason := range []string{"session_limit", "weekly_limit", "usage_limit"} {
+		t.Run(reason, func(t *testing.T) {
+			status, code, msg := upstreamErrorStatus(&agent.UpstreamStatusError{
+				Status:      http.StatusForbidden,
+				Body:        `{"type":"error","error":{"type":"permission_error","message":"OAuth authentication is currently not allowed for this organization."}}`,
+				LimitReason: reason,
+			})
+			if status != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403", status)
+			}
+			if code != "upstream_usage_cap" {
+				t.Fatalf("code = %q, want upstream_usage_cap (a cap must not read as an org wall)", code)
+			}
+			lower := strings.ToLower(msg)
+			if !strings.Contains(lower, "recovers") || !strings.Contains(lower, "do not re-login") {
+				t.Fatalf("message must say it recovers and NOT to re-login: %q", msg)
+			}
+			// It must NOT be the permanent org-wall message.
+			if strings.Contains(msg, "walled") || strings.Contains(strings.ToLower(msg), "disabled upstream") {
+				t.Fatalf("a usage cap must not carry the permanent org-wall wording: %q", msg)
+			}
+		})
+	}
+}
+
+// A 403 with NO LimitReason (a genuine permission wall) must keep its org-disable / generic
+// message — the cap arm must not swallow a real wall.
+func TestUpstreamErrorStatus_RealWallStillReLogins(t *testing.T) {
+	status, code, _ := upstreamErrorStatus(&agent.UpstreamStatusError{
+		Status: http.StatusForbidden,
+		Body:   `{"type":"error","error":{"type":"permission_error","message":"OAuth authentication is currently not allowed for this organization."}}`,
+		// No LimitReason: this is a genuine standing org wall.
+	})
+	if status != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", status)
+	}
+	if code == "upstream_usage_cap" {
+		t.Fatalf("a 403 with no cap reason must NOT be classified a usage cap, got %q", code)
+	}
+}
+
 // upstreamErrorKind is the single classifier the counter and the FAILED debug line share; its
 // ladder must match upstreamErrorStatus so the metric and the client status never disagree.
 func TestUpstreamErrorKind_ClassifiesEveryArm(t *testing.T) {

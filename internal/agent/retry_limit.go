@@ -74,18 +74,27 @@ func isAccountCap429(status int, body []byte, h http.Header, now time.Time) bool
 	return capWait != ""
 }
 
-// classifyLimit429 classifies one retryable upstream 429 into the closed rate-limit
-// vocabulary shared with the post-mortem transcript scan, and derives the cap-aware
-// wait the retry loop should use when the response carried no Retry-After.
+// classifyLimit429 classifies one upstream rate/usage refusal into the closed rate-limit
+// vocabulary shared with the post-mortem transcript scan, and derives the cap-aware wait the
+// retry loop should use when the response carried no Retry-After.
 //
-// cls is the zero value for a non-429. capWait is a delta-seconds string (the same
-// form an upstream Retry-After takes, consumed by retryBackoffWait) and is NON-EMPTY
-// only for an account cap — session_limit / weekly_limit / usage_limit: the seconds
-// until the provider-relayed unified reset for the matching window when one is named,
-// else the slow cap-probe interval. A rate_limited throttle returns capWait "" so the
-// transient Retry-After/exponential behavior is byte-for-byte unchanged.
+// It is HEADER-AWARE (ClassifyLimitResponseWithHeader), so despite the name it now catches the
+// population a 429-only gate missed: a Claude subscription USAGE/OVERAGE cap that surfaces as a
+// 403 (overage disabled, a rolling window at its cap) whose org-flavored body text is
+// indistinguishable from a permanent org wall — only the anthropic-ratelimit-unified-* /
+// -overage-status headers separate the two. Such a 403/402 cap now classifies as
+// session/weekly/usage_limit and gets a real capWait toward its reset, exactly like a 429 cap,
+// instead of dying in the transient-403 arm. A 429 with no overage header is byte-for-byte
+// unchanged.
+//
+// cls is the zero value when the response is neither a 429 nor a header-signalled cap. capWait is
+// a delta-seconds string (the same form an upstream Retry-After takes, consumed by
+// retryBackoffWait) and is NON-EMPTY only for an account cap — session_limit / weekly_limit /
+// usage_limit: the seconds until the provider-relayed unified reset for the matching window when
+// one is named, else the slow cap-probe interval. A rate_limited throttle returns capWait "" so
+// the transient Retry-After/exponential behavior is byte-for-byte unchanged.
 func classifyLimit429(status int, body []byte, h http.Header, now time.Time) (cls resume.LimitClassification, capWait string) {
-	cls, ok := resume.ClassifyLimitResponse(status, body)
+	cls, ok := resume.ClassifyLimitResponseWithHeader(status, body, h)
 	if !ok || cls.Reason == resume.LimitRate {
 		return cls, ""
 	}

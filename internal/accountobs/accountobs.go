@@ -177,6 +177,91 @@ func (s Snapshot) Unified() []UnifiedWindow {
 	return out
 }
 
+// UsageRejection is the folded verdict of whether a response's subscription rate-limit
+// headers show a self-recovering USAGE/OVERAGE cap — a rolling-window rejection the account
+// clears on its own at Reset, NOT a permanent wall. It is the ONE header taxonomy shared by
+// the live retry classifier (internal/agent) and the post-mortem/resume classifier
+// (internal/resume), so both sides draw the cap-vs-wall line the same way from the same bytes.
+type UsageRejection struct {
+	// Rejected is true when the provider relayed a usage/overage rejection: either
+	// anthropic-ratelimit-unified-overage-status: rejected, or any unified window
+	// (top-level, 5h, 7d, …) whose status is "rejected".
+	Rejected bool
+	// Window names the rejected unified window ("" top-level, "5h", "7d", …), or "overage"
+	// when only the overage-status header signalled it. It lets the caller pick the matching
+	// reset window (session vs weekly).
+	Window string
+	// Reset is the rejected window's reset instant when one was relayed; HaveReset is false
+	// when the header named no future reset (the caller then falls back to a slow cap probe).
+	Reset     time.Time
+	HaveReset bool
+}
+
+// overageStatusKey is the header the provider sets to "rejected" when an account has overage
+// disabled and this request would tip a rolling window past its cap — the exact live day30
+// signal. It is NOT a per-window field the Unified() parser surfaces, so it is read directly.
+const overageStatusKey = "anthropic-ratelimit-unified-overage-status"
+
+// UsageOverageRejection folds a response's headers into the shared usage/overage verdict. It is
+// true when the overage-status header is "rejected" OR any unified window reports status
+// "rejected" — a self-recovering cap, never a standing wall. When a window is rejected its reset
+// is returned so the caller can wait toward it (the same reset Unified() already parsed). A
+// response with no such signal (a genuine org/permission wall carries none) returns Rejected
+// false. Nil/empty headers are safe (Rejected false). This is the single source of truth for the
+// "is this a recoverable cap?" question across the live and post-mortem paths.
+func UsageOverageRejection(h http.Header) UsageRejection {
+	if len(h) == 0 {
+		return UsageRejection{}
+	}
+	t := New()
+	t.Observe(http.StatusForbidden, h)
+	windows := t.Snapshot().Unified()
+
+	// Locate the top-level ("") window's reset up front: it is where the overage-status cap's
+	// reset lives (the "overage" pseudo-window Unified() derives from the overage-status header
+	// carries none of its own). Named windows (5h/7d) carry their own reset directly.
+	var topReset time.Time
+	var topHaveReset bool
+	for _, w := range windows {
+		if w.Name == "" && w.HaveReset {
+			topReset, topHaveReset = w.Reset, true
+		}
+	}
+
+	// A rejected REAL usage window (5h/7d, or the top-level "") is the richest signal — it carries
+	// its own reset and names the window so the caller can pick session vs weekly. The synthetic
+	// "overage" pseudo-window (from the overage-status header) is handled separately below so its
+	// missing reset can borrow the top-level one. Prefer a NAMED window over the top-level scope.
+	var best *UnifiedWindow
+	for i := range windows {
+		w := windows[i]
+		if w.Name == "overage" { // synthetic; handled by the overage-status branch below
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(w.Status), "rejected") {
+			continue
+		}
+		if best == nil || (best.Name == "" && w.Name != "") {
+			ww := w
+			best = &ww
+		}
+	}
+	if best != nil {
+		reset, have := best.Reset, best.HaveReset
+		if !have { // a rejected window that relayed no reset of its own borrows the top-level reset
+			reset, have = topReset, topHaveReset
+		}
+		return UsageRejection{Rejected: true, Window: best.Name, Reset: reset, HaveReset: have}
+	}
+	// No rejected real window, but the overage-status header alone can mark the cap (the day30
+	// case: overage disabled, request would exceed the cap). Its reset rides the top-level
+	// unified-reset, so surface that when present.
+	if strings.EqualFold(strings.TrimSpace(h.Get(http.CanonicalHeaderKey(overageStatusKey))), "rejected") {
+		return UsageRejection{Rejected: true, Window: "overage", Reset: topReset, HaveReset: topHaveReset}
+	}
+	return UsageRejection{}
+}
+
 // Family is one API-key rate-limit family the provider relayed (requests,
 // input-tokens, output-tokens, tokens — the anthropic-ratelimit-<family>-limit/
 // -remaining/-reset triple, or its x-ratelimit-* spelling).

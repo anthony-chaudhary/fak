@@ -17,6 +17,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/journal"
+	"github.com/anthony-chaudhary/fak/internal/resume"
 )
 
 // maxBody bounds an inbound tool-args / MCP-frame body (defense against an
@@ -702,6 +703,21 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 		// authentication_error, 429 -> rate_limit_error), so these code strings are the
 		// machine-branchable companion to that human-facing type.
 		if se.Status >= 400 && se.Status < 500 {
+			// A 403/402 that fak already classified as a self-recovering USAGE/OVERAGE cap
+			// (se.LimitReason set to a session/weekly/usage window by the header-aware
+			// classifyLimit429 on the retry path) is NOT a permanent permission wall — it clears
+			// at its named reset. It only reaches here after the cap-aware wait exhausted the retry
+			// budget without the window resetting. Give it an honest "capped, recovers at reset —
+			// do NOT re-login" message keyed on LimitReason, so the wrapped agent/operator is not
+			// pushed toward a futile /login for a condition login cannot fix. The reset is echoed as
+			// Retry-After by writeUpstreamErr. This precedes the per-status arms so a capped 403
+			// never falls into the generic "re-login or check your plan" message below.
+			if (se.Status == http.StatusForbidden || se.Status == http.StatusPaymentRequired) && isUsageCapReason(se.LimitReason) {
+				return se.Status, "upstream_usage_cap",
+					fmt.Sprintf("upstream is at a usage/overage cap (HTTP %d): a rolling 5h/7d window hit its limit with overage disabled. "+
+						"The credential is VALID and RECOVERS on its own at the window reset — do NOT re-login (a fresh token hits the same cap). "+
+						"Wait for the reset (see the Retry-After response header), reduce usage, or ask the org admin to enable overage.", se.Status)
+			}
 			switch se.Status {
 			case http.StatusBadRequest: // 400
 				return se.Status, "upstream_invalid_request",
@@ -783,6 +799,20 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 		}
 	}
 	return http.StatusBadGateway, "", "upstream model error"
+}
+
+// isUsageCapReason reports whether a LimitReason names a self-recovering ACCOUNT CAP — a
+// session/weekly/usage window that clears at its reset — as opposed to a plain rate throttle or
+// no limit. It is the gateway-message counterpart of the retry loop's cap classification: a 403/402
+// carrying one of these means "capped, recovers at reset," not "permanent wall," so the client is
+// told to wait rather than re-login. The reason strings are the resume package's stable vocabulary.
+func isUsageCapReason(reason string) bool {
+	switch reason {
+	case resume.LimitSession, resume.LimitWeekly, resume.LimitUsage:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) plannerErrorStatus(err error) (status int, code, msg string) {
@@ -1042,9 +1072,38 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	if d, ok := s.planner.(*DualPlanner); ok {
 		data = append(data, map[string]any{"id": d.LocalModelID(), "object": "model", "owned_by": "fak"})
 	}
+	codexModels := make([]map[string]any, 0, len(data))
+	for _, row := range data {
+		id := strings.TrimSpace(fmt.Sprint(row["id"]))
+		if id == "" {
+			continue
+		}
+		codexModels = append(codexModels, map[string]any{
+			"slug":                    id,
+			"display_name":            id,
+			"description":             "fak gateway model",
+			"base_instructions":       "",
+			"default_reasoning_level": "medium",
+			"supported_reasoning_levels": []map[string]string{
+				{"effort": "low", "description": "Light reasoning"},
+				{"effort": "medium", "description": "Default reasoning"},
+				{"effort": "high", "description": "Deep reasoning"},
+			},
+			"shell_type":                   "shell_command",
+			"visibility":                   "list",
+			"supported_in_api":             true,
+			"supports_reasoning_summaries": false,
+			"support_verbosity":            false,
+			"priority":                     0,
+			"additional_speed_tiers":       []string{},
+			"service_tiers":                []map[string]string{},
+			"availability_nux":             nil,
+		})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"object": "list",
 		"data":   data,
+		"models": codexModels,
 	})
 }
 

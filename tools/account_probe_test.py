@@ -79,6 +79,18 @@ class ClassifyProbeOutputTest(unittest.TestCase):
         self.assertEqual(v["block_kind"], "usage")
         self.assertIn("7:50am", v["reset"])
 
+    def test_access_wall_text_with_a_reset_is_a_recovering_cap_not_a_wall(self) -> None:
+        # The load-bearing overage case: a banner that carries BOTH the org-disable wording
+        # (which the ACCESS wall regex matches) AND a reset window is a self-recovering usage
+        # cap, not a permanent wall. LIMIT must win over ACCESS so the seat is not marked
+        # permanently STOPPED and a human is not paged for a cap that comes back at its reset.
+        banner = ("Your organization has disabled Claude subscription access · "
+                  "You've hit your session limit · resets 7:50am (America/Los_Angeles)")
+        v = account_probe.classify_probe_output(1, "", banner)
+        self.assertEqual(v["status"], "LIMIT")
+        self.assertEqual(v["block_kind"], "usage")
+        self.assertIn("7:50am", v["reset"])
+
     def test_timeout_is_transport(self) -> None:
         v = account_probe.classify_probe_output(124, "", "", timed_out=True)
         self.assertEqual(v["status"], "TRANSPORT")

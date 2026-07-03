@@ -164,6 +164,16 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 			}
 			notifyAuthRefresh(p, AuthRefreshExhausted, attempt)
 		}
+		// A 403/402 USAGE/OVERAGE cap (see Complete): a self-recovering rolling-window cap that
+		// Anthropic surfaces as a 403 with an org-flavored body — only the unified/overage headers
+		// reveal it. Record it as a retryable cap so the loop rides the cap-aware backoff toward the
+		// reset, not the seconds-scale forbidden arm and not a terminal wall. Precedes the transient
+		// arm below.
+		if (r.StatusCode == http.StatusForbidden || r.StatusCode == http.StatusPaymentRequired) &&
+			usageOrOverageRejected(r.Header) {
+			rs.noteRetryableStatus(r.StatusCode, raw, r.Header, 400)
+			continue
+		}
 		// A 403's bounded transient-recovery arm (self-contained short paced wait; see Complete).
 		if r.StatusCode == http.StatusForbidden {
 			if fbState.step(ctx, raw) == forbiddenRetryGo {

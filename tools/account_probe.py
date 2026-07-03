@@ -217,19 +217,25 @@ def classify_probe_output(exit_code: int, stdout: str, stderr: str,
         return {"status": "TRANSPORT", "block_kind": "transport",
                 "block_reason": "probe timed out", "reset": None, "weekly": None}
 
-    if fleet_session_signals.is_auth_error(text):
-        kind = fleet_session_signals.auth_block_kind(text)  # access | credit | auth
-        status = {"access": "ACCESS", "credit": "CREDIT"}.get(kind, "AUTH")
-        return {"status": status, "block_kind": kind,
-                "block_reason": fleet_session_signals.auth_block_reason(text),
-                "reset": None, "weekly": None}
-
+    # A reset window is checked FIRST: a self-recovering usage/overage cap can carry a banner
+    # that ALSO matches the permanent access-wall regex (a subscription banner naming both the
+    # org-disable wording and a reset). Such a banner is a cap that comes back at its reset, not a
+    # permanent wall that should mark the seat STOPPED and page a human — so LIMIT must win over
+    # ACCESS when a reset is present. (Mirrors internal/fleetaccounts.authBlockKind, where the
+    # usage branch precedes accessWallRE.)
     windows = fleet_session_signals.limit_resets(text)
     if windows:
         reset = windows.get("daily") or windows.get("weekly")
         return {"status": "LIMIT", "block_kind": "usage",
                 "block_reason": (f"usage limit; resets {reset}" if reset else "usage limit"),
                 "reset": reset, "weekly": windows.get("weekly")}
+
+    if fleet_session_signals.is_auth_error(text):
+        kind = fleet_session_signals.auth_block_kind(text)  # access | credit | auth
+        status = {"access": "ACCESS", "credit": "CREDIT"}.get(kind, "AUTH")
+        return {"status": status, "block_kind": kind,
+                "block_reason": fleet_session_signals.auth_block_reason(text),
+                "reset": None, "weekly": None}
 
     if fleet_session_signals.is_api_error(text):
         return {"status": "APIERR", "block_kind": "apierr",
