@@ -532,7 +532,7 @@ def _operator_waiting(payload: dict[str, Any] | None, rows: list[str]) -> list[s
         account = str(cap.get("account") or (
             ((payload or {}).get("dispatcher") or {}).get("account") or {}).get("tag")
             or "account").strip()
-        reset = _friendly_time(cap.get("reset_text") or cap.get("until"))
+        reset = _friendly_time(cap.get("until") or cap.get("reset_text"))
         out.append(
             f"{product} account {account} is capped until {reset}; wait for auto recheck")
 

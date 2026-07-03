@@ -163,6 +163,7 @@ class RollupTextTest(unittest.TestCase):
             "product": "claude",
             "account": "july1-netra",
             "until": "2026-07-03T20:23:24Z",
+            "reset_text": "2pm",
         }
         dispatch_payload["backend_health"] = {"dead": [], "stub_rate": []}
         dispatch_payload["hook_health"] = {"by_backend": []}
@@ -173,6 +174,7 @@ class RollupTextTest(unittest.TestCase):
         self.assertIn("claude account july1-netra is capped until", text)
         self.assertIn("wait for auto recheck", text)
         self.assertIn("2026-07-03 13:23", text)
+        self.assertNotIn("capped until 2pm", text)
         self.assertNotIn("weekly-capped until 2026-07-03T20:23:24Z", text)
 
     def test_rollup_filters_noop_waiting_rows(self):
