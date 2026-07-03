@@ -686,6 +686,7 @@ def _attention_line(prefix: str, items: list[dict[str, Any]]) -> str:
         "STOPPED_LIMIT": "rate limit",
         "STOPPED_APIERR": "api error",
         "INFRA_AUTH": "auth needed",
+        "INFRA_ORG_DISABLED": "org disabled",
         "PARKED_WAIT": "waiting on task",
         "STOPPED_QUIET": "quiet",
     }

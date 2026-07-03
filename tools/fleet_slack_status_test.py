@@ -249,12 +249,14 @@ class RollupTextTest(unittest.TestCase):
 
         line = mod._attention_line("agent sessions", [{
             "title": "resume 1",
-            "detail": "[STOPPED_APIERR] C--work-fak age=0.9m",
+            "detail": "[STOPPED_APIERR] C--work-fak age=0.9m; [INFRA_ORG_DISABLED] C--work-other",
             "command": "",
         }])
 
         self.assertIn("api error", line)
+        self.assertIn("org disabled", line)
         self.assertNotIn("STOPPED_APIERR", line)
+        self.assertNotIn("INFRA_ORG_DISABLED", line)
 
 
 class PostRollupTest(unittest.TestCase):
