@@ -1342,7 +1342,6 @@ def _write_cap_hold(runs_dir: Path, *, product: str, account_tag: str | None,
                     hit: dict[str, Any], now_ts: float, fallback_min: int,
                     source: str) -> dict[str, Any]:
     now_utc = dt.datetime(1970, 1, 1) + dt.timedelta(seconds=now_ts)  # naive UTC
-    state_path = runs_dir / f"account-cap-{product}.json"
     kind = hit.get("kind") or "session"
     until = (_parse_reset_to_utc(str(hit.get("reset_text") or ""), now_utc)
              or now_utc + dt.timedelta(minutes=fallback_min))
@@ -1355,12 +1354,33 @@ def _write_cap_hold(runs_dir: Path, *, product: str, account_tag: str | None,
              "detected": now_utc.isoformat() + "Z", "until": until.isoformat() + "Z"}
     try:
         runs_dir.mkdir(parents=True, exist_ok=True)
-        state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        for state_path in _cap_state_paths(runs_dir, product=product,
+                                           account_tag=account_tag):
+            state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
     except OSError:
         pass
     return {"capped": True, "until": state["until"], "kind": kind,
             "reset_text": state["reset_text"], "source": source,
             "evidence_log": state["evidence_log"]}
+
+
+def _safe_cap_account_component(account_tag: str | None) -> str | None:
+    if not account_tag:
+        return None
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(account_tag).strip())
+    return safe or None
+
+
+def _cap_state_paths(runs_dir: Path, *, product: str,
+                     account_tag: str | None) -> list[Path]:
+    paths: list[Path] = []
+    safe_account = _safe_cap_account_component(account_tag)
+    if safe_account:
+        paths.append(runs_dir / f"account-cap-{product}-{safe_account}.json")
+    # Keep writing the legacy per-product file so older launchers still see the
+    # most recent cap. Readers prefer the account-specific file above.
+    paths.append(runs_dir / f"account-cap-{product}.json")
+    return paths
 
 
 def _scan_recent_cap_banner(runs_dir: Path, *, product: str, lookback_min: int,
@@ -1477,7 +1497,6 @@ def check_weekly_cap(runs_dir: Path, *, product: str, account_tag: str | None,
         import time
         now_ts = time.time() if now_ts is None else now_ts
         now_utc = dt.datetime(1970, 1, 1) + dt.timedelta(seconds=now_ts)  # naive UTC
-        state_path = runs_dir / f"account-cap-{product}.json"
         hit = _scan_recent_cap_banner(runs_dir, product=product,
                                       lookback_min=lookback_min, now_ts=now_ts,
                                       account_tag=account_tag)
@@ -1486,11 +1505,14 @@ def check_weekly_cap(runs_dir: Path, *, product: str, account_tag: str | None,
                                    hit=hit, now_ts=now_ts, fallback_min=fallback_min,
                                    source="banner")
         # No fresh banner: honor a persisted, unexpired hold for THIS account.
-        if state_path.exists():
+        for state_path in _cap_state_paths(runs_dir, product=product,
+                                           account_tag=account_tag):
+            if not state_path.exists():
+                continue
             try:
                 state = json.loads(state_path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
-                return {"capped": False}
+                continue
             until = _iso_to_utc(state.get("until") or "")
             if state.get("account") == account_tag and until and now_utc < until:
                 if not _persisted_hold_matches_account(runs_dir, state, account_tag):
@@ -1498,7 +1520,7 @@ def check_weekly_cap(runs_dir: Path, *, product: str, account_tag: str | None,
                         state_path.unlink()
                     except OSError:
                         pass
-                    return {"capped": False}
+                    continue
                 return {"capped": True, "until": state.get("until"),
                         "reset_text": state.get("reset_text", ""), "source": "state"}
             if until and now_utc >= until:

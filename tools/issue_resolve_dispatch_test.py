@@ -1658,6 +1658,32 @@ class WeeklyCapGateTest(unittest.TestCase):
             self.assertTrue(later["capped"])
             self.assertEqual(later["source"], "state")
 
+    def test_check_keeps_account_holds_when_next_account_caps(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._write_worker(runs, "resolve-day26.log", self.BANNER, mtime=now - 60,
+                               account_tag="day26NEW-netra")
+            first = mod.check_weekly_cap(runs, product="claude",
+                                         account_tag="day26NEW-netra", now_ts=now)
+            self.assertTrue(first["capped"])
+            self.assertTrue((runs / "account-cap-claude-day26NEW-netra.json").exists())
+
+            self._write_worker(runs, "resolve-july1.log", self.SESSION_BANNER,
+                               mtime=now + 60, account_tag="july1-netra")
+            second = mod.check_weekly_cap(runs, product="claude",
+                                          account_tag="july1-netra", now_ts=now + 120)
+            self.assertTrue(second["capped"])
+            self.assertTrue((runs / "account-cap-claude-july1-netra.json").exists())
+
+            later = mod.check_weekly_cap(runs, product="claude",
+                                         account_tag="day26NEW-netra",
+                                         now_ts=now + 3 * 3600)
+            self.assertTrue(later["capped"])
+            self.assertEqual(later["source"], "state")
+
     def test_check_clears_expired_hold(self) -> None:
         import tempfile
         mod = load()
