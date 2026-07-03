@@ -109,6 +109,8 @@ func main() {
 		cmdPreflight(os.Args[2:])
 	case "attest":
 		cmdAttest(os.Args[2:])
+	case "backend":
+		cmdBackend(os.Args[2:])
 	case "bench":
 		cmdBench(os.Args[2:])
 	case "benchmarks":
@@ -209,6 +211,8 @@ func main() {
 		cmdSnapshot(os.Args[2:])
 	case "traj":
 		cmdTraj(os.Args[2:])
+	case "dup":
+		cmdDup(os.Args[2:])
 	case "dream":
 		cmdDream(os.Args[2:])
 	case "memory":
