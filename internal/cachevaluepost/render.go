@@ -200,7 +200,16 @@ func currentFleetBenefitLine(r cachevaluereport.TwoTrackReport) string {
 		if f.ObservedAPICostReductionPct != nil {
 			reduction = fmt.Sprintf("%.2f%%", *f.ObservedAPICostReductionPct)
 		}
-		parts = append(parts, fmt.Sprintf("API avoided $%.4f (%s)", f.ObservedAPICostAvoidedUSD, reduction))
+		parts = append(parts, fmt.Sprintf("API avoided $%.4f (provider $%.4f + fak $%.4f, %s)",
+			f.ObservedAPICostAvoidedUSD, f.ProviderAPICostAvoidedUSD, f.FakAPICostAvoidedUSD, reduction))
+	}
+	if f.SpanDays > 0 {
+		rate := fmt.Sprintf("~$%.0f/day avoided (provider $%.0f + fak $%.0f, over %.1fd)",
+			f.USDAvoidedPerDay, f.ProviderUSDAvoidedPerDay, f.FakUSDAvoidedPerDay, f.SpanDays)
+		if f.RateProvisional {
+			rate += " [PROVISIONAL]"
+		}
+		parts = append(parts, rate)
 	}
 	if f.ContextExtensionTokens > 0 {
 		extension := fmt.Sprintf("shed %d context tok", f.ContextExtensionTokens)
