@@ -204,6 +204,8 @@ func main() {
 		cmdBgloop(os.Args[2:])
 	case "loop-score":
 		cmdLoopScore(os.Args[2:])
+	case "waiting":
+		cmdWaiting(os.Args[2:])
 	case "cron":
 		cmdCron(os.Args[2:])
 	case "logvault":
