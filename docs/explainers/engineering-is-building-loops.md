@@ -273,6 +273,10 @@ fak's bet is that this scaffolding is a kernel, not a library you copy into each
 
 One last honest note, the one the repo leads with. A prior-art audit found 0 of 29 primitives here novel (CLAIMS.md). The contribution is not any single mechanism. It is the assembly: a fused, fail-closed, witness-gated kernel with the tool call promoted to an in-process syscall. The parts are old. Wiring them into one boundary that is safe and fast for the same reason is the thing.
 
+So build the loop. That part is yours, and it is the part that matters. Just don't build the floor under it a fifth time — the gate, the quarantine, the durable cache, the keep-bit — badly, the way every hand-rolled loop does. Inherit the floor and let it hold the line no narration can move.
+
+> **Engineering is building loops. fak is the floor they run on — the one decision, at every ring, that no participant can move by narrating a number.**
+
 ## Read next
 
 - [Policy in the kernel](policy-in-the-kernel.md) — why a default-deny check on the call path beats an external recognizer that fails open.
