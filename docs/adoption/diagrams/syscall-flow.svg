@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="600" viewBox="0 0 980 600" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" role="img" aria-labelledby="sf-title sf-desc">
+<title id="sf-title">The path of one tool call: the agent proposes, the fak kernel adjudicates, then maybe executes</title>
+<desc id="sf-desc">A left-to-right flow. LEFT: the agent (the model) emits a tool call, a request not an action. CENTER: the fak kernel adjudicator holds a default-deny capability floor the model has no vote in, and returns one of four verdicts. RIGHT, four outcomes: ALLOW (green) the call runs; DENY (red) it never reaches the tool; TRANSFORM (amber) it is rewritten to a safe form and the safe form runs; REQUIRE_WITNESS (blue) it is held for a witness or human. Any call that runs is checked again on the way back, and a poisoned or secret-bearing result is quarantined before it enters the agent's context.</desc>
+
+<rect x="0" y="0" width="980" height="600" fill="#ffffff"/>
+
+<text x="490" y="36" text-anchor="middle" font-size="20" font-weight="700" fill="#24292f">The path of one tool call &#8212; propose, adjudicate, execute</text>
+<text x="490" y="60" text-anchor="middle" font-size="12.5" fill="#57606a">The model proposes; the kernel disposes. A denied call never reaches the tool; a distrusted result never reaches the context.</text>
+
+<!-- AGENT panel -->
+<rect x="30" y="110" width="180" height="430" rx="10" fill="#0969da" fill-opacity="0.04" stroke="#0969da" stroke-width="1.2"/>
+<text x="50" y="140" font-size="14" font-weight="700" fill="#0969da">AGENT</text>
+<text x="50" y="160" font-size="11.5" fill="#57606a">the model</text>
+<line x1="50" y1="176" x2="190" y2="176" stroke="#d0d7de" stroke-width="1"/>
+<text x="120" y="300" text-anchor="middle" font-size="13" font-weight="600" fill="#24292f">emits a tool call</text>
+<text x="120" y="320" text-anchor="middle" font-size="11.5" fill="#57606a">a request,</text>
+<text x="120" y="336" text-anchor="middle" font-size="11.5" fill="#57606a">not an action</text>
+<text x="120" y="510" text-anchor="middle" font-size="10.5" fill="#57606a">its stated intent</text>
+<text x="120" y="525" text-anchor="middle" font-size="10.5" fill="#57606a">carries no weight</text>
+
+<!-- arrow: agent -> kernel -->
+<line x1="210" y1="325" x2="284" y2="325" stroke="#24292f" stroke-width="2"/>
+<polygon points="284,318 298,325 284,332" fill="#24292f"/>
+<text x="247" y="316" text-anchor="middle" font-size="10.5" fill="#57606a">proposed call</text>
+
+<!-- KERNEL panel -->
+<rect x="300" y="110" width="240" height="430" rx="10" fill="#24292f" fill-opacity="0.04" stroke="#24292f" stroke-width="1.4"/>
+<text x="420" y="140" text-anchor="middle" font-size="14" font-weight="700" fill="#24292f">fak KERNEL</text>
+<text x="420" y="160" text-anchor="middle" font-size="11.5" fill="#57606a">adjudicator</text>
+<line x1="320" y1="176" x2="520" y2="176" stroke="#d0d7de" stroke-width="1"/>
+<text x="420" y="300" text-anchor="middle" font-size="12.5" font-weight="600" fill="#24292f">default-deny</text>
+<text x="420" y="318" text-anchor="middle" font-size="12.5" font-weight="600" fill="#24292f">capability floor</text>
+<text x="420" y="346" text-anchor="middle" font-size="11" fill="#57606a">the model has no</text>
+<text x="420" y="362" text-anchor="middle" font-size="11" fill="#57606a">vote here</text>
+<text x="420" y="510" text-anchor="middle" font-size="10.5" fill="#57606a">~362 ns / decision</text>
+<text x="420" y="525" text-anchor="middle" font-size="10.5" fill="#57606a">in-process, fail-closed</text>
+
+<!-- verdict arrows: kernel right edge (540) -> outcome stripe (605) -->
+<line x1="540" y1="158" x2="598" y2="158" stroke="#1a7f37" stroke-width="2"/>
+<polygon points="598,151 610,158 598,165" fill="#1a7f37"/>
+<line x1="540" y1="262" x2="598" y2="262" stroke="#cf222e" stroke-width="2"/>
+<polygon points="598,255 610,262 598,269" fill="#cf222e"/>
+<line x1="540" y1="366" x2="598" y2="366" stroke="#9a6700" stroke-width="2"/>
+<polygon points="598,359 610,366 598,373" fill="#9a6700"/>
+<line x1="540" y1="470" x2="598" y2="470" stroke="#0969da" stroke-width="2"/>
+<polygon points="598,463 610,470 598,477" fill="#0969da"/>
+
+<!-- ALLOW -->
+<rect x="605" y="110" width="6" height="95" fill="#1a7f37"/>
+<rect x="611" y="110" width="339" height="95" rx="8" fill="#1a7f37" fill-opacity="0.05" stroke="#1a7f37" stroke-width="1"/>
+<rect x="624" y="123" width="80" height="24" rx="5" fill="#1a7f37"/>
+<text x="664" y="140" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">ALLOW</text>
+<text x="624" y="166" font-size="12.5" font-weight="700" fill="#24292f">on the allow-list</text>
+<text x="624" y="184" font-size="11" fill="#57606a">the call runs</text>
+<text x="624" y="198" font-size="10.5" fill="#57606a">result checked before re-entering context</text>
+
+<!-- DENY -->
+<rect x="605" y="214" width="6" height="95" fill="#cf222e"/>
+<rect x="611" y="214" width="339" height="95" rx="8" fill="#cf222e" fill-opacity="0.05" stroke="#cf222e" stroke-width="1"/>
+<rect x="624" y="227" width="70" height="24" rx="5" fill="#cf222e"/>
+<text x="659" y="244" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">DENY</text>
+<text x="624" y="270" font-size="12.5" font-weight="700" fill="#24292f">off the floor / secret / policy</text>
+<text x="624" y="288" font-size="11" fill="#57606a">never reaches the tool</text>
+<text x="624" y="302" font-size="10.5" fill="#57606a">no lever was ever wired up</text>
+<text x="930" y="266" text-anchor="middle" font-size="20" font-weight="700" fill="#cf222e">&#215;</text>
+
+<!-- TRANSFORM -->
+<rect x="605" y="318" width="6" height="95" fill="#9a6700"/>
+<rect x="611" y="318" width="339" height="95" rx="8" fill="#9a6700" fill-opacity="0.06" stroke="#9a6700" stroke-width="1"/>
+<rect x="624" y="331" width="110" height="24" rx="5" fill="#9a6700"/>
+<text x="679" y="348" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">TRANSFORM</text>
+<text x="624" y="374" font-size="12.5" font-weight="700" fill="#24292f">rewritten to a safe form</text>
+<text x="624" y="392" font-size="11" fill="#57606a">the safe form runs</text>
+<text x="624" y="406" font-size="10.5" fill="#57606a">result checked before re-entering context</text>
+
+<!-- REQUIRE_WITNESS -->
+<rect x="605" y="422" width="6" height="95" fill="#0969da"/>
+<rect x="611" y="422" width="339" height="95" rx="8" fill="#0969da" fill-opacity="0.05" stroke="#0969da" stroke-width="1"/>
+<rect x="624" y="435" width="160" height="24" rx="5" fill="#0969da"/>
+<text x="704" y="452" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">REQUIRE_WITNESS</text>
+<text x="624" y="478" font-size="12.5" font-weight="700" fill="#24292f">held for corroboration</text>
+<text x="624" y="496" font-size="11" fill="#57606a">deferred to a witness or human</text>
+<text x="624" y="510" font-size="10.5" fill="#57606a">nothing executes until it clears</text>
+
+<!-- footer -->
+<text x="490" y="566" text-anchor="middle" font-size="11" fill="#57606a">Two independent gates carry the floor &#8212; call-side (a denied call never runs) and result-side (a distrusted output is quarantined</text>
+<text x="490" y="582" text-anchor="middle" font-size="11" fill="#57606a">before it becomes the model's next instructions). The four verdicts are the ledger line: allowed / denied / repaired / deferred.</text>
+</svg>

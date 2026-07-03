@@ -82,10 +82,16 @@ claude` puts it there in one command). Every tool call walks this path:
 At exit you get the ledger, one line:
 `fak guard: 131 kernel decisions; 121 allowed / 5 denied / 2 repaired / 0 quarantined / 3 deferred`.
 
-To see the flow drawn end to end, watch the
-[44-second agent-kernel explainer](../../visuals/agent-kernel-video.mp4) — a dedicated
-one-frame diagram of this page's path is planned under the same epic and will be
-linked here when it lands.
+![Left-to-right flow: the agent emits a tool call; the fak kernel adjudicates it against a default-deny capability floor; four verdicts branch out — ALLOW (the call runs), DENY (it never reaches the tool), TRANSFORM (rewritten to a safe form, then runs), REQUIRE_WITNESS (held) — and any result that runs is checked again before re-entering context](../adoption/diagrams/syscall-flow.svg)
+
+*The whole path on one frame. The model only **proposes**; the kernel **disposes** —
+a call the floor denies never reaches the tool runner (call-side gate), and a result
+the floor distrusts is **quarantined** before it can become the model's next
+instructions (result-side gate). The four verdicts on the right are exactly the four
+numbers in the ledger line above: allowed / denied / repaired / deferred.*
+
+To see the flow in motion, watch the
+[44-second agent-kernel explainer](../../visuals/agent-kernel-video.mp4).
 
 ## Why the placement is the whole point
 

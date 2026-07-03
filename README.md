@@ -150,6 +150,12 @@ outside the allow-list cannot be called, no matter what the model was told. Two 
 gates carry it: call-side (a denied call never reaches the tool runner) and result-side
 (poisoned or secret-bearing output is quarantined before it enters context).
 
+![The path of one tool call: the agent proposes, the fak kernel adjudicates against a default-deny floor, and four verdicts branch out — ALLOW runs, DENY never runs, TRANSFORM is rewritten then runs, REQUIRE_WITNESS is held — with the result checked again before re-entering context](docs/adoption/diagrams/syscall-flow.svg)
+
+<sub>The model proposes; the kernel disposes. The call-side gate stops a denied call before
+it runs; the result-side gate quarantines a distrusted output before it becomes the model's
+next instructions. Full walkthrough: [the tool call is a syscall](docs/explainers/tool-call-is-a-syscall.md).</sub>
+
 The floor is a
 deployable JSON manifest you copy, trim, and watch bite, no model in the loop:
 
