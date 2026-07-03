@@ -513,11 +513,17 @@ func runDojo(cfg WorktreeConfig, moduleDir, corpusDir string) (dojo.Report, erro
 	cmd := exec.Command("go", args...)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = moduleDir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return dojo.Report{}, fmt.Errorf("fak dojo run --corpus %s: %v: %s", filepath.Base(corpusDir), err, tail(string(out), 600))
+	// stdout/stderr are captured SEPARATELY (not CombinedOutput): `go run` writes
+	// toolchain/module-download progress ("go: downloading ...") to stderr, which
+	// would pollute the JSON on stdout and break parsing. stdout holds the report;
+	// stderr is folded into the diagnostic only on failure.
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return dojo.Report{}, fmt.Errorf("fak dojo run --corpus %s: %v: %s", filepath.Base(corpusDir), err, tail(stderr.String()+"\n"+stdout.String(), 600))
 	}
-	return parseDojoReport(out)
+	return parseDojoReport([]byte(stdout.String()))
 }
 
 // parseDojoReport decodes a `fak dojo run --json` envelope into a dojo.Report.
