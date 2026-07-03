@@ -35,6 +35,7 @@ func TestCountAttemptsAndLastLaunch(t *testing.T) {
 		{UnixSeconds: 500, Phase: "queued"},
 		{UnixSeconds: 600, Phase: "status"},
 		{UnixSeconds: 700, Phase: "progress"},
+		{UnixSeconds: 800, Phase: "settled", Action: "consolidate-auth-plan-row"},
 	}
 	if got := CountAttempts(history); got != 2 {
 		t.Errorf("CountAttempts = %d, want 2", got)

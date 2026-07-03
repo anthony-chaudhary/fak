@@ -80,6 +80,9 @@ not json
 		t.Fatal("launched row must carry its parsed unix timestamp")
 	}
 	// The operator-settled row (bad ts tolerated) blocks s2's gate forever.
+	if got := resume.CountAttempts(hist["s2"]); got != 0 {
+		t.Fatalf("settled row burned %d attempts, want 0", got)
+	}
 	gate := resume.RetryGate(hist["s2"], resume.OutcomeRecoverable, 8)
 	if !gate.Blocked {
 		t.Fatal("consolidate row must block the retry gate")
@@ -171,6 +174,63 @@ func TestResumeWatchdogBrokerDenyDoesNotSpawnWorker(t *testing.T) {
 	}
 	if !strings.Contains(string(ledger), `"phase":"broker_denied"`) || strings.Contains(string(ledger), configDir) {
 		t.Fatalf("broker-denied ledger = %s", ledger)
+	}
+}
+
+func TestResumeWatchdogAuthDispositionDoesNotSpawnWorker(t *testing.T) {
+	regDir := t.TempDir()
+	logDir := t.TempDir()
+	plan := `{"plan":[{"session":"sid-auth-1234567890","account":".claude-a","project":"P","disp":"INFRA_AUTH"}]}`
+	if err := os.WriteFile(filepath.Join(regDir, "resume_plan.json"), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldBroker := launchSpawnBroker
+	oldSpawn := rwSpawnResumeLaunch
+	brokered := false
+	spawned := false
+	launchSpawnBroker = func(a launchBrokerAttempt) launchBrokerGrant {
+		brokered = true
+		return allowLaunchBrokerGrant(a, "unit-test-allow")
+	}
+	rwSpawnResumeLaunch = func(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir string, grant launchBrokerGrant) (int, error) {
+		spawned = true
+		return 12345, nil
+	}
+	t.Cleanup(func() {
+		launchSpawnBroker = oldBroker
+		rwSpawnResumeLaunch = oldSpawn
+	})
+
+	var out, errb bytes.Buffer
+	rc := runResumeWatchdog(&out, &errb, []string{
+		"--live", "--no-refresh",
+		"--reg-dir", regDir,
+		"--log-dir", logDir,
+		"--spacing-sec", "0",
+	})
+	if rc != 0 {
+		t.Fatalf("watchdog rc=%d stderr=%s stdout=%s", rc, errb.String(), out.String())
+	}
+	if brokered || spawned {
+		t.Fatalf("auth plan row reached launch path: brokered=%v spawned=%v", brokered, spawned)
+	}
+	got := out.String() + errb.String()
+	if !strings.Contains(got, "requires auth/login") {
+		t.Fatalf("watchdog output missing auth skip reason:\n%s", got)
+	}
+	ledger, err := os.ReadFile(filepath.Join(regDir, "resume_ledger.jsonl"))
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	body := string(ledger)
+	for _, want := range []string{`"phase":"settled"`, `"action":"consolidate-auth-plan-row"`, `"outcome":"unrecoverable"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("auth skip ledger missing %s:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, `"phase":"launched"`) {
+		t.Fatalf("auth skip ledger recorded a launch:\n%s", body)
 	}
 }
 

@@ -185,6 +185,19 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 			break
 		}
 		sid8 := shortID(p.Session)
+		if rwPlanAuthBlocked(p.Disp) {
+			reason := fmt.Sprintf("plan disposition %s requires auth/login; automatic resume cannot fix it", strings.TrimSpace(p.Disp))
+			note("  SKIP %s — %s", sid8, reason)
+			if *live {
+				rwAppendLedger(ledgerPath, map[string]any{
+					"ts": rwNowISO(), "session": p.Session, "account": p.Account,
+					"resume_account": p.ResumeAccount,
+					"phase":          "settled", "action": "consolidate-auth-plan-row",
+					"outcome": "unrecoverable", "cause": p.Disp, "reason": reason,
+				})
+			}
+			continue
+		}
 		// Outcome-aware once-gate input: how did the LAST attempt actually end, per the
 		// transcript's own terminal turn (ground truth, never the launcher's ledger row)?
 		hist := history[p.Session]
@@ -479,6 +492,10 @@ func rwLoadPlan(path string) []resume.WatchdogPlanRow {
 		return nil
 	}
 	return doc.Plan
+}
+
+func rwPlanAuthBlocked(disp string) bool {
+	return strings.Contains(strings.ToUpper(strings.TrimSpace(disp)), "AUTH")
 }
 
 // rwLoadHistory groups the durable resume ledger per session as typed Attempts, so the

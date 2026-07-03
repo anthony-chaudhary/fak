@@ -99,7 +99,7 @@ type Attempt struct {
 // attempt, so counting it would burn a session's attempt budget on rows where nothing ran.
 func (a Attempt) IsLaunch() bool {
 	switch strings.ToLower(strings.TrimSpace(a.Phase)) {
-	case "deferred", "considered", "skipped", "gate_fail_open", "queued", "detected", "status", "tick", "snapshot", "progress":
+	case "deferred", "considered", "skipped", "gate_fail_open", "queued", "detected", "status", "tick", "snapshot", "progress", "settled", "operator_settled", "consolidated":
 		return false
 	default:
 		return true

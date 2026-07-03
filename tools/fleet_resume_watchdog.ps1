@@ -419,6 +419,26 @@ foreach ($p in @($plan)) {
   if ($launched -ge $MaxPerTick) { Note "  per-tick cap reached ($MaxPerTick)"; break }
   $sid = $p.session; $sid8 = $sid.Substring(0, 8)
   $acct = ($p.account -replace '\.claude-?', ''); if (-not $acct) { $acct = 'default' }
+  if ("$($p.disp)".ToUpperInvariant().Contains('AUTH')) {
+    $reason = "plan disposition $($p.disp) requires auth/login; automatic resume cannot fix it"
+    Note "  SKIP $sid8 -- $reason"
+    if ($Live) {
+      $closedSids[$sid] = $true
+      AppendJsonLine $ledgerPath @{
+        ts = ([DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))
+        session = $sid
+        account = $p.account
+        resume_account = $p.resume_account
+        phase = 'settled'
+        action = 'consolidate-auth-plan-row'
+        outcome = 'unrecoverable'
+        cause = $p.disp
+        reason = $reason
+      }
+      RecordSettled $statusLedger $mode $sid $reason
+    }
+    continue
+  }
   if ($workerAccts.Count -and -not $workerAccts.ContainsKey($p.account)) {
     Note "  SKIP $sid8 -- account $($p.account) is not an offered worker (policy/tombstoned)"
     $closedSids[$sid] = $true

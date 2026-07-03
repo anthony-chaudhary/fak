@@ -299,7 +299,7 @@ func scanGovernorLedgerStats(path string, now time.Time) governorLedgerStats {
 			if inWindow {
 				st.Deferred24h++
 			}
-		case "considered", "skipped":
+		case "considered", "skipped", "settled", "operator_settled", "consolidated":
 			// non-launch bookkeeping rows: not activity worth surfacing
 		default:
 			if inWindow {
@@ -485,7 +485,7 @@ func scanLaunchLedger(path string) (times []int64, last int64) {
 // real spawn).
 func isNonLaunchPhase(phase string) bool {
 	switch strings.ToLower(strings.TrimSpace(phase)) {
-	case "deferred", "considered", "skipped", "gate_fail_open":
+	case "deferred", "considered", "skipped", "gate_fail_open", "settled", "operator_settled", "consolidated":
 		return true
 	default:
 		return false
