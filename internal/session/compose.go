@@ -113,10 +113,18 @@ func (p Pace) ThrottleRatio(baselineOutput int) float64 {
 // budget is byte-for-byte what it was before this composition existed. The result is the
 // value to assign to agent.SessionPlanner.Budget.
 func (p Pace) ComposePlannerBudget(basePlannerBudget, baselineOutput int) int {
+	return scalePlannerBudget(basePlannerBudget, p.ThrottleRatio(baselineOutput))
+}
+
+// scalePlannerBudget scales a base resident-context window by ratio r, floored at
+// base/MinPlannerBudgetDivisor (never below 1) — the one rounding rule both the configured
+// (Pace.ComposePlannerBudget) and observed (Throughput.ComposePlannerBudgetForThroughput)
+// compositions apply, so the two signals can never drift apart in how they shrink a window.
+// A non-positive base is returned unchanged; a ratio at or above 1.0 returns the base verbatim.
+func scalePlannerBudget(basePlannerBudget int, r float64) int {
 	if basePlannerBudget <= 0 {
 		return basePlannerBudget
 	}
-	r := p.ThrottleRatio(baselineOutput)
 	if r >= 1.0 {
 		return basePlannerBudget
 	}
@@ -184,22 +192,7 @@ func (t Throughput) ThroughputRatio() float64 {
 // running ahead is untouched — byte-for-byte the base, exactly as an un-observed Throughput
 // was before this composition existed. A non-positive base is returned unchanged.
 func (t Throughput) ComposePlannerBudgetForThroughput(basePlannerBudget int) int {
-	if basePlannerBudget <= 0 {
-		return basePlannerBudget
-	}
-	r := t.ThroughputRatio()
-	if r >= 1.0 {
-		return basePlannerBudget
-	}
-	floor := basePlannerBudget / MinPlannerBudgetDivisor
-	if floor < 1 {
-		floor = 1
-	}
-	composed := int(math.Round(float64(basePlannerBudget) * r))
-	if composed < floor {
-		composed = floor
-	}
-	return composed
+	return scalePlannerBudget(basePlannerBudget, t.ThroughputRatio())
 }
 
 // ComposePace folds BOTH pace signals — the configured MaxTokensPerTurn cap (p) and the
