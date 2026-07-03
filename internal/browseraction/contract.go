@@ -80,6 +80,10 @@ type ContractTaskCandidate struct {
 	BudgetTurns int    `json:"budget_turns,omitempty"`
 }
 
+func sortBrowserActionContractTasks(out []ContractTaskCandidate) {
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+}
+
 type ContractModel struct {
 	Agent             string `json:"agent"`
 	FakAgent          string `json:"fak_agent"`
@@ -390,24 +394,6 @@ func joinArtifactPath(dir, leaf string) string {
 	return dir + "/" + leaf
 }
 
-func contractTaskCandidates(s ActionMediationSuite) []ContractTaskCandidate {
-	out := make([]ContractTaskCandidate, 0, len(s.Tasks))
-	for _, task := range s.Tasks {
-		if strings.TrimSpace(task.ID) == "" {
-			continue
-		}
-		out = append(out, ContractTaskCandidate{
-			ID:          strings.TrimSpace(task.ID),
-			Benchmark:   strings.TrimSpace(task.Benchmark),
-			Domain:      strings.TrimSpace(task.Domain),
-			SourceURL:   strings.TrimSpace(task.SourceURL),
-			BudgetTurns: task.BudgetTurns,
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
-}
-
 func contractTaskIDs(tasks []ContractTaskCandidate) []string {
 	ids := make([]string, 0, len(tasks))
 	for _, task := range tasks {
@@ -438,4 +424,22 @@ func mdCell(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
 	return s
+}
+
+func contractTaskCandidates(s ActionMediationSuite) []ContractTaskCandidate {
+	out := make([]ContractTaskCandidate, 0, len(s.Tasks))
+	for _, task := range s.Tasks {
+		if strings.TrimSpace(task.ID) == "" {
+			continue
+		}
+		out = append(out, ContractTaskCandidate{
+			ID:          strings.TrimSpace(task.ID),
+			Benchmark:   strings.TrimSpace(task.Benchmark),
+			Domain:      strings.TrimSpace(task.Domain),
+			SourceURL:   strings.TrimSpace(task.SourceURL),
+			BudgetTurns: task.BudgetTurns,
+		})
+	}
+	sortBrowserActionContractTasks(out)
+	return out
 }
