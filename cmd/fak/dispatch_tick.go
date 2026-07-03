@@ -600,7 +600,8 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	env = grant.Env
 	spawnCWD := firstString(grant.CWD, root)
 
-	spawned, err := dispatchIssueWorkerSpawner(launchCommand, env, spawnCWD, runsDir, target, pick.Lane, opts.Backend, leaseID, pick.Tree, account, opts.Membership, baseSHA, opts.SpawnProbeS)
+	stdinPayload := dispatchtick.WorkerStdinPayload(opts.Backend, prompt)
+	spawned, err := dispatchIssueWorkerSpawner(launchCommand, env, spawnCWD, runsDir, target, pick.Lane, opts.Backend, leaseID, pick.Tree, account, opts.Membership, baseSHA, stdinPayload, opts.SpawnProbeS)
 	if err != nil {
 		payload["ok"] = false
 		payload["action"] = "spawn_failed"
@@ -829,7 +830,7 @@ func augmentGuardEnvDefaults() {
 
 var dispatchIssueWorkerSpawner = spawnDispatchIssueWorker
 
-func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA string, probeS float64) (dispatchSpawnResult, error) {
+func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA, stdinPayload string, probeS float64) (dispatchSpawnResult, error) {
 	if len(command) == 0 {
 		return dispatchSpawnResult{}, errors.New("empty worker command")
 	}
@@ -848,13 +849,17 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 	}
 	fmt.Fprintf(fh, "# fak-spawn %s issue=%d lane=%s backend=%s argv0=%s\n", stamp, issue, lane, backend, filepath.Base(exe))
 	_ = fh.Sync()
-	devNull, _ := os.Open(os.DevNull)
 	cmd := exec.Command(exe, command[1:]...)
 	cmd.Dir = cwd
 	cmd.Env = envSliceFromMap(env)
-	if devNull != nil {
-		defer devNull.Close()
-		cmd.Stdin = devNull
+	if stdinPayload != "" {
+		cmd.Stdin = strings.NewReader(stdinPayload)
+	} else {
+		devNull, _ := os.Open(os.DevNull)
+		if devNull != nil {
+			defer devNull.Close()
+			cmd.Stdin = devNull
+		}
 	}
 	cmd.Stdout = fh
 	cmd.Stderr = fh

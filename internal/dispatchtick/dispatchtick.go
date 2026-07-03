@@ -146,10 +146,18 @@ func BuildWorkerCommand(backend, prompt, model string) ([]string, error) {
 		if strings.TrimSpace(model) != "" {
 			cmd = append(cmd, "-m", model)
 		}
-		return append(cmd, prompt), nil
+		return append(cmd, "-"), nil
 	default:
 		return nil, fmt.Errorf("unknown backend %q; expected claude, opencode, or codex", backend)
 	}
+}
+
+// WorkerStdinPayload returns the prompt bytes that must be piped to the worker.
+func WorkerStdinPayload(backend, prompt string) string {
+	if backend == "codex" {
+		return prompt
+	}
+	return ""
 }
 
 // WaveMembershipEnv stamps a detached worker's place in a wave.

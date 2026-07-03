@@ -30,7 +30,7 @@ func TestBuildWorkerCommandMatchesBackends(t *testing.T) {
 			model:   "gpt-5-codex",
 			want: []string{
 				"codex", "exec", "--dangerously-bypass-approvals-and-sandbox",
-				"--skip-git-repo-check", "-m", "gpt-5-codex", "resolve it",
+				"--skip-git-repo-check", "-m", "gpt-5-codex", "-",
 			},
 		},
 	}
@@ -44,6 +44,18 @@ func TestBuildWorkerCommandMatchesBackends(t *testing.T) {
 				t.Fatalf("command = %#v, want %#v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestWorkerStdinPayload(t *testing.T) {
+	if got := WorkerStdinPayload("codex", "resolve it"); got != "resolve it" {
+		t.Fatalf("codex stdin payload = %q, want prompt", got)
+	}
+	if got := WorkerStdinPayload("claude", "resolve it"); got != "" {
+		t.Fatalf("claude stdin payload = %q, want empty", got)
+	}
+	if got := WorkerStdinPayload("opencode", "resolve it"); got != "" {
+		t.Fatalf("opencode stdin payload = %q, want empty", got)
 	}
 }
 

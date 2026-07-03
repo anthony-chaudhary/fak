@@ -621,7 +621,7 @@ func TestDispatchTickLiveBrokerDenyDoesNotSpawnWorker(t *testing.T) {
 		}
 		return denyLaunchBrokerGrant(a, "unit-test-deny")
 	}
-	dispatchIssueWorkerSpawner = func(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA string, probeS float64) (dispatchSpawnResult, error) {
+	dispatchIssueWorkerSpawner = func(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA, stdinPayload string, probeS float64) (dispatchSpawnResult, error) {
 		spawned = true
 		return dispatchSpawnResult{PID: 999, Issue: issue, Lane: lane, Backend: backend}, nil
 	}
@@ -1620,6 +1620,7 @@ func TestSpawnDispatchIssueWorkerWritesAuditSidecars(t *testing.T) {
 		account,
 		&membership,
 		"abc123",
+		"",
 		5,
 	)
 	if err != nil {
@@ -1632,6 +1633,41 @@ func TestSpawnDispatchIssueWorkerWritesAuditSidecars(t *testing.T) {
 	assertFileContains(t, stem+dispatchLeaseTreeSidecarSuffix, "cmd/fak/dispatch_tick.go")
 	assertJSONField(t, stem+dispatchtick.AccountSidecarSuffix, "tag", "acct-a")
 	assertJSONField(t, stem+dispatchtick.WaveSidecarSuffix, "wave_id", "wave-test")
+	if early := spawned.EarlyExit; early["checked"] != true || early["silent"] == true {
+		t.Fatalf("early-exit probe = %#v, want checked and non-silent", early)
+	}
+}
+
+func TestSpawnDispatchIssueWorkerPipesCodexPromptOnStdin(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	runsDir := t.TempDir()
+	env := envMap(os.Environ())
+	env["FAK_DISPATCH_SPAWN_HELPER"] = "1"
+	env["FAK_DISPATCH_EXPECT_STDIN"] = "1"
+
+	spawned, err := spawnDispatchIssueWorker(
+		[]string{exe, "-test.run=TestDispatchSpawnHelper"},
+		env,
+		t.TempDir(),
+		runsDir,
+		1420,
+		"tools",
+		"codex",
+		"resolve-tools",
+		[]string{"tools/**"},
+		dispatchtick.Account{},
+		nil,
+		"base-sha",
+		"prompt through stdin",
+		5,
+	)
+	if err != nil {
+		t.Fatalf("spawnDispatchIssueWorker: %v", err)
+	}
+	assertFileContains(t, spawned.Log, "stdin:prompt through stdin")
 	if early := spawned.EarlyExit; early["checked"] != true || early["silent"] == true {
 		t.Fatalf("early-exit probe = %#v, want checked and non-silent", early)
 	}
@@ -1661,6 +1697,15 @@ func TestWriteDispatchStartupBundleSidecar(t *testing.T) {
 func TestDispatchSpawnHelper(t *testing.T) {
 	if os.Getenv("FAK_DISPATCH_SPAWN_HELPER") != "1" {
 		return
+	}
+	if os.Getenv("FAK_DISPATCH_EXPECT_STDIN") == "1" {
+		b, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Printf("read stdin error: %v\n", err)
+			os.Exit(0)
+		}
+		fmt.Printf("stdin:%s\n", string(b))
+		os.Exit(0)
 	}
 	fmt.Println("worker helper wrote output")
 	os.Exit(0)
