@@ -93,7 +93,26 @@ type Event struct {
 	// signal (e.g. a BashOutput poll) — the launch↔poll correlation the
 	// uncorrelated-events gap is about.
 	Via string `json:"via,omitempty"`
+
+	// spawn only (optional): how strongly this brokered launch is bound to a
+	// supervisable child. A brokered call that hands the supervisor a PID/cancel
+	// handle is "pid-bound" (full lifecycle coverage); one that journals a spawn
+	// but exposes no handle is "advice-only" — the leak-prevention boundary can
+	// observe it but cannot kill it. Absence of a binding must be VISIBLE here,
+	// never silently treated as covered (#2363). Empty means "not a brokered
+	// launch" (hook-fed rows, where coverage is not this seam's concern).
+	Coverage string `json:"coverage,omitempty"`
 }
+
+// Coverage tokens for Event.Coverage (CLOSED set for brokered spawn rows).
+const (
+	// CoveragePIDBound: the launch handed the supervisor a PID/cancel handle;
+	// the boundary can probe AND kill it.
+	CoveragePIDBound = "pid-bound"
+	// CoverageAdviceOnly: the launch was journaled but exposed no handle; the
+	// boundary can observe/quarantine results but cannot kill the child.
+	CoverageAdviceOnly = "advice-only"
+)
 
 // State is the CLOSED per-proc lifecycle state after the fold.
 type State string
@@ -143,6 +162,12 @@ type Proc struct {
 	Tool    string `json:"tool"`
 	Session string `json:"session,omitempty"`
 	State   State  `json:"state"`
+
+	// Coverage classifies how strongly a brokered launch binds to a
+	// supervisable child (CoveragePIDBound | CoverageAdviceOnly), folded from
+	// the spawn row. Empty for hook-fed rows. An advice-only proc is honestly
+	// un-killable: the boundary sees it but cannot reap it (#2363).
+	Coverage string `json:"coverage,omitempty"`
 
 	StartMS     int64 `json:"start_unix_ms"`
 	EndMS       int64 `json:"end_unix_ms,omitempty"`
@@ -249,6 +274,9 @@ func ValidateEvent(ev Event) error {
 		if ev.DeadlineMS < 0 || ev.HeartbeatEveryMS < 0 {
 			return fmt.Errorf("spawn %s: negative envelope", ev.CallID)
 		}
+		if ev.Coverage != "" && ev.Coverage != CoveragePIDBound && ev.Coverage != CoverageAdviceOnly {
+			return fmt.Errorf("spawn %s: coverage must be %q|%q, got %q", ev.CallID, CoveragePIDBound, CoverageAdviceOnly, ev.Coverage)
+		}
 	case EvPulse:
 		if ev.CallID == "" {
 			return fmt.Errorf("pulse: call_id required")
@@ -335,7 +363,7 @@ func Fold(events []Event, nowMS int64, cfg Config) (Table, error) {
 			}
 			procs[ev.CallID] = &proc{Proc: Proc{
 				CallID: ev.CallID, Tool: ev.Tool, Session: ev.Session,
-				State: StateRunning, StartMS: ev.AtMS,
+				State: StateRunning, StartMS: ev.AtMS, Coverage: ev.Coverage,
 				DeadlineMS: deadline, HeartbeatEveryMS: ev.HeartbeatEveryMS,
 			}}
 			order = append(order, ev.CallID)

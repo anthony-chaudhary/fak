@@ -114,9 +114,33 @@ func mcpToolprocSpawn(ctx context.Context, traceID, tool string) string {
 	mcpTP.mu.Unlock()
 	mcpToolprocAppend(toolproc.Event{
 		Kind: toolproc.EvSpawn, CallID: callID, Tool: tool,
-		Session: "mcp", AtMS: time.Now().UnixMilli(),
+		Session: mcpToolprocSession(), AtMS: time.Now().UnixMilli(),
+		Coverage: mcpToolprocCoverage(),
 	})
 	return callID
+}
+
+// mcpToolprocSession is the owning-lease id stamped on the spawn row: the
+// AgentRun envelope this MCP server runs under (EnvAgentRunID) when present, so
+// the brokered call's process row folds under the SAME run boundary as ordinary
+// spawned agents (#2363). It falls back to the bare "mcp" wire tag when no
+// AgentRun envelope was granted (a standalone server), never an empty session.
+func mcpToolprocSession() string {
+	if run := strings.TrimSpace(os.Getenv(toolprocgate.EnvAgentRunID)); run != "" {
+		return run
+	}
+	return "mcp"
+}
+
+// mcpToolprocCoverage classifies how strongly a brokered MCP call binds to a
+// supervisable child. A brokered fak_syscall runs IN-PROCESS: it exposes no
+// PID/cancel handle, so the leak-prevention boundary can observe and quarantine
+// its result (via the revocation table) but cannot kill a child — that is
+// honestly "advice-only", never silently treated as full coverage (#2363: "do
+// not treat absence of PID as success"). When a future ToolExec/subprocess
+// backend binds a PID, it stamps CoveragePIDBound instead.
+func mcpToolprocCoverage() string {
+	return toolproc.CoverageAdviceOnly
 }
 
 // mcpToolprocExit journals the exit row. A deny verdict is still a completed

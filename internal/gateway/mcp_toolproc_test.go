@@ -119,6 +119,35 @@ func TestMCPProgressPulsesKnownCallOnly(t *testing.T) {
 	}
 }
 
+// A brokered MCP call runs in-process: it exposes no PID/cancel handle, so its
+// spawn row is stamped advice-only coverage — the leak boundary can observe and
+// quarantine it but cannot kill it. Absence of a PID must be VISIBLE on the
+// folded proc, never silently treated as full coverage (#2363).
+func TestMCPSpawnStampsAdviceOnlyCoverage(t *testing.T) {
+	journal := mcpToolprocTestJournal(t)
+	callID := mcpToolprocSpawn(context.Background(), "tp-trace-cov", "search_kb")
+	mcpToolprocExit(callID, nil)
+	tab := foldTestJournal(t, journal)
+	p := tab.Procs[0]
+	if p.Coverage != toolproc.CoverageAdviceOnly {
+		t.Errorf("proc coverage = %q, want %q (no PID handle bound)", p.Coverage, toolproc.CoverageAdviceOnly)
+	}
+}
+
+// The spawn row folds under the AgentRun envelope this server runs beneath, so
+// a brokered tool-call process shares the SAME run-boundary session as ordinary
+// spawned agents — not an opaque "mcp" tag that the supervisor can't correlate.
+func TestMCPSpawnFoldsUnderAgentRunSession(t *testing.T) {
+	journal := mcpToolprocTestJournal(t)
+	t.Setenv(toolprocgate.EnvAgentRunID, "run-42")
+	callID := mcpToolprocSpawn(context.Background(), "tp-trace-run", "search_kb")
+	mcpToolprocExit(callID, nil)
+	tab := foldTestJournal(t, journal)
+	if p := tab.Procs[0]; p.Session != "run-42" {
+		t.Errorf("proc session = %q, want the AgentRun id run-42", p.Session)
+	}
+}
+
 // A client-reused trace id becomes a new generation (trace@2), so the shared
 // journal still folds instead of refusing on duplicate spawn.
 func TestMCPReusedTraceGetsGeneration(t *testing.T) {
