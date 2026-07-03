@@ -1,0 +1,21 @@
+{
+  "rows": [
+    {
+      "id": "containment-unmeasured-residual",
+      "canonical": "unmeasured-containment residual",
+      "signal": "hinted",
+      "evidence": "containment is not a measured number",
+      "evidence_kind": "phrase",
+      "current_name": "",
+      "proposed_name": "ContainmentUnmeasured",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the standing residual that fak's privacy/prompt-injection containment is a design posture, not a measured leakage number - repeated across research triages (MIRROR #1007) as an italicized hedge, never as a named, trackable residual",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "name it once (a claims-salience residual id or a named fence constant) and point every research-triage note at that name instead of restating the hedge"
+      ]
+    }
+  ]
+}

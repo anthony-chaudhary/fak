@@ -1,0 +1,55 @@
+{
+  "rows": [
+    {
+      "id": "conflated-300-literal",
+      "canonical": "the conflated 300 literal",
+      "signal": "latent-literal",
+      "evidence": "300",
+      "evidence_kind": "literal",
+      "current_name": "",
+      "proposed_name": "settleSleepMillis",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a bare 300 on non-const lines in ~40 production files that conflates at least four distinct concepts: 300ms settle sleeps, the HTTP redirect boundary (StatusCode >= 300), a compaction-shed token budget, and sweep sizes - none of them named",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "audit the sites and split into per-meaning named constants (settleSleepMillis, the http boundary is idiom, shed budgets get config names); one shared 300 constant would be WRONG - the conflation is the debt"
+      ]
+    },
+    {
+      "id": "inrepo-lcg-constants",
+      "canonical": "in-repo deterministic LCG",
+      "signal": "latent-literal",
+      "evidence": "1103515245",
+      "evidence_kind": "literal",
+      "current_name": "",
+      "proposed_name": "lcgMultiplier",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the textbook linear-congruential PRNG (state*1103515245 + 12345, masked to 31 bits) re-implemented inline in 14+ files (bench, benchids, cmdutil, agent) for deterministic jitter/ids - the multiplier and increment are never named, so the shared PRNG convention is invisible",
+      "aliases": ["12345"],
+      "verdict": "hinted",
+      "gaps": [
+        "name the constants (lcgMultiplier / lcgIncrement) or extract one deterministicRand helper and point the inline copies at it"
+      ]
+    },
+    {
+      "id": "provider-overload-status",
+      "canonical": "provider overload status 529",
+      "signal": "latent-literal",
+      "evidence": "529",
+      "evidence_kind": "literal",
+      "current_name": "",
+      "proposed_name": "statusProviderOverloaded",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the non-standard HTTP 529 the Anthropic API returns when overloaded, load-bearing in the stream-retry and account-rotation paths of ~9 files as a bare literal - unlike 429, no http.Status* name exists for it, so the concept has no name at all",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "declare statusProviderOverloaded once (internal/agent) and use it at every retryable-status check"
+      ]
+    }
+  ]
+}

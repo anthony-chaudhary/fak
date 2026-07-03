@@ -1,0 +1,22 @@
+{
+  "meta": {
+    "as_of": "2026-07-03",
+    "fak_version": "dev",
+    "note": "Detector thresholds are the declared noise floor. Raising a threshold or adding an ignore entry must be justified in the row files or a commit message - the universe is meant to be ungameable."
+  },
+  "detectors": {
+    "hinted": {"enabled": true, "ignore": []},
+    "latent_literal": {"enabled": true, "min_files": 6, "ignore": []},
+    "code_only": {"enabled": true, "min_files": 12, "min_len": 10, "ignore": []},
+    "doc_only": {
+      "enabled": true, "min_doc_files": 4, "max_words": 4,
+      "ignore": [
+        "Bottom line", "At a glance", "from the repo root", "Getting started",
+        "Future work", "Go deeper", "Common patterns", "Current status",
+        "Enforced by", "Advanced usage", "Measured results", "Live demo",
+        "JSON output", "Quick start", "Key takeaways", "Further reading",
+        "Learn more", "Under the hood"
+      ]
+    }
+  }
+}

@@ -1,0 +1,141 @@
+{
+  "rows": [
+    {
+      "id": "honest-fence",
+      "canonical": "honest fence",
+      "signal": "doc-only",
+      "evidence": "Honest fences",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "HonestFence",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the repo's core rhetorical device - an explicit statement of what a claim does NOT cover, placed next to the claim so it cannot be overread - used as a heading in 74+ docs under four drifting spellings (honest fence / honesty fence / honest boundary / honesty gate) with no definition anywhere and no code symbol",
+      "aliases": ["honest fence", "Honesty fences", "Honest boundary", "Honesty Boundary", "honesty gate"],
+      "verdict": "hinted",
+      "gaps": [
+        "define it once in the glossary, pick ONE spelling, and (ideally) name it in code where fences are machine-checked",
+        "the four spellings are a disambiguation-scorecard family waiting to happen - naming it here is the prerequisite"
+      ]
+    },
+    {
+      "id": "honest-scope",
+      "canonical": "honest scope",
+      "signal": "doc-only",
+      "evidence": "Honest scope",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "HonestScope",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring section (54 docs) that states what a feature deliberately does not attempt - the scope-declaration counterpart of the honest fence (which guards a specific claim) - never defined as a term",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "glossary entry drawing the scope-vs-fence line; today readers must infer the difference from usage"
+      ]
+    },
+    {
+      "id": "trust-boundary",
+      "canonical": "trust boundary",
+      "signal": "doc-only",
+      "evidence": "Trust boundary",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "TrustBoundary",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the line between what the kernel verifies and what it merely receives from an untrusted agent - a heading in 33 docs and the load-bearing idea of the whole system, with no code identifier and no glossary definition",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "the glossary's agent entry gestures at it; give the boundary itself a definition and a stable anchor"
+      ]
+    },
+    {
+      "id": "honesty-ledger",
+      "canonical": "honesty ledger",
+      "signal": "doc-only",
+      "evidence": "Honesty ledger",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "HonestyLedger",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring doc section (31 docs) recording which claims are proven vs open for a feature - readers meet it constantly, but which ledger file it denotes (if any) is never stated and no code writes a thing by this name",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "either bind the term to the real ledger artifact it summarizes or define it as a doc-section convention - today it reads like a system component that does not exist"
+      ]
+    },
+    {
+      "id": "ground-truth-section",
+      "canonical": "ground truth",
+      "signal": "doc-only",
+      "evidence": "Ground truth",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "GroundTruth",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the section (29 docs) pointing at the artifact/command a reader can run to verify a claim themselves - fak's evidence-over-assertion convention, unnamed and undefined",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "define the convention once (what qualifies as ground truth: a runnable command or a committed artifact) and link it from the doc templates"
+      ]
+    },
+    {
+      "id": "promotion-gate",
+      "canonical": "promotion gate",
+      "signal": "doc-only",
+      "evidence": "Promotion Gate",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "PromotionGate",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the criteria a claim/feature must meet to move up a maturity rung - a heading in 22 docs (plus 'Promotion rule' in 10) with no code symbol and no definition, despite gating being fak's favorite mechanism",
+      "aliases": ["Promotion rule"],
+      "verdict": "hinted",
+      "gaps": [
+        "define gate-vs-rule (or unify them) and anchor next to the maturity/support-maturity docs the sections gate"
+      ]
+    },
+    {
+      "id": "hot-path-usage",
+      "canonical": "hot path",
+      "signal": "doc-only",
+      "evidence": "hot path",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "HotPath",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "used in 45 docs for the latency-critical code route (decode loop, gateway serve path) - borrowed jargon everyone assumes, but WHICH paths are the hot paths is never enumerated, so the term cannot be checked",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "enumerate the actual hot paths once (glossary or perf doc); an unanchored 'hot path' claim is unfalsifiable"
+      ]
+    },
+    {
+      "id": "verdict-ladder",
+      "canonical": "verdict ladder",
+      "signal": "doc-only",
+      "evidence": "verdict ladder",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "VerdictLadder",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the ordered best-to-worst verdict scale every scorecard defines for its rows (crystal..undocumented, explicit..latent) - the shared pattern is used by 8+ docs as a heading but is named nowhere as the reusable concept it is",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "name the pattern once in the scorecard family doc; each new scorecard re-invents the explanation"
+      ]
+    }
+  ]
+}

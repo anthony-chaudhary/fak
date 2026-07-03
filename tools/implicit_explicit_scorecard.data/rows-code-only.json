@@ -1,0 +1,140 @@
+{
+  "rows": [
+    {
+      "id": "weight-bearing-engine",
+      "canonical": "weight-bearing engine",
+      "signal": "code-only",
+      "evidence": "WeightBearing",
+      "evidence_kind": "symbol",
+      "current_name": "WeightBearing",
+      "proposed_name": "",
+      "named_symbol": "WeightBearing",
+      "doc_anchor": "",
+      "definition": "the engine-interface predicate saying whether an engine actually carries model weights (real inference: DynamoEngine true) or is a stub/proxy (readEngine, localEngine false) - a load-bearing trust distinction that appears in 13 production files and zero docs",
+      "aliases": [],
+      "verdict": "named-code",
+      "gaps": [
+        "write the weight-bearing vs stub engine distinction into docs/generation.md or the glossary so the term is searchable outside the code"
+      ]
+    },
+    {
+      "id": "admission-verdict",
+      "canonical": "cache admission verdict",
+      "signal": "code-only",
+      "evidence": "AdmissionVerdict",
+      "evidence_kind": "symbol",
+      "current_name": "AdmissionVerdict",
+      "proposed_name": "",
+      "named_symbol": "AdmissionVerdict",
+      "doc_anchor": "",
+      "definition": "the cachemeta verdict string recording whether an entry was admitted to the cache and why (AdmissionFromVerdict maps abi verdict kinds onto it) - in 12 production files, never mentioned in the cache docs",
+      "aliases": [],
+      "verdict": "named-code",
+      "gaps": [
+        "add the admission-verdict concept to the addressable-KV-cache explainer / glossary"
+      ]
+    },
+    {
+      "id": "evidence-ref",
+      "canonical": "evidence ref",
+      "signal": "code-only",
+      "evidence": "EvidenceRef",
+      "evidence_kind": "symbol",
+      "current_name": "EvidenceRef",
+      "proposed_name": "",
+      "named_symbol": "EvidenceRef",
+      "doc_anchor": "",
+      "definition": "the struct that points a witness at an artifact it can read back (a file path, a git object) - the unit of witnessable evidence in taskmgr/loopmgr, in 17 production files and zero docs despite the witness pipeline being a headline concept",
+      "aliases": [],
+      "verdict": "named-code",
+      "gaps": [
+        "the witness/claims docs talk about evidence constantly but never name EvidenceRef - anchor the code term in the witness explainer"
+      ]
+    },
+    {
+      "id": "real-runner-seam",
+      "canonical": "RealRunner test seam",
+      "signal": "code-only",
+      "evidence": "RealRunner",
+      "evidence_kind": "symbol",
+      "current_name": "RealRunner",
+      "proposed_name": "",
+      "named_symbol": "RealRunner",
+      "doc_anchor": "",
+      "definition": "the repo-wide convention of a RealRunner function - the production process-runner injected where tests substitute a fake - independently re-declared in mergepreview, modver, releasestale and more (19 files), never documented as the convention it is",
+      "aliases": [],
+      "verdict": "named-code",
+      "gaps": [
+        "document the runner-seam convention (dev-tooling or CONTRIBUTING) so new packages copy it deliberately instead of by osmosis"
+      ]
+    },
+    {
+      "id": "configure-background-command",
+      "canonical": "background-command window gate",
+      "signal": "code-only",
+      "evidence": "ConfigureBackgroundCommand",
+      "evidence_kind": "symbol",
+      "current_name": "ConfigureBackgroundCommand",
+      "proposed_name": "",
+      "named_symbol": "ConfigureBackgroundCommand",
+      "doc_anchor": "",
+      "definition": "the internal/windowgate helper every spawned subprocess passes through so background commands never flash a console window on Windows (no-op elsewhere) - called from 77 production files, invisible in the docs",
+      "aliases": [],
+      "verdict": "named-code",
+      "gaps": [
+        "one paragraph in dev-tooling on why every exec.Cmd must route through windowgate, so the 78th call site is written on purpose"
+      ]
+    },
+    {
+      "id": "parse-flags-convention",
+      "canonical": "per-verb ParseFlags convention",
+      "signal": "code-only",
+      "evidence": "ParseFlags",
+      "evidence_kind": "symbol",
+      "current_name": "ParseFlags",
+      "proposed_name": "",
+      "named_symbol": "ParseFlags",
+      "doc_anchor": "",
+      "definition": "the convention that every CLI verb declares its own ParseFlags/parseFlags helper (139 production files) with reject-args and or-help variants - the single most repeated declared name in the tree, described nowhere",
+      "aliases": ["ParseFlagsRejectArgs", "ParseFlagsOrHelp"],
+      "verdict": "named-code",
+      "gaps": [
+        "document the verb-flag-parsing convention and its variants in the CLI contributor notes"
+      ]
+    },
+    {
+      "id": "write-indented-json",
+      "canonical": "indented-JSON emitter",
+      "signal": "code-only",
+      "evidence": "writeIndentedJSON",
+      "evidence_kind": "symbol",
+      "current_name": "writeIndentedJSON",
+      "proposed_name": "",
+      "named_symbol": "writeIndentedJSON",
+      "doc_anchor": "",
+      "definition": "the helper (declared per package, 59 production files) that emits the canonical two-space-indented JSON for --json verb output, with a no-escape variant - the de-facto JSON output contract of the CLI, stated in no doc",
+      "aliases": ["writeIndentedJSONNoEscape"],
+      "verdict": "named-code",
+      "gaps": [
+        "name the --json output contract (indentation, escaping) in the CLI reference; today it is only inferable from the helper"
+      ]
+    },
+    {
+      "id": "expand-tilde",
+      "canonical": "tilde expansion helper",
+      "signal": "code-only",
+      "evidence": "ExpandTilde",
+      "evidence_kind": "symbol",
+      "current_name": "ExpandTilde",
+      "proposed_name": "",
+      "named_symbol": "ExpandTilde",
+      "doc_anchor": "",
+      "definition": "the internal/pathutil helper that expands a leading ~ in user-supplied paths (54 production files) - the reason ~/foo works in every fak flag, a behavior users rely on that no doc promises",
+      "aliases": [],
+      "verdict": "named-code",
+      "gaps": [
+        "promise the ~-expansion behavior in the CLI reference (it is user-visible, not an implementation detail)"
+      ]
+    }
+  ]
+}
