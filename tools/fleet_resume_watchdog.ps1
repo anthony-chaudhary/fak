@@ -308,9 +308,11 @@ function TranscriptProgress($sid, [int64]$lastLaunch) {
     } catch {}
   }
   $low = $terminalText.ToLowerInvariant()
+  $limitWall = $low -match 'limit\s*[·:|.\-]?\s*resets?' -or $low -match '\b(session|weekly|usage|fable\s+\d+)\s+limit\b' -or $low.Contains('/usage-credits')
+  $transientWall = $low.Contains('overloaded') -or $terminalText.Contains('529') -or ($low.Contains('api error') -and $low.Contains('rate'))
   if ($low -match 'login interrupted|please run /login|authentication_error|invalid x-api-key|invalid authentication credentials|401|oauth token has expired|credit balance is too low|organization has disabled claude subscription access|use an anthropic api key instead|not logged in') {
     $out.Outcome = 'unrecoverable'
-  } elseif ($low -match 'limit\s*[·:|.\-]?\s*resets?' -or $low.Contains('overloaded') -or $terminalText.Contains('529') -or ($low.Contains('api error') -and $low.Contains('rate'))) {
+  } elseif ($limitWall -or $transientWall) {
     $out.Outcome = 'recoverable'
   } elseif ($terminalText.Trim()) {
     $out.Outcome = 'progressed'
