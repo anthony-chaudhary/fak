@@ -237,6 +237,14 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
     },
     {
       "@type": "Question",
+      "name": "What is memory engineering?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Memory engineering is the discipline of deciding what an AI agent remembers, where that memory lives, how a memory is re-verified before it is trusted again, and when it is provably forgotten — each decided by an inspectable mechanism rather than by the model's in-context judgment. Prompt engineering shaped one completion and context engineering shapes one session's window; memory engineering governs what an agent carries across sessions. fak implements the four decisions at the same kernel boundary that adjudicates tool calls: a truth-duration write gate that defaults ephemeral facts to expire rather than persist, a structured promotion record so fak memory explain-promotion answers \"why is this fact in memory\" from a ledger captured at write time rather than a model's story, verified recall (fak memory recall) that re-checks a note's claims against ground truth at read time and withholds what fails, ECC-style syndrome and scrub integrity over persisted memory images, and bit-exact span eviction so a removed memory is provably gone (max|Δ| = 0). The one-line test: if a memory system cannot answer \"why is this fact in memory\", \"is it still true\", and \"can you prove it is …"
+      }
+    },
+    {
+      "@type": "Question",
       "name": "What exact path does a proposed tool call take through the kernel?",
       "acceptedAnswer": {
         "@type": "Answer",
@@ -1894,6 +1902,10 @@ The lock bounds tool *names* structurally but does not bound the resolved effect
 ## How does adding a verdict like "quarantine" fit the same mental model as "deny"?
 
 Both are verdicts in one restrictiveness lattice the kernel folds to, so quarantine (result-side) and deny (call-side) are the same kind of object: a value the next loop turn consumes, not an exception. The adjudicator chain folds to the most-restrictive verdict across allow, defer, transform, quarantine, require-witness, and deny; an unknown verdict kind fails closed rather than panicking, and a refusal is returned as a structured result, never an HTTP error. That uniformity is why a result quarantine and a call denial share one wire shape and one audit path: the model proposed something, the kernel returned a verdict, and the loop reads it in-band.
+
+## What is memory engineering?
+
+Memory engineering is the discipline of deciding what an AI agent remembers, where that memory lives, how a memory is re-verified before it is trusted again, and when it is provably forgotten — each decided by an inspectable mechanism rather than by the model's in-context judgment. Prompt engineering shaped one completion and context engineering shapes one session's window; memory engineering governs what an agent carries across sessions. `fak` implements the four decisions at the same kernel boundary that adjudicates tool calls: a truth-duration write gate that defaults ephemeral facts to expire rather than persist, a structured promotion record so `fak memory explain-promotion` answers "why is this fact in memory" from a ledger captured at write time rather than a model's story, verified recall (`fak memory recall`) that re-checks a note's claims against ground truth at read time and withholds what fails, ECC-style syndrome and scrub integrity over persisted memory images, and bit-exact span eviction so a removed memory is provably gone (`max|Δ| = 0`). The one-line test: if a memory system cannot answer "why is this fact in memory", "is it still true", and "can you prove it is gone", it has memory features, not memory engineering. The definitional page is docs/explainers/memory-engineering.md.
 
 ## The lock — how adjudication works
 
