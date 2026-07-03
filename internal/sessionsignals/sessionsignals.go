@@ -30,6 +30,7 @@ import (
 var limitRE = regexp.MustCompile(`(?i)limit\s*[·:|.\-]?\s*resets?\s+([^()"` + "\n" + `]+?(?:\([^()` + "\n" + `]*\))?)\s*(?:["` + "\n" + `<]|$|\.(?:\s|$))`)
 
 var bareLimitRE = regexp.MustCompile(`(?i)\b(?:session|weekly|usage|fable\s+\d+)\s+limit\b|/usage-credits`)
+var negatedBareLimitRE = regexp.MustCompile(`(?i)\bnot\s+(?:your\s+)?(?:session|weekly|usage|fable\s+\d+)\s+limit\b`)
 
 var authRE = regexp.MustCompile(`(?i)Login interrupted|please run /login|authentication_error|` +
 	`invalid x-api-key|invalid authentication credentials|` +
@@ -48,12 +49,15 @@ var loginRequiredRE = regexp.MustCompile(`(?i)Login interrupted|please run /logi
 	`API Error:\s*401|HTTP\s*401|401\s+(?:authentication required|unauthorized)|` +
 	`OAuth token has expired|Not logged in`)
 
-// apiErrRE matches transport/server errors only. Auth and quota signals are checked
-// separately (IsAPIError subtracts IsAuthError, exactly as the Python did).
-var apiErrRE = regexp.MustCompile(`(?i)isApiErrorMessage|API Error|overloaded_error|\boverloaded\b|` +
+const apiErrPattern = `(?i)isApiErrorMessage|API Error|overloaded_error|\boverloaded\b|` +
 	`\b429\b|\b529\b|\b503\b|fetch failed|ECONNRESET|ETIMEDOUT|` +
 	`socket hang up|Internal Server Error|service unavailable|` +
-	`connection error|network error|request timed out`)
+	`connection error|network error`
+
+// apiErrRE matches transport/server errors only. Auth and quota signals are checked
+// separately (IsAPIError subtracts IsAuthError, exactly as the Python did).
+var apiErrRE = regexp.MustCompile(apiErrPattern + `|request timed out`)
+var apiErrWithoutBareTimeoutRE = regexp.MustCompile(apiErrPattern)
 
 // Resets is the set of usage-limit reset windows one throttle banner carries. Claude's
 // banner can name a short (hourly/daily) window AND a weekly one in the same message;
@@ -102,7 +106,11 @@ func LimitReset(text string) string {
 // no-reset banners such as "Fable 5 limit" that require a different seat/model rather
 // than a same-seat blind retry.
 func IsLimitError(text string) bool {
-	return LimitReset(text) != "" || bareLimitRE.MatchString(text)
+	return LimitReset(text) != "" || hasBareLimitSignal(text)
+}
+
+func hasBareLimitSignal(text string) bool {
+	return bareLimitRE.MatchString(text) && !negatedBareLimitRE.MatchString(text)
 }
 
 // WeeklyReset is just the weekly reset window, or "".
@@ -143,6 +151,15 @@ func resetTZOffset(when string) int {
 // should treat that conservatively as not-yet-passed, exactly as the Python None did.
 // Pure and injectable, so it unit-tests without a clock.
 func ResetPassed(when string, nowUTC, anchorUTC time.Time) (passed, ok bool) {
+	if nowUTC.IsZero() {
+		nowUTC = time.Now().UTC()
+	}
+	return ResetPassedAt(when, nowUTC, anchorUTC)
+}
+
+// ResetPassedAt is the clock-free reset check used by compatibility callers that
+// require a fully injected nowUTC value, even when it is the zero time.
+func ResetPassedAt(when string, nowUTC, anchorUTC time.Time) (passed, ok bool) {
 	m := resetTimeRE.FindStringSubmatch(when)
 	if m == nil {
 		return false, false
@@ -156,9 +173,6 @@ func ResetPassed(when string, nowUTC, anchorUTC time.Time) (passed, ok bool) {
 		minute = atoiSafe(m[2])
 	}
 	tz := time.FixedZone("banner", resetTZOffset(when)*3600)
-	if nowUTC.IsZero() {
-		nowUTC = time.Now().UTC()
-	}
 	anchor := anchorUTC
 	if anchor.IsZero() {
 		anchor = nowUTC
@@ -205,7 +219,17 @@ func IsAuthError(text string) bool { return authRE.MatchString(text) }
 // IsAPIError reports whether text names a transient transport/server error that is NOT
 // also an auth wall (auth outranks: a 401 is never a retry-now signal).
 func IsAPIError(text string) bool {
-	return apiErrRE.MatchString(text) && !IsAuthError(text)
+	return isAPIError(text, apiErrRE)
+}
+
+// IsAPIErrorWithoutBareTimeout preserves the older resume/signals API-error surface,
+// which did not classify a bare "request timed out" banner as retryable.
+func IsAPIErrorWithoutBareTimeout(text string) bool {
+	return isAPIError(text, apiErrWithoutBareTimeoutRE)
+}
+
+func isAPIError(text string, re *regexp.Regexp) bool {
+	return re.MatchString(text) && !IsAuthError(text)
 }
 
 // AuthBlockKind classifies an auth wall's text: "credit" (balance too low), "access"
@@ -246,6 +270,13 @@ const (
 	FailureAPIErr = "API_ERR"
 )
 
+// TerminalFailureOptions selects compatibility edges around the shared terminal
+// failure taxonomy.
+type TerminalFailureOptions struct {
+	IncludeBareLimit          bool
+	IncludeBareRequestTimeout bool
+}
+
 // TerminalFailure classifies a session's TERMINAL ERROR text into its failure mode — the
 // single source of truth shared by the sweep classifier and the resume watchdogs, so they
 // can never disagree about what state a session is in.
@@ -261,6 +292,15 @@ const (
 // record at all) yields ("", "") — no error record means no failure bucket, never an
 // inference from prose.
 func TerminalFailure(errText string) (kind, detail string) {
+	return TerminalFailureWithOptions(errText, TerminalFailureOptions{
+		IncludeBareLimit:          true,
+		IncludeBareRequestTimeout: true,
+	})
+}
+
+// TerminalFailureWithOptions classifies terminal error text with explicit compatibility
+// switches for legacy callers.
+func TerminalFailureWithOptions(errText string, opts TerminalFailureOptions) (kind, detail string) {
 	t := strings.TrimSpace(errText)
 	if t == "" {
 		return "", ""
@@ -271,10 +311,14 @@ func TerminalFailure(errText string) (kind, detail string) {
 	if when := LimitReset(t); when != "" {
 		return FailureLimit, when
 	}
-	if IsLimitError(t) {
+	if opts.IncludeBareLimit && hasBareLimitSignal(t) {
 		return FailureLimit, ""
 	}
-	if IsAPIError(t) {
+	apiErr := apiErrWithoutBareTimeoutRE
+	if opts.IncludeBareRequestTimeout {
+		apiErr = apiErrRE
+	}
+	if isAPIError(t, apiErr) {
 		return FailureAPIErr, ""
 	}
 	return "", ""
