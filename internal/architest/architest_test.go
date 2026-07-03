@@ -186,6 +186,7 @@ var tier = map[string]int{
 	"stopfailure":      1, // pure StopFailure marker planner/settler over JSON files and transcript existence; stdlib-only, off the hot path.
 	"dogfoodscore":     1, // pure dogfood-loop scorecard over transcripts/markers; imports stopfailure, off the hot path.
 	"conceptusage":     1, // pure concept-usage scorecard: folds git log + .dos journals into a dogfooding score; stdlib-only, off the hot path.
+	"renameconcept":    1, // pure tree-wide concept-rename planner/applier: case-form variant expansion + mechanical-vs-holdout triage + residual rescan; stdlib-only, imports nothing internal, off the hot path.
 	"maturity":         1, // pure feature-maturity lifecycle scorecard: folds dos.toml lanes + the tree's import graph into a per-capability ladder rung + next-work backlog; stdlib-only, off the hot path.
 	"dropin":           1,
 	"comm":             2,

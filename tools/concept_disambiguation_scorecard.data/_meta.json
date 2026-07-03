@@ -14,7 +14,7 @@
       "ignore": ["cached", "caches", "cacheable", "cacheless", "uncached", "caching",
                  "cachedir", "cachelen", "cachettl", "flushcache", "defaultcachesize",
                  "cachecreation", "cacheentry", "cacheevent", "cachedecay", "cachestream", "cacherevoke",
-                 "usercachedir"],
+                 "usercachedir", "pycache"],
       "min_files": 3,
       "note": "The headline confusable space: raw KV tensor storage vs the page-table virtualization (vCache) vs the provider prompt-cache vs the metadata sidecar (cachemeta)."
     },

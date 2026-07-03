@@ -169,6 +169,7 @@ concurrent = [
   "opttarget",
   "guardcomplaint", # the agent APPEAL channel (`fak complain`): the subjective complement of guardroute; tree = internal/guardcomplaint/** only (its cmd/fak/complain.go shim stays in the `cmd` lane, keeping every leaf tree pairwise-disjoint per the header invariant)
   "maturity",
+  "renameconcept", # internal/renameconcept leaf (the tree-wide concept-rename planner/applier); declared so a `(fak renameconcept)` ship-stamp binds and the arbiter protects internal/renameconcept/** edits; its cmd/fak/renameconcept.go shim stays in the `cmd` lane
   "loopindex", # #1152: internal/loopindex leaf (the agentic-coding loop-index spine); cmd/fak/loopindex.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
   "codexmcphealth",
   "commitintent",
@@ -238,6 +239,7 @@ autopick = [
   "advmodel",
   "modelroute",
   "modelreg", # #1029: internal/modelreg leaf (the run-by-name model registry), see [lanes].concurrent note
+  "renameconcept", # internal/renameconcept leaf (the concept-rename planner/applier), see [lanes].concurrent note
   "sessionimage",
   "a2achan",
   "snapshot",
@@ -417,6 +419,7 @@ modelroute = ["internal/modelroute/**"]
 # #1029 set out to add was inert. Tree = internal/modelreg/** only; its cmd/fak shim stays in `cmd`.
 modelreg = ["internal/modelreg/**"]
 maturity = ["internal/maturity/**"]
+renameconcept = ["internal/renameconcept/**"] # tree-wide concept-rename planner/applier (cmd/fak/renameconcept.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint)
 sessionimage = ["internal/sessionimage/**"]
 a2achan = ["internal/a2achan/**"]
 snapshot = ["internal/snapshot/**"]

@@ -626,17 +626,18 @@
       "family": "cache",
       "kind": "config",
       "definition": "CacheTTL1h (internal/gateway/cache_pricing.go) is the extended 1-hour ephemeral provider prompt-cache TTL tier, priced above the 5-minute default.",
-      "distinction": "A provider prompt-cache TTL TIER, not engine KV memory and not a fak-side cache.",
+      "distinction": "A provider prompt-cache TTL TIER (pricing), not engine KV memory, not a fak-side cache - and NOT Config.CacheTTL1H, the gateway lever field that shares its spelling (the tier prices, the lever arms).",
       "distinct_from": [
         "kv-cache",
-        "vcache"
+        "vcache",
+        "config-cachettl1h"
       ],
       "aliases": [],
       "grounding": "CacheTTL1h",
       "grounding_kind": "symbol",
-      "glossary_anchor": "",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",
-      "verdict": "defined",
+      "verdict": "crystal",
       "gaps": []
     },
     {
@@ -645,16 +646,17 @@
       "family": "cache",
       "kind": "symbol",
       "definition": "UpgradeAnthropicStableCacheTTL1h (internal/agent/anthropic_cachebp.go) rewrites an Anthropic request body to upgrade stable cache_control breakpoints to the 1h TTL tier, returning a typed upgrade outcome.",
-      "distinction": "The request REWRITER that applies the CacheTTL1h tier; CacheTTL1h is the tier value.",
+      "distinction": "The request REWRITER that applies the CacheTTL1h tier - NOT the tier value (CacheTTL1h) and NOT the lever that arms it (Config.CacheTTL1H).",
       "distinct_from": [
-        "x-goal25-cache-cachettl1h"
+        "x-goal25-cache-cachettl1h",
+        "config-cachettl1h"
       ],
       "aliases": [],
       "grounding": "UpgradeAnthropicStableCacheTTL1h",
       "grounding_kind": "symbol",
-      "glossary_anchor": "",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",
-      "verdict": "defined",
+      "verdict": "crystal",
       "gaps": []
     },
     {
@@ -663,16 +665,17 @@
       "family": "cache",
       "kind": "metric",
       "definition": "fak_gateway_cache_ttl_upgrade_total is the /metrics counter witnessing managed-cache TTL upgrades by outcome label.",
-      "distinction": "The WITNESS counter for TTL upgrades, not the upgrade rewriter itself.",
+      "distinction": "The WITNESS counter for TTL upgrades, not the upgrade rewriter itself - recorded only while the lever is on, so a zero panel with the lever active means every head was ineligible.",
       "distinct_from": [
-        "x-goal25-cache-upgradeanthropicstablecachettl1h"
+        "x-goal25-cache-upgradeanthropicstablecachettl1h",
+        "config-cachettl1h"
       ],
       "aliases": [],
       "grounding": "fak_gateway_cache_ttl_upgrade_total",
       "grounding_kind": "metric",
-      "glossary_anchor": "",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",
-      "verdict": "defined",
+      "verdict": "crystal",
       "gaps": []
     },
     {

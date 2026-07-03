@@ -187,6 +187,7 @@ var verbManifest = []Verb{
 	{Name: "release", Synopsis: "the release front door over the tools/release_*.py helpers (status/cut/tag/publish/...)", Lane: "cmd"},
 	{Name: "release-lock", Synopsis: "the process-safe release lock every VERSION/tag mutation must take (acquire/release/status)", Lane: "cmd"},
 	{Name: "release-staleness", Synopsis: "the publish-freshness signal: how far the latest @latest tag lags HEAD (commits + days)", Lane: "cmd"},
+	{Name: "rename-concept", Synopsis: "plan/apply a tree-wide concept rename: case-form variants, mechanical vs holdout triage, residual rescan", Lane: "cmd"},
 	{Name: "replay", Synopsis: "explicit spelling of the trace-replay path (fak run --trace)", Lane: "cmd"},
 	{Name: "repo-hygiene-scorecard", Synopsis: "native repo-hygiene scorecard control-pane payload (hygiene_debt)", Lane: "cmd"},
 	{Name: "resume", Synopsis: "the deterministic resume-cache decision: what happens to the prompt cache on resume, and what to do", Lane: "cmd"},

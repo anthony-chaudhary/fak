@@ -113,6 +113,48 @@ other in mind produces the "I lowered the budget and nothing changed" surprise.
   cut on the tail vs a re-plan of what stays resident (see the context-management
   family below).
 
+### managed cache - the knob, the lever, the tier, and the restart plan
+
+"Managed cache" names fak actively DRIVING the provider's prompt cache instead of
+merely forwarding the client's `cache_control` bytes. Several names ride that
+phrase; they live at different layers, two collide in spelling, and one is a
+different sense entirely:
+
+- **managed cache** (the posture: `fak guard --managed-cache auto|on|off`, epic
+  #1844 C6) - should THIS guard session actively manage the prompt cache on the
+  outbound Anthropic wire? AUTO activates only when the session provably bills an
+  operator API key (`--api-key-env` resolved a key, no subscription token pinned);
+  subscription OAuth, non-Anthropic wires, and local models stay passive - fak
+  never speculates with billing it cannot see. `resolveGuardManagedCache` resolves
+  the knob once at startup into **guardManagedCachePosture** (mode, active,
+  reason), rendered in the banner. *Not* the Prompt cache (the provider feature it
+  manages), *not* vCache (the virtual control plane fak builds), and *not*
+  managed context (the gateway's context program - same "managed", different
+  resource).
+
+- **Config.CacheTTL1H** (the gateway LEVER, `internal/gateway/gateway.go`) vs
+  **CacheTTL1h** (the pricing TIER, `internal/gateway/cache_pricing.go`) - one
+  spelling, two concepts. The lever is the Config bool an ACTIVE posture arms:
+  each outbound request's existing stable-head `cache_control` breakpoint is
+  upgraded to the 1-hour tier (`maybeUpgradeAnthropicCacheTTL1H` ->
+  `agent.UpgradeAnthropicStableCacheTTL1h`), so an idle gap past 5 minutes
+  re-enters on a 0.1x cache read instead of re-writing the whole prefix. The tier
+  is the PRICE of that choice: 1h writes cost 2x once (vs 1.25x at 5m) - the
+  lever ARMS the upgrade, the tier PRICES it. `FAK_ABLATE_TTL_1H=1` is the
+  ablation arm that forces the same lever for A/B measurement, independent of
+  posture. Every attempt is witnessed by `fak_gateway_cache_ttl_upgrade_total`
+  (outcome-labelled; recorded only while the lever is on, so a zero panel with
+  the lever active means every head was ineligible - visible, not silent).
+
+- **managed-cache restart plan** (`internal/resume`) - the OTHER sense of the
+  phrase: not a live session's wire posture but the restart verdict for a
+  DORMANT one. `Diagnose` finds the transcripts that crashed on a rate limit and
+  never resumed; `Plan` prices RESUME_FULL vs CUT (RESET always priced as the
+  alternative) against the projected cache posture, so the restart is "a new
+  session with cache managed" instead of a blind cold re-prefill of the whole
+  resident transcript. *Not* the guard posture above (live wire vs restart
+  pricing) and *not* the ctxplanner / memq `Plan` types (see the plan family).
+
 ---
 
 ## The guard / gate family
@@ -407,6 +449,53 @@ the spelling; nothing in the kernel's safety layer touches the model's tensors.
 
 - **MLA KV layout seam** - attention cache variant seam interface: standardKVLayout vs mlaKVLayout.
   *Not* Layout (tensor) (that is element ordering, not cache variant).
+
+---
+
+## The loop family
+
+The most overloaded word in the repo. Six families of "keep work happening" machinery
+grew at different times, and the same token names a read-only walker, a bulk fleet
+launcher, a ledger, an admission gate, and a scorecard. Draw the line on sight; the
+full operational map is [the loop-family map](../notes/CONCEPT-CONTINUAL-WORK-LOOP-MAP-2026-07-02.md).
+
+- **loop (the ring)** - the generic engineering abstraction: sense -> decide -> act ->
+  witness, at any altitude (tool-call / turn / session / fleet). *Not* any one named
+  mechanism below - it is the shape they all instantiate.
+
+- **super loop (`fak superloop`)** - a read-only INTENT walker: an interior node that
+  reads its member loops' status worst-first and mutates nothing. *Not* the `/super-loop`
+  skill (a bulk detached wave LAUNCHER that spawns fleets) - same word, opposite risk.
+
+- **`fak loop` (ledger + governor)** - the durable hash-chained ledger
+  (`.fak/loops.jsonl`) plus the admission governor (`loopmgr.Admit`); it records and
+  gates, it does not itself loop. *Not* `fak loop drive` (that is an actual Ralph loop
+  that settles one `GOAL.md` witness).
+
+- **loopgate** - the per-turn DOS exit-gate a `fak loop drive` turn passes through
+  (`internal/loopgate`): verified-vs-naive admission for one iteration. *Not* the
+  `loopmgr` governor (that is fleet-level admission over a ledger fold, not one turn).
+
+- **bench-loop (`fak bench-loop`)** - the benchmark control surface that folds the
+  benchmark registry + run catalog + nightrun ledger into the single next benchmark
+  action. *Not* `loopbench` (`internal/loopgate/loopbench.go`, the verified-vs-naive
+  exit-gate micro-bench) - unrelated code paths sharing a spelling.
+
+- **loop-index (`fak loop-index-scorecard`)** - the Orient->Plan->Act->Verify->Ship->Learn
+  STAGE-coverage scorecard: are the agentic-coding loop stages witnessed at floor. *Not*
+  an index OF loops (that role is the loop-family map, a doc, not a scorecard).
+
+- **loopfleet** - the cross-ledger loop-health FOLD (`internal/loopfleet`): rolls up
+  loopmgr / nightrun / dojo / cadence / dispatch ledgers into one live/stale/dark view.
+  *Not* `loopmgr` (that governs ONE loop's admission; loopfleet only reads many).
+
+- **bgloop** - the always-on background-loop supervisor (`internal/bgloop`,
+  `fak bgloop`) that keeps a detached loop process alive. *Not* `fak loop` (the ledger)
+  and *Not* a super loop (an intent walker) - bgloop is the process babysitter.
+
+- **loopback (network)** - the 127.0.0.1 network address / same-host bind, swallowed by
+  the `loop` root but from a different domain entirely. *Not* any work-loop concept -
+  it is a networking term, drawn here only because the token collides.
 
 ---
 

@@ -1155,17 +1155,18 @@
       "family": "context-ctx",
       "kind": "concept",
       "definition": "managed context is fak's gateway-owned context program - the SLO-reported alternative to client-managed context (internal/productscorecard ManagedContextSLOReport).",
-      "distinction": "The PROGRAM of gateway-owned context; context health is its user-facing severity readout.",
+      "distinction": "The PROGRAM of gateway-owned context; context health is its user-facing severity readout - NOT managed cache (the guard's prompt-cache posture; same 'managed', different resource).",
       "distinct_from": [
         "x-goal25b-context-ctx-contexthealth",
-        "context-mmu"
+        "context-mmu",
+        "managed-cache"
       ],
       "aliases": [],
       "grounding": "managedContext",
       "grounding_kind": "symbol",
-      "glossary_anchor": "",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",
-      "verdict": "defined",
+      "verdict": "crystal",
       "gaps": []
     },
     {

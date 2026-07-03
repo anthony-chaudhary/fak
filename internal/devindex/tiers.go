@@ -198,6 +198,7 @@ var verbTiers = map[string]VerbTier{
 	"release":                       TierDev,
 	"release-lock":                  TierDev,
 	"release-staleness":             TierDev,
+	"rename-concept":                TierDev,
 	"repo-hygiene-scorecard":        TierDev,
 	"rollup":                        TierDev,
 	"route":                         TierDev,
