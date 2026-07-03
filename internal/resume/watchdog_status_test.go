@@ -104,6 +104,35 @@ func TestFoldWatchdogStatusLaunchWithoutProgressIsNotRecovered(t *testing.T) {
 	if row.ProgressWitnessedAt != 0 || row.Evidence != "" {
 		t.Fatalf("launch alone must not carry progress witness: %+v", row)
 	}
+	if row.UnprovenSeconds != 200 {
+		t.Fatalf("unproven seconds = %d, want 200", row.UnprovenSeconds)
+	}
+}
+
+func TestFoldWatchdogStatusOldLaunchWithoutProgressTurnsRed(t *testing.T) {
+	got := FoldWatchdogStatus(WatchdogStatusInput{
+		Mode:            "LIVE",
+		NowUnix:         1_300,
+		SilentSeconds:   10_000,
+		UnprovenSeconds: 120,
+		MonotonicTicks:  3,
+		Plan:            []WatchdogPlanRow{{Session: "sid-launched", Account: ".claude-a"}},
+		Events: []WatchdogStatusEvent{
+			{UnixSeconds: 1_000, Session: "sid-launched", Phase: "queued", Mode: "LIVE"},
+			{UnixSeconds: 1_100, Session: "sid-launched", Phase: "launched", Mode: "LIVE"},
+		},
+	})
+
+	if got.Verdict != WatchdogDrainRed {
+		t.Fatalf("verdict = %s, want red for old launched-unproven row: %+v", got.Verdict, got)
+	}
+	if got.UnprovenSeconds != 200 {
+		t.Fatalf("max unproven seconds = %d, want 200", got.UnprovenSeconds)
+	}
+	joined := strings.Join(got.Reasons, "\n")
+	if !strings.Contains(joined, "launched resume") || !strings.Contains(joined, "unproven") {
+		t.Fatalf("reasons = %q, want launched-unproven alarm", joined)
+	}
 }
 
 func TestFoldWatchdogStatusLegacyPhaseLessLaunchAndSettledRows(t *testing.T) {

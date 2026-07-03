@@ -79,6 +79,7 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 	statusOnly := fs.Bool("status", false, "print the read-only drain status from resume_plan.json + resume_ledger.jsonl, then exit")
 	asJSON := fs.Bool("json", false, "with --status, emit the machine-readable drain report")
 	silentHours := fs.Float64("silent-hours", rwEnvFloat("FAK_RESUME_SILENT_HOURS", 2), "with --status, mark red when any unrecovered queued row is silent this many hours (env FAK_RESUME_SILENT_HOURS)")
+	unprovenMinutes := fs.Float64("unproven-minutes", rwEnvFloat("FAK_RESUME_UNPROVEN_MINUTES", 10), "with --status, mark red when a launched resume has no progress witness for this many minutes (env FAK_RESUME_UNPROVEN_MINUTES; 0 disables)")
 	monotonicTicks := fs.Int("monotonic-ticks", rwEnvInt("FAK_RESUME_MONOTONIC_TICKS", 3), "with --status, mark red when AUTO_RESUME depth grows for this many consecutive ticks (env FAK_RESUME_MONOTONIC_TICKS)")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -139,12 +140,13 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 	statusEvents = append(statusEvents, rwLoadWatchdogStatusEvents(statusLedgerPath)...)
 	if *statusOnly {
 		rep := resume.FoldWatchdogStatus(resume.WatchdogStatusInput{
-			Mode:           tickMode,
-			NowUnix:        time.Now().Unix(),
-			SilentSeconds:  int64(*silentHours * 3600),
-			MonotonicTicks: *monotonicTicks,
-			Plan:           plan,
-			Events:         statusEvents,
+			Mode:            tickMode,
+			NowUnix:         time.Now().Unix(),
+			SilentSeconds:   int64(*silentHours * 3600),
+			UnprovenSeconds: int64(*unprovenMinutes * 60),
+			MonotonicTicks:  *monotonicTicks,
+			Plan:            plan,
+			Events:          statusEvents,
 		})
 		if *asJSON {
 			code := encodeJSONOrFail(stdout, stderr, rep, "fak resume watchdog --status")
@@ -616,8 +618,9 @@ func rwWatchdogStatusLedger(regDir string) string {
 }
 
 func renderResumeWatchdogStatus(w io.Writer, rep resume.WatchdogDrainStatus) {
-	fmt.Fprintf(w, "resume watchdog status — %s mode=%s auto_resume_depth=%d silent_max=%s\n",
-		strings.ToUpper(string(rep.Verdict)), rep.Mode, rep.AutoResumeDepth, humanIdle(rep.SilentSeconds))
+	fmt.Fprintf(w, "resume watchdog status — %s mode=%s auto_resume_depth=%d silent_max=%s unproven_max=%s\n",
+		strings.ToUpper(string(rep.Verdict)), rep.Mode, rep.AutoResumeDepth,
+		humanIdle(rep.SilentSeconds), humanIdle(rep.UnprovenSeconds))
 	for _, r := range rep.Reasons {
 		fmt.Fprintf(w, "  red: %s\n", r)
 	}

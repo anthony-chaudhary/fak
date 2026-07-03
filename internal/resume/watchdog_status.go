@@ -29,12 +29,13 @@ const (
 // WatchdogStatusInput is the pure input to FoldWatchdogStatus. Events are typed facts
 // parsed from the durable resume ledger; Plan is the current AUTO_RESUME plan.
 type WatchdogStatusInput struct {
-	Mode           string                `json:"mode"`
-	NowUnix        int64                 `json:"now_unix"`
-	SilentSeconds  int64                 `json:"silent_seconds"`
-	MonotonicTicks int                   `json:"monotonic_ticks"`
-	Plan           []WatchdogPlanRow     `json:"plan,omitempty"`
-	Events         []WatchdogStatusEvent `json:"events,omitempty"`
+	Mode            string                `json:"mode"`
+	NowUnix         int64                 `json:"now_unix"`
+	SilentSeconds   int64                 `json:"silent_seconds"`
+	UnprovenSeconds int64                 `json:"unproven_seconds,omitempty"`
+	MonotonicTicks  int                   `json:"monotonic_ticks"`
+	Plan            []WatchdogPlanRow     `json:"plan,omitempty"`
+	Events          []WatchdogStatusEvent `json:"events,omitempty"`
 }
 
 // WatchdogStatusEvent is one ledger fact the drain steward can trust without reading
@@ -64,6 +65,7 @@ type WatchdogMTTRRow struct {
 	ResumedAt           int64              `json:"resumed_at,omitempty"`
 	ProgressWitnessedAt int64              `json:"progress_witnessed_at,omitempty"`
 	SilentSeconds       int64              `json:"silent_seconds,omitempty"`
+	UnprovenSeconds     int64              `json:"unproven_seconds,omitempty"`
 	Evidence            string             `json:"evidence,omitempty"`
 }
 
@@ -76,6 +78,8 @@ type WatchdogDrainStatus struct {
 	AutoResumeMonotonicTicks int                  `json:"auto_resume_monotonic_ticks,omitempty"`
 	SilentSeconds            int64                `json:"silent_seconds,omitempty"`
 	SilentHours              float64              `json:"silent_hours,omitempty"`
+	UnprovenSeconds          int64                `json:"unproven_seconds,omitempty"`
+	UnprovenHours            float64              `json:"unproven_hours,omitempty"`
 	MTTRSessions             []WatchdogMTTRRow    `json:"mttr_sessions"`
 	Reasons                  []string             `json:"reasons,omitempty"`
 }
@@ -172,6 +176,8 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 
 	rows := make([]WatchdogMTTRRow, 0, len(bySession))
 	var maxSilent int64
+	var maxUnproven int64
+	staleUnproven := 0
 	for _, f := range bySession {
 		if f.closed {
 			continue
@@ -182,6 +188,12 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 		row := foldWatchdogMTTRRow(*f, mode, now)
 		if row.SilentSeconds > maxSilent {
 			maxSilent = row.SilentSeconds
+		}
+		if row.UnprovenSeconds > maxUnproven {
+			maxUnproven = row.UnprovenSeconds
+		}
+		if in.UnprovenSeconds > 0 && row.UnprovenSeconds >= in.UnprovenSeconds {
+			staleUnproven++
 		}
 		rows = append(rows, row)
 	}
@@ -201,6 +213,9 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 	if in.SilentSeconds > 0 && maxSilent >= in.SilentSeconds {
 		reasons = append(reasons, fmt.Sprintf("oldest unrecovered AUTO_RESUME row silent for %.1fh", float64(maxSilent)/3600))
 	}
+	if in.UnprovenSeconds > 0 && staleUnproven > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d launched resume(s) unproven for >= %.1fm", staleUnproven, float64(in.UnprovenSeconds)/60))
+	}
 	if mode == "DRY-RUN" && currentDepth > 0 {
 		reasons = append(reasons, "watchdog is DRY-RUN with queued AUTO_RESUME rows")
 	}
@@ -217,6 +232,8 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 		AutoResumeMonotonicTicks: monotonic,
 		SilentSeconds:            maxSilent,
 		SilentHours:              float64(maxSilent) / 3600,
+		UnprovenSeconds:          maxUnproven,
+		UnprovenHours:            float64(maxUnproven) / 3600,
 		MTTRSessions:             rows,
 		Reasons:                  reasons,
 	}
@@ -294,6 +311,10 @@ func foldWatchdogMTTRRow(f watchdogSessionFold, mode string, now int64) Watchdog
 	if status != WatchdogMTTRRecovered && f.detectedAt > 0 && now > f.detectedAt {
 		silent = now - f.detectedAt
 	}
+	unproven := int64(0)
+	if status == WatchdogMTTRLaunchedUnproven && resumedAt > 0 && now > resumedAt {
+		unproven = now - resumedAt
+	}
 	return WatchdogMTTRRow{
 		Session:             f.session,
 		Status:              status,
@@ -302,6 +323,7 @@ func foldWatchdogMTTRRow(f watchdogSessionFold, mode string, now int64) Watchdog
 		ResumedAt:           resumedAt,
 		ProgressWitnessedAt: progressAt,
 		SilentSeconds:       silent,
+		UnprovenSeconds:     unproven,
 		Evidence:            evidence,
 	}
 }

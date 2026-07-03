@@ -199,7 +199,7 @@ func TestResumeWatchdogStatusJSONLaunchedNoProgressRed(t *testing.T) {
 	var out, errb bytes.Buffer
 	code := runResumeWatchdog(&out, &errb, []string{
 		"--status", "--json", "--live", "--no-refresh", "--reg-dir", reg,
-		"--silent-hours", "1", "--monotonic-ticks", "3",
+		"--silent-hours", "1000000", "--unproven-minutes", "1", "--monotonic-ticks", "0",
 	})
 	if code != 3 {
 		t.Fatalf("exit = %d, want red exit 3 (stderr: %s, stdout: %s)", code, errb.String(), out.String())
@@ -211,12 +211,18 @@ func TestResumeWatchdogStatusJSONLaunchedNoProgressRed(t *testing.T) {
 	if rep.Schema != resume.WatchdogStatusSchema || rep.Verdict != resume.WatchdogDrainRed || rep.Mode != "LIVE" {
 		t.Fatalf("report header = %+v, want schema/red/LIVE", rep)
 	}
+	if rep.UnprovenSeconds == 0 || !strings.Contains(strings.Join(rep.Reasons, "\n"), "unproven") {
+		t.Fatalf("report did not expose launched-unproven alarm: %+v", rep)
+	}
 	row := findWatchdogStatusRow(rep.MTTRSessions, "sid-stuck")
 	if row.Status != resume.WatchdogMTTRLaunchedUnproven {
 		t.Fatalf("sid-stuck row = %+v, want launched_unproven (all rows: %+v)", row, rep.MTTRSessions)
 	}
 	if row.ProgressWitnessedAt != 0 {
 		t.Fatalf("launch alone must not be progress: %+v", row)
+	}
+	if row.UnprovenSeconds == 0 {
+		t.Fatalf("launched-unproven row must carry its unproven age: %+v", row)
 	}
 }
 
