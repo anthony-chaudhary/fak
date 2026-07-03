@@ -54,3 +54,9 @@ func Reset() {}
 func Prefill(X []float32, P, nLayers, w, H int) (lastPre, kraw, kpost, v []float32, ok bool) {
 	return nil, nil, nil, nil, false
 }
+
+// LastGEMMGPUMs returns 0 in the stub build: with no Metal backend there is no command-buffer
+// GPU-execute window to report. The Apple-Silicon build records the real cb.GPUEndTime-GPUStartTime
+// of the most recent q4_k GEMM/GEMMGroup dispatch; the model side reads it under FAK_QPROFILE to
+// split its wall time into compute vs roundtrip, and safely treats 0 as "not measured here".
+func LastGEMMGPUMs() float64 { return 0 }

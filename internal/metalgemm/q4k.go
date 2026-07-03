@@ -20,18 +20,39 @@ void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y
 int  mg_q6k_upload(const unsigned char* raw, int out, int in);
 void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, float* y);
 int  mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int* down_wids, int n, const float* x, float* Ycat);
-void mg_q4k_gemm(int wid, const float* X, int P, float* Y);
-void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat, const int* yoff);
+void mg_q4k_gemm(int wid, const float* X, int P, float* Y, double* out_gpu_ms);
+void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat, const int* yoff, double* out_gpu_ms);
 void mg_q4k_set_use_mm(int on);
 void mg_q4k_reset(void);
 */
 import "C"
 
 import (
+	"math"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 )
+
+// lastGEMMGPUMs holds the on-GPU execution window (in milliseconds) of the most recent q4_k prefill
+// GEMM dispatch — a single GEMM (Q4KWeight.GEMM) or a whole group (GEMMGroup). It is the
+// cb.GPUEndTime-cb.GPUStartTime window the Metal kernel reports after waitUntilCompleted, i.e. the
+// true on-GPU compute time EXCLUDING the CPU-side encode/commit/sync/H2D round-trip. Stored as the
+// float64 bits so it is lock-free; read it with LastGEMMGPUMs immediately after the call. The value
+// is 0 until the first dispatch populates it. Package-level (not per-weight) because the model side
+// times one call at a time under FAK_QPROFILE and reads the split right after — a single store/load
+// is the smallest non-breaking shape that covers both the GEMM and the GEMMGroup path.
+var lastGEMMGPUMs atomic.Uint64
+
+// LastGEMMGPUMs returns the GPU-execute window (in ms) of the most recent Q4KWeight.GEMM or
+// GEMMGroup dispatch — the on-GPU compute time only (cb.GPUEndTime-cb.GPUStartTime), excluding the
+// CPU-side encode/commit/sync/H2D. Valid only immediately after the call returns; 0 if no dispatch
+// has run yet. The model side reads it right after a wall-timed GEMM (under FAK_QPROFILE) to split
+// its q4kTime into gpu_compute (this) vs roundtrip (wall - this). Reading Metal's already-completed
+// command-buffer timestamps is cheap, so the profile path costs one extra out-param write per call
+// and nothing when unused.
+func LastGEMMGPUMs() float64 { return math.Float64frombits(lastGEMMGPUMs.Load()) }
 
 // Q4KWeight is a handle to a raw q4_k weight matrix [Out, In] resident on the GPU. In must be
 // a multiple of 256 (the q4_k super-block size); the resident byte cost is Out*(In/256)*144.
@@ -251,12 +272,17 @@ func FusedMLPQ6DownBatch(gate, up []*Q4KWeight, down []*Q6KWeight, x, Ycat []flo
 }
 
 // GEMM computes Y[P, Out] = X[P, In] · Wᵀ (batched prefill GEMM). X and Y are f32 row-major;
-// Y must have length >= P*Out. Both slices are accessed only during the call.
+// Y must have length >= P*Out. Both slices are accessed only during the call. It also records the
+// dispatch's on-GPU execute window into the package-level LastGEMMGPUMs (readable immediately after
+// the call) so the model side can, under FAK_QPROFILE, split its wall time into compute vs
+// roundtrip. The recorded time is instrumentation only — it does not change the GEMM numerics.
 func (w *Q4KWeight) GEMM(X []float32, P int, Y []float32) {
 	if w == nil || w.id < 0 || P <= 0 || len(X) < P*w.In || len(Y) < P*w.Out {
 		return
 	}
-	C.mg_q4k_gemm(w.id, (*C.float)(unsafe.Pointer(&X[0])), C.int(P), (*C.float)(unsafe.Pointer(&Y[0])))
+	var gpuMs C.double
+	C.mg_q4k_gemm(w.id, (*C.float)(unsafe.Pointer(&X[0])), C.int(P), (*C.float)(unsafe.Pointer(&Y[0])), &gpuMs)
+	lastGEMMGPUMs.Store(math.Float64bits(float64(gpuMs)))
 }
 
 // GEMMGroup runs one batched prefill GEMM per weight in ws — all reading the SAME activation panel
@@ -285,8 +311,10 @@ func GEMMGroup(ws []*Q4KWeight, X []float32, P int) [][]float32 {
 	}
 	yoff[n] = C.int(off)
 	ycat := make([]float32, off)
+	var gpuMs C.double
 	C.mg_q4k_gemm_group(&wids[0], C.int(n), (*C.float)(unsafe.Pointer(&X[0])), C.int(P),
-		(*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0])
+		(*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0], &gpuMs)
+	lastGEMMGPUMs.Store(math.Float64bits(float64(gpuMs)))
 	out := make([][]float32, n)
 	o := 0
 	for i, w := range ws {

@@ -908,8 +908,11 @@ void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, cons
 }
 
 // mg_q4k_gemm computes Y[P, out] = X[P, in] · W[wid]^T (batched prefill GEMM). f32 in/out,
-// row-major; Y must hold P*out floats.
-void mg_q4k_gemm(int wid, const float* X, int P, float* Y) {
+// row-major; Y must hold P*out floats. out_gpu_ms is nullable: when non-NULL it receives the
+// command buffer's on-GPU execution window (cb.GPUEndTime - cb.GPUStartTime, in ms), valid after
+// waitUntilCompleted returns — the true compute time excluding the CPU-side encode/commit/sync/H2D
+// round-trip. Callers passing NULL are unaffected (the profile path is opt-in).
+void mg_q4k_gemm(int wid, const float* X, int P, float* Y, double* out_gpu_ms) {
     if (wid < 0 || wid >= gNQ4 || P <= 0) return;
     @autoreleasepool {
         Q4KW W = gQ4[wid];
@@ -947,6 +950,10 @@ void mg_q4k_gemm(int wid, const float* X, int P, float* Y) {
         [e endEncoding];
         [cb commit];
         [cb waitUntilCompleted];
+        // GPUStartTime/GPUEndTime are valid only after waitUntilCompleted returns (already-completed
+        // cb; reading them is cheap). This is the on-GPU execution window, excluding the CPU-side
+        // encode/commit/sync/H2D that dominates the q4k_metal prefill wall we are trying to split.
+        if (out_gpu_ms) *out_gpu_ms = (cb.GPUEndTime - cb.GPUStartTime) * 1000.0;
 
         memcpy(Y, yb.contents, (size_t)P * W.out * 4);
     }
@@ -959,7 +966,10 @@ void mg_q4k_gemm(int wid, const float* X, int P, float* Y) {
 // group and the GPU pipelines the n GEMMs — the prefill-wall lever (~7 per-weight submits per layer
 // collapse to ~2-3). Each weight i writes its own [P, out_i] token-major block into Ycat at element
 // offset yoff[i] (= P*Σ_{j<i} out_j; yoff[n] = total y elems). Every weight must share X's `in`.
-void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat, const int* yoff) {
+// out_gpu_ms is nullable: when non-NULL it receives the whole group's on-GPU execution window
+// (cb.GPUEndTime - cb.GPUStartTime, in ms), valid after waitUntilCompleted returns. NULL is inert.
+void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat, const int* yoff,
+                       double* out_gpu_ms) {
     if (n <= 0 || P <= 0) return;
     @autoreleasepool {
         int in = gQ4[wids[0]].in;
@@ -999,6 +1009,9 @@ void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Yca
         [e endEncoding];
         [cb commit];
         [cb waitUntilCompleted];
+        // On-GPU execution window for the whole group (valid post-wait; excludes CPU encode/commit/
+        // sync/H2D). Lets the model side split its wall-timed q4kTime into gpu_compute vs roundtrip.
+        if (out_gpu_ms) *out_gpu_ms = (cb.GPUEndTime - cb.GPUStartTime) * 1000.0;
 
         memcpy(Ycat, yb.contents, (size_t)ytot * 4);
     }
