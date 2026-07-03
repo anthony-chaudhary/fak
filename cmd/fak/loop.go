@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -22,6 +23,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/repoguard"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
+	"github.com/anthony-chaudhary/fak/internal/slackoutbox"
+	"github.com/anthony-chaudhary/fak/internal/slackwire"
 )
 
 func cmdLoop(argv []string) { os.Exit(runLoop(os.Stdout, os.Stderr, argv)) }
@@ -303,6 +306,16 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
+	// Live run card (#2263, epic #2259): when a dispatch channel resolves, the
+	// channel sees the run START as one card line now; the SAME message is edited
+	// into the witnessed verdict when the run ends. Best-effort like the rest of
+	// the Slack surface — a nil card means unarmed/unavailable, never a failed run.
+	card := openDispatchRunCard(stderr, *dispatchChannel, *dispatchToken, dispatchpost.Result{
+		LoopID:  *loopID,
+		RunID:   *runID,
+		Command: filepath.Base(cmdArgs[0]),
+	})
+
 	exitCode, durationMS, fatal := loopRunChild(stdout, stderr, childArgv, loopRunChildCtx{
 		ledger:    *ledger,
 		loopID:    *loopID,
@@ -321,7 +334,7 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 	// a resolved channel (or --notify-slack) arms it, and any failure is reported to
 	// stderr without changing the run's exit code — the dispatch's result must stand
 	// on its own even if Slack is unreachable.
-	postDispatchResult(stderr, *notifySlack, *dispatchChannel, *dispatchToken,
+	postDispatchResult(stderr, *notifySlack, *dispatchChannel, *dispatchToken, card,
 		dispatchpost.Result{
 			LoopID:     *loopID,
 			RunID:      *runID,
@@ -1336,19 +1349,80 @@ func formatLoopTime(ts int64) string {
 	return time.Unix(0, ts).UTC().Format(time.RFC3339)
 }
 
-// postDispatchResult posts a witnessed dispatch-result card to the dispatch Slack
-// channel when a `fak loop run` dispatch ends. It is the wire that turns ongoing
-// background dispatch into a Slack-visible result: the run's outcome (exit code,
-// duration) PLUS the git HEAD delta it actually landed (the witness) become one
-// channel post, so a slow nightly/cron dispatch reports what it did without anyone
-// tailing the ledger.
+// dispatchAPIBase overrides the Slack API base URL for the run-card wire —
+// the test seam that points the drain at an httptest fake. "" = live Slack.
+var dispatchAPIBase = ""
+
+// dispatchCardWire builds the run-card drain transport on the dispatch token
+// (falling back to the shared scoreboard token, like the legacy post).
+func dispatchCardWire(tokenOverride string) (*slackwire.Client, error) {
+	tok := tokenOverride
+	if tok == "" {
+		tok = dispatchpost.ResolveToken()
+	}
+	if tok == "" {
+		return nil, fmt.Errorf("no dispatch bot token: set FAK_DISPATCH_TOKEN or FAK_SCOREBOARD_TOKEN")
+	}
+	var opts []slackwire.Option
+	if dispatchAPIBase != "" {
+		opts = append(opts, slackwire.WithAPIBase(dispatchAPIBase))
+	}
+	return slackwire.New(tok, opts...), nil
+}
+
+// drainDispatchCard runs one best-effort outbox drain so the card's enqueued
+// intents reach Slack now. A failure leaves the rows durably spooled for the
+// next `fak slack outbox drain` — reported, never fatal.
+func drainDispatchCard(stderr io.Writer, card *dispatchpost.RunCard, tokenOverride string) {
+	wire, err := dispatchCardWire(tokenOverride)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak loop run: card drain skipped (rows stay spooled): %v\n", err)
+		return
+	}
+	if _, err := card.Outbox.Drain(ctx(), wire, slackoutbox.DrainOpts{Root: "."}); err != nil && err != slackoutbox.ErrDrainBusy {
+		fmt.Fprintf(stderr, "fak loop run: card drain: %v\n", err)
+	}
+}
+
+// openDispatchRunCard arms the live run card (#2263) when a dispatch channel
+// resolves: it opens (or, after a restart, resumes) the run's card over the
+// durable outbox spool, enqueues the start post, and drains once so the channel
+// sees the run begin. nil means unarmed (no channel) or unavailable (reported);
+// the dispatch itself is never affected.
+func openDispatchRunCard(stderr io.Writer, channelOverride, tokenOverride string, res dispatchpost.Result) *dispatchpost.RunCard {
+	ch := channelOverride
+	if ch == "" {
+		ch = dispatchpost.ResolveChannel()
+	}
+	if ch == "" {
+		return nil
+	}
+	card, err := dispatchpost.OpenRunCard(resolveOutboxDir(), res.LoopID, res.RunID)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak loop run: run card unavailable: %v\n", err)
+		return nil
+	}
+	if err := card.Start(ch, res); err != nil {
+		fmt.Fprintf(stderr, "fak loop run: run card start: %v\n", err)
+		return nil
+	}
+	drainDispatchCard(stderr, card, tokenOverride)
+	return card
+}
+
+// postDispatchResult reports a finished dispatch to the dispatch Slack channel.
+// With an armed run card (#2263) it FINALIZES the card: the start message is
+// edited in place into the witnessed verdict (commit SHA + ship-stamp grepped
+// from the HEAD delta, verify source, exit code) and the full result body rides
+// in the card's thread — one channel line per run. Without a card (or when the
+// card path fails) it falls back to the legacy terminal post.
 //
 // It is gated and best-effort. The post is attempted when --notify-slack is set OR a
 // dispatch channel resolves from the environment/.env.slack.local; otherwise it is a
 // silent no-op so an unconfigured box runs the dispatch normally. Any error (no
 // channel under --notify-slack, no token, a Slack API failure) is reported to stderr
 // and NEVER changes the run's exit code — the dispatch result stands on its own.
-func postDispatchResult(stderr io.Writer, notify bool, channelOverride, tokenOverride string, res dispatchpost.Result) {
+func postDispatchResult(stderr io.Writer, notify bool, channelOverride, tokenOverride string, card *dispatchpost.RunCard, res dispatchpost.Result) {
 	ch := channelOverride
 	if ch == "" {
 		ch = dispatchpost.ResolveChannel()
@@ -1366,6 +1440,22 @@ func postDispatchResult(stderr io.Writer, notify bool, channelOverride, tokenOve
 	res.Commits = dispatchpost.CommitsBetween(ctx(), "", res.HeadBefore, res.HeadAfter)
 	if res.Source == "" {
 		res.Source = defaultSource()
+	}
+
+	if card != nil {
+		err := card.Finalize(res)
+		if errors.Is(err, slackoutbox.ErrCardNotPosted) {
+			// The start post never drained (e.g. Slack was down at run start):
+			// deliver it now, then finalize against the resolved ts.
+			drainDispatchCard(stderr, card, tokenOverride)
+			err = card.Finalize(res)
+		}
+		if err == nil {
+			drainDispatchCard(stderr, card, tokenOverride)
+			fmt.Fprintf(stderr, "fak loop run: dispatch run card finalized in %s\n", ch)
+			return
+		}
+		fmt.Fprintf(stderr, "fak loop run: run card finalize failed (%v); falling back to direct post\n", err)
 	}
 
 	tok := tokenOverride
