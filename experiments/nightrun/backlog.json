@@ -24,5 +24,44 @@
     "recheck_days": 14,
     "timeout_sec": 1800,
     "doc": "docs/nightrun/MAC-OVERNIGHT-PLAN-2026-06-28.md"
+  },
+  {
+    "id": "witness-qwen36-27b-metal-decode-longgen",
+    "title": "Qwen3.6-27B Q4_K_M warm single-stream decode tok/s at LONG generations (256/512 tok) in fak's own Metal kernel (engine=inkernel, --metal). Extends the collected 16/32/64/128 curve (which climbed 1.63->1.84 tok/s) to confirm where the prefill-amortization asymptote flattens. The MAC-OVERNIGHT-PLAN 'next conditions' item #1.",
+    "source": "overlay",
+    "value": "witness",
+    "requires": ["metal", "weights"],
+    "manual": true,
+    "run": "On the Mac metal node (a -tags fakmetal fak build): FAK_Q4K=1 FAK_GATEWAY_KEY=$(cat ~/.fak-gateway-key) fak serve --metal --gguf <mac>/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf --model qwen3.6-27b --addr $FAK_MAC_GATEWAY --require-key-env FAK_GATEWAY_KEY --context-budget-tokens 8192  then curl /v1/chat/completions with prompt_tokens=25 max_tokens={256,512} (finish=length) and record completion_tokens/time_total. WARM the serve first (discard any cold first request). Real mac host/user resolve from the gitignored fak-mac.local.ps1 (see docs/fak/scrubbing-real-values.md).",
+    "acceptance": "a recorded warm decode tok/s at 256 and 512 tok for Qwen3.6-27B Q4_K_M on the Mac Metal node, labelled WITNESSED (fak own kernel), plotted against the existing 16/32/64/128 points to show the asymptote",
+    "recheck_days": 14,
+    "timeout_sec": 1800,
+    "doc": "docs/nightrun/MAC-OVERNIGHT-PLAN-2026-06-28.md"
+  },
+  {
+    "id": "witness-qwen36-27b-metal-prefill-sweep",
+    "title": "Qwen3.6-27B Q4_K_M PREFILL (prompt-eval) tok/s vs prompt length in fak's own Metal kernel, plus the resident-prefill A/B (default resident-on vs FAK_METAL_RESIDENT=0, internal/model/metal_prefill.go). A dimension never measured on the Mac node: the upload + GPU round-trip prefill cost. The MAC-OVERNIGHT-PLAN 'next conditions' items #2 (prefill sweep) and #3 (FAK_METAL_RESIDENT resident-forward).",
+    "source": "overlay",
+    "value": "frontier",
+    "requires": ["metal", "weights"],
+    "manual": true,
+    "run": "On the Mac metal node (a -tags fakmetal fak build): FAK_Q4K=1 FAK_GATEWAY_KEY=$(cat ~/.fak-gateway-key) fak serve --metal --gguf <mac>/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf --model qwen3.6-27b --addr $FAK_MAC_GATEWAY --require-key-env FAK_GATEWAY_KEY --context-budget-tokens 8192  then curl /v1/chat/completions with prompt_tokens={128,512,2048,4096} at max_tokens=16 and record prompt-eval (prefill) tok/s = prompt_tokens/prefill_time. A/B ARM: re-launch the serve with FAK_METAL_RESIDENT=0 and repeat to isolate the resident-prefill speedup. WARM first. Real mac host/user resolve from the gitignored fak-mac.local.ps1.",
+    "acceptance": "a recorded prefill tok/s at prompt_tokens 128/512/2048/4096 for Qwen3.6-27B Q4_K_M on the Mac Metal node (resident default), and the FAK_METAL_RESIDENT=0 A/B arm, in an experiments artifact labelled WITNESSED (fak own kernel)",
+    "recheck_days": 14,
+    "timeout_sec": 1800,
+    "doc": "docs/nightrun/MAC-OVERNIGHT-PLAN-2026-06-28.md"
+  },
+  {
+    "id": "witness-qwen36-27b-metal-2stream",
+    "title": "Qwen3.6-27B Q4_K_M 2-stream concurrency point in fak's own Metal kernel: aggregate decode tok/s of two concurrent completions vs the single-stream warm baseline, to measure concurrency scaling on the 36GB Mac node. A dimension never measured here. The MAC-OVERNIGHT-PLAN 'next conditions' item #4.",
+    "source": "overlay",
+    "value": "frontier",
+    "requires": ["metal", "weights"],
+    "manual": true,
+    "run": "On the Mac metal node (a -tags fakmetal fak build): FAK_Q4K=1 FAK_GATEWAY_KEY=$(cat ~/.fak-gateway-key) fak serve --metal --gguf <mac>/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf --model qwen3.6-27b --addr $FAK_MAC_GATEWAY --require-key-env FAK_GATEWAY_KEY --context-budget-tokens 8192  then fire 2 concurrent POST /v1/chat/completions (prompt_tokens=25 max_tokens=128 each) and record aggregate completion_tokens/wall vs the single-stream warm decode. WARM first. Watch KV: 2 streams double KV residency under the 8192 budget. Real mac host/user resolve from the gitignored fak-mac.local.ps1.",
+    "acceptance": "a recorded 2-stream aggregate decode tok/s and the per-stream vs single-stream ratio for Qwen3.6-27B Q4_K_M on the Mac Metal node, labelled WITNESSED (fak own kernel)",
+    "recheck_days": 14,
+    "timeout_sec": 1800,
+    "doc": "docs/nightrun/MAC-OVERNIGHT-PLAN-2026-06-28.md"
   }
 ]

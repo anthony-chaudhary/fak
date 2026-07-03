@@ -64,8 +64,22 @@ flagged separately, never folded into the steady-state.
 
 ## Resume / next conditions
 
-The decode-length curve is now characterized. Genuinely-new Mac conditions for a later night:
-warm steady-state at longer generations (256/512 tok), a prefill-length sweep (the upload +
-GPU round-trip cost the prefill-witness memory describes), `FAK_METAL_RESIDENT` resident-forward
-if available, and a 2-stream concurrency point. Re-witness cadence: 14 days (the backlog task
+The decode-length curve is now characterized. The genuinely-new Mac conditions are each
+**enqueued** as a `fak nightrun` task in the operator overlay
+[`experiments/nightrun/backlog.json`](../../experiments/nightrun/backlog.json) — so the next Mac
+session's `fak nightrun next` surfaces the highest-novelty one with the exact command, and a
+collected artifact closes the loop:
+
+| next condition | enqueued task id | value |
+|---|---|---|
+| warm steady-state at longer generations (256/512 tok) | `witness-qwen36-27b-metal-decode-longgen` | witness |
+| prefill-length sweep (upload + GPU round-trip cost) **and** `FAK_METAL_RESIDENT` resident-forward A/B | `witness-qwen36-27b-metal-prefill-sweep` | frontier |
+| 2-stream concurrency point | `witness-qwen36-27b-metal-2stream` | frontier |
+
+The prefill sweep folds in the resident-forward bullet: `FAK_METAL_RESIDENT` gates the resident
+*prefill* path (`internal/model/metal_prefill.go`, default on; `=0` disables it), so the sweep's
+A/B arm isolates its contribution — whereas `FAK_METAL_DECODE`'s resident *decode* path declines
+MoE and so does not apply to Qwen3.6-27B. All three are `manual: true` (they need the gateway key
+and host resolution) and require `metal` + `weights`, so they are only ever surfaced feasible on
+the Mac node itself. Re-witness cadence: 14 days each (alongside the original decode-curve task
 `witness-qwen36-27b-metal-decode`).
