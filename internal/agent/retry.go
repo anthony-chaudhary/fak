@@ -218,6 +218,154 @@ func authRefreshWindow() time.Duration {
 	return defaultAuthRefreshWindow
 }
 
+// A 403 has TWO populations that a bare status cannot tell apart. The PERMANENT one — the
+// credential genuinely lacks entitlement for this model/org/region — is terminal: retrying
+// only stalls the turn before the same "run /login" answer. The TRANSIENT one — a
+// server-side abuse/capacity gate that trips under a burst and clears in seconds (the
+// 2026-07-03 gem8 storm: five sessions 403'd for ~9 minutes, then the SAME pinned token
+// succeeded on the next request with no local change) — is exactly as recoverable as a 529,
+// and today dies the same terminal death, dropping the live session into a spurious /login.
+//
+// So a 403 gets its OWN bounded retry arm, deliberately NOT folded into retryableStatus:
+// that family inherits the multi-HOUR budget (plannerRetryBudget), which is right for an
+// overload but catastrophic for a permanent denial — it would wedge a truly-unentitled turn
+// for hours. Instead a 403 retries a FEW times across a SHORT window: long enough to ride
+// out a transient abuse-gate flap, short enough that a permanent denial surfaces promptly
+// with the real answer. Bounded by BOTH a max attempt count and a total window, whichever
+// trips first; a permanent 403 exhausts the small budget in seconds and surfaces terminally.
+
+// defaultForbiddenRetryWindow is the total wall-clock a transient-403 recovery will keep
+// retrying before surfacing the 403 terminally. Sized to the observed transient-403 flap
+// (seconds-to-low-minutes), NOT the hours a rate-limit window can run: a permanent
+// entitlement 403 must surface fast with the actionable "run /login", so this stays short.
+// FAK_FORBIDDEN_RETRY_WINDOW overrides it; 0 disables the 403 retry arm entirely (restore
+// the historical terminal-on-first-403 behavior).
+const defaultForbiddenRetryWindow = 30 * time.Second
+
+// maxForbiddenRetryWindow clamps FAK_FORBIDDEN_RETRY_WINDOW so a fat-fingered value cannot
+// turn a permanent 403 into a multi-minute stall before the real "run /login" answer. The
+// caller's context is still the real ceiling under it.
+const maxForbiddenRetryWindow = 2 * time.Minute
+
+// forbiddenRetryMaxAttempts caps the number of 403 retries independently of the window, so
+// even a zero-Retry-After 403 answered instantly cannot spin: at most this many re-sends,
+// then surface. Combined with the window (whichever trips first), a transient flap gets a
+// handful of paced probes and a permanent denial gives up in well under the window.
+const forbiddenRetryMaxAttempts = 5
+
+// forbiddenRetryWindow resolves the transient-403 recovery window, defaulting to
+// defaultForbiddenRetryWindow and honoring FAK_FORBIDDEN_RETRY_WINDOW (any Go duration),
+// clamped to [0, maxForbiddenRetryWindow]. A value of 0 disables the 403 retry arm.
+func forbiddenRetryWindow() time.Duration {
+	if v := os.Getenv("FAK_FORBIDDEN_RETRY_WINDOW"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+			if d > maxForbiddenRetryWindow {
+				return maxForbiddenRetryWindow
+			}
+			return d
+		}
+	}
+	return defaultForbiddenRetryWindow
+}
+
+// forbiddenRetryWait is the paced backoff between 403 re-sends: the same jittered exponential
+// schedule the transient-status family uses, so a fleet of sessions hitting the same abuse
+// gate does not stampede it the instant it might clear. Reuses backoffDuration's floor
+// (600ms) so the small attempt budget spans the window rather than firing all at once.
+func forbiddenRetryWait(attempt int) time.Duration {
+	return jitter(backoffDuration(attempt))
+}
+
+// forbiddenBodyIsPermanent reports whether a 403 body carries an upstream signature that marks
+// the denial as PERMANENT — a hard entitlement/permission refusal a retry cannot fix — so the
+// transient recovery arm skips it and surfaces the actionable answer immediately. It matches
+// only conservative, unambiguous signatures (the provider naming permission/entitlement/region
+// as the cause); anything it does not recognize is treated as POSSIBLY-transient and gets the
+// bounded retry, because the storm's whole lesson is that an unlabeled 403 may well clear. The
+// match is lowercase-substring over the truncated body, so it is robust to surrounding JSON.
+func forbiddenBodyIsPermanent(body []byte) bool {
+	b := strings.ToLower(string(body))
+	for _, sig := range []string{
+		"permission_error",     // provider typed a hard permission denial
+		"not have access",      // "...does not have access to model..."
+		"does not have access", // same, explicit
+		"not entitled",         // entitlement refusal
+		"not allowed to use",   // model/feature not on the plan
+		"unsupported_region",   // geographic entitlement — a retry never clears it
+		"region is not",        // "...region is not supported/allowed..."
+	} {
+		if strings.Contains(b, sig) {
+			return true
+		}
+	}
+	return false
+}
+
+// forbiddenRetryDecision is the closed verdict of one 403 recovery step.
+type forbiddenRetryDecision int
+
+const (
+	// forbiddenRetryGiveUp: the denial is permanent (body signature) or the bounded budget is
+	// spent — surface the 403 terminally with the actionable answer.
+	forbiddenRetryGiveUp forbiddenRetryDecision = iota
+	// forbiddenRetryGo: a transient 403 within budget — the arm has already slept its paced wait
+	// and the caller should re-send.
+	forbiddenRetryGo
+)
+
+// forbiddenRetryState bounds a single upstream call's 403 recovery arm — the transient-403
+// analogue of the 401 auth-refresh window. It is SELF-CONTAINED: step() decides whether to
+// retry, and when it does it sleeps its OWN short paced wait (never the 429/5xx hour-budget
+// backoff), so a permanent entitlement 403 exhausts a seconds-scale budget promptly instead of
+// inheriting the multi-hour transient window. Zero value is ready to use; the window/attempt
+// bounds are resolved lazily on first use so a test env override is picked up per call.
+type forbiddenRetryState struct {
+	tries    int       // 403 retries already spent by this arm
+	deadline time.Time // total-window bound; zero until the first step arms it
+	max      int       // attempt bound; zero until the first step arms it
+	window   time.Duration
+	fired    bool // whether this arm ever decided to retry (drives the exhausted notify)
+}
+
+// step is called on each 403 for one upstream call. It returns forbiddenRetryGo after sleeping a
+// paced wait when the denial looks transient and the bounded budget (window AND attempts) has
+// room, or forbiddenRetryGiveUp when the body marks a permanent denial, the budget is spent, or
+// the context is cancelled. The ctx cancel path returns give-up promptly so an abandoned turn
+// never blocks here.
+func (s *forbiddenRetryState) step(ctx context.Context, body []byte) forbiddenRetryDecision {
+	if s.deadline.IsZero() {
+		s.window = forbiddenRetryWindow()
+		s.deadline = time.Now().Add(s.window)
+		s.max = forbiddenRetryMaxAttempts
+	}
+	// A disabled arm (FAK_FORBIDDEN_RETRY_WINDOW=0) or a permanent-signature body never retries.
+	if s.window <= 0 || forbiddenBodyIsPermanent(body) {
+		return forbiddenRetryGiveUp
+	}
+	if s.tries >= s.max || !time.Now().Before(s.deadline) {
+		return forbiddenRetryGiveUp
+	}
+	wait := forbiddenRetryWait(s.tries + 1)
+	if rem := time.Until(s.deadline); rem < wait {
+		wait = rem // never sleep past the window
+	}
+	if wait <= 0 {
+		return forbiddenRetryGiveUp
+	}
+	if err := sleepCtx(ctx, wait); err != nil {
+		return forbiddenRetryGiveUp // context cancelled/expired: do not keep an abandoned turn waiting
+	}
+	s.tries++
+	s.fired = true
+	return forbiddenRetryGo
+}
+
+// attempted reports whether this arm ever decided to retry, so the caller fires the "exhausted"
+// notify only when a recovery was genuinely attempted-and-spent — not on a first-403 give-up
+// (permanent signature, or the arm disabled), which is a plain terminal denial, not a self-heal
+// that ran out of budget.
+func (s *forbiddenRetryState) attempted() bool { return s.fired }
+
 // maxBackoff caps a single exponential backoff wait. The attempt²×600ms schedule would
 // otherwise grow without bound as the attempt budget rises; the cap keeps any ONE wait
 // reasonable while still letting the OVERALL retry window stretch across many attempts.

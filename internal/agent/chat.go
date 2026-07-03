@@ -847,6 +847,19 @@ type HTTPPlanner struct {
 	// closure that bumps a per-outcome counter and prints a "fak-turn auth-refresh" line. nil =
 	// behavior byte-for-byte unchanged (the self-heal itself is independent of the hook).
 	AuthRefreshNotify func(outcome string, attempt int)
+
+	// ForbiddenRetryNotify, when non-nil, is called when a 403's bounded recovery arm resolves —
+	// separately from RetryNotify and AuthRefreshNotify so a transient-permission flap is never
+	// conflated with a 429/5xx backoff or a 401 token rotation (three different causes, three
+	// different metrics). outcome is "recovered" when a retry within the short window returned
+	// 200 (a transient abuse/capacity gate cleared and the live session healed in place instead
+	// of dropping into a spurious /login), or "exhausted" when the window/attempts elapsed still
+	// 403ing (the denial is the permanent entitlement kind and now surfaces with the actionable
+	// answer). It is the observability hook for the otherwise-INVISIBLE transient-403 event that
+	// the 2026-07-03 gem8 storm made visible. The gateway sets it to a closure that bumps a
+	// per-outcome counter and prints a "fak-turn forbidden-retry" line. nil = behavior
+	// byte-for-byte unchanged (the recovery arm itself is independent of the hook).
+	ForbiddenRetryNotify func(outcome string, attempt int)
 }
 
 // NewHTTPPlanner builds a live planner with a bounded timeout. The per-request
@@ -1026,6 +1039,11 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 	// re-read it fresh and retry. triedAuthRefresh caps that at a single extra attempt so a
 	// genuinely-bad credential still fails fast instead of looping.
 	triedAuthRefresh := false
+	// A 403 gets a bounded, SEPARATE recovery arm (see retry.go): a transient abuse/capacity
+	// gate clears in seconds, so retry a few times across a short window before surfacing the
+	// 403 terminally. fbState tracks that arm's own attempt count + deadline, independent of the
+	// 429/5xx budget so a permanent entitlement 403 can never inherit the multi-hour window.
+	var fbState forbiddenRetryState
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			// Surface the retry BEFORE the silent backoff sleep, then wait; when the TIME
@@ -1105,7 +1123,33 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 				// gate a second 401, but the window already elapsed so we fail now).
 				notifyAuthRefresh(p, AuthRefreshExhausted, attempt)
 			}
+			// A 403's bounded recovery arm: retry a transient abuse/capacity denial a few times
+			// across a short window before surfacing it. The arm is SELF-CONTAINED — it sleeps its
+			// own short paced wait (never the 429/5xx hour-budget backoff) and rewinds attempt so
+			// the probe does not consume the transient attempt budget. On its own exhaustion
+			// (window or attempts spent) or a body the upstream marks as a hard entitlement denial,
+			// it falls through to the terminal return with the actionable /login answer. The
+			// "recovered" notify is fired NOT here but at loop top on the next 200 (see below), so
+			// it reports a CONFIRMED heal, never an optimistic one; here we only note give-up.
+			if resp.StatusCode == http.StatusForbidden {
+				if fbState.step(ctx, raw) == forbiddenRetryGo {
+					attempt-- // uncounted against the 429/5xx budget; the arm bounds itself
+					continue
+				}
+				if fbState.attempted() {
+					// The arm retried and the window/attempts elapsed still 403ing: the denial is
+					// the permanent kind. Report the spent self-heal so it is not a silent give-up.
+					notifyForbiddenRetry(p, ForbiddenRetryExhausted, attempt)
+				}
+			}
 			return nil, &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 400), RetryAfter: resp.Header.Get("Retry-After")}
+		}
+		// A 200 after the 403 arm fired is a CONFIRMED transient-403 self-heal: the abuse/capacity
+		// gate cleared and the live session healed in place instead of dropping into a spurious
+		// /login. Report it once (fired is one-way, so a later success cannot double-count).
+		if fbState.attempted() {
+			notifyForbiddenRetry(p, ForbiddenRetryRecovered, attempt)
+			fbState.fired = false
 		}
 		comp, err := call.adapter.ParseResponse(raw)
 		if err != nil {

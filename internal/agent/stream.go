@@ -100,6 +100,27 @@ func notifyAuthRefresh(p *HTTPPlanner, outcome string, attempt int) {
 	}
 }
 
+// Forbidden-retry outcomes reported to HTTPPlanner.ForbiddenRetryNotify. A 403's bounded
+// recovery arm either RECOVERED (a retry within the short window returned 200, so a transient
+// abuse/capacity gate cleared and the live session healed in place instead of dropping into a
+// spurious /login) or was EXHAUSTED (the window/attempts elapsed still 403ing, so the denial
+// is the permanent entitlement kind and now surfaces with the actionable answer). Counted
+// apart so an operator can tell a self-healed 403 flap from a session dying on a real
+// permission denial — the same recovered/exhausted split the 401 self-heal already draws.
+const (
+	ForbiddenRetryRecovered = "recovered"
+	ForbiddenRetryExhausted = "exhausted"
+)
+
+// notifyForbiddenRetry fires the planner's ForbiddenRetryNotify hook if set. Centralized so the
+// three 403 recovery sites (Complete, CompleteStream, StreamAnthropicRaw) report identically,
+// mirroring notifyAuthRefresh.
+func notifyForbiddenRetry(p *HTTPPlanner, outcome string, attempt int) {
+	if p != nil && p.ForbiddenRetryNotify != nil {
+		p.ForbiddenRetryNotify(outcome, attempt)
+	}
+}
+
 // refreshAPIKeyWait is refreshAPIKey with a bounded grace window for the RE-LOGIN race.
 // A 401 on the rotating-subscription path means the token fak just sent is dead; the fix
 // is to send the rotated-in replacement. But when the token expired, the upstream 401s the
@@ -351,6 +372,7 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 	lastRetryAfter := ""
 	lastCapWait := "" // classified account-cap wait (#1362): toward the named reset when Retry-After is absent
 	triedAuthRefresh := false
+	var fbState forbiddenRetryState // bounded transient-403 recovery arm (see retry.go), mirrors Complete
 	var resp *http.Response
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
@@ -380,6 +402,11 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 			continue         // lastStatusErr left intact
 		}
 		if r.StatusCode == http.StatusOK {
+			// A 200 after the 403 arm fired is a CONFIRMED transient-403 self-heal (see Complete).
+			if fbState.attempted() {
+				notifyForbiddenRetry(p, ForbiddenRetryRecovered, attempt)
+				fbState.fired = false
+			}
 			resp = r
 			break
 		}
@@ -414,6 +441,17 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 				continue
 			}
 			notifyAuthRefresh(p, AuthRefreshExhausted, attempt)
+		}
+		// A 403's bounded transient-recovery arm (self-contained short paced wait; see Complete):
+		// retry a transient abuse/capacity denial a few times before surfacing it terminally.
+		if r.StatusCode == http.StatusForbidden {
+			if fbState.step(ctx, raw) == forbiddenRetryGo {
+				attempt--
+				continue
+			}
+			if fbState.attempted() {
+				notifyForbiddenRetry(p, ForbiddenRetryExhausted, attempt)
+			}
 		}
 		return nil, &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
 	}

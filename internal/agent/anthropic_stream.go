@@ -91,6 +91,7 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	// the loop; only the successful 200 escapes to the SSE reader below.
 	authRefreshable := apiKey == "" && p.APIKeyFunc != nil
 	triedAuthRefresh := false
+	var fbState forbiddenRetryState // bounded transient-403 recovery arm (see retry.go), mirrors Complete
 	maxAttempts, deadline, budgetOn := retryBounds(time.Now())
 	var lastErr error
 	// lastStatusErr: see Complete (#1358) — the last real-HTTP-status error, never cleared
@@ -145,6 +146,11 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 			continue         // lastStatusErr left intact
 		}
 		if r.StatusCode == http.StatusOK {
+			// A 200 after the 403 arm fired is a CONFIRMED transient-403 self-heal (see Complete).
+			if fbState.attempted() {
+				notifyForbiddenRetry(p, ForbiddenRetryRecovered, attempt)
+				fbState.fired = false
+			}
 			resp = r
 			break
 		}
@@ -179,6 +185,16 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 				continue
 			}
 			notifyAuthRefresh(p, AuthRefreshExhausted, attempt)
+		}
+		// A 403's bounded transient-recovery arm (self-contained short paced wait; see Complete).
+		if r.StatusCode == http.StatusForbidden {
+			if fbState.step(ctx, raw) == forbiddenRetryGo {
+				attempt--
+				continue
+			}
+			if fbState.attempted() {
+				notifyForbiddenRetry(p, ForbiddenRetryExhausted, attempt)
+			}
 		}
 		return &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
 	}
