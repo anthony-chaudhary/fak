@@ -66,3 +66,17 @@ func reasonOrKind(v WireVerdict) string {
 	}
 	return v.Kind
 }
+
+// remedyNote renders the refusing rule's sanctioned alternative
+// (arg_rules[].fix, carried as WireVerdict.Detail["fix"]) so the refusal and
+// the recommended path arrive in the same breath — "great, it refused the bad
+// call, but then WHAT?" answered in-band. Empty when the rule declares no fix.
+// The generic "choose an allowed alternative" trailer stays; this names the
+// alternative for rules whose author declared one.
+func remedyNote(a ToolAdjudication) string {
+	fix := a.Verdict.Detail["fix"]
+	if fix == "" {
+		return ""
+	}
+	return "sanctioned alternative: " + fix
+}
