@@ -95,6 +95,26 @@ The rule of thumb: reproduce the defect as a captured artifact *first*, then mak
 clean. If you cannot capture it, you cannot prove you fixed it — say `not yet` with the missing
 witness, don't claim a fix.
 
+## New work defaults: spine first, then fan out
+
+Two defaults fire for **any new unit of work** (feature, leaf, verb, demo, process change) —
+full doctrine in [`docs/spine-first-defaults.md`](docs/spine-first-defaults.md), agent
+checklist in the `/spine-fanout` skill:
+
+1. **Ship the minimal WORKING end-to-end spine first, in the same session the work starts** —
+   the smallest runnable path through the real seam (LCD demo with `-selfcheck` for a
+   user-facing surface; a test driving the real object plus one captured live run for a
+   library/verb). If that is not achievable this session with high confidence, **file the
+   spine itself as the first issue** (`gen/now`, milestoned, missing witness named) — a spine
+   is never silently deferred.
+2. **File the follow-on backlog at creation time (3..50+ issues)** — the moment a spine
+   ships, run `fak issue fanout --title T --leaf L --spine <sha|cmd|doc> --json` to expand
+   the QA / dogfood / productization / observability / integration / docs / release taxonomy
+   into contract-ready candidates (every one dispatchable under `fak issue contract`), then
+   file them with milestone + labels at creation, or wave-plan first via
+   `fak issue cohort --from-plan`. The verb refuses to plan without a spine witness — that
+   refusal is default 1 talking.
+
 ## Hard rules (these WILL bite an agent — they are enforced below the agent layer)
 
 **Default: ship.** Once the tree is green, **commit AND push** — don't wait to be asked.
