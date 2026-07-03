@@ -1,0 +1,31 @@
+name: Adoption story
+description: You ran fak or the DOS kernel on real work — tell us how it went.
+title: "[adoption] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Stories from real use are the most valuable feedback this project
+        gets — including the parts that didn't work. Rough notes are fine.
+  - type: textarea
+    id: setup
+    attributes:
+      label: What you ran
+      description: The setup in a sentence or two — how many agents/sessions, what kind of work, which pieces of fak/DOS you used.
+      placeholder: "Example: 3 Claude Code sessions on a shared trunk, using dos arbitrate for lane leases and dos verify to check each other's done claims."
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What worked, what didn't
+      description: The honest version. "Verify, don't trust" applies to our own success stories — if you quote numbers, say how they were measured, and label anything simulated as simulated.
+    validations:
+      required: true
+  - type: checkboxes
+    id: quoting
+    attributes:
+      label: Sharing
+      options:
+        - label: You may quote this story (attributed to my GitHub handle) in the project docs.
+          required: false

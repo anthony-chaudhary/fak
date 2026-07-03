@@ -1,0 +1,24 @@
+name: Feature request
+description: Propose an improvement to fak or the DOS trust kernel.
+title: "[feature] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A clear problem statement is the valuable part — a proposed design is
+        optional. "This refusal was confusing" or "I wanted X and had to
+        hand-roll it" are both great starts.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and where does it hurt today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution (optional)
+      description: If you have a shape in mind, sketch it. Alternatives welcome too.
+    validations:
+      required: false

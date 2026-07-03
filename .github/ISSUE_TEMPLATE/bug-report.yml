@@ -1,0 +1,32 @@
+name: Bug report
+description: Something broke, refused, or behaved differently than documented.
+title: "[bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! A one-line bug with a command to reproduce it
+        is a great issue — you don't need to fill in more than that.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you run, and what did you see?
+      placeholder: "Example: `fak commit --path docs/x.md -m \"...\"` refused with PATHSPEC_RACE even though the tree was clean."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      placeholder: "The commit lands, or the refusal names a reason I can act on."
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Version / environment
+      description: Output of `fak --version` (or the commit SHA), plus OS if relevant.
+      placeholder: "Example: fak v0.9.3, Windows 11 / WSL2"
+    validations:
+      required: false
