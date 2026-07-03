@@ -140,3 +140,11 @@ The contract is shipped green; the load-bearing properties are test-pinned in
 
 Run: `go test ./internal/memview/` (and `go test ./internal/architest/` for the
 tier/layering gate that admits the leaf).
+
+## Follow-on: the output-format axis
+
+[`CONCEPT-MEMORY-VIEW-FORMATS-2026-07-03.md`](CONCEPT-MEMORY-VIEW-FORMATS-2026-07-03.md)
+adds a third, orthogonal axis on top of this contract's Kind/taint axes: once a
+view is admitted and rendered, *how it is serialized* (markdown/JSON/TOON) is a
+separate, swappable, measurably-ablated choice (`memview.Surface` +
+`SweepFormats`), first consumed by `fak memory recall --format`/`--ablate-formats`.

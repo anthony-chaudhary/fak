@@ -63,7 +63,7 @@ func memoryUsage() {
       core image with --dir). Mutations are PROPOSED unless --apply is given.
 
   fak memory recall --intent STR [--store DIR] [--k N] [--budget BYTES] [--json]
-      the loop-turn orientation block (#2346 R1): run the loop-recall driver over
+      the loop-turn orientation block (#2346 R1): run a recall query over
       the markdown memory store (MEMORY.md + fact files; default: the committed
       mirror .claude/memory), re-verifying each note's concrete artifact claims
       at page-in — a stale note is WITHHELD with the failing claim named, a

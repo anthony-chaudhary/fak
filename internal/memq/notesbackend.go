@@ -232,39 +232,3 @@ func parseNoteMeta(raw string) (description, mtype string) {
 	}
 	return description, mtype
 }
-
-func init() {
-	// loop-recall — the loop-turn orientation query (#2346 R1): the top-K unsealed,
-	// untombstoned notes most relevant to the turn's intent, trimmed to a byte
-	// budget, rendered through the gated page-in (so a stale or secret-shaped note
-	// is refused, not rendered). Corpus-agnostic like every driver; the name
-	// documents the intended loop-turn-start use.
-	Register(Driver{
-		Name: "loop-recall",
-		Doc:  "budget-bounded top-K verified orientation block for a loop turn (stale notes refused at page-in)",
-		Build: func(p Params) Query {
-			k := p.K
-			if k <= 0 {
-				k = 5
-			}
-			budget := p.Budget
-			if budget <= 0 {
-				budget = 8192
-			}
-			return Query{
-				Intent: p.Intent,
-				Ops: []Op{
-					{Kind: OpScan},
-					{Kind: OpFilter, Pred: &Pred{Op: PredAnd, Args: []Pred{
-						{Op: PredEq, Field: "sealed", Value: "false"},
-						{Op: PredEq, Field: "tombstoned", Value: "false"},
-					}}},
-					{Kind: OpRank, By: RankRelevance, Desc: true},
-					{Kind: OpLimit, K: k},
-					{Kind: OpBudget, Bytes: budget},
-					{Kind: OpRender},
-				},
-			}
-		},
-	})
-}

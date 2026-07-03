@@ -303,6 +303,7 @@ autopick = [
   "slackwire",
   "slackoutbox",
   "resume", # internal/resume leaf (the crash-resume decision kernel), see [lanes].concurrent note
+  "logvault", # #2449: internal/logvault leaf (central log-vault capture/verify), see [lanes].concurrent note
   # new-leaf:lane
 ]
 
@@ -477,6 +478,7 @@ toolprocgate = ["internal/toolprocgate/**"]
 slackwire = ["internal/slackwire/**"]
 slackoutbox = ["internal/slackoutbox/**"]
 resume = ["internal/resume/**"] # crash-resume decision kernel; cmd/fak resume_*.go shims stay in the `cmd` lane
+logvault = ["internal/logvault/**"] # #2449: internal/logvault leaf (central log-vault capture/verify); cmd/fak/logvault.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]

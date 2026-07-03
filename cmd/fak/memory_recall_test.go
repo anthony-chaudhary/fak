@@ -103,3 +103,75 @@ func TestMemoryRecall_missingStoreFailsOpen(t *testing.T) {
 		t.Errorf("empty store must say so; got:\n%s", out.String())
 	}
 }
+
+// --list-formats prints the registered memview formats and exits, independent of
+// any store — this is the "what can I surface this in" discovery seam.
+func TestMemoryRecall_listFormats(t *testing.T) {
+	var out, errb strings.Builder
+	code := runMemoryRecall(&out, &errb, []string{"--list-formats"})
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, errb.String())
+	}
+	for _, want := range []string{"markdown", "json", "toon"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("--list-formats must list %q; got:\n%s", want, out.String())
+		}
+	}
+}
+
+// --format toon surfaces the SAME verdicts the markdown mode renders, just under
+// the compact TOON encoding — the "consumed under a chosen format at the right
+// time" half of the goal. A withheld note's body must still never appear.
+func TestMemoryRecall_formatTOON(t *testing.T) {
+	dir := fixtureMemoryStore(t)
+	var out, errb strings.Builder
+	code := runMemoryRecall(&out, &errb, []string{"--store", dir, "--intent", "memory algebra gate", "--format", "toon"})
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, errb.String())
+	}
+	s := out.String()
+	if !strings.HasPrefix(s, "verified_memory_recall[3]{") {
+		t.Fatalf("expected a TOON header for 3 rows; got:\n%s", s)
+	}
+	if !strings.Contains(s, "fresh") || !strings.Contains(s, "unverified") || !strings.Contains(s, "withheld:stale_recall_artifact") {
+		t.Errorf("TOON surface must carry all three verdicts; got:\n%s", s)
+	}
+	// The withheld row may name the failing claim as evidence (same as markdown
+	// mode's withheld line) — but never the note's actual prose body.
+	if strings.Contains(s, "The fix lives in internal/gonepkg/gone.go.") {
+		t.Errorf("withheld note's body must never surface under any format; got:\n%s", s)
+	}
+}
+
+// An unknown --format name fails closed, naming the bad value — never silently
+// falls back to markdown.
+func TestMemoryRecall_formatUnknownFailsClosed(t *testing.T) {
+	dir := fixtureMemoryStore(t)
+	var out, errb strings.Builder
+	code := runMemoryRecall(&out, &errb, []string{"--store", dir, "--intent", "x", "--format", "yaml"})
+	if code == 0 {
+		t.Fatalf("expected a non-zero exit for an unknown format; stdout:\n%s", out.String())
+	}
+	if !strings.Contains(errb.String(), "yaml") {
+		t.Errorf("stderr must name the unknown format; got:\n%s", errb.String())
+	}
+}
+
+// --ablate-formats measures the SAME note set's cost under every named format
+// instead of rendering it — the ablation half of the goal: same content, vary
+// only the encoding, read the byte/token delta off one table.
+func TestMemoryRecall_ablateFormats(t *testing.T) {
+	dir := fixtureMemoryStore(t)
+	var out, errb strings.Builder
+	code := runMemoryRecall(&out, &errb, []string{"--store", dir, "--intent", "memory algebra gate", "--ablate-formats", "json,toon"})
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, errb.String())
+	}
+	s := out.String()
+	if !strings.Contains(s, "json") || !strings.Contains(s, "toon") {
+		t.Fatalf("ablation table must list both requested formats; got:\n%s", s)
+	}
+	if strings.Contains(s, "markdown") {
+		t.Errorf("ablation table must only list the requested formats, not the full registry; got:\n%s", s)
+	}
+}

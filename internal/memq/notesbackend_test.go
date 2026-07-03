@@ -54,6 +54,23 @@ func splitVerifier(_ context.Context, claims []recall.ArtifactClaim) []recall.Ar
 	return out
 }
 
+func notesRecallQueryForTest(intent string) Query {
+	return Query{
+		Intent: intent,
+		Ops: []Op{
+			{Kind: OpScan},
+			{Kind: OpFilter, Pred: &Pred{Op: PredAnd, Args: []Pred{
+				{Op: PredEq, Field: "sealed", Value: "false"},
+				{Op: PredEq, Field: "tombstoned", Value: "false"},
+			}}},
+			{Kind: OpRank, By: RankRelevance, Desc: true},
+			{Kind: OpLimit, K: 5},
+			{Kind: OpBudget, Bytes: 8192},
+			{Kind: OpRender},
+		},
+	}
+}
+
 // #2347: the index IS the curation — one cell per MEMORY.md-linked fact file, in
 // index order, carrying safe metadata (kind, durability from metadata.type,
 // provenance attr) and never the body.
@@ -91,7 +108,7 @@ func TestNotesBackend_cellsFromIndex(t *testing.T) {
 
 // #2347 / #2077 done-condition: a note whose concrete claim no longer verifies is
 // REFUSED at page-in (stale_recall_artifact) with the claim named; a still-true
-// note renders. Run through the loop-recall driver, end to end.
+// note renders. Run through the same query shape the CLI uses, end to end.
 func TestNotesBackend_staleNoteRefusedFreshNoteRendered(t *testing.T) {
 	dir := fixtureNotesStore(t, notesFixtureIndex, notesFixtureFiles)
 	b, err := NewNotesBackend(dir)
@@ -100,11 +117,7 @@ func TestNotesBackend_staleNoteRefusedFreshNoteRendered(t *testing.T) {
 	}
 	b.WithVerifier(splitVerifier)
 
-	d, ok := Get("loop-recall")
-	if !ok {
-		t.Fatal("loop-recall driver not registered")
-	}
-	res, err := Run(context.Background(), b, d.Build(Params{Intent: "gate refuses fix helper"}), Caps{})
+	res, err := Run(context.Background(), b, notesRecallQueryForTest("gate refuses fix helper"), Caps{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,6 +139,19 @@ func TestNotesBackend_staleNoteRefusedFreshNoteRendered(t *testing.T) {
 	}
 	if !staleRefusal {
 		t.Fatalf("stale note must be refused as stale_recall_artifact; refused=%+v", res.Refused)
+	}
+}
+
+// #2347 is a backend + CLI surface, not a new canned strategy: `fak memory
+// drivers` must remain unchanged by the notes backend.
+func TestNotesBackend_doesNotRegisterDriver(t *testing.T) {
+	if _, ok := Get("loop-recall"); ok {
+		t.Fatal("notes backend must not register loop-recall in the global driver catalog")
+	}
+	for _, d := range Drivers() {
+		if d.Name == "loop-recall" {
+			t.Fatal("loop-recall leaked into the memory driver list")
+		}
 	}
 }
 

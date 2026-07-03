@@ -24,6 +24,8 @@ import (
 	"path/filepath"
 
 	"github.com/anthony-chaudhary/fak/internal/logvault"
+	"github.com/anthony-chaudhary/fak/internal/slackenv"
+	"github.com/anthony-chaudhary/fak/internal/slackoutbox"
 )
 
 func cmdLogvault(argv []string) { os.Exit(runLogvault(os.Stdout, os.Stderr, argv)) }
@@ -38,6 +40,8 @@ func runLogvault(w, ew io.Writer, argv []string) int {
 	repo := fs.String("repo", "", "repo root holding the state dirs (default: current directory)")
 	vaultDir := fs.String("vault", "", "vault directory (default: $FAK_LOG_VAULT, else <repo-parent>/fak-log-vault)")
 	sample := fs.Int("sample", 250, "verify: mirrors to re-hash (0 = all)")
+	notifySlack := fs.Bool("notify-slack", false, "capture/verify: enqueue a durable Slack digest (counts + the vault-head chain anchor) through the slack outbox")
+	slackChannel := fs.String("slack-channel", "", "channel for -notify-slack (default: $FAK_DISPATCH_CHANNEL, then $FAK_SCOREBOARD_CHANNEL)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -103,6 +107,9 @@ func runLogvault(w, ew io.Writer, argv []string) int {
 		}
 		fmt.Fprintf(w, "TOTAL files=%d copy=%s errors=%d (WITNESSED: sizes stat'd, hashes computed, by this run)\n",
 			files, fmtBytesLV(bytes), errs)
+		if verb == "capture" && *notifySlack {
+			logvaultNotifySlack(w, ew, *slackChannel, logvaultCaptureDigest(v.Dir, files, bytes, errs))
+		}
 		if errs > 0 {
 			return 1
 		}
@@ -118,6 +125,9 @@ func runLogvault(w, ew io.Writer, argv []string) int {
 		fmt.Fprintf(w, "  mirrors re-hashed: %d, mismatches: %d\n", checked, len(problems))
 		for _, p := range problems {
 			fmt.Fprintf(w, "  PROBLEM %s/%s: %s\n", p.Source, p.RelPath, p.Reason)
+		}
+		if *notifySlack {
+			logvaultNotifySlack(w, ew, *slackChannel, logvaultVerifyDigest(v.Dir, rows, checked, problems))
 		}
 		if len(problems) > 0 {
 			return 1
@@ -139,5 +149,97 @@ func fmtBytesLV(n int64) string {
 		return fmt.Sprintf("%.1fKB", float64(n)/(1<<10))
 	default:
 		return fmt.Sprintf("%dB", n)
+	}
+}
+
+// logvaultAnchorSuffix renders the chain-head anchor for a digest line — the
+// off-box tamper-evidence witness: even a fully hijacked vault (local anchor
+// file rewritten to match a corrupted manifest) cannot un-post a PAST digest
+// naming the prior honest (seq, hash).
+func logvaultAnchorSuffix(vaultDir string) string {
+	seq, hash, ok, err := logvault.ReadAnchor(vaultDir)
+	if err != nil {
+		return fmt.Sprintf(" · anchor unreadable: %v", err)
+	}
+	if !ok {
+		return " · anchor: none yet"
+	}
+	if len(hash) > 12 {
+		hash = hash[:12]
+	}
+	return fmt.Sprintf(" · anchor seq=%d hash=%s…", seq, hash)
+}
+
+// logvaultCaptureDigest renders the one-line Slack digest for a capture run.
+func logvaultCaptureDigest(vaultDir string, files int, bytes int64, errs int) string {
+	glyph := "✅"
+	if errs > 0 {
+		glyph = "⚠️"
+	}
+	return fmt.Sprintf("%s *logvault capture* — files=%d copy=%s errors=%d%s",
+		glyph, files, fmtBytesLV(bytes), errs, logvaultAnchorSuffix(vaultDir))
+}
+
+// logvaultVerifyDigest renders the one-line Slack digest for a verify run.
+func logvaultVerifyDigest(vaultDir string, rows, checked int, problems []logvault.VerifyProblem) string {
+	glyph := "✅"
+	if len(problems) > 0 {
+		glyph = "🔴"
+	}
+	line := fmt.Sprintf("%s *logvault verify* — chain rows=%d mirrors_checked=%d mismatches=%d%s",
+		glyph, rows, checked, len(problems), logvaultAnchorSuffix(vaultDir))
+	for i, p := range problems {
+		if i >= 5 {
+			line += fmt.Sprintf("\n… +%d more", len(problems)-5)
+			break
+		}
+		line += fmt.Sprintf("\n  PROBLEM %s/%s: %s", p.Source, p.RelPath, p.Reason)
+	}
+	return line
+}
+
+// logvaultNotifySlack enqueues text durably through the shared slack outbox
+// (never blocks on the network — Enqueue only appends to the local spool)
+// and then attempts one same-tick drain pass so a healthy channel sees the
+// digest immediately; a failed or skipped drain leaves the row queued for the
+// next `fak slack outbox drain` (scheduled or manual), so this call can never
+// lose the digest, only delay it.
+func logvaultNotifySlack(w, ew io.Writer, channel, text string) {
+	ch := channel
+	if ch == "" {
+		if r := slackenv.Lookup("FAK_DISPATCH_CHANNEL"); r.Set() {
+			ch = r.Value
+		} else if r := slackenv.Lookup("FAK_SCOREBOARD_CHANNEL"); r.Set() {
+			ch = r.Value
+		}
+	}
+	if ch == "" {
+		fmt.Fprintln(w, "  slack: skipped — no channel resolved (set -slack-channel, FAK_DISPATCH_CHANNEL, or FAK_SCOREBOARD_CHANNEL)")
+		return
+	}
+	ob, err := openOutbox()
+	if err != nil {
+		fmt.Fprintf(ew, "  slack: outbox open failed: %v\n", err)
+		return
+	}
+	nonce, err := ob.Enqueue(slackoutbox.Row{Channel: ch, Text: text, Source: "logvault"})
+	if err != nil {
+		fmt.Fprintf(ew, "  slack: enqueue failed: %v\n", err)
+		return
+	}
+	fmt.Fprintf(w, "  slack: enqueued %s to %s\n", nonce, ch)
+	wire, err := outboxWire("", "")
+	if err != nil {
+		fmt.Fprintf(w, "  slack: drain deferred — %v (row stays durably queued)\n", err)
+		return
+	}
+	rep, err := ob.Drain(ctx(), wire, slackoutbox.DrainOpts{Root: "."})
+	switch {
+	case err == slackoutbox.ErrDrainBusy:
+		fmt.Fprintln(w, "  slack: another drainer holds the lock — row stays queued")
+	case err != nil:
+		fmt.Fprintf(w, "  slack: drain attempt failed: %v (row stays durably queued for retry)\n", err)
+	default:
+		fmt.Fprintf(w, "  slack: drained — posted %d updated %d remaining %d\n", rep.Posted, rep.Updated, rep.Remaining)
 	}
 }

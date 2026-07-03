@@ -448,6 +448,13 @@ const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--
                  Register-ScheduledTask snippet whose command is 'fak loop run --loop
                  <id> ...'. The OS scheduler owns wall-clock firing; fak owns the
                  semantics (overlap-lock, missed-run). The operator installs the unit)
+  fak logvault  plan | capture | verify [-sample N] | sources [-repo DIR] [-vault DIR]
+                [-notify-slack] [-slack-channel ID]
+                (central, chain-aware backup of every durable fak log store into one
+                 vault directory outside any git tree; capture/verify optionally
+                 enqueue a durable Slack digest — counts + the vault-head chain
+                 anchor — through the slack outbox, so a hijacked/corrupted vault is
+                 witnessed off-box even if the local anchor is tampered)
   fak serve     [--addr 127.0.0.1:8080 | --stdio]
                 [--provider openai|anthropic|gemini|xai --base-url URL [--replica-base-url URL ...] --model M --api-key-env VAR]
                 [--engine inkernel] [--gguf FILE] [--policy FILE] [--policy-check] [--require-key-env VAR] [--vdso=true]

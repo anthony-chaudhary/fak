@@ -190,6 +190,15 @@ func readAnchor(vaultDir string) (anchor, bool, error) {
 	return a, true, nil
 }
 
+// ReadAnchor is the exported form of the chain-head sidecar read: the (seq,
+// hash) an off-box witness (e.g. a Slack digest) can quote as tamper-evidence
+// for a vault it never reads the content of. ok is false when the vault has
+// never completed a capture (no anchor written yet).
+func ReadAnchor(vaultDir string) (seq uint64, hash string, ok bool, err error) {
+	a, ok, err := readAnchor(vaultDir)
+	return a.Seq, a.Hash, ok, err
+}
+
 // Append stamps the order anchor + chain hash and commits the row.
 func (m *Manifest) Append(row ManifestRow) (ManifestRow, error) {
 	m.seq++
