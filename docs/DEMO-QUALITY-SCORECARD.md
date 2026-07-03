@@ -1,11 +1,11 @@
 ---
 title: "fak Demo-Quality Scorecard: Demos a Skeptic Can Run"
-description: "fak's demo-quality scorecard grades 66 demos on five deterministic axes into a demo-score (0-100, A-F) and a re-derivable demo-debt count."
+description: "fak's demo-quality scorecard grades 68 demos on five deterministic axes into a demo-score (0-100, A-F) and a re-derivable demo-debt count."
 ---
 
 # Demo-quality scorecard
 
-<!-- demo-quality-scorecard: 2026-06-30 · process: tools/demo_quality_scorecard.py -->
+<!-- demo-quality-scorecard: 2026-07-03 · process: tools/demo_quality_scorecard.py -->
 
 > Regenerate: `python tools/demo_quality_scorecard.py --markdown --stamp DATE > docs/DEMO-QUALITY-SCORECARD.md`
 > Verify snapshot freshness: `python tools/demo_quality_scorecard.py --check-doc`
@@ -16,11 +16,11 @@ description: "fak's demo-quality scorecard grades 66 demos on five deterministic
 
 | Metric | Value |
 |---|---|
-| Demos scored | 66 |
+| Demos scored | 68 |
 | **Demo-debt (total defects)** | **0** |
-| Mean score | 98.8/100 |
-| Median / min / max | 100.0 / 93.1 / 100.0 |
-| Grade distribution | A:66 B:0 C:0 D:0 F:0 |
+| Mean score | 98.7/100 |
+| Median / min / max | 100.0 / 91.0 / 100.0 |
+| Grade distribution | A:68 B:0 C:0 D:0 F:0 |
 
 ## Per-demo scores
 
@@ -28,6 +28,7 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 
 | Score | Grade | Debt | run | repro | scope | self | docs | Demo |
 |---:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|
+| 91.0 | A | 0 | 86 | 100 | 100 | 88 | 78 | `examples/mobile-ffi` |
 | 93.1 | A | 0 | 86 | 100 | 100 | 100 | 78 | `examples/trace-authoring` |
 | 94.2 | A | 0 | 100 | 100 | 90 | 88 | 90 | `examples/grammar-repair-demo` |
 | 94.2 | A | 0 | 100 | 100 | 90 | 88 | 90 | `cmd/dropindemo` |
@@ -57,6 +58,7 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/adjudication-demo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/agentdojo-redteam` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/auth-hardening` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/commit-audit-in-60s` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/deny-in-60s` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/escalation-demo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/extdriver` |
@@ -100,6 +102,12 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
 
 ## Soft signals (score only, not debt)
+
+### `examples/mobile-ffi`
+- runnable: a runnable script exists but the README shows no paste-able command to launch it
+- self_contained: no stated prerequisites — a cold runner can't tell what to install first
+- documented: no run/usage section and no visible run command — hard to find how to start
+- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
 ### `examples/trace-authoring`
 - runnable: a runnable script exists but the README shows no paste-able command to launch it
@@ -192,4 +200,3 @@ No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
 
 ### `examples/vdso-cache-hit`
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
-
