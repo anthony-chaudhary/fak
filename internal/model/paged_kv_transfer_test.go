@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"math"
 	"net"
 	"sync"
@@ -181,6 +182,95 @@ func TestTCPKVTransportMatchesLocal(t *testing.T) {
 	}
 	if tcp.Entry.Residency.Lease != "tcp-loopback" || tcp.Entry.Residency.Tier != cachemeta.TierRemote {
 		t.Fatalf("residency descriptor missing after TCP transfer: %+v", tcp.Entry.Residency)
+	}
+}
+
+func TestKVTransferBackendMatrixAndSelection(t *testing.T) {
+	matrix := KVTransferBackendMatrix()
+	got := map[KVTransferBackend]KVTransferBackendSpec{}
+	for _, row := range matrix {
+		got[row.Backend] = row
+	}
+	for _, backend := range []KVTransferBackend{
+		KVTransferBackendSHM,
+		KVTransferBackendTCP,
+		KVTransferBackendUCXRDMA,
+		KVTransferBackendNVMeOF,
+		KVTransferBackendObject,
+	} {
+		row, ok := got[backend]
+		if !ok {
+			t.Fatalf("backend matrix missing %q; got %+v", backend, matrix)
+		}
+		if row.Witness == "" {
+			t.Fatalf("backend %q has no witness descriptor", backend)
+		}
+	}
+	if !got[KVTransferBackendSHM].Available || !got[KVTransferBackendTCP].Available {
+		t.Fatalf("shm and tcp rows should be available: %+v %+v", got[KVTransferBackendSHM], got[KVTransferBackendTCP])
+	}
+	for _, backend := range []KVTransferBackend{KVTransferBackendUCXRDMA, KVTransferBackendNVMeOF, KVTransferBackendObject} {
+		if got[backend].Available {
+			t.Fatalf("%s should be declared but unavailable until a backend factory registers", backend)
+		}
+	}
+	if got := SelectKVTransferBackend(KVTransferPath{SameHost: true, FromTier: cachemeta.TierDRAM, ToTier: cachemeta.TierDRAM}); got != KVTransferBackendSHM {
+		t.Fatalf("same-host path selected %q, want shm", got)
+	}
+	if got := SelectKVTransferBackend(KVTransferPath{CrossNode: true, FromTier: cachemeta.TierDRAM, ToTier: cachemeta.TierRemote}); got != KVTransferBackendUCXRDMA {
+		t.Fatalf("cross-node path selected %q, want ucx-rdma", got)
+	}
+	if got := SelectKVTransferBackend(KVTransferPath{CrossNode: true, TCPFallback: true, FromTier: cachemeta.TierDRAM, ToTier: cachemeta.TierRemote}); got != KVTransferBackendTCP {
+		t.Fatalf("cross-node TCP fallback selected %q, want tcp", got)
+	}
+	if got := SelectKVTransferBackend(KVTransferPath{ColdTier: true, FromTier: cachemeta.TierDRAM, ToTier: cachemeta.TierDisk}); got != KVTransferBackendNVMeOF {
+		t.Fatalf("cold disk path selected %q, want nvme-of", got)
+	}
+	if got := SelectKVTransferBackend(KVTransferPath{FromTier: cachemeta.TierDisk, ToTier: cachemeta.TierProvider}); got != KVTransferBackendObject {
+		t.Fatalf("object path selected %q, want object", got)
+	}
+}
+
+func TestKVTransferBackendUnavailableRowsFailClosed(t *testing.T) {
+	_, err := OpenKVTransferBackend(KVTransportOpenRequest{
+		Backend: KVTransferBackendUCXRDMA,
+		Pool:    NewPagedKVPoolWithRaw(pagedEvictCfg(), 3),
+	})
+	if !errors.Is(err, ErrKVTransferBackendUnavailable) {
+		t.Fatalf("ucx-rdma open error = %v, want ErrKVTransferBackendUnavailable", err)
+	}
+}
+
+func TestOpenKVTransferBackendStampsReceiptBackend(t *testing.T) {
+	cfg := pagedEvictCfg()
+	m := NewSynthetic(cfg)
+	ref := m.NewSession()
+	ref.Prefill([]int{5, 8, 13, 21})
+
+	srcPool := NewPagedKVPoolWithRaw(cfg, 2)
+	src := snapshotCacheToPaged(srcPool, ref.Cache)
+	h, err := OpenKVTransferBackend(KVTransportOpenRequest{Backend: KVTransferBackendTCP, Pool: NewPagedKVPoolWithRaw(cfg, 2)})
+	if err != nil {
+		t.Fatalf("OpenKVTransferBackend(tcp): %v", err)
+	}
+	defer func() {
+		if h.Close != nil {
+			_ = h.Close()
+		}
+	}()
+	got, err := h.Transport.Send(src, cachemeta.KVTransfer{
+		Direction: cachemeta.KVMigrate,
+		Tokens:    int64(src.Len()),
+		ModelID:   "synthetic",
+		FromTier:  cachemeta.TierDRAM,
+		ToTier:    cachemeta.TierRemote,
+		Lease:     "backend-stamp",
+	}, 0, src.Len())
+	if err != nil {
+		t.Fatalf("tcp backend Send: %v", err)
+	}
+	if got.Transfer.Backend != string(KVTransferBackendTCP) || got.Entry.Labels["backend"] != string(KVTransferBackendTCP) {
+		t.Fatalf("backend stamp missing from receipt: transfer=%+v labels=%+v", got.Transfer, got.Entry.Labels)
 	}
 }
 

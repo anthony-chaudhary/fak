@@ -47,6 +47,9 @@ func TestNativePDRoleSplitTransfersKVIntoDecodeScheduler(t *testing.T) {
 	if admit.Transfer.Transfer.SerializerID != model.PagedKVTransferSerializerID {
 		t.Fatalf("serializer = %q, want %q", admit.Transfer.Transfer.SerializerID, model.PagedKVTransferSerializerID)
 	}
+	if admit.Transfer.Transfer.Backend != string(model.KVTransferBackendSHM) {
+		t.Fatalf("default transfer backend = %q, want %q", admit.Transfer.Transfer.Backend, model.KVTransferBackendSHM)
+	}
 	if admit.Transfer.Transfer.BytesMoved <= 0 {
 		t.Fatalf("transfer moved no KV bytes: %+v", admit.Transfer.Transfer)
 	}
@@ -105,10 +108,57 @@ func TestNativePDRoleSplitTransfersKVIntoDecodeScheduler(t *testing.T) {
 		`fak_native_pd_worker_requests_total{role="prefill",worker="prefill-0"} 2`,
 		`fak_native_pd_worker_requests_total{role="decode",worker="` + admit.DecodeWorker + `"} 2`,
 		`fak_native_pd_route_total{result="locality_hit"} 1`,
+		`fak_native_pd_transfer_backend_total{backend="shm"} 2`,
 	} {
 		if metrics := cluster.Metrics(); !strings.Contains(metrics, wantMetric) {
 			t.Fatalf("metrics missing %q\n--- metrics ---\n%s", wantMetric, metrics)
 		}
+	}
+}
+
+func TestNativePDTCPTransferBackendRunsThroughDecodeScheduler(t *testing.T) {
+	m := model.NewSynthetic(SyntheticConfig())
+	cluster := NewNativePDClusterWithResidency(m, 1, nil, WithNativePDKVTransferBackend(model.KVTransferBackendTCP))
+	defer cluster.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	prompt := []int{2, 4, 6, 8, 10}
+	admit, err := cluster.Admit(ctx, NativePDRequest{
+		Call:             inlineCall("issue2243_tcp_pd", `{"prompt":"tcp"}`),
+		Prompt:           prompt,
+		ModelID:          "synthetic-test",
+		TokenizerID:      "byte",
+		Lease:            "lease-2243",
+		Taint:            abi.TaintTrusted,
+		Scope:            abi.ScopeFleet,
+		AdmissionVerdict: cachemeta.AdmissionAllow,
+	})
+	if err != nil {
+		t.Fatalf("Admit native P/D over TCP backend: %v", err)
+	}
+	if got, want := drainPDRequest(t, admit.Request), serialGreedyTokens(m, prompt); !reflect.DeepEqual(got, want) {
+		t.Fatalf("TCP P/D tokens changed:\n got %v\nwant %v", got, want)
+	}
+	if admit.Transfer.Transfer.Backend != string(model.KVTransferBackendTCP) {
+		t.Fatalf("transfer backend = %q, want tcp", admit.Transfer.Transfer.Backend)
+	}
+	if admit.Transfer.Entry.Labels["backend"] != string(model.KVTransferBackendTCP) {
+		t.Fatalf("cachemeta receipt missing tcp backend label: %+v", admit.Transfer.Entry.Labels)
+	}
+	decode, ok := cluster.DecodeWorker(admit.DecodeWorker)
+	if !ok {
+		t.Fatalf("decode worker %q not found", admit.DecodeWorker)
+	}
+	entry, ok := decode.TransferEntry(admit.Transfer.Transfer.SpanDigest)
+	if !ok {
+		t.Fatalf("decode worker cannot query TCP transfer entry for digest %q", admit.Transfer.Transfer.SpanDigest)
+	}
+	if entry.Labels["backend"] != string(model.KVTransferBackendTCP) || entry.Residency.Lease != "lease-2243" {
+		t.Fatalf("stored TCP receipt lost backend/lease: labels=%+v residency=%+v", entry.Labels, entry.Residency)
+	}
+	if metrics := cluster.Metrics(); !strings.Contains(metrics, `fak_native_pd_transfer_backend_total{backend="tcp"} 1`) {
+		t.Fatalf("metrics missing tcp backend count\n--- metrics ---\n%s", metrics)
 	}
 }
 

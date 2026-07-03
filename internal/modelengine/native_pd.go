@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -109,6 +110,7 @@ type NativePDRequest struct {
 	Prompt           []int
 	PrefixKey        string
 	PrefixSegments   []string
+	TransferBackend  model.KVTransferBackend
 	ModelID          string
 	TokenizerID      string
 	Lease            string
@@ -235,22 +237,37 @@ type NativePDCluster struct {
 	prefill *NativePDWorker
 	decode  []*NativePDWorker
 
-	mu             sync.Mutex
-	residency      NativePDResidencyIndex
-	localityHits   int64
-	coldRoutes     int64
-	lastDecodeName string
+	mu                sync.Mutex
+	residency         NativePDResidencyIndex
+	transferBackend   model.KVTransferBackend
+	transferByBackend map[string]int64
+	localityHits      int64
+	coldRoutes        int64
+	lastDecodeName    string
 }
 
 func NewNativePDCluster(m *model.Model, decodeWorkers int) *NativePDCluster {
 	return NewNativePDClusterWithResidency(m, decodeWorkers, nil)
 }
 
+// NativePDOption configures the native P/D cluster without changing the default
+// same-host behavior.
+type NativePDOption func(*NativePDCluster)
+
+// WithNativePDKVTransferBackend selects the cluster-wide KV transfer backend.
+// Leaving it unset auto-selects the same-host shm row; a request can still
+// override per admission with NativePDRequest.TransferBackend.
+func WithNativePDKVTransferBackend(backend model.KVTransferBackend) NativePDOption {
+	return func(c *NativePDCluster) {
+		c.transferBackend = backend
+	}
+}
+
 // NewNativePDClusterWithResidency builds a native P/D pool over a caller-supplied
 // residency view. Passing gateway.PrefixResidencyIndex wires the native role split
 // into the same shared routing spine as fleet serving; nil uses a small local
 // index for standalone in-process use.
-func NewNativePDClusterWithResidency(m *model.Model, decodeWorkers int, residency NativePDResidencyIndex) *NativePDCluster {
+func NewNativePDClusterWithResidency(m *model.Model, decodeWorkers int, residency NativePDResidencyIndex, opts ...NativePDOption) *NativePDCluster {
 	if decodeWorkers < 1 {
 		decodeWorkers = 1
 	}
@@ -258,13 +275,19 @@ func NewNativePDClusterWithResidency(m *model.Model, decodeWorkers int, residenc
 		residency = newNativePDLocalResidency()
 	}
 	c := &NativePDCluster{
-		m:         m,
-		prefill:   newNativePDWorker("prefill-0", NativePDRolePrefill, m),
-		decode:    make([]*NativePDWorker, decodeWorkers),
-		residency: residency,
+		m:                 m,
+		prefill:           newNativePDWorker("prefill-0", NativePDRolePrefill, m),
+		decode:            make([]*NativePDWorker, decodeWorkers),
+		residency:         residency,
+		transferByBackend: make(map[string]int64),
 	}
 	for i := range c.decode {
 		c.decode[i] = newNativePDWorker("decode-"+strconv.Itoa(i), NativePDRoleDecode, m)
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(c)
+		}
 	}
 	return c
 }
@@ -326,11 +349,20 @@ func (c *NativePDCluster) Admit(ctx context.Context, req NativePDRequest) (Nativ
 	}
 	defer src.Free()
 
-	transfer := c.transferDescriptor(req, decode.name, len(prompt))
-	receipt, err := (model.LocalKVTransport{Pool: decode.pool}).Send(src, transfer, 0, len(prompt))
+	backend := c.transferBackendFor(req)
+	transport, err := model.OpenKVTransferBackend(model.KVTransportOpenRequest{Backend: backend, Pool: decode.pool})
 	if err != nil {
 		return NativePDAdmission{}, err
 	}
+	if transport.Close != nil {
+		defer transport.Close()
+	}
+	transfer := c.transferDescriptor(req, decode.name, len(prompt))
+	receipt, err := transport.Transport.Send(src, transfer, 0, len(prompt))
+	if err != nil {
+		return NativePDAdmission{}, err
+	}
+	c.observeTransferBackend(receipt.Transfer.Backend)
 	c.prefill.addPrefill(receipt.Transfer.BytesMoved)
 	cache := receipt.KV.ToKVCache(c.m.Cfg)
 	importedSnapshot := cache.Clone()
@@ -381,6 +413,29 @@ func (c *NativePDCluster) prefixSegments(req NativePDRequest, fallbackKey string
 		return append([]string(nil), req.PrefixSegments...)
 	}
 	return []string{fallbackKey}
+}
+
+func (c *NativePDCluster) transferBackendFor(req NativePDRequest) model.KVTransferBackend {
+	if req.TransferBackend != "" {
+		return req.TransferBackend
+	}
+	if c != nil && c.transferBackend != "" {
+		return c.transferBackend
+	}
+	return model.SelectKVTransferBackend(model.KVTransferPath{
+		SameHost: true,
+		FromTier: cachemeta.TierDRAM,
+		ToTier:   cachemeta.TierDRAM,
+	})
+}
+
+func (c *NativePDCluster) observeTransferBackend(backend string) {
+	if c == nil || backend == "" {
+		return
+	}
+	c.mu.Lock()
+	c.transferByBackend[backend]++
+	c.mu.Unlock()
 }
 
 func (c *NativePDCluster) transferDescriptor(req NativePDRequest, owner string, n int) cachemeta.KVTransfer {
@@ -538,11 +593,25 @@ func (c *NativePDCluster) Metrics() string {
 	}
 	c.mu.Lock()
 	hits, cold := c.localityHits, c.coldRoutes
+	byBackend := make(map[string]int64, len(c.transferByBackend))
+	for k, v := range c.transferByBackend {
+		byBackend[k] = v
+	}
 	c.mu.Unlock()
 	b.WriteString("# HELP fak_native_pd_route_total Native P/D decode routes by locality result.\n")
 	b.WriteString("# TYPE fak_native_pd_route_total counter\n")
 	fmt.Fprintf(&b, "fak_native_pd_route_total{result=%s} %d\n", promQuote("locality_hit"), hits)
 	fmt.Fprintf(&b, "fak_native_pd_route_total{result=%s} %d\n", promQuote("cold_receive"), cold)
+	b.WriteString("# HELP fak_native_pd_transfer_backend_total Native P/D KV transfers by selected backend.\n")
+	b.WriteString("# TYPE fak_native_pd_transfer_backend_total counter\n")
+	backends := make([]string, 0, len(byBackend))
+	for backend := range byBackend {
+		backends = append(backends, backend)
+	}
+	sort.Strings(backends)
+	for _, backend := range backends {
+		fmt.Fprintf(&b, "fak_native_pd_transfer_backend_total{backend=%s} %d\n", promQuote(backend), byBackend[backend])
+	}
 	return b.String()
 }
 

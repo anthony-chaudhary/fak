@@ -33,6 +33,7 @@ const (
 // separately from payload").
 type KVTransfer struct {
 	Direction           KVTransferDirection
+	Backend             string // transport backend that moved the bytes (shm, tcp, ucx-rdma, nvme-of, object)
 	SpanDigest          string // identity of the KV span being moved/restored/routed
 	Tokens              int64  // span length in positions
 	ModelID             string
@@ -127,6 +128,9 @@ func FromKVTransfer(t KVTransfer, opts ...Option) Entry {
 	}
 	if t.ToTier != "" {
 		e.Labels["to_tier"] = string(t.ToTier)
+	}
+	if t.Backend != "" {
+		e.Labels["backend"] = t.Backend
 	}
 	if t.FaultReason != "" {
 		e.Labels["fault_reason"] = t.FaultReason

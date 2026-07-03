@@ -9,6 +9,7 @@ import (
 func TestFromKVTransferRecordsResidencyTransition(t *testing.T) {
 	e := FromKVTransfer(KVTransfer{
 		Direction:   KVOffload,
+		Backend:     "tcp",
 		SpanDigest:  "span-abc",
 		Tokens:      2048,
 		ModelID:     "m",
@@ -25,7 +26,8 @@ func TestFromKVTransferRecordsResidencyTransition(t *testing.T) {
 		t.Fatalf("residency must record where the span now lives: %+v", e.Residency)
 	}
 	if e.Labels["direction"] != "offload" || e.Labels["outcome"] != "ok" ||
-		e.Labels["from_tier"] != "hbm" || e.Labels["to_tier"] != "dram" {
+		e.Labels["from_tier"] != "hbm" || e.Labels["to_tier"] != "dram" ||
+		e.Labels["backend"] != "tcp" {
 		t.Fatalf("transition labels missing: %+v", e.Labels)
 	}
 	if e.Derivation.ModelID != "m" || e.Derivation.PositionMode != PositionPrefixAligned {
