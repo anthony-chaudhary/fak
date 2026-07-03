@@ -151,6 +151,70 @@ func TestWatchdogChildEnvStripsGuardWiringAndPinsConfigDir(t *testing.T) {
 	}
 }
 
+func TestReviveOutcomeReleasesStaleTookLatchOnProvenDeath(t *testing.T) {
+	dead := ReDeathEvidence{ProcessScanOK: true, TranscriptIdleSeconds: 3600}
+	for _, tc := range []struct {
+		in      Outcome
+		want    Outcome
+		revived bool
+	}{
+		{OutcomeProgressed, OutcomeRecoverable, true},
+		{OutcomeUnknown, OutcomeRecoverable, true},
+		{OutcomeUnrecoverable, OutcomeUnrecoverable, false}, // an auth wall is never revived
+		{OutcomeRecoverable, OutcomeRecoverable, false},     // already open — nothing to release
+	} {
+		got, revived := ReviveOutcome(tc.in, dead)
+		if got != tc.want || revived != tc.revived {
+			t.Fatalf("ReviveOutcome(%s, dead) = (%s, %v), want (%s, %v)",
+				tc.in, got, revived, tc.want, tc.revived)
+		}
+	}
+}
+
+func TestReviveOutcomeAnyUnprovenFactKeepsTheBurn(t *testing.T) {
+	for name, ev := range map[string]ReDeathEvidence{
+		"zero value":       {},
+		"live process":     {ProcessScanOK: true, ProcessLive: true, TranscriptIdleSeconds: 3600},
+		"unreadable table": {ProcessScanOK: false, TranscriptIdleSeconds: 3600},
+		"no transcript":    {ProcessScanOK: true, TranscriptIdleSeconds: -1},
+		"fresh transcript": {ProcessScanOK: true, TranscriptIdleSeconds: DeadTranscriptIdleFloorSeconds - 1},
+	} {
+		if got, revived := ReviveOutcome(OutcomeProgressed, ev); revived || got != OutcomeProgressed {
+			t.Fatalf("%s: ReviveOutcome = (%s, %v), want the burn kept", name, got, revived)
+		}
+	}
+}
+
+func TestReviveOutcomeThroughWatchdogGate(t *testing.T) {
+	// The #2368 acceptance chain, leaf half: a prior take marker (launched history,
+	// progressed outcome) plus proof of a new death must reach LAUNCH, not the
+	// "already resumed once" skip.
+	dead := ReDeathEvidence{ProcessScanOK: true, TranscriptIdleSeconds: 3600}
+	row := WatchdogPlanRow{Session: "sid-relatch", Account: ".claude-x"}
+	hist := []Attempt{{Phase: "launched"}}
+
+	outcome, revived := ReviveOutcome(OutcomeProgressed, dead)
+	if !revived {
+		t.Fatal("proven death must release the latch")
+	}
+	d := DecideWatchdogRow(row, WatchdogGuards{}, hist, outcome)
+	if d.Action != WatchdogLaunch || d.Attempt != 2 {
+		t.Fatalf("revived row: action=%s attempt=%d (%s), want launch/2", d.Action, d.Attempt, d.Reason)
+	}
+
+	// Higher-precedence blocks keep binding through a revive: an operator settle …
+	settled := []Attempt{{Phase: "launched"}, {Action: "consolidate-operator"}}
+	if d := DecideWatchdogRow(row, WatchdogGuards{}, settled, outcome); d.Action != WatchdogSkipBlocked ||
+		!strings.Contains(d.Reason, "settled") {
+		t.Fatalf("settled + revive = %s (%s), want skip_blocked settled", d.Action, d.Reason)
+	}
+	// … and the spent attempt cap.
+	if d := DecideWatchdogRow(row, WatchdogGuards{MaxAttempts: 1}, hist, outcome); d.Action != WatchdogSkipBlocked ||
+		!strings.Contains(d.Reason, "cap") {
+		t.Fatalf("cap + revive = %s (%s), want skip_blocked cap", d.Action, d.Reason)
+	}
+}
+
 func TestResolveWatchdogProbeMode(t *testing.T) {
 	if got := ResolveWatchdogProbeMode("auto", false); got != "none" {
 		t.Fatalf("auto dry-run = %q, want none (a default tick must spend nothing)", got)

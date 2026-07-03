@@ -192,6 +192,58 @@ func WatchdogChildEnv(environ []string, configDir string) []string {
 	return append(out, "CLAUDE_CONFIG_DIR="+configDir)
 }
 
+// --- the stale resume-took latch (#2368) --------------------------------------------
+
+// ReDeathEvidence is the typed, shell-extracted proof that a session whose last resume
+// TOOK (or whose outcome is unreadable) has since died AGAIN. The burn-once retry gate
+// reads a progressed/unknown outcome as "resumed once — done"; that latch goes stale
+// the moment the session stops a second time: the sweep re-plans the session every
+// tick and the watchdog skips it every tick with "already resumed once (resume took)",
+// forever. Every field defaults to "unproven", so the zero value revives nothing and a
+// caller that cannot gather evidence keeps today's conservative burn-once behavior.
+type ReDeathEvidence struct {
+	// ProcessScanOK: the process table was actually readable. False = liveness unknown
+	// → never revive (racing two `claude` processes on one transcript is worse than
+	// waiting a tick for a readable table).
+	ProcessScanOK bool `json:"process_scan_ok"`
+	// ProcessLive: some live process's command line names this session id (the
+	// `claude --resume <sid>` child still running).
+	ProcessLive bool `json:"process_live"`
+	// TranscriptIdleSeconds: seconds since the session's newest transcript copy last
+	// changed; -1 when no transcript could be found (unknown → never revive).
+	TranscriptIdleSeconds int64 `json:"transcript_idle_seconds"`
+}
+
+// DeadTranscriptIdleFloorSeconds is how long a session's transcript must have been
+// silent before "no live process" reads as a new death rather than startup latency: a
+// just-fired resume can take a while to write its first record, and a live session
+// deep in one long tool call writes nothing either — but neither state survives ten
+// minutes of transcript silence WITH no process holding the session id.
+const DeadTranscriptIdleFloorSeconds int64 = 10 * 60
+
+// DiedAgain reports whether the evidence proves a new death: the process table was
+// readable, no live process holds the session id, and the transcript has been silent
+// past the dead floor. Any unknown fact fails the proof — a wrong revive races two
+// processes on one transcript NOW, while a wrong keep just waits for stronger evidence
+// on a later tick.
+func (ev ReDeathEvidence) DiedAgain() bool {
+	return ev.ProcessScanOK && !ev.ProcessLive &&
+		ev.TranscriptIdleSeconds >= DeadTranscriptIdleFloorSeconds
+}
+
+// ReviveOutcome folds re-death evidence into the outcome the retry gate reads. With
+// proof of a new death, a progressed/unknown outcome reads RECOVERABLE, which
+// re-admits the session through RetryGate under the same attempt cap while every
+// higher-precedence block (operator-settled, auth wall, spent cap) keeps binding
+// exactly as before. The bool reports whether the latch was released, so the shell
+// narrates the override instead of silently re-launching.
+func ReviveOutcome(outcome Outcome, ev ReDeathEvidence) (Outcome, bool) {
+	if (outcome == OutcomeProgressed || outcome == OutcomeUnknown) && ev.DiedAgain() {
+		return OutcomeRecoverable, true
+	}
+	return outcome, false
+}
+
 // ResolveWatchdogProbeMode resolves the FAK_PROBE setting for a tick: "auto" probes
 // blocked accounts only on a LIVE tick (so the default dry-run stays side-effect-free —
 // no probe spend), and an explicit setting is honored as-is. Mirrors
