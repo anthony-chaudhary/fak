@@ -86,6 +86,18 @@ func TestGuardCodexEnvKey(t *testing.T) {
 	}
 }
 
+func TestGuardCodexGatewayModel(t *testing.T) {
+	if got := guardCodexGatewayModel([]string{"codex"}, "", "openai-responses"); got != guardCodexDefaultModelID {
+		t.Fatalf("default Codex gateway model = %q, want %q", got, guardCodexDefaultModelID)
+	}
+	if got := guardCodexGatewayModel([]string{"codex"}, "gpt-custom", "openai-responses"); got != "gpt-custom" {
+		t.Fatalf("explicit Codex gateway model = %q, want gpt-custom", got)
+	}
+	if got := guardCodexGatewayModel([]string{"claude"}, "", "anthropic"); got != "" {
+		t.Fatalf("non-Codex gateway model = %q, want empty passthrough default", got)
+	}
+}
+
 // guardCodexConfigArgs builds the ordered `-c key=value` overrides that define the `fak`
 // provider in Codex's config. The provider id is used bare in model_provider= (Codex reads
 // it as the id), while name/base_url/wire_api/env_key are TOML string literals carrying
@@ -191,10 +203,102 @@ func TestInstallGuardCodexConfigCodexOnlyRewrite(t *testing.T) {
 	})
 }
 
+func TestGuardCodexAuthEnv(t *testing.T) {
+	applied := guardCodexInstall{Applied: true, ProviderID: "fak", EnvKey: "OPENAI_API_KEY", BaseURL: "http://127.0.0.1:1/v1"}
+
+	t.Run("disabled install needs no env", func(t *testing.T) {
+		env, err := guardCodexAuthEnv(guardCodexInstall{}, "", false, nil)
+		if err != nil || len(env) != 0 {
+			t.Fatalf("guardCodexAuthEnv disabled = env=%v err=%v, want no-op", env, err)
+		}
+	})
+
+	t.Run("resolved upstream key is explicit child grant", func(t *testing.T) {
+		env, err := guardCodexAuthEnv(applied, "sk-test", false, nil)
+		if err != nil {
+			t.Fatalf("guardCodexAuthEnv resolved key: %v", err)
+		}
+		if len(env) != 1 || env[0] != [2]string{"OPENAI_API_KEY", "sk-test"} {
+			t.Fatalf("env grant = %v, want OPENAI_API_KEY=sk-test", env)
+		}
+	})
+
+	t.Run("chatgpt subscription keeps upstream token in guard", func(t *testing.T) {
+		chatgpt := applied
+		chatgpt.AuthMode = "chatgpt"
+		env, err := guardCodexAuthEnv(chatgpt, "oauth-access-token", false, nil)
+		if err != nil {
+			t.Fatalf("guardCodexAuthEnv chatgpt: %v", err)
+		}
+		if len(env) != 1 || env[0] != [2]string{"OPENAI_API_KEY", guardCodexOAuthPlaceholderAPIKey} {
+			t.Fatalf("chatgpt env = %v, want OPENAI_API_KEY placeholder", env)
+		}
+	})
+
+	t.Run("ambient key can pass through", func(t *testing.T) {
+		env, err := guardCodexAuthEnv(applied, "", false, func(name string) string {
+			if name == "OPENAI_API_KEY" {
+				return "sk-ambient"
+			}
+			return ""
+		})
+		if err != nil || len(env) != 0 {
+			t.Fatalf("ambient key env = %v err=%v, want no extra grant", env, err)
+		}
+	})
+
+	t.Run("local only gets placeholder", func(t *testing.T) {
+		env, err := guardCodexAuthEnv(applied, "", true, func(string) string { return "" })
+		if err != nil {
+			t.Fatalf("local-only placeholder: %v", err)
+		}
+		if len(env) != 1 || env[0] != [2]string{"OPENAI_API_KEY", guardCodexLocalPlaceholderAPIKey} {
+			t.Fatalf("local-only env = %v, want placeholder", env)
+		}
+	})
+
+	t.Run("chatgpt subscription gets placeholder not token", func(t *testing.T) {
+		chatgpt := applied
+		chatgpt.AuthMode = "chatgpt"
+		env, err := guardCodexAuthEnv(chatgpt, "oauth-token", false, func(string) string { return "" })
+		if err != nil {
+			t.Fatalf("chatgpt placeholder: %v", err)
+		}
+		if len(env) != 1 || env[0] != [2]string{"OPENAI_API_KEY", guardCodexOAuthPlaceholderAPIKey} {
+			t.Fatalf("chatgpt env = %v, want OAuth placeholder", env)
+		}
+	})
+
+	t.Run("missing api key fails before spawning codex", func(t *testing.T) {
+		env, err := guardCodexAuthEnv(applied, "", false, func(string) string { return "" })
+		if err == nil {
+			t.Fatalf("guardCodexAuthEnv missing key returned env=%v and no error", env)
+		}
+		msg := err.Error()
+		for _, want := range []string{"$OPENAI_API_KEY", "codex login", "--api-key-env"} {
+			if !strings.Contains(msg, want) {
+				t.Fatalf("missing-key error %q missing %q", msg, want)
+			}
+		}
+	})
+}
+
+func TestPinnedCodexChildGetsOpenAIPlaceholderOnly(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	child := buildGuardChild([]string{"codex"}, nil, true)
+	env := strings.Join(child.Env, "\n")
+	if !strings.Contains(env, "OPENAI_API_KEY="+guardCodexOAuthPlaceholderAPIKey) {
+		t.Fatalf("pinned Codex child must carry OPENAI_API_KEY placeholder; env=%v", child.Env)
+	}
+	if strings.Contains(env, "ANTHROPIC_API_KEY=fak-guard-oauth-placeholder") {
+		t.Fatalf("pinned Codex child must not receive the Anthropic placeholder; env=%v", child.Env)
+	}
+}
+
 // printGuardCodexNote stays silent unless the install actually applied (so the banner does
 // not lie about a codex repoint for a non-codex agent), and when it applied it must name the
-// provider, the responses wire, the base URL, and the honest auth fence (the env key, and
-// that a ChatGPT-subscription `codex login` is not yet wired).
+// provider, the responses wire, the base URL, and the credential posture.
 func TestPrintGuardCodexNote(t *testing.T) {
 	var quiet bytes.Buffer
 	printGuardCodexNote(&quiet, guardCodexInstall{}) // Applied=false
@@ -213,6 +317,25 @@ func TestPrintGuardCodexNote(t *testing.T) {
 	for _, want := range []string{"fak", "responses", "http://127.0.0.1:8137/v1", "OPENAI_API_KEY", "codex login"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("printGuardCodexNote output missing %q\n got: %s", want, out)
+		}
+	}
+	if strings.Contains(out, "not yet wired") {
+		t.Fatalf("default Codex note still claims subscription auth is unwired: %s", out)
+	}
+
+	b.Reset()
+	printGuardCodexNote(&b, guardCodexInstall{
+		Applied:    true,
+		ProviderID: "fak",
+		EnvKey:     "OPENAI_API_KEY",
+		BaseURL:    "http://127.0.0.1:8137/v1",
+		AuthMode:   "chatgpt",
+		AuthSource: "C:/tmp/codex/auth.json",
+	})
+	out = b.String()
+	for _, want := range []string{"ChatGPT subscription", "C:/tmp/codex/auth.json", "placeholder"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("chatgpt Codex note missing %q\n got: %s", want, out)
 		}
 	}
 }

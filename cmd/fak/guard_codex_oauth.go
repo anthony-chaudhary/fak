@@ -7,41 +7,28 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
-// guard_codex_oauth.go — the Codex ChatGPT-SUBSCRIPTION credential resolver: the OpenAI
-// twin of resolveAnthropicOAuthToken (guard.go). It reads the OAuth access token AND the
-// ChatGPT account id that `codex login` writes to <codex-home>/auth.json, so a future
-// `fak guard -- codex` can hold the SUBSCRIPTION credential upstream the same way the
-// Claude path holds the Pro/Max OAuth token — instead of requiring an OPENAI_API_KEY
-// (API billing, the only Codex auth `fak guard` wires today).
+// guard_codex_oauth.go — the Codex ChatGPT-subscription credential path. It reads the
+// OAuth access token AND the ChatGPT account id that `codex login` writes to
+// <codex-home>/auth.json, then gives `fak guard -- codex` the two provider-specific bits
+// the ordinary OpenAI API-key path does not have:
 //
-// HONEST FENCE — why this file is the RESOLVER only, not the whole subscription wiring.
-// The Codex subscription path differs from Claude in two ways the resolver alone does
-// not close, so they are named follow-ons (see the plan doc,
-// docs/notes/CODEX-GUARD-SUBSCRIPTION-OAUTH-2026-06-30.md):
+//   - the subscription token is sent to the ChatGPT Codex backend, not api.openai.com;
+//   - every upstream request carries ChatGPT-Account-Id beside the bearer token.
 //
-//  1. DIFFERENT UPSTREAM. Claude's OAuth token goes to the SAME host (api.anthropic.com)
-//     with only a different auth scheme (Bearer + the oauth beta), which the anthropic
-//     adapter already picks by token shape (IsAnthropicOAuthToken). Codex's subscription
-//     token does NOT go to api.openai.com — it goes to the ChatGPT backend
-//     (https://chatgpt.com/backend-api/codex) on the Responses wire. So the guard's
-//     resolved base URL must repoint there when this credential is held.
-//  2. EXTRA REQUIRED HEADER. The ChatGPT backend needs `ChatGPT-Account-Id: <id>`
-//     alongside the bearer; drop it and it 401/403s. The current Responses adapter
-//     (internal/agent/adapters.go openAIResponsesAdapter.Headers) emits only
-//     `Authorization: Bearer` and has no seam for a per-request extra header — that seam
-//     is a separate, reviewed increment.
-//
-// This resolver is the FOUNDATION both follow-ons build on: it extracts the token AND the
-// account id as a MATCHED PAIR from the one file that holds both, so a later wiring change
-// can never send a mismatched account id (a documented 401 cause). It is pure + read-only
-// and NOTHING calls it yet, so shipping it changes no live path — exactly how
-// codexMemoryBackend shipped ahead of its one-line dispatch wiring (memq_codex.go).
+// The resolver extracts the token and account id as a MATCHED PAIR from the same auth.json,
+// so the guard never combines one account's token with another account's routing header.
 
 // codexAuthFileName is the credential file `codex login` writes under the Codex home
 // (CODEX_HOME, else ~/.codex). Matches the file `codex login` maintains and refreshes.
 const codexAuthFileName = "auth.json"
+
+const (
+	guardCodexChatGPTBackendBaseURL = "https://chatgpt.com/backend-api/codex"
+	guardCodexChatGPTAccountHeader  = "ChatGPT-Account-Id"
+)
 
 // codexSubscriptionCredential is the resolved Codex ChatGPT-subscription credential: the
 // OAuth access token `codex login` holds and the ChatGPT account id the backend requires
@@ -120,12 +107,66 @@ func parseCodexSubscriptionCredential(raw []byte, source string) (codexSubscript
 		return codexSubscriptionCredential{AuthMode: mode, Source: source}, fmt.Errorf(
 			"no Codex ChatGPT-subscription token in %s (auth_mode=%q) — run `codex login`, or export OPENAI_API_KEY for API billing", source, mode)
 	}
+	accountID := codexAccountID(doc)
+	if accountID == "" {
+		return codexSubscriptionCredential{AccessToken: tok, AuthMode: mode, Source: source}, fmt.Errorf(
+			"no Codex ChatGPT account id in %s (auth_mode=%q) — run `codex login` again, or export OPENAI_API_KEY for API billing", source, mode)
+	}
 	return codexSubscriptionCredential{
 		AccessToken: tok,
-		AccountID:   codexAccountID(doc),
+		AccountID:   accountID,
 		AuthMode:    mode,
 		Source:      source,
 	}, nil
+}
+
+func guardCodexSubscriptionEligible(command []string, provider, baseURLFlag, remoteServeBase, apiKeyEnv string) bool {
+	return len(command) > 0 &&
+		guardIsCodex(command[0]) &&
+		strings.TrimSpace(provider) == "openai-responses" &&
+		strings.TrimSpace(baseURLFlag) == "" &&
+		strings.TrimSpace(remoteServeBase) == "" &&
+		strings.TrimSpace(apiKeyEnv) == ""
+}
+
+func guardCodexSubscriptionHeaders(cred codexSubscriptionCredential) map[string]string {
+	if strings.TrimSpace(cred.AccountID) == "" {
+		return nil
+	}
+	return map[string]string{guardCodexChatGPTAccountHeader: strings.TrimSpace(cred.AccountID)}
+}
+
+func newCodexSubscriptionRefreshers(codexHomeFlag string, first codexSubscriptionCredential) (func() string, func() map[string]string) {
+	var mu sync.Mutex
+	last := first
+	resolve := func() (codexSubscriptionCredential, bool) {
+		cred, err := resolveCodexSubscriptionCredential(codexHomeFlag)
+		if err != nil {
+			return codexSubscriptionCredential{}, false
+		}
+		mu.Lock()
+		last = cred
+		mu.Unlock()
+		return cred, true
+	}
+	token := func() string {
+		if cred, ok := resolve(); ok {
+			return cred.AccessToken
+		}
+		return ""
+	}
+	headers := func() map[string]string {
+		mu.Lock()
+		cred := last
+		mu.Unlock()
+		if strings.TrimSpace(cred.AccountID) == "" {
+			if fresh, ok := resolve(); ok {
+				cred = fresh
+			}
+		}
+		return guardCodexSubscriptionHeaders(cred)
+	}
+	return token, headers
 }
 
 // codexAuthMode reports the login mode. It honors an explicit auth_mode, else infers:

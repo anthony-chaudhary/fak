@@ -422,6 +422,29 @@ func TestBuildGuardChildIncludesRestartEnv(t *testing.T) {
 	}
 }
 
+func TestGuardChildTerminalRestorePulseCodexOnly(t *testing.T) {
+	var calls [][2]time.Duration
+	orig := startGuardChildTerminalRestorePulse
+	startGuardChildTerminalRestorePulse = func(duration, interval time.Duration) {
+		calls = append(calls, [2]time.Duration{duration, interval})
+	}
+	defer func() { startGuardChildTerminalRestorePulse = orig }()
+
+	maybeStartGuardChildTerminalRestorePulse(nil)
+	maybeStartGuardChildTerminalRestorePulse([]string{"claude"})
+	if len(calls) != 0 {
+		t.Fatalf("non-Codex commands started restore pulse: %v", calls)
+	}
+
+	maybeStartGuardChildTerminalRestorePulse([]string{"codex", "exec"})
+	if len(calls) != 1 {
+		t.Fatalf("Codex command started %d pulses, want 1", len(calls))
+	}
+	if calls[0][0] != guardCodexTerminalRestorePulseDuration || calls[0][1] != guardCodexTerminalRestorePulseInterval {
+		t.Fatalf("pulse durations = %v, want %v/%v", calls[0], guardCodexTerminalRestorePulseDuration, guardCodexTerminalRestorePulseInterval)
+	}
+}
+
 func TestGuardSpawnBrokerDeniedBeforeLauncher(t *testing.T) {
 	broker := toolprocgate.NewSpawnBroker()
 	called := false

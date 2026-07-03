@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -27,12 +28,10 @@ import (
 // call crosses the same capability floor as the Claude path, and the gateway proxies
 // upstream on the Responses wire.
 //
-// Credential posture (the honest fence). The injected provider authenticates with an API
-// key read from env_key (default OPENAI_API_KEY); the child sends it to the gateway and
-// the gateway forwards it upstream (or substitutes the --api-key-env key). This is the
-// API-billing path. A Codex ChatGPT subscription login (`codex login`) is NOT yet wired
-// through guard the way the Claude Pro/Max subscription is — that is a named follow-on, not
-// a claim this path makes.
+// Credential posture. The injected provider authenticates to the local gateway with an
+// env_key (default OPENAI_API_KEY). On the API-key path that key is the upstream secret
+// selected by --api-key-env or the client. On the ChatGPT-subscription path, guard holds
+// the real `codex login` OAuth token upstream and gives the child only a placeholder key.
 
 // guardCodexProviderID is the model-provider id `fak guard` defines in Codex's config for
 // the gateway. It must avoid Codex's reserved built-in ids (openai, ollama, lmstudio), so
@@ -61,6 +60,24 @@ type guardCodexInstall struct {
 	ProviderID string
 	EnvKey     string
 	BaseURL    string
+	AuthMode   string
+	AuthSource string
+}
+
+const (
+	guardCodexLocalPlaceholderAPIKey = "fak-local-codex-placeholder"
+	guardCodexOAuthPlaceholderAPIKey = "fak-guard-oauth-placeholder"
+	guardCodexDefaultModelID         = "gpt-5.5"
+)
+
+func guardCodexGatewayModel(command []string, model, provider string) string {
+	if strings.TrimSpace(model) != "" {
+		return strings.TrimSpace(model)
+	}
+	if len(command) > 0 && guardIsCodex(command[0]) && strings.TrimSpace(provider) == "openai-responses" {
+		return guardCodexDefaultModelID
+	}
+	return model
 }
 
 // guardCodexConfigArgs builds the ordered `-c key=value` override arguments that point
@@ -124,14 +141,47 @@ func installGuardCodexConfig(command []string, enabled bool, gwURL, apiKeyEnv st
 	}
 }
 
+// guardCodexAuthEnv returns any explicit env grant the Codex child needs for the injected
+// provider. Codex validates model_providers.fak.env_key before the first turn, so an absent
+// key otherwise surfaces as an opaque Codex startup error after plugin loading. For API
+// billing, hand the resolved key to the child explicitly; for pure local in-kernel mode, a
+// placeholder is enough because the gateway never proxies to an upstream provider.
+func guardCodexAuthEnv(in guardCodexInstall, upstreamAPIKey string, localOnly bool, getenv func(string) string) ([][2]string, error) {
+	if !in.Applied {
+		return nil, nil
+	}
+	envKey := strings.TrimSpace(in.EnvKey)
+	if envKey == "" {
+		return nil, errors.New("Codex provider env_key is empty")
+	}
+	if in.AuthMode == "chatgpt" {
+		return [][2]string{{envKey, guardCodexOAuthPlaceholderAPIKey}}, nil
+	}
+	if strings.TrimSpace(upstreamAPIKey) != "" {
+		return [][2]string{{envKey, upstreamAPIKey}}, nil
+	}
+	if getenv == nil {
+		getenv = func(string) string { return "" }
+	}
+	if strings.TrimSpace(getenv(envKey)) != "" {
+		return nil, nil
+	}
+	if localOnly {
+		return [][2]string{{envKey, guardCodexLocalPlaceholderAPIKey}}, nil
+	}
+	return nil, fmt.Errorf("Codex provider env $%s is empty and no ChatGPT subscription auth.json was resolved. Run `codex login`, export %s, or pass --api-key-env VAR. For a local or no-auth OpenAI-compatible upstream, set %s to any non-empty placeholder.", envKey, envKey, envKey)
+}
+
 // printGuardCodexNote explains the Codex repoint on the banner: the gateway provider that
-// was injected, the wire, and the credential env var the child must hold. It also names the
-// honest fence (API-key billing, not the ChatGPT subscription) so a subscription-only user
-// is told why a missing OPENAI_API_KEY would fail rather than hitting an opaque Codex error.
+// was injected, the wire, and the credential posture the child sees.
 func printGuardCodexNote(w io.Writer, in guardCodexInstall) {
 	if !in.Applied {
 		return
 	}
 	fmt.Fprintf(w, "fak guard: Codex wired via -c model_provider=%s (wire_api=responses, base_url=%s) — every tool call crosses the kernel floor\n", in.ProviderID, in.BaseURL)
-	fmt.Fprintf(w, "fak guard: Codex upstream auth — API key from $%s (forwarded upstream). A `codex login` ChatGPT subscription is not yet wired through guard; export %s for first-class `fak guard -- codex`.\n", in.EnvKey, in.EnvKey)
+	if in.AuthMode == "chatgpt" {
+		fmt.Fprintf(w, "fak guard: Codex upstream auth — ChatGPT subscription from %s (token held by guard; child sees $%s placeholder)\n", in.AuthSource, in.EnvKey)
+		return
+	}
+	fmt.Fprintf(w, "fak guard: Codex upstream auth — API key from $%s when API billing is selected; `codex login` is used automatically when a ChatGPT subscription auth.json is present.\n", in.EnvKey)
 }

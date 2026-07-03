@@ -811,10 +811,11 @@ func cmdGuard(argv []string) {
 		startupPhases = append(startupPhases, gateway.StartupPhase{Name: "tokenizer-load", Dur: tokenizerLoadDur})
 	}
 	startupPhases = append(startupPhases, gateway.StartupPhase{Name: "listener-bind", Dur: listenDur})
+	gatewayModel := guardCodexGatewayModel(command, *model, up)
 
 	srv, err := gateway.New(gateway.Config{
 		EngineID: "inkernel",
-		Model:    *model,
+		Model:    gatewayModel,
 		BaseURL:  resolvedBase,
 		Provider: up,
 		APIKey:   apiKey,
@@ -824,6 +825,8 @@ func cmdGuard(argv []string) {
 		APIKeyFunc:       apiKeyFunc,
 		ExtraHeaders:     extraHeaders,
 		ExtraHeadersFunc: extraHeadersFunc,
+		ForceResponsesStream: pinUpstream && up == "openai-responses" &&
+			strings.TrimRight(resolvedBase, "/") == guardCodexChatGPTBackendBaseURL,
 		// On an ACCOUNT-SCOPED 403 wall (org OAuth disabled / region / billing), fail over to a
 		// permitted sibling account instead of surfacing a 403 that no re-login can fix. nil on
 		// every non-pinned path (and when the home root is unresolvable), preserving the

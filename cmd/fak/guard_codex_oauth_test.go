@@ -111,6 +111,20 @@ func TestParseCodexSubscriptionCredential(t *testing.T) {
 		}
 	})
 
+	t.Run("account id is required beside the token", func(t *testing.T) {
+		raw := []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"at-no-account"}}`)
+		got, err := parseCodexSubscriptionCredential(raw, "auth.json")
+		if err == nil {
+			t.Fatalf("expected an error for a token without account id, got credential %+v", got)
+		}
+		if got.AccessToken != "at-no-account" {
+			t.Errorf("AccessToken on miss = %q, want the parsed token for diagnostics", got.AccessToken)
+		}
+		if !strings.Contains(err.Error(), "account id") {
+			t.Errorf("missing-account error = %q, want account id hint", err)
+		}
+	})
+
 	t.Run("malformed JSON errors", func(t *testing.T) {
 		if _, err := parseCodexSubscriptionCredential([]byte(`{not json`), "auth.json"); err == nil {
 			t.Error("expected a parse error for malformed JSON")
@@ -184,5 +198,32 @@ func TestResolveCodexSubscriptionCredentialHonorsCodexHome(t *testing.T) {
 	}
 	if got.AccessToken != "at-env" || got.AccountID != "acct-env" {
 		t.Errorf("resolve = %+v, want token at-env / account acct-env from CODEX_HOME", got)
+	}
+}
+
+func TestGuardCodexSubscriptionEligible(t *testing.T) {
+	cases := []struct {
+		name        string
+		command     []string
+		provider    string
+		baseURL     string
+		remoteServe string
+		apiKeyEnv   string
+		want        bool
+	}{
+		{"default codex responses", []string{"codex"}, "openai-responses", "", "", "", true},
+		{"non-codex", []string{"claude"}, "openai-responses", "", "", "", false},
+		{"plain openai provider", []string{"codex"}, "openai", "", "", "", false},
+		{"explicit base url keeps operator upstream", []string{"codex"}, "openai-responses", "https://api.openai.com/v1", "", "", false},
+		{"remote serve keeps operator upstream", []string{"codex"}, "openai-responses", "", "http://gpu:8080", "", false},
+		{"explicit api key env keeps API billing opt-in", []string{"codex"}, "openai-responses", "", "", "OPENAI_API_KEY", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := guardCodexSubscriptionEligible(tc.command, tc.provider, tc.baseURL, tc.remoteServe, tc.apiKeyEnv)
+			if got != tc.want {
+				t.Fatalf("eligible = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
