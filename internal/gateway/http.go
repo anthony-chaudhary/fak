@@ -950,12 +950,14 @@ func denySummary(adjs []ToolAdjudication) string {
 func adjudicationNote(adjs []ToolAdjudication) string {
 	denied := make([]string, 0, len(adjs))
 	repaired := make([]string, 0, len(adjs))
+	hasConfirmRecipe := false
 	for _, a := range adjs {
 		switch {
 		case !a.Admitted:
 			entry := fmt.Sprintf("%s (%s/%s)", a.Tool, reasonOrKind(a.Verdict), a.Verdict.Disposition)
 			if note := reversibilityGateNote(a); note != "" {
 				entry += " " + note
+				hasConfirmRecipe = true
 			}
 			if note := remedyNote(a); note != "" {
 				entry += " " + note
@@ -977,8 +979,21 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 		b.WriteString("refused ")
 		b.WriteString(strconv.Itoa(len(denied)))
 		b.WriteString(" tool call(s): ")
-		b.WriteString(strings.Join(denied, "; "))
-		b.WriteString(". Do not re-propose a refused call unchanged; choose an allowed alternative.")
+		joined := strings.Join(denied, "; ")
+		b.WriteString(joined)
+		if !strings.HasSuffix(joined, ".") {
+			b.WriteString(".")
+		}
+		// The blanket "do not re-propose" trailer contradicts the preview-confirm
+		// recipe, whose sanctioned recovery IS re-proposing the same call (plus the
+		// confirm key). Witnessed wedging a fleet session for 1h+: the agent obeyed
+		// the trailer, never echoed the token, and the push never happened. When any
+		// denied call carries a confirm recipe, the trailer must except it.
+		if hasConfirmRecipe {
+			b.WriteString(" A preview-confirm refusal is a pause, not a denial: the sanctioned next step is to re-propose that same call with only the _fak_confirm key added. Do not re-propose any other refused call unchanged; choose an allowed alternative.")
+		} else {
+			b.WriteString(" Do not re-propose a refused call unchanged; choose an allowed alternative.")
+		}
 	}
 	if len(repaired) > 0 {
 		if len(denied) > 0 {

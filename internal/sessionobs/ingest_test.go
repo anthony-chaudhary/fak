@@ -150,15 +150,19 @@ func TestFoldCountsGuardRefusals(t *testing.T) {
 		// a user tool_result that merely QUOTES the full banner (a Read of this file or a gateway
 		// test fixture) lands in a user block -- it must NOT be mistaken for a real refusal.
 		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"// fixture: ... Do not re-propose a refused call unchanged; choose an allowed alternative.","is_error":false}]}}`,
+		// the confirm-aware trailer variant (a preview-confirm refusal was among the denied
+		// calls): the generic "Do not re-propose a refused call unchanged" sentence is replaced
+		// wholesale, so this variant carries its own marker or the refusal goes uncounted.
+		`{"type":"assistant","message":{"id":"g7","role":"assistant","usage":{"output_tokens":11},"content":[{"type":"text","text":"[fak] refused 1 tool call(s): Bash (REQUIRE_WITNESS/ESCALATE) preview-confirm gate: outward-facing command: git push origin main. A preview-confirm refusal is a pause, not a denial: the sanctioned next step is to re-propose that same call with only the _fak_confirm key added. Do not re-propose any other refused call unchanged; choose an allowed alternative."}]}}`,
 	)
 	rec, ev := FoldTranscript(strings.NewReader(tr), FoldMeta{SessionID: "gr"})
-	// g1 deny + g2 all-denied + g6 two-blocks-one-turn = 3. g3 quarantine, g4 benign, g5
-	// casual mention, and the quoting user block all correctly contribute 0.
-	if ev.GuardRefusals != 3 {
-		t.Errorf("GuardRefusals want 3 (deny + kernel-deny + one per-turn; quarantine excluded), got %d", ev.GuardRefusals)
+	// g1 deny + g2 all-denied + g6 two-blocks-one-turn + g7 confirm-aware trailer = 4. g3
+	// quarantine, g4 benign, g5 casual mention, and the quoting user block all contribute 0.
+	if ev.GuardRefusals != 4 {
+		t.Errorf("GuardRefusals want 4 (deny + kernel-deny + one per-turn + confirm-aware trailer; quarantine excluded), got %d", ev.GuardRefusals)
 	}
-	if rec.Signals.GuardRefusals != 3 {
-		t.Errorf("Signals.GuardRefusals must be promoted from evidence, want 3 got %d", rec.Signals.GuardRefusals)
+	if rec.Signals.GuardRefusals != 4 {
+		t.Errorf("Signals.GuardRefusals must be promoted from evidence, want 4 got %d", rec.Signals.GuardRefusals)
 	}
 	// NON-CIRCULARITY: a guard refusal is a behavior FEATURE the contrast ranks, never a
 	// cohort definer. Even with an Edit (Mutated) and refusals present but no stop/commit, the

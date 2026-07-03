@@ -25,6 +25,12 @@ import (
 // the reversibility rung and cannot be confirmed past
 // (TestAdjudicateReversibilityGateDoesNotOverrideHardDeny). The gate is a
 // deliberate acknowledged pause over a bounded preview, not a capability wall.
+//
+// The recipe says "byte-identical" out loud because the token hashes the
+// call's canonical args minus confirm keys: a model that re-proposes with a
+// reworded description or a tweaked command gets a FRESH refusal with a FRESH
+// token, and chases tokens turn after turn instead of converging (witnessed
+// wedging a fleet session for 1h+).
 func reversibilityGateNote(a ToolAdjudication) string {
 	if a.Verdict.Kind != "REQUIRE_WITNESS" || a.Verdict.By != "monitor/reversibility" {
 		return ""
@@ -45,7 +51,7 @@ func reversibilityGateNote(a ToolAdjudication) string {
 	} else {
 		b.WriteString(env.Class)
 	}
-	b.WriteString(`. If this call is deliberate, re-propose it with "_fak_confirm":"`)
+	b.WriteString(`. If this call is deliberate, re-propose it byte-identical — same tool, every other argument unchanged, since any edit issues a different token — with "_fak_confirm":"`)
 	b.WriteString(env.ConfirmToken)
 	b.WriteString(`" added to the tool input (the kernel verifies and strips the key before dispatch, so the tool never sees it)`)
 	if env.DryRunHint != "" {

@@ -119,6 +119,7 @@ var goalDirective = regexp.MustCompile(`(?i)(<command-name>\s*/?goal|^\s*/goal\b
 // already counted on the StopMarks pathway.)
 var guardRefusalMarkers = []string{
 	"Do not re-propose a refused call unchanged",             // adjudicationNote: proposed call(s) denied (Anthropic wire)
+	"A preview-confirm refusal is a pause, not a denial",     // adjudicationNote: denied turn carrying a reversibility confirm recipe (confirm-aware trailer)
 	"All proposed tool calls were refused by the fak kernel", // denySummary: all-denied turn (fak-unaware wires)
 }
 

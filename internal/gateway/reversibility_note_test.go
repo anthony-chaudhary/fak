@@ -33,8 +33,17 @@ func TestAdjudicationNoteCarriesReversibilityConfirmRecipe(t *testing.T) {
 	for _, want := range []string{
 		"PowerShell (REQUIRE_WITNESS/ESCALATE)",
 		"outward-facing command: git push origin main",
+		"re-propose it byte-identical",
 		`"_fak_confirm":"fak-0011223344556677"`,
 		"try git push --dry-run first",
+		// The trailer must sanction the re-propose, not forbid it: the generic
+		// "do not re-propose" trailer alongside the confirm recipe was a live
+		// contradiction that wedged a fleet session (the agent obeyed the
+		// prohibition, never echoed the token, and the push never happened).
+		"A preview-confirm refusal is a pause, not a denial",
+		// The trailer joins the note's terminal period without doubling it
+		// (the old unconditional ". Do not..." rendered "first.. Do not").
+		"try git push --dry-run first. A preview-confirm refusal",
 	} {
 		if !strings.Contains(note, want) {
 			t.Fatalf("adjudicationNote missing %q:\n%s", want, note)
@@ -42,6 +51,31 @@ func TestAdjudicationNoteCarriesReversibilityConfirmRecipe(t *testing.T) {
 	}
 	if strings.Contains(note, "(/ESCALATE)") {
 		t.Fatalf("empty-reason refusal still renders the malformed (/ESCALATE) form:\n%s", note)
+	}
+	if strings.Contains(note, "Do not re-propose a refused call unchanged") {
+		t.Fatalf("confirm recipe still contradicted by the blanket do-not-re-propose trailer:\n%s", note)
+	}
+}
+
+// A turn mixing a preview-confirm refusal with a plain deny gets the
+// confirm-aware trailer: the re-propose sanction for the tokened call, the
+// prohibition scoped to every OTHER refused call.
+func TestAdjudicationNoteTrailerScopesProhibitionWhenMixed(t *testing.T) {
+	plainDeny := ToolAdjudication{
+		Tool:     "Write",
+		Admitted: false,
+		Verdict:  WireVerdict{Kind: "DENY", Reason: "DEFAULT_DENY", Disposition: "TERMINAL"},
+	}
+	note := adjudicationNote([]ToolAdjudication{reversibilityRefusal(), plainDeny})
+	for _, want := range []string{
+		`"_fak_confirm":"fak-0011223344556677"`,
+		"Write (DEFAULT_DENY/TERMINAL)",
+		"A preview-confirm refusal is a pause, not a denial",
+		"Do not re-propose any other refused call unchanged",
+	} {
+		if !strings.Contains(note, want) {
+			t.Fatalf("mixed-refusal note missing %q:\n%s", want, note)
+		}
 	}
 }
 
@@ -94,5 +128,11 @@ func TestAdjudicationNoteKeepsReasonRenderingForPlainDenies(t *testing.T) {
 	}})
 	if !strings.Contains(note, "Write (DEFAULT_DENY/TERMINAL)") {
 		t.Fatalf("plain deny rendering changed:\n%s", note)
+	}
+	// Byte-identical legacy rendering: the pinned fixtures (messages_test.go,
+	// sessionobs) and the transcript-fold marker depend on this exact sentence
+	// for turns with no confirm recipe.
+	if !strings.Contains(note, "Write (DEFAULT_DENY/TERMINAL). Do not re-propose a refused call unchanged; choose an allowed alternative.") {
+		t.Fatalf("plain-deny trailer drifted from the pinned legacy form:\n%s", note)
 	}
 }
