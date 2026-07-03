@@ -63,5 +63,31 @@
     "recheck_days": 14,
     "timeout_sec": 1800,
     "doc": "docs/nightrun/MAC-OVERNIGHT-PLAN-2026-06-28.md"
+  },
+  {
+    "id": "witness-guard-kernel-ablation-mgpu",
+    "title": "fak guard value under a kernel we control: the K1/K2/A1 ablation matrix on an 8-GPU datacenter-class box - the same guarded solved-ticket workload driven against (K1) fak's own inkernel GLM-5.2 serve, (K2) vLLM/SGLang on the same weights+box, (A1) the GLM-5.2 API - each guard-on AND guard-off. Reads the guard-value deltas only kernel control makes measurable: WITNESSED kv_prefix reuse (structurally 0 in proxy mode), clean guard-hop TTFB pricing, wasted-decode tokens on denied canary calls, zero provider-credential child env, and K1 replay-journal determinism.",
+    "source": "overlay",
+    "value": "frontier",
+    "requires": ["cuda", "weights"],
+    "manual": true,
+    "run": "Per docs/notes/GUARD-KERNEL-CONTROL-ABLATION-2026-07-03.md section 2: K1 serve via tools/glm52_mgpu_serve.sh (or tools/glm52_stage_serve_dgx3.sh on sm_80) -> fak swebench run --agent fleet --gateway 127.0.0.1:8080 --model glm-5.2 --filter smoke, wrapped in fak guard --audit for the guard-on cell; K2 via tools/glm52_sglang_vllm_serve.sh same workload; A1 same workload with the guard's upstream at the Z.ai GLM-5.2 API. Per cell capture: the hash-chained guard journal, fak swebench cache-witness --gateway ... --out <cell>/cache-witness.json, the gateway-usage exit row, and per-turn TTFB. Canary turn per guard-on cell: append a delete_account-class destructive tool call and assert POLICY_BLOCK (trychatdemo liveWitness pattern).",
+    "acceptance": "an experiments/benchmark/runs artifact with one row per matrix cell holding journal path + cache-witness.json + usage row; headline: K1 kv_prefix.reused_tokens > 0 (WITNESSED) beside A1 provider cache_read (OBSERVED), the guard-on-minus-off TTFB delta distribution on K1/K2, canary POLICY_BLOCK rows in every guard-on cell, and the K1 double-run journal byte-diff result",
+    "recheck_days": 30,
+    "timeout_sec": 14400,
+    "doc": "docs/notes/GUARD-KERNEL-CONTROL-ABLATION-2026-07-03.md"
+  },
+  {
+    "id": "witness-guard-hop-live-kernel",
+    "title": "Close the guard-hop latency RSI loop against a live serve we control: guard-on vs guard-off TTFB delta per turn with fak serve as the upstream, on ANY CUDA box with ANY supported weights (does NOT need GLM-5.2 - a small model isolates the hop better). Unsticks tools/guard_hop_rsi.py from PENDING_MEASUREMENT: against an API upstream, provider jitter swamps the ~us adjudication cost; against our own serve the hop is cleanly priceable.",
+    "source": "overlay",
+    "value": "witness",
+    "requires": ["cuda", "weights"],
+    "manual": true,
+    "run": "fak serve --engine inkernel --backend cuda with a small resident model (e.g. qwen2.5-3b Q8_0) -> run the tools/guard_hop_bench.py protocol twice: agent -> gateway direct (guard-off baseline) and fak guard --audit -- <same agent> (guard-on), same prompt set, warm serve, >= 30 turns per arm; record the per-turn TTFB distributions and the on-minus-off delta.",
+    "acceptance": "a recorded guard-on vs guard-off TTFB delta distribution (median + p95) against a live fak-kernel serve, labelled WITNESSED-derived timing, folded back into tools/guard_hop_rsi.py so its keep-bit reflects a real measurement instead of PENDING_MEASUREMENT",
+    "recheck_days": 30,
+    "timeout_sec": 3600,
+    "doc": "docs/notes/GUARD-KERNEL-CONTROL-ABLATION-2026-07-03.md"
   }
 ]
