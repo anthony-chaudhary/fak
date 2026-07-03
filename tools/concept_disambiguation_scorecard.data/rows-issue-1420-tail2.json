@@ -1,0 +1,34 @@
+{
+  "rows": [
+    {
+      "id": "x-issue1420-render-materialize-renderslack",
+      "canonical": "RenderSlack (sidecar Slack renderer)",
+      "family": "render-materialize",
+      "kind": "concept",
+      "definition": "RenderSlack (internal/sidecar/render.go) materializes a sidecar Pane as a Slack Block Kit payload ([]any of blocks), walking the same Sections() sequence its sibling RenderText walks so terminal and Slack carry the identical core-field order by construction.",
+      "distinction": "The Slack Block Kit materializer over a sidecar Pane - NOT RenderText (the sibling that materializes the same Pane as a terminal string) and NOT renderSlackRefresh / renderSlackWalk (cmd/fak/slack_refresh.go account-refresh output helpers that are unrelated to the sidecar pane).",
+      "distinct_from": ["x-issue1420-session-runtime-sessionrows"],
+      "aliases": [],
+      "grounding": "RenderSlack",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-session-runtime-sessionrows",
+      "canonical": "SessionRows (sidecar census input slice)",
+      "family": "session-runtime",
+      "kind": "concept",
+      "definition": "SessionRows (internal/sidecar/sidecar.go) is the []SessionRow slice on the sidecar Inputs bundle carrying the collected fleet-session census rows into foldSessions, which folds them with the Sessions PlaneInput status into the rendered Sessions plane.",
+      "distinction": "The plural input slice of collected session census rows - NOT SessionRow (the singular row element type it holds) and NOT Sessions (the PlaneInput measurement-status for the same plane) and NOT tuiSessionRow (the terminal-overview render struct).",
+      "distinct_from": ["x-issue1420-render-materialize-renderslack"],
+      "aliases": [],
+      "grounding": "SessionRows",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
