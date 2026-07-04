@@ -210,11 +210,16 @@ func (s *Store) PageOut(ctx context.Context, r abi.Ref) (abi.Ref, error) {
 	if err != nil {
 		return abi.Ref{}, err
 	}
-	stored, err := s.Put(ctx, b)
-	if err != nil {
+	// Persist unconditionally (commit, not Put): page-out's contract is "bytes out
+	// of context behind a pointer", so even a small body must land on the remote —
+	// Put's inline shortcut would return a RefBlob handle whose bytes were never
+	// uploaded, so PageIn/Resolve would 404 and the payload would be lost. The
+	// in-memory and on-disk siblings persist a small page-out the same way.
+	d := blob.Digest(b)
+	if err := s.commit(ctx, d, b); err != nil {
 		return abi.Ref{}, err
 	}
-	return abi.Ref{Kind: abi.RefBlob, Digest: stored.Digest, Len: int64(len(b)), Taint: r.Taint, Scope: r.Scope}, nil
+	return abi.Ref{Kind: abi.RefBlob, Digest: d, Len: int64(len(b)), Taint: r.Taint, Scope: r.Scope}, nil
 }
 
 // PageIn re-materializes a paged-out handle Ref into an inline Ref.

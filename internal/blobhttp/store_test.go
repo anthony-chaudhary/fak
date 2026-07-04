@@ -194,6 +194,44 @@ func TestPageOutPageIn(t *testing.T) {
 	}
 }
 
+// TestPageOutSmallPayloadResolves is the small-body page-out proof. Page-out's
+// contract is "bytes out of context behind a RESOLVABLE pointer", so even a body
+// at or below InlineMax must land on the remote and its RefBlob handle must
+// resolve — the in-memory (blob) and on-disk (blobfs) siblings persist a small
+// page-out the same way. Regression guard: PageOut must NOT take Put's inline
+// shortcut, which would return a RefBlob handle whose bytes were never uploaded, so
+// PageIn/Resolve would 404 and a small paged-out body (e.g. a ~50-byte quarantined
+// injection string) would be silently lost.
+func TestPageOutSmallPayloadResolves(t *testing.T) {
+	obj := newObjectServer()
+	srv := httptest.NewServer(obj)
+	defer srv.Close()
+	ctx := context.Background()
+	s := New(srv.URL)
+
+	// A body <= InlineMax: the size that rides inline on a Put and would otherwise
+	// never reach the remote.
+	body := payload(50, 'q')
+	handle, err := s.PageOut(ctx, abi.Ref{Kind: abi.RefInline, Inline: body, Len: int64(len(body))})
+	if err != nil {
+		t.Fatalf("PageOut(small): %v", err)
+	}
+	if handle.Kind != abi.RefBlob || len(handle.Inline) != 0 {
+		t.Fatalf("page-out handle must be a bytes-absent RefBlob, got %+v", handle)
+	}
+	// The bytes must actually be on the remote — page-out is "out of context".
+	if obj.puts != 1 {
+		t.Fatalf("small page-out did not upload to the remote: saw %d PUTs, want 1", obj.puts)
+	}
+	back, err := s.PageIn(ctx, handle)
+	if err != nil {
+		t.Fatalf("PageIn(small handle): %v (the paged-out bytes were lost)", err)
+	}
+	if !bytes.Equal(back.Inline, body) {
+		t.Fatalf("page-in bytes differ from the small paged-out body")
+	}
+}
+
 func TestDelete(t *testing.T) {
 	srv := httptest.NewServer(newObjectServer())
 	defer srv.Close()
