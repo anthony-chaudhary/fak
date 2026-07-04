@@ -164,6 +164,7 @@ Useful readouts:
 ```powershell
 python tools/dispatch_status.py
 go run ./cmd/fak dispatch progress --target 50
+go run ./cmd/fak loop economics --ledger .fak/loops.jsonl
 go run ./cmd/fak superloop walk drain-issues
 go run ./cmd/fak superloop walk improve-quality
 go run ./cmd/fak vcache status
@@ -172,6 +173,48 @@ go run ./cmd/fak vcache status
 Read these as control surfaces, not as automatic proof of savings. The proof for a
 specific claim is the witness behind the row: a provider cache metric, a fak-authored
 token-equivalent witness, a closure audit, or an explicit `not yet`.
+
+## The Loop-Economics Readout
+
+`fak loop economics` folds the loop ledger (`.fak/loops.jsonl`) into one readout that
+answers "did the loop save tokens, wall time, worker attention, or retries versus the
+real baseline?" — and keeps the four claim classes separate so a row is never read as
+a stronger claim than its witness supports. It reads only the hash-chained ledger and
+writes nothing.
+
+The **witnessed** block is derived purely from the recorded events and the dispatch
+progress / worker / cooldown metrics they carry:
+
+| Field | How to read it | Do not read it as |
+|---|---|---|
+| `baseline_open` / `observed_open` | The open-issue count the loop started from vs. the most recent snapshot | A billing figure |
+| `issues_closed_by_loop` | Peak cumulative issues the loop witnessed-closed | Issues closed *because of* one mechanism |
+| `close_rate` | `closed / (closed + observed_open)` — the share of the loop's lifetime worklist witnessed-closed | A guarantee about future issues |
+| `retry_rate` | `refused / fires` — the share of ticks the governor braked (cooldown, cap, collision) instead of re-spawning | A per-issue failure rate |
+| `duplicate_attempts_avoided` | Refused admissions — spawns the governor declined, i.e. worker+token spend a naive always-spawn loop would have burned | A measured token count |
+| `effective_workers` / `worker_cap` | Peak concurrent workers observed vs. the configured cap | Sustained parallelism |
+| `wall_time_seconds` | Summed measured run durations (`run_durations`), else the event-window span (`window_span`) | Human attention time |
+
+The **token-equivalent saved** accounts are kept strictly separate and each defaults to
+`not_yet` — the readout never invents a saving the ledger cannot prove:
+
+- **provider cache** — a provider prompt-cache/billing benefit. *Observed, not owned by
+  fak.* Stays `not_yet` until you fold a provider figure with `--provider-cache-tokens`.
+- **fak-authored** — token-equivalent work fak removed/reused/served itself. Witnessed
+  only with a proof for that mechanism (`--fak-authored-tokens`); `not_yet` otherwise.
+- **modeled** — a projection, `duplicate_attempts_avoided * tokens_per_avoided`, for
+  planning only. Never a billing claim; `not_yet` until you supply
+  `--modeled-tokens-per-avoided` with your own per-attempt estimate.
+
+The `not_yet` array names every field with no witness in the given inputs, so a real `0`
+(or an un-owned account) is never mistaken for a proven win. A rate whose denominator was
+zero (`close_rate`, `retry_rate`) is reported as `not_yet` rather than a misleading `0%`.
+
+What this readout does **not** yet auto-fold — the honest next step — is the external
+token witnesses: the gateway cache-saved token metrics and the closure-audit/benchmark
+scorecards are folded only when an operator passes them as explicit figures. Auto-folding
+those sources (so provider/fak-authored populate without an operator input) is the
+follow-on to this leaf.
 
 ## The Product Claim
 

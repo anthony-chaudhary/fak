@@ -45,6 +45,8 @@ func runLoop(stdout, stderr io.Writer, argv []string) int {
 		return runLoopHealth(stdout, stderr, argv[1:])
 	case "rollup":
 		return runLoopRollup(stdout, stderr, argv[1:])
+	case "economics":
+		return runLoopEconomics(stdout, stderr, argv[1:])
 	case "admit":
 		return runLoopAdmit(stdout, stderr, argv[1:])
 	case "region":
@@ -1485,6 +1487,8 @@ func loopUsage(w io.Writer) {
   fak loop status [--ledger FILE] [--json]
   fak loop health [--ledger FILE] [--registry FILE] [--check] [--json]
   fak loop rollup [--ledger PATH|NODE=PATH ...] [--dir DIR] [--glob '*.jsonl'] [--json]
+  fak loop economics [--ledger FILE] [--loop ID] [--provider-cache-tokens N]
+                  [--fak-authored-tokens N] [--modeled-tokens-per-avoided N] [--json]
   fak loop admit [--loop ID] [--ledger FILE] [--policy FILE] [--json]
   fak loop region [--lane LANE] [--tree GLOB ...] [--actor ID] [--self LEASE-ID]
                   [--dir DIR] [--json]
@@ -1506,7 +1510,12 @@ renders live/stale/dark-loop state plus current learning_debt for the
 docs-freshness loop. Rollup folds MANY nodes' ledgers into one fleet-wide "how
 often did every loop run" view — per-loop run counts, cadence, and last-run —
 reusing the fak ps table format; it is a read-only aggregation that ingests
-journals and writes nothing. Admit applies the tunable
+journals and writes nothing. Economics folds that same ledger into one honest
+loop-economics readout — baseline vs observed open count, close/retry rate,
+duplicate attempts avoided, effective workers, and wall time as WITNESSED figures —
+and keeps the provider-cache, fak-authored, and modeled token-saving accounts
+strictly separate, each defaulting to not_yet until an explicit witness is folded so
+it never invents a saving the ledger cannot prove. Admit applies the tunable
 admission policy (default .fak/loop-policy.json, FAK_LOOP_POLICY) to the fold and
 prints admit/refuse per loop — exit 3 when any evaluated loop is refused, so a
 scheduler line can gate work on it. Recover folds the ledger into the cross-run
