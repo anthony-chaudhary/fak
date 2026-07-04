@@ -1035,12 +1035,17 @@ def unwrap_opencode_npm_shim(exe: str) -> str:
     if _command_basename(exe) not in {"opencode", "opencode.exe", "opencode.cmd",
                                       "opencode.bat", "opencode.ps1"}:
         return ""
-    parent = Path(exe).parent
-    if str(parent) in ("", "."):
+    raw = os.fspath(exe)
+    parent_idx = max(raw.rfind("/"), raw.rfind("\\"))
+    if parent_idx < 0:
         return ""
-    target = parent / "node_modules" / "opencode-ai" / "bin" / "opencode.exe"
+    parent = raw[:parent_idx]
+    if parent in ("", "."):
+        return ""
+    sep = raw[parent_idx]
+    target = sep.join((parent, "node_modules", "opencode-ai", "bin", "opencode.exe"))
     try:
-        return str(target) if target.is_file() else ""
+        return target if os.path.isfile(target) else ""
     except OSError:
         return ""
 
