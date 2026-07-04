@@ -1066,6 +1066,23 @@ func TestFormatAuditSummary(t *testing.T) {
 		}
 	}
 
+	// burst_unprofitable is the WARM continuously-active long-session bail: a shed-able middle
+	// but no repaying turn-horizon and not idle past the message-cache TTL, so the burst economics
+	// keep the warm cache. The diagnostic must NAME it apart from anchor-starved and point at the
+	// real fix (a bounded budget or an idle gap), so "F is ~0" reads as working-as-designed.
+	burstUnprofitable := formatAuditSummary(gateway.AdjudicationSummary{
+		Total: 1, Allowed: 1,
+		CachedPromptTokens:    100,
+		CompactionBailed:      1,
+		CompactionBudget:      48000,
+		CompactionBailReasons: map[string]uint64{"burst_unprofitable": 1},
+	})
+	for _, want := range []string{"fak-slice diagnostic", "burst-unprofitable x1", "bounded turn/context budget"} {
+		if !strings.Contains(burstUnprofitable, want) {
+			t.Errorf("burst-unprofitable zero-slice diagnostic missing %q:\n%s", want, burstUnprofitable)
+		}
+	}
+
 	// Tool-floor prune (the INBOUND tools[] lever): when fak dropped unreachable tool defs the
 	// line names the count + turns. This is the lever that was previously INVISIBLE — its result
 	// was discarded with no metric, so the operator could not tell a delivering prune from a no-op.

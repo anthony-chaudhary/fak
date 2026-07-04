@@ -59,6 +59,51 @@ func TestToGatewaySessionTimeProjection(t *testing.T) {
 	})
 }
 
+// TestToGatewaySessionBudgetProjectsContextSignals pins the two signals the outbound-compaction
+// burst gate reads on a context-budgeted-but-turn-unbounded session: the context ceiling
+// (Budget.ContextTokensCap) and the last debited turn's resident window (Cost.LatestContextTokens).
+// Before these were projected, a headless `fak guard -- claude` with a --context-budget-tokens but
+// no turn budget crossed the wire with no way to reason about its remaining horizon. The
+// un-budgeted default must still project both as zero so its wire form is unchanged.
+func TestToGatewaySessionBudgetProjectsContextSignals(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0)
+
+	t.Run("context-budgeted session carries cap and last resident", func(t *testing.T) {
+		// Construct the ring via its exported fields (push is package-private): one debited turn
+		// whose resident window was 52000 tokens, at ring head 1 / count 1.
+		ring := session.CostRing{Count: 1, Head: 1}
+		ring.Turns[0] = session.TurnCost{OutputTokens: 300, ContextTokens: 52000}
+		st := session.State{
+			TraceID: "sess-ctx",
+			Run:     session.Running,
+			Budget: session.Budget{
+				TurnsLeft:         session.Unbounded, // no turn horizon — the common headless shape
+				TokensLeft:        session.Unbounded,
+				ContextTokensLeft: 12000,
+				ContextTokensCap:  64000,
+			},
+			Cost: ring,
+		}
+		got := toGatewaySessionStateAt(st, base).Budget
+		if got.ContextTokensCap != 64000 {
+			t.Fatalf("ContextTokensCap = %d, want 64000", got.ContextTokensCap)
+		}
+		if got.ResidentContextTokens != 52000 {
+			t.Fatalf("ResidentContextTokens = %d, want 52000 (last debited turn's resident window)", got.ResidentContextTokens)
+		}
+		if got.ContextTokensLeft != 12000 {
+			t.Fatalf("ContextTokensLeft = %d, want 12000 (unchanged)", got.ContextTokensLeft)
+		}
+	})
+
+	t.Run("un-budgeted session projects both signals as zero", func(t *testing.T) {
+		got := toGatewaySessionStateAt(session.State{TraceID: "sess-plain", Run: session.Running}, base).Budget
+		if got.ContextTokensCap != 0 || got.ResidentContextTokens != 0 {
+			t.Fatalf("an un-budgeted, never-debited session must project zero context signals, got cap=%d resident=%d", got.ContextTokensCap, got.ResidentContextTokens)
+		}
+	})
+}
+
 func TestFormatSessionStateRendersTime(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0)
 

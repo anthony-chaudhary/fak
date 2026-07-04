@@ -410,6 +410,10 @@ func main() {
 		cmdTokenDefaultsScorecard(os.Args[2:])
 	case "skill-effectiveness-scorecard":
 		cmdSkillEffectivenessScorecard(os.Args[2:])
+	case "skill":
+		// The queried skill loader operator surface (epic #1103, C7 / #1110):
+		// `fak skill query|residency|swap` over .claude/skills (+ MCP resolver).
+		cmdSkill(os.Args[2:])
 	case "conflation-scorecard":
 		cmdConflationScorecard(os.Args[2:])
 	case "score":
@@ -1210,6 +1214,12 @@ func toGatewaySessionStateAt(s session.State, now time.Time) gateway.SessionStat
 			TurnsLeft:         s.Budget.TurnsLeft,
 			TokensLeft:        s.Budget.TokensLeft,
 			ContextTokensLeft: s.Budget.ContextTokensLeft,
+			// Context ceiling + last-turn resident window: the two signals the outbound-compaction
+			// burst gate needs to reason about a context-budgeted-but-turn-unbounded session's
+			// horizon. Both project 0 (omitempty) for an un-budgeted or never-debited session, so
+			// the default `fak guard -- claude` wire form is unchanged and no horizon is derived.
+			ContextTokensCap:      s.Budget.ContextTokensCap,
+			ResidentContextTokens: s.Cost.LatestContextTokens(),
 		},
 		Priority:       s.Priority,
 		Pace:           gateway.SessionPace{MaxTokensPerTurn: s.Pace.MaxTokensPerTurn, MinTurnGapMs: s.Pace.MinTurnGapMs},

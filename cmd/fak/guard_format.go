@@ -208,9 +208,20 @@ func formatFakSliceDiagnostic(sum gateway.AdjudicationSummary) string {
 	if savings.FakTokenEquiv() > 0 || !fakSliceDiagnosticRelevant(sum) {
 		return ""
 	}
-	reasons := make([]string, 0, 3)
+	reasons := make([]string, 0, 4)
 	if sum.CompactionAnchorStarved > 0 {
 		reasons = append(reasons, fmt.Sprintf("anchor-starved x%d (protected prefix exceeds the %d-tok compaction budget; needs a --compact-anchor-head re-anchor — default-on unless disabled)", sum.CompactionAnchorStarved, sum.CompactionBudget))
+	}
+	// burst_unprofitable is the OTHER reason a head-anchored shed does not fire, operationally
+	// opposite to anchor-starved: there the anchor is fine and the middle IS shed-able, but the
+	// one-time cost of re-writing the invalidated cache suffix has no repaying horizon — this
+	// session carries no bounded turn budget AND has not idled past the message-cache TTL, so the
+	// burst economics (CacheBurstPaysBack, #1408) conservatively keep the warm cache rather than
+	// guess. This is the common WARM continuously-active long-session case (a headless worker that
+	// never idles 5 min); the fix is a bounded horizon (a turn/context budget) or an idle gap, NOT
+	// a tighter budget. Named apart so its "did not fire" reads as working-as-designed, not a bug.
+	if n := sum.CompactionBailReasons["burst_unprofitable"]; n > 0 {
+		reasons = append(reasons, fmt.Sprintf("burst-unprofitable x%d (shed-able middle, but no repaying turn-horizon and not idle past the message-cache TTL, so the burst economics keep the warm cache; fix = a bounded turn/context budget or an idle gap, not a tighter budget)", n))
 	}
 	switch {
 	case sum.KVPrefixPromptTokens == 0:
