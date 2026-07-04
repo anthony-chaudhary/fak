@@ -79,6 +79,7 @@ are wired, measured, and kept honest. The doctrine behind all of them is
 |---|---|
 | Architecture of agent ↔ kernel integration | [agent-integration-architecture.md](agent-integration-architecture.md) |
 | Put `fak` in front of a framework (LangChain/LangGraph, LlamaIndex, AutoGen, CrewAI, …) | [agent-framework-integration.md](agent-framework-integration.md) |
+| Wrap a customer workflow in a reusable harness loop | [`docs/integrations/harness-loop-playbook.md`](../integrations/harness-loop-playbook.md) |
 | Client code in Python, JavaScript, Go, and Rust | [multi-language-examples.md](multi-language-examples.md) |
 | Migrate an existing stack (OpenAI API, LangChain, AutoGen, llama.cpp) onto `fak` | [migration-guide.md](migration-guide.md) |
 | Claude Code + Anthropic API setup | [`docs/integrations/claude.md`](../integrations/claude.md) |
