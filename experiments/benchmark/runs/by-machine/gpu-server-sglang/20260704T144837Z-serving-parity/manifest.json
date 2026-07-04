@@ -1,0 +1,40 @@
+{
+  "$schema": "benchmark/run-manifest.v1",
+  "run_id": "gpu-server-sglang-gemma4-serving-parity-20260704T144837Z",
+  "machine_id": "gpu-server-sglang",
+  "timestamp": "20260704T144837Z",
+  "git": {
+    "rev": "3d1507947102d83ff026d83bf28f847239e8e2a9",
+    "branch": "main",
+    "dirty": false
+  },
+  "harness": {
+    "name": "fak webbench serving",
+    "version": "serving-parity.v1"
+  },
+  "model": {
+    "name": "google/gemma-4-31B-it",
+    "precision": "served"
+  },
+  "config": {
+    "requests": 8,
+    "concurrency": 2,
+    "slo_ms": 2000,
+    "tracks": [
+      "ours",
+      "sglang"
+    ],
+    "claim_class": "WITNESSED",
+    "scrubbed": true
+  },
+  "tags": [
+    "serving",
+    "webbench",
+    "sglang",
+    "gateway-tax",
+    "witnessed"
+  ],
+  "artifacts": {
+    "serving_parity": "serving-parity.json"
+  }
+}
