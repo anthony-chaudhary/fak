@@ -100,3 +100,10 @@ func TestSanitizeGatewayForReportKeepsLoopbackOnly(t *testing.T) {
 		t.Fatalf("remote sanitize = %q", got)
 	}
 }
+
+func TestElapsedSecondsFloorsNonPositiveDurations(t *testing.T) {
+	got := elapsedSeconds(time.Now().Add(time.Second))
+	if got != 0.001 {
+		t.Fatalf("elapsedSeconds future start = %v, want 0.001", got)
+	}
+}
