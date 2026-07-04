@@ -389,12 +389,22 @@ func tokenHeadroom(limit, used int64) int64 {
 	if limit <= 0 {
 		return UnlimitedHeadroom
 	}
+	if used >= limit {
+		// Saturated/over cap: remaining capacity is 0, never negative — and never
+		// the -1 UnlimitedHeadroom sentinel a configured dimension must not emit.
+		return 0
+	}
 	return limit - used
 }
 
 func concurrentHeadroom(limit, used int) int {
 	if limit <= 0 {
 		return UnlimitedConcurrentHeadroom
+	}
+	if used >= limit {
+		// Saturated/over cap: 0 remaining, never the -1 UnlimitedConcurrentHeadroom
+		// sentinel (which is reserved for an unconfigured concurrency dimension).
+		return 0
 	}
 	return limit - used
 }

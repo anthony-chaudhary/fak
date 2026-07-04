@@ -219,3 +219,50 @@ func TestTokenCapsAppliesTargetUtilizationHeadroom(t *testing.T) {
 		t.Fatalf("target-concurrency deny = %+v, want cap=%s limit=9 used=9 requested=1 headroom=0", decision, TokenCapConcurrency)
 	}
 }
+
+// TestTokenHeadroomSaturatedIsZeroNotUnlimitedSentinel pins a headroom sentinel
+// collision: Headroom reserves -1 (UnlimitedHeadroom / UnlimitedConcurrentHeadroom)
+// to mean "this dimension has no configured cap". But a CONFIGURED dimension that
+// is exactly one unit over its effective cap computed limit-used == -1, which is
+// byte-identical to the unlimited sentinel — so a scheduler checking the sentinel
+// would misread a saturated cap as unlimited and over-admit. Remaining capacity
+// can never be negative, so a saturated/over limited dimension must report 0, and
+// only an UNCONFIGURED dimension may report the sentinel. Reachable via the
+// documented TargetUtilization knob (below) and via a raw one-over-cap load.
+func TestTokenHeadroomSaturatedIsZeroNotUnlimitedSentinel(t *testing.T) {
+	// TargetUtilization=0.9 lowers the effective input cap to floor(100*0.9)=90 and
+	// concurrency to 90, so a load of 91 is one over each effective cap. Output is
+	// left uncapped: a genuinely unlimited dimension that must still report -1.
+	caps := TokenCaps{
+		MaxConcurrent:     100,
+		MaxInputTokens:    100,
+		TargetUtilization: 0.9,
+	}
+	load := TokenLoad{Concurrent: 91, Tokens: NewTokenUsage(91, 0, 0)}
+	h := caps.Headroom(load)
+
+	if h.InputTokens == UnlimitedHeadroom {
+		t.Fatalf("saturated input headroom = %d, collides with UnlimitedHeadroom sentinel", h.InputTokens)
+	}
+	if h.InputTokens != 0 {
+		t.Fatalf("saturated input headroom = %d, want 0", h.InputTokens)
+	}
+	if h.Concurrent == UnlimitedConcurrentHeadroom {
+		t.Fatalf("saturated concurrency headroom = %d, collides with UnlimitedConcurrentHeadroom sentinel", h.Concurrent)
+	}
+	if h.Concurrent != 0 {
+		t.Fatalf("saturated concurrency headroom = %d, want 0", h.Concurrent)
+	}
+	// The unlimited contract still holds for a dimension with no configured cap.
+	if h.OutputTokens != UnlimitedHeadroom {
+		t.Fatalf("uncapped output headroom = %d, want UnlimitedHeadroom(%d)", h.OutputTokens, UnlimitedHeadroom)
+	}
+
+	// The collision is not utilization-specific: an exact one-over on a raw cap
+	// (no TargetUtilization) hits the same -1.
+	raw := TokenCaps{MaxCachedInputTokens: 50}
+	rawLoad := TokenLoad{Tokens: NewTokenUsage(51, 51, 0)} // cached = 51, one over the 50 cap
+	if got := raw.Headroom(rawLoad).CachedInputTokens; got != 0 {
+		t.Fatalf("cached headroom one-over cap = %d, want 0 (not the -1 sentinel)", got)
+	}
+}
