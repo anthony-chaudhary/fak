@@ -63,6 +63,10 @@ func runLeaseref(stdout, stderr io.Writer, argv []string) int {
 		return runLeaserefRenew(stdout, stderr, rest)
 	case "release":
 		return runLeaserefRelease(stdout, stderr, rest)
+	case "announce":
+		return runLeaserefAnnounce(stdout, stderr, rest)
+	case "announce-view":
+		return runLeaserefAnnounceView(stdout, stderr, rest)
 	case "sync":
 		return runLeaserefSync(stdout, stderr, rest)
 	case "-h", "--help", "help":
@@ -169,6 +173,21 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       and a ref that advanced under the delete is LEASE_CONTENDED. An absent
       lease is an idempotent OK; an EXPIRED record is releasable by anyone
       (single-id reap). --force skips the holder check (operator override).
+
+  fak leaseref announce --issue N --id ID --holder H --action acquire|renew|release [--generation N] [--tree GLOB ...] [--ttl SEC] [--repo OWNER/REPO] [--dry-run]
+      PLANE 2 (#2300): post a structured one-line announcement of a lease transition
+      to a coordination issue's comments — the durable, human-visible backup channel
+      for when a node can reach neither the git remote (plane 0) nor the dev server
+      (plane 1). The comment carries a human summary line plus one fenced JSON line
+      'announce-view' folds back. NEVER BLOCKS the underlying lease op: a gh failure is
+      a WARNING and a 0 exit, never a refusal. --dry-run prints the body without posting.
+      A comment is EVIDENCE, never a lock.
+
+  fak leaseref announce-view --issue N [--repo OWNER/REPO] [--dir DIR]
+      Read a coordination issue's comments and FOLD the announcements into the advisory
+      held-set view: the latest announced record per lease id (a release drops it out),
+      emitted as JSON [{lease_id,holder,generation,tree,ttl_seconds,action}, ...]. This
+      is ADVISORY visibility only — never an admission input on its own.
 
   fak leaseref sync [--remote R] [--push-only|--fetch-only] [--dir DIR]
       CONVERGE the refs/fak/locks/* namespace with a remote (default origin): push
