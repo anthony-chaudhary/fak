@@ -60,6 +60,7 @@ var tier = map[string]int{
 	"benchloop":            1, // benchmark super-loop manager: folds benchcatalog/benchruns/nightrun status into one command-facing control surface; off the hot path.
 	"macbench":             1, // Mac gateway benchmark probes for nightrun: stdlib HTTP client + JSON artifact fold, off the hot path.
 	"benchruns":            1, // pure benchmark-run catalog reader/renderer over experiments/benchmark artifacts; stdlib-only, off the hot path.
+	"benchckpt":            1, // per-cell write-ahead checkpoint/resume ledger the compute-bench executors write through (#2382); stdlib-only, off the hot path.
 	"benchlineagegate":     1, // pure benchmark-emitter lineage hygiene gate; stdlib-only source scanner, off the hot path.
 	"cachevalueledger":     1, // durable, append-only cache-value observation ledger for fak sessions; JSONL persistence over cacheobs stats.
 	"gatewayusageledger":   1, // durable, append-only gateway usage-counter ledger (#1610); JSONL persistence over a stdlib-only Counters mirror, no internal/gateway or internal/kernel import.
