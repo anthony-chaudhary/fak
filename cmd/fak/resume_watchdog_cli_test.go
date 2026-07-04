@@ -111,6 +111,13 @@ func TestResumeWatchdogBrokerDenyDoesNotSpawnWorker(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("FLEET_CLAUDE_EXE", "claude")
 	t.Setenv("ANTHROPIC_API_KEY", "sk-env-secret")
+	// Isolate fleet account discovery from the operator's real ~/.config (XDG_CONFIG_HOME
+	// leaks live opencode accounts into rwWorkerAccounts, which would make the
+	// WorkerAccounts guard non-empty and skip the test's .claude-secret row as
+	// non-worker before it reaches the broker — the same isolation dispatch_tick_test.go
+	// applies). An empty dir discovers no accounts, leaving the guard inert (fail-open).
+	t.Setenv("FLEET_USER_HOME", filepath.Join(home, "empty-home"))
+	t.Setenv("FLEET_CONFIG_HOME", filepath.Join(home, "empty-config"))
 	configJSON, _ := json.Marshal(configDir)
 	workJSON, _ := json.Marshal(work)
 	plan := `{"plan":[{` +
