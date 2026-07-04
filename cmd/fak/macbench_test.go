@@ -50,6 +50,52 @@ func TestParseIntCSVRejectsBadValues(t *testing.T) {
 	}
 }
 
+func TestMacBenchWatchWritesResultWhenHealthy(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			_, _ = w.Write([]byte(`{"ok":true,"engine":"metal","planner":"inkernel","model":"qwen3.6-27b"}`))
+		case "/v1/chat/completions":
+			_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"length"}],"usage":{"prompt_tokens":25,"completion_tokens":4,"total_tokens":29}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	result := t.TempDir() + "/macbench-result.json"
+	var stdout, stderr bytes.Buffer
+	code := runMacBench(&stdout, &stderr, []string{
+		"watch",
+		"--gateway", ts.URL,
+		"--model", "qwen3.6-27b",
+		"--gateway-key-file", "",
+		"--fetch-key=false",
+		"--duration", "1s",
+		"--interval", "1ms",
+		"--health-timeout", "1s",
+		"--run-timeout", "5s",
+		"--max-polls", "1",
+		"--decode-tokens", "4",
+		"--prefill-tokens", "8",
+		"--concurrency", "1",
+		"--result", result,
+	})
+	if code != 0 {
+		t.Fatalf("runMacBench watch code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	b, err := os.ReadFile(result)
+	if err != nil {
+		t.Fatalf("read result: %v", err)
+	}
+	if !strings.Contains(string(b), `"schema": "fak.macbench.result.v1"`) || !strings.Contains(string(b), `"suite": "all"`) {
+		t.Fatalf("unexpected result:\n%s", b)
+	}
+	if !strings.Contains(stdout.String(), `"suite": "health"`) || !strings.Contains(stdout.String(), `"suite": "all"`) {
+		t.Fatalf("watch stdout did not include health and full reports:\n%s", stdout.String())
+	}
+}
+
 func TestMacBenchFetchesGatewayKeyOverSSH(t *testing.T) {
 	oldExec := execCommand
 	t.Cleanup(func() { execCommand = oldExec })

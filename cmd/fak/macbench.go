@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -17,6 +18,9 @@ import (
 func cmdMacBench(argv []string) { os.Exit(runMacBench(os.Stdout, os.Stderr, argv)) }
 
 func runMacBench(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && argv[0] == "watch" {
+		return runMacBenchWatch(stdout, stderr, argv[1:])
+	}
 	suite := macbench.SuiteAll
 	if len(argv) > 0 && !strings.HasPrefix(argv[0], "-") {
 		suite = macbench.Suite(argv[0])
@@ -83,6 +87,148 @@ func runMacBench(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+func runMacBenchWatch(stdout, stderr io.Writer, argv []string) int {
+	def := macbench.DefaultOptions()
+	fs := flag.NewFlagSet("macbench watch", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	gateway := fs.String("gateway", envOrDefault("FAK_MAC_GATEWAY", def.Gateway), "fak serve gateway on the Mac")
+	model := fs.String("model", envOrDefault("FAK_MAC_MODEL", def.Model), "model id served by the Mac gateway")
+	keyEnv := fs.String("gateway-key-env", "FAK_GATEWAY_KEY", "env var holding the gateway bearer")
+	keyFile := fs.String("gateway-key-file", "~/.fak-gateway-key", "file holding the gateway bearer when the env var is empty; empty disables file lookup")
+	fetchKey := fs.Bool("fetch-key", true, "when env/file key lookup is empty for a remote gateway, fetch ~/.fak-gateway-key from the Mac over ssh")
+	sshHost := fs.String("ssh-host", envOrDefault("FAK_MAC_SSH_HOST", defaultClaudeMacSSHHost), "ssh host used by --fetch-key")
+	sshKey := fs.String("ssh-key", defaultClaudeMacSSHKey(), "ssh identity used by --fetch-key; empty uses ssh defaults")
+	duration := fs.Duration("duration", 12*time.Hour, "maximum time to poll before giving up")
+	interval := fs.Duration("interval", 5*time.Minute, "delay between health polls")
+	healthTimeout := fs.Duration("health-timeout", 20*time.Second, "timeout for each health poll")
+	runTimeout := fs.Duration("run-timeout", 2*time.Hour, "timeout for the full macbench run after health turns green")
+	resultPath := fs.String("result", "", "optional path for the full macbench result JSON")
+	decodeTokens := fs.String("decode-tokens", "256,512", "comma-separated max_tokens for decode-longgen")
+	prefillTokens := fs.String("prefill-tokens", "128,512,2048,4096", "comma-separated prompt-token targets for prefill-sweep")
+	concurrency := fs.Int("concurrency", 2, "concurrent requests for the 2stream suite")
+	maxPolls := fs.Int("max-polls", 0, "maximum health polls before giving up; 0 means bounded by --duration only")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if *duration <= 0 || *interval <= 0 || *healthTimeout <= 0 || *runTimeout <= 0 {
+		fmt.Fprintln(stderr, "fak macbench watch: durations must be positive")
+		return 2
+	}
+	dec, err := parseIntCSV(*decodeTokens)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak macbench watch: --decode-tokens: %v\n", err)
+		return 2
+	}
+	pre, err := parseIntCSV(*prefillTokens)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak macbench watch: --prefill-tokens: %v\n", err)
+		return 2
+	}
+
+	deadline := time.Now().Add(*duration)
+	polls := 0
+	for {
+		polls++
+		healthCtx, cancel := context.WithTimeout(context.Background(), *healthTimeout)
+		health, err := macbench.Run(healthCtx, macbench.Options{
+			Gateway: *gateway,
+			Model:   *model,
+			Suite:   macbench.SuiteHealth,
+		})
+		cancel()
+		if err != nil {
+			fmt.Fprintf(stderr, "fak macbench watch: %v\n", err)
+			return 1
+		}
+		_ = writeIndentedJSONNoEscape(stdout, health)
+		if health.Health.OK {
+			return runMacBenchWatchFull(stdout, stderr, macBenchWatchRunOptions{
+				gateway:       *gateway,
+				model:         *model,
+				keyEnv:        *keyEnv,
+				keyFile:       *keyFile,
+				fetchKey:      *fetchKey,
+				sshHost:       *sshHost,
+				sshKey:        *sshKey,
+				timeout:       *runTimeout,
+				resultPath:    *resultPath,
+				decodeTokens:  dec,
+				prefillTokens: pre,
+				concurrency:   *concurrency,
+			})
+		}
+		if (*maxPolls > 0 && polls >= *maxPolls) || time.Now().Add(*interval).After(deadline) {
+			fmt.Fprintf(stderr, "fak macbench watch: gateway did not become healthy after %d poll(s)\n", polls)
+			return 124
+		}
+		time.Sleep(*interval)
+	}
+}
+
+type macBenchWatchRunOptions struct {
+	gateway       string
+	model         string
+	keyEnv        string
+	keyFile       string
+	fetchKey      bool
+	sshHost       string
+	sshKey        string
+	timeout       time.Duration
+	resultPath    string
+	decodeTokens  []int
+	prefillTokens []int
+	concurrency   int
+}
+
+func runMacBenchWatchFull(stdout, stderr io.Writer, opts macBenchWatchRunOptions) int {
+	key, err := resolveMacBenchKeyForRun(opts.keyEnv, opts.keyFile, opts.fetchKey, opts.sshHost, opts.sshKey, opts.gateway, macbench.SuiteAll)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak macbench watch: %v\n", err)
+		return 2
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), opts.timeout)
+	defer cancel()
+	rep, err := macbench.Run(ctx, macbench.Options{
+		Gateway:       opts.gateway,
+		Model:         opts.model,
+		Key:           key,
+		Suite:         macbench.SuiteAll,
+		DecodeTokens:  opts.decodeTokens,
+		PrefillTokens: opts.prefillTokens,
+		Concurrency:   opts.concurrency,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "fak macbench watch: %v\n", err)
+		return 1
+	}
+	_ = writeIndentedJSONNoEscape(stdout, rep)
+	if strings.TrimSpace(opts.resultPath) != "" {
+		if err := writeMacBenchResultFile(opts.resultPath, rep); err != nil {
+			fmt.Fprintf(stderr, "fak macbench watch: write --result: %v\n", err)
+			return 1
+		}
+	}
+	if rep.HasErrors() {
+		return 1
+	}
+	return 0
+}
+
+func writeMacBenchResultFile(path string, rep macbench.Report) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	return enc.Encode(rep)
 }
 
 func resolveMacBenchKeyForRun(envName, keyFile string, fetch bool, sshHost, sshKey, gateway string, suite macbench.Suite) (string, error) {
