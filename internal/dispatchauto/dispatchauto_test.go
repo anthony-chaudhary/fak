@@ -22,7 +22,7 @@ func TestPlanAutoBindsTheScarcestCeiling(t *testing.T) {
 			binding: CeilingReadyWork,
 		},
 		{
-			name:    "distinct pools bind so the wave never serializes on one usage bucket",
+			name:    "account session slots bind so the wave never exceeds account capacity",
 			in:      Input{EffectiveCap: 8, DistinctPools: 2, ReadyWork: 5},
 			target:  2,
 			binding: CeilingDistinctPools,

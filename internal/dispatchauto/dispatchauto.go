@@ -23,20 +23,21 @@ type Node struct {
 // switcher, the issue router); the fold itself does no I/O and reads no clock.
 //
 // Zero-value semantics are split by what a zero MEANS:
-//   - DistinctPools and ReadyWork are hard facts: 0 pools or 0 ready units
-//     really does mean "no wave" (Target 0).
+//   - DistinctPools and ReadyWork are hard facts: 0 account session slots or
+//     0 ready units really does mean "no wave" (Target 0).
 //   - EffectiveCap, RequiredWorkers, and SharedContextTokens use 0 = "unset":
 //     an absent ceiling never binds.
 type Input struct {
 	// EffectiveCap is the preflight's already-folded population ceiling
 	// (min of configured max-workers, kernel lease target, host resource
-	// cap, seat total). 0 = no preflight view (never binds).
+	// cap, account session-slot total). 0 = no preflight view (never binds).
 	EffectiveCap int `json:"effective_cap"`
 	// LiveWorkers is the current live worker population.
 	LiveWorkers int `json:"live_workers"`
-	// DistinctPools is how many DISTINCT, fresh rate-limit account pools the
-	// switcher can allocate right now. A wave wider than this collapses onto
-	// shared usage buckets and serializes, so it always binds.
+	// DistinctPools is the historical wire name for the account-backed steady
+	// population ceiling: live workers already occupying slots plus free session
+	// slots the switcher can allocate right now. Claude accounts contribute
+	// multiple bounded slots; unavailable duplicate identities do not.
 	DistinctPools int `json:"distinct_pools"`
 	// ReadyWork is how many dispatchable work units are ready (routed open
 	// issues, ready leaves). Workers beyond this have nothing to take.
@@ -65,7 +66,7 @@ type Assignment struct {
 // running (Target), how many to launch now to converge (Refill), and where.
 type Plan struct {
 	// Target is the steady-state worker population: the minimum of every
-	// ceiling that is set, and of the hard facts (pools, ready work).
+	// ceiling that is set, and of the hard facts (account slots, ready work).
 	Target int `json:"target"`
 	// Refill is what to launch THIS tick: max(0, Target-LiveWorkers). A
 	// caller that runs on a cadence converges the population to Target and
