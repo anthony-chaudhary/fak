@@ -350,6 +350,16 @@ const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--
                  shows a plan without running it; 'run' executes it (mutations PROPOSED
                  unless --apply). Default backend is the in-memory demo corpus; --dir
                  runs over a recall core image)
+  fak skill    query <intent> | residency | swap <name> <version>
+                 [--budget N] [--mcp] [--from VER] [--journal PATH] [--json]
+                 (the QUERIED SKILL LOADER  -  0 cost for inf skills, paged on demand,
+                  versioned and hot-swappable, protocol-blind: skill/MCP/A2A behind one
+                  resolver (#1103, C7). 'query' ranks the at-rest cards by intent and
+                  faults in the top winners up to a budget (the working set + paged cost);
+                  'residency' shows the resident cards, the version page-table pins, and
+                  the loader-journal reconciliation; 'swap' hot-swaps a version and prints
+                  the pre-flip blast radius. Works over .claude/skills; --mcp folds in the
+                  MCP-tool resolver so one query ranks both)
   fak debug     [--session JSONL] [--dir DIR] [--cmd report|html|info|bt|x|ws|grep|tombstone|context-query|context-diff]
                 [--query STR] [--step N] [--grep PAT] [--k N] [--reason STR]
                 [--requested-by STR] [--out cdb-report.json|cdb-report.html]
@@ -402,7 +412,8 @@ const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--
   fak console   issues [--epic N] [--issues-json FILE] [--json] |
                 loops [--ledger FILE] [--json] | sessions [--sessions-json FILE] [--json] |
                 garden [--garden-json FILE] [--json] [--check] |
-                guard --guard-json FILE [--json] | overview [--json]
+                guard --guard-json FILE [--json] [--color auto|always|never] |
+                overview [--json]
                 (the NATIVE TERMINAL CONTROL PANE spine: ranked GitHub issue
                  lanes, durable loop-ledger lanes, and live session DRIVE lanes,
                  plus garden health, guard proof packets, and a composed overview,
