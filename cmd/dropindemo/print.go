@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/dropin"
@@ -151,7 +152,8 @@ func runSelfcheck(gwURL string) int {
 		if plan.Provider != provider {
 			miss = append(miss, fmt.Sprintf("provider=%q want %q", plan.Provider, provider))
 		}
-		// Env shape: anthropic = one var, bare host; openai = two vars, each /v1.
+		// Env shape: anthropic = one var, bare host; openai = OpenAI aliases
+		// with /v1 plus the bare Anthropic URL for the local Messages surface.
 		switch plan.Provider {
 		case "anthropic":
 			if len(plan.EnvVars) != 1 || plan.EnvVars[0] != [2]string{"ANTHROPIC_BASE_URL", gwURL} {
@@ -159,8 +161,13 @@ func runSelfcheck(gwURL string) int {
 			}
 		case "openai":
 			wantV := strings.TrimRight(gwURL, "/") + "/v1"
-			if len(plan.EnvVars) != 2 || plan.EnvVars[0] != [2]string{"OPENAI_BASE_URL", wantV} || plan.EnvVars[1] != [2]string{"OPENAI_API_BASE", wantV} {
-				miss = append(miss, fmt.Sprintf("env=%v want OPENAI_BASE_URL + OPENAI_API_BASE = %s", plan.EnvVars, wantV))
+			want := [][2]string{
+				{"OPENAI_BASE_URL", wantV},
+				{"OPENAI_API_BASE", wantV},
+				{"ANTHROPIC_BASE_URL", gwURL},
+			}
+			if !reflect.DeepEqual(plan.EnvVars, want) {
+				miss = append(miss, fmt.Sprintf("env=%v want %v", plan.EnvVars, want))
 			}
 		}
 		if len(miss) > 0 {
