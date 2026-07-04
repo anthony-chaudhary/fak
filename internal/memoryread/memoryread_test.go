@@ -80,7 +80,22 @@ func TestRenderDigestMaxBytesOmission(t *testing.T) {
 	dir := t.TempDir()
 	buildStore(t, dir)
 	out := RenderDigest(dir, false, 1)
-	if !strings.Contains(out, "BODY-ONE") || strings.Contains(out, "BODY-TWO") || !strings.Contains(out, "omitted") {
+	// The first fact is always emitted (emitted>0 guard); the second overflows the
+	// 1-byte budget. The over-budget fact is NAMED under a typed MEMORY_INDEX_OVERFLOW
+	// advisory (#2430) — never an anonymous "N omitted" count.
+	if !strings.Contains(out, "BODY-ONE") || strings.Contains(out, "BODY-TWO") {
 		t.Fatalf("bounded digest mismatch:\n%s", out)
+	}
+	if !strings.Contains(out, OverflowReason) || !strings.Contains(out, "Second fact (second-fact.md)") {
+		t.Fatalf("over-budget fact not named under %s:\n%s", OverflowReason, out)
+	}
+}
+
+func TestRenderDigestZeroOverflowNoAdvisory(t *testing.T) {
+	dir := t.TempDir()
+	buildStore(t, dir)
+	out := RenderDigest(dir, false, 60000)
+	if strings.Contains(out, OverflowReason) {
+		t.Fatalf("in-budget digest emitted an overflow advisory:\n%s", out)
 	}
 }

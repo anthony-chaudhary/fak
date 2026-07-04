@@ -76,26 +76,42 @@ func RenderDigest(storeDir string, indexOnly bool, maxBytes int) string {
 
 	parts = append(parts, "", "---", "")
 	budget := maxBytes
-	emitted, omitted := 0, 0
+	emitted, unreadable := 0, 0
+	var overflow []string // fact files dropped for BUDGET — named, never an anonymous count (#2430)
 	for _, fact := range ParseIndex(indexText) {
 		title, fname := fact[0], fact[1]
 		bodyBytes, err := os.ReadFile(filepath.Join(storeDir, fname))
 		if err != nil {
-			omitted++
+			unreadable++
 			continue
 		}
 		body := strings.TrimRight(StripFrontmatter(string(bodyBytes)), "\n")
 		block := fmt.Sprintf("## %s (%s)\n\n%s\n", title, fname, body)
 		if budget-len(block) < 0 && emitted > 0 {
-			omitted++
+			overflow = append(overflow, fmt.Sprintf("%s (%s)", title, fname))
 			continue
 		}
 		parts = append(parts, block)
 		budget -= len(block)
 		emitted++
 	}
-	if omitted > 0 {
-		parts = append(parts, fmt.Sprintf("...(%d more fact file(s) omitted - read directly from %s/ if needed)", omitted, StoreRel))
+	// An over-budget index is a TYPED, NAMED event, not a silent tail-drop: name every
+	// fact that fell past the line so the reader knows exactly what it did not get and
+	// can page it in directly. The list is the compaction work-list (#2430). Emitted
+	// only when something overflowed, so an in-budget index stays advisory-free.
+	if len(overflow) > 0 {
+		parts = append(parts, fmt.Sprintf("%s: %d fact file(s) past the %d-byte budget: %s - read them directly from %s/",
+			OverflowReason, len(overflow), maxBytes, strings.Join(overflow, ", "), StoreRel))
+	}
+	if unreadable > 0 {
+		parts = append(parts, fmt.Sprintf("...(%d fact file(s) unreadable and skipped)", unreadable))
 	}
 	return strings.TrimRight(strings.Join(parts, "\n"), "\n") + "\n"
 }
+
+// OverflowReason is the closed-vocabulary label RenderDigest stamps on an over-budget
+// index advisory (#2430). It mirrors memq.OverflowReason by value; the two are kept as
+// separate string literals ON PURPOSE because internal/memq imports internal/memoryread
+// (notesbackend), so memoryread cannot import memq without a cycle. A test pins them
+// equal so the wire label never drifts.
+const OverflowReason = "MEMORY_INDEX_OVERFLOW"

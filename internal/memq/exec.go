@@ -115,6 +115,34 @@ type Effect struct {
 	Note         string   `json:"note,omitempty"`
 }
 
+// OverflowReason is the closed-vocabulary verdict name stamped on an over-budget
+// memory index (#2430). It is a TYPED event, not a free-text note: a consumer keys off
+// this exact string to route the overflow list into the compaction/write pass.
+const OverflowReason = "MEMORY_INDEX_OVERFLOW"
+
+// OverflowEntry names one memory entry that fell past the byte budget — never an
+// anonymous tail-drop. Descriptor/Bytes let a compactor prioritize; ID is the recovery
+// handle (the fact file / cell to consolidate or read directly).
+type OverflowEntry struct {
+	ID         string `json:"id"`
+	Descriptor string `json:"descriptor,omitempty"`
+	Bytes      int64  `json:"bytes"`
+}
+
+// IndexOverflow is the typed verdict for an over-budget memory index (#2430): the named
+// entries that did not fit under the byte cap, plus the cap and the in-budget count. It
+// is emitted ONLY when at least one entry overflows — a zero-overflow index yields no
+// verdict (Result.Overflow stays nil), so the common in-budget path carries no advisory
+// spam. The Dropped list is deterministic (it preserves the working-set order Run saw)
+// and IS the compaction work-list, mirroring how Refused/Advisory surface named cells
+// rather than counts.
+type IndexOverflow struct {
+	Reason  string          `json:"reason"` // always OverflowReason
+	Budget  int64           `json:"budget"` // the byte cap enforced
+	Kept    int             `json:"kept"`   // in-budget prefix count
+	Dropped []OverflowEntry `json:"dropped"`
+}
+
 // Stats is the run accounting.
 type Stats struct {
 	CellsScanned    int   `json:"cells_scanned"`
@@ -136,14 +164,15 @@ type Stats struct {
 
 // Result is the outcome of Run.
 type Result struct {
-	Intent   string        `json:"intent,omitempty"`
-	Steps    []StepTrace   `json:"steps"`
-	Rendered []RenderItem  `json:"rendered,omitempty"`
-	Effects  []Effect      `json:"effects,omitempty"`
-	Refused  []Refusal     `json:"refused,omitempty"`
-	Advisory []NearDupPair `json:"advisory,omitempty"` // opt-in near-dup pairs (#2506); advisory, never collapsed
-	Working  []Cell        `json:"working,omitempty"`  // final working set (safe metadata only)
-	Stats    Stats         `json:"stats"`
+	Intent   string         `json:"intent,omitempty"`
+	Steps    []StepTrace    `json:"steps"`
+	Rendered []RenderItem   `json:"rendered,omitempty"`
+	Effects  []Effect       `json:"effects,omitempty"`
+	Refused  []Refusal      `json:"refused,omitempty"`
+	Advisory []NearDupPair  `json:"advisory,omitempty"` // opt-in near-dup pairs (#2506); advisory, never collapsed
+	Overflow *IndexOverflow `json:"overflow,omitempty"` // typed over-budget verdict (#2430); nil when nothing overflowed
+	Working  []Cell         `json:"working,omitempty"`  // final working set (safe metadata only)
+	Stats    Stats          `json:"stats"`
 }
 
 // Run executes an authored query against a backend. It validates first (an invalid
@@ -194,7 +223,17 @@ func Run(ctx context.Context, b Backend, q Query, caps Caps) (Result, error) {
 				work = work[:op.K]
 			}
 		case OpBudget:
-			work, note = applyBudget(work, op.Bytes)
+			var dropped []Cell
+			work, dropped = applyBudget(work, op.Bytes)
+			if len(dropped) > 0 {
+				ov := &IndexOverflow{Reason: OverflowReason, Budget: op.Bytes, Kept: len(work)}
+				for _, c := range dropped {
+					ov.Dropped = append(ov.Dropped, OverflowEntry{ID: c.ID, Descriptor: c.Descriptor, Bytes: c.Bytes})
+				}
+				res.Overflow = ov
+				note = fmt.Sprintf("%s: %d entr%s over the %d-byte budget (%s)", OverflowReason,
+					len(dropped), plural(len(dropped)), op.Bytes, overflowNames(dropped))
+			}
 		case OpDedup:
 			work, note = applyDedup(&res, work)
 		case OpRender:
@@ -259,26 +298,55 @@ func computeRefcount(cells []Cell) map[string]int {
 	return out
 }
 
-// applyBudget keeps the prefix whose cumulative size stays within cap (0 = unbounded).
-func applyBudget(work []Cell, cap int64) ([]Cell, string) {
+// applyBudget keeps the prefix whose cumulative size stays within cap (0 = unbounded)
+// and returns the over-budget cells VERBATIM as dropped — the caller names them in a
+// typed MEMORY_INDEX_OVERFLOW verdict (#2430) instead of an anonymous count, so the
+// overflow doubles as a deterministic compaction work-list. dropped preserves the
+// working-set order it saw (the same order the compactor would consolidate in).
+func applyBudget(work []Cell, cap int64) (kept, dropped []Cell) {
 	if cap <= 0 {
-		return work, ""
+		return work, nil
 	}
 	used := int64(0)
-	kept := work[:0:0]
-	dropped := 0
+	kept = work[:0:0]
 	for _, c := range work {
 		if used+c.Bytes > cap {
-			dropped++
+			dropped = append(dropped, c)
 			continue
 		}
 		used += c.Bytes
 		kept = append(kept, c)
 	}
-	if dropped == 0 {
-		return kept, ""
+	return kept, dropped
+}
+
+// plural returns the "entry"/"entries" suffix for n (n==1 → "y", else "ies").
+func plural(n int) string {
+	if n == 1 {
+		return "y"
 	}
-	return kept, fmt.Sprintf("dropped %d cell(s) over the %d-byte budget", dropped, cap)
+	return "ies"
+}
+
+// overflowNames renders the dropped entries' handles for the step note — the ID (or the
+// descriptor when the ID is empty), comma-joined and bounded so a large overflow does
+// not blow the note out. The structured IndexOverflow.Dropped carries the full,
+// unbounded list; this is only the human-readable one-line summary.
+func overflowNames(dropped []Cell) string {
+	const max = 5
+	names := make([]string, 0, len(dropped))
+	for i, c := range dropped {
+		if i == max {
+			names = append(names, fmt.Sprintf("+%d more", len(dropped)-max))
+			break
+		}
+		name := c.ID
+		if name == "" {
+			name = c.Descriptor
+		}
+		names = append(names, name)
+	}
+	return strings.Join(names, ", ")
 }
 
 // applyDedup is the read-side duplicate collapse (#2506): it folds byte-identical

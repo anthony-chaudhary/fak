@@ -49,11 +49,12 @@ type recallNote struct {
 }
 
 type recallEnvelope struct {
-	Store    string       `json:"store"`
-	Intent   string       `json:"intent"`
-	Rendered []recallNote `json:"rendered"`
-	Withheld []recallNote `json:"withheld,omitempty"`
-	Stats    memq.Stats   `json:"stats"`
+	Store    string              `json:"store"`
+	Intent   string              `json:"intent"`
+	Rendered []recallNote        `json:"rendered"`
+	Withheld []recallNote        `json:"withheld,omitempty"`
+	Overflow *memq.IndexOverflow `json:"overflow,omitempty"` // typed over-budget verdict (#2430); nil when nothing overflowed
+	Stats    memq.Stats          `json:"stats"`
 }
 
 // runMemoryRecall is `fak memory recall` (#2346 R1): the loop-turn orientation
@@ -70,6 +71,7 @@ func runMemoryRecall(stdout, stderr io.Writer, argv []string) int {
 	k := fs.Int("k", 0, "max notes (0 = driver default 5)")
 	budget := fs.Int64("budget", 0, "byte budget for the block (0 = driver default 8192)")
 	asJSON := fs.Bool("json", false, "emit the envelope as JSON (the full struct, unaffected by --format)")
+	explain := fs.Bool("explain", false, "print the byte budget and, if the index overflowed it, the typed MEMORY_INDEX_OVERFLOW count and the named entries dropped past the line (#2430)")
 	format := fs.String("format", "markdown", "surface encoding: markdown (default, rich prose) | json | toon | any memview.Register'd format")
 	listFormats := fs.Bool("list-formats", false, "print the registered surface formats and exit")
 	ablateFormats := fs.String("ablate-formats", "", "measure this note set's byte/token cost under every named format (comma-separated, or \"all\") instead of rendering")
@@ -90,7 +92,7 @@ func runMemoryRecall(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
-	env := recallEnvelope{Store: backend.Dir(), Intent: *intent, Stats: res.Stats}
+	env := recallEnvelope{Store: backend.Dir(), Intent: *intent, Overflow: res.Overflow, Stats: res.Stats}
 	cells, _ := backend.Cells(c)
 	titles := make(map[string]string, len(cells))
 	for _, cell := range cells {
@@ -177,7 +179,47 @@ func runMemoryRecall(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprintf(stdout, "\nstats: scanned=%d rendered=%d withheld=%d ~tokens=%d\n",
 		env.Stats.CellsScanned, env.Stats.Rendered, len(env.Withheld), env.Stats.EstimatedTokens)
+	if *explain {
+		renderRecallExplain(stdout, effectiveRecallBudget(*budget), env.Overflow)
+	}
 	return 0
+}
+
+// effectiveRecallBudget resolves the byte budget --explain reports: the flag value, or
+// the driver default (8192) when unset — the same resolution memoryRecallQuery applies,
+// so the reported budget matches the one actually enforced.
+func effectiveRecallBudget(budget int64) int64 {
+	if budget <= 0 {
+		return 8192
+	}
+	return budget
+}
+
+// renderRecallExplain prints the budget line and, when the index overflowed it, the
+// typed MEMORY_INDEX_OVERFLOW count plus the NAMED entries dropped past the line (#2430)
+// — never an anonymous count. A zero-overflow recall prints only the in-budget line, so
+// --explain stays quiet on the common path.
+func renderRecallExplain(stdout io.Writer, budget int64, ov *memq.IndexOverflow) {
+	if ov == nil {
+		fmt.Fprintf(stdout, "\nbudget: %d bytes (in budget; nothing overflowed)\n", budget)
+		return
+	}
+	fmt.Fprintf(stdout, "\nbudget: %d bytes — %s: %d entr%s dropped past the line (kept %d):\n",
+		budget, ov.Reason, len(ov.Dropped), overflowEntryPlural(len(ov.Dropped)), ov.Kept)
+	for _, e := range ov.Dropped {
+		name := e.ID
+		if e.Descriptor != "" {
+			name = fmt.Sprintf("%s (%s)", e.Descriptor, e.ID)
+		}
+		fmt.Fprintf(stdout, "  - %s [%d bytes]\n", name, e.Bytes)
+	}
+}
+
+func overflowEntryPlural(n int) string {
+	if n == 1 {
+		return "y"
+	}
+	return "ies"
 }
 
 // recallSurface translates a recallEnvelope into a memview.Surface — the

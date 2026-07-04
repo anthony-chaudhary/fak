@@ -93,6 +93,46 @@ func TestMemoryRecall_jsonEnvelope(t *testing.T) {
 	}
 }
 
+// #2430 CLI acceptance: `--explain` with a budget too tight to hold the fixture
+// notes prints the typed MEMORY_INDEX_OVERFLOW count and names the dropped
+// entries — never an anonymous count.
+func TestMemoryRecall_explainReportsOverflow(t *testing.T) {
+	dir := fixtureMemoryStore(t)
+	var out, errb strings.Builder
+	code := runMemoryRecall(&out, &errb, []string{"--store", dir, "--intent", "memory algebra gate", "--budget", "5", "--explain"})
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, errb.String())
+	}
+	s := out.String()
+	if !strings.Contains(s, "budget: 5 bytes") {
+		t.Errorf("--explain must print the enforced byte budget; got:\n%s", s)
+	}
+	if !strings.Contains(s, "MEMORY_INDEX_OVERFLOW") {
+		t.Errorf("--explain must name the typed overflow verdict; got:\n%s", s)
+	}
+	if !strings.Contains(s, "dropped past the line") {
+		t.Errorf("--explain must report the dropped count; got:\n%s", s)
+	}
+}
+
+// The zero-overflow path: a budget generous enough to hold every fixture note
+// prints only the in-budget line, no overflow advisory.
+func TestMemoryRecall_explainNoOverflow(t *testing.T) {
+	dir := fixtureMemoryStore(t)
+	var out, errb strings.Builder
+	code := runMemoryRecall(&out, &errb, []string{"--store", dir, "--intent", "memory algebra gate", "--explain"})
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, errb.String())
+	}
+	s := out.String()
+	if !strings.Contains(s, "budget: 8192 bytes (in budget; nothing overflowed)") {
+		t.Errorf("--explain on an in-budget recall must report no overflow; got:\n%s", s)
+	}
+	if strings.Contains(s, "MEMORY_INDEX_OVERFLOW") {
+		t.Errorf("an in-budget recall must not mention the overflow verdict; got:\n%s", s)
+	}
+}
+
 // A missing store yields an empty block and exit 0 — the loop's recall step must
 // fail open on a fresh node, never refuse the turn.
 func TestMemoryRecall_missingStoreFailsOpen(t *testing.T) {
