@@ -1,7 +1,10 @@
 package gatewayusageledger
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -99,6 +102,62 @@ func TestReadLedgerFileMissingIsEmptyNotError(t *testing.T) {
 	rows := ReadLedgerFile(filepath.Join(dir, "does-not-exist.jsonl"))
 	if len(rows) != 0 {
 		t.Fatalf("expected 0 rows for a missing ledger file, got %d", len(rows))
+	}
+}
+
+// TestCacheTTLUpgradeCountersRoundTrip is the #1844-C6 durable-witness proof: the
+// managed-cache TTL-upgrade outcome family survives Append -> ReadLedgerFile, and the
+// serialized row carries the ttl-bearing counter keys the managed-cache proving ground
+// (tools/managed_cache_proving_ground.py) auto-detects to climb ttl_upgrade_1h past
+// UNWIRED. The unconditional key matters: even an upgraded=0 row from a lever-on
+// session proves the durable channel exists.
+func TestCacheTTLUpgradeCountersRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	ledgerPath := filepath.Join(dir, "gateway-usage.jsonl")
+
+	row := NewRow("exit", "guard", "claude", "", time.Minute, Counters{
+		CacheTTLUpgradesUpgraded: 3,
+		CacheTTLUpgradeReasons:   map[string]uint64{"volatile_head": 2, "no_stable_breakpoint": 1},
+	}, time.Unix(1000, 0))
+	if err := Append(ledgerPath, row); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	rows := ReadLedgerFile(ledgerPath)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	got := rows[0].Counters
+	if got.CacheTTLUpgradesUpgraded != 3 {
+		t.Fatalf("CacheTTLUpgradesUpgraded = %d, want 3", got.CacheTTLUpgradesUpgraded)
+	}
+	if got.CacheTTLUpgradeReasons["volatile_head"] != 2 || got.CacheTTLUpgradeReasons["no_stable_breakpoint"] != 1 {
+		t.Fatalf("CacheTTLUpgradeReasons did not round-trip: %v", got.CacheTTLUpgradeReasons)
+	}
+
+	// The serialized counter keys are the proving ground's auto-detect contract: any
+	// "ttl"-bearing key in a usage row climbs the C6 rung with no tool change. The
+	// upgraded key must serialize even at zero (no omitempty), so a lever-on session
+	// with no eligible head still leaves durable evidence of the channel.
+	raw, err := os.ReadFile(ledgerPath)
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	for _, key := range []string{`"cache_ttl_upgrades_upgraded":3`, `"cache_ttl_upgrade_reasons"`} {
+		if !strings.Contains(string(raw), key) {
+			t.Fatalf("serialized row missing %s:\n%s", key, raw)
+		}
+	}
+	zero := NewRow("exit", "serve", "http", "", 0, Counters{}, time.Unix(2000, 0))
+	zb, err := json.Marshal(zero)
+	if err != nil {
+		t.Fatalf("marshal zero row: %v", err)
+	}
+	if !strings.Contains(string(zb), `"cache_ttl_upgrades_upgraded":0`) {
+		t.Fatalf("zero row must still carry the ttl counter key:\n%s", zb)
+	}
+	if strings.Contains(string(zb), "cache_ttl_upgrade_reasons") {
+		t.Fatalf("zero row must omit the empty reasons map:\n%s", zb)
 	}
 }
 

@@ -84,6 +84,17 @@ type Counters struct {
 	// Deny-all stops (WITNESSED) — turns where every proposed tool call was refused.
 	DenyAllStops uint64 `json:"deny_all_stops"`
 
+	// Managed-cache 1h TTL upgrade (WITNESSED, epic #1844 C6): outcomes of fak's own
+	// stable-prefix cache_control TTL splice on the outbound Anthropic wire, mirrored
+	// from the in-process fak_gateway_cache_ttl_upgrade_total family so a managed-cache
+	// session leaves DURABLE evidence instead of a witness that dies with the process.
+	// Upgraded counts actual 1h-tier upgrades; the reasons map is the closed
+	// agent.TTLUpgradeReason* refusal vocabulary. Both are zero/absent while the lever
+	// (--managed-cache / CacheTTL1H) is off; a zero upgraded count WITH reason rows is
+	// an ON-but-ineligible session (every head refused) — signal, not a bug.
+	CacheTTLUpgradesUpgraded uint64            `json:"cache_ttl_upgrades_upgraded"`
+	CacheTTLUpgradeReasons   map[string]uint64 `json:"cache_ttl_upgrade_reasons,omitempty"`
+
 	// ByReason is the deny/quarantine reason breakdown (gateway.AdjudicationSummary.ByReason).
 	ByReason map[string]uint64 `json:"by_reason,omitempty"`
 }
