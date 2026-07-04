@@ -217,6 +217,7 @@ func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall,
 	dropped := 0
 	for _, tc := range calls {
 		tool := tc.Function.Name
+		s.observePrunedToolProposal(reqTrace, tool)
 		argsDigest := guardrsi.ArgsDigest(tc.Function.Arguments)
 		seq := s.nextOriginSeq()
 		wv, repaired, aerr := s.adjudicateWithSeq(ctx, tool, tc.Function.Arguments, false, "", reqTrace, seq)

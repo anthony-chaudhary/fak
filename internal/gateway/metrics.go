@@ -150,9 +150,10 @@ type gatewayMetrics struct {
 	//   - toolPruneTurns: turns on which at least one tool def was pruned.
 	//   - toolPruneCount: cumulative tool defs removed across all those turns.
 	// Kept off compactMu — a different transform with its own (rare) hot path.
-	toolPruneMu    sync.Mutex
-	toolPruneTurns uint64 // WITNESSED: turns where >=1 unreachable tool def was pruned from tools[]
-	toolPruneCount uint64 // WITNESSED: total tool defs removed across all prune turns
+	toolPruneMu       sync.Mutex
+	toolPruneTurns    uint64 // WITNESSED: turns where >=1 unreachable tool def was pruned from tools[]
+	toolPruneCount    uint64 // WITNESSED: total tool defs removed across all prune turns
+	toolPrunedPropose uint64 // WITNESSED: pruned tool names later proposed, deduped once per trace/tool
 
 	// resetShadowMu guards the per-session resetScore SHADOW accumulators (#792). The reset
 	// policy (reset_score.go) recommends cut-vs-reset; this folds the recommend-only verdict
@@ -763,6 +764,18 @@ func (m *gatewayMetrics) observeInboundToolPrune(n int) {
 	m.toolPruneMu.Unlock()
 }
 
+// observeInboundPrunedToolProposal records that a model later proposed a tool name fak had
+// removed from that trace's advertised tools[]. The caller de-duplicates per trace/tool; this
+// counter is the process-wide witness count. It is names-only observability, not a verdict.
+func (m *gatewayMetrics) observeInboundPrunedToolProposal(n int) {
+	if m == nil || n <= 0 {
+		return
+	}
+	m.toolPruneMu.Lock()
+	m.toolPrunedPropose += uint64(n)
+	m.toolPruneMu.Unlock()
+}
+
 // inboundToolPruneSnapshot reads the WITNESSED tool-prune accumulators under their lock. Pure
 // read — the exit summary and the Prometheus surface both fold the same two numbers, so the line
 // can never disagree with the scrape.
@@ -773,6 +786,15 @@ func (m *gatewayMetrics) inboundToolPruneSnapshot() (turns, count uint64) {
 	m.toolPruneMu.Lock()
 	defer m.toolPruneMu.Unlock()
 	return m.toolPruneTurns, m.toolPruneCount
+}
+
+func (m *gatewayMetrics) inboundPrunedToolProposalSnapshot() uint64 {
+	if m == nil {
+		return 0
+	}
+	m.toolPruneMu.Lock()
+	defer m.toolPruneMu.Unlock()
+	return m.toolPrunedPropose
 }
 
 // recordResetShadow folds one compacted turn's resetScore SHADOW verdict into the recommend-only
@@ -2873,6 +2895,7 @@ func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
 	pruneTurns, pruneCount := m.inboundToolPruneSnapshot()
 	writeCounter(b, "fak_gateway_inbound_tools_pruned_total", "WITNESSED (fak authored): cumulative unreachable tool DEFINITIONS dropped from the outbound tools[] across the session. A pure uncached-token saving — the pruner drops only tools after the cache_control breakpoint and re-proves the protected prefix is byte-identical, so a counted prune never bursts the provider-side upstream cache.", int64(pruneCount))
 	writeCounter(b, "fak_gateway_inbound_tools_prune_turns_total", "WITNESSED (fak authored): turns on which at least one unreachable tool def was pruned from tools[]. Zero on a harness (e.g. Claude Code) whose single cache_control breakpoint sits on the LAST tool, since nothing is then droppable.", int64(pruneTurns))
+	writeCounter(b, "fak_gateway_inbound_tools_pruned_then_proposed_total", "WITNESSED (fak authored): pruned tool definition names that the model later proposed anyway, counted once per trace/tool. Nonzero means the advertised floor and observed model behavior drifted; call-time adjudication still default-denies the proposal.", int64(m.inboundPrunedToolProposalSnapshot()))
 }
 
 // resetShadowSnapshot is a lock-free copy of the resetScore SHADOW accumulators for rendering.

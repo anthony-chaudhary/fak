@@ -255,7 +255,9 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// nil predicate or no floor-denied advertised tool ⇒ req.Raw untouched. The call records
 	// its WITNESSED prune count into /metrics (observeInboundToolPrune), so a turn that shed
 	// unreachable tool defs is now visible in the exit summary instead of silently discarded.
-	s.maybeCompactInboundTools(req)
+	// Also remember the concrete names per trace so a later model proposal of a pruned name is
+	// logged once as a floor-vs-observed drift witness.
+	s.recordInboundPrunedToolDefinitions(reqTrace, s.maybeCompactInboundTools(req))
 	s.maybeCompactInboundSystem(req)
 	// In passthrough mode the upstream credential is the client's own (transparent
 	// hop) UNLESS the gateway pins its own (the subscription path). The inbound

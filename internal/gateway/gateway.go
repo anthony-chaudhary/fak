@@ -830,6 +830,14 @@ type Server struct {
 	livelockMu sync.Mutex
 	livelock   *guardrsi.LivelockDetector
 
+	// prunedToolDefs remembers, per served trace, tool definitions fak removed from the
+	// advertised Anthropic tools[] because the capability floor could never admit them. If
+	// the model later proposes one of those names anyway, adjudicateProposed logs that drift
+	// once per trace/tool as a wire witness (tool name only; never raw arguments).
+	prunedToolDefsMu         sync.Mutex
+	prunedToolDefs           map[string]map[string]struct{}
+	notedPrunedToolProposals map[string]map[string]struct{}
+
 	// contextQueryAudit is the managed-context clarification journal (#1622): every
 	// context question minted by the gateway records the answer source/default and
 	// the assumption source ref it produced, so a replay can attribute a later
