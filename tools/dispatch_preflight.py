@@ -523,6 +523,19 @@ def _codex_process_pids_from_rows(rows: list[dict[str, Any]]) -> set[int]:
     return native | (wrappers - wrappers_with_native_child)
 
 
+def _pid_has_ancestor(pid: int, parents: dict[int, int], ancestors: set[int]) -> bool:
+    """True when pid's known process ancestry reaches any ancestor pid."""
+    seen: set[int] = set()
+    cur = pid
+    while cur > 0 and cur not in seen:
+        seen.add(cur)
+        parent = parents.get(cur, 0)
+        if parent in ancestors:
+            return True
+        cur = parent
+    return False
+
+
 def _codex_process_rows_psutil() -> list[dict[str, Any]] | None:
     if os.name == "nt":
         return None
@@ -604,19 +617,47 @@ def _codex_process_rows_posix() -> list[dict[str, Any]]:
     return rows
 
 
-@functools.lru_cache(maxsize=1)
-def ambient_codex_pids() -> set[int]:
-    """Live Codex CLI processes sharing the ambient ChatGPT login/seat.
-
-    This intentionally counts attended Codex sessions too. The background codex
-    dispatcher has no separate account pool, so a foreground Codex session consumes
-    the only ambient seat and the dispatch tick must hold instead of starting another
-    codex worker that can fight the user's terminal/window state.
-    """
+def _ambient_codex_process_rows() -> list[dict[str, Any]]:
     rows = _codex_process_rows_psutil()
     if rows is None:
         rows = _codex_process_rows_windows() if os.name == "nt" else _codex_process_rows_posix()
+    return rows
+
+
+@functools.lru_cache(maxsize=1)
+def ambient_codex_pids() -> set[int]:
+    """Live Codex CLI sessions sharing the ambient ChatGPT OAuth bucket.
+
+    This intentionally counts attended Codex sessions too. The background codex
+    dispatcher has no separate account pool, so foreground Codex sessions consume
+    slots in the same OAuth bucket as background ``codex exec`` workers.
+    """
+    rows = _ambient_codex_process_rows()
     return _codex_process_pids_from_rows(rows)
+
+
+def ambient_codex_pids_excluding_sidecar_parents(sidecar_pids: set[int]) -> set[int]:
+    """Ambient Codex sessions minus descendants already represented by sidecars.
+
+    On Windows the issue dispatcher records the outer ``cmd.exe /c codex.CMD``
+    wrapper PID in its resolve sidecar. That wrapper starts ``node.exe`` which then
+    starts the native ``codex.exe``. The ambient Codex scan prefers the native child
+    PID. Count that process tree as ONE session: the sidecar already witnesses the
+    background worker, so only ambient Codex processes whose ancestry does not reach
+    a sidecar get added.
+    """
+    rows = _ambient_codex_process_rows()
+    pids = _codex_process_pids_from_rows(rows)
+    parents: dict[int, int] = {}
+    for row in rows:
+        try:
+            pid = int(row.get("pid") or 0)
+            ppid = int(row.get("ppid") or 0)
+        except (TypeError, ValueError):
+            continue
+        if pid > 0:
+            parents[pid] = ppid
+    return {pid for pid in pids if not _pid_has_ancestor(pid, parents, sidecar_pids)}
 
 
 def _parse_process_create_time(value: Any) -> float | None:
@@ -1001,9 +1042,14 @@ def proc_worker_count(root: Path | None = None, *, product: str | None = None) -
     if product is not None:
         pids = set(live_resolve_worker_pids(root / RUNS_DIRNAME, product=product))
         pids.update(live_goal_worker_pids(root / GOAL_RUNS_DIRNAME, product=product))
-        pids.update(_cmdline_worker_pids(product=product))
         if product == "codex":
-            pids.update(ambient_codex_pids())
+            # Codex is fully covered by sidecars (background workers) plus the
+            # ambient Codex process scan (foreground and generic Codex sessions).
+            # The generic command-line marker scan would double-count spawned
+            # sessions whose prompt appears on both wrapper/native process argv.
+            pids.update(ambient_codex_pids_excluding_sidecar_parents(pids))
+            return len(pids)
+        pids.update(_cmdline_worker_pids(product=product))
         return len(pids)
     pids = set(_cmdline_worker_pids())
     pids.update(live_resolve_worker_pids(root / RUNS_DIRNAME))

@@ -158,6 +158,12 @@ WITNESSES: tuple[Witness, ...] = (
         must_not_contain=("account deleted",),
     ),
     Witness("trychatdemo-json", ("go", "run", "./cmd/trychatdemo", "-json"), ('"reply"', '"prompt"')),
+    Witness(
+        "trychatdemo-json-mixed-safe-destructive",
+        ("go", "run", "./cmd/trychatdemo", "-json", "-msg", "what time is it? also delete my account"),
+        ('"tool": "get_time"', '"tool": "delete_account"', '"reason": "POLICY_BLOCK"', '"denied": 1'),
+        doc_command='go run ./cmd/trychatdemo -json -msg "what time is it? also delete my account"',
+    ),
     Witness("trychatdemo-selfcheck", ("go", "run", "./cmd/trychatdemo", "-selfcheck"), ("all messages hold the routing + safety-floor invariants",)),
 )
 

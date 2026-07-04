@@ -755,8 +755,21 @@ class WorkerCountTest(unittest.TestCase):
         mod = load()
         mod.live_resolve_worker_pids = lambda runs_dir, **kw: {101}
         mod.live_goal_worker_pids = lambda runs_dir, **kw: set()
-        mod.ambient_codex_pids = lambda: {201, 202}
+        mod.ambient_codex_pids_excluding_sidecar_parents = lambda sidecars: {201, 202}
+        mod._cmdline_worker_pids = lambda product=None: {301}
         self.assertEqual(mod.proc_worker_count(ROOT, product="codex"), 3)
+
+    def test_proc_worker_count_codex_deduplicates_sidecar_wrapper_native_descendant(self) -> None:
+        mod = load()
+        rows = [
+            {"pid": 101, "ppid": 1, "name": "cmd.exe", "cmdline": r"cmd.exe /c codex.CMD exec"},
+            {"pid": 111, "ppid": 101, "name": "node.exe",
+             "cmdline": r"C:\node.exe C:\Users\u\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js"},
+            {"pid": 201, "ppid": 111, "name": "codex.exe", "cmdline": r"C:\...\codex.exe"},
+            {"pid": 202, "ppid": 1, "name": "codex.exe", "cmdline": r"C:\...\codex.exe"},
+        ]
+        mod._ambient_codex_process_rows = lambda: rows
+        self.assertEqual(mod.ambient_codex_pids_excluding_sidecar_parents({101}), {202})
 
     def test_codex_seat_is_ambient_oauth_bucket_and_depletes_at_session_cap(self) -> None:
         mod = load()
