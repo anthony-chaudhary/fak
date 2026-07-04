@@ -626,6 +626,20 @@ type guardChildSpawnMetadata struct {
 
 type guardChildLauncher func(toolprocgate.SpawnGrant) (*exec.Cmd, error)
 
+const (
+	guardCodexTerminalRestorePulseDuration = 8 * time.Second
+	guardCodexTerminalRestorePulseInterval = 500 * time.Millisecond
+)
+
+var startGuardChildTerminalRestorePulse = windowgate.StartTerminalRestorePulse
+
+func maybeStartGuardChildTerminalRestorePulse(command []string) {
+	if len(command) == 0 || !guardIsCodex(command[0]) {
+		return
+	}
+	startGuardChildTerminalRestorePulse(guardCodexTerminalRestorePulseDuration, guardCodexTerminalRestorePulseInterval)
+}
+
 func newGuardChildSpawnMetadata(agentRunID, policyDigest, backend string, rt policy.Runtime, command []string) guardChildSpawnMetadata {
 	agentRunID = strings.TrimSpace(agentRunID)
 	if agentRunID == "" {
@@ -651,7 +665,7 @@ func newGuardChildSpawnMetadata(agentRunID, policyDigest, backend string, rt pol
 
 // buildGuardChild constructs the wrapped-agent command with ONLY the gateway URL injected
 // into its environment (never the parent shell). In pinned subscription mode it also hands
-// the client a placeholder ANTHROPIC_API_KEY (when it has none) so it talks x-api-key to the
+// the client a provider-shaped placeholder API key (when it has none) so it talks to the
 // gateway, which ignores the placeholder and authenticates upstream with the held token.
 func buildGuardChild(command []string, injected [][2]string, pinUpstream bool, extraEnv ...[2]string) *exec.Cmd {
 	command, env := guardChildCommandEnv(command, injected, pinUpstream, extraEnv...)
@@ -667,7 +681,16 @@ func guardChildCommandEnv(command []string, injected [][2]string, pinUpstream bo
 	// itself before exec'ing the agent. Off by default, no-op on non-Linux or when the hook
 	// dirs cannot be resolved — the original command is used unchanged.
 	command = maybeLandlockCommand(command)
-	env := os.Environ()
+	// Apply the always-on #2358 secret floor to the AMBIENT parent environment
+	// before it is inherited by the wrapped agent: a spawned child (and anything
+	// it spawns) must not receive inherited credentials it never needed. Only the
+	// ambient os.Environ() portion is stripped — the injected gateway wiring, the
+	// caller's extraEnv, and the placeholder key below are guard's EXPLICIT grants,
+	// appended after, and always survive. This is safe for every guard auth
+	// posture: guard already resolved and captured its own upstream OAuth token in
+	// THIS (parent) process before spawning, and the provider API keys an
+	// API-billing child needs are spared by StripInheritedSecrets.
+	env, _ := policy.StripInheritedSecrets(os.Environ())
 	for _, kv := range injected {
 		env = append(env, kv[0]+"="+kv[1])
 	}
@@ -677,12 +700,14 @@ func guardChildCommandEnv(command []string, injected [][2]string, pinUpstream bo
 		}
 	}
 	// Subscription mode: hand the client a PLACEHOLDER api key (only if it has none) so
-	// it talks to the gateway in x-api-key mode; the gateway IGNORES the placeholder
-	// (pinUpstream) and authenticates upstream with the real held OAuth token. Without it
-	// the client may forward its own subscription bearer — also ignored in pinned mode —
-	// so either way the held token is what reaches Anthropic.
-	if pinUpstream && os.Getenv("ANTHROPIC_API_KEY") == "" {
+	// it talks to the gateway; the gateway IGNORES the placeholder (pinUpstream) and
+	// authenticates upstream with the real held OAuth token.
+	isCodex := len(command) > 0 && guardIsCodex(command[0])
+	if pinUpstream && !isCodex && os.Getenv("ANTHROPIC_API_KEY") == "" {
 		env = append(env, "ANTHROPIC_API_KEY=fak-guard-oauth-placeholder")
+	}
+	if pinUpstream && isCodex && os.Getenv("OPENAI_API_KEY") == "" {
+		env = append(env, "OPENAI_API_KEY="+guardCodexOAuthPlaceholderAPIKey)
 	}
 	return command, env
 }
@@ -969,6 +994,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
+		maybeStartGuardChildTerminalRestorePulse(command)
 		runErr := child.Run()
 		if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
 			command = next
@@ -990,6 +1016,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
+		maybeStartGuardChildTerminalRestorePulse(command)
 		if err := child.Start(); err != nil {
 			finishGuardChildAndReport(err, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return

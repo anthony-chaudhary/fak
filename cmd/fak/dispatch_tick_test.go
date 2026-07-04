@@ -297,6 +297,8 @@ func TestDispatchReadAccountRosterNativeLoadsRegistryAndPolicyWeights(t *testing
 	t.Setenv("FLEET_REG_DIR", "")
 	t.Setenv("FLEET_POLICY_PATH", "")
 	t.Setenv("FLEET_POLICY_DIR", "")
+	t.Setenv("FLEET_USER_HOME", filepath.Join(root, "empty-home"))
+	t.Setenv("FLEET_CONFIG_HOME", filepath.Join(root, "empty-config"))
 	writeDispatchJSONFixture(t, filepath.Join(root, "tools", "_registry", "sessions.json"), map[string]any{
 		"accounts": []any{
 			map[string]any{
@@ -357,6 +359,65 @@ func TestDispatchReadAccountRosterNativeLoadsRegistryAndPolicyWeights(t *testing
 	route := dispatchtick.RouteAccount(dispatchtick.AccountRouteInput{Rows: rows, Product: "claude", WorkKind: "engineering"})
 	if !route.OK || route.Account.Tag != "day26" {
 		t.Fatalf("route = %+v, want day26 and not excluded hidden row", route)
+	}
+}
+
+func TestDispatchReadAccountRosterNativePrefersAuthoritativeFleetAccounts(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	configHome := filepath.Join(root, "config")
+	t.Setenv("FLEET_REG_DIR", "")
+	t.Setenv("FLEET_POLICY_PATH", "")
+	t.Setenv("FLEET_POLICY_DIR", "")
+	t.Setenv("FLEET_USER_HOME", home)
+	t.Setenv("FLEET_CONFIG_HOME", configHome)
+	writeDispatchClaudeAccount(t, home, ".claude-day26", "same-account", "day26@example.test")
+	writeDispatchClaudeAccount(t, home, ".claude-day30", "same-account", "day26@example.test")
+	writeDispatchClaudeAccount(t, home, ".claude-july2", "unique-account", "july2@example.test")
+	writeDispatchJSONFixture(t, filepath.Join(root, "tools", "_registry", "sessions.json"), map[string]any{
+		"accounts": []any{
+			map[string]any{"account": ".claude-day30", "tag": "day30", "available": true, "active_sessions": 0},
+		},
+		"sessions": []any{},
+	})
+	writeDispatchJSONFixture(t, filepath.Join(root, "tools", "_registry", "accounts_policy.json"), map[string]any{
+		"route_weights": map[string]any{
+			"day30": 100,
+			"july2": 10,
+		},
+	})
+
+	rows, err := dispatchReadAccountRosterNative(root)
+	if err != nil {
+		t.Fatalf("dispatchReadAccountRosterNative: %v", err)
+	}
+	byTag := map[string]dispatchtick.AccountRow{}
+	for _, row := range rows {
+		byTag[row.Tag] = row
+	}
+	if byTag["day30"].IdentityRole != "duplicate" {
+		t.Fatalf("day30 row = %+v, want duplicate identity from authoritative fleet account roster", byTag["day30"])
+	}
+	route := dispatchtick.RouteAccount(dispatchtick.AccountRouteInput{Rows: rows, Product: "claude", WorkKind: "engineering"})
+	if !route.OK || route.Account.Tag != "july2" {
+		t.Fatalf("route = %+v, want july2; duplicate day30 must not win despite higher weight", route)
+	}
+}
+
+func writeDispatchClaudeAccount(t *testing.T, home, name, uuid, email string) {
+	t.Helper()
+	dir := filepath.Join(home, name)
+	if err := os.MkdirAll(filepath.Join(dir, "projects"), 0o755); err != nil {
+		t.Fatalf("mkdir account %s: %v", name, err)
+	}
+	writeDispatchJSONFixture(t, filepath.Join(dir, ".claude.json"), map[string]any{
+		"oauthAccount": map[string]any{
+			"accountUuid":  uuid,
+			"emailAddress": email,
+		},
+	})
+	if err := os.WriteFile(filepath.Join(dir, ".credentials.json"), []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write credentials for %s: %v", name, err)
 	}
 }
 
@@ -650,6 +711,103 @@ func TestDispatchTickLiveBrokerDenyDoesNotSpawnWorker(t *testing.T) {
 	broker := mapAt(got, "spawn_broker")
 	if broker["allow"] != false || dispatchMapString(broker, "reason") != "unit-test-deny" {
 		t.Fatalf("spawn broker payload = %#v, want denied unit-test reason", broker)
+	}
+}
+
+func TestDispatchTickLiveFailsNonzeroEarlyExitAndPinsClaudeAccountEnv(t *testing.T) {
+	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	root := t.TempDir()
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "ambient-token-must-not-leak")
+
+	oldBroker := launchSpawnBroker
+	oldSpawner := dispatchIssueWorkerSpawner
+	var capturedEnv map[string]string
+	var capturedAccount dispatchtick.Account
+	launchSpawnBroker = func(a launchBrokerAttempt) launchBrokerGrant {
+		return allowLaunchBrokerGrant(a, "unit-test-allow")
+	}
+	dispatchIssueWorkerSpawner = func(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA, stdinPayload string, probeS float64) (dispatchSpawnResult, error) {
+		capturedEnv = copyStringMap(env)
+		capturedAccount = account
+		if account.Tag != "acct-preflight" {
+			t.Fatalf("spawn account = %+v, want acct-preflight", account)
+		}
+		logPath := filepath.Join(runsDir, "resolve-12-20000101-000000.log")
+		if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+			t.Fatalf("mkdir runs dir: %v", err)
+		}
+		body := []byte("# fak-spawn\nYou've hit your usage limit; resets later\n")
+		if err := os.WriteFile(logPath, body, 0o644); err != nil {
+			t.Fatalf("write early-exit log: %v", err)
+		}
+		return dispatchSpawnResult{
+			PID:     4242,
+			Log:     logPath,
+			Issue:   issue,
+			Lane:    lane,
+			Backend: backend,
+			LeaseID: leaseID,
+			Tree:    tree,
+			Account: dispatchtick.AccountSidecar(account),
+			EarlyExit: map[string]any{
+				"checked":    true,
+				"alive":      false,
+				"wait_s":     probeS,
+				"silent":     false,
+				"returncode": 1,
+				"log_bytes":  int64(len(body)),
+				"class":      dispatchtick.NoCommitAuthWall,
+				"summary":    dispatchEarlyExitSummary(dispatchtick.NoCommitAuthWall),
+			},
+		}, nil
+	}
+	t.Cleanup(func() {
+		launchSpawnBroker = oldBroker
+		dispatchIssueWorkerSpawner = oldSpawner
+	})
+
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--live", "--json")
+	if code != 1 {
+		t.Fatalf("exit = %d, want nonzero early-exit refusal (stderr: %s)\n%s", code, errb, out)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out)
+	}
+	if got["action"] != "spawn_failed" || got["verdict"] != "SPAWN_FAILED" || got["ok"] != false {
+		t.Fatalf("early-exit result = action %v verdict %v ok %v", got["action"], got["verdict"], got["ok"])
+	}
+	reason := dispatchMapString(got, "reason")
+	if !strings.Contains(reason, "exited within 5.0s with code 1") || !strings.Contains(reason, "auth or usage wall") {
+		t.Fatalf("reason = %q, want timed code-1 auth/usage classification", reason)
+	}
+	if capturedEnv["CLAUDE_CONFIG_DIR"] != capturedAccount.Dir {
+		t.Fatalf("CLAUDE_CONFIG_DIR = %q, want selected account dir %q", capturedEnv["CLAUDE_CONFIG_DIR"], capturedAccount.Dir)
+	}
+	if _, ok := capturedEnv["CLAUDE_CODE_OAUTH_TOKEN"]; ok {
+		t.Fatalf("ambient CLAUDE_CODE_OAUTH_TOKEN leaked into worker env: %#v", capturedEnv)
+	}
+	if acct := mapAt(got, "account"); dispatchMapString(acct, "tag") != capturedAccount.Tag || dispatchMapString(acct, "dir") != capturedAccount.Dir {
+		t.Fatalf("payload account = %#v, want selected account %+v", acct, capturedAccount)
+	}
+	spawned := mapAt(got, "spawned")
+	if early := mapAt(spawned, "early_exit"); dispatchMapString(early, "class") != dispatchtick.NoCommitAuthWall {
+		t.Fatalf("spawned early_exit = %#v, want auth_wall class", early)
+	}
+	startupPath := dispatchMapString(spawned, "startup_bundle")
+	if startupPath == "" {
+		t.Fatalf("spawned payload missing startup bundle path: %#v", spawned)
+	}
+	var sidecar map[string]any
+	raw, err := os.ReadFile(startupPath)
+	if err != nil {
+		t.Fatalf("read startup sidecar %s: %v", startupPath, err)
+	}
+	if err := json.Unmarshal(raw, &sidecar); err != nil {
+		t.Fatalf("bad startup sidecar json: %v\n%s", err, raw)
+	}
+	if acct := mapAt(sidecar, "account"); dispatchMapString(acct, "tag") != capturedAccount.Tag || dispatchMapString(acct, "dir") != capturedAccount.Dir {
+		t.Fatalf("startup account = %#v, want selected account %+v", acct, capturedAccount)
 	}
 }
 

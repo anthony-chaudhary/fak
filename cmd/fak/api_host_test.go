@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -107,17 +108,124 @@ func TestAPIHostAcceptanceCommandWritesReports(t *testing.T) {
 	}
 }
 
-func TestAPIHostRejectsTargetAndRosterTogether(t *testing.T) {
+func writeAPIHostModelAccountsRoster(t *testing.T, baseURL string) string {
+	t.Helper()
+	body := fmt.Sprintf(`{
+  "version": "fak-accounts/v1",
+  "accounts": [
+    {"id":"local-probe","kind":"local","base_url":%q},
+    {"id":"claude-sub","kind":"anthropic","cred_env":"CLAUDE_CODE_OAUTH_TOKEN"}
+  ],
+  "default": "local-probe",
+  "bindings": [
+    {"model":"small","account":"local-probe","upstream_model":"m1"},
+    {"model":"large","account":"claude-sub","upstream_model":"claude-opus-4-6"}
+  ]
+}`, baseURL)
+	path := filepath.Join(t.TempDir(), "model-accounts.json")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write model account roster: %v", err)
+	}
+	return path
+}
+
+func TestAPIHostReadinessFromModelAccountsRoster(t *testing.T) {
+	server := apiHostTestServer()
+	defer server.Close()
+	roster := writeAPIHostModelAccountsRoster(t, server.URL+"/ok")
 	var stdout, stderr bytes.Buffer
+
 	rc := runAPIHost(&stdout, &stderr, []string{
 		"readiness",
-		"--target", "ok|http://example.invalid",
-		"--from-roster", "roster.json",
+		"--from-model-accounts", roster,
 	})
-	if rc != 2 {
-		t.Fatalf("rc=%d, want 2", rc)
+	if rc != 0 {
+		t.Fatalf("runAPIHost readiness rc=%d stderr=%q stdout=%s", rc, stderr.String(), stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "mutually exclusive") {
-		t.Fatalf("stderr = %q", stderr.String())
+	var report struct {
+		Summary struct {
+			Targets         int  `json:"targets"`
+			ModelsConfirmed int  `json:"models_confirmed"`
+			ReadinessGate   bool `json:"readiness_gate"`
+		} `json:"summary"`
+		Probes []struct {
+			Name      string `json:"name"`
+			ModelHint string `json:"model_hint"`
+		} `json:"probes"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal JSON report: %v\n%s", err, stdout.String())
+	}
+	if report.Summary.Targets != 1 || report.Summary.ModelsConfirmed != 1 || !report.Summary.ReadinessGate {
+		t.Fatalf("unexpected readiness summary: %+v\n%s", report.Summary, stdout.String())
+	}
+	if len(report.Probes) != 1 || report.Probes[0].Name != "local-probe" || report.Probes[0].ModelHint != "m1" {
+		t.Fatalf("unexpected readiness probes: %+v\n%s", report.Probes, stdout.String())
+	}
+}
+
+func TestAPIHostAcceptanceFromModelAccountsRosterKeepsNativeAccounts(t *testing.T) {
+	server := apiHostTestServer()
+	defer server.Close()
+	roster := writeAPIHostModelAccountsRoster(t, server.URL+"/ok")
+	var stdout, stderr bytes.Buffer
+
+	rc := runAPIHost(&stdout, &stderr, []string{
+		"acceptance",
+		"--from-model-accounts", roster,
+		"--root", t.TempDir(),
+	})
+	if rc != 0 {
+		t.Fatalf("runAPIHost acceptance rc=%d stderr=%q stdout=%s", rc, stderr.String(), stdout.String())
+	}
+	var report struct {
+		Summary struct {
+			Targets               int  `json:"targets"`
+			ReadyForLiveBridgeRun int  `json:"ready_for_live_bridge_run"`
+			WireSupportedUnprobed int  `json:"wire_supported_unprobed"`
+			AcceptanceGate        bool `json:"acceptance_gate"`
+		} `json:"summary"`
+		Targets []struct {
+			Name     string `json:"name"`
+			Provider string `json:"provider"`
+			Status   string `json:"status"`
+		} `json:"targets"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal JSON report: %v\n%s", err, stdout.String())
+	}
+	if report.Summary.Targets != 2 || report.Summary.ReadyForLiveBridgeRun != 1 ||
+		report.Summary.WireSupportedUnprobed != 1 || !report.Summary.AcceptanceGate {
+		t.Fatalf("unexpected acceptance summary: %+v\n%s", report.Summary, stdout.String())
+	}
+	statuses := map[string]string{}
+	providers := map[string]string{}
+	for _, row := range report.Targets {
+		statuses[row.Name] = row.Status
+		providers[row.Name] = row.Provider
+	}
+	if statuses["local-probe"] != "READY_FOR_LIVE_BRIDGE_RUN" || providers["local-probe"] != "openai-compatible" {
+		t.Fatalf("local account row wrong: statuses=%v providers=%v", statuses, providers)
+	}
+	if statuses["claude-sub"] != "WIRE_SUPPORTED_UNPROBED" || providers["claude-sub"] != "anthropic" {
+		t.Fatalf("native account row wrong: statuses=%v providers=%v", statuses, providers)
+	}
+}
+
+func TestAPIHostRejectsMultipleSources(t *testing.T) {
+	cases := [][]string{
+		{"readiness", "--target", "ok|http://example.invalid", "--from-roster", "roster.json"},
+		{"readiness", "--target", "ok|http://example.invalid", "--from-model-accounts", "accounts.json"},
+		{"acceptance", "--from-roster", "roster.json", "--from-model-accounts", "accounts.json"},
+	}
+	for _, argv := range cases {
+		var stdout, stderr bytes.Buffer
+		rc := runAPIHost(&stdout, &stderr, argv)
+		if rc != 2 {
+			t.Fatalf("%v rc=%d, want 2", argv, rc)
+		}
+		if !strings.Contains(stderr.String(), "mutually exclusive") {
+			t.Fatalf("%v stderr = %q", argv, stderr.String())
+		}
 	}
 }

@@ -374,6 +374,9 @@ func gatewayUsageCounters(srv *gateway.Server) gatewayusageledger.Counters {
 
 		DenyAllStops: adj.DenyAllStops,
 
+		CacheTTLUpgradesUpgraded: adj.CacheTTLUpgraded,
+		CacheTTLUpgradeReasons:   adj.CacheTTLUpgradeReasons,
+
 		ByReason: adj.ByReason,
 	}
 }

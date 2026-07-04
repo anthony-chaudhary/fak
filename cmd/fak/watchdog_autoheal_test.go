@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -353,6 +355,69 @@ func TestWatchdogAutohealKeepsAgentPaneClean(t *testing.T) {
 	}
 	if n := strings.Count(string(again), "fak watchdog-autoheal:"); n != 2 {
 		t.Fatalf("autoheal.log heal lines = %d, want 2 (append, not truncate)", n)
+	}
+}
+
+func TestRunWatchdogAutohealProbesSpecsConcurrently(t *testing.T) {
+	now := time.Unix(5000, 0).UTC()
+	dir := t.TempDir()
+	const perSpecDelay = 60 * time.Millisecond
+	const specCount = 4
+
+	specs := make([]watchdogAutohealSpec, specCount)
+	for i := 0; i < specCount; i++ {
+		id := fmt.Sprintf("svc-%d", i)
+		specs[i] = watchdogAutohealSpec{
+			watchdogService: watchdogService{ID: id, Manager: "taskscheduler", Unit: id},
+			Probe: func(context.Context) (watchdogProbe, error) {
+				time.Sleep(perSpecDelay)
+				return watchdogProbe{Installed: false, Alive: false, Detail: "not installed"}, nil
+			},
+			Restart: func(context.Context) error { return nil },
+		}
+	}
+	opts := testWatchdogAutohealOptions(dir, &now, specs[0])
+	opts.Specs = specs
+
+	start := time.Now()
+	got := runWatchdogAutoheal(context.Background(), opts)
+	wall := time.Since(start)
+
+	if len(got) != specCount {
+		t.Fatalf("results = %d, want %d", len(got), specCount)
+	}
+	if budget := perSpecDelay * 5 / 2; wall >= budget {
+		t.Fatalf("runWatchdogAutoheal took %s for %d specs at %s each, want < %s", wall, specCount, perSpecDelay, budget)
+	}
+	for i, r := range got {
+		if r.ID != specs[i].ID {
+			t.Fatalf("result order not preserved: got[%d].ID = %q, want %q", i, r.ID, specs[i].ID)
+		}
+		if r.ElapsedMS <= 0 {
+			t.Fatalf("result[%d].ElapsedMS = %d, want > 0", i, r.ElapsedMS)
+		}
+	}
+}
+
+func TestWatchdogAutohealSummaryLineIsUnconditional(t *testing.T) {
+	results := []watchdogAutohealResult{
+		{Action: "noop", ID: "a"},
+		{Action: "noop", ID: "b"},
+		{Action: "give_up", ID: "c"},
+	}
+	b := watchdogAutohealSummaryLine("guard", 123*time.Millisecond, results)
+	if b == nil {
+		t.Fatalf("summary line = nil, want JSON")
+	}
+	var s watchdogAutohealSummary
+	if err := json.Unmarshal(b, &s); err != nil {
+		t.Fatalf("unmarshal summary: %v; line = %s", err, b)
+	}
+	if s.Specs != 3 || s.Noop != 2 || s.GaveUp != 1 || s.ElapsedMS != 123 || s.Verb != "guard" || !s.Summary {
+		t.Fatalf("summary = %+v, want specs=3 noop=2 gave_up=1 elapsed_ms=123 verb=guard summary=true", s)
+	}
+	if got := watchdogAutohealSummaryLine("guard", time.Millisecond, nil); got != nil {
+		t.Fatalf("summary line for zero results = %q, want nil", got)
 	}
 }
 

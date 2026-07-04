@@ -406,6 +406,7 @@ const fakeReleaseWorktree = "C:\\tmp\\fak-release-ship-test"
 
 func stubReleaseShipRunner(t *testing.T, runner releaseShipCommandRunner) func() {
 	t.Helper()
+	t.Setenv("FAK_PYTHON", "python-test")
 	oldRunner := releaseShipRunCommand
 	oldMkdir := releaseShipMkdirTemp
 	releaseShipRunCommand = runner

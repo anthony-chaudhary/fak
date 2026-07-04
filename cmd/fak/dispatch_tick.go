@@ -618,11 +618,11 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		spawned.Startup = writeDispatchStartupBundleSidecar(spawned.Log, bundle)
 	}
 	payload["spawned"] = dispatchSpawnMap(spawned)
-	if early, ok := spawned.EarlyExit["silent"].(bool); ok && early {
+	if reason, failed := dispatchEarlyExitFailureReason(opts.Backend, spawned.PID, target, spawned.EarlyExit); failed {
 		payload["ok"] = false
 		payload["action"] = "spawn_failed"
 		payload["verdict"] = "SPAWN_FAILED"
-		payload["reason"] = fmt.Sprintf("%s worker pid %d for #%d exited immediately and produced an empty log", opts.Backend, spawned.PID, target)
+		payload["reason"] = reason
 		recordDispatchPayload(runsDir, opts.Backend, payload)
 		return finish(payload), nil
 	}
@@ -972,11 +972,66 @@ func probeDispatchSpawn(cmd *exec.Cmd, logPath string, waitS float64) map[string
 		if st, statErr := os.Stat(logPath); statErr == nil {
 			rec["log_bytes"] = st.Size()
 			rec["silent"] = st.Size() == 0
+			if st.Size() > 0 {
+				class := dispatchEarlyExitClass(logPath)
+				rec["class"] = class
+				rec["summary"] = dispatchEarlyExitSummary(class)
+			}
 		}
 		return rec
 	case <-time.After(time.Duration(waitS * float64(time.Second))):
 		return map[string]any{"checked": true, "alive": true, "wait_s": waitS}
 	}
+}
+
+func dispatchEarlyExitClass(logPath string) string {
+	tail, size := dispatchWitnessLogTail(logPath)
+	if tail == "" && size <= 0 {
+		return dispatchtick.NoCommitUnknown
+	}
+	return dispatchtick.ClassifyNoCommitReason(tail, size)
+}
+
+func dispatchEarlyExitSummary(class string) string {
+	switch class {
+	case dispatchtick.NoCommitAuthWall:
+		return "backend auth or usage wall"
+	case dispatchtick.NoCommitSelfModify:
+		return "guard self-modify refusal"
+	case dispatchtick.NoCommitPolicyBlock:
+		return "guard policy refusal"
+	case dispatchtick.NoCommitOffTrunk:
+		return "guard off-trunk refusal"
+	case dispatchtick.NoCommitBannerNoop:
+		return "banner-only no-op"
+	default:
+		return "unclassified early process exit"
+	}
+}
+
+func dispatchEarlyExitFailureReason(backend string, pid, issue int, early map[string]any) (string, bool) {
+	if len(early) == 0 || dispatchMapBool(early, "alive") {
+		return "", false
+	}
+	if dispatchMapBool(early, "silent") {
+		return fmt.Sprintf("%s worker pid %d for #%d exited immediately and produced an empty log", backend, pid, issue), true
+	}
+	code := dispatchMapInt(early, "returncode")
+	if code == 0 && dispatchMapString(early, "error") == "" {
+		return "", false
+	}
+	waitS := dispatchMapFloat(early, "wait_s")
+	reason := fmt.Sprintf("%s worker pid %d for #%d exited within %.1fs", backend, pid, issue, waitS)
+	if code != 0 {
+		reason += fmt.Sprintf(" with code %d", code)
+	}
+	if err := dispatchMapString(early, "error"); err != "" {
+		reason += ": " + err
+	}
+	if class := dispatchMapString(early, "class"); class != "" && class != dispatchtick.NoCommitUnknown {
+		reason += " (" + dispatchEarlyExitSummary(class) + ")"
+	}
+	return reason, true
 }
 
 func recordDispatchPayload(runsDir, backend string, payload map[string]any) {

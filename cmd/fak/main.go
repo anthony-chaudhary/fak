@@ -194,6 +194,8 @@ func main() {
 		cmdRelay(os.Args[2:])
 	case "claude-mac-fak":
 		cmdClaudeMacFak(os.Args[2:])
+	case "macbench":
+		cmdMacBench(os.Args[2:])
 	case "codex":
 		cmdCodex(os.Args[2:])
 	case "codex-mcp-health":

@@ -61,9 +61,11 @@ const ultracodeSettingsArg = `{"ultracode":true}`
 // agents.
 const defaultLaunchModel = "fable"
 
-// defaultLaunchFallbackModel is the one-shot startup fallback when the default Fable 5
-// launch is refused before a session starts because the model is unavailable. It deliberately
-// lands on the explicit Opus 4.8 id; ultracode is preserved by reusing the same launchOpts.
+// defaultLaunchFallbackModel is the default fallback CHAIN (`--fallback-model`, comma-separated)
+// tried in order when the default Fable 5 launch is refused before a session starts because the
+// model is unavailable — unknown/invalid OR a usage/rate limit (e.g. Fable's weekly cap). It
+// lands on the explicit Opus 4.8 id; ultracode is preserved by reusing the same launchOpts. A
+// caller can widen it, e.g. `--fallback-model claude-opus-4-8,claude-sonnet-5`.
 const defaultLaunchFallbackModel = "claude-opus-4-8"
 
 // launchSkipPermsFlag returns the agent-specific flag that hands permission authority to
@@ -151,7 +153,7 @@ type launchParams struct {
 	ultracode     bool   // default true — put Claude in ultracode (workflow) mode via --settings
 	model         string // default Fable — the model a switched Claude launch pins via --model ("" => seat default)
 	modelExplicit bool
-	fallbackModel string // default Opus 4.8 — retried once when the default Fable startup is unavailable
+	fallbackModel string // default Opus 4.8 — comma-separated fallback CHAIN tried when the default Fable startup is unavailable
 	dryRun        bool   // print the plan, do not exec
 	passthrough   []string
 	registryPath  string
@@ -191,6 +193,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 	}
 	// Serve needs disk-derived identity (a seat that can't serve falls forward), so refresh.
 	reg = reg.Refresh()
+	fixes := accountFixSummary(p.registryPath, reg)
 
 	name := strings.TrimSpace(p.name)
 	if p.rotate {
@@ -220,6 +223,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 				fmt.Fprintf(stderr, "fak accounts launch --rotate: only one account bucket in rotation (%s) — "+
 					"nowhere else to rotate; enroll another with `fak accounts add`\n", plan.Pool[0].Name)
 			}
+			printAccountFixSummary(stderr, fixes, "account fixes")
 			return 1
 		}
 		if anchor != "" {
@@ -235,6 +239,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		if !ok {
 			fmt.Fprintln(stderr, "fak accounts launch: no --name and no active seat to default to — "+
 				"set one with `fak accounts set-default --name <seat>`, or pass --name <seat>")
+			printAccountFixSummary(stderr, fixes, "account fixes")
 			return 2
 		}
 		name = picked
@@ -305,8 +310,8 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 			modelWord = fmt.Sprintf("n/a (%s is not Claude; --model not applied)", command)
 		}
 	}
-	if fb, ok := defaultModelFallback(command, p); ok {
-		modelWord += fmt.Sprintf(" (fallback %s on model-unavailable startup)", fb)
+	if chain, ok := modelFallbackChain(command, p); ok {
+		modelWord += fmt.Sprintf(" (fallback chain: %s — on unknown-model or usage/rate-limit startup)", strings.Join(chain, " -> "))
 	}
 	fmt.Fprintf(stderr, "  guard             = %s\n", guardWord)
 	fmt.Fprintf(stderr, "  permissions       = %s\n", permWord)
@@ -315,6 +320,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 	fmt.Fprintf(stderr, "  command           = %s\n", strings.Join(grant.SanitizedArgv, " "))
 	fmt.Fprintf(stderr, "  agent_run         = %s policy_digest=%s broker=%s\n",
 		grant.Metadata.AgentRunID, grant.Metadata.PolicyDigest, grant.Reason)
+	printAccountFixSummary(stderr, fixes, "account fixes")
 
 	if !grant.Allow {
 		fmt.Fprintf(stderr, "fak accounts launch: spawn broker denied launch: %s\n", grant.Reason)
@@ -330,48 +336,86 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		return 0
 	}
 	res := accountsLaunchRun(stdout, stderr, launchArgv, launchEnv)
-	if fallback, ok := defaultModelFallback(command, p); ok && shouldRetryLaunchWithFallback(res, p.model) {
-		fmt.Fprintf(stderr, "fak accounts launch: primary model %q was unavailable at startup; retrying once with fallback model %q.\n",
-			p.model, fallback)
-		fallbackArgv := buildLaunchArgv(fakBin, launchOpts{
-			command:         command,
-			useGuard:        p.useGuard,
-			skipPermissions: p.skipPerms,
-			ultracode:       p.ultracode,
-			model:           fallback,
-			passthrough:     p.passthrough,
-		})
-		fallbackGrant := launchSpawnBroker(newLaunchBrokerAttempt("accounts_launch", guardAgentBaseName(command), fallbackArgv, envMap(env), home.Dir))
-		fmt.Fprintf(stderr, "  fallback command  = %s\n", strings.Join(fallbackGrant.SanitizedArgv, " "))
-		fmt.Fprintf(stderr, "  fallback agent_run = %s policy_digest=%s broker=%s\n",
-			fallbackGrant.Metadata.AgentRunID, fallbackGrant.Metadata.PolicyDigest, fallbackGrant.Reason)
-		if !fallbackGrant.Allow {
-			fmt.Fprintf(stderr, "fak accounts launch: spawn broker denied fallback launch: %s\n", fallbackGrant.Reason)
-			return 1
+	if chain, ok := modelFallbackChain(command, p); ok {
+		// Walk the fallback chain: after each unavailable startup, try the next model until one
+		// starts (exit 0), the chain is exhausted, or a failure a model switch cannot fix appears
+		// (auth wall, a long-running crash). `tried` tracks the model of the current failed launch
+		// so the unknown-model gate keys off the right id as we descend.
+		tried := p.model
+		for _, fallback := range chain {
+			if !shouldRetryLaunchWithFallback(res, tried) {
+				break
+			}
+			kind := classifyLaunchModelUnavailable(res.Stderr, tried)
+			fmt.Fprintf(stderr, "fak accounts launch: model %q was unavailable at startup (%s); falling back to %q.\n",
+				tried, kind, fallback)
+			fallbackArgv := buildLaunchArgv(fakBin, launchOpts{
+				command:         command,
+				useGuard:        p.useGuard,
+				skipPermissions: p.skipPerms,
+				ultracode:       p.ultracode,
+				model:           fallback,
+				passthrough:     p.passthrough,
+			})
+			fallbackGrant := launchSpawnBroker(newLaunchBrokerAttempt("accounts_launch", guardAgentBaseName(command), fallbackArgv, envMap(env), home.Dir))
+			fmt.Fprintf(stderr, "  fallback command  = %s\n", strings.Join(fallbackGrant.SanitizedArgv, " "))
+			fmt.Fprintf(stderr, "  fallback agent_run = %s policy_digest=%s broker=%s\n",
+				fallbackGrant.Metadata.AgentRunID, fallbackGrant.Metadata.PolicyDigest, fallbackGrant.Reason)
+			if !fallbackGrant.Allow {
+				fmt.Fprintf(stderr, "fak accounts launch: spawn broker denied fallback launch: %s\n", fallbackGrant.Reason)
+				return 1
+			}
+			res = accountsLaunchRun(stdout, stderr, fallbackGrant.Argv, envSliceFromMap(fallbackGrant.Env))
+			tried = fallback
+			if res.Code == 0 {
+				break
+			}
 		}
-		res = accountsLaunchRun(stdout, stderr, fallbackGrant.Argv, envSliceFromMap(fallbackGrant.Env))
 	}
 	return res.Code
 }
 
-func defaultModelFallback(command string, p launchParams) (string, bool) {
+// modelFallbackChain returns the ordered list of Claude model ids to try, in order, when the
+// default startup model is unavailable — the "Fable 5 -> Opus 4.8 -> ..." chain. It reads the
+// (comma-separated) --fallback-model list, dropping blanks, the primary model itself, and any
+// duplicate so the chain never re-launches a model already attempted. ok is false when auto
+// fallback does not apply at all: a non-Claude agent (the id is a Claude model, meaningless
+// elsewhere), an explicit --model (the operator named a specific model — respect it, don't
+// second-guess), an empty chain, or a passthrough `-- --model x` override.
+func modelFallbackChain(command string, p launchParams) ([]string, bool) {
 	switch guardAgentBaseName(command) {
 	case "claude", "claude-code":
 	default:
-		return "", false
+		return nil, false
 	}
 	primary := strings.TrimSpace(p.model)
-	fallback := strings.TrimSpace(p.fallbackModel)
-	if primary == "" || fallback == "" || strings.EqualFold(primary, fallback) {
-		return "", false
+	if primary == "" {
+		return nil, false
 	}
 	if p.modelExplicit || !strings.EqualFold(primary, defaultLaunchModel) {
-		return "", false
+		return nil, false
 	}
 	if passthroughOverridesClaudeModel(p.passthrough) {
-		return "", false
+		return nil, false
 	}
-	return fallback, true
+	seen := map[string]bool{strings.ToLower(primary): true}
+	var chain []string
+	for _, m := range strings.Split(p.fallbackModel, ",") {
+		m = strings.TrimSpace(m)
+		if m == "" {
+			continue
+		}
+		key := strings.ToLower(m)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		chain = append(chain, m)
+	}
+	if len(chain) == 0 {
+		return nil, false
+	}
+	return chain, true
 }
 
 func passthroughOverridesClaudeModel(args []string) bool {
@@ -386,40 +430,116 @@ func passthroughOverridesClaudeModel(args []string) bool {
 	return false
 }
 
-func shouldRetryLaunchWithFallback(res launchRunResult, primary string) bool {
+func shouldRetryLaunchWithFallback(res launchRunResult, tried string) bool {
 	if res.Code == 0 {
 		return false
 	}
+	// Only a FAST failure is a startup refusal. A non-zero exit after a long session is the
+	// user quitting or a mid-run crash, not "this model can't start" — never burn the chain on it.
 	if res.Duration > launchModelFallbackMaxDuration {
 		return false
 	}
-	return launchModelUnavailable(res.Stderr, primary)
+	return classifyLaunchModelUnavailable(res.Stderr, tried) != launchModelAvailable
 }
 
-func launchModelUnavailable(stderr, primary string) bool {
+// launchModelUnavailKind is the closed set of startup-failure reasons that a fallback to a
+// DIFFERENT model can address. It is the launch-time (stderr-text) sibling of the gateway's
+// richer, header-aware upstream taxonomy (internal/agent/upstream_remedy.go's UpstreamRemedy);
+// unifying the two vocabularies is tracked as a follow-on so both layers name a limit the same
+// way. Auth/login walls and plain crashes are deliberately NOT in this set: a model switch on a
+// walled account still fails, so they map to launchModelAvailable and never trigger a fallback.
+type launchModelUnavailKind int
+
+const (
+	launchModelAvailable  launchModelUnavailKind = iota // no model-unavailability signal in the text
+	launchModelUnknown                                  // the model id was refused: unknown / invalid / not entitled
+	launchModelUsageLimit                               // a usage / weekly / session cap — a different model has its own bucket
+	launchModelRateLimit                                // a transient 429 / overload — another model may be clear right now
+)
+
+func (k launchModelUnavailKind) String() string {
+	switch k {
+	case launchModelUnknown:
+		return "unknown-model"
+	case launchModelUsageLimit:
+		return "usage-limit"
+	case launchModelRateLimit:
+		return "rate-limit"
+	default:
+		return "available"
+	}
+}
+
+// launchModelUsageLimitSignals name a self-recovering USAGE/OVERAGE cap the tried model hit
+// (session/weekly/usage limits, or a reset window). This is the class the old unknown-model-only
+// detector MISSED — the "Fable 5 hit its weekly limit, fall back to Opus" the switcher exists for.
+// Kept aligned with the account-side taxonomy in internal/fleetaccounts/authsignals.go so a limit
+// reads the same wherever fak classifies one.
+var launchModelUsageLimitSignals = []string{
+	"usage limit", "weekly limit", "session limit", "usage cap",
+	"5-hour limit", "5 hour limit", "limit reached", "limit exceeded",
+	"quota exceeded", "out of usage", "overage",
+	"resets at", "resets in", "try again at", "try again in", "try again after",
+	"/usage-credits",
+}
+
+// launchModelRateLimitSignals name a TRANSIENT throttle/overload of the tried model — a
+// different model (a separate capacity pool) may serve right now.
+var launchModelRateLimitSignals = []string{
+	"rate limit", "rate_limit", "too many requests", "429",
+	"overloaded", "server is overloaded",
+}
+
+// launchModelUnknownSignals name an UNKNOWN / INVALID / UNENTITLED model refusal.
+var launchModelUnknownSignals = []string{
+	"not available", "unavailable", "not found", "does not exist",
+	"unknown model", "invalid model", "unsupported model", "model_not_found",
+	"no access to model", "not have access", "not entitled",
+}
+
+// classifyLaunchModelUnavailable inspects an agent's startup stderr and decides whether the model
+// just tried is unavailable in a way a fallback to a DIFFERENT model can fix — and of what kind.
+// `tried` is the model id handed to the failed launch. Usage/rate limits are matched FIRST and
+// WITHOUT a model-name gate: a weekly/usage cap is account- and bucket-scoped, so its text rarely
+// names the model id, and the whole point of the fallback is to reach a model with a separate
+// allocation. An unknown/invalid MODEL refusal, by contrast, must name the model dimension and
+// must not be about some OTHER model than the one we tried (so `opus is not available` while we
+// launched fable does not fire a fable fallback). Everything else — including auth/login walls and
+// ordinary crashes — returns launchModelAvailable so the chain is never burned on a failure a
+// model switch cannot fix.
+func classifyLaunchModelUnavailable(stderr, tried string) launchModelUnavailKind {
 	text := strings.ToLower(stderr)
-	if !strings.Contains(text, "model") {
-		return false
-	}
-	primary = strings.ToLower(strings.TrimSpace(primary))
-	if primary != "" && !strings.Contains(text, primary) && !strings.Contains(text, "fable") {
-		return false
-	}
-	for _, sig := range []string{
-		"not available",
-		"unavailable",
-		"not found",
-		"does not exist",
-		"unknown model",
-		"invalid model",
-		"unsupported model",
-		"model_not_found",
-	} {
+	tried = strings.ToLower(strings.TrimSpace(tried))
+	for _, sig := range launchModelUsageLimitSignals {
 		if strings.Contains(text, sig) {
-			return true
+			return launchModelUsageLimit
 		}
 	}
-	return false
+	for _, sig := range launchModelRateLimitSignals {
+		if strings.Contains(text, sig) {
+			return launchModelRateLimit
+		}
+	}
+	if !strings.Contains(text, "model") {
+		return launchModelAvailable
+	}
+	// The default id surfaces as the friendly alias "fable" as often as its canonical form, so
+	// accept either for the first hop; a later hop (opus, sonnet, ...) matches on its own id.
+	if tried != "" && !strings.Contains(text, tried) && !strings.Contains(text, "fable") {
+		return launchModelAvailable
+	}
+	for _, sig := range launchModelUnknownSignals {
+		if strings.Contains(text, sig) {
+			return launchModelUnknown
+		}
+	}
+	return launchModelAvailable
+}
+
+// launchModelUnavailable is the boolean form retained for callers/tests that only need
+// "is this a model-unavailability the chain should act on?".
+func launchModelUnavailable(stderr, tried string) bool {
+	return classifyLaunchModelUnavailable(stderr, tried) != launchModelAvailable
 }
 
 func warnIfAccountsLaunchStaleBinary(stderr io.Writer, fakBin string, useGuard bool) {

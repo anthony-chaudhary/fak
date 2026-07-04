@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
@@ -89,6 +90,7 @@ type watchdogAutohealResult struct {
 	Attempt     uint64 `json:"attempt,omitempty"`
 	Error       string `json:"error,omitempty"`
 	RestartedAt int64  `json:"restarted_at_unix_nano,omitempty"`
+	ElapsedMS   int64  `json:"elapsed_ms,omitempty"`
 }
 
 type watchdogHealState struct {
@@ -122,7 +124,9 @@ func watchdogAutohealOnStart(verb string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
+		t0 := time.Now()
 		results := runWatchdogAutoheal(ctx, opts)
+		elapsed := time.Since(t0)
 		// Pick the sink so the JSON heal lines never land on top of an attended agent's
 		// alternate-screen TUI: an interactive `fak guard -- <agent>` launch routes them to a
 		// log file under the state dir; serve and any headless/piped run keep stderr. See
@@ -130,7 +134,58 @@ func watchdogAutohealOnStart(verb string) {
 		w, closeSink := watchdogAutohealLogSink(verb, opts.StateDir, os.Stderr)
 		defer closeSink()
 		logWatchdogAutohealResults(w, results)
+		if b := watchdogAutohealSummaryLine(verb, elapsed, results); b != nil {
+			fmt.Fprintf(w, "%s\n", b)
+		}
 	}()
+}
+
+type watchdogAutohealSummary struct {
+	Schema    string `json:"schema"`
+	Verb      string `json:"verb"`
+	Summary   bool   `json:"summary"`
+	ElapsedMS int64  `json:"elapsed_ms"`
+	Specs     int    `json:"specs"`
+	Noop      int    `json:"noop,omitempty"`
+	Restarted int    `json:"restarted,omitempty"`
+	Debounced int    `json:"debounced,omitempty"`
+	Warned    int    `json:"warned,omitempty"`
+	GaveUp    int    `json:"gave_up,omitempty"`
+	Failed    int    `json:"failed,omitempty"`
+}
+
+func watchdogAutohealSummaryLine(verb string, elapsed time.Duration, results []watchdogAutohealResult) []byte {
+	if len(results) == 0 {
+		return nil
+	}
+	s := watchdogAutohealSummary{
+		Schema:    watchdogAutohealSchema,
+		Verb:      verb,
+		Summary:   true,
+		ElapsedMS: elapsed.Milliseconds(),
+		Specs:     len(results),
+	}
+	for _, r := range results {
+		switch r.Action {
+		case "noop":
+			s.Noop++
+		case "restarted":
+			s.Restarted++
+		case "debounced":
+			s.Debounced++
+		case "warn":
+			s.Warned++
+		case "give_up":
+			s.GaveUp++
+		case "probe_failed", "lease_failed":
+			s.Failed++
+		}
+	}
+	b, err := json.Marshal(s)
+	if err != nil {
+		return nil
+	}
+	return b
 }
 
 // watchdogAutohealToSharedStderr decides whether the background heal JSON lines may stream to
@@ -305,10 +360,19 @@ func runWatchdogAutoheal(ctx context.Context, opts watchdogAutohealOptions) []wa
 	if opts.Mode == watchdogAutohealOff || len(opts.Specs) == 0 {
 		return nil
 	}
-	results := make([]watchdogAutohealResult, 0, len(opts.Specs))
-	for _, spec := range opts.Specs {
-		results = append(results, healOneWatchdog(ctx, opts, spec))
+	results := make([]watchdogAutohealResult, len(opts.Specs))
+	var wg sync.WaitGroup
+	for i, spec := range opts.Specs {
+		wg.Add(1)
+		go func(i int, spec watchdogAutohealSpec) {
+			defer wg.Done()
+			t0 := time.Now()
+			r := healOneWatchdog(ctx, opts, spec)
+			r.ElapsedMS = time.Since(t0).Milliseconds()
+			results[i] = r
+		}(i, spec)
 	}
+	wg.Wait()
 	return results
 }
 

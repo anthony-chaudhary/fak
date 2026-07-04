@@ -16,7 +16,10 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
 )
+
+const fallbackCodexOAuthSessions = 10
 
 func dispatchRefreshRegistry(root string, stderr io.Writer) map[string]any {
 	obj, err := dispatchRunJSON(root, stderr, 120*time.Second, filepath.Join("tools", "fleet_sessions.py"), "registry")
@@ -92,18 +95,38 @@ func dispatchCodexAmbientAccount() dispatchtick.AccountCheck {
 	return dispatchtick.AccountCheck{Available: false, Reason: "no ~/.codex/auth.json - run `codex login`"}
 }
 
+func dispatchCodexOAuthSessionCap() int {
+	raw := strings.TrimSpace(os.Getenv("FAK_CODEX_OAUTH_SESSIONS"))
+	if raw == "" {
+		return fallbackCodexOAuthSessions
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return fallbackCodexOAuthSessions
+	}
+	return n
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 func dispatchPreflightSeat(root string, _ io.Writer, product string) dispatchtick.SeatCheck {
 	if product == "codex" {
+		total := dispatchCodexOAuthSessionCap()
 		live := dispatchAmbientCodexProcessCount()
-		leased := 0
-		if live > 0 {
-			leased = 1
+		leased := live
+		if leased > total {
+			leased = total
 		}
 		return dispatchtick.SeatCheck{
-			Total:    dispatchtick.IntPtr(1),
-			Free:     dispatchtick.IntPtr(1 - leased),
+			Total:    dispatchtick.IntPtr(total),
+			Free:     dispatchtick.IntPtr(maxInt(0, total-live)),
 			Leased:   dispatchtick.IntPtr(leased),
-			Depleted: leased > 0,
+			Depleted: live >= total,
 		}
 	}
 	rows, err := dispatchReadAccountRoster(root)
@@ -139,6 +162,9 @@ var dispatchProbeCodexProcessRows = dispatchScanCodexProcessRowsNative
 var dispatchReadAccountRoster = dispatchReadAccountRosterNative
 
 func dispatchReadAccountRosterNative(root string) ([]dispatchtick.AccountRow, error) {
+	if rows := dispatchAuthoritativeAccountRows(root); len(rows) > 0 {
+		return rows, nil
+	}
 	registryPath := dispatchAccountRegistryPath(root)
 	doc, err := dispatchReadJSONFile(registryPath)
 	if err != nil {
@@ -191,6 +217,61 @@ func dispatchReadAccountRosterNative(root string) ([]dispatchtick.AccountRow, er
 		return nil, fmt.Errorf("account registry %s has no readable account rows", registryPath)
 	}
 	return rows, nil
+}
+
+func dispatchAuthoritativeAccountRows(root string) []dispatchtick.AccountRow {
+	toolsDir := filepath.Join(root, "tools")
+	paths := fleetaccounts.ResolvePaths(toolsDir)
+	pol := fleetaccounts.LoadPolicy(paths)
+	reg := fleetaccounts.LoadRegistry(paths.RegistryPath)
+	accounts := fleetaccounts.AnnotatedRoster(paths.Home, paths.ConfigHome, pol, reg)
+	weights := dispatchLoadAccountRouteWeights(root)
+	rows := make([]dispatchtick.AccountRow, 0, len(accounts))
+	for _, acct := range accounts {
+		row := dispatchAccountRowFromFleetAccount(acct)
+		if row.Account == "" && row.Dir != "" {
+			row.Account = dispatchAnyOSBase(row.Dir)
+		}
+		row = dispatchtick.NormalizeAccountRow(row)
+		if row.RouteWeight == 0 {
+			row.RouteWeight = dispatchAccountRouteWeight(row, weights)
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func dispatchAccountRowFromFleetAccount(acct fleetaccounts.Account) dispatchtick.AccountRow {
+	row := dispatchtick.AccountRow{
+		Account:      acct.Account,
+		Tag:          acct.Tag,
+		Product:      acct.Product,
+		Dir:          acct.Dir,
+		Kind:         string(acct.Kind),
+		Available:    dispatchBoolPtrValue(acct.Available),
+		BlockReason:  firstString(dispatchStringPtrValue(acct.BlockReason), acct.Reason),
+		RouteWeight:  dispatchIntPtrValue(acct.RouteWeight),
+		IdentityRole: dispatchStringPtrValue(acct.IdentityRole),
+		AccountUUID:  dispatchStringPtrValue(acct.AccountUUID),
+		LoginStatus:  dispatchStringPtrValue(acct.LoginStatus),
+	}
+	if acct.Model != nil {
+		row.Model = *acct.Model
+	}
+	if acct.ModelTier != nil {
+		row.ModelTier = *acct.ModelTier
+	}
+	if acct.ActiveSessions != nil {
+		row.ActiveSessions = *acct.ActiveSessions
+	}
+	if acct.LiveSessions != nil {
+		row.LiveSessions = *acct.LiveSessions
+	}
+	if acct.CanServe != nil {
+		canServe := *acct.CanServe
+		row.CanServe = &canServe
+	}
+	return row
 }
 
 func dispatchAccountRegistryPath(root string) string {
@@ -247,6 +328,24 @@ func dispatchAccountRouteWeight(row dispatchtick.AccountRow, weights map[string]
 		}
 	}
 	return 0
+}
+
+func dispatchStringPtrValue(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+func dispatchIntPtrValue(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+func dispatchBoolPtrValue(p *bool) bool {
+	return p != nil && *p
 }
 
 func dispatchReadJSONFile(path string) (map[string]any, error) {
@@ -498,7 +597,7 @@ func dispatchRAMAndThreadsPOSIX() (*int, *int) {
 func dispatchProductWorkerCount(root, product string) int {
 	pids := dispatchLiveResolveWorkerPIDs(filepath.Join(root, dispatchtick.RunsDirName), product)
 	if product == "codex" {
-		for pid := range dispatchAmbientCodexPIDs() {
+		for pid := range dispatchAmbientCodexPIDsExcludingSidecarParents(pids) {
 			pids[pid] = true
 		}
 	}
@@ -525,6 +624,18 @@ func dispatchAmbientCodexPIDs() map[int]bool {
 }
 
 func dispatchCodexProcessPIDs(rows []dispatchCodexProcessRow) map[int]bool {
+	return dispatchCodexProcessPIDsExcludingParents(rows, nil)
+}
+
+func dispatchAmbientCodexPIDsExcludingSidecarParents(sidecarPIDs map[int]bool) map[int]bool {
+	rows, err := dispatchProbeCodexProcessRows()
+	if err != nil {
+		return map[int]bool{}
+	}
+	return dispatchCodexProcessPIDsExcludingParents(rows, sidecarPIDs)
+}
+
+func dispatchCodexProcessPIDsExcludingParents(rows []dispatchCodexProcessRow, excludedParents map[int]bool) map[int]bool {
 	native := map[int]bool{}
 	wrappers := map[int]bool{}
 	parent := map[int]int{}
@@ -548,14 +659,33 @@ func dispatchCodexProcessPIDs(rows []dispatchCodexProcessRow) map[int]bool {
 	}
 	out := map[int]bool{}
 	for pid := range native {
+		if excludedParents != nil && dispatchPIDHasAncestor(pid, parent, excludedParents) {
+			continue
+		}
 		out[pid] = true
 	}
 	for pid := range wrappers {
 		if !wrappersWithNativeChild[pid] {
+			if excludedParents != nil && dispatchPIDHasAncestor(pid, parent, excludedParents) {
+				continue
+			}
 			out[pid] = true
 		}
 	}
 	return out
+}
+
+func dispatchPIDHasAncestor(pid int, parents map[int]int, ancestors map[int]bool) bool {
+	seen := map[int]bool{}
+	for pid > 0 && !seen[pid] {
+		seen[pid] = true
+		parent := parents[pid]
+		if ancestors[parent] {
+			return true
+		}
+		pid = parent
+	}
+	return false
 }
 
 func dispatchIsCodexNativeImage(name string) bool {

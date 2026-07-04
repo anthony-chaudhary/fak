@@ -63,6 +63,22 @@ type acctDoctorReport struct {
 	Applied     int          `json:"applied"`
 }
 
+type acctFixSummary struct {
+	Actionable  int            `json:"actionable"`
+	AutoFixable int            `json:"auto_fixable"`
+	ByAction    map[string]int `json:"by_action,omitempty"`
+	Seats       []acctFixSeat  `json:"seats,omitempty"`
+}
+
+type acctFixSeat struct {
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Action  string `json:"action"`
+	Command string `json:"command,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+	Reset   string `json:"reset,omitempty"`
+}
+
 // accountsDoctor folds every seat into a recovery action and (with write) applies the
 // auto-fixable ones. Exit 0 when nothing is left to do, 1 while actions remain — so a
 // watchdog can run `fak accounts doctor --write` and alert on nonzero.
@@ -72,15 +88,7 @@ func accountsDoctor(stdout, stderr io.Writer, registryPath, dosView, jobView str
 		return 1
 	}
 	reg = reg.Refresh()
-	report := acctDoctorReport{
-		Schema:      doctorSchema,
-		Registry:    registryPath,
-		ProbeLedger: strings.TrimSpace(os.Getenv("FLEET_REG_DIR")) != "",
-	}
-	login := reg.LoginReport()
-	for _, obs := range login.Seats {
-		report.Seats = append(report.Seats, foldDoctorSeat(obs, report.ProbeLedger))
-	}
+	report := buildAccountsDoctorReport(registryPath, reg)
 
 	if write {
 		for i := range report.Seats {
@@ -120,18 +128,7 @@ func accountsDoctor(stdout, stderr io.Writer, registryPath, dosView, jobView str
 		}
 	}
 
-	for _, s := range report.Seats {
-		if s.Applied {
-			report.Applied++
-			continue
-		}
-		if s.Action != doctorNone {
-			report.Actionable++
-			if s.AutoFix {
-				report.AutoFixable++
-			}
-		}
-	}
+	foldDoctorReportCounts(&report)
 
 	if asJSON {
 		b, err := json.MarshalIndent(report, "", "  ")
@@ -147,6 +144,65 @@ func accountsDoctor(stdout, stderr io.Writer, registryPath, dosView, jobView str
 		return 1
 	}
 	return 0
+}
+
+func buildAccountsDoctorReport(registryPath string, reg accounts.Registry) acctDoctorReport {
+	report := acctDoctorReport{
+		Schema:      doctorSchema,
+		Registry:    registryPath,
+		ProbeLedger: strings.TrimSpace(os.Getenv("FLEET_REG_DIR")) != "",
+	}
+	login := reg.LoginReport()
+	for _, obs := range login.Seats {
+		report.Seats = append(report.Seats, foldDoctorSeat(obs, report.ProbeLedger))
+	}
+	foldDoctorReportCounts(&report)
+	return report
+}
+
+func foldDoctorReportCounts(report *acctDoctorReport) {
+	report.Actionable = 0
+	report.AutoFixable = 0
+	report.Applied = 0
+	for _, s := range report.Seats {
+		if s.Applied {
+			report.Applied++
+			continue
+		}
+		if s.Action != doctorNone {
+			report.Actionable++
+			if s.AutoFix {
+				report.AutoFixable++
+			}
+		}
+	}
+}
+
+func summarizeAccountFixes(report acctDoctorReport) acctFixSummary {
+	sum := acctFixSummary{Actionable: report.Actionable, AutoFixable: report.AutoFixable}
+	for _, s := range report.Seats {
+		if s.Applied || s.Action == doctorNone {
+			continue
+		}
+		if sum.ByAction == nil {
+			sum.ByAction = map[string]int{}
+		}
+		action := string(s.Action)
+		sum.ByAction[action]++
+		sum.Seats = append(sum.Seats, acctFixSeat{
+			Name:    s.Name,
+			Status:  s.Status,
+			Action:  action,
+			Command: s.Command,
+			Reason:  s.Reason,
+			Reset:   s.Reset,
+		})
+	}
+	return sum
+}
+
+func accountFixSummary(registryPath string, reg accounts.Registry) acctFixSummary {
+	return summarizeAccountFixes(buildAccountsDoctorReport(registryPath, reg))
 }
 
 // foldDoctorSeat maps one login observation (plus the optional fresh probe-ledger

@@ -28,6 +28,23 @@ func rotateRegistry(t *testing.T, home string) (regPath, aDir, bDir, cDir string
 	return regPath, aDir, bDir, cDir
 }
 
+func rotateRegistryWithBrokenSeat(t *testing.T, home string) (regPath, bDir, brokenDir string) {
+	t.Helper()
+	aDir := mkHome(t, home, ".claude-alice-seat", "alice@example.test", true)
+	bDir = mkHome(t, home, ".claude-bob-seat", "bob@example.test", true)
+	brokenDir = mkHome(t, home, ".claude-broken-seat", "broken@example.test", false)
+	reg := `{"version":"fak-config-homes/v1","homes":[` +
+		`{"name":"alice-seat","dir":"` + jsonPath(aDir) + `"},` +
+		`{"name":"bob-seat","dir":"` + jsonPath(bDir) + `"},` +
+		`{"name":"broken-seat","dir":"` + jsonPath(brokenDir) + `"}` +
+		`],"roles":{"active":"alice-seat","anchor":"alice-seat"}}`
+	regPath = filepath.Join(home, "registry.json")
+	if err := os.WriteFile(regPath, []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return regPath, bDir, brokenDir
+}
+
 func TestAccountsNextRoundRobin(t *testing.T) {
 	home := t.TempDir()
 	regPath, _, bDir, _ := rotateRegistry(t, home)
@@ -73,6 +90,42 @@ func TestAccountsNextRoundRobin(t *testing.T) {
 		!strings.Contains(out, `"login_status": "ready"`) ||
 		!strings.Contains(out, `"can_serve": true`) {
 		t.Fatalf("next --json = %q", strings.TrimSpace(out))
+	}
+}
+
+func TestAccountsNextReportsActionableFixes(t *testing.T) {
+	home := t.TempDir()
+	regPath, bDir, _ := rotateRegistryWithBrokenSeat(t, home)
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{"next", "--after", "alice-seat", "--registry", regPath, "--home", home})
+	if rc != 0 {
+		t.Fatalf("next rc=%d stderr=%s", rc, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{
+		"next: bob-seat",
+		"account fixes: 1 seat(s) need action (relogin=1); run `fak accounts doctor`",
+		"broken-seat: relogin",
+		"CLAUDE_CONFIG_DIR=",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("next output missing %q:\n%s", want, got)
+		}
+	}
+
+	out.Reset()
+	errb.Reset()
+	rc = runAccounts(&out, &errb, []string{"next", "--after", "alice-seat", "--env", "--registry", regPath, "--home", home})
+	if rc != 0 {
+		t.Fatalf("next --env rc=%d stderr=%s", rc, errb.String())
+	}
+	if strings.TrimSpace(out.String()) != "CLAUDE_CONFIG_DIR="+bDir {
+		t.Fatalf("next --env stdout = %q, want only CLAUDE_CONFIG_DIR=%s", strings.TrimSpace(out.String()), bDir)
+	}
+	if !strings.Contains(errb.String(), "account fixes: 1 seat(s) need action") ||
+		!strings.Contains(errb.String(), "broken-seat: relogin") {
+		t.Fatalf("next --env stderr should carry account fixes:\n%s", errb.String())
 	}
 }
 
@@ -141,6 +194,30 @@ func TestAccountsLaunchRotate(t *testing.T) {
 	}
 }
 
+func TestAccountsLaunchRotateReportsActionableFixes(t *testing.T) {
+	home := t.TempDir()
+	regPath, _, _ := rotateRegistryWithBrokenSeat(t, home)
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{"launch", "--rotate", "--dry-run", "--registry", regPath, "--home", home})
+	if rc != 0 {
+		t.Fatalf("launch --rotate rc=%d stderr=%s", rc, errb.String())
+	}
+	got := errb.String()
+	for _, want := range []string{
+		`rotating off "alice-seat" -> "bob-seat"`,
+		"account fixes: 1 seat(s) need action (relogin=1); run `fak accounts doctor`",
+		"broken-seat: relogin",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rotated launch stderr missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(out.String(), "account fixes") {
+		t.Fatalf("dry-run stdout should stay scriptable, got:\n%s", out.String())
+	}
+}
+
 // TestAccountsRotationInspect covers the full witnessed rotation dump — the pool in launch
 // order, every exclusion with its reason, and the registry-drift check — plus the heal loop:
 // a registry whose stored identities lag disk reports drift, `discover --write` heals it,
@@ -193,5 +270,59 @@ func TestAccountsRotationInspect(t *testing.T) {
 	}
 	if !strings.Contains(out, "registry drift: none") {
 		t.Fatalf("rotation after discover --write still drifts: %q", out)
+	}
+}
+
+func TestAccountsRotationJSONReportsActionableFixes(t *testing.T) {
+	home := t.TempDir()
+	regPath, _, _ := rotateRegistryWithBrokenSeat(t, home)
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{"rotation", "--json", "--registry", regPath, "--home", home})
+	if rc != 0 {
+		t.Fatalf("rotation --json rc=%d stderr=%s", rc, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{
+		`"account_fixes"`,
+		`"actionable": 1`,
+		`"by_action"`,
+		`"relogin": 1`,
+		`"name": "broken-seat"`,
+		`"action": "relogin"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rotation --json missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestAccountsCheckNamesUDriftAndActionableFixes(t *testing.T) {
+	home := t.TempDir()
+	regPath, _, _ := rotateRegistryWithBrokenSeat(t, home)
+	jobView := filepath.Join(home, "claude_accounts.yaml")
+	if err := os.WriteFile(jobView, []byte("accounts: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{
+		"check", "--registry", regPath, "--home", home,
+		"--dos-view", "", "--job-view", jobView,
+	})
+	if rc != 1 {
+		t.Fatalf("check rc=%d, want drift exit 1; stderr=%s\nstdout=%s", rc, errb.String(), out.String())
+	}
+	got := out.String()
+	for _, want := range []string{
+		"DRIFT job:",
+		"this is what `u` reads",
+		"run `fak accounts sync`",
+		"account fixes: 1 seat(s) need action",
+		"broken-seat: relogin",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("check output missing %q:\n%s", want, got)
+		}
 	}
 }

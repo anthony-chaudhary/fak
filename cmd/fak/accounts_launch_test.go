@@ -382,11 +382,93 @@ func TestRunAccountsLaunchFallsBackToOpus48WhenDefaultFableUnavailable(t *testin
 			t.Fatalf("fallback launch missing %q:\n%s", want, second)
 		}
 	}
-	for _, want := range []string{"retrying once", defaultLaunchFallbackModel, "fallback command"} {
+	for _, want := range []string{"falling back to", "unknown-model", defaultLaunchFallbackModel, "fallback command"} {
 		if !strings.Contains(errb.String(), want) {
 			t.Fatalf("fallback stderr missing %q:\n%s", want, errb.String())
 		}
 	}
+}
+
+// TestRunAccountsLaunchFallsBackWhenDefaultFableHitsWeeklyLimit is the goal case: a usage/weekly
+// limit is NOT an "unknown model" error, so the old unknown-model-only detector would have let the
+// walled Fable startup fail without ever trying Opus. The broadened classifier recognizes the cap
+// and the chain falls forward to Opus 4.8.
+func TestRunAccountsLaunchFallsBackWhenDefaultFableHitsWeeklyLimit(t *testing.T) {
+	home := t.TempDir()
+	regPath, _ := launchRegistry(t, home)
+
+	var calls [][]string
+	orig := accountsLaunchRun
+	accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) launchRunResult {
+		calls = append(calls, append([]string(nil), argv...))
+		if len(calls) == 1 {
+			// No "model" / "fable" token at all — a bucket-scoped weekly cap, exactly what the
+			// old unknown-model gate misses.
+			return launchRunResult{Code: 1, Stderr: "Claude usage limit reached — your weekly limit resets at 2026-07-10T00:00:00Z"}
+		}
+		return launchRunResult{Code: 0}
+	}
+	t.Cleanup(func() { accountsLaunchRun = orig })
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{"launch", "--name", "gem8-seat", "--registry", regPath, "--home", home})
+	if rc != 0 {
+		t.Fatalf("weekly-limit fallback rc=%d stderr=%s", rc, errb.String())
+	}
+	if len(calls) != 2 {
+		t.Fatalf("launch attempts = %d, want primary + fallback; calls=%#v", len(calls), calls)
+	}
+	if second := strings.Join(calls[1], " "); !strings.Contains(second, "--model "+defaultLaunchFallbackModel) {
+		t.Fatalf("weekly-limit fallback did not switch to Opus: %q", second)
+	}
+	if !strings.Contains(errb.String(), "usage-limit") {
+		t.Fatalf("fallback plan should name the usage-limit kind:\n%s", errb.String())
+	}
+}
+
+// TestRunAccountsLaunchWalksMultiModelFallbackChain proves --fallback-model is an ordered CHAIN,
+// not a single retry: Fable and the first fallback are both unavailable, and the launch walks on
+// to the second fallback, which starts.
+func TestRunAccountsLaunchWalksMultiModelFallbackChain(t *testing.T) {
+	home := t.TempDir()
+	regPath, _ := launchRegistry(t, home)
+
+	var models []string
+	orig := accountsLaunchRun
+	accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) launchRunResult {
+		models = append(models, modelArg(argv))
+		if len(models) < 3 {
+			// A transient throttle is bucket-scoped (no model-name gate), so each hop fires and
+			// the chain walks Fable -> Opus -> Sonnet regardless of which id the error names.
+			return launchRunResult{Code: 1, Stderr: `Error 429: too many requests`}
+		}
+		return launchRunResult{Code: 0}
+	}
+	t.Cleanup(func() { accountsLaunchRun = orig })
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{
+		"launch", "--name", "gem8-seat",
+		"--fallback-model", "claude-opus-4-8,claude-sonnet-5",
+		"--registry", regPath, "--home", home,
+	})
+	if rc != 0 {
+		t.Fatalf("chain launch rc=%d stderr=%s", rc, errb.String())
+	}
+	want := []string{defaultLaunchModel, "claude-opus-4-8", "claude-sonnet-5"}
+	if !reflect.DeepEqual(models, want) {
+		t.Fatalf("fallback chain models = %#v, want %#v", models, want)
+	}
+}
+
+// modelArg returns the value passed after --model in a launch argv, or "" if none.
+func modelArg(argv []string) string {
+	for i, a := range argv {
+		if a == "--model" && i+1 < len(argv) {
+			return argv[i+1]
+		}
+	}
+	return ""
 }
 
 func TestRunAccountsLaunchDoesNotFallbackWhenModelExplicit(t *testing.T) {
@@ -420,18 +502,34 @@ func TestRunAccountsLaunchDoesNotFallbackWhenModelExplicit(t *testing.T) {
 func TestLaunchModelUnavailableClassifier(t *testing.T) {
 	cases := []struct {
 		stderr string
-		want   bool
+		want   launchModelUnavailKind
 	}{
-		{`error: model "fable" is not available for this account`, true},
-		{`invalid model: fable`, true},
-		{`model_not_found: fable`, true},
-		{`network unavailable while contacting provider`, false},
-		{`model claude-opus-4-8 is not available`, false},
-		{`permission denied`, false},
+		// Unknown / invalid / unentitled model — must name the model dimension AND the tried id.
+		{`error: model "fable" is not available for this account`, launchModelUnknown},
+		{`invalid model: fable`, launchModelUnknown},
+		{`model_not_found: fable`, launchModelUnknown},
+		{`your account does not have access to model fable`, launchModelUnknown},
+		// Usage / weekly / session caps — the class the old unknown-model-only detector MISSED.
+		// They are bucket-scoped and need not name the model id at all.
+		{`Claude usage limit reached — your weekly limit resets at 2026-07-10`, launchModelUsageLimit},
+		{`session limit reached; try again in 3 hours`, launchModelUsageLimit},
+		{`You've hit your 5-hour limit`, launchModelUsageLimit},
+		// Transient throttle / overload — a different model's pool may be clear.
+		{`Error 429: too many requests`, launchModelRateLimit},
+		{`overloaded_error: the server is overloaded`, launchModelRateLimit},
+		// Not a model-unavailability the chain should act on.
+		{`network unavailable while contacting provider`, launchModelAvailable},
+		{`model claude-opus-4-8 is not available`, launchModelAvailable}, // names a DIFFERENT model than fable
+		{`permission denied`, launchModelAvailable},
+		{`Error: Not logged in. Run /login`, launchModelAvailable}, // auth wall — a model switch cannot fix it
 	}
 	for _, tc := range cases {
-		if got := launchModelUnavailable(tc.stderr, defaultLaunchModel); got != tc.want {
-			t.Errorf("launchModelUnavailable(%q) = %v, want %v", tc.stderr, got, tc.want)
+		if got := classifyLaunchModelUnavailable(tc.stderr, defaultLaunchModel); got != tc.want {
+			t.Errorf("classifyLaunchModelUnavailable(%q) = %v, want %v", tc.stderr, got, tc.want)
+		}
+		wantBool := tc.want != launchModelAvailable
+		if got := launchModelUnavailable(tc.stderr, defaultLaunchModel); got != wantBool {
+			t.Errorf("launchModelUnavailable(%q) = %v, want %v", tc.stderr, got, wantBool)
 		}
 	}
 }

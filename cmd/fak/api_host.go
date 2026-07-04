@@ -7,9 +7,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/apihostprobe"
+	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
 
 func cmdAPIHost(argv []string) { os.Exit(runAPIHost(os.Stdout, os.Stderr, argv)) }
@@ -39,6 +41,7 @@ func runAPIHostReadiness(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	fs.Var(&targets, "target", "name|base_url[|api_key_env[|model_hint]] (repeatable)")
 	fromRoster := fs.String("from-roster", "", "read probe targets from an api_host_roster JSON artifact")
+	fromModelAccounts := fs.String("from-model-accounts", "", "read probe targets from a fak model-account roster (fak route --accounts-dump)")
 	outPath := fs.String("out", "", "write JSON report here")
 	markdownPath := fs.String("markdown", "", "write Markdown report here")
 	timeoutS := fs.Float64("timeout-s", 10.0, "HTTP timeout in seconds")
@@ -46,8 +49,8 @@ func runAPIHostReadiness(stdout, stderr io.Writer, argv []string) int {
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
-	if len(targets) > 0 && *fromRoster != "" {
-		fmt.Fprintln(stderr, "fak api-host readiness: --target and --from-roster are mutually exclusive")
+	if err := oneAPIHostSource("readiness", len(targets) > 0, *fromRoster != "", *fromModelAccounts != ""); err != nil {
+		fmt.Fprintln(stderr, err)
 		return 2
 	}
 
@@ -56,6 +59,8 @@ func runAPIHostReadiness(stdout, stderr io.Writer, argv []string) int {
 	switch {
 	case *fromRoster != "":
 		parsed, err = apihostprobe.LoadReadinessRosterTargets(*fromRoster)
+	case *fromModelAccounts != "":
+		parsed, err = loadModelAccountReadinessTargets(*fromModelAccounts)
 	case len(targets) > 0:
 		parsed = make([]apihostprobe.ReadinessTarget, 0, len(targets))
 		for _, spec := range targets {
@@ -93,6 +98,7 @@ func runAPIHostAcceptance(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	fs.Var(&targets, "target", "name|provider|base_url[|api_key_env[|model_hint]] (repeatable)")
 	fromRoster := fs.String("from-roster", "", "read candidate targets from an api_host_roster JSON artifact")
+	fromModelAccounts := fs.String("from-model-accounts", "", "read candidate targets from a fak model-account roster (fak route --accounts-dump)")
 	outPath := fs.String("out", "", "write JSON report here")
 	markdownPath := fs.String("markdown", "", "write Markdown report here")
 	timeoutS := fs.Float64("timeout-s", 10.0, "HTTP timeout in seconds")
@@ -101,8 +107,8 @@ func runAPIHostAcceptance(stdout, stderr io.Writer, argv []string) int {
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
-	if len(targets) > 0 && *fromRoster != "" {
-		fmt.Fprintln(stderr, "fak api-host acceptance: --target and --from-roster are mutually exclusive")
+	if err := oneAPIHostSource("acceptance", len(targets) > 0, *fromRoster != "", *fromModelAccounts != ""); err != nil {
+		fmt.Fprintln(stderr, err)
 		return 2
 	}
 
@@ -111,6 +117,8 @@ func runAPIHostAcceptance(stdout, stderr io.Writer, argv []string) int {
 	switch {
 	case *fromRoster != "":
 		parsed, err = apihostprobe.LoadAcceptanceRosterTargets(*fromRoster)
+	case *fromModelAccounts != "":
+		parsed, err = loadModelAccountAcceptanceTargets(*fromModelAccounts)
 	case len(targets) > 0:
 		parsed = make([]apihostprobe.AcceptanceTarget, 0, len(targets))
 		for _, spec := range targets {
@@ -141,6 +149,128 @@ func runAPIHostAcceptance(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	return 1
+}
+
+func oneAPIHostSource(mode string, target, roster, modelAccounts bool) error {
+	n := 0
+	for _, enabled := range []bool{target, roster, modelAccounts} {
+		if enabled {
+			n++
+		}
+	}
+	if n <= 1 {
+		return nil
+	}
+	return fmt.Errorf("fak api-host %s: --target, --from-roster, and --from-model-accounts are mutually exclusive", mode)
+}
+
+func loadModelAccountReadinessTargets(path string) ([]apihostprobe.ReadinessTarget, error) {
+	r, err := modelroute.LoadRoster(path)
+	if err != nil {
+		return nil, err
+	}
+	hints := modelAccountHints(r)
+	var out []apihostprobe.ReadinessTarget
+	for _, a := range r.Accounts {
+		if !modelAccountSupportsModelsProbe(a.Kind) {
+			continue
+		}
+		base := modelAccountBaseURL(a)
+		if base == "" {
+			continue
+		}
+		out = append(out, apihostprobe.ReadinessTarget{
+			Name:      a.ID,
+			BaseURL:   base,
+			APIKeyEnv: a.CredEnv,
+			ModelHint: firstModelHint(hints[a.ID]),
+		})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("model-account roster %s has no OpenAI-compatible/local accounts to probe", path)
+	}
+	return out, nil
+}
+
+func loadModelAccountAcceptanceTargets(path string) ([]apihostprobe.AcceptanceTarget, error) {
+	r, err := modelroute.LoadRoster(path)
+	if err != nil {
+		return nil, err
+	}
+	hints := modelAccountHints(r)
+	var out []apihostprobe.AcceptanceTarget
+	for _, a := range r.Accounts {
+		base := modelAccountBaseURL(a)
+		if base == "" {
+			continue
+		}
+		out = append(out, apihostprobe.AcceptanceTarget{
+			Name:      a.ID,
+			Provider:  modelAccountAPIHostProvider(a.Kind),
+			BaseURL:   base,
+			APIKeyEnv: a.CredEnv,
+			ModelHint: firstModelHint(hints[a.ID]),
+		})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("model-account roster %s has no accounts with a probeable base_url", path)
+	}
+	return out, nil
+}
+
+func modelAccountHints(r modelroute.Roster) map[string][]string {
+	out := map[string][]string{}
+	for _, b := range r.Bindings {
+		model := b.UpstreamModel
+		if model == "" {
+			model = b.Model
+		}
+		if model != "" {
+			out[b.Account] = append(out[b.Account], model)
+		}
+	}
+	for account := range out {
+		sort.Strings(out[account])
+	}
+	return out
+}
+
+func firstModelHint(hints []string) string {
+	if len(hints) == 0 {
+		return ""
+	}
+	return hints[0]
+}
+
+func modelAccountBaseURL(a modelroute.Account) string {
+	if a.BaseURL != "" {
+		return a.BaseURL
+	}
+	return modelroute.KindBaseURL(a.Kind)
+}
+
+func modelAccountSupportsModelsProbe(k modelroute.ProviderKind) bool {
+	switch k {
+	case modelroute.KindOpenAI, modelroute.KindOpenAIResponses, modelroute.KindXAI, modelroute.KindLocal:
+		return true
+	default:
+		return false
+	}
+}
+
+func modelAccountAPIHostProvider(k modelroute.ProviderKind) string {
+	switch k {
+	case modelroute.KindAnthropic:
+		return "anthropic"
+	case modelroute.KindGemini:
+		return "gemini"
+	case modelroute.KindXAI:
+		return "xai"
+	case modelroute.KindLocal, modelroute.KindOpenAIResponses:
+		return "openai-compatible"
+	default:
+		return string(k)
+	}
 }
 
 func emitAPIHostReport(stdout, stderr io.Writer, outPath, markdownPath string, report any, markdown, label string) int {
@@ -193,13 +323,16 @@ func (r *apiHostRepeatedString) Set(value string) error {
 
 func apiHostUsage(w io.Writer) {
 	fmt.Fprint(w, `usage:
-  fak api-host readiness  [--target SPEC ... | --from-roster FILE] [--out FILE] [--markdown FILE] [--timeout-s N] [--probe-missing-auth]
-  fak api-host acceptance [--target SPEC ... | --from-roster FILE] [--out FILE] [--markdown FILE] [--timeout-s N] [--probe-missing-auth] [--root DIR]
+  fak api-host readiness  [--target SPEC ... | --from-roster FILE | --from-model-accounts FILE] [--out FILE] [--markdown FILE] [--timeout-s N] [--probe-missing-auth]
+  fak api-host acceptance [--target SPEC ... | --from-roster FILE | --from-model-accounts FILE] [--out FILE] [--markdown FILE] [--timeout-s N] [--probe-missing-auth] [--root DIR]
 
 readiness target:
   name|base_url[|api_key_env[|model_hint]]
 
 acceptance target:
   name|provider|base_url[|api_key_env[|model_hint]]
+
+model-account roster:
+  a fak-route account roster from 'fak route --accounts-dump'; readiness probes OpenAI-compatible/local accounts only, while acceptance also classifies native provider accounts as supported-unprobed.
 `)
 }

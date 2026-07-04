@@ -26,6 +26,7 @@ func clearSlackEnv(t *testing.T) {
 		"FAK_NEWS_CHANNEL",
 		"FAK_NODE_USAGE_TOKEN", "FAK_NODE_USAGE_CHANNEL",
 		"FAK_STEERING_CHANNEL",
+		"FAK_GUARD_SESSIONS_TOKEN", "FAK_GUARD_SESSIONS_CHANNEL",
 		"FAK_CHATRELAY_TOKEN", "FAK_CHATRELAY_CHANNEL",
 	}
 	for _, k := range keys {
@@ -76,6 +77,17 @@ func TestBuildSurfaceReportsScoreboardFallback(t *testing.T) {
 	blk := reportByName(reports, "blockers")
 	if blk.Channel == "" || blk.ChannelSource != "built-in default" {
 		t.Fatalf("blockers should use its built-in channel default: %+v", blk)
+	}
+
+	guardSessions := reportByName(reports, "guard-sessions")
+	if guardSessions == nil {
+		t.Fatal("guard-sessions surface must be registered")
+	}
+	if guardSessions.Channel != guardSessionsChannelDefault || guardSessions.ChannelSource != "built-in default" {
+		t.Fatalf("guard-sessions should default to %s: %+v", guardSessionsChannelDefault, guardSessions)
+	}
+	if !guardSessions.TokenSet || !strings.Contains(guardSessions.TokenSource, "scoreboard-fallback") {
+		t.Fatalf("guard-sessions should fall back to the scoreboard token: %+v", guardSessions)
 	}
 }
 

@@ -103,7 +103,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	launchCommand := fs.String("command", "claude", "(launch) the agent command to start under the resolved seat")
 	launchUltracode := fs.Bool("ultracode", true, "(launch) run Claude in ultracode (xhigh reasoning + dynamic multi-agent workflow orchestration) by default, via --settings '{\"ultracode\":true}'; --ultracode=false launches without it. Claude-only; ignored for other agents")
 	launchModel := fs.String("model", defaultLaunchModel, "(launch) model id a switched Claude launch pins via --model; defaults to Fable 5 ("+defaultLaunchModel+") so every seat starts on it regardless of its own saved default; --model '' launches with the seat's saved default. Claude-only; ignored for other agents")
-	launchFallbackModel := fs.String("fallback-model", defaultLaunchFallbackModel, "(launch) Claude model retried once if the default Fable 5 startup fails with a model-unavailable error; empty disables. Default: Opus 4.8 ("+defaultLaunchFallbackModel+"). Ignored when --model is explicit")
+	launchFallbackModel := fs.String("fallback-model", defaultLaunchFallbackModel, "(launch) comma-separated Claude fallback CHAIN, tried in order when the default Fable 5 startup is unavailable — an unknown/invalid model OR a usage/rate limit (e.g. Fable's weekly cap -> Opus); empty disables. Default: Opus 4.8 ("+defaultLaunchFallbackModel+"). Ignored when --model is explicit")
 	rotateFlag := fs.Bool("rotate", false, "(launch) launch the NEXT account in the rotation instead of the active/named seat — the round-robin off a walled account")
 	afterSeat := fs.String("after", "", "(next/launch) rotate to the account bucket AFTER this seat (default: the named seat, else the active seat)")
 	noHeadroom := fs.Bool("no-headroom", false, "(next/launch --rotate) ignore the live runtime headroom signal and rotate stable-by-name; by default rotation prefers the account with room and sorts walled/capped accounts last")
@@ -407,6 +407,7 @@ func accountsNext(stdout, stderr io.Writer, registryPath, homeDir, after string,
 		return 1
 	}
 	reg = reg.Refresh()
+	fixes := accountFixSummary(registryPath, reg)
 	// By default fold in the live runtime headroom signal so the pool is ordered with the
 	// account that has room first and walled/capped accounts last, instead of stable-by-name.
 	var hr accounts.RotationHeadroom
@@ -423,14 +424,17 @@ func accountsNext(stdout, stderr io.Writer, registryPath, homeDir, after string,
 			fmt.Fprintf(stderr, "fak accounts next: only one account bucket in rotation (%s) — "+
 				"nowhere else to rotate; enroll another with `fak accounts add`\n", plan.Pool[0].Name)
 		}
+		printAccountFixSummary(stderr, fixes, "account fixes")
 		return 1
 	}
 	switch {
 	case asJSON:
 		stdout.Write(mustJSON(seat))
 		fmt.Fprintln(stdout)
+		printAccountFixSummary(stderr, fixes, "account fixes")
 	case asEnv:
 		fmt.Fprintf(stdout, "CLAUDE_CONFIG_DIR=%s\n", seat.Dir)
+		printAccountFixSummary(stderr, fixes, "account fixes")
 	default:
 		line := "next: " + seat.Name
 		if seat.Dir != "" {
@@ -444,6 +448,7 @@ func accountsNext(stdout, stderr io.Writer, registryPath, homeDir, after string,
 			line += fmt.Sprintf("  headroom=%s", headroomLabel(*seat.Headroom))
 		}
 		fmt.Fprintln(stdout, line)
+		printAccountFixSummary(stdout, fixes, "account fixes")
 	}
 	return 0
 }
@@ -462,6 +467,48 @@ func headroomLabel(score float64) string {
 	default:
 		return "unknown"
 	}
+}
+
+func printAccountFixSummary(w io.Writer, sum acctFixSummary, prefix string) {
+	if sum.Actionable == 0 {
+		return
+	}
+	if prefix == "" {
+		prefix = "account fixes"
+	}
+	fmt.Fprintf(w, "%s: %d seat(s) need action", prefix, sum.Actionable)
+	if by := actionCountsText(sum.ByAction); by != "" {
+		fmt.Fprintf(w, " (%s)", by)
+	}
+	if sum.AutoFixable > 0 {
+		fmt.Fprintf(w, "; run `fak accounts doctor --write` for %d auto-fixable repair(s)", sum.AutoFixable)
+	} else {
+		fmt.Fprint(w, "; run `fak accounts doctor`")
+	}
+	fmt.Fprintln(w)
+	for _, seat := range sum.Seats {
+		detail := firstString(seat.Command, seat.Reset, seat.Reason)
+		if detail == "" {
+			detail = seat.Status
+		}
+		fmt.Fprintf(w, "  - %s: %s - %s\n", seat.Name, seat.Action, detail)
+	}
+}
+
+func actionCountsText(by map[string]int) string {
+	if len(by) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(by))
+	for k := range by {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%d", k, by[k]))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // accountsRotation prints the FULL witnessed rotation decision: the pool in launch order
@@ -491,6 +538,7 @@ func accountsRotation(stdout, stderr io.Writer, registryPath, homeDir string, as
 	}
 	res := live.RotationPlanWithHeadroom(hr)
 	drift := identityDrift(storedIDs, live)
+	fixes := accountFixSummary(registryPath, live)
 	if asJSON {
 		stdout.Write(mustJSON(map[string]any{
 			"schema":         "fak.accounts.rotation.v1",
@@ -499,6 +547,7 @@ func accountsRotation(stdout, stderr io.Writer, registryPath, homeDir string, as
 			"pool":           res.Pool,
 			"excluded":       res.Excluded,
 			"registry_drift": drift,
+			"account_fixes":  fixes,
 		}))
 		fmt.Fprintln(stdout)
 		return 0
@@ -533,6 +582,7 @@ func accountsRotation(stdout, stderr io.Writer, registryPath, homeDir string, as
 			fmt.Fprintf(stdout, "  %-29s stored %s -> disk %s\n", d.Name, d.Stored, d.Disk)
 		}
 	}
+	printAccountFixSummary(stdout, fixes, "account fixes")
 	return 0
 }
 
@@ -765,6 +815,7 @@ func accountsCheck(stdout, stderr io.Writer, registryPath, dosView, jobView stri
 		return 1
 	}
 	reg = reg.Refresh()
+	fixes := accountFixSummary(registryPath, reg)
 	drift := 0
 	for _, t := range viewTargets(dosView, jobView) {
 		want, err := reg.RenderView(t.view)
@@ -774,21 +825,30 @@ func accountsCheck(stdout, stderr io.Writer, registryPath, dosView, jobView stri
 		}
 		got, err := os.ReadFile(t.path)
 		if err != nil {
-			fmt.Fprintf(stdout, "DRIFT %s: cannot read %s (%v)\n", t.view, t.path, err)
+			fmt.Fprintf(stdout, "DRIFT %s: cannot read %s%s (%v)\n", t.view, t.path, accountsViewConsumerHint(t.view), err)
 			drift++
 			continue
 		}
 		if string(got) != want {
-			fmt.Fprintf(stdout, "DRIFT %s: %s differs from registry projection — run `fak accounts sync`\n", t.view, t.path)
+			fmt.Fprintf(stdout, "DRIFT %s: %s differs from registry projection%s — run `fak accounts sync`\n",
+				t.view, t.path, accountsViewConsumerHint(t.view))
 			drift++
 			continue
 		}
 		fmt.Fprintf(stdout, "ok %s: %s matches registry\n", t.view, t.path)
 	}
+	printAccountFixSummary(stdout, fixes, "account fixes")
 	if drift > 0 {
 		return 1
 	}
 	return 0
+}
+
+func accountsViewConsumerHint(view accounts.ViewName) string {
+	if view == accounts.ViewJob {
+		return " (this is what `u` reads)"
+	}
+	return ""
 }
 
 // syncViews projects the canonical registry (at registryPath) into the named roster views and

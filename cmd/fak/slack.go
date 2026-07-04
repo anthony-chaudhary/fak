@@ -81,6 +81,7 @@ var slackSurfaces = []slackSurface{
 	{"news", "external industry / SOTA / OSS research updates", "", "FAK_NEWS_CHANNEL", "", false},
 	{"node-usage", "compute-node usage snapshots", "FAK_NODE_USAGE_TOKEN", "FAK_NODE_USAGE_CHANNEL", nodeusagepost.ChannelDefault, false},
 	{"steering", "steering-guard surface", "", "FAK_STEERING_CHANNEL", steeringChannelDefault, false},
+	{"guard-sessions", "one root thread per fak guard session", guardSessionsTokenEnv, guardSessionsChannelEnv, guardSessionsChannelDefault, false},
 	{"chatrelay", "Slack <-> served-model chat bridge", "FAK_CHATRELAY_TOKEN", "FAK_CHATRELAY_CHANNEL", "", true},
 }
 
