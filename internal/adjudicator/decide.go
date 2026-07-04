@@ -945,8 +945,22 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 		val, present := argString(args, pr.Arg)
 		switch pr.Kind {
 		case ArgAllowGlob:
+			// Canonicalize before the containment check (#2407): a backslash,
+			// redundant dot-segment, env alias, or quote-wrapped spelling of an
+			// in-bounds path must not read as an escape, and vice versa. An
+			// undecodable value (an unterminated quote) fails closed as
+			// MALFORMED rather than sliding past the glob under a raw spelling
+			// the canonical form would have caught.
+			canon := val
+			if present {
+				c, ok := canonicalizeArgValue(val)
+				if !ok {
+					return argMalformed(pr), true, notes
+				}
+				canon = c
+			}
 			// Positive requirement: a missing OR out-of-bounds value fails closed.
-			if !present || !pathUnderGlob(pr.Glob, val) {
+			if !present || !pathUnderGlob(pr.Glob, canon) {
 				if pr.Advisory {
 					note(pr, "allow_glob "+pr.Glob)
 					continue
@@ -961,8 +975,7 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 			// one-character launder (`curl x | python3` slips a rule that only names sh/bash).
 			// commandHasRemotePipeToInterpreter tokenizes the command (skipping quoted words),
 			// unwraps sh -c / $()/`` sources, and matches a real downloader|interpreter pipe at
-			// a command boundary across the broadened interpreter set. All other deny_regex
-			// rules stay literal.
+			// a command boundary across the broadened interpreter set.
 			if isRCEPipeArgRule(pr) {
 				if present && commandHasRemotePipeToInterpreter(val) {
 					if pr.Advisory {
@@ -971,12 +984,25 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 					}
 					return argDeny(pr, "rce_pipe download|interpreter"), true, notes
 				}
-			} else if present && pr.Re != nil && pr.Re.MatchString(val) {
-				if pr.Advisory {
-					note(pr, "deny_regex /"+pr.Re.String()+"/")
-					continue
+				continue
+			}
+			// Every OTHER deny_regex rule matches the CANONICAL form (#2407): the raw
+			// arg string alone let a backslash, dot-segment, env-alias, or quote-style
+			// spelling of the same value slip a rule written against its canonical
+			// spelling (the documented #1464/#1466 bypass class). An undecodable value
+			// fails closed as MALFORMED instead of matching nothing.
+			if present {
+				canon, ok := canonicalizeArgValue(val)
+				if !ok {
+					return argMalformed(pr), true, notes
 				}
-				return argDeny(pr, "deny_regex /"+pr.Re.String()+"/"), true, notes
+				if pr.Re != nil && pr.Re.MatchString(canon) {
+					if pr.Advisory {
+						note(pr, "deny_regex /"+pr.Re.String()+"/")
+						continue
+					}
+					return argDeny(pr, "deny_regex /"+pr.Re.String()+"/"), true, notes
+				}
 			}
 		case ArgMaxBytes:
 			if present && len(val) > pr.N {
@@ -1012,6 +1038,20 @@ func argDeny(pr *ArgPredicate, detail string) abi.Verdict {
 		v.Meta = map[string]string{"fix": pr.Fix}
 	}
 	return v
+}
+
+// argMalformed builds the fail-closed Deny for an arg value the canonicalizer
+// (#2407) could not decode (e.g. an unterminated quote). Always MALFORMED,
+// never pr.Reason: the failure is that the rung could not tell what the value
+// canonically IS, not that a specific rule matched it, so it must not be
+// softened by that rule's own Advisory declaration.
+func argMalformed(pr *ArgPredicate) abi.Verdict {
+	return abi.Verdict{
+		Kind:    abi.VerdictDeny,
+		Reason:  abi.ReasonMalformed,
+		By:      "monitor",
+		Payload: abi.WitnessPayload{Claim: pr.Tool + "." + pr.Arg + " undecodable arg value"},
+	}
 }
 
 // argString returns the string form of args[key] and whether the key was present.

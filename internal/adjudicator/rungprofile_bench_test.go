@@ -2,6 +2,7 @@ package adjudicator
 
 import (
 	"context"
+	"regexp"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -62,6 +63,42 @@ func BenchmarkDecideReadClass(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			_ = a.Adjudicate(ctx, calls[i%len(calls)])
+		}
+	})
+}
+
+// BenchmarkDecideArgPredicateCanonicalized is the #2407 latency arm: it times
+// the ArgDenyRegex rung with the canonicalization stage against a baseline
+// with no ArgPredicates configured, so a regression that made
+// canonicalizeArgValue expensive (e.g. an accidental allocation-heavy path)
+// shows up here rather than only in aggregate. Run with
+//
+//	go test ./internal/adjudicator -bench BenchmarkDecideArgPredicateCanonicalized -benchmem
+func BenchmarkDecideArgPredicateCanonicalized(b *testing.B) {
+	ctx := context.Background()
+	call := inlineCall("read_credential_file", `{"path":"~/.ssh/id_rsa"}`)
+
+	b.Run("no_arg_predicates", func(b *testing.B) {
+		a := New(Policy{Allow: map[string]bool{"read_credential_file": true}})
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = a.Adjudicate(ctx, call)
+		}
+	})
+
+	b.Run("canonicalized_arg_deny_regex", func(b *testing.B) {
+		a := New(Policy{
+			Allow: map[string]bool{"read_credential_file": true},
+			ArgPredicates: []ArgPredicate{{
+				Tool: "read_credential_file", Arg: "path", Kind: ArgDenyRegex,
+				Re: regexp.MustCompile(`\.ssh/id_(rsa|ed25519)$`), Reason: abi.ReasonPolicyBlock,
+			}},
+		})
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = a.Adjudicate(ctx, call)
 		}
 	})
 }
