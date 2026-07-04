@@ -60,7 +60,48 @@ type KVSpanStats struct {
 	// makes KVEvictionCostAged reduce exactly to KVEvictionCost, so every existing caller
 	// that never sets it is byte-identical to today.
 	AgeStamp float64
+	// PinBoost is a bounded, TTL-decaying lease strength (#2673) the caller derives from a
+	// pin's remaining TTL via PinBoostFromTTL — the economics form of a pin that
+	// KVEvictionCostPinned FOLDS INTO the cost-of-losing (additively) rather than bypassing
+	// it. A live pin with ample TTL carries a large boost (effectively unevictable, today's
+	// hard-pin behavior); as TTL → 0 the boost decays to 0 so an expiring pin on a cold span
+	// releases gracefully instead of holding memory forever. Zero (the default) makes
+	// KVEvictionCostPinned reduce exactly to KVEvictionCost, so every existing caller that
+	// never sets it is byte-identical to today. The absolute-exclusion Pinned bool is the
+	// PinBoost = +Inf limit of this term; both are honored by KVEvictionCostPinned.
+	PinBoost float64
+	// Hint is an adjudicated agent cache-control prior (#2225/#805) — a closed vocabulary
+	// (HintNone/HintPrecious/HintEphemeral) that KVEvictionCostPinned applies as a BOUNDED
+	// multiplier on the reuse term, never an override: `precious` raises keep-value,
+	// `ephemeral` lowers it, both saturating so a hint can never fully defeat the value
+	// function (an agent cannot game the cache into starvation — the adjudication fence).
+	// HintNone (the default) leaves the reuse term untouched, so an unhinted span is
+	// byte-identical to today.
+	Hint KVCacheHint
 }
+
+// KVCacheHint is the closed vocabulary of adjudicated agent cache-control priors (#2225/#805
+// intent conduit, default-deny adjudication) that KVEvictionCostPinned folds into the reuse
+// term as a bounded multiplier. It is a PRIOR on keep-value, not an override: the multiplier
+// is finite and strictly positive (see hintReuseMultiplier), so a hint biases the ranking
+// but a genuinely hotter or colder span still dominates — an agent cannot pin the cache into
+// starvation by declaring everything precious, nor evict a live hot span by declaring it
+// ephemeral. The zero value HintNone is the identity (multiplier 1).
+type KVCacheHint int
+
+const (
+	// HintNone is the absence of an agent cache-control hint — the reuse term is unscaled,
+	// so a span with HintNone scores exactly as it does under KVEvictionCost. Default.
+	HintNone KVCacheHint = iota
+	// HintPrecious is an agent declaring a span worth keeping (#2225): it RAISES the reuse
+	// term by a bounded factor, biasing the evictor to retain the span — but bounded, so a
+	// precious hint on a genuinely cold span still loses to a much hotter unhinted span.
+	HintPrecious
+	// HintEphemeral is an agent declaring a span one-shot (#2225): it LOWERS the reuse term
+	// by a bounded factor, biasing the evictor to reclaim the span first — but bounded, so
+	// an ephemeral hint on a genuinely hot span still outranks a much colder unhinted span.
+	HintEphemeral
+)
 
 // KVEvictionCost is #2239's value-of-keeping score for a resident KV span:
 //
