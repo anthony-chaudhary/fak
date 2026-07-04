@@ -1038,9 +1038,9 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 		// the trailer, never echoed the token, and the push never happened. When any
 		// denied call carries a confirm recipe, the trailer must except it.
 		if hasConfirmRecipe {
-			b.WriteString(" A preview-confirm refusal is a pause, not a denial: the sanctioned next step is to re-propose that same call with only the _fak_confirm key added. Do not re-propose any other refused call unchanged; choose an allowed alternative.")
+			b.WriteString(" A preview-confirm refusal is a pause, not a denial: the sanctioned next step is to re-propose that same call with only the _fak_confirm key added. This is per-tool feedback, not a session stop. Do not re-propose any other refused call unchanged; choose an allowed alternative. A session stop only comes from a declared stop policy.")
 		} else {
-			b.WriteString(" Do not re-propose a refused call unchanged; choose an allowed alternative.")
+			b.WriteString(" This is per-tool feedback, not a session stop. Do not re-propose a refused call unchanged; fix the arguments/tool choice or choose an allowed alternative. A session stop only comes from a declared stop policy.")
 		}
 	}
 	if len(repaired) > 0 {

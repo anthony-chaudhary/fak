@@ -44,6 +44,8 @@ func TestAdjudicationNoteCarriesReversibilityConfirmRecipe(t *testing.T) {
 		// The trailer joins the note's terminal period without doubling it
 		// (the old unconditional ". Do not..." rendered "first.. Do not").
 		"try git push --dry-run first. A preview-confirm refusal",
+		"This is per-tool feedback, not a session stop",
+		"A session stop only comes from a declared stop policy",
 	} {
 		if !strings.Contains(note, want) {
 			t.Fatalf("adjudicationNote missing %q:\n%s", want, note)
@@ -71,6 +73,7 @@ func TestAdjudicationNoteTrailerScopesProhibitionWhenMixed(t *testing.T) {
 		`"_fak_confirm":"fak-0011223344556677"`,
 		"Write (DEFAULT_DENY/TERMINAL)",
 		"A preview-confirm refusal is a pause, not a denial",
+		"This is per-tool feedback, not a session stop",
 		"Do not re-propose any other refused call unchanged",
 	} {
 		if !strings.Contains(note, want) {
@@ -117,10 +120,10 @@ func TestReversibilityNoteScopedToReversibilityGate(t *testing.T) {
 	}
 }
 
-// Refusals that carry a closed-vocabulary Reason keep their exact historical
-// rendering — the pinned fixtures elsewhere (messages_test.go, sessionobs)
-// depend on "Tool (REASON/DISPOSITION)".
-func TestAdjudicationNoteKeepsReasonRenderingForPlainDenies(t *testing.T) {
+// Refusals that carry a closed-vocabulary Reason keep their exact reason rendering
+// while the generic trailer now states the control-plane boundary explicitly:
+// a denied tool call is per-tool feedback, not a session stop.
+func TestAdjudicationNotePlainDenySaysFeedbackNotSessionStop(t *testing.T) {
 	note := adjudicationNote([]ToolAdjudication{{
 		Tool:     "Write",
 		Admitted: false,
@@ -129,10 +132,17 @@ func TestAdjudicationNoteKeepsReasonRenderingForPlainDenies(t *testing.T) {
 	if !strings.Contains(note, "Write (DEFAULT_DENY/TERMINAL)") {
 		t.Fatalf("plain deny rendering changed:\n%s", note)
 	}
-	// Byte-identical legacy rendering: the pinned fixtures (messages_test.go,
-	// sessionobs) and the transcript-fold marker depend on this exact sentence
-	// for turns with no confirm recipe.
-	if !strings.Contains(note, "Write (DEFAULT_DENY/TERMINAL). Do not re-propose a refused call unchanged; choose an allowed alternative.") {
-		t.Fatalf("plain-deny trailer drifted from the pinned legacy form:\n%s", note)
+	for _, want := range []string{
+		"This is per-tool feedback, not a session stop",
+		"Do not re-propose a refused call unchanged",
+		"fix the arguments/tool choice or choose an allowed alternative",
+		"A session stop only comes from a declared stop policy",
+	} {
+		if !strings.Contains(note, want) {
+			t.Fatalf("plain-deny note missing %q:\n%s", want, note)
+		}
+	}
+	if strings.Contains(note, "session stopped") {
+		t.Fatalf("plain deny implied a stopped session:\n%s", note)
 	}
 }
