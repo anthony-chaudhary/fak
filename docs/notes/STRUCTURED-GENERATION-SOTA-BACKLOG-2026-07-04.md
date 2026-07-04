@@ -218,6 +218,53 @@ and own only the smallest native proof needed to keep the kernel honest.
    note: explain that structured generation became infrastructure and state
    fak's differentiator as effect adjudication after valid generation.
 
+## #26 base-item close-out
+
+[#26](https://github.com/anthony-chaudhary/fak/issues/26) is the parent
+base-item ("structured/guided decoding feeding tool-call gating"). Its
+base-item acceptance is satisfied and independently re-witnessed on
+2026-07-04; the residual is carried forward as a distinct tracked child, so
+#26 closes as a base item rather than staying open behind a non-goal.
+
+Acceptance checklist bound to evidence:
+
+| #26 acceptance item | State | Witness |
+|---|---|---|
+| Constrained generation on at least one track (Track A ride is the min bar) | shipped | [#907](https://github.com/anthony-chaudhary/fak/issues/907) (CLOSED) |
+| `SampleParams` carries structured-decode fields additively; call sites compile | shipped | `internal/agent/chat.go` `ResponseFormat`/`LogitBias` + `WithResponseFormat`/`WithLogitBias` opts |
+| Gateway parses OpenAI `response_format`/`logit_bias` and forwards them | shipped | `TestChatProxyForwardsStructuredOutputFieldsToRideEngine`, `...OmitsStructuredOutputFieldsWhenAbsent` (PASS) |
+| Ride path enforces + integrates with the whole-turn gate | shipped | `internal/gateway/structured_output_passthrough_test.go` |
+| Native path: logit-bias/grammar mask at the StepBatch step, unconstrained bit-exact | shipped | [#929](https://github.com/anthony-chaudhary/fak/issues/929) (CLOSED); `internal/model/constraint.go`; `constraint_test.go` (8 tests PASS) |
+| Test: constrained tool-call workload admitted/transformed as a policy decision | shipped | `TestNativeMaskedDecodeEntersGrammarAdjudication` (PASS) |
+| Reconciliation note posted to #348 | superseded | see invalidating assumption below |
+
+**Promotion evidence (gen/now, base-item shipped):** #907 and #929 both
+CLOSED; `CLAIMS.md` records `[SHIPPED] Native decode-time constraint hook
+(#929, the in-kernel half of #907/#26)`; the three witness suites
+(`internal/gateway`, `internal/model`, `internal/agent`) are green.
+
+**Retirement-by-completion:** the one remaining fak-owned gap — the
+`grammar.Grammar` / tool JSON Schema + tokenizer -> `model.LogitMask`
+compiler — is a #26 non-goal ("a full high-performance grammar compiler ...
+is out of scope; a correct minimal logit-mask / JSON-schema constraint is the
+bar", which #929 met). It is tracked in
+[#2596](https://github.com/anthony-chaudhary/fak/issues/2596) (OPEN by
+design), so #26 carries no untracked debt.
+
+**Invalidating assumption:** the acceptance item "Reconciliation note posted
+to #348" assumes #348 is a live GitHub issue. It is not — `gh issue view 348`
+resolves to nothing; #348 is an internal-tracker sibling number from the
+migration, not a fak GitHub issue. That acceptance item is unreachable as
+literally written and is superseded by this note, `CLAIMS.md`, and the owner's
+2026-07-04 reconciliation comment on #26.
+
+**Classification (recommended, repair blocked):** #26 is unclassified
+(no `gen/*` label; milestone "Ship releases automatically on a green trunk").
+The evidence classifies it as `gen/now` — a shipped base serving item. The
+label/milestone repair is blocked by the preview-confirm gate (`gh issue edit`
+is refused); an operator with issue-edit rights should add `generation` +
+`gen/now` and bind the `Generation G0 - Now / Immediate` milestone.
+
 ## Sources
 
 - XGrammar-2 blog: <https://blog.mlc.ai/2026/05/04/xgrammar-2-fast-customizable-structured-generation>
