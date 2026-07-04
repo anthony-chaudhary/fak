@@ -341,6 +341,23 @@ def _glob_to_re(glob: str) -> re.Pattern[str]:
     return re.compile("^" + "".join(out) + "$")
 
 
+def named_repo_paths(text: str) -> list[str]:
+    """Concrete repo paths an issue title/body NAMES, deduped in first-seen order.
+
+    The canonical extraction the path-grep routing rung uses (:data:`_PATH_RE`),
+    exposed so a caller (the dispatcher's multi-lane scope guard, #2615) reads the
+    issue's file families through the SAME lens the router routes by, rather than
+    re-deriving a second, drifting path regex. Only rooted paths under a recognized
+    family (`internal/**`, `tools/`, `docs/`, `.github/`, `.claude/`, `cmd/`,
+    `visuals/`) match; a bare `Makefile` / `dos.toml` / glob like `tools/*.py` does
+    not, so the set is deliberately the confidently-rooted families, not prose."""
+    seen: list[str] = []
+    for p in _PATH_RE.findall(text or ""):
+        if p not in seen:
+            seen.append(p)
+    return seen
+
+
 def path_matches_lane(path: str, trees: dict[str, list[str]]) -> list[str]:
     """All lanes whose tree globs match `path` (normalized, repo-relative)."""
     # Strip ONLY a leading `./` prefix — NOT `str.lstrip("./")`, which is a

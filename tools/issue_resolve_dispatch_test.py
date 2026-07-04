@@ -3155,9 +3155,74 @@ class TickExitCodeTest(unittest.TestCase):
         # spawn_failed is the ONLY emitted action outside the benign set.
         mod = load()
         emitted = {"spawned", "would_spawn", "no_issue", "no_lane", "lane_busy",
-                   "lane_leased", "refused", "weekly_capped", "backend_unhealthy",
-                   "spawn_failed"}
+                   "lane_leased", "multi_lane_scope", "refused", "weekly_capped",
+                   "backend_unhealthy", "spawn_failed"}
         self.assertEqual(emitted - mod.BENIGN_ACTIONS, {"spawn_failed"})
+
+
+class MultiLaneScopeTest(unittest.TestCase):
+    """The #2615 guard: refuse an issue whose named file families fall outside the
+    chosen lane's LEASE TREE (the collision authority), not just its label. Pure —
+    canned trees, no dos/gh."""
+
+    TREES = {
+        "ci": [".github/**"],
+        "docs": ["docs/**"],
+        "claude": [".claude/**"],
+        "tools": ["tools/**", "scripts/**"],
+        "gateway": ["internal/gateway/**"],
+    }
+    LANES = set(TREES)
+
+    def test_broad_issue_under_narrow_lane_is_multi_lane(self) -> None:
+        # #2233 shape: a ci-leased worker (tree .github/**) told to edit .claude/**
+        # and docs/** — the families the narrow lease cannot protect.
+        mod = load()
+        body = ("Callers live in `.claude/skills/x/SKILL.md`, `.github/workflows/y.yml`, "
+                "and `docs/archive/z.md`.")
+        scan = mod.multi_lane_scope(body, "ci", [".github/**"], self.TREES, self.LANES)
+        self.assertTrue(scan["multi_lane"])
+        self.assertEqual(scan["uncovered_lanes"], ["claude", "docs"])
+        # The path the lease DOES cover is not flagged.
+        self.assertIn(".github/workflows/y.yml", scan["covered_paths"])
+
+    def test_single_lane_issue_is_not_refused(self) -> None:
+        # An issue naming only its own lane's tree clears — no false positive.
+        mod = load()
+        body = "Edit `tools/issue_resolve_dispatch.py` and `tools/issue_lane_router.py`."
+        scan = mod.multi_lane_scope(body, "tools", ["tools/**", "scripts/**"],
+                                    self.TREES, self.LANES)
+        self.assertFalse(scan["multi_lane"])
+        self.assertEqual(scan["uncovered"], [])
+
+    def test_lease_covering_every_family_clears(self) -> None:
+        # The done-condition escape hatch: when the lease tree covers every named
+        # family, the same broad body is admissible (no refusal).
+        mod = load()
+        body = "Touches `.github/workflows/a.yml` and `docs/b.md`."
+        wide = {"wide": [".github/**", "docs/**"]}
+        trees = {**self.TREES, **wide}
+        scan = mod.multi_lane_scope(body, "wide", [".github/**", "docs/**"],
+                                    trees, set(trees))
+        self.assertFalse(scan["multi_lane"])
+
+    def test_glob_and_bare_paths_do_not_trip_the_guard(self) -> None:
+        # A `tools/*.py` glob or a bare `Makefile`/`dos.toml` is not a rooted path,
+        # so it never manufactures a spurious cross-lane family.
+        mod = load()
+        body = "Rewrite `tools/*.py`, `Makefile`, and `dos.toml` command strings."
+        scan = mod.multi_lane_scope(body, "ci", [".github/**"], self.TREES, self.LANES)
+        self.assertFalse(scan["multi_lane"])
+
+    def test_reason_names_families_and_split_path(self) -> None:
+        mod = load()
+        scan = {"chosen_lane": "ci", "chosen_tree": [".github/**"],
+                "uncovered": [{"path": ".claude/skills/", "lanes": ["claude"]}],
+                "uncovered_lanes": ["claude"]}
+        reason = mod.multi_lane_scope_reason(2233, scan)
+        self.assertIn("#2233", reason)
+        self.assertIn(".claude/skills/", reason)
+        self.assertIn("Split into", reason)
 
 
 if __name__ == "__main__":

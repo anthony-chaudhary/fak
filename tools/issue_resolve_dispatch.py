@@ -2075,6 +2075,85 @@ def lane_tree(root: Path, lane: str) -> list[str]:
     return [f"internal/{lane}/**"]
 
 
+# --- Multi-lane scope guard (#2615) ----------------------------------------
+# A contract score of 100 proves an issue is well-DESCRIBED; it says nothing about
+# whether the ONE lane the router collapsed it onto can protect every file family
+# the body names. The router already sees the collision — it computes `path_lanes`
+# across all named paths and flags `path-ambiguous` when they span >1 lane — but it
+# silently picks a single lane, and the fenced lease then covers only that lane's
+# tree. So a broad mechanical issue (#2233: callers across `.claude/**`, `.github/**`,
+# `docs/**`, tools/…) admitted under a narrow lane (`ci` = `.github/**`) reads as
+# WOULD_SPAWN while the worker is scoped to edit far outside the leased tree — the
+# exact "safe-looking but unsafe in the shared tree" admission this guard refuses.
+#
+# The rule is the issue's own assumption: the LEASE TREE, not the label or lane
+# string, is the collision authority. A named file family the chosen lane's lease
+# does NOT cover but that belongs to ANOTHER concurrent lane is an unprotected
+# mutation region -> refuse (or require an operator split / --force). Deliberately
+# conservative in the refuse direction: an unprotected broad rewrite in the shared
+# trunk is worse than a false refusal an operator can --force or split. Only rooted,
+# recognized families count (issue_lane_router.named_repo_paths), so a bare prose
+# path mention or a `tools/*.py` glob never trips it.
+def multi_lane_scope(text: str, chosen_lane: str, chosen_tree: list[str],
+                     trees: dict[str, list[str]], lane_set: set[str]) -> dict[str, Any]:
+    """PURE: file families ``text`` names that ``chosen_lane``'s lease can't cover.
+
+    ``chosen_tree`` is the lease's glob set (from :func:`lane_tree`); ``trees`` is the
+    full ``dos.toml`` lane->globs map; ``lane_set`` the routable (concurrent) lanes.
+    A named path is UNCOVERED when the lease tree does not match it AND it belongs to
+    at least one OTHER routable lane. Returns ``{multi_lane, uncovered:[{path,lanes}],
+    uncovered_lanes, covered_paths, chosen_lane, chosen_tree}``."""
+    import issue_lane_router as ilr  # noqa: PLC0415  (lazy, same as lane_tree)
+    lease_view = {"__lease__": list(chosen_tree or [])}
+    covered: list[str] = []
+    uncovered: list[dict[str, Any]] = []
+    for p in ilr.named_repo_paths(text):
+        if ilr.path_matches_lane(p, lease_view):
+            covered.append(p)
+            continue
+        other = sorted(l for l in ilr.path_matches_lane(p, trees)
+                       if l in lane_set and l != chosen_lane)
+        if other:
+            uncovered.append({"path": p, "lanes": other})
+    uncovered_lanes = sorted({l for u in uncovered for l in u["lanes"]})
+    return {"multi_lane": bool(uncovered), "chosen_lane": chosen_lane,
+            "chosen_tree": list(chosen_tree or []), "covered_paths": covered,
+            "uncovered": uncovered, "uncovered_lanes": uncovered_lanes}
+
+
+def scan_multi_lane_scope(root: Path, text: str, chosen_lane: str) -> dict[str, Any]:
+    """Resolve the taxonomy and run :func:`multi_lane_scope` for a live dispatch.
+
+    Fail-open: a taxonomy read failure (no ``dos`` binary / broken store) returns
+    ``{multi_lane: False, unavailable: True}`` so the guard can only ADD a refusal,
+    never wedge the loop — the same discipline as the contract and lease gates."""
+    try:
+        import issue_lane_router as ilr  # noqa: PLC0415
+        concurrent, trees = ilr.lane_taxonomy(root)
+    except Exception as exc:  # noqa: BLE001  (fail-open: no taxonomy -> no guard)
+        return {"multi_lane": False, "unavailable": True, "reason": str(exc)}
+    if not trees:
+        return {"multi_lane": False, "unavailable": True,
+                "reason": "dos doctor returned no lane trees"}
+    scan = multi_lane_scope(text, chosen_lane, lane_tree(root, chosen_lane),
+                            trees, set(concurrent) or set(trees))
+    scan["unavailable"] = False
+    return scan
+
+
+def multi_lane_scope_reason(issue: int, scan: dict[str, Any]) -> str:
+    """One actionable line naming the uncovered families + the split/override path."""
+    fam = ", ".join(f"{u['path']} ({'/'.join(u['lanes'])})"
+                    for u in scan.get("uncovered") or [])
+    return (f"issue #{issue} names file families outside lane "
+            f"'{scan.get('chosen_lane')}' lease tree {scan.get('chosen_tree')}: {fam} "
+            f"— the lease is the collision authority, and a narrow "
+            f"'{scan.get('chosen_lane')}' lease would NOT protect "
+            f"{scan.get('uncovered_lanes')} while the worker edits them. Split into "
+            f"per-lane child issues, or re-dispatch under a lane whose lease covers "
+            f"every named family (or --force to accept the under-scoped lease)")
+
+
 # --- Commit-time diff-witness binding (residual of #1310/#1324, proposal #2) ---
 # The fenced lane-lease above is the UPSTREAM half of the verified loop: it denies a
 # colliding spawn before it starts. This is the DOWNSTREAM half: a worker's slot only
@@ -3135,6 +3214,34 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
             "bypassed": True,
             "gate_reason": issue_contract_hold_reason(contract),
         }
+
+    # Multi-lane scope guard (#2615): the contract gate and the lane-disjointness
+    # gate are SEPARATE — a score of 100 never proves the chosen lane's lease covers
+    # the issue's mutation region. Refuse an issue whose body names a file family the
+    # chosen lane's lease tree does not cover (and that belongs to another lane),
+    # rather than admitting a broad rewrite under a narrow lease. Runs on a pinned
+    # --issue too (a collision guard, not a readiness one); --force accepts the
+    # under-scoped lease transparently. Fail-open on an unavailable taxonomy.
+    scope_scan = scan_multi_lane_scope(
+        root, f"{rec.get('title') or ''}\n{(rec.get('issue_record') or {}).get('body') or ''}",
+        chosen_lane)
+    if scope_scan.get("multi_lane") and not force:
+        payload["multi_lane_scope"] = scope_scan
+        payload.update({
+            "ok": False,
+            "action": "multi_lane_scope",
+            "verdict": "MULTI_LANE_SCOPE",
+            "reason": multi_lane_scope_reason(target, scope_scan),
+        })
+        _record(runs_dir, payload)
+        return finish(payload)
+    if scope_scan.get("multi_lane") and force:
+        payload["multi_lane_scope_forced"] = {
+            "bypassed": True,
+            "uncovered_lanes": scope_scan.get("uncovered_lanes"),
+            "uncovered": scope_scan.get("uncovered"),
+        }
+
     model, effort = worker_model_effort(backend, acct)
     preview_prompt = f"<resolve #{target} prompt, {rec.get('prompt_chars')} chars>"
     preview_env = dispatch_worker.child_env(chosen_lane, backend, root)
@@ -3317,6 +3424,7 @@ BENIGN_ACTIONS = frozenset({
     "repair_spawned", "would_repair",                    # contract grooming dispatched
     "repair_in_flight",                                  # a groomer is already on it
     "no_issue", "no_lane", "lane_busy", "lane_leased",   # nothing to spawn
+    "multi_lane_scope",                                  # issue spans lanes the lease can't cover (#2615)
     "issue_contract_hold",                               # issue needs scope before spawn
     "refused",                                           # preflight backpressure (host at cap / no account)
     "weekly_capped", "backend_unhealthy",                # pool unavailable; declined correctly
