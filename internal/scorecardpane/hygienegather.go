@@ -79,38 +79,44 @@ func loadEnforcementVocab(root string) {
 	}
 }
 
-// parsePyList extracts the quoted string members of a Python list literal
-// `NAME = [ "a", "b", ... ]`, preserving order.
-func parsePyList(src, name string) []string {
-	body := pyAssignBody(src, name, '[', ']')
+// parsePyLiteralMembers extracts every literal captured by re within the Python
+// assignment body `NAME = <open> ... <close>`, mapping each match through extract.
+// Shared by parsePyList/parsePySet/parsePyTuple — the three differ only in the
+// bracket pair, the literal regex (quote style), and how a match maps to a string.
+func parsePyLiteralMembers(src, name string, open, close byte, re *regexp.Regexp, extract func(m []string) string) []string {
+	body := pyAssignBody(src, name, open, close)
 	if body == "" {
 		return nil
 	}
 	var out []string
-	for _, m := range pyAnyStrLitRE.FindAllStringSubmatch(body, -1) {
-		s := m[1]
-		if s == "" {
-			s = m[2]
-		}
-		out = append(out, s)
+	for _, m := range re.FindAllStringSubmatch(body, -1) {
+		out = append(out, extract(m))
 	}
 	return out
+}
+
+// parsePyList extracts the quoted string members of a Python list literal
+// `NAME = [ "a", "b", ... ]`, preserving order.
+func parsePyList(src, name string) []string {
+	return parsePyLiteralMembers(src, name, '[', ']', pyAnyStrLitRE, func(m []string) string {
+		if m[1] != "" {
+			return m[1]
+		}
+		return m[2]
+	})
 }
 
 // parsePySet extracts the quoted string members of a Python set literal
 // `NAME = { "a", "b", ... }` (multi-line). Comments are ignored because they carry
 // no double-quoted token that is also a set member here.
 func parsePySet(src, name string) map[string]bool {
-	body := pyAssignBody(src, name, '{', '}')
-	if body == "" {
+	members := parsePyLiteralMembers(src, name, '{', '}', pyStrLitRE, func(m []string) string { return m[1] })
+	if len(members) == 0 {
 		return nil
 	}
 	out := map[string]bool{}
-	for _, m := range pyStrLitRE.FindAllStringSubmatch(body, -1) {
-		out[m[1]] = true
-	}
-	if len(out) == 0 {
-		return nil
+	for _, s := range members {
+		out[s] = true
 	}
 	return out
 }
@@ -118,15 +124,7 @@ func parsePySet(src, name string) map[string]bool {
 // parsePyTuple extracts the quoted string members of a Python tuple literal
 // `NAME = ( "a", "b", ... )`, preserving order.
 func parsePyTuple(src, name string) []string {
-	body := pyAssignBody(src, name, '(', ')')
-	if body == "" {
-		return nil
-	}
-	var out []string
-	for _, m := range pyStrLitRE.FindAllStringSubmatch(body, -1) {
-		out = append(out, m[1])
-	}
-	return out
+	return parsePyLiteralMembers(src, name, '(', ')', pyStrLitRE, func(m []string) string { return m[1] })
 }
 
 // pyAssignBody returns the text between the opening and matching closing bracket of
@@ -449,16 +447,27 @@ func fmtDenseSignal(ease float64, f string) string {
 	return "dense reading-ease " + fmtRound0(ease) + " (< " + fmtRound0(fleschFloor) + "): " + f
 }
 
-// localMDTargets returns the repo-relative .md targets a doc links to (local links).
-func localMDTargets(text, docRel, root string) []string {
-	base := docDir(docRel)
+// localLinkTargets scans text for local (non-external) link targets, returning
+// each match's trimmed path portion (query/anchor stripped) in document order.
+// Shared by localMDTargets and allLocalLinks — the regex scan + external-link
+// filter both build on before diverging on how the target is resolved/kept.
+func localLinkTargets(text string) []string {
 	var out []string
 	for _, m := range linkRE.FindAllStringSubmatch(text, -1) {
 		t := strings.TrimSpace(m[2])
 		if hasExternalPrefix(t) {
 			continue
 		}
-		pathPart := strings.TrimSpace(stripAfter(stripAfter(t, "#"), "?"))
+		out = append(out, strings.TrimSpace(stripAfter(stripAfter(t, "#"), "?")))
+	}
+	return out
+}
+
+// localMDTargets returns the repo-relative .md targets a doc links to (local links).
+func localMDTargets(text, docRel, root string) []string {
+	base := docDir(docRel)
+	var out []string
+	for _, pathPart := range localLinkTargets(text) {
 		if !strings.HasSuffix(pathPart, ".md") {
 			continue
 		}
@@ -481,12 +490,7 @@ func allLocalLinks(text, docRel, root string) []localLink {
 	base := docDir(docRel)
 	var out []localLink
 	seen := map[string]bool{}
-	for _, m := range linkRE.FindAllStringSubmatch(text, -1) {
-		t := strings.TrimSpace(m[2])
-		if hasExternalPrefix(t) {
-			continue
-		}
-		pathPart := strings.TrimSpace(stripAfter(stripAfter(t, "#"), "?"))
+	for _, pathPart := range localLinkTargets(text) {
 		if pathPart == "" || seen[pathPart] {
 			continue
 		}
