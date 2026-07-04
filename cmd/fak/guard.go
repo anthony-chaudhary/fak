@@ -1184,7 +1184,7 @@ func cmdGuard(argv []string) {
 			case pinUpstream && up == "anthropic":
 				fmt.Fprintf(&startupReport, "fak guard: upstream auth — Claude Pro/Max subscription (provider-reported identity; OAuth token from %s, sent as a bearer token)\n", oauthSource)
 			case up == "anthropic" && apiKey != "":
-				fmt.Fprintf(&startupReport, "fak guard: upstream auth — API key (from --api-key-env %s; API billing)\n", *apiKeyEnv)
+				fmt.Fprintf(&startupReport, "fak guard: upstream auth — API key (from --api-key-env %s; provider-side API billing, not a fak claim)\n", *apiKeyEnv)
 			case up == "anthropic":
 				fmt.Fprintln(&startupReport, "fak guard: upstream auth — passthrough (Claude Code forwards its own credential through the gateway)")
 			}
