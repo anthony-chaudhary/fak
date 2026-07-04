@@ -87,6 +87,19 @@ func TestStatusSurfacesManualAndCatalogRefresh(t *testing.T) {
 		t.Fatalf("manual action = %+v", manual.NextAction)
 	}
 
+	mixed := StatusFromParts(Parts{
+		Now:     now,
+		Catalog: benchruns.Catalog{Runs: []benchruns.Run{{"run_id": "r", "timestamp": "2026-06-29T00:00:00Z"}}},
+		Caps:    nightrun.Capabilities{Box: "box-a", GPU: "none", Net: true, Creds: map[string]bool{}},
+		Tasks: []nightrun.Task{
+			{ID: "operator", Value: nightrun.ValueFrontier, Run: "run <model>", Manual: true},
+			{ID: "auto", Value: nightrun.ValueCoverage, Run: "echo 12 tok/s"},
+		},
+	})
+	if mixed.NextAction.Kind != "collect_local" || mixed.Local.Next == nil || mixed.Local.Next.ID != "auto" {
+		t.Fatalf("mixed manual+auto action = %+v next=%+v, want collect_local auto", mixed.NextAction, mixed.Local.Next)
+	}
+
 	missing := StatusFromParts(Parts{
 		Now:        now,
 		CatalogErr: errors.New("missing catalog"),

@@ -295,6 +295,7 @@ func localStatus(caps nightrun.Capabilities, tasks []nightrun.Task, ledger []nig
 		return s
 	}
 	ranked := nightrun.Rank(tasks, caps, ledger, now)
+	var firstManual *NextTask
 	for _, row := range ranked {
 		if row.Feasible {
 			s.Feasible++
@@ -304,11 +305,19 @@ func localStatus(caps nightrun.Capabilities, tasks []nightrun.Task, ledger []nig
 		if row.Saturated {
 			s.Saturated++
 		}
-		if s.Next == nil && row.Feasible && !row.Saturated {
+		if row.Feasible && !row.Saturated && s.Next == nil && row.Task.AutoRunnable() {
 			next := nextTask(row)
 			s.Next = &next
 			s.HasNext = true
 		}
+		if row.Feasible && !row.Saturated && firstManual == nil && !row.Task.AutoRunnable() {
+			next := nextTask(row)
+			firstManual = &next
+		}
+	}
+	if s.Next == nil && firstManual != nil {
+		s.Next = firstManual
+		s.HasNext = true
 	}
 	return s
 }
