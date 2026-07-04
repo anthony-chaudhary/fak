@@ -74,6 +74,17 @@ type Session struct {
 	// This is the end-to-end-correct, low-memory route toward the q4_k_m decode bar.
 	Q4K bool
 
+	// F16 routes this session's matmul weight uploads through the device F16 GEMM
+	// (compute.F16 — the fp16 tensor-core HGEMM, #484, floor cudaFP16CosineMin=0.997)
+	// instead of Q8 (s.Quant) or Q4_K (s.Q4K). Unlike those it needs no resident
+	// prequantized copy: the host f32 weight is narrowed to __half at H2D by the
+	// UploadDtype-capable backend (Caps().UploadDtype), so the same manifest weight is
+	// uploaded once as F16. This is the Session-level device-dtype select that lets an
+	// fak-cuda-f16 bench engine exist (Lever 4 residual, epic #1476 C4). Inert on a
+	// backend without UploadDtype (cpu-ref ignores the narrowing) — useHALF16Weights
+	// gates on it, so a non-device session falls through to the f32 weightHAL path.
+	F16 bool
+
 	// GPTQ selects the resident AutoGPTQ/GPTQModel path loaded by LoadGPTQ. It routes
 	// matmul weights through residentMatRows (GPTQ when present, f32 for small tensors)
 	// using the shared per-token blockStep skeleton. It is opt-in so existing f32/Q8/Q4

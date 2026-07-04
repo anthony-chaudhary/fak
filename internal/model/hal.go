@@ -120,6 +120,16 @@ func (s *Session) useHALQ4KWeights() bool {
 	return s.Q4K && s.M != nil && s.M.q4kw != nil && s.Backend != nil && s.Backend.Caps().UploadDtype
 }
 
+// useHALF16Weights reports whether this session narrows its matmul weight uploads to device F16
+// (the #484 fp16 HGEMM) at H2D instead of Q8/Q4_K — true for an F16-tagged session (s.F16) on a
+// device backend that honors the upload dtype (Caps().UploadDtype). Unlike Q8/Q4_K it needs no
+// resident prequantized map (m.q8w/m.q4kw): F16 is derived from the same host f32 weight the f32
+// weightHAL uploads, just narrowed to __half at the copy. cpu-ref reports UploadDtype=false, so a
+// reference session falls through to the f32 path and the Reference stays bit-identical.
+func (s *Session) useHALF16Weights() bool {
+	return s.F16 && s.M != nil && s.Backend != nil && s.Backend.Caps().UploadDtype
+}
+
 var halQ8BatchLayers = envIntMin("FAK_HAL_Q8_BATCH_LAYERS", 0, 2)
 
 // weightHALStaged caches one resident quantized weight on the backend under key,
@@ -169,6 +179,21 @@ func (s *Session) weightHALQ4K(name string, qt *q4kTensor) compute.Tensor {
 	}, compute.Q4_K)
 }
 
+// weightHALF16 stages the host f32 weight `name` onto the backend narrowed to device F16, the
+// F16 twin of weightHALQ8/weightHALQ4K. Unlike those there is no resident prequantized source: the
+// same manifest f32 tensor the f32 weightHAL uploads is handed to Upload with compute.F16, and an
+// UploadDtype-capable backend narrows it to __half at H2D (#484). Cached under the f16 key so a
+// device session uploads each weight to VRAM exactly once, like the Q8/Q4_K staged builders.
+func (s *Session) weightHALF16(name string) compute.Tensor {
+	return s.weightHALStaged("f16:"+name, func() compute.Tensor {
+		meta, ok := s.M.manifest[name]
+		if !ok {
+			panic("model: missing tensor " + name)
+		}
+		return compute.NewF32(compute.Default(), append([]int(nil), meta.Shape...), s.M.tensor(name))
+	}, compute.F16)
+}
+
 func (s *Session) matWeightHAL(name string) compute.Tensor {
 	if s.useHALQ8Weights() {
 		if qt, ok := s.M.q8w[name]; ok {
@@ -179,6 +204,9 @@ func (s *Session) matWeightHAL(name string) compute.Tensor {
 		if qt, ok := s.M.q4kw[name]; ok {
 			return s.weightHALQ4K(name, qt)
 		}
+	}
+	if s.useHALF16Weights() {
+		return s.weightHALF16(name)
 	}
 	return s.weightHAL(name)
 }
@@ -202,6 +230,13 @@ func (s *Session) lmHeadMatHAL() compute.Tensor {
 		if qt, ok := s.M.q4kw[name]; ok {
 			return s.weightHALQ4K(name, qt)
 		}
+	}
+	if s.useHALF16Weights() {
+		name := "lm_head.weight"
+		if !s.M.has(name) {
+			name = "model.embed_tokens.weight"
+		}
+		return s.weightHALF16(name)
 	}
 	return s.lmHeadHAL()
 }
