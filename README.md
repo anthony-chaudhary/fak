@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/anthony-chaudhary/fak/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/ci.yml) [![release artifacts](https://github.com/anthony-chaudhary/fak/actions/workflows/release-artifacts.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/release-artifacts.yml)
 
-<!-- readme-verified: 2026-07-04 vs VERSION 0.37.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. 2026-07-04: token-savings value prop foregrounded — "Token savings, set and forget" section + the 6-defaults scorecard link, "What you get" bullet reframed to the set-and-forget catch-all; honest provider-owned-vs-fak-authored split preserved (SESSION-CACHE-SAVINGS ablation). 2026-07-03: release pin refreshed for v0.37.0. 2026-07-01: front page halved; overflow: docs/README-legacy.md. Same day: hero video + gallery/video links re-surfaced; examples generalized to the hardware/harness sweep (HARDWARE-MATRIX + supported/); guided tutorial surfaced (Pick-your-path + docs map). -->
+<!-- readme-verified: 2026-07-04 vs VERSION 0.37.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. 2026-07-04: token-savings value prop foregrounded — "Token savings, set and forget" section + the 6-defaults scorecard link, "What you get" bullet reframed to the set-and-forget catch-all; honest provider-owned-vs-fak-authored split preserved (SESSION-CACHE-SAVINGS ablation). Same day: refocused on the long-session TREND — fak-authored share climbs ~1%→~11% with length (new BENCHMARK-AUTHORITY row; shed token counts WITNESSED, % is MODELED, n=2 thin, peak-not-pool). 2026-07-03: release pin refreshed for v0.37.0. 2026-07-01: front page halved; overflow: docs/README-legacy.md. Same day: hero video + gallery/video links re-surfaced; examples generalized to the hardware/harness sweep (HARDWARE-MATRIX + supported/); guided tutorial surfaced (Pick-your-path + docs map). -->
 
 <!-- lead source: docs/adoption/pitch-ladder.md (rung 1). Edit the ladder first; keep this lead consistent with its one-sentence pitch. -->
 fak in one line: fak treats every agent tool call like a syscall — the model proposes, the
@@ -42,12 +42,13 @@ ledger is [CLAIMS.md](CLAIMS.md):
   and Linux. On CUDA, in-kernel decode reaches ~120 tok/s on a single RTX 4070, inside
   llama.cpp's Q8_0 band of 120 +/- 15 tok/s. The sweep, per box:
   [docs/HARDWARE-MATRIX.md](docs/HARDWARE-MATRIX.md).
-- **Six token-saving methods, on by default.** Run `fak guard` and every safe saver
-  turns on with no flags: three that cannot change your outputs, three that keep the
-  model's working set intact. `fak` also keeps your provider's prompt-cache discount
-  alive as the session grows, so the rebate you already have does not quietly break.
-  Set it once and stop chasing token-savings knobs — [the defaults, scored from the
-  binary itself](docs/serving/token-defaults-scorecard.md).
+- **Your token savings grow the longer you run.** `fak guard` turns on six safe
+  token-savers by default (no flags). On a short session the provider's prompt cache
+  does nearly all the work; as the session gets long, fak's *own* share climbs — on our
+  longest measured session it reached **~11%** (1.67M tokens trimmed from old turns the
+  cache could no longer reuse), up from ~1% on a shorter run. That is fak's slice on top
+  of the provider discount, not the discount itself.
+  [The savers + the honest split](docs/serving/token-defaults-scorecard.md).
 - **The guard tax is ~362 ns per call:** the allow/deny decision runs in-process
   (measured, Apple M3 Pro), no network hop.
 
@@ -93,9 +94,12 @@ tied`: a deterministic offline lens.
 
 ## Token savings, set and forget
 
-The reason to wrap your agent in `fak guard` for cost is that you run it once and stop
-thinking about token savings. Six methods that cut token cost turn on by default. There
-are no flags to find and no config to keep current.
+The longer a session runs, the more of the savings fak authors itself. Run `fak guard` and
+six safe token-savers turn on by default, no flags. On a short session the provider's prompt
+cache does nearly all the saving; as the session grows, fak's own compaction trims the old
+middle turns the cache can no longer reuse, so its share climbs — on our two longest measured
+sessions it went from ~1% (39 turns) to about **11%** (106 turns, 1.67M tokens shed), and it
+keeps climbing with length ([authority](BENCHMARK-AUTHORITY.md)).
 
 | Default saver | What it does | Touches your output? |
 |---|---|:--:|
@@ -106,39 +110,29 @@ are no flags to find and no config to keep current.
 | Oversized-result elision | shrinks a scrolled-past tool result to head and tail | working set kept |
 | Planned context view | re-materializes history under a token budget | working set kept |
 
-The first three are lossless: they cannot change a single output token, so there is no
-quality tax to weigh before turning them on. The last three keep the model's working set
-intact and each carries an honest note on what it sheds. You never pick these, tune them,
-or check that a new release still ships them. The defaults are re-derived from the binary's
-own entry points and pinned by a test, so they cannot silently regress. The live view is
-one command: `fak token-defaults-scorecard` (grade A, six of six on).
-
-Here is the part most cost pitches skip. On the flagship Claude Code route the biggest
-saving is the *provider's* prompt-cache discount, not fak's own savers. That discount only
-holds while the cached prefix stays byte-for-byte identical, which is what breaks when a
-session outgrows the window or a naive setup summarizes to save room. `fak` keeps the
-prefix identical as the session grows, so a discount you already have does not quietly stop
-working, and it relays the provider's own saved-token count each turn rather than claiming
-it. One portal keeps the whole stack on and shows it working, so you are not wiring up a
-shelf of separate techniques and hoping each is still firing. The full attribution, on a
-real 122-turn session:
-[what fak changed, and what the provider did](docs/notes/SESSION-CACHE-SAVINGS-ABLATION-2026-06-29.md).
+The first three savers are lossless — they cannot change a single output token. The last
+three keep the model's working set intact and note what they shed; compaction is the one
+whose take grows with length. The honest split most cost pitches skip: on the Claude Code
+route the provider's prompt-cache discount is still the bigger number, and fak's other job
+is to keep it alive — it holds the cached prefix byte-for-byte identical as the session grows
+(the thing that breaks when a session outgrows the window or a summarizer rewrites it) and
+relays the provider's own saved-token count rather than claiming it. fak's ~11% is a
+longest-session peak from a thin sample, not a fleet average. You tune none of it:
+`fak token-defaults-scorecard` (grade A, six of six on) proves the stack stays on, and every
+`fak info` line shows the live `provider X% + fak Y%` split. Full attribution on a real
+session: [what fak changed, and what the provider did](docs/notes/SESSION-CACHE-SAVINGS-ABLATION-2026-06-29.md).
 
 ## Run the model in the kernel
 
-The kernel can also host the model. `fak guard --gguf qwen2.5:7b -- claude` loads a
-local GGUF model in-process. There is no API key or network, and your data never leaves
-the box. The kernel owns the KV cache, so the same reuse and quarantine machinery applies
-to a local model as to a proxied one.
+The kernel can also host the model. `fak guard --gguf qwen2.5:7b -- claude` loads a local
+GGUF model in-process: no API key, no network, your data never leaves the box, and the kernel
+owns the KV cache so the same reuse and quarantine machinery applies. The path is profiled on
+Apple Metal, AMD Vulkan, and CUDA, where f32 in-kernel decode reaches parity with a quantized
+llama.cpp ([head-to-head](docs/benchmarks/LLAMACPP-HEADTOHEAD-RESULTS.md)).
 
-This is not one lucky box: the path is profiled on Apple Metal, AMD Vulkan, and CUDA. On
-CUDA, f32 in-kernel decode reaches parity with a
-quantized llama.cpp ([head-to-head](docs/benchmarks/LLAMACPP-HEADTOHEAD-RESULTS.md)),
-with models from SmolLM2-135M to Qwen3.6-27B running end-to-end.
-
-The honest fence: a small local model is a quality ramp, not a frontier coder. Use
-`--gguf` for offline or privacy-bound work, and the proxy path for the best reasoning.
-Build tags and GPU flags are in the same walkthrough linked above.
+The honest fence: a small local model is a quality ramp, not a frontier coder. Use `--gguf`
+for offline or privacy-bound work and the proxy path for the best reasoning; build tags and
+GPU flags are in the walkthrough linked above.
 
 ## The performance value proposition
 
