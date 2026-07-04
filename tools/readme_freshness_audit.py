@@ -45,6 +45,14 @@ hard-gate ``ok``:
                        skeptic/perf/casual reader sees a number before scrolling    WARN
   audience_footholds the first screen gives each reader (skeptic / security / perf /
                        casual) a foothold + an explicit who-is-this-for router      WARN
+  front_page_focus   the page stays SMALL — a line budget, a section-count budget, a
+                       single-lead rule (pitch stated once, not thrice), and detail
+                       linked OUT to an overflow sink                               WARN
+
+The substance checks split into two forces that must both live in the tool. Five
+reward ADDING an affordance; a page optimized to them alone only grows. The sixth,
+``front_page_focus``, is the counterweight — it rewards concision, so "halve the
+front page, then let it regrow every pass" stops being the stable equilibrium.
 
 FAIL is a required edit; WARN/ADVISORY are judgment calls. ``ok`` is False iff a
 *hygiene* FAIL fires (or a substance affordance is wholly absent, or the audit
@@ -115,6 +123,20 @@ FIRST_SCREEN_LINES = 110
 # not under a paragraph the lowest-common-denominator reader never finishes.
 ONE_GLANCE_LINES = 8
 
+# The size law, made checkable. The five substance checks above all reward
+# ADDING an affordance (guard, lcd, speed, hero, footholds); nothing pushed back
+# on growth, so every refresh pass and every "surface X on the front page" commit
+# ratcheted the page UP — halve, regrow, halve, regrow. front_page_focus is the
+# counterweight: a total-line budget, a section-count budget, and a single-lead
+# rule (the one-binary/syscall pitch stated once in the preamble, not restated
+# three times before the reader reaches a section). Generous by design — it flags
+# DRIFT (debt), it does not hard-FAIL a page for being one line over. Bump the
+# budgets deliberately (and say why in the commit) when the page genuinely earns
+# a new section; do not bump them to silence the warning.
+FRONT_PAGE_LINE_BUDGET = 250
+FRONT_PAGE_SECTION_BUDGET = 12
+MAX_LEAD_RESTATEMENTS = 2
+
 # Expert terms that stumble a 6th-grade / Feynman reader on the first screen if
 # they appear with no plain-language gloss nearby. Advisory only.
 JARGON_TERMS = [
@@ -142,6 +164,7 @@ WEIGHTS: dict[str, float] = {
     "guard_prominence": 1.5,
     "lcd_onramp": 1.5,
     "audience_footholds": 1.5,
+    "front_page_focus": 1.5,
     "speed_claim": 2.0,
     "hero_above_fold": 2.0,
 }
@@ -154,7 +177,7 @@ WEIGHTS: dict[str, float] = {
 # average over the substance checks only; hygiene gates it, it does not pad it.
 SUBSTANCE_CHECKS = {
     "guard_prominence", "lcd_onramp", "audience_footholds",
-    "speed_claim", "hero_above_fold",
+    "front_page_focus", "speed_claim", "hero_above_fold",
 }
 
 # A page with a hygiene FAIL (dead link, stale pin, naive-led headline) is
@@ -211,6 +234,22 @@ _SPEED_TOKEN_RE = re.compile(
     r"ns(?:/op)?|µs|μs|nanoseconds?|microseconds?|latency|throughput|"
     r"time[- ]to[- ]first[- ]token|ttft|prefill|decode\b)"
     r"|\d[\d.,]*\s*×",
+    re.IGNORECASE,
+)
+
+# A top-level `## ` heading (NOT `### `). Counts the front page's section sprawl.
+_H2_RE = re.compile(r"^##\s+\S", re.MULTILINE)
+
+# The lead pitch's signature phrases. A page that restates "one binary in front
+# of the agent you already run" three times before the first section is the
+# regrowth pattern this catches — so we count these ONLY in the preamble (above
+# the first `## `), where section bodies that legitimately re-say the pitch (e.g.
+# "Get started") are out of scope.
+_LEAD_SIGNATURE_RE = re.compile(
+    r"one (?:static )?(?:go )?binary"
+    r"|in front of (?:the |an? )?(?:ai )?agent"
+    r"|agent you already run"
+    r"|drop-?in",
     re.IGNORECASE,
 )
 
@@ -589,6 +628,46 @@ def check_audience_footholds(readme: str, *, first_screen_lines: int) -> dict[st
         label="the first screen gives each reader (skeptic / security / perf / casual) a foothold")
 
 
+def check_front_page_focus(readme: str, *, line_budget: int,
+                           section_budget: int, max_lead: int) -> dict[str, Any]:
+    """The size law, made checkable — the counterweight to the ADD-only checks.
+
+    Every other substance check rewards putting one more thing on the page. This
+    one rewards keeping the page small and un-repetitive, so the composite score
+    reflects concision, not just completeness. Affordances:
+      within_line_budget   README.md total length <= line_budget
+      sections_bounded     the count of top-level `## ` sections <= section_budget
+      single_lead          the pitch is restated <= max_lead times in the PREAMBLE
+                             (above the first `## `) — not three times before the
+                             reader reaches a section
+      overflow_linked      the page links an overflow/deep-dive sink (README-legacy /
+                             "Going deeper"), proving detail has somewhere to flow OUT
+                             instead of accreting on the front page
+
+    Never a hard FAIL (fail_if_zero=False): an over-budget page is DRIFT, not a
+    broken page. It shows up as debt + a lower score, which is the steady
+    downward pressure the front page lacked.
+    """
+    lines = readme.splitlines()
+    total = len(lines)
+    n_sections = len(_H2_RE.findall(readme))
+    # Preamble = everything before the first `## ` heading (the lead region).
+    first_h2 = next((i for i, ln in enumerate(lines) if _H2_RE.match(ln)), len(lines))
+    lead_hits = sum(1 for ln in lines[:first_h2] if _LEAD_SIGNATURE_RE.search(ln))
+    subs = {
+        "within_line_budget": total <= line_budget,
+        "sections_bounded": n_sections <= section_budget,
+        "single_lead": lead_hits <= max_lead,
+        "overflow_linked": bool(re.search(
+            r"README-legacy|overflow|going deeper", readme, re.IGNORECASE)),
+    }
+    return _grade_subs(
+        "front_page_focus", subs, fail_if_zero=False,
+        label=(f"front page stays focused ({total}/{line_budget} lines, "
+               f"{n_sections}/{section_budget} sections, "
+               f"{lead_hits} preamble lead restatement(s))"))
+
+
 # ---------------------------------------------------------------------------
 # Small pure helpers
 # ---------------------------------------------------------------------------
@@ -944,6 +1023,9 @@ def run_checks(readme: str, version: str, authority: str, root: Path, *,
         check_speed_claim(readme, authority, first_screen_lines=FIRST_SCREEN_LINES),
         check_hero_above_fold(readme, authority, first_screen_lines=FIRST_SCREEN_LINES),
         check_audience_footholds(readme, first_screen_lines=FIRST_SCREEN_LINES),
+        check_front_page_focus(readme, line_budget=FRONT_PAGE_LINE_BUDGET,
+                               section_budget=FRONT_PAGE_SECTION_BUDGET,
+                               max_lead=MAX_LEAD_RESTATEMENTS),
     ]
 
 

@@ -221,6 +221,49 @@ def test_audience_footholds_all_personas() -> None:
     assert c["score"] == 1.0, c
 
 
+# --- front_page_focus (the size-law counterweight) -------------------------
+
+def test_front_page_focus_ok_when_lean() -> None:
+    txt = ("# fak\n"
+           "> **one static Go binary in front of the agent you already run.**\n\n"
+           "It routes, checks, and reuses. See the [overflow page](docs/README-legacy.md).\n"
+           "## Install\n## Docs\n")
+    c = rfa.check_front_page_focus(txt, line_budget=250, section_budget=12, max_lead=2)
+    assert c["score"] == 1.0 and c["status"] == "OK", c
+
+
+def test_front_page_focus_flags_triple_lead() -> None:
+    # The pitch restated 3x in the preamble (above the first `## `) is the
+    # regrowth pattern. A restatement inside a section body must NOT count.
+    txt = ("# fak\n"
+           "a single Go binary you drop in front of the agent you already run.\n"
+           "one static Go binary sits in front of an agent's calls.\n"
+           "use one binary with the agent you already run.\n"
+           "## Get started\nwrap the agent you already run in one command.\n")
+    c = rfa.check_front_page_focus(txt, line_budget=250, section_budget=12, max_lead=2)
+    assert "single_lead" in c["items"], c
+    assert c["score"] < 1.0, c
+
+
+def test_front_page_focus_flags_over_line_budget() -> None:
+    txt = "# fak\n" + "\n".join(f"line {i}" for i in range(60))
+    c = rfa.check_front_page_focus(txt, line_budget=40, section_budget=12, max_lead=2)
+    assert "within_line_budget" in c["items"], c
+
+
+def test_front_page_focus_flags_section_sprawl() -> None:
+    txt = "# fak\n" + "\n".join(f"## Section {i}" for i in range(20))
+    c = rfa.check_front_page_focus(txt, line_budget=250, section_budget=12, max_lead=2)
+    assert "sections_bounded" in c["items"], c
+
+
+def test_front_page_focus_only_counts_top_level_sections() -> None:
+    # `### ` subsections are not section sprawl; only `## ` counts.
+    txt = "# fak\n## One\n### a\n### b\n### c\n## Two\n"
+    c = rfa.check_front_page_focus(txt, line_budget=250, section_budget=12, max_lead=2)
+    assert "sections_bounded" not in c["items"], c
+
+
 # --- grader / payload tests ------------------------------------------------
 
 def test_payload_ok_all_green() -> None:

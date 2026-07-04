@@ -54,6 +54,36 @@ the page could hold only ten things?* If not, it belongs in a linked topic doc,
 not on the front page. Detail flows OUT to `docs/` and the "Go deeper" table; the
 front page stays small.
 
+**The size law now has teeth (it used to be aspirational).** Five of the six
+substance checks reward *adding* an affordance — put `fak guard` up top, add a
+speed number, add a hero result, add a persona router. Optimized to those alone,
+the page only ever grows: the git log shows it halved on 2026-07-01 and
+immediately regrew, one well-meaning "surface X on the front page" commit at a
+time. `front_page_focus` is the counterweight — a line budget, a section-count
+budget, and a **single-lead** rule (the one-binary/syscall pitch stated *once* in
+the preamble, not restated three times before the reader reaches a section). It
+feeds the composite score and the `readme_debt` gate, so a bloated page can no
+longer score an A. The two forces now both live in the tool; concision is checked,
+not just hoped for.
+
+The three anti-regrowth rules this pass enforces:
+
+1. **Retire before you add.** The page is at its section budget by design. To add
+   a section, *fold or cut* one first — do not bump `FRONT_PAGE_SECTION_BUDGET` to
+   make room. Bumping a budget to silence the warning is the failure mode; bump it
+   only when the page has genuinely, durably earned the slot, and say why in the
+   commit.
+2. **One lead, not three.** The pitch is derived from
+   [`docs/adoption/pitch-ladder.md`](../../../docs/adoption/pitch-ladder.md) rung 1
+   and appears *once* above the first `## `. A second "and also, fak is a binary
+   you put in front of your agent" paragraph is the confusion `single_lead`
+   catches — collapse it into the one lead.
+3. **Detail flows OUT, never back IN.** The overflow sink is
+   [`docs/README-legacy.md`](../../../docs/README-legacy.md). Narrower-audience or
+   deep-dive material moves there and earns a link; it does not migrate back onto
+   the front page. If a section keeps wanting to come home, that is a signal to
+   write a topic doc, not to re-inline it.
+
 ---
 
 ## Step 1 — Run the auditor (it builds your work-list)
@@ -75,6 +105,7 @@ It checks, and exits non-zero on any **FAIL**:
 | `headline_authority` | a bolded multiplier not mirrored in `BENCHMARK-AUTHORITY` | WARN |
 | `freshness_stamp` | the `readme-verified` marker absent or older than 14d | WARN |
 | `jargon_density` | first-screen expert terms with no plain gloss nearby (law 2) | advisory |
+| `front_page_focus` | the page busts the line/section budget or restates the lead ≥3× (the size law) | debt |
 
 **FAIL = a required edit. WARN = a judgment call. ADVISORY = a nudge.** Voice
 (jargon) is never a hard gate — plain-language is writing judgment, not a
