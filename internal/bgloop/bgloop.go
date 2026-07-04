@@ -31,7 +31,8 @@ type Supervisor struct {
 	backoffMax time.Duration
 	admit      func(name string) (ok bool, reason string)
 	observer   func(Status)
-	rng        func() float64 // uniform [0,1) source for backoff jitter; New installs the real one
+	rng        func() float64   // uniform [0,1) source for backoff jitter; New installs the real one
+	now        func() time.Time // injectable clock for the recorded timestamps; New installs time.Now
 
 	mu      sync.Mutex
 	loops   []*loopState
@@ -71,12 +72,28 @@ func WithAdmit(fn func(name string) (ok bool, reason string)) Option {
 	return func(s *Supervisor) { s.admit = fn }
 }
 
+// WithClock installs the injectable clock seam — the `now func() time.Time` the dormancy
+// clock and the rehydrate leaves also consume (epic #1178, #1192). Every instant the
+// supervisor records — a loop's StartedAt, each tick's LastTickAt/duration, and the
+// backoff / next-idle NextTickAt — is read through it, so a deterministic dormancy
+// harness can fast-forward a loop's observable clock hours -> months with no real wait
+// and no wall-clock read. Defaults to time.Now; a nil argument is ignored (the default
+// stays in force) so production callers never lose their clock.
+func WithClock(now func() time.Time) Option {
+	return func(s *Supervisor) {
+		if now != nil {
+			s.now = now
+		}
+	}
+}
+
 // New returns an empty Supervisor with default backoff bounds.
 func New(opts ...Option) *Supervisor {
 	s := &Supervisor{
 		backoffMin: defaultBackoffMin,
 		backoffMax: defaultBackoffMax,
 		rng:        rand.Float64, // math/rand/v2: auto-seeded, lock-free, concurrency-safe
+		now:        time.Now,     // injectable clock seam (#1192); WithClock overrides it for time-travel tests
 		byName:     map[string]*loopState{},
 	}
 	for _, o := range opts {
@@ -104,7 +121,7 @@ func (s *Supervisor) Register(l Loop) error {
 	if _, dup := s.byName[name]; dup {
 		return fmt.Errorf("bgloop: duplicate loop name %q", name)
 	}
-	ls := &loopState{name: name, interval: l.Interval, tick: l.Tick, state: StateIdle}
+	ls := &loopState{name: name, interval: l.Interval, tick: l.Tick, state: StateIdle, now: s.now}
 	s.byName[name] = ls
 	s.loops = append(s.loops, ls)
 	return nil
@@ -221,9 +238,9 @@ func (s *Supervisor) run(ctx context.Context, ls *loopState) {
 		}
 
 		ls.markRunning()
-		start := time.Now()
+		start := s.now()
 		err, panicked := safeTick(ctx, ls.tick)
-		ls.recordTick(err, panicked, time.Since(start))
+		ls.recordTick(err, panicked, s.now().Sub(start))
 		s.fire(ls)
 
 		// Cancellation during the tick wins over backoff: stop cleanly rather than
@@ -238,7 +255,7 @@ func (s *Supervisor) run(ctx context.Context, ls *loopState) {
 			// the SCHEDULE itself by the un-jittered doubling — so the envelope still
 			// climbs to backoffMax while lockstep failures de-correlate their retries.
 			wait := s.jittered(backoff)
-			ls.markBackoff(time.Now().Add(wait))
+			ls.markBackoff(s.now().Add(wait))
 			backoff = nextBackoff(backoff, s.backoffMax)
 			if !sleepCtx(ctx, wait) {
 				ls.setState(StateStopped)
@@ -253,7 +270,7 @@ func (s *Supervisor) run(ctx context.Context, ls *loopState) {
 			ls.markIdle(time.Time{})
 			continue // continuous: the Tick paces itself
 		}
-		ls.markIdle(time.Now().Add(ls.interval))
+		ls.markIdle(s.now().Add(ls.interval))
 		if !sleepCtx(ctx, ls.interval) {
 			ls.setState(StateStopped)
 			return

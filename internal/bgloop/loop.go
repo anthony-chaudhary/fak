@@ -72,6 +72,7 @@ type loopState struct {
 	name     string
 	interval time.Duration
 	tick     func(context.Context) error
+	now      func() time.Time // injectable clock seam (#1192); set from the Supervisor at Register
 
 	mu         sync.Mutex
 	state      State
@@ -90,9 +91,19 @@ type loopState struct {
 
 func (ls *loopState) begin() {
 	ls.mu.Lock()
-	ls.startedAt = time.Now()
+	ls.startedAt = ls.nowFn()
 	ls.state = StateIdle
 	ls.mu.Unlock()
+}
+
+// nowFn reads the loop's injected clock (#1192). It falls back to the wall clock if the
+// seam is unset so a directly-constructed loopState stays total — the Supervisor always
+// sets it from its own clock at Register, so the exercised path never hits the fallback.
+func (ls *loopState) nowFn() time.Time {
+	if ls.now != nil {
+		return ls.now()
+	}
+	return time.Now()
 }
 
 func (ls *loopState) setState(s State) {
@@ -112,7 +123,7 @@ func (ls *loopState) recordTick(err error, panicked bool, dur time.Duration) {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
 	ls.lastDur = dur
-	now := time.Now()
+	now := ls.nowFn()
 	ls.lastTickAt = now
 	switch {
 	case panicked:

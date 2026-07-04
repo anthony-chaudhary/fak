@@ -381,6 +381,134 @@ func TestContinuousLoopRespectsCancel(t *testing.T) {
 	})
 }
 
+// --- injectable clock seam (deterministic time-travel, #1192) ----------------
+
+// testClock is a deterministic, manually-advanced time source for the injectable `now`
+// seam (#1192): a test places it at any instant — minutes to months from an epoch — and
+// the supervisor reads every recorded timestamp back through it, with no wall clock and
+// no real wait. It is the bgloop end of the one clock the dormancy harness drives; the
+// mutex makes it safe if a future multi-loop test shares one across goroutines.
+type testClock struct {
+	mu  sync.Mutex
+	cur time.Time
+}
+
+func newTestClock(start time.Time) *testClock { return &testClock{cur: start} }
+
+func (c *testClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cur
+}
+
+func (c *testClock) advance(d time.Duration) {
+	c.mu.Lock()
+	c.cur = c.cur.Add(d)
+	c.mu.Unlock()
+}
+
+// TestInjectedClockDrivesTimestamps is the time-travel witness the #1192 contract names
+// for internal/bgloop: with an injected clock the supervisor records EVERY timestamp from
+// that clock, not the wall clock, so a single test fast-forwards a loop's observable
+// dormancy past 90 days with no real sleep. The clock starts at a 2020 epoch — far from
+// any real run — so a leaked time.Now() (a 2026 wall clock) fails the year assertion. Each
+// tick advances the injected clock one day; synctest paces the loop so ~90+ days elapse on
+// the injected timeline in microseconds of real time.
+func TestInjectedClockDrivesTimestamps(t *testing.T) {
+	epoch := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	const (
+		step     = 24 * time.Hour   // each tick fast-forwards the injected clock one day
+		interval = time.Millisecond // virtual pacing under synctest; no real wait
+	)
+	synctest.Test(t, func(t *testing.T) {
+		clk := newTestClock(epoch)
+		s := New(WithClock(clk.now))
+		if err := s.Register(Loop{Name: "dorm", Interval: interval, Tick: func(context.Context) error {
+			clk.advance(step)
+			return nil
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		s.Start(ctx)
+
+		// >180 virtual intervals => >180 ticks => >180 days advanced on the injected clock.
+		time.Sleep(200 * interval)
+		synctest.Wait()
+		st, _ := s.Get("dorm")
+
+		cancel()
+		synctest.Wait()
+		_ = s.Shutdown(context.Background())
+
+		// StartedAt is read from the injected clock at loop begin — exactly the epoch,
+		// before any tick advanced it. An equal check catches a wall-clock leak outright.
+		if !st.StartedAt.Equal(epoch) {
+			t.Errorf("StartedAt=%v want injected epoch %v (wall clock leaked into begin?)", st.StartedAt, epoch)
+		}
+		// Every recorded instant sits on the injected 2020 timeline, never the real clock.
+		if st.LastTickAt.Year() != 2020 {
+			t.Errorf("LastTickAt=%v not on the injected 2020 timeline (wall clock leaked into recordTick)", st.LastTickAt)
+		}
+		if st.NextTickAt.Year() != 2020 {
+			t.Errorf("NextTickAt=%v not on the injected 2020 timeline (wall clock leaked into next-idle)", st.NextTickAt)
+		}
+		// The observable dormancy the injected clock simulated is well past 90 days — a
+		// horizon no real test could wait out.
+		if gap := st.LastTickAt.Sub(st.StartedAt); gap < 90*24*time.Hour {
+			t.Errorf("simulated dormancy gap=%v want >= 90d (injected fast-forward did not drive the clock)", gap)
+		}
+		// After a clean tick the next-idle instant is exactly the last injected instant plus
+		// one interval — proving both the tick-start and next-idle sites read the SAME seam.
+		if want := st.LastTickAt.Add(interval); !st.NextTickAt.Equal(want) {
+			t.Errorf("NextTickAt=%v want LastTickAt+interval=%v", st.NextTickAt, want)
+		}
+	})
+}
+
+// TestInjectedClockDrivesBackoffTimestamp covers the third seam site named in the contract
+// — the backoff NextTickAt. An always-failing loop schedules its retry through the injected
+// clock, so the recorded backoff instant is on the simulated timeline, not the wall clock.
+func TestInjectedClockDrivesBackoffTimestamp(t *testing.T) {
+	epoch := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	const step = 24 * time.Hour
+	synctest.Test(t, func(t *testing.T) {
+		clk := newTestClock(epoch)
+		s := New(WithClock(clk.now), WithBackoff(20*time.Millisecond, 20*time.Millisecond))
+		if err := s.Register(Loop{Name: "errs", Tick: func(context.Context) error {
+			clk.advance(step)
+			return errTick
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		s.Start(ctx)
+
+		time.Sleep(200 * time.Millisecond)
+		synctest.Wait()
+		st, _ := s.Get("errs")
+
+		cancel()
+		synctest.Wait()
+		_ = s.Shutdown(context.Background())
+
+		if st.Errors == 0 {
+			t.Fatal("loop never errored; backoff path not exercised")
+		}
+		if !st.StartedAt.Equal(epoch) {
+			t.Errorf("StartedAt=%v want injected epoch %v", st.StartedAt, epoch)
+		}
+		// The backoff retry instant (markBackoff) and the error instant (recordTick) both
+		// come from the injected clock — on the 2020 timeline, never the wall clock.
+		if st.NextTickAt.Year() != 2020 {
+			t.Errorf("backoff NextTickAt=%v not on the injected 2020 timeline (wall clock leaked into markBackoff)", st.NextTickAt)
+		}
+		if st.LastErrAt.Year() != 2020 {
+			t.Errorf("LastErrAt=%v not on the injected 2020 timeline", st.LastErrAt)
+		}
+	})
+}
+
 // --- clean shutdown / no-leak (real time) ------------------------------------
 
 // TestShutdownJoinsCleanly: Shutdown returns nil only after every loop goroutine has
