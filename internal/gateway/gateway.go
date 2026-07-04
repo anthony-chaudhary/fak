@@ -2498,6 +2498,16 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 		if wv.Kind == "QUARANTINE" {
 			quarantinedIdx = append(quarantinedIdx, i)
 		}
+		// Subagent-boundary witness (#2438): a child terminal result whose prose CLAIMS
+		// ship/create/fix but carries no artifact witness (commit SHA / file hash) is
+		// folded TAINTED, not clean — the loop-body-witness discipline
+		// (ReasonLoopBodyUnwitnessed) at the subagent fold. Only a plain ALLOW is demoted;
+		// the content is still forwarded (the parent sees it) but the admission records it
+		// visibly unverified. Placed before the vDSO fill (ALLOW-only) so a demoted, unbacked
+		// claim can never warm the cache either.
+		if demoted, ok := subagentDoneVerdict(messages[i].Name, messages[i].Content, wv); ok {
+			wv = demoted
+		}
 		// Warm the vDSO from this ADMITTED result (opt-in, default off): only a plain
 		// Allow (never QUARANTINE/TRANSFORM/DENY), paired to its originating read-only
 		// call, fills (tool,args)->result so a later identical read is served inline.
