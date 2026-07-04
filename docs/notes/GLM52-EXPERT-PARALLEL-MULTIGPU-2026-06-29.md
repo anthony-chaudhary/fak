@@ -71,6 +71,13 @@ overnight collection (`docs/nightrun/collected.jsonl`, 2026-06-28):
 
 The cpu-offload path is host-expert-GEMM-bound; resident EP moves that GEMM onto the idle GPUs.
 
+Above the cpu-offload floor sits the **SOTA serving floor** this native track must cite before any
+"native EP beats X" claim: the vLLM Expert-Parallel + EPLB MoE baseline, whose reproducible serve
+command and artifact schema are in
+[VLLM-EP-EPLB-MOE-BASELINE-RUNBOOK](../benchmarks/VLLM-EP-EPLB-MOE-BASELINE-RUNBOOK.md) (#1733).
+A native EP number is only comparable when it serves the same model family / hardware / precision /
+context / concurrency as a recorded vLLM EP/EPLB run; otherwise it is `[NOT COMPARABLE]` and must say so.
+
 ## Benchmark run this session (native GLM-DSA decode, host CPU)
 
 To keep the benchmark thread honest with an actually-executed measurement (not only the
