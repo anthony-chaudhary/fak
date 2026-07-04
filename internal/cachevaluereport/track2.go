@@ -90,6 +90,16 @@ type SavingsObservation struct {
 	// the 5m tier, byte-identical to before this field existed.
 	CacheCreationTokensUpgraded uint64
 
+	// CompactionFired / CompactionBailed / CompactionAnchorStarved are the WITNESSED health
+	// counters from AdjudicationSummary. They let the durable record distinguish a session
+	// where the lever FIRED but shed nothing (anchor-starved, #1407) from one where it was
+	// idle or disabled -- the gap #2039 closes. CompactionBudget is the resident-token
+	// threshold (0 = lever OFF); persisted so a reader can tell enabled-but-idle from disabled.
+	CompactionFired         uint64
+	CompactionBailed        uint64
+	CompactionAnchorStarved uint64
+	CompactionBudget        int
+
 	Pricing SavingsPricing
 }
 
@@ -131,6 +141,14 @@ type SavingsRow struct {
 	// CompactionShedTokens is the input tokens `--compact-history-budget` (#745)
 	// dropped before the turn was sent — a fak-authored token saving on the spend side.
 	CompactionShedTokens uint64 `json:"compaction_shed_tokens,omitempty"`
+
+	// CompactionFired / CompactionBailed / CompactionAnchorStarved are the WITNESSED health
+	// counters persisted per #2039 so a fired-but-shed-zero session leaves a row, not silence.
+	// CompactionBudget is the resident-token threshold the lever fires past (0 = OFF).
+	CompactionFired         uint64 `json:"compaction_fired,omitempty"`
+	CompactionBailed        uint64 `json:"compaction_bailed,omitempty"`
+	CompactionAnchorStarved uint64 `json:"compaction_anchor_starved,omitempty"`
+	CompactionBudget        int    `json:"compaction_budget,omitempty"`
 
 	// Saved-token-equivalents (OBSERVED), the read rebate minus the write premium,
 	// in input-token units — the same quantity vcachegov.TelemetrySavingsProof
@@ -180,6 +198,14 @@ type SavingsBucket struct {
 	CacheCreationTokens  uint64 `json:"cache_creation_tokens"`
 	OutputTokens         uint64 `json:"output_tokens"`
 	CompactionShedTokens uint64 `json:"compaction_shed_tokens"`
+
+	// Compaction health (#2039): fired/bailed/anchor_starved let the report
+	// distinguish a lever that FIRED from one that was idle. CompactionBudget is
+	// the max resident-token threshold seen across the bucket's sessions.
+	CompactionFired         uint64 `json:"compaction_fired"`
+	CompactionBailed        uint64 `json:"compaction_bailed"`
+	CompactionAnchorStarved uint64 `json:"compaction_anchor_starved"`
+	CompactionBudget        int    `json:"compaction_budget"`
 
 	SavedTokenEquiv    float64 `json:"saved_token_equiv"`
 	NetSavedTokenEquiv float64 `json:"net_saved_token_equiv"`
@@ -288,11 +314,20 @@ func NewSavingsRows(obs SavingsObservation, now time.Time) []SavingsRow {
 		normalizeSavingsDimensions(&row)
 		rows = append(rows, row)
 	}
-	if obs.CompactionShedTokens > 0 {
+	// Emit a compaction row when the lever FIRED, BAILED, or SHED -- not only when it
+	// shed tokens. The anchor-starved case (#1407/#2039) fires the lever but sheds
+	// zero, and without a row here the durable record is indistinguishable from a
+	// session where compaction was idle or disabled. The health fields carry the
+	// diagnostic; CompactionShedTokens/CompactionSavedUSD stay 0 when nothing was shed.
+	if obs.CompactionShedTokens > 0 || obs.CompactionFired > 0 || obs.CompactionBailed > 0 || obs.CompactionAnchorStarved > 0 {
 		row := base
 		row.Provider = "fak"
 		row.Mechanism = "compaction_shed"
 		row.CompactionShedTokens = obs.CompactionShedTokens
+		row.CompactionFired = obs.CompactionFired
+		row.CompactionBailed = obs.CompactionBailed
+		row.CompactionAnchorStarved = obs.CompactionAnchorStarved
+		row.CompactionBudget = obs.CompactionBudget
 		row.SavedTokenEquiv = float64(obs.CompactionShedTokens)
 		row.NetSavedTokenEquiv = row.SavedTokenEquiv
 		row.InputPerMTokUSD = obs.Pricing.InputPerMTokUSD
@@ -431,7 +466,7 @@ func normalizeSavingsDimensions(row *SavingsRow) {
 		switch {
 		case row.CacheReadTokens > 0 || row.CacheCreationTokens > 0:
 			row.Mechanism = "provider_prompt_cache"
-		case row.CompactionShedTokens > 0:
+		case row.CompactionShedTokens > 0 || row.CompactionFired > 0 || row.CompactionBailed > 0 || row.CompactionAnchorStarved > 0:
 			row.Mechanism = "compaction_shed"
 		default:
 			row.Mechanism = "unknown_mechanism"
@@ -444,7 +479,7 @@ func normalizeSavingsDimensions(row *SavingsRow) {
 		row.WritePremiumUSD == 0 &&
 		row.SpendUSD == 0 &&
 		row.CompactionSavedUSD == 0 &&
-		(row.CacheReadTokens > 0 || row.CacheCreationTokens > 0 || row.CompactionShedTokens > 0) {
+		(row.CacheReadTokens > 0 || row.CacheCreationTokens > 0 || row.CompactionShedTokens > 0 || row.CompactionFired > 0 || row.CompactionBailed > 0 || row.CompactionAnchorStarved > 0) {
 		row.DollarStatus = SavingsDollarStatusBlind
 	}
 }
@@ -482,6 +517,12 @@ func foldSavings(rows []SavingsRow) []SavingsBucket {
 		b.CacheCreationTokens += row.CacheCreationTokens
 		b.OutputTokens += row.OutputTokens
 		b.CompactionShedTokens += row.CompactionShedTokens
+		b.CompactionFired += row.CompactionFired
+		b.CompactionBailed += row.CompactionBailed
+		b.CompactionAnchorStarved += row.CompactionAnchorStarved
+		if row.CompactionBudget > b.CompactionBudget {
+			b.CompactionBudget = row.CompactionBudget
+		}
 		b.SavedTokenEquiv += row.SavedTokenEquiv
 		b.NetSavedTokenEquiv += row.NetSavedTokenEquiv
 		b.RebateUSD += row.RebateUSD
@@ -843,6 +884,24 @@ func RenderTwoTrack(r TwoTrackReport) string {
 			fmt.Fprintf(&sb, "  %-9s  %-16s  %-23s  %5d  %10.4f  %10.4f  %10.4f  %10.4f  %12.4f  %-13s  %12.4f%s\n",
 				b.Period, b.Provider, b.Mechanism, b.Sessions, b.RebateUSD, b.CompactionSavedUSD, b.WritePremiumUSD, b.SpendUSD,
 				b.NetUSD, pricing, b.CumulativeNetUSD, be)
+		}
+	}
+	// Compaction lever health (#2039): surface the fire/starve/shed trend so an inert
+	// lever (fired>0, shed=0) is distinguishable from an idle one across the folded ledger.
+	var compactionBuckets []SavingsBucket
+	for _, b := range r.Track2 {
+		if b.Provider == "fak" || strings.HasPrefix(b.Mechanism, "compaction") {
+			compactionBuckets = append(compactionBuckets, b)
+		}
+	}
+	if len(compactionBuckets) > 0 {
+		fmt.Fprintf(&sb, "\nCompaction lever health (fire/starve/shed trend)\n")
+		fmt.Fprintf(&sb, "  %-9s  %5s  %6s  %6s  %8s  %10s  %8s\n",
+			"week", "sess", "fired", "bailed", "starved", "shed_tok", "budget")
+		for _, b := range compactionBuckets {
+			fmt.Fprintf(&sb, "  %-9s  %5d  %6d  %6d  %8d  %10d  %8d\n",
+				b.Period, b.Sessions, b.CompactionFired, b.CompactionBailed,
+				b.CompactionAnchorStarved, b.CompactionShedTokens, b.CompactionBudget)
 		}
 	}
 	sb.WriteString(RenderComponentHealth(r.ComponentHealth))

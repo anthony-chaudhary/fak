@@ -33,15 +33,20 @@ type cacheValueAppendResult struct {
 
 func appendObservedCacheSavingsTo(path, sessionType, provider, context string, sum gateway.AdjudicationSummary, now time.Time) cacheValueAppendResult {
 	rows := cachevaluereport.NewSavingsRows(cachevaluereport.SavingsObservation{
-		SessionType:          sessionType,
-		Provider:             provider,
-		Context:              context,
-		InputTokens:          sum.InputTokens,
-		CacheReadTokens:      sum.CachedPromptTokens,
-		CacheCreationTokens:  sum.CacheCreationTokens,
-		OutputTokens:         sum.OutputTokens,
-		CompactionShedTokens: sum.CompactionShedTokens,
-		Pricing:              cachevalueSavingsPricing(provider, context),
+		SessionType:                 sessionType,
+		Provider:                    provider,
+		Context:                     context,
+		InputTokens:                 sum.InputTokens,
+		CacheReadTokens:             sum.CachedPromptTokens,
+		CacheCreationTokens:         sum.CacheCreationTokens,
+		CacheCreationTokensUpgraded: sum.CacheCreationTokensUpgraded,
+		OutputTokens:                sum.OutputTokens,
+		CompactionShedTokens:        sum.CompactionShedTokens,
+		CompactionFired:             sum.CompactionFired,
+		CompactionBailed:            sum.CompactionBailed,
+		CompactionAnchorStarved:     sum.CompactionAnchorStarved,
+		CompactionBudget:            sum.CompactionBudget,
+		Pricing:                     cachevalueSavingsPricing(provider, context),
 	}, now)
 	res := cacheValueAppendResult{RowsPlanned: len(rows)}
 	for _, row := range rows {

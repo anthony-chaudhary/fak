@@ -68,6 +68,49 @@ func TestAppendObservedCacheSavingsReportsRowsAndErrors(t *testing.T) {
 	}
 }
 
+// TestAppendObservedCacheSavingsThreadsUpgradedCreationTokens is the #2179 closing
+// witness: gateway.AdjudicationSummary.CacheCreationTokensUpgraded (the gateway's
+// per-turn managed-cache 1h TTL-upgrade attribution) must reach the durable Track-2
+// ledger row, not just live inside the gateway's own in-memory summary. Before this
+// wire, appendObservedCacheSavingsTo dropped the field on the floor and every
+// session's cache-write was priced at the flat 5m tier regardless of the upgrade.
+func TestAppendObservedCacheSavingsThreadsUpgradedCreationTokens(t *testing.T) {
+	clearCachevaluePriceEnv(t)
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "cache-savings.jsonl")
+	sum := gateway.AdjudicationSummary{
+		InputTokens:                 20,
+		CachedPromptTokens:          60,
+		CacheCreationTokens:         2000,
+		CacheCreationTokensUpgraded: 1200, // gateway-attributed: 1200 of 2000 written at the 1h tier
+		OutputTokens:                3,
+	}
+
+	res := appendObservedCacheSavingsTo(path, "guard", "anthropic", "claude", sum, now)
+	if res.Err != nil {
+		t.Fatalf("append savings returned error: %v", res.Err)
+	}
+	rows := cachevaluereport.ReadSavingsLedgerFile(path)
+	if len(rows) != 1 || rows[0].Mechanism != "provider_prompt_cache" {
+		t.Fatalf("want one provider_prompt_cache row, got %+v", rows)
+	}
+	row := rows[0]
+	if row.CacheCreationTokensUpgraded != 1200 {
+		t.Fatalf("ledger row CacheCreationTokensUpgraded = %d, want 1200 (the gateway summary's attribution)", row.CacheCreationTokensUpgraded)
+	}
+	if row.CacheCreationTierProvenance != cachevaluereport.CacheCreationTierProvenanceGatewayAttributed {
+		t.Fatalf("ledger row CacheCreationTierProvenance = %q, want %q", row.CacheCreationTierProvenance, cachevaluereport.CacheCreationTierProvenanceGatewayAttributed)
+	}
+	// write premium = 1200*(2.0-1) + 800*(1.25-1) = 1400 token-equiv, priced at
+	// $5/MTok = 0.007. A dropped-on-the-floor field would instead price the whole
+	// 2000 at flat 1.25x = 500 token-equiv (0.0025) — the #2179 under-count.
+	if !approxSavingsTest(row.WritePremiumUSD, 0.007) {
+		t.Fatalf("WritePremiumUSD = %.6f, want 0.007 (the ledger must see the gateway's 1h attribution)", row.WritePremiumUSD)
+	}
+}
+
+func approxSavingsTest(a, b float64) bool { return math.Abs(a-b) <= 1e-9 }
+
 func TestAppendObservedCacheSavingsEnvOverridesDefaultPricing(t *testing.T) {
 	t.Setenv(cachevalueInputPriceEnv, "7")
 	t.Setenv(cachevalueOutputPriceEnv, "11")
@@ -174,5 +217,52 @@ func TestFormatCacheValuePersistenceSummaryMakesNoEvidenceExplicit(t *testing.T)
 	}
 	if strings.Contains(out, "fak cachevalue report --since") {
 		t.Fatalf("no-evidence summary should not point at an empty report command:\n%s", out)
+	}
+}
+
+// TestAppendObservedCacheSavingsPersistsCompactionHealthOnFiredButZeroShed is the
+// end-to-end #2039 witness: a guard session where the compaction lever FIRED but
+// shed NOTHING (the anchor-starved case #1407) must still write a durable
+// compaction_shed row carrying the health fields (fired>0, starved>0, shed=0).
+func TestAppendObservedCacheSavingsPersistsCompactionHealthOnFiredButZeroShed(t *testing.T) {
+	clearCachevaluePriceEnv(t)
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "cache-savings.jsonl")
+	sum := gateway.AdjudicationSummary{
+		InputTokens:             164_000,
+		CachedPromptTokens:      12_500_000,
+		CacheCreationTokens:     500_000,
+		OutputTokens:            3_000,
+		CompactionShedTokens:    0,
+		CompactionFired:         0,
+		CompactionBailed:        5,
+		CompactionAnchorStarved: 5,
+		CompactionBudget:        48000,
+	}
+
+	res := appendObservedCacheSavingsTo(path, "guard", "anthropic", "claude", sum, now)
+	if res.Err != nil {
+		t.Fatalf("append savings returned error: %v", res.Err)
+	}
+
+	rows := cachevaluereport.ReadSavingsLedgerFile(path)
+	var compaction *cachevaluereport.SavingsRow
+	for i := range rows {
+		if rows[i].Mechanism == "compaction_shed" {
+			compaction = &rows[i]
+			break
+		}
+	}
+	if compaction == nil {
+		t.Fatalf("fired-but-zero-shed session must write a compaction_shed row; got %d rows: %+v", len(rows), rows)
+	}
+	if compaction.CompactionShedTokens != 0 {
+		t.Fatalf("shed must be 0: %d", compaction.CompactionShedTokens)
+	}
+	if compaction.CompactionAnchorStarved != 5 {
+		t.Fatalf("anchor_starved must be persisted as 5: %d", compaction.CompactionAnchorStarved)
+	}
+	if compaction.CompactionBudget != 48000 {
+		t.Fatalf("budget must be persisted: %d", compaction.CompactionBudget)
 	}
 }

@@ -576,3 +576,109 @@ func TestParseSavingsLedgerRoundTrips(t *testing.T) {
 		t.Fatalf("round-trip NET mismatch: %.6f", got[0].NetUSDComputed())
 	}
 }
+
+// TestNewSavingsRowsEmitsCompactionHealthOnFiredButZeroShed is the #2039 witness: a
+// session where the lever FIRED but shed NOTHING (the anchor-starved case #1407
+// documents) must still emit a compaction_shed row carrying the health fields — not
+// silence. Before #2039 the durable record was indistinguishable from an idle lever.
+func TestNewSavingsRowsEmitsCompactionHealthOnFiredButZeroShed(t *testing.T) {
+	rows := NewSavingsRows(SavingsObservation{
+		SessionType:             "guard",
+		Provider:                "anthropic",
+		Context:                 "claude",
+		CompactionShedTokens:    0,
+		CompactionFired:         3,
+		CompactionBailed:        2,
+		CompactionAnchorStarved: 2,
+		CompactionBudget:        48000,
+		Pricing:                 SavingsPricing{InputPerMTokUSD: 5, OutputPerMTokUSD: 25},
+	}, twoTrackNow)
+
+	if len(rows) != 1 {
+		t.Fatalf("want 1 compaction_health row (fired>0, shed=0), got %d: %+v", len(rows), rows)
+	}
+	row := rows[0]
+	if row.Provider != "fak" || row.Mechanism != "compaction_shed" {
+		t.Fatalf("row dimensions = %s/%s, want fak/compaction_shed", row.Provider, row.Mechanism)
+	}
+	if row.CompactionFired != 3 || row.CompactionBailed != 2 || row.CompactionAnchorStarved != 2 {
+		t.Fatalf("health fields not persisted: fired=%d bailed=%d starved=%d", row.CompactionFired, row.CompactionBailed, row.CompactionAnchorStarved)
+	}
+	if row.CompactionBudget != 48000 {
+		t.Fatalf("budget not persisted: %d", row.CompactionBudget)
+	}
+	if row.CompactionShedTokens != 0 {
+		t.Fatalf("shed must stay 0 when nothing was shed: %d", row.CompactionShedTokens)
+	}
+	if row.SavedTokenEquiv != 0 || row.CompactionSavedUSD != 0 {
+		t.Fatalf("zero-shed row must carry $0 saving: saved_teq=%.1f saved_usd=%.6f", row.SavedTokenEquiv, row.CompactionSavedUSD)
+	}
+
+	line, err := AppendSavingsLine(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(line, `"compaction_fired":3`) || !strings.Contains(line, `"compaction_anchor_starved":2`) {
+		t.Fatalf("durable line must carry health fields: %s", line)
+	}
+}
+
+// TestNewSavingsRowsOmitsCompactionRowWhenLeverIdle verifies that a session with no
+// compaction activity (fired=0, bailed=0, shed=0) produces NO compaction row — the
+// lever was idle or disabled, which is the case that should remain silent.
+func TestNewSavingsRowsOmitsCompactionRowWhenLeverIdle(t *testing.T) {
+	rows := NewSavingsRows(SavingsObservation{
+		SessionType:  "guard",
+		Provider:     "anthropic",
+		Context:      "claude",
+		InputTokens:  100,
+		OutputTokens: 50,
+		Pricing:      SavingsPricing{InputPerMTokUSD: 5, OutputPerMTokUSD: 25},
+	}, twoTrackNow)
+	if len(rows) != 0 {
+		t.Fatalf("idle compaction lever must produce no row, got %d: %+v", len(rows), rows)
+	}
+}
+
+// TestFoldSavingsAggregatesCompactionHealth verifies the per-period fold sums the
+// health fields so the report can chart the fire/starve/shed trend across sessions.
+func TestFoldSavingsAggregatesCompactionHealth(t *testing.T) {
+	rows := []SavingsRow{
+		{
+			Date: "2026-06-15", Provider: "fak", Mechanism: "compaction_shed",
+			CompactionFired: 3, CompactionAnchorStarved: 3, CompactionShedTokens: 0,
+			CompactionBudget: 48000,
+		},
+		{
+			Date: "2026-06-17", Provider: "fak", Mechanism: "compaction_shed",
+			CompactionFired: 5, CompactionBailed: 1, CompactionShedTokens: 8000,
+			CompactionBudget: 48000,
+		},
+	}
+	buckets := foldSavings(rows)
+	if len(buckets) != 1 {
+		t.Fatalf("want 1 folded bucket, got %d", len(buckets))
+	}
+	b := buckets[0]
+	if b.CompactionFired != 8 {
+		t.Fatalf("folded fired = %d, want 8", b.CompactionFired)
+	}
+	if b.CompactionBailed != 1 || b.CompactionAnchorStarved != 3 {
+		t.Fatalf("folded bailed/starved = %d/%d, want 1/3", b.CompactionBailed, b.CompactionAnchorStarved)
+	}
+	if b.CompactionShedTokens != 8000 {
+		t.Fatalf("folded shed = %d, want 8000", b.CompactionShedTokens)
+	}
+	if b.CompactionBudget != 48000 {
+		t.Fatalf("folded budget = %d, want 48000", b.CompactionBudget)
+	}
+
+	rep := FoldTwoTrack(nil, rows, twoTrackNow)
+	out := RenderTwoTrack(rep)
+	if !strings.Contains(out, "Compaction lever health") {
+		t.Fatalf("render must show the compaction health section:\n%s", out)
+	}
+	if !strings.Contains(out, "fired") || !strings.Contains(out, "starved") {
+		t.Fatalf("render must show fired/starved columns:\n%s", out)
+	}
+}
