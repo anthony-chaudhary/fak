@@ -1017,14 +1017,14 @@ def _seat_row(tag, *, uuid="", available=True, product="claude", role="", dir_=N
 
 
 class SeatPoolTest(unittest.TestCase):
-    """The explicit multi-seat account pool (#1336): seat -> live-worker binding,
-    depletion, double-booking, and the no-double-hand (one seat per rate-limit pool)."""
+    """The explicit account session-slot pool (#1336): pool -> live-worker binding,
+    depletion, over-cap double-booking, and the no-double-count duplicate identity rule."""
 
     def test_free_pool_has_full_headroom_and_is_not_depleted(self) -> None:
         fa = load_fleet_accounts()
         pool = fa.seat_pool([_seat_row("a"), _seat_row("b"), _seat_row("c")], [])
-        self.assertEqual(pool["total_seats"], 3)
-        self.assertEqual(pool["free_seats"], 3)
+        self.assertEqual(pool["total_seats"], 12)
+        self.assertEqual(pool["free_seats"], 12)
         self.assertEqual(pool["leased_seats"], 0)
         self.assertFalse(pool["depleted"])
         self.assertEqual(pool["double_booked"], [])
@@ -1034,36 +1034,43 @@ class SeatPoolTest(unittest.TestCase):
         leases = [{"worker": "resolve-101", "pid": 101, "tag": "a", "dir": "/home/u/a"}]
         pool = fa.seat_pool([_seat_row("a"), _seat_row("b")], leases)
         self.assertEqual(pool["leased_seats"], 1)
-        self.assertEqual(pool["free_seats"], 1)
+        self.assertEqual(pool["free_seats"], 7)
         leased = [s for s in pool["seats"] if s["state"] == "leased"]
         self.assertEqual(len(leased), 1)
         self.assertEqual(leased[0]["tag"], "a")
+        self.assertEqual(leased[0]["session_cap"], 4)
+        self.assertEqual(leased[0]["free_slots"], 3)
         self.assertEqual(leased[0]["workers"], ["resolve-101"])
 
-    def test_pool_depleted_when_every_seat_leased(self) -> None:
+    def test_pool_depleted_when_every_session_slot_leased(self) -> None:
         fa = load_fleet_accounts()
-        leases = [{"worker": "w1", "tag": "a", "dir": "/home/u/a"},
-                  {"worker": "w2", "tag": "b", "dir": "/home/u/b"}]
+        leases = [
+            {"worker": f"a{i}", "tag": "a", "dir": "/home/u/a"} for i in range(4)
+        ] + [
+            {"worker": f"b{i}", "tag": "b", "dir": "/home/u/b"} for i in range(4)
+        ]
         pool = fa.seat_pool([_seat_row("a"), _seat_row("b")], leases)
-        self.assertEqual(pool["leased_seats"], 2)
+        self.assertEqual(pool["leased_seats"], 8)
         self.assertEqual(pool["free_seats"], 0)
         self.assertTrue(pool["depleted"])
 
-    def test_double_booking_one_seat_two_live_workers_is_surfaced(self) -> None:
-        # The invariant the issue forbids — two live workers on ONE seat — must be
-        # OBSERVABLE, not silently assumed away.
+    def test_overbooking_one_account_beyond_cap_is_surfaced(self) -> None:
+        # Four Claude sessions on one account are admitted; the fifth is the
+        # over-cap condition that must be OBSERVABLE, not silently assumed away.
         fa = load_fleet_accounts()
-        leases = [{"worker": "w1", "tag": "a", "dir": "/home/u/a"},
-                  {"worker": "w2", "tag": "a", "dir": "/home/u/a"}]
+        leases = [{"worker": f"w{i}", "tag": "a", "dir": "/home/u/a"} for i in range(5)]
         pool = fa.seat_pool([_seat_row("a")], leases)
         self.assertEqual(len(pool["double_booked"]), 1)
-        self.assertEqual(sorted(pool["double_booked"][0]["workers"]), ["w1", "w2"])
+        self.assertEqual(pool["double_booked"][0]["session_cap"], 4)
+        self.assertEqual(sorted(pool["double_booked"][0]["workers"]),
+                         ["w0", "w1", "w2", "w3", "w4"])
 
     def test_lease_on_account_not_in_pool_is_unbound(self) -> None:
         fa = load_fleet_accounts()
         leases = [{"worker": "ghost", "tag": "gone", "dir": "/home/u/gone"}]
         pool = fa.seat_pool([_seat_row("a")], leases)
         self.assertEqual(pool["leased_seats"], 0)
+        self.assertEqual(pool["free_seats"], 4)
         self.assertEqual(len(pool["unbound_leases"]), 1)
         self.assertEqual(pool["unbound_leases"][0]["worker"], "ghost")
 
@@ -1074,13 +1081,13 @@ class SeatPoolTest(unittest.TestCase):
         rows = [_seat_row("canon", uuid="U1"),
                 _seat_row("copy", uuid="U1", role="duplicate")]
         pool = fa.seat_pool(rows, [])
-        self.assertEqual(pool["total_seats"], 1)
+        self.assertEqual(pool["total_seats"], 4)
         self.assertEqual(pool["seats"][0]["tag"], "canon")
 
     def test_product_scope_filters_the_pool(self) -> None:
         fa = load_fleet_accounts()
         rows = [_seat_row("a", product="claude"), _seat_row("g", product="opencode")]
-        self.assertEqual(fa.seat_pool(rows, [], product="claude")["total_seats"], 1)
+        self.assertEqual(fa.seat_pool(rows, [], product="claude")["total_seats"], 4)
         self.assertEqual(fa.seat_pool(rows, [], product="opencode")["total_seats"], 1)
 
 
@@ -1122,7 +1129,7 @@ class LiveSeatLeasesTest(unittest.TestCase):
             leases = fa.live_seat_leases(str(runs), alive=set(), probe=self._live_probe(now))
             self.assertEqual(leases, [])
             pool = fa.seat_pool([_seat_row("worker-a")], leases)
-            self.assertEqual(pool["free_seats"], 1)
+            self.assertEqual(pool["free_seats"], 4)
             self.assertFalse(pool["depleted"])
 
 
@@ -1183,7 +1190,7 @@ class SeatRefusalTest(unittest.TestCase):
 
 
 class RaisedDefaultCeilingTest(unittest.TestCase):
-    """The raised static ceiling (DEFAULT_MAX_WORKERS 4->8, env-tunable via
+    """The raised static ceiling (DEFAULT_MAX_WORKERS ->20, env-tunable via
     FAK_MAX_WORKERS) is safe iff it stays strictly bounded by the adaptive gates.
     These tests pin the new default, prove the env knob retunes it both ways, and
     prove the raise can never exceed host_cap or the seat pool — i.e. raising the
@@ -1203,49 +1210,49 @@ class RaisedDefaultCeilingTest(unittest.TestCase):
                 os.environ["FAK_MAX_WORKERS"] = old
 
     def test_default_ceiling_is_raised(self) -> None:
-        # The ceiling itself: pin 8 so a later silent revert is caught.
-        self.assertEqual(self._load_with_env(None).DEFAULT_MAX_WORKERS, 8)
+        # The ceiling itself: pin 20 so a later silent revert is caught.
+        self.assertEqual(self._load_with_env(None).DEFAULT_MAX_WORKERS, 20)
 
     def test_env_knob_retunes_the_ceiling(self) -> None:
         # FAK_MAX_WORKERS is the dynamic half: retune per host, no code change;
         # garbage / non-positive values fall back to the built-in ceiling.
         self.assertEqual(self._load_with_env("12").DEFAULT_MAX_WORKERS, 12)
         self.assertEqual(self._load_with_env("1").DEFAULT_MAX_WORKERS, 1)
-        self.assertEqual(self._load_with_env("garbage").DEFAULT_MAX_WORKERS, 8)
-        self.assertEqual(self._load_with_env("0").DEFAULT_MAX_WORKERS, 8)
+        self.assertEqual(self._load_with_env("garbage").DEFAULT_MAX_WORKERS, 20)
+        self.assertEqual(self._load_with_env("0").DEFAULT_MAX_WORKERS, 20)
 
     def test_default_ceiling_fills_on_a_roomy_box_with_seats(self) -> None:
-        # The win: a roomy box with >=8 free seats and no dos throttle lets the
-        # default ceiling fill to 8 — governed only by the adaptive gates.
+        # The win: a roomy box with >=20 free session slots and no dos throttle lets
+        # the default ceiling fill to 20 — governed only by the adaptive gates.
         mod = self._load_with_env(None)
         patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "AT_TARGET"}, procs=0,
                      host_res={"cores": 64, "free_ram_mb": 128_000, "total_threads": 1000},
-                     seat={"total": 8, "free": 8, "leased": 0, "depleted": False})
+                     seat={"total": 20, "free": 20, "leased": 0, "depleted": False})
         p = run_eval(mod, max_workers=mod.DEFAULT_MAX_WORKERS)
-        self.assertEqual(p["cap"], 8)               # min(8, host_cap=32, seats=8)
+        self.assertEqual(p["cap"], 20)              # min(20, host_cap=32, seats=20)
         self.assertEqual(p["verdict"], mod.OK_VERDICT)
 
     def test_default_ceiling_still_throttles_on_a_loaded_box(self) -> None:
         # Safety: raising the ceiling cannot saturate a loaded host — host_cap pulls
-        # the effective cap back below 8 (here to the floor), exactly as before.
+        # the effective cap back below 20 (here to the floor), exactly as before.
         mod = self._load_with_env(None)
         patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0,
                      host_res={"cores": 8, "free_ram_mb": 64_000, "total_threads": 200_000},
-                     seat={"total": 8, "free": 8, "leased": 0, "depleted": False})
+                     seat={"total": 20, "free": 20, "leased": 0, "depleted": False})
         p = run_eval(mod, max_workers=mod.DEFAULT_MAX_WORKERS)
         self.assertEqual(p["host_cap"], 1)
         self.assertEqual(p["cap"], 1)               # raised ceiling, still throttled
         self.assertLess(p["cap"], mod.DEFAULT_MAX_WORKERS)
 
     def test_default_ceiling_still_bounded_by_a_smaller_seat_pool(self) -> None:
-        # Safety: raising the ceiling cannot double-book accounts — a 3-seat roster
-        # caps the raised ceiling at 3, not 8 (the live agent-host case).
+        # Safety: raising the ceiling cannot overbook accounts — a 3-slot roster
+        # caps the raised ceiling at 3, not 20.
         mod = self._load_with_env(None)
         patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0,
                      host_res={"cores": 64, "free_ram_mb": 128_000, "total_threads": 1000},
                      seat={"total": 3, "free": 3, "leased": 0, "depleted": False})
         p = run_eval(mod, max_workers=mod.DEFAULT_MAX_WORKERS)
-        self.assertEqual(p["cap"], 3)               # min(8, host_cap=32, seats=3)
+        self.assertEqual(p["cap"], 3)               # min(20, host_cap=32, seats=3)
         self.assertEqual(p["verdict"], mod.OK_VERDICT)
 
     def test_host_budget_env_knobs_retune_the_gradient(self) -> None:

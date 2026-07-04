@@ -111,15 +111,16 @@ def _env_pos_int(name: str, default: int) -> int:
 # Operator's *aspirational* ceiling on simultaneous live dispatch workers — NOT the
 # safety bound. The real DoS proof is the adaptive cap below: min(this, host_cap,
 # seats). host_cap (#1337) auto-throttles to the box's live cores/RAM/thread
-# headroom; the seat pool (#1336) hard-bounds at one worker per routable account so a
-# spawn can never double-book a rate limit. Raised 4->8 after the 2->4 doubling
-# proved the pattern: the static ceiling's only job is to sit ABOVE the adaptive
+# headroom; the seat pool (#1336) hard-bounds at bounded account session slots so a
+# spawn can never overbook a rate-limit pool. Raised to 20 after Claude worker
+# accounts were modeled as four bounded sessions each: the static ceiling's only job
+# is to sit ABOVE the adaptive
 # gates — which can only LOWER the effective cap — so concurrency rises to what the
-# box and the account pool can actually carry and no further (the 2026-07-01
+# box and the account pool can actually carry and no further (the 2026-07-04
 # headroom audit witnessed host_cap 16 with the static caps binding first). The
 # FAK_MAX_WORKERS env knob retunes the fleet-wide ceiling per host without a code
 # change; the Go tick (internal/dispatchtick.DefaultMaxWorkers) reads the same knob.
-DEFAULT_MAX_WORKERS = _env_pos_int("FAK_MAX_WORKERS", 8)
+DEFAULT_MAX_WORKERS = _env_pos_int("FAK_MAX_WORKERS", 20)
 DEFAULT_CODEX_OAUTH_SESSIONS = _env_pos_int("FAK_CODEX_OAUTH_SESSIONS", 10)
 
 # A live dispatch worker's command line carries this marker (dispatch_worker.py

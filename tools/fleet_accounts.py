@@ -53,17 +53,17 @@ CLI:
                                               # config_dir + oauth_token + tier (pin via
                                               # --account; dogfood via --faklocal-ok). The
                                               # single call every dispatch front door makes.
-    python tools/fleet_accounts.py wave --count 8 --explain  # allocate up to 8 DISTINCT
-                                              # available pools for a parallel fan-out (an
-                                              # ultracode wave); --explain prints the headroom
-                                              # multiplier (distinct_pools vs the naive 1).
-                                              # Omit --count for every distinct pool free now.
-    python tools/fleet_accounts.py seats --product claude    # the EXPLICIT seat pool: M
-                                              # distinct routable seats x tier with the
+    python tools/fleet_accounts.py wave --count 20 --explain # allocate up to 20 bounded
+                                              # account session slots for a parallel fan-out
+                                              # (an ultracode wave); --explain prints the
+                                              # distinct pool count vs the naive 1.
+                                              # Omit --count for every session slot free now.
+    python tools/fleet_accounts.py seats --product claude    # the EXPLICIT seat pool:
+                                              # bounded account session slots x tier with the
                                               # seat->worker binding for live workers (from
                                               # each live worker's .account lease sidecar).
-                                              # free_seats is the concurrency headroom;
-                                              # depleted == every seat leased. --json for machines.
+                                              # Claude worker accounts contribute 4 slots;
+                                              # depleted == every slot leased. --json for machines.
 """
 from __future__ import annotations
 
@@ -259,6 +259,42 @@ def _as_int(value: object, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+DEFAULT_CLAUDE_ACCOUNT_SESSION_CAP = 4
+DEFAULT_ACCOUNT_SESSION_CAP = 1
+
+# One-knob-one-way override for the Claude per-account session budget, read the SAME
+# way by Go (fleetaccounts.AccountSessionCap, via fleetaccounts.SessionsPerAccountEnv)
+# so the two languages never drift. Lets an operator widen/narrow account capacity per
+# host without a rebuild; a non-positive or unparseable value keeps the default.
+SESSIONS_PER_ACCOUNT_ENV = "FAK_SESSIONS_PER_ACCOUNT"
+
+
+def _claude_session_cap() -> int:
+    raw = os.environ.get(SESSIONS_PER_ACCOUNT_ENV)
+    if raw is not None:
+        try:
+            n = int(raw)
+        except (TypeError, ValueError):
+            n = 0
+        if n > 0:
+            return n
+    return DEFAULT_CLAUDE_ACCOUNT_SESSION_CAP
+
+
+def _session_cap(row: dict) -> int:
+    """Bounded concurrent worker sessions one routable account pool may back.
+
+    Claude Code accounts can carry several independent worker sessions before the
+    account itself is the limiter. Keep the cap explicit and conservative; the
+    per-spawn host/lease guards still lower real launches when the machine or file
+    trees cannot carry this many sessions. The Claude cap honors the
+    FAK_SESSIONS_PER_ACCOUNT override (see _claude_session_cap).
+    """
+    if str(row.get("product") or "claude").lower() == "claude":
+        return _claude_session_cap()
+    return DEFAULT_ACCOUNT_SESSION_CAP
 
 
 def _model_tier_from_name(model: object) -> int:
@@ -1801,7 +1837,7 @@ def allocate_wave(count: int, *, task_text: str = "", task_class: str = "auto",
                   registry: dict | None = None,
                   config_home: str | None = None,
                   wave_id: str | None = None) -> dict:
-    """Allocate up to ``count`` DISTINCT available accounts for a parallel fan-out
+    """Allocate up to ``count`` bounded account session slots for a parallel fan-out
     (an "ultracode" wave), balanced across the roster -- the primitive a wave needs
     that single-account ``resolve_account`` cannot provide.
 
@@ -1813,12 +1849,12 @@ def allocate_wave(count: int, *, task_text: str = "", task_class: str = "auto",
     pools sat free). ``allocate_wave`` hands out DISTINCT pools in one call, so N
     lanes draw on N independent per-account usage limits.
 
-    "Distinct" is by RATE-LIMIT POOL (``_pool_key``: the Anthropic ``accountUuid``
+    Capacity is by RATE-LIMIT POOL (``_pool_key``: the Anthropic ``accountUuid``
     for a logged-in Claude dir, else the dir basename), never the dir name -- two
-    dirs on one account are one pool and must not both be handed out (that is the
-    same double-count the duplicate-identity reconciliation already guards, applied
-    to allocation). Duplicate-identity dirs are excluded up front via
-    ``routable_worker``.
+    dirs on one account are one pool and must not both be counted as separate
+    accounts. Duplicate-identity dirs are excluded up front via ``routable_worker``.
+    A healthy Claude pool contributes four bounded session slots; non-Claude pools
+    contribute one.
 
     Filling order mirrors ``route_account``: the target tier first (best quality),
     each tier's pools ordered by ``_route_rank`` (operator room bias, then fewest
@@ -1827,10 +1863,10 @@ def allocate_wave(count: int, *, task_text: str = "", task_class: str = "auto",
     ``allow_tier_fallback``. Every lane carries its own ``selected_tier`` and
     ``fallback_used`` so a mixed-tier wave is legible.
 
-    Honest under-fill: if the roster can only safely back K < count distinct pools
-    right now, ``granted == K`` and ``shortfall == count - K`` -- never a silent
-    duplicate that would re-collapse two lanes onto one pool. ``distinct_pools`` (==
-    granted) is the wave's true concurrency multiplier vs the naive 1.
+    Honest under-fill: if the roster can only safely back K < count session slots
+    right now, ``granted == K`` and ``shortfall == count - K`` -- never an unbounded
+    duplicate that would overbook an account. ``distinct_pools`` is the number of
+    account pools backing those session slots.
 
     Rank-stamped membership (the typed group). Each granted lane carries its
     ``rank`` in ``[0, granted)``, the shared ``wave_id`` (a deterministic, content-
@@ -1853,7 +1889,7 @@ def allocate_wave(count: int, *, task_text: str = "", task_class: str = "auto",
 
         {ok, requested, granted, shortfall, distinct_pools, size, wave_id,
          target_tier, reason, lanes: [<resolve record + 'pool'/'rank'/'wave_id'/
-         'size'>...], blocked_target_accounts}
+         'size'/'session_slot'/'session_cap'>...], blocked_target_accounts}
 
     Each ``lanes`` entry is the same flat shape ``resolve_account`` returns (so a
     caller pins ``config_dir`` as CLAUDE_CONFIG_DIR and serves on ``oauth_token``),
@@ -1894,34 +1930,51 @@ def allocate_wave(count: int, *, task_text: str = "", task_class: str = "auto",
         tier_order.append(2)
 
     lanes: list[dict] = []
-    seen_pools: set[str] = set()
+    pool_load: dict[str, int] = {}
     for tier in tier_order:
         if len(lanes) >= n:
             break
-        candidates = sorted(
-            (r for r in available if _as_int(r.get("model_tier"), 3) == tier),
-            key=_route_rank)
-        for r in candidates:
-            if len(lanes) >= n:
-                break
+        candidates: list[dict] = []
+        seen_candidate_pools: set[str] = set()
+        for r in sorted(
+                (r for r in available if _as_int(r.get("model_tier"), 3) == tier),
+                key=_route_rank):
             pool = _pool_key(r)
-            if pool in seen_pools:
-                continue  # a second dir on a pool already taken -> would re-serialize
-            seen_pools.add(pool)
+            if pool in seen_candidate_pools:
+                continue
+            seen_candidate_pools.add(pool)
+            candidates.append(r)
+        while len(lanes) < n:
+            choices = [
+                r for r in candidates
+                if pool_load.get(_pool_key(r), 0) < max(1, _session_cap(r))
+            ]
+            if not choices:
+                break
+            r = min(choices, key=lambda row: (pool_load.get(_pool_key(row), 0),
+                                              _route_rank(row)))
+            pool = _pool_key(r)
+            cap = max(1, _session_cap(r))
+            slot = pool_load.get(pool, 0) + 1
             lane = _flatten_resolved(
                 r, ok=True,
                 reason="wave lane (target tier)" if tier == target else "wave lane (fallback tier)",
                 selected_tier=r.get("model_tier"), target_tier=target,
                 fallback_used=tier != target)
             lane["pool"] = pool
+            lane["session_slot"] = slot
+            lane["session_cap"] = cap
             lanes.append(lane)
+            pool_load[pool] = slot
 
     granted = len(lanes)
     shortfall = max(0, n - granted)
     # Stamp the rank-stamped membership now that the group size is known: each lane
     # gets its rank in [0, granted), the shared (content-addressed) wave id, and the
     # wave size. This is the typed-group identity a spawner carries onto each child.
-    wid = wave_id if wave_id is not None else _wave_id_for([lane["pool"] for lane in lanes])
+    distinct = len({lane["pool"] for lane in lanes})
+    wid = wave_id if wave_id is not None else _wave_id_for(
+        [f"{lane['pool']}#{lane.get('session_slot', 1)}" for lane in lanes])
     for i, lane in enumerate(lanes):
         lane["rank"] = i
         lane["wave_id"] = wid
@@ -1934,16 +1987,17 @@ def allocate_wave(count: int, *, task_text: str = "", task_class: str = "auto",
         reason = (f"no available account for a wave (target tier {target}"
                   + (f", product {wanted_product}" if wanted_product else "") + ")")
     elif shortfall:
-        reason = (f"granted {granted} of {n} distinct pools; {shortfall} short "
-                  f"(roster has no more distinct available pools at the requested tiers)")
+        reason = (f"granted {granted} of {n} session slot(s) across {distinct} distinct pool(s); "
+                  f"{shortfall} short (roster has no more available session slots "
+                  "at the requested tiers)")
     else:
-        reason = f"granted {granted} distinct pools"
+        reason = f"granted {granted} session slot(s) across {distinct} distinct pool(s)"
     return {
         "ok": granted > 0,
         "requested": n,
         "granted": granted,
         "shortfall": shortfall,
-        "distinct_pools": granted,
+        "distinct_pools": distinct,
         "size": granted,
         "wave_id": wid,
         "target_tier": target,
@@ -2041,27 +2095,26 @@ def _lease_matches_seat(lease: dict, row: dict) -> bool:
 
 def seat_pool(rows: list[dict], leases: list[dict] | None = None,
               *, product: str | None = None) -> dict:
-    """The explicit multi-seat account pool: M distinct routable worker pools (SEATS)
+    """The explicit multi-slot account pool: bounded routable worker session slots
     x tier, with the seat->worker binding for the live workers leasing them.
 
-    A SEAT is one distinct rate-limit POOL among the routable workers -- keyed by
+    A row is one distinct rate-limit POOL among the routable workers -- keyed by
     ``_pool_key`` (the Anthropic accountUuid for a logged-in Claude dir, else the dir
-    basename), so two dirs on ONE Anthropic account are ONE seat, never two. That is
-    the same no-double-hand principle ``allocate_wave`` enforces for a burst, lifted
-    here into an explicit, enumerable pool. The seat count M is the real binding
-    constraint on concurrency: M seats back at most M live workers; handing a busy
-    seat to a second worker only collides on one rate limit.
+    basename), so two dirs on ONE Anthropic account are one pool, never two. The slot
+    count is the real binding constraint on concurrency: Claude pools contribute four
+    bounded worker sessions, non-Claude pools contribute one. Handing a pool more live
+    workers than its cap is an overbooking violation and is surfaced.
 
     ``leases`` is the list of live-worker lease records (``{worker, tag, dir, ...}``,
     parsed from each live worker's ``.account`` sidecar -- see ``live_seat_leases``).
     Each is matched to its seat; the seat is then classified:
       leased   bound to >=1 live worker (its tag/dir named by a live lease)
       free     available now (roster) AND not leased -> offerable headroom
-      blocked  a real seat that is throttled/auth-blocked now (not offerable)
+      blocked  a real pool that is throttled/auth-blocked now (not offerable)
     ``free_seats`` is the effective concurrency headroom and ``depleted`` is
-    ``free_seats == 0``. A seat named by >1 live lease is a DOUBLE-BOOKING, surfaced in
-    ``double_booked`` so the invariant 'no seat to two live workers' is OBSERVABLE
-    rather than silently assumed. A lease matching no routable seat is an
+    ``free_seats == 0``. A pool named by more live leases than its session cap is a
+    DOUBLE-BOOKING, surfaced in ``double_booked`` so over-cap account use is
+    OBSERVABLE rather than silently assumed. A lease matching no routable pool is an
     ``unbound_lease`` (a live worker on an account no longer in the pool). Because the
     binding is derived from LIVE workers, a worker that exits frees its seat on the
     next read -- there is no separate release step to forget."""
@@ -2076,18 +2129,31 @@ def seat_pool(rows: list[dict], leases: list[dict] | None = None,
             continue
         if wanted and str(row.get("product") or "").lower() != wanted:
             continue
+        capacity = max(1, _session_cap(row))
         bound = [i for i, ls in enumerate(leases) if _lease_matches_seat(ls, row)]
         matched.update(bound)
         workers = [str(leases[i].get("worker") or leases[i].get("pid") or "?")
                    for i in bound]
         available = bool(row.get("available"))
+        leased_slots = len(workers)
+        leased_capped = min(leased_slots, capacity)
+        free_slots = 0
         if workers:
-            state, leased = "leased", leased + 1
+            state = "leased"
+            leased += leased_capped
+            if available:
+                free_slots = max(0, capacity - leased_capped)
+                free += free_slots
+            else:
+                blocked += max(0, capacity - leased_capped)
         elif available:
-            state, free = "free", free + 1
+            state = "free"
+            free_slots = capacity
+            free += free_slots
         else:
-            state, blocked = "blocked", blocked + 1
-        total += 1
+            state = "blocked"
+            blocked += capacity
+        total += capacity
         # dispatch_state/hold_reason: the operator-facing seat-inventory vocabulary
         # (#1799) -- available/busy/cooling/unavailable, with a specific hold_reason
         # whenever the seat is not simply available. A leased seat is "busy" even if the
@@ -2114,12 +2180,15 @@ def seat_pool(rows: list[dict], leases: list[dict] | None = None,
             "dispatch_state": dispatch_state,
             "hold_reason": hold_reason,
             "cooldown": cooldown,
+            "session_cap": capacity,
+            "leased_slots": leased_slots,
+            "free_slots": free_slots,
             "workers": workers,
         }
         seats.append(seat)
-        if len(workers) > 1:
+        if leased_slots > capacity:
             double_booked.append({"seat": seat["seat"], "tag": seat["tag"],
-                                  "workers": workers})
+                                  "workers": workers, "session_cap": capacity})
     unbound = [
         {"worker": str(ls.get("worker") or ls.get("pid") or "?"),
          "tag": ls.get("tag"), "dir": ls.get("dir")}
@@ -2269,7 +2338,7 @@ def _cli_list(rows: list[dict]) -> None:
 
 def _cli_seats(pool: dict) -> None:
     """Human view of the explicit seat pool + the seat->worker binding for live workers."""
-    print(f"seat pool [{pool.get('product')}]: {pool.get('total_seats')} seat(s)  "
+    print(f"seat pool [{pool.get('product')}]: {pool.get('total_seats')} session slot(s)  "
           f"free={pool.get('free_seats')} leased={pool.get('leased_seats')} "
           f"blocked={pool.get('blocked_seats')}"
           + ("  DEPLETED" if pool.get("depleted") else ""))
@@ -2279,7 +2348,9 @@ def _cli_seats(pool: dict) -> None:
         hold = s.get("hold_reason") or ""
         suffix = f"  ({hold})" if hold else ""
         print(f"  [{str(s.get('dispatch_state') or ''):<11}] {str(s.get('tag') or ''):<16} "
-              f"{str(s.get('account') or ''):<28} {tier:<3} -> {workers}{suffix}")
+              f"{str(s.get('account') or ''):<28} {tier:<3} "
+              f"slots={s.get('leased_slots', 0)}/{s.get('session_cap', 1)} "
+              f"free={s.get('free_slots', 0)} -> {workers}{suffix}")
     if pool.get("double_booked"):
         print("\nDOUBLE-BOOKED (one seat, >1 live worker -- INVARIANT VIOLATION):")
         for d in pool["double_booked"]:
@@ -2376,10 +2447,10 @@ def main(argv: list[str]) -> int:
         print(json.dumps(doc, indent=1))
         return 0 if doc.get("ok") else 1
     elif mode == "wave":
-        # Allocate N DISTINCT available pools for a parallel fan-out (an ultracode wave).
-        # Same arg grammar as `resolve`, plus --count/-n N (omit -> every distinct pool
-        # free now). --explain reduces the output to the headroom witness: distinct_pools
-        # granted vs the naive 1, i.e. the fan-out's true concurrency multiplier.
+        # Allocate N available account session slots for a parallel fan-out (an
+        # ultracode wave). Same arg grammar as `resolve`, plus --count/-n N (omit ->
+        # every slot free now). --explain reduces the output to the headroom witness:
+        # distinct_pools granted vs the naive 1.
         tier, strict = _tier_arg(argv)
         kind = _arg_value(argv, ("--work-kind", "--kind"), "").strip().lower()
         task = _arg_value(argv, ("--task", "--goal", "--prompt"), "")
@@ -2397,11 +2468,12 @@ def main(argv: list[str]) -> int:
             strict_tier=strict,
         )
         if not explicit:
-            # No count asked => report "all distinct pools available now", not a shortfall
+            # No count asked => report "all available session slots now", not a shortfall
             # against the 10**6 sentinel.
             doc["requested"] = doc["granted"]
             doc["shortfall"] = 0
-            doc["reason"] = f"all {doc['granted']} distinct available pool(s)"
+            doc["reason"] = (f"all {doc['granted']} available session slot(s) across "
+                             f"{doc['distinct_pools']} distinct pool(s)")
         if _has_arg(argv, ("--explain",)):
             doc = {
                 "ok": doc["ok"],
@@ -2419,10 +2491,10 @@ def main(argv: list[str]) -> int:
         print(json.dumps(doc, indent=1))
         return 0 if doc.get("ok") else 1
     elif mode == "seats":
-        # The explicit multi-seat account pool: M distinct routable worker pools (seats)
-        # x tier, with the seat->worker binding for live workers. Reads each live worker's
-        # `.account` sidecar (its seat lease) so a depleted pool is visible and an exited
-        # worker's seat frees on the next read. --product scopes the pool; --json for machines.
+        # The explicit account session-slot pool, with the seat->worker binding for live
+        # workers. Reads each live worker's `.account` sidecar so a depleted pool is
+        # visible and an exited worker frees its slot on the next read. --product scopes
+        # the pool; --json for machines.
         product = _arg_value(argv, ("--product",), "").strip().lower() or None
         pool = seat_pool(rows, live_seat_leases(), product=product)
         if _has_arg(argv, ("--json",)):

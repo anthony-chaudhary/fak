@@ -789,13 +789,14 @@ class FleetAccountsTest(unittest.TestCase):
 
 
 class WaveAllocationTest(unittest.TestCase):
-    """allocate_wave hands a parallel fan-out N DISTINCT rate-limit pools at once.
+    """allocate_wave hands a parallel fan-out N bounded account session slots at once.
 
     The provable-benefit witness: a fan-out that calls single-account resolve() N
     times in a burst gets the SAME account N times (no session has registered yet to
     move the live-load tie-break), so all N lanes share ONE usage pool and the
-    fan-out serializes. A wave allocates distinct pools instead -> N independent
-    per-account limits -> the concurrency multiplies."""
+    fan-out serializes. A wave allocates bounded slots across distinct pools instead,
+    so Claude worker accounts can each carry several sessions without unbounded
+    overbooking."""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -809,17 +810,18 @@ class WaveAllocationTest(unittest.TestCase):
         login_dir(self.home, ".claude-gem7-acct", uuid="uuid-7", email="gem7@x.ai")
         login_dir(self.home, ".claude-gem8-acct", uuid="uuid-8", email="gem8@x.ai")
 
-    def test_wave_allocates_distinct_pools_and_underfills_honestly(self) -> None:
+    def test_wave_allocates_session_slots_and_underfills_honestly(self) -> None:
         self._three_distinct()
         w = fleet_accounts.allocate_wave(
-            8, task_class="t1", home=str(self.home),
+            13, task_class="t1", home=str(self.home),
             config_home=str(self.config_home), registry={})
         self.assertTrue(w["ok"])
-        self.assertEqual(w["granted"], 3)        # only 3 distinct pools exist
+        self.assertEqual(w["granted"], 12)       # 3 Claude pools x 4 slots
         self.assertEqual(w["distinct_pools"], 3)
-        self.assertEqual(w["shortfall"], 5)      # asked 8, got 3 -> honest, never a dup
+        self.assertEqual(w["shortfall"], 1)      # asked 13, got 12 -> honest, never over cap
         pools = [lane["pool"] for lane in w["lanes"]]
-        self.assertEqual(len(pools), len(set(pools)), "every lane must be a distinct pool")
+        self.assertEqual(max(pools.count(p) for p in set(pools)), 4)
+        self.assertTrue(all(lane["session_cap"] == 4 for lane in w["lanes"]))
         self.assertEqual({lane["tag"] for lane in w["lanes"]}, {"gem5", "gem7", "gem8"})
 
     def test_wave_beats_naive_resolve_burst(self) -> None:
@@ -832,7 +834,7 @@ class WaveAllocationTest(unittest.TestCase):
         wave = {lane["tag"] for lane in fleet_accounts.allocate_wave(
             3, task_class="t1", **kw)["lanes"]}
         self.assertEqual(len(naive), 1, "naive burst piles all 3 lanes on one pool")
-        self.assertEqual(len(wave), 3, "wave gives 3 distinct pools = 3x the headroom")
+        self.assertGreater(len(wave), 1, "wave spreads slots beyond the first pool")
 
     def test_wave_excludes_duplicate_identity_dirs(self) -> None:
         # Two dirs logged into ONE Anthropic account are ONE pool; a wave must not hand
@@ -843,9 +845,10 @@ class WaveAllocationTest(unittest.TestCase):
         w = fleet_accounts.allocate_wave(
             5, task_class="t1", home=str(self.home),
             config_home=str(self.config_home), registry={})
-        self.assertEqual(w["granted"], 2, "3 dirs but only 2 distinct accounts")
+        self.assertEqual(w["granted"], 5, "3 dirs but 2 distinct Claude accounts with 4 slots each")
         pools = [lane["pool"] for lane in w["lanes"]]
-        self.assertEqual(sorted(pools), ["uuid:uuid-5", "uuid:uuid-8"])
+        self.assertEqual(set(pools), {"uuid:uuid-5", "uuid:uuid-8"})
+        self.assertLessEqual(max(pools.count(p) for p in set(pools)), 4)
 
     def test_wave_lane_carries_full_resolve_record(self) -> None:
         # Each lane is the flat resolve shape a front door pins (config_dir / oauth_token /
@@ -863,14 +866,16 @@ class WaveAllocationTest(unittest.TestCase):
         self.assertEqual(lane["oauth_token"], "tok-8")
         self.assertEqual(lane["selected_tier"], 1)
         self.assertEqual(lane["pool"], "uuid:uuid-8")
+        self.assertEqual(lane["session_slot"], 1)
+        self.assertEqual(lane["session_cap"], 4)
 
     def test_wave_skips_blocked_pool(self) -> None:
         self._three_distinct()
         reg = {"throttle": {".claude-gem7-acct": {"reset": "Dec 31, 11:59pm"}}}
         w = fleet_accounts.allocate_wave(
-            3, task_class="t1", home=str(self.home),
+            9, task_class="t1", home=str(self.home),
             config_home=str(self.config_home), registry=reg)
-        self.assertEqual(w["granted"], 2, "the throttled pool is not offered")
+        self.assertEqual(w["granted"], 8, "the throttled pool is not offered")
         self.assertNotIn("gem7", {lane["tag"] for lane in w["lanes"]})
         self.assertTrue(any(b.get("tag") == "gem7" for b in w["blocked_target_accounts"]))
 
@@ -898,14 +903,14 @@ class WaveAllocationTest(unittest.TestCase):
         w = fleet_accounts.allocate_wave(
             5, task_class="t1", home=str(self.home),
             config_home=str(self.config_home), registry={})
-        self.assertEqual(w["granted"], 3)
-        self.assertEqual(w["size"], 3)
-        self.assertEqual(w["shortfall"], 2)            # asked 5, got 3
+        self.assertEqual(w["granted"], 5)
+        self.assertEqual(w["size"], 5)
+        self.assertEqual(w["shortfall"], 0)
         self.assertTrue(w["wave_id"].startswith("wave-"))
         ranks = [lane["rank"] for lane in w["lanes"]]
-        self.assertEqual(ranks, [0, 1, 2])             # ranks 0..granted-1, in order
+        self.assertEqual(ranks, [0, 1, 2, 3, 4])       # ranks 0..granted-1, in order
         self.assertEqual({lane["wave_id"] for lane in w["lanes"]}, {w["wave_id"]})
-        self.assertEqual({lane["size"] for lane in w["lanes"]}, {3})
+        self.assertEqual({lane["size"] for lane in w["lanes"]}, {5})
 
     def test_wave_id_is_deterministic_and_content_addressed(self) -> None:
         # Same roster -> same wave_id (deterministic, no clock/random); an explicit
