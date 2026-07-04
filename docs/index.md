@@ -229,6 +229,7 @@ fak guard -- claude          # or: fak guard --provider openai -- opencode
 | **The principles fak is built to satisfy** | [Charter](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CHARTER.md) |
 | **Structured-output decoding SOTA + fak's ride-mode surface (#907)** | [Research note](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RESEARCH-structured-output-decoding-2026-06-26.md) |
 | **Keeping a stable core as models × backends × features multiply** | [Combinatorial-growth epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/COMBINATORIAL-GROWTH-EPIC-2026-06-27.md) |
+| **Constructing many on-demand "views" of the token history at marginal cost (attention/KV side-cars, re-attend tiers)** | [Research note](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONTEXT-VIEWS-AT-MARGINAL-COST-2026-07-04.md) |
 | **The quick answers** | [FAQ](FAQ.md) |
 | **A guided first run** | [Tutorial](fak/tutorial.md) |
 | **What the words mean** (preflight vs inflight vs prefill; cache rebate / net saving) | [Glossary](glossary.md) |
