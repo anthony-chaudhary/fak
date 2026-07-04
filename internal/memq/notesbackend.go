@@ -147,9 +147,7 @@ func noteDurability(mtype string) string {
 
 // Cells returns the scanned page table (safe metadata only) as a snapshot copy.
 func (b *NotesBackend) Cells(_ context.Context) ([]Cell, error) {
-	out := make([]Cell, len(b.cells))
-	copy(out, b.cells)
-	return out, nil
+	return snapshotCells(b.cells), nil
 }
 
 // Materialize pages one note in through BOTH gates: the content re-screen (a

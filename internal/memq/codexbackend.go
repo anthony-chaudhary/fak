@@ -176,9 +176,7 @@ func codexDurability(kind string) string {
 // Cells returns the scanned page table (safe metadata only) — a snapshot copy so
 // the executor never mutates the backend's slice.
 func (b *CodexBackend) Cells(_ context.Context) ([]Cell, error) {
-	out := make([]Cell, len(b.cells))
-	copy(out, b.cells)
-	return out, nil
+	return snapshotCells(b.cells), nil
 }
 
 // Materialize pages one Codex file in THROUGH THE TRUST GATE. A cell sealed at scan
@@ -215,6 +213,15 @@ func (b *CodexBackend) Home() string { return b.home }
 func isMarkdown(name string) bool {
 	lower := strings.ToLower(name)
 	return strings.HasSuffix(lower, ".md") || strings.HasSuffix(lower, ".markdown")
+}
+
+// snapshotCells returns a defensive copy of a backend's cell slice — the shared
+// core of a Backend.Cells implementation, so the returned page table can never
+// be used to mutate the backend's own stored slice.
+func snapshotCells(cells []Cell) []Cell {
+	out := make([]Cell, len(cells))
+	copy(out, cells)
+	return out
 }
 
 func init() {
