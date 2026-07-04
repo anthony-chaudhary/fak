@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // FixtureSuite is the deterministic Eve eval suite #2605 names: t.succeeded,
@@ -143,7 +144,9 @@ func extractCaseTag(messages []struct {
 // gate rather than aborting the run, so a broken arm is a visible divergence, not a panic.
 func RunArm(arm, command, baseURL string, suite Suite, strict bool, client *http.Client) ArmResult {
 	if client == nil {
-		client = http.DefaultClient
+		// A bounded default so a hung fixture server (or a real gateway that stalls)
+		// surfaces as a per-case transport error, never an indefinite hang.
+		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	res := ArmResult{Arm: arm, Command: command, SessionIDsPresent: true, TokenMetadataPresent: true}
 	for _, c := range suite.Cases {
