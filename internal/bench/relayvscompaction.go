@@ -405,8 +405,8 @@ func BuildRelayVsCompactionReportFor(m RVCModel, durations []int) RelayVsCompact
 			"Cache multipliers (read 0.1x, write 1.25x) and the window/growth/baton constants are representative Anthropic-style figures, not a measured provider run; different economics shift the magnitudes but not the sign — the relay resets an O(1) prefix, compaction rewrites a near-wall one.",
 			"The goal does not fit in one window (the only regime a relay is for); for a goal that fits in one leg, neither strategy fires and there is no difference to measure.",
 		},
-		Promotion: "Replace the modeled constants with OBSERVED per-turn context/cache/token records from a live relay-vs-compaction run (the internal/sessionreset + session.Recontinue relay path vs a compaction baseline), feeding BuildRelayVsCompactionReportFor, the way loopverify accepts an OBSERVED ledger. When the observed run reproduces the sign, the leaf promotes toward `now`.",
-		DemotionRetirement: "If a live run shows compaction matching the relay on BOTH cost and fidelity for a goal class (e.g. a compaction that re-queries git), the relay's complexity is not justified for that class and this bench demotes the claim rather than defending it.",
+		Promotion:           "Replace the modeled constants with OBSERVED per-turn context/cache/token records from a live relay-vs-compaction run (the internal/sessionreset + session.Recontinue relay path vs a compaction baseline), feeding BuildRelayVsCompactionReportFor, the way loopverify accepts an OBSERVED ledger. When the observed run reproduces the sign, the leaf promotes toward `now`.",
+		DemotionRetirement:  "If a live run shows compaction matching the relay on BOTH cost and fidelity for a goal class (e.g. a compaction that re-queries git), the relay's complexity is not justified for that class and this bench demotes the claim rather than defending it.",
 		InvalidatingUnknown: "The single assumption most likely to flip the result is #1: that compaction does not re-derive dropped facts from the durable store. If it does, the fidelity advantage collapses and only the peak-context and cache advantages remain.",
 	}
 }
