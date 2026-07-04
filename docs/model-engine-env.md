@@ -105,6 +105,13 @@ LRU at a fixed budget and bounded by an exact offline oracle, active pins are
 skipped without violation, and an evicted/restored hot prefix returns with
 identical payload bytes.
 
+The #2675 trace corpus is
+`internal/compute/testdata/kvbm_trace_issue2675_synthetic.json`, loaded by
+`TestKVReplayTraceGoldenCorpusScoresCostAwareAgainstOracle` and surfaced through
+`fak kvbm trace --check`. It scores LRU and cost-aware against the same finite
+trace, reports the Belady-oracle bound and good-decision ratio, and gates
+evictions-per-hit so the policy cannot buy hit-rate by thrashing.
+
 The in-kernel chat planner also owns a process-local `radixkv` prefix cache when it
 runs on the CPU-session path (`backend == nil`). Its cache-specific knobs are:
 

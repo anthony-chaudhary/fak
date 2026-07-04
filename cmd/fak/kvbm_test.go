@@ -61,6 +61,54 @@ func TestRunKVBMReplayJSON(t *testing.T) {
 	}
 }
 
+func TestRunKVBMTraceCorpusCheck(t *testing.T) {
+	trace := filepath.FromSlash("../../internal/compute/testdata/kvbm_trace_issue2675_synthetic.json")
+	var stdout, stderr bytes.Buffer
+	code := runKVBM(&stdout, &stderr, []string{"trace", "--trace", trace, "--check"})
+	if code != 0 {
+		t.Fatalf("runKVBM trace exit=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"kvbm trace: issue2675-synthetic-zipf-bimodal-agent-prefix",
+		"cost-aware: hits=300/800",
+		"lru:        hits=150/800",
+		"oracle:    hits=350/800 exact=true",
+		"gdr>=lru=true",
+		"stability_no_worse=true",
+		"verdict: PASS",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("kvbm trace output missing %q\n--- got ---\n%s", want, out)
+		}
+	}
+}
+
+func TestRunKVBMTraceJSON(t *testing.T) {
+	trace := filepath.FromSlash("../../internal/compute/testdata/kvbm_trace_issue2675_synthetic.json")
+	var stdout, stderr bytes.Buffer
+	code := runKVBM(&stdout, &stderr, []string{"trace", "--trace", trace, "--json"})
+	if code != 0 {
+		t.Fatalf("runKVBM trace --json exit=%d stderr=%s", code, stderr.String())
+	}
+	var payload struct {
+		OK     bool `json:"ok"`
+		Checks struct {
+			CostAwareAtLeastLRU    bool `json:"cost_aware_at_least_lru"`
+			CostAwareGDRAtLeastLRU bool `json:"cost_aware_gdr_at_least_lru"`
+			OracleBoundsPolicies   bool `json:"oracle_bounds_policies"`
+			StabilityNoWorse       bool `json:"stability_no_worse"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("kvbm trace JSON did not parse: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK || !payload.Checks.CostAwareAtLeastLRU || !payload.Checks.CostAwareGDRAtLeastLRU ||
+		!payload.Checks.OracleBoundsPolicies || !payload.Checks.StabilityNoWorse {
+		t.Fatalf("kvbm trace JSON did not carry passing checks: %+v", payload)
+	}
+}
+
 func TestRunKVBMReplayCheckFailsOnWeakArtifact(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "weak.json")
 	if err := os.WriteFile(path, []byte(`{
