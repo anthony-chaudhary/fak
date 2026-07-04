@@ -8,6 +8,26 @@ description: "Dogfood playbook to run Claude Code against fak serve fronting a l
 This playbook runs the real Claude Code CLI against `fak serve`, with `fak` fronting
 a large local OpenAI-compatible Qwen3.6 server such as `llama-server` or LM Studio.
 
+## Fastest path
+
+Two commands, two terminals, no env vars to export by hand:
+
+```bash
+# terminal 1 — start the Qwen3.6 model server (llama-server shown; LM Studio works too)
+llama-server -hf lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M \
+  --host 127.0.0.1 --port 8131 --ctx-size 32768 --n-gpu-layers 99
+
+# terminal 2 — front it with the kernel and launch Claude Code
+fak guard --local -- claude
+```
+
+`fak guard --local` auto-detects the server above (it probes Ollama, LM Studio, the
+Qwen3.6 dogfood port `8131`, then llama.cpp, in that order) and injects
+`ANTHROPIC_BASE_URL` into the Claude Code child process only — no manual exports, no
+second `fak serve` command. Everything below this section is the detailed reference:
+the `fak-qwen36-claude` preset launcher, the explicit env-var equivalents, and the
+in-kernel (no external server) variant.
+
 ## FAQ
 
 ### What do I run first?
@@ -575,11 +595,12 @@ repo-local binary automatically.
 
 - `fak/DOGFOOD-CLAUDE.md` documents the general Claude Code dogfood launcher,
   policy floor, isolation, and live evidence.
-- `docs/qwen36-surface-runbook.md` documents the Qwen3.6 model-server and fak
-  surface smoke workflow.
+- `docs/integrations/claude.md` has the "simplest command" quickstart for
+  `fak guard --local -- claude` fronting a Qwen3.6 server.
+- `tools/qwen36_surface_smoke.py` runs the Qwen3.6 `agent`, `gateway-openai`, and
+  `mcp-http` surface smoke against a model server you already started; see e.g.
+  `fak/experiments/qwen36/gpu-server-r4-20260622/surface-smoke.json` for a captured run.
 - `tools/grafana/README.md` documents the Prometheus/Grafana stack, including the
   dedicated **FAK Dogfood Slow Requests** dashboard.
-- `fak/experiments/qwen36/mac-local-qwen36-surfaces.md` records the Qwen3.6
-  `agent`, `gateway-openai`, and `mcp-http` surface smoke.
 - `fak/experiments/agent-live/dogfood-claude-probe.json` is the committed Claude
   Code dogfood witness.

@@ -582,6 +582,13 @@ For every tool call the model proposes, the kernel evaluates:
 
 If you want to wire Claude Code to `fak serve` manually:
 
+> **Simpler alternative:** `fak guard --local -- claude` replaces steps 2 and 3 below —
+> it starts the gateway, auto-detects the model server from step 1, and injects
+> `ANTHROPIC_BASE_URL` into the Claude Code child process for you (see
+> [Large local models](#large-local-models-qwen36-preset)). Use the manual steps below
+> when you need a long-running gateway process (e.g. a second machine, or a client
+> other than `fak guard`'s own child-process launch).
+
 ### 1. Start a model server
 
 **Ollama (macOS/Linux):**
@@ -693,40 +700,40 @@ With **no policy**, the kernel default-denies every tool. The dogfood launcher l
 
 ### Large local models (Qwen3.6 preset)
 
-The `fak-qwen36-claude` preset targets a large local model:
+Two commands, two terminals: start the model server, then front it with guard. No env
+vars to export by hand.
 
 ```bash
-fak-qwen36-claude --probe "Reply with exactly the word: pong"
+# terminal 1 — start a local Qwen3.6 OpenAI-compatible server (llama-server shown;
+# LM Studio or `python tools/qwen36_node_server.py --profile mac` also work):
+llama-server -hf lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M \
+  --host 127.0.0.1 --port 8131 --ctx-size 32768 --n-gpu-layers 99
+
+# terminal 2 — front it and launch Claude Code; --local auto-detects the server above:
+fak guard --local -- claude
 ```
 
-If that same Qwen3.6 server is already running on the documented dogfood port
-(`http://127.0.0.1:8131/v1`), the generic guard front door can also discover it:
+`--local` probes Ollama (`11434`), LM Studio (`1234`), the Qwen3.6 dogfood port
+(`8131`), then llama.cpp (`8080`) in turn and wires guard's upstream to whichever is
+alive — no `--base-url`, no `--model`, no manual `ANTHROPIC_BASE_URL` export. When the
+detected backend/model is Qwen3.6, guard also applies the same request-body tuning as
+the Qwen preset (`top_k=20` and `preserve_thinking=true`) unless you already set
+`FAK_PROVIDER_EXTRA_BODY_JSON`. Add `--probe "..."` for one headless turn instead of an
+interactive session:
 
 ```bash
 fak guard --local --probe -- claude -p "Reply with exactly the word: pong"
 ```
 
-`--local` detects the OpenAI-compatible model server for the upstream proxy hop, while
-the guard still injects `ANTHROPIC_BASE_URL` for Claude Code so the child talks to the
-local `/v1/messages` surface. When the detected local backend/model is Qwen3.6, guard
-also applies the same request-body tuning as the Qwen preset (`top_k=20` and
-`preserve_thinking=true`) unless you already set `FAK_PROVIDER_EXTRA_BODY_JSON`.
-
-This is equivalent to:
+The `fak-qwen36-claude` preset (installed by `scripts/dogfood-claude.sh --install`) is
+the same recipe with a curated 900s timeout baked in:
 
 ```bash
-FAK_DOGFOOD_BACKEND=openai \
-FAK_DOGFOOD_BASE_URL=http://127.0.0.1:8131/v1 \
-FAK_DOGFOOD_MODEL=lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M \
-FAK_DOGFOOD_TIMEOUT_S=900 \
-FAK_DOGFOOD_PROVIDER_EXTRA_BODY_JSON='{"top_k":20,"chat_template_kwargs":{"preserve_thinking":true}}' \
-fak-dogfood --probe "Reply with exactly the word: pong"
+fak-qwen36-claude --probe "Reply with exactly the word: pong"
 ```
 
-**Prerequisites:**
-
-- llama-server or LM Studio serving `Qwen3.6-27B-Q4_K_M` at `http://127.0.0.1:8131/v1`
-- See `docs/qwen36-claude-dogfood-playbook.md` for full details
+See `docs/qwen36-claude-dogfood-playbook.md` for the full playbook (troubleshooting,
+the in-kernel CUDA variant, and the Mac-gateway remote-front variant).
 
 ### Authentication
 
