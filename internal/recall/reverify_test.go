@@ -139,3 +139,40 @@ func TestDefaultArtifactVerifierClassifiesRevertedCommitStale(t *testing.T) {
 		t.Fatalf("reverted commit status = %+v, want stale/later reverted", got[0])
 	}
 }
+
+// TestDefaultArtifactVerifierClassifiesRenamedFlagStale is the "renamed flag" half
+// of #2077's Done-when, exercised against the REAL DefaultArtifactVerifier (not an
+// injected stub): a recalled note naming a flag still present in the tracked
+// checkout verifies fresh, while one naming a renamed/removed flag verifies stale
+// so the surrounding note is withheld rather than injected as fact. The existing
+// witnesses cover a moved file (path) and a missing/reverted commit (SHA); the flag
+// surface had no verifier-level witness — only extraction (TestExtractArtifactClaims).
+//
+// The "gone" flag literal is assembled from fragments so this test file, once
+// committed and thus tracked, cannot itself make `git grep` report the flag as
+// present — the same self-reference footgun a path/SHA fixture sidesteps by
+// stat/ancestry instead of grep.
+func TestDefaultArtifactVerifierClassifiesRenamedFlagStale(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	if err := exec.Command("git", "rev-parse", "--show-toplevel").Run(); err != nil {
+		t.Skip("not running inside a git checkout")
+	}
+	// Assembled so the contiguous literal never appears in tracked source.
+	goneFlag := "--" + "renamed-gone-flag-" + "q7z9k"
+	claims := []ArtifactClaim{
+		{Kind: ArtifactFlag, Value: "--json"}, // present across the tracked tree
+		{Kind: ArtifactFlag, Value: goneFlag}, // absent: a renamed/removed flag
+	}
+	got := DefaultArtifactVerifier(context.Background(), claims)
+	if len(got) != 2 {
+		t.Fatalf("findings = %+v, want two", got)
+	}
+	if got[0].Status != ArtifactFresh {
+		t.Errorf("present flag status = %+v, want fresh", got[0])
+	}
+	if got[1].Status != ArtifactStale {
+		t.Errorf("renamed/removed flag status = %+v, want stale", got[1])
+	}
+}
