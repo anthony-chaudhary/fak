@@ -283,10 +283,10 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	defer releaseLock()
 
 	// (6) Capture HEAD, then commit by pathspec with the message in a file.
-	if head, code, herr := run(ctx, opts.Dir, "rev-parse", "HEAD"); herr != nil {
-		return res, fmt.Errorf("safecommit: git not executable: %w", herr)
-	} else if code == 0 {
-		res.HeadBefore = strings.TrimSpace(head)
+	if sha, herr := headSHA(ctx, run, opts.Dir); herr != nil {
+		return res, herr
+	} else {
+		res.HeadBefore = sha
 	}
 
 	if augmented, changed, aerr := autoIndexDatedNotes(ctx, run, opts.Dir, paths); aerr != nil {
@@ -348,10 +348,10 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	// --stat: --stat formats names (rename arrows, quoting, truncation) and would make the
 	// path-set comparison brittle. diff-tree --name-only gives one repo-relative path per
 	// line; a deletion still lists the deleted path (correctly "exactly requested").
-	if head, code, herr := run(ctx, opts.Dir, "rev-parse", "HEAD"); herr != nil {
-		return res, fmt.Errorf("safecommit: git not executable: %w", herr)
-	} else if code == 0 {
-		res.SHA = strings.TrimSpace(head)
+	if sha, herr := headSHA(ctx, run, opts.Dir); herr != nil {
+		return res, herr
+	} else {
+		res.SHA = sha
 	}
 	res.Committed = true
 
@@ -453,6 +453,20 @@ func gitConfigValue(ctx context.Context, run Runner, dir, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(out)
+}
+
+// headSHA runs `git rev-parse HEAD` in dir and returns the trimmed SHA. A non-zero exit
+// is not an error — an empty repo has no HEAD yet — it simply yields "". A failure to
+// exec git itself is the infrastructure error the caller returns as-is.
+func headSHA(ctx context.Context, run Runner, dir string) (string, error) {
+	head, code, err := run(ctx, dir, "rev-parse", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("safecommit: git not executable: %w", err)
+	}
+	if code != 0 {
+		return "", nil
+	}
+	return strings.TrimSpace(head), nil
 }
 
 // precommitGates runs the pure, lock-free refusal checks before any lock or `git add`
