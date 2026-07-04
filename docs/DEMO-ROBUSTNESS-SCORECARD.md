@@ -1,11 +1,11 @@
 ---
 title: "fak Demo-Robustness Scorecard: Simplicity, Speed, Durability"
-description: "The fak demo-robustness scorecard grades 68 demos on simplicity, speed, and durability into a 0-100 robustness-score, A-F grade, and a robustness-debt count."
+description: "The fak demo-robustness scorecard grades 72 demos on simplicity, speed, and durability into a 0-100 robustness-score, A-F grade, and a robustness-debt count."
 ---
 
 # Demo-robustness scorecard
 
-<!-- demo-robustness-scorecard: 2026-07-03 · process: tools/demo_robustness_scorecard.py -->
+<!-- demo-robustness-scorecard: 2026-07-04 · process: tools/demo_robustness_scorecard.py -->
 
 > Regenerate: `python tools/demo_robustness_scorecard.py --markdown --stamp DATE > docs/DEMO-ROBUSTNESS-SCORECARD.md`
 > Verify snapshot freshness: `python tools/demo_robustness_scorecard.py --check-doc`
@@ -16,12 +16,12 @@ description: "The fak demo-robustness scorecard grades 68 demos on simplicity, s
 
 | Metric | Value |
 |---|---|
-| Demos scored | 68 |
-| **Robustness-debt (total defects)** | **2** |
-| Axis-debt | simplicity:0 · speed:1 · durability:1 |
-| Mean score | 97.3/100 |
-| Median / min / max | 100.0 / 76.2 / 100.0 |
-| Grade distribution | A:67 B:0 C:1 D:0 F:0 |
+| Demos scored | 72 |
+| **Robustness-debt (total defects)** | **0** |
+| Axis-debt | simplicity:0 · speed:0 · durability:0 |
+| Mean score | 97.6/100 |
+| Median / min / max | 100.0 / 91.6 / 100.0 |
+| Grade distribution | A:72 B:0 C:0 D:0 F:0 |
 
 ## Per-demo scores
 
@@ -29,11 +29,11 @@ Three axes, each 0–100 (simplicity · speed · durability), weighted into a sc
 
 | Score | Grade | Debt | simplicity | speed | durability | Demo |
 |---:|:--:|:--:|:--:|:--:|:--:|---|
-| 76.2 | C | 2 | 100 | 66 | 66 | `examples/mobile-ffi` |
 | 91.6 | A | 0 | 100 | 88 | 88 | `examples/admit-and-log` |
 | 91.6 | A | 0 | 100 | 88 | 88 | `examples/agent-ab` |
 | 91.6 | A | 0 | 100 | 88 | 88 | `examples/context-debugger` |
 | 91.6 | A | 0 | 100 | 88 | 88 | `examples/deny-in-60s` |
+| 91.6 | A | 0 | 100 | 88 | 88 | `examples/playground` |
 | 91.6 | A | 0 | 100 | 88 | 88 | `examples/preflight-ladder` |
 | 91.6 | A | 0 | 100 | 88 | 88 | `examples/remote-vm-guard` |
 | 91.6 | A | 0 | 100 | 88 | 88 | `examples/session-reload` |
@@ -51,14 +51,17 @@ Three axes, each 0–100 (simplicity · speed · durability), weighted into a sc
 | 95.8 | A | 0 | 100 | 88 | 100 | `examples/observability` |
 | 95.8 | A | 0 | 100 | 100 | 88 | `examples/plan-cfi` |
 | 95.8 | A | 0 | 100 | 88 | 100 | `examples/policy-hot-reload` |
+| 95.8 | A | 0 | 100 | 100 | 88 | `examples/policy-loader-properties` |
 | 95.8 | A | 0 | 100 | 88 | 100 | `examples/self-modify-floor` |
 | 95.8 | A | 0 | 100 | 100 | 88 | `examples/shared-task-record-verdicts` |
 | 95.8 | A | 0 | 100 | 100 | 88 | `examples/trace-authoring` |
 | 95.8 | A | 0 | 100 | 88 | 100 | `examples/trace-reset` |
 | 95.8 | A | 0 | 100 | 88 | 100 | `examples/vdso-cache-hit` |
+| 95.8 | A | 0 | 100 | 100 | 88 | `examples/verified-memory-recall` |
 | 95.8 | A | 0 | 100 | 88 | 100 | `examples/wire-quarantine-demo` |
 | 95.8 | A | 0 | 100 | 88 | 100 | `examples/witness-gate` |
 | 97.6 | A | 0 | 92 | 100 | 100 | `cmd/tokendemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | `examples/addressable-evict` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/agentdojo-redteam` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/autogen-groupchat` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/bench-latency` |
@@ -72,6 +75,7 @@ Three axes, each 0–100 (simplicity · speed · durability), weighted into a sc
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/grammar-repair-demo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/mcp` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/mcp-client` |
+| 100.0 | A | 0 | 100 | 100 | 100 | `examples/mobile-ffi` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/normgate-evasion` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/openai-agents-guardrail` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/presets` |
@@ -100,9 +104,7 @@ Three axes, each 0–100 (simplicity · speed · durability), weighted into a sc
 
 ## Robustness-debt work-list
 
-### `examples/mobile-ffi` — 2 defect(s), score 76.2 (C)
-- speed: no stated expected runtime — the README never says how long a run takes; state it (e.g. 'runs in ~Ns', 'completes in seconds')
-- durability: no stability / determinism guarantee — the README doesn't say whether a re-run is repeatable (deterministic / byte-identical / pinned); state it
+No robustness-debt: every demo is simple, fast, and durable. 🎉
 
 ## Soft signals (score only, not debt)
 
@@ -119,6 +121,10 @@ Three axes, each 0–100 (simplicity · speed · durability), weighted into a sc
 - durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note — a Windows user can't tell how to run it
 
 ### `examples/deny-in-60s`
+- speed: builds the whole binary (`go build`) with no `go run` fast path — slower cold start and a leftover artifact
+- durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note — a Windows user can't tell how to run it
+
+### `examples/playground`
 - speed: builds the whole binary (`go build`) with no `go run` fast path — slower cold start and a leftover artifact
 - durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note — a Windows user can't tell how to run it
 
@@ -179,6 +185,9 @@ Three axes, each 0–100 (simplicity · speed · durability), weighted into a sc
 ### `examples/policy-hot-reload`
 - speed: builds the whole binary (`go build`) with no `go run` fast path — slower cold start and a leftover artifact
 
+### `examples/policy-loader-properties`
+- durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note — a Windows user can't tell how to run it
+
 ### `examples/self-modify-floor`
 - speed: builds the whole binary (`go build`) with no `go run` fast path — slower cold start and a leftover artifact
 
@@ -194,6 +203,9 @@ Three axes, each 0–100 (simplicity · speed · durability), weighted into a sc
 ### `examples/vdso-cache-hit`
 - speed: builds the whole binary (`go build`) with no `go run` fast path — slower cold start and a leftover artifact
 
+### `examples/verified-memory-recall`
+- durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note — a Windows user can't tell how to run it
+
 ### `examples/wire-quarantine-demo`
 - speed: builds the whole binary (`go build`) with no `go run` fast path — slower cold start and a leftover artifact
 
@@ -202,3 +214,4 @@ Three axes, each 0–100 (simplicity · speed · durability), weighted into a sc
 
 ### `cmd/tokendemo`
 - simplicity: 9 files in the demo dir — a larger surface to skim
+

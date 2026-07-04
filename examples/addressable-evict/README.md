@@ -30,6 +30,9 @@ quarantine gate, so it needs nothing but Go:
 go test ./internal/kvmmu -run 'TestWriteTimeEvictEqualsNeverSaw$' -count=1 -v
 ```
 
+Expected runtime: the synthetic witnesses complete in seconds on a warm Go cache
+and do not download a model.
+
 The line to read (see [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md) for a full captured run):
 
 ```text

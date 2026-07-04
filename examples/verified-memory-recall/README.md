@@ -36,6 +36,10 @@ The demo must run from inside this checkout: the default artifact verifier resol
 repo-relative paths against the git working tree, so the fresh note's claim
 (`internal/memq/exec.go`) only checks out here.
 
+Expected runtime: the run completes in seconds once `fak` is on `PATH`. It is
+deterministic: the authored notes and repo-path witnesses are fixed, so re-running
+against the same checkout emits the same freshness/refusal verdicts.
+
 See [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md) for the expected transcript.
 
 ## Scope — what this does not claim
