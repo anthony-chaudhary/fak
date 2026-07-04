@@ -210,6 +210,23 @@ func dequantBlocks(out []float32, raw []byte, qk, blockBytes int, body func([]fl
 	wg.Wait()
 }
 
+// dequantKQuantBody returns the per-chunk dequant body the K-quant and IQ3_XXS load
+// paths hand to dequantBlocks. It runs the SIMD arch unpack when the CPU provides it
+// (arch returns true after vectorizing the chunk) and falls back to the scalar unpack
+// otherwise. Wrapping arch-then-scalar as a dequantBlocks body is the #1130 seam:
+// dequantBlocks fans a tensor's blocks across cores (#1102's parFor) and each core
+// vectorizes its own block-aligned chunk here, so per-core SIMD throughput composes
+// with across-core parallelism. Quants without an arch kernel keep passing their
+// scalar body straight to dequantBlocks, so the default path is untouched where the
+// SIMD feature is absent (arch is the noasm stub that always declines).
+func dequantKQuantBody(arch func([]float32, []byte) bool, scalar func([]float32, []byte)) func([]float32, []byte) {
+	return func(out []float32, raw []byte) {
+		if !arch(out, raw) {
+			scalar(out, raw)
+		}
+	}
+}
+
 // dequantF32 decodes a GGUF tensor's raw payload into a freshly-allocated f32 slice.
 func dequantF32(t TensorInfo, raw []byte) ([]float32, error) {
 	return dequantF32Into(nil, t, raw)
@@ -490,7 +507,7 @@ func dequantIQ4XSScalar(out []float32, raw []byte) {
 // gives an 8-bit sign mask (bit j flips output j). Layout matches ggml exactly so the f32 is
 // bit-faithful to llama.cpp's IQ3_XXS dequant.
 func dequantIQ3XXS(out []float32, raw []byte) {
-	dequantBlocks(out, raw, qkK, blockIQ3XXSBytes, dequantIQ3XXSScalar)
+	dequantBlocks(out, raw, qkK, blockIQ3XXSBytes, dequantKQuantBody(dequantIQ3XXSArch, dequantIQ3XXSScalar))
 }
 
 func dequantIQ3XXSScalar(out []float32, raw []byte) {
@@ -703,7 +720,7 @@ func unpackQ3KScales(raw []byte) [16]int8 {
 }
 
 func dequantQ4K(out []float32, raw []byte) {
-	dequantBlocks(out, raw, qkK, blockQ4KBytes, dequantQ4KScalar)
+	dequantBlocks(out, raw, qkK, blockQ4KBytes, dequantKQuantBody(dequantQ4KArch, dequantQ4KScalar))
 }
 
 func dequantQ4KScalar(out []float32, raw []byte) {
@@ -743,7 +760,7 @@ func scaleMinPairK4(d, min float32, is int, scales []byte) (d1, m1, d2, m2 float
 }
 
 func dequantQ5K(out []float32, raw []byte) {
-	dequantBlocks(out, raw, qkK, blockQ5KBytes, dequantQ5KScalar)
+	dequantBlocks(out, raw, qkK, blockQ5KBytes, dequantKQuantBody(dequantQ5KArch, dequantQ5KScalar))
 }
 
 func dequantQ5KScalar(out []float32, raw []byte) {
@@ -783,7 +800,7 @@ func dequantQ5KScalar(out []float32, raw []byte) {
 }
 
 func dequantQ6K(out []float32, raw []byte) {
-	dequantBlocks(out, raw, qkK, blockQ6KBytes, dequantQ6KScalar)
+	dequantBlocks(out, raw, qkK, blockQ6KBytes, dequantKQuantBody(dequantQ6KArch, dequantQ6KScalar))
 }
 
 func dequantQ8_0(out []float32, raw []byte) {
