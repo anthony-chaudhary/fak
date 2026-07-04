@@ -279,6 +279,18 @@ detects the Qwen3.6 dogfood endpoint or a Qwen3.6 model id, it sets
 `FAK_PROVIDER_EXTRA_BODY_JSON`, guard leaves your override alone and reports that it is
 using the existing value.
 
+For an already-running Mac gateway (`claude-mac` / `fak claude-mac-fak`), the tuning
+must be set on the gateway process itself. The preflight panel reads `/debug/vars`
+and should show:
+
+```text
+request tuning: provider extra body set (keys: chat_template_kwargs, top_k)
+```
+
+If a Qwen3.6 gateway does not expose that posture, the panel warns before handing
+the terminal to Claude Code. Restart `fak serve` on the Mac with the same
+`FAK_PROVIDER_EXTRA_BODY_JSON` value above, then rerun the probe.
+
 ## What The Probe Command Does
 
 The probe command below does all of this:

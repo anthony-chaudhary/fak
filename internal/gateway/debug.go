@@ -2,8 +2,10 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"runtime"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -101,6 +103,12 @@ type debugUpstreamVars struct {
 	// through the same secret scrubber the logs use before it is stored, and empty until a
 	// persistent 403 lands.
 	LastForbiddenDetail string `json:"last_forbidden_detail,omitempty"`
+	// ProviderExtraBodySet reports whether the live HTTP upstream planner carries a
+	// provider-specific extra request body. ProviderExtraBodyKeys carries only the
+	// top-level keys, never values, so an operator can verify a Qwen/vLLM/SGLang tuning
+	// posture without leaking raw request config.
+	ProviderExtraBodySet  bool     `json:"provider_extra_body_set"`
+	ProviderExtraBodyKeys []string `json:"provider_extra_body_keys,omitempty"`
 }
 
 type debugGatewayVars struct {
@@ -383,6 +391,9 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 	vcacheTurns, vcacheCapped := m.vcacheTurnsSnapshot()
 	_, inflightMaxAge := m.inflightSnapshot(now)
 
+	upstream := m.debugUpstreamVars()
+	upstream.ProviderExtraBodySet, upstream.ProviderExtraBodyKeys = debugProviderExtraBody(s.planner)
+
 	return debugVarsResponse{
 		Gateway: debugGatewayVars{
 			Up:               true,
@@ -427,7 +438,7 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 			VDSOHitRatio: ratio,
 		},
 		Inference:        inferenceVarsFromSnapshot(infer, inflightMaxAge),
-		Upstream:         m.debugUpstreamVars(),
+		Upstream:         upstream,
 		VCache:           vcacheVarsFromSnapshot(infer),
 		CacheAttribution: cacheAttributionVars(m.adjudicationSummary(), c.VDSOHits, m.servedInlineSnapshot()),
 		VCacheFamilies:   vcacheFamiliesVars(vcacheTurns, vcacheCapped),
@@ -464,6 +475,25 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 			InKernelPressureTrim: debugInKernelPressureTrimRows(s.planner),
 		},
 	}
+}
+
+func debugProviderExtraBody(planner agent.Planner) (bool, []string) {
+	hp := unwrapHTTPPlanner(planner)
+	if hp == nil || len(hp.ExtraBody) == 0 {
+		return false, nil
+	}
+	obj := map[string]json.RawMessage{}
+	if err := json.Unmarshal(hp.ExtraBody, &obj); err != nil {
+		return true, nil
+	}
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		if strings.TrimSpace(k) != "" {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	return true, keys
 }
 
 // debugSessionVars is the per-session drive-state row /debug/vars mirrors for live

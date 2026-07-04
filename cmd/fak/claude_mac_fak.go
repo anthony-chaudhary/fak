@@ -311,6 +311,10 @@ type claudeMacDebugVars struct {
 		DecodeTokensPerSecond  float64 `json:"decode_tokens_per_second"`
 		InflightMaxAgeSeconds  float64 `json:"inflight_max_age_seconds"`
 	} `json:"inference"`
+	Upstream struct {
+		ProviderExtraBodySet  bool     `json:"provider_extra_body_set"`
+		ProviderExtraBodyKeys []string `json:"provider_extra_body_keys"`
+	} `json:"upstream"`
 	Runtime struct {
 		NumGoroutine int `json:"num_goroutine"`
 		Memory       struct {
@@ -450,7 +454,13 @@ func renderClaudeMacPreflight(h claudeMacHealth, v claudeMacDebugVars, gatewayUR
 	// request is invisible. Flag an old one loudly.
 	ageWord := inflightAgeLabel(v.Inference.InflightMaxAgeSeconds, v.Gateway.InflightRequests)
 	fmt.Fprintf(&b, "inflight %d%s\n", v.Gateway.InflightRequests, ageWord)
-	fmt.Fprintf(&b, "model %s  auth %s\n", blankDash(firstNonEmpty(model, h.Model, v.Gateway.Model)), blankDash(auth))
+	effectiveModel := firstNonEmpty(model, h.Model, v.Gateway.Model)
+	fmt.Fprintf(&b, "model %s  auth %s\n", blankDash(effectiveModel), blankDash(auth))
+	if v.Upstream.ProviderExtraBodySet {
+		fmt.Fprintf(&b, "request tuning: provider extra body set%s\n", providerExtraBodyKeyLabel(v.Upstream.ProviderExtraBodyKeys))
+	} else if guardLocalLooksQwen36(effectiveModel) {
+		fmt.Fprintf(&b, "WARN: Qwen3.6 request tuning is not visible on this gateway — set FAK_PROVIDER_EXTRA_BODY_JSON=%s before starting fak serve\n", guardQwen36ProviderExtraBodyJSON)
+	}
 	// metrics/vars are read-only observability endpoints. A bare browser click on
 	// these URLs 401s off-box (they are loopback-exempt only — see authExempt), so
 	// the panel leads with the zero-friction path: `--metrics` reuses the bearer fak
@@ -496,6 +506,13 @@ func claudeMacPanelLegend() string {
 	fmt.Fprintln(&b, "  TTFT = time-to-first-token (the prefill→decode boundary) · tok/s = tokens per second · inflight = requests running now")
 	fmt.Fprintln(&b, "  up = gateway uptime · auth = how this client authenticates to the gateway · '-' = not measured yet (no served turn)")
 	return b.String()
+}
+
+func providerExtraBodyKeyLabel(keys []string) string {
+	if len(keys) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (keys: %s)", strings.Join(keys, ", "))
 }
 
 func isProxyPlanner(planner string) bool {

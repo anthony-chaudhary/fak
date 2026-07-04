@@ -348,6 +348,57 @@ func TestRenderClaudeMacPreflightWarnsOnMockWithoutBearerLeak(t *testing.T) {
 	}
 }
 
+func TestRenderClaudeMacPreflightShowsProviderExtraBodyKeys(t *testing.T) {
+	var v claudeMacDebugVars
+	v.Upstream.ProviderExtraBodySet = true
+	v.Upstream.ProviderExtraBodyKeys = []string{"chat_template_kwargs", "top_k"}
+
+	out := renderClaudeMacPreflight(
+		claudeMacHealth{OK: true, Engine: "fak", Model: "lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M", Planner: "proxy"},
+		v,
+		"http://node.example:8080",
+		"",
+		"gateway-bearer",
+		"",
+	)
+	for _, want := range []string{
+		"request tuning: provider extra body set",
+		"keys: chat_template_kwargs, top_k",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("preflight missing %q:\n%s", want, out)
+		}
+	}
+	for _, forbidden := range []string{"preserve_thinking", `"top_k":20`} {
+		if strings.Contains(out, forbidden) {
+			t.Fatalf("preflight leaked provider extra body value %q:\n%s", forbidden, out)
+		}
+	}
+}
+
+func TestRenderClaudeMacPreflightWarnsQwenWithoutProviderExtraBody(t *testing.T) {
+	var v claudeMacDebugVars
+
+	out := renderClaudeMacPreflight(
+		claudeMacHealth{OK: true, Engine: "fak", Model: "lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M", Planner: "proxy"},
+		v,
+		"http://node.example:8080",
+		"",
+		"gateway-bearer",
+		"",
+	)
+	for _, want := range []string{
+		"WARN: Qwen3.6 request tuning is not visible",
+		"FAK_PROVIDER_EXTRA_BODY_JSON",
+		"top_k",
+		"preserve_thinking",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("preflight warning missing %q:\n%s", want, out)
+		}
+	}
+}
+
 // TestRenderClaudeMacPreflightLinkAnnotations pins the two link-honesty fixes:
 // the default (unreachable) Grafana URL is SUPPRESSED rather than printed as a
 // dead link, and the bearer-gated note is omitted when no auth is in force.

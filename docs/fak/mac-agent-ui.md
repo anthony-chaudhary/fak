@@ -61,6 +61,7 @@ fak debug · gateway http://node-macos-a.local:8080
 health: ok  engine(build)=metal  planner(live)=inkernel
 vdso=on  cache-hit 0.88  inflight 0  up 3h12m
 model qwen3.6-27b  auth gateway-bearer
+request tuning: provider extra body set (keys: chat_template_kwargs, top_k)
 metrics: run  fak claude-mac-fak --metrics   (fetches /metrics + /debug/vars with the gateway's own bearer)
   urls: http://node-macos-a.local:8080/metrics · …/debug/vars  (open on the gateway host; off-box needs the bearer)
 -> launching claude ...
@@ -122,7 +123,12 @@ The always-on Mac services must be sized for a real Claude Code first turn:
 - `com.fak.serve-gateway` exports `FAK_PLANNER_TIMEOUT_S=1800` and
   `FAK_HTTP_WRITE_TIMEOUT_S=1800`.
 - `~/.local/bin/fak-mac-serve-gateway` exports
-  `FAK_PROVIDER_EXTRA_BODY_JSON='{ "top_k": 20, "chat_template_kwargs": { "enable_thinking": false } }'`.
+  `FAK_PROVIDER_EXTRA_BODY_JSON='{"top_k":20,"chat_template_kwargs":{"preserve_thinking":true}}'`.
+
+For Qwen3.6, the preflight panel should show `request tuning: provider extra body
+set (keys: chat_template_kwargs, top_k)`. If it prints a Qwen3.6 tuning warning,
+restart the gateway with the `FAK_PROVIDER_EXTRA_BODY_JSON` value above before
+running the Claude Code probe.
 
 Reload launchd after changing either LaunchAgent:
 
