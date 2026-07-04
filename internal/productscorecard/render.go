@@ -151,7 +151,11 @@ func RenderCompare(baseline map[string]any, current Payload) string {
 	for _, gp := range groups {
 		lines = append(lines, fmt.Sprintf("  %-13s %d -> %d", gp, intValue(bg[gp]), intValue(cg[gp])))
 	}
-	target3 := (bd + 2) / 3
+	// A ">=Nx reduction" claim means baseline/current >= N, i.e. current <= bd/N.
+	// current is an integer, so the threshold is floor(bd/N) (Go integer division) —
+	// matching the ">=2x" floor below. A ceil form ((bd+2)/3) would over-claim ">=3x"
+	// on a drop as shallow as ~2x when bd is not divisible by 3 (e.g. 10->4 is 2.5x).
+	target3 := bd / 3
 	target2 := bd / 2
 	switch {
 	case cd <= target3:
