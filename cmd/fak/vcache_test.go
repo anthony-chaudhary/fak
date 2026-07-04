@@ -780,6 +780,7 @@ func TestRunVCacheScoreTelemetryJSONAndOut(t *testing.T) {
 }
 
 func TestRunVCacheScoreAgenticActivationFlags(t *testing.T) {
+	t.Setenv("FAK_VCACHE_SNAPSHOT", filepath.Join(t.TempDir(), "missing.jsonl"))
 	telemetry := filepath.Join(t.TempDir(), "openai.jsonl")
 	if err := os.WriteFile(telemetry, []byte(`{"usage":{"input_tokens":2006,"input_tokens_details":{"cached_tokens":1920}}}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -893,6 +894,7 @@ func TestRunVCacheScoreKernelLedgerSuppliesWitness(t *testing.T) {
 }
 
 func TestRunVCacheScoreTelemetryHumanReportsEconomics(t *testing.T) {
+	t.Setenv("FAK_VCACHE_SNAPSHOT", filepath.Join(t.TempDir(), "missing.jsonl"))
 	telemetry := filepath.Join(t.TempDir(), "openai.jsonl")
 	if err := os.WriteFile(telemetry, []byte(`{"usage":{"input_tokens":2006,"input_tokens_details":{"cached_tokens":1920}}}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
