@@ -371,8 +371,9 @@ func simulatedRVCProvenance() Provenance {
 // leg-record path (BuildRelayVsCompactionReportFromRecords).
 func assembleRVCReport(m RVCModel, sweep []RVCPoint, provenance Provenance) RelayVsCompactionReport {
 	// The flat-peak witness: the relay's peak context is identical at every
-	// duration (independent of total work done).
-	flat := true
+	// duration (independent of total work done). An empty sweep has no data point to
+	// witness the invariant, so flat is false — a claim needs at least one duration.
+	flat := len(sweep) > 0
 	relayPeak := 0
 	if len(sweep) > 0 {
 		relayPeak = sweep[0].Relay.PeakContext
@@ -386,14 +387,22 @@ func assembleRVCReport(m RVCModel, sweep []RVCPoint, provenance Provenance) Rela
 	// Delta at the deepest duration (worst case for compaction). The relay wins if
 	// at EVERY duration it is lower-peak, cheaper (billed), busts less cache, and
 	// is at least as faithful. Raw cache-hit RATE is reported but deliberately NOT
-	// an acceptance gate — it flatters the larger-prefix strategy (see RVCArm).
-	verdict := VerdictRelayWins
-	for _, p := range sweep {
-		if !(p.Relay.PeakContext < p.Compaction.PeakContext &&
-			p.Relay.BilledTokens < p.Compaction.BilledTokens &&
-			p.Relay.CacheBustTokens < p.Compaction.CacheBustTokens &&
-			p.Relay.Accuracy >= p.Compaction.Accuracy) {
-			verdict = VerdictNoAdvantage
+	// an acceptance gate — it flatters the larger-prefix strategy (see RVCArm). An
+	// empty sweep has ZERO comparisons and so cannot witness a win: it fails closed
+	// to VerdictNoAdvantage rather than defaulting to a claim over no data points
+	// (the fail-closed contract BuildRelayVsCompactionReportFromRecords already
+	// enforces on the OBSERVED path).
+	verdict := VerdictNoAdvantage
+	if len(sweep) > 0 {
+		verdict = VerdictRelayWins
+		for _, p := range sweep {
+			if !(p.Relay.PeakContext < p.Compaction.PeakContext &&
+				p.Relay.BilledTokens < p.Compaction.BilledTokens &&
+				p.Relay.CacheBustTokens < p.Compaction.CacheBustTokens &&
+				p.Relay.Accuracy >= p.Compaction.Accuracy) {
+				verdict = VerdictNoAdvantage
+				break
+			}
 		}
 	}
 

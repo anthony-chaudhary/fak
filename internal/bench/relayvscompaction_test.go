@@ -281,6 +281,29 @@ func TestRelayVsCompactionObservedRefusals(t *testing.T) {
 	}
 }
 
+// TestRelayVsCompactionEmptySweepNoFalseWin pins the fail-closed contract on the
+// ANALYTIC seam. BuildRelayVsCompactionReportFor is the exported seam a live
+// leg-record run feeds constants into; over an empty duration sweep it has ZERO
+// comparisons, so it must not claim the relay wins or that its peak context is flat
+// — the same honesty BuildRelayVsCompactionReportFromRecords already enforces on
+// the OBSERVED path (TestRelayVsCompactionObservedRefusals). Before the fix the
+// analytic seam defaulted the verdict to VerdictRelayWins and flat_peak_context to
+// true, fabricating a "relay wins + flat peak" claim over no data points.
+func TestRelayVsCompactionEmptySweepNoFalseWin(t *testing.T) {
+	for _, durations := range [][]int{nil, {}} {
+		r := BuildRelayVsCompactionReportFor(DefaultRVCModel(), durations)
+		if len(r.Sweep) != 0 {
+			t.Fatalf("empty durations %v should yield an empty sweep, got %d points", durations, len(r.Sweep))
+		}
+		if r.Verdict != VerdictNoAdvantage {
+			t.Errorf("empty sweep verdict = %q; want %q (zero comparisons cannot witness a win)", r.Verdict, VerdictNoAdvantage)
+		}
+		if r.FlatPeakContext {
+			t.Errorf("empty sweep claims flat_peak_context=true with no data points to witness the invariant")
+		}
+	}
+}
+
 func peaks(r RelayVsCompactionReport) []int {
 	out := make([]int, 0, len(r.Sweep))
 	for _, p := range r.Sweep {
