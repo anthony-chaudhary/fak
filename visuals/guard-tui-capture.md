@@ -20,6 +20,13 @@ Checked-in outputs:
 - `visuals/guard-tui-video.gif`
 - `visuals/guard-tui-video.mp4`
 
+README front-door use:
+
+- `README.md` embeds `visuals/guard-tui-screenshot.png` in the `fak guard`
+  getting-started section.
+- The README caption links the live recording as
+  `visuals/guard-tui-video.gif` and `visuals/guard-tui-video.mp4`.
+
 Public-scrub note: the fixture is payload-free and uses only generic tool names,
 verdicts, reasons, and placeholder hash-chain values. It contains no local user
 path, account tag, credential, hostname, or server-specific detail.
