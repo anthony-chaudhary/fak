@@ -1,6 +1,6 @@
 ---
 title: "fak Demo-Quality Scorecard: Demos a Skeptic Can Run"
-description: "fak's demo-quality scorecard grades 68 demos on five deterministic axes into a demo-score (0-100, A-F) and a re-derivable demo-debt count."
+description: "fak's demo-quality scorecard grades 72 demos on five deterministic axes into a demo-score (0-100, A-F) and a re-derivable demo-debt count."
 ---
 
 # Demo-quality scorecard
@@ -16,11 +16,11 @@ description: "fak's demo-quality scorecard grades 68 demos on five deterministic
 
 | Metric | Value |
 |---|---|
-| Demos scored | 68 |
+| Demos scored | 72 |
 | **Demo-debt (total defects)** | **0** |
-| Mean score | 98.7/100 |
+| Mean score | 98.6/100 |
 | Median / min / max | 100.0 / 91.0 / 100.0 |
-| Grade distribution | A:68 B:0 C:0 D:0 F:0 |
+| Grade distribution | A:72 B:0 C:0 D:0 F:0 |
 
 ## Per-demo scores
 
@@ -29,12 +29,14 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | Score | Grade | Debt | run | repro | scope | self | docs | Demo |
 |---:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|
 | 91.0 | A | 0 | 86 | 100 | 100 | 88 | 78 | `examples/mobile-ffi` |
+| 93.1 | A | 0 | 86 | 100 | 100 | 100 | 78 | `examples/playground` |
 | 93.1 | A | 0 | 86 | 100 | 100 | 100 | 78 | `examples/trace-authoring` |
 | 94.2 | A | 0 | 100 | 100 | 90 | 88 | 90 | `examples/grammar-repair-demo` |
 | 94.2 | A | 0 | 100 | 100 | 90 | 88 | 90 | `cmd/dropindemo` |
 | 95.0 | A | 0 | 86 | 100 | 100 | 100 | 90 | `examples/bench-latency` |
 | 95.0 | A | 0 | 86 | 100 | 100 | 100 | 90 | `examples/gpu-smoke` |
 | 95.0 | A | 0 | 86 | 100 | 100 | 100 | 90 | `examples/turntax` |
+| 95.3 | A | 0 | 100 | 86 | 100 | 100 | 90 | `examples/verified-memory-recall` |
 | 96.2 | A | 0 | 100 | 100 | 100 | 88 | 90 | `examples/autogen-groupchat` |
 | 96.2 | A | 0 | 100 | 100 | 100 | 88 | 90 | `examples/crewai-crew` |
 | 96.2 | A | 0 | 100 | 100 | 100 | 88 | 90 | `examples/fanbench` |
@@ -42,6 +44,7 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | 96.4 | A | 0 | 100 | 100 | 90 | 100 | 90 | `examples/normgate-evasion` |
 | 96.6 | A | 0 | 86 | 100 | 100 | 100 | 100 | `examples/deny-as-value` |
 | 96.6 | A | 0 | 86 | 100 | 100 | 100 | 100 | `examples/grammar-repair` |
+| 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/addressable-evict` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/admit-and-log` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/agent-ab` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/context-debugger` |
@@ -50,6 +53,7 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/frontierswe-harbor-shim` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/loader-properties` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/openai-agents-guardrail` |
+| 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/policy-loader-properties` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/radixattention` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/remote-vm-guard` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/self-modify-floor` |
@@ -109,6 +113,11 @@ No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
 - documented: no run/usage section and no visible run command — hard to find how to start
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
+### `examples/playground`
+- runnable: a runnable script exists but the README shows no paste-able command to launch it
+- documented: no run/usage section and no visible run command — hard to find how to start
+- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
+
 ### `examples/trace-authoring`
 - runnable: a runnable script exists but the README shows no paste-able command to launch it
 - documented: no run/usage section and no visible run command — hard to find how to start
@@ -134,6 +143,10 @@ No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
 
 ### `examples/turntax`
 - runnable: a runnable script exists but the README shows no paste-able command to launch it
+- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
+
+### `examples/verified-memory-recall`
+- reproducible: no exit-code / determinism statement — the demo doesn't say how to tell pass from fail (a CI gate needs this)
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
 ### `examples/autogen-groupchat`
@@ -162,6 +175,9 @@ No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
 ### `examples/grammar-repair`
 - runnable: a runnable script exists but the README shows no paste-able command to launch it
 
+### `examples/addressable-evict`
+- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
+
 ### `examples/admit-and-log`
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
@@ -186,6 +202,9 @@ No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
 ### `examples/openai-agents-guardrail`
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
+### `examples/policy-loader-properties`
+- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
+
 ### `examples/radixattention`
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
@@ -200,3 +219,4 @@ No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
 
 ### `examples/vdso-cache-hit`
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
+

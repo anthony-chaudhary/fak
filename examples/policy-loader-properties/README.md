@@ -109,6 +109,14 @@ the closest structural proof this demo can run: the dumped manifest, unmodified,
 re-parses to the identical floor — evidence that dump and load speak the same complete
 schema, not partial fragments.
 
+## Scope — what this does not claim
+
+This demo does not claim to prove every runtime policy path, every policy authored by a
+user, or the quality of any particular allow-list. It only exercises the loader-facing
+safety properties documented in [`POLICY.md`](../../POLICY.md): schema rejection,
+closed-vocabulary deny reasons, posture validation, empty-manifest warning, and dump /
+check round-trip stability.
+
 ## Files
 
 | file | what it is |

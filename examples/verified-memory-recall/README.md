@@ -38,6 +38,13 @@ repo-relative paths against the git working tree, so the fresh note's claim
 
 See [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md) for the expected transcript.
 
+## Scope — what this does not claim
+
+This demo does not claim to make markdown memory truthful by itself, rank every possible
+operator note perfectly, or replace higher-cost review of risky recalled facts. It only
+shows the read-time witness behavior for three authored notes: a fresh path claim, a
+stale path claim, and a prose-only note.
+
 ## The store
 
 Three authored notes, one per read-time verdict:
