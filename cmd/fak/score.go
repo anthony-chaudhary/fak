@@ -24,10 +24,13 @@ import (
 // -scorecard/-score/-rsi suffix, so `fak score <name>` reads as the thing being scored.
 var scoreRoutes = map[string]func(argv []string){
 	"conflation":          cmdConflationScorecard,
+	"concept-usage":       cmdConceptUsageScore,
 	"dogfood":             cmdDogfoodScore,
 	"dojo-rsi":            cmdDojoRSI,
 	"guard-rsi":           cmdGuardRSIScorecard,
 	"guard-verdict-rsi":   cmdGuardVerdictRSI,
+	"loop-index":          cmdLoopIndexScorecard,
+	"milestone":           cmdMilestoneScorecard,
 	"product":             func(argv []string) { os.Exit(runProductScorecard(os.Stdout, os.Stderr, argv)) },
 	"skill-effectiveness": cmdSkillEffectivenessScorecard,
 	"support-maturity":    cmdSupportMaturityScorecard,

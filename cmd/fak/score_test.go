@@ -5,16 +5,19 @@ import (
 	"testing"
 )
 
-// TestScoreRoutesCoverTheMetaVerbs pins the `fak score <name>` parent (#1505) to exactly the ten
-// meta-scorecard / RSI subcommands it consolidated. If a route is dropped or an eleventh is added
+// TestScoreRoutesCoverTheMetaVerbs pins the `fak score <name>` parent (#1505) to exactly the
+// meta-scorecard / RSI subcommands it consolidated. If a route is dropped or a new one is added
 // without updating this list, the test reds -- the parent's surface is a contract, not incidental.
 func TestScoreRoutesCoverTheMetaVerbs(t *testing.T) {
 	want := []string{
 		"conflation",
+		"concept-usage",
 		"dogfood",
 		"dojo-rsi",
 		"guard-rsi",
 		"guard-verdict-rsi",
+		"loop-index",
+		"milestone",
 		"product",
 		"skill-effectiveness",
 		"support-maturity",

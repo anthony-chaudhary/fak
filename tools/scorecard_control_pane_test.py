@@ -215,7 +215,7 @@ def test_milestone_scorecard_registered() -> None:
         "key": "milestone",
         "debt": "milestone_debt",
         "script": "",
-        "cmd": "go run ./cmd/fak milestone-scorecard --json",
+        "cmd": "go run ./cmd/fak score milestone --json",
         "label": "milestone",
     }
 
@@ -230,7 +230,7 @@ def test_milestone_climb_scorecard_registered() -> None:
         "key": "milestone_climb",
         "debt": "climb_ratchet_debt",
         "script": "",
-        "cmd": "go run ./cmd/fak milestone-scorecard --ratchet --json",
+        "cmd": "go run ./cmd/fak score milestone --ratchet --json",
         "label": "milestone-climb",
     }
 

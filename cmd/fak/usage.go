@@ -683,10 +683,11 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
   fak swebench  describe | eval | compare    (SWE-bench Verified benchmarking)
   fak dojo      run --corpus DIR | list    (prediction-vs-reality calibration gym)
   fak score     <name> [--json] [--markdown] [--compare FILE]   (#1505)
-                (parent verb for the meta-scorecards / RSI loops -- one grouped surface for the
+                 (parent verb for the meta-scorecards / RSI loops -- one grouped surface for the
                  tooling an operator does not drive day to day. 'fak score list' names them:
-                 conflation, dogfood, dojo-rsi, guard-rsi, guard-verdict-rsi, product,
-                 skill-effectiveness, support-maturity, token-defaults, ui-quality. Each
+                 conflation, concept-usage, dogfood, dojo-rsi, guard-rsi, guard-verdict-rsi,
+                 loop-index, milestone, product, skill-effectiveness, support-maturity,
+                 token-defaults, ui-quality. Each
                  forwards to the same handler the legacy top-level verb ran, so
                  'fak score conflation --json' == the old 'fak conflation-scorecard --json';
                  the legacy verbs stay as thin aliases)

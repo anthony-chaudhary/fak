@@ -258,7 +258,7 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "tokendefaults", "debt": "token_defaults_debt", "script": "", "cmd": "go run ./cmd/fak score token-defaults --json", "label": "token-defaults"},
     {"key": "guard_rsi", "debt": "guard_rsi_debt", "script": "", "cmd": "go run ./cmd/fak score guard-rsi --json", "label": "guard-rsi"},
     {"key": "dogfood", "debt": "dogfood_debt", "script": "", "cmd": "go run ./cmd/fak score dogfood --json", "label": "dogfood-loop"},
-    {"key": "conceptusage", "debt": "conceptusage_debt", "script": "", "cmd": "go run ./cmd/fak concept-usage-score --json", "label": "concept-usage"},
+    {"key": "conceptusage", "debt": "conceptusage_debt", "script": "", "cmd": "go run ./cmd/fak score concept-usage --json", "label": "concept-usage"},
     {"key": "maturity", "debt": "maturity_debt", "script": "", "cmd": "go run ./cmd/fak maturity --json", "label": "maturity"},
     {"key": "growth", "debt": "growth_debt", "script": "", "cmd": "go run ./cmd/fak coverage-matrix --json", "label": "growth-debt"},
     {"key": "support_maturity", "debt": "support_maturity_debt", "script": "", "cmd": "go run ./cmd/fak score support-maturity --json", "label": "support-maturity"},
@@ -268,19 +268,19 @@ SCORECARDS: list[dict[str, str]] = [
     # loop retires milestones like every other surface. Composes -- not duplicates --
     # support_maturity: that card fences each cell to its regime ceiling, this one
     # scores raw distance-to-matured across the grid as the headline climb + roadmap.
-    {"key": "milestone", "debt": "milestone_debt", "script": "", "cmd": "go run ./cmd/fak milestone-scorecard --json", "label": "milestone"},
+    {"key": "milestone", "debt": "milestone_debt", "script": "", "cmd": "go run ./cmd/fak score milestone --json", "label": "milestone"},
     # The milestone CLIMB ratchet (#1442, epic #1436): a DISTINCT gate from
     # milestone_debt. The two witnessed climb KPIs (matured_cells + milestone_progress)
     # are pinned in docs/milestones/baseline.json; climb_ratchet_debt is 1 when EITHER
     # regresses below the pin (else 0), so a same-debt rung swap that lowers the matured
     # count -- invisible to milestone_debt -- still reds the control pane here. Re-pin on
     # a real climb improvement with `fak milestone-scorecard --pin`.
-    {"key": "milestone_climb", "debt": "climb_ratchet_debt", "script": "", "cmd": "go run ./cmd/fak milestone-scorecard --ratchet --json", "label": "milestone-climb"},
+    {"key": "milestone_climb", "debt": "climb_ratchet_debt", "script": "", "cmd": "go run ./cmd/fak score milestone --ratchet --json", "label": "milestone-climb"},
     # The agentic-coding loop-index (#1152, dev-ex epic #1148 spine): folds the six
     # loop stages (orient->plan->act->verify->ship->learn) into one loopindex_debt.
     # Registered here so a stage UN-WIRING (a regressed default) reds the ratchet —
     # the spine's "a regression reds the gate" DoD. Go-native, no GPU, deterministic.
-    {"key": "loopindex", "debt": "loopindex_debt", "script": "", "cmd": "go run ./cmd/fak loop-index-scorecard --json", "label": "loop-index"},
+    {"key": "loopindex", "debt": "loopindex_debt", "script": "", "cmd": "go run ./cmd/fak score loop-index --json", "label": "loop-index"},
     # Operator-heaviness (#1504): folds the operator-facing surface pressure into
     # the control pane through heaviness_debt while heaviness_pressure stays the
     # unbounded drift number operators watch over time.
