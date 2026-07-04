@@ -42,7 +42,19 @@ const (
 	// hand-written off-schema row the tool structurally could not stamp (#1140).
 	OutcomePassed   Outcome = "passed"   // bridge-folded: the off-box witness ran and met its bar (a collected datum)
 	OutcomeDegraded Outcome = "degraded" // bridge-folded: the off-box witness ran but did NOT meet its bar (recorded honestly)
+	// OutcomeHeartbeat is a mid-run LIVENESS sample, not a terminal result (#2385): a
+	// durable row appended between task-start and task-end so a watcher can tell a
+	// still-grinding task from a hung/dead one before the wall-clock budget fires. It is
+	// deliberately NOT a collected-class outcome (CollectedOutcome is false), so a
+	// heartbeat never marks a datum fresh or suppresses a re-measure; it is in the closed
+	// vocabulary only so the ValidateLedger CI gate accepts the additive liveness rows.
+	OutcomeHeartbeat Outcome = "heartbeat"
 )
+
+// PhaseHeartbeat tags a mid-run liveness row so a consumer can filter heartbeats
+// from the single terminal collection row per task (#2385). A terminal row leaves
+// Phase empty, so it serializes exactly as before (back-compat).
+const PhaseHeartbeat = "heartbeat"
 
 // validOutcomes is the closed set of outcome tokens a ledger row may carry. A row
 // whose outcome is outside this set is off-schema — the validator (ValidateLedger)
@@ -56,6 +68,7 @@ var validOutcomes = map[Outcome]bool{
 	OutcomeSkipped:   true,
 	OutcomePassed:    true,
 	OutcomeDegraded:  true,
+	OutcomeHeartbeat: true,
 }
 
 // IsValidOutcome reports whether o is a member of the closed outcome vocabulary.
@@ -80,9 +93,11 @@ type CollectRow struct {
 	TaskID      string  `json:"task_id"`                // the Task.ID join key
 	Value       string  `json:"value"`                  // the Task's importance class, for trend reads
 	Command     string  `json:"command"`                // the exact command run (or that would run)
-	Outcome     string  `json:"outcome"`                // collected | failed | dry-run | skipped
+	Outcome     string  `json:"outcome"`                // collected | failed | dry-run | skipped | heartbeat
+	Phase       string  `json:"phase,omitempty"`        // "heartbeat" for a mid-run liveness row; empty for the terminal row (#2385)
+	Cell        string  `json:"cell,omitempty"`         // grid position k/N at heartbeat time, best-effort (heartbeat rows only)
 	Artifact    string  `json:"artifact,omitempty"`     // captured output path, when any
-	Number      string  `json:"number,omitempty"`       // first parsed unit-bearing token, best-effort (else empty)
+	Number      string  `json:"number,omitempty"`       // first parsed unit-bearing token, best-effort (else empty); on a heartbeat row this is the most recent parsed grid number (last_number)
 	Note        string  `json:"note,omitempty"`         // free-text context for a bridge-folded witness (what was observed off-box); empty for a run-loop row
 	DurationSec float64 `json:"duration_sec,omitempty"` // wall time of the run
 	GeneratedAt string  `json:"generated_at"`           // RFC3339 stamp
@@ -137,6 +152,33 @@ func NewCollectRow(t Task, box string, outcome Outcome, artifact, number string,
 		Artifact:    artifact,
 		Number:      number,
 		DurationSec: round1(dur.Seconds()),
+		GeneratedAt: now.UTC().Format(time.RFC3339),
+	}
+}
+
+// IsHeartbeat reports whether this row is a mid-run liveness sample (#2385) rather
+// than a terminal collection row, so a consumer can filter the additive heartbeat
+// rows from the single terminal row per task.
+func (r CollectRow) IsHeartbeat() bool { return r.Phase == PhaseHeartbeat }
+
+// NewHeartbeatRow builds a durable mid-run LIVENESS row for a task still in flight
+// (#2385): it carries the grid cell (k/N), the most recent parsed grid number
+// (last_number), and the elapsed run-time so far, tagged Phase="heartbeat" and with a
+// non-collected Outcome so it never marks the datum fresh. It is additive — the
+// terminal NewCollectRow is still emitted exactly once when the task ends.
+func NewHeartbeatRow(t Task, box, cell, lastNumber string, elapsed time.Duration, now time.Time) CollectRow {
+	return CollectRow{
+		Schema:      CollectSchema,
+		Date:        now.UTC().Format("2006-01-02"),
+		Box:         box,
+		TaskID:      t.ID,
+		Value:       string(t.Value),
+		Command:     t.Run,
+		Outcome:     string(OutcomeHeartbeat),
+		Phase:       PhaseHeartbeat,
+		Cell:        cell,
+		Number:      lastNumber,
+		DurationSec: round1(elapsed.Seconds()),
 		GeneratedAt: now.UTC().Format(time.RFC3339),
 	}
 }
@@ -218,7 +260,7 @@ type OffSchemaError struct {
 
 func (e *OffSchemaError) Error() string {
 	return "nightrun ledger: task " + e.TaskID + ": off-schema outcome " + strconv.Quote(e.Outcome) +
-		" (not in collected|failed|timeout|dry-run|skipped|passed|degraded)"
+		" (not in collected|failed|timeout|dry-run|skipped|passed|degraded|heartbeat)"
 }
 
 // LedgerDefect is one reason a ledger row failed validation, keyed to the offending
@@ -257,7 +299,7 @@ func ValidateLedger(rows []CollectRow, registeredIDs map[string]bool) []LedgerDe
 		if !IsValidOutcome(Outcome(r.Outcome)) {
 			defects = append(defects, LedgerDefect{
 				Line: line, TaskID: r.TaskID, Outcome: r.Outcome,
-				Reason: "off-schema outcome (not in collected|failed|timeout|dry-run|skipped|passed|degraded)",
+				Reason: "off-schema outcome (not in collected|failed|timeout|dry-run|skipped|passed|degraded|heartbeat)",
 			})
 		}
 		if registeredIDs != nil && !registeredIDs[r.TaskID] {

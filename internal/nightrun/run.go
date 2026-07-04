@@ -39,6 +39,71 @@ type RunSummary struct {
 // without shelling out.
 type Executor func(ctx context.Context, t Task, artifactPath string) (Outcome, string, time.Duration, error)
 
+// Heartbeat is a mid-run LIVENESS sample an executor reports between task-start and
+// task-end (#2385): where the task is in its grid (Cell k/N), the most recent parsed
+// grid number so far (LastNumber, never fabricated), and the elapsed run-time. It is
+// projected into a durable heartbeat CollectRow so a watcher can tell a still-grinding
+// task from a hung/dead one before the wall-clock budget fires.
+type Heartbeat struct {
+	Cell       string        // grid position k/N, best-effort ("" when unknown)
+	LastNumber string        // most recent parsed grid number ("" when none yet)
+	Elapsed    time.Duration // run-time so far (executor-reported, monotonic; drives interval throttling deterministically)
+}
+
+// HeartbeatFunc is the emit seam a ProgressExecutor calls to report one liveness
+// sample. The implementation RunLoop hands over is THROTTLED (see heartbeatThrottle):
+// it appends a durable row only when the cell advances or a coarse interval of
+// executor-reported elapsed has passed, so an executor may call it as often as it likes
+// (e.g. per output line) without producing a row storm. A nil HeartbeatFunc is a valid
+// no-op an executor can call unconditionally.
+type HeartbeatFunc func(Heartbeat)
+
+// ProgressExecutor is the heartbeat-aware executor seam (#2385): it runs one Task like
+// an Executor but additionally receives a throttled emit callback it may call between
+// task-start and task-end to append durable liveness rows to the same ledger. It is an
+// optional superset of Executor — when RunOptions.ProgressExecutor is set it is used
+// instead of Executor, and the emit closure is wired to RunOptions.AppendRow. The live
+// shell path (execTask) does not yet emit (turning modelbench's throttled stderr LOAD
+// progress into GRID progress the callback can consume is the follow-on, #2385); this
+// seam is what a bench-side or fake producer drives.
+type ProgressExecutor func(ctx context.Context, t Task, artifactPath string, emit HeartbeatFunc) (Outcome, string, time.Duration, error)
+
+// DefaultHeartbeatInterval is the coarse minimum span of executor-reported elapsed
+// between two same-cell heartbeat rows. A cell advance always emits; within one cell,
+// samples closer together than this are dropped — so the row count is bounded by cells
+// and time, never by output lines.
+const DefaultHeartbeatInterval = 30 * time.Second
+
+// heartbeatThrottle collapses a stream of raw Heartbeat samples into a bounded set of
+// durable rows: the FIRST sample always emits, a changed non-empty Cell always emits,
+// and otherwise a sample emits only once minInterval of executor-reported Elapsed has
+// passed since the last emitted row. Throttling on Heartbeat.Elapsed (not wall clock)
+// keeps the decision deterministic under a faked executor.
+type heartbeatThrottle struct {
+	minInterval time.Duration
+	emitted     int
+	lastCell    string
+	lastElapsed time.Duration
+}
+
+func (h *heartbeatThrottle) allow(hb Heartbeat) bool {
+	if h.emitted == 0 {
+		return true
+	}
+	if hb.Cell != "" && hb.Cell != h.lastCell {
+		return true
+	}
+	return h.minInterval > 0 && hb.Elapsed-h.lastElapsed >= h.minInterval
+}
+
+func (h *heartbeatThrottle) mark(hb Heartbeat) {
+	h.emitted++
+	if hb.Cell != "" {
+		h.lastCell = hb.Cell
+	}
+	h.lastElapsed = hb.Elapsed
+}
+
 // RunOptions configures one RunLoop invocation. The read/append/executor seams
 // default to the live disk + shell wiring when nil, so the cmd layer can pass
 // nothing and a test can pass fakes.
@@ -55,6 +120,12 @@ type RunOptions struct {
 	Executor    Executor     // nil => execTask via the live shell (go-run benches pre-built once)
 	ReadLedger  func() []CollectRow
 	AppendRow   func(CollectRow) error
+	// ProgressExecutor, when set, replaces Executor and additionally receives a throttled
+	// heartbeat emit seam it may call mid-run to append durable liveness rows (#2385).
+	ProgressExecutor ProgressExecutor
+	// HeartbeatInterval overrides DefaultHeartbeatInterval for same-cell heartbeat
+	// throttling (0 => the default). Ignored when ProgressExecutor is nil.
+	HeartbeatInterval time.Duration
 }
 
 // RunLoop drives the collection loop: rank â†’ pick the most important feasible
@@ -125,7 +196,7 @@ func RunLoop(ctx context.Context, opts RunOptions) (RunSummary, error) {
 		}
 
 		artifact := absArtifact(opts, next.Task)
-		outcome, number, dur, runErr := opts.Executor(ctx, next.Task, artifact)
+		outcome, number, dur, runErr := runOne(ctx, opts, next.Task, artifact)
 		row := NewCollectRow(next.Task, opts.Caps.Box, outcome, toRel(opts.Root, artifact), number, dur, opts.Now)
 		if err := opts.AppendRow(row); err != nil {
 			return summary, fmt.Errorf("nightrun: append ledger: %w", err)
@@ -143,6 +214,34 @@ func RunLoop(ctx context.Context, opts RunOptions) (RunSummary, error) {
 		}
 	}
 	return summary, nil
+}
+
+// runOne executes one task and returns its terminal values. When a ProgressExecutor is
+// wired it is used with a THROTTLED heartbeat emitter (#2385) that appends durable
+// liveness rows to the same ledger via opts.AppendRow between task-start and task-end;
+// otherwise it falls back to the plain Executor (unchanged behavior). A failed heartbeat
+// append is best-effort — it is swallowed so a liveness hiccup cannot fail the task; the
+// terminal row is still built and appended by the caller exactly once.
+func runOne(ctx context.Context, opts RunOptions, t Task, artifact string) (Outcome, string, time.Duration, error) {
+	if opts.ProgressExecutor == nil {
+		return opts.Executor(ctx, t, artifact)
+	}
+	interval := opts.HeartbeatInterval
+	if interval <= 0 {
+		interval = DefaultHeartbeatInterval
+	}
+	thr := &heartbeatThrottle{minInterval: interval}
+	emit := func(hb Heartbeat) {
+		if !thr.allow(hb) {
+			return
+		}
+		row := NewHeartbeatRow(t, opts.Caps.Box, hb.Cell, hb.LastNumber, hb.Elapsed, opts.Now)
+		if err := opts.AppendRow(row); err != nil {
+			return // best-effort liveness: never fail the task on a heartbeat append
+		}
+		thr.mark(hb)
+	}
+	return opts.ProgressExecutor(ctx, t, artifact, emit)
 }
 
 // pickFresh returns the highest-priority feasible, unsaturated Scored whose Task
