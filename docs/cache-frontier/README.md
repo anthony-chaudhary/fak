@@ -51,3 +51,13 @@ append-only ledger.
 ## Entries
 
 - [2026-06-29 cache-frontier review](reviews/2026-06-29.md)
+
+## Findings
+
+Standalone research findings (not the generated weekly review) live alongside the
+entries when a specific question is investigated from evidence:
+
+- [2026-07-04 — cache-read vs rate-limit burn on OAuth seats (#2183)](2026-07-04-oauth-ratelimit-cache-read-finding.md):
+  the managed-cache passive-on-OAuth rule was assumed on the dollar axis and never
+  measured on the rate-limit axis; the correlation is currently unmeasurable
+  because the limit-burn and cache-read sides of the join are not co-persisted.
