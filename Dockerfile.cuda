@@ -1,0 +1,78 @@
+# Dockerfile.cuda — the in-kernel GPU-serving image (#2661).
+#
+# Companion to the default `Dockerfile` (which stays the lean, GPU-free distroless
+# static image for proxy mode and remains `:latest`). This image adds a CUDA
+# runtime so `fak serve --gguf ... --engine inkernel --backend cuda` can bind a
+# rented GPU on a neo cloud (CoreWeave / Lambda / Crusoe / RunPod / Vast) or a
+# local box with the NVIDIA Container Toolkit installed.
+#
+#   docker build -f Dockerfile.cuda -t fak:cuda .
+#   docker run --rm --gpus all -p 8080:8080 fak:cuda \
+#       serve --addr 0.0.0.0:8080 --gguf /models/model.gguf \
+#       --engine inkernel --backend cuda
+#
+# Compute-capability floor: the builder compiles internal/compute's CUDA kernels
+# for ONE arch via --build-arg CUDA_ARCH (default sm_89, Ada/L4). Pass the arch
+# that matches the rented card — sm_80 (A100), sm_90 (H100/H200), or sm_100
+# (B200/GB200) — the same four arches internal/compute/build_cuda.sh and
+# docs/cuda-dev.md advertise:
+#   docker build -f Dockerfile.cuda --build-arg CUDA_ARCH=sm_90 -t fak:cuda .
+# This image does NOT support sm_120 (RTX 50-series / consumer Blackwell):
+# internal/compute has no sm_120 kernel variant today, so rent a datacenter card
+# (A100/L4/H100/H200/B200/GB200), not a 50-series board — it would either fail to
+# bind or run a mismatched-arch kernel.
+#
+# CUDA 12.6 is pinned to match the toolchain internal/compute/setup_cuda_wsl.sh
+# and .github/workflows/cuda-build.yml already build and test against, so the
+# runtime this image ships is the SAME toolkit line the CUDA CI already covers,
+# not an untested newer/older one.
+#
+# Override APP_VERSION at build time to stamp a specific version into the binary:
+#   docker build -f Dockerfile.cuda --build-arg APP_VERSION=0.36.0 -t fak:0.36.0-cuda .
+
+# --- builder -------------------------------------------------------------------
+FROM nvidia/cuda:12.6.2-devel-ubuntu22.04 AS build
+ARG APP_VERSION=docker
+ARG CUDA_ARCH=sm_89
+
+# The -devel image lacks git/build-essential/Go by default (same toolchain gap
+# .github/workflows/cuda-build.yml's nvcc job fills).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential ca-certificates curl git \
+    && rm -rf /var/lib/apt/lists/*
+ARG GO_VERSION=1.26.0
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tgz \
+    && tar -C /usr/local -xzf /tmp/go.tgz && rm /tmp/go.tgz
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+WORKDIR /src
+COPY . .
+
+# Compile the kernels with build_cuda.sh's exact flags (same nvcc invocation the CI
+# nvcc job runs), then cgo-link the version-stamped -tags cuda binary against the
+# resident archive + this image's cudart/cublas libs.
+RUN cd internal/compute \
+    && nvcc -O3 -std=c++14 -arch="${CUDA_ARCH}" -ccbin g++ -Xcompiler -fPIC \
+         -c cuda_kernels.cu -o cuda_kernels.o \
+    && ar rcs libfakcuda.a cuda_kernels.o
+ENV CGO_ENABLED=1 \
+    CGO_CFLAGS="-I/usr/local/cuda/include" \
+    CGO_LDFLAGS="-L/src/internal/compute -L/usr/local/cuda/lib64"
+RUN GOTOOLCHAIN=auto go build -trimpath -tags cuda \
+      -ldflags "-s -w -X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion=${APP_VERSION}" \
+      -o /out/fak ./cmd/fak
+
+# --- runtime -------------------------------------------------------------------
+# -runtime (not -base): carries cudart/cublas so the binary's dynamic links resolve;
+# the NVIDIA Container Toolkit injects libcuda.so + the driver at `docker run --gpus`.
+FROM nvidia/cuda:12.6.2-runtime-ubuntu22.04
+LABEL io.modelcontextprotocol.server.name="io.github.anthony-chaudhary/fak"
+RUN groupadd -r fak && useradd -r -g fak -d /nonexistent -s /usr/sbin/nologin fak
+COPY --from=build /out/fak /usr/local/bin/fak
+USER fak
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/fak"]
+# Default to the gateway bound to all interfaces (containers need 0.0.0.0, not
+# loopback). Override the whole command to add --gguf/--engine inkernel/--backend
+# cuda, or run `agent`, `policy`, etc.
+CMD ["serve", "--addr", "0.0.0.0:8080"]

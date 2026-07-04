@@ -1,0 +1,12 @@
+# Keep the build context to the Go module + CUDA sources. This is a live
+# multi-session dev box: the repo root accumulates VCS metadata, host-local
+# session/dispatch state, and editor/tool caches (some containing symlinks
+# Docker's build-context tar cannot resolve, e.g. .dispatch-runs' pin
+# symlinks to an absolute host path). The `go` tool itself already ignores
+# any dot-prefixed file/dir when resolving packages (embeds included), so
+# excluding them here mirrors an existing invariant rather than inventing a
+# new one — nothing under a dot-prefixed path can be part of a buildable
+# package.
+.*
+*.exe
+*.exe~

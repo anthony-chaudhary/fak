@@ -163,6 +163,36 @@ curl -s http://127.0.0.1:8080/v1/models \
   -H "Authorization: Bearer $FAK_GATEWAY_KEY"
 ```
 
+### GPU image (in-kernel CUDA serving)
+
+The default image above is GPU-free (proxy mode only). To run the **in-kernel**
+engine (`--gguf ... --engine inkernel --backend cuda`) on a rented or local GPU,
+use [`Dockerfile.cuda`](https://github.com/anthony-chaudhary/fak/blob/main/Dockerfile.cuda)
+instead — a CUDA-runtime variant of the same two-stage build, published alongside
+the default image as the `-cuda` tag:
+
+```bash
+# Pull (a tagged release publishes both):
+docker pull ghcr.io/anthony-chaudhary/fak:0.36.0-cuda
+
+# Or build locally, picking the arch that matches the rented card
+# (sm_80 A100, sm_89 Ada/L4 default, sm_90 H100/H200, sm_100 B200/GB200):
+docker build -f Dockerfile.cuda --build-arg CUDA_ARCH=sm_90 -t fak:cuda .
+
+# Run with the NVIDIA Container Toolkit (--gpus requires it on the host):
+docker run --rm --gpus all -p 8080:8080 \
+  -v /models:/models:ro \
+  ghcr.io/anthony-chaudhary/fak:0.36.0-cuda \
+  serve --addr 0.0.0.0:8080 --gguf /models/model.gguf \
+  --engine inkernel --backend cuda
+```
+
+This image does **not** support sm_120 (RTX 50-series / consumer Blackwell) —
+`internal/compute` has no sm_120 kernel variant yet, so rent a datacenter card
+(A100/L4/H100/H200/B200/GB200). Model coverage in-kernel is exactly what
+[`internal/compute`](https://github.com/anthony-chaudhary/fak/tree/main/internal/compute)
+already proves — this image ships the runtime, not new kernel coverage.
+
 ---
 
 ## 2. Docker Compose
