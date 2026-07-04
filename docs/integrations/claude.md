@@ -706,6 +706,10 @@ If that same Qwen3.6 server is already running on the documented dogfood port
 fak guard --local --probe -- claude -p "Reply with exactly the word: pong"
 ```
 
+`--local` detects the OpenAI-compatible model server for the upstream proxy hop, while
+the guard still injects `ANTHROPIC_BASE_URL` for Claude Code so the child talks to the
+local `/v1/messages` surface.
+
 This is equivalent to:
 
 ```bash

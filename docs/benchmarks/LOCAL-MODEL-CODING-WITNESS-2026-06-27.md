@@ -120,15 +120,15 @@ The run surfaced two truths the runbook's `--gguf` framing did not make obvious.
 stated here rather than smoothed over, because the witness exists to be honest about the
 capability ramp.
 
-1. **`--local` routes OpenAI-wire harnesses, not `claude`.** `fak guard --local` wires the
-   child's `OPENAI_BASE_URL`/`OPENAI_API_BASE` to the in-process gateway, which proxies to
-   the detected server. That governs **codex / aider / opencode** — OpenAI-wire clients. It
-   does **not** govern `claude` (Claude Code), which is an **Anthropic-wire** client and
-   reads `ANTHROPIC_BASE_URL`: a `fak guard --local -- claude` turn silently used Claude's
-   own upstream, so the gateway saw zero traffic and the journal stayed empty. The path that
-   governs `claude` against a local model is `fak guard --gguf` (fak serves the in-kernel
-   model on the **Anthropic** `/v1/messages` wire `claude` speaks). Use `--local` for
-   OpenAI-wire harnesses; use `--gguf` for `claude`.
+1. **Historical `--local` / `claude` gap.** At the time of this 2026-06-27 witness,
+   `fak guard --local` wired only the child's `OPENAI_BASE_URL`/`OPENAI_API_BASE` to
+   the in-process gateway. That governed **codex / aider / opencode** — OpenAI-wire
+   clients — but not `claude`, which reads `ANTHROPIC_BASE_URL`. A `fak guard --local
+   -- claude` turn therefore silently used Claude's own upstream, so the gateway saw
+   zero traffic and the journal stayed empty. Current `fak guard` now also injects
+   `ANTHROPIC_BASE_URL` when the upstream is OpenAI-compatible, so `--local` can route
+   Claude Code through the guard's Anthropic `/v1/messages` surface while proxying
+   inference to a detected local OpenAI-compatible model server.
 
 2. **A no-tool-call chat turn records zero verdicts — that is correct, not a bug.** Driving
    the gateway with a one-shot chat completion proved the proxy works end to end (the local
@@ -162,9 +162,10 @@ capability ramp.
 - **The honest fence:** This witness claims exactly four things, each backed above:
   **(a)** a small local coder (3B/7B) produces the correct fix for this fixture on CPU at
   $0; **(b)** the kernel's safety floor adjudicates tool calls identically regardless of
-  model; **(c)** `--local` governs OpenAI-wire harnesses while `claude` needs the `--gguf`
-  Anthropic-wire path; **(d)** the full `claude`-drives-a-tool-call end-to-end witness is
-  still owed (issue #1059). It does **not** claim capability parity on real tasks.
+  model; **(c)** this historical run exposed the old `--local` / `claude` env-wiring
+  gap that current guard code fixes by also injecting `ANTHROPIC_BASE_URL`; **(d)** the
+  full `claude`-drives-a-tool-call end-to-end witness is still owed (issue #1059). It
+  does **not** claim capability parity on real tasks.
 
 ---
 
