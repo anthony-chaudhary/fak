@@ -85,6 +85,22 @@ scope can emit and consume it without prose parsing.
 `fix-label | fix-milestone | promote | demote | retire | park | add-witness`,
 chosen from the first RED check.
 
+### Field bindings
+
+Each check reads a cheap GitHub field, so a groomer (or the future `fak issue fit`
+verb) can score from `gh issue view <n> --json labels,milestone,body` alone —
+no epic reread, no clone:
+
+| Check | GitHub source | Fit rule |
+|---|---|---|
+| 1 label_completeness | `.labels[].name` | `generation` present and exactly one `gen/*`. |
+| 2 label_milestone_agree | `.labels[].name` × `.milestone.title` | pair matches the [streams table](../docs/generation.md#streams). |
+| 3 scope_width_fit | `.body` "Initial scope" / stream rule | scope grain matches the stream. |
+| 4 proof_bar_fit | `.body` "Acceptance" / "Witness" | promised witness meets the stream's proof bar. |
+| 5 risk_exposure_fit | `.body` gate/dogfood/handoff language | risk is behind a gate, not a runtime-gate substitute. |
+| 6 evidence_completeness | `.body` | promotion + demotion/retirement + ≥1 invalidating assumption all present. |
+| 7 continuation | `.body` | scope + horizon + witness self-contained. |
+
 ## Worked before/after readout
 
 Applying the rubric to two issues shows the flag firing and clearing.
