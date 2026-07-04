@@ -28,9 +28,17 @@ type Outcome string
 const (
 	OutcomeCollected Outcome = "collected" // ran clean, artifact captured
 	OutcomeFailed    Outcome = "failed"    // ran, non-zero exit / no artifact
-	OutcomeTimeout   Outcome = "timeout"   // exceeded the per-task wall-clock budget; killed (partial artifact kept)
-	OutcomeDryRun    Outcome = "dry-run"   // printed only; nothing executed (a summary state — never written to the ledger by the run loop, but a valid recorded outcome)
-	OutcomeSkipped   Outcome = "skipped"   // a manual/placeholder Run (operator-setup witness); surfaced but never auto-executed by the run loop — but a valid recorded outcome (a bridge fold of a hand-run datum)
+	OutcomeTimeout   Outcome = "timeout"   // exceeded the per-task wall-clock budget; killed (partial artifact kept, but no number parsed)
+	// OutcomePartial is a timed-out run whose captured partial output still parsed a
+	// real headline number (#2383) — distinct from OutcomeTimeout, which drops the
+	// number entirely. It banks the work a killed run already did as a WEAKER
+	// freshness tier: CollectedOutcome is deliberately false for it (it never
+	// masquerades as a clean collect), but the selector gives it a short re-check
+	// window so Rank does not re-run it from zero on the very next attempt, while
+	// still re-picking it once that shorter horizon ages out.
+	OutcomePartial Outcome = "partial"
+	OutcomeDryRun  Outcome = "dry-run" // printed only; nothing executed (a summary state — never written to the ledger by the run loop, but a valid recorded outcome)
+	OutcomeSkipped Outcome = "skipped" // a manual/placeholder Run (operator-setup witness); surfaced but never auto-executed by the run loop — but a valid recorded outcome (a bridge fold of a hand-run datum)
 	// OutcomePassed / OutcomeDegraded are the BRIDGE-FOLD outcomes. A heavy HW-gated
 	// witness (a GLM-5.2 decode on a DGX, a CUDA-graph parity run) is reached over the
 	// Slack bridge, NOT by running `fak nightrun run --apply` on-box, so its result is
@@ -64,6 +72,7 @@ var validOutcomes = map[Outcome]bool{
 	OutcomeCollected: true,
 	OutcomeFailed:    true,
 	OutcomeTimeout:   true,
+	OutcomePartial:   true,
 	OutcomeDryRun:    true,
 	OutcomeSkipped:   true,
 	OutcomePassed:    true,
@@ -93,7 +102,7 @@ type CollectRow struct {
 	TaskID      string  `json:"task_id"`                // the Task.ID join key
 	Value       string  `json:"value"`                  // the Task's importance class, for trend reads
 	Command     string  `json:"command"`                // the exact command run (or that would run)
-	Outcome     string  `json:"outcome"`                // collected | failed | dry-run | skipped | heartbeat
+	Outcome     string  `json:"outcome"`                // collected | failed | timeout | partial | dry-run | skipped | passed | degraded | heartbeat
 	Phase       string  `json:"phase,omitempty"`        // "heartbeat" for a mid-run liveness row; empty for the terminal row (#2385)
 	Cell        string  `json:"cell,omitempty"`         // grid position k/N at heartbeat time, best-effort (heartbeat rows only)
 	Artifact    string  `json:"artifact,omitempty"`     // captured output path, when any
@@ -260,7 +269,7 @@ type OffSchemaError struct {
 
 func (e *OffSchemaError) Error() string {
 	return "nightrun ledger: task " + e.TaskID + ": off-schema outcome " + strconv.Quote(e.Outcome) +
-		" (not in collected|failed|timeout|dry-run|skipped|passed|degraded|heartbeat)"
+		" (not in collected|failed|timeout|partial|dry-run|skipped|passed|degraded|heartbeat)"
 }
 
 // LedgerDefect is one reason a ledger row failed validation, keyed to the offending
@@ -299,7 +308,7 @@ func ValidateLedger(rows []CollectRow, registeredIDs map[string]bool) []LedgerDe
 		if !IsValidOutcome(Outcome(r.Outcome)) {
 			defects = append(defects, LedgerDefect{
 				Line: line, TaskID: r.TaskID, Outcome: r.Outcome,
-				Reason: "off-schema outcome (not in collected|failed|timeout|dry-run|skipped|passed|degraded|heartbeat)",
+				Reason: "off-schema outcome (not in collected|failed|timeout|partial|dry-run|skipped|passed|degraded|heartbeat)",
 			})
 		}
 		if registeredIDs != nil && !registeredIDs[r.TaskID] {
@@ -314,15 +323,32 @@ func ValidateLedger(rows []CollectRow, registeredIDs map[string]bool) []LedgerDe
 
 // lastCollected returns the most recent SUCCESSFUL collection row for taskID on
 // box, and whether one exists. Only a collected-class outcome counts (the run
-// loop's "collected" or a bridge-folded "passed") — a failed, timed-out, skipped,
-// dry-run, or "degraded" (ran but missed its bar) attempt does not make a datum
-// fresh. Comparison is by (date, then generated_at) so a same-day re-run is ordered
-// after the earlier one.
+// loop's "collected" or a bridge-folded "passed") — a failed, timed-out, partial,
+// skipped, dry-run, or "degraded" (ran but missed its bar) attempt does not make a
+// datum fresh. Comparison is by (date, then generated_at) so a same-day re-run is
+// ordered after the earlier one.
 func lastCollected(rows []CollectRow, taskID, box string) (CollectRow, bool) {
+	return latestMatching(rows, taskID, box, CollectedOutcome)
+}
+
+// lastPartial returns the most recent PARTIAL row for taskID on box, and whether
+// one exists (#2383). A partial datum is weaker evidence than a clean collect: it
+// banks the number a timed-out run's captured output still parsed, but unlike
+// lastCollected it is only meant to buy the selector a short freshness window
+// (score() decides how short), never a permanent freshness the way a clean
+// collect does.
+func lastPartial(rows []CollectRow, taskID, box string) (CollectRow, bool) {
+	return latestMatching(rows, taskID, box, func(o Outcome) bool { return o == OutcomePartial })
+}
+
+// latestMatching returns the most recent row for taskID on box whose outcome
+// satisfies match, and whether one exists. Comparison is by (date, then
+// generated_at) so a same-day re-run is ordered after the earlier one.
+func latestMatching(rows []CollectRow, taskID, box string, match func(Outcome) bool) (CollectRow, bool) {
 	var best CollectRow
 	found := false
 	for _, r := range rows {
-		if r.TaskID != taskID || !CollectedOutcome(Outcome(r.Outcome)) {
+		if r.TaskID != taskID || !match(Outcome(r.Outcome)) {
 			continue
 		}
 		if box != "" && r.Box != box { // empty/other-box row is "not collected here"

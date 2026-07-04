@@ -74,8 +74,10 @@
 //     sweep. Heavy witnesses carry an explicit TimeoutSec (a cold GLM load: 30 min;
 //     a serve+throughput sweep: 1 h). For a one-off heavy collection, raise it
 //     WITHOUT recompiling via the overlay file (DefaultOverlayRel): add a row with
-//     `"timeout_sec": 3600`. A task that exceeds its budget is killed and recorded
-//     OBSERVED as a timeout, never a success, so one hung run cannot stall the loop.
+//     `"timeout_sec": 3600`. A task that exceeds its budget is killed; it is
+//     recorded OBSERVED as a timeout (never a success) unless its captured partial
+//     output still parsed a real number, in which case it is banked as the weaker
+//     OutcomePartial tier (#2383) — either way one hung run cannot stall the loop.
 //
 // A curated witness whose Run is a HUMAN RECIPE (a `<placeholder>`, a prose arrow,
 // or a bare `script.sh   # comment` that needs operator setup) carries Manual:true

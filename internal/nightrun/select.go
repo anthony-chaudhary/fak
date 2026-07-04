@@ -117,8 +117,21 @@ func score(t Task, caps Capabilities, ledger []CollectRow, now time.Time) Scored
 	// A Manual recipe is never an auto-collectable datum, so it is never "saturated"
 	// (the loop skips it for a different reason); an infeasible, never-collected, or
 	// overdue task is not saturated either.
-	if s.Feasible && s.Task.autoRunnable() && ok && s.AgeDays >= 0 && s.Staleness < 1 {
+	switch {
+	case s.Feasible && s.Task.autoRunnable() && ok && s.AgeDays >= 0 && s.Staleness < 1:
 		s.Saturated = true
+	// A PARTIAL datum (#2383) is weaker evidence than a clean collect: a timed-out
+	// run that still parsed a real number banks that work for a short horizon so
+	// the very next pick does not re-run it from zero — but that horizon is
+	// deliberately shorter than a clean collect's recheckDays, so a
+	// chronically-timing-out task is re-picked again once the partial ages out,
+	// instead of permanently suppressing its full re-measure.
+	case s.Feasible && s.Task.autoRunnable() && !ok:
+		if p, pok := lastPartial(ledger, t.ID, caps.Box); pok {
+			if age, valid := ageDays(now, p.GeneratedAt, p.Date); valid && age < float64(t.partialRecheckDays()) {
+				s.Saturated = true
+			}
+		}
 	}
 	s.Reason = reasonFor(s, why)
 	return s
@@ -137,6 +150,8 @@ func reasonFor(s Scored, infeasibleWhy string) string {
 		return "operator recipe — run by hand; the unattended `run --apply` loop skips it (needs a setup the prober can't gate)"
 	}
 	switch {
+	case s.LastCollected == "" && s.Saturated:
+		return "timed out but banked a partial number — fresh for a short horizon, re-picked once it ages out (#2383)"
 	case s.LastCollected == "":
 		return fmt.Sprintf("never collected on this box — a first-ever %s datum", s.Task.Value)
 	case s.Staleness >= 1.0:

@@ -421,8 +421,14 @@ func execTask(ctx context.Context, root string, cache *goRunCache, t Task, artif
 		return OutcomeFailed, "", dur, fmt.Errorf("capture output: %w", werr)
 	}
 	// A deadline hit is reported as a timeout, not a generic failure: it is the
-	// budget firing, not the command itself exiting non-zero.
+	// budget firing, not the command itself exiting non-zero. But the captured
+	// partial output is still evidence of how far the run got (#2383) — if it
+	// contains a parseable headline number, bank it under the weaker OutcomePartial
+	// tier instead of discarding the parse the way a plain timeout does.
 	if runCtx.Err() == context.DeadlineExceeded {
+		if number := parseNumber(string(out)); number != "" {
+			return OutcomePartial, number, dur, fmt.Errorf("task %q exceeded its %s budget (partial measurement banked: %s)", t.ID, t.timeout(), number)
+		}
 		return OutcomeTimeout, "", dur, fmt.Errorf("task %q exceeded its %s budget", t.ID, t.timeout())
 	}
 	if err != nil {

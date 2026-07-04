@@ -168,6 +168,19 @@ func (t Task) recheckDays() int {
 	return DefaultRecheckDays
 }
 
+// partialRecheckDays returns the weaker re-check horizon a PARTIAL datum (#2383)
+// stays "fresh enough" for — deliberately shorter than recheckDays() so a
+// chronically-timing-out task still gets re-picked once this shorter horizon ages
+// out, instead of a partial permanently suppressing a full re-measure the way a
+// clean collect does. Floored at 1 day.
+func (t Task) partialRecheckDays() int {
+	d := t.recheckDays() / 4
+	if d < 1 {
+		return 1
+	}
+	return d
+}
+
 // timeout returns the Task's per-attempt wall-clock budget, defaulting when unset.
 func (t Task) timeout() time.Duration {
 	if t.TimeoutSec > 0 {
