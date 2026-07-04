@@ -209,6 +209,14 @@ func (t Task) autoRunnable() bool {
 	return !placeholderRE.MatchString(run)
 }
 
+// AutoRunnable reports whether the task is safe for an unattended runner to exec.
+// It is the exported view used by control-plane packages that must choose between
+// "collect now" and "surface an operator recipe" without duplicating the
+// placeholder/prose-arrow rules.
+func (t Task) AutoRunnable() bool {
+	return t.autoRunnable()
+}
+
 // DefaultRecheckDays is the fall-back staleness horizon for a Task that does not
 // declare its own — the same 14-day default tools/bench_plan.py uses, so the two
 // planners agree on what "stale" means.
