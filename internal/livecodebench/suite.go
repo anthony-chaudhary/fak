@@ -88,19 +88,23 @@ type TestCase struct {
 // without an evidence class, and ResultClaimAllowed cannot be true unless the
 // evidence class is EvidenceOfficialLCBRunner — see Validate.
 type Report struct {
-	Schema                string      `json:"schema"`
-	GeneratedAt           string      `json:"generated_at"`
-	Benchmark             string      `json:"benchmark"`
-	Model                 string      `json:"model,omitempty"`
-	ReleaseVersion        string      `json:"release_version"`
-	StartDate             string      `json:"start_date,omitempty"`
-	EndDate               string      `json:"end_date,omitempty"`
-	EvidenceClass         string      `json:"evidence_class,omitempty"`
-	Arms                  []ArmResult `json:"arms,omitempty"`
-	Summary               Summary     `json:"summary"`
-	PromotionRequirements []string    `json:"promotion_requirements,omitempty"`
-	ResultClaimAllowed    bool        `json:"result_claim_allowed"`
-	ClaimBoundary         string      `json:"claim_boundary,omitempty"`
+	Schema         string `json:"schema"`
+	GeneratedAt    string `json:"generated_at"`
+	Benchmark      string `json:"benchmark"`
+	Model          string `json:"model,omitempty"`
+	ReleaseVersion string `json:"release_version"`
+	StartDate      string `json:"start_date,omitempty"`
+	EndDate        string `json:"end_date,omitempty"`
+	EvidenceClass  string `json:"evidence_class,omitempty"`
+	// WindowScore carries the contamination-free date-windowed rate alongside the
+	// full-set rate when a run scopes results to a contest-date window (see
+	// WindowedPassAtK); nil when the run was not date-windowed.
+	WindowScore           *WindowScores `json:"window_score,omitempty"`
+	Arms                  []ArmResult   `json:"arms,omitempty"`
+	Summary               Summary       `json:"summary"`
+	PromotionRequirements []string      `json:"promotion_requirements,omitempty"`
+	ResultClaimAllowed    bool          `json:"result_claim_allowed"`
+	ClaimBoundary         string        `json:"claim_boundary,omitempty"`
 }
 
 // ArmResult is one (arm, scenario) result cell: raw vs fak, per scenario.
