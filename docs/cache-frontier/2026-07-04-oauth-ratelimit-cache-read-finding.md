@@ -44,12 +44,20 @@ real sessions, which needs the durable seam.
   utilization / status / reset) and `anthropic-ratelimit-<family>-*` /
   `x-ratelimit-*` headers off every upstream response
   ([`internal/gateway/upstream_observe.go`](../../internal/gateway/upstream_observe.go)
-  → `internal/accountobs/accountobs.go`). But a `Tracker` is a **latest-value,
-  in-memory** view: it is rendered only to (a) the guard exit banner
-  (`Snapshot.Report`) and (b) the `/metrics` `fak_account_ratelimit_*` gauges
-  (`Snapshot.PrometheusText`). Nothing writes a per-session utilization/burn row
-  to any append-only ledger. The gauges are point-in-time scrape values, not an
-  archived per-session series.
+  → `internal/accountobs/accountobs.go`). But the gap is **one step earlier than
+  "observed-but-not-persisted": in the shipped tree the session `Tracker` is not
+  wired into any production session at all.** `gateway.Config.UpstreamResponseObserver`
+  — the seam that would feed a `Tracker` — is assigned only in a test
+  (`internal/gateway/upstream_observe_test.go`); no `cmd/fak` file imports
+  `internal/accountobs`; and `Snapshot.Report` (the guard-exit banner its own doc
+  comment names) and `Snapshot.PrometheusText` (the `fak_account_ratelimit_*` gauges)
+  have **zero production callers** — the guard's `/metrics` `PrometheusText` at
+  `cmd/fak/guard.go:1008` renders the harness *resource* sampler, not the account
+  view. The only live use of the header taxonomy is the transient per-429 reset
+  resolver, which builds a throwaway `accountobs.New()`, reads one response's
+  `Unified()` windows, and discards it (`internal/agent/retry_limit.go:117-120`;
+  `internal/resume/limit.go`). So a running OAuth session neither accumulates a
+  utilization curve nor writes one to any append-only ledger.
 - **Cache-read side.** The durable per-session record is the cache-savings ledger
   `docs/nightrun/cache-savings.jsonl` (schema `fak-cache-savings-ledger/1`,
   `internal/cachevaluereport` `SavingsRow`). It carries `cache_read_tokens`,
@@ -114,8 +122,18 @@ near-term gate or dogfood — the enabling schema change has to land first).
 
 ## Smallest next step
 
-Land the co-persistence witness: add the per-session unified-window
-utilization/burn fields to the durable session ledger so a later worker can run the
-correlation on real OAuth sessions. Until then, `--managed-cache` AUTO passivity on
-OAuth is **evidence-tracked as unmeasured**, not silently assumed — which is the
-state #2183 asked for.
+Because the account view is not accumulated per session at all (above), the witness
+lands in three ordered steps, not one:
+
+1. **Wire it.** Install a session-scope `accountobs.Tracker` onto
+   `gateway.Config.UpstreamResponseObserver` in the guard/serve command (the seam
+   and parser already exist and are tested) so a running OAuth session accumulates
+   its unified-window utilization curve and 429 count.
+2. **Persist it.** Append the folded snapshot (per-window utilization at exit, 429
+   count, resets) to the durable session ledger, keyed so it joins the
+   `cache-savings` row for the same session.
+3. **Measure it.** Run a matched cache-hot vs cache-cold A/B on two equivalent
+   Pro/Max seats and compare the unified-window utilization slope.
+
+Until step 3, `--managed-cache` AUTO passivity on OAuth is **evidence-tracked as
+unmeasured**, not silently assumed — which is the state #2183 asked for.
