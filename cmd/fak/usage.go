@@ -423,11 +423,12 @@ const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--
                  plus garden health, guard proof packets, and a composed overview,
                  with fixture-friendly JSON models for deterministic use. fak tui
                  is the compatibility alias)
-  fak claude-mac-fak [--dry-run] [--probe] [--prompt STR]
-                (one-command Mac gateway dogfood: defaults to the always-on
-                 node-macos-a fak serve gateway, fetches the bearer over ssh when
-                 FAK_GATEWAY_KEY is empty, and opens interactive Claude Code
-                 through the existing fak console agent launcher. --probe runs
+  fak mac       [--dry-run] [--probe] [--prompt STR]
+                (one-command Mac gateway dogfood — the crisp handle; the long form
+                 fak claude-mac-fak keeps working byte-for-byte. Defaults to the
+                 always-on node-macos-a fak serve gateway, fetches the bearer over
+                 ssh when FAK_GATEWAY_KEY is empty, and opens interactive Claude
+                 Code through the existing fak console agent launcher. --probe runs
                  a one-shot JSON check)
   fak info      [--gateway-url URL] [--interval DUR] [--once] [--json]
                 (the live fak-info overlay: poll a fak guard/serve gateway's

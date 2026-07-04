@@ -33,10 +33,12 @@ serve` gateway and reads the bearer from an environment variable.
 
 ## One-command test
 
-From the repo root, this opens interactive Claude Code against the Mac gateway:
+From the repo root, this opens interactive Claude Code against the Mac gateway.
+`fak mac` is the crisp handle; `fak claude-mac-fak` is the equivalent long form —
+both route to the same launcher, byte-for-byte:
 
 ```powershell
-go run ./cmd/fak claude-mac-fak
+go run ./cmd/fak mac
 ```
 
 If `FAK_GATEWAY_KEY` is empty, the command fetches the gateway bearer from

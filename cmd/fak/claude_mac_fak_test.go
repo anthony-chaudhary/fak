@@ -807,3 +807,41 @@ func TestClaudeMacFakProbePreflightsQuietly(t *testing.T) {
 		t.Fatalf("headless probe preflight must stay quiet on stdout:\n%s", stdout.String())
 	}
 }
+
+// TestMacAliasRoutesToClaudeMacFak proves the crisp `fak mac` handle (#2693) is a live
+// dispatch spelling that resolves to the SAME verb as the long `fak claude-mac-fak` — an
+// alias, not a rename. The routing itself is the shared `case "claude-mac-fak", "mac":`
+// arm in main.go; this pins it through the live, dispatch-derived verb catalog, so a
+// later edit that drops either spelling — or forks them onto different handlers — reds
+// here. The identical launch plan is guaranteed by construction: both arms make the one
+// `cmdClaudeMacFak(os.Args[2:])` call, so there is no divergent code path to drift.
+func TestMacAliasRoutesToClaudeMacFak(t *testing.T) {
+	cat := helpCatalog()
+	if cat == nil {
+		t.Skip("devindex catalog unavailable (no repo root); alias routing is only checkable in-repo")
+	}
+	// Both spellings must be LIVE dispatch tokens derived from main.go's switch.
+	live := map[string]bool{}
+	for _, v := range cat.Verbs() {
+		for _, sp := range v.Spellings() {
+			live[strings.ToLower(sp)] = true
+		}
+	}
+	for _, sp := range []string{"mac", "claude-mac-fak"} {
+		if !live[sp] {
+			t.Errorf("%q is not a live dispatch spelling — the alias is not wired in main.go", sp)
+		}
+	}
+	// And both must resolve to the one verb: two names, one handler.
+	macV, ok := cat.VerbByName("mac")
+	if !ok {
+		t.Fatal("VerbByName(mac) did not resolve — mac is not a registered alias")
+	}
+	longV, ok := cat.VerbByName("claude-mac-fak")
+	if !ok {
+		t.Fatal("VerbByName(claude-mac-fak) did not resolve")
+	}
+	if macV.Name != "claude-mac-fak" || macV.Name != longV.Name {
+		t.Errorf("mac -> %q, claude-mac-fak -> %q; want both = claude-mac-fak", macV.Name, longV.Name)
+	}
+}

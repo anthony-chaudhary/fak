@@ -194,7 +194,9 @@ func main() {
 		cmdChatRelay(os.Args[2:])
 	case "relay":
 		cmdRelay(os.Args[2:])
-	case "claude-mac-fak":
+	case "claude-mac-fak", "mac":
+		// `fak mac` is the crisp, memorable handle; `fak claude-mac-fak` is the long
+		// form kept working byte-for-byte. Both spellings route to the one handler.
 		cmdClaudeMacFak(os.Args[2:])
 	case "macbench":
 		cmdMacBench(os.Args[2:])

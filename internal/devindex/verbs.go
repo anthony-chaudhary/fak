@@ -95,7 +95,7 @@ var verbManifest = []Verb{
 	{Name: "chatrelay", Synopsis: "the chat-relay Slack surface bridging a channel to a gateway", Lane: "cmd"},
 	{Name: "check-tool-failure", Synopsis: "lookup the closed non-guard tool-failure vocabulary (summary/fix/retryable)", Lane: "cmd"},
 	{Name: "claim-check", Synopsis: "grade an efficiency/perf claim against the six-question net-true-value rubric", Lane: "cmd"},
-	{Name: "claude-mac-fak", Synopsis: "one-command Mac gateway dogfood through the node-macos-a fak serve gateway", Lane: "cmd"},
+	{Name: "claude-mac-fak", Synopsis: "one-command Mac gateway dogfood through the node-macos-a fak serve gateway", Aliases: []string{"mac"}, Lane: "cmd"},
 	{Name: "cluster", Synopsis: "multi-node compute: run a real cross-node collective over fak's process group", Lane: "cmd"},
 	{Name: "codelint", Synopsis: "language-server-pack code linter: route each file to its pack and report parse/compile errors", Lane: "cmd"},
 	{Name: "codex", Synopsis: "OpenAI Codex integration launcher (codex exec routed through the kernel)", Lane: "cmd"},
