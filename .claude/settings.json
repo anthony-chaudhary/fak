@@ -18,7 +18,7 @@
             "type": "command"
           }
         ],
-        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit"
+        "matcher": "Bash|Read|Write|Edit|MultiEdit|NotebookEdit"
       },
       {
         "hooks": [
