@@ -430,6 +430,12 @@ func (c *claudeMacDebugClient) probe() (claudeMacHealth, claudeMacDebugVars, err
 // discards. The bearer is never printed.
 func renderClaudeMacPreflight(h claudeMacHealth, v claudeMacDebugVars, gatewayURL, model, auth, grafanaURL string) string {
 	var b strings.Builder
+	// Signature banner: this panel is the seconds-long "boot screen" a user stares at (and
+	// screenshots) before Claude Code takes the terminal, so it opens with one recognizable
+	// line naming what fak is doing — pointing Claude Code at the user's own Mac-local model.
+	// It is a constant brand line, not a claim; the live gateway/health facts follow
+	// immediately below. The `== … ==` framing matches the --metrics output (runClaudeMacMetrics).
+	fmt.Fprintln(&b, "== fak · Claude Code -> your own Mac's local model ==")
 	fmt.Fprintf(&b, "fak debug · gateway %s\n", gatewayURL)
 	healthWord := "ok"
 	if !h.OK {

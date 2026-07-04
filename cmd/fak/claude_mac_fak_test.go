@@ -388,6 +388,7 @@ func TestRenderClaudeMacPreflightWarnsOnMockWithoutBearerLeak(t *testing.T) {
 		"http://grafana.example",
 	)
 	for _, want := range []string{
+		"== fak · Claude Code -> your own Mac's local model ==",
 		"fak debug",
 		"planner(live)=mock",
 		"vdso=on",
