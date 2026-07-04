@@ -99,6 +99,40 @@ func TestMaybeUpgradeCacheTTL1HGate(t *testing.T) {
 	}
 }
 
+// TestMaybeUpgradeCacheTTL1HPlacesThenUpgrades (#2175): a caller that sends ZERO cache_control
+// used to hit no_stable_breakpoint forever — upgrade only edits an EXISTING breakpoint, and the
+// sibling that places one (agent.PlaceAnthropicCacheBreakpointWithOutcome) only ran behind the
+// compaction gate (compactHistoryBudget>0), not the managed-cache posture. With --managed-cache
+// ACTIVE and compaction OFF, the flagship lever must still place-then-upgrade as one transform.
+func TestMaybeUpgradeCacheTTL1HPlacesThenUpgrades(t *testing.T) {
+	raw := []byte(`{"model":"claude","max_tokens":1024,` +
+		`"system":[{"type":"text","text":"stable policy, no caching hint at all"}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)
+	req, err := agent.DecodeAnthropicMessagesRequest(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	s := anthropicPassthroughServer(0) // compaction OFF: placement must not depend on it
+	s.cacheTTL1H = true
+	s.metrics = newGatewayMetrics(time.Now())
+
+	if !s.maybeUpgradeAnthropicCacheTTL1H(req) {
+		t.Fatal("managed-cache ACTIVE must place-then-upgrade a zero-cache_control stable head")
+	}
+	if !bytes.Contains(req.Raw, []byte(`"cache_control":{"type":"ephemeral","ttl":"1h"}`)) {
+		t.Fatalf("system head was not placed+upgraded to 1h:\n%s", req.Raw)
+	}
+	if n := s.metrics.ttlUpgrades[agent.TTLUpgradeReasonNoStableBreakpoint]; n != 0 {
+		t.Fatalf("no_stable_breakpoint must stay flat on the composed path, got %d", n)
+	}
+	if n := s.metrics.ttlUpgrades[cacheTTLUpgradePlacedAndUpgraded]; n != 1 {
+		t.Fatalf("placed_and_upgraded must count the composed attempt, got %d", n)
+	}
+	if n := s.metrics.ttlUpgrades["upgraded"]; n != 0 {
+		t.Fatalf("the composed row must not double-count into upgrade-only, got %d", n)
+	}
+}
+
 // TestMaybeCompactOffIsIdentity: budget 0 forwards the body byte-for-byte unchanged.
 func TestMaybeCompactOffIsIdentity(t *testing.T) {
 	raw := compactWireBody(t, 16)

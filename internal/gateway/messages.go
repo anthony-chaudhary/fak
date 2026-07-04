@@ -753,6 +753,24 @@ func (s *Server) maybeUpgradeAnthropicCacheTTL1H(req *agent.AnthropicMessagesReq
 		return false
 	}
 	out, outcome := agent.UpgradeAnthropicStableCacheTTL1h(req.Raw)
+	if outcome.Reason == agent.TTLUpgradeReasonNoStableBreakpoint {
+		// #2175: the flagship lever no-ops forever on a caller that sends zero cache_control,
+		// because upgrade only edits an EXISTING stable-head breakpoint. Compose place-then-upgrade
+		// as one transform so ACTIVE closes the dead end instead of depending on compaction's
+		// (compactHistoryBudget-gated) placement to have run first. Byte-safe: placement itself is
+		// fail-safe identity on ambiguity, and the upgrade below re-validates the placed bytes.
+		placed, placement := agent.PlaceAnthropicCacheBreakpointWithOutcome(req.Raw)
+		s.metrics.observePlacement(placement)
+		if placement.Reason == agent.BreakpointReasonNone {
+			if upgraded, upgradeOutcome := agent.UpgradeAnthropicStableCacheTTL1h(placed); upgradeOutcome.Reason == agent.TTLUpgradeReasonNone {
+				req.Raw = upgraded
+				// New outcome value distinct from "upgraded" (upgrade-only) and "placed" (placement-only
+				// from the compaction path), so a sweep can attribute the composed case on its own row.
+				s.metrics.observeCacheTTLUpgrade(cacheTTLUpgradePlacedAndUpgraded)
+				return true
+			}
+		}
+	}
 	// WITNESSED per attempt while the lever is on (--managed-cache / FAK_ABLATE_TTL_1H), so
 	// an active-but-never-eligible session is visible on /metrics instead of silent.
 	s.metrics.observeCacheTTLUpgrade(outcome.Reason)

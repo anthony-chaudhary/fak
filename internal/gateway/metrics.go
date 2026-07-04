@@ -662,6 +662,13 @@ func (m *gatewayMetrics) observeCtxViewRewrite(out agent.CompactOutcome) {
 	m.ctxViewMu.Unlock()
 }
 
+// cacheTTLUpgradePlacedAndUpgraded is the composed-transform outcome (#2175): the caller sent
+// zero cache_control, so maybeUpgradeAnthropicCacheTTL1H placed a stable-head breakpoint AND
+// upgraded it to the 1h tier in one turn. Distinct from "upgraded" (an existing breakpoint was
+// upgraded) and placement's own "placed" row (compaction-path placement, no TTL upgrade), so a
+// sweep can attribute placement-only vs upgrade-only vs composed.
+const cacheTTLUpgradePlacedAndUpgraded = "placed_and_upgraded"
+
 // observeCacheTTLUpgrade records one managed-cache 1h TTL upgrade attempt on the outbound
 // Anthropic wire, bucketed by the closed agent.TTLUpgradeReason* outcome ("" — an actual
 // upgrade — counts as "upgraded"). WITNESSED: fak authored the splice, and the upgrader
@@ -2955,7 +2962,7 @@ func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
 	// OBSERVED on the cache_read counters, never claimed here. The "upgraded" row is emitted
 	// even at 0 so an active lever with zero eligible heads is visible, not silent.
 	writeHelpType(b, "fak_gateway_cache_ttl_upgrade_total",
-		"WITNESSED (fak authored): managed-cache 1h TTL upgrade attempts on the outbound Anthropic wire, by outcome: upgraded (ttl:\"1h\" spliced into the stable system/tools-head cache_control) or the bail reason (no_stable_breakpoint|already_1h|ttl_already_set|volatile_head|non_json|splice_failed|redecode_failed). Rows exist only while --managed-cache is ACTIVE. splice_failed/redecode_failed are fak bugs and must stay 0. The provider honoring the 1h tier across an idle gap is OBSERVED via cache_read, not claimed by this counter.", "counter")
+		"WITNESSED (fak authored): managed-cache 1h TTL upgrade attempts on the outbound Anthropic wire, by outcome: upgraded (ttl:\"1h\" spliced into an existing stable system/tools-head cache_control), placed_and_upgraded (no cache_control existed; fak placed the stable-head breakpoint AND upgraded it in one turn, #2175), or the bail reason (no_stable_breakpoint|already_1h|ttl_already_set|volatile_head|non_json|splice_failed|redecode_failed). Rows exist only while --managed-cache is ACTIVE. splice_failed/redecode_failed are fak bugs and must stay 0. The provider honoring the 1h tier across an idle gap is OBSERVED via cache_read, not claimed by this counter.", "counter")
 	fmt.Fprintf(b, "fak_gateway_cache_ttl_upgrade_total{outcome=%q} %d\n", "upgraded", snap.ttlUpgrades["upgraded"])
 	ttlReasons := make([]string, 0, len(snap.ttlUpgrades))
 	for r := range snap.ttlUpgrades {
