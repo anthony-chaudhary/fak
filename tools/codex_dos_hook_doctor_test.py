@@ -1,6 +1,7 @@
 """Hermetic tests for tools/codex_dos_hook_doctor.py."""
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 import sys
@@ -62,6 +63,10 @@ def write_manifest(home: Path) -> Path:
         encoding="utf-8",
     )
     return manifest
+
+
+def powershell_encoded(script: str) -> str:
+    return base64.b64encode(script.encode("utf-16-le")).decode("ascii")
 
 
 class CodexDosHookDoctorTest(unittest.TestCase):
@@ -213,6 +218,34 @@ class CodexDosHookDoctorTest(unittest.TestCase):
             command = rewritten["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
             self.assertIn("dos-hook.ps1", command)
             self.assertNotIn("'2>/dev/null'", command)
+
+    def test_encoded_powershell_native_launcher_is_classified(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td) / "codex-home"
+            manifest = write_manifest(home)
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            script = (
+                "$root = $env:CODEX_PLUGIN_ROOT\n"
+                "if (-not $root) { $root = 'C:\\Users\\USER\\.codex\\plugins\\cache\\dos\\dos-kernel\\0.29.0' }\n"
+                "& (Join-Path $root 'bin/dos-hook.ps1') pretool --workspace . *> $null\n"
+                "if ($LASTEXITCODE -ne 0) { python -m dos.cli hook pretool --workspace . *> $null }\n"
+                "exit 0\n"
+            )
+            data["hooks"]["PreToolUse"][0]["hooks"][0] = {
+                "type": "command",
+                "shell": "bash",
+                "command": "powershell.exe -NoProfile -NonInteractive -EncodedCommand " + powershell_encoded(script),
+            }
+            del data["hooks"]["UserPromptSubmit"]
+            manifest.write_text(json.dumps(data) + "\n", encoding="utf-8")
+
+            report = mod.build_report(home, apply=False, target_shell="powershell")
+
+            self.assertEqual(report["status"], "PASS")
+            self.assertEqual(report["summary"]["command_modes"], {"powershell_native_launcher": 1})
+            self.assertEqual(report["summary"]["projected_command_modes"], {"powershell_native_launcher": 1})
+            self.assertEqual(report["summary"]["replacements_available"], 0)
 
     def test_unparseable_python_hook_stays_unrepairable(self) -> None:
         mod = load()

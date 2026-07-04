@@ -12,6 +12,7 @@ not hook command bodies.
 from __future__ import annotations
 
 import argparse
+import base64
 from collections import Counter
 import json
 import os
@@ -24,18 +25,19 @@ from typing import Any
 
 SCHEMA = "fak-codex-dos-hook-doctor/1"
 PYTHON_HOOK_RE = re.compile(
-    r"-m\s+dos\.cli\s+hook\s+(?P<verb>[a-z0-9-]+)(?P<flags>.*?)(?:;|$)",
+    r"-m\s+dos\.cli\s+hook\s+(?P<verb>[a-z0-9-]+)(?P<flags>[^\r\n;]*)",
     re.IGNORECASE,
 )
 NATIVE_HOOK_RE = re.compile(
-    r"dos-hook(?:\.ps1)?(?:['\"])?\s+['\"]?(?P<verb>[a-z0-9-]+)['\"]?(?P<flags>.*?)(?:;|$)",
+    r"dos-hook(?:\.ps1)?[^A-Za-z0-9_-]+['\"]?(?P<verb>[a-z0-9-]+)['\"]?(?P<flags>[^\r\n;]*)",
     re.IGNORECASE,
 )
 PS_NATIVE_HOOK_RE = re.compile(
-    r"&\s+\$[A-Za-z_][A-Za-z0-9_]*\s+['\"]?(?P<verb>[a-z0-9-]+)['\"]?(?P<flags>.*?)(?:;|$)",
+    r"&\s+\$[A-Za-z_][A-Za-z0-9_]*\s+['\"]?(?P<verb>[a-z0-9-]+)['\"]?(?P<flags>[^\r\n;]*)",
     re.IGNORECASE,
 )
-REDIRECT_TOKEN_RE = re.compile(r"^(?:\d?>|\d?>&|>&)")
+POWERSHELL_ENCODED_RE = re.compile(r"(?i)(?:-|/)EncodedCommand\s+([A-Za-z0-9+/=]+)")
+REDIRECT_TOKEN_RE = re.compile(r"^(?:\d?>|\d?>&|>&|\*>)")
 
 
 def default_codex_home(env: dict[str, str] = os.environ) -> Path:
@@ -67,7 +69,7 @@ def discover_manifests(home: Path) -> list[Path]:
 
 
 def hook_command_mode(command: str) -> str:
-    lower = command.lower()
+    lower = command_search_text(command).lower()
     if "dos-hook.ps1" in lower:
         return "powershell_native_launcher"
     if "dos-hook" in lower:
@@ -78,13 +80,37 @@ def hook_command_mode(command: str) -> str:
 
 
 def command_has_codex_dialect(command: str) -> bool:
-    normalized = command.lower().replace("'", "").replace('"', "")
+    normalized = command_search_text(command).lower().replace("'", "").replace('"', "")
     return "--dialect codex" in normalized
 
 
 def command_has_quoted_redirect_arg(command: str) -> bool:
-    lower = command.lower()
+    lower = command_search_text(command).lower()
     return any(token in lower for token in ("'2>/dev/null'", '"2>/dev/null"', "'2>$null'", '"2>$null"'))
+
+
+def decode_powershell_encoded_command(command: str) -> str:
+    match = POWERSHELL_ENCODED_RE.search(command)
+    if match is None:
+        return ""
+    token = match.group(1)
+    try:
+        raw = base64.b64decode(token)
+    except (ValueError, base64.binascii.Error):
+        return ""
+    for enc in ("utf-16-le", "utf-8"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return ""
+
+
+def command_search_text(command: str) -> str:
+    decoded = decode_powershell_encoded_command(command)
+    if decoded:
+        return command + "\n" + decoded
+    return command
 
 
 def normalize_target_shell(target_shell: str) -> str:
@@ -128,6 +154,7 @@ def split_flags(flags: str) -> list[str]:
     flags = flags.strip()
     if not flags:
         return []
+    flags = re.split(r"\s+(?:\*>|\d?>|\d?>&|>&)", flags, maxsplit=1)[0].strip()
     try:
         parts = shlex.split(flags, posix=True)
     except ValueError:
@@ -136,7 +163,7 @@ def split_flags(flags: str) -> list[str]:
 
 
 def parse_python_hook(command: str) -> tuple[str, list[str]] | None:
-    match = PYTHON_HOOK_RE.search(command)
+    match = PYTHON_HOOK_RE.search(command_search_text(command))
     if match is None:
         return None
     verb = match.group("verb").strip()
@@ -145,7 +172,8 @@ def parse_python_hook(command: str) -> tuple[str, list[str]] | None:
 
 
 def parse_native_launcher(command: str) -> tuple[str, list[str]] | None:
-    match = PS_NATIVE_HOOK_RE.search(command) or NATIVE_HOOK_RE.search(command)
+    text = command_search_text(command)
+    match = PS_NATIVE_HOOK_RE.search(text) or NATIVE_HOOK_RE.search(text)
     if match is None:
         return None
     verb = match.group("verb").strip()
@@ -318,9 +346,11 @@ def inspect_manifest(path: Path, home: Path, *, apply: bool, target_shell: str =
     if replacements:
         status = "CHANGED" if applied else "WARN"
         reason = f"hook commands can be routed through the bundled {target} native launcher"
-    elif int(codex_command_modes.get(target_mode) or 0):
+    elif int(codex_command_modes.get(target_mode) or 0) or (
+        not codex_command_modes and int(command_modes.get(target_mode) or 0)
+    ):
         status = "PASS"
-        reason = "Codex hook commands already use the host-preferred native launcher"
+        reason = "hook commands already use the host-preferred native launcher"
     else:
         status = "UNKNOWN"
         reason = "no repairable hook commands or host-preferred Codex native hook commands were found"
@@ -374,7 +404,9 @@ def build_report(home: Path, *, apply: bool, target_shell: str = "auto") -> dict
         status = "CHANGED"
     elif replacements:
         status = "WARN"
-    elif int(codex_command_modes.get(target_mode) or 0):
+    elif int(codex_command_modes.get(target_mode) or 0) or (
+        not codex_command_modes and int(command_modes.get(target_mode) or 0)
+    ):
         status = "PASS"
     else:
         status = "UNKNOWN"

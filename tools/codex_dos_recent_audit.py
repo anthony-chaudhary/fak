@@ -11,6 +11,7 @@ It does not copy prompts, tool arguments, tool results, diffs, or model text.
 from __future__ import annotations
 
 import argparse
+import base64
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -28,6 +29,7 @@ import urllib.request
 SCHEMA = "fak-codex-dos-recent-audit/1"
 THREAD_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 ACTIVE_STOP_FAILURE_RECENT_HOURS = 6
+POWERSHELL_ENCODED_RE = re.compile(r"(?i)(?:-|/)EncodedCommand\s+([A-Za-z0-9+/=]+)")
 GIT_WRITE_SUBCOMMANDS = {
     "add",
     "checkout",
@@ -843,8 +845,31 @@ def hook_commands(manifest: dict[str, Any]) -> list[str]:
     return commands
 
 
+def decode_powershell_encoded_command(command: str) -> str:
+    match = POWERSHELL_ENCODED_RE.search(command)
+    if match is None:
+        return ""
+    try:
+        raw = base64.b64decode(match.group(1))
+    except (ValueError, base64.binascii.Error):
+        return ""
+    for enc in ("utf-16-le", "utf-8"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return ""
+
+
+def command_search_text(command: str) -> str:
+    decoded = decode_powershell_encoded_command(command)
+    if decoded:
+        return command + "\n" + decoded
+    return command
+
+
 def hook_command_mode(command: str) -> str:
-    lower = command.lower()
+    lower = command_search_text(command).lower()
     if "dos-hook.ps1" in lower:
         return "powershell_native_launcher"
     if "dos-hook" in lower:
@@ -855,7 +880,7 @@ def hook_command_mode(command: str) -> str:
 
 
 def command_has_codex_dialect(command: str) -> bool:
-    normalized = command.lower().replace("'", "").replace('"', "")
+    normalized = command_search_text(command).lower().replace("'", "").replace('"', "")
     return "--dialect codex" in normalized
 
 
@@ -929,9 +954,9 @@ def codex_hook_fast_path(home: Path, *, target_shell: str = "auto") -> dict[str,
     if codex_python:
         status = "WARN"
         reason = "Codex hook commands route through the Python CLI hook instead of the bundled native launcher"
-    elif codex_native_total:
+    elif codex_native_total or (not codex_command_modes and int(command_modes.get(target_mode) or 0)):
         status = "PASS"
-        reason = "Codex hook commands use a native launcher"
+        reason = "hook commands use the host-preferred native launcher"
     else:
         status = "UNKNOWN"
         reason = "no Codex-dialect hook commands were found in the cached manifest"
@@ -939,6 +964,7 @@ def codex_hook_fast_path(home: Path, *, target_shell: str = "auto") -> dict[str,
     try:
         doctor_report = load_hook_doctor_module().build_report(home, apply=False, target_shell=target)
         doctor_summary = doctor_report.get("summary") if isinstance(doctor_report.get("summary"), dict) else {}
+        projected = doctor_summary.get("projected_command_modes") or {}
         projected_codex = doctor_summary.get("projected_codex_command_modes") or {}
         codex_replacements = int(doctor_summary.get("codex_replacements_available") or 0)
         if doctor_report.get("status") == "WARN" and codex_replacements:
@@ -948,6 +974,7 @@ def codex_hook_fast_path(home: Path, *, target_shell: str = "auto") -> dict[str,
             "status": doctor_report.get("status"),
             "codex_replacements_available": codex_replacements,
             "codex_unrepairable_python_cli_hooks": int(doctor_summary.get("codex_unrepairable_python_cli_hooks") or 0),
+            "projected_command_modes": projected,
             "projected_codex_command_modes": projected_codex,
             "would_clear_codex_python_cli": (
                 int(projected_codex.get("python_cli") or 0) == 0

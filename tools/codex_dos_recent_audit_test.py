@@ -2,6 +2,7 @@
 """Hermetic tests for tools/codex_dos_recent_audit.py."""
 from __future__ import annotations
 
+import base64
 import importlib.util
 import contextlib
 import io
@@ -65,6 +66,10 @@ def write_hook_manifest(home: Path, command: str) -> Path:
 
 def native_bash_hook_command() -> str:
     return 'root="${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-}}"; "$root/bin/dos-hook" pretool --workspace . --dialect codex'
+
+
+def powershell_encoded(script: str) -> str:
+    return base64.b64encode(script.encode("utf-16-le")).decode("ascii")
 
 
 def write_gate_report(path: Path, *, tool: str, reason: str, created_at: str) -> None:
@@ -394,6 +399,29 @@ class RecentCodexDosAuditTest(unittest.TestCase):
             self.assertEqual(windows_target["target_command_mode"], "powershell_native_launcher")
             self.assertEqual(
                 windows_target["repair_projection"]["projected_codex_command_modes"],
+                {"powershell_native_launcher": 1},
+            )
+
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td) / "codex-home"
+            script = (
+                "$root = $env:CODEX_PLUGIN_ROOT\n"
+                "if (-not $root) { $root = 'C:\\Users\\USER\\.codex\\plugins\\cache\\dos\\dos-kernel\\0.29.0' }\n"
+                "& (Join-Path $root 'bin/dos-hook.ps1') pretool --workspace . *> $null\n"
+                "if ($LASTEXITCODE -ne 0) { python -m dos.cli hook pretool --workspace . *> $null }\n"
+                "exit 0\n"
+            )
+            write_hook_manifest(
+                home,
+                "powershell.exe -NoProfile -NonInteractive -EncodedCommand " + powershell_encoded(script),
+            )
+            encoded_report = mod.codex_hook_fast_path(home, target_shell="powershell")
+            self.assertEqual(encoded_report["status"], "PASS")
+            self.assertEqual(encoded_report["command_modes"], {"powershell_native_launcher": 1})
+            self.assertEqual(encoded_report["codex_command_modes"], {})
+            self.assertEqual(encoded_report["codex_powershell_native_hooks"], 0)
+            self.assertEqual(
+                encoded_report["repair_projection"]["projected_command_modes"],
                 {"powershell_native_launcher": 1},
             )
 
