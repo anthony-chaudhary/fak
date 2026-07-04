@@ -88,6 +88,7 @@ concurrent = [
   "slackwire",
   "slackoutbox",
   "trajctl",
+  "waiting",
   # They landed by hand / during the new_leaf.py path-bug window, so the `# new-leaf:lane`
   # auto-insert never fired. All are real, architest-tiered packages.
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
@@ -213,6 +214,7 @@ concurrent = [
   # pairwise-disjoint per the header invariant.
   "resume",
   "trajctl",
+  "waiting",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -307,6 +309,7 @@ autopick = [
   "resume", # internal/resume leaf (the crash-resume decision kernel), see [lanes].concurrent note
   "logvault", # #2449: internal/logvault leaf (central log-vault capture/verify), see [lanes].concurrent note
   "trajctl",
+  "waiting",
   # new-leaf:lane
 ]
 
@@ -483,6 +486,7 @@ slackoutbox = ["internal/slackoutbox/**"]
 resume = ["internal/resume/**"] # crash-resume decision kernel; cmd/fak resume_*.go shims stay in the `cmd` lane
 logvault = ["internal/logvault/**"] # #2449: internal/logvault leaf (central log-vault capture/verify); cmd/fak/logvault.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
 trajctl = ["internal/trajctl/**"]
+waiting = ["internal/waiting/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
@@ -794,6 +798,19 @@ refusal  = false
 summary  = "a single foreground sleep timer at or over 120s in a Bash/PowerShell tool call -- it holds the turn open doing nothing while background-wait primitives exist for exactly this"
 fix      = "wait in the background instead: Bash run_in_background with an until-loop, the Monitor tool, or ScheduleWakeup. Floor: cmd/repoguard (PreToolUse hook, advisory even under enforce); soften with FAK_REPO_GUARD=warn or off."
 see_also = ["internal/repoguard/sleepwait.go", "cmd/repoguard/main.go", ".claude/settings.json"]
+
+# Live Monitor output-file polling (#2374): Bash background jobs materialize
+# tasks/<id>.output at launch, but Monitor streams do not materialize that file
+# until the stream ends. A bare Read ENOENT invites verbatim polling. The
+# repoguard PreToolUse hook refuses a Read of tasks/<id>.output only when <id>
+# matches a live Monitor in the toolproc journal, and points the agent at the
+# pushed Monitor stream instead of filesystem polling.
+[reasons.LIVE_MONITOR_OUTPUT_READ]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "a Read targets tasks/<id>.output for a Monitor that is still live; Monitor output files are not materialized until the stream ends, so polling the path produces bare ENOENT loops"
+fix      = "do not Read-poll the output file while the Monitor is live. Consume the pushed Monitor events and wait for the completion notification; tasks/<id>.output appears only after the stream ends. Floor: cmd/repoguard (PreToolUse hook) plus the live toolproc journal."
+see_also = ["internal/repoguard/monitor_read.go", "cmd/repoguard/main.go", "internal/toolproc", ".claude/settings.json"]
 
 # L3 cross-tenant prefix-share gate (#57): the two typed REFUSE reasons the read-path
 # admission gate (internal/gateway/l3share.go -> AdmitL3SharedPage) cites when it refuses
