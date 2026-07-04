@@ -134,24 +134,9 @@ func (s *Store) GetSession(ctx context.Context, id string) (SessionDescriptor, b
 // forward-incompatible or corrupt entry must not blind the whole view), not surfaced as an
 // error — the same rules as the lock-lease List.
 func (s *Store) ListSessions(ctx context.Context) ([]SessionDescriptor, error) {
-	out, code, err := s.run(ctx, s.dir, "for-each-ref", "--format=%(refname)", refPrefix)
+	ds, err := listRefs(ctx, s, isSessionRef, s.readSessionRef)
 	if err != nil {
-		return nil, fmt.Errorf("leaseref: git not executable: %w", err)
-	}
-	if code != 0 {
-		return nil, nil // absent/empty namespace is an empty list, not an error
-	}
-	var ds []SessionDescriptor
-	for _, line := range strings.Split(out, "\n") {
-		ref := strings.TrimSpace(line)
-		if !isSessionRef(ref) {
-			continue // skip lock leases and any non-session ref — keep the views distinct
-		}
-		d, rerr := s.readSessionRef(ctx, ref)
-		if rerr != nil {
-			continue // skip an unreadable/forward-incompatible descriptor, don't fail the view
-		}
-		ds = append(ds, d)
+		return nil, err
 	}
 	sort.Slice(ds, func(i, j int) bool { return ds[i].ID < ds[j].ID })
 	return ds, nil
@@ -167,13 +152,7 @@ func (s *Store) LiveSessions(ctx context.Context, now time.Time) (live []Session
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, d := range all {
-		if d.Expired(now) {
-			expired = append(expired, d.ID)
-			continue
-		}
-		live = append(live, d)
-	}
+	live, expired = liveExpire(all, now, func(d SessionDescriptor) string { return d.ID })
 	return live, expired, nil
 }
 

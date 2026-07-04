@@ -239,11 +239,7 @@ func (s *Store) commitFenced(ctx context.Context, ref string, out Record, oldOID
 // be reacquired, never revived by a renew, since a peer may already own it). On OK it returns
 // the renewed record. ttlSeconds <= 0 keeps the lease's existing TTL.
 func (s *Store) Renew(ctx context.Context, id, holder string, ttlSeconds int64, now time.Time) (Record, FenceVerdict, error) {
-	if !validID(id) {
-		return Record{}, FenceVerdict{}, fmt.Errorf("leaseref: invalid lease id %q", id)
-	}
-	ref := refPrefix + id
-	oldOID, hasRef, err := s.currentOID(ctx, ref)
+	ref, oldOID, hasRef, err := s.resolveLeaseRef(ctx, id)
 	if err != nil {
 		return Record{}, FenceVerdict{}, err
 	}
@@ -276,6 +272,19 @@ func (s *Store) Renew(ctx context.Context, id, holder string, ttlSeconds int64, 
 		out.TTLSeconds = ttlSeconds
 	}
 	return s.commitFenced(ctx, ref, out, oldOID, true, "renew", id)
+}
+
+// resolveLeaseRef validates id and resolves the refs/fak/locks/<id> it addresses to its
+// current object id and existence, ready for a CAS write or delete — the shared
+// validate-then-currentOID preamble of Renew and ReleaseFenced. The caller maps a
+// returned error into its own zero-valued return shape.
+func (s *Store) resolveLeaseRef(ctx context.Context, id string) (ref, oldOID string, hasRef bool, err error) {
+	if !validID(id) {
+		return "", "", false, fmt.Errorf("leaseref: invalid lease id %q", id)
+	}
+	ref = refPrefix + id
+	oldOID, hasRef, err = s.currentOID(ctx, ref)
+	return ref, oldOID, hasRef, err
 }
 
 // currentOID returns the object id ref currently points at and whether ref exists, via

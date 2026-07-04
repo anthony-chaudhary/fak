@@ -123,10 +123,7 @@ func (r Record) effectiveActiveAt() int64 {
 // renew-aware effectiveActiveAt, so a heartbeated lease stays live; a never-renewed
 // record measures from AcquiredAt, identical to the pre-fence behavior.
 func (r Record) Expired(now time.Time) bool {
-	if r.TTLSeconds <= 0 {
-		return false
-	}
-	return now.Unix() >= r.effectiveActiveAt()+r.TTLSeconds
+	return expired(now, r.TTLSeconds, r.effectiveActiveAt())
 }
 
 // Ref returns the full ref path this record is stored at.
@@ -287,32 +284,20 @@ func (s *Store) Get(ctx context.Context, id string) (Record, bool, error) {
 // is SKIPPED (a forward-compatible or corrupt entry must not blind the whole view), not
 // surfaced as an error.
 func (s *Store) List(ctx context.Context) ([]Record, error) {
-	out, code, err := s.run(ctx, s.dir, "for-each-ref", "--format=%(refname)", refPrefix)
-	if err != nil {
-		return nil, fmt.Errorf("leaseref: git not executable: %w", err)
-	}
-	if code != 0 {
-		// No refs under the namespace (or the namespace is absent) is an empty list,
-		// not an error — the same "absence is valid" rule as Get.
-		return nil, nil
-	}
-	var recs []Record
-	for _, line := range strings.Split(out, "\n") {
-		ref := strings.TrimSpace(line)
+	recs, err := listRefs(ctx, s, func(ref string) bool {
 		if !strings.HasPrefix(ref, refPrefix) {
-			continue
+			return false
 		}
 		if isSessionRef(ref) {
-			continue // session descriptors (refs/fak/locks/session-*) are a DISTINCT kind, not lock leases
+			return false // session descriptors (refs/fak/locks/session-*) are a DISTINCT kind, not lock leases
 		}
 		if isIntentRef(ref) {
-			continue // intent leases (refs/fak/locks/intent-*) are work-target claims, not tree leases (#2155)
+			return false // intent leases (refs/fak/locks/intent-*) are work-target claims, not tree leases (#2155)
 		}
-		rec, rerr := s.readRef(ctx, ref)
-		if rerr != nil {
-			continue // skip an unreadable/forward-incompatible record, don't fail the view
-		}
-		recs = append(recs, rec)
+		return true
+	}, s.readRef)
+	if err != nil {
+		return nil, err
 	}
 	sort.Slice(recs, func(i, j int) bool { return recs[i].ID < recs[j].ID })
 	return recs, nil
@@ -327,13 +312,7 @@ func (s *Store) Live(ctx context.Context, now time.Time) (live []Record, expired
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, r := range all {
-		if r.Expired(now) {
-			expired = append(expired, r.ID)
-			continue
-		}
-		live = append(live, r)
-	}
+	live, expired = liveExpire(all, now, func(r Record) string { return r.ID })
 	return live, expired, nil
 }
 

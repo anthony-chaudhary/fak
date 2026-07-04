@@ -37,11 +37,7 @@ import (
 // anonymous) holder refuses STALE_LEASE; a ref that advanced between the read and
 // the CAS delete refuses LEASE_CONTENDED (re-read and retry).
 func (s *Store) ReleaseFenced(ctx context.Context, id, holder string, generation int64, now time.Time) (FenceVerdict, error) {
-	if !validID(id) {
-		return FenceVerdict{}, fmt.Errorf("leaseref: invalid lease id %q", id)
-	}
-	ref := refPrefix + id
-	oldOID, hasRef, err := s.currentOID(ctx, ref)
+	ref, oldOID, hasRef, err := s.resolveLeaseRef(ctx, id)
 	if err != nil {
 		return FenceVerdict{}, err
 	}

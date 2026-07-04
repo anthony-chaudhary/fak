@@ -90,10 +90,7 @@ func (r IntentRecord) effectiveActiveAt() int64 {
 // Expired reports whether the intent is past its TTL at time now. A zero TTL never
 // expires (claim with the default instead — an immortal intent defeats the design).
 func (r IntentRecord) Expired(now time.Time) bool {
-	if r.TTLSeconds <= 0 {
-		return false
-	}
-	return now.Unix() >= r.effectiveActiveAt()+r.TTLSeconds
+	return expired(now, r.TTLSeconds, r.effectiveActiveAt())
 }
 
 // Ref returns the full ref path this intent is stored at: refs/fak/locks/intent-<key>.
@@ -281,24 +278,9 @@ func (s *Store) getIntentByKey(ctx context.Context, key string) (IntentRecord, b
 // split); an unparseable record is skipped, not surfaced — the same reader rules as
 // List/ListSessions.
 func (s *Store) ListIntents(ctx context.Context) ([]IntentRecord, error) {
-	out, code, err := s.run(ctx, s.dir, "for-each-ref", "--format=%(refname)", refPrefix)
+	recs, err := listRefs(ctx, s, isIntentRef, s.readIntentRef)
 	if err != nil {
-		return nil, fmt.Errorf("leaseref: git not executable: %w", err)
-	}
-	if code != 0 {
-		return nil, nil // absent/empty namespace is an empty list, not an error
-	}
-	var recs []IntentRecord
-	for _, line := range strings.Split(out, "\n") {
-		ref := strings.TrimSpace(line)
-		if !isIntentRef(ref) {
-			continue
-		}
-		rec, rerr := s.readIntentRef(ctx, ref)
-		if rerr != nil {
-			continue
-		}
-		recs = append(recs, rec)
+		return nil, err
 	}
 	sort.Slice(recs, func(i, j int) bool { return recs[i].Key < recs[j].Key })
 	return recs, nil
@@ -312,13 +294,7 @@ func (s *Store) LiveIntents(ctx context.Context, now time.Time) (live []IntentRe
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, r := range all {
-		if r.Expired(now) {
-			expired = append(expired, r.Key)
-			continue
-		}
-		live = append(live, r)
-	}
+	live, expired = liveExpire(all, now, func(r IntentRecord) string { return r.Key })
 	return live, expired, nil
 }
 

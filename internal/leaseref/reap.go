@@ -35,15 +35,7 @@ func (s *Store) Reap(ctx context.Context, now time.Time) (reaped []string, err e
 	if lerr != nil {
 		return nil, lerr
 	}
-	var errs []error
-	for _, id := range expired {
-		if rerr := s.Release(ctx, id); rerr != nil {
-			errs = append(errs, fmt.Errorf("reap %s: %w", id, rerr))
-			continue
-		}
-		reaped = append(reaped, id)
-	}
-	return reaped, errors.Join(errs...)
+	return reapEach(ctx, expired, "reap", s.Release)
 }
 
 // ReapSessions deletes every SESSION descriptor expired at time now and returns the ids
@@ -57,10 +49,18 @@ func (s *Store) ReapSessions(ctx context.Context, now time.Time) (reaped []strin
 	if lerr != nil {
 		return nil, lerr
 	}
+	return reapEach(ctx, expired, "reap session", s.RemoveSession)
+}
+
+// reapEach deletes each expired id via del (Release or RemoveSession), collecting a
+// per-id failure into the joined error without aborting the sweep — the shared body of
+// Reap and ReapSessions. label prefixes the wrapped error ("reap" / "reap session") so a
+// caller can tell which namespace a failed id came from.
+func reapEach(ctx context.Context, expired []string, label string, del func(context.Context, string) error) (reaped []string, err error) {
 	var errs []error
 	for _, id := range expired {
-		if rerr := s.RemoveSession(ctx, id); rerr != nil {
-			errs = append(errs, fmt.Errorf("reap session %s: %w", id, rerr))
+		if rerr := del(ctx, id); rerr != nil {
+			errs = append(errs, fmt.Errorf("%s %s: %w", label, id, rerr))
 			continue
 		}
 		reaped = append(reaped, id)
