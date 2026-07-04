@@ -177,7 +177,7 @@ func collectTokenDefaultsScorecard(root string) map[string]any {
 	levers := []lever{
 		{
 			key: "provider_cache", label: "provider_cache — provider prompt-cache prefix (byte-faithful passthrough)",
-			class: "lossless", on: strings.Contains(messages, "PlaceAnthropicCacheBreakpoint("),
+			class: "lossless", on: strings.Contains(messages, "PlaceAnthropicCacheBreakpoint"),
 			witnessed: true, blocker: "", flag: "(structural)", gated: false, noted: true, locked: true,
 		},
 		{
