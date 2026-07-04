@@ -331,6 +331,20 @@ func waitResetDecision(in ResolveInput, owner *Owner, status OwnerStatus, blockR
 	return rec, true
 }
 
+// pinToOwner builds the PIN_BLOCKED decision selectRehomeTarget falls back to when
+// no re-home target can be confirmed: the owner keeps the pin and the resume waits
+// for a reset. probes is the target-probe trail to attach (may be nil); reason is
+// the caller-specific explanation. rec is mutated in place (matching the caller's
+// existing accumulate-into-rec discipline) and also returned via the Decision value.
+func pinToOwner(rec *Decision, owner *Owner, probes []TargetProbe, reason string) (Target, Decision, bool) {
+	rec.TargetProbes = probes
+	rec.Action = "PIN_BLOCKED"
+	rec.PinAccount = owner.Account
+	rec.PinConfigDir = owner.ConfigDir
+	rec.Reason = reason
+	return Target{}, *rec, true
+}
+
 // selectRehomeTarget picks the healthy worker the owner's transcript should land on.
 // When forcedTarget is set (a prior duplicate-reselect proved it serving), that target
 // is used directly; otherwise it ranks the live availability roster, relaxes the
@@ -358,12 +372,8 @@ func selectRehomeTarget(in ResolveInput, home string, owner *Owner, forcedTarget
 		relief := RehomeTargets(availability, owner.Account, nil, CapUnbounded)
 		relief, statusScreened = filterTargetsByStatus(relief, in.OwnerStatusFn)
 		if len(relief) == 0 {
-			rec.TargetProbes = statusScreened
-			rec.Action = "PIN_BLOCKED"
-			rec.PinAccount = owner.Account
-			rec.PinConfigDir = owner.ConfigDir
-			rec.Reason = "owner blocked (" + blockReason + ") and no healthy Claude worker available -- pin to owner; resume waits for reset"
-			return Target{}, *rec, true
+			return pinToOwner(rec, owner, statusScreened,
+				"owner blocked ("+blockReason+") and no healthy Claude worker available -- pin to owner; resume waits for reset")
 		}
 		rec.CapRelief = &CapRelief{
 			RehomeCap: RehomeCap(),
@@ -399,12 +409,8 @@ func selectRehomeTarget(in ResolveInput, home string, owner *Owner, forcedTarget
 			// checked candidate probed blocked, re-homing only moves the resume from
 			// one walled account to another -> pin to owner (PIN_BLOCKED).
 			if allBlocked(checked) {
-				rec.TargetProbes = checked
-				rec.Action = "PIN_BLOCKED"
-				rec.PinAccount = owner.Account
-				rec.PinConfigDir = owner.ConfigDir
-				rec.Reason = "owner blocked (" + blockReason + ") and every probed re-home target is also limited -- pin to owner; resume waits for reset"
-				return Target{}, *rec, true
+				return pinToOwner(rec, owner, checked,
+					"owner blocked ("+blockReason+") and every probed re-home target is also limited -- pin to owner; resume waits for reset")
 			}
 			tgt = targets[0]
 		}

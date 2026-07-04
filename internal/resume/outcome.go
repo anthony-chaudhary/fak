@@ -98,6 +98,13 @@ type Attempt struct {
 // gate's launch-rate window uses: a deferral/consideration/skip is bookkeeping, not an
 // attempt, so counting it would burn a session's attempt budget on rows where nothing ran.
 func (a Attempt) IsLaunch() bool {
+	// An operator-settled row (a manual consolidate, marked by Action not Phase) is an
+	// override, not a fired launch — counting it would burn an attempt on a row where the
+	// operator, not the watchdog, acted. RetryGate already blocks on settled(); keep the
+	// launch count consistent so a phase-less consolidate row is not miscounted as a spawn.
+	if a.settled() {
+		return false
+	}
 	switch strings.ToLower(strings.TrimSpace(a.Phase)) {
 	case "deferred", "considered", "skipped", "gate_fail_open", "queued", "detected", "status", "tick", "snapshot", "progress", "settled", "operator_settled", "consolidated":
 		return false
