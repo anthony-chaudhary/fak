@@ -98,8 +98,68 @@ jobs:
       - name: test (+ coverage profile)
         run: go test -coverprofile=coverage.out ./...
 
-      - name: coverage report (total statement coverage)
-        run: go tool cover -func=coverage.out | tail -1
+      # Coverage report + gap analysis + trend surfacing (E-002 / #233): the profile
+      # was previously reduced to one `tail -1` line lost in the logs. This step keeps
+      # that total, adds a per-package breakdown sorted ascending with every package
+      # under the issue's 80% goal marked GAP, lists internal packages absent from the
+      # profile entirely (no test files — invisible to `go tool cover`), and writes it
+      # all to the step summary so the numbers are surfaced per run, the same trend
+      # mechanism dogfood-coverage.yml uses. Advisory by design: the hard floor is the
+      # follow-on tuning tracked in #34, per the comment above.
+      - name: coverage report (total + per-package gaps -> step summary)
+        run: |
+          total="$(go tool cover -func=coverage.out | tail -1)"
+          echo "$total"
+
+          # Per-package statement coverage from the merged profile. Profile lines are
+          # "<file>:<start>,<end> <numstmt> <count>"; summing numstmt per package dir
+          # (covered = count>0) gives the same statement metric as the total line.
+          perpkg="$(awk -F: 'NR>1 {
+            file=$1
+            sub(/\/[^\/]+$/, "", file)
+            split($2, f, " ")
+            tot[file]+=f[2]; if (f[3]>0) cov[file]+=f[2]
+          } END {
+            for (p in tot) if (tot[p]>0) {
+              pct=100*cov[p]/tot[p]
+              printf "%6.1f%%  %s  %s\n", pct, (pct<80 ? "GAP" : "ok "), p
+            }
+          }' coverage.out | sort -n)"
+          echo "$perpkg"
+
+          # Internal packages with no rows in the profile at all: `go test ./...`
+          # skips packages with no test files, so they never reach coverage.out and
+          # would otherwise be invisible in the gap list.
+          untested="$(comm -13 \
+            <(awk -F: 'NR>1 {p=$1; sub(/\/[^\/]+$/, "", p); print p}' coverage.out | sort -u) \
+            <(go list ./internal/... | sort))"
+
+          {
+            echo "## Go statement coverage (E-002 / #233)"
+            echo '```'
+            echo "$total"
+            echo '```'
+            echo "Per-package, ascending — under the 80% goal is marked GAP:"
+            echo '```'
+            echo "$perpkg"
+            echo '```'
+            if [ -n "$untested" ]; then
+              echo "Internal packages with no coverage data (no test files):"
+              echo '```'
+              echo "$untested"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Trend tracking (E-002 / #233): retain the raw merged profile per run so any
+      # two runs can be diffed (`go tool cover -func`) without re-running the suite.
+      - name: upload coverage profile (trend artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-profile
+          path: coverage.out
+          if-no-files-found: ignore
 
       # The out-of-tree driver example (#454) is a SEPARATE module under
       # examples/extdriver, so the root `go build ./...` / `go test ./...` above
