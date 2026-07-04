@@ -31,7 +31,12 @@
 //	       [--agents 1,4,...,1024] | [--agent-max 1024 --grid log|full|canonical]
 //	       [--sub-turns 8] [--prefix 2048] [--trials 1] [--seed N]
 //	       [--reps 3 --model-dir /path/to/model --quant]   (optional prefill-elision wall-clock)
+//	       [--checkpoint F | --resume F]                   (per-cell write-ahead + crash resume, #2382)
 //	       [--out fanrun.json]
+//
+// --checkpoint F appends each cell to F as it completes, so a crash mid-grid keeps the cells
+// already measured; --resume F re-runs only the widths F is missing and refuses if F was built
+// for a different grid/model/seed.
 package main
 
 import (
@@ -63,6 +68,8 @@ func main() {
 	seed := fs.Int64("seed", 0x5EED_F1EE, "root seed")
 	modelDir := fs.String("model-dir", "", "optional small CPU model dir for the prefill-elision wall-clock; empty => geometry-only")
 	quant := fs.Bool("quant", true, "Q8 lane for the prefill-timing model (fleetserve parity)")
+	checkpoint := fs.String("checkpoint", "", "per-cell write-ahead checkpoint path: each cell is appended as it completes so a crash keeps widths 1..N-1 (#2382)")
+	resume := fs.String("resume", "", "resume from an existing checkpoint (alias for --checkpoint on an existing file): reuse recorded cells, run only the missing widths")
 	out := fs.String("out", "fanrun.json", "JSON artifact path")
 	_ = fs.Parse(os.Args[1:])
 
@@ -72,17 +79,35 @@ func main() {
 		os.Exit(2)
 	}
 
+	// --resume is an alias for --checkpoint on an existing file: both feed one path that both
+	// writes ahead and, if the file already matches this grid, resumes from it.
+	ckPath := *checkpoint
+	if strings.TrimSpace(*resume) != "" {
+		ckPath = *resume
+	}
+
 	grid := buildAgentGrid(*agentsArg, *agentMax, *gridKind)
 	opts := bench.FanrunOptions{
 		Profile: prof, Grid: grid, SubTurns: *subTurns, Prefix: *prefix,
 		Trials: *trials, Reps: *reps, Seed: *seed, ModelDir: *modelDir, Quant: *quant,
+		Checkpoint: ckPath,
 	}
 
-	fmt.Fprintf(os.Stderr, "fanrun: profile=%s grid=%v sub-turns=%d prefix=%d trials=%d => %d real-agent waves (SERIAL; cross-agent dedup is the measured win, NOT parallel speedup)\n",
-		prof.Name, grid, *subTurns, *prefix, *trials, len(grid))
+	ckNote := ""
+	if ckPath != "" {
+		ckNote = fmt.Sprintf(" checkpoint=%s", ckPath)
+	}
+	fmt.Fprintf(os.Stderr, "fanrun: profile=%s grid=%v sub-turns=%d prefix=%d trials=%d%s => %d real-agent waves (SERIAL; cross-agent dedup is the measured win, NOT parallel speedup)\n",
+		prof.Name, grid, *subTurns, *prefix, *trials, ckNote, len(grid))
 
 	t0 := time.Now()
-	rep := bench.RunFanoutLive(context.Background(), opts)
+	rep, err := bench.RunFanoutLiveResumable(context.Background(), opts)
+	if err != nil {
+		// A resume against a checkpoint built for a different grid/model/seed refuses here
+		// rather than silently mixing incompatible cells into one artifact.
+		fmt.Fprintf(os.Stderr, "fanrun: refusing to resume %s: %v\n", ckPath, err)
+		os.Exit(2)
+	}
 	for _, c := range rep.Cells {
 		fmt.Fprintf(os.Stderr, "  N=%-4d wall=%8.1fms agents/s(serial)=%6.1f cross_hits=%-5d fills_flat elided=%d\n",
 			c.Agents, c.AgentsWallSerialMs, c.AgentsPerSecSerial, c.CrossHits, c.PrefixTokensElided)

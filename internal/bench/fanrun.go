@@ -44,6 +44,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/benchckpt"
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
@@ -70,6 +71,14 @@ type FanrunOptions struct {
 	Seed     int64
 	ModelDir string // optional small CPU model for the prefill-elision wall-clock; "" => skip
 	Quant    bool   // Q8 lane for the prefill-timing model (fleetserve parity)
+
+	// Checkpoint is an optional per-cell write-ahead checkpoint path (issue #2382): each
+	// measured cell is appended to it before the next N, so a crash at cell N keeps cells
+	// 1..N-1; on restart the recorded cells are reused and only the missing widths are
+	// re-measured. "" => no checkpoint (the historical all-or-nothing shape). A resume whose
+	// grid identity (profile/prefix/sub-turns/seed/model) differs from the checkpoint refuses
+	// with benchckpt.ErrFingerprintMismatch instead of mixing incompatible cells.
+	Checkpoint string
 }
 
 // shares reports whether this profile's sub-agents share their goal reads (so cross-agent
@@ -153,7 +162,27 @@ type FanrunCell struct {
 // RunFanoutLive runs the full live fan-out sweep. SERIAL by construction (process-global
 // vDSO world). Deterministic in (profile, grid, sub-turns, prefix, trials, seed) for the
 // counter+geometry halves; the *_ms wall-clock halves are not.
+//
+// This is the historical no-checkpoint entry point: it cannot refuse, so it discards the
+// error the shared core only ever returns for a checkpoint resume. Set opts.Checkpoint and
+// call RunFanoutLiveResumable to get the write-ahead + resume behavior of issue #2382.
 func RunFanoutLive(ctx context.Context, opts FanrunOptions) FanrunReport {
+	rep, _ := runFanoutLive(ctx, opts)
+	return rep
+}
+
+// RunFanoutLiveResumable runs the sweep with an optional per-cell write-ahead checkpoint
+// (opts.Checkpoint, issue #2382). Each completed cell is appended to the checkpoint before the
+// next N, so a crash at cell N keeps cells 1..N-1; on restart every cell already recorded
+// under a matching grid fingerprint is reused (not re-measured) and only the missing widths
+// run. A resume whose grid identity differs from the checkpoint refuses with
+// benchckpt.ErrFingerprintMismatch rather than silently mixing incompatible cells. With
+// opts.Checkpoint == "" it is exactly RunFanoutLive and never returns an error.
+func RunFanoutLiveResumable(ctx context.Context, opts FanrunOptions) (FanrunReport, error) {
+	return runFanoutLive(ctx, opts)
+}
+
+func runFanoutLive(ctx context.Context, opts FanrunOptions) (FanrunReport, error) {
 	if opts.SubTurns <= 0 {
 		opts.SubTurns = 8
 	}
@@ -185,19 +214,76 @@ func RunFanoutLive(ctx context.Context, opts FanrunOptions) FanrunReport {
 		TimingModel: timingModel,
 	}
 
+	// Optional write-ahead checkpoint: persist each completed cell and, on resume, reuse any
+	// cell already recorded under a matching grid fingerprint. A mismatched grid/model/seed (or
+	// an unreadable checkpoint) refuses here rather than blending incompatible cells.
+	var ck *benchckpt.Ledger
+	if opts.Checkpoint != "" {
+		l, err := benchckpt.Open(opts.Checkpoint, fanrunFingerprint(opts))
+		if err != nil {
+			return rep, err
+		}
+		ck = l
+		defer ck.Close()
+	}
+
 	// The single-agent (N=1) per-agent hit baseline is the intra-agent dedup one sub-agent
 	// gets alone (the duplicate get_user re-verify). cross_uplift subtracts N× of it so
 	// CrossHits is the fan-out-ONLY sibling dedup, exactly like fanout.go's shared−isolated.
 	// Measured in the SHARED regime; the no-share control has no sibling reuse to subtract.
-	baselinePerAgentHits := liveWave(ctx, opts, 1).waveHits
+	// Measured lazily: a fully-resumed sweep that re-measures nothing must not pay for it.
+	baselineDone := false
+	baselinePerAgentHits := 0
+	baseline := func() int {
+		if !baselineDone {
+			baselinePerAgentHits = liveWave(ctx, opts, 1).waveHits
+			baselineDone = true
+		}
+		return baselinePerAgentHits
+	}
 
 	for _, N := range opts.Grid {
 		if N < 1 {
 			continue
 		}
-		rep.Cells = append(rep.Cells, runLiveCell(ctx, opts, N, baselinePerAgentHits))
+		key := fanrunCellKey(N)
+		if ck != nil {
+			var cached FanrunCell
+			if ok, err := ck.Cell(key, &cached); err == nil && ok {
+				rep.Cells = append(rep.Cells, cached) // resume: reuse the recorded cell, skip the wave
+				continue
+			}
+		}
+		cell := runLiveCell(ctx, opts, N, baseline())
+		if ck != nil {
+			if err := ck.Append(key, cell); err != nil {
+				return rep, err
+			}
+		}
+		rep.Cells = append(rep.Cells, cell)
 	}
-	return rep
+	return rep, nil
+}
+
+// fanrunCellKey is the checkpoint coordinate for a fan-out width — the full cell key is N.
+func fanrunCellKey(n int) string { return fmt.Sprintf("N=%d", n) }
+
+// fanrunFingerprint is the grid identity a checkpoint is bound to. It captures the parameters
+// that make a measured cell VALID — the sharing regime, the prefix geometry, the turn budget,
+// the seed, and the timing model — but NOT the sweep's width list: a cell for width N means
+// the same thing regardless of which sibling widths are in the grid, which is exactly what
+// lets a crash-then-resume over the same grid reuse recorded cells. A resume whose
+// profile/prefix/sub-turns/seed/model differs refuses (benchckpt.ErrFingerprintMismatch).
+func fanrunFingerprint(opts FanrunOptions) benchckpt.Fingerprint {
+	return benchckpt.Fingerprint{
+		"schema":    FanrunSchema,
+		"profile":   opts.Profile.Name,
+		"prefix":    opts.Prefix,
+		"sub_turns": opts.SubTurns,
+		"seed":      opts.Seed,
+		"model_dir": opts.ModelDir,
+		"quant":     opts.Quant,
+	}
 }
 
 // waveResult is one wave's measured rollup.
