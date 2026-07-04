@@ -153,6 +153,12 @@ unknown code as `REASON_<n>` rather than failing.)
   manifest the binary emits parses back to the identical floor (enforced by
   `TestRoundTrip`).
 
+Runnable demonstration of all three properties plus the empty-manifest warning (above,
+"An empty manifest (`{}`) is valid"):
+[`examples/policy-loader-properties/`](examples/policy-loader-properties/README.md).
+Enforced by `internal/policy`'s `TestRoundTrip`, `TestLoadedPolicyIsLoadBearing`, and
+`TestUnknownDenyReasonRejected`.
+
 ## Roadmap
 
 - A YAML reader (comments + anchors) as a thin front-end over the same schema —
