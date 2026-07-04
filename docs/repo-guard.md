@@ -69,7 +69,8 @@ Claude Code **PreToolUse** hook, matcher-scoped to the mutating tools
 ```json
 "PreToolUse": [{ "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit",
                  "hooks": [{ "type": "command",
-                             "command": "python \"$CLAUDE_PROJECT_DIR/tools/repo_guard.py\" --hook" }] }]
+                             "command": "python",
+                             "args": ["-c", "import os,subprocess,sys; root=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(root,'tools','repo_guard.py'); subprocess.call([sys.executable,p,'--hook']); sys.exit(0)"] }] }]
 ```
 
 On a violation the hook returns `permissionDecision: deny`, so the tool call never

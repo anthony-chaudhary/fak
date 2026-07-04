@@ -4,7 +4,11 @@
       {
         "hooks": [
           {
-            "command": "python -c \"import subprocess,sys; subprocess.call([sys.executable,'-m','dos.cli','hook','posttool','--workspace','.']); sys.exit(0)\"",
+            "command": "python",
+            "args": [
+              "-c",
+              "import subprocess,sys; subprocess.call([sys.executable,'-m','dos.cli','hook','posttool','--workspace','.']); sys.exit(0)"
+            ],
             "type": "command"
           }
         ]
@@ -14,7 +18,11 @@
       {
         "hooks": [
           {
-            "command": "python -c \"import os,subprocess,sys; root=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); bins=[os.path.join(root,'tools','.bin','repoguard.exe'),os.path.join(root,'tools','.bin','repoguard')]; p=next((x for x in bins if os.path.exists(x)),None); args=[p,'--hook'] if p else [sys.executable,os.path.join(root,'tools','repo_guard.py'),'--hook']; subprocess.call(args); sys.exit(0)\"",
+            "command": "python",
+            "args": [
+              "-c",
+              "import os,subprocess,sys; root=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); bins=[os.path.join(root,'tools','.bin','repoguard.exe'),os.path.join(root,'tools','.bin','repoguard')]; p=next((x for x in bins if os.path.exists(x)),None); args=[p,'--hook'] if p else [sys.executable,os.path.join(root,'tools','repo_guard.py'),'--hook']; subprocess.call(args); sys.exit(0)"
+            ],
             "type": "command"
           }
         ],
@@ -23,7 +31,11 @@
       {
         "hooks": [
           {
-            "command": "python -c \"import subprocess,sys; subprocess.call([sys.executable,'-m','dos.cli','hook','pretool','--workspace','.']); sys.exit(0)\"",
+            "command": "python",
+            "args": [
+              "-c",
+              "import subprocess,sys; subprocess.call([sys.executable,'-m','dos.cli','hook','pretool','--workspace','.']); sys.exit(0)"
+            ],
             "type": "command"
           }
         ],
@@ -34,7 +46,11 @@
       {
         "hooks": [
           {
-            "command": "python -c \"import subprocess,sys; subprocess.call([sys.executable,'-m','dos.cli','hook','stop','--workspace','.']); sys.exit(0)\"",
+            "command": "python",
+            "args": [
+              "-c",
+              "import subprocess,sys; subprocess.call([sys.executable,'-m','dos.cli','hook','stop','--workspace','.']); sys.exit(0)"
+            ],
             "type": "command"
           }
         ]

@@ -18,9 +18,9 @@ resource-starved. The cost was **per-agent-turn latency**, not load.
 The fleet wires the DOS kernel as three Claude Code hooks (`.claude/settings.json`):
 
 ```json
-"PreToolUse":  [{ "hooks": [{ "command": "dos hook pretool  --workspace ." }] }],
-"PostToolUse": [{ "hooks": [{ "command": "dos hook posttool --workspace ." }] }],
-"Stop":        [{ "hooks": [{ "command": "dos hook stop     --workspace ." }] }]
+"PreToolUse":  [{ "hooks": [{ "command": "python", "args": ["-m", "dos.cli", "hook", "pretool",  "--workspace", "."] }] }],
+"PostToolUse": [{ "hooks": [{ "command": "python", "args": ["-m", "dos.cli", "hook", "posttool", "--workspace", "."] }] }],
+"Stop":        [{ "hooks": [{ "command": "python", "args": ["-m", "dos.cli", "hook", "stop",     "--workspace", "."] }] }]
 ```
 
 Two properties make this the dominant felt cost:
@@ -72,7 +72,7 @@ Stop spawning `dos hook` on read-only tools. In `.claude/settings.json`:
 
 ```json
 "PreToolUse":  [{ "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*dos.*",
-                  "hooks": [{ "command": "dos hook pretool --workspace ." }] }]
+                  "hooks": [{ "command": "python", "args": ["-m", "dos.cli", "hook", "pretool", "--workspace", "."] }] }]
 ```
 
 - **Win:** eliminates the spawn on (often the majority of) tool calls.

@@ -117,10 +117,28 @@ Treat `projected_codex_command_modes: {"native_launcher": N}` with zero projecte
 `python_cli` hooks as the proof that the repair would clear the Codex fast-path
 warning.
 
+Run the same dry-run against Claude Code's plugin cache when Claude Stop hooks are
+showing hook JSON errors or shell-form command warnings:
+
+```powershell
+python tools\codex_dos_hook_doctor.py --codex-home $env:USERPROFILE\.claude --target-shell powershell
+```
+
+That report is the same privacy-preserving shape: manifest-relative paths and
+mode counts only. A `WARN` with `replacements_available` means cached DOS plugin
+hooks can be rerouted away from shell-form/native-launcher drift; do not edit the
+cache by hand.
+
 Then apply it explicitly:
 
 ```powershell
 python tools\codex_dos_hook_doctor.py --codex-home $env:USERPROFILE\.codex --apply
+```
+
+For Claude's plugin cache, use the same explicit apply with the Claude home:
+
+```powershell
+python tools\codex_dos_hook_doctor.py --codex-home $env:USERPROFILE\.claude --target-shell powershell --apply
 ```
 
 The doctor rewrites cached DOS hook manifests to call the bundled native
@@ -218,13 +236,16 @@ from a DOS advisory warning. Healthy hook no-ops emit nothing and exit 0:
 '{}' | python -m dos.cli hook stop --workspace .
 ```
 
-The checked-in `.claude/settings.json` therefore uses a shell-neutral
-`python -c` launcher that delegates to `python -m dos.cli ...` and exits 0 after
-the delegate returns. Real denies and Stop blocks are still preserved because
-they are stdout protocol objects, not nonzero process exits. The repo-guard
-PreToolUse hook follows the same rule: the launcher prefers the compiled
-`tools/.bin/repoguard(.exe)` when present and falls back to `tools/repo_guard.py`,
-then exits 0 so a missing binary never becomes a hook failure banner.
+The checked-in `.claude/settings.json` therefore uses Claude Code's exec-form
+hook shape (`"command": "python"`, `"args": ["-c", "..."]`) rather than a
+shell-form command string. The launcher delegates to `python -m dos.cli ...` and
+exits 0 after the delegate returns, so Git Bash/profile startup output cannot be
+prepended to hook stdout and trigger Claude's JSON parser. Real denies and Stop
+blocks are still preserved because they are stdout protocol objects, not nonzero
+process exits. The repo-guard PreToolUse hook follows the same rule: the
+launcher prefers the compiled `tools/.bin/repoguard(.exe)` when present and
+falls back to `tools/repo_guard.py`, then exits 0 so a missing binary never
+becomes a hook failure banner.
 
 PostToolUse also has one expected "background" shape: polling a still-running
 background task can produce repeated identical tool results. DOS may resurface
