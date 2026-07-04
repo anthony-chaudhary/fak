@@ -218,6 +218,7 @@ var verbTiers = map[string]VerbTier{
 	"session-audit":                 TierDev,
 	"sessions":                      TierDev,
 	"sidecar":                       TierDev,
+	"skill":                         TierDev,
 	"skill-effectiveness-scorecard": TierDev,
 	"slack":                         TierDev,
 	"snapshot":                      TierDev,
