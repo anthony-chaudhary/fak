@@ -393,6 +393,21 @@ type Config struct {
 	// manifest and fails loud on a malformed one (a mis-routed model is a security
 	// boundary, never a silent default). Set by `fak serve --route-manifest` (#601).
 	RouteManifest *modelroute.Manifest
+	// RouteAccounts, when non-nil, is the model-ACCOUNT roster the gateway consults at
+	// live dispatch time (#2528): after RouteManifest PICKs an abstract model id
+	// ("guard-a"), the roster BINDS it to a concrete Target (which provider kind, which
+	// of the user's accounts, and the upstream wire model), and the account-resolved
+	// Target.EngineRoute() ("openai:acct/gpt-5.5") — NOT the bare plan-member string — is
+	// what buildCall writes to abi.ToolCall.Engine before Submit. So the residency PDP
+	// adjudicates the ACCOUNT-resolved remote/local route, an ensemble member each binds
+	// independently, and a route to a provider with no registered adapter fails LOUD at
+	// dispatch ("no engine registered for route") rather than silently running through the
+	// default engine. nil (the default) leaves the pre-#2528 behavior byte-for-byte: the
+	// plan member string IS the route. New() validates a non-nil roster and fails loud on a
+	// misconfigured one (a mis-bound account is a security boundary). Set by `fak serve
+	// --route-accounts FILE`; the pure resolver is internal/modelroute (reused verbatim, per
+	// the ticket's "the pure resolver is the source of truth" non-goal).
+	RouteAccounts *modelroute.Roster
 	// Native, when true, makes /v1/messages drive fak's OWN agent loop (agent.RunArm /
 	// RunArmStream) instead of the single-shot proxy turn: fak owns dispatch, the in-kernel
 	// syscall boundary is the sole tool path, and no external harness owns the turn loop.
@@ -991,6 +1006,14 @@ type Server struct {
 	// classification sees either the whole old manifest or the whole new one.
 	route *modelroute.Live
 
+	// roster, when non-nil, is the model-ACCOUNT switcher the routed model id is bound
+	// through before dispatch (#2528, Config.RouteAccounts). resolveRoute maps the
+	// abstract plan member ("guard-a") to the account-resolved Target.EngineRoute()
+	// ("openai:acct/gpt-5.5") the residency PDP and the kernel dispatch read; nil leaves
+	// the plan member string as the route (the pre-#2528 path). It is a validated value
+	// (New() calls Validate), so Resolve's dangling-ref/locality invariants hold.
+	roster *modelroute.Roster
+
 	// native, when true, routes a non-streaming /v1/messages turn through fak's OWN agent
 	// loop (agent.RunArm) — the native-harness keystone (#1316). nativeMaxTurns bounds the
 	// loop's model round-trips per request. See Config.Native / native_serve.go.
@@ -1065,6 +1088,15 @@ func New(cfg Config) (*Server, error) {
 	if cfg.RouteManifest != nil {
 		if err := cfg.RouteManifest.Validate(); err != nil {
 			return nil, fmt.Errorf("gateway: route manifest: %w", err)
+		}
+	}
+	// A misconfigured account roster is the SAME class of security boundary: it decides
+	// which provider/account (local or remote) a routed model — and thus a tenant payload
+	// — reaches. Validate at New and fail loud rather than fall through to a silent
+	// mis-bind or a residency-floor bypass at dispatch time (#2528).
+	if cfg.RouteAccounts != nil {
+		if err := cfg.RouteAccounts.Validate(); err != nil {
+			return nil, fmt.Errorf("gateway: route accounts: %w", err)
 		}
 	}
 	model := cfg.Model
@@ -1233,6 +1265,7 @@ func New(cfg Config) (*Server, error) {
 		activity:                   newSessionActivity(),
 		metrics:                    newGatewayMetrics(time.Now()),
 		route:                      newRouteLive(cfg.RouteManifest),
+		roster:                     cfg.RouteAccounts,
 		native:                     cfg.Native,
 		nativeMaxTurns:             nativeMaxTurnsOr(cfg.NativeMaxTurns),
 		vdsoProxyFill:              cfg.VDSOProxyFill,
@@ -2017,6 +2050,10 @@ func (s *Server) syscall(ctx context.Context, tool, rawArgs string, readOnly boo
 			Content: string(resolveBytes(ctx, r.Payload)),
 			Meta:    r.Meta,
 		}
+		// Record the account binding this call resolved through (#2528): account id,
+		// provider kind, upstream model, the account-resolved engine route, and the
+		// credential env NAME — no secret values. No-op without a roster.
+		s.recordRouteAccount(env, tc.Tool, readOnly, tc.Meta)
 	}
 	return wv, env, nil
 }
@@ -2051,7 +2088,17 @@ func (s *Server) dispatchEnsemble(ctx context.Context, base *abi.ToolCall, plan 
 	var lastRefused abi.Verdict
 	refused := 0
 	for _, mem := range plan.Members {
-		r, v := s.k.Syscall(ctx, memberCall(base, mem.Model))
+		// Bind THIS member through the account roster before its own kernel call (#2528):
+		// each ensemble member resolves independently to its account-resolved EngineRoute,
+		// so a member bound for a remote account still crosses the residency floor for a
+		// sensitive payload, and the fold below stays in Plan.Members order. An unresolvable
+		// member fails LOUD for the whole ensemble — never a silently-dropped or
+		// default-routed vote. Without a roster the member model id is the route (pre-#2528).
+		route, rerr := s.resolveRoute(mem.Model)
+		if rerr != nil {
+			return WireVerdict{}, nil, rerr
+		}
+		r, v := s.k.Syscall(ctx, memberCall(base, route))
 		if r == nil || r.Status != abi.StatusOK {
 			lastRefused = v
 			refused++
@@ -2158,8 +2205,15 @@ func (s *Server) buildCall(ctx context.Context, tool, rawArgs string, readOnly b
 	// residency PDP reads c.Engine INSIDE the adjudication fold, so a route written
 	// any later (at Reap/dispatch) would adjudicate an empty Engine and fail open on a
 	// tenant payload bound for a remote model. nil manifest => Engine "" => kernel
-	// default (byte-for-byte the pre-routing path).
-	tc.Engine = s.routeEngine(tool, readOnly, meta)
+	// default (byte-for-byte the pre-routing path). With an account roster configured
+	// (#2528) the routed model id is BOUND through the roster to its account-resolved
+	// EngineRoute here, and an unresolvable id (unknown account, no binding + no default)
+	// fails LOUD — the call never dispatches on a silent default.
+	route, rerr := s.routeEngine(tool, readOnly, meta)
+	if rerr != nil {
+		return nil, rerr
+	}
+	tc.Engine = route
 	return tc, nil
 }
 
@@ -2191,13 +2245,13 @@ func (s *Server) routeDecision(tool string, readOnly bool, meta map[string]strin
 // tenant/sensitive payload bound for a remote model. A route to a model with no
 // registered engine driver fails LOUD at dispatch ("no engine registered for route"),
 // never silently runs elsewhere.
-func (s *Server) routeEngine(tool string, readOnly bool, meta map[string]string) string {
+func (s *Server) routeEngine(tool string, readOnly bool, meta map[string]string) (string, error) {
 	began := time.Now()
 	d, ok := s.routeDecision(tool, readOnly, meta)
 	if !ok {
 		// No manifest: the kernel-default path, never reached when routing is off — record
 		// nothing so the family honestly reads 0 until routing is actually live.
-		return ""
+		return "", nil
 	}
 	// Routing is LIVE for this call: fold the per-aspect Decision into the observability
 	// journal (#603) so it reaches /metrics AND the audit trail. This is the ONE fold per
@@ -2207,9 +2261,84 @@ func (s *Server) routeEngine(tool string, readOnly bool, meta map[string]string)
 	// (pure-function routing, so tiny). nil metrics / nil routing accumulator => no-op.
 	s.metrics.observeRouteDecision(s.routeManifestVersion(), d, time.Since(began))
 	if d.Plan.IsEnsemble() {
-		return ""
+		return "", nil
 	}
-	return d.Plan.Primary()
+	return s.resolveRoute(d.Plan.Primary())
+}
+
+// resolveRoute maps a routed model id to the engine route bound to abi.ToolCall.Engine
+// (#2528). With an account roster configured it BINDS the abstract id through the
+// roster to the account-resolved Target.EngineRoute() ("openai:acct/gpt-5.5") — the
+// load-bearing residency contract, since the residency PDP reads the route INSIDE the
+// adjudication fold, so the account-resolved remote/local route must be visible BEFORE
+// Submit. Without a roster it returns the id verbatim (byte-for-byte the pre-#2528
+// path). A model id that cannot resolve (unknown account, no binding + no default) is a
+// FAIL-LOUD error carrying the recovery hint from the pure resolver — never a silent
+// fallback to the default engine. An empty id (no primary member) resolves to "" (the
+// kernel default), never through the roster.
+func (s *Server) resolveRoute(modelID string) (string, error) {
+	if s.roster == nil || modelID == "" {
+		return modelID, nil
+	}
+	t, err := s.roster.Resolve(modelID)
+	if err != nil {
+		return "", fmt.Errorf("gateway: route accounts: %w (fix the roster binding for %q or set a default account; no silent fallback)", err, modelID)
+	}
+	return t.EngineRoute(), nil
+}
+
+// routeAccount resolves the account binding for a SINGLE-MODEL routed call so the served
+// path can record it (#2528 observability). ok is false when routing is off, no roster is
+// configured, the plan is an ensemble, or the id cannot resolve (the fail-loud already
+// surfaced at buildCall — observability never re-raises it). The returned Target carries
+// only non-secret fields (account id, provider kind, upstream model, credential env NAME),
+// so it is safe to fold into a report; the credential VALUE never enters a Target. Pure
+// (re-runs the cheap classification), consistent with ensemblePlan re-routing the same
+// Subject at dispatch.
+func (s *Server) routeAccount(tool string, readOnly bool, meta map[string]string) (modelroute.Target, bool) {
+	if s.roster == nil {
+		return modelroute.Target{}, false
+	}
+	d, ok := s.routeDecision(tool, readOnly, meta)
+	if !ok || d.Plan.IsEnsemble() {
+		return modelroute.Target{}, false
+	}
+	prim := d.Plan.Primary()
+	if prim == "" {
+		return modelroute.Target{}, false
+	}
+	t, err := s.roster.Resolve(prim)
+	if err != nil {
+		return modelroute.Target{}, false
+	}
+	return t, true
+}
+
+// recordRouteAccount folds the non-secret account binding of a single-model routed call
+// into the result envelope Meta (#2528 acceptance: "records route decision plus account
+// id/provider kind/upstream model with no secret values"). It writes the account id,
+// provider kind, upstream wire model, the account-resolved engine route, and the
+// credential env NAME (a name, never the secret — the ticket explicitly permits the env
+// name in reports). No-op when no roster resolved the call, so the pre-#2528 meta is
+// byte-for-byte unchanged.
+func (s *Server) recordRouteAccount(env *ResultEnvelope, tool string, readOnly bool, meta map[string]string) {
+	if env == nil {
+		return
+	}
+	t, ok := s.routeAccount(tool, readOnly, meta)
+	if !ok {
+		return
+	}
+	if env.Meta == nil {
+		env.Meta = map[string]string{}
+	}
+	env.Meta["route_account"] = t.Account
+	env.Meta["route_kind"] = string(t.Kind)
+	env.Meta["route_upstream"] = t.UpstreamModel
+	env.Meta["route_engine"] = t.EngineRoute()
+	if t.CredEnv != "" {
+		env.Meta["route_cred_env"] = t.CredEnv // the env-var NAME, never its value
+	}
 }
 
 // routeManifestVersion returns the installed routing manifest's schema version (for the

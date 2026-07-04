@@ -99,6 +99,7 @@ type serveFlags struct {
 	invalidation                *string
 	requireKeyEnv               *string
 	routeManifest               *string
+	routeAccounts               *string
 	ggufPath                    *string
 	tokPath                     *string
 	ctxViewBudget               *int
@@ -152,6 +153,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.invalidation = fs.String("invalidation", "global", "vDSO tier-2 invalidation granularity for the live fleet: global|namespace|resource")
 	sf.requireKeyEnv = fs.String("require-key-env", "", "env var holding a bearer token to REQUIRE on every request (default: no auth)")
 	sf.routeManifest = fs.String("route-manifest", "", "model-routing policy to install: each fak_syscall call is classified into a modelroute.Subject and a single-model (PICK) plan binds abi.ToolCall.Engine before Submit, so the residency PDP adjudicates the real route (#601). Empty (default) leaves Engine unset → the kernel default engine, byte-for-byte the pre-routing behavior. A malformed manifest fails startup loud (a mis-routed model is a security boundary, never a silent default). The installed file is HOT-RELOADED: an edit is picked up without a restart and swapped atomically (a request classifies against the whole old or whole new policy, never a torn read); a malformed edit is rejected and the last-good policy stays installed (#842).")
+	sf.routeAccounts = fs.String("route-accounts", "", "model-ACCOUNT roster (fak-accounts/v1) to install ALONGSIDE --route-manifest (#2528): after the manifest PICKs an abstract model id, the roster BINDS it to a concrete provider account + upstream wire model, and the account-resolved EngineRoute (openai:acct/model, local:acct/model) — not the bare plan-member string — is written to abi.ToolCall.Engine before Submit, so the residency PDP adjudicates the ACCOUNT-resolved route and an ensemble member each binds independently. A route to a provider with no registered adapter fails LOUD at dispatch (no silent fallback to the default engine). Credentials are env-var NAMES in the roster, never secrets. Empty (default) leaves the plan-member string as the route, byte-for-byte the pre-#2528 behavior. A malformed roster fails startup loud. Preflight it no-spend first with `fak api-host acceptance --from-model-accounts FILE`.")
 	sf.ggufPath = fs.String("gguf", "", "load these GGUF weights into the in-kernel engine at boot; the load is part of the measured startup sequence and its phase breakdown is exposed on /metrics. Default path is lean-Q8 (Q4→f32→Q8 round-trip); set FAK_Q4K=1 for the direct-resident-Q4_K path (Qwen3.6-27B q4_k_m, the P1/P2 decode lever)")
 	sf.tokPath = fs.String("tokenizer", "", "OPTIONAL override for the in-kernel CHAT planner's tokenizer. With --gguf and no --base-url, /v1/chat/completions AND /v1/messages already serve the in-kernel model (real ChatML chat) using the GGUF's EMBEDDED tokenizer; pass this only to override it (e.g. an SPM-only checkpoint with no embedded BPE tokenizer, or a custom vocab). Accepts a tokenizer.json or its directory. e.g. ~/.cache/fak-models/tokenizers/qwen3.6")
 	sf.ctxViewBudget = fs.Int("ctx-view-budget", 8000, "wire the ctxplan context PLANNER into the live serve loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). DEFAULT-ON at a conservative 8000 resident tokens; pass 0 to disable (leaves the existing path byte-for-byte unchanged). The planner only ever SHORTENS and falls open to the full history on any doubt; on the Anthropic passthrough it keeps the cached prefix byte-identical (witness: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md). The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
@@ -241,6 +243,23 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		fmt.Printf("fak: model-routing policy loaded from %s\n", *sf.routeManifest)
 	}
 
+	// Resolve the optional model-ACCOUNT roster (#2528). Off by default: an empty
+	// --route-accounts leaves routeRoster nil, so the plan-member string stays the route
+	// (byte-for-byte the pre-#2528 behavior). A malformed roster fails loud here rather
+	// than mis-binding a routed model to the wrong account (a residency-floor boundary);
+	// LoadRoster validates on load and gateway.New re-validates. The roster carries only
+	// env-var NAMES, never secrets.
+	var routeRoster *modelroute.Roster
+	if *sf.routeAccounts != "" {
+		loaded, err := modelroute.LoadRoster(*sf.routeAccounts)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fak serve: --route-accounts:", err)
+			os.Exit(1)
+		}
+		routeRoster = &loaded
+		fmt.Printf("fak: model-account roster loaded from %s\n", *sf.routeAccounts)
+	}
+
 	srv, err := gateway.New(gateway.Config{
 		EngineID:                    *sf.engineID,
 		Model:                       *sf.model,
@@ -294,6 +313,12 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		// path. When set, each fak_syscall call is classified and a PICK plan binds the
 		// chosen model before Submit so the residency PDP adjudicates the real route.
 		RouteManifest: routeMan,
+		// Model-account roster (#2528). nil (the default, no --route-accounts) leaves the
+		// plan-member string as the route. When set, the routed model id is BOUND through
+		// the roster to its account-resolved EngineRoute before Submit, so the residency
+		// PDP adjudicates the ACCOUNT-resolved route and a native provider with no wired
+		// adapter fails loud instead of running through the default engine.
+		RouteAccounts: routeRoster,
 		// Native-harness keystone (#1316): drive agent.RunArm for a non-streaming
 		// /v1/messages turn. Off by default — the proxy path is byte-for-byte unchanged.
 		Native:         *sf.native,
