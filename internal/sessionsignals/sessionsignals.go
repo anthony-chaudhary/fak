@@ -232,6 +232,21 @@ func isAPIError(text string, re *regexp.Regexp) bool {
 	return re.MatchString(text) && !IsAuthError(text)
 }
 
+// unknownModelRE names an UNKNOWN / INVALID / UNENTITLED model refusal — a startup
+// failure a switch to a DIFFERENT model can fix, distinct from a usage cap (bucket-
+// scoped, IsLimitError) and an auth wall (IsAuthError, which a model switch cannot
+// clear). Kept aligned with the launch-time set in cmd/fak/accounts_launch.go
+// (launchModelUnknownSignals) so a model refusal reads the same wherever the fleet
+// classifies one. The "model" dimension must be named so a generic "not available"
+// (a network/service blip) does not read as a model refusal.
+var unknownModelRE = regexp.MustCompile(`(?i)unknown model|invalid model|unsupported model|model_not_found|` +
+	`no access to model|does not have access to model|not entitled to (?:use )?(?:the )?model|` +
+	`model[^` + "\n" + `]{0,40}(?:not available|unavailable|not found|does not exist|not entitled)`)
+
+// UnknownModel reports whether text names an unknown/invalid/unentitled MODEL refusal
+// — the class a fallback to a different model can address.
+func UnknownModel(text string) bool { return unknownModelRE.MatchString(text) }
+
 // AuthBlockKind classifies an auth wall's text: "credit" (balance too low), "access"
 // (org disabled subscription access), else "auth" (login/credential refresh).
 func AuthBlockKind(text string) string {

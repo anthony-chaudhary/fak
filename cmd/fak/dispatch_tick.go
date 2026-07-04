@@ -1049,7 +1049,13 @@ func dispatchEarlyExitClass(logPath string) string {
 func dispatchEarlyExitSummary(class string) string {
 	switch class {
 	case dispatchtick.NoCommitAuthWall:
-		return "backend auth or usage wall"
+		return "backend login/auth wall"
+	case dispatchtick.NoCommitUsageCap:
+		return "usage/weekly cap (model-switchable)"
+	case dispatchtick.NoCommitModelUnknown:
+		return "model unavailable/unentitled (model-switchable)"
+	case dispatchtick.NoCommitRateLimit:
+		return "rate limit/overload (model-switchable)"
 	case dispatchtick.NoCommitSelfModify:
 		return "guard self-modify refusal"
 	case dispatchtick.NoCommitPolicyBlock:

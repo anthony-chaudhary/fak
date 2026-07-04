@@ -7,14 +7,18 @@ package dispatchtick
 // a structured reason classified from the log tail. Only the two RE-BLOCKABLE guard
 // refusals (self_modify / policy_block) hold their issue out of the next pick: a
 // re-dispatch would hit the same guard identically, so re-storming it burns budget
-// for zero commits. An auth wall re-probes after the time cooldown; a banner no-op
-// is owned by the backend-health gate. This file is the pure half — the runs-dir
+// for zero commits. A usage/rate/unknown-model wall is model-switchable (Layer-2
+// re-dispatch downgrades onto the next chain model); a genuine auth wall re-probes
+// after the time cooldown; a banner no-op is owned by the backend-health gate. This
+// file is the pure half — the runs-dir
 // walk, git/dos subprocesses, and sidecar writes live in the cmd/fak shell.
 
 import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/sessionsignals"
 )
 
 // Claim verdicts a finished worker slot grades into — the .witness sidecar vocabulary.
@@ -29,13 +33,24 @@ const (
 const WitnessOK = "diff-witnessed"
 
 // Why a FINISHED worker landed no resolving commit (the .witness `reason` field).
+//
+// The model-switchable trio (usage_cap / model_unknown / rate_limit) is distinct from
+// the guard refusals AND from a genuine auth wall: a switch to a DIFFERENT model can
+// clear them — a different weekly bucket, an entitled model id, a clear capacity pool —
+// so Layer-2 re-dispatch downgrades onto the next chain model instead of re-storming the
+// same walled one. auth_wall is now a GENUINE login/credit/access wall that a model
+// switch cannot fix (only a human /login or a billing/entitlement change), corrected
+// from its former mislabel where its regexes actually only caught usage caps.
 const (
-	NoCommitSelfModify  = "self_modify"
-	NoCommitPolicyBlock = "policy_block"
-	NoCommitAuthWall    = "auth_wall"
-	NoCommitOffTrunk    = "off_trunk"
-	NoCommitBannerNoop  = "banner_noop"
-	NoCommitUnknown     = "unknown"
+	NoCommitSelfModify   = "self_modify"
+	NoCommitPolicyBlock  = "policy_block"
+	NoCommitAuthWall     = "auth_wall"
+	NoCommitUsageCap     = "usage_cap"
+	NoCommitModelUnknown = "model_unknown"
+	NoCommitRateLimit    = "rate_limit"
+	NoCommitOffTrunk     = "off_trunk"
+	NoCommitBannerNoop   = "banner_noop"
+	NoCommitUnknown      = "unknown"
 )
 
 // WitnessSidecarSuffix marks a worker slot as audited-once: a commit's diff (so its
@@ -102,14 +117,27 @@ func (r WitnessRecord) Map() map[string]any {
 // could not be stat'd — the banner-no-op floor then fails open to unknown, exactly
 // like the Python classifier's OSError branch. Pure + fail-open: no recognized
 // signature -> unknown, never a false positive.
+//
+// Precedence mirrors sessionsignals.TerminalFailure (AUTH > LIMIT > API_ERR) with the
+// guard refusals first and the model-unknown class inserted between a usage cap and a
+// transient rate-limit: a genuine login/credit/access wall (auth_wall) is checked
+// BEFORE the usage cap so a credit wall is never mislabeled a switchable cap, and the
+// local capBannerRE/glmWallRE stay (they catch the GLM "limit will reset at" banner
+// that sessionsignals.IsLimitError does not) — sessionsignals only WIDENS coverage.
 func ClassifyNoCommitReason(tail string, size int64) string {
 	switch {
 	case strings.Contains(tail, "SELF_MODIFY"):
 		return NoCommitSelfModify
 	case strings.Contains(tail, "POLICY_BLOCK"):
 		return NoCommitPolicyBlock
-	case capBannerRE.MatchString(tail) || glmWallRE.MatchString(tail):
+	case sessionsignals.NeedsLoginPrompt(tail) || sessionsignals.IsAuthError(tail):
 		return NoCommitAuthWall
+	case capBannerRE.MatchString(tail) || glmWallRE.MatchString(tail) || sessionsignals.IsLimitError(tail):
+		return NoCommitUsageCap
+	case sessionsignals.UnknownModel(tail):
+		return NoCommitModelUnknown
+	case sessionsignals.IsAPIError(tail):
+		return NoCommitRateLimit
 	case strings.Contains(tail, "OFF_TRUNK"):
 		return NoCommitOffTrunk
 	case size >= 0 && size <= StubLogMaxBytes && noopBannerRE.MatchString(tail):
@@ -117,6 +145,19 @@ func ClassifyNoCommitReason(tail string, size int64) string {
 	default:
 		return NoCommitUnknown
 	}
+}
+
+// ModelSwitchableReason reports whether a no-commit reason is one a switch to a
+// DIFFERENT model can address — a usage/weekly cap (a different model has its own
+// bucket), an unknown/unentitled model id, or a transient rate-limit/overload. A
+// genuine auth wall, a guard refusal, an off-trunk refusal, or a banner no-op is NOT
+// model-switchable, so Layer-2 re-dispatch skips them.
+func ModelSwitchableReason(reason string) bool {
+	switch reason {
+	case NoCommitUsageCap, NoCommitModelUnknown, NoCommitRateLimit:
+		return true
+	}
+	return false
 }
 
 // HeldNoCommitIssues folds this tick's witness records into the issue numbers the

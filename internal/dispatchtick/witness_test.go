@@ -16,10 +16,15 @@ func TestClassifyNoCommitReason(t *testing.T) {
 		{"self-modify guard refusal", "guard summary\nrefused: reason=SELF_MODIFY edit to cmd/fak\n", 90000, NoCommitSelfModify},
 		{"policy block guard refusal", "final turn\nPOLICY_BLOCK: push refused\n", 4096, NoCommitPolicyBlock},
 		{"self-modify outranks policy block", "SELF_MODIFY then POLICY_BLOCK\n", 500, NoCommitSelfModify},
-		{"claude cap banner", "You've hit your usage limit · resets 8pm\n", 700, NoCommitAuthWall},
-		{"codex cap banner", "You've hit your usage limit. Visit https://chatgpt.com/codex\n", 700, NoCommitAuthWall},
-		{"glm quota wall", "Limit Exhausted: your limit will reset at 2026-07-03\n", 120000, NoCommitAuthWall},
-		{"glm usage wall", "usage limit reached for zai-coding-plan\n", 300, NoCommitAuthWall},
+		{"claude cap banner", "You've hit your usage limit · resets 8pm\n", 700, NoCommitUsageCap},
+		{"codex cap banner", "You've hit your usage limit. Visit https://chatgpt.com/codex\n", 700, NoCommitUsageCap},
+		{"glm quota wall", "Limit Exhausted: your limit will reset at 2026-07-03\n", 120000, NoCommitUsageCap},
+		{"glm usage wall", "usage limit reached for zai-coding-plan\n", 300, NoCommitUsageCap},
+		{"login wall is genuine auth (401 /login)", "API Error: 401 Please run /login\n", 300, NoCommitAuthWall},
+		{"not-logged-in is genuine auth", "Not logged in. Run /login to continue\n", 300, NoCommitAuthWall},
+		{"credit wall is genuine auth", "Your credit balance is too low to run this request\n", 300, NoCommitAuthWall},
+		{"unknown/unentitled model is switchable", "error: model \"fable\" is not available for this account\n", 300, NoCommitModelUnknown},
+		{"transient overload is rate limit", "API Error: 529 overloaded_error\n", 300, NoCommitRateLimit},
 		{"off-trunk guard refusal", "commit refused: OFF_TRUNK\n", 2000, NoCommitOffTrunk},
 		{"banner-only no-op under stub floor", banner, int64(len(banner)), NoCommitBannerNoop},
 		{"banner over stub floor is not a no-op", banner + strings.Repeat("x", StubLogMaxBytes), StubLogMaxBytes + 30, NoCommitUnknown},
@@ -46,6 +51,11 @@ func TestHeldNoCommitIssuesHoldsOnlyReblockableGuardRefusals(t *testing.T) {
 		{Issue: 1341, Claim: ClaimNoCommit, Reason: NoCommitBannerNoop},
 		{Issue: 1342, Claim: ClaimNoCommit, Reason: NoCommitOffTrunk},
 		{Issue: 1343, Claim: ClaimNoCommit, Reason: NoCommitUnknown},
+		// The model-switchable trio is handled by Layer-2 downgrade re-dispatch, NOT by
+		// holding — so a usage_cap / model_unknown / rate_limit slot is never held out.
+		{Issue: 1346, Claim: ClaimNoCommit, Reason: NoCommitUsageCap},
+		{Issue: 1347, Claim: ClaimNoCommit, Reason: NoCommitModelUnknown},
+		{Issue: 1348, Claim: ClaimNoCommit, Reason: NoCommitRateLimit},
 		{Issue: 1344, Claim: ClaimWitnessed, SHA: "abc123"},
 		{Issue: 1345, Claim: ClaimUnwitnessed, SHA: "def456"},
 	}
@@ -55,6 +65,25 @@ func TestHeldNoCommitIssuesHoldsOnlyReblockableGuardRefusals(t *testing.T) {
 	}
 	if got := HeldNoCommitIssues(nil); len(got) != 0 {
 		t.Fatalf("held over no records = %v, want empty", got)
+	}
+}
+
+// TestModelSwitchableReason pins which no-commit classes Layer-2 re-dispatch acts on:
+// the switchable trio (a different model can clear them) vs the guard refusals, the
+// genuine auth wall, off-trunk, banner no-op, and unknown (a model switch cannot).
+func TestModelSwitchableReason(t *testing.T) {
+	for _, r := range []string{NoCommitUsageCap, NoCommitModelUnknown, NoCommitRateLimit} {
+		if !ModelSwitchableReason(r) {
+			t.Errorf("ModelSwitchableReason(%q) = false, want true", r)
+		}
+	}
+	for _, r := range []string{
+		NoCommitSelfModify, NoCommitPolicyBlock, NoCommitAuthWall,
+		NoCommitOffTrunk, NoCommitBannerNoop, NoCommitUnknown, "",
+	} {
+		if ModelSwitchableReason(r) {
+			t.Errorf("ModelSwitchableReason(%q) = true, want false", r)
+		}
 	}
 }
 

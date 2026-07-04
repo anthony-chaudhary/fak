@@ -195,6 +195,21 @@ func TestUnknownWitnessReasonFoldsToUnknown(t *testing.T) {
 	}
 }
 
+// TestModelSwitchableReasonsAccountedNotFolded pins that the Layer-2 model-switchable
+// classes (usage_cap / model_unknown / rate_limit) are first-class no-commit buckets,
+// not folded into "unknown" — so conservation accounting names where each unit went.
+func TestModelSwitchableReasonsAccountedNotFolded(t *testing.T) {
+	runs := t.TempDir()
+	mkWorker(t, runs, 31, 1.0, workerOpts{witness: map[string]any{"claim": "CLAIM_NO_COMMIT", "sha": nil, "reason": "usage_cap"}})
+	mkWorker(t, runs, 32, 1.0, workerOpts{witness: map[string]any{"claim": "CLAIM_NO_COMMIT", "sha": nil, "reason": "model_unknown"}})
+	mkWorker(t, runs, 33, 1.0, workerOpts{witness: map[string]any{"claim": "CLAIM_NO_COMMIT", "sha": nil, "reason": "rate_limit"}})
+	rep := report(runs, aliveSet(), 6.0)
+	r := rep.Units.NoCommitReasons
+	if r["usage_cap"] != 1 || r["model_unknown"] != 1 || r["rate_limit"] != 1 || r["unknown"] != 0 {
+		t.Errorf("no_commit_reasons = %v, want each switchable class = 1 and no unknown", r)
+	}
+}
+
 func TestRepairUnitsCountedSeparately(t *testing.T) {
 	runs := t.TempDir()
 	mkWorker(t, runs, 30, 1.0, workerOpts{kind: "repair", lane: "contract-repair"})

@@ -13,8 +13,8 @@
 //
 //	units_spent(window) = shipped_witnessed
 //	                    + committed_unwitnessed
-//	                    + no_commit{self_modify|policy_block|auth_wall|
-//	                                off_trunk|banner_noop|unknown}
+//	                    + no_commit{self_modify|policy_block|auth_wall|usage_cap|
+//	                                model_unknown|rate_limit|off_trunk|banner_noop|unknown}
 //	                    + spawn_failed
 //	                    + leaked_unswept          <- the number this tool exists for
 //
@@ -70,6 +70,7 @@ const (
 // outside it folds to "unknown".
 var noCommitReasons = map[string]bool{
 	"self_modify": true, "policy_block": true, "auth_wall": true,
+	"usage_cap": true, "model_unknown": true, "rate_limit": true,
 	"off_trunk": true, "banner_noop": true, "unknown": true,
 }
 
