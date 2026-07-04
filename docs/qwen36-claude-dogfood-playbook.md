@@ -272,6 +272,13 @@ curl -sS http://127.0.0.1:8131/v1/chat/completions \
 If `/v1/models` works but `/v1/chat/completions` fails, the Qwen server is alive but
 not ready for this dogfood path. Fix that before debugging Claude Code.
 
+The generic guard path now carries the Qwen preset tuning too: when `fak guard --local`
+detects the Qwen3.6 dogfood endpoint or a Qwen3.6 model id, it sets
+`FAK_PROVIDER_EXTRA_BODY_JSON` for that guard process to
+`{"top_k":20,"chat_template_kwargs":{"preserve_thinking":true}}`. If you already set
+`FAK_PROVIDER_EXTRA_BODY_JSON`, guard leaves your override alone and reports that it is
+using the existing value.
+
 ## What The Probe Command Does
 
 The probe command below does all of this:

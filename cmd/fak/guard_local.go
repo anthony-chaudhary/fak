@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+const guardQwen36ProviderExtraBodyJSON = `{"top_k":20,"chat_template_kwargs":{"preserve_thinking":true}}`
+
 // guard_local.go implements `fak guard --local`: auto-detect a local OpenAI-compatible
 // model server the user is ALREADY running (Ollama / LM Studio / llama.cpp server) and
 // wire guard's upstream to it with zero flags. It is the works-end-to-end-TODAY sibling
@@ -93,6 +95,38 @@ func guardChooseLocalBackend(results []localProbeResult) (base, model, label str
 		return guardOpenAIV1Base(r.backend.base), guardPickLocalModel(r.models), r.backend.name, true
 	}
 	return "", "", "", false
+}
+
+func guardLocalProviderExtraBody(label, model string) string {
+	if guardLocalLooksQwen36(label) || guardLocalLooksQwen36(model) {
+		return guardQwen36ProviderExtraBodyJSON
+	}
+	return ""
+}
+
+func guardLocalLooksQwen36(s string) bool {
+	l := strings.ToLower(strings.TrimSpace(s))
+	return strings.Contains(l, "qwen3.6") || strings.Contains(l, "qwen3_6") || strings.Contains(l, "qwen36")
+}
+
+func guardApplyLocalProviderExtraBody(label, model string, getenv func(string) string, setenv func(string, string) error) (applied, alreadySet bool, value string, err error) {
+	value = guardLocalProviderExtraBody(label, model)
+	if value == "" {
+		return false, false, "", nil
+	}
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	if strings.TrimSpace(getenv("FAK_PROVIDER_EXTRA_BODY_JSON")) != "" {
+		return false, true, value, nil
+	}
+	if setenv == nil {
+		setenv = os.Setenv
+	}
+	if err := setenv("FAK_PROVIDER_EXTRA_BODY_JSON", value); err != nil {
+		return false, false, value, err
+	}
+	return true, false, value, nil
 }
 
 // guardPickLocalModel selects ONE model id from a backend's served list. It prefers a

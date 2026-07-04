@@ -134,6 +134,54 @@ func TestGuardPickLocalModel(t *testing.T) {
 	}
 }
 
+func TestGuardLocalProviderExtraBodyForQwen36(t *testing.T) {
+	for _, tc := range []struct {
+		label string
+		model string
+	}{
+		{label: "Qwen3.6 local", model: ""},
+		{label: "LM Studio", model: "lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M"},
+		{label: "llama.cpp", model: "qwen36-27b-q4_k_m"},
+	} {
+		if got := guardLocalProviderExtraBody(tc.label, tc.model); got != guardQwen36ProviderExtraBodyJSON {
+			t.Fatalf("guardLocalProviderExtraBody(%q, %q) = %q, want Qwen3.6 body", tc.label, tc.model, got)
+		}
+	}
+	if got := guardLocalProviderExtraBody("LM Studio", "qwen2.5-coder:7b"); got != "" {
+		t.Fatalf("non-Qwen3.6 model got extra body: %q", got)
+	}
+}
+
+func TestGuardApplyLocalProviderExtraBody(t *testing.T) {
+	env := map[string]string{}
+	applied, alreadySet, value, err := guardApplyLocalProviderExtraBody(
+		"Qwen3.6 local",
+		"lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M",
+		func(k string) string { return env[k] },
+		func(k, v string) error { env[k] = v; return nil },
+	)
+	if err != nil || !applied || alreadySet || value != guardQwen36ProviderExtraBodyJSON {
+		t.Fatalf("apply = applied=%v alreadySet=%v value=%q err=%v", applied, alreadySet, value, err)
+	}
+	if env["FAK_PROVIDER_EXTRA_BODY_JSON"] != guardQwen36ProviderExtraBodyJSON {
+		t.Fatalf("env body = %q, want Qwen3.6 body", env["FAK_PROVIDER_EXTRA_BODY_JSON"])
+	}
+
+	env["FAK_PROVIDER_EXTRA_BODY_JSON"] = `{"top_k":8}`
+	applied, alreadySet, value, err = guardApplyLocalProviderExtraBody(
+		"Qwen3.6 local",
+		"lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M",
+		func(k string) string { return env[k] },
+		func(k, v string) error { env[k] = v; return nil },
+	)
+	if err != nil || applied || !alreadySet || value != guardQwen36ProviderExtraBodyJSON {
+		t.Fatalf("override apply = applied=%v alreadySet=%v value=%q err=%v", applied, alreadySet, value, err)
+	}
+	if env["FAK_PROVIDER_EXTRA_BODY_JSON"] != `{"top_k":8}` {
+		t.Fatalf("operator override was overwritten: %q", env["FAK_PROVIDER_EXTRA_BODY_JSON"])
+	}
+}
+
 func TestParseOllamaTags(t *testing.T) {
 	body := []byte(`{"models":[{"name":"qwen2.5-coder:7b"},{"name":"llama3:8b"},{"name":""}]}`)
 	got := parseOllamaTags(body)

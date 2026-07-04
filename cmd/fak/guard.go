@@ -434,8 +434,19 @@ func cmdGuard(argv []string) {
 		if strings.TrimSpace(*model) == "" {
 			*model = detModel
 		}
+		extraApplied, extraAlreadySet, _, extraErr := guardApplyLocalProviderExtraBody(detLabel, *model, os.Getenv, os.Setenv)
+		if extraErr != nil {
+			fmt.Fprintf(os.Stderr, "fak guard: --local could not apply Qwen3.6 provider tuning: %v\n", extraErr)
+			os.Exit(2)
+		}
 		if !*quiet {
 			fmt.Fprintln(os.Stderr, guardLocalDetectedBanner(detLabel, detBase, detModel))
+			switch {
+			case extraApplied:
+				fmt.Fprintln(os.Stderr, "-> local tuning: Qwen3.6 provider extra body enabled (top_k=20, preserve_thinking=true)")
+			case extraAlreadySet:
+				fmt.Fprintln(os.Stderr, "-> local tuning: using existing FAK_PROVIDER_EXTRA_BODY_JSON")
+			}
 		}
 	} else if *localAuto && localModel && !*quiet {
 		fmt.Fprintln(os.Stderr, "fak guard: --gguf is set, so --local is ignored (the in-kernel model is the upstream)")

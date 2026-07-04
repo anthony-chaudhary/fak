@@ -708,7 +708,9 @@ fak guard --local --probe -- claude -p "Reply with exactly the word: pong"
 
 `--local` detects the OpenAI-compatible model server for the upstream proxy hop, while
 the guard still injects `ANTHROPIC_BASE_URL` for Claude Code so the child talks to the
-local `/v1/messages` surface.
+local `/v1/messages` surface. When the detected local backend/model is Qwen3.6, guard
+also applies the same request-body tuning as the Qwen preset (`top_k=20` and
+`preserve_thinking=true`) unless you already set `FAK_PROVIDER_EXTRA_BODY_JSON`.
 
 This is equivalent to:
 
