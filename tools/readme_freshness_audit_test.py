@@ -264,6 +264,97 @@ def test_front_page_focus_only_counts_top_level_sections() -> None:
     assert "sections_bounded" not in c["items"], c
 
 
+def test_front_page_focus_exposes_overage_magnitude() -> None:
+    # The check surfaces HOW FAR over (not just a boolean) so the score can weight
+    # it: a preamble with a thrice-restated lead, over a tiny line budget.
+    readme = ("# fak\none binary in front of the agent you already run.\n"
+              "one static Go binary in front of the agent you already run.\n"
+              "drop-in one binary in front of the agent you already run.\n"
+              + "\n".join(f"x{i}" for i in range(20)))
+    c = rfa.check_front_page_focus(readme, line_budget=10, section_budget=12, max_lead=2)
+    assert c["lines_over"] == len(readme.splitlines()) - 10, c
+    assert c["lead_over"] >= 1, c
+    assert "lines_over" in c and "overflow_linked" in c, c
+
+
+# --- the UNBOUNDED, magnitude-aware composite score ------------------------
+
+def _focus_check(*, lines_over=0, sections_over=0, lead_over=0,
+                 overflow_linked=True) -> dict:
+    """A front_page_focus check dict carrying explicit overage, for score tests."""
+    missing = []
+    if lines_over:
+        missing.append("within_line_budget")
+    if sections_over:
+        missing.append("sections_bounded")
+    if lead_over:
+        missing.append("single_lead")
+    if not overflow_linked:
+        missing.append("overflow_linked")
+    met = 4 - len(missing)
+    return {"check": "front_page_focus", "status": "OK" if met >= 3 else "WARN",
+            "score": round(met / 4, 3), "items": missing,
+            "lines_over": lines_over, "sections_over": sections_over,
+            "lead_over": lead_over, "overflow_linked": overflow_linked}
+
+
+def _all_substance_ok() -> list[dict]:
+    """The five non-focus substance checks maxed (1.0) + a lean focus (0 penalty)."""
+    return [{"check": c, "status": "OK", "score": 1.0}
+            for c in rfa.SUBSTANCE_CHECKS if c != "front_page_focus"] + [_focus_check()]
+
+
+def test_clean_lean_page_scores_100() -> None:
+    p = rfa.build_payload(workspace=".", checks=_all_substance_ok())
+    assert p["score"] == 100 and p["grade"] == "A", p
+
+
+def test_score_is_unbounded_below_on_gross_bloat() -> None:
+    # A page 250 lines over budget scores far BELOW zero — the old score floored
+    # at 0, hiding the difference between a little and a lot of bloat.
+    checks = _all_substance_ok()[:-1] + [_focus_check(lines_over=250)]
+    p = rfa.build_payload(workspace=".", checks=checks)
+    assert p["score"] < 0, p
+    assert p["score"] == round(100 - 250 * rfa.LINE_OVER_PENALTY), p
+
+
+def test_score_is_magnitude_aware_lines_over() -> None:
+    # 5 lines over vs 200 lines over differ by exactly the overage delta — the
+    # boolean within_line_budget used to make them identical (both = one defect).
+    small = rfa.build_payload(
+        workspace=".", checks=_all_substance_ok()[:-1] + [_focus_check(lines_over=5)])
+    big = rfa.build_payload(
+        workspace=".", checks=_all_substance_ok()[:-1] + [_focus_check(lines_over=200)])
+    assert big["score"] < small["score"], (big["score"], small["score"])
+    assert small["score"] - big["score"] == round(195 * rfa.LINE_OVER_PENALTY)
+
+
+def test_second_hygiene_fail_drops_below_the_cap() -> None:
+    # One FAIL lands exactly on the old cap; a second takes the score below it,
+    # unbounded — a broken page can no longer hide near a passing grade.
+    one = rfa.build_payload(
+        workspace=".", checks=_all_substance_ok() + [{"check": "links", "status": "FAIL"}])
+    two = rfa.build_payload(
+        workspace=".", checks=_all_substance_ok()
+        + [{"check": "links", "status": "FAIL"}, {"check": "version_pins", "status": "FAIL"}])
+    assert one["score"] == rfa.FAIL_SCORE_CAP, one
+    assert two["score"] < rfa.FAIL_SCORE_CAP, two
+    assert two["score"] == round(100 - 2 * rfa.HYGIENE_FAIL_PENALTY), two
+
+
+def test_excess_section_and_lead_outweigh_a_single_line() -> None:
+    # Magnitude weights: an extra section (8) and an extra lead (10) each cost
+    # more than one line over budget (1) — sprawl and confusion bite harder.
+    line = rfa.build_payload(
+        workspace=".", checks=_all_substance_ok()[:-1] + [_focus_check(lines_over=1)])
+    section = rfa.build_payload(
+        workspace=".", checks=_all_substance_ok()[:-1] + [_focus_check(sections_over=1)])
+    lead = rfa.build_payload(
+        workspace=".", checks=_all_substance_ok()[:-1] + [_focus_check(lead_over=1)])
+    assert section["score"] < line["score"], (section["score"], line["score"])
+    assert lead["score"] < section["score"], (lead["score"], section["score"])
+
+
 # --- grader / payload tests ------------------------------------------------
 
 def test_payload_ok_all_green() -> None:
@@ -338,7 +429,10 @@ def test_score_is_substance_only_not_padded_by_hygiene() -> None:
         {"check": "audience_footholds", "status": "OK", "score": 0.0},
     ]
     p = rfa.build_payload(workspace=".", checks=checks)
-    assert p["score"] == 0, p  # substance-only: hygiene OK rows do not pad it
+    # substance-only: hygiene OK rows add zero penalty, so the score is driven
+    # purely by the missing substance affordances (weight-scaled: 2+2+1.5+1.5+1.5
+    # = 8.5 x SUBSTANCE_SHORTFALL_SCALE = 85 penalty => 100-85 = 15).
+    assert p["score"] == 15, p
     assert p["finding"] == "readme_fresh_thin", p
 
 
@@ -394,7 +488,7 @@ def test_compare_improved_reports_multiplier_verdict() -> None:
         {"corpus": {"score": 47, "grade": "F", "readme_debt": 9}},
     )
     assert "readme_debt: 9 -> 0" in out, out
-    assert "score:       47/100 -> 100/100" in out, out
+    assert "score:       47 -> 100" in out, out  # unbounded: no "/100" ceiling
     assert ">=3x improvement" in out, out
 
 
