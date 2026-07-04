@@ -113,6 +113,26 @@ func RenderTwoTrackMarkdown(r TwoTrackReport) string {
 		sb.WriteString("no OBSERVED-$ rows yet (Track-2 ledger empty).\n\n")
 	}
 
+	// Compaction lever health (#2039): surface the fire/starve/shed trend in the markdown
+	// P&L too, so an inert lever (fired>0, shed=0) is distinguishable from an idle one
+	// across both render paths, not only the terminal one.
+	var compactionBuckets []SavingsBucket
+	for _, b := range r.Track2 {
+		if b.Provider == "fak" || strings.HasPrefix(b.Mechanism, "compaction") {
+			compactionBuckets = append(compactionBuckets, b)
+		}
+	}
+	if len(compactionBuckets) > 0 {
+		fmt.Fprintf(&sb, "### Compaction lever health (fire/starve/shed trend)\n\n")
+		fmt.Fprintf(&sb, "| week | sessions | fired | bailed | anchor_starved | shed_tok | budget |\n|---|---|---|---|---|---|---|\n")
+		for _, b := range compactionBuckets {
+			fmt.Fprintf(&sb, "| %s | %d | %d | %d | %d | %d | %d |\n",
+				b.Period, b.Sessions, b.CompactionFired, b.CompactionBailed,
+				b.CompactionAnchorStarved, b.CompactionShedTokens, b.CompactionBudget)
+		}
+		sb.WriteString("\n")
+	}
+
 	// KPI table — every row names its provenance so the projection is never read as witnessed.
 	sb.WriteString("### KPI\n\n")
 	sb.WriteString("| metric | value | provenance |\n|---|---|---|\n")

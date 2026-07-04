@@ -78,3 +78,39 @@ func TestMarkdownSparkline(t *testing.T) {
 		t.Errorf("min→max series must span low→high glyph; got %q..%q", string(s[0]), string(s[2]))
 	}
 }
+
+// #2039: the markdown P&L surfaces the compaction lever's fire/starve/shed trend, so a
+// lever that fired but shed nothing (anchor-starved, #1407) is visible as fired>0,
+// anchor_starved>0, shed_tok=0 — not silence — in the --markdown render path too.
+func TestRenderTwoTrackMarkdown_showsCompactionLeverHealth(t *testing.T) {
+	rep := sampleTwoTrack()
+	rep.Track2 = append(rep.Track2, SavingsBucket{
+		Period:                  "2026-W26",
+		Provider:                "fak",
+		Mechanism:               "compaction_shed",
+		Sessions:                3,
+		CompactionFired:         8,
+		CompactionBailed:        1,
+		CompactionAnchorStarved: 5,
+		CompactionShedTokens:    0,
+		CompactionBudget:        48000,
+	})
+	md := RenderTwoTrackMarkdown(rep)
+	if !strings.Contains(md, "Compaction lever health") {
+		t.Fatalf("markdown must show the compaction health section:\n%s", md)
+	}
+	for _, want := range []string{"8", "5", "48000"} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("markdown compaction health must include %q:\n%s", want, md)
+		}
+	}
+}
+
+// #2039: a report with no compaction buckets emits no compaction-health section (an idle
+// lever must not fabricate a health row), mirroring the terminal render's guard.
+func TestRenderTwoTrackMarkdown_omitsCompactionHealthWhenIdle(t *testing.T) {
+	md := RenderTwoTrackMarkdown(sampleTwoTrack())
+	if strings.Contains(md, "Compaction lever health") {
+		t.Fatalf("a report with no compaction buckets must not emit the section:\n%s", md)
+	}
+}
