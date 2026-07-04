@@ -66,12 +66,12 @@ func newSessionActivity() *sessionActivity {
 
 // getOrMakeLocked returns the record for trace, creating it (and evicting the coldest
 // record first when at cap) if absent. The caller holds a.mu; trace is assumed non-empty.
-func (a *sessionActivity) getOrMakeLocked(trace string) *traceActivity {
+func (a *sessionActivity) getOrMakeLocked(trace string, now time.Time) *traceActivity {
 	if r := a.rec[trace]; r != nil {
 		return r
 	}
 	if len(a.rec) >= sessionActivityCap {
-		a.evictColdestLocked()
+		a.evictColdestLocked(now)
 	}
 	r := &traceActivity{}
 	a.rec[trace] = r
@@ -82,13 +82,14 @@ func (a *sessionActivity) getOrMakeLocked(trace string) *traceActivity {
 // lastActivityUnix and inflightSinceUnix (so an open turn is treated as fresh and survives
 // eviction). Ties break on trace id for determinism. The caller holds a.mu and the map is
 // known non-empty.
-func (a *sessionActivity) evictColdestLocked() {
+func (a *sessionActivity) evictColdestLocked(now time.Time) {
 	var victim string
 	var best int64
+	nowU := now.Unix()
 	for id, r := range a.rec {
 		seen := r.lastActivityUnix
-		if r.inflightSinceUnix > seen {
-			seen = r.inflightSinceUnix
+		if r.inflightSinceUnix > 0 {
+			seen = nowU
 		}
 		if victim == "" || seen < best || (seen == best && id < victim) {
 			victim, best = id, seen
@@ -107,7 +108,7 @@ func (a *sessionActivity) stampProposed(trace, tool string, now time.Time) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	r := a.getOrMakeLocked(trace)
+	r := a.getOrMakeLocked(trace, now)
 	r.lastTool = tool
 	r.lastActivityUnix = now.Unix()
 	if subagentSpawnTool(tool) {
@@ -124,7 +125,7 @@ func (a *sessionActivity) beginTurn(trace string, now time.Time) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.getOrMakeLocked(trace).inflightSinceUnix = now.Unix()
+	a.getOrMakeLocked(trace, now).inflightSinceUnix = now.Unix()
 }
 
 // endTurn clears trace's in-flight marker when its served request returns. It deliberately
