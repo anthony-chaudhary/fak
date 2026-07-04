@@ -83,6 +83,20 @@ func TestParseGuardStopHookConsecutive(t *testing.T) {
 	}
 }
 
+func TestParseGuardStopHookSignalsReadsToolFeedback(t *testing.T) {
+	signals, err := parseGuardStopHookSignals(strings.Join([]string{
+		"# HELP x",
+		"fak_guard_deny_all_consecutive 0",
+		"fak_guard_tool_feedback_consecutive 4",
+	}, "\n"))
+	if err != nil {
+		t.Fatalf("parse signals: %v", err)
+	}
+	if signals.DenyAllConsecutive != 0 || signals.ToolFeedbackConsecutive != 4 {
+		t.Fatalf("signals = %+v, want deny_all=0 tool_feedback=4", signals)
+	}
+}
+
 func TestReadStopHookActive(t *testing.T) {
 	if !readStopHookActive(strings.NewReader(`{"stop_hook_active":true,"session_id":"s"}`)) {
 		t.Fatalf("stop_hook_active true not parsed")
@@ -122,6 +136,31 @@ func TestRunGuardStopHookEnforceBlocksOnDenyAll(t *testing.T) {
 	for _, want := range []string{"RESHAPING", "SELF_MODIFY", "guarded write target"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("nudge missing reshape guidance %q: %s", want, stderr.String())
+		}
+	}
+}
+
+func TestRunGuardStopHookContinuesRetryableToolFeedbackPastDenyAllBound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(strings.Join([]string{
+			"fak_guard_deny_all_consecutive 0",
+			"fak_guard_tool_feedback_consecutive 4",
+		}, "\n")))
+	}))
+	defer srv.Close()
+
+	var stderr strings.Builder
+	code := runGuardStopHook(&stderr, strings.NewReader("{}"), []string{
+		"--mode", guardPreCompactModeEnforce,
+		"--metrics-url", srv.URL + "/metrics",
+		"--max", "3",
+	})
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 (retryable tool feedback continues even past hard deny-all max); stderr=%s", code, stderr.String())
+	}
+	for _, want := range []string{"retryable tool-call feedback", "not a session stop", "Fix the JSON/arguments/tool shape"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("tool-feedback guidance missing %q: %s", want, stderr.String())
 		}
 	}
 }

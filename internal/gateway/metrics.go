@@ -296,9 +296,11 @@ type gatewayMetrics struct {
 	// turn" legible, and the consecutive gauge is the bounded signal the guard
 	// `--deny-all-continue` Stop-hook polls to auto-continue the agent past it. Kept off the
 	// locks above — a one-fold-per-served-turn path with no coupling to the cache families.
-	denyAllMu          sync.Mutex
-	denyAllStops       uint64 // cumulative deny-all turns this session
-	denyAllConsecutive uint64 // consecutive deny-all turns ending the most recent served turn (reset by any non-deny-all turn)
+	denyAllMu               sync.Mutex
+	denyAllStops            uint64 // cumulative deny-all turns this session
+	denyAllConsecutive      uint64 // consecutive deny-all turns ending the most recent served turn (reset by any non-deny-all turn)
+	toolFeedbackTurns       uint64 // cumulative retryable tool-feedback turns (all proposed calls rejected as model-fixable feedback)
+	toolFeedbackConsecutive uint64 // consecutive retryable tool-feedback turns ending the most recent served turn
 }
 
 type inflightEntry struct {
@@ -819,23 +821,41 @@ func (m *gatewayMetrics) recordResetShadow(d ResetDecision) {
 	m.resetShadowMu.Unlock()
 }
 
-// recordAdjudicationOutcome folds one served turn's adjudication SHAPE into the deny-all
-// stop family. denyAll is true iff the model proposed >=1 tool call this turn and the
-// capability floor refused EVERY one (no survivor) — the case the wire reports as end_turn,
-// halting the agent though it wanted to act. A non-deny-all turn (at least one surviving
-// call, or a pure-text turn) RESETS the consecutive run, so the gauge reads the live "are we
-// stuck refusing?" depth a bounded auto-continue can act on. Called once per served
-// Anthropic turn on both wire paths. A no-op for a nil metrics.
-func (m *gatewayMetrics) recordAdjudicationOutcome(denyAll bool) {
+type adjudicationOutcomeSignal int
+
+const (
+	adjudicationOutcomeReset adjudicationOutcomeSignal = iota
+	adjudicationOutcomeDenyAll
+	adjudicationOutcomeToolFeedback
+)
+
+// recordAdjudicationOutcome folds one served turn's adjudication SHAPE into two
+// separate turn-control signals:
+//   - deny-all: every proposed tool call was hard-refused by the floor. This is the
+//     bounded stop-policy signal; the guard Stop hook may eventually give up.
+//   - tool-feedback: every proposed tool call was rejected as retryable/model-fixable
+//     feedback (for example MALFORMED JSON). This should continue the turn but must not
+//     be counted as a session-stop/give-up policy.
+//
+// A reset turn (at least one survivor/served call, or pure text) clears both consecutive
+// runs. Called once per served Anthropic turn on both wire paths. A no-op for nil metrics.
+func (m *gatewayMetrics) recordAdjudicationOutcome(signal adjudicationOutcomeSignal) {
 	if m == nil {
 		return
 	}
 	m.denyAllMu.Lock()
-	if denyAll {
+	switch signal {
+	case adjudicationOutcomeDenyAll:
 		m.denyAllStops++
 		m.denyAllConsecutive++
-	} else {
+		m.toolFeedbackConsecutive = 0
+	case adjudicationOutcomeToolFeedback:
+		m.toolFeedbackTurns++
+		m.toolFeedbackConsecutive++
 		m.denyAllConsecutive = 0
+	default:
+		m.denyAllConsecutive = 0
+		m.toolFeedbackConsecutive = 0
 	}
 	m.denyAllMu.Unlock()
 }
@@ -871,12 +891,26 @@ func (m *gatewayMetrics) denyAllSnapshot() (stops, consecutive uint64) {
 	return m.denyAllStops, m.denyAllConsecutive
 }
 
+// toolFeedbackSnapshot reads the retryable tool-feedback accumulators under the same
+// lock as deny-all. The two families are mutually exclusive on a given turn but rendered
+// side by side so operators can tell "the model needs to fix JSON/args" apart from "the
+// floor hard-refused every action."
+func (m *gatewayMetrics) toolFeedbackSnapshot() (turns, consecutive uint64) {
+	if m == nil {
+		return 0, 0
+	}
+	m.denyAllMu.Lock()
+	defer m.denyAllMu.Unlock()
+	return m.toolFeedbackTurns, m.toolFeedbackConsecutive
+}
+
 // writeDenyAllMetrics renders the deny-all stop family: the cumulative count of turns the
 // floor refused entirely (forcing an unchosen end_turn) and the live consecutive-run gauge
 // the guard Stop-hook polls. Both are 0 on a healthy session, so the surface stays quiet
 // until the floor actually refuses a whole turn.
 func (m *gatewayMetrics) writeDenyAllMetrics(b *strings.Builder) {
 	stops, consec := m.denyAllSnapshot()
+	feedbackTurns, feedbackConsec := m.toolFeedbackSnapshot()
 	writeCounter(b, "fak_guard_deny_all_stops_total",
 		"Served turns whose EVERY proposed tool call the capability floor refused, forcing the wire to report end_turn (a stop the agent did not choose; the v0.15.0 contract that keeps the client from hanging on a dropped tool_use block). The guard --deny-all-continue Stop-hook reads the consecutive gauge below to auto-continue the agent past these.",
 		int64(stops))
@@ -884,6 +918,13 @@ func (m *gatewayMetrics) writeDenyAllMetrics(b *strings.Builder) {
 		"Consecutive deny-all turns ending the most recent served turn (reset to 0 by any turn with a surviving or no tool call). The bounded signal the guard --deny-all-continue Stop-hook polls: 1..MAX continues the agent, above MAX it gives up and lets the turn end.",
 		"gauge")
 	fmt.Fprintf(b, "fak_guard_deny_all_consecutive %d\n", consec)
+	writeCounter(b, "fak_guard_tool_feedback_turns_total",
+		"Served turns whose EVERY proposed tool call was rejected as retryable model feedback (for example MALFORMED JSON/args). These turns may need guard auto-continue, but they are NOT hard deny-all stops and do not drive the bounded give-up policy.",
+		int64(feedbackTurns))
+	writeHelpType(b, "fak_guard_tool_feedback_consecutive",
+		"Consecutive retryable tool-feedback turns ending the most recent served turn. The guard Stop-hook may continue the turn from this signal, but a session stop must come from a separate declared stop policy, not from malformed tool calls accidentally accumulating as hard deny-all.",
+		"gauge")
+	fmt.Fprintf(b, "fak_guard_tool_feedback_consecutive %d\n", feedbackConsec)
 }
 
 func (m *gatewayMetrics) observeHTTP(route, method string, status int, dur time.Duration) {
@@ -1030,6 +1071,10 @@ type AdjudicationSummary struct {
 	// summary so the operator SEES how often fak ended a turn, the otherwise-invisible
 	// false-stop the --deny-all-continue Stop-hook auto-resumes the agent past.
 	DenyAllStops uint64 `json:"deny_all_stops"`
+	// ToolFeedbackTurns is the sibling non-terminal count: every proposed tool call was
+	// rejected as retryable/model-fixable feedback, so the guard may continue the turn,
+	// but this is NOT a session-stop/give-up policy input.
+	ToolFeedbackTurns uint64 `json:"tool_feedback_turns"`
 
 	// CacheTTLUpgrade* folds the managed-cache 1h TTL-upgrade lever (--managed-cache,
 	// epic #1844 C6) into the same exit frame, WITNESSED (fak authored the cache_control
@@ -1073,6 +1118,7 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	// session keeps the JSON field absent (omitempty).
 	sum.ToolPruneTurns, sum.ToolPruneCount = m.inboundToolPruneSnapshot()
 	sum.DenyAllStops, _ = m.denyAllSnapshot()
+	sum.ToolFeedbackTurns, _ = m.toolFeedbackSnapshot()
 	if len(comp.bailReasons) > 0 {
 		sum.CompactionBailReasons = comp.bailReasons
 	}

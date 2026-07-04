@@ -56,6 +56,10 @@ const (
 	// guardStopHookMetricName is the gateway gauge this hook polls: the count of consecutive
 	// deny-all turns ending the most recent served turn (0 on a healthy completion).
 	guardStopHookMetricName = "fak_guard_deny_all_consecutive"
+	// guardStopHookToolFeedbackMetricName is the sibling gauge for retryable tool-call feedback
+	// turns (for example malformed JSON/args). These are NOT session-stop policy input; the hook
+	// uses them only to continue the turn so the model can repair the call shape.
+	guardStopHookToolFeedbackMetricName = "fak_guard_tool_feedback_consecutive"
 
 	// The graduated back-off ladder. Rather than a single cliff (continue N times, then a hard
 	// stop), the auto-continue guidance ESCALATES with the consecutive deny-all depth, and the
@@ -108,6 +112,10 @@ func (s guardStopHookStage) String() string {
 // turn); this is the gentle nudge to act on it rather than stop. Later rungs of the ladder
 // (guardStopHookStageMessage) escalate the firmness and name the sanctioned clean exit.
 const guardStopHookContinueReason = "fak guard: your previous turn proposed only tool call(s) the capability floor refused, so it ended without action (reported upstream as end_turn). Do NOT re-propose a refused call unchanged — pick an ALLOWED alternative and continue the task. Most refusals are MODEL-FIXABLE by RESHAPING, not a dead end: a SELF_MODIFY deny means the floor saw a guarded write target (e.g. VERSION, .dos/, internal/…), so re-issue the command with the write aimed at an unguarded path, split compound commands to isolate the intended write, or drop the guarded write. If there is genuinely no allowed way to make progress, say so explicitly and then stop."
+
+func guardStopHookToolFeedbackMessage(consecutive int) string {
+	return fmt.Sprintf("fak guard: the previous %d turn(s) ended after retryable tool-call feedback, not a session stop. The model proposed only malformed or otherwise model-fixable tool call(s), so fak returned per-call feedback and kept the task alive. Fix the JSON/arguments/tool shape and continue; do not treat the tool rejection as done or blocked.", consecutive)
+}
 
 // normalizeDenyAllThresholds makes the ladder a TOTAL, deterministic function of its three
 // knobs: it clamps any operator/env misconfiguration into the invariant 1 <= warn <= final <=
@@ -236,12 +244,22 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) int {
 		fmt.Fprintln(stderr, "fak guard Stop: allowing stop; no metrics URL configured")
 		return 0
 	}
-	consecutive, err := fetchGuardStopHookConsecutive(context.Background(), metricsURL, *timeout)
+	signals, err := fetchGuardStopHookSignals(context.Background(), metricsURL, *timeout)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak guard Stop: allowing stop; deny-all gauge unavailable: %v\n", err)
 		return 0
 	}
+	consecutive := signals.DenyAllConsecutive
+	feedbackConsecutive := signals.ToolFeedbackConsecutive
 	warnAt, finalAt, maxN := normalizeDenyAllThresholds(*warnFlag, *finalFlag, *maxFlag)
+	if consecutive <= 0 && feedbackConsecutive > 0 {
+		if mode == guardPreCompactModeShadow {
+			fmt.Fprintf(stderr, "fak guard Stop: shadow would auto-continue tool-feedback turn(s) (tool_feedback_consecutive=%d stop_hook_active=%v)\n", feedbackConsecutive, active)
+			return 0
+		}
+		fmt.Fprintln(stderr, guardStopHookToolFeedbackMessage(feedbackConsecutive))
+		return 2
+	}
 	exit, block, stage := guardStopHookDecision(consecutive, warnAt, finalAt, maxN, mode)
 	if mode == guardPreCompactModeShadow {
 		action := "allow stop"
@@ -622,7 +640,17 @@ func mergeGuardStopHookIntoSettings(path, fakBin string) error {
 	return os.WriteFile(path, data, 0o600)
 }
 
+type guardStopHookSignals struct {
+	DenyAllConsecutive      int
+	ToolFeedbackConsecutive int
+}
+
 func fetchGuardStopHookConsecutive(ctx context.Context, metricsURL string, timeout time.Duration) (int, error) {
+	signals, err := fetchGuardStopHookSignals(ctx, metricsURL, timeout)
+	return signals.DenyAllConsecutive, err
+}
+
+func fetchGuardStopHookSignals(ctx context.Context, metricsURL string, timeout time.Duration) (guardStopHookSignals, error) {
 	if timeout <= 0 {
 		timeout = 500 * time.Millisecond
 	}
@@ -630,42 +658,58 @@ func fetchGuardStopHookConsecutive(ctx context.Context, metricsURL string, timeo
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metricsURL, nil)
 	if err != nil {
-		return 0, err
+		return guardStopHookSignals{}, err
 	}
 	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, err
+		return guardStopHookSignals{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("metrics returned HTTP %d", resp.StatusCode)
+		return guardStopHookSignals{}, fmt.Errorf("metrics returned HTTP %d", resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return 0, err
+		return guardStopHookSignals{}, err
 	}
-	return parseGuardStopHookConsecutive(string(body))
+	return parseGuardStopHookSignals(string(body))
 }
 
 // parseGuardStopHookConsecutive extracts the unlabeled fak_guard_deny_all_consecutive gauge
 // value from a Prometheus scrape. Not-found is an error so the caller fails open rather than
 // silently treating a missing gauge as 0 (which would never auto-continue).
 func parseGuardStopHookConsecutive(metrics string) (int, error) {
+	signals, err := parseGuardStopHookSignals(metrics)
+	return signals.DenyAllConsecutive, err
+}
+
+func parseGuardStopHookSignals(metrics string) (guardStopHookSignals, error) {
+	var out guardStopHookSignals
+	foundDenyAll := false
 	for _, line := range strings.Split(metrics, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 		fields := strings.Fields(line)
-		if len(fields) < 2 || fields[0] != guardStopHookMetricName {
+		if len(fields) < 2 {
 			continue
 		}
 		value, err := strconv.ParseFloat(fields[1], 64)
 		if err != nil {
-			return 0, fmt.Errorf("parse %s value %q: %w", guardStopHookMetricName, fields[1], err)
+			return guardStopHookSignals{}, fmt.Errorf("parse %s value %q: %w", fields[0], fields[1], err)
 		}
-		return int(value), nil
+		switch fields[0] {
+		case guardStopHookMetricName:
+			out.DenyAllConsecutive = int(value)
+			foundDenyAll = true
+		case guardStopHookToolFeedbackMetricName:
+			out.ToolFeedbackConsecutive = int(value)
+		}
 	}
-	return 0, fmt.Errorf("metric %s not found", guardStopHookMetricName)
+	if !foundDenyAll {
+		return guardStopHookSignals{}, fmt.Errorf("metric %s not found", guardStopHookMetricName)
+	}
+	return out, nil
 }

@@ -211,6 +211,38 @@ func (s *Server) annotateToolLivelock(trace string, adjs []ToolAdjudication) {
 	}
 }
 
+func adjudicationOutcomeForTurn(adjs []ToolAdjudication, keptTools, servedTools int) adjudicationOutcomeSignal {
+	if len(adjs) == 0 || keptTools > 0 || servedTools > 0 {
+		return adjudicationOutcomeReset
+	}
+	sawRejected := false
+	allRetryableFeedback := true
+	for _, adj := range adjs {
+		if adj.Admitted || adj.Verdict.Kind == "ALLOW" || adj.Verdict.Kind == "TRANSFORM" {
+			return adjudicationOutcomeReset
+		}
+		sawRejected = true
+		if !toolRejectionIsRetryableFeedback(adj.Verdict) {
+			allRetryableFeedback = false
+		}
+	}
+	if !sawRejected {
+		return adjudicationOutcomeReset
+	}
+	if allRetryableFeedback {
+		return adjudicationOutcomeToolFeedback
+	}
+	return adjudicationOutcomeDenyAll
+}
+
+func toolRejectionIsRetryableFeedback(v WireVerdict) bool {
+	reason := strings.ToUpper(strings.TrimSpace(v.Reason))
+	if reason == "MALFORMED" || reason == "MISROUTE" {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(v.Disposition), "RETRYABLE")
+}
+
 func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall, reqTrace string) ([]agent.ToolCall, []ToolAdjudication, int) {
 	kept := make([]agent.ToolCall, 0, len(calls))
 	adjs := make([]ToolAdjudication, 0, len(calls))

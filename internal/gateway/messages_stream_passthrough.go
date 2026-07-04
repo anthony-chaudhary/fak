@@ -69,6 +69,7 @@ type anthropicPassthrough struct {
 	flushedTools bool
 	keptTools    int
 	servedTools  int // vDSO served-inline hits this turn (a SUCCESS, excluded from deny-all)
+	adjs         []ToolAdjudication
 
 	promptTok, complTok, cacheRead, cacheCreate int
 	finishReason                                string
@@ -129,6 +130,7 @@ func (p *anthropicPassthrough) flushHeldTools() {
 	kept, adjs, dropped, servedText, servedHits := p.s.adjudicateProposedServed(p.r.Context(), calls, p.reqTrace)
 	p.keptTools = len(kept)
 	p.servedTools = servedHits
+	p.adjs = adjs
 	// Stash this turn's SAFETY delta (blocked/repaired calls + quarantined inbound results) so the
 	// per-turn fak-turn debug line, rendered just after the terminal inference observation, shows
 	// what the kernel refused the MOMENT it happened — not only in the exit summary. p.resultAdms
@@ -266,12 +268,10 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 			p.flushedTools = true
 			p.flushHeldTools()
 		}
-		// Fold this turn's adjudication SHAPE into the deny-all stop family BEFORE relaying the
-		// (possibly end_turn-rewritten) message_delta: a deny-all (tools proposed, every one
-		// refused) is exactly the case relayMessageDelta rewrites to end_turn, the unchosen stop
-		// the guard Stop-hook resumes. A survivor — or a pure-text turn (no held tools) — resets
-		// the consecutive run. Once per turn (message_delta is terminal).
-		p.s.metrics.recordAdjudicationOutcome(len(p.toolOrder) > 0 && p.keptTools == 0 && p.servedTools == 0)
+		// Fold this turn's adjudication SHAPE into separate turn-control signals BEFORE relaying
+		// the (possibly end_turn-rewritten) message_delta. Hard deny-all remains the bounded
+		// stop-policy path; retryable tool feedback continues without counting as a session stop.
+		p.s.metrics.recordAdjudicationOutcome(adjudicationOutcomeForTurn(p.adjs, p.keptTools, p.servedTools))
 		p.complTok, p.finishReason = relayMessageDelta(p.send, ev.Data, p.complTok, len(p.toolOrder) > 0, p.keptTools)
 
 	case "message_stop":

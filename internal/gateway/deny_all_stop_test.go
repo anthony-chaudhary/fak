@@ -18,21 +18,21 @@ import (
 func TestRecordAdjudicationOutcomeCountsAndResets(t *testing.T) {
 	m := newGatewayMetrics(time.Unix(0, 0))
 
-	m.recordAdjudicationOutcome(true)
-	m.recordAdjudicationOutcome(true)
+	m.recordAdjudicationOutcome(adjudicationOutcomeDenyAll)
+	m.recordAdjudicationOutcome(adjudicationOutcomeDenyAll)
 	if stops, consec := m.denyAllSnapshot(); stops != 2 || consec != 2 {
 		t.Fatalf("after two deny-all turns: stops=%d consec=%d, want 2/2", stops, consec)
 	}
 
 	// A non-deny-all turn (a survivor, or a pure-text turn) resets the consecutive run but not
 	// the cumulative total.
-	m.recordAdjudicationOutcome(false)
+	m.recordAdjudicationOutcome(adjudicationOutcomeReset)
 	if stops, consec := m.denyAllSnapshot(); stops != 2 || consec != 0 {
 		t.Fatalf("after reset turn: stops=%d consec=%d, want 2/0", stops, consec)
 	}
 
 	// A fresh deny-all run starts the consecutive count over from 1.
-	m.recordAdjudicationOutcome(true)
+	m.recordAdjudicationOutcome(adjudicationOutcomeDenyAll)
 	if stops, consec := m.denyAllSnapshot(); stops != 3 || consec != 1 {
 		t.Fatalf("after new deny-all: stops=%d consec=%d, want 3/1", stops, consec)
 	}
@@ -52,11 +52,58 @@ func TestRecordAdjudicationOutcomeCountsAndResets(t *testing.T) {
 	}
 }
 
+func TestRecordAdjudicationOutcomeSeparatesRetryableToolFeedback(t *testing.T) {
+	m := newGatewayMetrics(time.Unix(0, 0))
+
+	for i := 0; i < 4; i++ {
+		m.recordAdjudicationOutcome(adjudicationOutcomeToolFeedback)
+	}
+	if stops, consec := m.denyAllSnapshot(); stops != 0 || consec != 0 {
+		t.Fatalf("malformed feedback counted as hard deny-all: stops=%d consec=%d, want 0/0", stops, consec)
+	}
+	if turns, consec := m.toolFeedbackSnapshot(); turns != 4 || consec != 4 {
+		t.Fatalf("tool feedback snapshot = %d/%d, want 4/4", turns, consec)
+	}
+
+	var b strings.Builder
+	m.writeDenyAllMetrics(&b)
+	out := b.String()
+	for _, want := range []string{
+		"fak_guard_deny_all_stops_total 0",
+		"fak_guard_deny_all_consecutive 0",
+		"fak_guard_tool_feedback_turns_total 4",
+		"fak_guard_tool_feedback_consecutive 4",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("metrics missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestMalformedToolCallsDriveFeedbackNotDenyAllStop(t *testing.T) {
+	m := newGatewayMetrics(time.Unix(0, 0))
+	malformed := []ToolAdjudication{{
+		Tool:     "Write",
+		Admitted: false,
+		Verdict:  WireVerdict{Kind: "DENY", Reason: "MALFORMED", Disposition: "RETRYABLE"},
+	}}
+
+	for i := 0; i < 4; i++ {
+		m.recordAdjudicationOutcome(adjudicationOutcomeForTurn(malformed, 0, 0))
+	}
+	if stops, consec := m.denyAllSnapshot(); stops != 0 || consec != 0 {
+		t.Fatalf("four malformed tool-call turns became session-stop signal: denyAll=%d/%d, want 0/0", stops, consec)
+	}
+	if turns, consec := m.toolFeedbackSnapshot(); turns != 4 || consec != 4 {
+		t.Fatalf("four malformed tool-call turns did not stay feedback: feedback=%d/%d, want 4/4", turns, consec)
+	}
+}
+
 // TestNilMetricsRecordAdjudicationOutcomeNoPanic guards the nil-receiver contract the other
 // observe methods hold: a Server built without metrics must not panic on the hot path.
 func TestNilMetricsRecordAdjudicationOutcomeNoPanic(t *testing.T) {
 	var m *gatewayMetrics
-	m.recordAdjudicationOutcome(true) // must be a no-op, not a nil deref
+	m.recordAdjudicationOutcome(adjudicationOutcomeDenyAll) // must be a no-op, not a nil deref
 	if stops, consec := m.denyAllSnapshot(); stops != 0 || consec != 0 {
 		t.Fatalf("nil snapshot = %d/%d, want 0/0", stops, consec)
 	}
