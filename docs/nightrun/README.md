@@ -88,6 +88,19 @@ problem, not a benchmark result. Keep the watcher running, then:
 4. When `/healthz` turns OK, the watcher runs the full suite and writes the
    result JSON automatically.
 
+To turn the current watcher artifact plus known control-path facts into a
+sanitized operator action plan, run:
+
+```bash
+fak macbench recover --log experiments/nightrun/<box>/<stamp>-macbench-watch.log \
+  --result experiments/nightrun/<box>/<stamp>-macbench-result.json \
+  --tailnet-online unknown --ssh-reachable unknown --wake-helper unknown --json
+```
+
+Use `true` / `false` when a fact is known. The recovery plan keeps remote gateway
+evidence scrubbed, so it can be copied into an issue without exposing the private
+endpoint.
+
 ## How next() ranks
 
 Each feasible task is scored by a blend that sums to 1.0:

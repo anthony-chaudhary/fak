@@ -171,6 +171,50 @@ func TestMacBenchWatchStatusReportsWaitingWithoutLeakingGateway(t *testing.T) {
 	}
 }
 
+func TestMacBenchRecoverPlansTailnetOfflineWithoutLeakingGateway(t *testing.T) {
+	logPath := t.TempDir() + "/macbench-watch.log"
+	rep := macbench.Report{
+		Schema:      macbench.Schema,
+		GeneratedAt: "2026-07-04T07:43:14Z",
+		Suite:       macbench.SuiteHealth,
+		Gateway:     "http://100.64.1.2:8080",
+		Model:       "qwen3.6-27b",
+		Health:      macbench.Health{Error: `Get "http://100.64.1.2:8080/healthz": context deadline exceeded`},
+		Errors:      []string{`healthz failed: Get "http://100.64.1.2:8080/healthz": context deadline exceeded`},
+	}
+	if err := writeMacBenchWatchReport(io.Discard, logPath, rep); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runMacBench(&stdout, &stderr, []string{
+		"recover",
+		"--log", logPath,
+		"--tailnet-online", "false",
+		"--ssh-reachable", "false",
+		"--wake-helper", "false",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("recover code=%d stderr=%s", code, stderr.String())
+	}
+	var plan macbench.RecoveryPlan
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatalf("decode recovery plan: %v\n%s", err, stdout.String())
+	}
+	if plan.Schema != macbench.RecoverySchema || plan.State != "tailnet_offline" || plan.Severity != "operator" {
+		t.Fatalf("plan = %+v", plan)
+	}
+	for _, want := range []string{"wake-or-power-mac", "confirm-tailnet-online", "restart-gateway", "document-wake-helper-gap"} {
+		if !hasMacBenchRecoveryAction(plan, want) {
+			t.Fatalf("recovery plan missing action %q: %+v", want, plan.Actions)
+		}
+	}
+	if strings.Contains(stdout.String(), "100.64.1.2") {
+		t.Fatalf("recovery plan leaked raw gateway:\n%s", stdout.String())
+	}
+}
+
 func TestMacBenchWatchStatusReportsCompletedResult(t *testing.T) {
 	logPath := t.TempDir() + "/macbench-watch.log"
 	resultPath := t.TempDir() + "/macbench-result.json"
@@ -249,4 +293,13 @@ func TestMacBenchSSHHelperProcess(t *testing.T) {
 	}
 	_, _ = os.Stdout.WriteString("fetched-macbench-key\n")
 	os.Exit(0)
+}
+
+func hasMacBenchRecoveryAction(plan macbench.RecoveryPlan, id string) bool {
+	for _, action := range plan.Actions {
+		if action.ID == id {
+			return true
+		}
+	}
+	return false
 }

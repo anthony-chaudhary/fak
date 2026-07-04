@@ -21,6 +21,9 @@ func runMacBench(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) > 0 && argv[0] == "watch-status" {
 		return runMacBenchWatchStatus(stdout, stderr, argv[1:])
 	}
+	if len(argv) > 0 && argv[0] == "recover" {
+		return runMacBenchRecover(stdout, stderr, argv[1:])
+	}
 	if len(argv) > 0 && argv[0] == "watch" {
 		return runMacBenchWatch(stdout, stderr, argv[1:])
 	}
@@ -522,6 +525,89 @@ func renderMacBenchWatchStatus(w io.Writer, s macBenchWatchStatus) {
 		fmt.Fprintf(w, "error: %s\n", s.LastError)
 	}
 	fmt.Fprintf(w, "next: %s\n", s.NextAction)
+}
+
+func runMacBenchRecover(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("macbench recover", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	logPath := fs.String("log", "", "macbench watch append-only log path")
+	resultPath := fs.String("result", "", "macbench watch full result JSON path")
+	watcherRunning := fs.Bool("watcher-running", true, "whether the macbench watcher process is still running")
+	tailnetOnline := fs.String("tailnet-online", "unknown", "Mac peer status: true|false|unknown (also online|offline)")
+	sshReachable := fs.String("ssh-reachable", "unknown", "Mac control path status: true|false|unknown (also reachable|unreachable)")
+	wakeHelper := fs.String("wake-helper", "unknown", "wake/restart helper availability: true|false|unknown (also present|absent)")
+	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if strings.TrimSpace(*logPath) == "" && strings.TrimSpace(*resultPath) == "" {
+		fmt.Fprintln(stderr, "fak macbench recover: pass --log and/or --result")
+		return 2
+	}
+	status, err := loadMacBenchWatchStatus(*logPath, *resultPath, time.Now().UTC())
+	if err != nil {
+		fmt.Fprintf(stderr, "fak macbench recover: %v\n", err)
+		return 1
+	}
+	tailnet, err := parseOptionalMacBenchBool("tailnet-online", *tailnetOnline)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak macbench recover: %v\n", err)
+		return 2
+	}
+	ssh, err := parseOptionalMacBenchBool("ssh-reachable", *sshReachable)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak macbench recover: %v\n", err)
+		return 2
+	}
+	wake, err := parseOptionalMacBenchBool("wake-helper", *wakeHelper)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak macbench recover: %v\n", err)
+		return 2
+	}
+	plan := macbench.PlanRecovery(macbench.RecoverySignals{
+		WatcherRunning: *watcherRunning,
+		ResultPresent:  status.ResultPresent,
+		LatestReport:   status.LatestReport,
+		TailnetOnline:  tailnet,
+		SSHReachable:   ssh,
+		WakeHelper:     wake,
+	})
+	if *asJSON {
+		_ = writeIndentedJSONNoEscape(stdout, plan)
+		return 0
+	}
+	renderMacBenchRecovery(stdout, plan)
+	return 0
+}
+
+func parseOptionalMacBenchBool(name, raw string) (*bool, error) {
+	v := strings.ToLower(strings.TrimSpace(raw))
+	switch v {
+	case "", "unknown":
+		return nil, nil
+	case "1", "t", "true", "y", "yes", "online", "reachable", "present", "available":
+		b := true
+		return &b, nil
+	case "0", "f", "false", "n", "no", "offline", "unreachable", "absent", "missing", "unavailable":
+		b := false
+		return &b, nil
+	default:
+		return nil, fmt.Errorf("--%s must be true, false, or unknown", name)
+	}
+}
+
+func renderMacBenchRecovery(w io.Writer, plan macbench.RecoveryPlan) {
+	fmt.Fprintf(w, "macbench recovery: %s (%s)\n", plan.State, plan.Severity)
+	fmt.Fprintf(w, "%s\n", plan.Summary)
+	for _, ev := range plan.Evidence {
+		fmt.Fprintf(w, "evidence: %s\n", ev)
+	}
+	for _, action := range plan.Actions {
+		fmt.Fprintf(w, "- %s: %s\n", action.ID, action.Title)
+		if action.Detail != "" {
+			fmt.Fprintf(w, "  %s\n", action.Detail)
+		}
+	}
 }
 
 func resolveMacBenchKeyForRun(envName, keyFile string, fetch bool, sshHost, sshKey, gateway string, suite macbench.Suite) (string, error) {
