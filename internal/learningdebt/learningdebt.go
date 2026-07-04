@@ -469,9 +469,11 @@ func priorityIndex(payload map[string]any) map[string]struct {
 }
 
 func newDefect(doc, class, exact, source, score, grade string, rank int, prio float64) Defect {
-	if rank == 0 && prio == 0 {
-		rank = 9999
-	}
+	// rank is the doc's array position in corpus.priorities (0 == the producer's
+	// #1 doc); a doc absent from that index is already defaulted to 9999 by the
+	// caller. Do NOT demote a rank-0 doc on a 0 priority value: the producer sorts
+	// priorities descending, so position 0 is the top doc even in a degenerate
+	// all-equal (prio 0) corpus, and priority is only a sort tiebreaker below rank.
 	d := Defect{
 		Doc:    doc,
 		Class:  class,

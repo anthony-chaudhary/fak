@@ -84,6 +84,49 @@ func TestExtractDefectsIncludesDocCoverageAndStamp(t *testing.T) {
 	}
 }
 
+// TestTopPriorityDocSurvivesZeroPriority pins the producer contract that
+// corpus.priorities is ordered by array POSITION (descending priority), so the
+// position-0 entry is the #1 doc even when every numeric priority is 0.0 — the
+// degenerate all-equal-priority corpus (e.g. no front-door-reachable docs, where
+// tools/learning_scorecard.py emits importance 0 for every doc, so prio rounds to
+// 0.0). Regression: a guard in newDefect demoted the rank-0 doc to rank 9999
+// whenever its priority value was 0, rotating the #1 doc to LAST and, under a
+// tight cap, dropping the very doc the producer ranked first.
+func TestTopPriorityDocSurvivesZeroPriority(t *testing.T) {
+	const raw = `{
+	  "corpus": {"priorities": [
+	    {"path": "docs/lead.md", "priority": 0.0},
+	    {"path": "docs/second.md", "priority": 0.0}
+	  ]},
+	  "docs": [
+	    {"path": "docs/lead.md", "defects": ["orientation: lead is broken"]},
+	    {"path": "docs/second.md", "defects": ["orientation: second is broken"]}
+	  ]
+	}`
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("fixture parse: %v", err)
+	}
+
+	defects := ExtractDefects(payload)
+	if len(defects) != 2 {
+		t.Fatalf("got %d defects, want 2", len(defects))
+	}
+	if defects[0].Doc != "docs/lead.md" {
+		t.Fatalf("top-of-priorities doc = %q, want docs/lead.md (position-0 doc must keep its lead even when priority==0)", defects[0].Doc)
+	}
+	if defects[0].Rank != 0 {
+		t.Fatalf("position-0 doc Rank = %d, want 0 (array position IS the rank, regardless of a 0 priority value)", defects[0].Rank)
+	}
+
+	// The concrete harm the demotion caused: under a cap of 1 the producer's #1
+	// doc was rotated to last and therefore the one dropped.
+	plan, _ := BuildPlan(defects, SeenCache{}, nil, 1, "scorecard.json")
+	if len(plan) != 1 || plan[0].Doc != "docs/lead.md" {
+		t.Fatalf("cap=1 planned %v, want only the highest-priority doc docs/lead.md", plan)
+	}
+}
+
 func TestPlanAppliesCapAfterDedup(t *testing.T) {
 	defects := ExtractDefects(fixturePayload(t))
 	plan, stats := BuildPlan(defects, SeenCache{}, nil, 2, "scorecard.json")
