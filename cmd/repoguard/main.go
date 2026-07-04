@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/repoguard"
 )
@@ -31,7 +32,9 @@ func main() {
 	selftest := flag.Bool("selftest", false, "run the built-in case table and exit")
 	check := flag.String("check", "", "classify a single Bash command and report")
 	workspace := flag.String("workspace", "", "workspace root (default: nearest .git above cwd)")
-	asJSON := flag.Bool("json", false, "machine-readable output for --check")
+	asJSON := flag.Bool("json", false, "machine-readable output for --check / --summary")
+	summary := flag.Bool("summary", false, "read the decision journal and show the accumulated guard value")
+	recentN := flag.Int("recent", 10, "how many recent findings to list under --summary")
 	flag.Parse()
 
 	switch {
@@ -39,6 +42,8 @@ func main() {
 		os.Exit(runSelftest(os.Stdout))
 	case *hook:
 		os.Exit(runHook(os.Stdin, os.Stdout, os.Stderr))
+	case *summary:
+		os.Exit(runSummary(*workspace, *recentN, *asJSON, os.Stdout))
 	case *check != "":
 		os.Exit(runCheck(*check, *workspace, *asJSON, os.Stdout))
 	default:
@@ -77,12 +82,13 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
 	if mode == "off" {
 		return 0
 	}
+	var payload hookPayload
+	var workspaceRoot string
 	violations, err := func() ([]repoguard.Violation, error) {
 		raw, err := io.ReadAll(stdin)
 		if err != nil {
 			return nil, err
 		}
-		var payload hookPayload
 		if len(strings.TrimSpace(string(raw))) == 0 {
 			return nil, nil
 		}
@@ -93,7 +99,7 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
 		if cwd == "" {
 			cwd, _ = os.Getwd()
 		}
-		workspaceRoot := repoguard.FindRepoRoot(cwd)
+		workspaceRoot = repoguard.FindRepoRoot(cwd)
 		safeRoots := repoguard.SafeRootsForWorkspace(workspaceRoot)
 		liveMonitorIDs := liveMonitorIDsForRead(payload, workspaceRoot, stderr)
 		return repoguard.EvaluateWithLiveMonitorIDs(payload.ToolName, payload.ToolInput, workspaceRoot, safeRoots, liveMonitorIDs), nil
@@ -127,7 +133,7 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
 	// the guard delivered in a long session is a fact on disk, not an ephemeral
 	// stderr line the harness scrolls away. Fail-open: a journal error is logged
 	// and swallowed, never allowed to change the decision below.
-	recordDecisions(payload, append(denying, advisory...), stderr)
+	recordDecisions(payload, workspaceRoot, mode, append(denying, advisory...), stderr)
 	if len(denying) == 0 {
 		return 0
 	}
@@ -143,6 +149,25 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
 	}})
 	fmt.Fprintf(stderr, "repo_guard: DENY %s\n", reason)
 	return 0
+}
+
+// recordDecisions appends the guard's findings to the durable decision journal.
+// Best-effort and fail-open: any error is logged to stderr and swallowed so the
+// hook's decision is never affected by a journal problem. The timestamp is taken
+// here (the command layer owns the clock; the pure core stays deterministic).
+func recordDecisions(payload hookPayload, workspaceRoot, mode string, violations []repoguard.Violation, stderr io.Writer) {
+	if len(violations) == 0 {
+		return
+	}
+	if workspaceRoot == "" {
+		return
+	}
+	ts := time.Now().UTC().Format(time.RFC3339)
+	rows := repoguard.DecisionsFromViolations(violations, payload.ToolName, payload.SessionID, mode, ts)
+	path := repoguard.DecisionJournalPath(workspaceRoot)
+	if err := repoguard.AppendDecisions(path, rows); err != nil {
+		fmt.Fprintf(stderr, "repo_guard: decision journal write failed, continuing (%v)\n", err)
+	}
 }
 
 func liveMonitorIDsForRead(payload hookPayload, workspaceRoot string, stderr io.Writer) map[string]bool {
@@ -222,6 +247,29 @@ func runCheck(command, workspace string, asJSON bool, stdout io.Writer) int {
 	if denying > 0 {
 		return 1
 	}
+	return 0
+}
+
+// runSummary reads the decision journal and prints the accumulated guard value:
+// what the guard denied, by reason, over the life of the journal. This is the
+// "show that value" half — a live session's saves become a countable fact. A
+// missing journal is a clean empty summary, not an error.
+func runSummary(workspace string, recentN int, asJSON bool, stdout io.Writer) int {
+	ws := repoguard.FindRepoRoot(orCwd(workspace))
+	path := repoguard.DecisionJournalPath(ws)
+	sum, err := repoguard.SummarizeDecisionsFile(path, recentN)
+	if err != nil {
+		fmt.Fprintf(stdout, "repo_guard: could not read decision journal %s (%v)\n", path, err)
+		return 1
+	}
+	if asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetEscapeHTML(false)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(sum)
+		return 0
+	}
+	fmt.Fprintln(stdout, repoguard.RenderSummary(sum))
 	return 0
 }
 
