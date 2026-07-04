@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -46,4 +48,45 @@ func TestParseIntCSVRejectsBadValues(t *testing.T) {
 	if _, err := parseIntCSV("128, nope"); err == nil {
 		t.Fatal("expected parse error")
 	}
+}
+
+func TestMacBenchFetchesGatewayKeyOverSSH(t *testing.T) {
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		if name != "ssh" || len(args) == 0 || args[len(args)-1] != "cat ~/.fak-gateway-key" {
+			t.Fatalf("unexpected command: %s %v", name, args)
+		}
+		cmd := exec.Command(os.Args[0], "-test.run=TestMacBenchSSHHelperProcess", "--")
+		cmd.Env = append(os.Environ(), "GO_WANT_MACBENCH_SSH_HELPER=1")
+		return cmd
+	}
+	t.Setenv("FAK_GATEWAY_KEY", "")
+
+	key, err := resolveMacBenchKeyForRun(
+		"FAK_GATEWAY_KEY",
+		"",
+		true,
+		"user@node-macos-a.local",
+		"",
+		"http://example.invalid:8080",
+		"decode-longgen",
+	)
+	if err != nil {
+		t.Fatalf("resolveMacBenchKeyForRun: %v", err)
+	}
+	if key != "fetched-macbench-key" {
+		t.Fatalf("key = %q", key)
+	}
+	if got := os.Getenv("FAK_GATEWAY_KEY"); got != "fetched-macbench-key" {
+		t.Fatalf("env key = %q", got)
+	}
+}
+
+func TestMacBenchSSHHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_MACBENCH_SSH_HELPER") != "1" {
+		return
+	}
+	_, _ = os.Stdout.WriteString("fetched-macbench-key\n")
+	os.Exit(0)
 }

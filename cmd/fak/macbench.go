@@ -29,6 +29,9 @@ func runMacBench(stdout, stderr io.Writer, argv []string) int {
 	model := fs.String("model", envOrDefault("FAK_MAC_MODEL", def.Model), "model id served by the Mac gateway")
 	keyEnv := fs.String("gateway-key-env", "FAK_GATEWAY_KEY", "env var holding the gateway bearer")
 	keyFile := fs.String("gateway-key-file", "~/.fak-gateway-key", "file holding the gateway bearer when the env var is empty; empty disables file lookup")
+	fetchKey := fs.Bool("fetch-key", true, "when env/file key lookup is empty for a remote gateway, fetch ~/.fak-gateway-key from the Mac over ssh")
+	sshHost := fs.String("ssh-host", envOrDefault("FAK_MAC_SSH_HOST", defaultClaudeMacSSHHost), "ssh host used by --fetch-key")
+	sshKey := fs.String("ssh-key", defaultClaudeMacSSHKey(), "ssh identity used by --fetch-key; empty uses ssh defaults")
 	timeout := fs.Duration("timeout", 2*time.Hour, "overall benchmark timeout")
 	decodeTokens := fs.String("decode-tokens", "256,512", "comma-separated max_tokens for decode-longgen")
 	prefillTokens := fs.String("prefill-tokens", "128,512,2048,4096", "comma-separated prompt-token targets for prefill-sweep")
@@ -37,7 +40,7 @@ func runMacBench(stdout, stderr io.Writer, argv []string) int {
 	if !parseFlags(fs, argv) {
 		return 2
 	}
-	key, err := resolveMacBenchKey(*keyEnv, *keyFile)
+	key, err := resolveMacBenchKeyForRun(*keyEnv, *keyFile, *fetchKey, *sshHost, *sshKey, *gateway, suite)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak macbench: %v\n", err)
 		return 2
@@ -80,6 +83,27 @@ func runMacBench(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+func resolveMacBenchKeyForRun(envName, keyFile string, fetch bool, sshHost, sshKey, gateway string, suite macbench.Suite) (string, error) {
+	key, err := resolveMacBenchKey(envName, keyFile)
+	if err != nil {
+		return "", err
+	}
+	if key != "" || !fetch || suite == macbench.SuiteHealth {
+		return key, nil
+	}
+	if err := ensureClaudeMacGatewayKey(envName, true, sshHost, sshKey, gateway); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(os.Getenv(nonEmptyString(strings.TrimSpace(envName), "FAK_GATEWAY_KEY"))), nil
+}
+
+func nonEmptyString(s, fallback string) string {
+	if s != "" {
+		return s
+	}
+	return fallback
 }
 
 func renderMacBench(w io.Writer, rep macbench.Report) {
