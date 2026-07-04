@@ -1,0 +1,88 @@
+{
+  "version": "fak-harness-profiles/v1",
+  "description": "Data source for the guard-floor profile lint (issue #2595). Names the shared dangerous-command rule sets every shell-like tool alias must inherit, the shell-like aliases themselves, and the first-class harness profiles whose required host-plumbing tools the embedded guard floor must cover. LintHarnessProfiles compares cmd/fak/guard-default-policy.json against this file; the deny_regex values are copied verbatim from the canonical floor so the lint catches any drift.",
+
+  "shell_rule_sets": {
+    "posix_shell": {
+      "arg": "command",
+      "rules": [
+        { "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]" },
+        { "deny_regex": "\\bsudo\\b" },
+        { "deny_regex": "\\bmkfs\\b|\\bdd\\s+if=|>\\s*/dev/sd" },
+        { "deny_regex": ":\\(\\)\\s*\\{" },
+        { "deny_regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba)?sh\\b" },
+        { "deny_regex": "\\bterraform(?:\\.exe)?\\b[^|;&\\n]*\\bdestroy\\b" },
+        { "deny_regex": "-o\\s+\\.\\.[\\\\/]" },
+        { "deny_regex": "--output[= ]\\s+\\.\\.[\\\\/]" },
+        { "deny_regex": ">>?\\s*\\.\\.[\\\\/]" },
+        { "deny_regex": "\\b(cp|mv|install|tee|rsync|ln)\\b[^|;&]*\\s\\.\\.[\\\\/]" }
+      ]
+    },
+    "windows_shell": {
+      "arg": "command",
+      "rules": [
+        { "deny_regex": "(?i)\\bRemove-Item\\b[^|;\\n]*-(Recurse|Force)\\b" },
+        { "deny_regex": "(?i)\\b(Format-Volume|Clear-Disk|Initialize-Disk|Clear-Content)\\b" },
+        { "deny_regex": "(?i)\\b(Invoke-WebRequest|iwr|curl|wget|Invoke-RestMethod|irm)\\b[^|]*\\|[^|]*\\b(iex|Invoke-Expression)\\b" },
+        { "deny_regex": "(?i)\\bStart-Process\\b[^|;\\n]*-Verb\\s+RunAs\\b" },
+        { "deny_regex": "(?i)\\bterraform(?:\\.exe)?\\b[^|;&\\n]*\\bdestroy\\b" }
+      ]
+    }
+  },
+
+  "shell_aliases": [
+    { "name": "Bash",               "inherits": ["posix_shell"] },
+    { "name": "PowerShell",         "inherits": ["windows_shell"] },
+    { "name": "bash",               "inherits": ["posix_shell"] },
+    { "name": "shell_command",      "inherits": ["posix_shell", "windows_shell"] },
+    { "name": "functions.shell_command", "inherits": ["posix_shell", "windows_shell"] }
+  ],
+
+  "harnesses": [
+    {
+      "name": "claude-code",
+      "required_tools": [
+        "Bash", "PowerShell", "Read", "Edit", "Write", "NotebookEdit", "Glob", "Grep", "LS",
+        "TodoWrite", "Task", "WebFetch", "WebSearch", "ExitPlanMode", "Skill", "Agent",
+        "AskUserQuestion", "EnterPlanMode", "Monitor", "ScheduleWakeup", "SendMessage",
+        "StructuredOutput", "TaskCreate", "TaskGet", "TaskList", "TaskOutput", "TaskStop",
+        "TaskUpdate", "ToolSearch", "BashOutput", "KillShell",
+        "ListMcpResourcesTool", "ReadMcpResourceTool", "ReadMcpResourceDirTool"
+      ]
+    },
+    {
+      "name": "codex",
+      "required_tools": [
+        "shell_command", "functions.shell_command",
+        "update_plan", "functions.update_plan",
+        "request_user_input", "functions.request_user_input",
+        "view_image", "functions.view_image",
+        "get_goal", "functions.get_goal",
+        "create_goal", "functions.create_goal",
+        "update_goal", "functions.update_goal",
+        "list_mcp_resources", "functions.list_mcp_resources",
+        "list_mcp_resource_templates", "functions.list_mcp_resource_templates",
+        "read_mcp_resource", "functions.read_mcp_resource",
+        "tool_search_tool", "tool_search.tool_search_tool",
+        "parallel", "multi_tool_use.parallel"
+      ]
+    },
+    {
+      "name": "opencode",
+      "required_tools": [
+        "bash", "read", "write", "edit", "multiedit", "patch", "apply_patch",
+        "functions.apply_patch", "grep", "glob", "list", "ls", "webfetch",
+        "todowrite", "todoread", "task", "skill", "lsp"
+      ]
+    },
+    {
+      "name": "mcp-client",
+      "required_tools": [
+        "mcp__dos__dos_verify", "mcp__dos__dos_arbitrate", "mcp__dos__dos_recall",
+        "mcp__dos__dos_review", "mcp__dos__dos_status", "mcp__dos__dos_doctor",
+        "mcp__dos__dos_answer", "mcp__dos__dos_check_reason", "mcp__dos__dos_refuse_reasons",
+        "mcp__dos__dos_commit_audit", "mcp__dos__dos_citation_resolve", "mcp__dos__acme_lane_hint"
+      ]
+    }
+  ]
+}
