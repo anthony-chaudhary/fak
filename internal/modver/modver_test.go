@@ -18,6 +18,10 @@ func TestModuleOf(t *testing.T) {
 		{"cmd/fak/main.go", "cmd/fak", "cmd", true},
 		{"cmd/trychatdemo/page.html", "cmd/trychatdemo", "cmd", true},
 		{"internal\\modver\\modver.go", "internal/modver", "internal", true},
+		{".github/workflows/ci.yml", ".github/workflows/ci.yml", "workflow", true},
+		{".github\\workflows\\release-cadence.yml", ".github/workflows/release-cadence.yml", "workflow", true},
+		{".github/workflows/nested/x.yml", "", "", false},   // Actions ignores subdirs
+		{".github/actions/setup/action.yml", "", "", false}, // not the workflows keyspace
 		{"docs/notes/X.md", "", "", false},
 		{"cmd/orphan.go", "", "", false}, // directly under a root: no module
 		{"", "", "", false},
@@ -92,6 +96,49 @@ func TestSnapshotWithFakeRunner(t *testing.T) {
 		if m.Name == "internal/deleted" {
 			t.Errorf("deleted module ghosted into the report")
 		}
+	}
+}
+
+// TestWorkflowKeyspace is the #2464 witness: a .github/workflows/<file> flows
+// through Snapshot as a file-keyed "workflow" module and produces a ledger row,
+// while a non-workflow .github file is excluded from the keyspace.
+func TestWorkflowKeyspace(t *testing.T) {
+	const wfLog = "\x1e" + "wf111111\t2026-07-04T12:00:00Z\n" +
+		".github/workflows/ci.yml\n" +
+		".github/workflows/ci.yml\n" + // same workflow twice in one commit: counts once
+		".github/actions/setup/action.yml\n" + // not the workflows keyspace: excluded
+		"\x1e" + "wf000000\t2026-07-03T09:00:00Z\n" +
+		".github/workflows/ci.yml\n"
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		switch args[0] {
+		case "rev-parse":
+			return []byte("wfhead01\n"), nil
+		case "ls-files":
+			return []byte(".github/workflows/ci.yml\x00.github/actions/setup/action.yml\x00"), nil
+		case "log":
+			return []byte(wfLog), nil
+		}
+		t.Fatalf("unexpected git args: %v", args)
+		return nil, nil
+	}
+	rep, err := Snapshot(context.Background(), t.TempDir(), run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Modules) != 1 {
+		t.Fatalf("got %d modules, want 1 (only the workflow file): %+v", len(rep.Modules), rep.Modules)
+	}
+	m := rep.Modules[0]
+	if m.Name != ".github/workflows/ci.yml" || m.Kind != "workflow" || m.Rev != 2 {
+		t.Fatalf("workflow module = %+v, want .github/workflows/ci.yml kind=workflow rev=2", m)
+	}
+	if v := m.Version(); v != "r2+gwf111111" {
+		t.Errorf("Version() = %q, want r2+gwf111111", v)
+	}
+	// The workflow module must be emittable as a ledger row (empty prior ledger).
+	rows := DeltaRows(rep, nil, "2026-07-04T12:00:00Z")
+	if len(rows) != 1 || rows[0].Module != ".github/workflows/ci.yml" || rows[0].Kind != "workflow" {
+		t.Fatalf("ledger rows = %+v, want one workflow row", rows)
 	}
 }
 

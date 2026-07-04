@@ -30,10 +30,11 @@ import (
 // Schema is the ledger row schema tag.
 const Schema = "fak-module-versions/1"
 
-// Module is one versioned unit: an internal/<leaf> package or a cmd/<dir> binary.
+// Module is one versioned unit: an internal/<leaf> package, a cmd/<dir> binary,
+// or a .github/workflows/<file> CI workflow.
 type Module struct {
-	Name       string   `json:"module"` // e.g. "internal/modver", "cmd/fak"
-	Kind       string   `json:"kind"`   // "internal" | "cmd"
+	Name       string   `json:"module"` // e.g. "internal/modver", "cmd/fak", ".github/workflows/ci.yml"
+	Kind       string   `json:"kind"`   // "internal" | "cmd" | "workflow"
 	Rev        int      `json:"rev"`    // distinct commits touching the module
 	LastCommit string   `json:"last_commit"`
 	LastDate   string   `json:"last_date"` // committer date (ISO) of the last touch
@@ -79,10 +80,11 @@ func RealRunner(ctx context.Context, dir string, args ...string) ([]byte, error)
 	return stdout.Bytes(), nil
 }
 
-// trackedRoots are the path prefixes that define the module key space today.
-// (tools/, docs/, skills, policies are follow-on key spaces — see the
-// version-everything backlog.)
-var trackedRoots = []string{"internal", "cmd"}
+// trackedRoots are the path prefixes that define the module key space today:
+// the internal/ leaves and cmd/ binaries, plus the .github/workflows/ CI
+// keyspace (each workflow file is its own module). (tools/, docs/, skills,
+// policies are follow-on key spaces — see the version-everything backlog.)
+var trackedRoots = []string{"internal", "cmd", ".github/workflows"}
 
 // Snapshot computes the module-version report for the repo at dir: one
 // `git ls-files` to bound the LIVE module set, one `git log --name-only`
@@ -132,8 +134,13 @@ func liveModules(lsFilesOut []byte) map[string]bool {
 }
 
 // moduleOf maps a repo-relative path to its module key: internal/<leaf>/… →
-// internal/<leaf>, cmd/<dir>/… → cmd/<dir>. Files sitting directly under a
-// root (no module directory) belong to no module.
+// internal/<leaf>, cmd/<dir>/… → cmd/<dir>. A directory keyspace groups every
+// file under a module directory into one module. The .github/workflows/ CI
+// keyspace is file-keyed instead: each workflow file (.github/workflows/<file>)
+// is its own module, since a workflow's unit of behavior is the file, not a
+// directory. Files sitting directly under a root (no module directory) belong
+// to no module, as do nested paths under .github/workflows/ (GitHub Actions
+// does not run workflows in subdirectories).
 func moduleOf(path string) (name, kind string, ok bool) {
 	path = strings.TrimSpace(strings.ReplaceAll(path, "\\", "/"))
 	parts := strings.Split(path, "/")
@@ -143,6 +150,10 @@ func moduleOf(path string) (name, kind string, ok bool) {
 	switch parts[0] {
 	case "internal", "cmd":
 		return parts[0] + "/" + parts[1], parts[0], true
+	case ".github":
+		if parts[1] == "workflows" && len(parts) == 3 {
+			return path, "workflow", true
+		}
 	}
 	return "", "", false
 }
