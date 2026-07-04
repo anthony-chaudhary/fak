@@ -29,6 +29,8 @@ func runIssue(stdout, stderr io.Writer, argv []string) int {
 		return runIssueCohort(stdout, stderr, argv[1:])
 	case "fanout":
 		return runIssueFanout(stdout, stderr, argv[1:])
+	case "create":
+		return runIssueCreate(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		issueUsage(stdout)
 		return 0
@@ -1075,6 +1077,16 @@ func issueUsage(w io.Writer) {
                      [--live --dedupe-checked --dedupe-cap N] [--max-wave N]
   fak issue fanout   --title T --leaf L --spine REF [--parent REF]
                      [--paths p1,p2] [--areas a1,a2] [--max N] [--json]
+  fak issue create   --title T (--body B | --body-file F) [--labels l1,l2]
+                     [--repo owner/name] [--dry-run] [--json]
+
+The create command files one GitHub issue directly, shelling to gh issue
+create from the trusted fak binary instead of the agent proposing raw gh
+issue create via Bash — the sanctioned smooth path so routine issue filing
+does not trip the reversibility/ESCALATE preview-confirm gate (which is
+correct to keep escalating an agent's own raw gh/git calls). --dry-run
+renders the issue and the exact gh argv without calling gh. Exit 0 created
+(or dry-run ok); exit 2 bad flags; exit 1 gh failure.
 
 The contract command reviews machine-created GitHub issue candidates before a
 producer syncs them. Exit 0 means dispatchable; exit 3 means the candidate is
