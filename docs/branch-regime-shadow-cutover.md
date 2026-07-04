@@ -118,6 +118,17 @@ ship-stamp — the "PRs managed in advance" bodies a human operator reads when
 `dev` work ships to `main`. `--check` fails if the range holds unstamped
 commits, so legibility is a gate, not a hope.
 
+`fak release ship --execute --open-pr` (issue #2195) turns that fold into a
+real GitHub PR at promotion time: it pushes the exact release-cut commit onto
+a release-owned promotion branch (`fak/release/<tag>` by default) and opens or
+refreshes that promotion branch -> `main` with the prplan body. It never uses
+live `dev` as the PR head, so pilot workers can keep landing work on `dev`
+while the release PR is under review. A rerun updates the same promotion branch
+with `--force-with-lease` and refreshes the existing open PR rather than
+creating a duplicate. Tag/publish then run in a separate `fak release ship`
+once the PR is reviewed and merged. This is inert until `dev` and `main` name
+distinct branch roles — the same cutover this checklist gates.
+
 The proof bundle is incomplete unless it includes:
 
 - the starting `main` SHA used to create or validate `dev`;
