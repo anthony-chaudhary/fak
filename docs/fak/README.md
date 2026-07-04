@@ -55,6 +55,7 @@ are wired, measured, and kept honest. The doctrine behind all of them is
 | Topic | Doc |
 |---|---|
 | The loops doctrine — the five-ring ladder and the witness threads | [`engineering-is-building-loops.md`](../explainers/engineering-is-building-loops.md) |
+| Why loops matter to end users: token cost, fleet efficiency, harness loops, and super loops | [`loops-user-value.md`](../loops-user-value.md) |
 | Find the right `fak` verb at every loop stage | [loop-tool-map.md](loop-tool-map.md) |
 | Plan guard-hop RSI tuning (latency loop) | [guard-hop-rsi-loop.md](guard-hop-rsi-loop.md) |
 | Close the guard verdict-quality RSI loop on our own journal | [guard-verdict-rsi-loop.md](guard-verdict-rsi-loop.md) |
