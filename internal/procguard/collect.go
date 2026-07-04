@@ -233,7 +233,7 @@ func collectPOSIXRelations() ([]Proc, string) {
 }
 
 // KillPID is the destructive reaper (native process-tree termination on Windows,
-// SIGKILL on POSIX).
+// process-group or descendant-walk SIGKILL on POSIX).
 func KillPID(pid int) (bool, string) {
 	if pid <= 0 {
 		return false, "invalid pid"

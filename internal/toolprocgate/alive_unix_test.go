@@ -2,7 +2,12 @@
 
 package toolprocgate
 
-import "syscall"
+import (
+	"fmt"
+	"os"
+	"strings"
+	"syscall"
+)
 
 // pidAlive reports whether a process with the given pid is currently running.
 // It is the OS-liveness oracle the descendant-containment witness polls: it must
@@ -16,6 +21,22 @@ func pidAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
+	if procState, ok := linuxProcState(pid); ok {
+		return procState != "Z" && procState != "X"
+	}
 	err := syscall.Kill(pid, 0)
 	return err == nil || err == syscall.EPERM
+}
+
+func linuxProcState(pid int) (string, bool) {
+	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return "", false
+	}
+	text := string(raw)
+	closeParen := strings.LastIndex(text, ")")
+	if closeParen < 0 || closeParen+2 >= len(text) {
+		return "", false
+	}
+	return text[closeParen+2 : closeParen+3], true
 }
