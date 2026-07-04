@@ -71,7 +71,7 @@ var tier = map[string]int{
 	"amdgpu":               1, // AMD GPU fact probe and perf-counter JSON fold for Windows harness diagnostics; imports windowgate(1), off the hot path.
 	"accounts":             1, "accountobs": 1, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "cacheobs": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
 	// stdlib-only foundation leaves (import nothing internal); off the hot path.
-	"auditpane": 1, "bgloop": 1, "binstamp": 1, "cachewitness": 1, "cmdutil": 1, "codexmemory": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "dojocal": 1, "experiments": 1, "fleetaccounts": 1, "flock": 1, "issuecontractrepair": 1, "maputil": 1, "mathx": 1, "newleaf": 1, "newmodel": 1, "numfmt": 1, "randhex": 1, "selfinstall": 1, "sessionaudit": 1, "strmatch": 1,
+	"auditpane": 1, "bgloop": 1, "binstamp": 1, "cachewitness": 1, "cmdutil": 1, "codexmemory": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "experiments": 1, "fleetaccounts": 1, "flock": 1, "issuecontractrepair": 1, "maputil": 1, "mathx": 1, "newleaf": 1, "newmodel": 1, "numfmt": 1, "randhex": 1, "selfinstall": 1, "sessionaudit": 1, "strmatch": 1,
 	"chatrelay":            1,                // pure Slack chat-relay client (the inbound complement to the scoreboard publishers): posts/reads a channel via the shared slackenv resolver; rides slackwire(1) for transport, off the hot path.
 	"sessionsignals":       1,                // shared closed vocabulary of terminal-turn transcript signals (limit-reset banners, auth/credit/access walls, transient API errors) ported from tools/fleet_session_signals.py; the one taxonomy the resume sweep/stopped/watchdog family classifies with. Stdlib-only, imports nothing internal, off the hot path.
 	"sessiondesc":          1,                // pure session-descriptor join schema (fak.session.descriptor.v1, #2214): folds gateway drive-state / leaseref / harness-identity rows into one exact-join record with a closed absence vocabulary; stdlib-only, imports nothing internal, off the hot path.
@@ -144,12 +144,14 @@ var tier = map[string]int{
 	"ifc": 3, "normgate": 3, "secretgate": 3, "recall": 3, "kvmmu": 3, "radixkv": 3, "cdb": 3, "contextq": 3, "agentdojo": 3, "toollint": 3, "toolsandbox": 3, "terminalbench": 3,
 	"agentdemo":     3,                // agentic "try-it" demo spine (epic #1167): a deterministic, no-key tool-using agent loop that folds the REAL kernel per call â€” the live-loop dual of turnbench's trace replay. Composer: imports abi(0)+adjudicator(2)+kernel(2), off the hot path.
 	"browseraction": 3,                // browser/computer-use action-mediation harness: composes webbench actions with policy/adjudicator, off the live request path.
+	"demo":          3,                // CLI 60-second proof composer: folds agentdemo(3)+kernel(2)+abi(0) into ALLOW/DENY/QUARANTINE evidence for `fak demo`, off the hot path.
 	"memq":          3, "headroom": 3, // memq: the memory-operation algebra composed over recall (tier 3). headroom: the context-compression seam over ctxmmu/abi (its doc.go declares composer/3).
 	"memvaluescore": 3, // unbounded memory-value scorecard (frontier/pressure/debt) over the committed memory mirror + recall-events ledger; composes recall(3)+memoryread(1)+pkg/scorecard, off the hot path.
 	"selfquery":     3, // unified self-feature catalog over devindex, memq, gateway-supplied tool descriptors, and capindex cards; composer view, off the hot path.
 
 	"agent": 4, "bench": 4, "turnbench": 4, "gateway": 4, "registrations": 4, "rsiloop": 4,
 	"docfreshrsi": 4, // RSI rung of the docs-freshness loop (#1278/#1284): an rsiloop(4) sibling that imports only shipgate(2)'s keep-bit, off the hot path.
+	"dojocal":     4, // dojo-RSI calibration worktree/proposer: imports rsiloop(4)+shipgate(2), so it belongs at the integrator tier.
 	"capindexgw":  4, // gateway-backed capindex resolvers (MCP tools / A2A methods): the adapter that couples capindex(2) to gateway(4). It lives at the higher tier so the capindex keystone itself stays tier-2 and importable by the tier-3 skill-loader.
 	"tracesink":   4, // imports agent/turnbench/registrations (tier 4) â€” tier forced to 4
 	"agenttest":   4, // public agent-workflow TEST harness (#238, D-008): deterministic fixtures + tool-call assertion library + mock tool responses + reproduce-from-transcript replay; imports agent(4), off the hot path.
