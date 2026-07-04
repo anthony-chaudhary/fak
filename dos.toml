@@ -215,6 +215,7 @@ concurrent = [
   "resume",
   "trajctl",
   "waiting",
+  "tuiplugin",
   "issuefanout", # #2522: internal/issuefanout leaf (the spine-first + fan-out follow-on planner); cmd/fak/issue_fanout.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
@@ -311,6 +312,7 @@ autopick = [
   "logvault", # #2449: internal/logvault leaf (central log-vault capture/verify), see [lanes].concurrent note
   "trajctl",
   "waiting",
+  "tuiplugin",
   "issuefanout", # #2522: internal/issuefanout leaf (the spine-first + fan-out follow-on planner), see [lanes].concurrent note
   # new-leaf:lane
 ]
@@ -489,6 +491,7 @@ resume = ["internal/resume/**"] # crash-resume decision kernel; cmd/fak resume_*
 logvault = ["internal/logvault/**"] # #2449: internal/logvault leaf (central log-vault capture/verify); cmd/fak/logvault.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
 trajctl = ["internal/trajctl/**"]
 waiting = ["internal/waiting/**"]
+tuiplugin = ["internal/tuiplugin/**"]
 issuefanout = ["internal/issuefanout/**"] # #2522: internal/issuefanout leaf (the spine-first + fan-out follow-on planner); cmd/fak/issue_fanout.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
@@ -837,6 +840,18 @@ refusal  = true
 summary  = "G1 verify rung: the bytes the L3 get returned do not hash to the digest the page CLAIMS (Ref.Digest) -- a hash collision or a mis-tag the semantics-free store cannot detect. Refused for EVERY reader, same-tenant included: a corrupt/ambiguous page is served to no one. A full-content digest recompute, not a truncated locality hash."
 fix      = "do not admit the page -- the content address does not match its bytes. Re-fetch / re-key at the store, or re-mint the page so its Ref.Digest is the true hex(sha256) of its content. Floor: go test ./internal/gateway -run TestL3Share_DigestMismatch."
 see_also = ["internal/gateway/l3share.go", "internal/abi/types.go", "internal/model/evict_test.go"]
+
+# L3 producer-side fleet-stamp gate (#2508): the read-side G1/G4 gates above trust the
+# ShareScope a page ALREADY carries; this is the missing producer half named in
+# l3share.go's HONEST LIMIT comment -- a mis-stamped ScopeFleet crosses tenants with
+# every reader-side gate green. FleetShareRegistry.StampL3Scope refuses a ScopeFleet
+# stamp for any prefix the registry has not explicitly declared fleet-shareable.
+[reasons.L3_UNWITNESSED_FLEET_STAMP]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "producer-side stamp rung: a ScopeFleet stamp was requested for a prefix the fleet-share registry never declared fleet-shareable -- an unwitnessed boundary-crossing stamp, refused before it can become a silent reader-side hole. ScopeAgent/ScopeTenant stamping is unaffected (only the boundary-crossing stamp needs a witness)."
+fix      = "declare the prefix fleet-shareable at the producer (FleetShareRegistry.DeclareFleetShareable) if it is genuinely public, or stamp the page ScopeAgent/ScopeTenant instead. Floor: go test ./internal/gateway -run TestL3Share_UnwitnessedFleetStampRefused."
+see_also = ["internal/gateway/l3share.go", "internal/abi/types.go", "L3_CROSS_TENANT_SCOPE_DENIED"]
 
 # Self-tax overhead budget breach (#1150, epic #1147 T2): the closed-vocabulary token a
 # per-rung/per-method overhead breach names. The plane declares an EXPECTED overhead

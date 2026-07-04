@@ -43,6 +43,8 @@ package gateway
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"sort"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -66,6 +68,13 @@ const (
 	// L3ReasonDigestMismatch is the G1 bite: the bytes the L3 get returned do not hash
 	// to the digest the page claims (a collision or a mis-tag).
 	L3ReasonDigestMismatch = "L3_PAGE_DIGEST_MISMATCH"
+	// L3ReasonUnwitnessedFleetStamp is the producer-side bite: a ScopeFleet stamp was
+	// requested for a prefix the fleet-share registry never declared shareable. The
+	// reader-side gates above (G1/G4) trust the ShareScope a page ALREADY carries; this
+	// is the missing half named in the package doc's HONEST LIMIT — the stamp itself
+	// must be witnessed, or a mis-stamped page crosses tenants with every reader-side
+	// gate green.
+	L3ReasonUnwitnessedFleetStamp = "L3_UNWITNESSED_FLEET_STAMP"
 )
 
 // L3SharedGet is the control-path record of one cross-tenant prefix-share GET: WHO is
@@ -140,6 +149,104 @@ func AdmitL3SharedPage(req L3SharedGet) L3ShareVerdict {
 // value exceeds ScopeFleet's), so this is an explicit allowlist, not a `>=` compare.
 func crossTenantPermits(s abi.ShareScope) bool {
 	return s == abi.ScopeFleet
+}
+
+// l3StampBy is the forensics id the producer-side stamp gate records on its verdicts —
+// distinct from l3ShareBy (the reader-side gate) so a witness can tell which half of
+// the trust boundary decided.
+const l3StampBy = "gateway-l3-fleet-stamp-gate"
+
+// FleetShareRegistry is the producer-side declaration seam named in the package doc's
+// HONEST LIMIT: the set of prefixes an operator has explicitly named fleet-shareable.
+// StampL3Scope consults it before a ScopeFleet stamp is allowed to land, so the
+// boundary-crossing bit is never taken on a producer's self-report alone. The zero
+// value is ready to use (an empty registry — every ScopeFleet stamp refused until a
+// prefix is declared).
+type FleetShareRegistry struct {
+	mu       sync.RWMutex
+	declared map[string]bool
+	stamped  map[string]int // prefix -> count of admitted ScopeFleet stamps (provenance)
+}
+
+// NewFleetShareRegistry constructs an empty registry (no prefix pre-declared).
+func NewFleetShareRegistry() *FleetShareRegistry {
+	return &FleetShareRegistry{declared: map[string]bool{}, stamped: map[string]int{}}
+}
+
+// DeclareFleetShareable names a prefix as safe to cross the fleet trust boundary — the
+// witness StampL3Scope requires before it will admit a ScopeFleet stamp for that prefix.
+func (r *FleetShareRegistry) DeclareFleetShareable(prefix string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.declared[prefix] = true
+}
+
+// IsFleetShareable reports whether prefix has been declared fleet-shareable.
+func (r *FleetShareRegistry) IsFleetShareable(prefix string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.declared[prefix]
+}
+
+// L3StampVerdict is the producer-side gate's decision for one scope-stamping request:
+// Admitted reports whether the stamp may land; Scope is the scope actually stamped
+// (only meaningful when Admitted); Reason/Detail/By mirror L3ShareVerdict's shape so a
+// caller handles both gates the same way.
+type L3StampVerdict struct {
+	Admitted bool
+	Scope    abi.ShareScope
+	Reason   string
+	Detail   string
+	By       string
+}
+
+// StampL3Scope is the producer-side counterpart of AdmitL3SharedPage's G4 check: a
+// ScopeFleet stamp for prefix is admitted ONLY when the registry has declared that
+// prefix fleet-shareable. ScopeAgent and ScopeTenant stamp freely — neither crosses the
+// tenant trust boundary the registry exists to guard, so gating them would only add
+// friction without closing a hole (the same "only the boundary-crossing stamp needs a
+// witness" split the reader-side gate draws). Fails closed: an undeclared prefix asking
+// for ScopeFleet is refused with L3ReasonUnwitnessedFleetStamp, never stamped on trust.
+func (r *FleetShareRegistry) StampL3Scope(prefix string, desired abi.ShareScope) L3StampVerdict {
+	if desired != abi.ScopeFleet {
+		return L3StampVerdict{Admitted: true, Scope: desired, By: l3StampBy}
+	}
+	if !r.IsFleetShareable(prefix) {
+		return L3StampVerdict{
+			Reason: L3ReasonUnwitnessedFleetStamp,
+			Detail: "prefix " + tagLabel(prefix) + " requested a fleet/public stamp but was never declared fleet-shareable",
+			By:     l3StampBy,
+		}
+	}
+	r.mu.Lock()
+	r.stamped[prefix]++
+	r.mu.Unlock()
+	return L3StampVerdict{Admitted: true, Scope: abi.ScopeFleet, By: l3StampBy}
+}
+
+// L3StampRecord is one row of the registry's audit view: a fleet-shareable prefix, how
+// many ScopeFleet stamps it has been granted, and the stamp provenance (that it passed
+// the declared-prefix witness rather than a bare producer self-report).
+type L3StampRecord struct {
+	Prefix    string
+	Scope     string
+	Count     int
+	Witnessed bool // always true for a recorded stamp — StampL3Scope never records an unwitnessed one
+}
+
+// Audit lists every live fleet page's stamp provenance, sorted by prefix for a
+// deterministic report: the audit surface the issue's done condition names. Only
+// admitted ScopeFleet stamps are recorded (a refused stamp never reaches the ledger),
+// so every row here carries a witness by construction.
+func (r *FleetShareRegistry) Audit() []L3StampRecord {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]L3StampRecord, 0, len(r.stamped))
+	for prefix, count := range r.stamped {
+		out = append(out, L3StampRecord{Prefix: prefix, Scope: l3ScopeLabel(abi.ScopeFleet), Count: count, Witnessed: true})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Prefix < out[j].Prefix })
+	return out
 }
 
 // l3Digest is the content address of a byte span — hex(sha256), byte-identical to the

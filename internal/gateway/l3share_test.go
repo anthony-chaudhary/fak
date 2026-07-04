@@ -206,3 +206,85 @@ func TestL3Share_RidesL3RegionBackend(t *testing.T) {
 		t.Fatalf("a fleet-scoped, tier-verified page must be admitted across tenants, got refused (reason=%q detail=%q)", v.Reason, v.Detail)
 	}
 }
+
+// TestL3Share_UnwitnessedFleetStampRefused is the producer-side bite named by issue
+// #2508: a ScopeFleet stamp for a prefix the fleet-share registry never declared
+// fleet-shareable is refused with the typed L3ReasonUnwitnessedFleetStamp — a mis- or
+// un-declared stamp never lands, closing the "producer self-report" hole the read-side
+// gates (G1/G4) cannot see.
+func TestL3Share_UnwitnessedFleetStampRefused(t *testing.T) {
+	reg := NewFleetShareRegistry()
+	v := reg.StampL3Scope("tenant-A/private-prefix", abi.ScopeFleet)
+	if v.Admitted {
+		t.Fatalf("an undeclared prefix must be refused a fleet stamp, got admitted (scope=%v)", v.Scope)
+	}
+	if v.Reason != L3ReasonUnwitnessedFleetStamp {
+		t.Fatalf("reason = %q, want %q", v.Reason, L3ReasonUnwitnessedFleetStamp)
+	}
+	if got := reg.Audit(); len(got) != 0 {
+		t.Fatalf("a refused stamp must not appear in the audit ledger, got %+v", got)
+	}
+}
+
+// TestL3Share_DeclaredPrefixStampsClean proves the companion path: a prefix the
+// registry HAS declared fleet-shareable stamps ScopeFleet cleanly, and the audit view
+// carries its provenance. It also proves ScopeAgent/ScopeTenant stamping stays free of
+// the witness requirement (the "boundary-crossing stamp only" acceptance note) and that
+// same-scope/no-scope calls do not pollute the fleet audit ledger.
+func TestL3Share_DeclaredPrefixStampsClean(t *testing.T) {
+	reg := NewFleetShareRegistry()
+	reg.DeclareFleetShareable("public/refund-policy")
+
+	if v := reg.StampL3Scope("some/other-prefix", abi.ScopeAgent); !v.Admitted || v.Reason != "" {
+		t.Fatalf("ScopeAgent stamping must stay free of the witness gate, got admitted=%v reason=%q", v.Admitted, v.Reason)
+	}
+	if v := reg.StampL3Scope("some/other-prefix", abi.ScopeTenant); !v.Admitted || v.Reason != "" {
+		t.Fatalf("ScopeTenant stamping must stay free of the witness gate, got admitted=%v reason=%q", v.Admitted, v.Reason)
+	}
+
+	v := reg.StampL3Scope("public/refund-policy", abi.ScopeFleet)
+	if !v.Admitted || v.Reason != "" {
+		t.Fatalf("a declared prefix must stamp ScopeFleet clean, got admitted=%v reason=%q", v.Admitted, v.Reason)
+	}
+	if v.Scope != abi.ScopeFleet {
+		t.Fatalf("Scope = %v, want ScopeFleet", v.Scope)
+	}
+
+	audit := reg.Audit()
+	if len(audit) != 1 {
+		t.Fatalf("audit ledger = %+v, want exactly one fleet-stamp row (agent/tenant stamps must not appear)", audit)
+	}
+	if audit[0].Prefix != "public/refund-policy" || audit[0].Count != 1 || !audit[0].Witnessed {
+		t.Fatalf("audit row = %+v, want prefix=public/refund-policy count=1 witnessed=true", audit[0])
+	}
+}
+
+// TestL3Share_FleetAuditProvenance proves the done condition's "audit verb shows stamp
+// provenance for every live fleet page": repeated admitted stamps for the same prefix
+// accumulate, a second declared prefix gets its own row, and the ledger is sorted for a
+// deterministic report.
+func TestL3Share_FleetAuditProvenance(t *testing.T) {
+	reg := NewFleetShareRegistry()
+	reg.DeclareFleetShareable("z-prefix")
+	reg.DeclareFleetShareable("a-prefix")
+
+	for i := 0; i < 3; i++ {
+		if v := reg.StampL3Scope("z-prefix", abi.ScopeFleet); !v.Admitted {
+			t.Fatalf("declared prefix must stamp clean on repeat call %d, got reason=%q", i, v.Reason)
+		}
+	}
+	if v := reg.StampL3Scope("a-prefix", abi.ScopeFleet); !v.Admitted {
+		t.Fatalf("second declared prefix must stamp clean, got reason=%q", v.Reason)
+	}
+
+	audit := reg.Audit()
+	if len(audit) != 2 {
+		t.Fatalf("audit ledger = %+v, want 2 rows", audit)
+	}
+	if audit[0].Prefix != "a-prefix" || audit[1].Prefix != "z-prefix" {
+		t.Fatalf("audit ledger not sorted by prefix: %+v", audit)
+	}
+	if audit[1].Count != 3 {
+		t.Fatalf("z-prefix count = %d, want 3 (repeated stamps accumulate)", audit[1].Count)
+	}
+}
