@@ -60,6 +60,7 @@ func TestNextActionReleaseBranches(t *testing.T) {
 		StableSummary{},
 		DirtySummary{Clean: true},
 		CIDiagnosis{},
+		BranchRegime{},
 	)
 	if clean.Kind != "cut_release" {
 		t.Fatalf("clean tree release kind=%q, want cut_release", clean.Kind)
@@ -72,12 +73,31 @@ func TestNextActionReleaseBranches(t *testing.T) {
 		StableSummary{},
 		DirtySummary{Clean: false, ModifiedCount: 2, UntrackedCount: 1},
 		CIDiagnosis{},
+		BranchRegime{},
 	)
 	if hot.Kind != "cut_release_hot_tree" {
 		t.Fatalf("dirty tree release kind=%q, want cut_release_hot_tree", hot.Kind)
 	}
 	if !strings.Contains(hot.Detail, "fak release ship --execute") {
 		t.Fatalf("hot tree detail missing ship verb: %q", hot.Detail)
+	}
+}
+
+func TestNextActionUsesBranchRegimePromotionWhenUnblocked(t *testing.T) {
+	action := "promote dev abc123 to main with `fak release ship --execute --open-pr --source-branch dev --trunk main --base origin/dev`"
+	got := foldNextAction(
+		Decision{Decision: "release", NextVersion: "v1.2.4"},
+		StableSummary{},
+		DirtySummary{Clean: false, ModifiedCount: 2, UntrackedCount: 1},
+		CIDiagnosis{},
+		BranchRegime{Drift: "development_ahead", NextAction: action},
+	)
+	if got.Kind != "promote_release_branch" || got.Detail != action {
+		t.Fatalf("next action = %+v, want branch-regime promotion", got)
+	}
+	ok, verdict, _ := loopStatus(got)
+	if ok || verdict != "ACTION" {
+		t.Fatalf("loopStatus = ok:%v verdict:%s, want ACTION", ok, verdict)
 	}
 }
 
@@ -136,7 +156,7 @@ func TestNextActionBlockerPriority(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
-		got := foldNextAction(tc.decision, StableSummary{Evidence: StableEvidence{OK: true}}, tc.dirty, tc.ci)
+		got := foldNextAction(tc.decision, StableSummary{Evidence: StableEvidence{OK: true}}, tc.dirty, tc.ci, BranchRegime{})
 		if got.Kind != tc.want {
 			t.Errorf("%s: kind=%q, want %q", tc.name, got.Kind, tc.want)
 		}
@@ -309,6 +329,7 @@ func TestBranchRegimeFold(t *testing.T) {
 		wantBlocked   bool
 		wantBlocker   string
 		wantCandidate string
+		wantAction    string
 	}{
 		{
 			name:        "no drift",
@@ -322,6 +343,7 @@ func TestBranchRegimeFold(t *testing.T) {
 			wantDrift:     "development_ahead",
 			wantBlocked:   false,
 			wantCandidate: "bbb222",
+			wantAction:    "fak release ship --execute --open-pr --source-branch dev --trunk main --base origin/dev",
 		},
 		{
 			name:        "release ahead blocks promotion",
@@ -362,6 +384,9 @@ func TestBranchRegimeFold(t *testing.T) {
 			}
 			if got.NextAction == "" {
 				t.Fatalf("next action empty: %+v", got)
+			}
+			if tc.wantAction != "" && !strings.Contains(got.NextAction, tc.wantAction) {
+				t.Fatalf("next action = %q, want it to contain %q", got.NextAction, tc.wantAction)
 			}
 		})
 	}

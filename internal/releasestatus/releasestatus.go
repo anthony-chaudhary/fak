@@ -47,6 +47,7 @@ var actionNextActions = map[string]bool{
 	"fix_version_topology":   true,
 	"repair_stable_evidence": true,
 	"promote_stable":         true,
+	"promote_release_branch": true,
 	"cut_release_hot_tree":   true,
 	"hold":                   true,
 	"consider_stable":        true,
@@ -153,6 +154,7 @@ type Facts struct {
 	// resolve it, which the fold reports as candidate state "unresolved" (mirroring
 	// the python tag_sha() returning None).
 	CandidateSHA string
+	BranchRegime BranchRegime
 }
 
 // ---- the typed status record --------------------------------------------------
@@ -304,7 +306,7 @@ type Status struct {
 func Fold(f Facts) Status {
 	dirty := foldDirty(f.Dirty)
 	stable := foldStable(f)
-	action := foldNextAction(f.Decision, stable, dirty, f.CIDiagnosis)
+	action := foldNextAction(f.Decision, stable, dirty, f.CIDiagnosis, f.BranchRegime)
 	ok, verdict, detail := loopStatus(action)
 	return Status{
 		Schema:               Schema,
@@ -415,7 +417,7 @@ func branchRegimeNextAction(r BranchRegime) string {
 	}
 	switch r.Drift {
 	case "development_ahead":
-		return fmt.Sprintf("promotion candidate: %s %s is %d commit(s) ahead of %s", r.DevelopmentBranch, shortSHA(r.DevelopmentHead), r.DevelopmentAhead, r.ReleaseBranch)
+		return fmt.Sprintf("promote %s %s to %s with `fak release ship --execute --open-pr --source-branch %s --trunk %s --base origin/%s`", r.DevelopmentBranch, shortSHA(r.DevelopmentHead), r.ReleaseBranch, r.DevelopmentBranch, r.ReleaseBranch, r.DevelopmentBranch)
 	case "no_drift":
 		return fmt.Sprintf("hold; %s and %s point at the same release source", r.DevelopmentBranch, r.ReleaseBranch)
 	case "unknown":
@@ -689,7 +691,10 @@ func stableRecommendation(lag *int, candidate StableCandidate, noStable bool) st
 }
 
 // foldNextAction ports release_status.py next_action(): the single operator move.
-func foldNextAction(decision Decision, stable StableSummary, dirty DirtySummary, ci CIDiagnosis) NextAction {
+func foldNextAction(decision Decision, stable StableSummary, dirty DirtySummary, ci CIDiagnosis, branchRegime BranchRegime) NextAction {
+	if action := branchRegimePromotionAction(branchRegime); action.Kind != "" {
+		return action
+	}
 	blockers := decision.Blockers
 	if decision.Decision == "release" {
 		if !dirty.Clean {
@@ -764,6 +769,13 @@ func foldNextAction(decision Decision, stable StableSummary, dirty DirtySummary,
 		detail = "nothing release-worthy pending"
 	}
 	return NextAction{Kind: "wait", Detail: detail}
+}
+
+func branchRegimePromotionAction(branchRegime BranchRegime) NextAction {
+	if branchRegime.Drift != "development_ahead" || branchRegime.PromotionBlocked || branchRegime.NextAction == "" {
+		return NextAction{}
+	}
+	return NextAction{Kind: "promote_release_branch", Detail: branchRegime.NextAction}
 }
 
 // loopStatus ports release_status.py loop_status_fields(): the (ok, verdict, detail)
