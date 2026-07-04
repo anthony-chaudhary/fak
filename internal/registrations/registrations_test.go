@@ -43,3 +43,25 @@ func TestDefconfigEnrollsToolLintSteward(t *testing.T) {
 	}
 	t.Fatalf("the defconfig did not enroll %q in abi.Stewards() — the toollint leaf is not blank-imported in registrations.go, so the tool-surface invariant ships dark", want)
 }
+
+// TestDefconfigEnrollsVLLMEngine guards the same wiring for the vLLM-V1 serving
+// adapter of issue #40. The engine self-registers under id "vllm" in its init()
+// (proven in-package by engine.TestVLLMEngineIsRegisteredLifecycleDriver), but that
+// only makes it registered — an operator can SELECT it as a gateway upstream solely
+// because it appears in abi.EngineIDs(), the set gateway.New validates Config.EngineID
+// against (internal/gateway/gateway.go). That set is populated only when the defconfig
+// blank-imports internal/engine (registrations.go), and the gateway imports the leaf
+// through no other path. Drop that import and this goes red — the vLLM adapter ships
+// DARK, unselectable as a gateway upstream — while the engine package's own in-package
+// registry test stays green, the exact blind spot this asserts at the defconfig
+// boundary. This is the GPU-free acceptance witness for #40 item 1 ("registered via
+// abi.RegisterEngine AND selectable as a gateway upstream").
+func TestDefconfigEnrollsVLLMEngine(t *testing.T) {
+	const want = "vllm"
+	for _, id := range abi.EngineIDs() {
+		if id == want {
+			return
+		}
+	}
+	t.Fatalf("the defconfig did not enroll engine %q in abi.EngineIDs() — internal/engine is not blank-imported in registrations.go, so the vLLM-V1 adapter ships unselectable as a gateway upstream (issue #40 item 1); have: %v", want, abi.EngineIDs())
+}
