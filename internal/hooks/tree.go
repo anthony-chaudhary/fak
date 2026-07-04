@@ -114,6 +114,12 @@ func HygieneGates() []HygieneGate {
 		{"TIER_DECLARED", gateTierDeclaredTree, false},
 		{"NEW_PYTHON_TOOL", gatePythonToolTree, false},
 		{"HARDWARE_TELL", gateHardwareTreeTell, false},
+		// DEAD_CODE (the slop-prevention twin of NEW_PYTHON_TOOL) is DefaultOff: the tree still
+		// carries pre-existing dead unexported symbols the /slop-score loop is retiring, so it
+		// would red the shared trunk against known debt. It is the always-available audit sweep
+		// (`fak hygiene --gates DEAD_CODE`) that proves the retirement, and flips DefaultOff:false
+		// — the enforcement gate that HOLDS the line at zero — once the tree is clean.
+		{"DEAD_CODE", gateDeadCodeTree, true},
 		// BARE_DEV_SPELLING (C4 of epic #2228, #2233) is DefaultOff: it is the reusable
 		// audit sweep the migration batches run via `fak hygiene --gates BARE_DEV_SPELLING`,
 		// and it flips DefaultOff:false (the C5 enforcement gate) once the tree is migrated

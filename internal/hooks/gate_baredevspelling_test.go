@@ -136,16 +136,30 @@ func TestBareDevSpelling_EmbeddedAllowlistParses(t *testing.T) {
 	}
 }
 
+// knownDefaultOffGates is the explicit allowlist of gates permitted to land DefaultOff — each a
+// deliberate migration-in-flight ratchet that runs only via `--gates <NAME>` until its tree is
+// clean, then flips DefaultOff:false to become an enforcing gate. Any OTHER DefaultOff gate is an
+// accident (a gate silently excluded from the default `make ci` sweep), which the test below
+// still catches. Add a gate here only with the same intent BARE_DEV_SPELLING and DEAD_CODE carry.
+var knownDefaultOffGates = map[string]bool{
+	"BARE_DEV_SPELLING": true, // C4 spelling migration in flight (#2228, #2233)
+	"DEAD_CODE":         true, // pre-existing dead symbols being retired by /slop-score
+}
+
 // TestBareDevSpelling_RegisteredDefaultOff pins the ratchet-in-flight contract: the gate is
 // registered but DefaultOff, so `make ci`'s default sweep never reds the trunk against the
-// not-yet-migrated tree, while `--gates BARE_DEV_SPELLING` can still run it.
+// not-yet-migrated tree, while `--gates BARE_DEV_SPELLING` can still run it. It also guards the
+// general invariant that no gate is DefaultOff by accident — every DefaultOff gate must be a
+// declared migration ratchet in knownDefaultOffGates.
 func TestBareDevSpelling_RegisteredDefaultOff(t *testing.T) {
 	var found, off bool
 	for _, g := range HygieneGates() {
 		if g.Name == "BARE_DEV_SPELLING" {
 			found, off = true, g.DefaultOff
-		} else if g.DefaultOff {
-			t.Errorf("gate %s is unexpectedly DefaultOff — only the migration ratchet should be", g.Name)
+		}
+		if g.DefaultOff && !knownDefaultOffGates[g.Name] {
+			t.Errorf("gate %s is unexpectedly DefaultOff — only a declared migration ratchet "+
+				"(knownDefaultOffGates) may be", g.Name)
 		}
 	}
 	if !found {
