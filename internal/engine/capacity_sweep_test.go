@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"sort"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -198,6 +199,114 @@ func TestCapacityPressureSweepHostDRAMAwareTarget(t *testing.T) {
 	}
 	if kv.stageCalls != 1 || len(kv.evicts) != 1 {
 		t.Fatalf("the colder-tier demote must still stage then evict (demote-not-drop), stage=%d evicts=%+v", kv.stageCalls, kv.evicts)
+	}
+}
+
+// TestCapacityPressureSweepColderTierBudgetAndVictimOrder is the #1473 acceptance: under a
+// pressure spike with a colder tier sized for K<N spans, the sweep demotes EXACTLY the K
+// highest-value-to-relocate spans and evicts the rest, never overfilling the colder tier.
+//
+// The box has only HBM + DRAM, so when DRAM is full the demote ladder bottoms out and an
+// overflow span evicts (recompute on demand) — the clean "K demote, rest evict" shape. DRAM
+// is sized for exactly K=2 spans. Four spans are all individually cheaper to retain in DRAM
+// than to recompute (each would demote on its own), but carry DISTINCT recompute values in
+// ENUMERATION order low->high. A value-blind, budget-blind enumeration sweep (the prior
+// behavior) would demote the first two (low value) AND — seeing an empty DRAM on every
+// independent plan — demote all four, overfilling the tier. The victim order + per-tier
+// budget instead demote the two HIGHEST-value spans and hold demoted bytes to the budget.
+func TestCapacityPressureSweepColderTierBudgetAndVictimOrder(t *testing.T) {
+	const (
+		total = 1000 << 20 // 1000 MiB device
+		span  = 20 << 20   // 20 MiB per span
+		k     = 2          // DRAM holds exactly two spans
+	)
+
+	defaults := cachemeta.DefaultTierProfiles()
+	dram := defaults[cachemeta.TierDRAM]
+	dram.CapacityBytes = k * span // size the colder tier for exactly K spans
+	// A box with only the top two local tiers: no NUMA-far/CXL/disk rung to fall to, so an
+	// overflow demote has nowhere colder and evicts instead.
+	profiles := map[cachemeta.ResidencyTier]cachemeta.TierProfile{
+		cachemeta.TierHBM:  defaults[cachemeta.TierHBM],
+		cachemeta.TierDRAM: dram,
+	}
+
+	mk := func(digest string, tokens int64) CapacityPressureCandidate {
+		return CapacityPressureCandidate{
+			Request: cachemeta.PlacementRequest{
+				Lifecycle:            cachemeta.NewLifecycle(cachemeta.TierHBM, 0).MarkResident(profiles, 0),
+				SizeBytes:            span,
+				Tokens:               tokens,
+				Profiles:             profiles,
+				Pressure:             cachemeta.TierPressure{},
+				Policy:               cachemeta.LifecyclePolicy{DemoteOnExpiry: true},
+				PerTokenPrefillNanos: 2_000_000,
+				NowMillis:            0,
+			},
+			Move: PlacementMove{
+				SpanDigest: digest, From: 0, N: int(tokens),
+				ModelID: "sweep-model", PositionMode: cachemeta.PositionPrefixAligned,
+				Owner: "capacity-sweep",
+			},
+		}
+	}
+	// Enumeration order is low->high value; the sweep must NOT reward that order.
+	cands := []CapacityPressureCandidate{
+		mk("low-1", 2000),
+		mk("low-2", 2100),
+		mk("high-1", 4000),
+		mk("high-2", 4100),
+	}
+
+	kv := &sweepFakeKV{len: 1 << 20, stageOut: abi.KVResidencyOK}
+	res, err := RunCapacityPressureSweep(context.Background(), CapacityPressureSweep{
+		Backend:        fakeCapBackend{Backend: compute.Default(), total: total, free: compute.FreeUnknown, probe: true},
+		Adapter:        &CapacityAdapter{KV: kv, Recorder: NewCacheEventRecorder()},
+		ResidentBytes:  870 << 20, // pressure 0.87 -> relief needs every candidate moved
+		TargetPressure: 0.80,
+		Candidates:     cands,
+	})
+	if err != nil {
+		t.Fatalf("RunCapacityPressureSweep: %v", err)
+	}
+
+	var demoted, evicted []string
+	var demotedBytes int64
+	for _, m := range res.Moves {
+		dg := cands[m.Index].Move.SpanDigest
+		switch m.Decision.Action {
+		case cachemeta.ActionDemote:
+			if m.Decision.ToTier != cachemeta.TierDRAM {
+				t.Fatalf("demote target should be DRAM, got %s for %s", m.Decision.ToTier, dg)
+			}
+			demoted = append(demoted, dg)
+			demotedBytes += m.Decision.EstMoveBytes
+		case cachemeta.ActionEvict:
+			evicted = append(evicted, dg)
+		default:
+			t.Fatalf("unexpected action %s for %s", m.Decision.Action, dg)
+		}
+	}
+
+	// Budget: exactly K demote into DRAM and their staged bytes never exceed the tier's
+	// capacity budget. The refute guard — a budget-blind sweep demotes all four (4*span >
+	// budget) — is this assertion failing.
+	if len(demoted) != k {
+		t.Fatalf("want exactly %d demotes under the DRAM budget, got %d (%v)", k, len(demoted), demoted)
+	}
+	if demotedBytes > k*span {
+		t.Fatalf("colder tier overfilled: demoted %d bytes > %d budget", demotedBytes, int64(k*span))
+	}
+	// Order: the two demoted spans are the two HIGHEST recompute-value spans, not the first
+	// two in enumeration order.
+	sort.Strings(demoted)
+	if demoted[0] != "high-1" || demoted[1] != "high-2" {
+		t.Fatalf("victim order should demote the two highest-value spans, got demoted=%v evicted=%v", demoted, evicted)
+	}
+	// Relief: the K demotes plus the overflow evicts together drop HBM below target — a
+	// relief pass, not a stall.
+	if res.AppliedMoves != len(cands) || res.FinalPressure >= 0.80 {
+		t.Fatalf("sweep should move every candidate and reach target: applied=%d final=%v", res.AppliedMoves, res.FinalPressure)
 	}
 }
 

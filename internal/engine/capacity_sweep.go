@@ -9,6 +9,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -102,14 +103,22 @@ func RunCapacityPressureSweep(ctx context.Context, cfg CapacityPressureSweep) (C
 	}
 
 	resident := cfg.ResidentBytes
-	for i, cand := range cfg.Candidates {
+	// Process candidates highest-value-to-relocate first, and fold the bytes each demote
+	// commits back into the colder tier's pressure so a wave of demotes cannot overfill a
+	// tier the per-span planner sees as empty. Together these turn the sweep from "demote
+	// whatever comes first until something breaks" into "spend the scarce colder-tier room
+	// on the spans that benefit most, and stop when that room is gone."
+	committed := map[cachemeta.ResidencyTier]int64{}
+	for _, i := range victimOrder(cfg.Candidates) {
+		cand := cfg.Candidates[i]
 		if cfg.MaxMoves > 0 && len(res.Moves) >= cfg.MaxMoves {
 			break
 		}
 		if res.FinalPressure < target {
 			break
 		}
-		decision := planPlacementForDeviceAtHighWater(cfg.Backend, resident, target, withSweepHostDRAM(cfg, cand.Request))
+		req := withSweepTierBudget(withSweepHostDRAM(cfg, cand.Request), committed)
+		decision := planPlacementForDeviceAtHighWater(cfg.Backend, resident, target, req)
 		if !capacityPressureDropAction(decision.Action) {
 			continue
 		}
@@ -125,6 +134,11 @@ func RunCapacityPressureSweep(ctx context.Context, cfg CapacityPressureSweep) (C
 			continue
 		}
 		res.AppliedMoves++
+		if isColderRelocation(decision.Action) {
+			// Charge the demoted bytes against the target tier so the next candidate planned
+			// against it sees the room shrink (and, once spent, cascades colder or evicts).
+			committed[decision.ToTier] += decision.EstMoveBytes
+		}
 		reclaimed := cand.ReclaimBytes
 		if reclaimed <= 0 {
 			reclaimed = cand.Request.SizeBytes
@@ -204,6 +218,82 @@ func capacityPressureDropAction(a cachemeta.PlacementAction) bool {
 	default:
 		return false
 	}
+}
+
+// isColderRelocation reports whether an action RELOCATES the span into a colder tier (and
+// therefore consumes that tier's capacity budget). Eviction drops the span to recompute and
+// spends no colder-tier room, so it is excluded.
+func isColderRelocation(a cachemeta.PlacementAction) bool {
+	switch a {
+	case cachemeta.ActionDemote, cachemeta.ActionSpill, cachemeta.ActionCompressDemote:
+		return true
+	default:
+		return false
+	}
+}
+
+// victimOrder returns candidate indices sorted highest-value-to-relocate first, so a bounded
+// sweep spends the scarce room in the colder tiers on the spans that gain most from being
+// relocated rather than dropped: the most expensive to recompute (tokens x per-token prefill)
+// first, then — among equally costly spans — the cheapest to restore (fewest bytes), then the
+// coldest (least-recently accessed). The prior sweep processed candidates in enumeration
+// order with identical synthetic economics, so under a colder-tier budget whichever span
+// happened to come first won the room. This is pure over the candidates' declared economics
+// (no clock, no backend read) and stable: a full tie keeps the caller's original order.
+func victimOrder(cands []CapacityPressureCandidate) []int {
+	order := make([]int, len(cands))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		ri, rj := cands[order[a]].Request, cands[order[b]].Request
+		if vi, vj := recomputeCost(ri), recomputeCost(rj); vi != vj {
+			return vi > vj // most expensive to recompute relocates first
+		}
+		if ri.SizeBytes != rj.SizeBytes {
+			return ri.SizeBytes < rj.SizeBytes // cheapest to restore first
+		}
+		return ri.Lifecycle.LastAccessMillis < rj.Lifecycle.LastAccessMillis // coldest first
+	})
+	return order
+}
+
+// recomputeCost is the cost of rebuilding a span from scratch (tokens x per-token prefill) —
+// the quantity a demote AVOIDS, and the headline term in a span's value-to-relocate. A span
+// with no token/cost info scores 0 (nothing to avoid), so it sorts behind spans that do.
+func recomputeCost(req cachemeta.PlacementRequest) int64 {
+	if req.Tokens <= 0 || req.PerTokenPrefillNanos <= 0 {
+		return 0
+	}
+	return req.Tokens * req.PerTokenPrefillNanos
+}
+
+// withSweepTierBudget raises each colder tier's pressure to reflect the bytes THIS sweep has
+// already committed into it, so a span planned against a tier earlier demotes filled sees the
+// room shrink — and, once the tier's capacity budget is spent (pressure reaches 1.0), the
+// planner cascades the span to the next colder tier or to eviction instead of piling on top
+// of demotes its per-span coldestColderWithRoom check cannot yet see. Without this the sweep
+// plans every candidate against the tier's ORIGINAL fullness, so N spans each independently
+// believe a tier with room for one has room for all, overfilling it into a cascade. The fold
+// is fail-open and mirrors withSweepHostDRAM's copy-on-write shape: a tier with no profiled
+// capacity (CapacityBytes <= 0) is left untouched — the sweep never invents a ceiling the box
+// did not declare — keeping the sweep a pure function of its config plus its own commitments.
+func withSweepTierBudget(req cachemeta.PlacementRequest, committed map[cachemeta.ResidencyTier]int64) cachemeta.PlacementRequest {
+	for tier, bytes := range committed {
+		if bytes <= 0 {
+			continue
+		}
+		prof, ok := req.Profiles[tier]
+		if !ok || prof.CapacityBytes <= 0 {
+			continue
+		}
+		p := req.Pressure[tier] + float64(bytes)/float64(prof.CapacityBytes)
+		if p > 1 {
+			p = 1
+		}
+		req.Pressure = withTierPressure(req.Pressure, tier, p)
+	}
+	return req
 }
 
 func pressureAfterReclaim(b compute.Backend, residentBytes int64) float64 {
