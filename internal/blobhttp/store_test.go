@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -139,6 +140,34 @@ func TestResolveMissingDigest(t *testing.T) {
 	_, err := s.Resolve(ctx, abi.Ref{Kind: abi.RefBlob, Digest: "deadbeef"})
 	if err == nil {
 		t.Fatal("expected an error resolving an absent digest")
+	}
+}
+
+// TestResolveRejectsDigestMismatch is the content-integrity proof: a remote that
+// serves the WRONG bytes for a content address — a misconfigured proxy, a shared
+// bucket collision, or corruption in transit — must be refused, not returned. The
+// digest IS the identity, so a content-addressed read that hands back bytes not
+// hashing to the requested digest silently breaks the load-bearing invariant.
+func TestResolveRejectsDigestMismatch(t *testing.T) {
+	want := payload(4096, 'h')
+	digest := blob.Digest(want)
+	corrupt := payload(4096, 'X') // same length, different content -> different digest
+
+	// Every GET returns the corrupt body regardless of the requested key, standing in
+	// for an untrusted/misconfigured object endpoint.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(corrupt)
+	}))
+	defer srv.Close()
+	ctx := context.Background()
+	s := New(srv.URL)
+
+	got, err := s.Resolve(ctx, abi.Ref{Kind: abi.RefBlob, Digest: digest})
+	if err == nil {
+		t.Fatalf("Resolve returned %d bytes that do not hash to the requested digest (integrity violation); want an error", len(got))
+	}
+	if !strings.Contains(err.Error(), "digest mismatch") {
+		t.Fatalf("want a digest-mismatch integrity error, got %v", err)
 	}
 }
 

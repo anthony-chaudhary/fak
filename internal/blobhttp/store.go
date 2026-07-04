@@ -173,6 +173,14 @@ func (s *Store) Resolve(ctx context.Context, r abi.Ref) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("blobhttp: read %s: %w", r.Digest, err)
 		}
+		// Content-addressing is only sound if a read verifies the address: the remote
+		// is UNTRUSTED (a misconfigured proxy, a shared bucket, corruption in transit),
+		// so bytes that do not hash to the requested digest are refused, never returned
+		// — the fail-closed guard the in-memory blob store gets for free (its bytes are
+		// keyed by their own digest and immutable in RAM).
+		if got := blob.Digest(b); got != r.Digest {
+			return nil, fmt.Errorf("blobhttp: digest mismatch for %s: remote returned bytes hashing to %s", r.Digest, got)
+		}
 		return b, nil
 	default:
 		return nil, fmt.Errorf("blobhttp: unknown RefKind %d", r.Kind)
