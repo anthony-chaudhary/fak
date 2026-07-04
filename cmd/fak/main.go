@@ -277,6 +277,12 @@ func main() {
 		// one compact line per tick (cache economy + floor safety + liveness). This is the 20%
 		// pane `fak guard --split` opens; also runnable by hand in a second pane.
 		cmdInfo(os.Args[2:])
+	case "demo":
+		// The zero-flag 60-second proof: run fak's canonical offline scenario through the
+		// REAL kernel and narrate one verdict per call class — a safe read ALLOWED, an
+		// irreversible call DENIED, a poisoned tool result QUARANTINED. Every verdict is a
+		// live kernel decision, not a scripted string. Launches no agent, needs no key.
+		cmdDemo(os.Args[2:])
 	case "guard-precompact":
 		// Hidden: Claude Code PreCompact hook actuator installed by `fak guard`.
 		cmdGuardPreCompact(os.Args[2:])
