@@ -900,16 +900,25 @@ func orderedEvents(events []ToolEvent) []ToolEvent {
 	return out
 }
 
+// groupConsecutive appends e to the last run in out when sameGroup reports
+// that e belongs with that run's first event, otherwise it starts a new run.
+// It captures the "consecutive run" grouping idiom shared by groupBySession
+// and groupByTurn, which differ only in the equality predicate.
+func groupConsecutive(out [][]ToolEvent, e ToolEvent, sameGroup func(first, e ToolEvent) bool) [][]ToolEvent {
+	if len(out) == 0 || !sameGroup(out[len(out)-1][0], e) {
+		return append(out, []ToolEvent{e})
+	}
+	out[len(out)-1] = append(out[len(out)-1], e)
+	return out
+}
+
 func groupBySession(events []ToolEvent) [][]ToolEvent {
 	ordered := orderedEvents(events)
 	var out [][]ToolEvent
 	for _, e := range ordered {
-		session := sessionID(e)
-		if len(out) == 0 || sessionID(out[len(out)-1][0]) != session {
-			out = append(out, []ToolEvent{e})
-			continue
-		}
-		out[len(out)-1] = append(out[len(out)-1], e)
+		out = groupConsecutive(out, e, func(first, e ToolEvent) bool {
+			return sessionID(first) == sessionID(e)
+		})
 	}
 	return out
 }
@@ -920,11 +929,9 @@ func groupByTurn(events []ToolEvent) [][]ToolEvent {
 	}
 	var out [][]ToolEvent
 	for _, e := range events {
-		if len(out) == 0 || e.Turn != out[len(out)-1][0].Turn {
-			out = append(out, []ToolEvent{e})
-			continue
-		}
-		out[len(out)-1] = append(out[len(out)-1], e)
+		out = groupConsecutive(out, e, func(first, e ToolEvent) bool {
+			return first.Turn == e.Turn
+		})
 	}
 	return out
 }
@@ -961,17 +968,23 @@ func millisToAction(first, action ToolEvent) (int64, bool) {
 	return action.AtMillis - first.AtMillis, true
 }
 
+// medianFromSorted computes the median of an already-sorted slice. It backs
+// both medianInts and medianInt64s, which only differ in how they sort.
+func medianFromSorted[T int | int64](ys []T) float64 {
+	n := len(ys)
+	if n%2 == 1 {
+		return float64(ys[n/2])
+	}
+	return round4(float64(ys[n/2-1]+ys[n/2]) / 2)
+}
+
 func medianInts(xs []int) float64 {
 	if len(xs) == 0 {
 		return 0
 	}
 	ys := append([]int(nil), xs...)
 	sort.Ints(ys)
-	n := len(ys)
-	if n%2 == 1 {
-		return float64(ys[n/2])
-	}
-	return round4(float64(ys[n/2-1]+ys[n/2]) / 2)
+	return medianFromSorted(ys)
 }
 
 func medianInt64s(xs []int64) float64 {
@@ -980,11 +993,7 @@ func medianInt64s(xs []int64) float64 {
 	}
 	ys := append([]int64(nil), xs...)
 	sort.Slice(ys, func(i, j int) bool { return ys[i] < ys[j] })
-	n := len(ys)
-	if n%2 == 1 {
-		return float64(ys[n/2])
-	}
-	return round4(float64(ys[n/2-1]+ys[n/2]) / 2)
+	return medianFromSorted(ys)
 }
 
 func callIdentity(e ToolEvent) string {
