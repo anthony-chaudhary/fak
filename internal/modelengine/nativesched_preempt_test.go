@@ -152,6 +152,94 @@ func TestNativeSchedulerPreemptionMetrics(t *testing.T) {
 	}
 }
 
+func TestNativeSchedulerCostAwareVictimUsesReuseHintsAndPins(t *testing.T) {
+	s := NewNativeScheduler(model.NewSynthetic(SyntheticConfig()))
+	s.SetKVPreemptionPolicy(NativePreemptionPolicy{
+		Mode:        NativePreemptRecompute,
+		VictimRule:  NativePreemptVictimCostAware,
+		MaxBlocks:   2,
+		BlockTokens: 10,
+	})
+	s.lanes = []*schedLane{
+		nativePreemptTestLane("pinned", 1, 10, 0, true),
+		nativePreemptTestLane("cold", 2, 10, 0, false),
+		nativePreemptTestLane("hot", 3, 10, 8, false),
+	}
+	defer func() {
+		for _, ln := range s.lanes {
+			ln.cancel()
+		}
+		for _, ln := range s.preempted {
+			ln.cancel()
+		}
+	}()
+
+	if idx := s.mostRecentPreemptibleLaneLocked(); idx != 2 {
+		t.Fatalf("fixture sanity: most-recent victim = %d, want 2 (hot/newest)", idx)
+	}
+	idx := s.preemptibleLaneLocked()
+	if idx != 1 {
+		t.Fatalf("cost-aware victim = %d (%s), want 1 (cold, unpinned, lowest reuse)", idx, s.lanes[idx].tool)
+	}
+	stats := s.preemptStats
+	if stats.LastCandidates != 3 || stats.LastPinned != 1 || stats.PinnedSkipped != 1 {
+		t.Fatalf("cost-aware selection observability = %+v, want 3 candidates / 1 pinned skip", stats)
+	}
+	if stats.LastVictimHits != 0 || stats.LastVictimTokens != 10 || stats.LastVictimBlocks != 1 || stats.LastVictimCost != 1 {
+		t.Fatalf("last victim stats = %+v, want cold 10-token one-block cost=1", stats)
+	}
+}
+
+func TestNativeSchedulerCostAwarePreemptionMetrics(t *testing.T) {
+	s := NewNativeScheduler(model.NewSynthetic(SyntheticConfig()))
+	s.SetKVPreemptionPolicy(NativePreemptionPolicy{
+		Mode:        NativePreemptRecompute,
+		VictimRule:  NativePreemptVictimCostAware,
+		MaxBlocks:   2,
+		BlockTokens: 10,
+	})
+	s.lanes = []*schedLane{
+		nativePreemptTestLane("pinned", 1, 10, 0, true),
+		nativePreemptTestLane("cold", 2, 10, 0, false),
+		nativePreemptTestLane("hot", 3, 10, 8, false),
+	}
+	defer func() {
+		for _, ln := range s.lanes {
+			ln.cancel()
+		}
+		for _, ln := range s.preempted {
+			ln.cancel()
+		}
+	}()
+
+	s.enforcePreemptionLocked()
+	if len(s.preempted) != 1 || s.preempted[0].tool != "cold" {
+		t.Fatalf("preempted lanes = %+v, want only cold", preemptedTools(s.preempted))
+	}
+	if got := runningTools(s.lanes); !reflect.DeepEqual(got, []string{"pinned", "hot"}) {
+		t.Fatalf("running lanes after cost-aware preemption = %v, want pinned+hot", got)
+	}
+	stats := s.KVPreemptionStats()
+	if stats.CostAwareVictims != 1 || stats.RecomputeCount != 1 || stats.VictimRule != NativePreemptVictimCostAware {
+		t.Fatalf("cost-aware preemption stats = %+v, want one cost-aware recompute", stats)
+	}
+	var b strings.Builder
+	s.WriteKVPreemptionMetrics(&b)
+	out := b.String()
+	for _, want := range []string{
+		"fak_sched_preempt_victim_rule 2",
+		"fak_sched_preempt_cost_aware_total 1",
+		"fak_sched_preempt_pinned_skipped_total 1",
+		"fak_sched_preempt_last_candidates 3",
+		"fak_sched_preempt_last_pinned 1",
+		"fak_sched_preempt_last_victim_cost 1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("cost-aware metrics missing %q\n--- got ---\n%s", want, out)
+		}
+	}
+}
+
 func TestNativeSchedulerReadmitsOversizeVictimWhenAlone(t *testing.T) {
 	m := model.NewSynthetic(SyntheticConfig())
 	calls := issue31Calls()
@@ -184,11 +272,57 @@ func TestNativePreemptionPolicyFromEnv(t *testing.T) {
 	t.Setenv("FAK_NATIVE_KV_MAX_BLOCKS", "7")
 	t.Setenv("FAK_NATIVE_KV_BLOCK_TOKENS", "4")
 	t.Setenv("FAK_NATIVE_KV_PREEMPT_MODE", "recompute")
+	t.Setenv("FAK_NATIVE_KV_VICTIM_RULE", "cost-aware")
 
 	p := nativePreemptionPolicyFromEnv()
-	if p.Mode != NativePreemptRecompute || p.MaxBlocks != 7 || p.BlockTokens != 4 {
+	if p.Mode != NativePreemptRecompute || p.VictimRule != NativePreemptVictimCostAware || p.MaxBlocks != 7 || p.BlockTokens != 4 {
 		t.Fatalf("native preemption policy from env = %+v, want recompute max=7 block=4", p)
 	}
+}
+
+func TestNativeKVBMHintsFromMeta(t *testing.T) {
+	hits, pinned := nativeKVBMHintsFromMeta(map[string]string{
+		"kv.reuse_hits":  "4",
+		"kv.preempt_pin": "true",
+	})
+	if hits != 4 || !pinned {
+		t.Fatalf("dot-form hints = hits %d pinned %v, want 4/true", hits, pinned)
+	}
+	hits, pinned = nativeKVBMHintsFromMeta(map[string]string{
+		"kv_reuse_hits": "-4",
+		"kv_pin":        "false",
+	})
+	if hits != 0 || pinned {
+		t.Fatalf("defensive hints = hits %d pinned %v, want 0/false", hits, pinned)
+	}
+}
+
+func nativePreemptTestLane(tool string, seq int64, tokens, hits int, pinned bool) *schedLane {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &schedLane{
+		ctx:         ctx,
+		cancel:      cancel,
+		sess:        &model.Session{},
+		tool:        tool,
+		promptLen:   tokens,
+		seqNo:       seq,
+		kvReuseHits: hits,
+		kvPinned:    pinned,
+		done:        make(chan struct{}),
+		tokens:      make(chan abi.EngineToken),
+	}
+}
+
+func runningTools(lanes []*schedLane) []string {
+	out := make([]string, 0, len(lanes))
+	for _, ln := range lanes {
+		out = append(out, ln.tool)
+	}
+	return out
+}
+
+func preemptedTools(lanes []*schedLane) []string {
+	return runningTools(lanes)
 }
 
 func issue31Calls() []*abi.ToolCall {

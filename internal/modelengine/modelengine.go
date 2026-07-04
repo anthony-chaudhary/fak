@@ -255,6 +255,12 @@ func nativePreemptionPolicyFromEnv() NativePreemptionPolicy {
 	case "recompute":
 		p.Mode = NativePreemptRecompute
 	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_NATIVE_KV_VICTIM_RULE"))) {
+	case "", "most-recent", "newest":
+		p.VictimRule = NativePreemptVictimMostRecent
+	case "cost-aware", "cost", "kvbm":
+		p.VictimRule = NativePreemptVictimCostAware
+	}
 	return p
 }
 

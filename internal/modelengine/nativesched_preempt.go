@@ -13,12 +13,17 @@ package modelengine
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
-const nativePreemptVictimMostRecent = "most-recent"
+const (
+	nativePreemptVictimMostRecent = "most-recent"
+	nativePreemptVictimCostAware  = "cost-aware"
+)
 
 // NativePreemptionMode selects how the scheduler releases a victim's KV under pressure.
 type NativePreemptionMode uint8
@@ -32,9 +37,33 @@ const (
 	NativePreemptRecompute
 )
 
+// NativePreemptionVictimRule selects which running lane is swapped/recomputed when
+// the native scheduler's paged-KV block budget is exceeded.
+type NativePreemptionVictimRule uint8
+
+const (
+	// NativePreemptVictimMostRecent preserves the pre-#2239 behavior: preempt the newest
+	// running lane first.
+	NativePreemptVictimMostRecent NativePreemptionVictimRule = 0
+	// NativePreemptVictimCostAware uses compute.PickEvictionVictim over scheduler-local
+	// KVBM hints. Metric code 1 is already used by the gateway preemptor for
+	// lowest-priority, so native cost-aware is exported as 2.
+	NativePreemptVictimCostAware NativePreemptionVictimRule = 2
+)
+
+func (r NativePreemptionVictimRule) String() string {
+	switch r {
+	case NativePreemptVictimCostAware:
+		return nativePreemptVictimCostAware
+	default:
+		return nativePreemptVictimMostRecent
+	}
+}
+
 // NativePreemptionPolicy arms the scheduler's paged-KV block pressure path.
 type NativePreemptionPolicy struct {
 	Mode        NativePreemptionMode
+	VictimRule  NativePreemptionVictimRule
 	MaxBlocks   int // <=0 disables preemption; positive means a paged-KV block budget exists
 	BlockTokens int // tokens per paged-KV block; <=0 defaults to 16
 }
@@ -53,6 +82,15 @@ type NativePreemptionStats struct {
 	Readmitted        int64
 	SwapRestoredBytes int64
 	VictimReason      string
+	VictimRule        NativePreemptionVictimRule
+	CostAwareVictims  int64
+	PinnedSkipped     int64
+	LastVictimCost    float64
+	LastVictimTokens  int
+	LastVictimBlocks  int
+	LastVictimHits    int
+	LastCandidates    int
+	LastPinned        int
 }
 
 // SetKVPreemptionPolicy configures the scheduler's opt-in paged-KV preemption path. It is
@@ -66,6 +104,11 @@ func (s *NativeScheduler) SetKVPreemptionPolicy(p NativePreemptionPolicy) {
 	case NativePreemptSwap, NativePreemptRecompute:
 	default:
 		p.Mode = NativePreemptSwap
+	}
+	switch p.VictimRule {
+	case NativePreemptVictimMostRecent, NativePreemptVictimCostAware:
+	default:
+		p.VictimRule = NativePreemptVictimMostRecent
 	}
 	s.mu.Lock()
 	s.preemption = p
@@ -83,6 +126,7 @@ func (s *NativeScheduler) KVPreemptionStats() NativePreemptionStats {
 	st.SwappedOut = len(s.preempted)
 	st.MaxBlocks = s.preemption.MaxBlocks
 	st.MaxPreemptRounds = s.maxPreemptRoundsLocked()
+	st.VictimRule = s.preemption.VictimRule
 	return st
 }
 
@@ -116,11 +160,19 @@ func writeNativePreemptionMetrics(b *strings.Builder, st NativePreemptionStats) 
 	fmt.Fprintf(b, "%smax_blocks %d\n", p, st.MaxBlocks)
 	writeNativeHelpType(b, p+"swapped_out", "Sequences currently swapped/awaiting readmit (preempted).", "gauge")
 	fmt.Fprintf(b, "%sswapped_out %d\n", p, st.SwappedOut)
-	writeNativeHelpType(b, p+"victim_rule", "Active victim-selection rule (0=most-recent).", "gauge")
-	fmt.Fprintf(b, "%svictim_rule %d\n", p, nativePreemptVictimRuleCode(st.VictimReason))
+	writeNativeHelpType(b, p+"victim_rule", "Active victim-selection rule (0=most-recent, 1=lowest-priority, 2=cost-aware).", "gauge")
+	fmt.Fprintf(b, "%svictim_rule %d\n", p, nativePreemptVictimRuleCode(st.VictimRule, st.VictimReason))
+	writeNativeHelpType(b, p+"last_candidates", "Candidate lanes considered by the last victim-selection pass.", "gauge")
+	fmt.Fprintf(b, "%slast_candidates %d\n", p, st.LastCandidates)
+	writeNativeHelpType(b, p+"last_pinned", "Pinned candidate lanes skipped by the last victim-selection pass.", "gauge")
+	fmt.Fprintf(b, "%slast_pinned %d\n", p, st.LastPinned)
+	writeNativeHelpType(b, p+"last_victim_cost", "Cost-aware score of the last selected victim; 0 when no cost-aware victim has been selected.", "gauge")
+	fmt.Fprintf(b, "%slast_victim_cost %g\n", p, st.LastVictimCost)
 	writeNativeHelpType(b, p+"max_wait_rounds", "Oldest current victim's age in readmit rounds (starvation visibility).", "gauge")
 	fmt.Fprintf(b, "%smax_wait_rounds %d\n", p, st.MaxPreemptRounds)
 	writeNativeCounter(b, p+"total", "Sequences preempted under KV-block exhaustion.", st.Preemptions)
+	writeNativeCounter(b, p+"cost_aware_total", "Sequences preempted by the cost-aware KVBM victim picker.", st.CostAwareVictims)
+	writeNativeCounter(b, p+"pinned_skipped_total", "Pinned lanes skipped by the cost-aware KVBM victim picker.", st.PinnedSkipped)
 	writeNativeCounter(b, p+"swap_total", "Preemptions taken via KV swap-to-host.", st.SwapPreemptions)
 	writeNativeCounter(b, p+"recompute_total", "Preemptions taken via drop-and-recompute.", st.RecomputeCount)
 	writeNativeCounter(b, p+"swap_bytes_total", "KV bytes swapped out to host DRAM.", st.SwapBytes)
@@ -137,10 +189,18 @@ func writeNativeCounter(b *strings.Builder, name, help string, v int64) {
 	fmt.Fprintf(b, "%s %d\n", name, v)
 }
 
-func nativePreemptVictimRuleCode(reason string) int {
+func nativePreemptVictimRuleCode(rule NativePreemptionVictimRule, reason string) int {
+	switch rule {
+	case NativePreemptVictimCostAware:
+		return int(NativePreemptVictimCostAware)
+	case NativePreemptVictimMostRecent:
+		return 0
+	}
 	switch reason {
 	case "", nativePreemptVictimMostRecent:
-		return 0
+		return int(NativePreemptVictimMostRecent)
+	case nativePreemptVictimCostAware:
+		return int(NativePreemptVictimCostAware)
 	default:
 		return -1
 	}
@@ -278,7 +338,7 @@ func (s *NativeScheduler) enforcePreemptionLocked() {
 		return
 	}
 	for s.usedKVBlocksLocked() > s.preemption.MaxBlocks {
-		idx := s.mostRecentPreemptibleLaneLocked()
+		idx := s.preemptibleLaneLocked()
 		if idx < 0 {
 			return
 		}
@@ -287,6 +347,15 @@ func (s *NativeScheduler) enforcePreemptionLocked() {
 			ln.finish(nil, err)
 		}
 		s.lanes = append(s.lanes[:idx], s.lanes[idx+1:]...)
+	}
+}
+
+func (s *NativeScheduler) preemptibleLaneLocked() int {
+	switch s.preemption.VictimRule {
+	case NativePreemptVictimCostAware:
+		return s.costAwarePreemptibleLaneLocked()
+	default:
+		return s.mostRecentPreemptibleLaneLocked()
 	}
 }
 
@@ -308,12 +377,76 @@ func (s *NativeScheduler) mostRecentPreemptibleLaneLocked() int {
 	return best
 }
 
+func (s *NativeScheduler) costAwarePreemptibleLaneLocked() int {
+	if len(s.lanes) <= 1 {
+		return -1
+	}
+	spans := make([]compute.KVSpanStats, 0, len(s.lanes))
+	laneIndexes := make([]int, 0, len(s.lanes))
+	pinned := 0
+	for i, ln := range s.lanes {
+		stats, ok := s.laneKVCostStatsLocked(ln)
+		if !ok {
+			continue
+		}
+		if stats.Pinned {
+			pinned++
+		}
+		spans = append(spans, stats)
+		laneIndexes = append(laneIndexes, i)
+	}
+	s.preemptStats.LastCandidates = len(spans)
+	s.preemptStats.LastPinned = pinned
+	s.preemptStats.PinnedSkipped += int64(pinned)
+	victim := compute.PickEvictionVictim(spans)
+	if victim < 0 {
+		return -1
+	}
+	stats := spans[victim]
+	s.preemptStats.LastVictimCost = compute.KVEvictionCost(stats)
+	s.preemptStats.LastVictimTokens = stats.Tokens
+	s.preemptStats.LastVictimBlocks = blocksFromStats(stats, s.blockTokensLocked())
+	s.preemptStats.LastVictimHits = stats.Hits
+	return laneIndexes[victim]
+}
+
+func (s *NativeScheduler) laneKVCostStatsLocked(ln *schedLane) (compute.KVSpanStats, bool) {
+	if ln == nil || ln.terminal || ln.ctx.Err() != nil || ln.sess == nil {
+		return compute.KVSpanStats{}, false
+	}
+	tokens := ln.promptLen + ln.emitted
+	if ln.sess.Cache != nil && ln.sess.Cache.Len() > tokens {
+		tokens = ln.sess.Cache.Len()
+	}
+	if tokens <= 0 {
+		return compute.KVSpanStats{}, false
+	}
+	blocks := (tokens + s.blockTokensLocked() - 1) / s.blockTokensLocked()
+	return compute.KVSpanStats{
+		Tokens:   tokens,
+		Bytes:    int64(blocks * s.blockTokensLocked()),
+		Hits:     ln.kvReuseHits,
+		LastUsed: uint64(ln.seqNo),
+		Pinned:   ln.kvPinned,
+	}, true
+}
+
+func blocksFromStats(stats compute.KVSpanStats, blockTokens int) int {
+	if blockTokens <= 0 || stats.Tokens <= 0 {
+		return 0
+	}
+	return (stats.Tokens + blockTokens - 1) / blockTokens
+}
+
 func (s *NativeScheduler) preemptLaneLocked(ln *schedLane) error {
 	ln.preemptMode = s.preemption.Mode
 	ln.preemptRound = s.preemptRound
 	ln.savedLogits = copyF32(ln.logits)
 	s.preemptStats.Preemptions++
-	s.preemptStats.VictimReason = nativePreemptVictimMostRecent
+	s.preemptStats.VictimReason = s.preemption.VictimRule.String()
+	if s.preemption.VictimRule == NativePreemptVictimCostAware {
+		s.preemptStats.CostAwareVictims++
+	}
 	switch s.preemption.Mode {
 	case NativePreemptRecompute:
 		s.preemptStats.RecomputeCount++
@@ -352,6 +485,41 @@ func (s *NativeScheduler) newLaneSession(q4k bool) *model.Session {
 		sess.Q4K = true
 	}
 	return sess
+}
+
+func nativeKVBMHintsFromMeta(meta map[string]string) (reuseHits int, pinned bool) {
+	reuseHits = nonNegativeMetaInt(meta, "kv_reuse_hits", "kv.reuse_hits")
+	pinned = metaBool(meta, "kv_pin", "kv.pin", "kv_preempt_pin", "kv.preempt_pin")
+	return reuseHits, pinned
+}
+
+func nonNegativeMetaInt(meta map[string]string, keys ...string) int {
+	for _, key := range keys {
+		if raw, ok := meta[key]; ok {
+			n, err := strconv.Atoi(strings.TrimSpace(raw))
+			if err == nil && n > 0 {
+				return n
+			}
+			return 0
+		}
+	}
+	return 0
+}
+
+func metaBool(meta map[string]string, keys ...string) bool {
+	for _, key := range keys {
+		raw, ok := meta[key]
+		if !ok {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(raw)) {
+		case "1", "t", "true", "y", "yes", "pin", "pinned":
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func (s *NativeScheduler) sessionFromCache(cache *model.KVCache, q4k bool) *model.Session {

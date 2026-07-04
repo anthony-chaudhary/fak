@@ -142,22 +142,25 @@ func (s *NativeScheduler) Admit(ctx context.Context, c *abi.ToolCall) (abi.Engin
 		sess.Q4K = true
 	}
 	logits := sess.Prefill(prompt)
+	kvReuseHits, kvPinned := nativeKVBMHintsFromMeta(c.Meta)
 
 	cctx, cancel := context.WithCancel(ctx)
 	ln := &schedLane{
-		sched:     s,
-		ctx:       cctx,
-		cancel:    cancel,
-		sess:      sess,
-		logits:    logits,
-		tool:      c.Tool,
-		prompt:    append([]int(nil), prompt...),
-		promptLen: len(prompt),
-		putCtx:    ctx,
-		tok:       prep.tok,
-		q4k:       prep.q4k,
-		tokens:    make(chan abi.EngineToken, 1),
-		done:      make(chan struct{}),
+		sched:       s,
+		ctx:         cctx,
+		cancel:      cancel,
+		sess:        sess,
+		logits:      logits,
+		tool:        c.Tool,
+		prompt:      append([]int(nil), prompt...),
+		promptLen:   len(prompt),
+		putCtx:      ctx,
+		tok:         prep.tok,
+		q4k:         prep.q4k,
+		kvReuseHits: kvReuseHits,
+		kvPinned:    kvPinned,
+		tokens:      make(chan abi.EngineToken, 1),
+		done:        make(chan struct{}),
 	}
 
 	s.mu.Lock()
@@ -385,18 +388,20 @@ type schedLane struct {
 	cancel context.CancelFunc
 
 	// loop-private decode state (touched only by the run goroutine).
-	sess      *model.Session
-	logits    []float32
-	gen       []int
-	emitted   int
-	tool      string
-	prompt    []int
-	promptLen int
-	putCtx    context.Context
-	tok       NLTokenizer
-	q4k       bool
-	terminal  bool
-	seqNo     int64
+	sess        *model.Session
+	logits      []float32
+	gen         []int
+	emitted     int
+	tool        string
+	prompt      []int
+	promptLen   int
+	putCtx      context.Context
+	tok         NLTokenizer
+	q4k         bool
+	kvReuseHits int
+	kvPinned    bool
+	terminal    bool
+	seqNo       int64
 
 	// Preemption state. A preempted lane is removed from the running set without closing
 	// its token stream; readmit restores sess/logits and the stream resumes.
