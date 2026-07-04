@@ -760,3 +760,128 @@ func TestMaybeCompactAnchorHeadFiresOnObservedColdTrace(t *testing.T) {
 		t.Fatalf("an unseen trace must never read as cold, got fired=%v reason=%q", fired, reason)
 	}
 }
+
+// TestMaybeCompactAnchorHeadFiresOnAssumedSessionPrior is the head of the goal: a WARM, un-budgeted
+// session (no wired turn horizon, not idle past the TTL) that today refuses now FIRES early because
+// the assumed-session-length prior presumes it will run long. This is the path that raises fak's own
+// cache-value share on continuously-active long sessions.
+func TestMaybeCompactAnchorHeadFiresOnAssumedSessionPrior(t *testing.T) {
+	s := anthropicPassthroughServer(1200)
+	s.compactAnchorHead = true
+	s.assumeSessionTurns = DefaultAssumedSessionTurns // 100
+	s.metrics = newGatewayMetrics(time.Now())
+	// A fresh trace (served-turn depth 0 ⇒ CurrentTurn 1): maximally early in a presumed-100-turn
+	// session, so the burst has ~99 repaying turns ahead.
+	req, err := agent.DecodeAnthropicMessagesRequest(headOrderedWireBody(t, 120, 2))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	orig := append([]byte(nil), req.Raw...)
+	fired, reason := s.compactAnthropicRawWithReason(req, 0, "trace-fresh")
+	if !fired || reason != "" {
+		t.Fatalf("warm un-budgeted session must fire on the assumed-session prior, got fired=%v reason=%q", fired, reason)
+	}
+	if bytes.Equal(req.Raw, orig) || len(req.Raw) >= len(orig) {
+		t.Fatalf("a prior-driven fire must shrink the body, got %d (in %d)", len(req.Raw), len(orig))
+	}
+	if _, err := agent.DecodeAnthropicMessagesRequest(req.Raw); err != nil {
+		t.Fatalf("prior-fired body failed to decode: %v", err)
+	}
+}
+
+// TestMaybeCompactAnchorHeadPriorRefusesLateInAssumedSession proves the prior is not a blunt "always
+// fire": deep in a presumed-100-turn session (few repaying turns left) the SAME break-even economics
+// keep the warm cache — the burst can no longer repay before the presumed end.
+func TestMaybeCompactAnchorHeadPriorRefusesLateInAssumedSession(t *testing.T) {
+	s := anthropicPassthroughServer(1200)
+	s.compactAnchorHead = true
+	s.assumeSessionTurns = DefaultAssumedSessionTurns // 100
+	s.metrics = newGatewayMetrics(time.Now())
+	// Drive the trace's served-turn depth close to the presumed end (99 folds ⇒ CurrentTurn 100),
+	// so remainingTurns is ~0 and a non-trivial invalidated suffix cannot repay. Prime each fold at
+	// "now" (warm — never idle-cold), so the refusal comes from the horizon, not the cold path.
+	now := time.Now()
+	for i := 0; i < 99; i++ {
+		s.metrics.observeHarnessCoherence("trace-deep", now, "", false, "", false, false, 0, 0)
+	}
+	req, err := agent.DecodeAnthropicMessagesRequest(headOrderedWireBody(t, 120, 2))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	orig := append([]byte(nil), req.Raw...)
+	if fired, reason := s.compactAnthropicRawWithReason(req, 0, "trace-deep"); fired || reason != agent.CompactReasonBurstUnprofitable {
+		t.Fatalf("deep in a presumed session the burst must not repay, got fired=%v reason=%q", fired, reason)
+	}
+	if !bytes.Equal(req.Raw, orig) {
+		t.Fatal("a late-session bail must leave req.Raw byte-identical")
+	}
+}
+
+// TestMaybeCompactAnchorHeadPriorDisabledPreservesConservativeBail is the escape-hatch / byte-identity
+// lock: with the prior disabled (assumeSessionTurns 0) a warm un-budgeted session bails exactly as it
+// did before the prior existed — the default-off behavior is byte-for-byte unchanged.
+func TestMaybeCompactAnchorHeadPriorDisabledPreservesConservativeBail(t *testing.T) {
+	s := anthropicPassthroughServer(1200)
+	s.compactAnchorHead = true
+	s.assumeSessionTurns = 0 // prior OFF
+	s.metrics = newGatewayMetrics(time.Now())
+	req, err := agent.DecodeAnthropicMessagesRequest(headOrderedWireBody(t, 120, 2))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	orig := append([]byte(nil), req.Raw...)
+	if fired, reason := s.compactAnthropicRawWithReason(req, 0, "trace-fresh"); fired || reason != agent.CompactReasonBurstUnprofitable {
+		t.Fatalf("with the prior disabled a warm session must bail burst_unprofitable, got fired=%v reason=%q", fired, reason)
+	}
+	if !bytes.Equal(req.Raw, orig) {
+		t.Fatal("prior-disabled bail must leave req.Raw byte-identical")
+	}
+}
+
+// TestMaybeCompactAnchorHeadBoundedTurnsLeftBeatsPrior proves precedence: a genuine wired turn
+// horizon always wins over the prior. A bounded turnsLeft fires off the real remaining-turn budget
+// even when the trace's served depth is primed deep (which would refuse under the prior alone).
+func TestMaybeCompactAnchorHeadBoundedTurnsLeftBeatsPrior(t *testing.T) {
+	s := anthropicPassthroughServer(1200)
+	s.compactAnchorHead = true
+	s.assumeSessionTurns = DefaultAssumedSessionTurns
+	s.metrics = newGatewayMetrics(time.Now())
+	now := time.Now()
+	for i := 0; i < 99; i++ { // deep enough that the prior alone would refuse
+		s.metrics.observeHarnessCoherence("trace-deep", now, "", false, "", false, false, 0, 0)
+	}
+	req, err := agent.DecodeAnthropicMessagesRequest(headOrderedWireBody(t, 120, 2))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	orig := append([]byte(nil), req.Raw...)
+	fired, reason := s.compactAnthropicRawWithReason(req, 1000, "trace-deep")
+	if !fired || reason != "" {
+		t.Fatalf("a wired bounded horizon must win over the prior, got fired=%v reason=%q", fired, reason)
+	}
+	if bytes.Equal(req.Raw, orig) || len(req.Raw) >= len(orig) {
+		t.Fatalf("a bounded-horizon fire must shrink the body, got %d (in %d)", len(req.Raw), len(orig))
+	}
+}
+
+// TestServedTurnCountIncrementsPerFold locks the per-trace depth counter the prior reads as
+// CurrentTurn: it advances one per served fold, and both an unseen trace and a nil-metrics server
+// report 0.
+func TestServedTurnCountIncrementsPerFold(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	now := time.Now()
+	const k = 7
+	for i := 0; i < k; i++ {
+		m.observeHarnessCoherence("t", now, "", false, "", false, false, 0, 0)
+	}
+	if got := m.servedTurnCount("t"); got != k {
+		t.Fatalf("servedTurnCount=%d, want %d", got, k)
+	}
+	if got := m.servedTurnCount("unseen"); got != 0 {
+		t.Fatalf("unseen trace servedTurnCount=%d, want 0", got)
+	}
+	var nilM *gatewayMetrics
+	if got := nilM.servedTurnCount("t"); got != 0 {
+		t.Fatalf("nil-metrics servedTurnCount=%d, want 0", got)
+	}
+}

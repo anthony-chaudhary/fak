@@ -69,6 +69,22 @@ import (
 // discarding a cached prefix. An explicit --compact-history-budget wins; 0 means OFF.
 const DefaultCompactHistoryBudget = 48000
 
+// DefaultAssumedSessionTurns is the session length the head-anchored compaction burst gate
+// ASSUMES when no bounded turn horizon is wired (the default un-budgeted `fak guard -- claude`
+// path, where Budget.TurnsLeft is Unbounded). Without a horizon the gate can only fire on an
+// observed-cold trace (idle past the message-span TTL), so a warm, continuously-active long
+// session — exactly the kind that benefits most — never sheds. Assuming a plausible length lets
+// the SAME break-even economics (agent.CacheBurstPaysBack) fire EARLY in a presumed-long session,
+// when the per-turn shed saving still has many turns to compound, and correctly REFUSE late
+// (near the assumed end). The trade is sound because the burst penalty is ONE-TIME and bounded
+// (a cold re-write of the invalidated suffix) while the shed saving is per-turn: an early burst
+// on a session that runs long is a clear win, and a large-suffix shed still refuses regardless.
+// This is a moving target — a future auto-tune seeds it from the observed session-length
+// distribution (docs/nightrun/cache-value.jsonl `turns`); the firing seam reads only the resolved
+// int, so tuning changes the value, never the gate. An explicit --assume-session-turns wins;
+// 0 disables the prior and restores the conservative "no horizon ⇒ no fire" behavior exactly.
+const DefaultAssumedSessionTurns = 100
+
 const (
 	// DocumentedElideResultBytes is the reviewed threshold for oversized tool-result
 	// elision: a tool_result whose text payload exceeds this many bytes is a candidate
@@ -359,6 +375,16 @@ type Config struct {
 	// (the default) reproduces the pre-#1407 CompactAnchorFirstBP behavior byte-for-byte;
 	// this is an explicit opt-in, not a default-on lever, because it can burst a warm cache.
 	CompactAnchorHead bool
+	// AssumeSessionTurns is the session length the head-anchored burst gate ASSUMES when no
+	// bounded turn horizon is wired (Budget.TurnsLeft Unbounded), so a warm continuously-active
+	// long session can shed instead of waiting to idle past the message-span TTL. Positive ⇒ the
+	// gate fires early in a presumed-long session (CurrentTurn from the trace's served-turn depth,
+	// TotalTurns from this value) and refuses near the presumed end; 0 ⇒ the conservative
+	// "no horizon ⇒ no fire unless zero-penalty" behavior, byte-for-byte. A wired positive
+	// Budget.TurnsLeft always wins over this prior. The command surfaces default this to
+	// DefaultAssumedSessionTurns. Consulted only when CompactAnchorHead is on and the head
+	// re-anchor engages; inert on every other path.
+	AssumeSessionTurns int
 	// ElideResultBytes is the oversized tool-result elision threshold.
 	// 0 keeps the transform inert; a positive value arms the documented head+tail
 	// shrinker for results outside the active working set. The command surfaces default this
@@ -952,6 +978,11 @@ type Server struct {
 	// agent.CompactAnchorHead, the opt-in #1407/#1408 fix for anchor-starved sessions.
 	compactAnchorHead bool
 
+	// assumeSessionTurns mirrors Config.AssumeSessionTurns: the head-anchored burst gate's
+	// assumed session length when no bounded turn horizon is wired. Positive fires the shed
+	// early on a warm continuously-active long session; 0 keeps the conservative behavior.
+	assumeSessionTurns int
+
 	// elideResultBytes mirrors Config.ElideResultBytes: when > 0 the flagship Anthropic
 	// passthrough shrinks oversized tool_result bodies in the un-cached, non-recent middle to a
 	// bounded head+tail form (agent.ElideAnthropicResults), keeping the cached-prefix bytes
@@ -1255,6 +1286,7 @@ func New(cfg Config) (*Server, error) {
 		ctxView:                    ctxView,
 		compactHistoryBudget:       cfg.CompactHistoryBudget,
 		compactAnchorHead:          cfg.CompactAnchorHead,
+		assumeSessionTurns:         cfg.AssumeSessionTurns,
 		elideResultBytes:           cfg.ElideResultBytes,
 		cacheTTL1H:                 cfg.CacheTTL1H || envEnabled("FAK_ABLATE_TTL_1H"),
 		toolFloorDenies:            cfg.ToolFloorDenies,

@@ -698,7 +698,37 @@ func (s *Server) maybeCompactAnthropicRaw(req *agent.AnthropicMessagesRequest) (
 // idled past the message-breakpoint cache TTL since its last served turn has a provably expired
 // message-span suffix, so a head-anchored fire there carries no marginal cache penalty and the
 // gate fires horizon-free. "" (no trace — tests, non-session callers) is never cold.
+
+// headSessionPrior resolves the {TotalTurns, CurrentTurn} horizon the head-anchored burst gate
+// (agent.CacheBurstPaysBack) consults. Precedence:
+//
+//  1. A genuine bounded horizon (turnsLeft>0, a wired DecideSession turn budget) wins, mapped to
+//     the same {CurrentTurn=1, TotalTurns=1+turnsLeft} adapter as before — the gate still only
+//     fires when the remaining turns repay the one-time burst. This is an adapter, not a guess.
+//  2. Otherwise, when the assumed-session-length prior is enabled (assumeSessionTurns>0), an
+//     un-budgeted session is PRESUMED to run that many turns, and CurrentTurn is the trace's real
+//     served-turn depth + 1. The gate then fires EARLY (low CurrentTurn ⇒ many repaying turns
+//     left) and refuses near the presumed end — the same break-even economics, just given a
+//     history-based length instead of refusing outright. A large invalidated suffix still refuses
+//     regardless (break-even exceeds the headroom), so the economics remain the real guard.
+//  3. With the prior disabled (assumeSessionTurns<=0) it returns (0,0) — the conservative
+//     "unknown horizon ⇒ no fire unless zero-penalty (ColdCache)" behavior, byte-for-byte.
+//
+// The trade in case 2 is sound because the burst penalty is ONE-TIME and bounded while the shed
+// saving is per-turn: an early burst on a session that runs long compounds; a session that ends
+// early costs only a single bounded cold re-write of the invalidated suffix.
+func (s *Server) headSessionPrior(turnsLeft int, trace string) (totalTurns, currentTurn int) {
+	if turnsLeft > 0 {
+		return 1 + turnsLeft, 1
+	}
+	if s.assumeSessionTurns <= 0 {
+		return 0, 0
+	}
+	return s.assumeSessionTurns, int(s.metrics.servedTurnCount(trace)) + 1
+}
+
 func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesRequest, turnsLeft int, trace string) (fired bool, reason string) {
+	_ = s.headSessionPrior // silence unused in the (impossible) build shape where the head path is compiled out
 	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) {
 		return false, ""
 	}
@@ -727,17 +757,13 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 	opts := agent.CompactOptions{Budget: s.compactHistoryBudget, Anchor: agent.CompactAnchorFirstBP}
 	if s.compactAnchorHead {
 		// #1407/#1408 opt-in: re-anchor on the stable head so anchor-starved sessions can
-		// shed. When turnsLeft carries a genuine bounded horizon, hand CacheBurstPaysBack a
-		// {TotalTurns, CurrentTurn} pair whose difference is exactly turnsLeft (CurrentTurn=1,
-		// TotalTurns=1+turnsLeft) — an adapter, not a guess: the gate still only fires when the
-		// remaining turns repay the one-time burst. Otherwise TotalTurns/CurrentTurn stay 0 and
-		// the gate stays fully conservative — it only fires this anchor when the burst has zero
-		// one-time penalty, never guessing at an unknown or unbounded session length.
+		// shed. headSessionPrior supplies the {TotalTurns, CurrentTurn} pair the burst gate
+		// consults: a genuine bounded horizon (turnsLeft>0) wins as before; otherwise, when the
+		// assumed-session-length prior is enabled, it hands the gate a presumed length + the
+		// trace's real served-turn depth so a warm continuously-active long session fires early
+		// and refuses near the presumed end (see headSessionPrior).
 		opts.Anchor = agent.CompactAnchorHead
-		if turnsLeft > 0 {
-			opts.CurrentTurn = 1
-			opts.TotalTurns = 1 + turnsLeft
-		}
+		opts.TotalTurns, opts.CurrentTurn = s.headSessionPrior(turnsLeft, trace)
 		// Observed-cold witness: the per-trace idle gap (the harness-coherence wall clock) has
 		// passed the message-breakpoint cache TTL, so the suffix a head fire would invalidate is
 		// ALREADY expired and re-bills cold this turn regardless — a zero-penalty burst the gate

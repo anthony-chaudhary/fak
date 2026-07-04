@@ -105,10 +105,12 @@ type harnessCoherenceMetrics struct {
 }
 
 // coordEntry is one trace's coordinator plus the wall clock of its last served turn (for the idle
-// gap the TTL signal needs).
+// gap the TTL signal needs) and the count of served turns folded so far (for the head-anchored
+// session-length prior — see servedTurns).
 type coordEntry struct {
 	coord    *compactcohere.Coordinator
 	lastTurn time.Time
+	turns    uint64 // served passthrough turns folded into this trace so far
 }
 
 func newHarnessCoherenceMetrics(ttl time.Duration) *harnessCoherenceMetrics {
@@ -147,6 +149,7 @@ func (h *harnessCoherenceMetrics) observe(trace string, now time.Time, digest st
 		idle = now.Sub(entry.lastTurn)
 	}
 	entry.lastTurn = now
+	entry.turns++
 
 	obs := compactcohere.TurnObservation{
 		InboundPrefixDigest: digest,
@@ -209,6 +212,34 @@ func (m *gatewayMetrics) coldMessageSpanCache(trace string, now time.Time, ttl1h
 		return false
 	}
 	return m.harnessCoherence.idleExceeds(trace, now, ttl1h)
+}
+
+// servedTurns reports how many served passthrough turns this trace has folded so far — the
+// per-trace depth the head-anchored session-length prior reads as CurrentTurn. Because observe
+// folds in the finalizer AFTER a turn's compaction runs, a turn N compaction sees the count from
+// turn N-1, so CurrentTurn = servedTurns()+1 is the correct 1-based "this is turn N" index. An
+// unknown trace (first turn, or a metrics-less server) reports 0.
+func (h *harnessCoherenceMetrics) servedTurns(trace string) uint64 {
+	if h == nil || trace == "" {
+		return 0
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	entry := h.coords[trace]
+	if entry == nil {
+		return 0
+	}
+	return entry.turns
+}
+
+// servedTurnCount is the gatewayMetrics-level, nil-safe accessor for servedTurns: the per-trace
+// served-turn depth the --compact-anchor-head burst gate consumes as CurrentTurn when it falls
+// back to the assumed-session-length prior (an unbudgeted warm session with no wired turn horizon).
+func (m *gatewayMetrics) servedTurnCount(trace string) uint64 {
+	if m == nil || m.harnessCoherence == nil {
+		return 0
+	}
+	return m.harnessCoherence.servedTurns(trace)
 }
 
 // harnessCoherenceInputs carries the per-turn facts the harness-coherence observation needs that
