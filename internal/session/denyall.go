@@ -179,6 +179,15 @@ func (b *DenyAllBreaker) reset() {
 	b.disposition = 0
 }
 
+// Reset clears any in-progress stuck run. A loop driver calls this at an objective
+// boundary (a new /goal, a session resume, a manual retry) to drop a stale streak
+// without synthesizing a fake clean observation — so a breaker carried across
+// objectives cannot false-stop on a fresh goal because of a run the previous goal
+// accrued. It is idempotent and a no-op on an already-clear breaker.
+func (b *DenyAllBreaker) Reset() {
+	b.reset()
+}
+
 // Observe folds one served turn's deny-all shape and returns the verdict. It is the
 // ONE call a loop driver makes per turn (the deny-all twin of Table.Decide). The
 // decision is pure over (breaker state, observation); the diagnostic is built only

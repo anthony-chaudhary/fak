@@ -196,6 +196,27 @@ func TestDenyAllBreakerFlippedToolOrReasonReseeds(t *testing.T) {
 	})
 }
 
+// TestDenyAllBreakerResetClearsStaleRun proves Reset drops an in-progress streak at
+// an objective boundary, so a breaker carried across /goal objectives cannot
+// false-stop a fresh goal on a run the previous goal accrued.
+func TestDenyAllBreakerResetClearsStaleRun(t *testing.T) {
+	var b DenyAllBreaker
+	b.Observe(defaultDenyPlan())
+	b.Observe(defaultDenyPlan()) // count == 2, one short of the default threshold
+	b.Reset()
+	// After Reset the next stuck turn seeds a fresh run at 1, not 3.
+	v := b.Observe(defaultDenyPlan())
+	if !v.Continue || v.Consecutive != 1 {
+		t.Fatalf("post-reset stuck turn: Consecutive = %d, want 1 (fresh run, not %d)", v.Consecutive, v.Consecutive)
+	}
+	// Reset is idempotent and a no-op on an already-clear breaker.
+	b.Reset()
+	b.Reset()
+	if v := b.Observe(defaultDenyPlan()); v.Consecutive != 1 {
+		t.Fatalf("idempotent reset: Consecutive = %d, want 1", v.Consecutive)
+	}
+}
+
 // TestDenyAllBreakerCustomThreshold proves the bound is configurable (a tighter
 // threshold stops sooner) and that the verdict carries the effective threshold so
 // a renderer never has to re-derive it.
