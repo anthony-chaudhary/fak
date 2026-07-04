@@ -308,16 +308,7 @@ func envAdapterNetworkMode(pinnedHosts []string) string {
 }
 
 func envAdapterJobYAML(wrapped, gatewayBase string, allowInternet bool) string {
-	return fmt.Sprintf(`agents:
-  - name: fak-routed-claude-code
-    import_path: harbor_ext.fak_routed:FakRoutedAgent
-    model_name: ${FRONTIERSWE_MODEL}
-    override_timeout_sec: 72000
-    kwargs:
-      wrapped: %s
-      fak_base_url: %s
-      allow_internet: %t
-`, wrapped, gatewayBase, allowInternet)
+	return routedJobYAML(harnessNameForWrapped(wrapped), wrapped, gatewayBase, allowInternet)
 }
 
 func isSandboxURL(raw string, pinnedHosts []string) bool {
