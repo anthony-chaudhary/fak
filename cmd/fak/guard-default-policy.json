@@ -211,7 +211,20 @@
     ".netrc",
     "id_rsa",
     "id_ed25519",
-    "/etc/"
+    "id_ecdsa",
+    "id_dsa",
+    "/etc/",
+    ".credentials.json",
+    ".gitconfig",
+    ".bashrc",
+    ".bash_profile",
+    ".zshrc",
+    ".profile",
+    "gh/hosts.yml",
+    ".pypirc",
+    ".docker/config.json",
+    ".kube/config",
+    ".terraformrc"
   ],
 
   "redact_fields": [

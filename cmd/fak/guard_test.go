@@ -70,6 +70,31 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"write into .ssh allowed (issue #1086: remote dev-node SSH)", "Write", `{"file_path":".ssh/authorized_keys","content":"x"}`, abi.VerdictAllow},
 		{"unlisted tool fails closed", "exfiltrate_secrets", `{}`, abi.VerdictDeny},
 
+		// #1464: credential + code-execution-persistence writes the named-pattern
+		// self_modify denylist now covers — via BOTH the Write targetPath rung and the
+		// Bash command-string rung (both consult the same self_modify_globs). Before
+		// this, a wrapped agent could overwrite fak's own OAuth trust anchor, plant a
+		// global-gitconfig hooksPath RCE, or seed a shell-rc, and the floor said ALLOW.
+		{"write ~/.claude/.credentials.json refused (#1464 fak's own OAuth anchor)", "Write", `{"file_path":"/home/u/.claude/.credentials.json","content":"{}"}`, abi.VerdictDeny},
+		{"bash append into .credentials.json refused (#1464 shell path)", "Bash", `{"command":"cat /tmp/stolen >> /home/u/.claude/.credentials.json"}`, abi.VerdictDeny},
+		{"write ~/.gitconfig refused (#1464 global hooksPath RCE)", "Write", `{"file_path":"/home/u/.gitconfig","content":"[core] hooksPath=/tmp/h"}`, abi.VerdictDeny},
+		{"write ~/.bashrc refused (#1464 shell-rc persistence)", "Write", `{"file_path":"/home/u/.bashrc","content":"x"}`, abi.VerdictDeny},
+		{"bash redirect into .bashrc refused (#1464 shell path)", "Bash", `{"command":"echo evil > /home/u/.bashrc"}`, abi.VerdictDeny},
+		{"write ~/.bash_profile refused (#1464 shell-rc)", "Write", `{"file_path":"/home/u/.bash_profile","content":"x"}`, abi.VerdictDeny},
+		{"write ~/.zshrc refused (#1464 shell-rc)", "Write", `{"file_path":"/home/u/.zshrc","content":"x"}`, abi.VerdictDeny},
+		{"write ~/.profile refused (#1464 shell-rc)", "Write", `{"file_path":"/home/u/.profile","content":"x"}`, abi.VerdictDeny},
+		{"write gh/hosts.yml refused (#1464 gh CLI OAuth token)", "Write", `{"file_path":"/home/u/.config/gh/hosts.yml","content":"x"}`, abi.VerdictDeny},
+		{"write ~/.ssh/id_ecdsa refused (#1464 non-rsa key type slipped)", "Write", `{"file_path":"/home/u/.ssh/id_ecdsa","content":"x"}`, abi.VerdictDeny},
+		{"write ~/.ssh/id_dsa refused (#1464 non-rsa key type slipped)", "Write", `{"file_path":"/home/u/.ssh/id_dsa","content":"x"}`, abi.VerdictDeny},
+		{"write ~/.pypirc refused (#1464 PyPI upload token)", "Write", `{"file_path":"/home/u/.pypirc","content":"x"}`, abi.VerdictDeny},
+		{"write ~/.docker/config.json refused (#1464 registry creds)", "Write", `{"file_path":"/home/u/.docker/config.json","content":"x"}`, abi.VerdictDeny},
+		{"write ~/.kube/config refused (#1464 cluster creds)", "Write", `{"file_path":"/home/u/.kube/config","content":"x"}`, abi.VerdictDeny},
+		{"write ~/.terraformrc refused (#1464 TF cloud token)", "Write", `{"file_path":"/home/u/.terraformrc","content":"x"}`, abi.VerdictDeny},
+		// The #1086 carve-out must SURVIVE the broadened denylist: authorized_keys under a
+		// full home path stays writable. If a future SSH glob broadening swallows it, this
+		// fails loudly right next to the new denies.
+		{"write ~/.ssh/authorized_keys still allowed (#1086 preserved under #1464)", "Write", `{"file_path":"/home/u/.ssh/authorized_keys","content":"x"}`, abi.VerdictAllow},
+
 		// PowerShell is the Windows agent's shell — admitted like Bash, with the genuine-danger
 		// classes refused by argument value (the rm -rf / disk-wipe / RCE-pipe / privilege-
 		// escalation equivalents). Without this a Windows guarded session could not run a shell
