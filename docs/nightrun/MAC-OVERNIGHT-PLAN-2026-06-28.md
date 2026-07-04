@@ -106,3 +106,14 @@ uses the local gateway by default, reads the bearer from `FAK_GATEWAY_KEY` or
 off-node tailnet runs, and sanitizes any non-loopback gateway in its JSON
 report. The older overlay tasks above remain as manual recipes for targeted
 follow-up, but the auto task is the first command to leave running overnight.
+
+From a driver host that may outlive the Mac's sleep/wake cycle, use:
+
+```sh
+fak macbench watch --gateway "$FAK_MAC_GATEWAY" --model qwen3.6-27b \
+  --duration 12h --interval 5m \
+  --result experiments/nightrun/<box>/<stamp>-macbench-result.json
+```
+
+`watch` records sanitized health reports while the gateway is unreachable and
+runs the full sweep once as soon as `/healthz` succeeds.

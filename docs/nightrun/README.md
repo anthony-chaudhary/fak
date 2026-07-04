@@ -63,6 +63,16 @@ set `FAK_MAC_GATEWAY`. `macbench` reads the bearer from `FAK_GATEWAY_KEY`, then
 `--gateway-key-file`, and finally `--fetch-key` pulls `~/.fak-gateway-key` over
 SSH using `FAK_MAC_SSH_HOST` / `--ssh-host`.
 
+For an unattended off-node wait, use the built-in watcher instead of a shell
+loop:
+
+```bash
+fak macbench watch --gateway "$FAK_MAC_GATEWAY" --model qwen3.6-27b --result experiments/nightrun/<box>/<stamp>-macbench-result.json
+```
+
+It polls `health` until the gateway is reachable, emits sanitized health JSON
+for each poll, then runs the full `all` sweep once and writes the result file.
+
 ## How next() ranks
 
 Each feasible task is scored by a blend that sums to 1.0:
