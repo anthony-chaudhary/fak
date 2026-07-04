@@ -152,6 +152,16 @@ func TestRenderGuardInfoLineCarriesWhy(t *testing.T) {
 	}
 }
 
+// TestGuardInfoLegendDocumentsWhy proves the pane's in-line guide explains the promoted
+// why-detail clause, so an operator who sees "why <reason> xN" beside the safety count knows
+// it is the reason code(s) behind those blocks (the live twin of the exit summary breakdown).
+func TestGuardInfoLegendDocumentsWhy(t *testing.T) {
+	legend := guardInfoLegend()
+	if !strings.Contains(legend, "why") || !strings.Contains(legend, "reason code") {
+		t.Fatalf("legend must document the promoted why-detail line:\n%s", legend)
+	}
+}
+
 func TestGuardInfoHarnessText(t *testing.T) {
 	if got := guardInfoHarnessText(nil); got != "" {
 		t.Fatalf("nil harness text = %q, want empty", got)
