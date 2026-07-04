@@ -297,3 +297,31 @@ func TestGlossaryTermByKey(t *testing.T) {
 		}
 	}
 }
+
+// TestSafetyViewTermsHaveGlossary proves the two forensic labels the Safety focused view surfaces
+// as standalone words — "held for witness" and "deferred" — each have a clickable glossary
+// definition, so a watcher who lands on the Safety tab and does not know the term can look it up.
+// It is the coherence witness for the Phase-B "why" detail promoted into the focused view: the
+// view speaks the words, the glossary defines them.
+func TestSafetyViewTermsHaveGlossary(t *testing.T) {
+	v := provenVisualVars()
+	v.Adjudication = &gateway.AdjudicationSummary{
+		Denied: 2, Escalated: 1, Deferred: 1,
+		ByReason: map[string]uint64{"dangerous_command": 2},
+	}
+	safety := strings.Join(renderInfoSafetyView(v), "\n")
+	// The view must speak both words...
+	if !strings.Contains(safety, "held for witness") || !strings.Contains(safety, "deferred") {
+		t.Fatalf("safety view must surface both forensic labels:\n%s", safety)
+	}
+	// ...and the glossary must define each as a clickable term.
+	for _, key := range []string{"witness", "deferred"} {
+		term, ok := glossaryTermByKey(key)
+		if !ok {
+			t.Fatalf("glossary must define %q for the safety view", key)
+		}
+		if strings.TrimSpace(term.short) == "" || strings.TrimSpace(term.long) == "" {
+			t.Fatalf("glossary term %q must carry both a short and long definition", key)
+		}
+	}
+}
