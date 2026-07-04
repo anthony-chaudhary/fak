@@ -179,18 +179,7 @@ func clampScore(score float64) int {
 // HygieneGrade is the A-F ladder for a composite score (the same thresholds the
 // family shares).
 func HygieneGrade(score float64) string {
-	switch {
-	case score >= 90:
-		return "A"
-	case score >= 80:
-		return "B"
-	case score >= 70:
-		return "C"
-	case score >= 60:
-		return "D"
-	default:
-		return "F"
-	}
+	return scorecard.GradeStd(score)
 }
 
 // kpiResult builds a HygieneKPI, normalizing nil slices to empty (the Python lists).

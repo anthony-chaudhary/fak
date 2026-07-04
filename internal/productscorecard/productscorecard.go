@@ -195,18 +195,7 @@ func clamp(score float64) int {
 }
 
 func GradeLetter(score float64) string {
-	switch {
-	case score >= 90:
-		return "A"
-	case score >= 80:
-		return "B"
-	case score >= 70:
-		return "C"
-	case score >= 60:
-		return "D"
-	default:
-		return "F"
-	}
+	return scorecard.GradeStd(score)
 }
 
 func NormSection(s any) string {
