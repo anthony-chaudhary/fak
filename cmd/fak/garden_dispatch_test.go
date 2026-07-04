@@ -66,6 +66,36 @@ func gardenDispatchRouterFor(t *testing.T) {
 	t.Cleanup(func() { dispatchRouteIssues = old })
 }
 
+// gardenDispatchSpawnerFor makes the live spawn pipeline deterministic under --apply:
+// it allows every broker attempt and returns a clean spawn (no early exit) so an
+// admitted candidate maps to action "spawned". Without it the --apply path hits the
+// real broker + real subprocess spawner, which is environment-dependent (0 spawns on a
+// headless CI runner) — the same allow-broker + fake-spawner pattern the dispatch-tick
+// live tests use.
+func gardenDispatchSpawnerFor(t *testing.T) {
+	t.Helper()
+	oldBroker := launchSpawnBroker
+	oldSpawner := dispatchIssueWorkerSpawner
+	launchSpawnBroker = func(a launchBrokerAttempt) launchBrokerGrant {
+		return allowLaunchBrokerGrant(a, "unit-test-allow")
+	}
+	dispatchIssueWorkerSpawner = func(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA, stdinPayload string, probeS float64) (dispatchSpawnResult, error) {
+		return dispatchSpawnResult{
+			PID:     40000 + issue,
+			Issue:   issue,
+			Lane:    lane,
+			Backend: backend,
+			LeaseID: leaseID,
+			Tree:    tree,
+			Account: dispatchtick.AccountSidecar(account),
+		}, nil
+	}
+	t.Cleanup(func() {
+		launchSpawnBroker = oldBroker
+		dispatchIssueWorkerSpawner = oldSpawner
+	})
+}
+
 type gardenDispatchResultJSON struct {
 	Schema     string         `json:"schema"`
 	DryRun     bool           `json:"dry_run"`
@@ -146,6 +176,7 @@ func TestGardenDispatchDryRunReportsCandidateDecisions(t *testing.T) {
 func TestGardenDispatchApplySpawnsAdmittedOnly(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
 	gardenDispatchRouterFor(t)
+	gardenDispatchSpawnerFor(t)
 	root := t.TempDir()
 	initDispatchGit(t, root)
 	fixture := gardenDispatchIssuesFixture(t)
