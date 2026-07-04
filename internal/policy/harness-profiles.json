@@ -13,7 +13,7 @@
         { "deny_regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba)?sh\\b" },
         { "deny_regex": "\\bterraform(?:\\.exe)?\\b[^|;&\\n]*\\bdestroy\\b" },
         { "deny_regex": "-o\\s+\\.\\.[\\\\/]" },
-        { "deny_regex": "--output[= ]\\s+\\.\\.[\\\\/]" },
+        { "deny_regex": "--output[= ]\\s*\\.\\.[\\\\/]" },
         { "deny_regex": ">>?\\s*\\.\\.[\\\\/]" },
         { "deny_regex": "\\b(cp|mv|install|tee|rsync|ln)\\b[^|;&]*\\s\\.\\.[\\\\/]" }
       ]
