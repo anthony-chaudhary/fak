@@ -182,6 +182,7 @@ fak bench post    --rollup latest|regression [--n N] [--catalog PATH] [--baselin
 fak bench request [--now STAMP | --plan-json FILE] [--top N] [--dry-run]   # post a bench RUN-REQUEST (the bench_plan next-test-per-machine) to the bench channel. A request is a POST, not a dispatch — no inbound listener; the bench-nodes act on it out-of-band
 fak blockers post [--severity status|operator|clear] --title ... [--detail ... --owner "<@U>" --action ... --action-url URL --ref ...] [--dry-run]   # post a BLOCKER to the central Slack #blockers channel: a background `status` line records quietly, an `operator` one is SURFACED (pages <!here>/owner, red, with a do-this-next). FAK_BLOCKERS_* (token falls back to the scoreboard token; #blockers is the built-in default)
 fak blockers feed --issues FILE [--label blocked --repo-url URL] [--dry-run]   # CI roll-up: fold a `gh issue list --json number,title,url,assignees,labels` payload into one card — clear when empty, operator (paged) when a blocker is UNOWNED, background status when all are assigned
+fak chatrelay --endpoint URL --channel C0X [--model M --mention <@U> --system S --prime=false --once --interval 3s --dry-run]   # bridge ONE Slack channel to a `fak serve` /v1/chat/completions endpoint: poll history, forward each human message, post the reply in-thread. Generic chatbot front end — no shell, no command router; channel text is chatbot input, never a command. FAK_CHATRELAY_* (token falls back to the scoreboard token; channel has NO fallback). See docs/fak/slack-sessions.md
 fak leaseref  live [--dir DIR] | liveness [--session ME] [--dir DIR] | list [--json] [--dir DIR] | audit [--dir DIR] | reap [--dir DIR] | sync [--remote R] [--push-only|--fetch-only] [--dir DIR]   # cross-machine lease visibility: read refs/fak/locks/* into the dos_arbitrate live_leases shape (#825); `liveness` classifies each live lease self|peer-live|peer-dead|peer-unknown by the owning session's heartbeat (#2164); `audit` is the read-only staleness report; `sync` converges the namespace with a remote (push-then-fetch, side refs only)
 fak attest    --policy FILE [--probes FILE] [--json]        # compliance attestation: prove the capability floor from preflight (exit 0 PROVEN / 1 drift / 2 usage)
 fak stopfailure plan | reset-stale [--apply]                # inspect and settle stale .dos/stop-failures breaker markers
@@ -369,7 +370,7 @@ one to spawn workers. The actual contract:
 - `fak garden walk` — **propose-only**. It classifies the open-issue backlog and emits a
   budget-bounded, worst-first worklist with the exact `gh`/dispatch command per item, but it
   never runs any of them — no worker is spawned by `garden walk` itself.
-- **Dispatch loops** (`fak dispatch tick`, the `issue-resolve-dispatch/<backend>[/<goal-token>]`
+- **Dispatch loops** (`fak dispatch auto` / `fak dispatch tick`, the `issue-resolve-dispatch/<backend>[/<goal-token>]`
   Task Scheduler arm — see [`docs/dispatch-loop.md`](dispatch-loop.md)) are the only path that
   actually spawns workers, and they own the safety machinery that has to guard that: seat/weekly-cap
   checks, lane lease / DOS arbitration, and the issue worker prompt + picker semantics. `--goal

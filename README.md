@@ -7,8 +7,8 @@
 <!-- lead source: docs/adoption/pitch-ladder.md (rung 1). Edit the ladder first; keep this lead consistent with its one-sentence pitch. -->
 fak in one line: fak treats every agent tool call like a syscall — the model proposes, the
 kernel disposes. One static Go binary sits in front of an agent's tool calls. It checks
-each call. It reuses the stable work in long sessions. The same agent loop comes out
-safer, cheaper, and faster.
+each call, routes work, and reuses the stable setup in long sessions. The same agent loop
+comes out more controlled, cheaper, and faster.
 
 Use one binary with the agent you already run. It works with Claude Code, Codex, Cursor,
 and OpenAI / Anthropic / MCP clients. `fak guard -- claude` wraps your normal agent in one
@@ -25,7 +25,7 @@ itself for you.
 [follow the guided tutorial, 15 min, no key, no GPU](docs/fak/tutorial.md) ·
 [run the Colab quickstart](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb) ·
 [run a model in the kernel](#run-the-model-in-the-kernel) ·
-[the performance story](#the-performance-value-proposition) · [a hard security floor](#for-security-teams).
+[the performance story](#the-performance-value-proposition) · [tool-call controls](#tool-call-controls).
 
 ## What you get, in numbers
 
@@ -62,7 +62,7 @@ fak guard --provider openai --api-key-env OPENAI_API_KEY -- opencode   # an Open
 process only. It forwards your real upstream credential
 (and the `cache_control` prompt-cache breakpoints) byte-for-byte, so there is no cost
 regression. On that same boundary, it checks every tool call against a built-in secure
-capability floor: a default-deny allow-list. On exit it prints a compact decision summary:
+capability floor: a reviewable allow-list. On exit it prints a compact decision summary:
 `fak guard: 131 kernel decisions; 121 allowed / 5 denied / 2 repaired / 0 quarantined / 3 deferred`.
 
 For Claude Code, `fak guard` uses your logged-in subscription by default, so no API key is
@@ -134,6 +134,10 @@ watch: [four wins, by example, a 29-second silent MP4](visuals/worked-examples-v
 - Any OpenAI- or Anthropic-compatible client: put `fak serve` in front of a model
   endpoint and point the client at it: [GETTING-STARTED.md](GETTING-STARTED.md) ·
   [docs/fak/api-reference.md](docs/fak/api-reference.md).
+- From Slack: every `fak guard` session posts a durable run-card to a channel you name,
+  and `fak chatrelay` bridges a served model into a channel as a chatbot — your own
+  workspace bot, nothing baked into source. See
+  [docs/fak/slack-sessions.md](docs/fak/slack-sessions.md).
 
 Witnessed live in front of Claude Code (a measured 5-run A/B ablation), opencode, and
 Codex. 41 of 47 surveyed harnesses and frameworks repoint with one base URL. The
@@ -142,13 +146,13 @@ list: [overflow page](docs/README-legacy.md#what-the-kernel-does). Every claim i
 [CLAIMS.md](CLAIMS.md) carries exactly one tag: `[SHIPPED]`, `[SIMULATED]`, or `[STUB]`.
 The lint gate enforces that honesty ledger.
 
-## For security teams
+## Tool-call controls
 
-Most agent security tries to recognize bad text. Recognizers help; they are not the floor.
-So `fak` moves the load-bearing decision to the **capability floor**: a dangerous tool
-outside the allow-list cannot be called, no matter what the model was told. Two independent
-gates carry it: call-side (a denied call never reaches the tool runner) and result-side
-(poisoned or secret-bearing output is quarantined before it enters context).
+The same boundary that saves repeated work also gives teams a reviewable control plane for
+agent effects. A tool call crosses the kernel before it runs, receives a verdict, and is
+recorded with a reason. Dangerous tools stay outside the allow-list, result bytes can be
+quarantined before they re-enter context, and the model does not get to widen its own
+authority by text alone.
 
 ![The path of one tool call: the agent proposes, the fak kernel adjudicates against a default-deny floor, and four verdicts branch out — ALLOW runs, DENY never runs, TRANSFORM is rewritten then runs, REQUIRE_WITNESS is held — with the result checked again before re-entering context](docs/adoption/diagrams/syscall-flow.svg)
 
@@ -156,8 +160,7 @@ gates carry it: call-side (a denied call never reaches the tool runner) and resu
 it runs; the result-side gate quarantines a distrusted output before it becomes the model's
 next instructions. Full walkthrough: [the tool call is a syscall](docs/explainers/tool-call-is-a-syscall.md).</sub>
 
-The floor is a
-deployable JSON manifest you copy, trim, and watch bite, no model in the loop:
+The floor is a deployable JSON manifest you copy, trim, and test, no model in the loop:
 
 ```bash
 fak preflight --tool refund_payment --args "{}"     # -> DENY (DEFAULT_DENY): not on the allow-list, fail-closed
@@ -195,7 +198,7 @@ path-scoped ship loop: [CONTRIBUTING.md](CONTRIBUTING.md) · [docs/dev-tooling.m
 ## Boundaries
 
 - Token serving: use vLLM or SGLang for raw throughput. `fak` is the agent kernel around them.
-- Prompt injection: classifiers are useful, but the capability floor carries the load.
+- Prompt injection: classifiers are useful, but tool authority still comes from policy.
 - Provider prompt caches: hits are rebates, telemetry until you control the memory.
 - In-kernel model: a correctness/reference witness with real tests; use a tuned serving
   stack for production throughput.
@@ -217,6 +220,7 @@ and the three-axes view (scale -> depth -> deployment substrate).
 | Absolute-beginner start · the ordered concept path | [START-HERE.md](START-HERE.md) · [LEARNING-PATH.md](LEARNING-PATH.md) |
 | Claude Code / guard path | [docs/integrations/claude.md](docs/integrations/claude.md) |
 | Always-on gateway (`fak node`) | [docs/fak/node-setup.md](docs/fak/node-setup.md) |
+| Guard sessions + a served model from Slack | [docs/fak/slack-sessions.md](docs/fak/slack-sessions.md) |
 | Long sessions / cache | [docs/explainers/long-sessions-keep-the-cache-hit.md](docs/explainers/long-sessions-keep-the-cache-hit.md) |
 | Capability floor (policy) | [POLICY.md](POLICY.md) · [examples/README.md](examples/README.md) |
 | CLI verbs | [docs/cli-reference.md](docs/cli-reference.md) |
