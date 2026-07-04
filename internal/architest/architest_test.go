@@ -813,6 +813,7 @@ var interpreterSuffix = []string{".py", ".sh", ".bash", ".ps1", ".rb", ".pl", ".
 var interpreterExecAllow = map[string]string{
 	"witness":   "execution witnesses run caller-declared selector argv; the selector is evidence-gated and not a script interpreter dependency of the kernel itself",
 	"procguard": "host process-guard telemetry/reaper — execs the OS process tools (ps/taskkill/PowerShell CIM one-liners) through the shared runTool helper as a host-observation seam; not an adjudication dependency of the tool-call decide path",
+	"accounts":  "credential-refresh spawn (DefaultRefreshSpawn) execs the resolved claude COMPILED binary via ClaudeExe() (env/PATH/conventional-install lookup, never a script interpreter); the path is platform/config-dependent so it cannot be a literal, and the spawn is a token-rotation host seam, not a tool-call adjudication dependency",
 }
 
 // oracleSeamFiles names the off-path Python oracle/baseline seam scripts (DIRECTION.md
