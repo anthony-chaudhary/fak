@@ -162,9 +162,10 @@ func runClaudeMacFak(stdout, stderr io.Writer, argv []string) int {
 		if !claudeMacArgsHavePrompt(passthrough) {
 			passthrough = append([]string{"-p", *prompt}, passthrough...)
 		}
-		if len(fs.Args()) == 0 && !*asJSON {
+		if !*asJSON && !claudeMacArgsHaveFlag(passthrough, "--output-format") {
 			passthrough = append(passthrough, "--output-format", "json")
 		}
+		passthrough = claudeMacProbeIsolationArgs(passthrough)
 	}
 	if len(passthrough) > 0 {
 		tuiArgs = append(tuiArgs, "--")
@@ -176,6 +177,32 @@ func runClaudeMacFak(stdout, stderr io.Writer, argv []string) int {
 func claudeMacArgsHavePrompt(args []string) bool {
 	for _, a := range args {
 		if a == "-p" || a == "--prompt" || strings.HasPrefix(a, "--prompt=") {
+			return true
+		}
+	}
+	return false
+}
+
+func claudeMacProbeIsolationArgs(args []string) []string {
+	out := append([]string(nil), args...)
+	if !claudeMacArgsHaveFlag(out, "--safe-mode") {
+		out = append(out, "--safe-mode")
+	}
+	if !claudeMacArgsHaveFlag(out, "--tools") {
+		out = append(out, "--tools", "")
+	}
+	if !claudeMacArgsHaveFlag(out, "--disable-slash-commands") {
+		out = append(out, "--disable-slash-commands")
+	}
+	if !claudeMacArgsHaveFlag(out, "--no-session-persistence") {
+		out = append(out, "--no-session-persistence")
+	}
+	return out
+}
+
+func claudeMacArgsHaveFlag(args []string, name string) bool {
+	for _, a := range args {
+		if a == name || strings.HasPrefix(a, name+"=") {
 			return true
 		}
 	}

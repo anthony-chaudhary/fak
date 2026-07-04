@@ -57,17 +57,27 @@ func TestClaudeMacFakProbeAddsPromptAndJSONOutput(t *testing.T) {
 		"--claude-config-dir", dir,
 		"--gateway-url", "http://node.example:8080",
 		"--model", "qwen-local",
+		"--width", "1000",
 	})
 	if code != 0 {
 		t.Fatalf("runClaudeMacFak code=%d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"claude", "-p", "Reply with exactly: OK", "--output-format json"} {
+	for _, want := range []string{
+		"claude",
+		"-p",
+		"Reply with exactly: OK",
+		"--output-format json",
+		"--safe-mode",
+		`--tools ""`,
+		"--disable-slash-commands",
+		"--no-session-persistence",
+	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("probe dry-run missing %q:\n%s", want, out)
 		}
 	}
-	wantCommand := `claude --permission-mode bypassPermissions -p "Reply with exactly: OK" --output-format json`
+	wantCommand := `claude --permission-mode bypassPermissions -p "Reply with exactly: OK" --output-format json --safe-mode --tools "" --disable-slash-commands --no-session-persistence`
 	if !strings.Contains(out, wantCommand) {
 		t.Fatalf("probe dry-run command has wrong prompt/output order; want %q in:\n%s", wantCommand, out)
 	}
@@ -84,6 +94,7 @@ func TestClaudeMacFakProbePrependsPromptBeforePassthrough(t *testing.T) {
 		"--claude-config-dir", dir,
 		"--gateway-url", "http://node.example:8080",
 		"--model", "qwen-local",
+		"--width", "1000",
 		"--",
 		"--output-format", "stream-json",
 	})
@@ -91,12 +102,71 @@ func TestClaudeMacFakProbePrependsPromptBeforePassthrough(t *testing.T) {
 		t.Fatalf("runClaudeMacFak code=%d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	wantCommand := `claude --permission-mode bypassPermissions -p "Reply with exactly: OK" --output-format stream-json`
+	wantCommand := `claude --permission-mode bypassPermissions -p "Reply with exactly: OK" --output-format stream-json --safe-mode --tools "" --disable-slash-commands --no-session-persistence`
 	if !strings.Contains(out, wantCommand) {
 		t.Fatalf("probe passthrough command has wrong prompt/output order; want %q in:\n%s", wantCommand, out)
 	}
 	if strings.Contains(out, "--output-format stream-json --output-format json") {
 		t.Fatalf("probe passthrough should not append the default JSON output flag:\n%s", out)
+	}
+}
+
+func TestClaudeMacFakProbeKeepsExplicitIsolationOverrides(t *testing.T) {
+	t.Setenv("FAK_GATEWAY_KEY", "super-secret-test-key")
+	dir := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+	code := runClaudeMacFak(&stdout, &stderr, []string{
+		"--dry-run",
+		"--probe",
+		"--claude-config-dir", dir,
+		"--gateway-url", "http://node.example:8080",
+		"--model", "qwen-local",
+		"--width", "1000",
+		"--",
+		"--output-format", "json",
+		"--safe-mode",
+		"--tools", "Read",
+		"--disable-slash-commands",
+		"--no-session-persistence",
+	})
+	if code != 0 {
+		t.Fatalf("runClaudeMacFak code=%d stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, `claude --permission-mode bypassPermissions -p "Reply with exactly: OK" --output-format json --safe-mode --tools Read --disable-slash-commands --no-session-persistence`) {
+		t.Fatalf("probe passthrough command did not preserve explicit isolation flags:\n%s", out)
+	}
+	if strings.Contains(out, `--tools Read --tools ""`) || strings.Count(out, "--tools") != 2 {
+		t.Fatalf("probe passthrough duplicated --tools or added the empty default:\n%s", out)
+	}
+	if strings.Count(out, "--safe-mode") != 2 || strings.Count(out, "--disable-slash-commands") != 2 || strings.Count(out, "--no-session-persistence") != 2 {
+		t.Fatalf("probe passthrough duplicated boolean isolation defaults:\n%s", out)
+	}
+}
+
+func TestClaudeMacFakProbeAddsJSONOutputWithPassthrough(t *testing.T) {
+	t.Setenv("FAK_GATEWAY_KEY", "super-secret-test-key")
+	dir := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+	code := runClaudeMacFak(&stdout, &stderr, []string{
+		"--dry-run",
+		"--probe",
+		"--claude-config-dir", dir,
+		"--gateway-url", "http://node.example:8080",
+		"--model", "qwen-local",
+		"--width", "1000",
+		"--",
+		"--max-turns", "1",
+	})
+	if code != 0 {
+		t.Fatalf("runClaudeMacFak code=%d stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	wantCommand := `claude --permission-mode bypassPermissions -p "Reply with exactly: OK" --max-turns 1 --output-format json --safe-mode --tools "" --disable-slash-commands --no-session-persistence`
+	if !strings.Contains(out, wantCommand) {
+		t.Fatalf("probe passthrough command did not add default JSON output; want %q in:\n%s", wantCommand, out)
 	}
 }
 

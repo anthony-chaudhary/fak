@@ -73,6 +73,11 @@ SSH error instead of hanging before Claude Code starts.
 `claude-mac --probe` also checks the gateway's `/healthz` and `/debug/vars`
 before launching Claude Code. A healthy probe keeps stdout reserved for Claude's
 JSON output; an unhealthy gateway exits before Claude's long API timeout starts.
+The probe is intentionally a fast smoke test: it launches Claude Code with JSON
+output, safe mode, tools disabled, slash commands disabled, and session
+persistence disabled unless explicit Claude args after `--` override those
+defaults. The 2026-07-04 Mac witness returned `pong` through the live
+`qwen3.6-27b` gateway in 13.1 seconds with 1,889 input tokens.
 
 ### What does the Qwen preset assume?
 
@@ -153,10 +158,13 @@ threshold rates, and kernel activity while Claude Code waits on a local model.
 
 ### Why is the first Qwen3.6 request so slow?
 
-Claude Code sends a large prompt with the agent instructions and tool schemas. The
-known-good Qwen3.6 probe on 2026-06-19 sent about 25.6K input tokens and completed
-in 218 seconds. That is slow, but it is not automatically a failure if the gateway
-is still in flight, the stream is sending pings, and the model server is still
+Claude Code can send a large prompt with the agent instructions and tool schemas.
+The Mac smoke probe avoids that by using safe mode and disabling tools; the
+2026-07-04 witness sent 1,889 input tokens and completed in 13.1 seconds. A full
+interactive turn, or a probe run without safe mode, is much larger: on the same
+Mac path a non-safe probe sent about 14.3K input tokens and took about 162
+seconds. That is slow, but it is not automatically a failure if the gateway is
+still in flight, the stream is sending pings, and the model server is still
 working.
 
 ## Plain-English Map

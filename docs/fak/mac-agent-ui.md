@@ -10,10 +10,13 @@ through a single `fak` binary, and watch fak prove the gateway is live before it
 over the terminal. A premium cloud agent, open weights running on your own silicon, one
 static binary in between. It is the whole fak thesis, runnable on a laptop.
 
-Being honest about it: the first local turn is slow (10 to 15 minutes of prefill on an M3
-Pro), and the model serves one stream at a time. The point is not speed. The point is that
-the whole loop works end to end and stays observable the entire time, through the preflight
-panel, `--overlay`, and `--metrics` below.
+Being honest about it: the fast headless probe is now a smoke test, not a full
+agent session. `--probe` launches Claude Code in safe mode with tools, skills, and
+session persistence disabled, so the 2026-07-04 Mac witness sent 1,889 input
+tokens and returned `pong` in 13.1 seconds through the live gateway. A full
+interactive first turn can still be much slower because Claude Code includes the
+normal agent context and tool surface. The loop stays observable the entire time,
+through the preflight panel, `--overlay`, and `--metrics` below.
 
 > **Audience.** Operators launching Claude Code from the fak console against an already-running Mac `fak serve` gateway. By the end you can open interactive Claude Code against `node-macos-a` with one command.
 
@@ -21,7 +24,7 @@ Use this when `node-macos-a` is already running the always-on Qwen3.6 stack:
 
 ```text
 Claude Code <- fak console agent -> http://node-macos-a.local:8080
-                                    fak serve -> llama-server :8131
+                                    fak serve -> Qwen3.6 OpenAI-compatible server
 ```
 
 The UI surface is `fak console agent`. With `--gateway-url`, it does not start a
@@ -86,8 +89,11 @@ instead of starting Claude against an unreachable gateway. Pass `--debug=false`
 to skip it.
 
 Headless `--probe` runs the same reachability gate before launching Claude Code,
-but keeps stdout quiet on success so Claude's JSON output stays parseable. If the
-gateway is down, the probe exits before Claude Code starts.
+but keeps stdout quiet on success so Claude's JSON output stays parseable. Probe
+mode also defaults Claude Code to `--output-format json`, `--safe-mode`,
+`--tools ""`, `--disable-slash-commands`, and `--no-session-persistence`; pass
+explicit Claude args after `--` to override those defaults. If the gateway is
+down, the probe exits before Claude Code starts.
 
 **Read the metrics without token wrangling.** `/metrics` and `/debug/vars` are
 loopback-exempt: they open without a bearer from the gateway host itself, but a
@@ -136,7 +142,9 @@ shown in the preflight panel comes from `--grafana-url` / `FAK_MAC_GRAFANA`.
 
 The always-on Mac services must be sized for a real Claude Code first turn:
 
-- `com.fak.qwen36-model` runs `llama-server` with `--ctx-size 65536`.
+- `com.fak.qwen36-kernel` runs `llama-server` with a 32K-or-larger context
+  window, the `qwen3.6-27b` alias, Metal enabled, and the OpenAI-compatible API
+  on loopback for the public gateway to proxy.
 - `com.fak.serve-gateway` exports `FAK_PLANNER_TIMEOUT_S=1800` and
   `FAK_HTTP_WRITE_TIMEOUT_S=1800`.
 - `~/.local/bin/fak-mac-serve-gateway` exports
@@ -150,8 +158,8 @@ running the Claude Code probe.
 Reload launchd after changing either LaunchAgent:
 
 ```bash
-launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/com.fak.qwen36-model.plist 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.fak.qwen36-model.plist
+launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/com.fak.qwen36-kernel.plist 2>/dev/null || true
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.fak.qwen36-kernel.plist
 launchctl kickstart -k "gui/$(id -u)/com.fak.serve-gateway"
 ```
 
