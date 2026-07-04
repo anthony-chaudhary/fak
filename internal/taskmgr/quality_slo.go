@@ -60,13 +60,12 @@ func (m *Manager) taskShapeWitness(taskID string) (ShapeWitness, error) {
 }
 
 func (m *Manager) stepShapeWitness(taskID, stepID string) (ShapeWitness, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	step, err := m.stepLocked(taskID, stepID)
-	if err != nil {
-		return ShapeWitness{}, err
-	}
-	return shapeWitnessForSLO(step.spec.QualitySLO), nil
+	var sw ShapeWitness
+	err := m.withStep(taskID, stepID, func(step *stepState) error {
+		sw = shapeWitnessForSLO(step.spec.QualitySLO)
+		return nil
+	})
+	return sw, err
 }
 
 func evaluateTaskQualitySLO(slo *QualitySLO, witness *WitnessRecord, liveness LivenessClass, steps []StepSnapshot) *QualitySLOStatus {
