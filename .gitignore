@@ -69,6 +69,9 @@ tools/_walltime.*
 *scratchpad*
 # ...but a tracked note ABOUT the scratchpad concept is legitimate, not a leak.
 !docs/notes/*SCRATCHPAD*
+# One-off `*_scratch.json` dumps a tool writes to the repo root (e.g.
+# ready_leaves_scratch.json) — per-session throwaway, never a build input.
+*_scratch.json
 **/rmverifytmp/
 **/*verifytmp/
 

@@ -180,6 +180,8 @@ var refClassByExactPath = map[string]string{
 
 	"AGENTS.md":                                 RefClassDevelopmentSource,
 	"CONTRIBUTING.md":                           RefClassDevelopmentSource,
+	"cmd/fak/dup.go":                            RefClassDevelopmentSource,
+	"tools/issue_resolve_dispatch.py":           RefClassDevelopmentSource,
 	"tools/extend_preflight.py":                 RefClassDevelopmentSource,
 	"tools/fleet_control_pane.py":               RefClassDevelopmentSource,
 	"tools/fleet_control_pane_test.py":          RefClassDevelopmentSource,
