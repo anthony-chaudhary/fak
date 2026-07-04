@@ -127,6 +127,36 @@ PATH="$FAKEBIN:$PATH" SSH_LOG="$SSH_LOG" SSH_STDIN_LOG="$SSH_STDIN_LOG" BENCH_KE
 if grep -q "nohup caffeinate -dimsu -t \"123\"" "$SSH_STDIN_LOG" && grep -q "KEEP_AWAKE armed duration_s=123" "$SSH_STDIN_LOG"; then ok
 else no "keepawake did not arm caffeinate (stdin: $(cat "$SSH_STDIN_LOG"))"; fi
 
+# 7) recover is OFFLINE-SAFE (like info): it prints the tailnet-offline runbook WITHOUT
+# invoking the provisioner (resolve_cmd) or SSH, and distinguishes peer-offline from
+# gateway-down. This is the #2607 public recovery path.
+SENT3="$TMP/recover_should_not_invoke.sentinel"; rm -f "$SENT3"
+reg <<JSON
+{ "schema":"fleet-bench-nodes/1","nodes":[
+  { "name":"macbook","sanitized_name":"node-macos-a",
+    "resolve_cmd":"printf 127.0.0.1; : > '$SENT3'",
+    "ssh_user":"u","ssh_key":"~/.ssh/id_ed25519","ssh_port":22,"host_key":"",
+    "repo_path":"~/r","toolchain_env":"GOTOOLCHAIN=auto" } ]}
+JSON
+t "recover is offline-safe (no provisioner/SSH invoked)"
+rout="$(run macbook recover 2>/dev/null)"
+if [ ! -f "$SENT3" ]; then ok; else no "recover invoked the resolver (sentinel present)"; fi
+
+t "recover distinguishes peer-offline from gateway-down"
+if echo "$rout" | grep -q "PEER OFFLINE" && echo "$rout" | grep -q "GATEWAY DOWN"; then ok
+else no "recover runbook missing a failure-mode branch (out: $rout)"; fi
+
+t "recover points back at watcher + result re-check"
+if echo "$rout" | grep -q "watch-status" && echo "$rout" | grep -q "macbench-result.json"; then ok
+else no "recover runbook missing the post-recovery re-check (out: $rout)"; fi
+
+# 8) scrub check: the recover runbook must name ONLY scrubbed identifiers -- never a private
+# IP, host, or key. It may print macbook / node-macos-a / <remote-gateway>; assert no dotted
+# IPv4 leaks into the public output.
+t "recover output carries only scrubbed identifiers"
+if echo "$rout" | grep -Eq '([0-9]{1,3}\.){3}[0-9]{1,3}'; then no "recover leaked a dotted IPv4 (out: $rout)"
+else ok; fi
+
 echo
 if [ "$fail" -eq 0 ]; then echo "PASS (bench_node resolve_cmd)"; exit 0
 else echo "SOME TESTS FAILED"; exit 1; fi

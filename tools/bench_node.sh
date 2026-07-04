@@ -10,6 +10,7 @@
 #   tools/bench_node.sh <node> kernels         # arm64 NEON quant hot-path: correctness gate +
 #                                              #   percell-vs-row4 GEMM A/B + prove/refute verdict
 #   tools/bench_node.sh <node> keepawake       # arm macOS caffeinate as soon as SSH is reachable
+#   tools/bench_node.sh <node> recover         # offline-safe operator runbook for a tailnet-offline node
 #   tools/bench_node.sh <node> cmd <shell...>  # arbitrary command on the node
 #   WAIT=1 tools/bench_node.sh <node> bench    # auto-wait if the node is asleep
 #   BENCH_KEEPAWAKE_S=28800 tools/bench_node.sh <node> keepawake  # caffeinate duration
@@ -24,7 +25,7 @@
 # CPU brand / hostname. Promoting a result to a committed path needs a real redaction pass.
 set -uo pipefail
 
-RUNNER_VERSION="0.6.0"   # 0.6.0: keepawake grabber; 0.5.0: windows-wsl remote_shell; 0.4.0: resolve_cmd dynamic host/IP resolver; 0.3.0: kernels
+RUNNER_VERSION="0.7.0"   # 0.7.0: tailnet-offline recover runbook; 0.6.0: keepawake grabber; 0.5.0: windows-wsl remote_shell; 0.4.0: resolve_cmd dynamic host/IP resolver; 0.3.0: kernels
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SELF_DIR/.." && pwd)"
 REG="${BENCH_NODES:-$SELF_DIR/bench_nodes.json}"
@@ -43,6 +44,8 @@ usage: bench_node.sh <node> <subcommand> [args]
   info            print resolved node facts (sanitized name only)
   cmd <shell...>  run an arbitrary command on the node (-> gitignored scratch)
   keepawake       wait if needed, then arm macOS caffeinate on the node
+  recover         print an offline-safe recovery runbook for a tailnet-offline node
+                  (no network: works while the node is unreachable)
   tests           go test ./internal/ggufload ./internal/model -count=1
   bench           kernel-latency microbenches (adjudicator+ctxmmu, count=8, ns/op)
   kernels         arm64 NEON quant hot-path: bit-exact correctness gate + per-cell-vs-row4
@@ -107,7 +110,7 @@ SAN="$(field sanitized_name)"   || exit $?
 # sanitized name is ever public. `info` stays offline-safe -- it never calls the provisioner.
 TAILNET_IP="$(field tailnet_ip 1)"
 RESOLVE_CMD="$(field resolve_cmd 1)"
-if [ -n "$RESOLVE_CMD" ] && [ "$SUB" != "info" ]; then
+if [ -n "$RESOLVE_CMD" ] && [ "$SUB" != "info" ] && [ "$SUB" != "recover" ]; then
   IP="$(resolve_dynamic_ip "$RESOLVE_CMD")" || exit $?
   echo "resolve: $NODE current host/IP fetched via resolve_cmd (ephemeral host)" >&2
 elif [ -n "$TAILNET_IP" ]; then
@@ -273,6 +276,40 @@ EOF
     tail -8 "$OUT/run.log"
     echo "keepawake rc=$rc -> $OUT (gitignored)"
     exit $rc
+    ;;
+  recover)
+    # OFFLINE-SAFE operator runbook for a tailnet-offline / gateway-unreachable bench node.
+    # The public repo cannot wake a peer over the PRIVATE control path, so this prints the
+    # scrubbed next steps + how to re-check the watcher/result after recovery. Like `info`,
+    # it never touches the network -- so it works while the node is unreachable (the whole
+    # point). It names ONLY the scrubbed node identifiers and <remote-gateway>; never a
+    # private host, IP, key, or repo path.
+    cat <<RB
+RECOVER $NODE (sanitized $SAN): tailnet-offline / gateway-unreachable runbook
+
+Two DISTINCT failure modes -- confirm WHICH before acting (do not conflate them):
+  1. PEER OFFLINE  -- the node itself is unreachable: tailnet last-seen is stale and SSH
+                      times out. Confirm: tools/bench_node.sh $NODE ping -> UNREACHABLE $NODE.
+  2. GATEWAY DOWN  -- the peer is up (ping REACHABLE) but <remote-gateway>/healthz reports
+                      'context deadline exceeded'; the watcher sits in waiting_for_gateway.
+
+If PEER OFFLINE:
+  - Wake the node over its private control path (that path is out of this public repo's scope).
+  - Physically or remotely power / lid-open the node, or trigger its own wake helper.
+  - Re-confirm reachability:  tools/bench_node.sh $NODE ping     (expect: REACHABLE $NODE)
+  - Once reachable, hold the wake window:  tools/bench_node.sh $NODE keepawake
+
+If GATEWAY DOWN (peer REACHABLE but healthz failing):
+  - Restart the gateway on the node, then confirm it answers /healthz locally.
+  - (The Mac gateway is its own service -- this runner does not start/stop it.)
+
+After EITHER recovery, re-check the watcher + result via the existing public paths:
+  - fak macbench watch-status        (expect state to advance past waiting_for_gateway)
+  - the watcher writes the result JSON once gateway health is OK; confirm the
+    experiments/nightrun/<box>/<ts>-macbench-result.json artifact appears.
+
+This runbook is offline-safe and scrubbed.
+RB
     ;;
   cmd)
     ensure_online || exit $?

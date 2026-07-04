@@ -27,6 +27,7 @@ tools/bench_node.sh <node> wait            # poll (backoff) until reachable
 tools/bench_node.sh <node> tests           # go test ggufload+model (correctness)
 tools/bench_node.sh <node> bench           # kernel-latency microbenches (ns/op)
 tools/bench_node.sh <node> keepawake       # wait, then arm macOS caffeinate
+tools/bench_node.sh <node> recover         # offline-safe tailnet-offline recovery runbook
 tools/bench_node.sh <node> cmd <shell...>  # arbitrary command on the node
 WAIT=1 tools/bench_node.sh <node> bench    # auto-wait if the node is asleep
 BENCH_KEEPAWAKE_S=28800 tools/bench_node.sh <node> keepawake
@@ -39,6 +40,37 @@ BENCH_KEEPAWAKE_S=28800 tools/bench_node.sh <node> keepawake
 first remote script starts `caffeinate -dimsu -t <seconds>` before any checkout/toolchain
 inspection. That preserves the wake window for follow-up `tests`, `bench`, `kernels`, or
 `cmd` runs on macOS nodes that would otherwise go back to sleep.
+
+## Tailnet-offline recovery (`recover`)
+
+When the overnight Mac benchmark stalls, `fak macbench watch-status` reports
+`waiting_for_gateway`, and `tools/bench_node.sh macbook ping` returns `UNREACHABLE macbook`,
+the operator has no live SSH path to the node. `recover` prints a **scrubbed, offline-safe
+runbook** — it is the public next step for that case:
+
+```bash
+tools/bench_node.sh macbook recover
+```
+
+Unlike every other subcommand, `recover` **never touches the network** (like `info`, it
+skips the provisioner and SSH), so it works while the node is unreachable. It first makes the
+operator separate the two failure modes that look alike from the watcher's side — do **not**
+conflate them:
+
+- **PEER OFFLINE** — the node itself is unreachable: tailnet last-seen is stale and SSH times
+  out (`ping` → `UNREACHABLE`). Recovery is a wake over the **private** control path (out of
+  this public repo's scope): power/lid-open the node or trigger its own wake helper, then
+  re-confirm with `tools/bench_node.sh macbook ping` and hold the window with `keepawake`.
+- **GATEWAY DOWN** — the peer is up (`ping` → `REACHABLE`) but `<remote-gateway>/healthz`
+  reports `context deadline exceeded`; restart the gateway on the node (the Mac gateway is its
+  own service — this runner does not start or stop it).
+
+After either recovery, re-check the existing public paths: `fak macbench watch-status` (state
+should advance past `waiting_for_gateway`) and confirm the watcher writes
+`experiments/nightrun/<box>/<ts>-macbench-result.json`.
+
+The runbook names only the scrubbed identifiers `macbook`, `node-macos-a`, and
+`<remote-gateway>` — never a private host, IP, key, or repo path.
 
 ## Lineage / observability (every run)
 
