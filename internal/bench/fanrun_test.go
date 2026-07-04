@@ -46,8 +46,19 @@ func TestFanrunSmallEndToEnd(t *testing.T) {
 	if c.WaveHits < c.CrossHits {
 		t.Errorf("wave_hits %d < cross_hits %d (cross must be the sibling-only subset)", c.WaveHits, c.CrossHits)
 	}
-	if c.AgentsWallSerialMs <= 0 {
-		t.Errorf("agents_wall_serial_ms = %v, want > 0 (real measured wall-clock)", c.AgentsWallSerialMs)
+	// A tiny offline wave can finish within a single monotonic-clock tick on a fast
+	// host, so the measured serial wall-clock is legitimately 0 there — a strict >0
+	// floor is not portable (#2649). Require it present and non-negative, its per-agent
+	// mean a consistent projection of the measured sum, and — only when the clock DID
+	// advance — the derived throughput positive. No fabricated timing.
+	if c.AgentsWallSerialMs < 0 {
+		t.Errorf("agents_wall_serial_ms = %v, want >= 0 (measured, non-negative)", c.AgentsWallSerialMs)
+	}
+	if c.Agents > 0 && c.PerAgentMsMean != c.AgentsWallSerialMs/float64(c.Agents) {
+		t.Errorf("per_agent_ms_mean = %v, want wall/agents = %v (consistent projection)", c.PerAgentMsMean, c.AgentsWallSerialMs/float64(c.Agents))
+	}
+	if c.AgentsWallSerialMs > 0 && c.AgentsPerSecSerial <= 0 {
+		t.Errorf("wall %v > 0 but agents_per_sec_serial = %v (throughput must derive when measurable)", c.AgentsWallSerialMs, c.AgentsPerSecSerial)
 	}
 	if !rep.SharedGoal {
 		t.Errorf("research profile must be marked shared_goal=true")
@@ -124,5 +135,36 @@ func TestCrossHitsScaleWithN(t *testing.T) {
 	}
 	if !(n16.CrossHits > n4.CrossHits && n4.CrossHits > 0) {
 		t.Errorf("cross_hits must grow with N: N=4=%d N=16=%d", n4.CrossHits, n16.CrossHits)
+	}
+}
+
+// TestFanrunWallClockZeroIsPortable pins the #2649 fix deterministically: a wave that
+// completes within a single monotonic-clock tick on a fast host measures wallMs == 0,
+// and that is a VALID sub-granularity measurement — the derived per-agent mean and
+// serial throughput stay zero-safe (no divide-by-zero, no +Inf) and the projection
+// remains internally consistent. The old TestFanrunSmallEndToEnd floor asserted
+// agents_wall_serial_ms > 0, which this legitimate zero-elapsed wave trips.
+func TestFanrunWallClockZeroIsPortable(t *testing.T) {
+	// Sub-granularity wave: a real wave whose summed elapsed rounds to zero ns.
+	var zero FanrunCell
+	projectWallClock(&zero, 0, 4)
+	if zero.AgentsWallSerialMs != 0 {
+		t.Fatalf("agents_wall_serial_ms = %v, want 0 (sub-tick wave)", zero.AgentsWallSerialMs)
+	}
+	if zero.PerAgentMsMean != 0 {
+		t.Fatalf("per_agent_ms_mean = %v, want 0 for a zero-elapsed wave", zero.PerAgentMsMean)
+	}
+	if zero.AgentsPerSecSerial != 0 {
+		t.Fatalf("agents_per_sec_serial = %v, want 0 (guarded, no divide-by-zero/+Inf)", zero.AgentsPerSecSerial)
+	}
+
+	// A measurable wave still projects a positive, consistent throughput.
+	var pos FanrunCell
+	projectWallClock(&pos, 2.0, 4)
+	if pos.PerAgentMsMean != 0.5 {
+		t.Fatalf("per_agent_ms_mean = %v, want 2.0/4 = 0.5", pos.PerAgentMsMean)
+	}
+	if pos.AgentsPerSecSerial != 2000 {
+		t.Fatalf("agents_per_sec_serial = %v, want 4/(2.0/1e3) = 2000", pos.AgentsPerSecSerial)
 	}
 }

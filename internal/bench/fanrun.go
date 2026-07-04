@@ -314,7 +314,6 @@ func runLiveCell(ctx context.Context, opts FanrunOptions, N, baselinePerAgentHit
 
 	cell := FanrunCell{
 		Agents:             N,
-		AgentsWallSerialMs: first.wallMs,
 		WaveHits:           first.waveHits,
 		CrossHits:          first.waveHits - N*baselinePerAgentHits,
 		CrossHitsStable:    opts.Trials < 2 || stable,
@@ -330,17 +329,28 @@ func runLiveCell(ctx context.Context, opts FanrunOptions, N, baselinePerAgentHit
 	if cell.CrossHits < 0 {
 		cell.CrossHits = 0 // a lone agent has no sibling to share with; never report negative
 	}
-	if N > 0 {
-		cell.PerAgentMsMean = first.wallMs / float64(N)
-	}
-	if first.wallMs > 0 {
-		cell.AgentsPerSecSerial = float64(N) / (first.wallMs / 1e3)
-	}
+	projectWallClock(&cell, first.wallMs, N)
 
 	if opts.ModelDir != "" && opts.Reps > 0 {
 		applyPrefillTiming(&cell, opts, N)
 	}
 	return cell
+}
+
+// projectWallClock fills the MEASURED wall-clock triad (serial sum, per-agent mean,
+// serial agents/sec) from a wave's summed elapsed. A tiny offline wave can complete
+// inside a single monotonic-clock tick on a fast host, so wallMs is legitimately 0
+// there (issue #2649); the derived mean and throughput stay zero-safe rather than
+// assuming a >=1-tick floor or dividing by zero. Timing is never fabricated — a 0
+// here is a real sub-granularity measurement, not a synthesized value.
+func projectWallClock(cell *FanrunCell, wallMs float64, N int) {
+	cell.AgentsWallSerialMs = wallMs
+	if N > 0 {
+		cell.PerAgentMsMean = wallMs / float64(N)
+	}
+	if wallMs > 0 {
+		cell.AgentsPerSecSerial = float64(N) / (wallMs / 1e3)
+	}
 }
 
 // liveWave runs N real RunArm sub-agent sessions SERIALLY in one fresh world epoch and
