@@ -77,16 +77,25 @@ func OrderLaneCandidates(cands []LaneCandidate, preferNewest bool) []int {
 		if ordered[i].Weight != ordered[j].Weight {
 			return ordered[i].Weight > ordered[j].Weight
 		}
-		if preferNewest {
-			return ordered[i].Number > ordered[j].Number
-		}
-		return ordered[i].Number < ordered[j].Number
+		return numberTiebreak(ordered[i].Number, ordered[j].Number, preferNewest)
 	})
 	out := make([]int, len(ordered))
 	for i, c := range ordered {
 		out[i] = c.Number
 	}
 	return out
+}
+
+// numberTiebreak breaks a tie between two issue numbers once every higher
+// tier (priority weight, and for OrderLaneCandidatesSmallFirst, smallness)
+// already agrees: oldest-first (ascending) by default, newest-first when
+// preferNewest. Shared by OrderLaneCandidates and OrderLaneCandidatesSmallFirst
+// so the two orderings' number tiebreak can never drift apart.
+func numberTiebreak(a, b int, preferNewest bool) bool {
+	if preferNewest {
+		return a > b
+	}
+	return a < b
 }
 
 // SmallnessCandidate is one orderable issue plus the two independent facts a
@@ -129,10 +138,7 @@ func OrderLaneCandidatesSmallFirst(cands []SmallnessCandidate, preferNewest bool
 		if ordered[i].Small != ordered[j].Small {
 			return ordered[i].Small
 		}
-		if preferNewest {
-			return ordered[i].Number > ordered[j].Number
-		}
-		return ordered[i].Number < ordered[j].Number
+		return numberTiebreak(ordered[i].Number, ordered[j].Number, preferNewest)
 	})
 	out := make([]int, len(ordered))
 	for i, c := range ordered {
