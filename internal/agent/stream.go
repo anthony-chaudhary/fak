@@ -183,6 +183,42 @@ func (c *upstreamCall) failoverAccountCred(p *HTTPPlanner, reason string) bool {
 	return false
 }
 
+// rehomeToSiblingSeat runs the shared account-cap rehome arm behind Complete's and
+// CompleteStream's 429-account-cap and 403/402-usage-overage branches: on a successful
+// swap it flips triedRehome/rehomePending and clears the cap-wait so the caller re-sends
+// immediately, returning true (the caller should rewind attempt and resend); on no free
+// seat it reports the spent-but-fruitless rehome once and returns false so the caller
+// falls through to the existing cap-aware backoff. triedRehome caps this at a single swap
+// attempt per call, mirroring the 403 org-wall failover arm.
+func rehomeToSiblingSeat(p *HTTPPlanner, call *upstreamCall, rs *retryState, triedRehome, rehomePending *bool, attempt int) bool {
+	if *triedRehome || p == nil || p.AccountFailoverFunc == nil {
+		return false
+	}
+	if call.failoverAccountCred(p, RehomedSeat) {
+		*triedRehome = true
+		*rehomePending = true
+		rs.lastRetryAfter = "" // re-send immediately on the sibling seat; do not wait out the cap
+		rs.lastCapWait = ""
+		return true
+	}
+	// No free sibling seat — every one capped/walled/absent. Report the spent-but-fruitless
+	// rehome so the cap-driven give-up is visible, then let the caller ride the backoff.
+	notifyAccountFailover(p, RehomeSeatUnavailable, attempt)
+	*triedRehome = true // one report; do not re-notify every capped attempt
+	return false
+}
+
+// notifyRehomeRecovered reports, at most once, that a prior seat-rehome swap was CONFIRMED
+// by this 200: the capped session adopted a permitted sibling seat and completed the turn
+// in place instead of sleeping toward an hours-away reset. Shared by Complete and
+// CompleteStream, mirroring forbiddenRetryState.noteRecovered.
+func notifyRehomeRecovered(p *HTTPPlanner, rehomePending *bool, attempt int) {
+	if *rehomePending {
+		notifyAccountFailover(p, RehomedSeat, attempt)
+		*rehomePending = false
+	}
+}
+
 // refreshAPIKeyWait is refreshAPIKey with a bounded grace window for the RE-LOGIN race.
 // A 401 on the rotating-subscription path means the token fak just sent is dead; the fix
 // is to send the rotated-in replacement. But when the token expired, the upstream 401s the
@@ -465,23 +501,16 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 		req.Header.Set("Accept", "text/event-stream")
 		r, err := p.Client.Do(req)
 		if err != nil {
-			if deterministicTransportError(err) {
-				return nil, &UpstreamUnreachableError{Err: err}
+			if uerr := classifyDoError(err, &rs); uerr != nil {
+				return nil, uerr
 			}
-			rs.noteTransportGlitch(err)
 			continue
 		}
 		if r.StatusCode == http.StatusOK {
 			// A 200 after the 403 arm fired is a CONFIRMED transient-403 self-heal (see Complete).
-			if fbState.attempted() {
-				notifyForbiddenRetry(p, ForbiddenRetryRecovered, attempt)
-				fbState.fired = false
-			}
+			fbState.noteRecovered(p, attempt)
 			// A 200 after a 429-account-cap seat rehome is a CONFIRMED rehome (see Complete).
-			if rehomePending {
-				notifyAccountFailover(p, RehomedSeat, attempt)
-				rehomePending = false
-			}
+			notifyRehomeRecovered(p, &rehomePending, attempt)
 			resp = r
 			break
 		}
@@ -490,21 +519,13 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 		if retryableStatus(r.StatusCode) {
 			rs.noteRetryableStatus(r.StatusCode, raw, r.Header, 400)
 			// A 429 ACCOUNT CAP (session/weekly/usage) can hold for a hours-away reset; rehome the
-			// session ONCE to a permitted sibling seat rather than sleep on the capped one. Same swap
-			// mechanism as the 403 failover; on no free seat, fall through to the cap-aware backoff.
-			// A transient rate_limited throttle keeps its seat (isAccountCap429 false).
-			if !triedRehome && p.AccountFailoverFunc != nil &&
-				isAccountCap429(r.StatusCode, raw, r.Header, time.Now()) {
-				if call.failoverAccountCred(p, RehomedSeat) {
-					triedRehome = true
-					rehomePending = true
-					rs.lastRetryAfter = ""
-					rs.lastCapWait = ""
-					attempt--
-					continue
-				}
-				notifyAccountFailover(p, RehomeSeatUnavailable, attempt)
-				triedRehome = true
+			// session ONCE to a permitted sibling seat rather than sleep on the capped one
+			// (rehomeToSiblingSeat mirrors the 403 failover's swap mechanism). A transient
+			// rate_limited throttle keeps its seat (isAccountCap429 false).
+			if isAccountCap429(r.StatusCode, raw, r.Header, time.Now()) &&
+				rehomeToSiblingSeat(p, call, &rs, &triedRehome, &rehomePending, attempt) {
+				attempt--
+				continue
 			}
 			continue
 		}
@@ -532,29 +553,18 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 		if (r.StatusCode == http.StatusForbidden || r.StatusCode == http.StatusPaymentRequired) &&
 			usageOrOverageRejected(r.Header) {
 			rs.noteRetryableStatus(r.StatusCode, raw, r.Header, 400)
-			if !triedRehome && p.AccountFailoverFunc != nil {
-				if call.failoverAccountCred(p, RehomedSeat) {
-					triedRehome = true
-					rehomePending = true
-					rs.lastRetryAfter = ""
-					rs.lastCapWait = ""
-					attempt--
-					continue
-				}
-				notifyAccountFailover(p, RehomeSeatUnavailable, attempt)
-				triedRehome = true
+			if rehomeToSiblingSeat(p, call, &rs, &triedRehome, &rehomePending, attempt) {
+				attempt--
+				continue
 			}
 			continue
 		}
 		// A 403's bounded transient-recovery arm (self-contained short paced wait; see Complete):
 		// retry a transient abuse/capacity denial a few times before surfacing it terminally.
 		if r.StatusCode == http.StatusForbidden {
-			if fbState.step(ctx, raw) == forbiddenRetryGo {
+			if fbState.step403(ctx, p, raw, attempt) {
 				attempt--
 				continue
-			}
-			if fbState.attempted() {
-				notifyForbiddenRetry(p, ForbiddenRetryExhausted, attempt)
 			}
 		}
 		return nil, &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}

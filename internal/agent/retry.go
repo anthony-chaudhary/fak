@@ -64,6 +64,22 @@ func deterministicTransportError(err error) bool {
 	return false
 }
 
+// classifyDoError turns a Client.Do failure into the shared retry-vs-fail-fast verdict
+// behind Complete, CompleteStream, and StreamAnthropicRaw: a deterministic dial failure
+// (refused / NXDOMAIN / TLS) is a misconfiguration a retry cannot fix, so it comes back
+// wrapped for the caller to return immediately; any other transport glitch (timeout,
+// mid-flight reset) is noted on rs and comes back nil so the caller retries with the same
+// backoff. The three call sites differ only in how they return the non-nil case (some
+// return it alone, some alongside a nil result), which is why the return itself stays at
+// the call site rather than folding into this helper.
+func classifyDoError(err error, rs *retryState) error {
+	if deterministicTransportError(err) {
+		return &UpstreamUnreachableError{Err: err}
+	}
+	rs.noteTransportGlitch(err)
+	return nil
+}
+
 // statusOverloaded is Anthropic's non-standard HTTP 529 "Overloaded" — the upstream is
 // momentarily over capacity. net/http has no constant for it, and it is exactly as
 // transient as a 503, so it belongs in retryableStatus. fak most often fronts Claude, so
@@ -365,6 +381,34 @@ func (s *forbiddenRetryState) step(ctx context.Context, body []byte) forbiddenRe
 // (permanent signature, or the arm disabled), which is a plain terminal denial, not a self-heal
 // that ran out of budget.
 func (s *forbiddenRetryState) attempted() bool { return s.fired }
+
+// noteRecovered reports, at most once, that this arm's prior retry was a CONFIRMED
+// self-heal: the next 200 after step() fired means the transient abuse/capacity gate
+// cleared and the live session healed in place instead of dropping into a spurious /login.
+// fired is one-way (attempted() false after this), so a later success on the same call
+// cannot double-count. Shared by Complete, CompleteStream, and StreamAnthropicRaw so a 200
+// following the 403 arm is reported identically on all three wires.
+func (s *forbiddenRetryState) noteRecovered(p *HTTPPlanner, attempt int) {
+	if s.attempted() {
+		notifyForbiddenRetry(p, ForbiddenRetryRecovered, attempt)
+		s.fired = false
+	}
+}
+
+// step403 runs the shared bounded 403 recovery decision behind Complete, CompleteStream, and
+// StreamAnthropicRaw: true means step() judged the denial transient and within budget (the
+// caller should rewind attempt and resend immediately, uncounted against the 429/5xx budget);
+// false means the arm never fired or is now spent, in which case a genuinely-attempted arm's
+// exhaustion is reported before the caller falls through to the terminal 403.
+func (s *forbiddenRetryState) step403(ctx context.Context, p *HTTPPlanner, raw []byte, attempt int) bool {
+	if s.step(ctx, raw) == forbiddenRetryGo {
+		return true
+	}
+	if s.attempted() {
+		notifyForbiddenRetry(p, ForbiddenRetryExhausted, attempt)
+	}
+	return false
+}
 
 // maxBackoff caps a single exponential backoff wait. The attempt²×600ms schedule would
 // otherwise grow without bound as the attempt budget rises; the cap keeps any ONE wait

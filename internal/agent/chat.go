@@ -1145,10 +1145,9 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			// A deterministic dial-time failure (refused / NXDOMAIN / TLS) will not
 			// resolve on retry — retrying only adds ~8s of backoff latency to what is a
 			// configuration error. Fail fast and tag it as unreachable (#346).
-			if deterministicTransportError(err) {
-				return nil, &UpstreamUnreachableError{Err: err}
+			if uerr := classifyDoError(err, &rs); uerr != nil {
+				return nil, uerr
 			}
-			rs.noteTransportGlitch(err)
 			continue
 		}
 		raw, _ := io.ReadAll(resp.Body)
@@ -1159,26 +1158,15 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 				// A 429 that names an ACCOUNT CAP (session/weekly/usage) is not a seconds-long
 				// throttle — its named reset can be hours (or a multi-account/billing wall) away.
 				// Rather than sleep on the capped seat toward that reset, rehome the session ONCE to
-				// a permitted sibling seat that can serve the turn now, using the SAME swap mechanism
-				// the 403 org-wall failover uses (failoverAccountCred + AccountFailoverFunc). On a
-				// successful swap re-send immediately (no cap-wait); on no free seat, fall through to
-				// the existing cap-aware backoff below, so behavior is unchanged when rehoming can't
-				// help or is not configured. A transient rate_limited throttle (not an account cap)
-				// skips this entirely and keeps its seat.
-				if !triedRehome && p.AccountFailoverFunc != nil &&
-					isAccountCap429(resp.StatusCode, raw, resp.Header, time.Now()) {
-					if call.failoverAccountCred(p, RehomedSeat) {
-						triedRehome = true
-						rehomePending = true   // confirmed-rehome notify fires at the next 200, not here
-						rs.lastRetryAfter = "" // re-send immediately on the sibling seat; do not wait out the cap
-						rs.lastCapWait = ""
-						attempt-- // the rehome probe is uncounted against the 429 backoff budget
-						continue
-					}
-					// No free sibling seat — every one capped/walled/absent. Report the spent-but-
-					// fruitless rehome so the cap-driven give-up is visible, then ride the backoff.
-					notifyAccountFailover(p, RehomeSeatUnavailable, attempt)
-					triedRehome = true // one report; do not re-notify every capped attempt
+				// a permitted sibling seat that can serve the turn now (rehomeToSiblingSeat uses the
+				// SAME swap mechanism the 403 org-wall failover uses). On no free seat, fall through
+				// to the existing cap-aware backoff below, so behavior is unchanged when rehoming
+				// can't help or is not configured. A transient rate_limited throttle (not an account
+				// cap) skips this entirely and keeps its seat.
+				if isAccountCap429(resp.StatusCode, raw, resp.Header, time.Now()) &&
+					rehomeToSiblingSeat(p, call, &rs, &triedRehome, &rehomePending, attempt) {
+					attempt-- // the rehome probe is uncounted against the 429 backoff budget
+					continue
 				}
 				continue
 			}
@@ -1222,17 +1210,9 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			if (resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusPaymentRequired) &&
 				usageOrOverageRejected(resp.Header) {
 				rs.noteRetryableStatus(resp.StatusCode, raw, resp.Header, 200)
-				if !triedRehome && p.AccountFailoverFunc != nil {
-					if call.failoverAccountCred(p, RehomedSeat) {
-						triedRehome = true
-						rehomePending = true
-						rs.lastRetryAfter = "" // re-send immediately on the sibling seat; do not wait out the cap
-						rs.lastCapWait = ""
-						attempt-- // the rehome probe is uncounted against the backoff budget
-						continue
-					}
-					notifyAccountFailover(p, RehomeSeatUnavailable, attempt)
-					triedRehome = true
+				if rehomeToSiblingSeat(p, call, &rs, &triedRehome, &rehomePending, attempt) {
+					attempt-- // the rehome probe is uncounted against the backoff budget
+					continue
 				}
 				continue // ride the cap-aware backoff toward the reset (retryBackoffWait uses lastCapWait)
 			}
@@ -1245,14 +1225,9 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			// "recovered" notify is fired NOT here but at loop top on the next 200 (see below), so
 			// it reports a CONFIRMED heal, never an optimistic one; here we only note give-up.
 			if resp.StatusCode == http.StatusForbidden {
-				if fbState.step(ctx, raw) == forbiddenRetryGo {
+				if fbState.step403(ctx, p, raw, attempt) {
 					attempt-- // uncounted against the 429/5xx budget; the arm bounds itself
 					continue
-				}
-				if fbState.attempted() {
-					// The arm retried and the window/attempts elapsed still 403ing: the denial is
-					// the permanent kind. Report the spent self-heal so it is not a silent give-up.
-					notifyForbiddenRetry(p, ForbiddenRetryExhausted, attempt)
 				}
 			}
 			// An ACCOUNT-SCOPED wall (a 403/402 whose body says this credential's org/region/billing
@@ -1282,10 +1257,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		// A 200 after the 403 arm fired is a CONFIRMED transient-403 self-heal: the abuse/capacity
 		// gate cleared and the live session healed in place instead of dropping into a spurious
 		// /login. Report it once (fired is one-way, so a later success cannot double-count).
-		if fbState.attempted() {
-			notifyForbiddenRetry(p, ForbiddenRetryRecovered, attempt)
-			fbState.fired = false
-		}
+		fbState.noteRecovered(p, attempt)
 		// A 200 after an account swap is a CONFIRMED failover heal: the walled session adopted a
 		// permitted sibling account and completed the turn in place instead of surfacing a futile
 		// /login. Report it once (failoverPending is one-way here).
@@ -1296,10 +1268,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		// A 200 after a 429-account-cap seat rehome is a CONFIRMED rehome: the capped session
 		// adopted a permitted sibling seat and completed the turn in place instead of sleeping
 		// toward a hours-away reset. Report it once (rehomePending is one-way here).
-		if rehomePending {
-			notifyAccountFailover(p, RehomedSeat, attempt)
-			rehomePending = false
-		}
+		notifyRehomeRecovered(p, &rehomePending, attempt)
 		if call.responsesStreamed {
 			decoded, derr := openAIResponsesSSEFinalResponse(raw)
 			if derr != nil {

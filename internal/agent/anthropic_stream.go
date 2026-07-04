@@ -127,18 +127,14 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 			// A deterministic dial failure (refused/NXDOMAIN/TLS) cannot be retried away —
 			// fail fast and tagged. A transient transport error (timeout, mid-flight reset)
 			// gets the same backoff as a retryable status.
-			if deterministicTransportError(derr) {
-				return &UpstreamUnreachableError{Err: derr}
+			if uerr := classifyDoError(derr, &rs); uerr != nil {
+				return uerr
 			}
-			rs.noteTransportGlitch(derr)
 			continue
 		}
 		if r.StatusCode == http.StatusOK {
 			// A 200 after the 403 arm fired is a CONFIRMED transient-403 self-heal (see Complete).
-			if fbState.attempted() {
-				notifyForbiddenRetry(p, ForbiddenRetryRecovered, attempt)
-				fbState.fired = false
-			}
+			fbState.noteRecovered(p, attempt)
 			resp = r
 			break
 		}
@@ -176,12 +172,9 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		}
 		// A 403's bounded transient-recovery arm (self-contained short paced wait; see Complete).
 		if r.StatusCode == http.StatusForbidden {
-			if fbState.step(ctx, raw) == forbiddenRetryGo {
+			if fbState.step403(ctx, p, raw, attempt) {
 				attempt--
 				continue
-			}
-			if fbState.attempted() {
-				notifyForbiddenRetry(p, ForbiddenRetryExhausted, attempt)
 			}
 		}
 		return &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
