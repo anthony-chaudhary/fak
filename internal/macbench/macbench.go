@@ -269,7 +269,7 @@ func runTwoStream(ctx context.Context, opts Options) []Row {
 		}()
 	}
 	wg.Wait()
-	wall := time.Since(start).Seconds()
+	wall := elapsedSeconds(start)
 	agg := Row{Name: "2stream-aggregate", Kind: "2stream", Streams: streams, PromptRequested: 25, MaxTokens: 128, WallSeconds: round(wall)}
 	for _, row := range rows {
 		agg.CompletionTokens += row.CompletionTokens
@@ -294,7 +294,7 @@ func runBuffered(ctx context.Context, opts Options, kind, name string, promptTok
 	body := chatBody(opts.Model, prompt(promptTokens), maxTokens, false)
 	start := time.Now()
 	resp, err := doChat(ctx, opts, body)
-	wall := time.Since(start).Seconds()
+	wall := elapsedSeconds(start)
 	row.WallSeconds = round(wall)
 	if err != nil {
 		row.Error = err.Error()
@@ -367,12 +367,12 @@ func runStreamed(ctx context.Context, opts Options, kind, name string, promptTok
 			if choice.Delta.Content != "" {
 				chunkTokens++
 				if row.TTFTSeconds == 0 {
-					row.TTFTSeconds = round(time.Since(start).Seconds())
+					row.TTFTSeconds = elapsedSeconds(start)
 				}
 			}
 		}
 	}
-	row.WallSeconds = round(time.Since(start).Seconds())
+	row.WallSeconds = elapsedSeconds(start)
 	if row.CompletionTokens == 0 {
 		row.CompletionTokens = chunkTokens
 	}
@@ -446,6 +446,14 @@ func round(v float64) float64 {
 		return 0.001
 	}
 	return float64(int(v*1000+0.5)) / 1000
+}
+
+func elapsedSeconds(start time.Time) float64 {
+	v := time.Since(start).Seconds()
+	if v <= 0 {
+		return 0.001
+	}
+	return round(v)
 }
 
 type chatResponse struct {
