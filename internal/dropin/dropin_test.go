@@ -1,6 +1,9 @@
 package dropin
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestDetectProvider(t *testing.T) {
 	cases := []struct {
@@ -108,13 +111,12 @@ func TestInjectedEnv(t *testing.T) {
 		t.Errorf("anthropic injected = %v, want one ANTHROPIC_BASE_URL=%s", got, gw)
 	}
 
-	// OpenAI wire with no override: BOTH conventional base-URL vars, each carrying /v1,
-	// so a client reading OPENAI_API_BASE (Aider, LiteLLM) connects as well as one
-	// reading OPENAI_BASE_URL (Codex, OpenCode, the OpenAI SDK).
-	want := [][2]string{{"OPENAI_BASE_URL", gw + "/v1"}, {"OPENAI_API_BASE", gw + "/v1"}}
+	// OpenAI wire with no override: the OpenAI conventional vars carry /v1, while
+	// ANTHROPIC_BASE_URL carries the bare guard URL for Claude Code.
+	want := [][2]string{{"OPENAI_BASE_URL", gw + "/v1"}, {"OPENAI_API_BASE", gw + "/v1"}, {"ANTHROPIC_BASE_URL", gw}}
 	for _, p := range []string{"openai", "gemini", "xai", "other"} {
 		got := InjectedEnv(p, "", gw)
-		if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s injected = %v, want %v", p, got, want)
 		}
 	}
@@ -146,8 +148,8 @@ func TestPlanFor(t *testing.T) {
 	if codex.Provider != "openai" || !codex.Autodetected || !codex.Recognized {
 		t.Errorf("codex plan provider/autodetect/recognized = %q/%v/%v", codex.Provider, codex.Autodetected, codex.Recognized)
 	}
-	if len(codex.EnvVars) != 2 || codex.EnvVars[0] != [2]string{"OPENAI_BASE_URL", gw + "/v1"} {
-		t.Errorf("codex env = %v, want OPENAI_BASE_URL + OPENAI_API_BASE carrying /v1", codex.EnvVars)
+	if len(codex.EnvVars) != 3 || codex.EnvVars[0] != [2]string{"OPENAI_BASE_URL", gw + "/v1"} || codex.EnvVars[2] != [2]string{"ANTHROPIC_BASE_URL", gw} {
+		t.Errorf("codex env = %v, want OPENAI_BASE_URL + OPENAI_API_BASE carrying /v1 plus ANTHROPIC_BASE_URL bare", codex.EnvVars)
 	}
 
 	// An explicit --provider on an unknown agent: NOT autodetected, NOT recognized,

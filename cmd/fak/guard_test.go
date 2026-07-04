@@ -2073,7 +2073,7 @@ func TestPrintGuardBannerShowsVersionAndBuild(t *testing.T) {
 	printGuardBanner(&b,
 		"9.9.9", "abc123def456 +uncommitted  (committed 2026-06-30T00:00:00Z)",
 		"http://127.0.0.1:9", "anthropic", "https://api.anthropic.com", "examples/floor.json",
-		"ANTHROPIC_BASE_URL", "http://127.0.0.1:9", "off", "~/.fak/audit.jsonl",
+		"ANTHROPIC_BASE_URL=http://127.0.0.1:9", "off", "~/.fak/audit.jsonl",
 		nil, false /*remoteServe*/, false /*local*/, "", []string{"claude"})
 	out := b.String()
 
@@ -2090,7 +2090,7 @@ func TestPrintGuardBannerShowsPriorRefusals(t *testing.T) {
 	printGuardBanner(&b,
 		"9.9.9", "abc123def456",
 		"http://127.0.0.1:9", "anthropic", "https://api.anthropic.com", "examples/floor.json",
-		"ANTHROPIC_BASE_URL", "http://127.0.0.1:9", "off", "~/.fak/audit.jsonl",
+		"ANTHROPIC_BASE_URL=http://127.0.0.1:9", "off", "~/.fak/audit.jsonl",
 		[]guardRefusalCarry{
 			{Reason: "OFF_TRUNK", Count: 1, Fix: "commit directly to main"},
 			{Reason: "STALE_RECALL", Count: 1, Fix: "refresh from the source witness"},
@@ -2101,6 +2101,28 @@ func TestPrintGuardBannerShowsPriorRefusals(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("banner missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestFormatGuardInjectedEnvForBannerShowsMixedBaseURLValues(t *testing.T) {
+	got := formatGuardInjectedEnvForBanner([][2]string{
+		{"OPENAI_BASE_URL", "http://127.0.0.1:9000/v1"},
+		{"OPENAI_API_BASE", "http://127.0.0.1:9000/v1"},
+		{"ANTHROPIC_BASE_URL", "http://127.0.0.1:9000"},
+		{"OPENAI_API_KEY", "secret-token"},
+	})
+	for _, want := range []string{
+		"OPENAI_BASE_URL=http://127.0.0.1:9000/v1",
+		"OPENAI_API_BASE=http://127.0.0.1:9000/v1",
+		"ANTHROPIC_BASE_URL=http://127.0.0.1:9000",
+		"OPENAI_API_KEY",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("banner env label missing %q: %s", want, got)
+		}
+	}
+	if strings.Contains(got, "secret-token") {
+		t.Fatalf("banner env label leaked non-base-url value: %s", got)
 	}
 }
 

@@ -1148,15 +1148,11 @@ func cmdGuard(argv []string) {
 		if providerAutodetected {
 			fmt.Fprintf(&startupReport, "fak guard: detected agent %q -> --provider %s (pass --provider to override)\n", strings.ToLower(filepath.Base(command[0])), up)
 		}
-		injectNames := injected[0][0]
-		for _, kv := range injected[1:] {
-			injectNames += ", " + kv[0]
-		}
 		localLabel := ""
 		if localModel {
 			localLabel = filepath.Base(*ggufPath)
 		}
-		printGuardBanner(&startupReport, guardBannerVersion(), guardBannerBuildStamp(), gwURL, up, resolvedBase, floorSource, injectNames, injected[0][1], logLabel, auditLabel, refusalCarryForward, remoteBase != "", localModel, localLabel, command)
+		printGuardBanner(&startupReport, guardBannerVersion(), guardBannerBuildStamp(), gwURL, up, resolvedBase, floorSource, formatGuardInjectedEnvForBanner(injected), logLabel, auditLabel, refusalCarryForward, remoteBase != "", localModel, localLabel, command)
 		if preCompactInstall.Applied {
 			fmt.Fprintf(&startupReport, "fak guard: Claude PreCompact hook: %s (settings %s)\n", preCompactInstall.Mode, preCompactInstall.SettingsPath)
 		}

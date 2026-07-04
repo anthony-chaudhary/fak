@@ -123,18 +123,17 @@ func EnvValue(provider, gwURL string) string {
 // InjectedEnv lists the environment variables guard sets in the child to point it at
 // the gateway. An explicit override yields exactly that one var (value follows the
 // wire's /v1 convention). The Anthropic wire is ANTHROPIC_BASE_URL. The
-// OpenAI-compatible wire gets BOTH conventional base-URL variables a client might
-// read: OPENAI_BASE_URL (the OpenAI SDK, Codex, OpenCode, the Vercel AI SDK) and
-// OPENAI_API_BASE (LiteLLM-backed clients and Aider). Setting both is harmless to a
-// client that reads only one, and it means more agents work under `fak guard` with no
-// extra flag. Both pairs share one value (EnvValue), so the gateway URL is injected
-// once under two names.
+// OpenAI-compatible wire gets OPENAI_BASE_URL and OPENAI_API_BASE with /v1, plus
+// ANTHROPIC_BASE_URL with the bare guard URL so Claude Code can still talk to the local
+// Anthropic Messages surface while fak proxies inference over an OpenAI-compatible
+// upstream.
 func InjectedEnv(provider, override, gwURL string) [][2]string {
 	val := EnvValue(provider, gwURL)
 	primary := EnvVar(provider, override)
 	pairs := [][2]string{{primary, val}}
 	if strings.TrimSpace(override) == "" && primary == "OPENAI_BASE_URL" {
 		pairs = append(pairs, [2]string{"OPENAI_API_BASE", val})
+		pairs = append(pairs, [2]string{"ANTHROPIC_BASE_URL", EnvValue("anthropic", gwURL)})
 	}
 	return pairs
 }

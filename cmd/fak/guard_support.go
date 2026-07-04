@@ -336,11 +336,11 @@ func guardClaudeConfigDir() string {
 }
 
 // printGuardBanner explains exactly what is now in front of the agent: where the
-// gateway is, what it proxies to, which floor is loaded, the single env var injected
-// into the child, and WHERE TO WATCH IT — the live metrics/debug endpoints, the durable
-// audit journal, and the structured log stream. It goes to stderr so it never pollutes a
-// `-p` JSON run the child writes to stdout.
-func printGuardBanner(w io.Writer, version, buildStamp, gwURL, provider, baseURL, floorSource, injectVar, injectVal, logLabel, auditLabel string, refusalCarryForward []guardRefusalCarry, remoteServe, local bool, localLabel string, command []string) {
+// gateway is, what it proxies to, which floor is loaded, the env vars injected into the
+// child, and WHERE TO WATCH IT — the live metrics/debug endpoints, the durable audit
+// journal, and the structured log stream. It goes to stderr so it never pollutes a `-p`
+// JSON run the child writes to stdout.
+func printGuardBanner(w io.Writer, version, buildStamp, gwURL, provider, baseURL, floorSource, injectLabel, logLabel, auditLabel string, refusalCarryForward []guardRefusalCarry, remoteServe, local bool, localLabel string, command []string) {
 	fmt.Fprintf(w, "fak guard %s — kernel-adjudicated: %s\n", version, strings.Join(command, " "))
 	// The embedded build stamp, not the version, is the reliable "is THIS guard binary current?"
 	// signal: the version reads the tree's VERSION file, so a stale binary still looks current
@@ -361,7 +361,7 @@ func printGuardBanner(w io.Writer, version, buildStamp, gwURL, provider, baseURL
 		fmt.Fprintf(w, "  upstream   : %s   (via the %s wire)\n", baseURL, provider)
 	}
 	fmt.Fprintf(w, "  floor      : %s\n", floorSource)
-	fmt.Fprintf(w, "  wired via  : %s=%s   (child only — your shell is untouched)\n", injectVar, injectVal)
+	fmt.Fprintf(w, "  wired via  : %s   (child only — your shell is untouched)\n", injectLabel)
 	// Observability: the live scrape surfaces are on the gateway URL above (unauth on
 	// loopback); the audit journal is ON by default (auditLabel says where), the log
 	// stream survives the session only if asked for.
@@ -374,6 +374,37 @@ func printGuardBanner(w io.Writer, version, buildStamp, gwURL, provider, baseURL
 	fmt.Fprint(w, formatGuardRefusalCarryForward(refusalCarryForward))
 	fmt.Fprintf(w, "  gateway log: %s\n", logLabel)
 	fmt.Fprintln(w, "  every tool call the agent proposes crosses the capability floor before it runs.")
+}
+
+func formatGuardInjectedEnvForBanner(pairs [][2]string) string {
+	if len(pairs) == 0 {
+		return "(none)"
+	}
+	labels := make([]string, 0, len(pairs))
+	for _, kv := range pairs {
+		name := strings.TrimSpace(kv[0])
+		if name == "" {
+			continue
+		}
+		if guardBannerShowsEnvValue(name) {
+			labels = append(labels, fmt.Sprintf("%s=%s", name, kv[1]))
+			continue
+		}
+		labels = append(labels, name)
+	}
+	if len(labels) == 0 {
+		return "(none)"
+	}
+	return strings.Join(labels, ", ")
+}
+
+func guardBannerShowsEnvValue(name string) bool {
+	switch name {
+	case "ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", "OPENAI_API_BASE":
+		return true
+	default:
+		return false
+	}
 }
 
 // guardLogSink builds the gateway's structured-log destination from the --log value.
