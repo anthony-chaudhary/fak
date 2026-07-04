@@ -737,14 +737,23 @@ func isUnscopedStashCreate(rest []string) bool {
 // recognized. A wrapper script (`mygit`, `hub`) or alias is intentionally NOT
 // recognized (documented non-goal — those remain the git hooks' floor).
 func gitArgv(seg []string) []string {
-	i := 0
-	for i < len(seg) && (isAssign(seg[i]) || seg[i] == "env") {
-		i++
-	}
+	i := skipEnvPrefix(seg)
 	if i >= len(seg) || !isGitProgram(seg[i]) {
 		return nil
 	}
 	return seg[i+1:]
+}
+
+// skipEnvPrefix returns the index of the first token in seg that is not a leading
+// shell env assignment (NAME=val) or a leading `env` word — i.e. where the actual
+// command-position program token begins. Shared by gitArgv and dashCStrings, which
+// both need to look past `VAR=val ... env` before testing the program word.
+func skipEnvPrefix(seg []string) int {
+	i := 0
+	for i < len(seg) && (isAssign(seg[i]) || seg[i] == "env") {
+		i++
+	}
+	return i
 }
 
 // isGitProgram reports whether a token names the git program in command position:
@@ -1058,10 +1067,7 @@ func extractParenBody(s string, open int) (body string, end int, ok bool) {
 func dashCStrings(s string) []string {
 	var inner []string
 	for _, seg := range tokenizeSegments(s) {
-		i := 0
-		for i < len(seg) && (isAssign(seg[i]) || seg[i] == "env") {
-			i++
-		}
+		i := skipEnvPrefix(seg)
 		if i >= len(seg) || !isShellProgram(seg[i]) {
 			continue
 		}
