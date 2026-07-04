@@ -179,9 +179,9 @@ func TestWaveFanoutReflectsDroppedSeat(t *testing.T) {
 		expiredCredBody(t, -2*time.Hour))
 
 	rows := AnnotatedRoster(home, cfg, DefaultPolicy(), Registry{})
-	wave := AllocateWave(rows, WaveRequest{Count: 2, Product: "claude"}, DefaultPolicy())
-	if wave.Granted != 1 || wave.Shortfall != 1 {
-		t.Fatalf("wave granted/shortfall = %d/%d, want 1/1 (the stale seat is out of the pool)",
+	wave := AllocateWave(rows, WaveRequest{Count: 5, Product: "claude"}, DefaultPolicy())
+	if wave.Granted != 4 || wave.Shortfall != 1 {
+		t.Fatalf("wave granted/shortfall = %d/%d, want 4/1 (the stale account's four slots are out of the pool)",
 			wave.Granted, wave.Shortfall)
 	}
 	for _, lane := range wave.Lanes {

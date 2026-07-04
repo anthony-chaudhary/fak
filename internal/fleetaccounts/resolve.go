@@ -168,6 +168,42 @@ func PoolKey(r Account) string {
 // SeatPoolSchema is the seat-pool envelope schema tag.
 const SeatPoolSchema = "fleet-seat-pool/1"
 
+const (
+	// DefaultClaudeSessionsPerAccount is the default concurrent session budget
+	// for one healthy Claude worker account. It models account capacity as
+	// session slots rather than a single binary seat.
+	DefaultClaudeSessionsPerAccount = 4
+	DefaultAccountSessionsPerWorker = 1
+)
+
+// SessionsPerAccountEnv retunes the per-account Claude session budget without a
+// rebuild — the same "one knob, one way" pattern as FAK_MAX_WORKERS (read by both
+// tools/dispatch_preflight.py and internal/dispatchtick). Python reads the same
+// variable in fleet_accounts._session_cap, so the two languages stay in lockstep.
+const SessionsPerAccountEnv = "FAK_SESSIONS_PER_ACCOUNT"
+
+func AccountSessionCap(row Account) int {
+	switch strings.ToLower(productOf(row)) {
+	case "claude":
+		return claudeSessionsPerAccount()
+	default:
+		return DefaultAccountSessionsPerWorker
+	}
+}
+
+// claudeSessionsPerAccount is the per-account concurrent session budget for a
+// healthy Claude worker account: DefaultClaudeSessionsPerAccount, overridable per
+// host via the FAK_SESSIONS_PER_ACCOUNT env knob. A non-positive or unparseable
+// value keeps the default.
+func claudeSessionsPerAccount() int {
+	if v := strings.TrimSpace(os.Getenv(SessionsPerAccountEnv)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return DefaultClaudeSessionsPerAccount
+}
+
 // Lease is a live-worker lease record parsed from a `.account` sidecar.
 type Lease struct {
 	Worker string `json:"worker"`
@@ -178,18 +214,21 @@ type Lease struct {
 
 // Seat is one seat-pool row.
 type Seat struct {
-	Seat      string   `json:"seat"`
-	Tag       string   `json:"tag"`
-	Account   string   `json:"account"`
-	Product   string   `json:"product"`
-	Model     *string  `json:"model"`
-	ModelTier *int     `json:"model_tier"`
-	Available bool     `json:"available"`
-	State     string   `json:"state"`
-	Workers   []string `json:"workers"`
+	Seat        string   `json:"seat"`
+	Tag         string   `json:"tag"`
+	Account     string   `json:"account"`
+	Product     string   `json:"product"`
+	Model       *string  `json:"model"`
+	ModelTier   *int     `json:"model_tier"`
+	Available   bool     `json:"available"`
+	State       string   `json:"state"`
+	SessionCap  int      `json:"session_cap,omitempty"`
+	LeasedSlots int      `json:"leased_slots,omitempty"`
+	FreeSlots   int      `json:"free_slots,omitempty"`
+	Workers     []string `json:"workers"`
 }
 
-// DoubleBooked names a seat held by more than one live worker (an invariant violation).
+// DoubleBooked names a session pool held beyond its configured cap (an invariant violation).
 type DoubleBooked struct {
 	Seat    string   `json:"seat"`
 	Tag     string   `json:"tag"`
@@ -244,14 +283,11 @@ func leaseMatchesSeat(lease Lease, row Account) bool {
 	return ltag != "" && ltag == strings.ToLower(row.Tag)
 }
 
-// BuildSeatPool builds the explicit seat pool (M distinct routable worker pools x tier)
-// with the seat->worker binding for the live workers leasing them.
+// BuildSeatPool builds the explicit session-slot pool (M distinct routable worker pools
+// times each product's per-account session cap) with live worker bindings.
 func BuildSeatPool(rows []Account, leases []Lease, product string) SeatPool {
 	wanted := strings.ToLower(product)
-	var seats []Seat
-	var doubleBooked []DoubleBooked
-	matched := map[int]bool{}
-	total, free, leased, blocked := 0, 0, 0, 0
+	var workers []Account
 	for _, row := range rows {
 		if !RoutableWorker(row) {
 			continue
@@ -259,34 +295,54 @@ func BuildSeatPool(rows []Account, leases []Lease, product string) SeatPool {
 		if wanted != "" && strings.ToLower(row.Product) != wanted {
 			continue
 		}
-		var bound []int
-		var workers []string
-		for i, ls := range leases {
-			if leaseMatchesSeat(ls, row) {
-				bound = append(bound, i)
-				matched[i] = true
-				workers = append(workers, leaseWorkerLabel(ls))
-			}
+		workers = append(workers, row)
+	}
+	leaseWorkers, matched := leaseWorkersByPool(workers, leases)
+	seats := []Seat{}
+	doubleBooked := []DoubleBooked{}
+	total, free, leased, blocked := 0, 0, 0, 0
+	for _, row := range uniquePoolAccounts(workers) {
+		capacity := AccountSessionCap(row)
+		if capacity <= 0 {
+			continue
 		}
+		poolKey := PoolKey(row)
+		seatWorkers := append([]string(nil), leaseWorkers[poolKey]...)
+		leasedSlots := len(seatWorkers)
+		leasedCapped := fleetMinInt(leasedSlots, capacity)
+		freeSlots := 0
 		available := accountCanBeOffered(row)
-		var state string
+		state := "blocked"
+		total += capacity
 		switch {
-		case len(workers) > 0:
-			state, leased = "leased", leased+1
+		case leasedSlots > 0:
+			state = "leased"
+			leased += leasedCapped
+			if available {
+				freeSlots = capacity - leasedCapped
+				if freeSlots < 0 {
+					freeSlots = 0
+				}
+				free += freeSlots
+			} else {
+				blocked += capacity - leasedCapped
+			}
 		case available:
-			state, free = "free", free+1
+			state = "free"
+			freeSlots = capacity
+			free += freeSlots
 		default:
-			state, blocked = "blocked", blocked+1
+			blocked += capacity
 		}
-		total++
 		seat := Seat{
-			Seat: PoolKey(row), Tag: row.Tag, Account: row.Account, Product: row.Product,
+			Seat: poolKey, Tag: row.Tag, Account: row.Account, Product: row.Product,
 			Model: row.Model, ModelTier: row.ModelTier, Available: available,
-			State: state, Workers: workers,
+			State: state, SessionCap: capacity, LeasedSlots: leasedSlots,
+			FreeSlots: freeSlots, Workers: seatWorkers,
 		}
 		seats = append(seats, seat)
-		if len(workers) > 1 {
-			doubleBooked = append(doubleBooked, DoubleBooked{Seat: seat.Seat, Tag: seat.Tag, Workers: workers})
+		if leasedSlots > capacity {
+			doubleBooked = append(doubleBooked, DoubleBooked{Seat: seat.Seat, Tag: seat.Tag, Workers: seatWorkers})
 		}
 	}
 	var unbound []UnboundLease
@@ -329,4 +385,57 @@ func BuildSeatPool(rows []Account, leases []Lease, product string) SeatPool {
 		LeasedSeats: leased, BlockedSeats: blocked, Depleted: free == 0,
 		DoubleBooked: doubleBooked, UnboundLeases: unbound, Seats: seats,
 	}
+}
+
+func uniquePoolAccounts(rows []Account) []Account {
+	byPool := map[string]Account{}
+	order := []string{}
+	for _, row := range rows {
+		pool := PoolKey(row)
+		if _, ok := byPool[pool]; !ok {
+			order = append(order, pool)
+			byPool[pool] = row
+			continue
+		}
+		if accountPoolLess(row, byPool[pool]) {
+			byPool[pool] = row
+		}
+	}
+	out := make([]Account, 0, len(order))
+	for _, pool := range order {
+		out = append(out, byPool[pool])
+	}
+	return out
+}
+
+func accountPoolLess(a, b Account) bool {
+	aa, ba := accountCanBeOffered(a), accountCanBeOffered(b)
+	if aa != ba {
+		return aa
+	}
+	return rankLess(a, b)
+}
+
+func leaseWorkersByPool(rows []Account, leases []Lease) (map[string][]string, map[int]bool) {
+	out := map[string][]string{}
+	matched := map[int]bool{}
+	for i, ls := range leases {
+		for _, row := range rows {
+			if !leaseMatchesSeat(ls, row) {
+				continue
+			}
+			pool := PoolKey(row)
+			out[pool] = append(out[pool], leaseWorkerLabel(ls))
+			matched[i] = true
+			break
+		}
+	}
+	return out, matched
+}
+
+func fleetMinInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

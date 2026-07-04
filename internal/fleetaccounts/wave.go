@@ -23,10 +23,12 @@ type WaveRequest struct {
 // distinct-pool and rank-stamped wave membership.
 type WaveLane struct {
 	Resolved
-	Pool   string `json:"pool"`
-	Rank   int    `json:"rank"`
-	WaveID string `json:"wave_id"`
-	Size   int    `json:"size"`
+	Pool        string `json:"pool"`
+	SessionSlot int    `json:"session_slot,omitempty"`
+	SessionCap  int    `json:"session_cap,omitempty"`
+	Rank        int    `json:"rank"`
+	WaveID      string `json:"wave_id"`
+	Size        int    `json:"size"`
 }
 
 // WaveResult is the native account-wave allocation shape.
@@ -48,9 +50,10 @@ type WaveResult struct {
 	DroppedSeats []DroppedSeat `json:"dropped_seats,omitempty"`
 }
 
-// AllocateWave allocates up to Count distinct available account pools for a
+// AllocateWave allocates up to Count available account session slots for a
 // parallel fan-out. It is the multi-account sibling of Resolve: lanes are flat
-// resolve records, but no two lanes share the same PoolKey.
+// resolve records, and a healthy Claude account can appear once per session slot
+// up to its product cap.
 func AllocateWave(rows []Account, req WaveRequest, pol Policy) WaveResult {
 	n := req.Count
 	if n < 0 {
@@ -77,7 +80,8 @@ func AllocateWave(rows []Account, req WaveRequest, pol Policy) WaveResult {
 	}
 
 	var lanes []WaveLane
-	seenPools := map[string]bool{}
+	usedPools := map[string]bool{}
+	load := map[string]int{}
 	for _, tier := range tierOrder {
 		if len(lanes) >= n {
 			break
@@ -88,26 +92,40 @@ func AllocateWave(rows []Account, req WaveRequest, pol Policy) WaveResult {
 				candidates = append(candidates, r)
 			}
 		}
+		candidates = uniquePoolAccounts(candidates)
 		sort.SliceStable(candidates, func(i, j int) bool {
 			return rankLess(candidates[i], candidates[j])
 		})
-		for _, r := range candidates {
-			if len(lanes) >= n {
+		for len(lanes) < n {
+			best := -1
+			for i, r := range candidates {
+				pool := PoolKey(r)
+				if load[pool] >= AccountSessionCap(r) {
+					continue
+				}
+				if best < 0 || waveSlotLess(r, candidates[best], load[pool], load[PoolKey(candidates[best])]) {
+					best = i
+				}
+			}
+			if best < 0 {
 				break
 			}
+			r := candidates[best]
 			pool := PoolKey(r)
-			if seenPools[pool] {
-				continue
-			}
-			seenPools[pool] = true
+			capacity := AccountSessionCap(r)
+			slot := load[pool] + 1
+			load[pool] = slot
+			usedPools[pool] = true
 			reason := "wave lane (target tier)"
 			if tier != target {
 				reason = "wave lane (fallback tier)"
 			}
 			tt := target
 			lanes = append(lanes, WaveLane{
-				Resolved: flattenResolved(r, true, reason, r.ModelTier, &tt, tier != target, ""),
-				Pool:     pool,
+				Resolved:    flattenResolved(r, true, reason, r.ModelTier, &tt, tier != target, ""),
+				Pool:        pool,
+				SessionSlot: slot,
+				SessionCap:  capacity,
 			})
 		}
 	}
@@ -143,9 +161,9 @@ func AllocateWave(rows []Account, req WaveRequest, pol Policy) WaveResult {
 		}
 		reason += ")"
 	case shortfall > 0:
-		reason = fmt.Sprintf("granted %d of %d distinct pools; %d short (roster has no more distinct available pools at the requested tiers)", granted, n, shortfall)
+		reason = fmt.Sprintf("granted %d of %d session slot(s) across %d distinct pool(s); %d short (roster has no more available session slots at the requested tiers)", granted, n, len(usedPools), shortfall)
 	default:
-		reason = fmt.Sprintf("granted %d distinct pools", granted)
+		reason = fmt.Sprintf("granted %d session slot(s) across %d distinct pool(s)", granted, len(usedPools))
 	}
 
 	// A pool shrunk by a stale credential must never shrink silently (#2075):
@@ -172,7 +190,7 @@ func AllocateWave(rows []Account, req WaveRequest, pol Policy) WaveResult {
 		Requested:             n,
 		Granted:               granted,
 		Shortfall:             shortfall,
-		DistinctPools:         granted,
+		DistinctPools:         len(usedPools),
 		Size:                  granted,
 		WaveID:                waveID,
 		TargetTier:            target,
@@ -181,6 +199,13 @@ func AllocateWave(rows []Account, req WaveRequest, pol Policy) WaveResult {
 		BlockedTargetAccounts: blocked,
 		DroppedSeats:          dropped,
 	}
+}
+
+func waveSlotLess(a, b Account, loadA, loadB int) bool {
+	if loadA != loadB {
+		return loadA < loadB
+	}
+	return rankLess(a, b)
 }
 
 func lanePools(lanes []WaveLane) []string {

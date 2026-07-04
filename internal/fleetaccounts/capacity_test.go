@@ -16,8 +16,8 @@ func TestBuildCapacityPreflightClassifiesClaudeSeats(t *testing.T) {
 	if !rep.OK || rep.Verdict != "OK" {
 		t.Fatalf("preflight = %+v, want OK for one required seat", rep)
 	}
-	if rep.TrueConcurrentCeiling != 1 || rep.FreshSeats != 1 || rep.BlockedSeats != 1 || rep.StaleSeats != 0 || rep.TotalSeats != 2 {
-		t.Fatalf("counts = fresh:%d blocked:%d stale:%d total:%d ceiling:%d, want 1/1/0/2/1",
+	if rep.TrueConcurrentCeiling != 4 || rep.FreshSeats != 4 || rep.BlockedSeats != 4 || rep.StaleSeats != 0 || rep.TotalSeats != 8 {
+		t.Fatalf("counts = fresh:%d blocked:%d stale:%d total:%d ceiling:%d, want 4/4/0/8/4",
 			rep.FreshSeats, rep.BlockedSeats, rep.StaleSeats, rep.TotalSeats, rep.TrueConcurrentCeiling)
 	}
 	got := byAccount(rep)
@@ -42,9 +42,9 @@ func TestBuildCapacityPreflightSurfacesStaleCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := AnnotatedRoster(home, cfg, DefaultPolicy(), Registry{})
-	rep := BuildCapacityPreflight(rows, "claude", 3)
-	if rep.OK || rep.Verdict != "UNDER_CAPACITY" || rep.TrueConcurrentCeiling != 2 {
-		t.Fatalf("preflight = %+v, want under-capacity for required=3 with two fresh seats", rep)
+	rep := BuildCapacityPreflight(rows, "claude", 9)
+	if rep.OK || rep.Verdict != "UNDER_CAPACITY" || rep.TrueConcurrentCeiling != 8 {
+		t.Fatalf("preflight = %+v, want under-capacity for required=9 with eight fresh Claude slots", rep)
 	}
 	needs := byAccount(rep)[".claude-needslogin-acct"]
 	if needs.State != CapacityStale || needs.LoginStatus == nil || *needs.LoginStatus != "needs_login" ||
@@ -57,8 +57,8 @@ func TestBuildCapacityPreflightAllProducts(t *testing.T) {
 	home, cfg, regPath := fixture(t)
 	rows := AnnotatedRoster(home, cfg, DefaultPolicy(), LoadRegistry(regPath))
 	rep := BuildCapacityPreflight(rows, "all", 0)
-	if rep.TrueConcurrentCeiling != 2 || rep.FreshSeats != 2 || rep.BlockedSeats != 1 {
-		t.Fatalf("all-products counts = %+v, want two fresh seats (.claude + opencode-glm) and one blocked", rep)
+	if rep.TrueConcurrentCeiling != 5 || rep.FreshSeats != 5 || rep.BlockedSeats != 4 {
+		t.Fatalf("all-products counts = %+v, want five fresh slots (.claude x4 + opencode-glm x1) and four blocked", rep)
 	}
 }
 

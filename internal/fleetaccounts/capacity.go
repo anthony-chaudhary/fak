@@ -28,6 +28,7 @@ type CapacityAccount struct {
 	Reason         string  `json:"reason,omitempty"`
 	LoginStatus    *string `json:"login_status,omitempty"`
 	CanServe       *bool   `json:"can_serve,omitempty"`
+	SessionCap     int     `json:"session_cap,omitempty"`
 	ActiveSessions int     `json:"active_sessions"`
 	LiveSessions   int     `json:"live_sessions"`
 	StatusSource   string  `json:"status_source,omitempty"`
@@ -64,6 +65,7 @@ func BuildCapacityPreflight(rows []Account, product string, required int) Capaci
 		OK:       true,
 		Verdict:  "OK",
 	}
+	workers := []Account{}
 	for _, row := range rows {
 		if !RoutableWorker(row) {
 			continue
@@ -72,16 +74,23 @@ func BuildCapacityPreflight(rows []Account, product string, required int) Capaci
 		if product != "all" && rowProduct != product {
 			continue
 		}
+		workers = append(workers, row)
+	}
+	for _, row := range uniquePoolAccounts(workers) {
 		acct := capacityAccount(row)
 		rep.Accounts = append(rep.Accounts, acct)
-		rep.TotalSeats++
+		capacity := AccountSessionCap(row)
+		if capacity <= 0 {
+			continue
+		}
+		rep.TotalSeats += capacity
 		switch acct.State {
 		case CapacityFresh:
-			rep.FreshSeats++
+			rep.FreshSeats += capacity
 		case CapacityBlockedUntil:
-			rep.BlockedSeats++
+			rep.BlockedSeats += capacity
 		default:
-			rep.StaleSeats++
+			rep.StaleSeats += capacity
 		}
 	}
 	sort.SliceStable(rep.Accounts, func(i, j int) bool {
@@ -95,11 +104,11 @@ func BuildCapacityPreflight(rows []Account, product string, required int) Capaci
 		return rep.Accounts[i].Tag < rep.Accounts[j].Tag
 	})
 	rep.TrueConcurrentCeiling = rep.FreshSeats
-	rep.Reason = fmt.Sprintf("%d fresh seat(s), %d stale, %d blocked", rep.FreshSeats, rep.StaleSeats, rep.BlockedSeats)
+	rep.Reason = fmt.Sprintf("%d fresh session slot(s), %d stale, %d blocked", rep.FreshSeats, rep.StaleSeats, rep.BlockedSeats)
 	if required > 0 && rep.TrueConcurrentCeiling < required {
 		rep.OK = false
 		rep.Verdict = "UNDER_CAPACITY"
-		rep.Reason = fmt.Sprintf("requires %d fresh seat(s), only %d available; dispatch must downsize before spawning", required, rep.TrueConcurrentCeiling)
+		rep.Reason = fmt.Sprintf("requires %d fresh session slot(s), only %d available; dispatch must downsize before spawning", required, rep.TrueConcurrentCeiling)
 	}
 	return rep
 }
@@ -123,6 +132,7 @@ func capacityAccount(row Account) CapacityAccount {
 		Reason:         reason,
 		LoginStatus:    row.LoginStatus,
 		CanServe:       row.CanServe,
+		SessionCap:     AccountSessionCap(row),
 		ActiveSessions: derefInt(row.ActiveSessions),
 		LiveSessions:   derefInt(row.LiveSessions),
 		StatusSource:   derefStr(row.StatusSource),

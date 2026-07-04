@@ -177,7 +177,7 @@ func RenderSeats(pool SeatPool) string {
 	if pool.Depleted {
 		depleted = "  DEPLETED"
 	}
-	fmt.Fprintf(&b, "seat pool [%s]: %d seat(s)  free=%d leased=%d blocked=%d%s\n",
+	fmt.Fprintf(&b, "seat pool [%s]: %d session slot(s)  free=%d leased=%d blocked=%d%s\n",
 		pool.Product, pool.TotalSeats, pool.FreeSeats, pool.LeasedSeats, pool.BlockedSeats, depleted)
 	for _, s := range pool.Seats {
 		workers := strings.Join(s.Workers, ", ")
@@ -188,10 +188,14 @@ func RenderSeats(pool SeatPool) string {
 		if s.ModelTier != nil {
 			tier = "t" + itoa(*s.ModelTier)
 		}
-		fmt.Fprintf(&b, "  [%-7s] %-16s %-28s %-3s -> %s\n", s.State, s.Tag, s.Account, tier, workers)
+		slotText := ""
+		if s.SessionCap > 0 {
+			slotText = fmt.Sprintf(" slots=%d/%d free=%d", s.LeasedSlots, s.SessionCap, s.FreeSlots)
+		}
+		fmt.Fprintf(&b, "  [%-7s] %-16s %-28s %-3s%s -> %s\n", s.State, s.Tag, s.Account, tier, slotText, workers)
 	}
 	if len(pool.DoubleBooked) > 0 {
-		b.WriteString("\nDOUBLE-BOOKED (one seat, >1 live worker -- INVARIANT VIOLATION):\n")
+		b.WriteString("\nDOUBLE-BOOKED (session pool over cap -- INVARIANT VIOLATION):\n")
 		for _, d := range pool.DoubleBooked {
 			fmt.Fprintf(&b, "  %s: %s\n", d.Tag, strings.Join(d.Workers, ", "))
 		}

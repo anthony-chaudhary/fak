@@ -510,16 +510,18 @@ func TestAllocateWaveGrantsDistinctPoolsAndUnderfills(t *testing.T) {
 		WorkKind:          "engineering",
 		AllowTierFallback: true,
 	}, DefaultPolicy())
-	if !wave.OK || wave.Requested != 3 || wave.Granted != 2 || wave.Shortfall != 1 ||
-		wave.DistinctPools != 2 || wave.Size != 2 || wave.WaveID == "" {
-		t.Fatalf("wave = %+v, want 2 distinct granted pools and 1 shortfall", wave)
+	if !wave.OK || wave.Requested != 3 || wave.Granted != 3 || wave.Shortfall != 0 ||
+		wave.DistinctPools != 1 || wave.Size != 3 || wave.WaveID == "" {
+		t.Fatalf("wave = %+v, want 3 session slots on the one fresh tier-1 pool", wave)
 	}
-	if len(wave.Lanes) != 2 || wave.Lanes[0].Rank != 0 || wave.Lanes[1].Rank != 1 ||
-		wave.Lanes[0].WaveID != wave.WaveID || wave.Lanes[1].Size != 2 {
+	if len(wave.Lanes) != 3 || wave.Lanes[0].Rank != 0 || wave.Lanes[1].Rank != 1 ||
+		wave.Lanes[2].Rank != 2 || wave.Lanes[0].WaveID != wave.WaveID || wave.Lanes[2].Size != 3 {
 		t.Fatalf("lane membership = %+v, want rank-stamped shared wave", wave.Lanes)
 	}
-	if wave.Lanes[0].Pool == wave.Lanes[1].Pool {
-		t.Fatalf("wave reused one pool: %+v", wave.Lanes)
+	for i, lane := range wave.Lanes {
+		if lane.Pool != wave.Lanes[0].Pool || lane.SessionSlot != i+1 || lane.SessionCap != DefaultClaudeSessionsPerAccount {
+			t.Fatalf("lane %d = %+v, want repeated slots 1..3 on one Claude pool", i, lane)
+		}
 	}
 	for _, lane := range wave.Lanes {
 		if lane.Tag == "dup" || lane.Tag == "gem8" {
@@ -563,12 +565,12 @@ func TestSeatPoolBindingAndHeadroom(t *testing.T) {
 	pool := BuildSeatPool(rows, leases, "")
 
 	// routable seats: .claude (canonical), gem8, opencode-glm. dup is NOT a seat (one pool).
-	if pool.TotalSeats != 3 {
-		t.Errorf("total_seats = %d want 3 (dup collapsed)", pool.TotalSeats)
+	if pool.TotalSeats != 9 {
+		t.Errorf("total_seats = %d want 9 (two Claude pools x4 + one opencode slot; dup collapsed)", pool.TotalSeats)
 	}
 	// opencode-glm leased, .claude free, gem8 blocked.
-	if pool.LeasedSeats != 1 || pool.FreeSeats != 1 || pool.BlockedSeats != 1 {
-		t.Errorf("seat states leased/free/blocked = %d/%d/%d want 1/1/1",
+	if pool.LeasedSeats != 1 || pool.FreeSeats != 4 || pool.BlockedSeats != 4 {
+		t.Errorf("seat states leased/free/blocked = %d/%d/%d want 1/4/4",
 			pool.LeasedSeats, pool.FreeSeats, pool.BlockedSeats)
 	}
 	if pool.Depleted {
@@ -584,7 +586,8 @@ func TestSeatPoolBindingAndHeadroom(t *testing.T) {
 			glmSeat = &pool.Seats[i]
 		}
 	}
-	if glmSeat == nil || glmSeat.State != "leased" || len(glmSeat.Workers) != 1 {
+	if glmSeat == nil || glmSeat.State != "leased" || len(glmSeat.Workers) != 1 ||
+		glmSeat.SessionCap != 1 || glmSeat.FreeSlots != 0 || glmSeat.LeasedSlots != 1 {
 		t.Errorf("opencode-glm seat not leased correctly: %+v", glmSeat)
 	}
 }
