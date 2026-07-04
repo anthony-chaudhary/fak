@@ -5,7 +5,7 @@ description: "fak's code-slop scorecard grades the Go module on six deterministi
 
 # Code-slop scorecard
 
-<!-- code-slop-scorecard: 2026-07-03 · process: tools/code_slop_scorecard.py -->
+<!-- code-slop-scorecard: 2026-07-04 · process: tools/code_slop_scorecard.py -->
 
 > Regenerate: `python tools/code_slop_scorecard.py --markdown --stamp DATE > docs/CODE-SLOP-SCORECARD.md`
 > Verify snapshot freshness: `python tools/code_slop_scorecard.py --check-doc`
@@ -16,18 +16,18 @@ description: "fak's code-slop scorecard grades the Go module on six deterministi
 
 | Metric | Value |
 |---|---|
-| Slop-score | 56.4/100 (grade F) |
-| **Slop-debt (total HARD defects)** | **826** |
+| Slop-score | 74.0/100 (grade C) |
+| **Slop-debt (total HARD defects)** | **782** |
 | Soft signals (advisory) | 78 |
 
 ## Per-KPI (worst-first)
 
 | KPI | Score | Slop-debt | Detail |
 |---|---:|---:|---|
-| duplication | 0/100 | 810 | 810 duplicated block(s) (copy-pasted across 2+ sites) |
-| dead_code | 20/100 | 16 | 16 dead unexported symbol(s) |
+| duplication | 0/100 | 782 | 782 duplicated block(s) (copy-pasted across 2+ sites) |
+| dead_code | 100/100 | 0 | no dead unexported symbols |
 | comment_slop | 100/100 | 0 | no comment slop |
-| vacuous_tests | 100/100 | 0 | 9833 Test func(s), all assert |
+| vacuous_tests | 100/100 | 0 | 10179 Test func(s), all assert |
 | stub_masquerade | 100/100 | 0 | no exported stub-masquerade |
 | churn_bloat | 100/100 | 0 | no commits in range (skipped) |
 
@@ -54,6 +54,6 @@ description: "fak's code-slop scorecard grades the Go module on six deterministi
 
 > When `promotable` is yes: review the elapsed window for any false positive, then move the `stub_masquerade` finding from `soft` to `defects` and bump `KPI_WEIGHTS["stub_masquerade"]` in `tools/code_slop_scorecard.py` — the deliberate flip.
 
-> 826 unit(s) of slop-debt; score 56.4/100 (grade F); heaviest KPI: duplication (810 defect(s))
+> 782 unit(s) of slop-debt; score 74.0/100 (grade C); heaviest KPI: duplication (782 defect(s))
 
 > next: retire slop-debt worst-first (see corpus.breakdown + per-KPI defects): de-duplicate clones, delete dead unexported symbols, drop commented-out code + tautological doc comments, add assertions to vacuous tests; re-run to prove the drop

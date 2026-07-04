@@ -70,7 +70,7 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 	maxPerTick := fs.Int("max-per-tick", rwEnvInt("FAK_MAX_PER_TICK", 4), "max resumes launched per tick (env FAK_MAX_PER_TICK)")
 	maxAttempts := fs.Int("max-attempts", rwEnvInt("FAK_MAX_ATTEMPTS", resume.DefaultMaxResumeAttempts), "give-up cap on automatic resumes of one session (env FAK_MAX_ATTEMPTS)")
 	spacingSec := fs.Float64("spacing-sec", rwEnvFloat("FAK_LAUNCH_SPACING_SEC", 8), "seconds between spawns in one tick, so a burst does not trip the per-source 529 wall (0 = all at once; env FAK_LAUNCH_SPACING_SEC)")
-	probeMode := fs.String("probe", rwEnvStr("FAK_PROBE", "auto"), "registry refresh probe mode: auto|blocked|stale|all|none (auto = blocked on --live, none on dry-run; env FAK_PROBE)")
+	probeMode := fs.String("probe", envOrDefault("FAK_PROBE", "auto"), "registry refresh probe mode: auto|blocked|stale|all|none (auto = blocked on --live, none on dry-run; env FAK_PROBE)")
 	probeMinIntervalMin := fs.Int("probe-min-interval-min", rwEnvInt("FAK_PROBE_MIN_INTERVAL_MIN", 20), "min minutes between active probes of one account (env FAK_PROBE_MIN_INTERVAL_MIN)")
 	regDirFlag := fs.String("reg-dir", "", "registry dir holding resume_plan.json / resume_ledger.jsonl / sessions.json (default: $FLEET_REG_DIR, else host Fleet registry when present, else <repo>/tools/_registry)")
 	logDirFlag := fs.String("log-dir", "", "watchdog log dir (default: $FAK_WATCHDOG_LOG_DIR, else <repo>/tools/_watchdog)")
@@ -964,13 +964,6 @@ func rwEnvBool(name string) bool {
 		return true
 	}
 	return false
-}
-
-func rwEnvStr(name, def string) string {
-	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
-		return v
-	}
-	return def
 }
 
 func rwEnvFloat(name string, def float64) float64 {
