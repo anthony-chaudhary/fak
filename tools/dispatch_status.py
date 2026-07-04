@@ -29,6 +29,7 @@ target and host clean), 1 when something needs an operator's eye.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -54,6 +55,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch_preflight  # noqa: E402  (pid-sidecar identity probe)
 
 SCHEMA = "fleet-dispatch-status/1"
+LAB_READINESS_SCHEMA = "fak.lab_readiness/v1"
+LAB_READY_FOR_DEV_WORK = "READY_FOR_DEV_WORK"
+LAB_READINESS_STATUSES = {
+    LAB_READY_FOR_DEV_WORK,
+    "WAIT_PRIVATE_RECOVERY",
+    "GATEWAY_UNREACHABLE",
+    "AUTH_OR_CHANNEL_BLOCKED",
+    "INDETERMINATE",
+}
+LAB_READINESS_KEYS = {
+    "schema",
+    "machine_class",
+    "checked_at",
+    "status",
+    "next_action",
+    "evidence",
+    "admit_lab_dispatch",
+}
+_GENERIC_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_LAB_MARK_READY_COMMAND = "fak lab readiness --status READY_FOR_DEV_WORK --write-default --json"
+_LAB_MARK_WAIT_COMMAND = "fak lab readiness --status WAIT_PRIVATE_RECOVERY --write-default --json"
 # The guarded always-on tick (tools/register_issue_dispatch.ps1). The older
 # FleetDOSDispatchWatchdog keeps the un-gated kernel supervisor alive; this card
 # tracks the DoS-safe issue dispatcher, so it reports the guarded task.
@@ -80,7 +102,41 @@ _NOOP_BANNER_RE = re.compile(r"(?i)>\s*build\s*[·:]")
 # banner-only no-op counts as "produced nothing", not as output. See #1276.
 _STUB_LOG_MAX_BYTES = 512
 _BACKEND_STUB_LOOKBACK_MIN = 90
+_RUN_STATUS_LOOKBACK_MIN = 180
 _RID_RE = re.compile(r"^RID-[A-Z0-9]+$")
+_RUN_STATUS_START_KINDS = {"start"}
+_RUN_STATUS_TERMINAL_KINDS = {"end"}
+_RUN_STATUS_TERMINAL_STATUSES = {
+    "claimed_done",
+    "witnessed_done",
+    "failed",
+    "refused",
+    "cancelled",
+}
+_RESOLVE_TICK_SCHEMA = "fleet-resolve-ticks/1"
+_RESOLVE_TICK_FRESH_MIN = 90.0
+_UTILIZATION_SCHEMA = "fleet-utilization/1"
+
+# Per-lane low-yield witness (#2062). `silent_workers` only catches a worker that
+# produced NOTHING (a sub-floor log). It is blind to the costlier failure the fleet
+# self-audit found: a worker that runs 44-94 turns, writes a full log, and still
+# lands ZERO `Fixes #` commits — so `pick_lane` keeps re-seating that lane with no
+# feedback. This fold binds turns-spent to ancestry-closes per lane over a recent
+# window and flags a lane that burned >= the turn floor yet closed nothing on its
+# own tree. The floor sits just below the observed 44-turn low end so a genuinely
+# stuck lane surfaces while a short productive session does not. Informational
+# only: it adds a reason/row but never flips the card's `ok`.
+_LOW_YIELD_SCHEMA = "fleet-low-yield-lanes/1"
+_LOW_YIELD_TURNS_FLOOR = 40
+_LOW_YIELD_LOOKBACK_MIN = 180
+# One kernel-adjudicated turn emits a `fak-turn ...` trace line (cmd/fak/guard.go),
+# so counting those lines recovers a resolve log's turn count post-hoc.
+_FAK_TURN_RE = re.compile(r"^fak-turn\b")
+# The resolving-commit grammar, mirrored from tools/issue_closure_audit._RESOLVE_RE
+# (itself a mirror of internal/hooks/commit_issuelink.go) so "what closes an issue"
+# agrees across the author gate, the closure audit, and this witness.
+_LOW_YIELD_RESOLVE_RE = re.compile(
+    r"\b(?:close|fixe?|resolve)[sd]?\s+#(\d+)\b", re.IGNORECASE)
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -162,6 +218,386 @@ def merge_state(root: Path) -> dict[str, Any]:
     return out
 
 
+def _lab_readiness_default_path() -> Path:
+    env = os.environ.get("FAK_LAB_READINESS", "").strip()
+    if env:
+        return Path(env)
+    if os.name == "nt":
+        root = os.environ.get("APPDATA", "").strip()
+        if root:
+            return Path(root) / "fak" / "fleet" / "lab-readiness.json"
+        return Path.home() / "AppData" / "Roaming" / "fak" / "fleet" / "lab-readiness.json"
+    root = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    base = Path(root) if root else Path.home() / ".config"
+    return base / "fak" / "fleet" / "lab-readiness.json"
+
+
+def _lab_readiness_indeterminate(*, next_action: str, evidence: str,
+                                 error: str | None = None) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "schema": LAB_READINESS_SCHEMA,
+        "machine_class": "gpu-server",
+        "checked_at": None,
+        "status": "INDETERMINATE",
+        "next_action": next_action,
+        "evidence": evidence,
+        "admit_lab_dispatch": False,
+        "present": False,
+        "valid": error is None,
+        "commands": _lab_readiness_commands(),
+    }
+    if error:
+        out["_error"] = error
+    return out
+
+
+def _lab_readiness_problem(doc: dict[str, Any]) -> str | None:
+    unknown = sorted(set(doc) - LAB_READINESS_KEYS)
+    if unknown:
+        return "unknown field(s): " + ", ".join(unknown[:6])
+    if doc.get("schema") not in (None, "", LAB_READINESS_SCHEMA):
+        return f"unsupported schema {doc.get('schema')!r}"
+    status = str(doc.get("status") or "")
+    if status not in LAB_READINESS_STATUSES:
+        return f"unknown status {status!r}"
+    for key in ("machine_class", "next_action", "evidence"):
+        value = str(doc.get(key) or "")
+        if not _GENERIC_TOKEN_RE.match(value):
+            return f"{key} must be a generic token-like value"
+    return None
+
+
+def _lab_readiness_commands() -> dict[str, str]:
+    return {
+        "mark_ready": _LAB_MARK_READY_COMMAND,
+        "mark_wait_private_recovery": _LAB_MARK_WAIT_COMMAND,
+    }
+
+
+def read_lab_readiness(path: Path | None = None) -> dict[str, Any]:
+    """Read the public fak.lab_readiness/v1 dispatch gate.
+
+    This intentionally does not run dgxbridge or print the source path. The private
+    bridge publishes a scrubbed record; the status card only consumes that public
+    yes/no gate and fails closed when it is absent or malformed.
+    """
+    p = path or _lab_readiness_default_path()
+    try:
+        doc = json.loads(p.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return _lab_readiness_indeterminate(
+            next_action="publish-lab-readiness",
+            evidence="no-readiness-record",
+            error="missing readiness record",
+        )
+    except (OSError, ValueError) as exc:
+        return _lab_readiness_indeterminate(
+            next_action="fix-lab-readiness-record",
+            evidence="invalid-readiness-record",
+            error=str(exc),
+        )
+    if not isinstance(doc, dict):
+        return _lab_readiness_indeterminate(
+            next_action="fix-lab-readiness-record",
+            evidence="invalid-readiness-record",
+            error="readiness record is not an object",
+        )
+    problem = _lab_readiness_problem(doc)
+    if problem:
+        return _lab_readiness_indeterminate(
+            next_action="fix-lab-readiness-record",
+            evidence="invalid-readiness-record",
+            error=problem,
+        )
+    status = str(doc.get("status") or "INDETERMINATE")
+    return {
+        "schema": LAB_READINESS_SCHEMA,
+        "machine_class": str(doc.get("machine_class") or "gpu-server"),
+        "checked_at": doc.get("checked_at"),
+        "status": status,
+        "next_action": str(doc.get("next_action") or ""),
+        "evidence": str(doc.get("evidence") or ""),
+        "admit_lab_dispatch": status == LAB_READY_FOR_DEV_WORK,
+        "present": True,
+        "valid": True,
+        "commands": _lab_readiness_commands(),
+    }
+
+
+def _resolve_tick_next_action(row: dict[str, Any]) -> str:
+    gate = row.get("launch_gate") or {}
+    blockers = gate.get("blockers") or []
+    if blockers:
+        action = blockers[0].get("next_action")
+        if action:
+            return str(action)
+    verdict = str(row.get("verdict") or "")
+    if verdict == "MULTI_LANE_SCOPE":
+        return "split-issue-or-dispatch-under-covering-lane"
+    if verdict == "ISSUE_CONTRACT_HOLD":
+        return "backfill-issue-contract"
+    if verdict == "LANE_BUSY":
+        return "wait-for-lane-lease"
+    if verdict == "SELF_MODIFY_HOLD":
+        return "enable-worktree-isolated-resolver-or-route-non-self-source-lane"
+    if verdict.startswith("REFUSE_NO_ACCOUNT"):
+        return "wait-for-free-account"
+    return ""
+
+
+def _resolve_tick_rank(row: dict[str, Any]) -> tuple[int, float]:
+    """Prefer the most actionable fresh planner row over the newest noisy row."""
+    age = float(row.get("age_min") or 0.0)
+    gate = row.get("launch_gate") or {}
+    action = str(row.get("action") or "")
+    verdict = str(row.get("verdict") or "")
+    if (row.get("fresh") and gate.get("ready") is True
+            and action in ("would_spawn", "would_repair")):
+        return (0, age)
+    if row.get("fresh") and action in ("spawned", "repair_spawned", "repair_in_flight"):
+        return (1, age)
+    if row.get("fresh") and gate.get("ready") is False:
+        return (2, age)
+    if row.get("fresh") and verdict.startswith("REFUSE_"):
+        return (4, age)
+    if row.get("fresh"):
+        return (3, age)
+    return (5, age)
+
+
+def _resolve_tick_live_command(row: dict[str, Any]) -> list[str]:
+    if not row or (row.get("launch_gate") or {}).get("ready") is not True:
+        return []
+    if row.get("action") not in ("would_spawn", "would_repair"):
+        return []
+    backend = row.get("backend") or "claude"
+    max_workers = row.get("max_workers")
+    cmd = [
+        "python", "tools\\issue_resolve_dispatch.py",
+        "--backend", str(backend),
+    ]
+    if max_workers is not None:
+        cmd += ["--max-workers", str(max_workers)]
+    work_kind = row.get("work_kind")
+    if work_kind:
+        cmd += ["--work-kind", str(work_kind)]
+    if row.get("action") == "would_spawn":
+        lane = row.get("lane")
+        issue = row.get("target_issue")
+        if not lane or issue is None:
+            return []
+        cmd += ["--lane", str(lane), "--issue", str(issue)]
+    if row.get("action") == "would_repair":
+        if row.get("contract_scan") is not None:
+            cmd += ["--contract-scan", str(row.get("contract_scan"))]
+        if row.get("repair_batch") is not None:
+            cmd += ["--repair-batch", str(row.get("repair_batch"))]
+    if row.get("force"):
+        cmd.append("--force")
+    cmd += ["--live", "--json"]
+    return cmd
+
+
+def read_resolve_ticks(root: Path, *, now_ts: float | None = None,
+                       fresh_min: float = _RESOLVE_TICK_FRESH_MIN) -> dict[str, Any]:
+    """Read last issue-resolver tick artifacts without re-running the planner.
+
+    These files are evidence of the last scheduler/manual tick, not launch
+    authorization. Freshness is explicit so dashboards can distinguish a current
+    hold from a stale historical one.
+    """
+    runs = root / RUNS_DIRNAME
+    now = time.time() if now_ts is None else now_ts
+    rows: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    for path in sorted(runs.glob("last-resolve-tick-*.json")):
+        try:
+            st = path.stat()
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(doc, dict):
+                raise ValueError("tick is not an object")
+        except (OSError, ValueError) as exc:
+            errors.append({"path": path.name, "error": str(exc)})
+            continue
+        age_min = max(0.0, (now - st.st_mtime) / 60.0)
+        gate = doc.get("launch_gate") if isinstance(doc.get("launch_gate"), dict) else {}
+        blockers = gate.get("blockers") if isinstance(gate.get("blockers"), list) else []
+        row = {
+            "path": path.name,
+            "backend": doc.get("backend") or path.stem.replace("last-resolve-tick-", ""),
+            "verdict": doc.get("verdict"),
+            "action": doc.get("action"),
+            "ok": doc.get("ok"),
+            "live": doc.get("live"),
+            "max_workers": doc.get("max_workers"),
+            "work_kind": doc.get("work_kind"),
+            "force": bool(doc.get("force")),
+            "contract_scan": doc.get("contract_scan"),
+            "repair_batch": doc.get("repair_batch"),
+            "lane": doc.get("lane"),
+            "target_issue": doc.get("target_issue"),
+            "reason": doc.get("reason"),
+            "contract_repair": doc.get("contract_repair") or {},
+            "safe_lanes_busy": doc.get("safe_lanes_busy") or [],
+            "self_modify_held": doc.get("self_modify_held") or [],
+            "held_lanes": doc.get("held_lanes") or [],
+            "launch_gate": {
+                "ready": gate.get("ready"),
+                "blockers": [
+                    {
+                        "code": b.get("code"),
+                        "reason": b.get("reason"),
+                        "next_action": b.get("next_action"),
+                    }
+                    for b in blockers[:4] if isinstance(b, dict)
+                ],
+            } if gate else {},
+            "next_action": _resolve_tick_next_action(doc),
+            "age_min": age_min,
+            "fresh": age_min <= fresh_min,
+        }
+        live_command = _resolve_tick_live_command(row)
+        if live_command:
+            row["live_command"] = live_command
+            row["live_command_text"] = " ".join(live_command)
+        rows.append(row)
+    rows.sort(key=lambda r: float(r.get("age_min") or 0.0))
+    selected = sorted(rows, key=_resolve_tick_rank)[0] if rows else None
+    return {
+        "schema": _RESOLVE_TICK_SCHEMA,
+        "fresh_min": fresh_min,
+        "count": len(rows),
+        "fresh_count": sum(1 for r in rows if r.get("fresh")),
+        "latest": rows[0] if rows else None,
+        "selected": selected,
+        "ticks": rows,
+        "errors": errors,
+    }
+
+
+def _utilization_blocker(code: str, scope: str, next_action: str,
+                         detail: str = "") -> dict[str, Any]:
+    out = {"code": code, "scope": scope, "next_action": next_action}
+    if detail:
+        out["detail"] = detail
+    return out
+
+
+def utilization_state(*, live: int | None, cap: int | None, host_safe: bool,
+                      pre_verdict: str | None, resolver: dict[str, Any],
+                      lab_readiness: dict[str, Any],
+                      weekly_cap: dict[str, Any] | None = None,
+                      merge: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Fold capacity + planner/lab admission into one utilization signal.
+
+    ``dispatcher.verdict`` says whether the local host may grow. This says why
+    available slots are, or are not, turning into useful background work.
+    """
+    headroom: int | None = None
+    if live is not None and cap is not None:
+        headroom = max(0, int(cap) - int(live))
+    blockers: list[dict[str, Any]] = []
+    next_actions: list[str] = []
+    launch_command: list[str] = []
+    launch_command_text = ""
+    state = "UNKNOWN"
+
+    def add_blocker(code: str, scope: str, action: str, detail: str = "") -> None:
+        blockers.append(_utilization_blocker(code, scope, action, detail))
+        if action and action not in next_actions:
+            next_actions.append(action)
+
+    if headroom is None:
+        state = "CAPACITY_UNKNOWN"
+        add_blocker("CAPACITY_UNKNOWN", "host", "inspect-dispatch-preflight")
+    elif headroom <= 0:
+        state = "SATURATED"
+    elif not host_safe:
+        state = "HOST_BLOCKED"
+        add_blocker("HOST_FLAGGED", "host", "inspect-or-reap-host-process")
+    elif pre_verdict == "REFUSE_NO_ACCOUNT":
+        state = "ACCOUNT_BLOCKED"
+        add_blocker("NO_FREE_ACCOUNT", "account", "wait-for-free-account")
+    elif pre_verdict == "REFUSE_INSPECT":
+        state = "INSPECT"
+        add_blocker("PREFLIGHT_INSPECT", "host", "inspect-dispatch-preflight")
+    elif weekly_cap:
+        state = "ACCOUNT_CAPPED"
+        add_blocker("WEEKLY_CAPPED", "account", "wait-for-weekly-cap-reset")
+    elif (merge or {}).get("merge_in_progress"):
+        state = "EDIT_HELD"
+        add_blocker("MERGE_IN_PROGRESS", "git",
+                    (merge or {}).get("next_action") or "wait-for-merge-head-clear")
+    else:
+        latest = (resolver or {}).get("selected") or (resolver or {}).get("latest") or {}
+        gate = latest.get("launch_gate") or {}
+        if not latest:
+            state = "HEADROOM_UNASSESSED"
+            add_blocker("NO_RECENT_PLANNER_TICK", "planner",
+                        "run-issue-resolve-dispatch-dry-run")
+        elif not latest.get("fresh"):
+            state = "HEADROOM_STALE_PLAN"
+            add_blocker("STALE_PLANNER_TICK", "planner",
+                        "run-issue-resolve-dispatch-dry-run",
+                        f"age={_age_text(latest.get('age_min'))}")
+        elif (pre_verdict == "SPAWN_OK"
+              and str(latest.get("verdict") or "")
+              in ("REFUSE_AT_CAP", "REFUSE_NO_ACCOUNT", "REFUSE_INSPECT")):
+            state = "HEADROOM_STALE_PLAN"
+            add_blocker(
+                "STALE_PLANNER_REFUSAL", "planner",
+                "run-issue-resolve-dispatch-dry-run",
+                f"last={latest.get('verdict')} current={pre_verdict}")
+        elif gate.get("ready") is True and latest.get("action") in ("would_spawn", "would_repair"):
+            state = "HEADROOM_LAUNCH_READY"
+            action = "approve-live-launch-or-enable-always-on-issue-dispatch"
+            if latest.get("action") == "would_repair":
+                state = "HEADROOM_REPAIR_READY"
+                action = "approve-live-repair-or-enable-always-on-issue-dispatch"
+            if action not in next_actions:
+                next_actions.append(action)
+            launch_command = list(latest.get("live_command") or [])
+            launch_command_text = str(latest.get("live_command_text") or "")
+        elif latest.get("action") in ("spawned", "repair_spawned"):
+            state = "WORKER_STARTING"
+        elif latest.get("action") == "repair_in_flight":
+            state = "REPAIR_IN_FLIGHT"
+        else:
+            state = "HEADROOM_HELD"
+            blockers_in_gate = gate.get("blockers") or []
+            if blockers_in_gate:
+                for b in blockers_in_gate[:4]:
+                    add_blocker(str(b.get("code") or latest.get("verdict") or "PLANNER_HELD"),
+                                "planner",
+                                str(b.get("next_action")
+                                    or latest.get("next_action")
+                                    or "inspect-last-resolve-tick"),
+                                str(b.get("reason") or ""))
+            else:
+                add_blocker(str(latest.get("verdict") or "PLANNER_HELD"),
+                            "planner",
+                            str(latest.get("next_action") or "inspect-last-resolve-tick"))
+
+    if (lab_readiness or {}).get("schema") and not lab_readiness.get("admit_lab_dispatch"):
+        lab_commands = lab_readiness.get("commands") or {}
+        add_blocker("LAB_READINESS_HELD", "lab",
+                    str(lab_readiness.get("next_action") or "publish-lab-readiness"),
+                    str(lab_commands.get("mark_ready")
+                        or lab_readiness.get("status") or "INDETERMINATE"))
+
+    out = {
+        "schema": _UTILIZATION_SCHEMA,
+        "state": state,
+        "worker_slots": {"live": live, "cap": cap, "headroom": headroom},
+        "next_actions": next_actions,
+        "blockers": blockers,
+    }
+    if launch_command:
+        out["launch_command"] = launch_command
+        out["launch_command_text"] = launch_command_text or " ".join(launch_command)
+    return out
+
+
 def _string_list(v: Any) -> list[str]:
     if isinstance(v, list):
         return [str(x) for x in v if str(x).strip()]
@@ -228,6 +664,39 @@ def _lease_expired(rec: dict[str, Any], now_ts: float) -> bool:
     return now_ts >= active + ttl
 
 
+def _session_expired(desc: dict[str, Any], now_ts: float) -> bool:
+    ttl = _int(desc.get("ttl_seconds"), 0) or 0
+    if ttl <= 0:
+        return False
+    updated = _int(desc.get("updated_at"))
+    if updated is None:
+        return False
+    return now_ts >= updated + ttl
+
+
+def _lease_liveness(rec: dict[str, Any], sessions: dict[str, dict[str, Any]],
+                    now_ts: float) -> tuple[str, bool, str]:
+    session_id = str(rec.get("session_id") or "").strip()
+    if not session_id:
+        return ("peer-unknown", False,
+                "lease carries no session_id; absence is not proof of death")
+    desc = sessions.get(session_id)
+    if not isinstance(desc, dict):
+        return ("peer-unknown", False,
+                f"no session descriptor for session-{session_id}; absence is not proof of death")
+    state = str(desc.get("pcb_state") or "").strip()
+    updated = _int(desc.get("updated_at"))
+    ttl = _int(desc.get("ttl_seconds"), 0) or 0
+    if state.upper() == "STOPPED":
+        return ("peer-dead", True,
+                f"session {session_id} published STOPPED at {updated}")
+    if _session_expired(desc, now_ts):
+        return ("peer-dead", True,
+                f"session {session_id} heartbeat lapsed: now >= {updated}+{ttl}")
+    return ("peer-live", False,
+            f"session {session_id} heartbeating state={state or '?'} updated_at={updated} ttl={ttl}")
+
+
 def _lease_lane(lease_id: str) -> str:
     lease_id = str(lease_id or "").strip()
     if not lease_id.startswith("resolve-"):
@@ -279,7 +748,8 @@ def _backlog_candidates(backlog: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def summarize_leases(records: list[dict[str, Any]], backlog: dict[str, Any],
-                     *, now_ts: float | None = None) -> dict[str, Any]:
+                     *, sessions: dict[str, dict[str, Any]] | None = None,
+                     now_ts: float | None = None) -> dict[str, Any]:
     """Classify refs/fak/locks records for the status card.
 
     Active leases block a candidate only when their tree overlaps a currently
@@ -287,6 +757,7 @@ def summarize_leases(records: list[dict[str, Any]], backlog: dict[str, Any],
     but never block a candidate.
     """
     now_ts = time.time() if now_ts is None else now_ts
+    sessions = sessions or {}
     backlog = backlog if isinstance(backlog, dict) else {}
     lanes = backlog.get("lanes") or {}
     candidate_source_available = "_skipped" not in backlog and not ("_error" in backlog and not lanes)
@@ -307,16 +778,22 @@ def summarize_leases(records: list[dict[str, Any]], backlog: dict[str, Any],
         expires_in = None
         if ttl > 0 and active_unix is not None:
             expires_in = int(active_unix + ttl - now_ts)
+        session_id = str(rec.get("session_id") or "").strip()
+        liveness, reclaimable, liveness_evidence = _lease_liveness(rec, sessions, now_ts)
         row = {
             "id": lease_id,
             "lane": _lease_lane(lease_id),
             "holder": rec.get("holder"),
+            "session_id": session_id or None,
             "tree": tree,
             "age_seconds": age_seconds,
             "age_min": round(age_seconds / 60, 1) if age_seconds is not None else None,
             "ttl_seconds": ttl,
             "expires_in_seconds": expires_in,
             "generation": rec.get("generation"),
+            "liveness": liveness,
+            "reclaimable": reclaimable,
+            "liveness_evidence": liveness_evidence,
         }
         if _lease_expired(rec, now_ts):
             row["status"] = "EXPIRED"
@@ -352,6 +829,11 @@ def summarize_leases(records: list[dict[str, Any]], backlog: dict[str, Any],
 
 
 def read_leaseref_records(root: Path) -> tuple[list[dict[str, Any]], str | None]:
+    records, _sessions, err = read_leaseref_records_and_sessions(root)
+    return records, err
+
+
+def read_leaseref_records_and_sessions(root: Path) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]], str | None]:
     try:
         proc = subprocess.run(
             ["git", "for-each-ref", "--format=%(refname)", _LEASEREF_PREFIX],
@@ -363,13 +845,13 @@ def read_leaseref_records(root: Path) -> tuple[list[dict[str, Any]], str | None]
         return [], (proc.stderr or proc.stdout or "git for-each-ref failed").strip()[-500:]
 
     records: list[dict[str, Any]] = []
+    sessions: dict[str, dict[str, Any]] = {}
     skipped = 0
     for ref in (proc.stdout or "").splitlines():
         ref = ref.strip()
         if not ref.startswith(_LEASEREF_PREFIX):
             continue
-        if ref[len(_LEASEREF_PREFIX):].startswith("session-"):
-            continue
+        name = ref[len(_LEASEREF_PREFIX):]
         try:
             blob = subprocess.run(
                 ["git", "cat-file", "blob", ref],
@@ -387,19 +869,23 @@ def read_leaseref_records(root: Path) -> tuple[list[dict[str, Any]], str | None]
             skipped += 1
             continue
         if isinstance(rec, dict):
-            rec.setdefault("id", ref[len(_LEASEREF_PREFIX):])
-            records.append(rec)
+            if name.startswith("session-"):
+                rec.setdefault("id", name[len("session-"):])
+                sessions[str(rec.get("id") or name[len("session-"):])] = rec
+            else:
+                rec.setdefault("id", name)
+                records.append(rec)
         else:
             skipped += 1
     if skipped:
         for rec in records:
             rec.setdefault("_skipped_records", skipped)
-    return records, None
+    return records, sessions, None
 
 
 def read_lease_state(root: Path, backlog: dict[str, Any],
                      *, now_ts: float | None = None) -> dict[str, Any]:
-    records, err = read_leaseref_records(root)
+    records, sessions, err = read_leaseref_records_and_sessions(root)
     if err:
         return {
             "source": "refs/fak/locks",
@@ -412,7 +898,7 @@ def read_lease_state(root: Path, backlog: dict[str, Any],
             "active": [],
             "expired": [],
         }
-    state = summarize_leases(records, backlog, now_ts=now_ts)
+    state = summarize_leases(records, backlog, sessions=sessions, now_ts=now_ts)
     skipped = max((_int(r.get("_skipped_records"), 0) or 0) for r in records) if records else 0
     if skipped:
         state["skipped_records"] = skipped
@@ -592,16 +1078,23 @@ def has_key_named(obj: Any, key: str) -> bool:
     return False
 
 
-def run_ids_from_loop_ledger(ledger: Path, *, limit: int = 6) -> list[str]:
+def run_ids_from_loop_ledger(
+    ledger: Path,
+    *,
+    limit: int = 6,
+    lookback_min: int | None = _RUN_STATUS_LOOKBACK_MIN,
+    now_ns: int | None = None,
+) -> list[str]:
     if limit <= 0 or not ledger.exists():
         return []
+    if lookback_min is not None and lookback_min > 0 and now_ns is None:
+        now_ns = time.time_ns()
     try:
         lines = ledger.read_text(encoding="utf-8").splitlines()
     except OSError:
         return []
-    out: list[str] = []
-    seen: set[str] = set()
-    for line in reversed(lines):
+    runs: dict[str, dict[str, Any]] = {}
+    for idx, line in enumerate(lines):
         try:
             row = json.loads(line)
         except ValueError:
@@ -610,9 +1103,40 @@ def run_ids_from_loop_ledger(ledger: Path, *, limit: int = 6) -> list[str]:
         run_id = str(row.get("run_id") or "")
         if not loop_id.startswith("issue-resolve-") or not _RID_RE.fullmatch(run_id):
             continue
-        if run_id in seen:
+        state = runs.setdefault(run_id, {
+            "loop_id": loop_id,
+            "started": False,
+            "last_index": idx,
+            "last_kind": "",
+            "last_status": "",
+            "last_ts_unix_nano": None,
+        })
+        kind = str(row.get("kind") or "").strip().lower()
+        status = str(row.get("status") or "").strip().lower()
+        state["loop_id"] = loop_id
+        state["last_index"] = idx
+        state["last_kind"] = kind
+        state["last_status"] = status
+        ts = _int(row.get("ts_unix_nano"))
+        if ts is not None:
+            state["last_ts_unix_nano"] = ts
+        if kind in _RUN_STATUS_START_KINDS or status == "running":
+            state["started"] = True
+
+    out: list[str] = []
+    for run_id, state in sorted(
+            runs.items(), key=lambda kv: int(kv[1].get("last_index") or 0),
+            reverse=True):
+        if not state.get("started"):
             continue
-        seen.add(run_id)
+        if state.get("last_kind") in _RUN_STATUS_TERMINAL_KINDS:
+            continue
+        if state.get("last_status") in _RUN_STATUS_TERMINAL_STATUSES:
+            continue
+        ts = _int(state.get("last_ts_unix_nano"))
+        if ts is not None and now_ns is not None and lookback_min is not None and lookback_min > 0:
+            if now_ns - ts > lookback_min * 60 * 1_000_000_000:
+                continue
         out.append(run_id)
         if len(out) >= limit:
             break
@@ -712,6 +1236,135 @@ def silent_workers(
                     "pid": pid, "size": size, "kind": "empty" if size == 0 else "stub"})
     out.sort(key=lambda r: r["stamp"], reverse=True)
     return out
+
+
+def _log_turn_count(log: Path) -> int:
+    """Turns a ``resolve-*.log`` recorded: one per ``fak-turn ...`` trace line the
+    guard emits per kernel-adjudicated turn. Best-effort — an unreadable log is 0."""
+    try:
+        text = log.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return 0
+    return sum(1 for ln in text.splitlines() if _FAK_TURN_RE.match(ln))
+
+
+def count_lane_ancestry_closes(root: Path, tree: list[str], *,
+                               since_iso: str) -> int | None:
+    """Count in-window resolving commits touching ``tree`` — the ancestry-closes a
+    lane's recent worker sessions actually landed. A resolving commit is one whose
+    subject/body matches the repo's ``close|fix|resolve #N`` grammar AND whose diff
+    touched the lane's tree, committed at/after ``since_iso``. Returns ``None`` when
+    the tree is unknown or git can't answer, so the caller never flips a lane
+    LOW_YIELD on a join it could not make (fail-open, like ``silent_workers`` without
+    a liveness oracle)."""
+    pathspecs = _clean_tree(tree)
+    if not pathspecs:
+        return None
+    cmd = ["git", "log", f"--since={since_iso}", "--no-merges",
+           "--pretty=format:%x1e%s%n%b", "--", *pathspecs]
+    try:
+        proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=30,
+                              creationflags=_win_creationflags())
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    # \x1e (record separator) prefixes each commit's subject+body; count records
+    # whose message resolves an issue.
+    records = (proc.stdout or "").split("\x1e")
+    return sum(1 for rec in records
+               if rec.strip() and _LOW_YIELD_RESOLVE_RE.search(rec))
+
+
+def low_yield_lanes(
+    runs_dir: Path,
+    *,
+    closes_counter: Any,
+    turns_floor: int = _LOW_YIELD_TURNS_FLOOR,
+    lookback_min: int = _LOW_YIELD_LOOKBACK_MIN,
+    now_ts: float | None = None,
+    lane_trees: dict[str, list[str]] | None = None,
+    turns_of_log: Any | None = None,
+) -> dict[str, Any]:
+    """Bind turns-spent to ancestry-closes per lane over the recent window (#2062).
+
+    For each ``resolve-*.log`` whose mtime is within ``lookback_min``, derive its
+    lane (spawn-header ``lane=``) and turn count (``fak-turn`` trace lines) and roll
+    them up per lane. A lane is a LOW_YIELD candidate when its recent sessions spent
+    ``>= turns_floor`` turns; for a candidate whose tree is known, ``closes_counter``
+    returns the in-window ancestry-closes touching that tree, and the lane is flagged
+    ``LOW_YIELD`` when that count is exactly 0 — turns burned, nothing closed. Every
+    other lane (below floor, tree unknown, or with closes) is ``OK``. This never
+    flips the card's ``ok``; it is the per-session/per-lane feedback ``pick_lane``
+    lacked, so a re-seated low-yield lane is no longer invisible.
+
+    The tree is resolved from ``lane_trees`` (the router's lane→tree map, passed by
+    ``collect``) with the worker's ``.lease-tree.json`` sidecar as a fallback; a lane
+    with neither is reported with ``tree_known=False`` and never flagged, so the
+    witness never fabricates a low-yield verdict it cannot substantiate. Pure given
+    ``closes_counter``/``turns_of_log``; git lives only in the default counter.
+    """
+    empty = {
+        "schema": _LOW_YIELD_SCHEMA,
+        "turns_floor": turns_floor,
+        "lookback_min": lookback_min,
+        "lanes": [],
+        "low_yield_count": 0,
+    }
+    if not runs_dir.is_dir():
+        return empty
+    now_ts = time.time() if now_ts is None else now_ts
+    turns_of = turns_of_log or _log_turn_count
+    lane_trees = lane_trees or {}
+    horizon = now_ts - lookback_min * 60
+    by_lane: dict[str, dict[str, Any]] = {}
+    for log in runs_dir.glob("resolve-*.log"):
+        if not _RESOLVE_LOG_RE.search(log.name):
+            continue
+        try:
+            if log.stat().st_mtime < horizon:
+                continue
+        except OSError:
+            continue
+        lane = _spawn_lane(log)
+        if not lane:
+            continue
+        turns = turns_of(log)
+        row = by_lane.setdefault(lane, {
+            "lane": lane, "sessions": 0, "turns": 0, "max_session_turns": 0,
+            "tree": [], "evidence_logs": []})
+        row["sessions"] += 1
+        row["turns"] += turns
+        row["max_session_turns"] = max(row["max_session_turns"], turns)
+        for t in _clean_tree(_read_worker_tree(log.with_suffix(""))):
+            if t not in row["tree"]:
+                row["tree"].append(t)
+        if len(row["evidence_logs"]) < 5:
+            row["evidence_logs"].append(log.name)
+
+    lanes_out: list[dict[str, Any]] = []
+    for lane, row in by_lane.items():
+        tree = _clean_tree(lane_trees.get(lane)) or row["tree"]
+        row["tree"] = tree
+        row["tree_known"] = bool(tree)
+        candidate = row["turns"] >= turns_floor
+        # Only pay the git join for a candidate lane with a tree to join on — a
+        # below-floor lane is never LOW_YIELD regardless of closes.
+        closes = closes_counter(lane, tree) if (candidate and tree) else None
+        row["closes"] = closes
+        row["verdict"] = "LOW_YIELD" if (candidate and closes == 0) else "OK"
+        lanes_out.append(row)
+
+    lanes_out.sort(key=lambda r: (r["verdict"] != "LOW_YIELD",
+                                  -int(r["turns"]), str(r["lane"])))
+    return {
+        "schema": _LOW_YIELD_SCHEMA,
+        "turns_floor": turns_floor,
+        "lookback_min": lookback_min,
+        "lanes": lanes_out,
+        "low_yield_count": sum(1 for r in lanes_out if r["verdict"] == "LOW_YIELD"),
+    }
 
 
 def watchdog_installed() -> dict[str, Any]:
@@ -1093,6 +1746,23 @@ def _auth_failed_seat_action(seat_inventory: dict[str, Any]) -> str:
     )
 
 
+def _double_booked_seat_action(seat_inventory: dict[str, Any]) -> str:
+    rows = seat_inventory.get("double_booked") or []
+    labels: list[str] = []
+    for row in rows:
+        tag = str(row.get("tag") or row.get("seat") or "?")
+        workers = row.get("workers") or []
+        cap = _int(row.get("session_cap"), 1) or 1
+        labels.append(f"{tag}:{len(workers)}/{cap}")
+    if not labels:
+        return ""
+    return (
+        f"double_booked={len(rows)} [{_limited_seat_labels(labels)}]; "
+        "next action: let one worker finish or reap a dead/stale worker before "
+        "launching more on that seat"
+    )
+
+
 def _seat_inventory_summary_line(seat_inventory: dict[str, Any]) -> str:
     if not seat_inventory.get("schema"):
         return ""
@@ -1102,10 +1772,45 @@ def _seat_inventory_summary_line(seat_inventory: dict[str, Any]) -> str:
         f"available={by_state.get('available', 0)} busy={by_state.get('busy', 0)} "
         f"cooling={by_state.get('cooling', 0)} unavailable={by_state.get('unavailable', 0)}"
     )
+    free = seat_inventory.get("free_seats")
+    leased = seat_inventory.get("leased_seats")
+    if free is not None or leased is not None:
+        line += f"; slots free={free} leased={leased}"
+    unattributed = _int(seat_inventory.get("unattributed_live"), 0)
+    if unattributed:
+        line += f"; unattributed_live={unattributed}"
+    double_booked_action = _double_booked_seat_action(seat_inventory)
+    if double_booked_action:
+        line += f"; {double_booked_action}"
     auth_action = _auth_failed_seat_action(seat_inventory)
     if auth_action:
         line += f"; {auth_action}"
     return line
+
+
+def annotate_seat_inventory_from_preflight(seat_inventory: dict[str, Any],
+                                           pre: dict[str, Any]) -> dict[str, Any]:
+    """Surface conservative preflight accounting on the status card.
+
+    ``fleet_accounts.seat_pool`` can only mark a pool busy when a live worker has an
+    ``.account`` sidecar. Preflight also sees product-scoped live workers; when that
+    count exceeds sidecar leases, it annotates ``seat.unattributed_live``. Carry that
+    signal into the operator inventory without fabricating per-account bindings.
+    """
+    seat = (pre or {}).get("seat") or {}
+    missing = _int(seat.get("unattributed_live"), 0) or 0
+    if missing <= 0 or not seat_inventory.get("schema"):
+        return seat_inventory
+    out = dict(seat_inventory)
+    out["unattributed_live"] = missing
+    free = _int(out.get("free_seats"))
+    if free is not None:
+        out["free_seats"] = max(0, free - missing)
+    leased = _int(out.get("leased_seats"), 0) or 0
+    out["leased_seats"] = max(leased, leased + missing)
+    if _int(out.get("free_seats"), 0) == 0:
+        out["depleted"] = True
+    return out
 
 
 def _github_rate_limit_error(*docs: dict[str, Any]) -> str:
@@ -1171,15 +1876,32 @@ def _dispatch_limiter_terms(limiter: dict[str, Any]) -> str:
 
 def collect(root: Path, *, max_workers: int, fast: bool,
             closure_commits: int) -> dict[str, Any]:
-    pre = run_json([_py(), str(root / "tools" / "dispatch_preflight.py"),
-                    "--json", "--max-workers", str(max_workers)], root, timeout=120)
-    sup = run_json([_py(), str(root / "tools" / "dos_supervisor_status.py"),
-                    "--json"], root, timeout=90)
-    wd = watchdog_installed()
-
-    backlog: dict[str, Any] = {"_skipped": "fast"} if fast else run_json(
-        [_py(), str(root / "tools" / "issue_lane_router.py"), "--json"], root,
-        timeout=130)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        pre_f = pool.submit(
+            run_json,
+            [_py(), str(root / "tools" / "dispatch_preflight.py"),
+             "--json", "--max-workers", str(max_workers)],
+            root,
+            120,
+        )
+        sup_f = pool.submit(
+            run_json,
+            [_py(), str(root / "tools" / "dos_supervisor_status.py"), "--json"],
+            root,
+            90,
+        )
+        wd_f = pool.submit(watchdog_installed)
+        backlog_f = None if fast else pool.submit(
+            run_json,
+            [_py(), str(root / "tools" / "issue_lane_router.py"), "--json"],
+            root,
+            130,
+        )
+        pre = pre_f.result()
+        sup = sup_f.result()
+        wd = wd_f.result()
+        backlog: dict[str, Any] = (
+            {"_skipped": "fast"} if fast else backlog_f.result())
     # Cover the WHOLE repo, not a slice. A closure audit whose --max-commits is
     # narrower than the repo's history can't bind a resolving commit older than the
     # window, so a long-since-shipped issue mis-buckets CLAIMED_CLOSED and the
@@ -1191,32 +1913,86 @@ def collect(root: Path, *, max_workers: int, fast: bool,
     total_commits = _total_commits(root)
     commit_window = max(closure_commits,
                         (total_commits + 200) if total_commits else closure_commits)
-    closure: dict[str, Any] = {"_skipped": "fast"} if fast else run_json(
-        [_py(), str(root / "tools" / "issue_closure_audit.py"), "--json",
-         "--max-commits", str(commit_window), "--issue-limit", "4000"],
-        root, timeout=300)
+    # Low-yield lanes (#2062): bind turns-spent to ancestry-closes per lane over the
+    # recent window. The ancestry-close join is git, so it lives here in the impure
+    # collect layer; the fold itself stays pure over this counter. Lane trees come
+    # from the router's lane→tree map (backlog), with each worker's lease-tree
+    # sidecar as fallback inside the fold.
+    low_yield_now = time.time()
+    low_yield_since_iso = time.strftime(
+        "%Y-%m-%dT%H:%M:%S +0000",
+        time.gmtime(low_yield_now - _LOW_YIELD_LOOKBACK_MIN * 60))
+    lane_trees = {
+        str(ln): _clean_tree((info or {}).get("tree"))
+        for ln, info in (
+            (backlog.get("lanes") or {}) if isinstance(backlog, dict) else {}).items()
+        if isinstance(info, dict) and _clean_tree((info or {}).get("tree"))
+    }
+
+    def _lane_closes(_lane: str, tree: list[str]) -> int | None:
+        return count_lane_ancestry_closes(root, tree, since_iso=low_yield_since_iso)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+        closure_f = None if fast else pool.submit(
+            run_json,
+            [_py(), str(root / "tools" / "issue_closure_audit.py"), "--json",
+             "--max-commits", str(commit_window), "--issue-limit", "4000"],
+            root,
+            300,
+        )
+        throughput_f = None if fast else pool.submit(
+            run_json,
+            [_py(), str(root / "tools" / "dispatch_throughput.py"), "--json"],
+            root,
+            140,
+            set(range(0, 16)),
+        )
+        silent_f = pool.submit(silent_workers, root / RUNS_DIRNAME)
+        weekly_cap_f = pool.submit(
+            read_active_weekly_cap,
+            root / RUNS_DIRNAME,
+            (pre.get("account") or {}).get("tag"),
+        )
+        backend_health_f = pool.submit(read_backend_health, root / RUNS_DIRNAME)
+        backend_stub_rate_f = pool.submit(backend_stub_rates, root / RUNS_DIRNAME)
+        hook_failures_f = pool.submit(backend_hook_failures, root / RUNS_DIRNAME)
+        guard_f = pool.submit(guard_coverage, root / RUNS_DIRNAME)
+        run_status_f = pool.submit(read_run_status_digests, root)
+        merge_f = pool.submit(merge_state, root)
+        leases_f = pool.submit(read_lease_state, root, backlog)
+        seat_inventory_f = pool.submit(read_seat_inventory, root)
+        lab_readiness_f = pool.submit(read_lab_readiness)
+        resolve_ticks_f = pool.submit(read_resolve_ticks, root)
+        low_yield_f = pool.submit(
+            low_yield_lanes, root / RUNS_DIRNAME,
+            closes_counter=_lane_closes, lane_trees=lane_trees, now_ts=low_yield_now)
+
+        closure: dict[str, Any] = (
+            {"_skipped": "fast"} if fast else closure_f.result())
     # The RATE fold (closed/hour vs target) — the observable the loop's goal is
     # actually stated in. gh-backed, so it degrades to n/a under --fast/timeout
     # exactly like backlog/closure; it never flips the dispatcher-health verdict
     # (a below-target rate is information, not a broken dispatcher).
-    throughput: dict[str, Any] = {"_skipped": "fast"} if fast else run_json(
-        [_py(), str(root / "tools" / "dispatch_throughput.py"), "--json"],
-        root, timeout=140, ok_codes=set(range(0, 16)))
+        throughput: dict[str, Any] = (
+            {"_skipped": "fast"} if fast else throughput_f.result())
 
-    # Pure-local, always run (no gh/dos): which spawned workers exited producing
-    # nothing. Cheap enough that --fast keeps it.
-    silent = silent_workers(root / RUNS_DIRNAME)
-    weekly_cap = read_active_weekly_cap(root / RUNS_DIRNAME,
-                                        (pre.get("account") or {}).get("tag"))
-    backend_health = read_backend_health(root / RUNS_DIRNAME)
-    backend_stub_rate = backend_stub_rates(root / RUNS_DIRNAME)
-    hook_failures = backend_hook_failures(root / RUNS_DIRNAME)
-    guard = guard_coverage(root / RUNS_DIRNAME)
-    run_status = read_run_status_digests(root)
-    merge = merge_state(root)
-    leases = read_lease_state(root, backlog)
-    worker_leases = worker_lease_crosscheck(root / RUNS_DIRNAME, leases)
-    seat_inventory = read_seat_inventory(root)
+        # Pure-local, always run (no gh/dos): which spawned workers exited producing
+        # nothing. Cheap enough that --fast keeps it.
+        silent = silent_f.result()
+        weekly_cap = weekly_cap_f.result()
+        backend_health = backend_health_f.result()
+        backend_stub_rate = backend_stub_rate_f.result()
+        hook_failures = hook_failures_f.result()
+        guard = guard_f.result()
+        run_status = run_status_f.result()
+        merge = merge_f.result()
+        leases = leases_f.result()
+        worker_leases = worker_lease_crosscheck(root / RUNS_DIRNAME, leases)
+        seat_inventory = annotate_seat_inventory_from_preflight(
+            seat_inventory_f.result(), pre)
+        lab_readiness = lab_readiness_f.result()
+        resolve_ticks = resolve_ticks_f.result()
+        low_yield = low_yield_f.result()
 
     return build_payload(root=root, pre=pre, sup=sup, wd=wd, backlog=backlog,
                          closure=closure, max_workers=max_workers, fast=fast,
@@ -1225,7 +2001,9 @@ def collect(root: Path, *, max_workers: int, fast: bool,
                          backend_stub_rate=backend_stub_rate,
                          hook_failures=hook_failures, guard=guard,
                          run_status=run_status, merge=merge, leases=leases,
-                         worker_leases=worker_leases, seat_inventory=seat_inventory)
+                         worker_leases=worker_leases, seat_inventory=seat_inventory,
+                         lab_readiness=lab_readiness, resolve_ticks=resolve_ticks,
+                         low_yield=low_yield)
 
 
 def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
@@ -1241,7 +2019,10 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                   merge: dict[str, Any] | None = None,
                   leases: dict[str, Any] | None = None,
                   worker_leases: dict[str, Any] | None = None,
-                  seat_inventory: dict[str, Any] | None = None) -> dict[str, Any]:
+                  seat_inventory: dict[str, Any] | None = None,
+                  lab_readiness: dict[str, Any] | None = None,
+                  resolve_ticks: dict[str, Any] | None = None,
+                  low_yield: dict[str, Any] | None = None) -> dict[str, Any]:
     # --- dispatcher liveness / capacity ---
     cap = _int(pre.get("cap"))
     live = _int(pre.get("live"))
@@ -1390,8 +2171,8 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         if digest.get("_error"):
             status_errors += 1
             continue
-        verdict = str(((digest.get("liveness") or {}).get("verdict")) or "UNKNOWN")
-        status_counts[verdict] = status_counts.get(verdict, 0) + 1
+        run_verdict = str(((digest.get("liveness") or {}).get("verdict")) or "UNKNOWN")
+        status_counts[run_verdict] = status_counts.get(run_verdict, 0) + 1
     if run_status:
         if status_errors:
             reasons.append(f"dos status digest read had {status_errors} error(s); inspect run_status")
@@ -1430,8 +2211,12 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         ol = _int(worker_leases.get("orphan_lease_count"), 0) or 0
         clean = _int(worker_leases.get("clean_count"), 0) or 0
         if op or ol:
+            lease_note = ""
+            if ol:
+                lease_note = "; unmatched live leases are not necessarily reapable"
             reasons.append(
-                f"worker/lease cross-check: clean={clean}, orphan-process={op}, orphan-lease={ol}")
+                f"worker/lease cross-check: clean={clean}, orphan-process={op}, "
+                f"unmatched-live-lease={ol}{lease_note}")
         elif clean:
             reasons.append(f"worker/lease cross-check clean ({clean} matched worker/lease pair(s))")
 
@@ -1444,7 +2229,79 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
     elif seat_inventory.get("schema"):
         reasons.append(_seat_inventory_summary_line(seat_inventory))
 
+    resolve_ticks = resolve_ticks or {}
+    latest_tick = resolve_ticks.get("selected") or resolve_ticks.get("latest") or {}
+    if latest_tick:
+        tick_age = _age_text(latest_tick.get("age_min"))
+        tick_backend = latest_tick.get("backend") or "?"
+        tick_verdict = latest_tick.get("verdict") or "UNKNOWN"
+        tick_issue = latest_tick.get("target_issue")
+        issue_bit = f" #{tick_issue}" if tick_issue is not None else ""
+        lane_bit = f" lane {latest_tick.get('lane')}" if latest_tick.get("lane") else ""
+        gate = latest_tick.get("launch_gate") or {}
+        if not latest_tick.get("fresh"):
+            reasons.append(
+                f"last resolver tick stale: {tick_backend}{issue_bit}{lane_bit} "
+                f"{tick_verdict} age {tick_age}")
+        elif gate.get("ready") is True:
+            reasons.append(
+                f"selected resolver tick launch-ready: {tick_backend}{issue_bit}{lane_bit} "
+                f"age {tick_age}")
+        elif gate.get("ready") is False:
+            blockers = gate.get("blockers") or []
+            code = (blockers[0].get("code") if blockers else tick_verdict) or tick_verdict
+            action = latest_tick.get("next_action") or "inspect-last-resolve-tick"
+            reasons.append(
+                f"selected resolver tick held: {tick_backend}{issue_bit}{lane_bit} "
+                f"{code}; next action: {action}; age {tick_age}")
+        elif tick_verdict not in ("WOULD_SPAWN", "SPAWNED"):
+            action = latest_tick.get("next_action") or "inspect-last-resolve-tick"
+            reasons.append(
+                f"selected resolver tick: {tick_backend}{issue_bit}{lane_bit} "
+                f"{tick_verdict}; next action: {action}; age {tick_age}")
+    if resolve_ticks.get("errors"):
+        reasons.append(f"{len(resolve_ticks.get('errors') or [])} resolver tick artifact read error(s)")
+
+    # Low-yield lanes (#2062): lanes whose recent sessions spent >= the turn floor
+    # yet closed nothing on their own tree. Informational — a reason line, never a
+    # flip of ok. This is the per-lane feedback pick_lane lacked (silent_workers only
+    # sees the empty-log case).
+    low_yield = low_yield or {}
+    low_yield_flagged = [r for r in (low_yield.get("lanes") or [])
+                         if r.get("verdict") == "LOW_YIELD"]
+    if low_yield_flagged:
+        names = ", ".join(
+            f"{r.get('lane')} ({r.get('turns')}t/{r.get('sessions')} sess, 0 closes)"
+            for r in low_yield_flagged[:4])
+        reasons.append(
+            f"{len(low_yield_flagged)} low-yield lane(s) over the last "
+            f"{low_yield.get('lookback_min')}m ({names}) — turns spent with zero "
+            f"ancestry-closes; pick_lane should re-scope or exclude (#2062)")
+
+    lab_readiness = lab_readiness or {}
+    if lab_readiness.get("schema") and not lab_readiness.get("commands"):
+        lab_readiness = {**lab_readiness, "commands": _lab_readiness_commands()}
+    if lab_readiness.get("schema"):
+        status = lab_readiness.get("status")
+        action = lab_readiness.get("next_action") or "publish-lab-readiness"
+        if lab_readiness.get("admit_lab_dispatch"):
+            reasons.append(f"lab readiness: {status} — lab-backed dispatch may be admitted")
+        else:
+            reasons.append(f"lab readiness: {status}; next action: {action}; no lab-backed dispatch")
+
     limiter = _dispatch_limiter(pre, backlog, closure, leases)
+    utilization = utilization_state(
+        live=live, cap=cap, host_safe=host_safe, pre_verdict=pre_verdict,
+        resolver=resolve_ticks, lab_readiness=lab_readiness,
+        weekly_cap=weekly_cap, merge=merge)
+    if utilization.get("state") in (
+            "HEADROOM_LAUNCH_READY", "HEADROOM_REPAIR_READY", "HEADROOM_HELD", "HEADROOM_STALE_PLAN",
+            "ACCOUNT_CAPPED", "ACCOUNT_BLOCKED", "HOST_BLOCKED", "EDIT_HELD"):
+        actions = ", ".join(utilization.get("next_actions") or [])
+        suffix = f"; next action: {actions}" if actions else ""
+        reasons.append(
+            f"utilization: {utilization.get('state')} "
+            f"({(utilization.get('worker_slots') or {}).get('headroom')} free slot(s)){suffix}")
 
     return {
         "schema": SCHEMA,
@@ -1518,6 +2375,10 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         "leases": leases,
         "worker_lease_check": worker_leases,
         "seat_inventory": seat_inventory or {},
+        "resolver": resolve_ticks or {},
+        "low_yield": low_yield or {},
+        "lab_readiness": lab_readiness or {},
+        "utilization": utilization,
         "git": {
             "merge_in_progress": bool(merge.get("merge_in_progress")),
             "merge_head": merge.get("merge_head"),
@@ -1549,16 +2410,46 @@ def _lease_block_text(row: dict[str, Any]) -> str:
     return "blocks " + (",".join(nums[:4]) if nums else "candidate")
 
 
+def _lease_liveness_text(row: dict[str, Any]) -> str:
+    live = str(row.get("liveness") or "").strip()
+    if not live:
+        return "unknown"
+    if row.get("reclaimable"):
+        return f"{live} reclaimable"
+    return live
+
+
 def _lease_summary_bits(leases: dict[str, Any], *, limit: int = 3) -> list[str]:
     rows = leases.get("active") or []
     bits: list[str] = []
     for row in rows[:limit]:
         bits.append(
             f"{row.get('id')} lane={row.get('lane') or '-'} "
-            f"age={_age_text(row.get('age_min'))} {_lease_block_text(row)}")
+            f"age={_age_text(row.get('age_min'))} "
+            f"live={_lease_liveness_text(row)} {_lease_block_text(row)}")
     if len(rows) > limit:
         bits.append(f"+{len(rows) - limit} more")
     return bits
+
+
+def _resolve_tick_state(row: dict[str, Any]) -> str:
+    gate = row.get("launch_gate") or {}
+    if not row.get("fresh"):
+        return "stale"
+    if gate.get("ready") is True:
+        return "launch-ready"
+    if row.get("action") == "repair_in_flight":
+        return "repair-in-flight"
+    if row.get("action") == "repair_spawned":
+        return "repair-spawned"
+    if gate.get("ready") is False:
+        blockers = gate.get("blockers") or []
+        code = blockers[0].get("code") if blockers else row.get("verdict")
+        return f"held {code}"
+    verdict = str(row.get("verdict") or "UNKNOWN")
+    if verdict in ("WOULD_SPAWN", "SPAWNED"):
+        return verdict.lower()
+    return "held " + verdict
 
 
 def _worker_lease_bucket_bits(rows: list[dict[str, Any]], *, key: str,
@@ -1598,6 +2489,35 @@ def render(p: dict[str, Any]) -> str:
     seat_line = _seat_inventory_summary_line(p.get("seat_inventory") or {})
     if seat_line:
         lines.append("║ seats     : " + seat_line.removeprefix("seat inventory: "))
+    lab = p.get("lab_readiness") or {}
+    if lab.get("schema"):
+        gate = "admit" if lab.get("admit_lab_dispatch") else "hold"
+        lines.append(
+            f"║ lab       : {lab.get('status')} ({gate}; next={lab.get('next_action') or '-'})")
+        if not lab.get("admit_lab_dispatch"):
+            cmd = (lab.get("commands") or {}).get("mark_ready")
+            if cmd:
+                lines.append(f"║ lab cmd   : {cmd}")
+    resolver = p.get("resolver") or {}
+    latest_tick = resolver.get("selected") or resolver.get("latest") or {}
+    if latest_tick:
+        issue = latest_tick.get("target_issue")
+        issue_bit = f"#{issue}" if issue is not None else "-"
+        next_action = latest_tick.get("next_action") or "-"
+        lines.append(
+            f"║ planner   : {latest_tick.get('backend') or '-'} {issue_bit} "
+            f"lane={latest_tick.get('lane') or '-'} {_resolve_tick_state(latest_tick)} "
+            f"age={_age_text(latest_tick.get('age_min'))} next={next_action}")
+        if latest_tick.get("live_command_text"):
+            lines.append(f"║ launch    : {latest_tick.get('live_command_text')}")
+    util = p.get("utilization") or {}
+    if util.get("schema"):
+        slots = util.get("worker_slots") or {}
+        actions = ",".join(util.get("next_actions") or []) or "-"
+        lines.append(
+            f"║ use       : {util.get('state')} "
+            f"slots={slots.get('live')}/{slots.get('cap')} "
+            f"free={slots.get('headroom')} next={actions}")
     if b.get("na"):
         lines.append("║ backlog   : n/a (--fast or gh timeout)")
     else:
@@ -1625,6 +2545,14 @@ def render(p: dict[str, Any]) -> str:
     if sc:
         nums = ", ".join(f"#{s['issue']}" for s in (w.get("silent") or [])[:6])
         lines.append(f"║ workers   : {sc} silent (<= {_STUB_LOG_MAX_BYTES} B log, exited) [{nums}]")
+    ly = p.get("low_yield") or {}
+    if ly.get("low_yield_count"):
+        flagged = [r for r in (ly.get("lanes") or []) if r.get("verdict") == "LOW_YIELD"]
+        bits = ", ".join(f"{r.get('lane')}={r.get('turns')}t/{r.get('sessions')}s/0c"
+                         for r in flagged[:4])
+        lines.append(
+            f"║ low-yield : {ly.get('low_yield_count')} lane(s) >= {ly.get('turns_floor')}t, "
+            f"0 closes [{bits}] (#2062)")
     bh = p.get("backend_health") or {}
     flagged_rates = [r for r in (bh.get("stub_rate") or []) if r.get("majority_stub")]
     if flagged_rates:
@@ -1665,13 +2593,13 @@ def render(p: dict[str, Any]) -> str:
             bits.append("orphan-process "
                         + ",".join(_worker_lease_bucket_bits(wl.get("orphan_process") or [], key="worker")))
         if wl.get("orphan_lease_count"):
-            bits.append("orphan-lease "
+            bits.append("unmatched-live-lease "
                         + ",".join(_worker_lease_bucket_bits(wl.get("orphan_lease") or [], key="lease")))
         detail = f" [{'; '.join(bits)}]" if bits else ""
         lines.append(
             f"║ lease chk : clean={wl.get('clean_count', 0)} "
             f"orphan-process={wl.get('orphan_process_count', 0)} "
-            f"orphan-lease={wl.get('orphan_lease_count', 0)}{detail}")
+            f"unmatched-live-lease={wl.get('orphan_lease_count', 0)}{detail}")
     git = p.get("git") or {}
     if git.get("merge_in_progress"):
         lines.append(f"║ git       : MERGE_HEAD present — {git.get('next_action')}")
@@ -1731,6 +2659,36 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
     seat_line = _seat_inventory_summary_line(payload.get("seat_inventory") or {})
     if seat_line:
         out.append(f"- **seat inventory**: {seat_line.removeprefix('seat inventory: ')}")
+    lab = payload.get("lab_readiness") or {}
+    if lab.get("schema"):
+        gate = "admit" if lab.get("admit_lab_dispatch") else "hold"
+        out.append(
+            f"- **lab readiness**: `{lab.get('status')}` ({gate}; "
+            f"next `{lab.get('next_action') or '-'}`)")
+        if not lab.get("admit_lab_dispatch"):
+            cmd = (lab.get("commands") or {}).get("mark_ready")
+            if cmd:
+                out.append(f"- **lab publish command**: `{cmd}`")
+    resolver = payload.get("resolver") or {}
+    latest_tick = resolver.get("selected") or resolver.get("latest") or {}
+    if latest_tick:
+        issue = latest_tick.get("target_issue")
+        issue_bit = f"#{issue}" if issue is not None else "-"
+        out.append(
+            f"- **last resolver tick**: `{latest_tick.get('backend') or '-'}` "
+            f"{issue_bit} lane `{latest_tick.get('lane') or '-'}` — "
+            f"{_resolve_tick_state(latest_tick)}, age {_age_text(latest_tick.get('age_min'))}, "
+            f"next `{latest_tick.get('next_action') or '-'}`")
+        if latest_tick.get("live_command_text"):
+            out.append(f"- **approved live command**: `{latest_tick.get('live_command_text')}`")
+    util = payload.get("utilization") or {}
+    if util.get("schema"):
+        slots = util.get("worker_slots") or {}
+        actions = ", ".join(f"`{a}`" for a in (util.get("next_actions") or [])) or "`-`"
+        out.append(
+            f"- **utilization**: `{util.get('state')}`; "
+            f"worker slots {slots.get('live')}/{slots.get('cap')} "
+            f"(headroom {slots.get('headroom')}); next {actions}")
     rs = payload.get("run_status") or {}
     if rs.get("count"):
         out.append(f"- **run status source**: `dos status` digests for {rs.get('count')} RID(s), "
@@ -1750,7 +2708,7 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
     elif wl:
         out.append(f"- **worker/lease cross-check**: clean={wl.get('clean_count', 0)}, "
                    f"orphan-process={wl.get('orphan_process_count', 0)}, "
-                   f"orphan-lease={wl.get('orphan_lease_count', 0)}")
+                   f"unmatched-live-lease={wl.get('orphan_lease_count', 0)}")
     out += [
         "",
         "## Backlog by lane (issue → lane sync)",
@@ -1846,8 +2804,8 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
                 f"{leases.get('expired_count')} expired lease record(s) are visible but non-blocking.")
         out += [
             "",
-            "| lease id | lane | age | ttl | blocks candidate | holder | tree |",
-            "|---|---|---:|---:|---|---|---|",
+            "| lease id | lane | age | ttl | liveness | blocks candidate | holder | tree |",
+            "|---|---|---:|---:|---|---|---|---|",
         ]
         for row in leases.get("active") or []:
             tree = ", ".join(f"`{t}`" for t in (row.get("tree") or [])) or "—"
@@ -1855,7 +2813,8 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
             out.append(
                 f"| `{row.get('id')}` | {row.get('lane') or '—'} | "
                 f"{_age_text(row.get('age_min'))} | {row.get('ttl_seconds')}s | "
-                f"{_lease_block_text(row)} | `{holder}` | {tree} |")
+                f"{_lease_liveness_text(row)} | {_lease_block_text(row)} | "
+                f"`{holder}` | {tree} |")
 
     wl = payload.get("worker_lease_check") or {}
     out += ["", "## Worker / lease cross-check", ""]
@@ -1867,7 +2826,13 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
         out.append(
             f"clean={wl.get('clean_count', 0)}, "
             f"orphan-process={wl.get('orphan_process_count', 0)}, "
-            f"orphan-lease={wl.get('orphan_lease_count', 0)}.")
+            f"unmatched-live-lease={wl.get('orphan_lease_count', 0)}.")
+        if wl.get("orphan_lease_count"):
+            out.append("")
+            out.append(
+                "_Unmatched live leases have no local live worker sidecar in this checkout. "
+                "They are not automatically safe to reap; use `fak leaseref audit` / "
+                "`fak leaseref liveness` and only `fak leaseref reap` expired records._")
         clean_rows = wl.get("clean") or []
         out += ["", "Clean matches:", ""]
         if not clean_rows:
@@ -2043,6 +3008,43 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
             out.append(f"| #{sw.get('issue')} | {sw.get('stamp')} | {sw.get('kind') or '—'} | "
                        f"{sw.get('size') if sw.get('size') is not None else '—'} | `{sw.get('log')}` |")
 
+    ly = payload.get("low_yield") or {}
+    ly_lanes = ly.get("lanes") or []
+    out += ["", "## Low-yield lanes (turns spent vs ancestry closes)", ""]
+    if not ly_lanes:
+        out.append(
+            f"No resolve sessions in the last {ly.get('lookback_min', _LOW_YIELD_LOOKBACK_MIN)}m, "
+            "so no per-lane turns-vs-closes signal this run.")
+    else:
+        flagged = [r for r in ly_lanes if r.get("verdict") == "LOW_YIELD"]
+        if flagged:
+            out += [
+                f"**{len(flagged)}** lane(s) spent **>= {ly.get('turns_floor')} turns** over the "
+                f"last {ly.get('lookback_min')}m yet landed **zero** ancestry-closes "
+                "(a `Fixes #`/`Closes #` commit touching the lane's tree). `silent_workers` "
+                "misses this — the log is full, the worker just closed nothing — so this is "
+                "the per-lane feedback `pick_lane` needs to re-scope or exclude a stuck lane "
+                "instead of re-seating it blind (#2062). Informational only; it never flips "
+                "the card's verdict.",
+                "",
+            ]
+        else:
+            out += ["Every recent lane either stayed under the turn floor or landed at least "
+                    "one ancestry-close — no low-yield lane this window.", ""]
+        out += [
+            "| lane | sessions | turns | max/session | closes | verdict | tree | evidence |",
+            "|---|---:|---:|---:|---:|---|---|---|",
+        ]
+        for r in ly_lanes:
+            verdict = "**LOW_YIELD**" if r.get("verdict") == "LOW_YIELD" else "ok"
+            closes = r.get("closes")
+            closes_txt = "—" if closes is None else str(closes)
+            tree = ", ".join(f"`{t}`" for t in (r.get("tree") or [])) or "—"
+            evidence = ", ".join(f"`{log}`" for log in (r.get("evidence_logs") or [])[:3]) or "—"
+            out.append(
+                f"| {r.get('lane')} | {r.get('sessions')} | {r.get('turns')} | "
+                f"{r.get('max_session_turns')} | {closes_txt} | {verdict} | {tree} | {evidence} |")
+
     out += ["", "## Issue-contract repair flow", ""]
     out += [
         "When `fak issue contract` / `fak dispatch route --json` hold an issue "
@@ -2119,7 +3121,7 @@ def _dispatch_capacity_line(payload: dict[str, Any]) -> str:
     if wl and wl.get("available") is not False:
         parts.append(f"lease-check clean {wl.get('clean_count', 0)}"
                      f"/orphan-proc {wl.get('orphan_process_count', 0)}"
-                     f"/orphan-lease {wl.get('orphan_lease_count', 0)}")
+                     f"/unmatched-live-lease {wl.get('orphan_lease_count', 0)}")
     return "capacity: " + " · ".join(parts) if parts else ""
 
 
@@ -2193,6 +3195,44 @@ def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
     auth_seat_action = _auth_failed_seat_action(payload.get("seat_inventory") or {})
     if auth_seat_action:
         buckets["action"].append(auth_seat_action)
+    double_booked_action = _double_booked_seat_action(payload.get("seat_inventory") or {})
+    if double_booked_action:
+        buckets["action"].append(double_booked_action)
+    lab = payload.get("lab_readiness") or {}
+    if lab.get("schema"):
+        status = lab.get("status") or "INDETERMINATE"
+        action = lab.get("next_action") or "publish-lab-readiness"
+        if lab.get("admit_lab_dispatch"):
+            buckets["expected"].append(f"lab readiness {status}; lab-backed dispatch may be admitted")
+        else:
+            cmd = (lab.get("commands") or {}).get("mark_ready")
+            suffix = f"; publish ready with `{cmd}`" if cmd else ""
+            buckets["action"].append(
+                f"lab readiness {status}; {action}; lab-backed dispatch held{suffix}")
+    resolver = payload.get("resolver") or {}
+    latest_tick = resolver.get("selected") or resolver.get("latest") or {}
+    if latest_tick:
+        tick_desc = (
+            f"{latest_tick.get('backend') or '?'} "
+            f"#{latest_tick.get('target_issue') or '-'} "
+            f"lane {latest_tick.get('lane') or '-'}")
+        state = _resolve_tick_state(latest_tick)
+        if not latest_tick.get("fresh"):
+            buckets["expected"].append(
+                f"last resolver tick stale ({tick_desc}, {state}, "
+                f"age {_age_text(latest_tick.get('age_min'))})")
+        elif state == "launch-ready" and not latest_tick.get("live"):
+            cmd = latest_tick.get("live_command_text")
+            suffix = f"; approve `{cmd}`" if cmd else "; live launch requires approval"
+            buckets["action"].append(f"resolver dry-run launch-ready ({tick_desc}){suffix}")
+        elif state in ("repair-in-flight", "repair-spawned"):
+            buckets["auto-solving"].append(f"resolver {state} ({tick_desc})")
+        elif state.startswith("held "):
+            action = latest_tick.get("next_action") or "inspect-last-resolve-tick"
+            buckets["action"].append(
+                f"last resolver tick {state} ({tick_desc}); {action}")
+    elif latest_tick.get("action") == "spawned":
+        buckets["auto-solving"].append(f"resolver spawned worker ({tick_desc})")
     limiter = ((payload.get("dispatcher") or {}).get("limiter") or {})
     if limiter.get("primary") == "github_rate_limit":
         buckets["action"].append("GitHub rate limit is blocking the gh-backed status folds")
@@ -2204,6 +3244,13 @@ def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
             f"{workers.get('silent_count')} no-output worker(s) skipped by cooldown"
             + (f" ({nums})" if nums else "")
             + "; inspect only if the same issue repeats")
+
+    low_yield = payload.get("low_yield") or {}
+    for r in [x for x in (low_yield.get("lanes") or [])
+              if x.get("verdict") == "LOW_YIELD"][:4]:
+        buckets["action"].append(
+            f"lane {r.get('lane')} low-yield: {r.get('turns')} turns / "
+            f"{r.get('sessions')} session(s), 0 ancestry-closes; re-scope or exclude the lane")
 
     bh = payload.get("backend_health") or {}
     stub_by_product = {
@@ -2267,11 +3314,23 @@ def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
         ol = wl.get("orphan_lease_count") or 0
         if op or ol:
             buckets["action"].append(
-                f"worker/lease orphans: clean={wl.get('clean_count', 0)}, "
-                f"orphan-process={op}, orphan-lease={ol}")
+                f"worker/lease mismatch: clean={wl.get('clean_count', 0)}, "
+                f"orphan-process={op}, unmatched-live-lease={ol}")
         elif wl.get("clean_count"):
             buckets["expected"].append(
                 f"worker/lease cross-check clean ({wl.get('clean_count')} matched)")
+    util = payload.get("utilization") or {}
+    if util.get("schema"):
+        state = str(util.get("state") or "")
+        slots = util.get("worker_slots") or {}
+        actions = ", ".join(util.get("next_actions") or []) or "inspect-dispatch-status"
+        if state in ("HEADROOM_LAUNCH_READY", "HEADROOM_REPAIR_READY"):
+            buckets["action"].append(
+                f"utilization {state}: {slots.get('headroom')} free worker slot(s); {actions}")
+        elif state in ("HEADROOM_HELD", "HEADROOM_STALE_PLAN", "HOST_BLOCKED",
+                       "ACCOUNT_BLOCKED", "ACCOUNT_CAPPED", "EDIT_HELD"):
+            buckets["action"].append(
+                f"utilization {state}: {slots.get('headroom')} free worker slot(s); {actions}")
 
     return buckets
 
@@ -2366,7 +3425,7 @@ def git_date(root: Path) -> str:
 
 
 def _default_max_workers() -> int:
-    """Mirror of dispatch_preflight.DEFAULT_MAX_WORKERS (built-in 8, FAK_MAX_WORKERS
+    """Mirror of dispatch_preflight.DEFAULT_MAX_WORKERS (built-in 20, FAK_MAX_WORKERS
     env knob applied) so the card's probe matches the gate's own ceiling instead of
     understating the fleet's headroom with a stale local default."""
     raw = os.environ.get("FAK_MAX_WORKERS", "").strip()
@@ -2375,7 +3434,7 @@ def _default_max_workers() -> int:
             return int(raw)
     except ValueError:
         pass
-    return 8
+    return 20
 
 
 def main(argv: list[str] | None = None) -> int:

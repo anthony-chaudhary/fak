@@ -10,6 +10,7 @@ minimal payload to prove it does not raise.
 from __future__ import annotations
 
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -83,6 +84,64 @@ def cap_limiter(primary: str = "configured_max", term: str = "max_workers") -> d
     }
 
 
+def resolver_tick(*, verdict: str = "WOULD_SPAWN", action: str = "would_spawn",
+                  ready: bool | None = True, blocker: str | None = None,
+                  next_action: str = "", live: bool = False) -> dict:
+    gate = {}
+    if ready is not None:
+        gate = {
+            "ready": ready,
+            "blockers": ([] if ready else [{
+                "code": blocker or verdict,
+                "reason": "synthetic hold",
+                "next_action": next_action or "inspect-last-resolve-tick",
+            }]),
+        }
+    latest = {
+        "backend": "claude",
+        "verdict": verdict,
+        "action": action,
+        "ok": ready is True,
+        "live": live,
+        "max_workers": 4,
+        "work_kind": "engineering",
+        "force": False,
+        "lane": "docs",
+        "target_issue": 2042,
+        "reason": "synthetic resolver tick",
+        "launch_gate": gate,
+        "next_action": next_action,
+        "age_min": 1.0,
+        "fresh": True,
+    }
+    if ready is True and action == "would_spawn":
+        latest["live_command"] = [
+            "python", "tools\\issue_resolve_dispatch.py", "--backend", "claude",
+            "--max-workers", "4", "--work-kind", "engineering",
+            "--lane", "docs", "--issue", "2042", "--live", "--json",
+        ]
+        latest["live_command_text"] = " ".join(latest["live_command"])
+    elif ready is True and action == "would_repair":
+        latest["contract_scan"] = 8
+        latest["repair_batch"] = 5
+        latest["live_command"] = [
+            "python", "tools\\issue_resolve_dispatch.py", "--backend", "claude",
+            "--max-workers", "4", "--work-kind", "engineering",
+            "--contract-scan", "8", "--repair-batch", "5", "--live", "--json",
+        ]
+        latest["live_command_text"] = " ".join(latest["live_command"])
+    return {
+        "schema": "fleet-resolve-ticks/1",
+        "fresh_min": 90.0,
+        "count": 1,
+        "fresh_count": 1,
+        "latest": latest,
+        "selected": latest,
+        "ticks": [latest],
+        "errors": [],
+    }
+
+
 def build(mod, **over):
     kw = dict(
         root=ROOT, pre=pre(), sup=sup(), wd={"installed": True, "status": "Ready"},
@@ -98,6 +157,15 @@ class VerdictTest(unittest.TestCase):
         self.assertTrue(p["ok"])
         self.assertEqual(p["verdict"], "READY_TO_GROW")
         self.assertEqual(p["dispatcher"]["headroom"], 2)
+
+    def test_run_liveness_does_not_overwrite_spawn_gate_verdict(self) -> None:
+        mod = load()
+        p = build(mod, pre=pre("SPAWN_OK"), run_status=[
+            {"run_id": "RID-ACTIVE1", "liveness": {"verdict": "STALLED"}},
+        ])
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "READY_TO_GROW")
+        self.assertEqual(p["run_status"]["liveness"], {"STALLED": 1})
 
     def test_host_flagged_fails_the_card(self) -> None:
         mod = load()
@@ -221,20 +289,31 @@ class WatchdogReasonTest(unittest.TestCase):
 
 
 class RunStatusDigestTest(unittest.TestCase):
-    def test_loop_ledger_run_ids_are_recent_rids_only(self) -> None:
+    def test_loop_ledger_run_ids_are_recent_active_started_rids_only(self) -> None:
         mod = load()
         with tempfile.TemporaryDirectory() as d:
             ledger = Path(d) / "loops.jsonl"
+            now_ns = 10_000_000_000_000
+            recent_ns = now_ns - 30 * 60 * 1_000_000_000
+            stale_ns = now_ns - 3 * 60 * 60 * 1_000_000_000
             ledger.write_text("\n".join([
                 '{"loop_id":"issue-resolve-dispatch/claude","run_id":"legacy-1"}',
                 '{"loop_id":"other","run_id":"RID-OTHER1"}',
-                '{"loop_id":"issue-resolve-progress","run_id":"RID-PROGRESS1"}',
-                '{"loop_id":"issue-resolve-dispatch/codex","run_id":"RID-DISPATCH1"}',
-                '{"loop_id":"issue-resolve-dispatch/codex","run_id":"RID-DISPATCH1"}',
+                '{"loop_id":"issue-resolve-progress","run_id":"RID-PROGRESS1","kind":"fire"}',
+                '{"loop_id":"issue-resolve-progress","run_id":"RID-PROGRESS1","kind":"end","status":"claimed_done"}',
+                '{"loop_id":"issue-resolve-dispatch/codex","run_id":"RID-DRYRUN1","kind":"fire"}',
+                '{"loop_id":"issue-resolve-dispatch/codex","run_id":"RID-DRYRUN1","kind":"admit","status":"admitted"}',
+                '{"loop_id":"issue-resolve-dispatch/codex","run_id":"RID-DRYRUN1","kind":"end","status":"claimed_done"}',
+                '{"loop_id":"issue-resolve-dispatch/claude","run_id":"RID-REFUSED1","kind":"fire"}',
+                '{"loop_id":"issue-resolve-dispatch/claude","run_id":"RID-REFUSED1","kind":"admit","status":"refused"}',
+                '{"loop_id":"issue-resolve-dispatch/opencode","run_id":"RID-ACTIVE1","kind":"fire"}',
+                f'{{"loop_id":"issue-resolve-dispatch/opencode","run_id":"RID-ACTIVE1","kind":"start","status":"running","ts_unix_nano":{recent_ns}}}',
+                f'{{"loop_id":"issue-resolve-dispatch/claude","run_id":"RID-STALE1","kind":"start","status":"running","ts_unix_nano":{stale_ns}}}',
+                f'{{"loop_id":"issue-resolve-dispatch/claude","run_id":"RID-ACTIVE2","kind":"start","status":"running","ts_unix_nano":{recent_ns + 1}}}',
             ]) + "\n", encoding="utf-8")
             self.assertEqual(
-                mod.run_ids_from_loop_ledger(ledger),
-                ["RID-DISPATCH1", "RID-PROGRESS1"])
+                mod.run_ids_from_loop_ledger(ledger, lookback_min=60, now_ns=now_ns),
+                ["RID-ACTIVE2", "RID-ACTIVE1"])
 
     def test_claimed_key_detector_is_recursive(self) -> None:
         mod = load()
@@ -253,6 +332,349 @@ class RunStatusDigestTest(unittest.TestCase):
         self.assertEqual(p["run_status"]["errors"], 1)
         self.assertTrue(any("dos status digest" in r for r in p["reasons"]))
         self.assertIn("run truth", mod.render(p))
+
+
+class LabReadinessTest(unittest.TestCase):
+    def test_missing_lab_readiness_fails_closed(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            rec = mod.read_lab_readiness(Path(d) / "missing.json")
+        self.assertEqual(rec["schema"], mod.LAB_READINESS_SCHEMA)
+        self.assertEqual(rec["status"], "INDETERMINATE")
+        self.assertFalse(rec["admit_lab_dispatch"])
+        self.assertEqual(rec["next_action"], "publish-lab-readiness")
+        self.assertEqual(rec["evidence"], "no-readiness-record")
+        self.assertFalse(rec["present"])
+        self.assertIn("--write-default", rec["commands"]["mark_ready"])
+
+    def test_ready_record_derives_admit_bit_and_rejects_private_fields(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "lab-readiness.json"
+            path.write_text(json.dumps({
+                "schema": mod.LAB_READINESS_SCHEMA,
+                "machine_class": "gpu-server",
+                "checked_at": "2026-07-04T14:00:00Z",
+                "status": "READY_FOR_DEV_WORK",
+                "next_action": "admit-lab-backed-dispatch",
+                "evidence": "scrubbed-private-readback",
+                "admit_lab_dispatch": False,
+            }), encoding="utf-8")
+            rec = mod.read_lab_readiness(path)
+            self.assertTrue(rec["admit_lab_dispatch"])
+
+            path.write_text(json.dumps({
+                "schema": mod.LAB_READINESS_SCHEMA,
+                "machine_class": "gpu-server",
+                "status": "READY_FOR_DEV_WORK",
+                "next_action": "admit-lab-backed-dispatch",
+                "evidence": "scrubbed-private-readback",
+                "raw_thread": "secret",
+            }), encoding="utf-8")
+            bad = mod.read_lab_readiness(path)
+            self.assertEqual(bad["status"], "INDETERMINATE")
+            self.assertEqual(bad["evidence"], "invalid-readiness-record")
+            self.assertIn("unknown field", bad["_error"])
+
+    def test_lab_hold_reaches_payload_render_and_slack_action(self) -> None:
+        mod = load()
+        lab = {
+            "schema": mod.LAB_READINESS_SCHEMA,
+            "machine_class": "gpu-server",
+            "checked_at": "2026-07-04T14:00:00Z",
+            "status": "WAIT_PRIVATE_RECOVERY",
+            "next_action": "confirm-private-control-session",
+            "evidence": "scrubbed-private-readback",
+            "admit_lab_dispatch": False,
+        }
+        p = build(mod, lab_readiness=lab)
+        self.assertEqual(p["lab_readiness"]["status"], "WAIT_PRIVATE_RECOVERY")
+        self.assertTrue(any("lab readiness: WAIT_PRIVATE_RECOVERY" in r for r in p["reasons"]))
+        self.assertIn("lab       : WAIT_PRIVATE_RECOVERY", mod.render(p))
+        self.assertIn("lab cmd", mod.render(p))
+        slack = mod.slack_text(p)
+        self.assertIn("*dispatch scheduler:* `READY_TO_GROW` (ACTION)", slack)
+        self.assertIn("lab readiness WAIT_PRIVATE_RECOVERY", slack)
+        self.assertIn("lab-backed dispatch held", slack)
+        self.assertIn("fak lab readiness --status READY_FOR_DEV_WORK --write-default --json", slack)
+
+    def test_ready_lab_record_is_expected_not_action(self) -> None:
+        mod = load()
+        lab = {
+            "schema": mod.LAB_READINESS_SCHEMA,
+            "machine_class": "gpu-server",
+            "checked_at": "2026-07-04T14:00:00Z",
+            "status": "READY_FOR_DEV_WORK",
+            "next_action": "admit-lab-backed-dispatch",
+            "evidence": "scrubbed-private-readback",
+            "admit_lab_dispatch": True,
+        }
+        p = build(mod, lab_readiness=lab)
+        slack = mod.slack_text(p)
+        self.assertIn("lab readiness READY_FOR_DEV_WORK", slack)
+        self.assertNotIn("lab-backed dispatch held", slack)
+
+
+class ResolverTickTest(unittest.TestCase):
+    def test_read_resolve_ticks_summarizes_latest_backend_artifact(self) -> None:
+        import os
+        import time
+        mod = load()
+        now = time.time()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / mod.RUNS_DIRNAME
+            runs.mkdir()
+            tick = runs / "last-resolve-tick-claude.json"
+            tick.write_text(json.dumps({
+                "backend": "claude",
+                "verdict": "SELF_MODIFY_HOLD",
+                "action": "no_lane",
+                "ok": False,
+                "live": False,
+                "lane": None,
+                "target_issue": None,
+                "reason": "all self-source",
+                "launch_gate": {
+                    "ready": False,
+                    "blockers": [{
+                        "code": "SELF_MODIFY_HOLD",
+                        "reason": "all self-source",
+                        "next_action": "enable-worktree-isolated-resolver",
+                    }],
+                },
+            }), encoding="utf-8")
+            os.utime(tick, (now - 60, now - 60))
+
+            out = mod.read_resolve_ticks(root, now_ts=now)
+
+        self.assertEqual(out["count"], 1)
+        self.assertEqual(out["fresh_count"], 1)
+        self.assertEqual(out["latest"]["backend"], "claude")
+        self.assertEqual(out["latest"]["launch_gate"]["blockers"][0]["code"],
+                         "SELF_MODIFY_HOLD")
+        self.assertEqual(out["latest"]["next_action"],
+                         "enable-worktree-isolated-resolver")
+
+    def test_read_resolve_ticks_selects_launch_ready_over_newer_unguarded(self) -> None:
+        import os
+        import time
+        mod = load()
+        now = time.time()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / mod.RUNS_DIRNAME
+            runs.mkdir()
+            claude = runs / "last-resolve-tick-claude.json"
+            claude.write_text(json.dumps({
+                "backend": "claude",
+                "verdict": "WOULD_SPAWN",
+                "action": "would_spawn",
+                "ok": True,
+                "live": False,
+                "max_workers": 4,
+                "work_kind": "engineering",
+                "lane": "tools",
+                "target_issue": 1672,
+                "launch_gate": {"ready": True, "blockers": []},
+            }), encoding="utf-8")
+            opencode = runs / "last-resolve-tick-opencode.json"
+            opencode.write_text(json.dumps({
+                "backend": "opencode",
+                "verdict": "WOULD_SPAWN",
+                "action": "would_spawn",
+                "ok": True,
+                "live": False,
+                "max_workers": 4,
+                "lane": "tools",
+                "target_issue": 1672,
+                "launch_gate": {
+                    "ready": False,
+                    "blockers": [{
+                        "code": "UNGUARDED_WORKER",
+                        "next_action": "make-fak-guard-resolvable",
+                    }],
+                },
+            }), encoding="utf-8")
+            os.utime(claude, (now - 120, now - 120))
+            os.utime(opencode, (now - 30, now - 30))
+
+            out = mod.read_resolve_ticks(root, now_ts=now)
+
+        self.assertEqual(out["latest"]["backend"], "opencode")
+        self.assertEqual(out["selected"]["backend"], "claude")
+        self.assertEqual(out["selected"]["live_command"],
+                         ["python", "tools\\issue_resolve_dispatch.py", "--backend", "claude",
+                          "--max-workers", "4", "--work-kind", "engineering",
+                          "--lane", "tools", "--issue", "1672", "--live", "--json"])
+
+    def test_read_resolve_ticks_prefers_repair_in_flight_over_refusal_noise(self) -> None:
+        import os
+        import time
+        mod = load()
+        now = time.time()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / mod.RUNS_DIRNAME
+            runs.mkdir()
+            repair = runs / "last-resolve-tick-claude.json"
+            repair.write_text(json.dumps({
+                "backend": "claude",
+                "verdict": "REPAIR_IN_FLIGHT",
+                "action": "repair_in_flight",
+                "ok": True,
+                "live": False,
+                "target_issue": 2201,
+                "lane": "docs",
+            }), encoding="utf-8")
+            refusal = runs / "last-resolve-tick-codex.json"
+            refusal.write_text(json.dumps({
+                "backend": "codex",
+                "verdict": "REFUSE_AT_CAP",
+                "action": "refused",
+                "ok": False,
+                "live": False,
+            }), encoding="utf-8")
+            os.utime(repair, (now - 60, now - 60))
+            os.utime(refusal, (now - 10, now - 10))
+
+            out = mod.read_resolve_ticks(root, now_ts=now)
+
+        self.assertEqual(out["latest"]["backend"], "codex")
+        self.assertEqual(out["selected"]["backend"], "claude")
+        self.assertEqual(mod._resolve_tick_state(out["selected"]), "repair-in-flight")
+
+    def test_launch_ready_tick_reaches_payload_render_and_slack_action(self) -> None:
+        mod = load()
+        p = build(mod, resolve_ticks=resolver_tick())
+        self.assertTrue(any("selected resolver tick launch-ready" in r for r in p["reasons"]))
+        self.assertEqual(p["utilization"]["state"], "HEADROOM_LAUNCH_READY")
+        self.assertIn("approve-live-launch", p["utilization"]["next_actions"][0])
+        self.assertIn("--live", p["utilization"]["launch_command"])
+        self.assertIn("planner", mod.render(p))
+        self.assertIn("launch-ready", mod.render(p))
+        self.assertIn("launch    : python", mod.render(p))
+        self.assertIn("use       : HEADROOM_LAUNCH_READY", mod.render(p))
+        buckets = mod._dispatch_slack_buckets(p)
+        self.assertTrue(any("resolver dry-run launch-ready" in r for r in buckets["action"]))
+        self.assertTrue(any("--live --json" in r for r in buckets["action"]))
+        self.assertTrue(any("utilization HEADROOM_LAUNCH_READY" in r
+                            for r in buckets["action"]))
+        self.assertEqual(mod._dispatch_headline_state(p), "ACTION")
+
+    def test_repair_ready_tick_reaches_payload_render_and_slack_action(self) -> None:
+        mod = load()
+        p = build(mod, resolve_ticks=resolver_tick(
+            verdict="WOULD_REPAIR",
+            action="would_repair",
+            ready=True,
+        ))
+        self.assertEqual(p["utilization"]["state"], "HEADROOM_REPAIR_READY")
+        self.assertIn("--repair-batch", p["utilization"]["launch_command"])
+        rendered = mod.render(p)
+        self.assertIn("use       : HEADROOM_REPAIR_READY", rendered)
+        self.assertIn("launch    : python", rendered)
+        buckets = mod._dispatch_slack_buckets(p)
+        self.assertTrue(any("resolver dry-run launch-ready" in r for r in buckets["action"]))
+        self.assertTrue(any("utilization HEADROOM_REPAIR_READY" in r
+                            for r in buckets["action"]))
+
+    def test_repair_in_flight_is_productive_utilization(self) -> None:
+        mod = load()
+        p = build(mod, resolve_ticks=resolver_tick(
+            verdict="REPAIR_IN_FLIGHT",
+            action="repair_in_flight",
+            ready=None,
+        ))
+        self.assertEqual(p["utilization"]["state"], "REPAIR_IN_FLIGHT")
+        self.assertIn("repair-in-flight", mod.render(p))
+        self.assertTrue(any("resolver repair-in-flight" in r
+                            for r in mod._dispatch_slack_buckets(p)["auto-solving"]))
+
+    def test_held_tick_reaches_payload_render_and_slack_action(self) -> None:
+        mod = load()
+        p = build(mod, resolve_ticks=resolver_tick(
+            verdict="SELF_MODIFY_HOLD",
+            action="no_lane",
+            ready=False,
+            blocker="SELF_MODIFY_HOLD",
+            next_action="enable-worktree-isolated-resolver",
+        ))
+        self.assertTrue(any("selected resolver tick held" in r for r in p["reasons"]))
+        self.assertEqual(p["utilization"]["state"], "HEADROOM_HELD")
+        self.assertEqual(p["utilization"]["blockers"][0]["code"], "SELF_MODIFY_HOLD")
+        self.assertIn("held SELF_MODIFY_HOLD", mod.render(p))
+        self.assertIn("use       : HEADROOM_HELD", mod.render(p))
+        self.assertTrue(any("last resolver tick held SELF_MODIFY_HOLD" in r
+                            for r in mod._dispatch_slack_buckets(p)["action"]))
+
+    def test_safe_lanes_busy_is_primary_utilization_action(self) -> None:
+        mod = load()
+        tick = resolver_tick(
+            verdict="SELF_MODIFY_HOLD",
+            action="no_lane",
+            ready=False,
+            blocker="SELF_MODIFY_HOLD",
+            next_action="route-non-self-source-lane-or-enable-worktree-isolated-resolver",
+        )
+        latest = tick["selected"]
+        latest["lane"] = None
+        latest["target_issue"] = None
+        latest["launch_gate"]["blockers"] = [
+            {
+                "code": "SAFE_LANES_BUSY",
+                "reason": "safe non-self-source lanes already have live workers: docs, tools",
+                "next_action": "wait-for-safe-lane-lease",
+            },
+            {
+                "code": "SELF_MODIFY_HOLD",
+                "reason": "every remaining open issue lane maps to the shared source tree",
+                "next_action": "route-non-self-source-lane-or-enable-worktree-isolated-resolver",
+            },
+        ]
+        latest["next_action"] = "wait-for-safe-lane-lease"
+        p = build(mod, resolve_ticks=tick)
+        self.assertEqual(p["utilization"]["state"], "HEADROOM_HELD")
+        self.assertEqual(p["utilization"]["blockers"][0]["code"], "SAFE_LANES_BUSY")
+        self.assertEqual(p["utilization"]["next_actions"][0], "wait-for-safe-lane-lease")
+        self.assertIn("held SAFE_LANES_BUSY", mod.render(p))
+        self.assertTrue(any("last resolver tick held SAFE_LANES_BUSY" in r
+                            for r in mod._dispatch_slack_buckets(p)["action"]))
+
+    def test_lab_hold_is_a_utilization_blocker(self) -> None:
+        mod = load()
+        lab = {
+            "schema": mod.LAB_READINESS_SCHEMA,
+            "machine_class": "gpu-server",
+            "status": "INDETERMINATE",
+            "next_action": "publish-lab-readiness",
+            "evidence": "no-readiness-record",
+            "admit_lab_dispatch": False,
+        }
+        p = build(mod, resolve_ticks=resolver_tick(), lab_readiness=lab)
+        blockers = {b["code"]: b for b in p["utilization"]["blockers"]}
+        self.assertEqual(p["utilization"]["state"], "HEADROOM_LAUNCH_READY")
+        self.assertIn("LAB_READINESS_HELD", blockers)
+        self.assertIn("publish-lab-readiness", p["utilization"]["next_actions"])
+        md = mod.render_md(p, date="2026-07-04")
+        self.assertIn("**utilization**", md)
+        self.assertIn("publish-lab-readiness", md)
+        self.assertIn("lab publish command", md)
+
+    def test_stale_capacity_refusal_is_not_treated_as_current_hold(self) -> None:
+        mod = load()
+        p = build(mod, pre=pre("SPAWN_OK", live=0, cap=16),
+                  resolve_ticks=resolver_tick(
+                      verdict="REFUSE_AT_CAP",
+                      action="refused",
+                      ready=None,
+                      next_action="",
+                  ))
+        self.assertEqual(p["utilization"]["state"], "HEADROOM_STALE_PLAN")
+        self.assertEqual(p["utilization"]["blockers"][0]["code"], "STALE_PLANNER_REFUSAL")
+        self.assertIn("run-issue-resolve-dispatch-dry-run",
+                      p["utilization"]["next_actions"])
+        self.assertIn("HEADROOM_STALE_PLAN", mod.render(p))
 
 
 class LeaseStateTest(unittest.TestCase):
@@ -318,6 +740,48 @@ class LeaseStateTest(unittest.TestCase):
 
         self.assertFalse(state["candidate_source_available"])
         self.assertIsNone(state["active"][0]["blocks_candidate"])
+
+    def test_summarize_leases_annotates_session_liveness(self) -> None:
+        mod = load()
+        state = mod.summarize_leases([
+            {
+                "id": "resolve-docs",
+                "tree_globs": ["docs/**"],
+                "holder": "node-a/s-live",
+                "session_id": "s-live",
+                "acquired_unix": 1_000,
+                "ttl_seconds": 3_600,
+            },
+            {
+                "id": "resolve-tools",
+                "tree_globs": ["tools/**"],
+                "holder": "node-a/s-stopped",
+                "session_id": "s-stopped",
+                "acquired_unix": 1_000,
+                "ttl_seconds": 3_600,
+            },
+            {
+                "id": "resolve-gateway",
+                "tree_globs": ["internal/gateway/**"],
+                "holder": "legacy",
+                "acquired_unix": 1_000,
+                "ttl_seconds": 3_600,
+            },
+        ], self._backlog(), sessions={
+            "s-live": {"id": "s-live", "pcb_state": "RUNNING",
+                       "updated_at": 1_500, "ttl_seconds": 600},
+            "s-stopped": {"id": "s-stopped", "pcb_state": "STOPPED",
+                          "updated_at": 1_500, "ttl_seconds": 600},
+        }, now_ts=1_600)
+
+        by_id = {row["id"]: row for row in state["active"]}
+        self.assertEqual(by_id["resolve-docs"]["liveness"], "peer-live")
+        self.assertFalse(by_id["resolve-docs"]["reclaimable"])
+        self.assertEqual(by_id["resolve-docs"]["session_id"], "s-live")
+        self.assertEqual(by_id["resolve-tools"]["liveness"], "peer-dead")
+        self.assertTrue(by_id["resolve-tools"]["reclaimable"])
+        self.assertEqual(by_id["resolve-gateway"]["liveness"], "peer-unknown")
+        self.assertFalse(by_id["resolve-gateway"]["reclaimable"])
 
     def test_age_text_formats_minutes_and_hours(self) -> None:
         mod = load()
@@ -484,12 +948,14 @@ class RenderTest(unittest.TestCase):
 
         p = build(mod, worker_leases=worker_leases)
         self.assertTrue(any("orphan-process=1" in r for r in p["reasons"]))
+        self.assertTrue(any("unmatched-live-lease=1" in r for r in p["reasons"]))
         text = mod.render(p)
-        self.assertIn("lease chk : clean=1 orphan-process=1 orphan-lease=1", text)
+        self.assertIn("lease chk : clean=1 orphan-process=1 unmatched-live-lease=1", text)
         self.assertIn("orphan-process resolve-1770-20260701-120001", text)
-        self.assertIn("orphan-lease resolve-model-1700", text)
+        self.assertIn("unmatched-live-lease resolve-model-1700", text)
         slack = mod.slack_text(p)
-        self.assertIn("worker/lease orphans", slack)
+        self.assertIn("worker/lease mismatch", slack)
+        self.assertIn("unmatched-live-lease=1", slack)
 
 
 class SilentWorkersFoldTest(unittest.TestCase):
@@ -837,6 +1303,17 @@ class SeatInventoryPayloadTest(unittest.TestCase):
             and "cooling=1" in r and "unavailable=1" in r
             for r in p["reasons"]))
 
+    def test_unattributed_live_from_preflight_is_visible_in_summary(self) -> None:
+        mod = load()
+        inv = mod.annotate_seat_inventory_from_preflight(
+            self._pool(), {"seat": {"unattributed_live": 2}})
+        self.assertEqual(inv["free_seats"], 0)
+        self.assertEqual(inv["leased_seats"], 3)
+        self.assertTrue(inv["depleted"])
+        line = mod._seat_inventory_summary_line(inv)
+        self.assertIn("slots free=0 leased=3", line)
+        self.assertIn("unattributed_live=2", line)
+
     def test_auth_failed_seat_is_actionable_and_excluded_from_capacity(self) -> None:
         mod = load()
         p = build(mod, seat_inventory=self._pool())
@@ -852,6 +1329,28 @@ class SeatInventoryPayloadTest(unittest.TestCase):
         slack = mod.slack_text(p)
         self.assertIn("*dispatch scheduler:* `READY_TO_GROW` (ACTION)", slack)
         self.assertIn("action: auth_failed=1 [auth1]", slack)
+
+    def test_double_booked_seat_is_actionable(self) -> None:
+        mod = load()
+        pool = self._pool()
+        pool["double_booked"] = [{
+            "seat": "dir:opencode",
+            "tag": "default",
+            "workers": ["resolve-1", "resolve-2"],
+            "session_cap": 1,
+        }]
+        p = build(mod, seat_inventory=pool)
+        self.assertTrue(any(
+            "double_booked=1 [default:2/1]" in r
+            and "reap a dead/stale worker" in r
+            for r in p["reasons"]))
+
+        rendered = mod.render(p)
+        self.assertIn("double_booked=1 [default:2/1]", rendered)
+
+        slack = mod.slack_text(p)
+        self.assertIn("*dispatch scheduler:* `READY_TO_GROW` (ACTION)", slack)
+        self.assertIn("double_booked=1 [default:2/1]", slack)
 
     def test_seat_inventory_error_degrades_gracefully(self) -> None:
         mod = load()
@@ -971,8 +1470,8 @@ class RenderMdTest(unittest.TestCase):
         }
         md = mod.render_md(self._payload(mod, leases=leases), date="2026-06-30")
         self.assertIn("## Active lane leases", md)
-        self.assertIn("| `resolve-tools-1762` | tools | 10m | 3600s | blocks #1762 |", md)
-        self.assertIn("| `resolve-model-1700` | model | 5m | 3600s | no candidate |", md)
+        self.assertIn("| `resolve-tools-1762` | tools | 10m | 3600s | unknown | blocks #1762 |", md)
+        self.assertIn("| `resolve-model-1700` | model | 5m | 3600s | unknown | no candidate |", md)
         self.assertIn("1 expired lease record", md)
 
     def test_md_lists_worker_lease_cross_check_buckets(self) -> None:
@@ -999,6 +1498,8 @@ class RenderMdTest(unittest.TestCase):
         md = mod.render_md(self._payload(mod, worker_leases=worker_leases),
                            date="2026-07-01")
         self.assertIn("## Worker / lease cross-check", md)
+        self.assertIn("unmatched-live-lease=1", md)
+        self.assertIn("not automatically safe to reap", md)
         self.assertIn("| `resolve-1765-20260701-120000` | #1765 | 111 | `resolve-tools-1765` |", md)
         self.assertIn("| `resolve-1770-20260701-120001` | #1770 | 222 | `resolve-docs-1770` | missing active dispatch lease |", md)
         self.assertIn("| `resolve-model-1700` | model | `peer-b` | active lease has no local live worker sidecar |", md)
@@ -1241,6 +1742,229 @@ class GuardCoverageFoldTest(unittest.TestCase):
         p = build(mod)  # build() does not pass guard -> defaults to None -> {}
         self.assertEqual(p["guard"], {})
         self.assertFalse(any("fak guard witnessed" in r for r in p["reasons"]))
+
+
+class LowYieldLanesScanTest(unittest.TestCase):
+    """low_yield_lanes() binds turns-spent to ancestry-closes per lane (#2062) —
+    hermetic: a tmp runs-dir of resolve logs + an injected closes_counter (no git)."""
+
+    NOW = 2_000_000.0
+
+    def _mk(self, runs: Path, issue: int, stamp: str, *, lane: str, turns: int,
+            mtime: float, tree: list[str] | None = None) -> None:
+        import json as _json
+        import os
+        log = runs / f"resolve-{issue}-{stamp}.log"
+        lines = [f"# fak-spawn {stamp} issue={issue} lane={lane} backend=claude"]
+        lines += [f"fak-turn trace=guard ok prov={i}k tok" for i in range(turns)]
+        log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        os.utime(log, (mtime, mtime))
+        if tree is not None:
+            (runs / f"resolve-{issue}-{stamp}.lease-tree.json").write_text(
+                _json.dumps(tree), encoding="utf-8")
+
+    def test_high_turn_zero_close_lane_is_low_yield(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 2062, "20260704-120000", lane="tools", turns=44,
+                     mtime=self.NOW - 60, tree=["tools/**"])
+            out = mod.low_yield_lanes(
+                runs, closes_counter=lambda lane, tree: 0, now_ts=self.NOW)
+        self.assertEqual(out["low_yield_count"], 1)
+        row = out["lanes"][0]
+        self.assertEqual(row["lane"], "tools")
+        self.assertEqual(row["turns"], 44)
+        self.assertEqual(row["sessions"], 1)
+        self.assertEqual(row["closes"], 0)
+        self.assertTrue(row["tree_known"])
+        self.assertEqual(row["verdict"], "LOW_YIELD")
+        self.assertEqual(row["tree"], ["tools"])  # normalized pathspec
+
+    def test_lane_with_a_close_is_ok(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 2100, "20260704-120500", lane="docs", turns=60,
+                     mtime=self.NOW - 60, tree=["docs/**"])
+            out = mod.low_yield_lanes(
+                runs, closes_counter=lambda lane, tree: 3, now_ts=self.NOW)
+        self.assertEqual(out["low_yield_count"], 0)
+        self.assertEqual(out["lanes"][0]["verdict"], "OK")
+        self.assertEqual(out["lanes"][0]["closes"], 3)
+
+    def test_below_floor_lane_never_flags_and_skips_the_git_join(self) -> None:
+        mod = load()
+        calls: list[str] = []
+
+        def counter(lane, tree):
+            calls.append(lane)
+            return 0
+
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 2200, "20260704-121000", lane="model", turns=10,
+                     mtime=self.NOW - 60, tree=["internal/model/**"])
+            out = mod.low_yield_lanes(runs, closes_counter=counter, now_ts=self.NOW)
+        self.assertEqual(out["low_yield_count"], 0)
+        self.assertEqual(out["lanes"][0]["verdict"], "OK")
+        self.assertIsNone(out["lanes"][0]["closes"])
+        self.assertEqual(calls, [])  # a below-floor lane never pays the git join
+
+    def test_candidate_without_known_tree_is_not_flagged(self) -> None:
+        # High turns but no lease-tree sidecar and no lane_trees entry: we cannot
+        # join to the lane's tree, so we never fabricate a LOW_YIELD verdict.
+        mod = load()
+        calls: list[str] = []
+
+        def counter(lane, tree):
+            calls.append(lane)
+            return 0
+
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 2300, "20260704-121500", lane="mystery", turns=80,
+                     mtime=self.NOW - 60)  # no tree sidecar
+            out = mod.low_yield_lanes(runs, closes_counter=counter, now_ts=self.NOW)
+        row = out["lanes"][0]
+        self.assertEqual(row["turns"], 80)
+        self.assertFalse(row["tree_known"])
+        self.assertEqual(row["verdict"], "OK")
+        self.assertIsNone(row["closes"])
+        self.assertEqual(calls, [])
+
+    def test_lane_trees_map_overrides_sidecar_for_the_join(self) -> None:
+        mod = load()
+        seen: list[tuple[str, tuple]] = []
+
+        def counter(lane, tree):
+            seen.append((lane, tuple(tree)))
+            return 0
+
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            # No sidecar; the router's lane→tree map supplies the tree.
+            self._mk(runs, 2400, "20260704-122000", lane="bench", turns=50,
+                     mtime=self.NOW - 60)
+            out = mod.low_yield_lanes(
+                runs, closes_counter=counter,
+                lane_trees={"bench": ["internal/bench/**"]}, now_ts=self.NOW)
+        self.assertEqual(out["lanes"][0]["verdict"], "LOW_YIELD")
+        self.assertEqual(out["lanes"][0]["tree"], ["internal/bench"])
+        self.assertEqual(seen, [("bench", ("internal/bench",))])
+
+    def test_sessions_aggregate_turns_across_the_window(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 2500, "20260704-120000", lane="tools", turns=25,
+                     mtime=self.NOW - 120, tree=["tools/**"])
+            self._mk(runs, 2501, "20260704-121000", lane="tools", turns=20,
+                     mtime=self.NOW - 60, tree=["tools/**"])
+            out = mod.low_yield_lanes(
+                runs, closes_counter=lambda lane, tree: 0, now_ts=self.NOW)
+        row = out["lanes"][0]
+        self.assertEqual(row["sessions"], 2)
+        self.assertEqual(row["turns"], 45)            # 25 + 20 >= floor
+        self.assertEqual(row["max_session_turns"], 25)
+        self.assertEqual(row["verdict"], "LOW_YIELD")
+
+    def test_stale_logs_outside_the_window_are_ignored(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 2600, "20260701-120000", lane="tools", turns=90,
+                     mtime=self.NOW - 10 * 3600, tree=["tools/**"])  # 10h old
+            out = mod.low_yield_lanes(
+                runs, closes_counter=lambda lane, tree: 0, now_ts=self.NOW,
+                lookback_min=180)
+        self.assertEqual(out["lanes"], [])
+        self.assertEqual(out["low_yield_count"], 0)
+
+    def test_missing_runs_dir_is_empty(self) -> None:
+        mod = load()
+        out = mod.low_yield_lanes(
+            Path("does-not-exist-xyz"), closes_counter=lambda lane, tree: 0)
+        self.assertEqual(out["lanes"], [])
+        self.assertEqual(out["low_yield_count"], 0)
+        self.assertEqual(out["schema"], mod._LOW_YIELD_SCHEMA)
+
+    def test_turn_count_reads_fak_turn_lines(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            log = Path(d) / "resolve-1-20260704-120000.log"
+            log.write_text(
+                "# fak-spawn header lane=tools\n"
+                "fak-turn trace=guard cold prov=0 tok\n"
+                "some tool output that is not a turn\n"
+                "fak-turn trace=guard ok prov=5k tok\n",
+                encoding="utf-8")
+            self.assertEqual(mod._log_turn_count(log), 2)
+
+
+class LowYieldFoldTest(unittest.TestCase):
+    """build_payload folds the injected low_yield rollup into payload + a reason,
+    and render/render_md/slack surface a flagged lane — never flipping ok (#2062)."""
+
+    def _low_yield(self, **over) -> dict:
+        ly = {
+            "schema": "fleet-low-yield-lanes/1",
+            "turns_floor": 40,
+            "lookback_min": 180,
+            "low_yield_count": 1,
+            "lanes": [
+                {"lane": "tools", "sessions": 2, "turns": 118, "max_session_turns": 74,
+                 "closes": 0, "tree": ["tools"], "tree_known": True,
+                 "verdict": "LOW_YIELD",
+                 "evidence_logs": ["resolve-2062-20260704-120000.log"]},
+                {"lane": "docs", "sessions": 1, "turns": 60, "max_session_turns": 60,
+                 "closes": 4, "tree": ["docs"], "tree_known": True, "verdict": "OK",
+                 "evidence_logs": ["resolve-2100-20260704-121000.log"]},
+            ],
+        }
+        ly.update(over)
+        return ly
+
+    def test_flagged_lane_reaches_payload_reason_and_render(self) -> None:
+        mod = load()
+        p = build(mod, low_yield=self._low_yield())
+        self.assertTrue(p["ok"])  # informational only — never flips ok
+        self.assertEqual(p["low_yield"]["low_yield_count"], 1)
+        self.assertTrue(any("low-yield lane" in r and "#2062" in r for r in p["reasons"]))
+        rendered = mod.render(p)
+        self.assertIn("low-yield :", rendered)
+        self.assertIn("tools=118t/2s/0c", rendered)
+
+    def test_flagged_lane_is_a_slack_action(self) -> None:
+        mod = load()
+        p = build(mod, low_yield=self._low_yield())
+        buckets = mod._dispatch_slack_buckets(p)
+        self.assertTrue(any("lane tools low-yield" in r and "re-scope or exclude" in r
+                            for r in buckets["action"]))
+        self.assertEqual(mod._dispatch_headline_state(p), "ACTION")
+
+    def test_no_flagged_lane_emits_no_reason(self) -> None:
+        mod = load()
+        p = build(mod, low_yield=self._low_yield(
+            low_yield_count=0,
+            lanes=[{"lane": "docs", "sessions": 1, "turns": 60, "closes": 4,
+                    "tree": ["docs"], "tree_known": True, "verdict": "OK",
+                    "max_session_turns": 60, "evidence_logs": []}]))
+        self.assertFalse(any("low-yield lane" in r for r in p["reasons"]))
+        self.assertNotIn("low-yield :", mod.render(p))
+
+    def test_low_yield_defaults_to_empty_when_omitted(self) -> None:
+        mod = load()
+        p = build(mod)  # build() does not pass low_yield -> defaults to None -> {}
+        self.assertEqual(p["low_yield"], {})
+        self.assertFalse(any("low-yield lane" in r for r in p["reasons"]))
+
+    def test_md_low_yield_section_lists_flagged_lane(self) -> None:
+        mod = load()
+        md = mod.render_md(build(mod, low_yield=self._low_yield()), date="2026-07-04")
+        self.assertIn("## Low-yield lanes (turns spent vs ancestry closes)", md)
+        self.assertIn("| tools | 2 | 118 | 74 | 0 | **LOW_YIELD** |", md)
+        self.assertIn("| docs | 1 | 60 | 60 | 4 | ok |", md)
 
 
 if __name__ == "__main__":
