@@ -255,6 +255,86 @@ func TestWriteReportRoundTrip(t *testing.T) {
 	}
 }
 
+func TestLabReadinessContract(t *testing.T) {
+	checkedAt := time.Date(2026, 7, 4, 14, 0, 0, 0, time.UTC)
+	ready := NewLabReadiness("gpu-server", LabReadyForDevWork, "", "", checkedAt)
+	if ready.Schema != LabReadinessSchema {
+		t.Fatalf("schema = %q, want %q", ready.Schema, LabReadinessSchema)
+	}
+	if ready.CheckedAt != "2026-07-04T14:00:00Z" {
+		t.Fatalf("checked_at = %q", ready.CheckedAt)
+	}
+	if !ready.AdmitLabDispatch {
+		t.Fatal("READY_FOR_DEV_WORK must admit lab dispatch")
+	}
+	if probs := ready.Validate(); len(probs) != 0 {
+		t.Fatalf("ready record should validate: %v", probs)
+	}
+
+	hold := NewLabReadiness("gpu-server", LabWaitPrivateRecover, "", "", checkedAt)
+	if hold.AdmitLabDispatch {
+		t.Fatal("WAIT_PRIVATE_RECOVERY must fail closed")
+	}
+	if hold.NextAction != "confirm-private-control-session" {
+		t.Fatalf("next_action = %q", hold.NextAction)
+	}
+	cmds := DefaultLabReadinessCommands()
+	withCommands := ready
+	withCommands.Commands = &cmds
+	if probs := withCommands.Validate(); len(probs) != 0 {
+		t.Fatalf("default command hints should validate: %v", probs)
+	}
+
+	bad := LabReadiness{
+		Schema:       LabReadinessSchema,
+		MachineClass: "gpu.server",
+		CheckedAt:    "2026-07-04T14:00:00Z",
+		Status:       "PRIVATE_OK",
+		NextAction:   "see:C123",
+		Evidence:     "scrubbed-private-readback",
+		Commands: &LabReadinessCommands{
+			MarkReady: "private bridge command with token",
+		},
+	}
+	probs := strings.Join(bad.Validate(), " | ")
+	for _, want := range []string{"closed lab readiness vocabulary", "machine_class", "next_action", "commands.mark_ready"} {
+		if !strings.Contains(probs, want) {
+			t.Fatalf("expected %q in validation problems, got %q", want, probs)
+		}
+	}
+}
+
+func TestLoadLabReadinessForcesAdmissionBit(t *testing.T) {
+	doc := `{
+		"schema":"fak.lab_readiness/v1",
+		"machine_class":"gpu-server",
+		"checked_at":"2026-07-04T14:00:00Z",
+		"status":"READY_FOR_DEV_WORK",
+		"next_action":"admit-lab-backed-dispatch",
+		"evidence":"scrubbed-private-readback",
+		"admit_lab_dispatch":false,
+		"commands":{
+			"mark_ready":"fak lab readiness --status READY_FOR_DEV_WORK --write-default --json"
+		}
+	}`
+	got, err := LoadLabReadiness(strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("LoadLabReadiness: %v", err)
+	}
+	if !got.AdmitLabDispatch {
+		t.Fatal("loader must derive admit_lab_dispatch from status, not trust the file")
+	}
+	if got.Commands == nil || got.Commands.MarkReady == "" {
+		t.Fatalf("loader should accept default public command hints, got %+v", got.Commands)
+	}
+	if _, err := LoadLabReadiness(strings.NewReader(`{"schema":"fak.lab_readiness/v1","status":"READY_FOR_DEV_WORK","machine_class":"gpu-server","next_action":"admit-lab-backed-dispatch","evidence":"scrubbed-private-readback","raw_thread":"secret"}`)); err == nil {
+		t.Fatal("unknown raw/private fields must be refused")
+	}
+	if _, err := LoadLabReadiness(strings.NewReader(`{"schema":"fak.lab_readiness/v1","status":"READY_FOR_DEV_WORK","machine_class":"gpu-server","next_action":"admit-lab-backed-dispatch","evidence":"scrubbed-private-readback","commands":{"mark_ready":"private command"}}`)); err == nil {
+		t.Fatal("non-default command hints must be refused")
+	}
+}
+
 // ---- render: the 100-box scale witness --------------------------------------
 
 // TestRenderScalesTo100 is the headline scale guarantee: a 100-box fleet renders to
