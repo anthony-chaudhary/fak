@@ -111,16 +111,7 @@ func TestCheckRejectsFabricatedKeptIteration(t *testing.T) {
 
 func TestScorecardPayloadShapeAndGrade(t *testing.T) {
 	root := t.TempDir()
-	mustWrite(t, filepath.Join(root, "cmd", "fak", "main.go"), []byte("guard-verdict-rsi guard-rsi-scorecard"))
-	mustWrite(t, filepath.Join(root, "cmd", "fak", "guardrsi.go"), []byte("package main"))
-	mustWrite(t, filepath.Join(root, "cmd", "fak", "guard.go"), []byte("package main"))
-	mustWrite(t, filepath.Join(root, "internal", "guardrsi", "guardrsi_test.go"), []byte("package guardrsi"))
-	mustWrite(t, filepath.Join(root, "tools", "guard_hop_rsi.py"), []byte("PENDING_MEASUREMENT check_plan"))
-	mustWrite(t, filepath.Join(root, "tools", "scorecard_control_pane.py"), []byte("guard-rsi-scorecard guard_rsi_debt"))
-	mustWrite(t, filepath.Join(root, "tools", "scorecard_baseline.json"), []byte(`{"guard_rsi":1}`))
-	mustWrite(t, filepath.Join(root, ".claude", "skills", "guard-rsi-score", "SKILL.md"), []byte("skill"))
-	mustWrite(t, filepath.Join(root, "docs", "fak", "guard-verdict-rsi-loop.md"), []byte("doc"))
-	mustWrite(t, filepath.Join(root, ".dispatch-runs", "guard-audit", "one.jsonl"), []byte(`{"verdict":"DENY","reason":"POLICY_BLOCK","witness":{"policy":"fixture"}}`+"\n"))
+	writeGuardRSITree(t, root, true)
 
 	payload := BuildScorecard(root)
 	if payload.Schema != ScorecardSchema || payload.Corpus["guard_rsi_debt"] != 0 {
@@ -128,6 +119,39 @@ func TestScorecardPayloadShapeAndGrade(t *testing.T) {
 	}
 	if scorecard.GradeStd(90) != "A" || scorecard.GradeStd(80) != "B" || scorecard.GradeStd(70) != "C" || scorecard.GradeStd(60) != "D" || scorecard.GradeStd(59) != "F" {
 		t.Fatalf("grade boundaries changed")
+	}
+}
+
+// TestScorecardGradeRidesSharedKernelTable pins guard-rsi's grade to the shared
+// pkg/scorecard.GradeStd table (#1511): the emitted corpus grade must be exactly the
+// shared-table letter, so a re-copied local grade table can no longer drift this card off
+// the family curve. Both fixtures sit far from a grade boundary so the letter is
+// unambiguous, and the gap is forced by a root-only source omission (the audit journal
+// stays present) rather than the audit count, which loadContext also reads from the host.
+func TestScorecardGradeRidesSharedKernelTable(t *testing.T) {
+	t.Run("clean_tree_grades_off_shared_table", func(t *testing.T) {
+		// Every hard KPI passes -> composite 100 -> A, debt 0.
+		root := t.TempDir()
+		writeGuardRSITree(t, root, true)
+		assertGradeRidesTable(t, BuildScorecard(root), 100, 0)
+	})
+	t.Run("hard_gap_grades_off_shared_table", func(t *testing.T) {
+		// Dropping the control-pane registration fails one hard realized KPI -> composite
+		// ~89.1 -> B; only that gap moves the letter, so the grade is host-independent.
+		root := t.TempDir()
+		writeGuardRSITree(t, root, true)
+		mustWrite(t, filepath.Join(root, "tools", "scorecard_control_pane.py"), []byte(""))
+		assertGradeRidesTable(t, BuildScorecard(root), 89.1, 1)
+	})
+}
+
+func assertGradeRidesTable(t *testing.T, p scorecard.Payload, composite float64, wantDebt int) {
+	t.Helper()
+	if got, want := p.Corpus["grade"], scorecard.GradeStd(composite); got != want {
+		t.Fatalf("grade = %v, want shared-table GradeStd(%.1f)=%v", got, composite, want)
+	}
+	if got, ok := p.Corpus[DebtKey].(int); !ok || got != wantDebt {
+		t.Fatalf("%s = %v, want %d", DebtKey, p.Corpus[DebtKey], wantDebt)
 	}
 }
 
@@ -147,6 +171,25 @@ func writeJournal(t *testing.T, rows []map[string]any) string {
 		t.Fatalf("write journal: %v", err)
 	}
 	return path
+}
+
+// writeGuardRSITree lays down the minimal source/skill/doc tree BuildScorecard reads. With
+// withJournal it also drops one real adjudicated row so every hard KPI can pass (a clean,
+// grade-A build); without it the missing journal leaves one hard realized gap (debt 1).
+func writeGuardRSITree(t *testing.T, root string, withJournal bool) {
+	t.Helper()
+	mustWrite(t, filepath.Join(root, "cmd", "fak", "main.go"), []byte("guard-verdict-rsi guard-rsi-scorecard"))
+	mustWrite(t, filepath.Join(root, "cmd", "fak", "guardrsi.go"), []byte("package main"))
+	mustWrite(t, filepath.Join(root, "cmd", "fak", "guard.go"), []byte("package main"))
+	mustWrite(t, filepath.Join(root, "internal", "guardrsi", "guardrsi_test.go"), []byte("package guardrsi"))
+	mustWrite(t, filepath.Join(root, "tools", "guard_hop_rsi.py"), []byte("PENDING_MEASUREMENT check_plan"))
+	mustWrite(t, filepath.Join(root, "tools", "scorecard_control_pane.py"), []byte("guard-rsi-scorecard guard_rsi_debt"))
+	mustWrite(t, filepath.Join(root, "tools", "scorecard_baseline.json"), []byte(`{"guard_rsi":1}`))
+	mustWrite(t, filepath.Join(root, ".claude", "skills", "guard-rsi-score", "SKILL.md"), []byte("skill"))
+	mustWrite(t, filepath.Join(root, "docs", "fak", "guard-verdict-rsi-loop.md"), []byte("doc"))
+	if withJournal {
+		mustWrite(t, filepath.Join(root, ".dispatch-runs", "guard-audit", "one.jsonl"), []byte(`{"verdict":"DENY","reason":"POLICY_BLOCK","witness":{"policy":"fixture"}}`+"\n"))
+	}
 }
 
 func mustWrite(t *testing.T, path string, b []byte) {
