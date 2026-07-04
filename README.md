@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/anthony-chaudhary/fak/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/ci.yml) [![release artifacts](https://github.com/anthony-chaudhary/fak/actions/workflows/release-artifacts.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/release-artifacts.yml)
 
-<!-- readme-verified: 2026-07-03 vs VERSION 0.37.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. 2026-07-03: release pin refreshed for v0.37.0. 2026-07-01: front page halved; overflow: docs/README-legacy.md. Same day: hero video + gallery/video links re-surfaced; examples generalized to the hardware/harness sweep (HARDWARE-MATRIX + supported/); guided tutorial surfaced (Pick-your-path + docs map). -->
+<!-- readme-verified: 2026-07-04 vs VERSION 0.37.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. 2026-07-04: token-savings value prop foregrounded — "Token savings, set and forget" section + the 6-defaults scorecard link, "What you get" bullet reframed to the set-and-forget catch-all; honest provider-owned-vs-fak-authored split preserved (SESSION-CACHE-SAVINGS ablation). 2026-07-03: release pin refreshed for v0.37.0. 2026-07-01: front page halved; overflow: docs/README-legacy.md. Same day: hero video + gallery/video links re-surfaced; examples generalized to the hardware/harness sweep (HARDWARE-MATRIX + supported/); guided tutorial surfaced (Pick-your-path + docs map). -->
 
 <!-- lead source: docs/adoption/pitch-ladder.md (rung 1). Edit the ladder first; keep this lead consistent with its one-sentence pitch. -->
 fak in one line: fak treats every agent tool call like a syscall — the model proposes, the
@@ -42,8 +42,12 @@ ledger is [CLAIMS.md](CLAIMS.md):
   and Linux. On CUDA, in-kernel decode reaches ~120 tok/s on a single RTX 4070, inside
   llama.cpp's Q8_0 band of 120 +/- 15 tok/s. The sweep, per box:
   [docs/HARDWARE-MATRIX.md](docs/HARDWARE-MATRIX.md).
-- **The provider cache discount survives a long session.** `fak` sheds old turns while
-  keeping the prompt-cache prefix byte-identical, so the rebate holds.
+- **Six token-saving methods, on by default.** Run `fak guard` and every safe saver
+  turns on with no flags: three that cannot change your outputs, three that keep the
+  model's working set intact. `fak` also keeps your provider's prompt-cache discount
+  alive as the session grows, so the rebate you already have does not quietly break.
+  Set it once and stop chasing token-savings knobs — [the defaults, scored from the
+  binary itself](docs/serving/token-defaults-scorecard.md).
 - **The guard tax is ~362 ns per call:** the allow/deny decision runs in-process
   (measured, Apple M3 Pro), no network hop.
 
@@ -86,6 +90,39 @@ fak benchmarks list --offline   # -> the zero-asset benchmark set
 `fak routebench` replays a built-in 8-case corpus through a routing policy versus a
 single-model baseline and prints `routed is ~20% cheaper, ~10% less total compute, quality
 tied`: a deterministic offline lens.
+
+## Token savings, set and forget
+
+The reason to wrap your agent in `fak guard` for cost is that you run it once and stop
+thinking about token savings. Six methods that cut token cost turn on by default. There
+are no flags to find and no config to keep current.
+
+| Default saver | What it does | Touches your output? |
+|---|---|:--:|
+| Provider prompt-cache passthrough | forwards the cache breakpoints byte-for-byte so the provider's discount holds | no |
+| Tool-floor pruning | drops tool definitions the policy would deny anyway | no |
+| vDSO dedup | answers an identical repeated call from the previous result | no |
+| History compaction | sheds the un-cacheable middle of a long session past a budget | working set kept |
+| Oversized-result elision | shrinks a scrolled-past tool result to head and tail | working set kept |
+| Planned context view | re-materializes history under a token budget | working set kept |
+
+The first three are lossless: they cannot change a single output token, so there is no
+quality tax to weigh before turning them on. The last three keep the model's working set
+intact and each carries an honest note on what it sheds. You never pick these, tune them,
+or check that a new release still ships them. The defaults are re-derived from the binary's
+own entry points and pinned by a test, so they cannot silently regress. The live view is
+one command: `fak token-defaults-scorecard` (grade A, six of six on).
+
+Here is the part most cost pitches skip. On the flagship Claude Code route the biggest
+saving is the *provider's* prompt-cache discount, not fak's own savers. That discount only
+holds while the cached prefix stays byte-for-byte identical, which is what breaks when a
+session outgrows the window or a naive setup summarizes to save room. `fak` keeps the
+prefix identical as the session grows, so a discount you already have does not quietly stop
+working, and it relays the provider's own saved-token count each turn rather than claiming
+it. One portal keeps the whole stack on and shows it working, so you are not wiring up a
+shelf of separate techniques and hoping each is still firing. The full attribution, on a
+real 122-turn session:
+[what fak changed, and what the provider did](docs/notes/SESSION-CACHE-SAVINGS-ABLATION-2026-06-29.md).
 
 ## Run the model in the kernel
 
@@ -226,6 +263,7 @@ and the three-axes view (scale -> depth -> deployment substrate).
 | Always-on gateway (`fak node`) | [docs/fak/node-setup.md](docs/fak/node-setup.md) |
 | Guard sessions + a served model from Slack | [docs/fak/slack-sessions.md](docs/fak/slack-sessions.md) |
 | Long sessions / cache | [docs/explainers/long-sessions-keep-the-cache-hit.md](docs/explainers/long-sessions-keep-the-cache-hit.md) |
+| Token savings on by default (the set-and-forget stack) | [docs/serving/token-defaults-scorecard.md](docs/serving/token-defaults-scorecard.md) |
 | Capability floor (policy) | [POLICY.md](POLICY.md) · [examples/README.md](examples/README.md) |
 | CLI verbs | [docs/cli-reference.md](docs/cli-reference.md) |
 | Security model | [docs/fak/security.md](docs/fak/security.md) |

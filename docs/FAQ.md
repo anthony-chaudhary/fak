@@ -29,6 +29,22 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
     },
     {
       "@type": "Question",
+      "name": "Do I have to configure anything to save tokens?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. fak guard -- claude turns on six safe token-saving methods by default, with no flags and no config. Three are lossless and cannot change a single output token: provider prompt-cache passthrough (it forwards the cache breakpoints byte-for-byte so the provider's discount holds), tool-floor pruning (it drops tool definitions the policy would deny anyway), and vDSO dedup (it answers an identical repeated call from the previous result). Three are bounded — they keep the model's working set intact and each carries an honest note on what it sheds: history compaction, oversized-result elision, and a planned context view. You never pick, tune, or re-check them; the defaults are re-derived from the binary's own entry points and pinned by a test, so a new release cannot silently drop one. See them live with fak token-defaults-scorecard (grade A, six of six on), or read the token-saving-defaults scorecard."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What token savings does fak give me out of the box?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Two things, kept honestly separate. First, fak keeps your provider's prompt-cache discount alive as the session grows. That discount is often the difference between paying full price and a small fraction of it on a long run, and it only holds while the cached prefix stays byte-for-byte identical — which is exactly what breaks when a session outgrows the window, or when a naive setup summarizes to save room. fak holds the prefix identical and relays the provider's own saved-token count each turn rather than claiming it. On the flagship Claude Code route that provider discount is the biggest line item, and it is the provider's, not fak's. Second, fak adds its own savers on the uncached remainder (tool-floor pruning, history compaction, result elision, the planned view) and catches malformed or dead-end tool calls before they cost a wasted round-trip. The value is one portal that keeps the whole stack on and proves it each turn, so you are not wiring up and babysitting each technique yourself. The full attribution on a real 122-turn session is in what fak changed, and what the provider did."
+      }
+    },
+    {
+      "@type": "Question",
       "name": "How is fak different from a normal firewall or API gateway?",
       "acceptedAnswer": {
         "@type": "Answer",
@@ -1660,6 +1676,36 @@ wrong — at one boundary, the tool call:
    are gated by a reviewable allow-list checked inside the kernel — default-deny and
    fail-closed — and suspicious tool results are quarantined so they never enter the
    model's context.
+
+## Do I have to configure anything to save tokens?
+
+No. `fak guard -- claude` turns on six safe token-saving methods by default, with no
+flags and no config. Three are **lossless** and cannot change a single output token:
+provider prompt-cache passthrough (it forwards the cache breakpoints byte-for-byte so the
+provider's discount holds), tool-floor pruning (it drops tool definitions the policy would
+deny anyway), and vDSO dedup (it answers an identical repeated call from the previous
+result). Three are **bounded** — they keep the model's working set intact and each carries
+an honest note on what it sheds: history compaction, oversized-result elision, and a
+planned context view. You never pick, tune, or re-check them; the defaults are re-derived
+from the binary's own entry points and pinned by a test, so a new release cannot silently
+drop one. See them live with `fak token-defaults-scorecard` (grade A, six of six on), or read
+[the token-saving-defaults scorecard](serving/token-defaults-scorecard.md).
+
+## What token savings does fak give me out of the box?
+
+Two things, kept honestly separate. First, `fak` keeps your provider's prompt-cache
+discount alive as the session grows. That discount is often the difference between paying
+full price and a small fraction of it on a long run, and it only holds while the cached
+prefix stays byte-for-byte identical — which is exactly what breaks when a session outgrows
+the window, or when a naive setup summarizes to save room. `fak` holds the prefix identical
+and relays the provider's own saved-token count each turn rather than claiming it. On the
+flagship Claude Code route that provider discount is the biggest line item, and it is the
+*provider's*, not fak's. Second, `fak` adds its own savers on the uncached remainder
+(tool-floor pruning, history compaction, result elision, the planned view) and catches
+malformed or dead-end tool calls before they cost a wasted round-trip. The value is one
+portal that keeps the whole stack on and proves it each turn, so you are not wiring up and
+babysitting each technique yourself. The full attribution on a real 122-turn session is in
+[what fak changed, and what the provider did](notes/SESSION-CACHE-SAVINGS-ABLATION-2026-06-29.md).
 
 ## How is fak different from a normal firewall or API gateway?
 
