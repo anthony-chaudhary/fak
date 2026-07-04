@@ -94,6 +94,15 @@ The default report should also expose four non-overlapping numbers:
 
 These are ordered for product usefulness, with pure fak and API/provider work first.
 
+> **Landed-increment annotations (2026-07-04).** This page stays a planning artifact — it
+> ranks work, it does not certify shipped behavior. Where an item has since gained a landed
+> increment under epic [#1844](https://github.com/anthony-chaudhary/fak/issues/1844) /
+> [#1490](https://github.com/anthony-chaudhary/fak/issues/1490), the row's evidence cell now
+> carries a bold cross-ref (issue + a code/metric witness) so a reader ranking the backlog can
+> tell planned from landed. The cross-ref records the increment only; it does **not** change the
+> item's own open/closed tracking status (item 26 / #1544 is a live example: the join mechanism
+> is on the wire, yet the issue stays open because the dollar target is not yet met).
+
 | # | Lane | Item | Default/evidence target |
 |---:|---|---|---|
 | 1 | Scoring | Define `fak.cache.default_usefulness.v1` with the facets above. | `fak vcache score --json` and cachevalue reports can expose per-plane fields without breaking the old schema. |
@@ -117,12 +126,12 @@ These are ordered for product usefulness, with pure fak and API/provider work fi
 | 19 | Pure fak | Put `cachemeta.MaterializeVerdict` in front of every local cache serve path. | Local reuse remains governed by scope, freshness, taint, and quality evidence. |
 | 20 | Pure fak | Add a turn-tax adaptive planner that picks reuse, query, or cold prefill per turn. | Pure fak makes a cache decision by default and records why. |
 | 21 | API/provider | Extend provider telemetry parsing across OpenAI Chat, OpenAI Responses, Anthropic Messages, Gemini, and xAI-compatible responses. | All API modes can feed the same scorecard when counters exist. |
-| 22 | API/provider | Preserve Anthropic `cache_control` and OpenAI-compatible stable prefix bytes through guard/serve transformations. | The gateway's safety layer does not defeat provider reuse by rewriting stable prefixes. |
+| 22 | API/provider | Preserve Anthropic `cache_control` and OpenAI-compatible stable prefix bytes through guard/serve transformations. | The gateway's safety layer does not defeat provider reuse by rewriting stable prefixes. **Landed (part):** #1850 gated 1h `cache_control` TTL upgrade (`dbf5aaa4b`) + #1851 uncached-remainder trim (`e717e4403`), both `fak gateway` under #1844 C6/C7 (CLOSED). |
 | 23 | API/provider | Add an explicit "passive only" label for providers with no safe active warm primitive. | The operator sees observe/preserve/score but no active scheduler. |
 | 24 | API/provider | Implement provider constants as measured records with freshness, not hard-coded defaults. | TTL/min-prefix/read-discount are `MEASURED` or `HYPOTHESIS` with date and source. |
 | 25 | API/provider | Add a cache-budget dry run to `fak guard` startup. | Before a session starts, the user sees expected uncached budget and cache rebate is not pre-credited. |
-| 26 | API/provider | Join Track 2 provider-dollar rows into `fak cachevalue report`. | Provider-dollar claims become net OBSERVED economics, not token-only proxies. |
-| 27 | API/provider | Add provider-cache card fields for write cost, read rebate, hit rate, false-warm, and agentic activation. | A high provider hit rate cannot hide zero fak-authored cache decisions. |
+| 26 | API/provider | Join Track 2 provider-dollar rows into `fak cachevalue report`. | Provider-dollar claims become net OBSERVED economics, not token-only proxies. **Join live, item still OPEN (#1544):** `docs/nightrun/cache-savings.jsonl` + the two-track fold are joined by `fak cachevalue report`, but the dollars are DEFAULT-priced projections (`pricing_source=default:…`), not the net-OBSERVED economics this item targets — see [cache-value-rollup.md](../cache-value-rollup.md). |
+| 27 | API/provider | Add provider-cache card fields for write cost, read rebate, hit rate, false-warm, and agentic activation. | A high provider hit rate cannot hide zero fak-authored cache decisions. **Landed (part):** write-premium / read-rebate / spend / net `_usd` fields in `cache-savings.jsonl` + the per-owner/per-mechanism attribution card (#1491 CLOSED, with the #2179 CLOSED 1h-write pricing-tier fix); false-warm and agentic-activation card fields still planned. |
 | 28 | API/provider | Add per-family cache review rows to `docs/cache-frontier/review-ledger.jsonl`. | Weekly reviews can say which families are useful, flat, drifting, or disabled. |
 | 29 | API/provider | Gate dedicated warming on break-even, false-warm risk, secret class, and rate headroom. | Active warm does not arm just because a prefix is long. |
 | 30 | API/provider | Add send-one-then-fan scheduling for any active provider warm/fan-out path. | Dependents wait until the first request has made the prefix readable. |
