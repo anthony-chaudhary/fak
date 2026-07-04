@@ -248,3 +248,100 @@ func TestCachevalueReportIncludesFleetAggregateAndContextBudget(t *testing.T) {
 		}
 	}
 }
+
+// writeDevSessionFixture drops a fake Claude Code session transcript at
+// <root>/projects/<ns>/session1.jsonl and points CLAUDE_CONFIG_DIR at root, so
+// sessionaudit.Discover (via DefaultRoots) finds it without touching the real
+// ~/.claude/projects on the test machine.
+func writeDevSessionFixture(t *testing.T, root string) {
+	t.Helper()
+	t.Setenv("CLAUDE_CONFIG_DIR", root)
+	nsDir := filepath.Join(root, "projects", "fixture-ns")
+	if err := os.MkdirAll(nsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"assistant","message":{"id":"m1","model":"claude-opus-4-8-20260101","usage":{"input_tokens":100000,"output_tokens":20000,"cache_read_input_tokens":1000000,"cache_creation_input_tokens":200000}}}` + "\n"
+	if err := os.WriteFile(filepath.Join(nsDir, "session1.jsonl"), []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCachevalueReportDevSessionsOptIn is the CLI-seam test for Track 3 (#goal
+// cache-value-on-real-dev-sessions): --dev-sessions is opt-in (the recompute test above
+// asserts the default omits it), and when passed it prices a real, un-proxied transcript with
+// the same NewSavingsRows economics Track 2 uses.
+func TestCachevalueReportDevSessionsOptIn(t *testing.T) {
+	dir := t.TempDir()
+	track1, track2 := writeTwoLedgers(t, dir)
+	devRoot := t.TempDir()
+	writeDevSessionFixture(t, devRoot)
+
+	var out, errb bytes.Buffer
+	code := runCachevalueReport(&out, &errb, []string{
+		"--ledger", track1, "--savings-ledger", track2,
+		"--usage-ledger", filepath.Join(dir, "absent-usage.jsonl"),
+		"--dev-sessions", "--dev-sessions-all-namespaces", "--json",
+	})
+	if code != 0 {
+		t.Fatalf("report --json exit = %d, stderr=%s", code, errb.String())
+	}
+	var rep cachevaluereport.TwoTrackReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("report --json did not decode: %v\n%s", err, out.String())
+	}
+	if rep.DevSessionBenefit == nil {
+		t.Fatal("--dev-sessions must populate DevSessionBenefit")
+	}
+	d := rep.DevSessionBenefit
+	if d.Sessions != 1 || d.PricedSessions != 1 {
+		t.Fatalf("dev-session benefit = %+v, want 1 session/1 priced", d)
+	}
+	if d.CacheReadTokens != 1_000_000 || d.CacheCreationTokens != 200_000 {
+		t.Fatalf("dev-session token axes = %+v, want cache_read=1000000 cache_write=200000", d)
+	}
+	if d.ObservedAPICostAvoidedUSD <= 0 {
+		t.Fatalf("dev-session avoided $ should be positive: %+v", d)
+	}
+
+	// The plain-text table must render the fenced Track-3 section too.
+	var tableOut, tableErr bytes.Buffer
+	code = runCachevalueReport(&tableOut, &tableErr, []string{
+		"--ledger", track1, "--savings-ledger", track2,
+		"--usage-ledger", filepath.Join(dir, "absent-usage.jsonl"),
+		"--dev-sessions", "--dev-sessions-all-namespaces",
+	})
+	if code != 0 {
+		t.Fatalf("report table exit = %d, stderr=%s", code, tableErr.String())
+	}
+	got := tableOut.String()
+	for _, want := range []string{"Dev-session lens", "MAY OVERLAP"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("table missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestCachevalueReportDevSessionsDefaultOff confirms --dev-sessions is opt-in: without the
+// flag, a real fixture transcript on disk must NOT appear in the report.
+func TestCachevalueReportDevSessionsDefaultOff(t *testing.T) {
+	dir := t.TempDir()
+	track1, track2 := writeTwoLedgers(t, dir)
+	devRoot := t.TempDir()
+	writeDevSessionFixture(t, devRoot)
+
+	var out, errb bytes.Buffer
+	code := runCachevalueReport(&out, &errb, []string{
+		"--ledger", track1, "--savings-ledger", track2,
+		"--usage-ledger", filepath.Join(dir, "absent-usage.jsonl"), "--json",
+	})
+	if code != 0 {
+		t.Fatalf("report --json exit = %d, stderr=%s", code, errb.String())
+	}
+	var rep cachevaluereport.TwoTrackReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("report --json did not decode: %v\n%s", err, out.String())
+	}
+	if rep.DevSessionBenefit != nil {
+		t.Fatalf("DevSessionBenefit must stay nil without --dev-sessions: %+v", rep.DevSessionBenefit)
+	}
+}
