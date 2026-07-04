@@ -9,7 +9,7 @@
 # wheel in a free REPL at the end — type any tool name and watch it get judged.
 # Non-interactive (piped, or in CI): the four-step guided tour runs start-to-finish on
 # its own, so the same three distinct verdicts print without a human at the keyboard.
-set -uo pipefail
+set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"

@@ -48,6 +48,11 @@ go -C examples/mobile-ffi test ./...
 go -C examples/mobile-ffi run .
 ```
 
+Expected runtime: the test and run commands complete in seconds on a normal Go
+toolchain. The witness is deterministic: it uses fixed JSON tool calls and the
+engine-free adjudicator floor, so the allow/deny/fail-closed verdicts are stable
+across re-runs of the same checkout.
+
 Expected `run` output is captured in [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md); the
 final `mobile-ffi: OK` line and a zero exit are the witness.
 

@@ -18,6 +18,9 @@ verdicts print without a human at the keyboard:
 bash examples/playground/play.sh | cat   # non-interactive: the full tour runs start to finish
 ```
 
+Expected runtime: the non-interactive guided tour completes in seconds once `fak` is
+on `PATH`.
+
 ## Prerequisites
 
 A built `fak` binary on `PATH` (or `FAK_BIN=/path/to/fak`) — one static Go binary,

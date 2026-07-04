@@ -2,7 +2,7 @@
 # policy-loader-properties: witness the three structural loader guarantees
 # (fail-loud, replace-not-merge, round-trip-stable) plus the empty-manifest
 # warning, documented in POLICY.md "Safety properties of the loader".
-set -uo pipefail
+set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
@@ -20,8 +20,12 @@ fails=0
 expect_exit() {
   local case="$1" want="$2"; shift 2
   echo "== $case =="
-  "$@"
-  local got=$?
+  local got=0
+  if "$@"; then
+    got=0
+  else
+    got=$?
+  fi
   if [ "$got" -eq "$want" ]; then
     echo "-- exit=$got (expected $want) PASS"
   else
