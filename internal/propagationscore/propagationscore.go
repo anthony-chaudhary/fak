@@ -76,6 +76,7 @@ var Family = []Member{
 	{Verb: "loop-index-scorecard", CmdFile: "cmd/fak/loopscore.go", PkgDir: "internal/loopscore", DebtKey: "loopindex_debt"},
 	{Verb: "ui-quality-scorecard", CmdFile: "cmd/fak/uiqualityscore.go", PkgDir: "internal/uiquality", DebtKey: "ui_quality_debt"},
 	{Verb: "propagation-scorecard", CmdFile: "cmd/fak/propagationscore.go", PkgDir: "internal/propagationscore", DebtKey: DebtKey},
+	{Verb: "unwired-scorecard", CmdFile: "cmd/fak/unwiredscore.go", PkgDir: "internal/unwiredscore", DebtKey: "unwired_debt"},
 }
 
 // Convention is one "scoring concept" that, once improved in one card, SHOULD fan out to the
