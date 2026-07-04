@@ -21,6 +21,13 @@ Every generation issue should also carry the `generation` label. The stream
 label and milestone should agree. If they do not, treat the mismatch as intake
 drift: fix the label or milestone before using the issue for dispatch.
 
+The compatibility promise that lets later-horizon architecture work influence
+current APIs without a per-generation branch is pinned in
+[`docs/generation-abi-compatibility-policy.md`](generation-abi-compatibility-policy.md):
+the frozen wire ABI stays additive-only and the versioned JSONL schemas never
+edit a shipped `/N` in place, so concurrent generations share one trunk without
+a flag day.
+
 ## Orthogonality
 
 Generation is independent of priority. A `gen/future` issue can be high-value or
