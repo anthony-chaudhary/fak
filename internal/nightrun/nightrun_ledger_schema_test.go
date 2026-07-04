@@ -130,6 +130,23 @@ func TestValidateLedgerFlagsOffSchemaAndUnregistered(t *testing.T) {
 	}
 }
 
+// TestValidateLedgerAcceptsPartialOutcome pins that OutcomePartial (#2383) is a clean
+// member of the closed vocabulary from the CI validator's point of view: a registered
+// task's "partial" row must NOT be flagged off-schema, so the parse-on-timeout path can
+// append durable rows without ever failing `fak nightrun ledger --check`.
+func TestValidateLedgerAcceptsPartialOutcome(t *testing.T) {
+	registered := TaskIDSet([]Task{{ID: "bench-slow"}})
+	rows := []CollectRow{
+		{TaskID: "bench-slow", Outcome: string(OutcomePartial), Number: "12.5 tok/s"},
+	}
+	if defects := ValidateLedger(rows, registered); len(defects) != 0 {
+		t.Errorf("a registered task's partial row must validate clean, got defects %+v", defects)
+	}
+	if !IsValidOutcome(OutcomePartial) {
+		t.Error("OutcomePartial must be a member of the closed outcome vocabulary")
+	}
+}
+
 // TestNewBacklogRowRegistered pins that the #1138 frontier backlog row is registered, so
 // once a CUDA box with weights+net is reachable it is a pickable task — and so the ledger
 // validator accepts a row recorded against it.
