@@ -83,6 +83,41 @@ func TestRunFanScale_SmokeN8(t *testing.T) {
 	}
 }
 
+// An explicit, non-empty grid must be HONORED — the default only fills in for a caller
+// that provided no width at all. Passing Grid:[]int{1} means "score only the N=1 baseline"
+// (a cheap host smoke / isolated control); it must NOT silently expand to the full canonical
+// {1,100,500,1000} sweep, which drags in an expensive N=1000 cell the caller did not ask
+// for. This is the symmetric partner of TestRunFanScale_Capable1024 ([1024] -> [1,1024]):
+// a single-point grid stays a single-point grid (plus the always-present baseline).
+func TestRunFanScale_ExplicitBaselineGridHonored(t *testing.T) {
+	rep := RunFanScale(context.Background(), FanScaleOptions{
+		Grid: []int{1}, SubTurns: 1, Trials: 1,
+	})
+	if got, want := rep.Grid, []int{1}; !equalInts(got, want) {
+		t.Fatalf("explicit Grid []int{1} expanded to %v; a non-empty grid must be honored, want %v", got, want)
+	}
+	if len(rep.Points) != 1 {
+		t.Fatalf("points = %d, want exactly 1 (the requested N=1 point only)", len(rep.Points))
+	}
+	if rep.Points[0].Agents != 1 {
+		t.Errorf("points[0].Agents = %d, want 1", rep.Points[0].Agents)
+	}
+}
+
+// A grid with no usable width (nil, empty, or all-invalid) DOES fall back to the documented
+// canonical default — the flip side of TestRunFanScale_ExplicitBaselineGridHonored, so the
+// fix narrows the fallback to "no width provided" without dropping it for real empty input.
+func TestRunFanScale_NoUsableWidthUsesDefault(t *testing.T) {
+	for _, grid := range [][]int{nil, {}, {0}, {-5}} {
+		rep := RunFanScale(context.Background(), FanScaleOptions{
+			Grid: grid, SubTurns: 1, Trials: 1,
+		})
+		if got, want := rep.Grid, []int{1, 100, 500, 1000}; !equalInts(got, want) {
+			t.Errorf("grid %v (no usable width) = %v, want the canonical default %v", grid, got, want)
+		}
+	}
+}
+
 // The acceptance criteria name N=100/500/1000; assert the documented default grid carries
 // exactly those scale points (plus the N=1 baseline).
 func TestCanonicalFanScaleGrid_AcceptancePoints(t *testing.T) {

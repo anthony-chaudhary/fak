@@ -120,6 +120,21 @@ type FanScaleOptions struct {
 	Seed     int64                     // root seed (default fanScaleSeed)
 }
 
+// fanScaleGridHasUsableWidth reports whether the caller's RAW grid (pre-normalization)
+// named at least one strictly-positive width. This distinguishes an explicit request for
+// only the N=1 baseline (e.g. []int{1}, a deliberate cheap smoke) from a caller that gave
+// no usable width at all (nil, empty, or every value <1) — both normalize to the same
+// single-element []int{1}, so the fallback below must inspect the raw input, not the
+// normalized length.
+func fanScaleGridHasUsableWidth(grid []int) bool {
+	for _, n := range grid {
+		if n >= 1 {
+			return true
+		}
+	}
+	return false
+}
+
 // normalizeFanScaleGrid returns a sorted, unique, strictly-positive grid that always
 // includes 1 (the single-agent baseline that prices every overhead/uplift number).
 func normalizeFanScaleGrid(grid []int) []int {
@@ -180,7 +195,7 @@ func RunFanScale(ctx context.Context, opt FanScaleOptions) FanScaleReport {
 		opt.Seed = fanScaleSeed
 	}
 	grid := normalizeFanScaleGrid(opt.Grid)
-	if len(grid) == 1 { // only the implicit baseline survived (nil/empty input)
+	if !fanScaleGridHasUsableWidth(opt.Grid) { // nil/empty/all-invalid input: fall back to the default
 		grid = normalizeFanScaleGrid(CanonicalFanScaleGrid)
 	}
 
