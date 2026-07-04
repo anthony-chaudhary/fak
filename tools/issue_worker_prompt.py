@@ -141,8 +141,34 @@ def _generation_frame(issue: dict[str, Any]) -> str:
             "expected artifact=updated labels, milestone, or final report naming why classification is blocked")
 
 
-def render_prompt(issue: dict[str, Any], lane: str, *, workspace: str) -> str:
-    """Render the resolution prompt for ONE issue. Pure: no I/O."""
+def _windows_shell_guidance(host_os: str | None = None) -> str:
+    """PowerShell-native shell guidance for a worker on a Windows host; empty off-Windows.
+
+    An opencode/glm worker on Windows runs under PowerShell, but this repo's prose
+    leans on Unix tools (grep/wc/cat). A worker that shells out to those burns turns
+    on "unrecognized command" before recovering via the built-in search/read tools
+    (seen in the live repair-2464 log). Naming the PowerShell-native equivalents up
+    front stops that waste. Off-Windows this returns "" so a POSIX worker's prompt
+    is byte-identical to before. ``host_os`` is injectable for cross-platform tests.
+    """
+    if (host_os or os.name) != "nt":
+        return ""
+    return (
+        "host shell (Windows): this worker runs under PowerShell, not bash. Prefer the "
+        "built-in read/search tools where you can; when you shell out, use PowerShell-native "
+        "commands — `Select-String` for grep, `Get-Content` for cat, `Get-ChildItem` for "
+        "ls/find, `Measure-Object` or `.Count` for wc -l, `Select-Object -First/-Last` for "
+        "head/tail. Raw `grep`, `wc`, `cat`, and `find /` are NOT on PATH here and will fail "
+        "— do not waste turns rediscovering that."
+    )
+
+
+def render_prompt(issue: dict[str, Any], lane: str, *, workspace: str,
+                  host_os: str | None = None) -> str:
+    """Render the resolution prompt for ONE issue. Pure: no I/O.
+
+    ``host_os`` defaults to the runtime ``os.name``; pass it explicitly to exercise
+    the Windows/PowerShell shell hint on any platform in tests."""
     n = issue.get("number")
     title = (issue.get("title") or "").strip() or f"issue #{n}"
     body = (issue.get("body") or "").strip()
@@ -152,6 +178,8 @@ def render_prompt(issue: dict[str, Any], lane: str, *, workspace: str) -> str:
     labels = _labels(issue)
     generation = _generation_intent(issue)
     generation_frame = _generation_frame(issue)
+    win_hint = _windows_shell_guidance(host_os)
+    win_hint_block = f"\n{win_hint}\n" if win_hint else ""
 
     return f"""your goal: resolve GitHub issue #{n} ({title}) with the smallest correct \
 change that genuinely closes it, then ship it on `main` citing `#{n}` in the \
@@ -168,7 +196,7 @@ This issue routed to the `{lane}` lane (its file-tree). Labels: {labels}.
 Generation intent: {generation}. Generation is orthogonal to priority, shared trunk, and runtime feature gates.
 Generation frame: {generation_frame}.
 When closing generation work, name promotion evidence, demotion/retirement evidence, and at least one invalidating assumption in the artifact or final report.
-
+{win_hint_block}
 issue body (verbatim, may be truncated — re-read live):
 ---
 {body or '(no body — read the title and `gh issue view` for the full thread)'}
@@ -257,7 +285,8 @@ def _repair_row_line(row: dict[str, Any]) -> str:
 
 
 def render_repair_prompt(rows: list[dict[str, Any]], *, workspace: str,
-                         min_score: int = 100) -> str:
+                         min_score: int = 100,
+                         host_os: str | None = None) -> str:
     """Render the contract-repair prompt for a batch of gate-held issues.
     Pure: no I/O. ``rows`` carry {number,title,missing_fields,reasons} as the
     dispatcher's contract scan recorded them.
@@ -266,9 +295,14 @@ def render_repair_prompt(rows: list[dict[str, Any]], *, workspace: str,
     issue mutations are operator-gated on this host (the egress floor blocks a
     worker's direct edit), and the dispatcher's contract review merges
     body+overlay itself — so the overlay is both the write a worker can actually
-    complete and the backfill the gate actually reads."""
+    complete and the backfill the gate actually reads.
+
+    ``host_os`` defaults to the runtime ``os.name``; pass it explicitly to exercise
+    the Windows/PowerShell shell hint on any platform in tests."""
     numbers = [str(r.get("number") or r.get("issue")) for r in rows]
     issue_lines = "\n".join(_repair_row_line(r) for r in rows)
+    win_hint = _windows_shell_guidance(host_os)
+    win_hint_block = f"\n{win_hint}\n" if win_hint else ""
     return f"""your goal: bring {len(rows)} open GitHub issue(s) (#{', #'.join(numbers)}) up to \
 this repo's structured dispatch contract by writing ONE LOCAL CONTRACT OVERLAY \
 per issue — `.dispatch-runs/contract-overlays/issue-<N>.md` — containing the \
@@ -281,7 +315,7 @@ why: the dispatcher refuses to spawn on an issue whose contract review scores \
 below {min_score}. These issues predate the contract schema — the content the \
 fields need is usually already in the issue's own title, body, and thread; your \
 job is to reshape that evidence into the named sections, not to invent scope.
-
+{win_hint_block}
 the issues (work each one, oldest first):
 {issue_lines}
 

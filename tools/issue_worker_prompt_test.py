@@ -9,6 +9,7 @@ an injected runner so the gh shell-out never runs.
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 import tempfile
 import unittest
@@ -167,6 +168,69 @@ class RenderRepairPromptTest(unittest.TestCase):
         self.assertEqual(rec["prompt_chars"], len(rec["prompt"]))
         # Bounded: the whole batch prompt stays well under the /goal-style caps.
         self.assertLess(rec["prompt_chars"], 8000)
+
+
+class WindowsShellHintTest(unittest.TestCase):
+    """The opencode/glm worker on Windows runs under PowerShell but the repo's prose
+    leans on Unix tools — a worker that shells out to grep/wc burns turns on
+    "unrecognized command" (live repair-2464 log). The prompt must name the
+    PowerShell-native equivalents on Windows and stay byte-identical off-Windows."""
+
+    ISSUE = {"number": 2464, "title": "t", "body": "b", "labels": [], "state": "OPEN"}
+    REPAIR_ROWS = [{"number": 2464, "title": "t",
+                    "missing_fields": ["done_condition"], "reasons": ["X"]}]
+
+    def test_guidance_lists_powershell_equivalents_on_windows(self) -> None:
+        mod = load()
+        hint = mod._windows_shell_guidance("nt")
+        self.assertIn("PowerShell", hint)
+        # the exact equivalents the issue names + the exact commands the log saw fail
+        for tok in ("Select-String", "Get-Content", "Get-ChildItem",
+                    "Measure-Object", "grep", "wc"):
+            self.assertIn(tok, hint)
+
+    def test_guidance_empty_off_windows(self) -> None:
+        mod = load()
+        self.assertEqual(mod._windows_shell_guidance("posix"), "")
+
+    def test_resolver_prompt_carries_hint_on_windows(self) -> None:
+        mod = load()
+        p = mod.render_prompt(self.ISSUE, "tools", workspace="C:/work/fak", host_os="nt")
+        self.assertIn("PowerShell", p)
+        self.assertIn("Select-String", p)
+        # the commands that failed in the log are now named as NOT-on-PATH
+        self.assertIn("NOT on PATH", p)
+
+    def test_resolver_prompt_has_no_hint_off_windows(self) -> None:
+        mod = load()
+        p_posix = mod.render_prompt(self.ISSUE, "tools", workspace="C:/work/fak",
+                                    host_os="posix")
+        self.assertNotIn("PowerShell", p_posix)
+        self.assertNotIn("Select-String", p_posix)
+
+    def test_repair_prompt_carries_hint_on_windows(self) -> None:
+        mod = load()
+        p = mod.render_repair_prompt(self.REPAIR_ROWS, workspace="C:/work/fak",
+                                     host_os="nt")
+        self.assertIn("PowerShell", p)
+        self.assertIn("Select-String", p)
+
+    def test_repair_prompt_has_no_hint_off_windows(self) -> None:
+        mod = load()
+        p = mod.render_repair_prompt(self.REPAIR_ROWS, workspace="C:/work/fak",
+                                     host_os="posix")
+        self.assertNotIn("PowerShell", p)
+
+    def test_off_windows_is_byte_identical_to_default_on_posix(self) -> None:
+        # On a POSIX host the default-arg render must equal the explicit posix render,
+        # i.e. adding the host_os knob changed nothing for the non-Windows path.
+        if os.name != "posix":
+            self.skipTest("POSIX-host byte-identity check only runs on POSIX")
+        mod = load()
+        a = mod.render_prompt(self.ISSUE, "tools", workspace="C:/work/fak")
+        b = mod.render_prompt(self.ISSUE, "tools", workspace="C:/work/fak",
+                              host_os="posix")
+        self.assertEqual(a, b)
 
 
 class FetchIssueDecodeTest(unittest.TestCase):
