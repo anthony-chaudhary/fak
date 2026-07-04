@@ -42,9 +42,46 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
+	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
+
+// EvictDisposition records the fidelity of an eviction — the machine-readable form of
+// the never-saw caveat the code has always documented at every evict call site (a
+// scheduled or by-id evict is bit-identical to never-having-seen the span ONLY when no
+// later segment was prefilled over it). It is set by evict, never by the caller.
+type EvictDisposition uint8
+
+const (
+	// DispositionNone is the zero value: the span is still KV-resident (never evicted).
+	DispositionNone EvictDisposition = iota
+	// DispositionNeverSaw is the strongest fidelity: the eviction happened before any later
+	// segment's forward pass was prefilled over this span, so the compacted cache is
+	// byte-identical to a run that never saw it (max|Δ|=0 vs the never-saw reference). This
+	// is the fidelity AdmitResult's write-time evict inherits, and that Expire inherits for an
+	// end-of-turn span evicted before any downstream attention.
+	DispositionNeverSaw
+	// DispositionCompacted is the downgraded fidelity: the span was evicted AFTER a later
+	// segment's forward pass had already incorporated attention over its K/V positions. The
+	// survivors are renumbered correctly (the cache is a coherent compaction — removed and
+	// correct-going-forward), but it is NOT byte-identical to never-having-seen the span;
+	// that downstream KV stands. Expire marks a mid-context (cross-attended) expiry with this
+	// disposition rather than silently claiming bit-exactness.
+	DispositionCompacted
+)
+
+// String renders the disposition for audit/log surfaces.
+func (d EvictDisposition) String() string {
+	switch d {
+	case DispositionNeverSaw:
+		return "never-saw"
+	case DispositionCompacted:
+		return "compacted"
+	default:
+		return "resident"
+	}
+}
 
 // Segment is the contiguous K/V span one appended unit (a prompt chunk or a tool
 // result) occupies in the session's attention cache.
@@ -55,6 +92,33 @@ type Segment struct {
 	Len  int               // number of cached positions; 0 once evicted
 	Held bool              // true once this segment's K/V has been evicted from the cache
 	KV   cachemeta.EntryID // cachemeta identity for derived entries that parent this span
+
+	// Class is the write-time durability class stamped on a tool-result segment by the
+	// result-admit gate (ctxmmu.classifyDurability via Verdict.Meta["durability"]): one of
+	// ctxmmu.Durability{Turn,Session,Bounded,Durable}. It is the HOW-LONG-this-fact-is-true
+	// half of the S7 rung-3 expiry signal — populated in AdmitResult from the gate verdict.
+	// The other half (WHEN, an absolute clock) is the caller's: SetTTL stamps ExpiresAtUnix
+	// from the clock the boundary owner owns, since this package is deliberately time-agnostic.
+	// Empty for trusted spans added via Append (no gate verdict) — such a span never expires
+	// on its own (only an explicit Quarantine can remove it).
+	Class string
+
+	// ExpiresAtUnix is the absolute Unix-seconds time at which this segment's K/V should be
+	// forgotten, stamped by the turn/session boundary owner via SetTTL (S7 rung 3 — #80).
+	// Zero means no TTL is armed: Expire leaves the segment resident, and only an explicit
+	// Quarantine(id) can remove it. The engine never calls time.Now() — the clock is injected
+	// through Expire(nowUnix) and compared against this caller-stamped field.
+	ExpiresAtUnix int64
+
+	// Disposition records the fidelity of an eviction, set by evict: DispositionNone while the
+	// span is resident; DispositionNeverSaw if the eviction happened before any later segment
+	// was prefilled over this span (the cache is byte-identical to never-having-seen it,
+	// max|Δ|=0 vs the never-saw reference); DispositionCompacted if a later segment's forward
+	// pass had already absorbed attention over this span's positions (a coherent compaction —
+	// removed and correct-going-forward — but NOT the never-saw guarantee). This is the
+	// never-saw caveat the code documents at every evict call site, made machine-readable so a
+	// caller (Expire, Quarantine, a recall re-screen) cannot silently overclaim bit-exactness.
+	Disposition EvictDisposition
 
 	// Attended is the witnessed post-softmax attention mass this span has received in the
 	// CURRENT turn, accumulated by AttributeRow from the rung-1 attention observer
@@ -238,6 +302,13 @@ func (c *Context) AdmitResult(ctx context.Context, id, tool string, ids []int, b
 		Payload: abi.Ref{Kind: abi.RefInline, Inline: body, Len: int64(len(body))},
 	}
 	v = c.gate.Admit(ctx, call, res)
+	// Stamp the write-time durability class from the gate verdict onto the ledger segment
+	// (S7 rung 3 — #80). ctxmmu.classifyDurability writes Verdict.Meta["durability"]; an
+	// absent/unknown tag fails closed to the turn class. Class is the HOW-LONG half of the
+	// expiry signal; the WHEN half (ExpiresAtUnix) is stamped by the boundary owner via
+	// SetTTL, since this package never touches a clock. Set it before the quarantine branch
+	// so an immediately-evicted poison still records the class it was admitted under.
+	seg.Class = ctxmmu.NormalizeDurabilityClass(v.Meta[ctxmmu.DurabilityKey])
 	if v.Kind == abi.VerdictQuarantine {
 		c.evict(seg)
 		return v, true, nil
@@ -260,6 +331,81 @@ func (c *Context) Quarantine(id string) (evicted int, ok bool) {
 		}
 	}
 	return 0, false
+}
+
+// SetTTL stamps an absolute expiry on a recorded segment — the clock-injected write seam
+// the turn/session boundary owner calls to arm Expire (S7 rung 3 — #80). kvmmu is
+// deliberately time-agnostic (it never calls time.Now()), so the durability class the
+// write gate stamped on admission (seg.Class) is only HALF of the expiry signal: the
+// other half is WHEN, and that is the caller's clock, not the engine's. The turn boundary
+// owner reads seg.Class, maps it to a truth-duration (turn_end / session_end / an explicit
+// bounded expiry), and stamps the resulting absolute time here; Expire only reads it.
+// Returns false if the id is unknown or already held. A non-positive expiresAtUnix clears
+// the TTL (the segment will not expire on its own; only an explicit Quarantine can remove it).
+func (c *Context) SetTTL(id string, expiresAtUnix int64) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, s := range c.segs {
+		if s.ID == id && !s.Held {
+			s.ExpiresAtUnix = expiresAtUnix
+			return true
+		}
+	}
+	return false
+}
+
+// Expire is the time-driven forgetting move (S7 rung 3 — #80): it scans the ledger and
+// routes each segment whose TTL has elapsed through the proven c.evict, so a
+// turn/session-class span is forgotten on a clock set by its durability class — the
+// in-context analogue of the durable-boundary inversion (recall expires by default; here
+// the IN-CONTEXT KV does too, via the bit-exact model.KVCache.Evict). It returns the
+// count of segments whose K/V was actually removed.
+//
+// The clock is INJECTED (nowUnix is the only time the engine sees), never time.Now()
+// inside this package: kvmmu is deliberately time-agnostic so the eviction math stays
+// deterministic and testable, and no live scheduler runs inside the gate. The CALLER —
+// the turn/session boundary owner — stamps each segment's absolute ExpiresAtUnix (via
+// SetTTL) from the clock IT owns; Expire only reads.
+//
+// A segment is expired iff it has a positive ExpiresAtUnix that has passed
+// (ExpiresAtUnix <= nowUnix). Eviction runs in REVERSE-position order (highest From first)
+// so a multi-segment expiry renumbers correctly — the same invariant ApplyPlan relies on
+// for a multi-span elision.
+//
+// Never-saw caveat (enforced in code, not overclaimed): a scheduled evict inherits the
+// bit-exact max|Δ|=0 guarantee ONLY when no later segment was prefilled over the evicted
+// span — the write-time evict's own boundary, now relevant on the time axis. c.evict sets
+// each evicted segment's Disposition: DispositionNeverSaw for an end-of-turn span no
+// downstream attention has absorbed (bit-identical to never-having-seen it), or
+// DispositionCompacted for a mid-context span a later segment already attended to (a
+// coherent compaction — removed and correct-going-forward — but NOT the never-saw
+// guarantee). Expire does not claim bit-exactness where the boundary does not hold; a
+// caller that needs the never-saw guarantee reads seg.Disposition after the call.
+func (c *Context) Expire(nowUnix int64) (evicted int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// Reverse ledger order: evict the highest-From expired segment first so the renumber
+	// loop in evict (which only shifts later positions) touches segments already gone. This
+	// also makes each evicted segment's Disposition honest relative to SURVIVING segments:
+	// an expiring tail segment is processed before the earlier ones, so by the time an
+	// earlier expired segment is evicted, the already-evicted tail is Held and does not
+	// count as "downstream attention" — only still-resident later segments do.
+	for i := len(c.segs) - 1; i >= 0; i-- {
+		s := c.segs[i]
+		if s.Held {
+			continue
+		}
+		if s.ExpiresAtUnix <= 0 || s.ExpiresAtUnix > nowUnix {
+			continue
+		}
+		c.evict(s)
+		// evict returns 0 (and leaves Held=false) for a non-evictable recurrent cache
+		// (CanEvict != nil); only count segments whose K/V was actually removed.
+		if s.Held {
+			evicted++
+		}
+	}
+	return evicted
 }
 
 // Compact is the kernel-mediated external-compaction seam (issue #522): it swaps a
@@ -389,6 +535,21 @@ func (c *Context) evict(seg *Segment) int {
 	n := c.kv.Evict(seg.From, seg.Len)
 	c.external = append(c.external, cachemeta.PlanExternalInvalidations(seg.KV, c.meta)...)
 	c.invalidateReferences(seg.KV)
+	// Determine the eviction fidelity BEFORE the renumber loop disturbs Froms: never-saw iff
+	// no later (higher-position) segment survives in the ledger. A Held segment was already
+	// removed; a surviving later segment means its forward pass was prefilled over this span's
+	// positions and absorbed attention to it — the compacted cache after this evict is a
+	// coherent compaction, NOT byte-identical to never-having-seen the span. This is the
+	// never-saw caveat the code documents at every evict call site, now machine-readable on
+	// the segment so a caller (Expire, Quarantine, a recall re-screen) cannot silently
+	// overclaim bit-exactness where the boundary does not hold.
+	neverSaw := true
+	for _, s := range c.segs {
+		if s != seg && !s.Held && s.From > seg.From {
+			neverSaw = false
+			break
+		}
+	}
 	for _, s := range c.segs {
 		if s != seg && s.From > seg.From {
 			s.From -= seg.Len
@@ -396,6 +557,11 @@ func (c *Context) evict(seg *Segment) int {
 	}
 	seg.Held = true
 	seg.Len = 0
+	if neverSaw {
+		seg.Disposition = DispositionNeverSaw
+	} else {
+		seg.Disposition = DispositionCompacted
+	}
 	// A held span can no longer be attended to: its in-flight mass AND its rolling
 	// accumulators (cumulative/EMA/trajectory) all clear — the span is gone from the
 	// cache, so its attention history is moot. Survivors keep their accumulators

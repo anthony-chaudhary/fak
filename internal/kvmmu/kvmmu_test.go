@@ -72,6 +72,141 @@ func maxAbsDiff(a, b []float32) float64 {
 	return mx
 }
 
+// turnClassGate is the stub Gate the rung-3 test uses in place of the real rung-1
+// classifier: it ADMITS every result (Allow) but stamps a chosen durability class on the
+// verdict's Meta, so the test isolates the TTL/Expire path without depending on the
+// lexical classifier. It is the "stub gate stamps the tag — no classifier needed here"
+// the issue's acceptance criteria name.
+type turnClassGate struct{ class string }
+
+func (g turnClassGate) Admit(_ context.Context, _ *abi.ToolCall, _ *abi.Result) abi.Verdict {
+	return abi.Verdict{
+		Kind: abi.VerdictAllow,
+		By:   "stub-turn-class",
+		Meta: map[string]string{ctxmmu.DurabilityKey: g.class},
+	}
+}
+
+// findSeg returns the recorded segment with the given id, or nil.
+func findSeg(t *testing.T, c *kvmmu.Context, id string) *kvmmu.Segment {
+	t.Helper()
+	for _, s := range c.Segments() {
+		if s.ID == id {
+			return s
+		}
+	}
+	return nil
+}
+
+// TestTurnClassExpiryEqualsNeverSaw is the S7 rung-3 witness (issue #80), modeled on the
+// real TestWriteTimeEvictEqualsNeverSaw. A turn-class tool result is ADMITTED (the gate
+// stamps Meta["durability"]="turn" and returns Allow), so it stays KV-resident — the
+// non-vacuous control that absent Expire nothing forgets it. The turn boundary owner arms
+// a TTL (SetTTL), then Expire(turnEnd) evicts exactly the turn span, and because no later
+// segment was prefilled over it, the post-evict next-token distribution is BIT-IDENTICAL
+// (max|Δ|=0) to a session that never saw the turn span — while a run that KEEPS it differs.
+// A separate case proves a cross-attended early span is marked compacted, NOT never-saw.
+func TestTurnClassExpiryEqualsNeverSaw(t *testing.T) {
+	ctx := context.Background()
+	m := model.NewSynthetic(synthCfg())
+	prefix := []int{1, 2, 3, 4, 5}
+	turn := []int{10, 11, 12, 13} // a turn-class tool result
+	query := []int{20, 21}
+
+	// Reference distributions: never-saw-turn and turn-kept (no expire).
+	lNever := m.NewSession().Prefill(cat(prefix, query))
+	lKept := m.NewSession().Prefill(cat(prefix, turn, query))
+	dKept := maxAbsDiff(lKept, lNever)
+	if dKept == 0 {
+		t.Fatalf("turn span did not perturb the next-token distribution (max|Δ|=0) — the witness would be vacuous")
+	}
+
+	// --- Criteria 1-2: append prefix, ADMIT a turn-class result, assert admitted + resident. ---
+	const turnEndUnix = int64(1_700_000_000)
+	s := m.NewSession()
+	c := kvmmu.NewWithGate(s, turnClassGate{class: ctxmmu.DurabilityTurn})
+	c.Append("sys", "system", prefix)
+	v, admitted, _ := c.AdmitResult(ctx, "t1", "read_clock", turn, []byte("it is now 3pm"))
+	if v.Kind != abi.VerdictAllow {
+		t.Fatalf("turn-class result verdict = %v, want Allow (the stub gate admits)", v.Kind)
+	}
+	if admitted {
+		t.Fatal("a turn-class result was evicted on admission — it must stay resident until Expire")
+	}
+	t1 := findSeg(t, c, "t1")
+	if t1 == nil || t1.Held {
+		t.Fatalf("turn-class segment must be KV-resident before Expire, got %+v", t1)
+	}
+	if t1.Class != ctxmmu.DurabilityTurn {
+		t.Fatalf("t1.Class = %q, want %q (populated from Verdict.Meta[durability])", t1.Class, ctxmmu.DurabilityTurn)
+	}
+	if got := c.CacheLen(); got != len(prefix)+len(turn) {
+		t.Fatalf("after admit, cache len = %d, want %d (turn span resident)", got, len(prefix)+len(turn))
+	}
+
+	// Arm the expiry: the turn boundary owner stamps the absolute expiry from ITS clock.
+	if !c.SetTTL("t1", turnEndUnix) {
+		t.Fatal("SetTTL(t1) returned false — segment not found or already held")
+	}
+
+	// Injected-clock discipline: Expire BEFORE the boundary evicts nothing (the engine
+	// never decides on its own when "now" is — the caller's clock drives it).
+	if n := c.Expire(turnEndUnix - 1); n != 0 {
+		t.Fatalf("Expire(before-turnEnd) evicted %d, want 0 (the TTL has not elapsed)", n)
+	}
+	if got := c.CacheLen(); got != len(prefix)+len(turn) {
+		t.Fatalf("after pre-boundary Expire, cache len = %d, want %d (turn span still resident)", got, len(prefix)+len(turn))
+	}
+
+	// --- Criterion 3: Expire(turnEnd) evicts exactly 1 segment. ---
+	if n := c.Expire(turnEndUnix); n != 1 {
+		t.Fatalf("Expire(turnEnd) evicted %d segments, want 1", n)
+	}
+	if got := c.Evicted(); got != 1 {
+		t.Fatalf("Evicted() = %d, want 1", got)
+	}
+	if got := c.CacheLen(); got != len(prefix) {
+		t.Fatalf("after Expire, cache len = %d, want %d (turn span removed)", got, len(prefix))
+	}
+	// The evicted tail span had no downstream attention -> never-saw disposition.
+	if t1.Disposition != kvmmu.DispositionNeverSaw {
+		t.Fatalf("t1 disposition = %v, want DispositionNeverSaw (tail span, no downstream attention)", t1.Disposition)
+	}
+
+	// --- Criterion 4: post-evict distribution bit-identical to never-saw-turn; kept differs. ---
+	lExpire, _ := c.Append("usr", "user", query)
+	dExpire := maxAbsDiff(lExpire, lNever)
+	t.Logf("max|Δ| expire-vs-never = %.3e (want 0) ; turn-kept-vs-never = %.3e (want >0)", dExpire, dKept)
+	if dExpire != 0 {
+		t.Fatalf("turn-expired distribution != never-saw-turn (max|Δ|=%.3e); want bit-identical (never-saw)", dExpire)
+	}
+	// The un-expired run differs (dKept > 0, established above as the non-vacuity control).
+
+	// --- Criterion 5: a cross-attended early span is marked compacted, NOT never-saw. ---
+	s2 := m.NewSession()
+	c2 := kvmmu.NewWithGate(s2, turnClassGate{class: ctxmmu.DurabilityTurn})
+	c2.Append("sys", "system", prefix)
+	c2.AdmitResult(ctx, "t2", "read_clock", turn, []byte("it is now 3pm"))
+	c2.Append("q", "user", query) // a later query is prefilled OVER the turn span -> cross-attended
+	c2.SetTTL("t2", turnEndUnix)
+	if n := c2.Expire(turnEndUnix); n != 1 {
+		t.Fatalf("cross-attended Expire evicted %d segments, want 1", n)
+	}
+	t2 := findSeg(t, c2, "t2")
+	if t2.Disposition != kvmmu.DispositionCompacted {
+		t.Fatalf("cross-attended t2 disposition = %v, want DispositionCompacted (a later query attended over it)", t2.Disposition)
+	}
+	// Justify the downgrade: the compacted cache is NOT bit-identical to never-saw. Appending
+	// the same suffix and comparing against a never-saw-turn reference must differ — the
+	// later query's KV absorbed the turn span, so removing it compacts but does not un-see.
+	suffix := []int{30, 31}
+	lCompact, _ := c2.Append("u2", "user", suffix)
+	refCompact := m.NewSession().Prefill(cat(prefix, query, suffix))
+	if d := maxAbsDiff(lCompact, refCompact); d == 0 {
+		t.Fatalf("cross-attended compacted cache is unexpectedly bit-identical to never-saw (max|Δ|=0) — the disposition downgrade to compacted would be unjustified")
+	}
+}
+
 // TestWriteTimeEvictEqualsNeverSaw is the load-bearing bridge witness. The REAL
 // ctxmmu gate reads REAL poison bytes and returns Quarantine; the bridge enforces
 // that decision by EVICTING the result's span from the kernel-owned KV cache; the
