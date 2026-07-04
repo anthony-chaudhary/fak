@@ -1084,6 +1084,53 @@ func TestFormatAuditSummary(t *testing.T) {
 	}
 }
 
+// TestFormatAuditSummarySplitsToolFeedbackFromDenyAllStop pins the #2632 contract: the guard
+// exit summary must distinguish a PER-TOOL refusal turn (retryable model feedback — the turn
+// keeps going) from a turn/session STOP (a deny-all that ended the turn), so a strict floor does
+// not read like a dead session. The two counters render on separate lines with separate wording,
+// and neither appears on a run that did not hit it.
+func TestFormatAuditSummarySplitsToolFeedbackFromDenyAllStop(t *testing.T) {
+	// A denied tool that was RETRYABLE feedback: the turn was NOT stopped.
+	feedback := formatAuditSummary(gateway.AdjudicationSummary{
+		Total: 5, Allowed: 2, Denied: 3, ToolFeedbackTurns: 2,
+		ByReason: map[string]uint64{"MALFORMED": 3},
+	})
+	for _, want := range []string{
+		"tool-feedback turns", "2 turn(s)", "RETRYABLE", "NOT stopped", "not a session stop",
+	} {
+		if !strings.Contains(feedback, want) {
+			t.Errorf("tool-feedback summary missing %q:\n%s", want, feedback)
+		}
+	}
+	// A retryable-feedback run must NOT claim the turn/session stopped.
+	if strings.Contains(feedback, "deny-all stops") {
+		t.Errorf("a tool-feedback run must not print a deny-all stop line:\n%s", feedback)
+	}
+
+	// A managed stop: every proposed call refused and the turn ended (deny-all).
+	stop := formatAuditSummary(gateway.AdjudicationSummary{
+		Total: 3, Allowed: 0, Denied: 3, DenyAllStops: 1,
+		ByReason: map[string]uint64{"POLICY_BLOCK": 3},
+	})
+	for _, want := range []string{
+		"deny-all stops", "a stop the agent did not choose", "--deny-all-continue=enforce",
+	} {
+		if !strings.Contains(stop, want) {
+			t.Errorf("deny-all stop summary missing %q:\n%s", want, stop)
+		}
+	}
+	// A deny-all stop with no retryable-feedback turns must NOT print the tool-feedback line.
+	if strings.Contains(stop, "tool-feedback turns") {
+		t.Errorf("a deny-all stop run with no tool-feedback turns must not print a tool-feedback line:\n%s", stop)
+	}
+
+	// A clean run prints neither control line — the split stays quiet when nothing fired.
+	clean := formatAuditSummary(gateway.AdjudicationSummary{Total: 3, Allowed: 3})
+	if strings.Contains(clean, "tool-feedback turns") || strings.Contains(clean, "deny-all stops") {
+		t.Errorf("a clean run must print neither the tool-feedback nor the deny-all stop line:\n%s", clean)
+	}
+}
+
 // TestFormatVCacheSnapshotPointer pins the exit pointer that closes the loop from the LIVE
 // guard cache summary to the OFFLINE `fak vcache` family: a session that recorded turns must
 // name the snapshot path AND the `fak vcache score` command that replays it (the related
