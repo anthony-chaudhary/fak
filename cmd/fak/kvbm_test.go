@@ -21,6 +21,8 @@ func TestRunKVBMReplayArtifactCheck(t *testing.T) {
 		"kvbm replay: issue2666-agent-session-hot-prefix-pin-restore",
 		"cost-aware: hits=150/450",
 		"lru:        hits=100/450",
+		"oracle:    hits=150/450 exact=true",
+		"oracle_bounds=true",
 		"pins_safe=true",
 		"restore_bytes_stable=true",
 		"verdict: PASS",
@@ -42,6 +44,7 @@ func TestRunKVBMReplayJSON(t *testing.T) {
 		OK     bool `json:"ok"`
 		Checks struct {
 			CostAwareAtLeastLRU  bool `json:"cost_aware_at_least_lru"`
+			OracleBoundsPolicies bool `json:"oracle_bounds_policies"`
 			PinPressureExercised bool `json:"pin_pressure_exercised"`
 			PinsSafe             bool `json:"pins_safe"`
 			RestoreExercised     bool `json:"restore_exercised"`
@@ -51,8 +54,9 @@ func TestRunKVBMReplayJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("kvbm replay JSON did not parse: %v\n%s", err, stdout.String())
 	}
-	if !payload.OK || !payload.Checks.CostAwareAtLeastLRU || !payload.Checks.PinPressureExercised ||
-		!payload.Checks.PinsSafe || !payload.Checks.RestoreExercised || !payload.Checks.RestoreBytesStable {
+	if !payload.OK || !payload.Checks.CostAwareAtLeastLRU || !payload.Checks.OracleBoundsPolicies ||
+		!payload.Checks.PinPressureExercised || !payload.Checks.PinsSafe ||
+		!payload.Checks.RestoreExercised || !payload.Checks.RestoreBytesStable {
 		t.Fatalf("kvbm replay JSON did not carry passing checks: %+v", payload)
 	}
 }

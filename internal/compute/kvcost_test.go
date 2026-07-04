@@ -126,35 +126,7 @@ func TestPickEvictionVictimReturnsMinusOneWhenAllLocked(t *testing.T) {
 // the "eviction-pressure trace where cost-aware beats LRU" the issue's witness checkbox
 // names; the simulator (ReplayKVCache) is the committed artifact.
 func TestReplayCostAwareBeatsLRUOnHotSpanTrace(t *testing.T) {
-	const (
-		hot   = 1
-		cold1 = 2
-		cold2 = 3
-		cold3 = 4
-		cold4 = 5
-	)
-	// Every span is 50 tokens; the budget holds exactly 2 spans resident (100 tokens).
-	const spanTokens, budget = 50, 100
-	trace := []KVReplayEvent{
-		{hot, spanTokens},   // t1: insert HOT.            resident: {HOT}
-		{cold1, spanTokens}, // t2: insert COLD1.          resident: {HOT,COLD1} (full)
-		{hot, spanTokens},   // t3: HIT HOT (HOT.hits=1).  resident unchanged
-		{cold2, spanTokens}, // t4: insert COLD2, evict 1.
-		//   LRU:        HOT@3 newer than COLD1@2 -> evict COLD1. {HOT,COLD2}
-		//   cost-aware: HOT.cost(Hits=1)=2 > COLD1.cost(Hits=0)=1 -> evict COLD1.
-		{cold3, spanTokens}, // t5: insert COLD3, evict 1.
-		//   LRU:        HOT@3 OLDER than COLD2@4 -> evict HOT!  {COLD2,COLD3}
-		//   cost-aware: HOT.cost=2 > COLD2.cost=1 -> evict COLD2. {HOT,COLD3}
-		{hot, spanTokens}, // t6: access HOT.
-		//   LRU:        MISS (evicted@5), re-insert HOT, evict COLD2@4 (oldest). {HOT,COLD3}
-		//   cost-aware: HIT (HOT.hits=2).
-		{cold4, spanTokens}, // t7: insert COLD4, evict 1.
-		//   LRU:        COLD3@5 older than HOT@6 -> evict COLD3. {HOT,COLD4}
-		//   cost-aware: HOT.cost(Hits=2)=3 > COLD3.cost=1 -> evict COLD3. {HOT,COLD4}
-		{hot, spanTokens}, // t8: access HOT.
-		//   LRU:        HIT now (HOT resident since t6).
-		//   cost-aware: HIT (HOT.hits=3).
-	}
+	trace, spanTokens, budget := hotColdKVReplayTrace()
 	lruHits, accessed := ReplayKVCache(trace, budget, KVEvictLRU)
 	costHits, _ := ReplayKVCache(trace, budget, KVEvictCostAware)
 
@@ -170,6 +142,57 @@ func TestReplayCostAwareBeatsLRUOnHotSpanTrace(t *testing.T) {
 	if minExtra := spanTokens; costHits-lruHits < minExtra {
 		t.Fatalf("cost-aware lead (%d) below the single t6 hot-hit divergence (%d): LRU=%d cost=%d",
 			costHits-lruHits, minExtra, lruHits, costHits)
+	}
+}
+
+func TestReplayKVCacheMultiScoresAgainstBeladyOracle(t *testing.T) {
+	trace, _, budget := hotColdKVReplayTrace()
+	rows := ReplayKVCacheMulti(trace, budget, KVEvictLRU, KVEvictCostAware)
+	oracle := BeladyKVReplayOracle(trace, budget)
+	if !oracle.Exact || oracle.HitTokens != 150 {
+		t.Fatalf("Belady oracle = %+v, want exact 150 hit tokens", oracle)
+	}
+	lru := rows[KVEvictLRU]
+	cost := rows[KVEvictCostAware]
+	if lru.HitTokens != 100 || cost.HitTokens != 150 {
+		t.Fatalf("policy hit tokens = LRU %d cost-aware %d, want 100/150", lru.HitTokens, cost.HitTokens)
+	}
+	if cost.GoodDecisionRatio != 1 {
+		t.Fatalf("cost-aware good-decision ratio = %v, want 1 against oracle %+v", cost.GoodDecisionRatio, oracle)
+	}
+	if lru.GoodDecisionRatio >= cost.GoodDecisionRatio {
+		t.Fatalf("LRU good-decision ratio should be below cost-aware: LRU=%+v cost=%+v", lru, cost)
+	}
+	if cost.EvictionsPerHit >= lru.EvictionsPerHit {
+		t.Fatalf("cost-aware stability should beat LRU: LRU=%+v cost=%+v", lru, cost)
+	}
+}
+
+func TestReplayKVCacheResultMatchesLegacyReplay(t *testing.T) {
+	trace, _, budget := hotColdKVReplayTrace()
+	for _, policy := range []KVEvictPolicy{KVEvictLRU, KVEvictCostAware} {
+		hits, accessed := ReplayKVCache(trace, budget, policy)
+		result := ReplayKVCacheResult(trace, budget, policy)
+		if result.HitTokens != hits || result.AccessTokens != accessed {
+			t.Fatalf("structured replay mismatch for policy %d: result=%+v legacy=%d/%d",
+				policy, result, hits, accessed)
+		}
+		if result.Evictions == 0 {
+			t.Fatalf("structured replay did not count evictions for policy %d: %+v", policy, result)
+		}
+	}
+}
+
+func TestBeladyKVReplayOracleUnboundedMatchesAllReuses(t *testing.T) {
+	trace := []KVReplayEvent{
+		{1, 10},
+		{1, 10},
+		{2, 20},
+		{1, 10},
+	}
+	oracle := BeladyKVReplayOracle(trace, 0)
+	if !oracle.Exact || oracle.HitTokens != 20 || oracle.AccessTokens != 50 {
+		t.Fatalf("unbounded oracle = %+v, want exact 20/50", oracle)
 	}
 }
 
@@ -225,4 +248,36 @@ func TestReplaySkipsNonPositiveTokens(t *testing.T) {
 	if hits != 0 || accessed != 10 {
 		t.Fatalf("non-positive events skipped: hits=%d accessed=%d, want 0/10", hits, accessed)
 	}
+}
+
+func hotColdKVReplayTrace() ([]KVReplayEvent, int, int) {
+	const (
+		hot   = 1
+		cold1 = 2
+		cold2 = 3
+		cold3 = 4
+		cold4 = 5
+	)
+	// Every span is 50 tokens; the budget holds exactly 2 spans resident (100 tokens).
+	const spanTokens, budget = 50, 100
+	return []KVReplayEvent{
+		{hot, spanTokens},   // t1: insert HOT.            resident: {HOT}
+		{cold1, spanTokens}, // t2: insert COLD1.          resident: {HOT,COLD1} (full)
+		{hot, spanTokens},   // t3: HIT HOT (HOT.hits=1).  resident unchanged
+		{cold2, spanTokens}, // t4: insert COLD2, evict 1.
+		//   LRU:        HOT@3 newer than COLD1@2 -> evict COLD1. {HOT,COLD2}
+		//   cost-aware: HOT.cost(Hits=1)=2 > COLD1.cost(Hits=0)=1 -> evict COLD1.
+		{cold3, spanTokens}, // t5: insert COLD3, evict 1.
+		//   LRU:        HOT@3 OLDER than COLD2@4 -> evict HOT!  {COLD2,COLD3}
+		//   cost-aware: HOT.cost=2 > COLD2.cost=1 -> evict COLD2. {HOT,COLD3}
+		{hot, spanTokens}, // t6: access HOT.
+		//   LRU:        MISS (evicted@5), re-insert HOT, evict COLD2@4 (oldest). {HOT,COLD3}
+		//   cost-aware: HIT (HOT.hits=2).
+		{cold4, spanTokens}, // t7: insert COLD4, evict 1.
+		//   LRU:        COLD3@5 older than HOT@6 -> evict COLD3. {HOT,COLD4}
+		//   cost-aware: HOT.cost(Hits=2)=3 > COLD3.cost=1 -> evict COLD3. {HOT,COLD4}
+		{hot, spanTokens}, // t8: access HOT.
+		//   LRU:        HIT now (HOT resident since t6).
+		//   cost-aware: HIT (HOT.hits=3).
+	}, spanTokens, budget
 }

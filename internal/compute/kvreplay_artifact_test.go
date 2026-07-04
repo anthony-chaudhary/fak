@@ -24,6 +24,9 @@ func TestKVReplayArtifactWitnessesCostAwarePinAndRestore(t *testing.T) {
 		t.Fatalf("cost-aware replay regressed below LRU: LRU=%d cost-aware=%d accessed=%d",
 			report.LRU.HitTokens, report.CostAware.HitTokens, report.CostAware.AccessTokens)
 	}
+	if !report.Oracle.Exact || report.Oracle.HitTokens != report.CostAware.HitTokens {
+		t.Fatalf("oracle = %+v, want exact upper bound matching cost-aware hits %d", report.Oracle, report.CostAware.HitTokens)
+	}
 	if lead := report.CostAware.HitTokens - report.LRU.HitTokens; lead < 50 {
 		t.Fatalf("cost-aware lead = %d tokens, want at least the restored hot-prefix span", lead)
 	}

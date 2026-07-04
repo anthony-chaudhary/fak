@@ -87,6 +87,7 @@ type kvbmReplayEnvelope struct {
 
 type kvbmReplayChecks struct {
 	CostAwareAtLeastLRU  bool `json:"cost_aware_at_least_lru"`
+	OracleBoundsPolicies bool `json:"oracle_bounds_policies"`
 	PinPressureExercised bool `json:"pin_pressure_exercised"`
 	PinsSafe             bool `json:"pins_safe"`
 	RestoreExercised     bool `json:"restore_exercised"`
@@ -95,7 +96,9 @@ type kvbmReplayChecks struct {
 
 func newKVBMReplayEnvelope(path string, report compute.KVReplayArtifactReport) kvbmReplayEnvelope {
 	checks := kvbmReplayChecks{
-		CostAwareAtLeastLRU:  report.CostAwareAtLeastLRU(),
+		CostAwareAtLeastLRU: report.CostAwareAtLeastLRU(),
+		OracleBoundsPolicies: report.Oracle.Exact &&
+			(report.Oracle.HitTokens >= report.LRU.HitTokens && report.Oracle.HitTokens >= report.CostAware.HitTokens),
 		PinPressureExercised: report.LRU.PinnedSkips+report.CostAware.PinnedSkips > 0,
 		PinsSafe:             report.PinViolations() == 0,
 		RestoreExercised:     report.LRU.Restores+report.CostAware.Restores > 0,
@@ -105,6 +108,7 @@ func newKVBMReplayEnvelope(path string, report compute.KVReplayArtifactReport) k
 		Schema:   "fak.kvbm.replay.report/v1",
 		Artifact: path,
 		OK: checks.CostAwareAtLeastLRU &&
+			checks.OracleBoundsPolicies &&
 			checks.PinPressureExercised &&
 			checks.PinsSafe &&
 			checks.RestoreExercised &&
@@ -123,8 +127,9 @@ func renderKVBMReplay(w io.Writer, env kvbmReplayEnvelope) {
 		r.LRU.HitTokens, r.LRU.AccessTokens, r.LRU.HitRate(), r.LRU.Evictions, r.LRU.Restores, r.LRU.PinnedSkips, r.LRU.BitDriftMismatches)
 	fmt.Fprintf(w, "cost-aware: hits=%d/%d rate=%.3f evictions=%d restores=%d pinned_skips=%d drift=%d\n",
 		r.CostAware.HitTokens, r.CostAware.AccessTokens, r.CostAware.HitRate(), r.CostAware.Evictions, r.CostAware.Restores, r.CostAware.PinnedSkips, r.CostAware.BitDriftMismatches)
-	fmt.Fprintf(w, "checks: cost>=lru=%t pin_pressure=%t pins_safe=%t restore_exercised=%t restore_bytes_stable=%t\n",
-		env.Checks.CostAwareAtLeastLRU, env.Checks.PinPressureExercised, env.Checks.PinsSafe, env.Checks.RestoreExercised, env.Checks.RestoreBytesStable)
+	fmt.Fprintf(w, "oracle:    hits=%d/%d exact=%t\n", r.Oracle.HitTokens, r.Oracle.AccessTokens, r.Oracle.Exact)
+	fmt.Fprintf(w, "checks: cost>=lru=%t oracle_bounds=%t pin_pressure=%t pins_safe=%t restore_exercised=%t restore_bytes_stable=%t\n",
+		env.Checks.CostAwareAtLeastLRU, env.Checks.OracleBoundsPolicies, env.Checks.PinPressureExercised, env.Checks.PinsSafe, env.Checks.RestoreExercised, env.Checks.RestoreBytesStable)
 	verdict := "FAIL"
 	if env.OK {
 		verdict = "PASS"
@@ -139,8 +144,8 @@ usage:
   fak kvbm replay [--artifact FILE] [--json] [--check]
 
 The default artifact is %s. --check exits 0 only when the replay proves the #2666
-validation shape: cost-aware hit tokens are at least LRU at the same budget, pin
-pressure is exercised without pin violations, and an evicted/restored span returns
-with identical bytes.
+validation shape: cost-aware hit tokens are at least LRU at the same budget, the
+offline oracle bounds both policies, pin pressure is exercised without pin violations,
+and an evicted/restored span returns with identical bytes.
 `, filepath.FromSlash(defaultKVBMReplayArtifact))
 }

@@ -38,6 +38,7 @@ type KVReplayArtifactReport struct {
 	BudgetBytes int64
 	LRU         KVReplayPolicyReport
 	CostAware   KVReplayPolicyReport
+	Oracle      KVReplayOracleResult
 }
 
 // KVReplayPolicyReport is the per-policy validation evidence from one artifact replay.
@@ -95,11 +96,13 @@ func ReplayKVArtifact(artifact KVReplayArtifact) (KVReplayArtifactReport, error)
 	}
 	lru := replayKVArtifactPolicy(artifact, KVEvictLRU)
 	cost := replayKVArtifactPolicy(artifact, KVEvictCostAware)
+	oracle := kvReplayArtifactOracle(artifact)
 	return KVReplayArtifactReport{
 		Name:        artifact.Name,
 		BudgetBytes: artifact.BudgetBytes,
 		LRU:         lru,
 		CostAware:   cost,
+		Oracle:      oracle,
 	}, nil
 }
 
@@ -275,4 +278,26 @@ func kvReplayPolicyName(policy KVEvictPolicy) string {
 	default:
 		return "unknown"
 	}
+}
+
+func kvReplayArtifactOracle(artifact KVReplayArtifact) KVReplayOracleResult {
+	events := make([]KVReplayEvent, 0, len(artifact.Events))
+	spanIndexes := map[string]int{}
+	uniformBytes := true
+	for _, ev := range artifact.Events {
+		if ev.Bytes != 0 && ev.Bytes != int64(ev.Tokens) {
+			uniformBytes = false
+		}
+		idx, ok := spanIndexes[ev.SpanID]
+		if !ok {
+			idx = len(spanIndexes) + 1
+			spanIndexes[ev.SpanID] = idx
+		}
+		events = append(events, KVReplayEvent{SpanID: idx, Tokens: ev.Tokens})
+	}
+	oracle := BeladyKVReplayOracle(events, int(artifact.BudgetBytes))
+	if !uniformBytes {
+		oracle.Exact = false
+	}
+	return oracle
 }

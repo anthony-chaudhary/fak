@@ -101,8 +101,9 @@ The committed replay witness for the cost-aware KVBM policy is
 `internal/compute/testdata/kvbm_agent_replay_issue2666.json`, loaded by
 `TestKVReplayArtifactWitnessesCostAwarePinAndRestore`. It proves the validation
 shape #2666 names without a GPU or model run: cost-aware hit tokens are at least
-LRU at a fixed budget, active pins are skipped without violation, and an
-evicted/restored hot prefix returns with identical payload bytes.
+LRU at a fixed budget and bounded by an exact offline oracle, active pins are
+skipped without violation, and an evicted/restored hot prefix returns with
+identical payload bytes.
 
 The in-kernel chat planner also owns a process-local `radixkv` prefix cache when it
 runs on the CPU-session path (`backend == nil`). Its cache-specific knobs are:
