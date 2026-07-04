@@ -262,6 +262,8 @@ func main() {
 		cmdReleaseLock(os.Args[2:])
 	case "release-staleness":
 		cmdReleaseStaleness(os.Args[2:])
+	case "watchdog":
+		cmdWatchdog(os.Args[2:])
 	case "serve":
 		cmdServe(os.Args[2:])
 	case "serve-wiring":
