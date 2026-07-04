@@ -149,6 +149,60 @@ Machine-stamped for the table above: AMD Ryzen 9 9950X, linux/amd64, 2026-06-26 
 zero-alloc/flat-scaling **shape** is hardware-independent and reproduces the test exactly;
 the absolute ns is single-box, per `BENCHMARK-GOVERNANCE.md` regime rules).
 
+### 3b. Determinism mode — a recorded capability column on every vLLM row ([#1734](https://github.com/anthony-chaudhary/fak/issues/1734))
+
+A tax/throughput number is only comparable if the two engines were run under the **same
+reproducibility regime**. vLLM documents two distinct guarantees — **batch invariance** for
+online reproducibility and a **deterministic offline scheduler** — and, critically, that
+*without* one of them batching variation and numerical instability can change outputs **even
+at temperature 0** (vLLM `docs/usage/faq.md`). fak therefore surfaces the served engine's
+determinism posture as a first-class capability and stamps it onto the bench rows, so a
+"raw vs fak-fronted" comparison never silently mixes a batch-invariant run with a
+dynamic-batching one.
+
+**The capability (criterion 1).** `internal/engine/vllm_determinism.go` exposes the mode as a
+negotiable ABI capability token, read from the server-**launch** environment
+(`FAK_VLLM_DETERMINISM`) — it is an operator/engine-declared property of how the worker was
+started, never something fak infers from a request's sampling params. It **fails closed**:
+an unset or unrecognized declaration normalizes to `unavailable`, so a missing signal reports
+"not reproducible" rather than silently asserting determinism.
+
+| Declared mode | Capability token | Temp-0 reproducible? |
+|---|---|---|
+| batch invariance | `engine.vllm.determinism.batch_invariance` | yes |
+| deterministic offline scheduler | `engine.vllm.determinism.deterministic_offline_scheduler` | yes |
+| *unavailable* (fail-closed default) | `engine.vllm.determinism.unavailable` | **no** |
+
+**On the bench rows (criterion 2).** Every raw-vLLM and fak-fronts-vLLM row in §2/§3 carries
+its declared determinism mode alongside precision and batching regime — a `determinism` field
+in the committed artifact (`experiments/vllm/adjudication-tax-witness.json`, the §2
+`vllm` engine row), reported here as a column so the two sides of a comparison disclose their
+regime:
+
+| Surface | row | determinism mode (until a run declares otherwise) |
+|---|---|---|
+| §3 tax | raw vLLM | `unavailable` (dynamic continuous batching, no invariance declared) |
+| §3 tax | fak-fronts-vLLM | inherits the upstream engine's declared mode (fak does not add invariance) |
+| §2 engine | vLLM (aggregate) | `unavailable` unless the run is launched with `FAK_VLLM_DETERMINISM` set |
+
+fak does **not** rebuild batch-invariant kernels — it uses the engine capability when the
+operator declares it and labels it `unavailable` when they do not. A run that stands vLLM up
+with batch-invariant kernels declares `FAK_VLLM_DETERMINISM=batch_invariance`, and the mode is
+recorded on that run's rows.
+
+**The temperature-0 witness guard (criterion 3).** A replay/witness claim **cannot** cite
+temperature 0 alone as determinism when the engine reports dynamic batching without batch
+invariance. `VLLMDeterminism.TemperatureZeroYieldsDeterminism()` is the guard: it is `false`
+for `unavailable`, so a witness that asserts "reproducible because temperature 0" over an
+`unavailable` engine is **not** witnessed. Only `batch_invariance` and
+`deterministic_offline_scheduler` make temperature 0 reproduce token-for-token.
+
+Reproduce (GPU-free, ~2 s — the capability + witness guard are proven in CI today):
+
+```bash
+go test ./internal/engine -run TestVLLMDeterminism -v   # capability tokens + temp-0 guard (#1734)
+```
+
 ## 4. The measured sibling: the SGLang stack (real numbers, NOT vLLM's)
 
 The vLLM tables above are placeholders. The **SGLang** head-to-head *did* run, on the same
