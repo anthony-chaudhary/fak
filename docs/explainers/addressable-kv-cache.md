@@ -120,6 +120,14 @@ The defensible, shipped-and-tested claim is about **bit-exactness**:
 > and the eviction's reposition is bit-identical to recompute at `max|Δ| = 0`
 > (`TestKVQuarantineEqualsNeverSaw`).
 
+**Run it yourself.** [`examples/addressable-evict/`](../../examples/addressable-evict/README.md)
+is the standalone, offline demo of exactly this claim: it admits a poisoned tool result
+through the real quarantine gate, evicts the span write-time, and prints
+`max|Δ| evict-vs-never = 0.000e+00` with a non-vacuous `poison-vs-never = 3.257e-01`
+control — no key, model download, GPU, or network (`./examples/addressable-evict/run.sh`).
+The token-for-token-vs-HuggingFace rung is the fixture-gated
+`TestKVQuarantineEqualsNeverSaw`, recorded there too.
+
 Why can it, when the others can't quite? Removing a middle span is only the easy
 half (drop the bytes). The hard half is the *survivors*: every token after the cut
 had its key rotated by RoPE at its **old** absolute position, and now sits at a new
