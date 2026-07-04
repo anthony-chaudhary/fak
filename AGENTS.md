@@ -139,6 +139,13 @@ group or `fak commit --preview ...` followed by `fak commit --path <p> ... -m "<
 for a narrower change. Use raw `git commit -s -- <paths>` only as a fallback when the
 binary/tooling is unavailable, and say so in the handoff.
 
+Filing a GitHub issue from an agent session works the same way: prefer
+`fak issue create --title T (--body B | --body-file F)` over raw `gh issue create` —
+it shells to `gh` directly from the trusted binary, the same way `fak commit`/`fak
+sweep` do for git, so it does not trip the reversibility/ESCALATE preview-confirm
+gate on every call. Use raw `gh issue create` only as a fallback when the binary is
+unavailable, and say so.
+
 - **Work directly on the trunk (`main`). Never open a feature branch or new worktree.**
   The trunk guard *refuses* off-trunk commits (the `OFF_TRUNK` law). A dirty/diverged
   tree means reconcile **in place** or STOP — never escape into a side branch.
