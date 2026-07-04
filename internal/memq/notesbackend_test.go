@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -200,6 +201,97 @@ func TestNotesBackend_secretShapedNoteSealed(t *testing.T) {
 	}
 	if _, err := b.Materialize(context.Background(), "leaky.md"); err == nil {
 		t.Fatal("sealed note must refuse page-in")
+	}
+}
+
+// W2 (#2620): a note's forward [[wikilinks]] populate Cell.Refs, resolved to indexed
+// cell IDs; an off-index link is flagged on refs_unresolved, never invented as an
+// edge; and the graph is queryable — an authored query can filter cells to "references
+// <id>" (hasref) and rank by reference count (refcount in-degree).
+func TestNotesBackend_referencesFromWikilinks(t *testing.T) {
+	index := "# Memory index\n\n" +
+		"- [Hub](hub.md) — links the spokes\n" +
+		"- [Spoke A](spoke-a.md) — links back to the hub\n" +
+		"- [Spoke B](spoke-b.md) — links back to the hub\n"
+	files := map[string]string{
+		// hub links both spokes (the second via a [[slug|display]] alias) plus one
+		// off-index (not-yet-written) note; [[hub]] is a self-link — the ghost link and
+		// the self-link must not become edges.
+		"hub.md":     "---\nname: hub\ndescription: the center\nmetadata:\n  type: reference\n---\n\nThe hub gathers [[spoke-a]] and [[spoke-b|Spoke B]], see also [[ghost-note]] and itself [[hub]].\n",
+		"spoke-a.md": "---\nname: spoke-a\ndescription: a leaf\nmetadata:\n  type: reference\n---\n\nSpoke A points home to [[hub]].\n",
+		"spoke-b.md": "---\nname: spoke-b\ndescription: a leaf\nmetadata:\n  type: reference\n---\n\nSpoke B points home to [[hub]] as well.\n",
+	}
+	dir := fixtureNotesStore(t, index, files)
+	b, err := NewNotesBackend(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cells, err := b.Cells(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]Cell{}
+	for _, c := range cells {
+		byID[c.ID] = c
+	}
+
+	// Refs are the resolved forward edges, in first-appearance order, de-duplicated,
+	// with the self-link and the off-index link excluded.
+	if got := byID["hub.md"].Refs; !reflect.DeepEqual(got, []string{"spoke-a.md", "spoke-b.md"}) {
+		t.Fatalf("hub.md Refs = %v, want [spoke-a.md spoke-b.md]", got)
+	}
+	if got := byID["spoke-a.md"].Refs; !reflect.DeepEqual(got, []string{"hub.md"}) {
+		t.Fatalf("spoke-a.md Refs = %v, want [hub.md]", got)
+	}
+	// The off-index [[ghost-note]] is recorded on refs_unresolved, never in Refs.
+	if got := byID["hub.md"].Attrs["refs_unresolved"]; got != "ghost-note" {
+		t.Fatalf("hub.md refs_unresolved = %q, want %q", got, "ghost-note")
+	}
+	for _, r := range byID["hub.md"].Refs {
+		if r == "ghost-note" || r == "ghost-note.md" {
+			t.Fatalf("unresolved [[ghost-note]] leaked into Refs: %v", byID["hub.md"].Refs)
+		}
+	}
+
+	// Determinism: a second scan of the same store yields byte-identical Refs.
+	b2, _ := NewNotesBackend(dir)
+	cells2, _ := b2.Cells(context.Background())
+	for i := range cells {
+		if !reflect.DeepEqual(cells[i].Refs, cells2[i].Refs) {
+			t.Fatalf("Refs not deterministic for %s: %v vs %v", cells[i].ID, cells[i].Refs, cells2[i].Refs)
+		}
+	}
+
+	// Acceptance #1a — filter cells to "references hub.md": only the two spokes.
+	refsHub := Query{Ops: []Op{
+		{Kind: OpScan},
+		{Kind: OpFilter, Pred: &Pred{Op: PredHasRef, Value: "hub.md"}},
+	}}
+	res, err := Run(context.Background(), b, refsHub, Caps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, c := range res.Working {
+		got[c.ID] = true
+	}
+	if len(got) != 2 || !got["spoke-a.md"] || !got["spoke-b.md"] {
+		t.Fatalf("hasref(hub.md) must keep exactly the two spokes, got %v", got)
+	}
+
+	// Acceptance #1b — rank by reference count (in-degree), most-backlinked first:
+	// hub (2 backlinks) precedes the spokes (1 each).
+	rankRefs := Query{Ops: []Op{
+		{Kind: OpScan},
+		{Kind: OpRank, By: RankRefcount, Desc: true},
+	}}
+	res, err = Run(context.Background(), b, rankRefs, Caps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Working) == 0 || res.Working[0].ID != "hub.md" {
+		t.Fatalf("rank by refcount desc must put hub.md (2 backlinks) first, got %+v",
+			idsOf(res.Working))
 	}
 }
 

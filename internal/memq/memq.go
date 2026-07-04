@@ -3,6 +3,7 @@ package memq
 import (
 	"cmp"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -75,17 +76,18 @@ const (
 
 // Pred ops. Comparison ops resolve a field; the boolean ops compose sub-predicates.
 const (
-	PredTrue  = "true"
-	PredAnd   = "and"
-	PredOr    = "or"
-	PredNot   = "not"
-	PredEq    = "eq"
-	PredNe    = "ne"
-	PredLt    = "lt"
-	PredLe    = "le"
-	PredGt    = "gt"
-	PredGe    = "ge"
-	PredMatch = "match" // token overlap of Value against (role + descriptor) > 0
+	PredTrue   = "true"
+	PredAnd    = "and"
+	PredOr     = "or"
+	PredNot    = "not"
+	PredEq     = "eq"
+	PredNe     = "ne"
+	PredLt     = "lt"
+	PredLe     = "le"
+	PredGt     = "gt"
+	PredGe     = "ge"
+	PredMatch  = "match"  // token overlap of Value against (role + descriptor) > 0
+	PredHasRef = "hasref" // Value is a member of the cell's Refs (the [[wikilink]] edge set); "references <id>"
 )
 
 // Rank keys.
@@ -94,13 +96,14 @@ const (
 	RankBytes      = "bytes"      // size
 	RankStep       = "step"       // ordinal position
 	RankDurability = "durability" // shortest-lived first (asc) / longest-lived first (desc)
+	RankRefcount   = "refcount"   // graph in-degree — how many other cells reference this one (desc = most backlinks first)
 )
 
 // Pred is a serializable predicate expression — the WHERE clause an agent authors as
 // JSON. A zero Pred (or Op == "" / PredTrue) matches every cell.
 type Pred struct {
 	Op    string `json:"op"`
-	Field string `json:"field,omitempty"` // durability|role|kind|descriptor|digest|witness|bytes|step|sealed|tombstoned|refcount|attr:<k>
+	Field string `json:"field,omitempty"` // durability|role|kind|descriptor|digest|witness|bytes|step|sealed|tombstoned|refcount|attr:<k> (unused by hasref, which reads Value against Refs)
 	Value string `json:"value,omitempty"`
 	Args  []Pred `json:"args,omitempty"` // sub-predicates for and/or/not
 }
@@ -168,7 +171,7 @@ func Validate(q Query) error {
 			}
 		case OpRank:
 			switch op.By {
-			case RankRelevance, RankBytes, RankStep, RankDurability:
+			case RankRelevance, RankBytes, RankStep, RankDurability, RankRefcount:
 			default:
 				return fmt.Errorf("memq: op %d (rank) has unknown key %q", i, op.By)
 			}
@@ -214,6 +217,11 @@ func validatePred(p Pred) error {
 			return fmt.Errorf("comparison op %q requires a field", p.Op)
 		}
 		return nil
+	case PredHasRef:
+		if p.Value == "" {
+			return fmt.Errorf("hasref requires a value (the referenced cell id)")
+		}
+		return nil
 	default:
 		return fmt.Errorf("unknown predicate op %q", p.Op)
 	}
@@ -247,6 +255,8 @@ func (p Pred) eval(c Cell, refcount int) bool {
 		return !p.Args[0].eval(c, refcount)
 	case PredMatch:
 		return overlap(tokenize(p.Value), tokenize(c.Role+" "+c.Descriptor)) > 0
+	case PredHasRef:
+		return slices.Contains(c.Refs, p.Value)
 	}
 	if n, isNum := numField(c, p.Field, refcount); isNum {
 		rv, err := strconv.ParseInt(strings.TrimSpace(p.Value), 10, 64)
@@ -321,9 +331,10 @@ func cmpOrdered[T cmp.Ordered](op string, a, b T) bool {
 
 // rankLess is the comparison used by OpRank. relevance ranks by descending token
 // overlap with the intent (the recall ranker); the others rank by the named field.
+// ra/rb are the cells' relevance scores; fa/fb their graph in-degrees (refcount).
 // Ties always break by ascending Step then ID, so the order is total and
 // deterministic regardless of the input slice order.
-func rankLess(by string, desc bool, a, b Cell, ra, rb int) bool {
+func rankLess(by string, desc bool, a, b Cell, ra, rb, fa, fb int) bool {
 	prim := 0
 	switch by {
 	case RankRelevance:
@@ -347,6 +358,11 @@ func rankLess(by string, desc bool, a, b Cell, ra, rb int) bool {
 		}
 	case RankDurability:
 		prim = compareInt(durabilityRank[NormDurability(a.Durability)], durabilityRank[NormDurability(b.Durability)])
+		if desc {
+			prim = -prim
+		}
+	case RankRefcount:
+		prim = compareInt(fa, fb) // graph in-degree; desc = most-backlinked first
 		if desc {
 			prim = -prim
 		}
@@ -381,10 +397,13 @@ func compareInt64(a, b int64) int {
 }
 
 // sortByRank stably sorts cells in place by the rank key. relevance needs each cell's
-// overlap score against the intent, supplied via score.
-func sortByRank(cells []Cell, by string, desc bool, score map[string]int) {
+// overlap score against the intent (score); refcount needs each cell's graph in-degree
+// (refcount) — both precomputed once per Run.
+func sortByRank(cells []Cell, by string, desc bool, score, refcount map[string]int) {
 	sort.SliceStable(cells, func(i, j int) bool {
-		return rankLess(by, desc, cells[i], cells[j], score[cells[i].ID], score[cells[j].ID])
+		return rankLess(by, desc, cells[i], cells[j],
+			score[cells[i].ID], score[cells[j].ID],
+			refcount[cells[i].ID], refcount[cells[j].ID])
 	})
 }
 

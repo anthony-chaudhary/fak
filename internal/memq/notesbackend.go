@@ -64,13 +64,33 @@ func NewNotesBackend(dir string) (*NotesBackend, error) {
 	if err != nil {
 		return b, nil // no index — empty corpus, not an error
 	}
+	// Two passes so the [[wikilink]] resolver is complete before any note's References
+	// are computed (W2, #2620). Pass 1 reads every indexed fact file and records its
+	// resolution keys (lower filename-stem and frontmatter `name:`) -> the canonical
+	// cell ID (its filename); pass 2 appends each cell, resolving its forward links
+	// against that map. The index is the curation boundary: a link is an edge only when
+	// its target is itself indexed — an off-index link is flagged, never invented.
+	type indexedNote struct {
+		step         int
+		title, fname string
+		raw          []byte
+	}
+	var notes []indexedNote
+	resolver := map[string]string{}
 	for i, fact := range memoryread.ParseIndex(string(indexBytes)) {
 		title, fname := fact[0], fact[1]
 		raw, err := os.ReadFile(filepath.Join(dir, fname))
 		if err != nil {
 			continue // index points at a missing file — fewer candidates, never a crash
 		}
-		b.appendCell(i, title, fname, raw)
+		notes = append(notes, indexedNote{step: i, title: title, fname: fname, raw: raw})
+		resolver[strings.ToLower(strings.TrimSuffix(fname, ".md"))] = fname
+		if name := noteName(string(raw)); name != "" {
+			resolver[strings.ToLower(name)] = fname
+		}
+	}
+	for _, n := range notes {
+		b.appendCell(n.step, n.title, n.fname, n.raw, resolver)
 	}
 	return b, nil
 }
@@ -91,7 +111,9 @@ func (b *NotesBackend) Dir() string { return b.dir }
 // appendCell turns one indexed fact file into a Cell carrying only SAFE metadata.
 // The frontmatter-stripped body is held off-cell and surfaces only through the
 // gated Materialize. Step preserves MEMORY.md index order (the curation order).
-func (b *NotesBackend) appendCell(step int, title, fname string, raw []byte) {
+// resolver maps each indexed note's link keys to its cell ID, so the note's forward
+// [[wikilinks]] become Cell.Refs — the graph edge set the algebra can filter/rank on.
+func (b *NotesBackend) appendCell(step int, title, fname string, raw []byte, resolver map[string]string) {
 	desc, mtype := parseNoteMeta(string(raw))
 	body := []byte(memoryread.StripFrontmatter(string(raw)))
 
@@ -107,6 +129,19 @@ func (b *NotesBackend) appendCell(step int, title, fname string, raw []byte) {
 	}
 
 	id := fname
+	refs, unresolved := resolveWikiLinks(body, id, resolver)
+	attrs := map[string]string{
+		"provenance":  NotesProvenance,
+		"source_path": filepath.Join(b.dir, fname),
+		"note_type":   mtype,
+		"title":       title,
+	}
+	// An off-index forward reference is RECORDED, not dropped — the index is the
+	// curation boundary, but a broken/not-yet-written link is real rot the graph must
+	// keep visible (matching the W1 forward-reference grammar).
+	if len(unresolved) > 0 {
+		attrs["refs_unresolved"] = strings.Join(unresolved, ",")
+	}
 	b.cells = append(b.cells, Cell{
 		ID:         id,
 		Step:       step,
@@ -118,14 +153,70 @@ func (b *NotesBackend) appendCell(step int, title, fname string, raw []byte) {
 		Durability: noteDurability(mtype),
 		Sealed:     sealed,
 		Witness:    NotesProvenance,
-		Attrs: map[string]string{
-			"provenance":  NotesProvenance,
-			"source_path": filepath.Join(b.dir, fname),
-			"note_type":   mtype,
-			"title":       title,
-		},
+		Refs:       refs,
+		Attrs:      attrs,
 	})
 	b.bodies[id] = body
+}
+
+// wikiLinkRE matches a [[target]] wikilink, tolerating a [[target|display]] alias and
+// stripping a #anchor — the same grammar internal/memvaluescore flags broken links
+// with. The shared extractor + backlink index is the W1 (internal/memgraph) lift;
+// until that lands, W2 keeps a local copy so the memq algebra gains the edge set
+// without depending on an unshipped package (#2620, epic #2618).
+var wikiLinkRE = regexp.MustCompile(`\[\[([^\[\]|#]+?)(?:\|[^\[\]]*)?\]\]`)
+
+// noteNameRE reads the top-level frontmatter `name:` slug — the alternate link key an
+// authored [[name]] may use when it differs from the filename stem.
+var noteNameRE = regexp.MustCompile(`(?m)^name:\s*(\S+)`)
+
+// noteName returns the frontmatter `name:` slug, or "" when the block is absent or
+// malformed (lexical and tolerant, like parseNoteMeta).
+func noteName(raw string) string {
+	if !strings.HasPrefix(raw, "---") {
+		return ""
+	}
+	end := strings.Index(raw[3:], "\n---")
+	if end == -1 {
+		return ""
+	}
+	if m := noteNameRE.FindStringSubmatch(raw[:end+3]); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// resolveWikiLinks splits a note body's forward [[wikilinks]] into (resolved,
+// unresolved) against the indexed-file resolver. A resolved link becomes the target's
+// canonical cell ID (its filename) in Cell.Refs — deterministic first-appearance order
+// with de-duplication, so a fixed body yields a byte-identical edge set. A self-link is
+// not an edge (it would inflate the note's own in-degree). An unresolved link — one
+// whose target is not an indexed fact file — is returned to be flagged, never dropped.
+func resolveWikiLinks(body []byte, self string, resolver map[string]string) (refs, unresolved []string) {
+	seenRef := map[string]bool{}
+	seenUn := map[string]bool{}
+	for _, m := range wikiLinkRE.FindAllStringSubmatch(string(body), -1) {
+		target := strings.TrimSpace(m[1])
+		if target == "" {
+			continue
+		}
+		fname, ok := resolver[strings.ToLower(target)]
+		if !ok {
+			if !seenUn[target] {
+				seenUn[target] = true
+				unresolved = append(unresolved, target)
+			}
+			continue
+		}
+		if fname == self { // a note linking to itself is not a graph edge
+			continue
+		}
+		if !seenRef[fname] {
+			seenRef[fname] = true
+			refs = append(refs, fname)
+		}
+	}
+	return refs, unresolved
 }
 
 // noteDurability maps the store's frontmatter `metadata.type` onto the durability

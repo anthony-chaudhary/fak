@@ -188,7 +188,7 @@ func Run(ctx context.Context, b Backend, q Query, caps Caps) (Result, error) {
 			}
 			work = kept
 		case OpRank:
-			sortByRank(work, op.By, op.Desc, score)
+			sortByRank(work, op.By, op.Desc, score, refcount)
 		case OpLimit:
 			if op.K < len(work) {
 				work = work[:op.K]

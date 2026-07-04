@@ -132,6 +132,8 @@ func predString(p Pred) string {
 		return "NOT(?)"
 	case PredMatch:
 		return fmt.Sprintf("match(%q)", p.Value)
+	case PredHasRef:
+		return fmt.Sprintf("hasref(%q)", p.Value)
 	}
 	sym := map[string]string{PredEq: "==", PredNe: "!=", PredLt: "<", PredLe: "<=", PredGt: ">", PredGe: ">="}[p.Op]
 	if sym == "" {
