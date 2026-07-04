@@ -143,6 +143,44 @@ func TestInKernelKVMemoryStatsDeviceBackendReportsGeometryOnly(t *testing.T) {
 	}
 }
 
+func TestInKernelRadixCostAwareVictimRuleFromEnv(t *testing.T) {
+	t.Setenv("FAK_INKERNEL_RADIX", "on")
+	t.Setenv("FAK_INKERNEL_RADIX_BUDGET", "20")
+	t.Setenv("FAK_NATIVE_KV_VICTIM_RULE", "cost-aware")
+
+	cfg := tinyCfg()
+	p := NewInKernelPlanner(model.NewSynthetic(cfg), nil, "synthetic", false, nil, false)
+	p.quant = false
+	if p.tree == nil {
+		t.Fatal("FAK_INKERNEL_RADIX=on should construct a radix tree")
+	}
+	if got := p.tree.Stats().EvictionPolicy; got != "cost-aware" {
+		t.Fatalf("radix eviction policy = %q, want cost-aware", got)
+	}
+
+	a := synthIDs(cfg.VocabSize, 10, 210)
+	b := synthIDs(cfg.VocabSize, 10, 211)
+	c := synthIDs(cfg.VocabSize, 10, 212)
+	p.generateReused(a, 0, 0, 0, 0, map[int]bool{}, nil)
+	p.generateReused(a, 0, 0, 0, 0, map[int]bool{}, nil) // make a reused, but older than b.
+	p.generateReused(b, 0, 0, 0, 0, map[int]bool{}, nil)
+	p.generateReused(c, 0, 0, 0, 0, map[int]bool{}, nil) // 30 tokens > budget 20.
+
+	if got := p.cachedPrefixLen(a); got != len(a) {
+		t.Fatalf("cost-aware radix should keep reused a, cached %d/%d", got, len(a))
+	}
+	if got := p.cachedPrefixLen(b); got != 0 {
+		t.Fatalf("cost-aware radix should evict one-shot b, cached %d", got)
+	}
+	if got := p.cachedPrefixLen(c); got != len(c) {
+		t.Fatalf("new c prompt should survive its insert-time eviction pass, cached %d/%d", got, len(c))
+	}
+	st := p.tree.Stats()
+	if st.Evictions != 1 || st.CostEvictions != 1 || st.ReuseHits == 0 {
+		t.Fatalf("cost-aware radix stats = %+v, want one cost eviction fed by reuse hits", st)
+	}
+}
+
 // TestInKernelReuseMatchesFullPrefill is the PARITY witness: a second turn that shares a
 // long prefix with the first reuses that prefix's KV (through an edge split), and its
 // greedy decode is BIT-IDENTICAL to the same turn run with reuse disabled (full prefill).

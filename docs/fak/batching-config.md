@@ -120,7 +120,7 @@ sources in [`docs/model-engine-env.md`](../model-engine-env.md); the batching-re
 | `FAK_NATIVE_KV_MAX_BLOCKS` | unset (off) | Enables the native scheduler's KV pressure path and sets the live paged-KV block budget. |
 | `FAK_NATIVE_KV_BLOCK_TOKENS` | `16` | Tokens per block for the scheduler's KV budget estimator and swap pool. |
 | `FAK_NATIVE_KV_PREEMPT_MODE` | `swap` | Selects scheduler preemption recovery: `swap`/`swap-to-host` or `recompute`. |
-| `FAK_NATIVE_KV_VICTIM_RULE` | `most-recent` | Selects the native KV-pressure victim rule; `cost-aware`/`kvbm` uses KVBM reuse and pin hints and exposes candidate/pin/victim-cost metrics. |
+| `FAK_NATIVE_KV_VICTIM_RULE` | `most-recent` | Selects the native KV-pressure victim rule; `cost-aware`/`kvbm` uses KVBM reuse and pin hints, exposes candidate/pin/victim-cost metrics, and also drives planner radix eviction under `FAK_INKERNEL_RADIX_BUDGET`. |
 | `FAK_QPROFILE` | off | Print coarse phase timing (quantize / GEMM / attention) for batched-Q and Metal prefill. |
 
 All are off-by-tuning safe: they change kernel *scheduling*, never the numerics (the batched

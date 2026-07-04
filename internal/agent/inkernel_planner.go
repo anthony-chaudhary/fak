@@ -62,9 +62,11 @@ type InKernelPlanner struct {
 	//
 	// MEMORY NOTE: radixkv stores the FULL-prefix KV per node, so a long single growing
 	// conversation accumulates nested KV clones (see radixkv's Tokens-vs-PrefixTokens
-	// note). FAK_INKERNEL_RADIX_BUDGET sets the LRU edge-token budget (0 = unbounded, the
-	// default — the maximal-reuse regime the witnesses measure). Operators serving long
-	// sessions should set a budget; bounding the deep-chain footprint is tracked.
+	// note). FAK_INKERNEL_RADIX_BUDGET sets the edge-token budget (0 = unbounded, the
+	// default — the maximal-reuse regime the witnesses measure), and
+	// FAK_NATIVE_KV_VICTIM_RULE=cost-aware selects the KVBM victim rule for budget pressure.
+	// Operators serving long sessions should set a budget; bounding the deep-chain
+	// footprint is tracked.
 	mu   sync.Mutex
 	tree *radixkv.Tree
 
@@ -158,7 +160,7 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 	// (the A/B "tree OFF" arm). The reuse clone is a CPU session, so it only engages when
 	// no device backend is wired — the device path keeps its current full-prefill behavior.
 	if os.Getenv("FAK_INKERNEL_RADIX") != "off" && backend == nil {
-		p.tree = radixkv.New(envInt("FAK_INKERNEL_RADIX_BUDGET", 0))
+		p.tree = radixkv.NewWithEvictionPolicy(envInt("FAK_INKERNEL_RADIX_BUDGET", 0), inKernelRadixEvictionPolicyFromEnv())
 	}
 	// The model-side KV-quarantine eviction bridge (#579) is OFF unless opted in, the same
 	// default-off / fail-open posture as the ctxplan seam (FAK_CTXPLAN_SEAM). It runs over a
@@ -168,6 +170,15 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 		p.kvSpanEvict = backend == nil
 	}
 	return p
+}
+
+func inKernelRadixEvictionPolicyFromEnv() radixkv.EvictionPolicy {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_NATIVE_KV_VICTIM_RULE"))) {
+	case "cost-aware", "cost", "kvbm":
+		return radixkv.EvictionCostAware
+	default:
+		return radixkv.EvictionLRU
+	}
 }
 
 // Model reports the model id (for /v1/models provenance + the planner seam).
