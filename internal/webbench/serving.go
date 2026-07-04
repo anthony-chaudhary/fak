@@ -200,14 +200,15 @@ type ServingParityConfig struct {
 }
 
 type ServingParityReport struct {
-	Schema      string                 `json:"schema"`
-	GeneratedAt string                 `json:"generated_at"`
-	MachineID   string                 `json:"machine_id"`
-	Model       string                 `json:"model"`
-	Workload    ServingWorkloadInfo    `json:"workload"`
-	Tracks      []ServingTrackResult   `json:"tracks"`
-	Honesty     ServingHonestyContract `json:"honesty"`
-	Artifact    string                 `json:"artifact,omitempty"`
+	Schema          string                 `json:"schema"`
+	GeneratedAt     string                 `json:"generated_at"`
+	MachineID       string                 `json:"machine_id"`
+	Model           string                 `json:"model"`
+	Workload        ServingWorkloadInfo    `json:"workload"`
+	Tracks          []ServingTrackResult   `json:"tracks"`
+	OursVsSGLangTax ServingTaxReport       `json:"ours_vs_sglang_tax"`
+	Honesty         ServingHonestyContract `json:"honesty"`
+	Artifact        string                 `json:"artifact,omitempty"`
 }
 
 type ServingWorkloadInfo struct {
@@ -236,18 +237,21 @@ type ServingTrackResult struct {
 }
 
 type ServingSample struct {
-	ID                   string    `json:"id"`
-	Status               string    `json:"status"`
-	Error                string    `json:"error,omitempty"`
-	HTTPStatus           int       `json:"http_status,omitempty"`
-	StreamMode           string    `json:"stream_mode,omitempty"`
-	TTFTMillis           *float64  `json:"ttft_ms,omitempty"`
-	ITLMillis            []float64 `json:"itl_ms,omitempty"`
-	TPOTMillis           *float64  `json:"tpot_ms,omitempty"`
-	EndToEndMillis       float64   `json:"end_to_end_ms"`
-	OutputEvents         int       `json:"output_events"`
-	OutputTokenEstimate  int       `json:"output_token_estimate"`
-	PromptTokensEstimate int       `json:"prompt_tokens_estimate"`
+	ID                    string    `json:"id"`
+	Status                string    `json:"status"`
+	Error                 string    `json:"error,omitempty"`
+	ErrorClass            string    `json:"error_class,omitempty"`
+	HTTPStatus            int       `json:"http_status,omitempty"`
+	StreamMode            string    `json:"stream_mode,omitempty"`
+	TTFTMillis            *float64  `json:"ttft_ms,omitempty"`
+	ITLMillis             []float64 `json:"itl_ms,omitempty"`
+	TPOTMillis            *float64  `json:"tpot_ms,omitempty"`
+	EndToEndMillis        float64   `json:"end_to_end_ms"`
+	OutputEvents          int       `json:"output_events"`
+	OutputTokenEstimate   int       `json:"output_token_estimate"`
+	OutputTokensExact     *int      `json:"output_tokens_exact,omitempty"`
+	OutputTokenCountBasis string    `json:"output_token_count_basis,omitempty"`
+	PromptTokensEstimate  int       `json:"prompt_tokens_estimate"`
 }
 
 type ServingStats struct {
@@ -269,8 +273,28 @@ type QuantileMetric struct {
 	Unit   string   `json:"unit,omitempty"`
 	P50    *float64 `json:"p50,omitempty"`
 	P90    *float64 `json:"p90,omitempty"`
+	P95    *float64 `json:"p95,omitempty"`
 	P99    *float64 `json:"p99,omitempty"`
 	Reason string   `json:"reason,omitempty"`
+}
+
+type ServingTaxReport struct {
+	Status         string                      `json:"status"`
+	OursTrack      ServingTrack                `json:"ours_track"`
+	RawTrack       ServingTrack                `json:"raw_track"`
+	SourceQuantile string                      `json:"source_quantile,omitempty"`
+	Reason         string                      `json:"reason,omitempty"`
+	Metrics        map[string]ServingTaxMetric `json:"metrics,omitempty"`
+}
+
+type ServingTaxMetric struct {
+	Status       string   `json:"status"`
+	Unit         string   `json:"unit,omitempty"`
+	Ours         *float64 `json:"ours,omitempty"`
+	Raw          *float64 `json:"raw,omitempty"`
+	OursMinusRaw *float64 `json:"ours_minus_raw,omitempty"`
+	OursDivRaw   *float64 `json:"ours_div_raw,omitempty"`
+	Reason       string   `json:"reason,omitempty"`
 }
 
 type ScalarMetric struct {
@@ -321,7 +345,7 @@ func RunServingParity(ctx context.Context, cfg ServingParityConfig) (*ServingPar
 			Requests:        len(cfg.Workload),
 			Concurrency:     cfg.Concurrency,
 			SLOMillis:       cfg.SLO.Milliseconds(),
-			TokenCountBasis: "stream_content_events",
+			TokenCountBasis: "sample.output_token_count_basis",
 		},
 		Honesty: ServingHonestyContract{
 			IdenticalWorkload: true,
@@ -337,6 +361,7 @@ func RunServingParity(ctx context.Context, cfg ServingParityConfig) (*ServingPar
 		}
 		rep.Tracks = append(rep.Tracks, tr)
 	}
+	rep.OursVsSGLangTax = servingOursVsSGLangTax(rep.Tracks)
 	return rep, nil
 }
 
@@ -440,6 +465,7 @@ func MeasureSSERequest(ctx context.Context, client *http.Client, tc ServingTrack
 	body, err := json.Marshal(payload)
 	if err != nil {
 		sample.Error = err.Error()
+		sample.ErrorClass = "request_encode"
 		return sample
 	}
 	url := strings.TrimRight(tc.BaseURL, "/") + "/chat/completions"
@@ -448,6 +474,7 @@ func MeasureSSERequest(ctx context.Context, client *http.Client, tc ServingTrack
 	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		sample.Error = err.Error()
+		sample.ErrorClass = "request_build"
 		return sample
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -465,6 +492,7 @@ func MeasureSSERequest(ctx context.Context, client *http.Client, tc ServingTrack
 	if err != nil {
 		sample.EndToEndMillis = millis(time.Since(start))
 		sample.Error = err.Error()
+		sample.ErrorClass = classifyServingRequestError(err)
 		return sample
 	}
 	defer resp.Body.Close()
@@ -476,6 +504,7 @@ func MeasureSSERequest(ctx context.Context, client *http.Client, tc ServingTrack
 		if sample.Error == "" {
 			sample.Error = resp.Status
 		}
+		sample.ErrorClass = "http_status"
 		return sample
 	}
 
@@ -485,8 +514,15 @@ func MeasureSSERequest(ctx context.Context, client *http.Client, tc ServingTrack
 		sample.StreamMode = "non_sse"
 		sample.EndToEndMillis = millis(time.Since(start))
 		sample.Status = "ok"
-		content := completionContent(b)
-		sample.OutputTokenEstimate = EstimateTokens(content)
+		content, exactTokens := completionContentAndUsage(b)
+		if exactTokens != nil {
+			sample.OutputTokensExact = exactTokens
+			sample.OutputTokenEstimate = *exactTokens
+			sample.OutputTokenCountBasis = "usage.completion_tokens"
+		} else {
+			sample.OutputTokenEstimate = EstimateTokens(content)
+			sample.OutputTokenCountBasis = "estimated_content_tokens"
+		}
 		return sample
 	}
 
@@ -507,8 +543,14 @@ func MeasureSSERequest(ctx context.Context, client *http.Client, tc ServingTrack
 		if data == "[DONE]" {
 			break
 		}
-		part, ok := streamContent(data)
+		chunk, ok := streamChunk(data)
 		if !ok {
+			continue
+		}
+		if chunk.OutputTokens != nil {
+			sample.OutputTokensExact = chunk.OutputTokens
+		}
+		if !chunk.HasContent {
 			continue
 		}
 		now := time.Now()
@@ -521,18 +563,25 @@ func MeasureSSERequest(ctx context.Context, client *http.Client, tc ServingTrack
 		}
 		last = now
 		sample.OutputEvents++
-		content.WriteString(part)
+		content.WriteString(chunk.Content)
 	}
 	if err := sc.Err(); err != nil {
 		sample.EndToEndMillis = millis(time.Since(start))
 		sample.Error = err.Error()
+		sample.ErrorClass = "stream_read"
 		return sample
 	}
 	end := time.Now()
 	sample.EndToEndMillis = millis(end.Sub(start))
-	sample.OutputTokenEstimate = sample.OutputEvents
-	if sample.OutputTokenEstimate == 0 {
+	if sample.OutputTokensExact != nil {
+		sample.OutputTokenEstimate = *sample.OutputTokensExact
+		sample.OutputTokenCountBasis = "usage.completion_tokens"
+	} else if sample.OutputEvents > 0 {
+		sample.OutputTokenEstimate = sample.OutputEvents
+		sample.OutputTokenCountBasis = "stream_content_events"
+	} else {
 		sample.OutputTokenEstimate = EstimateTokens(content.String())
+		sample.OutputTokenCountBasis = "estimated_content_tokens"
 	}
 	if sample.OutputEvents > 1 && !first.IsZero() {
 		tpot := millis(end.Sub(first)) / float64(sample.OutputEvents-1)
@@ -542,7 +591,13 @@ func MeasureSSERequest(ctx context.Context, client *http.Client, tc ServingTrack
 	return sample
 }
 
-func streamContent(data string) (string, bool) {
+type servingStreamChunk struct {
+	Content      string
+	HasContent   bool
+	OutputTokens *int
+}
+
+func streamChunk(data string) (servingStreamChunk, bool) {
 	var chunk struct {
 		Choices []struct {
 			Delta struct {
@@ -550,22 +605,31 @@ func streamContent(data string) (string, bool) {
 			} `json:"delta"`
 			Text string `json:"text"`
 		} `json:"choices"`
+		Usage struct {
+			CompletionTokens *int `json:"completion_tokens"`
+			OutputTokens     *int `json:"output_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-		return data, true
+		return servingStreamChunk{Content: data, HasContent: true}, true
 	}
+	out := servingStreamChunk{OutputTokens: usageTokenCount(chunk.Usage.CompletionTokens, chunk.Usage.OutputTokens)}
 	for _, ch := range chunk.Choices {
 		if ch.Delta.Content != "" {
-			return ch.Delta.Content, true
+			out.Content = ch.Delta.Content
+			out.HasContent = true
+			return out, true
 		}
 		if ch.Text != "" {
-			return ch.Text, true
+			out.Content = ch.Text
+			out.HasContent = true
+			return out, true
 		}
 	}
-	return "", false
+	return out, out.OutputTokens != nil
 }
 
-func completionContent(data []byte) string {
+func completionContentAndUsage(data []byte) (string, *int) {
 	var doc struct {
 		Choices []struct {
 			Message struct {
@@ -573,16 +637,37 @@ func completionContent(data []byte) string {
 			} `json:"message"`
 			Text string `json:"text"`
 		} `json:"choices"`
+		Usage struct {
+			CompletionTokens *int `json:"completion_tokens"`
+			OutputTokens     *int `json:"output_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(data, &doc); err != nil {
-		return string(data)
+		return string(data), nil
 	}
 	var b strings.Builder
 	for _, ch := range doc.Choices {
 		b.WriteString(ch.Message.Content)
 		b.WriteString(ch.Text)
 	}
-	return b.String()
+	return b.String(), usageTokenCount(doc.Usage.CompletionTokens, doc.Usage.OutputTokens)
+}
+
+func usageTokenCount(completionTokens, outputTokens *int) *int {
+	if completionTokens != nil {
+		return intPtr(*completionTokens)
+	}
+	if outputTokens != nil {
+		return intPtr(*outputTokens)
+	}
+	return nil
+}
+
+func classifyServingRequestError(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || os.IsTimeout(err) {
+		return "timeout"
+	}
+	return "transport"
 }
 
 func FoldServingSamples(samples []ServingSample, wallSeconds float64, slo time.Duration) ServingStats {
@@ -592,6 +677,7 @@ func FoldServingSamples(samples []ServingSample, wallSeconds float64, slo time.D
 	}
 	var ttft, itl, tpot, e2e []float64
 	var good, tokens int
+	tokenBases := make(map[string]int)
 	for _, s := range samples {
 		if s.Status == "ok" {
 			stats.OK++
@@ -607,18 +693,24 @@ func FoldServingSamples(samples []ServingSample, wallSeconds float64, slo time.D
 				tpot = append(tpot, *s.TPOTMillis)
 			}
 			tokens += s.OutputTokenEstimate
+			tokenBases[servingSampleTokenBasis(s)]++
 		} else {
 			stats.Failed++
 		}
 	}
+	stats.TokenCountBasis = servingStatsTokenBasis(tokenBases)
 	stats.TTFTMillis = quantiles(ttft, "ms", "no streaming first-token measurements")
 	stats.ITLMillis = quantiles(itl, "ms", "no inter-token measurements")
 	stats.TPOTMillis = quantiles(tpot, "ms", "no TPOT measurements")
 	stats.EndToEndMillis = quantiles(e2e, "ms", "no successful request latencies")
+	throughputUnit := "output_token_estimate/s"
+	if stats.TokenCountBasis != "mixed" {
+		throughputUnit = stats.TokenCountBasis + "/s"
+	}
 	if wallSeconds > 0 && tokens > 0 {
-		stats.ThroughputTokensS = measuredScalar(float64(tokens)/wallSeconds, "stream_content_events/s", "")
+		stats.ThroughputTokensS = measuredScalar(float64(tokens)/wallSeconds, throughputUnit, "")
 	} else {
-		stats.ThroughputTokensS = notMeasuredScalar("stream_content_events/s", "no output events measured")
+		stats.ThroughputTokensS = notMeasuredScalar(throughputUnit, "no output tokens measured")
 	}
 	if wallSeconds > 0 && stats.OK > 0 {
 		stats.GoodputRPS = measuredScalar(float64(good)/wallSeconds, "requests/s", "")
@@ -627,6 +719,115 @@ func FoldServingSamples(samples []ServingSample, wallSeconds float64, slo time.D
 	}
 	stats.PrefixCacheHitRate = notMeasuredScalar("ratio", "no metrics URL configured")
 	return stats
+}
+
+func servingSampleTokenBasis(s ServingSample) string {
+	if s.OutputTokenCountBasis != "" {
+		return s.OutputTokenCountBasis
+	}
+	if s.OutputTokensExact != nil {
+		return "usage.completion_tokens"
+	}
+	if s.OutputEvents > 0 {
+		return "stream_content_events"
+	}
+	return "estimated_content_tokens"
+}
+
+func servingStatsTokenBasis(counts map[string]int) string {
+	if len(counts) == 0 {
+		return "stream_content_events"
+	}
+	if len(counts) == 1 {
+		for basis := range counts {
+			return basis
+		}
+	}
+	return "mixed"
+}
+
+func servingOursVsSGLangTax(tracks []ServingTrackResult) ServingTaxReport {
+	report := ServingTaxReport{
+		Status:         "not_measured",
+		OursTrack:      TrackOurs,
+		RawTrack:       TrackSGLang,
+		SourceQuantile: "p50",
+	}
+	ours, okOurs := servingTrackResult(tracks, TrackOurs)
+	raw, okRaw := servingTrackResult(tracks, TrackSGLang)
+	if !okOurs {
+		report.Reason = "ours track missing"
+		return report
+	}
+	if !okRaw {
+		report.Reason = "sglang raw track missing"
+		return report
+	}
+	if ours.Status != "measured" {
+		report.Reason = "ours track not measured"
+		return report
+	}
+	if raw.Status != "measured" {
+		report.Reason = "sglang raw track not measured"
+		return report
+	}
+
+	report.Metrics = map[string]ServingTaxMetric{
+		"ttft_ms":          servingTaxFromQuantile(ours.Stats.TTFTMillis, raw.Stats.TTFTMillis, "ms", "p50 latency missing"),
+		"itl_ms":           servingTaxFromQuantile(ours.Stats.ITLMillis, raw.Stats.ITLMillis, "ms", "p50 latency missing"),
+		"tpot_ms":          servingTaxFromQuantile(ours.Stats.TPOTMillis, raw.Stats.TPOTMillis, "ms", "p50 latency missing"),
+		"end_to_end_ms":    servingTaxFromQuantile(ours.Stats.EndToEndMillis, raw.Stats.EndToEndMillis, "ms", "p50 latency missing"),
+		"throughput_tok_s": servingTaxFromScalar(ours.Stats.ThroughputTokensS, raw.Stats.ThroughputTokensS, "throughput missing"),
+		"goodput_rps":      servingTaxFromScalar(ours.Stats.GoodputRPS, raw.Stats.GoodputRPS, "goodput missing"),
+	}
+	for _, metric := range report.Metrics {
+		if metric.Status == "measured" {
+			report.Status = "measured"
+			return report
+		}
+	}
+	report.Reason = "no shared measured metrics"
+	return report
+}
+
+func servingTrackResult(tracks []ServingTrackResult, want ServingTrack) (ServingTrackResult, bool) {
+	for _, tr := range tracks {
+		if tr.Track == want {
+			return tr, true
+		}
+	}
+	return ServingTrackResult{}, false
+}
+
+func servingTaxFromQuantile(ours, raw QuantileMetric, unit, reason string) ServingTaxMetric {
+	return servingTaxValues(ours.P50, raw.P50, unit, reason)
+}
+
+func servingTaxFromScalar(ours, raw ScalarMetric, reason string) ServingTaxMetric {
+	unit := ours.Unit
+	if unit == "" {
+		unit = raw.Unit
+	}
+	return servingTaxValues(ours.Value, raw.Value, unit, reason)
+}
+
+func servingTaxValues(ours, raw *float64, unit, reason string) ServingTaxMetric {
+	if ours == nil || raw == nil {
+		return ServingTaxMetric{Status: "not_measured", Unit: unit, Reason: reason}
+	}
+	delta := round(*ours - *raw)
+	metric := ServingTaxMetric{
+		Status:       "measured",
+		Unit:         unit,
+		Ours:         floatPtr(*ours),
+		Raw:          floatPtr(*raw),
+		OursMinusRaw: &delta,
+	}
+	if *raw != 0 {
+		ratio := round(*ours / *raw)
+		metric.OursDivRaw = &ratio
+	}
+	return metric
 }
 
 func FetchPrefixCacheHitRate(ctx context.Context, client *http.Client, metricsURL string) ScalarMetric {
@@ -709,6 +910,7 @@ func quantiles(values []float64, unit, reason string) QuantileMetric {
 		Unit:   unit,
 		P50:    floatPtr(percentileFloat(values, 0.50)),
 		P90:    floatPtr(percentileFloat(values, 0.90)),
+		P95:    floatPtr(percentileFloat(values, 0.95)),
 		P99:    floatPtr(percentileFloat(values, 0.99)),
 	}
 }
@@ -741,6 +943,11 @@ func notMeasuredScalar(unit, reason string) ScalarMetric {
 
 func floatPtr(v float64) *float64 {
 	x := round(v)
+	return &x
+}
+
+func intPtr(v int) *int {
+	x := v
 	return &x
 }
 

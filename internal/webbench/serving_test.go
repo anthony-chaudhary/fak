@@ -50,7 +50,7 @@ func TestFoldServingSamplesMeasuredMetrics(t *testing.T) {
 	if stats.Requests != 3 || stats.OK != 2 || stats.Failed != 1 {
 		t.Fatalf("counts = %+v, want requests=3 ok=2 failed=1", stats)
 	}
-	if stats.TTFTMillis.Status != "measured" || *stats.TTFTMillis.P50 != 100 || *stats.TTFTMillis.P90 != 200 {
+	if stats.TTFTMillis.Status != "measured" || *stats.TTFTMillis.P50 != 100 || *stats.TTFTMillis.P90 != 200 || *stats.TTFTMillis.P95 != 200 {
 		t.Fatalf("ttft quantiles wrong: %+v", stats.TTFTMillis)
 	}
 	if stats.ITLMillis.Status != "measured" || *stats.ITLMillis.P99 != 70 {
@@ -91,6 +91,9 @@ func TestRunServingParityReportsMissingEndpointsAsNotMeasured(t *testing.T) {
 			t.Fatalf("%s ttft = %+v, want not_measured", tr.Track, tr.Stats.TTFTMillis)
 		}
 	}
+	if rep.OursVsSGLangTax.Status != "not_measured" {
+		t.Fatalf("tax status = %+v, want not_measured", rep.OursVsSGLangTax)
+	}
 }
 
 func TestParsePrefixCacheHitRateMetrics(t *testing.T) {
@@ -118,6 +121,7 @@ func TestMeasureSSERequestReadsTokenStream(t *testing.T) {
 		flusher.Flush()
 		time.Sleep(time.Millisecond)
 		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"B\"}}]}\n\n")
+		fmt.Fprint(w, "data: {\"choices\":[],\"usage\":{\"completion_tokens\":2}}\n\n")
 		fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer srv.Close()
@@ -142,8 +146,64 @@ func TestMeasureSSERequestReadsTokenStream(t *testing.T) {
 	if s.OutputEvents != 2 || s.OutputTokenEstimate != 2 {
 		t.Fatalf("output events = %d estimate=%d, want 2/2", s.OutputEvents, s.OutputTokenEstimate)
 	}
+	if s.OutputTokensExact == nil || *s.OutputTokensExact != 2 || s.OutputTokenCountBasis != "usage.completion_tokens" {
+		t.Fatalf("usage token count = exact:%v basis:%q, want 2 usage.completion_tokens", s.OutputTokensExact, s.OutputTokenCountBasis)
+	}
 	if s.TTFTMillis == nil || len(s.ITLMillis) != 1 || s.TPOTMillis == nil {
 		t.Fatalf("stream timings missing: %+v", s)
+	}
+}
+
+func TestMeasureSSERequestClassifiesHTTPFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	s := MeasureSSERequest(
+		context.Background(),
+		srv.Client(),
+		ServingTrackConfig{BaseURL: srv.URL + "/v1"},
+		"m",
+		ServingRequest{ID: "r1", Messages: []ChatMessage{{Role: "user", Content: "hello"}}, MaxOutputTokens: 8},
+		time.Second,
+	)
+	if s.Status != "fail" || s.HTTPStatus != http.StatusServiceUnavailable || s.ErrorClass != "http_status" {
+		t.Fatalf("failure sample = %+v, want http_status classification", s)
+	}
+}
+
+func TestServingOursVsSGLangTaxReportsDeltaAndRatio(t *testing.T) {
+	oursTTFT, rawTTFT := 120.0, 100.0
+	oursThroughput, rawThroughput := 80.0, 100.0
+	tax := servingOursVsSGLangTax([]ServingTrackResult{
+		{
+			Track:  TrackOurs,
+			Status: "measured",
+			Stats: ServingStats{
+				TTFTMillis:        QuantileMetric{Status: "measured", Unit: "ms", P50: &oursTTFT},
+				ThroughputTokensS: ScalarMetric{Status: "measured", Unit: "usage.completion_tokens/s", Value: &oursThroughput},
+			},
+		},
+		{
+			Track:  TrackSGLang,
+			Status: "measured",
+			Stats: ServingStats{
+				TTFTMillis:        QuantileMetric{Status: "measured", Unit: "ms", P50: &rawTTFT},
+				ThroughputTokensS: ScalarMetric{Status: "measured", Unit: "usage.completion_tokens/s", Value: &rawThroughput},
+			},
+		},
+	})
+	if tax.Status != "measured" || tax.RawTrack != TrackSGLang || tax.OursTrack != TrackOurs {
+		t.Fatalf("tax header = %+v, want measured ours-vs-sglang", tax)
+	}
+	ttft := tax.Metrics["ttft_ms"]
+	if ttft.OursMinusRaw == nil || *ttft.OursMinusRaw != 20 || ttft.OursDivRaw == nil || *ttft.OursDivRaw != 1.2 {
+		t.Fatalf("ttft tax = %+v, want delta 20 ratio 1.2", ttft)
+	}
+	throughput := tax.Metrics["throughput_tok_s"]
+	if throughput.OursMinusRaw == nil || *throughput.OursMinusRaw != -20 || throughput.OursDivRaw == nil || *throughput.OursDivRaw != 0.8 {
+		t.Fatalf("throughput tax = %+v, want delta -20 ratio 0.8", throughput)
 	}
 }
 
