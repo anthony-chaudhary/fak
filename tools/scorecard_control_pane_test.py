@@ -203,6 +203,55 @@ def test_propagation_pinned_in_committed_baseline() -> None:
         "propagation dropped from baseline grade_weights — the grade ratchet floor is gone"
 
 
+def test_milestone_scorecard_registered() -> None:
+    # #1444 (epic #1436): the milestone report rides the ratchet as a first-class
+    # RSI scorecard only if its milestone_debt card stays in the fold. It is
+    # go-backed (script=""), so the on-disk breadth invariant
+    # (test_every_scorecard_is_registered_or_excluded, which scans tools/*_scorecard.py)
+    # does NOT cover it — a refactor could silently drop the row and no test would
+    # notice. This drift sentinel pins the exact card so the fold can't lose it.
+    card = next(c for c in scp.SCORECARDS if c["key"] == "milestone")
+    assert card == {
+        "key": "milestone",
+        "debt": "milestone_debt",
+        "script": "",
+        "cmd": "go run ./cmd/fak milestone-scorecard --json",
+        "label": "milestone",
+    }
+
+
+def test_milestone_climb_scorecard_registered() -> None:
+    # #1442/#1444: the milestone CLIMB ratchet is a DISTINCT gate from milestone_debt
+    # — climb_ratchet_debt reds on a same-debt rung swap that lowers matured_cells,
+    # a regression milestone_debt alone can't see. Pin its card too so the two-gate
+    # fold (debt worklist + climb ratchet) can't collapse back to one.
+    card = next(c for c in scp.SCORECARDS if c["key"] == "milestone_climb")
+    assert card == {
+        "key": "milestone_climb",
+        "debt": "climb_ratchet_debt",
+        "script": "",
+        "cmd": "go run ./cmd/fak milestone-scorecard --ratchet --json",
+        "label": "milestone-climb",
+    }
+
+
+def test_milestone_pinned_in_committed_baseline() -> None:
+    # #1444 acceptance ("a regression reds the ratchet"): registering the milestone
+    # cards in SCORECARDS is only half the ratchet — the committed
+    # tools/scorecard_baseline.json must carry BOTH milestone keys in BOTH axes (raw
+    # metrics + grade_weights), or their debt has no floor and a regression can't red
+    # --check. Same drift sentinel as propagation (#1515), for the milestone surface:
+    # a future blind --pin on a tree where the go-backed card errored can't silently
+    # drop the milestone floor.
+    baseline = scp.load_baseline(scp.repo_root() / scp.BASELINE_REL)
+    assert baseline is not None, f"{scp.BASELINE_REL} missing or unreadable"
+    for key in ("milestone", "milestone_climb"):
+        assert key in (baseline.get("metrics") or {}), \
+            f"{key} dropped from baseline metrics — the raw-unit floor is gone"
+        assert key in (baseline.get("grade_weights") or {}), \
+            f"{key} dropped from baseline grade_weights — the grade ratchet floor is gone"
+
+
 # --- fold: portfolio sum + verdict ladder ----------------------------------
 
 def test_fold_sums_portfolio_debt() -> None:
