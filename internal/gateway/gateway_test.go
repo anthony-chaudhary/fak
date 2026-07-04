@@ -384,10 +384,30 @@ func TestHTTPModelsAndHealth(t *testing.T) {
 	var models struct {
 		Object string           `json:"object"`
 		Data   []map[string]any `json:"data"`
+		Models []struct {
+			Slug               string `json:"slug"`
+			DisplayName        string `json:"display_name"`
+			BaseInstructions   string `json:"base_instructions"`
+			Priority           int    `json:"priority"`
+			ReasoningSummaries bool   `json:"supports_reasoning_summaries"`
+			Verbosity          bool   `json:"support_verbosity"`
+			TruncationPolicy   struct {
+				Mode  string `json:"mode"`
+				Limit int    `json:"limit"`
+			} `json:"truncation_policy"`
+			ContextWindow int `json:"context_window"`
+		} `json:"models"`
 	}
 	getJSON(t, ts.URL+"/v1/models", &models)
 	if models.Object != "list" || len(models.Data) != 1 || models.Data[0]["id"] != "test-model" {
 		t.Errorf("/v1/models = %+v", models)
+	}
+	if len(models.Models) != 1 || models.Models[0].Slug != "test-model" || models.Models[0].DisplayName != "test-model" {
+		t.Errorf("/v1/models Codex catalog = %+v", models.Models)
+	} else if models.Models[0].BaseInstructions != "" || models.Models[0].Priority != 0 || models.Models[0].ReasoningSummaries || models.Models[0].Verbosity {
+		t.Errorf("/v1/models Codex metadata = %+v", models.Models[0])
+	} else if models.Models[0].TruncationPolicy.Mode != "tokens" || models.Models[0].TruncationPolicy.Limit <= 0 || models.Models[0].ContextWindow <= 0 {
+		t.Errorf("/v1/models Codex limits = %+v", models.Models[0])
 	}
 	var health map[string]any
 	getJSON(t, ts.URL+"/healthz", &health)

@@ -285,20 +285,18 @@ func turnBodyClaimsCompletedEdit(content string) bool {
 	if strings.TrimSpace(body) == "" {
 		return false
 	}
-	for _, phrase := range []string{
+	if containsAnySubstring(body, []string{
 		" changes are complete ",
 		" edits are complete ",
 		" file has been updated ",
 		" file was updated ",
-	} {
-		if strings.Contains(body, phrase) {
-			return true
-		}
+	}) {
+		return true
 	}
 	if !turnBodyNamesEditableArtifact(body) {
 		return false
 	}
-	for _, phrase := range []string{
+	return containsAnySubstring(body, []string{
 		" i edited ",
 		" i've edited ",
 		" i have edited ",
@@ -314,8 +312,13 @@ func turnBodyClaimsCompletedEdit(content string) bool {
 		" i replaced ",
 		" i renamed ",
 		" i wrote ",
-	} {
-		if strings.Contains(body, phrase) {
+	})
+}
+
+// containsAnySubstring reports whether s contains at least one of subs.
+func containsAnySubstring(s string, subs []string) bool {
+	for _, sub := range subs {
+		if strings.Contains(s, sub) {
 			return true
 		}
 	}
@@ -323,16 +326,11 @@ func turnBodyClaimsCompletedEdit(content string) bool {
 }
 
 func turnBodyNamesEditableArtifact(body string) bool {
-	for _, marker := range []string{
+	return containsAnySubstring(body, []string{
 		" file ", " files ", " folder ", " directory ", " repo ", " code ",
 		" readme", " doc ", " docs ", ".go", ".md", ".json", ".yaml", ".yml",
 		".txt", ".ps1", ".sh", ".py", ".ts", ".tsx", ".js", ".jsx",
-	} {
-		if strings.Contains(body, marker) {
-			return true
-		}
-	}
-	return false
+	})
 }
 
 func turnHasAdmittedCall(adjs []ToolAdjudication) bool {
@@ -347,14 +345,12 @@ func turnHasAdmittedCall(adjs []ToolAdjudication) bool {
 func turnHasEffectCapableCall(calls []agent.ToolCall) bool {
 	for _, tc := range calls {
 		name := strings.ToLower(tc.Function.Name)
-		for _, token := range []string{
+		if containsAnySubstring(name, []string{
 			"write", "edit", "patch", "apply", "create", "delete", "remove",
 			"replace", "rename", "move", "commit", "bash", "shell", "exec",
 			"command", "python",
-		} {
-			if strings.Contains(name, token) {
-				return true
-			}
+		}) {
+			return true
 		}
 	}
 	return false

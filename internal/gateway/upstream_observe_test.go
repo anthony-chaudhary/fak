@@ -66,3 +66,32 @@ func TestNilUpstreamObserverLeavesTransportUnchanged(t *testing.T) {
 		t.Fatalf("nil observer must not install a transport, got %T", hp.Client.Transport)
 	}
 }
+
+func TestProxyPlannerForwardsExtraHeaders(t *testing.T) {
+	var gotAuth, gotAccount string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotAccount = r.Header.Get("ChatGPT-Account-Id")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"completed","output":[{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+	}))
+	defer upstream.Close()
+
+	planner, err := newProxyPlanner(Config{
+		Provider:     "openai-responses",
+		APIKey:       "subscription-token",
+		ExtraHeaders: map[string]string{"ChatGPT-Account-Id": "acct-gateway"},
+	}, "gpt-test", []string{upstream.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := planner.Complete(t.Context(), []agent.Message{{Role: agent.RoleUser, Content: "hi"}}, nil); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if gotAuth != "Bearer subscription-token" {
+		t.Fatalf("Authorization = %q, want bearer subscription-token", gotAuth)
+	}
+	if gotAccount != "acct-gateway" {
+		t.Fatalf("ChatGPT-Account-Id = %q, want acct-gateway", gotAccount)
+	}
+}

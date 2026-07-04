@@ -63,6 +63,16 @@ func renderVerdict(v abi.Verdict, resultMeta map[string]string) WireVerdict {
 	if wp, ok := v.Payload.(abi.WitnessPayload); ok && wp.Claim != "" {
 		w.Detail = map[string]string{"claim": wp.Claim}
 	}
+	// The rule's sanctioned alternative (manifest arg_rules[].fix, stamped on the
+	// verdict Meta by the adjudicator) rides to every wire so a refusal can be
+	// rendered as a redirect, not a dead end. Same disclosure budget as the claim:
+	// static operator-authored manifest text, never the arg value.
+	if fix := v.Meta["fix"]; fix != "" {
+		if w.Detail == nil {
+			w.Detail = map[string]string{}
+		}
+		w.Detail["fix"] = fix
+	}
 
 	// A result quarantined by the context-MMU at admit-time overrides the (Allow)
 	// submit verdict — the poisoned bytes were already paged out.

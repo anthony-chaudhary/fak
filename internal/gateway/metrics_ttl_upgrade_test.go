@@ -44,3 +44,43 @@ func TestCacheTTLUpgradeMetricsZero(t *testing.T) {
 		t.Fatalf("unexpected extra ttl-upgrade rows in zero state:\n%s", got)
 	}
 }
+
+// The TTL-upgrade outcomes must fold into AdjudicationSummary — the exported bridge the
+// guard exit banner and the gateway-usage ledger fill read — split into the upgraded
+// count and the per-refusal-reason map, so the durable row can carry the same family
+// the in-process fak_gateway_cache_ttl_upgrade_total counter witnesses (#1844 C6).
+func TestCacheTTLUpgradeFoldsIntoAdjudicationSummary(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	m.observeCacheTTLUpgrade("")
+	m.observeCacheTTLUpgrade("")
+	m.observeCacheTTLUpgrade("no_stable_breakpoint")
+	m.observeCacheTTLUpgrade("volatile_head")
+	m.observeCacheTTLUpgrade("volatile_head")
+
+	sum := m.adjudicationSummary()
+	if sum.CacheTTLUpgraded != 2 {
+		t.Fatalf("CacheTTLUpgraded = %d, want 2", sum.CacheTTLUpgraded)
+	}
+	if got := sum.CacheTTLUpgradeReasons["no_stable_breakpoint"]; got != 1 {
+		t.Fatalf("CacheTTLUpgradeReasons[no_stable_breakpoint] = %d, want 1", got)
+	}
+	if got := sum.CacheTTLUpgradeReasons["volatile_head"]; got != 2 {
+		t.Fatalf("CacheTTLUpgradeReasons[volatile_head] = %d, want 2", got)
+	}
+	if _, present := sum.CacheTTLUpgradeReasons["upgraded"]; present {
+		t.Fatalf("upgraded leaked into the refusal-reason map: %v", sum.CacheTTLUpgradeReasons)
+	}
+}
+
+// A lever-off session (nothing observed) folds to a zero count and an ABSENT reason map,
+// so the ledger row's omitempty keeps the JSON key out and OFF stays distinguishable from
+// ON-but-ineligible.
+func TestCacheTTLUpgradeSummaryZeroStateAbsent(t *testing.T) {
+	sum := newGatewayMetrics(time.Now()).adjudicationSummary()
+	if sum.CacheTTLUpgraded != 0 {
+		t.Fatalf("CacheTTLUpgraded = %d, want 0", sum.CacheTTLUpgraded)
+	}
+	if sum.CacheTTLUpgradeReasons != nil {
+		t.Fatalf("CacheTTLUpgradeReasons = %v, want nil (absent under omitempty)", sum.CacheTTLUpgradeReasons)
+	}
+}
