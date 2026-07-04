@@ -93,6 +93,36 @@ func (s *Supervisor) Spawn(callID, tool, session string, deadlineMS, heartbeatEv
 	return nil
 }
 
+// ArmMonitor arms an event-stream monitor as a liveness process. It enforces
+// the observed-coverage doctrine at the seam: toolproc.ArmMonitor REFUSES a
+// filter that covers no failure-signature class (MONITOR_NO_FAILURE_COVERAGE)
+// BEFORE anything is journaled, so a progress-only monitor never enters the
+// table. An armed monitor carries its declared heartbeat cadence, so a stream
+// that goes quiet folds to TOOL_HEARTBEAT_STALLED with KILL advice and the next
+// Tick revokes it (unlike a generic long-runner's stall, which is only probed).
+// cancel is the lever Tick pulls on that kill; nil means observable-but-not-
+// cancellable (the revocation still quarantines a late completion).
+func (s *Supervisor) ArmMonitor(spec toolproc.MonitorSpec, cancel func()) error {
+	ev, err := toolproc.ArmMonitor(spec)
+	if err != nil {
+		return err
+	}
+	if err := toolproc.ValidateEvent(ev); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.spawned[ev.CallID] {
+		return fmt.Errorf("toolprocgate: duplicate spawn for call %s", ev.CallID)
+	}
+	s.spawned[ev.CallID] = true
+	s.events = append(s.events, ev)
+	if cancel != nil {
+		s.cancels[ev.CallID] = cancel
+	}
+	return nil
+}
+
 // Pulse reports a liveness signal (heartbeat, output chunk, progress, poll).
 // via optionally names the polling call's TraceID (launch↔poll correlation).
 func (s *Supervisor) Pulse(callID string, nowMS int64, via string) error {

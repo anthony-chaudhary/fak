@@ -1182,6 +1182,11 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 		// cost per tool call this session. Best-effort — a hook-less session prints
 		// nothing rather than a vacuous zero row.
 		fmt.Fprint(os.Stderr, guardHookLatencySummaryLine(sessionWindow, time.Now()))
+		// The tool process table (#2445): any event-stream monitor that went silent
+		// past its cadence this session folded to a killed TOOL_HEARTBEAT_STALLED —
+		// surface that count here (silence is not success). Best-effort, empty when
+		// nothing is outstanding.
+		fmt.Fprint(os.Stderr, guardToolprocSummary(time.Now()))
 	}
 	// Append cache-value observation to ledger (epic #1072, issue #1075).
 	stats := cacheobs.Default.Snapshot()

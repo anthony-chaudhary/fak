@@ -26,10 +26,13 @@
 // JSONL journal to the process table at one instant: per-proc state
 // (RUNNING/DONE/KILLED), liveness class (LIVE/QUIET/STALLED), deadline
 // overdue-ness, orphan-ness, and findings from a CLOSED verdict vocabulary —
-// TOOL_DEADLINE_EXCEEDED (advice: kill), TOOL_HEARTBEAT_STALLED (advice:
-// probe), TOOL_ORPHANED (advice: reap), TOOL_RESULT_AFTER_KILL (advice:
-// quarantine_result). The reason codes live in the registered out-of-tree range
-// (1040–1043, above abi.ReasonCoreMax) exactly like egressfloor's EGRESS_BLOCK;
+// TOOL_DEADLINE_EXCEEDED (advice: kill), TOOL_HEARTBEAT_STALLED (advice: probe
+// for a generic long-runner, KILL for a monitor — see monitor.go), TOOL_ORPHANED
+// (advice: reap), TOOL_RESULT_AFTER_KILL (advice: quarantine_result). An
+// event-stream MONITOR is armed through ArmMonitor, which refuses a progress-only
+// filter with the closed MONITOR_NO_FAILURE_COVERAGE token (silence is not
+// success). The reason codes live in the registered out-of-tree range
+// (1040–1044, above abi.ReasonCoreMax) exactly like egressfloor's EGRESS_BLOCK;
 // the consumer registers the names, so this leaf stays init-free and pure.
 //
 // WHAT THIS LEAF IS NOT. It is the decision spine only — deterministic,

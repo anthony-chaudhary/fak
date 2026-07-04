@@ -282,9 +282,9 @@ func encodeToolprocEventLine(stdout, stderr io.Writer, ev toolproc.Event) int {
 }
 
 func renderToolprocTable(w io.Writer, tab toolproc.Table) {
-	fmt.Fprintf(w, "toolproc: now_unix_ms=%d running=%d done=%d killed=%d overdue=%d stalled=%d orphaned=%d attention=%t\n",
+	fmt.Fprintf(w, "toolproc: now_unix_ms=%d running=%d done=%d killed=%d overdue=%d stalled=%d stalled_monitors=%d orphaned=%d attention=%t\n",
 		tab.NowUnixMS, tab.Counts.Running, tab.Counts.Done, tab.Counts.Killed,
-		tab.Counts.Overdue, tab.Counts.Stalled, tab.Counts.Orphaned, tab.AttentionNeeded)
+		tab.Counts.Overdue, tab.Counts.Stalled, tab.Counts.StalledMonitors, tab.Counts.Orphaned, tab.AttentionNeeded)
 	for _, p := range tab.Procs {
 		owner := p.Session
 		if owner == "" {

@@ -49,6 +49,7 @@ func ReasonPairs() []ReasonPair {
 		{ReasonToolHeartbeatStalled, ReasonToolHeartbeatStalledName},
 		{ReasonToolOrphaned, ReasonToolOrphanedName},
 		{ReasonToolResultAfterKill, ReasonToolResultAfterKillName},
+		{ReasonMonitorNoFailureCoverage, ReasonMonitorNoFailureCoverageName},
 	}
 }
 
@@ -102,6 +103,13 @@ type Event struct {
 	// never silently treated as covered (#2363). Empty means "not a brokered
 	// launch" (hook-fed rows, where coverage is not this seam's concern).
 	Coverage string `json:"coverage,omitempty"`
+
+	// spawn only (optional): this call is an event-stream MONITOR (see
+	// monitor.go). A monitor is armed through ArmMonitor, which refuses a
+	// progress-only filter; a monitor that stalls folds to TOOL_HEARTBEAT_STALLED
+	// with KILL advice (a generic long-runner's stall is only a probe). A monitor
+	// spawn MUST carry a positive HeartbeatEveryMS — silence is the whole signal.
+	Monitor bool `json:"monitor,omitempty"`
 }
 
 // Coverage tokens for Event.Coverage (CLOSED set for brokered spawn rows).
@@ -169,6 +177,11 @@ type Proc struct {
 	// un-killable: the boundary sees it but cannot reap it (#2363).
 	Coverage string `json:"coverage,omitempty"`
 
+	// Monitor marks an event-stream monitor (folded from the spawn row). A
+	// stalled monitor carries KILL advice, not the generic probe — silence is
+	// not success (see monitor.go).
+	Monitor bool `json:"monitor,omitempty"`
+
 	StartMS     int64 `json:"start_unix_ms"`
 	EndMS       int64 `json:"end_unix_ms,omitempty"`
 	LastPulseMS int64 `json:"last_pulse_unix_ms,omitempty"`
@@ -190,12 +203,16 @@ type Proc struct {
 
 // Counts is the table's attention summary.
 type Counts struct {
-	Running  int `json:"running"`
-	Done     int `json:"done"`
-	Killed   int `json:"killed"`
-	Overdue  int `json:"overdue"`
-	Stalled  int `json:"stalled"`
-	Orphaned int `json:"orphaned"`
+	Running int `json:"running"`
+	Done    int `json:"done"`
+	Killed  int `json:"killed"`
+	Overdue int `json:"overdue"`
+	Stalled int `json:"stalled"`
+	// StalledMonitors is the subset of Stalled that are event-stream monitors —
+	// the "silence is not success" count `fak guard` surfaces. A stalled monitor
+	// is a KILL, not a probe, so this count is attention that was acted on.
+	StalledMonitors int `json:"stalled_monitors"`
+	Orphaned        int `json:"orphaned"`
 }
 
 // Config tunes the fold. Zero values are safe: no default deadline (unbounded
@@ -263,6 +280,9 @@ func ValidateEvent(ev Event) error {
 	if ev.AtMS <= 0 {
 		return fmt.Errorf("event %q: at_unix_ms must be positive", ev.Kind)
 	}
+	if ev.Monitor && ev.Kind != EvSpawn {
+		return fmt.Errorf("event %q: monitor flag is spawn-only", ev.Kind)
+	}
 	switch ev.Kind {
 	case EvSpawn:
 		if ev.CallID == "" {
@@ -273,6 +293,9 @@ func ValidateEvent(ev Event) error {
 		}
 		if ev.DeadlineMS < 0 || ev.HeartbeatEveryMS < 0 {
 			return fmt.Errorf("spawn %s: negative envelope", ev.CallID)
+		}
+		if ev.Monitor && ev.HeartbeatEveryMS <= 0 {
+			return fmt.Errorf("spawn %s: monitor requires a positive heartbeat cadence (silence is the signal)", ev.CallID)
 		}
 		if ev.Coverage != "" && ev.Coverage != CoveragePIDBound && ev.Coverage != CoverageAdviceOnly {
 			return fmt.Errorf("spawn %s: coverage must be %q|%q, got %q", ev.CallID, CoveragePIDBound, CoverageAdviceOnly, ev.Coverage)
@@ -365,6 +388,7 @@ func Fold(events []Event, nowMS int64, cfg Config) (Table, error) {
 				CallID: ev.CallID, Tool: ev.Tool, Session: ev.Session,
 				State: StateRunning, StartMS: ev.AtMS, Coverage: ev.Coverage,
 				DeadlineMS: deadline, HeartbeatEveryMS: ev.HeartbeatEveryMS,
+				Monitor: ev.Monitor,
 			}}
 			order = append(order, ev.CallID)
 		case EvPulse:
@@ -436,6 +460,9 @@ func Fold(events []Event, nowMS int64, cfg Config) (Table, error) {
 		}
 		if p.Liveness == LivenessStalled {
 			t.Counts.Stalled++
+			if p.Monitor {
+				t.Counts.StalledMonitors++
+			}
 		}
 		if p.Orphaned {
 			t.Counts.Orphaned++
@@ -495,11 +522,22 @@ func finalizeProc(p *proc, nowMS int64, cfg Config) {
 		})
 	}
 	if p.Liveness == LivenessStalled {
+		// A generic long-runner that goes quiet may be slow-but-alive: PROBE it
+		// (the embedder's move — poll, nudge). A MONITOR that goes quiet is not
+		// doing its one job, and its silence is indistinguishable from the
+		// crashloop it was armed to catch — so it is a KILL: the supervisor
+		// revokes it and journals the verdict (silence is not success).
+		advice := AdviceProbe
+		detail := fmt.Sprintf("no signal within %.0fx its %dms cadence", cfg.StallMultiplier, p.HeartbeatEveryMS)
+		if p.Monitor {
+			advice = AdviceKill
+			detail = fmt.Sprintf("monitor silent within %.0fx its %dms cadence — silence is not success", cfg.StallMultiplier, p.HeartbeatEveryMS)
+		}
 		p.Findings = append(p.Findings, Finding{
 			Reason: ReasonToolHeartbeatStalledName,
 			Code:   uint32(ReasonToolHeartbeatStalled),
-			Advice: AdviceProbe,
-			Detail: fmt.Sprintf("no signal within %.0fx its %dms cadence", cfg.StallMultiplier, p.HeartbeatEveryMS),
+			Advice: advice,
+			Detail: detail,
 		})
 	}
 	if p.State == StateRunning && p.sessionEndedMS > 0 {

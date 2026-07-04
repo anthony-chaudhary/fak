@@ -242,18 +242,20 @@ func TestParseRoundTrip(t *testing.T) {
 }
 
 // The reason block stays out of the human-owned core range and the pairs stay
-// in lockstep with the constants.
+// in lockstep with the constants. The verdict family is namespaced to this leaf:
+// TOOL_* for a live process's lifecycle verdict, MONITOR_* for the arm-time
+// monitor-coverage refusal (an admission verdict, not a lifecycle one).
 func TestReasonBlockIsOutOfTree(t *testing.T) {
 	for _, pr := range ReasonPairs() {
 		if pr.Code <= abi.ReasonCoreMax {
 			t.Errorf("%s: code %d is inside the human-owned core range (<= %d)", pr.Name, pr.Code, abi.ReasonCoreMax)
 		}
-		if !strings.HasPrefix(pr.Name, "TOOL_") {
-			t.Errorf("%s: verdict tokens are namespaced TOOL_*", pr.Name)
+		if !strings.HasPrefix(pr.Name, "TOOL_") && !strings.HasPrefix(pr.Name, "MONITOR_") {
+			t.Errorf("%s: verdict tokens are namespaced TOOL_* or MONITOR_*", pr.Name)
 		}
 	}
-	if len(ReasonPairs()) != 4 {
-		t.Errorf("closed vocabulary has 4 tokens, got %d", len(ReasonPairs()))
+	if len(ReasonPairs()) != 5 {
+		t.Errorf("closed vocabulary has 5 tokens, got %d", len(ReasonPairs()))
 	}
 }
 
