@@ -162,6 +162,9 @@ func firstWitnessed(ep Episode) int {
 // self-reported "done", trusting it. The cost of a wrong trust is the rework
 // (wasted iterations) that the falsely-accepted done forces downstream.
 func runNaive(ep Episode) EpisodeOutcome {
+	if len(ep.Turns) == 0 {
+		return EpisodeOutcome{Episode: ep.Name} // no turns: nothing accepted (mirrors runGated's empty-safety)
+	}
 	accepted := len(ep.Turns)
 	for i, t := range ep.Turns {
 		if t.SelfReportedDone {
