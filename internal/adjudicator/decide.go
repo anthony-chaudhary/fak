@@ -172,6 +172,11 @@ type ArgPredicate struct {
 	// can soften ONE false-positive-prone rule without uncoupling the rest of the
 	// floor. The rule-granular dual of Policy.AdvisoryReasons.
 	Advisory bool
+	// Fix is the operator-authored sanctioned alternative (manifest
+	// arg_rules[].fix), carried on the deny verdict's Meta["fix"] so every wire
+	// can recommend it in the same breath as the refusal. Empty when the rule
+	// declares none. Static manifest text only — never the arg value.
+	Fix string
 }
 
 // Adjudicator is the reference monitor. Construct with New; the default instance
@@ -994,12 +999,19 @@ func argDeny(pr *ArgPredicate, detail string) abi.Verdict {
 	if reason == abi.ReasonNone {
 		reason = abi.ReasonPolicyBlock
 	}
-	return abi.Verdict{
+	v := abi.Verdict{
 		Kind:    abi.VerdictDeny,
 		Reason:  reason,
 		By:      "monitor",
 		Payload: abi.WitnessPayload{Claim: pr.Tool + "." + pr.Arg + " " + detail},
 	}
+	// The rule's sanctioned alternative rides the verdict so the refusal is a
+	// redirect, not a dead end (same bounded-disclosure budget: static manifest
+	// text, never the arg value).
+	if pr.Fix != "" {
+		v.Meta = map[string]string{"fix": pr.Fix}
+	}
+	return v
 }
 
 // argString returns the string form of args[key] and whether the key was present.
