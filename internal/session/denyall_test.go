@@ -129,6 +129,46 @@ func TestDenyAllBreakerDangerousDenialFailsClosed(t *testing.T) {
 	}
 }
 
+// TestDenyAllBreakerPowerShellPolicyBlockDiagnosticIsActionable replays the
+// Windows destructive-command churn shape: PowerShell repeatedly proposes the
+// same Remove-Item -Recurse/-Force style call, the policy floor refuses it with a
+// POLICY_BLOCK and an explicit sanctioned alternative, and auto-continuation must
+// end with a diagnostic that preserves that alternative instead of mislabeling the
+// reason as DEFAULT_DENY / missing allow-list coverage.
+func TestDenyAllBreakerPowerShellPolicyBlockDiagnosticIsActionable(t *testing.T) {
+	var b DenyAllBreaker
+	obs := DenyAllObservation{
+		Tool:        "PowerShell",
+		Reason:      "POLICY_BLOCK",
+		Progress:    false,
+		Disposition: DenyAllEffectful,
+	}
+	var stop DenyAllVerdict
+	for i := 0; i < DenyAllDefaultThreshold; i++ {
+		stop = b.Observe(obs)
+	}
+	if !stop.Stopped {
+		t.Fatal("repeated PowerShell POLICY_BLOCK must hit the bounded stop")
+	}
+	d := stop.Diagnostic
+	for _, want := range []string{
+		"PowerShell",
+		"POLICY_BLOCK",
+		"explicit policy rule blocked this call",
+		"sanctioned alternative",
+		"do NOT re-propose",
+		"Remove-Item <file>",
+		"recursive/forced deletes stay operator-only",
+	} {
+		if !strings.Contains(d, want) {
+			t.Errorf("PowerShell POLICY_BLOCK diagnostic missing %q\n got:\n%s", want, d)
+		}
+	}
+	if strings.Contains(d, "DEFAULT_DENY = not on the capability floor") {
+		t.Fatalf("POLICY_BLOCK diagnostic must not carry DEFAULT_DENY semantics:\n%s", d)
+	}
+}
+
 // TestDenyAllBreakerProgressResetsTheRun proves a stuck streak resets the instant
 // the loop makes useful progress (a surviving call or meaningful work) — the
 // breaker never false-stops a loop that is actually moving, only one spinning on

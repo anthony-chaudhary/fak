@@ -248,19 +248,60 @@ func denyAllDiagnostic(tool, reason string, dispo DenyAllDisposition, consecutiv
 		recovery = "this is a harness-dialect COVERAGE problem, not a dangerous action: the tool's schema is plan-state / read-only, so admit \"" +
 			tool + "\" (and its namespace-qualified spellings) on the harness profile / embedded floor. Do NOT disable fak guard."
 	case DenyAllEffectful:
-		recovery = "the floor is CORRECT to deny \"" + tool + "\": do NOT allow-list it without mirroring the dangerous-command argument rules " +
-			"the named shell aliases carry (rm -rf / sudo / curl|sh). If the tool is genuinely unavailable, answer in text only."
+		recovery = denyAllEffectfulRecovery(tool, reason)
 	default:
 		recovery = "inspect why the floor refuses \"" + tool + "\" before changing anything (fak guard --dump-policy)."
 	}
 	return "fak deny-all loop breaker: stopped after " + itoa(consecutive) + " consecutive turns (bound " + itoa(threshold) +
 		") refusing the same tool the same way — auto-continue ends here so the loop cannot spin.\n" +
 		"  refused tool : " + tool + "\n" +
-		"  reason       : " + reason + " (DEFAULT_DENY = not on the capability floor)\n" +
+		"  reason       : " + reason + denyAllReasonNote(reason) + "\n" +
 		"  disposition  : " + dispo.String() + "\n" +
 		"  floor source : " + floorSource + " (inspect: fak guard --dump-policy)\n" +
 		"  recovery     : " + recovery + "\n" +
 		"A genuinely dangerous repeated denial stays fail-closed: the breaker only stops AUTO-CONTINUATION; it never auto-allows a refused tool."
+}
+
+func denyAllEffectfulRecovery(tool, reason string) string {
+	switch reason {
+	case "POLICY_BLOCK":
+		if tool == "PowerShell" || tool == "shell_command" || tool == "functions.shell_command" {
+			return "the floor is CORRECT to deny \"" + tool + "\": follow the sanctioned alternative from the refusal text/policy and do NOT re-propose the refused call unchanged. For a PowerShell Remove-Item -Recurse/-Force block, remove exact files with Remove-Item <file> or move them aside; recursive/forced deletes stay operator-only."
+		}
+		return "the floor is CORRECT to deny \"" + tool + "\": follow the sanctioned alternative from the refusal text/policy and do NOT re-propose the refused call unchanged. Do NOT loosen the policy unless the same dangerous-command argument rules remain in force."
+	default:
+		return "the floor is CORRECT to deny \"" + tool + "\": do NOT allow-list it without mirroring the dangerous-command argument rules " +
+			"the named shell aliases carry (rm -rf / sudo / curl|sh). If the tool is genuinely unavailable, answer in text only."
+	}
+}
+
+func denyAllReasonNote(reason string) string {
+	switch reason {
+	case "DEFAULT_DENY":
+		return " (not on the capability floor)"
+	case "POLICY_BLOCK":
+		return " (explicit policy rule blocked this call)"
+	case "SELF_MODIFY":
+		return " (guarded write target)"
+	case "MALFORMED":
+		return " (tool arguments did not match the declared schema)"
+	case "MISROUTE":
+		return " (tool or argument shape did not match the intended route)"
+	case "RATE_LIMITED":
+		return " (rate or quota limit)"
+	case "LEASE_HELD":
+		return " (conflicting lease)"
+	case "SECRET_EXFIL", "RESULT_SECRET_DISCOVERED":
+		return " (secret-shaped content blocked)"
+	case "UNWITNESSED":
+		return " (required independent witness missing)"
+	case "OVERSIZE":
+		return " (payload over the configured size bound)"
+	case "UNKNOWN_TOOL":
+		return " (tool not exposed by this harness)"
+	default:
+		return ""
+	}
 }
 
 // itoa is a stdlib-free int->string for the diagnostic so this leaf stays stdlib-only
