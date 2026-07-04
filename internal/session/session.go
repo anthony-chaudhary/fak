@@ -321,7 +321,23 @@ type State struct {
 	// PinObjective/RepinObjective/CarryObjective mint and reconcile the pin; this field
 	// is only its durable home on the drive so a migration cannot drop it.
 	ObjectivePin ctxplan.ObjectivePin `json:"objective_pin,omitempty,omitzero"`
-	Rev          uint64               `json:"rev"`
+	// PendingTurn is the write-ahead checkpoint of an in-flight turn's retry/backoff
+	// progress (issue #1363, epic #1352 Pillar 3 "durable turn"). The retry loop
+	// (internal/agent's HTTPPlanner.Complete) tracks its attempt count and last
+	// observed status purely in local Go variables — a kill -9 mid-retry loses that
+	// progress even though the rest of this State survives via the Descriptor/
+	// Registry (session_durable.go's persistServeSessionRevision already writes
+	// through on every Decide/DebitUsage). Recording it here, through the SAME
+	// already-wired persistence path, gives a restart a real pointer to how far the
+	// lost turn had gotten instead of silently starting over with no memory of what
+	// already failed. The zero value means "no turn in flight" (StartedAt is zero);
+	// a caller clears it (SetPendingTurn with the zero value) once the turn
+	// completes, so a session with no in-flight retry restores byte-identically to
+	// a pre-#1363 State (omitzero keeps the wire shape unchanged when unused). This
+	// field is the durable primitive only — wiring internal/agent's retry loop to
+	// call SetPendingTurn is the follow-on that actually closes #1363.
+	PendingTurn PendingTurn `json:"pending_turn,omitempty,omitzero"`
+	Rev         uint64      `json:"rev"`
 }
 
 // Goal is the structural root descriptor carried on State (issue #849). It names the
@@ -401,6 +417,35 @@ func (ti TurnIntent) IsZero() bool {
 	return !ti.EndsSoon && !ti.IsSpeculative && !ti.WillDiscard &&
 		ti.SharesPrefixWith == "" && ti.ArrivingInMillis <= 0 && ti.Prefix == "" &&
 		!ti.ResultAlreadyKnown
+}
+
+// PendingTurn is one in-flight turn's write-ahead checkpoint (issue #1363): how many
+// retry attempts it has made, the last HTTP status observed, and when the turn
+// started. It is deliberately narrow — just enough for a restart to tell "a turn was
+// mid-retry, this far along" — not a replay log of the turn's messages (those stay in
+// the provider's / Claude Code's own transcript store, matching the Descriptor's
+// existing drive-state-not-transcript fence).
+type PendingTurn struct {
+	// Attempt is the retry attempt number in progress (1 = first attempt). 0 means
+	// no attempt has been checkpointed yet.
+	Attempt int `json:"attempt,omitempty"`
+	// LastStatus is the last HTTP status the retry loop observed (e.g. 429, 503).
+	// 0 means none observed yet.
+	LastStatus int `json:"last_status,omitempty"`
+	// StartedAtUnixNano is the wall-clock instant (unix nanoseconds) this turn
+	// began, so a restart can tell how long the lost turn had been running. It is a
+	// timestamp, not a monotonic clock reading (the same TimeBudget.StartedAtUnixNano
+	// discipline: a value that must survive a JSON round-trip and a process restart
+	// cannot depend on a monotonic reading that dies with the process). Zero means
+	// no turn is checkpointed.
+	StartedAtUnixNano int64 `json:"started_at_unix_nano,omitempty"`
+}
+
+// IsZero reports whether no turn is currently checkpointed — the safe default a
+// restart reads as "nothing was in flight". A consumer checks this before treating
+// the fields as a real in-progress attempt.
+func (p PendingTurn) IsZero() bool {
+	return p.Attempt == 0 && p.LastStatus == 0 && p.StartedAtUnixNano == 0
 }
 
 // DefaultState is the drive a fresh/unseen session reads: Running, unbounded budget,

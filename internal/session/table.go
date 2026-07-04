@@ -321,6 +321,16 @@ func (t *Table) SetGoal(trace string, goal Goal) (State, bool) {
 	return t.setLocked(trace, func(cur *State) { cur.Goal = goal })
 }
 
+// SetPendingTurn records (or, with the zero PendingTurn, clears) the write-ahead
+// checkpoint of an in-flight turn's retry progress (issue #1363). A terminal session
+// rejects the change, matching every other Set*. The table only RECORDS it; the
+// retry loop is the writer and the durable Registry — persisted through the SAME
+// Update path as every other drive field — is what makes it survive a kill -9.
+// Setting it bumps Rev like any other write.
+func (t *Table) SetPendingTurn(trace string, pt PendingTurn) (State, bool) {
+	return t.setLocked(trace, func(cur *State) { cur.PendingTurn = pt })
+}
+
 // SetTimeBudget re-sets a session's wall-clock envelope live (issue #1584) — raise it
 // to grant more real time, cut it to bound a runaway managed run. A terminal session
 // rejects the change, matching SetBudget. Unlike SetBudget, this does NOT arm the

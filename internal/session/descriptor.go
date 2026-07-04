@@ -112,6 +112,11 @@ type Descriptor struct {
 	// it held before migration, instead of silently dropping the managed-context
 	// continuity contract #1583 established for in-process resets.
 	ObjectivePin ctxplan.ObjectivePin `json:"objective_pin,omitempty,omitzero"`
+	// PendingTurn mirrors State.PendingTurn (issue #1363) — the write-ahead
+	// checkpoint of an in-flight turn's retry progress — so a restart re-attaches
+	// knowing how far a lost turn had gotten, not with that progress silently
+	// dropped. The zero value means no turn was in flight.
+	PendingTurn PendingTurn `json:"pending_turn,omitempty,omitzero"`
 	// Time mirrors the live State's wall-clock budget (issue #1584): the persisted
 	// LimitNanos/ElapsedNanos/StartedAtUnixNano so a process restart re-attaches the
 	// accumulated elapsed time, not a zeroed clock. descriptorFromState copies whatever
@@ -184,6 +189,7 @@ func descriptorFromState(st State) Descriptor {
 		CacheAffinity:    st.CacheAffinity,
 		ResetTransaction: st.ResetTransaction,
 		ObjectivePin:     st.ObjectivePin,
+		PendingTurn:      st.PendingTurn,
 		Rev:              st.Rev,
 		Time:             st.Time,
 	}
@@ -214,6 +220,7 @@ func (d Descriptor) RestoredState() State {
 		CacheAffinity:    d.CacheAffinity,
 		ResetTransaction: d.ResetTransaction,
 		ObjectivePin:     d.ObjectivePin,
+		PendingTurn:      d.PendingTurn,
 		Rev:              d.Rev,
 		// Time is restored PAUSED (see TimeBudget.restoredPaused): a HIDDEN process
 		// restart is exactly a Pause the old process never got to make, so the

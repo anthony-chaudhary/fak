@@ -372,6 +372,57 @@ func TestRegistryRestartReattachesObjectivePin(t *testing.T) {
 	}
 }
 
+// TestRegistryRestartReattachesPendingTurnCheckpoint is the #1363 write-ahead
+// checkpoint witness: a turn mid-retry gets its attempt/status checkpointed onto
+// the SAME already-wired Registry/DescriptorStore persistence path every other
+// drive field uses, and a kill -9 (simulated here as a brand-new Registry + Table
+// over the same durable store, with the in-flight retry's local Go state simply
+// gone) still re-attaches knowing exactly how far the lost turn had gotten —
+// instead of that progress being silently unrecoverable.
+func TestRegistryRestartReattachesPendingTurnCheckpoint(t *testing.T) {
+	store := NewMemStore()
+	r1 := NewRegistry(store)
+	t0 := fixedClock()
+
+	// Process A: a turn is mid-retry (this attempt/status pair would otherwise live
+	// only in HTTPPlanner.Complete's local retryState). Checkpoint it before the
+	// simulated kill.
+	live := NewTable()
+	live.Restore("trace-turn", State{TraceID: "trace-turn", Run: Running, Budget: Budget{TurnsLeft: 5, TokensLeft: 500}})
+	pt := PendingTurn{Attempt: 2, LastStatus: 429, StartedAtUnixNano: t0.UnixNano()}
+	st, ok := live.SetPendingTurn("trace-turn", pt)
+	if !ok {
+		t.Fatal("setup: SetPendingTurn rejected on a live session")
+	}
+	if _, err := r1.Register("sess-turn", "host-a", st, time.Hour, t0); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// --- kill -9: process A's local retryState (attempt/status) is gone. A brand-new
+	// Registry + Table over the SAME durable store is process B. ---
+	r2 := NewRegistry(store)
+	t1 := t0.Add(time.Minute)
+	descs, err := r2.List(t1)
+	if err != nil {
+		t.Fatalf("list on restart: %v", err)
+	}
+	if len(descs) != 1 {
+		t.Fatalf("restart did not read back the descriptor: %d rows", len(descs))
+	}
+	d := descs[0]
+
+	restarted := NewTable()
+	// Precondition: an unseen trace has no checkpoint, so the assertion below is not
+	// vacuous — it proves the restore path, not a coincidence of defaults.
+	if !restarted.Get(d.Trace).PendingTurn.IsZero() {
+		t.Fatalf("precondition: fresh table already carried a checkpoint; test would be vacuous")
+	}
+	got := restarted.Restore(d.Trace, d.RestoredState())
+	if got.PendingTurn != pt {
+		t.Fatalf("restart lost the write-ahead turn checkpoint: got %+v want %+v", got.PendingTurn, pt)
+	}
+}
+
 func TestMemStoreRejectsBlankID(t *testing.T) {
 	s := NewMemStore()
 	if err := s.Put(Descriptor{ID: ""}); err == nil {
