@@ -205,9 +205,13 @@ func (s AdjudicationSummary) ProviderCacheSavingsUSD(inputPerMTokUSD float64) fl
 // (vcachegov.ProveTelemetrySavings) over ONE aggregate row, so the live gateway numbers
 // (saved-token-equiv, hit rate, multiplier) are byte-identical to the offline observe
 // Aggregate on the same totals — the model is linear, so one aggregate row reproduces
-// the sum of N per-turn rows. The 1h/5m write split is not on the live wire, so the whole
-// creation total is priced at the 5-minute write multiplier, exactly the convention
-// ProveTelemetrySavings applies to unsplit creation.
+// the sum of N per-turn rows. The provider wire never splits 5m vs 1h creation tokens,
+// but the gateway KNOWS the subset it upgraded (CacheCreationTokensUpgraded, attributed
+// per witnessed observeCacheTTLUpgrade), so that slice is priced at the 1h write
+// multiplier (2.0x) and the remainder at the 5m tier (#2179); an unattributed caller
+// passes 0 and reproduces the old all-5m convention byte-for-byte. This attribution is
+// gateway_attributed, not provider-reported — see vcacheProofFromCountersWithUpgrade and
+// TestProviderCacheNetSavingsPricesUpgradedCreationAt1h.
 //
 // PROVENANCE: every input is OBSERVED (provider-relayed); the saving is a realized
 // rebate, never a fak trust claim. The result is in INPUT-TOKEN-EQUIVALENTS (the $ dual
