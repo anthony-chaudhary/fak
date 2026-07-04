@@ -207,3 +207,24 @@ func appendLoopVerifyEvent(t *testing.T, path string, ev loopmgr.Event) {
 		t.Fatalf("append loop event: %v", err)
 	}
 }
+
+// TestLoopVerifyEmptyEpisodeNoPanic pins the #2648 fix: BuildLoopVerifyReportFor
+// on an episode with zero turns must not panic (runNaive used to index
+// ep.Turns[-1]). Both arms return a well-formed zero outcome, mirroring
+// runGated's existing empty-safety.
+func TestLoopVerifyEmptyEpisodeNoPanic(t *testing.T) {
+	rep := BuildLoopVerifyReportFor([]Episode{{Name: "empty-no-turns"}})
+	if len(rep.Episodes) != 1 {
+		t.Fatalf("episodes = %d, want 1", len(rep.Episodes))
+	}
+	pair := rep.Episodes[0]
+	if pair.Naive.AcceptedTurn != 0 || pair.Naive.Iterations != 0 || pair.Naive.FalseDone {
+		t.Fatalf("naive outcome on empty episode = %+v, want zero/false", pair.Naive)
+	}
+	if pair.Gated != (EpisodeOutcome{Episode: "empty-no-turns"}) {
+		t.Fatalf("gated outcome on empty episode = %+v, want zero", pair.Gated)
+	}
+	if pair.Naive != pair.Gated {
+		t.Fatalf("arms disagree on empty episode: naive=%+v gated=%+v", pair.Naive, pair.Gated)
+	}
+}
