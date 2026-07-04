@@ -153,10 +153,12 @@ which the kernel **DENIED a proposed tool call** — the friction behind the con
 own recovery action ("surface the `AGENTS.md` recovery table earlier when refusals
 spike, before the session fights the guard into a STOP"). The fold derives it from the
 gateway's denial banners in **assistant text** (`internal/gateway/http.go`:
-`adjudicationNote`'s "Do not re-propose a refused call unchanged" and `denySummary`'s
-"All proposed tool calls were refused by the fak kernel"), anchored on the full phrase
-so an analysis session that merely *mentions* a refusal does not register one, and
-scanned only in assistant text so a tool_result that *quotes* a banner cannot.
+`adjudicationNote`'s "This is per-tool feedback, not a session stop" and
+`denySummary`'s "All proposed tool calls were refused by the fak kernel"), anchored on
+the full phrase so an analysis session that merely *mentions* a refusal does not
+register one, and scanned only in assistant text so a tool_result that *quotes* a
+banner cannot. A refusal row is deliberately not a stop row: a session stop is recorded
+only when a declared stop policy fires.
 
 Two honest limits travel with it:
 

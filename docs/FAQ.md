@@ -728,7 +728,7 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
       "name": "What does the gateway return to my client when policy denies a tool call?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "A policy refusal is a successful HTTP 200 carried as a verdict value, never a non-2xx error — the gateway reserves error statuses for malformed requests, auth failures, and upstream faults. On the served path the gateway keeps ALLOW and TRANSFORM calls and drops the rest; if no tool call survives, finish_reason becomes stop and a denySummary is written in-band so fak-unaware clients still see what happened. The full verdict for every proposed call, including the dropped ones, lands in the response body's fak extension. So your client never treats \"the kernel said no\" as an exception."
+        "text": "A policy refusal is a successful HTTP 200 carried as a verdict value, never a non-2xx error — the gateway reserves error statuses for malformed requests, auth failures, and upstream faults. On the served path the gateway keeps ALLOW and TRANSFORM calls and drops the rest; if no tool call survives, finish_reason becomes stop as a wire end-of-turn so clients do not wait for a missing tool block, and a denySummary is written in-band so fak-unaware clients still see what happened. That wire finish reason is not a managed session stop: per-tool refusal feedback continues by default, and a session stop only comes from a declared stop policy. The full verdict for every proposed call, including the dropped ones, lands in the response body's fak extension. So your client never treats \"the kernel said no\" as an exception."
       }
     },
     {
@@ -2177,7 +2177,7 @@ Claude Code reads content blocks but not the `fak` extension key, so on the `/v1
 
 ## What does the gateway return to my client when policy denies a tool call?
 
-A policy refusal is a successful HTTP 200 carried as a verdict value, never a non-2xx error — the gateway reserves error statuses for malformed requests, auth failures, and upstream faults. On the served path the gateway keeps ALLOW and TRANSFORM calls and drops the rest; if no tool call survives, `finish_reason` becomes `stop` and a `denySummary` is written in-band so fak-unaware clients still see what happened. The full verdict for every proposed call, including the dropped ones, lands in the response body's `fak` extension. So your client never treats "the kernel said no" as an exception.
+A policy refusal is a successful HTTP 200 carried as a verdict value, never a non-2xx error — the gateway reserves error statuses for malformed requests, auth failures, and upstream faults. On the served path the gateway keeps ALLOW and TRANSFORM calls and drops the rest; if no tool call survives, `finish_reason` becomes `stop` as a wire end-of-turn so clients do not wait for a missing tool block, and a `denySummary` is written in-band so fak-unaware clients still see what happened. That wire finish reason is not a managed session stop: per-tool refusal feedback continues by default, and a session stop only comes from a declared stop policy. The full verdict for every proposed call, including the dropped ones, lands in the response body's `fak` extension. So your client never treats "the kernel said no" as an exception.
 
 ## Is there intelligent request routing or tiered serving inside the gateway?
 

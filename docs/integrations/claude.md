@@ -204,23 +204,31 @@ returns `seed_messages` plus the fresh continuation trace for the new Claude win
 ### Deny-all auto-continue (no false stops)
 
 When the capability floor refuses **every** tool call in a turn (a single `rm -rf`, an
-unknown tool, or a whole batch all denied), the gateway must report `stop_reason: end_turn`
-to the client — if it reported `tool_use` with no `tool_use` block, Claude Code would hang
-hunting for a tool that was dropped. But `end_turn` tells the harness the assistant is
-**done**, so the agent loop **stops** and yields to you — even though the model wanted to
-act and was simply blocked. In an autonomous or `-p` run that is a **false stop**: the task
-is abandoned at the first refusal, and the model never gets to read fak's own
-`[fak] refused … choose an allowed alternative` note (it lands on a turn that already ended).
+unknown tool, or a whole batch all denied), the gateway may still need to report
+`stop_reason: end_turn` on the Anthropic wire — if it reported `tool_use` with no
+`tool_use` block, Claude Code would hang hunting for a tool that was dropped. That is a
+wire end-of-turn, not a managed session stop. The model-facing `[fak] refused …` note now
+says the refusal is per-tool feedback and that a session stop only comes from a declared
+stop policy.
+
+There are two counters because the two cases are different. Hard all-denied turns can
+trip the deny-all continue hook below. Retryable all-denied turns, such as malformed JSON
+or model-fixable tool shape errors, increment `fak_guard_tool_feedback_*` instead; those
+are per-tool feedback turns and the model should fix the arguments/tool choice and keep
+going.
 
 `fak guard` fixes this in two layers — the wire stays correct, the harness keeps moving:
 
-1. **It's counted.** Every deny-all turn increments `fak_guard_deny_all_stops_total` and the
-   live `fak_guard_deny_all_consecutive` gauge on `/metrics`, and the exit summary prints a
-   `deny-all stops — N turn(s) …` line. So the otherwise-invisible "fak ended the turn" is
-   legible whether or not you act on it.
+1. **It's counted separately.** Hard deny-all turns increment
+   `fak_guard_deny_all_stops_total` and the live `fak_guard_deny_all_consecutive` gauge on
+   `/metrics`; retryable tool-feedback turns increment
+   `fak_guard_tool_feedback_turns_total` and `fak_guard_tool_feedback_consecutive`. The exit
+   summary prints separate lines, so "the floor refused a tool" does not read as "the
+   session stopped."
 2. **It's auto-resumed.** guard installs a Claude Code **`Stop` hook** that reads that gauge
-   and, when the last turn was a deny-all, **blocks the stop and re-prompts the agent** with
-   *"pick an allowed alternative and continue"* — so the loop keeps going instead of halting.
+   and, when the last turn was a hard deny-all, **blocks the stop and re-prompts the agent**
+   with *"pick an allowed alternative and continue"* — so the loop keeps going instead of
+   halting.
    It is **on by default** (`--deny-all-continue=enforce`) and **bounded**
    (`--deny-all-max`, default 3 consecutive continues) so a model that keeps re-proposing a
    refused call cannot loop forever; once the model does something allowed, the counter
