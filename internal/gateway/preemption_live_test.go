@@ -1,9 +1,13 @@
 package gateway
 
 import (
+	"context"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelengine"
 )
@@ -65,6 +69,88 @@ func TestNativeSchedulerPreemptionMetricsRenderIntoLiveMetrics(t *testing.T) {
 	} {
 		if !strings.Contains(out, want+"\n") {
 			t.Fatalf("live native scheduler metrics missing %q\n--- got ---\n%s", want, out)
+		}
+	}
+}
+
+func TestNativeSchedulerCostAwarePreemptionMetricsRenderLiveDecision(t *testing.T) {
+	srv := newTestServer(t)
+	sched := modelengine.NewNativeScheduler(model.NewSynthetic(modelengine.SyntheticConfig()))
+	t.Cleanup(sched.Close)
+	sched.SetKVPreemptionPolicy(modelengine.NativePreemptionPolicy{
+		Mode:        modelengine.NativePreemptRecompute,
+		VictimRule:  modelengine.NativePreemptVictimCostAware,
+		MaxBlocks:   2,
+		BlockTokens: 128,
+	})
+	drainNativeSchedulerRequests(t, sched, []*abi.ToolCall{
+		kvbmMetricsCall("issue2666_pinned", `{"prompt":"alpha"}`, map[string]string{"kv_pin": "true"}),
+		kvbmMetricsCall("issue2666_cold", `{"prompt":"bravo"}`, nil),
+		kvbmMetricsCall("issue2666_hot", `{"prompt":"charlie"}`, map[string]string{"kv_reuse_hits": "8"}),
+	})
+	srv.SetKVPreemptionMetrics(sched)
+
+	out := srv.renderMetrics()
+	for _, want := range []string{
+		"fak_sched_preempt_victim_rule 2",
+		"fak_sched_preempt_cost_aware_total 1",
+		"fak_sched_preempt_pinned_skipped_total 1",
+		"fak_sched_preempt_last_candidates 3",
+		"fak_sched_preempt_last_pinned 1",
+		"fak_sched_preempt_last_victim_cost ",
+		"fak_sched_preempt_recompute_total 1",
+		"fak_sched_preempt_readmitted_total 1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("live cost-aware native scheduler metrics missing %q\n--- got ---\n%s", want, out)
+		}
+	}
+}
+
+func kvbmMetricsCall(tool, args string, meta map[string]string) *abi.ToolCall {
+	return &abi.ToolCall{
+		Tool: tool,
+		Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(args), Len: int64(len(args))},
+		Meta: meta,
+	}
+}
+
+func drainNativeSchedulerRequests(t *testing.T, sched *modelengine.NativeScheduler, calls []*abi.ToolCall) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	reqs := make([]abi.EngineRequest, len(calls))
+	for i, c := range calls {
+		r, err := sched.Admit(ctx, c)
+		if err != nil {
+			t.Fatalf("Admit %d: %v", i, err)
+		}
+		reqs[i] = r
+	}
+
+	var wg sync.WaitGroup
+	for _, r := range reqs {
+		wg.Add(1)
+		go func(r abi.EngineRequest) {
+			defer wg.Done()
+			for range r.Tokens() {
+			}
+		}(r)
+	}
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatalf("timed out draining native scheduler requests: %v", ctx.Err())
+	}
+	for i, r := range reqs {
+		if _, err := r.Result(); err != nil {
+			t.Fatalf("Result %d: %v", i, err)
 		}
 	}
 }
