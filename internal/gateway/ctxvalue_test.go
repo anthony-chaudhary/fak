@@ -108,6 +108,68 @@ func TestObserveCtxValueRollsLevels(t *testing.T) {
 	}
 }
 
+// TestCtxValue_WakeupHorizonPresent proves the #2446 acceptance: a served turn
+// makes the report carry the advice-only cache-window horizon, defaulting to the
+// 5m tier, with the priced re-prefill cost of committing past the window; an
+// unseen trace still answers with a decidable horizon rather than an error.
+func TestCtxValue_WakeupHorizonPresent(t *testing.T) {
+	s := newTestServerWithConfig(t, Config{EngineID: "test", Model: "test-model", CompactHistoryBudget: 10000})
+	s.observeCtxValue("t1", 3000, 100, 100, 10, false)
+	r := s.CtxValueReportFor("t1")
+	if r.Wakeup.TTLTier != "5m" {
+		t.Fatalf("default tier = %q, want 5m", r.Wakeup.TTLTier)
+	}
+	if r.Wakeup.WindowMs != cacheTTLWindow5mMs || r.Wakeup.WakeupByMs != cacheTTLWindow5mMs {
+		t.Fatalf("horizon = %+v, want the 5m window %d ms", r.Wakeup, cacheTTLWindow5mMs)
+	}
+	// resident = 3000 + 100 + 100 = 3200 re-prefills uncached if the window lapses.
+	if r.Wakeup.PastWindowReprefillTokens != 3200 {
+		t.Fatalf("re-prefill cost = %d, want 3200", r.Wakeup.PastWindowReprefillTokens)
+	}
+	if z := s.CtxValueReportFor("never-served"); z.Wakeup.TTLTier != "5m" || z.Wakeup.WindowProvenance != "OBSERVED" {
+		t.Fatalf("zero-report horizon = %+v, want a decidable 5m/OBSERVED", z.Wakeup)
+	}
+}
+
+// TestCtxValue_HorizonTracksTTLUpgrade proves the horizon shifts from the 5m to
+// the 1h window once the 1h TTL-upgrade rung fires for the session.
+func TestCtxValue_HorizonTracksTTLUpgrade(t *testing.T) {
+	s := newTestServerWithConfig(t, Config{EngineID: "test", Model: "test-model", CompactHistoryBudget: 10000})
+	s.observeCtxValue("t1", 2000, 0, 0, 10, false)
+	if r := s.CtxValueReportFor("t1"); r.Wakeup.TTLTier != "5m" || r.Wakeup.WindowMs != cacheTTLWindow5mMs {
+		t.Fatalf("pre-upgrade horizon = %+v, want 5m", r.Wakeup)
+	}
+	// The 1h TTL-upgrade rung fires for this session (as maybeUpgradeAnthropicCacheTTL1H does).
+	s.noteCtxValueTTL1h("t1")
+	r := s.CtxValueReportFor("t1")
+	if r.Wakeup.TTLTier != "1h" || r.Wakeup.WindowMs != cacheTTLWindow1hMs || r.Wakeup.WakeupByMs != cacheTTLWindow1hMs {
+		t.Fatalf("post-upgrade horizon = %+v, want the 1h window %d ms", r.Wakeup, cacheTTLWindow1hMs)
+	}
+	// The note-minted flag alone never conjures a phantom into the multi-session snapshot.
+	s.noteCtxValueTTL1h("note-only")
+	if snap := s.ctxValueSnapshot(""); len(snap.Sessions) != 1 || snap.Sessions[0].TraceID != "t1" {
+		t.Fatalf("snapshot = %+v, want only the served t1 session", snap.Sessions)
+	}
+}
+
+// TestCtxValue_ProvenanceLabels proves the Law-A2 split: the provider-owned TTL
+// window is OBSERVED, the tier decision and horizon arithmetic are WITNESSED, and
+// the pure fold agrees with the served-report path.
+func TestCtxValue_ProvenanceLabels(t *testing.T) {
+	s := newTestServerWithConfig(t, Config{EngineID: "test", Model: "test-model", CompactHistoryBudget: 10000})
+	s.observeCtxValue("t1", 1000, 0, 0, 10, false)
+	r := s.CtxValueReportFor("t1")
+	if r.Wakeup.WindowProvenance != "OBSERVED" {
+		t.Fatalf("window provenance = %q, want OBSERVED (provider-owned TTL)", r.Wakeup.WindowProvenance)
+	}
+	if r.Wakeup.HorizonProvenance != "WITNESSED" {
+		t.Fatalf("horizon provenance = %q, want WITNESSED (fak arithmetic)", r.Wakeup.HorizonProvenance)
+	}
+	if got := ctxWakeupHorizon(false, 1000); got != r.Wakeup {
+		t.Fatalf("pure horizon %+v != report horizon %+v", got, r.Wakeup)
+	}
+}
+
 // TestCtxValueUnknownTraceIsDecidable proves the MCP single-session read never
 // errors: an unseen trace gets a zero report whose advice says unknown and why.
 func TestCtxValueUnknownTraceIsDecidable(t *testing.T) {

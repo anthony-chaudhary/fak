@@ -93,6 +93,7 @@ type sessionCtxValue struct {
 	contextEvents   int  // turns where fak's own compaction/planned-view transform fired
 	turnsSinceEvent int  // turns since the last context event; == turns when none yet
 	lastTurnEvent   bool // the most recent turn was a context event
+	ttl1hActive     bool // the 1h prompt-cache TTL-upgrade rung fired for this session
 
 	// ring holds the last ctxValueWindow turns' resident-token counts within the
 	// CURRENT window era; a context event clears it, so the growth slope never spans
@@ -208,6 +209,50 @@ type CtxStepAdvice struct {
 	Provenance string    `json:"provenance"` // DECISION
 }
 
+// Cache-window horizon (#2446). Prompt-cache economics gate self-pacing wakeups:
+// a session that wakes at TTL+1s pays a full re-prefill the TTL-30s wake avoided.
+// Anthropic's default prompt-cache window is 5 minutes; the stable-head 1h
+// TTL-upgrade rung (maybeUpgradeAnthropicCacheTTL1H) extends it to one hour.
+const (
+	cacheTTLWindow5mMs int64 = 5 * 60 * 1000
+	cacheTTLWindow1hMs int64 = 60 * 60 * 1000
+)
+
+// CtxValueWakeup is the ADVICE-ONLY cache-window horizon: the latest a self-pacing
+// scheduler can fire the next turn and still land inside the prompt-cache window,
+// plus the priced re-prefill it forfeits by knowingly committing past it. Like
+// step_advice, nothing enforces it — loop skills and schedulers consume it. The
+// provenance splits by owner (Law A2): the TTL window length is OBSERVED
+// (provider-owned); the tier decision and the horizon arithmetic are WITNESSED
+// (fak's own upgrade rung + math).
+type CtxValueWakeup struct {
+	TTLTier                   string `json:"ttl_tier"`                     // "5m" | "1h" — which cache window applies
+	WindowMs                  int64  `json:"window_ms"`                    // the cache TTL window length in ms
+	WindowProvenance          string `json:"window_provenance"`            // OBSERVED (provider-owned TTL)
+	WakeupByMs                int64  `json:"wakeup_by_ms"`                 // latest next-turn offset from the last served turn (ms) that stays in-window
+	PastWindowReprefillTokens int    `json:"past_window_reprefill_tokens"` // resident prompt re-prefilled uncached if the next turn lands past the window
+	HorizonProvenance         string `json:"horizon_provenance"`           // WITNESSED (fak upgrade decision + arithmetic)
+}
+
+// ctxWakeupHorizon folds the session's cache-window tier into the wakeup horizon.
+// ttl1h reflects whether the 1h TTL-upgrade rung fired for this session; resident
+// is the prompt that re-prefills if the next turn lands past the window. Pure, so
+// the horizon is unit-testable without a Server (the adviseCtxStep pattern).
+func ctxWakeupHorizon(ttl1h bool, resident int) CtxValueWakeup {
+	tier, window := "5m", cacheTTLWindow5mMs
+	if ttl1h {
+		tier, window = "1h", cacheTTLWindow1hMs
+	}
+	return CtxValueWakeup{
+		TTLTier:                   tier,
+		WindowMs:                  window,
+		WindowProvenance:          "OBSERVED",
+		WakeupByMs:                window,
+		PastWindowReprefillTokens: maxNonNeg(resident),
+		HorizonProvenance:         "WITNESSED",
+	}
+}
+
 // CtxValueReport is one session's multi-level managed-context report.
 type CtxValueReport struct {
 	Schema     string          `json:"schema"`
@@ -216,6 +261,7 @@ type CtxValueReport struct {
 	Turns      CtxValueTurns   `json:"turns"`
 	Session    CtxValueSession `json:"session"`
 	StepAdvice CtxStepAdvice   `json:"step_advice"`
+	Wakeup     CtxValueWakeup  `json:"wakeup"`
 }
 
 // CtxValueSnapshot is the multi-session HTTP body: every tracked session's report.
@@ -364,6 +410,23 @@ func (s *Server) ctxValueForLocked(trace string) *sessionCtxValue {
 	return v
 }
 
+// noteCtxValueTTL1h records that the 1h prompt-cache TTL-upgrade rung fired for
+// this session, so the wakeup horizon reads the 1h window instead of the 5m
+// default from here on. Called from the Anthropic passthrough transform the turn
+// the upgrade applies (maybeUpgradeAnthropicCacheTTL1H). A nil server or empty
+// trace no-ops; the note-minted record stays out of the multi-session snapshot
+// until a real served turn is observed (the no-phantom invariant).
+func (s *Server) noteCtxValueTTL1h(trace string) {
+	if s == nil || strings.TrimSpace(trace) == "" {
+		return
+	}
+	s.ctxValueMu.Lock()
+	defer s.ctxValueMu.Unlock()
+	if v := s.ctxValueForLocked(trace); v != nil {
+		v.ttl1hActive = true
+	}
+}
+
 // ctxValueStateLocked folds the accumulator into the pure policy input.
 func (s *Server) ctxValueStateLocked(v *sessionCtxValue) ctxValueState {
 	return ctxValueState{
@@ -404,6 +467,7 @@ func (s *Server) ctxValueReportLocked(trace string, v *sessionCtxValue) CtxValue
 			Provenance:              "WITNESSED",
 		},
 		StepAdvice: adviseCtxStep(st),
+		Wakeup:     ctxWakeupHorizon(v.ttl1hActive, v.lastResident),
 	}
 	if st.Budget > 0 {
 		r.Tokens.Headroom = &CtxValueHeadroom{
@@ -427,7 +491,7 @@ func (s *Server) ctxValueReportLocked(trace string, v *sessionCtxValue) CtxValue
 func (s *Server) CtxValueReportFor(trace string) CtxValueReport {
 	trace = strings.TrimSpace(trace)
 	if s == nil || trace == "" {
-		return CtxValueReport{Schema: ctxValueSchema, StepAdvice: adviseCtxStep(ctxValueState{})}
+		return CtxValueReport{Schema: ctxValueSchema, StepAdvice: adviseCtxStep(ctxValueState{}), Wakeup: ctxWakeupHorizon(false, 0)}
 	}
 	s.ctxValueMu.Lock()
 	defer s.ctxValueMu.Unlock()
@@ -440,6 +504,7 @@ func (s *Server) CtxValueReportFor(trace string) CtxValueReport {
 	r.Tokens.Provenance = "OBSERVED"
 	r.Turns.Provenance = "WITNESSED"
 	r.StepAdvice = adviseCtxStep(ctxValueState{Budget: s.compactHistoryBudget})
+	r.Wakeup = ctxWakeupHorizon(false, 0)
 	return r
 }
 
@@ -455,6 +520,9 @@ func (s *Server) ctxValueSnapshot(traceFilter string) CtxValueSnapshot {
 	s.ctxValueMu.Lock()
 	defer s.ctxValueMu.Unlock()
 	for trace, v := range s.ctxValue {
+		if v.turns == 0 {
+			continue // note-minted (e.g. the TTL rung) but no served turn yet — no phantom
+		}
 		if traceFilter != "" && trace != traceFilter {
 			continue
 		}
