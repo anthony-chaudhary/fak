@@ -5,11 +5,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/cachevaluereport"
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
+	"github.com/anthony-chaudhary/fak/internal/sessionaudit"
 )
 
 // runCachevalueReport handles `fak cachevalue report` — the #1304 two-track P&L.
@@ -34,6 +36,10 @@ func runCachevalueReport(stdout, stderr io.Writer, argv []string) int {
 	contextBudget := fs.Uint64("context-budget-tokens", 0, "optional session context budget denominator; normalizes witnessed shed tokens into window-equivalent extension")
 	asJSON := fs.Bool("json", false, "emit the two-track report as JSON instead of the table")
 	markdown := fs.Bool("markdown", false, "emit the two-track report as markdown (mermaid xychart trends + sparklines + a provenance-labelled KPI table) instead of the terminal table")
+	devSessions := fs.Bool("dev-sessions", false, "fold real, un-proxied Claude Code session transcripts into a separate Track-3 dev-session lens (may overlap the fleet aggregate; never summed with it); opt-in: it discovers/reads local transcript files, a real-FS side effect the plain ledger fold does not have")
+	devSessionDays := fs.Float64("dev-session-days", 7, "with --dev-sessions, only include transcripts modified within N days")
+	devSessionMax := fs.Int("dev-session-max", 40, "with --dev-sessions, maximum recent transcripts to analyze")
+	devSessionAllNamespaces := fs.Bool("dev-sessions-all-namespaces", false, "with --dev-sessions, include transcripts from every project namespace instead of just this workspace")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -49,10 +55,15 @@ func runCachevalueReport(stdout, stderr io.Writer, argv []string) int {
 	track2 := filterTrack2Since(cachevaluereport.ReadSavingsLedgerFile(*savingsLedger), *since)
 	usage := filterGatewayUsageSince(gatewayusageledger.ReadLedgerFile(*usageLedger), *since)
 
-	report := cachevaluereport.FoldTwoTrackWithUsage(track1, track2, usage, time.Now().UTC(), cachevaluereport.FleetBenefitOptions{
+	now := time.Now().UTC()
+	report := cachevaluereport.FoldTwoTrackWithUsage(track1, track2, usage, now, cachevaluereport.FleetBenefitOptions{
 		ContextBudgetTokens: *contextBudget,
 	})
 	report.Since = *since
+	if *devSessions {
+		devRep := foldDevSessionBenefit(*devSessionDays, *devSessionMax, *devSessionAllNamespaces, now)
+		report.DevSessionBenefit = &devRep
+	}
 
 	if *asJSON {
 		b, err := json.MarshalIndent(report, "", "  ")
@@ -117,6 +128,39 @@ func filterGatewayUsageSince(rows []gatewayusageledger.Row, since string) []gate
 		}
 	}
 	return out
+}
+
+// foldDevSessionBenefit discovers + analyzes recent real Claude Code session transcripts
+// (scoped to this workspace's namespace unless allNamespaces is set) and folds them into the
+// Track-3 dev-session lens. A discovery error folds to the honest empty report rather than
+// failing the whole `cachevalue report` command — this lens is additive, never load-bearing.
+func foldDevSessionBenefit(sinceDays float64, max int, allNamespaces bool, now time.Time) cachevaluereport.DevSessionBenefitReport {
+	nsPrefix := ""
+	if !allNamespaces {
+		if cwd, err := os.Getwd(); err == nil {
+			nsPrefix = sessionaudit.ProjectNamespace(cwd)
+		}
+	}
+	var since *float64
+	if sinceDays >= 0 {
+		v := sinceDays
+		since = &v
+	}
+	recs, err := sessionaudit.Discover(sessionaudit.DiscoverOptions{SinceDays: since, NamespacePrefix: nsPrefix})
+	if err != nil {
+		return cachevaluereport.DevSessionBenefitReport{Finding: fmt.Sprintf("dev-session discovery error: %v", err)}
+	}
+	if max > 0 && len(recs) > max {
+		recs = recs[:max]
+	}
+	sessions := make([]sessionaudit.Session, 0, len(recs))
+	for _, rec := range recs {
+		if rec.Kind == "subagent" {
+			continue
+		}
+		sessions = append(sessions, sessionaudit.Analyze(rec.Path))
+	}
+	return cachevaluereport.FoldDevSessionBenefit(sessions, now)
 }
 
 func gatewayUsageRowDate(row gatewayusageledger.Row) string {
