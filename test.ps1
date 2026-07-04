@@ -86,5 +86,12 @@ if ($env:FAK_ORACLE_REQUIRED_FAMILIES) {
 
 $wslArgs = @()
 if ($distro) { $wslArgs += @('-d', $distro) }
-& wsl.exe @wslArgs bash "$wslDir/test.sh" @Rest
+# Invoke with `-e` (exec, no wrapping login shell). Without it, wsl.exe joins the
+# command and its arguments into ONE string and runs it through /bin/sh -c, so a
+# forwarded `go test` arg carrying shell metacharacters — e.g. `-run 'TestA|TestB'`
+# or `-run 'Test.*(A|B)'` — is reparsed by that shell (the pipe becomes a real
+# pipe, the parens a subshell) and the run breaks with "command not found" or a
+# syntax error. `-e` execs bash directly, so every argument boundary is preserved
+# verbatim (test.sh already forwards them with "$@"). See fak#2248.
+& wsl.exe @wslArgs -e bash "$wslDir/test.sh" @Rest
 exit $LASTEXITCODE

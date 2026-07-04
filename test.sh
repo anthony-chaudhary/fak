@@ -84,6 +84,16 @@ if [ "${#args[@]}" -eq 0 ]; then
   args=("./...")
 fi
 
+# Test-only escape hatch (mirrors test.ps1's FAK_TEST_PS1_ECHO_ARGS): echo each
+# argument this script received, one per line, and exit before running anything.
+# Lets a routed test assert that shell metacharacters in a forwarded `go test`
+# arg (e.g. `-run 'TestA|TestB'` or `-run 'Test.*(A|B)'`) survive the
+# Windows -> wsl.exe -> bash boundary verbatim. See fak#2248.
+if [ -n "${FAK_TEST_SH_ECHO_ARGS:-}" ]; then
+  for a in "${args[@]}"; do printf '%s\n' "$a"; done
+  exit 0
+fi
+
 # --- ext4 fast path (FAK_FAST=1; default from test.ps1 on Windows) ------------
 # The source tree lives on /mnt/c (9p), which taxes every run with a ~28s
 # enumerate+parse phase before a test runs (see the FILESYSTEM PERFORMANCE note
