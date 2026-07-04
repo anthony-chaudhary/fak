@@ -71,8 +71,8 @@ func pkgDirs(t *testing.T) (minimal, full string) {
 	if !ok {
 		t.Fatal("runtime.Caller failed — cannot locate the microagent package dir")
 	}
-	minimal = filepath.Dir(self)          // internal/registrations/microagent
-	full = filepath.Dir(minimal)          // internal/registrations
+	minimal = filepath.Dir(self) // internal/registrations/microagent
+	full = filepath.Dir(minimal) // internal/registrations
 	return minimal, full
 }
 

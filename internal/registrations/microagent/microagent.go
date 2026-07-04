@@ -19,9 +19,9 @@
 //
 // The capability floor this set MUST preserve (no adjudication rung silently dropped):
 //   - blob        Ref backend + MMU page-out codec — REQUIRED so abi.ActiveResolver()
-//                 is non-nil; without it the kernel cannot resolve a single Ref.
+//     is non-nil; without it the kernel cannot resolve a single Ref.
 //   - adjudicator the in-process DOS reference monitor (carries DefaultPolicy() — the
-//                 POLICY_BLOCK floor) — the authoritative tool-call adjudicator.
+//     POLICY_BLOCK floor) — the authoritative tool-call adjudicator.
 //   - ctxmmu      write-time result admission (the quarantine floor).
 //   - normgate    normalize-and-rescan admitter (obfuscation-evasion floor, rank 5).
 //   - ifc         information-flow control — provenance taint + tainted->sink refusal.

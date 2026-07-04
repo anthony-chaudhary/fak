@@ -99,13 +99,13 @@ func TestRewindRefusedUnderPeerLease(t *testing.T) {
 	// A live peer lease over an intersecting tree (the change set the restore
 	// would touch is held by a fleet-mate — the #2320 failure class).
 	v, err := Rewind(RewindInput{
-		Holder:  "operator",
-		Tree:    []string{"internal/session/restore.go"},
-		Leases:  []laneadmit.Lease{{ID: "loop-lane-session", Lane: "session", Tree: []string{"internal/session/**"}, Holder: "peer-7"}},
+		Holder:   "operator",
+		Tree:     []string{"internal/session/restore.go"},
+		Leases:   []laneadmit.Lease{{ID: "loop-lane-session", Lane: "session", Tree: []string{"internal/session/**"}, Holder: "peer-7"}},
 		Taxonomy: rewindTax(),
-		Applier: applier,
-		Journal: journal,
-		Now:     time.Unix(1_700_000_000, 0),
+		Applier:  applier,
+		Journal:  journal,
+		Now:      time.Unix(1_700_000_000, 0),
 	})
 	if err != nil {
 		t.Fatalf("Rewind error: %v", err)
@@ -197,12 +197,12 @@ func TestRewindForceClearsOverlapButNotExclusive(t *testing.T) {
 	// (1) Force over a plain tree-overlap clears it — the restore proceeds.
 	overlapApplier := &spyApplier{dir: dir, relpath: "a.txt", content: []byte("ok")}
 	v, err := Rewind(RewindInput{
-		Holder: "operator",
-		Tree:   []string{"internal/session/restore.go"},
-		Leases: []laneadmit.Lease{{ID: "loop-lane-session", Lane: "session", Tree: []string{"internal/session/**"}, Holder: "peer"}},
+		Holder:   "operator",
+		Tree:     []string{"internal/session/restore.go"},
+		Leases:   []laneadmit.Lease{{ID: "loop-lane-session", Lane: "session", Tree: []string{"internal/session/**"}, Holder: "peer"}},
 		Taxonomy: tax,
-		Force:   true,
-		Applier: overlapApplier,
+		Force:    true,
+		Applier:  overlapApplier,
 	})
 	if err != nil {
 		t.Fatalf("force overlap error: %v", err)
@@ -218,13 +218,13 @@ func TestRewindForceClearsOverlapButNotExclusive(t *testing.T) {
 	// alone, and a forced restore must never race it.
 	exclusiveApplier := &spyApplier{dir: dir, relpath: "b.txt", content: []byte("nope")}
 	v, err = Rewind(RewindInput{
-		Holder: "operator",
-		Lane:   "release",
-		Tree:   []string{"VERSION"},
-		Leases: []laneadmit.Lease{{ID: "loop-lane-docs", Lane: "session", Tree: []string{"internal/session/**"}, Holder: "peer"}},
+		Holder:   "operator",
+		Lane:     "release",
+		Tree:     []string{"VERSION"},
+		Leases:   []laneadmit.Lease{{ID: "loop-lane-docs", Lane: "session", Tree: []string{"internal/session/**"}, Holder: "peer"}},
 		Taxonomy: tax,
-		Force:   true,
-		Applier: exclusiveApplier,
+		Force:    true,
+		Applier:  exclusiveApplier,
 	})
 	if err != nil {
 		t.Fatalf("force exclusive error: %v", err)
@@ -247,12 +247,12 @@ func TestRewindOwnLeaseDoesNotConflict(t *testing.T) {
 	dir := t.TempDir()
 	applier := &spyApplier{dir: dir, relpath: "c.txt", content: []byte("own")}
 	v, err := Rewind(RewindInput{
-		Holder:  "operator",
-		LeaseID: "restore-lane-session",
-		Tree:    []string{"internal/session/restore.go"},
-		Leases:  []laneadmit.Lease{{ID: "restore-lane-session", Lane: "session", Tree: []string{"internal/session/**"}, Holder: "operator"}},
+		Holder:   "operator",
+		LeaseID:  "restore-lane-session",
+		Tree:     []string{"internal/session/restore.go"},
+		Leases:   []laneadmit.Lease{{ID: "restore-lane-session", Lane: "session", Tree: []string{"internal/session/**"}, Holder: "operator"}},
 		Taxonomy: rewindTax(),
-		Applier: applier,
+		Applier:  applier,
 	})
 	if err != nil {
 		t.Fatalf("Rewind error: %v", err)

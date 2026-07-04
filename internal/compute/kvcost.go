@@ -232,4 +232,3 @@ func ReplayKVCache(events []KVReplayEvent, budget int, policy KVEvictPolicy) (hi
 	}
 	return hitTokens, accessTokens
 }
-

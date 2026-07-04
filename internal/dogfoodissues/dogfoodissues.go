@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
 	"github.com/anthony-chaudhary/fak/internal/issuecohort"
+	"github.com/anthony-chaudhary/fak/internal/issuecontract"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 

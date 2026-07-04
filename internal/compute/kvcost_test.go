@@ -12,15 +12,15 @@ import (
 // reused. Bytes only changes the ranking when spans carry DIFFERENT per-token costs.
 func TestKVEvictionCostUniformBytesReducesToReuse(t *testing.T) {
 	// Two spans at the SAME uniform per-token byte cost (4 bytes/token).
-	long := KVSpanStats{Tokens: 100, Bytes: 400, Hits: 0}   // cost = 100*1/400 = 0.25
-	short := KVSpanStats{Tokens: 10, Bytes: 40, Hits: 0}    // cost = 10*1/40  = 0.25
+	long := KVSpanStats{Tokens: 100, Bytes: 400, Hits: 0} // cost = 100*1/400 = 0.25
+	short := KVSpanStats{Tokens: 10, Bytes: 40, Hits: 0}  // cost = 10*1/40  = 0.25
 	if cl, cs := KVEvictionCost(long), KVEvictionCost(short); cl != cs {
 		t.Fatalf("uniform per-token cost must make length irrelevant: long=%v short=%v", cl, cs)
 	}
 	// Reuse dominates under uniform bytes: a hit span outranks a never-reused one regardless
 	// of length. longReused (100 tok, 3 hits) vs shortOneShot (10 tok, 0 hits).
-	longReused := KVSpanStats{Tokens: 100, Bytes: 400, Hits: 3}  // 100*4/400 = 1.0
-	shortOneShot := KVSpanStats{Tokens: 10, Bytes: 40, Hits: 0}  // 10*1/40  = 0.25
+	longReused := KVSpanStats{Tokens: 100, Bytes: 400, Hits: 3} // 100*4/400 = 1.0
+	shortOneShot := KVSpanStats{Tokens: 10, Bytes: 40, Hits: 0} // 10*1/40  = 0.25
 	if got := KVEvictionCost(longReused); got != 1.0 {
 		t.Fatalf("longReused cost = %v, want 1.0", got)
 	}
@@ -38,8 +38,8 @@ func TestKVEvictionCostUniformBytesReducesToReuse(t *testing.T) {
 // and prefers evicting the fat span. This is the value-aware distinction recency-only
 // eviction cannot make and the reason #2239 divides by bytes.
 func TestKVEvictionCostCompactTierIsCheaperToKeep(t *testing.T) {
-	fat := KVSpanStats{Tokens: 50, Bytes: 400, Hits: 1}      // 50*2/400 = 0.25
-	compact := KVSpanStats{Tokens: 50, Bytes: 100, Hits: 1}  // 50*2/100 = 1.0
+	fat := KVSpanStats{Tokens: 50, Bytes: 400, Hits: 1}     // 50*2/400 = 0.25
+	compact := KVSpanStats{Tokens: 50, Bytes: 100, Hits: 1} // 50*2/100 = 1.0
 	if KVEvictionCost(compact) <= KVEvictionCost(fat) {
 		t.Fatalf("a compact (demoted) span must be cheaper to KEEP per unit of recompute value: compact=%v fat=%v",
 			KVEvictionCost(compact), KVEvictionCost(fat))
@@ -140,20 +140,20 @@ func TestReplayCostAwareBeatsLRUOnHotSpanTrace(t *testing.T) {
 		{cold1, spanTokens}, // t2: insert COLD1.          resident: {HOT,COLD1} (full)
 		{hot, spanTokens},   // t3: HIT HOT (HOT.hits=1).  resident unchanged
 		{cold2, spanTokens}, // t4: insert COLD2, evict 1.
-		                     //   LRU:        HOT@3 newer than COLD1@2 -> evict COLD1. {HOT,COLD2}
-		                     //   cost-aware: HOT.cost(Hits=1)=2 > COLD1.cost(Hits=0)=1 -> evict COLD1.
+		//   LRU:        HOT@3 newer than COLD1@2 -> evict COLD1. {HOT,COLD2}
+		//   cost-aware: HOT.cost(Hits=1)=2 > COLD1.cost(Hits=0)=1 -> evict COLD1.
 		{cold3, spanTokens}, // t5: insert COLD3, evict 1.
-		                     //   LRU:        HOT@3 OLDER than COLD2@4 -> evict HOT!  {COLD2,COLD3}
-		                     //   cost-aware: HOT.cost=2 > COLD2.cost=1 -> evict COLD2. {HOT,COLD3}
-		{hot, spanTokens},   // t6: access HOT.
-		                     //   LRU:        MISS (evicted@5), re-insert HOT, evict COLD2@4 (oldest). {HOT,COLD3}
-		                     //   cost-aware: HIT (HOT.hits=2).
+		//   LRU:        HOT@3 OLDER than COLD2@4 -> evict HOT!  {COLD2,COLD3}
+		//   cost-aware: HOT.cost=2 > COLD2.cost=1 -> evict COLD2. {HOT,COLD3}
+		{hot, spanTokens}, // t6: access HOT.
+		//   LRU:        MISS (evicted@5), re-insert HOT, evict COLD2@4 (oldest). {HOT,COLD3}
+		//   cost-aware: HIT (HOT.hits=2).
 		{cold4, spanTokens}, // t7: insert COLD4, evict 1.
-		                     //   LRU:        COLD3@5 older than HOT@6 -> evict COLD3. {HOT,COLD4}
-		                     //   cost-aware: HOT.cost(Hits=2)=3 > COLD3.cost=1 -> evict COLD3. {HOT,COLD4}
-		{hot, spanTokens},   // t8: access HOT.
-		                     //   LRU:        HIT now (HOT resident since t6).
-		                     //   cost-aware: HIT (HOT.hits=3).
+		//   LRU:        COLD3@5 older than HOT@6 -> evict COLD3. {HOT,COLD4}
+		//   cost-aware: HOT.cost(Hits=2)=3 > COLD3.cost=1 -> evict COLD3. {HOT,COLD4}
+		{hot, spanTokens}, // t8: access HOT.
+		//   LRU:        HIT now (HOT resident since t6).
+		//   cost-aware: HIT (HOT.hits=3).
 	}
 	lruHits, accessed := ReplayKVCache(trace, budget, KVEvictLRU)
 	costHits, _ := ReplayKVCache(trace, budget, KVEvictCostAware)
@@ -217,9 +217,9 @@ func TestReplayUnboundedBudgetYieldsAllHits(t *testing.T) {
 // the resident set.
 func TestReplaySkipsNonPositiveTokens(t *testing.T) {
 	trace := []KVReplayEvent{
-		{1, 0},   // skipped
-		{2, -5},  // skipped
-		{3, 10},  // counted
+		{1, 0},  // skipped
+		{2, -5}, // skipped
+		{3, 10}, // counted
 	}
 	hits, accessed := ReplayKVCache(trace, 0, KVEvictLRU)
 	if hits != 0 || accessed != 10 {

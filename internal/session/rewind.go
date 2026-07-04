@@ -79,16 +79,16 @@ type RewindEvent struct {
 
 // RewindInput configures a workspace restore.
 type RewindInput struct {
-	Holder   string                // the operator/agent requesting the restore
-	Lane     string                // named dos.toml lane the restore acts on ("" = a tree-only request)
-	LeaseID  string                // the restore's own lease id; a live lease with this id is the caller's own and never conflicts
-	Tree     []string              // the change set: repo-relative globs the restore would touch
-	Leases   []laneadmit.Lease     // the live leases (projected from refs/fak/locks/* via leaseref)
-	Taxonomy laneadmit.Taxonomy    // the dos.toml lane taxonomy
-	Force    bool                  // operator force: clears geometric/same-lane conflicts, still refuses over a live EXCLUSIVE lane
-	Applier  RewindApplier         // the bulk-write step (nil => admission decision only, no apply)
-	Journal  RewindJournal         // the ledger (nil => no journaling)
-	Now      time.Time             // injected clock for deterministic journal stamps (zero => time.Now)
+	Holder   string             // the operator/agent requesting the restore
+	Lane     string             // named dos.toml lane the restore acts on ("" = a tree-only request)
+	LeaseID  string             // the restore's own lease id; a live lease with this id is the caller's own and never conflicts
+	Tree     []string           // the change set: repo-relative globs the restore would touch
+	Leases   []laneadmit.Lease  // the live leases (projected from refs/fak/locks/* via leaseref)
+	Taxonomy laneadmit.Taxonomy // the dos.toml lane taxonomy
+	Force    bool               // operator force: clears geometric/same-lane conflicts, still refuses over a live EXCLUSIVE lane
+	Applier  RewindApplier      // the bulk-write step (nil => admission decision only, no apply)
+	Journal  RewindJournal      // the ledger (nil => no journaling)
+	Now      time.Time          // injected clock for deterministic journal stamps (zero => time.Now)
 }
 
 // Rewind is the workspace-restore handler. It consults the DOS lane arbiter over

@@ -20,17 +20,17 @@ import (
 // separate, so an adoption claim can cite the right one:
 //
 //   - witnessed    — derived from the ledger's own hash-chained events + the dispatch
-//                    progress/worker/cooldown metrics carried in them (close rate,
-//                    retry/refusal rate, duplicate attempts avoided, effective workers,
-//                    wall time, baseline vs observed open count).
+//     progress/worker/cooldown metrics carried in them (close rate,
+//     retry/refusal rate, duplicate attempts avoided, effective workers,
+//     wall time, baseline vs observed open count).
 //   - provider     — a provider prompt-cache/billing benefit. Observed, NOT owned by
-//                    fak; stays not_yet until an operator folds the provider figure.
+//     fak; stays not_yet until an operator folds the provider figure.
 //   - fak_authored — token-equivalent work fak removed/reused/served itself. Witnessed
-//                    only with a proof for that mechanism; not_yet by default.
+//     only with a proof for that mechanism; not_yet by default.
 //   - modeled      — a formula projecting token-equivalents saved from the witnessed
-//                    duplicate-attempts-avoided count. Useful for planning, not a
-//                    billing claim; not_yet until the operator supplies the per-attempt
-//                    assumption.
+//     duplicate-attempts-avoided count. Useful for planning, not a
+//     billing claim; not_yet until the operator supplies the per-attempt
+//     assumption.
 //
 // The token accounts default to not_yet and only populate from EXPLICIT operator
 // inputs, so the report never fabricates a saving the ledger cannot witness.
@@ -99,17 +99,17 @@ func loopEconOptToken(v int64) *int64 {
 const schemaLoopEconomics = "fak.loop-economics.v1"
 
 type loopEconomicsReport struct {
-	Schema        string             `json:"schema"`
-	TSUnixNano    int64              `json:"ts_unix_nano"`
-	LedgerPath    string             `json:"ledger_path,omitempty"`
-	LoopFilter    string             `json:"loop_filter,omitempty"`
-	Loops         int                `json:"loops"`
-	Window        loopEconWindow     `json:"window"`
-	Witnessed     loopEconWitnessed  `json:"witnessed"`
-	ProviderCache loopEconAccount    `json:"provider_cache"`
-	FakAuthored   loopEconAccount    `json:"fak_authored"`
-	Modeled       loopEconModeled    `json:"modeled"`
-	NotYet        []string           `json:"not_yet"`
+	Schema        string            `json:"schema"`
+	TSUnixNano    int64             `json:"ts_unix_nano"`
+	LedgerPath    string            `json:"ledger_path,omitempty"`
+	LoopFilter    string            `json:"loop_filter,omitempty"`
+	Loops         int               `json:"loops"`
+	Window        loopEconWindow    `json:"window"`
+	Witnessed     loopEconWitnessed `json:"witnessed"`
+	ProviderCache loopEconAccount   `json:"provider_cache"`
+	FakAuthored   loopEconAccount   `json:"fak_authored"`
+	Modeled       loopEconModeled   `json:"modeled"`
+	NotYet        []string          `json:"not_yet"`
 }
 
 // loopEconWindow is the observed span of the folded events — the wall-clock the
@@ -139,8 +139,8 @@ type loopEconWitnessed struct {
 	Started                  int64    `json:"started"`
 	Ended                    int64    `json:"ended"`
 	WitnessedDone            int64    `json:"witnessed_done"`
-	RetryRate                *float64 `json:"retry_rate"`                  // refused / fires; nil when fires is 0
-	DuplicateAttemptsAvoided int64    `json:"duplicate_attempts_avoided"`  // refused admissions — spawns the governor declined
+	RetryRate                *float64 `json:"retry_rate"`                 // refused / fires; nil when fires is 0
+	DuplicateAttemptsAvoided int64    `json:"duplicate_attempts_avoided"` // refused admissions — spawns the governor declined
 
 	// Workers (peak observed).
 	EffectiveWorkers int64 `json:"effective_workers"`

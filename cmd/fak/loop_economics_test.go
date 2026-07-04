@@ -141,7 +141,7 @@ func TestLoopEconomicsCommandJSON(t *testing.T) {
 	appendLoopTestEventAt(t, path, loopmgr.Event{LoopID: "issue-dispatch/claude", Kind: loopmgr.EventAdmit,
 		Status: loopmgr.StatusRefused, Reason: "WEEKLY_CAPPED"}, 2000)
 	appendLoopTestEventAt(t, path, loopmgr.Event{LoopID: "issue-resolve-progress", Kind: loopmgr.EventWitness,
-		Status: loopmgr.StatusWitnessedDone,
+		Status:  loopmgr.StatusWitnessedDone,
 		Metrics: map[string]int64{"baseline_open": 483, "open_now": 400, "closed_by_loop_total": 805}}, 3000)
 
 	var stdout, stderr bytes.Buffer

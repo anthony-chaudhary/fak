@@ -90,14 +90,14 @@ func collectSkillEffectivenessScorecard(root string) map[string]any {
 		"reason":      reason,
 		"next_action": next,
 		"corpus": map[string]any{
-			"skill_debt":           debt,
-			"loader_debt":          loaderDebt,
-			"loader_queryable":     queryable,
-			"loader_pages":         pagesNot,
-			"loader_in_sync":       inSync,
-			"skills":               len(matches),
-			"score":                score,
-			"grade":                grade,
+			"skill_debt":       debt,
+			"loader_debt":      loaderDebt,
+			"loader_queryable": queryable,
+			"loader_pages":     pagesNot,
+			"loader_in_sync":   inSync,
+			"skills":           len(matches),
+			"score":            score,
+			"grade":            grade,
 		},
 	}
 }

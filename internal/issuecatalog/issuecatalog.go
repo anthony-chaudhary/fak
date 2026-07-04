@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
 	"github.com/anthony-chaudhary/fak/internal/issuecohort"
+	"github.com/anthony-chaudhary/fak/internal/issuecontract"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -93,13 +93,13 @@ type SyncRow struct {
 
 // Result is the machine-readable plan/result fold.
 type Result struct {
-	Schema  string            `json:"schema"`
-	Mode    string            `json:"mode"`
-	Catalog string            `json:"catalog"`
-	Total   int               `json:"total"`
-	Planned []PlanRow         `json:"planned"`
-	Synced  []SyncRow         `json:"synced"`
-	Skipped []SkippedRow      `json:"skipped,omitempty"`
+	Schema  string       `json:"schema"`
+	Mode    string       `json:"mode"`
+	Catalog string       `json:"catalog"`
+	Total   int          `json:"total"`
+	Planned []PlanRow    `json:"planned"`
+	Synced  []SyncRow    `json:"synced"`
+	Skipped []SkippedRow `json:"skipped,omitempty"`
 	// Cohort is the batch-level wave/collision fold of the catalog rows, computed
 	// by running issuecohort.Build over the batch so a --live run's dispatch-scope
 	// collisions are visible before sync rather than only at wave-launch time. nil
