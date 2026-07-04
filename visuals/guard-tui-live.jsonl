@@ -1,0 +1,6 @@
+{"seq":1,"ts_unix_nano":1,"kind":"DECIDE","tool":"Read","verdict":"ALLOW","prev_hash":"","hash":"a"}
+{"seq":2,"ts_unix_nano":2,"kind":"DECIDE","tool":"search_kb","verdict":"ALLOW","prev_hash":"a","hash":"b"}
+{"seq":3,"ts_unix_nano":3,"kind":"DENY","tool":"Bash","verdict":"DENY","reason":"POLICY_BLOCK","by":"floor","witness":"deny_regex","prev_hash":"b","hash":"c"}
+{"seq":4,"ts_unix_nano":4,"kind":"DENY","tool":"write_file","verdict":"DENY","reason":"DEFAULT_DENY","prev_hash":"c","hash":"d"}
+{"seq":5,"ts_unix_nano":5,"kind":"QUARANTINE","tool":"fetch_url","verdict":"QUARANTINE","prev_hash":"d","hash":"e"}
+{"seq":6,"ts_unix_nano":6,"kind":"DECIDE","tool":"git_status","verdict":"ALLOW","prev_hash":"e","hash":"f"}
