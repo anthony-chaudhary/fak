@@ -2,6 +2,7 @@ package modver
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -139,6 +140,95 @@ func TestWorkflowKeyspace(t *testing.T) {
 	rows := DeltaRows(rep, nil, "2026-07-04T12:00:00Z")
 	if len(rows) != 1 || rows[0].Module != ".github/workflows/ci.yml" || rows[0].Kind != "workflow" {
 		t.Fatalf("ledger rows = %+v, want one workflow row", rows)
+	}
+}
+
+// TestSnapshotHostPathParity is the #2478 witness: the same logical history must
+// produce a byte-identical Report whether git emits POSIX paths joined by "\n"
+// (Linux/WSL) or Windows-style backslash paths joined by "\r\n". The fleet runs
+// the same repo natively and under WSL; moduleOf normalizes separators and
+// parseLog/moduleOf trim the trailing "\r", but nothing witnessed that the
+// end-to-end Snapshot output AGREES across host path styles until this test.
+//
+// Host caveat: git itself prints forward slashes on every platform, so a real
+// `git ls-files`/`git log` never emits the backslash form. The test synthesizes
+// the Windows-native style (backslashes + CRLF) directly against the Runner seam
+// to witness the normalization contract a non-git or core.autocrlf source could
+// still feed in — a stronger, host-agnostic parity check than a WSL-only run.
+func TestSnapshotHostPathParity(t *testing.T) {
+	type commit struct {
+		sha, date string
+		files     []string
+	}
+	// One logical history over two live modules (plus a deleted one that must not
+	// ghost), expressed host-neutrally with "/" separators.
+	history := []commit{
+		{"aaa11111", "2026-07-02T10:00:00Z", []string{
+			"internal/gateway/wire.go", "internal/gateway/metrics.go", "cmd/fak/main.go"}},
+		{"bbb22222", "2026-07-01T09:00:00Z", []string{
+			"internal/gateway/wire.go", "internal/deleted/gone.go"}},
+		{"ccc33333", "2026-06-30T08:00:00Z", []string{"cmd/fak/main.go"}},
+	}
+	liveFiles := []string{"internal/gateway/wire.go", "cmd/fak/main.go"}
+
+	// host renders the fixtures under a given separator + line ending, mimicking
+	// what git prints on that platform, and returns a fake Runner over them.
+	host := func(sep, eol string) Runner {
+		render := func(p string) string { return strings.ReplaceAll(p, "/", sep) }
+		var logB strings.Builder
+		for _, c := range history {
+			logB.WriteString("\x1e" + c.sha + "\t" + c.date + eol)
+			for _, f := range c.files {
+				logB.WriteString(render(f) + eol)
+			}
+		}
+		var lsB strings.Builder
+		for _, f := range liveFiles {
+			lsB.WriteString(render(f) + "\x00") // ls-files -z is NUL-terminated, no EOL
+		}
+		return func(_ context.Context, _ string, args ...string) ([]byte, error) {
+			switch args[0] {
+			case "rev-parse":
+				return []byte("deadbee1" + eol), nil
+			case "ls-files":
+				return []byte(lsB.String()), nil
+			case "log":
+				return []byte(logB.String()), nil
+			}
+			t.Fatalf("unexpected git args: %v", args)
+			return nil, nil
+		}
+	}
+
+	dir := t.TempDir() // same (repo-external) dir both ways: AppVersion is not the variable under test
+	posix, err := Snapshot(context.Background(), dir, host("/", "\n"))
+	if err != nil {
+		t.Fatalf("posix snapshot: %v", err)
+	}
+	windows, err := Snapshot(context.Background(), dir, host("\\", "\r\n"))
+	if err != nil {
+		t.Fatalf("windows snapshot: %v", err)
+	}
+
+	// Guard against a trivial both-empty pass: the fixture must yield real work.
+	if len(posix.Modules) != 2 {
+		t.Fatalf("posix produced %d modules, want 2: %+v", len(posix.Modules), posix.Modules)
+	}
+	if posix.Head != "deadbee1" {
+		t.Errorf("posix head = %q, want deadbee1 (trailing CRLF/whitespace not trimmed?)", posix.Head)
+	}
+	// sorted by name: cmd/fak, internal/gateway — assert the fields the ledger renders.
+	if m := posix.Modules[1]; m.Name != "internal/gateway" || m.Rev != 2 ||
+		m.LastCommit != "aaa11111" || m.LastDate != "2026-07-02T10:00:00Z" {
+		t.Errorf("posix internal/gateway = %+v, want rev 2 last aaa11111 @2026-07-02", m)
+	}
+	if len(windows.Modules) != len(posix.Modules) {
+		t.Fatalf("windows produced %d modules, want %d — backslash paths not normalized?",
+			len(windows.Modules), len(posix.Modules))
+	}
+
+	if !reflect.DeepEqual(posix, windows) {
+		t.Errorf("host path parity broken:\n posix   = %+v\n windows = %+v", posix, windows)
 	}
 }
 
