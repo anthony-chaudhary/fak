@@ -12,14 +12,14 @@ and runs on CPU — no GPU needed for small models.
 
 | I want to... | Follow this |
 |---------------|-------------|
-| **Prove the safety gate in 60 seconds** (no model, no download, no key) | [The boundary proof](README.md#for-security-teams) — one structural DENY |
-| **See the gate stop a live attack** (Go only, ~1 min, no downloads) | [AgentDojo red-team demo](examples/agentdojo-redteam/README.md) |
+| **Prove the tool-call boundary in 60 seconds** (no model, no download, no key) | [The boundary proof](README.md#tool-call-controls) — one structural DENY |
+| **See the boundary handle a live attack fixture** (Go only, ~1 min, no downloads) | [AgentDojo red-team demo](examples/agentdojo-redteam/README.md) |
 | **I'm a coding agent** (build/test/run + the rules) | [AGENTS.md](AGENTS.md) |
 | **Run a local model behind my existing coding agent** (no key, no network, one command) | `fak guard --gguf qwen2.5:7b -- claude` |
 | **Chat with a local AI** (most fun — needs a ~1.6 GB model download) | [Simple Demo](cmd/simpledemo/README.md) — 5 minutes |
 | **Follow a guided first session** (real output at every step) | [Tutorial](docs/fak/tutorial.md) — 15 minutes ⭐ |
 | **Learn every concept in order** (a prerequisite-based course you can join at any level) | [Learning path](LEARNING-PATH.md) — 98 courses, six levels ⭐ |
-| **Put a safety gate in front of my AI** | [Getting Started](GETTING-STARTED.md) — 10 minutes |
+| **Put a tool-call control plane in front of my AI** | [Getting Started](GETTING-STARTED.md) — 10 minutes |
 | **I already run an agent** (Claude Code, Cursor, an SDK, or MCP) | [Integration index](docs/integrations/README.md) — repoint one base URL, no agent-side code change |
 | **Understand what fak actually does** | [Main README](README.md) |
 | **See the performance benchmarks** | [Benchmark Authority](BENCHMARK-AUTHORITY.md) |
@@ -70,11 +70,12 @@ AI: Imagine a regular computer is like a light switch — it's either ON (1) or 
 ## What is fak?
 
 **fak** is **one Go binary** that sits between your AI agents and the tools they call.
-Everything runs inside that one process — the permission gate, the cache, the quarantine,
-the metrics — so there are no sidecars, no separate authorizer, and no multi-tier ops:
+Everything runs inside that one process — the gateway, permission checks, cache,
+quarantine, routing, and metrics — so there are no sidecars, no separate authorizer,
+and no multi-tier ops:
 
 - **Self-contained** — one static Go binary, zero external dependencies, no complex setup
-- **Safer** — puts every action behind a permission gate the model can't talk past
+- **Controlled** — gives every tool call a reviewable verdict before it runs
 - **Cheaper for fleets** — does the shared setup work once instead of every turn
 
 For fleets of AI agents that share setup (long system prompts, tool lists), the savings
@@ -96,7 +97,7 @@ its commit and artifact.
 
 1. Run the [Simple Demo](cmd/simpledemo/README.md)
 2. Read [Getting Started](GETTING-STARTED.md) for the full feature set
-3. Explore [examples](examples/) of safety policies and tool gates
+3. Explore [examples](examples/) of policy manifests and tool gates
 4. Check the [main README](README.md) for architecture and benchmarks
 
 ## Requirements

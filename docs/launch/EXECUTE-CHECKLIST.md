@@ -62,7 +62,7 @@ technical primary first, then let the rest follow the signal.
 
 These durable surfaces are being driven separately from this human-gated list:
 
-- **GitHub discoverability** — topics (20 set), description, custom OG image, CITATION.cff: live.
+- **GitHub discoverability** — agent-kernel/cache/routing/local-LLM/MCP topics, description, custom OG image, CITATION.cff: live.
 - **Docs-site SEO** — sitemap.xml (275 URLs), robots.txt, jekyll-seo-tag (title/description/OG/
   Twitter/4× JSON-LD), pkg.go.dev indexing: all verified live.
 - **Awesome-list PRs + registry/directory submissions** — researched and staged for review (the

@@ -1,6 +1,6 @@
 ---
 title: "fak FAQ — the agent kernel, answered"
-description: "Frequently asked questions about fak, the agent kernel: how its default-deny gate stops prompt injection, what an addressable KV cache is, and installing it."
+description: "Frequently asked questions about fak, the agent kernel: long-session cache value, per-call routing, audited tool-call control, local models, and installing it."
 ---
 
 # Frequently Asked Questions (FAQ)
@@ -16,7 +16,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "What is fak?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "fak is one static Go binary you put in front of the AI agent you already run — Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client — by repointing a single base URL, with no rewrite. It makes long sessions cheaper (shedding old turns while keeping the provider's prompt-cache prefix byte-identical), routes each tool call to the right model, keeps unsafe tool results out of the model's context, and records an auditable verdict for every call. Under the hood it is an agent kernel: an in-process, default-deny permission gate fused with an addressable, bit-exact KV cache, so the same boundary that saves tokens is also a hard security floor — it treats the language model like an untrusted program and every tool call like a syscall that must pass through a kernel the model cannot control. (It is also described as an agent tool firewall.)"
+        "text": "fak is one static Go binary you put in front of the AI agent you already run — Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client — by repointing a single base URL, with no rewrite. It makes long sessions cheaper (shedding old turns while keeping the provider's prompt-cache prefix byte-identical), routes each tool call to the right model, can run local GGUF models in-process, and records an auditable verdict for every call. Under the hood it is an agent kernel: an in-process tool-call control plane fused with an addressable, bit-exact KV cache, so one checkpoint handles reuse, routing, policy, quarantine, and audit for the agent loop."
       }
     },
     {
@@ -144,7 +144,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "Who is fak for?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Teams running self-hosted LLM agent fleets who need three things at once: prompt-injection containment, reviewable capability security, and cache-efficient inference. It is useful at every rung. Front your existing model for the safety floor, or go all-in on the fused kernel for the reuse wins on a self-hosted model."
+        "text": "Teams running long-lived or self-hosted LLM agent loops who need three things at once: cache-efficient inference, per-call model routing, and reviewable tool-call control. It is useful at every rung. Front your existing model for auditable verdicts and policy; go all-in on the fused kernel with a self-hosted model to also get the reuse wins."
       }
     },
     {
@@ -160,7 +160,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "Where can I learn more?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Guided tutorial — zero to first adjudicated call. Integration index — put fak in front of the agent you already run (Claude Code, Cursor, an SDK, or MCP). Policy in the kernel and Addressable KV cache — the two core ideas. Benchmark authority — every number. llms.txt — a machine-readable map for LLMs and answer engines."
+        "text": "Guided tutorial — zero to first adjudicated call. Integration index — put fak in front of the agent you already run (Claude Code, Cursor, an SDK, or MCP). Policy in the kernel and Addressable KV cache — two core mechanics. Benchmark authority — every number. llms.txt — a machine-readable map for LLMs and answer engines."
       }
     },
     {
@@ -1592,7 +1592,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "Is the in-kernel model engine ready to serve production traffic?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "No, the in-kernel model engine is a bit-exact correctness reference, not a tuned production serving engine, and the README and claims ledger say so plainly. It is a from-scratch pure-Go forward pass whose load-bearing claim is oracle correctness versus a HuggingFace reference, not throughput, and it has no continuous batching, no paged attention, and no multi-tenant scheduler. Forward-pass parity is proven for the llama family (SmolLM2-135M, argmax-exact at every position, final-logit max|Δ| about 6e-5); non-llama family parity is open, real-GGUF end-to-end parity is open, and a Qwen3.6-27B multi-token greedy decode was refuted because it diverges from llama.cpp at token index 2. For real serving, run fak serve in front of vLLM, SGLang, or llama.cpp instead."
+        "text": "No, the in-kernel model engine is a bit-exact correctness reference, not a tuned production serving engine, and the README and claims ledger say so plainly. It is a from-scratch pure-Go forward pass whose load-bearing claim is oracle correctness versus a HuggingFace reference, not throughput, and it has no continuous batching, no paged attention, and no multi-tenant scheduler. Forward-pass parity is proven for the llama family (SmolLM2-135M, argmax-exact at every position, final-logit max|Δ| about 6e-5); non-llama family parity is open, real-GGUF end-to-end parity is open, and a Qwen3.6-27B multi-token greedy decode was refuted because it diverges from llama.cpp at token index 2. For real serving, run fak serve in front of vLLM, SGLang, or llama.cpp instead. The What fak is not explainer states this serving-engine boundary — and the 0/29-novel prior-art audit — plainly."
       }
     },
     {
@@ -1634,13 +1634,10 @@ The most common questions, answered to stand on their own. The deeper topic sect
 Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client — by repointing a
 single base URL, with no rewrite. It makes long sessions cheaper (shedding old turns
 while keeping the provider's prompt-cache prefix byte-identical), routes each tool call
-to the right model, keeps unsafe tool results out of the model's context, and records an
-auditable verdict for every call. Under the hood it is an **agent kernel**: an
-in-process, default-deny **permission gate** fused with an **addressable, bit-exact KV
-cache**, so the same boundary that saves tokens is also a hard security floor — it treats
-the language model like an untrusted program and every tool call like a syscall that must
-pass through a kernel the model cannot control. (It is also described as an **agent tool
-firewall**.)
+to the right model, can run local GGUF models in-process, and records an auditable verdict
+for every call. Under the hood it is an **agent kernel**: an in-process tool-call control
+plane fused with an **addressable, bit-exact KV cache**, so one checkpoint handles reuse,
+routing, policy, quarantine, and audit for the agent loop.
 
 ## What problem does fak solve?
 
@@ -1847,10 +1844,10 @@ per-framework snippets, and a 60-second offline proof. The per-tool guides are
 
 ## Who is fak for?
 
-Teams running **self-hosted LLM agent fleets** who need three things at once:
-prompt-injection containment, reviewable capability security, and cache-efficient
-inference. It is useful at every rung. Front your existing model for the safety floor,
-or go all-in on the fused kernel for the reuse wins on a self-hosted model.
+Teams running long-lived or self-hosted LLM agent loops who need three things at once:
+cache-efficient inference, per-call model routing, and reviewable tool-call control. It
+is useful at every rung. Front your existing model for auditable verdicts and policy;
+go all-in on the fused kernel with a self-hosted model to also get the reuse wins.
 
 ## Where do I report a security vulnerability?
 
@@ -1861,7 +1858,7 @@ issue for an undisclosed vulnerability.
 
 - [Guided tutorial](fak/tutorial.md) — zero to first adjudicated call.
 - [Integration index](integrations/README.md) — put fak in front of the agent you already run (Claude Code, Cursor, an SDK, or MCP).
-- [Policy in the kernel](explainers/policy-in-the-kernel.md) and [Addressable KV cache](explainers/addressable-kv-cache.md) — the two core ideas.
+- [Policy in the kernel](explainers/policy-in-the-kernel.md) and [Addressable KV cache](explainers/addressable-kv-cache.md) — two core mechanics.
 - [Benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) — every number.
 - [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) — a machine-readable map for LLMs and answer engines.
 

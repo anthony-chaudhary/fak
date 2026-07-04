@@ -13,8 +13,8 @@ title: "Netra Fused Agent Kernel (`fak`)"
 description: >-
   Netra Fused Agent Kernel (`fak`): one Go binary you put in front of the AI agent you
   already run — Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client.
-  Cheaper long sessions, the right model per call, fewer wasted turns, an auditable
-  trail — and a default-deny security floor when you need one.
+  Cheaper long sessions, the right model per call, fewer wasted turns, and an auditable
+  verdict for every tool call.
 author: Anthony Chaudhary
 lang: en
 

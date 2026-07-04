@@ -199,10 +199,10 @@ def build_site_schemas() -> list[dict]:
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
         "name": "Netra Fused Agent Kernel",
-        "alternateName": ["fak", "Fused Agent Kernel", "agent tool firewall"],
+        "alternateName": ["fak", "Fused Agent Kernel", "agent kernel"],
         "description": desc,
         "applicationCategory": "DeveloperApplication",
-        "applicationSubCategory": "SecurityApplication",
+        "applicationSubCategory": "DeveloperTool",
         "operatingSystem": "Linux, macOS, Windows",
         "programmingLanguage": "Go",
         "softwareVersion": version(),
@@ -214,9 +214,9 @@ def build_site_schemas() -> list[dict]:
         "author": {"@type": "Person", "name": "Anthony Chaudhary"},
         "publisher": publisher,
         "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
-        "keywords": ("agent kernel, agent tool firewall, AI agent security, prompt injection "
-                     "defense, tool poisoning, capability security, default-deny permission gate, "
-                     "KV cache, addressable KV cache, self-hosted LLM, LLM agent fleet, Go"),
+        "keywords": ("agent kernel, Fused Agent Kernel, AI agents, LLM agents, prompt cache, "
+                     "model routing, local LLM, GGUF, MCP tool-call boundary, KV cache, "
+                     "addressable KV cache, self-hosted LLM, LLM agent fleet, Go"),
     }
     website = {
         "@context": "https://schema.org",

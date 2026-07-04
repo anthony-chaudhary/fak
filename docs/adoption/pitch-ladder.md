@@ -8,7 +8,7 @@ keywords:
   - treat the tool call like a syscall
   - the model proposes the kernel disposes
   - agent kernel
-  - agent tool firewall
+  - agent loop runtime
   - one-line summary
   - memorable framing
 date: 2026-07-03
@@ -18,7 +18,7 @@ date: 2026-07-03
 
 > **The one-sentence pitch:** fak treats every agent tool call like a syscall —
 > the model proposes, the kernel disposes: one static Go binary that makes the
-> same agent loop safer, cheaper, and faster.
+> same agent loop more controlled, cheaper, and faster.
 
 This is the same pitch at three zoom levels. Quote the rung that fits your
 venue; every rung makes the same claims, so a reader who climbs from the tweet
@@ -36,10 +36,10 @@ benchmark, or a novelty the 0/29 prior-art audit refutes.
 ## Rung 1 — one sentence (the tweet)
 
 > fak treats every agent tool call like a syscall — the model proposes, the
-> kernel disposes: one static Go binary that makes the same agent loop safer,
-> cheaper, and faster.
+> kernel disposes: one static Go binary that makes the same agent loop more
+> controlled, cheaper, and faster.
 
-29 words. The anchor is the syscall framing: an OS kernel never trusts a
+30 words. The anchor is the syscall framing: an OS kernel never trusts a
 program's word, and fak applies that same boundary to an AI agent's tool calls.
 Everything else fak does unpacks from that one move.
 
@@ -48,27 +48,27 @@ Everything else fak does unpacks from that one move.
 > fak is a fused agent kernel: one static Go binary you drop in front of the
 > agent you already run (`fak guard -- claude` — repoint one base URL, keep your
 > model, IDE, and keys). It treats every tool call like a syscall — the model
-> proposes, the kernel disposes — checking each call against a default-deny
-> capability floor and quarantining suspicious tool *results* by structure, so
-> refusing an irreversible action never depends on catching the attack. Because
-> the kernel owns the session, it also reuses the stable work: on a 50-turn ×
-> 5-agent run it does ~4.1× less work than a tuned warm-cache stack, and it can
-> evict one span from the middle of a KV cache and leave the rest bit-for-bit
-> identical (`max|Δ| = 0`). The decision tax is ~362 ns per call, in-process.
-> None of the primitives are new — the assembly into one drop-in binary is the
-> point.
+> proposes, the kernel disposes — giving each call a reviewable verdict while
+> the kernel reuses the stable work in the session. On a 50-turn × 5-agent run it
+> does ~4.1× less work than a tuned warm-cache stack, and it can evict one span
+> from the middle of a KV cache and leave the rest bit-for-bit identical
+> (`max|Δ| = 0`). The same in-process boundary also routes calls, repairs
+> malformed ones, quarantines distrusted results, and checks tool authority from
+> policy in ~362 ns per call. None of the primitives are new — the assembly into
+> one drop-in binary is the point.
 
-Same claims as the sentence, plus the mechanism (drop-in, default-deny,
-quarantine), the two witnessed numbers a skeptic will check first (the tuned
-~4.1×, never the naive re-send multiplier; the ~362 ns guard tax, measured on
-an Apple M3 Pro), and the novelty concession up front.
+Same claims as the sentence, plus the mechanism (drop-in, verdicts, reuse,
+routing, quarantine), the two witnessed numbers a skeptic will check first (the
+tuned ~4.1×, never the naive re-send multiplier; the ~362 ns guard tax, measured
+on an Apple M3 Pro), and the novelty concession up front.
 
 ## Rung 3 — one page (the blog intro)
 
-> Your AI agent runs every tool call on trust. The model decides to delete a
-> file, call an API, or push a commit, and the harness just… does it. Every
-> defense in that loop is advisory: a system prompt asking nicely, a classifier
-> hoping to catch the attack, a human skimming a transcript.
+> Your AI agent spends most of a long session re-paying for setup: the same
+> system prompt, the same tools, the same project context, the same retries after
+> malformed calls. A fleet pays that cost again for every agent. Meanwhile the
+> harness still treats a model's proposed tool call as the thing to run, not the
+> checkpoint where cost, routing, policy, and evidence should be decided.
 >
 > Operating systems solved this problem decades ago. A program never gets to
 > perform a dangerous action on its own say-so — it *proposes* a syscall, and
@@ -79,17 +79,16 @@ an Apple M3 Pro), and the novelty concession up front.
 > OpenAI/Anthropic/MCP client. `fak guard -- claude` wraps your normal agent in
 > one command; your model, IDE, and keys stay exactly as they are.
 >
-> From that seat, the kernel enforces five things:
+> From that seat, the kernel provides five things:
 >
 > 1. **The tool call is a syscall.** Every call crosses the kernel and gets a
->    verdict — allowed, denied, repaired, quarantined, or deferred — against a
->    default-deny capability floor. The decision runs in-process in ~362 ns
->    (measured, Apple M3 Pro): no network hop, no perceptible tax.
-> 2. **Refusal does not depend on detection.** Prompt-injection defense is
->    structural, not probabilistic: suspicious tool *results* are held out of
->    the model's context by quarantine, and an irreversible action is refused
->    because the capability was never granted — not because a classifier caught
->    the attack. The detector can be wrong; the floor holds anyway.
+>    verdict — allowed, denied, repaired, quarantined, or deferred. The decision
+>    runs in-process in ~362 ns (measured, Apple M3 Pro): no network hop, no
+>    perceptible tax.
+> 2. **The boundary is a control plane.** Tool authority comes from a reviewable
+>    policy, suspicious tool *results* can be held out of context, and every
+>    verdict is auditable. Refusing an irreversible action does not require a
+>    classifier to recognize the bad text first.
 > 3. **Long sessions stop getting more expensive.** The kernel owns the KV
 >    cache, so it can reach into the middle of a kept run, evict one span, and
 >    leave everything else bit-for-bit identical (`max|Δ| = 0`). On a witnessed
@@ -123,7 +122,7 @@ derived from rung 1:
 |---|---|---|---|
 | Tool call as syscall (model proposes, kernel disposes) | ✔ anchor | ✔ | ✔ |
 | One static Go binary, drop-in | ✔ | ✔ (`fak guard -- claude`) | ✔ |
-| Safer: default-deny gate + quarantine | "safer" | ✔ mechanism | ✔ + evadable-detector concession |
+| Controlled: verdicts, policy, quarantine | "controlled" | ✔ mechanism | ✔ + classifier caveat |
 | Cheaper: reuse, tuned ~4.1×, `max\|Δ\| = 0` | "cheaper" | ✔ numbers | ✔ numbers + naive-multiplier fence |
 | Faster: ~362 ns in-process decision | "faster" | ✔ number | ✔ number |
 | Verify, don't trust (DOS) | — (no room) | — | ✔ |

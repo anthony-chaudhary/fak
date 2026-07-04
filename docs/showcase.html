@@ -27,7 +27,7 @@
 
 <!-- ---- SEO / AEO (hand-written; this page opts out of the Jekyll theme + jekyll-seo-tag) ---- -->
 <title>fak — the agent kernel | a live showcase</title>
-<meta name="description" content="fak is one Go binary you put in front of the AI agent you already run — Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client. Cheaper long sessions, the right model per call, fewer wasted turns, an auditable trail — and a default-deny security floor when you need one. An in-process permission gate fused with an addressable, bit-exact KV cache, in Go." />
+<meta name="description" content="fak is one Go binary you put in front of the AI agent you already run — Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client. Cheaper long sessions, the right model per call, fewer wasted turns, and an auditable verdict for every tool call. An agent kernel with an addressable, bit-exact KV cache, in Go." />
 <link rel="canonical" href="https://anthony-chaudhary.github.io/fak/showcase.html" />
 <meta name="author" content="Anthony Chaudhary" />
 
@@ -35,12 +35,12 @@
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="fak — the agent kernel" />
 <meta property="og:title" content="fak — the agent kernel | a live showcase" />
-<meta property="og:description" content="Put one Go binary in front of the agent you already run: cheaper long sessions, the right model per call, fewer wasted turns, and a hard security floor when you need one." />
+<meta property="og:description" content="Put one Go binary in front of the agent you already run: cheaper long sessions, the right model per call, fewer wasted turns, and auditable tool-call control." />
 <meta property="og:url" content="https://anthony-chaudhary.github.io/fak/showcase.html" />
 <meta property="og:image" content="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/social-preview.png" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="fak — the agent kernel | a live showcase" />
-<meta name="twitter:description" content="One Go binary in front of your agent: cheaper long sessions, the right model per call, fewer wasted turns — plus a default-deny security floor." />
+<meta name="twitter:description" content="One Go binary in front of your agent: cheaper long sessions, the right model per call, fewer wasted turns, and auditable tool-call control." />
 <meta name="twitter:image" content="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/social-preview.png" />
 
 <style>
@@ -272,18 +272,18 @@
 <header class="hero">
   <div class="wrap">
     <span class="eyebrow"><b>●</b> the agent kernel · one Go binary · drop-in</span>
-    <h1 class="title">Run your agent for less. Keep it on a leash.</h1>
+    <h1 class="title">Run your agent for less. Keep control.</h1>
     <p class="lede">
       Put <span class="k">fak</span> in front of the AI agent you already run — Claude Code, Codex,
       Cursor, any OpenAI / Anthropic / MCP client. Long sessions get cheaper, each call routes to the
-      right model, and wasted turns get cut — while the same boundary holds a hard security floor when
-      you need one. One binary, no rewrite, no key to start.
+      right model, wasted turns get cut, and every tool call gets an auditable verdict. One binary,
+      no rewrite, no key to start.
     </p>
 
     <div class="syscall-line">
       <span class="chip">model / agent</span>
       <span class="arrow">→</span>
-      <span class="chip k">the kernel ·&nbsp;default-deny</span>
+      <span class="chip k">the kernel ·&nbsp;verdicts + reuse</span>
       <span class="arrow">→</span>
       <span class="chip">the outside world</span>
     </div>
@@ -363,7 +363,7 @@
         <div class="p-id">
           <div class="p-kicker">github.com/anthony-chaudhary/fak</div>
           <div class="p-name">fak <span class="sub">the agent kernel</span></div>
-          <p class="p-tag">“Treat the model like an untrusted program, and the tool call like a syscall.”</p>
+          <p class="p-tag">“Treat the tool call like a syscall: the model proposes, the kernel disposes.”</p>
           <div class="p-meta">
             <span class="pill lic">Apache-2.0</span>
             <span class="pill">Go 1.26+</span>
@@ -377,9 +377,9 @@
         <p class="p-lead">
           Everything an agent does to the outside world — call a tool, admit a result into memory,
           reuse a cached answer — becomes a <span class="hl">syscall that passes through a kernel the
-          model doesn't control</span>. From the security seat it's a permission gate the agent can't
-          argue past. From the performance seat it's a way to do shared work <em>once</em> instead of
-          every turn. The surprise: those turn out to be the <span class="hl">same gate</span>.
+          model doesn't control</span>. From the operations seat it is a control plane with audit and
+          policy. From the performance seat it's a way to do shared work <em>once</em> instead of every
+          turn. The surprise: those turn out to be the <span class="hl">same gate</span>.
         </p>
 
         <div class="flips">
@@ -442,7 +442,7 @@ fak agent --offline
             <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 005.47 7.59c.4.07.55-.17.55-.38v-1.34c-2.23.49-2.7-1.07-2.7-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.71 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.01.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 014 0c1.53-1.03 2.2-.82 2.2-.82.44 1.11.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
             Repository
           </a>
-          <a class="lnk" href="https://github.com/anthony-chaudhary/fak#readme" rel="noopener">README &amp; the two flips</a>
+          <a class="lnk" href="https://github.com/anthony-chaudhary/fak#readme" rel="noopener">README &amp; core mechanics</a>
           <a class="lnk" href="https://github.com/anthony-chaudhary/fak/releases/latest" rel="noopener">Releases &amp; binaries</a>
           <a class="lnk" href="https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb" rel="noopener">Modular Colab quickstart</a>
         </div>
@@ -452,7 +452,7 @@ fak agent --offline
 </section>
 
 <!-- ============================ EACH WIN, BY EXAMPLE ============================ -->
-<!-- The two flips + the cost collapse + the same-boundary code check, each shrunk to one worked
+<!-- The core mechanics + the cost collapse + the same-boundary code check, each shrunk to one worked
      example. Numbers trace to BENCHMARK-AUTHORITY.md and the explainer worked-example sections this
      links out to (the 5th card is a correctness win, so it carries no number). The monospace diagrams
      are plain text in <pre>; the colour spans add no width, so columns align on the literal chars. -->
@@ -463,7 +463,7 @@ fak agent --offline
     </div>
     <h2 class="sec-head" style="margin:0">Five ideas, five worked examples</h2>
     <p class="sec-sub">
-      The two flips and the cost collapse, plus the same boundary checking the code the agent itself
+      The core mechanics and the cost collapse, plus the same boundary checking the code the agent itself
       writes — each shrunk to one example you can read in ten seconds. Every number traces to
       <a href="https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md" style="color:var(--fak)">BENCHMARK-AUTHORITY.md</a>.
     </p>

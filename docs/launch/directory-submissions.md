@@ -13,7 +13,7 @@ form:
 - **Official MCP Registry** — wired via [`server.json`](https://github.com/anthony-chaudhary/fak/blob/main/server.json) + the ghcr image, now at **0.34.0** and matching the published image. As of 2026-06-27 `ghcr.io/anthony-chaudhary/fak:0.34.0` + `:latest` are built and **anonymously pullable** (the prereq is satisfied), so only the one interactive publish step in [`docs/fak/mcp-registry.md`](../fak/mcp-registry.md) remains — see Fresh leads #6 below.
 - **Awesome-list PRs** — already submitted across ~12 lists (don't duplicate).
 
-Reusable description (≈140 chars): *In-process default-deny permission gate for AI agents — fronts OpenAI/Anthropic/MCP wires and adjudicates every tool call like a syscall (prompt-injection / tool-poisoning containment).*
+Reusable description (≈140 chars): *Agent kernel for AI agents: one Go binary that fronts OpenAI/Anthropic/MCP wires, keeps long sessions cache-efficient, routes per call, and audits every tool-call verdict.*
 
 ---
 
@@ -24,7 +24,7 @@ Reusable description (≈140 chars): *In-process default-deny permission gate fo
 | Field | Value |
 |---|---|
 | Server Name | `fak` |
-| Short Description | In-process default-deny permission gate for AI agents fused with a bit-exact KV cache; fronts OpenAI/Anthropic/MCP wires and ships `fak_*` adjudication tools to contain prompt injection and tool poisoning. |
+| Short Description | Agent kernel for AI agents: one Go binary that fronts OpenAI/Anthropic/MCP wires, keeps long sessions cache-efficient, routes per call, and ships `fak_*` adjudication tools. |
 | Link | `https://github.com/anthony-chaudhary/fak` |
 | Category | Development |
 | Contact Email | `<your-contact-email>` |
@@ -39,7 +39,7 @@ Free listing goes to a manual review queue (a $39 tier skips the wait — not ne
 - **Body:**
   ```
   **Server Name:** fak (Fused Agent Kernel)
-  **Description:** Default-deny permission gate for AI agents — fronts OpenAI/Anthropic/MCP wires and adjudicates every tool call like a syscall (prompt-injection / tool-poisoning containment).
+  **Description:** Agent kernel for AI agents — fronts OpenAI/Anthropic/MCP wires, keeps long sessions cache-efficient, routes per call, and audits every tool-call verdict.
   **GitHub URL:** https://github.com/anthony-chaudhary/fak
   **Homepage:** https://anthony-chaudhary.github.io/fak/
   **Transport:** stdio (Streamable HTTP via `fak serve`)
@@ -65,8 +65,8 @@ but a hosted HTTPS endpoint (`fak serve --addr ...` behind TLS) gets the richest
 | Field | Value |
 |---|---|
 | Name | fak (Fused Agent Kernel) |
-| Category | Development / Self-Hosted / Security |
-| Short description | Open-source agent kernel: a default-deny permission gate for AI agents that treats every tool call like a syscall, fused with an addressable bit-exact KV cache. One static Go binary, Apache-2.0. |
+| Category | Development / Self-Hosted / Developer Tools |
+| Short description | Open-source agent kernel for AI agents: one static Go binary for long-session cache value, per-call routing, audited tool-call verdicts, and addressable bit-exact KV cache. Apache-2.0. |
 | License | Open Source (Apache-2.0) |
 | Platforms | Linux, macOS, Windows, Self-Hosted |
 | Link | `https://github.com/anthony-chaudhary/fak` |
@@ -91,7 +91,7 @@ project `DOS` was already submitted ([cline/mcp-marketplace#1794](https://github
 - **Logo:** a **400×400 PNG** attached to the issue. *This is the one missing asset — the repo has wide diagrams (`visuals/*.png`) and a 1200×630 `visuals/social-preview.png`, but no square icon. Make/crop a 400×400 fak icon and drag it onto the issue (GitHub issue image upload is web-UI only).* 
 - **Reason for addition (paste):**
   ```
-  fak is the Fused Agent Kernel: a default-deny tool-call firewall + result quarantine you put in front of an agent over MCP. Its server (fak serve --stdio) exposes fak_adjudicate / fak_syscall / fak_admit so Cline can screen a proposed tool call BEFORE running it, run one through the kernel, or hold a poisoned tool result out of context entirely — addressing the MCP Top-10 (Tool Poisoning, Memory Poisoning) by structure, not a classifier. One static Go binary, Apache-2.0, zero deps.
+  fak is the Fused Agent Kernel: one static Go binary you put in front of an agent over MCP. Its server (fak serve --stdio) exposes fak_adjudicate / fak_syscall / fak_admit so Cline can get a kernel verdict for a proposed tool call before running it, run one through the kernel, or hold distrusted tool results out of context. It also keeps long sessions cache-efficient, supports per-call routing, and emits an auditable verdict trail. Apache-2.0, zero deps.
   ```
 - **README-install confirmation (required checkbox):** TRUE. The repo README + [`examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md) give a README-alone install (`go install github.com/anthony-chaudhary/fak/cmd/fak@latest`, then `fak serve --stdio` / a project `.mcp.json`). Test it with Cline first, then tick the box.
 
@@ -132,5 +132,5 @@ These add fak to the docs of tools fak fronts, reaching THEIR users (not just a 
 
 ---
 
-*Every description here is capability-first and traces to [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md). No
+*Every description here is agent-kernel-first and traces to [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md). No
 performance multipliers are claimed in any listing — keep it that way if you edit them.*

@@ -24,7 +24,7 @@ the kernel. The readings are the docs you would read anyway; the path is what st
 reading them in the wrong order.
 
 > New to the project entirely? The fastest taste is the 2-minute boundary proof in
-> [`README.md`](README.md#for-security-teams), then come back here
+> [`README.md`](README.md#tool-call-controls), then come back here
 > and start at **FAK 101**. Just want to install and run? [`START-HERE.md`](START-HERE.md)
 > and [`GETTING-STARTED.md`](GETTING-STARTED.md) are the install front doors; this page is
 > the *concept* front door.

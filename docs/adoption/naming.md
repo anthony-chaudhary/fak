@@ -1,10 +1,12 @@
 ---
 title: "How to find and name fak: search terms and disambiguation"
-description: "How to search for and refer to fak. The bare word is buried under homophone and F.A.K.-acronym noise, so use 'agent kernel', 'agent tool firewall', or 'treat the tool call like a syscall'."
+description: "How to search for and refer to fak. The bare word is buried under homophone and F.A.K.-acronym noise, so use 'agent kernel', 'Fused Agent Kernel', or 'treat the tool call like a syscall'."
 slug: naming-and-search
 keywords:
   - fak agent kernel
-  - agent tool firewall
+  - fused agent kernel
+  - long-session prompt cache
+  - model routing for agents
   - treat the tool call like a syscall
   - vendor-neutral inference backend
   - how to search for fak
@@ -18,7 +20,7 @@ date: 2026-07-02
 
 > **TL;DR:** the bare word **fak** is dominated by homophone and F.A.K.-acronym
 > noise, so a plain search for it will not find this project. Pair it with a
-> disambiguated term — **agent kernel**, **agent tool firewall**, or the slogan
+> disambiguated term — **agent kernel**, **Fused Agent Kernel**, or the slogan
 > **"treat the tool call like a syscall"** — and give advocates those terms so
 > word-of-mouth lands on findable language. A concept people cannot find is a
 > concept that cannot spread.
@@ -50,23 +52,29 @@ These are the canonical search + reference terms, drawn from
 | Term | Use it when you mean |
 |---|---|
 | `fak agent kernel` | the whole thing — the primary handle |
-| `agent tool firewall` | the security framing (a gate in front of an agent's tools) |
+| `fused agent kernel` | the expanded product name when `fak` alone is too ambiguous |
 | `treat the tool call like a syscall` | the one-line mental model / slogan |
 | `fak serve` | the gateway verb (the runnable surface) |
+| `fak guard` | the one-command wrapper for an agent you already run |
+| `long-session prompt cache` | the cost/reuse framing |
+| `model routing for agents` | the per-call routing framing |
+| `MCP tool-call boundary` | the MCP/adjudication framing |
 | `vendor-neutral inference backend` | the interop/serving-boundary framing |
 | `bring-your-accelerator agent serving` | the hardware-portability framing |
 | `neo-silicon agent kernel` | the chip-vendor / backend-author angle |
 | `fak backend conformance`, `fak-certified backend` | the conformance mark |
 
 **The one canonical name to lead with:** *fak, the Fused Agent Kernel* — an
-**agent kernel** (also described as an **agent tool firewall**).
+**agent kernel** for AI agent loops.
 
 ## What category is this? (so people search the right shelf)
 
 fak is on these shelves — say the category, then the name:
 
-- **agent kernel** / **agent tool firewall**
-- **tool-call policy gateway**
+- **agent kernel**
+- **AI agent runtime boundary**
+- **cache-efficient agent serving**
+- **per-call model routing**
 - **result quarantine for agent tools**
 - **addressable KV cache**
 
@@ -76,7 +84,8 @@ Advocates lose the concept when a listener rounds it to the nearest familiar thi
 Draw these lines:
 
 - **Not a network firewall or a WAF.** The boundary is the tool call (a syscall),
-  not a network packet. "Firewall" is an analogy for the default-deny posture.
+  not a network packet. "Firewall" is only an analogy for one policy posture, not
+  the product category to lead with.
 - **Not a prompt-injection classifier / guardrails library.** The load-bearing
   floor is the **capability lock** (a tool off the allow-list cannot be called),
   not a recognizer that tries to spot bad text. The result detector is ~100%

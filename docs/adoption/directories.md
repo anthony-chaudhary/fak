@@ -1,6 +1,6 @@
 ---
 title: "Where to submit fak — a curated directory & awesome-list checklist"
-description: "The maintained, honest list of the awesome-lists, tool directories, and registries where fak actually belongs — agent infrastructure, MCP, harness engineering, LLM security, Go, and self-hosted. Each venue carries why-it-fits, a submission note, and a current status (wired / live / not yet / blocked / declined). Padded with nothing: venues that do not fit are in the Declined section with the reason."
+description: "The maintained, honest list of the awesome-lists, tool directories, and registries where fak actually belongs — agent infrastructure, MCP, harness engineering, cache-efficient serving, Go, and self-hosted. Each venue carries why-it-fits, a submission note, and a current status (wired / live / not yet / blocked / declined). Padded with nothing: venues that do not fit are in the Declined section with the reason."
 slug: where-to-submit-directories
 keywords:
   - where to submit fak
@@ -27,21 +27,18 @@ date: 2026-07-02
 
 ## What fak is (so a listing describes it accurately)
 
-`fak` is an **agent kernel / reference-monitor**: an in-process, default-deny
-tool-call gate fused with an addressable, bit-exact KV cache, shipped as **one static
-Go binary, Apache-2.0**. You put it in front of an agent you already run (Claude Code,
-Codex, Cursor, any OpenAI / Anthropic / MCP client) by repointing one base URL; every
-tool call it proposes crosses the capability floor first, suspicious tool *results* are
-held out of context (prompt-injection / tool-poisoning containment), and every verdict
-is audited. The same boundary is the trust substrate for a **fleet of autonomous
-agents**. It fronts a token engine; it does not replace one — so it belongs on
-**governance / agent-infra / security / MCP / self-hosted** surfaces, **not** on
-"fastest inference engine" lists.
+`fak` is an **agent kernel**: one static Go binary, Apache-2.0, that sits in front of
+the agent you already run (Claude Code, Codex, Cursor, any OpenAI / Anthropic / MCP
+client). Repoint one base URL and each tool call gets a kernel verdict before it runs;
+long sessions keep cache value, calls can route to the right model, repeated work is
+reused, local GGUF models can run in-process, and every verdict is audited. It fronts a
+token engine; it does not replace one — so it belongs on **agent-infra / cache-efficient
+serving / MCP / self-hosted / governance** surfaces, **not** on "fastest inference
+engine" lists.
 
-Reusable one-liner (≈140 chars, capability-first, no perf multiplier):
-*In-process default-deny permission gate for AI agents — fronts OpenAI/Anthropic/MCP
-wires and adjudicates every tool call like a syscall (prompt-injection / tool-poisoning
-containment). One static Go binary, Apache-2.0.*
+Reusable one-liner (≈140 chars, agent-kernel first, no perf multiplier):
+*Agent kernel for AI agents: one Go binary that fronts OpenAI/Anthropic/MCP wires, keeps
+long sessions cache-efficient, routes per call, and audits every tool-call verdict.*
 
 ## Honesty fences (apply to every submission)
 
@@ -56,7 +53,7 @@ containment). One static Go binary, Apache-2.0.*
 - **Read the venue's `CONTRIBUTING.md` first**, one venue per PR, disclose author
   affiliation where the venue requires it (awesome-selfhosted does), never resubmit a
   rejected entry without addressing the reason.
-- **Capability-first copy, no perf headline.** Never lead a listing with the naive
+- **Agent-kernel-first copy, no perf headline.** Never lead a listing with the naive
   8.8–9.7× number; the tuned figure is ~1.5–4.1× vs a warm-cache stack, and most
   listings need no number at all. Trace claims to [`CLAIMS.md`](../../CLAIMS.md).
 
@@ -131,7 +128,7 @@ Durable machine-facing surfaces driven from the repo, listed for completeness.
 | Venue | Why it fits | Submission note | Status |
 |---|---|---|---|
 | [pkg.go.dev](https://pkg.go.dev/github.com/anthony-chaudhary/fak) | Canonical Go package index; `go install` front door | Indexes automatically on first fetch | live |
-| [GitHub topics](https://github.com/anthony-chaudhary/fak) | Topic-based discovery | 20 topics set on the repo | live |
+| [GitHub topics](https://github.com/anthony-chaudhary/fak) | Topic-based discovery | 20 topics set on the repo, led by agent-kernel/cache/routing/local-LLM/MCP terms | live |
 | [Homebrew core](https://github.com/Homebrew/homebrew-core) | macOS package reach | Gate: ~225 stars, not yet met. A personal tap (`homebrew-fak`) is available now if Mac reach matters sooner | blocked (star gate) |
 
 ## Related catalog fak maintains
