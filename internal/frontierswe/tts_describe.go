@@ -121,9 +121,10 @@ type TrialArms struct {
 // TTSModel (Derive); the cross-trial arms add the shared-prefix lever:
 //
 //	A_trials = N · A                    — every trial re-prefills its whole context
-//	D_shared = P + N · ((A − P) · ratio)
-//	           where ratio = C(r)/A folds the cross-turn reuse INTO the per-trial
-//	           incremental work, and the prefix P is paid ONCE total across trials.
+//	D_shared = P + N · (C(r) − P)        — the reused single-trial work C(r) splits
+//	           into the prefix P (paid ONCE total across the N trials that share the
+//	           byte-identical prefix) and the per-trial reused incremental remainder
+//	           C(r) − P (paid per trial), so at N=1 D_shared collapses back to C(r).
 //
 // At N=1 the cross-trial arm collapses to the single-trial C(r) (no fan-out, no
 // cross-trial reuse) so the two surfaces agree. Pure arithmetic over geometry.go's

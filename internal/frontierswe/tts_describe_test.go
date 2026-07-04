@@ -153,6 +153,12 @@ func TestCrossTrialReuseArm(t *testing.T) {
 		if wantA := float64(single.A) * float64(n); ta.ATrials != wantA {
 			t.Errorf("N=%d: A_trials = %v, want %v (A*N)", n, ta.ATrials, wantA)
 		}
+		// D_shared pays the shared prefix P ONCE, then N times the per-trial reused
+		// incremental C(r)-P -- the exact decomposition the doc formula names. Pins
+		// the code against a "correction" toward a formula that breaks the N=1 collapse.
+		if wantD := float64(g.Prefix) + float64(n)*(single.C-float64(g.Prefix)); ta.DShared != wantD {
+			t.Errorf("N=%d: D_shared = %v, want %v (P + N*(C-P))", n, ta.DShared, wantD)
+		}
 		if i > 0 && !(ta.ATrialsD > prevAD) {
 			t.Errorf("N=%d: A/D not strictly increasing: %v <= %v", n, ta.ATrialsD, prevAD)
 		}
