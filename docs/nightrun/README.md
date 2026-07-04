@@ -44,6 +44,20 @@ go run ./cmd/fak nightrun ledger    # the durable collection history
 All of these take `--json` for an agent, and `--now <stamp>` to evaluate
 deterministically as-of a fixed time.
 
+### Mac Metal gateway sweep
+
+On the Mac Metal verify node, the auto-runnable gateway witness is:
+
+```bash
+fak macbench all --gateway http://127.0.0.1:8080 --model qwen3.6-27b --json
+```
+
+The command speaks to the local `fak serve --metal` gateway, runs the
+decode-longgen, prefill-sweep, and 2-stream probes, and emits a
+`fak.macbench.result.v1` JSON artifact. `nightrun run --apply --loop` selects the
+same built-in task when the probed box has `metal` and model weights. The report
+sanitizes non-loopback gateway addresses and never records the bearer key.
+
 ## How next() ranks
 
 Each feasible task is scored by a blend that sums to 1.0:

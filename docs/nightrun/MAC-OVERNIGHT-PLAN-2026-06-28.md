@@ -83,3 +83,25 @@ MoE and so does not apply to Qwen3.6-27B. All three are `manual: true` (they nee
 and host resolution) and require `metal` + `weights`, so they are only ever surfaced feasible on
 the Mac node itself. Re-witness cadence: 14 days each (alongside the original decode-curve task
 `witness-qwen36-27b-metal-decode`).
+
+## Automated all-night path
+
+The current unattended spine is the built-in `nightrun` task
+`witness-qwen36-27b-metal-auto-gateway-sweep`. On the Mac node, run:
+
+```sh
+fak nightrun run --apply --loop --json
+```
+
+or run the witness directly:
+
+```sh
+fak macbench all --gateway http://127.0.0.1:8080 --model qwen3.6-27b --json
+```
+
+The direct command writes a `fak.macbench.result.v1` artifact with decode-longgen,
+prefill-sweep, and 2-stream rows. It is safe for unattended selection because it
+uses the local gateway by default, reads the bearer from `FAK_GATEWAY_KEY` or
+`~/.fak-gateway-key`, and sanitizes any non-loopback gateway in its JSON report.
+The older overlay tasks above remain as manual recipes for targeted follow-up,
+but the auto task is the first command to leave running overnight.

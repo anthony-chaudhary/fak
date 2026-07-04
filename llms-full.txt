@@ -70,6 +70,7 @@
 - [Charter](docs/notes/CHARTER.md): the ten principles fak is built to satisfy — agentic by default, industry-leading value, low-ego interoperability, DOS-verified, self-improving, up-to-date, great by default, agentic-first, win-win-win, and human-steerable — each mapped to the surface that embodies it, the scorecard that keeps it honest, and an honest alignment grade. The constitution above the 18-scorecard control pane.
 - [Cache frontier operating plan](docs/CACHE-FRONTIER-OPERATING-PLAN.md): the project-management spine for keeping the multi-agent reuse win, O(1) context/query, provider-cache dogfood, and addressable-KV demos on the product path instead of buried under operational work.
 - [Generation contract](docs/generation.md): the canonical now/next/second-next/future taxonomy for issue labels, generation milestones, promotion/demotion evidence, shared-trunk rules, runtime feature-gate separation, intake rules, and anti-patterns. The front door for epic #1625 generation-aware development.
+- [Generational ABI and schema compatibility policy](docs/generation-abi-compatibility-policy.md): the cross-generation compatibility promise for artifacts that outlive one product horizon — the frozen wire ABI (`internal/abi`) stays additive-only and the versioned JSONL ledgers never edit a shipped `/N` schema in place, so `gen/future` architecture work can influence current APIs without a per-generation branch. Names promotion/demotion evidence and the additive-only kill criterion. The compatibility half of the #1625 generation contract.
 - [Spine-first + fan-out defaults](docs/spine-first-defaults.md): the two defaults for any new unit of work — ship the minimal working end-to-end spine first (or file the spine as its own issue), then file the 3..50+ follow-on QA/dogfood/productization backlog at creation time with `fak issue fanout` (wave-plan it with `fak issue cohort`).
 - [README](README.md): the full project overview — the two flips (policy in the kernel, addressable KV cache), the security results, and the install paths.
 - [Start Here](START-HERE.md): run a local AI model in under 10 minutes (no key, no GPU for small models).
@@ -128,6 +129,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 - [Addressable KV cache](docs/explainers/addressable-kv-cache.md): how mid-run causal span eviction stays bit-exact (`max|Δ| = 0`).
 - [KV cache for agentic context](docs/explainers/kv-cache-agentic-context.md): what a KV cache is and why agents stress it differently than chat.
 - [Long-session economics](docs/explainers/long-session-economics.md): why growing transcripts re-send prior turns, how provider cache discounts depend on byte-identical prefixes, and how fak preserves those bytes while honestly relaying the provider's reuse decision.
+- [The vLLM lifecycle cache-loss bridge](docs/explainers/vllm-lifecycle-cache-loss-bridge.md): how fak maps an upstream vLLM worker's pause/sleep/wake/reset onto session state with an explicit cache-loss witness — the closed `preserved`/`forgotten`/`unknown` KV vocabulary, why `unknown` fails closed, and the `WarmHitGate` rule that refuses a warm hit after a sleep/reset until a fresh `BlockStored` signal revalidates it. So a resume never routes onto KV the engine already threw away, and a fleet view never reads "serving" for an asleep worker.
 - [The frozen-trajectory cache cliff](docs/explainers/frozen-trajectory-cache-cliff.md): the public prompt-cache hit rate is high only because the trajectory is frozen (append-only); it decays toward 0% along three axes — flexibility/editing, per-turn tool-call density past the 20-block/4-breakpoint budget, and cross-agent fan-out via the concurrency wall. Demonstrator: `tools/cache_curve.py`, calibrated to the measured 96.6% ceiling.
 - [O(1) context window economics](docs/explainers/o1-context-window-economics.md): when reconstructing a bounded context every turn beats relying on the prefix cache — the crossover, measured on real billed usage, is the cache's own effective discount (~12% of the billed prompt).
 - [The compounding benefits of a saved call](docs/explainers/compounding-benefits-of-a-saved-call.md): why one avoided/cheapened tool call pays back from four orthogonal budgets at once (local CPU, GPU prefill, context window, wall-clock - rarely dollars), then compounds on the horizon - effective_horizon = budget / effective_cost_per_call, fak pushing the denominator down and the numerator up so the gain is their product r/d. The flat Net accounting under-models both; the per-call discharge is largely measured, the horizon multiplier is structure with measured inputs (no headline number). Lens tool: tools/savings_vector.py.
@@ -543,6 +545,13 @@ Every generation issue should also carry the `generation` label. The stream
 label and milestone should agree. If they do not, treat the mismatch as intake
 drift: fix the label or milestone before using the issue for dispatch.
 
+The compatibility promise that lets later-horizon architecture work influence
+current APIs without a per-generation branch is pinned in
+[`docs/generation-abi-compatibility-policy.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/generation-abi-compatibility-policy.md):
+the frozen wire ABI stays additive-only and the versioned JSONL schemas never
+edit a shipped `/N` in place, so concurrent generations share one trunk without
+a flag day.
+
 ## Orthogonality
 
 Generation is independent of priority. A `gen/future` issue can be high-value or
@@ -749,6 +758,190 @@ Generation remains orthogonal in these artifacts:
   reports, and issue handoffs without bloating every commit subject.
 - Stream labels reduce contention instead of becoming another stale taxonomy. If
   they do not, the evidence should demote or retire the mechanism, not defend it.
+
+---
+
+# Generational ABI and schema compatibility policy
+
+> Source: `docs/generation-abi-compatibility-policy.md`
+
+---
+title: "Generational ABI and Schema Compatibility Policy"
+description: "How fak artifacts that cross generations — the frozen wire ABI and the versioned schema ledgers — stay compatible without a per-generation branch, so long-horizon architecture work can influence current APIs safely."
+---
+
+# Generational ABI and Schema Compatibility Policy
+
+**Issue:** #1667.
+**Parent:** #1625.
+**Stream:** `gen/future`.
+**Milestone:** Generation G3 - Future.
+**Status:** research memo / decision model — a compatibility policy a later
+`gen/second-next` or `gen/next` stream can enforce with code, not yet a runtime
+gate.
+
+This memo is the handoff a future agent can use without rereading the whole
+generation epic. It answers one question: when a fak artifact has to be read by
+a worker from a *different* product generation than the one that wrote it, what
+compatibility promise binds the two, and what evidence moves that promise
+between generation streams? The canonical stream taxonomy is in
+[`docs/generation.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/generation.md); this memo is the compatibility half of
+the "second-next needs a compatibility policy before it can ship" rule stated
+there.
+
+## Why a cross-generation contract at all
+
+Long-horizon architecture work (`gen/future`, `gen/second-next`) cannot
+influence current APIs until it can promise that an artifact written today will
+still be readable by a worker built for a later horizon — and that a later
+worker will not silently mis-read an older artifact. Without that promise, every
+architecture bet forces a flag day, which the shared-trunk rule forbids. The
+industry analogue is the same one that seeds epic #1625: HBM3E and HBM4 ship
+concurrently because the interface between generations is a published, additive
+contract, not a fork.
+
+fak already has the two artifact classes that cross generations. This memo names
+them and states the promise for each.
+
+## The two cross-generation surfaces
+
+### 1. The frozen wire ABI (`internal/abi`)
+
+`internal/abi` is the wave-0 spine every fleet worker imports: a closed,
+byte-stable set of wire enums (verdict kinds, status, outcome, taint, scope,
+ref-kind, fallback, the reason vocabulary) plus the `FoldRank` restrictiveness
+lattice. Its compatibility rule is already proven and gated in
+[`docs/proofs/abi+architest.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/proofs/abi%2Barchitest.md): **additive-only**. A
+new generation may register new enum values; it may never renumber, remove, or
+repurpose an existing one, and every unknown value must fold fail-closed
+(`FallbackDeny`, rank 100).
+
+**Cross-generation promise (ABI):**
+
+- *Backward read* — a worker from generation *N+1* reading an artifact written by
+  generation *N* must recognise every value *N* could emit. Guaranteed because
+  values are never removed.
+- *Forward read* — a worker from generation *N* reading an artifact written by
+  *N+1* must not crash or silently accept an unknown value. Guaranteed because
+  unknown enum values fold to the most-restrictive rank (fail-closed), which is
+  the safe default for a trust kernel.
+- *No renumber* — a registration-block id is permanent. `FoldRank` orders by the
+  restrictiveness lattice, never by raw enum value, so adding values never
+  reorders folds.
+
+The witness already exists: `TestFoldSitesOrderByFoldRank` and
+`TestFoldRankOrdering` (`internal/architest`, `internal/abi`). This memo does not
+change that gate; it *names it as the ABI arm of the cross-generation policy* so
+a future stream does not re-invent it.
+
+### 2. Versioned schema ledgers (the `/N` JSONL rows)
+
+The second surface is the append-only JSONL ledgers under `docs/nightrun/` and
+adjacent (`fak-memory-value-ledger/1`, gateway-usage, cache-savings,
+harness-resources, and peers). Each row carries an explicit schema tag with a
+version suffix (`.../1`). Their compatibility rule mirrors the ABI:
+
+**Cross-generation promise (schema):**
+
+- A schema version is immutable once a row of it is committed. New fields are
+  added as *new optional keys within the same version* only when a reader that
+  ignores unknown keys stays correct; anything that changes the meaning of an
+  existing key or makes a previously optional key required is a **new version
+  suffix** (`.../2`), never an in-place edit of `/1`.
+- Readers must tolerate unknown keys (forward compatibility) and unknown schema
+  versions (skip-with-witness, never crash — the same fail-closed posture as the
+  ABI).
+- A ledger may carry multiple schema versions concurrently, exactly as the wire
+  ABI carries multiple enum generations concurrently. A fold/score consumer
+  (e.g. `internal/memvaluescore`) must dispatch on the version tag, not assume
+  the newest.
+
+## Orthogonality (the generation invariants this artifact must restate)
+
+This policy is metadata and promise, not a branch, a priority, or a runtime
+switch. Concretely:
+
+- **Orthogonal to priority.** The compatibility promise binds `gen/now` product
+  code and `gen/future` research artifacts identically. A `gen/future` label does
+  not lower the bar (an unversioned experimental ledger still cannot break a
+  reader); a `gen/now` label does not raise it (product code still gets only the
+  additive-only promise, nothing stronger). Priority answers "how urgent"; this
+  policy answers "what will still parse."
+- **Orthogonal to shared trunk.** All generations land on `main`, by explicit
+  path, under the same DCO and ship-stamp rules. This policy explicitly forbids
+  the per-generation branch (see #1667 non-goals): the whole point of an additive
+  wire contract is that concurrent generations share one trunk without a flag
+  day. Compatibility is enforced by the additive rule + `dos arbitrate` path
+  scope, not by isolation.
+- **Orthogonal to runtime feature gates.** A feature gate decides whether a code
+  path is reachable at runtime; this policy decides whether a *serialized
+  artifact* is readable across horizons. New-generation code can land inert
+  behind a default-off gate while still emitting a new, additive, versioned
+  schema that older readers safely skip. The gate controls exposure; the ABI/
+  schema contract controls durability. Neither substitutes for the other.
+
+## Promotion evidence (future → second-next → next → now)
+
+This memo promotes when a later stream can *enforce* the promise, not just state
+it:
+
+- **future → second-next:** a compatibility test fixture that pins a `/1` row and
+  a `/2` row and proves one consumer reads both — i.e. the schema arm gets the
+  same kind of gate the ABI arm already has (`internal/architest`). Naming that
+  fixture is the promotion witness.
+- **second-next → next:** a machine-checked schema registry (analogous to
+  `internal/abi`'s enum registry) that refuses an in-place edit of a shipped
+  schema version, wired into `make ci` / a `fak hygiene` gate.
+- **next → now:** the registry runs default-on in CI and the nightrun ledger
+  producers emit their version tag through it, so a drift is caught at commit
+  time rather than in review.
+
+## Demotion / retirement evidence
+
+- **Demote** if the additive-only rule proves too strict in practice — e.g. a
+  wire value must be *retired* because it is a security liability, forcing a
+  fail-closed removal path this memo currently forbids. That failure would push
+  the policy back to `gen/future` for a redesign that distinguishes
+  "never-renumber" from "may-quarantine-with-witness."
+- **Retire** the memo if `internal/abi`'s existing additive proof plus a single
+  schema-registry gate fully subsume it; then this doc collapses into a pointer
+  from [`docs/generation.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/generation.md) and the proof, with no standalone
+  policy left to carry.
+- **Retire** if generation-crossing artifacts stop existing (all consumers
+  become single-generation), which would make the cross-generation promise
+  vacuous.
+
+## Invalidating assumptions (kill criteria)
+
+State them so a later agent can check them cheaply:
+
+1. **The additive-only rule is sufficient.** This memo assumes no
+   cross-generation artifact ever *needs* a breaking change — that every real
+   evolution can be expressed as a new enum value or a new schema version. If a
+   concrete case appears that cannot (a field whose *removal* is required for
+   correctness or security, with no additive path), the policy is invalidated for
+   that surface and must gain an explicit, witnessed breaking-change protocol
+   (deprecation window + reader-version floor). **This is the assumption most
+   likely to fail.**
+2. **Readers already ignore unknown keys/values.** The forward-compatibility
+   promise assumes every current reader tolerates unknowns. This is *proven* for
+   the wire ABI (fail-closed fold) but only *asserted* for the JSONL consumers —
+   until the promotion fixture exists, a consumer that hard-fails on an unknown
+   key would silently violate the schema arm.
+3. **Two surfaces are enough.** This memo enumerates the wire ABI and the JSONL
+   ledgers. If a third cross-generation artifact class emerges (e.g. an on-disk
+   cache format, a persisted lease journal), the policy must be extended, not
+   assumed to cover it by analogy.
+
+## Handoff (continue from here without the epic)
+
+A future agent picking this up should: (a) write the `/1`-vs-`/2` schema
+compatibility fixture named under "promotion evidence" — that is the smallest
+next increment and the concrete promotion witness; (b) leave `internal/abi`'s
+additive proof untouched (it is the ABI arm and already green); (c) file the
+follow-on as a real `gen/second-next` issue under #1625, not a note. The
+compatibility promise here is planning data until that fixture makes the schema
+arm enforceable.
 
 ---
 
@@ -992,6 +1185,12 @@ outside the allow-list cannot be called, no matter what the model was told. Two 
 gates carry it: call-side (a denied call never reaches the tool runner) and result-side
 (poisoned or secret-bearing output is quarantined before it enters context).
 
+![The path of one tool call: the agent proposes, the fak kernel adjudicates against a default-deny floor, and four verdicts branch out — ALLOW runs, DENY never runs, TRANSFORM is rewritten then runs, REQUIRE_WITNESS is held — with the result checked again before re-entering context](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/diagrams/syscall-flow.svg)
+
+<sub>The model proposes; the kernel disposes. The call-side gate stops a denied call before
+it runs; the result-side gate quarantines a distrusted output before it becomes the model's
+next instructions. Full walkthrough: [the tool call is a syscall](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/tool-call-is-a-syscall.md).</sub>
+
 The floor is a
 deployable JSON manifest you copy, trim, and watch bite, no model in the loop:
 
@@ -1009,6 +1208,10 @@ dangerous action it denies and carries a witness command. Point your agent at on
 reason code you can assert on (`POLICY_BLOCK`, `SECRET_EXFIL`, …). Read
 [POLICY.md](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) and [docs/integrations/agent-memory.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/agent-memory.md),
 or watch the boundary work: [the agent-kernel explainer, a 44-second silent MP4](https://github.com/anthony-chaudhary/fak/blob/main/visuals/agent-kernel-video.mp4).
+
+![Two columns with the same four responsibilities labeled identically on both sides — reverse proxy / gateway, policy / capability floor, result quarantine, audit journal. Left, the usual governed-serving stack runs them as four separate processes with four configs, four ports, and network hops between them; right, one static fak binary holds the same four as in-process stages — one process, one config. A blue arrow reads "four processes → one": you add flags, not components](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/diagrams/single-binary.svg)
+
+<sub>Same four responsibilities on both sides; the collapse from four cooperating services to one process is the only difference. The floor is a flag you add to a binary you already run, not a stack you assemble and operate. The honest boundary: [what fak is not](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/what-fak-is-not.md).</sub>
 
 ## Install
 
@@ -17621,10 +17824,16 @@ claude` puts it there in one command). Every tool call walks this path:
 At exit you get the ledger, one line:
 `fak guard: 131 kernel decisions; 121 allowed / 5 denied / 2 repaired / 0 quarantined / 3 deferred`.
 
-To see the flow drawn end to end, watch the
-[44-second agent-kernel explainer](https://github.com/anthony-chaudhary/fak/blob/main/visuals/agent-kernel-video.mp4) — a dedicated
-one-frame diagram of this page's path is planned under the same epic and will be
-linked here when it lands.
+![Left-to-right flow: the agent emits a tool call; the fak kernel adjudicates it against a default-deny capability floor; four verdicts branch out — ALLOW (the call runs), DENY (it never reaches the tool), TRANSFORM (rewritten to a safe form, then runs), REQUIRE_WITNESS (held) — and any result that runs is checked again before re-entering context](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/diagrams/syscall-flow.svg)
+
+*The whole path on one frame. The model only **proposes**; the kernel **disposes** —
+a call the floor denies never reaches the tool runner (call-side gate), and a result
+the floor distrusts is **quarantined** before it can become the model's next
+instructions (result-side gate). The four verdicts on the right are exactly the four
+numbers in the ledger line above: allowed / denied / repaired / deferred.*
+
+To see the flow in motion, watch the
+[44-second agent-kernel explainer](https://github.com/anthony-chaudhary/fak/blob/main/visuals/agent-kernel-video.mp4).
 
 ## Why the placement is the whole point
 
@@ -18201,6 +18410,14 @@ The defensible, shipped-and-tested claim is about **bit-exactness**:
 > and the eviction's reposition is bit-identical to recompute at `max|Δ| = 0`
 > (`TestKVQuarantineEqualsNeverSaw`).
 
+**Run it yourself.** [`examples/addressable-evict/`](https://github.com/anthony-chaudhary/fak/blob/main/examples/addressable-evict/README.md)
+is the standalone, offline demo of exactly this claim: it admits a poisoned tool result
+through the real quarantine gate, evicts the span write-time, and prints
+`max|Δ| evict-vs-never = 0.000e+00` with a non-vacuous `poison-vs-never = 3.257e-01`
+control — no key, model download, GPU, or network (`./examples/addressable-evict/run.sh`).
+The token-for-token-vs-HuggingFace rung is the fixture-gated
+`TestKVQuarantineEqualsNeverSaw`, recorded there too.
+
 Why can it, when the others can't quite? Removing a middle span is only the easy
 half (drop the bytes). The hard half is the *survivors*: every token after the cut
 had its key rotated by RoPE at its **old** absolute position, and now sits at a new
@@ -18650,6 +18867,18 @@ the whole 100k prefix but pays a tenth for it — cheaper than the rewrite, and 
 cheap next turn because the prefix is still byte-identical. Keeping the discount beats
 shrinking the prompt.
 
+![Billed prompt tokens per turn over a 50-turn session: the naive full-price re-send line rises steeply while the fak prefix-preserving line stays shallow](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/diagrams/cost-curve.svg)
+
+*The shape of the worked example above, plotted across a 50-turn session. The two
+lines are the **modeled** per-turn bill from
+[`cache_curve.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/cache_curve.py) (cache-read at 0.1× base, full price
+1×); the box marks the **witnessed** anchors — the 96.6% machine-wide cache-read share
+and the ~4.1× vs a *tuned* warm-cache fleet result. The naive line is what happens
+when the prefix match breaks (a summarize, or a cold provider cache): it pays full
+price for the whole growing transcript every turn. `fak` keeps the shallow line by
+splicing on the original bytes so the prefix stays byte-identical — it guarantees the
+prefix that makes the discount possible, not the discount itself.*
+
 The witnessed version of this at fleet scale: on a 50-turn × 5-agent run
 (Qwen2.5-1.5B, Apple M3 Pro), reuse did **~60.3× less work than the naive re-send loop**,
 and **~4.1× less than a *tuned* warm-cache stack** — the honest, few-fold headline, not
@@ -18673,6 +18902,125 @@ rather than claiming a saving it cannot force.
 - [O(1) context-window economics](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/o1-context-window-economics.md) — the accounting model underneath the per-turn cost.
 
 *Last updated: 2026-07-03*
+
+---
+
+# The vLLM lifecycle cache-loss bridge
+
+> Source: `docs/explainers/vllm-lifecycle-cache-loss-bridge.md`
+
+# The vLLM lifecycle cache-loss bridge
+
+*Bridging fak session dormancy to an upstream vLLM worker's sleep/pause/wake
+controls, with explicit evidence of what happened to the KV cache. Issue
+[#1730](https://github.com/anthony-chaudhary/fak/issues/1730); parents #1178,
+#1193, #1203, #1204.*
+
+## The failure this prevents
+
+An external vLLM worker can go dormant in ways that silently throw the KV cache
+away. Per vLLM's own `docs/features/sleep_mode.md`:
+
+- **sleep level 1** offloads weights to CPU memory but *forgets the KV cache*;
+- **sleep level 2** forgets *both* weights and the KV cache;
+- a **prefix-cache reset** forgets the KV while the engine stays up;
+- a **pause** (scheduler stop) keeps the KV resident in place.
+
+fak's reuse layer tracks which prefixes are "warm" — resident KV it can route a
+resume onto for a cache discount. If the engine underneath sleeps or resets and
+fak keeps reporting a prefix warm, a resume routes as a **cache hit onto memory
+the engine no longer holds** — a false warm hit — and a fleet view can imply the
+worker is healthily serving while it is actually asleep. That is a correctness
+hole on the default serving path, not a cosmetic one.
+
+## The contract
+
+Every session-driven dormancy action lowers to one immutable **cache-loss
+witness** row that answers three questions honestly:
+
+1. **What happened to the KV?** A closed three-value vocabulary —
+   `preserved` / `forgotten` / `unknown`. `unknown` is a first-class answer,
+   never silently collapsed to `preserved`; when fak cannot prove the KV
+   survived it fails closed (treats it as potentially lost).
+2. **Must warm-prefix beliefs be demoted cold?** True on *any* KV loss and on
+   `unknown`. This is what stops a stale warm belief from surviving dormancy.
+3. **Can the engine actually serve?** `Serving` is false whenever the engine
+   cannot serve (paused, sleeping, error), so a metrics or `session ls` surface
+   never reads "healthy" for an asleep worker.
+
+| Action  | Phase      | KV          | Warm demoted | Serving |
+|---------|------------|-------------|--------------|---------|
+| `pause` | `paused`   | `preserved` | no           | no      |
+| `sleep` (level 1/2) | `sleeping` | `forgotten` | yes | no |
+| `sleep` (no level)  | `error`    | `unknown`   | yes | no |
+| `reset` | `serving`  | `forgotten` | yes          | yes     |
+| `wake`  | `serving`  | `unknown`   | yes          | yes     |
+
+`wake` is deliberately *not* a re-warm: the KV forgotten during sleep is not
+restored, so warm beliefs stay cold until a fresh cache signal proves residency.
+
+### The revalidation rule
+
+A resume may only claim a warm prefix hit against a possibly-slept worker after a
+**fresh `BlockStored`/cache signal** re-proves the KV is resident. The gate
+starts unproven, any KV-loss (or `unknown`) witness drives it back to unproven,
+and only a fresh cache signal re-warms it — the exact acceptance rule "resume
+refuses a warm hit after a vLLM sleep/reset unless a fresh BlockStored/cache
+signal revalidates it."
+
+## Where it lives
+
+The pure, wall-clock-free witness kernel is shipped in
+[`internal/cachemeta/sleep_witness.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/cachemeta/sleep_witness.go)
+(`WitnessDormancy`, the `EngineSleepLevel`/`EngineDormancyAction`/`KVDisposition`/
+`EngineLifecyclePhase` vocabularies, `SleepWitness`, and the `WarmHitGate`
+revalidation state machine), with the decision tests in
+`internal/cachemeta/sleep_witness_test.go`. The kernel owns *only* belief/witness
+logic: by design it never calls a vLLM control endpoint (that is the engine
+adapter's job — the same boundary `external_invalidation.go` keeps) and emits no
+metrics itself; it exposes the honest `Serving` bit a metrics / `session ls`
+layer reads.
+
+Keep this closed cache-loss vocabulary (`preserved` / `forgotten` / `unknown`)
+identical to the NIXL disaggregated-lease demotion terms
+([#1732](https://github.com/anthony-chaudhary/fak/issues/1732)) so the two warmth
+sources never drift.
+
+## State of the bridge (2026-07-03)
+
+**Shipped:** the witness kernel and its decision tests
+(`6c8ec8a4`, `internal/cachemeta`; `go test ./internal/cachemeta/` green).
+
+**Not yet wired** — the remaining acceptance is engine/CLI wiring, which is out
+of the `docs` lane and blocked for a guarded self-source worker
+(`internal/**` / `cmd/**`):
+
+- the `internal/engine` lifecycle adapter driving vLLM `/sleep`·`/wake_up`
+  *only* through a fak session lifecycle action, and folding each transition into
+  a `SleepWitness`;
+- the resume warm-hit path consulting `WarmHitGate` so a post-sleep resume
+  returns a miss until revalidated;
+- the `sleeping` / `waking` / `error` state surfaced in `fak session ls --fleet`
+  and metrics, distinct from `serving`;
+- the integration test against a *fake vLLM control endpoint* (credential-free,
+  no live GPU) proving sleep(level=1/2) records `kv_cache=forgotten`, demotes
+  warm prefixes, and that resume refuses a warm hit post-sleep until revalidated.
+
+**Generation classification:** `gen/next` (Generation G1 — Next Gen). This is
+near-term foundation whose vocabulary and belief kernel have landed but which
+still needs a gate + default-exposure proof (the `session ls --fleet` / metrics
+surface and the fake-endpoint integration test) before agents can rely on it.
+
+- *Promotion evidence:* the closed cache-loss vocabulary and the pure witness /
+  `WarmHitGate` kernel landed with six passing decision tests, retiring the "is
+  the cache-loss contract decided?" blocker.
+- *Demotion / retirement evidence:* none — the issue is neither obsolete nor
+  duplicated; the wiring is genuinely pending, so it stays open, not retired.
+- *Invalidating assumption:* the pending integration test assumes the fake
+  control endpoint mirrors vLLM's public `/sleep`·`/wake_up` + prefix-cache-reset
+  surface (`docs/usage/security.md`). If a different control-API shape is
+  intended, the adapter wiring and that test are built against the wrong seam —
+  operator input needed before the engine-lane leaf lands.
 
 ---
 
@@ -20248,16 +20596,20 @@ description: "How fak routes one request by aspect, from tool calls to reasoning
 
 # Model routing — first-class at every level (`fak route`)
 
-fak model routing is a way to route a single request at any aspect — the whole request, one tool call, a sub-query, a planner state, or a reasoning step — each to a different model, with first-class ensembles folded by a configurable reduction (first, vote, best_of, all_reduce, or concat), all expressed as one deterministic, verifiable policy manifest. Most LLM routers answer only "which single model serves this whole request?"; fak makes the routing decision first-class at every level instead. The routing decision spine and the ensemble reduce are shipped and witnessed by go test (internal/modelroute, fak route), along with an offline routing benchmark (fak routebench) that compares per-aspect and ensemble policies against a single-model baseline with no model in the loop. The served gateway path now executes route decisions on real registered engines via `--route-manifest` for single-model picks and ensembles; any "10x" remains a categorical capability framing and a target to be measured, never a measured result.
+fak model routing is a way to route a single request at any aspect — the whole request, one tool call, a sub-query, a planner state, or a reasoning step — each to a different model, with first-class ensembles folded by a configurable reduction (first, vote, best_of, all_reduce, or concat), all expressed as one deterministic, verifiable policy manifest. Most LLM routers answer only "which single model serves this whole request?"; fak makes the routing decision first-class at every level instead. The served gateway and standalone agent paths now execute route decisions on real registered engines via `--route-manifest` for single-model picks, and the served gateway also executes ensembles; any "10x" remains a categorical capability framing and a target to be measured, never a measured result.
 
 > **Status.** The routing **decision** spine and the ensemble **reduce** are
 > [SHIPPED] (`internal/modelroute`, `fak route`, witnessed by `go test`). The
 > **offline routing benchmark** (`fak routebench` — per-aspect + ensemble vs
 > single-model on cost/quality/latency, no model in the loop) is [SHIPPED]. The
 > **served gateway dispatch** path is [SHIPPED] for single-model picks and
-> ensembles through `--route-manifest`. Standalone `fak agent` route-manifest
-> entry points, scout-model live classification, and learned routing remain
-> follow-ons. See [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
+> ensembles through `--route-manifest`; standalone `fak agent --route-manifest`
+> is [SHIPPED] for fak-arm single-model picks. The remaining tracked follow-ons
+> are live account-resolved dispatch from model-account rosters
+> ([#2528](https://github.com/anthony-chaudhary/fak/issues/2528)), native
+> in-kernel scout binding ([#2207](https://github.com/anthony-chaudhary/fak/issues/2207)),
+> and learned routing ([#600](https://github.com/anthony-chaudhary/fak/issues/600)).
+> See [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
 
 ## The one-paragraph version
 
@@ -20528,6 +20880,9 @@ connectivity for each chosen member. The dedicated guides:
   dispatching *through* it) and what each means.
 - **[Routers & gateways](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/routers.md)** — OpenRouter, Portkey, LiteLLM
   Router, Unify, Martian: fak as a complement to request-level routers.
+- **[Model accounts](https://github.com/anthony-chaudhary/fak/blob/main/docs/model-accounts.md)** — the account-switcher roster that binds
+  abstract routed model ids to your provider accounts, plus the `fak api-host
+  --from-model-accounts` bridge for no-spend readiness/acceptance checks.
 
 **Residency is fail-closed across every backend.** The engine-residency PDP
 (`internal/engine`) treats any route it cannot prove is on-box — a provider wire, a
@@ -20618,18 +20973,26 @@ and re-asserts the documented numbers.
 
 ## Roadmap (the GitHub issue series)
 
-The decision spine, offline benchmark (`fak routebench`), and served gateway
-dispatch for picks/ensembles are shipped. The remaining work is broader product
-surface and learning:
+The decision spine, offline benchmark (`fak routebench`), served gateway dispatch
+for picks/ensembles, route observability, free-text `best_of`, and the
+`internal/polymodel` bridge are shipped. The current issue map is:
 
-- Per-tool-call routing inside the agent loop (`agent.execViaKernel`).
-- Scout-model live classification (a cheap model fills `Subject.Complexity`/labels).
-- Telemetry → learned routing (LIVE cost/latency/quality feedback feeding the
-  policy, RouteLLM-style but per-aspect — the offline benchmark measures a recorded
-  corpus; this is its live, self-improving counterpart).
-- Free-text ensemble reductions (a judge/verifier model for `best_of` beyond scalar scores).
-- Speculative/draft roles bridged to `internal/polymodel` (drafter/verifier members).
-- Industry-scorecard row positioning vs the surveyed routers.
+| Issue | State | Scope |
+|---|---|---|
+| [#595](https://github.com/anthony-chaudhary/fak/issues/595) | open epic | Parent epic for the per-aspect + ensemble routing program. |
+| [#596](https://github.com/anthony-chaudhary/fak/issues/596) | closed | Single-model route writes `ToolCall.Engine` before adjudication. |
+| [#597](https://github.com/anthony-chaudhary/fak/issues/597) | closed | Gateway ensemble execution: N adjudicated submits plus `Combine`. |
+| [#598](https://github.com/anthony-chaudhary/fak/issues/598) | closed | In-process agent-loop route hook (`WithRouteManifest`). |
+| [#599](https://github.com/anthony-chaudhary/fak/issues/599) | closed | Scout classifier seam for filling route subject signals. |
+| [#600](https://github.com/anthony-chaudhary/fak/issues/600) | open | Telemetry to learned routing: live cost/latency/quality feedback feeding policy. |
+| [#601](https://github.com/anthony-chaudhary/fak/issues/601) | closed | `fak serve --route-manifest` plus hot reload. |
+| [#602](https://github.com/anthony-chaudhary/fak/issues/602) | closed | Free-text ensemble reductions with a judge/verifier model. |
+| [#603](https://github.com/anthony-chaudhary/fak/issues/603) | closed | Routing observability in `/metrics` and the decision journal. |
+| [#604](https://github.com/anthony-chaudhary/fak/issues/604) | closed | Drafter/verifier roles bridged to `internal/polymodel`. |
+| [#605](https://github.com/anthony-chaudhary/fak/issues/605) | closed | Industry-scorecard positioning vs surveyed routers. |
+| [#2207](https://github.com/anthony-chaudhary/fak/issues/2207) | open | Bind the scout classifier to the in-kernel engine for a native local micro-scout. |
+| [#2528](https://github.com/anthony-chaudhary/fak/issues/2528) | open | Dispatch account-resolved targets from a model-account roster through live gateway engines. |
+| [#2529](https://github.com/anthony-chaudhary/fak/issues/2529) | open | Standalone `fak agent --route-manifest` is wired in this tree; close the tracker after the change ships. |
 
 ---
 
@@ -20751,6 +21114,23 @@ accounts are `ready` only when their named env var is present and non-empty, oth
 `needs_credential` with the env var to set. This is intentionally an environment observation, not
 a live API probe or billing claim, and it still prints only env-var names.
 
+## API-host probe bridge
+
+The same model-account roster can feed the API-host no-spend probes:
+
+```bash
+fak api-host readiness  --from-model-accounts examples/model-accounts.example.json
+fak api-host acceptance --from-model-accounts examples/model-accounts.example.json
+```
+
+`readiness` converts only OpenAI-compatible or local accounts into `/models` probe targets
+(`openai`, `openai-responses`, `xai`, and `local`). Native provider accounts are not guessed into
+an OpenAI-shaped probe. `acceptance` keeps every account with a probeable base URL visible:
+OpenAI-compatible/local accounts can become `READY_FOR_LIVE_BRIDGE_RUN`, while native
+Anthropic/Gemini accounts are reported as `WIRE_SUPPORTED_UNPROBED`. Model hints come from the
+roster bindings, so the API-host report stays tied to the same abstract model ids the route policy
+uses.
+
 ## Residency is declared, not guessed
 
 fak's residency floor denies a tenant-scoped or sensitivity-tagged payload bound for a
@@ -20785,11 +21165,12 @@ residency-honest `EngineRoute`. The `fak route --accounts` path prints the bindi
 This is pure and deterministic, witnessed by `go test ./internal/modelroute` and the
 cross-package residency test.
 
-**Deferred:** live multi-account dispatch. v1 *resolves and prints* a binding; it does
-not yet send a request over the wire to your chosen account. Building the planners from
-the Targets and running an ensemble's members is the additive dispatch wiring, the same
-shipped-vs-deferred split the routing spine uses for the ensemble fold versus its
-execution. (Per-call routing into dispatch — writing the routed id to
+**Deferred:** live multi-account dispatch
+([#2528](https://github.com/anthony-chaudhary/fak/issues/2528)). v1 *resolves and prints*
+a binding; it does not yet send a request over the wire to your chosen account. Building
+the planners from the Targets and running an ensemble's members is the additive dispatch
+wiring, the same shipped-vs-deferred split the routing spine uses for the ensemble fold
+versus its execution. (Per-call routing into dispatch — writing the routed id to
 `abi.ToolCall.Engine` before submit — has landed for the single-model case; the
 account-resolved route is the next refinement of what that field carries.)
 
@@ -30318,11 +30699,21 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 - [Adoption-signals dashboard spec](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/signals.md) — the honest signals worth watching to tell whether fak/DOS is actually being adopted (stars, forks, watchers, mentions, directory listings, integration recipes, distinct harnesses, docs reachability): where each is collected, and — the load-bearing column — what each does NOT prove. Every signal labeled `OBSERVED` (a number a third party controls) vs `WITNESSED` (an artifact fak authored) per the [conflation discipline](https://github.com/anthony-chaudhary/fak/blob/main/docs/CONFLATION-SCORECARD.md); no vanity total ships without its disclaimer, no number is invented. Dimension K of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 - [Where to submit fak — directory & awesome-list checklist](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/directories.md) — the curated, honest map of the awesome-lists, tool directories, and registries where fak actually belongs (agent-infra, MCP, harness engineering, LLM security, Go, self-hosted): each venue with why-it-fits, a submission note, and a current status (wired / live / not yet / blocked / declined). Venues that do NOT fit are in the Declined section with the reason; the copy-paste payloads live in [`docs/launch/directory-submissions.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/launch/directory-submissions.md). Dimension J of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 - [Social storyboard for the five concepts](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/social-storyboard.md) — a drop-in card-per-concept storyboard for a short social thread or slide carousel: one card each for tool-call-as-syscall, verify-don't-trust, the addressable KV cache, the default-deny gate + quarantine, and the one static binary — each with a one-line hook, the diagram that carries it, and a link. The reusable spine for any social push; witnessed numbers only (tuned ~4.1×, ~362 ns guard tax, `max|Δ| = 0`). Dimension J of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
+- [fak concept card (printable one-pager)](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/concept-card.md) — the single page you hand someone at a meetup: the five concepts (one sentence each + its carrying diagram), the install one-liner, and the 60-second proof command — designed to render to one printed/PDF page, honesty-fenced (not a token engine, evadable-by-design detector, 0/29 novel, tuned ~4.1× never the naive number). The printable counterpart to the [social storyboard](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/social-storyboard.md) and [pitch ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/pitch-ladder.md). Dimension B of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 - [How to find and name fak (search + disambiguation)](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/naming.md) — a reader-facing note on how to search for and refer to fak: the bare word is buried under homophone + F.A.K.-acronym noise, so the concept travels under `agent kernel`, `agent tool firewall`, and "treat the tool call like a syscall". The disambiguated terms to use (kept consistent with [`llms.txt`](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt)), the category shelves, and what fak is NOT (network firewall, guardrails classifier, token engine, request-level router). Dimension I of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 - [Objections & one-line answers (advocate card)](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/objections.md) — a pocket card of the 10 objections fak actually draws (isn't this a classifier, doesn't it slow the agent, why not just use vLLM, is the security real if the detector is evadable, another gateway, is it novel, how is it different from a firewall, do I rewrite my agent, are the numbers too good, is the KV eviction lossless), each with a crisp honest one-to-two-line answer and a deeper link. Concedes where an objection lands (evadable detector, 0/29 novelty, throughput); witnessed numbers only. Dimension I of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 - [The pitch ladder: 1 sentence / 1 paragraph / 1 page](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/pitch-ladder.md) — the canonical fak pitch at three zoom levels: one sentence (the tweet, ≤30 words), one paragraph (the HN comment), one page (the blog intro) — each self-consistent and quotable, anchored on "treat the tool call like a syscall: the model proposes, the kernel disposes". The source for the README lead; a consistency table keeps the rungs from drifting; witnessed numbers only (the tuned ~4.1×, ~362 ns guard tax, `max|Δ| = 0`) and the 0/29 novelty fence conceded up front. Dimension I of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 - [Launch-post draft kit (honest, ready to adapt)](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/launch-kit.md) — a single, self-contained Show HN / launch-post draft: title options, the opening hook, the prosecution-first first comment, a longer launch-post body, the honest what-it-IS / what-it-is-NOT framing, a copy-paste TL;DR, and a pre-post checklist that blocks an over-claim. Draft only — posting is human-owned; every witnessed number traces to [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) / [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) and leads with the tuned ~4.1×, never the naive multiplier; aspirational numbers (~60×, "agent city", power/$) are labeled design-target / simulated. The one-page unit; the deeper per-channel campaign is [`docs/launch/`](https://github.com/anthony-chaudhary/fak/blob/main/docs/launch/README.md). Dimension J of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 - [Bench-story: the 4x that's real](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/stories/the-real-4x.md) — the tuned warm-cache result told honestly: fak's fused kernel does ~4.1× less work than a *tuned* single-tenant stack (B/C, the honest headline) on a 50-turn × 5-agent session (Qwen2.5-1.5B, Q8_0, M3 Pro), not the flattering 60.3× naive number (A/C). What the 4.1x is (prefix reuse + decode batching over a warm KV cache), what it is NOT (a throughput win over llama.cpp; a hosted-API win), and the conditions it holds under. Witnessed against [SESSION-VALUE-STACK-RESULTS.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/SESSION-VALUE-STACK-RESULTS.md). Dimension H of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
+- [Capability matrix across the category](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/compare/matrix.md) — the one-glance, sourced table scoring fak against the three neighbouring product categories people already run (guardrails/output-validation libraries, LLM API gateways & routers, vLLM/SGLang-class inference servers) on the six capabilities fak claims: default-deny tool-call gate, prompt-injection result quarantine, addressable bit-exact KV eviction (`max|Δ| = 0`), commit-level verify, closed-vocabulary structured refusal, and single-binary drop-in. Every cell is yes/partial/no with a note and a source (or an `unverified` tag), the categories are framed as complements not rivals, and fak's own gaps are named (the KV evictor is a no-op on a proxy seat; 0/29 novel). Links to the long-form [comparison](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak-vs-alternatives-comparison.md) and [compatibility matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/compatibility-matrix.md) for depth. Dimension D of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
+- [fak vs a guardrails library (honest side-by-side)](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/compare/vs-guardrails.md) — the focused one-on-one against the guardrails class (Guardrails AI, NeMo Guardrails, Llama Guard): each tool's real strength stated from its own primary docs, the fail-open recognizer vs fail-closed capability-gate distinction as the spine, a side-by-side table, and the honest "these are complements you run together" framing (a guardrails lib validates content; fak default-denies the tool-call boundary and can front one via one base-URL change). fak's own gaps named (poor content classifier, evadable-by-design bonus detector, 0/29 novel). Links to the wider [capability matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/compare/matrix.md). Dimension D of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
+- [fak vs an API gateway / LLM router](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/compare/vs-routers.md) — the focused router/gateway side-by-side for the "don't I already have this?" question: a router (OpenRouter, Portkey, LiteLLM, Kong AI Gateway) picks *which model* serves a request and how to reach it reliably; fak governs *which effects* each tool call may have via a default-deny capability floor one layer down. Shows the compose topology (fak in front of the router), states the honestly-mixed packaging (Kong=binary, LiteLLM=Python proxy, OpenRouter=hosted → why the category is *Partial* on single-binary), and names fak's gaps (does not out-connect a gateway; KV evictor is a no-op on a hosted seat; 0/29 novel). Summarizes and links [the routers integration guide](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/routers.md) and the [category matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/compare/matrix.md); witnessed numbers only. Dimension D of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
+- [Is fak just a firewall?](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/compare/vs-firewall.md) — the boundary FAQ expanded into a standalone page: it concedes what is genuinely firewall-shaped about the default-deny tool-call gate (a single chokepoint, a reviewable allow-list, an audit ledger, a drop-in appliance) before drawing the real line — a firewall filters traffic by rules on packets or HTTP it inspects and often fails open, while fak adjudicates effects by capability on the same in-process call path the model does not control (fails closed, ~362 ns/decision), understands tool-call semantics a packet filter cannot, quarantines poisoned results, and can refuse a false "done" from git evidence. Same instinct, different layer; keep your network firewall too. Honesty-fenced (0/29 novel, evadable-by-design detector, no market claim). Links to the [capability matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/compare/matrix.md) and [tool call is a syscall](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/tool-call-is-a-syscall.md). Dimension D of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
+- [Good first popularization tasks (contributor on-ramp)](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/good-first-tasks.md) — a curated board of small, self-contained doc/example contributions a newcomer can finish in an afternoon: 12 tasks, each naming the exact existing file to edit and a starter/moderate difficulty (add an objection answer, a glossary term, a comparison row, a translation, an integration recipe), plus a pointer to the open `popularization` backlog for a tracked ticket. Honesty-fenced (evadable-by-design detector, 0/29 novel, tuned ~4.1× never the naive number). Dimension E of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
+- [Who is fak for? A persona gallery](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/personas.md) — the kinds of person (and one machine) who land on fak, each with who they are, a one-sentence quote-ready pitch, and the first door to walk through: the solo dev, app developer, and backend integrator (consume); the SRE and security engineer (operate); the ML researcher, benchmark engineer, and decision-maker (evaluate); the contributor and the AI coding agent (build). The reader-facing cut of the [pitch ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/pitch-ladder.md), on the same 10-persona roster the [persona-readiness scorecard](https://github.com/anthony-chaudhary/fak/blob/main/docs/persona-scorecard/README.md) grades; pitches FOR personas not fabricated quotes FROM them, witnessed numbers only. Dimension E of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
+- [fak install paths: which one command do I run?](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/install-paths.md) — a four-row decision table that routes each reader to their one correct install command: prebuilt binary ("just try it"), go install ("I have Go"), from source ("I want to hack on it"), and the one-paste MCP .mcp.json ("I drive an MCP client"). Each row has one verified command (all consistent with GETTING-STARTED and examples/mcp/.mcp.json) and its honest caveat. Dimension F of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
+- [Adopt fak in an existing repo (10-minute checklist)](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/adopt-in-your-repo.md) — the ordered checklist for taking an agent project you already run and putting fak in front in ~10 minutes: get the binary, repoint one base URL (fak guard -- claude, or fak serve --base-url), load a starter capability floor, verify a verdict appears (fak preflight / the guard exit summary), then wire the DOS trust gate into your runtime (dos init --hooks auto .) so a false "done" is refused from git evidence (dos commit-audit). Honest about what does not change (model, keys, IDE, subscription stay put) and the current limits (KV evictor is a no-op on a subscription seat; Anthropic-wire streaming is buffered). Dimension G of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
+- [Bench-story: roughly 100% evadable, on purpose](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/stories/evadable-on-purpose.md) — the detector-honesty story: fak's injection detector is roughly 100% evadable by design and the repo says so in CLAIMS.md and SECURITY.md; the security floor is the default-deny capability lock plus structural quarantine, neither of which has to recognize an attack to stop it. Separates the evadable detector (a bonus) from the non-evadable floor + containment, and names the false-positive ceiling (2 of 59 pages sealed on benign images) and the argument-injection residual. Dimension H of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 
 ## Operating the agent fleet
 
@@ -30374,6 +30765,7 @@ front page.
 
 ### Latest working notes
 
+- [Harness tool dialects: guard floor compatibility postmortem](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/HARNESS-TOOL-DIALECT-GUARD-FLOOR-2026-07-03.md) -- auto-indexed dated note.
 - [Guard value under a kernel we control — the GPU-server GLM-5.2 vs API ablation (2026-07-03)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/GUARD-KERNEL-CONTROL-ABLATION-2026-07-03.md) — the benchmark design for proving real `fak guard` value when the wrapped agent's upstream is fak's own inkernel serve instead of a provider API: the K1 (fak kernel) / K2 (vLLM-SGLang, same weights) / A1 (same-model API) matrix crossed with guard-on/off, the five kernel-only value axes (WITNESSED kv-prefix economics vs OBSERVED provider `cache_read`, clean guard-hop pricing, constrained-decode enforcement headroom, credential-surface elimination, deterministic replay adjudication), and the honest runnable-today vs `not yet` gates. Dispatch rows live in the nightrun overlay; tracker [#2509](https://github.com/anthony-chaudhary/fak/issues/2509) (child of epic #1010).
 - [Trajectory control — score anything, steer by curve (2026-07-03)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/TRAJECTORY-CONTROL-SCORE-ANYTHING-2026-07-03.md) — the trajctl concept family: declared objectives with witness-rung progress scores (W3 evidence > W2 transcript heuristic > W1 judge > W0 self-report), curves not points, a regime-gated steering ladder (annotate → re-anchor nudge → warn → suspend → escalate), and detours as budgeted child objectives. Positioned against `fak traj` (retrospective corpus gardening), the scorecard `*_debt` family, and `loopdrive`'s binary GOAL.md witness.
 - [Version-everything backlog: epic + 44 contract-ready children (2026-07-03)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/VERSION-EVERYTHING-BACKLOG-2026-07-03.md) -- auto-indexed dated note.
