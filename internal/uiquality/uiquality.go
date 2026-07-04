@@ -545,7 +545,10 @@ func kpiLegendCoverage(src []source) KPI {
 // usage text, so --help is a complete map of the panes.
 // ---------------------------------------------------------------------------
 
-var reConsoleCase = regexp.MustCompile(`case\s+"([a-z]+)":`)
+var (
+	reConsoleCase    = regexp.MustCompile(`case\s+"([a-z]+)":`)
+	reConsolePaneReg = regexp.MustCompile(`tuiplugin\.Pane\s*\{[^}]*ID:\s*"([a-z][a-z0-9-]*)"`)
+)
 
 func kpiHelpCompleteness(src []source) KPI {
 	k := newKPI("help_completeness")
@@ -578,6 +581,16 @@ func kpiHelpCompleteness(src []source) KPI {
 			continue
 		}
 		subs[name] = true
+	}
+	if len(subs) == 0 {
+		for _, s := range src {
+			if !strings.Contains(s.Body, "tuiplugin.Pane") && !strings.Contains(s.Body, "tuiplugin.Register") {
+				continue
+			}
+			for _, m := range reConsolePaneReg.FindAllStringSubmatch(s.Body, -1) {
+				subs[m[1]] = true
+			}
+		}
 	}
 	missing := []string{}
 	for name := range subs {

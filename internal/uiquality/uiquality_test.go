@@ -198,6 +198,36 @@ func TestHelpCompletenessReadsUsageFromAnyFile(t *testing.T) {
 	}
 }
 
+func TestHelpCompletenessReadsTUIPaneRegistry(t *testing.T) {
+	f := cleanFixtures()
+	f["cmd/fak/tui.go"] = `package main
+func runTUI() {
+	pane, ok := tuiplugin.Lookup(argv[0])
+	if !ok { tuiUsage(stderr) }
+	_ = pane
+}
+func runTUIIssues() {}
+`
+	f["cmd/fak/tui_registry.go"] = `package main
+func registerBuiltinTUIPanes() {
+	tuiplugin.Register(tuiplugin.Pane{ID: "loops"})
+	tuiplugin.Register(tuiplugin.Pane{ID: "guard"})
+	tuiplugin.Register(tuiplugin.Pane{ID: "panes", Controls: []tuiplugin.Control{{ID: "json"}}})
+}
+`
+	f["cmd/fak/tui_loop_render.go"] = strings.Replace(
+		f["cmd/fak/tui_loop_render.go"],
+		"  fak console guard --guard-json FILE\n",
+		"  fak console guard --guard-json FILE\n  fak console panes [--json]\n",
+		1)
+	root := writeTree(t, f)
+	p := Build(Options{Root: root})
+	help := kpiByKey(p, "help_completeness")
+	if len(help.Defects) != 0 {
+		t.Fatalf("registry help_completeness false-flagged documented panes: %v", help.Defects)
+	}
+}
+
 // TestHelpCompletenessCatchesUndocumented flags a real gap.
 func TestHelpCompletenessCatchesUndocumented(t *testing.T) {
 	f := cleanFixtures()
