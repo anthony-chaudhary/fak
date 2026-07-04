@@ -61,6 +61,12 @@ key explicitly: `--api-key-env ANTHROPIC_API_KEY`.)
    while every tool call Claude proposes crosses the capability floor first.
 5. Tears the gateway down when Claude exits and prints what the kernel decided:
 
+A launcher is not first-class merely because its provider wire connects. Its exact
+host-tool dialect must be covered too: Claude Code's PascalCase tools, Codex's
+snake_case tools, OpenCode's lowercase tools, danger-bearing argument names, and each
+harness's stop/continue behavior after a denial. Keep new `fak guard` launcher claims tied
+to the [harness integration acceptance checklist](harness-acceptance-checklist.md).
+
 ```
 fak guard: 131 kernel decision(s) — 121 allowed, 5 denied, 2 repaired, 0 quarantined, 3 deferred
   blocked: POLICY_BLOCK     x4
@@ -850,6 +856,7 @@ tail -f <tmp>/fak-serve.log
 ## Cross-references
 
 - `fak/DOGFOOD-CLAUDE.md` — Full dogfood launcher documentation
+- `docs/integrations/harness-acceptance-checklist.md` — Acceptance checklist for first-class launcher tool dialects and deny behavior
 - `fak/GETTING-STARTED.md` — fak install and run guide
 - `docs/qwen36-claude-dogfood-playbook.md` — Qwen3.6 local model specifics
 - `fak/POLICY.md` — Policy manifest schema

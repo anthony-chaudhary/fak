@@ -36,6 +36,12 @@ of the model's context. Your agent, your model, your prompts — unchanged.
 
 *Every client repoints one base URL; the same gate adjudicates each tool call before it reaches the upstream engine. Each guide above is linked under "Which agent do you run?".*
 
+Wire compatibility is only the first acceptance check. A first-class fak launcher also
+has to document its host-tool dialect, danger-bearing argument fields, and stop/continue
+behavior after a denied tool; use the
+[harness integration acceptance checklist](harness-acceptance-checklist.md) before
+advertising a new launcher here.
+
 The reason this works for so many agents is one fact: `fak serve` speaks the wires your
 agent already speaks.
 
@@ -257,6 +263,7 @@ governance surface, not tokens per second. Full scope, claim by claim:
 ## Cross-references
 
 - [What fak supports](../supported/README.md) — the dedicated capability pages: [models](../supported/models.md), [clouds & hosted providers](../supported/clouds.md), [APIs, wires & MCP](../supported/apis-and-protocols.md), [agent harnesses & frameworks](../supported/agent-harnesses.md), and [serving engines](../supported/engines.md).
+- [Harness integration acceptance checklist](harness-acceptance-checklist.md) — the model-wire, host-tool dialect, argument-field, deny-behavior, and replay fixture contract for first-class launchers.
 - [Agent memory (mem0 / OpenMemory / MCP)](agent-memory.md) — put the gate in front of a memory store: oversized and secret-shaped writes refused, a prompt-injected `delete_all` refused, every recalled memory trust-gated before it re-enters context.
 - [Harden any MCP server](harden-any-mcp.md) — drop fak in front of any MCP server: a context-MMU quarantines poisoned tool results out of context and a capability allow-list blocks tools you never wired.
 - [fak + LiteLLM](litellm.md) — the three topologies (fak in front of a LiteLLM proxy, fak as a governed node behind it, and fak's per-aspect routing dispatching through it), and why supporting LiteLLM is one wire, not a hundred adapters.

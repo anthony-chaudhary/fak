@@ -51,6 +51,15 @@ Use the right path for the job:
   upstream model sees it.
 - Offline proof: run the preflight commands before any key, model, or GPU is involved.
 
+Do not treat "Codex can reach `/v1/responses`" as the whole integration contract. The
+guarded model-wire path also has to match Codex's host-tool dialect: exact tool names
+such as `update_plan`, namespace-qualified spellings such as `functions.update_plan`,
+dangerous argument fields, and Codex's behavior after a denied tool. The acceptance gate
+for that surface is the
+[harness integration acceptance checklist](harness-acceptance-checklist.md); the failure
+mode it prevents is recorded in the
+[2026-07-03 tool-dialect postmortem](../notes/HARNESS-TOOL-DIALECT-GUARD-FLOOR-2026-07-03.md).
+
 ## 60-second proof before wiring Codex
 
 From the repository root:
@@ -618,6 +627,7 @@ This page was checked against the current OpenAI Codex manual on 2026-06-25:
 fak-side references:
 
 - [Integration index](README.md)
+- [Harness integration acceptance checklist](harness-acceptance-checklist.md)
 - [MCP example](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md)
 - [Policy manifest guide](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md)
 - [Supported APIs and protocols](../supported/apis-and-protocols.md)
