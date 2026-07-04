@@ -36,7 +36,6 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | 95.0 | A | 0 | 86 | 100 | 100 | 100 | 90 | `examples/bench-latency` |
 | 95.0 | A | 0 | 86 | 100 | 100 | 100 | 90 | `examples/gpu-smoke` |
 | 95.0 | A | 0 | 86 | 100 | 100 | 100 | 90 | `examples/turntax` |
-| 95.3 | A | 0 | 100 | 86 | 100 | 100 | 90 | `examples/verified-memory-recall` |
 | 96.2 | A | 0 | 100 | 100 | 100 | 88 | 90 | `examples/autogen-groupchat` |
 | 96.2 | A | 0 | 100 | 100 | 100 | 88 | 90 | `examples/crewai-crew` |
 | 96.2 | A | 0 | 100 | 100 | 100 | 88 | 90 | `examples/fanbench` |
@@ -59,6 +58,7 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/self-modify-floor` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/session-reload` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/vdso-cache-hit` |
+| 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/verified-memory-recall` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/adjudication-demo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/agentdojo-redteam` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/auth-hardening` |
@@ -145,10 +145,6 @@ No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
 - runnable: a runnable script exists but the README shows no paste-able command to launch it
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
-### `examples/verified-memory-recall`
-- reproducible: no exit-code / determinism statement — the demo doesn't say how to tell pass from fail (a CI gate needs this)
-- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
-
 ### `examples/autogen-groupchat`
 - self_contained: no stated prerequisites — a cold runner can't tell what to install first
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
@@ -218,5 +214,8 @@ No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
 ### `examples/vdso-cache-hit`
+- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
+
+### `examples/verified-memory-recall`
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
