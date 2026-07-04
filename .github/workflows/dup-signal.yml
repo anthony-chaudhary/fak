@@ -1,0 +1,114 @@
+name: dup-signal
+
+# Wire `fak dup guard` as a durable, ATTRIBUTABLE anti-clone advisory — the
+# "more often + durable" half of the dedup-earlier prescription
+# (docs/notes/DEDUP-EARLIER-AND-MORE-OFTEN-2026-07-03.md, its sequenced step 4).
+#
+# The problem it closes: the code-slop scorecard grades DUPLICATION as a
+# whole-tree number a cycle after code lands. On a many-session shared trunk that
+# number is a moving target — it can't attribute a fresh clone to the commit that
+# introduced it, so it can never gate a push, and `make ci` deliberately does NOT
+# wire the bare slop run for exactly that reason (it would red-gate on peer drift).
+# `fak dup query`/`fak dup guard` (internal/clonescan) invert the SAME
+# normalized-token clone engine into a forward, per-commit question: "does an
+# added Go block already exist as a tracked site?" That IS attributable — it names
+# the commit's own added lines — so it can run at the authoring boundary. It has
+# existed as a verb since the spine landed, but nothing INVOKED it, so the
+# prevention stayed opt-in. This makes it fire on every push to main.
+#
+#   * push to main  -> `fak dup guard` over THIS push's added Go lines. It posts a
+#     step-summary card only; a clean push shows "clear". ADVISORY by construction:
+#     the guard always exits 0 and this job never fails, so a false positive on an
+#     idiom can never wedge the trunk (the design note's non-negotiable — never a
+#     hard block).
+#   * workflow_dispatch -> a manual off-cadence run scanning the last 20 commits.
+#
+# Read-only (contents: read), no secret, no external post: the signal is the
+# Actions step summary + a durable artifact, so the run is fully reversible and
+# safe on the shared tree. The forward authoring-time twin an author runs BEFORE
+# writing a helper is `fak dup query --file X` / `--stdin`.
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dup-signal-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  dup-signal:
+    name: added Go clones a tracked site -> advisory
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOTOOLCHAIN: auto
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The guard diffs a commit RANGE (before..after); a shallow checkout
+          # would not contain `github.event.before`, collapsing the range.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false # zero external deps -> no go.sum to key a cache on
+
+      # The clone engine FIRST: an advisory below is only meaningful if the pure
+      # library that produced it is itself proven correct (mirrors score-signal
+      # running its tool self-test before it acts).
+      - name: clonescan self-test
+        run: go test ./internal/clonescan/...
+
+      - name: build fak
+        run: go build -o fak ./cmd/fak
+
+      # Run the guard over the added Go lines of the pushed range. On a normal push
+      # that is `before..after`; a first push / force-push (a zero or non-ancestor
+      # `before`) falls back to the last 20 commits, as does a manual dispatch. The
+      # guard itself fail-opens (prints "advisory — skipping" and exits 0) on any
+      # unresolvable range, so `set +e` is belt-and-braces, not load-bearing.
+      - name: dup guard over the push range (advisory)
+        run: |
+          set +e
+          BEFORE="${{ github.event.before }}"
+          ZERO="0000000000000000000000000000000000000000"
+          if [ "${{ github.event_name }}" = "push" ] && [ -n "$BEFORE" ] \
+             && [ "$BEFORE" != "$ZERO" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            RANGE="${BEFORE}..${{ github.sha }}"
+          else
+            RANGE="HEAD~20..HEAD"
+          fi
+          echo "range=$RANGE"
+          ./fak dup guard --range "$RANGE" | tee dup-guard.txt
+          ./fak dup guard --range "$RANGE" --json > dup-guard.json
+          set -e
+
+      - name: payload -> step summary
+        if: always()
+        run: |
+          {
+            echo "## dup-guard (advisory)"
+            echo "_Runs \`fak dup guard\` over this push's added Go lines — the SAME normalized-token clone engine as the code-slop scorecard, run as a forward per-commit question. Advisory only: it never fails the build. A warning means an added block token-matches an existing tracked site, so a shared helper may already exist — check with \`fak dup query --file <the added file>\` before extending it._"
+            echo '```'
+            cat dup-guard.txt 2>/dev/null || echo "(no output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload dup-guard artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dup-guard
+          path: |
+            dup-guard.txt
+            dup-guard.json
+          if-no-files-found: ignore
