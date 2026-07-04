@@ -699,6 +699,13 @@ The `fak-qwen36-claude` preset targets a large local model:
 fak-qwen36-claude --probe "Reply with exactly the word: pong"
 ```
 
+If that same Qwen3.6 server is already running on the documented dogfood port
+(`http://127.0.0.1:8131/v1`), the generic guard front door can also discover it:
+
+```bash
+fak guard --local --probe -- claude -p "Reply with exactly the word: pong"
+```
+
 This is equivalent to:
 
 ```bash

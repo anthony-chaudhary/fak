@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -20,6 +21,7 @@ func mkResults(live map[string]bool, models map[string][]string) []localProbeRes
 func TestGuardChooseLocalBackendPrecedence(t *testing.T) {
 	ollamaV1 := guardOpenAIV1Base("http://127.0.0.1:11434")
 	lmstudioV1 := guardOpenAIV1Base("http://127.0.0.1:1234")
+	qwen36V1 := guardOpenAIV1Base("http://127.0.0.1:8131")
 	llamaV1 := guardOpenAIV1Base("http://127.0.0.1:8080")
 
 	cases := []struct {
@@ -64,6 +66,24 @@ func TestGuardChooseLocalBackendPrecedence(t *testing.T) {
 			wantFound: true,
 		},
 		{
+			name:      "qwen36 dogfood port is discoverable",
+			live:      map[string]bool{"Qwen3.6 local": true},
+			models:    map[string][]string{"Qwen3.6 local": {"lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M"}},
+			wantBase:  qwen36V1,
+			wantModel: "lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M",
+			wantLabel: "Qwen3.6 local",
+			wantFound: true,
+		},
+		{
+			name:      "lm studio default port wins over qwen dogfood port",
+			live:      map[string]bool{"LM Studio": true, "Qwen3.6 local": true},
+			models:    map[string][]string{"LM Studio": {"local-default"}, "Qwen3.6 local": {"qwen3.6"}},
+			wantBase:  lmstudioV1,
+			wantModel: "local-default",
+			wantLabel: "LM Studio",
+			wantFound: true,
+		},
+		{
 			name:      "live but zero models -> chosen with empty model",
 			live:      map[string]bool{"Ollama": true},
 			models:    map[string][]string{"Ollama": nil},
@@ -81,6 +101,15 @@ func TestGuardChooseLocalBackendPrecedence(t *testing.T) {
 					base, model, label, found, tc.wantBase, tc.wantModel, tc.wantLabel, tc.wantFound)
 			}
 		})
+	}
+}
+
+func TestGuardLocalNothingDetectedMessageMentionsQwen36Port(t *testing.T) {
+	msg := guardLocalNothingDetectedMessage()
+	for _, want := range []string{"Ollama 127.0.0.1:11434", "LM Studio 127.0.0.1:1234", "Qwen3.6 dogfood 127.0.0.1:8131", "llama.cpp 127.0.0.1:8080"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("message missing %q:\n%s", want, msg)
+		}
 	}
 }
 

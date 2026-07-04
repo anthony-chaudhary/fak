@@ -39,9 +39,9 @@ type localBackend struct {
 }
 
 // guardLocalBackends is the ordered probe list. Precedence: Ollama (the most common local
-// runner) first, then LM Studio, then a bare llama.cpp server. honored env overrides are
-// applied in guardDetectLocalBackend (OLLAMA_HOST for Ollama) rather than baked here, so
-// this stays a pure data table.
+// runner) first, then LM Studio's default port, then fak's Qwen3.6 dogfood port, then a
+// bare llama.cpp server. Honored env overrides are applied in guardDetectLocalBackend
+// (OLLAMA_HOST for Ollama) rather than baked here, so this stays a pure data table.
 func guardLocalBackends() []localBackend {
 	return []localBackend{
 		{
@@ -53,6 +53,12 @@ func guardLocalBackends() []localBackend {
 		{
 			name:        "LM Studio",
 			base:        "http://127.0.0.1:1234",
+			modelsPath:  "/v1/models",
+			parseModels: parseOpenAIModels,
+		},
+		{
+			name:        "Qwen3.6 local",
+			base:        "http://127.0.0.1:8131",
 			modelsPath:  "/v1/models",
 			parseModels: parseOpenAIModels,
 		},
@@ -240,9 +246,9 @@ func guardLocalDetectedBanner(label, base, model string) string {
 func guardLocalNothingDetectedMessage() string {
 	return fmt.Sprintf(
 		"fak guard --local: no local model server detected on the conventional ports "+
-			"(Ollama %s, LM Studio %s, llama.cpp %s).\n"+
+			"(Ollama %s, LM Studio %s, Qwen3.6 dogfood %s, llama.cpp %s).\n"+
 			"  Start one (e.g. `ollama run %s`), or use the no-server in-kernel path: `fak guard --gguf %s -- <agent>`.",
-		"127.0.0.1:11434", "127.0.0.1:1234", "127.0.0.1:8080",
+		"127.0.0.1:11434", "127.0.0.1:1234", "127.0.0.1:8131", "127.0.0.1:8080",
 		"qwen2.5-coder:7b", "qwen2.5-coder:3b",
 	)
 }
