@@ -1,0 +1,88 @@
+{
+  "schema": "fak.kvbm.trace/v1",
+  "name": "issue2675-synthetic-zipf-bimodal-agent-prefix",
+  "source": "synthetic-zipf-bimodal seed=2675",
+  "budget_tokens": 100,
+  "events": [
+    {
+      "session": "synthetic-00",
+      "span_id": "hot-00",
+      "tokens": 50
+    },
+    {
+      "session": "synthetic-00",
+      "span_id": "hot-01",
+      "tokens": 50
+    },
+    {
+      "session": "synthetic-00",
+      "span_id": "hot-00",
+      "tokens": 50
+    },
+    {
+      "session": "synthetic-00",
+      "span_id": "cold-001",
+      "tokens": 50
+    },
+    {
+      "session": "synthetic-00",
+      "span_id": "cold-002",
+      "tokens": 50
+    },
+    {
+      "session": "synthetic-01",
+      "span_id": "hot-00",
+      "tokens": 50
+    },
+    {
+      "session": "synthetic-01",
+      "span_id": "hot-02",
+      "tokens": 50
+    },
+    {
+      "session": "synthetic-01",
+      "span_id": "hot-00",
+      "tokens": 50
+    },
+    {
+      "session": "synthetic-01",
+      "span_id": "cold-003",
+      "tokens": 50
+    },
+    {
+      "session": "synthetic-01",
+      "span_id": "cold-004",
+      "tokens": 50
+    },
+    {
+      "session": "synthetic-02",
+      "span_id": "hot-00",
+      "tokens": 50
+    },
+    {
+      "session": "synthetic-02",
+      "span_id": "hot-01",
+      "tokens": 50
+    },
+    {
+      "session": "synthetic-02",
+      "span_id": "hot-00",
+      "tokens": 50
+    },
+    {
+      "session": "synthetic-02",
+      "span_id": "cold-005",
+      "tokens": 50
+    },
+    {
+      "session": "synthetic-02",
+      "span_id": "cold-006",
+      "tokens": 50
+    },
+    {
+      "session": "synthetic-03",
+      "span_id": "hot-00",
+      "tokens": 50
+    }
+  ]
+}
