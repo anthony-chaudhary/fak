@@ -57,8 +57,7 @@ func (m *Mock) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, erro
 	in := refBytes(ctx, c.Args)
 	body := fmt.Sprintf(`{"tool":%q,"echo":%q,"ok":true}`, c.Tool, truncate(in, 256))
 	ref := putBytes(ctx, []byte(body))
-	u := Usage{InputTokens: 50 + len(in)/4, OutputTokens: len(body) / 4}
-	u.TotalTokens = u.InputTokens + u.OutputTokens
+	u := estimateOfflineUsage(len(in), len(body))
 	return &abi.Result{
 		Call:    c,
 		Payload: ref,

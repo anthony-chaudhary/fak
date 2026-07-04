@@ -208,8 +208,7 @@ func (r *adapterRequest) assemble() *abi.Result {
 
 func (r *adapterRequest) finish(res *abi.Result, err error) {
 	r.res, r.err = res, err
-	close(r.tokens)
-	close(r.done)
+	closeRequestChannels(r.tokens, r.done)
 }
 
 // AdapterEngine is a LifecycleEngine and each request satisfies EngineRequest —

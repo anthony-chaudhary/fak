@@ -2,7 +2,6 @@ package engine
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -74,21 +73,9 @@ type VLLMEngine struct {
 
 // NewVLLMEngine builds a vLLM driver over public vLLM surfaces.
 func NewVLLMEngine(cfg VLLMConfig) *VLLMEngine {
-	if cfg.WorkerID == "" {
-		cfg.WorkerID = "vllm"
-	}
-	client := cfg.Client
-	if client == nil {
-		client = &http.Client{Timeout: 0}
-	}
-	cache := cfg.CacheRecorder
-	if cache == nil {
-		cache = NewCacheEventRecorder()
-	}
-	residency := cfg.Residency
-	if residency == nil {
-		residency = NewPrefixResidencyIndex()
-	}
+	cfg.WorkerID = defaultWorkerID(cfg.WorkerID, "vllm")
+	client := defaultHTTPClient(cfg.Client)
+	cache, residency := defaultCacheAndResidency(cfg.CacheRecorder, cfg.Residency)
 	return &VLLMEngine{cfg: cfg, client: client, cache: cache, residency: residency}
 }
 
@@ -121,27 +108,9 @@ func (e *VLLMEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequ
 	}
 	ctrl := e.deriveVLLMControls(c)
 	body = applyVLLMControls(body, ctrl)
-	cctx, cancel := context.WithCancel(ctx)
-	req, err := http.NewRequestWithContext(cctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	cctx, cancel, resp, err := postStreamingRequest(ctx, e.client, endpoint, e.cfg.APIKey, body, "vllm", kind)
 	if err != nil {
-		cancel()
 		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	if e.cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+e.cfg.APIKey)
-	}
-	resp, err := e.client.Do(req)
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		_ = resp.Body.Close()
-		cancel()
-		return nil, fmt.Errorf("vllm: %s returned %d: %s", kind, resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
 	r := &vllmRequest{
 		tokens:      make(chan abi.EngineToken),
@@ -235,10 +204,7 @@ func vllmEndpointKind(c *abi.ToolCall) string {
 // synthesized user message filled in when absent, and streaming forced on. An
 // empty/non-object args synthesizes the whole body from the tool name.
 func openAIChatBody(model string, c *abi.ToolCall, args []byte) ([]byte, error) {
-	obj := map[string]json.RawMessage{}
-	if json.Unmarshal(args, &obj) != nil || len(obj) == 0 {
-		obj = map[string]json.RawMessage{}
-	}
+	obj := decodeOrEmptyJSONObject(args)
 	if _, ok := obj["model"]; !ok && model != "" {
 		obj["model"] = mustJSON(model)
 	}
@@ -253,10 +219,7 @@ func openAIChatBody(model string, c *abi.ToolCall, args []byte) ([]byte, error) 
 // openAICompletionsBody is the /completions counterpart of openAIChatBody: it fills
 // a synthesized prompt (rather than a chat message) when absent.
 func openAICompletionsBody(model string, c *abi.ToolCall, args []byte) ([]byte, error) {
-	obj := map[string]json.RawMessage{}
-	if json.Unmarshal(args, &obj) != nil || len(obj) == 0 {
-		obj = map[string]json.RawMessage{}
-	}
+	obj := decodeOrEmptyJSONObject(args)
 	if _, ok := obj["model"]; !ok && model != "" {
 		obj["model"] = mustJSON(model)
 	}
@@ -337,28 +300,10 @@ func (r *vllmRequest) Result() (*abi.Result, error) {
 func (r *vllmRequest) Cancel() { r.cancel() }
 
 func (r *vllmRequest) pump(ctx context.Context) {
-	defer r.body.Close()
-	defer r.cancel()
-	sc := bufio.NewScanner(r.body)
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		if err := ctx.Err(); err != nil {
-			r.finish(nil, err)
-			return
-		}
-		line := strings.TrimSpace(sc.Text())
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "[DONE]" {
-			r.finish(r.assemble(), nil)
-			return
-		}
+	runSSEPump(ctx, r.body, r.cancel, r.tokens, r.finish, r.assemble, func(data string) (string, error) {
 		delta, usage, model, finish, err := parseVLLMSSE(data, r.kind)
 		if err != nil {
-			r.finish(nil, err)
-			return
+			return "", err
 		}
 		if usage != nil {
 			r.usage = *usage
@@ -369,22 +314,11 @@ func (r *vllmRequest) pump(ctx context.Context) {
 		if finish != "" {
 			r.finishReason = finish
 		}
-		if delta == "" {
-			continue
-		}
+		// WriteString is a no-op for "" so this stays correct whether or not delta
+		// ends up empty (the shared pump loop skips empty deltas after decode).
 		r.text.WriteString(delta)
-		select {
-		case r.tokens <- abi.EngineToken{Text: delta}:
-		case <-ctx.Done():
-			r.finish(nil, ctx.Err())
-			return
-		}
-	}
-	if err := sc.Err(); err != nil {
-		r.finish(nil, err)
-		return
-	}
-	r.finish(r.assemble(), nil)
+		return delta, nil
+	})
 }
 
 func (r *vllmRequest) assemble() *abi.Result {
@@ -413,24 +347,12 @@ func (r *vllmRequest) assemble() *abi.Result {
 		"endpoint":     r.kind,
 		"output_chars": strconv.Itoa(r.text.Len()),
 	}
-	if model := firstNonEmpty(r.streamModel, r.model); model != "" {
-		meta["model"] = model
-	}
-	if r.finishReason != "" {
-		meta["finish_reason"] = r.finishReason
-	}
-	if r.usage.PromptTokens > 0 {
-		meta["input_tokens"] = strconv.Itoa(r.usage.PromptTokens)
-	}
-	if r.usage.CompletionTokens > 0 {
-		meta["output_tokens"] = strconv.Itoa(r.usage.CompletionTokens)
-	}
-	if r.usage.TotalTokens > 0 {
-		meta["total_tokens"] = strconv.Itoa(r.usage.TotalTokens)
-	}
-	if r.cacheSalt != "" {
-		meta["cache_salt"] = r.cacheSalt
-	}
+	setMetaIfNonEmpty(meta, "model", firstNonEmpty(r.streamModel, r.model))
+	setMetaIfNonEmpty(meta, "finish_reason", r.finishReason)
+	setMetaIfPositive(meta, "input_tokens", r.usage.PromptTokens)
+	setMetaIfPositive(meta, "output_tokens", r.usage.CompletionTokens)
+	setMetaIfPositive(meta, "total_tokens", r.usage.TotalTokens)
+	setMetaIfNonEmpty(meta, "cache_salt", r.cacheSalt)
 	if r.hasPriority {
 		meta["priority"] = r.priority
 	}
@@ -439,8 +361,7 @@ func (r *vllmRequest) assemble() *abi.Result {
 
 func (r *vllmRequest) finish(res *abi.Result, err error) {
 	r.res, r.err = res, err
-	close(r.tokens)
-	close(r.done)
+	closeRequestChannels(r.tokens, r.done)
 }
 
 type vllmUsage struct {
@@ -493,12 +414,8 @@ func parseVLLMSSE(data, kind string) (delta string, usage *vllmUsage, model stri
 }
 
 func rawContentText(raw json.RawMessage) string {
-	if len(raw) == 0 || string(raw) == "null" {
-		return ""
-	}
-	var s string
-	if json.Unmarshal(raw, &s) == nil {
-		return s
+	if v, ok := decodeRawJSONOrBareString(raw); ok {
+		return v
 	}
 	var parts []struct {
 		Type string `json:"type"`
@@ -1134,14 +1051,18 @@ func writeServingSumCountRows(b *strings.Builder, name, help string, rows []Serv
 }
 
 func writeGaugeRows(b *strings.Builder, name, help string, rows []ServingMetricsSnapshot, pick func(ServingMetricsSnapshot) float64) {
-	writeHelpType(b, name, help, "gauge")
-	for _, row := range rows {
-		fmt.Fprintf(b, "%s{%s} %s\n", name, servingSnapshotLabels(row, false), promFloat(pick(row)))
-	}
+	writeTypedFloatRows(b, name, help, "gauge", rows, pick)
 }
 
 func writeCounterFloatRows(b *strings.Builder, name, help string, rows []ServingMetricsSnapshot, pick func(ServingMetricsSnapshot) float64) {
-	writeHelpType(b, name, help, "counter")
+	writeTypedFloatRows(b, name, help, "counter", rows, pick)
+}
+
+// writeTypedFloatRows renders one Prometheus HELP/TYPE header plus a value row per
+// snapshot. writeGaugeRows and writeCounterFloatRows differ only in the declared
+// metric type ("gauge" vs "counter"), so they share this body.
+func writeTypedFloatRows(b *strings.Builder, name, help, typ string, rows []ServingMetricsSnapshot, pick func(ServingMetricsSnapshot) float64) {
+	writeHelpType(b, name, help, typ)
 	for _, row := range rows {
 		fmt.Fprintf(b, "%s{%s} %s\n", name, servingSnapshotLabels(row, false), promFloat(pick(row)))
 	}

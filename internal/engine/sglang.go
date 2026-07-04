@@ -31,8 +31,6 @@ package engine
 // shares the engine identity "sglang" with the cache referee.
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -96,21 +94,9 @@ type SGLangEngine struct {
 
 // NewSGLangEngine builds an SGLang driver over public SGLang surfaces.
 func NewSGLangEngine(cfg SGLangConfig) *SGLangEngine {
-	if cfg.WorkerID == "" {
-		cfg.WorkerID = "sglang"
-	}
-	client := cfg.Client
-	if client == nil {
-		client = &http.Client{Timeout: 0}
-	}
-	cache := cfg.CacheRecorder
-	if cache == nil {
-		cache = NewCacheEventRecorder()
-	}
-	residency := cfg.Residency
-	if residency == nil {
-		residency = NewPrefixResidencyIndex()
-	}
+	cfg.WorkerID = defaultWorkerID(cfg.WorkerID, "sglang")
+	client := defaultHTTPClient(cfg.Client)
+	cache, residency := defaultCacheAndResidency(cfg.CacheRecorder, cfg.Residency)
 	return &SGLangEngine{cfg: cfg, client: client, cache: cache, residency: residency}
 }
 
@@ -154,27 +140,9 @@ func (e *SGLangEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRe
 	if err != nil {
 		return nil, err
 	}
-	cctx, cancel := context.WithCancel(ctx)
-	req, err := http.NewRequestWithContext(cctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	cctx, cancel, resp, err := postStreamingRequest(ctx, e.client, endpoint, e.cfg.APIKey, body, "sglang", "/generate")
 	if err != nil {
-		cancel()
 		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	if e.cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+e.cfg.APIKey)
-	}
-	resp, err := e.client.Do(req)
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		_ = resp.Body.Close()
-		cancel()
-		return nil, fmt.Errorf("sglang: /generate returned %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
 	r := &sglangRequest{
 		tokens:   make(chan abi.EngineToken),
@@ -203,10 +171,7 @@ func (e *SGLangEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Resu
 // through verbatim with stream forced on; a non-object/empty args synthesizes a
 // prompt from the tool name so the offline dispatch chain still drives it.
 func (e *SGLangEngine) buildGenerateBody(c *abi.ToolCall, args []byte) ([]byte, error) {
-	obj := map[string]json.RawMessage{}
-	if json.Unmarshal(args, &obj) != nil || len(obj) == 0 {
-		obj = map[string]json.RawMessage{}
-	}
+	obj := decodeOrEmptyJSONObject(args)
 	_, hasText := obj["text"]
 	_, hasInputIDs := obj["input_ids"]
 	_, hasInputEmbeds := obj["input_embeds"]
@@ -459,28 +424,10 @@ func (r *sglangRequest) Result() (*abi.Result, error) {
 func (r *sglangRequest) Cancel() { r.cancel() }
 
 func (r *sglangRequest) pump(ctx context.Context) {
-	defer r.body.Close()
-	defer r.cancel()
-	sc := bufio.NewScanner(r.body)
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		if err := ctx.Err(); err != nil {
-			r.finish(nil, err)
-			return
-		}
-		line := strings.TrimSpace(sc.Text())
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "[DONE]" {
-			r.finish(r.assemble(), nil)
-			return
-		}
+	runSSEPump(ctx, r.body, r.cancel, r.tokens, r.finish, r.assemble, func(data string) (string, error) {
 		var chunk sglangGenChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			r.finish(nil, fmt.Errorf("sglang: decode /generate SSE: %w", err))
-			return
+			return "", fmt.Errorf("sglang: decode /generate SSE: %w", err)
 		}
 		if chunk.MetaInfo.PromptTokens > 0 {
 			r.usage.PromptTokens = chunk.MetaInfo.PromptTokens
@@ -497,22 +444,8 @@ func (r *sglangRequest) pump(ctx context.Context) {
 		if fr := sglangFinishReason(chunk.MetaInfo.FinishReason); fr != "" {
 			r.finishReason = fr
 		}
-		delta := r.advance(chunk.Text)
-		if delta == "" {
-			continue
-		}
-		select {
-		case r.tokens <- abi.EngineToken{Text: delta}:
-		case <-ctx.Done():
-			r.finish(nil, ctx.Err())
-			return
-		}
-	}
-	if err := sc.Err(); err != nil {
-		r.finish(nil, err)
-		return
-	}
-	r.finish(r.assemble(), nil)
+		return r.advance(chunk.Text), nil
+	})
 }
 
 // advance reconciles SGLang's stream against what has already been emitted. SGLang
@@ -561,21 +494,11 @@ func (r *sglangRequest) assemble() *abi.Result {
 		"endpoint":     "generate",
 		"output_chars": strconv.Itoa(r.text.Len()),
 	}
-	if r.model != "" {
-		meta["model"] = r.model
-	}
-	if r.finishReason != "" {
-		meta["finish_reason"] = r.finishReason
-	}
-	if r.usage.PromptTokens > 0 {
-		meta["input_tokens"] = strconv.Itoa(r.usage.PromptTokens)
-	}
-	if r.usage.CompletionTokens > 0 {
-		meta["output_tokens"] = strconv.Itoa(r.usage.CompletionTokens)
-	}
-	if total > 0 {
-		meta["total_tokens"] = strconv.Itoa(total)
-	}
+	setMetaIfNonEmpty(meta, "model", r.model)
+	setMetaIfNonEmpty(meta, "finish_reason", r.finishReason)
+	setMetaIfPositive(meta, "input_tokens", r.usage.PromptTokens)
+	setMetaIfPositive(meta, "output_tokens", r.usage.CompletionTokens)
+	setMetaIfPositive(meta, "total_tokens", total)
 	if r.cachedTokens > 0 {
 		meta["cached_tokens"] = strconv.Itoa(r.cachedTokens)
 		r.recordPrefixHit()
@@ -610,8 +533,7 @@ func (r *sglangRequest) recordPrefixHit() {
 
 func (r *sglangRequest) finish(res *abi.Result, err error) {
 	r.res, r.err = res, err
-	close(r.tokens)
-	close(r.done)
+	closeRequestChannels(r.tokens, r.done)
 }
 
 type sglangUsage struct {
@@ -637,12 +559,8 @@ type sglangGenChunk struct {
 // streaming and on the terminal chunk is either an object ({"type":"stop"}) or, on
 // some builds, a bare string.
 func sglangFinishReason(raw json.RawMessage) string {
-	if len(raw) == 0 || string(raw) == "null" {
-		return ""
-	}
-	var s string
-	if json.Unmarshal(raw, &s) == nil {
-		return s
+	if v, ok := decodeRawJSONOrBareString(raw); ok {
+		return v
 	}
 	var obj struct {
 		Type string `json:"type"`

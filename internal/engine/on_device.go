@@ -110,8 +110,7 @@ func (e *OnDeviceEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Re
 	// runtime returns text, not its own token ids); a real adapter should overwrite
 	// these with the usage its phone-class engine reports. Kept for parity so the
 	// dispatch chain's Meta consumers see the same keys for every offline engine.
-	u := Usage{InputTokens: 50 + len(prompt)/4, OutputTokens: len(out) / 4}
-	u.TotalTokens = u.InputTokens + u.OutputTokens
+	u := estimateOfflineUsage(len(prompt), len(out))
 	return &abi.Result{
 		Call:    c,
 		Payload: ref,

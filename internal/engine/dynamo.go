@@ -10,7 +10,6 @@ package engine
 // normalized serving telemetry around that ridden pool.
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -58,13 +57,8 @@ type DynamoEngine struct {
 
 // NewDynamoEngine builds a Dynamo driver over public Dynamo surfaces.
 func NewDynamoEngine(cfg DynamoConfig) *DynamoEngine {
-	if cfg.WorkerID == "" {
-		cfg.WorkerID = "dynamo"
-	}
-	client := cfg.Client
-	if client == nil {
-		client = &http.Client{Timeout: 0}
-	}
+	cfg.WorkerID = defaultWorkerID(cfg.WorkerID, "dynamo")
+	client := defaultHTTPClient(cfg.Client)
 	return &DynamoEngine{cfg: cfg, client: client}
 }
 
@@ -96,27 +90,9 @@ func (e *DynamoEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRe
 	if err != nil {
 		return nil, err
 	}
-	cctx, cancel := context.WithCancel(ctx)
-	req, err := http.NewRequestWithContext(cctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	cctx, cancel, resp, err := postStreamingRequest(ctx, e.client, endpoint, e.cfg.APIKey, body, "dynamo", kind)
 	if err != nil {
-		cancel()
 		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	if e.cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+e.cfg.APIKey)
-	}
-	resp, err := e.client.Do(req)
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		_ = resp.Body.Close()
-		cancel()
-		return nil, fmt.Errorf("dynamo: %s returned %d: %s", kind, resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
 	r := &vllmRequest{
 		tokens:   make(chan abi.EngineToken),

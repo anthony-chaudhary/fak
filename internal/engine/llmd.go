@@ -9,7 +9,6 @@ package engine
 // directly instead of pretending the deployment is only a raw vLLM worker.
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -112,27 +111,9 @@ func (e *LLMDEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequ
 	if err != nil {
 		return nil, err
 	}
-	cctx, cancel := context.WithCancel(ctx)
-	req, err := http.NewRequestWithContext(cctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	cctx, cancel, resp, err := postStreamingRequest(ctx, e.vllm.client, endpoint, e.cfg.APIKey, body, "llm-d", kind)
 	if err != nil {
-		cancel()
 		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	if e.cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+e.cfg.APIKey)
-	}
-	resp, err := e.vllm.client.Do(req)
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		_ = resp.Body.Close()
-		cancel()
-		return nil, fmt.Errorf("llm-d: %s returned %d: %s", kind, resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
 	r := &vllmRequest{
 		tokens:   make(chan abi.EngineToken),
