@@ -1,0 +1,62 @@
+[
+  {
+    "strategy": "relay",
+    "goal_turns": 6,
+    "turns": [
+      {"cached_input_tokens": 6000,  "uncached_input_tokens": 6000, "cache_bust_tokens": 0,    "resident_tokens": 12000, "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 12000, "uncached_input_tokens": 6000, "cache_bust_tokens": 0,    "resident_tokens": 18000, "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 18000, "uncached_input_tokens": 6000, "cache_bust_tokens": 0,    "resident_tokens": 24000, "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 0,     "uncached_input_tokens": 8000, "cache_bust_tokens": 8000, "resident_tokens": 14000, "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 14000, "uncached_input_tokens": 6000, "cache_bust_tokens": 0,    "resident_tokens": 20000, "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 20000, "uncached_input_tokens": 6000, "cache_bust_tokens": 0,    "resident_tokens": 26000, "facts_produced": 3, "facts_retained": 3}
+    ]
+  },
+  {
+    "strategy": "compaction",
+    "goal_turns": 6,
+    "turns": [
+      {"cached_input_tokens": 40000, "uncached_input_tokens": 20000, "cache_bust_tokens": 0,     "resident_tokens": 60000,  "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 60000, "uncached_input_tokens": 20000, "cache_bust_tokens": 0,     "resident_tokens": 80000,  "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 80000, "uncached_input_tokens": 20000, "cache_bust_tokens": 0,     "resident_tokens": 100000, "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 0,     "uncached_input_tokens": 40000, "cache_bust_tokens": 40000, "resident_tokens": 40000,  "facts_produced": 3, "facts_retained": 2},
+      {"cached_input_tokens": 40000, "uncached_input_tokens": 20000, "cache_bust_tokens": 0,     "resident_tokens": 60000,  "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 60000, "uncached_input_tokens": 20000, "cache_bust_tokens": 0,     "resident_tokens": 80000,  "facts_produced": 3, "facts_retained": 3}
+    ]
+  },
+  {
+    "strategy": "relay",
+    "goal_turns": 12,
+    "turns": [
+      {"cached_input_tokens": 6000,  "uncached_input_tokens": 6000, "cache_bust_tokens": 0,    "resident_tokens": 12000, "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 12000, "uncached_input_tokens": 6000, "cache_bust_tokens": 0,    "resident_tokens": 18000, "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 18000, "uncached_input_tokens": 6000, "cache_bust_tokens": 0,    "resident_tokens": 24000, "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 0,     "uncached_input_tokens": 8000, "cache_bust_tokens": 8000, "resident_tokens": 14000, "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 14000, "uncached_input_tokens": 6000, "cache_bust_tokens": 0,    "resident_tokens": 20000, "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 20000, "uncached_input_tokens": 6000, "cache_bust_tokens": 0,    "resident_tokens": 26000, "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 0,     "uncached_input_tokens": 8000, "cache_bust_tokens": 8000, "resident_tokens": 14000, "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 14000, "uncached_input_tokens": 6000, "cache_bust_tokens": 0,    "resident_tokens": 20000, "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 20000, "uncached_input_tokens": 6000, "cache_bust_tokens": 0,    "resident_tokens": 26000, "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 0,     "uncached_input_tokens": 8000, "cache_bust_tokens": 8000, "resident_tokens": 14000, "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 14000, "uncached_input_tokens": 6000, "cache_bust_tokens": 0,    "resident_tokens": 20000, "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 20000, "uncached_input_tokens": 6000, "cache_bust_tokens": 0,    "resident_tokens": 26000, "facts_produced": 3, "facts_retained": 3}
+    ]
+  },
+  {
+    "strategy": "compaction",
+    "goal_turns": 12,
+    "turns": [
+      {"cached_input_tokens": 40000, "uncached_input_tokens": 20000, "cache_bust_tokens": 0,     "resident_tokens": 60000,  "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 60000, "uncached_input_tokens": 20000, "cache_bust_tokens": 0,     "resident_tokens": 80000,  "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 80000, "uncached_input_tokens": 20000, "cache_bust_tokens": 0,     "resident_tokens": 100000, "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 0,     "uncached_input_tokens": 40000, "cache_bust_tokens": 40000, "resident_tokens": 40000,  "facts_produced": 3, "facts_retained": 2},
+      {"cached_input_tokens": 40000, "uncached_input_tokens": 20000, "cache_bust_tokens": 0,     "resident_tokens": 60000,  "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 60000, "uncached_input_tokens": 20000, "cache_bust_tokens": 0,     "resident_tokens": 80000,  "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 80000, "uncached_input_tokens": 20000, "cache_bust_tokens": 0,     "resident_tokens": 100000, "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 0,     "uncached_input_tokens": 40000, "cache_bust_tokens": 40000, "resident_tokens": 40000,  "facts_produced": 3, "facts_retained": 2},
+      {"cached_input_tokens": 40000, "uncached_input_tokens": 20000, "cache_bust_tokens": 0,     "resident_tokens": 60000,  "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 60000, "uncached_input_tokens": 20000, "cache_bust_tokens": 0,     "resident_tokens": 80000,  "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 80000, "uncached_input_tokens": 20000, "cache_bust_tokens": 0,     "resident_tokens": 100000, "facts_produced": 3, "facts_retained": 3},
+      {"cached_input_tokens": 0,     "uncached_input_tokens": 40000, "cache_bust_tokens": 40000, "resident_tokens": 40000,  "facts_produced": 3, "facts_retained": 2}
+    ]
+  }
+]

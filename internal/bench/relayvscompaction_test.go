@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -164,6 +165,119 @@ func TestRelayVsCompactionCustomModelSeam(t *testing.T) {
 	}
 	if !r.FlatPeakContext {
 		t.Errorf("relay peak should still be flat under the custom model")
+	}
+}
+
+// TestRelayVsCompactionObservedLegLedger is the promotion witness for issue
+// #2659: OBSERVED per-leg records (a replayed capture, provenance != SIMULATED)
+// fed through the loader reproduce the SIGN — the relay is lower-peak, cheaper,
+// busts less cache, and is at least as faithful at every swept duration — and the
+// relay's peak context stays FLAT across the sweep. The checked-in report is the
+// issue's "checked-in OBSERVED result artifact". Regenerate with UPDATE_GOLDEN=1.
+func TestRelayVsCompactionObservedLegLedger(t *testing.T) {
+	ledger := filepath.Join("testdata", "relayvscompaction_observed_legs.json")
+	r, err := BuildRelayVsCompactionReportFromLegLedger(DefaultRVCModel(), ledger)
+	if err != nil {
+		t.Fatalf("BuildRelayVsCompactionReportFromLegLedger: %v", err)
+	}
+
+	// Provenance is OBSERVED (record-derived), not the analytic model — the whole
+	// point of the promotion seam.
+	if r.Provenance.Kind != ProvenanceObserved {
+		t.Fatalf("provenance = %q; want %q (record-derived)", r.Provenance.Kind, ProvenanceObserved)
+	}
+	if r.Schema != "relayvscompaction.v1" {
+		t.Fatalf("schema = %q; want relayvscompaction.v1", r.Schema)
+	}
+	if len(r.Sweep) != 2 {
+		t.Fatalf("sweep points = %d; want 2 (durations 6, 12)", len(r.Sweep))
+	}
+
+	// The sign the analytic model asserts must survive on OBSERVED records.
+	for _, p := range r.Sweep {
+		if !(p.Relay.PeakContext < p.Compaction.PeakContext) {
+			t.Errorf("%d turns: relay peak %d not < compaction %d", p.GoalTurns, p.Relay.PeakContext, p.Compaction.PeakContext)
+		}
+		if !(p.Relay.BilledTokens < p.Compaction.BilledTokens) {
+			t.Errorf("%d turns: relay billed %d not < compaction %d", p.GoalTurns, p.Relay.BilledTokens, p.Compaction.BilledTokens)
+		}
+		if !(p.Relay.CacheBustTokens < p.Compaction.CacheBustTokens) {
+			t.Errorf("%d turns: relay cache-bust %d not < compaction %d", p.GoalTurns, p.Relay.CacheBustTokens, p.Compaction.CacheBustTokens)
+		}
+		if !(p.Relay.Accuracy >= p.Compaction.Accuracy) {
+			t.Errorf("%d turns: relay accuracy %.3f not >= compaction %.3f", p.GoalTurns, p.Relay.Accuracy, p.Compaction.Accuracy)
+		}
+	}
+	if r.Verdict != VerdictRelayWins {
+		t.Fatalf("observed verdict = %q; want %q (sign reproduced)", r.Verdict, VerdictRelayWins)
+	}
+	// The O(1) invariant holds in the OBSERVED capture too: the relay's peak is
+	// identical across the sweep even though the 12-turn run does strictly more
+	// rotations than the 6-turn run.
+	if !r.FlatPeakContext {
+		t.Fatalf("observed relay peak is NOT flat across the sweep: %v", peaks(r))
+	}
+	if !(r.Sweep[1].Relay.Rotations > r.Sweep[0].Relay.Rotations) {
+		t.Fatalf("longer observed goal should rotate more legs: %d not > %d",
+			r.Sweep[1].Relay.Rotations, r.Sweep[0].Relay.Rotations)
+	}
+
+	got, err := r.JSON()
+	if err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+	golden := filepath.Join("testdata", "relayvscompaction_observed_report.json")
+	if os.Getenv("UPDATE_GOLDEN") != "" {
+		if err := os.WriteFile(golden, append(got, '\n'), 0o644); err != nil {
+			t.Fatalf("write golden: %v", err)
+		}
+		t.Logf("updated golden %s", golden)
+		return
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("read golden (run with UPDATE_GOLDEN=1 to create): %v", err)
+	}
+	if !bytes.Equal(bytes.TrimRight(want, "\n"), bytes.TrimRight(got, "\n")) {
+		t.Errorf("observed report drifted from golden %s; re-run with UPDATE_GOLDEN=1 if intended", golden)
+	}
+}
+
+// TestRelayVsCompactionObservedRefusals pins the fail-closed contract: an OBSERVED
+// report is only emitted when the records actually back it. Empty input, a run
+// with no turns, an unknown strategy label, a duplicate arm, and a duration
+// missing one of the two arms each refuse rather than fabricate an OBSERVED sign.
+func TestRelayVsCompactionObservedRefusals(t *testing.T) {
+	m := DefaultRVCModel()
+	relay6 := RVCRunRecord{Strategy: StrategyRelay, GoalTurns: 6, Turns: []RVCTurnRecord{
+		{CachedInputTokens: 6000, UncachedInputTokens: 6000, ResidentTokens: 12000, FactsProduced: 3, FactsRetained: 3},
+	}}
+	comp6 := RVCRunRecord{Strategy: StrategyCompaction, GoalTurns: 6, Turns: []RVCTurnRecord{
+		{CachedInputTokens: 40000, UncachedInputTokens: 20000, ResidentTokens: 60000, FactsProduced: 3, FactsRetained: 3},
+	}}
+
+	cases := []struct {
+		name    string
+		runs    []RVCRunRecord
+		wantSub string
+	}{
+		{"empty", nil, "no observed leg records"},
+		{"no-turns", []RVCRunRecord{{Strategy: StrategyRelay, GoalTurns: 6}, comp6}, "has no turn records"},
+		{"unknown-strategy", []RVCRunRecord{{Strategy: "guess", GoalTurns: 6, Turns: relay6.Turns}}, "unknown strategy"},
+		{"duplicate-arm", []RVCRunRecord{relay6, relay6, comp6}, "duplicate relay run"},
+		{"missing-compaction", []RVCRunRecord{relay6}, "missing the compaction arm"},
+		{"missing-relay", []RVCRunRecord{comp6}, "missing the relay arm"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := BuildRelayVsCompactionReportFromRecords(m, tc.runs, "fixture")
+			if err == nil {
+				t.Fatalf("want refusal containing %q, got nil error", tc.wantSub)
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Fatalf("error = %q; want substring %q", err.Error(), tc.wantSub)
+			}
+		})
 	}
 }
 

@@ -4,7 +4,7 @@
     "kind": "SIMULATED",
     "command": "go test ./internal/bench -run RelayVsCompaction",
     "generated_by": "fak/internal/bench.BuildRelayVsCompactionReport",
-    "note": "Hermetic ANALYTIC model, not a live provider run (the issue permits a hermetic/replayed comparison). It witnesses the MEASUREMENT and the sign of the comparison under the named constants in `model`; a live relay-vs-compaction leg-record run can feed the same report shape via BuildRelayVsCompactionReportFor and either confirm or demote the claim."
+    "note": "Hermetic ANALYTIC model, not a live provider run (the issue permits a hermetic/replayed comparison). It witnesses the MEASUREMENT and the sign of the comparison under the named constants in `model`; a live relay-vs-compaction leg-record run can feed the same report shape via BuildRelayVsCompactionReportFromRecords and either confirm or demote the claim."
   },
   "model": {
     "window_ceiling_tokens": 200000,
@@ -150,7 +150,7 @@
     "Cache multipliers (read 0.1x, write 1.25x) and the window/growth/baton constants are representative Anthropic-style figures, not a measured provider run; different economics shift the magnitudes but not the sign — the relay resets an O(1) prefix, compaction rewrites a near-wall one.",
     "The goal does not fit in one window (the only regime a relay is for); for a goal that fits in one leg, neither strategy fires and there is no difference to measure."
   ],
-  "promotion": "Replace the modeled constants with OBSERVED per-turn context/cache/token records from a live relay-vs-compaction run (the internal/sessionreset + session.Recontinue relay path vs a compaction baseline), feeding BuildRelayVsCompactionReportFor, the way loopverify accepts an OBSERVED ledger. When the observed run reproduces the sign, the leaf promotes toward `now`.",
+  "promotion": "Replace the modeled constants with OBSERVED per-leg context/cache/token records from a live relay-vs-compaction run (the internal/sessionreset + session.Recontinue relay path vs a compaction baseline), feeding BuildRelayVsCompactionReportFromRecords (the loader shipped here, mirroring loopverify's OBSERVED ledger path). When the observed run reproduces the sign, the leaf promotes toward `now`.",
   "demotion_or_retirement": "If a live run shows compaction matching the relay on BOTH cost and fidelity for a goal class (e.g. a compaction that re-queries git), the relay's complexity is not justified for that class and this bench demotes the claim rather than defending it.",
   "invalidating_assumption": "The single assumption most likely to flip the result is #1: that compaction does not re-derive dropped facts from the durable store. If it does, the fidelity advantage collapses and only the peak-context and cache advantages remain."
 }

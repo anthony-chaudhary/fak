@@ -49,7 +49,18 @@ package bench
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+)
+
+// The two context strategies the bench compares, as stable labels an OBSERVED leg
+// record tags its run with.
+const (
+	StrategyRelay      = "relay"
+	StrategyCompaction = "compaction"
 )
 
 // RVCModel is the hermetic, named constant set the comparison runs over. Every
@@ -253,7 +264,7 @@ func simulateCompaction(m RVCModel, goalTurns int) RVCArm {
 			factsInWindow -= lost
 		}
 	}
-	return finishArm("compaction", m, rotations, peak, billed, cacheHits, cacheTotal, cacheBust, factsTotal, factsRetained)
+	return finishArm(StrategyCompaction, m, rotations, peak, billed, cacheHits, cacheTotal, cacheBust, factsTotal, factsRetained)
 }
 
 // simulateRelay replays the SAME goal under bounded-leg rotation.
@@ -297,7 +308,7 @@ func simulateRelay(m RVCModel, goalTurns int) RVCArm {
 	// Fidelity: the fail-closed externalize gate guarantees every load-bearing
 	// fact is durable before rotation, and the baton is re-verified at read, so
 	// nothing load-bearing is lost.
-	return finishArm("relay", m, rotations, peak, billed, cacheHits, cacheTotal, cacheBust, factsTotal, factsTotal)
+	return finishArm(StrategyRelay, m, rotations, peak, billed, cacheHits, cacheTotal, cacheBust, factsTotal, factsTotal)
 }
 
 func finishArm(strategy string, m RVCModel, rotations, peak int, billed float64, cacheHits, cacheTotal, cacheBust, factsTotal, factsRetained int) RVCArm {
@@ -336,7 +347,29 @@ func BuildRelayVsCompactionReportFor(m RVCModel, durations []int) RelayVsCompact
 			Compaction: simulateCompaction(m, n),
 		})
 	}
+	return assembleRVCReport(m, sweep, simulatedRVCProvenance())
+}
 
+// simulatedRVCProvenance labels the hermetic analytic path.
+func simulatedRVCProvenance() Provenance {
+	return Provenance{
+		Kind:        ProvenanceSimulated,
+		Command:     "go test ./internal/bench -run RelayVsCompaction",
+		GeneratedBy: "fak/internal/bench.BuildRelayVsCompactionReport",
+		Note: "Hermetic ANALYTIC model, not a live provider run (the issue permits a " +
+			"hermetic/replayed comparison). It witnesses the MEASUREMENT and the sign " +
+			"of the comparison under the named constants in `model`; a live relay-vs-" +
+			"compaction leg-record run can feed the same report shape via " +
+			"BuildRelayVsCompactionReportFromRecords and either confirm or demote the claim.",
+	}
+}
+
+// assembleRVCReport folds an already-populated sweep (simulated OR observed) into
+// the full relayvscompaction.v1 report: the flat-peak witness, the deepest-
+// duration delta, the verdict, and the net-true prose. The caller supplies the
+// provenance so the SAME assembly serves both the analytic path and the OBSERVED
+// leg-record path (BuildRelayVsCompactionReportFromRecords).
+func assembleRVCReport(m RVCModel, sweep []RVCPoint, provenance Provenance) RelayVsCompactionReport {
 	// The flat-peak witness: the relay's peak context is identical at every
 	// duration (independent of total work done).
 	flat := true
@@ -382,17 +415,8 @@ func BuildRelayVsCompactionReportFor(m RVCModel, durations []int) RelayVsCompact
 	}
 
 	return RelayVsCompactionReport{
-		Schema: "relayvscompaction.v1",
-		Provenance: Provenance{
-			Kind:        ProvenanceSimulated,
-			Command:     "go test ./internal/bench -run RelayVsCompaction",
-			GeneratedBy: "fak/internal/bench.BuildRelayVsCompactionReport",
-			Note: "Hermetic ANALYTIC model, not a live provider run (the issue permits a " +
-				"hermetic/replayed comparison). It witnesses the MEASUREMENT and the sign " +
-				"of the comparison under the named constants in `model`; a live relay-vs-" +
-				"compaction leg-record run can feed the same report shape via " +
-				"BuildRelayVsCompactionReportFor and either confirm or demote the claim.",
-		},
+		Schema:           "relayvscompaction.v1",
+		Provenance:       provenance,
 		Model:            m,
 		Sweep:            sweep,
 		FlatPeakContext:  flat,
@@ -405,7 +429,7 @@ func BuildRelayVsCompactionReportFor(m RVCModel, durations []int) RelayVsCompact
 			"Cache multipliers (read 0.1x, write 1.25x) and the window/growth/baton constants are representative Anthropic-style figures, not a measured provider run; different economics shift the magnitudes but not the sign — the relay resets an O(1) prefix, compaction rewrites a near-wall one.",
 			"The goal does not fit in one window (the only regime a relay is for); for a goal that fits in one leg, neither strategy fires and there is no difference to measure.",
 		},
-		Promotion:           "Replace the modeled constants with OBSERVED per-turn context/cache/token records from a live relay-vs-compaction run (the internal/sessionreset + session.Recontinue relay path vs a compaction baseline), feeding BuildRelayVsCompactionReportFor, the way loopverify accepts an OBSERVED ledger. When the observed run reproduces the sign, the leaf promotes toward `now`.",
+		Promotion:           "Replace the modeled constants with OBSERVED per-leg context/cache/token records from a live relay-vs-compaction run (the internal/sessionreset + session.Recontinue relay path vs a compaction baseline), feeding BuildRelayVsCompactionReportFromRecords (the loader shipped here, mirroring loopverify's OBSERVED ledger path). When the observed run reproduces the sign, the leaf promotes toward `now`.",
 		DemotionRetirement:  "If a live run shows compaction matching the relay on BOTH cost and fidelity for a goal class (e.g. a compaction that re-queries git), the relay's complexity is not justified for that class and this bench demotes the claim rather than defending it.",
 		InvalidatingUnknown: "The single assumption most likely to flip the result is #1: that compaction does not re-derive dropped facts from the durable store. If it does, the fidelity advantage collapses and only the peak-context and cache advantages remain.",
 	}
@@ -445,4 +469,155 @@ func rvcFinding(d RVCDelta, p RVCPoint, relayPeak int, flat bool) string {
 // map iteration), so it is a re-derivable witness.
 func (r RelayVsCompactionReport) JSON() ([]byte, error) {
 	return json.MarshalIndent(r, "", "  ")
+}
+
+// ── OBSERVED leg-record path ────────────────────────────────────────────────
+//
+// The types and loaders below are the promotion seam the report's `promotion`
+// field names: they fold OBSERVED per-leg records from a live (or replayed)
+// relay-vs-compaction run into the SAME relayvscompaction.v1 shape, mirroring
+// loopverify's OBSERVED ledger path (BuildLoopVerifyReportFromLoop*). The
+// distinction OBSERVED vs SIMULATED is the DERIVATION path — measured leg records
+// vs the analytic model — not a claim of a provider-billed total; the report's
+// provenance Note carries that honesty, exactly as loopverify's does.
+
+// RVCTurnRecord is one OBSERVED turn of a leg run: the input tokens actually sent
+// this turn split cached/uncached (so the same cache-aware billing the analytic
+// arms use applies), the tokens force-rewritten by a context-management event
+// this turn (a compaction summarize or a relay leg rotation; 0 on an ordinary
+// turn), the resident context after the turn, and the load-bearing facts the turn
+// produced plus how many survived to the run's end. It is the measured counterpart
+// of one iteration of simulateRelay/simulateCompaction.
+type RVCTurnRecord struct {
+	CachedInputTokens   int `json:"cached_input_tokens"`
+	UncachedInputTokens int `json:"uncached_input_tokens"`
+	CacheBustTokens     int `json:"cache_bust_tokens"`
+	ResidentTokens      int `json:"resident_tokens"`
+	FactsProduced       int `json:"facts_produced"`
+	FactsRetained       int `json:"facts_retained"`
+}
+
+// RVCRunRecord is one OBSERVED arm run: a single strategy replayed over a goal of
+// a given duration, as an ordered sequence of turn records. A comparison needs a
+// relay AND a compaction run at each duration (one arm proves nothing).
+type RVCRunRecord struct {
+	Strategy  string          `json:"strategy"` // StrategyRelay | StrategyCompaction
+	GoalTurns int             `json:"goal_turns"`
+	Turns     []RVCTurnRecord `json:"turns"`
+}
+
+// observedArm folds a run's OBSERVED turn records into an RVCArm using the SAME
+// cache-aware billing the analytic arms use (a cache read at CacheReadMult, an
+// uncached/re-written token at CacheWriteMult). Rotations are counted from turns
+// that force-rewrote cache; peak is the max resident context observed.
+func observedArm(m RVCModel, run RVCRunRecord) RVCArm {
+	var billed float64
+	var cacheHits, cacheTotal, cacheBust int
+	peak, rotations := 0, 0
+	factsTotal, factsRetained := 0, 0
+	for _, t := range run.Turns {
+		billed += float64(t.CachedInputTokens)*m.CacheReadMult + float64(t.UncachedInputTokens)*m.CacheWriteMult
+		cacheHits += t.CachedInputTokens
+		cacheTotal += t.CachedInputTokens + t.UncachedInputTokens
+		cacheBust += t.CacheBustTokens
+		if t.CacheBustTokens > 0 {
+			rotations++
+		}
+		if t.ResidentTokens > peak {
+			peak = t.ResidentTokens
+		}
+		factsTotal += t.FactsProduced
+		factsRetained += t.FactsRetained
+	}
+	return finishArm(run.Strategy, m, rotations, peak, billed, cacheHits, cacheTotal, cacheBust, factsTotal, factsRetained)
+}
+
+// BuildRelayVsCompactionReportFromRecords folds OBSERVED relay/compaction leg
+// records into the relayvscompaction.v1 report, mirroring loopverify's OBSERVED
+// ledger path. It refuses rather than emit an OBSERVED report the records do not
+// back: no records, a run with no turns, an unknown strategy label, a duplicate
+// arm, or a duration missing one of the two arms each fail closed — OBSERVED
+// provenance is only produced when both arms are actually present at every swept
+// duration.
+func BuildRelayVsCompactionReportFromRecords(m RVCModel, runs []RVCRunRecord, command string) (RelayVsCompactionReport, error) {
+	if len(runs) == 0 {
+		return RelayVsCompactionReport{}, errors.New("relayvscompaction: no observed leg records")
+	}
+	type armPair struct {
+		relay, compaction *RVCRunRecord
+	}
+	byDur := map[int]*armPair{}
+	var order []int
+	for i := range runs {
+		r := &runs[i]
+		if len(r.Turns) == 0 {
+			return RelayVsCompactionReport{}, fmt.Errorf("relayvscompaction: observed %s run at %d turns has no turn records", r.Strategy, r.GoalTurns)
+		}
+		p := byDur[r.GoalTurns]
+		if p == nil {
+			p = &armPair{}
+			byDur[r.GoalTurns] = p
+			order = append(order, r.GoalTurns)
+		}
+		switch r.Strategy {
+		case StrategyRelay:
+			if p.relay != nil {
+				return RelayVsCompactionReport{}, fmt.Errorf("relayvscompaction: duplicate relay run at %d turns", r.GoalTurns)
+			}
+			p.relay = r
+		case StrategyCompaction:
+			if p.compaction != nil {
+				return RelayVsCompactionReport{}, fmt.Errorf("relayvscompaction: duplicate compaction run at %d turns", r.GoalTurns)
+			}
+			p.compaction = r
+		default:
+			return RelayVsCompactionReport{}, fmt.Errorf("relayvscompaction: unknown strategy %q (want %q|%q)", r.Strategy, StrategyRelay, StrategyCompaction)
+		}
+	}
+	sort.Ints(order)
+	sweep := make([]RVCPoint, 0, len(order))
+	for _, n := range order {
+		p := byDur[n]
+		switch {
+		case p.relay == nil:
+			return RelayVsCompactionReport{}, fmt.Errorf("relayvscompaction: duration %d turns is missing the relay arm", n)
+		case p.compaction == nil:
+			return RelayVsCompactionReport{}, fmt.Errorf("relayvscompaction: duration %d turns is missing the compaction arm", n)
+		}
+		sweep = append(sweep, RVCPoint{
+			GoalTurns:  n,
+			Relay:      observedArm(m, *p.relay),
+			Compaction: observedArm(m, *p.compaction),
+		})
+	}
+	if command == "" {
+		command = "relayvscompaction observed leg records"
+	}
+	return assembleRVCReport(m, sweep, Provenance{
+		Kind:        ProvenanceObserved,
+		Command:     command,
+		GeneratedBy: "fak/internal/bench.BuildRelayVsCompactionReportFromRecords",
+		Note: "Report folded from OBSERVED per-leg records (billed cached/uncached input, " +
+			"cache-bust tokens, resident context, load-bearing facts), NOT the analytic " +
+			"model. The checked-in sample is a REPLAYED capture that witnesses the loader " +
+			"and schema, not a live provider-billed run; a live relay-vs-compaction run " +
+			"feeds the same shape to promote the claim toward gen/now.",
+	}), nil
+}
+
+// BuildRelayVsCompactionReportFromLegLedger reads a JSON array of OBSERVED
+// RVCRunRecord leg records from path and folds them into the report — the file
+// counterpart of loopverify's BuildLoopVerifyReportFromLoopLedger. The command
+// field is derived from the file's base name (no machine-absolute path) so the
+// resulting artifact is deterministic across checkouts.
+func BuildRelayVsCompactionReportFromLegLedger(m RVCModel, path string) (RelayVsCompactionReport, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return RelayVsCompactionReport{}, err
+	}
+	var runs []RVCRunRecord
+	if err := json.Unmarshal(data, &runs); err != nil {
+		return RelayVsCompactionReport{}, fmt.Errorf("relayvscompaction: parse leg ledger %s: %w", filepath.Base(path), err)
+	}
+	return BuildRelayVsCompactionReportFromRecords(m, runs, "replayed leg-record sample "+filepath.Base(path))
 }

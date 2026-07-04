@@ -1,0 +1,102 @@
+{
+  "schema": "relayvscompaction.v1",
+  "provenance": {
+    "kind": "OBSERVED",
+    "command": "replayed leg-record sample relayvscompaction_observed_legs.json",
+    "generated_by": "fak/internal/bench.BuildRelayVsCompactionReportFromRecords",
+    "note": "Report folded from OBSERVED per-leg records (billed cached/uncached input, cache-bust tokens, resident context, load-bearing facts), NOT the analytic model. The checked-in sample is a REPLAYED capture that witnesses the loader and schema, not a live provider-billed run; a live relay-vs-compaction run feeds the same shape to promote the claim toward gen/now."
+  },
+  "model": {
+    "window_ceiling_tokens": 200000,
+    "system_prefix_tokens": 4000,
+    "growth_per_turn_tokens": 6000,
+    "baton_tokens": 2000,
+    "compaction_trigger_frac": 0.95,
+    "compaction_keep_frac": 0.3,
+    "compaction_loss_frac": 0.15,
+    "relay_arm_frac": 0.6,
+    "facts_per_turn": 3,
+    "cache_read_mult": 0.1,
+    "cache_write_mult": 1.25
+  },
+  "sweep": [
+    {
+      "goal_turns": 6,
+      "relay": {
+        "strategy": "relay",
+        "rotations": 1,
+        "peak_context_tokens": 26000,
+        "peak_context_frac": 0.13,
+        "billed_tokens": 54500,
+        "cache_hit_rate": 0.6481,
+        "cache_bust_tokens": 8000,
+        "load_bearing_facts": 18,
+        "facts_retained": 18,
+        "accuracy": 1
+      },
+      "compaction": {
+        "strategy": "compaction",
+        "rotations": 1,
+        "peak_context_tokens": 100000,
+        "peak_context_frac": 0.5,
+        "billed_tokens": 203000,
+        "cache_hit_rate": 0.6667,
+        "cache_bust_tokens": 40000,
+        "load_bearing_facts": 18,
+        "facts_retained": 17,
+        "accuracy": 0.9444
+      }
+    },
+    {
+      "goal_turns": 12,
+      "relay": {
+        "strategy": "relay",
+        "rotations": 3,
+        "peak_context_tokens": 26000,
+        "peak_context_frac": 0.13,
+        "billed_tokens": 111300,
+        "cache_hit_rate": 0.6389,
+        "cache_bust_tokens": 24000,
+        "load_bearing_facts": 36,
+        "facts_retained": 36,
+        "accuracy": 1
+      },
+      "compaction": {
+        "strategy": "compaction",
+        "rotations": 3,
+        "peak_context_tokens": 100000,
+        "peak_context_frac": 0.5,
+        "billed_tokens": 429000,
+        "cache_hit_rate": 0.6429,
+        "cache_bust_tokens": 120000,
+        "load_bearing_facts": 36,
+        "facts_retained": 33,
+        "accuracy": 0.9167
+      }
+    }
+  ],
+  "flat_peak_context": true,
+  "relay_peak_context_tokens": 26000,
+  "delta": {
+    "at_goal_turns": 12,
+    "peak_context_reduction_tokens": 74000,
+    "peak_context_ratio_relay_over_compaction": 0.26,
+    "billed_tokens_saved": 317700,
+    "billed_ratio_relay_over_compaction": 0.2594,
+    "cache_bust_tokens_saved": 96000,
+    "cache_bust_ratio_relay_over_compaction": 0.2,
+    "cache_hit_rate_gain": -0.004,
+    "accuracy_gain": 0.0833,
+    "finding": "At 12 turns, the relay's peak context is FLAT across the sweep (26000 tokens, 13% of the window — out of the context-rot zone), while compaction peaks at 100000 (50% — pinned at the wall). The relay bills 111300 effective tokens vs compaction's 429000 (26% of the cost), force-rewrites only 24000 cache-busted tokens vs compaction's 120000 (20% — it resets an O(1) baton, not a near-wall prefix), and retains 100% of load-bearing facts vs 92%. Raw cache-hit rate is comparable (0.64 vs 0.64; compaction's is marginally higher only because it runs a larger resident prefix). Peak, cost, cache-preservation, and fidelity favor the relay; the comparison is a hermetic model, so the numbers are the SIGN, not a provider-billed total."
+  },
+  "verdict": "relay_lower_peak_cheaper_more_faithful",
+  "assumptions": [
+    "Compaction TRUSTS its in-place summary rather than re-querying the durable store; a compacting agent that also re-derived dropped facts from git on demand would narrow the accuracy gap toward the relay's. This is the load-bearing doctrinal assumption.",
+    "The relay's externalize gate is fail-closed: every load-bearing fact is committed/ledgered/filed before rotation and the baton is re-verified at read, so accuracy is 1.0. A leg that rotated with load-bearing state still transcript-only (a gate bypass) would drop below 1.0.",
+    "Cache multipliers (read 0.1x, write 1.25x) and the window/growth/baton constants are representative Anthropic-style figures, not a measured provider run; different economics shift the magnitudes but not the sign — the relay resets an O(1) prefix, compaction rewrites a near-wall one.",
+    "The goal does not fit in one window (the only regime a relay is for); for a goal that fits in one leg, neither strategy fires and there is no difference to measure."
+  ],
+  "promotion": "Replace the modeled constants with OBSERVED per-leg context/cache/token records from a live relay-vs-compaction run (the internal/sessionreset + session.Recontinue relay path vs a compaction baseline), feeding BuildRelayVsCompactionReportFromRecords (the loader shipped here, mirroring loopverify's OBSERVED ledger path). When the observed run reproduces the sign, the leaf promotes toward `now`.",
+  "demotion_or_retirement": "If a live run shows compaction matching the relay on BOTH cost and fidelity for a goal class (e.g. a compaction that re-queries git), the relay's complexity is not justified for that class and this bench demotes the claim rather than defending it.",
+  "invalidating_assumption": "The single assumption most likely to flip the result is #1: that compaction does not re-derive dropped facts from the durable store. If it does, the fidelity advantage collapses and only the peak-context and cache advantages remain."
+}
