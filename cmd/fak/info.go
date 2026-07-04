@@ -573,23 +573,29 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 	// byte-for-byte unchanged. fs starts focused=true: a pane that opens already focused, and the
 	// universal case where the terminal never reports focus at all, must run at full cadence.
 	fs := focusState{focused: true}
-	var keyCh <-chan focusEvent
+	var keyCh <-chan infoInput
 	var resizeCh <-chan struct{}
 	var lastSample guardInfoVars
 	haveSample := false
+	// viewState is the interactive overlay's tabbed-view + glossary UI state (info_tabs.go). It is
+	// consulted only on the interactive path (focusable); the non-interactive visual block ignores
+	// it, so piped / non-TTY-stdin panes render byte-for-byte as before.
+	var viewState infoViewState
 	focusable := visual && term.IsTerminal(int(os.Stdin.Fd()))
 	if focusable {
 		if oldState, err := term.MakeRaw(int(os.Stdin.Fd())); err == nil {
-			// Register teardown BEFORE emitting any raw/1004 byte so a panic also restores cleanly.
-			// LIFO order on return: disable focus reporting, restore the cooked stdin, then (the
-			// existing) trailing newline if a frame is parked. Registered after `defer stop()` so it
-			// runs first.
+			// Register teardown BEFORE emitting any raw/1004/1000 byte so a panic also restores
+			// cleanly. LIFO order on return: disable mouse + focus reporting, restore the cooked
+			// stdin, then (the existing) trailing newline if a frame is parked. Registered after
+			// `defer stop()` so it runs first.
 			defer func() {
+				writeMouseDisable(stdout)
 				writeFocusDisable(stdout)
 				_ = term.Restore(int(os.Stdin.Fd()), oldState)
 			}()
 			writeFocusEnable(stdout)
-			keyCh = startGuardInfoFocusReader(os.Stdin, stop)
+			writeMouseEnable(stdout)
+			keyCh = startGuardInfoInputReader(os.Stdin, stop)
 			rc, stopResize := newInfoResizeChan()
 			resizeCh = rc
 			defer stopResize()
@@ -612,7 +618,14 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 		}
 		if visual {
 			tr.push(v)
-			prevRows = writeGuardInfoFrame(stdout, renderGuardInfoVisualBlock(v, tr, width, height), prevRows)
+			// The interactive path (a visual-mode TTY whose stdin is also a TTY) draws the TABBED
+			// block — a tab bar over the active view or the glossary overlay. Every other visual
+			// path keeps the plain stacked-panels block, byte-for-byte as before.
+			block := renderGuardInfoVisualBlock(v, tr, width, height)
+			if focusable {
+				block = renderGuardInfoInteractiveBlock(viewState, v, tr, width, height)
+			}
+			prevRows = writeGuardInfoFrame(stdout, block, prevRows)
 			dirty = true
 			return
 		}
@@ -672,29 +685,48 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 			}
 			return 0
 		case ev := <-keyCh:
-			// A terminal focus report (or a raw-mode quit byte). focusQuit means Ctrl-C arrived as
-			// a 0x03 byte that raw mode swallowed before signal.NotifyContext could see it, so we
-			// cancel the context ourselves and let the ctx.Done() arm run the clean teardown.
-			if ev == focusQuit {
+			// A decoded interactive event: a terminal focus report, a quit byte/key, or a
+			// view/glossary/mouse action (info_tabs.go). infoInputQuit means Ctrl-C / 'q' arrived as
+			// a byte that raw mode swallowed before signal.NotifyContext could see it, so we cancel
+			// the context ourselves and let the ctx.Done() arm run the clean teardown.
+			switch ev.Kind {
+			case infoInputQuit:
 				stop()
-				continue
-			}
-			prev := fs.focused
-			fs = applyFocus(fs, ev)
-			switch {
-			case fs.focused && !prev:
+			case infoInputFocusIn:
 				// Focus-IN edge: the tab may have been resized while hidden. Latch a repaint and
 				// paint it now from the last sample (writeFrame re-measures + clears the old block;
 				// no extra /debug/vars fetch). If no sample yet, the latch rides to the next tick.
 				// Then resume the foreground cadence.
+				prev := fs.focused
+				fs.focused = true
 				fs.needsRepaint = true
-				if haveSample {
-					writeFrame(lastSample)
+				if !prev {
+					if haveSample {
+						writeFrame(lastSample)
+					}
+					ticker.Reset(effectiveInterval(true, interval, bg))
 				}
-				ticker.Reset(effectiveInterval(true, interval, bg))
-			case !fs.focused && prev:
+			case infoInputFocusOut:
 				// Focus-OUT edge: throttle (never pause) so a hidden tab stops churning.
-				ticker.Reset(effectiveInterval(false, interval, bg))
+				if fs.focused {
+					fs.focused = false
+					ticker.Reset(effectiveInterval(false, interval, bg))
+				}
+			default:
+				// A view switch / glossary toggle / mouse click. Fold it into the UI state and
+				// repaint from the last sample (no new fetch). A mouse click carries ABSOLUTE screen
+				// coords; translate the row to block-relative before hit-testing against the tab/chip
+				// layout. Only repaint when the state actually changed, so an inert click is silent.
+				if ev.Kind == infoInputMouseClick {
+					ev.Y = blockRelativeRow(ev.Y, height, prevRows)
+				}
+				if next := applyInfoInput(viewState, ev); next != viewState {
+					viewState = next
+					fs.needsRepaint = true
+					if haveSample {
+						writeFrame(lastSample)
+					}
+				}
 			}
 			continue
 		case <-resizeCh:
