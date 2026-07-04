@@ -73,6 +73,15 @@ because it has a generation label.
 - `park`: keep the item true-but-not-active when it remains useful context but
   has no current owner, witness path, or decision.
 
+For `gen/future` work specifically, the `retire` verb is operationalized by a
+closed sunset-trigger vocabulary, a review cadence, and a four-piece
+retirement-evidence contract in
+[`docs/generation-future-sunset-criteria.md`](generation-future-sunset-criteria.md)
+(the kill machinery), which pairs with the valuation in
+[`docs/generation-future-real-options-model.md`](generation-future-real-options-model.md).
+A `gen/future` bet is retired only by a named trigger from that closed set, on a
+stated cadence, with a witnessed evidence trail — never by label movement alone.
+
 Promotion should preserve issue history. Prefer updating labels, milestone, and
 the evidence comment over opening a duplicate issue in another stream.
 
