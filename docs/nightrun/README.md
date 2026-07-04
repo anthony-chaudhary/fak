@@ -67,11 +67,14 @@ For an unattended off-node wait, use the built-in watcher instead of a shell
 loop:
 
 ```bash
-fak macbench watch --gateway "$FAK_MAC_GATEWAY" --model qwen3.6-27b --result experiments/nightrun/<box>/<stamp>-macbench-result.json
+fak macbench watch --gateway "$FAK_MAC_GATEWAY" --model qwen3.6-27b \
+  --log experiments/nightrun/<box>/<stamp>-macbench-watch.log \
+  --result experiments/nightrun/<box>/<stamp>-macbench-result.json
 ```
 
 It polls `health` until the gateway is reachable, emits sanitized health JSON
-for each poll, then runs the full `all` sweep once and writes the result file.
+for each poll, then runs the full `all` sweep once and writes the log/result
+files.
 
 ## How next() ranks
 

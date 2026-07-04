@@ -112,6 +112,7 @@ From a driver host that may outlive the Mac's sleep/wake cycle, use:
 ```sh
 fak macbench watch --gateway "$FAK_MAC_GATEWAY" --model qwen3.6-27b \
   --duration 12h --interval 5m \
+  --log experiments/nightrun/<box>/<stamp>-macbench-watch.log \
   --result experiments/nightrun/<box>/<stamp>-macbench-result.json
 ```
 
