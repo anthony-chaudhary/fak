@@ -650,3 +650,51 @@ func TestMergeDiscoveredSkipsTombstonedDir(t *testing.T) {
 		}
 	}
 }
+
+// TestMergeDiscoveredSkipsTombstonedIdentity proves a retired account cannot resurface by
+// re-logging into a NEW, differently-named dir with no `.DELETED` marker — the case the
+// basename filter cannot see. The registry tombstones seat "gem8" (uuid-8); a live dir
+// ".claude-gem8NEW" logged into the SAME uuid-8 must NOT be admitted as a fresh active seat.
+// This is the identity-keyed form of the deleted-seat-resurfaces regression: the tombstone
+// binds to the ACCOUNT identity, not to the mutable dir/registry name.
+func TestMergeDiscoveredSkipsTombstonedIdentity(t *testing.T) {
+	home := t.TempDir()
+	// The retired account, re-logged-into a brand-new dir with no `.DELETED` suffix.
+	full := filepath.Join(home, ".claude-gem8NEW")
+	if err := os.MkdirAll(filepath.Join(full, "projects"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"oauthAccount":{"emailAddress":"gem8@example.test","accountUuid":"uuid-8"}}`
+	if err := os.WriteFile(filepath.Join(full, ".claude.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(full, ".credentials.json"), []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A live seat plus a tombstone carrying the retired account's identity (uuid-8). The
+	// tombstone's own dir is gone (archived elsewhere), so only its cached Identity remains.
+	base := Registry{Homes: []Home{
+		{Name: "live-seat", Dir: filepath.Join(home, ".claude-live-seat")},
+		{
+			Name: "gem8", Status: StatusTombstoned, RehomeTo: "live-seat",
+			Identity: Identity{Email: "gem8@example.test", AccountUUID: "uuid-8"},
+		},
+	}}
+	merged, err := base.MergeDiscovered(home)
+	if err != nil {
+		t.Fatalf("MergeDiscovered: %v", err)
+	}
+	for _, h := range merged.Homes {
+		if h.Name == "gem8NEW" {
+			t.Fatalf("re-login into a new dir resurrected tombstoned account uuid-8 as active seat %q", h.Name)
+		}
+		if h.Active() && h.Identity.AccountUUID == "uuid-8" {
+			t.Fatalf("tombstoned account uuid-8 came back as active seat %q (dir %q)", h.Name, h.Dir)
+		}
+	}
+	// The tombstone itself must be untouched, and the registry must still validate.
+	if err := merged.Validate(); err != nil {
+		t.Errorf("merged registry should validate: %v", err)
+	}
+}

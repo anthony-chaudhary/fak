@@ -907,10 +907,23 @@ func (r Registry) MergeDiscovered(home string) (Registry, error) {
 	}
 	byName := map[string]int{}
 	byDir := map[string]int{}
+	// tombstonedKeys indexes the ACCOUNT IDENTITY (uuid:/tok:) of every tombstoned home, so a
+	// brand-new dir logged into a retired account is refused even when its dir/registry name
+	// differs. A tombstone is keyed to a MUTABLE handle (the seat name / dir); re-logging the
+	// same account into a fresh `.claude-<name>NEW` dir would otherwise present a new name the
+	// name-match below treats as a stranger and admits as active — resurrecting the retired
+	// account under an alias. The `.DELETED`-basename filter in isConfigHome only catches the
+	// archived-dir case; this catches the re-login-into-a-new-dir case it cannot see.
+	tombstonedKeys := map[string]bool{}
 	for i, h := range r.Homes {
 		byName[h.Name] = i
 		if h.Dir != "" {
 			byDir[filepath.Clean(h.Dir)] = i
+		}
+		if h.Status == StatusTombstoned {
+			if k := h.Identity.AccountKey(); k != "" {
+				tombstonedKeys[k] = true
+			}
 		}
 	}
 	out := r // copy header (Version, SharedHistory)
@@ -927,6 +940,13 @@ func (r Registry) MergeDiscovered(home string) (Registry, error) {
 			// authored policy fields already in out.Homes[idx].
 			out.Homes[idx].Dir = d.Dir
 			out.Homes[idx].Identity = d.Identity
+			continue
+		}
+		// A dir the registry does not know BY NAME but whose account identity matches a
+		// tombstoned seat is the same retired account under a new dir — never re-admit it as
+		// active. Skipping it (rather than folding it onto the tombstone) keeps the tombstone's
+		// authored dir/rehome intact; the shadow dir simply stays invisible to the roster.
+		if k := d.Identity.AccountKey(); k != "" && tombstonedKeys[k] {
 			continue
 		}
 		// Brand-new config dir the registry never knew: add as an active seat with policy
