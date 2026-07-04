@@ -95,6 +95,35 @@ guarantees none.
 
 ---
 
+## The comm/compute-overlap arm (concurrent Reap over the seam, issue #651)
+
+`Reap` (`internal/kernel/kernel.go`) pops a pending submission under `k.mu` and then
+releases the lock **before** calling `eng.Complete` — so W host goroutines reaping
+**distinct** handles run their inference *concurrently*, overlapping the slow engine
+round-trip the way the MPI `Isend`/`Irecv` + progress story overlaps communication with
+computation (borrowed for **shape only**). `cmd/fanbench`'s overlap arm
+(`cmd/fanbench/overlap_test.go`, a go-test fixture) is the one bench that isolates that
+factor: it drives the real kernel via `Submit`/`Reap` over a **deterministic offline
+engine** — one whose call tally is a `sync/atomic` counter, *not* `engine.Mock`'s racy
+`m.calls++`, so it is `-race`-clean — once with a single reaper (inference serialized) and
+once with W concurrent reapers (inference overlapped), and reports
+
+    overlap-efficiency = (serial adjudicate + serial infer) / measured wall
+
+The number is **measured**, so the fixture asserts only the structural facts (the engine
+was called exactly N times, results are bit-identical whichever goroutine reaped them, the
+overlapped infer wall is strictly below the serialized one) and **logs** the efficiency
+rather than pinning a wall-clock value — it ships no flaky number.
+
+> **Honesty caveat.** This measures fak's **ACTUAL overlap shape** — host-driven concurrent
+> `Reap` over an engine whose `Complete` runs **inline** on the reaping goroutine — **NOT**
+> an MPI non-blocking progress thread, and **NOT** MPI/HPC latency-hiding. It borrows the
+> `Isend`/`Irecv` + progress *story* for shape only; it **never** carries over an
+> MPI/InfiniBand overlap, message-rate, or throughput number. The `overlap-efficiency`
+> above is a ratio of two locally measured wall times on this box, nothing more.
+
+---
+
 ## What this is NOT
 
 - **Not** a multi-communicator transport. One process-global engine fold; `Queue` selects
@@ -105,6 +134,10 @@ guarantees none.
   `internal/abi/types.go`; this doc adds nothing to the struct.
 - **Not** a scheduler. There is no behavior to verify at runtime — the seam is inert by
   design, and that inertness is the honest claim.
+- **Not** an MPI progress thread. The overlap arm's concurrent `Reap` is host goroutines
+  running an *inline* `Complete`, not a non-blocking transport with a background progress
+  engine; its `overlap-efficiency` is a locally measured wall-time ratio, never an
+  MPI/InfiniBand overlap or message-rate number.
 
 ---
 
@@ -112,5 +145,6 @@ guarantees none.
 
 - [`internal/abi/types.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/abi/types.go) — `SubmissionHandle`, `Completion`, `Ext`/`ExtKey` (the frozen source).
 - [`internal/kernel/kernel.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/kernel/kernel.go) — `ReapAny`, the first (and today only) consumer of a handle.
+- [`cmd/fanbench/overlap_test.go`](https://github.com/anthony-chaudhary/fak/blob/main/cmd/fanbench/overlap_test.go) — the comm/compute-overlap arm (issue #651): concurrent `Reap` over an atomic offline engine, reporting `overlap-efficiency` as a `-race`-clean go-test fixture.
 - [vdso-revoke-as-comm-revoke.md](../explainers/vdso-revoke-as-comm-revoke.md) — the sibling MPI-analogue mapping (`vdso.Revoke` ≈ `MPI_Comm_revoke`) in the same epic.
 - [abi+architest.md](abi+architest.md) — the proof that the ABI's additive-only / human-owned discipline is enforced.
