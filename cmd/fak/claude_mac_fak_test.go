@@ -147,6 +147,36 @@ func TestEnsureClaudeMacGatewayKeySurfacesSSHStderr(t *testing.T) {
 	}
 }
 
+func TestEnsureClaudeMacGatewayKeyUsesBoundedNonInteractiveSSH(t *testing.T) {
+	t.Setenv("FAK_GATEWAY_KEY", "")
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	var sawArgs []string
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		if name != "ssh" {
+			t.Fatalf("execCommand name = %q, want ssh", name)
+		}
+		sawArgs = append([]string(nil), args...)
+		cs := append([]string{"-test.run=TestClaudeMacFakSSHHelperProcess", "--", name}, args...)
+		cmd := exec.Command(os.Args[0], cs...)
+		cmd.Env = append(os.Environ(), "GO_WANT_SSH_HELPER_PROCESS=1")
+		return cmd
+	}
+
+	_ = ensureClaudeMacGatewayKey("FAK_GATEWAY_KEY", true, "user@node-macos-a.local", "", "http://node-macos-a.local:8080")
+	got := strings.Join(sawArgs, " ")
+	for _, want := range []string{
+		"-o BatchMode=yes",
+		"-o ConnectTimeout=5",
+		"-o ConnectionAttempts=1",
+		"user@node-macos-a.local cat ~/.fak-gateway-key",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("ssh args missing %q:\n%v", want, sawArgs)
+		}
+	}
+}
+
 // TestEnsureClaudeMacGatewayKeyLocalSkipsSSH is the easy-local-default
 // guarantee: when the gateway is loopback there is no Mac to ssh into and a
 // local fak serve without --require-key-env needs no bearer, so the ssh fetch

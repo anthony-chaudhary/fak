@@ -29,6 +29,9 @@ go run ./cmd/fak claude-mac-fak
 If `FAK_GATEWAY_KEY` is empty, the command fetches the gateway bearer from
 `user@node-macos-a.local:~/.fak-gateway-key` over SSH using
 `~/.ssh/id_ed25519_prod_to_laptop`. Override that host with `FAK_MAC_SSH_HOST`.
+The SSH fetch is non-interactive and bounded (`BatchMode=yes`,
+`ConnectTimeout=5`, one attempt), so an unreachable Mac fails quickly with the
+SSH reason instead of hanging before the preflight panel.
 It then runs the same `fak console agent` gateway launcher with an isolated
 Claude config dir.
 

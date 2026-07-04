@@ -232,7 +232,7 @@ func ensureClaudeMacGatewayKey(envName string, fetch bool, host, keyPath, gatewa
 	if host == "" {
 		return fmt.Errorf("%s is empty and --ssh-host is empty", envName)
 	}
-	args := []string{}
+	args := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "ConnectionAttempts=1"}
 	if strings.TrimSpace(keyPath) != "" {
 		args = append(args, "-i", keyPath)
 	}

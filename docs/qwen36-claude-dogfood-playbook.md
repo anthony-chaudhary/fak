@@ -65,6 +65,11 @@ claude-mac --probe "Reply with exactly the word: pong"
 Claude Code still talks to a loopback Anthropic Messages endpoint while inference
 runs on the MacBook.
 
+If `FAK_GATEWAY_KEY` is empty, the Mac launcher fetches `~/.fak-gateway-key` over
+SSH using `FAK_MAC_SSH_HOST`. That SSH fetch is non-interactive and bounded to one
+5-second connection attempt, so a sleeping or unreachable Mac fails fast with the
+SSH error instead of hanging before Claude Code starts.
+
 ### What does the Qwen preset assume?
 
 `fak-qwen36-claude` is the same script as `fak-dogfood`, but its invoked name selects
