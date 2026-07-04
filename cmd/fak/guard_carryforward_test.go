@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -57,5 +58,28 @@ func TestGuardReadPriorRefusalCarryForwardFallsBackToPreviousJournal(t *testing.
 	got := guardReadPriorRefusalCarryForward(currentAudit, "guard", dir)
 	if len(got) != 1 || got[0].Reason != "POLICY_BLOCK" || got[0].Count != 1 {
 		t.Fatalf("journal fallback carry-forward = %+v, want POLICY_BLOCK x1", got)
+	}
+}
+
+func TestGuardRecoveryPromptNamesPriorRefusals(t *testing.T) {
+	got := guardRecoveryPrompt([]guardRefusalCarry{{
+		Reason: "OFF_TRUNK",
+		Count:  2,
+		Fix:    "commit directly to main",
+	}})
+	for _, want := range []string{
+		"[fak] resume recovery",
+		"recovery/debugging",
+		"Do not re-propose the same refused call unchanged",
+		"OFF_TRUNK x2",
+		"commit directly to main",
+		"Keep fak guard wrapped",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("recovery prompt missing %q:\n%s", want, got)
+		}
+	}
+	if got := guardRecoveryPrompt([]guardRefusalCarry{{Count: 1}}); got != "" {
+		t.Fatalf("empty reason prompt = %q, want empty", got)
 	}
 }

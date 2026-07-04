@@ -357,6 +357,36 @@ func formatGuardRefusalCarryForward(items []guardRefusalCarry) string {
 	return b.String()
 }
 
+func guardRecoveryPrompt(items []guardRefusalCarry) string {
+	if len(items) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("[fak] resume recovery: the previous guarded run recorded capability-floor refusal(s). ")
+	b.WriteString("Treat this resumed turn as recovery/debugging, not a blind retry. ")
+	b.WriteString("Do not re-propose the same refused call unchanged; clear the blocker or choose an allowed alternative before continuing. ")
+	b.WriteString("Prior refusal(s):")
+	wrote := false
+	for _, item := range items {
+		if strings.TrimSpace(item.Reason) == "" {
+			continue
+		}
+		if wrote {
+			b.WriteString(";")
+		}
+		fmt.Fprintf(&b, " %s x%d", item.Reason, item.Count)
+		if fix := strings.TrimSpace(item.Fix); fix != "" {
+			fmt.Fprintf(&b, " (fix: %s)", fix)
+		}
+		wrote = true
+	}
+	if !wrote {
+		return ""
+	}
+	b.WriteString(". Keep fak guard wrapped after the blocker is cleared.")
+	return b.String()
+}
+
 var guardReasonHeaderRE = regexp.MustCompile(`^\[reasons\.([A-Z0-9_]+)\]`)
 
 func guardReadReasonDocs(root string) map[string]guardReasonDoc {
