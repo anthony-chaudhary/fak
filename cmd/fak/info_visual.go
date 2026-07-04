@@ -205,9 +205,7 @@ func guardInfoVisualTinyRow(v guardInfoVars) string {
 // guardInfoSafetyText is the safety sub-pane's value (the "safety" label is the row gutter): the
 // plain-words floor summary without renderGuardInfoLine's "safety: " prefix.
 func guardInfoSafetyText(v guardInfoVars) string {
-	return strings.TrimPrefix(
-		guardFloorSafetyWord(v.Kernel.Denies, v.Kernel.Transforms, v.Kernel.Quarantines, v.Kernel.ResultDenies),
-		"safety: ")
+	return strings.TrimPrefix(guardSafetyWord(v), "safety: ")
 }
 
 func guardInfoIncidentText(v guardInfoVars) string {

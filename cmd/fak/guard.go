@@ -881,6 +881,7 @@ func cmdGuard(argv []string) {
 		ResetOnBudget:         resetOnBudgetHook(*resetOnBudget, contextBudgetLimit),
 		OnBudgetExhausted:     restarter.OnBudgetExhausted,
 		DefaultTraceID:        guardTraceID,
+		GuardRecoveryPrompt:   guardRecoveryPrompt(refusalCarryForward),
 		StartTime:             t0,
 		StartupPhases:         startupPhases,
 		// Default OFF (clean terminal); --log routes the full structured stream to a file

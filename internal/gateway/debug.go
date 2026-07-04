@@ -28,6 +28,20 @@ type debugVarsResponse struct {
 	Sessions         []debugSessionVars             `json:"sessions,omitempty"`
 	Assumptions      []SessionAssumption            `json:"assumptions,omitempty"`
 	ContextQueries   []ContextQueryAuditRecord      `json:"context_queries,omitempty"`
+	// Endpoints is the live accounts+nodes block — which Claude seats and which serving
+	// nodes THIS session is using (fak guard's status area). Nil/omitted unless the host
+	// set a provider (SetSessionEndpointsProvider) that has something to report.
+	Endpoints *SessionEndpoints `json:"endpoints,omitempty"`
+	// Adjudication is the verdict roll-up (the same AdjudicationSummary the guard exit
+	// summary folds): tally + by-reason + compaction/tool-prune/deny-all — promoted here
+	// so the live pane shows what the kernel blocked/repaired/quarantined instead of the
+	// vacuous kernel.Counters (which the Decide proxy never increments). Omitted on a
+	// cold gateway that has decided nothing.
+	Adjudication *AdjudicationSummary `json:"adjudication,omitempty"`
+	// Harness is the live harness-resource block (kernel/agent CPU/RSS/IO/net) — the
+	// /debug/vars twin of the /metrics-only fak_harness_* family, so the pane can show
+	// live what the exit summary prints. Nil/omitted until the host samples a session.
+	Harness *SessionHarness `json:"harness,omitempty"`
 	// StartupReport is the full human-readable startup report the host recorded at boot
 	// (fak guard's banner + hook/auth notes) — what `fak info --startup` prints when an
 	// attended launch kept the terminal banner compact. Omitted when the host set none.
@@ -422,9 +436,12 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		ModelLoad:        debugModelLoadProfile(s.modelLoadProfile()),
 		KVMemory:         debugKVMemory(s.planner),
 		RequestMemory:    debugRequestMemory(s.planner),
-		Sessions:         s.debugSessions(ctx),
+		Sessions:         s.debugSessions(ctx, now),
 		Assumptions:      s.debugAssumptions(ctx),
 		ContextQueries:   s.contextQueryAuditSnapshot(),
+		Endpoints:        s.debugEndpoints(),
+		Adjudication:     s.debugAdjudication(),
+		Harness:          s.debugHarness(),
 		StartupReport:    s.startupReportText(),
 		Metrics: debugMetricsVars{
 			HTTP:       debugHTTPRows(httpRows),
@@ -468,23 +485,45 @@ type debugSessionVars struct {
 	ContextTokensLeft int    `json:"context_tokens_left,omitempty"`
 	ElapsedSeconds    int64  `json:"elapsed_seconds,omitempty"`
 	Assumptions       int    `json:"assumptions,omitempty"`
+	// LastTool is the tool NAME of the last call the gateway ADMITTED for this trace —
+	// the agents pane's "what is it doing" signal (#2627). Payload-free: the identifier
+	// only, never arguments or results. Omitted until the trace has an admitted call.
+	LastTool string `json:"last_tool,omitempty"`
+	// SpawnCount is how many subagent-SHAPED tool calls this trace has had admitted — an
+	// activity signal (is it fanning out?), NOT a live-child census (#2397 owns that).
+	// Omitted while zero.
+	SpawnCount int `json:"spawn_count,omitempty"`
+	// InflightSeconds is the age of the served model request this trace holds RIGHT NOW,
+	// omitted when no request is open. Distinct from IdleSeconds — a row carries one or
+	// the other, never both: in-flight means a request is open now.
+	InflightSeconds int64 `json:"inflight_seconds,omitempty"`
+	// IdleSeconds is the time since this trace's last admitted call with nothing in
+	// flight, omitted while a request is open or before the first call — the "is it stuck
+	// / idle" signal.
+	IdleSeconds int64 `json:"idle_seconds,omitempty"`
 }
 
 // debugSessions folds the live session registry into /debug/vars rows. Stopped sessions
 // are dropped (matching debugAssumptions: the pane shows what is running, not history),
 // and rows keep the registry's own order so the main agent — registered first — leads.
-func (s *Server) debugSessions(ctx context.Context) []debugSessionVars {
+// Each live row is joined against the per-trace activity registry (#2627) for its
+// last-tool / spawn-count / in-flight-or-idle age, projected relative to now; a trace with
+// no activity contributes no extra fields, so a pre-activity row's wire shape is unchanged.
+func (s *Server) debugSessions(ctx context.Context, now time.Time) []debugSessionVars {
 	if s.listSessions == nil {
 		return nil
 	}
 	sessions := s.listSessions(ctx)
+	live := make(map[string]struct{}, len(sessions))
 	var out []debugSessionVars
 	for _, st := range sessions {
 		if strings.EqualFold(strings.TrimSpace(st.Run), "stopped") {
 			continue
 		}
-		out = append(out, debugSessionVars{
-			TraceID:           strings.TrimSpace(st.TraceID),
+		trace := strings.TrimSpace(st.TraceID)
+		live[trace] = struct{}{}
+		row := debugSessionVars{
+			TraceID:           trace,
 			Run:               strings.TrimSpace(st.Run),
 			ParentTrace:       strings.TrimSpace(st.ParentTrace),
 			Generation:        st.Generation,
@@ -494,9 +533,53 @@ func (s *Server) debugSessions(ctx context.Context) []debugSessionVars {
 			ContextTokensLeft: st.Budget.ContextTokensLeft,
 			ElapsedSeconds:    st.Time.ElapsedSeconds,
 			Assumptions:       len(st.Assumptions),
-		})
+		}
+		if act, ok := s.activity.snapshot(trace, now); ok {
+			row.LastTool = act.LastTool
+			row.SpawnCount = act.SpawnCount
+			row.InflightSeconds = act.InflightSeconds
+			row.IdleSeconds = act.IdleSeconds
+		}
+		out = append(out, row)
 	}
+	// Fold stopped/vanished traces so the activity registry tracks at most the live
+	// sessions — the read-path half of the bounded lifecycle (the write path caps it).
+	s.activity.retain(live)
 	return out
+}
+
+// debugEndpoints projects the host-supplied accounts+nodes provider into the
+// /debug/vars "endpoints" block, or nil when no provider is set / nothing to report
+// (the block is then omitted). See session_endpoints.go.
+func (s *Server) debugEndpoints() *SessionEndpoints {
+	ep, ok := s.sessionEndpoints()
+	if !ok {
+		return nil
+	}
+	return &ep
+}
+
+// debugAdjudication folds the live operation ledger into the verdict roll-up the guard
+// exit summary also prints (via Server.AdjudicationSummary, which attaches the
+// compaction budget), or nil on a cold gateway that has decided nothing and observed no
+// tokens — so a fresh session omits the block rather than emitting an all-zero tally.
+func (s *Server) debugAdjudication() *AdjudicationSummary {
+	sum := s.AdjudicationSummary()
+	if sum.Total == 0 && sum.CachedPromptTokens == 0 && sum.InputTokens == 0 &&
+		sum.OutputTokens == 0 && sum.CompactionBudget == 0 {
+		return nil
+	}
+	return &sum
+}
+
+// debugHarness projects the host-supplied harness-resource provider into the
+// /debug/vars "harness" block, or nil when unset / unsampled. See session_endpoints.go.
+func (s *Server) debugHarness() *SessionHarness {
+	h, ok := s.sessionHarness()
+	if !ok {
+		return nil
+	}
+	return &h
 }
 
 func (s *Server) debugAssumptions(ctx context.Context) []SessionAssumption {

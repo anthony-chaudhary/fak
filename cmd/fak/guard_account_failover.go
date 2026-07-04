@@ -63,6 +63,27 @@ func (a *accountFailover) currentConfigDir() string {
 	return a.currentDir
 }
 
+// walledKeys returns a snapshot of the account keys (uuid:/tok:) proven walled this
+// session — the seats an account-scoped 403 forced a failover to skip. It is read by the
+// live accounts+nodes endpoints provider (guard_endpoints.go) to mark those seats in the
+// status area. A copy is returned so the caller never races the failover mutator. nil
+// receiver (no failover armed) yields nil, which the provider reads as "nothing walled".
+func (a *accountFailover) walledKeys() map[string]bool {
+	if a == nil {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.walled) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(a.walled))
+	for k, v := range a.walled {
+		out[k] = v
+	}
+	return out
+}
+
 // failover is the AccountFailoverFunc body: mark the current account walled, then pick a permitted
 // sibling and adopt it. reason is the classified remedy label (never a raw upstream body). It
 // returns the sibling's live token and ok=true when a target was found — advancing currentDir so

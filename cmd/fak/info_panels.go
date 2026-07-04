@@ -61,6 +61,7 @@ func guardInfoPanels() []guardInfoPanel {
 	return []guardInfoPanel{
 		{name: "trends", degrade: 4, rows: guardInfoTrendsPanelRows},
 		{name: "tasks", degrade: 1, rows: guardInfoTasksPanelRows},
+		{name: "endpoints", degrade: 2, rows: guardInfoEndpointsPanelRows},
 		{name: "incident", degrade: 0, rows: guardInfoIncidentPanelRows},
 		{name: "resources", degrade: 3, rows: guardInfoResourcesPanelRows},
 		{name: "agents", degrade: 2, rows: guardInfoAgentsPanelRows},
@@ -249,7 +250,14 @@ func guardInfoResourcesPanelRows(ctx guardInfoPanelCtx, level guardInfoPanelLeve
 	if v.Gateway.InflightRequests > 0 && v.Inference.InflightMaxAgeSeconds > 0 {
 		rateRow += fmt.Sprintf(" · oldest req %.0fs", v.Inference.InflightMaxAgeSeconds)
 	}
-	return []string{memRow, rateRow}
+	rows := []string{memRow, rateRow}
+	// The harness half (guard process CPU/RSS/IO/net) — the same figures the exit summary
+	// prints, promoted live from the /debug/vars harness block. Silent when the host wired
+	// no sampler (a plain fak serve gateway, or --resource-stats=false).
+	if host := guardInfoHarnessText(v.Harness); host != "" {
+		rows = append(rows, " host   "+host)
+	}
+	return rows
 }
 
 // guardInfoAgentsMaxRows caps the per-session rows the agents panel spends at full
@@ -315,14 +323,37 @@ func guardInfoAgentText(s guardInfoSession) string {
 	if s.TurnsLeft > 0 {
 		parts = append(parts, fmt.Sprintf("%d turns left", s.TurnsLeft))
 	}
+	// Live-status activity cell (#2627): what the agent is doing right now. Each clause is
+	// omitted when its axis is unset, so a pre-activity row renders exactly as before.
+	if tool := strings.TrimSpace(s.LastTool); tool != "" {
+		parts = append(parts, "tool "+tool)
+	}
+	if s.SpawnCount > 0 {
+		noun := "spawns"
+		if s.SpawnCount == 1 {
+			noun = "spawn"
+		}
+		parts = append(parts, fmt.Sprintf("%d %s", s.SpawnCount, noun))
+	}
+	// In-flight and idle are mutually exclusive by construction (the gateway sets one or
+	// the other); prefer in-flight so an open request always reads as "hot", not "idle".
+	if s.InflightSeconds > 0 {
+		parts = append(parts, "in-flight "+humanUptime(float64(s.InflightSeconds)))
+	} else if s.IdleSeconds > 0 {
+		parts = append(parts, "idle "+humanUptime(float64(s.IdleSeconds)))
+	}
 	return strings.Join(parts, " · ")
 }
 
 // guardInfoAgentsSummary is the agents panel's one-row mini form (also reused by the
-// compact status line): active count, sub-agent count, and the deepest spawn depth.
+// compact status line): active count, sub-agent count, the deepest spawn depth, and how
+// many sessions hold an in-flight request right now (#2627 — the compact "who is hot").
 func guardInfoAgentsSummary(ss []guardInfoSession) string {
-	subs, deepest := 0, 0
+	subs, deepest, inflight := 0, 0, 0
 	for _, s := range ss {
+		if s.InflightSeconds > 0 {
+			inflight++
+		}
 		if strings.TrimSpace(s.ParentTrace) != "" {
 			subs++
 			gen := s.Generation
@@ -337,6 +368,9 @@ func guardInfoAgentsSummary(ss []guardInfoSession) string {
 	out := fmt.Sprintf("%d active", len(ss))
 	if subs > 0 {
 		out += fmt.Sprintf(" (%d sub, deepest g%d)", subs, deepest)
+	}
+	if inflight > 0 {
+		out += fmt.Sprintf(", %d in-flight", inflight)
 	}
 	return out
 }

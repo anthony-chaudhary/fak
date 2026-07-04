@@ -295,6 +295,11 @@ type Config struct {
 	// value lets wrapped CLIs that do not expose trace headers still share one
 	// operator-addressable session budget.
 	DefaultTraceID string
+	// GuardRecoveryPrompt is a one-time, model-visible recovery note supplied by
+	// `fak guard` when the previous guarded run recorded capability-floor refusals.
+	// The gateway injects it into the first Anthropic Messages request for this
+	// server, then clears it. Empty leaves requests byte-for-byte unchanged.
+	GuardRecoveryPrompt string
 	// Logf is the structured log sink (default: stderr). MCP-over-stdio sets this
 	// to stderr so protocol bytes on stdout are never corrupted.
 	Logf func(format string, args ...any)
@@ -716,6 +721,13 @@ type Server struct {
 	// for a New'd Server; nil only in a bare zero value).
 	loops *bgloop.Supervisor
 
+	// activity is the bounded per-trace activity registry behind the agents pane's
+	// live-status cell (#2627): the last admitted tool, the subagent-spawn count, and
+	// the in-flight/idle age of each live trace, projected onto debugSessionVars.
+	// Payload-free (tool NAME only). Built in New; nil-safe for a bare Server. See
+	// session_activity.go.
+	activity *sessionActivity
+
 	// startup is the one-time boot timeline (start -> ready, per-phase costs),
 	// exposed as fak_gateway_startup_* gauges. See startup.go.
 	startup *startupProfile
@@ -724,6 +736,20 @@ type Server struct {
 	// suppresses every fak_model_load_* metric. Guarded by modelLoadMu.
 	modelLoadMu sync.Mutex
 	modelLoad   *ModelLoadProfile
+
+	// endpointsProvider is the optional pull source for the live accounts+nodes block
+	// on /debug/vars (the "endpoints" block). fak guard wires it to a closure over the
+	// on-box account roster + the resolved serving nodes (see cmd/fak/guard_endpoints.go);
+	// nil on the default serve path. Guarded by endpointsMu. See session_endpoints.go.
+	endpointsMu       sync.Mutex
+	endpointsProvider func() SessionEndpoints
+
+	// harnessSnapshotProvider is the optional pull source for the live harness-resource
+	// block on /debug/vars (kernel/agent CPU/RSS/IO/net/GPU) — a structured twin of the
+	// /metrics-only SetHarnessMetricsProvider. nil on the default serve path. Guarded by
+	// harnessSnapshotMu. See session_endpoints.go.
+	harnessSnapshotMu       sync.Mutex
+	harnessSnapshotProvider func() SessionHarness
 
 	// planner generates the assistant turn for the /v1/chat/completions proxy. A
 	// live HTTPPlanner/ReplicaRouter when BaseURL/ReplicaBaseURLs are set, else the
@@ -883,6 +909,13 @@ type Server struct {
 	// or resets a session. The projection is WITNESSED (fak's resume.Plan); the first-turn cache
 	// bill it is differenced against is OBSERVED (provider-relayed). Its own mutex; zero-value ready.
 	resumeProj resumeProjMetrics
+
+	// guardRecoveryPrompt is the one-shot model-visible hint the guard host supplies
+	// after a prior run ended with guard refusals. It is popped on the first served
+	// Anthropic Messages request so a resume sees the recovery context once, without
+	// turning it into persistent conversation noise.
+	guardRecoveryMu     sync.Mutex
+	guardRecoveryPrompt string
 
 	// compactHistoryBudget mirrors Config.CompactHistoryBudget: when > 0 the flagship
 	// Anthropic passthrough compacts OLD turns in the OUTBOUND body to this resident-token
@@ -1172,6 +1205,7 @@ func New(cfg Config) (*Server, error) {
 		resetOnBudget:              cfg.ResetOnBudget,
 		budgetDrained:              cfg.OnBudgetExhausted,
 		defaultTraceID:             strings.TrimSpace(cfg.DefaultTraceID),
+		guardRecoveryPrompt:        strings.TrimSpace(cfg.GuardRecoveryPrompt),
 		startup:                    startup,
 		planner:                    planner,
 		inKernelModelButChatIsMock: inKernelModelButChatIsMock,
@@ -1187,6 +1221,7 @@ func New(cfg Config) (*Server, error) {
 		rungObs:                    rungObs,
 		feed:                       newCoherenceFeed(0),
 		sessionFeed:                newSessionFeed(0),
+		activity:                   newSessionActivity(),
 		metrics:                    newGatewayMetrics(time.Now()),
 		route:                      newRouteLive(cfg.RouteManifest),
 		native:                     cfg.Native,
@@ -1839,6 +1874,11 @@ func recoverRecurrentEvictUnsupported(r any) (error, bool) {
 // output/context budgets here. Planner errors keep the old behavior: no usage was
 // reported, so there is nothing to debit beyond the turn admission already taken.
 func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	// Mark the trace as holding an open model request so the agents pane can show its
+	// in-flight age (#2627). The window closes when this call returns; adjudication then
+	// stamps last_tool/idle from the served turn. Cleared on every exit path via defer.
+	s.activity.beginTurn(turn.traceID, time.Now())
+	defer s.activity.endTurn(turn.traceID)
 	lease, err := s.beginServedAdmission(ctx, turn, messages, tools, sampleMaxTokens(opts))
 	if err != nil {
 		return nil, err

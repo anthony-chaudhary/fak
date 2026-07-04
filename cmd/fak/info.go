@@ -118,6 +118,21 @@ type guardInfoVars struct {
 	// live session state. It is rendered from /debug/vars only; `fak info` never reads
 	// hidden transcript text to infer what the model might be assuming.
 	Assumptions []gateway.SessionAssumption `json:"assumptions,omitempty"`
+	// Endpoints is the live accounts+nodes block (the fak guard "status area"): which
+	// Claude seats and which serving nodes THIS session is using. Decoded straight into
+	// the gateway's own shape (info.go already imports gateway). Pointer, like VCache, so
+	// a gateway that set no provider — a fak serve gateway, or the accounts half of a
+	// non-subscription guard session — omits it rather than fabricating an empty roster.
+	Endpoints *gateway.SessionEndpoints `json:"endpoints"`
+	// Adjudication is the verdict roll-up promoted from the guard EXIT summary — the
+	// HONEST source for the live safety word, because kernel.Counters (the Kernel block
+	// above) is structurally ~0 on the guard Decide proxy. Nil on a cold gateway that has
+	// decided nothing and observed no tokens.
+	Adjudication *gateway.AdjudicationSummary `json:"adjudication"`
+	// Harness is the live harness-resource block (kernel CPU/RSS/IO/net) — the /debug/vars
+	// twin of the /metrics-only fak_harness_* family, so the pane can show live what the
+	// exit summary prints. Nil until the host samples a session.
+	Harness *gateway.SessionHarness `json:"harness"`
 	// StartupReport is the full startup report the guard recorded at boot — the banner +
 	// hook/auth notes an attended launch keeps compact (`fak guard --banner=auto`). The
 	// --startup flag prints it verbatim; empty means the gateway recorded none (a fak
@@ -141,6 +156,14 @@ type guardInfoSession struct {
 	ContextTokensLeft int    `json:"context_tokens_left"`
 	ElapsedSeconds    int64  `json:"elapsed_seconds"`
 	Assumptions       int    `json:"assumptions"`
+	// LastTool/SpawnCount/InflightSeconds/IdleSeconds are the live-status activity cell
+	// (#2627): the last ADMITTED tool name (payload-free), the admitted subagent-spawn
+	// count, and the in-flight-OR-idle age of the trace. A gateway that predates the
+	// fields simply omits them and these decode to zero (rendered as no clause).
+	LastTool        string `json:"last_tool"`
+	SpawnCount      int    `json:"spawn_count"`
+	InflightSeconds int64  `json:"inflight_seconds"`
+	IdleSeconds     int64  `json:"idle_seconds"`
 }
 
 // guardInfoManagedContext is the wire shape of a
@@ -706,8 +729,11 @@ func renderGuardInfoLine(v guardInfoVars) string {
 	}
 	line := fmt.Sprintf("%s · %s · replies %d · busy with %d · running %s",
 		cache,
-		guardFloorSafetyWord(v.Kernel.Denies, v.Kernel.Transforms, v.Kernel.Quarantines, v.Kernel.ResultDenies),
+		guardSafetyWord(v),
 		v.Inference.Turns, v.Gateway.InflightRequests, humanUptime(v.Gateway.UptimeSeconds))
+	if ep := guardInfoEndpointsSummary(v.Endpoints); ep != "" {
+		line += " · " + ep
+	}
 	// "turns saved": engine calls fak avoided for the agent this session (the same
 	// WITNESSED FakVDSOAvoidedCalls the visual pane's trends row and the exit summary
 	// report). Shown only when a call was actually avoided so a session that saved nothing
@@ -946,6 +972,20 @@ func absFloat(v float64) float64 {
 		return -v
 	}
 	return v
+}
+
+// guardSafetyWord is the safety summary the live line + panels render. It prefers the
+// operation-ledger ADJUDICATION tally — the honest source on the flagship `fak guard --
+// claude` proxy, where the kernel adjudicates with Decide and so the raw kernel.Counters
+// (the Kernel block) stay structurally ~0, which made the old "safety: blocked N" read a
+// vacuous 0 while the floor was actually refusing calls. It falls back to the kernel
+// counters for a fak serve gateway that has no adjudication block. Same formatting either
+// way via guardFloorSafetyWord.
+func guardSafetyWord(v guardInfoVars) string {
+	if a := v.Adjudication; a != nil {
+		return guardFloorSafetyWord(int64(a.Denied), int64(a.Transformed), int64(a.Quarantined), 0)
+	}
+	return guardFloorSafetyWord(v.Kernel.Denies, v.Kernel.Transforms, v.Kernel.Quarantines, v.Kernel.ResultDenies)
 }
 
 // guardFloorSafetyWord summarizes, in plain words, what fak did this session to keep you safe:
