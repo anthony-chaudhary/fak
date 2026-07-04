@@ -91,7 +91,8 @@ const dispatchLeaseIDSidecarSuffix = ".lease-id"
 const dispatchStartupBundleSidecarSuffix = ".startup.json"
 const dispatchStartupBundleSchema = "fleet-worker-startup-bundle/1"
 
-var dispatchResolvePIDRE = regexp.MustCompile(`^resolve-\d+-\d{8}-\d{6}\.pid$`)
+var dispatchResolvePIDRE = regexp.MustCompile(`^(?:resolve|repair)-\d+-\d{8}-\d{6}\.pid$`)
+var dispatchGoalPIDRE = regexp.MustCompile(`^.+-\d{8}-\d{6}\.pid$`)
 
 func runDispatchTick(stdout, stderr io.Writer, argv []string) int {
 	opts, asJSON, code := parseDispatchTickFlags(stderr, argv)
@@ -111,7 +112,29 @@ func runDispatchTick(stdout, stderr io.Writer, argv []string) int {
 	} else {
 		fmt.Fprint(stdout, renderDispatchTick(payload))
 	}
-	if ok, _ := payload["ok"].(bool); ok {
+	return dispatchTickExitCode(payload)
+}
+
+var dispatchTickBenignActions = map[string]bool{
+	"spawned":             true,
+	"would_spawn":         true,
+	"refused":             true,
+	"no_lane":             true,
+	"no_issue":            true,
+	"self_modify_hold":    true,
+	"in_flight_duplicate": true,
+	"collision_risk":      true,
+	"lane_busy":           true,
+	"lane_leased":         true,
+	"broker_denied":       true,
+}
+
+func dispatchTickExitCode(payload map[string]any) int {
+	if payload == nil {
+		return 1
+	}
+	action := dispatchMapString(payload, "action")
+	if dispatchTickBenignActions[action] {
 		return 0
 	}
 	return 1
@@ -454,9 +477,13 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	if opts.Backend != "opencode" && opts.Backend != "codex" {
 		model = ""
 	}
-	preview, err := dispatchtick.BuildWorkerCommand(opts.Backend, dispatchtick.PreviewPrompt(target, promptChars), model)
+	fallbackModel := dispatchWorkerFallbackModel(opts.Backend)
+	preview, err := dispatchtick.BuildWorkerCommand(opts.Backend, dispatchtick.PreviewPrompt(target, promptChars), model, fallbackModel)
 	if err != nil {
 		return nil, err
+	}
+	if fallbackModel != "" {
+		payload["worker_fallback_model"] = fallbackModel
 	}
 	launchPreview, guardedPreview := guardedDispatchCommand(root, pick.Lane, opts.Backend, preview)
 	payload["command"] = dispatchtick.LaunchCommandShape(preview, root, account)
@@ -565,7 +592,7 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	}
 
 	prompt := dispatchMapString(promptRec, "prompt")
-	command, err := dispatchtick.BuildWorkerCommand(opts.Backend, prompt, model)
+	command, err := dispatchtick.BuildWorkerCommand(opts.Backend, prompt, model, dispatchWorkerFallbackModel(opts.Backend))
 	if err != nil {
 		return nil, err
 	}
@@ -784,6 +811,33 @@ func guardedDispatchCommand(root, lane, backend string, command []string) ([]str
 	fakBin := resolveDispatchFakBin(root)
 	baseURL := strings.TrimSpace(os.Getenv("FLEET_DOGFOOD_GUARD_BASEURL"))
 	return dispatchtick.GuardedLaunchCommand(command, fakBin, lane, backend, root, baseURL)
+}
+
+// dispatchWorkerFallbackModel resolves the Claude fallback CHAIN a headless dispatch
+// worker hands to `claude -p --fallback-model`, so an unattended fleet turn degrades to
+// a backup model through a transient overload/unavailability window instead of dying and
+// re-dispatching the same walled model. It is the background/headless counterpart of the
+// interactive launcher's chain (accounts_launch.go's defaultLaunchFallbackModel), and it
+// reuses that same default (Opus 4.8) so both fronts fall back the same way. The flag is
+// Claude-specific and print-mode scoped, so it applies ONLY to the claude backend; codex
+// and opencode pin their own model via -m and get "". FLEET_WORKER_FALLBACK_MODEL overrides
+// the default (a comma-separated chain, e.g. "claude-opus-4-8,claude-sonnet-5"); an explicit
+// empty/off/none/disable/0/false DISABLES it (restores the historical no-fallback command),
+// so an operator who needs the worker pinned to exactly the seat model for a benchmark or a
+// model-accounting run can turn it off without a rebuild.
+func dispatchWorkerFallbackModel(backend string) string {
+	if backend != "claude" {
+		return ""
+	}
+	raw, ok := os.LookupEnv("FLEET_WORKER_FALLBACK_MODEL")
+	if !ok {
+		return defaultLaunchFallbackModel
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "0", "off", "false", "no", "none", "disable", "disabled":
+		return ""
+	}
+	return strings.TrimSpace(raw)
 }
 
 func guardDisabled() bool {

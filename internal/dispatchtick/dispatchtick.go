@@ -24,7 +24,7 @@ const (
 	OpencodePromptNotice = "Resolve GitHub issue # from the attached dispatch prompt."
 	// FallbackMaxWorkers is the built-in aspirational ceiling used when the
 	// operator sets no FAK_MAX_WORKERS; see DefaultMaxWorkers for the contract.
-	FallbackMaxWorkers     = 8
+	FallbackMaxWorkers     = 20
 	DefaultCooldownMinutes = 120
 	DefaultWorkerTimeoutS  = 1800
 	DefaultSpawnProbeS     = 5.0
@@ -33,16 +33,15 @@ const (
 
 // DefaultMaxWorkers is the operator's *aspirational* outer ceiling on live
 // dispatch workers, not the safety bound. The real DoS proof is the preflight's
-// adaptive cap = min(this, host_cap, seats): host_cap (#1337) auto-throttles to
-// the box's current cores/RAM/thread headroom, and the seat pool (#1336) hard-
-// bounds at one worker per routable account so a spawn can never double-book a
-// rate limit. Raised 4->8 after the 2->4 doubling proved the pattern: the static
-// ceiling's only job is to sit ABOVE the adaptive gates -- which can only LOWER
-// the effective cap -- so concurrency rises to what the box and the account pool
-// can actually carry and no further (the 2026-07-01 headroom audit witnessed
-// host_cap 16 with the static caps binding first). Resolved once at startup from
-// FAK_MAX_WORKERS so the fleet-wide ceiling is an env knob shared with the
-// Python launchers, not a rebuild.
+// adaptive cap = min(this, host_cap, account_slots): host_cap (#1337) auto-throttles
+// to the box's current cores/RAM/thread headroom, and the account session-slot pool
+// (#1336) hard-bounds launches so a spawn can never exceed the live account budget.
+// Raised 8->20 when Claude worker accounts were verified to carry
+// four sessions each: the static ceiling's only job is to sit ABOVE the adaptive
+// gates -- which can only LOWER the effective cap -- so concurrency rises to what
+// the box and the account pool can actually carry and no further. Resolved once
+// at startup from FAK_MAX_WORKERS so the fleet-wide ceiling is an env knob shared
+// with the Python launchers, not a rebuild.
 var DefaultMaxWorkers = envPosInt("FAK_MAX_WORKERS", FallbackMaxWorkers)
 
 // envPosInt returns the positive-int value of the named env var, or fallback on
@@ -129,10 +128,26 @@ func PreviewPrompt(issue, chars int) string {
 }
 
 // BuildWorkerCommand returns the backend-specific issue-resolution worker argv.
-func BuildWorkerCommand(backend, prompt, model string) ([]string, error) {
+//
+// fallbackModel is the comma-separated Claude fallback CHAIN handed to `claude -p`
+// via --fallback-model: when the primary (seat-default) model is overloaded or
+// unavailable, Claude Code retries the same headless turn on the next model in the
+// list instead of failing the worker outright. It is Claude-specific and print-mode
+// scoped — the flag only takes effect under -p — so it is emitted ONLY for the claude
+// backend and only when non-empty; opencode/codex pin their own model with -m and
+// ignore it. Empty disables the flag (historical behavior). The cmd/fak shell resolves
+// the default and the env override, keeping this leaf pure. This is the background/
+// headless counterpart of the interactive `fak accounts launch` fallback chain
+// (accounts_launch.go): unattended fleet work degrades gracefully to the fallback model
+// through a transient overload window instead of dying and re-dispatching the same model.
+func BuildWorkerCommand(backend, prompt, model, fallbackModel string) ([]string, error) {
 	switch backend {
 	case "claude":
-		return []string{"claude", "-p", "--permission-mode", "bypassPermissions", prompt}, nil
+		cmd := []string{"claude", "-p", "--permission-mode", "bypassPermissions"}
+		if strings.TrimSpace(fallbackModel) != "" {
+			cmd = append(cmd, "--fallback-model", fallbackModel)
+		}
+		return append(cmd, prompt), nil
 	case "opencode":
 		// --print-logs is required for unattended workers: opencode writes run-level
 		// failures such as GLM quota walls to its logger, and without this flag #1275

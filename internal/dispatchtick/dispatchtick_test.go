@@ -8,15 +8,34 @@ import (
 
 func TestBuildWorkerCommandMatchesBackends(t *testing.T) {
 	tests := []struct {
-		name    string
-		backend string
-		model   string
-		want    []string
+		name     string
+		backend  string
+		model    string
+		fallback string
+		want     []string
 	}{
 		{
-			name:    "claude prompt",
+			name:    "claude prompt, no fallback",
 			backend: "claude",
 			want:    []string{"claude", "-p", "--permission-mode", "bypassPermissions", "resolve it"},
+		},
+		{
+			// The headless worker gets --fallback-model (Claude-specific, print-mode scoped)
+			// before the trailing prompt so an unattended turn degrades to the backup model
+			// on a transient overload instead of dying on the walled default.
+			name:     "claude prompt with fallback chain",
+			backend:  "claude",
+			fallback: "claude-opus-4-8,claude-sonnet-5",
+			want:     []string{"claude", "-p", "--permission-mode", "bypassPermissions", "--fallback-model", "claude-opus-4-8,claude-sonnet-5", "resolve it"},
+		},
+		{
+			// --fallback-model is Claude-only: opencode pins its own model with -m and never
+			// gets the Claude flag even when a fallback is passed.
+			name:     "opencode ignores claude fallback",
+			backend:  "opencode",
+			model:    "glm-5.2",
+			fallback: "claude-opus-4-8",
+			want:     []string{"opencode", "run", "--print-logs", "--dangerously-skip-permissions", "-m", "glm-5.2", OpencodePromptNotice},
 		},
 		{
 			name:    "opencode pins model",
@@ -36,7 +55,7 @@ func TestBuildWorkerCommandMatchesBackends(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := BuildWorkerCommand(tt.backend, "resolve it", tt.model)
+			got, err := BuildWorkerCommand(tt.backend, "resolve it", tt.model, tt.fallback)
 			if err != nil {
 				t.Fatalf("BuildWorkerCommand: %v", err)
 			}
