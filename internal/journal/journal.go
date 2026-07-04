@@ -164,6 +164,16 @@ func (j *Journal) Emit(ev abi.Event) {
 // append stamps the order/time anchor + chain hash and commits the row.
 func (j *Journal) append(row Row) {
 	j.mu.Lock()
+	j.appendLocked(row)
+	j.mu.Unlock()
+}
+
+// appendLocked is the commit core; the caller must already hold j.mu. It stamps
+// the order/time anchor + chain hash onto the row and commits it (disk write,
+// recent tail, best-effort live fan-out). Cut appends its boundary anchor through
+// this so the anchor obeys every Journal invariant (chain head, recent tail,
+// subscribers) while Cut keeps the lock across the whole rotation.
+func (j *Journal) appendLocked(row Row) {
 	j.seq++
 	row.Seq = j.seq
 	row.TSUnixNano = j.clock().UnixNano()
@@ -189,7 +199,6 @@ func (j *Journal) append(row Row) {
 			j.dropped++
 		}
 	}
-	j.mu.Unlock()
 }
 
 // Subscribe returns a live channel of rows committed AFTER the call, plus a
