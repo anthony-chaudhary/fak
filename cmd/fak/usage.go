@@ -199,10 +199,12 @@ const usageCoreText = `usage:
                  and exits 1, a thin sample abstains  -  #1993)
   fak agent     [--task STR] [--provider openai|anthropic|gemini|xai]
                 [--base-url URL --model M --api-key-env VAR | --offline]
-                [--max-turns N] [--out agent-report.json] [--policy FILE]   (LIVE turn-count A/B)
+                [--max-turns N] [--out agent-report.json] [--policy FILE]
+                [--route-manifest FILE]   (LIVE turn-count A/B)
   fak api-host  readiness|acceptance
                 (native no-spend API-host bridge probes: /models readiness and typed
-                 acceptance classification over target specs or an api-host roster)
+                 acceptance classification over target specs, an api-host roster, or a
+                 fak route model-account roster via --from-model-accounts)
   fak llmd-smoke --base-url URL [--model M] [--api-key-env VAR] [--metrics-url URL]
                  [--timeout 15s] [--json]
                 (LLM-D SMOKE WITNESS: probe an llm-d Gateway API OpenAI-compatible
@@ -525,16 +527,6 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
                  After the Codex child exits it best-effort writes sanitized vCache
                  token-counter artifacts and updates the default score snapshot; use
                  --dry-run first to print the exact launch command)
-  fak guard-verdict-rsi fold|run|--check
-                (the GUARD VERDICT RSI loop: folds the real guard decision journal,
-                 scores verdict-quality, and keeps only on rows + strict gain + witness)
-  fak guard-rsi-scorecard [--json] [--markdown] [--compare FILE]
-                (native control-pane payload for guard RSI loop maturity and realized value)
-  fak dogfood-score [--json] [--markdown] [--compare FILE] [--window-hours N]
-                (scores the launched-session dogfooding loop: is it WIRED to run honestly,
-                 and does the model report itself truthfully  -  the keystone defect is a turn
-                 that claims success over an OBSERVED Stop-hook error, read from real transcripts;
-                 also grades the CHAIN axis: packet freshness + report-to-issues bridging)
   fak dogfood-issues [REPORT.json] [--live|--fetch-existing] [--json] [--label L]
                 (bridges a recent-feature dogfood report's ACTION findings into stable,
                  deduplicated GitHub issues so friction is filed by the loop, not stumbled
@@ -543,30 +535,12 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
                  gh and --fetch-existing verifies against the tracker -- both leave an
                  issues-sync.json receipt beside the report, which dogfood-score's chain
                  axis and the improve-loops super loop read)
-  fak token-defaults-scorecard [--json] [--markdown] [--compare FILE]
-                (native token-saving-defaults control-pane payload)
-  fak skill-effectiveness-scorecard [--json] [--markdown]
-                (native skill-pack effectiveness control-pane payload)
-  fak conflation-scorecard [--json] [--markdown] [--compare FILE]
-                (native provenance-honesty control-pane payload: every reported number/status
-                 labels its provenance -- WITNESSED vs OBSERVED -- folded into conflation_debt)
-  fak ui-quality-scorecard [--json] [--markdown] [--compare FILE]
-                (native terminal UI/UX control-pane payload: the fak console panes, fak info
-                 overlay, and fak guard --split graded for rune-safe truncation, cell-aware
-                 column pads, empty-state branches, info-legend + console-help coverage --
-                 folded into ui_quality_debt)
   fak claim-check --self-test | --file claim.json | --statement S --baseline real|strawman|none
                   [--net] --scope S --provenance WITNESSED|OBSERVED|MODELED|SIMULATED --witness S
                   [--realized=false --gate-reason R] [--json]
                 (the named NET-TRUE follow-on (#1171): grade an efficiency/perf claim against
                  the six-question net-true-value rubric -> net-true (0) / strawman (3) / not-yet
                  (3). --self-test grades the built-in honest+strawman corpus. docs/standards/net-true-value.md)
-  fak support-maturity-scorecard [--json] [--markdown] [--compare FILE]
-                [--matrix-md] [--write-doc] [--check-doc] [--workspace DIR]
-                (native support-maturity payload: fold the generated model x backend coverage
-                 matrix into support_maturity_debt, coverage percentage, and an A-F grade.
-                 --matrix-md emits the generated matrix block; --write-doc regenerates it in
-                 docs/HARDWARE-MATRIX.md; --check-doc reds when a committed cell is stale)
   fak support [--json] [--family SUBSTR] [--backend NAME]
                 (per-cell support read-out: one line per model x backend cell folding the
                  scorecard grid + rung->regime router into rung . regime . target .
@@ -592,9 +566,6 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
                  posts free-form product prose (persona items, direction calls). Same
                  workspace as #scoreboard but resolves FAK_PRODUCT_CHANNEL -- never falls
                  back to #scoreboard. Posts via FAK_SCOREBOARD_TOKEN, not the lab token)
-  fak product-scorecard [--json|--chart|--critical|--gaps|--compare FILE|--markdown-dir DIR]
-                (native product-readiness scorecard over CLAIMS.md and
-                 tools/product_scorecard.data; emits the product_debt control-pane payload)
   fak nodeusage post [--fleet snap.json | --kpi NAME --value V --grade G --verdict OK|ACTION |
                 --from FILE] [--detail D] [--title T] [--channel ID] [--source WHO] [--dry-run]
                 (the COMPUTE-NODE-USAGE Slack surface for #node-usage: --fleet folds a
@@ -659,11 +630,6 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
                  vs REALIZED behavior over a corpus of real Claude Code transcripts and
                  trends the per-lever calibration error; --append-history records a dated
                  row in docs/dojo/history.jsonl; list shows the registered levers)
-  fak dojo-rsi  fold|propose|run|loop|trend
-                (the self-pacing dojo RSI loop: selects the next calibration cell by
-                 novelty x value x staleness, journals KEEP/REVERT/ESCALATE rows in
-                 docs/dojo/rsi-journal.jsonl, routes REPROJECT/HARVEST to the agent arm,
-                 and renders the committed KEEP/REVERT trend for CI)
   fak nightrun  next | plan | run [--apply] [--loop] [--max N] | ledger | caps  [--json]
                 (RUN IT ALL NIGHT: the local-capability-aware data-collection door.
                  Probes THIS box (gpu/weights/datasets/creds), ranks the feasible-here
@@ -716,8 +682,15 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
   fak webbench  describe | eval | compare    (frontier web/browser agent benchmarking)
   fak swebench  describe | eval | compare    (SWE-bench Verified benchmarking)
   fak dojo      run --corpus DIR | list    (prediction-vs-reality calibration gym)
-  fak dojo-rsi  fold|propose|run|loop|trend (dojo self-improvement loop)
-  fak version
+  fak score     <name> [--json] [--markdown] [--compare FILE]   (#1505)
+                (parent verb for the meta-scorecards / RSI loops -- one grouped surface for the
+                 tooling an operator does not drive day to day. 'fak score list' names them:
+                 conflation, dogfood, dojo-rsi, guard-rsi, guard-verdict-rsi, product,
+                 skill-effectiveness, support-maturity, token-defaults, ui-quality. Each
+                 forwards to the same handler the legacy top-level verb ran, so
+                 'fak score conflation --json' == the old 'fak conflation-scorecard --json';
+                 the legacy verbs stay as thin aliases)
+  fak version   [modules [--json] [--stamp] [--scores F.json]]  (binary version; per-module version report)
 
 every tool call crosses one in-process syscall boundary: vDSO -> adjudicate ->
 pre-flight/grammar -> dispatch -> context-MMU admit.

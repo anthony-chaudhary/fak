@@ -103,7 +103,7 @@ def test_support_maturity_scorecard_registered() -> None:
         "key": "support_maturity",
         "debt": "support_maturity_debt",
         "script": "",
-        "cmd": "go run ./cmd/fak support-maturity-scorecard --json",
+        "cmd": "go run ./cmd/fak score support-maturity --json",
         "label": "support-maturity",
     }
 

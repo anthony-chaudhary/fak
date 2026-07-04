@@ -402,6 +402,11 @@ func main() {
 		cmdSkillEffectivenessScorecard(os.Args[2:])
 	case "conflation-scorecard":
 		cmdConflationScorecard(os.Args[2:])
+	case "score":
+		// Parent verb grouping the meta-scorecards / RSI loops (#1505): `fak score <name>` routes
+		// to the same handler each legacy top-level *-scorecard/*-score/*-rsi verb ran (see
+		// score.go). Behavior-preserving; the legacy verbs stay wired below as thin aliases.
+		cmdScore(os.Args[2:])
 	case "scorecard":
 		cmdScorecardPane(os.Args[2:])
 	case "repo-hygiene-scorecard":
