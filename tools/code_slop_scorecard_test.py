@@ -238,6 +238,54 @@ def test_duplication_catches_reformatted_clone():
     assert k["score"] < 100
 
 
+# --- duplication sub-category re-projection (payoff taxonomy) --------------
+
+def test_duplication_subcategory_extractable_ordered_before_pair():
+    # The keystone re-projection: a >=3-site cross-file group (the real missing-helper)
+    # must be LABELLED extractable and EMITTED before a 2-site pair, so a /slop-score
+    # loop retires the high-payoff clone first instead of whatever sorted first by path.
+    files = {
+        "a.go": "package a\n" + _dup_block("sum"),   # extractable group: 3 cross-file
+        "b.go": "package b\n" + _dup_block("sum"),
+        "c.go": "package c\n" + _dup_block("sum"),
+        "d.go": "package d\n" + _same_skeleton("f", "p", "q", "s", "r"),  # pair: 2 sites
+        "e.go": "package e\n" + _same_skeleton("f", "p", "q", "s", "r"),
+    }
+    k = cs.kpi_duplication(files)
+    assert k["defects"][0].startswith("[extractable]"), k["defects"]
+    ext_i = next(i for i, d in enumerate(k["defects"]) if d.startswith("[extractable]"))
+    pair_i = next(i for i, d in enumerate(k["defects"]) if d.startswith("[pair]"))
+    assert ext_i < pair_i, k["defects"]
+    assert k["subcategories"]["extractable"] == 1
+    assert k["subcategories"]["pair"] == 1
+
+
+def test_duplication_subcategory_local_self_clone():
+    # Two identical bodies in ONE file -> a same-file self-clone: a distinct fix (local
+    # helper / loop), labelled `local`, never mislabelled cross-cutting `extractable`.
+    files = {"a.go": "package a\n" + _dup_block("sumA") + _dup_block("sumB")}
+    k = cs.kpi_duplication(files)
+    assert len(k["defects"]) == 1, k["defects"]
+    assert k["defects"][0].startswith("[local]"), k["defects"]
+    assert k["subcategories"] == {"extractable": 0, "local": 1, "pair": 0}
+
+
+def test_duplication_subcategories_are_coverage_neutral():
+    # The re-projection must not change WHAT is HARD: the histogram partitions exactly the
+    # emitted defect groups (sum of buckets == number of defect lines == the debt count),
+    # so slop_debt and score are identical to the pre-split flat count.
+    files = {
+        "a.go": "package a\n" + _dup_block("sum"),
+        "b.go": "package b\n" + _dup_block("sum"),
+        "c.go": "package c\n" + _dup_block("sum"),
+        "d.go": "package d\n" + _same_skeleton("f", "p", "q", "s", "r"),
+        "e.go": "package e\n" + _same_skeleton("f", "p", "q", "s", "r"),
+    }
+    k = cs.kpi_duplication(files)
+    assert sum(k["subcategories"].values()) == len(k["defects"])
+    assert set(k["subcategories"]) == {"extractable", "local", "pair"}
+
+
 # --- go_tokens (the #780 token-stream foundation) -------------------------
 
 def test_go_tokens_literal_is_one_token():
@@ -623,6 +671,26 @@ def test_payload_without_promotion_block_omits_corpus_key():
     kpis = [_kpi(n, []) for n in cs.KPI_WEIGHTS]
     p = cs.build_payload(workspace="/x", kpis=kpis)
     assert "stub_masquerade_promotion" not in p["corpus"]
+
+
+def test_payload_lifts_dup_subcategories_to_corpus():
+    # The duplication payoff histogram must be reachable from corpus (what the control-pane
+    # reads) so the worst-first loop can target `dup_extractable` directly.
+    dup = {"kpi": "duplication", "score": 98, "detail": "1 duplicated block(s)",
+           "defects": ["[pair] clone x2"], "soft": [],
+           "subcategories": {"extractable": 0, "local": 0, "pair": 1}}
+    kpis = [dup, _kpi("dead_code", []), _kpi("comment_slop", []),
+            _kpi("vacuous_tests", []), _kpi("stub_masquerade", []), _kpi("churn_bloat", [])]
+    p = cs.build_payload(workspace="/x", kpis=kpis)
+    assert p["corpus"]["dup_subcategories"] == {"extractable": 0, "local": 0, "pair": 1}
+
+
+def test_payload_without_dup_subcategories_omits_corpus_key():
+    # a duplication KPI without the split (e.g. a legacy fixture) must not synthesize the
+    # corpus key — the lift is defensive, never fabricated.
+    kpis = [_kpi(n, []) for n in cs.KPI_WEIGHTS]
+    p = cs.build_payload(workspace="/x", kpis=kpis)
+    assert "dup_subcategories" not in p["corpus"]
 
 
 def test_payload_breakdown_worst_first():

@@ -646,6 +646,36 @@ def _is_sort_scaffold_only(key: tuple[str, ...]) -> bool:
     return True
 
 
+# Duplication payoff taxonomy (docs/notes/SLOP-DEBT-SUBCATEGORIES-AND-SYSTEMIC-APPROACH-
+# 2026-07-03.md). A surviving HARD clone group collapses to +1 debt regardless of shape,
+# so the flat count cannot tell a 46-line x21 missing-helper from a 6-line x2 idiom. The
+# re-projection LABELS each survivor's shape and orders emission worst-first by payoff so
+# a /slop-score loop retires the real extractable clones before it touches a pair. This is
+# a pure re-projection: every survivor is still one HARD unit (coverage unchanged); only
+# ORDER and LABEL change, plus a `subcategories` histogram on the KPI result. The note's
+# advisory kinds (dup_test / dup_data) are moot for THIS detector: kpi_duplication is fed
+# the non-test production corpus only (gather_go routes _test.go to test_files, and the
+# logic-token gate already drops pure string/import windows upstream), so every reachable
+# survivor lands in one of the three buckets below — no dead-kpi-field.
+_DUP_ORDER = {"extractable": 0, "local": 1, "pair": 2}
+
+
+def _dup_subcategory(sites: list[tuple[str, int, int]]) -> str:
+    """Classify a surviving clone group by its site geometry alone (no file content):
+      extractable — >=3 sites across >=2 files: the missing shared helper, the number the
+                    note names as the one to drive to zero.
+      local       — every site in one file: a distinct fix (local helper / loop), not
+                    cross-cutting rot.
+      pair        — exactly 2 sites across 2 files: real, but may not pay for indirection.
+    """
+    files_set = {f for f, _, _ in sites}
+    if len(files_set) == 1:
+        return "local"
+    if len(sites) >= 3:
+        return "extractable"
+    return "pair"
+
+
 def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
     """Copy-paste clones, measured on the normalized Go token stream (#780). For every
     file, slide a CLONE_WINDOW_TOKENS-token window over ``go_tokens`` output, keep only
@@ -758,7 +788,7 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
 
     defects: list[str] = []
     soft: list[str] = []
-    groups = 0
+    survivors: list[list[tuple[str, int, int]]] = []
     for sites in group_sites:
         # FIX 1: signature-only func-header FP. When a window's whole 34-token span is
         # on a single line (e == s) that begins with `func `, it is a param-list/type
@@ -803,20 +833,38 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
             continue
         if max(e - s + 1 for f, s, e in sites) < CLONE_MIN_GROUP_SPAN:
             continue  # sub-6-line fragment: idiomatic, not extractable slop
-        groups += 1
-        if len(defects) < CLONE_GROUPS_CAP:
-            shown = ", ".join(f"{f}:{s}" for f, s, _ in sites[:4])
-            more = f" (+{len(sites) - 4} more)" if len(sites) > 4 else ""
-            f0, s0, e0 = sites[0]
-            span = max(1, e0 - s0 + 1)
-            sample = _clone_sample(files.get(f0, ""), s0)
-            defects.append(
-                f"clone x{len(sites)} (~{span} lines): {shown}{more} — '{sample[:60]}…'")
+        survivors.append(sites)
+
+    # Re-project the survivors onto the payoff taxonomy and EMIT WORST-FIRST: highest
+    # ordering rank (extractable) first, then within a rank the biggest payoff
+    # (span x sites) first, so the capped/first-read work-list surfaces the real
+    # missing-helpers rather than whatever sorted first by path. Coverage is unchanged:
+    # groups == len(survivors) exactly as before, so score and slop_debt do not move.
+    classified = [(_dup_subcategory(sites), sites) for sites in survivors]
+    counts = {"extractable": 0, "local": 0, "pair": 0}
+    for kind, _ in classified:
+        counts[kind] += 1
+    classified.sort(key=lambda ks: (
+        _DUP_ORDER[ks[0]],
+        -(max(e - s + 1 for _, s, e in ks[1]) * len(ks[1])),
+        ks[1][0][0], ks[1][0][1]))
+    for kind, sites in classified:
+        if len(defects) >= CLONE_GROUPS_CAP:
+            break
+        shown = ", ".join(f"{f}:{s}" for f, s, _ in sites[:4])
+        more = f" (+{len(sites) - 4} more)" if len(sites) > 4 else ""
+        f0, s0, e0 = sites[0]
+        span = max(1, e0 - s0 + 1)
+        sample = _clone_sample(files.get(f0, ""), s0)
+        defects.append(
+            f"[{kind}] clone x{len(sites)} (~{span} lines): {shown}{more} — '{sample[:60]}…'")
+    groups = len(survivors)
     score = _clamp(100 - 2 * groups)
-    detail = ("no copy-paste clones" if groups == 0
-              else f"{groups} duplicated block(s) (copy-pasted across 2+ sites)")
+    detail = ("no copy-paste clones" if groups == 0 else
+              f"{groups} duplicated block(s): {counts['extractable']} extractable · "
+              f"{counts['local']} local · {counts['pair']} pair")
     return {"kpi": "duplication", "score": score, "detail": detail,
-            "defects": defects, "soft": soft}
+            "defects": defects, "soft": soft, "subcategories": counts}
 
 
 def _func_bodies(code: list[str]) -> list[tuple[str, int, list[str]]]:
@@ -1383,6 +1431,13 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
     stub_promotion = (by_name.get("stub_masquerade") or {}).get("promotion")
     if stub_promotion:
         corpus["stub_masquerade_promotion"] = stub_promotion
+
+    # Surface the duplication payoff histogram as its own control-pane-reachable line
+    # so the worst-first loop can target `dup_extractable` (the real missing-helpers)
+    # directly rather than the flat count. Absent on fixtures without the split.
+    dup_sub = (by_name.get("duplication") or {}).get("subcategories")
+    if dup_sub:
+        corpus["dup_subcategories"] = dup_sub
 
     if slop_debt == 0:
         ok, verdict, finding = True, "OK", "code_slop_clean"
