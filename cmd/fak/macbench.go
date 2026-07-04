@@ -105,6 +105,7 @@ func runMacBenchWatch(stdout, stderr io.Writer, argv []string) int {
 	healthTimeout := fs.Duration("health-timeout", 20*time.Second, "timeout for each health poll")
 	runTimeout := fs.Duration("run-timeout", 2*time.Hour, "timeout for the full macbench run after health turns green")
 	resultPath := fs.String("result", "", "optional path for the full macbench result JSON")
+	logPath := fs.String("log", "", "optional append-only log path for health and full macbench JSON reports")
 	decodeTokens := fs.String("decode-tokens", "256,512", "comma-separated max_tokens for decode-longgen")
 	prefillTokens := fs.String("prefill-tokens", "128,512,2048,4096", "comma-separated prompt-token targets for prefill-sweep")
 	concurrency := fs.Int("concurrency", 2, "concurrent requests for the 2stream suite")
@@ -142,7 +143,10 @@ func runMacBenchWatch(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak macbench watch: %v\n", err)
 			return 1
 		}
-		_ = writeIndentedJSONNoEscape(stdout, health)
+		if err := writeMacBenchWatchReport(stdout, *logPath, health); err != nil {
+			fmt.Fprintf(stderr, "fak macbench watch: write --log: %v\n", err)
+			return 1
+		}
 		if health.Health.OK {
 			return runMacBenchWatchFull(stdout, stderr, macBenchWatchRunOptions{
 				gateway:       *gateway,
@@ -154,6 +158,7 @@ func runMacBenchWatch(stdout, stderr io.Writer, argv []string) int {
 				sshKey:        *sshKey,
 				timeout:       *runTimeout,
 				resultPath:    *resultPath,
+				logPath:       *logPath,
 				decodeTokens:  dec,
 				prefillTokens: pre,
 				concurrency:   *concurrency,
@@ -177,6 +182,7 @@ type macBenchWatchRunOptions struct {
 	sshKey        string
 	timeout       time.Duration
 	resultPath    string
+	logPath       string
 	decodeTokens  []int
 	prefillTokens []int
 	concurrency   int
@@ -203,7 +209,10 @@ func runMacBenchWatchFull(stdout, stderr io.Writer, opts macBenchWatchRunOptions
 		fmt.Fprintf(stderr, "fak macbench watch: %v\n", err)
 		return 1
 	}
-	_ = writeIndentedJSONNoEscape(stdout, rep)
+	if err := writeMacBenchWatchReport(stdout, opts.logPath, rep); err != nil {
+		fmt.Fprintf(stderr, "fak macbench watch: write --log: %v\n", err)
+		return 1
+	}
 	if strings.TrimSpace(opts.resultPath) != "" {
 		if err := writeMacBenchResultFile(opts.resultPath, rep); err != nil {
 			fmt.Fprintf(stderr, "fak macbench watch: write --result: %v\n", err)
@@ -214,6 +223,26 @@ func runMacBenchWatchFull(stdout, stderr io.Writer, opts macBenchWatchRunOptions
 		return 1
 	}
 	return 0
+}
+
+func writeMacBenchWatchReport(stdout io.Writer, logPath string, rep macbench.Report) error {
+	_ = writeIndentedJSONNoEscape(stdout, rep)
+	logPath = strings.TrimSpace(logPath)
+	if logPath == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	return enc.Encode(rep)
 }
 
 func writeMacBenchResultFile(path string, rep macbench.Report) error {

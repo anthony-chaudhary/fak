@@ -64,6 +64,7 @@ func TestMacBenchWatchWritesResultWhenHealthy(t *testing.T) {
 	defer ts.Close()
 
 	result := t.TempDir() + "/macbench-result.json"
+	logPath := t.TempDir() + "/macbench-watch.log"
 	var stdout, stderr bytes.Buffer
 	code := runMacBench(&stdout, &stderr, []string{
 		"watch",
@@ -80,6 +81,7 @@ func TestMacBenchWatchWritesResultWhenHealthy(t *testing.T) {
 		"--prefill-tokens", "8",
 		"--concurrency", "1",
 		"--result", result,
+		"--log", logPath,
 	})
 	if code != 0 {
 		t.Fatalf("runMacBench watch code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
@@ -93,6 +95,13 @@ func TestMacBenchWatchWritesResultWhenHealthy(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"suite": "health"`) || !strings.Contains(stdout.String(), `"suite": "all"`) {
 		t.Fatalf("watch stdout did not include health and full reports:\n%s", stdout.String())
+	}
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !strings.Contains(string(logBytes), `"suite": "health"`) || !strings.Contains(string(logBytes), `"suite": "all"`) {
+		t.Fatalf("watch log did not include health and full reports:\n%s", logBytes)
 	}
 }
 
