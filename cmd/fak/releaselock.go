@@ -29,7 +29,7 @@ func runReleaseLock(stdout, stderr io.Writer, argv []string) int {
 	case "-h", "--help", "help":
 		releaseLockUsage(stdout)
 		return 0
-	case "acquire", "release", "status":
+	case "acquire", "renew", "release", "status":
 		// handled below
 	default:
 		fmt.Fprintf(stderr, "fak release-lock: unknown subcommand %q\n", sub)
@@ -57,6 +57,9 @@ func runReleaseLock(stdout, stderr io.Writer, argv []string) int {
 	case "acquire":
 		st, err := release.Acquire(opts, *ttl, *note, !*noSteal, *force)
 		return emitLockResult(stdout, stderr, *asJSON, st, err, "acquire")
+	case "renew":
+		st, err := release.Renew(opts, *ttl, *force)
+		return emitLockResult(stdout, stderr, *asJSON, st, err, "renew")
 	case "release":
 		st, err := release.Release(opts, *force)
 		return emitLockResult(stdout, stderr, *asJSON, st, err, "release")
@@ -129,12 +132,20 @@ auto-cut AND a human /release — takes this SAME lock so they cannot race (#139
 
 Usage:
   fak release-lock acquire [--ttl 30m] [--owner TOKEN] [--note TEXT] [--no-steal-stale] [--force] [--json]
+  fak release-lock renew   [--ttl 30m] [--owner TOKEN] [--force] [--json]
   fak release-lock release [--owner TOKEN] [--force] [--json]
   fak release-lock status  [--json]
 
-Owner identity defaults to $FAK_RELEASE_OWNER, else $CLAUDE_CODE_SESSION_ID, else
-host+user+pid (stable within a session, so acquire/release auto-share an owner).
+renew is the heartbeat: extend a lock you already hold so a long critical section
+(a slow release ship blocked on a -race CI run) can keep the TTL short — a tight
+crash-recovery window — without letting the lease expire and be stolen mid-flight.
+It refuses (exit 3) if the lock is gone or now owned by another token; --force
+re-takes it. Renew from the SAME owner on a timer at roughly ttl/3.
 
-Exit codes: 0 ok, 2 usage, 3 contended/denied (held by another owner / not owner).
+Owner identity defaults to $FAK_RELEASE_OWNER, else $CLAUDE_CODE_SESSION_ID, else
+host+user+pid (stable within a session, so acquire/renew/release auto-share an owner).
+
+Exit codes: 0 ok, 2 usage, 3 contended/denied (held by another owner / not owner /
+lock lost).
 `)
 }

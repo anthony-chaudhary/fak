@@ -17,6 +17,11 @@ This helper is that lock. It is deliberately small and host-agnostic:
             held by another session; steal a *stale* one (past its TTL) or with
             --force. The lock records its owner, so the holder can re-prove identity
             across separate `python` invocations.
+  renew     extend a lock you already hold so its TTL restarts from now — the
+            heartbeat that keeps a long critical section (a slow `release ship`
+            blocked on a -race CI run) from expiring and being stolen mid-flight.
+            Refuse if the lock is gone / owned by another (that is the theft signal)
+            unless --force. Renew on a timer at ~ttl/3.
   verify    exit 0 iff the lock is held by --owner and not expired (used by
             release_bump.py to gate the VERSION mutation on lock ownership).
   guard     compare the *actually staged* set (`git diff --cached`) against the
@@ -43,6 +48,7 @@ Pure stdlib; off the request path (tooling seam). Exit codes: 0 ok, 2 usage,
 Usage:
   python tools/release_lock.py acquire --ttl 1800
   python tools/release_lock.py acquire --snapshot VERSION --snapshot docs/foo.md
+  python tools/release_lock.py renew --ttl 1800
   python tools/release_lock.py verify
   python tools/release_lock.py guard --allow VERSION --allow docs/releases/v0.5.0.md
   python tools/release_lock.py status
@@ -222,6 +228,57 @@ def acquire(root: Path, *, ttl: int, owner: str, snapshot: list[str], note: str 
     return {"ok": False, "reason": "contended", "detail": "lost the steal race 5x"}, EXIT_DENIED
 
 
+def renew(root: Path, *, owner: str, ttl: int, force: bool) -> tuple[dict, int]:
+    """Extend a lock the caller already holds — the heartbeat half of the
+    short-TTL/renew design, mirroring internal/release.Renew.
+
+    A long release (a `release ship` blocked on a slow -race CI run) can outlive a
+    tight TTL; renewing on a timer keeps the lease live so a concurrent cutter
+    cannot steal-stale it mid-flight, while the TTL stays a fast crash-recovery
+    window. Refuses (EXIT_DENIED) if the lock is gone or now owned by another
+    token — that mismatch is the theft signal, not something to paper over — unless
+    --force re-takes it. acquired_at, snapshot, and note are preserved when the
+    caller still owns it. The replace is atomic (os.replace) so a status read
+    never sees a free gap.
+    """
+    lock = read_lock(root)
+    mine = isinstance(lock, dict) and lock.get("owner") == owner
+    if lock is None and not force:
+        return {"ok": False, "reason": "gone"}, EXIT_DENIED
+    if lock is not None and not mine and not force:
+        return {"ok": False, "reason": "held by another", "holder": lock}, EXIT_DENIED
+
+    started = now()
+    acquired = started
+    if mine and isinstance(lock.get("acquired_at"), (int, float)):
+        acquired = lock["acquired_at"]
+    branch = git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
+    head = git(root, "rev-parse", "--short", "HEAD").strip()
+    payload = {
+        "owner": owner,
+        "pid": os.getpid(),
+        "host": host(),
+        "branch": branch or None,
+        "git_user": git(root, "config", "user.name").strip() or None,
+        "head_sha": head or None,
+        "acquired_at": acquired,
+        "ttl": ttl,
+        "expires_at": started + ttl,
+        "snapshot": list(lock.get("snapshot", [])) if mine else [],
+    }
+    if mine and lock.get("note"):
+        payload["note"] = lock["note"]
+
+    path = lock_path(root)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    os.replace(str(tmp), str(path))
+    out = {"ok": True, "renewed": True, "lock": payload}
+    if force and not mine and lock is not None:
+        out["stole"] = lock
+    return out, EXIT_OK
+
+
 def release(root: Path, *, owner: str | None, force: bool) -> tuple[dict, int]:
     lock = read_lock(root)
     if lock is None:
@@ -300,6 +357,11 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--no-steal-stale", action="store_true", help="do NOT auto-steal an expired lock")
     a.add_argument("--force", action="store_true", help="steal even a live lock (use sparingly)")
 
+    rn = sub.add_parser("renew", help="extend a lock you already hold (heartbeat for long critical sections)")
+    rn.add_argument("--ttl", type=int, default=DEFAULT_TTL, help=f"new lifetime in seconds from now (default {DEFAULT_TTL})")
+    rn.add_argument("--owner", default=None, help="owner token (default: session id)")
+    rn.add_argument("--force", action="store_true", help="renew even if the lock is gone or held by another")
+
     v = sub.add_parser("verify", help="exit 0 iff the lock is held by --owner")
     v.add_argument("--owner", default=None, help="owner token to check (default: session id)")
 
@@ -323,6 +385,11 @@ def main(argv: list[str] | None = None) -> int:
             root, ttl=args.ttl, owner=owner, snapshot=args.snapshot, note=args.note,
             steal_stale=not args.no_steal_stale, force=args.force,
         )
+        return _emit(payload, code)
+
+    if args.cmd == "renew":
+        owner = args.owner or default_owner()
+        payload, code = renew(root, owner=owner, ttl=args.ttl, force=args.force)
         return _emit(payload, code)
 
     if args.cmd == "verify":

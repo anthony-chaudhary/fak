@@ -134,6 +134,97 @@ func TestReleaseFreesLock(t *testing.T) {
 	}
 }
 
+// TestRenewExtendsOwnLockKeepingItLiveAcrossTTL proves the heartbeat: a holder
+// that renews before its TTL keeps the lock live, so a concurrent cutter still
+// sees it held and cannot steal-stale it mid-ship — the collision #1391 stops.
+func TestRenewExtendsOwnLockKeepingItLiveAcrossTTL(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FAK_RELEASE_LOCK_ROOT", dir)
+	t0 := time.Unix(5_000_000, 0)
+
+	ship := optsAt(dir, "ship-session", t0)
+	if _, err := Acquire(ship, 30*time.Minute, "cut", false, false); err != nil {
+		t.Fatalf("acquire failed: %v", err)
+	}
+
+	// 20 min in — before the 30-min TTL — the ship heartbeat renews for another
+	// 30 min. acquired_at must be preserved; expiry must move to t1+30m.
+	t1 := t0.Add(20 * time.Minute)
+	st, err := Renew(optsAt(dir, "ship-session", t1), 30*time.Minute, false)
+	if err != nil {
+		t.Fatalf("renew by owner failed: %v", err)
+	}
+	if st == nil || !st.Held || st.Lock == nil || st.Lock.AcquiredAt != epoch(t0) {
+		t.Fatalf("renew should preserve acquired_at and stay held; got %+v", st)
+	}
+	if want := epoch(t1) + (30 * time.Minute).Seconds(); st.Lock.ExpiresAt != want {
+		t.Fatalf("renew expiry = %v, want %v", st.Lock.ExpiresAt, want)
+	}
+
+	// 35 min after the ORIGINAL acquire — which without the renew would be stale —
+	// a concurrent cutter must still be refused, because the renew pushed expiry
+	// out to t1+30m = t0+50m.
+	t2 := t0.Add(35 * time.Minute)
+	if s := Status(optsAt(dir, "probe", t2)); s.Stale {
+		t.Fatalf("renewed lock must not be stale at t0+35m; got %+v", s)
+	}
+	bot := optsAt(dir, "cadence-bot", t2)
+	if _, err := Acquire(bot, 30*time.Minute, "auto", true /*steal stale*/, false); !errors.Is(err, ErrHeld) {
+		t.Fatalf("a renewed (live) lock must refuse a steal-stale acquire; got %v", err)
+	}
+}
+
+// TestRenewRefusesWhenLockStolen proves the theft signal: if a peer already owns
+// the lock (a missed renewal let it go stale and get stolen), Renew refuses with
+// ErrRenewLost instead of silently clobbering the peer's lease.
+func TestRenewRefusesWhenLockStolen(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FAK_RELEASE_LOCK_ROOT", dir)
+	now := time.Unix(6_000_000, 0)
+
+	peer := optsAt(dir, "peer-session", now)
+	if _, err := Acquire(peer, 30*time.Minute, "peer cut", false, false); err != nil {
+		t.Fatalf("peer acquire failed: %v", err)
+	}
+
+	// The original holder tries to heartbeat a lock a peer now owns.
+	st, err := Renew(optsAt(dir, "original-session", now), 30*time.Minute, false)
+	if !errors.Is(err, ErrRenewLost) {
+		t.Fatalf("renew over a peer's lock: want ErrRenewLost, got err=%v state=%+v", err, st)
+	}
+	if st == nil || st.Lock == nil || st.Lock.Owner != "peer-session" {
+		t.Fatalf("refusal should report the live holder; got %+v", st)
+	}
+	// The peer's lock is untouched.
+	if s := Status(peer); !s.Held || s.Lock.Owner != "peer-session" {
+		t.Fatalf("peer lock must survive a refused renew; got %+v", s)
+	}
+}
+
+// TestRenewGoneRefusedUnlessForced proves renewing an absent lock refuses by
+// default (the lease is gone — do not resurrect it under the caller), but a
+// forced renew re-establishes it.
+func TestRenewGoneRefusedUnlessForced(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FAK_RELEASE_LOCK_ROOT", dir)
+	now := time.Unix(7_000_000, 0)
+
+	o := optsAt(dir, "session", now)
+	if _, err := Renew(o, 30*time.Minute, false); !errors.Is(err, ErrRenewLost) {
+		t.Fatalf("renew of absent lock: want ErrRenewLost, got %v", err)
+	}
+	st, err := Renew(o, 30*time.Minute, true)
+	if err != nil {
+		t.Fatalf("forced renew of absent lock should establish it: %v", err)
+	}
+	if st == nil || !st.Held || st.Lock == nil || st.Lock.Owner != "session" {
+		t.Fatalf("forced renew should hold the lock for the caller; got %+v", st)
+	}
+	if s := Status(o); !s.Held || s.Lock.Owner != "session" {
+		t.Fatalf("forced renew should persist; got %+v", s)
+	}
+}
+
 // TestLockPathHonorsEnvOverride confirms the lockfile lands at the well-known
 // name under the env-overridden root, so the Go and Python paths contend on the
 // SAME file.

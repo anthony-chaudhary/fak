@@ -68,6 +68,13 @@ var ErrHeld = errors.New("release: lock held by another owner")
 // and force was not set.
 var ErrNotOwner = errors.New("release: lock not owned by caller")
 
+// ErrRenewLost is returned by Renew when the lock the caller expected to still
+// hold is gone or now owned by another token — the heartbeat's signal that the
+// lease was already stolen (e.g. a renewal was missed and it went stale). A
+// long-running cutter that sees this must stop before it pushes/tags under a
+// lock it no longer holds, rather than race a concurrent cutter on VERSION/tag.
+var ErrRenewLost = errors.New("release: lock lost (gone or owned by another)")
+
 // Lock is the on-disk lock record. The JSON shape is compatible with
 // tools/release_lock.py so a lock written by either side is readable by the
 // other.
@@ -298,6 +305,30 @@ func writeLockExcl(path string, rec *Lock) error {
 	return f.Close()
 }
 
+// writeLockAtomic replaces an EXISTING lockfile in place (temp write + rename) so
+// a non-guarded Status read never observes a momentary "free" gap during a Renew.
+// Unlike writeLockExcl (whose O_EXCL create IS the acquire mutual-exclusion act),
+// this is only called under the flock guard by Renew, which has already decided
+// the caller may extend the lock.
+func writeLockAtomic(path string, rec *Lock) error {
+	data, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	// os.Rename overwrites the destination on both POSIX and Windows (MoveFileEx
+	// with MOVEFILE_REPLACE_EXISTING), so the swap is atomic for readers.
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
 // Release frees the lock iff it is owned by opts.Owner (or force). A missing lock
 // is a no-op success. A live lock owned by another caller refuses with
 // ErrNotOwner.
@@ -320,6 +351,76 @@ func Release(opts Options, force bool) (*State, error) {
 		return nil, err
 	}
 	return &State{Held: false, Reason: "released", Lock: l}, nil
+}
+
+// Renew extends the caller's live lock so its expiry moves to now+ttl, keeping a
+// long-running critical section (a slow `fak release ship` blocked on a -race CI
+// run) from letting its lock expire and be stolen mid-flight. It is the heartbeat
+// half of the short-TTL/renew design: the TTL stays a tight crash-recovery window
+// while the operation stays protected for as long as it keeps renewing.
+//
+// Renew refuses with ErrRenewLost when the lock is gone or owned by a different
+// token (unless force) — that mismatch is the theft signal the caller must act
+// on, not silently paper over by re-taking the lease. A lock still owned by the
+// caller is renewed even if it has already drifted past its expiry: reclaiming
+// our own just-expired lease is exactly what the heartbeat is for. acquired_at
+// and the recorded snapshot/note are preserved so age and guard state survive.
+func Renew(opts Options, ttl time.Duration, force bool) (*State, error) {
+	if ttl <= 0 {
+		ttl = DefaultTTL
+	}
+	path := opts.lockPath()
+	unguard, err := guardLock(path)
+	if err != nil {
+		return nil, err
+	}
+	defer unguard()
+
+	owner := opts.owner()
+	existing := readLock(path)
+	mine := existing != nil && existing.Owner == owner
+	switch {
+	case existing == nil && !force:
+		return &State{Held: false, Reason: "gone"}, ErrRenewLost
+	case existing != nil && !mine && !force:
+		return &State{Held: false, Reason: "owned by another", Lock: existing}, ErrRenewLost
+	}
+
+	at := opts.now()
+	nowEpoch := epoch(at)
+	acquired := nowEpoch
+	if mine && existing.AcquiredAt != 0 {
+		acquired = existing.AcquiredAt
+	}
+	note := ""
+	if existing != nil {
+		note = existing.Note
+	}
+	rec := &Lock{
+		Owner:      owner,
+		PID:        os.Getpid(),
+		Host:       hostname(),
+		Branch:     gitOut(opts.Root, "rev-parse", "--abbrev-ref", "HEAD"),
+		GitUser:    gitOut(opts.Root, "config", "user.name"),
+		HeadSHA:    gitOut(opts.Root, "rev-parse", "--short", "HEAD"),
+		AcquiredAt: acquired,
+		TTL:        ttl.Seconds(),
+		ExpiresAt:  nowEpoch + ttl.Seconds(),
+		Note:       note,
+	}
+	if err := writeLockAtomic(path, rec); err != nil {
+		return nil, err
+	}
+	return &State{Held: true, Reason: "renewed", Lock: rec, Remaining: ttl.Seconds(), Stolen: stolenIf(force, mine, existing)}, nil
+}
+
+// stolenIf reports the pre-existing lock as "stolen" only when Renew force-took a
+// lease that was NOT the caller's own — parity with Acquire's takeover reporting.
+func stolenIf(force, mine bool, existing *Lock) *Lock {
+	if force && !mine && existing != nil {
+		return existing
+	}
+	return nil
 }
 
 // Status reports the current lock without mutating it: held/stale/free plus the

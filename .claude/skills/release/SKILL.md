@@ -52,6 +52,14 @@ python tools/release_lock.py acquire --ttl 1800
 - **`ok: true`** → you hold it; continue. The owner is your session id, so every later `release_lock` / `release_bump` call re-proves ownership automatically.
 - **`ok: false, reason: "held"`** → another session is mid-release. **Stop**, report the holder, and let its release finish. A stale lock past its TTL is auto-stolen on the next `acquire`. Don't `--force` unless the holder is known-dead.
 
+**Keep the lock alive across a long cut.** The TTL is a tight crash-recovery window (30 min), not a budget for the whole release — a cut that waits on a slow `-race` CI run can outlive it, and the moment it goes stale the auto-cut tick or another session will steal it and race you on VERSION/tag. If any step (CI wait, tag) might run long, renew on a timer at roughly ttl/3 from the SAME session:
+
+```bash
+python tools/release_lock.py renew --ttl 1800   # extend; refuses (exit 3) if the lease was already stolen
+```
+
+A `renew` that refuses with `reason: "held by another"` means you already lost the lock — **stop before you push or tag**, don't `--force` over the new holder. (`fak release ship` is the automated hot-tree path; it holds this same lock but does not yet auto-renew it, so a very long ship still relies on its acquire TTL — renewing that path automatically is tracked follow-up work.)
+
 Release a manual lock on **every** exit path including failure (`python tools/release_lock.py release`); a stranded lock self-heals at TTL but releasing promptly is courteous.
 
 ## Step 1: Decide whether to release
