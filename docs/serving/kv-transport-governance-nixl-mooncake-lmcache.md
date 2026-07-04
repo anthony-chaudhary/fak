@@ -54,6 +54,50 @@ func reportNIXLTransfer(ctx context.Context, spanID string, tokens int64, fromTi
 }
 ```
 
+#### 2.1.1 NIXL KV leases (disaggregated prefill) — [#1732](https://github.com/anthony-chaudhary/fak/issues/1732)
+
+`reportNIXLTransfer` above records a *one-shot* transfer. A disaggregated NIXL
+span is not one-shot: vLLM's prefill node pins the K/V blocks under a **lease**,
+the decode node heartbeats it from scheduler admission, and the blocks free on
+transfer completion, finish/abort, or lease expiry
+(`docs/design/nixl_kv_cache_lease.md`, `docs/design/nixl_kv_push_connector.md`).
+Treating a live lease as an opaque warm bit would let a router take a
+cache-aware route to a span whose pin already freed. So a NIXL adapter should
+witness the lease itself — not just the byte movement — through the purpose-built
+lease API in
+[`internal/cachemeta/nixl_lease.go`](../../internal/cachemeta/nixl_lease.go):
+
+- `NIXLLease` is the field-only witness keyed by trace/request, `RemoteEngineID`,
+  block identity (`SpanDigest`/`Tokens`), `Role` (prefill_pin / decode_pull /
+  push_write), the last observed `Event`, and the grant/expiry instants. Like the
+  rest of cachemeta it is wall-clock-free: the caller injects `nowMillis`, so a
+  disaggregated workload replays deterministically.
+- `NIXLLeaseVerdict(lease, nowMillis)` folds the lease's last event and the clock
+  into the shared `LookupVerdict` trichotomy — **create/heartbeat → Hit** (warm,
+  routable), **transfer-complete → Miss(lease_released)**, **expiry →
+  Miss(expired_ttl)**, **abort → Fault(residency_fault)**, unidentified span →
+  Miss(absent). Only the Active case reports `CanServe() == true`, and a
+  create/heartbeat whose `ExpiresAtMillis` has passed demotes purely from the
+  clock — so a router that gates on `CanServe` (or `NIXLLease.Warm`) takes **no
+  cache-aware route on an expired or failed lease**.
+- `ClassifyNIXLClear` records what proof fak holds for a remote deletion/clear —
+  `exact_span` (engine-confirmed eviction of a named block), `whole_prefix`
+  (coarse attested reset), or `none` (fail-closed; an "exact" claim with no span
+  identity degrades to none). `NIXLClearProof.EvictionScope()` projects the first
+  two onto the shared `KVEvictionScope` vocabulary and refuses a scope for a
+  no-proof clear.
+
+`FromNIXLLease` lowers the lease onto this same `PlaneKVTransfer` plane (reusing
+`FromKVTransfer`) at `TierRemote`, tagging `nixl_role`/`nixl_event`/`nixl_state`
+labels and setting `InvalidationExternalRefutation` so the coherence plane never
+mistakes a remote lease for a policy-governed local borrow. The three acceptance
+behaviors are pinned by `internal/cachemeta/nixl_lease_test.go`
+(`TestNIXLLeaseVerdictFoldsLifecycle`,
+`TestNIXLExpiredLeaseDemotesWarmSetAndBlocksRoute`,
+`TestClassifyNIXLClearRecordsProof`; `go test ./internal/cachemeta/` green).
+Prefer this lease API over a bare `reportNIXLTransfer` whenever the span is held
+under a NIXL lease.
+
 ### 2.2 Mooncake integration
 
 Mooncake exposes a KVCache-centric store with a Transfer Engine for RDMA/TCP/NVMe-oF. Mooncake events map as:
