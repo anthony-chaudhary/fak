@@ -40,6 +40,9 @@ func runLogvault(w, ew io.Writer, argv []string) int {
 	repo := fs.String("repo", "", "repo root holding the state dirs (default: current directory)")
 	vaultDir := fs.String("vault", "", "vault directory (default: $FAK_LOG_VAULT, else <repo-parent>/fak-log-vault)")
 	sample := fs.Int("sample", 250, "verify: mirrors to re-hash (0 = all)")
+	allProjects := fs.Bool("all-projects", false, "expand the harness store per project: capture every ~/.claude/projects/* store (not just this repo's) under by-source/harness-store-<slug>/")
+	scratchpad := fs.Bool("scratchpad", false, "opt in the %TEMP%/claude scratchpad tier (re-derivable working files, excluded by default; bounded by -scratchpad-cap-mb)")
+	scratchpadCapMB := fs.Int64("scratchpad-cap-mb", 256, "scratchpad tier size cap in MiB (opt-in bound; 0 = the 256 MiB default)")
 	notifySlack := fs.Bool("notify-slack", false, "capture/verify: enqueue a durable Slack digest (counts + the vault-head chain anchor) through the slack outbox")
 	slackChannel := fs.String("slack-channel", "", "channel for -notify-slack (default: $FAK_DISPATCH_CHANNEL, then $FAK_SCOREBOARD_CHANNEL)")
 	if err := fs.Parse(argv); err != nil {
@@ -70,7 +73,16 @@ func runLogvault(w, ew io.Writer, argv []string) int {
 		*vaultDir = filepath.Join(filepath.Dir(absRepo), "fak-log-vault")
 	}
 	home, _ := os.UserHomeDir()
-	v := &logvault.Vault{Dir: *vaultDir, Sources: logvault.DefaultSources(absRepo, home)}
+	sources := logvault.DefaultSources(absRepo, home)
+	if *allProjects {
+		// Every OTHER project's harness store; the fak store is already in
+		// DefaultSources, so AllProjectSources skips it (no duplicate capture).
+		sources = append(sources, logvault.AllProjectSources(absRepo, home)...)
+	}
+	if *scratchpad {
+		sources = append(sources, logvault.ScratchpadSource(os.TempDir(), *scratchpadCapMB<<20))
+	}
+	v := &logvault.Vault{Dir: *vaultDir, Sources: sources}
 
 	switch verb {
 	case "sources":

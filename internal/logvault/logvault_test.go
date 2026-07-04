@@ -406,6 +406,85 @@ func TestIncludeListRestrictsCapture(t *testing.T) {
 	}
 }
 
+func TestAllProjectSourcesExpandsAndSkipsOwn(t *testing.T) {
+	home := t.TempDir()
+	repoRoot := `C:\work\fak`
+	ownSlug := harnessProjectSlug(repoRoot) // C--work-fak
+	projects := filepath.Join(home, ".claude", "projects")
+	writeFile(t, filepath.Join(projects, ownSlug, "own.jsonl"), "own\n")
+	writeFile(t, filepath.Join(projects, "C--work-other", "other.jsonl"), "other\n")
+	writeFile(t, filepath.Join(projects, "-home-u-third", "third.jsonl"), "third\n")
+
+	srcs := AllProjectSources(repoRoot, home)
+	if len(srcs) != 2 {
+		t.Fatalf("AllProjectSources = %d sources, want 2 (own store skipped)", len(srcs))
+	}
+	ids := map[string]bool{}
+	for _, s := range srcs {
+		ids[s.ID] = true
+		if s.ID == "harness-store-"+ownSlug {
+			t.Fatalf("own store %s must not be re-expanded (duplicate capture)", s.ID)
+		}
+	}
+	if !ids["harness-store-C--work-other"] || !ids["harness-store--home-u-third"] {
+		t.Fatalf("expanded ids = %v, want the two non-fak projects", ids)
+	}
+
+	// A second project's transcripts land under by-source/harness-store-<slug>/.
+	v := &Vault{Dir: t.TempDir(), Sources: srcs}
+	if _, err := v.Capture(); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, v.mirrorPath("harness-store-C--work-other", "other.jsonl")); got != "other\n" {
+		t.Fatalf("mirror = %q, want the other project's transcript", got)
+	}
+
+	// Missing projects dir is valid-empty, not an error.
+	if s := AllProjectSources(repoRoot, t.TempDir()); s != nil {
+		t.Fatalf("absent projects dir must yield no sources, got %v", s)
+	}
+	if s := AllProjectSources(repoRoot, ""); s != nil {
+		t.Fatalf("empty home must yield no sources, got %v", s)
+	}
+}
+
+func TestScratchpadSourceIsBoundedByCap(t *testing.T) {
+	// ScratchpadSource roots at <temp>/claude and defaults to the 256 MiB cap.
+	temp := t.TempDir()
+	src := ScratchpadSource(temp, 0)
+	if src.MaxBytes != DefaultScratchpadCapBytes {
+		t.Fatalf("cap = %d, want default %d", src.MaxBytes, DefaultScratchpadCapBytes)
+	}
+	if filepath.Base(src.Root) != "claude" {
+		t.Fatalf("root = %q, want <temp>/claude", src.Root)
+	}
+
+	// Ten 100-byte session files under the scratchpad; a 350-byte cap admits a
+	// bounded prefix (<= cap), never the whole tree.
+	scratch := filepath.Join(temp, "claude")
+	for i := 0; i < 10; i++ {
+		writeFile(t, filepath.Join(scratch, "sess"+string(rune('0'+i)), "artifact.txt"), strings.Repeat("x", 100))
+	}
+	v := &Vault{Dir: t.TempDir(), Sources: []Source{ScratchpadSource(temp, 0)}}
+	v.Sources[0].MaxBytes = 350 // aggressive cap for the test
+	stats, err := v.Capture()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats[0].Files != 3 || stats[0].CopyBytes != 300 {
+		t.Fatalf("bounded capture: %+v, want exactly 3 files / 300 bytes under the 350B cap", stats[0])
+	}
+}
+
+func TestDefaultSourcesExcludesScratchpadTier(t *testing.T) {
+	// The scratchpad is opt-in: it must never appear in the default registry.
+	for _, s := range DefaultSources(`C:\work\fak`, `C:\Users\u`) {
+		if s.ID == "harness-scratchpad" {
+			t.Fatal("scratchpad tier must be excluded from DefaultSources (opt-in only)")
+		}
+	}
+}
+
 func TestHarnessProjectSlug(t *testing.T) {
 	if got := harnessProjectSlug(`C:\work\fak`); got != "C--work-fak" {
 		t.Fatalf("slug = %q, want C--work-fak", got)

@@ -14,6 +14,7 @@ type Source struct {
 	Root     string   // absolute root on this box
 	Includes []string // when non-empty, ONLY matching files are captured (same syntax as Excludes)
 	Excludes []string // rel-path prefixes ("tmp/") or base-name globs ("*.exe") to skip
+	MaxBytes int64    // when >0, an aggressive cap: the walk stops admitting files once cumulative admitted size reaches it (bounds an opt-in tier like the scratchpad)
 	Note     string   // why this source matters (shown by plan/du)
 }
 
@@ -115,6 +116,69 @@ func DefaultSources(repoRoot, home string) []Source {
 		})
 	}
 	return srcs
+}
+
+// DefaultScratchpadCapBytes bounds the opt-in scratchpad tier. The %TEMP%/claude
+// tree is multi-GB (2.7 GB / 77k files witnessed 2026-07-03), new-dir-per-session
+// and mostly cold within a day, so the opt-in defaults to an aggressive 256 MiB
+// cap — enough to bank a handful of recent sessions' kept artifacts, never the
+// whole re-derivable tree.
+const DefaultScratchpadCapBytes = 256 << 20
+
+// AllProjectSources returns one harness-store-<slug> source per Claude Code
+// project directory under ~/.claude/projects, EXCLUDING this repo's own store —
+// DefaultSources already captures that as the canonical "harness-store" source,
+// and a second source over the same directory would duplicate the fak project
+// store into the vault. This is the `--all-projects` expansion: every other repo
+// the harness touched (transcripts + auto-memory) rides along, each under its own
+// by-source/harness-store-<slug>/ subtree.
+//
+// A missing ~/.claude/projects (or an empty home) is the valid-empty posture:
+// no extra sources, never an error.
+func AllProjectSources(repoRoot, home string) []Source {
+	if home == "" {
+		return nil
+	}
+	projectsDir := filepath.Join(home, ".claude", "projects")
+	ents, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return nil
+	}
+	ownSlug := harnessProjectSlug(repoRoot)
+	var out []Source
+	for _, e := range ents {
+		if !e.IsDir() {
+			continue
+		}
+		slug := e.Name()
+		if slug == ownSlug {
+			continue // the fak store is already captured as "harness-store" — no duplicate
+		}
+		out = append(out, Source{
+			ID:   "harness-store-" + slug,
+			Root: filepath.Join(projectsDir, slug),
+			Note: "Claude Code session store for project " + slug + " (--all-projects)",
+		})
+	}
+	return out
+}
+
+// ScratchpadSource returns the opt-in scratchpad tier: the harness's
+// per-session working dirs under %TEMP%/claude. It is DEFAULT-EXCLUDED (only
+// layered in when the caller opts in) because the tree is re-derivable working
+// files, and it is bounded by an aggressive cumulative-size cap (capBytes, or
+// DefaultScratchpadCapBytes when non-positive) so the opt-in can never pull the
+// whole multi-GB tree into the vault.
+func ScratchpadSource(tempDir string, capBytes int64) Source {
+	if capBytes <= 0 {
+		capBytes = DefaultScratchpadCapBytes
+	}
+	return Source{
+		ID:       "harness-scratchpad",
+		Root:     filepath.Join(tempDir, "claude"),
+		MaxBytes: capBytes,
+		Note:     "opt-in %TEMP%/claude scratchpad (re-derivable; excluded by default, bounded by an aggressive size cap)",
+	}
 }
 
 // harnessProjectSlug maps a repo path to the Claude Code projects-dir name:

@@ -94,6 +94,11 @@ func (v *Vault) walkSource(src Source, fn func(relPath string, info fs.FileInfo)
 	if vaultAbs != "" && pathWithin(srcAbs, vaultAbs) {
 		return false, nil, fmt.Errorf("logvault: source %s root %s overlaps the vault %s", src.ID, src.Root, v.Dir)
 	}
+	// budget bounds an opt-in tier (src.MaxBytes>0): once the cumulative admitted
+	// file size reaches the cap the walk stops, so a multi-GB scratchpad tree can
+	// only ever bank a bounded prefix into the vault. WalkDir's lexical order makes
+	// the admitted set deterministic across Plan/Capture runs.
+	var budget int64
 	err = filepath.WalkDir(src.Root, func(path string, d fs.DirEntry, walkErr error) error {
 		relOS, relErr := filepath.Rel(src.Root, path)
 		rel := ""
@@ -123,6 +128,14 @@ func (v *Vault) walkSource(src Source, fn func(relPath string, info fs.FileInfo)
 		if infoErr != nil {
 			problems = append(problems, walkProblem{Rel: rel, Err: infoErr})
 			return nil
+		}
+		if src.MaxBytes > 0 {
+			// Stop before the cap is exceeded, not after: admitting this file only
+			// if it still fits keeps the captured footprint <= MaxBytes.
+			if budget+info.Size() > src.MaxBytes {
+				return filepath.SkipAll
+			}
+			budget += info.Size()
 		}
 		return fn(rel, info)
 	})
