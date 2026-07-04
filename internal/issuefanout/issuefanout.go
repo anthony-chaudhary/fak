@@ -13,6 +13,7 @@
 package issuefanout
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -267,13 +268,13 @@ func AreaNames() []string {
 // below the fan-out floor.
 func Build(in Input) (Plan, error) {
 	if strings.TrimSpace(in.Title) == "" || strings.TrimSpace(in.Leaf) == "" {
-		return Plan{}, fmt.Errorf("issuefanout: title and leaf are required")
+		return Plan{}, refusef("issuefanout: title and leaf are required")
 	}
 	if strings.TrimSpace(in.SpineRef) == "" {
-		return Plan{}, fmt.Errorf("issuefanout: spine_ref is required — ship the minimal working spine first (or file the spine issue itself), then fan out from its witness")
+		return Plan{}, refusef("issuefanout: spine_ref is required — ship the minimal working spine first (or file the spine issue itself), then fan out from its witness")
 	}
 	if in.Max != 0 && in.Max < MinFanout {
-		return Plan{}, fmt.Errorf("issuefanout: max %d is below the fan-out floor %d", in.Max, MinFanout)
+		return Plan{}, refusef("issuefanout: max %d is below the fan-out floor %d", in.Max, MinFanout)
 	}
 	allowed := map[string]bool{}
 	known := map[string]bool{}
@@ -286,7 +287,7 @@ func Build(in Input) (Plan, error) {
 			continue
 		}
 		if !known[a] {
-			return Plan{}, fmt.Errorf("issuefanout: unknown area %q (known: %s)", a, strings.Join(AreaNames(), ", "))
+			return Plan{}, refusef("issuefanout: unknown area %q (known: %s)", a, strings.Join(AreaNames(), ", "))
 		}
 		allowed[a] = true
 	}
@@ -303,9 +304,101 @@ func Build(in Input) (Plan, error) {
 		plan.AreaCounts[t.area]++
 	}
 	if len(plan.Candidates) < MinFanout {
-		return Plan{}, fmt.Errorf("issuefanout: area filter leaves %d candidates, below the fan-out floor %d", len(plan.Candidates), MinFanout)
+		return Plan{}, refusef("issuefanout: area filter leaves %d candidates, below the fan-out floor %d", len(plan.Candidates), MinFanout)
 	}
 	return plan, nil
+}
+
+// Refusal is a planner CONTRACT refusal: an input that violated the spine-fanout
+// default (no spine witness, a cap below the floor, an unknown area). It is a
+// deliberate, well-formed rejection — distinct from an unexpected internal error
+// — so the outcome fold can bucket it as a refusal rather than a failure. It
+// formats to the exact message the bare error carried, so existing substring
+// witnesses (and callers that only read Error()) keep matching.
+type Refusal struct{ msg string }
+
+// Error implements error.
+func (r *Refusal) Error() string { return r.msg }
+
+// refusef builds a Refusal with a formatted message — the one constructor Build
+// uses for every contract rejection, so all of Build's refusals classify as
+// OutcomeRefused and any other error is a genuine failure.
+func refusef(format string, a ...any) error {
+	return &Refusal{msg: fmt.Sprintf(format, a...)}
+}
+
+// Outcome buckets one planner invocation for the observability fold (#2519). The
+// three buckets mirror the ticket's health axes: a plan that built, a contract
+// refusal the planner deliberately returned, and an unexpected error from anything
+// else in the invocation path.
+type Outcome string
+
+const (
+	OutcomeSuccess Outcome = "success"
+	OutcomeRefused Outcome = "refused"
+	OutcomeError   Outcome = "error"
+)
+
+// ClassifyOutcome maps a Build (or a caller's invocation) result to its outcome
+// bucket: nil is success, a *Refusal is a deliberate contract refusal, and any
+// other error is an unexpected failure. Pure and allocation-light.
+func ClassifyOutcome(err error) Outcome {
+	if err == nil {
+		return OutcomeSuccess
+	}
+	var r *Refusal
+	if errors.As(err, &r) {
+		return OutcomeRefused
+	}
+	return OutcomeError
+}
+
+// OutcomeCounts folds a stream of planner invocations into per-bucket counts — the
+// observability surface #2519 asks for: success/refusal/error counts visible from
+// a report/JSON surface, so a regression in the refusal contract shows up in a fold
+// instead of a bug report. It is a plain accumulator, like the rest of this leaf's
+// pure folds; the caller (a verb, a wave, a test) records each result with Observe.
+type OutcomeCounts struct {
+	Success int `json:"success"`
+	Refused int `json:"refused"`
+	Error   int `json:"error"`
+}
+
+// Observe classifies one invocation result, increments the matching bucket, and
+// returns the bucket it credited.
+func (c *OutcomeCounts) Observe(err error) Outcome {
+	o := ClassifyOutcome(err)
+	switch o {
+	case OutcomeSuccess:
+		c.Success++
+	case OutcomeRefused:
+		c.Refused++
+	default:
+		c.Error++
+	}
+	return o
+}
+
+// Total is the number of invocations folded.
+func (c OutcomeCounts) Total() int { return c.Success + c.Refused + c.Error }
+
+// BuildInto runs Build and folds its outcome into counts — the one-call seam a
+// verb or wave uses so every planner invocation is counted, not just narrated. A
+// nil counts pointer is a no-op fold, so the seam is drop-in on any existing call.
+func BuildInto(in Input, counts *OutcomeCounts) (Plan, error) {
+	plan, err := Build(in)
+	if counts != nil {
+		counts.Observe(err)
+	}
+	return plan, err
+}
+
+// RenderOutcomes prints the outcome fold as one report line, mirroring
+// Render/RenderScorecard/RenderAdoption so a `fak issue fanout` health readout
+// reads identically to the rest of the leaf.
+func RenderOutcomes(c OutcomeCounts) string {
+	return fmt.Sprintf("issuefanout invocations: %d (%d success, %d refused, %d error)",
+		c.Total(), c.Success, c.Refused, c.Error)
 }
 
 // expand substitutes one template into a fully-scoped candidate.
