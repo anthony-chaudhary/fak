@@ -86,6 +86,7 @@ the contract map that governs which of these may ever carry a public result clai
 | File | Kind | One-liner | Headline |
 | --- | --- | --- | --- |
 | [BENCHMARK-CONTRACT-MAP.md](BENCHMARK-CONTRACT-MAP.md) | contract | The single map binding each mediated fak eval to its official public benchmark, oracle, artifacts, and caveats. | Every row with result_claim_allowed=false is a contract or local fixture, not a public-leaderboard result; local smokes quotable only as [SIMULATED] |
+| [EVE-EVAL-PARITY-RUNBOOK.md](EVE-EVAL-PARITY-RUNBOOK.md) | runbook | The command path and evidence contract for running a Vercel Eve eval suite raw and fak-routed, before any parity claim (#2605). | Status: contract written, no fixture harness yet — no eve parity claim is made |
 | [FRONTIERSWE-ENV-ADAPTER.md](FRONTIERSWE-ENV-ADAPTER.md) | adapter | How fak stands up a co-resident fak serve gateway inside a FrontierSWE task sandbox without claiming a benchmark result. | |
 | [FRONTIERSWE-RESULTS.md](FRONTIERSWE-RESULTS.md) | pending | The authority page for fak's FrontierSWE time-to-solution (TTS) claim. Created empty and gated: no number yet. | GATED, no number yet — no wall-clock or turn-count TTS number is recorded until the official grader has produced both arms' reward.json and score-parity holds |
 | [FRONTIERSWE-SCORING-PARITY.md](FRONTIERSWE-SCORING-PARITY.md) | contract | How internal/frontierswe's Go scorer maps field-for-field onto the published leaderboard oracle score_from_reward.py | |
