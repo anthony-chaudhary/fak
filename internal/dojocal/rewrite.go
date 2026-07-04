@@ -57,6 +57,27 @@ func cellClaimRe(lever, metric string) *regexp.Regexp {
 	return regexp.MustCompile(`(` + anchor + `)` + claimArgRe)
 }
 
+// locateClaim runs the anchored (lever, metric) regex against src and returns
+// the single match's submatch index slice, failing closed if the cell's
+// claim/floor anchor is missing or matches more than once. Shared by
+// RewriteClaim and ReadClaim, which each extract a different field of the same
+// match afterward. notFoundDetail/ambiguousDetail are appended verbatim to the
+// respective error message so each caller still explains the failure in its
+// own terms (a rewrite that can't find its anchor is a broken contract; a
+// read just reports the failure) without duplicating the anchor-and-locate
+// logic itself.
+func locateClaim(src []byte, lever, metric, notFoundDetail, ambiguousDetail string) ([]int, error) {
+	re := cellClaimRe(lever, metric)
+	locs := re.FindAllSubmatchIndex(src, -1)
+	switch {
+	case len(locs) == 0:
+		return nil, fmt.Errorf("dojocal: no claim/floor literal for cell %s/%s in %s%s", lever, metric, ClaimsRelPath, notFoundDetail)
+	case len(locs) > 1:
+		return nil, fmt.Errorf("dojocal: claim literal for cell %s/%s is ambiguous (%d matches)%s", lever, metric, len(locs), ambiguousDetail)
+	}
+	return locs[0], nil
+}
+
 // RewriteClaim re-points the single registered claim literal for (lever, metric) in
 // the claims.go source `src` to newClaimed, returning the rewritten bytes and the
 // OLD value it replaced. It is the pure rewrite the worktree arm applies inside a
@@ -74,16 +95,12 @@ func cellClaimRe(lever, metric string) *regexp.Regexp {
 // Only the float is rewritten; the basis string (which may quote the same number),
 // a floor's trailing bool, and every other cell are byte-identical in the output.
 func RewriteClaim(src []byte, lever, metric string, newClaimed float64) ([]byte, float64, error) {
-	re := cellClaimRe(lever, metric)
-	locs := re.FindAllSubmatchIndex(src, -1)
-	switch {
-	case len(locs) == 0:
-		return nil, 0, fmt.Errorf("dojocal: no claim/floor literal for cell %s/%s in %s (cell unregistered or moved — the rewrite anchor is broken)", lever, metric, ClaimsRelPath)
-	case len(locs) > 1:
-		return nil, 0, fmt.Errorf("dojocal: claim literal for cell %s/%s is ambiguous (%d matches) — the source is not the canonical registry", lever, metric, len(locs))
+	m, err := locateClaim(src, lever, metric,
+		" (cell unregistered or moved — the rewrite anchor is broken)",
+		" — the source is not the canonical registry")
+	if err != nil {
+		return nil, 0, err
 	}
-
-	m := locs[0]
 	// Submatch indexes: [0:1]=whole, [2:3]=group1 anchor, [4:5]=group2 float.
 	valStart, valEnd := m[4], m[5]
 	oldText := string(src[valStart:valEnd])
@@ -110,15 +127,10 @@ func RewriteClaim(src []byte, lever, metric string, newClaimed float64) ([]byte,
 // the before value. Same fail-closed anchoring as RewriteClaim (not-found / ambiguous
 // are errors, never a silent zero).
 func ReadClaim(src []byte, lever, metric string) (float64, error) {
-	re := cellClaimRe(lever, metric)
-	locs := re.FindAllSubmatchIndex(src, -1)
-	switch {
-	case len(locs) == 0:
-		return 0, fmt.Errorf("dojocal: no claim/floor literal for cell %s/%s in %s", lever, metric, ClaimsRelPath)
-	case len(locs) > 1:
-		return 0, fmt.Errorf("dojocal: claim literal for cell %s/%s is ambiguous (%d matches)", lever, metric, len(locs))
+	m, err := locateClaim(src, lever, metric, "", "")
+	if err != nil {
+		return 0, err
 	}
-	m := locs[0]
 	return strconv.ParseFloat(string(src[m[4]:m[5]]), 64)
 }
 

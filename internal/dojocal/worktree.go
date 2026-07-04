@@ -125,20 +125,9 @@ func NewWorktreeHarness(cfg WorktreeConfig) rsiloop.Harness {
 		}
 		var bf shardFolds
 		err = withWorktree(cfg, sha, func(p wtPaths) error {
-			shardA, shardB, serr := splitCorpus(cfg.Corpus, cfg.ScratchDir)
-			if serr != nil {
-				return serr
-			}
-			repA, rerr := runDojo(cfg, p.module, shardA)
-			if rerr != nil {
-				return rerr
-			}
-			repB, rerr := runDojo(cfg, p.module, shardB)
-			if rerr != nil {
-				return rerr
-			}
-			bf = foldTwoShards(repA, repB)
-			return nil
+			var ferr error
+			bf, ferr = measureShardFolds(cfg, p.module)
+			return ferr
 		})
 		if err != nil {
 			return "", shardFolds{}, err
@@ -175,7 +164,7 @@ func NewWorktreeHarness(cfg WorktreeConfig) rsiloop.Harness {
 				return rsiloop.Measurement{}, err
 			}
 			var (
-				cf        shardFolds
+				cf         shardFolds
 				suiteGreen bool
 				truthClean bool
 				suiteNote  string
@@ -184,19 +173,11 @@ func NewWorktreeHarness(cfg WorktreeConfig) rsiloop.Harness {
 				if rerr := rewriteClaimInWorktree(p.module, wc); rerr != nil {
 					return rerr
 				}
-				shardA, shardB, serr := splitCorpus(cfg.Corpus, cfg.ScratchDir)
-				if serr != nil {
-					return serr
+				var ferr error
+				cf, ferr = measureShardFolds(cfg, p.module)
+				if ferr != nil {
+					return ferr
 				}
-				repA, rerr := runDojo(cfg, p.module, shardA)
-				if rerr != nil {
-					return rerr
-				}
-				repB, rerr := runDojo(cfg, p.module, shardB)
-				if rerr != nil {
-					return rerr
-				}
-				cf = foldTwoShards(repA, repB)
 				green, detail := runSuite(p.module, cfg.SuiteCmds)
 				suiteGreen = green
 				if !green {
@@ -239,6 +220,28 @@ func foldTwoShards(repA, repB dojo.Report) shardFolds {
 		ShardB:   dojo.FoldCalibrable(repB.Episodes).Value,
 		Measured: full.Measured,
 	}
+}
+
+// measureShardFolds splits cfg.Corpus into two disjoint shards, runs `fak dojo
+// run` on each inside the worktree at moduleDir, and folds both reports into
+// the two-shard + full-corpus view. Both the baseline resolve and the
+// candidate measure need this identical split-run-fold sequence over their
+// own worktree — they differ only in what edit (if any) preceded it, never in
+// how the shards are produced or folded.
+func measureShardFolds(cfg WorktreeConfig, moduleDir string) (shardFolds, error) {
+	shardA, shardB, serr := splitCorpus(cfg.Corpus, cfg.ScratchDir)
+	if serr != nil {
+		return shardFolds{}, serr
+	}
+	repA, rerr := runDojo(cfg, moduleDir, shardA)
+	if rerr != nil {
+		return shardFolds{}, rerr
+	}
+	repB, rerr := runDojo(cfg, moduleDir, shardB)
+	if rerr != nil {
+		return shardFolds{}, rerr
+	}
+	return foldTwoShards(repA, repB), nil
 }
 
 // twoShardGate reports whether the candidate dropped FoldCalibrable STRICTLY on
