@@ -213,6 +213,12 @@ func codexAccountIDFromIDToken(idToken string) string {
 // marked by its auth.json or config.toml; any other profile falls back to the Claude marker.
 func isConfigHomeForProfile(dir string, profile harnessprofile.HarnessProfile) bool {
 	if profile.Identity == harnessprofile.IdentityCodex {
+		// A tombstoned (`.DELETED`) codex home keeps its auth.json/config.toml intact, so
+		// guard the marker checks the same way isConfigHome does for Claude — a retired seat
+		// is never a config home regardless of harness.
+		if isTombstonedDir(dir) {
+			return false
+		}
 		if fi, err := os.Stat(filepath.Join(dir, codexAuthFile)); err == nil && !fi.IsDir() {
 			return true
 		}

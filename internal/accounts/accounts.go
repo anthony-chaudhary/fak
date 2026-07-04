@@ -826,10 +826,26 @@ func tokenFingerprint(dir string) string {
 	return hex.EncodeToString(sum[:6])
 }
 
+// isTombstonedDir reports whether a config-dir basename carries the house tombstone
+// marker (the `.DELETED-<date>` suffix `fak accounts remove --archive` renames a retired
+// dir to). An archived dir keeps its .claude.json + projects/ intact, so the config-home
+// markers below would otherwise re-admit it as a LIVE seat — the exact way a deleted seat
+// resurfaced in the switcher when Discover ran without a registry to overlay the tombstone.
+// This makes Discover honor the same `.DELETED` rule the policy-aware scanners already do
+// (fleetaccounts.classifyRow / fleet_accounts._classify_row), so a decommissioned dir is
+// never offered as a seat and MergeDiscovered never resurrects it into the registry.
+func isTombstonedDir(dir string) bool {
+	return strings.Contains(strings.ToLower(filepath.Base(dir)), ".deleted")
+}
+
 // isConfigHome reports whether dir looks like a Claude config home rather than an
 // adjacent ~/.claude-* directory (backups, a monitor cache). The marker mirrors the
-// fleet's: a .claude.json or a projects/ subdir.
+// fleet's: a .claude.json or a projects/ subdir. A tombstoned (`.DELETED`) dir is never a
+// config home regardless of its contents — a retired seat must not be re-offered.
 func isConfigHome(dir string) bool {
+	if isTombstonedDir(dir) {
+		return false
+	}
 	if fi, err := os.Stat(filepath.Join(dir, ".claude.json")); err == nil && !fi.IsDir() {
 		return true
 	}

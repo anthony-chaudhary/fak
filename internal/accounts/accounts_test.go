@@ -515,6 +515,10 @@ func TestDiscover(t *testing.T) {
 	mk(".claude-q-seat", "gem8@example.test", "uuid-8", true, true) // the lie
 	mk(".claude-account-backups", "", "", false, false)             // NOT a config home
 	mk(".claude-monitor", "", "", false, false)                     // NOT a config home
+	// An archived (`--archive`) seat: the rename keeps .claude.json + projects/ intact, so
+	// the config-home markers alone would re-admit it. Discover must honor the `.DELETED`
+	// tombstone and drop it — the deleted-seat-resurfaces-in-the-switcher regression.
+	mk(".claude-gem8-seat.DELETED-2026-06-26", "gem8@example.test", "uuid-8", true, true)
 
 	homes, err := Discover(home)
 	if err != nil {
@@ -529,6 +533,9 @@ func TestDiscover(t *testing.T) {
 	}
 	if _, ok := byName["monitor"]; ok {
 		t.Errorf("monitor should be skipped (not a config home)")
+	}
+	if _, ok := byName["gem8-seat.DELETED-2026-06-26"]; ok {
+		t.Errorf("tombstoned (.DELETED) dir must not be discovered as a live seat")
 	}
 	if d, ok := byName["default"]; !ok || d.Identity.Email != "q@example.test" {
 		t.Errorf("default home identity = %+v, want q@", d.Identity)
@@ -610,5 +617,36 @@ func TestMergeDiscovered(t *testing.T) {
 	// The merged registry must still be valid (gone resolves to keep-seat).
 	if err := merged.Validate(); err != nil {
 		t.Errorf("merged registry should validate: %v", err)
+	}
+}
+
+// TestMergeDiscoveredSkipsTombstonedDir proves the regenerator (`fak accounts discover
+// --write`) does NOT resurrect an archived seat: a leftover `.DELETED` config dir keeps its
+// .claude.json + projects/ intact, but MergeDiscovered must treat it as absent, never fold
+// it back into the registry as a brand-new active seat — the durable form of the
+// deleted-seat-resurfaces regression.
+func TestMergeDiscoveredSkipsTombstonedDir(t *testing.T) {
+	home := t.TempDir()
+	full := filepath.Join(home, ".claude-gem8-seat.DELETED-2026-06-26")
+	if err := os.MkdirAll(filepath.Join(full, "projects"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"oauthAccount":{"emailAddress":"gem8@example.test","accountUuid":"uuid-8"}}`
+	if err := os.WriteFile(filepath.Join(full, ".claude.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(full, ".credentials.json"), []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	base := Registry{Homes: []Home{{Name: "live-seat", Dir: filepath.Join(home, ".claude-live-seat")}}}
+	merged, err := base.MergeDiscovered(home)
+	if err != nil {
+		t.Fatalf("MergeDiscovered: %v", err)
+	}
+	for _, h := range merged.Homes {
+		if strings.Contains(strings.ToLower(h.Name), ".deleted") {
+			t.Fatalf("archived .DELETED dir was resurrected into the registry as seat %q", h.Name)
+		}
 	}
 }
