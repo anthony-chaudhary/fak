@@ -97,3 +97,52 @@ func TestLlmsUpdatesTextHasHeaderAndBody(t *testing.T) {
 		t.Errorf("llms-updates missing the updated stamp:\n%s", txt)
 	}
 }
+
+func TestDisambiguationTermsFeedIncludesLocalizedAndFableHooks(t *testing.T) {
+	b, err := DisambiguationTermsFeed(time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("DisambiguationTermsFeed: %v", err)
+	}
+	var feed map[string]any
+	if err := json.Unmarshal(b, &feed); err != nil {
+		t.Fatalf("term feed is not valid JSON: %v\n%s", err, b)
+	}
+	if feed["@type"] != "DefinedTermSet" {
+		t.Errorf("@type = %v, want DefinedTermSet", feed["@type"])
+	}
+	items, ok := feed["hasDefinedTerm"].([]any)
+	if !ok || len(items) < 10 {
+		t.Fatalf("hasDefinedTerm = %v, want populated term set", feed["hasDefinedTerm"])
+	}
+	s := string(b)
+	for _, want := range []string{
+		"Fable 5 refusal fallback",
+		"Claude Fable 5 model routing",
+		"एजेंट कर्नेल",
+		"AI 代理内核",
+		"工具调用防火墙",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("term feed missing %q:\n%s", want, s)
+		}
+	}
+	if strings.Contains(strings.ToLower(s), "market adoption") {
+		t.Errorf("term feed should not imply market adoption:\n%s", s)
+	}
+}
+
+func TestLlmsTermsTextHasFableAndLocalizedTerms(t *testing.T) {
+	txt := LlmsTermsText(time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC))
+	for _, want := range []string{
+		"# fak — answer-engine disambiguation terms",
+		"Updated: 2026-07-04",
+		"## frontier-model-launch",
+		"Fable 5 refusal fallback",
+		"एजेंट कर्नेल",
+		"模型路由和回退",
+	} {
+		if !strings.Contains(txt, want) {
+			t.Errorf("llms terms missing %q:\n%s", want, txt)
+		}
+	}
+}
