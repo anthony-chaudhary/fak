@@ -20,6 +20,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -148,6 +149,21 @@ func usageAllVerbs(w io.Writer) {
 // when neither source knows the verb.
 func printVerbHelp(w io.Writer, tok string) bool {
 	tok = strings.ToLower(strings.TrimSpace(tok))
+	if !verbDeepHelpBody(w, tok) {
+		return false
+	}
+	fmt.Fprintf(w, "\nflags: fak %s -h\n", tok)
+	return true
+}
+
+// verbDeepHelpBody writes the verb's deep help body (catalog synopsis/aliases/doc
+// line over the wall-carved section(s)) WITHOUT the trailing "flags: fak X -h"
+// hint — the shared core behind both `fak help <verb>` (printVerbHelp, which adds
+// the hint) and verbFlagUsage (which follows the body with the real flag dump
+// instead of a hint pointing at itself). Reports false when neither the catalog
+// nor the wall knows the verb.
+func verbDeepHelpBody(w io.Writer, tok string) bool {
+	tok = strings.ToLower(strings.TrimSpace(tok))
 	spellings := []string{tok}
 	var header string
 	cat := helpCatalog()
@@ -180,8 +196,26 @@ func printVerbHelp(w io.Writer, tok string) bool {
 	if len(sections) == 0 {
 		fmt.Fprintln(w)
 	}
-	fmt.Fprintf(w, "\nflags: fak %s -h\n", tok)
 	return true
+}
+
+// verbFlagUsage sets fs.Usage so `fak <verb> --help` / `-h` prints the verb's deep
+// help (the catalog synopsis + the wall-carved block) above the flag defaults,
+// instead of the bare `flag` package dump ("Usage of <verb>: ..."). tok is the
+// catalog verb name to look up — for a sub-command FlagSet (e.g. "session ls")
+// pass the parent verb ("session") so the lookup hits the verb's own wall entry.
+// Call this right after flag.NewFlagSet, before Parse.
+func verbFlagUsage(fs *flag.FlagSet, tok string) {
+	fs.Usage = func() {
+		w := fs.Output()
+		if !verbDeepHelpBody(w, tok) {
+			fmt.Fprintf(w, "Usage of %s:\n", fs.Name())
+			fs.PrintDefaults()
+			return
+		}
+		fmt.Fprintln(w)
+		fs.PrintDefaults()
+	}
 }
 
 // verbWallSections carves the usage wall (the three usage.go constants) into the
