@@ -1,0 +1,115 @@
+# release-cuda-container.yml — publish the CUDA/GPU variant of the fak OCI image.
+#
+# Companion to release-container.yml (which always publishes the lean distroless static
+# image on a v* tag — that stays the default `:latest` and is untouched by this file). This
+# workflow additionally publishes a CUDA-capable image built from Dockerfile.cuda when that
+# file exists in the tagged tree (see #2661/#2684). Until the CUDA Dockerfile lands, this
+# workflow is inert: the `check` job looks for Dockerfile.cuda and the `cuda-image` job is
+# gated on it being present, so ordinary releases — and this workflow's own introduction —
+# publish nothing extra and cannot fail on a missing Dockerfile.
+name: release-cuda-container
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing vX.Y.Z tag to (re)build and push the CUDA image for"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-cuda-container-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: check for Dockerfile.cuda
+    runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Dockerfile.cuda presence
+        id: check
+        run: |
+          set -euo pipefail
+          if [ -f Dockerfile.cuda ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Dockerfile.cuda present — CUDA image publish will run."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Dockerfile.cuda not present yet — skipping CUDA image publish (inert until it lands, see #2661)."
+          fi
+
+  cuda-image:
+    name: build + push ghcr CUDA image
+    needs: check
+    if: needs.check.outputs.exists == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write # push to ghcr.io
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve version + lowercase image ref
+        id: meta
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          # ghcr image paths must be lowercase; the owner login may carry uppercase.
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          IMAGE="ghcr.io/${OWNER}/fak"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "resolved ${IMAGE}:${VERSION}-cuda"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push CUDA image
+        id: publish
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.cuda
+          push: true
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.version }}
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}-cuda
+            ${{ steps.meta.outputs.image }}:cuda-latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            io.modelcontextprotocol.server.name=io.github.anthony-chaudhary/fak
+
+      - name: Smoke — fak version inside the CUDA image
+        run: |
+          set -euo pipefail
+          IMAGE="${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}-cuda"
+          got="$(docker run --rm "$IMAGE" version 2>/dev/null | head -1 || true)"
+          echo "container fak version -> ${got}"
+          case "$got" in
+            *"${{ steps.meta.outputs.version }}"*) echo "ok: CUDA image reports ${{ steps.meta.outputs.version }}" ;;
+            *) echo "::error::CUDA image fak version mismatch: got '$got', want '${{ steps.meta.outputs.version }}'"; exit 1 ;;
+          esac
