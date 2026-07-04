@@ -1,6 +1,6 @@
 ---
 name: conflation-score
-description: One repeatable pass that keeps every number and status fak reports PROVENANCE-HONEST - each value labeled by what fak CONTROLS (witnessed/authored) vs what it only OBSERVES (relayed from an external party), and no bad observed value blamed on a fak action. Runs the conflation scorecard (tools/conflation_scorecard.py) over the fact-reporting surfaces (Prometheus metric help, the fak guard exit summary), turns each HARD defect into a required edit (label an unlabeled external value OBSERVED; correct prose that attributes a provider-side miss to a fak action), retires conflation-debt worst-first WITHOUT changing any number or logic, re-measures to PROVE the debt dropped, and commits only the scorecard lane by explicit path. The truth-maintenance counterpart of appeal-score (prose voice) and observability (what is measured). Use after adding a metric/exit-summary that reports an external value, when a dashboard mislabels whose number it is, or on a /loop cadence to keep the reporting surface honest about its own boundary.
+description: One repeatable pass that keeps every number and status fak reports PROVENANCE-HONEST - each value labeled by what fak CONTROLS (witnessed/authored) vs what it only OBSERVES (relayed from an external party), and no bad observed value blamed on a fak action. Runs the conflation scorecard (`fak conflation-scorecard`, the Go verb backed by internal/conflationscore) over the fact-reporting surfaces (Prometheus metric help, the fak guard exit summary), turns each HARD defect into a required edit (label an unlabeled external value OBSERVED; correct prose that attributes a provider-side miss to a fak action), retires conflation-debt worst-first WITHOUT changing any number or logic, re-measures to PROVE the debt dropped, and commits only the scorecard lane by explicit path. The truth-maintenance counterpart of appeal-score (prose voice) and observability (what is measured). Use after adding a metric/exit-summary that reports an external value, when a dashboard mislabels whose number it is, or on a /loop cadence to keep the reporting surface honest about its own boundary.
 ---
 
 # conflation-score - the anti-conflation / provenance-honesty pass
@@ -36,8 +36,10 @@ witnessed signal proves the fault is fak's.**
 
 ## The pass (the shared five-step loop)
 
-1. **Run it** - `python tools/conflation_scorecard.py` (work-list), `--json` (payload),
-   `--compare baseline.json` (prove the drop).
+1. **Run it** - `fak conflation-scorecard` (work-list), `--json` (payload),
+   `--compare baseline.json` (prove the drop), `--markdown` (regenerate the committed
+   snapshot). The card is a Go verb now (`internal/conflationscore`); the old
+   `python tools/conflation_scorecard.py` was removed when the card was ported to Go.
 2. **Retire conflation_debt worst-first** - fix the heaviest KPI by **editing the prose**:
    add the OBSERVED label to an external value, or rewrite an attribution sentence so it
    names the provider-side cause and the single fak-fault signal. This pass changes only
@@ -46,9 +48,9 @@ witnessed signal proves the fault is fak's.**
    don't invent signals that don't exist.
 4. **Re-measure + prove** - `--compare` prints the debt delta; the scorecard must read A
    (debt 0) on the disciplined tree.
-5. **Commit only the scorecard lane, by explicit path** - the scorecard tool/test, the
-   reporting-surface file(s) whose prose you corrected, the control-pane baseline. Never
-   `git add -A`. End the subject with `(fak <leaf>)`.
+5. **Commit only the scorecard lane, by explicit path** - the scorecard source/test
+   (`internal/conflationscore/`), the reporting-surface file(s) whose prose you corrected,
+   the control-pane baseline. Never `git add -A`. End the subject with `(fak <leaf>)`.
 
 ## The anti-gaming rule (specific to this surface)
 
@@ -57,18 +59,18 @@ detector.** A flagged external value is fixed by *labeling* it OBSERVED, not by 
 metric. A false-attribution sentence is fixed by naming the real provider-side cause, not by
 deleting the sentence so the substring no longer matches. If a flagged string is *already*
 honest in different words (e.g. "provider-side reuse, distinct from the local caches"), the
-fix is to teach the detector that phrasing in `OBSERVED_QUALIFIERS` - recognizing real
-honesty the keyword list was blind to is NOT weakening the check; relaxing it to pass a
-genuine conflation is.
+fix is to teach the detector that phrasing in `observedQualifiers`
+(`internal/conflationscore/conflationscore.go`) - recognizing real honesty the keyword list
+was blind to is NOT weakening the check; relaxing it to pass a genuine conflation is.
 
 ## Adding a surface
 
 When a new file renders operator-facing numbers (a metric family, a new exit summary), add
-its path to `REPORTING_SURFACES` in `tools/conflation_scorecard.py`. The scorecard then holds
-it to the same provenance discipline, and the live-tree smoke test pins the new floor.
+its path to `ReportingSurfaces` in `internal/conflationscore/conflationscore.go`. The scorecard
+then holds it to the same provenance discipline, and the live-tree test pins the new floor.
 
 ## ASCII gotcha
 
-Keep the scorecard source ASCII-only (no em-dashes / smart quotes). The repo's provenance
-pre-commit hook crashes on non-cp1252 UTF-8 before its own escape fires. Use ` - ` for a
-dash and straight quotes.
+Keep the scorecard source (`internal/conflationscore/`) and the surfaces it grades ASCII-only
+(no em-dashes / smart quotes). The repo's provenance pre-commit hook crashes on non-cp1252
+UTF-8 before its own escape fires. Use ` - ` for a dash and straight quotes.
