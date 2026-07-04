@@ -7,8 +7,8 @@
 #
 # Apply order (or `kubectl apply -k deploy/k8s`):
 #   1. Fill the Secret (gateway-key, and the upstream provider key if hosted).
-#   2. Point `image:` at a registry your cluster can pull from (you build + push the
-#      repo Dockerfile; there is no public image yet).
+#   2. `image:` defaults to the published ghcr.io/anthony-chaudhary/fak image;
+#      override it (or the kustomize `images:` patch) if you build from source.
 #   3. kubectl apply -f deploy/k8s/fak.yaml
 #
 # The one rule that bites first: a network-facing gateway MUST set --require-key-env
@@ -63,9 +63,9 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: fak
-          # Build the repo Dockerfile and push to a registry the cluster can pull:
-          #   docker build -t REGISTRY/fak:0.32.0 . && docker push REGISTRY/fak:0.32.0
-          image: REGISTRY/fak:0.32.0
+          # Published image (public, no login needed to pull). To build from
+          # source instead: docker build -t REGISTRY/fak:0.36.0 . && docker push REGISTRY/fak:0.36.0
+          image: ghcr.io/anthony-chaudhary/fak:0.36.0
           args:
             - serve
             - --addr=0.0.0.0:8080

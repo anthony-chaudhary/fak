@@ -91,12 +91,22 @@ two-stage build: stage one compiles `cmd/fak` static (`CGO_ENABLED=0`); the fina
 image is `gcr.io/distroless/static-debian12:nonroot` plus the single binary — no
 shell, no package manager, runs as `nonroot`, exposes `8080`.
 
-> **No public registry image yet.** There is no official image on a public
-> registry; you build from this Dockerfile and push to a registry you control.
-> Building the static binary is the documented Docker adopter path (the
-> `static-binary / Docker` route).
+> **Published image.** Every `v*` tag publishes
+> `ghcr.io/anthony-chaudhary/fak:<version>` and `:latest` to GitHub Container
+> Registry ([`release-container.yml`](https://github.com/anthony-chaudhary/fak/blob/main/.github/workflows/release-container.yml)),
+> and the package is public — no login needed to pull it. Building the
+> Dockerfile yourself is the alternative for an air-gapped cluster or a
+> private-registry mirror.
 
-### Build
+### Pull (recommended)
+
+```bash
+docker pull ghcr.io/anthony-chaudhary/fak:0.36.0
+# or track the moving tag:
+docker pull ghcr.io/anthony-chaudhary/fak:latest
+```
+
+### Build (alternative: air-gapped / private registry)
 
 ```bash
 # From a clone (repo root, where the Dockerfile lives):
@@ -164,7 +174,7 @@ the observability stack:
 # compose.yaml
 services:
   fak:
-    image: fak:0.36.0          # built from the repo Dockerfile, pushed to your registry
+    image: ghcr.io/anthony-chaudhary/fak:0.36.0   # published image; swap for your own to build from source
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -205,13 +215,15 @@ scrapes `fak serve` on `:8080`; see [observability.md](observability.md).
 
 The example below runs proxy-mode fak as a stateless `Deployment` — the secret in a
 `Secret`, the policy in a `ConfigMap`, `/healthz` driving the probes, and a
-hardened `securityContext` that matches the distroless `nonroot` image. Apply it to
-your cluster after pushing the image to a registry the cluster can pull from.
+hardened `securityContext` that matches the distroless `nonroot` image. It
+defaults to the published `ghcr.io/anthony-chaudhary/fak` image; point `image:`
+at your own registry instead if you build from source.
 
 > This manifest is also **committed at [`deploy/k8s/`](https://github.com/anthony-chaudhary/fak/tree/main/deploy/k8s)**
 > — apply it directly with `kubectl apply -k deploy/k8s` (or `kubectl apply -f
-> deploy/k8s/fak.yaml`) after filling the `Secret` and pointing `image:` at your
-> registry. See [`deploy/k8s/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/deploy/k8s/README.md).
+> deploy/k8s/fak.yaml`) after filling the `Secret`. It pulls the published ghcr
+> image by default; override `image:` (or the kustomize `images:` patch) to
+> point at your own registry. See [`deploy/k8s/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/deploy/k8s/README.md).
 
 > TLS belongs at the edge. Terminate TLS at your Ingress / load balancer and route
 > cleartext HTTP to the `Service` — fak speaks plain HTTP.
@@ -260,7 +272,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: fak
-          image: REGISTRY/fak:0.36.0
+          image: ghcr.io/anthony-chaudhary/fak:0.36.0   # or REGISTRY/fak:0.36.0 if you build from source
           args:
             - serve
             - --addr=0.0.0.0:8080

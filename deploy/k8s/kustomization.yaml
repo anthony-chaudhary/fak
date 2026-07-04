@@ -9,11 +9,12 @@ kind: Kustomization
 resources:
   - fak.yaml
 
-# Override the image without editing the manifest:
+# fak.yaml's `image:` already defaults to the published ghcr.io/anthony-chaudhary/fak
+# image. Override it without editing the manifest (e.g. to build from source instead):
 #   images:
-#     - name: REGISTRY/fak
-#       newName: ghcr.io/your-org/fak
-#       newTag: "0.32.0"
+#     - name: ghcr.io/anthony-chaudhary/fak
+#       newName: REGISTRY/fak
+#       newTag: "0.36.0"
 
 # Deploy into a dedicated namespace (create it first: kubectl create ns fak):
 #   namespace: fak

@@ -48,13 +48,15 @@ speaks plain HTTP.
 
 ## Apply
 
-1. **Build and push the image.** There is no public registry image yet — build the
-   repo [`Dockerfile`](../../Dockerfile) and push to a registry your cluster can pull
-   from, then point `image:` (or the kustomize `images:` override) at it:
+1. **Image.** `fak.yaml` already pulls the published, public
+   `ghcr.io/anthony-chaudhary/fak:0.36.0` image — no build or push needed. For an
+   air-gapped cluster or a private-registry mirror, build the repo
+   [`Dockerfile`](../../Dockerfile) yourself and point `image:` (or the kustomize
+   `images:` override) at your own registry instead:
 
    ```bash
-   docker build -t REGISTRY/fak:0.32.0 .
-   docker push REGISTRY/fak:0.32.0
+   docker build -t REGISTRY/fak:0.36.0 .
+   docker push REGISTRY/fak:0.36.0
    ```
 
 2. **Fill the Secret.** Replace the placeholders in `fak.yaml` (or, in production,
