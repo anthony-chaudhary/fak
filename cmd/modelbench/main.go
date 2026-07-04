@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/benchckpt"
 	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
@@ -245,6 +246,8 @@ type benchFlags struct {
 	smokeDeadline         *time.Duration
 	fitCheck              *bool
 	loadProgress          *bool
+	checkpoint            *string
+	resume                *string
 }
 
 // parseFlags defines and parses the command-line flags, then expands a leading ~
@@ -281,6 +284,8 @@ func parseFlags() *benchFlags {
 		smokeDeadline:         flag.Duration("smoke-deadline", 90*time.Second, "hard wall-clock cap on the -smoke load: if the load exceeds it, abort and report SMOKE_LOAD_TIMEOUT with the last progress line instead of hanging"),
 		fitCheck:              flag.Bool("fit-check", true, "before a normal load, refuse a model that a capacity-reporting -backend KNOWS won't fit (typed refusal instead of a mid-load OOM panic). Fail-open on legacy/cpu-ref. -fit-check=false for deliberate stress runs."),
 		loadProgress:          flag.Bool("load-progress", true, "stream throttled load progress (percent / GB / elapsed / GB-per-s) to stderr on lean/q4k GGUF loads so a multi-minute load is not silent; -load-progress=false silences it"),
+		checkpoint:            flag.String("checkpoint", "", "per-cell write-ahead checkpoint path (#2382): each grid cell (prefill size / decode / workload case) is appended as it completes, so a crash mid-grid keeps the cells already measured instead of discarding the whole sweep"),
+		resume:                flag.String("resume", "", "resume from an existing checkpoint (alias for -checkpoint on an existing file): reuse the recorded cells and measure only the missing ones; refuses if the file was built for a different model/precision/grid"),
 	}
 	flag.Parse()
 	*f.dir = pathutil.ExpandTilde(*f.dir)
@@ -701,19 +706,27 @@ func stepDecode(s *model.Session, id, steps, vocab int) time.Duration {
 }
 
 // runPrefill times Session.Prefill over each P in prefillSizes (builds KV cache, last
-// logits) and records the median timings and any phase profiles into the report maps.
-func runPrefill(f *benchFlags, newSession func() *model.Session, vocab int, prefillSizes []int, report, phaseReport map[string]any) {
+// logits) and records the median timings and any phase profiles into the report maps. With a
+// checkpoint (ck != nil), each per-size cell is write-ahead persisted as it completes and reused
+// verbatim on resume, so a crash mid-grid keeps the sizes already measured (#2382).
+func runPrefill(f *benchFlags, ck *benchckpt.Ledger, newSession func() *model.Session, vocab int, prefillSizes []int, report, phaseReport map[string]any) {
 	var prefills []prefillResult
 	var prefillPhases []*model.PhaseProfile
 	for _, p := range prefillSizes {
 		ids := lcgIDs(p, vocab)
-		med := timePrefillReps(newSession, ids, *f.prefillReps)
-		prefills = append(prefills, prefillResult{
-			Tokens: p, Reps: *f.prefillReps, MedianMS: med,
-			TokPerSec: float64(p) / (med / 1e3),
+		res, reused := checkpointCell(ck, fmt.Sprintf("prefill:P=%d", p), func() prefillResult {
+			med := timePrefillReps(newSession, ids, *f.prefillReps)
+			return prefillResult{
+				Tokens: p, Reps: *f.prefillReps, MedianMS: med,
+				TokPerSec: float64(p) / (med / 1e3),
+			}
 		})
-		fmt.Fprintf(os.Stderr, "[fak] prefill P=%d: %.1f ms (%.1f tok/s)\n", p, med, float64(p)/(med/1e3))
-		if *f.phaseProfile {
+		prefills = append(prefills, res)
+		fmt.Fprintf(os.Stderr, "[fak] prefill P=%d: %.1f ms (%.1f tok/s)%s\n", p, res.MedianMS, res.TokPerSec, resumedTag(reused))
+		// Phase profiling reruns the forward with a profiler attached; a cell reused from the
+		// checkpoint has no live measurement to profile, so skip it (the timing grid resumes;
+		// the -phase-profile deep-dive covers only the freshly-measured sizes).
+		if *f.phaseProfile && !reused {
 			s := newSession()
 			pp := model.NewPhaseProfiler()
 			s.PhaseProfiler = pp
@@ -733,18 +746,22 @@ func runPrefill(f *benchFlags, newSession func() *model.Session, vocab int, pref
 }
 
 // runDecode prefills a short prompt then times D incremental Step() calls, recording the
-// per-token median and any phase profile into the report maps.
-func runDecode(f *benchFlags, newSession func() *model.Session, vocab int, report, phaseReport map[string]any) {
+// per-token median and any phase profile into the report maps. The single decode cell is
+// checkpointed under the "decode" key, so a resume reuses it rather than re-measuring (#2382).
+func runDecode(f *benchFlags, ck *benchckpt.Ledger, newSession func() *model.Session, vocab int, report, phaseReport map[string]any) {
 	prompt := lcgIDs(*f.decodePrompt, vocab)
-	med := medDecodeReps(newSession, prompt, *f.decodeReps, *f.decodeSteps, vocab, func(r int) int {
-		return int(uint64(r*131+7) % uint64(vocab))
+	res, reused := checkpointCell(ck, "decode", func() decodeResult {
+		med := medDecodeReps(newSession, prompt, *f.decodeReps, *f.decodeSteps, vocab, func(r int) int {
+			return int(uint64(r*131+7) % uint64(vocab))
+		})
+		return decodeResult{
+			PromptTokens: *f.decodePrompt, DecodeSteps: *f.decodeSteps, Reps: *f.decodeReps,
+			PerTokenMedMS: med, TokPerSec: 1.0 / (med / 1e3),
+		}
 	})
-	report["decode"] = decodeResult{
-		PromptTokens: *f.decodePrompt, DecodeSteps: *f.decodeSteps, Reps: *f.decodeReps,
-		PerTokenMedMS: med, TokPerSec: 1.0 / (med / 1e3),
-	}
-	fmt.Fprintf(os.Stderr, "[fak] decode: %.1f ms/tok (%.1f tok/s)\n", med, 1.0/(med/1e3))
-	if *f.phaseProfile {
+	report["decode"] = res
+	fmt.Fprintf(os.Stderr, "[fak] decode: %.1f ms/tok (%.1f tok/s)%s\n", res.PerTokenMedMS, res.TokPerSec, resumedTag(reused))
+	if *f.phaseProfile && !reused {
 		s := newSession()
 		s.Prefill(prompt)
 		pp := model.NewPhaseProfiler()
@@ -759,18 +776,23 @@ func runDecode(f *benchFlags, newSession func() *model.Session, vocab int, repor
 }
 
 // runWorkload replays the recorded agent workload cases: a prefill timing and a decode
-// timing per case, at the recorded (capped) prompt/decode lengths, into the report.
-func runWorkload(f *benchFlags, newSession func() *model.Session, vocab int, workload *model.BenchWorkload, report map[string]any) {
+// timing per case, at the recorded (capped) prompt/decode lengths, into the report. Each case's
+// prefill and decode cell is checkpointed under a per-case key, so a crash partway through the
+// workload keeps the cases already measured and a resume runs only the missing ones (#2382).
+func runWorkload(f *benchFlags, ck *benchckpt.Ledger, newSession func() *model.Session, vocab int, workload *model.BenchWorkload, report map[string]any) {
 	var wp []prefillResult
 	for i, c := range workload.Cases {
 		n := capPositive(c.PromptTokens, *f.workloadPrefillCap)
-		ids := lcgIDsSeed(n, vocab, 0xC0FFEE+uint64(i)*977)
-		med := timePrefillReps(newSession, ids, *f.prefillReps)
-		wp = append(wp, prefillResult{
-			Name: c.Name, Source: c.Source, Tokens: n, RecordedTokens: c.PromptTokens,
-			Reps: *f.prefillReps, MedianMS: med, TokPerSec: float64(n) / (med / 1e3),
+		res, reused := checkpointCell(ck, fmt.Sprintf("wprefill:%d", i), func() prefillResult {
+			ids := lcgIDsSeed(n, vocab, 0xC0FFEE+uint64(i)*977)
+			med := timePrefillReps(newSession, ids, *f.prefillReps)
+			return prefillResult{
+				Name: c.Name, Source: c.Source, Tokens: n, RecordedTokens: c.PromptTokens,
+				Reps: *f.prefillReps, MedianMS: med, TokPerSec: float64(n) / (med / 1e3),
+			}
 		})
-		fmt.Fprintf(os.Stderr, "[fak workload] prefill %s P=%d recorded=%d: %.1f ms\n", c.Name, n, c.PromptTokens, med)
+		wp = append(wp, res)
+		fmt.Fprintf(os.Stderr, "[fak workload] prefill %s P=%d recorded=%d: %.1f ms%s\n", c.Name, n, c.PromptTokens, res.MedianMS, resumedTag(reused))
 	}
 	report["workload_prefill"] = wp
 
@@ -778,20 +800,102 @@ func runWorkload(f *benchFlags, newSession func() *model.Session, vocab int, wor
 	for i, c := range workload.Cases {
 		promptN := capPositive(c.PromptTokens, *f.workloadPrefillCap)
 		steps := capPositive(c.CompletionTokens, *f.decodeSteps)
-		prompt := lcgIDsSeed(promptN, vocab, 0xA11CE+uint64(i)*131)
-		med := medDecodeReps(newSession, prompt, *f.decodeReps, steps, vocab, func(r int) int {
-			return int((uint64(r+1)*2654435761 + uint64(i)) % uint64(vocab))
+		res, reused := checkpointCell(ck, fmt.Sprintf("wdecode:%d", i), func() workloadDecodeResult {
+			prompt := lcgIDsSeed(promptN, vocab, 0xA11CE+uint64(i)*131)
+			med := medDecodeReps(newSession, prompt, *f.decodeReps, steps, vocab, func(r int) int {
+				return int((uint64(r+1)*2654435761 + uint64(i)) % uint64(vocab))
+			})
+			return workloadDecodeResult{
+				Name: c.Name, Source: c.Source,
+				PromptTokens: promptN, RecordedPromptTokens: c.PromptTokens,
+				DecodeSteps: steps, RecordedDecodeTokens: c.CompletionTokens,
+				Reps: *f.decodeReps, PerTokenMedMS: med, TokPerSec: 1.0 / (med / 1e3),
+			}
 		})
-		wd = append(wd, workloadDecodeResult{
-			Name: c.Name, Source: c.Source,
-			PromptTokens: promptN, RecordedPromptTokens: c.PromptTokens,
-			DecodeSteps: steps, RecordedDecodeTokens: c.CompletionTokens,
-			Reps: *f.decodeReps, PerTokenMedMS: med, TokPerSec: 1.0 / (med / 1e3),
-		})
-		fmt.Fprintf(os.Stderr, "[fak workload] decode %s prompt=%d recorded=%d steps=%d/%d: %.1f ms/tok\n",
-			c.Name, promptN, c.PromptTokens, steps, c.CompletionTokens, med)
+		wd = append(wd, res)
+		fmt.Fprintf(os.Stderr, "[fak workload] decode %s prompt=%d recorded=%d steps=%d/%d: %.1f ms/tok%s\n",
+			c.Name, promptN, c.PromptTokens, steps, c.CompletionTokens, res.PerTokenMedMS, resumedTag(reused))
 	}
 	report["workload_decode"] = wd
+}
+
+// resumedTag annotates a stderr progress line when a cell was reused from a checkpoint rather
+// than freshly measured, so a resume's log makes plain which cells were re-run.
+func resumedTag(reused bool) string {
+	if reused {
+		return " [resumed]"
+	}
+	return ""
+}
+
+// checkpointCell returns the cell recorded under key in ck (reused verbatim, reused=true) or
+// measures a fresh one via measure, write-ahead appends it, and returns it (reused=false). A nil
+// ledger always measures — the historical no-checkpoint path, byte-for-byte unchanged. This is
+// the per-cell seam issue #2382 asks for: every completed grid cell is persisted before the next
+// begins, so a crash keeps cells 1..N-1 and a -resume reuses them instead of re-measuring.
+func checkpointCell[T any](ck *benchckpt.Ledger, key string, measure func() T) (cell T, reused bool) {
+	if ck != nil {
+		var cached T
+		if ok, err := ck.Cell(key, &cached); err == nil && ok {
+			return cached, true
+		}
+	}
+	cell = measure()
+	if ck != nil {
+		if err := ck.Append(key, cell); err != nil {
+			fmt.Fprintf(os.Stderr, "modelbench: checkpoint append %q: %v\n", key, err)
+			os.Exit(1)
+		}
+	}
+	return cell, false
+}
+
+// modelbenchFingerprint is the grid identity a checkpoint is bound to (#2382). It captures
+// everything that makes a measured cell VALID to reuse — the model source/name, the precision
+// lane, the backend, the resolved matmul worker regime, and the per-cell rep/step counts a median
+// is taken over — but deliberately NOT the prefill-size LIST: a cell for P=16 means the same thing
+// regardless of which sibling sizes are swept, which is exactly what lets a crash-then-resume over
+// the same (or a superset) grid reuse recorded cells. A resume whose model/precision/counts differ
+// refuses with benchckpt.ErrFingerprintMismatch rather than blending incompatible cells.
+func modelbenchFingerprint(f *benchFlags, modelName string) benchckpt.Fingerprint {
+	return benchckpt.Fingerprint{
+		"schema":        "modelbench-grid/1",
+		"source":        loadSource(*f.hf, *f.gguf, *f.dir, *f.lean, *f.q4k),
+		"name":          modelName,
+		"quant":         *f.quant,
+		"metal":         *f.metal,
+		"q4k":           *f.q4k,
+		"lean":          *f.lean,
+		"backend":       *f.backendName,
+		"prefill_reps":  *f.prefillReps,
+		"decode_reps":   *f.decodeReps,
+		"decode_steps":  *f.decodeSteps,
+		"decode_prompt": *f.decodePrompt,
+		"workload":      *f.workloadPath,
+		"workload_cap":  *f.workloadPrefillCap,
+		"workers":       model.NumWorkers(),
+	}
+}
+
+// openCheckpoint opens the write-ahead checkpoint for a full grid run when -checkpoint or
+// -resume names a path. -resume is an alias for -checkpoint on an existing file: both feed the
+// one path that both writes ahead and, if it already matches this grid's fingerprint, resumes
+// from it. A resume whose fingerprint differs refuses here (exit 2) rather than silently mixing
+// incompatible cells. Returns a nil ledger (and nil closer) when no checkpoint was requested.
+func openCheckpoint(f *benchFlags, modelName string) *benchckpt.Ledger {
+	ckPath := *f.checkpoint
+	if strings.TrimSpace(*f.resume) != "" {
+		ckPath = *f.resume
+	}
+	if ckPath == "" {
+		return nil
+	}
+	l, err := benchckpt.Open(ckPath, modelbenchFingerprint(f, modelName))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "modelbench: refusing to resume %s: %v\n", ckPath, err)
+		os.Exit(2)
+	}
+	return l
 }
 
 func main() {
@@ -944,10 +1048,19 @@ func main() {
 		}
 	}
 
-	runPrefill(f, newSession, vocab, prefillSizes, report, phaseReport)
-	runDecode(f, newSession, vocab, report, phaseReport)
+	// Open the per-cell write-ahead checkpoint (if -checkpoint/-resume was passed) now that the
+	// model/precision regime is finalized — its fingerprint binds the recorded cells to this
+	// grid. Only the grid AFTER load is protected; the -preflight/-smoke/-load-only/-verify
+	// early exits above never reach here, which is exactly the gap #2382 names.
+	ck := openCheckpoint(f, modelName)
+	if ck != nil {
+		defer ck.Close()
+	}
+
+	runPrefill(f, ck, newSession, vocab, prefillSizes, report, phaseReport)
+	runDecode(f, ck, newSession, vocab, report, phaseReport)
 	if workload != nil {
-		runWorkload(f, newSession, vocab, workload, report)
+		runWorkload(f, ck, newSession, vocab, workload, report)
 	}
 	if *f.phaseProfile {
 		report["phase_profile"] = phaseReport
