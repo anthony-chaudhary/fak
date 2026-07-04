@@ -191,6 +191,7 @@ type macBenchWatchRunOptions struct {
 func runMacBenchWatchFull(stdout, stderr io.Writer, opts macBenchWatchRunOptions) int {
 	key, err := resolveMacBenchKeyForRun(opts.keyEnv, opts.keyFile, opts.fetchKey, opts.sshHost, opts.sshKey, opts.gateway, macbench.SuiteAll)
 	if err != nil {
+		_ = writeMacBenchWatchError(opts.logPath, "key", err)
 		fmt.Fprintf(stderr, "fak macbench watch: %v\n", err)
 		return 2
 	}
@@ -206,6 +207,7 @@ func runMacBenchWatchFull(stdout, stderr io.Writer, opts macBenchWatchRunOptions
 		Concurrency:   opts.concurrency,
 	})
 	if err != nil {
+		_ = writeMacBenchWatchError(opts.logPath, "run", err)
 		fmt.Fprintf(stderr, "fak macbench watch: %v\n", err)
 		return 1
 	}
@@ -243,6 +245,36 @@ func writeMacBenchWatchReport(stdout io.Writer, logPath string, rep macbench.Rep
 	enc.SetIndent("", "  ")
 	enc.SetEscapeHTML(false)
 	return enc.Encode(rep)
+}
+
+func writeMacBenchWatchError(logPath, phase string, err error) error {
+	logPath = strings.TrimSpace(logPath)
+	if logPath == "" || err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		return err
+	}
+	f, errOpen := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if errOpen != nil {
+		return errOpen
+	}
+	defer f.Close()
+	event := struct {
+		Schema      string `json:"schema"`
+		GeneratedAt string `json:"generated_at"`
+		Phase       string `json:"phase"`
+		Error       string `json:"error"`
+	}{
+		Schema:      "fak.macbench.watch.event.v1",
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		Phase:       phase,
+		Error:       err.Error(),
+	}
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	return enc.Encode(event)
 }
 
 func writeMacBenchResultFile(path string, rep macbench.Report) error {

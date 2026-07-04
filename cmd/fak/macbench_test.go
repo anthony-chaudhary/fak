@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMacBenchJSONDoesNotLeakBearer(t *testing.T) {
@@ -102,6 +103,32 @@ func TestMacBenchWatchWritesResultWhenHealthy(t *testing.T) {
 	}
 	if !strings.Contains(string(logBytes), `"suite": "health"`) || !strings.Contains(string(logBytes), `"suite": "all"`) {
 		t.Fatalf("watch log did not include health and full reports:\n%s", logBytes)
+	}
+}
+
+func TestMacBenchWatchLogsKeyErrors(t *testing.T) {
+	logPath := t.TempDir() + "/macbench-watch.log"
+	var stdout, stderr bytes.Buffer
+	code := runMacBenchWatchFull(&stdout, &stderr, macBenchWatchRunOptions{
+		gateway:     "http://example.invalid:8080",
+		model:       "qwen3.6-27b",
+		keyEnv:      "FAK_GATEWAY_KEY",
+		keyFile:     t.TempDir(),
+		fetchKey:    true,
+		sshHost:     "user@node-macos-a.local",
+		timeout:     time.Second,
+		logPath:     logPath,
+		concurrency: 1,
+	})
+	if code == 0 {
+		t.Fatal("expected key error")
+	}
+	b, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !strings.Contains(string(b), `"schema": "fak.macbench.watch.event.v1"`) || !strings.Contains(string(b), `"phase": "key"`) {
+		t.Fatalf("watch log did not record key error:\n%s", b)
 	}
 }
 
