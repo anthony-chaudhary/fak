@@ -172,6 +172,32 @@ _BACKEND_PRODUCT = {"claude": "claude", "opencode": "opencode", "codex": "codex"
 OPENCODE_PROMPT_NOTICE = "Resolve GitHub issue # from the attached dispatch prompt."
 OPENCODE_PROMPT_FILE_SUFFIX = ".prompt.txt"
 
+# Operator directive: claude issue-resolution workers run Opus 4.8 at xhigh
+# reasoning effort. Pinned here (not read from the per-account settings.json
+# `model`, which the switcher/backup tooling live-rotates) so the choice STICKS.
+# xhigh has no settings.json field — it is only settable via the `--effort` flag.
+CLAUDE_WORKER_MODEL = "claude-opus-4-8"
+CLAUDE_WORKER_EFFORT = "xhigh"
+
+
+def worker_model_effort(backend: str, acct: dict) -> tuple[str | None, str | None]:
+    """The (model, reasoning-effort) to pin on one worker's CLI, per backend.
+
+    - opencode keeps its per-account model and takes no effort knob.
+    - claude is pinned to :data:`CLAUDE_WORKER_MODEL` at
+      :data:`CLAUDE_WORKER_EFFORT` (operator directive) — EXCEPT a ``local``
+      account, which routes to the local gateway model whose upstream ignores
+      Claude's effort knob (mirrors ``claude_agent_chat``'s glm-mode skip).
+    - codex uses its ambient login default (no pin).
+    """
+    if backend == "opencode":
+        return acct.get("model"), None
+    if backend == "claude":
+        if str(acct.get("model") or "") == "local":
+            return "local", None
+        return CLAUDE_WORKER_MODEL, str(acct.get("model_effort") or CLAUDE_WORKER_EFFORT)
+    return None, None
+
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
@@ -959,12 +985,23 @@ def open_issue_updated_map(root: Path, *, cap: int = 1000,
     return out
 
 
-def build_worker_command(backend: str, prompt: str, model: str | None) -> list[str]:
+def build_worker_command(backend: str, prompt: str, model: str | None,
+                         effort: str | None = None) -> list[str]:
     """The argv for one detached issue-resolution worker, per backend. Both forms
     run the SAME issue-resolution prompt (with its ``#N``-in-subject rule), so the
-    resulting commit is witnessable by the closure auditor regardless of backend."""
+    resulting commit is witnessable by the closure auditor regardless of backend.
+
+    ``model``/``effort`` pin the claude worker's model and reasoning effort via the
+    CLI flags (``--model``/``--effort``, both real in Claude Code >=2.1) — the only
+    way to apply ``xhigh``, which has no ``settings.json`` equivalent."""
     if backend == "claude":
-        return ["claude", "-p", "--permission-mode", "bypassPermissions", prompt]
+        cmd = ["claude", "-p", "--permission-mode", "bypassPermissions"]
+        if model:
+            cmd += ["--model", model]  # pin the exact model (reproducible/traced)
+        if effort:
+            cmd += ["--effort", effort]  # reasoning effort; no settings.json field
+        cmd.append(prompt)
+        return cmd
     if backend == "opencode":
         # Keep the full dispatch prompt out of argv. The live spawn path writes it
         # beside the log and attaches it with ``--file``; this short notice keeps
@@ -2606,7 +2643,7 @@ def _maybe_dispatch_contract_repair(
                        f"spawn 1 {backend} contract-repair worker on issue(s) "
                        f"{nums} to bring them up to contract")})
         return payload
-    model = acct.get("model") if backend == "opencode" else None
+    model, effort = worker_model_effort(backend, acct)
     if backend == "claude":
         env = issue_dispatch.worker_env(acct.get("dir"), REPAIR_LANE, root)
     elif backend == "codex":
@@ -2615,7 +2652,7 @@ def _maybe_dispatch_contract_repair(
         env = opencode_worker_env(acct.get("dir"), REPAIR_LANE, root, runs_dir)
     env["FLEET_REPAIR_ISSUES"] = nums
     command, guarded = dispatch_worker.guarded_launch_command(
-        build_worker_command(backend, rec["prompt"], model),
+        build_worker_command(backend, rec["prompt"], model, effort),
         REPAIR_LANE, backend, root, env)
     if guarded:
         dispatch_worker.guard_env_augment(env)
@@ -3098,11 +3135,11 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
             "bypassed": True,
             "gate_reason": issue_contract_hold_reason(contract),
         }
-    model = acct.get("model") if backend == "opencode" else None
+    model, effort = worker_model_effort(backend, acct)
     preview_prompt = f"<resolve #{target} prompt, {rec.get('prompt_chars')} chars>"
     preview_env = dispatch_worker.child_env(chosen_lane, backend, root)
     preview_command, preview_guarded = dispatch_worker.guarded_launch_command(
-        build_worker_command(backend, preview_prompt, model),
+        build_worker_command(backend, preview_prompt, model, effort),
         chosen_lane, backend, root, preview_env)
     payload["command"] = preview_command
     payload["guarded"] = preview_guarded
@@ -3144,7 +3181,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         env = opencode_worker_env(acct.get("dir"), chosen_lane, root, runs_dir)
     env["FLEET_RESOLVE_ISSUE"] = str(target)
     command, guarded = dispatch_worker.guarded_launch_command(
-        build_worker_command(backend, rec["prompt"], model),
+        build_worker_command(backend, rec["prompt"], model, effort),
         chosen_lane, backend, root, env)
     if guarded:
         dispatch_worker.guard_env_augment(env)

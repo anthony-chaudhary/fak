@@ -1309,6 +1309,42 @@ class BuildWorkerCommandTest(unittest.TestCase):
             mod.build_worker_command("claude", "PROMPT", None),
             ["claude", "-p", "--permission-mode", "bypassPermissions", "PROMPT"])
 
+    def test_claude_command_pins_model_and_effort(self) -> None:
+        mod = load()
+        self.assertEqual(
+            mod.build_worker_command("claude", "PROMPT", "claude-opus-4-8", "xhigh"),
+            ["claude", "-p", "--permission-mode", "bypassPermissions",
+             "--model", "claude-opus-4-8", "--effort", "xhigh", "PROMPT"])
+
+    def test_claude_command_effort_only_when_model_absent(self) -> None:
+        # A model-less claude worker still carries its reasoning effort flag.
+        mod = load()
+        self.assertEqual(
+            mod.build_worker_command("claude", "PROMPT", None, "xhigh"),
+            ["claude", "-p", "--permission-mode", "bypassPermissions",
+             "--effort", "xhigh", "PROMPT"])
+
+    def test_worker_model_effort_pins_claude_to_opus48_xhigh(self) -> None:
+        # A cloud claude account is pinned to Opus 4.8 xhigh regardless of the
+        # (live-rotated) per-account settings.json model.
+        mod = load()
+        self.assertEqual(
+            mod.worker_model_effort("claude", {"model": "claude-fable-5"}),
+            (mod.CLAUDE_WORKER_MODEL, mod.CLAUDE_WORKER_EFFORT))
+        self.assertEqual(mod.CLAUDE_WORKER_MODEL, "claude-opus-4-8")
+        self.assertEqual(mod.CLAUDE_WORKER_EFFORT, "xhigh")
+
+    def test_worker_model_effort_keeps_local_claude_and_opencode(self) -> None:
+        mod = load()
+        # A 'local' claude account is not forced onto cloud Opus, and takes no effort.
+        self.assertEqual(mod.worker_model_effort("claude", {"model": "local"}),
+                         ("local", None))
+        # opencode keeps its own model and takes no effort knob.
+        self.assertEqual(mod.worker_model_effort("opencode", {"model": "glm-5.2"}),
+                         ("glm-5.2", None))
+        # codex is unpinned.
+        self.assertEqual(mod.worker_model_effort("codex", {"model": "x"}), (None, None))
+
     def test_opencode_command_pins_model_and_skips_permissions(self) -> None:
         mod = load()
         self.assertEqual(

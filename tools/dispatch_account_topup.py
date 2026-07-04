@@ -129,7 +129,8 @@ def main(argv=None) -> int:
             continue
         env = issue_dispatch.worker_env(acct_dir, p["lane"], REPO)
         env["FLEET_RESOLVE_ISSUE"] = str(issue)
-        cmd = ird.build_worker_command("claude", rb["prompt"], None)
+        model, effort = ird.worker_model_effort("claude", acct)
+        cmd = ird.build_worker_command("claude", rb["prompt"], model, effort)
         res = ird.spawn_issue_worker(cmd, env, REPO, RUNS, issue, p["lane"], "claude",
                                      account=acct, spawn_probe_s=5.0)
         spawned.append({"issue": issue, "pid": res.get("pid")})
