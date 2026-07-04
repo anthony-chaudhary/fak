@@ -72,6 +72,21 @@ tools/_walltime.*
 # One-off `*_scratch.json` dumps a tool writes to the repo root (e.g.
 # ready_leaves_scratch.json) — per-session throwaway, never a build input.
 *_scratch.json
+# Dispatch/routing scratch dumps the issue-dispatch tooling writes to the repo
+# root (leaves2.json, ready_tmp.json, router_ready.json, lanes_ready.json,
+# router_tmp.json, cp_out.json/cp_scratch*, after.json). Per-session throwaway,
+# never a build input — but tree-scan governance tests (branchrole ref-audit,
+# pythongate, the tier/classification suites) walk the whole tree and red on a
+# stray `origin/main` string or a stored issue title inside them. Scope to the
+# root so a real tracked `*_ready.json` in a package (there are none today) is
+# never hidden.
+/*_tmp.json
+/*_ready.json
+/leaves*.json
+/lanes_ready.json
+/cp_out.json
+/cp_scratch*.json
+/after.json
 **/rmverifytmp/
 **/*verifytmp/
 
