@@ -1,0 +1,245 @@
+{
+  "schema": "fak.eve-eval-parity-contract.v1",
+  "issue": 2605,
+  "suite": "eve-fixture-parity",
+  "strict": true,
+  "raw": {
+    "arm": "raw",
+    "command": "eve eval --json --junit --strict --suite eve-fixture-parity",
+    "cases": [
+      {
+        "case_id": "succeeded-and-tool",
+        "passed": true,
+        "checks": [
+          {
+            "name": "t.succeeded",
+            "kind": "hard_gate",
+            "passed": true
+          },
+          {
+            "name": "t.calledTool(\"search\")",
+            "kind": "hard_gate",
+            "passed": true
+          }
+        ]
+      },
+      {
+        "case_id": "content-exact",
+        "passed": true,
+        "checks": [
+          {
+            "name": "t.succeeded",
+            "kind": "hard_gate",
+            "passed": true
+          },
+          {
+            "name": "content",
+            "kind": "hard_gate",
+            "passed": true
+          }
+        ]
+      },
+      {
+        "case_id": "soft-quality",
+        "passed": true,
+        "checks": [
+          {
+            "name": "t.succeeded",
+            "kind": "hard_gate",
+            "passed": true
+          },
+          {
+            "name": "quality",
+            "kind": "soft_score",
+            "passed": true,
+            "score": 0.9
+          }
+        ]
+      },
+      {
+        "case_id": "deliberate-gate-fail",
+        "passed": false,
+        "fail_reason": "t.calledTool(\"write\"): tool not called",
+        "checks": [
+          {
+            "name": "t.succeeded",
+            "kind": "hard_gate",
+            "passed": true
+          },
+          {
+            "name": "t.calledTool(\"write\")",
+            "kind": "hard_gate",
+            "passed": false,
+            "reason": "t.calledTool(\"write\"): tool not called"
+          }
+        ]
+      },
+      {
+        "case_id": "soft-strict-fail",
+        "passed": false,
+        "fail_reason": "coverage: score 0.50 below --strict threshold 0.70",
+        "fail_kind": "soft_score",
+        "checks": [
+          {
+            "name": "t.succeeded",
+            "kind": "hard_gate",
+            "passed": true
+          },
+          {
+            "name": "coverage",
+            "kind": "soft_score",
+            "passed": false,
+            "score": 0.5,
+            "reason": "coverage: score 0.50 below --strict threshold 0.70"
+          }
+        ]
+      }
+    ],
+    "session_ids_present": true,
+    "token_metadata_present": true
+  },
+  "fak": {
+    "arm": "fak",
+    "command": "eve eval --json --junit --strict --base-url http://127.0.0.1:8080/v1 --suite eve-fixture-parity",
+    "cases": [
+      {
+        "case_id": "succeeded-and-tool",
+        "passed": true,
+        "checks": [
+          {
+            "name": "t.succeeded",
+            "kind": "hard_gate",
+            "passed": true
+          },
+          {
+            "name": "t.calledTool(\"search\")",
+            "kind": "hard_gate",
+            "passed": true
+          }
+        ]
+      },
+      {
+        "case_id": "content-exact",
+        "passed": true,
+        "checks": [
+          {
+            "name": "t.succeeded",
+            "kind": "hard_gate",
+            "passed": true
+          },
+          {
+            "name": "content",
+            "kind": "hard_gate",
+            "passed": true
+          }
+        ]
+      },
+      {
+        "case_id": "soft-quality",
+        "passed": true,
+        "checks": [
+          {
+            "name": "t.succeeded",
+            "kind": "hard_gate",
+            "passed": true
+          },
+          {
+            "name": "quality",
+            "kind": "soft_score",
+            "passed": true,
+            "score": 0.9
+          }
+        ]
+      },
+      {
+        "case_id": "deliberate-gate-fail",
+        "passed": false,
+        "fail_reason": "t.calledTool(\"write\"): tool not called",
+        "checks": [
+          {
+            "name": "t.succeeded",
+            "kind": "hard_gate",
+            "passed": true
+          },
+          {
+            "name": "t.calledTool(\"write\")",
+            "kind": "hard_gate",
+            "passed": false,
+            "reason": "t.calledTool(\"write\"): tool not called"
+          }
+        ]
+      },
+      {
+        "case_id": "soft-strict-fail",
+        "passed": false,
+        "fail_reason": "coverage: score 0.50 below --strict threshold 0.70",
+        "fail_kind": "soft_score",
+        "checks": [
+          {
+            "name": "t.succeeded",
+            "kind": "hard_gate",
+            "passed": true
+          },
+          {
+            "name": "coverage",
+            "kind": "soft_score",
+            "passed": false,
+            "score": 0.5,
+            "reason": "coverage: score 0.50 below --strict threshold 0.70"
+          }
+        ]
+      }
+    ],
+    "session_ids_present": true,
+    "token_metadata_present": true
+  },
+  "cases": [
+    {
+      "case_id": "succeeded-and-tool",
+      "raw_passed": true,
+      "fak_passed": true,
+      "agree": true,
+      "downgraded": false
+    },
+    {
+      "case_id": "content-exact",
+      "raw_passed": true,
+      "fak_passed": true,
+      "agree": true,
+      "downgraded": false
+    },
+    {
+      "case_id": "soft-quality",
+      "raw_passed": true,
+      "fak_passed": true,
+      "agree": true,
+      "downgraded": false
+    },
+    {
+      "case_id": "deliberate-gate-fail",
+      "raw_passed": false,
+      "fak_passed": false,
+      "raw_fail_reason": "t.calledTool(\"write\"): tool not called",
+      "fak_fail_reason": "t.calledTool(\"write\"): tool not called",
+      "agree": true,
+      "downgraded": false
+    },
+    {
+      "case_id": "soft-strict-fail",
+      "raw_passed": false,
+      "fak_passed": false,
+      "raw_fail_reason": "coverage: score 0.50 below --strict threshold 0.70",
+      "fak_fail_reason": "coverage: score 0.50 below --strict threshold 0.70",
+      "raw_fail_kind": "soft_score",
+      "fak_fail_kind": "soft_score",
+      "agree": true,
+      "downgraded": false
+    }
+  ],
+  "parity_verdict": "pass",
+  "gate_failure_preserved": true,
+  "strict_threshold_preserved": true,
+  "session_ids_preserved": true,
+  "token_metadata_preserved": true,
+  "harness": "in-repo eve-semantics evaluator; fak arm routed through internal/gateway proxy; upstream `eve` CLI arm host-gated (see EVE-EVAL-PARITY-RUNBOOK.md)"
+}

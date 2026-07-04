@@ -5,12 +5,15 @@ description: "The command path and evidence contract for running a Vercel Eve ev
 
 # Eve eval parity runbook (GATED)
 
-Status: **contract written, no fixture harness yet**. This is the command path and evidence
-contract for [#2605](https://github.com/anthony-chaudhary/fak/issues/2605) — running a
+Status: **CI-runnable fixture parity harness shipped** (`internal/eveparity`, resolving
+[#2605](https://github.com/anthony-chaudhary/fak/issues/2605)); the **upstream `eve` npm
+CLI arm remains host-gated**. This is the command path and evidence contract for running a
 [Vercel Eve](https://github.com/vercel/eve) eval suite once raw and once routed through
-`fak serve`, and proving the two arms agree. No parity number, and no claim that fak
-preserves an Eve gate failure, is made until the fixture harness below exists and both
-arms have actually run.
+fak's gateway, and proving the two arms agree. The fak-mediation invariant — routing the
+identical fixture suite through fak's real gateway preserves every gate verdict, reason,
+and `--strict` threshold, and never downgrades a hard gate into a soft observation — is now
+witnessed by a Go test and a golden artifact. What is NOT yet witnessed, and makes no claim
+here, is a run against the *actual* upstream `eve` binary (it is not installed in CI).
 
 Upstream sources: [Eve evals overview](https://github.com/vercel/eve/blob/main/docs/evals/overview.mdx),
 [Eve CLI reference](https://github.com/vercel/eve/blob/main/docs/reference/cli.md).
@@ -25,27 +28,34 @@ all of these hold:
 1. a fixture Eve eval suite exists in this repo (`t.succeeded`, `t.calledTool`, and a
    deterministic content check) driven by a deterministic mock model — no external model
    key required in CI;
-2. the raw arm (`eve eval --json --junit` against the fixture agent, unmediated) and the
-   fak arm (the same eval target routed through `fak serve`) both produce a result artifact
-   for the same fixture suite; and
+2. the raw arm (the fixture suite evaluated unmediated) and the fak arm (the same suite
+   routed through fak's gateway) both produce a result artifact for the same fixture
+   suite; and
 3. a Go test asserts the two arms' pass/fail status is equal, a deliberately-failing gate
    fails both arms with the original Eve failure reason preserved in fak's result artifact,
    and `--strict` soft-threshold behavior is preserved.
 
-None of the three exist yet. This runbook fixes the contract now so the implementation has
-one target instead of an ad hoc shape.
+**All three now hold** for the fak-mediation arm: `internal/eveparity` implements the
+fixture suite, both arms, the comparator, and the golden witness
+(`internal/eveparity/testdata/parity-witness.golden.json`). The one boundary that
+remains: the raw arm here is an in-repo evaluator that models the Eve eval semantics, **not**
+the upstream `eve` npm CLI (`eve eval --json --junit`), which is not installed in CI. So this
+repo witnesses that *fak's mediation is transparent to Eve-shaped gates*; it does not yet
+witness a byte diff against the upstream binary's own JSON/JUnit output. That upstream-binary
+arm is the named residual — run it on a host with `eve` installed (§2/§3 below).
 
 ## Shipped vs residual
 
 | Piece | State | Evidence / residual |
 |---|---|---|
-| OpenAI-compatible fak gateway | shipped | `fak serve` exposes `/v1/chat/completions`; an Eve eval target can point at it once the fixture agent is authored. |
-| Fixture Eve eval suite (`t.succeeded`, `t.calledTool`, deterministic content check) | pending | no `testdata` fixture suite exists in this repo yet. |
-| Deterministic mock-model fixture (no external key needed) | pending | fak already has deterministic model fixtures elsewhere in the tree (e.g. `internal/model` test doubles); none are wired to an Eve-shaped agent yet. |
-| Raw-arm runner (`eve eval --json --junit`) | pending | no `fak eve` verb exists (`cmd/fak` has no `eve.go`). |
-| fak-routed arm runner | pending | same residual — no adapter routes the eval target through `fak serve` yet. |
-| Comparison / parity verdict + witness artifact | pending | schema proposed below (`fak.eve-eval-parity-contract.v1`); nothing produces it yet. |
-| Go test asserting equal pass/fail across arms | pending | this is the acceptance witness #2605 asks for; not written. |
+| OpenAI-compatible fak gateway | shipped | `fak serve` exposes `/v1/chat/completions`; the fak arm points the fixture suite at a real `gateway.New` proxy. |
+| Fixture Eve eval suite (`t.succeeded`, `t.calledTool`, deterministic content check) | shipped | `internal/eveparity` `FixtureSuite()` — three positive cases plus one deliberately-failing hard gate and one strict-sensitive soft score. |
+| Deterministic mock-model fixture (no external key needed) | shipped | `internal/eveparity` `FixtureUpstream()` serves scripted OpenAI chat replies; no model key required. |
+| Raw-arm runner | shipped | `RunArm("raw", …)` drives the fixture suite unmediated against the fixture upstream. |
+| fak-routed arm runner | shipped | `RunArm("fak", …)` drives the identical suite through a real `gateway.New` proxy (session admission + policy + upstream proxy); the fixture `search` tool is admitted through fak's floor. |
+| Comparison / parity verdict + witness artifact | shipped | `Compare()` emits `fak.eve-eval-parity-contract.v1`; golden at `internal/eveparity/testdata/parity-witness.golden.json`. |
+| Go test asserting equal pass/fail across arms | shipped | `TestEveParityRawVsFak` (both `--strict` modes) + `TestCompareCatchesSilentDowngrade` (adversarial no-downgrade). |
+| Raw arm against the **upstream `eve` npm CLI** (`eve eval --json --junit`) | host-gated | `eve` is not installed in CI; §2/§3 give the exact command shape to run on a host that has it. |
 
 ## 1. Fixture suite shape
 
@@ -125,17 +135,31 @@ Proposed schema, `fak.eve-eval-parity-contract.v1`:
 `parity_verdict` stays `"pending"` until a Go test has actually run both arms and compared
 them; a doc alone can never set it to `"pass"`.
 
-## 5. The smallest honest win
+## 5. The smallest honest win — landed
 
 One fixture suite (the three positive cases plus the one deliberately-failing gate), both
 arms run, a Go test asserting equal pass/fail status, and the failing gate's original Eve
-reason string byte-identical in both result artifacts. That is the first witnessed point.
-Until it lands, this repo makes no Eve eval parity claim.
+reason string byte-identical in both result artifacts. **That point is now witnessed** by
+`internal/eveparity`:
+
+- `go test ./internal/eveparity/ -count=1` runs the fixture suite raw and fak-routed (the
+  fak arm through a real `gateway.New` proxy) under both `--strict` modes.
+- The deliberately-failing gate (`t.calledTool("write")`) fails BOTH arms with the
+  byte-identical reason `t.calledTool("write"): tool not called`, marked a `hard_gate` in
+  the golden — never a soft observation.
+- `TestCompareCatchesSilentDowngrade` proves the comparator *fails* if a fak arm ever turned
+  that hard gate into a pass — the golden artifact's whole reason to exist.
+
+Regenerate the golden with `go test ./internal/eveparity/ -run Golden -update`.
+
+The remaining residual is the upstream-binary arm: replace the in-repo evaluator's raw arm
+with a real `eve eval --json --junit` run (§2) on a host that has the `eve` CLI, and diff its
+JSON/JUnit against fak's artifact byte-for-byte.
 
 ## 6. Provenance
 
 - House benchmark discipline this runbook follows: [`BENCHMARK-CONTRACT-MAP.md`](BENCHMARK-CONTRACT-MAP.md),
   [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md), [`BENCHMARK-GOVERNANCE.md`](../../BENCHMARK-GOVERNANCE.md).
-- Written with no `eve` CLI installed and no fixture harness in the tree. Every step above
-  is a proposed command shape pinned to the issue's own text, not a captured run — that is
-  the residual #2605 still owns.
+- The fixture harness (`internal/eveparity`) is now in the tree and green in CI; §2/§3's
+  upstream-`eve`-binary commands remain proposed shapes (no `eve` CLI in CI), and that
+  upstream-binary diff is the residual #2605's harness does not yet capture.
