@@ -25,9 +25,33 @@ func runIssueFanout(stdout, stderr io.Writer, argv []string) int {
 	areas := fs.String("areas", "", "comma-separated area filter ("+strings.Join(issuefanout.AreaNames(), ",")+")")
 	maxN := fs.Int("max", 0, "cap candidates (0 = full taxonomy; floor "+fmt.Sprint(issuefanout.MinFanout)+")")
 	asJSON := fs.Bool("json", false, "emit the machine-readable fan-out plan (feed to fak issue cohort --from-plan)")
+	adoption := fs.Bool("adoption", false, "measure the default instead of planning: report which --leaves cleared the fan-out floor vs gaps (exit 1 on any gap)")
+	leaves := fs.String("leaves", "", "with --adoption: comma-separated shipped leaves to audit")
+	markers := fs.String("markers", "", "with --adoption: comma-separated filed fan-out marker keys (fanout-<leaf>-<slug>)")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
+
+	if *adoption {
+		if fs.NArg() != 0 {
+			fmt.Fprintln(stderr, "fak issue fanout --adoption: takes no positional args (pass --leaves and --markers)")
+			return 2
+		}
+		rep := issuefanout.Adoption(issueFanoutSplit(*leaves), issueFanoutSplit(*markers))
+		if *asJSON {
+			if err := writeIndentedJSON(stdout, rep); err != nil {
+				fmt.Fprintf(stderr, "fak issue fanout: encode json: %v\n", err)
+				return 1
+			}
+		} else {
+			fmt.Fprint(stdout, issuefanout.RenderAdoption(rep))
+		}
+		if !rep.OK {
+			return 1 // a shipped leaf is a gap — the honesty meter fails the gate
+		}
+		return 0
+	}
+
 	if fs.NArg() != 0 || *title == "" || *leaf == "" || *spine == "" {
 		fmt.Fprintln(stderr, "fak issue fanout: --title, --leaf and --spine are required (the spine witness comes first; no spine yet means the spine itself is the issue to file)")
 		return 2
