@@ -26,6 +26,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/rehydrate"
+	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/toolprocgate"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -1005,10 +1006,44 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 	}
 }
 
+// guardTimeBudgetTickInterval is the coarse cadence at which the supervision loop
+// polls the session wall-clock envelope. 15s is fine-grained enough that a
+// --max-duration overshoot is bounded to one tick, and coarse enough to add no
+// measurable overhead to a guarded run.
+const guardTimeBudgetTickInterval = 15 * time.Second
+
+// guardTimeBudgetExhausted is the production caller of the session wall-clock gate
+// that issue #2229 found missing: the supervision ticker asks it, once per tick,
+// whether traceID's --max-duration envelope has elapsed as of now. It returns
+// (true, TIME_BUDGET_EXHAUSTED) only on a genuine wall-clock exhaustion — an
+// unbounded (--max-duration 0), still-within-budget, paused, or terminal session
+// reports (false, "") and is left untouched, so an unconfigured envelope never
+// stops a run. The transition to Draining/Stopped and the final elapsed-time fold
+// are done by DecideTimeBudget itself (see internal/session/timebudget.go); this
+// wrapper only classifies its verdict for the loop, and is the seam #2229's
+// enforcement test drives.
+func guardTimeBudgetExhausted(sessions *session.Table, traceID string, now time.Time) (bool, string) {
+	if sessions == nil || strings.TrimSpace(traceID) == "" {
+		return false, ""
+	}
+	v := sessions.DecideTimeBudget(traceID, now)
+	if v.Stop && v.Reason == session.ReasonTimeBudgetExhausted {
+		return true, v.Reason
+	}
+	return false, ""
+}
+
 func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, spawnMeta guardChildSpawnMetadata, restarter *guardBudgetRestarter, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler) {
 	spawnBroker := toolprocgate.NewSpawnBroker()
 	var extraEnv [][2]string
 	restarts := 0
+	// Wall-clock enforcement (#2229): poll the session time budget on a coarse ticker so a
+	// --max-duration envelope is actually ENFORCED here, not merely armed/persisted/displayed.
+	// guardTimeBudgetExhausted is a no-op for an unbounded/paused/still-fine session, so a run
+	// without a configured envelope is untouched; on a TIME_BUDGET_EXHAUSTED verdict the child
+	// is stopped through the existing stopGuardChild path and the session is reported.
+	budgetTicker := time.NewTicker(guardTimeBudgetTickInterval)
+	defer budgetTicker.Stop()
 	for {
 		_, child, err := launchGuardChildWithBroker(command, injected, pinUpstream, spawnMeta, spawnBroker, nil, extraEnv...)
 		wait := make(chan error, 1)
@@ -1052,6 +1087,17 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			// stopping the process that initiated it.
 			time.Sleep(750 * time.Millisecond)
 			stopGuardChild(child, wait, 2*time.Second)
+		case <-budgetTicker.C:
+			// The wall-clock envelope elapsed: stop the wrapped agent and report, rather
+			// than let it keep burning tokens past its --max-duration (the #2229 gap).
+			if _, reason := guardTimeBudgetExhausted(serveSessions, guardTraceID, time.Now()); reason != "" {
+				if !quiet {
+					fmt.Fprintf(os.Stderr, "fak guard: %s — wall-clock --max-duration envelope elapsed for %s; stopping the wrapped agent\n", reason, guardTraceID)
+				}
+				stopGuardChild(child, wait, 2*time.Second)
+				finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				return
+			}
 		}
 	}
 }

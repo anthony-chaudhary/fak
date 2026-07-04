@@ -1230,7 +1230,11 @@ func cmdGuard(argv []string) {
 
 	// 6. Run the wrapped agent, then tear the gateway down and report the session.
 	spawnMeta := newGuardChildSpawnMetadata(guardTraceID, policyDigest, up, rt, command)
-	if restarter.Enabled() {
+	// The supervised loop is required whenever the child must be interrupted mid-run:
+	// a --restart-on-budget context restart OR a --max-duration wall-clock envelope that
+	// must be ENFORCED (#2229). A --max-duration-only run routes here with a disabled
+	// restarter (its events channel never fires), gaining only the time-budget ticker.
+	if restarter.Enabled() || maxDurationLimit > 0 {
 		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, spawnMeta, restarter, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler)
 		return
 	}
