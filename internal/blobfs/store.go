@@ -276,6 +276,15 @@ func (s *Store) Resolve(ctx context.Context, r abi.Ref) ([]byte, error) {
 			}
 			return nil, fmt.Errorf("blobfs: resolve %s: %w", r.Digest, err)
 		}
+		// Content-addressing is only sound if a read verifies the address. Unlike the
+		// in-memory blob store (whose bytes are keyed by their own digest and immutable
+		// in RAM), a committed file on a SHARED, durable directory is exposed to bit-rot
+		// and to a foreign process writing wrong content under a valid digest name, so
+		// bytes that no longer hash to the requested digest are refused, never returned —
+		// the same fail-closed guard blobhttp enforces for its untrusted remote.
+		if got := blob.Digest(b); got != r.Digest {
+			return nil, fmt.Errorf("blobfs: digest mismatch for %s: on-disk bytes hash to %s (corrupt or tampered)", r.Digest, got)
+		}
 		return b, nil
 	default:
 		return nil, fmt.Errorf("blobfs: unknown RefKind %d", r.Kind)

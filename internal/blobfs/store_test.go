@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -283,4 +284,51 @@ func TestResolverInterface(t *testing.T) {
 	var _ abi.Resolver = (*Store)(nil)
 	var _ abi.CASPinner = (*Store)(nil)
 	var _ abi.PageOutBackend = pageOutBackend{}
+}
+
+// TestResolveRefusesCorruptedOnDiskBlob is the fail-closed content-addressing guard:
+// blobfs is a SHARED, durable directory ("shareable across processes on the same
+// host"), so a committed file is exposed to bit-rot and to a foreign process writing
+// wrong content under a valid digest name. Content addressing is only sound if a read
+// verifies the address — bytes that no longer hash to the requested digest must be
+// REFUSED, never returned, the same guard blobhttp enforces for its untrusted remote.
+// The in-memory blob store gets this for free (its bytes are keyed by their own digest
+// in RAM); blobfs reads a file BY NAME, so the name/content bond must be re-checked.
+// Pre-fix Resolve handed back the corrupt bytes; post-fix it errors "digest mismatch".
+func TestResolveRefusesCorruptedOnDiskBlob(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	s, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	want := payload(4096, 'x') // > InlineMax → lands on disk under its content digest
+	r, err := s.Put(ctx, want)
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if r.Kind != abi.RefBlob {
+		t.Fatalf("precondition: want RefBlob so Resolve reads from disk, got kind %d", r.Kind)
+	}
+
+	// Corrupt the committed file in place: SAME digest file name, DIFFERENT bytes —
+	// exactly what silent bit-rot or a foreign write under a valid digest looks like.
+	corrupt := payload(4096, 'z')
+	if blob.Digest(corrupt) == r.Digest {
+		t.Fatalf("test setup: corrupt payload must not hash to the original digest")
+	}
+	onDisk := filepath.Join(dir, r.Digest[0:2], r.Digest[2:4], r.Digest)
+	if err := os.WriteFile(onDisk, corrupt, 0o644); err != nil {
+		t.Fatalf("corrupt on-disk blob: %v", err)
+	}
+
+	// The read must fail-closed: refuse the mismatched bytes rather than leak corruption
+	// back into the caller as if it were the addressed content.
+	got, err := s.Resolve(ctx, r)
+	if err == nil {
+		t.Fatalf("Resolve returned corrupt bytes (len=%d) for digest %s; want a digest-mismatch refusal", len(got), r.Digest)
+	}
+	if !strings.Contains(err.Error(), "digest mismatch") {
+		t.Fatalf("Resolve error = %q, want it to mention 'digest mismatch'", err)
+	}
 }
