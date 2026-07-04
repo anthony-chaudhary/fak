@@ -65,6 +65,10 @@ regression. On that same boundary, it checks every tool call against a built-in 
 capability floor: a reviewable allow-list. On exit it prints a compact decision summary:
 `fak guard: 131 kernel decisions; 121 allowed / 5 denied / 2 repaired / 0 quarantined / 3 deferred`.
 
+![The fak guard TUI decision pane: every tool call the agent proposes is listed with its verdict — ALLOW, or DENY with a reason such as POLICY_BLOCK — folded live from the hash-chained guard decision journal](visuals/guard-tui-screenshot.png)
+
+<sub>The live pane, not a mock: a real `fak console guard --journal` render, captured as terminal frames — [silent GIF](visuals/guard-tui-video.gif) · [MP4](visuals/guard-tui-video.mp4).</sub>
+
 For Claude Code, `fak guard` uses your logged-in subscription by default, so no API key is
 required. The full walkthrough includes an end-to-end proof that a real `/v1/messages` turn
 crossed the gateway: [docs/integrations/claude.md](docs/integrations/claude.md).
