@@ -69,4 +69,3 @@ func qGemm8TileInto(qt *q8Tensor, qp *q8Panel, Y []float32) {
 		}
 	}
 }
-
