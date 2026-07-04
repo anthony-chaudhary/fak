@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -19,6 +20,10 @@ func main() {
 }
 
 func run(argv []string) int {
+	if len(argv) > 0 && argv[0] == "export" {
+		return runExport(argv[1:])
+	}
+
 	fs := flag.NewFlagSet("livecodebench", flag.ContinueOnError)
 	fixture := fs.String("fixture", "internal/livecodebench/testdata/fixture.json", "path to committed LiveCodeBench smoke fixture")
 	asJSON := fs.Bool("json", false, "print the smoke report as JSON")
@@ -65,6 +70,52 @@ func run(argv []string) int {
 		report.Questions, len(report.Scenarios), report.ResultClaimAllowed)
 	for _, s := range report.Scenarios {
 		fmt.Printf("  - %s: %d\n", s.Scenario, s.Questions)
+	}
+	return 0
+}
+
+// runExport implements `livecodebench export --format custom-evaluator`: it
+// writes the exact input lcb_runner.runner.custom_evaluator consumes, so a
+// fak generation run can be graded by the OFFICIAL LiveCodeBench checker.
+// Grade the emitted file with:
+//
+//	python -m lcb_runner.runner.custom_evaluator \
+//	    --custom_output_file <out> \
+//	    --release_version <release_vN>
+func runExport(argv []string) int {
+	fs := flag.NewFlagSet("livecodebench export", flag.ContinueOnError)
+	fixture := fs.String("fixture", "internal/livecodebench/testdata/fixture.json", "path to the LiveCodeBench fixture holding the generations to export")
+	format := fs.String("format", "custom-evaluator", "export format; only \"custom-evaluator\" is supported")
+	out := fs.String("out", "", "file to write the export to (default: stdout)")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "livecodebench export: unexpected positional arguments")
+		return 2
+	}
+	if *format != "custom-evaluator" {
+		fmt.Fprintf(os.Stderr, "livecodebench export: unsupported --format %q (only \"custom-evaluator\")\n", *format)
+		return 2
+	}
+	f, err := livecodebench.LoadFile(*fixture)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "livecodebench export: %v\n", err)
+		return 1
+	}
+	w := io.Writer(os.Stdout)
+	if *out != "" {
+		file, err := os.Create(*out)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "livecodebench export: %v\n", err)
+			return 1
+		}
+		defer file.Close()
+		w = file
+	}
+	if err := livecodebench.WriteCustomEvaluatorInput(w, f); err != nil {
+		fmt.Fprintf(os.Stderr, "livecodebench export: %v\n", err)
+		return 1
 	}
 	return 0
 }

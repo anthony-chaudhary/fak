@@ -16,7 +16,7 @@ Results page: [LIVECODEBENCH-RESULTS.md](LIVECODEBENCH-RESULTS.md).
 | In-kernel serving path | shipped for serving; LCB run residual | `fak serve --gguf --engine inkernel --backend <backend>` is the fak-owned model path; a full LCB run on it is still pending. |
 | LiveCodeBench native suite/report schema | pending | #2087 through #2095. |
 | All four LCB scenario adapters | pending | #2096 through #2099. |
-| Official custom-evaluator export | pending | #2102; this runbook names the required JSON shape now. |
+| Official custom-evaluator export | shipped | #2102; `go run ./cmd/livecodebench export --format custom-evaluator` (backed by `internal/livecodebench.WriteCustomEvaluatorInput`; not yet wired through the `fak` front door, tracked with the pending CLI wrapper below), pinned by `TestCustomEvaluatorItemsFixtureRoundTrip` and `TestRunExportCustomEvaluatorWritesGradeableInput`. |
 | fak-native CLI wrapper | pending | #2109 through #2111. |
 | Honesty gates and authority promotion | pending | #2113, #2114, #2115. |
 | Results scaffold | shipped | [LIVECODEBENCH-RESULTS.md](LIVECODEBENCH-RESULTS.md); all score cells remain `pending run`. |
@@ -150,16 +150,18 @@ The official custom evaluator expects one row per benchmark problem:
 ]
 ```
 
-The fak export step must produce that shape for the exact saved generations:
+The fak export step produces that shape from a fixture holding the saved generations
+(`question_id` + `code_list` per item, order preserved):
 
 ```bash
-fak livecodebench export-custom \
-  --input "$LCB_OUT/fak/codegeneration" \
+go run ./cmd/livecodebench export --format custom-evaluator \
+  --fixture "$LCB_OUT/fak-codegeneration-fixture.json" \
   --out "$LCB_OUT/fak-codegeneration-custom.json"
 ```
 
-This is pending #2102. The promotion rule is already fixed: the exported JSON digest must
-be recorded before grading, and the same file must be the one handed to `lcb_runner`.
+Shipped in #2102 (`internal/livecodebench.WriteCustomEvaluatorInput`). The promotion rule is
+already fixed: the exported JSON digest must be recorded before grading, and the same file
+must be the one handed to `lcb_runner`.
 
 ## 5. Grade With The Official Evaluator
 

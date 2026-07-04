@@ -30,6 +30,52 @@ func TestRunFixtureSmokeJSONClaimDisallowed(t *testing.T) {
 	}
 }
 
+// TestRunExportCustomEvaluatorWritesGradeableInput pins #2102: `livecodebench
+// export --format custom-evaluator` must emit the exact
+// [{question_id, code_list}] shape lcb_runner.runner.custom_evaluator
+// consumes, ordered to match the fixture's benchmark problems.
+func TestRunExportCustomEvaluatorWritesGradeableInput(t *testing.T) {
+	fixture := filepath.Join("..", "..", "internal", "livecodebench", "testdata", "fixture.json")
+	dir := t.TempDir()
+	out := filepath.Join(dir, "custom_evaluator_input.json")
+
+	code := run([]string{"export", "--format", "custom-evaluator", "--fixture", fixture, "--out", out})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read export output: %v", err)
+	}
+	var items []struct {
+		QuestionID string   `json:"question_id"`
+		CodeList   []string `json:"code_list"`
+	}
+	if err := json.Unmarshal(raw, &items); err != nil {
+		t.Fatalf("export output not valid JSON: %v\n%s", err, raw)
+	}
+	if len(items) != 4 {
+		t.Fatalf("item count = %d, want 4", len(items))
+	}
+	if items[0].QuestionID != "fixture-codegeneration-1" {
+		t.Fatalf("item 0 question_id = %q, want fixture-codegeneration-1 (order drift)", items[0].QuestionID)
+	}
+	if len(items[0].CodeList) == 0 {
+		t.Fatal("item 0 code_list is empty")
+	}
+}
+
+// TestRunExportRejectsUnsupportedFormat guards the --format flag against a
+// silent no-op for a format the exporter cannot produce.
+func TestRunExportRejectsUnsupportedFormat(t *testing.T) {
+	fixture := filepath.Join("..", "..", "internal", "livecodebench", "testdata", "fixture.json")
+	code := run([]string{"export", "--format", "nonsense", "--fixture", fixture})
+	if code == 0 {
+		t.Fatal("exit = 0, want nonzero for an unsupported --format")
+	}
+}
+
 // TestRunPreflightNeverProbesNetworkByDefault pins #2111: --preflight must
 // never emit a benchmark number, and without --probe-dataset/--probe-gateway
 // it must not attempt network I/O -- the dataset and gateway gates report
