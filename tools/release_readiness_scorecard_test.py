@@ -114,8 +114,19 @@ def test_failed_release_quarantine_detector():
             --silent
     """
     assert rrs.detect_post_publish_quarantine(workflow) is True
-    assert rrs.detect_post_publish_quarantine(workflow.replace("verify_published_artifacts", "checkout")) is False
+    # The bare job-level `if: failure()` form (the production release-artifacts.yml
+    # shape) is the MORE robust contract: it quarantines on ANY prior-step failure in
+    # the publish job, not only the verify step — so a checkout/build/publish failure
+    # also demotes the release rather than leaving @latest on a half-published tag.
+    # The detector must recognize it, so this stays True after the step-id rename.
+    assert rrs.detect_post_publish_quarantine(workflow.replace("verify_published_artifacts", "checkout")) is True
+    bare_failure = workflow.replace("failure() && steps.verify_published_artifacts.outcome == 'failure'", "failure()")
+    assert rrs.detect_post_publish_quarantine(bare_failure) is True
+    # But the contract still requires BOTH a fail-guard AND the release demotion:
+    # drop the demotion, or drop the guard, and it must not detect.
     assert rrs.detect_post_publish_quarantine(workflow.replace("make_latest=false", "")) is False
+    no_guard = workflow.replace("if: ${{ failure() && steps.verify_published_artifacts.outcome == 'failure' }}", "if: ${{ success() }}")
+    assert rrs.detect_post_publish_quarantine(no_guard) is False
 
 
 def test_payload_envelope_contract():

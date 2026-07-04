@@ -224,16 +224,25 @@ def gather(root: Path) -> dict:
 
 
 def detect_post_publish_quarantine(artifacts_wf: str) -> bool:
-    """Detect the fail-closed path for a bad published release."""
+    """Detect the fail-closed path for a bad published release.
+
+    The contract is: when post-publish verification fails, a step demotes the
+    just-published GitHub release to ``prerelease=true`` + ``make_latest=false``
+    so ``@latest`` never resolves to an unverified build. The fail guard may be
+    the job-level ``if: failure()`` (which quarantines on ANY prior-step failure
+    in the publish job — the more robust form) OR a specific
+    ``steps.<id>.outcome == 'failure'`` gate; either satisfies the contract, so
+    the check recognizes both rather than pinning one hand-authored step id.
+    """
     lower = artifacts_wf.lower()
-    return (
-        "failure()" in lower
-        and "verify_published_artifacts.outcome == 'failure'" in lower
-        and "gh api" in lower
+    fail_guarded = "failure()" in lower or ".outcome == 'failure'" in lower
+    demotes_release = (
+        "gh api" in lower
         and "releases/${release_id}" in lower
         and "prerelease=true" in lower
         and "make_latest=false" in lower
     )
+    return fail_guarded and demotes_release
 
 
 def _staleness_facts(root: Path) -> dict:
