@@ -101,6 +101,10 @@ func TestResourcesListAndRead(t *testing.T) {
 			Digest  string   `json:"digest"`
 			Sources []string `json:"sources"`
 		} `json:"selfFeatureQuery"`
+		CacheSemantics struct {
+			Resource string `json:"resource"`
+			Schema   string `json:"schema"`
+		} `json:"cacheSemantics"`
 		Tools []struct {
 			Name string `json:"name"`
 		} `json:"tools"`
@@ -122,8 +126,98 @@ func TestResourcesListAndRead(t *testing.T) {
 	if doc.SelfFeatureQuery.Tool != "fak_feature_query" || !doc.SelfFeatureQuery.Ready || doc.SelfFeatureQuery.Digest == "" {
 		t.Errorf("capabilities resource omitted self-feature query summary: %+v", doc.SelfFeatureQuery)
 	}
+	if doc.CacheSemantics.Resource != "fak://server/cache-semantics" ||
+		doc.CacheSemantics.Schema != "fak-mcp-cache-semantics/1" {
+		t.Errorf("capabilities resource omitted cache semantics pointer: %+v", doc.CacheSemantics)
+	}
 	if len(doc.Tools) != len(toolDescriptors()) {
 		t.Errorf("capabilities resource lists %d tools, registry has %d", len(doc.Tools), len(toolDescriptors()))
+	}
+}
+
+func TestMCPCacheSemanticsResourceDocumentsInvalidationContract(t *testing.T) {
+	srv := newTestServer(t)
+	read := resultMap(t, rpcRoundTrip(t, srv, "resources/read", `{"uri":"fak://server/cache-semantics"}`))
+	contents, ok := read["contents"].([]any)
+	if !ok || len(contents) != 1 {
+		t.Fatalf("resources/read contents malformed: %v", read)
+	}
+	text, _ := contents[0].(map[string]any)["text"].(string)
+	var doc struct {
+		Schema        string `json:"schema"`
+		ServerVersion string `json:"serverVersion"`
+		StandardHints struct {
+			Fields []string `json:"fields"`
+		} `json:"standardHints"`
+		DescriptorCache struct {
+			Surfaces []string `json:"surfaces"`
+		} `json:"descriptorCache"`
+		ToolResultCache struct {
+			HitSurfaces  []string `json:"hitSurfaces"`
+			Invalidation []string `json:"invalidation"`
+		} `json:"toolResultCache"`
+		ProviderPrefixCache struct {
+			StablePrefixInputs []string `json:"stablePrefixInputs"`
+		} `json:"providerPrefixCache"`
+		ChangeFeed struct {
+			Poll   string `json:"poll"`
+			Refute string `json:"refute"`
+		} `json:"changeFeed"`
+	}
+	if err := json.Unmarshal([]byte(text), &doc); err != nil {
+		t.Fatalf("cache semantics resource is not valid JSON: %v\n%s", err, text)
+	}
+	if doc.Schema != "fak-mcp-cache-semantics/1" || doc.ServerVersion != srv.version {
+		t.Fatalf("schema/version = %q/%q, want fak-mcp-cache-semantics/1/%q", doc.Schema, doc.ServerVersion, srv.version)
+	}
+	for _, want := range []string{"ttlMs", "cacheScope"} {
+		if !contains(doc.StandardHints.Fields, want) {
+			t.Errorf("standard cache hints missing %q: %v", want, doc.StandardHints.Fields)
+		}
+	}
+	for _, want := range []string{"tools/list", "resources/list", "prompts/list"} {
+		if !contains(doc.DescriptorCache.Surfaces, want) {
+			t.Errorf("descriptor cache surfaces missing %q: %v", want, doc.DescriptorCache.Surfaces)
+		}
+	}
+	for _, want := range []string{"fak_syscall(read_only=true)", "fak_read"} {
+		if !contains(doc.ToolResultCache.HitSurfaces, want) {
+			t.Errorf("tool-result hit surfaces missing %q: %v", want, doc.ToolResultCache.HitSurfaces)
+		}
+	}
+	for _, want := range []string{"fak_changes", "fak_revoke"} {
+		if !contains(doc.ToolResultCache.Invalidation, want) {
+			t.Errorf("tool-result invalidation missing %q: %v", want, doc.ToolResultCache.Invalidation)
+		}
+	}
+	if doc.ChangeFeed.Poll != "fak_changes" || doc.ChangeFeed.Refute != "fak_revoke" {
+		t.Fatalf("change feed = %+v, want fak_changes/fak_revoke", doc.ChangeFeed)
+	}
+	if !contains(doc.ProviderPrefixCache.StablePrefixInputs, "tool_descriptors") {
+		t.Fatalf("provider prefix cache inputs = %v, want tool_descriptors", doc.ProviderPrefixCache.StablePrefixInputs)
+	}
+}
+
+func TestMCPListAndReadResultsCarryCacheHints(t *testing.T) {
+	srv := newTestServer(t)
+	for _, tc := range []struct {
+		name   string
+		method string
+		params string
+		scope  string
+		ttl    float64
+	}{
+		{name: "tools list", method: "tools/list", scope: "public", ttl: 600000},
+		{name: "resources list", method: "resources/list", scope: "public", ttl: 600000},
+		{name: "prompts list", method: "prompts/list", scope: "public", ttl: 600000},
+		{name: "capabilities read", method: "resources/read", params: `{"uri":"fak://server/capabilities"}`, scope: "public", ttl: 60000},
+		{name: "cache semantics read", method: "resources/read", params: `{"uri":"fak://server/cache-semantics"}`, scope: "public", ttl: 60000},
+		{name: "missing context read", method: "resources/read", params: `{"uri":"fak://context/missing/deploy-target"}`, scope: "private", ttl: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resultMap(t, rpcRoundTrip(t, srv, tc.method, tc.params))
+			assertCacheHint(t, got, tc.ttl, tc.scope)
+		})
 	}
 }
 
@@ -276,4 +370,19 @@ func contains(xs []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func assertCacheHint(t *testing.T, got map[string]any, wantTTL float64, wantScope string) {
+	t.Helper()
+	ttl, ok := got["ttlMs"].(float64)
+	if !ok {
+		t.Fatalf("ttlMs missing or not a number: %v", got)
+	}
+	if ttl != wantTTL {
+		t.Fatalf("ttlMs = %v, want %v in %v", ttl, wantTTL, got)
+	}
+	scope, _ := got["cacheScope"].(string)
+	if scope != wantScope {
+		t.Fatalf("cacheScope = %q, want %q in %v", scope, wantScope, got)
+	}
 }

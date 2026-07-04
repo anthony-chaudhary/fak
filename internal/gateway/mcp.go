@@ -180,15 +180,15 @@ func (s *Server) handleMethod(ctx context.Context, method string, params json.Ra
 	case "ping":
 		return map[string]any{}, nil
 	case "tools/list":
-		return map[string]any{"tools": toolDescriptors()}, nil
+		return mcpCacheHint(map[string]any{"tools": toolDescriptors()}, mcpCatalogTTLMillis, mcpCacheScopePublic), nil
 	case "tools/call":
 		return s.callTool(ctx, params)
 	case "resources/list":
-		return map[string]any{"resources": s.resourceDescriptors()}, nil
+		return mcpCacheHint(map[string]any{"resources": s.resourceDescriptors()}, mcpCatalogTTLMillis, mcpCacheScopePublic), nil
 	case "resources/read":
 		return s.readResource(params)
 	case "prompts/list":
-		return map[string]any{"prompts": promptDescriptors()}, nil
+		return mcpCacheHint(map[string]any{"prompts": promptDescriptors()}, mcpCatalogTTLMillis, mcpCacheScopePublic), nil
 	case "prompts/get":
 		return s.getPrompt(params)
 	default:

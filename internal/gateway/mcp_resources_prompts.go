@@ -7,6 +7,16 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/selfquery"
 )
 
+const (
+	mcpCacheSemanticsURI    = "fak://server/cache-semantics"
+	mcpCacheSemanticsSchema = "fak-mcp-cache-semantics/1"
+	mcpCatalogTTLMillis     = 600000
+	mcpResourceTTLMillis    = 60000
+	mcpNoCacheTTLMillis     = 0
+	mcpCacheScopePublic     = "public"
+	mcpCacheScopePrivate    = "private"
+)
+
 // MCP ecosystem surface beyond the tool registry (#213). The gateway already
 // serves the "tools" primitive (tools/list + tools/call = tool auto-discovery);
 // this file adds the other two standard MCP primitives so the kernel is a
@@ -51,8 +61,22 @@ func (s *Server) resources() []mcpResource {
 					"protocolVersions": mcpProtocolVersions,
 					"tools":            toolCatalogSummary(),
 					"selfFeatureQuery": selfFeatureSummary(),
+					"cacheSemantics": map[string]string{
+						"resource": mcpCacheSemanticsURI,
+						"schema":   mcpCacheSemanticsSchema,
+					},
 				}
 				b, _ := json.Marshal(doc)
+				return string(b)
+			},
+		},
+		{
+			uri:  mcpCacheSemanticsURI,
+			name: "fak MCP cache semantics",
+			desc: "machine-readable cache contract for MCP clients: descriptor/resource reuse, tool-result hits, provider-prefix constraints, and invalidation verbs",
+			mime: "application/json",
+			build: func(s *Server) string {
+				b, _ := json.Marshal(mcpCacheSemanticsDoc(s.version))
 				return string(b)
 			},
 		},
@@ -75,6 +99,85 @@ func (s *Server) resources() []mcpResource {
 			},
 		},
 	}
+}
+
+func mcpCacheSemanticsDoc(serverVersion string) map[string]any {
+	return map[string]any{
+		"schema":        mcpCacheSemanticsSchema,
+		"serverVersion": serverVersion,
+		"standardHints": map[string]any{
+			"fields": []string{
+				"ttlMs",
+				"cacheScope",
+			},
+			"ttlMs":      "milliseconds a client may treat a result as fresh before re-fetching",
+			"cacheScope": "public means shared caches may reuse the result; private means only the requesting client may reuse it",
+		},
+		"descriptorCache": map[string]any{
+			"surfaces": []string{
+				"initialize",
+				"tools/list",
+				"resources/list",
+				"prompts/list",
+				"fak://server/capabilities",
+			},
+			"reuseUntil": []string{
+				"server_version_changes",
+				"protocol_revision_changes",
+				"tool_catalog_changes",
+				"policy_or_feature_catalog_changes",
+			},
+			"economics": "tool schemas are prompt-prefix material; prefer fak_tools_search or resource reads for progressive disclosure instead of injecting every schema into every model turn",
+		},
+		"resourceCache": map[string]any{
+			"surface":  "resources/read",
+			"identity": "uri plus returned schema/digest when present",
+			"sessionBoundTemplates": []string{
+				contextq.MCPMissingContextURIPrefix + "<key>",
+			},
+			"rule": "cache durable server descriptions by URI, but treat demand pages that create audit/default-answer rows as session-bound reads",
+		},
+		"toolResultCache": map[string]any{
+			"hitSurfaces": []string{
+				"fak_syscall(read_only=true)",
+				"fak_read",
+			},
+			"keyAxes": []string{
+				"tool",
+				"arguments_digest",
+				"witness_or_write_epoch",
+				"principal_scope",
+				"policy_version",
+			},
+			"invalidation": []string{
+				"fak_changes",
+				"fak_revoke",
+			},
+			"admission": "tool bytes enter model-visible context only after fak_syscall or fak_admit; quarantine is a successful adjudication value, not a reusable hit",
+		},
+		"providerPrefixCache": map[string]any{
+			"scope": "model-provider prompt cache or in-kernel KV prefix, not an MCP protocol cache",
+			"stablePrefixInputs": []string{
+				"system_prompt",
+				"tool_descriptors",
+				"prompt_templates",
+				"unchanged_prefix_bytes",
+			},
+			"rule":      "MCP schema churn can bust provider prefix reuse; keep descriptor bytes stable and load uncommon schemas lazily",
+			"guarantee": "fak can preserve byte-identical prefixes it sends, but provider cache reuse remains observed telemetry unless fak owns the KV cache",
+		},
+		"changeFeed": map[string]any{
+			"poll":   "fak_changes",
+			"refute": "fak_revoke",
+			"rule":   "clients with their own MCP-side caches should consume changes before trusting a prior read-only result",
+		},
+	}
+}
+
+func mcpCacheHint(result map[string]any, ttlMs int, scope string) map[string]any {
+	result["ttlMs"] = ttlMs
+	result["cacheScope"] = scope
+	return result
 }
 
 func selfFeatureSummary() map[string]any {
@@ -133,23 +236,23 @@ func (s *Server) readResource(params json.RawMessage) (any, *rpcError) {
 			"audit":          audit,
 		}
 		b, _ := json.Marshal(doc)
-		return map[string]any{
+		return mcpCacheHint(map[string]any{
 			"contents": []map[string]any{{
 				"uri":      req.URI,
 				"mimeType": "application/json",
 				"text":     string(b),
 			}},
-		}, nil
+		}, mcpNoCacheTTLMillis, mcpCacheScopePrivate), nil
 	}
 	for _, r := range s.resources() {
 		if r.uri == p.URI {
-			return map[string]any{
+			return mcpCacheHint(map[string]any{
 				"contents": []map[string]any{{
 					"uri":      r.uri,
 					"mimeType": r.mime,
 					"text":     r.build(s),
 				}},
-			}, nil
+			}, mcpResourceTTLMillis, mcpCacheScopePublic), nil
 		}
 	}
 	return nil, &rpcError{Code: rpcInvalidParams, Message: "unknown resource: " + p.URI}
