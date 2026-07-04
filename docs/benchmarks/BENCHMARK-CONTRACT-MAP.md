@@ -69,6 +69,43 @@ This is witnessed by `TestBuildRejectsIncompleteResultPacket`
 (`internal/agenticbench/rollup_test.go`): a packet missing the official grader, the fak arm,
 or a checked-in artifact fails the gate and cannot graduate.
 
+## Serving-baseline provenance: the `vllm_compile` block (#1731)
+
+A serving compare is only honest when the vLLM baseline it quotes was actually *tuned* —
+`torch.compile` artifact cache warm, CUDA-graph capture complete, and no compilation paid
+inside the measured window. A silently cold or misconfigured vLLM makes any fak "win"
+meaningless. So every serving row that quotes a vLLM (or vLLM-family) baseline — raw vLLM,
+fak-fronted vLLM, and SGLang/llama rows **when comparable** — must carry a `vllm_compile`
+provenance block, recorded at benchmark start.
+
+The block and its tuned-baseline gate are defined in `internal/vllmcompile`
+(`vllmcompile.Block`), stdlib-only and off the request path. Each block records, per engine
+row: the engine commit/version, whether the compile-artifact cache was enabled (and its
+key/hash when exposed), the CUDA-graph mode and capture sizes, warmup completion, and whether
+any request triggered compilation during the measured window.
+
+`Block.Classify()` folds that state into one of three classes, and the gate **fails closed**:
+
+- **`tuned`** — cache enabled, warmup complete, no request-time compilation. The only class a
+  net-true-value serving claim may quote as a baseline.
+- **`cold-start`** — the engine paid compile latency inside the window: cache disabled, warmup
+  incomplete, **or** a request-time compilation event. A diagnostic reading, never a tuned
+  baseline. (`nil` vs `*false` pointer fields distinguish *unobserved* from *observed-disabled*.)
+- **`diagnostic`** — compile/warmup state was not observed, so the row cannot be *certified*
+  tuned. Report it; do not quote it as tuned.
+
+`GateRows(...)` extends this across an A/B set: a comparison is tuned only when it has ≥1 row
+and **every** compared row is tuned — one cold raw-vLLM baseline poisons the whole compare even
+when the fak row is warm. The gate is the executable form of this issue's acceptance: a
+missing/disabled cache is labeled cold-start/diagnostic (not tuned), and a fixture with a
+request-time compilation event fails the tuned-baseline gate — witnessed by
+`TestClassifyAndGate` (`internal/vllmcompile/vllmcompile_test.go`).
+
+This binds the serving batteries above (notably the [#870](https://github.com/anthony-chaudhary/fak/issues/870)
+GLM-5.2/vLLM battery): before any serving delta is attributed to fak, each quoted engine row
+records its `vllm_compile` block and passes the gate. Wiring the block into the per-producer
+serving-bench artifacts is tracked as the remaining `internal/**` step under #1731.
+
 ## Which fak value each row measures
 
 A mediated compare must separate the **external benchmark score** (model + harness fidelity)
