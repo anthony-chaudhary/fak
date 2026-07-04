@@ -77,7 +77,7 @@ func TestProbeFakFiresEarlyPerStep(t *testing.T) {
 	for _, budget := range []int{DefaultCompactHistoryBudget} {
 		trace := "probe-session"
 		s := anthropicPassthroughServer(budget)
-		s.compactAnchorHead = true                       // default-on
+		s.compactAnchorHead = true                        // default-on
 		s.assumeSessionTurns = DefaultAssumedSessionTurns // 100, default-on
 		s.elideResultBytes = DefaultElideResultBytes      // 16384, default-on
 		now := time.Now()

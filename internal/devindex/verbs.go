@@ -229,6 +229,8 @@ var verbManifest = []Verb{
 	{Name: "tree-doctor", Synopsis: "the worktree doctor: detect and prune stray / dead git worktrees", Lane: "cmd"},
 	{Name: "turntax", Synopsis: "turn-tax A/B: price the extra error-code model turns a SOTA loop fires vs fak's one-shot", Lane: "cmd"},
 	{Name: "ui-quality-scorecard", Synopsis: "native terminal UI/UX control-pane payload (ui_quality_debt)", Lane: "cmd"},
+	{Name: "unwired-debt-dispatch", Synopsis: "unwired-scorecard -> backlog: file one deduped issue per orphaned internal package", Lane: "cmd"},
+	{Name: "unwired-scorecard", Synopsis: "score which code-complete internal packages are not wired into a runnable CLI surface", Lane: "cmd"},
 	{Name: "usage", Synopsis: "read side of the CLI-invocation journal: how fak itself has been invoked (totals/errors/timing, per-verb)", Lane: "cmd"},
 	{Name: "vcache", Synopsis: "the virtual provider-cache status/proof surface (status/prove/prove-telemetry)", Lane: "cmd"},
 	{Name: "version", Synopsis: "print the fak version", Aliases: []string{"-v", "--version"}, Lane: "cmd"},
