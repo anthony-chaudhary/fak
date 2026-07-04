@@ -1,0 +1,71 @@
+{
+  "schema": "fak.kvbm.replay/v1",
+  "name": "issue2666-agent-session-hot-prefix-pin-restore",
+  "budget_bytes": 150,
+  "events": [
+    {
+      "session": "agent-a",
+      "span_id": "operator-policy",
+      "tokens": 50,
+      "bytes": 50,
+      "payload": "policy:customer-support-readonly:v1",
+      "pin_ttl_events": 8
+    },
+    {
+      "session": "agent-a",
+      "span_id": "shared-system-prefix",
+      "tokens": 50,
+      "bytes": 50,
+      "payload": "system:customer-support:tools-and-style"
+    },
+    {
+      "session": "agent-b",
+      "span_id": "cold-kb-order-status",
+      "tokens": 50,
+      "bytes": 50,
+      "payload": "kb:order-status:one-shot"
+    },
+    {
+      "session": "agent-a",
+      "span_id": "shared-system-prefix",
+      "tokens": 50,
+      "bytes": 50,
+      "payload": "system:customer-support:tools-and-style"
+    },
+    {
+      "session": "agent-c",
+      "span_id": "cold-kb-refund-policy",
+      "tokens": 50,
+      "bytes": 50,
+      "payload": "kb:refund-policy:one-shot"
+    },
+    {
+      "session": "agent-d",
+      "span_id": "cold-kb-shipping-delay",
+      "tokens": 50,
+      "bytes": 50,
+      "payload": "kb:shipping-delay:one-shot"
+    },
+    {
+      "session": "agent-b",
+      "span_id": "shared-system-prefix",
+      "tokens": 50,
+      "bytes": 50,
+      "payload": "system:customer-support:tools-and-style"
+    },
+    {
+      "session": "agent-e",
+      "span_id": "cold-kb-coupon",
+      "tokens": 50,
+      "bytes": 50,
+      "payload": "kb:coupon:one-shot"
+    },
+    {
+      "session": "agent-c",
+      "span_id": "shared-system-prefix",
+      "tokens": 50,
+      "bytes": 50,
+      "payload": "system:customer-support:tools-and-style"
+    }
+  ]
+}
