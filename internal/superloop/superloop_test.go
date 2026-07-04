@@ -608,7 +608,7 @@ func TestWalkActionUsesEnterHint(t *testing.T) {
 
 func TestWalkLoopActionUsesEnterHint(t *testing.T) {
 	s := Super{Name: "t", Title: "t", Floor: 0, Members: []Member{
-		{Kind: KindLoop, Ref: "loopmgr:issue-resolve-dispatch/claude/high-priority", Enter: "fak dispatch tick --goal high-priority"},
+		{Kind: KindLoop, Ref: "loopmgr:issue-resolve-dispatch/claude/high-priority", Enter: "fak dispatch auto --goal high-priority"},
 	}}
 	rep := Walk(s, []MemberStatus{{
 		Member:   s.Members[0],
@@ -618,7 +618,7 @@ func TestWalkLoopActionUsesEnterHint(t *testing.T) {
 	if len(rep.Worklist) != 1 {
 		t.Fatalf("worklist len = %d, want 1", len(rep.Worklist))
 	}
-	if action := rep.Worklist[0].Action; !strings.Contains(action, "fak dispatch tick --goal high-priority") {
+	if action := rep.Worklist[0].Action; !strings.Contains(action, "fak dispatch auto --goal high-priority") {
 		t.Fatalf("loop action should carry Enter hint, got %q", action)
 	}
 
@@ -630,7 +630,7 @@ func TestWalkLoopActionUsesEnterHint(t *testing.T) {
 	if len(rep.Worklist) != 1 {
 		t.Fatalf("dark worklist len = %d, want 1", len(rep.Worklist))
 	}
-	if action := rep.Worklist[0].Action; !strings.Contains(action, "revive via") || !strings.Contains(action, "fak dispatch tick --goal high-priority") {
+	if action := rep.Worklist[0].Action; !strings.Contains(action, "revive via") || !strings.Contains(action, "fak dispatch auto --goal high-priority") {
 		t.Fatalf("dark loop action should be a concrete revive hint, got %q", action)
 	}
 }

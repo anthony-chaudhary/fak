@@ -172,7 +172,7 @@ var registry = []Super{
 		About: "walk the named throughput dispatch loop ledger and revive the step-budget lane-pressure picker when it goes dark or stale",
 		Floor: 0,
 		Members: []Member{
-			{Kind: KindLoop, Ref: "loopmgr:issue-resolve-dispatch/claude/throughput", Why: "the named throughput dispatch goal: move open tasks by lane pressure while preserving its own ledger identity", Enter: "go run ./cmd/fak dispatch tick --goal throughput"},
+			{Kind: KindLoop, Ref: "loopmgr:issue-resolve-dispatch/claude/throughput", Why: "the named throughput dispatch goal: move open tasks by lane pressure while preserving its own ledger identity", Enter: "go run ./cmd/fak dispatch auto --goal throughput"},
 		},
 	},
 	{
@@ -181,7 +181,7 @@ var registry = []Super{
 		About: "walk the named high-priority dispatch loop ledger and revive the priority-label picker when it goes dark or stale",
 		Floor: 0,
 		Members: []Member{
-			{Kind: KindLoop, Ref: "loopmgr:issue-resolve-dispatch/claude/high-priority", Why: "the named high-priority dispatch goal: favor the strongest priority label while sharing the same lane/tree lease fabric", Enter: "go run ./cmd/fak dispatch tick --goal high-priority"},
+			{Kind: KindLoop, Ref: "loopmgr:issue-resolve-dispatch/claude/high-priority", Why: "the named high-priority dispatch goal: favor the strongest priority label while sharing the same lane/tree lease fabric", Enter: "go run ./cmd/fak dispatch auto --goal high-priority"},
 		},
 	},
 	{
