@@ -78,6 +78,19 @@ func isExternalResidency(t ResidencyTier) bool {
 	return t == TierRemote || t == TierProvider
 }
 
+// ExternalSelfReference reports whether entry e IS the K/V span kv (a
+// self-reference by identity) AND lives on an external (remote/provider)
+// residency tier — the case a reference-invalidation pass on Evict must also
+// invalidate. ctxresidency.countDependents and kvmmu.invalidateReferences both
+// call this exact predicate when reconciling their own K/V reference
+// invalidation on a poisoned/evicted span.
+func ExternalSelfReference(e Entry, kv EntryID) bool {
+	if e.ID != kv {
+		return false
+	}
+	return isExternalResidency(e.Residency.Tier)
+}
+
 // ExactSpanTarget is the payload-free identity of one precise cache object an
 // exact-span-capable engine must evict: the content-addressed K/V span (or its
 // dependent DSA attention_index), never the bytes. It is the projection of a

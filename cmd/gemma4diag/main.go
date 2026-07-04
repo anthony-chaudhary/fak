@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -171,14 +170,8 @@ func setEnv(k string, v bool) {
 }
 
 func printTopK(tok *tokenizer.Tokenizer, logits []float32, k int) {
-	idx := make([]int, len(logits))
-	for i := range idx {
-		idx[i] = i
-	}
-	sort.Slice(idx, func(a, b int) bool { return logits[idx[a]] > logits[idx[b]] })
-	for i := 0; i < k && i < len(idx); i++ {
-		id := idx[i]
-		s, _ := tok.Decode([]int{id})
-		fmt.Printf("  %2d. id=%-7d logit=%+.4f decode=%q\n", i, id, logits[id], s)
+	for i, tp := range model.TopK(logits, k) {
+		s, _ := tok.Decode([]int{tp.ID})
+		fmt.Printf("  %2d. id=%-7d logit=%+.4f decode=%q\n", i, tp.ID, tp.Logit, s)
 	}
 }

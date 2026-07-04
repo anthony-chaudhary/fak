@@ -46,12 +46,10 @@ func CompactInboundSystem(raw []byte, plan BlockPlan, decode func([]byte) error)
 	if !ok || len(elems) == 0 {
 		return identity(raw, SkipNoSystem)
 	}
-	breakIdx := lastToolBreakpoint(elems)
-	if breakIdx < 0 {
-		return identity(raw, SkipNoBreakpoint)
+	breakIdx, keep, pruned, bad, ok := breakpointAnchor(raw, elems, false)
+	if !ok {
+		return bad
 	}
-	keep := make([]int, 0, len(elems))
-	var pruned []string
 	for i, el := range elems {
 		block, name := blockName(el)
 		if i > breakIdx && block == plan.Block && plan.Drop[name] {
@@ -98,6 +96,20 @@ type PruneResult struct {
 
 func identity(raw []byte, reason string) PruneResult {
 	return PruneResult{Body: raw, Changed: false, SkipReason: reason}
+}
+
+// breakpointAnchor computes the last-tool-breakpoint anchor over elems (the index a
+// caller may drop elements strictly after) and, unless extraHasBreakpoint supplies
+// an alternate anchor (e.g. CompactInboundTools' `system`-block fallback), returns
+// the fail-safe identity result both inbound compactors share for SkipNoBreakpoint.
+// On success it also allocates the keep/pruned accumulators every splice loop
+// starts from, so ok reports whether the caller may proceed straight into its loop.
+func breakpointAnchor(raw []byte, elems []json.RawMessage, extraHasBreakpoint bool) (anchor int, keep []int, pruned []string, bad PruneResult, ok bool) {
+	anchor = lastToolBreakpoint(elems)
+	if anchor < 0 && !extraHasBreakpoint {
+		return 0, nil, nil, identity(raw, SkipNoBreakpoint), false
+	}
+	return anchor, make([]int, 0, len(elems)), nil, PruneResult{}, true
 }
 
 // decodeCurateInput runs the fail-safe prologue every inbound compactor shares:
@@ -159,17 +171,15 @@ func CompactInboundTools(raw []byte, plan ToolPlan, decode func([]byte) error) P
 	// tools[] head too (pfxEnd = -1 ⇒ every tool is compactible). With NO
 	// breakpoint anywhere ahead of tools[] we cannot know the cache boundary and
 	// must not touch the body.
-	pfxEnd := lastToolBreakpoint(elems)
 	sysHasCC := rawHasCacheControl(obj["system"])
-	if pfxEnd < 0 && !sysHasCC {
-		return identity(raw, SkipNoBreakpoint)
+	pfxEnd, keep, pruned, bad, ok := breakpointAnchor(raw, elems, sysHasCC)
+	if !ok {
+		return bad
 	}
 
 	// Select the tools strictly after the protected prefix that the plan drops.
 	// Anything at index <= pfxEnd is the cached head and is NEVER touched —
 	// dropping it would move the breakpoint and bust the session cache.
-	keep := make([]int, 0, len(elems))
-	var pruned []string
 	for i, el := range elems {
 		if i > pfxEnd && plan.Drop[toolName(el)] {
 			pruned = append(pruned, toolName(el))

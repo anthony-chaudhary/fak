@@ -2,8 +2,6 @@ package storedrv
 
 import (
 	"context"
-	"fmt"
-	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
@@ -53,13 +51,8 @@ func (r *Router) PutPlaced(ctx context.Context, b []byte, h Hint, d cachemeta.Pl
 		// stands, so an opted-in caller with a no-pressure verdict is identical to PutHinted.
 		return r.PutHinted(ctx, b, h)
 	}
-	if i := r.firstDurable(); i >= 0 {
-		atomic.AddInt64(&r.puts, 1)
-		ref, err := r.tiers[i].Driver.Put(ctx, b)
-		if err != nil {
-			return abi.Ref{}, fmt.Errorf("storedrv: put-placed -> tier %s: %w", r.tiers[i].Driver.ID(), err)
-		}
-		return ref, nil
+	if ref, err, ok := r.putFirstDurable(ctx, b, "put-placed"); ok {
+		return ref, err
 	}
 	// No durable tier exists to route colder into — fall back to the size/durability route
 	// rather than fail (a single-tier router has nowhere colder to honor the verdict).

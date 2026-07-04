@@ -58,18 +58,24 @@ func (c *Corpus) Len() int {
 	return len(c.rows)
 }
 
+// filterLocked returns the rows matching pred, under the (already held) corpus
+// lock — the shared iterate-and-collect body behind Positives / HardNegatives.
+func (c *Corpus) filterLocked(pred func(abi.LabelRow) bool) []abi.LabelRow {
+	var out []abi.LabelRow
+	for _, r := range c.rows {
+		if pred(r) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // Positives returns the rows that are CATCHES (a non-Allow verdict) — the labeled
 // examples of the gates firing.
 func (c *Corpus) Positives() []abi.LabelRow {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var out []abi.LabelRow
-	for _, r := range c.rows {
-		if r.Verdict != abi.VerdictAllow {
-			out = append(out, r)
-		}
-	}
-	return out
+	return c.filterLocked(func(r abi.LabelRow) bool { return r.Verdict != abi.VerdictAllow })
 }
 
 // HardNegatives returns rows where a cheap rung PASSED but an expensive rung FAILED
@@ -78,13 +84,7 @@ func (c *Corpus) Positives() []abi.LabelRow {
 func (c *Corpus) HardNegatives() []abi.LabelRow {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var out []abi.LabelRow
-	for _, r := range c.rows {
-		if r.RungPassed >= 0 && r.RungFailed > r.RungPassed {
-			out = append(out, r)
-		}
-	}
-	return out
+	return c.filterLocked(func(r abi.LabelRow) bool { return r.RungPassed >= 0 && r.RungFailed > r.RungPassed })
 }
 
 // ByReason tallies catches per reason name (forensics / a class-balance view of the

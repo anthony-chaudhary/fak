@@ -263,6 +263,15 @@ func (t *Table) SetBudget(trace string, b Budget) (State, bool) {
 	return t.setLocked(trace, func(cur *State) { cur.Budget = b.withContextCap() })
 }
 
+// getLockedNonTerminal loads trace's current State (the caller must already hold
+// t.mu, matching the getLocked/putLocked naming convention) and reports whether it
+// is non-terminal — the shared guard setLocked and DecideTimeBudget both open with
+// before doing anything else.
+func (t *Table) getLockedNonTerminal(trace string) (State, bool) {
+	cur := t.getLocked(trace)
+	return cur, !cur.Run.terminal()
+}
+
 // setLocked is the shared body of the live-setter verbs (SetBudget / SetPace /
 // SetPriority / SetTurnIntent / SetGoal): under the table lock it rejects a terminal
 // session (returning it with ok=false) and otherwise applies mutate to the current
@@ -271,8 +280,8 @@ func (t *Table) SetBudget(trace string, b Budget) (State, bool) {
 func (t *Table) setLocked(trace string, mutate func(cur *State)) (State, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	cur := t.getLocked(trace)
-	if cur.Run.terminal() {
+	cur, ok := t.getLockedNonTerminal(trace)
+	if !ok {
 		return cur, false
 	}
 	mutate(&cur)
@@ -382,8 +391,8 @@ func (t *Table) QueryTimeBudget(trace string, now time.Time) TimeQueryVerdict {
 func (t *Table) DecideTimeBudget(trace string, now time.Time) Verdict {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	cur := t.getLocked(trace)
-	if cur.Run.terminal() {
+	cur, ok := t.getLockedNonTerminal(trace)
+	if !ok {
 		return Verdict{Proceed: false, Stop: true, Reason: cur.stopReasonOr(ReasonStopped), State: cur}
 	}
 	if cur.Run == Paused {

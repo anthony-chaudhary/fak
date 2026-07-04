@@ -142,30 +142,21 @@ func tierOf(s *kvmmu.Segment) cachemeta.ResidencyTier {
 
 // countDependents is the read-only projection of kvmmu.evict's reference
 // invalidation: how many live cachemeta entries parent this span's K/V and would
-// be invalidated by its eviction. It mirrors kvmmu.externalEntryReferencesKV
-// (the provider/remote self-reference) alongside cachemeta.AttentionIndexReferences
-// (the attention_index parent reference) so the count equals what an Evict drops.
+// be invalidated by its eviction. It shares cachemeta.ExternalSelfReference
+// (the provider/remote self-reference) with kvmmu.invalidateReferences, alongside
+// cachemeta.AttentionIndexReferences (the attention_index parent reference), so
+// the count equals what an Evict drops.
 func countDependents(live []cachemeta.Entry, kv cachemeta.EntryID) int {
 	if !kv.Valid() {
 		return 0
 	}
 	n := 0
 	for _, e := range live {
-		if cachemeta.AttentionIndexReferences(e, kv) || externalRefMatches(e, kv) {
+		if cachemeta.AttentionIndexReferences(e, kv) || cachemeta.ExternalSelfReference(e, kv) {
 			n++
 		}
 	}
 	return n
-}
-
-// externalRefMatches mirrors kvmmu.externalEntryReferencesKV: an entry whose own
-// identity IS the evicted K/V and that lives on a remote/provider tier is a
-// self-reference that eviction must invalidate.
-func externalRefMatches(e cachemeta.Entry, kv cachemeta.EntryID) bool {
-	if e.ID != kv {
-		return false
-	}
-	return e.Residency.Tier == cachemeta.TierProvider || e.Residency.Tier == cachemeta.TierRemote
 }
 
 // ---------------------------------------------------------------------------

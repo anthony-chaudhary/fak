@@ -138,36 +138,46 @@ func (c *KVCache) evictSupported(from, n int) int {
 	// c.pos still holds each survivor's ORIGINAL absolute position; its new position
 	// is its new index i. Where they differ, re-derive K[i] from the PRE-RoPE Kraw[i]
 	// in one rotation at position i — bit-exact to a prefill that never saw the span.
-	c.pos = append(c.pos[:from], c.pos[end:]...)
-	for i := range c.pos {
-		if c.pos[i] != i {
-			for l := 0; l < c.cfg.NumLayers; l++ {
-				if c.cfg.Alibi {
-					copy(c.K[l][i*w:(i+1)*w], c.Kraw[l][i*w:(i+1)*w])
-					continue
-				}
-				cos, sin := ropeRowForLayer(c.cfg, l, i)
-				for h := 0; h < nKV; h++ {
-					dst := c.K[l][i*w+h*hd : i*w+(h+1)*hd]
-					copy(dst, c.Kraw[l][i*w+h*hd:i*w+(h+1)*hd]) // raw (pre-RoPE)
-					applyRopeRow(dst, cos, sin)                 // single rotation at new pos
-				}
+	return c.compactPositions(from, end, func(i int) {
+		for l := 0; l < c.cfg.NumLayers; l++ {
+			if c.cfg.Alibi {
+				copy(c.K[l][i*w:(i+1)*w], c.Kraw[l][i*w:(i+1)*w])
+				continue
 			}
-			c.msa.rerotateSurvivor(c.cfg, i) // nil-safe: re-RoPE the survivor's index key
+			cos, sin := ropeRowForLayer(c.cfg, l, i)
+			for h := 0; h < nKV; h++ {
+				dst := c.K[l][i*w+h*hd : i*w+(h+1)*hd]
+				copy(dst, c.Kraw[l][i*w+h*hd:i*w+(h+1)*hd]) // raw (pre-RoPE)
+				applyRopeRow(dst, cos, sin)                 // single rotation at new pos
+			}
 		}
-		c.pos[i] = i
-	}
-	return end - from
+		c.msa.rerotateSurvivor(c.cfg, i) // nil-safe: re-RoPE the survivor's index key
+	})
 }
 
 func (c *KVCache) evictGLMDsa(from, end int) int {
 	if c.glm != nil {
 		c.glm.evict(c.cfg, from, end)
 	}
+	return c.compactPositions(from, end, func(i int) {
+		if c.glm != nil {
+			c.glm.rerotateSurvivor(c.cfg, i)
+		}
+	})
+}
+
+// compactPositions removes the evicted [from,end) span from c.pos and renumbers every
+// surviving position to its new index i, calling onMoved(i) for each survivor whose
+// index actually changed (so its RoPE/position-dependent state can be re-derived at
+// its new index) before stamping c.pos[i] = i. Shared by evictSupported and
+// evictGLMDsa so the position-compaction bookkeeping can never drift between the two
+// eviction paths; onMoved carries the one part that legitimately differs (the
+// per-cache-family re-derivation). Returns the count removed (end - from).
+func (c *KVCache) compactPositions(from, end int, onMoved func(i int)) int {
 	c.pos = append(c.pos[:from], c.pos[end:]...)
 	for i := range c.pos {
-		if c.pos[i] != i && c.glm != nil {
-			c.glm.rerotateSurvivor(c.cfg, i)
+		if c.pos[i] != i {
+			onMoved(i)
 		}
 		c.pos[i] = i
 	}

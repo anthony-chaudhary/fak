@@ -92,22 +92,35 @@ func (s *Store) Sync(ctx context.Context, remote string, doPush, doFetch bool) (
 	}
 	res := SyncResult{Remote: remote, Refspec: syncRefspec}
 	if doPush {
-		if _, code, err := s.run(ctx, s.dir, "push", remote, syncRefspec); err != nil {
-			return res, fmt.Errorf("leaseref: git not executable: %w", err)
-		} else if code != 0 {
-			// Stop here: force-fetching over unpublished local state would regress the
-			// very leases this clone just wrote (the ordering rationale in the file doc).
-			return res, fmt.Errorf("leaseref: push %s %s exited %d — sync stopped before fetch (never force-fetch over unpublished local leases)", remote, syncRefspec, code)
+		// Stop here: force-fetching over unpublished local state would regress the
+		// very leases this clone just wrote (the ordering rationale in the file doc).
+		if err := s.runSyncDirection(ctx, "push", remote, " — sync stopped before fetch (never force-fetch over unpublished local leases)"); err != nil {
+			return res, err
 		}
 		res.Pushed = true
 	}
 	if doFetch {
-		if _, code, err := s.run(ctx, s.dir, "fetch", remote, syncRefspec); err != nil {
-			return res, fmt.Errorf("leaseref: git not executable: %w", err)
-		} else if code != 0 {
-			return res, fmt.Errorf("leaseref: fetch %s %s exited %d", remote, syncRefspec, code)
+		if err := s.runSyncDirection(ctx, "fetch", remote, ""); err != nil {
+			return res, err
 		}
 		res.Fetched = true
 	}
 	return res, nil
+}
+
+// runSyncDirection runs one sync direction (git verb remote syncRefspec) and
+// translates its outcome into the error shape both Sync directions use: a
+// non-executable git is an infrastructure error, and a non-zero exit is a
+// verb-tagged message with an optional direction-specific extra suffix (push
+// carries the stop-before-fetch rationale; fetch carries none). Returns nil
+// once the direction completed (exit 0).
+func (s *Store) runSyncDirection(ctx context.Context, verb, remote, extra string) error {
+	_, code, err := s.run(ctx, s.dir, verb, remote, syncRefspec)
+	if err != nil {
+		return fmt.Errorf("leaseref: git not executable: %w", err)
+	}
+	if code != 0 {
+		return fmt.Errorf("leaseref: %s %s %s exited %d%s", verb, remote, syncRefspec, code, extra)
+	}
+	return nil
 }

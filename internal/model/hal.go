@@ -140,11 +140,18 @@ func (s *Session) weightHALStaged(key string, mk func() compute.Tensor, dtype co
 	return t
 }
 
+// requireTensorPresent panics with the uniform "missing weight" message the
+// weightHALQ8/weightHALQ4K staged builders both raise when their source tensor is
+// nil. kind names the tensor family (e.g. "Q8", "Q4_K") in the message.
+func requireTensorPresent(missing bool, kind, name string) {
+	if missing {
+		panic("model: missing " + kind + " tensor " + name)
+	}
+}
+
 func (s *Session) weightHALQ8(name string, qt *q8Tensor) compute.Tensor {
 	return s.weightHALStaged("q8:"+name, func() compute.Tensor {
-		if qt == nil {
-			panic("model: missing Q8 tensor " + name)
-		}
+		requireTensorPresent(qt == nil, "Q8", name)
 		return compute.NewQ8(compute.Default(), []int{qt.out, qt.in}, qt.q, qt.d, qBlk)
 	}, compute.Q8_0)
 }
@@ -157,9 +164,7 @@ func (s *Session) weightHALQ8(name string, qt *q8Tensor) compute.Tensor {
 // the Q4_K majority of a 753B GLM-5.2 on the GPU, with only ~0.56 B/weight resident.
 func (s *Session) weightHALQ4K(name string, qt *q4kTensor) compute.Tensor {
 	return s.weightHALStaged("q4k:"+name, func() compute.Tensor {
-		if qt == nil {
-			panic("model: missing Q4_K tensor " + name)
-		}
+		requireTensorPresent(qt == nil, "Q4_K", name)
 		return compute.NewQ4K(compute.Default(), []int{qt.out, qt.in}, qt.raw)
 	}, compute.Q4_K)
 }

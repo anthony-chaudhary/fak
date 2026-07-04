@@ -275,7 +275,7 @@ func healthRow(id string, snap LoopSnapshot, ledgered bool, job Job, registered 
 	}
 	row.CadenceSeconds = cadence
 
-	row.State = deriveState(snap.LastEventUnixNano, cadence, now, th)
+	row.State = DeriveState(snap.LastEventUnixNano, cadence, now, th)
 	if row.State != HealthDark || snap.LastEventUnixNano > 0 {
 		// Age is meaningful only when the loop has ticked; a never-ticked dark loop
 		// leaves AgeSeconds at 0 (the never-ticked rule, not an age).
@@ -291,14 +291,18 @@ func healthRow(id string, snap LoopSnapshot, ledgered bool, job Job, registered 
 	return row
 }
 
-// deriveState classifies a loop's liveness from its last tick against a cadence.
+// DeriveState classifies a loop's liveness from its last tick against a cadence.
 // The rules, in order:
 //   - never ticked (lastTick <= 0): DARK — a registered/ledgered loop that has never
 //     fired is dark, not unknown; if cadence is also unknown (<=0) it is UNKNOWN.
 //   - ticked, age <= cadence: LIVE.
 //   - ticked, cadence < age <= DarkMultiple*cadence: STALE (slipping).
 //   - ticked, age > DarkMultiple*cadence: DARK (gone quiet past its cadence).
-func deriveState(lastTickUnixNano, cadenceSeconds int64, now time.Time, th HealthThresholds) HealthState {
+//
+// Exported so a cross-package fold (e.g. internal/loopfleet's cross-ledger pane) can
+// call the SAME classifier instead of re-implementing it, guaranteeing the two draw
+// the dark line identically by construction rather than by comment convention.
+func DeriveState(lastTickUnixNano, cadenceSeconds int64, now time.Time, th HealthThresholds) HealthState {
 	if lastTickUnixNano <= 0 {
 		if cadenceSeconds <= 0 {
 			return HealthUnknown

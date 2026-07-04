@@ -296,21 +296,31 @@ func Build() scorecard.Payload {
 	})
 }
 
-// undefinedCells returns the debt cells in deterministic order.
-func undefinedCells(cells []Cell) []Cell {
-	var out []Cell
+// undefinedOf filters cells to those isUndefined reports true for (preserving
+// order) and stable-sorts the result with less — the "filter to the debt cells,
+// then sort deterministically" idiom both the family-axis matrix (undefinedCells)
+// and the cross-axis matrix (undefinedXCells, precision.go) share.
+func undefinedOf[T any](cells []T, isUndefined func(T) bool, less func(a, b T) bool) []T {
+	var out []T
 	for _, c := range cells {
-		if c.Support == Undefined {
+		if isUndefined(c) {
 			out = append(out, c)
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Family != out[j].Family {
-			return out[i].Family < out[j].Family
-		}
-		return out[i].Backend < out[j].Backend
-	})
+	sort.SliceStable(out, func(i, j int) bool { return less(out[i], out[j]) })
 	return out
+}
+
+// undefinedCells returns the debt cells in deterministic order.
+func undefinedCells(cells []Cell) []Cell {
+	return undefinedOf(cells,
+		func(c Cell) bool { return c.Support == Undefined },
+		func(a, b Cell) bool {
+			if a.Family != b.Family {
+				return a.Family < b.Family
+			}
+			return a.Backend < b.Backend
+		})
 }
 
 // pct renders n/total as a 0-100 score (100 when total is 0, so an empty axis is clean).

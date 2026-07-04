@@ -43,11 +43,7 @@ var patchModeSubs = setOf("add", "checkout", "reset", "restore", "stash", "commi
 func classifyInteractive(command string) []Violation {
 	var out []Violation
 	for _, seg := range splitSegments(command) {
-		toks, ok := shlexSplit(seg)
-		if !ok {
-			toks = strings.Fields(seg)
-		}
-		verb, operands, overridden := stripEnvAndEnvVerb(toks)
+		verb, operands, overridden := tokenizeSegment(seg)
 		if verb == "" || overridden {
 			continue
 		}
@@ -61,6 +57,19 @@ func classifyInteractive(command string) []Violation {
 // ClassifyInteractive returns would-hang interactive violations for a shell command.
 func ClassifyInteractive(command string) []Violation {
 	return classifyInteractive(command)
+}
+
+// tokenizeSegment splits seg into shell tokens (shlex-aware, falling back to whitespace
+// fields when shlex parsing fails on an unbalanced quote) and strips a leading env-var
+// assignment / `env` verb prefix, returning the resolved verb, its operands, and whether
+// an editor-override env var was seen — the identical front-end classifyInteractive and
+// classifySleepWait both run over each command segment before their differing checks.
+func tokenizeSegment(seg string) (verb string, operands []string, overridden bool) {
+	toks, ok := shlexSplit(seg)
+	if !ok {
+		toks = strings.Fields(seg)
+	}
+	return stripEnvAndEnvVerb(toks)
 }
 
 // stripEnvAndEnvVerb skips leading NAME=VALUE assignments (and an `env` verb

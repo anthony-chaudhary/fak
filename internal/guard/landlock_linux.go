@@ -323,8 +323,8 @@ func buildRuleset(fd int, spec RulesetSpec, fileClass, dirClass uint64) error {
 // abort). Opened O_PATH|O_NOFOLLOW so a file target opens and a symlink is not followed at
 // construct time.
 func grantWritable(rulesetFD int, path string, fileClass, dirClass uint64) {
-	pfd, err := syscall.Open(path, oPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
-	if err != nil {
+	pfd, ok := openRuleFD(path)
+	if !ok {
 		return
 	}
 	defer syscall.Close(pfd)
@@ -346,12 +346,25 @@ func grantWritable(rulesetFD int, path string, fileClass, dirClass uint64) {
 
 // grantReadonly adds a read-only rule on a hook dir: read files, list the dir, execute hooks.
 func grantReadonly(rulesetFD int, path string) {
-	pfd, err := syscall.Open(path, oPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
-	if err != nil {
+	pfd, ok := openRuleFD(path)
+	if !ok {
 		return // hook dir absent (ENOENT) → nothing to protect; tolerated
 	}
 	defer syscall.Close(pfd)
 	addRule(rulesetFD, pfd, readClass)
+}
+
+// openRuleFD opens path as an O_PATH fd (not following symlinks) for a landlock
+// path_beneath rule attachment — the shared open-or-give-up shape grantWritable
+// and grantReadonly both need. ok is false on any open error (ENOENT or
+// otherwise); callers treat a missing/unreachable path as "nothing to protect,"
+// never a build abort.
+func openRuleFD(path string) (fd int, ok bool) {
+	pfd, err := syscall.Open(path, oPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return 0, false
+	}
+	return pfd, true
 }
 
 // addRule issues landlock_add_rule(PATH_BENEATH) for an already-open parent fd. An incompatible

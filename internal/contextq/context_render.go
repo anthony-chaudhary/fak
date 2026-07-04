@@ -1,6 +1,7 @@
 package contextq
 
 import (
+	"cmp"
 	"fmt"
 	"sort"
 	"strings"
@@ -161,40 +162,56 @@ func cleanAssumptions(in []AssumedContext) []AssumedContext {
 	return out
 }
 
+// cmpOrdered returns -1, 0, or 1 for a vs b — the numeric core every chained
+// tie-break comparison below reduces to.
+func cmpOrdered[T cmp.Ordered](a, b T) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// chainLess composes per-key comparators (each returning cmpOrdered's -1/0/1)
+// into one sort.SliceStable Less func: the first comparator to report non-equal
+// decides — exactly the "if rows[i].F != rows[j].F { return rows[i].F <
+// rows[j].F }" cascade every row sorter in this file otherwise repeats by hand.
+func chainLess(cmps ...func(i, j int) int) func(i, j int) bool {
+	return func(i, j int) bool {
+		for _, c := range cmps {
+			if v := c(i, j); v != 0 {
+				return v < 0
+			}
+		}
+		return false
+	}
+}
+
 func sortKnownContext(rows []KnownContextRow) {
-	sort.SliceStable(rows, func(i, j int) bool {
-		if rows[i].Step != rows[j].Step {
-			return rows[i].Step < rows[j].Step
-		}
-		if rows[i].Role != rows[j].Role {
-			return rows[i].Role < rows[j].Role
-		}
-		return rows[i].Descriptor < rows[j].Descriptor
-	})
+	sort.SliceStable(rows, chainLess(
+		func(i, j int) int { return cmpOrdered(rows[i].Step, rows[j].Step) },
+		func(i, j int) int { return cmpOrdered(rows[i].Role, rows[j].Role) },
+		func(i, j int) int { return cmpOrdered(rows[i].Descriptor, rows[j].Descriptor) },
+	))
 }
 
 func sortUnknownContext(rows []UnknownContextRow) {
-	sort.SliceStable(rows, func(i, j int) bool {
-		if rows[i].Step != rows[j].Step {
-			return rows[i].Step < rows[j].Step
-		}
-		if rows[i].Kind != rows[j].Kind {
-			return rows[i].Kind < rows[j].Kind
-		}
-		if rows[i].Role != rows[j].Role {
-			return rows[i].Role < rows[j].Role
-		}
-		return rows[i].Reason < rows[j].Reason
-	})
+	sort.SliceStable(rows, chainLess(
+		func(i, j int) int { return cmpOrdered(rows[i].Step, rows[j].Step) },
+		func(i, j int) int { return cmpOrdered(rows[i].Kind, rows[j].Kind) },
+		func(i, j int) int { return cmpOrdered(rows[i].Role, rows[j].Role) },
+		func(i, j int) int { return cmpOrdered(rows[i].Reason, rows[j].Reason) },
+	))
 }
 
 func sortAssumedContext(rows []AssumedContext) {
-	sort.SliceStable(rows, func(i, j int) bool {
-		if rows[i].Key != rows[j].Key {
-			return rows[i].Key < rows[j].Key
-		}
-		return rows[i].Statement < rows[j].Statement
-	})
+	sort.SliceStable(rows, chainLess(
+		func(i, j int) int { return cmpOrdered(rows[i].Key, rows[j].Key) },
+		func(i, j int) int { return cmpOrdered(rows[i].Statement, rows[j].Statement) },
+	))
 }
 
 func mdCell(s string) string {

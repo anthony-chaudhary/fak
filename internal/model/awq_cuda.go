@@ -26,6 +26,35 @@ import (
 */
 import "C"
 
+// awqUploadDeviceBuffers allocates the four device buffers the AWQ GEMV/GEMM kernels
+// share (quantized weight, per-row scales, input activations, output), uploads the
+// weight/scales/input from host memory, and leaves the output buffer allocated but
+// untouched (the kernel writes it). yLen is the element count to allocate for the
+// output. Shared by awqMatRowsCUDA (GEMV) and awqGemmCUDA (GEMM).
+func awqUploadDeviceBuffers(qt *awqTensor, x []float32, yLen int) (dW, dScales, dX, dY unsafe.Pointer) {
+	// Allocate device memory
+	dW = C.fcuda_malloc(C.size_t(len(qt.raw)))
+	dScales = C.fcuda_malloc(C.size_t(len(qt.scales) * 4))
+	dX = C.fcuda_malloc(C.size_t(len(x) * 4))
+	dY = C.fcuda_malloc(C.size_t(yLen * 4))
+
+	// Copy data to device
+	C.fcuda_h2d(dW, unsafe.Pointer(&qt.raw[0]), C.size_t(len(qt.raw)))
+	C.fcuda_h2d(dScales, unsafe.Pointer(&qt.scales[0]), C.size_t(len(qt.scales)*4))
+	C.fcuda_h2d(dX, unsafe.Pointer(&x[0]), C.size_t(len(x)*4))
+
+	return dW, dScales, dX, dY
+}
+
+// awqFreeDeviceBuffers frees the four device buffers awqUploadDeviceBuffers
+// allocated, in the same order they were allocated.
+func awqFreeDeviceBuffers(dW, dScales, dX, dY unsafe.Pointer) {
+	C.fcuda_free(dW)
+	C.fcuda_free(dScales)
+	C.fcuda_free(dX)
+	C.fcuda_free(dY)
+}
+
 // awqMatRowsCUDA computes y = AWQ @ x on GPU where AWQ is a 4-bit quantized tensor.
 // This is a direct cgo call to the CUDA kernel for AWQ matrix-vector multiplication.
 func awqMatRowsCUDA(qt *awqTensor, x []float32) []float32 {
@@ -36,16 +65,7 @@ func awqMatRowsCUDA(qt *awqTensor, x []float32) []float32 {
 		return y
 	}
 
-	// Allocate device memory
-	dW := C.fcuda_malloc(C.size_t(len(qt.raw)))
-	dScales := C.fcuda_malloc(C.size_t(len(qt.scales) * 4))
-	dX := C.fcuda_malloc(C.size_t(len(x) * 4))
-	dY := C.fcuda_malloc(C.size_t(len(y) * 4))
-
-	// Copy data to device
-	C.fcuda_h2d(dW, unsafe.Pointer(&qt.raw[0]), C.size_t(len(qt.raw)))
-	C.fcuda_h2d(dScales, unsafe.Pointer(&qt.scales[0]), C.size_t(len(qt.scales)*4))
-	C.fcuda_h2d(dX, unsafe.Pointer(&x[0]), C.size_t(len(x)*4))
+	dW, dScales, dX, dY := awqUploadDeviceBuffers(qt, x, out)
 
 	// Run AWQ GEMV kernel
 	C.fcuda_awq_gemv((*C.uint8_t)(dW), (*C.float)(dScales), (*C.float)(dX), (*C.float)(dY), C.int(out), C.int(in))
@@ -53,11 +73,7 @@ func awqMatRowsCUDA(qt *awqTensor, x []float32) []float32 {
 	// Copy result back
 	C.fcuda_d2h(unsafe.Pointer(&y[0]), dY, C.size_t(len(y)*4))
 
-	// Free device memory
-	C.fcuda_free(dW)
-	C.fcuda_free(dScales)
-	C.fcuda_free(dX)
-	C.fcuda_free(dY)
+	awqFreeDeviceBuffers(dW, dScales, dX, dY)
 
 	return y
 }
@@ -71,16 +87,7 @@ func awqGemmCUDA(qt *awqTensor, X []float32, P int) []float32 {
 		return Y
 	}
 
-	// Allocate device memory
-	dW := C.fcuda_malloc(C.size_t(len(qt.raw)))
-	dScales := C.fcuda_malloc(C.size_t(len(qt.scales) * 4))
-	dX := C.fcuda_malloc(C.size_t(len(X) * 4))
-	dY := C.fcuda_malloc(C.size_t(len(Y) * 4))
-
-	// Copy data to device
-	C.fcuda_h2d(dW, unsafe.Pointer(&qt.raw[0]), C.size_t(len(qt.raw)))
-	C.fcuda_h2d(dScales, unsafe.Pointer(&qt.scales[0]), C.size_t(len(qt.scales)*4))
-	C.fcuda_h2d(dX, unsafe.Pointer(&X[0]), C.size_t(len(X)*4))
+	dW, dScales, dX, dY := awqUploadDeviceBuffers(qt, X, P*out)
 
 	// Run AWQ GEMM kernel
 	C.fcuda_awq_gemm((*C.uint8_t)(dW), (*C.float)(dScales), (*C.float)(dX), (*C.float)(dY), C.int(out), C.int(in), C.int(P))
@@ -88,11 +95,7 @@ func awqGemmCUDA(qt *awqTensor, X []float32, P int) []float32 {
 	// Copy result back
 	C.fcuda_d2h(unsafe.Pointer(&Y[0]), dY, C.size_t(len(Y)*4))
 
-	// Free device memory
-	C.fcuda_free(dW)
-	C.fcuda_free(dScales)
-	C.fcuda_free(dX)
-	C.fcuda_free(dY)
+	awqFreeDeviceBuffers(dW, dScales, dX, dY)
 
 	return Y
 }

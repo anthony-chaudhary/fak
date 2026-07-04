@@ -37,6 +37,8 @@ import (
 	"io"
 	"sort"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
 // GateLatencyRegression is the closed-vocabulary alarm token a hook-latency budget
@@ -168,11 +170,7 @@ func FoldHookLatency(obs []HookObservation) HookLatencyRollup {
 		byVerb[o.Verb] = append(byVerb[o.Verb], o.LatencyMS)
 	}
 	r := HookLatencyRollup{Total: foldLatencySamples("", all)}
-	verbs := make([]string, 0, len(byVerb))
-	for v := range byVerb {
-		verbs = append(verbs, v)
-	}
-	sort.Strings(verbs)
+	verbs := maputil.SortedKeys(byVerb)
 	for _, v := range verbs {
 		r.ByVerb = append(r.ByVerb, foldLatencySamples(v, byVerb[v]))
 	}

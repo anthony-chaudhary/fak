@@ -165,6 +165,23 @@ func (s *PagedKV) Append(k, v [][]float32) {
 	s.appendPlanes([][][]float32{k, v})
 }
 
+// ensureBlockForOffset resolves the block-local offset for linear position pos,
+// allocating a fresh tail block on a block boundary or claiming ownership of the
+// existing tail block (copy-on-write) otherwise, and returns that offset plus the
+// block's storage. Shared by appendPlanes and appendLayerPlanes so the
+// block-allocation / copy-on-write boundary lives in exactly one place.
+func (s *PagedKV) ensureBlockForOffset(pos int) (off int, blk []float32) {
+	p := s.pool
+	li := pos / p.blockTokens
+	off = pos % p.blockTokens
+	if li == len(s.table) {
+		s.table = append(s.table, p.alloc())
+	} else {
+		s.ensureOwned(li)
+	}
+	return off, p.blocks[s.table[li]]
+}
+
 // appendPlanes writes one token's per-plane, per-layer rows into the sequence tail. planes[i]
 // is plane i's per-layer rows (plane 0 = K, 1 = V, 2 = Kraw); planes beyond the pool's plane
 // count, or layers beyond nLayers, are ignored, and rows shorter than stride are written as
@@ -172,14 +189,7 @@ func (s *PagedKV) Append(k, v [][]float32) {
 // block-allocation / copy-on-write boundary lives in exactly one place.
 func (s *PagedKV) appendPlanes(planes [][][]float32) {
 	p := s.pool
-	li := s.nTokens / p.blockTokens
-	off := s.nTokens % p.blockTokens
-	if li == len(s.table) {
-		s.table = append(s.table, p.alloc())
-	} else {
-		s.ensureOwned(li)
-	}
-	blk := p.blocks[s.table[li]]
+	off, blk := s.ensureBlockForOffset(s.nTokens)
 	for plane, rows := range planes {
 		if plane >= p.planes {
 			break
@@ -210,14 +220,7 @@ func (s *PagedKV) appendLayerPlanes(layer int, planes [][]float32) {
 		}
 		pos = s.nTokens - 1
 	}
-	li := pos / p.blockTokens
-	off := pos % p.blockTokens
-	if li == len(s.table) {
-		s.table = append(s.table, p.alloc())
-	} else {
-		s.ensureOwned(li)
-	}
-	blk := p.blocks[s.table[li]]
+	off, blk := s.ensureBlockForOffset(pos)
 	for plane, row := range planes {
 		if plane >= p.planes {
 			break

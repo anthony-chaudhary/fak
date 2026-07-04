@@ -41,6 +41,26 @@ type reuseMetrics struct {
 
 func msFromDur(d time.Duration) float64 { return float64(d.Nanoseconds()) / 1e6 }
 
+// logProgress prints one cell's reuse-ms-breakdown -> turns/s progress line (plus
+// the no-reuse comparison when ablation ran) to stderr. prefix carries the
+// cell-identity fields each run mode prints before the shared reuse breakdown —
+// main.go's "T=.. C=.. P=.. D=.. R=.. | " grid cell, or workload.go's bare
+// "  C=.. | " — already rendered by the caller (so it substitutes as a plain
+// %s, never re-interpreted as a format string).
+func logProgress(prefix string, rTot, rTurns float64, m reuseMetrics, ablation bool) {
+	if ablation {
+		fmt.Fprintf(os.Stderr,
+			"%sreuse %.0f ms (pre %.0f + clone %.0f + dec %.0f + res %.0f) = %.1f turns/s | "+
+				"no-reuse %.0f ms = %.1f turns/s | reuse %.2f×\n",
+			prefix, rTot, m.ReusePrefillMS, m.ReuseCloneMS, m.ReuseDecodeMS, m.ReuseResultMS, rTurns,
+			*m.NoReuseTotalMS, *m.NoReuseAgentTurnsSec, *m.ReuseSpeedup)
+	} else {
+		fmt.Fprintf(os.Stderr,
+			"%sreuse %.0f ms (pre %.0f + clone %.0f + dec %.0f + res %.0f) = %.1f turns/s | no-reuse skipped\n",
+			prefix, rTot, m.ReusePrefillMS, m.ReuseCloneMS, m.ReuseDecodeMS, m.ReuseResultMS, rTurns)
+	}
+}
+
 // fillNoReuse folds the no-reuse ablation timing slices into m's NoReuse* fields and the
 // reuse-vs-no-reuse speedup, given the reuse agents/sec for the same cell. C is the
 // concurrency (agents) and turns is the per-agent turn count for the turns/sec figures.

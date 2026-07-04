@@ -132,22 +132,26 @@ func Render(targetRatePerHour float64) string {
 	return b.String()
 }
 
-// trim formats a float without a trailing ".0" when it is integral, so "5" reads
-// cleaner than "5.0" in the table.
-func trim(x float64) string {
+// formatFloat renders x as a bare integer (no trailing fraction) when it is
+// integral, else with the given fallback verb — shared by trim ("%g") and
+// trimFixed ("%.2f"), which differ only in that fallback.
+func formatFloat(x float64, fallback string) string {
 	if x == math.Trunc(x) && !math.IsInf(x, 0) {
 		return fmt.Sprintf("%d", int64(x))
 	}
-	return fmt.Sprintf("%g", x)
+	return fmt.Sprintf(fallback, x)
+}
+
+// trim formats a float without a trailing ".0" when it is integral, so "5" reads
+// cleaner than "5.0" in the table.
+func trim(x float64) string {
+	return formatFloat(x, "%g")
 }
 
 // trimFixed formats the exact load to two decimals (e.g. "66.67"), trimming the
 // fraction when the value is integral.
 func trimFixed(x float64) string {
-	if x == math.Trunc(x) && !math.IsInf(x, 0) {
-		return fmt.Sprintf("%d", int64(x))
-	}
-	return fmt.Sprintf("%.2f", x)
+	return formatFloat(x, "%.2f")
 }
 
 // Verdict is the capacity judgment of an Estimate: whether the workers a fleet has

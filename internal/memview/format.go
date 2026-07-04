@@ -136,13 +136,21 @@ func EncodeMarkdown(s Surface) []byte {
 		b.WriteString("| " + strings.Join(makeDashes(len(s.Fields)), " | ") + " |\n")
 	}
 	for _, r := range s.Rows {
-		cells := make([]string, len(r))
-		for i, v := range r {
-			cells[i] = escapeMarkdownCell(v)
-		}
+		cells := escapeRow(r, escapeMarkdownCell)
 		b.WriteString("| " + strings.Join(cells, " | ") + " |\n")
 	}
 	return []byte(b.String())
+}
+
+// escapeRow renders one row's raw values into per-cell escaped strings using escape,
+// shared by EncodeMarkdown and EncodeTOON so each format differs only in its own
+// escape function and the surrounding row-line syntax, never in how cells are built.
+func escapeRow(r []string, escape func(string) string) []string {
+	cells := make([]string, len(r))
+	for i, v := range r {
+		cells[i] = escape(v)
+	}
+	return cells
 }
 
 func makeDashes(n int) []string {
@@ -205,10 +213,7 @@ func EncodeTOON(s Surface) []byte {
 	}
 	fmt.Fprintf(&b, "%s[%d]{%s}:\n", name, len(s.Rows), strings.Join(s.Fields, ","))
 	for _, r := range s.Rows {
-		cells := make([]string, len(r))
-		for i, v := range r {
-			cells[i] = toonCell(v)
-		}
+		cells := escapeRow(r, toonCell)
 		b.WriteString("  " + strings.Join(cells, ",") + "\n")
 	}
 	return []byte(b.String())

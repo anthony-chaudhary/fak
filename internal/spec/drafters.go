@@ -258,9 +258,16 @@ func (md *MultiDrafter) pick() int {
 	if md.round%md.probeEvery == md.probeEvery-1 {
 		return (md.round / md.probeEvery) % len(md.members)
 	}
+	return bestIndexOf(md.meters)
+}
+
+// bestIndexOf returns the index of the meter with the highest measured
+// acceptance rate (ties to the earlier index) — the exploit-rule scan both
+// pick() and Best() perform over the ensemble's meters.
+func bestIndexOf(meters []AcceptanceMeter) int {
 	best := 0
-	for i := 1; i < len(md.members); i++ {
-		if md.meters[i].AcceptanceRate() > md.meters[best].AcceptanceRate() {
+	for i := 1; i < len(meters); i++ {
+		if meters[i].AcceptanceRate() > meters[best].AcceptanceRate() {
 			best = i
 		}
 	}
@@ -328,11 +335,5 @@ func (md *MultiDrafter) Best() string {
 	if len(md.members) == 0 {
 		return ""
 	}
-	best := 0
-	for i := 1; i < len(md.members); i++ {
-		if md.meters[i].AcceptanceRate() > md.meters[best].AcceptanceRate() {
-			best = i
-		}
-	}
-	return md.members[best].Name
+	return md.members[bestIndexOf(md.meters)].Name
 }

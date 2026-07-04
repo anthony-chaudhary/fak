@@ -169,19 +169,8 @@ func main() {
 				pt.fillNoReuse(acc.nTotal, acc.nPre, acc.nDec, acc.nResult, C, T, rAgents)
 			}
 			points = append(points, pt)
-			if *ablation {
-				fmt.Fprintf(os.Stderr,
-					"T=%-2d C=%-3d P=%d D=%d R=%d | reuse %.0f ms (pre %.0f + clone %.0f + dec %.0f + res %.0f) = %.1f turns/s | "+
-						"no-reuse %.0f ms = %.1f turns/s | reuse %.2f×\n",
-					T, C, *prefixLen, *decodeSteps, *resultTokens, rTot, pt.ReusePrefillMS,
-					pt.ReuseCloneMS, pt.ReuseDecodeMS, pt.ReuseResultMS, rTurns, *pt.NoReuseTotalMS,
-					*pt.NoReuseAgentTurnsSec, *pt.ReuseSpeedup)
-			} else {
-				fmt.Fprintf(os.Stderr,
-					"T=%-2d C=%-3d P=%d D=%d R=%d | reuse %.0f ms (pre %.0f + clone %.0f + dec %.0f + res %.0f) = %.1f turns/s | no-reuse skipped\n",
-					T, C, *prefixLen, *decodeSteps, *resultTokens, rTot, pt.ReusePrefillMS,
-					pt.ReuseCloneMS, pt.ReuseDecodeMS, pt.ReuseResultMS, rTurns)
-			}
+			logProgress(fmt.Sprintf("T=%-2d C=%-3d P=%d D=%d R=%d | ", T, C, *prefixLen, *decodeSteps, *resultTokens),
+				rTot, rTurns, pt.reuseMetrics, *ablation)
 		}
 	}
 

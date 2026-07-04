@@ -163,16 +163,29 @@ func (r *Router) PutHinted(ctx context.Context, b []byte, h Hint) (abi.Ref, erro
 	}
 	wantDurable := h.Taint == abi.TaintQuarantined || h.Scope != abi.ScopeAgent || h.Durability == "durable"
 	if wantDurable {
-		if i := r.firstDurable(); i >= 0 {
-			atomic.AddInt64(&r.puts, 1)
-			ref, err := r.tiers[i].Driver.Put(ctx, b)
-			if err != nil {
-				return abi.Ref{}, fmt.Errorf("storedrv: put-hinted -> tier %s: %w", r.tiers[i].Driver.ID(), err)
-			}
-			return ref, nil
+		if ref, err, ok := r.putFirstDurable(ctx, b, "put-hinted"); ok {
+			return ref, err
 		}
 	}
 	return r.Put(ctx, b)
+}
+
+// putFirstDurable writes b to the first durable tier, if one exists, tagging any
+// error with label (the caller's route name, e.g. "put-hinted" / "put-placed") the
+// same way each route already did inline. ok reports whether a durable tier was
+// found (and therefore used); when ok is false, ref/err are zero and the caller
+// falls back to its own default route. Shared by PutHinted and PutPlaced.
+func (r *Router) putFirstDurable(ctx context.Context, b []byte, label string) (ref abi.Ref, err error, ok bool) {
+	i := r.firstDurable()
+	if i < 0 {
+		return abi.Ref{}, nil, false
+	}
+	atomic.AddInt64(&r.puts, 1)
+	ref, err = r.tiers[i].Driver.Put(ctx, b)
+	if err != nil {
+		return abi.Ref{}, fmt.Errorf("storedrv: %s -> tier %s: %w", label, r.tiers[i].Driver.ID(), err), true
+	}
+	return ref, nil, true
 }
 
 // Resolve materializes the bytes a Ref points at, trying tiers in order (hottest

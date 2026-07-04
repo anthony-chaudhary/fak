@@ -110,13 +110,10 @@ func RenderList(rows []Account, home, policyPath string, policyExists bool,
 		fmt.Fprintf(&b, "  [%-8s] %-16s %-28s %-3s %-24s %s\n",
 			product(r), r.Tag, r.Account, tierStr(r), derefStr(r.Model), detail)
 	}
-	if len(buckets["blocked"]) > 0 {
-		fmt.Fprintf(&b, "\nBLOCKED (real account, do not offer now): %d\n", len(buckets["blocked"]))
-		for _, r := range buckets["blocked"] {
-			fmt.Fprintf(&b, "  [%-8s] %-16s %-28s %-3s %-24s %s\n",
-				product(r), r.Tag, r.Account, tierStr(r), derefStr(r.Model), derefStr(r.BlockReason))
-		}
-	}
+	renderBucketSection(&b, buckets["blocked"], "BLOCKED (real account, do not offer now)", func(r Account) {
+		fmt.Fprintf(&b, "  [%-8s] %-16s %-28s %-3s %-24s %s\n",
+			product(r), r.Tag, r.Account, tierStr(r), derefStr(r.Model), derefStr(r.BlockReason))
+	})
 	if dropped := DroppedSeats(rows); len(dropped) > 0 {
 		fmt.Fprintf(&b, "\nNEEDS RE-LOGIN (seat dropped from the offerable pool): %d\n", len(dropped))
 		for _, d := range dropped {
@@ -124,27 +121,17 @@ func RenderList(rows []Account, home, policyPath string, policyExists bool,
 			fmt.Fprintf(&b, "  %-16s re-login: %s\n", "", d.NextAction)
 		}
 	}
-	if len(buckets["duplicate"]) > 0 {
-		fmt.Fprintf(&b, "\nDUPLICATE IDENTITY (same Anthropic account as a canonical dir -- not offered): %d\n",
-			len(buckets["duplicate"]))
-		for _, r := range buckets["duplicate"] {
-			peers := strings.Join(r.IdentityPeers, ", ")
-			fmt.Fprintf(&b, "  [%-8s] %-16s %-28s login=%s  shares with: %s\n",
-				product(r), r.Tag, r.Account, derefStr(r.LoginEmail), peers)
-		}
-	}
-	if len(buckets["excluded"]) > 0 {
-		fmt.Fprintf(&b, "\nEXCLUDED (tombstoned): %d\n", len(buckets["excluded"]))
-		for _, r := range buckets["excluded"] {
-			fmt.Fprintf(&b, "  [%-8s] %-16s %-28s %s\n", product(r), r.Tag, r.Account, r.Reason)
-		}
-	}
-	if len(buckets["non-account"]) > 0 {
-		fmt.Fprintf(&b, "\nNON-ACCOUNT (ignored): %d\n", len(buckets["non-account"]))
-		for _, r := range buckets["non-account"] {
-			fmt.Fprintf(&b, "  [%-8s] %-16s %-28s %s\n", product(r), r.Tag, r.Account, r.Reason)
-		}
-	}
+	renderBucketSection(&b, buckets["duplicate"], "DUPLICATE IDENTITY (same Anthropic account as a canonical dir -- not offered)", func(r Account) {
+		peers := strings.Join(r.IdentityPeers, ", ")
+		fmt.Fprintf(&b, "  [%-8s] %-16s %-28s login=%s  shares with: %s\n",
+			product(r), r.Tag, r.Account, derefStr(r.LoginEmail), peers)
+	})
+	renderBucketSection(&b, buckets["excluded"], "EXCLUDED (tombstoned)", func(r Account) {
+		fmt.Fprintf(&b, "  [%-8s] %-16s %-28s %s\n", product(r), r.Tag, r.Account, r.Reason)
+	})
+	renderBucketSection(&b, buckets["non-account"], "NON-ACCOUNT (ignored)", func(r Account) {
+		fmt.Fprintf(&b, "  [%-8s] %-16s %-28s %s\n", product(r), r.Tag, r.Account, r.Reason)
+	})
 	polSrc := "(built-in defaults)"
 	if policyExists {
 		polSrc = policyPath
@@ -153,6 +140,20 @@ func RenderList(rows []Account, home, policyPath string, policyExists bool,
 	}
 	fmt.Fprintf(&b, "\npolicy: %s\n", polSrc)
 	return b.String()
+}
+
+// renderBucketSection appends a "\nLABEL: %d\n" header, skipped entirely when
+// rows is empty, followed by one line per row rendered by renderRow. Every
+// gated roster section (BLOCKED/DUPLICATE/EXCLUDED/NON-ACCOUNT) shares this
+// exact skeleton; only the header text and per-row formatting differ.
+func renderBucketSection(b *strings.Builder, rows []Account, label string, renderRow func(Account)) {
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "\n%s: %d\n", label, len(rows))
+	for _, r := range rows {
+		renderRow(r)
+	}
 }
 
 func product(r Account) string {

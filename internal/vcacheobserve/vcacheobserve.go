@@ -274,13 +274,7 @@ func ObserveWithOptions(turns []Turn, opt Options) Report {
 
 	// Concentration MEASURED from the account's family distribution (must be sorted
 	// descending by ranking weight before fitting — §5.2).
-	sort.SliceStable(ranked, func(i, j int) bool {
-		wi, wj := ranked[i].Weight(), ranked[j].Weight()
-		if wi == wj {
-			return ranked[i].Key < ranked[j].Key
-		}
-		return wi > wj
-	})
+	sortRankedByWeightDesc(ranked)
 	rep.Concentration = vcachecal.FitConcentration(ranked)
 
 	// M4 recall cost gate at the account's real mean prefix size, one unit, no fan-out.
@@ -498,6 +492,14 @@ func RankedWorkload(turns []Turn) []vcachecal.RankedVBlock {
 			ReuseDensity: float64(fam.CacheReadTokens) / float64(fam.Turns),
 		})
 	}
+	sortRankedByWeightDesc(ranked)
+	return ranked
+}
+
+// sortRankedByWeightDesc sorts ranked by descending Weight(), breaking ties by
+// ascending Key for a deterministic order. Shared by the observe-time concentration
+// fit and RankedWorkload's exported ranking so the two orderings can't drift apart.
+func sortRankedByWeightDesc(ranked []vcachecal.RankedVBlock) {
 	sort.SliceStable(ranked, func(i, j int) bool {
 		wi, wj := ranked[i].Weight(), ranked[j].Weight()
 		if wi == wj {
@@ -505,7 +507,6 @@ func RankedWorkload(turns []Turn) []vcachecal.RankedVBlock {
 		}
 		return wi > wj
 	})
-	return ranked
 }
 
 func ratio(num, den float64) float64 {

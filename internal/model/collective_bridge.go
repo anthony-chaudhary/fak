@@ -62,6 +62,19 @@ func (b *BackendCollective) uploadRankF32(rank int, shape []int, data []float32)
 	return b.be.Upload(t, compute.F32), nil
 }
 
+// uploadRankInto uploads parts[r] as rank r and stores the resulting tensor at ts[r], or
+// returns the first upload error — the identical per-rank upload step AllGather and
+// AllReduceSum both perform inside their loop over parts, once each's own rank-specific
+// validation (if any) is satisfied.
+func (b *BackendCollective) uploadRankInto(ts []compute.Tensor, r int, parts [][]float32) error {
+	t, err := b.uploadRankF32(r, []int{len(parts[r])}, parts[r])
+	if err != nil {
+		return err
+	}
+	ts[r] = t
+	return nil
+}
+
 // AllGather concatenates the per-rank output bands in rank order through the HAL AllGather,
 // after the SAME width validation LocalCollective.AllGather performs — each parts[r] must be
 // exactly p.Shards[r].Width() long and the result exactly p.Dim — so a mis-sized rank is
@@ -77,11 +90,9 @@ func (b *BackendCollective) AllGather(parts [][]float32, p TPPlan) ([]float32, e
 		if len(parts[r]) != s.Width() {
 			return nil, fmt.Errorf("model: AllGather rank %d part len = %d, want shard width %d", r, len(parts[r]), s.Width())
 		}
-		t, err := b.uploadRankF32(r, []int{len(parts[r])}, parts[r])
-		if err != nil {
+		if err := b.uploadRankInto(ts, r, parts); err != nil {
 			return nil, err
 		}
-		ts[r] = t
 	}
 	out, err := b.coll.AllGather(ts)
 	if err != nil {
@@ -106,11 +117,9 @@ func (b *BackendCollective) AllReduceSum(parts [][]float32) ([]float32, error) {
 	}
 	ts := make([]compute.Tensor, len(parts))
 	for r := range parts {
-		t, err := b.uploadRankF32(r, []int{len(parts[r])}, parts[r])
-		if err != nil {
+		if err := b.uploadRankInto(ts, r, parts); err != nil {
 			return nil, err
 		}
-		ts[r] = t
 	}
 	out, err := b.coll.AllReduceSum(ts)
 	if err != nil {

@@ -61,11 +61,7 @@ func classifySleepWait(command string) []Violation {
 	}
 	var out []Violation
 	for _, seg := range splitSegments(command) {
-		toks, ok := shlexSplit(seg)
-		if !ok {
-			toks = strings.Fields(seg)
-		}
-		verb, operands, _ := stripEnvAndEnvVerb(toks)
+		verb, operands, _ := tokenizeSegment(seg)
 		for shellFlowKeywords[verb] {
 			verb, operands, _ = stripEnvAndEnvVerb(operands)
 		}

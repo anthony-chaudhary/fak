@@ -184,19 +184,18 @@ func cacheLedMTP(quiet bool) bool {
 	// 3a. Ensemble path: a real co-resident draft model proposes (the "idle models
 	// become the speculation ensemble" idea). Whatever the acceptance, output must be
 	// token-identical to greedy.
+	// 3b. Rollback stress: an ADVERSARIAL proposer (a deterministic counter, independent
+	// of the target) forces rejections nearly every round, so the bit-exact Evict
+	// rollback path runs hard. Output must STILL be token-identical to greedy, and we
+	// assert rejections actually happened — otherwise the witness would be vacuous.
 	draft := model.NewSynthetic(cfg(32, 2, 2, 1, 16, 64)) // cheaper, different weights
-	gotA, draftedA, acceptedA, evictedA := specDecodeModel(target, draft, prompt, N, K)
+	gotA, draftedA, acceptedA, evictedA, gotB, draftedB, acceptedB, evictedB := runSpecDecodeTrials(target, draft, prompt, N, K)
+
 	ok = assertLossless(quiet, "3a real-draft-model", gotA, want, N) && ok
 	accA := rate(acceptedA, draftedA)
 	logf(quiet, "  3a real draft model: proposed %d, accepted %d (%.0f%%), rolled-back %d; E(K=%d)=%.2f",
 		draftedA, acceptedA, accA*100, evictedA, K, polymodel.EffectiveTokensPerVerify(K, accA))
 
-	// 3b. Rollback stress: an ADVERSARIAL proposer (a deterministic counter, independent
-	// of the target) forces rejections nearly every round, so the bit-exact Evict
-	// rollback path runs hard. Output must STILL be token-identical to greedy, and we
-	// assert rejections actually happened — otherwise the witness would be vacuous.
-	adversary := func(round, j, last int) int { return (round*13 + j*7 + 1) % 256 }
-	gotB, draftedB, acceptedB, evictedB := specDecodeProposer(target, prompt, N, K, adversary)
 	ok = assertLossless(quiet, "3b adversarial-draft", gotB, want, N) && ok
 	if evictedB == 0 {
 		fmt.Fprintln(os.Stderr, "  VACUOUS WITNESS: adversarial draft caused 0 rollbacks — the Evict path was never exercised")
@@ -355,6 +354,19 @@ func specDecodeProposer(target *model.Model, prompt []int, n, k int, propose fun
 		tl = ts.Step(correction)
 	}
 	return out, drafted, accepted, evicted
+}
+
+// runSpecDecodeTrials runs BOTH speculative-decode regimes — a real co-resident
+// draft model (specDecodeModel) and a deterministic adversarial proposer
+// (specDecodeProposer) — against the same target over the same prompt/n/k, and
+// returns their raw decode traces + counts. Shared by the -selfcheck witness
+// (cacheLedMTP) and the #535 bench harness (measureSpec) so both measure the
+// identical two regimes.
+func runSpecDecodeTrials(target, draft *model.Model, prompt []int, n, k int) (gotA []int, draftedA, acceptedA, evictedA int, gotB []int, draftedB, acceptedB, evictedB int) {
+	gotA, draftedA, acceptedA, evictedA = specDecodeModel(target, draft, prompt, n, k)
+	adversary := func(round, j, last int) int { return (round*13 + j*7 + 1) % 256 }
+	gotB, draftedB, acceptedB, evictedB = specDecodeProposer(target, prompt, n, k, adversary)
+	return
 }
 
 // ---------------------------------------------------------------------------

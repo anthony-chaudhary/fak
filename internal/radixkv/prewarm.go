@@ -81,22 +81,13 @@ func (t *Tree) WarmInsert(tokens []int, kv *model.KVCache) int {
 	if len(suffix) == 0 {
 		return 0 // the whole byte-known prefix is already cached — already hot, nothing to warm
 	}
-	s := append([]int(nil), suffix...)
-	leaf := &node{
-		key:      s,
-		parent:   boundary,
-		children: map[int]*node{},
-		kv:       kv,
-		plen:     boundary.plen + len(s),
-		lastUsed: warmRecency, // lowest priority: first LRU victim, never displaces demand
-	}
-	boundary.children[s[0]] = leaf
-	t.tokens += len(s)
+	// lowest priority: first LRU victim, never displaces demand
+	leaf := t.attachLeaf(boundary, suffix, kv, warmRecency)
 	// Reclaim to budget. Because the warm leaf carries warmRecency it is the LRU victim of
 	// its own pass when the tree is already full, so a warm into a saturated pool is dropped
 	// before it can cost a demand token.
 	t.evictToBudget()
-	return len(s)
+	return len(leaf.key)
 }
 
 // WarmTokens returns the total cached tokens currently held as OPPORTUNISTIC warm — nodes

@@ -26,7 +26,6 @@ package covmatrix
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
@@ -185,22 +184,17 @@ func Coverage() CoverageFace {
 // structurally empty (every gap is a fence), but it is computed — not assumed — so the
 // invariant is witnessed by the same machinery that would catch a regression.
 func undefinedXCells(cells []XCell) []XCell {
-	var out []XCell
-	for _, c := range cells {
-		if c.Support == Undefined {
-			out = append(out, c)
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Family != out[j].Family {
-			return out[i].Family < out[j].Family
-		}
-		if out[i].Backend != out[j].Backend {
-			return out[i].Backend < out[j].Backend
-		}
-		return out[i].Precision < out[j].Precision
-	})
-	return out
+	return undefinedOf(cells,
+		func(c XCell) bool { return c.Support == Undefined },
+		func(a, b XCell) bool {
+			if a.Family != b.Family {
+				return a.Family < b.Family
+			}
+			if a.Backend != b.Backend {
+				return a.Backend < b.Backend
+			}
+			return a.Precision < b.Precision
+		})
 }
 
 // BuildX folds the cross tensor into the control-pane Payload, surfacing the

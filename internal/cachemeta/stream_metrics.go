@@ -138,10 +138,7 @@ func (m *StreamMetrics) Snapshot() StreamSnapshot {
 // "unknown" when an entry carries no residency tier, so the series shape is stable.
 func (s StreamSnapshot) Prometheus() string {
 	var b strings.Builder
-	help := func(name, h, typ string) {
-		b.WriteString("# HELP " + name + " " + h + "\n")
-		b.WriteString("# TYPE " + name + " " + typ + "\n")
-	}
+	help := func(name, h, typ string) { WritePromHelp(&b, name, h, typ) }
 	help("fak_cache_events_total", "cachemeta cache-entry lifecycle/verdict events folded across every cache plane (the unified-stream fold; vDSO tier-2 tool cache is the live producer today).", "counter")
 	b.WriteString("fak_cache_events_total " + strconv.FormatUint(s.Events, 10) + "\n")
 	help("fak_cache_bytes_moved_total", "Bytes moved across residency tiers by cache events (0 until a byte-moving producer, e.g. the live-engine KV recorder, feeds the stream; the local vDSO cache moves no bytes).", "counter")
@@ -161,6 +158,15 @@ func (s StreamSnapshot) Prometheus() string {
 			strconv.FormatUint(r.Count, 10) + "\n")
 	}
 	return b.String()
+}
+
+// WritePromHelp appends the two-line "# HELP name text" / "# TYPE name typ" preamble
+// Prometheus exposition format requires before a metric's samples. Shared by every
+// fak_cache_*/fak_engine_cache_* Prometheus renderer so the preamble format can't
+// drift between cache families.
+func WritePromHelp(b *strings.Builder, name, help, typ string) {
+	b.WriteString("# HELP " + name + " " + help + "\n")
+	b.WriteString("# TYPE " + name + " " + typ + "\n")
 }
 
 func promStreamLabel(s string) string {

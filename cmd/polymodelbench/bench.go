@@ -140,9 +140,7 @@ func measureSpec(quiet bool, ok *bool) SpecBench {
 
 	want := greedyDecode(target, prompt, N)
 	draft := model.NewSynthetic(cfg(32, 2, 2, 1, 16, 64)) // cheaper, different weights
-	gotA, draftedA, acceptedA, evictedA := specDecodeModel(target, draft, prompt, N, K)
-	adversary := func(round, j, last int) int { return (round*13 + j*7 + 1) % 256 }
-	gotB, draftedB, acceptedB, evictedB := specDecodeProposer(target, prompt, N, K, adversary)
+	gotA, draftedA, acceptedA, evictedA, gotB, draftedB, acceptedB, evictedB := runSpecDecodeTrials(target, draft, prompt, N, K)
 
 	lossless := losslessEqual(gotA, want, N) && losslessEqual(gotB, want, N)
 	if !lossless {

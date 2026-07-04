@@ -276,10 +276,10 @@ func planeVerdict(items []Item) string {
 // honesty (the marquee S/N), throughput vs target, dead backends, silent workers,
 // and witnessed-closable issues a human could close now.
 func interpretDispatch(in PlaneInput) (PlaneStatus, []Item) {
-	if ps, ok := planeGuard(in, "dispatch"); !ok {
+	ps, items, ok := planeGuardItems(in, "dispatch")
+	if !ok {
 		return ps, nil
 	}
-	var items []Item
 
 	if cl, ok := in.Payload["closure"].(map[string]any); ok && !asBool(cl["na"]) {
 		if rate, ok := asFloatOK(cl["closure_rate"]); ok {
@@ -361,10 +361,10 @@ func dispatchSummary(p map[string]any) string {
 // agentic automation that has silently stopped ticking — is the canonical "the
 // human thinks an agent is running but it is not" failure, so it is surfaced.
 func interpretLoops(in PlaneInput) (PlaneStatus, []Item) {
-	if ps, ok := planeGuard(in, "loops"); !ok {
+	ps, items, ok := planeGuardItems(in, "loops")
+	if !ok {
 		return ps, nil
 	}
-	var items []Item
 	roll, _ := in.Payload["rollup"].(map[string]any)
 	dark := asInt(roll["dark"])
 	live := asInt(roll["live"])
@@ -390,10 +390,10 @@ func interpretLoops(in PlaneInput) (PlaneStatus, []Item) {
 // when the (~4-minute) scorecard pane was run. A missing scores block is "not
 // run", not a regression, so it never fabricates a warn.
 func interpretCadence(in PlaneInput) (PlaneStatus, []Item) {
-	if ps, ok := planeGuard(in, "cadence"); !ok {
+	ps, items, ok := planeGuardItems(in, "cadence")
+	if !ok {
 		return ps, nil
 	}
-	var items []Item
 	work, _ := in.Payload["work"].(map[string]any)
 	commits, ships := asInt(work["commits"]), asInt(work["ships"])
 	summary := fmt.Sprintf("%d/%d ship-stamped", ships, commits)
@@ -452,10 +452,10 @@ func interpretCadence(in PlaneInput) (PlaneStatus, []Item) {
 // emits a ranked "what needs me now" Attention list (box liveness / GPU waste);
 // this lifts its crit/warn rows into the unified list, dropping its OK noise.
 func interpretFleet(in PlaneInput) (PlaneStatus, []Item) {
-	if ps, ok := planeGuard(in, "fleet"); !ok {
+	ps, items, ok := planeGuardItems(in, "fleet")
+	if !ok {
 		return ps, nil
 	}
-	var items []Item
 	if att, ok := in.Payload["attention"].([]any); ok {
 		for _, raw := range att {
 			m, ok := raw.(map[string]any)
@@ -494,6 +494,18 @@ func planeGuard(in PlaneInput, name string) (PlaneStatus, bool) {
 		return unmeasuredPlane(name, in.Err), false
 	}
 	return PlaneStatus{}, true
+}
+
+// planeGuardItems is the shared front-of-interpreter boilerplate every interpret*
+// function opens with: run planeGuard and, when the plane is measured, hand back a
+// fresh nil Item slice ready for the caller to append into. ok is false when the
+// caller must return ps (the unmeasured PlaneStatus) immediately.
+func planeGuardItems(in PlaneInput, name string) (PlaneStatus, []Item, bool) {
+	ps, ok := planeGuard(in, name)
+	if !ok {
+		return ps, nil, false
+	}
+	return ps, nil, true
 }
 
 // signalNoise builds the marquee from the dispatch (closure) and cadence (work)

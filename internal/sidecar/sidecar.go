@@ -242,19 +242,27 @@ func provOf(measured bool, whenMeasured string) string {
 	return whenMeasured
 }
 
+// sortedRows copies rows (so the fold owns its own slice) and stable-sorts the
+// copy with less. It is the "copy + stable-sort so the render order is
+// deterministic regardless of the collector's emission order" idiom every
+// rows-plane fold (sessions/accounts/lanes) below shares; each fold supplies its
+// own tie-break chain via less.
+func sortedRows[T any](rows []T, less func(a, b T) bool) []T {
+	out := append([]T(nil), rows...)
+	sort.SliceStable(out, func(i, j int) bool { return less(out[i], out[j]) })
+	return out
+}
+
 func foldSessions(in PlaneInput, rows []SessionRow) SessionsFold {
 	f := SessionsFold{Measured: in.Measured, Note: in.Note, Prov: provOf(in.Measured, Witnessed)}
 	if !in.Measured {
 		return f
 	}
-	// Copy + stable-sort so the render order is deterministic regardless of the
-	// collector's emission order (a parity prerequisite).
-	f.Rows = append(f.Rows, rows...)
-	sort.SliceStable(f.Rows, func(i, j int) bool {
-		if f.Rows[i].Account != f.Rows[j].Account {
-			return f.Rows[i].Account < f.Rows[j].Account
+	f.Rows = sortedRows(rows, func(a, b SessionRow) bool {
+		if a.Account != b.Account {
+			return a.Account < b.Account
 		}
-		return f.Rows[i].Session < f.Rows[j].Session
+		return a.Session < b.Session
 	})
 	f.Total = len(f.Rows)
 	for _, r := range f.Rows {
@@ -270,8 +278,7 @@ func foldAccounts(in PlaneInput, rows []AccountRow) AccountsFold {
 	if !in.Measured {
 		return f
 	}
-	f.Rows = append(f.Rows, rows...)
-	sort.SliceStable(f.Rows, func(i, j int) bool { return f.Rows[i].Account < f.Rows[j].Account })
+	f.Rows = sortedRows(rows, func(a, b AccountRow) bool { return a.Account < b.Account })
 	for _, r := range f.Rows {
 		switch strings.ToLower(r.State) {
 		case "throttled":
@@ -292,8 +299,7 @@ func foldLanes(in PlaneInput, rows []LaneRow) LanesFold {
 	if !in.Measured {
 		return f
 	}
-	f.Rows = append(f.Rows, rows...)
-	sort.SliceStable(f.Rows, func(i, j int) bool { return f.Rows[i].Lane < f.Rows[j].Lane })
+	f.Rows = sortedRows(rows, func(a, b LaneRow) bool { return a.Lane < b.Lane })
 	for _, r := range f.Rows {
 		if r.Held {
 			f.Held++

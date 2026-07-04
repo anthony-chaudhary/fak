@@ -48,7 +48,6 @@ import (
 	"context"
 	"encoding/json"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -194,11 +193,7 @@ func Propose(corpus []NearMiss) []Candidate {
 		cl.support++
 	}
 
-	verbs := make([]string, 0, len(byVerb))
-	for v := range byVerb {
-		verbs = append(verbs, v)
-	}
-	sort.Strings(verbs)
+	verbs := maputil.SortedKeys(byVerb)
 
 	out := make([]Candidate, 0, len(verbs))
 	for _, verb := range verbs {

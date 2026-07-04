@@ -48,18 +48,31 @@ func asString(v any) string {
 	return s
 }
 
+// nestedFind returns the first accept(sub[key]) that succeeds across the
+// "corpus" then "doc" nested sub-maps of p, in that preference order (matching
+// the Python find_* precedence: try the two known nests before any top-level/
+// deep fallback the caller applies itself). Shared by findInt, findString, and
+// findScore, which differ only in the accept conversion.
+func nestedFind[T any](p map[string]any, key string, accept func(any) (T, bool)) (T, bool) {
+	for _, nest := range []string{"corpus", "doc"} {
+		if sub, ok := p[nest].(map[string]any); ok {
+			if v, ok := accept(sub[key]); ok {
+				return v, ok
+			}
+		}
+	}
+	var zero T
+	return zero, false
+}
+
 // findInt is the first int value stored under key anywhere in the payload, with the
 // corpus/doc nests preferred (matching the Python find_int precedence: try the two
 // nests, then the top level, then a deep walk).
 func findInt(payload any, key string) *int {
 	switch p := payload.(type) {
 	case map[string]any:
-		for _, nest := range []string{"corpus", "doc"} {
-			if sub, ok := p[nest].(map[string]any); ok {
-				if i, ok := asInt(sub[key]); ok {
-					return &i
-				}
-			}
+		if i, ok := nestedFind(p, key, asInt); ok {
+			return &i
 		}
 		if i, ok := asInt(p[key]); ok {
 			return &i
@@ -86,12 +99,8 @@ func findString(payload any, key string) *string {
 	if !ok {
 		return nil
 	}
-	for _, nest := range []string{"corpus", "doc"} {
-		if sub, ok := p[nest].(map[string]any); ok {
-			if g, ok := sub[key].(string); ok {
-				return &g
-			}
-		}
+	if g, ok := nestedFind(p, key, func(v any) (string, bool) { s, ok := v.(string); return s, ok }); ok {
+		return &g
 	}
 	if g, ok := p[key].(string); ok {
 		return &g
@@ -117,12 +126,8 @@ func findScore(payload any, key string) *float64 {
 	if !ok {
 		return nil
 	}
-	for _, nest := range []string{"corpus", "doc"} {
-		if sub, ok := p[nest].(map[string]any); ok {
-			if f, ok := asFloat(sub[key]); ok {
-				return &f
-			}
-		}
+	if f, ok := nestedFind(p, key, asFloat); ok {
+		return &f
 	}
 	if f, ok := asFloat(p[key]); ok {
 		return &f

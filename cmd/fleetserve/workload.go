@@ -320,18 +320,7 @@ func runWorkloadMode(m *model.Model, quant bool, vocab int, prof *workloadProfil
 			pt.fillNoReuse(acc.nTotal, acc.nPre, acc.nDec, acc.nResult, C, T, rAgents)
 		}
 		points = append(points, pt)
-		if ablation {
-			fmt.Fprintf(os.Stderr,
-				"  C=%-3d | reuse %.0f ms (pre %.0f + clone %.0f + dec %.0f + res %.0f) = %.1f turns/s | "+
-					"no-reuse %.0f ms = %.1f turns/s | reuse %.2f×\n",
-				C, rTot, pt.ReusePrefillMS, pt.ReuseCloneMS, pt.ReuseDecodeMS, pt.ReuseResultMS,
-				rTurns, *pt.NoReuseTotalMS, *pt.NoReuseAgentTurnsSec, *pt.ReuseSpeedup)
-		} else {
-			fmt.Fprintf(os.Stderr,
-				"  C=%-3d | reuse %.0f ms (pre %.0f + clone %.0f + dec %.0f + res %.0f) = %.1f turns/s | no-reuse skipped\n",
-				C, rTot, pt.ReusePrefillMS, pt.ReuseCloneMS, pt.ReuseDecodeMS, pt.ReuseResultMS,
-				rTurns)
-		}
+		logProgress(fmt.Sprintf("  C=%-3d | ", C), rTot, rTurns, pt.reuseMetrics, ablation)
 	}
 
 	report := map[string]any{

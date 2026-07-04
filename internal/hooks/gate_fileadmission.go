@@ -9,19 +9,20 @@ import "regexp"
 
 const fileAdmissionMaxBytes = 10 * 1024 * 1024 // DEFAULT_MAX_BYTES (10 MiB), L37
 
-var secretFiles = []struct {
+// patternReason pairs a path regex with the human-readable reason it is refused —
+// the shared shape of the secretFiles and privateOnly classification tables.
+type patternReason struct {
 	re  *regexp.Regexp
 	why string
-}{
+}
+
+var secretFiles = []patternReason{
 	{regexp.MustCompile(`(^|/)secrets/`), "secrets dir — credentials never belong in git; keep them gitignored / in a secret store"},
 	{regexp.MustCompile(`\.sa\.json$`), "GCP service-account key (*.sa.json) — never commit a key; rotate it and keep it gitignored"},
 	{regexp.MustCompile(`-(sa|gcp)-key\.json$`), "cloud service-account key — never commit a key; rotate it and keep it gitignored"},
 }
 
-var privateOnly = []struct {
-	re  *regexp.Regexp
-	why string
-}{
+var privateOnly = []patternReason{
 	{regexp.MustCompile(`^(cmd|internal)/[^/]*dgx[^/]*/`), "private lab GPU-server connection subsystem — belongs in the private repo, not the public tree"},
 	{regexp.MustCompile(`^cmd/slackgc/`), "private lab Slack-housekeeping tool — belongs in the private repo, not the public tree"},
 }

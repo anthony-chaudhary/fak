@@ -252,11 +252,11 @@ func TestFoldHealth_UnknownWhenNoCadenceAndNoTick(t *testing.T) {
 	if got := (HealthThresholds{}).defaultCadenceSeconds(); got != DefaultHealthCadenceSeconds {
 		t.Fatalf("defaultCadenceSeconds() = %d, want %d", got, DefaultHealthCadenceSeconds)
 	}
-	if got := deriveState(0, 0, now, HealthThresholds{}); got != HealthUnknown {
-		t.Fatalf("deriveState(no tick, no cadence) = %q, want %q", got, HealthUnknown)
+	if got := DeriveState(0, 0, now, HealthThresholds{}); got != HealthUnknown {
+		t.Fatalf("DeriveState(no tick, no cadence) = %q, want %q", got, HealthUnknown)
 	}
-	if got := deriveState(now.UnixNano(), 0, now, HealthThresholds{}); got != HealthUnknown {
-		t.Fatalf("deriveState(ticked, no cadence) = %q, want %q", got, HealthUnknown)
+	if got := DeriveState(now.UnixNano(), 0, now, HealthThresholds{}); got != HealthUnknown {
+		t.Fatalf("DeriveState(ticked, no cadence) = %q, want %q", got, HealthUnknown)
 	}
 }
 

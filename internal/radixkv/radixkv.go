@@ -212,6 +212,21 @@ func (t *Tree) Insert(boundary *node, suffix []int, kv *model.KVCache) *node {
 	if len(suffix) == 0 {
 		return boundary // already fully cached; keep the boundary lease for the caller to Done
 	}
+	leaf := t.attachLeaf(boundary, suffix, kv, t.tick())
+	leaf.refs++ // lease the in-flight request's own leaf...
+	if boundary.refs > 0 {
+		boundary.refs-- // ...and release the prefix lease Lookup took (the leaf now guards the path)
+	}
+	t.evictToBudget()
+	return leaf
+}
+
+// attachLeaf builds a new leaf node hanging suffix off boundary (copying suffix
+// so the tree owns the slice), links it as boundary's child, and grows the
+// tree's token count — the node-construction step both Insert and WarmInsert
+// (prewarm.go) share; each caller applies its own lease/recency bookkeeping and
+// eviction pass on the returned leaf.
+func (t *Tree) attachLeaf(boundary *node, suffix []int, kv *model.KVCache, lastUsed uint64) *node {
 	s := append([]int(nil), suffix...)
 	leaf := &node{
 		key:      s,
@@ -219,15 +234,10 @@ func (t *Tree) Insert(boundary *node, suffix []int, kv *model.KVCache) *node {
 		children: map[int]*node{},
 		kv:       kv,
 		plen:     boundary.plen + len(s),
-		lastUsed: t.tick(),
+		lastUsed: lastUsed,
 	}
 	boundary.children[s[0]] = leaf
 	t.tokens += len(s)
-	leaf.refs++ // lease the in-flight request's own leaf...
-	if boundary.refs > 0 {
-		boundary.refs-- // ...and release the prefix lease Lookup took (the leaf now guards the path)
-	}
-	t.evictToBudget()
 	return leaf
 }
 

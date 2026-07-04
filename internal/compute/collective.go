@@ -94,6 +94,20 @@ func evenShard(lenLabel, opLabel string, n, p int) (int, error) {
 	return n / p, nil
 }
 
+// evenShardOutputs computes the per-rank shard size for n elements split across p
+// ranks (failing closed via evenShard on an indivisible split) and allocates the
+// P-length Tensor slice the caller fills in one per-rank shard at a time. Shared by
+// ReduceScatter and AllToAll, whose per-rank shard CONTENTS differ (one contiguous
+// slice of a single reduced vector vs a gather across P input views) but whose
+// shard-size validation and output allocation are identical.
+func evenShardOutputs(lenLabel, opLabel string, n, p int) (shard int, out []Tensor, err error) {
+	shard, err = evenShard(lenLabel, opLabel, n, p)
+	if err != nil {
+		return 0, nil, err
+	}
+	return shard, make([]Tensor, p), nil
+}
+
 // AllReduceSum sums the equal-length per-rank partials in rank order and returns a new F32
 // tensor. The fixed order makes it bit-identical to model.sumPartialsRankOrder over the same
 // slices, so the row-parallel reduction order is pinned. A single part is the identity (a copy
@@ -121,12 +135,10 @@ func (c *cpuBackend) ReduceScatter(parts []Tensor) ([]Tensor, error) {
 		return nil, err
 	}
 	p := len(parts)
-	n := len(acc)
-	shard, err := evenShard("ReduceScatter reduced", "reduce-scatter", n, p)
+	shard, out, err := evenShardOutputs("ReduceScatter reduced", "reduce-scatter", len(acc), p)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Tensor, p)
 	for r := 0; r < p; r++ {
 		seg := make([]float32, shard)
 		copy(seg, acc[r*shard:(r+1)*shard])
@@ -183,11 +195,10 @@ func (c *cpuBackend) AllToAll(parts []Tensor) ([]Tensor, error) {
 	}
 	p := len(views)
 	n := len(views[0])
-	shard, err := evenShard("AllToAll per-rank", "all-to-all", n, p)
+	shard, out, err := evenShardOutputs("AllToAll per-rank", "all-to-all", n, p)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Tensor, p)
 	for r := 0; r < p; r++ {
 		seg := make([]float32, 0, n)
 		for k := 0; k < p; k++ {

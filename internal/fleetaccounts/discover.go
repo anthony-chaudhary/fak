@@ -217,58 +217,55 @@ func claudeLoginStatus(acctDir, tag string) (configaccounts.LoginStatus, bool) {
 	return st, st == configaccounts.LoginReady
 }
 
-func discoverClaude(home string, pol Policy) []Account {
+// discoverProduct globs pattern under root and folds each match into an Account
+// row: the common "not a directory" guard first (every product agrees on that),
+// then a product-specific second gate (extraCheck) that returns a non-empty
+// Reason to short-circuit as a KindNonAccount row, or "" to fall through to
+// classifyRow. This is the glob-then-classify idiom discoverClaude and
+// discoverOpencode share; only the glob pattern, the product tag, and the
+// second gate differ between them.
+func discoverProduct(root, pattern, product string, pol Policy, extraCheck func(acctDir string) (reason string)) []Account {
 	var rows []Account
-	matches, _ := filepath.Glob(filepath.Join(home, ".claude*"))
+	matches, _ := filepath.Glob(filepath.Join(root, pattern))
 	for _, acctDir := range matches {
 		account := filepath.Base(acctDir)
 		tag := AccountTag(account)
 		note := pol.Notes[tag]
 		st, err := os.Stat(acctDir)
 		if err != nil || !st.IsDir() {
-			rows = append(rows, Account{Dir: acctDir, Product: "claude", Account: account,
+			rows = append(rows, Account{Dir: acctDir, Product: product, Account: account,
 				Tag: tag, Kind: KindNonAccount, Reason: "not a directory", Notes: note})
 			continue
 		}
-		pst, perr := os.Stat(filepath.Join(acctDir, "projects"))
-		if perr != nil || !pst.IsDir() {
-			rows = append(rows, Account{Dir: acctDir, Product: "claude", Account: account,
-				Tag: tag, Kind: KindNonAccount, Reason: "no projects/ subdir", Notes: note})
+		if reason := extraCheck(acctDir); reason != "" {
+			rows = append(rows, Account{Dir: acctDir, Product: product, Account: account,
+				Tag: tag, Kind: KindNonAccount, Reason: reason, Notes: note})
 			continue
 		}
-		rows = append(rows, classifyRow(acctDir, "claude", account, pol))
+		rows = append(rows, classifyRow(acctDir, product, account, pol))
 	}
 	return rows
 }
 
-func discoverOpencode(configHome string, pol Policy) []Account {
-	var rows []Account
-	matches, _ := filepath.Glob(filepath.Join(configHome, "opencode*"))
-	for _, acctDir := range matches {
-		account := filepath.Base(acctDir)
-		tag := AccountTag(account)
-		note := pol.Notes[tag]
-		st, err := os.Stat(acctDir)
-		if err != nil || !st.IsDir() {
-			rows = append(rows, Account{Dir: acctDir, Product: "opencode", Account: account,
-				Tag: tag, Kind: KindNonAccount, Reason: "not a directory", Notes: note})
-			continue
+func discoverClaude(home string, pol Policy) []Account {
+	return discoverProduct(home, ".claude*", "claude", pol, func(acctDir string) string {
+		pst, perr := os.Stat(filepath.Join(acctDir, "projects"))
+		if perr != nil || !pst.IsDir() {
+			return "no projects/ subdir"
 		}
-		hasMarker := false
+		return ""
+	})
+}
+
+func discoverOpencode(configHome string, pol Policy) []Account {
+	return discoverProduct(configHome, "opencode*", "opencode", pol, func(acctDir string) string {
 		for _, m := range OpencodeMarkerFiles {
 			if mst, merr := os.Stat(filepath.Join(acctDir, m)); merr == nil && !mst.IsDir() {
-				hasMarker = true
-				break
+				return ""
 			}
 		}
-		if !hasMarker {
-			rows = append(rows, Account{Dir: acctDir, Product: "opencode", Account: account,
-				Tag: tag, Kind: KindNonAccount, Reason: "no opencode.json config", Notes: note})
-			continue
-		}
-		rows = append(rows, classifyRow(acctDir, "opencode", account, pol))
-	}
-	return rows
+		return "no opencode.json config"
+	})
 }
 
 // dirRecency returns the newest .jsonl mtime under the dir's projects/ — a cheap "last

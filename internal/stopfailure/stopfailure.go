@@ -164,16 +164,26 @@ func ResetStale(opts Options, apply bool) (ResetResult, error) {
 	if !apply {
 		return result, nil
 	}
+	result.Updated, result.Errors = applyResetMarkers(plan.Root, candidates)
+	return result, nil
+}
+
+// applyResetMarkers writes a reset marker for each candidate, healing it (zeroing
+// Consecutive and setting SettlementAction to ActionHealedNonzero) on success. A
+// per-candidate write failure is recorded in errs and that candidate is skipped
+// rather than aborting the batch. Shared by ResetStale and ClearReviewed so the two
+// apply paths heal a marker identically.
+func applyResetMarkers(root string, candidates []Marker) (updated []Marker, errs []string) {
 	for _, marker := range candidates {
-		if err := writeResetMarker(plan.Root, marker); err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", marker.MarkerPath, err))
+		if err := writeResetMarker(root, marker); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", marker.MarkerPath, err))
 			continue
 		}
 		marker.Consecutive = 0
 		marker.SettlementAction = ActionHealedNonzero
-		result.Updated = append(result.Updated, marker)
+		updated = append(updated, marker)
 	}
-	return result, nil
+	return updated, errs
 }
 
 func resettableCandidates(plan Plan) []Marker {
@@ -259,15 +269,7 @@ func ClearReviewed(opts Options, sessionIDs []string, apply bool) (ClearReviewed
 	if !apply {
 		return result, nil
 	}
-	for _, marker := range result.Candidates {
-		if err := writeResetMarker(plan.Root, marker); err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", marker.MarkerPath, err))
-			continue
-		}
-		marker.Consecutive = 0
-		marker.SettlementAction = ActionHealedNonzero
-		result.Updated = append(result.Updated, marker)
-	}
+	result.Updated, result.Errors = applyResetMarkers(plan.Root, result.Candidates)
 	return result, nil
 }
 

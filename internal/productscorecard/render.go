@@ -36,13 +36,7 @@ func Render(p Payload) string {
 			formatValueFrom(mc["value"], mc["score"]), formatNumber(mc["score"]), intValue(mc["debt"]), intValue(mc["total"]), intValue(mc["passed"])), "")
 	}
 	for _, row := range sortedLeaderboard(c["leaderboard"]) {
-		verdict := stringAny(row["verdict"])
-		today := "-"
-		if boolAny(row["offline"]) {
-			today = "laptop"
-		} else if NonEmpty(row["first_command"]) {
-			today = "cmd"
-		}
+		verdict, today := verdictToday(row, "cmd")
 		flag := ""
 		if verdict != stringAny(row["expected_verdict"]) {
 			flag = "  expected " + stringAny(row["expected_verdict"])
@@ -285,13 +279,7 @@ func RenderDocIndex(p Payload, stamp string) string {
 		"|---|---|---|---|---|---|",
 	)
 	for _, row := range sortedLeaderboard(c["leaderboard"]) {
-		verdict := stringAny(row["verdict"])
-		today := "-"
-		if boolAny(row["offline"]) {
-			today = "laptop"
-		} else if NonEmpty(row["first_command"]) {
-			today = "needs gpu/key"
-		}
+		verdict, today := verdictToday(row, "needs gpu/key")
 		lines = append(lines, fmt.Sprintf("| %s | %s | %s | %s | %s | **%s** - %s |",
 			marks[verdict], verdict, stringAny(row["maturity"]), stringAny(row["category"]), today, stringAny(row["concept"]), stringAny(row["what_you_get"])))
 	}
@@ -310,6 +298,22 @@ func RenderDocIndex(p Payload, stamp string) string {
 
 func RenderDocFolder(p Payload, stamp string) map[string]string {
 	return map[string]string{"README.md": RenderDocIndex(p, stamp)}
+}
+
+// verdictToday computes a leaderboard row's verdict and its "can you use it
+// today" label — the "-" / "laptop" / needsLabel classification the terminal
+// table (Render) and the doc-index markdown table (RenderDocIndex) both derive
+// from the same row; only the label used for the needs-gpu/key case differs
+// between the two renderers.
+func verdictToday(row object, needsLabel string) (verdict, today string) {
+	verdict = stringAny(row["verdict"])
+	today = "-"
+	if boolAny(row["offline"]) {
+		today = "laptop"
+	} else if NonEmpty(row["first_command"]) {
+		today = needsLabel
+	}
+	return verdict, today
 }
 
 func bar(n, scale, width int) string {

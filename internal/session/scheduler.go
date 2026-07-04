@@ -270,6 +270,16 @@ func (s *Scheduler) Pick() (State, bool) {
 	}
 }
 
+// lockAndPruneReservations acquires s.mu and reclaims stale advisory reservations at
+// now, returning the dropped reservations plus an unlock func the caller must defer —
+// e.g. `defer s.lockAndPruneReservations(now)()`, whose immediate call locks+prunes and
+// whose deferred result unlocks. Shared by ReserveKnownComing, Reservations, and
+// ExpireReservations so the lock-then-prune boundary can't drift between the three.
+func (s *Scheduler) lockAndPruneReservations(now time.Time) (dropped []SlotReservation, unlock func()) {
+	s.mu.Lock()
+	return s.pruneReservationsLocked(now), s.mu.Unlock
+}
+
 // ReserveKnownComing scans the live snapshot for #811 forward-looking TurnIntent
 // hints and records advisory reservations for those known-coming turns. The returned
 // reservations are the holds a host may use to pin matching KV residency and keep a
@@ -280,9 +290,8 @@ func (s *Scheduler) ReserveKnownComing(now time.Time) []SlotReservation {
 	if s == nil {
 		return nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.pruneReservationsLocked(now)
+	_, unlock := s.lockAndPruneReservations(now)
+	defer unlock()
 	if s.table == nil {
 		return nil
 	}
@@ -333,9 +342,9 @@ func (s *Scheduler) ExpireReservations(now time.Time) []SlotReservation {
 	if s == nil {
 		return nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.pruneReservationsLocked(now)
+	dropped, unlock := s.lockAndPruneReservations(now)
+	defer unlock()
+	return dropped
 }
 
 // Reservations returns the currently-active advisory reservations after first applying
@@ -345,9 +354,8 @@ func (s *Scheduler) Reservations(now time.Time) []SlotReservation {
 	if s == nil {
 		return nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.pruneReservationsLocked(now)
+	_, unlock := s.lockAndPruneReservations(now)
+	defer unlock()
 	out := make([]SlotReservation, 0, len(s.reservations))
 	for _, r := range s.reservations {
 		out = append(out, r)

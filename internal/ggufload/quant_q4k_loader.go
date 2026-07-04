@@ -147,6 +147,20 @@ func (s *WeightSource) QuantModelQ4KProfile(p *LoadProfiler) (*model.Model, erro
 	return s.QuantModelQ4KProfileOptions(p)
 }
 
+// shapeAndBytesOrFail calls s.shapeAndBytes(info) and, on error, records it onto
+// tw.err — the shared "err -> tw.err; bail" shape every shapeAndBytes call site
+// in the per-tensor compute path below repeats. ok is false when the call
+// failed (tw already carries the error; the caller should `return tw`
+// immediately).
+func (s *WeightSource) shapeAndBytesOrFail(info TensorInfo, tw *tensorWork) (shape []int, raw []byte, ok bool) {
+	shape, raw, err := s.shapeAndBytes(info)
+	if err != nil {
+		tw.err = err
+		return nil, nil, false
+	}
+	return shape, raw, true
+}
+
 // QuantModelQ4KProfileOptions is QuantModelQ4KProfile with explicit load options. The default
 // option set is byte-compatible with QuantModelQ4KProfile; an expert shard only filters routed
 // expert tensors after the GGUF batched expert split.
@@ -191,9 +205,8 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 			// and unsloth UD quants can use IQ3_XXS/IQ4_XS/Q8_0 in addition to the K-quants.
 			// Any other type falls to the f32 dequant-split.
 			if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {
-				shape, raw, err := s.shapeAndBytes(info)
-				if err != nil {
-					tw.err = err
+				shape, raw, okShape := s.shapeAndBytesOrFail(info, &tw)
+				if !okShape {
 					return tw
 				}
 				tw.acctType, tw.acctExpert, tw.acctBytes = info.Type.String(), true, tensorOnDiskBytes(info)
@@ -253,9 +266,8 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 			tw.err = fmt.Errorf("gguf: no canonical mapping for tensor %s", info.Name)
 			return tw
 		}
-		shape, raw, err := s.shapeAndBytes(info)
-		if err != nil {
-			tw.err = err
+		shape, raw, ok := s.shapeAndBytesOrFail(info, &tw)
+		if !ok {
 			return tw
 		}
 		tw.acctType, tw.acctExpert, tw.acctBytes, tw.acctTensors = info.Type.String(), false, tensorOnDiskBytes(info), 1

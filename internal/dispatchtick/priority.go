@@ -79,9 +79,17 @@ func OrderLaneCandidates(cands []LaneCandidate, preferNewest bool) []int {
 		}
 		return numberTiebreak(ordered[i].Number, ordered[j].Number, preferNewest)
 	})
-	out := make([]int, len(ordered))
-	for i, c := range ordered {
-		out[i] = c.Number
+	return orderedNumbers(len(ordered), func(i int) int { return ordered[i].Number })
+}
+
+// orderedNumbers materializes the Number field of an already-sorted candidate slice,
+// in order, as a plain []int. Shared tail of OrderLaneCandidates and
+// OrderLaneCandidatesSmallFirst once each has settled its own (different) sort
+// comparator, so the two exported orderings can't drift on how they emit numbers.
+func orderedNumbers(n int, at func(i int) int) []int {
+	out := make([]int, n)
+	for i := 0; i < n; i++ {
+		out[i] = at(i)
 	}
 	return out
 }
@@ -140,9 +148,5 @@ func OrderLaneCandidatesSmallFirst(cands []SmallnessCandidate, preferNewest bool
 		}
 		return numberTiebreak(ordered[i].Number, ordered[j].Number, preferNewest)
 	})
-	out := make([]int, len(ordered))
-	for i, c := range ordered {
-		out[i] = c.Number
-	}
-	return out
+	return orderedNumbers(len(ordered), func(i int) int { return ordered[i].Number })
 }

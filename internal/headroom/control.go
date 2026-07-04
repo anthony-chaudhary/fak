@@ -112,22 +112,9 @@ func skipEscapeSequence(b []byte, i int) int {
 		}
 		return j
 	case ']': // OSC: terminated by BEL (0x07) or ST (ESC \)
-		for j++; j < n; j++ {
-			if b[j] == 0x07 {
-				return j + 1
-			}
-			if b[j] == 0x1b && j+1 < n && b[j+1] == '\\' {
-				return j + 2
-			}
-		}
-		return n
+		return scanToStringTerminator(b, j+1, n, true)
 	case 'P', 'X', '^', '_': // DCS/SOS/PM/APC: string terminated by ST (ESC \)
-		for j++; j < n; j++ {
-			if b[j] == 0x1b && j+1 < n && b[j+1] == '\\' {
-				return j + 2
-			}
-		}
-		return n
+		return scanToStringTerminator(b, j+1, n, false)
 	case '(', ')', '*', '+': // charset designation: one designation byte follows
 		j++
 		if j < n {
@@ -137,6 +124,23 @@ func skipEscapeSequence(b []byte, i int) int {
 	default: // generic two-byte escape (ESC + one byte)
 		return j + 1
 	}
+}
+
+// scanToStringTerminator scans b[start:n] for the ST terminator (ESC \), optionally
+// also treating a bare BEL (0x07) as a terminator (OSC allows either; DCS/SOS/PM/APC
+// accept only ST). It returns the index just past whichever terminator is found
+// first, or n if the sequence is unterminated (the safe direction: drop the
+// dangling control). Shared by the OSC and DCS/SOS/PM/APC cases of skipEscapeSequence.
+func scanToStringTerminator(b []byte, start, n int, bel bool) int {
+	for j := start; j < n; j++ {
+		if bel && b[j] == 0x07 {
+			return j + 1
+		}
+		if b[j] == 0x1b && j+1 < n && b[j+1] == '\\' {
+			return j + 2
+		}
+	}
+	return n
 }
 
 // collapseCarriageReturns rewrites each physical line (split on \n) to the final

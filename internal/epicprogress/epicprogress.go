@@ -67,6 +67,18 @@ func DefaultRunner(args []string) (string, string, bool) {
 	return out.String(), errb.String(), err == nil
 }
 
+// runGH appends --repo when set and invokes runner, returning just stdout and
+// the ok flag — the "add the repo override, run gh, surface failure uniformly"
+// idiom both countByLabel and countByChecklist share before parsing their own
+// JSON shape.
+func runGH(runner Runner, repo string, args []string) (string, bool) {
+	if repo != "" {
+		args = append(args, "--repo", repo)
+	}
+	stdout, _, ok := runner(args)
+	return stdout, ok
+}
+
 // Counts resolves one epic's child completion via the provenance-honest priority
 // chain: a track LABEL (open/closed children carrying it), then the epic body's
 // task-list CHECKLIST. Whichever answers first wins and stamps Source. When neither
@@ -92,10 +104,7 @@ func Counts(runner Runner, repo string, spec EpicSpec) EpicCounts {
 // fails or the label has no children (so the chain falls through to the checklist).
 func countByLabel(runner Runner, repo string, spec EpicSpec) (EpicCounts, bool) {
 	args := []string{"issue", "list", "--label", spec.Label, "--state", "all", "--limit", "500", "--json", "number,state"}
-	if repo != "" {
-		args = append(args, "--repo", repo)
-	}
-	stdout, _, ok := runner(args)
+	stdout, ok := runGH(runner, repo, args)
 	if !ok {
 		return EpicCounts{}, false
 	}
@@ -129,10 +138,7 @@ func countByLabel(runner Runner, repo string, spec EpicSpec) (EpicCounts, bool) 
 // honest errored row rather than a fabricated 0%.
 func countByChecklist(runner Runner, repo string, spec EpicSpec) (EpicCounts, bool) {
 	args := []string{"issue", "view", strconv.Itoa(spec.Number), "--json", "body"}
-	if repo != "" {
-		args = append(args, "--repo", repo)
-	}
-	stdout, _, ok := runner(args)
+	stdout, ok := runGH(runner, repo, args)
 	if !ok {
 		return EpicCounts{}, false
 	}

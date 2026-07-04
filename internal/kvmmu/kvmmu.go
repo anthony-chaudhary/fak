@@ -416,20 +416,13 @@ func (c *Context) invalidateReferences(kv cachemeta.EntryID) {
 	}
 	live := c.meta[:0]
 	for _, e := range c.meta {
-		if cachemeta.AttentionIndexReferences(e, kv) || externalEntryReferencesKV(e, kv) {
+		if cachemeta.AttentionIndexReferences(e, kv) || cachemeta.ExternalSelfReference(e, kv) {
 			c.invalidated = append(c.invalidated, e)
 			continue
 		}
 		live = append(live, e)
 	}
 	c.meta = live
-}
-
-func externalEntryReferencesKV(e cachemeta.Entry, kv cachemeta.EntryID) bool {
-	if e.ID != kv {
-		return false
-	}
-	return e.Residency.Tier == cachemeta.TierProvider || e.Residency.Tier == cachemeta.TierRemote
 }
 
 // Segments returns the current ledger (a copy of the slice header is fine; the

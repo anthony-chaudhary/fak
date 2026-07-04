@@ -295,10 +295,7 @@ func CacheTierMemoryClass(t cachemeta.ResidencyTier) compute.MemoryClass {
 // fak_engine_cache_* so they sit alongside the gateway's fak_gateway_*/fak_kernel_*.
 func (s CacheEventSnapshot) Prometheus() string {
 	var b strings.Builder
-	help := func(name, h, typ string) {
-		b.WriteString("# HELP " + name + " " + h + "\n")
-		b.WriteString("# TYPE " + name + " " + typ + "\n")
-	}
+	help := func(name, h, typ string) { cachemeta.WritePromHelp(&b, name, h, typ) }
 	help("fak_engine_cache_events_total", "Live-engine KV cache events normalized into the cache-entry stream.", "counter")
 	b.WriteString("fak_engine_cache_events_total " + utoa(s.Events) + "\n")
 	help("fak_engine_cache_hits_total", "Cache events whose typed verdict was a HIT (serveable).", "counter")

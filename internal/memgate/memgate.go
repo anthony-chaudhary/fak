@@ -63,11 +63,7 @@ func ParseDarwin(vmStat string, pageSize, total int64) Memory {
 		}
 		key, rest, _ := strings.Cut(line, ":")
 		fields := strings.Fields(strings.TrimSpace(rest))
-		if len(fields) == 0 {
-			continue
-		}
-		n, err := strconv.ParseInt(fields[0], 10, 64)
-		if err == nil {
+		if n, ok := parseFirstIntField(fields); ok {
 			vals[strings.ToLower(strings.TrimSpace(key))] = n
 		}
 	}
@@ -94,11 +90,7 @@ func ParseLinux(meminfo string) Memory {
 			continue
 		}
 		fields := strings.Fields(rest)
-		if len(fields) == 0 {
-			continue
-		}
-		n, err := strconv.ParseInt(fields[0], 10, 64)
-		if err == nil {
+		if n, ok := parseFirstIntField(fields); ok {
 			vals[key] = n * 1024
 		}
 	}
@@ -116,6 +108,21 @@ func ParseLinux(meminfo string) Memory {
 		WiredBytes:      0,
 		CompressedBytes: 0,
 	}
+}
+
+// parseFirstIntField parses the first whitespace-separated field as a base-10 int64,
+// reporting ok=false (rather than an error) when fields is empty or the field doesn't
+// parse — the shared ParseDarwin/ParseLinux row-skip rule: a malformed vm_stat/meminfo
+// row is silently skipped, never fatal.
+func parseFirstIntField(fields []string) (int64, bool) {
+	if len(fields) == 0 {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(fields[0], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 func ParseHolders(psText string) []Holder {

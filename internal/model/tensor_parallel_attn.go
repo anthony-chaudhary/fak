@@ -178,10 +178,7 @@ func TensorParallelAttention(qW, kW, vW, oW []float32, X [][]float32, hidden, nH
 	rankPartials := tensorParallelAttentionPartials(qW, kW, vW, oW, X, hidden, nH, nKV, headDim, scale, plan)
 	out := make([][]float32, seq)
 	for t := 0; t < seq; t++ {
-		parts := make([][]float32, len(plan.Shards))
-		for r := range plan.Shards {
-			parts[r] = rankPartials[r][t]
-		}
+		parts := gatherRankPartialsAt(rankPartials, plan.Shards, t)
 		reduced, err := coll.AllReduceSum(parts)
 		if err != nil {
 			return nil, fmt.Errorf("model: TensorParallelAttention o_proj AllReduce at position %d: %w", t, err)
@@ -231,13 +228,21 @@ func TensorParallelAttentionReference(qW, kW, vW, oW []float32, X [][]float32, h
 	seq := len(X)
 	out := make([][]float32, seq)
 	for t := 0; t < seq; t++ {
-		parts := make([][]float32, len(plan.Shards))
-		for r := range plan.Shards {
-			parts[r] = rankPartials[r][t]
-		}
-		out[t] = sumPartialsRankOrder(parts)
+		out[t] = sumPartialsRankOrder(gatherRankPartialsAt(rankPartials, plan.Shards, t))
 	}
 	return out, nil
+}
+
+// gatherRankPartialsAt collects each rank's o_proj partial at sequence position t, in
+// rank order — the identical per-position indexing step TensorParallelAttention
+// (Collective reduction) and TensorParallelAttentionReference (rank-order sum) both
+// perform before their differing reduction.
+func gatherRankPartialsAt(rankPartials [][][]float32, shards []TPShard, t int) [][]float32 {
+	parts := make([][]float32, len(shards))
+	for r := range shards {
+		parts[r] = rankPartials[r][t]
+	}
+	return parts
 }
 
 // referenceAttentionBandSlice exposes attentionOutputBand for the FULL head range so a test

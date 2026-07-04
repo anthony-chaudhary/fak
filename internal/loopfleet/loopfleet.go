@@ -270,38 +270,16 @@ func deriveRow(ledger string, raw rawLoop, cadence int64, now time.Time, th loop
 }
 
 // classify derives a loop's liveness from its last tick against a cadence. It
-// MIRRORS loopmgr.deriveState (unexported) so the cross-ledger pane and loopmgr's
-// own fold draw the dark line identically; it references loopmgr's exported
-// thresholds + constants so the defaults can never drift apart:
+// DELEGATES to loopmgr.DeriveState (exported for exactly this reason) so the
+// cross-ledger pane and loopmgr's own fold draw the dark line identically by
+// construction, not merely by comment convention:
 //   - never ticked, known cadence: DARK (registered/ledgered but never fired).
 //   - never ticked, no cadence:    UNKNOWN (decline to judge).
 //   - ticked, age <= cadence:                LIVE.
 //   - ticked, cadence < age <= darkMul*cadence: STALE (slipping).
 //   - ticked, age > darkMul*cadence:         DARK (gone quiet past its cadence).
 func classify(lastTickUnixNano, cadenceSeconds int64, now time.Time, th loopmgr.HealthThresholds) loopmgr.HealthState {
-	if lastTickUnixNano <= 0 {
-		if cadenceSeconds <= 0 {
-			return loopmgr.HealthUnknown
-		}
-		return loopmgr.HealthDark
-	}
-	if cadenceSeconds <= 0 {
-		return loopmgr.HealthUnknown
-	}
-	ageNanos := now.UTC().UnixNano() - lastTickUnixNano
-	if ageNanos < 0 {
-		ageNanos = 0
-	}
-	cadenceNanos := cadenceSeconds * int64(time.Second)
-	darkNanos := darkMultiple(th) * cadenceNanos
-	switch {
-	case ageNanos <= cadenceNanos:
-		return loopmgr.HealthLive
-	case ageNanos <= darkNanos:
-		return loopmgr.HealthStale
-	default:
-		return loopmgr.HealthDark
-	}
+	return loopmgr.DeriveState(lastTickUnixNano, cadenceSeconds, now, th)
 }
 
 func darkMultiple(th loopmgr.HealthThresholds) int64 {

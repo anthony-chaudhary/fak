@@ -191,11 +191,22 @@ func (p *ContextPlaybook) screenDelta(ctx context.Context, content string) *Play
 	return nil
 }
 
-func (p *ContextPlaybook) add(ctx context.Context, d PlaybookDelta) PlaybookVerdict {
-	if v := p.screenDelta(ctx, d.Content); v != nil {
-		return *v
+// beginMutation runs the shared content gate for a bullet mutation (add or
+// edit) and, if it passes, acquires p.mu for the caller. It returns a non-nil
+// verdict — with the lock NOT held — when the delta is refused/quarantined;
+// otherwise it returns nil with p.mu held (the caller must defer p.mu.Unlock()).
+func (p *ContextPlaybook) beginMutation(ctx context.Context, content string) *PlaybookVerdict {
+	if v := p.screenDelta(ctx, content); v != nil {
+		return v
 	}
 	p.mu.Lock()
+	return nil
+}
+
+func (p *ContextPlaybook) add(ctx context.Context, d PlaybookDelta) PlaybookVerdict {
+	if v := p.beginMutation(ctx, d.Content); v != nil {
+		return *v
+	}
 	defer p.mu.Unlock()
 	if dup := p.findDupLocked(d.Section, d.Content); dup != nil {
 		// Deterministic de-dup: an identical bullet in the same section is not a
@@ -210,10 +221,9 @@ func (p *ContextPlaybook) add(ctx context.Context, d PlaybookDelta) PlaybookVerd
 }
 
 func (p *ContextPlaybook) edit(ctx context.Context, d PlaybookDelta) PlaybookVerdict {
-	if v := p.screenDelta(ctx, d.Content); v != nil {
+	if v := p.beginMutation(ctx, d.Content); v != nil {
 		return *v
 	}
-	p.mu.Lock()
 	defer p.mu.Unlock()
 	b, ok := p.bullets[d.BulletID]
 	if !ok {
