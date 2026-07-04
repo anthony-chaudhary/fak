@@ -113,6 +113,7 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		// historical-session replay flagged (align_policy_with_real_tool_shapes). These are safe
 		// because a spawned subagent's real tool calls are re-adjudicated through this same floor.
 		{"ToolSearch allowed (deferred-tool loading is load-bearing)", "ToolSearch", `{"query":"select:WebFetch"}`, abi.VerdictAllow},
+		{"Artifact denied by default (publishes session output)", "Artifact", `{}`, abi.VerdictDeny},
 		{"Agent allowed (subagent calls re-adjudicated downstream)", "Agent", `{"subagent_type":"Explore","prompt":"map the floor"}`, abi.VerdictAllow},
 		{"TaskCreate allowed", "TaskCreate", `{"description":"x"}`, abi.VerdictAllow},
 		{"TaskUpdate allowed", "TaskUpdate", `{"task_id":"t1","status":"in_progress"}`, abi.VerdictAllow},

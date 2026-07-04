@@ -66,6 +66,7 @@ type shellAliasSpec struct {
 type harnessFloorProfile struct {
 	Name          string
 	RequiredTools []harnessToolProbe
+	DeniedTools   []harnessToolProbe
 	ShellAliases  []shellAliasSpec
 }
 
@@ -97,6 +98,12 @@ func firstClassHarnessFloorProfiles() []harnessFloorProfile {
 				{"Task", `{"subagent_type":"Explore","prompt":"map the floor"}`},
 				{"ToolSearch", `{"query":"select:WebFetch"}`},
 				{"ExitPlanMode", `{}`},
+			},
+			// Claude Code's Artifact tool publishes session output to claude.ai. It is a real
+			// host surface, but not part of the default local coding floor; keep it off-floor
+			// unless an operator opts into that publication capability with a custom policy.
+			DeniedTools: []harnessToolProbe{
+				{"Artifact", `{}`},
 			},
 			ShellAliases: []shellAliasSpec{
 				{Name: "Bash", Benign: "ls -la", Denies: posixDenies},
@@ -240,6 +247,16 @@ func checkHarnessFloorCoverage(manifestJSON []byte) ([]string, error) {
 					p.Name, probe.Tool, verdictWord(v), p.Name))
 			}
 		}
+		for _, probe := range p.DeniedTools {
+			v, err := decide(probe.Tool, probe.Args)
+			if err != nil {
+				return nil, err
+			}
+			if v != abi.VerdictDeny {
+				gaps = append(gaps, fmt.Sprintf("%s: explicitly denied tool %q is admitted (got %s, want deny) — this widens the default harness floor without an opt-in policy",
+					p.Name, probe.Tool, verdictWord(v)))
+			}
+		}
 		for _, sh := range p.ShellAliases {
 			declared[strings.ToLower(sh.Name)] = true
 			bv, err := decide(sh.Name, shellArgsJSON(sh.Benign))
@@ -326,6 +343,22 @@ func TestHarnessProfileCoverageDetectsMissingRequiredTool(t *testing.T) {
 	}
 	if !anyContains(gaps, `"update_plan"`) {
 		t.Fatalf("dropping update_plan from the floor should report a gap; got gaps=%v", gaps)
+	}
+}
+
+// TestHarnessProfileCoverageDetectsForbiddenArtifactTool pins the #2255 Artifact verdict:
+// it is a known Claude Code surface, but the default guard floor must not silently admit a
+// tool whose job is publishing session output outside the local tool boundary.
+func TestHarnessProfileCoverageDetectsForbiddenArtifactTool(t *testing.T) {
+	mutated := mutateFloorAllow(t, guardDefaultPolicyJSON, func(allow []string) []string {
+		return append(append([]string{}, allow...), "Artifact")
+	})
+	gaps, err := checkHarnessFloorCoverage(mutated)
+	if err != nil {
+		t.Fatalf("coverage check failed to run: %v", err)
+	}
+	if !anyContains(gaps, `"Artifact"`) {
+		t.Fatalf("allowing Artifact by default should report a gap; got gaps=%v", gaps)
 	}
 }
 
