@@ -70,6 +70,10 @@ SSH using `FAK_MAC_SSH_HOST`. That SSH fetch is non-interactive and bounded to o
 5-second connection attempt, so a sleeping or unreachable Mac fails fast with the
 SSH error instead of hanging before Claude Code starts.
 
+`claude-mac --probe` also checks the gateway's `/healthz` and `/debug/vars`
+before launching Claude Code. A healthy probe keeps stdout reserved for Claude's
+JSON output; an unhealthy gateway exits before Claude's long API timeout starts.
+
 ### What does the Qwen preset assume?
 
 `fak-qwen36-claude` is the same script as `fak-dogfood`, but its invoked name selects

@@ -54,7 +54,7 @@ func runClaudeMacFak(stdout, stderr io.Writer, argv []string) int {
 	apiTimeoutMS := fs.Int("api-timeout-ms", 1800000, "Claude Code API_TIMEOUT_MS")
 	width := fs.Int("width", 120, "dry-run width")
 	command := fs.String("command", "claude", "Claude Code command or path to execute")
-	debug := fs.Bool("debug", true, "before handoff, probe the gateway (/healthz + /debug/vars) and print a fak debug panel; aborts an interactive launch if the gateway is unreachable")
+	debug := fs.Bool("debug", true, "before handoff, probe the gateway (/healthz + /debug/vars) and print a fak debug panel for interactive launches; aborts interactive/probe launches if the gateway is unreachable")
 	overlay := fs.Bool("overlay", false, "do not launch Claude; instead poll /debug/vars and print one live fak line per tick (run in a second pane next to the session). Ctrl-C to stop")
 	overlayInterval := fs.Duration("overlay-interval", 2*time.Second, "refresh interval for --overlay")
 	metrics := fs.Bool("metrics", false, "do not launch Claude; fetch /metrics + /debug/vars using the gateway's own bearer and print them (the panel links 401 from a bare browser click; this needs no token wrangling)")
@@ -117,23 +117,22 @@ func runClaudeMacFak(stdout, stderr io.Writer, argv []string) int {
 		return runClaudeMacMetrics(stdout, stderr, dbg)
 	}
 
-	// Preflight debug panel (#claude-mac): probe the gateway and print what fak is
-	// about to do BEFORE handing the terminal to Claude Code, which makes fak
-	// otherwise invisible. A probe run stays quiet unless --debug is set explicitly;
-	// an interactive launch defaults debug on and ABORTS on an unreachable gateway
-	// rather than starting Claude against a dead/mock backend.
+	// Preflight debug panel (#claude-mac): probe the gateway before handing the
+	// terminal to Claude Code, which makes fak otherwise invisible. Interactive
+	// launches render the panel; headless probes keep stdout quiet so Claude's JSON
+	// remains parseable, but still abort on an unreachable gateway rather than
+	// waiting on Claude Code's long API timeout against a dead backend.
 	auth := "gateway-bearer"
 	if dbg.key == "" {
 		auth = "none"
 	}
-	if *debug && !*asJSON && !*probe && !*dryRun {
+	if *debug && !*asJSON && !*dryRun {
 		health, vars, err := dbg.probe()
 		if err != nil {
 			fmt.Fprintf(stderr, "fak debug: gateway unreachable: %v\n", err)
-			if *interactive || (!*probe && !*dryRun) {
-				return 1
-			}
-		} else {
+			return 1
+		}
+		if !*probe {
 			fmt.Fprint(stdout, renderClaudeMacPreflight(health, vars, dbg.base, *model, auth, dbg.grafana))
 		}
 	}

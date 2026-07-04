@@ -75,6 +75,10 @@ would mean scripted, non-model responses) and aborts the interactive launch
 instead of starting Claude against an unreachable gateway. Pass `--debug=false`
 to skip it.
 
+Headless `--probe` runs the same reachability gate before launching Claude Code,
+but keeps stdout quiet on success so Claude's JSON output stays parseable. If the
+gateway is down, the probe exits before Claude Code starts.
+
 **Read the metrics without token wrangling.** `/metrics` and `/debug/vars` are
 loopback-exempt: they open without a bearer from the gateway host itself, but a
 bare browser click from your laptop hits the remote IP and 401s. Rather than

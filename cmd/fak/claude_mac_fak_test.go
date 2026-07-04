@@ -647,3 +647,61 @@ func TestClaudeMacFakInteractiveAbortsOnUnreachableGateway(t *testing.T) {
 		t.Fatalf("must not launch claude after an unreachable-gateway abort:\n%s", stdout.String())
 	}
 }
+
+func TestClaudeMacFakProbeAbortsOnUnreachableGateway(t *testing.T) {
+	t.Setenv("FAK_GATEWAY_KEY", "super-secret-test-key")
+	dir := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+	code := runClaudeMacFak(&stdout, &stderr, []string{
+		"--probe",
+		"--claude-config-dir", dir,
+		// 127.0.0.1:1 is a closed reserved port: connection refused, fast.
+		"--gateway-url", "http://127.0.0.1:1",
+		"--model", "qwen-local",
+		"--command", "fak-no-such-claude-binary-xyz",
+	})
+	if code != 1 {
+		t.Fatalf("unreachable probe must abort with code 1, got %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "gateway unreachable") {
+		t.Fatalf("expected a gateway-unreachable error, stderr=%q", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "launching claude") {
+		t.Fatalf("must not launch claude after an unreachable-gateway abort:\n%s", stdout.String())
+	}
+}
+
+func TestClaudeMacFakProbePreflightsQuietly(t *testing.T) {
+	t.Setenv("FAK_GATEWAY_KEY", "super-secret-test-key")
+	var sawHealth, sawVars bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			sawHealth = true
+			_, _ = w.Write([]byte(`{"ok":true,"engine":"metal","model":"qwen-local","planner":"inkernel"}`))
+		case "/debug/vars":
+			sawVars = true
+			_, _ = w.Write([]byte(`{"gateway":{"up":true,"vdso":true},"kernel":{"submits":1},"runtime":{"num_goroutine":1,"memory":{"heap_alloc_bytes":1}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+	dir := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+	_ = runClaudeMacFak(&stdout, &stderr, []string{
+		"--probe",
+		"--claude-config-dir", dir,
+		"--gateway-url", ts.URL,
+		"--model", "qwen-local",
+		"--command", "fak-no-such-claude-binary-xyz",
+	})
+	if !sawHealth || !sawVars {
+		t.Fatalf("probe did not preflight the gateway: health=%v vars=%v", sawHealth, sawVars)
+	}
+	if strings.Contains(stdout.String(), "fak debug") || strings.Contains(stdout.String(), "launching claude") {
+		t.Fatalf("headless probe preflight must stay quiet on stdout:\n%s", stdout.String())
+	}
+}
