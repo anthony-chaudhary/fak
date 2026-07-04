@@ -193,3 +193,58 @@ overlay in place instead of filing duplicates.
 - private `tools/dgxbridge/internal/sessions.go`
 - private `tools/dgxbridge/internal/dgxbridge_test.go`
 - private `tools/dgxbridge/BRIDGE-AGENT-GUIDE.md`
+
+---
+
+<!-- Addendum appended 2026-07-03 by the overnight lab-machine worker
+(task overnight-lab-bridge-fix-goal-20260703). Same capability-floor reason as
+above: outward `gh issue comment` is refused for the unattended worker, so the
+evidence lands here for an operator/labeled-token pass to copy onto the issue.
+Scrubbed: no private hostnames, channel ids, tokens, or raw private run logs. -->
+
+## Addendum — live production witness of the fail-fast rung (2026-07-03)
+
+All three ask-1 witnesses re-run green from current private `main` HEAD
+(`c7f744e`, which still carries `f65858a` plus the `9298b03` TestDoctor
+isolation follow-up): GOPATH-mode `go test ./internal` ok in 0.219s; temp-module
+`go test -count=1 ./internal/dgxbridge` 15/15 PASS including
+`TestReadbackPreflightRoundTrips` and `TestReadbackPreflightTypedWedge`;
+temp-module `go build ./cmd/dgxbridge` exit 0.
+
+**The #2372 failure class was live during this pass, and the fix behaved as
+designed.** A cheap non-disruptive probe sequence (no lab jobs touched):
+
+- `doctor` — READY (token + control channel resolve). Exit 0.
+- Patient `selftest` (`-probe-wait 90s -settle 12s -timeout 5m`) against the
+  auto-picked running hub session — `readback BROKEN: sentinel_missing`: control
+  traffic and session discovery work, but no completion sentinel returns. This is
+  the exact wedge the issue describes, live.
+- `run 'echo BRIDGE_OK'` with `-timeout 4m` against that wedged session — typed
+  `READBACK_WEDGED` in **43.5s wall** instead of burning the full 240s. Repeated
+  through a second running session — typed `READBACK_WEDGED` in **43.7s**. The
+  pre-fix shape (full `-timeout` burned per attempt, 14x in one audited session)
+  did not occur.
+
+**Operational finding (for an operator, not a code change):** the wedge
+currently affects *all* running hub sessions (three were up; two probed, both
+wedged; the selftest's session was the third), so session rotation — ask 3's
+recovery — would not have recovered readback tonight. The remote control bridge
+needs an operator restart (the guide's "restart the bridge in pipe mode" rung).
+Until then the lab boxes are readback-blocked, but each attempt now fails typed
+in <1min instead of silently burning minutes.
+
+**Minor observation for ask 2/3 design:** the typed wedge reason can surface as
+`exec_error` (the hub-API history read hit the probe's context deadline) rather
+than `sentinel_missing`, depending on where the budget expires. Both are bounded
+and typed; distinguishing slow-transport from wedged-PTY in the reason string
+would sharpen the failover trigger.
+
+**Public-repo cleanliness (2026-07-03 pass):** public git HEAD and index carry no
+private bridge code (`7ede91ce` dropped the cluster; `git ls-files` empty for both
+paths; `.gitignore` `cmd/*dgx*/` + `internal/*dgx*/` backstop active). This pass
+staged and built only inside the private repo's gitignored `.dgxbridge-verify`
+temp module. Noted for the operator: a PRE-EXISTING, untracked, gitignored staged
+bridge copy from an earlier session still sits on disk under the public tree's
+ignored `cmd/dgxbridge/` + `internal/dgxbridge/` paths — uncommittable by design,
+left in place in case a running fleet process uses that build; the guide's
+staging recipe says to remove it when its session is done.
