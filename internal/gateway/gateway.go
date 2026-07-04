@@ -85,6 +85,38 @@ const DefaultCompactHistoryBudget = 48000
 // 0 disables the prior and restores the conservative "no horizon ⇒ no fire" behavior exactly.
 const DefaultAssumedSessionTurns = 100
 
+// Early-firing budget ramp (the "fak fires by ~step 5-10" seam). The head-anchored compaction
+// against the FULL DefaultCompactHistoryBudget (~48k) only crosses its threshold once a session
+// has sprawled past ~48k resident tokens — step ~35+ on a heavy coding session, and never on a
+// normal one — so fak's OWN witnessed cache value stays $0 for the whole early session (the
+// fak_share≈0 the guard-cache-value goal chased). But the burst economics (CacheBurstPaysBack)
+// are MOST favorable early: the earlier a fire sheds the un-cacheable middle, the more future
+// turns the per-turn read saving compounds over, AND a lower budget drops MORE of the middle
+// relative to the fixed one-time recent-breakpoint burst — flipping the same break-even from
+// "unprofitable" to a clean fire. So the effective budget the head-anchored fire targets RAMPS
+// from a floor fraction of the configured budget at the start of a session up to the full
+// configured ceiling by earlyFireRampTurns, keyed on the trace's real served-turn depth. The
+// CacheBurstPaysBack gate still runs on the real horizon, so the ramp only moves WHERE the budget
+// line sits — it can never force an unprofitable burst (the economics remain the safety net), and
+// the effective budget is always <= the configured budget (the ceiling and its byte-safety
+// guarantees are untouched). Inert unless head-anchored compaction is engaged WITH a resolved
+// horizon (assumed or wired): the conservative first-breakpoint default and the cold-only path
+// are byte-for-byte unchanged. Disabled by the same kill switches that disable early firing at
+// all (--compact-anchor-head=false or --assume-session-turns 0 with no wired horizon).
+const (
+	// earlyFireBudgetFloorFrac is the fraction of the configured compaction budget the
+	// head-anchored fire targets at served-turn depth 1, ramping linearly to the full budget by
+	// earlyFireRampTurns. 0.33 keeps a ~16k resident recent window at the floor (of the 48k
+	// default) — aggressive enough to fire within the first several turns of a heavy session,
+	// conservative enough to keep the model's live working set whole.
+	earlyFireBudgetFloorFrac = 0.33
+	// earlyFireRampTurns is the served-turn depth by which the effective budget reaches the full
+	// configured ceiling. Past it the steady-state resident window is exactly the configured
+	// budget, so a mature session is unchanged; the ramp only front-loads firing into the early
+	// turns where the compounding and the burst headroom are greatest.
+	earlyFireRampTurns = 25
+)
+
 const (
 	// DocumentedElideResultBytes is the reviewed threshold for oversized tool-result
 	// elision: a tool_result whose text payload exceeds this many bytes is a candidate

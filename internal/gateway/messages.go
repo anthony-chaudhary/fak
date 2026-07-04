@@ -727,6 +727,29 @@ func (s *Server) headSessionPrior(turnsLeft int, trace string) (totalTurns, curr
 	return s.assumeSessionTurns, int(s.metrics.servedTurnCount(trace)) + 1
 }
 
+// earlyFiringBudget ramps the head-anchored compaction's effective budget from a floor fraction
+// (earlyFireBudgetFloorFrac) of the configured budget at served-turn depth 1 up to the full
+// configured budget by earlyFireRampTurns, linearly in the 1-based step. It NEVER returns more
+// than the configured budget (the ceiling and its byte-safety guarantees are preserved) and never
+// less than 1. A non-positive configured budget or step returns the input unchanged. See the
+// early-firing ramp note in gateway.go for the economics: a lower early budget fires sooner and,
+// by dropping more of the middle relative to the fixed recent-breakpoint burst, keeps the fire
+// profitable — while CacheBurstPaysBack remains the final safety gate.
+func earlyFiringBudget(configured, step int) int {
+	if configured <= 0 || step <= 0 || step >= earlyFireRampTurns {
+		return configured
+	}
+	frac := earlyFireBudgetFloorFrac + (1-earlyFireBudgetFloorFrac)*float64(step)/float64(earlyFireRampTurns)
+	eff := int(float64(configured) * frac)
+	if eff < 1 {
+		eff = 1
+	}
+	if eff > configured {
+		eff = configured
+	}
+	return eff
+}
+
 func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesRequest, turnsLeft int, trace string) (fired bool, reason string) {
 	_ = s.headSessionPrior // silence unused in the (impossible) build shape where the head path is compiled out
 	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) {
@@ -764,6 +787,22 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 		// and refuses near the presumed end (see headSessionPrior).
 		opts.Anchor = agent.CompactAnchorHead
 		opts.TotalTurns, opts.CurrentTurn = s.headSessionPrior(turnsLeft, trace)
+		// Early-firing budget ramp (the "fak fires by ~step 5-10" seam, gateway.go): on the
+		// un-budgeted default `fak guard -- claude` path, where the assumed-session-length prior
+		// supplies the horizon (turnsLeft<=0 AND opts.TotalTurns>0), scale the budget the
+		// head-anchored fire targets from a floor up to the configured ceiling over the first
+		// earlyFireRampTurns, keyed on the trace's real served-turn depth. A lower early budget sheds
+		// the un-cacheable middle sooner (when the per-turn saving compounds over the most future
+		// turns, and drops more of the middle relative to the fixed recent-breakpoint burst — so the
+		// SAME break-even flips from unprofitable to a clean fire). The CacheBurstPaysBack gate still
+		// runs on the real horizon, so the ramp only moves the budget line; it can never force an
+		// unprofitable burst. It is deliberately NOT applied when a bounded turn horizon is WIRED
+		// (turnsLeft>0): that is an explicit operator budget, so its resident window is respected
+		// as-is. The cold-only path (TotalTurns<=0) also keeps the full budget — both are unchanged.
+		if turnsLeft <= 0 && opts.TotalTurns > 0 {
+			step := int(s.metrics.servedTurnCount(trace)) + 1
+			opts.Budget = earlyFiringBudget(s.compactHistoryBudget, step)
+		}
 		// Observed-cold witness: the per-trace idle gap (the harness-coherence wall clock) has
 		// passed the message-breakpoint cache TTL, so the suffix a head fire would invalidate is
 		// ALREADY expired and re-bills cold this turn regardless — a zero-penalty burst the gate
