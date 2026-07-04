@@ -1,0 +1,156 @@
+{
+  "schema": "relayvscompaction.v1",
+  "provenance": {
+    "kind": "SIMULATED",
+    "command": "go test ./internal/bench -run RelayVsCompaction",
+    "generated_by": "fak/internal/bench.BuildRelayVsCompactionReport",
+    "note": "Hermetic ANALYTIC model, not a live provider run (the issue permits a hermetic/replayed comparison). It witnesses the MEASUREMENT and the sign of the comparison under the named constants in `model`; a live relay-vs-compaction leg-record run can feed the same report shape via BuildRelayVsCompactionReportFor and either confirm or demote the claim."
+  },
+  "model": {
+    "window_ceiling_tokens": 200000,
+    "system_prefix_tokens": 4000,
+    "growth_per_turn_tokens": 6000,
+    "baton_tokens": 2000,
+    "compaction_trigger_frac": 0.95,
+    "compaction_keep_frac": 0.3,
+    "compaction_loss_frac": 0.15,
+    "relay_arm_frac": 0.6,
+    "facts_per_turn": 3,
+    "cache_read_mult": 0.1,
+    "cache_write_mult": 1.25
+  },
+  "sweep": [
+    {
+      "goal_turns": 40,
+      "relay": {
+        "strategy": "relay",
+        "rotations": 2,
+        "peak_context_tokens": 120000,
+        "peak_context_frac": 0.6,
+        "billed_tokens": 505800,
+        "cache_hit_rate": 0.8956,
+        "cache_bust_tokens": 12000,
+        "load_bearing_facts": 120,
+        "facts_retained": 120,
+        "accuracy": 1
+      },
+      "compaction": {
+        "strategy": "compaction",
+        "rotations": 1,
+        "peak_context_tokens": 190000,
+        "peak_context_frac": 0.95,
+        "billed_tokens": 702390,
+        "cache_hit_rate": 0.9205,
+        "cache_bust_tokens": 59800,
+        "load_bearing_facts": 120,
+        "facts_retained": 107,
+        "accuracy": 0.8917
+      }
+    },
+    {
+      "goal_turns": 80,
+      "relay": {
+        "strategy": "relay",
+        "rotations": 4,
+        "peak_context_tokens": 120000,
+        "peak_context_frac": 0.6,
+        "billed_tokens": 1014000,
+        "cache_hit_rate": 0.8961,
+        "cache_bust_tokens": 24000,
+        "load_bearing_facts": 240,
+        "facts_retained": 240,
+        "accuracy": 1
+      },
+      "compaction": {
+        "strategy": "compaction",
+        "rotations": 3,
+        "peak_context_tokens": 192340,
+        "peak_context_frac": 0.9617,
+        "billed_tokens": 1605897,
+        "cache_hit_rate": 0.9263,
+        "cache_bust_tokens": 180642,
+        "load_bearing_facts": 240,
+        "facts_retained": 178,
+        "accuracy": 0.7417
+      }
+    },
+    {
+      "goal_turns": 160,
+      "relay": {
+        "strategy": "relay",
+        "rotations": 8,
+        "peak_context_tokens": 120000,
+        "peak_context_frac": 0.6,
+        "billed_tokens": 2037600,
+        "cache_hit_rate": 0.8972,
+        "cache_bust_tokens": 48000,
+        "load_bearing_facts": 480,
+        "facts_retained": 480,
+        "accuracy": 1
+      },
+      "compaction": {
+        "strategy": "compaction",
+        "rotations": 6,
+        "peak_context_tokens": 192565,
+        "peak_context_frac": 0.9628,
+        "billed_tokens": 3342921,
+        "cache_hit_rate": 0.9312,
+        "cache_bust_tokens": 362326,
+        "load_bearing_facts": 480,
+        "facts_retained": 302,
+        "accuracy": 0.6292
+      }
+    },
+    {
+      "goal_turns": 320,
+      "relay": {
+        "strategy": "relay",
+        "rotations": 16,
+        "peak_context_tokens": 120000,
+        "peak_context_frac": 0.6,
+        "billed_tokens": 4113600,
+        "cache_hit_rate": 0.8992,
+        "cache_bust_tokens": 96000,
+        "load_bearing_facts": 960,
+        "facts_retained": 960,
+        "accuracy": 1
+      },
+      "compaction": {
+        "strategy": "compaction",
+        "rotations": 14,
+        "peak_context_tokens": 192571,
+        "peak_context_frac": 0.9629,
+        "billed_tokens": 6926106,
+        "cache_hit_rate": 0.9302,
+        "cache_bust_tokens": 846893,
+        "load_bearing_facts": 960,
+        "facts_retained": 350,
+        "accuracy": 0.3646
+      }
+    }
+  ],
+  "flat_peak_context": true,
+  "relay_peak_context_tokens": 120000,
+  "delta": {
+    "at_goal_turns": 320,
+    "peak_context_reduction_tokens": 72571,
+    "peak_context_ratio_relay_over_compaction": 0.6231,
+    "billed_tokens_saved": 2812506,
+    "billed_ratio_relay_over_compaction": 0.5939,
+    "cache_bust_tokens_saved": 750893,
+    "cache_bust_ratio_relay_over_compaction": 0.1134,
+    "cache_hit_rate_gain": -0.031,
+    "accuracy_gain": 0.6354,
+    "finding": "At 320 turns, the relay's peak context is FLAT across the sweep (120000 tokens, 60% of the window — out of the context-rot zone), while compaction peaks at 192571 (96% — pinned at the wall). The relay bills 4113600 effective tokens vs compaction's 6926106 (59% of the cost), force-rewrites only 96000 cache-busted tokens vs compaction's 846893 (11% — it resets an O(1) baton, not a near-wall prefix), and retains 100% of load-bearing facts vs 36%. Raw cache-hit rate is comparable (0.90 vs 0.93; compaction's is marginally higher only because it runs a larger resident prefix). Peak, cost, cache-preservation, and fidelity favor the relay; the comparison is a hermetic model, so the numbers are the SIGN, not a provider-billed total."
+  },
+  "verdict": "relay_lower_peak_cheaper_more_faithful",
+  "assumptions": [
+    "Compaction TRUSTS its in-place summary rather than re-querying the durable store; a compacting agent that also re-derived dropped facts from git on demand would narrow the accuracy gap toward the relay's. This is the load-bearing doctrinal assumption.",
+    "The relay's externalize gate is fail-closed: every load-bearing fact is committed/ledgered/filed before rotation and the baton is re-verified at read, so accuracy is 1.0. A leg that rotated with load-bearing state still transcript-only (a gate bypass) would drop below 1.0.",
+    "Cache multipliers (read 0.1x, write 1.25x) and the window/growth/baton constants are representative Anthropic-style figures, not a measured provider run; different economics shift the magnitudes but not the sign — the relay resets an O(1) prefix, compaction rewrites a near-wall one.",
+    "The goal does not fit in one window (the only regime a relay is for); for a goal that fits in one leg, neither strategy fires and there is no difference to measure."
+  ],
+  "promotion": "Replace the modeled constants with OBSERVED per-turn context/cache/token records from a live relay-vs-compaction run (the internal/sessionreset + session.Recontinue relay path vs a compaction baseline), feeding BuildRelayVsCompactionReportFor, the way loopverify accepts an OBSERVED ledger. When the observed run reproduces the sign, the leaf promotes toward `now`.",
+  "demotion_or_retirement": "If a live run shows compaction matching the relay on BOTH cost and fidelity for a goal class (e.g. a compaction that re-queries git), the relay's complexity is not justified for that class and this bench demotes the claim rather than defending it.",
+  "invalidating_assumption": "The single assumption most likely to flip the result is #1: that compaction does not re-derive dropped facts from the durable store. If it does, the fidelity advantage collapses and only the peak-context and cache advantages remain."
+}
