@@ -129,6 +129,14 @@ func LoadPolicy(p Paths) Policy {
 			}
 		}
 	}
+	if raw, ok := user["lane_models"]; ok {
+		var v map[string]string
+		if json.Unmarshal(raw, &v) == nil {
+			for k, val := range v {
+				pol.LaneModels[k] = val
+			}
+		}
+	}
 	if raw, ok := user["routing"]; ok {
 		var v Routing
 		if json.Unmarshal(raw, &v) == nil {

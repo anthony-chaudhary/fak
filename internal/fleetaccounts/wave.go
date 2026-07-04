@@ -14,6 +14,7 @@ type WaveRequest struct {
 	TaskClass         string
 	WorkKind          string
 	Product           string
+	Leases            []Lease
 	AllowTierFallback bool
 	StrictTier        bool
 	WaveID            string
@@ -81,7 +82,11 @@ func AllocateWave(rows []Account, req WaveRequest, pol Policy) WaveResult {
 
 	var lanes []WaveLane
 	usedPools := map[string]bool{}
+	leaseWorkers, _ := leaseWorkersByPool(workers, req.Leases)
 	load := map[string]int{}
+	for pool, workers := range leaseWorkers {
+		load[pool] = len(workers)
+	}
 	for _, tier := range tierOrder {
 		if len(lanes) >= n {
 			break

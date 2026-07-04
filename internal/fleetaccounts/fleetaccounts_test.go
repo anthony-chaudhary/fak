@@ -533,6 +533,37 @@ func TestAllocateWaveGrantsDistinctPoolsAndUnderfills(t *testing.T) {
 	}
 }
 
+func TestAllocateWaveSubtractsLiveLeaseSlots(t *testing.T) {
+	rows := []Account{{
+		Dir:         "C:/seats/a",
+		Product:     "claude",
+		Account:     ".claude-seat-a",
+		Tag:         "seat-a",
+		Kind:        KindWorker,
+		Reason:      "real offered account",
+		AccountUUID: strp("acct-a"),
+		ModelTier:   intp(1),
+		Available:   boolp(true),
+	}}
+	leases := []Lease{
+		{Worker: "resolve-1", Tag: "seat-a", Dir: "C:/seats/a"},
+		{Worker: "resolve-2", Tag: "seat-a", Dir: "C:/seats/a"},
+		{Worker: "resolve-3", Tag: "seat-a", Dir: "C:/seats/a"},
+	}
+	wave := AllocateWave(rows, WaveRequest{
+		Count:    4,
+		WorkKind: "engineering",
+		Product:  "claude",
+		Leases:   leases,
+	}, DefaultPolicy())
+	if !wave.OK || wave.Granted != 1 || wave.Shortfall != 3 || wave.DistinctPools != 1 {
+		t.Fatalf("wave = %+v, want only the fourth session slot free", wave)
+	}
+	if wave.Lanes[0].SessionSlot != 4 || wave.Lanes[0].SessionCap != DefaultClaudeSessionsPerAccount {
+		t.Fatalf("lane = %+v, want slot 4/%d", wave.Lanes[0], DefaultClaudeSessionsPerAccount)
+	}
+}
+
 func TestAllocateWaveSkipsCanServeFalse(t *testing.T) {
 	rows := []Account{{
 		Dir:       "C:/Users/u/.claude-stale",

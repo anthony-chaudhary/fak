@@ -48,13 +48,16 @@ var OpencodeMarkerFiles = []string{"opencode.json", "opencode.jsonc"}
 // Policy is the operator-editable account policy (accounts_policy.json), applying
 // uniformly to BOTH products. Exclude substrings tombstone accounts; IncludeOnly (when
 // non-empty) is an allowlist. AccountProfiles overrides model-tier inference; RouteWeights
-// biases the routing tie-break. The JSON keys match the Python policy file.
+// biases the routing tie-break. LaneModels pins a dispatch worker's model per LANE (the
+// model-switching config seam: a lane can name the model its resolution workers start on,
+// independent of the seat's own default). The JSON keys match the Python policy file.
 type Policy struct {
 	Exclude         []string                   `json:"exclude"`
 	IncludeOnly     []string                   `json:"include_only"`
 	Notes           map[string]string          `json:"notes"`
 	AccountProfiles map[string]ProfileOverride `json:"account_profiles"`
 	RouteWeights    map[string]int             `json:"route_weights"`
+	LaneModels      map[string]string          `json:"lane_models"`
 	Routing         Routing                    `json:"routing"`
 }
 
@@ -86,6 +89,7 @@ func DefaultPolicy() Policy {
 		},
 		AccountProfiles: map[string]ProfileOverride{},
 		RouteWeights:    map[string]int{},
+		LaneModels:      map[string]string{},
 		Routing: Routing{
 			LightConfidence:   0.999,
 			HardTier1Fallback: "stop",
@@ -277,6 +281,33 @@ func resolveProductTag(row Account) (product, tag string) {
 // accountRouteWeight: exact account, product:account, product:tag, short tag, product.
 func profileKeys(product, account, tag string) []string {
 	return []string{account, product + ":" + account, product + ":" + tag, tag, product}
+}
+
+// LaneModel returns the model id an operator pinned for a dispatch LANE via lane_models,
+// or "" when the lane has no pin. Match is on the trimmed lane name, exact first, then
+// case-insensitive so a "Docs" pin still covers the "docs" lane. Empty/blank lane -> "".
+func (p Policy) LaneModel(lane string) string {
+	lane = strings.TrimSpace(lane)
+	if lane == "" || len(p.LaneModels) == 0 {
+		return ""
+	}
+	if m := strings.TrimSpace(p.LaneModels[lane]); m != "" {
+		return m
+	}
+	for k, v := range p.LaneModels {
+		if strings.EqualFold(strings.TrimSpace(k), lane) {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+// ProfileModel returns the model id an account's routing PROFILE resolves to (the
+// account_profiles override, else the product default). It is the per-account fallback
+// the model resolver consults after a per-lane pin: "" only when the profile itself names
+// no model (e.g. a bare non-account row).
+func (p Policy) ProfileModel(row Account) string {
+	return strings.TrimSpace(accountProfile(row, p).Model)
 }
 
 // accountRouteWeight resolves the operator capacity bias (default 0) from RouteWeights.
