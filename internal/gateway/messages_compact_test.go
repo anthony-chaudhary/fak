@@ -133,6 +133,47 @@ func TestMaybeUpgradeCacheTTL1HPlacesThenUpgrades(t *testing.T) {
 	}
 }
 
+// TestMaybeUpgradeCacheTTL1HVolatileHeadStaysByteSafe (#2185 criterion 2): the composed
+// place-then-upgrade path (#2175) must stay byte-safe / identity-on-ambiguity — a caller that
+// sends ZERO cache_control AND whose only cacheable head is VOLATILE (a per-request nonce in the
+// tools block sits ahead of every system anchor, so no rewrite can make the prefix byte-stable)
+// gets NO breakpoint placed: placement refuses with volatile_head, the outbound body is returned
+// byte-for-byte unchanged, and the composed upgrade does NOT fire. The refusal is WITNESSED (the
+// placement counter records volatile_head; the no_stable_breakpoint bail stays visible) so an
+// ACTIVE-but-ineligible session is legible on /metrics instead of silently mutating the wire. This
+// is the refute guard for the composed path: it proves the transform, not a default that always
+// places. The success path is pinned by TestMaybeUpgradeCacheTTL1HPlacesThenUpgrades.
+func TestMaybeUpgradeCacheTTL1HVolatileHeadStaysByteSafe(t *testing.T) {
+	raw := []byte(`{"model":"claude","max_tokens":1024,` +
+		`"tools":[{"name":"run","description":"per-request nonce 11111111-2222-3333-4444-555555555555","input_schema":{"type":"object"}}],` +
+		`"system":[{"type":"text","text":"stable policy, no caching hint at all"}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)
+	req, err := agent.DecodeAnthropicMessagesRequest(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	orig := append([]byte(nil), req.Raw...)
+	s := anthropicPassthroughServer(0) // compaction OFF: the composed path must stand on its own
+	s.cacheTTL1H = true                // --managed-cache ACTIVE
+	s.metrics = newGatewayMetrics(time.Now())
+
+	if s.maybeUpgradeAnthropicCacheTTL1H(req) {
+		t.Fatal("a volatile-only head must NOT upgrade: no byte-stable prefix to secure")
+	}
+	if !bytes.Equal(req.Raw, orig) {
+		t.Fatalf("volatile-head body must be forwarded byte-for-byte unchanged:\n%s", req.Raw)
+	}
+	if n := s.metrics.placementAttempts[agent.BreakpointReasonVolatileHead]; n != 1 {
+		t.Fatalf("the composed placement must witness the volatile_head refusal, got %d", n)
+	}
+	if n := s.metrics.ttlUpgrades[cacheTTLUpgradePlacedAndUpgraded]; n != 0 {
+		t.Fatalf("placed_and_upgraded must stay flat when placement refuses, got %d", n)
+	}
+	if n := s.metrics.ttlUpgrades[agent.TTLUpgradeReasonNoStableBreakpoint]; n != 1 {
+		t.Fatalf("no_stable_breakpoint bail must stay witnessed on the refused path, got %d", n)
+	}
+}
+
 // TestMaybeCompactOffIsIdentity: budget 0 forwards the body byte-for-byte unchanged.
 func TestMaybeCompactOffIsIdentity(t *testing.T) {
 	raw := compactWireBody(t, 16)
