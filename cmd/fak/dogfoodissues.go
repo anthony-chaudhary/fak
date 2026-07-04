@@ -137,12 +137,14 @@ func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
-	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, existing, dogfoodissues.BuildOptions{
+	buildOpt := dogfoodissues.BuildOptions{
 		Live:             *live,
 		DedupeChecked:    *live || *fetchExisting || *existingJSON != "",
 		DedupeCap:        issueSyncScanLimit(*limit),
 		DefaultMilestone: strings.TrimSpace(*milestone),
-	})
+	}
+	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, existing, buildOpt)
+	cohort := dogfoodissues.CohortPlan(items, buildOpt)
 	result := dogfoodissues.Result{
 		Schema:          dogfoodissues.Schema,
 		Mode:            mode,
@@ -151,6 +153,7 @@ func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 		Planned:         plan,
 		Synced:          []dogfoodissues.SyncRow{},
 		Skipped:         skipped,
+		Cohort:          &cohort,
 	}
 	if *live && len(plan) > 0 {
 		result.Synced = dogfoodissues.Sync(plan, *repo, []string(labels), nil)

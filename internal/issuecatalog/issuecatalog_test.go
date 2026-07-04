@@ -214,6 +214,67 @@ func TestResultJSONShape(t *testing.T) {
 	}
 }
 
+// TestCohortPlanReportsCollidingBatchAsMultipleWaves is the issue-#2074 done
+// condition: a catalog batch whose dispatch trees overlap must report more than
+// one concurrency-safe wave (and a non-zero collision count), so a --live sync
+// sees the collision before wave-launch, not at it.
+func TestCohortPlanReportsCollidingBatchAsMultipleWaves(t *testing.T) {
+	a := completeRow() // paths include internal/cachemeta/pool.go
+	b := completeRow()
+	b.Key = "perf/kv-cache/cross-agent-reuse-default-on-child"
+	b.Title = "default-on cross-agent KV prefix reuse (child leaf)"
+	b.Paths = []string{"internal/cachemeta/pool.go"} // overlaps a's cachemeta path
+
+	plan := CohortPlan([]Row{a, b}, Options{})
+	if plan.Dispatchable != 2 {
+		t.Fatalf("dispatchable = %d, want 2 (both scoped rows route)", plan.Dispatchable)
+	}
+	if plan.CollisionPairs < 1 {
+		t.Fatalf("collision pairs = %d, want >=1 (overlapping dispatch trees)", plan.CollisionPairs)
+	}
+	if plan.NumWaves < 2 {
+		t.Fatalf("waves = %d, want >=2 (a colliding batch must not share one wave)", plan.NumWaves)
+	}
+
+	body := Render(Result{
+		Schema:  Schema,
+		Mode:    "dry-run",
+		Catalog: "catalog.json",
+		Total:   2,
+		Planned: []PlanRow{
+			{Action: "create", Key: a.Key, Title: a.Title},
+			{Action: "create", Key: b.Key, Title: b.Title},
+		},
+		Cohort: &plan,
+	})
+	for _, want := range []string{"cohort:", "colliding pair(s)", "colliding batch"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("render missing %q:\n%s", want, body)
+		}
+	}
+}
+
+// TestCohortPlanReportsDisjointBatchAsOneWave is the non-colliding control: two
+// complete rows on disjoint trees collapse into a single concurrency-safe wave.
+func TestCohortPlanReportsDisjointBatchAsOneWave(t *testing.T) {
+	a := completeRow() // internal/cachemeta/pool.go, internal/gateway/gateway.go
+	b := completeRow()
+	b.Key = "perf/kv-cache/disjoint-sibling"
+	b.Title = "disjoint sibling leaf"
+	b.Paths = []string{"internal/cachevalueledger/score.go"}
+
+	plan := CohortPlan([]Row{a, b}, Options{})
+	if plan.Dispatchable != 2 {
+		t.Fatalf("dispatchable = %d, want 2", plan.Dispatchable)
+	}
+	if plan.CollisionPairs != 0 {
+		t.Fatalf("collision pairs = %d, want 0 (disjoint trees)", plan.CollisionPairs)
+	}
+	if plan.NumWaves != 1 || plan.PeakConcurrency != 2 {
+		t.Fatalf("waves=%d peak=%d, want 1 wave of 2", plan.NumWaves, plan.PeakConcurrency)
+	}
+}
+
 func containsStr(xs []string, want string) bool {
 	for _, x := range xs {
 		if x == want {

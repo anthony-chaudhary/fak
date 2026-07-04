@@ -191,6 +191,63 @@ func TestReviewedPlanAcceptsExplicitInboxMilestone(t *testing.T) {
 	}
 }
 
+// TestCohortPlanReportsCollidingBatchAsMultipleWaves is the issue-#2074 done
+// condition: a batch whose dispatch trees overlap must report more than one
+// concurrency-safe wave (and a non-zero collision count), so a --live sync
+// sees the collision before wave-launch, not at it.
+func TestCohortPlanReportsCollidingBatchAsMultipleWaves(t *testing.T) {
+	a := scopedGuardActionItem() // paths: internal/guardrsi/**
+	b := scopedGuardActionItem()
+	b.Key = "guard-rsi-route/guard-journal:second_blank_reason"
+	b.Title = "guardrsi: close second blank-reason hole"
+	b.Paths = []string{"internal/guardrsi/journal.go"} // inside a's tree
+
+	plan := CohortPlan([]ActionItem{a, b}, BuildOptions{})
+	if plan.Dispatchable != 2 {
+		t.Fatalf("dispatchable = %d, want 2 (both scoped leaves route)", plan.Dispatchable)
+	}
+	if plan.CollisionPairs < 1 {
+		t.Fatalf("collision pairs = %d, want >=1 (overlapping dispatch trees)", plan.CollisionPairs)
+	}
+	if plan.NumWaves < 2 {
+		t.Fatalf("waves = %d, want >=2 (a colliding batch must not share one wave)", plan.NumWaves)
+	}
+
+	body := Render(Result{
+		Schema:  Schema,
+		Mode:    "dry-run",
+		Report:  "report.json",
+		Planned: []PlanRow{planRow(a), planRow(b)},
+		Cohort:  &plan,
+	})
+	for _, want := range []string{"cohort:", "colliding pair(s)", "colliding batch"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("render missing %q:\n%s", want, body)
+		}
+	}
+}
+
+// TestCohortPlanReportsDisjointBatchAsOneWave is the non-colliding control: two
+// scoped leaves on disjoint trees collapse into a single concurrency-safe wave.
+func TestCohortPlanReportsDisjointBatchAsOneWave(t *testing.T) {
+	a := scopedGuardActionItem() // internal/guardrsi/**
+	b := scopedGuardActionItem()
+	b.Key = "guard-rsi-route/guard-journal:disjoint_leaf"
+	b.Title = "guardrsi: disjoint sibling leaf"
+	b.Paths = []string{"internal/guardroute/**"}
+
+	plan := CohortPlan([]ActionItem{a, b}, BuildOptions{})
+	if plan.Dispatchable != 2 {
+		t.Fatalf("dispatchable = %d, want 2", plan.Dispatchable)
+	}
+	if plan.CollisionPairs != 0 {
+		t.Fatalf("collision pairs = %d, want 0 (disjoint trees)", plan.CollisionPairs)
+	}
+	if plan.NumWaves != 1 || plan.PeakConcurrency != 2 {
+		t.Fatalf("waves=%d peak=%d, want 1 wave of 2", plan.NumWaves, plan.PeakConcurrency)
+	}
+}
+
 func TestBodyContainsRequiredActionFields(t *testing.T) {
 	items := ExtractActionItems(fixtureReport(t), "report.json")
 	if len(items) == 0 {

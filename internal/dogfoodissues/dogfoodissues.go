@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuecohort"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -142,6 +143,11 @@ type Result struct {
 	// Receipt is the path of the bridge receipt written beside the report on a
 	// tracker-consulting run (--live / --fetch-existing); "" otherwise.
 	Receipt string `json:"receipt,omitempty"`
+	// Cohort is the batch-level wave/collision fold of the action items, computed
+	// by running issuecohort.Build over the batch so a --live run's dispatch-scope
+	// collisions are visible before sync rather than only at wave-launch time. nil
+	// when no cohort was computed.
+	Cohort *issuecohort.Plan `json:"cohort,omitempty"`
 }
 
 // Issue is the subset of a `gh issue list --json ...` row this tool reads.
@@ -651,6 +657,27 @@ func planRow(item ActionItem) PlanRow {
 	return planRowWithOptions(item, BuildOptions{})
 }
 
+// CohortPlan folds the batch's action items through issuecohort.Build so a
+// producer Result can carry the wave/collision structure of the planned batch.
+// The cohort planner re-reviews each item through the same issuecontract the
+// per-row path uses, so its dispatchable leaves are exactly the planned rows,
+// partitioned into concurrency-safe waves; collision_pairs counts the
+// dispatch-scope overlaps a --live sync would otherwise discover only at
+// wave-launch time.
+func CohortPlan(items []ActionItem, opt BuildOptions) issuecohort.Plan {
+	candidates := make([]issuecontract.Candidate, 0, len(items))
+	for _, item := range items {
+		candidates = append(candidates, actionCandidate(item))
+	}
+	return issuecohort.Build(candidates, issuecohort.Options{
+		Options: issuecontract.Options{
+			Live:          opt.Live,
+			DedupeChecked: opt.DedupeChecked,
+			DedupeCap:     opt.DedupeCap,
+		},
+	})
+}
+
 func planRowWithOptions(item ActionItem, opt BuildOptions) PlanRow {
 	milestone := strings.TrimSpace(opt.DefaultMilestone)
 	if milestone == "" {
@@ -967,6 +994,13 @@ func Render(r Result) string {
 		}
 		lines = append(lines, fmt.Sprintf("  [%s] %s: %s (grade=%s debt=%d)",
 			row.Action, target, row.Title, row.Grade, row.DebtCount))
+	}
+	if r.Cohort != nil {
+		lines = append(lines, fmt.Sprintf("  cohort: %d wave(s), peak %d at once, %d colliding pair(s)",
+			r.Cohort.NumWaves, r.Cohort.PeakConcurrency, r.Cohort.CollisionPairs))
+		if r.Cohort.CollisionPairs > 0 {
+			lines = append(lines, "  cohort: colliding batch - review wave split before --live")
+		}
 	}
 	if r.Mode == "dry-run" {
 		lines = append(lines, "  dry-run: pass --live to create/update issues with gh")

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuecohort"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -92,13 +93,18 @@ type SyncRow struct {
 
 // Result is the machine-readable plan/result fold.
 type Result struct {
-	Schema  string       `json:"schema"`
-	Mode    string       `json:"mode"`
-	Catalog string       `json:"catalog"`
-	Total   int          `json:"total"`
-	Planned []PlanRow    `json:"planned"`
-	Synced  []SyncRow    `json:"synced"`
-	Skipped []SkippedRow `json:"skipped,omitempty"`
+	Schema  string            `json:"schema"`
+	Mode    string            `json:"mode"`
+	Catalog string            `json:"catalog"`
+	Total   int               `json:"total"`
+	Planned []PlanRow         `json:"planned"`
+	Synced  []SyncRow         `json:"synced"`
+	Skipped []SkippedRow      `json:"skipped,omitempty"`
+	// Cohort is the batch-level wave/collision fold of the catalog rows, computed
+	// by running issuecohort.Build over the batch so a --live run's dispatch-scope
+	// collisions are visible before sync rather than only at wave-launch time. nil
+	// when no cohort was computed.
+	Cohort *issuecohort.Plan `json:"cohort,omitempty"`
 }
 
 // Issue is the subset of a `gh issue list --json ...` row this tool reads.
@@ -346,6 +352,27 @@ func BuildPlan(rows []Row, existing []Issue, opt Options) ([]PlanRow, []SkippedR
 	return plan, skipped
 }
 
+// CohortPlan folds the batch's catalog rows through issuecohort.Build so a
+// producer Result can carry the wave/collision structure of the planned batch.
+// The cohort planner re-reviews each row through the same issuecontract the
+// per-row path uses, so its dispatchable leaves are exactly the planned rows,
+// partitioned into concurrency-safe waves; collision_pairs counts the
+// dispatch-scope overlaps a --live sync would otherwise discover only at
+// wave-launch time.
+func CohortPlan(rows []Row, opt Options) issuecohort.Plan {
+	candidates := make([]issuecontract.Candidate, 0, len(rows))
+	for _, row := range rows {
+		candidates = append(candidates, row.Candidate())
+	}
+	return issuecohort.Build(candidates, issuecohort.Options{
+		Options: issuecontract.Options{
+			Live:          opt.Live,
+			DedupeChecked: opt.DedupeChecked,
+			DedupeCap:     opt.DedupeCap,
+		},
+	})
+}
+
 // Runner runs a `gh` subprocess and returns stdout, stderr, and an ok flag. It is
 // injectable so Sync is testable without a real gh.
 type Runner func(args []string) (stdout, stderr string, ok bool)
@@ -493,6 +520,13 @@ func Render(r Result) string {
 				break
 			}
 			lines = append(lines, fmt.Sprintf("    %s: %s", row.Key, row.Reason))
+		}
+	}
+	if r.Cohort != nil {
+		lines = append(lines, fmt.Sprintf("  cohort: %d wave(s), peak %d at once, %d colliding pair(s)",
+			r.Cohort.NumWaves, r.Cohort.PeakConcurrency, r.Cohort.CollisionPairs))
+		if r.Cohort.CollisionPairs > 0 {
+			lines = append(lines, "  cohort: colliding batch - review wave split before --live")
 		}
 	}
 	if r.Mode == "dry-run" {

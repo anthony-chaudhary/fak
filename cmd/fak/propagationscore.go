@@ -133,11 +133,13 @@ func runPropagationDebtDispatch(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
-	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, existing, dogfoodissues.BuildOptions{
+	buildOpt := dogfoodissues.BuildOptions{
 		Live:          *live,
 		DedupeChecked: *existingJSON != "" || *fetchExisting || *live,
 		DedupeCap:     *capN,
-	})
+	}
+	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, existing, buildOpt)
+	cohort := dogfoodissues.CohortPlan(items, buildOpt)
 
 	mode := "dry-run"
 	if *live {
@@ -150,6 +152,7 @@ func runPropagationDebtDispatch(stdout, stderr io.Writer, argv []string) int {
 		Planned: plan,
 		Synced:  []dogfoodissues.SyncRow{},
 		Skipped: skipped,
+		Cohort:  &cohort,
 	}
 
 	exit := 0
