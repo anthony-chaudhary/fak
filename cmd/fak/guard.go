@@ -172,13 +172,8 @@ func cmdGuard(argv []string) {
 	mcpRegister := fs.Bool("mcp-register", true, "register fak's own MCP self-query surface (fak_index_*, fak_memory_*, fak_tools_search) into the wrapped Claude Code child by default, via a session-scoped --mcp-config pointing at this gateway's /mcp endpoint. Claude-only; ADDS to any project/user MCP config the child already loads, never replaces it. Every call is still re-adjudicated by the guard floor — this widens discovery, not the danger floor. Pass --mcp-register=false if you already supply your own MCP config.")
 	managedCacheMode := fs.String("managed-cache", guardManagedCacheAuto, "actively manage the provider prompt-cache on the outbound Anthropic wire: auto|on|off (epic #1844 C6). ACTIVE upgrades the stable-prefix cache_control breakpoint to Anthropic's 1h TTL tier, so a long session that idles past the default 5m cache window (a human stepping away, a slow tool, a rate-limit stall) re-enters on a 0.1x cache READ instead of re-writing the whole prefix; the upgrade is byte-safe (only an existing stable system/tools-head breakpoint is extended, volatile heads refused) and witnessed on /metrics as fak_gateway_cache_ttl_upgrade_total. AUTO (default) activates ONLY when this session provably bills an API key (--api-key-env resolved a key on the Anthropic wire) — there the 2x one-time 1h write premium vs repeated 1.25x prefix re-writes is the operator's own dollars; a subscription-OAuth or passthrough session stays passive. on forces it; off disables.")
 	compress := fs.Bool("compress", false, "activate the native context-compressor for this session: shrink benign tool results (ANSI/control strip, CR-redraw collapse, duplicate-line fold, JSON minify) before they enter model context, only when the saving clears the worth-it floor and never on poison, with the original preserved (reversible). Equivalent to FAK_COMPRESSOR=native for this process; an explicit FAK_COMPRESSOR wins. See `fak headroom bench` for the savings and `fak headroom status` for the live decision breakdown.")
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: fak guard [flags] -- <agent command...>")
-		fmt.Fprintln(os.Stderr, "  e.g. fak guard -- claude")
-		fmt.Fprintln(os.Stderr, "       fak guard --provider openai -- codex")
-		fmt.Fprintln(os.Stderr, "       fak guard --policy my-floor.json -- claude")
-		fs.PrintDefaults()
-	}
+	guardHelpAll := guardArgvHasAll(argv)
+	fs.Usage = func() { printGuardUsage(os.Stderr, fs, guardHelpAll) }
 	_ = fs.Parse(argv)
 	// Boot-timeline instrumentation: mirror serve.go's StartupPhases (internal/gateway/startup.go)
 	// so a slow `fak guard` launch is diagnosable from THIS session's own boot timeline instead of
