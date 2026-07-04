@@ -100,6 +100,45 @@ class ContractScanStreamTest(unittest.TestCase):
         self.assertEqual(mod.contract_scan_stream(None, skip=set()), [])
 
 
+class OpencodeWorkerEnvTest(unittest.TestCase):
+    def test_pinning_xdg_preserves_windows_gh_config(self) -> None:
+        import os
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            appdata = root / "AppData" / "Roaming"
+            gh_config = appdata / "GitHub CLI"
+            gh_config.mkdir(parents=True)
+            account = root / "opencode"
+            account.mkdir()
+            with mock.patch.dict(os.environ, {
+                "APPDATA": str(appdata),
+                "USERPROFILE": str(root / "home"),
+            }, clear=True):
+                env = mod.opencode_worker_env(
+                    str(account), "contract-repair", root, root / ".dispatch-runs")
+        self.assertEqual(env["XDG_CONFIG_HOME"], str(root))
+        self.assertEqual(env["GH_CONFIG_DIR"], str(gh_config))
+
+    def test_explicit_gh_config_dir_wins(self) -> None:
+        import os
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            explicit = root / "custom-gh"
+            account = root / "opencode"
+            account.mkdir()
+            with mock.patch.dict(os.environ, {
+                "GH_CONFIG_DIR": str(explicit),
+                "APPDATA": str(root / "AppData" / "Roaming"),
+            }, clear=True):
+                env = mod.opencode_worker_env(
+                    str(account), "contract-repair", root, root / ".dispatch-runs")
+        self.assertEqual(env["GH_CONFIG_DIR"], str(explicit))
+
+
 class CooldownTest(unittest.TestCase):
     def test_recent_log_is_in_cooldown_old_one_is_not(self) -> None:
         import os

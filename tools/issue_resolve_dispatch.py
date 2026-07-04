@@ -1068,6 +1068,30 @@ def _opencode_config_home(account_dir: str, runs_dir: Path) -> str:
     return str(pin)
 
 
+def _github_cli_config_dir(base: dict[str, str] | None = None) -> str | None:
+    """Return the ambient gh config dir, if one exists.
+
+    opencode account pinning uses XDG_CONFIG_HOME. GitHub CLI also consults that
+    variable unless GH_CONFIG_DIR is explicit, so preserve the normal gh config
+    path before the worker's model-account pin hides it.
+    """
+    e = base if base is not None else os.environ
+    explicit = e.get("GH_CONFIG_DIR")
+    if explicit:
+        return explicit
+    candidates: list[Path] = []
+    appdata = e.get("APPDATA")
+    if appdata:
+        candidates.append(Path(appdata) / "GitHub CLI")
+    home = e.get("HOME") or e.get("USERPROFILE")
+    if home:
+        candidates.append(Path(home) / ".config" / "gh")
+    for path in candidates:
+        if path.exists():
+            return str(path)
+    return None
+
+
 def opencode_worker_env(account_dir: str | None, lane: str, workspace: Path,
                         runs_dir: Path) -> dict[str, str]:
     """Child env for an opencode/glm worker: the account pinned via XDG_CONFIG_HOME
@@ -1078,6 +1102,9 @@ def opencode_worker_env(account_dir: str | None, lane: str, workspace: Path,
     env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
     if account_dir:
         env["XDG_CONFIG_HOME"] = _opencode_config_home(account_dir, runs_dir)
+    gh_config = _github_cli_config_dir()
+    if gh_config:
+        env.setdefault("GH_CONFIG_DIR", gh_config)
     return env
 
 
