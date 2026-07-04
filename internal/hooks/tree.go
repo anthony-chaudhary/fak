@@ -112,6 +112,7 @@ func HygieneGates() []HygieneGate {
 		{"INDEX_SYNC", gateIndexSyncTree, false},
 		{"BRAND_CONSISTENCY", gateBrandConsistencyTree, false},
 		{"TIER_DECLARED", gateTierDeclaredTree, false},
+		{"NEW_PYTHON_TOOL", gatePythonToolTree, false},
 		{"HARDWARE_TELL", gateHardwareTreeTell, false},
 		// BARE_DEV_SPELLING (C4 of epic #2228, #2233) is DefaultOff: it is the reusable
 		// audit sweep the migration batches run via `fak hygiene --gates BARE_DEV_SPELLING`,

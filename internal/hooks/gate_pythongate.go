@@ -1,0 +1,101 @@
+package hooks
+
+import (
+	"regexp"
+	"sort"
+	"strings"
+)
+
+// gate_pythongate.go — the whole-tree gate that catches a NEW tools/*.py before it reaches
+// the shared trunk. internal/pythongate's TestNoNewPythonTools already reds CI when a tracked
+// tools/*.py is not in the grandfathered de-Python baseline, but that test only fires AFTER
+// the offending commit is on the trunk and `go test ./...` runs — so on a hot, many-session
+// trunk the ratchet reds the release-gating fast subset (ci-fast.yml) minutes after the push,
+// and holds the release cadence on CI_BASE_RED until a human notices. This gate surfaces the
+// same NEW_PYTHON_TOOL gap one boundary earlier, in `fak hygiene` (the pre-push --audit-tree
+// backstop), so a contributor sees it BEFORE the trunk goes red (epic #2653).
+//
+// It is the pythongate twin of gate_tierdeclared.go: like that gate, it does NOT import its
+// tier-2 scorecard package (an upward import a tier-1 hooks package may not make). It parses
+// the single source of truth — the `grandfathered` baseline literal in
+// internal/pythongate/baseline.go — from the tracked tree and compares it to the tracked
+// tools/*.py set, so it can never become a rival authority to the ratchet it fronts.
+
+// pythonBaselineFile is the single source of truth for the de-Python grandfathered baseline.
+const pythonBaselineFile = "internal/pythongate/baseline.go"
+
+// reasonNewPythonTool mirrors pythongate.ReasonNewPythonTool without importing the tier-2
+// package (kept as a literal so the tier-1 gate stays import-clean; the test asserts they agree).
+const reasonNewPythonTool = "NEW_PYTHON_TOOL"
+
+// pyBaselineEntryRE matches a `"tools/....py"` string literal — one grandfathered path per
+// match. Anchored to the tools/ prefix + .py suffix so a stray quoted string in a comment or
+// the regenerate recipe in the file's doc block is not miscounted as a baseline entry.
+var pyBaselineEntryRE = regexp.MustCompile(`"(tools/[^"]+\.py)"`)
+
+// declaredPyBaseline parses the grandfathered tools/*.py paths out of baseline.go read from
+// the tracked tree. ok is false when the file cannot be read or holds no entries (the gate
+// then fails open via ErrCouldNotRun, never a false NEW_PYTHON_TOOL on an unreadable source).
+func declaredPyBaseline(t *TrackedTree) (map[string]bool, bool) {
+	body, exists := t.FileBytes(pythonBaselineFile)
+	if !exists {
+		return nil, false
+	}
+	declared := map[string]bool{}
+	inBlock := false
+	for _, line := range strings.Split(string(body), "\n") {
+		if !inBlock {
+			if strings.Contains(line, "var grandfathered = []string{") {
+				inBlock = true
+			}
+			continue
+		}
+		// The slice literal closes at the first line that is just `}`.
+		if strings.TrimSpace(line) == "}" {
+			break
+		}
+		for _, m := range pyBaselineEntryRE.FindAllStringSubmatch(line, -1) {
+			declared[m[1]] = true
+		}
+	}
+	if len(declared) == 0 {
+		return nil, false // the marker moved or the file shape changed — fail open
+	}
+	return declared, true
+}
+
+// gatePythonToolTree emits a NEW_PYTHON_TOOL finding for every tracked tools/*.py that is not
+// in the grandfathered baseline — the same verdict pythongate.ScanTree computes, one boundary
+// earlier. It reads the tracked path set (so an untracked scratch .py in tools/ is correctly
+// ignored, exactly like git ls-files). Returns ErrCouldNotRun when the baseline cannot be
+// parsed (fail open, exit 2 → the pythongate TEST still catches it in CI as the backstop).
+func gatePythonToolTree(t *TrackedTree) ([]Finding, error) {
+	baseline, ok := declaredPyBaseline(t)
+	if !ok {
+		return nil, ErrCouldNotRun
+	}
+	var findings []Finding
+	for _, p := range t.Paths {
+		if !strings.HasPrefix(p, "tools/") || !strings.HasSuffix(p, ".py") {
+			continue
+		}
+		// A nested tools/**/x.py is not what the ratchet scans (git ls-files tools/*.py is
+		// one level); keep the gate's scope identical so it never over-refuses.
+		if strings.Count(p, "/") != 1 {
+			continue
+		}
+		if baseline[p] {
+			continue
+		}
+		findings = append(findings, Finding{
+			Gate: reasonNewPythonTool,
+			File: p,
+			Detail: p + " is a NEW python tool; port it to Go instead (" + reasonNewPythonTool +
+				"). If it is a genuinely new tool that must stay Python, add its path to the " +
+				"grandfathered baseline in " + pythonBaselineFile + " (the single source of truth " +
+				"pythongate.TestNoNewPythonTools also reads).",
+		})
+	}
+	sort.Slice(findings, func(i, j int) bool { return findings[i].File < findings[j].File })
+	return findings, nil
+}
