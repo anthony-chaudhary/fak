@@ -6,6 +6,9 @@ run alike, because they're enforced *below* the agent layer by git hooks and the
 trust kernel, not by trust. This file is the durable contract for everyone — human and
 agent alike.
 
+New here and want a small first PR? The [good first popularization tasks](docs/adoption/good-first-tasks.md)
+board lists doc-sized wins, each naming the exact file to edit and how hard it is.
+
 This file is short on purpose; the deep public guides are `fak/ARCHITECTURE.md` (the
 extension model and the layered-DAG tier gates, enforced by `internal/architest`) and
 **`fak/EXTENDING.md`** — the golden path if you're a researcher or team who wants to
