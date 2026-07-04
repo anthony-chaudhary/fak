@@ -167,6 +167,77 @@ func TestClassifyExtraDenyHosts(t *testing.T) {
 	}
 }
 
+// TestClassifyHostBlocksAlternateIPv4Encodings pins the cloud-metadata SSRF bypass
+// class that net.ParseIP alone misses: the IMDS address 169.254.169.254 (and the
+// Alibaba metadata address) can be reached via the non-canonical IPv4 encodings a
+// libc resolver (curl/wget/most HTTP clients, via inet_aton) still dials — a bare
+// 32-bit decimal integer, a 0x-hex integer, an octal integer, and per-octet hex/octal.
+// Before the looseIPv4 normalization each of these decoded to a nil net.IP and sailed
+// straight through the floor, handing a prompt-injected agent the box's credentials.
+func TestClassifyHostBlocksAlternateIPv4Encodings(t *testing.T) {
+	// Each of these dials 169.254.169.254 (the IMDS address) unless noted otherwise.
+	blocked := []string{
+		"2852039166",          // decimal (0xA9FEA9FE) — the canonical AWS IMDS SSRF bypass
+		"0xA9FEA9FE",          // hex, upper
+		"0xa9fea9fe",          // hex, lower
+		"025177524776",        // octal
+		"0xA9.0xFE.0xA9.0xFE", // per-octet hex
+		"0251.0376.0251.0376", // per-octet octal
+		"169.254.43518",       // 3-part inet_aton (last octet is the 16-bit 169*256+254)
+		"1684300900",          // decimal Alibaba Cloud metadata 100.100.100.100
+	}
+	for _, h := range blocked {
+		if ok, lbl := ClassifyHost(h); !ok {
+			t.Errorf("ClassifyHost(%q) = not blocked, want blocked (alternate-encoding metadata SSRF bypass)", h)
+		} else if lbl == "" {
+			t.Errorf("ClassifyHost(%q) blocked with an empty label", h)
+		}
+	}
+}
+
+// TestClassifyHostAllowsAlternateEncodingPublicIPs is the false-positive guard for the
+// alternate-encoding path: a NON-metadata address in integer/hex form (a public host a
+// bug-hunter might legitimately pass) must decode and then stay ALLOWED — the loose
+// parser only ever adds a block for a host that genuinely lands in the metadata/
+// link-local class, never for any host that decodes elsewhere.
+func TestClassifyHostAllowsAlternateEncodingPublicIPs(t *testing.T) {
+	allowed := []string{
+		"134744072",  // decimal 8.8.8.8 (public)
+		"0x08080808", // hex 8.8.8.8
+		"16843009",   // decimal 1.1.1.1
+		"0",          // 0.0.0.0
+		"3232235777", // decimal 192.168.1.1 (RFC1918, but not link-local/metadata)
+	}
+	for _, h := range allowed {
+		if ok, lbl := ClassifyHost(h); ok {
+			t.Errorf("ClassifyHost(%q) = blocked (%s), want allowed", h, lbl)
+		}
+	}
+}
+
+// TestClassifyAlternateEncodingThroughSurfaces proves the alternate-encoding block
+// fires through the real call surfaces, not just the bare-host classifier: a
+// WebFetch/endpoint destination and a curl command that dial the IMDS via a decimal or
+// hex integer host are refused exactly as the dotted form is.
+func TestClassifyAlternateEncodingThroughSurfaces(t *testing.T) {
+	cases := []struct {
+		name string
+		tool string
+		args map[string]any
+	}{
+		{"webfetch decimal url", "WebFetch", map[string]any{"url": "http://2852039166/latest/meta-data/iam/"}},
+		{"endpoint hex host with port", "http_get", map[string]any{"endpoint": "0xA9FEA9FE:80"}},
+		{"curl hex url in command", "Bash", map[string]any{"command": "curl -s http://0xA9FEA9FE/latest/meta-data/"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if h, _ := Classify(tc.tool, tc.args); h == "" {
+				t.Errorf("Classify(%s) did not block an alternate-encoding metadata destination", tc.name)
+			}
+		})
+	}
+}
+
 // TestClassifyDoesNotScanContent is the critical false-positive guard: a payload arg
 // (content/text/body/code/diff) that merely MENTIONS a metadata address — a doc, a
 // test, a security note being written to disk — must NOT be blocked. The floor refuses

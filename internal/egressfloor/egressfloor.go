@@ -24,6 +24,7 @@ package egressfloor
 import (
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -255,6 +256,17 @@ func ClassifyHost(host string) (blocked bool, label string) {
 	}
 	ip := net.ParseIP(h)
 	if ip == nil {
+		// net.ParseIP accepts only canonical dotted-decimal IPv4 / standard IPv6, but a
+		// libc resolver (curl/wget/most HTTP clients, via inet_aton) also dials the
+		// non-canonical forms — a bare 32-bit integer, 0x-hex, octal, per-octet radices.
+		// `http://2852039166/` reaches 169.254.169.254, the canonical cloud-metadata SSRF
+		// bypass, so normalize those to a canonical IP before the class checks below. This
+		// can only ever ADD a block for a host that decodes INTO the metadata/link-local
+		// class; a real hostname (has letters) or a public integer decodes elsewhere and
+		// stays allowed, so it introduces no false positive on legitimate traffic.
+		ip = looseIPv4(h)
+	}
+	if ip == nil {
 		return false, ""
 	}
 	switch {
@@ -269,6 +281,83 @@ func ClassifyHost(host string) (blocked bool, label string) {
 		return true, "link-local / cloud-metadata address (169.254.0.0/16, fe80::/10)"
 	}
 	return false, ""
+}
+
+// looseIPv4 parses the non-canonical IPv4 literals that net.ParseIP rejects but a libc
+// resolver (inet_aton, used by curl/wget and most HTTP clients) still dials: a value of
+// 1–4 dot-separated parts where each part may be decimal, 0x-hexadecimal, or leading-0
+// octal. The parts are combined with inet_aton's part-count-dependent byte layout (a
+// lone integer is the full 32 bits; a.b spills b into the low 24 bits; a.b.c spills c
+// into the low 16). It returns nil for anything that is not an unambiguous alternate-
+// radix IPv4 literal — a real DNS hostname has letters and never survives ParseUint —
+// so ClassifyHost can only ever ADD a metadata/link-local block from it, never a new
+// false positive on a legitimate hostname or an already-canonical dotted address (those
+// are handled by net.ParseIP before this runs).
+func looseIPv4(h string) net.IP {
+	if h == "" {
+		return nil
+	}
+	parts := strings.Split(h, ".")
+	if len(parts) > 4 {
+		return nil
+	}
+	vals := make([]uint64, len(parts))
+	for i, p := range parts {
+		v, ok := parseInetPart(p)
+		if !ok {
+			return nil
+		}
+		vals[i] = v
+	}
+	var ip uint32
+	switch len(parts) {
+	case 1: // a — the whole 32-bit address
+		if vals[0] > 0xFFFFFFFF {
+			return nil
+		}
+		ip = uint32(vals[0])
+	case 2: // a.b — b is the low 24 bits
+		if vals[0] > 0xFF || vals[1] > 0xFFFFFF {
+			return nil
+		}
+		ip = uint32(vals[0])<<24 | uint32(vals[1])
+	case 3: // a.b.c — c is the low 16 bits
+		if vals[0] > 0xFF || vals[1] > 0xFF || vals[2] > 0xFFFF {
+			return nil
+		}
+		ip = uint32(vals[0])<<24 | uint32(vals[1])<<16 | uint32(vals[2])
+	default: // a.b.c.d — one byte each
+		if vals[0] > 0xFF || vals[1] > 0xFF || vals[2] > 0xFF || vals[3] > 0xFF {
+			return nil
+		}
+		ip = uint32(vals[0])<<24 | uint32(vals[1])<<16 | uint32(vals[2])<<8 | uint32(vals[3])
+	}
+	return net.IPv4(byte(ip>>24), byte(ip>>16), byte(ip>>8), byte(ip))
+}
+
+// parseInetPart parses one inet_aton octet-or-larger field: a 0x/0X prefix is
+// hexadecimal, a lone leading 0 (with more digits) is octal, everything else is
+// decimal. It returns ok == false for an empty field or any value ParseUint rejects, so
+// a non-numeric token (a hostname label) can never masquerade as a numeric part.
+func parseInetPart(p string) (uint64, bool) {
+	if p == "" {
+		return 0, false
+	}
+	base := 10
+	switch {
+	case len(p) >= 2 && (p[:2] == "0x" || p[:2] == "0X"):
+		base, p = 16, p[2:]
+		if p == "" {
+			return 0, false
+		}
+	case len(p) >= 2 && p[0] == '0':
+		base, p = 8, p[1:]
+	}
+	v, err := strconv.ParseUint(p, base, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
 }
 
 var (
