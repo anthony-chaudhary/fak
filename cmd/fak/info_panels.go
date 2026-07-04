@@ -182,11 +182,21 @@ func guardInfoTrendsPanelRows(ctx guardInfoPanelCtx, level guardInfoPanelLevel) 
 	if level == guardPanelMini {
 		return []string{saveRow}
 	}
-	return []string{
+	rows := []string{
 		saveRow,
 		fmt.Sprintf(" hit   %s  %.0f%%  ×%.2f", sparklineTUI(ctx.tr.hit, ctx.sparkW), guardInfoHitPct(v), guardInfoMult(v)),
 		fmt.Sprintf(" work  %s  %d replies · busy %d", sparklineTUI(ctx.tr.turns, ctx.sparkW), v.Inference.Turns, v.Gateway.InflightRequests),
 	}
+	// "turns saved": engine calls fak avoided for the agent (vDSO memo hits + inline-served
+	// turns) — WITNESSED/fak-authored, the live twin of the exit summary's "vDSO N avoided
+	// call(s)". Shown only when fak actually avoided a call, so a proxy session that avoided
+	// nothing stays silent (the panels' zero-cost contract). Its currency is "calls", NOT
+	// "tok", so it never reads as a provider-cache token saving on the rows above.
+	if saved := guardInfoTurnsSaved(v); saved > 0 {
+		rows = append(rows, fmt.Sprintf(" saved %s  %s calls avoided",
+			sparklineTUI(ctx.tr.savedCalls, ctx.sparkW), guardInfoShortCount(int(saved))))
+	}
+	return rows
 }
 
 // guardInfoTasksPanelRows is the task-manager sub-pane: the cache gauge (with the

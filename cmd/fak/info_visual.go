@@ -35,12 +35,13 @@ var guardInfoSparkRunes = []rune("▁▂▃▄▅▆▇█")
 // Each series is capped to guardInfoTrendCap; push appends one tick and trims the oldest. It is
 // the only state the overlay carries across ticks — the gateway stays the single source of truth.
 type guardInfoTrend struct {
-	cap      int
-	saved    []float64 // net saved-token-equiv (the headline economic signal; can be negative)
-	hit      []float64 // cache hit rate, 0..1
-	turns    []float64 // cumulative replies (model turns) — its slope is the work rate
-	inflight []float64 // requests in flight right now
-	heap     []float64 // gateway heap-alloc bytes — the resources panel's live memory trend
+	cap        int
+	saved      []float64 // net saved-token-equiv (the headline economic signal; can be negative)
+	hit        []float64 // cache hit rate, 0..1
+	turns      []float64 // cumulative replies (model turns) — its slope is the work rate
+	inflight   []float64 // requests in flight right now
+	heap       []float64 // gateway heap-alloc bytes — the resources panel's live memory trend
+	savedCalls []float64 // cumulative engine calls fak avoided (turns saved) — its slope is the saving rate
 }
 
 // newGuardInfoTrend returns an empty trend ring with the given per-series cap (clamped to >=1).
@@ -65,6 +66,7 @@ func (t *guardInfoTrend) push(v guardInfoVars) {
 	t.turns = appendCappedTUI(t.turns, float64(v.Inference.Turns), t.cap)
 	t.inflight = appendCappedTUI(t.inflight, float64(v.Gateway.InflightRequests), t.cap)
 	t.heap = appendCappedTUI(t.heap, float64(v.Runtime.Memory.HeapAllocBytes), t.cap)
+	t.savedCalls = appendCappedTUI(t.savedCalls, float64(guardInfoTurnsSaved(v)), t.cap)
 }
 
 // appendCappedTUI appends v to s and keeps only the last capN elements (a fixed-size tail ring).
@@ -297,6 +299,20 @@ func guardInfoHitFrac(v guardInfoVars) float64 {
 }
 
 func guardInfoHitPct(v guardInfoVars) float64 { return guardInfoHitFrac(v) * 100 }
+
+// guardInfoTurnsSaved is the session's "turns saved": the count of engine calls fak
+// spared the agent this session — vDSO memo hits plus inline-served turns — the SAME
+// FakVDSOAvoidedCalls the guard exit summary prints as "vDSO N avoided call(s)". It is
+// WITNESSED/fak-authored (its witness is skipped engine calls, not provider-relayed
+// tokens), and reads the honest zero when the gateway has not reported the cache-
+// attribution block yet (nil pointer), so the trends panel stays silent on a session
+// that avoided nothing rather than fabricating a saving.
+func guardInfoTurnsSaved(v guardInfoVars) uint64 {
+	if v.CacheAttribution == nil {
+		return 0
+	}
+	return v.CacheAttribution.FakVDSOAvoidedCalls
+}
 
 func guardInfoMult(v guardInfoVars) float64 {
 	if v.VCache != nil {

@@ -708,6 +708,13 @@ func renderGuardInfoLine(v guardInfoVars) string {
 		cache,
 		guardFloorSafetyWord(v.Kernel.Denies, v.Kernel.Transforms, v.Kernel.Quarantines, v.Kernel.ResultDenies),
 		v.Inference.Turns, v.Gateway.InflightRequests, humanUptime(v.Gateway.UptimeSeconds))
+	// "turns saved": engine calls fak avoided for the agent this session (the same
+	// WITNESSED FakVDSOAvoidedCalls the visual pane's trends row and the exit summary
+	// report). Shown only when a call was actually avoided so a session that saved nothing
+	// stays quiet; kept in "calls" so it never reads as a provider-cache token saving.
+	if saved := guardInfoTurnsSaved(v); saved > 0 {
+		line += fmt.Sprintf(" · saved %s calls", guardInfoShortCount(int(saved)))
+	}
 	if len(v.Sessions) > 0 {
 		line += " · agents " + guardInfoAgentsSummary(v.Sessions)
 	}
@@ -1053,6 +1060,7 @@ func guardInfoLegend() string {
 	fmt.Fprintln(&b, "what this means:")
 	fmt.Fprintln(&b, "  cache  = fak re-uses text it already sent so the model costs less. \"saving money\" = the re-use has paid off; \"reused %\" = how much was re-used; \"×N cheaper\" = how much cheaper; tokens = how much you've saved so far (can start below zero).")
 	fmt.Fprintln(&b, "  safety = what fak did to keep you safe: blocked an unsafe action, fixed a risky one before it ran, or set a suspicious result aside.")
+	fmt.Fprintln(&b, "  saved  = \"turns saved\": engine calls fak avoided for you (served from its own cache or handled in-kernel) so the agent never had to make them — shown only once at least one was avoided.")
 	fmt.Fprintln(&b, "  assumptions = active facts the session is relying on, with source class, confidence, expiry, and origin reference from public session/debug state.")
 	fmt.Fprintln(&b, "  agents = live sessions running through this fak — the main agent plus any sub-agents it spawned, with remaining budget and wall-clock.")
 	fmt.Fprintln(&b, "  replies = answers the model has given · busy with = work happening right now · running = how long fak has been up · \"nothing yet\" = no re-use has happened.")

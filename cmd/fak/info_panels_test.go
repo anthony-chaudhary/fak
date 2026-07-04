@@ -62,6 +62,23 @@ func TestRenderGuardInfoVisualBlockResourcesAndAgents(t *testing.T) {
 	}
 }
 
+// TestRenderGuardInfoVisualBlockCarriesTurnsSaved proves the turns-saved row survives
+// the full composer path into the roomy visual block, under the trends section rule.
+func TestRenderGuardInfoVisualBlockCarriesTurnsSaved(t *testing.T) {
+	tr := newGuardInfoTrend(guardInfoTrendCap)
+	v := provenVisualVars()
+	v.CacheAttribution = &guardInfoCacheAttribution{FakVDSOAvoidedCalls: 4}
+	for i := 0; i < 6; i++ {
+		tr.push(v)
+	}
+	block := renderGuardInfoVisualBlock(v, tr, 120, 0 /*roomy*/)
+	for _, want := range []string{"── trends ", " saved ", "4 calls avoided"} {
+		if !strings.Contains(block, want) {
+			t.Errorf("visual block missing turns-saved element %q:\n%s", want, block)
+		}
+	}
+}
+
 // TestGuardInfoPanelsSilentWithoutData pins the zero-cost contract for absent data: a
 // snapshot with no runtime block and no sessions renders NO resources/agents rows, so
 // old gateways and bare fixtures keep the original two-sub-pane layout byte-for-byte.
@@ -180,6 +197,74 @@ func TestGuardInfoBytesText(t *testing.T) {
 		if got := guardInfoBytesText(tc.b); got != tc.want {
 			t.Errorf("bytesText(%d) = %q, want %q", tc.b, got, tc.want)
 		}
+	}
+}
+
+// TestGuardInfoTurnsSaved pins the "turns saved" projection: nil attribution reads the
+// honest zero, and a reported FakVDSOAvoidedCalls is surfaced verbatim.
+func TestGuardInfoTurnsSaved(t *testing.T) {
+	var v guardInfoVars
+	if got := guardInfoTurnsSaved(v); got != 0 {
+		t.Errorf("nil attribution must read 0 turns saved, got %d", got)
+	}
+	v.CacheAttribution = &guardInfoCacheAttribution{FakVDSOAvoidedCalls: 7}
+	if got := guardInfoTurnsSaved(v); got != 7 {
+		t.Errorf("turns saved = %d, want 7", got)
+	}
+}
+
+// TestGuardInfoTrendsSavedCalls proves the trends panel grows a "saved" row surfacing
+// the fak-authored turns saved (avoided engine calls) when the gateway reports them,
+// stays silent — the panels' zero-cost contract — when nothing was avoided, and keeps
+// the mini form the single headline save row either way.
+func TestGuardInfoTrendsSavedCalls(t *testing.T) {
+	tr := newGuardInfoTrend(guardInfoTrendCap)
+	v := provenVisualVars()
+	v.CacheAttribution = &guardInfoCacheAttribution{FakVDSOAvoidedCalls: 3}
+	for i := 0; i < 4; i++ {
+		tr.push(v)
+	}
+	ctx := guardInfoPanelCtx{v: v, tr: tr, width: 120, sparkW: 12, gaugeW: 10}
+
+	full := strings.Join(guardInfoTrendsPanelRows(ctx, guardPanelFull), "\n")
+	for _, want := range []string{" saved ", "3 calls avoided"} {
+		if !strings.Contains(full, want) {
+			t.Errorf("trends panel must carry the turns-saved row (%q):\n%s", want, full)
+		}
+	}
+	// The saved currency is "calls", never "tok" — it must not read as a token saving.
+	if strings.Contains(full, "calls avoided tok") || strings.Contains(full, "calls tok") {
+		t.Errorf("turns-saved row must stay in the calls currency:\n%s", full)
+	}
+
+	// Silent without any avoided calls: the pre-existing three-row trends layout.
+	bareCtx := guardInfoPanelCtx{v: provenVisualVars(), tr: tr, width: 120, sparkW: 12, gaugeW: 10}
+	bare := guardInfoTrendsPanelRows(bareCtx, guardPanelFull)
+	if strings.Contains(strings.Join(bare, "\n"), "calls avoided") {
+		t.Errorf("trends panel must omit the saved row when nothing was avoided:\n%s", strings.Join(bare, "\n"))
+	}
+	if len(bare) != 3 {
+		t.Errorf("silent trends panel must keep its three rows, got %d", len(bare))
+	}
+
+	// Mini stays the single save row whether or not calls were avoided.
+	mini := guardInfoTrendsPanelRows(ctx, guardPanelMini)
+	if len(mini) != 1 || strings.Contains(mini[0], "calls avoided") {
+		t.Errorf("mini trends form must stay the single save row: %q", mini)
+	}
+}
+
+// TestRenderGuardInfoLineCarriesTurnsSaved proves the compact status line (line mode +
+// the tiny-pane fallback) surfaces turns saved when present and omits it when zero, so
+// the metric is watchable even when the visual layout has no room for the trends row.
+func TestRenderGuardInfoLineCarriesTurnsSaved(t *testing.T) {
+	v := provenVisualVars()
+	v.CacheAttribution = &guardInfoCacheAttribution{FakVDSOAvoidedCalls: 5}
+	if line := renderGuardInfoLine(v); !strings.Contains(line, "saved 5 calls") {
+		t.Errorf("status line must carry turns saved when present: %q", line)
+	}
+	if line := renderGuardInfoLine(provenVisualVars()); strings.Contains(line, "calls") {
+		t.Errorf("status line must omit turns saved when none were avoided: %q", line)
 	}
 }
 
