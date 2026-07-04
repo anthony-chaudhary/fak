@@ -120,6 +120,8 @@ func main() {
 		cmdFrontierswe(os.Args[2:])
 	case "sota":
 		cmdSota(os.Args[2:])
+	case "kvbm":
+		cmdKVBM(os.Args[2:])
 	case "sota-coverage-scorecard":
 		cmdSOTACoverageScorecard(os.Args[2:])
 	case "bench-runs":

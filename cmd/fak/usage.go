@@ -173,6 +173,10 @@ const usageCoreText = `usage:
                  stay-minimal route, and the verification oracle -- so an op is not
                  re-derived from scratch when llama.cpp/Marlin/FlashInfer/a paper
                  already solved it)
+  fak kvbm      replay [--artifact FILE] [--json] [--check]
+                (KVBM eviction validation: replay a committed fak.kvbm.replay/v1
+                 artifact and gate cost-aware >= LRU hit tokens at the same budget,
+                 active-pin safety, and byte-identical restore after eviction)
   fak bench-runs list|show|compare|best|table|summary
                 (native query surface for experiments/benchmark/catalog.json and run
                  artifacts; the Go replacement for tools/bench_cli.py)
