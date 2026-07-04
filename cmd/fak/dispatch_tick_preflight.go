@@ -159,6 +159,7 @@ var dispatchProbeHostResources = dispatchPreflightHostResources
 var dispatchProbeWorkerCount = dispatchProductWorkerCount
 var dispatchProbeProcesses = dispatchProbeProcessesNative
 var dispatchProbeCodexProcessRows = dispatchScanCodexProcessRowsNative
+var dispatchProbeWorkerProcessRows = dispatchScanWorkerProcessRowsNative
 var dispatchReadAccountRoster = dispatchReadAccountRosterNative
 
 func dispatchReadAccountRosterNative(root string) ([]dispatchtick.AccountRow, error) {
@@ -371,7 +372,7 @@ func dispatchLiveSeatLeases(runsDir string) []dispatchtick.SeatLease {
 	if err != nil || !st.IsDir() {
 		return nil
 	}
-	matches, _ := filepath.Glob(filepath.Join(runsDir, "resolve-*.pid"))
+	matches := dispatchWorkerPIDFiles(runsDir)
 	sort.Strings(matches)
 	leases := make([]dispatchtick.SeatLease, 0, len(matches))
 	for _, pidFile := range matches {
@@ -596,6 +597,12 @@ func dispatchRAMAndThreadsPOSIX() (*int, *int) {
 
 func dispatchProductWorkerCount(root, product string) int {
 	pids := dispatchLiveResolveWorkerPIDs(filepath.Join(root, dispatchtick.RunsDirName), product)
+	for pid := range dispatchLiveGoalWorkerPIDs(filepath.Join(root, dispatchGoalRunsDirName), product) {
+		pids[pid] = true
+	}
+	for pid := range dispatchCmdlineWorkerPIDs(product) {
+		pids[pid] = true
+	}
 	if product == "codex" {
 		for pid := range dispatchAmbientCodexPIDsExcludingSidecarParents(pids) {
 			pids[pid] = true
@@ -603,6 +610,8 @@ func dispatchProductWorkerCount(root, product string) int {
 	}
 	return len(pids)
 }
+
+const dispatchGoalRunsDirName = ".goal-runs"
 
 type dispatchCodexProcessRow struct {
 	PID     int    `json:"pid"`
@@ -688,6 +697,49 @@ func dispatchPIDHasAncestor(pid int, parents map[int]int, ancestors map[int]bool
 	return false
 }
 
+const (
+	dispatchWorkerCmdMarker       = "dos-dispatch-loop"
+	dispatchIssueResolveCmdMarker = "resolve GitHub issue #"
+)
+
+func dispatchCmdlineWorkerPIDs(product string) map[int]bool {
+	out := map[int]bool{}
+	rows, err := dispatchProbeWorkerProcessRows()
+	if err != nil {
+		return out
+	}
+	for _, row := range rows {
+		if row.PID <= 0 || !dispatchIsWorkerCmdline(row.Cmdline) {
+			continue
+		}
+		if product != "" && !dispatchProcessImageMatchesProduct(row.Name, product) {
+			continue
+		}
+		out[row.PID] = true
+	}
+	return out
+}
+
+func dispatchIsWorkerCmdline(cmdline string) bool {
+	low := strings.ToLower(cmdline)
+	return strings.Contains(low, dispatchWorkerCmdMarker) ||
+		strings.Contains(low, strings.ToLower(dispatchIssueResolveCmdMarker))
+}
+
+func dispatchProcessImageMatchesProduct(name, product string) bool {
+	stem := dispatchProcessNameStem(name)
+	if stem == "" {
+		return false
+	}
+	for _, backend := range dispatchProductBackends(product) {
+		backend = strings.TrimSpace(backend)
+		if backend != "" && (stem == backend || strings.HasPrefix(stem, backend)) {
+			return true
+		}
+	}
+	return false
+}
+
 func dispatchIsCodexNativeImage(name string) bool {
 	return dispatchProcessNameStem(name) == "codex"
 }
@@ -720,6 +772,59 @@ func dispatchScanCodexProcessRowsNative() ([]dispatchCodexProcessRow, error) {
 		return dispatchScanCodexProcessRowsWindows()
 	}
 	return dispatchScanCodexProcessRowsPOSIX()
+}
+
+func dispatchScanWorkerProcessRowsNative() ([]dispatchCodexProcessRow, error) {
+	if runtime.GOOS == "windows" {
+		return dispatchScanWorkerProcessRowsWindows()
+	}
+	return dispatchScanWorkerProcessRowsPOSIX()
+}
+
+func dispatchScanWorkerProcessRowsWindows() ([]dispatchCodexProcessRow, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command",
+		"$rows = @(Get-CimInstance Win32_Process "+
+			"-Filter \"Name = 'claude.exe' OR Name = 'opencode.exe' OR Name = 'codex.exe' OR Name = 'node.exe'\" | "+
+			"Select-Object @{n='pid';e={$_.ProcessId}},@{n='ppid';e={$_.ParentProcessId}},@{n='name';e={$_.Name}},@{n='cmdline';e={$_.CommandLine}}); "+
+			"$rows | ConvertTo-Json -Compress")
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	return decodeDispatchCodexProcessRows(out)
+}
+
+func dispatchScanWorkerProcessRowsPOSIX() ([]dispatchCodexProcessRow, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "ps", "-eo", "pid=,ppid=,comm=,args=")
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	rows := []dispatchCodexProcessRow{}
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		pid, perr := strconv.Atoi(fields[0])
+		ppid, pperr := strconv.Atoi(fields[1])
+		if perr != nil || pperr != nil {
+			continue
+		}
+		name := fields[2]
+		cmdline := name
+		if len(fields) > 3 {
+			cmdline = strings.Join(fields[3:], " ")
+		}
+		rows = append(rows, dispatchCodexProcessRow{PID: pid, PPID: ppid, Name: name, Cmdline: cmdline})
+	}
+	return rows, nil
 }
 
 func dispatchScanCodexProcessRowsWindows() ([]dispatchCodexProcessRow, error) {
@@ -791,8 +896,7 @@ func dispatchLiveResolveWorkerPIDs(runsDir, product string) map[int]bool {
 	if st, err := os.Stat(runsDir); err != nil || !st.IsDir() {
 		return out
 	}
-	matches, _ := filepath.Glob(filepath.Join(runsDir, "resolve-*.pid"))
-	for _, pidFile := range matches {
+	for _, pidFile := range dispatchWorkerPIDFiles(runsDir) {
 		if !dispatchResolvePIDRE.MatchString(filepath.Base(pidFile)) {
 			continue
 		}
@@ -803,6 +907,59 @@ func dispatchLiveResolveWorkerPIDs(runsDir, product string) map[int]bool {
 		if ok && dispatchPIDAlive(pid) {
 			out[pid] = true
 		}
+	}
+	return out
+}
+
+func dispatchWorkerPIDFiles(runsDir string) []string {
+	matches := []string{}
+	for _, pattern := range []string{"resolve-*.pid", "repair-*.pid"} {
+		got, _ := filepath.Glob(filepath.Join(runsDir, pattern))
+		matches = append(matches, got...)
+	}
+	sort.Strings(matches)
+	return matches
+}
+
+func dispatchLiveGoalWorkerPIDs(goalRunsDir, product string) map[int]bool {
+	out := map[int]bool{}
+	if st, err := os.Stat(goalRunsDir); err != nil || !st.IsDir() {
+		return out
+	}
+	// tools/launch_goal_detached.ps1 is a Claude launcher; its breadcrumbs have
+	// no backend sidecar, so a product-scoped count can only assign them to the
+	// Claude pool. Empty product is the unscoped/global fold.
+	if product != "" && product != "claude" {
+		return out
+	}
+	rows, err := dispatchProbeWorkerProcessRows()
+	if err != nil {
+		return out
+	}
+	byPID := map[int]dispatchCodexProcessRow{}
+	for _, row := range rows {
+		if row.PID > 0 {
+			byPID[row.PID] = row
+		}
+	}
+	matches, _ := filepath.Glob(filepath.Join(goalRunsDir, "*.pid"))
+	sort.Strings(matches)
+	for _, pidFile := range matches {
+		if !dispatchGoalPIDRE.MatchString(filepath.Base(pidFile)) {
+			continue
+		}
+		pid, ok := readPID(pidFile)
+		if !ok || !dispatchPIDAlive(pid) {
+			continue
+		}
+		row, ok := byPID[pid]
+		if !ok || !dispatchProcessImageMatchesProduct(row.Name, "claude") {
+			continue
+		}
+		// A stale breadcrumb reused by an unrelated system process must not
+		// consume a worker slot. The launcher starts Claude, so require the
+		// current PID to resolve to a Claude worker image before counting it.
+		out[pid] = true
 	}
 	return out
 }

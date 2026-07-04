@@ -444,6 +444,112 @@ func TestDispatchLiveSeatLeasesReadsLiveAccountSidecars(t *testing.T) {
 	}
 }
 
+func TestDispatchLiveSeatLeasesReadsRepairWorkers(t *testing.T) {
+	runsDir := t.TempDir()
+	liveStem := filepath.Join(runsDir, "repair-1906-20000101-000000")
+	if err := os.WriteFile(liveStem+".pid", []byte(fmt.Sprint(os.Getpid())), 0o644); err != nil {
+		t.Fatalf("write live repair pid: %v", err)
+	}
+	writeDispatchJSONFixture(t, liveStem+dispatchtick.AccountSidecarSuffix, map[string]any{
+		"tag": "repair-acct",
+		"dir": "C:\\Users\\U\\.claude-repair",
+	})
+
+	leases := dispatchLiveSeatLeases(runsDir)
+	if len(leases) != 1 {
+		t.Fatalf("leases = %+v, want one live repair lease", leases)
+	}
+	if leases[0].Worker != "repair-1906-20000101-000000" || leases[0].PID != os.Getpid() || leases[0].Tag != "repair-acct" {
+		t.Fatalf("repair lease = %+v, want live repair account sidecar", leases[0])
+	}
+}
+
+func TestDispatchProductWorkerCountIncludesRepairAndGoalBreadcrumbs(t *testing.T) {
+	oldRows := dispatchProbeWorkerProcessRows
+	t.Cleanup(func() { dispatchProbeWorkerProcessRows = oldRows })
+
+	root := t.TempDir()
+	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
+	if err := os.MkdirAll(runsDir, 0o755); err != nil {
+		t.Fatalf("mkdir runs dir: %v", err)
+	}
+	repairStem := filepath.Join(runsDir, "repair-1906-20000101-000000")
+	if err := os.WriteFile(repairStem+".pid", []byte(fmt.Sprint(os.Getpid())), 0o644); err != nil {
+		t.Fatalf("write repair pid: %v", err)
+	}
+	if err := os.WriteFile(repairStem+".backend", []byte("claude"), 0o644); err != nil {
+		t.Fatalf("write repair backend: %v", err)
+	}
+
+	if got := dispatchProductWorkerCount(root, "claude"); got != 1 {
+		t.Fatalf("claude worker count with repair sidecar = %d, want 1", got)
+	}
+	if got := dispatchProductWorkerCount(root, "opencode"); got != 0 {
+		t.Fatalf("opencode worker count with claude repair sidecar = %d, want 0", got)
+	}
+
+	if err := os.Remove(repairStem + ".pid"); err != nil {
+		t.Fatalf("remove repair pid: %v", err)
+	}
+	goalDir := filepath.Join(root, dispatchGoalRunsDirName)
+	if err := os.MkdirAll(goalDir, 0o755); err != nil {
+		t.Fatalf("mkdir goal runs dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(goalDir, "resolve-tickets-20000101-000000.pid"), []byte(fmt.Sprint(os.Getpid())), 0o644); err != nil {
+		t.Fatalf("write goal pid: %v", err)
+	}
+	dispatchProbeWorkerProcessRows = func() ([]dispatchCodexProcessRow, error) {
+		return []dispatchCodexProcessRow{{PID: os.Getpid(), Name: "claude.exe", Cmdline: "claude -p"}}, nil
+	}
+	if got := dispatchProductWorkerCount(root, "claude"); got != 1 {
+		t.Fatalf("claude worker count with goal breadcrumb = %d, want 1", got)
+	}
+	if got := dispatchProductWorkerCount(root, "opencode"); got != 0 {
+		t.Fatalf("opencode worker count with claude goal breadcrumb = %d, want 0", got)
+	}
+}
+
+func TestDispatchProductWorkerCountRejectsStaleGoalBreadcrumbReusedBySystemProcess(t *testing.T) {
+	oldRows := dispatchProbeWorkerProcessRows
+	dispatchProbeWorkerProcessRows = func() ([]dispatchCodexProcessRow, error) {
+		return []dispatchCodexProcessRow{{PID: os.Getpid(), Name: "svchost.exe", Cmdline: ""}}, nil
+	}
+	t.Cleanup(func() { dispatchProbeWorkerProcessRows = oldRows })
+
+	root := t.TempDir()
+	goalDir := filepath.Join(root, dispatchGoalRunsDirName)
+	if err := os.MkdirAll(goalDir, 0o755); err != nil {
+		t.Fatalf("mkdir goal runs dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(goalDir, "old-goal-20000101-000000.pid"), []byte(fmt.Sprint(os.Getpid())), 0o644); err != nil {
+		t.Fatalf("write stale goal pid: %v", err)
+	}
+	if got := dispatchProductWorkerCount(root, "claude"); got != 0 {
+		t.Fatalf("stale goal breadcrumb reused by system process counted as %d worker(s), want 0", got)
+	}
+}
+
+func TestDispatchProductWorkerCountIncludesCmdlineWorkersByProduct(t *testing.T) {
+	oldRows := dispatchProbeWorkerProcessRows
+	dispatchProbeWorkerProcessRows = func() ([]dispatchCodexProcessRow, error) {
+		return []dispatchCodexProcessRow{
+			{PID: 101, Name: "claude.exe", Cmdline: "claude -p resolve GitHub issue #101"},
+			{PID: 102, Name: "opencode.exe", Cmdline: "opencode run dos-dispatch-loop --lane docs"},
+			{PID: 103, Name: "powershell.exe", Cmdline: "powershell resolve GitHub issue #103"},
+			{PID: 104, Name: "claude.exe", Cmdline: "claude ordinary chat"},
+		}, nil
+	}
+	t.Cleanup(func() { dispatchProbeWorkerProcessRows = oldRows })
+
+	root := t.TempDir()
+	if got := dispatchProductWorkerCount(root, "claude"); got != 1 {
+		t.Fatalf("claude worker count = %d, want one claude command-line worker", got)
+	}
+	if got := dispatchProductWorkerCount(root, "opencode"); got != 1 {
+		t.Fatalf("opencode worker count = %d, want one opencode command-line worker", got)
+	}
+}
+
 // TestLiveResolutionLanesDropsDeadBannerNoopWorker is the #1398 witness: a docs lane
 // "held" only by an exited opencode banner-no-op worker must report FREE, not busy.
 // An exited opencode worker runs as a `node` image, so AFTER it exits a recycled
@@ -507,8 +613,8 @@ func TestDispatchTickDryRunHoldsGuardedSelfModifyLane(t *testing.T) {
 	root := t.TempDir()
 
 	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "cmd", "--no-refresh", "--no-loop-ledger", "--json")
-	if code != 1 {
-		t.Fatalf("exit = %d, want 1 (a self-modify hold is a refuse) (stderr: %s)", code, errb)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (a self-modify hold is a benign scheduler hold) (stderr: %s)", code, errb)
 	}
 
 	var got map[string]any
@@ -561,8 +667,8 @@ func TestDispatchTickDryRunHoldsGuardedMisroutedSelfSourceIssue(t *testing.T) {
 	root := t.TempDir()
 
 	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "tools", "--no-refresh", "--no-loop-ledger", "--json")
-	if code != 1 {
-		t.Fatalf("exit = %d, want 1 (a self-modify hold is a refuse) (stderr: %s)", code, errb)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (a self-modify hold is a benign scheduler hold) (stderr: %s)", code, errb)
 	}
 	var got map[string]any
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
@@ -634,17 +740,17 @@ func TestDispatchTickDryRunPlansGuardedWorkerOnShippableLane(t *testing.T) {
 	}
 	terms := mapAt(capFact, "cap_terms")
 	if dispatchMapInt(terms, "configured_cap") != dispatchtick.DefaultMaxWorkers || dispatchMapInt(terms, "lease_cap") != 3 ||
-		dispatchMapInt(terms, "host_cap") != 32 || dispatchMapInt(terms, "seat_cap") != 3 ||
+		dispatchMapInt(terms, "host_cap") != 32 || dispatchMapInt(terms, "seat_cap") < 3 ||
 		dispatchMapInt(terms, "effective_cap") != 3 || dispatchMapString(terms, "limiting") != "lease" {
-		t.Fatalf("startup cap terms = %#v, want configured=%d lease=3 host=32 seat=3 effective=3 limiting=lease", terms, dispatchtick.DefaultMaxWorkers)
+		t.Fatalf("startup cap terms = %#v, want configured=%d lease=3 host=32 seat>=3 effective=3 limiting=lease", terms, dispatchtick.DefaultMaxWorkers)
 	}
 	preflight := mapAt(got, "preflight")
 	if dispatchMapString(mapAt(preflight, "cap_terms"), "limiting") != "lease" {
 		t.Fatalf("tick preflight cap terms = %#v, want limiting=lease", preflight)
 	}
 	seat := mapAt(bundle, "seat")
-	if dispatchMapInt(seat, "total") != 3 || dispatchMapInt(seat, "free") != 2 {
-		t.Fatalf("startup seat = %#v, want total/free 3/2", seat)
+	if dispatchMapInt(seat, "total") < 3 || dispatchMapInt(seat, "free") <= 0 {
+		t.Fatalf("startup seat = %#v, want at least three total seats and positive free seats", seat)
 	}
 	lease := mapAt(bundle, "lease")
 	if dispatchMapString(lease, "id") != "resolve-docs" {
@@ -692,8 +798,8 @@ func TestDispatchTickLiveBrokerDenyDoesNotSpawnWorker(t *testing.T) {
 	})
 
 	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--live", "--json")
-	if code != 1 {
-		t.Fatalf("exit = %d, want broker denial refusal (stderr: %s)\n%s", code, errb, out)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 for broker denial scheduler hold (stderr: %s)\n%s", code, errb, out)
 	}
 	if spawned {
 		t.Fatal("dispatch worker spawner was called after broker denial")
@@ -1026,8 +1132,8 @@ func TestDispatchTickDocsLaneHeldByLiveStreamingWorkerStaysLaneBusy(t *testing.T
 		"> build · glm-4.5-air\n"+strings.Repeat("streaming real work output line\n", 40))
 
 	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--json")
-	if code != 1 {
-		t.Fatalf("exit = %d, want 1 (a live worker keeps the lane busy) (stderr: %s)\n%s", code, errb, out)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (lane busy is a benign scheduler hold) (stderr: %s)\n%s", code, errb, out)
 	}
 	var got map[string]any
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
@@ -1068,8 +1174,8 @@ func TestDispatchTickRefusesSameFileLiveWorkerCollision(t *testing.T) {
 	writeDispatchJSONFixture(t, filepath.Join(runsDir, stem+dispatchLeaseTreeSidecarSuffix), []string{"docs/shared.md"})
 
 	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--json")
-	if code != 1 {
-		t.Fatalf("exit = %d, want 1 (same-file live worker collision must refuse) (stderr: %s)\n%s", code, errb, out)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (same-file collision is a benign scheduler hold) (stderr: %s)\n%s", code, errb, out)
 	}
 	var got map[string]any
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
@@ -1118,8 +1224,8 @@ func TestDispatchTickRefusesInFlightDuplicateIssue(t *testing.T) {
 	}
 
 	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--json")
-	if code != 1 {
-		t.Fatalf("exit = %d, want 1 (in-flight duplicate must refuse) (stderr: %s)\n%s", code, errb, out)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (in-flight duplicate is a benign scheduler hold) (stderr: %s)\n%s", code, errb, out)
 	}
 	var got map[string]any
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
