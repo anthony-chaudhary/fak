@@ -78,6 +78,14 @@ type KVSpanStats struct {
 	// HintNone (the default) leaves the reuse term untouched, so an unhinted span is
 	// byte-identical to today.
 	Hint KVCacheHint
+	// Sharers is the count of live sessions/leases currently depending on this span as a
+	// resident prefix (#2670) — the CONCURRENT-BREADTH signal the radix layer already tracks
+	// via ref-count/child fan-out but that Hits never captures (Hits counts subsequent
+	// lookups on one node, not how many distinct consumers currently share the node). A span
+	// shared by many live sessions costs a re-prefill PER sharer if evicted, not one.
+	// Sharers <= 1 (the zero value included) makes KVEvictionCostFanout reduce exactly to
+	// KVEvictionCost, so every existing caller that never sets it is byte-identical to today.
+	Sharers int
 }
 
 // KVCacheHint is the closed vocabulary of adjudicated agent cache-control priors (#2225/#805
