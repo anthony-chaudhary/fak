@@ -301,6 +301,7 @@ The `/metrics` endpoint exposes Prometheus metrics including:
 | `fak_model_load_*` | gauge | Model load profile breakdown (source, mode, total_seconds, tensors, bottleneck). |
 | `fak_gateway_operations_total` | counter | Kernel operation counts by operation, verdict (ALLOW, DENY, TRANSFORM, QUARANTINE, WITNESS), reason, disposition, and deciding adjudicator. |
 | `fak_gateway_operation_duration_seconds` | histogram | Operation latency by operation type (adjudicate, syscall, admit), verdict, and deciding adjudicator. |
+| `fak_sessions` | gauge | Live served sessions by DRIVE run-state token (`running`, `throttled`, `paused`, `draining`, `stopped`). A read-time fold of the session registry, so a GC'd session decrements its bucket at the next scrape; suppressed entirely when no session registry is wired (the default serve path). |
 
 ---
 

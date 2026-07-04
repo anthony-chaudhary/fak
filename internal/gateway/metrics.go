@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -927,6 +928,60 @@ func (m *gatewayMetrics) writeDenyAllMetrics(b *strings.Builder) {
 	fmt.Fprintf(b, "fak_guard_tool_feedback_consecutive %d\n", feedbackConsec)
 }
 
+// sessionRunStates is the closed vocabulary of session DRIVE-state tokens the
+// fak_sessions{state} gauge carries. These are the wire forms of SessionState.Run
+// (lowercase), so the scrape surface stays consistent with GET /v1/fak/sessions and
+// /debug/vars. Editing this set is a metrics-series change.
+var sessionRunStates = []string{"running", "throttled", "paused", "draining", "stopped"}
+
+// writeSessionMetrics renders the fak_sessions{state} gauge (#1204): a read-time fold
+// of the live session registry (C1 — the same listSessions snapshot /v1/fak/sessions
+// and /debug/vars project) into a per-state count, so "how many sessions are running,
+// by state" is scrapeable, not narratable. The fold is read-time off the live snapshot
+// (never a per-turn increment), so a registry that GCs a session naturally decrements
+// its bucket at the next scrape — no leaked counts, no stale descriptor.
+//
+// A nil listSessions injection (the default serve path) suppresses the family entirely
+// — the same fail-closed posture as GET /v1/fak/sessions — rather than emitting a
+// phantom all-zero surface. Every state in the closed vocabulary is always emitted
+// (0 when absent) so a dashboard series does not flap as sessions transition; a session
+// whose Run token is empty or outside the closed set is bucketed as "unknown" and
+// emitted only when nonzero, so registry drift is legible without leaking a count past
+// the closed surface.
+//
+// fak_session_liveness_class (#1204 acceptance) is intentionally NOT emitted here. That
+// gauge is fed from #750's two-heartbeat witness, which ships in internal/taskmgr as a
+// per-TASK LivenessClass (live|idle|stalled) and is not yet wired onto the gateway's
+// per-SESSION plane (#750 P6.1 remains open). Projecting a session-level
+// alive/stalled/degraded breakdown ahead of that wiring would fabricate a number; it is
+// deferred until #750's witness reaches the session registry.
+func (s *Server) writeSessionMetrics(b *strings.Builder) {
+	if s.listSessions == nil {
+		return
+	}
+	sessions := s.listSessions(context.Background())
+	counts := make(map[string]int, len(sessionRunStates)+1)
+	for _, st := range sessions {
+		state := strings.ToLower(strings.TrimSpace(st.Run))
+		if state == "" {
+			state = "unknown"
+		}
+		counts[state]++
+	}
+	writeHelpType(b, "fak_sessions", "Live served sessions by DRIVE run-state token (read-time fold of the session registry; a GC'd session decrements its bucket next scrape).", "gauge")
+	known := make(map[string]bool, len(sessionRunStates))
+	for _, state := range sessionRunStates {
+		fmt.Fprintf(b, "fak_sessions{state=\"%s\"} %d\n", promQuote(state), counts[state])
+		known[state] = true
+	}
+	for state, n := range counts {
+		if known[state] || n == 0 {
+			continue
+		}
+		fmt.Fprintf(b, "fak_sessions{state=\"%s\"} %d\n", promQuote(state), n)
+	}
+}
+
 func (m *gatewayMetrics) observeHTTP(route, method string, status int, dur time.Duration) {
 	if m == nil {
 		return
@@ -1703,6 +1758,7 @@ func (s *Server) renderMetrics() string {
 	m.writeCompactionMetrics(&b)
 	m.writeResetShadowMetrics(&b)
 	m.writeDenyAllMetrics(&b)
+	s.writeSessionMetrics(&b) // #1204: live session count by DRIVE run-state token
 	m.harnessCoherence.writeHarnessCoherenceMetrics(&b)
 	m.writeRoutingMetrics(&b)         // #603: per-aspect model-routing decision distribution (rule/strategy/aspect)
 	s.resumeProj.writeMetrics(&b)     // #941: resume projected-vs-observed residual (self-contained family)
