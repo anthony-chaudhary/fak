@@ -71,11 +71,12 @@ func Rank(tasks []Task, caps Capabilities, ledger []CollectRow, now time.Time) [
 	return out
 }
 
-// Next returns the single highest-priority FEASIBLE Scored task, and whether one
-// exists. It is the literal answer to "what should I collect next on this box."
+// Next returns the single highest-priority FEASIBLE, unsaturated Scored task, and
+// whether one exists. It is the literal answer to "what should I collect next on
+// this box."
 func Next(ranked []Scored) (Scored, bool) {
 	for _, s := range ranked {
-		if s.Feasible {
+		if s.Feasible && !s.Saturated {
 			return s, true
 		}
 	}
@@ -112,11 +113,11 @@ func score(t Task, caps Capabilities, ledger []CollectRow, now time.Time) Scored
 
 	s.Score = wNovelty*s.Novelty + wValue*s.ValueWeight + wStaleness*s.Staleness
 	// Saturated: a feasible, auto-runnable datum that is already collected on this box
-	// and still fresh (Staleness==0) carries no new information if re-run tonight. A
-	// Manual recipe is never an auto-collectable datum, so it is never "saturated"
-	// (the loop skips it for a different reason); an infeasible or never-collected or
-	// aging task is not saturated either.
-	if s.Feasible && s.Task.autoRunnable() && ok && s.Staleness == 0 {
+	// and still inside its re-check window carries no new information if re-run tonight.
+	// A Manual recipe is never an auto-collectable datum, so it is never "saturated"
+	// (the loop skips it for a different reason); an infeasible, never-collected, or
+	// overdue task is not saturated either.
+	if s.Feasible && s.Task.autoRunnable() && ok && s.AgeDays >= 0 && s.Staleness < 1 {
 		s.Saturated = true
 	}
 	s.Reason = reasonFor(s, why)

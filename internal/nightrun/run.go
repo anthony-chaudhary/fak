@@ -145,11 +145,11 @@ func RunLoop(ctx context.Context, opts RunOptions) (RunSummary, error) {
 	return summary, nil
 }
 
-// pickFresh returns the highest-priority feasible Scored whose Task has not been
-// attempted this session.
+// pickFresh returns the highest-priority feasible, unsaturated Scored whose Task
+// has not been attempted this session.
 func pickFresh(ranked []Scored, attempted map[string]bool) (Scored, bool) {
 	for _, s := range ranked {
-		if s.Feasible && !attempted[s.Task.ID] {
+		if s.Feasible && !s.Saturated && !attempted[s.Task.ID] {
 			return s, true
 		}
 	}
@@ -195,7 +195,7 @@ func stopReason(ranked []Scored, ran int, applied bool) string {
 // still fresh). The message names the external conditions the next genuinely-new datum
 // is blocked on — built from the infeasible tasks' Satisfies "why" strings, deduped and
 // in deterministic order. When some feasible auto-runnable task is still gatherable
-// (never-collected or aging), it returns ("", false) so the loop keeps collecting.
+// (never-collected or overdue), it returns ("", false) so the loop keeps collecting.
 func saturatedStopReason(ranked []Scored) (string, bool) {
 	feasibleAuto := 0
 	saturated := 0

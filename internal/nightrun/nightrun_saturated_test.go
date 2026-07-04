@@ -14,7 +14,7 @@ import (
 // why-strings, instead of re-firing a settled measurement.
 
 // freshLedger builds a collected row for taskID on box at `now`, so the task scores fresh
-// (Staleness==0) and therefore Saturated.
+// and therefore Saturated.
 func freshLedger(taskID, box string, now time.Time) []CollectRow {
 	return []CollectRow{{
 		Schema:      CollectSchema,
@@ -27,20 +27,26 @@ func freshLedger(taskID, box string, now time.Time) []CollectRow {
 }
 
 // TestScoredSaturatedFlag pins the per-task Saturated verdict: a feasible auto-runnable
-// datum collected today is saturated; a never-collected one is not; an overdue one is
-// not; a Manual recipe is never saturated; an infeasible one is never saturated.
+// datum collected inside its re-check window is saturated; a never-collected one is
+// not; an overdue one is not; a Manual recipe is never saturated; an infeasible one
+// is never saturated.
 func TestScoredSaturatedFlag(t *testing.T) {
 	box := "ci"
 	caps := Capabilities{Box: box, GPU: "cuda", Weights: true, Net: true, Creds: map[string]bool{}}
 	now := mustTime(t, "2026-06-28T00:00:00Z")
 
 	fresh := Task{ID: "bench-fresh", Value: ValueSmoke, Run: "echo a", RecheckDays: 14}
+	aging := Task{ID: "bench-aging", Value: ValueSmoke, Run: "echo aa", RecheckDays: 14}
 	never := Task{ID: "bench-never", Value: ValueSmoke, Run: "echo b"}
 	overdue := Task{ID: "bench-overdue", Value: ValueSmoke, Run: "echo c", RecheckDays: 1}
 	manual := Task{ID: "witness-manual", Value: ValueFrontier, Requires: []Requirement{ReqCUDA, ReqWeights}, Run: "run.sh <model>", Manual: true}
 	infeasible := Task{ID: "witness-metal", Value: ValueWitness, Requires: []Requirement{ReqMetal}, Run: "echo m"}
 
 	ledger := freshLedger("bench-fresh", box, now)
+	ledger = append(ledger, CollectRow{
+		Schema: CollectSchema, Date: "2026-06-27", Box: box,
+		TaskID: "bench-aging", Outcome: string(OutcomeCollected), GeneratedAt: "2026-06-27T12:00:00Z",
+	})
 	// An overdue collection: 30 days old against a 1-day recheck → Staleness clamps to 1.
 	old := mustTime(t, "2026-05-28T00:00:00Z")
 	ledger = append(ledger, CollectRow{
@@ -48,13 +54,16 @@ func TestScoredSaturatedFlag(t *testing.T) {
 		TaskID: "bench-overdue", Outcome: string(OutcomeCollected), GeneratedAt: old.Format(time.RFC3339),
 	})
 
-	ranked := Rank([]Task{fresh, never, overdue, manual, infeasible}, caps, ledger, now)
+	ranked := Rank([]Task{fresh, aging, never, overdue, manual, infeasible}, caps, ledger, now)
 	byID := map[string]Scored{}
 	for _, s := range ranked {
 		byID[s.Task.ID] = s
 	}
 	if !byID["bench-fresh"].Saturated {
 		t.Errorf("a feasible auto-runnable datum collected today must be Saturated, got %+v", byID["bench-fresh"])
+	}
+	if !byID["bench-aging"].Saturated {
+		t.Errorf("a feasible auto-runnable datum still inside its re-check window must be Saturated, got %+v", byID["bench-aging"])
 	}
 	if byID["bench-never"].Saturated {
 		t.Error("a never-collected task must NOT be Saturated (it is the most novel datum)")
@@ -152,5 +161,42 @@ func TestRunLoopReportsSaturatedAfterDraining(t *testing.T) {
 	}
 	if !strings.HasPrefix(summary.StopReason, "saturated") {
 		t.Errorf("after draining the feasible queue the loop must stop SATURATED, got %q", summary.StopReason)
+	}
+}
+
+func TestRunLoopSkipsFreshLedgerOnRestart(t *testing.T) {
+	box := "cuda-box"
+	caps := Capabilities{Box: box, GPU: "cuda", Weights: true, Creds: map[string]bool{}}
+	now := mustTime(t, "2026-06-28T12:00:00Z")
+	tasks := []Task{
+		{ID: "bench-fresh", Value: ValueCoverage, Run: "echo ok", RecheckDays: 14},
+		{ID: "witness-metal", Value: ValueFrontier, Requires: []Requirement{ReqMetal}, Run: "echo m"},
+	}
+	ledger := []CollectRow{{
+		Schema: CollectSchema, Date: "2026-06-28", Box: box,
+		TaskID: "bench-fresh", Outcome: string(OutcomeCollected), GeneratedAt: "2026-06-28T00:00:00Z",
+	}}
+	runs := 0
+	summary, err := RunLoop(context.Background(), RunOptions{
+		Root: "/repo", Caps: caps, Tasks: tasks, Now: now,
+		Apply: true, Loop: true,
+		ReadLedger: func() []CollectRow { return ledger },
+		AppendRow:  func(r CollectRow) error { ledger = append(ledger, r); return nil },
+		Executor: func(_ context.Context, _ Task, _ string) (Outcome, string, time.Duration, error) {
+			runs++
+			return OutcomeCollected, "", time.Second, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runs != 0 {
+		t.Errorf("fresh ledger row must suppress re-running the datum on restart, ran %d time(s)", runs)
+	}
+	if len(summary.Runs) != 0 {
+		t.Errorf("fresh ledger row should leave no run attempts, got %+v", summary.Runs)
+	}
+	if !strings.HasPrefix(summary.StopReason, "saturated") {
+		t.Errorf("fresh restart should stop SATURATED, got %q", summary.StopReason)
 	}
 }

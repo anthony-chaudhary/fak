@@ -25,8 +25,8 @@ type PlanReport struct {
 }
 
 // NextReport is the stable --json shape for `fak nightrun next` — the single
-// most important datum to collect, or an empty selection with the reason none is
-// feasible.
+// most important datum to collect, or an empty selection with the reason no
+// feasible datum is gatherable now.
 type NextReport struct {
 	Schema       string       `json:"schema"`
 	GeneratedAt  string       `json:"generated_at"`
@@ -52,8 +52,8 @@ func RenderNext(w io.Writer, c Capabilities, s Scored, ok bool) {
 	RenderCapabilities(w, c)
 	fmt.Fprintln(w)
 	if !ok {
-		fmt.Fprintln(w, "next: (nothing feasible on this box right now)")
-		fmt.Fprintln(w, "  every candidate needs a capability this box lacks — see `fak nightrun plan` for the full list and why.")
+		fmt.Fprintln(w, "next: (nothing gatherable on this box right now)")
+		fmt.Fprintln(w, "  every feasible auto-runnable datum is fresh or every candidate needs a capability this box lacks — see `fak nightrun plan` for the full list and why.")
 		return
 	}
 	t := s.Task

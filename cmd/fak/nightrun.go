@@ -207,7 +207,7 @@ func nightrunNext(stdout, stderr io.Writer, argv []string) int {
 			n := next
 			rep.Next = &n
 		} else {
-			rep.Note = "no feasible task on this box right now"
+			rep.Note = "no gatherable feasible task on this box right now"
 		}
 		emitNightrunJSON(stdout, rep)
 		return 0

@@ -73,6 +73,33 @@ func TestStatusChoosesLocalCollectionEntry(t *testing.T) {
 	}
 }
 
+func TestStatusDoesNotSelectFreshAgingTask(t *testing.T) {
+	now := benchLoopTime(t, "2026-06-30T12:00:00Z")
+	rep := StatusFromParts(Parts{
+		Root:    "/repo",
+		Now:     now,
+		Catalog: benchruns.Catalog{Runs: []benchruns.Run{{"run_id": "r", "timestamp": "2026-06-29T00:00:00Z"}}},
+		Ledger: []nightrun.CollectRow{{
+			Schema: nightrun.CollectSchema, Date: "2026-06-30", Box: "box-a",
+			TaskID: "fresh-aging", Outcome: string(nightrun.OutcomeCollected), GeneratedAt: "2026-06-30T00:00:00Z",
+		}},
+		Caps: nightrun.Capabilities{Box: "box-a", GPU: "none", Net: true, Creds: map[string]bool{}},
+		Tasks: []nightrun.Task{{
+			ID: "fresh-aging", Value: nightrun.ValueSmoke, Run: "echo fresh", RecheckDays: 14,
+		}},
+	})
+
+	if rep.Local.Saturated != 1 {
+		t.Fatalf("fresh in-window datum should be saturated, got local=%+v", rep.Local)
+	}
+	if rep.Local.HasNext || rep.Local.Next != nil {
+		t.Fatalf("status must not select an in-window fresh datum, next=%+v", rep.Local.Next)
+	}
+	if rep.NextAction.Kind == "collect_local" {
+		t.Fatalf("fresh in-window datum must not produce a collect action: %+v", rep.NextAction)
+	}
+}
+
 func TestStatusSurfacesManualAndCatalogRefresh(t *testing.T) {
 	now := benchLoopTime(t, "2026-06-30T00:00:00Z")
 	manual := StatusFromParts(Parts{
