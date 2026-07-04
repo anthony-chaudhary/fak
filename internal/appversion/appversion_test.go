@@ -3,6 +3,7 @@ package appversion
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -152,6 +153,30 @@ func TestDiagnoseBinaryDoesNotWarnOnLiveMatchingProcess(t *testing.T) {
 	}
 }
 
+func TestDiagnoseBinaryNamesNewerSiblingWhenCurrentExeIsNewer(t *testing.T) {
+	// Regression: when the CURRENT exe (fak.exe) is itself the NEWER image and the
+	// extensionless sibling `fak` is the stale one, the binary-shadow finding must
+	// name fak.exe as newer. Each image's Newer flag is "newer than the current
+	// exe", which is always false for whichever sibling IS the current exe — so a
+	// flag-based direction check saw !fak.Newer && !fakExe.Newer and fell back to
+	// the "fak" default, wrongly reporting "fak is newer" and pointing an operator
+	// at the wrong binary to replace.
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "fak.exe")
+	extless := filepath.Join(dir, "fak")
+	writeBinaryFixture(t, exe, "new-current-binary", time.Unix(200, 0))
+	writeBinaryFixture(t, extless, "old-stale-binary", time.Unix(100, 0))
+
+	rep := DiagnoseBinary(exe, []string{exe, extless})
+	f := findingOfBinary(rep, "binary-shadow")
+	if !strings.Contains(f, "fak.exe is newer") {
+		t.Fatalf("binary-shadow finding = %q, want it to name fak.exe (the newer current exe)", f)
+	}
+	if strings.Contains(f, "; fak is newer") {
+		t.Fatalf("binary-shadow finding = %q wrongly names the stale extensionless fak as newer", f)
+	}
+}
+
 func writeBinaryFixture(t *testing.T, path, body string, mod time.Time) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
@@ -166,6 +191,15 @@ func severityOfBinary(rep BinaryReport, check string) string {
 	for _, r := range rep.Recommendations {
 		if r.Check == check {
 			return r.Severity
+		}
+	}
+	return ""
+}
+
+func findingOfBinary(rep BinaryReport, check string) string {
+	for _, r := range rep.Recommendations {
+		if r.Check == check {
+			return r.Finding
 		}
 	}
 	return ""

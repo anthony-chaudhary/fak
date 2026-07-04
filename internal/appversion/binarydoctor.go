@@ -46,6 +46,12 @@ type BinaryImage struct {
 	ReadError   string `json:"read_error,omitempty"`
 	SameCurrent bool   `json:"same_as_current,omitempty"`
 	Newer       bool   `json:"newer_than_current,omitempty"`
+
+	// modTime is the raw file mod time, kept unexported (not serialized) for a
+	// precise sibling-vs-sibling age comparison. The exported Newer flag is only
+	// "newer than the CURRENT exe", so it cannot order two siblings when one of
+	// them IS the current exe (its Newer is false by construction).
+	modTime time.Time
 }
 
 type BinaryProcess struct {
@@ -96,8 +102,14 @@ func DiagnoseBinaryWithProcesses(exe string, candidates []string, processes []Bi
 	fak := byPath[cleanPathKey(filepath.Join(filepath.Dir(exe), "fak"))]
 	fakExe := byPath[cleanPathKey(filepath.Join(filepath.Dir(exe), "fak.exe"))]
 	if fak.Exists && fakExe.Exists && fak.SHA256 != "" && fakExe.SHA256 != "" && fak.SHA256 != fakExe.SHA256 {
+		// Order the two siblings by their actual mod times, NOT by the per-image
+		// "newer than the current exe" flag: that flag is always false for whichever
+		// sibling IS the current exe, so a flag-based check mislabels the case where
+		// the current exe (e.g. fak.exe) is itself the newer image and the
+		// extensionless sibling is the stale one (it fell back to the "fak" default
+		// and pointed the operator at the wrong binary). A tie defaults to "fak".
 		newer := "fak"
-		if !fak.Newer && fakExe.Newer {
+		if fakExe.modTime.After(fak.modTime) {
 			newer = "fak.exe"
 		}
 		rep.Recommendations = append(rep.Recommendations, BinaryRecommendation{
@@ -179,6 +191,7 @@ func readBinaryImage(path, exe string) BinaryImage {
 	img.Exists = true
 	img.Size = st.Size()
 	img.ModTime = st.ModTime().UTC().Format(time.RFC3339)
+	img.modTime = st.ModTime()
 	if !img.Current {
 		if cur, err := os.Stat(exe); err == nil {
 			img.Newer = st.ModTime().After(cur.ModTime())
