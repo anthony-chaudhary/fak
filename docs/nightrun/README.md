@@ -58,6 +58,11 @@ decode-longgen, prefill-sweep, and 2-stream probes, and emits a
 same built-in task when the probed box has `metal` and model weights. The report
 sanitizes non-loopback gateway addresses and never records the bearer key.
 
+When the sweep is driven from another tailnet host, pass the remote gateway or
+set `FAK_MAC_GATEWAY`. `macbench` reads the bearer from `FAK_GATEWAY_KEY`, then
+`--gateway-key-file`, and finally `--fetch-key` pulls `~/.fak-gateway-key` over
+SSH using `FAK_MAC_SSH_HOST` / `--ssh-host`.
+
 ## How next() ranks
 
 Each feasible task is scored by a blend that sums to 1.0:

@@ -102,6 +102,7 @@ fak macbench all --gateway http://127.0.0.1:8080 --model qwen3.6-27b --json
 The direct command writes a `fak.macbench.result.v1` artifact with decode-longgen,
 prefill-sweep, and 2-stream rows. It is safe for unattended selection because it
 uses the local gateway by default, reads the bearer from `FAK_GATEWAY_KEY` or
-`~/.fak-gateway-key`, and sanitizes any non-loopback gateway in its JSON report.
-The older overlay tasks above remain as manual recipes for targeted follow-up,
-but the auto task is the first command to leave running overnight.
+`~/.fak-gateway-key`, falls back to `--fetch-key` over `FAK_MAC_SSH_HOST` for
+off-node tailnet runs, and sanitizes any non-loopback gateway in its JSON
+report. The older overlay tasks above remain as manual recipes for targeted
+follow-up, but the auto task is the first command to leave running overnight.
