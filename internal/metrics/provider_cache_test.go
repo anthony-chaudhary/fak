@@ -48,6 +48,48 @@ func TestFoldCacheEntryRoutesProviderHitToProviderCounters(t *testing.T) {
 	}
 }
 
+// FoldCacheEntry must also fold the provider's cache-WRITE (creation) tokens into
+// the Arm's distinct write axis. A provider charges a write premium the first time
+// it caches a prefix; ablate prices that premium off ProviderCacheCreationTokens
+// (internal/ablate: ProviderPromptCacheWritePremiumTokenEquiv), so silently
+// dropping it on the entry-fold path under-prices the write as zero. A provider
+// entry carrying WriteTokens must therefore land in the Arm's creation axis — never
+// in a local counter, and never conflated with the read-hit axis.
+func TestFoldCacheEntryFoldsProviderCreationTokens(t *testing.T) {
+	var a Arm
+
+	remote := cachemeta.FromProviderCache(cachemeta.ProviderCache{
+		Provider:     "anthropic",
+		ModelID:      "claude-opus",
+		CachedTokens: 1200,
+		WriteTokens:  512,
+		PromptTokens: 1500,
+	})
+	if handled := a.FoldCacheEntry(remote); !handled {
+		t.Fatalf("provider entry must be handled as provider telemetry")
+	}
+
+	// Read hits and the write premium land in their OWN distinct provider axes.
+	if a.ProviderCacheReadTokens != 1200 {
+		t.Fatalf("ProviderCacheReadTokens = %d, want 1200", a.ProviderCacheReadTokens)
+	}
+	if a.ProviderCacheCreationTokens != 512 {
+		t.Fatalf("ProviderCacheCreationTokens = %d, want 512 (write premium must fold, not be dropped)", a.ProviderCacheCreationTokens)
+	}
+	// The provider write axis is remote cost, never a local reuse win.
+	if a.InTokens != 0 || a.VDSOHits != 0 {
+		t.Fatalf("provider creation-token fold leaked into local counters: InTokens=%d VDSOHits=%d", a.InTokens, a.VDSOHits)
+	}
+
+	// A provider entry with NO write premium leaves the creation axis untouched.
+	var b Arm
+	noWrite := cachemeta.FromProviderCache(cachemeta.ProviderCache{Provider: "openai", CachedTokens: 900})
+	b.FoldCacheEntry(noWrite)
+	if b.ProviderCacheCreationTokens != 0 {
+		t.Fatalf("ProviderCacheCreationTokens = %d, want 0 when the provider reported no write tokens", b.ProviderCacheCreationTokens)
+	}
+}
+
 // FoldSavingsSplit copies only the provider side of a cachemeta split into the
 // Arm, keeping local reuse out of the provider counters.
 func TestFoldSavingsSplitCopiesOnlyProviderSide(t *testing.T) {
