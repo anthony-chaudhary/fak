@@ -214,6 +214,80 @@ func TestPageOutLandsDurable(t *testing.T) {
 	}
 }
 
+// plainDriver is a Driver (abi.Resolver + ID) that deliberately does NOT implement
+// abi.PageOutBackend — it stands in for an EXTERNAL Factory-registered backend (a
+// columnar / embedded-KV driver) so the router's page-out FALLBACK branch (a
+// pageOutTier that is not a PageOutBackend) is exercised. It wraps *blob.Store in a
+// NAMED field, never embeds it: embedding would promote PageOut/PageIn and make
+// plainDriver a PageOutBackend, silently taking the fast path and making the
+// regression below vacuous.
+type plainDriver struct{ s *blob.Store }
+
+func (plainDriver) ID() string { return "plain" }
+func (d plainDriver) Put(ctx context.Context, b []byte) (abi.Ref, error) {
+	return d.s.Put(ctx, b)
+}
+func (d plainDriver) Resolve(ctx context.Context, r abi.Ref) ([]byte, error) {
+	return d.s.Resolve(ctx, r)
+}
+
+// TestPageOutFallbackResolves is the regression proof for the router's page-out
+// FALLBACK path: when the pageOutTier driver is NOT an abi.PageOutBackend (an external
+// Factory backend), page-out must fall back to Put WITHOUT losing the payload. Put
+// rides a <=InlineMax body inline and stores nothing, so fabricating a bytes-absent
+// RefBlob handle from that digest yields a handle that resolves in NO tier — the small
+// paged-out body (e.g. a ~50-byte quarantined injection string) is silently lost. The
+// handle the router returns must page back in byte-identically, with provenance
+// propagated, exactly as the PageOutBackend fast path does for blob/blobfs/blobhttp.
+func TestPageOutFallbackResolves(t *testing.T) {
+	ctx := context.Background()
+	// Guard: the stand-in must genuinely lack PageOutBackend, else the fast path hides
+	// the bug and this test proves nothing.
+	if _, ok := interface{}(plainDriver{}).(abi.PageOutBackend); ok {
+		t.Fatal("plainDriver must NOT implement abi.PageOutBackend, or the fallback path is not exercised")
+	}
+	// One durable tier whose driver is a plain Driver -> forces the Put-fallback branch.
+	r, err := New([]Tier{{Driver: plainDriver{blob.New()}, Durable: true}}, false)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Small body (<= InlineMax): the size Put rides inline and never stores — the loss
+	// case. Provenance (quarantined/fleet) must survive onto the handle.
+	small := payload(50, 'q')
+	sh, err := r.PageOut(ctx, abi.Ref{Kind: abi.RefInline, Inline: small, Len: int64(len(small)),
+		Taint: abi.TaintQuarantined, Scope: abi.ScopeFleet})
+	if err != nil {
+		t.Fatalf("PageOut(small): %v", err)
+	}
+	if sh.Taint != abi.TaintQuarantined || sh.Scope != abi.ScopeFleet {
+		t.Fatalf("fallback page-out dropped provenance: taint=%d scope=%d", sh.Taint, sh.Scope)
+	}
+	back, err := r.PageIn(ctx, sh)
+	if err != nil {
+		t.Fatalf("PageIn(small) failed — the fallback page-out LOST the bytes: %v", err)
+	}
+	if !bytes.Equal(back.Inline, small) {
+		t.Fatalf("small fallback page-in bytes differ from the paged-out body")
+	}
+
+	// Large body (> InlineMax): Put stores it as a RefBlob, so the fallback handle must
+	// be a bytes-absent RefBlob that still pages back in (regression guard for the large
+	// path that already worked, so the fix does not regress it).
+	large := payload(InlineMax+200, 'L')
+	lh, err := r.PageOut(ctx, abi.Ref{Kind: abi.RefInline, Inline: large, Len: int64(len(large))})
+	if err != nil {
+		t.Fatalf("PageOut(large): %v", err)
+	}
+	if lh.Kind != abi.RefBlob || len(lh.Inline) != 0 {
+		t.Fatalf("large fallback handle must be a bytes-absent RefBlob, got %+v", lh)
+	}
+	backL, err := r.PageIn(ctx, lh)
+	if err != nil || !bytes.Equal(backL.Inline, large) {
+		t.Fatalf("large fallback page-in: err=%v equal=%v", err, bytes.Equal(backL.Inline, large))
+	}
+}
+
 // TestPutHintedRoutesSealedToDurable proves a quarantined-taint hint sends a
 // small payload to the durable tier (sealed bytes never sit only in volatile RAM),
 // overriding the size policy that would keep it hot.

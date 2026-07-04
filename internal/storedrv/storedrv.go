@@ -261,11 +261,21 @@ func (r *Router) PageOut(ctx context.Context, ref abi.Ref) (abi.Ref, error) {
 	if po, ok := r.tiers[t].Driver.(abi.PageOutBackend); ok {
 		return po.PageOut(ctx, abi.Ref{Kind: abi.RefInline, Inline: b, Len: int64(len(b)), Taint: ref.Taint, Scope: ref.Scope})
 	}
+	// A plain Driver exposes no unconditional-store hook, so page-out can only Put. Put
+	// stores a >InlineMax body as a bytes-absent RefBlob (a proper handle), but rides a
+	// <=InlineMax body INLINE and stores nothing — fabricating a bytes-absent RefBlob
+	// from that digest would resolve in no tier and silently LOSE the payload (the very
+	// inline-shortcut trap blob/blobfs/blobhttp each avoid in their own PageOut). Return
+	// the handle Put actually produced — a resolvable RefBlob for a large body, a
+	// resolvable inline Ref for a small one — with the source provenance propagated:
+	// resolvability beats the out-of-context optimization a limited driver cannot honor
+	// for a tiny body.
 	stored, err := r.tiers[t].Driver.Put(ctx, b)
 	if err != nil {
 		return abi.Ref{}, err
 	}
-	return abi.Ref{Kind: abi.RefBlob, Digest: stored.Digest, Len: int64(len(b)), Taint: ref.Taint, Scope: ref.Scope}, nil
+	stored.Taint, stored.Scope = ref.Taint, ref.Scope
+	return stored, nil
 }
 
 // PageIn re-materializes a paged-out handle Ref into an inline Ref via Resolve.
