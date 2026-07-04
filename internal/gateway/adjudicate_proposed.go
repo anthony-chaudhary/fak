@@ -247,6 +247,10 @@ func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall,
 	kept := make([]agent.ToolCall, 0, len(calls))
 	adjs := make([]ToolAdjudication, 0, len(calls))
 	dropped := 0
+	// One clock for the whole turn's admitted-activity stamps (#2627): the calls in a
+	// single adjudicateProposed are effectively simultaneous, so a shared `now` keeps the
+	// agents pane's last_tool/idle deterministic and spares a time.Now() per call.
+	now := time.Now()
 	for _, tc := range calls {
 		tool := tc.Function.Name
 		s.observePrunedToolProposal(reqTrace, tool)
@@ -279,6 +283,12 @@ func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall,
 			dropped++
 		}
 		adjs = append(adjs, adj)
+		// Stamp the agents pane's live-status cell (#2627) for admitted calls only: an
+		// admitted call is what the trace is actually DOING. last_tool takes the last
+		// admitted tool of the turn; spawn_count counts admitted subagent-shaped calls.
+		if adj.Admitted {
+			s.activity.stampProposed(reqTrace, tool, now)
+		}
 	}
 	return kept, adjs, dropped
 }
