@@ -44,6 +44,7 @@ func runScorecardControlPane(stdout, stderr io.Writer, argv []string) int {
 	check := fs.Bool("check", false, "CI ratchet gate: exit non-zero only if debt regressed above baseline")
 	baselineFlag := fs.String("baseline", "", "baseline JSON path (default: "+scorecardpane.BaselineRel+")")
 	timeoutSec := fs.Int("timeout", 120, "per-scorecard timeout seconds")
+	post := fs.Bool("post", false, "opt-in: post the freshly-regenerated portfolio number to #scoreboard (also FAK_SCOREBOARD_AUTOPOST=1); off by default, deduped so an unchanged rerun is silent")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -62,6 +63,13 @@ func runScorecardControlPane(stdout, stderr io.Writer, argv []string) int {
 	metrics := scorecardpane.Collect(root, "", time.Duration(*timeoutSec)*time.Second)
 	baseline := scorecardpane.LoadBaseline(baselinePath)
 	payload := scorecardpane.Fold(metrics, baseline, root, scorecardpane.HeadCommitShort(root))
+
+	// Local producer side of #scoreboard (#998): when the operator opts in, publish
+	// the freshly-regenerated portfolio number the moment it is folded. Notices go to
+	// stderr so a --json/--check stdout stays a clean machine payload.
+	if code := autopostControlPane(stderr, root, payload, *post); code != 0 {
+		return code
+	}
 
 	if *pin {
 		doc := scorecardpane.BaselineDoc(payload)

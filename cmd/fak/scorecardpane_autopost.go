@@ -71,27 +71,77 @@ func scoreboardUpdateDigest(up scoreboard.Update) string {
 	return fmt.Sprintf("%x", sum[:])
 }
 
-func postScorecardResults(stderr io.Writer, root string, results []scorecardpane.Result) int {
-	statePath := filepath.Join(root, filepath.FromSlash(scoreboardAutoPostStateRel))
-	state := loadScoreboardAutoPostState(statePath)
-	if state.Updates == nil {
-		state.Updates = map[string]string{}
+// autopostControlPane posts the freshly-regenerated portfolio payload to #scoreboard
+// when the operator opted in (--post, or FAK_SCOREBOARD_AUTOPOST=1); a no-op otherwise.
+// This is the LOCAL producer side of the two-workspace status feed (#998, follow-on to
+// the 52ed934b publisher): a score an agent moves on a dev box shows up in the channel
+// the moment the scorecard is regenerated, with no second manual `fak scoreboard post`.
+// It reuses the persistent dedup state so a routine local regen that moved no debt is
+// silent, and routes notices (and the posted ts) to stderr so a --json stdout stays clean.
+func autopostControlPane(stderr io.Writer, root string, p scorecardpane.Payload, explicit bool) int {
+	if !scorecardAutoPostEnabled(explicit) {
+		return 0
 	}
-	changed := false
+	up := scoreboardControlPaneUpdate(p, defaultSource())
+	return postScoreboardUpdates(stderr, stderr, root, []scoreboard.Update{up})
+}
+
+// scoreboardControlPaneUpdate folds the portfolio control-pane payload into one
+// scoreboard Update. The headline is the raw-unit ratchet number (total_debt);
+// grade_debt rides in Score as the scale-invariant severity companion so the dedupe
+// digest also fires on a grade regression that holds total_debt flat. The human
+// summary (Reason, else the Finding token) becomes the card detail.
+func scoreboardControlPaneUpdate(p scorecardpane.Payload, source string) scoreboard.Update {
+	detail := p.Reason
+	if detail == "" {
+		detail = p.Finding
+	}
+	return scoreboard.Update{
+		Title:   "scorecard portfolio",
+		DebtKey: "total_debt",
+		Debt:    fmt.Sprintf("%d", p.TotalDebt),
+		Score:   fmt.Sprintf("%d", p.GradeDebt),
+		Verdict: p.Verdict,
+		Detail:  detail,
+		Source:  source,
+	}
+}
+
+// postScorecardResults posts each collected per-card scorecard Result behind the
+// persistent dedup state. It parses every payload first (a bad payload fails the
+// whole batch before any post) then delegates to the shared post loop.
+func postScorecardResults(stdout, stderr io.Writer, root string, results []scorecardpane.Result) int {
+	ups := make([]scoreboard.Update, 0, len(results))
 	for _, res := range results {
 		up, err := scoreboardUpdateFromResult(res)
 		if err != nil {
 			fmt.Fprintf(stderr, "scorecard autopost: %v\n", err)
 			return 2
 		}
+		ups = append(ups, up)
+	}
+	return postScoreboardUpdates(stdout, stderr, root, ups)
+}
+
+// postScoreboardUpdates is the shared change-gated post loop: each update whose score
+// fields differ from the last posted digest is published (via the durable post flow),
+// and its digest is banked in the persistent state file so a rerun that moved nothing
+// is silent. Any post-flow failure short-circuits with its exit code.
+func postScoreboardUpdates(stdout, stderr io.Writer, root string, ups []scoreboard.Update) int {
+	statePath := filepath.Join(root, filepath.FromSlash(scoreboardAutoPostStateRel))
+	state := loadScoreboardAutoPostState(statePath)
+	if state.Updates == nil {
+		state.Updates = map[string]string{}
+	}
+	changed := false
+	for _, up := range ups {
 		digest := scoreboardUpdateDigest(up)
 		key := up.ChangeKey()
 		if state.Updates[key] == digest {
 			fmt.Fprintf(stderr, "skipped %s: no change\n", up.Title)
 			continue
 		}
-		var stdout strings.Builder
-		code := scoreboardPostFlow(&stdout, stderr, up, scoreboardPostOpts{
+		code := scoreboardPostFlow(stdout, stderr, up, scoreboardPostOpts{
 			prefix:        "fak scorecard autopost",
 			resolveChan:   scoreboard.ResolveChannel,
 			resolveToken:  scoreboard.ResolveToken,
