@@ -19,11 +19,11 @@ func fakeEpisodes(lever, metric string, claimed, realized float64, n int) []dojo
 	out := make([]dojo.Episode, n)
 	for i := range out {
 		out[i] = dojo.Episode{
-			Lever:   lever,
-			Metric:  metric,
-			Claimed: claimed,
+			Lever:    lever,
+			Metric:   metric,
+			Claimed:  claimed,
 			Realized: realized,
-			Verdict: dojo.VerdictOverClaim,
+			Verdict:  dojo.VerdictOverClaim,
 		}
 	}
 	return out
@@ -196,11 +196,11 @@ func TestMeasureCandidateScorecardCarriesShardDeltas(t *testing.T) {
 		t.Fatal("Score = nil, want a scorecard")
 	}
 	want := map[string]float64{
-		"baseline_full":    0.50,
-		"candidate_full":   0.35,
-		"baseline_shard_a": 0.40,
+		"baseline_full":     0.50,
+		"candidate_full":    0.35,
+		"baseline_shard_a":  0.40,
 		"candidate_shard_a": 0.25,
-		"baseline_shard_b": 0.60,
+		"baseline_shard_b":  0.60,
 		"candidate_shard_b": 0.45,
 	}
 	got := map[string]float64{}

@@ -84,7 +84,7 @@ const DefaultLedgerRel = "docs/nightrun/memory-value.jsonl"
 // wikilink rot weigh 2 (annoyance/tax); a stale claim weighs 4 (corrupts a
 // decision if it reaches a turn uninjected — the recall gate is the mitigation).
 const (
-	SevStaleClaim  = 4
+	SevStaleClaim = 4
 	SevStructural = 2
 )
 

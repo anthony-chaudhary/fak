@@ -81,8 +81,8 @@ func SafeDefaultFor(reason string) string {
 // a dispatch seat; the loop id names the lane it occupies. Lease/worker refs the
 // notify event itself carried (in its metrics/evidence) are surfaced verbatim.
 type HeldResources struct {
-	WorkerSeat bool     `json:"worker_seat"`         // the run is in-flight (started, no end) — it holds a dispatch seat
-	LoopID     string   `json:"loop_id,omitempty"`   // the lane the run occupies
+	WorkerSeat bool     `json:"worker_seat"`          // the run is in-flight (started, no end) — it holds a dispatch seat
+	LoopID     string   `json:"loop_id,omitempty"`    // the lane the run occupies
 	LeaseRefs  []string `json:"lease_refs,omitempty"` // lease/worker refs the notify event carried, if any
 }
 
@@ -200,7 +200,7 @@ func Fold(events []loopmgr.Event, p Params) Queue {
 		it := Item{
 			Key:              itemKey(ev),
 			LoopID:           ev.LoopID,
-			RunID:           ev.RunID,
+			RunID:            ev.RunID,
 			Reason:           ev.Reason,
 			Summary:          ev.Summary,
 			NotifySeq:        ev.Seq,
