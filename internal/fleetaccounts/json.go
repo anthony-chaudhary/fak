@@ -89,8 +89,10 @@ func (o *orderedObj) set(key string, val any) {
 	o.vals = append(o.vals, val)
 }
 
-// setNullable emits a JSON null when the pointer is nil, else the string value.
-func (o *orderedObj) setNullable(key string, p *string) {
+// setNullablePtr emits a JSON null when the pointer is nil, else the dereferenced
+// value. Shared by the typed setNullable* wrappers below so the nil-check body isn't
+// copy-pasted per pointer type.
+func setNullablePtr[T any](o *orderedObj, key string, p *T) {
 	if p == nil {
 		o.set(key, nil)
 	} else {
@@ -98,12 +100,13 @@ func (o *orderedObj) setNullable(key string, p *string) {
 	}
 }
 
+// setNullable emits a JSON null when the pointer is nil, else the string value.
+func (o *orderedObj) setNullable(key string, p *string) {
+	setNullablePtr(o, key, p)
+}
+
 func (o *orderedObj) setNullableFloat(key string, p *float64) {
-	if p == nil {
-		o.set(key, nil)
-	} else {
-		o.set(key, *p)
-	}
+	setNullablePtr(o, key, p)
 }
 
 func (o *orderedObj) marshal() ([]byte, error) {
