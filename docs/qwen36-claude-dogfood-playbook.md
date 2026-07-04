@@ -24,16 +24,17 @@ On Windows PowerShell, run:
 .\scripts\dogfood-claude.ps1 --install
 ```
 
-That installs three PATH commands:
+That installs the PATH commands for the common local and remote dogfood paths:
 
 | command | purpose |
 |---|---|
 | `fak` | the repo CLI, so `fak serve --help` works from any directory |
 | `fak-dogfood` | generic Claude Code dogfood launcher |
 | `fak-qwen36-claude` | Qwen3.6 local preset launcher |
+| `claude-glm-gcp` | GLM-5.2 remote-node preset launcher |
+| `claude-mac` | MacBook fak-gateway preset launcher; set `FAK_MAC_GATEWAY` first |
 
-The Windows installer also writes `claude-glm-gcp.cmd` and `claude-mac.cmd` preset
-launchers for the remote-node dogfood paths.
+On Windows the same presets are installed as `.cmd` shims.
 
 ### What command runs the Qwen3.6 Claude probe?
 
@@ -48,6 +49,21 @@ fak-qwen36-claude --probe "Reply with exactly the word: pong"
 ```bash
 fak-qwen36-claude
 ```
+
+### What command uses an already-running MacBook fak gateway?
+
+When Qwen3.6 is served on a MacBook through `fak serve`, point the local dogfood
+launcher at that gateway and keep the guard on the current machine:
+
+```bash
+export FAK_MAC_GATEWAY="http://<macbook-ip>:8080"
+export FAK_GATEWAY_KEY="$(ssh <macbook-ssh-host> 'cat ~/.fak-gateway-key')"  # only if the gateway requires a bearer
+claude-mac --probe "Reply with exactly the word: pong"
+```
+
+`claude-mac` starts a local `fak serve` guard in front of the MacBook gateway, so
+Claude Code still talks to a loopback Anthropic Messages endpoint while inference
+runs on the MacBook.
 
 ### What does the Qwen preset assume?
 

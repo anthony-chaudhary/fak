@@ -69,6 +69,24 @@ func TestClaudeQwen36DogfoodLauncherPreset(t *testing.T) {
 	}
 }
 
+func TestClaudeMacDogfoodBashLauncherPreset(t *testing.T) {
+	root := repoRootFromTest(t)
+	sh := readRepoTextForClaudeGLMGCP(t, root, "scripts", "dogfood-claude.sh")
+	for _, want := range []string{
+		"claude-mac)",
+		`PRESET="mac"`,
+		`FAK_DOGFOOD_PRESET=mac requires FAK_MAC_GATEWAY=http://<macbook-ip>:8080`,
+		`DEFAULT_OPENAI_BASE_URL="$FAK_MAC_GATEWAY"`,
+		`DEFAULT_MODEL="${FAK_MAC_MODEL:-lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M}"`,
+		`DEFAULT_UPSTREAM_API_KEY_ENV="FAK_GATEWAY_KEY"`,
+		`UPSTREAM_API_KEY_ENV="${FAK_DOGFOOD_API_KEY_ENV:-$DEFAULT_UPSTREAM_API_KEY_ENV}"`,
+		`mac_name="claude-mac"`,
+		`ln -sf "$target" "$bindir/$mac_name"`,
+	} {
+		requireContainsForClaudeGLMGCP(t, sh, want)
+	}
+}
+
 func TestClaudeGLMGCPBringupPlanWiring(t *testing.T) {
 	root := repoRootFromTest(t)
 	gcp := readRepoTextForClaudeGLMGCP(t, root, "scripts", "gcp-glm-serve.sh")

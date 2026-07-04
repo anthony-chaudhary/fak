@@ -16,15 +16,19 @@
 #   ./scripts/dogfood-claude.sh --smoke         # curl the wire (no model intelligence needed), then exit
 #   ./scripts/dogfood-claude.sh --print-env     # print the export lines for your own `claude` invocation
 #   ./scripts/dogfood-claude.sh --list-accounts # show the account switcher's roster, then exit
-#   ./scripts/dogfood-claude.sh --install       # COPY `fak` (repo-independent) + symlink the `fak-dogfood`/`fak-qwen36-claude`/`claude-glm-gcp` launchers onto PATH
+#   ./scripts/dogfood-claude.sh --install       # COPY `fak` (repo-independent) + symlink the `fak-dogfood`/`fak-qwen36-claude`/`claude-glm-gcp`/`claude-mac` launchers onto PATH
 #   fak-qwen36-claude --probe "hi"              # installed Qwen3.6 local preset
 #   claude-glm-gcp --probe "say pong"           # installed GLM-5.2-on-GCP preset (set FAK_GLM_GCP_BASE_URL first)
+#   claude-mac --probe "say pong"               # installed Mac fak-serve preset (set FAK_MAC_GATEWAY first)
 #
 # Knobs (env):
-#   FAK_DOGFOOD_PRESET   qwen36-local | glm-gcp (auto from the invoked name: fak-qwen36-claude / claude-glm-gcp)
+#   FAK_DOGFOOD_PRESET   qwen36-local | glm-gcp | mac (auto from the invoked name: fak-qwen36-claude / claude-glm-gcp / claude-mac)
 #   FAK_GLM_GCP_BASE_URL the glm-gcp preset's GLM-5.2 /v1 base URL (a Tailscale host, or a localhost
 #                          SSH/IAP tunnel to the GCP serving node; default http://127.0.0.1:8200/v1).
 #                          Stand the node up with scripts/gcp-glm-serve.sh.
+#   FAK_MAC_GATEWAY      the mac preset's fak serve gateway base URL, e.g. http://<macbook-ip>:8080
+#   FAK_MAC_MODEL        the mac preset's served model id (default lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M)
+#   FAK_GATEWAY_KEY      bearer used by the mac preset when the gateway requires --require-key-env
 #   FAK_DOGFOOD_PORT     fak serve port              (default 8080)
 #   FAK_DOGFOOD_MODEL    served model id             (default: first ollama model, else qwen2.5:1.5b)
 #   FAK_DOGFOOD_BACKEND  ollama | shim | openai | gguf | anthropic
@@ -124,11 +128,12 @@ build_fak() {
 
 PRESET="${FAK_DOGFOOD_PRESET:-}"
 # The invoked name selects a preset when one isn't pinned via env — so the installed
-# symlinks (fak-qwen36-claude, claude-glm-gcp) each launch their own preset.
+# symlinks (fak-qwen36-claude, claude-glm-gcp, claude-mac) each launch their own preset.
 if [ -z "$PRESET" ]; then
   case "$INVOKED_NAME" in
     fak-qwen36-claude) PRESET="qwen36-local" ;;
     claude-glm-gcp)    PRESET="glm-gcp" ;;
+    claude-mac)        PRESET="mac" ;;
   esac
 fi
 
@@ -136,6 +141,7 @@ DEFAULT_BACKEND="ollama"
 DEFAULT_OPENAI_BASE_URL=""
 DEFAULT_MODEL=""
 DEFAULT_PROVIDER_EXTRA_BODY=""
+DEFAULT_UPSTREAM_API_KEY_ENV=""
 case "$PRESET" in
   "") ;;
   qwen36|qwen36-local)
@@ -158,7 +164,20 @@ case "$PRESET" in
     DEFAULT_MODEL="${FAK_GLM_GCP_MODEL:-glm-5.2}"
     DEFAULT_PROVIDER_EXTRA_BODY=""
     ;;
-  *) die "unknown FAK_DOGFOOD_PRESET=$PRESET (want qwen36-local | glm-gcp)" ;;
+  mac)
+    # MacBook dogfood preset: point Claude Code at an already-running fak serve on
+    # the Mac (often serving Qwen3.6-27B through Metal/LM Studio/llama-server).
+    # The public repo cannot carry a real tailnet host, so operators provide it
+    # explicitly via FAK_MAC_GATEWAY; the gateway bearer stays in FAK_GATEWAY_KEY.
+    PRESET="mac"
+    [ -n "${FAK_MAC_GATEWAY:-}" ] || die "FAK_DOGFOOD_PRESET=mac requires FAK_MAC_GATEWAY=http://<macbook-ip>:8080"
+    DEFAULT_BACKEND="openai"
+    DEFAULT_OPENAI_BASE_URL="$FAK_MAC_GATEWAY"
+    DEFAULT_MODEL="${FAK_MAC_MODEL:-lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M}"
+    DEFAULT_PROVIDER_EXTRA_BODY=""
+    DEFAULT_UPSTREAM_API_KEY_ENV="FAK_GATEWAY_KEY"
+    ;;
+  *) die "unknown FAK_DOGFOOD_PRESET=$PRESET (want qwen36-local | glm-gcp | mac)" ;;
 esac
 
 PORT="${FAK_DOGFOOD_PORT:-8080}"
@@ -185,7 +204,7 @@ if [ -n "$KERNEL_BACKEND" ] && [ -z "$DEFAULT_MODEL" ]; then DEFAULT_MODEL="qwen
 OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 SHIM_PORT="${FAK_DOGFOOD_SHIM_PORT:-8099}"
 OPENAI_BASE_URL="${FAK_DOGFOOD_BASE_URL:-$DEFAULT_OPENAI_BASE_URL}"
-UPSTREAM_API_KEY_ENV="${FAK_DOGFOOD_API_KEY_ENV:-}"
+UPSTREAM_API_KEY_ENV="${FAK_DOGFOOD_API_KEY_ENV:-$DEFAULT_UPSTREAM_API_KEY_ENV}"
 PROVIDER_EXTRA_BODY="${FAK_DOGFOOD_PROVIDER_EXTRA_BODY_JSON:-${FAK_DOGFOOD_EXTRA_BODY_JSON:-$DEFAULT_PROVIDER_EXTRA_BODY}}"
 CLAUDE_DEBUG="${FAK_DOGFOOD_CLAUDE_DEBUG:-api}"
 CLAUDE_DEBUG_FILE="${FAK_DOGFOOD_CLAUDE_DEBUG_FILE:-}"
@@ -216,7 +235,7 @@ case "${1:-}" in
   --help|-h)       sed -n '2,50p' "$0"; exit 0 ;;
 esac
 
-# --- --install: put `fak-dogfood`, `fak-qwen36-claude`, and `fak` on PATH -----
+# --- --install: put dogfood launchers and `fak` on PATH -----------------------
 # Idempotent. Picks the first writable PATH dir among ~/.local/bin, /opt/homebrew/bin,
 # /usr/local/bin (or $FAK_DOGFOOD_BINDIR), symlinks this script there as generic
 # `fak-dogfood` and preset `fak-qwen36-claude`, and builds+COPIES the repo CLI as
@@ -230,6 +249,7 @@ if [ "$MODE" = "install" ]; then
   name="fak-dogfood"
   qwen_name="fak-qwen36-claude"
   glm_name="claude-glm-gcp"
+  mac_name="claude-mac"
   if [ -n "${FAK_DOGFOOD_BINDIR:-}" ]; then
     cands="$FAK_DOGFOOD_BINDIR"
   else
@@ -247,6 +267,7 @@ if [ "$MODE" = "install" ]; then
   ln -sf "$target" "$bindir/$name"
   ln -sf "$target" "$bindir/$qwen_name"
   ln -sf "$target" "$bindir/$glm_name"
+  ln -sf "$target" "$bindir/$mac_name"
   log "building fak -> $BIN"
   build_fak "$BIN"
   # COPY the built binary onto PATH (not `ln -sf`): a copy is repo-independent, so the
@@ -257,14 +278,15 @@ if [ "$MODE" = "install" ]; then
   log "installed: $bindir/$name -> $target"
   log "installed: $bindir/$qwen_name -> $target"
   log "installed: $bindir/$glm_name -> $target"
+  log "installed: $bindir/$mac_name -> $target"
   log "installed: $bindir/fak  (copied; re-run --install to refresh)"
   # The launcher symlinks RUN the in-tree script, so they depend on the clone staying put
   # — only the copied `fak` binary above is repo-independent. Warn clearly so a later
   # move/delete of the clone is not a silent breakage (the install-path contract).
-  warn "the $name/$qwen_name/$glm_name launchers are symlinks INTO this clone ($SCRIPT_DIR);"
+  warn "the $name/$qwen_name/$glm_name/$mac_name launchers are symlinks INTO this clone ($SCRIPT_DIR);"
   warn "they break if you move or delete it. The copied \`fak\` binary survives a move — re-run --install after one."
   case ":$PATH:" in
-    *":$bindir:"*) log "ready — run \`fak serve --help\`, \`$name --probe\`, \`$qwen_name --probe\`, or \`$glm_name --probe\` from anywhere" ;;
+    *":$bindir:"*) log "ready — run \`fak serve --help\`, \`$name --probe\`, \`$qwen_name --probe\`, \`$glm_name --probe\`, or \`$mac_name --probe\` from anywhere" ;;
     *)             log "NOTE: $bindir is not on PATH — add it: export PATH=\"$bindir:\$PATH\"" ;;
   esac
   exit 0
