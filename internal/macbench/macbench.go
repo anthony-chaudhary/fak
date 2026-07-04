@@ -59,6 +59,32 @@ type Health struct {
 	Error   string `json:"error,omitempty"`
 }
 
+const RecoverySchema = "fak.macbench.recovery.v1"
+
+type RecoverySignals struct {
+	WatcherRunning bool
+	ResultPresent  bool
+	LatestReport   *Report
+	TailnetOnline  *bool
+	SSHReachable   *bool
+	WakeHelper     *bool
+}
+
+type RecoveryPlan struct {
+	Schema   string           `json:"schema"`
+	State    string           `json:"state"`
+	Severity string           `json:"severity"`
+	Summary  string           `json:"summary"`
+	Evidence []string         `json:"evidence,omitempty"`
+	Actions  []RecoveryAction `json:"actions"`
+}
+
+type RecoveryAction struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Detail string `json:"detail"`
+}
+
 type Row struct {
 	Name                   string  `json:"name"`
 	Kind                   string  `json:"kind"`
@@ -86,6 +112,140 @@ func DefaultOptions() Options {
 		PrefillTokens: []int{128, 512, 2048, 4096},
 		Concurrency:   2,
 	}
+}
+
+func PlanRecovery(sig RecoverySignals) RecoveryPlan {
+	plan := RecoveryPlan{
+		Schema:   RecoverySchema,
+		State:    "no_health_report",
+		Severity: "info",
+		Summary:  "macbench has not observed a gateway health report yet",
+		Actions: []RecoveryAction{{
+			ID:     "wait-first-poll",
+			Title:  "wait for first health poll",
+			Detail: "Keep the watcher running until it writes the first sanitized health report.",
+		}},
+	}
+	if sig.ResultPresent {
+		plan.State = "result_present"
+		plan.Severity = "info"
+		plan.Summary = "macbench result artifact is present"
+		plan.Actions = []RecoveryAction{{
+			ID:     "record-result",
+			Title:  "record result",
+			Detail: "Fold the result artifact into the nightrun ledger or benchmark summary.",
+		}}
+		return plan
+	}
+	if !sig.WatcherRunning {
+		plan.State = "watcher_not_running"
+		plan.Severity = "action"
+		plan.Summary = "macbench watcher is not running"
+		plan.Actions = []RecoveryAction{{
+			ID:     "restart-watch",
+			Title:  "restart macbench watch",
+			Detail: "Start `fak macbench watch` with the same sanitized log and result paths.",
+		}}
+		return plan
+	}
+	if sig.LatestReport == nil {
+		return plan
+	}
+
+	rep := *sig.LatestReport
+	gateway := sanitizedReportGateway(rep.Gateway)
+	plan.Evidence = append(plan.Evidence, fmt.Sprintf("latest suite=%s gateway=%s health=%t", rep.Suite, gateway, rep.Health.OK))
+	if rep.Health.Error != "" {
+		plan.Evidence = append(plan.Evidence, "health_error="+sanitizeGatewayInText(rep.Health.Error, rep.Gateway))
+	}
+	if rep.Health.OK {
+		plan.State = "gateway_ready"
+		plan.Severity = "info"
+		plan.Summary = "gateway health is OK; waiting for full benchmark result"
+		plan.Actions = []RecoveryAction{{
+			ID:     "wait-full-suite",
+			Title:  "wait for full suite",
+			Detail: "Let the watcher run the full `all` suite and write the result artifact.",
+		}}
+		return plan
+	}
+
+	errText := strings.ToLower(rep.Health.Error + "\n" + strings.Join(rep.Errors, "\n"))
+	switch {
+	case boolKnownFalse(sig.TailnetOnline):
+		plan.State = "tailnet_offline"
+		plan.Severity = "operator"
+		plan.Summary = "Mac benchmark peer is offline; gateway cannot be recovered from this host"
+		plan.Actions = []RecoveryAction{
+			{
+				ID:     "wake-or-power-mac",
+				Title:  "wake or power the Mac",
+				Detail: "Use the private lab control path or physical access to bring the Mac back onto the tailnet.",
+			},
+			{
+				ID:     "confirm-tailnet-online",
+				Title:  "confirm tailnet peer online",
+				Detail: "Re-check the tailnet peer status before restarting the gateway.",
+			},
+			{
+				ID:     "restart-gateway",
+				Title:  "restart fak gateway",
+				Detail: "Once reachable, start or restart the Mac `fak serve --metal` gateway and keep the watcher running.",
+			},
+		}
+	case boolKnownFalse(sig.SSHReachable):
+		plan.State = "control_path_down"
+		plan.Severity = "operator"
+		plan.Summary = "Mac control path is unreachable; gateway restart cannot be attempted"
+		plan.Actions = []RecoveryAction{
+			{
+				ID:     "restore-control-path",
+				Title:  "restore control path",
+				Detail: "Bring SSH/tailnet connectivity back before trying to read the gateway key or restart the gateway.",
+			},
+			{
+				ID:     "keep-watch-running",
+				Title:  "keep watcher running",
+				Detail: "The watcher will write the full result automatically once gateway health succeeds.",
+			},
+		}
+	case strings.Contains(errText, "deadline exceeded") ||
+		strings.Contains(errText, "timeout") ||
+		strings.Contains(errText, "connection refused") ||
+		strings.Contains(errText, "no route to host"):
+		plan.State = "gateway_unreachable"
+		plan.Severity = "operator"
+		plan.Summary = "gateway health probe is timing out or refusing connections"
+		plan.Actions = []RecoveryAction{
+			{
+				ID:     "check-peer-online",
+				Title:  "check Mac peer",
+				Detail: "Confirm the Mac is awake and visible on the private network.",
+			},
+			{
+				ID:     "restart-gateway",
+				Title:  "restart fak gateway",
+				Detail: "Restart the Mac gateway, then re-run `fak macbench watch-status` against the existing log/result paths.",
+			},
+		}
+	default:
+		plan.State = "waiting_for_gateway"
+		plan.Severity = "watch"
+		plan.Summary = "gateway health is still false"
+		plan.Actions = []RecoveryAction{{
+			ID:     "keep-watch-running",
+			Title:  "keep watcher running",
+			Detail: "Continue polling while investigating the latest sanitized health error.",
+		}}
+	}
+	if boolKnownFalse(sig.WakeHelper) {
+		plan.Actions = append(plan.Actions, RecoveryAction{
+			ID:     "document-wake-helper-gap",
+			Title:  "document wake helper gap",
+			Detail: "Track the missing wake/restart helper so the next run has an operator-usable recovery path.",
+		})
+	}
+	return plan
 }
 
 func (r Report) HasErrors() bool {
@@ -225,6 +385,18 @@ func sanitizeGatewayInText(s, rawGateway string) string {
 		return s
 	}
 	return strings.ReplaceAll(s, rawGateway, SanitizeGatewayForReport(rawGateway))
+}
+
+func sanitizedReportGateway(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "<") && strings.HasSuffix(raw, ">") {
+		return raw
+	}
+	return SanitizeGatewayForReport(raw)
+}
+
+func boolKnownFalse(v *bool) bool {
+	return v != nil && !*v
 }
 
 func portSuffix(u *url.URL) string {

@@ -119,6 +119,50 @@ func TestRemoteGatewayErrorTextIsSanitized(t *testing.T) {
 	}
 }
 
+func TestPlanRecoveryTailnetOfflineStaysScrubbed(t *testing.T) {
+	no := false
+	rep := Report{
+		Suite:   SuiteHealth,
+		Gateway: "http://100.64.1.2:8080",
+		Health:  Health{Error: `Get "http://100.64.1.2:8080/healthz": context deadline exceeded`},
+		Errors:  []string{`healthz failed: Get "http://100.64.1.2:8080/healthz": context deadline exceeded`},
+	}
+	plan := PlanRecovery(RecoverySignals{
+		WatcherRunning: true,
+		LatestReport:   &rep,
+		TailnetOnline:  &no,
+		SSHReachable:   &no,
+		WakeHelper:     &no,
+	})
+	if plan.State != "tailnet_offline" || plan.Severity != "operator" {
+		t.Fatalf("plan state=%q severity=%q, want tailnet_offline/operator: %+v", plan.State, plan.Severity, plan)
+	}
+	joined, _ := json.Marshal(plan)
+	if strings.Contains(string(joined), "100.64.1.2") {
+		t.Fatalf("recovery plan leaked raw gateway: %s", joined)
+	}
+	for _, want := range []string{"wake-or-power-mac", "confirm-tailnet-online", "restart-gateway", "document-wake-helper-gap"} {
+		if !hasRecoveryAction(plan, want) {
+			t.Fatalf("recovery plan missing action %q: %+v", want, plan.Actions)
+		}
+	}
+}
+
+func TestPlanRecoveryGatewayReadyWaitsForResult(t *testing.T) {
+	rep := Report{
+		Suite:   SuiteHealth,
+		Gateway: "<remote-gateway>",
+		Health:  Health{OK: true, Engine: "metal"},
+	}
+	plan := PlanRecovery(RecoverySignals{WatcherRunning: true, LatestReport: &rep})
+	if plan.State != "gateway_ready" {
+		t.Fatalf("plan state=%q, want gateway_ready: %+v", plan.State, plan)
+	}
+	if !hasRecoveryAction(plan, "wait-full-suite") {
+		t.Fatalf("recovery plan missing wait-full-suite action: %+v", plan.Actions)
+	}
+}
+
 func TestElapsedSecondsFloorsNonPositiveDurations(t *testing.T) {
 	got := elapsedSeconds(time.Now().Add(time.Second))
 	if got != 0.001 {
@@ -129,3 +173,12 @@ func TestElapsedSecondsFloorsNonPositiveDurations(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func hasRecoveryAction(plan RecoveryPlan, id string) bool {
+	for _, action := range plan.Actions {
+		if action.ID == id {
+			return true
+		}
+	}
+	return false
+}

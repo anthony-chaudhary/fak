@@ -76,6 +76,18 @@ It polls `health` until the gateway is reachable, emits sanitized health JSON
 for each poll, then runs the full `all` sweep once and writes the log/result
 files.
 
+If `fak macbench watch-status --log ... --result ... --json` reports
+`waiting_for_gateway` for a remote Mac, treat it as a control-path recovery
+problem, not a benchmark result. Keep the watcher running, then:
+
+1. Confirm the Mac tailnet peer is online.
+2. If the peer is offline, use the private lab control path or physical access to
+   wake/power it; do not commit tailnet IPs, hostnames, or keys.
+3. Once the peer is reachable, start or restart the Mac `fak serve --metal`
+   gateway and re-run `watch-status` against the same log/result paths.
+4. When `/healthz` turns OK, the watcher runs the full suite and writes the
+   result JSON automatically.
+
 ## How next() ranks
 
 Each feasible task is scored by a blend that sums to 1.0:
