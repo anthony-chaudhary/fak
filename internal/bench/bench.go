@@ -236,8 +236,9 @@ func Run(ctx context.Context, t *Trace, opt Options) (*metrics.Report, error) {
 	if offTok > 0 {
 		rep.TokenDeltaPct = 100 * float64(offTok-onTok) / float64(offTok)
 	}
-	// tokencost (unit 84): a representative $/Mtok blended rate applied to on-arm.
-	rep.DollarPerTask = dollar(onTok, on.Calls)
+	// tokencost (unit 84): the representative $/Mtok two-rate model applied to the
+	// on-arm's in/out split (so output is priced at the output rate, not collapsed).
+	rep.DollarPerTask = dollar(on.InTokens, on.OutTokens)
 
 	rep.ComputeGate()
 
@@ -262,9 +263,11 @@ func max1(n int) int {
 	return n
 }
 
-// dollar applies a blended $3/Mtok-in, $15/Mtok-out representative rate (a stand-in
-// for the tokencost 218-model table; the figure is illustrative, not billed).
-func dollar(totalTok int64, calls int) float64 {
-	// Without the in/out split here we approximate at the blended input rate.
-	return float64(totalTok) / 1e6 * 3.0
+// dollar prices the on-arm's token usage with the representative $3/Mtok-in,
+// $15/Mtok-out two-rate model (a stand-in for the tokencost 218-model table; the
+// figure is illustrative, not billed). Output is priced at the higher output rate
+// on its own axis rather than collapsed into the input rate, so an output-heavy
+// workload reports the cost the model actually implies.
+func dollar(inTok, outTok int64) float64 {
+	return float64(inTok)/1e6*3.0 + float64(outTok)/1e6*15.0
 }
