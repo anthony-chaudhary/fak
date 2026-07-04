@@ -5,6 +5,16 @@ description: "Repeatable operator steps for launching Claude Code from fak conso
 
 # Mac Agent UI
 
+**The showcase, in one line:** point Claude Code at your own Mac's local open model
+through a single `fak` binary, and watch fak prove the gateway is live before it hands
+over the terminal. A premium cloud agent, open weights running on your own silicon, one
+static binary in between. It is the whole fak thesis, runnable on a laptop.
+
+Being honest about it: the first local turn is slow (10 to 15 minutes of prefill on an M3
+Pro), and the model serves one stream at a time. The point is not speed. The point is that
+the whole loop works end to end and stays observable the entire time, through the preflight
+panel, `--overlay`, and `--metrics` below.
+
 > **Audience.** Operators launching Claude Code from the fak console against an already-running Mac `fak serve` gateway. By the end you can open interactive Claude Code against `node-macos-a` with one command.
 
 Use this when `node-macos-a` is already running the always-on Qwen3.6 stack:
