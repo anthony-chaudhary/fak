@@ -17,12 +17,19 @@ has a ``_test.go``, the file is under the god-file ceiling. Every existing KPI s
 
 "Don't let the kernel rot into slop" was an unfalsifiable vibe — there was no number to
 move. This is that number. It scores the Go module on six slop axes, folds them into a
-weighted **slop_score** (0-100, A-F) AND — the lever that makes "less slop" a checkable
-target — a **slop_debt** integer: the count of concrete, re-derivable slop defects you
-can drive toward zero. Every axis is static ``.go`` analysis only; the scorecard never
-shells ``go`` (so it stays no-network, no-build, gate-safe).
+weighted **slop_score** (ceiling 100 at zero defects, A-F, unbounded BELOW) AND — the
+lever that makes "less slop" a checkable target — a **slop_debt** integer: the count of
+concrete, re-derivable slop defects you can drive toward zero. Every axis is static
+``.go`` analysis only; the scorecard never shells ``go`` (so it stays no-network,
+no-build, gate-safe).
 
-The six KPIs (each 0-100):
+Each per-KPI score is ``100 - penalty*count`` with NO floor at 0: a tree carrying far
+more debt than the floor threshold still shows a falling (negative) score as defects are
+retired, instead of pinning at 0 and hiding every fix until the last one crosses the old
+floor. 100 stays the ceiling (zero defects is the best any KPI can be); nothing is capped
+below.
+
+The six KPIs (each capped at 100, unbounded below):
 
   duplication     copy-paste clones: a normalized Go token-window appearing in 2+ places [HARD]
   vacuous_tests   a Test/Benchmark func body that makes zero assertions                 [HARD]
@@ -216,7 +223,11 @@ _CODEISH_RE = re.compile(
 
 
 def _clamp(score: float) -> int:
-    return int(max(0, min(100, round(score))))
+    """Cap at 100 (zero defects is the best a KPI can be) but NEVER floor at 0 —
+    a floor would pin every heavy-debt tree at the same 0 and hide real progress
+    (fixing 50 of 784 clone groups) until debt crosses the floor threshold. Letting
+    the score run negative keeps every single genuine fix visible immediately."""
+    return int(min(100, round(score)))
 
 
 def grade_letter(score: float) -> str:
@@ -1608,8 +1619,9 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
         "---",
         'title: "fak Code-Slop Scorecard: the slop the compiler can\'t see"',
         ('description: "fak\'s code-slop scorecard grades the Go module on six '
-         'deterministic slop axes into a slop-score (0-100, A-F) and a re-derivable '
-         'slop-debt count — clones, vacuous tests, dead code, comment cruft."'),
+         'deterministic slop axes into a slop-score (ceiling 100, A-F, unbounded below) '
+         'and a re-derivable slop-debt count — clones, vacuous tests, dead code, comment '
+         'cruft."'),
         "---",
         "",
         "# Code-slop scorecard",
@@ -1627,8 +1639,10 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
                "copy-paste clones, tests that assert nothing, dead unexported symbols, "
                "commented-out code and tautological doc comments. Six deterministic axes "
                "(duplication · dead_code · comment_slop · vacuous_tests · stub_masquerade · "
-               "churn_bloat), folded into a **slop-score** (0–100, A–F) and a **slop-debt** "
-               "integer (the count of concrete, re-derivable slop defects). Every number "
+               "churn_bloat), folded into a **slop-score** (ceiling 100 at zero defects, "
+               "A–F, unbounded below so partial progress on a heavy-debt axis stays visible) "
+               "and a **slop-debt** integer (the count of concrete, re-derivable slop "
+               "defects). Every number "
                "below is re-derived from disk by `tools/code_slop_scorecard.py` — no "
                "hand-entry. Drive slop-debt to zero to make \"less slop\" provable.")
     out.append("")
