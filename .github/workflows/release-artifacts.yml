@@ -253,28 +253,11 @@ jobs:
             echo "::error::aggregate SHA256SUMS asset missing"; fail=1
           fi
 
-          echo "== verifying aggregate SHA256SUMS =="
-          if [ -f SHA256SUMS ]; then
-            if sha256sum -c SHA256SUMS; then
-              echo "ok: SHA256SUMS matches published archives"
-            else
-              echo "::error::aggregate SHA256SUMS verification failed"; fail=1
-            fi
-          fi
-
-          echo "== verifying per-archive sha256 sidecars =="
-          shopt -s nullglob
-          sums=( *.sha256 )
-          if [ "${#sums[@]}" -eq 0 ]; then
-            echo "::error::no per-archive .sha256 assets found"; fail=1
-          fi
-          for sum in "${sums[@]}"; do
-            if sha256sum -c "$sum"; then
-              echo "ok: $sum"
-            else
-              echo "::error::checksum mismatch for $sum"; fail=1
-            fi
-          done
+          # Checksum checks live in a standalone, unit-tested script
+          # (.github/scripts/verify-release-checksums_test.sh proves it
+          # actually fails on a corrupted asset) so this property is
+          # verified on every PR, not just on a real tag push (#1369).
+          bash "${GITHUB_WORKSPACE}/.github/scripts/verify-release-checksums.sh" "$assets" || fail=1
 
           echo "== extracting published archives =="
           for archive in "${expected_archives[@]}"; do

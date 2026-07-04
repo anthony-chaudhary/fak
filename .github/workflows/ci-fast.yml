@@ -67,6 +67,12 @@ jobs:
             ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-
             ${{ runner.os }}-gobuild-
 
+      # No Go/network dependency: proves the release-artifacts post-publish
+      # checksum verifier (#1369) still catches a corrupted asset, on every
+      # PR — not just when a real tag is cut.
+      - name: verify-release-checksums self-test
+        run: bash .github/scripts/verify-release-checksums_test.sh
+
       - name: build
         run: go build ./...
 
