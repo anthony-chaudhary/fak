@@ -1,0 +1,7 @@
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+  "allow": ["read_file", "search_web", "create_ticket", "send_email"],
+  "deny": {"send_email": "POLICY_BLOCK"},
+  "redact_fields": ["password", "api_key"]
+}
