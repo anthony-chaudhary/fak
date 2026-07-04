@@ -93,6 +93,39 @@ publicly: `note` is rendered verbatim (keep it pre-scrubbed — never a lab host
 channel, or operator path), and a roster's `endpoint`/`labels` must never carry a real
 channel/session/token (the private bridge owns the id→channel map on its side).
 
+## Lab-machine dev readiness
+
+Dispatch planning needs a smaller yes/no surface than the full operator report: can this
+class of lab machine safely take dev work right now? The public answer is a scrubbed
+readiness record. It is derived from private readbacks, but it carries only generic class
+and status words:
+
+```json
+{
+  "schema": "fak.lab_readiness/v1",
+  "machine_class": "gpu-server",
+  "checked_at": "2026-07-04T14:00:00Z",
+  "status": "WAIT_PRIVATE_RECOVERY",
+  "next_action": "confirm-private-control-session",
+  "evidence": "scrubbed-private-readback"
+}
+```
+
+`status` is a closed vocabulary:
+
+| Status | Dispatch meaning |
+|---|---|
+| `READY_FOR_DEV_WORK` | The machine class may be offered to lab-backed dev workers. |
+| `WAIT_PRIVATE_RECOVERY` | Do not dispatch work there; an operator must recover the private control path first. |
+| `GATEWAY_UNREACHABLE` | Do not dispatch model/gateway work there; keep any existing watcher alive and recover the gateway privately. |
+| `AUTH_OR_CHANNEL_BLOCKED` | Do not retry public dispatch; the private auth/channel state needs operator action. |
+| `INDETERMINATE` | Fail closed. Use local workers or another ready class until a stronger readback exists. |
+
+The record may name a generic class (`gpu-server`, `mac-worker`, `linux-worker`) and a
+generic next-action class. It must not name a host, endpoint, channel, token, account id,
+raw transcript, or private filesystem path. Super-loop and issue-dispatch planning should
+treat anything other than `READY_FOR_DEV_WORK` as no lab-machine capacity.
+
 ### First green run (before the private bridge is wired)
 
 To see a populated frame without the bridge, drop a sample report into a directory and

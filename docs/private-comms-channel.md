@@ -81,6 +81,24 @@ If `-probe` genuinely finds only STALE banners after a patient wait, *then* an o
 (re)start the remote control shell — a bare `default` login shell exits before delayed stdin,
 so the box needs a persistent/tmux control session.
 
+## Public readiness output
+
+Agents in the public repo should not consume raw bridge transcripts. When lab machines are
+being considered as dev-worker capacity, fold the private readback into the public
+`fak.lab_readiness/v1` record documented in [`fleet.md`](fleet.md). The only public statuses
+are:
+
+- `READY_FOR_DEV_WORK`
+- `WAIT_PRIVATE_RECOVERY`
+- `GATEWAY_UNREACHABLE`
+- `AUTH_OR_CHANNEL_BLOCKED`
+- `INDETERMINATE`
+
+Only `READY_FOR_DEV_WORK` admits lab-backed dispatch. Every other value is a public-safe
+hold: continue local work, keep existing watchers alive when appropriate, and recover the
+machine through `fak-private`. Never paste a host, endpoint, channel id, token, account id,
+raw transcript, or private path into a public issue, commit, or artifact.
+
 ## See also
 
 - [GPU-server private boundary](gpu-server-private-boundary.md) — the source of truth for *what is

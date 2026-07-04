@@ -28,6 +28,8 @@ Examples that can be public:
 - scrubbed result artifacts under `experiments/qwen36/...`
 - GPU acceptance scripts that run local commands and do not implement the lab control
   channel
+- scrubbed lab-machine readiness records using the `fak.lab_readiness/v1` status
+  vocabulary from [`fleet.md`](fleet.md)
 
 ## Private tree
 
@@ -43,6 +45,22 @@ Private-only paths and concepts:
 - GPU-server machine catalog runs under private machine IDs
 - raw control-plane state, transcripts, tokens, workspace IDs, lab hostnames, and
   operator paths
+
+## Readiness handoff
+
+The public tree may say whether a lab machine class is usable for dev work, but only as a
+scrubbed status class. Private bridge output is folded on the private side into one of:
+
+- `READY_FOR_DEV_WORK`
+- `WAIT_PRIVATE_RECOVERY`
+- `GATEWAY_UNREACHABLE`
+- `AUTH_OR_CHANNEL_BLOCKED`
+- `INDETERMINATE`
+
+That folded status is public evidence; the raw private command output is not. If a status
+cannot be produced without carrying a host, endpoint, channel id, token, account id, raw
+transcript, or private path, publish `INDETERMINATE` and keep the raw evidence private.
+Dispatch and super-loop code must fail closed on every status except `READY_FOR_DEV_WORK`.
 
 ## Confirming a feeder actually posted
 
