@@ -215,6 +215,7 @@ concurrent = [
   "resume",
   "trajctl",
   "waiting",
+  "issuefanout", # #2522: internal/issuefanout leaf (the spine-first + fan-out follow-on planner); cmd/fak/issue_fanout.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -310,6 +311,7 @@ autopick = [
   "logvault", # #2449: internal/logvault leaf (central log-vault capture/verify), see [lanes].concurrent note
   "trajctl",
   "waiting",
+  "issuefanout", # #2522: internal/issuefanout leaf (the spine-first + fan-out follow-on planner), see [lanes].concurrent note
   # new-leaf:lane
 ]
 
@@ -487,6 +489,7 @@ resume = ["internal/resume/**"] # crash-resume decision kernel; cmd/fak resume_*
 logvault = ["internal/logvault/**"] # #2449: internal/logvault leaf (central log-vault capture/verify); cmd/fak/logvault.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
 trajctl = ["internal/trajctl/**"]
 waiting = ["internal/waiting/**"]
+issuefanout = ["internal/issuefanout/**"] # #2522: internal/issuefanout leaf (the spine-first + fan-out follow-on planner); cmd/fak/issue_fanout.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
@@ -871,6 +874,20 @@ refusal  = true
 summary  = "Verification-ladder rung could not CONCLUSIVELY decide the claim cheaply and the ladder exhausted with no costlier rung available -- the residual indeterminate folds to a fail-closed deny (escalate, never silently allow). The kernel-side VerdictIndeterminate (internal/abi/types.go) is non-committable by construction; this token names the ladder's fail-closed tail."
 fix      = "Consult a costlier rung that can conclusively decide (require-witness / CI / git-evidence / isolated-worktree keep-bit / human ESCALATE), or accept the fail-closed deny. The ladder is DATA: declare a sufficient rung whose max_risk covers the claim's risk class in the dos.toml [ladder] (docs/standards/verification-ladder-spec.md). Floor: go test ./internal/kernel (the shipped lazy fold + residual-Indeterminate-fails-closed)."
 see_also = ["docs/standards/verification-ladder-spec.md", "docs/notes/verification-ladder-doctrine.md", "internal/abi/types.go", "internal/kernel/kernel.go"]
+
+# #2522 (integration follow-on of the spine-first + fan-out epic #2510): the
+# issue fanout planner's own contract rejections (internal/issuefanout.Refusal,
+# e.g. a missing spine_ref, a cap below MinFanout, an unknown area filter) named
+# as a dos_check_reason-resolvable token so a fleet loop can route/recover
+# mechanically instead of pattern-matching the free-text message. Advisory, not
+# a hard refusal: one malformed Build() call should not block the rest of a
+# dispatch loop's work.
+[reasons.ISSUEFANOUT_CONTRACT_REFUSED]
+category = "MISROUTE"
+refusal  = false
+summary  = "The issue fanout planner (internal/issuefanout.Build) refused an input that violates its declared contract -- a missing title/leaf/spine_ref, a --max cap below the fan-out floor (MinFanout), or an unknown --area filter."
+fix      = "Fix the caller's input and retry: supply spine_ref (the shipped spine's witness), keep --max at or above MinFanout, and pass a known --area (see AreaNames()). ClassifyOutcome distinguishes this deliberate refusal from an unexpected internal error."
+see_also = ["internal/issuefanout/issuefanout.go", "internal/issuefanout/outcome_test.go", "fak issue fanout"]
 
 # Bound the per-project `.dos/` scratch so a long-lived repo doesn't accrete audit
 # reports without limit (the "never reap a live lease" floor is the collector's,
