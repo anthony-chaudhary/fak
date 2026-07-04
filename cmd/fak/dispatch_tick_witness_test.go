@@ -180,8 +180,8 @@ func TestDispatchTickLiveHoldsStructurallyBlockedIssue(t *testing.T) {
 
 	// Live tick: the sweep grades the dead slot, records it, and the pick HOLDS #12.
 	out, errb, code = runDispatchAt("tick", "--workspace", root, "--lane", "docs", "--cooldown-min", "0", "--live", "--no-refresh", "--no-loop-ledger", "--json")
-	if code != 1 {
-		t.Fatalf("live exit = %d, want 1 (held issue leaves nothing to dispatch) (stderr: %s)\n%s", code, errb, out)
+	if code != 0 {
+		t.Fatalf("live exit = %d, want 0 (held issue is reported in the payload) (stderr: %s)\n%s", code, errb, out)
 	}
 	var got map[string]any
 	if err := json.Unmarshal([]byte(out), &got); err != nil {

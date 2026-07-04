@@ -83,8 +83,8 @@ func TestDispatchTickGuardedAllSelfSourceBacklogExplainsHold(t *testing.T) {
 	root := t.TempDir()
 
 	out, errb, code := runDispatchAt("tick", "--workspace", root, "--no-refresh", "--no-loop-ledger", "--json")
-	if code != 1 {
-		t.Fatalf("exit = %d, want 1 (an all-self-source backlog under guard is a refuse) (stderr: %s)", code, errb)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (self-source hold is reported in the payload) (stderr: %s)", code, errb)
 	}
 	var got map[string]any
 	if err := json.Unmarshal([]byte(out), &got); err != nil {

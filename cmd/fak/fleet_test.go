@@ -153,7 +153,7 @@ func TestFleetCapacityPreflightJSON(t *testing.T) {
 	t.Setenv("FLEET_POLICY_PATH", policyPath)
 
 	var out, errb bytes.Buffer
-	code := runFleetCapacity(&out, &errb, []string{"--json", "--require", "2"})
+	code := runFleetCapacity(&out, &errb, []string{"--json", "--require", "5"})
 	if code != 1 {
 		t.Fatalf("capacity exit=%d stderr=%q stdout=%q, want under-capacity exit 1", code, errb.String(), out.String())
 	}
@@ -161,8 +161,8 @@ func TestFleetCapacityPreflightJSON(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
 		t.Fatalf("bad json: %v\n%s", err, out.String())
 	}
-	if rep.TrueConcurrentCeiling != 1 || rep.FreshSeats != 1 || rep.StaleSeats != 1 || rep.BlockedSeats != 1 || rep.Verdict != "UNDER_CAPACITY" {
-		t.Fatalf("capacity report = %+v, want ceiling=1 fresh/stale/blocked=1/1/1 under-capacity", rep)
+	if rep.TrueConcurrentCeiling != 4 || rep.FreshSeats != 4 || rep.StaleSeats != 4 || rep.BlockedSeats != 4 || rep.Verdict != "UNDER_CAPACITY" {
+		t.Fatalf("capacity report = %+v, want ceiling=4 fresh/stale/blocked=4/4/4 under-capacity", rep)
 	}
 	states := map[string]fleetaccounts.CapacityAccount{}
 	for _, acct := range rep.Accounts {

@@ -14,8 +14,8 @@ func TestDispatchTickLiveHoldsGuardedSelfModifyBeforeSpawn(t *testing.T) {
 	root := t.TempDir()
 
 	out, errb, code := runDispatchAt("tick", "--workspace", root, "--live", "--lane", "cmd", "--no-refresh", "--no-loop-ledger", "--json")
-	if code != 1 {
-		t.Fatalf("exit = %d, want 1 (a live self-modify hold is a refuse) (stderr: %s)", code, errb)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (live self-modify hold is reported in the payload) (stderr: %s)", code, errb)
 	}
 
 	var got map[string]any

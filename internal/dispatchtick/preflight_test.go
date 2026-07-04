@@ -29,10 +29,10 @@ func TestHostCapacityRoomyBoxBoundByCores(t *testing.T) {
 }
 
 func TestDefaultMaxWorkersFallbackPinned(t *testing.T) {
-	// Pin the raised ceiling (4->8) so a silent revert is caught; the adaptive
+	// Pin the raised ceiling (8->20) so a silent revert is caught; the adaptive
 	// gates (host_cap, seats, dos target) can only pull the effective cap DOWN.
-	if FallbackMaxWorkers != 8 {
-		t.Fatalf("FallbackMaxWorkers = %d, want 8", FallbackMaxWorkers)
+	if FallbackMaxWorkers != 20 {
+		t.Fatalf("FallbackMaxWorkers = %d, want 20", FallbackMaxWorkers)
 	}
 }
 
@@ -150,7 +150,7 @@ func TestEvaluatePreflightCapTermsNameLimiter(t *testing.T) {
 		{
 			name: "lease target limits below configured and host",
 			mutate: func(in *PreflightInput) {
-				in.MaxWorkers = 8
+				in.MaxWorkers = FallbackMaxWorkers
 				in.Kernel.Target = IntPtr(3)
 				in.Resources = roomyResources()
 			},
@@ -159,12 +159,12 @@ func TestEvaluatePreflightCapTermsNameLimiter(t *testing.T) {
 			wantLease:  3,
 			wantHost:   32,
 			wantSeat:   nil,
-			wantConfig: 8,
+			wantConfig: FallbackMaxWorkers,
 		},
 		{
 			name: "seat inventory limits below lease and host",
 			mutate: func(in *PreflightInput) {
-				in.MaxWorkers = 8
+				in.MaxWorkers = FallbackMaxWorkers
 				in.Kernel.Target = IntPtr(6)
 				in.Resources = roomyResources()
 				in.Seat = SeatCheck{Total: IntPtr(2), Free: IntPtr(2)}
@@ -174,7 +174,7 @@ func TestEvaluatePreflightCapTermsNameLimiter(t *testing.T) {
 			wantLease:  6,
 			wantHost:   32,
 			wantSeat:   2,
-			wantConfig: 8,
+			wantConfig: FallbackMaxWorkers,
 		},
 	}
 
@@ -215,9 +215,9 @@ func TestEvaluatePreflightHostPressureTable(t *testing.T) {
 		{
 			name:         "normal resources recover to max workers",
 			resources:    roomyResources(),
-			wantCap:      8,
+			wantCap:      FallbackMaxWorkers,
 			wantHostCap:  32,
-			wantHeadroom: 8,
+			wantHeadroom: FallbackMaxWorkers,
 			wantBinding:  "cores",
 			wantVerdict:  PreflightOKVerdict,
 		},
@@ -255,8 +255,8 @@ func TestEvaluatePreflightHostPressureTable(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			in := preflightInput()
-			in.MaxWorkers = 8
-			in.Kernel.Target = IntPtr(10)
+			in.MaxWorkers = FallbackMaxWorkers
+			in.Kernel.Target = IntPtr(25)
 			in.Resources = tc.resources
 			in.OSWorkerProcs = tc.osWorkerProcs
 
