@@ -191,6 +191,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	applySessionPaceToAnthropicRequest(req, sessionTurn)
+	s.injectGuardRecoveryPrompt(req)
 	// Harness-coherence seam (#1132): capture a CONTENT-FREE digest of the inbound protected
 	// prefix (bytes through the first cache_control breakpoint) BEFORE any of fak's request-side
 	// transforms below. This ordering is load-bearing — fak forwards the inbound protected prefix
@@ -379,6 +380,228 @@ func applySessionPaceToAnthropicRequest(req *agent.AnthropicMessagesRequest, tur
 	if out, ok := spliceMaxTokens(req.Raw, cap); ok {
 		req.Raw = out
 	}
+}
+
+func (s *Server) takeGuardRecoveryPrompt() string {
+	if s == nil {
+		return ""
+	}
+	s.guardRecoveryMu.Lock()
+	defer s.guardRecoveryMu.Unlock()
+	out := strings.TrimSpace(s.guardRecoveryPrompt)
+	s.guardRecoveryPrompt = ""
+	return out
+}
+
+func (s *Server) injectGuardRecoveryPrompt(req *agent.AnthropicMessagesRequest) bool {
+	if req == nil {
+		return false
+	}
+	prompt := s.takeGuardRecoveryPrompt()
+	if prompt == "" {
+		return false
+	}
+	if !mergeGuardRecoveryPrompt(req, prompt) {
+		req.Messages = append(req.Messages, agent.Message{Role: agent.RoleUser, Content: prompt})
+	}
+	if len(req.Raw) != 0 {
+		if raw, ok := injectAnthropicUserTextRaw(req.Raw, prompt); ok {
+			req.Raw = raw
+		}
+	}
+	return true
+}
+
+func mergeGuardRecoveryPrompt(req *agent.AnthropicMessagesRequest, text string) bool {
+	if req == nil {
+		return false
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		msg := &req.Messages[i]
+		if msg.Role != agent.RoleUser || strings.TrimSpace(msg.Content) == "" {
+			continue
+		}
+		msg.Content = msg.Content + "\n\n" + text
+		return true
+	}
+	return false
+}
+
+func injectAnthropicUserTextRaw(raw []byte, text string) ([]byte, bool) {
+	text = strings.TrimSpace(text)
+	if len(raw) == 0 || text == "" {
+		return nil, false
+	}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(raw, &obj) != nil {
+		return nil, false
+	}
+	messagesRaw, ok := obj["messages"]
+	messagesTrimmed := bytes.TrimSpace(messagesRaw)
+	if !ok || len(messagesTrimmed) == 0 || messagesTrimmed[0] != '[' {
+		return nil, false
+	}
+	var elems []json.RawMessage
+	if json.Unmarshal(messagesRaw, &elems) != nil {
+		return nil, false
+	}
+	if raw, ok := mergeLastAnthropicUserTextRaw(raw, messagesRaw, elems, text); ok {
+		return raw, true
+	}
+	return appendAnthropicUserTextRaw(raw, text)
+}
+
+func appendAnthropicUserTextRaw(raw []byte, text string) ([]byte, bool) {
+	text = strings.TrimSpace(text)
+	if len(raw) == 0 || text == "" {
+		return nil, false
+	}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(raw, &obj) != nil {
+		return nil, false
+	}
+	messagesRaw, ok := obj["messages"]
+	messagesTrimmed := bytes.TrimSpace(messagesRaw)
+	if !ok || len(messagesTrimmed) == 0 || messagesTrimmed[0] != '[' {
+		return nil, false
+	}
+	var elems []json.RawMessage
+	if json.Unmarshal(messagesRaw, &elems) != nil {
+		return nil, false
+	}
+	base := bytes.Index(raw, messagesRaw)
+	if base < 0 || len(messagesRaw) < 2 {
+		return nil, false
+	}
+	closeIdx := bytes.LastIndexByte(messagesRaw, ']')
+	if closeIdx < 0 {
+		return nil, false
+	}
+	insert := base + closeIdx // before the closing ']'
+	msg, err := json.Marshal(struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}{Role: "user", Content: text})
+	if err != nil {
+		return nil, false
+	}
+	var out bytes.Buffer
+	out.Grow(len(raw) + len(msg) + 1)
+	out.Write(raw[:insert])
+	if len(elems) > 0 {
+		out.WriteByte(',')
+	}
+	out.Write(msg)
+	out.Write(raw[insert:])
+	b := out.Bytes()
+	if _, err := agent.DecodeAnthropicMessagesRequest(b); err != nil {
+		return nil, false
+	}
+	return b, true
+}
+
+func mergeLastAnthropicUserTextRaw(raw, messagesRaw []byte, elems []json.RawMessage, text string) ([]byte, bool) {
+	messagesBase := bytes.Index(raw, messagesRaw)
+	if messagesBase < 0 {
+		return nil, false
+	}
+	for i := len(elems) - 1; i >= 0; i-- {
+		var msg struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		}
+		if json.Unmarshal(elems[i], &msg) != nil || msg.Role != "user" {
+			continue
+		}
+		elemOffset := bytes.LastIndex(messagesRaw, elems[i])
+		if elemOffset < 0 {
+			continue
+		}
+		contentOffset := bytes.Index(elems[i], msg.Content)
+		if contentOffset < 0 {
+			continue
+		}
+		start := messagesBase + elemOffset + contentOffset
+		end := start + len(msg.Content)
+		if existing, ok := asRawJSONString(msg.Content); ok && strings.TrimSpace(existing) != "" {
+			merged := existing + "\n\n" + text
+			repl, err := json.Marshal(merged)
+			if err != nil {
+				return nil, false
+			}
+			return replaceAnthropicRawRange(raw, start, end, repl)
+		}
+		var blocks []map[string]json.RawMessage
+		if json.Unmarshal(msg.Content, &blocks) != nil {
+			continue
+		}
+		for j := len(blocks) - 1; j >= 0; j-- {
+			var typ string
+			if json.Unmarshal(blocks[j]["type"], &typ) != nil || typ != "text" {
+				continue
+			}
+			var existing string
+			if json.Unmarshal(blocks[j]["text"], &existing) != nil || strings.TrimSpace(existing) == "" {
+				continue
+			}
+			merged, err := json.Marshal(existing + "\n\n" + text)
+			if err != nil {
+				return nil, false
+			}
+			blocks[j]["text"] = merged
+			content, err := json.Marshal(blocks)
+			if err != nil {
+				return nil, false
+			}
+			return replaceAnthropicRawRange(raw, start, end, content)
+		}
+		blocks = append(blocks, map[string]json.RawMessage{
+			"type": json.RawMessage(`"text"`),
+			"text": json.RawMessage(mustMarshalJSONString(text)),
+		})
+		content, err := json.Marshal(blocks)
+		if err != nil {
+			return nil, false
+		}
+		return replaceAnthropicRawRange(raw, start, end, content)
+	}
+	return nil, false
+}
+
+func asRawJSONString(raw json.RawMessage) (string, bool) {
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return "", false
+	}
+	return s, true
+}
+
+func mustMarshalJSONString(s string) []byte {
+	raw, err := json.Marshal(s)
+	if err != nil {
+		return []byte(`""`)
+	}
+	return raw
+}
+
+func replaceAnthropicRawRange(raw []byte, start, end int, repl []byte) ([]byte, bool) {
+	if start < 0 || end < start || end > len(raw) {
+		return nil, false
+	}
+	var out bytes.Buffer
+	out.Grow(len(raw) + len(repl) - (end - start))
+	out.Write(raw[:start])
+	out.Write(repl)
+	out.Write(raw[end:])
+	b := out.Bytes()
+	if _, err := agent.DecodeAnthropicMessagesRequest(b); err != nil {
+		return nil, false
+	}
+	return b, true
 }
 
 // spliceMaxTokens replaces the integer value of the top-level "max_tokens" key in an Anthropic

@@ -917,6 +917,67 @@ func TestAnthropicMessagesPassthroughPreservesCacheAndAdjudicates(t *testing.T) 
 	}
 }
 
+func TestAnthropicMessagesGuardRecoveryPromptInjectedOnce(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterAdjudicator(0, toolAdj{})
+
+	var upstreamBodies [][]byte
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		upstreamBodies = append(upstreamBodies, raw)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer upstream.Close()
+
+	srv, err := New(Config{
+		EngineID: "test", Model: "claude-test", BaseURL: upstream.URL, Provider: "anthropic",
+		APIKey: "configured-key", VDSO: true,
+		GuardRecoveryPrompt: "[fak] resume recovery: prior refusal OFF_TRUNK x2; do not retry unchanged",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	body := []byte(`{"model":"claude-test","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}`)
+	for i := 0; i < 2; i++ {
+		req, _ := http.NewRequest("POST", ts.URL+"/v1/messages", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("post %d: %v", i+1, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("post %d status = %d", i+1, resp.StatusCode)
+		}
+	}
+	if len(upstreamBodies) != 2 {
+		t.Fatalf("upstream requests = %d, want 2", len(upstreamBodies))
+	}
+	if !bytes.Contains(upstreamBodies[0], []byte("resume recovery")) || !bytes.Contains(upstreamBodies[0], []byte("OFF_TRUNK")) {
+		t.Fatalf("first upstream request missing recovery prompt:\n%s", upstreamBodies[0])
+	}
+	if bytes.Contains(upstreamBodies[1], []byte("resume recovery")) {
+		t.Fatalf("recovery prompt was injected more than once:\n%s", upstreamBodies[1])
+	}
+	decoded, err := agent.DecodeAnthropicMessagesRequest(upstreamBodies[0])
+	if err != nil {
+		t.Fatalf("first upstream body no longer decodes: %v\n%s", err, upstreamBodies[0])
+	}
+	if len(decoded.Messages) != 1 {
+		t.Fatalf("first upstream messages = %d, want original user turn with folded recovery note", len(decoded.Messages))
+	}
+	if got := decoded.Messages[0].Content; !strings.Contains(got, "hi\n\n[fak] resume recovery") {
+		t.Fatalf("first upstream user message did not fold recovery note into live turn:\n%q", got)
+	}
+}
+
 // TestAnthropicMessagesPinnedOAuthSubscription proves the subscription path: with
 // PinUpstreamCredential set and an OAuth token configured, the gateway authenticates
 // upstream with its OWN token sent as Authorization: Bearer + the oauth beta, IGNORES

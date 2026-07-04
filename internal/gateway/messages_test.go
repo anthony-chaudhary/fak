@@ -506,6 +506,90 @@ func TestAnthropicMessagesPlannerLivePingsBeforeFirstUpstreamToken(t *testing.T)
 	}
 }
 
+func TestInjectAnthropicUserTextRawMergesLastUserText(t *testing.T) {
+	raw := []byte(`{"model":"m","max_tokens":64,"messages":[{"role":"user","content":"go"}],"metadata":{"trace":"t"}}`)
+	out, ok := injectAnthropicUserTextRaw(raw, "[fak] resume recovery: inspect the prior refusal")
+	if !ok {
+		t.Fatal("injectAnthropicUserTextRaw returned !ok")
+	}
+	if !bytes.HasPrefix(out, []byte(`{"model":"m","max_tokens":64,"messages":[{"role":"user","content":"go`)) {
+		t.Fatalf("raw prefix before merged message was not preserved:\n%s", out)
+	}
+	req, err := agent.DecodeAnthropicMessagesRequest(out)
+	if err != nil {
+		t.Fatalf("spliced body does not decode: %v\n%s", err, out)
+	}
+	if len(req.Messages) != 1 {
+		t.Fatalf("messages = %d, want original user turn only", len(req.Messages))
+	}
+	if got := req.Messages[0].Content; !strings.Contains(got, "go\n\n[fak] resume recovery") {
+		t.Fatalf("merged message = %q, want recovery note folded into live user turn", got)
+	}
+	if !bytes.Contains(out, []byte(`"metadata":{"trace":"t"}`)) {
+		t.Fatalf("trailing top-level fields were not preserved:\n%s", out)
+	}
+}
+
+func TestInjectAnthropicUserTextRawAppendsWhenNoUserText(t *testing.T) {
+	raw := []byte(`{"model":"m","max_tokens":64,"messages":[{"role":"assistant","content":"ready"}]}`)
+	out, ok := injectAnthropicUserTextRaw(raw, "[fak] resume recovery: inspect the prior refusal")
+	if !ok {
+		t.Fatal("injectAnthropicUserTextRaw returned !ok")
+	}
+	req, err := agent.DecodeAnthropicMessagesRequest(out)
+	if err != nil {
+		t.Fatalf("spliced body does not decode: %v\n%s", err, out)
+	}
+	if len(req.Messages) != 2 {
+		t.Fatalf("messages = %d, want assistant plus appended recovery user turn", len(req.Messages))
+	}
+	if got := req.Messages[1].Content; !strings.Contains(got, "resume recovery") {
+		t.Fatalf("appended message = %q, want recovery note", got)
+	}
+}
+
+func TestInjectAnthropicUserTextRawMergesUserTextBlock(t *testing.T) {
+	raw := []byte(`{"model":"m","max_tokens":64,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-1","content":"done"},{"type":"text","text":"continue"}]}]}`)
+	out, ok := injectAnthropicUserTextRaw(raw, "[fak] resume recovery: inspect the prior refusal")
+	if !ok {
+		t.Fatal("injectAnthropicUserTextRaw returned !ok")
+	}
+	if !bytes.Contains(out, []byte(`"tool_use_id":"call-1"`)) {
+		t.Fatalf("tool_result block was not preserved:\n%s", out)
+	}
+	req, err := agent.DecodeAnthropicMessagesRequest(out)
+	if err != nil {
+		t.Fatalf("spliced body does not decode: %v\n%s", err, out)
+	}
+	if len(req.Messages) != 2 || req.Messages[1].Role != agent.RoleUser {
+		t.Fatalf("decoded messages = %+v, want tool result plus merged user text", req.Messages)
+	}
+	if got := req.Messages[1].Content; !strings.Contains(got, "continue\n\n[fak] resume recovery") {
+		t.Fatalf("merged text block = %q, want recovery note folded into user text block", got)
+	}
+}
+
+func TestInjectAnthropicUserTextRawAddsTextBlockToToolResultOnlyUser(t *testing.T) {
+	raw := []byte(`{"model":"m","max_tokens":64,"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"call-1","name":"Read","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-1","content":"done"}]}]}`)
+	out, ok := injectAnthropicUserTextRaw(raw, "[fak] resume recovery: inspect the prior refusal")
+	if !ok {
+		t.Fatal("injectAnthropicUserTextRaw returned !ok")
+	}
+	if bytes.Count(out, []byte(`"role":"user"`)) != 1 {
+		t.Fatalf("recovery note must stay in the existing user turn, not create a second user message:\n%s", out)
+	}
+	req, err := agent.DecodeAnthropicMessagesRequest(out)
+	if err != nil {
+		t.Fatalf("spliced body does not decode: %v\n%s", err, out)
+	}
+	if len(req.Messages) != 3 || req.Messages[2].Role != agent.RoleUser {
+		t.Fatalf("decoded messages = %+v, want assistant tool_use, tool result, recovery user text", req.Messages)
+	}
+	if got := req.Messages[2].Content; !strings.Contains(got, "resume recovery") {
+		t.Fatalf("added text block = %q, want recovery note", got)
+	}
+}
+
 func TestAnthropicCountTokens(t *testing.T) {
 	srv := newTestServer(t)
 	ts := httptest.NewServer(srv.Handler())
