@@ -40,6 +40,9 @@ type releaseShipOptions struct {
 	ciAppearTimeout time.Duration
 	keepWorktree    bool
 	worktreeDir     string
+	openPR          bool
+	prTitle         string
+	promotionBranch string
 }
 
 type releaseShipResult struct {
@@ -62,6 +65,7 @@ type releaseShipResult struct {
 	CommitSHA          string               `json:"commit_sha,omitempty"`
 	Remote             string               `json:"remote,omitempty"`
 	Trunk              string               `json:"trunk,omitempty"`
+	PromotionBranch    string               `json:"promotion_branch,omitempty"`
 	Cut                map[string]any       `json:"cut,omitempty"`
 	TagResult          map[string]any       `json:"tag_result,omitempty"`
 	Publish            map[string]any       `json:"publish,omitempty"`
@@ -69,6 +73,7 @@ type releaseShipResult struct {
 	ReleaseLockRelease map[string]any       `json:"release_lock_release,omitempty"`
 	RemoteBranch       map[string]string    `json:"remote_branch,omitempty"`
 	Cleanup            map[string]any       `json:"cleanup,omitempty"`
+	PullRequest        map[string]any       `json:"pull_request,omitempty"`
 	Warnings           []string             `json:"warnings,omitempty"`
 	Errors             []string             `json:"errors,omitempty"`
 	CommandTail        map[string]string    `json:"command_tail,omitempty"`
@@ -130,9 +135,13 @@ func parseReleaseShipOptions(stderr io.Writer, argv []string) (releaseShipOption
 	fs.DurationVar(&opts.ciAppearTimeout, "ci-appear-timeout", opts.ciAppearTimeout, "how long to wait for a just-pushed CI run to appear before release_tag folds it")
 	fs.BoolVar(&opts.keepWorktree, "keep-worktree", false, "leave the detached worktree on disk")
 	fs.StringVar(&opts.worktreeDir, "worktree-dir", "", "use this detached worktree path instead of a temp dir")
+	fs.BoolVar(&opts.openPR, "open-pr", false, "open a source->trunk promotion PR via `gh pr create` with a prplan-folded body, instead of pushing straight to trunk; requires distinct --source-branch/--trunk")
+	fs.StringVar(&opts.prTitle, "pr-title", "", "override the generated --open-pr title")
+	fs.StringVar(&opts.promotionBranch, "promotion-branch", "", "branch to push the exact release-cut commit to before opening --open-pr; default fak/release/<tag>")
 	if err := fs.Parse(argv); err != nil {
 		return opts, err
 	}
+	opts.promotionBranch = strings.TrimSpace(opts.promotionBranch)
 	if strings.TrimSpace(*base) != "" {
 		opts.base = strings.TrimSpace(*base)
 	} else {
@@ -149,6 +158,12 @@ func parseReleaseShipOptions(stderr io.Writer, argv []string) (releaseShipOption
 	}
 	if opts.ttl <= 0 {
 		return opts, fmt.Errorf("--ttl must be positive")
+	}
+	if opts.openPR && opts.sourceBranch == opts.trunk {
+		return opts, fmt.Errorf("--open-pr requires distinct --source-branch and --trunk (today's branch-role regime has both = %q; see docs/branch-regime-shadow-cutover.md)", opts.trunk)
+	}
+	if opts.openPR && opts.promotionBranch == opts.trunk {
+		return opts, fmt.Errorf("--promotion-branch must not equal --trunk %q", opts.trunk)
 	}
 	return opts, nil
 }
@@ -284,6 +299,12 @@ func executeReleaseShip(opts releaseShipOptions) (result releaseShipResult) {
 	result.Version = stringFromAny(cut["version"])
 	result.Tag = stringFromAny(cut["tag"])
 	result.CommitSHA = stringFromAny(cut["commit_sha"])
+	if opts.openPR {
+		result.PromotionBranch = releaseShipPromotionBranch(opts, result)
+	}
+	if opts.openPR && result.CommitSHA != "" {
+		result.PullRequest = buildReleaseShipPRPreview(&result, wt, opts)
+	}
 	if !opts.execute {
 		result.OK = true
 		return finishReleaseShipWithCleanup(&result, root, opts, worktreeAdded)
@@ -298,6 +319,16 @@ func executeReleaseShip(opts releaseShipOptions) (result releaseShipResult) {
 	}
 	if result.Version == "" || result.Tag == "" || result.CommitSHA == "" {
 		result.fail("release_cut_missing_outputs", jsonTail(cut))
+		return finishReleaseShipWithCleanup(&result, root, opts, worktreeAdded)
+	}
+
+	if opts.openPR {
+		result.PullRequest = runReleaseShipOpenPRExecute(&result, wt, env, opts, result.PullRequest)
+		if ok, _ := result.PullRequest["ok"].(bool); !ok {
+			result.fail("open_pr_failed", jsonTail(result.PullRequest))
+			return finishReleaseShipWithCleanup(&result, root, opts, worktreeAdded)
+		}
+		result.OK = true
 		return finishReleaseShipWithCleanup(&result, root, opts, worktreeAdded)
 	}
 
@@ -384,6 +415,283 @@ func runReleaseShipTag(result *releaseShipResult, wt string, env []string, opts 
 func runReleaseShipPublish(result *releaseShipResult, wt string, env []string, version string) map[string]any {
 	args := []string{releaseShipScript(wt, "release_publish.py"), "--version", version, "--execute", "--json"}
 	return releaseShipJSONCommand(result, wt, releaseShipPython(), args, env, 10*time.Minute, "publish")
+}
+
+// buildReleaseShipPRPreview folds the promotion range (old trunk tip ..
+// cut commit) into the same PR-unit shape fak release prplan renders, so an
+// --open-pr caller can see the exact title/body it would post before any
+// push or gh call happens -- in a dry run this is the whole result.
+func buildReleaseShipPRPreview(result *releaseShipResult, wt string, opts releaseShipOptions) map[string]any {
+	baseSHA := result.TargetSHA
+	headSHA := result.CommitSHA
+	if baseSHA == "" || headSHA == "" || sameSHA(baseSHA, headSHA) {
+		return map[string]any{"ok": false, "reason": "empty_promotion_range", "base_sha": baseSHA, "head_sha": headSHA}
+	}
+	headBranch := result.PromotionBranch
+	if headBranch == "" {
+		headBranch = opts.sourceBranch
+	}
+	code, out := releaseShipCmd(result, wt, "git", []string{
+		"log", "--no-merges", "--name-only", "--format=%x1e%H%x1f%s%x1f%b%x1f", baseSHA + ".." + headSHA,
+	}, nil, 2*time.Minute)
+	if code != 0 {
+		return map[string]any{"ok": false, "reason": "promotion_log_failed", "tail": tail(out)}
+	}
+	commits := parsePRPlanLog(out)
+	units, unstamped := foldPRPlanUnits(commits)
+	checkOK := len(unstamped) == 0
+	plan := map[string]any{
+		"schema":          releasePRPlanSchema,
+		"base":            opts.trunk,
+		"base_sha":        baseSHA,
+		"head":            headBranch,
+		"head_sha":        headSHA,
+		"range":           baseSHA + ".." + headSHA,
+		"commit_count":    len(commits),
+		"unit_count":      len(units),
+		"unstamped_count": len(unstamped),
+		"units":           units,
+		"unstamped":       unstamped,
+		"check_ok":        checkOK,
+	}
+	title := strings.TrimSpace(opts.prTitle)
+	if title == "" {
+		title = fmt.Sprintf("Promote %s -> %s: %d commit(s), %d lane unit(s) (%s)", opts.sourceBranch, opts.trunk, len(commits), len(units), result.Tag)
+	}
+	return map[string]any{
+		"ok":              true,
+		"base":            opts.trunk,
+		"head":            headBranch,
+		"source_branch":   opts.sourceBranch,
+		"source_sha":      result.SourceSHA,
+		"title":           title,
+		"body":            renderPRPlanMarkdown(plan, 20),
+		"commit_count":    len(commits),
+		"unit_count":      len(units),
+		"unstamped_count": len(unstamped),
+		"check_ok":        checkOK,
+	}
+}
+
+// runReleaseShipOpenPRExecute pushes the cut commit onto the source branch
+// (through a release-owned promotion branch, so the live source can keep
+// moving after the cut) and opens the source->trunk PR via `gh pr create`
+// with the prplan-folded preview body -- the "PRs managed in advance" a human
+// operator reviews and merges through the native GitHub UI. Tag/publish are
+// deliberately not run here: they belong to a later `fak release ship` run
+// against the merged trunk SHA.
+func runReleaseShipOpenPRExecute(result *releaseShipResult, wt string, env []string, opts releaseShipOptions, preview map[string]any) map[string]any {
+	if ok, _ := preview["ok"].(bool); !ok {
+		return map[string]any{"ok": false, "reason": "no_promotion_range", "preview": preview}
+	}
+	if checkOK, _ := preview["check_ok"].(bool); !checkOK {
+		return map[string]any{"ok": false, "reason": "unstamped_commits_in_range", "preview": preview}
+	}
+	headBranch := result.PromotionBranch
+	if headBranch == "" {
+		headBranch = releaseShipPromotionBranch(opts, *result)
+		result.PromotionBranch = headBranch
+	}
+	if pushed := releaseShipPushPromotionBranch(result, wt, env, opts, headBranch); !releaseStatusBool(pushed["ok"]) {
+		return pushed
+	}
+	body, _ := preview["body"].(string)
+	bodyFile, err := os.CreateTemp("", "fak-release-pr-*.md")
+	if err != nil {
+		return map[string]any{"ok": false, "reason": "body_tempfile_failed", "detail": err.Error()}
+	}
+	defer os.Remove(bodyFile.Name())
+	if _, err := bodyFile.WriteString(body); err != nil {
+		bodyFile.Close()
+		return map[string]any{"ok": false, "reason": "body_write_failed", "detail": err.Error()}
+	}
+	bodyFile.Close()
+	title, _ := preview["title"].(string)
+
+	existing := releaseShipFindOpenPR(result, wt, env, opts, headBranch)
+	if ok, _ := existing["ok"].(bool); !ok {
+		return existing
+	}
+	if found, _ := existing["found"].(bool); found {
+		target := releaseShipExistingPRTarget(existing)
+		if target == "" {
+			return map[string]any{"ok": false, "reason": "existing_pr_missing_identifier", "existing": existing}
+		}
+		args := []string{"pr", "edit", target, "--title", title, "--body-file", bodyFile.Name()}
+		code, out := releaseShipCmd(result, wt, "gh", args, env, 2*time.Minute)
+		if code != 0 {
+			return map[string]any{"ok": false, "reason": "gh_pr_edit_failed", "existing": existing, "tail": tail(out)}
+		}
+		return map[string]any{
+			"ok":            true,
+			"existing":      true,
+			"updated":       true,
+			"url":           stringFromAny(existing["url"]),
+			"number":        existing["number"],
+			"base":          opts.trunk,
+			"head":          headBranch,
+			"source_branch": opts.sourceBranch,
+			"source_sha":    result.SourceSHA,
+			"title":         title,
+			"commit_count":  preview["commit_count"],
+			"unit_count":    preview["unit_count"],
+		}
+	}
+
+	args := []string{"pr", "create", "--base", opts.trunk, "--head", headBranch, "--title", title, "--body-file", bodyFile.Name()}
+	code, out := releaseShipCmd(result, wt, "gh", args, env, 2*time.Minute)
+	if code != 0 {
+		return map[string]any{"ok": false, "reason": "gh_pr_create_failed", "tail": tail(out)}
+	}
+	return map[string]any{
+		"ok":            true,
+		"created":       true,
+		"existing":      false,
+		"url":           releaseShipLastNonEmptyLine(out),
+		"base":          opts.trunk,
+		"head":          headBranch,
+		"source_branch": opts.sourceBranch,
+		"source_sha":    result.SourceSHA,
+		"title":         title,
+		"commit_count":  preview["commit_count"],
+		"unit_count":    preview["unit_count"],
+	}
+}
+
+func releaseShipPromotionBranch(opts releaseShipOptions, result releaseShipResult) string {
+	if branch := strings.TrimSpace(opts.promotionBranch); branch != "" {
+		return branch
+	}
+	name := strings.TrimSpace(result.Tag)
+	if name == "" {
+		name = strings.TrimSpace(result.Version)
+	}
+	if name == "" {
+		name = releaseStatusShortSHA(result.CommitSHA)
+	}
+	return "fak/release/" + releaseShipRefComponent(name)
+}
+
+func releaseShipRefComponent(s string) string {
+	s = strings.TrimPrefix(strings.TrimSpace(s), "refs/tags/")
+	var b strings.Builder
+	lastDash := false
+	for _, r := range s {
+		ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-'
+		if ok {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	out := strings.Trim(b.String(), ".-")
+	if out == "" {
+		return "untagged"
+	}
+	return out
+}
+
+func releaseShipPushPromotionBranch(result *releaseShipResult, wt string, env []string, opts releaseShipOptions, branch string) map[string]any {
+	ref := "refs/heads/" + branch
+	code, out := releaseShipCmd(result, wt, "git", []string{"ls-remote", opts.remote, ref}, env, 2*time.Minute)
+	if code != 0 {
+		return map[string]any{"ok": false, "reason": "promotion_branch_probe_failed", "branch": branch, "tail": tail(out)}
+	}
+	existing := ""
+	if fields := strings.Fields(out); len(fields) > 0 {
+		existing = fields[0]
+	}
+	args := []string{"push", opts.remote}
+	if existing != "" {
+		args = append(args, "--force-with-lease="+ref+":"+existing)
+	}
+	args = append(args, "HEAD:"+ref)
+	code, out = releaseShipCmd(result, wt, "git", args, env, 10*time.Minute)
+	if code != 0 {
+		return map[string]any{
+			"ok":           false,
+			"reason":       "push_promotion_branch_failed",
+			"branch":       branch,
+			"previous_sha": existing,
+			"tail":         tail(out),
+		}
+	}
+	code, out = releaseShipCmd(result, wt, "git", []string{"ls-remote", opts.remote, ref}, env, 2*time.Minute)
+	if code != 0 {
+		return map[string]any{"ok": false, "reason": "promotion_branch_verify_failed", "branch": branch, "tail": tail(out)}
+	}
+	fields := strings.Fields(out)
+	if len(fields) == 0 {
+		return map[string]any{"ok": false, "reason": "promotion_branch_missing_after_push", "branch": branch}
+	}
+	got := fields[0]
+	if !sameSHA(got, result.CommitSHA) {
+		return map[string]any{"ok": false, "reason": "promotion_branch_mismatch", "branch": branch, "sha": got, "want": result.CommitSHA}
+	}
+	return map[string]any{
+		"ok":                 true,
+		"branch":             branch,
+		"sha":                got,
+		"previous_sha":       existing,
+		"used_force_lease":   existing != "",
+		"source_branch":      opts.sourceBranch,
+		"source_sha":         result.SourceSHA,
+		"release_commit_sha": result.CommitSHA,
+	}
+}
+
+func releaseShipFindOpenPR(result *releaseShipResult, wt string, env []string, opts releaseShipOptions, headBranch string) map[string]any {
+	args := []string{"pr", "list", "--base", opts.trunk, "--head", headBranch, "--state", "open", "--json", "number,url,title,headRefName,baseRefName", "--limit", "1"}
+	code, out := releaseShipCmd(result, wt, "gh", args, env, 2*time.Minute)
+	if code != 0 {
+		return map[string]any{"ok": false, "reason": "gh_pr_list_failed", "tail": tail(out)}
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		return map[string]any{"ok": false, "reason": "gh_pr_list_non_json", "tail": tail(out)}
+	}
+	if len(rows) == 0 {
+		return map[string]any{"ok": true, "found": false}
+	}
+	row := rows[0]
+	return map[string]any{
+		"ok":     true,
+		"found":  true,
+		"pr":     row,
+		"url":    stringFromAny(row["url"]),
+		"number": row["number"],
+		"title":  stringFromAny(row["title"]),
+	}
+}
+
+func releaseShipExistingPRTarget(existing map[string]any) string {
+	if url := stringFromAny(existing["url"]); url != "" {
+		return url
+	}
+	switch n := existing["number"].(type) {
+	case float64:
+		return strconv.Itoa(int(n))
+	case int:
+		return strconv.Itoa(n)
+	case string:
+		return strings.TrimSpace(n)
+	default:
+		return ""
+	}
+}
+
+func releaseShipLastNonEmptyLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 func runReleaseShipLockAcquire(result *releaseShipResult, root string, env []string, opts releaseShipOptions) map[string]any {
@@ -791,6 +1099,13 @@ func renderReleaseShip(stdout, stderr io.Writer, result releaseShipResult) {
 			} else if status := stringFromAny(gh["status"]); status != "" {
 				fmt.Fprintf(stdout, "  github: %s\n", status)
 			}
+		}
+	}
+	if result.PullRequest != nil {
+		if url := stringFromAny(result.PullRequest["url"]); url != "" {
+			fmt.Fprintf(stdout, "  pr: %s\n", url)
+		} else if title := stringFromAny(result.PullRequest["title"]); title != "" {
+			fmt.Fprintf(stdout, "  pr (preview): %s -> %s %q\n", stringFromAny(result.PullRequest["head"]), stringFromAny(result.PullRequest["base"]), title)
 		}
 	}
 	for _, warning := range result.Warnings {

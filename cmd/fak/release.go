@@ -149,6 +149,7 @@ usage:
 examples:
   fak release --json
   fak release ship --execute --json
+  fak release ship --execute --json --open-pr
   fak release prplan --base origin/main --head main
   fak release prplan --check
   fak release staleness --json
@@ -176,6 +177,14 @@ prplan folds the promotion range (release branch .. release source) into PR
 units grouped by the (fak <leaf>) ship-stamp — the "PRs managed in advance"
 artifact a dev->main promotion opens as its human-legible PR body(ies);
 --check gates on unstamped commits in the range.
+ship --open-pr reuses that same fold as the body of a real GitHub PR: it pushes
+the exact cut commit to --promotion-branch (default fak/release/<tag>) and
+opens or refreshes that promotion-branch -> --trunk PR instead of pushing
+straight to trunk. The live --source-branch can keep accepting work while a
+human operator reviews and merges through the native PR UI; tag/publish then
+run in a later ship once the merge lands. Requires distinct --source-branch/
+--trunk — a no-op today under the main-only branch-role regime; see
+docs/branch-regime-shadow-cutover.md.
 The ship subcommand is the default hot-tree path: it leaves this checkout's
 unrelated modified/untracked files alone by cutting in a transient detached
 worktree, while sharing the same single-writer release lock.

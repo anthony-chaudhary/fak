@@ -402,6 +402,258 @@ func TestReleaseShipRefusesWhenReleaseLockHeldByAnotherOwner(t *testing.T) {
 	}
 }
 
+func TestParseReleaseShipOptionsOpenPRRequiresDistinctBranches(t *testing.T) {
+	var stderr strings.Builder
+	_, err := parseReleaseShipOptions(&stderr, []string{"--open-pr", "--source-branch", "main", "--trunk", "main"})
+	if err == nil || !strings.Contains(err.Error(), "--open-pr") {
+		t.Fatalf("err = %v, want an --open-pr distinct-branch validation error", err)
+	}
+}
+
+const openPRFakePromotionLog = "\x1eaaa1111111111111111111111111111111111111\x1ffix(cmd): add release ship open-pr flag (fak cmd)\x1f\x1f\ncmd/fak/release_ship.go\n"
+const openPRPromotionBranch = "fak/release/v0.40.0"
+
+func TestReleaseShipOpenPRDryRunPreviewsPlan(t *testing.T) {
+	restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
+		switch {
+		case name == "git" && sameArgs(args, "fetch", "origin", "refs/heads/dev:refs/remotes/origin/dev"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "fetch", "origin", "refs/heads/main:refs/remotes/origin/main"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/dev^{commit}"):
+			return 0, "dev-source-sha\n"
+		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "dev-source-sha", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha"):
+			return 0, `[{"databaseId":42,"status":"completed","conclusion":"success","headSha":"dev-source-sha","url":"https://example.test/ci"}]`
+		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/main^{commit}"):
+			return 0, "main-target-sha\n"
+		case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "main-target-sha", "dev-source-sha"):
+			return 0, ""
+		case name == "git" && len(args) >= 5 && sameArgs(args[:3], "worktree", "add", "--detach"):
+			return 0, ""
+		case name == releaseShipPython() && len(args) > 0 && strings.HasSuffix(args[0], filepath.Join("tools", "release_cut.py")):
+			return 0, `{"ok":true,"version":"0.40.0","tag":"v0.40.0","commit_sha":"cut-sha"}`
+		case name == "git" && sameArgs(args, "log", "--no-merges", "--name-only", "--format=%x1e%H%x1f%s%x1f%b%x1f", "main-target-sha..cut-sha"):
+			return 0, openPRFakePromotionLog
+		case name == "git" && sameArgs(args, "worktree", "remove", "--force", fakeReleaseWorktree):
+			return 0, ""
+		case name == "git" && sameArgs(args, "worktree", "prune"):
+			return 0, ""
+		default:
+			t.Fatalf("unexpected command in %s: %s %v", cwd, name, args)
+			return 127, "unexpected"
+		}
+	})
+	defer restore()
+
+	result := executeReleaseShip(releaseShipOptions{
+		execute:         false,
+		base:            "origin/dev",
+		sourceBranch:    "dev",
+		remote:          "origin",
+		trunk:           "main",
+		workflow:        "ci.yml",
+		limitCommits:    50,
+		ttl:             1800,
+		fetch:           true,
+		requireCI:       true,
+		waitCI:          false,
+		skipDryRun:      true,
+		ciAppearTimeout: 0,
+		openPR:          true,
+	})
+
+	if !result.OK {
+		t.Fatalf("result not ok: %#v", result)
+	}
+	if result.PromotionBranch != openPRPromotionBranch {
+		t.Fatalf("promotion branch = %q, want %q", result.PromotionBranch, openPRPromotionBranch)
+	}
+	if result.PullRequest == nil || result.PullRequest["ok"] != true {
+		t.Fatalf("pull request preview missing/not ok: %#v", result.PullRequest)
+	}
+	if result.PullRequest["head"] != openPRPromotionBranch || result.PullRequest["source_branch"] != "dev" {
+		t.Fatalf("preview head/source = %#v, want promotion branch over dev source", result.PullRequest)
+	}
+	if result.PullRequest["check_ok"] != true {
+		t.Fatalf("check_ok = %v, want true", result.PullRequest["check_ok"])
+	}
+	title, _ := result.PullRequest["title"].(string)
+	if !strings.Contains(title, "dev -> main") || !strings.Contains(title, "1 commit") {
+		t.Fatalf("title = %q, want a dev->main 1-commit summary", title)
+	}
+	body, _ := result.PullRequest["body"].(string)
+	if !strings.Contains(body, "cmd/fak/release_ship.go") {
+		t.Fatalf("body missing file rollup: %q", body)
+	}
+	if result.PullRequest["url"] != nil {
+		t.Fatalf("dry run must not open a real PR: %#v", result.PullRequest)
+	}
+}
+
+func TestReleaseShipOpenPRExecuteOpensPR(t *testing.T) {
+	const wantURL = "https://github.com/anthony-chaudhary/fak/pull/9999"
+	promotionProbeCount := 0
+	restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
+		switch {
+		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "acquire":
+			return 0, `{"ok":true,"lock":{"owner":"ship-owner"}}`
+		case name == "git" && sameArgs(args, "fetch", "origin", "refs/heads/dev:refs/remotes/origin/dev"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "fetch", "origin", "refs/heads/main:refs/remotes/origin/main"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/dev^{commit}"):
+			return 0, "dev-source-sha\n"
+		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/main^{commit}"):
+			return 0, "main-target-sha\n"
+		case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "main-target-sha", "dev-source-sha"):
+			return 0, ""
+		case name == "git" && len(args) >= 5 && sameArgs(args[:3], "worktree", "add", "--detach"):
+			return 0, ""
+		case name == releaseShipPython() && len(args) > 0 && strings.HasSuffix(args[0], filepath.Join("tools", "release_cut.py")):
+			return 0, `{"ok":true,"version":"0.40.0","tag":"v0.40.0","commit_sha":"cut-sha"}`
+		case name == "git" && sameArgs(args, "log", "--no-merges", "--name-only", "--format=%x1e%H%x1f%s%x1f%b%x1f", "main-target-sha..cut-sha"):
+			return 0, openPRFakePromotionLog
+		case name == "git" && sameArgs(args, "ls-remote", "origin", "refs/heads/"+openPRPromotionBranch):
+			promotionProbeCount++
+			if promotionProbeCount == 1 {
+				return 0, ""
+			}
+			return 0, "cut-sha\trefs/heads/" + openPRPromotionBranch + "\n"
+		case name == "git" && sameArgs(args, "push", "origin", "HEAD:refs/heads/"+openPRPromotionBranch):
+			return 0, ""
+		case name == "gh" && sameArgs(args, "pr", "list", "--base", "main", "--head", openPRPromotionBranch, "--state", "open", "--json", "number,url,title,headRefName,baseRefName", "--limit", "1"):
+			return 0, `[]`
+		case name == "gh" && len(args) == 10 && args[0] == "pr" && args[1] == "create" && args[2] == "--base" && args[3] == "main" && args[4] == "--head" && args[5] == openPRPromotionBranch && args[6] == "--title" && args[8] == "--body-file":
+			return 0, wantURL + "\n"
+		case name == "git" && sameArgs(args, "worktree", "remove", "--force", fakeReleaseWorktree):
+			return 0, ""
+		case name == "git" && sameArgs(args, "worktree", "prune"):
+			return 0, ""
+		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "release":
+			return 0, `{"ok":true,"released":true}`
+		default:
+			t.Fatalf("unexpected command in %s: %s %v", cwd, name, args)
+			return 127, "unexpected"
+		}
+	})
+	defer restore()
+
+	result := executeReleaseShip(releaseShipOptions{
+		execute:         true,
+		base:            "origin/dev",
+		sourceBranch:    "dev",
+		remote:          "origin",
+		trunk:           "main",
+		workflow:        "ci.yml",
+		limitCommits:    50,
+		ttl:             1800,
+		fetch:           true,
+		requireCI:       false,
+		waitCI:          false,
+		skipDryRun:      true,
+		ciAppearTimeout: 0,
+		openPR:          true,
+	})
+
+	if !result.OK {
+		t.Fatalf("result not ok: %#v", result)
+	}
+	if result.PullRequest == nil || result.PullRequest["url"] != wantURL {
+		t.Fatalf("pull request result = %#v, want url %q", result.PullRequest, wantURL)
+	}
+	if result.PullRequest["head"] != openPRPromotionBranch || result.PullRequest["source_branch"] != "dev" {
+		t.Fatalf("pull request head/source = %#v, want promotion branch over dev source", result.PullRequest)
+	}
+	if result.PullRequest["created"] != true {
+		t.Fatalf("pull request created flag = %#v, want true", result.PullRequest["created"])
+	}
+	if result.TagResult != nil || result.Publish != nil {
+		t.Fatalf("--open-pr must not tag/publish; got tag=%#v publish=%#v", result.TagResult, result.Publish)
+	}
+}
+
+func TestReleaseShipOpenPRExecuteUpdatesExistingPR(t *testing.T) {
+	const wantURL = "https://github.com/anthony-chaudhary/fak/pull/9999"
+	promotionProbeCount := 0
+	restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
+		switch {
+		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "acquire":
+			return 0, `{"ok":true,"lock":{"owner":"ship-owner"}}`
+		case name == "git" && sameArgs(args, "fetch", "origin", "refs/heads/dev:refs/remotes/origin/dev"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "fetch", "origin", "refs/heads/main:refs/remotes/origin/main"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/dev^{commit}"):
+			return 0, "dev-source-sha\n"
+		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/main^{commit}"):
+			return 0, "main-target-sha\n"
+		case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "main-target-sha", "dev-source-sha"):
+			return 0, ""
+		case name == "git" && len(args) >= 5 && sameArgs(args[:3], "worktree", "add", "--detach"):
+			return 0, ""
+		case name == releaseShipPython() && len(args) > 0 && strings.HasSuffix(args[0], filepath.Join("tools", "release_cut.py")):
+			return 0, `{"ok":true,"version":"0.40.0","tag":"v0.40.0","commit_sha":"cut-sha"}`
+		case name == "git" && sameArgs(args, "log", "--no-merges", "--name-only", "--format=%x1e%H%x1f%s%x1f%b%x1f", "main-target-sha..cut-sha"):
+			return 0, openPRFakePromotionLog
+		case name == "git" && sameArgs(args, "ls-remote", "origin", "refs/heads/"+openPRPromotionBranch):
+			promotionProbeCount++
+			if promotionProbeCount == 1 {
+				return 0, "old-cut-sha\trefs/heads/" + openPRPromotionBranch + "\n"
+			}
+			return 0, "cut-sha\trefs/heads/" + openPRPromotionBranch + "\n"
+		case name == "git" && sameArgs(args, "push", "origin", "--force-with-lease=refs/heads/"+openPRPromotionBranch+":old-cut-sha", "HEAD:refs/heads/"+openPRPromotionBranch):
+			return 0, ""
+		case name == "gh" && sameArgs(args, "pr", "list", "--base", "main", "--head", openPRPromotionBranch, "--state", "open", "--json", "number,url,title,headRefName,baseRefName", "--limit", "1"):
+			return 0, `[{"number":9999,"url":"` + wantURL + `","title":"old title","headRefName":"` + openPRPromotionBranch + `","baseRefName":"main"}]`
+		case name == "gh" && len(args) == 7 && args[0] == "pr" && args[1] == "edit" && args[2] == wantURL && args[3] == "--title" && args[5] == "--body-file":
+			return 0, ""
+		case name == "git" && sameArgs(args, "worktree", "remove", "--force", fakeReleaseWorktree):
+			return 0, ""
+		case name == "git" && sameArgs(args, "worktree", "prune"):
+			return 0, ""
+		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "release":
+			return 0, `{"ok":true,"released":true}`
+		default:
+			t.Fatalf("unexpected command in %s: %s %v", cwd, name, args)
+			return 127, "unexpected"
+		}
+	})
+	defer restore()
+
+	result := executeReleaseShip(releaseShipOptions{
+		execute:         true,
+		base:            "origin/dev",
+		sourceBranch:    "dev",
+		remote:          "origin",
+		trunk:           "main",
+		workflow:        "ci.yml",
+		limitCommits:    50,
+		ttl:             1800,
+		fetch:           true,
+		requireCI:       false,
+		waitCI:          false,
+		skipDryRun:      true,
+		ciAppearTimeout: 0,
+		openPR:          true,
+	})
+
+	if !result.OK {
+		t.Fatalf("result not ok: %#v", result)
+	}
+	if result.PullRequest == nil || result.PullRequest["url"] != wantURL {
+		t.Fatalf("pull request result = %#v, want url %q", result.PullRequest, wantURL)
+	}
+	if result.PullRequest["existing"] != true || result.PullRequest["updated"] != true {
+		t.Fatalf("existing PR should be refreshed, got %#v", result.PullRequest)
+	}
+	createIdx := releaseShipCommandIndex(result.ExecutedCommands, func(cmd releaseShipCommand) bool {
+		return cmd.Name == "gh" && len(cmd.Args) > 1 && cmd.Args[0] == "pr" && cmd.Args[1] == "create"
+	})
+	if createIdx >= 0 {
+		t.Fatalf("existing PR rerun must not create a duplicate: %#v", result.ExecutedCommands)
+	}
+}
+
 const fakeReleaseWorktree = "C:\\tmp\\fak-release-ship-test"
 
 func stubReleaseShipRunner(t *testing.T, runner releaseShipCommandRunner) func() {
