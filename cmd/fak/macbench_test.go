@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/macbench"
 )
 
 func TestMacBenchJSONDoesNotLeakBearer(t *testing.T) {
@@ -129,6 +133,80 @@ func TestMacBenchWatchLogsKeyErrors(t *testing.T) {
 	}
 	if !strings.Contains(string(b), `"schema": "fak.macbench.watch.event.v1"`) || !strings.Contains(string(b), `"phase": "key"`) {
 		t.Fatalf("watch log did not record key error:\n%s", b)
+	}
+}
+
+func TestMacBenchWatchStatusReportsWaitingWithoutLeakingGateway(t *testing.T) {
+	logPath := t.TempDir() + "/macbench-watch.log"
+	rep := macbench.Report{
+		Schema:      macbench.Schema,
+		GeneratedAt: "2026-07-04T07:43:14Z",
+		Suite:       macbench.SuiteHealth,
+		Gateway:     "<remote-gateway>",
+		Model:       "qwen3.6-27b",
+		Health:      macbench.Health{Error: `Get "<remote-gateway>/healthz": context deadline exceeded`},
+		Errors:      []string{`healthz failed: Get "<remote-gateway>/healthz": context deadline exceeded`},
+	}
+	if err := writeMacBenchWatchReport(io.Discard, logPath, rep); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runMacBench(&stdout, &stderr, []string{"watch-status", "--log", logPath, "--json"})
+	if code != 0 {
+		t.Fatalf("watch-status code=%d stderr=%s", code, stderr.String())
+	}
+	var status macBenchWatchStatus
+	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
+		t.Fatalf("decode status: %v\n%s", err, stdout.String())
+	}
+	if status.State != "waiting_for_gateway" || status.Reports != 1 || status.ResultPresent {
+		t.Fatalf("status = %+v", status)
+	}
+	if status.LatestReport == nil || status.LatestReport.Gateway != "<remote-gateway>" {
+		t.Fatalf("latest report not surfaced/sanitized: %+v", status.LatestReport)
+	}
+	if strings.Contains(stdout.String(), "100.64.") || strings.Contains(stdout.String(), "example.invalid") {
+		t.Fatalf("status leaked a raw gateway:\n%s", stdout.String())
+	}
+}
+
+func TestMacBenchWatchStatusReportsCompletedResult(t *testing.T) {
+	logPath := t.TempDir() + "/macbench-watch.log"
+	resultPath := t.TempDir() + "/macbench-result.json"
+	health := macbench.Report{
+		Schema:      macbench.Schema,
+		GeneratedAt: "2026-07-04T07:43:14Z",
+		Suite:       macbench.SuiteHealth,
+		Gateway:     "<remote-gateway>",
+		Model:       "qwen3.6-27b",
+		Health:      macbench.Health{OK: true, Engine: "metal"},
+	}
+	full := health
+	full.GeneratedAt = "2026-07-04T07:45:00Z"
+	full.Suite = macbench.SuiteAll
+	full.Rows = []macbench.Row{{Name: "decode-256", Kind: "decode-longgen", TokensPerSecond: 12.5}}
+	if err := writeMacBenchWatchReport(io.Discard, logPath, health); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeMacBenchResultFile(resultPath, full); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runMacBench(&stdout, &stderr, []string{"watch-status", "--log", logPath, "--result", resultPath, "--json"})
+	if code != 0 {
+		t.Fatalf("watch-status code=%d stderr=%s", code, stderr.String())
+	}
+	var status macBenchWatchStatus
+	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
+		t.Fatalf("decode status: %v\n%s", err, stdout.String())
+	}
+	if status.State != "completed" || !status.ResultPresent || status.Result == nil || status.Result.Suite != macbench.SuiteAll {
+		t.Fatalf("status = %+v", status)
+	}
+	if !strings.Contains(status.NextAction, "record") {
+		t.Fatalf("next action should point at recording the result, got %q", status.NextAction)
 	}
 }
 
