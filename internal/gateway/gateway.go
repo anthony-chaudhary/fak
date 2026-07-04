@@ -580,10 +580,19 @@ type SessionResetOmittedSpan struct {
 // SessionBudget is the wire form of internal/session.Budget. TurnsLeft/TokensLeft
 // at -1 (session.Unbounded) mean no cap; ContextTokensLeft uses 0 as off and a
 // positive value as the long-window reset budget.
+//
+// ContextTokensCap and ResidentContextTokens carry the two extra signals the outbound
+// history-compaction burst gate reads on a context-budgeted-but-turn-unbounded session (the
+// common headless `fak guard -- claude` shape, where TurnsLeft stays Unbounded): the configured
+// context ceiling and the last debited turn's resident window. Both are 0 (omitempty) on a
+// session with no context budget or no debited turn yet, so an un-budgeted session marshals
+// byte-identically to the pre-field wire form and the gate derives NO horizon from them.
 type SessionBudget struct {
-	TurnsLeft         int `json:"turns_left"`
-	TokensLeft        int `json:"tokens_left"`
-	ContextTokensLeft int `json:"context_tokens_left,omitempty"`
+	TurnsLeft             int `json:"turns_left"`
+	TokensLeft            int `json:"tokens_left"`
+	ContextTokensLeft     int `json:"context_tokens_left,omitempty"`
+	ContextTokensCap      int `json:"context_tokens_cap,omitempty"`
+	ResidentContextTokens int `json:"resident_context_tokens,omitempty"`
 }
 
 // SessionPace is the wire form of internal/session.Pace. Zero on either axis means

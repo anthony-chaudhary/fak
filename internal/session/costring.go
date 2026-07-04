@@ -82,6 +82,21 @@ func (r CostRing) at(i int) (TurnCost, bool) {
 	return r.Turns[idx], true
 }
 
+// LatestContextTokens returns the most recent debited turn's resident context/prompt tokens —
+// the full window the model read that turn — or 0 for a ring that has never been debited. It is
+// the single scalar the outbound-compaction burst gate needs to reason about a context-budgeted
+// session's remaining horizon: paired with the session's ContextTokensLeft it bounds how many
+// more turns the session can run before its context budget drains. Pure and reads only the ring
+// (like CostSummary), so it is reproducible and table-testable; the zero ring reads 0, the safe
+// "no history yet" default that leaves any consumer's horizon UNSET rather than guessed.
+func (r CostRing) LatestContextTokens() int {
+	latest, ok := r.at(0)
+	if !ok {
+		return 0
+	}
+	return latest.ContextTokens
+}
+
 // CostSummary is the render-ready fold of a session's cost ring — the numbers `fak ps` shows
 // in a cost-per-iteration column. Latest/Previous are the two most recent turns' combined cost;
 // Delta is Latest-Previous (a positive jump is a climbing cost); SpikeRatio is Latest over the

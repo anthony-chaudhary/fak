@@ -47,6 +47,24 @@ func TestCostSummaryEmptyAndSingle(t *testing.T) {
 	}
 }
 
+// TestLatestContextTokens proves the accessor the burst-gate horizon reads: an empty ring is 0
+// (the safe "no history yet" default that leaves a horizon unset, never guessed), and after
+// debits it returns the MOST RECENT turn's resident context — not output, not a prior turn.
+func TestLatestContextTokens(t *testing.T) {
+	var r CostRing
+	if got := r.LatestContextTokens(); got != 0 {
+		t.Fatalf("empty ring LatestContextTokens = %d, want 0", got)
+	}
+	r = r.push(TurnCost{OutputTokens: 500, ContextTokens: 40000})
+	if got := r.LatestContextTokens(); got != 40000 {
+		t.Fatalf("after one debit LatestContextTokens = %d, want 40000 (resident context, not output)", got)
+	}
+	r = r.push(TurnCost{OutputTokens: 300, ContextTokens: 52000})
+	if got := r.LatestContextTokens(); got != 52000 {
+		t.Fatalf("LatestContextTokens = %d, want 52000 (the most recent turn, not the prior one)", got)
+	}
+}
+
 // TestCostSummarySpikeRatio proves the cost-per-iteration runaway signal: a steady session
 // reads SpikeRatio ~1.0, and a turn that explodes ~200x the prior window reads ~200.
 func TestCostSummarySpikeRatio(t *testing.T) {
