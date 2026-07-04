@@ -51,6 +51,15 @@ type KVSpanStats struct {
 	// Leased reports an in-flight request lease (the refs>0 contract radixkv already
 	// enforces: a span being served cannot be reclaimed). A leased span is never a victim.
 	Leased bool
+	// AgeStamp is the GDSF-style aging-clock value (L) recorded the last time this span
+	// was referenced (inserted or hit) — see KVEvictionCostAged in kvcost_aging.go. The
+	// caller (the resident pool) stamps it with the pool's current AgingClock on every
+	// reference; a span that has not been touched since keeps its OLD, smaller stamp while
+	// AgingClock keeps advancing on later evictions, which is what lets recency re-enter
+	// the score instead of only breaking ties (LastUsed's current role). Zero (the default)
+	// makes KVEvictionCostAged reduce exactly to KVEvictionCost, so every existing caller
+	// that never sets it is byte-identical to today.
+	AgeStamp float64
 }
 
 // KVEvictionCost is #2239's value-of-keeping score for a resident KV span:
