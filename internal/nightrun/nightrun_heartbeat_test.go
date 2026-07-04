@@ -199,6 +199,44 @@ func TestHeartbeatThrottleBounded(t *testing.T) {
 	}
 }
 
+// TestHeartbeatRowBuilderRoundTrips pins the builder (NewHeartbeatRow) at the unit level,
+// below the RunLoop integration tests: the row is tagged Phase="heartbeat", carries the
+// cell/last_number/elapsed fields, is schema-valid but NOT collected-class, and survives a
+// JSONL round-trip through ParseLedger while staying distinguishable via IsHeartbeat().
+func TestHeartbeatRowBuilderRoundTrips(t *testing.T) {
+	now := mustTime(t, "2026-07-04T09:15:00Z")
+	task := Task{ID: "offline-a", Value: ValueFrontier, Run: "echo a"}
+	row := NewHeartbeatRow(task, "box-ci", "7/20", "13.5 tok/s", 90*time.Second, now)
+
+	if !row.IsHeartbeat() || row.Phase != PhaseHeartbeat {
+		t.Errorf("builder must tag the row as a heartbeat, got %+v", row)
+	}
+	if row.TaskID != task.ID || row.Box != "box-ci" || row.Value != string(ValueFrontier) {
+		t.Errorf("builder must carry task/box/value, got %+v", row)
+	}
+	if row.Cell != "7/20" || row.Number != "13.5 tok/s" || row.DurationSec != 90.0 {
+		t.Errorf("builder must carry cell/last_number/elapsed, got %+v", row)
+	}
+	if row.Date != "2026-07-04" || row.GeneratedAt != "2026-07-04T09:15:00Z" {
+		t.Errorf("builder must stamp date/generated_at from now, got %+v", row)
+	}
+	if !IsValidOutcome(Outcome(row.Outcome)) || CollectedOutcome(Outcome(row.Outcome)) {
+		t.Errorf("heartbeat outcome must be schema-valid but non-collected, got %q", row.Outcome)
+	}
+
+	line, err := AppendLedgerLine(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ParseLedger(line + "\n")
+	if len(got) != 1 {
+		t.Fatalf("heartbeat row must parse back as exactly one ledger row, got %d", len(got))
+	}
+	if !got[0].IsHeartbeat() || got[0].Cell != "7/20" || got[0].Number != "13.5 tok/s" {
+		t.Errorf("heartbeat fields must survive the JSONL round-trip, got %+v", got[0])
+	}
+}
+
 // TestHeartbeatThrottleInterval pins the time rung of the throttle in isolation: within a
 // SINGLE cell, samples emit only once the configured interval of executor-reported
 // elapsed has passed — so a long silent stall still yields periodic liveness rows without
