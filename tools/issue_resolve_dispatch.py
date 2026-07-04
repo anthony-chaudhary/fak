@@ -2197,6 +2197,75 @@ def audit_commit_witness(root: Path, sha: str, *, runner: Any | None = None) -> 
     return {"witnessed": witnessed, "verdict": verdict or None, "witness": witness or None}
 
 
+_ISSUE_TOKEN_RE = re.compile(r"(?<![\w-])#(\d+)\b")
+
+
+def _run_commit_audit_rows(root: Path, ref: str, *, timeout: int = 60) -> list[dict[str, Any]]:
+    kwargs: dict[str, Any] = {
+        "cwd": str(root), "capture_output": True, "text": True,
+        "encoding": "utf-8", "errors": "replace", "timeout": timeout,
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = no_window_creationflags()
+    try:
+        proc = subprocess.run(["dos", "commit-audit", ref, "--workspace", str(root),
+                               "--json"], **kwargs)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    try:
+        parsed = json.loads((proc.stdout or "").strip() or "[]")
+    except ValueError:
+        return []
+    if isinstance(parsed, dict):
+        return [parsed]
+    if isinstance(parsed, list):
+        return [r for r in parsed if isinstance(r, dict)]
+    return []
+
+
+def locally_witnessed_issues(root: Path, *, base_ref: str = "origin/main",
+                             git: Any | None = None,
+                             audit_rows: Any | None = None) -> set[int]:
+    """Open-loop duplicate guard for a hot shared tree.
+
+    A resolving commit may be present locally but not yet pushed/closed because a
+    pre-push guard or a peer commit blocks the range. Those issues are still open
+    on GitHub, so the normal picker would respawn them. Skip only issues cited by
+    commits in ``base_ref..HEAD`` that the DOS witness already grades OK.
+    """
+    git = git or _git_capture
+    rc, out = git(root, ["log", "--no-color",
+                         "--pretty=format:%H%x1f%B%x1e",
+                         f"{base_ref}..HEAD"])
+    if rc != 0 or not out:
+        return set()
+    cited: dict[str, set[int]] = {}
+    for entry in out.split("\x1e"):
+        entry = entry.strip()
+        if not entry:
+            continue
+        sha, sep, text = entry.partition("\x1f")
+        if not sep or not sha:
+            continue
+        nums = {int(m.group(1)) for m in _ISSUE_TOKEN_RE.finditer(text or "")}
+        if nums:
+            cited[sha.strip()] = nums
+    if not cited:
+        return set()
+    rows = audit_rows(root, f"{base_ref}..HEAD") if audit_rows else _run_commit_audit_rows(
+        root, f"{base_ref}..HEAD")
+    witnessed_shas = {
+        str(r.get("sha") or "") for r in rows
+        if str(r.get("verdict") or "").upper() == "OK"
+        and str(r.get("witness") or "") == _WITNESS_OK
+    }
+    out_issues: set[int] = set()
+    for sha, nums in cited.items():
+        if any(sha.startswith(w) or w.startswith(sha) for w in witnessed_shas if w):
+            out_issues.update(nums)
+    return out_issues
+
+
 def witness_exited_workers(runs_dir: Path, root: Path, *, live: bool,
                            alive: set[int] | None = None, probe: Any | None = None,
                            git: Any | None = None,
@@ -2755,6 +2824,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # landable drain. The held set is read from the recorded no-commit reason the
     # witness sweep above just bound, so an auth_wall still re-probes after its window.
     held_no_commit = held_no_commit_issues(witnessed)
+    local_witnessed = locally_witnessed_issues(root)
     # ...AND an issue whose contract review HELD within the TTL -- re-reviewing it
     # would hold identically (the body has not grown a contract in the meantime),
     # so skipping it lets the bounded scan advance to unreviewed issues instead of
@@ -2771,7 +2841,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         refreshed_ts = None
     contract_held_prior = contract_held_issues(
         runs_dir, ttl_h=contract_hold_ttl_h, updated_ts=refreshed_ts)
-    skip = live_issues | cooled | held_no_commit | contract_held_prior
+    skip = live_issues | cooled | held_no_commit | contract_held_prior | local_witnessed
     # The cross-lane candidate stream the bounded contract scan walks (busiest
     # lane's oldest candidate first, then each other eligible lane's, round-robin).
     # Falls back to the single chosen lane when the router fold predates the
@@ -2816,6 +2886,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         # Surface the structurally-held issues only when something is actually held, so
         # the common (nothing held) payload stays byte-identical to before (#1396).
         **({"held_no_commit": sorted(held_no_commit)} if held_no_commit else {}),
+        **({"locally_witnessed": sorted(local_witnessed)} if local_witnessed else {}),
         # Surface proactive self-source-tree holds (lane_issue_numbers) only when
         # something is actually held, for the same byte-identical-common-case reason.
         **({"self_modify_held": pick.get("self_modify_held")} if pick.get("self_modify_held") else {}),
@@ -2879,7 +2950,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         repair_suffix = f" (contract-repair: {repair_note})" if repair_note else ""
         payload.update({"ok": False, "action": "no_issue", "verdict": "NO_ISSUE",
                         "reason": (f"every open issue on {where} is "
-                                   f"either live ({sorted(live_issues)}), in "
+                                   f"either live ({sorted(live_issues)}), locally "
+                                   f"witnessed ({sorted(local_witnessed)}), in "
                                    f"cooldown ({sorted(cooled)}), or contract-held "
                                    f"within the last {contract_hold_ttl_h}h "
                                    f"({len(contract_held_prior)} issue(s) awaiting "

@@ -569,6 +569,7 @@ class EvaluateTest(unittest.TestCase):
         mod.live_resolution_issues = lambda runs_dir: set(live_issues or [])
         mod.live_resolution_lanes = lambda runs_dir: set(held_lanes or [])
         mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set(cooled or [])
+        mod.locally_witnessed_issues = lambda root, **k: set()
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": prompt_chars, "title": f"title {n}"}
         mod.issue_contract_review = passing_issue_contract
@@ -768,6 +769,28 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["target_issue"], 466)
         self.assertEqual(reviewed, [466])  # 467 skipped from the ledger, unreviewed
         self.assertEqual(p["contract_held_prior"], 1)
+
+    def test_local_witnessed_issue_skipped_until_push_close(self) -> None:
+        """A local diff-witnessed commit can be ahead of origin while a push guard
+        is blocked; do not spawn a duplicate worker for that still-open issue."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "tools", "numbers": [1444, 2293],
+                          "by_lane_count": {"tools": 2}})
+        mod.locally_witnessed_issues = lambda root, **k: {1444}
+        reviewed: list[int] = []
+
+        def counting_review(root, issue, number, **_kw):
+            reviewed.append(number)
+            return passing_issue_contract()
+
+        mod.issue_contract_review = counting_review
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+        self.assertEqual(p["verdict"], "WOULD_SPAWN")
+        self.assertEqual(p["target_issue"], 2293)
+        self.assertEqual(p["locally_witnessed"], [1444])
+        self.assertEqual(reviewed, [2293])
 
     def test_all_prior_contract_holds_plan_repair_worker(self) -> None:
         """A tick whose picker is empty only because the hold ledger skipped every
