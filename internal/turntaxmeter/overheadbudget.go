@@ -99,6 +99,19 @@ var defaultBudget = budgetTable([]Budget{
 	{Rung: "recall", Method: "fold", MaxNS: 20_000, MaxTokenDelta: 0},
 	// Dispatch planner — dry-run fan-out/collision pricing before workers launch.
 	{Rung: "dispatch", Method: "plan_fanout", MaxNS: 100_000_000, MaxTokenDelta: 0},
+	// Local-serve fast path — the vDSO hit that answers a read BEFORE any adjudication
+	// (kernel Submit consults FastPaths first; a hit renders By:"vdso" and runs zero
+	// adjudication tax). This is the hottest rung — it rides every served tool call of
+	// every turn of every worker — and the one path the #282 adjudication-latency gate
+	// does NOT cover (that gate is on s.adjudicate; the vDSO fold is on s.syscall). The
+	// measured anchor is a 1-shot serve p50 ~3.4 us wall-clock
+	// (examples/turntax/EXAMPLE-OUTPUT.md); the 10 us ceiling is a generous
+	// gross-regression envelope (~3x the anchor), in the same spirit as the 5-10 us
+	// compute rows above — normal serve jitter stays OK, while an order-of-magnitude
+	// regression (an added allocation or lock contention on the hit path) reads back as
+	// a structured breach. A serve SAVES tokens (negative delta on the net line), so its
+	// per-span add envelope is 0: a serve that ADDS tokens is itself a bug.
+	{Rung: "vdso", Method: "serve", MaxNS: 10_000, MaxTokenDelta: 0},
 })
 
 // budgetKey is the lookup key for the declared table.

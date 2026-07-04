@@ -63,6 +63,71 @@ func TestOverBudgetSpanReadsBackAsBreach(t *testing.T) {
 	}
 }
 
+// TestVDSOServeBudgetDeclaredAndBreaches is the acceptance witness for issue #2219
+// (epic #2218, gap G1): the hottest local-serve rung — the vDSO hit on s.syscall — must
+// carry a DECLARED envelope so a pure-Go regression on it reads back as a structured
+// breach instead of the fail-open silence an undeclared rung gets. It proves the row
+// exists, that an over-budget vdso.serve span reaches OVERHEAD_BUDGET_EXCEEDED (the
+// "reachable from a vdso span" acceptance), and that a serve at the 3.4 us serve anchor
+// stays comfortably OK — so the gate catches a gross regression without flagging normal
+// serves.
+func TestVDSOServeBudgetDeclaredAndBreaches(t *testing.T) {
+	b, ok := DefaultBudget("vdso", "serve")
+	if !ok {
+		t.Fatalf("issue #2219: no declared budget for the vdso/serve rung — the hottest " +
+			"serve path is still fail-open (an undeclared rung can never breach)")
+	}
+	// A generous gross-regression ceiling, not a tight p99: it must sit well above the
+	// ~3.4 us serve anchor so normal serve jitter never reds, while still catching an
+	// order-of-magnitude regression.
+	if b.MaxNS < 3_400 {
+		t.Fatalf("vdso.serve envelope %d ns is below the ~3.4 us serve anchor — it would "+
+			"red on a normal serve", b.MaxNS)
+	}
+	// A serve adds no tokens (it SAVES them), so any positive add is a breach.
+	if b.MaxTokenDelta != 0 {
+		t.Fatalf("vdso.serve token envelope = %d, want 0 (a serve that ADDS tokens is a bug)", b.MaxTokenDelta)
+	}
+
+	cases := []struct {
+		name       string
+		span       Span
+		wantBreach bool
+	}{
+		{
+			name:       "an order-of-magnitude serve regression breaches from a vdso span",
+			span:       Span{Rung: "vdso", Method: "serve", ElapsedNS: b.MaxNS * 10},
+			wantBreach: true,
+		},
+		{
+			name:       "a serve that adds tokens breaches the zero token envelope",
+			span:       Span{Rung: "vdso", Method: "serve", ElapsedNS: 3_400, TokenDelta: 1},
+			wantBreach: true,
+		},
+		{
+			name:       "a serve at the ~3.4 us anchor is well within budget",
+			span:       Span{Rung: "vdso", Method: "serve", ElapsedNS: 3_459},
+			wantBreach: false,
+		},
+		{
+			name:       "exactly at the ceiling is OK (breach is strictly over)",
+			span:       Span{Rung: "vdso", Method: "serve", ElapsedNS: b.MaxNS},
+			wantBreach: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			breach, reason := CheckSpan(tc.span)
+			if breach != tc.wantBreach {
+				t.Fatalf("CheckSpan(%+v): breach=%v, want %v (reason=%q)", tc.span, breach, tc.wantBreach, reason)
+			}
+			if breach && reason != OverheadBudgetExceeded {
+				t.Fatalf("a vdso.serve breach must name %q, got %q", OverheadBudgetExceeded, reason)
+			}
+		})
+	}
+}
+
 // TestBudgetTokenIsStable pins the breach token's spelling: it is the contract the
 // dos.toml [reasons.OVERHEAD_BUDGET_EXCEEDED] declaration and `dos check-reason` rely
 // on, so a rename here that drifts from the vocabulary must fail the build.
