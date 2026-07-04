@@ -31,6 +31,7 @@ dogfood.yml:master
 dogfood-coverage.yml:master
 dojo-feed.yml:master
 dojo-rsi-feed.yml:master
+dup-signal.yml:master
 garden.yml:master
 gate-signal.yml:master
 node-usage-feed.yml:master
