@@ -22,6 +22,15 @@ on:
 permissions:
   contents: read
 
+# Queue control (CI/CD run-speed): cancel a PR's superseded in-flight runs on a
+# re-push/force-push. On main — and on schedule/workflow_dispatch — github.head_ref
+# is empty, so the group key falls back to the unique commit SHA: every trunk commit
+# runs its own fast gate in parallel, uncancelled, preserving the per-commit
+# decisive conclusion release_decide reads on main.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   build-vet-test-fast:
     name: build · vet · test (no -race, fast release gate)

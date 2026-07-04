@@ -19,6 +19,14 @@ on:
 permissions:
   contents: read
 
+# Queue control (CI/CD run-speed): cancel a PR's superseded in-flight runs on a
+# re-push/force-push. On main — and on schedule/workflow_dispatch — github.head_ref
+# is empty, so the group key falls back to the unique commit SHA: every trunk commit
+# runs its own per-OS build+vet matrix in parallel, uncancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   build-vet:
     name: build · vet (${{ matrix.os }})
