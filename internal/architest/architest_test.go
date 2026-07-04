@@ -58,6 +58,7 @@ var tier = map[string]int{
 	"sotamatrix":           1, // pure SOTA prior-art registry (op -> reference/route/oracle) read by fak sota, the PRIOR_ART gate, and the coverage scorecard; stdlib-only, off the hot path.
 	"branchrole":           1, // branch-role contract reader over dos.toml; stdlib-only, off the hot path.
 	"benchloop":            1, // benchmark super-loop manager: folds benchcatalog/benchruns/nightrun status into one command-facing control surface; off the hot path.
+	"macbench":             1, // Mac gateway benchmark probes for nightrun: stdlib HTTP client + JSON artifact fold, off the hot path.
 	"benchruns":            1, // pure benchmark-run catalog reader/renderer over experiments/benchmark artifacts; stdlib-only, off the hot path.
 	"benchlineagegate":     1, // pure benchmark-emitter lineage hygiene gate; stdlib-only source scanner, off the hot path.
 	"cachevalueledger":     1, // durable, append-only cache-value observation ledger for fak sessions; JSONL persistence over cacheobs stats.
