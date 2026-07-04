@@ -188,6 +188,21 @@ def test_propagation_scorecard_registered() -> None:
     assert card["label"] == "propagation"
 
 
+def test_propagation_pinned_in_committed_baseline() -> None:
+    # #1515: registering the card in SCORECARDS is only half the ratchet — the
+    # re-pinned tools/scorecard_baseline.json must actually carry `propagation` in
+    # BOTH axes (raw metrics + grade_weights), or its debt has no floor and a
+    # regression can't red --check. The other tests use synthetic baselines; this
+    # one is a drift sentinel over the SHIPPED baseline file so a future blind
+    # --pin on a tree where the card errored can't silently drop it from the floor.
+    baseline = scp.load_baseline(scp.repo_root() / scp.BASELINE_REL)
+    assert baseline is not None, f"{scp.BASELINE_REL} missing or unreadable"
+    assert "propagation" in (baseline.get("metrics") or {}), \
+        "propagation dropped from baseline metrics — the raw-unit floor is gone"
+    assert "propagation" in (baseline.get("grade_weights") or {}), \
+        "propagation dropped from baseline grade_weights — the grade ratchet floor is gone"
+
+
 # --- fold: portfolio sum + verdict ladder ----------------------------------
 
 def test_fold_sums_portfolio_debt() -> None:
