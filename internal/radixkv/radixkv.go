@@ -46,7 +46,12 @@
 // memory for the guarantee that not one bit of the verified KV core is re-derived here.
 package radixkv
 
-import "github.com/anthony-chaudhary/fak/internal/model"
+import (
+	"math"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/model"
+)
 
 // node is one vertex of the compressed radix tree. The edge parent→node carries `key`
 // (a run of token ids); the path root→node spells the token prefix this node caches.
@@ -65,6 +70,26 @@ type node struct {
 	plen     int    // path length in tokens (parent.plen + len(key)); == len(kv) when kv!=nil
 	refs     int    // active leases; a leaf with refs>0 is never LRU-evicted
 	lastUsed uint64 // logical clock of the most recent match/insert touching this node — LRU key
+	hits     int    // subsequent demand lookups that found this node resident
+}
+
+// EvictionPolicy selects the budget-pressure victim rule. The zero value is pure LRU,
+// preserving New(maxTokens)'s original behavior; cost-aware is opt-in while the remaining
+// #2666 production wiring lands.
+type EvictionPolicy uint8
+
+const (
+	EvictionLRU EvictionPolicy = iota
+	EvictionCostAware
+)
+
+func (p EvictionPolicy) String() string {
+	switch p {
+	case EvictionCostAware:
+		return "cost-aware"
+	default:
+		return "lru"
+	}
 }
 
 // Tree is a RadixAttention prefix cache: a radix tree of token sequences with
@@ -74,10 +99,20 @@ type Tree struct {
 	maxTokens int    // LRU budget in cached tokens; 0 disables eviction (unbounded)
 	tokens    int    // total cached tokens = Σ len(node.key) over all nodes
 	clock     uint64 // logical access clock
+	policy    EvictionPolicy
 
 	evictions       int // LRU leaf evictions
+	costEvictions   int // cost-aware leaf evictions
 	policyEvictions int // EvictNode calls (the fak differentiator)
 	splits          int // edge splits performed (a structural RadixAttention event)
+
+	lastEvictPolicy       EvictionPolicy
+	lastEvictCandidates   int
+	lastEvictLocked       int
+	lastEvictVictimCost   float64
+	lastEvictVictimHits   int
+	lastEvictVictimTokens int
+	lastEvictVictimPrefix int
 }
 
 // New builds an empty prefix cache. maxTokens is the LRU budget in cached tokens; pass 0
@@ -85,6 +120,24 @@ type Tree struct {
 // algorithm's pure hit rate, before layering a memory bound on top).
 func New(maxTokens int) *Tree {
 	return &Tree{root: &node{children: map[int]*node{}}, maxTokens: maxTokens}
+}
+
+// NewWithEvictionPolicy builds a tree with an explicit budget-pressure policy. Unknown
+// policy values fall back to LRU so callers cannot accidentally widen behavior.
+func NewWithEvictionPolicy(maxTokens int, policy EvictionPolicy) *Tree {
+	t := New(maxTokens)
+	t.SetEvictionPolicy(policy)
+	return t
+}
+
+// SetEvictionPolicy changes the budget-pressure victim rule for future evictions only.
+func (t *Tree) SetEvictionPolicy(policy EvictionPolicy) {
+	switch policy {
+	case EvictionLRU, EvictionCostAware:
+		t.policy = policy
+	default:
+		t.policy = EvictionLRU
+	}
 }
 
 func (t *Tree) tick() uint64 { t.clock++; return t.clock }
@@ -154,6 +207,7 @@ func (t *Tree) split(parent, child *node, oi int) *node {
 		children: map[int]*node{},
 		plen:     parent.plen + oi,
 		lastUsed: child.lastUsed,
+		hits:     child.hits,
 	}
 	if child.kv != nil {
 		mid.kv = truncatePrefix(child.kv, mid.plen)
@@ -192,6 +246,11 @@ func (t *Tree) Lookup(tokens []int) (*node, int) {
 		p.lastUsed = t.clock + 1 // freshen the whole hot path
 	}
 	t.clock++
+	if matched > 0 {
+		for p := boundary; p != nil && p != t.root; p = p.parent {
+			p.hits++
+		}
+	}
 	boundary.refs++
 	return boundary, matched
 }
@@ -261,18 +320,31 @@ func (n *node) Plen() int { return n.plen }
 // leased (refs>0) is never chosen, so a prefix being served survives memory pressure.
 func (t *Tree) evictToBudget() {
 	for t.maxTokens > 0 && t.tokens > t.maxTokens {
-		v := t.lruLeaf()
+		v := t.victimLeaf()
 		if v == nil {
 			return // everything in budget-excess is locked; cannot evict further
 		}
 		t.removeLeaf(v)
 		t.evictions++
+		if t.policy == EvictionCostAware {
+			t.costEvictions++
+		}
+	}
+}
+
+func (t *Tree) victimLeaf() *node {
+	switch t.policy {
+	case EvictionCostAware:
+		return t.costAwareLeaf()
+	default:
+		return t.lruLeaf()
 	}
 }
 
 // lruLeaf returns the unlocked leaf (no children, not the root) with the smallest lastUsed.
 func (t *Tree) lruLeaf() *node {
 	var best *node
+	candidates, locked := 0, 0
 	var stack []*node
 	for _, c := range t.root.children {
 		stack = append(stack, c)
@@ -281,7 +353,12 @@ func (t *Tree) lruLeaf() *node {
 		n := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 		if len(n.children) == 0 {
-			if n.refs == 0 && (best == nil || n.lastUsed < best.lastUsed) {
+			candidates++
+			if n.refs > 0 {
+				locked++
+				continue
+			}
+			if best == nil || n.lastUsed < best.lastUsed {
 				best = n
 			}
 			continue
@@ -290,7 +367,74 @@ func (t *Tree) lruLeaf() *node {
 			stack = append(stack, c)
 		}
 	}
+	t.recordEvictChoice(EvictionLRU, candidates, locked, best)
 	return best
+}
+
+func (t *Tree) costAwareLeaf() *node {
+	var leaves []*node
+	var spans []compute.KVSpanStats
+	candidates, locked := 0, 0
+	var stack []*node
+	for _, c := range t.root.children {
+		stack = append(stack, c)
+	}
+	for len(stack) > 0 {
+		n := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if len(n.children) == 0 {
+			candidates++
+			leaves = append(leaves, n)
+			if n.refs > 0 {
+				locked++
+			}
+			spans = append(spans, n.kvSpanStats())
+			continue
+		}
+		for _, c := range n.children {
+			stack = append(stack, c)
+		}
+	}
+	idx := compute.PickEvictionVictim(spans)
+	if idx < 0 {
+		t.recordEvictChoice(EvictionCostAware, candidates, locked, nil)
+		return nil
+	}
+	v := leaves[idx]
+	t.recordEvictChoice(EvictionCostAware, candidates, locked, v)
+	return v
+}
+
+func (n *node) kvSpanStats() compute.KVSpanStats {
+	return compute.KVSpanStats{
+		Tokens:   len(n.key),
+		Bytes:    int64(max(n.plen, 1)),
+		Hits:     n.hits,
+		LastUsed: n.lastUsed,
+		Leased:   n.refs > 0,
+	}
+}
+
+func (t *Tree) recordEvictChoice(policy EvictionPolicy, candidates, locked int, victim *node) {
+	t.lastEvictPolicy = policy
+	t.lastEvictCandidates = candidates
+	t.lastEvictLocked = locked
+	t.lastEvictVictimCost = 0
+	t.lastEvictVictimHits = 0
+	t.lastEvictVictimTokens = 0
+	t.lastEvictVictimPrefix = 0
+	if victim == nil {
+		return
+	}
+	st := victim.kvSpanStats()
+	cost := compute.KVEvictionCost(st)
+	if math.IsInf(cost, 0) {
+		cost = 0
+	}
+	t.lastEvictVictimCost = cost
+	t.lastEvictVictimHits = st.Hits
+	t.lastEvictVictimTokens = st.Tokens
+	t.lastEvictVictimPrefix = victim.plen
 }
 
 func (t *Tree) removeLeaf(v *node) {
@@ -396,9 +540,20 @@ type Stats struct {
 	Leaves          int // leaf nodes
 	MaxDepthTokens  int // longest cached prefix
 	Evictions       int // LRU leaf evictions performed
+	CostEvictions   int // cost-aware leaf evictions performed
 	PolicyEvictions int // EvictNode calls
 	Splits          int // edge splits performed
 	MaxTokens       int // configured LRU budget (0 = unbounded)
+	EvictionPolicy  string
+	ReuseHits       int
+
+	LastEvictPolicy       string
+	LastEvictCandidates   int
+	LastEvictLocked       int
+	LastEvictVictimCost   float64
+	LastEvictVictimHits   int
+	LastEvictVictimTokens int
+	LastEvictVictimPrefix int
 }
 
 // Stats walks the tree and returns its current shape.
@@ -411,7 +566,21 @@ type Stats struct {
 // tree (a single N-token chain holds N·(N+1)/2 positions while Tokens reports only N).
 // PrefixTokens makes that gap measurable instead of silent (see TestBudgetVsTrueKVFootprint).
 func (t *Tree) Stats() Stats {
-	s := Stats{Evictions: t.evictions, PolicyEvictions: t.policyEvictions, Splits: t.splits, MaxTokens: t.maxTokens}
+	s := Stats{
+		Evictions:             t.evictions,
+		CostEvictions:         t.costEvictions,
+		PolicyEvictions:       t.policyEvictions,
+		Splits:                t.splits,
+		MaxTokens:             t.maxTokens,
+		EvictionPolicy:        t.policy.String(),
+		LastEvictPolicy:       t.lastEvictPolicy.String(),
+		LastEvictCandidates:   t.lastEvictCandidates,
+		LastEvictLocked:       t.lastEvictLocked,
+		LastEvictVictimCost:   t.lastEvictVictimCost,
+		LastEvictVictimHits:   t.lastEvictVictimHits,
+		LastEvictVictimTokens: t.lastEvictVictimTokens,
+		LastEvictVictimPrefix: t.lastEvictVictimPrefix,
+	}
 	var visit func(n *node)
 	visit = func(n *node) {
 		if n != t.root {
@@ -423,6 +592,7 @@ func (t *Tree) Stats() Stats {
 			if n.plen > s.MaxDepthTokens {
 				s.MaxDepthTokens = n.plen
 			}
+			s.ReuseHits += n.hits
 			if len(n.children) == 0 {
 				s.Leaves++
 			}
