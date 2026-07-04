@@ -182,6 +182,14 @@ surfaces:
   — `promote` / `demote` / `retire` / `park` map one-to-one onto
   exercise / hedge / retire / hold. The option model adds the *valuation* that
   justifies the verb; it does not introduce a new verb set.
+- **Sunset and kill criteria
+  ([`docs/generation-future-sunset-criteria.md`](generation-future-sunset-criteria.md))**
+  is the operational companion to this model. It defines the closed
+  sunset-trigger vocabulary that *fires* the `retire` disposition defined here
+  (`CARRY_EXHAUSTED`, `STRIKE_UNREACHABLE`, `ASSUMPTION_FIRED`, …), the default
+  recheck cadence, and the retirement-evidence contract. This model says
+  *whether* to retire; the sunset criteria say *when, why, and with what
+  witness*.
 
 ## Promotion And Retirement Evidence
 
