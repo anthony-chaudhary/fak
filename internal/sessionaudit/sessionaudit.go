@@ -1100,24 +1100,37 @@ func namespaceName(path string) string {
 	return filepath.Base(filepath.Dir(path))
 }
 
-func compactTiers(agg Aggregate) []CompactTier {
-	totalOutput := int64(0)
-	totalCost := 0.0
+// tierOutputCostTotals sums PerTier output tokens and total PerModel
+// estimated cost for agg. Shared by compactTiers and renderModelMix.
+func tierOutputCostTotals(agg Aggregate) (totalOutput int64, totalCost float64) {
 	for _, c := range agg.PerTier {
 		totalOutput += c.Output
 	}
 	for model, c := range agg.PerModel {
 		totalCost += ModelCost(model, c)
 	}
+	return totalOutput, totalCost
+}
+
+// modelCostByKey sums ModelCost across agg.PerModel for every model whose
+// classify(model) equals key. Shared by the per-tier (ModelTier) and
+// per-bucket (ProviderBucket) cost rollups.
+func modelCostByKey(agg Aggregate, key string, classify func(string) string) float64 {
+	cost := 0.0
+	for model, mc := range agg.PerModel {
+		if classify(model) == key {
+			cost += ModelCost(model, mc)
+		}
+	}
+	return cost
+}
+
+func compactTiers(agg Aggregate) []CompactTier {
+	totalOutput, totalCost := tierOutputCostTotals(agg)
 	out := make([]CompactTier, 0, len(agg.PerTier))
 	for _, tier := range sortedModelCounts(agg.PerTier) {
 		c := agg.PerTier[tier]
-		tierCost := 0.0
-		for model, mc := range agg.PerModel {
-			if ModelTier(model) == tier {
-				tierCost += ModelCost(model, mc)
-			}
-		}
+		tierCost := modelCostByKey(agg, tier, ModelTier)
 		out = append(out, CompactTier{
 			Tier:             tier,
 			OutputTokens:     c.Output,
@@ -1273,22 +1286,10 @@ func renderModelMix(b *strings.Builder, agg Aggregate) {
 	fmt.Fprintln(b)
 	fmt.Fprintln(b, "| Tier | Output tok | Output share | Est. cost | Cost share |")
 	fmt.Fprintln(b, "|---|---:|---:|---:|---:|")
-	totalOutput := int64(0)
-	totalCost := 0.0
-	for _, c := range agg.PerTier {
-		totalOutput += c.Output
-	}
-	for model, c := range agg.PerModel {
-		totalCost += ModelCost(model, c)
-	}
+	totalOutput, totalCost := tierOutputCostTotals(agg)
 	for _, tier := range sortedModelCounts(agg.PerTier) {
 		c := agg.PerTier[tier]
-		tierCost := 0.0
-		for model, mc := range agg.PerModel {
-			if ModelTier(model) == tier {
-				tierCost += ModelCost(model, mc)
-			}
-		}
+		tierCost := modelCostByKey(agg, tier, ModelTier)
 		fmt.Fprintf(b, "| %s | %s | %s | $%s | %s |\n", tier, fmtInt(c.Output), fmtPct(ratio(c.Output, totalOutput)), fmtFloat(tierCost, 2), fmtPct(floatRatio(tierCost, totalCost)))
 	}
 	fmt.Fprintln(b)
@@ -1301,12 +1302,7 @@ func renderBuckets(b *strings.Builder, agg Aggregate) {
 	fmt.Fprintln(b, "|---|---:|---:|---:|---:|:--:|")
 	for _, bucket := range sortedModelCounts(agg.PerBucket) {
 		c := agg.PerBucket[bucket]
-		bcost := 0.0
-		for model, mc := range agg.PerModel {
-			if ProviderBucket(model) == bucket {
-				bcost += ModelCost(model, mc)
-			}
-		}
+		bcost := modelCostByKey(agg, bucket, ProviderBucket)
 		costCell := "- (no card)"
 		priced := ""
 		if bucket == "Anthropic (Claude)" {
@@ -1384,10 +1380,7 @@ func renderOpusHeavySessions(b *strings.Builder, sessions []Session) {
 		rows = rows[:10]
 	}
 	for _, row := range rows {
-		sid := row.Session.Session
-		if len(sid) > 8 {
-			sid = sid[:8]
-		}
+		sid := shortSessionID(row.Session.Session)
 		fmt.Fprintf(b, "| %s | %s | %s | %s | $%s | %s | $%s | %s |\n",
 			sid,
 			namespaceName(row.Session.Path),
@@ -1466,6 +1459,15 @@ func topSessionModel(s Session) string {
 	return top
 }
 
+// shortSessionID truncates a session ID to its first 8 characters for
+// compact table display.
+func shortSessionID(sid string) string {
+	if len(sid) > 8 {
+		return sid[:8]
+	}
+	return sid
+}
+
 type longContextSessionRow struct {
 	Session       Session
 	TotalContext  int64
@@ -1486,10 +1488,7 @@ func renderLongContextSessions(b *strings.Builder, sessions []Session) {
 	}
 	for _, row := range rows {
 		s := row.Session
-		sid := s.Session
-		if len(sid) > 8 {
-			sid = sid[:8]
-		}
+		sid := shortSessionID(s.Session)
 		ioCell := "-"
 		if s.IORatio != nil {
 			ioCell = fmt.Sprintf("%.1f", *s.IORatio)
@@ -1585,10 +1584,7 @@ func renderTopSessions(b *strings.Builder, sessions []Session) {
 		sessions = sessions[:15]
 	}
 	for _, s := range sessions {
-		sid := s.Session
-		if len(sid) > 8 {
-			sid = sid[:8]
-		}
+		sid := shortSessionID(s.Session)
 		ioCell := "-"
 		if s.IORatio != nil {
 			ioCell = fmt.Sprintf("%.0f", *s.IORatio)
@@ -1666,7 +1662,12 @@ func fmtPctPtr(v *float64) string {
 }
 
 func fmtInt(n int64) string {
-	s := strconv.FormatInt(n, 10)
+	return groupThousands(strconv.FormatInt(n, 10))
+}
+
+// groupThousands inserts thousands-separator commas into a decimal digit
+// string, scanning from the right. Shared by fmtInt and fmtFloat.
+func groupThousands(s string) string {
 	var out []byte
 	for i, r := range reverse(s) {
 		if i > 0 && i%3 == 0 {
@@ -1694,22 +1695,11 @@ func fmtFloat(v float64, places int) string {
 		sign = "-"
 		intPart = strings.TrimPrefix(intPart, "-")
 	}
-	grouped := fmtIntString(intPart)
+	grouped := groupThousands(intPart)
 	if len(parts) == 2 {
 		return sign + grouped + "." + parts[1]
 	}
 	return sign + grouped
-}
-
-func fmtIntString(s string) string {
-	var out []byte
-	for i, r := range reverse(s) {
-		if i > 0 && i%3 == 0 {
-			out = append(out, ',')
-		}
-		out = append(out, byte(r))
-	}
-	return reverse(string(out))
 }
 
 func fmtStat(v *float64) string {
