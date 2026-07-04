@@ -166,15 +166,22 @@ func runNaive(ep Episode) EpisodeOutcome {
 		return EpisodeOutcome{Episode: ep.Name} // no turns: nothing accepted (mirrors runGated's empty-safety)
 	}
 	accepted := len(ep.Turns)
+	acceptedDone := false
 	for i, t := range ep.Turns {
 		if t.SelfReportedDone {
 			accepted = i + 1
+			acceptedDone = true
 			break
 		}
 	}
 	out := EpisodeOutcome{Episode: ep.Name, AcceptedTurn: accepted, Iterations: accepted}
 	out.SlopShipped = sumSlop(ep, accepted)
-	out.FalseDone = ep.Turns[accepted-1].DosVerdict != VerdictWitnessed
+	// A false done requires an ACCEPTED self-reported done that dos refutes. A loop
+	// that ran to exhaustion without ever claiming done accepted nothing, so it is
+	// not a false done — mirroring runGated's never-witnessed guard. Grading the
+	// trailing (non-witnessed) turn as a false done here would fabricate a naive
+	// false-done rate over an acceptance that never happened.
+	out.FalseDone = acceptedDone && ep.Turns[accepted-1].DosVerdict != VerdictWitnessed
 	if out.FalseDone {
 		switch w := firstWitnessed(ep); {
 		case w > accepted:

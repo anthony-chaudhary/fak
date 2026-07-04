@@ -208,6 +208,47 @@ func appendLoopVerifyEvent(t *testing.T, path string, ev loopmgr.Event) {
 	}
 }
 
+// TestLoopVerifyNaiveNeverClaimsDoneNotFalseDone pins the naive-arm guard for a
+// non-empty episode the loop never self-reports done on — reachable on the
+// OBSERVED ledger path when a loop is still working or was interrupted without a
+// claimed-done turn. The naive loop accepts nothing there, so it cannot have a
+// FALSE done: runNaive must mirror runGated's never-accepted guard rather than
+// grading the trailing (non-witnessed) turn as a false done, which would fabricate
+// a naive false-done rate and inflate the headline false_done_rate_reduction over
+// an acceptance that never happened.
+func TestLoopVerifyNaiveNeverClaimsDoneNotFalseDone(t *testing.T) {
+	never := []Episode{
+		{Name: "still-working", Turns: []Turn{
+			{DosVerdict: VerdictWorking, GateCostUnits: 1, Note: "turn 1"},
+			{DosVerdict: VerdictWorking, GateCostUnits: 1, Note: "turn 2; still no self-reported done"},
+		}},
+	}
+	r := BuildLoopVerifyReportFor(never)
+
+	// The naive loop never accepted a self-reported done, so nothing was falsely
+	// accepted: the episode is not a naive false-done.
+	if r.Episodes[0].Naive.FalseDone {
+		t.Errorf("naive false_done = true on a never-self-reported episode; want false (nothing was accepted)")
+	}
+	if r.Naive.FalseDoneRate != 0 {
+		t.Errorf("naive false_done_rate = %v; want 0 (no self-reported done to falsely accept)", r.Naive.FalseDoneRate)
+	}
+	// With no naive false done there is no gate win to claim over this corpus; a
+	// non-zero reduction here would be fabricated from an acceptance that never
+	// happened.
+	if r.Delta.FalseDoneRateReduction != 0 {
+		t.Errorf("false_done_rate_reduction = %v; want 0 (fabricated win otherwise)", r.Delta.FalseDoneRateReduction)
+	}
+	if r.Verdict != VerdictCorpusTooEasy {
+		t.Errorf("verdict = %q; want %q", r.Verdict, VerdictCorpusTooEasy)
+	}
+	// Both arms ran every turn (naive to exhaustion, gated re-arming), mirroring the
+	// never-witnessed / empty-episode treatment.
+	if r.Episodes[0].Naive.Iterations != 2 || r.Episodes[0].Gated.Iterations != 2 {
+		t.Errorf("iterations naive/gated = %d/%d; want 2/2", r.Episodes[0].Naive.Iterations, r.Episodes[0].Gated.Iterations)
+	}
+}
+
 // TestLoopVerifyEmptyEpisodeNoPanic pins the #2648 fix: BuildLoopVerifyReportFor
 // on an episode with zero turns must not panic (runNaive used to index
 // ep.Turns[-1]). Both arms return a well-formed zero outcome, mirroring
