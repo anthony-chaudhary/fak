@@ -98,23 +98,7 @@ func scanPublicLeakTree(t *TrackedTree) ([]Finding, string) {
 			continue
 		}
 		for i, line := range strings.Split(string(body), "\n") {
-			payloadL := strings.ToLower(line)
-			for _, n := range needles {
-				if strings.Contains(payloadL, strings.ToLower(n)) {
-					findings = append(findings, Finding{
-						Gate: "PUBLIC_LEAK", File: f, Line: i + 1,
-						Detail: "[" + n + "]  " + preview(line),
-					})
-				}
-			}
-			for _, rx := range auditRegexes {
-				if rx.re.MatchString(line) {
-					findings = append(findings, Finding{
-						Gate: "PUBLIC_LEAK", File: f, Line: i + 1,
-						Detail: "[" + rx.label + "]  " + preview(line),
-					})
-				}
-			}
+			findings = append(findings, publicLeakLineFindings(line, i+1, f, needles)...)
 		}
 	}
 	return findings, mode

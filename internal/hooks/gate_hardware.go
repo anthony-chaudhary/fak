@@ -185,21 +185,15 @@ func maskBracketedPathishLabels(line string) string {
 // commit subject/body is still a leak even inside backticks.
 func ScanMessageHardwareTells(msg string) []Finding {
 	var findings []Finding
-	for i, line := range strings.Split(msg, "\n") {
-		if strings.HasPrefix(line, "# ------------------------ >8") {
-			break
-		}
-		if strings.HasPrefix(line, "#") {
-			continue
-		}
+	eachCommitMessageLine(msg, func(i int, line string) {
 		if hardwareLineHasTell(line) {
 			findings = append(findings, Finding{
 				Gate:   "HARDWARE_TELL",
-				Line:   i + 1,
+				Line:   i,
 				Detail: preview(line),
 			})
 		}
-	}
+	})
 	return findings
 }
 

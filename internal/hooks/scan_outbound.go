@@ -18,17 +18,7 @@ func ScanOutboundText(payload, root string) []Finding {
 	needles := needlesWithSidecar(root)
 	var findings []Finding
 	for i, line := range strings.Split(payload, "\n") {
-		ll := strings.ToLower(line)
-		for _, n := range needles {
-			if strings.Contains(ll, strings.ToLower(n)) {
-				findings = append(findings, Finding{Gate: "PUBLIC_LEAK", Line: i + 1, Detail: "[" + n + "]  " + preview(line)})
-			}
-		}
-		for _, rx := range auditRegexes {
-			if rx.re.MatchString(line) {
-				findings = append(findings, Finding{Gate: "PUBLIC_LEAK", Line: i + 1, Detail: "[" + rx.label + "]  " + preview(line)})
-			}
-		}
+		findings = append(findings, publicLeakLineFindings(line, i+1, "", needles)...)
 		for _, hit := range scanShapes(line) {
 			findings = append(findings, Finding{Gate: "SECRET_SHAPE", Line: i + 1, Detail: "[" + hit.shape + "] " + hit.text})
 		}

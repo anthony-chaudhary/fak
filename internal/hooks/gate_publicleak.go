@@ -172,34 +172,17 @@ func needlesWithSidecar(root string) []string {
 func ScanMessageNeedles(msg string, root string) []Finding {
 	needles := needlesWithSidecar(root)
 	var findings []Finding
-	for i, line := range strings.Split(msg, "\n") {
-		// Mirror scrub_public_copy.py's message scanner so the Go gate and the Python
-		// checker cannot drift: stop at git's scissors line (the to-be-stripped diff
-		// preview the content gate owns), skip comment lines git strips from the final
-		// message, and skip identity trailers (DCO sign-off / co-author) — a needle in a
-		// `Signed-off-by: name <user@org>` is identity metadata, not a leak, so scanning
-		// it would refuse every signed commit.
-		if strings.HasPrefix(line, "# ------------------------ >8") {
-			break
-		}
-		if strings.HasPrefix(line, "#") {
-			continue
-		}
+	// Mirror scrub_public_copy.py's message scanner so the Go gate and the Python checker
+	// cannot drift: eachCommitMessageLine already stops at git's scissors line and skips
+	// comment lines; skip identity trailers (DCO sign-off / co-author) here too — a needle
+	// in a `Signed-off-by: name <user@org>` is identity metadata, not a leak, so scanning
+	// it would refuse every signed commit.
+	eachCommitMessageLine(msg, func(i int, line string) {
 		if messageTrailerRe.MatchString(line) {
-			continue
+			return
 		}
-		ll := strings.ToLower(line)
-		for _, n := range needles {
-			if strings.Contains(ll, strings.ToLower(n)) {
-				findings = append(findings, Finding{Gate: "PUBLIC_LEAK", Line: i + 1, Detail: "[" + n + "]  " + preview(line)})
-			}
-		}
-		for _, rx := range auditRegexes {
-			if rx.re.MatchString(line) {
-				findings = append(findings, Finding{Gate: "PUBLIC_LEAK", Line: i + 1, Detail: "[" + rx.label + "]  " + preview(line)})
-			}
-		}
-	}
+		findings = append(findings, publicLeakLineFindings(line, i, "", needles)...)
+	})
 	return findings
 }
 
