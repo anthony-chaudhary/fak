@@ -123,6 +123,7 @@ func cmdGuard(argv []string) {
 	auditPath := fs.String("audit", "", "write the durable, hash-chained DECISION JOURNAL to this file (default: .dispatch-runs/guard-audit/interactive-<pid>-<hash>.jsonl; pass 'off' to disable). Every kernel verdict this session is appended as a tamper-evident JSONL row you can later replay with `fak audit verify`.")
 	noAudit := fs.Bool("no-audit", false, "disable the durable decision journal for this session (it is ON by default — fak guard is the referee, and the journal is the verifiable record of what it allowed vs blocked)")
 	dumpPolicy := fs.Bool("dump-policy", false, "print the built-in guard capability floor (an editable manifest) and exit")
+	probeMode := fs.Bool("probe", false, "local one-shot smoke mode: keep the normal guarded gateway but default the task-handoff Stop gate OFF, so `fak guard --probe -- claude -p \"say pong\"` proves the wire without demanding a fleet handoff. Explicit --task-handoff still wins.")
 	quiet := fs.Bool("quiet", false, "suppress the startup banner and the exit audit summary")
 	bannerFlag := fs.String("banner", guardBannerAuto, "how much of the startup report to print before handing the terminal to the agent: auto|full|compact|off. AUTO (default): the compact 3-line banner for an attended interactive launch (the full report is a wall of text the agent's full-screen UI paints over seconds later), and the FULL report for headless/piped/scripted launches (a captured log wants the detail; byte-for-byte the pre-flag output). The full report is always recorded on the in-process gateway regardless — read it any time during the session with `fak info --startup` (it is the startup_report field of /debug/vars). --quiet still silences everything.")
 	resourceStats := fs.Bool("resource-stats", true, "ON by default — track the HARNESS's own hardware-resource use this session (CPU, memory/RSS, disk-I/O) for BOTH halves: the kernel (this guard process + the in-process gateway, sampled continuously) and the agent (the wrapped child, folded from its exit state). Reported as one line in the exit summary and appended as a durable row to docs/nightrun/harness-resources.jsonl. Pass --resource-stats=false to disable (epic #2044).")
@@ -1068,7 +1069,7 @@ func cmdGuard(argv []string) {
 	// control back every turn. So auto-OFF it for an interactive child the operator did not gate
 	// explicitly, while keeping enforce for headless/fleet runs. See guard_handoff_mode.go.
 	handoffMode, err := normalizeGuardTaskHandoffMode(
-		guardTaskHandoffEffectiveMode(*taskHandoffMode, guardSetFlags["task-handoff"], guardChildInteractive(command)),
+		guardTaskHandoffEffectiveMode(*taskHandoffMode, guardSetFlags["task-handoff"], guardChildInteractive(command), *probeMode),
 	)
 	if err != nil {
 		cancel()

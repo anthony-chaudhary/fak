@@ -40,6 +40,7 @@ var guardCommonFlags = []guardCommonFlag{
 	{"policy", "capability-floor manifest to enforce (default: the built-in floor; see --dump-policy)"},
 	{"provider", "upstream wire: anthropic|openai|gemini|xai (default: auto-detected from the agent name)"},
 	{"api-key-env", "opt IN to API billing using this env var (default: your subscription / passthrough)"},
+	{"probe", "one-shot smoke mode: prove the guarded wire without requiring a task handoff"},
 	{"gguf", "run a small model in-kernel, no API key or network (e.g. --gguf qwen2.5:7b)"},
 	{"local", "auto-detect an already-running local model server (Ollama / LM Studio / llama.cpp)"},
 	{"log", "write per-request + per-verdict structured logs to a file (or '-' for stderr)"},

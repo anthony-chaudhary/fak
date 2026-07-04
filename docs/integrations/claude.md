@@ -44,6 +44,12 @@ terminal, no config-file edits:
 fak guard -- claude    # your normal Claude Code, kernel-adjudicated, on your subscription
 ```
 
+For a quick live smoke that does not ask the agent to write a fleet handoff, run:
+
+```bash
+fak guard --probe -- claude -p "Reply with exactly the word: pong"
+```
+
 (No API key needed — `fak guard` uses your logged-in Claude Pro/Max subscription by
 default, **even if `ANTHROPIC_API_KEY` is exported**. To use API billing instead, name the
 key explicitly: `--api-key-env ANTHROPIC_API_KEY`.)
