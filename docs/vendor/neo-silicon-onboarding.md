@@ -18,8 +18,11 @@ documented in [hardware portability](../explainers/hardware-portability.md).
 
 The product packaging is not complete yet. The Backend Conformance Kit (#1684)
 and `fak backend scaffold <name>` generator (#1685) are the intended vendor
-entry points. Until those land, this guide names the contract and the evidence a
-backend will need.
+entry points. The conformance contract is now written down as the vendor-neutral
+[Backend Conformance Profile](../standards/backend-conformance-profile.md) — the
+ladder, the `fak backend conformance` verb, the signed artifact, and the
+`fak-certified` mark — but the runnable verb itself is not yet landed. Until it
+does, this guide names the contract and the evidence a backend will need.
 
 ## The contract to implement
 
