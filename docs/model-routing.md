@@ -5,16 +5,20 @@ description: "How fak routes one request by aspect, from tool calls to reasoning
 
 # Model routing — first-class at every level (`fak route`)
 
-fak model routing is a way to route a single request at any aspect — the whole request, one tool call, a sub-query, a planner state, or a reasoning step — each to a different model, with first-class ensembles folded by a configurable reduction (first, vote, best_of, all_reduce, or concat), all expressed as one deterministic, verifiable policy manifest. Most LLM routers answer only "which single model serves this whole request?"; fak makes the routing decision first-class at every level instead. The routing decision spine and the ensemble reduce are shipped and witnessed by go test (internal/modelroute, fak route), along with an offline routing benchmark (fak routebench) that compares per-aspect and ensemble policies against a single-model baseline with no model in the loop. The served gateway path now executes route decisions on real registered engines via `--route-manifest` for single-model picks and ensembles; any "10x" remains a categorical capability framing and a target to be measured, never a measured result.
+fak model routing is a way to route a single request at any aspect — the whole request, one tool call, a sub-query, a planner state, or a reasoning step — each to a different model, with first-class ensembles folded by a configurable reduction (first, vote, best_of, all_reduce, or concat), all expressed as one deterministic, verifiable policy manifest. Most LLM routers answer only "which single model serves this whole request?"; fak makes the routing decision first-class at every level instead. The served gateway and standalone agent paths now execute route decisions on real registered engines via `--route-manifest` for single-model picks, and the served gateway also executes ensembles; any "10x" remains a categorical capability framing and a target to be measured, never a measured result.
 
 > **Status.** The routing **decision** spine and the ensemble **reduce** are
 > [SHIPPED] (`internal/modelroute`, `fak route`, witnessed by `go test`). The
 > **offline routing benchmark** (`fak routebench` — per-aspect + ensemble vs
 > single-model on cost/quality/latency, no model in the loop) is [SHIPPED]. The
 > **served gateway dispatch** path is [SHIPPED] for single-model picks and
-> ensembles through `--route-manifest`. Standalone `fak agent` route-manifest
-> entry points, scout-model live classification, and learned routing remain
-> follow-ons. See [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
+> ensembles through `--route-manifest`; standalone `fak agent --route-manifest`
+> is [SHIPPED] for fak-arm single-model picks. The remaining tracked follow-ons
+> are live account-resolved dispatch from model-account rosters
+> ([#2528](https://github.com/anthony-chaudhary/fak/issues/2528)), native
+> in-kernel scout binding ([#2207](https://github.com/anthony-chaudhary/fak/issues/2207)),
+> and learned routing ([#600](https://github.com/anthony-chaudhary/fak/issues/600)).
+> See [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
 
 ## The one-paragraph version
 
@@ -285,6 +289,9 @@ connectivity for each chosen member. The dedicated guides:
   dispatching *through* it) and what each means.
 - **[Routers & gateways](integrations/routers.md)** — OpenRouter, Portkey, LiteLLM
   Router, Unify, Martian: fak as a complement to request-level routers.
+- **[Model accounts](model-accounts.md)** — the account-switcher roster that binds
+  abstract routed model ids to your provider accounts, plus the `fak api-host
+  --from-model-accounts` bridge for no-spend readiness/acceptance checks.
 
 **Residency is fail-closed across every backend.** The engine-residency PDP
 (`internal/engine`) treats any route it cannot prove is on-box — a provider wire, a
@@ -375,15 +382,23 @@ and re-asserts the documented numbers.
 
 ## Roadmap (the GitHub issue series)
 
-The decision spine, offline benchmark (`fak routebench`), and served gateway
-dispatch for picks/ensembles are shipped. The remaining work is broader product
-surface and learning:
+The decision spine, offline benchmark (`fak routebench`), served gateway dispatch
+for picks/ensembles, route observability, free-text `best_of`, and the
+`internal/polymodel` bridge are shipped. The current issue map is:
 
-- Per-tool-call routing inside the agent loop (`agent.execViaKernel`).
-- Scout-model live classification (a cheap model fills `Subject.Complexity`/labels).
-- Telemetry → learned routing (LIVE cost/latency/quality feedback feeding the
-  policy, RouteLLM-style but per-aspect — the offline benchmark measures a recorded
-  corpus; this is its live, self-improving counterpart).
-- Free-text ensemble reductions (a judge/verifier model for `best_of` beyond scalar scores).
-- Speculative/draft roles bridged to `internal/polymodel` (drafter/verifier members).
-- Industry-scorecard row positioning vs the surveyed routers.
+| Issue | State | Scope |
+|---|---|---|
+| [#595](https://github.com/anthony-chaudhary/fak/issues/595) | open epic | Parent epic for the per-aspect + ensemble routing program. |
+| [#596](https://github.com/anthony-chaudhary/fak/issues/596) | closed | Single-model route writes `ToolCall.Engine` before adjudication. |
+| [#597](https://github.com/anthony-chaudhary/fak/issues/597) | closed | Gateway ensemble execution: N adjudicated submits plus `Combine`. |
+| [#598](https://github.com/anthony-chaudhary/fak/issues/598) | closed | In-process agent-loop route hook (`WithRouteManifest`). |
+| [#599](https://github.com/anthony-chaudhary/fak/issues/599) | closed | Scout classifier seam for filling route subject signals. |
+| [#600](https://github.com/anthony-chaudhary/fak/issues/600) | open | Telemetry to learned routing: live cost/latency/quality feedback feeding policy. |
+| [#601](https://github.com/anthony-chaudhary/fak/issues/601) | closed | `fak serve --route-manifest` plus hot reload. |
+| [#602](https://github.com/anthony-chaudhary/fak/issues/602) | closed | Free-text ensemble reductions with a judge/verifier model. |
+| [#603](https://github.com/anthony-chaudhary/fak/issues/603) | closed | Routing observability in `/metrics` and the decision journal. |
+| [#604](https://github.com/anthony-chaudhary/fak/issues/604) | closed | Drafter/verifier roles bridged to `internal/polymodel`. |
+| [#605](https://github.com/anthony-chaudhary/fak/issues/605) | closed | Industry-scorecard positioning vs surveyed routers. |
+| [#2207](https://github.com/anthony-chaudhary/fak/issues/2207) | open | Bind the scout classifier to the in-kernel engine for a native local micro-scout. |
+| [#2528](https://github.com/anthony-chaudhary/fak/issues/2528) | open | Dispatch account-resolved targets from a model-account roster through live gateway engines. |
+| [#2529](https://github.com/anthony-chaudhary/fak/issues/2529) | open | Standalone `fak agent --route-manifest` is wired in this tree; close the tracker after the change ships. |

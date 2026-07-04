@@ -15,7 +15,7 @@ generalized for reuse.**
 > parts are old; the wiring and the invariant are the thing.
 
 Ledger snapshot (regenerate from [`claims-salience-register`](claims-salience-register.md)):
-**160 claims — 143 `[SHIPPED]` · 7 `[SIMULATED]` · 10 `[STUB]`.** Status tags below
+**180 claims — 163 `[SHIPPED]` · 7 `[SIMULATED]` · 10 `[STUB]`.** Status tags below
 are drawn from that ledger; `MIXED` means a package spans rungs.
 
 ---
@@ -113,7 +113,7 @@ Curated to the load-bearing innovations. The full leaf roster is in
 | Innovation | Concept it embodies | Home | Status |
 |---|---|---|---|
 | One-binary governed-serving gateway | OpenAI/Anthropic/MCP wires + floor + quarantine + audit in one static Go binary | `gateway`, `engine` | SHIPPED |
-| Per-aspect model routing + ensembles | route an *aspect* (tool call / sub-query / step), not the whole request; vote/best_of/concat/all_reduce | `modelroute` | MIXED (decision SHIPPED; live dispatch `[STUB]`) |
+| Per-aspect model routing + ensembles | route an *aspect* (tool call / sub-query / step), not the whole request; vote/best_of/concat/all_reduce; bind abstract model ids to provider accounts | `modelroute` | MIXED (decision/reduce/scout seam + served gateway dispatch + standalone `fak agent` CLI SHIPPED; account-resolved live dispatch, native scout binding, and learned routing `[STUB]`) |
 | Native admission / priority / fairness scheduler | token-budget + max-seqs admit, AGING no-starvation, trust→403/shed→429 | `gateway`, `session` | SHIPPED (live `/metrics` fold + 429 wire remaining) |
 | Session = serving admission (one machine, two altitudes) | the turn boundary is the admit/preempt/resume quantum | `session`, `loopmgr` | MIXED (unification epic #912) |
 | Cross-machine lease visibility | `refs/fak/locks/*` lease object (owner/TTL/target) | `leaseref`, `gpulease` | SHIPPED (fencing token gap) |
@@ -170,7 +170,7 @@ fak-specific code into a domain-free form.
 | One-sided screen + witnessed-loss polarity | an additive screen may only tighten; a wrong proposal costs a fault, never a loss | fak naming only | `wirescreen`, `ctxmmu` |
 | Core soft locks / coherence locks | hard-lock self-grading machinery; soft-lock authority changes with explicit witnesses | concept only | [core soft locks note](notes/CONCEPT-CORE-SOFT-LOCKS-2026-06-30.md) |
 | Prediction-vs-reality calibration | back-test a projection against telemetry before defaulting it on | partially | `dojo`, `resume` Backtest |
-| Per-aspect routing + ensembles | route an aspect, not the request; ensemble+reduction is a plan | partially | `modelroute` |
+| Per-aspect routing + ensembles | route an aspect, not the request; ensemble+reduction is a plan; account binding keeps provider choice inspectable | partially | `modelroute` |
 | Provider-cache-as-virtual-pages | model a cache you don't own; Law A1/A2 safety + amortized governor | partially | `vcachegov`, `vcachechain` |
 | Disjoint-lease admission | concurrency keyed on disjoint file-trees | well | `dos_arbitrate`, `dos.toml [lanes]` |
 | Claim-salience partition | LIVE vs PARKED, no-loss (`[SHIPPED]` vs `[SIM]/[STUB]`) | well | `dos.salience.partition` |

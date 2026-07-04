@@ -69,7 +69,7 @@ Browser demos by track:
 | **turntaxdemo** — turn-tax race (SOTA loop vs fak 1-shot) | `go run ./cmd/turntaxdemo` | efficiency | no — self-contained |
 | **unseedemo** — Un-See It / Lobotomy Cam (poisoned result deleted from KV cache, with bit-exact witness) | `go run ./cmd/unseedemo` | research/science | no — self-contained |
 | **timewolfdemo** — "what time is it, Mr. Wolf?" agent loop, kernel-gated (a smuggled destructive call refused at the floor, inside the loop) | `go run ./cmd/timewolfdemo` | agentic | no — self-contained |
-| **trychatdemo** — "try it" agentic chat: type a message, every tool call is kernel-gated (a destructive request or prompt injection refused at the floor) | `go run ./cmd/trychatdemo` | agentic | no — self-contained |
+| **trychatdemo** — "try it" agentic chat: type a message, every tool call is kernel-gated (a destructive request or prompt injection refused at the floor; optional latest-model planner arm stays behind explicit config) | `go run ./cmd/trychatdemo` | agentic | no by default — optional live arm |
 | **ctxdemo** — multi-agent context-reuse proof (fak vs a tuned warm-cache SOTA baseline) | `go run ./cmd/ctxdemo` | research/science | optional (live race needs one) |
 | **demorace** — reuse race (fak vs a tuned warm-cache SOTA baseline) + reuse curve | `go run ./cmd/demorace` | live model research | yes (live race) |
 
@@ -87,6 +87,7 @@ Headless witnesses by track:
 | **causalbench** | `go run ./cmd/causalbench -selfcheck` | research/science | an external write evicts exactly the dependent cached read, keeps siblings warm, and refuses stale re-admission |
 | **deletioncert** | `go run ./cmd/deletioncert -selfcheck` | research/science | a selected KV span is evicted to `max|Delta|=0`, bound into a certificate, and tamper-rejected |
 | **agentbenchdemo** | `go run ./cmd/agentbenchdemo` | performance | the kernel's per-tool-call adjudication cost (the "self-tax") is microseconds — orders of magnitude under one LLM round-trip |
+| **trajectory-control** | `go test ./internal/trajctl/` | agentic | the trajctl objective/score/witness-rung model and its append-only JSONL ledger round-trip (declare an objective, one score per W3/W2/W1/W0 rung, fold keeps the latest objective + full score history) |
 
 `guarddemo`, `turntaxdemo`, `tokendemo`, `dropindemo`, and `unseedemo` are the
 lowest-common-denominator demos: no model, no GPU, no download, no provider key, no network.
@@ -94,6 +95,23 @@ They run against frozen fixtures or synthetic witnesses through the real kernel 
 reproduce identically on any box with Go. `ctxdemo` is also model-free in `-print` and
 `-bars` modes, but it lives in the research track because its main job is explaining
 multi-agent context reuse rather than onboarding.
+
+`trychatdemo` remains in that LCD path by default and its `-selfcheck` never needs a key
+or network. Its opt-in latest-model arm uses an OpenAI Responses-compatible endpoint and
+records the exact provider/model/rung/as-of metadata in each JSON transcript. On
+2026-07-03 the OpenAI latest-model guide named `gpt-5.5` and recommended Responses for
+new agentic/reasoning integrations; treat that as a dated witness and set
+`FAK_TRYCHAT_MODEL` from the current guide before running `FAK_TRYCHAT_LIVE_MODEL=1`.
+
+The **trajectory-control** witness (`go test ./internal/trajctl/`) is the runnable,
+deterministic, model-free proof of the shipped `trajctl` spine — the objective/score
+model, the four witness rungs (W3/W2/W1/W0), and the append-only JSONL ledger that the
+[`/trajectory-control`](../.claude/skills/trajectory-control/SKILL.md) operator skill
+drives. The full `declare → curve → nudge` command walkthrough depends on the
+`fak trajctl` CLI verbs and the stop-hook scorer, which are later children of epic #2533
+and **not yet shipped**; when they land, this entry becomes a `go run ./cmd/fak trajctl …`
+walkthrough with a live curve. Until then the data-plane test is the honest end-to-end
+witness, and the skill describes the CLI steps conceptually rather than inventing output.
 
 ## Adding a demo
 

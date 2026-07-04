@@ -15,7 +15,7 @@ Standing: clear 1, disclosed 9, misleading 0.
 
 | metric | surface | invited intent | literal meaning | denominator | verdict |
 |---|---|---|---|---|---|
-| `Coverage (concept-disambiguation scorecard)` | concept-scorecard-doc | most of the discovered confusable namespace is positioned | 97.7% = 1200/1228 confusable tree tokens positioned; the denominator is the whole discove... | external-universe | clear |
+| `Coverage (concept-disambiguation scorecard)` | concept-scorecard-doc | most of the discovered confusable namespace is positioned | 100.0% = 1271/1271 confusable tree tokens positioned; the denominator is the whole discov... | external-universe | clear |
 | `closure_rate` | dispatch-status-doc | throughput - how many issues the fleet closes per period | an HONESTY ratio = TRUE_RESOLVED / (TRUE_RESOLVED + CLAIMED_CLOSED); a low value means fe... | self-referential | disclosed |
 | `completed /h` | dispatch-status-doc | the dispatcher's own productivity - how fast the loop is shipping | completed-per-hour counts resolved (not wontfix/dup) closes from ANY actor; a gh-rate far... | subset | disclosed |
 | `Composite score (industry scorecard)` | industry-scorecard-doc | fak is an A-grade product - fak is winning the field | 98.8/100 grades how complete and honest fak's competitive MAP is (honesty x 60% + coverag... | self-referential | disclosed |

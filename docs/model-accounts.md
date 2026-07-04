@@ -112,6 +112,23 @@ accounts are `ready` only when their named env var is present and non-empty, oth
 `needs_credential` with the env var to set. This is intentionally an environment observation, not
 a live API probe or billing claim, and it still prints only env-var names.
 
+## API-host probe bridge
+
+The same model-account roster can feed the API-host no-spend probes:
+
+```bash
+fak api-host readiness  --from-model-accounts examples/model-accounts.example.json
+fak api-host acceptance --from-model-accounts examples/model-accounts.example.json
+```
+
+`readiness` converts only OpenAI-compatible or local accounts into `/models` probe targets
+(`openai`, `openai-responses`, `xai`, and `local`). Native provider accounts are not guessed into
+an OpenAI-shaped probe. `acceptance` keeps every account with a probeable base URL visible:
+OpenAI-compatible/local accounts can become `READY_FOR_LIVE_BRIDGE_RUN`, while native
+Anthropic/Gemini accounts are reported as `WIRE_SUPPORTED_UNPROBED`. Model hints come from the
+roster bindings, so the API-host report stays tied to the same abstract model ids the route policy
+uses.
+
 ## Residency is declared, not guessed
 
 fak's residency floor denies a tenant-scoped or sensitivity-tagged payload bound for a
@@ -146,11 +163,12 @@ residency-honest `EngineRoute`. The `fak route --accounts` path prints the bindi
 This is pure and deterministic, witnessed by `go test ./internal/modelroute` and the
 cross-package residency test.
 
-**Deferred:** live multi-account dispatch. v1 *resolves and prints* a binding; it does
-not yet send a request over the wire to your chosen account. Building the planners from
-the Targets and running an ensemble's members is the additive dispatch wiring, the same
-shipped-vs-deferred split the routing spine uses for the ensemble fold versus its
-execution. (Per-call routing into dispatch — writing the routed id to
+**Deferred:** live multi-account dispatch
+([#2528](https://github.com/anthony-chaudhary/fak/issues/2528)). v1 *resolves and prints*
+a binding; it does not yet send a request over the wire to your chosen account. Building
+the planners from the Targets and running an ensemble's members is the additive dispatch
+wiring, the same shipped-vs-deferred split the routing spine uses for the ensemble fold
+versus its execution. (Per-call routing into dispatch — writing the routed id to
 `abi.ToolCall.Engine` before submit — has landed for the single-model case; the
 account-resolved route is the next refinement of what that field carries.)
 

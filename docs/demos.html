@@ -218,15 +218,16 @@
       <span class="go">Run the agent loop →</span>
     </a>
 
-    <!-- trychatdemo — local-only, no model weights -->
+    <!-- trychatdemo — local-only by default; optional latest-model planner arm -->
     <a class="card" href="run-the-demos.html" rel="noopener">
-      <span class="pill self">local · agentic · no model</span>
+      <span class="pill self">local · agentic · optional live planner</span>
       <h3>Try it — a kernel-gated agentic chat</h3>
       <p>Type a message and a tiny tool-using agent answers, but every tool call runs through
       the real <code>kernel.Fold</code> path first. Ask for the time or the weather and it answers;
       ask it to <code>delete_account</code> or paste a prompt injection and the destructive call is
-      refused at the capability floor. Run <code>go run ./cmd/trychatdemo</code> or open
-      <code>http://127.0.0.1:8157</code>.</p>
+      refused at the capability floor. The deterministic planner is the default; an explicit
+      latest-model arm records the provider/model/rung used. Run
+      <code>go run ./cmd/trychatdemo</code> or open <code>http://127.0.0.1:8157</code>.</p>
       <span class="go">Open the chat →</span>
     </a>
 

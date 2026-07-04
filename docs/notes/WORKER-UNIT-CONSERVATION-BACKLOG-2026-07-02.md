@@ -18,7 +18,7 @@ create`/`close`; any authorized session or producer can file them verbatim.
   wiring + `--plan` targeted runs), `870ce341` (bare `request timed out` is a
   transient), `1f29b395` (the `resume` lane declared in `dos.toml`). Both
   issues closed-by-commit.
-- **Conservation meter** — `tools/dispatch_conservation.py` (`ceb0f7bf`): over
+- **Conservation meter** — `fak dispatch-conservation` (`ceb0f7bf`; ported to Go in `internal/dispatchconservation` under the pythongate ratchet): over
   a window, `spent = shipped_witnessed + committed_unwitnessed +
   no_commit{reason} + spawn_failed + leaked_unswept`, plus windowed closes,
   contract-hold pressure, and re-storm churn; `--fail-on-leak N` is the CI
@@ -51,7 +51,7 @@ create`/`close`; any authorized session or producer can file them verbatim.
    the same-day contract-repair pipeline (peer lane) now grooms them, and the
    `updatedAt` re-admission (`d3112804` family) reopens them after repair.
 6. **Measurement** — was: rate-only (`dispatch_throughput`). Now: the
-   conservation identity above (`dispatch_conservation`).
+   conservation identity above (`fak dispatch-conservation`).
 
 ## Ready-to-file issues (contract verdict: `ready`, 100/100 each)
 
@@ -86,13 +86,13 @@ Wiring inside `tools/issue_resolve_dispatch.py`'s pick path + a small attempt-co
 Changing `internal/attemptbudget` policy itself; the close arm; contract-gate behavior; any lane-lease change (that is the SPAWN_FAILED lease issue); GitHub-side labels/comments.
 
 #### Done condition
-A fixture issue with N prior `.witness` failures of one class is refused with `ATTEMPT_BUDGET_HELD` (not re-spawned), appears in the held ledger with its failure class, and a fresh issue is picked instead; `python tools/dispatch_conservation.py` churn count for the fixture window goes to zero once the budget binds.
+A fixture issue with N prior `.witness` failures of one class is refused with `ATTEMPT_BUDGET_HELD` (not re-spawned), appears in the held ledger with its failure class, and a fresh issue is picked instead; `fak dispatch-conservation` churn count for the fixture window goes to zero once the budget binds.
 
 #### Witness
 `python tools/issue_resolve_dispatch_test.py` green including the new cases; a dry-run tick JSON showing `ATTEMPT_BUDGET_HELD` for the exhausted issue; ship commit passes `dos commit-audit`.
 
 #### Acceptance gate
-Same as Done condition; plus no regression in `tools/dispatch_conservation_test.py`.
+Same as Done condition; plus no regression in `internal/dispatchconservation` (Go tests).
 
 #### Work unit
 One worker owns the pick-path wiring + tests end to end in one sitting.
@@ -158,13 +158,13 @@ Lease early-release on spawn failure; retroactive header-only/dead-pid grading i
 The per-issue attempt budget wiring (sibling issue); changing probe duration semantics; lease TTL policy; any Go lease plumbing (`refs/fak/locks/*` verbs already exist).
 
 #### Done condition
-A fixture SPAWN_FAILED tick releases the lane lease in-tick (next tick can dispatch that lane) and the target issue is re-pickable immediately; a header-only log with a dead pid is graded SPAWN_FAILED on the next live tick; `python tools/dispatch_conservation.py` counts it under spawn_failed, not leaked_unswept.
+A fixture SPAWN_FAILED tick releases the lane lease in-tick (next tick can dispatch that lane) and the target issue is re-pickable immediately; a header-only log with a dead pid is graded SPAWN_FAILED on the next live tick; `fak dispatch-conservation` counts it under spawn_failed, not leaked_unswept.
 
 #### Witness
 `python tools/issue_resolve_dispatch_test.py` green including new cases; a two-tick dry-run trace showing the lane free on tick 2; ship commit passes `dos commit-audit`.
 
 #### Acceptance gate
-Same as Done condition; no regression in `tools/dispatch_conservation_test.py`.
+Same as Done condition; no regression in `internal/dispatchconservation` (Go tests).
 
 #### Work unit
 One worker owns spawn-failure lease release + retroactive grading + tests in one sitting.
