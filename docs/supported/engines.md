@@ -31,7 +31,7 @@ own deployment.
 | Engine | Default base URL | fak wiring |
 |---|---|---|
 | [Ollama](https://docs.ollama.com/api/openai-compatibility) | `http://localhost:11434/v1` | `fak serve --provider openai --base-url http://<host>:11434/v1` (host/port via `OLLAMA_HOST`) |
-| [vLLM](https://docs.vllm.ai/en/stable/serving/openai_compatible_server/) | `http://localhost:8000/v1` | `fak serve --provider openai --base-url http://<host>:8000/v1` (server launched with `vllm serve`, host/port via `--host`/`--port`) |
+| [vLLM](https://docs.vllm.ai/en/stable/serving/openai_compatible_server/) | `http://localhost:8000/v1` | `fak serve --provider openai --base-url http://<host>:8000/v1` (server launched with `vllm serve`, host/port via `--host`/`--port`). For the registered `vllm` lifecycle adapter (KV-events, Prometheus, cache-control), see the [vLLM V1 driver doc](../serving/vllm-v1-adapter.md). |
 | [llm-d](../integrations/llm-d.md) | cluster Gateway API route, usually `http://<gateway-host>/v1` | `fak serve --provider openai --base-url http://<llm-d-gateway>/v1` for chat proxy mode. For kernel-dispatched calls and route manifests, use the registered engine id `llm-d` with `FAK_LLMD_BASE_URL`, `FAK_LLMD_MODEL`, and optional `FAK_LLMD_API_KEY` / `FAK_LLMD_METRICS_URL`. |
 | [SGLang](https://docs.sglang.ai/backend/openai_api_completions.html) | `http://localhost:30000/v1` | `fak serve --provider openai --base-url http://<host>:30000/v1` (launched via `python3 -m sglang.launch_server`) |
 | [llama.cpp (llama-server)](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md) | `http://localhost:8080/v1` | `fak serve --provider openai --base-url http://<host>:8080/v1` (`llama-server -m model.gguf --host 0.0.0.0 --port 8080`) |
