@@ -337,7 +337,20 @@ type State struct {
 	// field is the durable primitive only — wiring internal/agent's retry loop to
 	// call SetPendingTurn is the follow-on that actually closes #1363.
 	PendingTurn PendingTurn `json:"pending_turn,omitempty,omitzero"`
-	Rev         uint64      `json:"rev"`
+	// QualityEnvelope is the session-start QA origin record (issue #1964, QA-dogfood
+	// spine #1961/QD-004): the single record saying which QA controls govern this
+	// session — the budget axes it opened under, the witness policy that gates its
+	// claims, the dogfood probes expected at origin, and the control-pane scorecards
+	// it is a member of (see quality_envelope.go). It rides the drive record — and
+	// therefore this State's existing dump/restore and sessionimage migration paths —
+	// so a session dumped and restored (or migrated to a new process) exposes the SAME
+	// QA envelope it started under, not a re-derived or silently reset one. The zero
+	// value means no envelope was stamped; a State with none marshals byte-identically
+	// to a pre-#1964 State (omitzero keeps the wire shape unchanged when unused).
+	// Advisory/observability only: no decision gates on it — a renderer or inspect
+	// surface reads it, nothing trusts it.
+	QualityEnvelope QualityEnvelope `json:"quality_envelope,omitempty,omitzero"`
+	Rev             uint64          `json:"rev"`
 }
 
 // Goal is the structural root descriptor carried on State (issue #849). It names the
