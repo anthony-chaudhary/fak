@@ -103,7 +103,7 @@ DEFAULT_ORPHAN_PATTERNS: tuple[str, ...] = ("dos_mcp.server",)
 # Launcher shells that legitimately wrap a session (pwsh -> claude -> mcp). A
 # shell with zero live children, aged past the floor, is a stray launcher whose
 # session exited. Matched against the bare (extension-stripped) process name.
-DEFAULT_IDLE_SHELL_NAMES = frozenset({"pwsh", "powershell", "bash"})
+DEFAULT_IDLE_SHELL_NAMES = frozenset({"pwsh", "powershell", "bash", "sh"})
 DEFAULT_IDLE_SHELL_AGE_SEC = 1800  # 30 min: well past any session-launch transient
 DEFAULT_ORPHAN_CONSOLE_SHELL_NAMES = frozenset({"cmd"})
 DEFAULT_CONSOLE_HOST_CHILD_NAMES = frozenset({"conhost", "openconsole"})

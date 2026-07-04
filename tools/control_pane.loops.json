@@ -200,14 +200,15 @@
     "proc-resource-guard": {
       "enabled": true,
       "status_cmd": [
-        "{python}",
-        "tools/proc_resource_guard.py",
+        "fak",
+        "process-guard",
+        "report",
         "--reap-orphans",
         "--json"
       ],
       "auto_recover": false,
       "timeout_s": 90,
-      "action": "Read-only host-resource fold: scans every live process and flags any whose OS thread / handle / working-set count has gone pathological (default thread ceiling 2000, far above the busiest legit process yet far below the witnessed 129k-thread llama-cli runaway that pinned the host), AND any orphaned ephemeral helper -- a `dos_mcp.server` still resident after the claude/opencode session that spawned it exited, serving no one (the quiet sprawl that makes a long-uptime host feel slow while every gauge reads idle). ok:false (ACTION) when a non-protected runaway OR orphan is live -- inspect it, fix the launcher that spawned it (an inference binary spawned with NO -t/--threads bound is the runaway root-cause class), then reap with `python tools/proc_resource_guard.py --reap-orphans --enact` (DESTRUCTIVE, opt-in; never kills an OS-critical process or the guard's own tree). The fleet watchdogs keep the supervisor and sessions ALIVE; nothing else watches a live process whose resource has run away or an orphan that outlived its session. Runbook docs/perf-runaway-guard.md."
+      "action": "Read-only host-resource fold: scans every live process and flags any whose OS thread / handle / working-set count has gone pathological (default thread ceiling 2000, far above the busiest legit process yet far below the witnessed 129k-thread llama-cli runaway that pinned the host), AND any orphaned ephemeral helper -- a `dos_mcp.server` still resident after the claude/opencode session that spawned it exited, serving no one (the quiet sprawl that makes a long-uptime host feel slow while every gauge reads idle). ok:false (ACTION) when a non-protected runaway OR orphan is live -- inspect it, fix the launcher that spawned it (an inference binary spawned with NO -t/--threads bound is the runaway root-cause class), then reap with `fak process-guard report --reap-orphans --enact` (DESTRUCTIVE, opt-in; never kills an OS-critical process or the guard's own tree). The native Windows guard uses Toolhelp/process APIs for relation scans, avoiding `Get-CimInstance Win32_Process` WMI pressure; the legacy Python script remains a compatibility fallback. The fleet watchdogs keep the supervisor and sessions ALIVE; nothing else watches a live process whose resource has run away or an orphan that outlived its session. Runbook docs/perf-runaway-guard.md."
     },
     "gofmt-debt-audit": {
       "enabled": true,

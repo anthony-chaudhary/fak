@@ -1,7 +1,7 @@
 <#
 register_proc_resource_guard.ps1 - install/remove the Scheduled Task that runs the
-cross-platform process-resource guard (tools/proc_resource_guard.py) on a standing
-interval, so the host has a durable watch for the runaway classes the level
+process-resource guard on a standing interval, so the host has a durable watch for
+the runaway classes the level
 watchdogs miss: a process whose thread/handle/working-set count has gone
 pathological, an orphaned ephemeral helper (a dos_mcp.server outliving its session),
 and -- the reason this companion to the find/grep reaper exists -- a SINGLE-THREADED
@@ -14,6 +14,11 @@ and a CPU pin only after it has held the threshold across every sample window
 (default 4 samples x 2s = 6s sustained), so a legitimate compile/test burst is never
 killed. It never touches an OS-critical process (System/csrss/lsass/...) or its own
 tree. See docs/perf-runaway-guard.md.
+
+Registration prefers the native `fak process-guard` implementation because its
+Windows relation scan uses Toolhelp/process APIs instead of `Get-CimInstance
+Win32_Process`, avoiding the WMI-overload class this guard must not worsen. It
+falls back to the legacy Python tool only when no fak binary is available.
 
 Registration prefers an S4U task (windowless, session 0, survives logoff) when run
 from an elevated shell, and otherwise falls back automatically to an Interactive
@@ -41,6 +46,7 @@ param(
   # Scheduled-Task contexts), which crashed the old `Join-Path $PSScriptRoot ...`
   # default. Resolve it below with a 3-tier fallback -- the trap host-maintenance docs.
   [string]$Guard = '',
+  [string]$FakExe = '',
   [string]$RepoRoot = ''
 )
 $ErrorActionPreference = 'Stop'
@@ -51,6 +57,14 @@ if (-not $ScriptRoot) { $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand
 if (-not $ScriptRoot) { $ScriptRoot = (Get-Location).Path }
 if (-not $Guard)    { $Guard    = Join-Path $ScriptRoot 'proc_resource_guard.py' }
 if (-not $RepoRoot) { $RepoRoot = Split-Path -Parent $ScriptRoot }
+if (-not $FakExe) {
+  $cmd = Get-Command fak.exe -ErrorAction SilentlyContinue
+  if ($cmd) { $FakExe = $cmd.Source }
+  else {
+    $repoFak = Join-Path $RepoRoot 'fak.exe'
+    if (Test-Path $repoFak) { $FakExe = $repoFak }
+  }
+}
 
 if ($Action -eq 'status') {
   $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -80,7 +94,14 @@ elseif ($py -match '(?i)\\py\.exe$') { $c = $py -replace '(?i)py\.exe$','pyw.exe
 # dos_mcp.server helpers, and (the single-threaded-core-pin witness) a process holding
 # >$MaxCpuPct% of one core sustained across $CpuSamples windows. --enact only added with -Enact.
 $enactArg = if ($Enact) { ' --enact' } else { '' }
-$guardArgs = "`"$Guard`" --reap-orphans --max-cpu-pct $MaxCpuPct --cpu-window $CpuWindow --cpu-samples $CpuSamples$enactArg"
+$useNative = $FakExe -and (Test-Path $FakExe)
+if ($useNative) {
+  $guardExe = $FakExe
+  $guardArgs = "process-guard report --reap-orphans --max-cpu-pct $MaxCpuPct --cpu-window $CpuWindow --cpu-samples $CpuSamples$enactArg"
+} else {
+  $guardExe = ''
+  $guardArgs = "`"$Guard`" --reap-orphans --max-cpu-pct $MaxCpuPct --cpu-window $CpuWindow --cpu-samples $CpuSamples$enactArg"
+}
 
 $trigger  = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
               -RepetitionInterval (New-TimeSpan -Minutes $EveryMin) `
@@ -89,8 +110,8 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
               -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
 
 function Register-Guard([string]$exe, $principal) {
-  $action = New-ScheduledTaskAction -Execute $exe -Argument $guardArgs -WorkingDirectory $RepoRoot
-  Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+  $taskAction = New-ScheduledTaskAction -Execute $exe -Argument $guardArgs -WorkingDirectory $RepoRoot
+  Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `
     -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
 }
 
@@ -98,20 +119,21 @@ function Register-Guard([string]$exe, $principal) {
 # On access-denied, fall back to an Interactive task (this user, while logged on, no
 # admin) launched via pythonw.exe so it stays windowless.
 $modeNote = ''
+$taskExe = if ($useNative) { $guardExe } else { $py }
 try {
   $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
-  Register-Guard $py $principal
+  Register-Guard $taskExe $principal
   $modeNote = 'S4U (windowless, session 0, survives logoff)'
 } catch {
   $s4uErr = $_.Exception.Message
-  $exe = if ($pyw) { $pyw } else { $py }
+  $exe = if ($useNative) { $guardExe } elseif ($pyw) { $pyw } else { $py }
   try {
     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
     $headlessArgs = "--headless `"$exe`" $guardArgs"
-    $action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $headlessArgs -WorkingDirectory $RepoRoot
-    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+    $taskAction = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $headlessArgs -WorkingDirectory $RepoRoot
+    Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `
       -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
-    $wl = if ($pyw) { 'pythonw via conhost --headless' } else { 'python via conhost --headless' }
+    $wl = if ($useNative) { 'native fak via conhost --headless' } elseif ($pyw) { 'pythonw via conhost --headless' } else { 'python via conhost --headless' }
     $modeNote = "Interactive as $env:USERNAME (runs while logged on; $wl). S4U skipped: $s4uErr"
   } catch {
     throw "register failed. S4U: $s4uErr ; Interactive: $($_.Exception.Message). Try an elevated shell for the S4U daemon."
@@ -120,6 +142,8 @@ try {
 
 $mode = if ($Enact) { "ENACT (reaps runaways/orphans + CPU pins >$MaxCpuPct%/core sustained ${CpuSamples}x${CpuWindow}s)" } else { 'REPORT-ONLY (logs intentions only)' }
 Write-Output "installed $TaskName - every $EveryMin min, $mode"
+if ($useNative) { Write-Output "  guard: native fak process-guard ($FakExe)" }
+else { Write-Output "  guard: legacy Python fallback ($Guard)" }
 Write-Output "  principal: $modeNote"
 Write-Output "  log: tools/_watchdog/proc_guard.log (one line per scan)"
 Write-Output "flip to enacting later:  .\tools\register_proc_resource_guard.ps1 -Enact"

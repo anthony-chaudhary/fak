@@ -133,6 +133,9 @@ type winRelRow struct {
 }
 
 func collectWindowsRelations() ([]Proc, string) {
+	if procs, handled, err := collectWindowsRelationsNative(); handled {
+		return procs, err
+	}
 	script := "$now=Get-Date; Get-CimInstance Win32_Process -ErrorAction SilentlyContinue " +
 		"| ForEach-Object { try { " +
 		"$a = if ($_.CreationDate) { [int](New-TimeSpan -Start $_.CreationDate -End $now).TotalSeconds } else { -1 }; " +
@@ -229,12 +232,16 @@ func collectPOSIXRelations() ([]Proc, string) {
 	return procs, ""
 }
 
-// KillPID is the destructive reaper (taskkill /T /F on Windows, SIGKILL on POSIX).
+// KillPID is the destructive reaper (native process-tree termination on Windows,
+// SIGKILL on POSIX).
 func KillPID(pid int) (bool, string) {
 	if pid <= 0 {
 		return false, "invalid pid"
 	}
 	if runtime.GOOS == "windows" {
+		if ok, detail, handled := killTreeWindowsNative(pid); handled {
+			return ok, detail
+		}
 		out, err := runTool(30*time.Second, "taskkill", "/PID", strconv.Itoa(pid), "/T", "/F")
 		return err == "", trimTo(strings.TrimSpace(out), 200)
 	}

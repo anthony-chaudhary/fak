@@ -55,8 +55,9 @@ const (
 var DefaultOrphanPatterns = []string{"dos_mcp.server"}
 
 // DefaultIdleShellNames are launcher shells that legitimately wrap a session; one
-// with zero live children aged past the floor is a stray launcher.
-var DefaultIdleShellNames = map[string]bool{"pwsh": true, "powershell": true, "bash": true}
+// with zero live children aged past the floor is a stray launcher. Git-for-Windows
+// hook children often surface as sh.exe rather than bash.exe, so both are included.
+var DefaultIdleShellNames = map[string]bool{"pwsh": true, "powershell": true, "bash": true, "sh": true}
 
 // DefaultOrphanConsoleShellNames are shell processes that can remain after their
 // owner exits while keeping only a console-host child alive.

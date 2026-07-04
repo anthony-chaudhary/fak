@@ -77,6 +77,7 @@ func TestClassifyOrphans(t *testing.T) {
 		{PID: 30, Name: "python", PPID: ip(999), Cmdline: "python -m dos_mcp.server"},
 		{PID: 31, Name: "python", PPID: ip(100), Cmdline: "python -m dos_mcp.server"}, // owner alive -> spared
 		{PID: 32, Name: "pwsh", PPID: ip(1), AgeSec: ip(3600)},                        // idle shell, 0 kids, aged
+		{PID: 33, Name: "sh", PPID: ip(1), AgeSec: ip(3600)},                          // Git-for-Windows idle shell
 	}
 	counts := ChildCounts(procs)
 	got := ClassifyOrphans(procs, live, counts, DefaultOrphanPatterns, DefaultIdleShellNames, 1800, true, nil, nil)
@@ -92,6 +93,9 @@ func TestClassifyOrphans(t *testing.T) {
 	}
 	if k, ok := flaggedPIDs[32]; !ok || k != "idle-shell" {
 		t.Fatalf("aged idle shell with 0 children must flag as idle-shell: %+v", got)
+	}
+	if k, ok := flaggedPIDs[33]; !ok || k != "idle-shell" {
+		t.Fatalf("aged Git-for-Windows sh shell must flag as idle-shell: %+v", got)
 	}
 }
 

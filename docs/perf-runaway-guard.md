@@ -25,13 +25,16 @@ supervisor and sessions **alive** — they answer *"did it stop?"*. None of them
 answers *"is a live process consuming a pathological amount of resource right
 now?"*. That is the gap this guard fills.
 
-## The guard: `tools/proc_resource_guard.py`
+## The guard: `fak process-guard`
 
 A control-pane loop first, an opt-in reaper second.
 
 - **Read-only status (default).** Scans every live process via the platform's own
-  tools (PowerShell `Get-Process` on Windows, `ps -eo pid,nlwp,rss,comm` on
-  Linux — no third-party deps) and flags any process over a threshold.
+  tools (PowerShell `Get-Process` for Windows resource levels, native Toolhelp /
+  process APIs for Windows relation scans, `ps` on Linux — no third-party deps) and
+  flags any process over a threshold. The legacy `tools/proc_resource_guard.py`
+  remains a compatibility oracle, but standing Windows loops should prefer the
+  native command so orphan checks do not enumerate `Win32_Process` through WMI.
   `ok:false` ⇒ ACTION (a runaway is live).
 - **Single-shot for the *level* dimensions.** Thread count is the load-bearing
   signal — 129k threads is unambiguous and needs no second sample — so the guard
@@ -49,13 +52,13 @@ A control-pane loop first, an opt-in reaper second.
 
 ```sh
 # status (read-only; what the control pane runs)
-python tools/proc_resource_guard.py --json
+fak process-guard report --json
 
 # human view, lower threshold to see the current top consumers
-python tools/proc_resource_guard.py --max-threads 250
+fak process-guard report --max-threads 250
 
 # DESTRUCTIVE: reap flagged non-protected runaways (operator opt-in)
-python tools/proc_resource_guard.py --enact
+fak process-guard report --enact
 ```
 
 Wired into `tools/control_pane.loops.json` as the **`proc-resource-guard`** loop
@@ -88,11 +91,11 @@ with **no external state to persist**.
 
 ```sh
 # report any process pinning >90% of one core, sustained over two 2s windows (4s)
-python tools/proc_resource_guard.py --max-cpu-pct 90 --cpu-window 2 --cpu-samples 3
+fak process-guard report --max-cpu-pct 90 --cpu-window 2 --cpu-samples 3
 
 # the safe enacting shape: must hold >90%/core across three 2s windows (6s) within a
 # run AND be flagged in 2 consecutive runs before it is killed
-python tools/proc_resource_guard.py --max-cpu-pct 90 --cpu-window 2 --cpu-samples 4 \
+fak process-guard report --max-cpu-pct 90 --cpu-window 2 --cpu-samples 4 \
     --cpu-reap-confirm 2 --enact
 ```
 
@@ -162,10 +165,10 @@ flagged orphan makes `ok:false` (ACTION) exactly like a runaway.
 
 ```sh
 # report orphaned MCP servers + idle launcher shells (read-only)
-python tools/proc_resource_guard.py --reap-orphans --reap-idle-shells
+fak process-guard report --reap-orphans --reap-idle-shells
 
 # DESTRUCTIVE: reap them (operator opt-in; protected names + own tree spared)
-python tools/proc_resource_guard.py --reap-orphans --enact
+fak process-guard report --reap-orphans --enact
 ```
 
 The standing **`proc-resource-guard`** control-pane loop now runs `--reap-orphans`
@@ -178,8 +181,11 @@ shells). Reaping still requires a deliberate `--enact` run.
 The control-pane fold above surfaces a runaway only when the pane is run. For a
 host that should *always* be watched without an operator in the loop,
 `tools/register_proc_resource_guard.ps1` installs the guard as a restart-durable
-Scheduled Task (`FleetProcResourceGuard`), the Python-guard peer of the find/grep
-reaper's `register_runaway_reaper.ps1`:
+Scheduled Task (`FleetProcResourceGuard`), the process-resource peer of the
+find/grep reaper's `register_runaway_reaper.ps1`. On Windows it prefers the native
+`fak process-guard` binary so relation scans use Toolhelp/process APIs instead of
+`Get-CimInstance Win32_Process`; it falls back to the legacy Python tool only when
+no `fak` binary is available.
 
 ```powershell
 # install REPORT-ONLY (safe default): logs every scan, kills nothing
