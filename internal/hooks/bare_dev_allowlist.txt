@@ -1,0 +1,18 @@
+# bare_dev_allowlist.txt — the committed exemption list for the BARE_DEV_SPELLING
+# hygiene gate (C4 of epic #2228, issue #2233). A caller surface that legitimately
+# keeps a bare `fak <devverb>` spelling — a historical transcript, a marketing
+# snapshot, a pre-migration note that quotes the OLD spelling to explain the
+# migration — is listed here so the sweep does not force-rewrite it. Everything not
+# listed must migrate to the canonical `fak dev <verb>` form.
+#
+# Format: one path per line; blank lines and `#` comments ignored. A path ending in
+# `/` is a directory prefix (exempts the whole subtree). Put the ONE-LINE REASON in a
+# trailing `# ...` comment on the same line — an entry without a reason is drift, the
+# thing this list exists to kill. Keep it SHORT: a growing allowlist means the
+# migration is stalling, not that the tree is clean.
+#
+# docs/archive/ is already out of the gate's scope (pruned by bareDevScanMode), so a
+# historical doc that moves there needs no entry here.
+#
+# --- entries (path  # reason) ---
+# (none yet — the migration batches append a must-keep here only when they hit one.)

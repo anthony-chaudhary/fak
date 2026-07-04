@@ -55,6 +55,11 @@ func runHygiene(stdout, stderr io.Writer, argv []string) int {
 		if want != nil && !want[g.Name] {
 			continue
 		}
+		// A DefaultOff gate (a migration-in-flight ratchet like BARE_DEV_SPELLING) runs only
+		// when named explicitly via --gates, never in the default `make ci` sweep.
+		if g.DefaultOff && want == nil {
+			continue
+		}
 		findings, gerr := g.Check(d)
 		if gerr != nil {
 			// a single gate that could-not-run is skipped (fail-open); the others still run.

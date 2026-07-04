@@ -91,6 +91,11 @@ func (t *TrackedTree) IndexMD() (string, bool) {
 type HygieneGate struct {
 	Name  string
 	Check func(t *TrackedTree) ([]Finding, error)
+	// DefaultOff marks a gate that does NOT run in the default `fak hygiene` / `make ci`
+	// sweep — it fires only when named explicitly via `--gates`. A ratchet lands DefaultOff
+	// while its migration is in flight (so it never reds the shared trunk against known,
+	// not-yet-migrated debt) and flips on with a one-line change once the tree is clean.
+	DefaultOff bool
 }
 
 // HygieneGates returns the tree-mode gates that have a parity-proven Go twin, in the order
@@ -99,15 +104,20 @@ type HygieneGate struct {
 // #928 A3/A4/A5; each port appends its gate here.
 func HygieneGates() []HygieneGate {
 	return []HygieneGate{
-		{"DOC_PLACEMENT", gateDocPlacementTree},
-		{"BROKEN_LINK", gateBrokenLinkTree},
-		{"FILE_ADMISSION", gateFileAdmissionTree},
-		{"SECRET_SHAPE", gateSecretShapeTree},
-		{"PROVENANCE_LABEL", gateProvenanceLabelTree},
-		{"INDEX_SYNC", gateIndexSyncTree},
-		{"BRAND_CONSISTENCY", gateBrandConsistencyTree},
-		{"TIER_DECLARED", gateTierDeclaredTree},
-		{"HARDWARE_TELL", gateHardwareTreeTell},
+		{"DOC_PLACEMENT", gateDocPlacementTree, false},
+		{"BROKEN_LINK", gateBrokenLinkTree, false},
+		{"FILE_ADMISSION", gateFileAdmissionTree, false},
+		{"SECRET_SHAPE", gateSecretShapeTree, false},
+		{"PROVENANCE_LABEL", gateProvenanceLabelTree, false},
+		{"INDEX_SYNC", gateIndexSyncTree, false},
+		{"BRAND_CONSISTENCY", gateBrandConsistencyTree, false},
+		{"TIER_DECLARED", gateTierDeclaredTree, false},
+		{"HARDWARE_TELL", gateHardwareTreeTell, false},
+		// BARE_DEV_SPELLING (C4 of epic #2228, #2233) is DefaultOff: it is the reusable
+		// audit sweep the migration batches run via `fak hygiene --gates BARE_DEV_SPELLING`,
+		// and it flips DefaultOff:false (the C5 enforcement gate) once the tree is migrated
+		// to zero bare dev spellings outside bare_dev_allowlist.txt.
+		{"BARE_DEV_SPELLING", gateBareDevSpellingTree, true},
 	}
 }
 
