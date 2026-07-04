@@ -67,6 +67,37 @@ func TestClaudeMacFakProbeAddsPromptAndJSONOutput(t *testing.T) {
 			t.Fatalf("probe dry-run missing %q:\n%s", want, out)
 		}
 	}
+	wantCommand := `claude --permission-mode bypassPermissions -p "Reply with exactly: OK" --output-format json`
+	if !strings.Contains(out, wantCommand) {
+		t.Fatalf("probe dry-run command has wrong prompt/output order; want %q in:\n%s", wantCommand, out)
+	}
+}
+
+func TestClaudeMacFakProbePrependsPromptBeforePassthrough(t *testing.T) {
+	t.Setenv("FAK_GATEWAY_KEY", "super-secret-test-key")
+	dir := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+	code := runClaudeMacFak(&stdout, &stderr, []string{
+		"--dry-run",
+		"--probe",
+		"--claude-config-dir", dir,
+		"--gateway-url", "http://node.example:8080",
+		"--model", "qwen-local",
+		"--",
+		"--output-format", "stream-json",
+	})
+	if code != 0 {
+		t.Fatalf("runClaudeMacFak code=%d stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	wantCommand := `claude --permission-mode bypassPermissions -p "Reply with exactly: OK" --output-format stream-json`
+	if !strings.Contains(out, wantCommand) {
+		t.Fatalf("probe passthrough command has wrong prompt/output order; want %q in:\n%s", wantCommand, out)
+	}
+	if strings.Contains(out, "--output-format stream-json --output-format json") {
+		t.Fatalf("probe passthrough should not append the default JSON output flag:\n%s", out)
+	}
 }
 
 func TestClaudeMacFakProbeInteractiveConflict(t *testing.T) {

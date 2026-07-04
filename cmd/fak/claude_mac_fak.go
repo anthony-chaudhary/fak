@@ -153,18 +153,33 @@ func runClaudeMacFak(stdout, stderr io.Writer, argv []string) int {
 	if *asJSON {
 		tuiArgs = append(tuiArgs, "--json")
 	}
+	passthrough := append([]string(nil), fs.Args()...)
 	if *probe {
-		tuiArgs = append(tuiArgs, "--prompt", *prompt)
-	}
-	passthrough := fs.Args()
-	if len(passthrough) == 0 && *probe && !*asJSON {
-		passthrough = []string{"--output-format", "json"}
+		// Claude Code prompt-mode examples put `-p PROMPT` before output flags.
+		// The generic TUI appends --prompt after passthrough args, so probe mode
+		// injects the prompt directly into Claude's argv to keep the live command
+		// deterministic: claude ... -p PROMPT --output-format json.
+		if !claudeMacArgsHavePrompt(passthrough) {
+			passthrough = append([]string{"-p", *prompt}, passthrough...)
+		}
+		if len(fs.Args()) == 0 && !*asJSON {
+			passthrough = append(passthrough, "--output-format", "json")
+		}
 	}
 	if len(passthrough) > 0 {
 		tuiArgs = append(tuiArgs, "--")
 		tuiArgs = append(tuiArgs, passthrough...)
 	}
 	return runTUI(stdout, stderr, tuiArgs)
+}
+
+func claudeMacArgsHavePrompt(args []string) bool {
+	for _, a := range args {
+		if a == "-p" || a == "--prompt" || strings.HasPrefix(a, "--prompt=") {
+			return true
+		}
+	}
+	return false
 }
 
 func envOrDefault(name, def string) string {
