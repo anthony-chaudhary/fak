@@ -66,10 +66,11 @@ PY_ISSUE_CREATE_ARGV_RE = re.compile(
 # Closure binding: this map plus test_issue_create_producers_are_contract_or_triage_gated
 # below satisfy #1461's ask in full -- every gh-issue-create-capable producer in the
 # repo (Go: internal/dogfoodissues, internal/issuecatalog, cmd/fak/taskmgr.go's
-# StrictScope handoff sync; Python: bench_signal.py, gate_signal.py, score_signal.py via
+# StrictScope handoff sync; cmd/fak/issue_create.go's trusted first-party wrapper;
+# Python: bench_signal.py, gate_signal.py, score_signal.py via
 # check_issue_contract/issue_contract_draft) is gated either by the shared
-# internal/issuecontract review or a hard triage-only label, with this test failing if a
-# new ungated producer appears. tools/dispatch_no_window_test.py's
+# internal/issuecontract review, a hard triage-only label, or the trusted fak wrapper
+# path, with this test failing if a new ungated producer appears. tools/dispatch_no_window_test.py's
 # test_non_test_spawn_calls_are_contract_gated adds the same gate on the dispatch/spawn
 # side (issue_contract_review before spawn_issue_worker). The work shipped citing generic
 # "sync shared worktree" subjects (d9182a0e, 35d34ebe), never #1461 itself; history on
@@ -83,6 +84,10 @@ ISSUE_CREATE_PRODUCERS = {
     "cmd/fak/dispatchaudit.go": [
         "dispatchability: `triage_only`",
         '"needs-triage", "triage-only"',
+    ],
+    "cmd/fak/issue_create.go": [
+        "trusted fak binary",
+        "deliberately escalates",
     ],
     "cmd/fak/taskmgr.go": [
         "ReviewHandoffWithOptions",

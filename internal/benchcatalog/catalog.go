@@ -218,6 +218,13 @@ var registry = []Bench{
 		Doc:     "",
 	},
 	{
+		Name: "macbench", Kind: KindVerb, Need: NeedWeights, Level: LevelServing,
+		Summary: "Mac gateway serving probe for nightrun: health, long decode, prefill sweep, and two-stream concurrency rows against a running fak gateway.",
+		Run:     "fak macbench health --gateway http://127.0.0.1:8080 --json",
+		Flags:   []string{"all|health|decode-longgen|prefill-sweep|2stream  -  suite selector", "--gateway  -  fak gateway base URL", "--model  -  model id to request", "--decode-tokens  -  comma list for long decode rows", "--prefill-tokens  -  comma list for prefill rows", "--timeout  -  per-run timeout"},
+		Doc:     "docs/nightrun/README.md",
+	},
+	{
 		Name: "modelbench", Kind: KindCmd, Need: NeedWeights, Level: LevelServing,
 		Summary: "In-kernel pure-Go forward-pass latency / tok-per-sec, so the kernel's model numbers are self-measured not borrowed.",
 		Run:     "go run ./cmd/modelbench -dir internal/model/.cache/smollm2-135m",

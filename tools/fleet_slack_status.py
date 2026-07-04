@@ -33,6 +33,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -78,6 +79,10 @@ SIGNAL_SCHEMA = "fleet-slack-signal/1"
 # The 3x-less-noise target the goal states; the gate (``--signal-check``) holds the
 # compact renderer to at least this reduction vs the boxed-and-fenced baseline.
 SIGNAL_TARGET_MULTIPLE = 3.0
+try:
+    OPERATOR_TIMEZONE = ZoneInfo("America/Los_Angeles")
+except Exception:  # pragma: no cover - fallback for Python builds without tzdata.
+    OPERATOR_TIMEZONE = dt.timezone(dt.timedelta(hours=-7), "PDT")
 
 # Box-drawing glyphs the terminal renderers use for rails/rules — pure decoration in
 # a Slack body. (Unicode box-drawing + the double-line set the cards actually emit.)
@@ -435,7 +440,7 @@ def _friendly_time(raw: Any) -> str:
         return "the reset time"
     try:
         stamp = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
-        return stamp.astimezone().strftime("%Y-%m-%d %H:%M %Z").strip()
+        return stamp.astimezone(OPERATOR_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z").strip()
     except ValueError:
         return text
 

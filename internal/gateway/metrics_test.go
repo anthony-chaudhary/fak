@@ -749,7 +749,6 @@ func TestDebugVarsEndpointExposesRuntimeGatewayKernelAndMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Body.Close()
 	if r.StatusCode != http.StatusOK {
 		t.Fatalf("/debug/vars status = %d, want 200", r.StatusCode)
 	}
@@ -758,6 +757,9 @@ func TestDebugVarsEndpointExposesRuntimeGatewayKernelAndMetrics(t *testing.T) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&vars); err != nil {
 		t.Fatalf("decode /debug/vars: %v", err)
+	}
+	if err := r.Body.Close(); err != nil {
+		t.Fatalf("close /debug/vars body: %v", err)
 	}
 
 	if !vars.Gateway.Up || vars.Gateway.Engine != "test" || vars.Gateway.Model != "test-model" || !vars.Gateway.VDSO {
@@ -779,9 +781,18 @@ func TestDebugVarsEndpointExposesRuntimeGatewayKernelAndMetrics(t *testing.T) {
 		t.Fatalf("/debug/vars missing syscall operation row: %+v", vars.Metrics.Operations)
 	}
 
-	text := getMetrics(t, ts.URL+"/metrics", "")
-	if !strings.Contains(text, `fak_gateway_http_requests_total{route="/debug/vars",method="GET",status="200"} 1`) {
-		t.Fatalf("/debug/vars route was not counted in Prometheus metrics:\n%s", text)
+	want := `fak_gateway_http_requests_total{route="/debug/vars",method="GET",status="200"} 1`
+	deadline := time.Now().Add(time.Second)
+	var text string
+	for {
+		text = getMetrics(t, ts.URL+"/metrics", "")
+		if strings.Contains(text, want) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("/debug/vars route was not counted in Prometheus metrics:\n%s", text)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
