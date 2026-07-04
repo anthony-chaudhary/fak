@@ -97,6 +97,12 @@ func TestStructuralFormattingIsNotDegenerate(t *testing.T) {
 		"setext-underline":  "Installation Guide\n========================================",
 		"ascii-border":      "+" + strings.Repeat("-", 40) + "+",
 		"build-log-w-rules": "Build complete.\n" + strings.Repeat("=", 60) + "\nResults: 42 passed\n" + strings.Repeat("=", 60) + "\nDone.",
+		// Pure-fill rules LONGER than compressionFloor (200): the sibling signals
+		// exclude them via hasAlnum, but compRepeat's flate signal must not flag them
+		// either — a long ASCII rule is still structure, not a loop (issue #2687).
+		"long-equals-rule":     strings.Repeat("=", 300),
+		"long-dash-rule":       strings.Repeat("-", 300),
+		"long-table-separator": strings.Repeat("|----", 80),
 	}
 	for name, text := range cases {
 		t.Run(name, func(t *testing.T) {

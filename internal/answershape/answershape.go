@@ -350,6 +350,14 @@ func compRepeat(b []byte, chars int) (frac, ratio float64) {
 		return 0, 0
 	}
 	ratio = float64(buf.Len()) / float64(len(b))
+	// A purely non-alphanumeric fill (a "====" rule, an ASCII border, a
+	// "|----|----|" separator, a progress bar) compresses tiny but is structural
+	// formatting, not a loop — mirror the hasAlnum guard periodRepeat and
+	// lineBlockRepeat already apply so it never drives the verdict. The ratio is
+	// still reported for informational parity with the other signals.
+	if !hasAlnum(string(b)) {
+		return 0, ratio
+	}
 	if chars < compressionFloor {
 		return 0, ratio
 	}
