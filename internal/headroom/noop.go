@@ -20,6 +20,8 @@ func (noopCompressor) Compress(_ context.Context, in Input) (Output, error) {
 		Codec:      "identity",
 		OrigLen:    len(in.Bytes),
 		NewLen:     len(in.Bytes),
+		Status:     "no-op",
+		Reason:     "noop compressor selected; bytes intentionally left unchanged",
 	}, nil
 }
 

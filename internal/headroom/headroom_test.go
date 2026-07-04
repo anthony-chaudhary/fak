@@ -200,6 +200,9 @@ func TestBridgeUnavailableIsInert(t *testing.T) {
 	if out.Compressed || string(out.Bytes) != string(in) {
 		t.Fatalf("a 5xx must pass the original through untouched: %+v", out)
 	}
+	if out.Status != "unavailable" || !strings.Contains(out.Reason, "HTTP 503") {
+		t.Fatalf("a 5xx must report unavailable with HTTP status, got %+v", out)
+	}
 }
 
 func TestGateNoopAdmitsAsIs(t *testing.T) {

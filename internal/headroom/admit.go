@@ -131,14 +131,14 @@ func (g *Gate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ve
 // compress" decision breakdown — so the governance is auditable, not just the
 // savings (Considered == Compressed + every Skipped* reason).
 type Stats struct {
-	Considered      int64
-	Compressed      int64
-	BytesIn         int64
-	BytesOut        int64
-	SkippedEmpty    int64
-	SkippedPoison   int64
-	SkippedNoSaving int64
-	SkippedNotWorth int64
+	Considered      int64 `json:"considered"`
+	Compressed      int64 `json:"compressed"`
+	BytesIn         int64 `json:"bytes_in"`
+	BytesOut        int64 `json:"bytes_out"`
+	SkippedEmpty    int64 `json:"skipped_empty"`
+	SkippedPoison   int64 `json:"skipped_poison"`
+	SkippedNoSaving int64 `json:"skipped_no_saving"`
+	SkippedNotWorth int64 `json:"skipped_not_worth"`
 }
 
 // Stats snapshots the gate's counters.

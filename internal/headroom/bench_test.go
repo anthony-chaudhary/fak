@@ -1,6 +1,8 @@
 package headroom
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -16,6 +18,10 @@ func TestRunBenchNativeSavesAggregate(t *testing.T) {
 	r := RunBench(native, BenchCorpus())
 	if r.OrigTotal <= 0 {
 		t.Fatal("empty corpus")
+	}
+	if r.Owner != "fak" || r.Dependency != "in_process" || r.Fidelity != "recoverable" ||
+		r.Evidence != "witnessed" || r.Status != "measured" {
+		t.Fatalf("native attribution/status = %+v", r)
 	}
 	if r.Saved < 0.5 {
 		t.Fatalf("aggregate saving = %.3f, want >= 0.5 on the representative corpus\n%s", r.Saved, r.Render())
@@ -40,6 +46,12 @@ func TestRunBenchNativeSavesAggregate(t *testing.T) {
 		if s.Name == "plain-prose" && s.Saved != 0 {
 			t.Fatalf("plain prose saved=%.3f, want 0", s.Saved)
 		}
+		if s.Name == "plain-prose" && s.Status != "no_effect" {
+			t.Fatalf("plain prose status=%q, want no_effect", s.Status)
+		}
+		if s.Saved > 0 && s.Status != "saved" {
+			t.Fatalf("sample %q saved %.3f but status=%q", s.Name, s.Saved, s.Status)
+		}
 		if s.NewLen > s.OrigLen {
 			t.Fatalf("sample %q expanded: %d -> %d", s.Name, s.OrigLen, s.NewLen)
 		}
@@ -56,10 +68,29 @@ func TestRunBenchNoopZero(t *testing.T) {
 	if r.Saved != 0 || r.NewTotal != r.OrigTotal {
 		t.Fatalf("noop must save nothing: saved=%.3f orig=%d new=%d", r.Saved, r.OrigTotal, r.NewTotal)
 	}
+	if r.Status != "no-op" || r.Owner != "fak" || r.Dependency != "none" || r.Fidelity != "no-op" {
+		t.Fatalf("noop attribution/status = %+v", r)
+	}
 	for _, s := range r.Samples {
-		if s.Codec != "(none)" {
-			t.Fatalf("noop sample %q codec=%q, want (none)", s.Name, s.Codec)
+		if s.Codec != "(none)" || s.Status != "no-op" {
+			t.Fatalf("noop sample %q codec/status=%q/%q, want (none)/no-op", s.Name, s.Codec, s.Status)
 		}
+	}
+}
+
+func TestRunBenchHeadroomUnavailableIsNotNoSaving(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	comp := headroomBridge{url: srv.URL, client: srv.Client()}
+	r := RunBench(comp, []BenchInput{{Name: "sample", Bytes: []byte("a compressible looking sample that cannot reach headroom")}})
+	if r.Status != "unavailable" || r.Owner != "external" || r.Dependency != "external_http_sidecar" {
+		t.Fatalf("headroom unavailable report = %+v", r)
+	}
+	if len(r.Samples) != 1 || r.Samples[0].Status != "unavailable" ||
+		!strings.Contains(r.Samples[0].Reason, "HTTP 503") {
+		t.Fatalf("headroom unavailable sample = %+v", r.Samples)
 	}
 }
 
@@ -81,6 +112,9 @@ func TestBenchRender(t *testing.T) {
 	s := r.Render()
 	if !strings.Contains(s, "compressor: native") {
 		t.Fatalf("render missing compressor name:\n%s", s)
+	}
+	if !strings.Contains(s, "status:") || !strings.Contains(s, "owner=fak") || !strings.Contains(s, "no_effect") {
+		t.Fatalf("render missing status/attribution details:\n%s", s)
 	}
 	if !strings.Contains(s, "TOTAL") {
 		t.Fatalf("render missing TOTAL row:\n%s", s)

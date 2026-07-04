@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -105,29 +106,33 @@ func (h headroomBridge) Compress(ctx context.Context, in Input) (Output, error) 
 		Config:   hrConfig{CompressUserMessages: false, ProtectRecent: 0},
 	})
 	if err != nil {
-		return passthrough(in), err
+		return passthroughWithReason(in, "error", "marshal headroom request: "+err.Error()), err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.url+"/v1/compress", bytes.NewReader(body))
 	if err != nil {
-		return passthrough(in), err
+		return passthroughWithReason(in, "error", "build headroom request: "+err.Error()), err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := h.client.Do(req)
 	if err != nil {
-		return passthrough(in), nil // unreachable service -> inert (admit original)
+		return passthroughWithReason(in, "unavailable", "headroom sidecar request failed: "+err.Error()), nil // unreachable service -> inert (admit original)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return passthrough(in), nil
+		return passthroughWithReason(in, "unavailable", fmt.Sprintf("headroom sidecar returned HTTP %d", resp.StatusCode)), nil
 	}
 	var out hrResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || len(out.Messages) == 0 {
-		return passthrough(in), nil
+		reason := "headroom sidecar returned no messages"
+		if err != nil {
+			reason = "decode headroom response: " + err.Error()
+		}
+		return passthroughWithReason(in, "unavailable", reason), nil
 	}
 	compressed := []byte(out.Messages[0].Content)
 	if len(compressed) == 0 || len(compressed) >= len(in.Bytes) {
-		return passthrough(in), nil // no saving -> admit original
+		return passthroughWithReason(in, "no_effect", "headroom sidecar returned no smaller rendering"), nil // no saving -> admit original
 	}
 	codec := HeadroomName
 	if len(out.TransformsApplied) > 0 {
@@ -140,6 +145,8 @@ func (h headroomBridge) Compress(ctx context.Context, in Input) (Output, error) 
 		Retrieval:  strings.Join(out.CCRHashes, ","),
 		OrigLen:    len(in.Bytes),
 		NewLen:     len(compressed),
+		Status:     "saved",
+		Reason:     "headroom sidecar applied " + strings.TrimPrefix(codec, HeadroomName+":"),
 	}, nil
 }
 

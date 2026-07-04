@@ -52,6 +52,8 @@ type Output struct {
 	Retrieval  string // optional handle to retrieve the original (CCR), "" if none
 	OrigLen    int    // len(input bytes)
 	NewLen     int    // len(output bytes)
+	Status     string // saved | no_effect | no-op | unavailable | error
+	Reason     string // operator-facing why this compressor did or did not help
 }
 
 // SavedRatio is the fraction of bytes removed, in [0,1] (0 when nothing helped).

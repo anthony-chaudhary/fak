@@ -77,6 +77,8 @@ func (nativeCompressor) Compress(_ context.Context, in Input) (Output, error) {
 		Codec:      strings.Join(codecs, "+"),
 		OrigLen:    len(orig),
 		NewLen:     len(body),
+		Status:     "saved",
+		Reason:     "native structural compressor applied " + strings.Join(codecs, "+"),
 	}, nil
 }
 
@@ -150,12 +152,18 @@ func normalizeLines(b []byte) ([]byte, []string) {
 }
 
 func passthrough(in Input) Output {
+	return passthroughWithReason(in, "no_effect", "compressor returned no smaller rendering")
+}
+
+func passthroughWithReason(in Input, status, reason string) Output {
 	return Output{
 		Bytes:      in.Bytes,
 		Compressed: false,
 		Codec:      "identity",
 		OrigLen:    len(in.Bytes),
 		NewLen:     len(in.Bytes),
+		Status:     status,
+		Reason:     reason,
 	}
 }
 
