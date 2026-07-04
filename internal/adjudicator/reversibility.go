@@ -228,6 +228,13 @@ func httpWriteVerb(w string) bool {
 func dryRunHint(tool, cmd string) string {
 	lowerTool, lowerCmd := strings.ToLower(tool), strings.ToLower(cmd)
 	switch {
+	// Raw `gh issue create` is escalated by design; the sanctioned path is the
+	// compiled `fak issue create` verb (cmd/fak/issue_create.go), a trusted-binary
+	// sidestep the kernel admits. Name it so the agent recovers in one step instead
+	// of chasing the unsatisfiable preview-confirm token loop on the raw-gh path.
+	case segmentHasPrefix(commandSegments(cmd), "gh", "issue", "create") ||
+		strings.Contains(lowerTool, "create_issue") || strings.Contains(lowerTool, "issue_create"):
+		return "file it with the sanctioned compiled verb: fak issue create --title … --body-file … (a trusted-binary path the kernel admits)"
 	case strings.Contains(lowerCmd, "git push") || strings.Contains(lowerTool, "git_push"):
 		return "try git push --dry-run first"
 	case strings.Contains(lowerCmd, "npm publish"):

@@ -39,6 +39,13 @@ func TestReversibilityClassifiesCommands(t *testing.T) {
 			hint: "try git push --dry-run first",
 		},
 		{
+			name: "gh issue create escalation names the fak issue create sidestep",
+			tool: "Bash",
+			args: map[string]any{"command": `gh issue create --title "bug" --body "repro"`},
+			want: ReversibilityOutwardFacing,
+			hint: "file it with the sanctioned compiled verb: fak issue create --title … --body-file … (a trusted-binary path the kernel admits)",
+		},
+		{
 			name: "http write is outward-facing",
 			tool: "Bash",
 			args: map[string]any{"command": "curl -X POST https://example.invalid/hook -d ok"},
