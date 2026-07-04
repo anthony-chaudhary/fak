@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/bench"
 )
@@ -138,7 +139,15 @@ func TestSweepViaSubprocess_DropsFailedArmWithReason(t *testing.T) {
 	// succeeds on the rest via the in-process core.
 	failNormgate := func(ctx context.Context, bin string, c FeatureConfig, traceJSON []byte) (AblationRun, error) {
 		if c.Name == "normgate" {
-			return AblationRun{}, fmt.Errorf("child exited 1: simulated re-exec failure")
+			time.Sleep(time.Millisecond)
+			code := 17
+			return AblationRun{}, &armRunError{
+				Stage:      "child_exit",
+				ExitCode:   &code,
+				StderrTail: "simulated stderr tail",
+				StdoutTail: "partial stdout",
+				Err:        fmt.Errorf("child exited 17: simulated re-exec failure"),
+			}
 		}
 		return fakeArmRunner(ctx, bin, c, traceJSON)
 	}
@@ -157,8 +166,16 @@ func TestSweepViaSubprocess_DropsFailedArmWithReason(t *testing.T) {
 	if len(dropped) != 1 || dropped[0].ArmID != "normgate" {
 		t.Fatalf("dropped = %+v, want exactly the normgate arm", dropped)
 	}
+	if len(rep.Dropped) != 1 || rep.Dropped[0].ArmID != "normgate" {
+		t.Fatalf("report dropped arms = %+v, want normgate recorded in the artifact", rep.Dropped)
+	}
 	if !strings.Contains(dropped[0].Reason, "simulated re-exec failure") {
 		t.Errorf("dropped reason = %q, want the child's error (a logged hole, not a silent one)", dropped[0].Reason)
+	}
+	if dropped[0].Stage != "child_exit" || dropped[0].ExitCode == nil || *dropped[0].ExitCode != 17 ||
+		dropped[0].StderrTail != "simulated stderr tail" || dropped[0].StdoutTail != "partial stdout" ||
+		dropped[0].DurationSeconds <= 0 {
+		t.Errorf("dropped diagnostics = %+v, want structured subprocess stage/exit/stdout/stderr/duration", dropped[0])
 	}
 }
 
@@ -181,6 +198,7 @@ func TestSweepViaSubprocess_DropsForkedWorkload(t *testing.T) {
 			return AblationRun{}, err
 		}
 		if c.Name == "vdso" {
+			time.Sleep(time.Millisecond)
 			run.WorkloadHash = "FORKED-HASH" // child secretly ran different work
 		}
 		return run, nil
@@ -198,6 +216,10 @@ func TestSweepViaSubprocess_DropsForkedWorkload(t *testing.T) {
 	}
 	if !strings.Contains(dropped[0].Reason, "workload hash mismatch") {
 		t.Errorf("dropped reason = %q, want a workload-hash-mismatch reason", dropped[0].Reason)
+	}
+	if dropped[0].Stage != "workload_hash" || dropped[0].ActualWorkloadHash != "FORKED-HASH" ||
+		dropped[0].ExpectedWorkloadHash == "" || dropped[0].DurationSeconds <= 0 {
+		t.Errorf("dropped workload diagnostics = %+v, want stage plus child/parent hashes", dropped[0])
 	}
 }
 

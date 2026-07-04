@@ -83,6 +83,18 @@ func TestSweep_VDSO_NArmGuardAndIsolatedDelta(t *testing.T) {
 		t.Errorf("expected vdso arm avoided calls (%d) > all-off avoided calls (%d)",
 			on.MechanismSavings.FakVDSOAvoidedCalls, off.MechanismSavings.FakVDSOAvoidedCalls)
 	}
+	offEffect := effectByFeature(off.CacheEffects, FeatureVDSO)
+	onEffect := effectByFeature(on.CacheEffects, FeatureVDSO)
+	if offEffect == nil || onEffect == nil {
+		t.Fatalf("expected vdso cache effects on both arms: off=%+v on=%+v", off.CacheEffects, on.CacheEffects)
+	}
+	if offEffect.Status != "inactive" || offEffect.Fidelity != "no-op" {
+		t.Fatalf("all-off vdso effect = %+v, want inactive/no-op", *offEffect)
+	}
+	if onEffect.Owner != "fak" || onEffect.Plane != "kernel_tool_cache" ||
+		onEffect.Status != "active" || onEffect.Fidelity != "lossless" || onEffect.Evidence != "witnessed" {
+		t.Fatalf("vdso cache effect = %+v, want fak/kernel_tool_cache active lossless witnessed", *onEffect)
+	}
 
 	// Provenance is stamped and self-describing.
 	if rep.Provenance.GeneratedBy != "fak/internal/ablate" {
@@ -160,6 +172,13 @@ func TestWireCacheFeaturesSweepAndReportPrefixIntegrity(t *testing.T) {
 		if run.ProviderTokenEquiv() != 0 {
 			t.Fatalf("%s provider_tokeq = %v, want 0 in the mock wire-lever arm", run.ArmID, run.ProviderTokenEquiv())
 		}
+	}
+	if eff := effectByFeature(ttl.CacheEffects, FeatureTTL1H); eff == nil || eff.Plane != "provider_prompt_cache_control" ||
+		eff.Status != "active" || eff.Fidelity != "passive" {
+		t.Fatalf("ttl_1h effect = %+v, want active passive provider_prompt_cache_control", eff)
+	}
+	if eff := effectByFeature(trim.CacheEffects, FeatureUncachedTrim); eff == nil || eff.Status != "active" || eff.Fidelity != "lossy" {
+		t.Fatalf("uncached_trim effect = %+v, want active/lossy", eff)
 	}
 }
 
@@ -270,4 +289,13 @@ func armIDs(r *Report) []string {
 		out = append(out, run.ArmID)
 	}
 	return out
+}
+
+func effectByFeature(effects []CacheEffect, feature string) *CacheEffect {
+	for i := range effects {
+		if effects[i].Feature == feature {
+			return &effects[i]
+		}
+	}
+	return nil
 }

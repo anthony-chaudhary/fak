@@ -215,6 +215,7 @@ type AblationRun struct {
 	Arm              metrics.Arm              `json:"arm"`
 	MechanismSavings gateway.MechanismSavings `json:"mechanism_savings"`
 	PrefixIntegrity  PrefixIntegrity          `json:"prefix_integrity"`
+	CacheEffects     []CacheEffect            `json:"cache_effects,omitempty"`
 }
 
 // PrefixIntegrity is the per-arm cache-burst witness for wire-side cache levers. The
@@ -225,6 +226,23 @@ type AblationRun struct {
 type PrefixIntegrity struct {
 	Checked        bool   `json:"checked"`
 	PrefixMismatch uint64 `json:"prefix_mismatch"`
+}
+
+// CacheEffect is the per-feature attribution card the ablation report carries for
+// cache-related knobs. It lets a reader distinguish "fak authored a lossless local
+// KV/tool-cache effect" from "a provider/external component was merely observed" or
+// "this arm was configured but is a no-op on the selected engine." The fields are
+// intentionally string-valued and stable for CLI/JSON consumers.
+type CacheEffect struct {
+	Feature    string `json:"feature"`
+	Owner      string `json:"owner"`      // fak | provider | external
+	Plane      string `json:"plane"`      // kernel_tool_cache | local_kv | provider_prompt_cache | context_compression | context_view
+	Component  string `json:"component"`  // vdso | radix | headroom | ...
+	Dependency string `json:"dependency"` // in_process | subprocess_env | external_http_sidecar | provider
+	Fidelity   string `json:"fidelity"`   // lossless | lossy | recoverable | passive | no-op
+	Evidence   string `json:"evidence"`   // witnessed | observed | configured | simulated
+	Status     string `json:"status"`     // active | inactive | no-op | unavailable
+	Reason     string `json:"reason"`
 }
 
 // Tokens returns the arm's total input+output tokens (a convenience for the table).
@@ -265,6 +283,7 @@ type Report struct {
 	Baseline     string             `json:"baseline_arm,omitempty"`
 	Caveats      []string           `json:"caveats,omitempty"`
 	Runs         []AblationRun      `json:"runs"`
+	Dropped      []DroppedArm       `json:"dropped_arms,omitempty"`
 }
 
 // ArmByID returns the arm with the given id, or nil.
@@ -431,7 +450,141 @@ func runArm(ctx context.Context, t *bench.Trace, engineID string, c FeatureConfi
 		Arm:              arm,
 		MechanismSavings: mechanismSavingsForArm(arm, c),
 		PrefixIntegrity:  prefixIntegrityForArm(c),
+		CacheEffects:     cacheEffectsForArm(arm, c, engineID),
 	}, nil
+}
+
+func cacheEffectsForArm(arm metrics.Arm, c FeatureConfig, engineID string) []CacheEffect {
+	descriptor := c.Descriptor()
+	keys := FeatureKeys(descriptor)
+	out := make([]CacheEffect, 0, len(keys))
+	for _, feature := range keys {
+		effect, ok := cacheEffectForFeature(feature, descriptor[feature] == "on", arm, c, engineID)
+		if ok {
+			out = append(out, effect)
+		}
+	}
+	return out
+}
+
+func cacheEffectForFeature(feature string, on bool, arm metrics.Arm, c FeatureConfig, engineID string) (CacheEffect, bool) {
+	switch feature {
+	case FeatureVDSO:
+		e := CacheEffect{
+			Feature:    feature,
+			Owner:      "fak",
+			Plane:      "kernel_tool_cache",
+			Component:  "vdso",
+			Dependency: "in_process",
+			Fidelity:   "lossless",
+			Evidence:   "witnessed",
+		}
+		switch {
+		case !on:
+			e.Status = "inactive"
+			e.Fidelity = "no-op"
+			e.Reason = "vDSO disabled for this arm"
+		case arm.VDSOHits > 0:
+			e.Status = "active"
+			e.Reason = fmt.Sprintf("served %d repeated tool call(s) from the in-kernel vDSO fast path", arm.VDSOHits)
+		default:
+			e.Status = "no-op"
+			e.Reason = "vDSO enabled, but this trace had no repeated call the fast path could serve"
+		}
+		return e, true
+	case FeatureRadix:
+		e := CacheEffect{
+			Feature:    feature,
+			Owner:      "fak",
+			Plane:      "local_kv",
+			Component:  "inkernel_radix",
+			Dependency: "subprocess_env",
+			Fidelity:   "lossless",
+			Evidence:   "configured",
+		}
+		return configuredCacheEffect(e, on, engineID, "in-kernel RadixAttention prefix reuse requires engine=inkernel"), true
+	case FeatureCtxplanSeam:
+		e := CacheEffect{
+			Feature:    feature,
+			Owner:      "fak",
+			Plane:      "context_view",
+			Component:  "ctxplan_seam",
+			Dependency: "subprocess_env",
+			Fidelity:   "recoverable",
+			Evidence:   "configured",
+		}
+		return configuredCacheEffect(e, on, engineID, "ctxplan cache-safe materialized views require engine=inkernel"), true
+	case FeatureCompressor:
+		e := CacheEffect{
+			Feature:    feature,
+			Owner:      "fak",
+			Plane:      "context_compression",
+			Component:  "headroom_compressor",
+			Dependency: "subprocess_env_or_external_sidecar",
+			Fidelity:   "recoverable",
+			Evidence:   "simulated",
+		}
+		if !on {
+			e.Status = "inactive"
+			e.Fidelity = "no-op"
+			e.Reason = "compressor disabled for this arm"
+		} else if mechanismSavingsForArm(arm, c).FakCompactionShedTokens > 0 {
+			e.Status = "active"
+			e.Reason = "mock ablation models fak-authored compaction shed tokens; use fak headroom bench/status for plugin-specific native/headroom evidence"
+		} else {
+			e.Status = "no-op"
+			e.Reason = "compressor enabled, but this trace produced no modeled compaction saving"
+		}
+		return e, true
+	case FeatureBreakpointPlan:
+		return wireCacheEffect(feature, on, "breakpoint_planner", "lossless", "places provider cache breakpoints without changing model-visible prefix bytes"), true
+	case FeatureTTL1H:
+		return wireCacheEffect(feature, on, "ttl_1h", "passive", "changes provider cache retention only; model-visible prefix bytes are unchanged"), true
+	case FeaturePrefixGuard:
+		return wireCacheEffect(feature, on, "prefix_guard", "lossless", "guards prefix stability before relying on provider-cache economics"), true
+	case FeatureUncachedTrim:
+		return wireCacheEffect(feature, on, "uncached_trim", "lossy", "sheds or rewrites uncached context; prefix integrity covers only the guarded cacheable prefix"), true
+	default:
+		return CacheEffect{}, false
+	}
+}
+
+func configuredCacheEffect(e CacheEffect, on bool, engineID, engineReason string) CacheEffect {
+	if !on {
+		e.Status = "inactive"
+		e.Fidelity = "no-op"
+		e.Reason = e.Component + " disabled for this arm"
+		return e
+	}
+	if !strings.EqualFold(strings.TrimSpace(engineID), "inkernel") {
+		e.Status = "no-op"
+		e.Reason = fmt.Sprintf("%s; selected engine %q cannot exercise it", engineReason, engineID)
+		return e
+	}
+	e.Status = "active"
+	e.Reason = e.Component + " enabled through the child process environment; live runs expose counters through cacheobs/gateway metrics"
+	return e
+}
+
+func wireCacheEffect(feature string, on bool, component, fidelity, reason string) CacheEffect {
+	e := CacheEffect{
+		Feature:    feature,
+		Owner:      "fak",
+		Plane:      "provider_prompt_cache_control",
+		Component:  component,
+		Dependency: "subprocess_env_and_provider",
+		Fidelity:   fidelity,
+		Evidence:   "simulated",
+	}
+	if !on {
+		e.Status = "inactive"
+		e.Fidelity = "no-op"
+		e.Reason = component + " disabled for this arm"
+		return e
+	}
+	e.Status = "active"
+	e.Reason = reason + "; mock ablation reports token-equivalent effects separately from provider-observed counters"
+	return e
 }
 
 func mechanismSavingsForArm(arm metrics.Arm, c FeatureConfig) gateway.MechanismSavings {

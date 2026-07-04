@@ -31,11 +31,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/bench"
@@ -62,8 +65,15 @@ type armRequest struct {
 // DroppedArm records an arm that failed to run, so a partial sweep names exactly which
 // config it could not measure and why — the fan-out never returns a silent hole.
 type DroppedArm struct {
-	ArmID  string `json:"arm_id"`
-	Reason string `json:"reason"`
+	ArmID                string  `json:"arm_id"`
+	Reason               string  `json:"reason"`
+	Stage                string  `json:"stage,omitempty"`
+	ExitCode             *int    `json:"exit_code,omitempty"`
+	DurationSeconds      float64 `json:"duration_seconds,omitempty"`
+	StderrTail           string  `json:"stderr_tail,omitempty"`
+	StdoutTail           string  `json:"stdout_tail,omitempty"`
+	ExpectedWorkloadHash string  `json:"expected_workload_hash,omitempty"`
+	ActualWorkloadHash   string  `json:"actual_workload_hash,omitempty"`
 }
 
 // SweepViaSubprocess is the rung-2 parent fan-out. It computes the trace's workload hash
@@ -108,6 +118,10 @@ func SweepViaSubprocess(ctx context.Context, bin string, t *bench.Trace, engineI
 		Caveats:      reportSessionCaveats(canonTrace, engineID, configs),
 	}
 	var dropped []DroppedArm
+	recordDrop := func(d DroppedArm) {
+		dropped = append(dropped, d)
+		rep.Dropped = append(rep.Dropped, d)
+	}
 	seen := make(map[string]bool, len(configs))
 	for _, c := range configs {
 		if c.Name == "" {
@@ -118,18 +132,24 @@ func SweepViaSubprocess(ctx context.Context, bin string, t *bench.Trace, engineI
 		}
 		seen[c.Name] = true
 
+		start := time.Now()
 		run, err := runner(ctx, bin, c, traceJSON)
+		duration := time.Since(start).Seconds()
 		if err != nil {
-			dropped = append(dropped, DroppedArm{ArmID: c.Name, Reason: err.Error()})
+			recordDrop(droppedArmFromError(c.Name, duration, err))
 			continue
 		}
 		// The cross-process identical-workload guard: a child that replayed a DIFFERENT
 		// workload (a forked trace, a re-exec drift) is dropped, never folded — the
 		// per-feature deltas must be apples-to-apples.
 		if run.WorkloadHash != parentHash {
-			dropped = append(dropped, DroppedArm{
-				ArmID:  c.Name,
-				Reason: fmt.Sprintf("workload hash mismatch: child ran %s, parent froze %s", run.WorkloadHash, parentHash),
+			recordDrop(DroppedArm{
+				ArmID:                c.Name,
+				Reason:               fmt.Sprintf("workload hash mismatch: child ran %s, parent froze %s", run.WorkloadHash, parentHash),
+				Stage:                "workload_hash",
+				DurationSeconds:      duration,
+				ExpectedWorkloadHash: parentHash,
+				ActualWorkloadHash:   run.WorkloadHash,
 			})
 			continue
 		}
@@ -205,6 +225,68 @@ func UnmarshalTrace(raw json.RawMessage) (*bench.Trace, error) {
 	return &t, nil
 }
 
+type armRunError struct {
+	Stage      string
+	ExitCode   *int
+	StderrTail string
+	StdoutTail string
+	Err        error
+}
+
+func (e *armRunError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Err == nil {
+		return e.Stage
+	}
+	return e.Err.Error()
+}
+
+func (e *armRunError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func droppedArmFromError(armID string, durationSeconds float64, err error) DroppedArm {
+	drop := DroppedArm{
+		ArmID:           armID,
+		Reason:          err.Error(),
+		Stage:           "child_run",
+		DurationSeconds: durationSeconds,
+	}
+	var armErr *armRunError
+	if errors.As(err, &armErr) {
+		if strings.TrimSpace(armErr.Stage) != "" {
+			drop.Stage = armErr.Stage
+		}
+		drop.ExitCode = armErr.ExitCode
+		drop.StderrTail = strings.TrimSpace(armErr.StderrTail)
+		drop.StdoutTail = strings.TrimSpace(armErr.StdoutTail)
+	}
+	return drop
+}
+
+func newArmRunError(stage string, exitCode *int, stdout, stderr []byte, err error) error {
+	return &armRunError{
+		Stage:      stage,
+		ExitCode:   exitCode,
+		StdoutTail: tailString(string(stdout), 2000),
+		StderrTail: tailString(string(stderr), 2000),
+		Err:        err,
+	}
+}
+
+func tailString(s string, limit int) string {
+	s = strings.TrimSpace(s)
+	if limit <= 0 || len(s) <= limit {
+		return s
+	}
+	return s[len(s)-limit:]
+}
+
 // execArmRunner is the PRODUCTION armRunner: it re-execs `bin ablate-arm`, splicing the
 // arm's FAK_* env onto the child, writes the {config, trace} request to the child's
 // stdin, and decodes the child's single AblationRun from stdout. It is the real
@@ -232,12 +314,20 @@ func execArmRunner(ctx context.Context, bin string, c FeatureConfig, traceJSON [
 	cmd.Stdout = &out
 	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
-		return AblationRun{}, fmt.Errorf("ablate: arm %q child failed: %w (stderr: %s)", c.Name, err, errBuf.String())
+		var exitCode *int
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			code := exitErr.ExitCode()
+			exitCode = &code
+		}
+		msg := fmt.Errorf("ablate: arm %q child failed: %w (stderr: %s)", c.Name, err, strings.TrimSpace(errBuf.String()))
+		return AblationRun{}, newArmRunError("child_exit", exitCode, out.Bytes(), errBuf.Bytes(), msg)
 	}
 
 	var run AblationRun
 	if err := json.Unmarshal(out.Bytes(), &run); err != nil {
-		return AblationRun{}, fmt.Errorf("ablate: decode arm %q child output: %w", c.Name, err)
+		msg := fmt.Errorf("ablate: decode arm %q child output: %w", c.Name, err)
+		return AblationRun{}, newArmRunError("decode_stdout", nil, out.Bytes(), errBuf.Bytes(), msg)
 	}
 	return run, nil
 }
