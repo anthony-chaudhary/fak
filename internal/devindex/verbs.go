@@ -142,6 +142,7 @@ var verbManifest = []Verb{
 	{Name: "index", Synopsis: "queryable self-index: lane/leaf/docs/claims/verbs/refs (query, don't survey)", Aliases: []string{"devindex"}, Lane: "devindex", Doc: "AGENTS.md"},
 	{Name: "info", Synopsis: "the live fak-info overlay: poll a gateway's /debug/vars and print one plain-words line per tick", Lane: "cmd"},
 	{Name: "issue", Synopsis: "the generated-issue contract: review machine-created GitHub issue candidates before sync", Lane: "cmd"},
+	{Name: "kvbm", Synopsis: "cost-aware KV eviction validation: replay/trace a policy corpus vs the offline oracle (cost-aware >= LRU)", Lane: "cmd"},
 	{Name: "lab", Synopsis: "the GPU-lab status surface: per-state / per-class node counts + readiness", Lane: "cmd"},
 	{Name: "leaseref", Synopsis: "cross-machine lease visibility: read the refs/fak/locks/* lease ref namespace", Lane: "cmd"},
 	{Name: "learning-debt-dispatch", Synopsis: "learning-scorecard -> backlog: file capped triage issues for HARD learning-debt defects", Lane: "cmd"},
