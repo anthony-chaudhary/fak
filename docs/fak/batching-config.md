@@ -120,8 +120,14 @@ sources in [`docs/model-engine-env.md`](../model-engine-env.md); the batching-re
 | `FAK_NATIVE_KV_MAX_BLOCKS` | unset (off) | Enables the native scheduler's KV pressure path and sets the live paged-KV block budget. |
 | `FAK_NATIVE_KV_BLOCK_TOKENS` | `16` | Tokens per block for the scheduler's KV budget estimator and swap pool. |
 | `FAK_NATIVE_KV_PREEMPT_MODE` | `swap` | Selects scheduler preemption recovery: `swap`/`swap-to-host` or `recompute`. |
-| `FAK_NATIVE_KV_VICTIM_RULE` | `most-recent` | Selects the native KV-pressure victim rule; `cost-aware`/`kvbm` uses KVBM reuse and pin hints, exposes candidate/pin/victim-cost metrics, and also drives planner radix eviction under `FAK_INKERNEL_RADIX_BUDGET`. |
+| `FAK_NATIVE_KV_VICTIM_RULE` | `most-recent` | Selects the native KV-pressure victim rule; `cost-aware`/`kvbm` uses KVBM reuse and TTL-bounded pin hints, exposes candidate/active-pin/expired-pin/victim-cost metrics, and also drives planner radix eviction under `FAK_INKERNEL_RADIX_BUDGET`. |
 | `FAK_QPROFILE` | off | Print coarse phase timing (quantize / GEMM / attention) for batched-Q and Metal prefill. |
+
+Native scheduler KVBM pins are leases, not permanent residency: `ToolCall.Meta` can pass
+`kv_pin_ttl_ms` / `kv.pin_ttl_ms` / `kv_preempt_pin_ttl_ms` /
+`kv.preempt_pin_ttl_ms`, and an omitted TTL defaults to one minute. Expired pins become
+evictable again and appear in the `fak_sched_preempt_last_expired_pins` and
+`fak_sched_preempt_pin_expired_total` metrics.
 
 All are off-by-tuning safe: they change kernel *scheduling*, never the numerics (the batched
 paths stay argmax-exact / bit-identical to the serial reference).

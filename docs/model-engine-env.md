@@ -80,15 +80,22 @@ continuous-batching scheduler.
 | `FAK_NATIVE_KV_MAX_BLOCKS` | int >= 1 (paged-KV blocks) | unset / invalid / <=0 = preemption disabled | Enable the native scheduler's KV pressure path and set the live block budget. When the running set exceeds the budget, the scheduler preempts a victim at a decode-step boundary and readmits it later. | `internal/modelengine/modelengine.go:239` |
 | `FAK_NATIVE_KV_BLOCK_TOKENS` | int >= 1 (tokens per block) | unset / invalid / <=0 = `16` | Override the block size used by the scheduler's paged-KV budget estimator and swap pool. | `internal/modelengine/modelengine.go:244` |
 | `FAK_NATIVE_KV_PREEMPT_MODE` | enum: `swap`, `swap-to-host`, `recompute` | unset = `swap` | Select how a preempted lane releases KV: serialize paged KV to host bytes (`swap`) or drop KV and replay prompt+generated tokens on readmit (`recompute`). | `internal/modelengine/modelengine.go:249` |
-| `FAK_NATIVE_KV_VICTIM_RULE` | enum: `most-recent`, `newest`, `cost-aware`, `cost`, `kvbm` | unset = `most-recent` | Select the live KV-pressure victim rule. In the native scheduler, `cost-aware`/`kvbm` uses the shared KVBM picker over scheduler-local reuse and pin hints. In the in-kernel planner's radix cache, it selects the cost-aware radix victim rule under `FAK_INKERNEL_RADIX_BUDGET` pressure. | `internal/modelengine/modelengine.go:258`, `internal/agent/inkernel_planner.go:175` |
+| `FAK_NATIVE_KV_VICTIM_RULE` | enum: `most-recent`, `newest`, `cost-aware`, `cost`, `kvbm` | unset = `most-recent` | Select the live KV-pressure victim rule. In the native scheduler, `cost-aware`/`kvbm` uses the shared KVBM picker over scheduler-local reuse and TTL-bounded pin hints. In the in-kernel planner's radix cache, it selects the cost-aware radix victim rule under `FAK_INKERNEL_RADIX_BUDGET` pressure. | `internal/modelengine/modelengine.go:258`, `internal/agent/inkernel_planner.go:175` |
 
 When `fak serve` attaches the native scheduler as the KV-preemption metrics writer,
 the live `/metrics` surface emits the `fak_sched_preempt_*` family from
 `internal/modelengine/nativesched_preempt.go:153`: active rule, used/max blocks,
-candidate and pinned counts from the last victim pass, cost-aware victim count,
-swap/recompute/readmit totals, swap bytes, restored bytes, and the last victim's
-cost score. The cost-aware validation witness is
+candidate, active-pinned, and expired-pin counts from the last victim pass,
+cost-aware victim count, cumulative pin-expiry count, swap/recompute/readmit
+totals, swap bytes, restored bytes, and the last victim's cost score. The cost-aware validation witness is
 `TestNativeSchedulerCostAwarePreemptionPreservesOutputAndPins`.
+
+For native scheduler cost-aware KVBM hints, callers can set `ToolCall.Meta`
+`kv_reuse_hits` / `kv.reuse_hits`, `kv_pin` / `kv.pin` / `kv_preempt_pin` /
+`kv.preempt_pin`, and `kv_pin_ttl_ms` / `kv.pin_ttl_ms` /
+`kv_preempt_pin_ttl_ms` / `kv.preempt_pin_ttl_ms`. A pin with no explicit TTL
+defaults to a one-minute lease; expired pins are counted and become evictable
+again rather than becoming permanent residency.
 
 The in-kernel chat planner also owns a process-local `radixkv` prefix cache when it
 runs on the CPU-session path (`backend == nil`). Its cache-specific knobs are:

@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -23,6 +24,7 @@ import (
 const (
 	nativePreemptVictimMostRecent = "most-recent"
 	nativePreemptVictimCostAware  = "cost-aware"
+	nativeKVBMDefaultPinTTL       = time.Minute
 )
 
 // NativePreemptionMode selects how the scheduler releases a victim's KV under pressure.
@@ -85,12 +87,14 @@ type NativePreemptionStats struct {
 	VictimRule        NativePreemptionVictimRule
 	CostAwareVictims  int64
 	PinnedSkipped     int64
+	ExpiredPins       int64
 	LastVictimCost    float64
 	LastVictimTokens  int
 	LastVictimBlocks  int
 	LastVictimHits    int
 	LastCandidates    int
 	LastPinned        int
+	LastExpiredPins   int
 }
 
 // SetKVPreemptionPolicy configures the scheduler's opt-in paged-KV preemption path. It is
@@ -166,6 +170,8 @@ func writeNativePreemptionMetrics(b *strings.Builder, st NativePreemptionStats) 
 	fmt.Fprintf(b, "%slast_candidates %d\n", p, st.LastCandidates)
 	writeNativeHelpType(b, p+"last_pinned", "Pinned candidate lanes skipped by the last victim-selection pass.", "gauge")
 	fmt.Fprintf(b, "%slast_pinned %d\n", p, st.LastPinned)
+	writeNativeHelpType(b, p+"last_expired_pins", "Pinned candidate lanes whose TTL had expired in the last victim-selection pass.", "gauge")
+	fmt.Fprintf(b, "%slast_expired_pins %d\n", p, st.LastExpiredPins)
 	writeNativeHelpType(b, p+"last_victim_cost", "Cost-aware score of the last selected victim; 0 when no cost-aware victim has been selected.", "gauge")
 	fmt.Fprintf(b, "%slast_victim_cost %g\n", p, st.LastVictimCost)
 	writeNativeHelpType(b, p+"max_wait_rounds", "Oldest current victim's age in readmit rounds (starvation visibility).", "gauge")
@@ -173,6 +179,7 @@ func writeNativePreemptionMetrics(b *strings.Builder, st NativePreemptionStats) 
 	writeNativeCounter(b, p+"total", "Sequences preempted under KV-block exhaustion.", st.Preemptions)
 	writeNativeCounter(b, p+"cost_aware_total", "Sequences preempted by the cost-aware KVBM victim picker.", st.CostAwareVictims)
 	writeNativeCounter(b, p+"pinned_skipped_total", "Pinned lanes skipped by the cost-aware KVBM victim picker.", st.PinnedSkipped)
+	writeNativeCounter(b, p+"pin_expired_total", "Pinned lanes whose KVBM pin TTL had expired when considered by the cost-aware victim picker.", st.ExpiredPins)
 	writeNativeCounter(b, p+"swap_total", "Preemptions taken via KV swap-to-host.", st.SwapPreemptions)
 	writeNativeCounter(b, p+"recompute_total", "Preemptions taken via drop-and-recompute.", st.RecomputeCount)
 	writeNativeCounter(b, p+"swap_bytes_total", "KV bytes swapped out to host DRAM.", st.SwapBytes)
@@ -383,21 +390,26 @@ func (s *NativeScheduler) costAwarePreemptibleLaneLocked() int {
 	}
 	spans := make([]compute.KVSpanStats, 0, len(s.lanes))
 	laneIndexes := make([]int, 0, len(s.lanes))
-	pinned := 0
+	pinned, expired := 0, 0
+	now := time.Now()
 	for i, ln := range s.lanes {
-		stats, ok := s.laneKVCostStatsLocked(ln)
+		stats, ok := s.laneKVCostStatsLockedAt(ln, now)
 		if !ok {
 			continue
 		}
 		if stats.Pinned {
 			pinned++
+		} else if ln.kvPinExpired(now) {
+			expired++
 		}
 		spans = append(spans, stats)
 		laneIndexes = append(laneIndexes, i)
 	}
 	s.preemptStats.LastCandidates = len(spans)
 	s.preemptStats.LastPinned = pinned
+	s.preemptStats.LastExpiredPins = expired
 	s.preemptStats.PinnedSkipped += int64(pinned)
+	s.preemptStats.ExpiredPins += int64(expired)
 	victim := compute.PickEvictionVictim(spans)
 	if victim < 0 {
 		return -1
@@ -411,6 +423,10 @@ func (s *NativeScheduler) costAwarePreemptibleLaneLocked() int {
 }
 
 func (s *NativeScheduler) laneKVCostStatsLocked(ln *schedLane) (compute.KVSpanStats, bool) {
+	return s.laneKVCostStatsLockedAt(ln, time.Now())
+}
+
+func (s *NativeScheduler) laneKVCostStatsLockedAt(ln *schedLane, now time.Time) (compute.KVSpanStats, bool) {
 	if ln == nil || ln.terminal || ln.ctx.Err() != nil || ln.sess == nil {
 		return compute.KVSpanStats{}, false
 	}
@@ -427,8 +443,22 @@ func (s *NativeScheduler) laneKVCostStatsLocked(ln *schedLane) (compute.KVSpanSt
 		Bytes:    int64(blocks * s.blockTokensLocked()),
 		Hits:     ln.kvReuseHits,
 		LastUsed: uint64(ln.seqNo),
-		Pinned:   ln.kvPinned,
+		Pinned:   ln.kvPinActive(now),
 	}, true
+}
+
+func (ln *schedLane) kvPinActive(now time.Time) bool {
+	if ln == nil || !ln.kvPinned {
+		return false
+	}
+	if ln.kvPinUntil.IsZero() {
+		return true
+	}
+	return now.Before(ln.kvPinUntil)
+}
+
+func (ln *schedLane) kvPinExpired(now time.Time) bool {
+	return ln != nil && ln.kvPinned && !ln.kvPinUntil.IsZero() && !now.Before(ln.kvPinUntil)
 }
 
 func blocksFromStats(stats compute.KVSpanStats, blockTokens int) int {
@@ -487,10 +517,22 @@ func (s *NativeScheduler) newLaneSession(q4k bool) *model.Session {
 	return sess
 }
 
-func nativeKVBMHintsFromMeta(meta map[string]string) (reuseHits int, pinned bool) {
+func nativeKVBMHintsFromMeta(meta map[string]string) (reuseHits int, pinned bool, pinUntil time.Time) {
+	return nativeKVBMHintsFromMetaAt(meta, time.Now())
+}
+
+func nativeKVBMHintsFromMetaAt(meta map[string]string, now time.Time) (reuseHits int, pinned bool, pinUntil time.Time) {
 	reuseHits = nonNegativeMetaInt(meta, "kv_reuse_hits", "kv.reuse_hits")
 	pinned = metaBool(meta, "kv_pin", "kv.pin", "kv_preempt_pin", "kv.preempt_pin")
-	return reuseHits, pinned
+	if !pinned {
+		return reuseHits, false, time.Time{}
+	}
+	ttl := nativeKVBMDefaultPinTTL
+	if ttlMS := nonNegativeMetaInt(meta, "kv_pin_ttl_ms", "kv.pin_ttl_ms", "kv_preempt_pin_ttl_ms", "kv.preempt_pin_ttl_ms"); ttlMS > 0 {
+		ttl = time.Duration(ttlMS) * time.Millisecond
+	}
+	pinUntil = now.Add(ttl)
+	return reuseHits, pinned, pinUntil
 }
 
 func nonNegativeMetaInt(meta map[string]string, keys ...string) int {

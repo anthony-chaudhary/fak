@@ -97,6 +97,8 @@ func TestNativeSchedulerCostAwarePreemptionMetricsRenderLiveDecision(t *testing.
 		"fak_sched_preempt_pinned_skipped_total 1",
 		"fak_sched_preempt_last_candidates 3",
 		"fak_sched_preempt_last_pinned 1",
+		"fak_sched_preempt_last_expired_pins 0",
+		"fak_sched_preempt_pin_expired_total 0",
 		"fak_sched_preempt_last_victim_cost ",
 		"fak_sched_preempt_recompute_total 1",
 		"fak_sched_preempt_readmitted_total 1",

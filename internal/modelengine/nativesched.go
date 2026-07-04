@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -142,7 +143,7 @@ func (s *NativeScheduler) Admit(ctx context.Context, c *abi.ToolCall) (abi.Engin
 		sess.Q4K = true
 	}
 	logits := sess.Prefill(prompt)
-	kvReuseHits, kvPinned := nativeKVBMHintsFromMeta(c.Meta)
+	kvReuseHits, kvPinned, kvPinUntil := nativeKVBMHintsFromMeta(c.Meta)
 
 	cctx, cancel := context.WithCancel(ctx)
 	ln := &schedLane{
@@ -159,6 +160,7 @@ func (s *NativeScheduler) Admit(ctx context.Context, c *abi.ToolCall) (abi.Engin
 		q4k:         prep.q4k,
 		kvReuseHits: kvReuseHits,
 		kvPinned:    kvPinned,
+		kvPinUntil:  kvPinUntil,
 		tokens:      make(chan abi.EngineToken, 1),
 		done:        make(chan struct{}),
 	}
@@ -400,6 +402,7 @@ type schedLane struct {
 	q4k         bool
 	kvReuseHits int
 	kvPinned    bool
+	kvPinUntil  time.Time
 	terminal    bool
 	seqNo       int64
 
