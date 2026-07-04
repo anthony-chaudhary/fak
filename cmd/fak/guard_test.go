@@ -97,6 +97,27 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"Monitor allowed", "Monitor", `{}`, abi.VerdictAllow},
 		{"ReadMcpResourceTool allowed (read-only)", "ReadMcpResourceTool", `{"uri":"x"}`, abi.VerdictAllow},
 
+		// Codex uses snake_case host tool names. These must be admitted too, or a
+		// `fak guard -- codex` / `fakc` /goal turn loops on DEFAULT_DENY(update_plan)
+		// before it can inspect anything. shell_command is effectful, so the floor also
+		// carries explicit command-value deny rules for its dangerous shapes.
+		{"Codex update_plan allowed (planning seam)", "update_plan", `{"plan":[{"step":"inspect","status":"in_progress"}]}`, abi.VerdictAllow},
+		{"Codex goal read allowed", "get_goal", `{}`, abi.VerdictAllow},
+		{"Codex goal update allowed", "update_goal", `{"status":"complete"}`, abi.VerdictAllow},
+		{"Codex MCP resource list allowed", "list_mcp_resources", `{}`, abi.VerdictAllow},
+		{"Codex MCP resource read allowed", "read_mcp_resource", `{"server":"dos","uri":"x"}`, abi.VerdictAllow},
+		{"Codex tool search allowed", "tool_search_tool", `{"query":"dos verify"}`, abi.VerdictAllow},
+		{"Codex shell command benign allowed", "shell_command", `{"command":"git status --short","workdir":"C:\\work\\fak"}`, abi.VerdictAllow},
+		{"Codex shell command rm -rf denied", "shell_command", `{"command":"rm -rf /tmp/x"}`, abi.VerdictDeny},
+		{"Codex shell command Remove-Item -Recurse denied", "shell_command", `{"command":"Remove-Item -Recurse -Force C:\\work"}`, abi.VerdictDeny},
+		{"Codex namespaced update_plan allowed", "functions.update_plan", `{"plan":[{"step":"inspect","status":"in_progress"}]}`, abi.VerdictAllow},
+		{"Codex namespaced goal read allowed", "functions.get_goal", `{}`, abi.VerdictAllow},
+		{"Codex namespaced tool search allowed", "tool_search.tool_search_tool", `{"query":"dos verify"}`, abi.VerdictAllow},
+		{"Codex namespaced parallel wrapper allowed", "multi_tool_use.parallel", `{"tool_uses":[]}`, abi.VerdictAllow},
+		{"Codex namespaced shell command benign allowed", "functions.shell_command", `{"command":"git status --short","workdir":"C:\\work\\fak"}`, abi.VerdictAllow},
+		{"Codex namespaced shell command rm -rf denied", "functions.shell_command", `{"command":"rm -rf /tmp/x"}`, abi.VerdictDeny},
+		{"Codex namespaced shell command Remove-Item -Recurse denied", "functions.shell_command", `{"command":"Remove-Item -Recurse -Force C:\\work"}`, abi.VerdictDeny},
+
 		// The broader ultracode orchestration surface is admitted so a full-toolset turn never
 		// leaves these names as silent prune-candidates. The work-spawners re-adjudicate their
 		// effects through this same floor (Workflow's agents, EnterWorktree's later writes,

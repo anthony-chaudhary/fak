@@ -42,7 +42,14 @@ const guardResourceSampleInterval = 2 * time.Second
 //
 // The allow-list also admits the host harness's ORCHESTRATION + deferred-tool-loading +
 // read-only-MCP surface (Agent/Task*/SendMessage/Monitor/ScheduleWakeup/EnterPlanMode/
-// AskUserQuestion/ToolSearch/Read*McpResource*). These are NOT capability grants: a
+// AskUserQuestion/ToolSearch/Read*McpResource*). It also admits the Codex-native
+// names for the same host plumbing (update_plan, request_user_input, get/update_goal,
+// list/read MCP resources, tool_search_tool, and shell_command with the same danger
+// arg-rules as Bash/PowerShell), including the namespace-qualified spellings some Codex
+// surfaces expose (`functions.shell_command`, `tool_search.tool_search_tool`,
+// `multi_tool_use.parallel`). That keeps `fak guard -- codex` from DEFAULT_DENYing the
+// harness's own planning seam before the agent can do real work. These are NOT
+// capability grants: a
 // subagent the floor lets the agent SPAWN makes its own tool calls back through this same
 // gateway, so every real effect is re-adjudicated downstream — the floor is unchanged, the
 // agent just keeps its task/subagent/plan plumbing. ToolSearch in particular is load-bearing
