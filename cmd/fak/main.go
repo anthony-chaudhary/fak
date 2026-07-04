@@ -408,6 +408,10 @@ func main() {
 		cmdPropagationScorecard(os.Args[2:])
 	case "propagation-debt-dispatch":
 		cmdPropagationDebtDispatch(os.Args[2:])
+	case "unwired-scorecard":
+		cmdUnwiredScorecard(os.Args[2:])
+	case "unwired-debt-dispatch":
+		cmdUnwiredDebtDispatch(os.Args[2:])
 	case "maturity":
 		cmdMaturity(os.Args[2:])
 	case "token-defaults-scorecard":
@@ -541,6 +545,7 @@ func cmdRun(argv []string) {
 // cmdRunTrace replays a trace through the kernel (the original `fak run`).
 func cmdRunTrace(argv []string) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
+	verbFlagUsage(fs, "run")
 	trace := fs.String("trace", "", "path to a trace JSON file")
 	engineID := fs.String("engine", "inkernel", "engine id (inkernel: the fused in-kernel model; mock; cassette)")
 	vdso := fs.Bool("vdso", true, "enable the vDSO fast path")
@@ -577,6 +582,7 @@ func cmdRunTrace(argv []string) {
 // fak preflight  -  run only the pre-flight/grammar rungs over one call.
 func cmdPreflight(argv []string) {
 	fs := flag.NewFlagSet("preflight", flag.ExitOnError)
+	verbFlagUsage(fs, "preflight")
 	tool := fs.String("tool", "", "tool name")
 	args := fs.String("args", "{}", "tool args as JSON")
 	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
