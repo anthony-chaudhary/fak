@@ -52,6 +52,11 @@ const (
 	savingsDollarStatusMixed = "mixed"
 )
 
+// CacheCreationTierProvenanceGatewayAttributed marks a row's CacheCreationTokensUpgraded
+// split as fak's own per-turn upgrade witness (#2179) rather than a provider-reported
+// value — the Anthropic usage block never splits 5m vs 1h creation tokens itself.
+const CacheCreationTierProvenanceGatewayAttributed = "gateway_attributed"
+
 // SavingsPricing is the caller-supplied base price for the model in play. DollarBlind
 // keeps zero-dollar rows explicit when the live session has provider counters but no
 // trusted price table, so $0 cannot be read as a priced no-savings result.
@@ -75,6 +80,15 @@ type SavingsObservation struct {
 	CacheCreationTokens  uint64
 	OutputTokens         uint64
 	CompactionShedTokens uint64
+
+	// CacheCreationTokensUpgraded is the subset of CacheCreationTokens written while
+	// the managed-cache 1h TTL-upgrade rung (--managed-cache) was active for that
+	// turn (#2179). GATEWAY_ATTRIBUTED, not provider-reported: the Anthropic usage
+	// block never splits 5m vs 1h creation tokens, so a caller with no attribution
+	// signal (e.g. a plain dev-session transcript with no fak gateway in the loop)
+	// leaves this 0, and WritePremiumUSD falls back to pricing the whole total at
+	// the 5m tier, byte-identical to before this field existed.
+	CacheCreationTokensUpgraded uint64
 
 	Pricing SavingsPricing
 }
@@ -104,6 +118,15 @@ type SavingsRow struct {
 	CacheReadTokens     uint64 `json:"cache_read_tokens"`
 	CacheCreationTokens uint64 `json:"cache_creation_tokens"`
 	OutputTokens        uint64 `json:"output_tokens"`
+
+	// CacheCreationTokensUpgraded is the subset of CacheCreationTokens attributed to
+	// the managed-cache 1h TTL tier; CacheCreationTierProvenance names the source of
+	// that attribution ("gateway_attributed" — fak's own per-turn upgrade witness,
+	// since the provider wire never splits 5m vs 1h creation tokens, #2179). Both are
+	// absent/zero when the observation carried no attribution, in which case
+	// WritePremiumUSD prices the whole CacheCreationTokens total at the 5m tier.
+	CacheCreationTokensUpgraded uint64 `json:"cache_creation_tokens_upgraded,omitempty"`
+	CacheCreationTierProvenance string `json:"cache_creation_tier_provenance,omitempty"`
 
 	// CompactionShedTokens is the input tokens `--compact-history-budget` (#745)
 	// dropped before the turn was sent — a fak-authored token saving on the spend side.
@@ -197,6 +220,20 @@ type OwnerAttributionBucket struct {
 	FakVDSOAvoidedCalls     uint64   `json:"fak_vdso_avoided_calls"`
 }
 
+// ComponentHealth is the per-cache-plane status row in the roll-up. It answers the
+// operational question "which component is working, missing, dollar-blind, or only
+// indirectly evidenced?" without making the reader infer that from three ledgers.
+type ComponentHealth struct {
+	Plane      string `json:"plane"`
+	Component  string `json:"component"`
+	Owner      string `json:"owner"`
+	Fidelity   string `json:"fidelity"` // lossless | lossy | recoverable | passive
+	Evidence   string `json:"evidence"` // WITNESSED | OBSERVED
+	Status     string `json:"status"`   // measured | insufficient | missing | dollar_blind
+	Reason     string `json:"reason"`
+	NextAction string `json:"next_action,omitempty"`
+}
+
 // FakShareOfTotalPct is fak's share of this period's total cache-value
 // token-equivalents, in percent. ok is false when the total is zero or negative
 // (nothing recorded, or a provider write premium that outweighed every saving) —
@@ -236,13 +273,17 @@ func NewSavingsRows(obs SavingsObservation, now time.Time) []SavingsRow {
 		row.CacheReadTokens = obs.CacheReadTokens
 		row.CacheCreationTokens = obs.CacheCreationTokens
 		row.OutputTokens = obs.OutputTokens
-		row.SavedTokenEquiv = providerSavedTokenEquiv(obs.CacheReadTokens, obs.CacheCreationTokens)
+		row.CacheCreationTokensUpgraded = clampUpgraded(obs.CacheCreationTokens, obs.CacheCreationTokensUpgraded)
+		if row.CacheCreationTokensUpgraded > 0 {
+			row.CacheCreationTierProvenance = CacheCreationTierProvenanceGatewayAttributed
+		}
+		row.SavedTokenEquiv = providerSavedTokenEquiv(obs.CacheReadTokens, obs.CacheCreationTokens, row.CacheCreationTokensUpgraded)
 		row.NetSavedTokenEquiv = row.SavedTokenEquiv
 		row.InputPerMTokUSD = obs.Pricing.InputPerMTokUSD
 		row.OutputPerMTokUSD = obs.Pricing.OutputPerMTokUSD
 		row.RebateUSD = perMTok(obs.Pricing.InputPerMTokUSD, float64(obs.CacheReadTokens)*(1-providerCacheReadMultiplier))
-		row.WritePremiumUSD = perMTok(obs.Pricing.InputPerMTokUSD, float64(obs.CacheCreationTokens)*(vcachegov.WriteMult5Minutes-1))
-		row.SpendUSD = providerSpendUSD(obs)
+		row.WritePremiumUSD = perMTok(obs.Pricing.InputPerMTokUSD, blendedCacheWriteTokenEquiv(obs.CacheCreationTokens, row.CacheCreationTokensUpgraded)-float64(obs.CacheCreationTokens))
+		row.SpendUSD = providerSpendUSD(obs, row.CacheCreationTokensUpgraded)
 		row.NetUSD = row.NetUSDComputed()
 		normalizeSavingsDimensions(&row)
 		rows = append(rows, row)
@@ -264,16 +305,45 @@ func NewSavingsRows(obs SavingsObservation, now time.Time) []SavingsRow {
 	return rows
 }
 
-func providerSavedTokenEquiv(read, creation uint64) float64 {
-	return float64(read)*(1-providerCacheReadMultiplier) + float64(creation)*(1-vcachegov.WriteMult5Minutes)
+// providerSavedTokenEquiv is the read rebate plus the write axis's saved-token-equiv
+// (baseline uncached cost minus what was actually billed, blended across the 1h/5m
+// tiers per creationUpgraded — see blendedCacheWriteTokenEquiv). creationUpgraded=0
+// reproduces the prior all-5m convention byte-for-byte.
+func providerSavedTokenEquiv(read, creation, creationUpgraded uint64) float64 {
+	return float64(read)*(1-providerCacheReadMultiplier) + float64(creation) - blendedCacheWriteTokenEquiv(creation, creationUpgraded)
 }
 
-func providerSpendUSD(obs SavingsObservation) float64 {
+// providerSpendUSD is the API dollars still incurred this session: the uncached
+// input remainder, the cache-read axis at its 0.1x rebate, and the cache-creation
+// axis blended across the 1h/5m tiers per creationUpgraded (#2179), plus output.
+// creationUpgraded=0 reproduces the prior all-5m convention byte-for-byte.
+func providerSpendUSD(obs SavingsObservation, creationUpgraded uint64) float64 {
 	inTok := float64(obs.InputTokens) +
 		float64(obs.CacheReadTokens)*providerCacheReadMultiplier +
-		float64(obs.CacheCreationTokens)*vcachegov.WriteMult5Minutes
+		blendedCacheWriteTokenEquiv(obs.CacheCreationTokens, creationUpgraded)
 	outTok := float64(obs.OutputTokens)
 	return perMTok(obs.Pricing.InputPerMTokUSD, inTok) + perMTok(obs.Pricing.OutputPerMTokUSD, outTok)
+}
+
+// blendedCacheWriteTokenEquiv is the actual billed token-equivalent for `total`
+// cache-creation tokens, split across the 1h and 5m write tiers: `upgraded` (clamped
+// to `total`) prices at vcachegov.WriteMult1Hour, the remainder at
+// vcachegov.WriteMult5Minutes — the same convention vcachegov.ProveTelemetrySavings
+// applies when a caller supplies Ephemeral1hInputTokens. upgraded=0 reproduces the
+// pre-#2179 flat 5m-tier pricing byte-for-byte.
+func blendedCacheWriteTokenEquiv(total, upgraded uint64) float64 {
+	upgraded = clampUpgraded(total, upgraded)
+	remainder := total - upgraded
+	return float64(upgraded)*vcachegov.WriteMult1Hour + float64(remainder)*vcachegov.WriteMult5Minutes
+}
+
+// clampUpgraded caps upgraded at total so an inconsistent (upgraded > total) pair
+// from a caller can never inflate the priced total.
+func clampUpgraded(total, upgraded uint64) uint64 {
+	if upgraded > total {
+		return total
+	}
+	return upgraded
 }
 
 func perMTok(price, tokens float64) float64 {
@@ -468,6 +538,7 @@ type TwoTrackReport struct {
 
 	OwnerAttribution []OwnerAttributionBucket `json:"owner_attribution"`
 	FleetBenefit     FleetBenefitReport       `json:"fleet_benefit"`
+	ComponentHealth  []ComponentHealth        `json:"component_health,omitempty"`
 
 	// DevSessionBenefit is Track 3 (see devsession.go): the same provider_prompt_cache
 	// economics priced over real, un-proxied Claude Code session transcripts. Set by the
@@ -513,6 +584,7 @@ func FoldTwoTrack(track1 []cachevalueledger.Row, track2 []SavingsRow, now time.T
 func FoldTwoTrackWithUsage(track1 []cachevalueledger.Row, track2 []SavingsRow, usage []gatewayusageledger.Row, now time.Time, opts FleetBenefitOptions) TwoTrackReport {
 	t1 := Fold(track1, now)
 	t2 := foldSavings(track2)
+	fleet := FoldFleetBenefit(track1, track2, usage, opts)
 
 	rep := TwoTrackReport{
 		Schema:           Schema,
@@ -520,7 +592,8 @@ func FoldTwoTrackWithUsage(track1 []cachevalueledger.Row, track2 []SavingsRow, u
 		Track1:           t1,
 		Track2:           t2,
 		OwnerAttribution: foldOwnerAttribution(t1.Buckets, t2),
-		FleetBenefit:     FoldFleetBenefit(track1, track2, usage, opts),
+		FleetBenefit:     fleet,
+		ComponentHealth:  foldComponentHealth(t1, t2, fleet),
 		ProjectionFence:  projectionFence,
 		OK:               true,
 		Verdict:          "INSUFFICIENT",
@@ -568,6 +641,99 @@ func FoldTwoTrackWithUsage(track1 []cachevalueledger.Row, track2 []SavingsRow, u
 		rep.NextAction = "accumulate guard/serve/run sessions into both ledgers, then re-roll"
 	}
 	return rep
+}
+
+func foldComponentHealth(t1 Report, t2 []SavingsBucket, fleet FleetBenefitReport) []ComponentHealth {
+	out := []ComponentHealth{{
+		Plane:     "local_kv",
+		Component: "kernel_prefix_reuse",
+		Owner:     "fak",
+		Fidelity:  "lossless",
+		Evidence:  "WITNESSED",
+		Status:    "insufficient",
+		Reason:    t1.Finding,
+	}}
+	if t1.Verdict == "MEASURED" {
+		out[0].Status = "measured"
+	} else {
+		out[0].NextAction = t1.NextAction
+	}
+
+	provider := ComponentHealth{
+		Plane:      "provider_prompt_cache",
+		Component:  "provider_prompt_cache",
+		Owner:      "provider",
+		Fidelity:   "lossless",
+		Evidence:   "OBSERVED",
+		Status:     "missing",
+		Reason:     "no provider prompt-cache rows in Track 2",
+		NextAction: "append provider cache_read/cache_creation evidence to the Track-2 savings ledger",
+	}
+	providerBuckets, providerBlind := 0, 0
+	for _, b := range t2 {
+		if b.Mechanism != "provider_prompt_cache" {
+			continue
+		}
+		providerBuckets++
+		if b.DollarStatus == SavingsDollarStatusBlind {
+			providerBlind++
+		}
+	}
+	if providerBuckets > 0 {
+		provider.Status = "measured"
+		provider.Reason = fmt.Sprintf("%d provider prompt-cache bucket(s) folded from Track 2", providerBuckets)
+		provider.NextAction = ""
+		if providerBlind == providerBuckets {
+			provider.Status = "dollar_blind"
+			provider.Reason = "provider cache token evidence exists, but no trusted price was configured"
+			provider.NextAction = "configure a trusted base price before treating Track-2 provider rows as dollars"
+		}
+	}
+	out = append(out, provider)
+
+	compaction := ComponentHealth{
+		Plane:      "context_compression",
+		Component:  "compaction_shed",
+		Owner:      "fak",
+		Fidelity:   "lossy",
+		Evidence:   "WITNESSED",
+		Status:     "missing",
+		Reason:     "no fak-authored compaction/context-shed tokens recorded",
+		NextAction: "enable or exercise fak compaction/headroom paths and append savings rows",
+	}
+	if fleet.ContextExtensionTokens > 0 || hasCompactionBucket(t2) {
+		compaction.Status = "measured"
+		compaction.Reason = fmt.Sprintf("%d context-extension token(s) attributed to fak compaction", fleet.ContextExtensionTokens)
+		compaction.NextAction = ""
+	}
+	out = append(out, compaction)
+
+	usage := ComponentHealth{
+		Plane:      "gateway_usage",
+		Component:  "guard_serve_usage_ledger",
+		Owner:      "fak",
+		Fidelity:   "passive",
+		Evidence:   "WITNESSED",
+		Status:     "missing",
+		Reason:     "gateway usage ledger has no rows in this report window",
+		NextAction: "run guard/serve sessions that append gateway-usage rows",
+	}
+	if fleet.UsageRows > 0 {
+		usage.Status = "measured"
+		usage.Reason = fmt.Sprintf("%d gateway usage row(s), %d exit session(s)", fleet.UsageRows, fleet.ExitSessions)
+		usage.NextAction = ""
+	}
+	out = append(out, usage)
+	return out
+}
+
+func hasCompactionBucket(buckets []SavingsBucket) bool {
+	for _, b := range buckets {
+		if b.CompactionShedTokens > 0 || b.Provider == "fak" || strings.HasPrefix(b.Mechanism, "compaction") {
+			return true
+		}
+	}
+	return false
 }
 
 func allSavingsBucketsDollarBlind(buckets []SavingsBucket) bool {
@@ -658,47 +824,66 @@ func RenderTwoTrack(r TwoTrackReport) string {
 	fmt.Fprintf(&sb, "\nTrack 2 (OBSERVED $, provider-relayed cost projection)\n")
 	if len(r.Track2) == 0 {
 		fmt.Fprintf(&sb, "  no OBSERVED-$ rows yet (Track-2 ledger empty)\n")
-		return sb.String()
-	}
-	if r.DollarBlindRows > 0 {
-		fmt.Fprintf(&sb, "  pricing: %d row(s) dollar-blind (no price configured); zero dollar fields are placeholders, not priced savings\n",
-			r.DollarBlindRows)
-	}
-	fmt.Fprintf(&sb, "  %-9s  %-16s  %-23s  %5s  %10s  %10s  %10s  %10s  %12s  %-13s  %s\n",
-		"week", "provider", "mechanism", "sess", "rebate$", "compact$", "writeprem$", "spend$", "net$", "pricing", "cumulative$ (break-even)")
-	for _, b := range r.Track2 {
-		be := ""
-		if b.BrokeEven {
-			be = "  >= break-even"
+	} else {
+		if r.DollarBlindRows > 0 {
+			fmt.Fprintf(&sb, "  pricing: %d row(s) dollar-blind (no price configured); zero dollar fields are placeholders, not priced savings\n",
+				r.DollarBlindRows)
 		}
-		pricing := b.DollarStatus
-		if pricing == "" {
-			pricing = "priced"
+		fmt.Fprintf(&sb, "  %-9s  %-16s  %-23s  %5s  %10s  %10s  %10s  %10s  %12s  %-13s  %s\n",
+			"week", "provider", "mechanism", "sess", "rebate$", "compact$", "writeprem$", "spend$", "net$", "pricing", "cumulative$ (break-even)")
+		for _, b := range r.Track2 {
+			be := ""
+			if b.BrokeEven {
+				be = "  >= break-even"
+			}
+			pricing := b.DollarStatus
+			if pricing == "" {
+				pricing = "priced"
+			}
+			fmt.Fprintf(&sb, "  %-9s  %-16s  %-23s  %5d  %10.4f  %10.4f  %10.4f  %10.4f  %12.4f  %-13s  %12.4f%s\n",
+				b.Period, b.Provider, b.Mechanism, b.Sessions, b.RebateUSD, b.CompactionSavedUSD, b.WritePremiumUSD, b.SpendUSD,
+				b.NetUSD, pricing, b.CumulativeNetUSD, be)
 		}
-		fmt.Fprintf(&sb, "  %-9s  %-16s  %-23s  %5d  %10.4f  %10.4f  %10.4f  %10.4f  %12.4f  %-13s  %12.4f%s\n",
-			b.Period, b.Provider, b.Mechanism, b.Sessions, b.RebateUSD, b.CompactionSavedUSD, b.WritePremiumUSD, b.SpendUSD,
-			b.NetUSD, pricing, b.CumulativeNetUSD, be)
 	}
+	sb.WriteString(RenderComponentHealth(r.ComponentHealth))
 	fmt.Fprintf(&sb, "\nOwner attribution (token-equiv; provider prompt-cache vs fak-authored)\n")
 	if len(r.OwnerAttribution) == 0 {
 		fmt.Fprintf(&sb, "  no owner-attribution rows yet\n")
-		return sb.String()
-	}
-	fmt.Fprintf(&sb, "  fak_share = fak_teq / (provider_teq + fak_teq), over rows RECORDED in the two ledgers; \"-\" when the period total is not positive\n")
-	fmt.Fprintf(&sb, "  %-9s  %13s  %10s  %10s  %10s  %11s  %s\n",
-		"week", "provider_teq", "fak_teq", "fak_share", "kv_tok", "compact_tok", "vdso_calls")
-	for _, b := range r.OwnerAttribution {
-		share := "-"
-		if pct, ok := b.FakShareOfTotalPct(); ok {
-			share = fmt.Sprintf("%.4f%%", pct)
+	} else {
+		fmt.Fprintf(&sb, "  fak_share = fak_teq / (provider_teq + fak_teq), over rows RECORDED in the two ledgers; \"-\" when the period total is not positive\n")
+		fmt.Fprintf(&sb, "  %-9s  %13s  %10s  %10s  %10s  %11s  %s\n",
+			"week", "provider_teq", "fak_teq", "fak_share", "kv_tok", "compact_tok", "vdso_calls")
+		for _, b := range r.OwnerAttribution {
+			share := "-"
+			if pct, ok := b.FakShareOfTotalPct(); ok {
+				share = fmt.Sprintf("%.4f%%", pct)
+			}
+			fmt.Fprintf(&sb, "  %-9s  %13.0f  %10.0f  %10s  %10d  %11d  %d\n",
+				b.Period, b.ProviderPromptCacheTokenEquiv, b.FakAuthoredTokenEquiv, share,
+				b.FakKVPrefixReusedTokens, b.FakCompactionShedTokens, b.FakVDSOAvoidedCalls)
 		}
-		fmt.Fprintf(&sb, "  %-9s  %13.0f  %10.0f  %10s  %10d  %11d  %d\n",
-			b.Period, b.ProviderPromptCacheTokenEquiv, b.FakAuthoredTokenEquiv, share,
-			b.FakKVPrefixReusedTokens, b.FakCompactionShedTokens, b.FakVDSOAvoidedCalls)
 	}
 	sb.WriteString(RenderFleetBenefit(r.FleetBenefit))
 	if r.DevSessionBenefit != nil {
 		sb.WriteString(RenderDevSessionBenefit(*r.DevSessionBenefit))
+	}
+	return sb.String()
+}
+
+// RenderComponentHealth renders the per-plane health rows in a compact table. It is
+// separate from RenderFleetBenefit so callers can place it before or after owner
+// attribution without recomputing the report.
+func RenderComponentHealth(rows []ComponentHealth) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "\nComponent health (cache planes and evidence)\n")
+	fmt.Fprintf(&sb, "  %-23s %-24s %-8s %-11s %-9s %-13s %s\n",
+		"plane", "component", "owner", "fidelity", "evidence", "status", "reason")
+	for _, h := range rows {
+		fmt.Fprintf(&sb, "  %-23s %-24s %-8s %-11s %-9s %-13s %s\n",
+			h.Plane, h.Component, h.Owner, h.Fidelity, h.Evidence, h.Status, h.Reason)
 	}
 	return sb.String()
 }

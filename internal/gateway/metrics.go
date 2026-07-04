@@ -65,7 +65,14 @@ type gatewayMetrics struct {
 	// the read total, the session can report NET realized vcache economics (read saving
 	// minus write premium) via the same engine `fak vcache observe` uses offline.
 	inferCacheCreationTokens uint64
-	inferDecodeSecs          float64
+	// inferCacheCreationTokensUpgraded is the SUBSET of inferCacheCreationTokens whose
+	// write happened on a turn where the managed-cache 1h TTL-upgrade rung
+	// (maybeUpgradeAnthropicCacheTTL1H) was already active for the session — GATEWAY-
+	// ATTRIBUTED (fak's own per-turn upgrade witness), never provider-reported: the
+	// Anthropic usage block does not split 5m vs 1h creation tokens (#2179). A turn's
+	// write only lands here when Server.ttl1hActiveFor reports true for its trace.
+	inferCacheCreationTokensUpgraded uint64
+	inferDecodeSecs                  float64
 	// Prefill (time-to-first-token) is split from decode ONLY on a path that can
 	// observe the first content delta — the streaming Anthropic passthrough. On a
 	// buffered turn the planner returns one all-up duration with no observable
@@ -1070,6 +1077,13 @@ type AdjudicationSummary struct {
 	InputTokens         uint64 `json:"input_tokens"`
 	OutputTokens        uint64 `json:"output_tokens"`
 	CacheCreationTokens uint64 `json:"cache_creation_tokens"`
+	// CacheCreationTokensUpgraded is the subset of CacheCreationTokens attributed to the
+	// managed-cache 1h TTL tier (GATEWAY_ATTRIBUTED — fak's own per-turn upgrade witness,
+	// since the provider wire never splits 5m vs 1h creation tokens; see
+	// inferCacheCreationTokensUpgraded). 0 means either the lever was off or every write
+	// stayed on the 5m tier; MechanismSavings/ProviderCacheNetSavings price the remainder
+	// (CacheCreationTokens - CacheCreationTokensUpgraded) at the 5m tier as before (#2179).
+	CacheCreationTokensUpgraded uint64 `json:"cache_creation_tokens_upgraded,omitempty"`
 
 	// Compaction* folds the Anthropic history-compaction visibility into the same guard exit
 	// summary, split WITNESSED (what fak authored) vs OBSERVED (what the provider reported):
@@ -1164,6 +1178,7 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	sum.InputTokens = m.inferPromptTokens
 	sum.OutputTokens = m.inferComplTokens
 	sum.CacheCreationTokens = m.inferCacheCreationTokens
+	sum.CacheCreationTokensUpgraded = m.inferCacheCreationTokensUpgraded
 	m.inferenceMu.Unlock()
 
 	comp := m.compactionSnapshotData()
@@ -1353,6 +1368,20 @@ func (m *gatewayMetrics) observeInferenceTimed(promptTok, complTok, cachedTok, c
 	m.inferenceMu.Unlock()
 }
 
+// recordCacheCreationTierSplit attributes `cacheCreateTok` cache-creation tokens to
+// the managed-cache 1h tier when `upgraded` is true (the session's TTL-upgrade rung
+// was already active for this turn), else leaves them counted only in the unsplit
+// inferCacheCreationTokens total — the same conservative "priced at 5m" convention
+// MechanismSavings/ProviderCacheNetSavings apply to any unattributed write (#2179).
+func (m *gatewayMetrics) recordCacheCreationTierSplit(cacheCreateTok int, upgraded bool) {
+	if m == nil || cacheCreateTok <= 0 || !upgraded {
+		return
+	}
+	m.inferenceMu.Lock()
+	m.inferCacheCreationTokensUpgraded += uint64(cacheCreateTok)
+	m.inferenceMu.Unlock()
+}
+
 func (s *Server) observePlannerRequestMemory() {
 	if s == nil || s.metrics == nil || s.planner == nil {
 		return
@@ -1481,6 +1510,12 @@ func (s *Server) logInferenceTurnWithContextEvent(traceID, wire string, stream b
 	if s == nil {
 		return
 	}
+	// #2179: attribute this turn's cache-creation write to the 1h tier when the
+	// managed-cache TTL-upgrade rung was already active for the session. GATEWAY-
+	// ATTRIBUTED, not provider-reported — the Anthropic usage block never splits 5m
+	// vs 1h creation tokens, so this is fak's own per-turn upgrade witness
+	// (noteCtxValueTTL1h), read BEFORE this turn's write is folded into the total.
+	s.metrics.recordCacheCreationTierSplit(usage.CacheCreationInputTokens, s.ttl1hActiveFor(traceID))
 	// Record this turn into the per-family live-observe window (#935) BEFORE the sink
 	// gates below, so the per-family / governor / warmth view is populated even with
 	// --log off and --debug-stats off. The family is the session/trace prefix; the token

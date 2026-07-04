@@ -226,3 +226,45 @@ func TestMechanismSavingsSumsOwnersAndMechanisms(t *testing.T) {
 		t.Fatalf("vdso avoided calls = %d, want 7", m.FakVDSOAvoidedCalls)
 	}
 }
+
+// TestMechanismSavingsWritePremiumAttributesUpgradedTokensAt1h is the #2179 repro: a
+// session whose cache-creation tokens were ALL written while the managed-cache 1h
+// TTL-upgrade rung was active must price that write at CacheWrite1hMultiplier
+// (2.0x), not the flat CacheWrite5mMultiplier (1.25x) the unattributed convention
+// applies. Before the fix, CacheCreationTokensUpgraded did not exist and every
+// write was priced at 1.25x regardless of the upgrade — under-counting the
+// one-time write premium on every managed-cache session.
+func TestMechanismSavingsWritePremiumAttributesUpgradedTokensAt1h(t *testing.T) {
+	// All 1,000 creation tokens were upgraded: premium = 1000 * (1 - 2.0) = -1000.
+	allUpgraded := AdjudicationSummary{CacheCreationTokens: 1000, CacheCreationTokensUpgraded: 1000}
+	if got := allUpgraded.MechanismSavings().ProviderPromptCacheWritePremiumTokenEquiv; !approx(got, -1000) {
+		t.Fatalf("all-upgraded write premium = %v, want -1000 (2.0x tier)", got)
+	}
+
+	// Half upgraded: 500 at 2.0x (-500) + 500 at 1.25x (-125) = -625.
+	halfUpgraded := AdjudicationSummary{CacheCreationTokens: 1000, CacheCreationTokensUpgraded: 500}
+	if got := halfUpgraded.MechanismSavings().ProviderPromptCacheWritePremiumTokenEquiv; !approx(got, -625) {
+		t.Fatalf("half-upgraded write premium = %v, want -625 (blended 2.0x/1.25x)", got)
+	}
+
+	// Zero upgraded must stay BYTE-IDENTICAL to the pre-split, unattributed 5m-only
+	// convention: 1000 * (1 - 1.25) = -250.
+	unattributed := AdjudicationSummary{CacheCreationTokens: 1000}
+	if got := unattributed.MechanismSavings().ProviderPromptCacheWritePremiumTokenEquiv; !approx(got, -250) {
+		t.Fatalf("unattributed write premium = %v, want -250 (flat 5m convention unchanged)", got)
+	}
+}
+
+// TestProviderCacheNetSavingsPricesUpgradedCreationAt1h proves ProviderCacheNetSavings
+// (the vcachegov-backed proof engine) folds CacheCreationTokensUpgraded into the
+// Ephemeral1hInputTokens axis rather than pricing every write at the 5m tier.
+func TestProviderCacheNetSavingsPricesUpgradedCreationAt1h(t *testing.T) {
+	s := AdjudicationSummary{CacheCreationTokens: 1000, CacheCreationTokensUpgraded: 1000, CachedPromptTokens: 10000}
+	proof := s.ProviderCacheNetSavings()
+	if !approx(proof.Ephemeral1hInputTokens, 1000) {
+		t.Fatalf("Ephemeral1hInputTokens = %v, want 1000 (all creation tokens attributed to 1h)", proof.Ephemeral1hInputTokens)
+	}
+	if !approx(proof.Ephemeral5mInputTokens, 0) {
+		t.Fatalf("Ephemeral5mInputTokens = %v, want 0", proof.Ephemeral5mInputTokens)
+	}
+}

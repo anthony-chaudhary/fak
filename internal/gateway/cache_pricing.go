@@ -216,7 +216,7 @@ func (s AdjudicationSummary) ProviderCacheSavingsUSD(inputPerMTokUSD float64) fl
 // whose prompt_tokens already fold in cached tokens, saved-token-equiv stays exact (the
 // input cancels in baseline-minus-actual) while hit_rate/multiplier read conservatively.
 func (s AdjudicationSummary) ProviderCacheNetSavings() vcachegov.TelemetrySavingsProof {
-	return vcacheProofFromCounters(s.InputTokens, s.CachedPromptTokens, s.CacheCreationTokens)
+	return vcacheProofFromCountersWithUpgrade(s.InputTokens, s.CachedPromptTokens, s.CacheCreationTokens, s.CacheCreationTokensUpgraded)
 }
 
 // MechanismSavings is the owner/mechanism split for cache-like savings that the
@@ -245,10 +245,25 @@ type MechanismSavings struct {
 func (s AdjudicationSummary) MechanismSavings() MechanismSavings {
 	return MechanismSavings{
 		ProviderPromptCacheReadTokenEquiv:         float64(s.CachedPromptTokens) * (1 - CacheReadMultiplier),
-		ProviderPromptCacheWritePremiumTokenEquiv: float64(s.CacheCreationTokens) * (1 - CacheWrite5mMultiplier),
+		ProviderPromptCacheWritePremiumTokenEquiv: splitCacheCreationPremiumTokenEquiv(s.CacheCreationTokens, s.CacheCreationTokensUpgraded),
 		FakCompactionShedTokens:                   s.CompactionShedTokens,
 		FakKVPrefixReusedTokens:                   s.KVPrefixReusedTokens,
 	}
+}
+
+// splitCacheCreationPremiumTokenEquiv is the provider write-premium token-equivalent
+// for `total` cache-creation tokens, split across the 1h and 5m tiers: `upgraded` is
+// the GATEWAY-ATTRIBUTED subset written while the managed-cache 1h TTL rung was
+// active (#2179); the remainder prices at the 5m tier, the same conservative
+// default this file has always applied to an unattributed write. upgraded > total
+// is clamped so an inconsistent pair never inflates the priced total. Negative
+// because a cache write always bills ABOVE the uncached baseline.
+func splitCacheCreationPremiumTokenEquiv(total, upgraded uint64) float64 {
+	if upgraded > total {
+		upgraded = total
+	}
+	remainder := total - upgraded
+	return float64(upgraded)*(1-CacheWrite1hMultiplier) + float64(remainder)*(1-CacheWrite5mMultiplier)
 }
 
 // ProviderTokenEquiv is the net OBSERVED provider prompt-cache effect: read rebate minus
@@ -284,15 +299,31 @@ func (m MechanismSavings) HasAnyTokenActivity() bool {
 // passed EXPLICITLY: vcachegov defaults the WRITE multipliers but NOT the read one, so
 // an unset ReadMult would price cache reads at 0x (free) and overstate the saving. They
 // equal vcachegov's defaults (0.1 / 1.25 / 2.0), so the result is byte-identical to
-// `fak vcache observe` on the same totals. The 1h/5m split is not on the live wire, so
-// the whole creation total is priced at the 5m write tier (the unsplit-creation
-// convention ProveTelemetrySavings itself applies).
+// `fak vcache observe` on the same totals. Callers with no 1h/5m attribution (the
+// per-family/debug rolling snapshots) price the whole creation total at the 5m write
+// tier, same as vcacheProofFromCountersWithUpgrade(..., 0).
 func vcacheProofFromCounters(input, read, creation uint64) vcachegov.TelemetrySavingsProof {
+	return vcacheProofFromCountersWithUpgrade(input, read, creation, 0)
+}
+
+// vcacheProofFromCountersWithUpgrade is vcacheProofFromCounters with `creationUpgraded`
+// (#2179): the GATEWAY-ATTRIBUTED subset of `creation` written while the managed-cache
+// 1h TTL rung was active for that turn — the provider wire itself never splits 5m vs
+// 1h creation tokens, so this is fak's own witness, never provider-reported. Folded into
+// Ephemeral1hInputTokens so ProveTelemetrySavings prices it at the 1h tier; the
+// remainder stays unspecified (creationUpgraded=0 reproduces vcacheProofFromCounters's
+// all-5m pricing byte-for-byte). creationUpgraded > creation is clamped so an
+// inconsistent pair never inflates the priced total.
+func vcacheProofFromCountersWithUpgrade(input, read, creation, creationUpgraded uint64) vcachegov.TelemetrySavingsProof {
+	if creationUpgraded > creation {
+		creationUpgraded = creation
+	}
 	return vcachegov.ProveTelemetrySavings(vcachegov.TelemetrySavingsInput{
 		Rows: []vcachegov.TelemetryRow{{
 			InputTokens:              float64(input),
 			CacheReadInputTokens:     float64(read),
 			CacheCreationInputTokens: float64(creation),
+			Ephemeral1hInputTokens:   float64(creationUpgraded),
 		}},
 		ReadMult:    CacheReadMultiplier,
 		Write5mMult: CacheWrite5mMultiplier,

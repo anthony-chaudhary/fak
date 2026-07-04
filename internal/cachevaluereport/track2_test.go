@@ -206,6 +206,50 @@ func TestFoldTwoTrackOwnerAttributionSeparatesProviderAndFakTokens(t *testing.T)
 	}
 }
 
+func TestFoldTwoTrackComponentHealthNamesPlanesAndFidelity(t *testing.T) {
+	track1 := []cachevalueledger.Row{
+		{Date: "2026-06-22", SessionType: "guard", Turns: 10, PromptTokens: 1000, ReusedTokens: 800},
+	}
+	track2 := []SavingsRow{
+		{
+			Date: "2026-06-22", Provider: "anthropic", Mechanism: "provider_prompt_cache",
+			CacheReadTokens: 1000, SavedTokenEquiv: 900, NetSavedTokenEquiv: 900, RebateUSD: 1,
+		},
+		{
+			Date: "2026-06-22", Provider: "fak", Mechanism: "compaction_shed",
+			CompactionShedTokens: 300, SavedTokenEquiv: 300, NetSavedTokenEquiv: 300,
+		},
+	}
+	rep := FoldTwoTrack(track1, track2, twoTrackNow)
+	byPlane := map[string]ComponentHealth{}
+	for _, h := range rep.ComponentHealth {
+		byPlane[h.Plane] = h
+	}
+	for _, plane := range []string{"local_kv", "provider_prompt_cache", "context_compression", "gateway_usage"} {
+		if _, ok := byPlane[plane]; !ok {
+			t.Fatalf("component_health missing plane %q: %+v", plane, rep.ComponentHealth)
+		}
+	}
+	if h := byPlane["local_kv"]; h.Owner != "fak" || h.Fidelity != "lossless" || h.Evidence != "WITNESSED" || h.Status != "measured" {
+		t.Fatalf("local_kv health = %+v, want fak/lossless/WITNESSED/measured", h)
+	}
+	if h := byPlane["provider_prompt_cache"]; h.Owner != "provider" || h.Fidelity != "lossless" || h.Evidence != "OBSERVED" || h.Status != "measured" {
+		t.Fatalf("provider health = %+v, want provider/lossless/OBSERVED/measured", h)
+	}
+	if h := byPlane["context_compression"]; h.Owner != "fak" || h.Fidelity != "lossy" || h.Status != "measured" {
+		t.Fatalf("compaction health = %+v, want fak/lossy/measured", h)
+	}
+	if h := byPlane["gateway_usage"]; h.Status != "missing" || h.Fidelity != "passive" {
+		t.Fatalf("usage health = %+v, want missing/passive without usage ledger rows", h)
+	}
+	out := RenderTwoTrack(rep)
+	for _, want := range []string{"Component health", "local_kv", "provider_prompt_cache", "context_compression", "lossy"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("render missing component-health field %q:\n%s", want, out)
+		}
+	}
+}
+
 // TestFoldTwoTrackOwnerAttributionFakSharePct pins the pre-divided headline: the
 // bucket carries fak's share of the period total so "what % of the cache value is
 // fak's?" is answered by the report, not left as a division for the reader — and
@@ -298,6 +342,70 @@ func TestNewSavingsRowsSplitsProviderAndCompaction(t *testing.T) {
 	}
 }
 
+// TestNewSavingsRowsPricesUpgradedCreationAt1hTier is the #2179 fix witness: a
+// session whose cache-creation tokens were partly written while the managed-cache
+// 1h TTL-upgrade rung was active must price that slice at the 2.0x tier instead of
+// the flat 1.25x the pre-split convention applied to every write.
+func TestNewSavingsRowsPricesUpgradedCreationAt1hTier(t *testing.T) {
+	rows := NewSavingsRows(SavingsObservation{
+		SessionType:                 "guard",
+		Provider:                    "anthropic",
+		Context:                     "claude",
+		InputTokens:                 1000,
+		CacheReadTokens:             10_000,
+		CacheCreationTokens:         2000,
+		CacheCreationTokensUpgraded: 1200, // 1200 tokens at 2.0x, 800 at 1.25x
+		OutputTokens:                500,
+		Pricing:                     SavingsPricing{InputPerMTokUSD: 5, OutputPerMTokUSD: 25},
+	}, twoTrackNow)
+	if len(rows) != 1 {
+		t.Fatalf("want one provider row, got %d: %+v", len(rows), rows)
+	}
+	row := rows[0]
+	if row.CacheCreationTokensUpgraded != 1200 {
+		t.Fatalf("CacheCreationTokensUpgraded = %d, want 1200", row.CacheCreationTokensUpgraded)
+	}
+	if row.CacheCreationTierProvenance != CacheCreationTierProvenanceGatewayAttributed {
+		t.Fatalf("CacheCreationTierProvenance = %q, want %q", row.CacheCreationTierProvenance, CacheCreationTierProvenanceGatewayAttributed)
+	}
+	// write premium = 1200*(2.0-1) + 800*(1.25-1) = 1200 + 200 = 1400 token-equiv,
+	// priced at $5/MTok = 0.007. The pre-split flat-1.25x convention would have
+	// given 2000*0.25 = 500 token-equiv (0.0025) instead — under-counting the
+	// premium, exactly the #2179 bug.
+	if !approxTrack2(row.WritePremiumUSD, 0.007) {
+		t.Fatalf("WritePremiumUSD = %.6f, want 0.007 (blended 2.0x/1.25x)", row.WritePremiumUSD)
+	}
+	if !approxTrack2(row.NetUSD, row.NetUSDComputed()) {
+		t.Fatalf("NetUSD = %.6f, want recomputed %.6f", row.NetUSD, row.NetUSDComputed())
+	}
+}
+
+// TestNewSavingsRowsZeroUpgradedIsByteIdenticalToUnsplit locks in acceptance
+// bullet 3 of #2179: an observation with no upgrade attribution must price
+// byte-identically to the pre-split convention.
+func TestNewSavingsRowsZeroUpgradedIsByteIdenticalToUnsplit(t *testing.T) {
+	obsBase := SavingsObservation{
+		SessionType:         "guard",
+		Provider:            "anthropic",
+		Context:             "claude",
+		InputTokens:         1000,
+		CacheReadTokens:     10_000,
+		CacheCreationTokens: 2000,
+		OutputTokens:        500,
+		Pricing:             SavingsPricing{InputPerMTokUSD: 5, OutputPerMTokUSD: 25},
+	}
+	unsplit := NewSavingsRows(obsBase, twoTrackNow)[0]
+	obsExplicitZero := obsBase
+	obsExplicitZero.CacheCreationTokensUpgraded = 0
+	explicitZero := NewSavingsRows(obsExplicitZero, twoTrackNow)[0]
+	if explicitZero != unsplit {
+		t.Fatalf("zero-upgraded row diverged from the unsplit row:\n  unsplit:      %+v\n  explicitZero: %+v", unsplit, explicitZero)
+	}
+	if unsplit.CacheCreationTierProvenance != "" {
+		t.Fatalf("CacheCreationTierProvenance = %q, want empty when no upgrade was attributed", unsplit.CacheCreationTierProvenance)
+	}
+}
+
 func TestNewSavingsRowsMarksDollarBlindWithoutPricing(t *testing.T) {
 	rows := NewSavingsRows(SavingsObservation{
 		SessionType:         "guard",
@@ -334,6 +442,16 @@ func TestNewSavingsRowsMarksDollarBlindWithoutPricing(t *testing.T) {
 	}
 	if rep.DollarBlindRows != 1 || len(rep.Track2) != 1 || rep.Track2[0].DollarStatus != SavingsDollarStatusBlind {
 		t.Fatalf("fold did not carry dollar-blind status: %+v", rep)
+	}
+	var providerHealth *ComponentHealth
+	for i := range rep.ComponentHealth {
+		if rep.ComponentHealth[i].Plane == "provider_prompt_cache" {
+			providerHealth = &rep.ComponentHealth[i]
+			break
+		}
+	}
+	if providerHealth == nil || providerHealth.Status != "dollar_blind" {
+		t.Fatalf("provider component health = %+v, want dollar_blind", providerHealth)
 	}
 	out := RenderTwoTrack(rep)
 	if !strings.Contains(out, "dollar-blind") || !strings.Contains(out, "zero dollar fields are placeholders") {

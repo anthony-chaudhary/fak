@@ -427,6 +427,23 @@ func (s *Server) noteCtxValueTTL1h(trace string) {
 	}
 }
 
+// ttl1hActiveFor reports whether the managed-cache 1h TTL-upgrade rung has fired
+// for this trace (noteCtxValueTTL1h), so a cache-creation-token counter can
+// attribute a turn's write to the 1h tier (#2179) instead of the unattributed 5m
+// default. A trace with no recorded session (never upgraded, or an empty trace
+// from a non-session caller) reads false — never true on a guess.
+func (s *Server) ttl1hActiveFor(trace string) bool {
+	if s == nil || strings.TrimSpace(trace) == "" {
+		return false
+	}
+	s.ctxValueMu.Lock()
+	defer s.ctxValueMu.Unlock()
+	if v, ok := s.ctxValue[trace]; ok {
+		return v.ttl1hActive
+	}
+	return false
+}
+
 // ctxValueStateLocked folds the accumulator into the pure policy input.
 func (s *Server) ctxValueStateLocked(v *sessionCtxValue) ctxValueState {
 	return ctxValueState{
