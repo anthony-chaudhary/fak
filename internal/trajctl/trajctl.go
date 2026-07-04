@@ -19,6 +19,10 @@ const (
 	KindScore     = "score"
 )
 
+// DefaultLedgerRel is the trajectory-control ledger path, relative to the repo
+// root, `fak trajctl` uses when no --ledger override is given.
+const DefaultLedgerRel = "docs/nightrun/trajctl.jsonl"
+
 // ObjectiveStatus is the closed lifecycle vocabulary for a live objective.
 type ObjectiveStatus string
 
