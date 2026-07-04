@@ -41,6 +41,34 @@ func TestClaudeGLMGCPPowerShellLauncherPreset(t *testing.T) {
 	}
 }
 
+func TestClaudeQwen36DogfoodLauncherPreset(t *testing.T) {
+	root := repoRootFromTest(t)
+	sh := readRepoTextForClaudeGLMGCP(t, root, "scripts", "dogfood-claude.sh")
+	ps1 := readRepoTextForClaudeGLMGCP(t, root, "scripts", "dogfood-claude.ps1")
+
+	for _, want := range []string{
+		"fak-qwen36-claude)",
+		`PRESET="qwen36-local"`,
+		`DEFAULT_OPENAI_BASE_URL="http://127.0.0.1:8131/v1"`,
+		`DEFAULT_MODEL="lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M"`,
+		`DEFAULT_PROVIDER_EXTRA_BODY='{"top_k":20,"chat_template_kwargs":{"preserve_thinking":true}}'`,
+		`qwen_name="fak-qwen36-claude"`,
+	} {
+		requireContainsForClaudeGLMGCP(t, sh, want)
+	}
+	for _, want := range []string{
+		"'qwen36-local'",
+		"$PresetBaseUrl   = 'http://127.0.0.1:8131/v1'",
+		"$PresetModel     = 'lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M'",
+		`$PresetExtraBody = '{"top_k":20,"chat_template_kwargs":{"preserve_thinking":true}}'`,
+		"fak-qwen36-claude.cmd",
+		"FAK_DOGFOOD_PRESET=qwen36-local",
+		"FAK_PROVIDER_EXTRA_BODY_JSON",
+	} {
+		requireContainsForClaudeGLMGCP(t, ps1, want)
+	}
+}
+
 func TestClaudeGLMGCPBringupPlanWiring(t *testing.T) {
 	root := repoRootFromTest(t)
 	gcp := readRepoTextForClaudeGLMGCP(t, root, "scripts", "gcp-glm-serve.sh")

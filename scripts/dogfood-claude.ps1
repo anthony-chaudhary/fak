@@ -35,7 +35,9 @@
     FAK_DOGFOOD_SHIM_PORT  transformers shim port         (default 8190, auto-bumped if busy)
     FAK_DOGFOOD_MODEL      served model id                (default SmolLM2-135M for shim; qwen2.5-coder:7b for ollama; qwen2.5-7b-q8 for gguf; empty for anthropic)
     FAK_DOGFOOD_CTX        ollama context window          (default 32768; baked via a derived num_ctx model so the ~25K Claude Code prompt is not truncated; 0 disables)
-    FAK_DOGFOOD_PRESET     glm-gcp                        (auto from the invoked name claude-glm-gcp)
+    FAK_DOGFOOD_PRESET     qwen36-local | glm-gcp | mac    (auto from the installed preset shims)
+                             qwen36-local = front a local Qwen3.6 OpenAI-compatible server at
+                             http://127.0.0.1:8131/v1 with the LM Studio Q4_K_M model id
                              glm-gcp = front GLM-5.2 served on the GCP node (scripts/gcp-glm-serve.sh)
                              via the openai backend. Set FAK_GLM_GCP_BASE_URL to its /v1 (a Tailscale
                              host, or a localhost SSH/IAP tunnel; default http://127.0.0.1:8200/v1).
@@ -121,8 +123,22 @@ $PresetBackend    = ''
 $PresetBaseUrl    = ''
 $PresetModel      = ''
 $PresetApiKeyEnv  = ''   # env var holding the upstream bearer token (authenticated remotes)
+$PresetExtraBody  = ''
 if ($Preset) {
   switch ($Preset) {
+    'qwen36' {
+      $Preset = 'qwen36-local'
+      $PresetBackend   = 'openai'
+      $PresetBaseUrl   = 'http://127.0.0.1:8131/v1'
+      $PresetModel     = 'lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M'
+      $PresetExtraBody = '{"top_k":20,"chat_template_kwargs":{"preserve_thinking":true}}'
+    }
+    'qwen36-local' {
+      $PresetBackend   = 'openai'
+      $PresetBaseUrl   = 'http://127.0.0.1:8131/v1'
+      $PresetModel     = 'lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M'
+      $PresetExtraBody = '{"top_k":20,"chat_template_kwargs":{"preserve_thinking":true}}'
+    }
     'glm-gcp' {
       $PresetBackend = 'openai'
       $PresetBaseUrl = if ($env:FAK_GLM_GCP_BASE_URL) { $env:FAK_GLM_GCP_BASE_URL } else { 'http://127.0.0.1:8200/v1' }
@@ -137,7 +153,7 @@ if ($Preset) {
       $PresetModel     = if ($env:FAK_MAC_MODEL)    { $env:FAK_MAC_MODEL }    else { 'lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M' }
       $PresetApiKeyEnv = 'FAK_GATEWAY_KEY'
     }
-    default { Die "unknown FAK_DOGFOOD_PRESET=$Preset (want glm-gcp|mac)" }
+    default { Die "unknown FAK_DOGFOOD_PRESET=$Preset (want qwen36-local|glm-gcp|mac)" }
   }
 }
 
@@ -320,6 +336,12 @@ if ($Mode -eq 'install') {
   $shimBody = "@powershell -NoProfile -ExecutionPolicy Bypass -File `"$self`" %*`r`n"
   [System.IO.File]::WriteAllText($shim, $shimBody, (New-Object System.Text.ASCIIEncoding))
 
+  # Write the fak-qwen36-claude.cmd preset shim: same script, with
+  # FAK_DOGFOOD_PRESET=qwen36-local pinned for the child only.
+  $qwenShim = Join-Path $BinDir 'fak-qwen36-claude.cmd'
+  $qwenShimBody = "@set FAK_DOGFOOD_PRESET=qwen36-local`r`n@powershell -NoProfile -ExecutionPolicy Bypass -File `"$self`" %*`r`n"
+  [System.IO.File]::WriteAllText($qwenShim, $qwenShimBody, (New-Object System.Text.ASCIIEncoding))
+
   # Write the claude-glm-gcp.cmd preset shim: same script, with FAK_DOGFOOD_PRESET=glm-gcp
   # pinned for the child only (a .cmd's `set` is local to its own cmd.exe instance).
   $glmShim = Join-Path $BinDir 'claude-glm-gcp.cmd'
@@ -335,11 +357,12 @@ if ($Mode -eq 'install') {
 
   Log "installed: $(Join-Path $BinDir 'fak.exe')  (copied; re-run --install to refresh)"
   Log "installed: $shim  -> $self"
+  Log "installed: $qwenShim  -> $self (preset qwen36-local)"
   Log "installed: $glmShim  -> $self (preset glm-gcp)"
   Log "installed: $macShim  -> $self (preset mac: fak -> Mac fak serve -> Qwen3.6-27B)"
   $onPath = (($env:PATH -split ';') | ForEach-Object { $_.TrimEnd('\') }) -contains $BinDir.TrimEnd('\')
   if ($onPath) {
-    Log "ready - run ``fak-dogfood --smoke`` or ``fak serve --help`` from anywhere"
+    Log "ready - run ``fak-dogfood --smoke``, ``fak-qwen36-claude --probe``, or ``fak serve --help`` from anywhere"
   } else {
     Log "add to PATH (current user), then reopen your shell:"
     Log "  setx PATH `"`$env:PATH;$BinDir`""
@@ -489,6 +512,9 @@ try {
   # idle disconnect, is what governs.
   if (-not $env:API_TIMEOUT_MS -and [int]$env:FAK_PLANNER_TIMEOUT_S -gt 0) {
     $env:API_TIMEOUT_MS = [string]([int]$env:FAK_PLANNER_TIMEOUT_S * 1000)
+  }
+  if ($PresetExtraBody -and -not $env:FAK_PROVIDER_EXTRA_BODY_JSON) {
+    $env:FAK_PROVIDER_EXTRA_BODY_JSON = $PresetExtraBody
   }
   $Port = Get-UsablePort $Port
   $serveArgs = @('serve', '--addr', "127.0.0.1:$Port", '--provider', $Provider)

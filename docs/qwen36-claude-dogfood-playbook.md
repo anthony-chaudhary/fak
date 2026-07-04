@@ -18,6 +18,12 @@ Install the launchers once from this repo:
 fak/scripts/dogfood-claude.sh --install
 ```
 
+On Windows PowerShell, run:
+
+```powershell
+.\scripts\dogfood-claude.ps1 --install
+```
+
 That installs three PATH commands:
 
 | command | purpose |
@@ -25,6 +31,9 @@ That installs three PATH commands:
 | `fak` | the repo CLI, so `fak serve --help` works from any directory |
 | `fak-dogfood` | generic Claude Code dogfood launcher |
 | `fak-qwen36-claude` | Qwen3.6 local preset launcher |
+
+The Windows installer also writes `claude-glm-gcp.cmd` and `claude-mac.cmd` preset
+launchers for the remote-node dogfood paths.
 
 ### What command runs the Qwen3.6 Claude probe?
 
