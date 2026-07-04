@@ -731,6 +731,11 @@ func renderGuardInfoLine(v guardInfoVars) string {
 		cache,
 		guardSafetyWord(v),
 		v.Inference.Turns, v.Gateway.InflightRequests, humanUptime(v.Gateway.UptimeSeconds))
+	// The adjudication "why" rides right after the safety word so the reason a call was refused
+	// stays adjacent to the count, and survives a narrow-pane width-trim (which keeps the front).
+	if why := guardInfoAdjudicationDetail(v.Adjudication); why != "" {
+		line += " · " + why
+	}
 	if ep := guardInfoEndpointsSummary(v.Endpoints); ep != "" {
 		line += " · " + ep
 	}
@@ -1011,6 +1016,75 @@ func guardFloorSafetyWord(denies, transforms, quarantines, resultDenies int64) s
 	return "safety: " + strings.Join(parts, ", ")
 }
 
+// guardInfoAdjudicationDetail promotes the guard EXIT summary's forensic "why" into the LIVE
+// pane: the top deny/quarantine reason codes (the ByReason breakdown formatAuditSummary prints
+// as "blocked: reason xN"), plus the held-for-witness (escalated) and deferred tallies. The
+// safety word above answers "how many blocked"; this answers "blocked WHY" — so an operator
+// watching the pane sees the reason a call was refused as it happens, not only in the closing
+// summary. Empty when the gateway reported no adjudication block (a nil pointer — an older
+// gateway or a fak serve gateway) or the session has refused nothing with a recorded reason and
+// holds nothing pending, so a clean session stays silent rather than printing a vacuous "why".
+func guardInfoAdjudicationDetail(a *gateway.AdjudicationSummary) string {
+	if a == nil {
+		return ""
+	}
+	var parts []string
+	if reasons := guardInfoTopReasons(a.ByReason, 3); reasons != "" {
+		parts = append(parts, "why "+reasons)
+	}
+	if a.Escalated > 0 {
+		parts = append(parts, fmt.Sprintf("%d held for witness", a.Escalated))
+	}
+	if a.Deferred > 0 {
+		parts = append(parts, fmt.Sprintf("%d deferred", a.Deferred))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// guardInfoTopReasons renders the top-`limit` reason codes by count (count desc, then code asc
+// for a stable order regardless of the map's iteration order), each as "code xN", with a
+// "+K more" tail folding the reasons past the cap so a long tail can never scroll the pane.
+// Empty for an empty/all-zero map.
+func guardInfoTopReasons(byReason map[string]uint64, limit int) string {
+	if len(byReason) == 0 {
+		return ""
+	}
+	type reasonCount struct {
+		code  string
+		count uint64
+	}
+	rows := make([]reasonCount, 0, len(byReason))
+	for code, n := range byReason {
+		if n == 0 {
+			continue
+		}
+		rows = append(rows, reasonCount{code, n})
+	}
+	if len(rows) == 0 {
+		return ""
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].count != rows[j].count {
+			return rows[i].count > rows[j].count
+		}
+		return rows[i].code < rows[j].code
+	})
+	shown := rows
+	extra := 0
+	if limit > 0 && len(rows) > limit {
+		shown = rows[:limit]
+		extra = len(rows) - limit
+	}
+	parts := make([]string, 0, len(shown)+1)
+	for _, r := range shown {
+		parts = append(parts, fmt.Sprintf("%s x%d", r.code, r.count))
+	}
+	if extra > 0 {
+		parts = append(parts, fmt.Sprintf("+%d more", extra))
+	}
+	return strings.Join(parts, ", ")
+}
+
 // signedTokens renders a net saved-token-equiv with an explicit sign, because the value is
 // NEGATIVE until cache reads repay the cache-creation premium — a "-1,234" reads correctly as
 // "still in the red", where a bare "1234" would look like a saving.
@@ -1100,6 +1174,7 @@ func guardInfoLegend() string {
 	fmt.Fprintln(&b, "what this means:")
 	fmt.Fprintln(&b, "  cache  = fak re-uses text it already sent so the model costs less. \"saving money\" = the re-use has paid off; \"reused %\" = how much was re-used; \"×N cheaper\" = how much cheaper; tokens = how much you've saved so far (can start below zero).")
 	fmt.Fprintln(&b, "  safety = what fak did to keep you safe: blocked an unsafe action, fixed a risky one before it ran, or set a suspicious result aside.")
+	fmt.Fprintln(&b, "  why    = the reason code(s) behind those blocks — the same breakdown fak prints when the session ends, now live — plus anything held for a witness or deferred.")
 	fmt.Fprintln(&b, "  saved  = \"turns saved\": engine calls fak avoided for you (served from its own cache or handled in-kernel) so the agent never had to make them — shown only once at least one was avoided.")
 	fmt.Fprintln(&b, "  assumptions = active facts the session is relying on, with source class, confidence, expiry, and origin reference from public session/debug state.")
 	fmt.Fprintln(&b, "  agents = live sessions running through this fak — the main agent plus any sub-agents it spawned, with remaining budget and wall-clock.")

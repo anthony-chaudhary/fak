@@ -211,7 +211,15 @@ func guardInfoTasksPanelRows(ctx guardInfoPanelCtx, level guardInfoPanelLevel) [
 	if level == guardPanelMini {
 		return []string{cacheRow}
 	}
-	return []string{cacheRow, " safety " + guardInfoSafetyText(v)}
+	rows := []string{cacheRow, " safety " + guardInfoSafetyText(v)}
+	// The adjudication "why" detail — the top deny reasons + held/deferred tallies the guard
+	// exit summary prints — promoted live under the safety count. Silent (no row) when the
+	// gateway reported no adjudication block or the session refused nothing with a reason, so
+	// the common clean pane keeps its two-row tasks form.
+	if why := guardInfoAdjudicationDetail(v.Adjudication); why != "" {
+		rows = append(rows, " why    "+why)
+	}
+	return rows
 }
 
 // guardInfoIncidentPanelRows surfaces upstream/provider incidents (errors by kind,

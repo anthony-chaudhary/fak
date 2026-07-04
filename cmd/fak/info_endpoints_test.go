@@ -81,6 +81,77 @@ func TestGuardSafetyWordPrefersAdjudication(t *testing.T) {
 	}
 }
 
+// TestGuardInfoAdjudicationDetail pins the promoted exit-detail "why": a nil block and a clean
+// adjudication stay silent (the zero-cost contract), and a real one leads with the top reason
+// by count, breaks ties by code, caps at three with a "+N more" tail, and carries the held-for-
+// witness and deferred tallies.
+func TestGuardInfoAdjudicationDetail(t *testing.T) {
+	if got := guardInfoAdjudicationDetail(nil); got != "" {
+		t.Fatalf("nil adjudication detail = %q, want empty", got)
+	}
+	if got := guardInfoAdjudicationDetail(&gateway.AdjudicationSummary{Total: 5, Allowed: 5}); got != "" {
+		t.Fatalf("clean adjudication detail = %q, want empty (nothing refused, nothing held)", got)
+	}
+	a := &gateway.AdjudicationSummary{
+		Denied:    3,
+		Escalated: 1,
+		Deferred:  2,
+		ByReason: map[string]uint64{
+			"dangerous_command": 2,
+			"out_of_tree_write": 1,
+			"secret_in_arg":     1,
+			"unknown_tool":      1,
+		},
+	}
+	got := guardInfoAdjudicationDetail(a)
+	if !strings.Contains(got, "why dangerous_command x2") {
+		t.Fatalf("detail must lead with the top reason by count: %q", got)
+	}
+	// Four reasons, cap 3 → the top three (count desc, then code asc) plus one folded.
+	if !strings.Contains(got, "out_of_tree_write x1") || !strings.Contains(got, "secret_in_arg x1") {
+		t.Fatalf("detail must show the tie-broken next reasons: %q", got)
+	}
+	if strings.Contains(got, "unknown_tool") || !strings.Contains(got, "+1 more") {
+		t.Fatalf("detail must fold the reason past the cap into +N more: %q", got)
+	}
+	if !strings.Contains(got, "1 held for witness") || !strings.Contains(got, "2 deferred") {
+		t.Fatalf("detail must carry the held/deferred tallies: %q", got)
+	}
+}
+
+// TestGuardInfoTasksPanelCarriesWhy proves the tasks sub-pane grows a "why" row surfacing the
+// adjudication reasons at full level, keeps the mini form the single cache gauge, and stays
+// silent (its original two-row form) when the gateway reported no adjudication block.
+func TestGuardInfoTasksPanelCarriesWhy(t *testing.T) {
+	v := provenVisualVars()
+	v.Adjudication = &gateway.AdjudicationSummary{Denied: 2, ByReason: map[string]uint64{"dangerous_command": 2}}
+	ctx := guardInfoPanelCtx{v: v, width: 120, gaugeW: 10}
+	full := strings.Join(guardInfoTasksPanelRows(ctx, guardPanelFull), "\n")
+	if !strings.Contains(full, " why    ") || !strings.Contains(full, "dangerous_command x2") {
+		t.Fatalf("tasks panel full must carry the why row:\n%s", full)
+	}
+	if mini := guardInfoTasksPanelRows(ctx, guardPanelMini); len(mini) != 1 || strings.Contains(mini[0], "why") {
+		t.Fatalf("tasks mini must stay the single cache row: %v", mini)
+	}
+	bare := strings.Join(guardInfoTasksPanelRows(guardInfoPanelCtx{v: provenVisualVars(), width: 120, gaugeW: 10}, guardPanelFull), "\n")
+	if strings.Contains(bare, " why    ") {
+		t.Fatalf("tasks panel must omit the why row without an adjudication block:\n%s", bare)
+	}
+}
+
+// TestRenderGuardInfoLineCarriesWhy proves the compact status line (line mode + the tiny-pane
+// fallback) also surfaces the adjudication why when present and omits it otherwise.
+func TestRenderGuardInfoLineCarriesWhy(t *testing.T) {
+	v := provenVisualVars()
+	v.Adjudication = &gateway.AdjudicationSummary{Denied: 1, ByReason: map[string]uint64{"dangerous_command": 1}}
+	if line := renderGuardInfoLine(v); !strings.Contains(line, "why dangerous_command x1") {
+		t.Fatalf("status line must carry the adjudication why when present: %q", line)
+	}
+	if line := renderGuardInfoLine(provenVisualVars()); strings.Contains(line, "why ") {
+		t.Fatalf("status line must omit the why clause without an adjudication block: %q", line)
+	}
+}
+
 func TestGuardInfoHarnessText(t *testing.T) {
 	if got := guardInfoHarnessText(nil); got != "" {
 		t.Fatalf("nil harness text = %q, want empty", got)
