@@ -469,6 +469,12 @@ type TwoTrackReport struct {
 	OwnerAttribution []OwnerAttributionBucket `json:"owner_attribution"`
 	FleetBenefit     FleetBenefitReport       `json:"fleet_benefit"`
 
+	// DevSessionBenefit is Track 3 (see devsession.go): the same provider_prompt_cache
+	// economics priced over real, un-proxied Claude Code session transcripts. Set by the
+	// CLI layer after folding (it requires session discovery/analysis I/O this package
+	// does not perform); nil when the caller did not fold dev sessions.
+	DevSessionBenefit *DevSessionBenefitReport `json:"dev_session_benefit,omitempty"`
+
 	// LatestNetUSD / CumulativeNetUSD are the most-recent period's net and the
 	// running total through it — the P&L headline. BrokeEven is whether the running
 	// total has crossed zero.
@@ -691,5 +697,8 @@ func RenderTwoTrack(r TwoTrackReport) string {
 			b.FakKVPrefixReusedTokens, b.FakCompactionShedTokens, b.FakVDSOAvoidedCalls)
 	}
 	sb.WriteString(RenderFleetBenefit(r.FleetBenefit))
+	if r.DevSessionBenefit != nil {
+		sb.WriteString(RenderDevSessionBenefit(*r.DevSessionBenefit))
+	}
 	return sb.String()
 }

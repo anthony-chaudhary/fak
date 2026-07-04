@@ -161,6 +161,18 @@ func RenderTwoTrackMarkdown(r TwoTrackReport) string {
 			fmt.Fprintf(&sb, "| cumulative session extension | %s | WITNESSED fak compaction-shed tokens only |\n", extension)
 		}
 	}
+	if r.DevSessionBenefit != nil && r.DevSessionBenefit.Sessions > 0 {
+		d := r.DevSessionBenefit
+		fmt.Fprintf(&sb, "| dev-session transcripts discovered | %d (%d priced) | %s |\n", d.Sessions, d.PricedSessions, d.Provenance)
+		if d.ObservedCounterfactualUSD != 0 || d.ObservedAPICostAvoidedUSD != 0 {
+			reduction := "-"
+			if d.ObservedAPICostReductionPct != nil {
+				reduction = fmt.Sprintf("%.2f%%", *d.ObservedAPICostReductionPct)
+			}
+			fmt.Fprintf(&sb, "| dev-session API cost avoided | $%.4f (%s reduction) | OBSERVED, real un-proxied Claude Code transcripts — MAY OVERLAP fleet aggregate above |\n",
+				d.ObservedAPICostAvoidedUSD, reduction)
+		}
+	}
 	return sb.String()
 }
 
