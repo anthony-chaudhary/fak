@@ -240,6 +240,55 @@ func TestNativeSchedulerCostAwarePreemptionMetrics(t *testing.T) {
 	}
 }
 
+// TestNativeSchedulerCostAwarePreemptionPreservesOutputAndPins is the live #2666 R2
+// witness: the cost-aware picker runs inside the real scheduler under KV pressure, skips a
+// pinned lane, chooses the cold one-shot lane instead of the newer hot lane, readmits the
+// victim, and still produces the same generated streams as the unpreempted scheduler.
+func TestNativeSchedulerCostAwarePreemptionPreservesOutputAndPins(t *testing.T) {
+	m := model.NewSynthetic(SyntheticConfig())
+	calls := issue2666KVBMCalls()
+	want := drainIssue31Scheduler(t, m, calls, NativePreemptionPolicy{})
+
+	for _, tc := range []struct {
+		name string
+		mode NativePreemptionMode
+	}{
+		{name: "swap", mode: NativePreemptSwap},
+		{name: "recompute", mode: NativePreemptRecompute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, stats := drainIssue31SchedulerWithStats(t, m, calls, NativePreemptionPolicy{
+				Mode:        tc.mode,
+				VictimRule:  NativePreemptVictimCostAware,
+				MaxBlocks:   2,
+				BlockTokens: 128,
+			})
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("%s cost-aware preemption changed generated tokens:\n got %v\nwant %v", tc.name, got, want)
+			}
+			if stats.Preemptions != 1 || stats.CostAwareVictims != 1 || stats.Readmitted != 1 {
+				t.Fatalf("%s cost-aware stats = %+v, want one preemption, cost-aware victim, and readmit", tc.name, stats)
+			}
+			if stats.LastCandidates != 3 || stats.LastPinned != 1 || stats.PinnedSkipped != 1 {
+				t.Fatalf("%s cost-aware candidate stats = %+v, want 3 candidates / 1 pinned skip", tc.name, stats)
+			}
+			if stats.LastVictimHits != 0 || stats.LastVictimBlocks != 1 || stats.LastVictimTokens <= 0 || stats.LastVictimCost <= 0 {
+				t.Fatalf("%s last victim stats = %+v, want cold one-block victim with zero reuse and positive cost", tc.name, stats)
+			}
+			switch tc.mode {
+			case NativePreemptSwap:
+				if stats.SwapPreemptions != 1 || stats.SwapBytes == 0 || stats.SwapRestoredBytes != stats.SwapBytes {
+					t.Fatalf("swap cost-aware stats = %+v, want byte-bearing swap round trip", stats)
+				}
+			case NativePreemptRecompute:
+				if stats.RecomputeCount != 1 || stats.SwapBytes != 0 || stats.SwapRestoredBytes != 0 {
+					t.Fatalf("recompute cost-aware stats = %+v, want recompute without swap bytes", stats)
+				}
+			}
+		})
+	}
+}
+
 func TestNativeSchedulerReadmitsOversizeVictimWhenAlone(t *testing.T) {
 	m := model.NewSynthetic(SyntheticConfig())
 	calls := issue31Calls()
@@ -330,6 +379,15 @@ func issue31Calls() []*abi.ToolCall {
 		inlineCall("issue31_first", `{"prompt":"alpha"}`),
 		inlineCall("issue31_second", `{"prompt":"bravo"}`),
 	}
+}
+
+func issue2666KVBMCalls() []*abi.ToolCall {
+	pinned := inlineCall("issue2666_pinned", `{"prompt":"alpha"}`)
+	pinned.Meta = map[string]string{"kv_pin": "true"}
+	cold := inlineCall("issue2666_cold", `{"prompt":"bravo"}`)
+	hot := inlineCall("issue2666_hot", `{"prompt":"charlie"}`)
+	hot.Meta = map[string]string{"kv_reuse_hits": "8"}
+	return []*abi.ToolCall{pinned, cold, hot}
 }
 
 func drainIssue31Scheduler(t *testing.T, m *model.Model, calls []*abi.ToolCall, p NativePreemptionPolicy) [][]int {
