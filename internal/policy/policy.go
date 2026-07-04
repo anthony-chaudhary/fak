@@ -173,6 +173,14 @@ type ArgRule struct {
 	DenyRegex string `json:"deny_regex,omitempty"`
 	MaxBytes  int    `json:"max_bytes,omitempty"`
 	Reason    string `json:"reason,omitempty"`
+	// Fix (optional) is the operator-authored SANCTIONED ALTERNATIVE recommended
+	// in the same breath as the refusal: one imperative line naming what the
+	// caller should do instead (e.g. "hand the exact elevated command to the
+	// operator to run"). It rides the deny verdict's Meta to every wire, so a
+	// refusal is a redirect, not a dead end. Rules with no sensible alternative
+	// (a fork bomb) simply omit it. Never interpolate the offending arg value —
+	// the fix is static manifest text, part of the bounded-disclosure budget.
+	Fix string `json:"fix,omitempty"`
 	// Advisory puts THIS rule on logged trial: a violation is noted on the
 	// admitted verdict's Meta (advisory_violations) instead of denying — the
 	// rule-granular false-positive softener, so one noisy rule can warn while
@@ -480,7 +488,8 @@ func FromPolicy(p adjudicator.Policy) Manifest {
 	if len(p.ArgPredicates) > 0 {
 		m.ArgRules = make([]ArgRule, 0, len(p.ArgPredicates))
 		for _, pred := range p.ArgPredicates {
-			r := ArgRule{Tool: pred.Tool, Arg: pred.Arg, Reason: abi.ReasonName(pred.Reason), Advisory: pred.Advisory}
+			r := ArgRule{Tool: pred.Tool, Arg: pred.Arg, Reason: abi.ReasonName(pred.Reason), Advisory: pred.Advisory,
+				Fix: pred.Fix}
 			switch pred.Kind {
 			case adjudicator.ArgAllowGlob:
 				r.AllowGlob = pred.Glob
@@ -842,7 +851,8 @@ func compileArgRules(rules []ArgRule) ([]adjudicator.ArgPredicate, error) {
 			}
 			reason = code
 		}
-		pred := adjudicator.ArgPredicate{Tool: r.Tool, Arg: r.Arg, Reason: reason, Advisory: r.Advisory}
+		pred := adjudicator.ArgPredicate{Tool: r.Tool, Arg: r.Arg, Reason: reason, Advisory: r.Advisory,
+			Fix: strings.TrimSpace(r.Fix)}
 		switch {
 		case r.AllowGlob != "":
 			pred.Kind = adjudicator.ArgAllowGlob
