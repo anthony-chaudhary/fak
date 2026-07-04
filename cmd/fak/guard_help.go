@@ -9,7 +9,7 @@
 // make one small adjustment. The shape now:
 //
 //	fak guard -h        -> the curated common-flag overview (below)
-//	fak guard -h -all   -> the full flag reference (fs.PrintDefaults, unchanged)
+//	fak guard -h -all   -> the full flag reference, GROUPED into labeled sections
 //
 // Membership is a taste call, deliberately small — every flag not listed
 // here is still real, still enforced, and still documented in full under
@@ -23,6 +23,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strings"
 )
 
 // guardCommonFlag is one curated line of the `fak guard -h` overview.
@@ -50,6 +51,155 @@ var guardCommonFlags = []guardCommonFlag{
 	{"split", "auto|on|off: a live fak-info pane beside the agent (auto-on inside a multiplexer)"},
 }
 
+// guardFlagGroup is one labeled section of the `fak guard -h -all` reference.
+// The front door carries 65+ flags and grows; a flat alphabetical dump makes an
+// operator hunt. Grouping the whole surface into stable, purpose-named sections
+// keeps it navigable AS the feature surface increases — the operator scans to
+// the section they want (auth, token savers, budgets, …) instead of a wall. The
+// membership below is the ONLY hand-maintained part; each flag's rendered
+// default + usage is pulled from the LIVE FlagSet, so it can never drift from
+// the binary's real behavior.
+type guardFlagGroup struct {
+	title string
+	flags []string
+}
+
+// guardFlagGroups partitions EVERY registered guard flag into exactly one
+// labeled section. The invariant (every live flag appears in exactly one group,
+// and every listed flag is live) is locked by guard_help_test.go: a flag added
+// without a home lands in the visible guardUngroupedTitle section, which the
+// test forbids — so the surface stays categorized as it grows. Order here is the
+// display order: the wire + floor first, the rarely-touched plumbing last.
+var guardFlagGroups = []guardFlagGroup{
+	{"Upstream wire & auth", []string{
+		"addr", "provider", "base-url", "model", "api-key-env",
+		"anthropic-oauth", "oauth-token-env", "env", "require-key-env",
+	}},
+	{"Policy, floor & audit", []string{
+		"policy", "dump-policy", "audit", "no-audit", "log", "landlock-hooks",
+	}},
+	{"Token economy (cache & context savers)", []string{
+		"compact-history-budget", "compact-anchor-head", "elide-result-bytes",
+		"ctx-view-budget", "managed-cache", "compress",
+	}},
+	{"Session lifecycle hooks (Claude Code)", []string{
+		"precompact-hook", "deny-all-continue", "deny-all-max", "deny-all-warn",
+		"deny-all-final", "toolproc-hooks", "task-handoff", "task-handoff-file",
+		"task-handoff-repo", "task-handoff-live",
+	}},
+	{"Budgets, resets & session governance", []string{
+		"context-budget-tokens", "max-duration", "budget-envelope",
+		"reset-on-budget", "restart-on-budget", "restart-limit", "restart-seed-dir",
+		"session-id", "session-pressure-gate", "session-pressure-days",
+		"session-pressure-max", "session-pressure-report", "session-pressure-justify",
+	}},
+	{"Local in-kernel model", []string{
+		"gguf", "local", "alongside", "backend", "tokenizer", "remote-serve",
+	}},
+	{"Child-harness wiring (Claude / Codex)", []string{
+		"codex-config", "codex-home", "mcp-register",
+	}},
+	{"Observability & UI", []string{
+		"banner", "quiet", "split", "split-where", "split-interval", "split-dry-run",
+		"debug-stats", "resource-stats", "dojo",
+	}},
+	{"Diagnostics & replay", []string{
+		"probe", "replay-trace", "replay-wire",
+	}},
+}
+
+// guardUngroupedTitle labels the section that catches any registered flag NOT
+// assigned to a group above. On a categorized tree it is never rendered; when it
+// IS, guard_help_test.go fails, forcing the new flag into a real group. The help
+// screen still SHOWS the flag (never hides a knob) — it just flags the omission.
+const guardUngroupedTitle = "Other (uncategorized — add to guardFlagGroups in guard_help.go)"
+
+// guardIsZeroDefault reports whether a flag's default is the zero value for its
+// type (the case Go's own flag.PrintDefaults omits "(default …)" for). Every
+// guard flag type — string/bool/int/int64/uint/float64/duration — renders its
+// zero as one of these strings, so this matches stdlib's reflective isZeroValue
+// for the whole live set without reflection.
+func guardIsZeroDefault(def string) bool {
+	switch def {
+	case "", "false", "0", "0s":
+		return true
+	}
+	return false
+}
+
+// guardFlagIsString reports whether a flag's value is a string (so its default
+// is shown quoted, `(default "x")`, exactly as flag.PrintDefaults does). It uses
+// only the exported flag.Getter, so it needs no unexported stdlib types.
+func guardFlagIsString(f *flag.Flag) bool {
+	g, ok := f.Value.(flag.Getter)
+	if !ok {
+		return false
+	}
+	_, isStr := g.Get().(string)
+	return isStr
+}
+
+// writeGuardFlagRef renders one flag exactly as flag.PrintDefaults would — the
+// single-dash name, the value-type placeholder, the indented usage, and the
+// DEFAULT shown inline (quoted for strings) so the operator sees what they get
+// with no flag. Reproducing the stdlib format byte-for-byte means grouping only
+// adds headers + reorders; no per-flag rendering regresses.
+func writeGuardFlagRef(w io.Writer, f *flag.Flag) {
+	typeName, usage := flag.UnquoteUsage(f)
+	head := "  -" + f.Name
+	if typeName != "" {
+		head += " " + typeName
+	}
+	fmt.Fprintln(w, head)
+	line := "    \t" + strings.ReplaceAll(usage, "\n", "\n    \t")
+	if !guardIsZeroDefault(f.DefValue) {
+		if guardFlagIsString(f) {
+			line += fmt.Sprintf(" (default %q)", f.DefValue)
+		} else {
+			line += fmt.Sprintf(" (default %v)", f.DefValue)
+		}
+	}
+	fmt.Fprintln(w, line)
+}
+
+// printGuardAllGrouped prints the full flag reference grouped into the labeled
+// sections above, rendered from the LIVE FlagSet so every default + usage is the
+// binary's real value. Any registered flag not assigned to a group falls into a
+// visible guardUngroupedTitle section — surfaced, never hidden — which the test
+// forbids, so a newly added flag must be categorized. That ratchet is what keeps
+// the front door navigable as the flag surface grows.
+func printGuardAllGrouped(w io.Writer, fs *flag.FlagSet) {
+	grouped := map[string]bool{}
+	for _, g := range guardFlagGroups {
+		var flags []*flag.Flag
+		for _, name := range g.flags {
+			if f := fs.Lookup(name); f != nil {
+				flags = append(flags, f)
+				grouped[name] = true
+			}
+		}
+		if len(flags) == 0 {
+			continue
+		}
+		fmt.Fprintf(w, "\n%s:\n", g.title)
+		for _, f := range flags {
+			writeGuardFlagRef(w, f)
+		}
+	}
+	var other []*flag.Flag
+	fs.VisitAll(func(f *flag.Flag) {
+		if !grouped[f.Name] {
+			other = append(other, f)
+		}
+	})
+	if len(other) > 0 {
+		fmt.Fprintf(w, "\n%s:\n", guardUngroupedTitle)
+		for _, f := range other {
+			writeGuardFlagRef(w, f)
+		}
+	}
+}
+
 // guardFlagCount counts every flag registered on fs, for the "N flags in
 // this build" footer — so the footer can never drift from the real set.
 func guardFlagCount(fs *flag.FlagSet) int {
@@ -60,22 +210,22 @@ func guardFlagCount(fs *flag.FlagSet) int {
 
 // printGuardUsage prints `fak guard`'s usage: the fixed synopsis/examples,
 // then either the curated common-flag overview or, with all=true (`fak
-// guard -h -all`), the full alphabetical flag reference.
+// guard -h -all`), the full flag reference grouped into labeled sections.
 func printGuardUsage(w io.Writer, fs *flag.FlagSet, all bool) {
 	fmt.Fprintln(w, "usage: fak guard [flags] -- <agent command...>")
 	fmt.Fprintln(w, "  e.g. fak guard -- claude")
 	fmt.Fprintln(w, "       fak guard --provider openai -- codex")
 	fmt.Fprintln(w, "       fak guard --policy my-floor.json -- claude")
 	if all {
-		fmt.Fprintln(w)
-		fs.PrintDefaults()
+		printGuardAllGrouped(w, fs)
+		fmt.Fprintf(w, "\n%d flags in this build, grouped above. docs/fak/api-reference.md has the deep dive.\n", guardFlagCount(fs))
 		return
 	}
 	fmt.Fprintln(w, "\ncommon flags:")
 	for _, f := range guardCommonFlags {
 		fmt.Fprintf(w, "  --%-14s %s\n", f.name, f.blurb)
 	}
-	fmt.Fprintf(w, "\n%d flags in this build. 'fak guard -h -all' lists every one; docs/fak/api-reference.md has the deep dive.\n", guardFlagCount(fs))
+	fmt.Fprintf(w, "\n%d flags in this build. 'fak guard -h -all' lists every one grouped; docs/fak/api-reference.md has the deep dive.\n", guardFlagCount(fs))
 }
 
 // guardArgvHasAll reports whether argv requests the FULL flag reference —

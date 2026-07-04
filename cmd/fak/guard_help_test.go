@@ -82,3 +82,66 @@ func TestGuardCommonFlagsAreLive(t *testing.T) {
 		}
 	}
 }
+
+// TestGuardFlagGroupsWellFormed is the pure, in-process half of the grouping
+// ratchet: guardFlagGroups must be a real partition — no flag in two groups, no
+// empty group or title, no duplicate title. It needs no subprocess because it
+// reads only the static table.
+func TestGuardFlagGroupsWellFormed(t *testing.T) {
+	seenFlag := map[string]string{}
+	seenTitle := map[string]bool{}
+	for _, g := range guardFlagGroups {
+		if strings.TrimSpace(g.title) == "" {
+			t.Error("guardFlagGroups has a group with an empty title")
+		}
+		if seenTitle[g.title] {
+			t.Errorf("duplicate group title %q", g.title)
+		}
+		seenTitle[g.title] = true
+		if len(g.flags) == 0 {
+			t.Errorf("group %q lists no flags", g.title)
+		}
+		for _, name := range g.flags {
+			if prev, ok := seenFlag[name]; ok {
+				t.Errorf("flag --%s is listed in two groups: %q and %q", name, prev, g.title)
+			}
+			seenFlag[name] = g.title
+		}
+	}
+}
+
+// TestGuardAllFlagsAreGrouped is the navigability ratchet against the LIVE flag
+// set: the grouped `-h -all` reference must place every registered flag in a
+// labeled section. A flag added without a group falls into the visible
+// guardUngroupedTitle section — which this test forbids — so growing the flag
+// surface forces the author to categorize the new flag, keeping the front door
+// navigable as it grows (not a flat wall). It also checks every declared group
+// title actually renders, so a group cannot silently drop out.
+func TestGuardAllFlagsAreGrouped(t *testing.T) {
+	full := runGuardHelp(t, "-h -all")
+	if strings.Contains(full, guardUngroupedTitle) {
+		t.Fatalf("`fak guard -h -all` rendered the %q section — a flag was added without a group.\nAdd it to guardFlagGroups in guard_help.go:\n%s", guardUngroupedTitle, full)
+	}
+	if n := strings.Count(full, "\n  -"); n < 60 {
+		t.Fatalf("grouped reference lists only %d flags; expected the full ~65 — a group may have been dropped:\n%s", n, full)
+	}
+	for _, g := range guardFlagGroups {
+		if !strings.Contains(full, "\n"+g.title+":\n") {
+			t.Errorf("grouped reference is missing the %q section header", g.title)
+		}
+	}
+}
+
+// TestGuardGroupedFlagsAreLive pins every flag NAME listed in guardFlagGroups to
+// a real, live flag in the `-h -all` reference, so a group can never advertise a
+// flag `fak guard` no longer registers (the reverse of the ratchet above).
+func TestGuardGroupedFlagsAreLive(t *testing.T) {
+	full := runGuardHelp(t, "-h -all")
+	for _, g := range guardFlagGroups {
+		for _, name := range g.flags {
+			if !strings.Contains(full, "\n  -"+name+" ") && !strings.Contains(full, "\n  -"+name+"\n") {
+				t.Errorf("group %q lists --%s, but the live flag reference has no such flag", g.title, name)
+			}
+		}
+	}
+}
