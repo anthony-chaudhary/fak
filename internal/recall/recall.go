@@ -72,7 +72,8 @@ type Page struct {
 	QID         string `json:"qid,omitempty"`
 	Reason      string `json:"reason,omitempty"`
 	Durability  string `json:"durability,omitempty"`  // rung-1 write-time class (#82): turn|session|durable; auditable in manifest.json
-	ValidTo     int64  `json:"valid_to,omitempty"`    // optional bounded-validity tick; read fails closed after this point
+	ValidFrom   int64  `json:"valid_from,omitempty"`  // optional bounded-validity open tick; a read before it is not-yet-valid (#81 rung-2 lower bound)
+	ValidTo     int64  `json:"valid_to,omitempty"`    // optional bounded-validity close tick; the interval is HALF-OPEN [ValidFrom,ValidTo) so a read AT this tick fails closed
 	Witness     string `json:"witness,omitempty"`     // external trust witness this page was admitted under
 	TrustEpoch  uint64 `json:"trust_epoch,omitempty"` // vdso trust epoch observed at record time
 
@@ -402,11 +403,25 @@ func firstAsOf(vals []int64) int64 {
 	return vals[0]
 }
 
+// validityGate enforces a bounded page's valid-time interval as the HALF-OPEN
+// window [ValidFrom, ValidTo): the page is admissible only when
+// ValidFrom <= asOf < ValidTo (the issue-#81 admissibility rule). A read AT ValidTo
+// has already crossed the close boundary — this is the stale-as-current failure at
+// the boundary tick the S7 epic exists to kill, so ValidTo is EXCLUSIVE. A read
+// before ValidFrom is not-yet-valid. Both bounds are optional and default-neutral: a
+// zero bound (an old manifest, or a caller with no clock — asOf<=0) is unbounded on
+// that side, so pages persisted before this rung keep today's behavior.
 func validityGate(p Page, asOf int64) error {
-	if p.Durability != durabilityBounded || p.ValidTo <= 0 || asOf <= 0 || asOf <= p.ValidTo {
+	if p.Durability != durabilityBounded || asOf <= 0 {
 		return nil
 	}
-	return fmt.Errorf("%w: page %d valid_to=%d as_of=%d", ErrExpired, p.Step, p.ValidTo, asOf)
+	if p.ValidTo > 0 && asOf >= p.ValidTo {
+		return fmt.Errorf("%w: page %d as_of=%d >= valid_to=%d (window closed)", ErrExpired, p.Step, asOf, p.ValidTo)
+	}
+	if p.ValidFrom > 0 && asOf < p.ValidFrom {
+		return fmt.Errorf("%w: page %d as_of=%d < valid_from=%d (not yet valid)", ErrExpired, p.Step, asOf, p.ValidFrom)
+	}
+	return nil
 }
 
 func (s *Session) trustGate(p Page, step int) error {
