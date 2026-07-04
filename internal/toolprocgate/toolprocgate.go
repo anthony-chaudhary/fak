@@ -78,6 +78,33 @@ func Reset() {
 	tbl.head = 0
 }
 
+// RewoundReasonName is the closed operator reason token cited when a call is
+// revoked because the conversation rewound past its originating turn — the
+// temporal twin of a kill. A straggler completion of a rewound call is
+// quarantined by the rank-2 Gate exactly as a post-kill completion is: the
+// verdict still cites TOOL_RESULT_AFTER_KILL (it IS a post-revocation result),
+// and the stub's kill_reason carries this token so the transcript names the
+// rewind as the cause.
+const RewoundReasonName = "TOOL_REWOUND"
+
+// Rewind arms the revocation table for a conversation rewind: each unresolved
+// tool_use id in the abandoned suffix is registered with RewoundReasonName, so
+// any straggler completion the rewound-past call produces is stubbed by the
+// rank-2 Gate before it enters context — the same teeth as a kill, no new gate.
+// This is the entry point the conversation layer's rewind handler calls after
+// enumerating the abandoned suffix; the handler owns which turns were dropped
+// and which calls were in flight, this leaf owns the teeth.
+//
+// Idempotent and order-stable: Kill's first-reason-wins semantics apply, so a
+// call already revoked (killed or rewound earlier) keeps its first reason, and
+// empty ids are ignored. A fresh call issued AFTER the rewind admits normally —
+// the table arms only for the ids named here.
+func Rewind(callIDs []string) {
+	for _, id := range callIDs {
+		Kill(id, RewoundReasonName)
+	}
+}
+
 // Gate is the rank-2 ResultAdmitter: the write-time enforcement of toolproc's
 // TOOL_RESULT_AFTER_KILL verdict. With an empty revocation table it Defers on
 // every result — registered-but-inert, byte-identical to the pre-gate chain —

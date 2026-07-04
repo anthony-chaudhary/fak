@@ -158,3 +158,94 @@ func TestReasonNamesRegistered(t *testing.T) {
 		}
 	}
 }
+
+// TestStragglerResultQuarantinedAfterRewind is the rewind witness THROUGH THE
+// REAL KERNEL FOLD: start a call, rewind past it, deliver its result — the
+// admitted transcript contains a stub citing the rewind revocation; the raw
+// bytes never enter context. Teeth engage exactly as they do for kills (#2428).
+func TestStragglerResultQuarantinedAfterRewind(t *testing.T) {
+	Reset()
+	t.Cleanup(Reset)
+	Rewind([]string{"t-rewound"})
+
+	c := call("t-rewound")
+	r := result(liveBody)
+	v := kernel.New("").AdmitResult(context.Background(), c, r)
+
+	if v.Kind != abi.VerdictQuarantine || v.Reason != toolproc.ReasonToolResultAfterKill {
+		t.Fatalf("want Quarantine/TOOL_RESULT_AFTER_KILL, got %v/%s", v.Kind, abi.ReasonName(v.Reason))
+	}
+	if r.Meta["admit"] != "quarantined" {
+		t.Errorf("kernel admit meta = %q, want quarantined", r.Meta["admit"])
+	}
+	if r.Meta["kill_reason"] != RewoundReasonName {
+		t.Errorf("kill_reason meta = %q, want %s", r.Meta["kill_reason"], RewoundReasonName)
+	}
+	after := string(r.Payload.Inline)
+	if strings.Contains(after, "secret-adjacent") {
+		t.Errorf("rewound call's payload leaked through the stub: %q", after)
+	}
+	var stub map[string]any
+	if err := json.Unmarshal(r.Payload.Inline, &stub); err != nil {
+		t.Fatalf("stub is not structured JSON: %v (%q)", err, after)
+	}
+	if stub["_quarantined"] != true || stub["kill_reason"] != RewoundReasonName {
+		t.Errorf("stub = %v, want _quarantined + kill_reason=%s", stub, RewoundReasonName)
+	}
+	if r.Payload.Taint != abi.TaintQuarantined {
+		t.Errorf("stub taint = %v, want TaintQuarantined", r.Payload.Taint)
+	}
+}
+
+// TestPostRewindFreshCallsUnaffected: a call issued AFTER the rewind admits
+// normally — Rewind arms the table only for the abandoned suffix, not for the
+// whole session (#2428).
+func TestPostRewindFreshCallsUnaffected(t *testing.T) {
+	Reset()
+	t.Cleanup(Reset)
+	Rewind([]string{"t-rewound"})
+
+	c := call("t-fresh")
+	r := result(liveBody)
+	v := kernel.New("").AdmitResult(context.Background(), c, r)
+
+	if v.Kind != abi.VerdictDefer || v.By != "toolprocgate" {
+		t.Fatalf("fresh result must Defer through the inert gate, got %v (%s)", v.Kind, v.By)
+	}
+	if r.Meta["admit"] == "quarantined" || r.Meta["admit"] == "denied" {
+		t.Fatalf("fresh result must be admitted, got admit=%q", r.Meta["admit"])
+	}
+	if got := string(r.Payload.Inline); got != liveBody {
+		t.Errorf("fresh payload was altered: %q", got)
+	}
+	if r.Meta["toolprocgate"] != "" {
+		t.Errorf("fresh result must carry no gate meta, got %q", r.Meta["toolprocgate"])
+	}
+}
+
+// TestRewindSemantics: empty ids are ignored, the rewind reason lands, a
+// rewind does not clobber a prior kill's reason (first-reason-wins), and a
+// kill does not clobber a prior rewind — symmetric with TestKillTableSemantics.
+func TestRewindSemantics(t *testing.T) {
+	Reset()
+	t.Cleanup(Reset)
+
+	Rewind([]string{"", "t-r"})
+	if r, ok := KilledReason("t-r"); !ok || r != RewoundReasonName {
+		t.Fatalf("rewind must register t-r with %s, got %q/%t", RewoundReasonName, r, ok)
+	}
+	if _, ok := KilledReason(""); ok {
+		t.Error("empty id must not enter the table")
+	}
+	// A later kill cannot clobber the rewind reason (first-reason-wins).
+	Kill("t-r", toolproc.ReasonToolDeadlineExceededName)
+	if r, _ := KilledReason("t-r"); r != RewoundReasonName {
+		t.Errorf("rewind reason must win over a later kill, got %q", r)
+	}
+	// Symmetrically, a rewind cannot clobber a prior kill.
+	Kill("t-k", toolproc.ReasonToolOrphanedName)
+	Rewind([]string{"t-k"})
+	if r, _ := KilledReason("t-k"); r != toolproc.ReasonToolOrphanedName {
+		t.Errorf("kill reason must win over a later rewind, got %q", r)
+	}
+}

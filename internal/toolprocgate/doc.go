@@ -22,6 +22,17 @@
 // Defers on every result, so the defconfig ships it enabled at zero behavior
 // change. Teeth engage the moment something calls Kill.
 //
+// REWIND ARMS THE SAME TABLE (no new gate). Rewind(callIDs) is the entry point
+// the conversation layer's rewind handler calls: it registers each unresolved
+// tool_use id in the abandoned suffix with the TOOL_REWOUND reason, and the
+// rank-2 Gate quarantines any straggler completion exactly as it does for a
+// kill — the temporal twin of the post-kill result problem. A call spawned
+// before the rewind whose originating turn is no longer in context will
+// eventually complete into a context that no longer references it; Rewind
+// makes that late completion bite through the existing teeth. The handler owns
+// the enumeration (which turns were abandoned, which calls were in flight);
+// this leaf owns the stubbing.
+//
 // THE SUPERVISOR (seam 1's engine, supervisor.go). NewSupervisor gives an
 // embedder — the gateway proxy, `fak guard`, the agent loop, the MCP server —
 // the live side of the table: report Spawn (with the in-flight work's cancel
