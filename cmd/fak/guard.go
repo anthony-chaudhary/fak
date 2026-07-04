@@ -380,7 +380,7 @@ func cmdGuard(argv []string) {
 	var refusalCarryForward []guardRefusalCarry
 	if auditJournal != nil {
 		auditSeq0, _, _ = auditJournal.Stats()
-		refusalCarryForward = guardReadRefusalCarryForward(auditJournal.Path(), guardTraceID, guardFindReasonRoot())
+		refusalCarryForward = guardReadPriorRefusalCarryForward(auditJournal.Path(), guardTraceID, guardFindReasonRoot())
 	}
 
 	// 2. --remote-serve sugar: run the guarded turn's INFERENCE on a lab box you chose.
@@ -499,6 +499,13 @@ func cmdGuard(argv []string) {
 		// OAuth disabled / region / billing). It also stickily advances the config dir apiKeyFunc
 		// reads from, so a walled session heals onto a working account and stays there.
 		accountFailoverFunc func(reason string) (string, bool)
+		// guardActiveAccountDir/guardWalledAccounts feed the live accounts+nodes status
+		// area (guard_endpoints.go): the config dir of the seat currently serving turns
+		// (it follows a failover) and the seats an account-scoped 403 walled this session.
+		// Set only on the pinned Claude subscription path; nil elsewhere (a non-subscription
+		// session has no seat "in use", so the status area shows nodes only).
+		guardActiveAccountDir func() string
+		guardWalledAccounts   func() map[string]bool
 	)
 	tUpstream := time.Now()
 	if localModel && !localAlongside {
@@ -548,6 +555,17 @@ func cmdGuard(argv []string) {
 			if homeRoot, hErr := os.UserHomeDir(); hErr == nil && strings.TrimSpace(homeRoot) != "" {
 				af = newAccountFailover(homeRoot, us.claudeConfigDir, nil)
 				accountFailoverFunc = af.failover
+			}
+			// Feed the live accounts+nodes status area: the ACTIVE seat follows a failover
+			// (af.currentConfigDir), and af.walledKeys marks the seats an account-scoped 403
+			// skipped. With af nil (home root unresolvable) the active seat is the pinned
+			// config dir and nothing is walled — a stable single-seat view.
+			if af != nil {
+				guardActiveAccountDir = af.currentConfigDir
+				guardWalledAccounts = af.walledKeys
+			} else {
+				pinnedDir := us.claudeConfigDir
+				guardActiveAccountDir = func() string { return pinnedDir }
 			}
 			apiKeyFunc = func() string {
 				// After a failover, read the ADOPTED sibling account's live token directly from its
@@ -916,6 +934,21 @@ func cmdGuard(argv []string) {
 	}
 	srv.MarkReady()
 
+	// Feed the live accounts+nodes status area (`fak info` / /debug/vars): which Claude
+	// seats and which serving nodes THIS session uses. The provider is a pull source
+	// (re-read per scrape) so a mid-session account failover's active/walled marks stay
+	// live; the serving-node list is resolved once from the boot upstream posture. See
+	// guard_endpoints.go. guardActiveAccountDir is nil on a non-subscription session, so
+	// the accounts half is simply absent there while the nodes still render.
+	srv.SetSessionEndpointsProvider(newGuardEndpointsProvider(guardActiveAccountDir, guardWalledAccounts, guardEndpointNodes{
+		provider:     up,
+		resolvedBase: resolvedBase,
+		remoteServe:  remoteBase != "",
+		localModel:   localModel,
+		localAlong:   localAlongside,
+		localAlias:   localAlias,
+	}))
+
 	// First-class harness resource tracking (epic #2044): start sampling THIS process's
 	// own hardware-resource use (CPU/RSS/IO — the guard process hosts the in-process
 	// gateway on the same PID, so this covers the whole kernel half) now that the gateway
@@ -958,6 +991,10 @@ func cmdGuard(argv []string) {
 		// fak_harness_* family, so a running session's CPU/mem/IO is scrapeable — not
 		// only printed at exit (epic #2044 / #2047). Pull-only: rendered per scrape.
 		srv.SetHarnessMetricsProvider(func() string { return resSampler.Snapshot().PrometheusText() })
+		// Structured twin of the /metrics harness family, on /debug/vars, so the live `fak
+		// info` pane can show the kernel CPU/RSS/IO the exit summary prints instead of only
+		// scraping Prometheus text. Same pull sampler, converted to the gateway's shape.
+		srv.SetSessionHarnessProvider(func() gateway.SessionHarness { return guardHarnessToSession(resSampler.Snapshot()) })
 	}
 
 	// Deferred session durability (#1833): only now — after the gateway is bound and

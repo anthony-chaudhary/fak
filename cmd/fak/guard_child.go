@@ -1079,12 +1079,34 @@ func stopGuardChild(child *exec.Cmd, wait <-chan error, grace time.Duration) {
 // follow a mid-conversation quarantine) usually clears if that one resume is retried WITHOUT
 // fak guard, then re-wrapped. Returned as a string (not printed) so it is unit-testable.
 func formatGuardResumeGuidance(agentName string, code int) string {
+	return formatGuardResumeGuidanceWithRefusals(agentName, code, nil)
+}
+
+func formatGuardResumeGuidanceWithRefusals(agentName string, code int, refusals []guardRefusalCarry) string {
+	guardActivity := ""
+	if len(refusals) > 0 {
+		var b strings.Builder
+		b.WriteString("  guard activity: the last guarded run hit floor refusal(s); treat the resume as recovery/debugging, not a blind retry.\n")
+		for _, item := range refusals {
+			if strings.TrimSpace(item.Reason) == "" {
+				continue
+			}
+			fmt.Fprintf(&b, "    - %s x%d", item.Reason, item.Count)
+			if fix := strings.TrimSpace(item.Fix); fix != "" {
+				fmt.Fprintf(&b, " — fix: %s", fix)
+			}
+			b.WriteByte('\n')
+		}
+		b.WriteString("  guard resume: keep fak guard wrapped after clearing the refusal; do not retry the same refused call unchanged.\n")
+		guardActivity = b.String()
+	}
 	return fmt.Sprintf(
 		"\nfak guard: %s exited abnormally (code %d).\n"+
 			"  resume: re-run the same `fak guard -- %s …` — launch the agent with its own resume/continue flag (e.g. `claude --continue`) so it picks the conversation back up.\n"+
+			"%s"+
 			"  this session's decision journal is replayable with `fak audit verify` (path in the audit summary above).\n"+
 			"  if a guarded resume dies IMMEDIATELY with \"upstream model error\", retry that one resume WITHOUT fak guard to recover, then re-wrap.\n",
-		agentName, code, agentName)
+		agentName, code, agentName, guardActivity)
 }
 
 // formatVCacheSnapshotPointer is the exit pointer that closes the loop between the LIVE
@@ -1123,6 +1145,7 @@ func guardSummaryResetPrefix(isTTY bool) string {
 }
 
 func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler) {
+	var currentRefusals []guardRefusalCarry
 
 	// Tear the gateway down and report what the kernel decided this session.
 	if sampler != nil {
@@ -1191,7 +1214,9 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 	// Flush + fsync the durable trail before exit so a row returned to the agent is
 	// never lost to a buffered write (Close is safe on a nil/in-memory journal).
 	if auditJournal != nil {
-		if err := guardWriteRefusalCarryForward(auditJournal, auditSeq0, guardTraceID, guardFindReasonRoot()); err != nil && !quiet {
+		var err error
+		currentRefusals, err = guardWriteRefusalCarryForwardAndReturn(auditJournal, auditSeq0, guardTraceID, guardFindReasonRoot())
+		if err != nil && !quiet {
 			fmt.Fprintf(os.Stderr, "fak guard: refusal carry-forward unavailable: %v\n", err)
 		}
 		_ = auditJournal.Close()
@@ -1204,7 +1229,7 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 			// the actionable resume note so the operator isn't left with a bare exit code.
 			// Suppressed under --quiet (scripted `-p` runs) and skipped on a clean 0 exit.
 			if code := ee.ExitCode(); code != 0 && !quiet {
-				fmt.Fprint(os.Stderr, formatGuardResumeGuidance(agentName, code))
+				fmt.Fprint(os.Stderr, formatGuardResumeGuidanceWithRefusals(agentName, code, currentRefusals))
 			}
 			os.Exit(ee.ExitCode())
 		}

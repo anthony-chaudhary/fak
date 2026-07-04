@@ -25,3 +25,23 @@ func TestFormatGuardResumeGuidance(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatGuardResumeGuidanceSurfacesGuardActivity(t *testing.T) {
+	out := formatGuardResumeGuidanceWithRefusals("claude", 1, []guardRefusalCarry{{
+		Reason: "OFF_TRUNK",
+		Count:  2,
+		Fix:    "commit directly to main",
+	}})
+	for _, want := range []string{
+		"guard activity",
+		"recovery/debugging",
+		"OFF_TRUNK x2",
+		"commit directly to main",
+		"do not retry the same refused call unchanged",
+		"WITHOUT fak guard",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("guidance missing %q\n--- guidance ---\n%s", want, out)
+		}
+	}
+}

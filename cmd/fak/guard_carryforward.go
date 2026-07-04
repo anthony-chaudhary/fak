@@ -43,16 +43,40 @@ func guardReadRefusalCarryForward(auditPath, traceID, root string) []guardRefusa
 	if path == "" {
 		return nil
 	}
+	out, _, ok := guardLoadRefusalCarryForwardFile(path, traceID, root)
+	if !ok {
+		return nil
+	}
+	return out
+}
+
+func guardReadPriorRefusalCarryForward(auditPath, traceID, root string) []guardRefusalCarry {
+	path := guardRefusalCarryForwardPath(auditPath)
+	if path != "" {
+		if out, _, ok := guardLoadRefusalCarryForwardFile(path, traceID, root); ok {
+			return out
+		}
+	}
+	if out, ok := guardReadLatestRefusalCarryForwardSidecar(auditPath, traceID, root); ok {
+		return out
+	}
+	if out, ok := guardReadLatestRefusalCarryForwardJournal(auditPath, traceID, root); ok {
+		return out
+	}
+	return nil
+}
+
+func guardLoadRefusalCarryForwardFile(path, traceID, root string) ([]guardRefusalCarry, int64, bool) {
 	raw, err := os.ReadFile(path)
 	if err != nil || len(raw) == 0 {
-		return nil
+		return nil, 0, false
 	}
 	var file guardRefusalCarryForwardFile
 	if err := json.Unmarshal(raw, &file); err != nil {
-		return nil
+		return nil, 0, false
 	}
 	if file.Schema != guardRefusalCarryForwardSchema || strings.TrimSpace(file.TraceID) != strings.TrimSpace(traceID) {
-		return nil
+		return nil, 0, false
 	}
 	docs := guardReadReasonDocs(root)
 	out := append([]guardRefusalCarry(nil), file.Refusals...)
@@ -61,23 +85,148 @@ func guardReadRefusalCarryForward(auditPath, traceID, root string) []guardRefusa
 			out[i].Fix = guardReasonFix(out[i].Reason, docs)
 		}
 	}
-	return out
+	return out, file.WrittenAtUnix, true
+}
+
+func guardReadLatestRefusalCarryForwardSidecar(auditPath, traceID, root string) ([]guardRefusalCarry, bool) {
+	dir := guardPriorAuditDir(auditPath)
+	if dir == "" {
+		return nil, false
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, false
+	}
+	current := filepath.Clean(guardRefusalCarryForwardPath(auditPath))
+	type candidate struct {
+		path string
+		when int64
+		out  []guardRefusalCarry
+	}
+	var candidates []candidate
+	for _, ent := range entries {
+		if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".jsonl.refusals.json") {
+			continue
+		}
+		path := filepath.Join(dir, ent.Name())
+		if current != "." && filepath.Clean(path) == current {
+			continue
+		}
+		out, when, ok := guardLoadRefusalCarryForwardFile(path, traceID, root)
+		if !ok {
+			continue
+		}
+		if when == 0 {
+			if info, err := ent.Info(); err == nil {
+				when = info.ModTime().Unix()
+			}
+		}
+		candidates = append(candidates, candidate{path: path, when: when, out: out})
+	}
+	if len(candidates) == 0 {
+		return nil, false
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].when != candidates[j].when {
+			return candidates[i].when > candidates[j].when
+		}
+		return candidates[i].path > candidates[j].path
+	})
+	return candidates[0].out, true
+}
+
+func guardReadLatestRefusalCarryForwardJournal(auditPath, traceID, root string) ([]guardRefusalCarry, bool) {
+	dir := guardPriorAuditDir(auditPath)
+	if dir == "" {
+		return nil, false
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, false
+	}
+	current := filepath.Clean(auditPath)
+	type candidate struct {
+		path string
+		mod  time.Time
+	}
+	var candidates []candidate
+	for _, ent := range entries {
+		if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".jsonl") {
+			continue
+		}
+		path := filepath.Join(dir, ent.Name())
+		if current != "." && filepath.Clean(path) == current {
+			continue
+		}
+		info, err := ent.Info()
+		if err != nil {
+			continue
+		}
+		candidates = append(candidates, candidate{path: path, mod: info.ModTime()})
+	}
+	if len(candidates) == 0 {
+		return nil, false
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if !candidates[i].mod.Equal(candidates[j].mod) {
+			return candidates[i].mod.After(candidates[j].mod)
+		}
+		return candidates[i].path > candidates[j].path
+	})
+	docs := guardReadReasonDocs(root)
+	for _, cand := range candidates {
+		rows, err := journal.ReadRows(cand.path)
+		if err != nil {
+			continue
+		}
+		if len(rows) == 0 {
+			return nil, true
+		}
+		if !guardRowsContainTrace(rows, traceID) {
+			continue
+		}
+		return guardRefusalCarryForwardFromRows(rows, traceID, docs, guardRefusalCarryForwardTopN), true
+	}
+	return nil, false
+}
+
+func guardPriorAuditDir(auditPath string) string {
+	auditPath = strings.TrimSpace(auditPath)
+	if auditPath != "" {
+		return filepath.Dir(auditPath)
+	}
+	return guardAuditDir(findRepoRoot("."))
+}
+
+func guardRowsContainTrace(rows []journal.Row, traceID string) bool {
+	traceID = strings.TrimSpace(traceID)
+	for _, row := range rows {
+		if traceID == "" || strings.TrimSpace(row.TraceID) == traceID {
+			return true
+		}
+	}
+	return false
 }
 
 func guardWriteRefusalCarryForward(j *journal.Journal, seq0 uint64, traceID, root string) error {
+	_, err := guardWriteRefusalCarryForwardAndReturn(j, seq0, traceID, root)
+	return err
+}
+
+func guardWriteRefusalCarryForwardAndReturn(j *journal.Journal, seq0 uint64, traceID, root string) ([]guardRefusalCarry, error) {
 	if j == nil {
-		return nil
+		return nil, nil
 	}
 	auditPath := j.Path()
 	if auditPath == "" {
-		return nil
+		return nil, nil
 	}
 	if err := j.Flush(); err != nil {
-		return err
+		return nil, err
 	}
 	rows, err := journal.ReadRows(auditPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	sessionRows := make([]journal.Row, 0, len(rows))
 	for _, row := range rows {
@@ -86,7 +235,7 @@ func guardWriteRefusalCarryForward(j *journal.Journal, seq0 uint64, traceID, roo
 		}
 	}
 	refusals := guardRefusalCarryForwardFromRows(sessionRows, traceID, guardReadReasonDocs(root), guardRefusalCarryForwardTopN)
-	return guardWriteRefusalCarryForwardFile(auditPath, traceID, refusals, time.Now())
+	return refusals, guardWriteRefusalCarryForwardFile(auditPath, traceID, refusals, time.Now())
 }
 
 func guardWriteRefusalCarryForwardFile(auditPath, traceID string, refusals []guardRefusalCarry, now time.Time) error {
