@@ -3,6 +3,7 @@ package macbench
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -101,9 +102,30 @@ func TestSanitizeGatewayForReportKeepsLoopbackOnly(t *testing.T) {
 	}
 }
 
+func TestRemoteGatewayErrorTextIsSanitized(t *testing.T) {
+	rep, err := Run(context.Background(), Options{
+		Gateway: "http://example.invalid:8080",
+		Suite:   SuiteHealth,
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New(`Get "http://example.invalid:8080/healthz": context deadline exceeded`)
+		})},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	joined := rep.Health.Error + "\n" + strings.Join(rep.Errors, "\n")
+	if strings.Contains(joined, "example.invalid") || !strings.Contains(joined, "<remote-gateway>/healthz") {
+		t.Fatalf("gateway was not sanitized in errors: %q", joined)
+	}
+}
+
 func TestElapsedSecondsFloorsNonPositiveDurations(t *testing.T) {
 	got := elapsedSeconds(time.Now().Add(time.Second))
 	if got != 0.001 {
 		t.Fatalf("elapsedSeconds future start = %v, want 0.001", got)
 	}
 }
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

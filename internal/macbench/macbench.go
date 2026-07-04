@@ -116,6 +116,7 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 		Model:       opts.Model,
 	}
 	rep.Health = probeHealth(ctx, opts)
+	rep.Health.Error = sanitizeGatewayInText(rep.Health.Error, base)
 	if !rep.Health.OK {
 		rep.Errors = append(rep.Errors, "healthz failed: "+rep.Health.Error)
 		if opts.Suite == SuiteHealth {
@@ -138,6 +139,7 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 	default:
 		return Report{}, fmt.Errorf("unknown suite %q", opts.Suite)
 	}
+	sanitizeReportErrors(&rep, base)
 	rep.Headline = headline(rep.Rows)
 	return rep, nil
 }
@@ -206,6 +208,23 @@ func SanitizeGatewayForReport(raw string) string {
 		return u.Scheme + "://" + host + portSuffix(u)
 	}
 	return "<remote-gateway>"
+}
+
+func sanitizeReportErrors(rep *Report, rawGateway string) {
+	rep.Health.Error = sanitizeGatewayInText(rep.Health.Error, rawGateway)
+	for i := range rep.Errors {
+		rep.Errors[i] = sanitizeGatewayInText(rep.Errors[i], rawGateway)
+	}
+	for i := range rep.Rows {
+		rep.Rows[i].Error = sanitizeGatewayInText(rep.Rows[i].Error, rawGateway)
+	}
+}
+
+func sanitizeGatewayInText(s, rawGateway string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, rawGateway, SanitizeGatewayForReport(rawGateway))
 }
 
 func portSuffix(u *url.URL) string {
