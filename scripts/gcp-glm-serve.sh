@@ -62,6 +62,9 @@
 #                   ON_IDLE=none disables the reaper.
 #   IDLE_MINUTES    idle window before the reaper acts        (default 60)
 #   GRACE_MINUTES   boot grace floor (never reap mid-load)    (default 90; GLM loads ~40min)
+#   MAX_DAILY_USD   hard operating envelope for this VM       (default 500; 0 disables)
+#   MAX_RUNTIME_MINUTES  override the computed max lifetime   (default: floor(MAX_DAILY_USD / tier_hourly * 60))
+#   MAX_RUNTIME_ACTION   stop | delete when lifetime expires  (default delete)
 set -euo pipefail
 
 SELF="${BASH_SOURCE[0]}"
@@ -84,6 +87,9 @@ LLAMA_DIR="${LLAMA_DIR:-/opt/llama.cpp}"
 ON_IDLE="${ON_IDLE:-delete}"        # idle-gardener action; ON_IDLE=none disables the reaper
 IDLE_MINUTES="${IDLE_MINUTES:-60}"  # reap after this many minutes of no model turns
 GRACE_MINUTES="${GRACE_MINUTES:-90}" # never reap within this many minutes of boot (GLM load ~40min)
+MAX_DAILY_USD="${MAX_DAILY_USD:-500}"
+MAX_RUNTIME_MINUTES="${MAX_RUNTIME_MINUTES:-}"
+MAX_RUNTIME_ACTION="${MAX_RUNTIME_ACTION:-delete}"
 
 MODE="plan"
 case "${1:-}" in
@@ -100,6 +106,10 @@ die() { printf '\033[31m[gcp-glm] %s\033[0m\n' "$*" >&2; exit 1; }
 if [ "$ENGINE" != "sglang" ] && [ "$ENGINE" != "vllm" ]; then
   die "ENGINE must be 'sglang' or 'vllm' (got '$ENGINE')"
 fi
+case "$MAX_RUNTIME_ACTION" in
+  stop|delete) ;;
+  *) die "MAX_RUNTIME_ACTION must be 'stop' or 'delete' (got '$MAX_RUNTIME_ACTION')" ;;
+esac
 
 # --- resolve the tier from the single registry (tools/gcp_accel.py) -----------
 # emit-shell prints eval-able GLM_* assignments (machine type, accelerator flag, GPU
@@ -110,6 +120,32 @@ TIER_SHELL="$("$PY" "$ROOT/tools/gcp_accel.py" --emit-shell "$GCP_TIER")" \
 eval "$TIER_SHELL"   # defines GLM_MACHINE_TYPE, GLM_ACCEL_FLAG, GLM_IMAGE_FAMILY, ...
 
 GCP_ZONE="${GCP_ZONE:-${GLM_DEFAULT_ZONE}}"
+
+compute_budget_minutes() {
+  "$PY" - "$GLM_APPROX_USD_HR" "$MAX_DAILY_USD" <<'PY'
+import math
+import sys
+
+try:
+    hourly = float(sys.argv[1])
+    budget = float(sys.argv[2])
+except ValueError:
+    raise SystemExit(2)
+
+if hourly <= 0 or budget <= 0:
+    print(0)
+else:
+    print(max(1, math.floor((budget / hourly) * 60)))
+PY
+}
+if [ -z "$MAX_RUNTIME_MINUTES" ]; then
+  if ! MAX_RUNTIME_MINUTES="$(compute_budget_minutes)"; then
+    die "MAX_DAILY_USD must be numeric (got '$MAX_DAILY_USD')"
+  fi
+fi
+case "$MAX_RUNTIME_MINUTES" in
+  ''|*[!0-9]*) die "MAX_RUNTIME_MINUTES must be a non-negative integer (got '$MAX_RUNTIME_MINUTES')" ;;
+esac
 
 # --- resolve the serve path: explicit SERVE wins; else by the tier's GPU arch -----------
 # sm_90+ (Hopper/Blackwell) defaults to the stock SGLang/vLLM DSA path; sm_80 (Ampere/A100)
@@ -284,6 +320,43 @@ render_idle_reaper() {
   echo "systemctl enable --now fak-idle-reaper.timer"
 }
 
+# render_budget_reaper — emit a one-shot max-lifetime guard that self-stops/deletes the
+# VM after the budget-derived runtime. This is separate from the idle reaper: idle protects
+# against abandoned sessions, while this protects the operator's daily spend envelope even
+# if the node stays busy. The price is the registry's indicative hourly estimate; the
+# Cloud Billing budget remains the authoritative spend monitor.
+render_budget_reaper() {
+  if [ "$MAX_RUNTIME_MINUTES" = "0" ]; then
+    echo "# max-lifetime budget reaper disabled (MAX_DAILY_USD=0 or MAX_RUNTIME_MINUTES=0)"
+    return 0
+  fi
+  echo "# --- max-lifetime budget guard (MAX_DAILY_USD=${MAX_DAILY_USD}, ~\$${GLM_APPROX_USD_HR}/hr => ${MAX_RUNTIME_MINUTES}min) ---"
+  cat <<'BUDGET'
+cat >/usr/local/sbin/fak-budget-reaper.sh <<'UNIT'
+#!/usr/bin/env bash
+set -euo pipefail
+ACTION="${MAX_RUNTIME_ACTION:-delete}"
+META="http://metadata.google.internal/computeMetadata/v1/instance"
+VM_NAME="$(curl -fsS --max-time 5 -H 'Metadata-Flavor: Google' "$META/name" 2>/dev/null || true)"
+ZONE_PATH="$(curl -fsS --max-time 5 -H 'Metadata-Flavor: Google' "$META/zone" 2>/dev/null || true)"
+ZONE_SHORT="${ZONE_PATH##*/}"
+ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "$ts budget-reaper action=$ACTION max_daily_usd=${MAX_DAILY_USD:-?} runtime_min=${MAX_RUNTIME_MINUTES:-?} hourly_usd=${GLM_APPROX_USD_HR:-?} vm=$VM_NAME zone=$ZONE_SHORT" >&2
+case "$ACTION" in stop|delete) ;; *) echo "invalid MAX_RUNTIME_ACTION=$ACTION" >&2; exit 2 ;; esac
+[ -n "$VM_NAME" ] && [ -n "$ZONE_SHORT" ] || { echo "metadata identity unavailable; refusing to act" >&2; exit 1; }
+command -v gcloud >/dev/null 2>&1 || { echo "gcloud unavailable; refusing to act" >&2; exit 1; }
+exec gcloud compute instances "$ACTION" "$VM_NAME" --zone "$ZONE_SHORT" --quiet
+UNIT
+chmod 0755 /usr/local/sbin/fak-budget-reaper.sh
+BUDGET
+  printf 'systemd-run --unit=fak-budget-reaper --collect --on-active=%smin \\\n' "$MAX_RUNTIME_MINUTES"
+  printf '  --setenv=MAX_RUNTIME_ACTION=%q \\\n' "$MAX_RUNTIME_ACTION"
+  printf '  --setenv=MAX_DAILY_USD=%q \\\n' "$MAX_DAILY_USD"
+  printf '  --setenv=MAX_RUNTIME_MINUTES=%q \\\n' "$MAX_RUNTIME_MINUTES"
+  printf '  --setenv=GLM_APPROX_USD_HR=%q \\\n' "$GLM_APPROX_USD_HR"
+  echo "  /usr/bin/env bash /usr/local/sbin/fak-budget-reaper.sh"
+}
+
 render_startup_script() {
   case "$SERVE" in
     fak)      render_startup_preamble "build-essential cmake"; render_startup_tail_fak ;;
@@ -291,6 +364,7 @@ render_startup_script() {
     *)        render_startup_preamble ""; render_startup_tail_dsa ;;
   esac
   render_idle_reaper "$GLM_PORT"
+  render_budget_reaper
 }
 
 # one-line human description of the resolved serve path, for the plan summary.
@@ -342,6 +416,11 @@ REACH
 if [ "$MODE" = "plan" ]; then
   log "PLAN (no apply). GLM-5.2 serve node: tier '$GCP_TIER' ($GLM_MACHINE_TYPE, ${GLM_GPU_COUNT}x ${GLM_GPU_LABEL}, sm_${GLM_COMPUTE_CAP}) in $GCP_ZONE as '$VM_NAME'."
   log "$(describe_serve) served-port=$GLM_PORT  (~\$${GLM_APPROX_USD_HR}/hr while up)"
+  if [ "$MAX_RUNTIME_MINUTES" = "0" ]; then
+    log "budget guard disabled; Cloud Billing budget alerts are still recommended."
+  else
+    log "budget guard: MAX_DAILY_USD=$MAX_DAILY_USD => self-${MAX_RUNTIME_ACTION} after ${MAX_RUNTIME_MINUTES}min on this tier (indicative price; verify billing before apply)."
+  fi
   echo "# gcloud command this would run:"
   print_gcloud
   echo "# --- VM startup script (cloud-init) ---"

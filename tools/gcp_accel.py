@@ -7,9 +7,11 @@ the one-touch driver) imports this so the machine-type strings, GPU model names,
 and the Blackwell-first fallback ladder live in exactly one file.
 
 Facts here were resolved from Google Cloud's GPU machine-type documentation
-(cloud.google.com/compute/docs/gpus) on 2026-06-20. They are slow-moving but not
-frozen -- re-confirm machine_type / accelerator_type strings against
-`gcloud compute accelerator-types list` before a real run on a new region.
+(cloud.google.com/compute/docs/gpus) on 2026-06-20. Pricing estimates for the
+large GLM tiers were refreshed against Google's accelerator-optimized pricing
+page on 2026-07-05. These are slow-moving but not frozen -- re-confirm machine
+type / accelerator_type strings against `gcloud compute accelerator-types list`
+and price against the billing catalog before a real run on a new region.
 
 Nothing in this module calls gcloud or the network; it is pure data + helpers so
 it imports cleanly anywhere (including the test suite) with no auth.
@@ -116,7 +118,7 @@ TIERS: tuple[AccelTier, ...] = (
         gen_rank=40,
         arch="hopper",
         compute_capability="90",
-        approx_usd_per_hour=60.0,
+        approx_usd_per_hour=84.81,
         common_zones=(
             "us-central1-a",
             "us-east5-a",
@@ -142,7 +144,7 @@ TIERS: tuple[AccelTier, ...] = (
         gen_rank=30,
         arch="hopper",
         compute_capability="90",
-        approx_usd_per_hour=30.0,
+        approx_usd_per_hour=88.49,
         common_zones=(
             "us-central1-a",
             "us-east4-a",
@@ -202,7 +204,7 @@ TIERS: tuple[AccelTier, ...] = (
         gen_rank=22,
         arch="ampere",
         compute_capability="80",
-        approx_usd_per_hour=40.0,
+        approx_usd_per_hour=40.55,
         common_zones=(
             "us-central1-a",
             "us-east4-c",
@@ -236,7 +238,7 @@ TIERS: tuple[AccelTier, ...] = (
         gen_rank=20,
         arch="ampere",
         compute_capability="80",
-        approx_usd_per_hour=29.0,
+        approx_usd_per_hour=29.39,
         common_zones=(
             "us-central1-a",
             "us-east1-b",

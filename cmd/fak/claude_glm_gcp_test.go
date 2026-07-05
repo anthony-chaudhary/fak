@@ -96,6 +96,8 @@ func TestClaudeGLMGCPBringupPlanWiring(t *testing.T) {
 		"--emit-shell",
 		"claude-glm-gcp",
 		"FAK_GLM_GCP_BASE_URL",
+		"MAX_DAILY_USD",
+		"fak-budget-reaper",
 		`MODE="plan"`,
 	} {
 		requireContainsForClaudeGLMGCP(t, gcp, want)

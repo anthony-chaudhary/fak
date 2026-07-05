@@ -48,6 +48,9 @@ GCP_PROJECT=<id> HF_TOKEN=<hf> ./scripts/gcp-glm-demo.sh --apply   # run it on 8
 KEEP=1 GCP_PROJECT=<id> ./scripts/gcp-glm-demo.sh --apply # skip teardown to debug the node
 ```
 
+For a real dev day, prefer `scripts/gcp-glm-serve.sh` directly with the budget guard below.
+`gcp-glm-demo.sh` is for a short witnessed demo and deliberately tears down.
+
 The plan render is proven on any host (`go test ./cmd/fak -run TestClaudeGLMGCPDemoPlan`);
 the live cache-value turn is hardware-gated, the same gate as the rest of this page.
 
@@ -61,6 +64,64 @@ script, and the reach-from-laptop steps, so the whole deploy is reviewable first
 ./scripts/gcp-glm-serve.sh                            # PLAN: gcloud + startup + reach steps
 GCP_PROJECT=<id> ./scripts/gcp-glm-serve.sh --apply   # create the GPU VM
 ```
+
+### $500/day dev envelope
+
+A **usable dev setup under $500/day is a bounded burst node, not a 24/7 GLM-5.2
+server**. GLM-5.2 needs an 8-GPU shape for the current GGUF path; at current
+on-demand order-of-magnitude pricing, every practical 8-GPU tier exceeds $500 if it is
+left up all day. The bring-up script now defaults to `MAX_DAILY_USD=500` and renders a
+one-shot **budget reaper** on the VM: after the budget-derived max lifetime, the VM
+self-`delete`s by default. The idle reaper remains separate and deletes earlier when no
+model turns arrive.
+
+| tier | role | approx $/hr in `tools/gcp_accel.py` | max runtime under $500 |
+|---|---|---:|---:|
+| `a2-high-a100-40gb` | cheapest GLM-sized A100 path; tighter host/VRAM headroom | 29.39 | 17h 0m |
+| `a2-ultra-a100-80gb` | recommended budget dev tier when A100 quota is available | 40.55 | 12h 19m |
+| `a3-ultra-h200` | Hopper/H200 fallback with much shorter budget window | 84.81 | 5h 53m |
+| `a3-high-h100` | demo/Hopper tier; useful for short witnessed runs | 88.49 | 5h 39m |
+| `a4-b200` | Blackwell target; quota/reservation gated | 90.00 | 5h 33m |
+
+Recommended dev command:
+
+```bash
+MAX_DAILY_USD=500 \
+MAX_RUNTIME_ACTION=delete \
+ON_IDLE=delete IDLE_MINUTES=45 GRACE_MINUTES=90 \
+GCP_TIER=a2-ultra-a100-80gb SERVE=fak \
+GCP_PROJECT=<id> HF_TOKEN=<hf> ./scripts/gcp-glm-serve.sh --apply
+```
+
+Use `MAX_RUNTIME_ACTION=stop` only when you deliberately want to preserve the boot disk
+for faster next-day bring-up; `delete` is the zero-residual-cost default. Use
+`MAX_RUNTIME_MINUTES=<n>` to make the cap stricter than the computed `$500 / hourly`
+window, for example `MAX_RUNTIME_MINUTES=480` for an eight-hour workday.
+
+Before apply, create a Cloud Billing budget scoped to the project at **$500** with
+50% / 80% / 100% actual-spend alerts. Treat that as an alerting plane, not the cap:
+Google budgets do not automatically stop resources. The VM reapers are the compute-side
+cap; billing alerts are the independent spend witness.
+
+Operator checklist for a live dev setup:
+
+1. Pick the tier: start with `a2-ultra-a100-80gb` for the best budget/headroom balance;
+   use `a2-high-a100-40gb` only when runtime is more valuable than headroom.
+2. Confirm quota in the chosen region for both the GPU family and the all-regions GPU
+   ceiling; if quota is missing, request it before running `--apply`.
+3. Create the project-scoped $500 Cloud Billing budget and alerts, then rely on
+   `MAX_DAILY_USD`, `MAX_RUNTIME_MINUTES`, and the idle reaper for compute-side stopping.
+4. Ensure the VM's attached service account can stop/delete its own instance
+   (`roles/compute.instanceAdmin.v1` or a narrower equivalent); otherwise the reapers log a
+   refusal and the node stays up.
+5. Run the plan command with the exact env you intend to apply; read the rendered
+   `gcloud` command, startup script, idle reaper, budget reaper, and tunnel steps.
+6. Run `--apply` from an authenticated host with `GCP_PROJECT` and `HF_TOKEN`.
+7. Watch readiness on the VM with `journalctl -u glm52serve -f` and `cat /opt/glm52-q4/PHASE`;
+   only move to the client when the endpoint answers `/v1/models` and a chat smoke.
+8. Open the IAP tunnel or use Tailscale, then run `claude-glm-gcp --probe "say pong"`.
+9. Use `claude-glm-gcp` for the dev session. During the run, `curl /metrics` should expose
+   fak's gateway counters; after the day, verify the VM stopped/deleted or delete it manually.
 
 It picks the serve path from the tier's GPU arch (override with `SERVE=`):
 
@@ -79,13 +140,13 @@ GCP_TIER=a2-ultra-a100-80gb SERVE=llamacpp ./scripts/gcp-glm-serve.sh  # A100, l
 GCP_TIER=a4-b200 ./scripts/gcp-glm-serve.sh                            # Blackwell, stock SGLang/vLLM
 ```
 
-The default tier is `a3-ultra-h200` (8× H200, sm_90, ~$60/hr) from the `tools/gcp_accel.py`
+The default tier is `a3-ultra-h200` (8× H200, sm_90, ~$84.81/hr) from the `tools/gcp_accel.py`
 registry — the most-provisionable tier that clears the DSA floor. The datacenter GPU tiers are
-`a2-ultra-a100-80gb` (8-GPU datacenter server 80GB, 640 GB VRAM, ~$40/hr — the same shape as the GPU server example)
-and `a2-high-a100-40gb` (8-GPU datacenter server 40GB, ~$29/hr). Knobs: `GCP_TIER`, `SERVE`, `GCP_ZONE`,
+`a2-ultra-a100-80gb` (8-GPU datacenter server 80GB, 640 GB VRAM, ~$40.55/hr — the same shape as the GPU server example)
+and `a2-high-a100-40gb` (8-GPU datacenter server 40GB, ~$29.39/hr). Knobs: `GCP_TIER`, `SERVE`, `GCP_ZONE`,
 `ENGINE`/`QUANT` (the sm_90 stock path), `GLM_GGUF_REPO`/`GLM_GGUF_SUBDIR` (the fak/llama.cpp
 GGUF, default `unsloth/GLM-5.2-GGUF` `UD-Q4_K_M`), `NCPU_MOE`, `GLM_PORT`, `HF_TOKEN`,
-`TAILSCALE_AUTHKEY`.
+`TAILSCALE_AUTHKEY`, `MAX_DAILY_USD`, `MAX_RUNTIME_MINUTES`, and `MAX_RUNTIME_ACTION`.
 
 > **Why A100 needs a different serve.** GLM-5.2's DSA kernels in stock SGLang/vLLM are gated
 > to Hopper (sm_90) / Blackwell (sm_100); on Ampere (datacenter GPU, sm_80) the preflight
@@ -158,6 +219,7 @@ which is not stood up from the implementing host — same gate as
 |---|---|---|
 | The `glm-gcp` preset resolves to fak's openai backend at the GLM `/v1` with model `glm-5.2` | `go test ./cmd/fak -run TestClaudeGLMGCP` (bash + PowerShell launchers) | ✅ proven on any host |
 | The bring-up plan renders the gcloud create + serve + the `claude-glm-gcp` hand-off, with no creds | `go test ./cmd/fak -run TestClaudeGLMGCPBringupPlanRendersWithoutCreds` | ✅ proven on any host |
+| The bring-up plan renders a `MAX_DAILY_USD` max-lifetime budget reaper in addition to the idle reaper | `go test ./cmd/fak -run TestClaudeGLMGCPBringupPlanWiring`; plan output contains `fak-budget-reaper` | ✅ proven on any host |
 | The **one-command demo** (`gcp-glm-demo.sh`) renders provision → pure-fak serve → probe → cache-value scrape → teardown on the **8× H100** tier, no creds | `go test ./cmd/fak -run TestClaudeGLMGCPDemoPlan` (wiring on any OS; bash render on Unix/CI) | ✅ proven on any host |
 | A **live cache-value turn** (`fak_gateway_kv_prefix_reused_tokens_total` > 0 on turns 2..N) through the demo | needs the 8× H100 node up (`gcp-glm-demo.sh --apply`) | ⏳ hardware-gated |
 | The **datacenter GPU tiers** are in the single registry (`a2-ultra-a100-80gb`, `a2-high-a100-40gb`) | `tools/gcp_accel_test.py` + `go test ./cmd/fak -run TestClaudeGLMGCPA100TiersInRegistry` | ✅ proven on any host |
