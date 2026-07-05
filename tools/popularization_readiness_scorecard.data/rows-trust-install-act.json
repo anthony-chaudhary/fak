@@ -1,0 +1,66 @@
+{
+  "rows": [
+    {
+      "id": "trust",
+      "stage": "Trust — the proof a skeptic needs",
+      "visitor": "A skeptical evaluator who likes the pitch but has been burned by hype. They want sourced numbers, an honest ledger, a clear comparison, and a real license before they invest more time.",
+      "job": "See that the claims are backed (a benchmark authority, an honesty ledger where every claim carries a status tag), understand how fak differs from what they already run, and confirm it is real open source.",
+      "phase": "trust",
+      "effort": "read",
+      "entry_doc": "CLAIMS.md",
+      "affordances": [
+        {"id": "benchmark-authority", "kind": "path_exists", "target": "BENCHMARK-AUTHORITY.md", "need": "a benchmark-authority doc every headline figure traces to — the number is sourced, not asserted", "severity": "hard"},
+        {"id": "honesty-ledger-tagged", "kind": "claim_section", "section": "The product", "tags": ["SHIPPED"], "need": "the honesty ledger (CLAIMS.md) backs the core product claim with a status tag, so a claim can be trusted instead of discounted", "severity": "hard"},
+        {"id": "ledger-linked", "kind": "doc_mentions", "doc": "README.md", "tokens": ["CLAIMS.md"], "match": "any", "need": "the front page links the honesty ledger — the skeptic can reach the tagged claims in one hop", "severity": "hard"},
+        {"id": "comparison-positioning", "kind": "any_path_exists", "targets": ["docs/integrations/compatibility-matrix.md", "docs/industry-scorecard/README.md"], "need": "a positioning/comparison surface answering 'how is this different from the thing I already use'", "severity": "hard"},
+        {"id": "boundaries-honest", "kind": "doc_mentions", "doc": "README.md", "tokens": ["Boundaries", "not the floor", "use vLLM"], "match": "any", "need": "an honest 'boundaries' section naming what fak is NOT — the fastest trust-builder for a skeptic", "severity": "hard"},
+        {"id": "social-proof", "kind": "any_path_exists", "targets": ["docs/adoption/signals.md", "docs/adoption/directories.md", "docs/launch/README.md"], "need": "a social-proof / adoption surface (witnessed usage, directory presence) for 'other people use this'", "severity": "hard"},
+        {"id": "license", "kind": "path_exists", "target": "LICENSE", "need": "a real OSS license file, so the visitor confirms they can actually use it", "severity": "hard"},
+        {"id": "supported-catalogue", "kind": "path_exists", "target": "docs/supported/README.md", "need": "a catalogue of supported models/engines/harnesses — breadth-of-support proof", "severity": "soft"}
+      ],
+      "verdict": "converts",
+      "gaps": [
+        "Social proof today is witnessed-usage + directory submissions; named third-party testimonials are honest-scope-fenced until they exist"
+      ]
+    },
+    {
+      "id": "install",
+      "stage": "Install — get the binary",
+      "visitor": "A convinced visitor who wants the binary now. The friction between 'interested' and 'have it running' is where they leak if the path is unclear or broken.",
+      "job": "Get fak with one command that resolves — a go install one-liner (module at the repo root) or a prebuilt archive — with a fuller install doc for the other platforms.",
+      "phase": "install",
+      "effort": "skim",
+      "entry_doc": "README.md",
+      "affordances": [
+        {"id": "install-oneliner", "kind": "doc_mentions", "doc": "README.md", "tokens": ["go install", "@latest"], "match": "all", "need": "the go install ...@latest one-liner on the front page (the module is at the repo root, so it resolves)", "severity": "hard"},
+        {"id": "module-root-path", "kind": "doc_mentions", "doc": "README.md", "tokens": ["github.com/anthony-chaudhary/fak/cmd/fak"], "match": "all", "need": "the EXACT installable module path, so `go install ...@latest` resolves directly — a stale path fails this", "severity": "hard"},
+        {"id": "install-doc", "kind": "path_exists", "target": "INSTALL.md", "need": "a fuller install doc (prebuilt archives, containers, per-platform notes) for the visitor who cannot go install", "severity": "hard"},
+        {"id": "prebuilt-path", "kind": "any_path_exists", "targets": ["install.sh", ".github/workflows/release-artifacts.yml"], "need": "a no-toolchain path to the binary (a curl|sh installer or a release-artifacts CI job) for the visitor who will not build from source", "severity": "hard"}
+      ],
+      "verdict": "converts",
+      "gaps": [
+        "No Homebrew/winget/scoop package yet — the lowest-effort install is curl|sh, a release archive, or go install"
+      ]
+    },
+    {
+      "id": "act",
+      "stage": "Act — the first win",
+      "visitor": "A visitor with the binary who wants a first success in under a minute — a command that runs with no key/model/GPU and prints an observable result they can recognize as 'it worked'.",
+      "job": "Run one offline command and see a labelled result (a cost/quality delta, a DENY verdict), backed by a quickstart from clone and a demo doc that shows what else to run.",
+      "phase": "act",
+      "effort": "glance",
+      "entry_doc": "README.md",
+      "affordances": [
+        {"id": "offline-first-command", "kind": "fenced_command", "docs": ["README.md"], "tokens": ["fak routebench", "fak benchmarks list --offline", "fak preflight"], "need": "a copy-pasteable no-key/no-model/no-GPU first command in a fenced block", "severity": "hard"},
+        {"id": "observable-signal", "kind": "doc_mentions", "doc": "README.md", "tokens": ["-> COST", "-> DENY", "routed is ~20%"], "match": "any", "need": "an observable success signal shown inline with the first command (an expected result marker), so the visitor can tell it WORKED", "severity": "hard"},
+        {"id": "first-command-resolves", "kind": "command_resolves", "command": "go run ./cmd/fak routebench", "need": "the first command's verb actually resolves against the binary's dispatch (documented in the CLI reference) — a doc that names a dead verb is an ambush", "severity": "hard"},
+        {"id": "quickstart", "kind": "any_path_exists", "targets": ["docs/fak/tutorial.md", "GETTING-STARTED.md", "START-HERE.md"], "need": "a quickstart/tutorial that carries the visitor from clone to a running kernel", "severity": "hard"},
+        {"id": "demo-doc", "kind": "path_exists", "target": "docs/run-the-demos.md", "need": "a demo doc that shows the visitor what else to run after the first win", "severity": "hard"}
+      ],
+      "verdict": "converts",
+      "gaps": [
+        "The first win is a deterministic offline lens (routebench/preflight); a hosted one-click demo would remove the install step entirely for the lowest-effort visitor"
+      ]
+    }
+  ]
+}

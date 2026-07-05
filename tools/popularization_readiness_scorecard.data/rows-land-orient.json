@@ -1,0 +1,45 @@
+{
+  "rows": [
+    {
+      "id": "land",
+      "stage": "Land — first glance at the README",
+      "visitor": "A first-time visitor who clicked a link. They will spend seconds, scanning the top of the README to decide whether to keep reading at all.",
+      "job": "In one glance, understand what fak is and see that it does something real — an identity line, a headline number, a runnable first command visible above the fold.",
+      "phase": "land",
+      "effort": "glance",
+      "entry_doc": "README.md",
+      "affordances": [
+        {"id": "identity-line", "kind": "doc_mentions", "doc": "README.md", "tokens": ["fak is a fused agent kernel", "one Go binary"], "match": "any", "need": "a one-sentence 'what fak is' the visitor can grasp in a glance, near the top of the README", "severity": "hard"},
+        {"id": "hero-first-command", "kind": "fenced_command", "docs": ["README.md"], "tokens": ["fak guard --", "fak routebench", "fak preflight"], "need": "a copy-pasteable hero command in a fenced block, so the visitor sees a runnable first move without scrolling", "severity": "hard"},
+        {"id": "headline-number", "kind": "doc_mentions", "doc": "README.md", "tokens": ["4.1", "less work"], "match": "any", "need": "the honest headline benchmark number on the front page (the tuned ~4.1x, not the naive figure)", "severity": "hard"},
+        {"id": "numbers-are-sourced", "kind": "doc_mentions", "doc": "README.md", "tokens": ["BENCHMARK-AUTHORITY", "CLAIMS.md"], "match": "any", "need": "the headline number is anchored to a source (benchmark authority + the honesty ledger) so it reads as real, not marketing", "severity": "hard"},
+        {"id": "hero-visual", "kind": "any_path_exists", "targets": ["visuals/hero-video.mp4", "visuals/hero-video.gif"], "need": "a hero visual the front page can lead with — one picture/video that makes the win legible in seconds", "severity": "soft"}
+      ],
+      "verdict": "converts",
+      "gaps": [
+        "The hero is a benchmark video + numbers; an interactive in-browser demo would convert an even-lower-effort visitor"
+      ]
+    },
+    {
+      "id": "orient",
+      "stage": "Orient — the five concepts, named and reachable",
+      "visitor": "A visitor who is intrigued and now wants the mental model: what are the actual ideas here, and can I get them from one page?",
+      "job": "Find the five core concepts named in plain language, each reachable from a front-door surface — so the visitor can re-explain fak to a colleague a week later.",
+      "phase": "orient",
+      "effort": "skim",
+      "entry_doc": "docs/concepts-and-story.md",
+      "affordances": [
+        {"id": "five-concepts-named", "kind": "doc_mentions", "doc": "docs/concepts-and-story.md", "tokens": ["syscall", "KV cache", "capability", "binary"], "match": "all", "need": "the five core concepts named together on a reader-facing surface (syscall model, verify-don't-trust, addressable KV cache, default-deny capability gate, single-binary drop-in)", "severity": "hard"},
+        {"id": "syscall-explainer", "kind": "path_exists", "target": "docs/explainers/tool-call-is-a-syscall.md", "need": "the flagship 'treat the tool call like a syscall' explainer — the one-page read that makes the whole design click", "severity": "hard"},
+        {"id": "concept-glossary", "kind": "path_exists", "target": "docs/fak/concept-glossary.md", "need": "a concept glossary that gives each idea one canonical name and definition", "severity": "hard"},
+        {"id": "machine-map", "kind": "path_exists", "target": "llms.txt", "need": "the machine-readable doc-map (llms.txt) so an answer engine can orient a visitor who asks it about fak", "severity": "hard"},
+        {"id": "docs-map", "kind": "doc_mentions", "doc": "README.md", "tokens": ["Docs map", "Machine-readable map"], "match": "any", "need": "a docs map on the README that routes 'if you want X, read Y' — so orienting is one hop, not a search", "severity": "hard"},
+        {"id": "learning-path", "kind": "any_path_exists", "targets": ["LEARNING-PATH.md", "START-HERE.md"], "need": "an ordered concept path for a visitor who wants to learn the ideas in sequence", "severity": "soft"}
+      ],
+      "verdict": "converts",
+      "gaps": [
+        "The five concepts are named on concepts-and-story.md and the epic doc; a single-screen 'concept card' image would make them even more repeatable"
+      ]
+    }
+  ]
+}
