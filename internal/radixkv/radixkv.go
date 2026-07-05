@@ -66,6 +66,12 @@ type node struct {
 	// path, post-prefill). nil in pure-accounting mode (no model attached); set by Insert
 	// to the cache the caller built, and by split to a truncated clone of a child's cache.
 	kv *model.KVCache
+	// logits is the final-token distribution for this exact full prefix, when the caller
+	// provided it. It lets an exact-hit replay sample the first generated token without
+	// refeeding the prompt's final token just to recover logits. Splits intentionally do
+	// not derive logits for the shorter boundary; a full-prefix KV can be truncated, but
+	// the final logits for an intermediate prefix are not available from a longer leaf.
+	logits []float32
 
 	plen     int    // path length in tokens (parent.plen + len(key)); == len(kv) when kv!=nil
 	refs     int    // active leases; a leaf with refs>0 is never LRU-evicted
@@ -268,10 +274,20 @@ func (t *Tree) Lookup(tokens []int) (*node, int) {
 // Insert returns, exactly when the request finishes — and the just-inserted request is
 // itself protected from the eviction its own Insert may trigger.
 func (t *Tree) Insert(boundary *node, suffix []int, kv *model.KVCache) *node {
+	return t.InsertWithLogits(boundary, suffix, kv, nil)
+}
+
+// InsertWithLogits is Insert plus an optional exact-prefix logits payload. The logits are
+// copied on admission because quantized sessions may reuse their logits buffer on the next
+// Step/Prefill. Passing nil preserves Insert's historical behavior.
+func (t *Tree) InsertWithLogits(boundary *node, suffix []int, kv *model.KVCache, logits []float32) *node {
 	if len(suffix) == 0 {
+		if logits != nil {
+			boundary.logits = append([]float32(nil), logits...)
+		}
 		return boundary // already fully cached; keep the boundary lease for the caller to Done
 	}
-	leaf := t.attachLeaf(boundary, suffix, kv, t.tick())
+	leaf := t.attachLeaf(boundary, suffix, kv, logits, t.tick())
 	leaf.refs++ // lease the in-flight request's own leaf...
 	if boundary.refs > 0 {
 		boundary.refs-- // ...and release the prefix lease Lookup took (the leaf now guards the path)
@@ -285,13 +301,14 @@ func (t *Tree) Insert(boundary *node, suffix []int, kv *model.KVCache) *node {
 // tree's token count — the node-construction step both Insert and WarmInsert
 // (prewarm.go) share; each caller applies its own lease/recency bookkeeping and
 // eviction pass on the returned leaf.
-func (t *Tree) attachLeaf(boundary *node, suffix []int, kv *model.KVCache, lastUsed uint64) *node {
+func (t *Tree) attachLeaf(boundary *node, suffix []int, kv *model.KVCache, logits []float32, lastUsed uint64) *node {
 	s := append([]int(nil), suffix...)
 	leaf := &node{
 		key:      s,
 		parent:   boundary,
 		children: map[int]*node{},
 		kv:       kv,
+		logits:   append([]float32(nil), logits...),
 		plen:     boundary.plen + len(s),
 		lastUsed: lastUsed,
 	}
@@ -310,6 +327,16 @@ func (t *Tree) Done(n *node) {
 // KV is the reusable kernel-owned cache for this node's full prefix (nil if none). Clone
 // it (model.SessionFromPrefix does) before prefilling a suffix; never mutate it in place.
 func (n *node) KV() *model.KVCache { return n.kv }
+
+// Logits returns a copy of the final-token logits for this exact full prefix, or nil when
+// the caller did not cache them. The copy keeps request-local sampling penalties/biases
+// from mutating the shared tree payload.
+func (n *node) Logits() []float32 {
+	if n == nil || n.logits == nil {
+		return nil
+	}
+	return append([]float32(nil), n.logits...)
+}
 
 // Plen is the node's cached prefix length in tokens.
 func (n *node) Plen() int { return n.plen }

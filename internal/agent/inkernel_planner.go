@@ -1078,6 +1078,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// independent copy and a concurrent tree eviction cannot affect this turn's decode.
 	var s *model.Session
 	closeSession := false
+	var cachedLogits []float32
 	if reuse {
 		p.mu.Lock()
 		b, m := p.tree.Lookup(ids)
@@ -1085,15 +1086,19 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			s = p.sessionFromPrefixClone(k.Clone()) // an independent clone; cache.Len() == m
 			closeSession = p.backend != nil
 			matched = m
+			if matched >= len(ids) {
+				cachedLogits = b.Logits()
+			}
 		}
 		p.tree.Done(b) // release the lease — we have our clone (or matched nothing)
 		p.mu.Unlock()
 		// Fully cached (an exact-duplicate transcript): the cached KV has the prefix but
-		// not the last-token logits decode must start from. Refeed only the final token:
-		// evicting the final cached row leaves an exact prefix of len(ids)-1, and Prefill
-		// below recomputes that one row/logits. If the cache cannot truncate exactly
-		// (for example a recurrent hybrid), fail open to the old full-prefill path.
-		if s != nil && matched >= len(ids) {
+		// decode still needs the last-token logits to sample the first generated token. New
+		// leaves carry those logits; older/split leaves may not. When absent, refeed only
+		// the final token: evicting the final cached row leaves an exact prefix of len(ids)-1,
+		// and Prefill below recomputes that one row/logits. If the cache cannot truncate
+		// exactly (for example a recurrent hybrid), fail open to the old full-prefill path.
+		if s != nil && matched >= len(ids) && cachedLogits == nil {
 			if inKernelRefeedLastTokenForExactHit(s, len(ids)) {
 				matched = len(ids) - 1
 			} else {
@@ -1136,9 +1141,12 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	}
 
 	// 2) Prefill ONLY the divergent suffix (the whole prompt on a miss).
-	tp := time.Now()
-	logits := s.Prefill(ids[matched:])
-	prefillS = time.Since(tp).Seconds()
+	logits := cachedLogits
+	if logits == nil {
+		tp := time.Now()
+		logits = s.Prefill(ids[matched:])
+		prefillS = time.Since(tp).Seconds()
+	}
 	if err = ctx.Err(); err != nil {
 		return
 	}
@@ -1150,7 +1158,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		snap := s.Cache.Clone()
 		p.mu.Lock()
 		b, m := p.tree.Lookup(ids)
-		leaf := p.tree.Insert(b, ids[m:], snap)
+		leaf := p.tree.InsertWithLogits(b, ids[m:], snap, logits)
 		p.tree.Done(leaf)
 		p.mu.Unlock()
 	}

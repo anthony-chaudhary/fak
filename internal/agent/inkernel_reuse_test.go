@@ -145,6 +145,13 @@ func (c *countingBackend) ops() (mat, batched int) {
 	return c.mat, c.batched
 }
 
+func (c *countingBackend) reset() {
+	c.mu.Lock()
+	c.mat = 0
+	c.batched = 0
+	c.mu.Unlock()
+}
+
 func kvConfigFromModelConfig(cfg model.Config) compute.KVConfig {
 	return compute.KVConfig{
 		NumLayers:  cfg.NumLayers,
@@ -294,7 +301,7 @@ func TestInKernelReuseMatchesFullPrefill(t *testing.T) {
 	}
 }
 
-func TestInKernelReuseExactHitRefeedsOnlyLastToken(t *testing.T) {
+func TestInKernelReuseExactHitUsesCachedPromptLogits(t *testing.T) {
 	cfg := tinyCfg()
 	ids := synthIDs(cfg.VocabSize, 24, 404)
 	const maxNew = 8
@@ -305,11 +312,11 @@ func TestInKernelReuseExactHitRefeedsOnlyLastToken(t *testing.T) {
 		t.Fatalf("first turn unexpectedly reused %d tokens", primeMatched)
 	}
 	gotReplay, matched := decode(pon, ids, maxNew)
-	if want := len(ids) - 1; matched != want {
-		t.Fatalf("exact replay reused %d tokens, want %d (all but final token re-fed for logits)", matched, want)
+	if want := len(ids); matched != want {
+		t.Fatalf("exact replay reused %d tokens, want %d (cached prompt-final logits avoid last-token refeed)", matched, want)
 	}
 	if !eqInts(gotReplay, gotPrime) {
-		t.Fatalf("exact-hit last-token refeed changed decode:\nprime=%v\nreplay=%v", gotPrime, gotReplay)
+		t.Fatalf("exact-hit cached-logits replay changed decode:\nprime=%v\nreplay=%v", gotPrime, gotReplay)
 	}
 
 	poff := reusePlanner(false, false, cfg)
@@ -322,15 +329,18 @@ func TestInKernelReuseExactHitRefeedsOnlyLastToken(t *testing.T) {
 	}
 }
 
-func TestInKernelReuseExactHitFallsBackWhenLastTokenCannotEvict(t *testing.T) {
+func TestInKernelReuseExactHitCachedLogitsDoNotRequireTruncation(t *testing.T) {
 	cfg := tinyHybridCfg()
 	p := reusePlanner(true, false, cfg)
 	ids := synthIDs(cfg.VocabSize, 18, 405)
 
 	decode(p, ids, 1)
-	_, matched := decode(p, ids, 1)
-	if matched != 0 {
-		t.Fatalf("hybrid exact replay reused %d tokens, want fallback full prefill because recurrent state cannot truncate", matched)
+	gen, matched := decode(p, ids, 1)
+	if matched != len(ids) {
+		t.Fatalf("hybrid exact replay reused %d tokens, want full exact hit via cached logits", matched)
+	}
+	if len(gen) != 1 {
+		t.Fatalf("hybrid exact replay generated %d tokens, want 1", len(gen))
 	}
 }
 
@@ -353,7 +363,7 @@ func TestInKernelBackendGLMDsaEnablesHostPrefixReuse(t *testing.T) {
 		t.Fatalf("first backend GLM turn unexpectedly reused %d tokens", primeMatched)
 	}
 	gotReplay, matched := decode(p, ids, 3)
-	if want := len(ids) - 1; matched != want {
+	if want := len(ids); matched != want {
 		t.Fatalf("backend GLM exact replay reused %d tokens, want %d", matched, want)
 	}
 	if !eqInts(gotReplay, gotPrime) {
@@ -363,6 +373,37 @@ func TestInKernelBackendGLMDsaEnablesHostPrefixReuse(t *testing.T) {
 	stats := p.KVMemoryStats()
 	if !stats.Enabled || stats.Backend != "radixkv" || stats.Scope != string(compute.MemoryScopeHost) {
 		t.Fatalf("backend GLM KV stats should report enabled host radixkv, got %+v", stats)
+	}
+}
+
+func TestInKernelBackendGLMDsaExactHitCachedLogitsAvoidsRefeed(t *testing.T) {
+	t.Setenv("FAK_INKERNEL_RADIX", "on")
+	be := &countingBackend{Backend: compute.Default()}
+	cfg := tinyGLMDsaCfg()
+	p := NewInKernelPlanner(model.NewSyntheticGLMDsa(cfg), nil, "glm-dsa-counting-backend", false, be, false)
+	p.quant = false
+	ids := synthIDs(cfg.VocabSize, 9, 407)
+
+	decode(p, ids, 0) // prime KV + prompt-final logits
+	be.reset()
+	gen, matched := decode(p, ids, 1)
+	if matched != len(ids) {
+		t.Fatalf("exact replay reused %d tokens, want full prompt hit", matched)
+	}
+	if len(gen) != 1 {
+		t.Fatalf("exact replay generated %d tokens, want 1", len(gen))
+	}
+	if mat, batched := be.ops(); mat != 0 || batched != 0 {
+		t.Fatalf("exact replay with cached logits should not refeed the prompt or compute an unused final Step, got mat=%d batched=%d", mat, batched)
+	}
+
+	be.reset()
+	gen, matched = decode(p, ids, 2)
+	if matched != len(ids) || len(gen) != 2 {
+		t.Fatalf("two-token exact replay matched=%d generated=%d, want full hit and 2 generated", matched, len(gen))
+	}
+	if mat, batched := be.ops(); mat == 0 && batched == 0 {
+		t.Fatalf("two-token exact replay should compute a Step between generated tokens")
 	}
 }
 
