@@ -28,9 +28,15 @@
 // Result. The orphan call prefers a CONFIRMED worker-liveness signal when the caller has one
 // (a started run whose worker is known-dead is orphaned at once; a known-live worker is never
 // orphaned however long it runs), and falls back to a conservative staleness window only when
-// liveness is unknown — so a legitimately long-running worker is not falsely reclaimed. The
-// impure half (read the ledger, optionally probe the worker pid) lives in the cmd/fak shell,
-// the same leaf/shell split internal/resume and internal/dispatchorder use.
+// liveness is unknown — so a legitimately long-running worker is not falsely reclaimed. That
+// confirmed signal comes from Probe, the pure pid-liveness primitive here: given a run's
+// recorded worker identity and a caller-injected Liveness lookup, it returns DEAD / ALIVE /
+// UNKNOWN, defeating pid reuse with start-time identity (a held-but-different-start pid is a
+// new process, so the recorded worker is DEAD). Re-dispatch is thereby gated on DEAD: a
+// confirmed-alive-but-silent worker classifies ALIVE_SILENT (a liveness-beat problem) and stays
+// out of the worklist. The impure half (read the ledger, run the OS side of the Liveness probe)
+// lives in the cmd/fak shell, the same leaf/shell split internal/resume and
+// internal/dispatchorder use.
 package looprecover
 
 import "sort"
@@ -64,9 +70,10 @@ const (
 // The closed reason vocabulary for a Ranked.Reason.
 const (
 	ReasonWitnessed        = "witnessed"           // complete: an independent witness bound the run
-	ReasonWorkerLive       = "worker_live"         // running: the worker is confirmed alive
+	ReasonWorkerLive       = "worker_live"         // running: the worker is confirmed alive and recently active
+	ReasonAliveSilent      = "alive_silent"        // running: worker confirmed alive but ledger-silent past stale (a liveness-beat problem, never re-dispatched)
 	ReasonRecentActivity   = "recent_activity"     // running: activity within the stale window
-	ReasonWorkerDead       = "worker_dead"         // orphaned: the worker is confirmed dead
+	ReasonWorkerDead       = "worker_dead"         // orphaned: the worker is confirmed dead (or its pid was reused)
 	ReasonSilentPastStale  = "silent_past_stale"   // orphaned: no activity past the stale window (presumed)
 	ReasonEndedUnwitness   = "ended_unwitnessed"   // unwitnessed: ended with no witness
 	ReasonClaimedUnwitness = "claimed_unwitnessed" // unwitnessed: claimed done with no witness
@@ -98,6 +105,13 @@ type RunFact struct {
 	// the decision falls back to staleness. WorkerLive is meaningful only when WorkerKnown.
 	WorkerKnown bool `json:"worker_known"`
 	WorkerLive  bool `json:"worker_live"`
+	// WorkerPID/WorkerHost/WorkerStart are the run's worker identity as folded from the ledger:
+	// the process id (loop.go stamps it into the start/end event Metrics), its host, and a
+	// reuse-safe start-time fingerprint. They are what a caller probes for CONFIRMED liveness
+	// (see Probe); all-zero means the run carries no probeable worker and staleness decides.
+	WorkerPID   int    `json:"worker_pid,omitempty"`
+	WorkerHost  string `json:"worker_host,omitempty"`
+	WorkerStart string `json:"worker_start,omitempty"`
 }
 
 // Ranked is one run with the recovery verdict attached.
@@ -205,7 +219,14 @@ func classify(f RunFact, age, stale int64) (Disposition, string) {
 	case f.Started:
 		switch {
 		case f.WorkerKnown && !f.WorkerLive:
+			// DEAD: the worker is confirmed gone (or its pid was reused) — the one signal that
+			// gates re-dispatch. Orphaned however recent the last event.
 			return DispOrphaned, ReasonWorkerDead
+		case f.WorkerKnown && f.WorkerLive && stale >= 0 && age >= stale:
+			// ALIVE_SILENT: the worker is confirmed alive but has gone ledger-silent past the
+			// stale window — a liveness-beat problem, NOT an orphan. Never re-dispatched (a live
+			// worker doing the work must not be double-run); surfaced distinctly for the beat rung.
+			return DispRunning, ReasonAliveSilent
 		case f.WorkerKnown && f.WorkerLive:
 			return DispRunning, ReasonWorkerLive
 		case stale >= 0 && age >= stale:
@@ -218,6 +239,72 @@ func classify(f RunFact, age, stale int64) (Disposition, string) {
 		// out of this leaf's recovery scope).
 		return DispRunning, ReasonRecentActivity
 	}
+}
+
+// ProbeVerdict is the pid-liveness verdict for one run's recorded worker — the precise signal
+// that lets recovery distinguish a DEAD worker (safe to re-dispatch) from an ALIVE-but-silent
+// one (a liveness-beat problem, never a re-dispatch target). It is stronger than the staleness
+// window: a confirmed verdict overrides age entirely.
+type ProbeVerdict string
+
+const (
+	// ProbeUnknown: the run carries no probeable pid, or the caller supplied no prober — liveness
+	// is unknown and the decision falls back to the staleness window.
+	ProbeUnknown ProbeVerdict = "unknown"
+	// ProbeDead: the recorded worker process is gone — or a DIFFERENT process now holds its pid
+	// (pid reuse, caught by start-time identity). Safe to re-dispatch / re-verify.
+	ProbeDead ProbeVerdict = "dead"
+	// ProbeAlive: the recorded worker process is still running — its pid is held by a process
+	// whose start-time identity matches what the run recorded. Never a re-dispatch target.
+	ProbeAlive ProbeVerdict = "alive"
+)
+
+// Liveness is the OS-facing lookup the impure shell injects as DATA, so Probe stays pure and
+// testable with a decoy pid: given a pid, report whether a process currently holds it and, if
+// so, that process's start-time identity (a reuse-safe fingerprint — e.g. the OS process
+// creation time, the same idea as procguard.StreakKey's start field). A returned (,,false)
+// means no process holds the pid.
+type Liveness func(pid int) (start string, running bool)
+
+// Probe is the pure, reuse-safe pid-liveness decision — the primitive the recovery shell calls
+// per orphan candidate before trusting the staleness window. It defeats pid reuse with
+// start-time identity: a pid that is HELD but whose current start identity differs from the one
+// the run recorded is a DIFFERENT process, so the original worker is DEAD, not alive. When
+// either side carries no start identity, Probe cannot prove reuse and reports the liveness it
+// can see (an alive pid ⇒ ProbeAlive). No pid or no prober ⇒ ProbeUnknown (staleness decides).
+func Probe(pid int, recordedStart string, live Liveness) ProbeVerdict {
+	if pid <= 0 || live == nil {
+		return ProbeUnknown
+	}
+	start, running := live(pid)
+	if !running {
+		return ProbeDead
+	}
+	if recordedStart != "" && start != "" && start != recordedStart {
+		// pid reuse: a new process now holds the pid; the run's recorded worker is gone.
+		return ProbeDead
+	}
+	return ProbeAlive
+}
+
+// ProbeRun probes a run's recorded worker identity (WorkerPID + WorkerStart) for liveness — the
+// convenience form of Probe over a RunFact the shell has folded from the ledger.
+func ProbeRun(f RunFact, live Liveness) ProbeVerdict {
+	return Probe(f.WorkerPID, f.WorkerStart, live)
+}
+
+// ApplyProbe folds a probe verdict into a run's worker-liveness facts so Plan can consume it: a
+// confirmed verdict (alive/dead) sets WorkerKnown and WorkerLive accordingly; ProbeUnknown
+// leaves the fields untouched so the decision falls back to the staleness window. Returns the
+// updated RunFact by value — the leaf never mutates its caller's slice in place.
+func (f RunFact) ApplyProbe(v ProbeVerdict) RunFact {
+	switch v {
+	case ProbeAlive:
+		f.WorkerKnown, f.WorkerLive = true, true
+	case ProbeDead:
+		f.WorkerKnown, f.WorkerLive = true, false
+	}
+	return f
 }
 
 // recoverRank orders the dispositions for the worklist: orphaned, unwitnessed, then the rest.

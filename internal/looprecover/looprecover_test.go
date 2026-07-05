@@ -135,6 +135,96 @@ func TestNegativeStaleDisablesPresumption(t *testing.T) {
 	}
 }
 
+// reasonOf returns the reason the planner gave the run with id (or "").
+func reasonOf(r Result, id string) string {
+	for _, x := range r.Runs {
+		if x.RunID == id {
+			return x.Reason
+		}
+	}
+	return ""
+}
+
+// inRecover reports whether id is on the actionable recovery worklist.
+func inRecover(r Result, id string) bool {
+	for _, x := range r.Recover {
+		if x == id {
+			return true
+		}
+	}
+	return false
+}
+
+// TestProbePidReuseDefense witnesses the pure primitive on its own: a live pid whose start-time
+// identity matches is ALIVE; a gone pid is DEAD; a live pid whose start identity DIFFERS is a
+// reused pid — a different process — so the recorded worker is DEAD, not fooled by the reuse. A
+// zero pid or nil prober is UNKNOWN (staleness must decide).
+func TestProbePidReuseDefense(t *testing.T) {
+	aliveSame := Liveness(func(int) (string, bool) { return "boot-A", true })
+	gone := Liveness(func(int) (string, bool) { return "", false })
+	reused := Liveness(func(int) (string, bool) { return "boot-B", true }) // same pid, different boot
+
+	if got := Probe(4242, "boot-A", aliveSame); got != ProbeAlive {
+		t.Errorf("live pid, matching start = %q, want alive", got)
+	}
+	if got := Probe(4242, "boot-A", gone); got != ProbeDead {
+		t.Errorf("gone pid = %q, want dead", got)
+	}
+	if got := Probe(4242, "boot-A", reused); got != ProbeDead {
+		t.Errorf("reused pid (start differs) = %q, want dead (not fooled)", got)
+	}
+	if got := Probe(0, "boot-A", aliveSame); got != ProbeUnknown {
+		t.Errorf("no pid = %q, want unknown", got)
+	}
+	if got := Probe(4242, "boot-A", nil); got != ProbeUnknown {
+		t.Errorf("no prober = %q, want unknown", got)
+	}
+}
+
+// TestRecoverProbeClassifiesLiveSilentVsDead is the issue witness end-to-end through the leaf:
+// recover on a fixture with a live decoy pid classifies the silent-past-stale run ALIVE_SILENT
+// and REFUSES re-dispatch; with the process gone it is DEAD (orphaned, on the worklist); and a
+// pid-reuse fixture (same pid, different start time) is not fooled — it too is DEAD.
+func TestRecoverProbeClassifiesLiveSilentVsDead(t *testing.T) {
+	// A started run, silent well past the stale window, carrying a recorded worker identity.
+	fixture := func(id string) RunFact {
+		f := started(id, 5000) // silent past a 600s window
+		f.WorkerPID, f.WorkerStart = 4242, "boot-A"
+		return f
+	}
+	stale := int64(600)
+
+	// Live decoy: the pid is held by the SAME process (matching start) — ALIVE_SILENT, refused.
+	liveDecoy := Liveness(func(int) (string, bool) { return "boot-A", true })
+	fLive := fixture("run").ApplyProbe(ProbeRun(fixture("run"), liveDecoy))
+	rLive := Plan(Input{NowUnix: now, StaleSeconds: stale, Runs: []RunFact{fLive}})
+	if dispoOf(rLive, "run") != DispRunning || reasonOf(rLive, "run") != ReasonAliveSilent {
+		t.Errorf("live decoy = %q/%q, want running/alive_silent", dispoOf(rLive, "run"), reasonOf(rLive, "run"))
+	}
+	if inRecover(rLive, "run") {
+		t.Error("a confirmed-alive worker must be REFUSED re-dispatch (not on the worklist)")
+	}
+
+	// Process gone: the pid is not held — DEAD, orphaned, on the worklist for re-dispatch.
+	goneDecoy := Liveness(func(int) (string, bool) { return "", false })
+	fGone := fixture("run").ApplyProbe(ProbeRun(fixture("run"), goneDecoy))
+	rGone := Plan(Input{NowUnix: now, StaleSeconds: stale, Runs: []RunFact{fGone}})
+	if dispoOf(rGone, "run") != DispOrphaned || reasonOf(rGone, "run") != ReasonWorkerDead {
+		t.Errorf("gone decoy = %q/%q, want orphaned/worker_dead", dispoOf(rGone, "run"), reasonOf(rGone, "run"))
+	}
+	if !inRecover(rGone, "run") {
+		t.Error("a confirmed-dead worker must be re-dispatched (on the worklist)")
+	}
+
+	// Pid reuse: the pid is held, but by a process with a DIFFERENT start — the worker is gone.
+	reuseDecoy := Liveness(func(int) (string, bool) { return "boot-B", true })
+	fReuse := fixture("run").ApplyProbe(ProbeRun(fixture("run"), reuseDecoy))
+	rReuse := Plan(Input{NowUnix: now, StaleSeconds: stale, Runs: []RunFact{fReuse}})
+	if dispoOf(rReuse, "run") != DispOrphaned || reasonOf(rReuse, "run") != ReasonWorkerDead {
+		t.Errorf("pid-reuse decoy = %q/%q, want orphaned/worker_dead (not fooled)", dispoOf(rReuse, "run"), reasonOf(rReuse, "run"))
+	}
+}
+
 // TestDeterministicAndTotal: identical inputs give identical results; the empty input is defined.
 func TestDeterministicAndTotal(t *testing.T) {
 	in := Input{NowUnix: now, StaleSeconds: 600, Runs: []RunFact{
