@@ -62,15 +62,15 @@ const (
 	guardStopHookToolFeedbackMetricName = "fak_guard_tool_feedback_consecutive"
 
 	// The graduated back-off ladder. Rather than a single cliff (continue N times, then a hard
-	// stop), the auto-continue guidance ESCALATES with the consecutive deny-all depth, and the
-	// hard give-up moves much later. This gives a confused-but-capable model more room while a
-	// genuinely-blocked one is told, early and explicitly, to declare BLOCKED and stop cleanly:
+	// stop), the auto-continue guidance firms up with the consecutive deny-all depth, and the
+	// stand-down moves much later. This gives a confused-but-capable model more room while one
+	// that genuinely has no allowed path is guided, early and gently, to say so and wrap up:
 	//
 	//	consecutive 0	-> ALLOW   (a clean completion is a real stop)
 	//	1 .. Warn-1	-> NUDGE   (gentle "pick an allowed alternative")
-	//	Warn .. Final-1	-> WARN    (force a relevance decision; name the BLOCKED exit)
-	//	Final .. Max	-> FINAL   (last attempts; act now or declare BLOCKED)
-	//	> Max		-> GIVE-UP (allow the stop, LOUDLY, so it is no longer invisible)
+	//	Warn .. Final-1	-> WARN    (suggest a change of tack; name the clean wrap-up)
+	//	Final .. Max	-> FINAL   (last attempts; act now or note the blocker and wrap up)
+	//	> Max		-> GIVE-UP (allow the stop, visibly, so it is no longer invisible)
 	guardStopHookDefaultWarn  = 3
 	guardStopHookDefaultFinal = 7
 	guardStopHookDefaultMax   = 9
@@ -86,7 +86,7 @@ const (
 	guardStopHookNudge                            // 1 .. Warn-1: gentle "pick an allowed alternative"
 	guardStopHookWarn                             // Warn .. Final-1: force a relevance decision
 	guardStopHookFinal                            // Final .. Max: last attempts before give-up
-	guardStopHookGiveUp                           // > Max: bounded give-up — allow the stop, loudly
+	guardStopHookGiveUp                           // > Max: bounded stand-down — allow the stop, visibly
 )
 
 func (s guardStopHookStage) String() string {
@@ -111,10 +111,10 @@ func (s guardStopHookStage) String() string {
 // refusal detail is already in the transcript (the in-band `[fak] refused …` note on the ended
 // turn); this is the gentle nudge to act on it rather than stop. Later rungs of the ladder
 // (guardStopHookStageMessage) escalate the firmness and name the sanctioned clean exit.
-const guardStopHookContinueReason = "fak guard: your previous turn proposed only tool call(s) the capability floor refused, so it ended without action (reported upstream as end_turn). Do NOT re-propose a refused call unchanged — pick an ALLOWED alternative and continue the task. Most refusals are MODEL-FIXABLE by RESHAPING, not a dead end: a SELF_MODIFY deny means the floor saw a guarded write target (e.g. VERSION, .dos/, internal/…), so re-issue the command with the write aimed at an unguarded path, split compound commands to isolate the intended write, or drop the guarded write. If there is genuinely no allowed way to make progress, say so explicitly and then stop."
+const guardStopHookContinueReason = "fak guard: heads-up — your previous turn proposed only tool call(s) the capability floor set aside, so it wrapped up without an action (reported upstream as end_turn). You can keep going: pick an ALLOWED alternative and continue the task. Most of these are MODEL-FIXABLE by RESHAPING the call, not a dead end — e.g. a SELF_MODIFY note means the floor saw a guarded write target (VERSION, .dos/, internal/…), so continue by aiming the write at an unguarded path, splitting a compound command to isolate the intended write, or dropping the guarded write. If there is genuinely no allowed way to make progress, just say so and wrap up."
 
 func guardStopHookToolFeedbackMessage(consecutive int) string {
-	return fmt.Sprintf("fak guard: the previous %d turn(s) ended after retryable tool-call feedback, not a session stop. The model proposed only malformed or otherwise model-fixable tool call(s), so fak returned per-call feedback and kept the task alive. Fix the JSON/arguments/tool shape and continue; do not treat the tool rejection as done or blocked.", consecutive)
+	return fmt.Sprintf("fak guard: the previous %d turn(s) ended after retryable tool-call feedback, not a session stop. The proposed tool call(s) were just malformed or otherwise model-fixable, so fak returned per-call feedback and kept the task alive. Fix the JSON/arguments/tool shape and continue — this is a routine retry, so keep going.", consecutive)
 }
 
 // normalizeDenyAllThresholds makes the ladder a TOTAL, deterministic function of its three
@@ -158,17 +158,17 @@ func guardStopHookStageFor(consecutive, warnAt, finalAt, maxN int) guardStopHook
 	}
 }
 
-// guardStopHookStageMessage is the exact stderr text fed back to the model when the hook BLOCKS
+// guardStopHookStageMessage is the exact stderr text fed back to the model when the hook holds
 // the stop (exit 2) at a continue rung. Each rung is firmer than the last, and the WARN/FINAL
-// rungs name the sanctioned clean exit: reply `BLOCKED: <reason>` and stop. (A pure-text turn
-// resets the gateway's consecutive gauge to 0, so that declaration genuinely lets the next stop
-// through — the agent's own choice, not a fak-forced halt.)
+// rungs name the clean wrap-up: note the blocker on one line (`no allowed path: <reason>`) and
+// stop. (A pure-text turn resets the gateway's consecutive gauge to 0, so that note genuinely
+// lets the next stop through — the agent's own choice, not a fak-forced halt.)
 func guardStopHookStageMessage(stage guardStopHookStage, consecutive, maxN int) string {
 	switch stage {
 	case guardStopHookWarn:
-		return fmt.Sprintf("fak guard: %d turns in a row now ended with EVERY proposed tool call refused by the capability floor — you are repeating calls it will not allow. STOP and DECIDE: is the remaining work actually reachable under this floor? If YES, take a DIFFERENT, allowed action now (a different tool, a narrower command, or a path the floor permits). If NO, reply on one line `BLOCKED: <reason>` and then stop — declaring blocked is a clean, expected outcome, not a failure. (Auto-continue %d of %d before fak lets the turn end.)", consecutive, consecutive, maxN)
+		return fmt.Sprintf("fak guard: the last %d turns each ended with the capability floor setting aside every proposed tool call, so it looks like the same approach keeps coming back. Good moment to change tack: if the remaining work is reachable under this floor, take a different allowed action now — a different tool, a narrower command, or a path the floor permits. If it genuinely is not reachable, note the blocker on one line (`no allowed path: <reason>`) and wrap up — that is a clean, expected outcome. (Auto-continue %d of %d before fak lets the turn end.)", consecutive, consecutive, maxN)
 	case guardStopHookFinal:
-		return fmt.Sprintf("fak guard: FINAL auto-continue (%d of %d). After %d consecutive refused-everything turns fak will let the session stop with work possibly unfinished. If you have ANY allowed way to make progress, take it on THIS turn; otherwise reply on one line `BLOCKED: <reason>` and stop now, so the stop is your decision, not fak's.", consecutive, maxN, maxN)
+		return fmt.Sprintf("fak guard: last auto-continue (%d of %d). After %d turns where the floor set aside every proposed call, fak will let the session wrap up with work possibly unfinished. If there is any allowed way to make progress, take it on this turn; otherwise note the blocker on one line (`no allowed path: <reason>`) and wrap up now, so the stop is your call.", consecutive, maxN, maxN)
 	default:
 		return guardStopHookContinueReason
 	}
@@ -178,7 +178,7 @@ func guardStopHookStageMessage(stage guardStopHookStage, consecutive, maxN int) 
 // allows the stop (exit 0, so it is NOT fed to the model). It makes the previously-invisible
 // give-up legible: the residual false-stop the audit named.
 func guardStopHookGiveUpMessage(consecutive, maxN int) string {
-	return fmt.Sprintf("fak guard Stop: GIVE-UP after %d consecutive deny-all turns (every proposed tool call refused; %d > max %d) — allowing the stop with work possibly unfinished. Inspect why the floor refuses everything (fak guard --dump-policy) or raise --deny-all-max; --deny-all-continue off disables this layer.", consecutive, consecutive, maxN)
+	return fmt.Sprintf("fak guard Stop: standing down after %d consecutive deny-all turns (every proposed tool call set aside; %d > max %d) — allowing the stop so the loop cannot spin. To keep the agent moving, inspect why the floor sets everything aside (fak guard --dump-policy) or raise --deny-all-max; --deny-all-continue off disables this layer.", consecutive, consecutive, maxN)
 }
 
 type guardStopHookInstall struct {
@@ -278,8 +278,8 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) int {
 		fmt.Fprintln(stderr, guardStopHookStageMessage(stage, consecutive, maxN))
 		return 2
 	}
-	// Allowed (exit 0). A clean completion (stage allow) is silent; a bounded GIVE-UP is the
-	// residual false-stop — make it loud and operator-visible (it is NOT fed to the model).
+	// Allowed (exit 0). A clean completion (stage allow) is silent; a bounded stand-down is the
+	// residual false-stop — make it operator-visible (it is NOT fed to the model).
 	if stage == guardStopHookGiveUp {
 		fmt.Fprintln(stderr, guardStopHookGiveUpMessage(consecutive, maxN))
 		return 0
@@ -643,11 +643,6 @@ func mergeGuardStopHookIntoSettings(path, fakBin string) error {
 type guardStopHookSignals struct {
 	DenyAllConsecutive      int
 	ToolFeedbackConsecutive int
-}
-
-func fetchGuardStopHookConsecutive(ctx context.Context, metricsURL string, timeout time.Duration) (int, error) {
-	signals, err := fetchGuardStopHookSignals(ctx, metricsURL, timeout)
-	return signals.DenyAllConsecutive, err
 }
 
 func fetchGuardStopHookSignals(ctx context.Context, metricsURL string, timeout time.Duration) (guardStopHookSignals, error) {
