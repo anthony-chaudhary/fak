@@ -43,6 +43,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -157,6 +158,74 @@ def preflight(root: Path, *, max_workers: int, work_kind: str,
                      "--max-workers", str(max_workers), "--work-kind", work_kind,
                      "--product", product],
                     root, timeout=120)
+
+
+def _preflight_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def preflight_public(doc: dict[str, Any]) -> dict[str, Any]:
+    out = {"verdict": doc.get("verdict"), "reason": doc.get("reason"),
+           "cap": doc.get("cap"), "live": doc.get("live")}
+    for key in ("headroom", "max_workers", "host_cap"):
+        if doc.get(key) is not None:
+            out[key] = doc.get(key)
+    limiter = doc.get("capacity_limiter")
+    if isinstance(limiter, dict):
+        out["capacity_limiter"] = limiter
+    seat = doc.get("seat")
+    if isinstance(seat, dict):
+        out["seat"] = {k: seat.get(k) for k in (
+            "total", "free", "leased", "depleted", "unattributed_live")
+            if seat.get(k) is not None}
+    return out
+
+
+def preflight_refusal_hint(doc: dict[str, Any]) -> dict[str, Any] | None:
+    if doc.get("verdict") != "REFUSE_AT_CAP":
+        return None
+    limiter = doc.get("capacity_limiter") if isinstance(doc.get("capacity_limiter"), dict) else {}
+    raw = limiter.get("raw") if isinstance(limiter.get("raw"), dict) else {}
+    term = str(limiter.get("term") or "")
+    maxw = _preflight_int(raw.get("max_workers"))
+    if maxw is None:
+        maxw = _preflight_int(doc.get("max_workers"))
+    host_cap = _preflight_int(raw.get("host_cap"))
+    if host_cap is None:
+        host_cap = _preflight_int(doc.get("host_cap"))
+    live_count = _preflight_int(doc.get("live"))
+    cap_count = _preflight_int(doc.get("cap"))
+    needed = live_count + 1 if live_count is not None else None
+    configured_cap = term == "max_workers" or (
+        maxw is not None and cap_count == maxw
+        and host_cap is not None and host_cap > maxw)
+    host_headroom_available = (
+        host_cap is None or live_count is None or live_count < host_cap)
+    needed_within_host = needed is None or host_cap is None or needed <= host_cap
+    if configured_cap and host_headroom_available and needed_within_host:
+        return {
+            "kind": "configured_max_workers",
+            "message": (
+                f"configured --max-workers={maxw} is the binding cap; "
+                + (f"rerun with --max-workers >= {needed} " if needed else "raise --max-workers ")
+                + (f"(still bounded by host_cap={host_cap}) "
+                   if host_cap is not None else "")
+                + "only if the operator intends to use available host headroom"),
+            "max_workers": maxw,
+            "required_min": needed,
+            "host_cap": host_cap,
+        }
+    if limiter:
+        return {
+            "kind": term or str(limiter.get("primary") or "capacity"),
+            "message": (f"capacity limiter {limiter.get('primary') or '?'}/"
+                        f"{term or '?'} is binding; do not route around "
+                        "the preflight refusal"),
+        }
+    return None
 
 
 def lane_priority_scores(root: Path,
@@ -398,6 +467,32 @@ def _truthy_env(value: str | None) -> bool:
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _sanitize_worker_id(s: str) -> str:
+    """A commit-trailer-safe worker token: keep ``[A-Za-z0-9._-]``, fold the rest to
+    ``-``. Mirrors dispatch_status._dispatch_lease_token's alphabet so the id survives
+    round-tripping through a ``(fak-worker <id>)`` trailer and the read-only fold."""
+    out = "".join(c if (c.isalnum() or c in "-_.") else "-" for c in str(s or "").strip())
+    return out.strip("-.") or "unknown"
+
+
+def worker_id(account_dir: str | None, lane: str,
+              base_env: dict[str, str] | None = None) -> str:
+    """A best-effort, human-legible id for the worker this env launches (#2065).
+
+    Stamped into ``FLEET_WORKER_ID`` so the dispatched agent can carry it as a
+    ``(fak-worker <id>)`` commit trailer, making a worker's witnessed ships
+    attributable on a shared trunk. Precedence: an explicit ambient
+    ``FLEET_WORKER_ID`` (operator / wave override) > the pinned account-seat directory
+    basename (the seat that ran the work) > the lane. The trailer is an attribution
+    AID, never a witness."""
+    env = base_env if base_env is not None else os.environ
+    explicit = (env.get("FLEET_WORKER_ID") or "").strip()
+    if explicit:
+        return _sanitize_worker_id(explicit)
+    seat = Path(account_dir).name if account_dir else ""
+    return _sanitize_worker_id(seat or lane or "unknown")
+
+
 def worker_env(account_dir: str | None, lane: str, workspace: Path) -> dict[str, str]:
     """Child env: the switcher account pinned, self-describing dispatch vars,
     and the benchmark-witness hint."""
@@ -425,6 +520,12 @@ def worker_env(account_dir: str | None, lane: str, workspace: Path) -> dict[str,
     # adjudications land in .dos/verdict-journal.jsonl while it works, an idle session
     # writes nothing, and the journal rides the existing .dos/ backup story.
     env["DISPATCH_OBSERVE"] = "1"
+    # A best-effort worker identity the dispatched agent can carry as a
+    # (fak-worker <id>) commit trailer, so its witnessed ships are attributable on the
+    # shared trunk (#2065). Set from the pinned account-seat basename (or the lane), and
+    # read back read-only by dispatch_status.ships_per_worker. Aid, not a witness — it
+    # never replaces the (fak <leaf>) ship stamp and nothing is gated on it.
+    env["FLEET_WORKER_ID"] = worker_id(account_dir, lane, env)
     return env
 
 
@@ -486,7 +587,10 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     acct = pre.get("account") or {}
     # Lanes already in flight from a prior tick: prefer a different one so the cron
     # spreads across the backlog rather than re-picking the richest lane every tick.
-    busy = busy_lanes(root / RUNS_DIRNAME)
+    marker_busy = busy_lanes(root / RUNS_DIRNAME)
+    lease_busy = lease_ref_busy_lanes(root)
+    lease_busy_set = set(lease_busy.get("lanes") or set())
+    busy = marker_busy | lease_busy_set
     lane_pick = pick_lane(root, lane, busy=busy)
     chosen = lane_pick.get("lane")
     command, launch_command, guarded = _build_launch(root, chosen)
@@ -497,20 +601,15 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         "live": live,
         "max_workers": max_workers,
         "registry_refresh": reg,
-        "preflight": {"verdict": pre.get("verdict"), "reason": pre.get("reason"),
-                      "cap": pre.get("cap"), "live": pre.get("live"),
-                      # host_cap is the host-derived ADAPTIVE ceiling (#1337): when it
-                      # is the binding term the cap tracks live host headroom (cores,
-                      # free RAM, OS-thread total) rather than a static number, so a
-                      # loaded box auto-throttles and recovers as load clears. Surface
-                      # it in the dispatcher's own telemetry so "live population tracks
-                      # host_cap" is observable here, not only inside the preflight
-                      # reason string.
-                      "host_cap": pre.get("host_cap")},
+        "preflight": preflight_public(pre),
         "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},
         "lane": chosen,
         "lane_issue_count": lane_pick.get("issues"),
         "busy_lanes": sorted(busy),
+        "busy_lane_sources": {
+            "inflight_markers": sorted(marker_busy),
+            "lease_refs": sorted(lease_busy_set),
+        },
         "lane_stacked": bool(lane_pick.get("stacked")),
         "self_modify_held": lane_pick.get("self_modify_held") or [],
         "command": command,
@@ -519,8 +618,13 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         "witness": {"kind": "benchmark",
                     "cmd": f"python tools/bench_witness.py --lane {chosen}" if chosen else None},
     }
+    if lease_busy.get("error"):
+        payload["lease_busy_error"] = lease_busy.get("error")
 
     if not pre_ok:
+        hint = preflight_refusal_hint(pre)
+        if hint:
+            payload["preflight_hint"] = hint
         payload.update({"ok": False, "action": "refused",
                         "verdict": pre.get("verdict") or "REFUSE",
                         "reason": f"preflight refused: {pre.get('reason')}"})
@@ -568,6 +672,13 @@ def _record(runs_dir: Path, payload: dict[str, Any]) -> None:
 def render(p: dict[str, Any]) -> str:
     a = p.get("account") or {}
     pf = p.get("preflight") or {}
+    hint = p.get("preflight_hint") or {}
+    busy_sources = p.get("busy_lane_sources") or {}
+    busy_detail = []
+    if busy_sources.get("inflight_markers"):
+        busy_detail.append(f"markers: {', '.join(busy_sources.get('inflight_markers'))}")
+    if busy_sources.get("lease_refs"):
+        busy_detail.append(f"lease refs: {', '.join(busy_sources.get('lease_refs'))}")
     lines = [
         f"issue-dispatch: {p.get('verdict')} ({'ok' if p.get('ok') else 'refuse'})  live={p.get('live')}",
         f"  preflight : {pf.get('verdict')} ({pf.get('live')}/{pf.get('cap')} live"
@@ -575,12 +686,15 @@ def render(p: dict[str, Any]) -> str:
         + ")",
         f"  account   : {a.get('tag') or '-'} (t{a.get('tier')})  {a.get('model') or ''}",
         f"  lane      : {p.get('lane') or '-'}  ({p.get('lane_issue_count')} issues)"
-        + (f"  [busy: {', '.join(p.get('busy_lanes'))}]" if p.get('busy_lanes') else "")
+        + (f"  [busy: {'; '.join(busy_detail) or ', '.join(p.get('busy_lanes'))}]"
+           if p.get('busy_lanes') else "")
         + ("  STACKED (all lanes in flight)" if p.get('lane_stacked') else ""),
         f"  witness   : {(p.get('witness') or {}).get('cmd') or '-'}",
         f"  command   : {' '.join(p.get('command') or []) or '-'}",
-        f"  -> {p.get('reason')}",
     ]
+    if isinstance(hint, dict) and hint.get("message"):
+        lines.append(f"  hint      : {hint.get('message')}")
+    lines.append(f"  -> {p.get('reason')}")
     if p.get("spawned"):
         lines.append(f"  spawned pid={p['spawned'].get('pid')} log={p['spawned'].get('log')}")
     return "\n".join(lines)
@@ -603,6 +717,76 @@ def _dos_cmd() -> list[str]:
     PATH, else the module form so a venv without the script still arbitrates."""
     exe = shutil.which("dos")
     return [exe] if exe else [_py(), "-m", "dos.cli"]
+
+
+def _fak_cmd() -> list[str] | None:
+    """The installed ``fak`` CLI for read-only lease inspection.
+
+    Do not fall back to ``go run`` here: a dirty shared cmd/ tree can fail to build,
+    and a capacity planner should fail open rather than wedge on a compile.
+    """
+    configured = (os.environ.get("FAK_BIN") or "").strip()
+    if configured:
+        return shlex.split(configured, posix=(os.name != "nt"))
+    exe = shutil.which("fak")
+    return [exe] if exe else None
+
+
+def _lease_lane(lease_id: Any) -> str | None:
+    raw = str(lease_id or "").strip()
+    if not raw:
+        return None
+    lane = raw[len("resolve-"):] if raw.startswith("resolve-") else raw
+    base, sep, suffix = lane.rpartition("-")
+    if sep and suffix.isdigit():
+        lane = base
+    return lane or None
+
+
+def lease_ref_busy_lanes(root: Path) -> dict[str, Any]:
+    """Fold refs/fak live lane leases into the same busy-lane set as local markers.
+
+    Inflight markers only cover workers launched by this checkout. Cross-session and
+    cross-machine leases are visible through ``fak leaseref liveness``; a wave must
+    not plan onto those lanes just because it lacks a local pid sidecar.
+    """
+    cmd_prefix = _fak_cmd()
+    if not cmd_prefix:
+        return {"lanes": set(), "error": "no fak binary"}
+    cmd = [*cmd_prefix, "leaseref", "liveness"]
+    try:
+        proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=30,
+                              creationflags=dispatch_worker.no_window_creationflags())
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"lanes": set(), "error": str(exc)}
+    out = (proc.stdout or "").strip()
+    try:
+        records = json.loads(out) if out else []
+    except ValueError:
+        records = []
+    if not isinstance(records, list):
+        return {"lanes": set(), "error": "unexpected leaseref liveness shape",
+                "returncode": proc.returncode}
+    lanes: set[str] = set()
+    rows: list[dict[str, Any]] = []
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        if rec.get("reclaimable") is True:
+            continue
+        lane = _lease_lane(rec.get("id"))
+        if not lane:
+            continue
+        lanes.add(lane)
+        rows.append({k: rec.get(k) for k in (
+            "id", "holder", "session_id", "liveness", "reclaimable")
+            if rec.get(k) is not None} | {"lane": lane})
+    payload: dict[str, Any] = {"lanes": lanes, "records": rows,
+                               "returncode": proc.returncode}
+    if proc.returncode != 0:
+        payload["error"] = (proc.stderr or "").strip() or f"exit {proc.returncode}"
+    return payload
 
 
 def lane_candidates(root: Path, guarded: bool | None = None) -> dict[str, Any]:
@@ -671,11 +855,38 @@ def allocate_seats(root: Path, max_workers: int, work_kind: str) -> dict[str, An
     membership. Fail-open: a seat-allocation failure resolves to zero seats (the wave
     refuses), never an exception that wedges the tick."""
     try:
+        leases = fleet_accounts.live_seat_leases(str(root / RUNS_DIRNAME))
         return fleet_accounts.allocate_wave(max_workers, work_kind=work_kind,
-                                            product="claude")
+                                            product="claude", leases=leases)
     except Exception as exc:  # noqa: BLE001 — fail-open boundary: no seats, never fatal
         return {"ok": False, "granted": 0, "lanes": [], "wave_id": None,
                 "error": str(exc)}
+
+
+def wave_admission_budget(pre: dict[str, Any], max_workers: int) -> dict[str, Any]:
+    """Seat request bound from the same preflight snapshot that will gate spawning."""
+    requested = max(0, int(max_workers))
+    headroom = _preflight_int(pre.get("headroom"))
+    seat = pre.get("seat") if isinstance(pre.get("seat"), dict) else {}
+    seat_free = _preflight_int(seat.get("free"))
+    if pre.get("verdict") != "SPAWN_OK":
+        return {
+            "max_workers": requested,
+            "preflight_headroom": headroom,
+            "seat_free": seat_free,
+            "requested_seats": 0,
+        }
+    budget = requested
+    if headroom is not None:
+        budget = min(budget, max(0, headroom))
+    if seat_free is not None:
+        budget = min(budget, max(0, seat_free))
+    return {
+        "max_workers": requested,
+        "preflight_headroom": headroom,
+        "seat_free": seat_free,
+        "requested_seats": budget,
+    }
 
 
 def _wave_env(rank: int, wave_id: str, size: int, shortfall: int) -> dict[str, str]:
@@ -742,7 +953,10 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
     ``dispatch_preflight`` is re-checked per spawn so the live population provably
     never exceeds the cap. A wave sidecar records ``{wave_id, size, lanes, seats}``."""
     reg = refresh_registry(root) if refresh else {"ok": None, "skipped": True}
-    seats = allocate_seats(root, max_workers, work_kind)
+    first_preflight: dict[str, Any] | None = preflight(
+        root, max_workers=max_workers, work_kind=work_kind)
+    budget = wave_admission_budget(first_preflight, max_workers)
+    seats = allocate_seats(root, int(budget["requested_seats"]), work_kind)
     seat_lanes = seats.get("lanes") or []
     # Cross-tick ACCOUNT de-confliction (#2060): the seat allocation is re-derived each
     # tick and is blind to a PRIOR tick's still-live worker, so with one seat free it
@@ -761,7 +975,10 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
     # Lanes a prior tick's worker still holds: skipped here so a wave never re-stacks
     # a lane already in flight (the within-tick arbiter only de-conflicts THIS wave's
     # own picks; busy_lanes carries the de-confliction ACROSS ticks).
-    busy = busy_lanes(root / RUNS_DIRNAME)
+    marker_busy = busy_lanes(root / RUNS_DIRNAME)
+    lease_busy = lease_ref_busy_lanes(root)
+    lease_busy_set = set(lease_busy.get("lanes") or set())
+    busy = marker_busy | lease_busy_set
 
     leases: list[dict[str, Any]] = []   # accumulating disjoint-tree leases (priced)
     members: list[dict[str, Any]] = []
@@ -769,6 +986,11 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
     baseline_live: int | None = None
     cap_seen: int | None = None
     refusal: str | None = None
+    last_preflight: dict[str, Any] | None = preflight_public(first_preflight)
+    preflight_hint: dict[str, Any] | None = None
+    if first_preflight.get("verdict") != "SPAWN_OK":
+        refusal = first_preflight.get("verdict") or "REFUSE"
+        preflight_hint = preflight_refusal_hint(first_preflight)
 
     payload: dict[str, Any] = {
         "schema": WAVE_SCHEMA,
@@ -777,61 +999,83 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
         "max_workers": max_workers,
         "wave_id": wave_id,
         "registry_refresh": reg,
+        "admission_budget": budget,
         "free_seats": free_seats,
         "seats": {"granted": seats.get("granted"), "requested": seats.get("requested"),
                   "shortfall": seats.get("shortfall"), "wave_id": seats.get("wave_id"),
                   "tags": [s.get("tag") for s in seat_lanes], "error": seats.get("error")},
         "candidate_lanes": [c["lane"] for c in candidates],
         "busy_lanes": sorted(busy),
+        "busy_lane_sources": {
+            "inflight_markers": sorted(marker_busy),
+            "lease_refs": sorted(lease_busy_set),
+        },
         "self_modify_held": cand.get("self_modify_held") or [],
         "router_error": cand.get("router_error"),
     }
+    if lease_busy.get("error"):
+        payload["lease_busy_error"] = lease_busy.get("error")
 
-    for c in candidates:
-        if len(members) >= max_workers:
-            break
-        if len(members) >= free_seats:
-            refusal = refusal or "SEATS_EXHAUSTED"
-            break
-        # Cross-tick de-confliction: a lane a prior tick's worker still holds is
-        # skipped before it costs a preflight re-check or a seat.
-        if c["lane"] in busy:
-            skipped_busy.append(c["lane"])
-            continue
-        # Per-spawn preflight re-check: the live population must never exceed the cap.
-        pre = preflight(root, max_workers=max_workers, work_kind=work_kind)
-        if pre.get("verdict") != "SPAWN_OK":
-            refusal = pre.get("verdict") or "REFUSE"
-            break
-        cap = pre.get("cap")
-        cap_seen = cap if isinstance(cap, int) else cap_seen
-        live_now = pre.get("live") if isinstance(pre.get("live"), int) else 0
-        if baseline_live is None:
-            baseline_live = live_now
-        # Defeat OS-scan lag: count our own in-tick spawns even before the scan sees
-        # them, so the bound holds WITHIN the tick. effective = max(scan, base+spawned).
-        effective_live = max(live_now, baseline_live + len(members))
-        if isinstance(cap, int) and effective_live >= cap:
-            refusal = "REFUSE_AT_CAP"
-            break
-        # Price this lane against the wave's already-admitted leases.
-        dec = arbitrate_lane(root, c["lane"], c["tree"], leases)
-        if not dec.get("admitted"):
-            continue   # collides with an admitted lane (or kernel error) -> skip
-        rank = len(members)
-        seat = seat_lanes[rank]
-        member: dict[str, Any] = {
-            "lane": c["lane"], "tree": dec["tree"], "issues": c["issues"], "rank": rank,
-            "account": {"tag": seat.get("tag"), "tier": seat.get("model_tier"),
-                        "pool": seat.get("pool"), "dir": seat.get("config_dir")},
-            "arbitrate": dec.get("reason"),
-        }
-        if live:
-            member["spawned"] = _spawn_wave_member(
-                root, c["lane"], seat, wave_id, rank, free_seats,
-                int(seats.get("shortfall") or 0))
-        members.append(member)
-        leases.append({"lane": c["lane"], "lane_kind": "cluster", "tree": dec["tree"]})
+    if not refusal:
+        preflight_seed = first_preflight
+        for c in candidates:
+            if len(members) >= max_workers:
+                break
+            if len(members) >= free_seats:
+                if free_seats > 0:
+                    refusal = refusal or "SEATS_EXHAUSTED"
+                break
+            # Cross-tick de-confliction: a lane a prior tick's worker still holds is
+            # skipped before it costs a preflight re-check or a seat.
+            if c["lane"] in busy:
+                skipped_busy.append(c["lane"])
+                continue
+            # Per-spawn preflight re-check: the live population must never exceed the cap.
+            pre = preflight_seed or preflight(
+                root, max_workers=max_workers, work_kind=work_kind)
+            preflight_seed = None
+            last_preflight = preflight_public(pre)
+            if pre.get("verdict") != "SPAWN_OK":
+                refusal = pre.get("verdict") or "REFUSE"
+                preflight_hint = preflight_refusal_hint(pre)
+                break
+            cap = pre.get("cap")
+            cap_seen = cap if isinstance(cap, int) else cap_seen
+            live_now = pre.get("live") if isinstance(pre.get("live"), int) else 0
+            if baseline_live is None:
+                baseline_live = live_now
+            # Defeat OS-scan lag: count our own in-tick spawns even before the scan sees
+            # them, so the bound holds WITHIN the tick. effective = max(scan, base+spawned).
+            effective_live = max(live_now, baseline_live + len(members))
+            if isinstance(cap, int) and effective_live >= cap:
+                refusal = "REFUSE_AT_CAP"
+                last_preflight["effective_live"] = effective_live
+                preflight_hint = {
+                    "kind": "in_tick_cap",
+                    "message": (
+                        f"wave in-tick accounting reached cap {cap}: effective_live "
+                        f"{effective_live} >= cap; do not add another member until "
+                        "a worker exits or the next preflight admits headroom"),
+                }
+                break
+            # Price this lane against the wave's already-admitted leases.
+            dec = arbitrate_lane(root, c["lane"], c["tree"], leases)
+            if not dec.get("admitted"):
+                continue   # collides with an admitted lane (or kernel error) -> skip
+            rank = len(members)
+            seat = seat_lanes[rank]
+            member: dict[str, Any] = {
+                "lane": c["lane"], "tree": dec["tree"], "issues": c["issues"], "rank": rank,
+                "account": {"tag": seat.get("tag"), "tier": seat.get("model_tier"),
+                            "pool": seat.get("pool"), "dir": seat.get("config_dir")},
+                "arbitrate": dec.get("reason"),
+            }
+            if live:
+                member["spawned"] = _spawn_wave_member(
+                    root, c["lane"], seat, wave_id, rank, free_seats,
+                    int(seats.get("shortfall") or 0))
+            members.append(member)
+            leases.append({"lane": c["lane"], "lane_kind": "cluster", "tree": dec["tree"]})
 
     size = len(members)
     lanes_used = [m["lane"] for m in members]
@@ -839,6 +1083,10 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
     payload.update({"size": size, "lanes": lanes_used, "members": members,
                     "seats_used": seats_used, "cap": cap_seen, "refusal": refusal,
                     "skipped_busy": skipped_busy})
+    if last_preflight:
+        payload["last_preflight"] = last_preflight
+    if preflight_hint:
+        payload["preflight_hint"] = preflight_hint
 
     if size > 0:
         payload.update({
@@ -850,6 +1098,10 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
                        + (f"; stopped on {refusal}" if refusal else ""))})
         if live:
             _write_wave_artifacts(root / RUNS_DIRNAME, payload)
+    elif refusal:
+        payload.update({"ok": False, "verdict": refusal,
+                        "action": "refused",
+                        "reason": f"no worker spawned (stopped on {refusal})"})
     elif not candidates:
         held = cand.get("self_modify_held") or []
         if held:
@@ -875,6 +1127,12 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
 
 def render_wave(p: dict[str, Any]) -> str:
     seats = (p.get("seats") or {}).get("tags") or []
+    busy_sources = p.get("busy_lane_sources") or {}
+    busy_detail = []
+    if busy_sources.get("inflight_markers"):
+        busy_detail.append(f"markers: {', '.join(busy_sources.get('inflight_markers'))}")
+    if busy_sources.get("lease_refs"):
+        busy_detail.append(f"lease refs: {', '.join(busy_sources.get('lease_refs'))}")
     lines = [
         f"issue-dispatch WAVE: {p.get('verdict')} ({'ok' if p.get('ok') else 'refuse'})  live={p.get('live')}",
         f"  wave_id   : {p.get('wave_id')}  size={p.get('size')}  cap={p.get('cap')}",
@@ -882,7 +1140,8 @@ def render_wave(p: dict[str, Any]) -> str:
         f"  candidates: {len(p.get('candidate_lanes') or [])} lane(s) with open issues",
     ]
     if p.get("busy_lanes"):
-        lines.append(f"  busy      : {', '.join(p.get('busy_lanes'))} (in flight; skipped)")
+        detail = "; ".join(busy_detail) or ", ".join(p.get("busy_lanes"))
+        lines.append(f"  busy      : {detail} (skipped)")
     for m in p.get("members") or []:
         sp = m.get("spawned") or {}
         tag = (m.get("account") or {}).get("tag") or "-"
@@ -891,13 +1150,16 @@ def render_wave(p: dict[str, Any]) -> str:
                      f"{m.get('issues')} issues  seat={tag}{pid}")
     if p.get("refusal"):
         lines.append(f"  stopped   : {p.get('refusal')}")
+    hint = p.get("preflight_hint")
+    if isinstance(hint, dict) and hint.get("message"):
+        lines.append(f"  hint      : {hint.get('message')}")
     lines.append(f"  -> {p.get('reason')}")
     return "\n".join(lines)
 
 
 def _default_max_workers() -> int:
     """The default worker ceiling, mirrored from dispatch_preflight.DEFAULT_MAX_WORKERS
-    (mirrored, not imported — same rationale as _pid_is_alive): the built-in 8 with the
+    (mirrored, not imported — same rationale as _pid_is_alive): the built-in 20 with the
     FAK_MAX_WORKERS env knob applied. Keeping the tick's default equal to the gate's
     means the launcher no longer under-asks (the old static 2 sat below every adaptive
     gate); the preflight's min(host_cap, dos target, seats) still bounds every spawn."""
@@ -907,7 +1169,7 @@ def _default_max_workers() -> int:
             return int(raw)
     except ValueError:
         pass
-    return 8
+    return 20
 
 
 def main(argv: list[str] | None = None) -> int:

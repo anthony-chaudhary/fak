@@ -138,6 +138,19 @@ _FAK_TURN_RE = re.compile(r"^fak-turn\b")
 _LOW_YIELD_RESOLVE_RE = re.compile(
     r"\b(?:close|fixe?|resolve)[sd]?\s+#(\d+)\b", re.IGNORECASE)
 
+# Ships-per-worker attribution (#2065). A dispatched agent can carry a best-effort
+# `(fak-worker <id>)` commit trailer (sourced from the FLEET_WORKER_ID env stamp
+# issue_dispatch.worker_env sets). This fold reads those trailers back out of git so a
+# worker's witnessed ships become countable on the shared trunk — cumulative-shipped is
+# otherwise unrecoverable (the guard-audit journal keeps only an args digest). The
+# trailer is agent-emitted BEST-EFFORT, so the count is an attribution AID, not a
+# witness: it never flips the card's `ok` and nothing is gated on it.
+_SHIPS_PER_WORKER_SCHEMA = "fleet-ships-per-worker/1"
+_SHIPS_PER_WORKER_GREP = "(fak-worker "
+_SHIPS_PER_WORKER_LOOKBACK_MIN = 24 * 60
+# A commit matched by the grep whose trailer id we can still parse; the group is the id.
+_FAK_WORKER_TRAILER_RE = re.compile(r"\(fak-worker\s+([^)]+)\)")
+
 
 def repo_root(start: Path | None = None) -> Path:
     here = (start or Path(__file__)).resolve()
@@ -1367,6 +1380,89 @@ def low_yield_lanes(
     }
 
 
+def parse_ships_per_worker(records: list[str]) -> dict[str, Any]:
+    """Fold a list of commit-message records (each ``subject\\n body``) into a
+    ships-per-worker attribution (#2065). Pure — the git read lives in the caller.
+
+    Each record is one commit; its first ``(fak-worker <id>)`` trailer names the worker
+    that authored it. A record with no parseable trailer is bucketed ``unknown`` (the
+    grep can match a commit whose trailer is malformed, and a fixture can feed a
+    zero-trailer record) so the fold never silently drops a matched commit. Best-effort:
+    the trailer is agent-emitted, so this is an attribution AID, not a witness."""
+    counts: dict[str, int] = {}
+    for rec in records:
+        if not rec.strip():
+            continue
+        m = _FAK_WORKER_TRAILER_RE.search(rec)
+        worker = _sanitize_worker_token(m.group(1)) if m else "unknown"
+        counts[worker] = counts.get(worker, 0) + 1
+    workers = sorted(({"worker": w, "ships": n} for w, n in counts.items()),
+                     key=lambda r: (-r["ships"], r["worker"]))
+    total = sum(counts.values())
+    return {
+        "schema": _SHIPS_PER_WORKER_SCHEMA,
+        "attributed_ships": total,
+        "worker_count": sum(1 for w in counts if w != "unknown"),
+        "unknown": counts.get("unknown", 0),
+        "workers": workers,
+        "note": "best-effort agent-emitted (fak-worker) trailer — attribution aid, not a witness",
+    }
+
+
+def _sanitize_worker_token(s: str) -> str:
+    """Trim a parsed trailer id to a stable token, mirroring
+    issue_dispatch._sanitize_worker_id so the two ends agree on the id alphabet."""
+    out = "".join(c if (c.isalnum() or c in "-_.") else "-" for c in str(s or "").strip())
+    return out.strip("-.") or "unknown"
+
+
+def ships_per_worker(
+    root: Path,
+    *,
+    lookback_min: int = _SHIPS_PER_WORKER_LOOKBACK_MIN,
+    now_ts: float | None = None,
+    runner: Any | None = None,
+) -> dict[str, Any]:
+    """Read-only ships-per-worker fold over recent git history (#2065).
+
+    Runs ``git log --grep='(fak-worker ' -F`` over the lookback window and folds the
+    matched commits' ``(fak-worker <id>)`` trailers into per-worker ship counts. The
+    grep and the fixed-string flag keep the scan to trailer-carrying commits; the pure
+    ``parse_ships_per_worker`` does the bucketing. Fail-open: if git can't answer, the
+    fold is empty rather than fatal (like ``count_lane_ancestry_closes``). ``runner`` is
+    injectable so the fold is testable without a real repo."""
+    now_ts = time.time() if now_ts is None else now_ts
+    # Clamp to the epoch floor: a tiny/zero now_ts (e.g. an injected test clock) would
+    # otherwise hand time.gmtime a negative timestamp, which raises on Windows.
+    since_iso = time.strftime("%Y-%m-%dT%H:%M:%S +0000",
+                              time.gmtime(max(0.0, now_ts - lookback_min * 60)))
+    run = runner or _run_ships_per_worker_git
+    records = run(root, since_iso)
+    if records is None:
+        out = parse_ships_per_worker([])
+        out["unavailable"] = True
+        return out
+    out = parse_ships_per_worker(records)
+    out["lookback_min"] = lookback_min
+    return out
+
+
+def _run_ships_per_worker_git(root: Path, since_iso: str) -> list[str] | None:
+    """Shell ``git log`` for trailer-carrying commits; return one ``subject\\n body``
+    record per commit (split on the record separator), or ``None`` if git can't answer."""
+    cmd = ["git", "log", f"--since={since_iso}", "--no-merges", "-F",
+           f"--grep={_SHIPS_PER_WORKER_GREP}", "--pretty=format:%x1e%s%n%b"]
+    try:
+        proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=30,
+                              creationflags=_win_creationflags())
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    return [rec for rec in (proc.stdout or "").split("\x1e") if rec.strip()]
+
+
 def watchdog_installed() -> dict[str, Any]:
     """Is the always-on watchdog scheduled task registered, and is it enabled?"""
     try:
@@ -1966,6 +2062,9 @@ def collect(root: Path, *, max_workers: int, fast: bool,
         low_yield_f = pool.submit(
             low_yield_lanes, root / RUNS_DIRNAME,
             closes_counter=_lane_closes, lane_trees=lane_trees, now_ts=low_yield_now)
+        # Ships-per-worker attribution (#2065): read the best-effort (fak-worker <id>)
+        # trailers back out of git. Pure-local git read, cheap, so --fast keeps it.
+        ships_f = pool.submit(ships_per_worker, root)
 
         closure: dict[str, Any] = (
             {"_skipped": "fast"} if fast else closure_f.result())
@@ -1993,6 +2092,7 @@ def collect(root: Path, *, max_workers: int, fast: bool,
         lab_readiness = lab_readiness_f.result()
         resolve_ticks = resolve_ticks_f.result()
         low_yield = low_yield_f.result()
+        ships = ships_f.result()
 
     return build_payload(root=root, pre=pre, sup=sup, wd=wd, backlog=backlog,
                          closure=closure, max_workers=max_workers, fast=fast,
@@ -2003,7 +2103,7 @@ def collect(root: Path, *, max_workers: int, fast: bool,
                          run_status=run_status, merge=merge, leases=leases,
                          worker_leases=worker_leases, seat_inventory=seat_inventory,
                          lab_readiness=lab_readiness, resolve_ticks=resolve_ticks,
-                         low_yield=low_yield)
+                         low_yield=low_yield, ships=ships)
 
 
 def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
@@ -2022,7 +2122,8 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                   seat_inventory: dict[str, Any] | None = None,
                   lab_readiness: dict[str, Any] | None = None,
                   resolve_ticks: dict[str, Any] | None = None,
-                  low_yield: dict[str, Any] | None = None) -> dict[str, Any]:
+                  low_yield: dict[str, Any] | None = None,
+                  ships: dict[str, Any] | None = None) -> dict[str, Any]:
     # --- dispatcher liveness / capacity ---
     cap = _int(pre.get("cap"))
     live = _int(pre.get("live"))
@@ -2278,6 +2379,20 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             f"{low_yield.get('lookback_min')}m ({names}) — turns spent with zero "
             f"ancestry-closes; pick_lane should re-scope or exclude (#2062)")
 
+    # Ships-per-worker (#2065): best-effort (fak-worker) trailer attribution over the
+    # recent window. Informational — a reason line, never a flip of ok; the trailer is
+    # agent-emitted, so this is an attribution aid, not a witness.
+    ships = ships or {}
+    ships_workers = ships.get("workers") or []
+    if ships.get("attributed_ships"):
+        top = ", ".join(f"{w.get('worker')}={w.get('ships')}" for w in ships_workers[:4])
+        unk = ships.get("unknown") or 0
+        unk_bit = f", {unk} unattributed" if unk else ""
+        reasons.append(
+            f"{ships.get('attributed_ships')} ship(s) attributed to "
+            f"{ships.get('worker_count')} worker(s) via (fak-worker) trailer ({top})"
+            f"{unk_bit} — best-effort aid, not a witness (#2065)")
+
     lab_readiness = lab_readiness or {}
     if lab_readiness.get("schema") and not lab_readiness.get("commands"):
         lab_readiness = {**lab_readiness, "commands": _lab_readiness_commands()}
@@ -2377,6 +2492,7 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         "seat_inventory": seat_inventory or {},
         "resolver": resolve_ticks or {},
         "low_yield": low_yield or {},
+        "ships_per_worker": ships or {},
         "lab_readiness": lab_readiness or {},
         "utilization": utilization,
         "git": {
@@ -2553,6 +2669,16 @@ def render(p: dict[str, Any]) -> str:
         lines.append(
             f"║ low-yield : {ly.get('low_yield_count')} lane(s) >= {ly.get('turns_floor')}t, "
             f"0 closes [{bits}] (#2062)")
+    spw = p.get("ships_per_worker") or {}
+    if spw.get("attributed_ships"):
+        bits = ", ".join(f"{w.get('worker')}={w.get('ships')}"
+                         for w in (spw.get("workers") or [])[:4])
+        unk = spw.get("unknown") or 0
+        lines.append(
+            f"║ ships/wkr : {spw.get('attributed_ships')} ship(s) / "
+            f"{spw.get('worker_count')} worker(s) [{bits}]"
+            + (f" +{unk} unattributed" if unk else "")
+            + " (aid, #2065)")
     bh = p.get("backend_health") or {}
     flagged_rates = [r for r in (bh.get("stub_rate") or []) if r.get("majority_stub")]
     if flagged_rates:
@@ -3044,6 +3170,34 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
             out.append(
                 f"| {r.get('lane')} | {r.get('sessions')} | {r.get('turns')} | "
                 f"{r.get('max_session_turns')} | {closes_txt} | {verdict} | {tree} | {evidence} |")
+
+    spw = payload.get("ships_per_worker") or {}
+    out += ["", "## Ships per worker (best-effort attribution)", ""]
+    spw_workers = spw.get("workers") or []
+    if not spw.get("attributed_ships"):
+        out.append(
+            "No `(fak-worker <id>)` trailers in the recent window — a dispatched worker "
+            "carries this trailer best-effort (sourced from the `FLEET_WORKER_ID` env "
+            "stamp), so ships-per-worker is attributable once workers start emitting it "
+            "(#2065). It is an **attribution aid, not a witness**; nothing is gated on it.")
+    else:
+        unk = spw.get("unknown") or 0
+        out += [
+            f"**{spw.get('attributed_ships')}** commit(s) carry a `(fak-worker <id>)` "
+            f"trailer over the last {spw.get('lookback_min', _SHIPS_PER_WORKER_LOOKBACK_MIN)}m, "
+            f"attributed to **{spw.get('worker_count')}** worker(s)"
+            + (f" ({unk} matched but unattributed)" if unk else "")
+            + ". The trailer is agent-emitted best-effort — an **attribution aid, not a "
+            "witness** (the `(fak <leaf>)` ship stamp + `Fixes #N` remain the ground "
+            "truth); this fold never flips the card's verdict (#2065).",
+            "",
+            "| worker | ships |",
+            "|---|---:|",
+        ]
+        for w in spw_workers:
+            out.append(f"| `{w.get('worker')}` | {w.get('ships')} |")
+        if unk:
+            out.append(f"| _unattributed_ | {unk} |")
 
     out += ["", "## Issue-contract repair flow", ""]
     out += [

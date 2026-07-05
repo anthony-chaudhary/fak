@@ -1967,5 +1967,110 @@ class LowYieldFoldTest(unittest.TestCase):
         self.assertIn("| docs | 1 | 60 | 60 | 4 | ok |", md)
 
 
+class ShipsPerWorkerFoldTest(unittest.TestCase):
+    """parse_ships_per_worker/ships_per_worker fold the best-effort (fak-worker <id>)
+    trailer into per-worker ship counts (#2065) — pure over commit records, and the
+    impure fold uses an injectable git runner so it stays hermetic."""
+
+    def _rec(self, subject: str, body: str = "") -> str:
+        return subject + "\n" + body
+
+    def test_counts_and_sorts_per_worker(self) -> None:
+        mod = load()
+        recs = [
+            self._rec("feat(x): a (fak tools)", "Fixes #1\n(fak-worker acct3)"),
+            self._rec("fix(y): b (fak tools)", "Fixes #2\n(fak-worker acct3)"),
+            self._rec("feat(z): c (fak gateway)", "Closes #3\n(fak-worker acct7)"),
+        ]
+        out = mod.parse_ships_per_worker(recs)
+        self.assertEqual(out["attributed_ships"], 3)
+        self.assertEqual(out["worker_count"], 2)
+        self.assertEqual(out["unknown"], 0)
+        # richest worker first, then lexicographic
+        self.assertEqual(out["workers"][0], {"worker": "acct3", "ships": 2})
+        self.assertEqual(out["workers"][1], {"worker": "acct7", "ships": 1})
+
+    def test_zero_trailer_commit_is_unknown(self) -> None:
+        mod = load()
+        recs = [
+            self._rec("feat(x): a (fak tools)", "Fixes #1\n(fak-worker acct3)"),
+            self._rec("chore(y): no trailer here", "Fixes #2"),  # matched-but-unparseable
+        ]
+        out = mod.parse_ships_per_worker(recs)
+        self.assertEqual(out["attributed_ships"], 2)
+        self.assertEqual(out["unknown"], 1)
+        self.assertEqual(out["worker_count"], 1)
+        self.assertIn({"worker": "acct3", "ships": 1}, out["workers"])
+
+    def test_empty_records_yield_empty_fold(self) -> None:
+        mod = load()
+        out = mod.parse_ships_per_worker([])
+        self.assertEqual(out["attributed_ships"], 0)
+        self.assertEqual(out["workers"], [])
+        self.assertEqual(out["schema"], mod._SHIPS_PER_WORKER_SCHEMA)
+
+    def test_impure_fold_uses_injected_runner(self) -> None:
+        mod = load()
+        recs = [self._rec("feat: a (fak tools)", "Fixes #1\n(fak-worker acct-a)")]
+        out = mod.ships_per_worker(ROOT, now_ts=0.0, runner=lambda root, since: recs)
+        self.assertEqual(out["attributed_ships"], 1)
+        self.assertEqual(out["workers"], [{"worker": "acct-a", "ships": 1}])
+        self.assertNotIn("unavailable", out)
+
+    def test_git_unavailable_fails_open(self) -> None:
+        mod = load()
+        out = mod.ships_per_worker(ROOT, now_ts=0.0, runner=lambda root, since: None)
+        self.assertTrue(out.get("unavailable"))
+        self.assertEqual(out["attributed_ships"], 0)
+
+
+class ShipsPerWorkerPayloadTest(unittest.TestCase):
+    """build_payload folds the injected ships-per-worker rollup into payload + a reason,
+    and render/render_md surface it — never flipping ok (#2065)."""
+
+    def _ships(self, **over) -> dict:
+        s = {
+            "schema": "fleet-ships-per-worker/1",
+            "attributed_ships": 3,
+            "worker_count": 2,
+            "unknown": 1,
+            "lookback_min": 1440,
+            "workers": [{"worker": "acct3", "ships": 2}, {"worker": "acct7", "ships": 1}],
+            "note": "best-effort agent-emitted (fak-worker) trailer — attribution aid, not a witness",
+        }
+        s.update(over)
+        return s
+
+    def test_ships_reach_payload_reason_and_render(self) -> None:
+        mod = load()
+        p = build(mod, ships=self._ships())
+        self.assertTrue(p["ok"])  # informational only — never flips ok
+        self.assertEqual(p["ships_per_worker"]["attributed_ships"], 3)
+        self.assertTrue(any("attributed to" in r and "#2065" in r for r in p["reasons"]))
+        rendered = mod.render(p)
+        self.assertIn("ships/wkr :", rendered)
+        self.assertIn("acct3=2", rendered)
+        self.assertIn("unattributed", rendered)
+
+    def test_no_ships_emits_no_reason(self) -> None:
+        mod = load()
+        p = build(mod, ships=self._ships(attributed_ships=0, worker_count=0,
+                                         unknown=0, workers=[]))
+        self.assertFalse(any("(fak-worker) trailer" in r for r in p["reasons"]))
+        self.assertNotIn("ships/wkr :", mod.render(p))
+
+    def test_ships_defaults_to_empty_when_omitted(self) -> None:
+        mod = load()
+        p = build(mod)  # build() does not pass ships -> defaults to None -> {}
+        self.assertEqual(p["ships_per_worker"], {})
+
+    def test_md_ships_section_lists_workers(self) -> None:
+        mod = load()
+        md = mod.render_md(build(mod, ships=self._ships()), date="2026-07-04")
+        self.assertIn("## Ships per worker (best-effort attribution)", md)
+        self.assertIn("| `acct3` | 2 |", md)
+        self.assertIn("| _unattributed_ | 1 |", md)
+
+
 if __name__ == "__main__":
     unittest.main()

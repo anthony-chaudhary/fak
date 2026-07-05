@@ -202,6 +202,14 @@ same `dos` verbs the loop already uses, with generic git:
   lanes on the same tree, a blanket add sweeps another loop's in-flight edits into
   your commit. The lane lease you held names exactly which paths are yours; commit
   only those.
+- **Carry your worker id as a `(fak-worker <id>)` trailer (best-effort, #2065).** If
+  `FLEET_WORKER_ID` is set in your environment (the dispatcher stamps it), append a
+  `(fak-worker <FLEET_WORKER_ID>)` trailer line to the commit body so a dispatched
+  worker's witnessed ships are attributable on the shared trunk. This is *additive and
+  best-effort*: it does NOT replace the `(fak <leaf>)` ship stamp or the `Fixes #N`
+  reference, and it is an attribution **aid, not a witness** — `dispatch_status.py`
+  folds it read-only (`git log --grep='(fak-worker '`) and nothing is gated on it, so a
+  missing trailer never blocks a ship. Skip it silently when `FLEET_WORKER_ID` is unset.
 - **Confirm the tree is clean for your lane before you exit.** `git status
   --porcelain -- <lane paths>` over the region you leased should come back empty once
   you have committed. If it does not, you stranded durable work — `log` it and commit

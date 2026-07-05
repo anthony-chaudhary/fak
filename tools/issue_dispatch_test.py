@@ -228,6 +228,33 @@ class WorkerEnvTest(unittest.TestCase):
             env_acct = mod.worker_env(d, "gateway", ROOT)
         self.assertEqual(env_acct["DISPATCH_OBSERVE"], "1")
 
+    def test_stamps_worker_id_from_account_seat_basename(self) -> None:
+        # #2065: the worker id defaults to the pinned seat directory basename so a
+        # dispatched worker's (fak-worker <id>) trailer is attributable per seat.
+        mod = load()
+        with mock.patch.dict("os.environ", {"FLEET_WORKER_ID": ""}, clear=False):
+            with tempfile.TemporaryDirectory() as d:
+                env = mod.worker_env(d, "docs", ROOT)
+        self.assertEqual(env["FLEET_WORKER_ID"],
+                         mod._sanitize_worker_id(Path(d).name))
+        self.assertNotEqual(env["FLEET_WORKER_ID"], "unknown")
+
+    def test_worker_id_falls_back_to_lane_without_account(self) -> None:
+        mod = load()
+        with mock.patch.dict("os.environ", {"FLEET_WORKER_ID": ""}, clear=False):
+            env = mod.worker_env(None, "recall", ROOT)
+        self.assertEqual(env["FLEET_WORKER_ID"], "recall")
+
+    def test_explicit_worker_id_env_overrides_the_seat(self) -> None:
+        # An operator/wave override (FLEET_WORKER_ID already set) wins over the seat,
+        # sanitized to a trailer-safe token.
+        mod = load()
+        with mock.patch.dict("os.environ", {"FLEET_WORKER_ID": "wave-3/rank-1"},
+                             clear=False):
+            with tempfile.TemporaryDirectory() as d:
+                env = mod.worker_env(d, "docs", ROOT)
+        self.assertEqual(env["FLEET_WORKER_ID"], "wave-3-rank-1")
+
 
 class EvaluateTest(unittest.TestCase):
     SPAWN_OK = {
@@ -249,6 +276,7 @@ class EvaluateTest(unittest.TestCase):
         # busy_lanes reads .dispatch-runs/ from disk; stub it empty so the tick is
         # hermetic. Its real behavior (fold + prune inflight markers) is covered below.
         mod.busy_lanes = lambda runs_dir, **kw: set()
+        mod.lease_ref_busy_lanes = lambda root: {"lanes": set()}
         mod.pick_lane = lambda root, explicit, busy=None: lane_pick
 
     def test_would_spawn_when_preflight_ok_and_lane_chosen(self) -> None:
@@ -274,7 +302,15 @@ class EvaluateTest(unittest.TestCase):
         self._patch(
             mod,
             pre={"verdict": "REFUSE_AT_CAP", "reason": "2/2 live", "cap": 2,
-                 "live": 2, "account": {}},
+                 "live": 2, "max_workers": 2, "host_cap": 16,
+                 "capacity_limiter": {
+                     "primary": "configured_max",
+                     "term": "max_workers",
+                     "raw": {"max_workers": 2, "host_cap": 16},
+                 },
+                 "seat": {"total": 20, "free": 18, "leased": 2,
+                          "depleted": False},
+                 "account": {}},
             lane_pick={"lane": "gateway", "issues": 4, "by_lane": {}})
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
                          lane=None, live=False)
@@ -283,6 +319,10 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["verdict"], "REFUSE_AT_CAP")
         self.assertIn("preflight refused", p["reason"])
         self.assertIn("2/2 live", p["reason"])
+        self.assertEqual(p["preflight"]["capacity_limiter"]["term"], "max_workers")
+        self.assertEqual(p["preflight"]["seat"]["free"], 18)
+        self.assertEqual(p["preflight_hint"]["kind"], "configured_max_workers")
+        self.assertIn("configured --max-workers=2", mod.render(p))
 
     def test_preflight_payload_surfaces_host_cap(self) -> None:
         # #1337: the host-derived adaptive ceiling must be observable in the
@@ -301,6 +341,28 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["preflight"]["host_cap"], 3)
         self.assertIn("host_cap 3", mod.render(p))
 
+    def test_preflight_payload_surfaces_headroom_limiter_and_seat(self) -> None:
+        mod = load()
+        self._no_spawn(mod)
+        self._patch(
+            mod,
+            pre={"verdict": "SPAWN_OK", "reason": "ok", "cap": 16, "live": 9,
+                 "headroom": 7, "max_workers": 20, "host_cap": 16,
+                 "capacity_limiter": {
+                     "primary": "cpu",
+                     "term": "host_cap",
+                     "raw": {"seat_free": 11},
+                 },
+                 "seat": {"total": 20, "free": 11, "leased": 9,
+                          "depleted": False},
+                 "account": {"tag": "worker-a", "tier": 1, "dir": "/acct/a"}},
+            lane_pick={"lane": "tools", "issues": 1, "by_lane": {}})
+        p = mod.evaluate(ROOT, max_workers=20, work_kind="engineering",
+                         lane=None, live=False)
+        self.assertEqual(p["preflight"]["headroom"], 7)
+        self.assertEqual(p["preflight"]["capacity_limiter"]["primary"], "cpu")
+        self.assertEqual(p["preflight"]["seat"]["leased"], 9)
+
     def test_preflight_payload_omits_host_cap_when_unbounded(self) -> None:
         # When no host dimension is readable host_cap is None; the render then
         # falls back to the static live/cap form with no host_cap clause.
@@ -310,7 +372,7 @@ class EvaluateTest(unittest.TestCase):
                     lane_pick={"lane": "tools", "issues": 1, "by_lane": {}})
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
                          lane=None, live=False)
-        self.assertIsNone(p["preflight"]["host_cap"])
+        self.assertNotIn("host_cap", p["preflight"])
         self.assertNotIn("host_cap", mod.render(p))
 
     def test_no_lane_when_router_empty(self) -> None:
@@ -368,6 +430,7 @@ class RefreshRegistryTest(unittest.TestCase):
                     "live": 2, "account": {}}
         mod.preflight = pre
         mod.busy_lanes = lambda runs_dir, **kw: set()
+        mod.lease_ref_busy_lanes = lambda root: {"lanes": set()}
         mod.pick_lane = lambda root, explicit, busy=None: {"lane": "docs", "issues": 1,
                                                            "by_lane": {}}
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
@@ -385,6 +448,7 @@ class RefreshRegistryTest(unittest.TestCase):
         mod.preflight = lambda root, **kw: {"verdict": "REFUSE_AT_CAP",
                                             "reason": "x", "account": {}}
         mod.busy_lanes = lambda runs_dir, **kw: set()
+        mod.lease_ref_busy_lanes = lambda root: {"lanes": set()}
         mod.pick_lane = lambda root, explicit, busy=None: {"lane": "docs", "issues": 1,
                                                            "by_lane": {}}
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
@@ -422,6 +486,7 @@ class WaveTest(unittest.TestCase):
               no_spawn=True) -> None:
         mod.refresh_registry = lambda root: {"ok": True, "stubbed": True}
         mod.busy_lanes = lambda runs_dir, **kw: set()
+        mod.lease_ref_busy_lanes = lambda root: {"lanes": set()}
         mod.allocate_seats = lambda root, mw, wk: {
             "granted": len(seats), "requested": 99, "shortfall": 0,
             "wave_id": "wave-test", "lanes": seats}
@@ -483,6 +548,9 @@ class WaveTest(unittest.TestCase):
         self.assertEqual(p["size"], 2)
         self.assertEqual(p["cap"], 2)
         self.assertEqual(p["refusal"], "REFUSE_AT_CAP")
+        self.assertEqual(p["last_preflight"]["effective_live"], 2)
+        self.assertEqual(p["preflight_hint"]["kind"], "in_tick_cap")
+        self.assertIn("wave in-tick accounting", mod.render_wave(p))
         # preflight was re-checked per spawn: 2 admits + 1 that hit the cap = 3 calls.
         self.assertEqual(calls["n"], 3)
 
@@ -490,12 +558,97 @@ class WaveTest(unittest.TestCase):
         mod = load()
         cands = [{"lane": "tools", "issues": 9, "tree": ["tools/**"]}]
         pre = {"verdict": "REFUSE_AT_CAP", "reason": "2/2 live", "cap": 2,
-               "live": 2, "account": {}}
+               "live": 2, "max_workers": 2, "host_cap": 16, "account": {},
+               "capacity_limiter": {
+                   "primary": "configured_max",
+                   "term": "max_workers",
+                   "raw": {"max_workers": 2, "host_cap": 16},
+               },
+               "seat": {"total": 20, "free": 18, "leased": 2,
+                        "depleted": False}}
         self._wire(mod, seats=[_seat(0), _seat(1)], candidates=cands, pre=pre)
         p = mod.evaluate_wave(ROOT, max_workers=2, work_kind="engineering", live=False)
         self.assertFalse(p["ok"])
         self.assertEqual(p["size"], 0)
         self.assertEqual(p["verdict"], "REFUSE_AT_CAP")
+        self.assertEqual(p["last_preflight"]["capacity_limiter"]["term"], "max_workers")
+        self.assertEqual(p["preflight_hint"]["kind"], "configured_max_workers")
+        self.assertEqual(p["preflight_hint"]["required_min"], 3)
+        self.assertIn("configured --max-workers=2", p["preflight_hint"]["message"])
+        self.assertIn("configured --max-workers=2", mod.render_wave(p))
+
+    def test_initial_preflight_refusal_requests_zero_seats(self) -> None:
+        mod = load()
+        cands = [{"lane": "tools", "issues": 9, "tree": ["tools/**"]}]
+        calls = {"preflight": 0, "seat_request": None}
+
+        def pre(root, **kw):
+            calls["preflight"] += 1
+            return {"verdict": "REFUSE_AT_CAP", "reason": "16/16 live",
+                    "cap": 16, "live": 16, "headroom": 0,
+                    "max_workers": 20, "host_cap": 16,
+                    "capacity_limiter": {"primary": "leases", "term": "live"},
+                    "seat": {"total": 20, "free": 4, "leased": 16,
+                             "depleted": False},
+                    "account": {}}
+
+        self._wire(mod, seats=[], candidates=cands, pre=pre)
+
+        def allocate(root, mw, wk):
+            calls["seat_request"] = mw
+            return {"granted": 0, "requested": mw, "shortfall": mw,
+                    "wave_id": "wave-zero", "lanes": []}
+        mod.allocate_seats = allocate
+
+        p = mod.evaluate_wave(ROOT, max_workers=20, work_kind="engineering",
+                              live=False)
+        self.assertEqual(p["verdict"], "REFUSE_AT_CAP")
+        self.assertEqual(p["admission_budget"]["requested_seats"], 0)
+        self.assertEqual(calls["seat_request"], 0)
+        self.assertEqual(calls["preflight"], 1)
+        self.assertEqual(p["free_seats"], 0)
+
+    def test_preflight_headroom_bounds_wave_seat_request(self) -> None:
+        mod = load()
+        cands = [{"lane": L, "issues": 9 - i, "tree": [f"{L}/**"]}
+                 for i, L in enumerate(["tools", "docs", "ci"])]
+        calls = {"seat_request": None}
+        pre = {"verdict": "SPAWN_OK", "reason": None, "cap": 16, "live": 15,
+               "headroom": 1, "max_workers": 20,
+               "seat": {"total": 20, "free": 4, "leased": 16,
+                        "depleted": False},
+               "account": {}}
+        self._wire(mod, seats=[_seat(0)], candidates=cands, pre=pre)
+
+        def allocate(root, mw, wk):
+            calls["seat_request"] = mw
+            return {"granted": mw, "requested": mw, "shortfall": 0,
+                    "wave_id": "wave-one", "lanes": [_seat(i) for i in range(mw)]}
+        mod.allocate_seats = allocate
+
+        p = mod.evaluate_wave(ROOT, max_workers=20, work_kind="engineering",
+                              live=False)
+        self.assertEqual(calls["seat_request"], 1)
+        self.assertEqual(p["admission_budget"]["requested_seats"], 1)
+        self.assertEqual(p["size"], 1)
+        self.assertEqual(p["free_seats"], 1)
+
+    def test_preflight_refusal_hint_surfaces_live_limiter(self) -> None:
+        mod = load()
+        hint = mod.preflight_refusal_hint({
+            "verdict": "REFUSE_AT_CAP",
+            "reason": "16/16 live",
+            "cap": 1,
+            "live": 16,
+            "max_workers": 1,
+            "host_cap": 16,
+            "capacity_limiter": {"primary": "leases", "term": "live",
+                                  "raw": {"max_workers": 1, "host_cap": 16}},
+        })
+        self.assertIsNotNone(hint)
+        self.assertEqual(hint["kind"], "live")
+        self.assertIn("capacity limiter leases/live", hint["message"])
+        self.assertNotIn("rerun with --max-workers", hint["message"])
 
     def test_seats_bound_the_wave_below_lanes(self) -> None:
         mod = load()
@@ -610,6 +763,46 @@ class BusyLanesTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             self.assertEqual(
                 mod.busy_lanes(Path(d) / "nope", is_alive=lambda pid: True), set())
+
+
+class LeaseRefBusyLanesTest(unittest.TestCase):
+    """lease_ref_busy_lanes folds cross-session refs into the planner's busy set."""
+
+    def test_live_non_reclaimable_refs_are_busy(self) -> None:
+        mod = load()
+
+        class Proc:
+            returncode = 0
+            stderr = ""
+            stdout = json.dumps([
+                {"id": "resolve-tools", "liveness": "peer-live",
+                 "reclaimable": False, "holder": "node/sess"},
+                {"id": "resolve-docs", "liveness": "peer-dead",
+                 "reclaimable": True, "holder": "node/dead"},
+            ])
+
+        def fake_run(cmd, **kwargs):
+            self.assertEqual(cmd[-2:], ["leaseref", "liveness"])
+            return Proc()
+
+        mod._fak_cmd = lambda: ["fak"]
+        with mock.patch.object(mod.subprocess, "run", fake_run):
+            out = mod.lease_ref_busy_lanes(ROOT)
+        self.assertEqual(out["lanes"], {"tools"})
+        self.assertEqual(out["records"][0]["lane"], "tools")
+
+    def test_unavailable_fak_fails_open(self) -> None:
+        mod = load()
+        mod._fak_cmd = lambda: None
+        out = mod.lease_ref_busy_lanes(ROOT)
+        self.assertEqual(out["lanes"], set())
+        self.assertIn("no fak binary", out["error"])
+
+    def test_fak_bin_split_preserves_windows_backslashes(self) -> None:
+        mod = load()
+        with mock.patch.dict(os.environ, {"FAK_BIN": r"C:\work\fak\fak.exe"}):
+            with mock.patch.object(mod.os, "name", "nt"):
+                self.assertEqual(mod._fak_cmd(), [r"C:\work\fak\fak.exe"])
 
 
 class BusyAccountsTest(unittest.TestCase):
@@ -906,11 +1099,12 @@ class EvaluateBusyWiringTest(unittest.TestCase):
             "verdict": "SPAWN_OK", "cap": 2, "live": 0,
             "account": {"tag": "a", "tier": 1, "dir": "/a"}}
         mod.busy_lanes = lambda runs_dir, **kw: {"gateway"}
+        mod.lease_ref_busy_lanes = lambda root: {"lanes": {"docs"}}
         seen: dict = {}
 
         def pick(root, explicit, busy=None):
             seen["busy"] = busy
-            return {"lane": "docs", "issues": 2, "by_lane": {}, "stacked": False}
+            return {"lane": "tools", "issues": 2, "by_lane": {}, "stacked": False}
         mod.pick_lane = pick
 
         def boom(*a, **k):
@@ -919,8 +1113,11 @@ class EvaluateBusyWiringTest(unittest.TestCase):
 
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
                          lane=None, live=False)
-        self.assertEqual(seen["busy"], {"gateway"})   # passed verbatim to pick_lane
-        self.assertEqual(p["busy_lanes"], ["gateway"])  # surfaced in the payload
+        self.assertEqual(seen["busy"], {"docs", "gateway"})
+        self.assertEqual(p["busy_lanes"], ["docs", "gateway"])
+        self.assertEqual(p["busy_lane_sources"]["inflight_markers"], ["gateway"])
+        self.assertEqual(p["busy_lane_sources"]["lease_refs"], ["docs"])
+        self.assertIn("markers: gateway; lease refs: docs", mod.render(p))
         self.assertFalse(p["lane_stacked"])
 
 
@@ -941,6 +1138,7 @@ class WaveBusySkipTest(unittest.TestCase):
                                             "live": 0, "account": {}}
         mod.arbitrate_lane = _disjoint_arbitrate
         mod.busy_lanes = lambda runs_dir, **kw: {"tools"}   # tools already in flight
+        mod.lease_ref_busy_lanes = lambda root: {"lanes": set()}
 
         def boom(*a, **k):
             raise AssertionError("dry-run must never spawn a wave worker")
@@ -951,6 +1149,33 @@ class WaveBusySkipTest(unittest.TestCase):
         self.assertEqual(p["skipped_busy"], ["tools"])
         self.assertEqual(p["busy_lanes"], ["tools"])
         self.assertEqual(p["size"], 1)
+
+    def test_wave_skips_a_live_lease_ref_lane(self) -> None:
+        mod = load()
+        mod.refresh_registry = lambda root: {"ok": True}
+        mod.allocate_seats = lambda root, mw, wk: {
+            "granted": 2, "requested": 2, "shortfall": 0,
+            "wave_id": "w", "lanes": [_seat(0), _seat(1)]}
+        cands = [{"lane": "tools", "issues": 9, "tree": ["tools/**"]},
+                 {"lane": "docs", "issues": 7, "tree": ["docs/**"]}]
+        mod.lane_candidates = lambda root: {"candidates": cands, "router_error": None}
+        mod.preflight = lambda root, **kw: {"verdict": "SPAWN_OK", "cap": 10,
+                                            "live": 0, "account": {}}
+        mod.arbitrate_lane = _disjoint_arbitrate
+        mod.busy_lanes = lambda runs_dir, **kw: set()
+        mod.lease_ref_busy_lanes = lambda root: {"lanes": {"tools"},
+                                                 "records": [{"lane": "tools"}]}
+
+        def boom(*a, **k):
+            raise AssertionError("dry-run must never spawn a wave worker")
+        mod._spawn_wave_member = boom
+
+        p = mod.evaluate_wave(ROOT, max_workers=2, work_kind="engineering", live=False)
+        self.assertEqual(p["lanes"], ["docs"])
+        self.assertEqual(p["skipped_busy"], ["tools"])
+        self.assertEqual(p["busy_lane_sources"]["lease_refs"], ["tools"])
+        self.assertEqual(p["busy_lane_sources"]["inflight_markers"], [])
+        self.assertIn("lease refs: tools", mod.render_wave(p))
 
 
 if __name__ == "__main__":
