@@ -34,6 +34,9 @@ func f(got []string) bool {
 		{"frozen list via slices.Equal flagged", `package p
 import "slices"
 func f(got []int) bool { return slices.Equal(got, []int{1, 2, 3, 4, 5}) }`, 1},
+		{"frozen list via cmp.Diff flagged", `package p
+import "cmp"
+func f(got []string) bool { return cmp.Diff(got, []string{"a", "b", "c", "d", "e"}) == "" }`, 1},
 		{"short literal list clean", `package p
 import "reflect"
 func f(got []string) bool { return reflect.DeepEqual(got, []string{"a", "b"}) }`, 0},

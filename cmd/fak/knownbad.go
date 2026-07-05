@@ -3,8 +3,12 @@ package main
 // fak knownbad -- the impure shell over the internal/knownbad fold core: the verbs
 // the blast-radius containment epic (#2712) spine exposes.
 //
-//	fak knownbad record --tree internal/foo/** --reason build --note "..."
-//	    appends one fak.known-bad.v1 JSONL row to a fleet-visible ledger.
+//	fak knownbad record --tree internal/foo/** --reason build --note "..." [--ttl S]
+//	    appends one fak.known-bad.v1 JSONL row to a fleet-visible ledger. Every row
+//	    carries a BOUNDED default TTL (knownbad.DefaultRecordTTLSeconds) so a signature
+//	    auto-EXPIRES (stops matching, hold auto-lifts) even if nobody resolves it — a
+//	    live shared bug re-fires and re-records, a phantom just ages out. --ttl 0 opts a
+//	    signature out of expiry for a genuinely durable failure (W8, #2720).
 //	fak knownbad match  --tree internal/foo/bar.go [--json]
 //	    reports whether the requested tree intersects any LIVE (open, unexpired)
 //	    known-bad signature, printing the matching record(s). Exit is non-zero
@@ -25,6 +29,17 @@ package main
 //	    On resolve: appends a superseding resolved row (which clears the W4
 //	    scope-hold on the next dispatch tick) and releases the fixer's exclusive
 //	    lease (W5). The witness is the gate; a self-report never releases the fleet.
+//	fak knownbad revoke <signature> --reason <why> [--by ID] [--json]
+//	    retracts a live signature WITHOUT a witness (W8, #2720): the UNWITNESSED release
+//	    valve resolve deliberately withholds. It is for a mis-recorded or stale signature
+//	    (a flaky test read as a shared bug, a fix that landed quietly) that would
+//	    otherwise scope-hold the fleet until its TTL lapses — revoke lifts the hold NOW.
+//	    Appends a superseding revoked row (Match drops it, clearing the W4 hold next tick)
+//	    and drops the fixer lease (W5), same release path as resolve; the ONLY difference
+//	    is there is no witness gate, so --reason (the human justification) is required
+//	    instead. A revoke is "this was never really a shared bug," a resolve is "the
+//	    shared bug is proven gone." A claim/resolve/revoke against an already
+//	    expired/revoked signature is refused with KNOWN_BAD_EXPIRED_OR_REVOKED.
 //	fak knownbad report [--leases FILE] [--repo-url URL] [--operator-after S] \
 //	                    [--dry-run] [--json]
 //	    folds the LIVE known-bad signatures into ONE operator blast card (W7, #2719):
@@ -70,7 +85,7 @@ func cmdKnownBad(argv []string) {
 
 func runKnownBad(stdout, stderr io.Writer, argv []string, nowUnix int64) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "fak knownbad: expected a subcommand (record|match|claim|resolve)")
+		fmt.Fprintln(stderr, "fak knownbad: expected a subcommand (record|match|claim|resolve|revoke|report)")
 		return 2
 	}
 	switch argv[0] {
@@ -82,13 +97,15 @@ func runKnownBad(stdout, stderr io.Writer, argv []string, nowUnix int64) int {
 		return runKnownBadClaim(stdout, stderr, argv[1:], nowUnix)
 	case "resolve":
 		return runKnownBadResolve(stdout, stderr, argv[1:], nowUnix)
+	case "revoke":
+		return runKnownBadRevoke(stdout, stderr, argv[1:], nowUnix)
 	case "report":
 		return runKnownBadReport(stdout, stderr, argv[1:], nowUnix)
 	case "-h", "--help", "help":
-		fmt.Fprintln(stderr, "fak knownbad: record | match | claim | resolve | report  (fleet-wide known-bad signature ledger)")
+		fmt.Fprintln(stderr, "fak knownbad: record | match | claim | resolve | revoke | report  (fleet-wide known-bad signature ledger)")
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak knownbad: unknown subcommand %q (want record|match|claim|resolve|report)\n", argv[0])
+		fmt.Fprintf(stderr, "fak knownbad: unknown subcommand %q (want record|match|claim|resolve|revoke|report)\n", argv[0])
 		return 2
 	}
 }
@@ -126,7 +143,7 @@ func runKnownBadRecord(stdout, stderr io.Writer, argv []string, nowUnix int64) i
 	note := fs.String("note", "", "free-text note describing the known-bad")
 	by := fs.String("by", "", "discoverer id (default: $FAK_AGENT_ID, else hostname)")
 	failureHash := fs.String("failure-hash", "", "optional guardrsi failure hash to fold into the signature")
-	ttl := fs.Int64("ttl", 0, "time-to-live in seconds (0 = no expiry)")
+	ttl := fs.Int64("ttl", knownbad.DefaultRecordTTLSeconds, "bounded time-to-live in seconds after which the signature auto-expires (stops matching, hold auto-lifts); pass 0 for a durable no-expiry signature")
 	ledger := fs.String("ledger", "", "ledger path override (default: <root>/"+knownbad.DefaultLedgerRel+")")
 	asJSON := fs.Bool("json", false, "emit the recorded row as JSON")
 	if !parseFlags(fs, argv) {
@@ -221,6 +238,75 @@ func runKnownBadMatch(stdout, stderr io.Writer, argv []string, nowUnix int64) in
 // handed the WINNER's identity (a pointer to the fixer), never a bare "refused".
 const reasonKnownBadAlreadyClaimed = "KNOWN_BAD_ALREADY_CLAIMED"
 
+// reasonKnownBadExpiredOrRevoked is the closed-vocabulary refusal a `claim`/`resolve`
+// carries when it acts on a signature that WAS recorded but is no longer live — its
+// bounded TTL lapsed (expired), an operator revoked it, or it was already resolved. It
+// is the W8 (#2720) safety-valve's structured "you are chasing a phantom" signal:
+// distinct from the plain usage error for a signature that was NEVER recorded (a typo'd
+// or made-up id), which stays a bare exit-2 because there is nothing to point the caller
+// at. Registered in dos.toml [reasons.KNOWN_BAD_EXPIRED_OR_REVOKED] so the refusal is
+// `dos check-reason`-verifiable, not free text.
+const reasonKnownBadExpiredOrRevoked = "KNOWN_BAD_EXPIRED_OR_REVOKED"
+
+// knownBadNotLiveResult is the --json envelope a `claim`/`resolve` emits when the target
+// signature is not actionable: OK=false, the verb, and — when the signature WAS recorded
+// but has since been retracted — the structured KNOWN_BAD_EXPIRED_OR_REVOKED reason and
+// the terminal state ("expired" | "revoked" | "resolved") so the caller knows it is
+// chasing a phantom, not a typo.
+type knownBadNotLiveResult struct {
+	Schema    string `json:"schema"`
+	OK        bool   `json:"ok"`
+	Verb      string `json:"verb"`
+	Signature string `json:"signature"`
+	Reason    string `json:"reason,omitempty"`
+	State     string `json:"state,omitempty"`
+	Detail    string `json:"detail,omitempty"`
+}
+
+// refuseKnownBadNotLive is the shared not-live gate both `claim` and `resolve` run after
+// the live lookup misses. It draws the W8 (#2720) line between two failures a
+// FindLatestLive miss conflates:
+//
+//   - the signature WAS recorded but is now expired/revoked/resolved — a structured
+//     refuse (KNOWN_BAD_EXPIRED_OR_REVOKED, exit leaserefRefused) so a worker acting on a
+//     stale id is told the signature aged out / was killed, not left to guess; and
+//   - the signature was NEVER recorded (a typo, a made-up id) — a plain usage error
+//     (exit 2), because there is nothing to point the caller at.
+//
+// It returns (exitCode, handled): handled=false means the signature is live and the caller
+// proceeds; handled=true means this printed the outcome and the caller returns exitCode.
+func refuseKnownBadNotLive(stdout, stderr io.Writer, verb, sig, ledgerPath string, records []knownbad.Record, nowUnix int64, asJSON bool) (int, bool) {
+	if _, found := knownbad.FindLatestLive(records, sig, nowUnix); found {
+		return 0, false
+	}
+	_, seen, state := knownbad.LatestState(records, sig, nowUnix)
+	if !seen {
+		fmt.Fprintf(stderr, "fak knownbad %s: no known-bad signature %s in %s (record it first, or check the signature)\n", verb, sig, ledgerPath)
+		return 2, true
+	}
+	// Seen but not live: the signature aged out (TTL), an operator revoked it, or it was
+	// already resolved. Refuse with the structured reason so the caller stops chasing it.
+	detail := fmt.Sprintf("known-bad %s is %s — it no longer holds the fleet; there is nothing to %s", sig, state, verb)
+	if asJSON {
+		code := knownBadEmitJSON(stdout, stderr, knownBadNotLiveResult{
+			Schema:    knownbad.Schema,
+			OK:        false,
+			Verb:      verb,
+			Signature: sig,
+			Reason:    reasonKnownBadExpiredOrRevoked,
+			State:     state,
+			Detail:    detail,
+		})
+		if code != 0 {
+			return code, true
+		}
+	} else {
+		fmt.Fprintf(stdout, "refused: %s (%s) — do not %s an aged-out or revoked signature; if the failure is live it re-fires and re-records\n",
+			detail, reasonKnownBadExpiredOrRevoked, verb)
+	}
+	return leaserefRefused, true
+}
+
 // knownBadClaimResult is the claim verb's --json shape. On a win OK is true, Record is
 // the stamped claim row, and Fixer is the claimant; on a loss OK is false, Reason is
 // KNOWN_BAD_ALREADY_CLAIMED, and Fixer is the WINNER (the pointer the loser needs),
@@ -276,11 +362,10 @@ func runKnownBadClaim(stdout, stderr io.Writer, argv []string, nowUnix int64) in
 		fmt.Fprintf(stderr, "fak knownbad claim: %v\n", err)
 		return 1
 	}
-	sigRec, found := knownbad.FindLatestLive(records, sig, nowUnix)
-	if !found {
-		fmt.Fprintf(stderr, "fak knownbad claim: no LIVE known-bad signature %s in %s (record it first, or it has been resolved)\n", sig, ledgerPath)
-		return 2
+	if code, handled := refuseKnownBadNotLive(stdout, stderr, "claim", sig, ledgerPath, records, nowUnix, *asJSON); handled {
+		return code
 	}
+	sigRec, _ := knownbad.FindLatestLive(records, sig, nowUnix)
 
 	claimant := knownBadDiscoverer(*by)
 	*dir = pathutil.ExpandTilde(*dir)
@@ -441,16 +526,16 @@ func runKnownBadResolve(stdout, stderr io.Writer, argv []string, nowUnix int64) 
 		fmt.Fprintf(stderr, "fak knownbad resolve: %v\n", err)
 		return 1
 	}
-	sigRec, found := knownbad.FindLatestLive(records, sig, nowUnix)
-	if !found {
-		fmt.Fprintf(stderr, "fak knownbad resolve: no LIVE known-bad signature %s in %s (record it first, or it is already resolved)\n", sig, ledgerPath)
-		return 2
+	if code, handled := refuseKnownBadNotLive(stdout, stderr, "resolve", sig, ledgerPath, records, nowUnix, *asJSON); handled {
+		return code
 	}
+	sigRec, _ := knownbad.FindLatestLive(records, sig, nowUnix)
 
 	// THE GATE: run the independent witness over the broken tree BEFORE touching the
 	// ledger. No green -> the signature stays open and the fleet stays parked. This is the
 	// whole point of W6: a resolve is refused unless the fix is proven, never on a claim.
-	wr := knownBadWitness(*dir, kind, sigRec.TreeGlobs, strings.TrimSpace(*commit))
+	repoDir := pathutil.ExpandTilde(*dir)
+	wr := knownBadWitness(repoDir, kind, sigRec.TreeGlobs, strings.TrimSpace(*commit))
 	if !wr.OK {
 		res := knownBadResolveResult{
 			Schema:    knownbad.Schema,
@@ -490,7 +575,7 @@ func runKnownBadResolve(stdout, stderr io.Writer, argv []string, nowUnix int64) 
 	// held by someone else is surfaced as a warning rather than failing the resolve — the
 	// signature is already witnessed-closed, the stuck lease is a separate operator action.
 	leaseID := knownbad.LeaseID(sig)
-	lease := releaseKnownBadLease(*dir, leaseID, resolver, nowUnix)
+	lease := releaseKnownBadLease(repoDir, leaseID, resolver, nowUnix)
 
 	res := knownBadResolveResult{
 		Schema:    knownbad.Schema,
@@ -549,6 +634,115 @@ func releaseKnownBadLease(dir, leaseID, holder string, nowUnix int64) *leaseref.
 		return &leaseref.FenceVerdict{Reason: "LEASE_RELEASE_ERROR", Detail: err.Error()}
 	}
 	return &verdict
+}
+
+// knownBadRevokeResult is the revoke verb's --json shape. On success OK is true, Record is
+// the stamped revoked row, and Lease carries the fixer-lease release verdict; the reason is
+// echoed as the human justification the retraction recorded.
+type knownBadRevokeResult struct {
+	Schema    string                 `json:"schema"`
+	OK        bool                   `json:"ok"`
+	Signature string                 `json:"signature"`
+	Reason    string                 `json:"reason"`
+	Trees     []string               `json:"trees,omitempty"`
+	LeaseID   string                 `json:"lease_id,omitempty"`
+	Record    *knownbad.Record       `json:"record,omitempty"`
+	Lease     *leaseref.FenceVerdict `json:"lease,omitempty"`
+}
+
+// runKnownBadRevoke retracts a live known-bad signature WITHOUT a witness (W8, #2720) — the
+// unwitnessed release valve resolve deliberately does not provide. The signature is the sole
+// positional argument (flags first); --reason is the REQUIRED human justification ("was
+// flaky, not shared", "wrong tree", "fix landed without a green"), because a revoke is a
+// judgement the audit trail must be able to read. It is the escape hatch for a phantom
+// signature: a mis-attribution, or a fix that landed quietly, would otherwise scope-hold the
+// fleet until the TTL lapsed — revoke lifts the hold NOW. Like resolve it (1) appends a
+// superseding revoked row (which Match drops because it is not Live, clearing the W4
+// scope-hold on the next tick) and (2) releases the fixer's exclusive lease (W5), so a
+// half-release can never leave the fleet stuck. The only difference from resolve is there is
+// NO witness gate — that is the whole point: a revoke is "this was never really a shared
+// bug," not "the shared bug is proven gone."
+func runKnownBadRevoke(stdout, stderr io.Writer, argv []string, nowUnix int64) int {
+	fs := flag.NewFlagSet("knownbad revoke", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	by := fs.String("by", "", "revoker id (default: $FAK_AGENT_ID, else hostname)")
+	reason := fs.String("reason", "", "human justification for the retraction (required), e.g. \"flaky not shared\", \"wrong tree\"")
+	dir := fs.String("dir", "", "repo dir for the exclusive-lease store (default: git discovery from cwd)")
+	ledger := fs.String("ledger", "", "ledger path override (default: <root>/"+knownbad.DefaultLedgerRel+")")
+	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(stderr, "fak knownbad revoke: exactly one <signature> is required (flags first): fak knownbad revoke [--by ID] --reason <why> <signature>")
+		return 2
+	}
+	if strings.TrimSpace(*reason) == "" {
+		fmt.Fprintln(stderr, "fak knownbad revoke: --reason is required (a revoke is a judgement; the audit trail must record why)")
+		return 2
+	}
+	sig := strings.TrimSpace(fs.Arg(0))
+
+	ledgerPath := knownBadLedgerPath(*ledger)
+	records, err := readKnownBadLedger(ledgerPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak knownbad revoke: %v\n", err)
+		return 1
+	}
+	// Same not-live gate as claim/resolve: a signature that was never recorded is a plain
+	// usage error; one already expired/revoked/resolved is a structured refuse (there is
+	// nothing left to retract — it already stopped matching).
+	if code, handled := refuseKnownBadNotLive(stdout, stderr, "revoke", sig, ledgerPath, records, nowUnix, *asJSON); handled {
+		return code
+	}
+	sigRec, _ := knownbad.FindLatestLive(records, sig, nowUnix)
+
+	// Append the superseding revoked row FIRST: the ledger flip is what the dispatcher
+	// re-reads each tick to clear the W4 scope-hold (Match drops a revoked row), so a revoke
+	// that recorded the release is durable even if the lease drop below hiccups. NO witness
+	// runs — the revoke's authority is the operator's judgement, stamped as the reason.
+	revoker := knownBadDiscoverer(*by)
+	revokedRec := sigRec.WithRevoke(revoker, nowUnix, *reason)
+	if err := appendKnownBadRow(ledgerPath, revokedRec); err != nil {
+		fmt.Fprintf(stderr, "fak knownbad revoke: could not record the revoke: %v\n", err)
+		return 1
+	}
+
+	// Release the fixer's exclusive lease (W5) so the tree is free for normal dispatch. Unlike
+	// resolve — where the FIXER releases their OWN claim, so the caller IS the holder — a revoke
+	// is an operator OVERRIDE that dissolves whoever else's stale claim held the signature. So
+	// the release is fenced to the RECORDED holder (the claimed row's ClaimedBy), not the
+	// revoker: the operator authoritatively hands the fixer's region back. An unclaimed
+	// signature has no live lease, so ReleaseFenced returns the idempotent absent-OK. The revoke
+	// is durable via the ledger flip above regardless of this best-effort lease drop.
+	holder := strings.TrimSpace(sigRec.ClaimedBy)
+	if holder == "" {
+		holder = revoker
+	}
+	leaseID := knownbad.LeaseID(sig)
+	repoDir := pathutil.ExpandTilde(*dir)
+	lease := releaseKnownBadLease(repoDir, leaseID, holder, nowUnix)
+
+	res := knownBadRevokeResult{
+		Schema:    knownbad.Schema,
+		OK:        true,
+		Signature: sig,
+		Reason:    strings.TrimSpace(*reason),
+		Trees:     revokedRec.TreeGlobs,
+		LeaseID:   leaseID,
+		Record:    &revokedRec,
+		Lease:     lease,
+	}
+	if *asJSON {
+		return knownBadEmitJSON(stdout, stderr, res)
+	}
+	fmt.Fprintf(stdout, "revoked: known-bad %s open -> revoked (%s); dropped fixer lease %s — held issues route as dispatchable on the next tick\n",
+		sig, strings.TrimSpace(*reason), leaseID)
+	if lease != nil && !lease.OK {
+		fmt.Fprintf(stderr, "fak knownbad revoke: note: fixer lease %s not dropped (%s) — %s; the signature is revoked regardless\n",
+			leaseID, lease.Reason, lease.Detail)
+	}
+	return 0
 }
 
 // runKnownBadWitness is the DEFAULT witness runner (the production behind knownBadWitness):
@@ -673,7 +867,7 @@ func runKnownBadReport(stdout, stderr io.Writer, argv []string, nowUnix int64) i
 		fmt.Fprintf(stderr, "fak knownbad report: %v\n", err)
 		return 1
 	}
-	leases, err := reportLeaseSet(*leasesPath, *dir, nowUnix)
+	leases, err := reportLeaseSet(*leasesPath, pathutil.ExpandTilde(*dir), nowUnix)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak knownbad report: %v\n", err)
 		return 1
