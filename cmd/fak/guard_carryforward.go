@@ -208,11 +208,6 @@ func guardRowsContainTrace(rows []journal.Row, traceID string) bool {
 	return false
 }
 
-func guardWriteRefusalCarryForward(j *journal.Journal, seq0 uint64, traceID, root string) error {
-	_, err := guardWriteRefusalCarryForwardAndReturn(j, seq0, traceID, root)
-	return err
-}
-
 func guardWriteRefusalCarryForwardAndReturn(j *journal.Journal, seq0 uint64, traceID, root string) ([]guardRefusalCarry, error) {
 	if j == nil {
 		return nil, nil

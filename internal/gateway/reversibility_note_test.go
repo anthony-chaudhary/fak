@@ -3,12 +3,69 @@ package gateway
 import (
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
 )
+
+// The sanctioned-alternative sentence flows through ONE field (Detail["remedy"])
+// and ONE renderer (remedyNote) for BOTH refusing rungs (#2749). The arg-predicate
+// rung stamps its rule's fix as Meta["fix"]; the reversibility rung stamps its
+// preview dry-run hint as Meta["dry_run_hint"]; renderVerdict folds EITHER onto the
+// single remedy seam. Before the unification the arg rung rode Detail["fix"] while
+// the reversibility hint was buried inside the confirm recipe — two Meta keys, two
+// renderers, so a maintainer wiring a redirect for one rung never discovered the
+// other. This is the witness that both now surface through the same field+renderer.
+func TestRemedySeamUnifiesBothRungs(t *testing.T) {
+	// Arg-predicate deny: its rule's fix rides Meta["fix"].
+	argRule := renderVerdict(abi.Verdict{
+		Kind:   abi.VerdictDeny,
+		Reason: abi.ReasonPolicyBlock,
+		By:     "monitor",
+		Meta:   map[string]string{"fix": "use fak issue create"},
+	}, nil)
+	if argRule.Detail["remedy"] != "use fak issue create" {
+		t.Fatalf("arg-rule sanctioned alternative not on the unified remedy field: %+v", argRule.Detail)
+	}
+
+	// Reversibility escalation: its preview dry-run hint rides Meta["dry_run_hint"].
+	claim := `{"class":"outward-facing","preview":"outward-facing command: git push origin main","confirm_token":"fak-0011223344556677","dry_run_hint":"try git push --dry-run first"}`
+	rev := renderVerdict(abi.Verdict{
+		Kind:    abi.VerdictRequireWitness,
+		By:      "monitor/reversibility",
+		Payload: abi.WitnessPayload{Claim: claim},
+		Meta:    map[string]string{"dry_run_hint": "try git push --dry-run first"},
+	}, nil)
+	if rev.Detail["remedy"] != "try git push --dry-run first" {
+		t.Fatalf("reversibility sanctioned alternative not on the unified remedy field: %+v", rev.Detail)
+	}
+
+	// The SAME renderer surfaces both — there is no rung-specific note for the
+	// "here is the sanctioned alternative" sentence anymore.
+	argAdj := ToolAdjudication{Tool: "Bash", Admitted: false, Verdict: argRule}
+	revAdj := ToolAdjudication{Tool: "PowerShell", Admitted: false, Verdict: rev}
+	if got := remedyNote(argAdj); got != "sanctioned alternative: use fak issue create" {
+		t.Fatalf("remedyNote(arg-rule) = %q", got)
+	}
+	if got := remedyNote(revAdj); got != "sanctioned alternative: try git push --dry-run first" {
+		t.Fatalf("remedyNote(reversibility) = %q", got)
+	}
+
+	// The reversibility recipe keeps ONLY the distinct preview+token recipe — the
+	// sanctioned-alternative sentence no longer lives inside it (it rides the seam).
+	recipe := reversibilityGateNote(revAdj)
+	if !strings.Contains(recipe, "fak-0011223344556677") {
+		t.Fatalf("recipe dropped its confirm token: %q", recipe)
+	}
+	if strings.Contains(recipe, "try git push --dry-run first") {
+		t.Fatalf("recipe still embeds the alternative (it must ride the remedy seam): %q", recipe)
+	}
+}
 
 // reversibilityRefusal builds a ToolAdjudication shaped exactly as the wire
 // produces one for the reversibility rung: renderVerdict maps the adjudicator's
 // RequireWitness to Kind=REQUIRE_WITNESS with an empty Reason, Disposition
-// ESCALATE, and the full preview envelope JSON in Detail["claim"].
+// ESCALATE, the full preview envelope JSON in Detail["claim"], and the preview
+// dry-run hint lifted onto the unified Detail["remedy"] seam (#2749).
 func reversibilityRefusal() ToolAdjudication {
 	claim := `{"class":"outward-facing","preview":"outward-facing command: git push origin main","confirm_token":"fak-0011223344556677","dry_run_hint":"try git push --dry-run first"}`
 	return ToolAdjudication{
@@ -18,7 +75,7 @@ func reversibilityRefusal() ToolAdjudication {
 			Kind:        "REQUIRE_WITNESS",
 			By:          "monitor/reversibility",
 			Disposition: "ESCALATE",
-			Detail:      map[string]string{"claim": claim},
+			Detail:      map[string]string{"claim": claim, "remedy": "try git push --dry-run first"},
 		},
 	}
 }

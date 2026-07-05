@@ -52,7 +52,6 @@ var tier = map[string]int{
 	"apihostprobe":         1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
 	"accountprobe":         1, // pure account-probe ledger reader (probe_ledger.jsonl): last-probe-by-account + probe recency for the roster fresh-probe fold; stdlib-only, imports nothing internal, off the hot path.
 	"dispatchconservation": 1, // pure worker-unit conservation fold over .dispatch-runs artifacts; stdlib-only, off the hot path.
-	"dispatchstatus":       1, // pure dispatch lease-status classifier (refs/fak/locks records -> LIVE/EXPIRED + tree-overlap candidate-blocking) ported from tools/dispatch_status.py; stdlib-only, imports nothing internal, off the hot path.
 	"eveparity":            1, // CI-runnable Eve-eval parity witness (#2605): pure in-repo eval-semantics evaluator (Evaluate/Compare keep the hard/soft gate distinction) proving fak-routed == raw; production code stdlib-only, off the hot path.
 	"benchcatalog":         1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
 	"clonescan":            1, // pure authoring-time clone QUERY: the forward half of the code-slop clone detector (normalized Go token-window engine) as an importable library — "does a token-similar block already exist?" before the code is written; stdlib-only, no internal import, off the hot path.
@@ -143,7 +142,7 @@ var tier = map[string]int{
 	"cachevaluereport": 2, // weekly cache-value TREND roll-up (epic #1301 rung A, Track 1): pure Fold over cachevalueledger(1) into a by-week realized-reuse trend, #1066-fenced; imports cachevalueledger(1)+stdlib only, off the hot path.
 	"auditusage":       2, // cross-session audit usage rollup (#1612): folds sink rows from journal(2), loopmgr(1), dispatchaudit(1), and usage ledgers into one CLI report; off the hot path.
 	"harvest":          2, "shipgate": 2, "policy": 2, "modelengine": 2, "ratelimit": 2,
-	"journal": 2, "gitgate": 2, "safecommit": 2, "spec": 2, // spec: the ProvisionalSink/OpsSpec speculation mechanism; composes model+polymodel under abi (off-defconfig, gated by FAK_POLYMODEL).
+	"journal": 2, "gitgate": 2, "safecommit": 2,
 	"storedrv": 2, // content-addressed storage ROUTER: composes the blob/blobfs/blobhttp (tier-1) drivers into one namespace; the abi RegionBackend only when FAK_STORE opts in.
 	"capindex": 2, // protocol-blind capability keystone (#1104 C1): CapRef/Capability/Index/Resolver + skill resolver, imports only abi(0). The gateway-backed MCP/A2A resolvers live in capindexgw(4) so the core stays importable by the tier-3 skill-loader (ctxresidency/ctxmmu, #1106).
 
@@ -185,7 +184,6 @@ var tier = map[string]int{
 	"region":           2, // typed one-sided shared Ref window: adjudicated Put/Get/Accumulate over abi.Resolver with ScopeFleet ceiling and vDSO coherence bumps.
 	"snapshot":         3, // uniform DUMP/RESTORE seam over any primitive (turn/tool/session/fleet/rsi): a sha256-integrity envelope (Marshal/Parse over any body) + a ladder registry + typed codecs for trace(trajectory) and fleet(session.Table). Imports session(1)+trajectory(3); off the hot path.
 	"rungobs":          2, // passive rung-decision distribution counter: an abi.Emitter (subscribed to EvDecide/EvDeny/EvVDSOHit) that re-folds each call's chain off the hot path via kernel.FoldExplain and bumps a per-(rung,kind,reason) histogram. Mechanism: imports kernel(2)+abi(0); runs synchronously in emit but adds 0 adjudication rungs and never touches the verdict or Counters.
-	"sharedtask":       2, // in-memory collaborative task-record fold: user patches, conflicts, held verdicts, event rows, scoped views, and a2achan live subscriptions. Mechanism, off the hot path.
 	"vcachegov":        2, // vCache M5 Governor (#720): the steady-state policy over the vCache warm set â€” pin/lazy/evict (Â§5.4), rate-limit warm budget (Â§5.5), cross-shard affinity routing + rehash/burst guards (Â§9/D3), and the Law-D4 secret classifier. Classifier itself: imports cachemeta(1)+stdlib. The live loop (loop.go, journal.go, quality.go, #1492) additionally imports vcacheqa(2) from its own qa_test.go only; loop.go itself stays cachemeta(1)+stdlib. Blank-imported by internal/registrations (env-gated by FAK_VCACHE_GOVERNOR / --vcache-governor, default OFF) -- no longer "NOT registered".
 	"vcachechain":      2, // vCache M4 chains & recall (#719): prefix DAG + topological replay (send-one-then-fan) + 20-block breakpoints + the Â§11.0 cost-gated rebuild (refuses single-unit chain rebuilds, allows amortized fan-out). Pure decision layer: imports cachemeta(1)+vcachegov(2)+stdlib, off the hot path (NOT registered; gated OFF by default).
 	"vcachecal":        2, // vCache M1 observe & calibrate (#716): the warmth-belief estimator (Â§7) over cachemeta.Lifecycle at TierProvider + the offline probe harness that fits T/M_min/r (Law D2) + the LRU probe budget (observer-perturbs-state) + the Zipf-s concentration gate (Â§5.2) + the false-warm/false-cold prediction-error report. Pure decision layer: imports cachemeta(1)+stdlib only, off the hot path (NOT registered; observe-only â€” no warming in M1).
@@ -631,13 +629,9 @@ func selfRegisters(t *testing.T, internal, pkg string) bool {
 // defconfig (internal/registrations). `agent` registers the "localtools" engine from its
 // init() and is pulled in directly by cmd/fak, never blank-imported. `gateway` registers
 // a per-Server metrics observer from New(), and the server itself is wired by cmd/fak.
-// `spec` (the speculation ProvisionalSink + OpsSpec ops) registers ONLY from its
-// Enabled()-gated Install(), never from init() and never from the defconfig â€” that
-// off-defconfig absence IS the strongest of its two safety gates (the kernel never even
-// links the poly-model lane until a rung flips FAK_POLYMODEL and calls Install; epic
-// #529). A leaf added here is a conscious "wired elsewhere" decision, the same review
+// A leaf added here is a conscious "wired elsewhere" decision, the same review
 // chokepoint as the tier table.
-var regOffList = map[string]bool{"agent": true, "gateway": true, "spec": true}
+var regOffList = map[string]bool{"agent": true, "gateway": true}
 
 // TestRequestPathLeavesRegistered closes the registration-completeness hole: a leaf whose
 // production init() calls abi.Register* MUST be either blank-imported by the defconfig

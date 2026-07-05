@@ -63,15 +63,22 @@ func renderVerdict(v abi.Verdict, resultMeta map[string]string) WireVerdict {
 	if wp, ok := v.Payload.(abi.WitnessPayload); ok && wp.Claim != "" {
 		w.Detail = map[string]string{"claim": wp.Claim}
 	}
-	// The rule's sanctioned alternative (manifest arg_rules[].fix, stamped on the
-	// verdict Meta by the adjudicator) rides to every wire so a refusal can be
-	// rendered as a redirect, not a dead end. Same disclosure budget as the claim:
-	// static operator-authored manifest text, never the arg value.
-	if fix := v.Meta["fix"]; fix != "" {
+	// The refusal's sanctioned alternative rides to every wire through ONE field
+	// (Detail["remedy"]) so a refusal renders as a redirect, not a dead end — and a
+	// single renderer (remedyNote) surfaces it regardless of which rung refused. Both
+	// rungs feed the one seam (#2749): the arg-predicate rung stamps Meta["fix"]
+	// (manifest arg_rules[].fix), the reversibility rung stamps Meta["dry_run_hint"]
+	// (its preview affordance). Same disclosure budget as the claim: static
+	// operator-authored text, never the arg value.
+	remedy := v.Meta["fix"]
+	if remedy == "" {
+		remedy = v.Meta["dry_run_hint"]
+	}
+	if remedy != "" {
 		if w.Detail == nil {
 			w.Detail = map[string]string{}
 		}
-		w.Detail["fix"] = fix
+		w.Detail["remedy"] = remedy
 	}
 
 	// A result quarantined by the context-MMU at admit-time overrides the (Allow)

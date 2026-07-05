@@ -39,7 +39,6 @@ func reversibilityGateNote(a ToolAdjudication) string {
 		Class        string `json:"class"`
 		Preview      string `json:"preview"`
 		ConfirmToken string `json:"confirm_token"`
-		DryRunHint   string `json:"dry_run_hint"`
 	}
 	if err := json.Unmarshal([]byte(a.Verdict.Detail["claim"]), &env); err != nil || env.ConfirmToken == "" {
 		return ""
@@ -53,12 +52,11 @@ func reversibilityGateNote(a ToolAdjudication) string {
 	}
 	b.WriteString(`. If this call is deliberate, re-propose it byte-identical — same tool, every other argument unchanged, since any edit issues a different token — with "_fak_confirm":"`)
 	b.WriteString(env.ConfirmToken)
-	b.WriteString(`" added to the tool input (the kernel verifies and strips the key before dispatch, so the tool never sees it)`)
-	if env.DryRunHint != "" {
-		b.WriteString("; to preview instead, ")
-		b.WriteString(env.DryRunHint)
-	}
-	b.WriteString(".")
+	b.WriteString(`" added to the tool input (the kernel verifies and strips the key before dispatch, so the tool never sees it).`)
+	// The "to preview instead, <dry_run_hint>" sentence is NOT rendered here: the
+	// hint is the reversibility rung's sanctioned alternative and flows through the
+	// unified remedy seam (remedyNote) exactly like the arg-rule fix (#2749). This
+	// note keeps ONLY the distinct preview+confirm-token recipe.
 	return b.String()
 }
 
@@ -73,16 +71,19 @@ func reasonOrKind(v WireVerdict) string {
 	return v.Kind
 }
 
-// remedyNote renders the refusing rule's sanctioned alternative
-// (arg_rules[].fix, carried as WireVerdict.Detail["fix"]) so the refusal and
-// the recommended path arrive in the same breath — "great, it refused the bad
-// call, but then WHAT?" answered in-band. Empty when the rule declares no fix.
-// The generic "choose an allowed alternative" trailer stays; this names the
-// alternative for rules whose author declared one.
+// remedyNote renders the refusing rung's sanctioned alternative — the single
+// unified remedy seam (#2749). Both rungs feed it through one field,
+// WireVerdict.Detail["remedy"] (renderVerdict folds the arg-predicate rung's
+// arg_rules[].fix and the reversibility rung's preview dry-run hint onto it), so
+// the refusal and the recommended path arrive in the same breath — "great, it
+// refused the bad call, but then WHAT?" answered in-band. One field, one renderer:
+// a maintainer wiring a redirect for either rung reuses the same plumbing. Empty
+// when the rung declares no alternative; the generic "choose an allowed
+// alternative" trailer still covers that case.
 func remedyNote(a ToolAdjudication) string {
-	fix := a.Verdict.Detail["fix"]
-	if fix == "" {
+	remedy := a.Verdict.Detail["remedy"]
+	if remedy == "" {
 		return ""
 	}
-	return "sanctioned alternative: " + fix
+	return "sanctioned alternative: " + remedy
 }

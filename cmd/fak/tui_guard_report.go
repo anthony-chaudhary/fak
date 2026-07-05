@@ -969,10 +969,6 @@ func tuiGuardTokenVisual(token string) tuiGuardVisual {
 	}
 }
 
-func renderTUIGuard(report tuiGuardReport, width int) string {
-	return renderTUIGuardStyled(report, width, tuiGuardRenderStyle{})
-}
-
 func renderTUIGuardStyled(report tuiGuardReport, width int, style tuiGuardRenderStyle) string {
 	var b strings.Builder
 	statusVisual := tuiGuardHeadlineVisual(report.Status)

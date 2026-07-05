@@ -422,10 +422,6 @@ func (s *NativeScheduler) costAwarePreemptibleLaneLocked() int {
 	return laneIndexes[victim]
 }
 
-func (s *NativeScheduler) laneKVCostStatsLocked(ln *schedLane) (compute.KVSpanStats, bool) {
-	return s.laneKVCostStatsLockedAt(ln, time.Now())
-}
-
 func (s *NativeScheduler) laneKVCostStatsLockedAt(ln *schedLane, now time.Time) (compute.KVSpanStats, bool) {
 	if ln == nil || ln.terminal || ln.ctx.Err() != nil || ln.sess == nil {
 		return compute.KVSpanStats{}, false
