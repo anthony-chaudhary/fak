@@ -747,7 +747,7 @@ func runVCacheContextWitness(stdout, stderr io.Writer, argv []string) int {
 	}()
 
 	var replay bytes.Buffer
-	replayExit := runGuardReplay(strings.TrimSpace(*fixture), strings.TrimSpace(*wire), "", &replay)
+	replayExit := runGuardReplay(strings.TrimSpace(*fixture), strings.TrimSpace(*wire), "", "", false, &replay)
 
 	var scoreOut, scoreErr bytes.Buffer
 	scoreExit := runVCache(&scoreOut, &scoreErr, []string{"score", "--json", "--snapshot", "off", "--context-snapshot", snapPath, "--kernel-ledger", "off"})

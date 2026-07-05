@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -88,7 +89,7 @@ func TestGuardReplayRunsCleanOnBothWires(t *testing.T) {
 		t.Run(wire, func(t *testing.T) {
 			t.Cleanup(journal.ResetActiveForTest)
 			var sb strings.Builder
-			code := runGuardReplay(guardTraceFixturePath, wire, "", &sb)
+			code := runGuardReplay(guardTraceFixturePath, wire, "", "", false, &sb)
 			out := sb.String()
 			if code != 0 {
 				t.Fatalf("runGuardReplay(%s) exit = %d, want 0\n%s", wire, code, out)
@@ -98,6 +99,7 @@ func TestGuardReplayRunsCleanOnBothWires(t *testing.T) {
 				"DENY[POLICY_BLOCK]",
 				"kernel decision(s)",
 				"journal chain verified",
+				"fak-guard-replay-",
 				"every call landed on its expected disposition",
 			} {
 				if !strings.Contains(out, want) {
@@ -122,7 +124,7 @@ func TestGuardReplayWritesExplicitContextSnapshot(t *testing.T) {
 	t.Setenv(vcachesnapshot.EnvPath, snapPath)
 
 	var sb strings.Builder
-	if code := runGuardReplay(guardContextTraceFixturePath, "openai", "", &sb); code != 0 {
+	if code := runGuardReplay(guardContextTraceFixturePath, "openai", "", "", false, &sb); code != 0 {
 		t.Fatalf("runGuardReplay exit = %d, want 0\n%s", code, sb.String())
 	}
 	if !strings.Contains(sb.String(), "wrote vcache snapshot") {
@@ -155,11 +157,33 @@ func TestGuardReplayWritesExplicitContextSnapshot(t *testing.T) {
 	}
 }
 
+func TestGuardReplayHonorsExplicitAuditPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(journal.ResetActiveForTest)
+	auditPath := filepath.Join(dir, "replay-audit.jsonl")
+
+	var sb strings.Builder
+	code := runGuardReplay(guardTraceFixturePath, "openai", "", auditPath, false, &sb)
+	out := sb.String()
+	if code != 0 {
+		t.Fatalf("runGuardReplay exit = %d, want 0\n%s", code, out)
+	}
+	if _, err := os.Stat(auditPath); err != nil {
+		t.Fatalf("explicit audit path was not created: %v\n%s", err, out)
+	}
+	if rows, err := journal.Verify(auditPath); err != nil || rows == 0 {
+		t.Fatalf("explicit audit path did not verify: rows=%d err=%v\n%s", rows, err, out)
+	}
+	if !strings.Contains(out, auditPath) {
+		t.Fatalf("replay output did not name explicit audit path %q:\n%s", auditPath, out)
+	}
+}
+
 // TestGuardReplayUnknownWireRejected proves a bad --replay-wire fails loud (exit 2) rather
 // than silently defaulting.
 func TestGuardReplayUnknownWireRejected(t *testing.T) {
 	var sb strings.Builder
-	if code := runGuardReplay(guardTraceFixturePath, "gemini", "", &sb); code != 2 {
+	if code := runGuardReplay(guardTraceFixturePath, "gemini", "", "", false, &sb); code != 2 {
 		t.Fatalf("unknown wire exit = %d, want 2\n%s", code, sb.String())
 	}
 }

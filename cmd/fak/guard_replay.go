@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
@@ -31,7 +32,7 @@ import (
 // economy and the journal rows recorded. Returns a process exit code: 0 when every call
 // landed on the disposition the fixture declared, 1 otherwise (so it doubles as a CI demo
 // check), 2 on a setup error.
-func runGuardReplay(fixturePath, wire, policyPath string, out io.Writer) int {
+func runGuardReplay(fixturePath, wire, policyPath, auditPath string, noAudit bool, out io.Writer) int {
 	provider := normalizeReplayWire(wire)
 	if provider == "" {
 		fmt.Fprintf(out, "fak guard --replay-trace: unknown --replay-wire %q (want anthropic|openai)\n", wire)
@@ -65,13 +66,23 @@ func runGuardReplay(fixturePath, wire, policyPath string, out io.Writer) int {
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)
 
-	// Turn the durable, hash-chained decision journal ON for the replay (a temp file), so
-	// the report can show the rows recorded and prove the chain verifies — the same trail
-	// `fak guard` writes for a live session.
-	jpath := filepath.Join(os.TempDir(), fmt.Sprintf("fak-guard-replay-%d.jsonl", time.Now().UnixNano()))
-	j, jerr := journal.Enable(jpath)
-	if jerr != nil {
-		fmt.Fprintf(out, "fak guard --replay-trace: audit journal disabled: %v\n", jerr)
+	// Turn the durable, hash-chained decision journal ON for the replay, so the report can
+	// show the rows recorded and prove the chain verifies. Replay keeps its historical temp
+	// path by default, but an operator-supplied --audit path must be honored exactly.
+	var j *journal.Journal
+	var jerr error
+	jpath, auditOptedOut, auditRequested := guardReplayAuditPlan(auditPath, noAudit)
+	if !auditOptedOut {
+		j, jerr = journal.Enable(jpath)
+		if jerr != nil {
+			fmt.Fprintf(out, "fak guard --replay-trace: audit journal disabled: %v\n", jerr)
+			if auditRequested {
+				return 2
+			}
+		} else if auditRequested && j != nil && j.Path() != "" && !sameReplayAuditPath(j.Path(), jpath) {
+			fmt.Fprintf(out, "fak guard --replay-trace: requested --audit %s but active journal is %s\n", jpath, j.Path())
+			return 2
+		}
 	}
 
 	const model = "fak-guard-replay:model"
@@ -270,6 +281,27 @@ func normalizeReplayWire(wire string) string {
 	default:
 		return ""
 	}
+}
+
+func guardReplayAuditPlan(auditPath string, noAudit bool) (path string, optedOut bool, requested bool) {
+	p := strings.TrimSpace(auditPath)
+	if noAudit || strings.EqualFold(p, "off") {
+		return "", true, false
+	}
+	if p != "" {
+		return p, false, true
+	}
+	return filepath.Join(os.TempDir(), fmt.Sprintf("fak-guard-replay-%d.jsonl", time.Now().UnixNano())), false, false
+}
+
+func sameReplayAuditPath(a, b string) bool {
+	if aa, err := filepath.Abs(a); err == nil {
+		a = aa
+	}
+	if bb, err := filepath.Abs(b); err == nil {
+		b = bb
+	}
+	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
 }
 
 // replayUpstreamBase appends /v1 for the OpenAI wire (its adapter posts <base>/chat/completions)

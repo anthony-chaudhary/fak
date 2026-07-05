@@ -293,7 +293,7 @@ func cmdGuard(argv []string) {
 	// journal + summary as the live path (see guard_replay.go), so what it shows is what
 	// a real session would do.
 	if *replayTrace != "" {
-		os.Exit(runGuardReplay(*replayTrace, *replayWire, *policyPath, os.Stdout))
+		os.Exit(runGuardReplay(*replayTrace, *replayWire, *policyPath, *auditPath, *noAudit, os.Stdout))
 		return
 	}
 
