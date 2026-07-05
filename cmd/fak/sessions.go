@@ -10,6 +10,8 @@ package main
 //	fak sessions discover [--project SUB] [--root DIR ...] [--since-days N]   list the transcripts found
 //	fak sessions score    [--project SUB] [--root DIR ...] [--max N] [--corpus OUT] [--json]
 //	                                                                          fold + witness + score the corpus
+//	fak sessions codex-loop [--session ID | --path FILE] [--codex-home DIR] [--json]
+//	                                                                          diagnose one Codex JSONL for repeated tool loops
 //
 // It reads transcripts and shells `git` (read-only) off any hot path; it writes
 // nothing unless --corpus is given (a scrubbed JSONL corpus, only structured signal,
@@ -50,6 +52,8 @@ func runSessions(stdout, stderr io.Writer, argv []string) int {
 		return sessionsScore(stdout, stderr, rest)
 	case "learn":
 		return sessionsLearn(stdout, stderr, rest)
+	case "codex-loop":
+		return sessionsCodexLoop(stdout, stderr, rest)
 	case "-h", "--help", "help":
 		sessionsUsage(stdout)
 		return 0
@@ -67,6 +71,7 @@ usage:
   fak sessions discover [--project SUB] [--root DIR ...] [--since-days N]
   fak sessions score    [--project SUB] [--root DIR ...] [--max N] [--corpus OUT] [--json]
   fak sessions learn    [--corpus IN] [--project SUB] [--root DIR ...] [--max N] [--json]
+  fak sessions codex-loop [--session ID | --path FILE] [--codex-home DIR] [--json]
 
 Start here:
   fak sessions score        fold THIS host's fak sessions, witness their commits, and
@@ -76,6 +81,8 @@ Start here:
                             waste-side (stopped) sessions and surface which behaviors
                             separate them. Reads a committed corpus with --corpus, else
                             folds this host's sessions live.
+  fak sessions codex-loop   point at a Codex TUI JSONL session and expose repeated tool
+                            outputs, token burn, livelock notices, and abort/status.
 `)
 }
 
