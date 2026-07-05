@@ -51,7 +51,7 @@ func TestRefusalNoteSeamSurfacesNewKindWithoutCallSiteEdit(t *testing.T) {
 // regression.
 func TestRefusalNoteSeamPreservesOrderAndConfirmRecipe(t *testing.T) {
 	adj := reversibilityRefusal()
-	adj.Verdict.Detail["fix"] = "run git push --dry-run"
+	adj.Verdict.Detail["remedy"] = "run git push --dry-run"
 	notes, recipe := renderRefusalNotes(adj)
 	if !recipe {
 		t.Fatalf("reversibility refusal did not flag a confirm recipe: %q", notes)
