@@ -187,6 +187,14 @@ class VerdictTest(unittest.TestCase):
         self.assertTrue(p["ok"])
         self.assertEqual(p["verdict"], "BLOCKED_ON_ACCOUNT")
 
+    def test_blocked_on_seat_is_a_healthy_steady_state(self) -> None:
+        mod = load()
+        p = build(mod, pre=pre("REFUSE_NO_SEAT"))
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "BLOCKED_ON_SEAT")
+        self.assertTrue(any("seat free" in r for r in p["reasons"]))
+        self.assertFalse(any("safe to spawn" in r for r in p["reasons"]))
+
     def test_inspect_fails_the_card(self) -> None:
         mod = load()
         p = build(mod, pre=pre("REFUSE_INSPECT"))

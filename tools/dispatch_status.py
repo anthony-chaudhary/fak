@@ -2171,6 +2171,10 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         ok = True
         verdict = "BLOCKED_ON_ACCOUNT"
         reasons.append("no worker account free right now (switcher will resume when one frees)")
+    elif pre_verdict == "REFUSE_NO_SEAT":
+        ok = True
+        verdict = "BLOCKED_ON_SEAT"
+        reasons.append("no dispatch seat free right now (seat pool will resume when one frees)")
     elif pre_verdict == "REFUSE_AT_CAP":
         ok = True
         verdict = "AT_CAP"
