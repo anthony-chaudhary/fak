@@ -652,6 +652,21 @@ summary  = "A `fak knownbad claim` lost the fixer election: a different agent al
 fix      = "Park behind the named fixer (the W4 scope-hold points held issues at them) and wait for the witness-gated auto-release (W6); do not open a competing fix. Floor: `fak knownbad claim <signature>` over the exclusive-lease seam (internal/leaseref)."
 see_also = ["internal/knownbad", "fak knownbad claim", "internal/leaseref", "docs/blast-radius-containment-cohort.md"]
 
+# Blast-radius containment W6 (#2718, epic #2712): `fak knownbad resolve` refuses to close a
+# signature that has NO independent witness of the fix. Clearing a known-bad on the fixer's
+# self-report ("I fixed it") is exactly the failure this repo's witness discipline forbids --
+# an unproven claim must not release the parked fleet. So resolve runs the witness FIRST (a
+# green `go test`/`fak affected` over the broken tree, and/or a `dos verify` binding the
+# fixer's commit to the signature's tree); a red or missing witness leaves the signature open
+# and refuses with this token, naming the witness that failed. This is what makes the W4
+# scope-hold safe to enter: parking is guaranteed to end on real evidence, never a claim.
+[reasons.KNOWN_BAD_NOT_WITNESSED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A `fak knownbad resolve` was refused because the fix is not witnessed: the green test over the broken tree (and/or the `dos verify` binding the fixer's commit) did not pass, so the signature stays open and the parked fleet is NOT released. A self-report never clears a known-bad -- only an independent green/verify does."
+fix      = "Land the real fix, then re-run `fak knownbad resolve <signature>` so the witness (a green `fak affected`/`go test` over the broken tree, or a `dos verify` on the fixer commit) passes; only a witnessed green flips open -> resolved and drops the fixer's lease. Floor: `fak knownbad resolve <signature> --witness tests|verify` over the internal/knownbad ledger."
+see_also = ["internal/knownbad", "fak knownbad resolve", "internal/affectedtests", "docs/blast-radius-containment-cohort.md"]
+
 [reasons.GATE_LATENCY_REGRESSION]
 category = "OPERATOR_GATE"
 refusal  = true

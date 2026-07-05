@@ -21,8 +21,12 @@
 //
 // Out of scope for this spine (each is a separate epic child): cross-trace
 // auto-promotion (W2), the blast-radius agent set (W3), dispatcher hold wiring
-// (W4), fixer election (W5), auto-release (W6), the operator card (W7), and any
-// TTL/GC policy beyond the plain unexpired check here (W8).
+// (W4), fixer election (W5), the operator card (W7), and any
+// TTL/GC policy beyond the plain unexpired check here (W8). The witness-gated
+// auto-release (W6, #2718) folds through this core: WithResolve stamps a
+// superseding resolved row, and Match / FindLatestLive read a signature's state as
+// its LATEST row (append-to-supersede) — so a resolved (or expired) latest row
+// retracts the signature even though its earlier open rows still sit on the ledger.
 package knownbad
 
 import (
@@ -43,6 +47,16 @@ const Schema = "fak.known-bad.v1"
 // auto-release) closes a signature by appending a superseding row; the plain
 // liveness check here only treats "open" (case-insensitive) as active.
 const StatusOpen = "open"
+
+// StatusResolved is the terminal status W6 (auto-release, #2718) stamps onto a
+// superseding row to close a signature on a WITNESSED fix. A resolved row is never
+// Live (Live is true only for "open"), so the dispatcher scope-hold (W4), the
+// fixer-election lease consumer (W5), and the match primitive all drop it the
+// moment the row is appended — "releasing the hold is a ledger status flip the
+// dispatcher already re-reads each tick". The witness kind (green tests, dos
+// verify) is carried in Witness; an empty Witness means the resolve was not
+// evidence-backed and must be refused by the shell.
+const StatusResolved = "resolved"
 
 // DefaultLedgerRel is the repo-relative, fleet-visible ledger the cmd shell
 // appends to by default — the same docs/nightrun/*.jsonl idiom the other fak
@@ -75,6 +89,22 @@ type Record struct {
 	// ClaimedAtUnix is the unix-seconds instant the claim row was appended (0 when
 	// unclaimed) — the companion to ClaimedBy.
 	ClaimedAtUnix int64 `json:"claimed_at_unix,omitempty"`
+	// ResolvedBy names the agent (or operator) that closed this signature on a
+	// WITNESSED fix (W6, #2718). It is bookkeeping the operator card (W7) reads to
+	// point a human at who released the fleet — the witness gate itself is enforced
+	// by the cmd shell (it runs the green/verify BEFORE appending this row), never by
+	// this stamp. Empty on an open/claimed row; omitempty keeps a pre-W6 row
+	// byte-identical.
+	ResolvedBy string `json:"resolved_by,omitempty"`
+	// ResolvedAtUnix is the unix-seconds instant the resolve row was appended (0 when
+	// unresolved) — the companion to ResolvedBy.
+	ResolvedAtUnix int64 `json:"resolved_at_unix,omitempty"`
+	// Witness names the independent evidence the fix landed: "tests" for a green
+	// `fak affected`/`go test` over the broken tree, "verify" for a `dos verify`
+	// binding the fixer's commit to the signature's tree. Empty on a non-resolved
+	// row; the shell refuses to append a resolved row with an empty Witness (that
+	// would be a self-report release, the exact failure W6 exists to forbid).
+	Witness string `json:"witness,omitempty"`
 }
 
 // Query is a match request: the tree globs a worker (or the dispatcher) is about
@@ -257,12 +287,32 @@ func (r Record) Live(nowUnix int64) bool {
 }
 
 // Match folds the ledger to the live records whose tree globs intersect the
-// query's, preserving ledger order. Pure: nowUnix is supplied as data, so the
-// same (records, query, now) always yields the same matches. An empty result
+// query's, preserving first-seen ledger order. Pure: nowUnix is supplied as data,
+// so the same (records, query, now) always yields the same matches. An empty result
 // means the requested tree is clear of every live known-bad signature.
+//
+// SUPERSEDE-AWARE (the invariant W6 depends on): a signature's state is its LATEST
+// row (append-to-supersede), not each row independently. So a signature whose most
+// recent row is resolved/expired does NOT match even though its earlier open rows
+// are still on the ledger — otherwise a resolve could never clear the hold, since
+// the original open row would keep matching forever. Collapsing to the latest row
+// per signature before the liveness/intersection test is what makes WithResolve's
+// "supersedes an earlier row" actually retract the hold.
 func Match(records []Record, q Query, nowUnix int64) []Record {
-	var out []Record
+	// Latest row per signature (last write wins), and the first-seen order so the
+	// result is deterministic and stable against the earlier per-row behavior.
+	latest := make(map[string]Record, len(records))
+	order := make([]string, 0, len(records))
 	for _, rec := range records {
+		sig := strings.TrimSpace(rec.Signature)
+		if _, seen := latest[sig]; !seen {
+			order = append(order, sig)
+		}
+		latest[sig] = rec
+	}
+	var out []Record
+	for _, sig := range order {
+		rec := latest[sig]
 		if !rec.Live(nowUnix) {
 			continue
 		}
@@ -275,6 +325,32 @@ func Match(records []Record, q Query, nowUnix int64) []Record {
 
 // Claimed reports whether a row records an elected fixer (a non-empty ClaimedBy).
 func (r Record) Claimed() bool { return strings.TrimSpace(r.ClaimedBy) != "" }
+
+// Resolved reports whether a row closes a signature on a witnessed fix (status
+// "resolved", case-insensitive). A resolved row is the terminal state W6 stamps
+// onto a superseding row; Live is false for it, so the dispatcher hold and the
+// match primitive both drop it.
+func (r Record) Resolved() bool {
+	return strings.EqualFold(strings.TrimSpace(r.Status), StatusResolved)
+}
+
+// WithResolve returns a copy of r stamped as resolved with the resolver, the
+// resolve instant, and the independent witness kind that gated the release. The
+// signature/tree/reason are left untouched: a resolve SUPERSEDES an earlier row
+// for the same signature via the append-to-supersede idiom, it does not mutate
+// the failure it points at. The caller MUST have run the witness (green tests /
+// dos verify) BEFORE appending the returned row — this method records the
+// evidence-backed release, it does not check the evidence.
+func (r Record) WithResolve(resolvedBy string, resolvedAtUnix int64, witness string) Record {
+	out := r
+	out.Status = StatusResolved
+	out.ResolvedBy = strings.TrimSpace(resolvedBy)
+	out.ResolvedAtUnix = resolvedAtUnix
+	out.Witness = strings.TrimSpace(witness)
+	// The claim bookkeeping is preserved so the operator card (W7) can still name
+	// the fixer that owned the fix, even after the release.
+	return out
+}
 
 // WithClaim returns a copy of r stamped with the elected fixer and the claim
 // instant, leaving the signature/tree/reason untouched: a claim SUPERSEDES an
@@ -290,23 +366,29 @@ func (r Record) WithClaim(claimant string, claimedAtUnix int64) Record {
 	return out
 }
 
-// FindLatestLive returns the most recent LIVE record carrying signature and whether
-// one was found. Later rows supersede earlier ones (the append-to-supersede idiom),
-// so the last live row is the current state of that signature — the tree to lease
-// over and whether a claim already stands. A signature with no live row cannot be
-// claimed: it was never recorded, or it has been resolved/expired, so there is no
-// live failure to elect a fixer for.
+// FindLatestLive returns the current LIVE record carrying signature and whether one
+// was found. Later rows supersede earlier ones (the append-to-supersede idiom), so
+// the LATEST row is the signature's current state — the tree to lease over and
+// whether a claim already stands. The latest row must itself be live: a signature
+// whose most recent row is resolved/expired has no live failure to elect a fixer for
+// (or to resolve again), EVEN THOUGH its earlier open rows are still on the ledger.
+// Checking "the latest row, is it live" rather than "the last row that is live" is
+// what makes a resolve/expiry actually retract the signature — the same supersede
+// discipline Match applies.
 func FindLatestLive(records []Record, signature string, nowUnix int64) (Record, bool) {
 	sig := strings.TrimSpace(signature)
-	var found Record
-	ok := false
+	var latest Record
+	seen := false
 	for _, r := range records {
-		if strings.TrimSpace(r.Signature) == sig && r.Live(nowUnix) {
-			found = r
-			ok = true
+		if strings.TrimSpace(r.Signature) == sig {
+			latest = r
+			seen = true
 		}
 	}
-	return found, ok
+	if !seen || !latest.Live(nowUnix) {
+		return Record{}, false
+	}
+	return latest, true
 }
 
 // ParseLedger folds JSONL bytes into records. It is deliberately robust for a

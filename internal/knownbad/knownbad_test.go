@@ -145,6 +145,41 @@ func TestMatch(t *testing.T) {
 	}
 }
 
+// TestMatchSupersedeByResolve is the pure-fold witness of the W6 (#2718) retract
+// invariant: a signature's state is its LATEST row. An open row FOLLOWED BY a
+// resolved row for the SAME signature no longer matches (the resolve superseded the
+// open row), EVEN THOUGH the earlier open row still sits on the ledger — otherwise a
+// resolve could never clear the W4 hold. A disjoint signature that is still open must
+// keep matching, so the supersede is scoped to the one signature, not the ledger.
+func TestMatchSupersedeByResolve(t *testing.T) {
+	const now = int64(1_000_000)
+	open := NewRecord("build", []string{"internal/foo/**"}, "foo broke", "agent-1", "", now-10, 0)
+	other := NewRecord("test", []string{"internal/bar/**"}, "bar broke", "agent-2", "", now-10, 0)
+	// The ledger keeps the original open row AND appends a resolved row for the same
+	// signature — the real append-to-supersede shape a resolve writes.
+	recs := []Record{
+		open,
+		other,
+		open.WithResolve("fixer", now, "tests"),
+	}
+
+	// foo was resolved: its LATEST row is not live, so it no longer matches even though
+	// the earlier open foo row is still present.
+	if got := Match(recs, Query{TreeGlobs: []string{"internal/foo/x.go"}}, now); len(got) != 0 {
+		t.Fatalf("a resolved signature must stop matching, got %+v", got)
+	}
+	if _, live := FindLatestLive(recs, open.Signature, now); live {
+		t.Errorf("FindLatestLive must report a resolved signature as not live")
+	}
+	// bar is untouched and still open: the supersede did not leak across signatures.
+	if got := Match(recs, Query{TreeGlobs: []string{"internal/bar/y.go"}}, now); len(got) != 1 {
+		t.Fatalf("a disjoint still-open signature must keep matching, got %+v", got)
+	}
+	if _, live := FindLatestLive(recs, other.Signature, now); !live {
+		t.Errorf("the untouched open signature must still be live")
+	}
+}
+
 // LeaseID turns a signature into one safe ref segment ("knownbad-<hex>"), strips
 // the "sha256:" scheme (a colon is ref-illegal), is stable for the same signature
 // (two agents derive the same mutex), and returns "" for a signature with no

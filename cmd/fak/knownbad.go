@@ -1,27 +1,38 @@
 package main
 
-// fak knownbad -- the impure shell over the internal/knownbad fold core: the two
-// verbs the blast-radius containment epic (#2712) spine exposes.
+// fak knownbad -- the impure shell over the internal/knownbad fold core: the verbs
+// the blast-radius containment epic (#2712) spine exposes.
 //
-//   fak knownbad record --tree internal/foo/** --reason build --note "..."
-//       appends one fak.known-bad.v1 JSONL row to a fleet-visible ledger.
-//   fak knownbad match  --tree internal/foo/bar.go [--json]
-//       reports whether the requested tree intersects any LIVE (open, unexpired)
-//       known-bad signature, printing the matching record(s). Exit is non-zero
-//       (with --json, matched:false) when nothing matches, so a worker OR the
-//       dispatcher can short-circuit before burning a cycle.
-//   fak knownbad claim <signature> [--by ID] [--ttl S] [--json]
-//       elects EXACTLY ONE fixer for a live signature by acquiring an EXCLUSIVE dos
-//       lease over its broken tree (W5, #2717). The first claimant wins (exit 0) and
-//       is stamped onto the ledger; a second, competing claimant is REFUSED (exit 3,
-//       reason KNOWN_BAD_ALREADY_CLAIMED) and told the current fixer's identity so it
-//       parks behind them instead of racing a second edit to the shared tree.
+//	fak knownbad record --tree internal/foo/** --reason build --note "..."
+//	    appends one fak.known-bad.v1 JSONL row to a fleet-visible ledger.
+//	fak knownbad match  --tree internal/foo/bar.go [--json]
+//	    reports whether the requested tree intersects any LIVE (open, unexpired)
+//	    known-bad signature, printing the matching record(s). Exit is non-zero
+//	    (with --json, matched:false) when nothing matches, so a worker OR the
+//	    dispatcher can short-circuit before burning a cycle.
+//	fak knownbad claim <signature> [--by ID] [--ttl S] [--json]
+//	    elects EXACTLY ONE fixer for a live signature by acquiring an EXCLUSIVE dos
+//	    lease over its broken tree (W5, #2717). The first claimant wins (exit 0) and
+//	    is stamped onto the ledger; a second, competing claimant is REFUSED (exit 3,
+//	    reason KNOWN_BAD_ALREADY_CLAIMED) and told the current fixer's identity so it
+//	    parks behind them instead of racing a second edit to the shared tree.
+//	fak knownbad resolve <signature> [--by ID] [--witness tests|verify] [--json]
+//	    flips a signature open -> resolved ONLY on an independent witness (W6, #2718):
+//	    a green `go test` over the broken tree (--witness tests, default) and/or a
+//	    `dos verify` binding the fixer's commit to the signature's tree
+//	    (--witness verify). No witness -> stays open, refused (exit 3,
+//	    KNOWN_BAD_NOT_WITNESSED) and reported as `not yet` with the missing witness.
+//	    On resolve: appends a superseding resolved row (which clears the W4
+//	    scope-hold on the next dispatch tick) and releases the fixer's exclusive
+//	    lease (W5). The witness is the gate; a self-report never releases the fleet.
 //
 // All impurity lives here: the ledger read/write, the exclusive-lease store (git
 // refs, via internal/leaseref), the clock (Unix seconds, injected as `nowUnix` so
-// runKnownBad is deterministic under test), and flag parsing. The signature
-// derivation, tree intersection, liveness, and the lease-id derivation are the pure
-// core in internal/knownbad.
+// runKnownBad is deterministic under test), the witness exec (go test / dos verify,
+// injectable as knownBadWitness so the resolve verb is deterministic under test),
+// and flag parsing. The signature derivation, tree intersection, liveness, the
+// lease-id derivation, and the resolve-status fold are the pure core in
+// internal/knownbad.
 
 import (
 	"context"
@@ -30,6 +41,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -45,7 +57,7 @@ func cmdKnownBad(argv []string) {
 
 func runKnownBad(stdout, stderr io.Writer, argv []string, nowUnix int64) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "fak knownbad: expected a subcommand (record|match|claim)")
+		fmt.Fprintln(stderr, "fak knownbad: expected a subcommand (record|match|claim|resolve)")
 		return 2
 	}
 	switch argv[0] {
@@ -55,11 +67,13 @@ func runKnownBad(stdout, stderr io.Writer, argv []string, nowUnix int64) int {
 		return runKnownBadMatch(stdout, stderr, argv[1:], nowUnix)
 	case "claim":
 		return runKnownBadClaim(stdout, stderr, argv[1:], nowUnix)
+	case "resolve":
+		return runKnownBadResolve(stdout, stderr, argv[1:], nowUnix)
 	case "-h", "--help", "help":
-		fmt.Fprintln(stderr, "fak knownbad: record | match | claim  (fleet-wide known-bad signature ledger)")
+		fmt.Fprintln(stderr, "fak knownbad: record | match | claim | resolve  (fleet-wide known-bad signature ledger)")
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak knownbad: unknown subcommand %q (want record|match|claim)\n", argv[0])
+		fmt.Fprintf(stderr, "fak knownbad: unknown subcommand %q (want record|match|claim|resolve)\n", argv[0])
 		return 2
 	}
 }
@@ -335,6 +349,275 @@ func runKnownBadClaim(stdout, stderr io.Writer, argv []string, nowUnix int64) in
 	fmt.Fprintf(stdout, "claimed: known-bad %s -> fixer %q owns the fix (exclusive lease %s over %s)\n",
 		sig, claimant, leaseID, strings.Join(claimRec.TreeGlobs, ","))
 	return 0
+}
+
+// reasonKnownBadNotWitnessed is the closed-vocabulary refusal a `resolve` carries when
+// the fix has NO independent witness: the green over the broken tree (and/or the dos
+// verify) did not pass, so the signature stays open and the parked fleet is NOT released.
+// Registered in dos.toml [reasons.KNOWN_BAD_NOT_WITNESSED] so the refusal is
+// `dos check-reason`-verifiable, not free text. Clearing a known-bad on a self-report is
+// the exact failure W6 exists to forbid.
+const reasonKnownBadNotWitnessed = "KNOWN_BAD_NOT_WITNESSED"
+
+// witnessKindTests / witnessKindVerify are the two independent witness kinds the resolve
+// gate accepts, matching the knownbad.Record.Witness vocabulary: a green `go test`/`fak
+// affected` over the broken tree, or a `dos verify` binding the fixer's commit to the
+// signature's tree.
+const (
+	witnessKindTests  = "tests"
+	witnessKindVerify = "verify"
+)
+
+// knownBadWitnessResult is one witness run's outcome: whether the fix is proven (green),
+// a one-line detail for the report, and the kind that graded it. It is the shape the
+// injectable seam returns so the resolve verb never inspects raw exec output.
+type knownBadWitnessResult struct {
+	OK     bool
+	Kind   string
+	Detail string
+}
+
+// knownBadWitness is the INJECTABLE witness seam (swapped in tests, the same idiom as
+// dispatchWitnessCommitAudit): it runs the requested independent witness over the
+// signature's broken tree and reports whether the fix is proven. The default runs a real
+// `go test` (witness=tests) or `dos verify` (witness=verify); a test stub returns a fixed
+// verdict so the resolve verb is deterministic. It is FAIL-CLOSED: any error or non-green
+// outcome reports OK=false, because an unproven witness must never release the fleet.
+var knownBadWitness = runKnownBadWitness
+
+// runKnownBadResolve flips a live known-bad signature open -> resolved ONLY on an
+// independent witness (W6, #2718). The signature is the sole positional argument (flags
+// first). It runs the witness FIRST over the signature's broken tree; a red or missing
+// witness leaves the signature open and refuses (KNOWN_BAD_NOT_WITNESSED), reported as
+// `not yet` with the failing witness. On a green witness it appends a superseding resolved
+// row (which clears the W4 scope-hold on the next dispatch tick — Match drops a resolved
+// row because it is not Live) AND releases the fixer's exclusive lease (W5), so a
+// half-release can never leave the fleet stuck. The witness is the gate; a self-report
+// never releases the fleet.
+func runKnownBadResolve(stdout, stderr io.Writer, argv []string, nowUnix int64) int {
+	fs := flag.NewFlagSet("knownbad resolve", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	by := fs.String("by", "", "resolver id (default: $FAK_AGENT_ID, else hostname)")
+	witnessKind := fs.String("witness", witnessKindTests, "independent witness of the fix: tests (green go test over the broken tree) | verify (dos verify on the fixer commit)")
+	commit := fs.String("commit", "", "fixer commit sha the verify witness binds to the signature's tree (--witness verify)")
+	dir := fs.String("dir", "", "repo dir for the exclusive-lease store (default: git discovery from cwd)")
+	ledger := fs.String("ledger", "", "ledger path override (default: <root>/"+knownbad.DefaultLedgerRel+")")
+	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(stderr, "fak knownbad resolve: exactly one <signature> is required (flags first): fak knownbad resolve [--by ID] [--witness tests|verify] <signature>")
+		return 2
+	}
+	sig := strings.TrimSpace(fs.Arg(0))
+	kind := strings.TrimSpace(strings.ToLower(*witnessKind))
+	if kind != witnessKindTests && kind != witnessKindVerify {
+		fmt.Fprintf(stderr, "fak knownbad resolve: --witness %q is not a witness kind (want tests|verify)\n", *witnessKind)
+		return 2
+	}
+
+	// Find the signature's live record: the tree to witness over, and whether a claim
+	// (fixer lease) stands to release. A signature with no live row cannot be resolved —
+	// never recorded, or already resolved/expired, so there is no open failure to close.
+	ledgerPath := knownBadLedgerPath(*ledger)
+	records, err := readKnownBadLedger(ledgerPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak knownbad resolve: %v\n", err)
+		return 1
+	}
+	sigRec, found := knownbad.FindLatestLive(records, sig, nowUnix)
+	if !found {
+		fmt.Fprintf(stderr, "fak knownbad resolve: no LIVE known-bad signature %s in %s (record it first, or it is already resolved)\n", sig, ledgerPath)
+		return 2
+	}
+
+	// THE GATE: run the independent witness over the broken tree BEFORE touching the
+	// ledger. No green -> the signature stays open and the fleet stays parked. This is the
+	// whole point of W6: a resolve is refused unless the fix is proven, never on a claim.
+	wr := knownBadWitness(*dir, kind, sigRec.TreeGlobs, strings.TrimSpace(*commit))
+	if !wr.OK {
+		res := knownBadResolveResult{
+			Schema:    knownbad.Schema,
+			OK:        false,
+			Signature: sig,
+			Witness:   kind,
+			Reason:    reasonKnownBadNotWitnessed,
+			Detail:    wr.Detail,
+			Trees:     sigRec.TreeGlobs,
+		}
+		if *asJSON {
+			if code := knownBadEmitJSON(stdout, stderr, res); code != 0 {
+				return code
+			}
+		} else {
+			fmt.Fprintf(stdout, "not yet: known-bad %s stays open — %s witness did not pass (%s); land the fix, then resolve again\n",
+				sig, kind, wr.Detail)
+		}
+		return leaserefRefused
+	}
+
+	// Witnessed green. Append the superseding resolved row FIRST: the ledger flip is what
+	// the dispatcher re-reads each tick to clear the W4 scope-hold (Match drops a resolved
+	// row), so a resolve that recorded the release is durable even if the lease drop below
+	// hiccups. The resolve carries the witness kind as its evidence stamp.
+	resolver := knownBadDiscoverer(*by)
+	resolvedRec := sigRec.WithResolve(resolver, nowUnix, kind)
+	if err := appendKnownBadRow(ledgerPath, resolvedRec); err != nil {
+		fmt.Fprintf(stderr, "fak knownbad resolve: witnessed the fix but could not record the resolve: %v\n", err)
+		return 1
+	}
+
+	// Release the fixer's exclusive lease (W5) so the tree is free for normal dispatch.
+	// Dropping the hold (the ledger flip) WITHOUT dropping the lease would leave the fleet
+	// half-stuck, so this is part of the same resolve. The release is best-effort AND
+	// reported: an absent lease is an idempotent OK (nothing was claimed), and a live lease
+	// held by someone else is surfaced as a warning rather than failing the resolve — the
+	// signature is already witnessed-closed, the stuck lease is a separate operator action.
+	leaseID := knownbad.LeaseID(sig)
+	lease := releaseKnownBadLease(*dir, leaseID, resolver, nowUnix)
+
+	res := knownBadResolveResult{
+		Schema:    knownbad.Schema,
+		OK:        true,
+		Signature: sig,
+		Witness:   kind,
+		Detail:    wr.Detail,
+		Trees:     resolvedRec.TreeGlobs,
+		LeaseID:   leaseID,
+		Record:    &resolvedRec,
+		Lease:     lease,
+	}
+	if *asJSON {
+		return knownBadEmitJSON(stdout, stderr, res)
+	}
+	fmt.Fprintf(stdout, "resolved: known-bad %s open -> resolved on a witnessed %s (%s); dropped fixer lease %s — held issues route as dispatchable on the next tick\n",
+		sig, kind, wr.Detail, leaseID)
+	if lease != nil && !lease.OK {
+		fmt.Fprintf(stderr, "fak knownbad resolve: note: fixer lease %s not dropped (%s) — %s; the signature is resolved regardless\n",
+			leaseID, lease.Reason, lease.Detail)
+	}
+	return 0
+}
+
+// knownBadResolveResult is the resolve verb's --json shape. On a witnessed resolve OK is
+// true, Record is the stamped resolved row, and Lease carries the lease-release verdict;
+// on a refused resolve OK is false, Reason is KNOWN_BAD_NOT_WITNESSED, and Detail names the
+// witness that did not pass.
+type knownBadResolveResult struct {
+	Schema    string                 `json:"schema"`
+	OK        bool                   `json:"ok"`
+	Signature string                 `json:"signature"`
+	Witness   string                 `json:"witness"`
+	Reason    string                 `json:"reason,omitempty"`
+	Detail    string                 `json:"detail,omitempty"`
+	Trees     []string               `json:"trees,omitempty"`
+	LeaseID   string                 `json:"lease_id,omitempty"`
+	Record    *knownbad.Record       `json:"record,omitempty"`
+	Lease     *leaseref.FenceVerdict `json:"lease,omitempty"`
+}
+
+// releaseKnownBadLease drops the fixer's exclusive lease (W5) at refs/fak/locks/<leaseID>
+// as the release arm of resolve. It returns the fenced verdict (nil only when the lease id
+// is unusable, which the resolve caller already validated upstream so it never is here).
+// An absent lease is an idempotent OK; a live lease held by a different holder refuses
+// STALE_LEASE (surfaced, not fatal — the signature is witnessed-closed regardless).
+func releaseKnownBadLease(dir, leaseID, holder string, nowUnix int64) *leaseref.FenceVerdict {
+	if leaseID == "" {
+		return nil
+	}
+	store := leaseref.NewInDir(pathutil.ExpandTilde(dir))
+	verdict, err := store.ReleaseFenced(context.Background(), leaseID, holder, 0, time.Unix(nowUnix, 0))
+	if err != nil {
+		// Infrastructure failure (git not runnable): report it as a non-OK verdict rather
+		// than failing the already-witnessed resolve.
+		return &leaseref.FenceVerdict{Reason: "LEASE_RELEASE_ERROR", Detail: err.Error()}
+	}
+	return &verdict
+}
+
+// runKnownBadWitness is the DEFAULT witness runner (the production behind knownBadWitness):
+// it runs the requested independent witness over the signature's broken tree and reports
+// whether the fix is proven. FAIL-CLOSED: any error or non-green outcome is OK=false, so an
+// unproven witness cannot release the fleet. `tests` runs `go test` over the tree's
+// package globs; `verify` runs `dos verify` binding the fixer commit to the tree.
+func runKnownBadWitness(dir, kind string, treeGlobs []string, commit string) knownBadWitnessResult {
+	root := strings.TrimSpace(dir)
+	if root == "" {
+		root = repoRoot()
+	}
+	switch kind {
+	case witnessKindVerify:
+		return runKnownBadVerifyWitness(root, treeGlobs, commit)
+	default:
+		return runKnownBadTestsWitness(root, treeGlobs)
+	}
+}
+
+// runKnownBadTestsWitness runs `go test` over the broken tree's package globs (each
+// normalized tree becomes ./<tree>/...) and reports green iff the run exits 0. An empty
+// tree set cannot be witnessed (there is nothing to prove green over) -> not witnessed.
+func runKnownBadTestsWitness(root string, treeGlobs []string) knownBadWitnessResult {
+	pkgs := knownBadTreePackages(treeGlobs)
+	if len(pkgs) == 0 {
+		return knownBadWitnessResult{OK: false, Kind: witnessKindTests, Detail: "no repo-relative tree to run go test over"}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	args := append([]string{"test"}, pkgs...)
+	cmd := exec.CommandContext(ctx, "go", args...)
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return knownBadWitnessResult{OK: false, Kind: witnessKindTests, Detail: fmt.Sprintf("go test %s not green: %v", strings.Join(pkgs, " "), knownBadFirstLine(out))}
+	}
+	return knownBadWitnessResult{OK: true, Kind: witnessKindTests, Detail: fmt.Sprintf("green go test over %s", strings.Join(pkgs, " "))}
+}
+
+// runKnownBadVerifyWitness runs `dos verify` binding the fixer commit to the signature's
+// tree. Without a commit there is nothing to bind, so the witness cannot pass. Green iff
+// the command exits 0.
+func runKnownBadVerifyWitness(root string, treeGlobs []string, commit string) knownBadWitnessResult {
+	if commit == "" {
+		return knownBadWitnessResult{OK: false, Kind: witnessKindVerify, Detail: "--witness verify requires --commit <sha> to bind the fix to the tree"}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "dos", "verify", commit, "--workspace", root)
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return knownBadWitnessResult{OK: false, Kind: witnessKindVerify, Detail: fmt.Sprintf("dos verify %s not green: %v", commit, knownBadFirstLine(out))}
+	}
+	return knownBadWitnessResult{OK: true, Kind: witnessKindVerify, Detail: fmt.Sprintf("dos verify bound %s to the tree", commit)}
+}
+
+// knownBadTreePackages turns the normalized broken-tree globs into ./<tree>/... package
+// patterns `go test` accepts, deduping. A tree is already normalized (no glob stars) by
+// NewRecord, so this only wraps it as a recursive package pattern.
+func knownBadTreePackages(treeGlobs []string) []string {
+	seen := make(map[string]struct{}, len(treeGlobs))
+	out := make([]string, 0, len(treeGlobs))
+	for _, t := range knownbad.NormalizeAll(treeGlobs) {
+		p := "./" + t + "/..."
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	return out
+}
+
+// knownBadFirstLine returns the first non-empty line of command output for a compact
+// refusal detail (the full log is the operator's to read; the report names the head).
+func knownBadFirstLine(out []byte) string {
+	for _, line := range strings.Split(string(out), "\n") {
+		if s := strings.TrimSpace(line); s != "" {
+			return s
+		}
+	}
+	return "no output"
 }
 
 // appendKnownBadRow appends one record as a JSONL line, creating the ledger's
