@@ -1008,14 +1008,8 @@ func denySummary(adjs []ToolAdjudication) string {
 	parts := make([]string, 0, len(adjs))
 	for _, a := range adjs {
 		part := fmt.Sprintf("%s: %s (%s/%s)", a.Tool, a.Verdict.Kind, reasonOrKind(a.Verdict), a.Verdict.Disposition)
-		if note := reversibilityGateNote(a); note != "" {
-			part += " " + note
-		}
-		if note := remedyNote(a); note != "" {
-			part += " " + note
-		}
-		if a.Livelock != nil {
-			part += " " + livelockInBandNote(a)
+		if notes, _ := renderRefusalNotes(a); notes != "" {
+			part += " " + notes
 		}
 		parts = append(parts, part)
 	}
@@ -1037,15 +1031,11 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 		switch {
 		case !a.Admitted:
 			entry := fmt.Sprintf("%s (%s/%s)", a.Tool, reasonOrKind(a.Verdict), a.Verdict.Disposition)
-			if note := reversibilityGateNote(a); note != "" {
-				entry += " " + note
-				hasConfirmRecipe = true
-			}
-			if note := remedyNote(a); note != "" {
-				entry += " " + note
-			}
-			if a.Livelock != nil {
-				entry += " " + livelockInBandNote(a)
+			if notes, recipe := renderRefusalNotes(a); notes != "" {
+				entry += " " + notes
+				if recipe {
+					hasConfirmRecipe = true
+				}
 			}
 			denied = append(denied, entry)
 		case a.Verdict.Kind == "TRANSFORM":
