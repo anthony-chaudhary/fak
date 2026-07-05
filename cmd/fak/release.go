@@ -200,6 +200,8 @@ On the same-trunk hot path, if a peer fast-forwards trunk during the cut and the
 force-with-lease push refuses, ship re-cuts the VERSION+note commit onto the new
 tip and retries the leased push up to --push-retries times (default 2); it never
 force-pushes and never tags a lost race — a rewritten/diverged trunk still refuses.
+Under --require-ci it re-witnesses source CI on the peer's new tip before the
+re-cut, so a retry never ships a commit whose CI was not confirmed green.
 When cut/tag are executed through this front door, --skip-dry-run is added unless
 you supplied it already; the real witness is the green trunk plus the post-tag
 release-substrate suite.
