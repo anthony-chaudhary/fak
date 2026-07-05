@@ -169,6 +169,16 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 			fmt.Fprintf(&b, "  blocked: %-16s x%d\n", r, sum.ByReason[r])
 		}
 	}
+	// A DEFAULT_DENY is a tool the floor never enumerated (a harness verb, an MCP tool,
+	// a new orchestration name) — not a genuine-danger refusal. The permissive-defaults
+	// posture is that those are usually FINE to allow, so point the operator at the
+	// out-of-band control that re-admits them for future sessions. Deliberately NOT shown
+	// for POLICY_BLOCK / SECRET_EXFIL: those are the danger floor (an arg-rule like rm -rf
+	// or an explicit deny), which the allow overlay cannot and should not lift.
+	if sum.ByReason["DEFAULT_DENY"] > 0 {
+		b.WriteString("  to always-allow a blocked tool for future sessions (operator, out-of-band from the agent):\n")
+		b.WriteString("    fak guard allow --from-journal        # lists what was blocked + the exact allow command\n")
+	}
 	return b.String()
 }
 

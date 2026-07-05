@@ -891,6 +891,13 @@ func reloadPolicy(path string) (policy.Runtime, error) {
 	if err != nil {
 		return policy.Runtime{}, err
 	}
+	// Re-apply the operator allow overlay on hot-reload so a `--policy` swap never
+	// silently drops the out-of-band always-allow list (`fak guard allow`). A missing
+	// overlay is the common no-op; a malformed one is tolerated on reload rather than
+	// wedging a live gateway (the loud failure already fired at launch).
+	if ov, ovErr := loadGuardAllowOverlay(guardAllowOverlayPath()); ovErr == nil {
+		guardApplyAllowOverlay(&rt, ov)
+	}
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)
 	return rt, nil

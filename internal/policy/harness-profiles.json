@@ -64,7 +64,8 @@
         "list_mcp_resource_templates", "functions.list_mcp_resource_templates",
         "read_mcp_resource", "functions.read_mcp_resource",
         "tool_search_tool", "tool_search.tool_search_tool",
-        "parallel", "multi_tool_use.parallel"
+        "parallel", "multi_tool_use.parallel",
+        "web.run", "imagegen", "image_gen.imagegen"
       ]
     },
     {

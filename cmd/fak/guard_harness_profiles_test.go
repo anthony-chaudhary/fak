@@ -122,6 +122,8 @@ func firstClassHarnessFloorProfiles() []harnessFloorProfile {
 				{"read_mcp_resource", `{"server":"dos","uri":"x"}`},
 				{"view_image", `{"path":"x"}`},
 				{"request_user_input", `{"prompt":"continue?"}`},
+				{"web.run", `{"search_query":[{"q":"fak agent kernel"}]}`},
+				{"image_gen.imagegen", `{"prompt":"diagram"}`},
 			},
 			// shell_command is Codex's cross-platform shell, so it must refuse BOTH the
 			// POSIX and the PowerShell danger dialects (the floor carries both rule sets

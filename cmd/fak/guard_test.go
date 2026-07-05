@@ -141,6 +141,8 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"Codex namespaced goal read allowed", "functions.get_goal", `{}`, abi.VerdictAllow},
 		{"Codex namespaced tool search allowed", "tool_search.tool_search_tool", `{"query":"dos verify"}`, abi.VerdictAllow},
 		{"Codex namespaced parallel wrapper allowed", "multi_tool_use.parallel", `{"tool_uses":[]}`, abi.VerdictAllow},
+		{"Hosted web tool allowed (built-in read/search surface)", "web.run", `{"search_query":[{"q":"fak agent kernel"}]}`, abi.VerdictAllow},
+		{"Hosted image tool allowed (built-in generation surface)", "image_gen.imagegen", `{"prompt":"diagram"}`, abi.VerdictAllow},
 		{"Codex namespaced shell command benign allowed", "functions.shell_command", `{"command":"git status --short","workdir":"C:\\work\\fak"}`, abi.VerdictAllow},
 		{"Codex namespaced shell command rm -rf denied", "functions.shell_command", `{"command":"rm -rf /tmp/x"}`, abi.VerdictDeny},
 		{"Codex namespaced shell command Remove-Item -Recurse denied", "functions.shell_command", `{"command":"Remove-Item -Recurse -Force C:\\work"}`, abi.VerdictDeny},
