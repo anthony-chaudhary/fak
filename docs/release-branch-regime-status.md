@@ -18,7 +18,7 @@ Operator actions:
 | Status | Action |
 |---|---|
 | `drift=no_drift` | Hold; development and release heads match. |
-| `drift=development_ahead` and no blockers | Treat `promotion_candidate` as the source SHA for a release-promotion dry run. |
+| `drift=development_ahead` and no blockers | Promote with `fak release ship --execute --open-pr --source-branch <development> --trunk <release> --base origin/<development>`; the command opens an exact-SHA promotion PR instead of pushing the live development branch straight to the release branch. |
 | `RELEASE_AHEAD` | Stop and inspect; the release/front-door branch has commits not in development. |
 | `DEVELOPMENT_CI_RED` | Fix or confirm CI on the development head before promotion. |
 | `RELEASE_LOCK_HELD` | Wait for the active release writer or inspect `python tools/release_lock.py status`. |

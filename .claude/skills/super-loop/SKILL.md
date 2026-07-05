@@ -1,6 +1,6 @@
 ---
 name: super-loop
-description: The durable front door to a "super loop" — launching HEADLESS work sessions in BULK, one detached `/goal` worker per DISTINCT rate-limit account, each resolving a top-ranked ready leaf and closing it by witnessed ancestry. Wraps the proven launchers (`tools/issue_dispatch.py --wave`, `tools/launch_wave_detached.ps1`) with the discipline the raw scripts assume: PLAN by default, price the fan-out for tree-collisions AND account-distinctness before a single worker spawns, re-check the no-DoS preflight cap per spawn, and never confuse a launch with a ship. Regime-aware, not a fixed script: it reads the host first and adapts — RECLAIM stale workers/residue before growing, RAMP a cold host canary-first (promote on witnessed commits), and run 12h+ MARATHONS as a cadence of waves with budget and stop signals. Use when the operator says "launch a wave", "run a super loop", "spin up N workers on the top issues", "fan out headless sessions", "drain the backlog in parallel", "start the overnight fleet", "clean up the old workers first", "ramp up slowly", or "keep it running for 12 hours".
+description: The durable front door to a "super loop" — launching HEADLESS work sessions in BULK, one detached `/goal` worker per bounded account session slot, each resolving a top-ranked ready leaf and closing it by witnessed ancestry. Wraps the proven launchers (`tools/issue_dispatch.py --wave`, `fak dispatch wave`, `tools/launch_wave_detached.ps1`) with the discipline the raw scripts assume: PLAN by default, price the fan-out for tree-collisions AND account capacity before a single worker spawns, re-check the no-DoS preflight cap per spawn, and never confuse a launch with a ship. Regime-aware, not a fixed script: it reads the host first and adapts — RECLAIM stale workers/residue before growing, RAMP a cold host canary-first (promote on witnessed commits), and run 12h+ MARATHONS as a cadence of waves with budget and stop signals. Use when the operator says "launch a wave", "run a super loop", "spin up N workers on the top issues", "fan out headless sessions", "drain the backlog in parallel", "start the overnight fleet", "clean up the old workers first", "ramp up slowly", or "keep it running for 12 hours".
 allowed-tools: Read, Bash, Write
 metadata:
   opencode: claude-only   # the commit-by-explicit-path, honesty-boundary, and collision discipline are load-bearing and not portable per-skill
@@ -21,11 +21,11 @@ metadata:
 | Path | What it gives | When |
 |---|---|---|
 | `python tools/issue_dispatch.py --wave` | Fans out across pairwise **TREE-DISJOINT** lanes in ONE checkout, PRICED (`dos arbitrate`) so a colliding set is caught before launch, preflight re-checked per spawn. Collision-safe by construction. | **Default.** In-repo issue work on the shared trunk. |
-| `tools/launch_wave_detached.ps1 -Count N` | Fans out across N **DISTINCT rate-limit accounts** (`fak fleet-accounts wave`), one detached `/goal` worker per pool → N× rate-limit headroom. | High throughput, when you need more usage buckets than one account gives. |
+| `fak dispatch wave --count N` / `tools/launch_wave_detached.ps1 -Count N` | Fans out across N bounded **account session slots** (`fak fleet-accounts wave`); Claude worker accounts can carry several sessions while duplicate login identities still collapse to one pool. | High throughput, when you need more workers than one session per account gives. |
 
-The catch that makes this skill load-bearing: **`launch_wave_detached.ps1` gives
-distinct accounts but its workers share ONE working tree** (a single `-Workspace`).
-Distinct rate-limit pools ≠ distinct file trees. So the multi-account wave is only
+The catch that makes this skill load-bearing: **the wave gives account session
+capacity, but its workers share ONE working tree** (a single `-Workspace`).
+Account slots ≠ distinct file trees. So the multi-session wave is only
 collision-safe if EITHER each worker takes a lane lease (`dos arbitrate`) before it
 edits — which the [fuel prompt](../../goal-prompts/resolve-top-issue-witnessed.md)
 mandates as step 1 — OR each account runs in its own checkout. Never launch a
@@ -163,7 +163,7 @@ still binds — never "top up" while workers are still starting (a just-spawned
 worker is invisible to the scan until it holds a lease); a new rung begins only
 after the last rung's workers hold leases/markers or have exited.
 
-## Step 2 — Price the fan-out (dry-run) — collisions AND account-distinctness
+## Step 2 — Price the fan-out (dry-run) — collisions AND account capacity
 
 Never launch blind. Run the launcher in its default PLAN mode and read the plan:
 
@@ -173,7 +173,7 @@ python tools/issue_dispatch.py --wave --max-workers <N> --work-kind engineering 
 ```
 
 ```powershell
-# High-throughput path — N distinct accounts (plan only, no -Launch):
+# High-throughput path — N account session slots (plan only, no -Launch):
 .\tools\launch_wave_detached.ps1 -Count <N> -WorkKind engineering -Workspace C:\work\fak `
   -PointerFile .claude/goal-prompts/resolve-top-issue-witnessed.md
 ```
@@ -184,13 +184,13 @@ Read the plan out loud for the operator:
   disjoint and none is a self-source lane the arbiter refused. This is
   `dos-plan-price` folded into the launcher — a colliding set is serialized into a
   later wave, not launched.
-- **Multi-account (`launch_wave_detached`):** confirm `granted` vs `requested`
-  (honest under-fill when fewer distinct accounts are free) and that
-  `distinct_pools > 1` (a naive burst collapses to ONE pool and serializes). If the
+- **Multi-account (`launch_wave_detached` / `fak dispatch wave`):** confirm `granted`
+  vs `requested` (honest under-fill when fewer account session slots are free) and
+  that repeated account tags stay within their `session_cap`. If the
   workers will share a tree, confirm the fuel's lane-lease step is intact, or launch
   fewer workers.
 
-If the plan shows collisions, an unavailable account, or `distinct_pools == 1`, fix
+If the plan shows collisions, an unavailable account, or fewer slots than needed, fix
 the partition or wait — do not `--force` / launch anyway.
 
 ## Step 3 — Launch the wave (opt-in, operator-approved)
@@ -206,7 +206,7 @@ python tools/issue_dispatch.py --wave --max-workers <N> --work-kind engineering 
 ```
 
 Each spawn re-checks the preflight cap, so the live population still never exceeds
-the seat cap even mid-wave. Record what launched: the per-lane account/pool/PID and
+the account session-slot cap even mid-wave. Record what launched: the per-lane account/pool/PID and
 the log paths the launcher prints (`.goal-runs/*.pid`, `.dispatch-runs/inflight-*`).
 
 ## Step 4 — Watch, witness, and stop (a launch is not a ship)
@@ -238,10 +238,11 @@ A worker is one-leaf-then-stop by fuel design, so a long run is a **cadence of
 waves**, never a long-lived worker or one bigger burst. Two honest shapes:
 
 - **Standing cron (preferred unattended).** The `FleetIssueDispatch` scheduled
-  task already re-ticks the dispatcher; the status card's watchdog fold says
-  whether it is installed and firing. If it is live, an "overnight run" means
-  leave it on and fix what the card says blocks it — do NOT also hand-launch
-  waves beside it (double-dispatch on the same seats and lanes).
+  task already auto-refills the dispatcher to live account/cap/work headroom; the
+  status card's watchdog fold says whether it is installed and firing. If it is
+  live, an "overnight run" means leave it on and fix what the card says blocks it
+  — do NOT also hand-launch waves beside it (double-dispatch on the same slots
+  and lanes).
 - **Attended cadence (wave-sized ticks).** Repeat orient → rung-1 reclaim →
   price → wave every 60–90 minutes. Every tick starts at Step 0: a preflight
   verdict from the previous tick is stale evidence, and the queue re-ranks live.
@@ -310,10 +311,10 @@ super-loop commit.
 - ❌ Launching with `--live` / `-Launch` before showing the dry-run plan and getting
   approval — the plan is the witnessable artifact and the collision check.
 - ❌ Treating a naive N-way burst of `launch_goal_detached.ps1` as a wave — it
-  resolves the SAME account N times (`distinct_pools == 1`) and serializes on one
-  rate-limit bucket. Use `launch_wave_detached.ps1` / `issue_dispatch.py --wave`.
-- ❌ A multi-account wave whose workers free-edit a shared tree with no lane lease —
-  distinct accounts, colliding files. Keep the fuel's `dos arbitrate` step 1 intact.
+  resolves without account session-cap accounting and can pile onto one account.
+  Use `fak dispatch wave`, `launch_wave_detached.ps1`, or `issue_dispatch.py --wave`.
+- ❌ A multi-session wave whose workers free-edit a shared tree with no lane lease —
+  account slots, colliding files. Keep the fuel's `dos arbitrate` step 1 intact.
 - ❌ `--force`-ing past a preflight `REFUSE_*` or an arbiter refuse — the refusal IS
   the no-DoS / no-collision floor.
 - ❌ Reporting the backlog "drained" from a launch. Read `dispatch_status.py`
@@ -326,6 +327,6 @@ super-loop commit.
   report — a reclaim kill carries the same operator bar as `-Launch`, and killing
   whatever looks big to clear `REFUSE_HOST` is `-SkipPreflight` by other means.
 - ❌ Running "12 hours" as one bigger burst, or hand-launching waves while the
-  `FleetIssueDispatch` cron is live — double-dispatch on the same seats and lanes.
+  `FleetIssueDispatch` cron is live — double-dispatch on the same slots and lanes.
 - ❌ Re-waving into flat throughput — launches rising while ships stay flat is a
   stop signal to investigate, not a sizing problem to push through.

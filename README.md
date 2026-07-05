@@ -4,6 +4,8 @@
 
 <!-- readme-verified: 2026-07-04 vs VERSION 0.37.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. 2026-07-04: token-savings value prop foregrounded — "Token savings, set and forget" section + the 6-defaults scorecard link, "What you get" bullet reframed to the set-and-forget catch-all; honest provider-owned-vs-fak-authored split preserved (SESSION-CACHE-SAVINGS ablation). Same day: refocused on the long-session TREND — fak-authored share climbs ~1%→~11% with length (new BENCHMARK-AUTHORITY row; shed token counts WITNESSED, % is MODELED, n=2 thin, peak-not-pool). 2026-07-03: release pin refreshed for v0.37.0. 2026-07-01: front page halved; overflow: docs/README-legacy.md. Same day: hero video + gallery/video links re-surfaced; examples generalized to the hardware/harness sweep (HARDWARE-MATRIX + supported/); guided tutorial surfaced (Pick-your-path + docs map). -->
 
+**fak is a fused agent kernel** — a single Go binary you drop in front of the AI agent you already run.
+
 <!-- lead source: docs/adoption/pitch-ladder.md (rung 1). Edit the ladder first; keep this lead consistent with its one-sentence pitch. -->
 fak in one line: fak treats every agent tool call like a syscall — the model proposes, the
 kernel disposes. One static Go binary sits in front of an agent's tool calls. It checks

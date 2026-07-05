@@ -21,9 +21,9 @@ template tells agents to ship normal work to `dev`.
   unexplained promotion blockers.
 - `fak workflow-audit --write-doc` has a clean audit, with every workflow branch
   filter classified as development, release, tag, legacy, or public-front-door.
-- `fak release ship --json` dry-runs from the configured release source and
+- `fak release ship --json --open-pr` dry-runs from the configured release source and
   reports `source_branch`, `source_sha`, `target_branch`, `target_sha`, and
-  `target_ancestry.ok=true`.
+  `target_ancestry.ok=true`, plus the exact promotion-PR preview.
 - The release source SHA has a green source CI witness or the run records a hold
   decision.
 - Forge rulesets for the pilot `dev` branch are present and documented.
@@ -85,7 +85,7 @@ tree at once):
 5. Capture release-promotion dry run from the pilot source:
 
    ```bash
-   fak release ship --json --source-branch dev --trunk main --base origin/dev
+   fak release ship --json --open-pr --source-branch dev --trunk main --base origin/dev
    ```
 
 6. Move only the named pilot cohort to `dev` by launching each pilot worker
@@ -108,7 +108,7 @@ git ls-remote origin refs/heads/main refs/heads/dev
 fak release status --json --require-ci-green --limit-commits 50
 fak workflow-audit --write-doc
 go test ./internal/workflowaudit -count=1
-fak release ship --json --source-branch dev --trunk main --base origin/dev
+fak release ship --json --open-pr --source-branch dev --trunk main --base origin/dev
 fak release prplan --base origin/main --head origin/dev --check
 ```
 
@@ -128,6 +128,18 @@ with `--force-with-lease` and refreshes the existing open PR rather than
 creating a duplicate. Tag/publish then run in a separate `fak release ship`
 once the PR is reviewed and merged. This is inert until `dev` and `main` name
 distinct branch roles — the same cutover this checklist gates.
+Execute-mode direct `dev` -> `main` promotion is refused unless an operator
+passes `--allow-direct-promotion`; the default split-branch promotion path is
+the PR flow above.
+After merging the promotion PR, run the tag/publish phase against the release
+branch itself, for example:
+
+```bash
+fak release ship --execute --source-branch main --trunk main --base origin/main
+```
+
+That follow-up reuses the merged `VERSION`/release-note cut when the tag is
+missing, so it does not need a second release commit.
 
 The proof bundle is incomplete unless it includes:
 
@@ -136,7 +148,8 @@ The proof bundle is incomplete unless it includes:
 - the pilot worker cohort;
 - at least one witnessed pilot commit to `dev`, or an explicit `hold` stating
   why the cohort did not run;
-- the release-promotion dry-run JSON containing the exact `dev` `source_sha`;
+- the release-promotion `--open-pr` dry-run JSON containing the exact `dev`
+  `source_sha` and promotion PR preview;
 - a final decision with links to command output or attached artifacts.
 
 ## Proceed Criteria

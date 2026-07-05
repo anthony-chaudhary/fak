@@ -24,6 +24,8 @@ Capture these before deciding:
 
 - Operator status card: `python tools/dispatch_status.py --fast`
 - Spawn dry run: `go run ./cmd/fak dispatch tick`
+- For a multi-worker detached wave, capture the structured planner:
+  `.\tools\launch_wave_detached.ps1 -Count <proposed_max_workers> -WorkKind engineering -Workspace C:\work\fak -PointerFile .claude/goal-prompts/resolve-top-issue-witnessed.md -Json`
 - Seat pool or routing summary from the active account-seat source.
 - Host cap from the dispatch preflight or host-cap status row.
 - Lease state from the current DOS or dispatch lease ledger.
@@ -35,6 +37,7 @@ Capture these before deciding:
 |---|---|---|
 | Seats | `green_seats >= proposed_max_workers`; every seat is routable and no account is in auth failure. | `REFUSE_NO_SEAT`, auth failures, account-pool skew, or cooldowns would make the extra workers idle or double-booked. |
 | Host cap | `host_cap >= proposed_max_workers`; CPU, memory, and process headroom recovered after the last wave. | Host cap is below the proposal, load is still clearing, or process cleanup is stale. |
+| Wave plan | The structured detached-wave plan is `ok=true`, `verdict=WOULD_WAVE`, `action=would_wave`, `allocation_requested <= proposed_max_workers`, and every lane carries `wave_id`, zero-based `rank`, `session_slot`, `session_cap`, and `pool`. | `-Json` returns a refusal token, `allocation_requested` is unexpectedly above the proposed cap, membership fields are missing, or the plan grants a larger fan-out than the current preflight/headroom admits. |
 | Lease health | Live leases plus planned workers fit under the cap; stale leases are scavenged; in-flight issue de-dup is clean. | A stale lease, orphaned worker, or duplicated issue would make the live count ambiguous. |
 | Rate budget | Remaining provider or account budget covers the proposed wave plus retry overhead. | Active throttle cooldowns, low remaining quota, or recent rate-limit errors would turn capacity into retries. |
 | Closure honesty | Recent closes are `TRUE_RESOLVED`/witnessed; `CLAIMED_CLOSED` and `unwitnessed` rows are not being counted as throughput. | The close arm has unresolved claimed-closed drift, failed reverify rows, or unwitnessed worker claims. |
@@ -49,6 +52,7 @@ Capture these before deciding:
   "proposed_max_workers": 4,
   "green_seats": 5,
   "host_cap": 6,
+  "wave_plan": "WOULD_WAVE/granted=4/wave_id=wave-abc123/ranks=0..3",
   "lease_headroom": 4,
   "rate_budget_workers": 4,
   "closure_honesty": "green",
@@ -68,6 +72,7 @@ arm is already live, and recheck the status card after one wave drains.
   "proposed_max_workers": 8,
   "green_seats": 8,
   "host_cap": 8,
+  "wave_plan": "REFUSE_AT_CAP/allocation_requested=0",
   "lease_headroom": 7,
   "rate_budget_workers": 3,
   "closure_honesty": "watch",

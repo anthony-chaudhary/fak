@@ -107,6 +107,34 @@ superloop walk: improve-quality — ACTION (superloop_debt)
   → worst-first: superloop "sweep-surfaces" — descend: `fak superloop walk sweep-surfaces`
 ```
 
+## What the walk reserves — the budget
+
+Each intent also declares a **generation budget**: a planned reservation across the
+four dimensions the [budget contract](generation-super-loop-budgets.md) names —
+**time**, **tokens**, **workers**, **review**. The walk folds it into one row per
+dimension and **divides it down** across the worklist members it just built, so the
+budget *reserves attention* without touching the worst-first order (priority stays
+debt-ordered; the budget only says how much capacity each member may draw):
+
+```
+  budget gen/next — declared reservation, divided across 3 worklist member(s):
+  DIMENSION  DECLARED      PER-MEMBER
+  time       20 minutes    6
+  tokens     120000 tokens 40000
+  workers    1 workers     0
+  review     —             HELD
+```
+
+Two rules make this honest. Division is **floored** — the per-member shares never sum
+past the declared cap (a scarce integer cap like `workers 1` over three members
+floors to a `0` share the members must timeshare, which is *budgeted*, not held). And
+a dimension with **no declared cap** renders as **HELD** — the contract's "no row =
+hold for later-horizon work" case, surfaced for the operator rather than silently
+treated as an unlimited grant. `walk --json` carries the same rows plus each worklist
+member's `allocation`. These are *declared* caps (the top of the cascade), not
+measured consumption; binding a member's share to its drive env and comparing planned
+against witnessed spend are the [remaining hooks](generation-super-loop-budgets.md#implementation-hooks).
+
 ## How a super loop relates to what already exists
 
 A super loop **generalizes the garden bundle** (`internal/gardenbundle`). The garden
@@ -144,10 +172,10 @@ runnable as printed. The registered set:
   intents.
 - **`drain-throughput`** — the throughput issue-drain intent. It walks
   `issue-resolve-dispatch/claude/throughput` and enters
-  `fak dispatch tick --goal throughput` when the loop is stale or dark.
+  `fak dispatch auto --goal throughput` when the loop is stale or dark.
 - **`drain-high-priority`** — the high-priority issue-drain intent. It walks
   `issue-resolve-dispatch/claude/high-priority` and enters
-  `fak dispatch tick --goal high-priority` when that loop is stale or dark.
+  `fak dispatch auto --goal high-priority` when that loop is stale or dark.
 - **`manage-benchmarks`** — the benchmark-DX scorecard + the `nightrun` collection
   loop + a descend pointer into `fak bench-loop status`, the benchmark-specific
   control surface.

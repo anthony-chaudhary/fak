@@ -108,6 +108,91 @@ python tools/new_leaf.py myfastcache --tier mechanism --register --summary "pref
 See the full seam table and the "how a new idea bakes in" walkthrough in
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
+**C. Operator panes / TUI controls → `internal/tuiplugin` `Register`.** If your
+extension is an operator-facing console pane, do not add another case to
+`cmd/fak/tui.go`. Register a pane descriptor plus runner instead:
+
+```go
+func init() {
+    tuiplugin.Register(tuiplugin.Pane{
+        ID:      "my-pane",
+        Summary: "one-line operator summary",
+        Usage:   "fak console my-pane [--json]",
+        Schema:  "fak.tui.my-pane.v1",
+        BuiltIn: true,
+        Controls: []tuiplugin.Control{
+            {ID: "json", Label: "JSON", Kind: "toggle", Flag: "--json"},
+            {ID: "mode", Label: "Mode", Kind: "flag", Flag: "--mode", Options: []string{"brief", "full"}},
+        },
+        Run:      runTUIMyPane,
+        Overview: tuiOverviewAdapter(buildTUIOverviewMyPaneCard), // optional
+    })
+}
+```
+
+Keep the `Register` call next to the pane implementation when practical. For
+example, the issues/garden panes register from `cmd/fak/tui_issues_garden.go`,
+and the loops pane registers from `cmd/fak/tui_loop_render.go`; adding another
+pane should follow that shape before growing a central dispatcher table.
+
+`fak console panes` lists the registered panes and their user controls, and
+`fak console panes --json` emits the stable discovery model (`fak.tui.registry.v1`)
+for a higher-level interactive shell, including whether a pane contributes an
+overview card and any enumerated `options` a control supports. This is the same
+kind of plugin seam as the ABI registries:
+in-process, compiled into the one binary, duplicate IDs panic at startup, and the
+dispatcher and overview walk the registry instead of importing every pane by name.
+
+The persisted user controls live in `~/.fak/console.json` / `$FAK_CONSOLE_FILE`.
+The first control is overview composition: `fak console overview` walks registered
+pane IDs that have overview adapters, and operators can choose a subset/order
+either per-run:
+
+```bash
+fak console overview --pane guard --pane loops --guard-json guard.json --ledger .fak/loops.jsonl
+```
+
+or in config:
+
+```json
+{
+  "overview_panes": ["guard", "loops", "issues"]
+}
+```
+
+The CLI list wins over the config file; with neither, overview includes all
+registered panes that have an overview adapter and ranks them by attention.
+The same config file can set per-pane defaults by registered control ID:
+
+```json
+{
+  "pane_defaults": {
+    "issues": {"json": true, "top": 40},
+    "guard": {"color": "never", "rows": 20}
+  }
+}
+```
+
+Pane defaults are injected before the pane parser runs, and an explicit CLI flag
+always wins (`--json=false` beats `"json": true`). Unknown panes, unknown controls,
+dispatcher-only controls, invalid value types, and values outside a control's
+declared `options` fail loudly instead of being ignored.
+
+Operators do not have to hand-edit that JSON. The `config` pane is itself a
+registered pane and can save the same controls after validating them against the
+registry:
+
+```bash
+fak console config --set-overview guard,loops,issues
+fak console config --set-default issues.json=true --set-default issues.top=40
+fak console config --unset-default issues.json --clear-overview
+```
+
+Use `--path FILE` or the dispatcher-level `--console-config FILE` when editing a
+non-default config file. `fak console config --json` renders the stored controls
+as `fak.tui.config.v1`, so an interactive shell can round-trip user preferences
+without scraping text.
+
 ### The layering gate
 
 Whichever seam you use, `internal/architest` enforces the five-tier layering
