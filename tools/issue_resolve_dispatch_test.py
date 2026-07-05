@@ -4176,6 +4176,27 @@ class SameIssueWipCollisionTest(unittest.TestCase):
         self.assertEqual(scan["evidence"][0]["log"],
                          "resolve-2718-20260705-191407.log")
 
+    def test_worktree_wording_collides(self) -> None:
+        import os
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            log = runs / "resolve-2718-20260705-191407.log"
+            log.write_text(
+                "Final report: implementation left as local worktree changes.\n"
+                "- cmd/fak/knownbad.go\n",
+                encoding="utf-8",
+            )
+            os.utime(log, (now - 60, now - 60))
+
+            scan = mod.same_issue_wip_collision(
+                runs, 2718, ["cmd/fak/knownbad.go"], now_ts=now)
+
+        self.assertTrue(scan["collides"])
+        self.assertEqual(scan["dirty_paths"], ["cmd/fak/knownbad.go"])
+
     def test_ignores_other_issue_and_stale_log(self) -> None:
         import os
         import tempfile

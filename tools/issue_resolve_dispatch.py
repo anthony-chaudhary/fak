@@ -2719,7 +2719,8 @@ def dirty_path_collision_reason(issue: int, scan: dict[str, Any]) -> str:
 
 _SAME_ISSUE_WIP_RE = re.compile(
     r"\b(uncommitted|working[- ]tree|working tree changes|left .* working[- ]tree|"
-    r"not committed|without a commit|no commit|commit blocked)\b",
+    r"worktree changes|left .* worktree|not committed|without a commit|"
+    r"no commit|commit blocked)\b",
     re.IGNORECASE,
 )
 _SAME_ISSUE_WIP_CLAIMS = frozenset({"CLAIM_NO_COMMIT", "CLAIM_UNWITNESSED"})
