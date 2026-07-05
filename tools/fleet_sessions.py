@@ -370,6 +370,10 @@ def classify(path):
 
 ACCT_POLICY = fleet_accounts.load_policy()
 
+def _account_still_worker(acct):
+    return fleet_accounts.is_worker(acct, USER, ACCT_POLICY)
+
+
 def scan():
     rows, throttle = [], {}
     for acct_dir in glob.glob(os.path.join(USER, ".claude*")):
@@ -379,7 +383,7 @@ def scan():
             continue
         # account policy: skip tombstoned/excluded accounts (e.g. the backup
         # account) so they never produce rows, resume commands, or plan entries.
-        if not fleet_accounts.is_worker(acct, USER, ACCT_POLICY):
+        if not _account_still_worker(acct):
             continue
         for path in glob.glob(os.path.join(proj, "*", "*.jsonl")):
             base = os.path.splitext(os.path.basename(path))[0]
@@ -419,6 +423,8 @@ def merge_known_throttle(throttle, rows):
     merged = {}
     for source in (prev, throttle):
         for acct, info in source.items():
+            if not _account_still_worker(acct):
+                continue
             if acct in cleared:
                 continue
             if not fleet_accounts.throttle_is_active(info):
@@ -510,6 +516,8 @@ def merge_known_auth(rows):
     merged = {}
     for source in (prev, current_auth):
         for acct, info in source.items():
+            if not _account_still_worker(acct):
+                continue
             row = _normalize_auth_info(info)
             seen = _auth_info_seen_utc(row, prev_generated)
             success_seen = latest_success.get(acct)

@@ -11,6 +11,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -85,6 +86,39 @@ class RehomeDecisionTest(unittest.TestCase):
         availability = [_avail("opencode-glm", available=True)]
         fleet_sessions.decide(rows, throttle, availability)
         self.assertEqual(rows[0]["action"], "DEFER_THROTTLED")
+
+    def test_merge_known_throttle_prunes_archived_accounts(self) -> None:
+        prev = {
+            "throttle": {
+                ".claude-live": {"reset": "tomorrow"},
+                ".claude-gem7-netra": {"reset": "tomorrow"},
+            }
+        }
+        with mock.patch.object(fleet_sessions.fleet_accounts, "load_registry",
+                               return_value=prev), \
+             mock.patch.object(fleet_sessions, "_account_still_worker",
+                               side_effect=lambda acct: acct == ".claude-live"):
+            merged = fleet_sessions.merge_known_throttle({}, [])
+
+        self.assertIn(".claude-live", merged)
+        self.assertNotIn(".claude-gem7-netra", merged)
+
+    def test_merge_known_auth_prunes_archived_accounts(self) -> None:
+        prev = {
+            "generated_utc": "2026-07-05T16:00:00+00:00",
+            "auth": {
+                ".claude-live": {"block_reason": "auth/login required"},
+                ".claude-gem7-netra": {"block_reason": "auth/login required"},
+            },
+        }
+        with mock.patch.object(fleet_sessions.fleet_accounts, "load_registry",
+                               return_value=prev), \
+             mock.patch.object(fleet_sessions, "_account_still_worker",
+                               side_effect=lambda acct: acct == ".claude-live"):
+            merged = fleet_sessions.merge_known_auth([])
+
+        self.assertIn(".claude-live", merged)
+        self.assertNotIn(".claude-gem7-netra", merged)
 
     def test_interactive_throttled_session_rehomes(self) -> None:
         # #1353: a rate-limit (STOPPED_LIMIT) is server-interrupted, not abandoned, so an

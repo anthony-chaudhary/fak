@@ -121,6 +121,10 @@ POLICY_PATH = os.environ.get(
 POLICY_EXAMPLE_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "accounts_policy.example.json")
 REGISTRY_PATH = os.path.join(REG_DIR, "sessions.json")
+ACCOUNTS_REGISTRY_PATH = os.environ.get(
+    "FAK_ACCOUNTS_REGISTRY",
+    os.path.join(USER, ".claude-accounts", "registry.json"),
+)
 RUNS_DIRNAME = ".dispatch-runs"
 ACCOUNT_CAP_PREFIX = "account-cap-"
 ACCOUNT_CAP_RUNS_DIR = os.environ.get(
@@ -441,6 +445,25 @@ def load_registry(path: str = REGISTRY_PATH) -> dict:
         return {}
 
 
+def load_accounts_registry(path: str | None = None, *, home: str = USER) -> dict:
+    """Best-effort read of the canonical ``fak accounts`` registry.
+
+    ``fleet_accounts`` still discovers config dirs directly so it can scan live
+    transcripts, but lifecycle truth lives in ``fak accounts``. A tombstoned seat
+    with a remaining ``projects/`` dir must not re-enter Slack/routing.
+    """
+    p = path or os.environ.get(
+        "FAK_ACCOUNTS_REGISTRY",
+        os.path.join(home, ".claude-accounts", "registry.json"),
+    )
+    try:
+        with open(p, encoding="utf-8") as f:
+            doc = json.load(f)
+        return doc if isinstance(doc, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def _registry_age_min(registry: dict) -> float | None:
     raw = registry.get("generated_utc")
     if not raw:
@@ -568,7 +591,113 @@ _IDENTITY_ALIASES = {
     "account_uuid": ("account_uuid", "accountUuid"),
     "login_email": ("login_email", "emailAddress", "email"),
     "org_uuid": ("org_uuid", "organizationUuid"),
+    "token_fp": ("token_fp", "tokenFP"),
 }
+
+
+def _identity_account_key(identity: dict) -> str:
+    if not isinstance(identity, dict):
+        return ""
+    uuid = str(identity.get("account_uuid") or "").strip().lower()
+    if uuid:
+        return "uuid:" + uuid
+    token_fp = str(identity.get("token_fp") or identity.get("tokenFP") or "").strip().lower()
+    if token_fp:
+        return "tok:" + token_fp
+    return ""
+
+
+def _path_key(path: str) -> str:
+    if not path:
+        return ""
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _accounts_registry_reason(home: dict, default: str) -> str:
+    reason = str(home.get("tombstone_reason") or default)
+    rehome = str(home.get("rehome_to") or "")
+    if rehome and "rehome" not in reason.lower():
+        reason += f"; rehome -> {rehome}"
+    return reason
+
+
+def _accounts_registry_index(registry: dict | None) -> dict:
+    """Index active/tombstoned homes from ``fak accounts`` registry.json."""
+    idx = {
+        "active_names": set(),
+        "active_dirs": set(),
+        "tombstoned_names": {},
+        "tombstoned_dirs": {},
+        "tombstoned_identities": {},
+    }
+    if not isinstance(registry, dict):
+        return idx
+    for h in registry.get("homes") or []:
+        if not isinstance(h, dict):
+            continue
+        status = str(h.get("status") or "active").strip().lower()
+        name = str(h.get("name") or "").strip()
+        dkey = _path_key(str(h.get("dir") or ""))
+        identity_key = _identity_account_key(_account_identity_from(h))
+        if status == "tombstoned":
+            if name:
+                idx["tombstoned_names"][name.lower()] = h
+            if dkey:
+                idx["tombstoned_dirs"][dkey] = h
+            if identity_key:
+                idx["tombstoned_identities"][identity_key] = h
+        else:
+            if name:
+                idx["active_names"].add(name.lower())
+            if dkey:
+                idx["active_dirs"].add(dkey)
+    return idx
+
+
+def _accounts_registry_lookup_keys(row: dict) -> set[str]:
+    account = str(row.get("account") or "")
+    tag = str(row.get("tag") or account_tag(account))
+    product = str(row.get("product") or account_product(account))
+    keys = {k.lower() for k in (account, tag) if k}
+    if product == "claude":
+        if account == ".claude":
+            keys.add("default")
+        elif account.startswith(".claude-"):
+            keys.add(account[len(".claude-"):].lower())
+    return keys
+
+
+def _accounts_registry_exclusion(row: dict, registry_index: dict | None) -> str:
+    if not registry_index:
+        return ""
+    keys = _accounts_registry_lookup_keys(row)
+    dkey = _path_key(str(row.get("dir") or ""))
+    tomb_names = registry_index.get("tombstoned_names") or {}
+    tomb_dirs = registry_index.get("tombstoned_dirs") or {}
+    for key in keys:
+        if key in tomb_names:
+            return _accounts_registry_reason(
+                tomb_names[key], "tombstoned in fak accounts registry")
+    if dkey and dkey in tomb_dirs:
+        return _accounts_registry_reason(
+            tomb_dirs[dkey], "tombstoned in fak accounts registry")
+
+    # Exact active registry entries stay valid even if an older tombstone shares the
+    # same account identity. Unknown aliases with that retired identity are excluded.
+    if keys & set(registry_index.get("active_names") or set()):
+        return ""
+    if dkey and dkey in (registry_index.get("active_dirs") or set()):
+        return ""
+
+    identity_key = _identity_account_key(_account_identity_from(row))
+    tomb_identities = registry_index.get("tombstoned_identities") or {}
+    if identity_key and identity_key in tomb_identities:
+        return _accounts_registry_reason(
+            tomb_identities[identity_key],
+            "same account identity as tombstoned fak accounts registry seat",
+        )
+    return ""
+
 
 # annotate_accounts calls runtime_status once per worker, so a naive per-call ledger read
 # re-parses the whole probe_ledger.jsonl ~10x per roster render. Memoize the parsed snapshot
@@ -1139,7 +1268,8 @@ def read_account_identity(acct_dir: str) -> dict:
     return out
 
 
-def _classify_row(acct_dir: str, product: str, account: str, pol: dict) -> dict:
+def _classify_row(acct_dir: str, product: str, account: str, pol: dict,
+                  accounts_index: dict | None = None) -> dict:
     """Apply policy + structure checks to one discovered dir, returning a row.
 
     Shared by the Claude and opencode discovery passes so the worker/excluded/
@@ -1164,6 +1294,14 @@ def _classify_row(acct_dir: str, product: str, account: str, pol: dict) -> dict:
         return {"dir": acct_dir, "product": product, "account": account, "tag": tag,
                 "kind": "excluded", "reason": "tombstoned (.DELETED marker)", "notes": note}
     identity = read_account_identity(acct_dir) if product == "claude" else {}
+    registry_reason = _accounts_registry_exclusion(
+        {"dir": acct_dir, "product": product, "account": account, "tag": tag,
+         "identity": identity, **identity},
+        accounts_index,
+    )
+    if registry_reason:
+        return {"dir": acct_dir, "product": product, "account": account, "tag": tag,
+                "kind": "excluded", "reason": registry_reason, "notes": note}
     hit = _excluded_match(tag, account, pol.get("exclude", []),
                           str(identity.get("login_email", "")))
     if hit:
@@ -1188,7 +1326,8 @@ def _classify_row(acct_dir: str, product: str, account: str, pol: dict) -> dict:
     return row
 
 
-def _discover_claude(home: str, pol: dict) -> list[dict]:
+def _discover_claude(home: str, pol: dict,
+                     accounts_index: dict | None = None) -> list[dict]:
     """Glob ``<home>/.claude*`` -- Claude config dirs under the user home."""
     rows: list[dict] = []
     for acct_dir in glob.glob(os.path.join(home, ".claude*")):
@@ -1204,11 +1343,12 @@ def _discover_claude(home: str, pol: dict) -> list[dict]:
             rows.append({"dir": acct_dir, "product": "claude", "account": account, "tag": tag,
                          "kind": "non-account", "reason": "no projects/ subdir", "notes": note})
             continue
-        rows.append(_classify_row(acct_dir, "claude", account, pol))
+        rows.append(_classify_row(acct_dir, "claude", account, pol, accounts_index))
     return rows
 
 
-def _discover_opencode(config_home: str, pol: dict) -> list[dict]:
+def _discover_opencode(config_home: str, pol: dict,
+                       accounts_index: dict | None = None) -> list[dict]:
     """Glob ``<config_home>/opencode*`` -- opencode config dirs under XDG home.
 
     A dir is an opencode *account* when it holds an ``opencode.json`` /
@@ -1230,7 +1370,7 @@ def _discover_opencode(config_home: str, pol: dict) -> list[dict]:
             rows.append({"dir": acct_dir, "product": "opencode", "account": account, "tag": tag,
                          "kind": "non-account", "reason": "no opencode.json config", "notes": note})
             continue
-        rows.append(_classify_row(acct_dir, "opencode", account, pol))
+        rows.append(_classify_row(acct_dir, "opencode", account, pol, accounts_index))
     return rows
 
 
@@ -1346,7 +1486,9 @@ def discover_accounts(home: str = USER, policy: dict | None = None,
     """
     pol = policy or load_policy()
     ch = config_home or CONFIG_HOME
-    rows = _discover_claude(home, pol) + _discover_opencode(ch, pol)
+    accounts_index = _accounts_registry_index(load_accounts_registry(home=home))
+    rows = _discover_claude(home, pol, accounts_index) + _discover_opencode(
+        ch, pol, accounts_index)
     # reconcile WHO each dir is logged into: collapse N dirs on one Anthropic account to
     # one canonical worker + duplicates, so the roster stops presenting one throttled
     # account as several independent healthy workers.
@@ -2309,8 +2451,19 @@ def is_worker(account: str, home: str = USER, policy: dict | None = None) -> boo
     Product-neutral: works for ``.claude-*`` and ``opencode-*`` basenames alike.
     Cheap, standalone check the session tools call per-account in their scan loop;
     it does not require the account dir to currently exist on disk."""
+    if ".deleted" in account.lower():
+        return False
     pol = policy or load_policy()
     tag = account_tag(account)
+    product = account_product(account)
+    acct_dir = os.path.join(CONFIG_HOME if product == "opencode" else home, account)
+    identity = read_account_identity(acct_dir) if product == "claude" else {}
+    if _accounts_registry_exclusion(
+        {"dir": acct_dir, "product": product, "account": account, "tag": tag,
+         "identity": identity, **identity},
+        _accounts_registry_index(load_accounts_registry(home=home)),
+    ):
+        return False
     if _excluded_match(tag, account, pol.get("exclude", [])):
         return False
     include_only = [t for t in pol.get("include_only", []) if t]

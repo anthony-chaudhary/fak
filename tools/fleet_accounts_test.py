@@ -59,6 +59,13 @@ def login_dir(root: Path, name: str, *, uuid: str = "", email: str = "",
     return path
 
 
+def write_accounts_registry(home: Path, homes: list[dict]) -> Path:
+    path = home / ".claude-accounts" / "registry.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"version": "test", "homes": homes}), encoding="utf-8")
+    return path
+
+
 class FleetAccountsTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -67,6 +74,10 @@ class FleetAccountsTest(unittest.TestCase):
         # hermetic and never glob the real ~/.config/opencode on the host
         self.config_home = self.home / "config"
         self.config_home.mkdir()
+        self._env = mock.patch.dict(os.environ, {}, clear=False)
+        self._env.start()
+        os.environ.pop("FAK_ACCOUNTS_REGISTRY", None)
+        self.addCleanup(self._env.stop)
         self.addCleanup(self._tmp.cleanup)
 
     def test_discover_accounts_separates_workers_excluded_and_non_accounts(self) -> None:
@@ -105,6 +116,48 @@ class FleetAccountsTest(unittest.TestCase):
 
         self.assertEqual(row["kind"], "excluded")
         self.assertEqual(row["reason"], "retired day28 account")
+
+    def test_fak_accounts_tombstone_excludes_existing_config_dir(self) -> None:
+        acct = login_dir(self.home, ".claude-gem7-netra", uuid="uuid-day30",
+                         email="day30@example.com")
+        write_accounts_registry(self.home, [
+            {
+                "name": "gem7-netra",
+                "dir": str(acct),
+                "status": "tombstoned",
+                "rehome_to": "default",
+                "identity": {"account_uuid": "uuid-day30", "email": "day30@example.com"},
+                "tombstone_reason": "archived by operator",
+            }
+        ])
+
+        rows = fleet_accounts.discover_accounts(str(self.home),
+                                                config_home=str(self.config_home))
+        row = {r["account"]: r for r in rows}[".claude-gem7-netra"]
+
+        self.assertEqual(row["kind"], "excluded")
+        self.assertIn("archived by operator", row["reason"])
+        self.assertFalse(fleet_accounts.is_worker(".claude-gem7-netra", str(self.home)))
+
+    def test_fak_accounts_tombstone_excludes_relogin_alias_by_identity(self) -> None:
+        login_dir(self.home, ".claude-gem7NEW-netra", uuid="uuid-retired",
+                  email="gem7@example.com")
+        write_accounts_registry(self.home, [
+            {
+                "name": "gem7-netra",
+                "dir": str(self.home / ".claude-gem7-netra.DELETED-2026-07-05"),
+                "status": "tombstoned",
+                "rehome_to": "default",
+                "identity": {"account_uuid": "uuid-retired", "email": "gem7@example.com"},
+            }
+        ])
+
+        rows = fleet_accounts.discover_accounts(str(self.home),
+                                                config_home=str(self.config_home))
+        row = {r["account"]: r for r in rows}[".claude-gem7NEW-netra"]
+
+        self.assertEqual(row["kind"], "excluded")
+        self.assertIn("same account identity", row["reason"])
 
     def test_policy_file_merges_with_safe_defaults(self) -> None:
         policy_path = self.home / "accounts_policy.json"
@@ -345,6 +398,8 @@ class FleetAccountsTest(unittest.TestCase):
         pol = {"exclude": ["backup", "breakglass"], "include_only": [], "notes": {}}
         self.assertTrue(fleet_accounts.is_worker(".claude-gem99-acct", str(self.home), pol))
         self.assertFalse(fleet_accounts.is_worker(".claude-backup", str(self.home), pol))
+        self.assertFalse(
+            fleet_accounts.is_worker(".claude-old.DELETED-2026-07-05", str(self.home), pol))
 
     def test_include_only_excludes_accounts_off_the_allowlist(self) -> None:
         account_dir(self.home, ".claude")
@@ -807,6 +862,10 @@ class WaveAllocationTest(unittest.TestCase):
         self.home = Path(self._tmp.name)
         self.config_home = self.home / "config"
         self.config_home.mkdir()
+        self._env = mock.patch.dict(os.environ, {}, clear=False)
+        self._env.start()
+        os.environ.pop("FAK_ACCOUNTS_REGISTRY", None)
+        self.addCleanup(self._env.stop)
         self.addCleanup(self._tmp.cleanup)
 
     def _three_distinct(self) -> None:
