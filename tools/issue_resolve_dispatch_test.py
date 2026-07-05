@@ -3763,7 +3763,12 @@ class WitnessExitedWorkersTest(unittest.TestCase):
                                              git=boom_git, lease_runner=lease_runner)
             self.assertEqual(out["audited"], [])
             self.assertEqual(out["lease_release_retried"], [
-                {"log": log.name, "id": "resolve-tools", "released": True}
+                {
+                    "log": log.name,
+                    "id": "resolve-tools",
+                    "reason": "already_witnessed_dead_worker",
+                    "released": True,
+                }
             ])
             self.assertEqual(len(out["lease_released"]), 1)
             self.assertEqual(out["lease_release_failed"], [])

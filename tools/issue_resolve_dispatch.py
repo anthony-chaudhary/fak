@@ -3103,6 +3103,7 @@ def witness_exited_workers(runs_dir: Path, root: Path, *, live: bool,
                         out["lease_release_retried"].append({
                             "log": log.name,
                             "id": lease.get("id"),
+                            "reason": "already_witnessed_dead_worker",
                             "released": bool(rel.get("released")),
                         })
                         if rel.get("released"):
