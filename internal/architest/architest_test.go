@@ -52,7 +52,6 @@ var tier = map[string]int{
 	"apihostprobe":         1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
 	"accountprobe":         1, // pure account-probe ledger reader (probe_ledger.jsonl): last-probe-by-account + probe recency for the roster fresh-probe fold; stdlib-only, imports nothing internal, off the hot path.
 	"dispatchconservation": 1, // pure worker-unit conservation fold over .dispatch-runs artifacts; stdlib-only, off the hot path.
-	"dispatchstatus":       1, // pure dispatch lease-status classifier (refs/fak/locks records -> LIVE/EXPIRED + tree-overlap candidate-blocking) ported from tools/dispatch_status.py; stdlib-only, imports nothing internal, off the hot path.
 	"eveparity":            1, // CI-runnable Eve-eval parity witness (#2605): pure in-repo eval-semantics evaluator (Evaluate/Compare keep the hard/soft gate distinction) proving fak-routed == raw; production code stdlib-only, off the hot path.
 	"benchcatalog":         1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
 	"clonescan":            1, // pure authoring-time clone QUERY: the forward half of the code-slop clone detector (normalized Go token-window engine) as an importable library — "does a token-similar block already exist?" before the code is written; stdlib-only, no internal import, off the hot path.
