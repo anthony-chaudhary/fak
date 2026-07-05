@@ -164,6 +164,91 @@ func TestKnownBadClaimElectsExactlyOneFixer(t *testing.T) {
 	}
 }
 
+// TestKnownBadClaimSequentialRefusalNamesWinner pins the DETERMINISTIC LEASE_HELD
+// branch that the concurrent race test cannot guarantee (a simultaneous create may
+// instead lose the CAS as LEASE_CONTENDED): once a first claim has SETTLED, a second
+// claim by a different holder is refused LEASE_HELD and handed the settled winner's
+// identity, with nothing appended to the ledger for the loser. It also asserts the
+// winner's --json envelope carries the stamped claim Record (claimed_by = winner).
+func TestKnownBadClaimSequentialRefusalNamesWinner(t *testing.T) {
+	dir := gitInitKnownBad(t)
+	ledger := filepath.Join(dir, "known-bad.jsonl")
+	const now = int64(1_700_000_000)
+
+	sig := knownbad.Signature("test", []string{"internal/bar/**"}, "")
+	var rb bytes.Buffer
+	if rc := runKnownBad(&rb, &rb, []string{
+		"record", "--tree", "internal/bar/**", "--reason", "test", "--ledger", ledger,
+	}, now); rc != 0 {
+		t.Fatalf("record rc=%d out=%q", rc, rb.String())
+	}
+
+	// First claim settles the election and stamps the winner into the --json Record.
+	var wb bytes.Buffer
+	if rc := runKnownBad(&wb, &wb, []string{
+		"claim", "--by", "winner", "--dir", dir, "--ledger", ledger, "--json", sig,
+	}, now); rc != 0 {
+		t.Fatalf("first claim rc=%d out=%q", rc, wb.String())
+	}
+	var win struct {
+		OK     bool             `json:"ok"`
+		Fixer  string           `json:"fixer"`
+		Record *knownbad.Record `json:"record"`
+	}
+	if err := json.Unmarshal(wb.Bytes(), &win); err != nil {
+		t.Fatalf("winner --json invalid: %v\nout=%q", err, wb.String())
+	}
+	if !win.OK || win.Fixer != "winner" || win.Record == nil || win.Record.ClaimedBy != "winner" {
+		t.Fatalf("winner envelope did not carry the stamped claim record: %+v", win)
+	}
+
+	// A settled lease means a second, different holder is refused LEASE_HELD (never the
+	// nondeterministic CONTENDED path) and is told the settled winner's identity.
+	var lb bytes.Buffer
+	rc := runKnownBad(&lb, &lb, []string{
+		"claim", "--by", "latecomer", "--dir", dir, "--ledger", ledger, "--json", sig,
+	}, now)
+	if rc != leaserefRefused {
+		t.Fatalf("late claim rc=%d, want %d (refused) out=%q", rc, leaserefRefused, lb.String())
+	}
+	var lose struct {
+		OK     bool   `json:"ok"`
+		Fixer  string `json:"fixer"`
+		Reason string `json:"reason"`
+		Lease  struct {
+			Reason string `json:"reason"`
+		} `json:"lease"`
+	}
+	if err := json.Unmarshal(lb.Bytes(), &lose); err != nil {
+		t.Fatalf("loser --json invalid: %v\nout=%q", err, lb.String())
+	}
+	if lose.OK || lose.Reason != reasonKnownBadAlreadyClaimed || lose.Fixer != "winner" {
+		t.Fatalf("late claim not refused with the winner's identity: %+v", lose)
+	}
+	if lose.Lease.Reason != leaseref.ReasonLeaseHeld {
+		t.Errorf("settled-lease refusal = %q, want the deterministic %s", lose.Lease.Reason, leaseref.ReasonLeaseHeld)
+	}
+
+	// The loser stamped NOTHING: the ledger still has exactly one claimed row, owned by
+	// the winner — the exactly-one invariant survives the losing attempt.
+	records, err := readKnownBadLedger(ledger)
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	claimed := 0
+	for _, r := range records {
+		if r.Signature == sig && r.Claimed() {
+			claimed++
+			if r.ClaimedBy != "winner" {
+				t.Errorf("claimed row owned by %q, want winner", r.ClaimedBy)
+			}
+		}
+	}
+	if claimed != 1 {
+		t.Fatalf("ledger has %d claimed rows, want exactly 1 (the loser must not append)", claimed)
+	}
+}
+
 // TestKnownBadClaimPreconditions pins the claim verb's non-race control paths: a
 // missing signature and a malformed signature are usage errors (exit 2), and a
 // claim on a signature that is not a LIVE ledger row is a precondition error (exit
