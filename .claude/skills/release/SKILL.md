@@ -58,7 +58,7 @@ python tools/release_lock.py acquire --ttl 1800
 python tools/release_lock.py renew --ttl 1800   # extend; refuses (exit 3) if the lease was already stolen
 ```
 
-A `renew` that refuses with `reason: "held by another"` means you already lost the lock — **stop before you push or tag**, don't `--force` over the new holder. (`fak release ship` is the automated hot-tree path; it holds this same lock but does not yet auto-renew it, so a very long ship still relies on its acquire TTL — renewing that path automatically is tracked follow-up work.)
+A `renew` that refuses with `reason: "held by another"` means you already lost the lock — **stop before you push or tag**, don't `--force` over the new holder. (`fak release ship` is the automated hot-tree path; it holds this same lock and auto-renews it before the tag and publish phases, refusing before it tags if the renewal proves the lease was stolen.)
 
 Release a manual lock on **every** exit path including failure (`python tools/release_lock.py release`); a stranded lock self-heals at TTL but releasing promptly is courteous.
 
@@ -118,7 +118,7 @@ python tools/release_tag.py --version X.Y.Z --ref <release-sha> --skip-dry-run -
 git ls-remote --tags origin 'vX.Y.Z^{}'
 ```
 
-The `ci` check is advisory NO_SIGNAL until CI runs on the release commit; that's expected. If `git push` rejects (a peer pushed), fast-forward your single release commit on top — never force-push `main`.
+The `ci` check is advisory NO_SIGNAL until CI runs on the release commit; that's expected. If `git push` rejects (a peer pushed), fast-forward your single release commit on top — never force-push `main`. (`fak release ship` automates exactly this recovery on the same-trunk hot path: it re-cuts the VERSION+note commit onto the advanced trunk tip and retries the leased push up to `--push-retries` times, refusing only if trunk was rewritten rather than fast-forwarded.)
 
 ## Step 7: Create the GitHub release page (do NOT skip), then artifacts
 

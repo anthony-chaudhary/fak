@@ -1379,6 +1379,257 @@ func TestRenderReleaseShipIncludesRemoteBranchLease(t *testing.T) {
 	}
 }
 
+func TestReleaseShipRetriesTrunkPushAfterPeerAdvance(t *testing.T) {
+	revParseCount := 0
+	cutCount := 0
+	restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
+		switch {
+		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "acquire":
+			return 0, `{"ok":true,"lock":{"owner":"ship-owner"}}`
+		case name == "git" && sameArgs(args, "fetch", "origin", "refs/heads/main:refs/remotes/origin/main"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/main^{commit}"):
+			revParseCount++
+			if revParseCount == 1 {
+				return 0, "base-sha\n"
+			}
+			return 0, "new-base-sha\n"
+		case name == "git" && sameArgs(args, "worktree", "add", "--detach", fakeReleaseWorktree, "base-sha"):
+			return 0, ""
+		case name == releaseShipPython() && len(args) > 0 && strings.HasSuffix(args[0], filepath.Join("tools", "release_cut.py")):
+			cutCount++
+			if cutCount == 1 {
+				return 0, `{"ok":true,"version":"0.35.0","tag":"v0.35.0","commit_sha":"release-sha"}`
+			}
+			return 0, `{"ok":true,"version":"0.35.0","tag":"v0.35.0","commit_sha":"release-sha-2"}`
+		case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "base-sha", "release-sha"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "push", "origin", "--force-with-lease=refs/heads/main:base-sha", "HEAD:refs/heads/main"):
+			return 1, "! [rejected] stale info\n"
+		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "renew":
+			return 0, `{"ok":true,"renewed":true}`
+		case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "base-sha", "new-base-sha"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "reset", "--hard", "new-base-sha"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "new-base-sha", "release-sha-2"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "push", "origin", "--force-with-lease=refs/heads/main:new-base-sha", "HEAD:refs/heads/main"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "ls-remote", "origin", "refs/heads/main"):
+			return 0, "release-sha-2\trefs/heads/main\n"
+		case name == releaseShipPython() && len(args) > 0 && strings.HasSuffix(args[0], filepath.Join("tools", "release_tag.py")):
+			if !containsArgPair(args, "--ref", "release-sha-2") || !containsArgPair(args, "--version", "0.35.0") {
+				t.Fatalf("release_tag must tag the re-cut commit: %v", args)
+			}
+			return 0, `{"ok":true,"tag":"v0.35.0","tag_created":true,"tag_pushed":true}`
+		case name == releaseShipPython() && len(args) > 0 && strings.HasSuffix(args[0], filepath.Join("tools", "release_publish.py")):
+			return 0, `{"ok":true,"release_created":true,"github_release":{"status":"present","url":"https://example.test/v0.35.0"}}`
+		case name == "git" && sameArgs(args, "worktree", "remove", "--force", fakeReleaseWorktree):
+			return 0, ""
+		case name == "git" && sameArgs(args, "worktree", "prune"):
+			return 0, ""
+		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "release":
+			return 0, `{"ok":true,"released":true}`
+		default:
+			t.Fatalf("unexpected command in %s: %s %v", cwd, name, args)
+			return 127, "unexpected"
+		}
+	})
+	defer restore()
+
+	result := executeReleaseShip(releaseShipOptions{
+		execute:         true,
+		base:            "origin/main",
+		sourceBranch:    "main",
+		remote:          "origin",
+		trunk:           "main",
+		workflow:        "ci.yml",
+		limitCommits:    50,
+		ttl:             1800,
+		fetch:           true,
+		requireCI:       false,
+		waitCI:          false,
+		skipDryRun:      true,
+		ciAppearTimeout: 0,
+		pushRetries:     2,
+	})
+
+	if !result.OK {
+		t.Fatalf("result not ok: %#v", result)
+	}
+	if len(result.PushRetries) != 1 {
+		t.Fatalf("push retries = %#v, want exactly one rebase attempt", result.PushRetries)
+	}
+	retry := result.PushRetries[0]
+	if retry["ok"] != true || retry["old_base"] != "base-sha" || retry["new_base"] != "new-base-sha" || retry["commit_sha"] != "release-sha-2" {
+		t.Fatalf("retry witness = %#v, want base-sha->new-base-sha re-cut to release-sha-2", retry)
+	}
+	if result.CommitSHA != "release-sha-2" || result.BaseSHA != "new-base-sha" {
+		t.Fatalf("release identity after retry = commit %q base %q, want re-cut on new tip", result.CommitSHA, result.BaseSHA)
+	}
+	if result.RemoteBranchPush == nil || result.RemoteBranchPush["lease_expected_sha"] != "new-base-sha" {
+		t.Fatalf("final push must lease against the advanced tip: %#v", result.RemoteBranchPush)
+	}
+	if result.RemoteBranch == nil || result.RemoteBranch["sha"] != "release-sha-2" {
+		t.Fatalf("verified remote = %#v, want release-sha-2", result.RemoteBranch)
+	}
+	if result.TagResult == nil || result.Publish == nil {
+		t.Fatalf("retry that lands must still tag/publish: tag=%#v publish=%#v", result.TagResult, result.Publish)
+	}
+}
+
+func TestReleaseShipRetryRefusesDivergedTrunk(t *testing.T) {
+	revParseCount := 0
+	restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
+		switch {
+		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "acquire":
+			return 0, `{"ok":true,"lock":{"owner":"ship-owner"}}`
+		case name == "git" && sameArgs(args, "fetch", "origin", "refs/heads/main:refs/remotes/origin/main"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/main^{commit}"):
+			revParseCount++
+			if revParseCount == 1 {
+				return 0, "base-sha\n"
+			}
+			return 0, "rewritten-sha\n"
+		case name == "git" && sameArgs(args, "worktree", "add", "--detach", fakeReleaseWorktree, "base-sha"):
+			return 0, ""
+		case name == releaseShipPython() && len(args) > 0 && strings.HasSuffix(args[0], filepath.Join("tools", "release_cut.py")):
+			return 0, `{"ok":true,"version":"0.35.0","tag":"v0.35.0","commit_sha":"release-sha"}`
+		case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "base-sha", "release-sha"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "push", "origin", "--force-with-lease=refs/heads/main:base-sha", "HEAD:refs/heads/main"):
+			return 1, "! [rejected] stale info\n"
+		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "renew":
+			return 0, `{"ok":true,"renewed":true}`
+		case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "base-sha", "rewritten-sha"):
+			return 1, ""
+		case name == "git" && sameArgs(args, "worktree", "remove", "--force", fakeReleaseWorktree):
+			return 0, ""
+		case name == "git" && sameArgs(args, "worktree", "prune"):
+			return 0, ""
+		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "release":
+			return 0, `{"ok":true,"released":true}`
+		default:
+			t.Fatalf("diverged trunk must refuse before reset/re-cut/tag; got %s %v in %s", name, args, cwd)
+			return 127, "unexpected"
+		}
+	})
+	defer restore()
+
+	result := executeReleaseShip(releaseShipOptions{
+		execute:         true,
+		base:            "origin/main",
+		sourceBranch:    "main",
+		remote:          "origin",
+		trunk:           "main",
+		workflow:        "ci.yml",
+		limitCommits:    50,
+		ttl:             1800,
+		fetch:           true,
+		requireCI:       false,
+		waitCI:          false,
+		skipDryRun:      true,
+		ciAppearTimeout: 0,
+		pushRetries:     2,
+	})
+
+	if result.OK {
+		t.Fatalf("result unexpectedly ok: %#v", result)
+	}
+	if len(result.PushRetries) != 1 || result.PushRetries[0]["reason"] != "retry_trunk_diverged" {
+		t.Fatalf("push retries = %#v, want a single retry_trunk_diverged refusal", result.PushRetries)
+	}
+	if result.TagResult != nil || result.Publish != nil {
+		t.Fatalf("diverged trunk must refuse before tag/publish: tag=%#v publish=%#v", result.TagResult, result.Publish)
+	}
+	if len(result.Errors) == 0 || !strings.Contains(result.Errors[0], "push_trunk_retry_failed") {
+		t.Fatalf("errors = %#v, want push_trunk_retry_failed", result.Errors)
+	}
+}
+
+func TestReleaseShipRetryBoundedByPushRetries(t *testing.T) {
+	revParseCount := 0
+	cutCount := 0
+	restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
+		switch {
+		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "acquire":
+			return 0, `{"ok":true,"lock":{"owner":"ship-owner"}}`
+		case name == "git" && sameArgs(args, "fetch", "origin", "refs/heads/main:refs/remotes/origin/main"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/main^{commit}"):
+			revParseCount++
+			if revParseCount == 1 {
+				return 0, "base-sha\n"
+			}
+			return 0, "new-base-sha\n"
+		case name == "git" && sameArgs(args, "worktree", "add", "--detach", fakeReleaseWorktree, "base-sha"):
+			return 0, ""
+		case name == releaseShipPython() && len(args) > 0 && strings.HasSuffix(args[0], filepath.Join("tools", "release_cut.py")):
+			cutCount++
+			if cutCount == 1 {
+				return 0, `{"ok":true,"version":"0.35.0","tag":"v0.35.0","commit_sha":"release-sha"}`
+			}
+			return 0, `{"ok":true,"version":"0.35.0","tag":"v0.35.0","commit_sha":"release-sha-2"}`
+		case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "base-sha", "release-sha"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "push", "origin", "--force-with-lease=refs/heads/main:base-sha", "HEAD:refs/heads/main"):
+			return 1, "! [rejected] stale info\n"
+		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "renew":
+			return 0, `{"ok":true,"renewed":true}`
+		case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "base-sha", "new-base-sha"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "reset", "--hard", "new-base-sha"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "new-base-sha", "release-sha-2"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "push", "origin", "--force-with-lease=refs/heads/main:new-base-sha", "HEAD:refs/heads/main"):
+			return 1, "! [rejected] stale info\n"
+		case name == "git" && sameArgs(args, "worktree", "remove", "--force", fakeReleaseWorktree):
+			return 0, ""
+		case name == "git" && sameArgs(args, "worktree", "prune"):
+			return 0, ""
+		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "release":
+			return 0, `{"ok":true,"released":true}`
+		default:
+			t.Fatalf("bounded retry must stop after one rebase; got %s %v in %s", name, args, cwd)
+			return 127, "unexpected"
+		}
+	})
+	defer restore()
+
+	result := executeReleaseShip(releaseShipOptions{
+		execute:         true,
+		base:            "origin/main",
+		sourceBranch:    "main",
+		remote:          "origin",
+		trunk:           "main",
+		workflow:        "ci.yml",
+		limitCommits:    50,
+		ttl:             1800,
+		fetch:           true,
+		requireCI:       false,
+		waitCI:          false,
+		skipDryRun:      true,
+		ciAppearTimeout: 0,
+		pushRetries:     1,
+	})
+
+	if result.OK {
+		t.Fatalf("result unexpectedly ok: %#v", result)
+	}
+	if len(result.PushRetries) != 1 {
+		t.Fatalf("push retries = %#v, want exactly one rebase before the bound is hit", result.PushRetries)
+	}
+	if result.TagResult != nil || result.Publish != nil {
+		t.Fatalf("exhausted retries must refuse before tag/publish: tag=%#v publish=%#v", result.TagResult, result.Publish)
+	}
+	if len(result.Errors) == 0 || !strings.Contains(result.Errors[0], "push_trunk_failed") {
+		t.Fatalf("errors = %#v, want push_trunk_failed after the bound", result.Errors)
+	}
+}
+
 const fakeReleaseWorktree = "C:\\tmp\\fak-release-ship-test"
 
 func stubReleaseShipRunner(t *testing.T, runner releaseShipCommandRunner) func() {

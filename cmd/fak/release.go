@@ -196,6 +196,10 @@ worktree, while sharing the same single-writer release lock.
 ship auto-sizes that lock to the bounded pre-tag work and renews it before
 tag/publish; if renewal proves the lock was lost, it refuses before creating
 the tag or GitHub release page.
+On the same-trunk hot path, if a peer fast-forwards trunk during the cut and the
+force-with-lease push refuses, ship re-cuts the VERSION+note commit onto the new
+tip and retries the leased push up to --push-retries times (default 2); it never
+force-pushes and never tags a lost race — a rewritten/diverged trunk still refuses.
 When cut/tag are executed through this front door, --skip-dry-run is added unless
 you supplied it already; the real witness is the green trunk plus the post-tag
 release-substrate suite.

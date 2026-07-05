@@ -59,6 +59,7 @@ type releaseShipOptions struct {
 	prTitle              string
 	promotionBranch      string
 	allowDirectPromotion bool
+	pushRetries          int
 }
 
 type releaseShipResult struct {
@@ -90,6 +91,7 @@ type releaseShipResult struct {
 	ReleaseLock            map[string]any       `json:"release_lock,omitempty"`
 	ReleaseLockRenewals    []map[string]any     `json:"release_lock_renewals,omitempty"`
 	ReleaseLockRelease     map[string]any       `json:"release_lock_release,omitempty"`
+	PushRetries            []map[string]any     `json:"push_retries,omitempty"`
 	RemoteBranch           map[string]string    `json:"remote_branch,omitempty"`
 	RemoteBranchPush       map[string]any       `json:"remote_branch_push,omitempty"`
 	RemoteBranchFinalCheck map[string]any       `json:"remote_branch_final_check,omitempty"`
@@ -161,6 +163,7 @@ func parseReleaseShipOptions(stderr io.Writer, argv []string) (releaseShipOption
 	fs.StringVar(&opts.prTitle, "pr-title", "", "override the generated --open-pr title")
 	fs.StringVar(&opts.promotionBranch, "promotion-branch", "", "branch to push the exact release-cut commit to before opening --open-pr; default fak/release/<tag>")
 	fs.BoolVar(&opts.allowDirectPromotion, "allow-direct-promotion", false, "allow --execute to push a distinct --source-branch directly to --trunk; default requires --open-pr for hot-tree safety")
+	fs.IntVar(&opts.pushRetries, "push-retries", opts.pushRetries, "same-trunk hot path: re-cut onto the advanced trunk tip and retry the fast-forward push up to N times when a peer pushes during the cut (never force-pushes)")
 	if err := fs.Parse(argv); err != nil {
 		return opts, err
 	}
@@ -181,6 +184,9 @@ func parseReleaseShipOptions(stderr io.Writer, argv []string) (releaseShipOption
 	}
 	if opts.ttl <= 0 {
 		return opts, fmt.Errorf("--ttl must be positive")
+	}
+	if opts.pushRetries < 0 {
+		return opts, fmt.Errorf("--push-retries must not be negative")
 	}
 	if opts.openPR && opts.sourceBranch == opts.trunk {
 		return opts, fmt.Errorf("--open-pr requires distinct --source-branch and --trunk (today's branch-role regime has both = %q; see docs/branch-regime-shadow-cutover.md)", opts.trunk)
@@ -236,6 +242,7 @@ func defaultReleaseShipOptions(root string) releaseShipOptions {
 		waitCI:          true,
 		skipDryRun:      true,
 		ciAppearTimeout: 2 * time.Minute,
+		pushRetries:     2,
 	}
 	return opts
 }
@@ -378,10 +385,7 @@ func executeReleaseShip(opts releaseShipOptions) (result releaseShipResult) {
 		return finishReleaseShipWithCleanup(&result, root, opts, worktreeAdded)
 	}
 
-	push := releaseShipPushTrunk(&result, wt, opts)
-	result.RemoteBranchPush = push
-	if !releaseStatusBool(push["ok"]) {
-		result.fail("push_trunk_failed", jsonTail(push))
+	if !executeReleaseShipTrunkPush(&result, root, wt, env, opts) {
 		return finishReleaseShipWithCleanup(&result, root, opts, worktreeAdded)
 	}
 	remoteSHA := verifyReleaseShipRemote(&result, wt, opts, result.CommitSHA)
@@ -904,6 +908,102 @@ func releaseShipPushTrunk(result *releaseShipResult, wt string, opts releaseShip
 		"release_commit_sha": result.CommitSHA,
 		"used_force_lease":   true,
 	}
+}
+
+// executeReleaseShipTrunkPush pushes the release-cut commit to trunk with a
+// force-with-lease, and on the same-trunk hot path re-cuts onto an
+// advanced trunk tip and retries when a peer fast-forwards trunk mid-cut. It
+// never force-pushes (each retry leases against the exact observed tip), never
+// rebases past a rewritten trunk, and returns true only after a verified push --
+// so tag/publish still run only against a landed release commit.
+func executeReleaseShipTrunkPush(result *releaseShipResult, root, wt string, env []string, opts releaseShipOptions) bool {
+	for attempt := 0; ; attempt++ {
+		push := releaseShipPushTrunk(result, wt, opts)
+		result.RemoteBranchPush = push
+		if releaseStatusBool(push["ok"]) {
+			return true
+		}
+		if !releaseShipPushRetryable(opts, push) || attempt >= opts.pushRetries {
+			result.fail("push_trunk_failed", jsonTail(push))
+			return false
+		}
+		// Renew before the (possibly slow) re-cut so the lease survives the retry;
+		// a lost lock surfaces as release_lock_renew_failed and aborts.
+		if !renewReleaseShipLockForPhase(result, root, env, opts,
+			fmt.Sprintf("push_retry_%d", attempt+1),
+			releaseShipCutCommandTimeout+releaseShipGitPushCommandTimeout) {
+			return false
+		}
+		rebase := releaseShipRebaseCutOntoTrunk(result, root, wt, env, opts)
+		result.PushRetries = append(result.PushRetries, rebase)
+		if !releaseStatusBool(rebase["ok"]) {
+			result.fail("push_trunk_retry_failed", jsonTail(rebase))
+			return false
+		}
+	}
+}
+
+// releaseShipPushRetryable gates the rebase-and-retry to the same-trunk hot path
+// (source == trunk, the default main-only regime) and only for a lease-mismatch
+// push refusal -- a peer advancing trunk during the cut. Distinct-branch
+// promotion (--open-pr / --allow-direct-promotion) keeps the refuse behavior.
+func releaseShipPushRetryable(opts releaseShipOptions, push map[string]any) bool {
+	if opts.pushRetries <= 0 || opts.openPR {
+		return false
+	}
+	if opts.sourceBranch == "" || opts.sourceBranch != opts.trunk {
+		return false
+	}
+	return stringFromAny(push["reason"]) == "push_trunk_failed"
+}
+
+// releaseShipRebaseCutOntoTrunk re-fetches trunk, proves the new tip is a
+// fast-forward of the base we cut from (a peer added commits; history was not
+// rewritten), resets the detached worktree to that tip, and re-cuts the
+// VERSION+note commit onto it -- the automated form of the manual /release
+// "fast-forward your single release commit on top" recovery. It updates the
+// result's base/commit identity so the next push leases against the new tip. It
+// fails closed on a diverged trunk, an unchanged trunk (a transient push error
+// rather than a peer advance), or a refused re-cut.
+func releaseShipRebaseCutOntoTrunk(result *releaseShipResult, root, wt string, env []string, opts releaseShipOptions) map[string]any {
+	oldBase := result.BaseSHA
+	refspec := fmt.Sprintf("refs/heads/%s:refs/remotes/%s/%s", opts.trunk, opts.remote, opts.trunk)
+	if code, out := releaseShipCmd(result, root, "git", []string{"fetch", opts.remote, refspec}, nil, 5*time.Minute); code != 0 {
+		return map[string]any{"ok": false, "reason": "retry_fetch_failed", "old_base": oldBase, "tail": tail(out)}
+	}
+	code, out := releaseShipCmd(result, root, "git", []string{"rev-parse", "--verify", opts.remote + "/" + opts.trunk + "^{commit}"}, nil, time.Minute)
+	if code != 0 {
+		return map[string]any{"ok": false, "reason": "retry_base_unresolvable", "old_base": oldBase, "tail": tail(out)}
+	}
+	newBase := strings.TrimSpace(out)
+	if sameSHA(newBase, oldBase) {
+		return map[string]any{"ok": false, "reason": "retry_trunk_unchanged", "old_base": oldBase, "new_base": newBase}
+	}
+	if code, out := releaseShipCmd(result, wt, "git", []string{"merge-base", "--is-ancestor", oldBase, newBase}, nil, releaseShipMergeBaseCommandTimeout); code != 0 {
+		return map[string]any{"ok": false, "reason": "retry_trunk_diverged", "old_base": oldBase, "new_base": newBase, "tail": tail(out)}
+	}
+	if code, out := releaseShipCmd(result, wt, "git", []string{"reset", "--hard", newBase}, nil, time.Minute); code != 0 {
+		return map[string]any{"ok": false, "reason": "retry_reset_failed", "old_base": oldBase, "new_base": newBase, "tail": tail(out)}
+	}
+	result.BaseSHA = newBase
+	result.SourceSHA = newBase
+	cut := runReleaseShipCut(result, wt, releaseShipPromotionEnv(env, *result), opts)
+	result.Cut = cut
+	if ok, _ := cut["ok"].(bool); !ok {
+		return map[string]any{"ok": false, "reason": "retry_cut_refused", "old_base": oldBase, "new_base": newBase, "detail": jsonTail(cut)}
+	}
+	result.Version = stringFromAny(cut["version"])
+	result.Tag = stringFromAny(cut["tag"])
+	commit := stringFromAny(cut["commit_sha"])
+	if commit == "" {
+		c, o := releaseShipCmd(result, wt, "git", []string{"rev-parse", "HEAD"}, nil, releaseShipCommitResolveTimeout)
+		if c != 0 {
+			return map[string]any{"ok": false, "reason": "retry_commit_unresolvable", "old_base": oldBase, "new_base": newBase, "tail": tail(o)}
+		}
+		commit = strings.TrimSpace(o)
+	}
+	result.CommitSHA = commit
+	return map[string]any{"ok": true, "old_base": oldBase, "new_base": newBase, "commit_sha": commit, "version": result.Version, "tag": result.Tag}
 }
 
 func releaseShipTrunkLeaseExpected(result releaseShipResult) string {
@@ -1488,6 +1588,9 @@ func renderReleaseShip(stdout, stderr io.Writer, result releaseShipResult) {
 			}
 		}
 		fmt.Fprintf(stdout, "  pushed: %s/%s %s%s\n", result.RemoteBranch["remote"], result.RemoteBranch["trunk"], result.RemoteBranch["sha"], lease)
+	}
+	if n := len(result.PushRetries); n > 0 {
+		fmt.Fprintf(stdout, "  push retries: %d (re-cut onto advanced trunk)\n", n)
 	}
 	if result.PromotionBranchPush != nil {
 		branch := stringFromAny(result.PromotionBranchPush["branch"])
