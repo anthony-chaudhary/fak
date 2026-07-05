@@ -419,6 +419,11 @@ func renderAuditDiagnosis(d auditDiagnosis) string {
 			out("    blocked: %-16s x%d\n", r, f.ByReason[r])
 		}
 	}
+	if f.ChildCrash > 0 {
+		for _, c := range sortedKeys(f.ByCrashClass) {
+			out("    child crash: %-12s x%d\n", c, f.ByCrashClass[c])
+		}
+	}
 	if f.BlankReasonOnDeny > 0 {
 		out("    ⚠ %d block(s) carried no reason (a closed-vocabulary reason should accompany every deny)\n", f.BlankReasonOnDeny)
 	}

@@ -212,6 +212,34 @@ func TestRunAuditDiagnose_RenderReportsRepeatedQuarantine(t *testing.T) {
 	}
 }
 
+func TestRunAuditDiagnose_RenderReportsChildCrashClass(t *testing.T) {
+	r, _ := mintRow(1, "", journal.Row{
+		Kind:    "CHILD_CRASH",
+		Tool:    "opencode",
+		TraceID: "guard",
+		Reason:  "NONZERO_EXIT",
+		By:      "guard-supervisor",
+	})
+	dir := t.TempDir()
+	path := filepath.Join(dir, "guard-audit.jsonl")
+	writeRowsFile(t, path, []journal.Row{r})
+
+	var stdout, stderr bytes.Buffer
+	code := runAuditDiagnose(&stdout, &stderr, path, false)
+	if code != 0 {
+		t.Fatalf("sound child-crash journal should exit 0, got %d (stderr=%s)", code, stderr.String())
+	}
+	for _, want := range []string{
+		"floor activity : 1 decision",
+		"child crash:",
+		"NONZERO_EXIT",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("render missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
 // TestRunAuditDiagnose_InterleavedExitsZero writes an interleaved-but-intact journal to a
 // temp file and confirms the command exits 0 (a fleet user's default journal is trustworthy)
 // and the render names the INTERLEAVED verdict.
