@@ -38,6 +38,41 @@ func TestLimitResetWeeklyOnlyStillBlocks(t *testing.T) {
 	}
 }
 
+// UnknownModel names an unknown/invalid/unentitled MODEL refusal — a startup class a
+// fallback to a DIFFERENT model can fix, distinct from a usage cap (IsLimitError) and
+// an auth wall (IsAuthError). The "model" dimension must be named, so a generic service
+// blip is not misread as a model refusal.
+func TestUnknownModel(t *testing.T) {
+	yes := []string{
+		`error: model "fable" is not available for this account`,
+		`invalid model: fable`,
+		`model_not_found: fable`,
+		`your account does not have access to model claude-opus-4-8`,
+		`unsupported model claude-x`,
+		`your plan is not entitled to use the model`,
+	}
+	for _, s := range yes {
+		if !UnknownModel(s) {
+			t.Errorf("UnknownModel(%q) = false, want true", s)
+		}
+	}
+	no := []string{
+		`Not logged in. Please run /login`,              // auth wall — a model switch cannot fix
+		`You've hit your weekly limit`,                  // usage cap — no model dimension
+		`network unavailable while contacting provider`, // generic blip, "model" not named
+		``,
+	}
+	for _, s := range no {
+		if UnknownModel(s) {
+			t.Errorf("UnknownModel(%q) = true, want false", s)
+		}
+	}
+	// A model refusal must not be misclassified as an auth wall or a usage cap.
+	if IsAuthError(`invalid model: fable`) || IsLimitError(`invalid model: fable`) {
+		t.Fatalf("model refusal leaked into auth/limit classification")
+	}
+}
+
 func TestLimitResetAbsent(t *testing.T) {
 	if got := LimitReset("all done, shipped and green"); got != "" {
 		t.Fatalf("clean text should carry no reset, got %q", got)
