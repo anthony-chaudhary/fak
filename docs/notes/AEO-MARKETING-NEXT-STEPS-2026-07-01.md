@@ -14,25 +14,31 @@ description: "Consolidated, evidence-backed next-steps record for fak's answer-e
 > [`CONCEPT-EMERGING-MARKET-ADOPTION-2026-06-30`](CONCEPT-EMERGING-MARKET-ADOPTION-2026-06-30.md)
 > for the AEO/marketing slice (that note keeps the full India/China lever set).
 
-## Refreshed today (witnessed)
+## Refreshed / added (witnessed)
 
 - **AEO recency feeds regenerated** from the latest witnessed ships (`HEAD~50..HEAD`, the
   `fak marketing aeo --refresh` default range):
   - `docs/marketing/updates.json` — schema.org `ItemList` an answer engine ingests directly
-    (47 witnessed ships gathered; the feed carries the newest 25, `defaultFeedCap`).
+    (50 witnessed ships gathered; the feed carries the newest 25, `defaultFeedCap`).
   - `llms-updates.txt` — the plain, newest-first feed agents poll.
-  - Refreshed twice today; the current rewrite is anchored to 2026-07-01 commit SHAs
-    (newest entry `3444c4d8`).
-- **`llms-full.txt` regenerated — STALE flag cleared.** It now inlines the current
-  `llms.txt` and all 110 source docs; `llms_full`, `llms_full_sources`, and
-  `llms_full_navigable` all read `[ok]`.
+  - Refreshed on 2026-07-04; the current rewrite is anchored to July 4 commit SHAs
+    (newest entry `706fcacf`).
+- **`llms-full.txt` regenerated after the AEO hub landing.** It now inlines the current
+  `llms.txt` and 132 source docs.
 - **"What's new" block reinjected into `llms.txt`** via `fak marketing aeo --inject`
-  (marker-fenced; the 2026-07-01 ships now front the hand-authored map).
+  (marker-fenced; the 2026-07-04 ships now front the hand-authored map).
 - **3 dead citation links repaired.** One real: redacted private-tool names left inside
   GitHub URL slots in `docs/benchmarks/SWEBENCH-VERIFIED-GPU-SERVER-RESOLVE-COMPARE.md`
   (now plain text, honestly marked private). Two were scanner false positives — a markdown
   link whose text is the URL itself mis-parsed by `SELF_REPO_RE`; the capture now
   terminates at `]` (`tools/seo_aeo_scorecard.py`). `citation_links` reads `[ok]`.
+- **2026-07-04 frontier-model launch bridge added.** `internal/marketing/aeo.go` now emits
+  a schema.org `DefinedTermSet` and plain `llms-terms.txt` feed for core fak terms,
+  Hindi/Chinese localized discovery terms, and Fable 5-style model-launch queries such as
+  `Claude Fable 5 model routing`, `Fable 5 refusal fallback`, `frontier model prompt-cache
+  cost`, and `safety classifier vs capability gate`. The human/crawler hub is
+  [`docs/marketing/README.md`](../marketing/README.md); the source positioning note is
+  [`FABLE5-AEO-FRONTIER-MODEL-MARKETING-2026-07-04`](FABLE5-AEO-FRONTIER-MODEL-MARKETING-2026-07-04.md).
 
 ## Program status snapshot (SEO/AEO scorecard, `scope=core`)
 
@@ -42,7 +48,9 @@ checks green; the remaining debt is the in-page front-matter backlog:
 
 - meta coverage **90.5%**; site checks **20/20**; grades **A:228 B:1 C:0 D:0 F:24**.
 - JSON-LD present and valid: SoftwareApplication, FAQPage, WebSite, BreadcrumbList,
-  Organization, Person, Question/Answer, ListItem, Offer.
+  Organization, Person, Question/Answer, ListItem, Offer. The site SoftwareApplication
+  keywords now consume `docs/marketing/disambiguation-terms.json`; FAQPage JSON-LD mirrors
+  202 visible FAQ questions after the 2026-07-04 refresh.
 - robots.txt welcomes all four major answer-engine crawlers (+7 named); sitemap + seo-tag
   plugins on; FAQPage JSON-LD mirrors 199 visible FAQ questions.
 
@@ -59,10 +67,11 @@ checks green; the remaining debt is the in-page front-matter backlog:
 
 ## Next steps — marketing program (bounded, honest)
 
-1. **Localized AEO terms (lever 2).** Extend `internal/marketing/aeo.go` to emit in-language
-   disambiguation terms + structured data (Hindi; Baidu/Zhihu/掘金 zh terms) so an answer
-   engine responding in Hindi/Chinese names fak correctly. Bounded generator extension, not
-   new infra. Gap today: no localized terms are emitted.
+1. **Localized AEO terms (lever 2).** First pass shipped in `internal/marketing/aeo.go`:
+   Hindi + Simplified Chinese terms now emit into `docs/marketing/disambiguation-terms.json`
+   and `llms-terms.txt`. Next bounded step: extend the roster to the other shipped i18n
+   pages (`ta`, `te`, `bn`, `mr`, `de`, `fr`) and add a scorecard check that `llms.txt`,
+   JSON-LD keywords, and the term feed share the same core terms.
 2. **Cost framing in local unit-economics (lever 5).** Re-skin the existing (honest) benchmark
    story as cost-per-1,000-turns / margin-per-seat; quote the tuned ~4.1× headline, not the
    naive 60×. Copy-only, no new measurements.
@@ -88,8 +97,7 @@ checks green; the remaining debt is the in-page front-matter backlog:
 ## Verify
 
 ```
-fak marketing aeo --refresh              # rewrite updates.json + llms-updates.txt (done today)
-python tools/gen_llms_full.py            # clear the llms-full.txt STALE flag (step 1)
-fak marketing aeo --inject               # reinject What's-new into llms.txt (step 2)
+fak marketing aeo --refresh --inject     # rewrite updates + terms feeds, reinject What's-new + JSON-LD
+python tools/gen_llms_full.py            # clear the llms-full.txt STALE flag
 python tools/seo_aeo_scorecard.py        # re-grade; prove seo-debt dropped
 ```

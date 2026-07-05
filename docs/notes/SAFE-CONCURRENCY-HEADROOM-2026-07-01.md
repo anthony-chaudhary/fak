@@ -83,6 +83,11 @@ the fleet runs zero workers.
   live args; fix the readout before reasoning from it.
 - Rate budget was `n/a (--fast)` in today's probe; the checklist requires a
   fresh rate row before any static-cap raise.
+- **2026-07-04 update:** the Claude lane no longer treats one worker account as
+  one launch slot. The live dispatcher now admits four bounded sessions per
+  healthy Claude worker account, and the background auto loop uses a
+  `--max-workers 20` ceiling so host/lease/rate gates, not the old static
+  `--max-workers 3` task, decide when to back off.
 
 ## Ceiling estimate
 

@@ -138,19 +138,33 @@ Reuse that shape rather than inventing a new config format:
 ```jsonc
 // ~/.fak/console.json (or $FAK_CONSOLE_FILE)
 {
-  "overview_panes": ["guard", "loops", "issues"],   // subset + order; omit = all, registry order
+  "overview_panes": ["guard", "loops", "issues"],   // subset + order; omit = all overview-capable panes
   "pane_defaults": {
-    "issues": {"top": 40, "width": 160},              // pre-fills flags so `fak console issues` alone matches a saved view
-    "guard":  {"min-attention": 200}
+    "issues": {"json": true, "top": 40},
+    "guard":  {"color": "never", "rows": 20}
   }
 }
 ```
 
-`tuiplugin.BuildCtx` reads this file once (same additive-override resolution as
-`computetarget.go`) and pre-seeds `Spec.Flags` defaults before `flag.Parse` runs, so a
-CLI flag still wins over the file, which still wins over the built-in default — the
-same three-tier precedence rule `EXTENDING.md`'s registries already use conceptually
-(writes cheap at load, reads O(1) after).
+The implemented path reads this file in the console dispatcher. Repeated
+`--pane ID` wins over `overview_panes`, which wins over the default registry walk;
+for every pane, explicit CLI flags win over `pane_defaults`. Defaults are keyed by
+registered control ID, not raw flag spelling, and the decoder rejects unknown keys,
+unknown panes, unknown controls, dispatcher-only controls, invalid value types,
+values outside a control's declared `options`, or defaults for the `config` pane
+instead of silently pretending a typo worked. The registry JSON now carries those
+option lists for enum controls such as `guard.color` (`auto|always|never`) and
+`issues.state` (`open|closed|all`), giving a higher-level TUI enough structure to
+render menus instead of free-text boxes.
+
+The file is no longer hand-edit-only: `fak console config` is a registered pane
+that can save the same controls after validating them against the registry:
+
+```bash
+fak console config --set-overview guard,loops,issues
+fak console config --set-default issues.json=true --set-default issues.top=40
+fak console config --unset-default issues.json --clear-overview
+```
 
 **Interactivity, without a framework.** "User controls" for a render-once-and-print
 tool are necessarily static (which panes, what order, what defaults). If fak wants
@@ -213,13 +227,47 @@ syntax).
 
 ## 6. Continue here
 
-For a future agent: the smallest next unit of work is the `internal/tuiplugin`
-registry (§2.2) plus the two-pane port named in §5 — pure code motion, testable by
-diffing `fak console guard` / `fak console loops` output before and after. **Do not**
-start with the verb switch (§3) or the interactivity path (§2.3's keypress reader) —
-both are named here as the generalization and the natural follow-on, not the
-increment to ship. `fak issue fanout` (the repo's spine-first + fan-out convention,
-[[spine-fanout-defaults-shipped]] in project memory) is the right tool to turn §2, §3,
-and §2.3 into a scoped epic + follow-on issues once the two-pane proof lands — filing
-that fan-out before the proof exists would be scope pre-committed to an unproven
-seam.
+The first rungs are now concrete in the working tree: `internal/tuiplugin` holds
+the pane registry, pane files register operator-facing controls,
+`cmd/fak/tui_registry.go` holds the registry/control surfaces plus remaining
+built-in wiring, `runTUI` dispatches by registry lookup, and
+`fak console panes [--json]` exposes the discovery model, including whether a pane
+contributes an overview card. `fak console overview` walks the registered
+overview builders, and operators can choose a saved subset/order through
+`~/.fak/console.json` / `$FAK_CONSOLE_FILE`:
+
+```bash
+fak console config --set-overview guard,loops,issues --set-default issues.json=true
+```
+
+This writes the same persisted JSON shape:
+
+```json
+{"overview_panes":["guard","loops","issues"],"pane_defaults":{"issues":{"json":true}}}
+```
+
+Operators can still override it per run with repeated `--pane ID` / explicit pane
+flags. Existing pane runners still own their flags/build/render logic; the registry
+and config layer control discovery, dispatch, overview composition, and pre-parse
+defaults.
+
+The first pane-local migration has also started: issues/garden register from
+`cmd/fak/tui_issues_garden.go`, loops registers from
+`cmd/fak/tui_loop_render.go`, and a source-level test keeps those registrations
+out of the central registry file. That is the intended steady-state shape for
+future panes.
+
+The next useful units, in order:
+
+1. Continue moving the remaining pane registrations out of `cmd/fak/tui_registry.go`
+   as their pane code becomes cohesive enough: next candidates are `sessions` and
+   `guard`; `overview`/`panes` can stay in the registry file because they are the
+   registry/control surfaces themselves.
+2. Only after these static controls hold under dogfood use, extend `guard --follow`
+   into a shared
+   raw-mode keypress loop (`golang.org/x/term`) for `n`/`p` pane switching,
+   `r` refresh, and row filtering.
+
+Do not start with the verb switch (§3) or a TUI framework rewrite. The registry has
+to pay for itself on the small console surface before the same pattern is promoted
+to the ~200-case top-level verb switch.

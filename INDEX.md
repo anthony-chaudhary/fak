@@ -167,6 +167,7 @@ front page.
 
 ### Latest working notes
 
+- [The preview-confirm loop on raw `gh` — and the sanctioned way around it](docs/notes/CONFIRM-GATE-DEADLOCK-2026-07-04.md) -- auto-indexed dated note.
 - [Out-of-band operator control — a closed control vocabulary for a running session](docs/notes/OUT-OF-BAND-OPERATOR-CONTROL-2026-07-05.md) -- auto-indexed dated note.
 - [Own-forward multi-agent fleet on a Mac — measured, not estimated (2026-07-04)](docs/notes/OWN-FORWARD-MULTI-AGENT-FLEET-MAC-2026-07-04.md) — live `sessionbench` runs of the 3-arm session-value stack on fak's OWN pure-Go CPU forward (no Metal, no llama.cpp) on the M3 Pro node, filling the gap [FLEET-5X200-7B-10MIN-RESULTS.md](docs/benchmarks/FLEET-5X200-7B-10MIN-RESULTS.md) / [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md) left as an arithmetic estimate (~22–51 min, never run). Reduced-scope but real (5 agents × 50 turns @1.5B, ×20 @7B): fak-fused still beats a warm per-agent cache (**1.06× / 1.26×**) even though own-forward decode is slow — but decode *batching* gave ~0% gain at either size, so the entire win is prefill/shared-prefix reuse, the inverse emphasis from the Metal-forward case. Discloses plainly that the build came from a dirty private-mirror checkout (566+/396- uncommitted diff on the quant/matmul hot path), so absolute tok/s are directional pending a clean-checkout re-run.
 - [Triage: Windows shell/TUI/console fault boundary (#2170)](docs/notes/WINDOWS-SHELL-TUI-FAULT-BOUNDARY-TRIAGE-2026-07-04.md) -- auto-indexed dated note.
