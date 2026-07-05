@@ -959,12 +959,16 @@ func releaseShipPushRetryable(opts releaseShipOptions, push map[string]any) bool
 
 // releaseShipRebaseCutOntoTrunk re-fetches trunk, proves the new tip is a
 // fast-forward of the base we cut from (a peer added commits; history was not
-// rewritten), resets the detached worktree to that tip, and re-cuts the
-// VERSION+note commit onto it -- the automated form of the manual /release
-// "fast-forward your single release commit on top" recovery. It updates the
-// result's base/commit identity so the next push leases against the new tip. It
-// fails closed on a diverged trunk, an unchanged trunk (a transient push error
-// rather than a peer advance), or a refused re-cut.
+// rewritten), re-witnesses source CI on that new tip, resets the detached
+// worktree to it, and re-cuts the VERSION+note commit onto it -- the automated
+// form of the manual /release "fast-forward your single release commit on top"
+// recovery. It updates the result's base/commit identity so the next push leases
+// against the new tip. It fails closed on a diverged trunk, an unchanged trunk (a
+// transient push error rather than a peer advance), a peer tip whose CI is not
+// confirmed green, or a refused re-cut. Re-witnessing CI here keeps the shipping
+// commit's green-CI guarantee honest: the pre-flight only confirmed the original
+// base, so without this the retry would tag -- and its FAK_RELEASE_SOURCE_CI
+// witness would claim green for -- a peer tip that was never checked.
 func releaseShipRebaseCutOntoTrunk(result *releaseShipResult, root, wt string, env []string, opts releaseShipOptions) map[string]any {
 	oldBase := result.BaseSHA
 	refspec := fmt.Sprintf("refs/heads/%s:refs/remotes/%s/%s", opts.trunk, opts.remote, opts.trunk)
@@ -987,6 +991,19 @@ func releaseShipRebaseCutOntoTrunk(result *releaseShipResult, root, wt string, e
 	}
 	result.BaseSHA = newBase
 	result.SourceSHA = newBase
+	// Re-witness source CI on the peer's new tip before re-cutting onto it. The
+	// pre-flight only confirmed the original base; the peer tip we now ship may be
+	// pending or red. Refresh result.SourceCI so the emitted witness and the
+	// FAK_RELEASE_SOURCE_CI env handed to the re-cut describe the tip we actually
+	// tag -- and refuse (fail-closed, symmetric with the pre-flight) if it is not
+	// green. On a hot trunk the peer tip may legitimately be mid-CI, so this
+	// sometimes defers the release to the next run; that is the correct behavior.
+	if opts.requireCI && !opts.skipCI {
+		result.SourceCI = releaseShipSourceCI(result, root, opts, newBase)
+		if !releaseShipCIOK(result.SourceCI) {
+			return map[string]any{"ok": false, "reason": "retry_source_ci_unconfirmed", "old_base": oldBase, "new_base": newBase, "detail": jsonTail(result.SourceCI)}
+		}
+	}
 	cut := runReleaseShipCut(result, wt, releaseShipPromotionEnv(env, *result), opts)
 	result.Cut = cut
 	if ok, _ := cut["ok"].(bool); !ok {
@@ -1227,17 +1244,45 @@ func releaseShipRemoteBranchCheck(result *releaseShipResult, wt string, opts rel
 	}
 	got := fields[0]
 	payload := map[string]any{
-		"ok":           sameSHA(got, want),
 		"remote":       opts.remote,
 		"trunk":        opts.trunk,
 		"ref":          ref,
 		"sha":          got,
 		"expected_sha": want,
 	}
-	if !releaseStatusBool(payload["ok"]) {
-		payload["reason"] = mismatchReason
+	if sameSHA(got, want) {
+		payload["ok"] = true
+		return payload
 	}
+	// The observed trunk tip is no longer exactly our release commit. On a hot
+	// trunk a peer can fast-forward the branch past the release commit while we
+	// wait for its CI run to appear -- that is benign: the release commit is still
+	// on trunk and the tag is content-addressed to it, so tag/publish stay
+	// correct. Only a tip that no longer contains the release commit (a rewrite
+	// that orphaned it) is a genuine mismatch. Distinguish the two with an
+	// ancestry probe; fail closed if it cannot confirm the commit is still there.
+	if releaseShipCommitStillOnTrunk(result, wt, opts, want) {
+		payload["ok"] = true
+		payload["fast_forwarded"] = true
+		return payload
+	}
+	payload["ok"] = false
+	payload["reason"] = mismatchReason
 	return payload
+}
+
+// releaseShipCommitStillOnTrunk fetches the remote trunk and reports whether
+// want is still an ancestor of (reachable from) the current trunk tip -- i.e.
+// the release commit survived a peer's fast-forward. A fetch failure or a
+// non-ancestor tip both answer false, so the caller refuses on a genuine
+// rewrite rather than an ordinary peer advance.
+func releaseShipCommitStillOnTrunk(result *releaseShipResult, wt string, opts releaseShipOptions, want string) bool {
+	refspec := fmt.Sprintf("refs/heads/%s:refs/remotes/%s/%s", opts.trunk, opts.remote, opts.trunk)
+	if code, _ := releaseShipCmd(result, wt, "git", []string{"fetch", opts.remote, refspec}, nil, 5*time.Minute); code != 0 {
+		return false
+	}
+	code, _ := releaseShipCmd(result, wt, "git", []string{"merge-base", "--is-ancestor", want, opts.remote + "/" + opts.trunk}, nil, releaseShipMergeBaseCommandTimeout)
+	return code == 0
 }
 
 func waitReleaseShipCIAppears(result *releaseShipResult, wt string, opts releaseShipOptions, sha string) {
