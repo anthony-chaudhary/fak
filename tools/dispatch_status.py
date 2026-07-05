@@ -1807,11 +1807,17 @@ def _guard_livelock_candidates(name: str, text: str) -> list[dict[str, Any]]:
         try:
             row = json.loads(line)
         except ValueError:
+            last_key = None
+            run_len = 0
             continue
         if not _guard_row_can_livelock(row):
+            last_key = None
+            run_len = 0
             continue
         digest = str(row.get("args_digest") or row.get("result_digest") or "")
         if not digest:
+            last_key = None
+            run_len = 0
             continue
         key = (
             str(row.get("kind") or "UNKNOWN"),

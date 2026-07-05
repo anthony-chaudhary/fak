@@ -1899,6 +1899,25 @@ class GuardCoverageScanTest(unittest.TestCase):
         self.assertTrue(any(c["tool"] == "tool_result" and c["count"] == 10
                             for c in candidates))
 
+    def test_non_candidate_rows_break_livelock_run_length(self) -> None:
+        mod = load()
+        now = 3_000_000.0
+        allow = ('{"kind":"DECIDE","verdict":"ALLOW","tool":"Read","reason":"NONE",'
+                 '"args_digest":"allowdigest"}')
+        quarantine = ('{"kind":"QUARANTINE","verdict":"QUARANTINE","tool":"tool_result",'
+                      '"reason":"SECRET_EXFIL","args_digest":"quardigest"}')
+        with tempfile.TemporaryDirectory() as d:
+            audit = Path(d) / mod.GUARD_AUDIT_DIRNAME
+            rows = []
+            for _ in range(10):
+                rows.extend([quarantine, allow])
+            self._journal(audit, "loop-claude-1-aaaa.jsonl", rows, mtime=now)
+            out = mod.guard_coverage(Path(d), now_ts=now)
+        candidates = out["livelock_candidates"]
+        top = next(c for c in candidates if c["tool"] == "tool_result")
+        self.assertEqual(top["count"], 10)
+        self.assertEqual(top["longest_run"], 1)
+
 
 class GuardCoverageFoldTest(unittest.TestCase):
     """build_payload + render surface the guard rollup (payload section, reason, card)."""
