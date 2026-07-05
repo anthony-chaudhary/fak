@@ -8,11 +8,11 @@ package dojo
 // scratch each run. Mirrors internal/cadencereport's ledger.
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 )
 
 // LedgerRow is one durable, append-only history line (a flattened projection of
@@ -72,33 +72,14 @@ func RowFromReport(r Report) LedgerRow {
 // skipping any line that is not a valid row (so a hand-edit can't crash the
 // reader). Rows are returned in file order.
 func ParseLedger(content string) []LedgerRow {
-	var rows []LedgerRow
-	sc := bufio.NewScanner(strings.NewReader(content))
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		var row LedgerRow
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			continue
-		}
-		// Reject rows that are not our schema. A foreign JSONL (e.g. another
-		// tool's history with its own "date" field) unmarshals cleanly into
-		// LedgerRow — extra fields are dropped, Date survives — so it would
-		// otherwise pollute the trend. Committed rows are written via
-		// RowFromReport, which stamps Schema=LedgerSchema, so this only drops
-		// lines that were never ours.
-		if row.Schema != LedgerSchema {
-			continue
-		}
-		if row.Date == "" {
-			continue
-		}
-		rows = append(rows, row)
-	}
-	return rows
+	// Reject rows that are not our schema. A foreign JSONL (e.g. another tool's
+	// history with its own "date" field) unmarshals cleanly into LedgerRow —
+	// extra fields are dropped, Date survives — so it would otherwise pollute the
+	// trend. Committed rows are written via RowFromReport, which stamps
+	// Schema=LedgerSchema, so this only keeps lines that were ours.
+	return jsonlledger.Parse(content, func(r LedgerRow) bool {
+		return r.Schema == LedgerSchema && r.Date != ""
+	})
 }
 
 // TrendVsLast computes the per-tick trend of `row` against the most recent prior

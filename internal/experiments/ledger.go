@@ -1,33 +1,18 @@
 package experiments
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 )
 
 func ParseLedger(content string) []Experiment {
-	var rows []Experiment
-	sc := bufio.NewScanner(strings.NewReader(content))
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		var row Experiment
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			continue
-		}
-		if row.ID == "" || row.Owner == "" {
-			continue
-		}
-		rows = append(rows, row)
-	}
-	return rows
+	return jsonlledger.Parse(content, func(r Experiment) bool {
+		return r.ID != "" && r.Owner != ""
+	})
 }
 
 func ReadLedgerFile(path string) []Experiment {

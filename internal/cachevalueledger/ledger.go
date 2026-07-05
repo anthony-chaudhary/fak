@@ -1,7 +1,6 @@
 package cachevalueledger
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
+	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 )
 
 const (
@@ -38,23 +38,11 @@ type Row struct {
 }
 
 func ParseLedger(content string) []Row {
-	var rows []Row
-	sc := bufio.NewScanner(strings.NewReader(content))
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		var row Row
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			continue
-		}
-		if row.Date == "" || row.SessionType == "" {
-			continue
-		}
-		normalizeRowDimensions(&row)
-		rows = append(rows, row)
+	rows := jsonlledger.Parse(content, func(r Row) bool {
+		return r.Date != "" && r.SessionType != ""
+	})
+	for i := range rows {
+		normalizeRowDimensions(&rows[i])
 	}
 	return rows
 }

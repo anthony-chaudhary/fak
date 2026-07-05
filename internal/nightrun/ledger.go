@@ -1,13 +1,14 @@
 package nightrun
 
 import (
-	"bufio"
 	"encoding/json"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 )
 
 // CollectSchema tags each durable collection row so a reader can validate the
@@ -116,24 +117,9 @@ type CollectRow struct {
 // skipping any line that is not a valid row (so a hand-edit cannot crash the
 // reader). Rows are returned in file order. Mirrors cadencereport.ParseLedger.
 func ParseLedger(content string) []CollectRow {
-	var rows []CollectRow
-	sc := bufio.NewScanner(strings.NewReader(content))
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		var row CollectRow
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			continue
-		}
-		if row.TaskID == "" || row.Date == "" {
-			continue
-		}
-		rows = append(rows, row)
-	}
-	return rows
+	return jsonlledger.Parse(content, func(r CollectRow) bool {
+		return r.TaskID != "" && r.Date != ""
+	})
 }
 
 // AppendLedgerLine renders the JSONL line for a row (no trailing newline). The

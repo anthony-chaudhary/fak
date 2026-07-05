@@ -1,12 +1,13 @@
 package fleetmon
 
 import (
-	"bufio"
 	"encoding/json"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 )
 
 // RunLedgerSchema tags each run-ledger row.
@@ -177,24 +178,9 @@ func smallestFollowUp(text string) string {
 // skipping any line that is not a complete row (so a hand-edit cannot crash the
 // reader). Rows are returned in file order.
 func ParseLedger(content string) []LedgerRow {
-	var rows []LedgerRow
-	sc := bufio.NewScanner(strings.NewReader(content))
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		var row LedgerRow
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			continue
-		}
-		if row.Session == "" && row.Issue == 0 {
-			continue
-		}
-		rows = append(rows, row)
-	}
-	return rows
+	return jsonlledger.Parse(content, func(r LedgerRow) bool {
+		return r.Session != "" || r.Issue != 0
+	})
 }
 
 // AppendLedgerLine renders the JSONL line for a row (no trailing newline); the

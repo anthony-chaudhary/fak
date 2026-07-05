@@ -1,14 +1,14 @@
 package trajctl
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 )
 
 const (
@@ -159,24 +159,7 @@ func ReadLedgerFile(path string) []Row {
 // ParseLedger parses JSONL rows, skipping blank, malformed, foreign-schema, and
 // invalid rows so a torn append cannot poison the whole fold.
 func ParseLedger(content string) []Row {
-	var rows []Row
-	sc := bufio.NewScanner(strings.NewReader(content))
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		var row Row
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			continue
-		}
-		if err := Validate(row); err != nil {
-			continue
-		}
-		rows = append(rows, row)
-	}
-	return rows
+	return jsonlledger.Parse(content, func(r Row) bool { return Validate(r) == nil })
 }
 
 // Fold returns the latest objective state and all score rows in append order.

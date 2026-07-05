@@ -1,12 +1,12 @@
 package gatewayusageledger
 
 import (
-	"bufio"
 	"encoding/json"
 	"os"
 	"sort"
-	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 )
 
 const (
@@ -168,24 +168,7 @@ func Append(path string, row Row) error {
 // line that fails to decode or is missing its Schema (so a foreign/corrupt line never
 // aborts the whole read).
 func ParseLedger(content string) []Row {
-	var rows []Row
-	sc := bufio.NewScanner(strings.NewReader(content))
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		var row Row
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			continue
-		}
-		if row.Schema == "" {
-			continue
-		}
-		rows = append(rows, row)
-	}
-	return rows
+	return jsonlledger.Parse(content, func(r Row) bool { return r.Schema != "" })
 }
 
 // ReadLedgerFile reads and parses the ledger at path. A missing/unreadable file
