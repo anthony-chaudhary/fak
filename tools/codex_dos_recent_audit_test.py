@@ -11,7 +11,7 @@ import os
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -329,11 +329,12 @@ class RecentCodexDosAuditTest(unittest.TestCase):
             self.assertIn("DENY_OR_BLOCKED_FEEDBACK", found["transcript_summary"]["evidence_tags"])
             rendered = mod.render(report)
             self.assertIn("workspace StopFailure API-wall failures: 4", rendered)
-            self.assertIn("active StopFailure blockers: 1 markers", rendered)
+            self.assertIn("Codex-origin current live StopFailure blockers: 0 markers/0 consecutive; workspace current-live inventory=1 markers/1 consecutive", rendered)
+            self.assertIn("StopFailure settlement debt: recent_review=1 markers/1 consecutive", rendered)
             self.assertIn('recent_origins={"claude_transcript": 1}', rendered)
-            self.assertIn('settlement={"RECENT_REVIEW": 1}', rendered)
+            self.assertIn('"RECENT_REVIEW": 1', rendered)
             self.assertIn("top recent active StopFailure sessions:", rendered)
-            self.assertIn("top active StopFailure sessions:", rendered)
+            self.assertIn("top active settlement StopFailure sessions:", rendered)
             self.assertIn("top StopFailure sessions:", rendered)
             self.assertIn(hot_session, rendered)
             # Issue #1447: the separated, clearly-labeled origin sections must be present.
@@ -1252,6 +1253,90 @@ class RecentCodexDosAuditTest(unittest.TestCase):
                 report["actionability"]["reasons"],
             )
             self.assertEqual(report["summary"]["codex_origin_stop_failures_total"], 3)
+
+    def test_progress_and_stale_codex_markers_are_settlement_debt_not_live_blockage(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            home = root / "codex-home"
+            progress_thread = "019f156d-5600-7ef0-887c-fc5c6cd6dc61"
+            stale_thread = "019f156d-5600-7ef0-887c-fc5c6cd6dc62"
+            now = datetime.now(timezone.utc)
+            progress_marker_at = now - timedelta(hours=1)
+            progress_activity_at = now - timedelta(minutes=5)
+            stale_marker_at = now - timedelta(hours=8)
+            stale_activity_at = stale_marker_at - timedelta(minutes=5)
+
+            for thread in (progress_thread, stale_thread):
+                write_jsonl(
+                    home / "sessions" / "2026" / "07" / "05" / f"rollout-{thread}.jsonl",
+                    [{"type": "response_item", "timestamp": now.isoformat().replace("+00:00", "Z")}],
+                )
+            write_hook_manifest(home, native_bash_hook_command())
+
+            streams_dir = root / ".dos" / "streams"
+            progress_stream = streams_dir / f"{progress_thread}.jsonl"
+            stale_stream = streams_dir / f"{stale_thread}.jsonl"
+            write_jsonl(progress_stream, [{"op": "STEP", "tool_name": "Read", "ts": progress_activity_at.isoformat().replace("+00:00", "Z")}])
+            write_jsonl(stale_stream, [{"op": "STEP", "tool_name": "Read", "ts": stale_activity_at.isoformat().replace("+00:00", "Z")}])
+
+            stop_dir = root / ".dos" / "stop-failures"
+            stop_dir.mkdir(parents=True, exist_ok=True)
+            progress_marker = stop_dir / f"{progress_thread}.json"
+            stale_marker = stop_dir / f"{stale_thread}.json"
+            progress_marker.write_text(json.dumps({"total": 3, "consecutive": 3}) + "\n", encoding="utf-8")
+            stale_marker.write_text(json.dumps({"total": 5, "consecutive": 5}) + "\n", encoding="utf-8")
+            os.utime(progress_marker, (progress_marker_at.timestamp(), progress_marker_at.timestamp()))
+            os.utime(progress_stream, (progress_activity_at.timestamp(), progress_activity_at.timestamp()))
+            os.utime(stale_marker, (stale_marker_at.timestamp(), stale_marker_at.timestamp()))
+            os.utime(stale_stream, (stale_activity_at.timestamp(), stale_activity_at.timestamp()))
+
+            report = mod.build_report(root, home, limit=10, since_days=3650, max_delegates=0, target_shell="bash")
+
+            self.assertEqual(report["status"], "PASS")
+            self.assertNotIn(
+                "stop blocks or uncleared StopFailure API-wall breaker markers are present",
+                report["actionability"]["reasons"],
+            )
+            summary = report["summary"]
+            self.assertEqual(summary["codex_origin_stop_failures_total"], 8)
+            self.assertEqual(summary["codex_origin_stop_failure_current_live_markers"], 0)
+            self.assertEqual(summary["codex_origin_stop_failure_current_live_consecutive_total"], 0)
+            self.assertEqual(summary["workspace_stop_failure_current_live_markers"], 0)
+            self.assertEqual(summary["workspace_stop_failure_current_live_consecutive_total"], 0)
+            self.assertEqual(summary["workspace_stop_failure_progress_after_marker_markers"], 1)
+            self.assertEqual(summary["workspace_stop_failure_progress_after_marker_consecutive_total"], 3)
+            self.assertEqual(summary["workspace_stop_failure_stale_active_markers"], 1)
+            self.assertEqual(summary["workspace_stop_failure_stale_active_consecutive_total"], 5)
+            self.assertEqual(summary["workspace_stop_failure_reset_stale_candidate_markers"], 2)
+            self.assertEqual(summary["workspace_stop_failure_reset_stale_apply_command"], "fak stopfailure reset-stale --apply")
+            self.assertEqual(summary["stop_failures_total"], 8)
+            self.assertEqual(summary["stop_failures_live_blocker_total"], 0)
+            self.assertEqual(summary["stop_failures_settlement_debt_total"], 8)
+
+            stop = report["workspace_stop_failures"]
+            self.assertEqual(stop["status"], "PASS")
+            self.assertEqual(stop["codex_origin_status"], "PASS")
+            self.assertEqual(stop["codex_origin"]["active_consecutive_markers"], 1)
+            self.assertEqual(stop["codex_origin"]["current_live_consecutive_markers"], 0)
+            self.assertEqual(stop["codex_origin"]["progress_after_marker_markers"], 1)
+            self.assertEqual(stop["settlement_action_counts"], {
+                "STALE_RESET_CANDIDATE": 1,
+                "PROGRESS_AFTER_MARKER_RESET_CANDIDATE": 1,
+            })
+            self.assertEqual(stop["session_settlement"][progress_thread]["settlement_action"], "PROGRESS_AFTER_MARKER_RESET_CANDIDATE")
+            self.assertTrue(stop["session_settlement"][progress_thread]["progress_after_marker"])
+            self.assertFalse(stop["session_settlement"][progress_thread]["codex_current_live"])
+            self.assertEqual(stop["session_settlement"][stale_thread]["settlement_action"], "STALE_RESET_CANDIDATE")
+            self.assertTrue(stop["session_settlement"][stale_thread]["stale_active"])
+            self.assertFalse(stop["session_settlement"][stale_thread]["codex_current_live"])
+
+            rendered = mod.render(report)
+            self.assertIn("Codex-origin current live StopFailure blockers: 0 markers/0 consecutive; workspace current-live inventory=0 markers/0 consecutive", rendered)
+            self.assertIn("progress_after_marker=1 markers/3 consecutive", rendered)
+            self.assertIn("stale=1 markers/5 consecutive", rendered)
+            self.assertIn("apply=`fak stopfailure reset-stale --apply`", rendered)
+            self.assertIn("Codex-origin StopFailure (counts toward Codex health): 8 failures across 2 markers, 0 current-live active", rendered)
 
 
 if __name__ == "__main__":

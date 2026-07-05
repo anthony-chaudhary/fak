@@ -269,7 +269,12 @@ def check_historical_audit(root: Path, checks: list[dict[str, Any]]) -> None:
     residual = set(action.get("residual") or [])
     reasons = set(action.get("reasons") or [])
     post_repair_shapes = action.get("post_repair_shell_shape_counts") if isinstance(action.get("post_repair_shell_shape_counts"), dict) else {}
-    active_consecutive = int(summary.get("workspace_stop_failure_active_consecutive_total") or 0)
+    if "codex_origin_stop_failure_current_live_consecutive_total" in summary:
+        active_consecutive = int(summary.get("codex_origin_stop_failure_current_live_consecutive_total") or 0)
+    elif "workspace_stop_failure_current_live_consecutive_total" in summary:
+        active_consecutive = int(summary.get("workspace_stop_failure_current_live_consecutive_total") or 0)
+    else:
+        active_consecutive = int(summary.get("workspace_stop_failure_active_consecutive_total") or 0)
     stop_failure_active = active_consecutive > 0
     actionability_ok = (
         (
@@ -283,8 +288,9 @@ def check_historical_audit(root: Path, checks: list[dict[str, Any]]) -> None:
             and not any("StopFailure API-wall" in reason for reason in reasons)
         )
     )
+    report_status_ok = report.get("status") == "WARN" if stop_failure_active else report.get("status") in {"PASS", "WARN"}
     ok = (
-        report.get("status") == "WARN"
+        report_status_ok
         and actionability_ok
         and git_gate.get("status") == "PASS"
         and "git_write" not in post_gate_families
@@ -299,7 +305,7 @@ def check_historical_audit(root: Path, checks: list[dict[str, Any]]) -> None:
         "audit="
         f"{report.get('status')} actionability={action.get('status')} "
         f"workspace_stop_failures={summary.get('workspace_stop_failures_total')} "
-        f"active_consecutive={summary.get('workspace_stop_failure_active_consecutive_total')} "
+        f"active_consecutive={active_consecutive} "
         f"reasons={sorted(reasons)} residual={sorted(residual)} post_gate={post_gate_families}",
     )
 
@@ -540,12 +546,27 @@ def synthesize_default_blockers(root: Path) -> list[dict[str, Any]]:
     workspace_stop = codex.get("workspace_stop_failures") if isinstance(codex.get("workspace_stop_failures"), dict) else {}
     active_consecutive = safe_int(codex_summary.get("workspace_stop_failure_active_consecutive_total"))
     active_markers = safe_int(codex_summary.get("workspace_stop_failure_active_markers"))
+    has_current_live = "codex_origin_stop_failure_current_live_consecutive_total" in codex_summary
+    current_live_consecutive = (
+        safe_int(codex_summary.get("codex_origin_stop_failure_current_live_consecutive_total"))
+        if has_current_live
+        else active_consecutive
+    )
+    current_live_markers = (
+        safe_int(codex_summary.get("codex_origin_stop_failure_current_live_markers"))
+        if has_current_live
+        else active_markers
+    )
+    workspace_current_live_consecutive = safe_int(codex_summary.get("workspace_stop_failure_current_live_consecutive_total"))
+    workspace_current_live_markers = safe_int(codex_summary.get("workspace_stop_failure_current_live_markers"))
     recent_active_consecutive = safe_int(codex_summary.get("workspace_stop_failure_recent_active_consecutive_total"))
     recent_active_markers = safe_int(codex_summary.get("workspace_stop_failure_recent_active_markers"))
     stale_active_consecutive = safe_int(codex_summary.get("workspace_stop_failure_stale_active_consecutive_total"))
     stale_active_markers = safe_int(codex_summary.get("workspace_stop_failure_stale_active_markers"))
+    progress_after_marker_consecutive = safe_int(codex_summary.get("workspace_stop_failure_progress_after_marker_consecutive_total"))
+    progress_after_marker_markers = safe_int(codex_summary.get("workspace_stop_failure_progress_after_marker_markers"))
     settlement_plan = workspace_stop.get("settlement_plan")
-    if recent_active_consecutive:
+    if current_live_consecutive:
         add_blocker(
             blockers,
             rank=10,
@@ -555,17 +576,27 @@ def synthesize_default_blockers(root: Path) -> list[dict[str, Any]]:
             evidence={
                 "active_markers": active_markers,
                 "active_consecutive_total": active_consecutive,
+                "current_live_markers": current_live_markers,
+                "current_live_consecutive_total": current_live_consecutive,
+                "workspace_current_live_markers": workspace_current_live_markers,
+                "workspace_current_live_consecutive_total": workspace_current_live_consecutive,
                 "recent_active_markers": recent_active_markers,
                 "recent_active_consecutive_total": recent_active_consecutive,
                 "active_recent_threshold_hours": safe_int(codex_summary.get("workspace_stop_failure_active_recent_threshold_hours")),
                 "stale_active_markers": stale_active_markers,
                 "stale_active_consecutive_total": stale_active_consecutive,
+                "progress_after_marker_markers": progress_after_marker_markers,
+                "progress_after_marker_consecutive_total": progress_after_marker_consecutive,
                 "origin_counts": top_counts(codex_summary.get("workspace_stop_failure_origin_counts")),
+                "current_live_origin_counts": top_counts(codex_summary.get("workspace_stop_failure_current_live_origin_counts")),
                 "recent_active_origin_counts": top_counts(codex_summary.get("workspace_stop_failure_recent_active_origin_counts")),
                 "stale_active_origin_counts": top_counts(codex_summary.get("workspace_stop_failure_stale_active_origin_counts")),
+                "progress_after_marker_origin_counts": top_counts(codex_summary.get("workspace_stop_failure_progress_after_marker_origin_counts")),
                 "active_settlement_action_counts": top_counts(codex_summary.get("workspace_stop_failure_active_settlement_action_counts")),
+                "current_live_settlement_action_counts": top_counts(codex_summary.get("workspace_stop_failure_current_live_settlement_action_counts")),
                 "recent_active_settlement_action_counts": top_counts(codex_summary.get("workspace_stop_failure_recent_active_settlement_action_counts")),
                 "stale_active_settlement_action_counts": top_counts(codex_summary.get("workspace_stop_failure_stale_active_settlement_action_counts")),
+                "progress_after_marker_settlement_action_counts": top_counts(codex_summary.get("workspace_stop_failure_progress_after_marker_settlement_action_counts")),
                 "one_day_failures_total": safe_int(codex_summary.get("workspace_stop_failures_total")),
                 "healed_nonzero_markers": safe_int(codex_summary.get("workspace_stop_failure_healed_nonzero_markers")),
                 "top_recent_active_sessions": summarize_stop_sessions(workspace_stop.get("top_recent_active")),
@@ -577,6 +608,48 @@ def synthesize_default_blockers(root: Path) -> list[dict[str, Any]]:
                 "transcript_evidence_tags": top_counts(codex_summary.get("workspace_stop_failure_transcript_evidence_tags")),
             },
             next_action="Clear or rotate the recent workspace sessions with nonzero consecutive StopFailure markers before treating fak-by-default actionability as healthy.",
+        )
+    elif has_current_live and recent_active_consecutive:
+        add_blocker(
+            blockers,
+            rank=30,
+            code="WORKSPACE_RECENT_STOPFAILURE_REVIEW_DEBT",
+            surface="workspace_dos",
+            status="REVIEW_DEBT",
+            evidence={
+                "current_live_markers": current_live_markers,
+                "current_live_consecutive_total": current_live_consecutive,
+                "workspace_current_live_markers": workspace_current_live_markers,
+                "workspace_current_live_consecutive_total": workspace_current_live_consecutive,
+                "recent_active_markers": recent_active_markers,
+                "recent_active_consecutive_total": recent_active_consecutive,
+                "active_recent_threshold_hours": safe_int(codex_summary.get("workspace_stop_failure_active_recent_threshold_hours")),
+                "recent_active_origin_counts": top_counts(codex_summary.get("workspace_stop_failure_recent_active_origin_counts")),
+                "recent_active_settlement_action_counts": top_counts(codex_summary.get("workspace_stop_failure_recent_active_settlement_action_counts")),
+                "top_recent_active_sessions": summarize_stop_sessions(workspace_stop.get("top_recent_active")),
+                "recent_review_plan": settlement_plan_rows(settlement_plan, ["RECENT_REVIEW"]),
+            },
+            next_action="Review or clear the recent StopFailure markers; current live guard failure is zero, so these are settlement debt.",
+        )
+    if progress_after_marker_consecutive:
+        add_blocker(
+            blockers,
+            rank=35,
+            code="WORKSPACE_PROGRESS_AFTER_MARKER_STOPFAILURE_RESET",
+            surface="workspace_dos",
+            status="SETTLEMENT_DEBT",
+            evidence={
+                "progress_after_marker_markers": progress_after_marker_markers,
+                "progress_after_marker_consecutive_total": progress_after_marker_consecutive,
+                "progress_after_marker_origin_counts": top_counts(codex_summary.get("workspace_stop_failure_progress_after_marker_origin_counts")),
+                "progress_after_marker_settlement_action_counts": top_counts(codex_summary.get("workspace_stop_failure_progress_after_marker_settlement_action_counts")),
+                "reset_stale_candidate_markers": safe_int(codex_summary.get("workspace_stop_failure_reset_stale_candidate_markers")),
+                "reset_stale_dry_run_command": codex_summary.get("workspace_stop_failure_reset_stale_dry_run_command"),
+                "reset_stale_apply_command": codex_summary.get("workspace_stop_failure_reset_stale_apply_command"),
+                "top_progress_after_marker_sessions": summarize_stop_sessions(workspace_stop.get("top_progress_after_marker")),
+                "progress_after_marker_plan": settlement_plan_rows(settlement_plan, ["PROGRESS_AFTER_MARKER_RESET_CANDIDATE"]),
+            },
+            next_action="Dry-run `fak stopfailure reset-stale --json`; if the candidate list matches expectation, apply `fak stopfailure reset-stale --apply`.",
         )
     if stale_active_consecutive:
         add_blocker(
@@ -733,24 +806,36 @@ def render(payload: dict[str, Any]) -> str:
         for row in blockers:
             evidence = row.get("evidence") if isinstance(row.get("evidence"), dict) else {}
             bits = []
+            if "current_live_consecutive_total" in evidence:
+                bits.append(f"current_live_consecutive={evidence.get('current_live_consecutive_total')}")
             if "recent_active_consecutive_total" in evidence:
                 bits.append(f"recent_consecutive={evidence.get('recent_active_consecutive_total')}")
             if "active_consecutive_total" in evidence:
                 bits.append(f"active_consecutive={evidence.get('active_consecutive_total')}")
             if "stale_active_consecutive_total" in evidence:
                 bits.append(f"stale_consecutive={evidence.get('stale_active_consecutive_total')}")
+            if "progress_after_marker_consecutive_total" in evidence:
+                bits.append(f"progress_after_marker_consecutive={evidence.get('progress_after_marker_consecutive_total')}")
             if "recent_active_origin_counts" in evidence:
                 bits.append(f"recent_origins={evidence.get('recent_active_origin_counts')}")
             if "stale_active_origin_counts" in evidence:
                 bits.append(f"stale_origins={evidence.get('stale_active_origin_counts')}")
+            if "progress_after_marker_origin_counts" in evidence:
+                bits.append(f"progress_origins={evidence.get('progress_after_marker_origin_counts')}")
             if "active_settlement_action_counts" in evidence:
                 bits.append(f"settlement={evidence.get('active_settlement_action_counts')}")
             elif "stale_active_settlement_action_counts" in evidence:
                 bits.append(f"settlement={evidence.get('stale_active_settlement_action_counts')}")
+            elif "progress_after_marker_settlement_action_counts" in evidence:
+                bits.append(f"settlement={evidence.get('progress_after_marker_settlement_action_counts')}")
             if "recent_review_plan" in evidence:
                 bits.append(f"recent_plan={len(evidence.get('recent_review_plan') or [])}")
             if "stale_settlement_plan" in evidence:
                 bits.append(f"stale_plan={len(evidence.get('stale_settlement_plan') or [])}")
+            if "progress_after_marker_plan" in evidence:
+                bits.append(f"progress_plan={len(evidence.get('progress_after_marker_plan') or [])}")
+            if "reset_stale_apply_command" in evidence:
+                bits.append(f"apply={evidence.get('reset_stale_apply_command')}")
             if "shell_no_write_target_detected" in evidence:
                 bits.append(f"opaque_shell={evidence.get('shell_no_write_target_detected')}")
             if "shell_remediation_counts" in evidence:

@@ -415,6 +415,109 @@ class GuardMCPStatusAuditTest(unittest.TestCase):
             self.assertIn("actionability=PASS", details)
             self.assertIn("active_consecutive=0", details)
 
+    def test_collect_separates_stopfailure_debt_from_current_live_blockage(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            seed_tree(root)
+            path = root / mod.CODEX_DOS_AUDIT
+            audit = json.loads(path.read_text(encoding="utf-8"))
+            summary = audit["summary"]
+            summary.update(
+                {
+                    "workspace_stop_failures_total": 8,
+                    "workspace_stop_failure_active_markers": 1,
+                    "workspace_stop_failure_active_consecutive_total": 5,
+                    "workspace_stop_failure_current_live_markers": 0,
+                    "workspace_stop_failure_current_live_consecutive_total": 0,
+                    "codex_origin_stop_failure_current_live_markers": 0,
+                    "codex_origin_stop_failure_current_live_consecutive_total": 0,
+                    "workspace_stop_failure_recent_active_markers": 2,
+                    "workspace_stop_failure_recent_active_consecutive_total": 2,
+                    "workspace_stop_failure_stale_active_markers": 1,
+                    "workspace_stop_failure_stale_active_consecutive_total": 5,
+                    "workspace_stop_failure_progress_after_marker_markers": 1,
+                    "workspace_stop_failure_progress_after_marker_consecutive_total": 3,
+                    "workspace_stop_failure_reset_stale_candidate_markers": 2,
+                    "workspace_stop_failure_reset_stale_dry_run_command": "fak stopfailure reset-stale --json",
+                    "workspace_stop_failure_reset_stale_apply_command": "fak stopfailure reset-stale --apply",
+                    "workspace_stop_failure_current_live_origin_counts": {},
+                    "workspace_stop_failure_recent_active_origin_counts": {"claude_transcript": 2},
+                    "workspace_stop_failure_stale_active_origin_counts": {"dos_stream": 1},
+                    "workspace_stop_failure_progress_after_marker_origin_counts": {"dos_stream": 1},
+                    "workspace_stop_failure_active_settlement_action_counts": {"STALE_RESET_CANDIDATE": 1},
+                    "workspace_stop_failure_current_live_settlement_action_counts": {},
+                    "workspace_stop_failure_recent_active_settlement_action_counts": {"RECENT_REVIEW": 2},
+                    "workspace_stop_failure_stale_active_settlement_action_counts": {"STALE_RESET_CANDIDATE": 1},
+                    "workspace_stop_failure_progress_after_marker_settlement_action_counts": {
+                        "PROGRESS_AFTER_MARKER_RESET_CANDIDATE": 1,
+                    },
+                }
+            )
+            audit["status"] = "PASS"
+            audit["actionability"]["status"] = "PASS"
+            audit["actionability"]["reasons"] = []
+            audit["workspace_stop_failures"]["settlement_plan"] = {
+                "RECENT_REVIEW": [
+                    {
+                        "session_id": "s-review",
+                        "marker_path": ".dos/stop-failures/s-review.json",
+                        "total": 2,
+                        "consecutive": 2,
+                        "age_seconds": 12,
+                        "origin": "claude_transcript",
+                        "settlement_action": "RECENT_REVIEW",
+                    }
+                ],
+                "PROGRESS_AFTER_MARKER_RESET_CANDIDATE": [
+                    {
+                        "session_id": "s-progress",
+                        "marker_path": ".dos/stop-failures/s-progress.json",
+                        "total": 3,
+                        "consecutive": 3,
+                        "age_seconds": 3600,
+                        "origin": "dos_stream",
+                        "settlement_action": "PROGRESS_AFTER_MARKER_RESET_CANDIDATE",
+                        "progress_after_marker": True,
+                    }
+                ],
+                "STALE_RESET_CANDIDATE": [
+                    {
+                        "session_id": "s-stale",
+                        "marker_path": ".dos/stop-failures/s-stale.json",
+                        "total": 5,
+                        "consecutive": 5,
+                        "age_seconds": 99999,
+                        "origin": "dos_stream",
+                        "settlement_action": "STALE_RESET_CANDIDATE",
+                    }
+                ],
+            }
+            audit["workspace_stop_failures"]["top_recent_active"] = audit["workspace_stop_failures"]["settlement_plan"]["RECENT_REVIEW"]
+            audit["workspace_stop_failures"]["top_progress_after_marker"] = audit["workspace_stop_failures"]["settlement_plan"]["PROGRESS_AFTER_MARKER_RESET_CANDIDATE"]
+            audit["workspace_stop_failures"]["top_stale_active"] = audit["workspace_stop_failures"]["settlement_plan"]["STALE_RESET_CANDIDATE"]
+            path.write_text(json.dumps(audit), encoding="utf-8")
+
+            payload = mod.collect(root)
+
+            self.assertEqual(payload["status"], "PASS")
+            codes = [row["code"] for row in payload["default_blockers"]]
+            self.assertNotIn("WORKSPACE_RECENT_STOPFAILURE_API_WALL", codes)
+            self.assertIn("WORKSPACE_RECENT_STOPFAILURE_REVIEW_DEBT", codes)
+            self.assertIn("WORKSPACE_PROGRESS_AFTER_MARKER_STOPFAILURE_RESET", codes)
+            self.assertIn("WORKSPACE_STALE_STOPFAILURE_MARKERS", codes)
+            review = next(row for row in payload["default_blockers"] if row["code"] == "WORKSPACE_RECENT_STOPFAILURE_REVIEW_DEBT")
+            self.assertEqual(review["status"], "REVIEW_DEBT")
+            self.assertEqual(review["evidence"]["current_live_consecutive_total"], 0)
+            progress = next(row for row in payload["default_blockers"] if row["code"] == "WORKSPACE_PROGRESS_AFTER_MARKER_STOPFAILURE_RESET")
+            self.assertEqual(progress["status"], "SETTLEMENT_DEBT")
+            self.assertEqual(progress["evidence"]["progress_after_marker_consecutive_total"], 3)
+            self.assertEqual(progress["evidence"]["reset_stale_apply_command"], "fak stopfailure reset-stale --apply")
+            rendered = mod.render(payload)
+            self.assertIn("WORKSPACE_RECENT_STOPFAILURE_REVIEW_DEBT", rendered)
+            self.assertIn("progress_after_marker_consecutive=3", rendered)
+            self.assertIn("apply=fak stopfailure reset-stale --apply", rendered)
+
     def test_main_writes_json_out_file(self) -> None:
         mod = load()
         with tempfile.TemporaryDirectory() as td:
