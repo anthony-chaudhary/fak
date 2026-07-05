@@ -413,6 +413,9 @@ func rowFromEvent(ev abi.Event) (Row, bool) {
 		row.ArgsDigest = refDigest(c.Args)
 		row.CallSeq = c.SeqNo // join key: same call's DECIDE and QUARANTINE share it
 		row.ArgsLabel = argsLabel(c.Args)
+		if row.ArgsLabel == "" {
+			row.ArgsLabel = argsLabelFromMeta(c.Meta)
+		}
 	}
 	if v := ev.Verdict; v != nil {
 		row.Verdict = verdictName(v.Kind)
@@ -478,16 +481,39 @@ func refDigest(r abi.Ref) string {
 	return ""
 }
 
-const maxArgsLabelLen = 96
+const (
+	// MetaArgsLabel carries the same bounded, redacted label row.ArgsLabel records when
+	// call args are blob-backed. It is internal telemetry only; the raw args stay out of
+	// the journal.
+	MetaArgsLabel   = "fak_args_label"
+	maxArgsLabelLen = 96
+)
+
+// ArgsLabelForBytes returns a bounded, redacted shape label for JSON tool args. It is
+// exported so gateways can preserve the label before large args are lowered to blob refs.
+func ArgsLabelForBytes(b []byte) string {
+	var obj map[string]any
+	if err := json.Unmarshal(b, &obj); err != nil || len(obj) == 0 {
+		return ""
+	}
+	return argsLabelForObject(obj)
+}
 
 func argsLabel(r abi.Ref) string {
 	if r.Kind != abi.RefInline || len(r.Inline) == 0 {
 		return ""
 	}
-	var obj map[string]any
-	if err := json.Unmarshal(r.Inline, &obj); err != nil || len(obj) == 0 {
+	return ArgsLabelForBytes(r.Inline)
+}
+
+func argsLabelFromMeta(meta map[string]string) string {
+	if meta == nil {
 		return ""
 	}
+	return safeProvidedArgsLabel(meta[MetaArgsLabel])
+}
+
+func argsLabelForObject(obj map[string]any) string {
 	parts := []string{}
 	if s := firstStringField(obj, "command", "cmd", "script"); s != "" {
 		if stem := commandStem(s); stem != "" {
@@ -510,6 +536,23 @@ func argsLabel(r abi.Ref) string {
 		}
 	}
 	return boundArgsLabel(strings.Join(parts, " "))
+}
+
+func safeProvidedArgsLabel(label string) string {
+	label = strings.TrimSpace(label)
+	if label == "" || secretish(label) {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range label {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '_' || r == '-' || r == '.' || r == '/' || r == '=' || r == ',' || r == ' ':
+			b.WriteRune(r)
+		}
+	}
+	return boundArgsLabel(b.String())
 }
 
 func firstStringField(obj map[string]any, names ...string) string {

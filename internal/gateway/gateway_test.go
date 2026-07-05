@@ -16,6 +16,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/memq"
 	"github.com/anthony-chaudhary/fak/internal/recall"
 )
@@ -133,6 +134,24 @@ func newTestServer(t *testing.T) *Server {
 	}
 	t.Cleanup(srv.Close) // release the coherence-bus subscription on the global vDSO
 	return srv
+}
+
+func TestBuildCall_StampsRedactedArgsLabel(t *testing.T) {
+	srv := newTestServer(t)
+	rawArgs := `{"command":"git status --short; echo sk-test-secret","workdir":"C:\\work\\fak","api_key":"sk-test-secret","padding":"` + strings.Repeat("x", 400) + `"}`
+	tc, err := srv.buildCall(context.Background(), "shell_command", rawArgs, true, "", "trace-label")
+	if err != nil {
+		t.Fatalf("buildCall: %v", err)
+	}
+	label := tc.Meta[journal.MetaArgsLabel]
+	if label != "command=git status path=fak" {
+		t.Fatalf("args label = %q, want redacted command/path", label)
+	}
+	for _, leak := range []string{"sk-test-secret", "api_key", "echo"} {
+		if strings.Contains(label, leak) {
+			t.Fatalf("args label leaked %q: %q", leak, label)
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------

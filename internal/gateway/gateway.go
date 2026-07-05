@@ -47,6 +47,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/enginecache"
 	"github.com/anthony-chaudhary/fak/internal/fusedturn"
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
+	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
@@ -2249,6 +2250,9 @@ func (s *Server) buildCall(ctx context.Context, tool, rawArgs string, readOnly b
 		return nil, fmt.Errorf("resolver: %w", err)
 	}
 	meta := metaFor(tool, readOnly)
+	if label := journal.ArgsLabelForBytes(args); label != "" {
+		meta[journal.MetaArgsLabel] = label
+	}
 	// The external world-state witness (a git commit / blob / lease epoch the caller is
 	// reading at) keys this read for cross-agent dedup AND for causal revocation: a later
 	// fak_revoke of this witness evicts every pooled entry admitted under it.

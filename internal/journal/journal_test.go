@@ -75,6 +75,34 @@ func TestMemoryJournalAddsRedactedArgsLabel(t *testing.T) {
 	}
 }
 
+func TestMemoryJournalAddsMetaArgsLabelForBlobArgs(t *testing.T) {
+	j := OpenMemory()
+	call := &abi.ToolCall{
+		Tool: "shell_command",
+		Args: abi.Ref{Kind: abi.RefBlob, Digest: "sha256:blobbed-args", Len: 1024},
+		Meta: map[string]string{MetaArgsLabel: "command=git status path=fak token=sk-test-secret"},
+	}
+	j.Emit(abi.Event{Kind: abi.EvDecide, Call: call, Verdict: &abi.Verdict{Kind: abi.VerdictAllow, By: "test"}})
+
+	rows := j.Recent(0)
+	if len(rows) != 1 {
+		t.Fatalf("wrote %d rows, want 1", len(rows))
+	}
+	if rows[0].ArgsLabel != "" {
+		t.Fatalf("unsafe meta ArgsLabel should be dropped, got %q", rows[0].ArgsLabel)
+	}
+
+	call.Meta[MetaArgsLabel] = "command=git status path=fak"
+	j.Emit(abi.Event{Kind: abi.EvDecide, Call: call, Verdict: &abi.Verdict{Kind: abi.VerdictAllow, By: "test"}})
+	rows = j.Recent(0)
+	if got := rows[len(rows)-1].ArgsLabel; got != "command=git status path=fak" {
+		t.Fatalf("meta ArgsLabel = %q, want sanitized label", got)
+	}
+	if n, err := VerifyRows(rows); err != nil || n != 2 {
+		t.Fatalf("meta ArgsLabel must not affect hash-chain verification: n=%d err=%v", n, err)
+	}
+}
+
 func TestFileJournalReopensAndContinuesChain(t *testing.T) {
 	path := t.TempDir() + "/audit.jsonl"
 	j, err := Open(path)
