@@ -623,6 +623,20 @@ summary  = "A dispatch or worker launch would overlap a live lease/region and ri
 fix      = "Run the arbiter and wait, repartition, or pick a disjoint lane/region before launching. Floor: `dos arbitrate` / lane lease checks."
 see_also = ["dos arbitrate", "dos top", "tools/dos_fleet_lease.py"]
 
+# Blast-radius containment W4 (#2716, epic #2712): the dispatch router scope-holds an
+# issue whose declared paths intersect a LIVE known-bad signature (the internal/knownbad
+# ledger, #2713), so a worker is not sent to walk straight into a shared bug. This is the
+# structured, `dos check-reason`-verifiable refusal the skip carries. It is DISTINCT from
+# BLOCKED_BY_HUMAN: dynamic (clears when the signature is released, not by a human action)
+# and it holds ONLY the intersecting subset -- disjoint issues keep dispatching, so the
+# fleet makes progress instead of a global stall.
+[reasons.BLOCKED_BY_KNOWN_BAD]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "An issue was held back from dispatch because its declared paths intersect a live fleet known-bad signature; dispatching it would send a worker into a known shared failure. Holds only the intersecting subset -- disjoint work keeps dispatching."
+fix      = "Wait for the known-bad signature to clear (auto-release, W6) or land the elected fixer (W5); an issue disjoint from every live signature dispatches normally. Floor: `fak dispatch route` / `fak dispatch skipped` known-bad hold over the internal/knownbad ledger."
+see_also = ["internal/knownbad", "fak dispatch route", "fak dispatch skipped", "docs/blast-radius-containment-cohort.md"]
+
 [reasons.GATE_LATENCY_REGRESSION]
 category = "OPERATOR_GATE"
 refusal  = true

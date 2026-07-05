@@ -364,14 +364,18 @@ func dispatchRouteIssuesNative(root string, stderr io.Writer) (dispatchtick.Rout
 	if issueErr != nil {
 		fetchErrs = append(fetchErrs, issueErr.Error())
 	}
-	return dispatchtick.RouteIssues(dispatchtick.RouterInput{
+	payload := dispatchtick.RouteIssues(dispatchtick.RouterInput{
 		Workspace:  root,
 		Taxonomy:   taxonomy,
 		Issues:     issues,
 		IssueLimit: issueLimit,
 		Injected:   injected,
 		FetchError: strings.Join(fetchErrs, "; "),
-	}), nil
+	})
+	// W4 scope-hold (#2716): after routing, hold back ONLY the issues whose declared paths
+	// intersect a live known-bad signature (internal/knownbad ledger, #2713). Disjoint
+	// issues keep dispatching. Fails open on a missing/broken ledger so it never stalls.
+	return holdKnownBadForRoute(root, payload), nil
 }
 
 // dispatchFetchScopedIssues fetches the open-issue set the router folds. A

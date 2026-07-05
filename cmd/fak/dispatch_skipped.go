@@ -80,6 +80,13 @@ func runDispatchSkipped(stdout, stderr io.Writer, argv []string) int {
 	}
 	blocked := humanBlockedSkipped(router)
 	card := renderSkippedHumanBlockedCard(blocked, *repoURL)
+	// A live known-bad hold (#2716) is a DISTINCT row class from the human-blocked set:
+	// dynamic, ledger-driven, and cleared by releasing the signature (not by a human
+	// action). Append it as its own card block only when something is actually held, so
+	// the human-blocked card and its tests are unchanged when the ledger is empty.
+	if knownBad := knownBadBlockedSkipped(router); len(knownBad) > 0 {
+		card += "\n\n" + renderSkippedKnownBadCard(knownBad, *repoURL)
+	}
 
 	if *dryRun {
 		fmt.Fprintln(stdout, card)
