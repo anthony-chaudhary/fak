@@ -218,6 +218,47 @@ func TestReversibilityClassifiesCommands(t *testing.T) {
 	}
 }
 
+// TestRedirectComesFromTheBlockingFamily pins the drift #2748 removes: the
+// redirect must derive from the family entry that actually blocked, so a
+// trigger phrase inside a quoted payload cannot attach another family's hint
+// to an unrelated escalation. Here the curl write escalates (http-write
+// family, no sanctioned sidestep) while the payload merely MENTIONS git push;
+// the git-push redirect must not leak onto it.
+func TestRedirectComesFromTheBlockingFamily(t *testing.T) {
+	env := ClassifyReversibility("Bash", map[string]any{
+		"command": `curl -X POST https://example.invalid/hook -d "git push"`,
+	})
+	if env.Class != ReversibilityOutwardFacing {
+		t.Fatalf("curl write must stay outward-facing, got %q", env.Class)
+	}
+	if env.DryRunHint != "" {
+		t.Fatalf("http-write escalation borrowed another family's redirect: %q", env.DryRunHint)
+	}
+}
+
+// TestFamilyTableSingleEntryYieldsBlockAndRedirect is the #2748 witness:
+// declaring ONE hypothetical family entry is sufficient to get BOTH its
+// escalation and its redirect — there is no second switch to keep in sync.
+func TestFamilyTableSingleEntryYieldsBlockAndRedirect(t *testing.T) {
+	const cmd = "carrierpigeon deliver --to ops 'release note'"
+	if class, hint := classifyAgainstFamilies(reversibilityFamilies, "Bash", cmd); class != ReversibilityReversible || hint != "" {
+		t.Fatalf("hypothetical family already classified by the real table: %q/%q", class, hint)
+	}
+	withFamily := append(append([]reversibilityFamily{}, reversibilityFamilies...), reversibilityFamily{
+		name:  "carrier-pigeon",
+		class: ReversibilityOutwardFacing,
+		heads: []string{"carrierpigeon"},
+		hint:  "send it with the sanctioned compiled verb: fak pigeon send",
+	})
+	class, hint := classifyAgainstFamilies(withFamily, "Bash", cmd)
+	if class != ReversibilityOutwardFacing {
+		t.Fatalf("single table entry did not escalate: class=%q", class)
+	}
+	if hint != "send it with the sanctioned compiled verb: fak pigeon send" {
+		t.Fatalf("single table entry did not carry its redirect: hint=%q", hint)
+	}
+}
+
 func TestReversibilityConfirmationTokenMustEcho(t *testing.T) {
 	args := map[string]any{"command": "rm -rf build"}
 	env, ok := ReversibilityConfirmed("Bash", args)
