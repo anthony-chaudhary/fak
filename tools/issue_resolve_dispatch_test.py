@@ -620,6 +620,7 @@ class EvaluateTest(unittest.TestCase):
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": prompt_chars, "title": f"title {n}"}
         mod.issue_contract_review = passing_issue_contract
+        mod.dirty_repo_paths = lambda root: {"paths": [], "unavailable": False}
         # Hermetic contract-hold ledger: no prior holds, and never write the real
         # .dispatch-runs ledger from a test tick (live hold ticks append to it).
         mod.contract_held_issues = lambda runs_dir, **k: set()
@@ -791,6 +792,59 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["target_issue"], 466)
         self.assertEqual([r["issue"] for r in p["multi_lane_skipped"]], [467])
         self.assertIn("multi-lane head", mod.render(p))
+
+    def test_dirty_path_collision_scans_to_next_clean_issue(self) -> None:
+        """A candidate naming dirty local WIP is skipped before launch pricing,
+        so an auto-pick can still admit a later disjoint issue."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "tools", "numbers": [2719, 2721],
+                          "by_lane_count": {"tools": 2},
+                          "eligible_by_lane": [["tools", [2719, 2721]]]})
+        mod.dirty_repo_paths = lambda root: {
+            "paths": ["cmd/fak/knownbad.go"], "unavailable": False}
+
+        def build(n, lane, *, workspace):
+            body = ("Likely files: `cmd/fak/knownbad.go`"
+                    if n == 2719 else "Likely files: `tools/safe.py`")
+            return {"prompt": f"resolve #{n}", "prompt_chars": 900,
+                    "title": f"title {n}",
+                    "issue_record": {"body": body}}
+
+        mod.issue_worker_prompt.build = build
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "WOULD_SPAWN")
+        self.assertEqual(p["target_issue"], 2721)
+        self.assertEqual([r["issue"] for r in p["dirty_path_skipped"]], [2719])
+        self.assertIn("dirty-path head", mod.render(p))
+
+    def test_dirty_path_collision_holds_when_no_clean_candidate(self) -> None:
+        """A final/pinned dirty-path candidate is a safety hold, not a launch-ready
+        dry-run."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "tools", "numbers": [2719],
+                          "by_lane_count": {"tools": 1},
+                          "eligible_by_lane": [["tools", [2719]]]})
+        mod.dirty_repo_paths = lambda root: {
+            "paths": ["cmd/fak/knownbad.go"], "unavailable": False}
+        mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
+            "prompt": f"resolve #{n}", "prompt_chars": 900,
+            "title": f"title {n}",
+            "issue_record": {"body": "Likely files: `cmd/fak/knownbad.go`"}}
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["action"], "dirty_path_collision")
+        self.assertEqual(p["verdict"], "DIRTY_PATH_COLLISION")
+        self.assertEqual(p["launch_gate"]["blockers"][0]["code"],
+                         "DIRTY_PATH_COLLISION")
+        self.assertIn("cmd/fak/knownbad.go", p["reason"])
 
     def test_contract_scan_bounded_holds_when_none_ready(self) -> None:
         """When every scanned issue is thin, the tick still HOLDs (the floor is
@@ -3556,6 +3610,7 @@ class TickExitCodeTest(unittest.TestCase):
     def test_benign_no_work_and_backpressure_exit_zero(self) -> None:
         mod = load()
         for action in ("no_issue", "no_lane", "lane_busy", "lane_leased",
+                       "dirty_path_collision",
                        "refused", "weekly_capped", "backend_unhealthy"):
             with self.subTest(action=action):
                 # ok=False on every benign verdict, yet the tick ran correctly.
@@ -3582,8 +3637,8 @@ class TickExitCodeTest(unittest.TestCase):
         # spawn_failed is the ONLY emitted action outside the benign set.
         mod = load()
         emitted = {"spawned", "would_spawn", "no_issue", "no_lane", "lane_busy",
-                   "lane_leased", "multi_lane_scope", "refused", "weekly_capped",
-                   "backend_unhealthy", "spawn_failed"}
+                   "lane_leased", "dirty_path_collision", "multi_lane_scope",
+                   "refused", "weekly_capped", "backend_unhealthy", "spawn_failed"}
         self.assertEqual(emitted - mod.BENIGN_ACTIONS, {"spawn_failed"})
 
 
@@ -3650,6 +3705,37 @@ class MultiLaneScopeTest(unittest.TestCase):
         self.assertIn("#2233", reason)
         self.assertIn(".claude/skills/", reason)
         self.assertIn("Split into", reason)
+
+
+class DirtyPathCollisionTest(unittest.TestCase):
+    def test_exact_dirty_paths_named_in_issue_collide(self) -> None:
+        mod = load()
+        scan = mod.dirty_path_collision(
+            "Likely files: `cmd/fak/knownbad.go`, `fak/internal/foo/bar.go`.",
+            ["cmd/fak/knownbad.go", "internal/foo/bar.go", "docs/clean.md"])
+        self.assertTrue(scan["collides"])
+        self.assertEqual(scan["dirty_paths"],
+                         ["cmd/fak/knownbad.go", "internal/foo/bar.go"])
+
+    def test_bare_filename_does_not_collide(self) -> None:
+        mod = load()
+        scan = mod.dirty_path_collision(
+            "Knownbad work mentions knownbad.go but no repo-relative path.",
+            ["cmd/fak/knownbad.go"])
+        self.assertFalse(scan["collides"])
+
+    def test_git_status_parser_handles_renames_and_untracked(self) -> None:
+        mod = load()
+        paths = mod.parse_git_status_paths(
+            " M cmd/fak/knownbad.go\n"
+            "?? internal/knownbad/knownbad_test.go\n"
+            "R  old/path.go -> new/path.go\n")
+        self.assertEqual(paths, [
+            "cmd/fak/knownbad.go",
+            "internal/knownbad/knownbad_test.go",
+            "old/path.go",
+            "new/path.go",
+        ])
 
 
 if __name__ == "__main__":

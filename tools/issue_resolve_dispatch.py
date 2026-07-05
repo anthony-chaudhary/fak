@@ -2384,6 +2384,82 @@ def multi_lane_scope_reason(issue: int, scan: dict[str, Any]) -> str:
             f"every named family (or --force to accept the under-scoped lease)")
 
 
+# --- Dirty-path collision guard (#2977) -------------------------------------
+# The lease checks protect live workers from each other, but a shared checkout may
+# already contain uncommitted peer WIP with no live worker owning it. If the next
+# issue explicitly names one of those dirty files, launching a new resolver would
+# send it straight into a local pathspec collision. This is a collision guard, not
+# a readiness gate: --force does not bypass it.
+def parse_git_status_paths(status: str) -> list[str]:
+    """Repo-relative paths from ``git status --porcelain=v1`` output."""
+    out: list[str] = []
+    for raw in (status or "").splitlines():
+        if len(raw) < 4:
+            continue
+        spec = raw[3:].strip()
+        parts = spec.split(" -> ", 1) if " -> " in spec else [spec]
+        for p in parts:
+            p = normalize_repo_path(p)
+            if p and p not in out:
+                out.append(p)
+    return out
+
+
+def normalize_repo_path(path: str) -> str:
+    p = str(path or "").strip().strip('"').replace("\\", "/")
+    if p.startswith("./"):
+        p = p[2:]
+    return p
+
+
+def dirty_repo_paths(root: Path) -> dict[str, Any]:
+    rc, out = _git_capture(root, [
+        "-c", "core.quotepath=false",
+        "status", "--porcelain=v1", "--untracked-files=all",
+    ], timeout=15)
+    if rc != 0:
+        return {"paths": [], "unavailable": True, "rc": rc}
+    return {"paths": parse_git_status_paths(out), "unavailable": False}
+
+
+def _path_text_variants(path: str) -> list[str]:
+    p = normalize_repo_path(path)
+    variants = [p] if p else []
+    if p.startswith("fak/"):
+        variants.append(p[len("fak/"):])
+    elif p.startswith(("internal/", "cmd/", "experiments/")):
+        variants.append("fak/" + p)
+    return list(dict.fromkeys(variants))
+
+
+def text_mentions_repo_path(text: str, path: str) -> bool:
+    hay = (text or "").replace("\\", "/")
+    for variant in _path_text_variants(path):
+        if re.search(r"(?<![\w./-])" + re.escape(variant) + r"(?![\w./-])", hay):
+            return True
+    return False
+
+
+def dirty_path_collision(text: str, dirty_paths: list[str]) -> dict[str, Any]:
+    matches: list[str] = []
+    for p in dirty_paths or []:
+        norm = normalize_repo_path(p)
+        if norm and text_mentions_repo_path(text, norm) and norm not in matches:
+            matches.append(norm)
+    return {"collides": bool(matches), "dirty_paths": matches}
+
+
+def dirty_path_collision_reason(issue: int, scan: dict[str, Any]) -> str:
+    paths = ", ".join(str(p) for p in (scan.get("dirty_paths") or [])[:8])
+    more = ""
+    if len(scan.get("dirty_paths") or []) > 8:
+        more = f" (+{len(scan.get('dirty_paths') or []) - 8} more)"
+    return (f"issue #{issue} names dirty local path(s) already modified in this "
+            f"checkout: {paths}{more} — refusing DIRTY_PATH_COLLISION so a new "
+            f"worker cannot overwrite peer WIP; wait for those paths to commit/"
+            f"clear, or dispatch a disjoint issue")
+
+
 # --- Commit-time diff-witness binding (residual of #1310/#1324, proposal #2) ---
 # The fenced lane-lease above is the UPSTREAM half of the verified loop: it denies a
 # colliding spawn before it starts. This is the DOWNSTREAM half: a worker's slot only
@@ -3447,6 +3523,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
 
     rec = issue_worker_prompt.build(target, chosen_lane, workspace=root)
     contract = issue_contract_review(root, rec.get("issue_record"), target)
+    dirty_paths_doc = dirty_repo_paths(root)
 
     def _contract_holds(c: dict[str, Any]) -> bool:
         return bool(c.get("unavailable") or not c.get("ok") or
@@ -3482,40 +3559,66 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         rec = issue_worker_prompt.build(target, chosen_lane, workspace=root)
         contract = issue_contract_review(root, rec.get("issue_record"), target)
 
-    # Multi-lane scope is also a per-candidate hold for auto-picks. If the oldest
-    # contract-ready issue names files outside its lane lease, scan forward within
-    # the same bounded window instead of wedging the whole tick on that one broad
-    # issue. A pinned issue still holds exactly, and --force still means "operator
-    # accepts the under-scoped lease" rather than silently substituting a target.
-    multi_lane_skipped: list[dict[str, Any]] = []
-    scope_scan: dict[str, Any] | None = None
-    scan_limit = max(1, contract_scan)
-    while (not force and issue_override is None and not _contract_holds(contract)):
-        scope_scan = scan_multi_lane_scope(
-            root,
-            f"{rec.get('title') or ''}\n{(rec.get('issue_record') or {}).get('body') or ''}",
-            chosen_lane)
-        if not scope_scan.get("multi_lane"):
-            break
-        if scan_pos + 1 >= len(scan_stream):
-            break
-        if len(contract_skipped) + len(multi_lane_skipped) + 1 >= scan_limit:
-            break
-        multi_lane_skipped.append({
-            "issue": target,
-            "lane": chosen_lane,
-            "title": rec.get("title"),
-            "reason": multi_lane_scope_reason(target, scope_scan)[:240],
-            "uncovered_lanes": scope_scan.get("uncovered_lanes"),
-        })
+    def _candidate_text(r: dict[str, Any]) -> str:
+        return f"{r.get('title') or ''}\n{(r.get('issue_record') or {}).get('body') or ''}"
+
+    def _advance_candidate() -> None:
+        nonlocal chosen_lane, target, rec, contract, scan_pos
         scan_pos += 1
         chosen_lane, target = scan_stream[scan_pos]
         rec = issue_worker_prompt.build(target, chosen_lane, workspace=root)
         contract = issue_contract_review(root, rec.get("issue_record"), target)
+
+    # Collision/scope guards are also per-candidate holds for auto-picks. If the
+    # oldest contract-ready issue would collide with dirty local WIP, or names
+    # files outside its lane lease, scan forward within the same bounded window.
+    # Pinned issues still hold exactly. Dirty-path collisions are never force-
+    # bypassed; multi-lane scope keeps its existing --force escape hatch.
+    dirty_path_skipped: list[dict[str, Any]] = []
+    multi_lane_skipped: list[dict[str, Any]] = []
+    scope_scan: dict[str, Any] | None = None
+    dirty_scan: dict[str, Any] | None = None
+    scan_limit = max(1, contract_scan)
+    while issue_override is None and not _contract_holds(contract):
+        dirty_scan = dirty_path_collision(
+            _candidate_text(rec), list(dirty_paths_doc.get("paths") or []))
+        if dirty_scan.get("collides"):
+            if scan_pos + 1 >= len(scan_stream):
+                break
+            if len(contract_skipped) + len(dirty_path_skipped) + len(multi_lane_skipped) + 1 >= scan_limit:
+                break
+            dirty_path_skipped.append({
+                "issue": target,
+                "lane": chosen_lane,
+                "title": rec.get("title"),
+                "reason": dirty_path_collision_reason(target, dirty_scan)[:240],
+                "dirty_paths": dirty_scan.get("dirty_paths"),
+            })
+            _advance_candidate()
+            scope_scan = None
+        elif not force:
+            scope_scan = scan_multi_lane_scope(root, _candidate_text(rec), chosen_lane)
+            if not scope_scan.get("multi_lane"):
+                break
+            if scan_pos + 1 >= len(scan_stream):
+                break
+            if len(contract_skipped) + len(dirty_path_skipped) + len(multi_lane_skipped) + 1 >= scan_limit:
+                break
+            multi_lane_skipped.append({
+                "issue": target,
+                "lane": chosen_lane,
+                "title": rec.get("title"),
+                "reason": multi_lane_scope_reason(target, scope_scan)[:240],
+                "uncovered_lanes": scope_scan.get("uncovered_lanes"),
+            })
+            _advance_candidate()
+            dirty_scan = None
+        else:
+            break
         while (_contract_holds(contract) and not contract.get("unavailable")
                and issue_override is None
                and scan_pos + 1 < len(scan_stream)
-               and len(contract_skipped) + len(multi_lane_skipped) + 1 < scan_limit):
+               and len(contract_skipped) + len(dirty_path_skipped) + len(multi_lane_skipped) + 1 < scan_limit):
             contract_skipped.append({
                 "issue": target,
                 "lane": chosen_lane,
@@ -3524,10 +3627,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                 "reason": issue_contract_hold_reason(contract)[:200],
                 "missing_fields": _contract_missing_fields(contract),
             })
-            scan_pos += 1
-            chosen_lane, target = scan_stream[scan_pos]
-            rec = issue_worker_prompt.build(target, chosen_lane, workspace=root)
-            contract = issue_contract_review(root, rec.get("issue_record"), target)
+            _advance_candidate()
 
     payload["target_issue"] = target
     payload["lane"] = chosen_lane
@@ -3537,6 +3637,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     payload["issue_title"] = rec.get("title")
     if contract_skipped:
         payload["contract_skipped"] = contract_skipped
+    if dirty_path_skipped:
+        payload["dirty_path_skipped"] = dirty_path_skipped
     if multi_lane_skipped:
         payload["multi_lane_skipped"] = multi_lane_skipped
     if contract_held_prior:
@@ -3607,6 +3709,27 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
             "gate_reason": issue_contract_hold_reason(contract),
         }
 
+    # Dirty-path collision guard (#2977): hold before command pricing if the
+    # chosen issue explicitly names a path already dirty in this checkout. This
+    # protects uncommitted peer WIP that has no live lease left to protect it.
+    if dirty_scan is None:
+        dirty_scan = dirty_path_collision(
+            _candidate_text(rec), list(dirty_paths_doc.get("paths") or []))
+    if dirty_scan.get("collides"):
+        payload["dirty_path_collision"] = dirty_scan
+        reason = dirty_path_collision_reason(target, dirty_scan)
+        payload["launch_gate"] = launch_gate_blocked(
+            "DIRTY_PATH_COLLISION", reason,
+            "wait-for-or-commit-dirty-paths-or-pick-disjoint-issue")
+        payload.update({
+            "ok": False,
+            "action": "dirty_path_collision",
+            "verdict": "DIRTY_PATH_COLLISION",
+            "reason": reason,
+        })
+        _record(runs_dir, payload)
+        return finish(payload)
+
     # Multi-lane scope guard (#2615): the contract gate and the lane-disjointness
     # gate are SEPARATE — a score of 100 never proves the chosen lane's lease covers
     # the issue's mutation region. Refuse an issue whose body names a file family the
@@ -3615,9 +3738,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # --issue too (a collision guard, not a readiness one); --force accepts the
     # under-scoped lease transparently. Fail-open on an unavailable taxonomy.
     if scope_scan is None:
-        scope_scan = scan_multi_lane_scope(
-            root, f"{rec.get('title') or ''}\n{(rec.get('issue_record') or {}).get('body') or ''}",
-            chosen_lane)
+        scope_scan = scan_multi_lane_scope(root, _candidate_text(rec), chosen_lane)
     if scope_scan.get("multi_lane") and not force:
         payload["multi_lane_scope"] = scope_scan
         payload.update({
@@ -3773,6 +3894,11 @@ def render(p: dict[str, Any]) -> str:
         lanes = sorted({str(r.get("lane")) for r in cs if r.get("lane")})
         lines.append(f"  scan      : {len(cs)} contract-held head(s) skipped"
                      + (f" across lanes [{','.join(lanes)}]" if len(lanes) > 1 else ""))
+    ds = p.get("dirty_path_skipped") or []
+    if ds:
+        lanes = sorted({str(r.get("lane")) for r in ds if r.get("lane")})
+        lines.append(f"  scan      : {len(ds)} dirty-path head(s) skipped"
+                     + (f" across lanes [{','.join(lanes)}]" if len(lanes) > 1 else ""))
     ms = p.get("multi_lane_skipped") or []
     if ms:
         lanes = sorted({str(r.get("lane")) for r in ms if r.get("lane")})
@@ -3841,6 +3967,7 @@ BENIGN_ACTIONS = frozenset({
     "repair_spawned", "would_repair",                    # contract grooming dispatched
     "repair_in_flight",                                  # a groomer is already on it
     "no_issue", "no_lane", "lane_busy", "lane_leased",   # nothing to spawn
+    "dirty_path_collision",                              # local WIP collision guard
     "multi_lane_scope",                                  # issue spans lanes the lease can't cover (#2615)
     "issue_contract_hold",                               # issue needs scope before spawn
     "refused",                                           # preflight backpressure (host at cap / no account)
