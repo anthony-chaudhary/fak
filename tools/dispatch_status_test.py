@@ -590,6 +590,24 @@ class ResolverTickTest(unittest.TestCase):
                             for r in buckets["action"]))
         self.assertEqual(mod._dispatch_headline_state(p), "ACTION")
 
+    def test_dispatcher_preflight_refusal_suppresses_launch_ready_tick(self) -> None:
+        mod = load()
+        p = build(mod, pre=pre("REFUSE_NO_SEAT", cap=4, live=0),
+                  resolve_ticks=resolver_tick())
+        self.assertFalse(any("selected resolver tick launch-ready" in r
+                             for r in p["reasons"]))
+        self.assertTrue(any("selected resolver tick held by current preflight" in r
+                            and "REFUSE_NO_SEAT" in r
+                            for r in p["reasons"]))
+        self.assertEqual(p["utilization"]["state"], "HEADROOM_HELD")
+        self.assertEqual(p["utilization"]["blockers"][0]["code"], "NO_FREE_SEAT")
+        rendered = mod.render(p)
+        self.assertNotIn("launch    : python", rendered)
+        self.assertNotIn("use       : HEADROOM_LAUNCH_READY", rendered)
+        buckets = mod._dispatch_slack_buckets(p)
+        self.assertFalse(any("resolver dry-run launch-ready" in r
+                             for r in buckets["action"]))
+
     def test_resolver_product_preflight_surfaces_backend_seat_state(self) -> None:
         mod = load()
         tick = resolver_tick()
@@ -601,12 +619,25 @@ class ResolverTickTest(unittest.TestCase):
             and "live=2/2" in r
             and "unattributed_live=1" in r
             for r in p["reasons"]))
+        self.assertFalse(any("selected resolver tick launch-ready" in r
+                             for r in p["reasons"]))
+        self.assertTrue(any("selected resolver tick held by current preflight" in r
+                            and "REFUSE_NO_SEAT" in r
+                            for r in p["reasons"]))
         rendered = mod.render(p)
         self.assertIn("plan gate : opencode REFUSE_NO_SEAT live=2/2", rendered)
+        self.assertEqual(p["utilization"]["state"], "HEADROOM_HELD")
+        self.assertEqual(p["utilization"]["blockers"][0]["code"], "NO_FREE_SEAT")
+        self.assertNotIn("use       : HEADROOM_LAUNCH_READY", rendered)
+        self.assertNotIn("launch    : python", rendered)
         md = mod.render_md(p, date="2026-07-05")
         self.assertIn("**resolver product preflight**: opencode REFUSE_NO_SEAT", md)
         buckets = mod._dispatch_slack_buckets(p)
         self.assertTrue(any("opencode REFUSE_NO_SEAT" in r
+                            for r in buckets["expected"]))
+        self.assertFalse(any("resolver dry-run launch-ready" in r
+                             for r in buckets["action"]))
+        self.assertTrue(any("resolver launch held by current preflight REFUSE_NO_SEAT" in r
                             for r in buckets["expected"]))
 
     def test_selected_resolver_preflight_runs_product_scoped_gate(self) -> None:

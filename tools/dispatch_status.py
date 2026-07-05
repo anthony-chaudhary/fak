@@ -545,8 +545,43 @@ def _utilization_blocker(code: str, scope: str, next_action: str,
     return out
 
 
+def _current_preflight_launch_blocker(pre_verdict: str | None,
+                                      resolver_preflight: dict[str, Any] | None
+                                      ) -> dict[str, str]:
+    """Return the current preflight refusal that makes a launch-ready tick stale."""
+    resolver_preflight = resolver_preflight or {}
+    checks = [
+        (str(resolver_preflight.get("verdict") or ""),
+         str(resolver_preflight.get("_backend") or resolver_preflight.get("product") or "resolver")),
+        (str(pre_verdict or ""), "dispatcher"),
+    ]
+    table = {
+        "REFUSE_NO_SEAT": ("NO_FREE_SEAT", "seat", "wait-for-free-account",
+                           "HEADROOM_HELD"),
+        "REFUSE_AT_CAP": ("AT_CAP", "host", "wait-for-worker-exit",
+                          "SATURATED"),
+        "REFUSE_NO_ACCOUNT": ("NO_FREE_ACCOUNT", "account", "wait-for-free-account",
+                              "ACCOUNT_BLOCKED"),
+        "REFUSE_INSPECT": ("PREFLIGHT_INSPECT", "host", "inspect-dispatch-preflight",
+                           "INSPECT"),
+    }
+    for verdict, source in checks:
+        if verdict in table:
+            code, scope, action, state = table[verdict]
+            return {
+                "verdict": verdict,
+                "code": code,
+                "scope": scope,
+                "action": action,
+                "state": state,
+                "source": source,
+            }
+    return {}
+
+
 def utilization_state(*, live: int | None, cap: int | None, host_safe: bool,
                       pre_verdict: str | None, resolver: dict[str, Any],
+                      resolver_preflight: dict[str, Any] | None = None,
                       lab_readiness: dict[str, Any],
                       weekly_cap: dict[str, Any] | None = None,
                       merge: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -569,6 +604,8 @@ def utilization_state(*, live: int | None, cap: int | None, host_safe: bool,
         if action and action not in next_actions:
             next_actions.append(action)
 
+    preflight_blocker = _current_preflight_launch_blocker(pre_verdict, resolver_preflight)
+
     if headroom is None:
         state = "CAPACITY_UNKNOWN"
         add_blocker("CAPACITY_UNKNOWN", "host", "inspect-dispatch-preflight")
@@ -577,12 +614,11 @@ def utilization_state(*, live: int | None, cap: int | None, host_safe: bool,
     elif not host_safe:
         state = "HOST_BLOCKED"
         add_blocker("HOST_FLAGGED", "host", "inspect-or-reap-host-process")
-    elif pre_verdict == "REFUSE_NO_ACCOUNT":
-        state = "ACCOUNT_BLOCKED"
-        add_blocker("NO_FREE_ACCOUNT", "account", "wait-for-free-account")
-    elif pre_verdict == "REFUSE_INSPECT":
-        state = "INSPECT"
-        add_blocker("PREFLIGHT_INSPECT", "host", "inspect-dispatch-preflight")
+    elif preflight_blocker:
+        state = preflight_blocker["state"]
+        add_blocker(preflight_blocker["code"], preflight_blocker["scope"],
+                    preflight_blocker["action"],
+                    f"{preflight_blocker['source']} {preflight_blocker['verdict']}")
     elif weekly_cap:
         state = "ACCOUNT_CAPPED"
         add_blocker("WEEKLY_CAPPED", "account", "wait-for-weekly-cap-reset")
@@ -2537,6 +2573,7 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
     resolver_preflight_line = _resolver_preflight_summary(resolver_preflight)
     if resolver_preflight_line:
         reasons.append(resolver_preflight_line)
+    preflight_launch_blocker = _current_preflight_launch_blocker(pre_verdict, resolver_preflight)
 
     resolve_ticks = resolve_ticks or {}
     latest_tick = resolve_ticks.get("selected") or resolve_ticks.get("latest") or {}
@@ -2553,9 +2590,16 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                 f"last resolver tick stale: {tick_backend}{issue_bit}{lane_bit} "
                 f"{tick_verdict} age {tick_age}")
         elif gate.get("ready") is True:
-            reasons.append(
-                f"selected resolver tick launch-ready: {tick_backend}{issue_bit}{lane_bit} "
-                f"age {tick_age}")
+            if preflight_launch_blocker:
+                reasons.append(
+                    f"selected resolver tick held by current preflight: "
+                    f"{tick_backend}{issue_bit}{lane_bit} "
+                    f"{preflight_launch_blocker['verdict']}; next action: "
+                    f"{preflight_launch_blocker['action']}; age {tick_age}")
+            else:
+                reasons.append(
+                    f"selected resolver tick launch-ready: {tick_backend}{issue_bit}{lane_bit} "
+                    f"age {tick_age}")
         elif gate.get("ready") is False:
             blockers = gate.get("blockers") or []
             code = (blockers[0].get("code") if blockers else tick_verdict) or tick_verdict
@@ -2615,7 +2659,8 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
     limiter = _dispatch_limiter(pre, backlog, closure, leases)
     utilization = utilization_state(
         live=live, cap=cap, host_safe=host_safe, pre_verdict=pre_verdict,
-        resolver=resolve_ticks, lab_readiness=lab_readiness,
+        resolver=resolve_ticks, resolver_preflight=resolver_preflight,
+        lab_readiness=lab_readiness,
         weekly_cap=weekly_cap, merge=merge)
     if utilization.get("state") in (
             "HEADROOM_LAUNCH_READY", "HEADROOM_REPAIR_READY", "HEADROOM_HELD", "HEADROOM_STALE_PLAN",
@@ -2823,17 +2868,22 @@ def render(p: dict[str, Any]) -> str:
             cmd = (lab.get("commands") or {}).get("mark_ready")
             if cmd:
                 lines.append(f"║ lab cmd   : {cmd}")
+    preflight_blocker = _current_preflight_launch_blocker(
+        d.get("preflight_verdict"), p.get("resolver_preflight") or {})
     resolver = p.get("resolver") or {}
     latest_tick = resolver.get("selected") or resolver.get("latest") or {}
     if latest_tick:
         issue = latest_tick.get("target_issue")
         issue_bit = f"#{issue}" if issue is not None else "-"
         next_action = latest_tick.get("next_action") or "-"
+        tick_state = _resolve_tick_state(latest_tick)
+        if preflight_blocker and tick_state == "launch-ready":
+            tick_state = f"held {preflight_blocker['verdict']}"
         lines.append(
             f"║ planner   : {latest_tick.get('backend') or '-'} {issue_bit} "
-            f"lane={latest_tick.get('lane') or '-'} {_resolve_tick_state(latest_tick)} "
+            f"lane={latest_tick.get('lane') or '-'} {tick_state} "
             f"age={_age_text(latest_tick.get('age_min'))} next={next_action}")
-        if latest_tick.get("live_command_text"):
+        if latest_tick.get("live_command_text") and not preflight_blocker:
             lines.append(f"║ launch    : {latest_tick.get('live_command_text')}")
     resolver_pre = p.get("resolver_preflight") or {}
     if resolver_pre.get("schema"):
@@ -3026,17 +3076,22 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
             cmd = (lab.get("commands") or {}).get("mark_ready")
             if cmd:
                 out.append(f"- **lab publish command**: `{cmd}`")
+    preflight_blocker = _current_preflight_launch_blocker(
+        d.get("preflight_verdict"), payload.get("resolver_preflight") or {})
     resolver = payload.get("resolver") or {}
     latest_tick = resolver.get("selected") or resolver.get("latest") or {}
     if latest_tick:
         issue = latest_tick.get("target_issue")
         issue_bit = f"#{issue}" if issue is not None else "-"
+        tick_state = _resolve_tick_state(latest_tick)
+        if preflight_blocker and tick_state == "launch-ready":
+            tick_state = f"held {preflight_blocker['verdict']}"
         out.append(
             f"- **last resolver tick**: `{latest_tick.get('backend') or '-'}` "
             f"{issue_bit} lane `{latest_tick.get('lane') or '-'}` — "
-            f"{_resolve_tick_state(latest_tick)}, age {_age_text(latest_tick.get('age_min'))}, "
+            f"{tick_state}, age {_age_text(latest_tick.get('age_min'))}, "
             f"next `{latest_tick.get('next_action') or '-'}`")
-        if latest_tick.get("live_command_text"):
+        if latest_tick.get("live_command_text") and not preflight_blocker:
             out.append(f"- **approved live command**: `{latest_tick.get('live_command_text')}`")
     resolver_pre = payload.get("resolver_preflight") or {}
     resolver_pre_line = _resolver_preflight_summary(resolver_pre)
@@ -3601,6 +3656,8 @@ def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
             suffix = f"; publish ready with `{cmd}`" if cmd else ""
             buckets["action"].append(
                 f"lab readiness {status}; {action}; lab-backed dispatch held{suffix}")
+    resolver_pre = payload.get("resolver_preflight") or {}
+    preflight_launch_blocker = _current_preflight_launch_blocker(preflight, resolver_pre)
     resolver = payload.get("resolver") or {}
     latest_tick = resolver.get("selected") or resolver.get("latest") or {}
     if latest_tick:
@@ -3614,9 +3671,15 @@ def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
                 f"last resolver tick stale ({tick_desc}, {state}, "
                 f"age {_age_text(latest_tick.get('age_min'))})")
         elif state == "launch-ready" and not latest_tick.get("live"):
-            cmd = latest_tick.get("live_command_text")
-            suffix = f"; approve `{cmd}`" if cmd else "; live launch requires approval"
-            buckets["action"].append(f"resolver dry-run launch-ready ({tick_desc}){suffix}")
+            if preflight_launch_blocker:
+                buckets["expected"].append(
+                    f"resolver launch held by current preflight "
+                    f"{preflight_launch_blocker['verdict']} ({tick_desc}); "
+                    f"{preflight_launch_blocker['action']}")
+            else:
+                cmd = latest_tick.get("live_command_text")
+                suffix = f"; approve `{cmd}`" if cmd else "; live launch requires approval"
+                buckets["action"].append(f"resolver dry-run launch-ready ({tick_desc}){suffix}")
         elif state in ("repair-in-flight", "repair-spawned"):
             buckets["auto-solving"].append(f"resolver {state} ({tick_desc})")
         elif state.startswith("held "):
@@ -3625,7 +3688,6 @@ def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
                 f"last resolver tick {state} ({tick_desc}); {action}")
     elif latest_tick.get("action") == "spawned":
         buckets["auto-solving"].append(f"resolver spawned worker ({tick_desc})")
-    resolver_pre = payload.get("resolver_preflight") or {}
     resolver_pre_line = _resolver_preflight_summary(resolver_pre)
     if resolver_pre_line:
         target_bucket = "expected"
