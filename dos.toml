@@ -870,6 +870,26 @@ summary  = "A lifecycle rung's measured overhead (elapsed ns or tokens added) ex
 fix      = "Confirm the breach against the rung's declared envelope (internal/turntaxmeter.DefaultBudget); if it is a real regression, fix or re-budget the added overhead; if the rung also SAVES more than it costs, the net line (epic T6) decides red/green, not this single breach. Floor: go test ./internal/turntaxmeter."
 see_also = ["internal/turntaxmeter/overheadbudget.go", "docs/notes/self-tax-performance-assurance-tracking-1147.md", "GATE_LATENCY_REGRESSION"]
 
+# Bottom-up admission backpressure (#2221, gap G3 / risk R4 of the dynamic-range epic
+# #2218): the closed token the spawn preflight names when degraded gate health is the
+# SOLE binding admission term. EvaluatePreflight's four cap terms (max-workers, dos
+# target, host cap, seat cap) flow admission DOWN the band ladder and consult NO gate
+# signal, so a fleet keeps admitting workers onto a kernel whose guard-hook p99 has
+# breached its budget -- the fast inner loop saturates while the slow outer loop
+# commands more load. The fifth term (internal/dispatchtick.ApplyGateBackpressure)
+# folds the MEASURED hook-latency rollup (and a standing OVERHEAD_BUDGET_EXCEEDED
+# breach) UP into the effective cap: degraded gate health freezes the fleet at its live
+# count and refuses with THIS token so the sweep terminates on it like any other
+# refusal. The signal is the measured rollup, never a worker self-report; a thin sample
+# abstains exactly as hooklat does (MinHookAlarmSamples), and the fold never RAISES the
+# cap. Floor: `go test ./internal/dispatchtick -run TestApplyGateBackpressure`.
+[reasons.GATE_PRESSURE]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "the spawn preflight refused because degraded gate health is the sole binding admission term -- a measured guard-hook p99 over budget (GATE_LATENCY_REGRESSION) or a standing overhead-budget breach (OVERHEAD_BUDGET_EXCEEDED) froze the fleet at its live count, admitting no new worker onto a slow kernel."
+fix      = "let the fleet drain and re-measure: reduce the hook path taxing every tool call (#2073) or fix the over-budget lifecycle rung until the p99 recovers under budget, then the preflight admits again. The fold abstains on a thin sample and never RAISES the cap. Floor: go test ./internal/dispatchtick -run TestApplyGateBackpressure."
+see_also = ["internal/dispatchtick/preflight_gate.go", "internal/turntaxmeter/hooklat.go", "GATE_LATENCY_REGRESSION", "OVERHEAD_BUDGET_EXCEEDED"]
+
 # Verification-ladder INDETERMINATE (#1210, C2/G2 of the agent-programming-grammar
 # epic #1208): the first-class verdict the declarable verification ladder
 # (docs/standards/verification-ladder-spec.md) folds to when a cheap rung could NOT

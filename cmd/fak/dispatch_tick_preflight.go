@@ -17,6 +17,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
+	"github.com/anthony-chaudhary/fak/internal/turntaxmeter"
 )
 
 const fallbackCodexOAuthSessions = 10
@@ -42,7 +43,41 @@ func dispatchPreflight(root string, stderr io.Writer, maxWorkers int, workKind, 
 		Budgets:       dispatchtick.DefaultHostBudgets(),
 		OSWorkerProcs: dispatchProbeWorkerCount(root, product),
 	}
-	return dispatchtick.EvaluatePreflight(in).Map(), nil
+	// The fifth cap term (#2221, G3 of epic #2218): fold the MEASURED guard-hook
+	// latency rollup UP into admission so a slow kernel earns spawn reluctance. The
+	// four in-struct terms only flow caps DOWN; this composes gate health on top and
+	// can only lower the effective cap, never raise it.
+	res := dispatchtick.EvaluatePreflight(in)
+	res = dispatchtick.ApplyGateBackpressure(res, dispatchPreflightGate(root))
+	return res.Map(), nil
+}
+
+// dispatchPreflightGate folds the workspace's MEASURED guard-hook latency rollup into
+// the gate-health state the fifth preflight cap term consults. It reuses the same
+// hook-observation streams `fak hooklat` discovers and folds; a missing/unreadable
+// stream or a thin sample simply yields a zero-pressure GateCheck (the fold abstains),
+// so preflight never grows an error path for an observability signal. The
+// overhead-budget breach input stays false here until a standing-breach ledger exists
+// to read -- the honest fence: the signal is the measured rollup, never a self-report.
+func dispatchPreflightGate(root string) dispatchtick.GateCheck {
+	var obs []turntaxmeter.HookObservation
+	for _, p := range discoverHookObservationStreams(root) {
+		f, err := os.Open(p)
+		if err != nil {
+			continue
+		}
+		rows, _, perr := turntaxmeter.ParseHookObservations(f)
+		f.Close()
+		if perr != nil {
+			continue
+		}
+		obs = append(obs, rows...)
+	}
+	rollup := turntaxmeter.FoldHookLatency(obs)
+	return dispatchtick.GateCheck{
+		Hook:         rollup.Total,
+		HookBudgetMS: turntaxmeter.DefaultHookP99BudgetMS,
+	}
 }
 
 func dispatchPreflightHost(_ string, _ io.Writer) dispatchtick.HostCheck {
