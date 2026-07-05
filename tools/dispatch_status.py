@@ -1023,6 +1023,21 @@ def _read_worker_tree(stem: Path) -> list[str]:
     return _string_list(obj)
 
 
+def _read_worker_text_sidecar(stem: Path, suffix: str) -> str:
+    try:
+        return stem.with_suffix(suffix).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _read_worker_account(stem: Path) -> dict[str, Any]:
+    try:
+        obj = json.loads(stem.with_suffix(".account").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return obj if isinstance(obj, dict) else {}
+
+
 def scan_live_dispatch_workers(
     runs_dir: Path,
     *,
@@ -1063,6 +1078,8 @@ def scan_live_dispatch_workers(
             "stamp": m.group(2),
             "pid": pid,
             "lane": lane,
+            "backend": _read_worker_text_sidecar(stem, ".backend"),
+            "account": _read_worker_account(stem),
             "lease_id": lease_id,
             "tree": _read_worker_tree(stem),
             "log": log.name,
@@ -1119,6 +1136,37 @@ def cross_check_worker_leases(worker_state: dict[str, Any],
         "orphan_process": orphan_process,
         "orphan_lease": orphan_lease,
     }
+
+
+def _active_worker_rows(worker_leases: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in worker_leases.get("clean") or []:
+        worker = row.get("worker") or {}
+        if worker:
+            rows.append(worker)
+    for row in worker_leases.get("orphan_process") or []:
+        worker = row.get("worker") or {}
+        if worker:
+            rows.append(worker)
+    return rows
+
+
+def _active_worker_summary(worker_leases: dict[str, Any], *, limit: int = 4) -> str:
+    workers = _active_worker_rows(worker_leases)
+    if not workers:
+        return ""
+    bits: list[str] = []
+    for worker in workers[:limit]:
+        issue = worker.get("issue")
+        issue_bit = f"#{issue}" if issue is not None else str(worker.get("worker") or "?")
+        lane = worker.get("lane") or "-"
+        backend = worker.get("backend") or "-"
+        pid = worker.get("pid") or "-"
+        lease = worker.get("lease_id") or "-"
+        bits.append(f"{issue_bit} {lane}/{backend} pid={pid} lease={lease}")
+    if len(workers) > limit:
+        bits.append(f"+{len(workers) - limit} more")
+    return "active resolver worker(s): " + "; ".join(bits)
 
 
 def worker_lease_crosscheck(
@@ -2456,6 +2504,9 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                 f"unmatched-live-lease={ol}{lease_note}")
         elif clean:
             reasons.append(f"worker/lease cross-check clean ({clean} matched worker/lease pair(s))")
+        active_worker_line = _active_worker_summary(worker_leases)
+        if active_worker_line:
+            reasons.append(active_worker_line)
 
     # Seat inventory (#1799): available/busy/cooling/unavailable counts across the
     # explicit account seat pool, so an operator sees WHY a seat is held without
@@ -2887,6 +2938,9 @@ def render(p: dict[str, Any]) -> str:
             f"║ lease chk : clean={wl.get('clean_count', 0)} "
             f"orphan-process={wl.get('orphan_process_count', 0)} "
             f"unmatched-live-lease={wl.get('orphan_lease_count', 0)}{detail}")
+        active_worker_line = _active_worker_summary(wl)
+        if active_worker_line:
+            lines.append("║ live work : " + active_worker_line.removeprefix("active resolver worker(s): "))
     git = p.get("git") or {}
     if git.get("merge_in_progress"):
         lines.append(f"║ git       : MERGE_HEAD present — {git.get('next_action')}")
@@ -3000,6 +3054,9 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
         out.append(f"- **worker/lease cross-check**: clean={wl.get('clean_count', 0)}, "
                    f"orphan-process={wl.get('orphan_process_count', 0)}, "
                    f"unmatched-live-lease={wl.get('orphan_lease_count', 0)}")
+        active_worker_line = _active_worker_summary(wl)
+        if active_worker_line:
+            out.append(f"- **active resolver workers**: {active_worker_line.removeprefix('active resolver worker(s): ')}")
     out += [
         "",
         "## Backlog by lane (issue → lane sync)",
@@ -3570,6 +3627,9 @@ def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
             f"{workers.get('silent_count')} no-output worker(s) skipped by cooldown"
             + (f" ({nums})" if nums else "")
             + "; inspect only if the same issue repeats")
+    active_worker_line = _active_worker_summary(payload.get("worker_lease_check") or {})
+    if active_worker_line:
+        buckets["auto-solving"].append(active_worker_line)
 
     low_yield = payload.get("low_yield") or {}
     for r in [x for x in (low_yield.get("lanes") or [])

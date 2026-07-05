@@ -944,6 +944,7 @@ class WorkerLeaseCrossCheckTest(unittest.TestCase):
                     "issue": 1765,
                     "pid": 111,
                     "lane": "tools",
+                    "backend": "opencode",
                     "lease_id": "resolve-tools-1765",
                 },
                 {
@@ -951,6 +952,7 @@ class WorkerLeaseCrossCheckTest(unittest.TestCase):
                     "issue": 1770,
                     "pid": 222,
                     "lane": "docs",
+                    "backend": "claude",
                     "lease_id": "resolve-docs-1770",
                 },
             ],
@@ -964,6 +966,39 @@ class WorkerLeaseCrossCheckTest(unittest.TestCase):
         self.assertEqual(out["clean"][0]["worker"]["worker"], "resolve-1765-20260701-120000")
         self.assertEqual(out["orphan_process"][0]["worker"]["worker"], "resolve-1770-20260701-120001")
         self.assertEqual(out["orphan_lease"][0]["lease"]["id"], "resolve-model-1700")
+        summary = mod._active_worker_summary(out)
+        self.assertIn("#1765 tools/opencode pid=111 lease=resolve-tools-1765", summary)
+        self.assertIn("#1770 docs/claude pid=222 lease=resolve-docs-1770", summary)
+
+    def test_payload_render_surfaces_active_resolver_workers(self) -> None:
+        mod = load()
+        worker_leases = {
+            "available": True,
+            "clean_count": 1,
+            "orphan_process_count": 0,
+            "orphan_lease_count": 0,
+            "clean": [{
+                "worker": {
+                    "worker": "resolve-2718-20260705-183239",
+                    "issue": 2718,
+                    "pid": 70232,
+                    "lane": "tools",
+                    "backend": "opencode",
+                    "lease_id": "resolve-tools",
+                },
+                "lease": {"id": "resolve-tools"},
+            }],
+            "orphan_process": [],
+            "orphan_lease": [],
+        }
+        p = build(mod, worker_leases=worker_leases)
+        self.assertTrue(any("#2718 tools/opencode pid=70232" in r
+                            for r in p["reasons"]))
+        self.assertIn("live work : #2718 tools/opencode pid=70232", mod.render(p))
+        self.assertIn("**active resolver workers**: #2718 tools/opencode pid=70232",
+                      mod.render_md(p, date="2026-07-05"))
+        self.assertTrue(any("#2718 tools/opencode pid=70232" in r
+                            for r in mod._dispatch_slack_buckets(p)["auto-solving"]))
 
     def test_cross_check_preserves_unavailable_liveness(self) -> None:
         mod = load()
