@@ -96,6 +96,7 @@ func (m *multiString) Set(v string) error {
 // assistant turn's provider-cache usage and the timestamp. Only the fields needed are
 // typed, so a future schema addition is forward-compatible.
 type observeUsageRec struct {
+	Type      string `json:"type"`
 	Timestamp string `json:"timestamp"`
 	Message   *struct {
 		Role  string `json:"role"`
@@ -135,7 +136,7 @@ func readObserveTranscript(path string) ([]vcacheobserve.Turn, error) {
 		if json.Unmarshal(line, &rec) != nil {
 			continue
 		}
-		if rec.Message == nil || rec.Message.Usage == nil || rec.Message.Role != "assistant" {
+		if rec.Message == nil || rec.Message.Usage == nil || !observeAssistantRecord(rec) {
 			continue
 		}
 		u := rec.Message.Usage
@@ -156,6 +157,16 @@ func readObserveTranscript(path string) ([]vcacheobserve.Turn, error) {
 		out = append(out, t)
 	}
 	return out, sc.Err()
+}
+
+func observeAssistantRecord(rec observeUsageRec) bool {
+	if rec.Message == nil {
+		return false
+	}
+	if rec.Message.Role == "assistant" {
+		return true
+	}
+	return rec.Type == "assistant" && rec.Message.Role == ""
 }
 
 // transcriptFamily derives a stable prefix-family key from a transcript path: the

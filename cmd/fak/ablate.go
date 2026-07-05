@@ -197,15 +197,21 @@ func printAblation(w io.Writer, rep *ablate.Report) {
 	fmt.Fprintf(w, "arms           : %d   baseline: %s   (same trace each arm; deltas are apples-to-apples)\n\n",
 		len(rep.Runs), rep.Baseline)
 
-	fmt.Fprintf(w, "%-10s %-12s %6s %9s %7s %7s %9s %9s %14s %9s %15s %8s\n",
-		"arm", "features", "calls", "vdso_hits", "denies", "quar", "p50_ns", "tokens", "provider_tokeq", "fak_tokeq", "prefix_mismatch", "wall_s")
+	fmt.Fprintf(w, "%-10s %-12s %-36s %6s %9s %7s %7s %9s %9s %14s %9s %15s %8s\n",
+		"arm", "features", "cache_effects", "calls", "vdso_hits", "denies", "quar", "p50_ns", "tokens", "provider_tokeq", "fak_tokeq", "prefix_mismatch", "wall_s")
 	for i := range rep.Runs {
 		r := &rep.Runs[i]
-		fmt.Fprintf(w, "%-10s %-12s %6d %9d %7d %7d %9d %9d %14s %9s %15d %8.3f\n",
-			r.ArmID, featStr(r.Features), r.Arm.Calls, r.Arm.VDSOHits, r.Arm.Denies,
+		fmt.Fprintf(w, "%-10s %-12s %-36s %6d %9d %7d %7d %9d %9d %14s %9s %15d %8.3f\n",
+			r.ArmID, featStr(r.Features), cacheEffectStr(r.CacheEffects), r.Arm.Calls, r.Arm.VDSOHits, r.Arm.Denies,
 			r.Arm.Quarantines, r.Arm.P50Ns, r.Tokens(),
 			formatAblationTokenEquiv(r.ProviderTokenEquiv()), formatAblationTokenEquiv(r.FakTokenEquiv()),
 			r.PrefixIntegrity.PrefixMismatch, r.WallSeconds)
+	}
+	if len(rep.Dropped) > 0 {
+		fmt.Fprintf(w, "\ndropped arms (subprocess/reporting holes):\n")
+		for _, d := range rep.Dropped {
+			fmt.Fprintf(w, "  %-10s %s\n", d.ArmID, droppedArmSummary(d))
+		}
 	}
 
 	base := rep.ArmByID(rep.Baseline)
@@ -242,12 +248,47 @@ func formatAblationTokenEquivDelta(v float64) string {
 	return gateway.HumanTokenEquiv(v)
 }
 
+func droppedArmSummary(d ablate.DroppedArm) string {
+	parts := []string{}
+	if strings.TrimSpace(d.Stage) != "" {
+		parts = append(parts, "stage="+d.Stage)
+	}
+	if d.ExitCode != nil {
+		parts = append(parts, fmt.Sprintf("exit=%d", *d.ExitCode))
+	}
+	if d.DurationSeconds > 0 {
+		parts = append(parts, fmt.Sprintf("duration=%.3fs", d.DurationSeconds))
+	}
+	if strings.TrimSpace(d.StderrTail) != "" {
+		parts = append(parts, "stderr="+d.StderrTail)
+	}
+	if strings.TrimSpace(d.StdoutTail) != "" {
+		parts = append(parts, "stdout="+d.StdoutTail)
+	}
+	if strings.TrimSpace(d.ExpectedWorkloadHash) != "" || strings.TrimSpace(d.ActualWorkloadHash) != "" {
+		parts = append(parts, fmt.Sprintf("hash=%s/%s", cachevalueEmptyDash(d.ActualWorkloadHash), cachevalueEmptyDash(d.ExpectedWorkloadHash)))
+	}
+	parts = append(parts, d.Reason)
+	return strings.Join(parts, " ")
+}
+
 // featStr renders an arm's descriptor as "k=v k=v" in sorted key order.
 func featStr(d map[string]string) string {
 	keys := maputil.SortedKeys(d)
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
 		parts = append(parts, k+"="+d[k])
+	}
+	return strings.Join(parts, " ")
+}
+
+func cacheEffectStr(effects []ablate.CacheEffect) string {
+	if len(effects) == 0 {
+		return "-"
+	}
+	parts := make([]string, 0, len(effects))
+	for _, e := range effects {
+		parts = append(parts, e.Feature+"="+e.Status+"/"+e.Fidelity+"/"+e.Owner)
 	}
 	return strings.Join(parts, " ")
 }

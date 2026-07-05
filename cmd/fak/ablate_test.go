@@ -31,9 +31,33 @@ func TestAblateTableTwoArms(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, errb)
 	}
-	for _, want := range []string{"fak ablate", "workload hash", "all-off", "vdso", "provider_tokeq", "fak_tokeq", "prefix_mismatch", "deltas vs all-off"} {
+	for _, want := range []string{"fak ablate", "workload hash", "all-off", "vdso", "cache_effects", "active/lossless/fak", "provider_tokeq", "fak_tokeq", "prefix_mismatch", "deltas vs all-off"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("table missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestAblateTableShowsDroppedArmDiagnostics(t *testing.T) {
+	exitCode := 17
+	rep := &ablate.Report{
+		WorkloadHash: "hash-123",
+		Baseline:     "all-off",
+		Dropped: []ablate.DroppedArm{{
+			ArmID:           "radix",
+			Reason:          "child failed",
+			Stage:           "child_exit",
+			ExitCode:        &exitCode,
+			DurationSeconds: 0.125,
+			StderrTail:      "radix stderr",
+		}},
+	}
+	var out bytes.Buffer
+	printAblation(&out, rep)
+	got := out.String()
+	for _, want := range []string{"dropped arms", "radix", "stage=child_exit", "exit=17", "duration=0.125s", "stderr=radix stderr"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("dropped diagnostic table missing %q:\n%s", want, got)
 		}
 	}
 }
@@ -62,6 +86,14 @@ func TestAblateJSONReport(t *testing.T) {
 				Checked        bool   `json:"checked"`
 				PrefixMismatch uint64 `json:"prefix_mismatch"`
 			} `json:"prefix_integrity"`
+			CacheEffects []struct {
+				Feature  string `json:"feature"`
+				Owner    string `json:"owner"`
+				Plane    string `json:"plane"`
+				Fidelity string `json:"fidelity"`
+				Evidence string `json:"evidence"`
+				Status   string `json:"status"`
+			} `json:"cache_effects"`
 			ProviderTokenEquiv float64 `json:"provider_tokeq"`
 			FakTokenEquiv      float64 `json:"fak_tokeq"`
 		} `json:"runs"`
@@ -74,6 +106,7 @@ func TestAblateJSONReport(t *testing.T) {
 	}
 	var offHits, onHits int64 = -1, -1
 	var offAvoided, onAvoided uint64
+	var vdsoEffectSeen bool
 	for _, r := range rep.Runs {
 		if r.WorkloadHash != rep.WorkloadHash {
 			t.Errorf("arm %q workload hash %q != report %q", r.ArmID, r.WorkloadHash, rep.WorkloadHash)
@@ -85,6 +118,12 @@ func TestAblateJSONReport(t *testing.T) {
 		case "vdso":
 			onHits = r.Arm.VDSOHits
 			onAvoided = r.MechanismSavings.FakVDSOAvoidedCalls
+			for _, e := range r.CacheEffects {
+				if e.Feature == "vdso" {
+					vdsoEffectSeen = e.Owner == "fak" && e.Plane == "kernel_tool_cache" &&
+						e.Fidelity == "lossless" && e.Evidence == "witnessed" && e.Status == "active"
+				}
+			}
 		}
 	}
 	if offHits != 0 {
@@ -95,6 +134,9 @@ func TestAblateJSONReport(t *testing.T) {
 	}
 	if onAvoided <= offAvoided {
 		t.Errorf("vdso arm avoided calls (%d) must exceed all-off (%d)", onAvoided, offAvoided)
+	}
+	if !vdsoEffectSeen {
+		t.Fatalf("vdso arm did not carry active fak/lossless/witnessed cache effect: %+v", rep.Runs)
 	}
 }
 

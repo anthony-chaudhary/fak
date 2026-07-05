@@ -12,8 +12,44 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
+	"github.com/anthony-chaudhary/fak/internal/tuiplugin"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
+
+func init() {
+	tuiplugin.Register(tuiplugin.Pane{
+		ID:      "issues",
+		Summary: "fold GitHub issues into triage lanes, actions, and an optional epic focus",
+		Usage:   "fak console issues [--issues-json FILE] [--repo owner/repo] [--state open|closed|all] [--top N] [--json]",
+		Schema:  tuiIssuesSchema,
+		BuiltIn: true,
+		Controls: []tuiplugin.Control{
+			{ID: "as-of", Label: "As Of", Kind: "input", Flag: "--as-of", Detail: "date for age/idle math"},
+			{ID: "epic", Label: "Epic", Kind: "input", Flag: "--epic", Detail: "highlight related issue work"},
+			{ID: "json", Label: "JSON", Kind: "toggle", Flag: "--json", Detail: "emit the typed pane model"},
+			{ID: "state", Label: "State", Kind: "flag", Flag: "--state", Default: "open", Options: []string{"open", "closed", "all"}},
+			{ID: "top", Label: "Top Rows", Kind: "input", Flag: "--top", Default: "25"},
+		},
+		Run:      runTUIIssues,
+		Overview: tuiOverviewAdapter(buildTUIOverviewIssueCard),
+	})
+	tuiplugin.Register(tuiplugin.Pane{
+		ID:      "garden",
+		Summary: "render the read-only garden bundle and gate posture",
+		Usage:   "fak console garden [--garden-json FILE] [--json] [--check] [--workspace DIR] [--deep]",
+		Schema:  tuiGardenSchema,
+		BuiltIn: true,
+		Controls: []tuiplugin.Control{
+			{ID: "check", Label: "Check Gate", Kind: "toggle", Flag: "--check", Detail: "include the garden gate decision"},
+			{ID: "deep", Label: "Deep", Kind: "toggle", Flag: "--deep", Detail: "run deeper read-only bundle checks"},
+			{ID: "json", Label: "JSON", Kind: "toggle", Flag: "--json", Detail: "emit the typed pane model"},
+			{ID: "timeout", Label: "Timeout", Kind: "input", Flag: "--timeout", Default: "20"},
+			{ID: "workspace", Label: "Workspace", Kind: "input", Flag: "--workspace"},
+		},
+		Run:      runTUIGarden,
+		Overview: tuiOverviewAdapter(buildTUIOverviewGardenCard),
+	})
+}
 
 func loadTUIGarden(path, workspace string, deep bool, timeout time.Duration) (gardenbundle.Payload, string, error) {
 	if path != "" {

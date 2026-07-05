@@ -3,7 +3,7 @@ package main
 // dispatch_auto.go — `fak dispatch auto`, the auto-sized, self-refilling front door to the
 // multi-account wave. The operator (or a scheduled tick) types NO count: the verb folds the
 // live ceilings — the preflight's effective cap (configured/lease/host/seat), the switcher's
-// distinct fresh account pools, the router's ready work, an optional throughput target — into
+// fresh account session slots, the router's ready work, an optional throughput target — into
 // a steady-state Target, computes the Refill (Target minus live workers), and drives the
 // existing priced `dispatch wave` path with that number. Run it on a cadence and the worker
 // population converges to Target and tops itself back up as workers exit — load-balancing
@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchauto"
@@ -38,6 +39,10 @@ func runDispatchAuto(stdout, stderr io.Writer, argv []string) int {
 	maxWorkers := fs.Int("max-workers", dispatchtick.DefaultMaxWorkers, "hard cap on live workers, enforced by each tick's preflight")
 	backend := fs.String("backend", "claude", "worker backend (claude|opencode|codex)")
 	workKind := fs.String("work-kind", "", "switcher work kind (default follows --backend)")
+	goal := fs.String("goal", "", "durable dispatch loop goal id (for example throughput or high-priority); forwarded to the refill wave")
+	goalProfile := fs.String("goal-profile", "", "dispatch picker profile: throughput|high-priority (default follows --goal, else throughput)")
+	lane := fs.String("lane", "", "pin the refill wave to this repo lane")
+	excludeLane := fs.String("exclude-lane", "", "comma-separated lanes to drop from the refill wave")
 	requiredWorkers := fs.Int("required-workers", 0, "optional throughput target (e.g. fleetcap required workers); 0 = unset")
 	contextTokens := fs.Int("context-tokens", 0, "optional fleet context-token budget, sliced evenly across the wave; 0 = unset")
 	live := fs.Bool("live", false, "actually spawn the refill through the priced dispatch wave")
@@ -63,25 +68,38 @@ func runDispatchAuto(stdout, stderr io.Writer, argv []string) int {
 	if wk == "" {
 		wk = dispatchtick.DefaultWorkKind(backendNorm)
 	}
+	goalID, profile, goalErr := normalizeDispatchGoal(*goal, *goalProfile)
+	if goalErr != nil {
+		fmt.Fprintf(stderr, "fak dispatch auto: %v\n", goalErr)
+		return 2
+	}
+	excluded := dispatchSplitCSV(*excludeLane)
 
-	in, notes := probeDispatchAutoInput(root, stderr, *maxWorkers, wk, backendNorm)
+	in, notes, probeErrors := probeDispatchAutoInput(root, stderr, *maxWorkers, wk, backendNorm, *lane, excluded)
 	in.RequiredWorkers = *requiredWorkers
 	in.SharedContextTokens = *contextTokens
 	plan := dispatchauto.PlanAuto(in)
 
 	rec := map[string]any{
-		"schema":    "fleet-issue-dispatch-auto/1",
-		"workspace": root,
-		"live":      *live,
-		"backend":   backendNorm,
-		"work_kind": wk,
-		"input":     in,
-		"plan":      plan,
-		"notes":     notes,
-		"ok":        true,
+		"schema":         "fleet-issue-dispatch-auto/1",
+		"workspace":      root,
+		"live":           *live,
+		"backend":        backendNorm,
+		"work_kind":      wk,
+		"goal":           goalID,
+		"goal_profile":   profile,
+		"lane":           strings.TrimSpace(*lane),
+		"excluded_lanes": excluded,
+		"input":          in,
+		"plan":           plan,
+		"notes":          notes,
+		"ok":             len(probeErrors) == 0,
+	}
+	if len(probeErrors) > 0 {
+		rec["errors"] = probeErrors
 	}
 
-	if *live && plan.Refill > 0 {
+	if *live && len(probeErrors) == 0 && plan.Refill > 0 {
 		waveArgv := []string{
 			"--workspace", root,
 			"--count", fmt.Sprint(plan.Refill),
@@ -89,6 +107,18 @@ func runDispatchAuto(stdout, stderr io.Writer, argv []string) int {
 			"--backend", backendNorm,
 			"--work-kind", wk,
 			"--live", "--json",
+		}
+		if goalID != "" {
+			waveArgv = append(waveArgv, "--goal", goalID)
+		}
+		if profile != "" && profile != dispatchGoalProfileThroughput {
+			waveArgv = append(waveArgv, "--goal-profile", profile)
+		}
+		if strings.TrimSpace(*lane) != "" {
+			waveArgv = append(waveArgv, "--lane", strings.TrimSpace(*lane))
+		}
+		if len(excluded) > 0 {
+			waveArgv = append(waveArgv, "--exclude-lane", strings.Join(excluded, ","))
 		}
 		var waveOut bytes.Buffer
 		code := runDispatchWave(&waveOut, stderr, waveArgv)
@@ -106,63 +136,124 @@ func runDispatchAuto(stdout, stderr io.Writer, argv []string) int {
 }
 
 // probeDispatchAutoInput gathers the live ceilings with the SAME folds tick/wave use: the
-// preflight's already-min-folded effective cap and live count, the switcher's distinct-pool
-// allocation, and the router's ready-work count. A probe that fails contributes a note and a
-// conservative value (0), never a crash — an unknown ceiling reads as "no wave" for the hard
-// facts and "unset" for the optional ones, matching the fold's zero-value contract.
-func probeDispatchAutoInput(root string, stderr io.Writer, maxWorkers int, workKind, backend string) (dispatchauto.Input, []string) {
+// preflight's already-min-folded effective cap and live count, the switcher's free
+// account-slot headroom, and the router's ready-work count. A probe that fails contributes
+// a note and a conservative value (0), never a crash — an unknown ceiling reads as
+// "no wave" for the hard facts and "unset" for the optional ones, matching the fold's
+// zero-value contract.
+func probeDispatchAutoInput(root string, stderr io.Writer, maxWorkers int, workKind, backend, lane string, excluded []string) (dispatchauto.Input, []string, []string) {
 	in := dispatchauto.Input{}
 	notes := []string{}
+	probeErrors := []string{}
 
 	product := dispatchtick.ProductForBackend(backend)
+	var preflightSeatFree *int
 	if pf, err := dispatchPreflight(root, stderr, maxWorkers, workKind, product); err == nil {
 		if terms, ok := pf["cap_terms"].(map[string]any); ok {
 			in.EffectiveCap = dispatchMapInt(terms, "effective_cap")
 		}
 		in.LiveWorkers = dispatchMapInt(pf, "live")
+		if seat, ok := pf["seat"].(map[string]any); ok {
+			preflightSeatFree = intPtrFromAny(seat["free"])
+		}
 		if verdict := dispatchMapString(pf, "verdict"); verdict != "" {
 			notes = append(notes, "preflight: "+verdict)
 		}
 	} else {
-		notes = append(notes, "preflight probe failed: "+err.Error())
+		msg := "preflight probe failed: " + err.Error()
+		notes = append(notes, msg)
+		probeErrors = append(probeErrors, msg)
 	}
 
 	if rows, err := dispatchReadAccountRoster(root); err == nil {
-		ask := in.EffectiveCap
-		if ask <= 0 {
-			ask = maxWorkers
+		pool := dispatchtick.BuildSeatPool(rows, dispatchLiveSeatLeases(filepath.Join(root, dispatchtick.RunsDirName)), product)
+		freeSlots := pool.FreeSeats
+		if preflightSeatFree != nil {
+			freeSlots = *preflightSeatFree
 		}
-		alloc := dispatchtick.AllocateWave(dispatchtick.AccountWaveInput{
-			Rows:     rows,
-			Count:    ask,
-			WorkKind: workKind,
-			Product:  product,
-		})
-		in.DistinctPools = len(alloc.Lanes)
-		if alloc.Shortfall > 0 {
-			notes = append(notes, fmt.Sprintf("accounts: %d distinct pool(s) free, %d short of the ask", len(alloc.Lanes), alloc.Shortfall))
+		in.DistinctPools = dispatchAutoAccountCapacity(in.LiveWorkers, freeSlots)
+		if pool.FreeSeats < pool.TotalSeats {
+			notes = append(notes, fmt.Sprintf("accounts: %d/%d session slot(s) free", pool.FreeSeats, pool.TotalSeats))
 		}
 	} else {
-		notes = append(notes, "account roster probe failed: "+err.Error())
+		msg := "account roster probe failed: " + err.Error()
+		notes = append(notes, msg)
+		probeErrors = append(probeErrors, msg)
 	}
 
 	if router, err := dispatchRouteIssues(root, stderr); err == nil {
-		in.ReadyWork = dispatchAutoReadyWork(router)
+		if reason := dispatchAutoRouterProbeError(router); reason != "" {
+			msg := "issue router probe failed: " + reason
+			notes = append(notes, msg)
+			probeErrors = append(probeErrors, msg)
+		} else {
+			in.ReadyWork = dispatchAutoReadyWork(router, lane, excluded)
+		}
 	} else {
-		notes = append(notes, "issue router probe failed: "+err.Error())
+		msg := "issue router probe failed: " + err.Error()
+		notes = append(notes, msg)
+		probeErrors = append(probeErrors, msg)
 	}
 
-	return in, notes
+	return in, notes, probeErrors
+}
+
+func dispatchAutoAccountCapacity(liveWorkers, freeSlots int) int {
+	if liveWorkers < 0 {
+		liveWorkers = 0
+	}
+	if freeSlots < 0 {
+		freeSlots = 0
+	}
+	return liveWorkers + freeSlots
+}
+
+func dispatchAutoRouterProbeError(router dispatchtick.RouterPayload) string {
+	if strings.EqualFold(strings.TrimSpace(router.Verdict), "FETCH_ERROR") ||
+		strings.EqualFold(strings.TrimSpace(router.Finding), "fetch_error") {
+		reason := strings.TrimSpace(router.Reason)
+		if reason == "" {
+			reason = "router fetch error"
+		}
+		return reason
+	}
+	return ""
 }
 
 // dispatchAutoReadyWork counts the dispatchable units the router sees: the routed issue list
 // when present, else the lane groups' counts (the same fallback the wave pricer walks).
-func dispatchAutoReadyWork(router dispatchtick.RouterPayload) int {
+func dispatchAutoReadyWork(router dispatchtick.RouterPayload, lane string, excluded []string) int {
+	wantLane := strings.TrimSpace(lane)
+	exclude := map[string]bool{}
+	for _, name := range excluded {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			exclude[name] = true
+		}
+	}
 	if n := len(router.Issues); n > 0 {
-		return n
+		total := 0
+		for _, issue := range router.Issues {
+			issueLane := strings.TrimSpace(issue.Lane)
+			if wantLane != "" && issueLane != wantLane {
+				continue
+			}
+			if exclude[issueLane] {
+				continue
+			}
+			total++
+		}
+		return total
 	}
 	total := 0
-	for _, grp := range router.Lanes {
+	for name, grp := range router.Lanes {
+		name = strings.TrimSpace(name)
+		if wantLane != "" && name != wantLane {
+			continue
+		}
+		if exclude[name] {
+			continue
+		}
 		if grp.Count > 0 {
 			total += grp.Count
 		} else {
@@ -201,6 +292,11 @@ func renderDispatchAuto(rec map[string]any, plan dispatchauto.Plan) string {
 	if notes, ok := rec["notes"].([]string); ok {
 		for _, note := range notes {
 			fmt.Fprintf(&b, "  note: %s\n", note)
+		}
+	}
+	if errs, ok := rec["errors"].([]string); ok {
+		for _, err := range errs {
+			fmt.Fprintf(&b, "  error: %s\n", err)
 		}
 	}
 	if wave, ok := rec["wave"].(map[string]any); ok {

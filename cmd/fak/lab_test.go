@@ -114,3 +114,105 @@ func TestLabReportRejectsBadInput(t *testing.T) {
 		t.Fatal("an escaping --id must be refused")
 	}
 }
+
+func TestLabReadinessMissingFailsClosed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.json")
+	t.Setenv("FAK_LAB_READINESS", path)
+
+	var out bytes.Buffer
+	if rc := runLab(&out, io.Discard, []string{"readiness", "--json"}); rc != 1 {
+		t.Fatalf("missing readiness should fail closed with exit 1, got %d", rc)
+	}
+	var rec fleet.LabReadiness
+	if err := json.Unmarshal(out.Bytes(), &rec); err != nil {
+		t.Fatalf("readiness --json did not emit a record: %v\n%s", err, out.String())
+	}
+	if rec.Status != fleet.LabIndeterminate || rec.AdmitLabDispatch {
+		t.Fatalf("missing readiness = %+v, want INDETERMINATE and not admitting", rec)
+	}
+	if rec.NextAction != "publish-lab-readiness" || rec.Evidence != "no-readiness-record" {
+		t.Fatalf("missing readiness action/evidence = %+v", rec)
+	}
+	if rec.Commands == nil || !strings.Contains(rec.Commands.MarkReady, "--write-default") {
+		t.Fatalf("missing readiness should include public mark-ready command hints, got %+v", rec.Commands)
+	}
+}
+
+func TestLabReadinessWriteThenRead(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lab-readiness.json")
+	var out bytes.Buffer
+	rc := runLab(&out, io.Discard, []string{
+		"readiness",
+		"--status", fleet.LabReadyForDevWork,
+		"--write", path,
+		"--json",
+	})
+	if rc != 0 {
+		t.Fatalf("writing READY_FOR_DEV_WORK should exit 0, got %d: %s", rc, out.String())
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("readiness record not written: %v", err)
+	}
+
+	out.Reset()
+	rc = runLab(&out, io.Discard, []string{"readiness", "--file", path, "--json"})
+	if rc != 0 {
+		t.Fatalf("reading READY_FOR_DEV_WORK should exit 0, got %d: %s", rc, out.String())
+	}
+	var rec fleet.LabReadiness
+	if err := json.Unmarshal(out.Bytes(), &rec); err != nil {
+		t.Fatalf("readiness read did not emit JSON: %v\n%s", err, out.String())
+	}
+	if rec.Status != fleet.LabReadyForDevWork || !rec.AdmitLabDispatch {
+		t.Fatalf("readiness read = %+v, want READY_FOR_DEV_WORK admitting", rec)
+	}
+}
+
+func TestLabReadinessWriteDefaultUsesConfiguredPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lab-readiness.json")
+	t.Setenv("FAK_LAB_READINESS", path)
+
+	var out bytes.Buffer
+	rc := runLab(&out, io.Discard, []string{
+		"readiness",
+		"--status", fleet.LabWaitPrivateRecover,
+		"--write-default",
+		"--json",
+	})
+	if rc != 1 {
+		t.Fatalf("WAIT_PRIVATE_RECOVERY should write but fail closed with exit 1, got %d", rc)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("default readiness record not written: %v", err)
+	}
+
+	out.Reset()
+	rc = runLab(&out, io.Discard, []string{"readiness", "--json"})
+	if rc != 1 {
+		t.Fatalf("reading WAIT_PRIVATE_RECOVERY should fail closed with exit 1, got %d", rc)
+	}
+	var rec fleet.LabReadiness
+	if err := json.Unmarshal(out.Bytes(), &rec); err != nil {
+		t.Fatalf("readiness read did not emit JSON: %v\n%s", err, out.String())
+	}
+	if rec.Status != fleet.LabWaitPrivateRecover || rec.AdmitLabDispatch {
+		t.Fatalf("readiness read = %+v, want WAIT_PRIVATE_RECOVERY and not admitting", rec)
+	}
+}
+
+func TestLabReadinessWriteDefaultRejectsConflictingWrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lab-readiness.json")
+	var stderr bytes.Buffer
+	rc := runLab(io.Discard, &stderr, []string{
+		"readiness",
+		"--status", fleet.LabReadyForDevWork,
+		"--write", path,
+		"--write-default",
+	})
+	if rc != 2 {
+		t.Fatalf("conflicting write flags should exit 2, got %d", rc)
+	}
+	if !strings.Contains(stderr.String(), "only one") {
+		t.Fatalf("conflict error should explain the flag problem, got:\n%s", stderr.String())
+	}
+}

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -85,5 +88,66 @@ func TestSuggestVerb(t *testing.T) {
 	}
 	if got := suggestVerb("zzqx"); got != "" {
 		t.Errorf("suggestVerb(zzqx) = %q, want no suggestion", got)
+	}
+}
+
+// TestCommitHelpShowsDeepHelpAboveFlagDump pins the #2246 acceptance example
+// verbatim: `fak commit --help` used to print only the bare `flag` package
+// dump ("Usage of commit: ..."); it must now show the carved wall block
+// (verbFlagUsage, wired in runCommit) above the flag defaults.
+func TestCommitHelpShowsDeepHelpAboveFlagDump(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if rc := runCommitCommand(&out, &errOut, []string{"--help"}); rc != 2 {
+		t.Fatalf("runCommitCommand(--help) = %d, want 2 (flag.ErrHelp stops the parse)", rc)
+	}
+	got := errOut.String()
+	wallIdx := strings.Index(got, "SAFE SHARED-TRUNK COMMIT")
+	flagIdx := strings.Index(got, "-m string")
+	if wallIdx < 0 {
+		t.Fatalf("fak commit --help lost its deep-help wall block; got:\n%s", got)
+	}
+	if flagIdx < 0 {
+		t.Fatalf("fak commit --help lost its flag dump; got:\n%s", got)
+	}
+	if wallIdx > flagIdx {
+		t.Errorf("fak commit --help printed the flag dump before the deep help; want the wall block first:\n%s", got)
+	}
+}
+
+// TestOverviewVerbsAdoptVerbFlagUsage is the #2246 adoption ratchet: every
+// compact-overview verb backed by a flag.FlagSet must wire verbFlagUsage right
+// after constructing it, so `fak <verb> --help` shows the carved wall block
+// instead of regressing to the bare `flag` package dump. Two verbs are exempt:
+// "version" has no flag.FlagSet at all (cmdVersion takes no flags), and "ps"
+// already sets fs.Usage to its own hand-curated psUsage (never the bare dump).
+func TestOverviewVerbsAdoptVerbFlagUsage(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob *.go: %v", err)
+	}
+	var all strings.Builder
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		all.Write(b)
+		all.WriteByte('\n')
+	}
+	src := all.String()
+	exempt := map[string]bool{"version": true, "ps": true}
+	for _, g := range overviewGroups {
+		for _, e := range g.entries {
+			if exempt[e.name] {
+				continue
+			}
+			want := `verbFlagUsage(fs, "` + e.name + `")`
+			if !strings.Contains(src, want) {
+				t.Errorf("overview verb %q: no %s call found in cmd/fak — its --help would regress to the bare flag.FlagSet dump", e.name, want)
+			}
+		}
 	}
 }

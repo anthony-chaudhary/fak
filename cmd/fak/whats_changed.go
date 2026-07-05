@@ -17,6 +17,7 @@ func cmdWhatsChanged(argv []string) { os.Exit(runWhatsChanged(os.Stdout, os.Stde
 func runWhatsChanged(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("whats-changed", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "whats-changed")
 	var paths pathList
 	fs.Var(&paths, "paths", "repo-relative pathspec/glob to check for peer commits (repeatable)")
 	fs.Var(&paths, "path", "alias for --paths")

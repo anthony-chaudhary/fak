@@ -148,7 +148,7 @@ func buildReleaseStatus(root string, opts releaseStatusOptions) map[string]any {
 		"branch_regime":  branchRegime,
 		"shadow_cutover": releaseStatusShadowCutover(branchRegime, cutPlan, releaseStatusPilot(root)),
 	}
-	action := releaseStatusNextAction(decision, stable, dirty, ciDiag)
+	action := releaseStatusNextAction(decision, stable, dirty, ciDiag, branchRegime)
 	status["next_action"] = action
 	for k, v := range releaseStatusLoopStatusFields(action) {
 		status[k] = v
@@ -272,12 +272,27 @@ func releaseStatusShadowCutover(branchRegime map[string]any, cutPlan map[string]
 		"ready":          decision == "ready_for_pilot" && len(proofGaps) == 0,
 		"blockers":       blockers,
 		"proof_gaps":     proofGaps,
-		"proof_commands": []string{"fak release status --json --require-ci-green --limit-commits 50", "fak workflow-audit --write-doc", "go test ./internal/workflowaudit -count=1", "fak release ship --json --source-branch dev --trunk main --base origin/dev"},
+		"proof_commands": releaseStatusShadowProofCommands(dev, release, source, pilot),
 	}
 	if len(pilot) > 0 {
 		out["pilot"] = pilot
 	}
 	return out
+}
+
+func releaseStatusShadowProofCommands(dev, release, source string, pilot map[string]any) []string {
+	pilotBranch := releaseStatusString(pilot["declared_branch"])
+	source = releaseStatusFirstString(strings.TrimSpace(source), strings.TrimSpace(dev), "dev")
+	release = releaseStatusFirstString(strings.TrimSpace(release), "main")
+	if source == release {
+		source = releaseStatusFirstString(strings.TrimSpace(pilotBranch), "dev")
+	}
+	return []string{
+		"fak release status --json --require-ci-green --limit-commits 50",
+		"fak workflow-audit --write-doc",
+		"go test ./internal/workflowaudit -count=1",
+		fmt.Sprintf("fak release ship --json --open-pr --source-branch %s --trunk %s --base origin/%s", source, release, source),
+	}
 }
 
 func releaseStatusBranchHead(root, branch string) string {
@@ -742,7 +757,10 @@ func releaseStatusStableRecommendation(lag int, candidate map[string]any, noStab
 	return fmt.Sprintf("stable lags by %d rolling release(s); consider /stable-release after soak", lag)
 }
 
-func releaseStatusNextAction(decision, stable, dirty, ciDiag map[string]any) map[string]any {
+func releaseStatusNextAction(decision, stable, dirty, ciDiag, branchRegime map[string]any) map[string]any {
+	if action := releaseStatusBranchRegimePromotionAction(branchRegime); len(action) > 0 {
+		return action
+	}
 	blockers := releaseStatusStringSlice(decision["blockers"])
 	if releaseStatusString(decision["decision"]) == "release" {
 		if !releaseStatusBool(dirty["clean"]) {
@@ -807,6 +825,7 @@ func releaseStatusLoopStatusFields(action map[string]any) map[string]any {
 		"fix_version_topology":   true,
 		"repair_stable_evidence": true,
 		"promote_stable":         true,
+		"promote_release_branch": true,
 		"cut_release_hot_tree":   true,
 		"hold":                   true,
 		"consider_stable":        true,
@@ -817,6 +836,17 @@ func releaseStatusLoopStatusFields(action map[string]any) map[string]any {
 		verdict = "ACTION"
 	}
 	return map[string]any{"ok": ok, "verdict": verdict, "detail": detail}
+}
+
+func releaseStatusBranchRegimePromotionAction(branchRegime map[string]any) map[string]any {
+	if releaseStatusString(branchRegime["drift"]) != "development_ahead" || releaseStatusBool(branchRegime["promotion_blocked"]) {
+		return nil
+	}
+	next := releaseStatusString(branchRegime["next_action"])
+	if next == "" {
+		return nil
+	}
+	return map[string]any{"kind": "promote_release_branch", "detail": next}
 }
 
 func renderReleaseStatus(status map[string]any) string {
@@ -869,6 +899,8 @@ func releaseStatusRenderBranchRegime(branchRegime map[string]any) string {
 		if len(blockers) > 0 {
 			detail += ": " + strings.Join(blockers, ", ")
 		}
+	} else if next := releaseStatusString(branchRegime["next_action"]); next != "" {
+		detail += "; next: " + next
 	}
 	return "  branch regime: " + detail
 }

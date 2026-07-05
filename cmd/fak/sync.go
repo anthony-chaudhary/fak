@@ -42,6 +42,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 
 	fs := flag.NewFlagSet("sync "+command, flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "sync")
 	repo := fs.String("repo", ".", "repo path (default: cwd)")
 	remote := fs.String("remote", "origin", "remote name")
 	branch := fs.String("branch", "", "branch to sync (default: current branch)")

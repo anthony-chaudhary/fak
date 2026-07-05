@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
 )
 
@@ -34,7 +35,7 @@ import (
 //	fak fleet-accounts resolve [--account P] [--work-kind K] [--product P] [--t1|--t2|--t3]
 //	                                          ONE flat record: config_dir + oauth_token + tier
 //	fak fleet-accounts wave [--count N] [--work-kind K] [--product P] [--t1|--t2|--t3]
-//	                                          allocate distinct account pools for fan-out
+//	                                          allocate account session slots for fan-out
 //	fak fleet-accounts seats [--product P] [--json]   the explicit seat pool (M distinct seats)
 //	fak fleet-accounts status                 the watchdog status fold (roster + availability)
 //
@@ -67,7 +68,7 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 	allowFallback := fs.Bool("allow-tier-fallback", false, "(resolve) allow a tier-1 target to fall back to tier 2")
 	faklocalOK := fs.Bool("faklocal-ok", false, "(resolve) synthesize the dogfood .claude-faklocal account when pinned")
 	count := -1
-	fs.IntVar(&count, "count", -1, "(wave) number of distinct account pools to allocate")
+	fs.IntVar(&count, "count", -1, "(wave) number of account session slots to allocate")
 	fs.IntVar(&count, "n", -1, "(wave) shorthand for --count")
 	explain := fs.Bool("explain", false, "(wave) emit the headroom witness projection")
 	waveID := fs.String("wave-id", "", "(wave) override the deterministic wave id")
@@ -76,7 +77,8 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	cwd, _ := os.Getwd()
-	toolsDir := filepath.Join(findRepoRoot(cwd), "tools")
+	repoRoot := findRepoRoot(cwd)
+	toolsDir := filepath.Join(repoRoot, "tools")
 	paths := fleetaccounts.ResolvePaths(toolsDir)
 	pol := fleetaccounts.LoadPolicy(paths)
 	reg := fleetaccounts.LoadRegistry(paths.RegistryPath)
@@ -135,17 +137,17 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 		wave := fleetaccounts.AllocateWave(rows, fleetaccounts.WaveRequest{
 			Count: waveCount, TaskText: *task, TaskClass: taskClass, WorkKind: *workKind,
 			Product: *product, AllowTierFallback: *allowFallback, StrictTier: strict,
-			WaveID: *waveID,
+			Leases: fleetSeatLeases(repoRoot), WaveID: *waveID,
 		}, pol)
 		if !explicitCount {
 			wave.Requested = wave.Granted
 			wave.Shortfall = 0
-			wave.Reason = fmt.Sprintf("all %d distinct available pool(s)", wave.Granted)
+			wave.Reason = fmt.Sprintf("all %d available session slot(s)", wave.Granted)
 		}
 		if *explain {
 			return emitWaveExplainJSON(stdout, stderr, wave)
 		}
-		out, err := json.MarshalIndent(wave, "", " ")
+		out, err := json.MarshalIndent(scrubFleetAccountWaveSecrets(wave), "", " ")
 		if err != nil {
 			fmt.Fprintln(stderr, "fleet-accounts: marshal:", err)
 			return 1
@@ -157,7 +159,7 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 		return 1
 
 	case "seats":
-		pool := fleetaccounts.BuildSeatPool(rows, nil, *product)
+		pool := fleetaccounts.BuildSeatPool(rows, fleetSeatLeases(repoRoot), *product)
 		if *asJSON {
 			out, err := json.MarshalIndent(pool, "", " ")
 			if err != nil {
@@ -175,6 +177,32 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "note: the active network probe + mutating ops (relogin/top-up/launch) remain on tools/fleet_accounts.py (issue #1415).")
 		return 2
 	}
+}
+
+func fleetSeatLeases(repoRoot string) []fleetaccounts.Lease {
+	raw := dispatchLiveSeatLeases(filepath.Join(repoRoot, dispatchtick.RunsDirName))
+	out := make([]fleetaccounts.Lease, 0, len(raw))
+	for _, lease := range raw {
+		row := fleetaccounts.Lease{Worker: lease.Worker, Tag: lease.Tag, Dir: lease.Dir}
+		if lease.PID > 0 {
+			pid := lease.PID
+			row.PID = &pid
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+func scrubFleetAccountWaveSecrets(wave fleetaccounts.WaveResult) any {
+	raw, err := json.Marshal(wave)
+	if err != nil {
+		return wave
+	}
+	var doc any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return wave
+	}
+	return scrubDispatchSecrets(doc)
 }
 
 func fleetAccountsTaskClass(t1, t2, t3 bool) string {

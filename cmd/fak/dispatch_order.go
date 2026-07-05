@@ -247,7 +247,7 @@ func dispAge(now, recency int64) string {
 func dispatchUsage(w io.Writer) {
 	fmt.Fprint(w, `fak dispatch — deterministic dispatch helpers
 
-  fak dispatch auto  [--workspace DIR] [--backend claude|opencode|codex] [--required-workers N] [--context-tokens N] [--live] [--json]
+  fak dispatch auto  [--workspace DIR] [--backend claude|opencode|codex] [--goal throughput|high-priority] [--lane L] [--exclude-lane L] [--required-workers N] [--context-tokens N] [--live] [--json]
   fak dispatch order [--in FILE] [--cooldown-min N] [--now UNIX] [--prefer-oldest] [--json]
   fak dispatch price [--workspace DIR] [--in FILE] [--json]
   fak dispatch route [--workspace DIR] [--json]
@@ -267,7 +267,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch timeout-ledger [--in FILE] [--workspace DIR] [--now UNIX] [--json]
 
 auto is the self-sizing front door to the multi-account wave: it folds the live ceilings (the
-preflight's effective cap, the switcher's distinct fresh account pools, the router's ready
+preflight's effective cap, the switcher's fresh account session slots, the router's ready
 work, an optional throughput target) into a steady-state worker Target, computes the Refill
 (Target minus live workers), and with --live drives the priced "dispatch wave" with that
 count. The operator types NO count; run it on a cadence and the population converges to
@@ -300,7 +300,7 @@ card and posts it to a dedicated internal Slack channel ($FAK_SKIPPED_CHANNEL); 
 the card without posting. tick is the native issue-resolution dispatch tick:
 preflight the host/account/cap, route open issues to lanes, pick one fresh issue, and dry-run or spawn one guarded worker. --goal scopes the loop ledger and lease holder for concurrent background loops; throughput keeps the historical step-budget lane pick, while high-priority picks the lane whose next eligible issue has the strongest priority label. price quotes a proposed
 fan-out before launch and emits plan_id, launch_plan, wave metrics, and repartition advice. wave allocates
-multiple account seats and drives goal-scoped ticks; sweep repeats ticks until the queue drains or preflight
+multiple account session slots and drives goal-scoped ticks; sweep repeats ticks until the queue drains or preflight
 refuses. progress snapshots the open-issue curve, witnessed-open count, and loop ledger. Spawn
 commands are dry-run until --live. issue-smallness-lint is a filing/backlog dry-run report: it
 checks that each issue has one primary deliverable and exactly one witness, flagging bundled

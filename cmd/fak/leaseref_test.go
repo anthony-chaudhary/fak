@@ -21,6 +21,7 @@ func TestLeaserefUsageAndUnknown(t *testing.T) {
 	}{
 		{nil, 2},
 		{[]string{"bogus"}, 2},
+		{[]string{"session-publish"}, 2},
 		{[]string{"--help"}, 0},
 		{[]string{"help"}, 0},
 	}
@@ -146,6 +147,51 @@ func TestLeaserefLiveEndToEnd(t *testing.T) {
 	}
 	if _, ok, _ := store.Get(ctx, "docs-lane"); !ok {
 		t.Fatalf("reap wrongly removed the live docs-lane")
+	}
+}
+
+// TestLeaserefSessionPublishEndToEnd proves the CLI can publish a session descriptor
+// into the side-ref store that `liveness` later reads.
+func TestLeaserefSessionPublishEndToEnd(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"config", "user.email", "t@example.com"},
+		{"config", "user.name", "t"},
+	} {
+		c := exec.Command("git", args...)
+		c.Dir = dir
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	var out, errb bytes.Buffer
+	if code := runLeaseref(&out, &errb, []string{"session-publish", "--session", "cli-pub", "--host", "host-a", "--state", "RUNNING", "--ttl", "600", "--dir", dir}); code != 0 {
+		t.Fatalf("leaseref session-publish exit=%d stderr=%q", code, errb.String())
+	}
+	var desc leaseref.SessionDescriptor
+	if err := json.Unmarshal(out.Bytes(), &desc); err != nil {
+		t.Fatalf("session-publish JSON unmarshal: %v\nout=%s", err, out.String())
+	}
+	if desc.ID != "cli-pub" || desc.Host != "host-a" || desc.PCBState != "RUNNING" || desc.TTLSecs != 600 {
+		t.Fatalf("session descriptor = %+v, want cli-pub host-a RUNNING ttl 600", desc)
+	}
+	if desc.UpdatedAt == 0 {
+		t.Fatalf("session descriptor missing UpdatedAt: %+v", desc)
+	}
+	got, ok, err := leaseref.NewInDir(dir).GetSession(context.Background(), "cli-pub")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if !ok {
+		t.Fatalf("published session not present")
+	}
+	if got.ID != desc.ID || got.Host != desc.Host || got.PCBState != desc.PCBState || got.TTLSecs != desc.TTLSecs || got.UpdatedAt != desc.UpdatedAt {
+		t.Fatalf("stored session = %+v, want %+v", got, desc)
 	}
 }
 

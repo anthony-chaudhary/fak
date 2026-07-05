@@ -176,7 +176,7 @@ func runFleetCapacity(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fleet capacity", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	product := fs.String("product", "claude", "product family to preflight (claude|opencode|all)")
-	required := fs.Int("require", 0, "fail if fewer than N fresh seats are available")
+	required := fs.Int("require", 0, "fail if fewer than N fresh session slots are available")
 	asJSON := fs.Bool("json", false, "emit JSON instead of a table")
 	if !parseFlags(fs, argv) {
 		return 2

@@ -36,6 +36,7 @@ func runFeature(stdout, stderr io.Writer, argv []string) int {
 func runFeatureQuery(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("feature query", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "feature")
 	root := fs.String("root", "", "repo root (default: search upward for dos.toml)")
 	plane := fs.String("plane", "all", "catalog plane: dev, live, or all")
 	detail := fs.String("detail", "", "fault detail for one selected card name/detail_ref")

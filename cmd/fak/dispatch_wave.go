@@ -105,6 +105,7 @@ type dispatchWavePrelaunchGate struct {
 	TargetCount     int                            `json:"target_count"`
 	ReadyCount      int                            `json:"ready_count"`
 	RefusedCount    int                            `json:"refused_count"`
+	ErrorCount      int                            `json:"error_count,omitempty"`
 	Reason          string                         `json:"reason,omitempty"`
 	Refused         []dispatchWavePrelaunchRefusal `json:"refused,omitempty"`
 }
@@ -122,7 +123,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("dispatch wave", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "workspace root (default: current directory)")
-	count := fs.Int("count", 2, "number of distinct account pools to allocate")
+	count := fs.Int("count", 2, "number of account session slots to allocate")
 	maxWorkers := fs.Int("max-workers", dispatchtick.DefaultMaxWorkers, "hard cap on live workers, enforced by each tick's preflight")
 	backend := fs.String("backend", "claude", "worker backend (claude|opencode|codex)")
 	workKind := fs.String("work-kind", "", "switcher work kind (default follows --backend)")
@@ -165,6 +166,44 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
+	product := dispatchtick.ProductForBackend(backendNorm)
+	allocationCount := *count
+	preflightShortfall := 0
+	var preflight map[string]any
+	if pf, err := dispatchPreflight(root, stderr, *maxWorkers, wk, product); err == nil {
+		preflight = pf
+		allocationCount = dispatchWaveAllocationCount(*count, pf)
+		preflightShortfall = *count - allocationCount
+		if preflightShortfall < 0 {
+			preflightShortfall = 0
+		}
+	} else {
+		preflight = map[string]any{"error": err.Error()}
+	}
+
+	rec := map[string]any{
+		"schema":               "fleet-issue-dispatch-wave/1",
+		"workspace":            root,
+		"live":                 *live,
+		"backend":              backendNorm,
+		"work_kind":            wk,
+		"goal":                 goalID,
+		"goal_profile":         profile,
+		"requested":            *count,
+		"allocation_requested": allocationCount,
+		"preflight":            preflight,
+		"ticks":                []any{},
+		"spawned":              0,
+		"stop_reason":          "",
+		"ok":                   false,
+	}
+	if allocationCount <= 0 {
+		rec["granted"] = 0
+		rec["shortfall"] = *count
+		rec["stop_reason"] = "preflight headroom exhausted before account allocation"
+		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
+	}
+
 	rows, err := dispatchReadAccountRoster(root)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak dispatch wave: allocate accounts: %v\n", err)
@@ -172,56 +211,78 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	}
 	alloc := dispatchtick.AllocateWave(dispatchtick.AccountWaveInput{
 		Rows:     rows,
-		Count:    *count,
+		Leases:   dispatchLiveSeatLeases(filepath.Join(root, dispatchtick.RunsDirName)),
+		Count:    allocationCount,
 		WorkKind: wk,
-		Product:  dispatchtick.ProductForBackend(backendNorm),
+		Product:  product,
 	})
 	lanes := alloc.Lanes
 	waveID := alloc.WaveID
-	shortfall := alloc.Shortfall
-	rec := map[string]any{
-		"schema":       "fleet-issue-dispatch-wave/1",
-		"workspace":    root,
-		"live":         *live,
-		"backend":      backendNorm,
-		"work_kind":    wk,
-		"goal":         goalID,
-		"goal_profile": profile,
-		"requested":    *count,
-		"granted":      len(lanes),
-		"shortfall":    shortfall,
-		"wave_id":      waveID,
-		"allocation":   scrubDispatchSecrets(alloc.Map()),
-		"ticks":        []any{},
-		"spawned":      0,
-		"stop_reason":  "",
-		"ok":           false,
-	}
+	shortfall := alloc.Shortfall + preflightShortfall
+	rec["granted"] = len(lanes)
+	rec["shortfall"] = shortfall
+	rec["wave_id"] = waveID
+	rec["allocation"] = scrubDispatchSecrets(alloc.Map())
 	if len(lanes) == 0 {
-		rec["stop_reason"] = firstString(alloc.Reason, "no distinct account pools available")
+		rec["stop_reason"] = firstString(alloc.Reason, "no account session slots available")
 		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 	}
 
-	price, err := priceDispatchWave(root, stderr, *count, len(lanes), *lane, dispatchSplitCSV(*excludeLane), dispatchtick.DefaultCooldownMinutes, profile)
+	excludedLanes := dispatchSplitCSV(*excludeLane)
+	router, err := dispatchRouteIssues(root, stderr)
 	if err != nil {
 		rec["stop_reason"] = "price fan-out: " + err.Error()
 		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 	}
-	rec["price"] = price
-	rec["planned_lanes"] = append([]string(nil), price.RunLanes...)
-	executionPlan := dispatchWaveExecutionPlans(root, backendNorm, wk, goalID, profile, waveID, shortfall, price.RunTargets, lanes, !*noLedger)
-	executionPlanID := dispatchWaveExecutionPlanID(executionPlan)
-	rec["execution_plan_id"] = executionPlanID
-	rec["execution_plan"] = executionPlan
-	if len(price.RunLanes) == 0 {
-		rec["stop_reason"] = "priced fan-out found no launchable lane"
-		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
-	}
-	executionAudit := auditDispatchWaveExecutionPlan(root, *maxWorkers, dispatchSplitCSV(*excludeLane), executionPlan)
-	rec["execution_plan_audit"] = executionAudit
-	prelaunchGate := dispatchWavePrelaunchGateFromAudit(executionPlanID, executionAudit)
-	rec["prelaunch_gate"] = prelaunchGate
-	if *live && !prelaunchGate.OK {
+	heldIssues := map[int]bool{}
+	var executionPlan []dispatchWaveExecutionPlan
+	const maxPrelaunchReprice = 8
+	for attempt := 0; ; attempt++ {
+		price, err := priceDispatchWavePayloadFiltered(root, router, *count, len(lanes), *lane, excludedLanes, dispatchtick.DefaultCooldownMinutes, heldIssues, profile)
+		if err != nil {
+			rec["stop_reason"] = "price fan-out: " + err.Error()
+			return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
+		}
+		rec["price"] = price
+		rec["planned_lanes"] = append([]string(nil), price.RunLanes...)
+		executionPlan = dispatchWaveExecutionPlans(root, backendNorm, wk, goalID, profile, waveID, shortfall, price.RunTargets, lanes, !*noLedger)
+		executionPlanID := dispatchWaveExecutionPlanID(executionPlan)
+		rec["execution_plan_id"] = executionPlanID
+		rec["execution_plan"] = executionPlan
+		if len(price.RunLanes) == 0 {
+			rec["stop_reason"] = "priced fan-out found no launchable lane"
+			return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
+		}
+		executionAudit := auditDispatchWaveExecutionPlan(root, *maxWorkers, excludedLanes, executionPlan)
+		rec["execution_plan_audit"] = executionAudit
+		prelaunchGate := dispatchWavePrelaunchGateFromAudit(executionPlanID, executionAudit)
+		rec["prelaunch_gate"] = prelaunchGate
+		readyPlan := dispatchWaveReadyExecutionPlan(executionPlan, executionAudit)
+		rec["ready_execution_plan"] = readyPlan
+		if prelaunchGate.OK {
+			executionPlan = readyPlan
+		}
+		if !*live {
+			break
+		}
+		rec["live_execution_plan"] = readyPlan
+		if prelaunchGate.OK {
+			break
+		}
+		retryIssues := dispatchWaveRetryableAuditIssues(executionAudit)
+		if len(retryIssues) > 0 && attempt < maxPrelaunchReprice {
+			added := false
+			for _, issue := range retryIssues {
+				if !heldIssues[issue] {
+					heldIssues[issue] = true
+					added = true
+				}
+			}
+			if added {
+				rec["prelaunch_retries"] = appendDispatchWavePrelaunchRetry(rec["prelaunch_retries"], attempt+1, retryIssues, prelaunchGate)
+				continue
+			}
+		}
 		rec["stop_reason"] = "prelaunch execution audit refused: " + prelaunchGate.Reason
 		rec["ticks"] = []any{}
 		rec["spawned"] = 0
@@ -254,7 +315,11 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 			continue
 		}
 		if !*live {
-			rec["stop_reason"] = "dry-run: planned the first wave tick only; re-run with --live to spawn"
+			if gate, ok := rec["prelaunch_gate"].(dispatchWavePrelaunchGate); ok && !gate.OK {
+				rec["stop_reason"] = "prelaunch execution audit refused: " + gate.Reason
+			} else {
+				rec["stop_reason"] = "dry-run: planned the first wave tick only; re-run with --live to spawn"
+			}
 		} else {
 			rec["stop_reason"] = firstString(dispatchMapString(payload, "verdict"), dispatchMapString(payload, "action"))
 		}
@@ -278,6 +343,10 @@ func priceDispatchWave(root string, stderr io.Writer, requested, granted int, ex
 }
 
 func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, requested, granted int, explicitLane string, excluded []string, cooldownMin int, goalProfile ...string) (dispatchWavePrice, error) {
+	return priceDispatchWavePayloadFiltered(root, router, requested, granted, explicitLane, excluded, cooldownMin, nil, goalProfile...)
+}
+
+func priceDispatchWavePayloadFiltered(root string, router dispatchtick.RouterPayload, requested, granted int, explicitLane string, excluded []string, cooldownMin int, excludedIssues map[int]bool, goalProfile ...string) (dispatchWavePrice, error) {
 	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
 	profile := dispatchWaveGoalProfile(goalProfile)
 	held := liveResolutionLanes(runsDir)
@@ -323,7 +392,7 @@ func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, re
 		if exclude[lane] {
 			continue
 		}
-		if liveIssues[route.Number] || cooled[route.Number] {
+		if liveIssues[route.Number] || cooled[route.Number] || excludedIssues[route.Number] {
 			continue
 		}
 		paths := append([]string(nil), route.Paths...)
@@ -376,7 +445,7 @@ func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, re
 			nums = append([]int(nil), grp.Issues...)
 		}
 		nums = dispatchWaveOrderLaneIssues(nums, grp.Priority)
-		issue, ok := firstLaunchableIssue(nums, liveIssues, cooled)
+		issue, ok := firstLaunchableIssue(nums, liveIssues, cooled, excludedIssues)
 		if !ok {
 			continue
 		}
@@ -707,6 +776,7 @@ func dispatchWavePrelaunchGateFromAudit(executionPlanID string, rows []dispatchW
 	for _, row := range rows {
 		if row.Error != "" {
 			gate.OK = false
+			gate.ErrorCount++
 			gate.RefusedCount++
 			gate.Refused = append(gate.Refused, dispatchWavePrelaunchRefusal{
 				Rank:   row.Rank,
@@ -731,14 +801,113 @@ func dispatchWavePrelaunchGateFromAudit(executionPlanID string, rows []dispatchW
 		}
 		gate.ReadyCount++
 	}
-	if !gate.OK {
-		gate.Action = "HOLD"
-		if len(gate.Refused) > 0 {
-			first := gate.Refused[0]
-			gate.Reason = strings.TrimSpace(first.Target + " " + firstString(first.Reason, first.Error, first.Verdict, first.Action, "not ok"))
+	switch {
+	case gate.ErrorCount > 0:
+		gate.OK = false
+		gate.Action = "HOLD_ERROR"
+		first := gate.Refused[0]
+		gate.Reason = strings.TrimSpace(first.Target + " " + firstString(first.Error, first.Reason, first.Verdict, first.Action, "audit error"))
+	case gate.ReadyCount > 0:
+		gate.OK = true
+		if gate.RefusedCount > 0 {
+			gate.Action = "LAUNCH_READY"
+			gate.Reason = fmt.Sprintf("launching %d ready target(s); holding %d refused target(s)", gate.ReadyCount, gate.RefusedCount)
 		}
+	case gate.RefusedCount > 0:
+		gate.OK = false
+		gate.Action = "HOLD"
+		first := gate.Refused[0]
+		gate.Reason = strings.TrimSpace(first.Target + " " + firstString(first.Reason, first.Error, first.Verdict, first.Action, "not ok"))
+	default:
+		gate.OK = false
+		gate.Action = "HOLD_EMPTY"
+		gate.Reason = "execution audit produced no targets"
 	}
 	return gate
+}
+
+func dispatchWaveReadyExecutionPlan(plan []dispatchWaveExecutionPlan, rows []dispatchWaveExecutionAudit) []dispatchWaveExecutionPlan {
+	if len(plan) == 0 || len(rows) == 0 {
+		return nil
+	}
+	ready := map[int]bool{}
+	for _, row := range rows {
+		if row.OK {
+			ready[row.Rank] = true
+		}
+	}
+	out := make([]dispatchWaveExecutionPlan, 0, len(plan))
+	for _, row := range plan {
+		if ready[row.Rank] {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+func dispatchWaveRetryableAuditIssues(rows []dispatchWaveExecutionAudit) []int {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := map[int]bool{}
+	for _, row := range rows {
+		if row.Error != "" || row.OK {
+			continue
+		}
+		if !dispatchTickBenignActions[row.Action] {
+			return nil
+		}
+		if row.Target.Issue <= 0 {
+			return nil
+		}
+		out[row.Target.Issue] = true
+	}
+	return sortedIntSet(out)
+}
+
+func dispatchWaveAllocationCount(requested int, preflight map[string]any) int {
+	if requested <= 0 {
+		return 0
+	}
+	limit := requested
+	if n := intPtrFromAny(preflight["headroom"]); n != nil {
+		if *n < limit {
+			limit = *n
+		}
+	}
+	if seat, ok := preflight["seat"].(map[string]any); ok {
+		if n := intPtrFromAny(seat["free"]); n != nil && *n < limit {
+			limit = *n
+		}
+	}
+	if limit < 0 {
+		return 0
+	}
+	return limit
+}
+
+func appendDispatchWavePrelaunchRetry(existing any, attempt int, issues []int, gate dispatchWavePrelaunchGate) []any {
+	out, _ := existing.([]any)
+	out = append(out, map[string]any{
+		"attempt":       attempt,
+		"held_issues":   append([]int(nil), issues...),
+		"gate_action":   gate.Action,
+		"refused_count": gate.RefusedCount,
+		"reason":        gate.Reason,
+	})
+	return out
+}
+
+func sortedIntSet(set map[int]bool) []int {
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]int, 0, len(set))
+	for n := range set {
+		out = append(out, n)
+	}
+	sort.Ints(out)
+	return out
 }
 
 func dispatchWaveExecutionPlanID(plan []dispatchWaveExecutionPlan) string {
@@ -904,9 +1073,9 @@ func cleanDispatchLeaseToken(s string) string {
 	return strings.Trim(b.String(), "-.")
 }
 
-func firstLaunchableIssue(nums []int, live, cooled map[int]bool) (int, bool) {
+func firstLaunchableIssue(nums []int, live, cooled, excluded map[int]bool) (int, bool) {
 	for _, n := range nums {
-		if !live[n] && !cooled[n] {
+		if !live[n] && !cooled[n] && !excluded[n] {
 			return n, true
 		}
 	}
@@ -914,6 +1083,7 @@ func firstLaunchableIssue(nums []int, live, cooled map[int]bool) (int, bool) {
 }
 
 func writeDispatchWaveResult(stdout, stderr io.Writer, rec map[string]any, asJSON bool) int {
+	dispatchWaveAnnotateOutcome(rec)
 	if asJSON {
 		if err := writeIndentedJSON(stdout, rec); err != nil {
 			fmt.Fprintf(stderr, "fak dispatch wave: encode json: %v\n", err)
@@ -925,7 +1095,121 @@ func writeDispatchWaveResult(stdout, stderr io.Writer, rec map[string]any, asJSO
 	if dispatchMapBool(rec, "ok") {
 		return 0
 	}
+	if dispatchWaveExitBenign(rec) {
+		return 0
+	}
 	return 1
+}
+
+func dispatchWaveAnnotateOutcome(rec map[string]any) {
+	if rec == nil {
+		return
+	}
+	if gate, ok := rec["prelaunch_gate"].(dispatchWavePrelaunchGate); ok {
+		rec["approval_ready"] = gate.OK
+		rec["approval_action"] = gate.Action
+		rec["approval_verdict"] = dispatchWavePrelaunchVerdict(gate)
+	}
+	verdict, action := dispatchWaveOutcome(rec)
+	rec["verdict"] = verdict
+	rec["action"] = action
+	if _, ok := rec["approval_ready"]; !ok {
+		rec["approval_ready"] = verdict == "WOULD_WAVE" || verdict == "WAVED"
+	}
+	if _, ok := rec["approval_action"]; !ok {
+		rec["approval_action"] = action
+	}
+	if _, ok := rec["approval_verdict"]; !ok {
+		rec["approval_verdict"] = verdict
+	}
+}
+
+func dispatchWaveOutcome(rec map[string]any) (string, string) {
+	if dispatchMapBool(rec, "live") && dispatchMapInt(rec, "spawned") > 0 {
+		return "WAVED", "waved"
+	}
+	if gate, ok := rec["prelaunch_gate"].(dispatchWavePrelaunchGate); ok {
+		if gate.OK {
+			return "WOULD_WAVE", "would_wave"
+		}
+		return dispatchWavePrelaunchVerdict(gate), "hold"
+	}
+	stop := dispatchMapString(rec, "stop_reason")
+	switch {
+	case stop == "preflight headroom exhausted before account allocation":
+		if pre, ok := rec["preflight"].(map[string]any); ok {
+			if verdict := dispatchMapString(pre, "verdict"); verdict != "" {
+				return verdict, "refused"
+			}
+		}
+		return "REFUSE_AT_CAP", "refused"
+	case dispatchMapInt(rec, "allocation_requested") > 0 && dispatchMapInt(rec, "granted") == 0:
+		return "WAVE_NO_SEATS", "no_seats"
+	case stop == "priced fan-out found no launchable lane":
+		return "WAVE_NO_LANE", "no_lane"
+	case strings.HasPrefix(stop, "price fan-out:"):
+		return "WAVE_PRICE_ERROR", "error"
+	case !dispatchMapBool(rec, "live") && dispatchMapInt(rec, "granted") > 0:
+		return "WOULD_WAVE", "would_wave"
+	default:
+		return "WAVE_EMPTY", "refused"
+	}
+}
+
+func dispatchWavePrelaunchVerdict(gate dispatchWavePrelaunchGate) string {
+	if gate.OK {
+		return "WOULD_WAVE"
+	}
+	for _, row := range gate.Refused {
+		if strings.TrimSpace(row.Verdict) != "" {
+			return strings.TrimSpace(row.Verdict)
+		}
+		if strings.TrimSpace(row.Action) != "" {
+			return strings.ToUpper(strings.TrimSpace(row.Action))
+		}
+		if row.Error != "" {
+			return "WAVE_AUDIT_ERROR"
+		}
+	}
+	if strings.TrimSpace(gate.Action) != "" {
+		return strings.TrimSpace(gate.Action)
+	}
+	return "WAVE_HELD"
+}
+
+func dispatchWaveExitBenign(rec map[string]any) bool {
+	if rec == nil {
+		return false
+	}
+	if strings.HasPrefix(dispatchMapString(rec, "stop_reason"), "price fan-out:") {
+		return false
+	}
+	gate, ok := rec["prelaunch_gate"].(dispatchWavePrelaunchGate)
+	if ok {
+		if gate.ErrorCount > 0 || gate.Action == "HOLD_ERROR" {
+			return false
+		}
+		if gate.Action == "HOLD" || gate.Action == "HOLD_EMPTY" || gate.Action == "LAUNCH_READY" {
+			for _, refusal := range gate.Refused {
+				if refusal.Error != "" {
+					return false
+				}
+				if refusal.Action != "" && !dispatchTickBenignActions[refusal.Action] {
+					return false
+				}
+			}
+			return true
+		}
+	}
+	verdict, action := dispatchWaveOutcome(rec)
+	if verdict == "WAVE_NO_SEATS" || action == "no_seats" {
+		return true
+	}
+	switch dispatchMapString(rec, "stop_reason") {
+	case "priced fan-out found no launchable lane", "filled requested wave", "preflight headroom exhausted before account allocation":
+		return true
+	}
+	return false
 }
 
 func renderDispatchWave(rec map[string]any) string {
@@ -934,14 +1218,41 @@ func renderDispatchWave(rec map[string]any) string {
 	if dispatchMapBool(rec, "live") {
 		mode = "live"
 	}
-	fmt.Fprintf(&b, "issue-dispatch-wave: %s  requested=%d granted=%d spawned=%d backend=%s\n",
-		mode, dispatchMapInt(rec, "requested"), dispatchMapInt(rec, "granted"),
+	fmt.Fprintf(&b, "issue-dispatch-wave: %s  verdict=%s action=%s requested=%d granted=%d spawned=%d backend=%s\n",
+		mode, dispatchMapString(rec, "verdict"), dispatchMapString(rec, "action"),
+		dispatchMapInt(rec, "requested"), dispatchMapInt(rec, "granted"),
 		dispatchMapInt(rec, "spawned"), dispatchMapString(rec, "backend"))
 	if id := dispatchMapString(rec, "wave_id"); id != "" {
 		fmt.Fprintf(&b, "  wave_id: %s\n", id)
 	}
+	if id := dispatchMapString(rec, "execution_plan_id"); id != "" {
+		fmt.Fprintf(&b, "  execution_plan_id: %s\n", id)
+	}
+	if _, ok := rec["approval_ready"]; ok {
+		fmt.Fprintf(&b, "  approval: ready=%t verdict=%s action=%s\n",
+			dispatchMapBool(rec, "approval_ready"),
+			dispatchMapString(rec, "approval_verdict"),
+			dispatchMapString(rec, "approval_action"))
+	}
 	if reason := dispatchMapString(rec, "stop_reason"); reason != "" {
 		fmt.Fprintf(&b, "  stop: %s\n", reason)
+	}
+	if gate, ok := rec["prelaunch_gate"].(dispatchWavePrelaunchGate); ok {
+		fmt.Fprintf(&b, "  prelaunch_gate: action=%s ready=%d refused=%d errors=%d target_count=%d\n",
+			gate.Action, gate.ReadyCount, gate.RefusedCount, gate.ErrorCount, gate.TargetCount)
+		if gate.Reason != "" {
+			fmt.Fprintf(&b, "    reason=%s\n", gate.Reason)
+		}
+	}
+	if plan, ok := rec["execution_plan"].([]dispatchWaveExecutionPlan); ok && len(plan) > 0 {
+		fmt.Fprintln(&b, "  execution_plan:")
+		renderDispatchWavePlanRows(&b, plan)
+	}
+	if ready, ok := rec["ready_execution_plan"].([]dispatchWaveExecutionPlan); ok && len(ready) > 0 {
+		if full, _ := rec["execution_plan"].([]dispatchWaveExecutionPlan); len(ready) != len(full) {
+			fmt.Fprintln(&b, "  ready_execution_plan:")
+			renderDispatchWavePlanRows(&b, ready)
+		}
 	}
 	if price, ok := rec["price"].(dispatchWavePrice); ok {
 		fmt.Fprintf(&b, "  priced fan-out: action=%s run=%s effective_cap=%d run_steps=%d candidate_steps=%d collisions_avoided=%d lanes_utilized=%d serialization_wasted=%d safe_concurrency=%d (%d%%) scope=%d%% same_lane_parallelism=%d repartition=%d\n",
@@ -967,9 +1278,42 @@ func renderDispatchWave(rec map[string]any) string {
 		}
 	}
 	if !dispatchMapBool(rec, "live") {
-		fmt.Fprintln(&b, "  (dry-run - re-run with --live to spawn the wave)")
+		if _, ok := rec["approval_ready"]; ok && !dispatchMapBool(rec, "approval_ready") {
+			fmt.Fprintln(&b, "  (dry-run held - resolve the refusal before using --live)")
+		} else {
+			fmt.Fprintln(&b, "  (dry-run - re-run with --live to spawn the wave)")
+		}
 	}
 	return b.String()
+}
+
+func renderDispatchWavePlanRows(b *strings.Builder, plan []dispatchWaveExecutionPlan) {
+	for _, row := range plan {
+		fmt.Fprintf(b, "    rank=%d wave=%s size=%d target=%s lane=%s lease=%s account=%s slot=%s\n",
+			row.Rank, row.WaveID, row.WaveSize, row.Target.ID, row.Target.Lane,
+			row.Target.LeaseID, dispatchWavePlanAccountLabel(row.Account),
+			dispatchWavePlanSlotLabel(row.Account))
+	}
+}
+
+func dispatchWavePlanAccountLabel(account map[string]any) string {
+	for _, key := range []string{"tag", "account", "dir"} {
+		if val := strings.TrimSpace(fmt.Sprint(account[key])); val != "" && val != "<nil>" {
+			return val
+		}
+	}
+	return "-"
+}
+
+func dispatchWavePlanSlotLabel(account map[string]any) string {
+	slot, cap := dispatchMapInt(account, "session_slot"), dispatchMapInt(account, "session_cap")
+	if slot <= 0 && cap <= 0 {
+		return "-"
+	}
+	if cap <= 0 {
+		return fmt.Sprint(slot)
+	}
+	return fmt.Sprintf("%d/%d", slot, cap)
 }
 
 func dispatchWaveSkippedCandidates(candidates []dispatchWaveCandidate) []dispatchWaveCandidate {

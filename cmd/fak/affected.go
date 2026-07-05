@@ -83,6 +83,7 @@ type affectedRunReport struct {
 func runAffected(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak affected", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "affected")
 	base := fs.String("base", "", "git ref to diff against (default: working tree vs HEAD). e.g. --base origin/main selects everything changed since the base")
 	var explicitFiles pathList
 	fs.Var(&explicitFiles, "file", "repo-relative changed file to test as the representative change (repeatable; bypasses git diff)")

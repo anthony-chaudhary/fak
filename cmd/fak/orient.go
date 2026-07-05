@@ -43,6 +43,7 @@ func (p *orientPathFlags) Set(v string) error {
 func runOrient(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak orient", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "orient")
 	root := fs.String("root", "", "repo root (default: search upward for dos.toml)")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	readLeases := fs.Bool("leases", true, "read live refs/fak/locks leases")

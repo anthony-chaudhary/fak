@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -842,7 +843,9 @@ func TestDispatchTickLiveFailsNonzeroEarlyExitAndPinsClaudeAccountEnv(t *testing
 		if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 			t.Fatalf("mkdir runs dir: %v", err)
 		}
-		body := []byte("# fak-spawn\nYou've hit your usage limit; resets later\n")
+		// A genuine login wall — a NON-switchable early-exit, so this stays a
+		// SPAWN_FAILED test (a usage_cap class would instead trigger Layer-2 re-dispatch).
+		body := []byte("# fak-spawn\nNot logged in. Please run /login\n")
 		if err := os.WriteFile(logPath, body, 0o644); err != nil {
 			t.Fatalf("write early-exit log: %v", err)
 		}
@@ -884,8 +887,8 @@ func TestDispatchTickLiveFailsNonzeroEarlyExitAndPinsClaudeAccountEnv(t *testing
 		t.Fatalf("early-exit result = action %v verdict %v ok %v", got["action"], got["verdict"], got["ok"])
 	}
 	reason := dispatchMapString(got, "reason")
-	if !strings.Contains(reason, "exited within 5.0s with code 1") || !strings.Contains(reason, "auth or usage wall") {
-		t.Fatalf("reason = %q, want timed code-1 auth/usage classification", reason)
+	if !strings.Contains(reason, "exited within 5.0s with code 1") || !strings.Contains(reason, "login/auth wall") {
+		t.Fatalf("reason = %q, want timed code-1 login/auth classification", reason)
 	}
 	if capturedEnv["CLAUDE_CONFIG_DIR"] != capturedAccount.Dir {
 		t.Fatalf("CLAUDE_CONFIG_DIR = %q, want selected account dir %q", capturedEnv["CLAUDE_CONFIG_DIR"], capturedAccount.Dir)
@@ -1427,6 +1430,9 @@ func TestDispatchWaveDryRunAllocatesAccountsAndPlansFirstTick(t *testing.T) {
 	if !strings.HasPrefix(fmt.Sprint(got["wave_id"]), "wave-") || got["granted"] != float64(2) || got["spawned"] != float64(0) {
 		t.Fatalf("wave header = %#v", got)
 	}
+	if got["verdict"] != "WOULD_WAVE" || got["action"] != "would_wave" || got["approval_ready"] != true {
+		t.Fatalf("wave outcome = verdict %v action %v approval_ready %v, want WOULD_WAVE/would_wave/true", got["verdict"], got["action"], got["approval_ready"])
+	}
 	if strings.Contains(out, "should-not-render") || strings.Contains(out, "oauth_token") {
 		t.Fatalf("wave output leaked allocator token material:\n%s", out)
 	}
@@ -1450,6 +1456,111 @@ func TestDispatchWaveDryRunAllocatesAccountsAndPlansFirstTick(t *testing.T) {
 	acct, _ := tick["account"].(map[string]any)
 	if tick["action"] != "would_spawn" || acct["tag"] != "acct-preflight" {
 		t.Fatalf("tick/account = %#v / %#v, want would_spawn/acct-preflight", tick, acct)
+	}
+}
+
+func TestDispatchWaveDryRunHoldStopReasonDoesNotInviteLive(t *testing.T) {
+	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	t.Setenv("FLEET_DOGFOOD_GUARD", "1")
+	root := t.TempDir()
+
+	out, errb, code := runDispatchAt("wave", "--workspace", root, "--count", "1", "--no-loop-ledger", "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 for a typed dry-run hold (stderr: %s)", code, errb)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out)
+	}
+	if got["approval_ready"] != false || got["verdict"] != "SELF_MODIFY_HOLD" {
+		t.Fatalf("wave hold = approval_ready %v verdict %v, want false/SELF_MODIFY_HOLD", got["approval_ready"], got["verdict"])
+	}
+	reason := dispatchMapString(got, "stop_reason")
+	if !strings.Contains(reason, "prelaunch execution audit refused:") ||
+		strings.Contains(reason, "--live") ||
+		strings.Contains(reason, "re-run") {
+		t.Fatalf("stop_reason = %q, want audit refusal without live-rerun hint", reason)
+	}
+}
+
+func TestDispatchWaveDryRunUsesReadySubsetAfterMixedPrelaunchAudit(t *testing.T) {
+	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	t.Setenv("FLEET_DOGFOOD_GUARD", "1")
+	root := t.TempDir()
+
+	out, errb, code := runDispatchAt("wave", "--workspace", root, "--count", "2", "--no-loop-ledger", "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 for a mixed ready/held dry-run (stderr: %s)\n%s", code, errb, out)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out)
+	}
+	if got["approval_ready"] != true || got["approval_action"] != "LAUNCH_READY" || got["verdict"] != "WOULD_WAVE" {
+		t.Fatalf("mixed prelaunch = approval_ready %v action %v verdict %v, want true/LAUNCH_READY/WOULD_WAVE", got["approval_ready"], got["approval_action"], got["verdict"])
+	}
+	ready, _ := got["ready_execution_plan"].([]any)
+	if len(ready) != 1 {
+		t.Fatalf("ready_execution_plan len = %d, want one ready target after holding cmd self-modify", len(ready))
+	}
+	readyTarget := mapAt(ready[0].(map[string]any), "target")
+	if dispatchMapString(readyTarget, "lane") != "docs" {
+		t.Fatalf("ready target = %#v, want docs lane", readyTarget)
+	}
+	ticks, _ := got["ticks"].([]any)
+	if len(ticks) != 1 {
+		t.Fatalf("dry-run ticks len = %d, want one ready tick", len(ticks))
+	}
+	tick, _ := ticks[0].(map[string]any)
+	if tick["action"] != "would_spawn" || tick["lane"] != "docs" {
+		t.Fatalf("dry-run tick = %#v, want would_spawn on docs ready subset", tick)
+	}
+	if reason := dispatchMapString(got, "stop_reason"); !strings.Contains(reason, "--live") {
+		t.Fatalf("stop_reason = %q, want ordinary live-rerun hint for ready subset", reason)
+	}
+}
+
+func TestDispatchWaveDryRunNoSeatsReturnsTypedHold(t *testing.T) {
+	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	root := t.TempDir()
+
+	oldRoster := dispatchReadAccountRoster
+	reads := 0
+	dispatchReadAccountRoster = func(root string) ([]dispatchtick.AccountRow, error) {
+		reads++
+		available := reads <= 2 // preflight account + seat checks see capacity; allocation sees the race.
+		row := dispatchtick.AccountRow{
+			Account:   ".claude-race",
+			Tag:       "acct-race",
+			Product:   "claude",
+			Dir:       filepath.Join(root, "acct-race"),
+			Available: available,
+			ModelTier: 1,
+			Model:     "claude",
+		}
+		if !available {
+			row.BlockReason = "session slot consumed after preflight"
+		}
+		return []dispatchtick.AccountRow{row}, nil
+	}
+	t.Cleanup(func() { dispatchReadAccountRoster = oldRoster })
+
+	out, errb, code := runDispatchAt("wave", "--workspace", root, "--count", "1", "--no-loop-ledger", "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 for a typed no-seat dry-run hold (stderr: %s)\n%s", code, errb, out)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out)
+	}
+	if got["verdict"] != "WAVE_NO_SEATS" || got["action"] != "no_seats" || got["approval_ready"] != false {
+		t.Fatalf("no-seat wave = verdict %v action %v approval_ready %v, want WAVE_NO_SEATS/no_seats/false", got["verdict"], got["action"], got["approval_ready"])
+	}
+	if got["granted"] != float64(0) || got["allocation_requested"] != float64(1) {
+		t.Fatalf("allocation fields = granted %v allocation_requested %v, want 0/1", got["granted"], got["allocation_requested"])
+	}
+	if reason := dispatchMapString(got, "stop_reason"); !strings.Contains(reason, "no available account for a wave") {
+		t.Fatalf("stop_reason = %q, want allocator no-seat reason", reason)
 	}
 }
 
@@ -1496,6 +1607,261 @@ func TestDispatchWaveHighPriorityGoalPricesAndForwardsGoal(t *testing.T) {
 	}
 	if plan[0].Goal != "high-priority" || plan[0].GoalProfile != dispatchGoalProfileHighPriority {
 		t.Fatalf("plan goal fields = %q/%q", plan[0].Goal, plan[0].GoalProfile)
+	}
+}
+
+func TestRenderDispatchWaveShowsExecutionPlanMembership(t *testing.T) {
+	rec := map[string]any{
+		"live":              false,
+		"requested":         2,
+		"granted":           2,
+		"spawned":           0,
+		"backend":           "claude",
+		"wave_id":           "wave-visible",
+		"execution_plan_id": "plan-visible",
+		"prelaunch_gate": dispatchWavePrelaunchGate{
+			OK:              true,
+			Action:          "LAUNCH",
+			ExecutionPlanID: "plan-visible",
+			TargetCount:     2,
+			ReadyCount:      2,
+		},
+		"execution_plan": []dispatchWaveExecutionPlan{
+			{
+				Rank:     0,
+				WaveID:   "wave-visible",
+				WaveSize: 2,
+				Target: dispatchLaunchTarget{
+					ID:      "cmd#42",
+					Lane:    "cmd",
+					LeaseID: "resolve-cmd-42",
+					Issue:   42,
+				},
+				Account: map[string]any{
+					"tag":          "acct-a",
+					"session_slot": 1,
+					"session_cap":  4,
+				},
+			},
+			{
+				Rank:     1,
+				WaveID:   "wave-visible",
+				WaveSize: 2,
+				Target: dispatchLaunchTarget{
+					ID:      "docs#43",
+					Lane:    "docs",
+					LeaseID: "resolve-docs-43",
+					Issue:   43,
+				},
+				Account: map[string]any{
+					"tag":          "acct-b",
+					"session_slot": 2,
+					"session_cap":  4,
+				},
+			},
+		},
+	}
+	dispatchWaveAnnotateOutcome(rec)
+	text := renderDispatchWave(rec)
+	for _, want := range []string{
+		"issue-dispatch-wave: dry-run  verdict=WOULD_WAVE action=would_wave",
+		"execution_plan_id: plan-visible",
+		"approval: ready=true verdict=WOULD_WAVE action=LAUNCH",
+		"prelaunch_gate: action=LAUNCH ready=2 refused=0 errors=0 target_count=2",
+		"rank=0 wave=wave-visible size=2 target=cmd#42 lane=cmd lease=resolve-cmd-42 account=acct-a slot=1/4",
+		"rank=1 wave=wave-visible size=2 target=docs#43 lane=docs lease=resolve-docs-43 account=acct-b slot=2/4",
+		"(dry-run - re-run with --live to spawn the wave)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("rendered wave text missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestRenderDispatchWaveShowsReadyExecutionSubset(t *testing.T) {
+	full := []dispatchWaveExecutionPlan{
+		{
+			Rank:     0,
+			WaveID:   "wave-mixed",
+			WaveSize: 2,
+			Target: dispatchLaunchTarget{
+				ID:      "cmd#42",
+				Lane:    "cmd",
+				LeaseID: "resolve-cmd-42",
+				Issue:   42,
+			},
+			Account: map[string]any{"tag": "acct-a"},
+		},
+		{
+			Rank:     1,
+			WaveID:   "wave-mixed",
+			WaveSize: 2,
+			Target: dispatchLaunchTarget{
+				ID:      "docs#43",
+				Lane:    "docs",
+				LeaseID: "resolve-docs-43",
+				Issue:   43,
+			},
+			Account: map[string]any{"tag": "acct-b"},
+		},
+	}
+	rec := map[string]any{
+		"live":                 false,
+		"requested":            2,
+		"granted":              2,
+		"spawned":              0,
+		"backend":              "claude",
+		"execution_plan":       full,
+		"ready_execution_plan": []dispatchWaveExecutionPlan{full[1]},
+		"prelaunch_gate": dispatchWavePrelaunchGate{
+			OK:           true,
+			Action:       "LAUNCH_READY",
+			ReadyCount:   1,
+			RefusedCount: 1,
+			TargetCount:  2,
+		},
+	}
+	dispatchWaveAnnotateOutcome(rec)
+	text := renderDispatchWave(rec)
+	for _, want := range []string{
+		"approval: ready=true verdict=WOULD_WAVE action=LAUNCH_READY",
+		"ready_execution_plan:",
+		"rank=1 wave=wave-mixed size=2 target=docs#43 lane=docs lease=resolve-docs-43 account=acct-b",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("rendered mixed wave missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestDispatchWaveOutcomeReflectsPrelaunchHold(t *testing.T) {
+	rec := map[string]any{
+		"live":              false,
+		"requested":         1,
+		"granted":           1,
+		"spawned":           0,
+		"backend":           "claude",
+		"execution_plan_id": "plan-held",
+		"prelaunch_gate": dispatchWavePrelaunchGate{
+			OK:              false,
+			Action:          "HOLD",
+			ExecutionPlanID: "plan-held",
+			TargetCount:     1,
+			RefusedCount:    1,
+			Refused: []dispatchWavePrelaunchRefusal{
+				{Rank: 0, Target: "cmd#42", Action: "self_modify_hold", Verdict: "SELF_MODIFY_HOLD"},
+			},
+		},
+	}
+	dispatchWaveAnnotateOutcome(rec)
+	if rec["approval_ready"] != false || rec["approval_verdict"] != "SELF_MODIFY_HOLD" {
+		t.Fatalf("approval fields = ready %v verdict %v", rec["approval_ready"], rec["approval_verdict"])
+	}
+	if rec["verdict"] != "SELF_MODIFY_HOLD" || rec["action"] != "hold" {
+		t.Fatalf("outcome = verdict %v action %v, want SELF_MODIFY_HOLD/hold", rec["verdict"], rec["action"])
+	}
+	text := renderDispatchWave(rec)
+	if !strings.Contains(text, "issue-dispatch-wave: dry-run  verdict=SELF_MODIFY_HOLD action=hold") {
+		t.Fatalf("rendered hold missing header verdict/action:\n%s", text)
+	}
+	if !strings.Contains(text, "approval: ready=false verdict=SELF_MODIFY_HOLD action=HOLD") {
+		t.Fatalf("rendered hold missing approval state:\n%s", text)
+	}
+	if !strings.Contains(text, "(dry-run held - resolve the refusal before using --live)") ||
+		strings.Contains(text, "(dry-run - re-run with --live to spawn the wave)") {
+		t.Fatalf("rendered hold has unsafe dry-run footer:\n%s", text)
+	}
+}
+
+func TestDispatchWaveOutcomeReflectsEarlyCapacityRefusals(t *testing.T) {
+	tests := []struct {
+		name    string
+		rec     map[string]any
+		verdict string
+		action  string
+	}{
+		{
+			name: "preflight-at-cap",
+			rec: map[string]any{
+				"live":                 false,
+				"requested":            2,
+				"allocation_requested": 0,
+				"granted":              0,
+				"stop_reason":          "preflight headroom exhausted before account allocation",
+				"preflight": map[string]any{
+					"verdict": "REFUSE_AT_CAP",
+				},
+			},
+			verdict: "REFUSE_AT_CAP",
+			action:  "refused",
+		},
+		{
+			name: "no-account-seats",
+			rec: map[string]any{
+				"live":                 false,
+				"requested":            2,
+				"allocation_requested": 2,
+				"granted":              0,
+				"stop_reason":          "no account session slots available",
+			},
+			verdict: "WAVE_NO_SEATS",
+			action:  "no_seats",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dispatchWaveAnnotateOutcome(tt.rec)
+			if tt.rec["verdict"] != tt.verdict || tt.rec["action"] != tt.action {
+				t.Fatalf("outcome = verdict %v action %v, want %s/%s", tt.rec["verdict"], tt.rec["action"], tt.verdict, tt.action)
+			}
+			if tt.rec["approval_ready"] != false || tt.rec["approval_verdict"] != tt.verdict || tt.rec["approval_action"] != tt.action {
+				t.Fatalf("approval fields = ready %v verdict %v action %v, want false/%s/%s", tt.rec["approval_ready"], tt.rec["approval_verdict"], tt.rec["approval_action"], tt.verdict, tt.action)
+			}
+			text := renderDispatchWave(tt.rec)
+			want := fmt.Sprintf("verdict=%s action=%s", tt.verdict, tt.action)
+			if !strings.Contains(text, want) {
+				t.Fatalf("rendered refusal missing %q:\n%s", want, text)
+			}
+			wantApproval := fmt.Sprintf("approval: ready=false verdict=%s action=%s", tt.verdict, tt.action)
+			if !strings.Contains(text, wantApproval) {
+				t.Fatalf("rendered refusal missing %q:\n%s", wantApproval, text)
+			}
+			if !strings.Contains(text, "(dry-run held - resolve the refusal before using --live)") ||
+				strings.Contains(text, "(dry-run - re-run with --live to spawn the wave)") {
+				t.Fatalf("rendered refusal has unsafe dry-run footer:\n%s", text)
+			}
+		})
+	}
+}
+
+func TestDispatchWaveNoSeatsHoldIsBenign(t *testing.T) {
+	rec := map[string]any{
+		"ok":                   false,
+		"live":                 false,
+		"requested":            2,
+		"allocation_requested": 2,
+		"granted":              0,
+		"backend":              "claude",
+		"stop_reason":          "no available account for a wave (target tier 1, product claude)",
+	}
+	dispatchWaveAnnotateOutcome(rec)
+	if rec["verdict"] != "WAVE_NO_SEATS" || rec["action"] != "no_seats" || rec["approval_ready"] != false {
+		t.Fatalf("no-seat outcome = verdict %v action %v approval_ready %v, want WAVE_NO_SEATS/no_seats/false", rec["verdict"], rec["action"], rec["approval_ready"])
+	}
+	if !dispatchWaveExitBenign(rec) {
+		t.Fatalf("no-seat wave hold should be a benign scheduler exit")
+	}
+	var stdout, stderr bytes.Buffer
+	if code := writeDispatchWaveResult(&stdout, &stderr, rec, false); code != 0 {
+		t.Fatalf("writeDispatchWaveResult exit = %d, want 0 (stderr: %s)\n%s", code, stderr.String(), stdout.String())
+	}
+	text := stdout.String()
+	if !strings.Contains(text, "approval: ready=false verdict=WAVE_NO_SEATS action=no_seats") {
+		t.Fatalf("no-seat render missing approval state:\n%s", text)
+	}
+	if !strings.Contains(text, "(dry-run held - resolve the refusal before using --live)") ||
+		strings.Contains(text, "(dry-run - re-run with --live to spawn the wave)") {
+		t.Fatalf("no-seat render has unsafe dry-run footer:\n%s", text)
 	}
 }
 

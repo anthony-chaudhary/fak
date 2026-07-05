@@ -29,6 +29,7 @@ import (
 // the floor it admits, so a misconfigured policy is caught BEFORE it gates a run.
 func cmdPolicy(argv []string) {
 	fs := flag.NewFlagSet("policy", flag.ExitOnError)
+	verbFlagUsage(fs, "policy")
 	dump := fs.Bool("dump", false, "write the built-in DefaultPolicy as a manifest to stdout")
 	check := fs.String("check", "", "validate a manifest file and print the floor it admits")
 	_ = fs.Parse(argv)

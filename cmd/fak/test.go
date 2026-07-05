@@ -115,6 +115,7 @@ func looksLikePackage(s string) bool {
 func runTest(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak test", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "test")
 	var (
 		list = fs.Bool("list", false, "print the available tiers and exit")
 		dry  = fs.Bool("n", false, "print the resolved command without running it")

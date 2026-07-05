@@ -38,6 +38,7 @@ func cmdScorecardPane(argv []string) {
 func runScorecardControlPane(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak scorecard control-pane", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "scorecard")
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 	pin := fs.Bool("pin", false, "pin the current debt as the baseline ("+scorecardpane.BaselineRel+")")

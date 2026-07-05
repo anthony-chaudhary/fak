@@ -26,6 +26,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/tuiplugin"
 )
 
 const (
@@ -61,28 +62,22 @@ func runTUI(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	switch argv[0] {
-	case "issues":
-		return runTUIIssues(stdout, stderr, argv[1:])
-	case "loops":
-		return runTUILoops(stdout, stderr, argv[1:])
-	case "sessions":
-		return runTUISessions(stdout, stderr, argv[1:])
-	case "garden":
-		return runTUIGarden(stdout, stderr, argv[1:])
-	case "guard":
-		return runTUIGuard(stdout, stderr, argv[1:])
-	case "agent":
-		return runTUIAgent(stdout, stderr, argv[1:])
-	case "overview":
-		return runTUIOverview(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		tuiUsage(stdout)
 		return 0
-	default:
+	}
+	pane, ok := tuiplugin.Lookup(argv[0])
+	if !ok {
 		fmt.Fprintf(stderr, "fak console: unknown subcommand %q\n", argv[0])
 		tuiUsage(stderr)
 		return 2
 	}
+	paneArgv, err := prepareTUIPaneArgs(pane, argv[1:])
+	if err != nil {
+		fmt.Fprintf(stderr, "fak console %s: %v\n", pane.ID, err)
+		return 2
+	}
+	return pane.Run(stdout, stderr, paneArgv)
 }
 
 func runTUIIssues(stdout, stderr io.Writer, argv []string) int {
@@ -280,6 +275,7 @@ func runTUIGuard(stdout, stderr io.Writer, argv []string) int {
 	tail := fs.Bool("tail", false, "tail the CANONICAL guard journal (FAK_AUDIT_JOURNAL, else newest .dispatch-runs/guard-audit/*.jsonl) — equivalent to --journal <canonical-path>")
 	follow := fs.Bool("follow", false, "with --journal/--tail: keep following the journal and print each NEW adjudication row as it lands (Ctrl-C to stop)")
 	maxRows := fs.Int("rows", 50, "cap the number of (highest-attention) journal rows rendered in the pane")
+	colorMode := fs.String("color", "auto", "colorize human output: auto, always, or never (NO_COLOR disables color)")
 	atText := fs.String("at", "", "snapshot time (RFC3339 or YYYY-MM-DD, default: now)")
 	width := fs.Int("width", 120, "target terminal width for human rendering")
 	asJSON := fs.Bool("json", false, "emit the guard TUI model as JSON")
@@ -298,6 +294,12 @@ func runTUIGuard(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak console guard: %v\n", err)
 		return 2
 	}
+	color, err := tuiColorEnabled(stdout, *colorMode)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak console guard: %v\n", err)
+		return 2
+	}
+	style := tuiGuardRenderStyle{Color: color}
 
 	// Live guard-journal mode (#843): tail the canonical hash-chained guard decision
 	// journal and render its denial surface through the SAME guard model, or follow it
@@ -316,7 +318,7 @@ func runTUIGuard(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintln(stderr, "fak console guard: --tail could not resolve a canonical guard journal path (set FAK_AUDIT_JOURNAL or pass --journal PATH)")
 			return 2
 		}
-		return runTUIGuardJournal(stdout, stderr, path, at, *width, *maxRows, *asJSON, *follow)
+		return runTUIGuardJournal(stdout, stderr, path, at, *width, *maxRows, *asJSON, *follow, style)
 	}
 	if len(guardJSON) == 0 {
 		fmt.Fprintln(stderr, "fak console guard: at least one --guard-json artifact (or --journal/--tail) is required")
@@ -331,8 +333,29 @@ func runTUIGuard(stdout, stderr io.Writer, argv []string) int {
 	if *asJSON {
 		return encodeJSONOrFail(stdout, stderr, report, "fak console guard")
 	}
-	fmt.Fprint(stdout, renderTUIGuard(report, *width))
+	fmt.Fprint(stdout, renderTUIGuardStyled(report, *width, style))
 	return 0
+}
+
+func tuiColorEnabled(stdout io.Writer, mode string) (bool, error) {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		mode = "auto"
+	}
+	switch mode {
+	case "always", "on", "yes", "true", "1":
+		return os.Getenv("NO_COLOR") == "", nil
+	case "never", "off", "no", "false", "0":
+		return false, nil
+	case "auto":
+		if os.Getenv("NO_COLOR") != "" {
+			return false, nil
+		}
+		f, ok := stdout.(*os.File)
+		return ok && guardFdIsTerminal(int(f.Fd())), nil
+	default:
+		return false, fmt.Errorf("--color must be auto, always, or never")
+	}
 }
 
 // runTUIGuardJournal renders the live guard-journal pane (#843): it reads the durable
@@ -344,7 +367,7 @@ func runTUIGuard(stdout, stderr io.Writer, argv []string) int {
 // row as it lands until interrupted. Redaction is preserved by construction: the
 // journal carries only decision fields + content digests, never a prompt/arg/result
 // payload, so nothing sensitive can reach the model.
-func runTUIGuardJournal(stdout, stderr io.Writer, path string, at time.Time, width, maxRows int, asJSON, follow bool) int {
+func runTUIGuardJournal(stdout, stderr io.Writer, path string, at time.Time, width, maxRows int, asJSON, follow bool, style tuiGuardRenderStyle) int {
 	rows, err := journal.ReadRows(path)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak console guard: %v\n", err)
@@ -354,9 +377,9 @@ func runTUIGuardJournal(stdout, stderr io.Writer, path string, at time.Time, wid
 	if asJSON {
 		return encodeJSONOrFail(stdout, stderr, report, "fak console guard")
 	}
-	fmt.Fprint(stdout, renderTUIGuard(report, width))
+	fmt.Fprint(stdout, renderTUIGuardStyled(report, width, style))
 	if follow {
-		return followGuardJournal(stdout, path, width, lastSeqOf(rows))
+		return followGuardJournal(stdout, path, width, lastSeqOf(rows), style)
 	}
 	return 0
 }
@@ -430,7 +453,7 @@ func canonicalGuardJournalPath() string {
 // followGuardJournal tails the journal after the initial snapshot, printing each NEW
 // adjudication row (seq beyond lastSeq) as a compact one-line entry as it lands. It
 // polls (no fsnotify dependency, matching the rest of the kernel) and stops on Ctrl-C.
-func followGuardJournal(stdout io.Writer, path string, width int, lastSeq uint64) int {
+func followGuardJournal(stdout io.Writer, path string, width int, lastSeq uint64, style tuiGuardRenderStyle) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -449,7 +472,7 @@ func followGuardJournal(stdout io.Writer, path string, width int, lastSeq uint64
 					continue
 				}
 				lastSeq = r.Seq
-				fmt.Fprintln(stdout, formatGuardJournalLine(r, width))
+				fmt.Fprintln(stdout, formatGuardJournalLine(r, width, style))
 			}
 		}
 	}
@@ -457,7 +480,7 @@ func followGuardJournal(stdout io.Writer, path string, width int, lastSeq uint64
 
 // formatGuardJournalLine renders one journal row as a compact tail line — decision
 // fields + the witness claim only, never a payload (the #840 redaction contract).
-func formatGuardJournalLine(r journal.Row, width int) string {
+func formatGuardJournalLine(r journal.Row, width int, style tuiGuardRenderStyle) string {
 	parts := []string{fmt.Sprintf("seq=%d", r.Seq), r.Kind}
 	for _, s := range []string{r.Tool, r.Verdict, r.Reason} {
 		if s != "" {
@@ -467,7 +490,18 @@ func formatGuardJournalLine(r journal.Row, width int) string {
 	if r.Witness != "" {
 		parts = append(parts, "("+r.Witness+")")
 	}
-	return trimTUI(strings.Join(parts, "  "), maxTUI(40, width))
+	row := tuiGuardRow{
+		Kind:    "audit-" + strings.ToLower(r.Kind),
+		Tool:    r.Tool,
+		Verdict: strings.ToUpper(r.Verdict),
+		Reason:  strings.ToUpper(r.Reason),
+		Count:   1,
+	}
+	row.Tags, row.Attention = scoreTUIGuardRow(row)
+	visual := tuiGuardRowVisual(row)
+	prefix := style.paint(visual.SGR, padRightTUI(visual.Symbol, 3))
+	body := trimTUI(strings.Join(parts, "  "), maxTUI(40, width-4))
+	return prefix + " " + style.paint(visual.SGR, body)
 }
 
 // lastSeqOf returns the highest seq in a row slice (0 for none) — the follow watermark.
@@ -813,6 +847,9 @@ func runTUIOverview(stdout, stderr io.Writer, argv []string) int {
 	gardenJSON := fs.String("garden-json", "", "read fak garden JSON and include the garden pane card")
 	var guardJSON stringList
 	fs.Var(&guardJSON, "guard-json", "read a guard artifact JSON file and include the guard pane card (repeatable)")
+	var paneList stringList
+	fs.Var(&paneList, "pane", "overview pane id to include, in display order (repeatable; overrides overview_panes in console config)")
+	paneSourceFlag := fs.String("pane-source", "", "source of default --pane values (internal)")
 	check := fs.Bool("check", false, "include the garden gate decision when --garden-json is set")
 	asOfText := fs.String("as-of", "", "date used for issue age/idle math (YYYY-MM-DD, default: today UTC)")
 	atText := fs.String("at", "", "snapshot time for non-issue panes (RFC3339 or YYYY-MM-DD, default: now)")
@@ -838,6 +875,14 @@ func runTUIOverview(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak console overview: %v\n", err)
 		return 2
 	}
+	panes := normalizeTUIOverviewPaneList([]string(paneList))
+	paneSource := ""
+	if len(panes) > 0 {
+		paneSource = strings.TrimSpace(*paneSourceFlag)
+		if paneSource == "" {
+			paneSource = "flag"
+		}
+	}
 	report, err := loadTUIOverview(tuiOverviewOptions{
 		IssuesJSON:   *issuesJSON,
 		Epic:         *epic,
@@ -846,6 +891,8 @@ func runTUIOverview(stdout, stderr io.Writer, argv []string) int {
 		GardenJSON:   *gardenJSON,
 		GuardJSON:    []string(guardJSON),
 		CheckGarden:  *check,
+		PaneOrder:    panes,
+		PaneSource:   paneSource,
 		AsOf:         asOf,
 		At:           at,
 	})
@@ -868,6 +915,8 @@ type tuiOverviewOptions struct {
 	GardenJSON   string
 	GuardJSON    []string
 	CheckGarden  bool
+	PaneOrder    []string
+	PaneSource   string
 	AsOf         time.Time
 	At           time.Time
 }

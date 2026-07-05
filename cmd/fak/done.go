@@ -66,6 +66,7 @@ func runDone(stdout, stderr io.Writer, argv []string) int {
 func runDoneWithRunner(stdout, stderr io.Writer, argv []string, runner doneRunner) int {
 	fs := flag.NewFlagSet("done", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "done")
 	var paths pathList
 	fs.Var(&paths, "paths", "repo-relative pathspec/glob to require clean before claiming done (repeatable)")
 	fs.Var(&paths, "path", "alias for --paths")

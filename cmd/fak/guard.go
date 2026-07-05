@@ -44,10 +44,11 @@ const guardResourceSampleInterval = 2 * time.Second
 // read-only-MCP surface (Agent/Task*/SendMessage/Monitor/ScheduleWakeup/EnterPlanMode/
 // AskUserQuestion/ToolSearch/Read*McpResource*). It also admits the Codex-native
 // names for the same host plumbing (update_plan, request_user_input, get/update_goal,
-// list/read MCP resources, tool_search_tool, and shell_command with the same danger
-// arg-rules as Bash/PowerShell), including the namespace-qualified spellings some Codex
-// surfaces expose (`functions.shell_command`, `tool_search.tool_search_tool`,
-// `multi_tool_use.parallel`). That keeps `fak guard -- codex` from DEFAULT_DENYing the
+// list/read MCP resources, tool_search_tool, hosted web/image built-ins, and
+// shell_command with the same danger arg-rules as Bash/PowerShell), including the
+// namespace-qualified spellings some Codex surfaces expose (`functions.shell_command`,
+// `tool_search.tool_search_tool`, `multi_tool_use.parallel`, `web.run`,
+// `image_gen.imagegen`). That keeps `fak guard -- codex` from DEFAULT_DENYing the
 // harness's own planning seam before the agent can do real work. These are NOT
 // capability grants: a
 // subagent the floor lets the agent SPAWN makes its own tool calls back through this same
@@ -106,6 +107,15 @@ func compressActivates(flag bool, env string) bool {
 }
 
 func cmdGuard(argv []string) {
+	// `fak guard allow …` is the OPERATOR control surface for the always-allow overlay
+	// — add / --list / --remove / --from-journal — peeled off before the wrap-a-command
+	// flag parse. The wrap form always names the agent after `--`, so a bare leading
+	// `allow` is unambiguous and never a program to wrap. It maintains the overlay
+	// out-of-band from the agent (see guard_allow.go) and returns; it never binds a gateway.
+	if len(argv) > 0 && argv[0] == "allow" {
+		cmdGuardAllow(argv[1:])
+		return
+	}
 	t0 := time.Now()
 	fs := flag.NewFlagSet("guard", flag.ExitOnError)
 	verbFlagUsage(fs, "guard")
@@ -363,6 +373,20 @@ func cmdGuard(argv []string) {
 		floorSource = "built-in guard floor (--dump-policy to see it)"
 	}
 	must(err)
+	// Union the OPERATOR allow overlay (`fak guard allow`) on top of whichever floor
+	// loaded. It only widens Allow / AllowPrefix — the danger arg-rules and explicit
+	// denies below stay intact — so an operator can re-admit a DEFAULT_DENY'd tool
+	// out-of-band from the agent without ever loosening the genuine-danger floor. A
+	// missing overlay is the common no-op; a malformed one fails loud (see guard_allow.go).
+	overlayPath := guardAllowOverlayPath()
+	allowOverlay, overlayErr := loadGuardAllowOverlay(overlayPath)
+	if overlayErr != nil {
+		fmt.Fprintf(os.Stderr, "fak guard: %v\n", overlayErr)
+		os.Exit(2)
+	}
+	if n := guardApplyAllowOverlay(&rt, allowOverlay); n > 0 {
+		floorSource += fmt.Sprintf(" + operator allow overlay (%d extra tool(s); fak guard allow --list)", n)
+	}
 	policyDigest = guardPolicyDigest(policyBytes)
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)

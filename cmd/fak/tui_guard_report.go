@@ -871,14 +871,124 @@ func tuiGuardActions(counts tuiGuardCounts) []string {
 	}
 }
 
+type tuiGuardRenderStyle struct {
+	Color bool
+}
+
+type tuiGuardVisual struct {
+	Symbol string
+	SGR    string
+}
+
+const (
+	tuiSGRReset       = "\x1b[0m"
+	tuiSGRDim         = "\x1b[2m"
+	tuiSGRRedBold     = "\x1b[31;1m"
+	tuiSGRGreen       = "\x1b[32m"
+	tuiSGRGreenBold   = "\x1b[32;1m"
+	tuiSGRYellowBold  = "\x1b[33;1m"
+	tuiSGRBlueBold    = "\x1b[34;1m"
+	tuiSGRMagentaBold = "\x1b[35;1m"
+	tuiSGRCyanBold    = "\x1b[36;1m"
+)
+
+func (style tuiGuardRenderStyle) paint(sgr, text string) string {
+	if !style.Color || sgr == "" || text == "" {
+		return text
+	}
+	return sgr + text + tuiSGRReset
+}
+
+func tuiGuardHeadlineVisual(status string) tuiGuardVisual {
+	switch tuiGuardStatusClass(status) {
+	case "fail":
+		return tuiGuardVisual{Symbol: "!!", SGR: tuiSGRRedBold}
+	case "warn":
+		return tuiGuardVisual{Symbol: "!", SGR: tuiSGRYellowBold}
+	case "pass":
+		return tuiGuardVisual{Symbol: "OK", SGR: tuiSGRGreenBold}
+	default:
+		return tuiGuardVisual{Symbol: "..", SGR: tuiSGRDim}
+	}
+}
+
+func tuiGuardRowVisual(row tuiGuardRow) tuiGuardVisual {
+	status := strings.ToUpper(row.Status)
+	verdict := strings.ToUpper(row.Verdict)
+	reason := strings.ToUpper(row.Reason)
+	switch {
+	case hasStringTUI(row.Tags, "unexpected") || tuiGuardStatusClass(row.Status) == "fail":
+		return tuiGuardVisual{Symbol: "!!", SGR: tuiSGRRedBold}
+	case verdict == "QUARANTINE" || hasStringTUI(row.Tags, "quarantine") || hasStringTUI(row.Tags, "trust-violation"):
+		return tuiGuardVisual{Symbol: "Q!", SGR: tuiSGRMagentaBold}
+	case hasStringTUI(row.Tags, "active") || hasStringTUI(row.Tags, "warn") || hasStringTUI(row.Tags, "settlement"):
+		return tuiGuardVisual{Symbol: "!", SGR: tuiSGRYellowBold}
+	case verdict == "DENY" && hasStringTUI(row.Tags, "expected-deny"):
+		return tuiGuardVisual{Symbol: "D+", SGR: tuiSGRGreenBold}
+	case verdict == "DENY" || reason == "POLICY_BLOCK" || reason == "DEFAULT_DENY" || hasStringTUI(row.Tags, "blocker"):
+		return tuiGuardVisual{Symbol: "D!", SGR: tuiSGRCyanBold}
+	case verdict == "TRANSFORM" || hasStringTUI(row.Tags, "transform"):
+		return tuiGuardVisual{Symbol: "T>", SGR: tuiSGRBlueBold}
+	case verdict == "ALLOW" || hasStringTUI(row.Tags, "allow") || tuiGuardStatusClass(row.Status) == "pass":
+		return tuiGuardVisual{Symbol: "OK", SGR: tuiSGRGreen}
+	case strings.Contains(status, "STALE") || strings.Contains(status, "HISTORICAL") || strings.Contains(status, "EXTERNAL"):
+		return tuiGuardVisual{Symbol: "~", SGR: tuiSGRDim}
+	default:
+		return tuiGuardVisual{Symbol: "..", SGR: tuiSGRDim}
+	}
+}
+
+func tuiGuardTokenVisual(token string) tuiGuardVisual {
+	switch strings.ToUpper(strings.TrimSpace(token)) {
+	case "FAIL", "ERROR", "BLOCKED", "UNEXPECTED":
+		return tuiGuardVisual{Symbol: "!!", SGR: tuiSGRRedBold}
+	case "WARN", "ACTIVE", "ACTIVE_DEBT":
+		return tuiGuardVisual{Symbol: "!", SGR: tuiSGRYellowBold}
+	case "PASS", "OK", "DENIED_EXPECTED":
+		return tuiGuardVisual{Symbol: "OK", SGR: tuiSGRGreenBold}
+	case "DENY":
+		return tuiGuardVisual{Symbol: "D!", SGR: tuiSGRCyanBold}
+	case "ALLOW":
+		return tuiGuardVisual{Symbol: "OK", SGR: tuiSGRGreen}
+	case "TRANSFORM":
+		return tuiGuardVisual{Symbol: "T>", SGR: tuiSGRBlueBold}
+	case "QUARANTINE":
+		return tuiGuardVisual{Symbol: "Q!", SGR: tuiSGRMagentaBold}
+	case "POLICY_BLOCK", "DEFAULT_DENY":
+		return tuiGuardVisual{Symbol: "D!", SGR: tuiSGRCyanBold}
+	case "":
+		return tuiGuardVisual{Symbol: "..", SGR: tuiSGRDim}
+	default:
+		if tuiGuardStatusClass(token) == "fail" {
+			return tuiGuardVisual{Symbol: "!!", SGR: tuiSGRRedBold}
+		}
+		if tuiGuardStatusClass(token) == "warn" {
+			return tuiGuardVisual{Symbol: "!", SGR: tuiSGRYellowBold}
+		}
+		return tuiGuardVisual{Symbol: "~", SGR: tuiSGRDim}
+	}
+}
+
 func renderTUIGuard(report tuiGuardReport, width int) string {
+	return renderTUIGuardStyled(report, width, tuiGuardRenderStyle{})
+}
+
+func renderTUIGuardStyled(report tuiGuardReport, width int, style tuiGuardRenderStyle) string {
 	var b strings.Builder
+	statusVisual := tuiGuardHeadlineVisual(report.Status)
 	fmt.Fprintf(&b, "fak console guard  at=%s  source=%s\n", report.At, report.Source)
 	fmt.Fprintf(&b, "status=%s  artifacts=%d  pass=%d  warn=%d  fail=%d  rows=%d  allow=%d  deny=%d  quarantine=%d  policy_block=%d  default_deny=%d  expected=%d  unexpected=%d\n",
-		report.Status, report.Counts.Artifacts, report.Counts.Pass, report.Counts.Warn,
+		style.paint(statusVisual.SGR, report.Status), report.Counts.Artifacts, report.Counts.Pass, report.Counts.Warn,
 		report.Counts.Fail, report.Counts.Rows, report.Counts.Allow, report.Counts.Deny,
 		report.Counts.Quarantine, report.Counts.PolicyBlock, report.Counts.DefaultDeny,
 		report.Counts.Expected, report.Counts.Unexpected)
+	fmt.Fprintf(&b, "legend: %s fail/unexpected  %s warn/active  %s deny  %s expected-deny  %s quarantine  %s allow\n",
+		style.paint(tuiSGRRedBold, "!!"),
+		style.paint(tuiSGRYellowBold, "!"),
+		style.paint(tuiSGRCyanBold, "D!"),
+		style.paint(tuiSGRGreenBold, "D+"),
+		style.paint(tuiSGRMagentaBold, "Q!"),
+		style.paint(tuiSGRGreen, "OK"))
 	if len(report.Actions) > 0 {
 		fmt.Fprintf(&b, "next: %s\n", trimTUI(report.Actions[0], maxTUI(20, width-6)))
 	}
@@ -887,7 +997,7 @@ func renderTUIGuard(report tuiGuardReport, width int) string {
 		return b.String()
 	}
 	fmt.Fprintln(&b, "\nRows")
-	fmt.Fprintln(&b, "attention artifact                 kind                 tool             verdict reason         count tags")
+	fmt.Fprintln(&b, "attention sig artifact                 kind                 tool             verdict reason         count tags")
 	for _, row := range report.Rows {
 		count := "-"
 		if row.Count > 0 {
@@ -897,14 +1007,18 @@ func renderTUIGuard(report tuiGuardReport, width int) string {
 		if row.Detail != "" {
 			tags += "  " + row.Detail
 		}
-		fmt.Fprintf(&b, "%9d %s %s %s %s %s %-5s %s\n",
+		rowVisual := tuiGuardRowVisual(row)
+		verdictVisual := tuiGuardTokenVisual(row.Verdict)
+		reasonVisual := tuiGuardTokenVisual(row.Reason)
+		fmt.Fprintf(&b, "%9d %s %s %s %s %s %s %-5s %s\n",
 			row.Attention,
+			style.paint(rowVisual.SGR, padRightTUI(rowVisual.Symbol, 3)),
 			padRightTUI(trimTUI(row.Artifact, 24), 24),
 			padRightTUI(trimTUI(row.Kind, 20), 20),
 			padRightTUI(trimTUI(row.Tool, 16), 16),
-			padRightTUI(trimTUI(row.Verdict, 7), 7),
-			padRightTUI(trimTUI(row.Reason, 14), 14),
-			count, trimTUI(tags, maxTUI(12, width-91)))
+			style.paint(verdictVisual.SGR, padRightTUI(trimTUI(row.Verdict, 7), 7)),
+			style.paint(reasonVisual.SGR, padRightTUI(trimTUI(row.Reason, 14), 14)),
+			count, style.paint(rowVisual.SGR, trimTUI(tags, maxTUI(12, width-106))))
 	}
 	return b.String()
 }

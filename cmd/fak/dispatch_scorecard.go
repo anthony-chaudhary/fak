@@ -426,8 +426,8 @@ func dispatchScorePrelaunchGate() dispatchPlanProbe {
 			Reason:  "issue #21 targets fak's own running source",
 		},
 	})
-	pass := !gate.OK &&
-		gate.Action == "HOLD" &&
+	pass := gate.OK &&
+		gate.Action == "LAUNCH_READY" &&
 		gate.TargetCount == 2 &&
 		gate.ExecutionPlanID == "score-plan" &&
 		gate.ReadyCount == 1 &&
@@ -435,7 +435,7 @@ func dispatchScorePrelaunchGate() dispatchPlanProbe {
 		len(gate.Refused) == 1 &&
 		gate.Refused[0].Target == "gateway#21"
 	return dispatchScoreProbe("prelaunch_audit_gate", pass,
-		"one failed execution audit holds the whole live wave before any worker launches",
+		"prelaunch audit launches ready rows while holding refused rows",
 		map[string]any{
 			"prelaunch_gate": gate,
 		})

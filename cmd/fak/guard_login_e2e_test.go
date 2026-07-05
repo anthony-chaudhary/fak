@@ -37,6 +37,9 @@ func TestMain(m *testing.M) {
 		// either way, a clean return is a 0 exit.
 		os.Exit(0)
 	}
+	// Keep console-pane tests hermetic. The production default reads ~/.fak/console.json;
+	// a developer's local preference file must not change package test behavior.
+	_ = os.Setenv("FAK_CONSOLE_FILE", filepath.Join(os.TempDir(), "fak-test-missing-console.json"))
 	os.Exit(m.Run())
 }
 

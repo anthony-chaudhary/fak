@@ -62,6 +62,7 @@ func TestCachevalueReportPrintsBothTracksAndNet(t *testing.T) {
 		"Track 1", "WITNESSED",
 		"Track 2", "OBSERVED $",
 		"net$", "break-even",
+		"Component health",
 		"marginal-over-tuned-warm-KV", // the #1066 fence on Track 1
 		"never blended",               // the provenance fence on the P&L
 	} {

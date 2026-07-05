@@ -14,6 +14,7 @@ package main
 //
 //	fak lab status [--roster F] [--reports DIR] [--group G] [--class C] [--all] [--json]
 //	fak lab report --id ID --state live|idle|draining|down [--version V] [--note N] [--reports DIR]
+//	fak lab readiness [--file F] [--status STATUS] [--write F|--write-default] [--json]
 //	fak lab ls     [--roster F] [--group G] [--class C] [--json]
 //
 // THE PUBLIC/PRIVATE BOUNDARY IS A DATA CONTRACT. The embedded roster is generic (an
@@ -31,6 +32,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/fleet"
 )
@@ -46,8 +49,9 @@ func cmdLab(argv []string) { os.Exit(runLab(os.Stdout, os.Stderr, argv)) }
 
 func runLab(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "usage: fak lab <status|report|ls> [flags]")
+		fmt.Fprintln(stderr, "usage: fak lab <status|report|readiness|ls> [flags]")
 		fmt.Fprintln(stderr, "       fak lab status            # which lab nodes are alive right now?")
+		fmt.Fprintln(stderr, "       fak lab readiness --json  # public-safe lab dispatch gate")
 		fmt.Fprintln(stderr, "       fak lab report --id ID --state live   # self-report this box")
 		return 2
 	}
@@ -56,16 +60,19 @@ func runLab(stdout, stderr io.Writer, argv []string) int {
 		return labStatus(stdout, stderr, argv[1:])
 	case "report":
 		return labReport(stdout, stderr, argv[1:])
+	case "readiness":
+		return labReadiness(stdout, stderr, argv[1:])
 	case "ls", "list":
 		return labLs(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
-		fmt.Fprintln(stdout, "usage: fak lab <status|report|ls> [flags]")
+		fmt.Fprintln(stdout, "usage: fak lab <status|report|readiness|ls> [flags]")
 		fmt.Fprintln(stdout, "  status   fold the lab roster against the reports dir and render the fleet view")
 		fmt.Fprintln(stdout, "  report   write one fak.fleet.report/v1 line for a box (self-report; no bridge)")
+		fmt.Fprintln(stdout, "  readiness read or write the public fak.lab_readiness/v1 dispatch gate")
 		fmt.Fprintln(stdout, "  ls       list the boxes in the (default or --roster) lab roster")
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak lab: unknown subcommand %q (want status|report|ls)\n", argv[0])
+		fmt.Fprintf(stderr, "fak lab: unknown subcommand %q (want status|report|readiness|ls)\n", argv[0])
 		return 2
 	}
 }
@@ -87,6 +94,20 @@ func labReportsDir(flagVal string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(cfgDir, "fleet", "reports"), nil
+}
+
+func labReadinessPath(flagVal string) (string, error) {
+	if flagVal != "" {
+		return flagVal, nil
+	}
+	if env := os.Getenv("FAK_LAB_READINESS"); env != "" {
+		return env, nil
+	}
+	cfgDir, err := nodeConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cfgDir, "fleet", "lab-readiness.json"), nil
 }
 
 // labLoadRoster loads the roster from --roster, or the embedded generic default when
@@ -209,6 +230,89 @@ func labReport(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprintf(stdout, "[fak lab] wrote %s state=%s -> %s\n", *id, st, filepath.Join(dir, *id+".json"))
 	return 0
+}
+
+func labReadiness(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("lab readiness", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	file := fs.String("file", "", "readiness record path (default: $FAK_LAB_READINESS or ~/.config/fak/fleet/lab-readiness.json)")
+	machineClass := fs.String("class", "gpu-server", "generic machine class")
+	status := fs.String("status", "", "emit this readiness status instead of reading a file")
+	nextAction := fs.String("next-action", "", "generic next action for --status")
+	evidence := fs.String("evidence", "", "generic evidence label for --status")
+	writePath := fs.String("write", "", "write the emitted --status record to this path")
+	writeDefault := fs.Bool("write-default", false, "write the emitted --status record to the default readiness path")
+	asJSON := fs.Bool("json", false, "emit the readiness record as JSON")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if *writeDefault && *writePath != "" {
+		fmt.Fprintln(stderr, "fak lab readiness: use only one of --write or --write-default")
+		return 2
+	}
+
+	var rec fleet.LabReadiness
+	if *status != "" {
+		rec = fleet.NewLabReadiness(*machineClass, *status, *nextAction, *evidence, time.Now())
+		if probs := rec.Validate(); len(probs) > 0 {
+			fmt.Fprintf(stderr, "fak lab readiness: invalid record: %s\n", strings.Join(probs, "; "))
+			return 2
+		}
+		if *writeDefault {
+			path, err := labReadinessPath(*file)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak lab readiness: %v\n", err)
+				return 1
+			}
+			*writePath = path
+		}
+		if *writePath != "" {
+			if err := writeIndentedJSONFile(*writePath, rec); err != nil {
+				fmt.Fprintf(stderr, "fak lab readiness: write %s: %v\n", *writePath, err)
+				return 1
+			}
+		}
+	} else {
+		if *writePath != "" || *writeDefault {
+			fmt.Fprintln(stderr, "fak lab readiness: --write/--write-default requires --status")
+			return 2
+		}
+		path, err := labReadinessPath(*file)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak lab readiness: %v\n", err)
+			return 1
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			rec = fleet.IndeterminateLabReadiness(*machineClass, "publish-lab-readiness", "no-readiness-record", time.Now())
+		} else {
+			defer f.Close()
+			rec, err = fleet.LoadLabReadiness(f)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak lab readiness: invalid %s: %v\n", path, err)
+				rec = fleet.IndeterminateLabReadiness(*machineClass, "fix-lab-readiness-record", "invalid-readiness-record", time.Now())
+			}
+		}
+	}
+
+	cmds := fleet.DefaultLabReadinessCommands()
+	rec.Commands = &cmds
+	if *asJSON {
+		if err := writeIndentedJSON(stdout, rec); err != nil {
+			fmt.Fprintf(stderr, "fak lab readiness: encode: %v\n", err)
+			return 1
+		}
+	} else {
+		fmt.Fprintf(stdout, "lab readiness %s: %s (%s)\n", rec.MachineClass, rec.Status, rec.NextAction)
+		if !rec.AdmitLabDispatch {
+			fmt.Fprintf(stdout, "mark ready: %s\n", cmds.MarkReady)
+			fmt.Fprintf(stdout, "mark wait: %s\n", cmds.MarkWaitPrivateRecovery)
+		}
+	}
+	if rec.AdmitLabDispatch {
+		return 0
+	}
+	return 1
 }
 
 func labLs(stdout, stderr io.Writer, argv []string) int {

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/anthony-chaudhary/fak/internal/memoryread"
+	"github.com/anthony-chaudhary/fak/internal/memq"
 )
 
 func cmdMemoryRead(argv []string) { os.Exit(runMemoryRead(os.Stdout, os.Stderr, argv)) }
@@ -31,6 +32,6 @@ func runMemoryRead(stdout, stderr io.Writer, argv []string) int {
 	} else if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}
-	_, _ = fmt.Fprint(stdout, memoryread.RenderDigest(dir, *indexOnly, *maxBytes))
+	_, _ = fmt.Fprint(stdout, memq.RenderNotesDigest(dir, *indexOnly, *maxBytes))
 	return 0
 }

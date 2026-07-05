@@ -49,6 +49,8 @@ func runLeaseref(stdout, stderr io.Writer, argv []string) int {
 		return runLeaserefLive(stdout, stderr, rest)
 	case "liveness":
 		return runLeaserefLiveness(stdout, stderr, rest)
+	case "session-publish":
+		return runLeaserefSessionPublish(stdout, stderr, rest)
 	case "list":
 		return runLeaserefList(stdout, stderr, rest)
 	case "reap":
@@ -119,6 +121,11 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       reclaimable; a heartbeating peer's lane is never stolen, and a lease with no
       session binding (or no descriptor) is peer-unknown, not reclaimable.
       --session ME tags your own leases self.
+
+  fak leaseref session-publish --session S [--host H] [--state RUNNING] [--ttl SEC] [--dir DIR]
+      Publish/refresh a lightweight session descriptor at refs/fak/locks/session-S
+      so leases acquired with --session S have a heartbeat for 'liveness'. This is
+      a side-ref update only, never a branch/HEAD mutation.
 
   fak leaseref list [--json] [--dir DIR]
       List every record under refs/fak/locks/* (incl. expired), one per line with
@@ -240,6 +247,46 @@ func runLeaserefLiveness(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return emitLeaserefJSON(stdout, stderr, rows, "liveness")
+}
+
+func runLeaserefSessionPublish(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak leaseref session-publish", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", "", "repo dir (default: git discovery from cwd)")
+	session := fs.String("session", "", "session id to publish under refs/fak/locks/session-<id>")
+	host := fs.String("host", "", "host/node label (default: os hostname)")
+	state := fs.String("state", "RUNNING", "session PCB state")
+	ttl := fs.Int64("ttl", 0, "descriptor lifetime in seconds (0 = no expiry)")
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
+		return code
+	}
+	*dir = pathutil.ExpandTilde(*dir)
+	if *session == "" {
+		fmt.Fprintln(stderr, "fak leaseref session-publish: --session is required")
+		return 2
+	}
+	if *host == "" {
+		if h, err := os.Hostname(); err == nil {
+			*host = h
+		}
+	}
+	now := time.Now()
+	desc := leaseref.SessionDescriptor{
+		ID:        *session,
+		Host:      *host,
+		PCBState:  strings.TrimSpace(*state),
+		UpdatedAt: now.Unix(),
+		TTLSecs:   *ttl,
+	}
+	if desc.PCBState == "" {
+		desc.PCBState = "RUNNING"
+	}
+	store := leaseref.NewInDir(*dir)
+	if _, err := store.PublishSession(context.Background(), desc); err != nil {
+		fmt.Fprintf(stderr, "fak leaseref session-publish: %v\n", err)
+		return 1
+	}
+	return emitLeaserefJSON(stdout, stderr, desc, "session-publish")
 }
 
 func runLeaserefList(stdout, stderr io.Writer, argv []string) int {

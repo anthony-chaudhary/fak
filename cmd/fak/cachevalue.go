@@ -24,6 +24,14 @@ import (
 //	fak cachevalue feed --ledger docs/nightrun/cache-value.jsonl --savings-ledger docs/nightrun/cache-savings.jsonl
 //	fak cachevalue post --report-json report.json        # post a pre-rolled report (- for stdin)
 //	fak cachevalue report --since 2026-06-22             # the two-track P&L (WITNESSED + OBSERVED $) + NET (#1304)
+//	fak cachevalue status --json                         # cache-plane health, owner, dependency, fidelity, and next action
+//	fak cachevalue status --session transcript.jsonl --vcache-score-report score.json
+//	fak cachevalue status --artifact-dir diagnostics/cache
+//	fak cachevalue status --vcache-observe-report observe.json
+//	fak cachevalue status --vcache-actions-report actions.json
+//	fak cachevalue status --vcache-context-join-report context-join.json
+//	fak cachevalue status --vcache-context-witness-report context-witness.json
+//	fak cachevalue status --ablation-report ablate.json --headroom-bench-report headroom.json
 //	fak cachevalue review --since 2026-06-22 --json      # inspect cache-frontier review row
 //	fak cachevalue review --date 2026-06-29 --append-ledger docs/cache-frontier/review-ledger.jsonl --markdown-out docs/cache-frontier/reviews/2026-06-29.md
 //
@@ -33,8 +41,9 @@ import (
 // renders the card and prints it without posting, matching the scoreboard/bench/blockers
 // "safe by default" idiom.
 func cmdCachevalue(argv []string) {
-	dispatchSubcommands("cachevalue", "report | review | post | feed", argv,
+	dispatchSubcommands("cachevalue", "report | status | review | post | feed", argv,
 		subcommand{"report", runCachevalueReport},
+		subcommand{"status", runCachevalueStatus},
 		subcommand{"review", runCachevalueReview},
 		subcommand{"post", runCachevaluePost},
 		subcommand{"feed", runCachevalueFeed},

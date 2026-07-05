@@ -42,7 +42,7 @@ func runHeadroom(stdout, stderr io.Writer, argv []string) int {
 	case "list":
 		return runHeadroomList(stdout, argv[1:])
 	case "status":
-		return runHeadroomStatus(stdout, argv[1:])
+		return runHeadroomStatus(stdout, stderr, argv[1:])
 	case "compress":
 		return runHeadroomCompress(stdout, stderr, argv[1:])
 	case "bench":
@@ -60,7 +60,7 @@ func runHeadroom(stdout, stderr io.Writer, argv []string) int {
 func headroomUsage(w io.Writer) {
 	fmt.Fprint(w, `usage:
   fak headroom list                          list compressor plugins (* = selected)
-  fak headroom status                        selected plugin, headroom proxy URL + reachability, KPI
+  fak headroom status [--json]               selected plugin, proxy reachability, plugin health, KPI
   fak headroom compress [flags] [FILE|-]     compress a blob and print the savings (proof)
   fak headroom bench [flags] [FILE...]       measure savings on a corpus (built-in, or REAL files via --dir/FILE)
 
@@ -93,17 +93,43 @@ func runHeadroomList(stdout io.Writer, _ []string) int {
 	return 0
 }
 
-func runHeadroomStatus(stdout io.Writer, _ []string) int {
-	sel := headroom.Selected()
-	fmt.Fprintf(stdout, "selected:     %s\n", sel.Name())
-	fmt.Fprintf(stdout, "plugins:      %s\n", strings.Join(headroom.Names(), ", "))
-	fmt.Fprintf(stdout, "headroom url: %s\n", headroom.HeadroomURL())
-
+func runHeadroomStatus(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("headroom status", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "emit status as JSON")
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	fmt.Fprintf(stdout, "reachable:    %v\n", headroom.Reachable(ctx))
+	report := headroom.BuildStatus(ctx)
+	if *asJSON {
+		b, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			fmt.Fprintf(stderr, "fak headroom: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, string(b))
+		return 0
+	}
 
-	st := headroom.Default.Stats()
+	fmt.Fprintf(stdout, "selected:     %s\n", report.Selected)
+	fmt.Fprintf(stdout, "plugins:      %s\n", strings.Join(headroom.Names(), ", "))
+	fmt.Fprintf(stdout, "headroom url: %s\n", report.HeadroomURL)
+	fmt.Fprintf(stdout, "reachable:    %v\n", report.HeadroomReachable)
+	fmt.Fprintf(stdout, "\nplugin health:\n")
+	fmt.Fprintf(stdout, "  %-9s %-8s %-22s %-11s %-10s %-12s %s\n", "plugin", "status", "dependency", "fidelity", "evidence", "reach", "reason")
+	for _, p := range report.Plugins {
+		marker := " "
+		if p.Selected {
+			marker = "*"
+		}
+		fmt.Fprintf(stdout, " %s%-8s %-8s %-22s %-11s %-10s %-12s %s\n",
+			marker, p.Name, p.Status, p.Dependency, p.Fidelity, p.Evidence, p.Reachability, p.Reason)
+	}
+
+	st := report.GateStats
+	fmt.Fprintf(stdout, "\n")
 	fmt.Fprintf(stdout, "considered:   %d\n", st.Considered)
 	fmt.Fprintf(stdout, "compressed:   %d\n", st.Compressed)
 	fmt.Fprintf(stdout, "bytes in/out: %d / %d\n", st.BytesIn, st.BytesOut)
@@ -156,6 +182,12 @@ func runHeadroomCompress(stdout, stderr io.Writer, argv []string) int {
 	fmt.Fprintf(stdout, "new bytes:  %d\n", out.NewLen)
 	fmt.Fprintf(stdout, "saved:      %.1f%%\n", out.SavedRatio()*100)
 	fmt.Fprintf(stdout, "compressed: %v\n", out.Compressed)
+	if out.Status != "" {
+		fmt.Fprintf(stdout, "status:     %s\n", out.Status)
+	}
+	if out.Reason != "" {
+		fmt.Fprintf(stdout, "reason:     %s\n", out.Reason)
+	}
 	if out.Retrieval != "" {
 		fmt.Fprintf(stdout, "ccr:        %s\n", out.Retrieval)
 	}

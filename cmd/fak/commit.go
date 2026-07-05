@@ -64,6 +64,7 @@ func (p *pathList) Set(v string) error {
 func runCommit(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("commit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "commit")
 	var paths pathList
 	fs.Var(&paths, "path", "a repo-relative path to commit (repeatable); paths may also be given after --")
 	msg := fs.String("m", "", "commit message (mutually exclusive with -F)")
@@ -218,6 +219,7 @@ type commitDrainResult struct {
 func runCommitSubmit(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("commit submit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "commit")
 	var paths pathList
 	fs.Var(&paths, "path", "a repo-relative path for the future commit (repeatable); paths may also be given after --")
 	msg := fs.String("m", "", "commit subject for the intent (mutually exclusive with -F)")
@@ -300,6 +302,7 @@ func runCommitSubmit(stdout, stderr io.Writer, argv []string) int {
 func runCommitDrain(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("commit drain", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "commit")
 	dir := fs.String("dir", "", "repo directory (default: discover from cwd)")
 	queueDir := fs.String("queue-dir", "", "commit-intent queue dir (default: <repo>/.fak/commit-intents)")
 	base := fs.String("base", "", "current base SHA (default: git rev-parse HEAD)")

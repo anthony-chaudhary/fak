@@ -127,11 +127,12 @@ func marketingPostSpec(art marketing.Artifact, channel, token string, dryRun boo
 
 // runMarketingAEO handles `fak marketing aeo --refresh`: regenerate the AEO/AgentEO recency
 // surface from the witnessed ships — docs/marketing/updates.json (a schema.org ItemList answer
-// engines ingest) and llms-updates.txt (the plain feed agents poll). With --inject it then
-// runs tools/gen_structured_data.py to fence a bounded "What's new" block into llms.txt + keep
-// the FAQ/SoftwareApplication JSON-LD in sync (Go produces the data; Python owns the in-place
-// doc injection, so hand-written prose is never clobbered). With --score it runs the SEO/AEO
-// and agent-readiness scorecards as a freshness REPORT (not a hard gate in v1).
+// engines ingest), docs/marketing/disambiguation-terms.json (a schema.org DefinedTermSet), and
+// the plain llms-updates.txt / llms-terms.txt feeds agents poll. With --inject it then runs
+// tools/gen_structured_data.py to fence a bounded "What's new" block into llms.txt + keep the
+// FAQ/SoftwareApplication JSON-LD in sync (Go produces the data; Python owns the in-place doc
+// injection, so hand-written prose is never clobbered). With --score it runs the SEO/AEO and
+// agent-readiness scorecards as a freshness REPORT (not a hard gate in v1).
 func runMarketingAEO(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak marketing aeo", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -157,15 +158,25 @@ func runMarketingAEO(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak marketing aeo: render feed: %v\n", err)
 		return 1
 	}
+	termsFeed, err := marketing.DisambiguationTermsFeed(now)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak marketing aeo: render terms feed: %v\n", err)
+		return 1
+	}
 	updatesTxt := marketing.LlmsUpdatesText(col.Ships, now)
+	termsTxt := marketing.LlmsTermsText(now)
 
 	feedPath := filepath.Join(*root, "docs", "marketing", "updates.json")
+	termsPath := filepath.Join(*root, "docs", "marketing", "disambiguation-terms.json")
 	txtPath := filepath.Join(*root, "llms-updates.txt")
+	termsTxtPath := filepath.Join(*root, "llms-terms.txt")
 
 	if *dryRun || !*refresh {
-		fmt.Fprintf(stdout, "would write %s (%d witnessed ships) and %s\n", feedPath, len(col.Ships), txtPath)
+		fmt.Fprintf(stdout, "would write %s (%d witnessed ships), %s (%d terms), %s, and %s\n",
+			feedPath, len(col.Ships), termsPath, len(marketing.AEODisambiguationTerms()), txtPath, termsTxtPath)
 		if *dryRun {
 			fmt.Fprintln(stdout, string(feed))
+			fmt.Fprintln(stdout, string(termsFeed))
 			return 0
 		}
 	}
@@ -178,11 +189,20 @@ func runMarketingAEO(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak marketing aeo: write feed: %v\n", err)
 			return 1
 		}
+		if err := os.WriteFile(termsPath, append(termsFeed, '\n'), 0o644); err != nil {
+			fmt.Fprintf(stderr, "fak marketing aeo: write terms feed: %v\n", err)
+			return 1
+		}
 		if err := os.WriteFile(txtPath, []byte(updatesTxt), 0o644); err != nil {
 			fmt.Fprintf(stderr, "fak marketing aeo: write llms-updates.txt: %v\n", err)
 			return 1
 		}
-		fmt.Fprintf(stdout, "wrote %s (%d witnessed ships)\nwrote %s\n", feedPath, len(col.Ships), txtPath)
+		if err := os.WriteFile(termsTxtPath, []byte(termsTxt), 0o644); err != nil {
+			fmt.Fprintf(stderr, "fak marketing aeo: write llms-terms.txt: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "wrote %s (%d witnessed ships)\nwrote %s (%d terms)\nwrote %s\nwrote %s\n",
+			feedPath, len(col.Ships), termsPath, len(marketing.AEODisambiguationTerms()), txtPath, termsTxtPath)
 	}
 
 	if *inject {

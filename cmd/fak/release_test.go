@@ -212,6 +212,12 @@ func TestReleaseUsageSurfacesCanonicalPath(t *testing.T) {
 		"staleness",
 		"readiness",
 		"stable|stable-context",
+		"auto-sizes that lock",
+		"renews it before",
+		"must use --open-pr",
+		"--allow-direct-promotion",
+		"tag/publish the merged release commit",
+		"an existing VERSION/release-note cut",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("usage missing %q:\n%s", want, text)
@@ -304,6 +310,10 @@ func TestReleaseStatusNativeJSONEnvelope(t *testing.T) {
 	if shadow["checklist"] != "docs/branch-regime-shadow-cutover.md" || shadow["decision"] == "" {
 		t.Fatalf("shadow_cutover missing checklist/decision: %#v", shadow)
 	}
+	proofCommands := releaseStatusStringSlice(shadow["proof_commands"])
+	if !containsString(proofCommands, "fak release ship --json --open-pr --source-branch dev --trunk main --base origin/dev") {
+		t.Fatalf("shadow_cutover proof commands = %#v, want open-pr release dry run", proofCommands)
+	}
 	if len(scripts) != 3 || scripts[0] != "release_context.py" || scripts[1] != "release_decide.py" || scripts[2] != "release_lock.py" {
 		t.Fatalf("helpers = %#v, want context+decide+release_lock", scripts)
 	}
@@ -347,6 +357,17 @@ func TestReleaseStatusShadowCutoverDecision(t *testing.T) {
 	if gaps := releaseStatusStringSlice(splitRolesWithOpenProofGaps["proof_gaps"]); len(gaps) > 0 && releaseStatusBool(splitRolesWithOpenProofGaps["ready"]) {
 		t.Fatalf("shadow cutover reported ready=true with proof gaps: %#v", splitRolesWithOpenProofGaps)
 	}
+	customBranches := releaseStatusShadowCutover(map[string]any{
+		"development_branch": "integration",
+		"release_branch":     "stable",
+		"release_source":     "integration",
+		"public_front_door":  "stable",
+		"promotion_blockers": []string{},
+	}, map[string]any{"ok": true}, nil)
+	customCommands := releaseStatusStringSlice(customBranches["proof_commands"])
+	if !containsString(customCommands, "fak release ship --json --open-pr --source-branch integration --trunk stable --base origin/integration") {
+		t.Fatalf("custom proof commands = %#v, want role-derived open-pr command", customCommands)
+	}
 }
 
 func TestReleaseStatusRenderIncludesBranchRegime(t *testing.T) {
@@ -383,6 +404,60 @@ func TestReleaseStatusRenderIncludesBranchRegime(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("render missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestReleaseStatusRenderIncludesBranchRegimeNextAction(t *testing.T) {
+	next := "promote dev bbb222 to main with `fak release ship --execute --open-pr --source-branch dev --trunk main --base origin/dev`"
+	status := map[string]any{
+		"rolling": map[string]any{
+			"last_tag":          "v1.2.3",
+			"commits_since_tag": 9,
+			"decision":          map[string]any{"decision": "hold", "reason": "waiting"},
+		},
+		"stable":      map[string]any{"latest_stable": nil},
+		"next_action": map[string]any{"kind": "wait", "detail": "nothing release-worthy pending"},
+		"branch_regime": map[string]any{
+			"development_branch": "dev",
+			"release_branch":     "main",
+			"development_ahead":  float64(3),
+			"release_ahead":      float64(0),
+			"drift":              "development_ahead",
+			"promotion_blocked":  false,
+			"promotion_blockers": []string{},
+			"next_action":        next,
+		},
+		"shadow_cutover": map[string]any{
+			"decision":   "hold",
+			"blockers":   []string{},
+			"proof_gaps": []string{"PILOT_COHORT_WITNESS"},
+		},
+	}
+	out := renderReleaseStatus(status)
+	if !strings.Contains(out, "branch regime: dev is 3 commit(s) ahead of main; next: "+next) {
+		t.Fatalf("render missing branch-regime next action:\n%s", out)
+	}
+}
+
+func TestReleaseStatusNextActionUsesBranchRegimePromotion(t *testing.T) {
+	next := "promote dev bbb222 to main with `fak release ship --execute --open-pr --source-branch dev --trunk main --base origin/dev`"
+	action := releaseStatusNextAction(
+		map[string]any{"decision": "release", "next_version": "0.40.0"},
+		map[string]any{},
+		map[string]any{"clean": false, "modified_count": 8, "untracked_count": 3},
+		map[string]any{},
+		map[string]any{
+			"drift":             "development_ahead",
+			"promotion_blocked": false,
+			"next_action":       next,
+		},
+	)
+	if action["kind"] != "promote_release_branch" || action["detail"] != next {
+		t.Fatalf("action = %#v, want branch-regime promotion", action)
+	}
+	loop := releaseStatusLoopStatusFields(action)
+	if loop["ok"] != false || loop["verdict"] != "ACTION" {
+		t.Fatalf("loop = %#v, want ACTION", loop)
 	}
 }
 

@@ -58,6 +58,7 @@ func runRecover(stdout, stderr io.Writer, argv []string) int {
 	}
 	fs := flag.NewFlagSet("recover", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "recover")
 	execute := fs.Bool("execute", false, "run the safe recovery commands (default: dry-run)")
 	dryRun := fs.Bool("dry-run", false, "print the recovery commands without running them (default)")
 	asJSON := fs.Bool("json", false, "emit JSON")

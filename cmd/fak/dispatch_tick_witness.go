@@ -88,6 +88,13 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 				Witness: witness,
 			}
 		}
+		// Layer 5b: scrape the model the slot was pinned to from its .model sidecar (absent
+		// for a floor/seat-default worker -> Model stays ""). It feeds both the .witness
+		// record's model key and the Layer-2 downgrade decision (which next chain model to
+		// re-dispatch on after a model-switchable wall).
+		if b, err := os.ReadFile(stem + dispatchtick.ModelSidecarSuffix); err == nil {
+			rec.Model = strings.TrimSpace(string(b))
+		}
 		records = append(records, rec)
 		row := rec.Map()
 		audited = append(audited, row)

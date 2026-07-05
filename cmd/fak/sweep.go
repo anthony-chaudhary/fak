@@ -39,6 +39,7 @@ func cmdSweep(argv []string) { os.Exit(runSweep(os.Stdout, os.Stderr, argv)) }
 func runSweep(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("sweep", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "sweep")
 	dir := fs.String("dir", "", "repo directory (default: discover from cwd)")
 	asJSON := fs.Bool("json", false, "emit the plan as JSON")
 	apply := fs.Bool("apply", false, "commit one lane group (requires --lane and -m); default is plan-only")

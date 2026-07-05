@@ -20,64 +20,86 @@ type releaseShipCommandRunner func(cwd, name string, args []string, env []string
 var releaseShipRunCommand releaseShipCommandRunner = runReleaseShipCommand
 var releaseShipMkdirTemp = os.MkdirTemp
 
+const (
+	releaseShipWorktreeAddCommandTimeout = 5 * time.Minute
+	releaseShipCutCommandTimeout         = 30 * time.Minute
+	releaseShipCommitResolveTimeout      = time.Minute
+	releaseShipPRPlanCommandTimeout      = 2 * time.Minute
+	releaseShipRemoteProbeCommandTimeout = 2 * time.Minute
+	releaseShipGHPRCommandTimeout        = 2 * time.Minute
+	releaseShipMergeBaseCommandTimeout   = time.Minute
+	releaseShipGitPushCommandTimeout     = 10 * time.Minute
+	releaseShipCIPollCommandTimeout      = time.Minute
+	releaseShipTagCommandTimeout         = 45 * time.Minute
+	releaseShipPublishCommandTimeout     = 10 * time.Minute
+	releaseShipLockRenewGrace            = 5 * time.Minute
+)
+
 type releaseShipOptions struct {
-	execute         bool
-	asJSON          bool
-	base            string
-	sourceBranch    string
-	remote          string
-	trunk           string
-	workflow        string
-	version         string
-	limitCommits    int
-	ttl             int
-	fetch           bool
-	force           bool
-	requireCI       bool
-	waitCI          bool
-	skipCI          bool
-	skipDryRun      bool
-	ciAppearTimeout time.Duration
-	keepWorktree    bool
-	worktreeDir     string
-	openPR          bool
-	prTitle         string
-	promotionBranch string
+	execute              bool
+	asJSON               bool
+	base                 string
+	sourceBranch         string
+	remote               string
+	trunk                string
+	workflow             string
+	version              string
+	limitCommits         int
+	ttl                  int
+	fetch                bool
+	force                bool
+	requireCI            bool
+	waitCI               bool
+	skipCI               bool
+	skipDryRun           bool
+	ciAppearTimeout      time.Duration
+	keepWorktree         bool
+	worktreeDir          string
+	openPR               bool
+	prTitle              string
+	promotionBranch      string
+	allowDirectPromotion bool
 }
 
 type releaseShipResult struct {
-	OK                 bool                 `json:"ok"`
-	DryRun             bool                 `json:"dry_run"`
-	Root               string               `json:"root"`
-	Base               string               `json:"base"`
-	BaseSHA            string               `json:"base_sha,omitempty"`
-	SourceBranch       string               `json:"source_branch,omitempty"`
-	SourceSHA          string               `json:"source_sha,omitempty"`
-	SourceCI           map[string]any       `json:"source_ci,omitempty"`
-	TargetBranch       string               `json:"target_branch,omitempty"`
-	TargetSHA          string               `json:"target_sha,omitempty"`
-	TargetAncestry     map[string]any       `json:"target_ancestry,omitempty"`
-	Worktree           string               `json:"worktree,omitempty"`
-	LockRoot           string               `json:"lock_root,omitempty"`
-	ReleaseOwner       string               `json:"release_owner,omitempty"`
-	Version            string               `json:"version,omitempty"`
-	Tag                string               `json:"tag,omitempty"`
-	CommitSHA          string               `json:"commit_sha,omitempty"`
-	Remote             string               `json:"remote,omitempty"`
-	Trunk              string               `json:"trunk,omitempty"`
-	PromotionBranch    string               `json:"promotion_branch,omitempty"`
-	Cut                map[string]any       `json:"cut,omitempty"`
-	TagResult          map[string]any       `json:"tag_result,omitempty"`
-	Publish            map[string]any       `json:"publish,omitempty"`
-	ReleaseLock        map[string]any       `json:"release_lock,omitempty"`
-	ReleaseLockRelease map[string]any       `json:"release_lock_release,omitempty"`
-	RemoteBranch       map[string]string    `json:"remote_branch,omitempty"`
-	Cleanup            map[string]any       `json:"cleanup,omitempty"`
-	PullRequest        map[string]any       `json:"pull_request,omitempty"`
-	Warnings           []string             `json:"warnings,omitempty"`
-	Errors             []string             `json:"errors,omitempty"`
-	CommandTail        map[string]string    `json:"command_tail,omitempty"`
-	ExecutedCommands   []releaseShipCommand `json:"executed_commands,omitempty"`
+	OK                     bool                 `json:"ok"`
+	DryRun                 bool                 `json:"dry_run"`
+	Root                   string               `json:"root"`
+	Base                   string               `json:"base"`
+	BaseSHA                string               `json:"base_sha,omitempty"`
+	SourceBranch           string               `json:"source_branch,omitempty"`
+	SourceSHA              string               `json:"source_sha,omitempty"`
+	SourceCI               map[string]any       `json:"source_ci,omitempty"`
+	TargetBranch           string               `json:"target_branch,omitempty"`
+	TargetSHA              string               `json:"target_sha,omitempty"`
+	TargetAncestry         map[string]any       `json:"target_ancestry,omitempty"`
+	TargetBranchCheck      map[string]any       `json:"target_branch_check,omitempty"`
+	TargetBranchFinalCheck map[string]any       `json:"target_branch_final_check,omitempty"`
+	Worktree               string               `json:"worktree,omitempty"`
+	LockRoot               string               `json:"lock_root,omitempty"`
+	ReleaseOwner           string               `json:"release_owner,omitempty"`
+	Version                string               `json:"version,omitempty"`
+	Tag                    string               `json:"tag,omitempty"`
+	CommitSHA              string               `json:"commit_sha,omitempty"`
+	Remote                 string               `json:"remote,omitempty"`
+	Trunk                  string               `json:"trunk,omitempty"`
+	PromotionBranch        string               `json:"promotion_branch,omitempty"`
+	Cut                    map[string]any       `json:"cut,omitempty"`
+	TagResult              map[string]any       `json:"tag_result,omitempty"`
+	Publish                map[string]any       `json:"publish,omitempty"`
+	ReleaseLock            map[string]any       `json:"release_lock,omitempty"`
+	ReleaseLockRenewals    []map[string]any     `json:"release_lock_renewals,omitempty"`
+	ReleaseLockRelease     map[string]any       `json:"release_lock_release,omitempty"`
+	RemoteBranch           map[string]string    `json:"remote_branch,omitempty"`
+	RemoteBranchPush       map[string]any       `json:"remote_branch_push,omitempty"`
+	RemoteBranchFinalCheck map[string]any       `json:"remote_branch_final_check,omitempty"`
+	Cleanup                map[string]any       `json:"cleanup,omitempty"`
+	PromotionBranchPush    map[string]any       `json:"promotion_branch_push,omitempty"`
+	PullRequest            map[string]any       `json:"pull_request,omitempty"`
+	Warnings               []string             `json:"warnings,omitempty"`
+	Errors                 []string             `json:"errors,omitempty"`
+	CommandTail            map[string]string    `json:"command_tail,omitempty"`
+	ExecutedCommands       []releaseShipCommand `json:"executed_commands,omitempty"`
 }
 
 type releaseShipCommand struct {
@@ -125,7 +147,7 @@ func parseReleaseShipOptions(stderr io.Writer, argv []string) (releaseShipOption
 	fs.StringVar(&opts.workflow, "workflow", opts.workflow, "GitHub Actions workflow checked before tagging")
 	fs.StringVar(&opts.version, "version", "", "target X.Y.Z; default from release_decide")
 	fs.IntVar(&opts.limitCommits, "limit-commits", opts.limitCommits, "commit window passed to release helpers")
-	fs.IntVar(&opts.ttl, "ttl", opts.ttl, "release lock TTL in seconds")
+	fs.IntVar(&opts.ttl, "ttl", opts.ttl, "minimum release lock TTL in seconds; long release phases extend it to their command budget")
 	fs.BoolVar(&opts.fetch, "fetch", opts.fetch, "fetch remote source/target branches before creating the detached worktree")
 	fs.BoolVar(&opts.force, "force", false, "pass --force to release_cut (only bypasses the substantive floor)")
 	fs.BoolVar(&opts.requireCI, "require-ci", opts.requireCI, "require green CI before tagging")
@@ -138,10 +160,11 @@ func parseReleaseShipOptions(stderr io.Writer, argv []string) (releaseShipOption
 	fs.BoolVar(&opts.openPR, "open-pr", false, "open a source->trunk promotion PR via `gh pr create` with a prplan-folded body, instead of pushing straight to trunk; requires distinct --source-branch/--trunk")
 	fs.StringVar(&opts.prTitle, "pr-title", "", "override the generated --open-pr title")
 	fs.StringVar(&opts.promotionBranch, "promotion-branch", "", "branch to push the exact release-cut commit to before opening --open-pr; default fak/release/<tag>")
+	fs.BoolVar(&opts.allowDirectPromotion, "allow-direct-promotion", false, "allow --execute to push a distinct --source-branch directly to --trunk; default requires --open-pr for hot-tree safety")
 	if err := fs.Parse(argv); err != nil {
 		return opts, err
 	}
-	opts.promotionBranch = strings.TrimSpace(opts.promotionBranch)
+	opts.promotionBranch = strings.TrimPrefix(strings.TrimSpace(opts.promotionBranch), "refs/heads/")
 	if strings.TrimSpace(*base) != "" {
 		opts.base = strings.TrimSpace(*base)
 	} else {
@@ -162,8 +185,22 @@ func parseReleaseShipOptions(stderr io.Writer, argv []string) (releaseShipOption
 	if opts.openPR && opts.sourceBranch == opts.trunk {
 		return opts, fmt.Errorf("--open-pr requires distinct --source-branch and --trunk (today's branch-role regime has both = %q; see docs/branch-regime-shadow-cutover.md)", opts.trunk)
 	}
+	if opts.openPR && opts.allowDirectPromotion {
+		return opts, fmt.Errorf("--allow-direct-promotion is incompatible with --open-pr")
+	}
+	if releaseShipDirectPromotionRequiresOpenPR(opts) {
+		return opts, fmt.Errorf("--execute with distinct --source-branch %q and --trunk %q must use --open-pr; pass --allow-direct-promotion only for an operator-approved direct hot-tree promotion", opts.sourceBranch, opts.trunk)
+	}
 	if opts.openPR && opts.promotionBranch == opts.trunk {
 		return opts, fmt.Errorf("--promotion-branch must not equal --trunk %q", opts.trunk)
+	}
+	if opts.openPR && opts.promotionBranch != "" && opts.promotionBranch == opts.sourceBranch {
+		return opts, fmt.Errorf("--promotion-branch must not equal live --source-branch %q", opts.sourceBranch)
+	}
+	if opts.openPR && opts.promotionBranch != "" {
+		if reason := releaseShipInvalidPromotionBranchReason(opts.promotionBranch); reason != "" {
+			return opts, fmt.Errorf("invalid --promotion-branch %q: %s", opts.promotionBranch, reason)
+		}
 	}
 	return opts, nil
 }
@@ -217,6 +254,10 @@ func executeReleaseShip(opts releaseShipOptions) (result releaseShipResult) {
 		CommandTail:  map[string]string{},
 		RemoteBranch: map[string]string{},
 	}
+	if releaseShipDirectPromotionRequiresOpenPR(opts) {
+		result.fail("direct_promotion_requires_open_pr", fmt.Sprintf("--execute with distinct --source-branch %q and --trunk %q must use --open-pr or --allow-direct-promotion", opts.sourceBranch, opts.trunk))
+		return finishReleaseShip(result)
+	}
 	owner := releaseShipOwner()
 	result.ReleaseOwner = owner
 	env := releaseShipEnv(root, owner)
@@ -229,16 +270,6 @@ func executeReleaseShip(opts releaseShipOptions) (result releaseShipResult) {
 			}
 		}
 	}()
-
-	if opts.execute {
-		lock := runReleaseShipLockAcquire(&result, root, env, opts)
-		result.ReleaseLock = lock
-		if ok, _ := lock["ok"].(bool); !ok {
-			result.fail("release_lock_refused", jsonTail(lock))
-			return finishReleaseShip(result)
-		}
-		lockAcquired = true
-	}
 
 	if opts.fetch {
 		for _, branch := range releaseShipFetchBranches(opts) {
@@ -272,6 +303,16 @@ func executeReleaseShip(opts releaseShipOptions) (result releaseShipResult) {
 		}
 	}
 
+	if opts.execute {
+		lock := runReleaseShipLockAcquire(&result, root, env, opts)
+		result.ReleaseLock = lock
+		if ok, _ := lock["ok"].(bool); !ok {
+			result.fail("release_lock_refused", jsonTail(lock))
+			return finishReleaseShip(result)
+		}
+		lockAcquired = true
+	}
+
 	wt, err := releaseShipWorktreeDir(root, opts)
 	if err != nil {
 		result.fail("worktree_dir_failed", err.Error())
@@ -280,7 +321,7 @@ func executeReleaseShip(opts releaseShipOptions) (result releaseShipResult) {
 	result.Worktree = wt
 	worktreeAdded := false
 
-	code, out = releaseShipCmd(&result, root, "git", []string{"worktree", "add", "--detach", wt, opts.base}, nil, 5*time.Minute)
+	code, out = releaseShipCmd(&result, root, "git", []string{"worktree", "add", "--detach", wt, result.BaseSHA}, nil, releaseShipWorktreeAddCommandTimeout)
 	if code != 0 {
 		if opts.worktreeDir == "" {
 			_ = os.Remove(wt)
@@ -293,8 +334,13 @@ func executeReleaseShip(opts releaseShipOptions) (result releaseShipResult) {
 	cut := runReleaseShipCut(&result, wt, releaseShipPromotionEnv(env, result), opts)
 	result.Cut = cut
 	if ok, _ := cut["ok"].(bool); !ok {
-		result.fail("release_cut_refused", jsonTail(cut))
-		return finishReleaseShipWithCleanup(&result, root, opts, worktreeAdded)
+		if existing := recoverReleaseShipExistingCut(&result, wt, opts, cut); existing != nil {
+			cut = existing
+			result.Cut = cut
+		} else {
+			result.fail("release_cut_refused", jsonTail(cut))
+			return finishReleaseShipWithCleanup(&result, root, opts, worktreeAdded)
+		}
 	}
 	result.Version = stringFromAny(cut["version"])
 	result.Tag = stringFromAny(cut["tag"])
@@ -310,7 +356,7 @@ func executeReleaseShip(opts releaseShipOptions) (result releaseShipResult) {
 		return finishReleaseShipWithCleanup(&result, root, opts, worktreeAdded)
 	}
 	if result.CommitSHA == "" {
-		code, out = releaseShipCmd(&result, wt, "git", []string{"rev-parse", "HEAD"}, nil, time.Minute)
+		code, out = releaseShipCmd(&result, wt, "git", []string{"rev-parse", "HEAD"}, nil, releaseShipCommitResolveTimeout)
 		if code != 0 {
 			result.fail("release_commit_unresolvable", out)
 			return finishReleaseShipWithCleanup(&result, root, opts, worktreeAdded)
@@ -332,8 +378,10 @@ func executeReleaseShip(opts releaseShipOptions) (result releaseShipResult) {
 		return finishReleaseShipWithCleanup(&result, root, opts, worktreeAdded)
 	}
 
-	if code, out = releaseShipCmd(&result, wt, "git", []string{"push", opts.remote, "HEAD:refs/heads/" + opts.trunk}, nil, 10*time.Minute); code != 0 {
-		result.fail("push_trunk_failed", out)
+	push := releaseShipPushTrunk(&result, wt, opts)
+	result.RemoteBranchPush = push
+	if !releaseStatusBool(push["ok"]) {
+		result.fail("push_trunk_failed", jsonTail(push))
 		return finishReleaseShipWithCleanup(&result, root, opts, worktreeAdded)
 	}
 	remoteSHA := verifyReleaseShipRemote(&result, wt, opts, result.CommitSHA)
@@ -343,11 +391,23 @@ func executeReleaseShip(opts releaseShipOptions) (result releaseShipResult) {
 	if opts.requireCI && !opts.skipCI && opts.ciAppearTimeout > 0 {
 		waitReleaseShipCIAppears(&result, wt, opts, result.CommitSHA)
 	}
+	finalRemote := releaseShipRemoteBranchCheck(&result, wt, opts, result.CommitSHA, "remote_branch_changed_before_tag")
+	result.RemoteBranchFinalCheck = finalRemote
+	if !releaseStatusBool(finalRemote["ok"]) {
+		result.fail("remote_branch_changed_before_tag", jsonTail(finalRemote))
+		return finishReleaseShipWithCleanup(&result, root, opts, worktreeAdded)
+	}
+	if !renewReleaseShipLockForPhase(&result, root, env, opts, "before_tag", releaseShipTagCommandTimeout) {
+		return finishReleaseShipWithCleanup(&result, root, opts, worktreeAdded)
+	}
 
 	tag := runReleaseShipTag(&result, wt, env, opts)
 	result.TagResult = tag
 	if ok, _ := tag["ok"].(bool); !ok {
 		result.fail("release_tag_refused", jsonTail(tag))
+		return finishReleaseShipWithCleanup(&result, root, opts, worktreeAdded)
+	}
+	if !renewReleaseShipLockForPhase(&result, root, env, opts, "before_publish", releaseShipPublishCommandTimeout) {
 		return finishReleaseShipWithCleanup(&result, root, opts, worktreeAdded)
 	}
 	publish := runReleaseShipPublish(&result, wt, env, result.Version)
@@ -379,7 +439,111 @@ func runReleaseShipCut(result *releaseShipResult, wt string, env []string, opts 
 	if opts.skipDryRun {
 		args = append(args, "--skip-dry-run")
 	}
-	return releaseShipJSONCommand(result, wt, releaseShipPython(), args, env, 30*time.Minute, "cut")
+	return releaseShipJSONCommand(result, wt, releaseShipPython(), args, env, releaseShipCutCommandTimeout, "cut")
+}
+
+func recoverReleaseShipExistingCut(result *releaseShipResult, wt string, opts releaseShipOptions, cut map[string]any) map[string]any {
+	if !releaseShipExistingCutRecoveryAllowed(opts, cut) {
+		return nil
+	}
+	code, out := releaseShipCmd(result, wt, "git", []string{"show", "HEAD:VERSION"}, nil, time.Minute)
+	if code != 0 {
+		return nil
+	}
+	version := strings.TrimSpace(out)
+	versionTuple, ok := releaseStatusSemverTuple(version)
+	if !ok {
+		return nil
+	}
+	if opts.version != "" && strings.TrimPrefix(strings.TrimSpace(opts.version), "v") != version {
+		return nil
+	}
+	tag := "v" + version
+	note := "docs/releases/" + tag + ".md"
+	code, out = releaseShipCmd(result, wt, "git", []string{"cat-file", "-e", "HEAD:" + note}, nil, time.Minute)
+	if code != 0 {
+		return nil
+	}
+	code, tagOut := releaseShipCmd(result, wt, "git", []string{"rev-list", "-n1", tag}, nil, time.Minute)
+	if code == 0 {
+		tagSHA := strings.TrimSpace(tagOut)
+		if !sameSHA(tagSHA, result.BaseSHA) {
+			return nil
+		}
+		return map[string]any{
+			"ok":           true,
+			"existing_cut": true,
+			"reason":       "release_tag_already_points_at_head",
+			"version":      version,
+			"tag":          tag,
+			"commit_sha":   result.BaseSHA,
+			"notes_file":   note,
+			"tag_sha":      tagSHA,
+			"recovered_from": map[string]any{
+				"aborted": stringFromAny(cut["aborted"]),
+				"detail":  stringFromAny(cut["detail"]),
+			},
+		}
+	}
+	code, tagsOut := releaseShipCmd(result, wt, "git", []string{"tag", "--sort=-v:refname"}, nil, time.Minute)
+	if code != 0 {
+		return nil
+	}
+	latest := ""
+	for _, line := range strings.Split(tagsOut, "\n") {
+		candidate := strings.TrimSpace(line)
+		if _, ok := releaseStatusSemverTuple(candidate); ok {
+			latest = candidate
+			break
+		}
+	}
+	if latest == "" {
+		return map[string]any{
+			"ok":           true,
+			"existing_cut": true,
+			"reason":       "version_ahead_of_latest_tag",
+			"version":      version,
+			"tag":          tag,
+			"commit_sha":   result.BaseSHA,
+			"notes_file":   note,
+			"latest_tag":   "",
+			"recovered_from": map[string]any{
+				"aborted": stringFromAny(cut["aborted"]),
+				"detail":  stringFromAny(cut["detail"]),
+			},
+		}
+	}
+	latestTuple, ok := releaseStatusSemverTuple(latest)
+	if !ok || !releaseStatusSemverGreater(versionTuple, latestTuple) {
+		return nil
+	}
+	return map[string]any{
+		"ok":           true,
+		"existing_cut": true,
+		"reason":       "version_ahead_of_latest_tag",
+		"version":      version,
+		"tag":          tag,
+		"commit_sha":   result.BaseSHA,
+		"notes_file":   note,
+		"latest_tag":   latest,
+		"recovered_from": map[string]any{
+			"aborted": stringFromAny(cut["aborted"]),
+			"detail":  stringFromAny(cut["detail"]),
+		},
+	}
+}
+
+func releaseShipExistingCutRecoveryAllowed(opts releaseShipOptions, cut map[string]any) bool {
+	if !opts.execute || opts.openPR || strings.TrimSpace(opts.sourceBranch) == "" || opts.sourceBranch != opts.trunk {
+		return false
+	}
+	if stringFromAny(cut["aborted"]) != "git commit failed" {
+		return false
+	}
+	detail := strings.ToLower(stringFromAny(cut["detail"]))
+	return strings.Contains(detail, "nothing to commit") ||
+		strings.Contains(detail, "working tree clean") ||
+		strings.Contains(detail, "no changes added to commit")
 }
 
 func runReleaseShipTag(result *releaseShipResult, wt string, env []string, opts releaseShipOptions) map[string]any {
@@ -409,12 +573,12 @@ func runReleaseShipTag(result *releaseShipResult, wt string, env []string, opts 
 	if opts.execute {
 		args = append(args, "--lock-already-held")
 	}
-	return releaseShipJSONCommand(result, wt, releaseShipPython(), args, env, 45*time.Minute, "tag")
+	return releaseShipJSONCommand(result, wt, releaseShipPython(), args, env, releaseShipTagCommandTimeout, "tag")
 }
 
 func runReleaseShipPublish(result *releaseShipResult, wt string, env []string, version string) map[string]any {
 	args := []string{releaseShipScript(wt, "release_publish.py"), "--version", version, "--execute", "--json"}
-	return releaseShipJSONCommand(result, wt, releaseShipPython(), args, env, 10*time.Minute, "publish")
+	return releaseShipJSONCommand(result, wt, releaseShipPython(), args, env, releaseShipPublishCommandTimeout, "publish")
 }
 
 // buildReleaseShipPRPreview folds the promotion range (old trunk tip ..
@@ -433,7 +597,7 @@ func buildReleaseShipPRPreview(result *releaseShipResult, wt string, opts releas
 	}
 	code, out := releaseShipCmd(result, wt, "git", []string{
 		"log", "--no-merges", "--name-only", "--format=%x1e%H%x1f%s%x1f%b%x1f", baseSHA + ".." + headSHA,
-	}, nil, 2*time.Minute)
+	}, nil, releaseShipPRPlanCommandTimeout)
 	if code != 0 {
 		return map[string]any{"ok": false, "reason": "promotion_log_failed", "tail": tail(out)}
 	}
@@ -473,9 +637,9 @@ func buildReleaseShipPRPreview(result *releaseShipResult, wt string, opts releas
 	}
 }
 
-// runReleaseShipOpenPRExecute pushes the cut commit onto the source branch
-// (through a release-owned promotion branch, so the live source can keep
-// moving after the cut) and opens the source->trunk PR via `gh pr create`
+// runReleaseShipOpenPRExecute pushes the cut commit onto a release-owned
+// promotion branch (so the live source can keep moving after the cut) and
+// opens the promotion-branch->trunk PR via `gh pr create`
 // with the prplan-folded preview body -- the "PRs managed in advance" a human
 // operator reviews and merges through the native GitHub UI. Tag/publish are
 // deliberately not run here: they belong to a later `fak release ship` run
@@ -487,13 +651,29 @@ func runReleaseShipOpenPRExecute(result *releaseShipResult, wt string, env []str
 	if checkOK, _ := preview["check_ok"].(bool); !checkOK {
 		return map[string]any{"ok": false, "reason": "unstamped_commits_in_range", "preview": preview}
 	}
+	target := releaseShipRemoteTargetCheck(result, wt, opts)
+	result.TargetBranchCheck = target
+	if !releaseStatusBool(target["ok"]) {
+		return target
+	}
 	headBranch := result.PromotionBranch
 	if headBranch == "" {
 		headBranch = releaseShipPromotionBranch(opts, *result)
 		result.PromotionBranch = headBranch
 	}
-	if pushed := releaseShipPushPromotionBranch(result, wt, env, opts, headBranch); !releaseStatusBool(pushed["ok"]) {
+	pushed := releaseShipPushPromotionBranch(result, wt, env, opts, headBranch)
+	result.PromotionBranchPush = pushed
+	if !releaseStatusBool(pushed["ok"]) {
 		return pushed
+	}
+	finalTarget := releaseShipRemoteTargetCheck(result, wt, opts)
+	result.TargetBranchFinalCheck = finalTarget
+	if !releaseStatusBool(finalTarget["ok"]) {
+		if reason := stringFromAny(finalTarget["reason"]); reason != "" {
+			finalTarget["base_reason"] = reason
+		}
+		finalTarget["reason"] = "target_branch_changed_after_promotion_push"
+		return finalTarget
 	}
 	body, _ := preview["body"].(string)
 	bodyFile, err := os.CreateTemp("", "fak-release-pr-*.md")
@@ -518,43 +698,47 @@ func runReleaseShipOpenPRExecute(result *releaseShipResult, wt string, env []str
 			return map[string]any{"ok": false, "reason": "existing_pr_missing_identifier", "existing": existing}
 		}
 		args := []string{"pr", "edit", target, "--title", title, "--body-file", bodyFile.Name()}
-		code, out := releaseShipCmd(result, wt, "gh", args, env, 2*time.Minute)
+		code, out := releaseShipCmd(result, wt, "gh", args, env, releaseShipGHPRCommandTimeout)
 		if code != 0 {
 			return map[string]any{"ok": false, "reason": "gh_pr_edit_failed", "existing": existing, "tail": tail(out)}
 		}
 		return map[string]any{
-			"ok":            true,
-			"existing":      true,
-			"updated":       true,
-			"url":           stringFromAny(existing["url"]),
-			"number":        existing["number"],
-			"base":          opts.trunk,
-			"head":          headBranch,
-			"source_branch": opts.sourceBranch,
-			"source_sha":    result.SourceSHA,
-			"title":         title,
-			"commit_count":  preview["commit_count"],
-			"unit_count":    preview["unit_count"],
+			"ok":             true,
+			"existing":       true,
+			"updated":        true,
+			"url":            stringFromAny(existing["url"]),
+			"number":         existing["number"],
+			"base":           opts.trunk,
+			"head":           headBranch,
+			"source_branch":  opts.sourceBranch,
+			"source_sha":     result.SourceSHA,
+			"title":          title,
+			"commit_count":   preview["commit_count"],
+			"unit_count":     preview["unit_count"],
+			"target_check":   finalTarget,
+			"promotion_push": pushed,
 		}
 	}
 
 	args := []string{"pr", "create", "--base", opts.trunk, "--head", headBranch, "--title", title, "--body-file", bodyFile.Name()}
-	code, out := releaseShipCmd(result, wt, "gh", args, env, 2*time.Minute)
+	code, out := releaseShipCmd(result, wt, "gh", args, env, releaseShipGHPRCommandTimeout)
 	if code != 0 {
 		return map[string]any{"ok": false, "reason": "gh_pr_create_failed", "tail": tail(out)}
 	}
 	return map[string]any{
-		"ok":            true,
-		"created":       true,
-		"existing":      false,
-		"url":           releaseShipLastNonEmptyLine(out),
-		"base":          opts.trunk,
-		"head":          headBranch,
-		"source_branch": opts.sourceBranch,
-		"source_sha":    result.SourceSHA,
-		"title":         title,
-		"commit_count":  preview["commit_count"],
-		"unit_count":    preview["unit_count"],
+		"ok":             true,
+		"created":        true,
+		"existing":       false,
+		"url":            releaseShipLastNonEmptyLine(out),
+		"base":           opts.trunk,
+		"head":           headBranch,
+		"source_branch":  opts.sourceBranch,
+		"source_sha":     result.SourceSHA,
+		"title":          title,
+		"commit_count":   preview["commit_count"],
+		"unit_count":     preview["unit_count"],
+		"target_check":   finalTarget,
+		"promotion_push": pushed,
 	}
 }
 
@@ -570,6 +754,52 @@ func releaseShipPromotionBranch(opts releaseShipOptions, result releaseShipResul
 		name = releaseStatusShortSHA(result.CommitSHA)
 	}
 	return "fak/release/" + releaseShipRefComponent(name)
+}
+
+func releaseShipInvalidPromotionBranchReason(branch string) string {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return "empty branch name"
+	}
+	if branch == "@" {
+		return "single @ is not a valid branch name"
+	}
+	if strings.HasPrefix(branch, "/") || strings.HasSuffix(branch, "/") {
+		return "must not start or end with slash"
+	}
+	if strings.Contains(branch, "//") {
+		return "must not contain empty path components"
+	}
+	if strings.Contains(branch, "..") {
+		return "must not contain consecutive dots"
+	}
+	if strings.Contains(branch, "@{") {
+		return "must not contain @{"
+	}
+	if strings.HasSuffix(branch, ".") {
+		return "must not end with dot"
+	}
+	for _, r := range branch {
+		if r <= ' ' || r == 0x7f {
+			return "must not contain whitespace or control characters"
+		}
+		switch r {
+		case '~', '^', ':', '?', '*', '[', '\\':
+			return fmt.Sprintf("must not contain %q", r)
+		}
+	}
+	for _, component := range strings.Split(branch, "/") {
+		if component == "" {
+			return "must not contain empty path components"
+		}
+		if strings.HasPrefix(component, ".") {
+			return "path component must not start with dot"
+		}
+		if strings.HasSuffix(strings.ToLower(component), ".lock") {
+			return "path component must not end with .lock"
+		}
+	}
+	return ""
 }
 
 func releaseShipRefComponent(s string) string {
@@ -589,15 +819,103 @@ func releaseShipRefComponent(s string) string {
 		}
 	}
 	out := strings.Trim(b.String(), ".-")
+	for strings.Contains(out, "..") {
+		out = strings.ReplaceAll(out, "..", ".-")
+	}
+	out = strings.Trim(out, ".-")
+	for strings.HasSuffix(strings.ToLower(out), ".lock") {
+		out = out[:len(out)-len(".lock")]
+		out = strings.Trim(out, ".-")
+	}
 	if out == "" {
 		return "untagged"
 	}
 	return out
 }
 
+func releaseShipRemoteTargetCheck(result *releaseShipResult, wt string, opts releaseShipOptions) map[string]any {
+	ref := "refs/heads/" + opts.trunk
+	expected := strings.TrimSpace(result.TargetSHA)
+	if expected == "" {
+		return map[string]any{"ok": false, "reason": "target_sha_missing", "remote": opts.remote, "branch": opts.trunk, "ref": ref}
+	}
+	code, out := releaseShipCmd(result, wt, "git", []string{"ls-remote", opts.remote, ref}, nil, releaseShipRemoteProbeCommandTimeout)
+	if code != 0 {
+		return map[string]any{"ok": false, "reason": "target_branch_probe_failed", "remote": opts.remote, "branch": opts.trunk, "ref": ref, "expected_sha": expected, "tail": tail(out)}
+	}
+	fields := strings.Fields(out)
+	if len(fields) == 0 {
+		return map[string]any{"ok": false, "reason": "target_branch_missing", "remote": opts.remote, "branch": opts.trunk, "ref": ref, "expected_sha": expected}
+	}
+	got := fields[0]
+	payload := map[string]any{
+		"ok":           sameSHA(got, expected),
+		"remote":       opts.remote,
+		"branch":       opts.trunk,
+		"ref":          ref,
+		"sha":          got,
+		"expected_sha": expected,
+	}
+	if !releaseStatusBool(payload["ok"]) {
+		payload["reason"] = "target_branch_changed_after_preview"
+	}
+	return payload
+}
+
+func releaseShipPushTrunk(result *releaseShipResult, wt string, opts releaseShipOptions) map[string]any {
+	ref := "refs/heads/" + opts.trunk
+	expected := releaseShipTrunkLeaseExpected(*result)
+	if expected == "" {
+		return map[string]any{"ok": false, "reason": "trunk_lease_expected_sha_missing", "remote": opts.remote, "branch": opts.trunk, "ref": ref}
+	}
+	code, out := releaseShipCmd(result, wt, "git", []string{"merge-base", "--is-ancestor", expected, result.CommitSHA}, nil, releaseShipMergeBaseCommandTimeout)
+	if code != 0 {
+		return map[string]any{
+			"ok":                 false,
+			"reason":             "release_commit_not_descendant_of_trunk",
+			"remote":             opts.remote,
+			"branch":             opts.trunk,
+			"ref":                ref,
+			"lease_expected_sha": expected,
+			"release_commit_sha": result.CommitSHA,
+			"tail":               tail(out),
+		}
+	}
+	args := []string{"push", opts.remote, "--force-with-lease=" + ref + ":" + expected, "HEAD:" + ref}
+	code, out = releaseShipCmd(result, wt, "git", args, nil, releaseShipGitPushCommandTimeout)
+	if code != 0 {
+		return map[string]any{
+			"ok":                 false,
+			"reason":             "push_trunk_failed",
+			"remote":             opts.remote,
+			"branch":             opts.trunk,
+			"ref":                ref,
+			"lease_expected_sha": expected,
+			"release_commit_sha": result.CommitSHA,
+			"tail":               tail(out),
+		}
+	}
+	return map[string]any{
+		"ok":                 true,
+		"remote":             opts.remote,
+		"branch":             opts.trunk,
+		"ref":                ref,
+		"lease_expected_sha": expected,
+		"release_commit_sha": result.CommitSHA,
+		"used_force_lease":   true,
+	}
+}
+
+func releaseShipTrunkLeaseExpected(result releaseShipResult) string {
+	if sha := strings.TrimSpace(result.TargetSHA); sha != "" {
+		return sha
+	}
+	return strings.TrimSpace(result.BaseSHA)
+}
+
 func releaseShipPushPromotionBranch(result *releaseShipResult, wt string, env []string, opts releaseShipOptions, branch string) map[string]any {
 	ref := "refs/heads/" + branch
-	code, out := releaseShipCmd(result, wt, "git", []string{"ls-remote", opts.remote, ref}, env, 2*time.Minute)
+	code, out := releaseShipCmd(result, wt, "git", []string{"ls-remote", opts.remote, ref}, env, releaseShipRemoteProbeCommandTimeout)
 	if code != 0 {
 		return map[string]any{"ok": false, "reason": "promotion_branch_probe_failed", "branch": branch, "tail": tail(out)}
 	}
@@ -605,22 +923,21 @@ func releaseShipPushPromotionBranch(result *releaseShipResult, wt string, env []
 	if fields := strings.Fields(out); len(fields) > 0 {
 		existing = fields[0]
 	}
-	args := []string{"push", opts.remote}
-	if existing != "" {
-		args = append(args, "--force-with-lease="+ref+":"+existing)
-	}
+	args := []string{"push", opts.remote, "--force-with-lease=" + ref + ":" + existing}
 	args = append(args, "HEAD:"+ref)
-	code, out = releaseShipCmd(result, wt, "git", args, env, 10*time.Minute)
+	code, out = releaseShipCmd(result, wt, "git", args, env, releaseShipGitPushCommandTimeout)
 	if code != 0 {
 		return map[string]any{
-			"ok":           false,
-			"reason":       "push_promotion_branch_failed",
-			"branch":       branch,
-			"previous_sha": existing,
-			"tail":         tail(out),
+			"ok":                    false,
+			"reason":                "push_promotion_branch_failed",
+			"branch":                branch,
+			"previous_sha":          existing,
+			"lease_expected_absent": existing == "",
+			"lease_expected_sha":    existing,
+			"tail":                  tail(out),
 		}
 	}
-	code, out = releaseShipCmd(result, wt, "git", []string{"ls-remote", opts.remote, ref}, env, 2*time.Minute)
+	code, out = releaseShipCmd(result, wt, "git", []string{"ls-remote", opts.remote, ref}, env, releaseShipRemoteProbeCommandTimeout)
 	if code != 0 {
 		return map[string]any{"ok": false, "reason": "promotion_branch_verify_failed", "branch": branch, "tail": tail(out)}
 	}
@@ -633,20 +950,22 @@ func releaseShipPushPromotionBranch(result *releaseShipResult, wt string, env []
 		return map[string]any{"ok": false, "reason": "promotion_branch_mismatch", "branch": branch, "sha": got, "want": result.CommitSHA}
 	}
 	return map[string]any{
-		"ok":                 true,
-		"branch":             branch,
-		"sha":                got,
-		"previous_sha":       existing,
-		"used_force_lease":   existing != "",
-		"source_branch":      opts.sourceBranch,
-		"source_sha":         result.SourceSHA,
-		"release_commit_sha": result.CommitSHA,
+		"ok":                    true,
+		"branch":                branch,
+		"sha":                   got,
+		"previous_sha":          existing,
+		"used_force_lease":      true,
+		"lease_expected_absent": existing == "",
+		"lease_expected_sha":    existing,
+		"source_branch":         opts.sourceBranch,
+		"source_sha":            result.SourceSHA,
+		"release_commit_sha":    result.CommitSHA,
 	}
 }
 
 func releaseShipFindOpenPR(result *releaseShipResult, wt string, env []string, opts releaseShipOptions, headBranch string) map[string]any {
 	args := []string{"pr", "list", "--base", opts.trunk, "--head", headBranch, "--state", "open", "--json", "number,url,title,headRefName,baseRefName", "--limit", "1"}
-	code, out := releaseShipCmd(result, wt, "gh", args, env, 2*time.Minute)
+	code, out := releaseShipCmd(result, wt, "gh", args, env, releaseShipGHPRCommandTimeout)
 	if code != 0 {
 		return map[string]any{"ok": false, "reason": "gh_pr_list_failed", "tail": tail(out)}
 	}
@@ -698,10 +1017,56 @@ func runReleaseShipLockAcquire(result *releaseShipResult, root string, env []str
 	args := []string{
 		releaseShipScript(root, "release_lock.py"),
 		"acquire",
-		"--ttl", strconv.Itoa(opts.ttl),
+		"--ttl", strconv.Itoa(releaseShipLockTTLForBudget(opts, releaseShipInitialLockBudget(opts))),
 		"--note", "fak release ship",
 	}
 	return releaseShipJSONCommand(result, root, releaseShipPython(), args, env, time.Minute, "release_lock")
+}
+
+func renewReleaseShipLockForPhase(result *releaseShipResult, root string, env []string, opts releaseShipOptions, label string, phaseBudget time.Duration) bool {
+	renew := runReleaseShipLockRenew(result, root, env, releaseShipLockTTLForBudget(opts, phaseBudget), label)
+	if !releaseStatusBool(renew["ok"]) {
+		result.fail("release_lock_renew_failed", jsonTail(renew))
+		return false
+	}
+	return true
+}
+
+func runReleaseShipLockRenew(result *releaseShipResult, root string, env []string, ttl int, label string) map[string]any {
+	args := []string{
+		releaseShipScript(root, "release_lock.py"),
+		"renew",
+		"--ttl", strconv.Itoa(ttl),
+	}
+	payload := releaseShipJSONCommand(result, root, releaseShipPython(), args, env, time.Minute, "release_lock_renew_"+label)
+	payload["label"] = label
+	payload["requested_ttl_s"] = ttl
+	result.ReleaseLockRenewals = append(result.ReleaseLockRenewals, payload)
+	return payload
+}
+
+func releaseShipInitialLockBudget(opts releaseShipOptions) time.Duration {
+	budget := releaseShipWorktreeAddCommandTimeout + releaseShipCutCommandTimeout + releaseShipCommitResolveTimeout
+	if opts.openPR {
+		promotionPushBudget := releaseShipRemoteProbeCommandTimeout + releaseShipGitPushCommandTimeout + releaseShipRemoteProbeCommandTimeout
+		targetChecksBudget := 2 * releaseShipRemoteProbeCommandTimeout
+		prBudget := releaseShipPRPlanCommandTimeout + 2*releaseShipGHPRCommandTimeout
+		return budget + prBudget + targetChecksBudget + promotionPushBudget
+	}
+	budget += releaseShipMergeBaseCommandTimeout + releaseShipGitPushCommandTimeout
+	budget += 2 * releaseShipRemoteProbeCommandTimeout
+	if opts.requireCI && !opts.skipCI && opts.ciAppearTimeout > 0 {
+		budget += opts.ciAppearTimeout + releaseShipCIPollCommandTimeout
+	}
+	return budget
+}
+
+func releaseShipLockTTLForBudget(opts releaseShipOptions, phaseBudget time.Duration) int {
+	minTTL := int((phaseBudget + releaseShipLockRenewGrace).Seconds())
+	if opts.ttl > minTTL {
+		return opts.ttl
+	}
+	return minTTL
 }
 
 func runReleaseShipLockRelease(result *releaseShipResult, root string, env []string) map[string]any {
@@ -732,34 +1097,54 @@ func releaseShipJSONCommand(result *releaseShipResult, cwd, name string, args []
 }
 
 func verifyReleaseShipRemote(result *releaseShipResult, wt string, opts releaseShipOptions, want string) string {
-	code, out := releaseShipCmd(result, wt, "git", []string{"ls-remote", opts.remote, "refs/heads/" + opts.trunk}, nil, 2*time.Minute)
-	if code != 0 {
-		result.fail("remote_verify_failed", out)
+	check := releaseShipRemoteBranchCheck(result, wt, opts, want, "remote_branch_mismatch")
+	if !releaseStatusBool(check["ok"]) {
+		result.fail(stringFromAny(check["reason"]), jsonTail(check))
 		return ""
 	}
-	fields := strings.Fields(out)
-	if len(fields) == 0 {
-		result.fail("remote_branch_missing", out)
-		return ""
-	}
-	got := fields[0]
+	got := stringFromAny(check["sha"])
 	result.RemoteBranch = map[string]string{
 		"remote": opts.remote,
 		"trunk":  opts.trunk,
 		"sha":    got,
 	}
-	if !sameSHA(got, want) {
-		result.fail("remote_branch_mismatch", fmt.Sprintf("remote %s/%s is %s, want %s", opts.remote, opts.trunk, got, want))
-		return ""
-	}
 	return got
+}
+
+func releaseShipRemoteBranchCheck(result *releaseShipResult, wt string, opts releaseShipOptions, want string, mismatchReason string) map[string]any {
+	ref := "refs/heads/" + opts.trunk
+	want = strings.TrimSpace(want)
+	if want == "" {
+		return map[string]any{"ok": false, "reason": "remote_branch_expected_sha_missing", "remote": opts.remote, "trunk": opts.trunk, "ref": ref}
+	}
+	code, out := releaseShipCmd(result, wt, "git", []string{"ls-remote", opts.remote, ref}, nil, releaseShipRemoteProbeCommandTimeout)
+	if code != 0 {
+		return map[string]any{"ok": false, "reason": "remote_verify_failed", "remote": opts.remote, "trunk": opts.trunk, "ref": ref, "expected_sha": want, "tail": tail(out)}
+	}
+	fields := strings.Fields(out)
+	if len(fields) == 0 {
+		return map[string]any{"ok": false, "reason": "remote_branch_missing", "remote": opts.remote, "trunk": opts.trunk, "ref": ref, "expected_sha": want}
+	}
+	got := fields[0]
+	payload := map[string]any{
+		"ok":           sameSHA(got, want),
+		"remote":       opts.remote,
+		"trunk":        opts.trunk,
+		"ref":          ref,
+		"sha":          got,
+		"expected_sha": want,
+	}
+	if !releaseStatusBool(payload["ok"]) {
+		payload["reason"] = mismatchReason
+	}
+	return payload
 }
 
 func waitReleaseShipCIAppears(result *releaseShipResult, wt string, opts releaseShipOptions, sha string) {
 	deadline := time.Now().Add(opts.ciAppearTimeout)
 	args := []string{"run", "list", "--workflow", opts.workflow, "--commit", sha, "--limit", "1", "--json", "databaseId,status,conclusion,url"}
 	for {
-		code, out := releaseShipCmd(result, wt, "gh", args, nil, time.Minute)
+		code, out := releaseShipCmd(result, wt, "gh", args, nil, releaseShipCIPollCommandTimeout)
 		if code != 0 {
 			result.Warnings = append(result.Warnings, "gh run list failed while waiting for CI to appear: "+tail(out))
 			return
@@ -822,6 +1207,12 @@ func releaseShipNeedsTargetAncestry(opts releaseShipOptions) bool {
 	source := strings.TrimSpace(opts.sourceBranch)
 	target := strings.TrimSpace(opts.trunk)
 	return source != "" && target != "" && source != target
+}
+
+func releaseShipDirectPromotionRequiresOpenPR(opts releaseShipOptions) bool {
+	source := strings.TrimSpace(opts.sourceBranch)
+	target := strings.TrimSpace(opts.trunk)
+	return opts.execute && !opts.openPR && !opts.allowDirectPromotion && source != "" && target != "" && source != target
 }
 
 func releaseShipTargetAncestry(result *releaseShipResult, root string, opts releaseShipOptions, sourceSHA string) map[string]any {
@@ -1090,7 +1481,30 @@ func renderReleaseShip(stdout, stderr io.Writer, result releaseShipResult) {
 		}
 	}
 	if result.RemoteBranch != nil {
-		fmt.Fprintf(stdout, "  pushed: %s/%s %s\n", result.RemoteBranch["remote"], result.RemoteBranch["trunk"], result.RemoteBranch["sha"])
+		lease := ""
+		if result.RemoteBranchPush != nil {
+			if expected := stringFromAny(result.RemoteBranchPush["lease_expected_sha"]); expected != "" {
+				lease = " (force-with-lease: " + expected + ")"
+			}
+		}
+		fmt.Fprintf(stdout, "  pushed: %s/%s %s%s\n", result.RemoteBranch["remote"], result.RemoteBranch["trunk"], result.RemoteBranch["sha"], lease)
+	}
+	if result.PromotionBranchPush != nil {
+		branch := stringFromAny(result.PromotionBranchPush["branch"])
+		sha := stringFromAny(result.PromotionBranchPush["sha"])
+		if branch != "" && sha != "" {
+			lease := ""
+			if used, _ := result.PromotionBranchPush["used_force_lease"].(bool); used {
+				if absent, _ := result.PromotionBranchPush["lease_expected_absent"].(bool); absent {
+					lease = " (force-with-lease: absent)"
+				} else if expected := stringFromAny(result.PromotionBranchPush["lease_expected_sha"]); expected != "" {
+					lease = " (force-with-lease: " + expected + ")"
+				} else {
+					lease = " (force-with-lease)"
+				}
+			}
+			fmt.Fprintf(stdout, "  promotion branch: %s %s%s\n", branch, sha, lease)
+		}
 	}
 	if result.Publish != nil {
 		if gh, ok := result.Publish["github_release"].(map[string]any); ok {

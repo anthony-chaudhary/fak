@@ -17,6 +17,7 @@ func cmdMerge(argv []string) { os.Exit(runMerge(os.Stdout, os.Stderr, argv)) }
 func runMerge(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("merge", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "merge")
 	dryRun := fs.Bool("dry-run", false, "preview a merge without touching the index/worktree")
 	dir := fs.String("dir", "", "repo directory (default: discover from cwd)")
 	target := fs.String("target", "", "ref to preview merging into HEAD (default: origin/<trunk>)")

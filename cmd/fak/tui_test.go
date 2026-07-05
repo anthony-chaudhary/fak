@@ -11,7 +11,9 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/tuiplugin"
 )
 
 func fixtureTUIIssues() []tuiIssue {
@@ -379,10 +381,81 @@ func TestTUIGuardHumanOutputFromFixtures(t *testing.T) {
 		t.Fatalf("runTUI guard code=%d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"fak console guard", "artifacts=2", "deny=4", "policy_block=1", "default_deny=3", "expected=1", "git_add", "Bash", "policy-block"} {
+	for _, want := range []string{"fak console guard", "artifacts=2", "deny=4", "policy_block=1", "default_deny=3", "expected=1", "legend:", "sig", "D!", "D+", "OK", "git_add", "Bash", "policy-block"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("guard output missing %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "\x1b[") {
+		t.Fatalf("guard auto color wrote ANSI to captured output:\n%s", out)
+	}
+}
+
+func TestTUIGuardHumanOutputColorAlways(t *testing.T) {
+	paths := writeTUIGuardFixtures(t)
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"guard",
+		"--guard-json", paths[0],
+		"--guard-json", paths[1],
+		"--at", "2026-06-25T12:00:00Z",
+		"--width", "130",
+		"--color", "always",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI guard code=%d stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "\x1b[") {
+		t.Fatalf("--color always did not emit ANSI:\n%s", out)
+	}
+	plain := stripANSITUI(out)
+	for _, want := range []string{"legend:", "D!", "D+", "Q!", "OK", "Bash", "policy-block"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("color guard output stripped missing %q:\n%s", want, plain)
+		}
+	}
+}
+
+func TestTUIGuardHumanOutputNoColorWins(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	paths := writeTUIGuardFixtures(t)
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"guard",
+		"--guard-json", paths[0],
+		"--guard-json", paths[1],
+		"--color", "always",
+		"--width", "130",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI guard code=%d stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	if strings.Contains(out, "\x1b[") {
+		t.Fatalf("NO_COLOR should suppress ANSI even with --color always:\n%s", out)
+	}
+	for _, want := range []string{"legend:", "D!", "D+", "OK"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("NO_COLOR guard output missing symbol %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUIGuardRejectsBadColorMode(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	paths := writeTUIGuardFixtures(t)
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"guard",
+		"--guard-json", paths[0],
+		"--color", "sometimes",
+	})
+	if code != 2 {
+		t.Fatalf("bad --color code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--color must be auto, always, or never") {
+		t.Fatalf("bad --color stderr = %q", stderr.String())
 	}
 }
 
@@ -417,6 +490,23 @@ func TestTUIGuardJSONOutputFromFixtures(t *testing.T) {
 	}
 	if !hasTUITag(report.Rows[0].Tags, "policy-block") || !hasTUITag(report.Rows[0].Tags, "sample") {
 		t.Fatalf("top row tags = %v, want policy-block+sample", report.Rows[0].Tags)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runTUI(&stdout, &stderr, []string{
+		"guard",
+		"--guard-json", paths[0],
+		"--guard-json", paths[1],
+		"--at", "2026-06-25T12:00:00Z",
+		"--json",
+		"--color", "always",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI guard color json code=%d stderr=%s", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "\x1b[") || strings.Contains(stdout.String(), `"D!"`) {
+		t.Fatalf("guard JSON should not carry render color/symbol decoration:\n%s", stdout.String())
 	}
 }
 
@@ -824,6 +914,33 @@ func TestTUIGuardJournalHuman(t *testing.T) {
 	}
 }
 
+func TestTUIGuardJournalLineUsesSymbolsAndColor(t *testing.T) {
+	row := journal.Row{
+		Seq:     2,
+		Kind:    "DENY",
+		Tool:    "Bash",
+		Verdict: "DENY",
+		Reason:  "POLICY_BLOCK",
+		Witness: "deny_regex",
+	}
+	plain := formatGuardJournalLine(row, 80, tuiGuardRenderStyle{})
+	if strings.Contains(plain, "\x1b[") {
+		t.Fatalf("plain journal line has ANSI:\n%s", plain)
+	}
+	for _, want := range []string{"D!", "seq=2", "DENY", "Bash", "POLICY_BLOCK", "deny_regex"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("plain journal line missing %q:\n%s", want, plain)
+		}
+	}
+	colored := formatGuardJournalLine(row, 80, tuiGuardRenderStyle{Color: true})
+	if !strings.Contains(colored, "\x1b[") {
+		t.Fatalf("colored journal line missing ANSI:\n%s", colored)
+	}
+	if stripped := stripANSITUI(colored); stripped != plain {
+		t.Fatalf("colored journal line stripped = %q, want %q", stripped, plain)
+	}
+}
+
 // TestTUIGuardJournalMissingIsEmptyPane proves a missing/empty journal yields a
 // well-formed empty pane (exit 0), not an error — the acceptance for a not-yet-written
 // journal.
@@ -1146,7 +1263,7 @@ func TestTUIOverviewHumanOutputFromFixtures(t *testing.T) {
 		t.Fatalf("runTUI overview code=%d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"fak console overview", "cards=5", "missing=0", "issues", "loops", "sessions", "garden", "guard", "garden-red"} {
+	for _, want := range []string{"fak console overview", "cards=6", "missing=0", "issues", "loops", "sessions", "garden", "guard", "config", "garden-red"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("overview output missing %q:\n%s", want, out)
 		}
@@ -1180,7 +1297,7 @@ func TestTUIOverviewJSONOutputFromFixtures(t *testing.T) {
 	if report.Schema != tuiOverviewSchema {
 		t.Fatalf("schema = %q, want %q", report.Schema, tuiOverviewSchema)
 	}
-	if report.Counts.Cards != 5 || report.Counts.Missing != 0 || report.Counts.Action != 4 || report.Counts.OK != 1 {
+	if report.Counts.Cards != 6 || report.Counts.Missing != 0 || report.Counts.Action != 4 || report.Counts.OK != 2 {
 		t.Fatalf("counts = %+v", report.Counts)
 	}
 	if len(report.Cards) == 0 || report.Cards[0].Pane != "garden" {
@@ -1188,6 +1305,395 @@ func TestTUIOverviewJSONOutputFromFixtures(t *testing.T) {
 	}
 	if len(report.Actions) < 4 {
 		t.Fatalf("actions = %+v, want action rows for pressure cards", report.Actions)
+	}
+}
+
+func TestTUIOverviewConsoleConfigSelectsAndOrdersPanes(t *testing.T) {
+	guardPaths := writeTUIGuardFixtures(t)
+	cfg := writeTUIConsoleConfig(t, `{"overview_panes":["guard","loops"]}`)
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"overview",
+		"--console-config", cfg,
+		"--ledger", writeTUILoopLedger(t),
+		"--guard-json", guardPaths[0],
+		"--guard-json", guardPaths[1],
+		"--at", "2026-06-25T12:10:00Z",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI overview config code=%d stderr=%s", code, stderr.String())
+	}
+	var report tuiOverviewReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal overview report: %v\n%s", err, stdout.String())
+	}
+	if !strings.Contains(report.Source, cfg) {
+		t.Fatalf("source = %q, want config path %q", report.Source, cfg)
+	}
+	if report.Counts.Cards != 2 || report.Counts.Missing != 0 {
+		t.Fatalf("counts = %+v, want only configured guard+loops", report.Counts)
+	}
+	if got := []string{report.Cards[0].Pane, report.Cards[1].Pane}; got[0] != "guard" || got[1] != "loops" {
+		t.Fatalf("card order = %v, want [guard loops]", got)
+	}
+}
+
+func TestTUIOverviewPaneFlagOverridesConsoleConfig(t *testing.T) {
+	guardPaths := writeTUIGuardFixtures(t)
+	cfg := writeTUIConsoleConfig(t, `{"overview_panes":["guard"]}`)
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"overview",
+		"--console-config", cfg,
+		"--pane", "loops",
+		"--pane", "guard",
+		"--ledger", writeTUILoopLedger(t),
+		"--guard-json", guardPaths[0],
+		"--guard-json", guardPaths[1],
+		"--at", "2026-06-25T12:10:00Z",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI overview --pane code=%d stderr=%s", code, stderr.String())
+	}
+	var report tuiOverviewReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal overview report: %v\n%s", err, stdout.String())
+	}
+	if !strings.Contains(report.Source, "flag") {
+		t.Fatalf("source = %q, want flag override", report.Source)
+	}
+	if got := []string{report.Cards[0].Pane, report.Cards[1].Pane}; got[0] != "loops" || got[1] != "guard" {
+		t.Fatalf("card order = %v, want [loops guard]", got)
+	}
+}
+
+func TestTUIOverviewConfigRejectsPaneWithoutAdapter(t *testing.T) {
+	cfg := writeTUIConsoleConfig(t, `{"overview_panes":["agent"]}`)
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"overview",
+		"--console-config", cfg,
+		"--json",
+	})
+	if code != 1 {
+		t.Fatalf("runTUI overview bad pane code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `pane "agent" is registered but has no overview adapter`) {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestTUIConfigPaneJSONFromConfig(t *testing.T) {
+	cfg := writeTUIConsoleConfig(t, `{"overview_panes":["guard","loops"],"pane_defaults":{"issues":{"json":true,"top":40},"guard":{"color":"never"}}}`)
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"config",
+		"--path", cfg,
+		"--at", "2026-06-25T12:10:00Z",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI config code=%d stderr=%s", code, stderr.String())
+	}
+	var report tuiConfigReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal config report: %v\n%s", err, stdout.String())
+	}
+	if report.Schema != tuiConfigSchema || report.Status != "loaded" || report.Path != cfg {
+		t.Fatalf("report = %+v", report)
+	}
+	if got := report.Panes; len(got) != 2 || got[0] != "guard" || got[1] != "loops" {
+		t.Fatalf("overview panes = %v, want [guard loops]", got)
+	}
+	if report.Counts.PaneDefaults != 3 || !hasTUIConfigDefault(report.Defaults, "issues", "json", "--json", "true") || !hasTUIConfigDefault(report.Defaults, "issues", "top", "--top", "40") || !hasTUIConfigDefault(report.Defaults, "guard", "color", "--color", "never") {
+		t.Fatalf("defaults = %+v", report.Defaults)
+	}
+}
+
+func TestTUIConfigPaneUsesConsoleConfigAlias(t *testing.T) {
+	cfg := writeTUIConsoleConfig(t, `{"overview_panes":["guard"]}`)
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"config",
+		"--console-config", cfg,
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI config alias code=%d stderr=%s", code, stderr.String())
+	}
+	var report tuiConfigReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal config report: %v\n%s", err, stdout.String())
+	}
+	if report.Path != cfg || report.Status != "loaded" || len(report.Panes) != 1 || report.Panes[0] != "guard" {
+		t.Fatalf("report = %+v", report)
+	}
+}
+
+func TestTUIConfigPaneMutatesAndAppliesConsoleConfig(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "console.json")
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"config",
+		"--path", cfg,
+		"--set-overview", "guard,loops",
+		"--set-default", "issues.json=true",
+		"--set-default", "issues.top=40",
+		"--set-default", "guard.color=never",
+		"--at", "2026-06-25T12:10:00Z",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI config mutate code=%d stderr=%s", code, stderr.String())
+	}
+	var report tuiConfigReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal config report: %v\n%s", err, stdout.String())
+	}
+	if !report.Updated || report.Status != "loaded" || report.Path != cfg {
+		t.Fatalf("report = %+v", report)
+	}
+	if got := report.Panes; len(got) != 2 || got[0] != "guard" || got[1] != "loops" {
+		t.Fatalf("overview panes = %v, want [guard loops]", got)
+	}
+	if report.Counts.PaneDefaults != 3 || !hasTUIConfigDefault(report.Defaults, "issues", "json", "--json", "true") || !hasTUIConfigDefault(report.Defaults, "issues", "top", "--top", "40") || !hasTUIConfigDefault(report.Defaults, "guard", "color", "--color", "never") {
+		t.Fatalf("defaults = %+v", report.Defaults)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runTUI(&stdout, &stderr, []string{
+		"issues",
+		"--console-config", cfg,
+		"--issues-json", writeTUIIssuesFixture(t),
+		"--as-of", "2026-06-25",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI issues with saved defaults code=%d stderr=%s", code, stderr.String())
+	}
+	var issues tuiIssueReport
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		t.Fatalf("saved issues.json default did not emit JSON: %v\n%s", err, stdout.String())
+	}
+	if issues.Schema != tuiIssuesSchema || issues.Counts.Open != 4 {
+		t.Fatalf("issues report = %+v", issues)
+	}
+}
+
+func TestTUIConfigPaneClearsSavedControls(t *testing.T) {
+	cfg := writeTUIConsoleConfig(t, `{"overview_panes":["guard","loops"],"pane_defaults":{"issues":{"json":true,"top":40},"guard":{"color":"never"}}}`)
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"config",
+		"--path", cfg,
+		"--clear-overview",
+		"--unset-default", "issues.json",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI config clear code=%d stderr=%s", code, stderr.String())
+	}
+	var report tuiConfigReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal config report: %v\n%s", err, stdout.String())
+	}
+	if !report.Updated || report.Counts.OverviewPanes != 0 || len(report.Panes) != 0 {
+		t.Fatalf("overview after clear = count %d panes %v updated=%v", report.Counts.OverviewPanes, report.Panes, report.Updated)
+	}
+	if report.Counts.PaneDefaults != 2 || hasTUIConfigDefault(report.Defaults, "issues", "json", "--json", "true") {
+		t.Fatalf("defaults after unset = %+v", report.Defaults)
+	}
+}
+
+func TestTUIConfigPaneRejectsInvalidSavedControls(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "overview pane without adapter", args: []string{"--set-overview", "agent"}, want: "overview_panes.agent: pane has no overview adapter"},
+		{name: "bad toggle default", args: []string{"--set-default", "issues.json=maybe"}, want: "pane_defaults.issues.json: must be a boolean"},
+		{name: "bad option default", args: []string{"--set-default", "guard.color=blue"}, want: "pane_defaults.guard.color: must be one of auto, always, never"},
+		{name: "config pane default", args: []string{"--set-default", "config.path=tmp.json"}, want: "pane_defaults.config: config pane cannot be defaulted"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := filepath.Join(t.TempDir(), "console.json")
+			var stdout, stderr bytes.Buffer
+			argv := append([]string{"config", "--path", cfg}, tc.args...)
+			code := runTUI(&stdout, &stderr, argv)
+			if code != 2 {
+				t.Fatalf("runTUI config invalid code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tc.want) {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), tc.want)
+			}
+			if _, err := os.Stat(cfg); !os.IsNotExist(err) {
+				t.Fatalf("invalid config mutation wrote %s (stat err=%v)", cfg, err)
+			}
+		})
+	}
+}
+
+func TestTUIPanesRegistryListsControls(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{"panes", "--json"})
+	if code != 0 {
+		t.Fatalf("runTUI panes code=%d stderr=%s", code, stderr.String())
+	}
+	var report tuiPaneRegistryReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal pane registry: %v\n%s", err, stdout.String())
+	}
+	if report.Schema != tuiRegistrySchema {
+		t.Fatalf("schema = %q, want %q", report.Schema, tuiRegistrySchema)
+	}
+	if report.Counts.Panes < 9 || report.Counts.Overview < 6 || report.Counts.Controls < 12 {
+		t.Fatalf("counts = %+v, want registered built-ins and controls", report.Counts)
+	}
+	config, ok := paneDescriptorByID(report.Panes, "config")
+	if !ok || config.Schema != tuiConfigSchema || !config.Overview || !hasTUIPaneControl(config.Controls, "path") || !hasTUIPaneControl(config.Controls, "set-default") {
+		t.Fatalf("config descriptor = %+v ok=%v", config, ok)
+	}
+	guard, ok := paneDescriptorByID(report.Panes, "guard")
+	if !ok {
+		t.Fatalf("guard pane missing from registry: %+v", report.Panes)
+	}
+	if guard.Schema != tuiGuardSchema || !guard.Overview || !hasTUIPaneControl(guard.Controls, "follow") || !hasTUIPaneControl(guard.Controls, "color") {
+		t.Fatalf("guard descriptor = %+v", guard)
+	}
+	color, ok := tuiPaneControlByID(guard.Controls, "color")
+	if !ok || !sameTUIStrings(color.Options, []string{"auto", "always", "never"}) {
+		t.Fatalf("guard color control = %+v ok=%v", color, ok)
+	}
+	issues, ok := paneDescriptorByID(report.Panes, "issues")
+	if !ok {
+		t.Fatalf("issues pane missing from registry: %+v", report.Panes)
+	}
+	state, ok := tuiPaneControlByID(issues.Controls, "state")
+	if !ok || !sameTUIStrings(state.Options, []string{"open", "closed", "all"}) {
+		t.Fatalf("issues state control = %+v ok=%v", state, ok)
+	}
+	loops, ok := paneDescriptorByID(report.Panes, "loops")
+	if !ok || loops.Schema != tuiLoopsSchema || !loops.Overview || !hasTUIPaneControl(loops.Controls, "ledger") {
+		t.Fatalf("loops descriptor = %+v ok=%v", loops, ok)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runTUI(&stdout, &stderr, []string{"panes"})
+	if code != 0 {
+		t.Fatalf("runTUI panes human code=%d stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"fak console panes", "overview=", "guard", "loops", "yes", "Controls", "--follow", "--ledger", "options=open|closed|all"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("pane registry output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUIPaneRegistrationLivesWithPaneCode(t *testing.T) {
+	central, err := os.ReadFile("tui_registry.go")
+	if err != nil {
+		t.Fatalf("read central registry: %v", err)
+	}
+	for _, pane := range []string{"issues", "garden", "loops"} {
+		if strings.Contains(string(central), `ID:      "`+pane+`"`) {
+			t.Fatalf("pane %q should register from its pane file, not tui_registry.go", pane)
+		}
+	}
+	for _, tc := range []struct {
+		file string
+		pane string
+	}{
+		{file: "tui_issues_garden.go", pane: "issues"},
+		{file: "tui_issues_garden.go", pane: "garden"},
+		{file: "tui_loop_render.go", pane: "loops"},
+	} {
+		data, err := os.ReadFile(tc.file)
+		if err != nil {
+			t.Fatalf("read %s: %v", tc.file, err)
+		}
+		if !strings.Contains(string(data), `ID:      "`+tc.pane+`"`) {
+			t.Fatalf("pane %q registration missing from %s", tc.pane, tc.file)
+		}
+	}
+}
+
+func TestTUIConsoleConfigAppliesPaneDefaults(t *testing.T) {
+	cfg := writeTUIConsoleConfig(t, `{"pane_defaults":{"issues":{"json":true}}}`)
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"issues",
+		"--console-config", cfg,
+		"--issues-json", writeTUIIssuesFixture(t),
+		"--as-of", "2026-06-25",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI issues defaults code=%d stderr=%s", code, stderr.String())
+	}
+	var report tuiIssueReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("configured issues did not emit JSON: %v\n%s", err, stdout.String())
+	}
+	if report.Schema != tuiIssuesSchema || report.Counts.Open != 4 {
+		t.Fatalf("report = %+v", report)
+	}
+}
+
+func TestTUIConsoleConfigPaneDefaultYieldsToCLIFlag(t *testing.T) {
+	cfg := writeTUIConsoleConfig(t, `{"pane_defaults":{"issues":{"json":true}}}`)
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"issues",
+		"--console-config", cfg,
+		"--issues-json", writeTUIIssuesFixture(t),
+		"--as-of", "2026-06-25",
+		"--json=false",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI issues defaults override code=%d stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	if strings.HasPrefix(strings.TrimSpace(out), "{") {
+		t.Fatalf("CLI --json=false should override configured json=true:\n%s", out)
+	}
+	if !strings.Contains(out, "fak console issues") {
+		t.Fatalf("expected human issues output, got:\n%s", out)
+	}
+}
+
+func TestTUIConsoleConfigRejectsUnknownPaneDefaultControl(t *testing.T) {
+	cfg := writeTUIConsoleConfig(t, `{"pane_defaults":{"issues":{"bogus":true}}}`)
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"issues",
+		"--console-config", cfg,
+		"--issues-json", writeTUIIssuesFixture(t),
+	})
+	if code != 2 {
+		t.Fatalf("runTUI issues bad defaults code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "pane_defaults.issues.bogus: unknown control") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestTUIConsoleConfigRejectsInvalidOptionDefault(t *testing.T) {
+	cfg := writeTUIConsoleConfig(t, `{"pane_defaults":{"guard":{"color":"blue"}}}`)
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"guard",
+		"--console-config", cfg,
+		"--guard-json", writeTUIGuardFixtures(t)[0],
+	})
+	if code != 2 {
+		t.Fatalf("runTUI guard bad option default code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "pane_defaults.guard.color: must be one of auto, always, never") {
+		t.Fatalf("stderr = %q", stderr.String())
 	}
 }
 
@@ -1200,6 +1706,59 @@ func TestTUIRejectsUnknownSubcommand(t *testing.T) {
 	if !strings.Contains(stderr.String(), "unknown subcommand") {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
+}
+
+func paneDescriptorByID(panes []tuiplugin.Descriptor, id string) (tuiplugin.Descriptor, bool) {
+	for _, pane := range panes {
+		if pane.ID == id {
+			return pane, true
+		}
+	}
+	return tuiplugin.Descriptor{}, false
+}
+
+func hasTUIPaneControl(controls []tuiplugin.Control, id string) bool {
+	_, ok := tuiPaneControlByID(controls, id)
+	return ok
+}
+
+func tuiPaneControlByID(controls []tuiplugin.Control, id string) (tuiplugin.Control, bool) {
+	for _, control := range controls {
+		if control.ID == id {
+			return control, true
+		}
+	}
+	return tuiplugin.Control{}, false
+}
+
+func hasTUIConfigDefault(defaults []tuiConfigDefault, pane, control, flag, value string) bool {
+	for _, def := range defaults {
+		if def.Pane == pane && def.Control == control && def.Flag == flag && def.Value == value {
+			return true
+		}
+	}
+	return false
+}
+
+func sameTUIStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func writeTUIConsoleConfig(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "console.json")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func hasTUITag(tags []string, want string) bool {
@@ -1218,6 +1777,26 @@ func hasTUIString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func stripANSITUI(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			i += 2
+			for i < len(s) {
+				c := s[i]
+				i++
+				if c >= 0x40 && c <= 0x7e {
+					break
+				}
+			}
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
 }
 
 func hasTUIAgentEnv(env []tuiAgentEnv, name, value string) bool {

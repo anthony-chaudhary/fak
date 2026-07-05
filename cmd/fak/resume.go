@@ -83,6 +83,7 @@ func runResume(stdout, stderr io.Writer, argv []string) int {
 func runResumePlan(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("resume plan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "resume")
 	residentTokens := fs.Int("resident-tokens", 0, "size of the context that would be re-prefilled on a full resume (the whole transcript)")
 	idleSeconds := fs.Int64("idle-seconds", -1, "how long the session was dormant before this resume (-1 = unknown; drives cold-vs-warm against the TTL)")
 	ttlStr := fs.String("ttl", "5m", "provider cache TTL tier the session used: 5m (default) or 1h")
@@ -156,6 +157,7 @@ func runResumePlan(stdout, stderr io.Writer, argv []string) int {
 func runResumeAdmit(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("resume admit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "resume")
 	ledger := fs.String("ledger", defaultResumeLedger(), "launch ledger JSONL path (the durable record every launcher appends to)")
 	policyPath := fs.String("policy", defaultResumeSourcePolicy(), "per-source admission policy JSON path")
 	maxLive := fs.Int("max-live", 4, "host-wide ceiling on live `claude --resume` processes across all accounts (0 disables)")
@@ -524,6 +526,7 @@ func defaultResumeSourcePolicy() string {
 func runResumeValidate(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("resume validate", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "resume")
 	corpus := fs.String("corpus", "", "directory of real Claude Code transcripts (.jsonl, scanned recursively) to back-test the projection against")
 	ttlStr := fs.String("ttl", "5m", "provider cache TTL tier to score the projection at: 5m (default) or 1h")
 	maxFiles := fs.Int("max-files", 0, "cap the number of transcript files scanned (0 = no cap)")

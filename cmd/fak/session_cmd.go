@@ -112,6 +112,7 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 
 	fs := flag.NewFlagSet("session "+verb, flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "session")
 	addr := fs.String("addr", defaultSessionAddr(), "gateway base URL")
 	key := fs.String("key", defaultGatewayBearerToken(), "bearer credential (only if the gateway sets --require-key)")
 	asJSON := fs.Bool("json", false, "emit the raw JSON instead of the human table")

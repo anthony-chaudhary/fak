@@ -10,7 +10,26 @@ import (
 	"unicode"
 
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/tuiplugin"
 )
+
+func init() {
+	tuiplugin.Register(tuiplugin.Pane{
+		ID:      "loops",
+		Summary: "fold the hash-chained loop ledger into running/refused/witness lanes",
+		Usage:   "fak console loops [--ledger FILE] [--json] [--top N] [--width N]",
+		Schema:  tuiLoopsSchema,
+		BuiltIn: true,
+		Controls: []tuiplugin.Control{
+			{ID: "at", Label: "At", Kind: "input", Flag: "--at", Detail: "snapshot time"},
+			{ID: "json", Label: "JSON", Kind: "toggle", Flag: "--json", Detail: "emit the typed pane model"},
+			{ID: "ledger", Label: "Ledger", Kind: "input", Flag: "--ledger", Detail: "loop JSONL ledger path"},
+			{ID: "top", Label: "Top Rows", Kind: "input", Flag: "--top", Default: "25"},
+		},
+		Run:      runTUILoops,
+		Overview: tuiOverviewAdapter(buildTUIOverviewLoopCard),
+	})
+}
 
 func buildTUILoopReport(st loopmgr.Status, at time.Time) tuiLoopReport {
 	rows := make([]tuiLoopRow, 0, len(st.Loops))
@@ -536,14 +555,19 @@ func tuiUsage(w io.Writer) {
   fak console garden [--garden-json FILE] [--json] [--check]
                  [--workspace DIR] [--deep] [--timeout N] [--width N]
   fak console guard  --guard-json FILE [--guard-json FILE ...] [--json]
-                 [--width N] [--at RFC3339|YYYY-MM-DD]
+                 [--width N] [--color auto|always|never] [--at RFC3339|YYYY-MM-DD]
+  fak console panes [--json]
+  fak console config [--path FILE] [--json]
+                 [--set-overview ID,ID] [--clear-overview]
+                 [--set-default PANE.CONTROL=VALUE] [--unset-default PANE.CONTROL]
   fak console agent [<target> | --target NAME | --auto] [--list-targets]
                 [--account NAME | --claude-config-dir DIR] [--dry-run]
                 [--prompt STR] [--session-id ID] [--passthrough]
                 [--permission-mode MODE] [--gateway-url URL]
                 [--gateway-key-env VAR --model MODEL] [--json]
                 [--] [claude args...]
-  fak console overview [--issues-json FILE] [--ledger FILE] [--sessions-json FILE]
+  fak console overview [--pane ID ...] [--console-config FILE]
+                   [--issues-json FILE] [--ledger FILE] [--sessions-json FILE]
                    [--garden-json FILE] [--guard-json FILE ...] [--json]
 
 The issues pane folds GitHub issues into a ranked terminal model: priority lanes,
@@ -561,6 +585,19 @@ bundle and renders member health, gating regressions, and advisory actions.
 
 The guard pane reads existing guard/adjudication JSON artifacts and renders
 denials, reasons, audit status, and proof-packet gaps without replaying calls.
+
+The panes registry lists every registered console pane plus its operator-facing
+controls. This is the in-process plugin seam for adding a pane without editing
+the console dispatcher.
+
+The config pane reads or writes the persisted console controls. Use it to save
+overview pane order and pane-control defaults after validating them against the
+registered pane descriptors.
+
+Any pane can read `+"`--console-config FILE`"+` before pane-local flags. The file
+defaults to FAK_CONSOLE_FILE, else `+"`~/.fak/console.json`"+`; missing files are
+ignored. A pane default applies only to registered controls, and an explicit CLI
+flag wins over the configured default.
 
 The agent pane launches a real Claude Code backend. By default it starts a local
 `+"`fak guard`"+` and pins CLAUDE_CONFIG_DIR from `+"`fak accounts`"+`; with
@@ -586,5 +623,9 @@ excludes a target. `+"`--auto --json`"+` emits the ranked decision instead of la
 
 The overview pane composes selected pane models into one ranked spine so
 operators can see issue, loop, session, garden, and guard pressure together.
+Use --pane repeatedly to choose a subset and display order for that invocation.
+Without --pane, overview reads overview_panes from FAK_CONSOLE_FILE or
+~/.fak/console.json when present; with neither, it includes every registered pane
+that has an overview adapter and ranks by attention.
 `)
 }

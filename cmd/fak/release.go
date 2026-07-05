@@ -185,9 +185,17 @@ human operator reviews and merges through the native PR UI; tag/publish then
 run in a later ship once the merge lands. Requires distinct --source-branch/
 --trunk — a no-op today under the main-only branch-role regime; see
 docs/branch-regime-shadow-cutover.md.
+In execute mode, distinct --source-branch/--trunk pairs must use --open-pr by
+default; --allow-direct-promotion is an explicit operator override.
+After an --open-pr promotion is merged, tag/publish the merged release commit
+with --source-branch <trunk> --trunk <trunk> --base origin/<trunk>; ship reuses
+an existing VERSION/release-note cut instead of creating a no-op release commit.
 The ship subcommand is the default hot-tree path: it leaves this checkout's
 unrelated modified/untracked files alone by cutting in a transient detached
 worktree, while sharing the same single-writer release lock.
+ship auto-sizes that lock to the bounded pre-tag work and renews it before
+tag/publish; if renewal proves the lock was lost, it refuses before creating
+the tag or GitHub release page.
 When cut/tag are executed through this front door, --skip-dry-run is added unless
 you supplied it already; the real witness is the green trunk plus the post-tag
 release-substrate suite.

@@ -8,70 +8,184 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/tuiplugin"
 )
 
 func loadTUIOverview(opt tuiOverviewOptions) (tuiOverviewReport, error) {
+	order, explicit, err := resolveTUIOverviewPanes(opt.PaneOrder, tuiplugin.All())
+	if err != nil {
+		return tuiOverviewReport{}, err
+	}
 	cards := []tuiOverviewCard{}
-	if opt.IssuesJSON != "" {
-		issues, source, err := loadTUIIssues(opt.IssuesJSON, "", "open", 1)
+	for _, pane := range order {
+		card, err := pane.Overview(opt)
 		if err != nil {
 			return tuiOverviewReport{}, err
 		}
-		cards = append(cards, overviewIssueCard(buildTUIIssueReport(issues, source, opt.AsOf, opt.Epic), opt.Epic))
-	} else {
-		cards = append(cards, missingOverviewCard("issues", "fak console overview --issues-json issues.json --epic 837"))
-	}
-	if opt.Ledger != "" {
-		st, err := loopmgr.SnapshotFile(opt.Ledger, opt.At)
-		if err != nil {
-			return tuiOverviewReport{}, err
+		if card.Pane == "" {
+			card.Pane = pane.ID
 		}
-		cards = append(cards, overviewLoopCard(buildTUILoopReport(st, opt.At)))
-	} else {
-		cards = append(cards, missingOverviewCard("loops", "fak console overview --ledger .fak/loop-ledger.jsonl"))
+		cards = append(cards, tuiOverviewCardFromPlugin(card))
 	}
-	if opt.SessionsJSON != "" {
-		list, source, err := loadTUISessions(opt.SessionsJSON, "", "")
-		if err != nil {
-			return tuiOverviewReport{}, err
-		}
-		cards = append(cards, overviewSessionCard(buildTUISessionReport(list, source, opt.At)))
-	} else {
-		cards = append(cards, missingOverviewCard("sessions", "fak console overview --sessions-json sessions.json"))
+	if !explicit {
+		sort.SliceStable(cards, func(i, j int) bool {
+			if cards[i].Attention != cards[j].Attention {
+				return cards[i].Attention > cards[j].Attention
+			}
+			return cards[i].Pane < cards[j].Pane
+		})
 	}
-	if opt.GardenJSON != "" {
-		payload, source, err := loadTUIGarden(opt.GardenJSON, "", false, 0)
-		if err != nil {
-			return tuiOverviewReport{}, err
-		}
-		cards = append(cards, overviewGardenCard(buildTUIGardenReport(payload, source, opt.At, opt.CheckGarden)))
-	} else {
-		cards = append(cards, missingOverviewCard("garden", "fak console overview --garden-json garden.json --check"))
-	}
-	if len(opt.GuardJSON) > 0 {
-		artifacts, err := loadTUIGuard(opt.GuardJSON)
-		if err != nil {
-			return tuiOverviewReport{}, err
-		}
-		cards = append(cards, overviewGuardCard(buildTUIGuardReport(artifacts, opt.At)))
-	} else {
-		cards = append(cards, missingOverviewCard("guard", "fak console overview --guard-json guard-proof.json"))
-	}
-	sort.SliceStable(cards, func(i, j int) bool {
-		if cards[i].Attention != cards[j].Attention {
-			return cards[i].Attention > cards[j].Attention
-		}
-		return cards[i].Pane < cards[j].Pane
-	})
 	counts := countTUIOverview(cards)
+	source := "registered panes"
+	if explicit {
+		source = "configured panes"
+		if strings.TrimSpace(opt.PaneSource) != "" {
+			source += " (" + strings.TrimSpace(opt.PaneSource) + ")"
+		}
+	}
 	return tuiOverviewReport{
 		Schema:  tuiOverviewSchema,
 		At:      opt.At.UTC().Format(time.RFC3339),
-		Source:  "selected panes",
+		Source:  source,
 		Counts:  counts,
 		Cards:   cards,
 		Actions: overviewActions(cards),
 	}, nil
+}
+
+func tuiOverviewAdapter(fn func(tuiOverviewOptions) (tuiOverviewCard, error)) tuiplugin.OverviewBuilder {
+	return func(ctx any) (tuiplugin.OverviewCard, error) {
+		opt, ok := ctx.(tuiOverviewOptions)
+		if !ok {
+			return tuiplugin.OverviewCard{}, fmt.Errorf("overview context has type %T, want tuiOverviewOptions", ctx)
+		}
+		card, err := fn(opt)
+		if err != nil {
+			return tuiplugin.OverviewCard{}, err
+		}
+		return tuiOverviewCardToPlugin(card), nil
+	}
+}
+
+func tuiOverviewCardToPlugin(card tuiOverviewCard) tuiplugin.OverviewCard {
+	return tuiplugin.OverviewCard{
+		Pane:      card.Pane,
+		Status:    card.Status,
+		Source:    card.Source,
+		Summary:   card.Summary,
+		Command:   card.Command,
+		Attention: card.Attention,
+		Counts:    cloneTUIIntMap(card.Counts),
+		Tags:      append([]string(nil), card.Tags...),
+	}
+}
+
+func tuiOverviewCardFromPlugin(card tuiplugin.OverviewCard) tuiOverviewCard {
+	return tuiOverviewCard{
+		Pane:      card.Pane,
+		Status:    card.Status,
+		Source:    card.Source,
+		Summary:   card.Summary,
+		Command:   card.Command,
+		Attention: card.Attention,
+		Counts:    cloneTUIIntMap(card.Counts),
+		Tags:      append([]string(nil), card.Tags...),
+	}
+}
+
+func cloneTUIIntMap(in map[string]int) map[string]int {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func resolveTUIOverviewPanes(requested []string, panes []tuiplugin.Pane) ([]tuiplugin.Pane, bool, error) {
+	byID := map[string]tuiplugin.Pane{}
+	for _, pane := range panes {
+		byID[pane.ID] = pane
+	}
+	requested = normalizeTUIOverviewPaneList(requested)
+	if len(requested) > 0 {
+		out := make([]tuiplugin.Pane, 0, len(requested))
+		for _, pane := range requested {
+			registered, ok := byID[pane]
+			if !ok {
+				return nil, true, fmt.Errorf("unknown overview pane %q", pane)
+			}
+			if registered.Overview == nil {
+				return nil, true, fmt.Errorf("pane %q is registered but has no overview adapter", pane)
+			}
+			out = append(out, registered)
+		}
+		return out, true, nil
+	}
+	order := []tuiplugin.Pane{}
+	for _, pane := range panes {
+		if pane.Overview != nil {
+			order = append(order, pane)
+		}
+	}
+	return order, false, nil
+}
+
+func buildTUIOverviewIssueCard(opt tuiOverviewOptions) (tuiOverviewCard, error) {
+	if opt.IssuesJSON == "" {
+		return missingOverviewCard("issues", "fak console overview --issues-json issues.json --epic 837"), nil
+	}
+	issues, source, err := loadTUIIssues(opt.IssuesJSON, "", "open", 1)
+	if err != nil {
+		return tuiOverviewCard{}, err
+	}
+	return overviewIssueCard(buildTUIIssueReport(issues, source, opt.AsOf, opt.Epic), opt.Epic), nil
+}
+
+func buildTUIOverviewLoopCard(opt tuiOverviewOptions) (tuiOverviewCard, error) {
+	if opt.Ledger != "" {
+		st, err := loopmgr.SnapshotFile(opt.Ledger, opt.At)
+		if err != nil {
+			return tuiOverviewCard{}, err
+		}
+		return overviewLoopCard(buildTUILoopReport(st, opt.At)), nil
+	}
+	return missingOverviewCard("loops", "fak console overview --ledger .fak/loop-ledger.jsonl"), nil
+}
+
+func buildTUIOverviewSessionCard(opt tuiOverviewOptions) (tuiOverviewCard, error) {
+	if opt.SessionsJSON != "" {
+		list, source, err := loadTUISessions(opt.SessionsJSON, "", "")
+		if err != nil {
+			return tuiOverviewCard{}, err
+		}
+		return overviewSessionCard(buildTUISessionReport(list, source, opt.At)), nil
+	}
+	return missingOverviewCard("sessions", "fak console overview --sessions-json sessions.json"), nil
+}
+
+func buildTUIOverviewGardenCard(opt tuiOverviewOptions) (tuiOverviewCard, error) {
+	if opt.GardenJSON != "" {
+		payload, source, err := loadTUIGarden(opt.GardenJSON, "", false, 0)
+		if err != nil {
+			return tuiOverviewCard{}, err
+		}
+		return overviewGardenCard(buildTUIGardenReport(payload, source, opt.At, opt.CheckGarden)), nil
+	}
+	return missingOverviewCard("garden", "fak console overview --garden-json garden.json --check"), nil
+}
+
+func buildTUIOverviewGuardCard(opt tuiOverviewOptions) (tuiOverviewCard, error) {
+	if len(opt.GuardJSON) > 0 {
+		artifacts, err := loadTUIGuard(opt.GuardJSON)
+		if err != nil {
+			return tuiOverviewCard{}, err
+		}
+		return overviewGuardCard(buildTUIGuardReport(artifacts, opt.At)), nil
+	}
+	return missingOverviewCard("guard", "fak console overview --guard-json guard-proof.json"), nil
 }
 
 func overviewIssueCard(report tuiIssueReport, epic int) tuiOverviewCard {

@@ -56,6 +56,7 @@ func cmdDoctor(argv []string) {
 func runDoctor(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "doctor")
 	text := fs.String("text", "", `text to diagnose, or "-" for stdin (default: stdin if neither --text nor --file is given)`)
 	file := fs.String("file", "", "read the text from this file instead of --text/stdin")
 	maxRepeat := fs.Float64("max-repeat", answershape.DefaultMaxRepeat, "largest in-shape repeat fraction (0..1); <=0 disables the repeat check")
