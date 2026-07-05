@@ -163,6 +163,20 @@ class CooldownTest(unittest.TestCase):
             cooled = mod.recently_attempted_issues(runs, cooldown_min=120, now_ts=now)
         self.assertEqual(cooled, {465})        # 465 fresh (10m < 120m), 450 stale
 
+    def test_recent_witness_only_attempt_is_in_cooldown(self) -> None:
+        import os
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            now = 1_000_000.0
+            fresh = runs / "resolve-2898-20260705-214923.witness"
+            fresh.write_text('{"claim": "CLAIM_NO_COMMIT", "issue": 2898}',
+                             encoding="utf-8")
+            os.utime(fresh, (now - 5 * 60, now - 5 * 60))
+            cooled = mod.recently_attempted_issues(runs, cooldown_min=120, now_ts=now)
+        self.assertEqual(cooled, {2898})
+
     def test_cooldown_zero_disables(self) -> None:
         import tempfile
         mod = load()
@@ -234,9 +248,11 @@ class ActiveGuardLivelockTest(unittest.TestCase):
             log = runs / "resolve-2720-20260705-202908.log"
             log.write_text(f"audit log  : {audit}\n", encoding="utf-8")
             log.with_suffix(".pid").write_text("1234\n", encoding="utf-8")
-            mod.dispatch_preflight.resolve_sidecar_pid_is_live = lambda pid_file: True
 
-            hold = mod.active_guard_livelock_hold(root, runs)
+            with mock.patch.object(mod.dispatch_preflight,
+                                   "resolve_sidecar_pid_is_live",
+                                   return_value=True):
+                hold = mod.active_guard_livelock_hold(root, runs)
 
         self.assertTrue(hold["active"])
         self.assertIn("#2720", hold["reason"])
@@ -266,9 +282,11 @@ class ActiveGuardLivelockTest(unittest.TestCase):
             log = runs / "resolve-2720-20260705-202908.log"
             log.write_text(f"audit log  : {audit}\n", encoding="utf-8")
             log.with_suffix(".pid").write_text("1234\n", encoding="utf-8")
-            mod.dispatch_preflight.resolve_sidecar_pid_is_live = lambda pid_file: True
 
-            hold = mod.active_guard_livelock_hold(root, runs)
+            with mock.patch.object(mod.dispatch_preflight,
+                                   "resolve_sidecar_pid_is_live",
+                                   return_value=True):
+                hold = mod.active_guard_livelock_hold(root, runs)
 
         self.assertFalse(hold["active"])
 
@@ -292,9 +310,11 @@ class ActiveCompactRunawayTest(unittest.TestCase):
             ]
             log.write_text("\n".join(lines), encoding="utf-8")
             log.with_suffix(".pid").write_text("1234\n", encoding="utf-8")
-            mod.dispatch_preflight.resolve_sidecar_pid_is_live = lambda pid_file: True
 
-            hold = mod.active_compact_runaway_hold(root, runs)
+            with mock.patch.object(mod.dispatch_preflight,
+                                   "resolve_sidecar_pid_is_live",
+                                   return_value=True):
+                hold = mod.active_compact_runaway_hold(root, runs)
 
         self.assertTrue(hold["active"])
         self.assertIn("#2311", hold["reason"])
@@ -320,9 +340,11 @@ class ActiveCompactRunawayTest(unittest.TestCase):
             ]
             log.write_text("\n".join(lines), encoding="utf-8")
             log.with_suffix(".pid").write_text("1234\n", encoding="utf-8")
-            mod.dispatch_preflight.resolve_sidecar_pid_is_live = lambda pid_file: True
 
-            hold = mod.active_compact_runaway_hold(root, runs)
+            with mock.patch.object(mod.dispatch_preflight,
+                                   "resolve_sidecar_pid_is_live",
+                                   return_value=True):
+                hold = mod.active_compact_runaway_hold(root, runs)
 
         self.assertFalse(hold["active"])
 
@@ -1411,6 +1433,7 @@ class EvaluateTest(unittest.TestCase):
             "lane": "gateway", "numbers": [467], "by_lane_count": {"gateway": 1}}
         mod.live_resolution_issues = lambda runs_dir: set()
         mod.live_resolution_lanes = lambda runs_dir: set()
+        mod.live_lane_lease_lanes = lambda root: {"lanes": []}
         mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set()
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": 100, "title": f"title {n}"}
@@ -1933,6 +1956,7 @@ class BackendRoutingTest(unittest.TestCase):
             "lane": "docs", "numbers": [260], "by_lane_count": {"docs": 1}}
         mod.live_resolution_issues = lambda runs_dir: set()
         mod.live_resolution_lanes = lambda runs_dir: set()
+        mod.live_lane_lease_lanes = lambda root: {"lanes": []}
         mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set()
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": 100, "title": f"t{n}"}
@@ -2493,6 +2517,7 @@ class WeeklyCapGateTest(unittest.TestCase):
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": 900, "title": f"title {n}"}
         mod.issue_contract_review = passing_issue_contract
+        mod.live_lane_lease_lanes = lambda root: {"lanes": []}
         mod.spawn_issue_worker = lambda *a, **k: (_ for _ in ()).throw(
             AssertionError("dry-run must never spawn"))
 
@@ -2560,6 +2585,7 @@ class EvaluateBackendHealthTest(unittest.TestCase):
         # Hermetic: no lane is held, so the pre-spawn lane-lease gate (#1310) never
         # reads the real .dispatch-runs and never trips for these backend-health tests.
         mod.live_resolution_lanes = lambda runs_dir: set()
+        mod.live_lane_lease_lanes = lambda root: {"lanes": []}
 
     def test_dead_backend_self_suppresses_without_spawning(self) -> None:
         mod = load()
@@ -3231,6 +3257,7 @@ class EvaluateLeaseGateTest(unittest.TestCase):
             "lane": lane, "numbers": list(numbers), "by_lane_count": {lane: len(numbers)}}
         mod.live_resolution_issues = lambda runs_dir: set()
         mod.live_resolution_lanes = lambda runs_dir: set()  # same-host scan: free
+        mod.live_lane_lease_lanes = lambda root: {"lanes": []}
         mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set()
         mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}
         mod.check_backend_health = lambda runs_dir, **k: {"state": "healthy"}

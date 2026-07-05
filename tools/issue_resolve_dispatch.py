@@ -830,10 +830,12 @@ def live_resolution_lanes(
 def recently_attempted_issues(runs_dir: Path, *, cooldown_min: int,
                               now_ts: float | None = None) -> set[int]:
     """Issue numbers attempted within the last ``cooldown_min`` minutes — read from
-    the mtime of their ``resolve-<N>-*.log``. This is the anti-churn gate: a hard
-    issue (e.g. a mislabeled epic) that a worker could not land must NOT be re-picked
-    every tick — re-dispatching it re-storms a known drain while the rest of the
-    lane's backlog goes untouched. After the cooldown it becomes eligible again (the
+    the mtime of their ``resolve-<N>-*.log`` or ``.witness`` sidecar. This is the
+    anti-churn gate: a hard issue (e.g. a mislabeled epic) that a worker could not
+    land must NOT be re-picked every tick — re-dispatching it re-storms a known
+    drain while the rest of the lane's backlog goes untouched. A witnessed dead slot
+    may have already lost its ``.log`` to sidecar cleanup, so the durable witness
+    sidecar also cools the issue. After the cooldown it becomes eligible again (the
     repo may have changed, or a fresh worker may get further). 0 disables the gate."""
     if cooldown_min <= 0 or not runs_dir.is_dir():
         return set()
@@ -841,12 +843,14 @@ def recently_attempted_issues(runs_dir: Path, *, cooldown_min: int,
     now = now_ts if now_ts is not None else time.time()
     horizon = now - cooldown_min * 60
     recent: set[int] = set()
-    for log in runs_dir.glob("resolve-*.log"):
-        m = _LOG_ISSUE_RE.search(log.name)
+    attempts = (*runs_dir.glob("resolve-*.log"),
+                *runs_dir.glob(f"resolve-*{WITNESS_SIDECAR_SUFFIX}"))
+    for attempt in attempts:
+        m = _LOG_ISSUE_RE.search(attempt.name)
         if not m:
             continue
         try:
-            if log.stat().st_mtime >= horizon:
+            if attempt.stat().st_mtime >= horizon:
                 recent.add(int(m.group(1)))
         except OSError:
             continue
