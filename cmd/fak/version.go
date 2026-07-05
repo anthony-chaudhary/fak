@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -34,6 +35,24 @@ func cmdVersion(w io.Writer) {
 	if len(os.Args) > 2 && os.Args[2] == "modules" {
 		os.Exit(runVersionModules(os.Stdout, os.Stderr, os.Args[3:]))
 	}
+
+	// `fak version --json` — the machine-readable binary identity (commit + dirty
+	// bit + a "stamped" flag). Unlike the human line 1 (appversion.Current(), which
+	// reads the TREE's VERSION file and so cannot reveal a stale binary), this is
+	// the running binary's OWN provenance, folded from the embedded VCS stamp. It
+	// is what a fleet monitor or a wave-admission skew witness reads to tell one
+	// long-lived running copy from another (epic #2218 gap G2 / risk R2): a
+	// detached worker cannot forge the commit it was built from, because the stamp
+	// travels with the binary, not with the tree it runs against.
+	if versionJSONRequested(os.Args[2:]) {
+		bi, _ := debug.ReadBuildInfo()
+		if err := writeVersionJSON(w, buildIdentity(bi)); err != nil {
+			fmt.Fprintf(os.Stderr, "fak version --json: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	fmt.Fprintln(w, appversion.Current())
 
 	bi, ok := debug.ReadBuildInfo()
@@ -150,4 +169,80 @@ func buildProvenanceLine(bi *debug.BuildInfo) string {
 		return "build: module " + v
 	}
 	return "build: (no VCS stamp — built without module/VCS provenance; cannot confirm the commit)"
+}
+
+// binaryIdentity is the machine-readable provenance of THIS running fak binary: the
+// VCS commit it was built from, whether that build carried uncommitted changes, and
+// whether any VCS stamp is present at all. It is the identity a fleet monitor or a
+// wave-admission skew witness reads to tell one long-lived running copy from another
+// (epic #2218 gap G2 / risk R2). `stamped` is the load-bearing bit: when it is false
+// the binary literally cannot attest which commit it is — the witnessed failure mode
+// that made a mixed-version wave undetectable — so a consumer must treat commit as
+// unknown rather than assume agreement.
+type binaryIdentity struct {
+	AppVersion    string `json:"app_version"`
+	Commit        string `json:"commit"`                   // full vcs.revision; "" when unstamped
+	CommitShort   string `json:"commit_short,omitempty"`   // first 12 hex of Commit
+	Dirty         bool   `json:"dirty"`                    // built from a tree with uncommitted changes
+	CommitTime    string `json:"commit_time,omitempty"`    // vcs.time (RFC3339)
+	Stamped       bool   `json:"stamped"`                  // a real VCS revision is embedded
+	ModuleVersion string `json:"module_version,omitempty"` // bi.Main.Version for the `go install …@vX` path
+	Go            string `json:"go"`
+	OS            string `json:"os"`
+	Arch          string `json:"arch"`
+}
+
+// buildIdentity folds a BuildInfo into the machine-readable identity. It is the pure
+// core of `fak version --json`: same extraction as buildProvenanceLine (vcs.revision
+// / vcs.modified / vcs.time), but structured for a consumer instead of a human line.
+// A nil BuildInfo (ReadBuildInfo reported no embedded info) yields an unstamped
+// identity — Stamped=false, Commit="" — rather than a lie about the commit.
+func buildIdentity(bi *debug.BuildInfo) binaryIdentity {
+	id := binaryIdentity{
+		AppVersion: appversion.Current(),
+		Go:         runtime.Version(),
+		OS:         runtime.GOOS,
+		Arch:       runtime.GOARCH,
+	}
+	if bi == nil {
+		return id
+	}
+	if v := bi.Main.Version; v != "" && v != "(devel)" {
+		id.ModuleVersion = v
+	}
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			id.Commit = s.Value
+		case "vcs.modified":
+			id.Dirty = s.Value == "true"
+		case "vcs.time":
+			id.CommitTime = s.Value
+		}
+	}
+	if id.Commit != "" {
+		id.Stamped = true
+		id.CommitShort = id.Commit
+		if len(id.CommitShort) > 12 {
+			id.CommitShort = id.CommitShort[:12]
+		}
+	}
+	return id
+}
+
+// versionJSONRequested reports whether the version args ask for JSON output.
+func versionJSONRequested(args []string) bool {
+	for _, a := range args {
+		if a == "--json" || a == "-json" {
+			return true
+		}
+	}
+	return false
+}
+
+// writeVersionJSON emits the identity as indented JSON with a trailing newline.
+func writeVersionJSON(w io.Writer, id binaryIdentity) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(id)
 }
