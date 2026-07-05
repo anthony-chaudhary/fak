@@ -302,6 +302,17 @@ func TestLabReadinessFromStatusAdmitsUsefulInference(t *testing.T) {
 	if _, err := os.Stat(readinessPath); err != nil {
 		t.Fatalf("--write-default did not persist the derived readiness record: %v", err)
 	}
+	rawPersisted, err := os.ReadFile(readinessPath)
+	if err != nil {
+		t.Fatalf("read persisted readiness: %v", err)
+	}
+	var persisted fleet.LabReadiness
+	if err := json.Unmarshal(rawPersisted, &persisted); err != nil {
+		t.Fatalf("persisted readiness is not JSON: %v\n%s", err, rawPersisted)
+	}
+	if persisted.Status != rec.Status || persisted.Evidence != "scrubbed-fleet-report" || !persisted.AdmitLabDispatch {
+		t.Fatalf("persisted readiness = %+v, want emitted READY_FOR_DEV_WORK from scrubbed report %+v", persisted, rec)
+	}
 }
 
 func TestLabReadinessFromStatusHoldsWarmingInference(t *testing.T) {

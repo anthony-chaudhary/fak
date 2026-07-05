@@ -48,6 +48,9 @@ func TestLabTargetResolvesReadyGLMTarget(t *testing.T) {
 	if res.Status != fleet.LabReadyForDevWork || res.Alias != "@lab/glm-5.2" || res.Model != "glm-5.2" || res.BoxID != "box-a" {
 		t.Fatalf("resolution = %+v", res)
 	}
+	if res.RemoteServeArg != "@lab/glm-5.2" || res.GuardCommand != labTargetDefaultCommand {
+		t.Fatalf("guard alias handoff = remote_serve_arg %q command %q, want public alias command %q", res.RemoteServeArg, res.GuardCommand, labTargetDefaultCommand)
+	}
 	if strings.Contains(out.String(), "127.0.0.1") || strings.Contains(out.String(), "18181") {
 		t.Fatalf("target JSON must stay scrubbed and not print local coordinates:\n%s", out.String())
 	}
