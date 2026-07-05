@@ -108,6 +108,51 @@ fak guard --remote-serve localhost:8080 -- codex
 The banner shows the upstream as a **remote fak serve on a lab box** so you can see at a
 glance that the turn's compute is where you put it, not on a public API.
 
+## The Codex prompt-size latency envelope
+
+Small OpenAI-compatible clients already complete through the lab route: a minimal
+`fak guard --remote-serve @lab/glm-5.2 --provider openai --probe -- python <smoke>` returns
+model text well inside the probe window. The **Codex** shape is different, and it is worth
+naming why so the next operator does not re-diagnose it:
+
+```bash
+fak guard --remote-serve @lab/glm-5.2 --probe -- \
+  codex exec --ephemeral --ignore-user-config --ignore-rules --skip-git-repo-check \
+    -C <tmp> --sandbox read-only -m glm-5.2 \
+    "Reply with exactly GLM52_OK. Do not inspect files. Do not call tools."
+```
+
+Even a no-repo, no-tools Codex turn carries Codex's own system + developer prompt. After
+proxy shaping caps `max_tokens` and strips tool schemas, the forwarded request is still on
+the order of ~20 KB across a few messages — the bulk is Codex's prompt, not repo context.
+Through the current bridge/model latency envelope that prompt does **not** decode inside a
+10-minute probe, while the small Python smoke does. The blocker is prefill+decode latency
+on a large fixed prompt, not the guard wiring, and not repo context leaking in.
+
+### Honest routes to close it
+
+Pick by what the lab box can give you; each is honest about any request shaping:
+
+- **Faster serving endpoint.** Serve the model on a box/engine whose prefill+decode clears
+  the ~20 KB prompt inside the probe window (a resident GLM-5.2 lane, or a smaller/faster
+  coder GGUF for the smoke). This is the route that closes the acceptance path without
+  changing what Codex sends.
+- **Direct tunnel.** Point `--remote-serve` at a lower-latency localhost tunnel to the
+  serving box so bridge round-trips are not added to the decode budget. Keep the tunnel
+  coordinates in the gitignored local target config, never in tracked files.
+- **Prompt compaction.** Reduce Codex's fixed prompt with its own flags before it reaches
+  the wire (fewer instructions, no tool schemas) so less prefill has to decode. Any shaping
+  the proxy performs (the `max_tokens` cap, the tool-schema strip) must be recorded in the
+  witness so the smoke stays honest about what was sent.
+- **Explicit Codex smoke mode.** A dedicated smoke that sends the minimal Codex-compatible
+  request and states plainly what it trimmed — honest shaping over a green-looking full run.
+
+The live sub-10-minute Codex witness through the lab GLM-5.2 route is **not yet** captured
+from a laptop/desktop that has no lab compute of its own: it needs a faster serving lane or
+tunnel on the lab side to record. Small guarded clients are witnessed; the Codex-sized
+prompt waits on one of the routes above. See #2974 for the tracking issue and #2952/#2953
+for the resolver and live-witness siblings.
+
 ## Driving it from Slack (private bridge)
 
 The Slack control channel that reaches the lab boxes is private — it speaks a lab protocol
