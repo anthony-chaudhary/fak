@@ -469,6 +469,8 @@ func main() {
 		cmdHorizonRecovery(os.Args[2:])
 	case "dogfood-issues":
 		cmdDogfoodIssues(os.Args[2:])
+	case "gh-spam-comments":
+		cmdGHSpamComments(os.Args[2:])
 	case "issue":
 		cmdIssue(os.Args[2:])
 	case "complain":
