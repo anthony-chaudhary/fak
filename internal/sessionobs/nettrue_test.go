@@ -144,6 +144,86 @@ func TestNetTrueDeterministic(t *testing.T) {
 	}
 }
 
+// TestNetTrueWarmCompactionShedIsDiscounted is the #2804 acceptance: a compaction
+// saving must be valued at the cache-read marginal (0.1x) on a WARM fire and only kept
+// at full input (1.0x) on an OBSERVED-COLD fire -- the same B1 basis the Track-2 report
+// applies. The repro is the contrast: an IDENTICAL 6000-token shed reads HELPED when it
+// was booked at 1.0x (the pre-fix defect) but is honestly WASH once the warm shed is
+// re-valued, while the cold fire keeps the full-value HELPED.
+func TestNetTrueWarmCompactionShedIsDiscounted(t *testing.T) {
+	rec := Record{SessionID: "warm-fire", AssistantTurns: 12, OutputTokens: 4000,
+		Outcome: OutcomeShipped, Signals: Signals{Commits: 1}}
+
+	// WARM: the 6000 shed tokens were live provider cache-reads -> worth 0.1x, not 1.0x.
+	warm := Mediation{
+		TokensAdded: 250, TokensSaved: 6000, CompactionShedTokens: 6000, ColdFire: false,
+		MediationNanos: 1_000_000, SavedProvenance: ProvObserved,
+	}
+	warmRow := NetTrue(rec, warm)
+	// effectiveSaved = 6000 - (6000 - floor(6000*0.1)) = 600; net = 600 - 250 = 350.
+	if warmRow.TokensSaved != 600 {
+		t.Errorf("warm shed should re-value 6000 -> 600 (0.1x), got %d", warmRow.TokensSaved)
+	}
+	if warmRow.NetTokens != 350 {
+		t.Errorf("warm net should be 600-250 = 350, got %d", warmRow.NetTokens)
+	}
+	if warmRow.Verdict != "WASH" {
+		t.Fatalf("a warm compaction saving must not read HELPED after the 0.1x discount, got %q (band=%d net=%d)",
+			warmRow.Verdict, warmRow.Band, warmRow.NetTokens)
+	}
+
+	// The pre-fix defect, made explicit: booking the SAME shed at 1.0x would have been a
+	// clear HELPED. The discount is what turns the over-valued win into an honest WASH.
+	grossNet := warm.TokensSaved - warm.TokensAdded // 5750, the un-netted number
+	if grossNet < warmRow.Band {
+		t.Fatalf("test is not exercising the defect: gross net %d should clear band %d (would be HELPED unfixed)",
+			grossNet, warmRow.Band)
+	}
+
+	// COLD: same shed, but observed-cold -> the tokens were NOT cache-reads, keep 1.0x.
+	cold := warm
+	cold.ColdFire = true
+	coldRow := NetTrue(rec, cold)
+	if coldRow.TokensSaved != 6000 {
+		t.Errorf("cold shed must keep full 1.0x basis, got %d (want 6000)", coldRow.TokensSaved)
+	}
+	if coldRow.NetTokens != 5750 {
+		t.Errorf("cold net should be 6000-250 = 5750, got %d", coldRow.NetTokens)
+	}
+	if coldRow.Verdict != "HELPED" {
+		t.Fatalf("a cold (full-basis) compaction saving above band should be HELPED, got %q", coldRow.Verdict)
+	}
+
+	// The warm detail must SAY it re-valued the shed, so the ledger is auditable, not silent.
+	if !strings.Contains(warmRow.Detail, "re-valued") {
+		t.Errorf("warm detail should disclose the B1 re-valuation, got %q", warmRow.Detail)
+	}
+}
+
+// TestNetTrueCompactionBasisAgreesWithReport pins sessionobs' warm-fire basis to the
+// SAME 0.1x the Track-2 report uses (internal/cachevaluereport/track2.go
+// `providerCacheReadMultiplier`). sessionobs is tier-1 and imports nothing internal, so
+// the two constants are copies; this test is the guard that they cannot silently drift
+// -- the #2804 "sessionobs and cachevaluereport agree on the compaction net" acceptance.
+func TestNetTrueCompactionBasisAgreesWithReport(t *testing.T) {
+	const reportProviderCacheReadMultiplier = 0.1 // cachevaluereport/track2.go:46
+	if compactionCacheReadMarginal != reportProviderCacheReadMultiplier {
+		t.Fatalf("sessionobs compaction basis %.3f must match the report's cache-read marginal %.3f",
+			compactionCacheReadMarginal, reportProviderCacheReadMultiplier)
+	}
+	// A pure local-reuse saving (no compaction shed) must be untouched by the basis -- the
+	// discount only ever removes phantom warm-shed value, never real vDSO/radix reuse.
+	local := Mediation{TokensAdded: 100, TokensSaved: 5000, MediationNanos: 1000, SavedProvenance: ProvWitnessed}
+	if got := local.effectiveSaved(); got != 5000 {
+		t.Errorf("pure local reuse must not be discounted, got %d (want 5000)", got)
+	}
+	// A mislabeled shed larger than the saving it belongs to clamps, never goes negative.
+	over := Mediation{TokensSaved: 1000, CompactionShedTokens: 5000}
+	if got := over.effectiveSaved(); got != 100 { // clamp shed->1000, 0.1x -> 100
+		t.Errorf("an over-large shed should clamp to the saving, got %d (want 100)", got)
+	}
+}
+
 // TestRenderNetTrueSmoke: the per-session terminal view renders the verdict + detail.
 func TestRenderNetTrueSmoke(t *testing.T) {
 	var buf bytes.Buffer

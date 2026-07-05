@@ -66,6 +66,17 @@ const minNetBand = 256
 // as a real HELPED/HURT rather than noise. 20 -> 5% of throughput.
 const netBandDivisor = 20
 
+// compactionCacheReadMarginal is the fraction of full input a compaction-shed token is
+// worth on a WARM fire -- the B1 basis (epic #2783, #2794/#2798). On a warm fire the
+// shed tokens were already provider cache-reads (billed at the read marginal), so
+// dropping them saves the read marginal per turn, NOT full input; booking the shed at
+// 1.0x over-values the saving ~7.7x-10x on warm traffic. This mirrors
+// internal/cachevaluereport/track2.go's `providerCacheReadMultiplier = 0.1` so the
+// per-session net-true ledger and the Track-2 report agree on the compaction net
+// (#2804). sessionobs is tier-1 (imports nothing internal), so the constant is copied,
+// not imported -- the test pins both to the same 0.1 so the mirror cannot silently drift.
+const compactionCacheReadMarginal = 0.1
+
 // Provenance labels how a reported number was obtained, the net-true vocabulary
 // (docs/standards/net-true-value.md Question #4). The zero value is MODELED -- an
 // unlabeled figure is a projection until a caller proves otherwise, never a silent
@@ -137,7 +148,22 @@ type Mediation struct {
 	TokensAdded int64 `json:"tokens_added"`
 	// TokensSaved is the tokens fak's reuse SAVED (vDSO tool-result reuse, RadixAttention
 	// prefix reuse, compaction). A mediation BENEFIT. Its provenance is SavedProvenance.
+	// For compaction, this is the GROSS shed; the warm-fire discount below is applied by
+	// effectiveSaved before the number reaches the net -- so callers still fold the raw
+	// shed here, and the basis lives in one place.
 	TokensSaved int64 `json:"tokens_saved"`
+	// CompactionShedTokens is the portion of TokensSaved that came from compaction shed
+	// (as opposed to vDSO/radix LOCAL reuse, which is worth its full marginal). On a warm
+	// fire those shed tokens were provider cache-reads, so this portion is re-valued from
+	// 1.0x down to compactionCacheReadMarginal before it counts toward the net -- the B1
+	// basis (#2804). 0 (the default) means "no compaction shed in this saving", so a pure
+	// local-reuse session is unchanged. Must be <= TokensSaved.
+	CompactionShedTokens int64 `json:"compaction_shed_tokens,omitempty"`
+	// ColdFire records that the compaction fire was OBSERVED-cold: the shed tokens were
+	// NOT live provider cache-reads, so they keep the full 1.0x input basis. The default
+	// (false = warm) is the honest, over-valued-if-unfixed common case -- a caller must
+	// prove cold to claim full value, never the reverse.
+	ColdFire bool `json:"cold_fire,omitempty"`
 	// MediationNanos is the wall-clock ns fak spent mediating (adjudication + result
 	// admission), the time-domain cost surfaced beside the token-domain net.
 	MediationNanos int64 `json:"mediation_nanos"`
@@ -151,6 +177,26 @@ type Mediation struct {
 // with no measured mediation has nothing to judge and reads WASH/MODELED.
 func (m Mediation) any() bool {
 	return m.TokensAdded != 0 || m.TokensSaved != 0 || m.MediationNanos != 0
+}
+
+// effectiveSaved is TokensSaved with the warm-fire compaction-shed portion re-valued
+// from full input (1.0x) down to the cache-read marginal (compactionCacheReadMarginal),
+// the B1 basis (#2804). Pure local reuse (CompactionShedTokens == 0) and observed-cold
+// fires (ColdFire) are returned untouched, so this only ever REMOVES phantom value --
+// it can never inflate a saving. The discount is floor-rounded, so it never credits a
+// fractional token the provider would not have billed.
+func (m Mediation) effectiveSaved() int64 {
+	shed := m.CompactionShedTokens
+	if shed <= 0 || m.ColdFire {
+		return m.TokensSaved // no warm compaction shed to discount
+	}
+	if shed > m.TokensSaved {
+		shed = m.TokensSaved // clamp: the shed portion cannot exceed the saving it is part of
+	}
+	// The shed was booked at 1.0x; on a warm fire it is worth only the read marginal.
+	// Remove the over-count = shed - floor(shed * marginal).
+	marginal := int64(float64(shed) * compactionCacheReadMarginal)
+	return m.TokensSaved - (shed - marginal)
 }
 
 // NetTrueRow is one session's net-true ledger row -- the per-SESSION analog of
@@ -188,7 +234,13 @@ type NetTrueRow struct {
 // saving-dominated row carries SavedProvenance, a cost-dominated row is WITNESSED (fak
 // authored the tokens it added and the ns it spent), a row with no mediation is MODELED.
 func NetTrue(rec Record, med Mediation) NetTrueRow {
-	net := med.TokensSaved - med.TokensAdded
+	// saved is the net-true benefit: TokensSaved with any warm compaction shed re-valued
+	// at the cache-read marginal (B1, #2804). The net and the reported saving both use it
+	// so the row's NetTokens = TokensSaved - TokensAdded invariant still holds honestly.
+	saved := med.effectiveSaved()
+	net := saved - med.TokensAdded
+	// throughput measures WORK done (the tokens that actually flowed), so it uses the
+	// gross shed -- the band scales with activity, not with the discounted value.
 	throughput := rec.OutputTokens + med.TokensAdded + med.TokensSaved
 	band := throughput / netBandDivisor
 	if band < minNetBand {
@@ -203,7 +255,7 @@ func NetTrue(rec Record, med Mediation) NetTrueRow {
 		Verdict:        verdict.String(),
 		Provenance:     netProvenance(med).String(),
 		TokensAdded:    med.TokensAdded,
-		TokensSaved:    med.TokensSaved,
+		TokensSaved:    saved,
 		NetTokens:      net,
 		MediationNanos: med.MediationNanos,
 		Band:           band,
@@ -235,7 +287,10 @@ func netProvenance(med Mediation) Provenance {
 	if !med.any() {
 		return ProvModeled // nothing measured -- honestly a projection, not a witness
 	}
-	if med.TokensSaved > med.TokensAdded {
+	// Dominance is judged on the EFFECTIVE (post-B1-discount) saving, so a warm compaction
+	// saving that shrinks below its own cost is honestly reported cost-dominated (WITNESSED),
+	// not quoted with the saved figure's authority for value it no longer has.
+	if med.effectiveSaved() > med.TokensAdded {
 		return med.SavedProvenance // saving-dominated: carries the saved figure's label
 	}
 	return ProvWitnessed // cost-dominated: fak authored the tokens it added + the ns it spent
@@ -251,9 +306,17 @@ func netDetail(rec Record, med Mediation, verdict NetTrueVerdict, net, band int6
 	case rec.Outcome == OutcomeStopped:
 		side = "waste"
 	}
+	saved := med.effectiveSaved()
+	// When the warm-fire B1 discount actually removed value, say so -- an operator reading
+	// the ledger sees the gross shed was re-valued, not silently shrunk.
+	basis := ""
+	if saved < med.TokensSaved {
+		basis = fmt.Sprintf(" [warm compaction shed %d re-valued at %.1fx: gross %d]",
+			med.CompactionShedTokens, compactionCacheReadMarginal, med.TokensSaved)
+	}
 	return fmt.Sprintf(
-		"%s: mediation saved %d, added %d tokens (net %+d vs band %d) over %dns on a %s (%s) session",
-		verdict, med.TokensSaved, med.TokensAdded, net, band, med.MediationNanos, side, rec.Outcome)
+		"%s: mediation saved %d, added %d tokens (net %+d vs band %d) over %dns on a %s (%s) session%s",
+		verdict, saved, med.TokensAdded, net, band, med.MediationNanos, side, rec.Outcome, basis)
 }
 
 // RenderNetTrue writes the human one-liner for a row, the terminal view the shell
