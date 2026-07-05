@@ -208,6 +208,9 @@ func guardInfoTasksPanelRows(ctx guardInfoPanelCtx, level guardInfoPanelLevel) [
 	if split := guardInfoCacheAttributionText(v); split != "" {
 		cacheRow += " · " + split
 	}
+	if posture := guardInfoManagedCacheText(v); posture != "" {
+		cacheRow += " · " + posture
+	}
 	if level == guardPanelMini {
 		return []string{cacheRow}
 	}

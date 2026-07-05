@@ -99,6 +99,12 @@ type guardInfoVars struct {
 		Status          string  `json:"status"`
 	} `json:"vcache"`
 	CacheAttribution *guardInfoCacheAttribution `json:"cache_attribution"`
+	// ManagedCache is #2190's managed-cache 1h TTL-upgrade posture: whether the lever is
+	// on for this session and, when on, whether it is paying (upgrades) or inert (every
+	// head refused). Rendered from /debug/vars only, mirroring debugManagedCacheVars
+	// field-for-field. Pointer, like CacheAttribution, so a passive/cold session omits the
+	// block rather than fabricating an all-zero posture.
+	ManagedCache *guardInfoManagedCache `json:"managed_cache"`
 	// PrefixStability is issue #1602's managed-context prefix-stability score: whether
 	// the stable/cacheable prefix (system + tools + any protected span) survived the
 	// last turn/reset boundary byte-identical. It is a pointer, like VCache, so a
@@ -194,6 +200,18 @@ type guardInfoPrefixStability struct {
 	FirstDivergentKind        string `json:"first_divergent_kind"`
 	ProtectedSpanBroken       bool   `json:"protected_span_broken"`
 	Reason                    string `json:"reason"`
+}
+
+// guardInfoManagedCache is the wire shape of the gateway's /debug/vars managed_cache block
+// (internal/gateway debugManagedCacheVars), field-for-field, so a gateway that starts
+// populating it needs no change here. Active is the 1h TTL-upgrade lever state; Inert marks
+// the #2190 ACTIVE-but-inert signal (lever on, zero upgrades). Reasons is the per-refusal
+// outcome breakdown (refusal-only; the "upgraded" outcome lives in Upgraded).
+type guardInfoManagedCache struct {
+	Active   bool              `json:"active"`
+	Inert    bool              `json:"inert"`
+	Upgraded uint64            `json:"upgraded"`
+	Reasons  map[string]uint64 `json:"reasons,omitempty"`
 }
 
 type guardInfoCacheAttribution struct {
@@ -759,6 +777,9 @@ func renderGuardInfoLine(v guardInfoVars) string {
 	if split := guardInfoCacheAttributionText(v); split != "" {
 		cache += " · " + split
 	}
+	if posture := guardInfoManagedCacheText(v); posture != "" {
+		cache += " · " + posture
+	}
 	line := fmt.Sprintf("%s · %s · replies %d · busy with %d · running %s",
 		cache,
 		guardSafetyWord(v),
@@ -991,6 +1012,41 @@ func guardInfoCacheAttributionText(v guardInfoVars) string {
 	return fmt.Sprintf("split default cache %.0f%% (~%s tok) + fak %.0f%% (~%s tok)",
 		providerPct, gateway.HumanTokenEquiv(provider),
 		fakPct, gateway.HumanTokenEquiv(fak))
+}
+
+// guardInfoManagedCacheText renders the managed-cache posture clause for the live line: the
+// 1h TTL-upgrade lever state and, when ACTIVE, whether it is paying (upgrades) or inert
+// (every head refused — the #2190 misconfiguration signal, named with its dominant reason so
+// the operator can see WHY the lever bought nothing). Empty when the gateway omitted the
+// block (a passive, cold session), so the common passthrough line stays quiet.
+func guardInfoManagedCacheText(v guardInfoVars) string {
+	mc := v.ManagedCache
+	if mc == nil {
+		return ""
+	}
+	if !mc.Active {
+		return "managed cache off"
+	}
+	if mc.Inert {
+		if reason := topTTLUpgradeReason(mc.Reasons); reason != "" {
+			return fmt.Sprintf("managed cache ACTIVE but inert (0 upgrades, mostly %s)", reason)
+		}
+		return "managed cache ACTIVE but inert (0 upgrades)"
+	}
+	return fmt.Sprintf("managed cache ACTIVE (%d TTL-upgraded head(s))", mc.Upgraded)
+}
+
+// topTTLUpgradeReason returns the most-frequent refusal reason in the ttl-upgrade outcome
+// map, ties broken by reason name so the line is deterministic despite Go's random map
+// iteration order. Empty string when the map is empty.
+func topTTLUpgradeReason(reasons map[string]uint64) string {
+	best, bestN := "", uint64(0)
+	for r, n := range reasons {
+		if n > bestN || (n == bestN && (best == "" || r < best)) {
+			best, bestN = r, n
+		}
+	}
+	return best
 }
 
 func ownerSplitPct(provider, fak, total float64) (providerPct, fakPct float64) {

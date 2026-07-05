@@ -21,6 +21,7 @@ type debugVarsResponse struct {
 	Upstream         debugUpstreamVars              `json:"upstream"`
 	VCache           *debugVCacheVars               `json:"vcache,omitempty"`
 	CacheAttribution *debugCacheAttributionVars     `json:"cache_attribution,omitempty"`
+	ManagedCache     *debugManagedCacheVars         `json:"managed_cache,omitempty"`
 	VCacheFamilies   *debugVCacheFamiliesVars       `json:"vcache_families,omitempty"`
 	VCacheGovernor   []vcacheGovernorDecisionRecord `json:"vcache_governor_journal,omitempty"`
 	VCacheWarmth     []vcacheWarmthDemotionRecord   `json:"vcache_warmth_demotions,omitempty"`
@@ -441,6 +442,7 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		Upstream:         upstream,
 		VCache:           vcacheVarsFromSnapshot(infer),
 		CacheAttribution: cacheAttributionVars(m.adjudicationSummary(), c.VDSOHits, m.servedInlineSnapshot()),
+		ManagedCache:     managedCacheVars(s.cacheTTL1H, m.adjudicationSummary()),
 		VCacheFamilies:   vcacheFamiliesVars(vcacheTurns, vcacheCapped),
 		VCacheGovernor:   m.vcacheGovernorDecisionRecords(),
 		VCacheWarmth:     m.vcacheWarmthDemotionRecords(),
@@ -800,6 +802,43 @@ func cacheAttributionVars(sum AdjudicationSummary, vdsoHits int64, servedInline 
 		FakCompactionShedTokens:                   ms.FakCompactionShedTokens,
 		FakKVPrefixReusedTokens:                   ms.FakKVPrefixReusedTokens,
 		FakVDSOAvoidedCalls:                       ms.FakVDSOAvoidedCalls,
+	}
+}
+
+// debugManagedCacheVars surfaces the managed-cache 1h TTL-upgrade POSTURE and its outcome
+// counts LIVE on /debug/vars — the posture sibling of the #1849 cache_attribution owner
+// split (#2190). Active is the resolved lever state (Server.cacheTTL1H, from
+// --managed-cache / Config.CacheTTL1H) independent of whether any head was eligible;
+// Upgraded and Reasons mirror the AdjudicationSummary.CacheTTLUpgrade* fields the durable
+// gateway-usage ledger (internal/gatewayusageledger) and the fak_gateway_cache_ttl_upgrade_total
+// family carry, so the live pane, the /metrics counter, and the ledger row report the same
+// numbers. Inert names the misconfiguration signal the weekly review's ACTIVE-but-inert gap
+// keys on: the lever is ON but every head refused, so a long idle session pays the 5m
+// re-write the operator opted out of — visible here as a zero-upgrade ACTIVE posture rather
+// than an absent panel.
+type debugManagedCacheVars struct {
+	Active   bool              `json:"active"`
+	Inert    bool              `json:"inert"`
+	Upgraded uint64            `json:"upgraded"`
+	Reasons  map[string]uint64 `json:"reasons,omitempty"`
+}
+
+// managedCacheVars builds the /debug/vars managed-cache posture block from the session's
+// resolved lever state (active) and the SAME AdjudicationSummary ttl-upgrade fields the
+// ledger row folds. It returns nil — omitting the block — only when the lever is OFF and
+// nothing was observed, so a passive, cold session stays quiet; an ACTIVE session renders
+// even at zero upgrades (Inert=true), keeping "the lever fired and paid" distinct from "the
+// lever is off" on the live surface. Reasons is refusal-only (the "upgraded" outcome lives
+// in Upgraded), inherited from AdjudicationSummary.
+func managedCacheVars(active bool, sum AdjudicationSummary) *debugManagedCacheVars {
+	if !active && sum.CacheTTLUpgraded == 0 && len(sum.CacheTTLUpgradeReasons) == 0 {
+		return nil
+	}
+	return &debugManagedCacheVars{
+		Active:   active,
+		Inert:    active && sum.CacheTTLUpgraded == 0,
+		Upgraded: sum.CacheTTLUpgraded,
+		Reasons:  sum.CacheTTLUpgradeReasons,
 	}
 }
 
