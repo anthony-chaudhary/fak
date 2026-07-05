@@ -3077,13 +3077,41 @@ def witness_exited_workers(runs_dir: Path, root: Path, *, live: bool,
         m = _LOG_ISSUE_RE.search(log.name)
         if not m:
             continue
-        if log.with_suffix(WITNESS_SIDECAR_SUFFIX).exists():
-            continue  # audited once; a commit's diff (so its verdict) is immutable
+        witness_path = log.with_suffix(WITNESS_SIDECAR_SUFFIX)
+        already_witnessed = witness_path.exists()
         pid_file = log.with_suffix(".pid")
         if not pid_file.exists():
             continue  # no pid -> cannot prove the worker finished -> not yet auditable
         if dispatch_preflight.resolve_sidecar_pid_is_live(pid_file, alive=alive, probe=probe):
             continue  # still running -> it may not have committed yet
+        if already_witnessed:
+            # Older ticks may have stamped the immutable commit witness before the
+            # fenced lane-lease release path existed or after a transient release
+            # failure. Retry the release for dead workers, but never re-audit the
+            # commit verdict.
+            if live:
+                try:
+                    witness_doc = json.loads(witness_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    witness_doc = {}
+                prior_release = witness_doc.get("lease_release") if isinstance(witness_doc, dict) else {}
+                if not (isinstance(prior_release, dict) and prior_release.get("released")):
+                    lease = read_lease_sidecar(log)
+                    if lease:
+                        rel = release_lane_lease(root, lease, runner=lease_runner)
+                        if rel.get("released"):
+                            out["lease_released"].append(rel)
+                        else:
+                            out["lease_release_failed"].append(rel)
+                        if isinstance(witness_doc, dict):
+                            witness_doc["lease_release"] = rel
+                            try:
+                                witness_path.write_text(
+                                    json.dumps(witness_doc, sort_keys=True),
+                                    encoding="utf-8")
+                            except OSError:
+                                pass
+            continue  # audited once; a commit's diff (so its verdict) is immutable
         issue = int(m.group(1))
         try:
             base = log.with_suffix(BASE_SHA_SIDECAR_SUFFIX).read_text(

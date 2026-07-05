@@ -3738,6 +3738,39 @@ class WitnessExitedWorkersTest(unittest.TestCase):
                                              git=boom_git)
             self.assertEqual(out["audited"], [])
 
+    def test_already_witnessed_dead_worker_releases_recorded_lane_lease(self) -> None:
+        import json
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            log = self._mk(runs, 1324, "20260629-120450", pid=4249)
+            log.with_suffix(".witness").write_text(
+                json.dumps({"claim": "CLAIM_WITNESSED"}), encoding="utf-8")
+            log.with_suffix(".lease").write_text(json.dumps({
+                "id": "resolve-tools",
+                "holder": "session-2",
+                "generation": 8,
+                "tree": ["tools/**"],
+            }), encoding="utf-8")
+            def boom_git(root, args):
+                raise AssertionError("an already-witnessed worker must not be re-audited")
+            seen: dict = {}
+            def lease_runner(root, args, **k):
+                seen["args"] = list(args)
+                return {"rc": 0, "verdict": {"ok": True}}
+            out = mod.witness_exited_workers(runs, ROOT, live=True, probe=self._dead,
+                                             git=boom_git, lease_runner=lease_runner)
+            self.assertEqual(out["audited"], [])
+            self.assertEqual(len(out["lease_released"]), 1)
+            self.assertEqual(out["lease_released"][0]["id"], "resolve-tools")
+            argv = seen["args"]
+            self.assertEqual(argv[0], "release")
+            self.assertEqual(argv[argv.index("--holder") + 1], "session-2")
+            self.assertEqual(argv[argv.index("--generation") + 1], "8")
+            side = json.loads(log.with_suffix(".witness").read_text(encoding="utf-8"))
+            self.assertTrue(side["lease_release"]["released"])
+
     def test_dry_run_audits_but_writes_no_sidecar(self) -> None:
         import json
         import tempfile
