@@ -151,6 +151,67 @@ func TestDiagnoseRows_EmptyJournalIsSound(t *testing.T) {
 	}
 }
 
+func TestDiagnoseRows_ReportsRepeatedAllowedCallLivelock(t *testing.T) {
+	var rows []journal.Row
+	prev := ""
+	for i := uint64(1); i <= 4; i++ {
+		r, h := mintRow(i, prev, journal.Row{
+			Kind:       "DECIDE",
+			Tool:       "shell_command",
+			Verdict:    "ALLOW",
+			Reason:     "NONE",
+			ArgsDigest: "sha256:repeat",
+		})
+		rows = append(rows, r)
+		prev = h
+	}
+	d := diagnoseRows("x", rows)
+	if d.Verdict != diagVerdictSound || len(d.LivelockCandidates) != 1 {
+		t.Fatalf("sound repeated-allow journal should expose one livelock candidate: %+v", d)
+	}
+	c := d.LivelockCandidates[0]
+	if c.Tool != "shell_command" || c.Verdict != "ALLOW" || c.DigestKind != "args_digest" || c.Digest != "sha256:repeat" || c.Count != 4 || c.LongestRun != 4 {
+		t.Fatalf("wrong repeated allowed candidate: %+v", c)
+	}
+}
+
+func TestRunAuditDiagnose_RenderReportsRepeatedQuarantine(t *testing.T) {
+	var rows []journal.Row
+	prev := ""
+	for i := uint64(1); i <= 3; i++ {
+		r, h := mintRow(i, prev, journal.Row{
+			Kind:         "QUARANTINE",
+			Tool:         "tool_result",
+			Verdict:      "QUARANTINE",
+			Reason:       "SECRET_EXFIL",
+			ArgsDigest:   "sha256:stable-poison",
+			ResultDigest: fmt.Sprintf("sha256:rewrite-%d", i),
+		})
+		rows = append(rows, r)
+		prev = h
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "guard-audit.jsonl")
+	writeRowsFile(t, path, rows)
+
+	var stdout, stderr bytes.Buffer
+	code := runAuditDiagnose(&stdout, &stderr, path, false)
+	if code != 0 {
+		t.Fatalf("sound quarantine journal should exit 0, got %d (stderr=%s)", code, stderr.String())
+	}
+	for _, want := range []string{
+		"loop candidates",
+		"tool_result",
+		"SECRET_EXFIL",
+		"args_digest=sha256:stable-poison",
+		"longest_run=3",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("render missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
 // TestRunAuditDiagnose_InterleavedExitsZero writes an interleaved-but-intact journal to a
 // temp file and confirms the command exits 0 (a fleet user's default journal is trustworthy)
 // and the render names the INTERLEAVED verdict.

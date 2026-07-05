@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 	"github.com/anthony-chaudhary/fak/internal/journal"
@@ -91,7 +92,26 @@ type auditDiagnosis struct {
 
 	// Friction: what the floor decided across the corpus (verdict + reason counts).
 	Friction guardrsi.Fold `json:"friction"`
+
+	// LivelockCandidates are repeated identical outcome identities in an otherwise
+	// sound journal. They are diagnostic, not integrity findings: a hash chain can be
+	// SOUND while the wrapped session is stuck re-emitting the same allowed call or
+	// quarantined result.
+	LivelockThreshold  int                      `json:"livelock_threshold,omitempty"`
+	LivelockCandidates []auditLivelockCandidate `json:"livelock_candidates,omitempty"`
 }
+
+type auditLivelockCandidate struct {
+	Tool       string `json:"tool"`
+	Verdict    string `json:"verdict"`
+	Reason     string `json:"reason,omitempty"`
+	DigestKind string `json:"digest_kind"`
+	Digest     string `json:"digest"`
+	Count      int    `json:"count"`
+	LongestRun int    `json:"longest_run"`
+}
+
+const auditDiagnoseLivelockThreshold = 3
 
 const (
 	diagVerdictSound       = "SOUND"
@@ -133,6 +153,10 @@ func diagnoseRows(path string, rows []journal.Row) auditDiagnosis {
 		d.Verdict = diagVerdictSound // an empty journal is trivially sound (nothing to break)
 		d.LinearOK = true
 		return d
+	}
+	d.LivelockCandidates = diagnoseLivelockCandidates(rows, auditDiagnoseLivelockThreshold)
+	if len(d.LivelockCandidates) > 0 {
+		d.LivelockThreshold = auditDiagnoseLivelockThreshold
 	}
 
 	// 1. The linear read — exactly what `fak audit verify` does. A clean pass is the
@@ -206,6 +230,118 @@ func diagnoseRows(path string, rows []journal.Row) auditDiagnosis {
 		d.Verdict = diagVerdictInterleaved
 	}
 	return d
+}
+
+type auditLivelockKey struct {
+	tool       string
+	verdict    string
+	reason     string
+	digestKind string
+	digest     string
+}
+
+type auditLivelockAccumulator struct {
+	key        auditLivelockKey
+	count      int
+	longestRun int
+}
+
+func diagnoseLivelockCandidates(rows []journal.Row, threshold int) []auditLivelockCandidate {
+	if threshold <= 0 {
+		threshold = auditDiagnoseLivelockThreshold
+	}
+	counts := map[auditLivelockKey]*auditLivelockAccumulator{}
+	var last auditLivelockKey
+	lastOK := false
+	run := 0
+	for _, r := range rows {
+		key, ok := auditLivelockKeyForRow(r)
+		if !ok {
+			lastOK = false
+			run = 0
+			continue
+		}
+		acc := counts[key]
+		if acc == nil {
+			acc = &auditLivelockAccumulator{key: key}
+			counts[key] = acc
+		}
+		acc.count++
+		if lastOK && key == last {
+			run++
+		} else {
+			run = 1
+		}
+		if run > acc.longestRun {
+			acc.longestRun = run
+		}
+		last = key
+		lastOK = true
+	}
+	out := make([]auditLivelockCandidate, 0, len(counts))
+	for _, acc := range counts {
+		if acc.count < threshold && acc.longestRun < threshold {
+			continue
+		}
+		out = append(out, auditLivelockCandidate{
+			Tool:       acc.key.tool,
+			Verdict:    acc.key.verdict,
+			Reason:     acc.key.reason,
+			DigestKind: acc.key.digestKind,
+			Digest:     acc.key.digest,
+			Count:      acc.count,
+			LongestRun: acc.longestRun,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].LongestRun != out[j].LongestRun {
+			return out[i].LongestRun > out[j].LongestRun
+		}
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		if out[i].Verdict != out[j].Verdict {
+			return out[i].Verdict < out[j].Verdict
+		}
+		if out[i].Tool != out[j].Tool {
+			return out[i].Tool < out[j].Tool
+		}
+		return out[i].Digest < out[j].Digest
+	})
+	if len(out) > 5 {
+		out = out[:5]
+	}
+	return out
+}
+
+func auditLivelockKeyForRow(r journal.Row) (auditLivelockKey, bool) {
+	tool := strings.TrimSpace(r.Tool)
+	verdict := strings.ToUpper(strings.TrimSpace(r.Verdict))
+	if verdict == "" {
+		verdict = strings.ToUpper(strings.TrimSpace(r.Kind))
+	}
+	if verdict == "RESULT_DENY" {
+		verdict = "QUARANTINE"
+	}
+	if tool == "" || verdict == "" {
+		return auditLivelockKey{}, false
+	}
+	digestKind, digest := "", ""
+	if strings.TrimSpace(r.ArgsDigest) != "" {
+		digestKind, digest = "args_digest", strings.TrimSpace(r.ArgsDigest)
+	} else if strings.TrimSpace(r.ResultDigest) != "" {
+		digestKind, digest = "result_digest", strings.TrimSpace(r.ResultDigest)
+	}
+	if digest == "" {
+		return auditLivelockKey{}, false
+	}
+	return auditLivelockKey{
+		tool:       tool,
+		verdict:    verdict,
+		reason:     strings.TrimSpace(r.Reason),
+		digestKind: digestKind,
+		digest:     digest,
+	}, true
 }
 
 // reconstructChain walks parent pointers from a tip row up to a genesis (prev_hash==""),
@@ -285,6 +421,17 @@ func renderAuditDiagnosis(d auditDiagnosis) string {
 	}
 	if f.BlankReasonOnDeny > 0 {
 		out("    ⚠ %d block(s) carried no reason (a closed-vocabulary reason should accompany every deny)\n", f.BlankReasonOnDeny)
+	}
+	if len(d.LivelockCandidates) > 0 {
+		out("  loop candidates: %d repeated outcome identity(s) at threshold %d\n", len(d.LivelockCandidates), d.LivelockThreshold)
+		for _, c := range d.LivelockCandidates {
+			reason := c.Reason
+			if reason == "" {
+				reason = "NONE"
+			}
+			out("    repeated: %-20s %-10s %-16s %s=%s count=%d longest_run=%d\n",
+				c.Tool, c.Verdict, reason, c.DigestKind, c.Digest, c.Count, c.LongestRun)
+		}
 	}
 	return string(b)
 }
