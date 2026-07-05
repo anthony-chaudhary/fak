@@ -223,8 +223,22 @@ func dryRunHint(tool, cmd string) string {
 	// gh call never reaches this hint.
 	case strings.Contains(lowerTool, "create_issue") || strings.Contains(lowerTool, "issue_create"):
 		return "file it with the sanctioned compiled verb: fak issue create --title … --body-file … (a trusted-binary path the kernel admits)"
+	// A Bash `slack …` HEAD (or an MCP tool whose name contains "slack") is escalated
+	// outward-facing by commandOutwardFacing/toolOutwardFacing; point it at the compiled
+	// `fak slack send` verb (cmd/fak/slack.go), a trusted-binary sidestep the kernel
+	// admits. Matched on the segment HEAD — mirroring the classifier — not a bare
+	// substring, so `git push origin slack-feature` keeps its own git-push hint below,
+	// and sendmail/mail/mutt (no fak equivalent) fall through to the empty default.
+	case strings.Contains(lowerTool, "slack") || segmentHeadIs(commandSegments(cmd), "slack"):
+		return "send it with the sanctioned compiled verb: fak slack send (a trusted-binary path the kernel admits)"
+	// git push is escalated outward-facing; name the compiled sidestep FIRST — a safe,
+	// non-force push the kernel admits because its command head is `fak`, not `git push`
+	// — with the --dry-run preview kept as the secondary option. Before #2651's pattern
+	// was generalized here, this hint named only `git push --dry-run`, which previews
+	// nothing and funnels the agent straight back to the gated real push (the confirm
+	// loop in docs/notes/CONFIRM-GATE-DEADLOCK-2026-07-04.md).
 	case strings.Contains(lowerCmd, "git push") || strings.Contains(lowerTool, "git_push"):
-		return "try git push --dry-run first"
+		return "push with the safe compiled verb: fak sync push (a trusted-binary non-force push the kernel admits), or preview first with git push --dry-run"
 	case strings.Contains(lowerCmd, "npm publish"):
 		return "try npm publish --dry-run first"
 	default:

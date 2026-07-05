@@ -32,11 +32,48 @@ func TestReversibilityClassifiesCommands(t *testing.T) {
 			want: ReversibilityIrreversible,
 		},
 		{
-			name: "publish command is outward-facing",
+			// git push stays gated, but the recovery hint now NAMES the compiled
+			// sidestep (fak sync push) first — generalizing #2651's fak-issue-create
+			// pattern to the git-push family so the agent isn't sent into the
+			// confirm-token loop (docs/notes/CONFIRM-GATE-DEADLOCK-2026-07-04.md).
+			name: "publish command is outward-facing and names fak sync push",
 			tool: "Bash",
 			args: map[string]any{"command": "git push origin main"},
 			want: ReversibilityOutwardFacing,
-			hint: "try git push --dry-run first",
+			hint: "push with the safe compiled verb: fak sync push (a trusted-binary non-force push the kernel admits), or preview first with git push --dry-run",
+		},
+		{
+			// The sidestep the hint names must actually clear the gate: `fak sync
+			// push` has command head `fak`, not `git push`, so it is reversible.
+			name: "fak sync push sidesteps the git-push gate",
+			tool: "Bash",
+			args: map[string]any{"command": "fak sync push"},
+			want: ReversibilityReversible,
+		},
+		{
+			// A git push whose branch merely CONTAINS "slack" keeps its git-push
+			// hint — the slack case is segment-head-guarded, not substring-matched.
+			name: "git push of a slack-named branch keeps the git-push hint",
+			tool: "Bash",
+			args: map[string]any{"command": "git push origin fix/slack-integration"},
+			want: ReversibilityOutwardFacing,
+			hint: "push with the safe compiled verb: fak sync push (a trusted-binary non-force push the kernel admits), or preview first with git push --dry-run",
+		},
+		{
+			// slack HEAD is escalated and now names the compiled fak slack send verb.
+			name: "slack send is outward-facing and names fak slack send",
+			tool: "Bash",
+			args: map[string]any{"command": "slack send -c ops 'deploy done'"},
+			want: ReversibilityOutwardFacing,
+			hint: "send it with the sanctioned compiled verb: fak slack send (a trusted-binary path the kernel admits)",
+		},
+		{
+			// Floor preservation: mail/mutt have NO fak verb, so naming verbs for
+			// slack/git-push must not relax their escalation nor invent a hint.
+			name: "mail head stays outward-facing with no fak-verb hint",
+			tool: "Bash",
+			args: map[string]any{"command": "echo done | mail -s ci ops@example.invalid"},
+			want: ReversibilityOutwardFacing,
 		},
 		{
 			// gh is operator-relaxed (2026-07-05): every gh write targets the
