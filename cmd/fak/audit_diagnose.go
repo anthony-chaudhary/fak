@@ -102,13 +102,17 @@ type auditDiagnosis struct {
 }
 
 type auditLivelockCandidate struct {
-	Tool       string `json:"tool"`
-	Verdict    string `json:"verdict"`
-	Reason     string `json:"reason,omitempty"`
-	DigestKind string `json:"digest_kind"`
-	Digest     string `json:"digest"`
-	Count      int    `json:"count"`
-	LongestRun int    `json:"longest_run"`
+	Tool         string `json:"tool"`
+	Verdict      string `json:"verdict"`
+	Reason       string `json:"reason,omitempty"`
+	DigestKind   string `json:"digest_kind"`
+	Digest       string `json:"digest"`
+	Count        int    `json:"count"`
+	LongestRun   int    `json:"longest_run"`
+	FirstSeq     uint64 `json:"first_seq,omitempty"`
+	LastSeq      uint64 `json:"last_seq,omitempty"`
+	FirstCallSeq uint64 `json:"first_call_seq,omitempty"`
+	LastCallSeq  uint64 `json:"last_call_seq,omitempty"`
 }
 
 const auditDiagnoseLivelockThreshold = 3
@@ -241,9 +245,13 @@ type auditLivelockKey struct {
 }
 
 type auditLivelockAccumulator struct {
-	key        auditLivelockKey
-	count      int
-	longestRun int
+	key          auditLivelockKey
+	count        int
+	longestRun   int
+	firstSeq     uint64
+	lastSeq      uint64
+	firstCallSeq uint64
+	lastCallSeq  uint64
 }
 
 func diagnoseLivelockCandidates(rows []journal.Row, threshold int) []auditLivelockCandidate {
@@ -267,6 +275,18 @@ func diagnoseLivelockCandidates(rows []journal.Row, threshold int) []auditLivelo
 			counts[key] = acc
 		}
 		acc.count++
+		if acc.firstSeq == 0 || r.Seq < acc.firstSeq {
+			acc.firstSeq = r.Seq
+		}
+		if r.Seq > acc.lastSeq {
+			acc.lastSeq = r.Seq
+		}
+		if r.CallSeq != 0 && (acc.firstCallSeq == 0 || r.CallSeq < acc.firstCallSeq) {
+			acc.firstCallSeq = r.CallSeq
+		}
+		if r.CallSeq > acc.lastCallSeq {
+			acc.lastCallSeq = r.CallSeq
+		}
 		if lastOK && key == last {
 			run++
 		} else {
@@ -284,13 +304,17 @@ func diagnoseLivelockCandidates(rows []journal.Row, threshold int) []auditLivelo
 			continue
 		}
 		out = append(out, auditLivelockCandidate{
-			Tool:       acc.key.tool,
-			Verdict:    acc.key.verdict,
-			Reason:     acc.key.reason,
-			DigestKind: acc.key.digestKind,
-			Digest:     acc.key.digest,
-			Count:      acc.count,
-			LongestRun: acc.longestRun,
+			Tool:         acc.key.tool,
+			Verdict:      acc.key.verdict,
+			Reason:       acc.key.reason,
+			DigestKind:   acc.key.digestKind,
+			Digest:       acc.key.digest,
+			Count:        acc.count,
+			LongestRun:   acc.longestRun,
+			FirstSeq:     acc.firstSeq,
+			LastSeq:      acc.lastSeq,
+			FirstCallSeq: acc.firstCallSeq,
+			LastCallSeq:  acc.lastCallSeq,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -437,8 +461,12 @@ func renderAuditDiagnosis(d auditDiagnosis) string {
 			if reason == "" {
 				reason = "NONE"
 			}
-			out("    repeated: %-20s %-10s %-16s %s=%s count=%d longest_run=%d\n",
-				c.Tool, c.Verdict, reason, c.DigestKind, c.Digest, c.Count, c.LongestRun)
+			seqText := fmt.Sprintf("seq=%d..%d", c.FirstSeq, c.LastSeq)
+			if c.FirstCallSeq != 0 || c.LastCallSeq != 0 {
+				seqText += fmt.Sprintf(" call_seq=%d..%d", c.FirstCallSeq, c.LastCallSeq)
+			}
+			out("    repeated: %-20s %-10s %-16s %s=%s count=%d longest_run=%d %s\n",
+				c.Tool, c.Verdict, reason, c.DigestKind, c.Digest, c.Count, c.LongestRun, seqText)
 		}
 	}
 	return string(b)

@@ -183,6 +183,7 @@ func TestDiagnoseRows_ReportsRepeatedAllowedCallLivelock(t *testing.T) {
 			Verdict:    "ALLOW",
 			Reason:     "NONE",
 			ArgsDigest: "sha256:repeat",
+			CallSeq:    100 + i,
 		})
 		rows = append(rows, r)
 		prev = h
@@ -194,6 +195,9 @@ func TestDiagnoseRows_ReportsRepeatedAllowedCallLivelock(t *testing.T) {
 	c := d.LivelockCandidates[0]
 	if c.Tool != "shell_command" || c.Verdict != "ALLOW" || c.DigestKind != "args_digest" || c.Digest != "sha256:repeat" || c.Count != 4 || c.LongestRun != 4 {
 		t.Fatalf("wrong repeated allowed candidate: %+v", c)
+	}
+	if c.FirstSeq != 1 || c.LastSeq != 4 || c.FirstCallSeq != 101 || c.LastCallSeq != 104 {
+		t.Fatalf("candidate should carry row/call sequence bounds, got %+v", c)
 	}
 }
 
@@ -227,6 +231,7 @@ func TestRunAuditDiagnose_RenderReportsRepeatedQuarantine(t *testing.T) {
 		"SECRET_EXFIL",
 		"args_digest=sha256:stable-poison",
 		"longest_run=3",
+		"seq=1..3",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("render missing %q:\n%s", want, stdout.String())
