@@ -156,7 +156,7 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 	// session ending (#2632). A session stop comes only from a declared stop policy, never from
 	// accumulated tool refusals. Printed only when it happened so a clean run stays quiet.
 	if sum.ToolFeedbackTurns > 0 {
-		fmt.Fprintf(&b, "fak guard: tool-feedback turns — %d turn(s) had every proposed tool call returned as retryable feedback (per-tool, model-fixable; the turn was not stopped — the model can fix the arguments or tool choice and retry). This is a tool-refusal count, not a session stop: a stop comes only from a declared stop policy.\n",
+		fmt.Fprintf(&b, "fak guard: tool-feedback turns — %d turn(s) had every proposed tool call returned as RETRYABLE feedback (per-tool, model-fixable; the turn was NOT stopped — the model can fix the arguments or tool choice and retry). This is a tool-refusal count, not a session stop: a stop comes only from a declared stop policy.\n",
 			sum.ToolFeedbackTurns)
 	}
 	if len(sum.ByReason) > 0 {
