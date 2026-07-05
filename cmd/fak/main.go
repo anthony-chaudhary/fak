@@ -164,6 +164,8 @@ func main() {
 		cmdDispatch(os.Args[2:])
 	case "dispatch-conservation":
 		cmdDispatchConservation(os.Args[2:])
+	case "knownbad":
+		cmdKnownBad(os.Args[2:])
 	case "process-guard":
 		cmdProcessGuard(os.Args[2:])
 	case "windowgate":
