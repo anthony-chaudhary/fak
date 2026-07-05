@@ -118,12 +118,72 @@ func decode(p *InKernelPlanner, ids []int, maxNew int) (gen []int, matched int) 
 	return gen, matched
 }
 
+type countingBackend struct {
+	compute.Backend
+	mu      sync.Mutex
+	mat     int
+	batched int
+}
+
+func (c *countingBackend) MatMul(w, x compute.Tensor) compute.Tensor {
+	c.mu.Lock()
+	c.mat++
+	c.mu.Unlock()
+	return c.Backend.MatMul(w, x)
+}
+
+func (c *countingBackend) BatchedMatMul(w, X compute.Tensor, P int) compute.Tensor {
+	c.mu.Lock()
+	c.batched++
+	c.mu.Unlock()
+	return c.Backend.BatchedMatMul(w, X, P)
+}
+
+func (c *countingBackend) ops() (mat, batched int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.mat, c.batched
+}
+
 func kvConfigFromModelConfig(cfg model.Config) compute.KVConfig {
 	return compute.KVConfig{
 		NumLayers:  cfg.NumLayers,
 		NumKVHeads: cfg.NumKVHeads,
 		HeadDim:    cfg.HeadDim,
 		RopeTheta:  cfg.RopeTheta,
+	}
+}
+
+func TestInKernelDecodeSkipsUnusedFinalStep(t *testing.T) {
+	cfg := tinyCfg()
+	ids := synthIDs(cfg.VocabSize, 12, 407)
+
+	run := func(maxNew int) (gen, mat, batched int) {
+		be := &countingBackend{Backend: compute.Default()}
+		p := NewInKernelPlanner(model.NewSynthetic(cfg), nil, "synthetic-counting-backend", false, be, false)
+		p.quant = false
+		got, _ := decode(p, ids, maxNew)
+		mat, batched = be.ops()
+		return len(got), mat, batched
+	}
+
+	gen0, mat0, batch0 := run(0)
+	if gen0 != 0 {
+		t.Fatalf("maxNew=0 generated %d tokens, want 0", gen0)
+	}
+	gen1, mat1, batch1 := run(1)
+	if gen1 != 1 {
+		t.Fatalf("maxNew=1 generated %d tokens, want 1", gen1)
+	}
+	if mat1 != mat0 || batch1 != batch0 {
+		t.Fatalf("maxNew=1 should stop after sampling the first token without an unused Step: ops maxNew=0 mat=%d batch=%d; maxNew=1 mat=%d batch=%d", mat0, batch0, mat1, batch1)
+	}
+	gen2, mat2, batch2 := run(2)
+	if gen2 != 2 {
+		t.Fatalf("maxNew=2 generated %d tokens, want 2", gen2)
+	}
+	if mat2 <= mat1 && batch2 <= batch1 {
+		t.Fatalf("maxNew=2 should compute one next-token Step between generated tokens: ops maxNew=1 mat=%d batch=%d; maxNew=2 mat=%d batch=%d", mat1, batch1, mat2, batch2)
 	}
 }
 

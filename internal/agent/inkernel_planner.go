@@ -1190,6 +1190,10 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 				break
 			}
 		}
+		if gen == maxNew-1 {
+			gen++ // this token was generated; avoid computing unused next-token logits.
+			break
+		}
 		logits = s.Step(next)
 	}
 	decodeS = time.Since(td).Seconds()
