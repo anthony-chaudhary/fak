@@ -183,6 +183,7 @@ func TestDiagnoseRows_ReportsRepeatedAllowedCallLivelock(t *testing.T) {
 			Verdict:    "ALLOW",
 			Reason:     "NONE",
 			ArgsDigest: "sha256:repeat",
+			ArgsLabel:  "command=python dispatch_status.py",
 			CallSeq:    100 + i,
 		})
 		rows = append(rows, r)
@@ -196,8 +197,65 @@ func TestDiagnoseRows_ReportsRepeatedAllowedCallLivelock(t *testing.T) {
 	if c.Tool != "shell_command" || c.Verdict != "ALLOW" || c.DigestKind != "args_digest" || c.Digest != "sha256:repeat" || c.Count != 4 || c.LongestRun != 4 {
 		t.Fatalf("wrong repeated allowed candidate: %+v", c)
 	}
+	if c.CallLabel != "command=python dispatch_status.py" {
+		t.Fatalf("candidate should carry the redacted call label, got %+v", c)
+	}
 	if c.FirstSeq != 1 || c.LastSeq != 4 || c.FirstCallSeq != 101 || c.LastCallSeq != 104 {
 		t.Fatalf("candidate should carry row/call sequence bounds, got %+v", c)
+	}
+}
+
+func TestRunAuditDiagnose_RenderAndJSONReportRepeatedAllowedCallLabel(t *testing.T) {
+	var rows []journal.Row
+	prev := ""
+	for i := uint64(1); i <= 3; i++ {
+		r, h := mintRow(i, prev, journal.Row{
+			Kind:       "DECIDE",
+			Tool:       "shell_command",
+			Verdict:    "ALLOW",
+			Reason:     "NONE",
+			ArgsDigest: "sha256:repeat",
+			ArgsLabel:  "command=git status",
+		})
+		rows = append(rows, r)
+		prev = h
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "guard-audit.jsonl")
+	writeRowsFile(t, path, rows)
+
+	var stdout, stderr bytes.Buffer
+	code := runAuditDiagnose(&stdout, &stderr, path, false)
+	if code != 0 {
+		t.Fatalf("sound allowed-call journal should exit 0, got %d (stderr=%s)", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"loop candidates",
+		"shell_command",
+		"call_label=command=git status",
+		"args_digest=sha256:repeat",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("render missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "sk-test-secret") {
+		t.Fatalf("render leaked raw secret-shaped text:\n%s", out)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runAuditDiagnose(&stdout, &stderr, path, true)
+	if code != 0 {
+		t.Fatalf("sound allowed-call journal --json should exit 0, got %d (stderr=%s)", code, stderr.String())
+	}
+	var d auditDiagnosis
+	if err := json.Unmarshal(stdout.Bytes(), &d); err != nil {
+		t.Fatalf("--json output not parseable: %v\n%s", err, stdout.String())
+	}
+	if len(d.LivelockCandidates) != 1 || d.LivelockCandidates[0].CallLabel != "command=git status" {
+		t.Fatalf("json candidate missing call_label: %+v", d.LivelockCandidates)
 	}
 }
 

@@ -107,6 +107,7 @@ type auditLivelockCandidate struct {
 	Reason       string `json:"reason,omitempty"`
 	DigestKind   string `json:"digest_kind"`
 	Digest       string `json:"digest"`
+	CallLabel    string `json:"call_label,omitempty"`
 	Count        int    `json:"count"`
 	LongestRun   int    `json:"longest_run"`
 	FirstSeq     uint64 `json:"first_seq,omitempty"`
@@ -252,6 +253,7 @@ type auditLivelockAccumulator struct {
 	lastSeq      uint64
 	firstCallSeq uint64
 	lastCallSeq  uint64
+	callLabel    string
 }
 
 func diagnoseLivelockCandidates(rows []journal.Row, threshold int) []auditLivelockCandidate {
@@ -287,6 +289,9 @@ func diagnoseLivelockCandidates(rows []journal.Row, threshold int) []auditLivelo
 		if r.CallSeq > acc.lastCallSeq {
 			acc.lastCallSeq = r.CallSeq
 		}
+		if acc.callLabel == "" {
+			acc.callLabel = auditCallLabelForRow(r)
+		}
 		if lastOK && key == last {
 			run++
 		} else {
@@ -309,6 +314,7 @@ func diagnoseLivelockCandidates(rows []journal.Row, threshold int) []auditLivelo
 			Reason:       acc.key.reason,
 			DigestKind:   acc.key.digestKind,
 			Digest:       acc.key.digest,
+			CallLabel:    acc.callLabel,
 			Count:        acc.count,
 			LongestRun:   acc.longestRun,
 			FirstSeq:     acc.firstSeq,
@@ -366,6 +372,17 @@ func auditLivelockKeyForRow(r journal.Row) (auditLivelockKey, bool) {
 		digestKind: digestKind,
 		digest:     digest,
 	}, true
+}
+
+func auditCallLabelForRow(r journal.Row) string {
+	label := strings.TrimSpace(r.ArgsLabel)
+	if label == "" {
+		return ""
+	}
+	if len(label) > 96 {
+		label = label[:96] + "..."
+	}
+	return label
 }
 
 // reconstructChain walks parent pointers from a tip row up to a genesis (prev_hash==""),
@@ -465,8 +482,12 @@ func renderAuditDiagnosis(d auditDiagnosis) string {
 			if c.FirstCallSeq != 0 || c.LastCallSeq != 0 {
 				seqText += fmt.Sprintf(" call_seq=%d..%d", c.FirstCallSeq, c.LastCallSeq)
 			}
-			out("    repeated: %-20s %-10s %-16s %s=%s count=%d longest_run=%d %s\n",
-				c.Tool, c.Verdict, reason, c.DigestKind, c.Digest, c.Count, c.LongestRun, seqText)
+			labelText := ""
+			if c.CallLabel != "" {
+				labelText = " call_label=" + c.CallLabel
+			}
+			out("    repeated: %-20s %-10s %-16s %s=%s%s count=%d longest_run=%d %s\n",
+				c.Tool, c.Verdict, reason, c.DigestKind, c.Digest, labelText, c.Count, c.LongestRun, seqText)
 		}
 	}
 	return string(b)

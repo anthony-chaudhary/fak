@@ -48,6 +48,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -77,8 +79,9 @@ type Row struct {
 	// these are appended after Hash and EXISTING journals verify unchanged). The
 	// tamper-evidence guarantee covers only the decision fields above; these are a
 	// debugging convenience layered on top.
-	CallSeq uint64 `json:"call_seq,omitempty"` // the kernel's per-call submission id (ToolCall.SeqNo): the join key tying a call's DECIDE to its later QUARANTINE
-	Witness string `json:"witness,omitempty"`  // the bounded-disclosure claim the verdict surfaced (offending self-modify glob / tool.arg bound / require-witness claim)
+	CallSeq   uint64 `json:"call_seq,omitempty"`   // the kernel's per-call submission id (ToolCall.SeqNo): the join key tying a call's DECIDE to its later QUARANTINE
+	Witness   string `json:"witness,omitempty"`    // the bounded-disclosure claim the verdict surfaced (offending self-modify glob / tool.arg bound / require-witness claim)
+	ArgsLabel string `json:"args_label,omitempty"` // bounded, redacted call shape label for operator diagnosis; never raw args
 
 	// Capability fields (for C6: witness + audit surface). These are populated for
 	// CAP_FAULT / CAP_EVICT / CAP_VERSION_BIND events to track capability lifecycle.
@@ -409,6 +412,7 @@ func rowFromEvent(ev abi.Event) (Row, bool) {
 		row.TraceID = c.TraceID
 		row.ArgsDigest = refDigest(c.Args)
 		row.CallSeq = c.SeqNo // join key: same call's DECIDE and QUARANTINE share it
+		row.ArgsLabel = argsLabel(c.Args)
 	}
 	if v := ev.Verdict; v != nil {
 		row.Verdict = verdictName(v.Kind)
@@ -472,6 +476,162 @@ func refDigest(r abi.Ref) string {
 		return "sha256:" + hex.EncodeToString(sum[:])
 	}
 	return ""
+}
+
+const maxArgsLabelLen = 96
+
+func argsLabel(r abi.Ref) string {
+	if r.Kind != abi.RefInline || len(r.Inline) == 0 {
+		return ""
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(r.Inline, &obj); err != nil || len(obj) == 0 {
+		return ""
+	}
+	parts := []string{}
+	if s := firstStringField(obj, "command", "cmd", "script"); s != "" {
+		if stem := commandStem(s); stem != "" {
+			parts = append(parts, "command="+stem)
+		}
+	}
+	if s := firstStringField(obj, "path", "file_path", "filepath", "file", "workdir", "cwd"); s != "" {
+		if stem := pathStem(s); stem != "" {
+			parts = append(parts, "path="+stem)
+		}
+	}
+	if s := firstStringField(obj, "action", "operation", "method"); s != "" {
+		if atom := safeAtom(s); atom != "" {
+			parts = append(parts, "action="+atom)
+		}
+	}
+	if len(parts) == 0 {
+		if keys := safeObjectKeys(obj); len(keys) > 0 {
+			parts = append(parts, "keys="+strings.Join(keys, ","))
+		}
+	}
+	return boundArgsLabel(strings.Join(parts, " "))
+}
+
+func firstStringField(obj map[string]any, names ...string) string {
+	for _, name := range names {
+		v, ok := obj[name]
+		if !ok {
+			continue
+		}
+		if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func commandStem(command string) string {
+	for _, seg := range strings.Split(command, ";") {
+		fields := strings.Fields(seg)
+		for i, raw := range fields {
+			tok := cleanToken(raw)
+			if tok == "" || tok == "&" || strings.HasPrefix(tok, "-") || strings.HasPrefix(strings.ToLower(tok), "$env:") {
+				continue
+			}
+			stem := pathStem(tok)
+			if stem == "" {
+				continue
+			}
+			if next := commandSecond(fields[i+1:]); next != "" {
+				return boundArgsLabel(stem + " " + next)
+			}
+			return stem
+		}
+	}
+	return ""
+}
+
+func commandSecond(fields []string) string {
+	for _, raw := range fields {
+		tok := cleanToken(raw)
+		if tok == "" || tok == "&" || strings.HasPrefix(tok, "-") || strings.HasPrefix(strings.ToLower(tok), "$env:") {
+			continue
+		}
+		if strings.Contains(tok, "=") {
+			continue
+		}
+		if strings.ContainsAny(tok, `/\`) {
+			return pathStem(tok)
+		}
+		return safeAtom(tok)
+	}
+	return ""
+}
+
+func pathStem(s string) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\\", "/"))
+	if s == "" || secretish(s) {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(s, "/"), "/")
+	if len(parts) == 0 {
+		return safeAtom(s)
+	}
+	last := cleanToken(parts[len(parts)-1])
+	if last == "" || secretish(last) {
+		return ""
+	}
+	return safeAtom(last)
+}
+
+func safeObjectKeys(obj map[string]any) []string {
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		k = safeAtom(k)
+		if k == "" || secretish(k) {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if len(keys) > 4 {
+		keys = keys[:4]
+	}
+	return keys
+}
+
+func cleanToken(s string) string {
+	return strings.Trim(strings.TrimSpace(s), `"'`)
+}
+
+func safeAtom(s string) string {
+	s = cleanToken(s)
+	if s == "" || secretish(s) {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '_' || r == '-' || r == '.' || r == '/':
+			b.WriteRune(r)
+		}
+	}
+	return boundArgsLabel(b.String())
+}
+
+func secretish(s string) bool {
+	x := strings.ToLower(s)
+	for _, needle := range []string{"authorization", "bearer", "api_key", "apikey", "secret", "token", "password", "sk-"} {
+		if strings.Contains(x, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func boundArgsLabel(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= maxArgsLabelLen {
+		return s
+	}
+	return s[:maxArgsLabelLen] + "..."
 }
 
 func verdictName(k abi.VerdictKind) string {

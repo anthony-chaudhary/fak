@@ -49,6 +49,32 @@ func TestMemoryJournalChainsRecentAndStreams(t *testing.T) {
 	}
 }
 
+func TestMemoryJournalAddsRedactedArgsLabel(t *testing.T) {
+	j := OpenMemory()
+	call := &abi.ToolCall{
+		Tool: "shell_command",
+		Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"command":"git status --short; echo sk-test-secret","api_key":"sk-test-secret","workdir":"C:\\work\\fak"}`)},
+	}
+	j.Emit(abi.Event{Kind: abi.EvDecide, Call: call, Verdict: &abi.Verdict{Kind: abi.VerdictAllow, By: "test"}})
+
+	rows := j.Recent(0)
+	if len(rows) != 1 {
+		t.Fatalf("wrote %d rows, want 1", len(rows))
+	}
+	label := rows[0].ArgsLabel
+	if label != "command=git status path=fak" {
+		t.Fatalf("ArgsLabel = %q, want redacted command/path label", label)
+	}
+	for _, leak := range []string{"sk-test-secret", "api_key", "echo"} {
+		if strings.Contains(label, leak) {
+			t.Fatalf("ArgsLabel leaked %q: %q", leak, label)
+		}
+	}
+	if n, err := VerifyRows(rows); err != nil || n != 1 {
+		t.Fatalf("ArgsLabel must not affect hash-chain verification: n=%d err=%v", n, err)
+	}
+}
+
 func TestFileJournalReopensAndContinuesChain(t *testing.T) {
 	path := t.TempDir() + "/audit.jsonl"
 	j, err := Open(path)
