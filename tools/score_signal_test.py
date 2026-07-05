@@ -159,7 +159,32 @@ def test_render_issue_has_root_point_section_with_four_fields():
     assert "Source paths:" in body, "source paths owning the debt"
     assert ("Evidence artifact:" in body
             and ss.BASELINE_ARTIFACT in body), "the tracked baseline evidence artifact"
+    assert f"{ss.BASELINE_ARTIFACT}` — the pinned baseline this delta is measured against (@base123)" in body, \
+        "baseline commit is bound to the evidence artifact"
     assert "At-origin gate (smallest path):" in body, "the smallest-path at-origin gate"
+
+
+def test_every_planned_issue_body_carries_root_point():
+    # The load-bearing guarantee for #1967: EVERY issue the planner emits — not just a
+    # hand-built cand — carries the Root-point section, so an auto-filed regression can
+    # never reach the tracker without naming its origin. Drives the real plan_issues path.
+    pane = _pane(
+        direction="regressed",
+        early_warning=[_ew("slop", "code-slop", 6, 4, 10),
+                       _ew("code", "code", 9, 30, 39),
+                       _ew("mystery", "mystery-metric", 3, 1, 4)],
+        metrics=[{"key": "code", "grade": "C"}, {"key": "slop", "grade": "B"}],
+    )
+    to_file, _refreshes, _stats = ss.plan_issues(
+        pane, open_keys=set(), min_delta=1, max_issues=10, today="2026-06-26",
+        available=SKILLS)
+    assert to_file, "sanity: the pane yields issues to plan"
+    for issue in to_file:
+        body = issue["body"]
+        assert "### Root-point" in body, f"{issue['key']} missing Root-point section"
+        assert "Producer command:" in body and "Source paths:" in body
+        assert "Evidence artifact:" in body and ss.BASELINE_ARTIFACT in body
+        assert "At-origin gate (smallest path):" in body
 
 
 def test_root_point_gate_degrades_to_portfolio_when_no_producer():
