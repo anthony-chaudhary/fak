@@ -90,12 +90,13 @@ const (
 	IndexFile      = recall.IndexFile // "index.json"
 	TrajectoryFile = "trajectory.jsonl"
 	WitnessFile    = "witness.json" // the persisted keep-bit (VerifiedDone rung); see witness.go
+	QualityFile    = "quality.json" // the latest per-card quality deltas; see quality_delta.go
 )
 
 // knownParts is the deterministic order parts are dumped, integrity-listed, and packed
 // in. image.json is excluded (it is the index over these). Only parts that actually
 // exist are written and listed; a missing optional part is simply absent.
-var knownParts = []string{SessionFile, ManifestFile, CASFile, IndexFile, TrajectoryFile, WitnessFile}
+var knownParts = []string{SessionFile, ManifestFile, CASFile, IndexFile, TrajectoryFile, WitnessFile, QualityFile}
 
 // Portability declares what a restored image guarantees and what it deliberately drops —
 // the model-change contract, made explicit so an operator never assumes a KV cache rode
@@ -170,6 +171,7 @@ type Input struct {
 	Index      *ctxplan.Index
 	Trajectory []trajectory.Turn
 	Witness    []WitnessEntry
+	Quality    []QualityDelta
 
 	Model     string
 	Engine    string
@@ -252,6 +254,15 @@ func DumpDir(dir string, in Input) (Meta, error) {
 	// reads a non-forgeable VerifiedDone rung, not the agent's re-narration (see witness.go).
 	if len(in.Witness) > 0 {
 		if err := writeWitness(filepath.Join(dir, WitnessFile), in.Witness); err != nil {
+			return Meta{}, err
+		}
+	}
+
+	// (4c) The quality-delta sibling (quality.json) — the latest per-card quality-score
+	// movement observed during the session. Absent when no scorecard ran; when present it
+	// is integrity-indexed and verified like every other part (see quality_delta.go).
+	if len(in.Quality) > 0 {
+		if err := writeQualityDelta(filepath.Join(dir, QualityFile), in.Quality); err != nil {
 			return Meta{}, err
 		}
 	}
