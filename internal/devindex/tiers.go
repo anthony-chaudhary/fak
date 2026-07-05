@@ -242,6 +242,8 @@ var verbTiers = map[string]VerbTier{
 	"tree-doctor":                   TierDev,
 	"turntax":                       TierDev,
 	"ui-quality-scorecard":          TierDev,
+	"unwired-debt-dispatch":         TierDev,
+	"unwired-scorecard":             TierDev,
 	"usage":                         TierDev,
 	"vcache":                        TierDev,
 	"waiting":                       TierDev,
