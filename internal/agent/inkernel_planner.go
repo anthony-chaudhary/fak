@@ -157,9 +157,11 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 		m.PrepareMetalResidency(q4k)
 	}
 	// RadixAttention KV-prefix reuse is ON by default; FAK_INKERNEL_RADIX=off disables it
-	// (the A/B "tree OFF" arm). The reuse clone is a CPU session, so it only engages when
-	// no device backend is wired — the device path keeps its current full-prefill behavior.
-	if os.Getenv("FAK_INKERNEL_RADIX") != "off" && backend == nil {
+	// (the A/B "tree OFF" arm). Most device backends keep authoritative KV in the backend
+	// HAL store, so host KV clones are disabled there. GLM-MoE-DSA is the exception: its
+	// backend path uses host DSA KV (Config.InKernelBackendPrefixReuseSupported), so the same
+	// radix tree safely skips repeated prefill on the live GCP GLM path.
+	if os.Getenv("FAK_INKERNEL_RADIX") != "off" && inKernelPlannerPrefixReuseSupported(m, backend) {
 		p.tree = radixkv.NewWithEvictionPolicy(envInt("FAK_INKERNEL_RADIX_BUDGET", 0), inKernelRadixEvictionPolicyFromEnv())
 	}
 	// The model-side KV-quarantine eviction bridge (#579) is OFF unless opted in, the same
@@ -170,6 +172,13 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 		p.kvSpanEvict = backend == nil
 	}
 	return p
+}
+
+func inKernelPlannerPrefixReuseSupported(m *model.Model, backend compute.Backend) bool {
+	if backend == nil {
+		return true
+	}
+	return m != nil && m.Cfg.InKernelBackendPrefixReuseSupported()
 }
 
 func inKernelRadixEvictionPolicyFromEnv() radixkv.EvictionPolicy {
@@ -185,10 +194,10 @@ func inKernelRadixEvictionPolicyFromEnv() radixkv.EvictionPolicy {
 func (p *InKernelPlanner) Model() string { return p.modelID }
 
 // KVMemoryStats reports the in-process KV prefix cache's resident memory shape.
-// RadixAttention reuse is currently CPU-session backed, so enabled=true reports host
-// scoped kv_cache bytes. A device backend uses per-request backend sessions today
-// (no persistent radix tree), so it reports enabled=false with the model's per-token
-// KV byte geometry for planning visibility.
+// RadixAttention reuse is host-KV backed, so enabled=true reports host-scoped kv_cache
+// bytes. A device backend normally uses per-request backend KV and reports enabled=false
+// with per-token device KV geometry; GLM-MoE-DSA is the exception because its backend path
+// still keeps DSA KV in the host KVCache, so a non-nil tree is reported as host radixkv.
 func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
 	if p == nil || p.m == nil {
 		return KVMemoryStats{
@@ -213,7 +222,7 @@ func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
 		BytesPerToken: bytesPerToken,
 		HeadroomRatio: inKernelKVMemoryHeadroom,
 	}
-	if p.backend != nil {
+	if p.backend != nil && p.tree == nil {
 		stats.Enabled = false
 		stats.Backend = p.backend.Name()
 		stats.Scope = string(compute.MemoryScopeDevice)
@@ -1062,37 +1071,50 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	if err = ctx.Err(); err != nil {
 		return
 	}
-	reuse := p.tree != nil && p.backend == nil
+	reuse := p.tree != nil && inKernelPlannerPrefixReuseSupported(p.m, p.backend)
 
 	// 1) Acquire a session, reusing the longest cached KV prefix when enabled. The clone
 	// (SessionFromPrefix) happens under the lock, so once we unlock our session owns an
 	// independent copy and a concurrent tree eviction cannot affect this turn's decode.
 	var s *model.Session
+	closeSession := false
 	if reuse {
 		p.mu.Lock()
 		b, m := p.tree.Lookup(ids)
 		if k := b.KV(); k != nil {
-			s = p.m.SessionFromPrefix(k) // an independent clone; cache.Len() == m
+			s = p.sessionFromPrefixClone(k.Clone()) // an independent clone; cache.Len() == m
+			closeSession = p.backend != nil
 			matched = m
 		}
 		p.tree.Done(b) // release the lease — we have our clone (or matched nothing)
 		p.mu.Unlock()
 		// Fully cached (an exact-duplicate transcript): the cached KV has the prefix but
-		// not the last-token logits decode must start from. Fail OPEN to a fresh full
-		// prefill rather than truncate (some recurrent architectures refuse Evict); the
-		// exact-replay case is not the reuse hot path.
+		// not the last-token logits decode must start from. Refeed only the final token:
+		// evicting the final cached row leaves an exact prefix of len(ids)-1, and Prefill
+		// below recomputes that one row/logits. If the cache cannot truncate exactly
+		// (for example a recurrent hybrid), fail open to the old full-prefill path.
 		if s != nil && matched >= len(ids) {
-			s, matched = nil, 0
+			if inKernelRefeedLastTokenForExactHit(s, len(ids)) {
+				matched = len(ids) - 1
+			} else {
+				if closeSession {
+					s.Close()
+				}
+				s, matched, closeSession = nil, 0, false
+			}
 		}
 	}
 	if s == nil {
 		matched = 0
 		if p.backend != nil {
 			s = p.m.NewBackendSession(p.backend)
-			defer s.Close()
+			closeSession = true
 		} else {
 			s = p.m.NewSession()
 		}
+	}
+	if closeSession {
+		defer s.Close()
 	}
 	s.Quant = p.quant
 	// resident-Q4_K decode runs on BOTH the host (cpu-ref) AND the cuda backend: the device HAL
@@ -1172,6 +1194,25 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	}
 	decodeS = time.Since(td).Seconds()
 	return
+}
+
+func (p *InKernelPlanner) sessionFromPrefixClone(prefix *model.KVCache) *model.Session {
+	if p.backend != nil {
+		s := p.m.NewBackendSession(p.backend)
+		s.Cache = prefix
+		return s
+	}
+	s := p.m.NewSession()
+	s.Cache = prefix
+	return s
+}
+
+func inKernelRefeedLastTokenForExactHit(s *model.Session, promptLen int) bool {
+	if s == nil || s.Cache == nil || promptLen <= 0 || s.Cache.Len() < promptLen {
+		return false
+	}
+	removed, err := s.Cache.TryEvict(promptLen-1, 1)
+	return err == nil && removed == 1 && s.Cache.Len() == promptLen-1
 }
 
 func envInt(key string, def int) int {

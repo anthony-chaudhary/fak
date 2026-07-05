@@ -725,6 +725,18 @@ func (c Config) isGLMMoeDsa() bool {
 	return c.isGLM() && strings.Contains(c.archFamilyKey(), "dsa")
 }
 
+// InKernelBackendPrefixReuseSupported reports whether an in-kernel planner using a
+// compute.Backend may still reuse the host KV radix tree for this architecture.
+//
+// Most backend sessions keep their authoritative KV state in the backend HAL store
+// (Session.halKV), so a host KVCache clone is not enough to resume a prefix. GLM-MoE-DSA
+// is the current exception: its backend path routes dense GEMMs through the backend, but
+// the DSA attention/index cache remains the ordinary host KVCache (Session.Cache.glm).
+// That makes prefix clones exact for GLM-DSA even when Backend is non-nil.
+func (c Config) InKernelBackendPrefixReuseSupported() bool {
+	return c.isGLMMoeDsa()
+}
+
 // isMiniMax reports a MiniMax-family model (model_type / architectures such as
 // "minimax_m3", "minimax_m2", "MiniMaxM3ForCausalLM"). The family key lowercases
 // model_type + architectures with separators stripped, so "minimax_m3" ->

@@ -95,6 +95,18 @@ func tinyHybridCfg() model.Config {
 	}
 }
 
+func tinyGLMDsaCfg() model.Config {
+	return model.Config{
+		HiddenSize: 32, NumLayers: 3, NumHeads: 4, NumKVHeads: 4, HeadDim: 8,
+		IntermediateSize: 64, VocabSize: 41, RMSNormEps: 1e-5, RopeTheta: 10000,
+		ModelType: "glm_moe_dsa", Architectures: []string{"GlmMoeDsaForCausalLM"},
+		QLoraRank: 32, KVLoraRank: 32, QKNopeHeadDim: 4, QKRopeHeadDim: 4, VHeadDim: 8,
+		IndexNHeads: 4, IndexHeadDim: 8, IndexTopK: 2,
+		IndexerTypes: []string{"full", "shared", "full"},
+		EOSTokenID:   -1,
+	}
+}
+
 // decode runs one turn through generateReused, collecting the generated token ids (via the
 // emit seam) and returning them alongside the reused-prefix length. No token-id stops are
 // passed, so decode always runs the full maxNew — a deterministic, comparable trace.
@@ -219,6 +231,78 @@ func TestInKernelReuseMatchesFullPrefill(t *testing.T) {
 			}
 			t.Logf("PARITY[%s]: reuse-through-split (%d/%d reused) == full re-prefill, %d tokens identical", name, matched, len(turn2), len(gotON))
 		})
+	}
+}
+
+func TestInKernelReuseExactHitRefeedsOnlyLastToken(t *testing.T) {
+	cfg := tinyCfg()
+	ids := synthIDs(cfg.VocabSize, 24, 404)
+	const maxNew = 8
+
+	pon := reusePlanner(true, false, cfg)
+	gotPrime, primeMatched := decode(pon, ids, maxNew)
+	if primeMatched != 0 {
+		t.Fatalf("first turn unexpectedly reused %d tokens", primeMatched)
+	}
+	gotReplay, matched := decode(pon, ids, maxNew)
+	if want := len(ids) - 1; matched != want {
+		t.Fatalf("exact replay reused %d tokens, want %d (all but final token re-fed for logits)", matched, want)
+	}
+	if !eqInts(gotReplay, gotPrime) {
+		t.Fatalf("exact-hit last-token refeed changed decode:\nprime=%v\nreplay=%v", gotPrime, gotReplay)
+	}
+
+	poff := reusePlanner(false, false, cfg)
+	gotOFF, matchedOFF := decode(poff, ids, maxNew)
+	if matchedOFF != 0 {
+		t.Fatalf("reuse-disabled exact replay matched %d", matchedOFF)
+	}
+	if !eqInts(gotReplay, gotOFF) {
+		t.Fatalf("exact-hit replay diverged from full prefill:\nreplay=%v\nfull=%v", gotReplay, gotOFF)
+	}
+}
+
+func TestInKernelReuseExactHitFallsBackWhenLastTokenCannotEvict(t *testing.T) {
+	cfg := tinyHybridCfg()
+	p := reusePlanner(true, false, cfg)
+	ids := synthIDs(cfg.VocabSize, 18, 405)
+
+	decode(p, ids, 1)
+	_, matched := decode(p, ids, 1)
+	if matched != 0 {
+		t.Fatalf("hybrid exact replay reused %d tokens, want fallback full prefill because recurrent state cannot truncate", matched)
+	}
+}
+
+func TestInKernelBackendGLMDsaEnablesHostPrefixReuse(t *testing.T) {
+	t.Setenv("FAK_INKERNEL_RADIX", "on")
+	backend, ok := compute.Lookup("cpu-ref")
+	if !ok {
+		t.Fatal("cpu-ref backend not registered")
+	}
+	cfg := tinyGLMDsaCfg()
+	p := NewInKernelPlanner(model.NewSyntheticGLMDsa(cfg), nil, "glm-dsa-backend", false, backend, false)
+	p.quant = false
+	if p.tree == nil {
+		t.Fatal("GLM-DSA backend planner should enable host radix KV reuse")
+	}
+
+	ids := synthIDs(cfg.VocabSize, 9, 406)
+	gotPrime, primeMatched := decode(p, ids, 3)
+	if primeMatched != 0 {
+		t.Fatalf("first backend GLM turn unexpectedly reused %d tokens", primeMatched)
+	}
+	gotReplay, matched := decode(p, ids, 3)
+	if want := len(ids) - 1; matched != want {
+		t.Fatalf("backend GLM exact replay reused %d tokens, want %d", matched, want)
+	}
+	if !eqInts(gotReplay, gotPrime) {
+		t.Fatalf("backend GLM exact replay changed decode:\nprime=%v\nreplay=%v", gotPrime, gotReplay)
+	}
+
+	stats := p.KVMemoryStats()
+	if !stats.Enabled || stats.Backend != "radixkv" || stats.Scope != string(compute.MemoryScopeHost) {
+		t.Fatalf("backend GLM KV stats should report enabled host radixkv, got %+v", stats)
 	}
 }
 
