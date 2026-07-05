@@ -142,6 +142,26 @@ def resolver_tick(*, verdict: str = "WOULD_SPAWN", action: str = "would_spawn",
     }
 
 
+def resolver_preflight(*, backend: str = "opencode",
+                       verdict: str = "REFUSE_NO_SEAT") -> dict:
+    return {
+        "schema": "fleet-dispatch-preflight/1",
+        "_backend": backend,
+        "verdict": verdict,
+        "cap": 2,
+        "live": 2,
+        "headroom": 0,
+        "seat": {
+            "total": 2,
+            "free": 0,
+            "leased": 2,
+            "depleted": True,
+            "unattributed_live": 1,
+        },
+        "os_worker_procs": 2,
+    }
+
+
 def build(mod, **over):
     kw = dict(
         root=ROOT, pre=pre(), sup=sup(), wd={"installed": True, "status": "Ready"},
@@ -569,6 +589,48 @@ class ResolverTickTest(unittest.TestCase):
         self.assertTrue(any("utilization HEADROOM_LAUNCH_READY" in r
                             for r in buckets["action"]))
         self.assertEqual(mod._dispatch_headline_state(p), "ACTION")
+
+    def test_resolver_product_preflight_surfaces_backend_seat_state(self) -> None:
+        mod = load()
+        tick = resolver_tick()
+        tick["selected"]["backend"] = "opencode"
+        p = build(mod, resolve_ticks=tick, resolver_preflight=resolver_preflight())
+        self.assertEqual(p["resolver_preflight"]["_backend"], "opencode")
+        self.assertTrue(any(
+            "selected resolver preflight: opencode REFUSE_NO_SEAT" in r
+            and "live=2/2" in r
+            and "unattributed_live=1" in r
+            for r in p["reasons"]))
+        rendered = mod.render(p)
+        self.assertIn("plan gate : opencode REFUSE_NO_SEAT live=2/2", rendered)
+        md = mod.render_md(p, date="2026-07-05")
+        self.assertIn("**resolver product preflight**: opencode REFUSE_NO_SEAT", md)
+        buckets = mod._dispatch_slack_buckets(p)
+        self.assertTrue(any("opencode REFUSE_NO_SEAT" in r
+                            for r in buckets["expected"]))
+
+    def test_selected_resolver_preflight_runs_product_scoped_gate(self) -> None:
+        mod = load()
+        tick = resolver_tick()
+        tick["selected"]["backend"] = "opencode"
+        tick["selected"]["max_workers"] = 2
+        calls = []
+        original = mod.run_json
+
+        def fake_run_json(cmd, cwd, timeout, ok_codes=None):
+            calls.append(cmd)
+            return resolver_preflight()
+
+        mod.run_json = fake_run_json
+        try:
+            out = mod.selected_resolver_preflight(ROOT, tick, max_workers=4)
+        finally:
+            mod.run_json = original
+
+        self.assertEqual(out["_backend"], "opencode")
+        self.assertIn("--product", calls[0])
+        self.assertIn("opencode", calls[0])
+        self.assertEqual(calls[0][calls[0].index("--max-workers") + 1], "2")
 
     def test_repair_ready_tick_reaches_payload_render_and_slack_action(self) -> None:
         mod = load()

@@ -491,6 +491,52 @@ def read_resolve_ticks(root: Path, *, now_ts: float | None = None,
     }
 
 
+def selected_resolver_preflight(root: Path, resolve_ticks: dict[str, Any],
+                                *, max_workers: int) -> dict[str, Any]:
+    """Run the spawn gate for the backend named by the selected resolver tick.
+
+    The headline preflight is the generic/default dispatcher view. Non-default
+    resolver ticks (notably opencode) can have their own account pool and live
+    workers, so surface that product-scoped gate beside the planner evidence.
+    """
+    tick = (resolve_ticks or {}).get("selected") or (resolve_ticks or {}).get("latest") or {}
+    backend = str(tick.get("backend") or "").strip()
+    if not backend or not tick.get("fresh"):
+        return {}
+    tick_max = _int(tick.get("max_workers"), max_workers) or max_workers
+    doc = run_json(
+        [_py(), str(root / "tools" / "dispatch_preflight.py"),
+         "--json", "--product", backend, "--max-workers", str(tick_max)],
+        root,
+        120,
+    )
+    if doc:
+        doc["_backend"] = backend
+    return doc
+
+
+def _resolver_preflight_summary(pre: dict[str, Any]) -> str:
+    if not pre.get("schema"):
+        err = pre.get("_error")
+        return f"resolver product preflight unavailable: {err}" if err else ""
+    backend = pre.get("_backend") or pre.get("product") or "?"
+    seat = pre.get("seat") or {}
+    bits = [
+        f"{backend}",
+        str(pre.get("verdict") or "UNKNOWN"),
+        f"live={pre.get('live')}/{pre.get('cap')}",
+        f"headroom={pre.get('headroom')}",
+        f"seats free={seat.get('free')} leased={seat.get('leased')}",
+    ]
+    unattributed = _int(seat.get("unattributed_live"), 0) or 0
+    if unattributed:
+        bits.append(f"unattributed_live={unattributed}")
+    os_workers = pre.get("os_worker_procs")
+    if os_workers is not None:
+        bits.append(f"os_workers={os_workers}")
+    return "selected resolver preflight: " + " ".join(bits)
+
+
 def _utilization_blocker(code: str, scope: str, next_action: str,
                          detail: str = "") -> dict[str, Any]:
     out = {"code": code, "scope": scope, "next_action": next_action}
@@ -2164,6 +2210,8 @@ def collect(root: Path, *, max_workers: int, fast: bool,
             seat_inventory_f.result(), pre)
         lab_readiness = lab_readiness_f.result()
         resolve_ticks = resolve_ticks_f.result()
+        resolver_preflight = selected_resolver_preflight(
+            root, resolve_ticks, max_workers=max_workers)
         low_yield = low_yield_f.result()
         ships = ships_f.result()
 
@@ -2176,6 +2224,7 @@ def collect(root: Path, *, max_workers: int, fast: bool,
                          run_status=run_status, merge=merge, leases=leases,
                          worker_leases=worker_leases, seat_inventory=seat_inventory,
                          lab_readiness=lab_readiness, resolve_ticks=resolve_ticks,
+                         resolver_preflight=resolver_preflight,
                          low_yield=low_yield, ships=ships)
 
 
@@ -2195,6 +2244,7 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                   seat_inventory: dict[str, Any] | None = None,
                   lab_readiness: dict[str, Any] | None = None,
                   resolve_ticks: dict[str, Any] | None = None,
+                  resolver_preflight: dict[str, Any] | None = None,
                   low_yield: dict[str, Any] | None = None,
                   ships: dict[str, Any] | None = None) -> dict[str, Any]:
     # --- dispatcher liveness / capacity ---
@@ -2416,6 +2466,11 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
     elif seat_inventory.get("schema"):
         reasons.append(_seat_inventory_summary_line(seat_inventory))
 
+    resolver_preflight = resolver_preflight or {}
+    resolver_preflight_line = _resolver_preflight_summary(resolver_preflight)
+    if resolver_preflight_line:
+        reasons.append(resolver_preflight_line)
+
     resolve_ticks = resolve_ticks or {}
     latest_tick = resolve_ticks.get("selected") or resolve_ticks.get("latest") or {}
     if latest_tick:
@@ -2577,6 +2632,7 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         "worker_lease_check": worker_leases,
         "seat_inventory": seat_inventory or {},
         "resolver": resolve_ticks or {},
+        "resolver_preflight": resolver_preflight or {},
         "low_yield": low_yield or {},
         "ships_per_worker": ships or {},
         "lab_readiness": lab_readiness or {},
@@ -2712,6 +2768,17 @@ def render(p: dict[str, Any]) -> str:
             f"age={_age_text(latest_tick.get('age_min'))} next={next_action}")
         if latest_tick.get("live_command_text"):
             lines.append(f"║ launch    : {latest_tick.get('live_command_text')}")
+    resolver_pre = p.get("resolver_preflight") or {}
+    if resolver_pre.get("schema"):
+        seat = resolver_pre.get("seat") or {}
+        unattributed = _int(seat.get("unattributed_live"), 0) or 0
+        unattributed_bit = f" unattributed={unattributed}" if unattributed else ""
+        lines.append(
+            f"║ plan gate : {resolver_pre.get('_backend') or resolver_pre.get('product') or '-'} "
+            f"{resolver_pre.get('verdict') or '-'} live={resolver_pre.get('live')}/"
+            f"{resolver_pre.get('cap')} headroom={resolver_pre.get('headroom')} "
+            f"seat={seat.get('free')}/{seat.get('leased')}{unattributed_bit} "
+            f"os={resolver_pre.get('os_worker_procs')}")
     util = p.get("utilization") or {}
     if util.get("schema"):
         slots = util.get("worker_slots") or {}
@@ -2901,6 +2968,10 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
             f"next `{latest_tick.get('next_action') or '-'}`")
         if latest_tick.get("live_command_text"):
             out.append(f"- **approved live command**: `{latest_tick.get('live_command_text')}`")
+    resolver_pre = payload.get("resolver_preflight") or {}
+    resolver_pre_line = _resolver_preflight_summary(resolver_pre)
+    if resolver_pre_line:
+        out.append(f"- **resolver product preflight**: {resolver_pre_line.removeprefix('selected resolver preflight: ')}")
     util = payload.get("utilization") or {}
     if util.get("schema"):
         slots = util.get("worker_slots") or {}
@@ -3481,6 +3552,13 @@ def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
                 f"last resolver tick {state} ({tick_desc}); {action}")
     elif latest_tick.get("action") == "spawned":
         buckets["auto-solving"].append(f"resolver spawned worker ({tick_desc})")
+    resolver_pre = payload.get("resolver_preflight") or {}
+    resolver_pre_line = _resolver_preflight_summary(resolver_pre)
+    if resolver_pre_line:
+        target_bucket = "expected"
+        if resolver_pre.get("verdict") in ("REFUSE_INSPECT",):
+            target_bucket = "action"
+        buckets[target_bucket].append(resolver_pre_line)
     limiter = ((payload.get("dispatcher") or {}).get("limiter") or {})
     if limiter.get("primary") == "github_rate_limit":
         buckets["action"].append("GitHub rate limit is blocking the gh-backed status folds")
