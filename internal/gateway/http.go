@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -203,6 +204,16 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		ReadTimeout:       durEnv("FAK_HTTP_READ_TIMEOUT_S", 30*time.Second),
 		WriteTimeout:      durEnv("FAK_HTTP_WRITE_TIMEOUT_S", serveWriteTimeoutDefault(plannerKind(s.planner))),
 		IdleTimeout:       durEnv("FAK_HTTP_IDLE_TIMEOUT_S", 120*time.Second),
+		// Route net/http's own diagnostics (per-request panic recovery, TLS/keepalive
+		// errors) through the SAME sink as every other gateway log. Left nil, net/http
+		// falls back to the std logger → os.Stderr, which UNDER `fak guard` is the child
+		// harness's controlling TTY: a recovered handler panic then dumps a multi-line
+		// goroutine stack straight into the agent's TUI and corrupts the display (#2772).
+		// s.logf already honors the operator's --log choice — muted by default to keep the
+		// terminal clean, streamed to a file/stderr when asked — so binding ErrorLog to it
+		// makes those diagnostics obey the same policy instead of bypassing it. Zero flags
+		// so we don't double-stamp the timestamp s.logf already adds.
+		ErrorLog: log.New(logfWriter{logf: s.logf}, "", 0),
 	}
 	// Disable Nagle on accepted TCP connections. Without TCP_NODELAY the kernel
 	// coalesces small writes (Nagle), adding 40-200ms of buffering on a high-RTT
@@ -240,6 +251,23 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	case err := <-errc:
 		return err
 	}
+}
+
+// logfWriter adapts the gateway's structured logf onto io.Writer so an http.Server.ErrorLog
+// (which speaks io.Writer) drains into the same sink. net/http hands ErrorLog one whole
+// pre-formatted message per line (a panic recovery arrives as a single multi-line write), so
+// we forward it verbatim minus the trailing newline; when logf is the guard default no-op the
+// message is dropped and nothing reaches the terminal. A nil logf is tolerated for the same
+// reason the Serve path assumes it non-nil — belt-and-braces, never a nil-deref.
+type logfWriter struct {
+	logf func(format string, args ...any)
+}
+
+func (w logfWriter) Write(p []byte) (int, error) {
+	if w.logf != nil {
+		w.logf("%s", strings.TrimRight(string(p), "\n"))
+	}
+	return len(p), nil
 }
 
 // cacheBootSummary renders the startup cache-state line from the process-global cacheobs

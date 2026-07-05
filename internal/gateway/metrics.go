@@ -3185,17 +3185,37 @@ func (s *Server) withMetrics(next http.Handler) http.Handler {
 		}
 		traceID := ensureHTTPTrace(s, w, r)
 		rec := &statusRecorder{ResponseWriter: w}
+		// Record metrics + the request log for EVERY outcome, panic included, and contain a
+		// downstream handler panic HERE — the outermost fak-owned wrapper — instead of letting
+		// it unwind into net/http. net/http's own recovery writes a full goroutine stack to the
+		// server ErrorLog, which under `fak guard` is the wrapped agent's controlling TTY (#2772);
+		// worse, the unwind would skip the accounting below, so the failed turn would never reach
+		// observeHTTP or the request log and the panic would be invisible at /metrics (#2773/#2775).
+		// We convert it to a 500 + one structured line + a counted turn. http.ErrAbortHandler is
+		// net/http's intentional silent-abort sentinel, so it is re-raised untouched.
+		defer func() {
+			if current := requestTraceID(r); current != "" {
+				traceID = current
+			}
+			if p := recover(); p != nil {
+				if p == http.ErrAbortHandler {
+					panic(p)
+				}
+				if rec.status == 0 {
+					rec.WriteHeader(http.StatusInternalServerError)
+					_, _ = rec.Write([]byte("internal server error\n"))
+				}
+				s.logf("gateway: recovered handler panic route=%s method=%s trace_id=%s: %v", route, r.Method, traceID, p)
+			}
+			status := rec.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			dur := time.Since(start)
+			s.metrics.observeHTTP(route, r.Method, status, dur)
+			s.logHTTPRequest(r, route, status, dur, rec.bytes, traceID)
+		}()
 		next.ServeHTTP(rec, r)
-		status := rec.status
-		if status == 0 {
-			status = http.StatusOK
-		}
-		dur := time.Since(start)
-		s.metrics.observeHTTP(route, r.Method, status, dur)
-		if current := requestTraceID(r); current != "" {
-			traceID = current
-		}
-		s.logHTTPRequest(r, route, status, dur, rec.bytes, traceID)
 	})
 }
 
