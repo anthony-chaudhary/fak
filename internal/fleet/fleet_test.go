@@ -661,6 +661,77 @@ func TestGPUStatOnlyFromReachable(t *testing.T) {
 	}
 }
 
+// ---- inference usefulness ---------------------------------------------------
+
+func TestInferenceUsefulnessFoldAndRender(t *testing.T) {
+	ro := Template(5, "a100x8", "lab", "box")
+	reps := []Report{
+		{State: StateLive, Version: "1.0.0", Inference: &InferenceStats{Status: InferenceReady, Engine: "fak", Model: "qwen", OutputTPS: 1.5}},
+		{State: StateLive, Version: "1.0.0", Inference: &InferenceStats{Status: InferenceDegraded, Engine: "llama", Model: "glm", Reason: "cpu-bound"}},
+		{State: StateLive, Version: "1.0.0", Inference: &InferenceStats{Status: InferenceWarming, Reason: "loading"}},
+		{State: StateLive, Version: "1.0.0", Inference: &InferenceStats{Status: InferenceBlocked, Reason: "needs-operator"}},
+		{State: StateLive, Version: "1.0.0"},
+	}
+	snap := Fold(ro, reps, FoldOpts{})
+
+	if snap.Inference == nil {
+		t.Fatal("expected inference summary")
+	}
+	if got, want := snap.Inference.Useful, 2; got != want {
+		t.Fatalf("inference useful = %d, want %d", got, want)
+	}
+	if got, want := snap.Inference.Reported, 4; got != want {
+		t.Fatalf("inference reported = %d, want %d", got, want)
+	}
+	if snap.Inference.Ready != 1 || snap.Inference.Degraded != 1 || snap.Inference.Warming != 1 || snap.Inference.Blocked != 1 {
+		t.Fatalf("unexpected inference summary: %+v", snap.Inference)
+	}
+	if snap.Score != 100 {
+		t.Fatalf("inference status must not move readiness score, got %d", snap.Score)
+	}
+	if !hasCrit(snap.Attention, "blocked for inference") {
+		t.Fatalf("blocked inference should raise a crit, got %+v", snap.Attention)
+	}
+	if !hasWarn(snap.Attention, "degraded for inference") || !hasWarn(snap.Attention, "waiting on inference readiness") {
+		t.Fatalf("degraded/warming inference should raise warnings, got %+v", snap.Attention)
+	}
+	out := Render(snap, true, 72)
+	for _, want := range []string{
+		"INFERENCE useful=2/5 reported=4 ready=1 degraded=1 warming=1 blocked=1 unknown=0",
+		"ready/fak/qwen/1.50tps",
+		"blocked/needs-operator",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("render missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestInferenceReportRoundTripAndValidation(t *testing.T) {
+	dir := t.TempDir()
+	if err := WriteReport(dir, "gpu", Report{
+		State: StateLive,
+		Inference: &InferenceStats{
+			Status:    InferenceReady,
+			Engine:    "fak",
+			Model:     "qwen",
+			OutputTPS: 2.25,
+		},
+	}); err != nil {
+		t.Fatalf("WriteReport with inference: %v", err)
+	}
+	reps := ReadReports(dir, Roster{Boxes: []Box{{ID: "gpu"}}})
+	if reps[0].Inference == nil || reps[0].Inference.Status != InferenceReady || reps[0].Inference.OutputTPS != 2.25 {
+		t.Fatalf("inference report did not round-trip: %+v", reps[0].Inference)
+	}
+	if err := WriteReport(dir, "bad", Report{State: StateLive, Inference: &InferenceStats{Status: InferenceStatus("private-ok")}}); err == nil {
+		t.Fatal("unknown inference status must be refused")
+	}
+	if err := WriteReport(dir, "bad", Report{State: StateLive, Inference: &InferenceStats{Status: InferenceReady, OutputTPS: -1}}); err == nil {
+		t.Fatal("negative inference output_tps must be refused")
+	}
+}
+
 // countBoxRows counts rendered per-box rows: lines that begin with exactly two
 // spaces then a box id (the BOXES table), distinct from the 8-space-indented
 // attention detail lines.

@@ -73,6 +73,44 @@ type GPUStats struct {
 	UtilPct int `json:"util_pct,omitempty"` // aggregate 0-100 busy percent across the box, when known
 }
 
+// InferenceStatus is the public, transport-neutral answer to "can this box take
+// inference work right now?". It is separate from State: a box can be live for
+// shell/dev work while its serving stack is warming or blocked.
+type InferenceStatus string
+
+const (
+	InferenceReady    InferenceStatus = "ready"    // serving can take inference traffic now
+	InferenceDegraded InferenceStatus = "degraded" // usable, but slower/partial/caveated
+	InferenceWarming  InferenceStatus = "warming"  // loading or booting; not useful yet
+	InferenceBlocked  InferenceStatus = "blocked"  // known blocker; operator action needed
+	InferenceUnknown  InferenceStatus = "unknown"  // producer could not prove serving usefulness
+)
+
+func (s InferenceStatus) Known() bool {
+	switch s {
+	case InferenceReady, InferenceDegraded, InferenceWarming, InferenceBlocked, InferenceUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s InferenceStatus) Useful() bool {
+	return s == InferenceReady || s == InferenceDegraded
+}
+
+// InferenceStats is a scrubbed serving-usefulness report for one box. It names only
+// generic serving facts: status, engine/model labels, a throughput number, and an
+// optional generic reason. It must never carry a host, URL, channel id, token, raw
+// transcript, or private filesystem path.
+type InferenceStats struct {
+	Status    InferenceStatus `json:"status"`               // ready|degraded|warming|blocked|unknown
+	Engine    string          `json:"engine,omitempty"`     // generic engine label, e.g. fak|vllm|sglang|llama
+	Model     string          `json:"model,omitempty"`      // generic model label, never a private path
+	OutputTPS float64         `json:"output_tps,omitempty"` // observed output tok/s when known
+	Reason    string          `json:"reason,omitempty"`     // short scrubbed reason class
+}
+
 // Report is one box's current operational state — the seam schema. AgeSec is how
 // long ago the box last reported (the transport stamps it); a large age means the
 // box has gone quiet even if its last word was "live".
@@ -84,14 +122,15 @@ type GPUStats struct {
 // GPU is an OPTIONAL pointer: a box that cannot probe its GPUs omits it, and the fold
 // treats a nil GPU as unknown-utilization (no waste signal), never as 0%-idle.
 type Report struct {
-	Schema  string    `json:"schema,omitempty"`
-	ID      string    `json:"-"`
-	State   State     `json:"state"`
-	Version string    `json:"version,omitempty"`
-	AgeSec  float64   `json:"age_sec,omitempty"`
-	Note    string    `json:"note,omitempty"`
-	GPU     *GPUStats `json:"gpu,omitempty"`
-	Err     string    `json:"-"`
+	Schema    string          `json:"schema,omitempty"`
+	ID        string          `json:"-"`
+	State     State           `json:"state"`
+	Version   string          `json:"version,omitempty"`
+	AgeSec    float64         `json:"age_sec,omitempty"`
+	Note      string          `json:"note,omitempty"`
+	GPU       *GPUStats       `json:"gpu,omitempty"`
+	Inference *InferenceStats `json:"inference,omitempty"`
+	Err       string          `json:"-"`
 }
 
 // Reachable reports whether a trustworthy report was obtained: no read error and a
@@ -141,6 +180,9 @@ func readOneReport(dir string, b Box) Report {
 		r.Err = fmt.Sprintf("unknown state %q", r.State)
 		r.State = StateUnknown
 	}
+	if err := normalizeInference(r.Inference); err != nil {
+		return Report{ID: b.ID, State: StateUnknown, Err: err.Error()}
+	}
 	// Freshness backstop: age_sec only ages a box if the bridge keeps re-stamping it,
 	// so a dead bridge would leave a frozen "live, age 5s" file reading green forever.
 	// Floor the age at the file's own mtime age so a stale file trips the stale warn.
@@ -169,6 +211,9 @@ func WriteReport(dir, id string, r Report) error {
 	if !r.State.Known() {
 		return fmt.Errorf("state %q is not one of live|idle|draining|down|unknown", r.State)
 	}
+	if err := normalizeInference(r.Inference); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create reports dir: %w", err)
 	}
@@ -182,6 +227,22 @@ func WriteReport(dir, id string, r Report) error {
 	path := filepath.Join(dir, id+".json")
 	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
 		return fmt.Errorf("write report: %w", err)
+	}
+	return nil
+}
+
+func normalizeInference(inf *InferenceStats) error {
+	if inf == nil {
+		return nil
+	}
+	if inf.Status == "" {
+		inf.Status = InferenceUnknown
+	}
+	if !inf.Status.Known() {
+		return fmt.Errorf("unknown inference status %q", inf.Status)
+	}
+	if inf.OutputTPS < 0 {
+		return fmt.Errorf("inference output_tps must be non-negative")
 	}
 	return nil
 }

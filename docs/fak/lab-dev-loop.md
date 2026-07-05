@@ -122,6 +122,20 @@ fak lab report --id da-cpu --state live --version "$(fak version)"
 Keep `--note` generic (no host/IP/channel/token) — it is rendered verbatim in the public
 fleet view.
 
+If the box is also serving a model, publish the separate inference-usefulness status so
+`fak lab status` can answer whether the lab machine is useful for inference, not just
+reachable:
+
+```bash
+fak lab report --id mac-a --state live \
+  --inference ready --engine fak --model qwen --output-tps 1.75
+```
+
+Use `ready` or `degraded` only when the serving stack can take inference work. Use
+`warming`, `blocked`, or `unknown` when it cannot. The model/engine/reason labels must stay
+generic; never publish a URL, host, channel id, token, private model path, or raw bridge
+transcript.
+
 ## Boundary rules (do not trip)
 
 - The private control plane stays in `fak-private`. Never add `private bridge/control packages` or

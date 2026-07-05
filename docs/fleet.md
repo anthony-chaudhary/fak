@@ -78,7 +78,14 @@ directory, named `<endpoint-or-id>.json`:
   "state": "live",          // live | idle | draining | down | unknown
   "version": "0.31.0",
   "age_sec": 12.5,
-  "note": "throttled until 14:05"
+  "note": "throttled until 14:05",
+  "inference": {
+    "status": "ready",      // ready | degraded | warming | blocked | unknown
+    "engine": "fak",
+    "model": "qwen",
+    "output_tps": 1.75,
+    "reason": "scrubbed-reason"
+  }
 }
 ```
 
@@ -92,6 +99,13 @@ Two seam fields are operator-facing and **must stay generic** in anything commit
 publicly: `note` is rendered verbatim (keep it pre-scrubbed — never a lab hostname,
 channel, or operator path), and a roster's `endpoint`/`labels` must never carry a real
 channel/session/token (the private bridge owns the id→channel map on its side).
+
+The optional `inference` block answers the question liveness cannot: is this box useful
+for model inference right now? `ready` and `degraded` count as useful; `warming`,
+`blocked`, and `unknown` do not. The labels are public-safe serving facts only. Never put
+a URL, host, channel id, token, private model path, or raw bridge transcript in the block.
+If no producer can prove the serving state, omit `inference` or set `status` to
+`unknown`; do not report false idle/ready.
 
 ## Lab-machine dev readiness
 
@@ -168,10 +182,13 @@ REACHABLE  98/100
 STATE      live=86 idle=10 down=2 unknown=2
 CLASS      a100x8=64 h100x8=36
 VERSION    0.31.0  (6 reachable box(es) on other/none)
+INFERENCE useful=72/100 reported=80 ready=68 degraded=4 warming=3 blocked=2 unknown=3
 
 ATTENTION
   [CRIT] 4 box(es) down or unreachable
         box-031, box-047, box-068, box-091
+  [CRIT] 2 box(es) blocked for inference
+        box-014(blocked/needs-operator), box-062(blocked/no-model)
   [WARN] 4 box(es) off the fleet version 0.31.0
         box-005@0.30.0, box-018@0.30.0, box-052@0.30.0, box-077@0.30.0
 ```

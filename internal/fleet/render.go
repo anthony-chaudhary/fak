@@ -63,6 +63,10 @@ func Render(snap Snapshot, all bool, width int) string {
 	if g := snap.GPUUtil; g != nil {
 		fmt.Fprintf(&b, "GPU UTIL   busy=%d/%d idle=%d (%d%%)\n", g.Busy, g.Total, g.Total-g.Busy, g.UtilPct)
 	}
+	if inf := snap.Inference; inf != nil {
+		fmt.Fprintf(&b, "INFERENCE useful=%d/%d reported=%d ready=%d degraded=%d warming=%d blocked=%d unknown=%d\n",
+			inf.Useful, snap.Total, inf.Reported, inf.Ready, inf.Degraded, inf.Warming, inf.Blocked, inf.Unknown)
+	}
 
 	b.WriteString("\nATTENTION\n")
 	for _, it := range snap.Attention {
@@ -80,7 +84,7 @@ func Render(snap Snapshot, all bool, width int) string {
 			if r.Err != "" {
 				note = r.Err
 			}
-			fmt.Fprintf(&b, "  %-18s %-12s %-9s %-10s %s\n", r.ID, Dash(r.Class), r.State, ver, note)
+			fmt.Fprintf(&b, "  %-18s %-12s %-9s %-10s %-18s %s\n", r.ID, Dash(r.Class), r.State, ver, inferenceCell(r.Inference), note)
 		}
 	}
 
@@ -128,4 +132,21 @@ func Dash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+func inferenceCell(inf *InferenceStats) string {
+	if inf == nil {
+		return "-"
+	}
+	parts := []string{string(inf.Status)}
+	if inf.Engine != "" {
+		parts = append(parts, inf.Engine)
+	}
+	if inf.Model != "" {
+		parts = append(parts, inf.Model)
+	}
+	if inf.OutputTPS > 0 {
+		parts = append(parts, fmt.Sprintf("%.2ftps", inf.OutputTPS))
+	}
+	return strings.Join(parts, "/")
 }

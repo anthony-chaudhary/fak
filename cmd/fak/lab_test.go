@@ -82,6 +82,48 @@ func TestLabReportThenStatusClosesLoop(t *testing.T) {
 	}
 }
 
+func TestLabReportInferenceThenStatusClosesLoop(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FAK_FLEET_REPORTS", dir)
+
+	if rc := runLab(io.Discard, io.Discard, []string{
+		"report",
+		"--id", "box-a",
+		"--state", "live",
+		"--inference", "ready",
+		"--engine", "fak",
+		"--model", "qwen",
+		"--output-tps", "1.75",
+	}); rc != 0 {
+		t.Fatalf("lab report with inference exited %d, want 0", rc)
+	}
+
+	var out bytes.Buffer
+	if rc := runLab(&out, io.Discard, []string{"status", "--json"}); rc != 0 {
+		t.Fatalf("lab status exited %d, want 0", rc)
+	}
+	var snap fleet.Snapshot
+	if err := json.Unmarshal(out.Bytes(), &snap); err != nil {
+		t.Fatalf("status --json did not emit a snapshot: %v\n%s", err, out.String())
+	}
+	if snap.Inference == nil || snap.Inference.Useful != 1 || snap.Inference.Ready != 1 {
+		t.Fatalf("inference summary = %+v, want one useful ready box", snap.Inference)
+	}
+	var found bool
+	for _, r := range snap.Rows {
+		if r.ID != "box-a" {
+			continue
+		}
+		found = true
+		if r.Inference == nil || r.Inference.Status != fleet.InferenceReady || r.Inference.Engine != "fak" || r.Inference.Model != "qwen" || r.Inference.OutputTPS != 1.75 {
+			t.Fatalf("box-a inference row = %+v", r.Inference)
+		}
+	}
+	if !found {
+		t.Fatal("box-a not present in the folded snapshot rows")
+	}
+}
+
 // TestLabStatusHonestDegrade: with an empty/missing reports dir, status exits 0 (NOT a
 // failure), every box reads unknown, and the output tells the operator how to populate
 // liveness — it must never read as a confirmed fleet-wide outage.
@@ -112,6 +154,12 @@ func TestLabReportRejectsBadInput(t *testing.T) {
 	}
 	if rc := runLab(io.Discard, io.Discard, []string{"report", "--id", "../evil", "--state", "live"}); rc == 0 {
 		t.Fatal("an escaping --id must be refused")
+	}
+	if rc := runLab(io.Discard, io.Discard, []string{"report", "--id", "x", "--state", "live", "--inference", "private-ok"}); rc == 0 {
+		t.Fatal("an unknown --inference status must be refused")
+	}
+	if rc := runLab(io.Discard, io.Discard, []string{"report", "--id", "x", "--state", "live", "--inference", "ready", "--output-tps", "-1"}); rc == 0 {
+		t.Fatal("a negative --output-tps must be refused")
 	}
 }
 

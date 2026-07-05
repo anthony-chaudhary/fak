@@ -39,15 +39,16 @@ type Item struct {
 
 // BoxRow is the per-box render record: roster identity folded with its report.
 type BoxRow struct {
-	ID      string    `json:"id"`
-	Class   string    `json:"class,omitempty"`
-	Group   string    `json:"group,omitempty"`
-	State   State     `json:"state"`
-	Version string    `json:"version,omitempty"`
-	AgeSec  float64   `json:"age_sec,omitempty"`
-	Note    string    `json:"note,omitempty"`
-	GPU     *GPUStats `json:"gpu,omitempty"`
-	Err     string    `json:"err,omitempty"`
+	ID        string          `json:"id"`
+	Class     string          `json:"class,omitempty"`
+	Group     string          `json:"group,omitempty"`
+	State     State           `json:"state"`
+	Version   string          `json:"version,omitempty"`
+	AgeSec    float64         `json:"age_sec,omitempty"`
+	Note      string          `json:"note,omitempty"`
+	GPU       *GPUStats       `json:"gpu,omitempty"`
+	Inference *InferenceStats `json:"inference,omitempty"`
+	Err       string          `json:"err,omitempty"`
 }
 
 type countRow struct {
@@ -73,9 +74,23 @@ type Snapshot struct {
 	// no utilization line rather than a false 0%. Distinct from Score (readiness) and
 	// from cache-tier capacity: this is "is the silicon working", not "is it up" or
 	// "does the cache have room".
-	GPUUtil   *GPUStats `json:"gpu_util,omitempty"`
-	Attention []Item    `json:"attention"`
-	Rows      []BoxRow  `json:"rows"`
+	GPUUtil   *GPUStats         `json:"gpu_util,omitempty"`
+	Inference *InferenceSummary `json:"inference,omitempty"`
+	Attention []Item            `json:"attention"`
+	Rows      []BoxRow          `json:"rows"`
+}
+
+// InferenceSummary is the fleet-level serving-usefulness fold. Reported is the
+// number of boxes that supplied an inference block. Useful is stricter: the box must
+// be healthy and report ready/degraded serving.
+type InferenceSummary struct {
+	Reported int `json:"reported"`
+	Useful   int `json:"useful"`
+	Ready    int `json:"ready,omitempty"`
+	Degraded int `json:"degraded,omitempty"`
+	Warming  int `json:"warming,omitempty"`
+	Blocked  int `json:"blocked,omitempty"`
+	Unknown  int `json:"unknown,omitempty"`
 }
 
 // Fold folds a roster and its (roster-aligned) reports into a Snapshot. reports must
@@ -98,6 +113,8 @@ func Fold(ro Roster, reports []Report, opts FoldOpts) Snapshot {
 	// counts more than a busy 1-GPU box); gpuTotal is the denominator for that mean.
 	var gpuTotal, gpuBusy, utilWeighted, utilWeight int
 	sawGPU := false
+	inference := InferenceSummary{}
+	sawInference := false
 
 	for i, b := range ro.Boxes {
 		r := Report{ID: b.ID, State: StateUnknown, Err: "no report"}
@@ -135,9 +152,28 @@ func Fold(ro Roster, reports []Report, opts FoldOpts) Snapshot {
 				utilWeight += g.Total
 			}
 		}
+		if inf := r.Inference; inf != nil && r.Err == "" {
+			sawInference = true
+			inference.Reported++
+			switch inf.Status {
+			case InferenceReady:
+				inference.Ready++
+			case InferenceDegraded:
+				inference.Degraded++
+			case InferenceWarming:
+				inference.Warming++
+			case InferenceBlocked:
+				inference.Blocked++
+			case InferenceUnknown:
+				inference.Unknown++
+			}
+			if st.Healthy() && inf.Status.Useful() {
+				inference.Useful++
+			}
+		}
 		rows[i] = BoxRow{
 			ID: b.ID, Class: b.Class, Group: b.Group,
-			State: st, Version: r.Version, AgeSec: r.AgeSec, Note: r.Note, GPU: r.GPU, Err: r.Err,
+			State: st, Version: r.Version, AgeSec: r.AgeSec, Note: r.Note, GPU: r.GPU, Inference: r.Inference, Err: r.Err,
 		}
 	}
 
@@ -158,6 +194,9 @@ func Fold(ro Roster, reports []Report, opts FoldOpts) Snapshot {
 			util = int(math.Round(float64(utilWeighted) / float64(utilWeight)))
 		}
 		snap.GPUUtil = &GPUStats{Total: gpuTotal, Busy: gpuBusy, UtilPct: util}
+	}
+	if sawInference {
+		snap.Inference = &inference
 	}
 	snap.Score = scoreOf(snap.Total, reachable, healthy, modalN)
 	snap.Attention = attentionOf(rows, modal, opts.StaleSec, opts.WasteFloor)
@@ -194,7 +233,7 @@ func scoreOf(total, reachable, healthy, modalN int) int {
 // clean. Each list is capped in the rendered detail so 100 down boxes do not print
 // 100 ids.
 func attentionOf(rows []BoxRow, modal string, staleSec float64, wasteFloor int) []Item {
-	var down, skew, stale, wasting []string
+	var down, skew, stale, wasting, infBlocked, infWaiting, infDegraded []string
 	for _, r := range rows {
 		if r.Err != "" || r.State == StateDown || r.State == StateUnknown {
 			down = append(down, r.ID)
@@ -213,6 +252,16 @@ func attentionOf(rows []BoxRow, modal string, staleSec float64, wasteFloor int) 
 		if g := r.GPU; g != nil && g.Total > 0 && (g.Total-g.Busy) >= wasteFloor {
 			wasting = append(wasting, fmt.Sprintf("%s(%d/%d)", r.ID, g.Busy, g.Total))
 		}
+		if inf := r.Inference; inf != nil {
+			switch inf.Status {
+			case InferenceBlocked:
+				infBlocked = append(infBlocked, inferenceAttentionLabel(r))
+			case InferenceWarming, InferenceUnknown:
+				infWaiting = append(infWaiting, inferenceAttentionLabel(r))
+			case InferenceDegraded:
+				infDegraded = append(infDegraded, inferenceAttentionLabel(r))
+			}
+		}
 	}
 	var items []Item
 	if len(down) > 0 {
@@ -229,11 +278,32 @@ func attentionOf(rows []BoxRow, modal string, staleSec float64, wasteFloor int) 
 			Detail: previewList(wasting, 6),
 		})
 	}
+	if len(infBlocked) > 0 {
+		items = append(items, Item{
+			Level:  "crit",
+			Title:  fmt.Sprintf("%d box(es) blocked for inference", len(infBlocked)),
+			Detail: previewList(infBlocked, 6),
+		})
+	}
 	if len(skew) > 0 {
 		items = append(items, Item{
 			Level:  "warn",
 			Title:  fmt.Sprintf("%d box(es) off the fleet version %s", len(skew), modal),
 			Detail: previewList(skew, 6),
+		})
+	}
+	if len(infDegraded) > 0 {
+		items = append(items, Item{
+			Level:  "warn",
+			Title:  fmt.Sprintf("%d box(es) degraded for inference", len(infDegraded)),
+			Detail: previewList(infDegraded, 6),
+		})
+	}
+	if len(infWaiting) > 0 {
+		items = append(items, Item{
+			Level:  "warn",
+			Title:  fmt.Sprintf("%d box(es) waiting on inference readiness", len(infWaiting)),
+			Detail: previewList(infWaiting, 6),
 		})
 	}
 	if len(stale) > 0 {
@@ -286,6 +356,20 @@ func previewList(xs []string, max int) string {
 		return strings.Join(xs, ", ")
 	}
 	return strings.Join(xs[:max], ", ") + fmt.Sprintf(" (+%d more)", len(xs)-max)
+}
+
+func inferenceAttentionLabel(r BoxRow) string {
+	if r.Inference == nil {
+		return r.ID
+	}
+	parts := []string{string(r.Inference.Status)}
+	if r.Inference.Model != "" {
+		parts = append(parts, r.Inference.Model)
+	}
+	if r.Inference.Reason != "" {
+		parts = append(parts, r.Inference.Reason)
+	}
+	return fmt.Sprintf("%s(%s)", r.ID, strings.Join(parts, "/"))
 }
 
 func clamp(x, lo, hi float64) float64 {

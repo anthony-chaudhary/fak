@@ -13,7 +13,7 @@ package main
 // self-report — never a misleading score-0 "outage".
 //
 //	fak lab status [--roster F] [--reports DIR] [--group G] [--class C] [--all] [--json]
-//	fak lab report --id ID --state live|idle|draining|down [--version V] [--note N] [--reports DIR]
+//	fak lab report --id ID --state live|idle|draining|down [--version V] [--note N] [--inference ready|degraded|warming|blocked|unknown] [--reports DIR]
 //	fak lab readiness [--file F] [--status STATUS] [--write F|--write-default] [--json]
 //	fak lab ls     [--roster F] [--group G] [--class C] [--json]
 //
@@ -205,6 +205,11 @@ func labReport(stdout, stderr io.Writer, argv []string) int {
 	state := fs.String("state", "", "operational state: live|idle|draining|down")
 	version := fs.String("version", "", "version string the box is running (optional)")
 	note := fs.String("note", "", "short generic note (optional; NO host/IP/channel/token)")
+	inference := fs.String("inference", "", "serving usefulness: ready|degraded|warming|blocked|unknown")
+	engine := fs.String("engine", "", "generic inference engine label for --inference (optional)")
+	model := fs.String("model", "", "generic model label for --inference (optional; never a private path)")
+	outputTPS := fs.Float64("output-tps", 0, "observed output tokens/sec for --inference (optional)")
+	reason := fs.String("reason", "", "short generic inference reason for --inference (optional)")
 	reports := fs.String("reports", "", "reports dir (default: $FAK_FLEET_REPORTS or ~/.config/fak/fleet/reports)")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -218,13 +223,31 @@ func labReport(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak lab report: --state %q must be one of live|idle|draining|down\n", *state)
 		return 2
 	}
+	if *outputTPS < 0 {
+		fmt.Fprintln(stderr, "fak lab report: --output-tps must be non-negative")
+		return 2
+	}
 
 	dir, err := labReportsDir(*reports)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak lab report: %v\n", err)
 		return 1
 	}
-	if err := fleet.WriteReport(dir, *id, fleet.Report{State: st, Version: *version, Note: *note}); err != nil {
+	rep := fleet.Report{State: st, Version: *version, Note: *note}
+	if *inference != "" || *engine != "" || *model != "" || *outputTPS > 0 || *reason != "" {
+		status := fleet.InferenceStatus(*inference)
+		if status == "" {
+			status = fleet.InferenceUnknown
+		}
+		rep.Inference = &fleet.InferenceStats{
+			Status:    status,
+			Engine:    *engine,
+			Model:     *model,
+			OutputTPS: *outputTPS,
+			Reason:    *reason,
+		}
+	}
+	if err := fleet.WriteReport(dir, *id, rep); err != nil {
 		fmt.Fprintf(stderr, "fak lab report: %v\n", err)
 		return 1
 	}
