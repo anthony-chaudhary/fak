@@ -323,6 +323,33 @@ func Match(records []Record, q Query, nowUnix int64) []Record {
 	return out
 }
 
+// LiveRecords collapses the ledger to the current LIVE record of EVERY signature —
+// the same supersede-aware fold Match applies (latest row per signature, in
+// first-seen order), but WITHOUT a tree query: it answers "which known-bad
+// signatures are live right now" rather than "which intersect this tree". The
+// operator blast card (W7, #2719) folds over exactly this set — one card per live
+// signature — so a resolved/expired signature whose earlier open rows still sit on
+// the ledger is dropped, same as Match drops it. Pure: nowUnix is data.
+func LiveRecords(records []Record, nowUnix int64) []Record {
+	latest := make(map[string]Record, len(records))
+	order := make([]string, 0, len(records))
+	for _, rec := range records {
+		sig := strings.TrimSpace(rec.Signature)
+		if _, seen := latest[sig]; !seen {
+			order = append(order, sig)
+		}
+		latest[sig] = rec
+	}
+	var out []Record
+	for _, sig := range order {
+		rec := latest[sig]
+		if rec.Live(nowUnix) {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
 // Claimed reports whether a row records an elected fixer (a non-empty ClaimedBy).
 func (r Record) Claimed() bool { return strings.TrimSpace(r.ClaimedBy) != "" }
 

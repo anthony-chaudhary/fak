@@ -25,6 +25,17 @@ package main
 //	    On resolve: appends a superseding resolved row (which clears the W4
 //	    scope-hold on the next dispatch tick) and releases the fixer's exclusive
 //	    lease (W5). The witness is the gate; a self-report never releases the fleet.
+//	fak knownbad report [--leases FILE] [--repo-url URL] [--operator-after S] \
+//	                    [--dry-run] [--json]
+//	    folds the LIVE known-bad signatures into ONE operator blast card (W7, #2719):
+//	    "N shared blockers -> M affected, K fixing, M-K parked, witness pending",
+//	    posted to the #blockers Slack surface (blockerpost). The affected count per
+//	    signature is the live dos leases whose tree intersects the signature's tree
+//	    (the direct-intersection floor). Severity: clear when the ledger has no live
+//	    signature, operator when an UNCLAIMED signature has gone longer than
+//	    --operator-after without a fixer (a human must elect one), else a muted status
+//	    line. --dry-run (default posture, like the other feeders) renders the card
+//	    without posting.
 //
 // All impurity lives here: the ledger read/write, the exclusive-lease store (git
 // refs, via internal/leaseref), the clock (Unix seconds, injected as `nowUnix` so
@@ -46,6 +57,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/blastradius"
+	"github.com/anthony-chaudhary/fak/internal/blockerpost"
 	"github.com/anthony-chaudhary/fak/internal/knownbad"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -69,11 +82,13 @@ func runKnownBad(stdout, stderr io.Writer, argv []string, nowUnix int64) int {
 		return runKnownBadClaim(stdout, stderr, argv[1:], nowUnix)
 	case "resolve":
 		return runKnownBadResolve(stdout, stderr, argv[1:], nowUnix)
+	case "report":
+		return runKnownBadReport(stdout, stderr, argv[1:], nowUnix)
 	case "-h", "--help", "help":
-		fmt.Fprintln(stderr, "fak knownbad: record | match | claim | resolve  (fleet-wide known-bad signature ledger)")
+		fmt.Fprintln(stderr, "fak knownbad: record | match | claim | resolve | report  (fleet-wide known-bad signature ledger)")
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak knownbad: unknown subcommand %q (want record|match|claim|resolve)\n", argv[0])
+		fmt.Fprintf(stderr, "fak knownbad: unknown subcommand %q (want record|match|claim|resolve|report)\n", argv[0])
 		return 2
 	}
 }
@@ -621,6 +636,120 @@ func knownBadFirstLine(out []byte) string {
 }
 
 // appendKnownBadRow appends one record as a JSONL line, creating the ledger's
+// defaultKnownBadOperatorAfter is how long an UNCLAIMED signature may sit without an
+// elected fixer before the blast card escalates from a muted status line to a surfaced
+// operator page. It is a bounded window, not zero, so a just-discovered signature does
+// not page before the fleet has had a dispatch tick to elect a fixer (W5); it is
+// overridable with --operator-after for a tighter or looser fleet cadence.
+const defaultKnownBadOperatorAfter = 15 * time.Minute
+
+// runKnownBadReport folds the LIVE known-bad signatures into ONE operator blast card
+// (W7, #2719) and posts it to the #blockers Slack surface. It is a READ/render surface:
+// it reads the ledger + the live dos leases and reflects that state — it never decides a
+// hold, elects a fixer, or resolves a signature. The affected count per signature is the
+// direct-intersection floor: the live leases whose declared tree intersects the
+// signature's tree (knownbad.TreesIntersect, the same containment W1/W3 use). Default
+// posture is --dry-run-safe like the other feeders: a status-tier card never pages, only
+// an operator-tier one (an unclaimed signature past --operator-after) does.
+func runKnownBadReport(stdout, stderr io.Writer, argv []string, nowUnix int64) int {
+	fs := flag.NewFlagSet("knownbad report", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	ledger := fs.String("ledger", "", "ledger path override (default: <root>/"+knownbad.DefaultLedgerRel+")")
+	leasesPath := fs.String("leases", "", "read the live lease set from a JSONL fixture instead of the dos lease ledger (for tests / offline render)")
+	dir := fs.String("dir", "", "repo dir for the live dos lease read (default: git discovery from cwd)")
+	repoURL := fs.String("repo-url", "", "repo base URL for the operator card's do-this-next link, e.g. https://github.com/owner/repo")
+	operatorAfter := fs.Duration("operator-after", defaultKnownBadOperatorAfter, "how long an unclaimed signature may go without a fixer before the card escalates to an operator page")
+	source := fs.String("source", "", "who is posting: ci | agent | <hostname> (default: $FAK_SCOREBOARD_SOURCE or hostname)")
+	channel := fs.String("channel", "", "override target channel id (default: $FAK_BLOCKERS_CHANNEL / .env.slack.local / #blockers)")
+	token := fs.String("token", "", "override bot token (default: $FAK_BLOCKERS_TOKEN, then the scoreboard token)")
+	asJSON := fs.Bool("json", false, "emit the folded signatures as JSON (implies no post)")
+	dryRun := fs.Bool("dry-run", false, "render the card and print it; do not post to Slack")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+
+	records, err := readKnownBadLedger(knownBadLedgerPath(*ledger))
+	if err != nil {
+		fmt.Fprintf(stderr, "fak knownbad report: %v\n", err)
+		return 1
+	}
+	leases, err := reportLeaseSet(*leasesPath, *dir, nowUnix)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak knownbad report: %v\n", err)
+		return 1
+	}
+
+	live := knownbad.LiveRecords(records, nowUnix)
+	sigs := make([]blockerpost.Signature, 0, len(live))
+	for _, rec := range live {
+		affected := countAffectedLeases(rec.TreeGlobs, leases)
+		unclaimed := !rec.Claimed()
+		overdue := unclaimed && knownBadOverdue(rec.DiscoveredAtUnix, nowUnix, *operatorAfter)
+		sigs = append(sigs, blockerpost.Signature{
+			ID:             rec.Signature,
+			Reason:         rec.ReasonClass,
+			Trees:          rec.TreeGlobs,
+			Affected:       affected,
+			Fixer:          rec.ClaimedBy,
+			WitnessPending: !rec.Resolved(),
+			NoFixerOverdue: overdue,
+		})
+	}
+
+	if *asJSON {
+		out := struct {
+			Schema     string                  `json:"schema"`
+			LiveCount  int                     `json:"live_count"`
+			Signatures []blockerpost.Signature `json:"signatures"`
+		}{Schema: knownbad.Schema, LiveCount: len(sigs), Signatures: sigs}
+		return knownBadEmitJSON(stdout, stderr, out)
+	}
+
+	card := blockerpost.FoldBlast(sigs, strings.TrimSpace(*repoURL))
+	card.Source = resolveBlockerSource(*source)
+	return emitBlocker(stdout, stderr, card, *channel, *token, *dryRun)
+}
+
+// reportLeaseSet resolves the lease set the affected count folds over: a --leases JSONL
+// fixture wins (offline / test render), otherwise the live dos lease ledger at --dir. A
+// missing dir falls back to git discovery from cwd (empty string), the same default the
+// blast estimator uses.
+func reportLeaseSet(leasesPath, dir string, nowUnix int64) ([]blastradius.Lease, error) {
+	if strings.TrimSpace(leasesPath) != "" {
+		return readBlastLeases(leasesPath)
+	}
+	return liveBlastLeases(dir, time.Unix(nowUnix, 0))
+}
+
+// countAffectedLeases counts the live leases whose declared tree intersects the
+// signature's tree — the direct-intersection floor for the blast card's affected count
+// (knownbad.TreesIntersect, the same containment W1 matches on). It is deliberately the
+// conservative floor, not the full W3 import-graph blast radius: the card is a surface,
+// so it counts who DIRECTLY touches the broken tree without paying a `go list` per render.
+func countAffectedLeases(sigTrees []string, leases []blastradius.Lease) int {
+	n := 0
+	for _, l := range leases {
+		if knownbad.TreesIntersect(sigTrees, l.TreeGlobs) {
+			n++
+		}
+	}
+	return n
+}
+
+// knownBadOverdue reports whether an unclaimed signature discovered at discoveredAtUnix
+// has gone longer than the operator window without a fixer. A non-positive window means
+// "escalate immediately" (any unclaimed signature is overdue); a zero discovery time
+// (a malformed row) is treated as not-overdue so a bad row never pages on its own.
+func knownBadOverdue(discoveredAtUnix, nowUnix int64, window time.Duration) bool {
+	if discoveredAtUnix <= 0 {
+		return false
+	}
+	if window <= 0 {
+		return true
+	}
+	return nowUnix-discoveredAtUnix >= int64(window.Seconds())
+}
+
 // parent directory on first write — the same append idiom the other fak ledgers
 // use (see appendLedgerRow in cadence.go).
 func appendKnownBadRow(path string, rec knownbad.Record) error {

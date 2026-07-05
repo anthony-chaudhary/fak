@@ -180,6 +180,43 @@ func TestMatchSupersedeByResolve(t *testing.T) {
 	}
 }
 
+func TestLiveRecords(t *testing.T) {
+	const now = int64(1_000_000)
+	openFoo := NewRecord("build", []string{"internal/foo/**"}, "foo broke", "agent-1", "", now-10, 0)
+	openBar := NewRecord("test", []string{"internal/bar/**"}, "bar broke", "agent-2", "", now-10, 0)
+	expired := NewRecord("lint", []string{"internal/baz/**"}, "aged out", "agent-3", "", now-500, 100)
+	recs := []Record{
+		openFoo,
+		openBar,
+		expired,
+		// foo is superseded by a resolved row — its LATEST row is not live.
+		openFoo.WithResolve("fixer", now, "tests"),
+		// bar picks up a claim but stays open+live; the claimed fixer must survive.
+		openBar.WithClaim("fixer-9", now-5),
+	}
+
+	live := LiveRecords(recs, now)
+	if len(live) != 1 {
+		t.Fatalf("LiveRecords should collapse to the single still-live signature, got %d: %+v", len(live), live)
+	}
+	got := live[0]
+	if got.Signature != openBar.Signature {
+		t.Fatalf("the surviving live signature should be bar (foo resolved, baz expired), got %s", got.Signature)
+	}
+	if got.ClaimedBy != "fixer-9" {
+		t.Fatalf("LiveRecords must return the LATEST row per signature (the claimed one), got claimant %q", got.ClaimedBy)
+	}
+	// Ordering is first-seen: prove it by adding a second live signature discovered later.
+	openQux := NewRecord("build", []string{"internal/qux/**"}, "qux broke", "agent-4", "", now-1, 0)
+	live2 := LiveRecords(append(recs, openQux), now)
+	if len(live2) != 2 || live2[0].Signature != openBar.Signature || live2[1].Signature != openQux.Signature {
+		t.Fatalf("LiveRecords must preserve first-seen order, got %+v", live2)
+	}
+	if LiveRecords(nil, now) != nil {
+		t.Fatalf("an empty ledger should fold to no live records")
+	}
+}
+
 func TestWithResolveStampsTerminalWitnessRow(t *testing.T) {
 	const now = int64(1_000_000)
 	open := NewRecord("build", []string{"internal/foo/**"}, "foo broke", "agent-1", "sha256:bad", now-10, 0)
