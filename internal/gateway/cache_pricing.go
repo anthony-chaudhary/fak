@@ -223,6 +223,19 @@ func (s AdjudicationSummary) ProviderCacheNetSavings() vcachegov.TelemetrySaving
 	return vcacheProofFromCountersWithUpgrade(s.InputTokens, s.CachedPromptTokens, s.CacheCreationTokens, s.CacheCreationTokensUpgraded)
 }
 
+// MeanTurnLatencySeconds is the session's OBSERVED mean end-to-end turn latency in
+// seconds, or 0 when no turn was timed (E2ELatencyCount == 0 — a replayed/offline summary
+// or a session that served nothing). OBSERVED (provider round-trip timing), never modeled:
+// it is the honest per-turn cost the guard exit line prices WITNESSED turns-saved against,
+// so "time saved" is (turns spared) × (a latency the session actually measured), not a
+// fabricated tokens/sec constant.
+func (s AdjudicationSummary) MeanTurnLatencySeconds() float64 {
+	if s.E2ELatencyCount == 0 {
+		return 0
+	}
+	return s.E2ELatencySumSeconds / float64(s.E2ELatencyCount)
+}
+
 // MechanismSavings is the owner/mechanism split for cache-like savings that the
 // operator-facing surfaces render. Token-equivalent fields all use the same input-token
 // currency as ProviderCacheNetSavings and fak_vcache_saved_token_equiv:

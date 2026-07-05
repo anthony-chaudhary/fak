@@ -1162,6 +1162,17 @@ type AdjudicationSummary struct {
 	// rows means ON-but-ineligible (every head refused) — visible, not silent.
 	CacheTTLUpgraded       uint64            `json:"cache_ttl_upgrades_upgraded"`
 	CacheTTLUpgradeReasons map[string]uint64 `json:"cache_ttl_upgrade_reasons,omitempty"`
+
+	// E2ELatency* fold the session's OBSERVED end-to-end per-turn latency distribution
+	// (inferE2EHist, fed by observeInferenceTimed for every served turn) into the summary
+	// so the guard exit line can price WITNESSED turns-saved into wall-clock at the
+	// session's OWN measured per-turn cost — never a fabricated tokens/sec constant.
+	// Sum is the total observed seconds across Count timed turns; mean = Sum/Count (see
+	// MeanTurnLatencySeconds). Both are OBSERVED (provider round-trip timing), and 0 when
+	// no turn was timed (a replayed/offline summary, or a session that served nothing) —
+	// in which case the exit line prints turns only and omits the wall-clock dual.
+	E2ELatencySumSeconds float64 `json:"e2e_latency_sum_seconds,omitempty"`
+	E2ELatencyCount      uint64  `json:"e2e_latency_count,omitempty"`
 }
 
 // adjudicationSummary folds the live operation counters into a verdict roll-up.
@@ -1179,6 +1190,13 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	sum.OutputTokens = m.inferComplTokens
 	sum.CacheCreationTokens = m.inferCacheCreationTokens
 	sum.CacheCreationTokensUpgraded = m.inferCacheCreationTokensUpgraded
+	// Observed per-turn E2E latency distribution (same lock observeInferenceTimed holds
+	// when it writes inferE2EHist), so the exit line can price turns-saved into wall-clock
+	// at the session's own measured per-turn cost.
+	if m.inferE2EHist != nil {
+		sum.E2ELatencySumSeconds = m.inferE2EHist.sum
+		sum.E2ELatencyCount = m.inferE2EHist.count
+	}
 	m.inferenceMu.Unlock()
 
 	comp := m.compactionSnapshotData()

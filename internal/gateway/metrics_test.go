@@ -260,6 +260,34 @@ func TestAdjudicationSummaryReportsProviderCache(t *testing.T) {
 	}
 }
 
+func TestAdjudicationSummaryReportsObservedTurnLatency(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+
+	// Idle: no turn timed → no latency folded, and the mean is a clean 0 (not a NaN from a
+	// divide-by-zero) so the guard exit line prints turns-only rather than a phantom time.
+	if s := m.adjudicationSummary(); s.E2ELatencyCount != 0 || s.E2ELatencySumSeconds != 0 {
+		t.Fatalf("idle summary must fold no turn latency, got %d turns / %.3fs", s.E2ELatencyCount, s.E2ELatencySumSeconds)
+	}
+	if mean := m.adjudicationSummary().MeanTurnLatencySeconds(); mean != 0 {
+		t.Errorf("idle MeanTurnLatencySeconds = %.3f, want 0", mean)
+	}
+
+	// Two served turns of 2s and 4s → sum 6.0s over 2 timed turns, mean 3.0s/turn.
+	m.observeInference(10, 5, 0, 0, "end_turn", 2*time.Second)
+	m.observeInference(10, 5, 0, 0, "end_turn", 4*time.Second)
+
+	s := m.adjudicationSummary()
+	if s.E2ELatencyCount != 2 {
+		t.Errorf("E2ELatencyCount = %d, want 2", s.E2ELatencyCount)
+	}
+	if s.E2ELatencySumSeconds != 6.0 {
+		t.Errorf("E2ELatencySumSeconds = %.3f, want 6.0", s.E2ELatencySumSeconds)
+	}
+	if mean := s.MeanTurnLatencySeconds(); mean != 3.0 {
+		t.Errorf("MeanTurnLatencySeconds = %.3f, want 3.0", mean)
+	}
+}
+
 func TestAdjudicationSummaryReportsCompaction(t *testing.T) {
 	m := newGatewayMetrics(time.Now())
 	m.observeCompaction(agent.CompactOutcome{}, true)
