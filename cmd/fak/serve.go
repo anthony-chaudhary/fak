@@ -105,6 +105,7 @@ type serveFlags struct {
 	ctxViewBudget               *int
 	compactHistoryBudget        *int
 	compactAnchorHead           *bool
+	assumeSessionTurns          *int
 	elideResultBytes            *int
 	sessionID                   *string
 	sessionStatePath            *string
@@ -131,6 +132,7 @@ type serveFlags struct {
 // plus the struct the boot stages read the parsed values through.
 func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	verbFlagUsage(fs, "serve")
 	sf := &serveFlags{}
 	sf.addr = fs.String("addr", "127.0.0.1:8080", "HTTP listen address (OpenAI + fak + /mcp surface); ignored with --stdio")
 	sf.stdio = fs.Bool("stdio", false, "serve MCP over stdin/stdout (newline-delimited JSON-RPC) instead of HTTP")
@@ -159,6 +161,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.ctxViewBudget = fs.Int("ctx-view-budget", 8000, "wire the ctxplan context PLANNER into the live serve loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). DEFAULT-ON at a conservative 8000 resident tokens; pass 0 to disable (leaves the existing path byte-for-byte unchanged). The planner only ever SHORTENS and falls open to the full history on any doubt; on the Anthropic passthrough it keeps the cached prefix byte-identical (witness: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md). The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
 	sf.compactHistoryBudget = fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "on the Anthropic PASSTHROUGH (an upstream --base-url anthropic), compact OLD conversation turns in the OUTBOUND request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream cache hit survives. This reaches the flagship passthrough the streaming ctxplan view cannot (#555). DEFAULT-ON: once a conversation sprawls past ~48k resident tokens the cut fires and sheds the un-cacheable middle the provider re-bills every turn; a typical short session stays untouched. Pass 0 to disable (body forwarded byte-for-byte). No effect on non-passthrough wires.")
 	sf.compactAnchorHead = fs.Bool("compact-anchor-head", true, "re-anchor --compact-history-budget's protected prefix on the stable system/tools head instead of the first-breakpoint anchor, fixing the anchor-starved trap (#1407) where real Claude Code traffic's recent cache_control breakpoint protects almost the whole conversation so the budget can never shed anything. DEFAULT-ON, and every fire stays gated on the burst economics (CacheBurstPaysBack, #1408): a WARM session with no bounded turns budget never bursts — it fires only when a wired session-turn horizon repays the one-time burst, or when the trace OBSERVABLY idled past the message-breakpoint cache TTL since its last served turn (a penalty-free cut, the long-session firing path). Pass =false to pin the old warm-only first-breakpoint anchor.")
+	sf.assumeSessionTurns = fs.Int("assume-session-turns", gateway.DefaultAssumedSessionTurns, "the session length the head-anchored burst gate (--compact-anchor-head) ASSUMES when no bounded turn horizon is wired, so a WARM continuously-active long session sheds early instead of waiting to idle past the message-span cache TTL. The gate maps the trace's real served-turn depth to CurrentTurn and this value to TotalTurns: it fires early (many repaying turns left) and refuses near the presumed end — the same one-time-burst break-even economics (agent.CacheBurstPaysBack, #1408), just given a history-based length instead of refusing outright. DEFAULT-ON at gateway.DefaultAssumedSessionTurns; a genuine wired Budget.TurnsLeft horizon always WINS over this prior, and a large invalidated suffix still refuses regardless. Pass 0 to disable (byte-for-byte the conservative no-horizon behavior — no fire unless the burst is zero-penalty). Consulted only when --compact-anchor-head is on and the head re-anchor engages; inert on every other path.")
 	sf.elideResultBytes = fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes, "ON by default at gateway.DefaultElideResultBytes (the reviewed gateway.DocumentedElideResultBytes threshold): shrink oversized tool_result bodies outside the active working set to a bounded head+tail form once they exceed this byte threshold. 0 disables.")
 	sf.sessionID = fs.String("session-id", "", "default trace/session id for callers that omit X-Trace-Id or MCP trace_id (empty = mint gw-N per request unless --context-budget-tokens is set)")
 	sf.sessionStatePath = fs.String("session-state", "", "COLD-RESUME the per-session DRIVE state across a process restart (#629): a fleet-snapshot file this `fak serve` RESTORES at boot — re-attaching every session at the budget/priority/run-state/pace it held, not its defaults (a STOPPED session reloads STOPPED with its reason, never silently RUNNING) — and REWRITES on a clean shutdown. Empty (default) = off, byte-for-byte today's path. Distinct from the live Paused→Running resume the /v1/fak/session control verbs already do.")
@@ -299,6 +302,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		CtxViewBudget:               *sf.ctxViewBudget,
 		CompactHistoryBudget:        *sf.compactHistoryBudget,
 		CompactAnchorHead:           *sf.compactAnchorHead,
+		AssumeSessionTurns:          *sf.assumeSessionTurns,
 		ElideResultBytes:            *sf.elideResultBytes,
 		DebugStatsf:                 debugStatsSink(*sf.debugStats),
 		// Inbound twin of #555: prune tool DEFINITIONS the installed floor can never admit

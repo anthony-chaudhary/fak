@@ -79,8 +79,8 @@ var guardFlagGroups = []guardFlagGroup{
 		"policy", "dump-policy", "audit", "no-audit", "log", "landlock-hooks",
 	}},
 	{"Token economy (cache & context savers)", []string{
-		"compact-history-budget", "compact-anchor-head", "elide-result-bytes",
-		"ctx-view-budget", "managed-cache", "compress",
+		"compact-history-budget", "compact-anchor-head", "assume-session-turns",
+		"elide-result-bytes", "ctx-view-budget", "managed-cache", "compress",
 	}},
 	{"Session lifecycle hooks (Claude Code)", []string{
 		"precompact-hook", "deny-all-continue", "deny-all-max", "deny-all-warn",
