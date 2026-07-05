@@ -31,6 +31,17 @@ If `.claude/project.yaml` is missing or these keys are absent, print one line po
 
 This repo ships the mechanical helpers (`tools/release_decide.py`, `release_cut.py`, `release_tag.py`, `release_publish.py`, `release_lock.py`, `release_dry_run.py`) that automate Steps 1–7. The skill text below drives them and explains the structural gotchas they enforce by refusing.
 
+## Fast path (hot shared tree): `fak release ship`
+
+On this repo's hot, multi-session trunk, prefer the one-command front door over driving the helpers by hand:
+
+```bash
+fak release ship --json            # full dry-run plan — no mutations, no lock
+fak release ship --execute --json  # cut, push to trunk, tag, publish
+```
+
+It cuts in a throwaway **detached worktree at the origin tip**, so it leaves *this* checkout's dirty peer WIP untouched; takes and auto-renews the single-writer release lock; pushes with `--force-with-lease`; on a same-trunk peer advance during the cut it re-cuts onto the new tip and retries (never force-pushing); and on a benign peer fast-forward past the release commit while it waits for CI, it recognizes the commit is still on trunk and proceeds — only a rewrite that orphans the commit refuses. Reach for this first. Drive the manual **Steps 0–7 below by hand only when `fak release ship` refuses** and you need to see why — each manual step carries the same hot-tree safety corrections the front door automates.
+
 ---
 
 ## Step 0: Scope (optional — scope by default on a hot shared tree)
@@ -77,7 +88,7 @@ python tools/release_decide.py --json --limit-commits 300
 
 ## Step 2: Pre-release WIP snapshot (only if the tree is dirty)
 
-Skip if the tree is clean. Otherwise commit in-flight WIP *before* drafting the release, so each thematic change lands as its own `git log` entry and the release commit carries only the version bump + release note. Group dirty paths into 2–5 thematic commits, **one `git add` per commit with every path explicit — never `git add -A`/`-u`/`.`**. Match the prefix style of recent commits.
+Skip on a clean tree — and skip on a hot/shared tree, where the dirty paths are peers' in-flight WIP, not yours: do **not** commit or stash their work (Step 3–5 says the same). There, use `fak release ship` (or the detached-worktree cut in Step 3–5), which reads only the origin tip and leaves the working tree untouched. **Only when you own the whole checkout** (a solo, quiet tree) commit *your own* in-flight WIP first, so each thematic change lands as its own `git log` entry and the release commit carries only the version bump + release note. Group your dirty paths into 2–5 thematic commits, **one `git add` per commit with every path explicit — never `git add -A`/`-u`/`.`**. Match the prefix style of recent commits.
 
 ## Step 3–5: Cut (bump VERSION + draft notes + commit)
 
