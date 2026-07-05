@@ -180,6 +180,32 @@ func TestMatchSupersedeByResolve(t *testing.T) {
 	}
 }
 
+func TestWithResolveStampsTerminalWitnessRow(t *testing.T) {
+	const now = int64(1_000_000)
+	open := NewRecord("build", []string{"internal/foo/**"}, "foo broke", "agent-1", "sha256:bad", now-10, 0)
+	claim := open.WithClaim("fixer-7", now-5)
+
+	resolved := claim.WithResolve(" fixer-7 ", now, " tests ")
+	if !resolved.Resolved() || resolved.Live(now) {
+		t.Fatalf("resolved row terminal state = Resolved:%v Live:%v, want resolved and non-live", resolved.Resolved(), resolved.Live(now))
+	}
+	if resolved.Status != StatusResolved || resolved.ResolvedBy != "fixer-7" || resolved.ResolvedAtUnix != now || resolved.Witness != "tests" {
+		t.Fatalf("WithResolve did not stamp the witness-backed release: %+v", resolved)
+	}
+	if resolved.Signature != open.Signature || resolved.ReasonClass != open.ReasonClass || resolved.FailureHash != open.FailureHash {
+		t.Errorf("WithResolve mutated the failure identity: %+v vs %+v", resolved, open)
+	}
+	if len(resolved.TreeGlobs) != len(open.TreeGlobs) || resolved.TreeGlobs[0] != open.TreeGlobs[0] {
+		t.Errorf("WithResolve mutated the release tree: %+v vs %+v", resolved.TreeGlobs, open.TreeGlobs)
+	}
+	if resolved.ClaimedBy != "fixer-7" || resolved.ClaimedAtUnix != now-5 {
+		t.Errorf("WithResolve must preserve fixer claim bookkeeping for operator read-back: %+v", resolved)
+	}
+	if open.Resolved() || !open.Live(now) {
+		t.Errorf("WithResolve mutated the original open row: %+v", open)
+	}
+}
+
 // LeaseID turns a signature into one safe ref segment ("knownbad-<hex>"), strips
 // the "sha256:" scheme (a colon is ref-illegal), is stable for the same signature
 // (two agents derive the same mutex), and returns "" for a signature with no
