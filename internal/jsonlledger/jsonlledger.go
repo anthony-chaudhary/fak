@@ -1,14 +1,14 @@
-// Package jsonlledger parses a JSONL ledger (one JSON object per line) into a
-// slice of typed rows, skipping blank lines, unparseable lines, and rows the
-// keep predicate rejects. It replaces the byte-identical ParseLedger scan body
-// that was copy-pasted across the report packages (cadencereport,
-// milestonereport, programreport, …): each keeps its own row type and delegates
-// the scan here, so the duplicated loop lives in exactly one place.
+// Package jsonlledger holds the shared JSONL-ledger row helpers the report
+// packages (cadencereport, milestonereport, programreport, …) each used to
+// copy-paste: Parse scans a JSONL ledger into typed rows, and LatestBefore finds
+// the newest prior row. Each caller keeps its own row type and delegates here so
+// the duplicated bodies live in exactly one place.
 package jsonlledger
 
 import (
 	"bufio"
 	"encoding/json"
+	"sort"
 	"strings"
 )
 
@@ -35,4 +35,32 @@ func Parse[T any](content string, keep func(T) bool) []T {
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+// LatestBefore returns the row in prior with the greatest (date, tiebreak) sort
+// key, skipping any row whose non-empty tiebreak equals the reference row's (its
+// own prior generation), or (zero, false) when none remain. date and tiebreak
+// extract the primary sort key and the stable-sort tiebreaker from a row. It
+// consolidates the identical "find the previous ledger row" scan the report
+// packages each carried.
+func LatestBefore[T any](row T, prior []T, date, tiebreak func(T) string) (T, bool) {
+	self := tiebreak(row)
+	cands := make([]T, 0, len(prior))
+	for _, p := range prior {
+		if tb := tiebreak(p); tb != "" && tb == self {
+			continue
+		}
+		cands = append(cands, p)
+	}
+	if len(cands) == 0 {
+		var zero T
+		return zero, false
+	}
+	sort.SliceStable(cands, func(i, j int) bool {
+		if di, dj := date(cands[i]), date(cands[j]); di != dj {
+			return di < dj
+		}
+		return tiebreak(cands[i]) < tiebreak(cands[j])
+	})
+	return cands[len(cands)-1], true
 }

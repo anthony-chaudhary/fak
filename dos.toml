@@ -89,6 +89,7 @@ concurrent = [
   "slackoutbox",
   "trajctl",
   "waiting",
+  "chatopsdetach",
   # They landed by hand / during the new_leaf.py path-bug window, so the `# new-leaf:lane`
   # auto-insert never fired. All are real, architest-tiered packages.
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
@@ -217,6 +218,7 @@ concurrent = [
   "waiting",
   "tuiplugin",
   "issuefanout", # #2522: internal/issuefanout leaf (the spine-first + fan-out follow-on planner); cmd/fak/issue_fanout.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
+  "chatopsdetach",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -314,6 +316,7 @@ autopick = [
   "waiting",
   "tuiplugin",
   "issuefanout", # #2522: internal/issuefanout leaf (the spine-first + fan-out follow-on planner), see [lanes].concurrent note
+  "chatopsdetach",
   # new-leaf:lane
 ]
 
@@ -493,6 +496,7 @@ trajctl = ["internal/trajctl/**"]
 waiting = ["internal/waiting/**"]
 tuiplugin = ["internal/tuiplugin/**"]
 issuefanout = ["internal/issuefanout/**"] # #2522: internal/issuefanout leaf (the spine-first + fan-out follow-on planner); cmd/fak/issue_fanout.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
+chatopsdetach = ["internal/chatopsdetach/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]

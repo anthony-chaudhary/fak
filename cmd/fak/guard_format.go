@@ -145,7 +145,7 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 	// Stop-hook lever that auto-resumes the agent past it, so a session that hit the false stop
 	// tells the operator both that it happened and how to keep the loop moving next time.
 	if sum.DenyAllStops > 0 {
-		fmt.Fprintf(&b, "fak guard: deny-all stops — %d turn(s) had EVERY proposed tool call refused, reported to the client as end_turn (a stop the agent did not choose; the model wanted to act, the floor blocked all of it). Keep the agent moving past these with --deny-all-continue=enforce (auto-resumes the agent with 'choose an allowed alternative', bounded).\n",
+		fmt.Fprintf(&b, "fak guard: deny-all stops — %d turn(s) had every proposed tool call set aside, reported to the client as end_turn (a stop the agent did not choose; the model wanted to act and the floor set all of it aside). Keep the agent moving past these with --deny-all-continue=enforce (auto-resumes the agent with 'choose an allowed alternative', bounded).\n",
 			sum.DenyAllStops)
 	}
 	// Tool-feedback turns: the RETRYABLE sibling of the deny-all stops above. Every proposed
@@ -156,7 +156,7 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 	// session ending (#2632). A session stop comes only from a declared stop policy, never from
 	// accumulated tool refusals. Printed only when it happened so a clean run stays quiet.
 	if sum.ToolFeedbackTurns > 0 {
-		fmt.Fprintf(&b, "fak guard: tool-feedback turns — %d turn(s) had EVERY proposed tool call refused as RETRYABLE feedback (per-tool, model-fixable; the turn was NOT stopped — the model can fix the arguments or tool choice and retry). This is a tool-refusal count, not a session stop: a stop comes only from a declared stop policy.\n",
+		fmt.Fprintf(&b, "fak guard: tool-feedback turns — %d turn(s) had every proposed tool call returned as retryable feedback (per-tool, model-fixable; the turn was not stopped — the model can fix the arguments or tool choice and retry). This is a tool-refusal count, not a session stop: a stop comes only from a declared stop policy.\n",
 			sum.ToolFeedbackTurns)
 	}
 	if len(sum.ByReason) > 0 {
