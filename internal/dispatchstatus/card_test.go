@@ -66,3 +66,30 @@ func TestBuildCardGuardReasonIncludesChildCrashes(t *testing.T) {
 	}
 	t.Fatalf("guard child crash count missing from reasons: %#v", payload["reasons"])
 }
+
+func TestBuildCardGuardReasonIncludesLivelockCandidate(t *testing.T) {
+	in := baseCardInputs()
+	in.Guard = map[string]any{
+		"sessions":    2,
+		"rows":        5,
+		"denied":      1,
+		"quarantined": 1,
+		"by_kind":     map[string]any{"DECIDE": 5},
+		"livelock_candidates": []any{map[string]any{
+			"file":        "loop-claude-1-aaaa.jsonl",
+			"tool":        "Read",
+			"reason":      "NONE",
+			"digest":      "allowdigest",
+			"count":       3,
+			"longest_run": 3,
+		}},
+	}
+
+	payload := BuildCard(in)
+	for _, reason := range payload["reasons"].([]string) {
+		if strings.Contains(reason, "loop candidate: loop-claude-1-aaaa.jsonl Read/NONE") {
+			return
+		}
+	}
+	t.Fatalf("guard livelock candidate missing from reasons: %#v", payload["reasons"])
+}

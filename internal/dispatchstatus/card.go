@@ -186,9 +186,13 @@ func appendGuardReason(reasons []string, guard map[string]any) []string {
 			}
 			mix = fmt.Sprintf("%s, %d child crash%s", mix, crashes, suffix)
 		}
+		loopText := ""
+		if label := guardLivelockLabel(guard); label != "" {
+			loopText = fmt.Sprintf("; loop candidate: %s", label)
+		}
 		return append(reasons, fmt.Sprintf(
-			"fak guard witnessed %d kernel decision(s) across %d dispatch session(s) (%s)",
-			gRows, gSessions, mix))
+			"fak guard witnessed %d kernel decision(s) across %d dispatch session(s) (%s)%s",
+			gRows, gSessions, mix, loopText))
 	case gSessions > 0:
 		return append(reasons, fmt.Sprintf(
 			"fak guard ran %d dispatch session(s) but recorded 0 decisions (%d empty) — workers booted under guard but proposed no adjudicated tool call",
@@ -196,6 +200,38 @@ func appendGuardReason(reasons []string, guard map[string]any) []string {
 	default:
 		return reasons
 	}
+}
+
+func guardLivelockLabel(guard map[string]any) string {
+	candidates := listOf(guard["livelock_candidates"])
+	if len(candidates) == 0 {
+		return ""
+	}
+	row := mp(candidates[0])
+	tool := strOf(row["tool"])
+	if tool == "" {
+		tool = strOf(row["kind"])
+	}
+	if tool == "" {
+		tool = "?"
+	}
+	reason := strOf(row["reason"])
+	if reason == "" {
+		reason = strOf(row["verdict"])
+	}
+	if reason == "" {
+		reason = "?"
+	}
+	digest := strOf(row["digest"])
+	if len(digest) > 12 {
+		digest = digest[:12]
+	}
+	if digest == "" {
+		digest = "-"
+	}
+	return fmt.Sprintf("%s %s/%s digest=%s count=%s run=%s",
+		pyAtom(row["file"]), tool, reason, digest,
+		pyAtom(row["count"]), pyAtom(row["longest_run"]))
 }
 
 // appendThroughputReason mirrors BuildCard's throughput (closed/hour vs
