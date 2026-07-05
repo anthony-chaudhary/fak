@@ -119,6 +119,18 @@ Gap **G2** (ticket below). Prior art in-tree: the garden already flags "stale @l
 (`cmd/fak/watchdog_autoheal.go:242-245`), but nothing folds binary identity into spawn
 or wave admission.
 
+**G2 R1 landed (2026-07-04):** the machine-readable half of the provenance ask is now
+real — `fak version --json` emits the running binary's OWN commit + dirty bit + a
+`stamped` flag, folded from the embedded VCS stamp (`cmd/fak/version.go` `buildIdentity`,
+witnessed by `cmd/fak/version_identity_test.go`). A normal `go build ./cmd/fak` already
+embeds that stamp, so the "no VCS stamp" line above is the *unstamped-build* failure
+mode a consumer must read as `stamped:false` ("commit unknown"), not the default. This
+is the identity a monitor or a wave-admission skew witness reads; what remains as
+follow-on (R2/R3) is the *surfacing*: fold the identity into `fak fleet monitor`
+per-worker rows and into wave admission as an advisory when a member's commit differs
+from the launcher's. Honest fence unchanged: observability-first, no closed skew
+refusal token until a measured incident justifies one.
+
 **R3 — A µs regression multiplies up the ladder, and part of B1 is fail-open.**
 A B0/B1 cost rides every tool call of every turn of every worker. The envelope system
 exists (W5) but its coverage has a hole: the turntaxmeter budget table has **no `vdso`
