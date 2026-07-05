@@ -132,6 +132,39 @@ var cacheHeadlineOwnerQualifiers = []string{
 	"compaction", "vDSO", "cost/latency", "rebate", "plane",
 }
 
+// cacheDollarPhrases catch a fak cache/compaction saving expressed in DOLLARS -- a "$" figure
+// (literal like $0.42 or a format verb like $%.2f / $%d) or an explicit USD/dollars amount --
+// as opposed to a raw token-equivalent count. A dollar figure is where the 0.1x-vs-1.0x
+// valuation choice (#2794/#2798) becomes real money, so it is the figure that must name its
+// basis. Deliberately narrow: a bare "$%s" env reference matches no number verb, and a plain
+// token-equivalent count carries no "$" at all, so neither trips this.
+var cacheDollarPhrases = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\$\s?(?:\d|%[#+\-0-9.* ]*[dfgv])`),
+	regexp.MustCompile(`(?i)\b\d+(?:\.\d+)?\s*(?:usd|us dollars|dollars)\b`),
+}
+
+// cacheSavingsContext marks a string as being about a cache/compaction SAVING, so a "$" in it
+// is a cache-value dollar and not an unrelated amount (a budget envelope, a handoff env-var).
+// Always AND-ed with a dollar figure, so breadth here is safe: any dollar-denominated saving
+// SHOULD name its basis.
+var cacheSavingsContext = []string{
+	"cache", "compaction", "shed", "saving", "saved", "fak_share", "fak share",
+}
+
+// valuationBasisQualifiers name the basis a shed/compaction token's value was priced on -- the
+// B3 enum from #2796 and its human phrasings (the multipliers, the marginal). A cache-value
+// DOLLAR that names none of these hides whether it booked the shed token at 1.0x full-input or
+// 0.1x cache-read marginal, which is exactly the ~7.7x warm overvaluation #2794/#2798 exist to
+// kill. Owner alone (kpiCacheHeadlineProvenance) does not suffice: "fak compaction saved $0.42"
+// names the owner yet still conceals the basis.
+var valuationBasisQualifiers = []string{
+	"valuation_basis", "valuation basis", "basis=",
+	"FULL_INPUT", "full-input", "full input",
+	"CACHE_READ_MARGINAL", "cache-read marginal", "cache read marginal", "cache-read-marginal",
+	"OBSERVED_NET", "observed-net", "observed net",
+	"1.0x", "0.1x", "0.9x", "CacheReadMultiplier", "cache-read multiplier", "cache read multiplier",
+}
+
 // faultSignalNamed matches prose that names a single fak-fault signal (the "only X>0 is our
 // bug" pattern), ported from the Python re.search with re.I.
 var faultSignalNamed = regexp.MustCompile(`(?i)only\b.{0,40}\bis\s+(?:fak's|the\s+\w+\s+)?bug`)
@@ -325,6 +358,60 @@ func kpiCacheHeadlineProvenance(surfaces map[string][]cacheHeadlineLine) scoreca
 	}
 }
 
+// isCacheDollarClaim reports whether s emits a fak cache/compaction saving in DOLLARS (a "$" or
+// USD amount in cache-savings context), as opposed to a raw token-equivalent count or an
+// unrelated dollar (a budget envelope, an env-var reference). Only a dollar figure carries the
+// 0.1x-vs-1.0x valuation stakes, so only it is held to the basis contract.
+func isCacheDollarClaim(s string) bool {
+	if !scorecard.HasAny(s, cacheSavingsContext) {
+		return false
+	}
+	for _, re := range cacheDollarPhrases {
+		if re.MatchString(s) {
+			return true
+		}
+	}
+	return false
+}
+
+// kpiValuationBasisLabeled (HARD): every reporting string that emits a fak cache/compaction
+// value in DOLLARS must name the valuation basis it priced the shed token on (B3, #2796). A
+// cache dollar with no basis hides whether it booked the token at 1.0x full-input or 0.1x
+// cache-read marginal -- the 0.1x-vs-1.0x conflation #2794/#2798 exist to kill. This is basis
+// honesty, distinct from the owner honesty kpiCacheHeadlineProvenance already enforces.
+func kpiValuationBasisLabeled(surfaces map[string][]string) scorecard.KPI {
+	var defects []string
+	total := 0
+	for _, path := range sortedKeys(surfaces) {
+		sid := lastSegment(path)
+		for _, s := range surfaces[path] {
+			if !isCacheDollarClaim(s) {
+				continue
+			}
+			total++
+			if !scorecard.HasAny(s, valuationBasisQualifiers) {
+				defects = append(defects, sid+": cache-value dollar emitted with no valuation_basis (1.0x full-input vs 0.1x cache-read marginal): \""+scorecard.Clip(s, 90)+"\"")
+			}
+		}
+	}
+	score := 100.0
+	if len(defects) > 0 {
+		denom := total
+		if denom < 1 {
+			denom = 1
+		}
+		score = 100.0 * (1 - float64(len(defects))/float64(denom))
+		if score < 0 {
+			score = 0
+		}
+	}
+	return scorecard.KPI{
+		Key: "valuation_basis_labeled", Group: "honesty", Score: score,
+		Detail:  detailCounts(total-len(defects), total, "cache-value dollars name their valuation basis"),
+		Defects: defects,
+	}
+}
+
 func cacheHeadlineClaim(line string) bool {
 	for _, re := range cacheHeadlineClaimPhrases {
 		if re.MatchString(line) {
@@ -334,7 +421,7 @@ func cacheHeadlineClaim(line string) bool {
 	return false
 }
 
-// Build reads the reporting surfaces, runs the three KPIs, and folds them into the
+// Build reads the reporting surfaces, runs the conflation KPIs, and folds them into the
 // control-pane payload via the shared kernel. root is the repo root.
 func Build(root string) scorecard.Payload {
 	surfaces := map[string][]string{}
@@ -349,6 +436,14 @@ func Build(root string) scorecard.Payload {
 			}
 		}
 	}
+	cacheDollarSeen := 0
+	for _, rel := range ReportingSurfaces {
+		for _, s := range surfaces[rel] {
+			if isCacheDollarClaim(s) {
+				cacheDollarSeen++
+			}
+		}
+	}
 	cacheSurfaces := cacheHeadlineSurfaces(root)
 	cacheClaimsSeen := 0
 	for _, lines := range cacheSurfaces {
@@ -358,6 +453,7 @@ func Build(root string) scorecard.Payload {
 		kpiProvenanceLabeled(surfaces),
 		kpiNoFalseAttribution(surfaces),
 		kpiFaultSignalIsolated(surfaces),
+		kpiValuationBasisLabeled(surfaces),
 		kpiCacheHeadlineProvenance(cacheSurfaces),
 	}
 	debt := 0
@@ -367,8 +463,8 @@ func Build(root string) scorecard.Payload {
 	finding := "every reported fact labels its provenance and blames no provider-side miss on fak"
 	next := "hold -- re-run after a new reporting surface lands"
 	if debt > 0 {
-		finding = plural(debt, "conflation defect") + ": a reported value is unlabeled or a provider miss is attributed to a fak action"
-		next = "fix " + worstKPI(kpis) + ": label external values OBSERVED / correct the attribution"
+		finding = plural(debt, "conflation defect") + ": a reported value is unlabeled, a cache dollar names no valuation basis, or a provider miss is attributed to a fak action"
+		next = "fix " + worstKPI(kpis) + ": label external values OBSERVED / name the cache-dollar valuation basis / correct the attribution"
 	}
 	p := scorecard.Fold(Schema, kpis, DebtKey, nil, scorecard.Messages{
 		Grade:           scorecard.GradeStrict,
@@ -380,6 +476,7 @@ func Build(root string) scorecard.Payload {
 			"surfaces":                   len(ReportingSurfaces),
 			"external_values_seen":       externalSeen,
 			"cache_headline_claims_seen": cacheClaimsSeen,
+			"cache_dollar_claims_seen":   cacheDollarSeen,
 		},
 	})
 	p.Workspace = root

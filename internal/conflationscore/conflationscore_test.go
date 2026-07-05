@@ -185,6 +185,58 @@ func TestLiveTreeFloorIsZero(t *testing.T) {
 	}
 }
 
+func TestValuationBasisLabeled_UnlabeledCacheDollarIsDebt(t *testing.T) {
+	// The pre-B1 report: a compaction dollar booked with no basis -- the reader cannot tell
+	// 1.0x full-input from 0.1x cache-read marginal (the ~7.7x warm overvaluation #2794/#2798).
+	surfaces := map[string][]string{"x/metrics.go": {
+		"fak compaction saved $0.42 this session (fak_share of the cache economy)."}}
+	k := kpiValuationBasisLabeled(surfaces)
+	if len(k.Defects) == 0 {
+		t.Error("a cache-value dollar with no valuation_basis must be debt")
+	}
+	if k.Score >= 100.0 {
+		t.Errorf("score should drop below 100 on a defect, got %v", k.Score)
+	}
+}
+
+func TestValuationBasisLabeled_BasisLabeledCacheDollarIsClean(t *testing.T) {
+	// The post-B1 report: the same dollar naming its basis is honest.
+	surfaces := map[string][]string{"x/metrics.go": {
+		"fak compaction saved $0.42 this session (valuation_basis=CACHE_READ_MARGINAL, shed priced 0.1x on warm reads)."}}
+	k := kpiValuationBasisLabeled(surfaces)
+	if len(k.Defects) != 0 {
+		t.Errorf("a basis-labeled cache dollar is honest, got defects %v", k.Defects)
+	}
+	if k.Score != 100.0 {
+		t.Errorf("clean score=%v want 100", k.Score)
+	}
+}
+
+func TestValuationBasisLabeled_TokenEquivSavingIsNotADollarClaim(t *testing.T) {
+	// A raw token-equivalent saving (no $) is graded by the owner/provenance KPIs, not this one
+	// -- this KPI must fire ONLY on a dollar figure, so it never over-flags the live tree.
+	surfaces := map[string][]string{"x/metrics.go": {
+		"WITNESSED fak-authored token savings (compaction shed + in-kernel KV-prefix reuse)."}}
+	k := kpiValuationBasisLabeled(surfaces)
+	if len(k.Defects) != 0 {
+		t.Errorf("a token-equivalent saving is not a dollar claim, got %v", k.Defects)
+	}
+	if k.Score != 100.0 {
+		t.Errorf("clean score=%v want 100", k.Score)
+	}
+}
+
+func TestValuationBasisLabeled_NonCacheDollarIgnored(t *testing.T) {
+	// A dollar with no cache-savings context (a handoff env-var reference) is not a cache-value
+	// claim -- the context gate is why the disciplined live tree stays at debt 0.
+	surfaces := map[string][]string{"x/guard.go": {
+		"fak guard: task handoff Stop gate; child sees $%s"}}
+	k := kpiValuationBasisLabeled(surfaces)
+	if len(k.Defects) != 0 {
+		t.Errorf("a non-cache dollar (env ref) must not be a valuation-basis defect, got %v", k.Defects)
+	}
+}
+
 func containsSubstr(ss []string, sub string) bool {
 	for _, s := range ss {
 		if strings.Contains(s, sub) {
