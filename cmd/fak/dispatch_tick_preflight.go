@@ -73,11 +73,59 @@ func dispatchPreflightGate(root string) dispatchtick.GateCheck {
 		}
 		obs = append(obs, rows...)
 	}
+	// Window the fold to LIVE kernel health before judging the tail. Backpressure is
+	// a "hold until the tail recovers" signal, but a fold over the ALL-TIME stream can
+	// never recover: a past slow period stays in the denominator forever, so the gate
+	// would red permanently on a stream that has accumulated one. FAK_GATE_WINDOW (a
+	// duration; default dispatchGateDefaultWindow) scopes it to recent rows the same
+	// way `fak hooklat --since` does; "0"/"off" restores the whole-stream fold.
+	if window := dispatchGateWindow(); window > 0 {
+		obs = turntaxmeter.FilterHookObservationsSince(obs, time.Now().Add(-window))
+	}
 	rollup := turntaxmeter.FoldHookLatency(obs)
 	return dispatchtick.GateCheck{
 		Hook:         rollup.Total,
 		HookBudgetMS: turntaxmeter.DefaultHookP99BudgetMS,
+		MinWorkers:   dispatchGateMinWorkers(),
 	}
+}
+
+// dispatchGateDefaultWindow scopes the gate's hook-latency fold to recent kernel
+// health. Two hours is generous enough to hold a trustworthy tail (n well past
+// turntaxmeter.MinHookAlarmSamples on any live fleet) while still letting a resolved
+// regression age out so the gate can recover -- the property the all-time fold lacked.
+const dispatchGateDefaultWindow = 2 * time.Hour
+
+// dispatchGateWindow resolves the gate's observation lookback from FAK_GATE_WINDOW: a
+// Go duration (e.g. "90m") windows the fold; "0" or "off" folds the whole stream; an
+// empty or unparseable value falls back to dispatchGateDefaultWindow.
+func dispatchGateWindow() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("FAK_GATE_WINDOW"))
+	switch {
+	case raw == "":
+		return dispatchGateDefaultWindow
+	case raw == "0" || strings.EqualFold(raw, "off"):
+		return 0
+	}
+	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+		return d
+	}
+	return dispatchGateDefaultWindow
+}
+
+// dispatchGateMinWorkers resolves the gate cold-start floor from FAK_GATE_MIN_WORKERS,
+// falling back to dispatchtick.DefaultGateMinWorkers. A zero or negative override is
+// clamped by GateCheck.floor() back to the default, so the deadlock-at-zero the floor
+// forbids cannot be reintroduced through the env.
+func dispatchGateMinWorkers() int {
+	raw := strings.TrimSpace(os.Getenv("FAK_GATE_MIN_WORKERS"))
+	if raw == "" {
+		return dispatchtick.DefaultGateMinWorkers
+	}
+	if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+		return n
+	}
+	return dispatchtick.DefaultGateMinWorkers
 }
 
 func dispatchPreflightHost(_ string, _ io.Writer) dispatchtick.HostCheck {

@@ -61,6 +61,78 @@ func TestApplyGateBackpressureBreachLowersCapAndRefuses(t *testing.T) {
 	}
 }
 
+// coldGateBaseline returns a SPAWN_OK preflight for a COLD fleet (0 live, cap 5) so a
+// pressured fold's cold-start floor is a visible allowance rather than a deadlock.
+func coldGateBaseline(t *testing.T) PreflightResult {
+	t.Helper()
+	in := preflightInput()
+	in.MaxWorkers = 5
+	in.Kernel = KernelCheck{Alive: IntPtr(0), Target: IntPtr(9), Verdict: "FILLING"}
+	res := EvaluatePreflight(in)
+	if res.Verdict != PreflightOKVerdict || res.Cap != 5 || res.Live != 0 || res.Headroom != 5 {
+		t.Fatalf("cold baseline = %s cap/live/headroom=%d/%d/%d, want SPAWN_OK 5/0/5", res.Verdict, res.Cap, res.Live, res.Headroom)
+	}
+	return res
+}
+
+func TestApplyGateBackpressureColdStartFloorKeepsMinimalSpawn(t *testing.T) {
+	// A cold fleet under genuine pressure must NOT deadlock at a zero cap: the floor
+	// holds it to a minimal cold-start presence and keeps the verdict SPAWN_OK, so the
+	// first worker can start and begin clearing the very backlog the gate reacts to.
+	got := ApplyGateBackpressure(coldGateBaseline(t), GateCheck{
+		Hook:         turntaxmeter.HookLatencyStats{Count: 40, P99MS: 900},
+		HookBudgetMS: turntaxmeter.DefaultHookP99BudgetMS,
+	})
+	if !got.OK || got.Verdict != PreflightOKVerdict {
+		t.Fatalf("cold fleet under pressure must stay SPAWN_OK (throttle growth, not liveness); got ok=%v verdict=%s", got.OK, got.Verdict)
+	}
+	if got.Cap != DefaultGateMinWorkers || got.Headroom != DefaultGateMinWorkers {
+		t.Fatalf("cap/headroom = %d/%d, want the cold-start floor %d/%d", got.Cap, got.Headroom, DefaultGateMinWorkers, DefaultGateMinWorkers)
+	}
+	if got.CapTerms.EffectiveCap != DefaultGateMinWorkers || got.CapTerms.Limiting != "gate" {
+		t.Fatalf("cap_terms effective/limiting = %d/%q, want %d/gate", got.CapTerms.EffectiveCap, got.CapTerms.Limiting, DefaultGateMinWorkers)
+	}
+}
+
+func TestApplyGateBackpressureCustomFloorAllowsMoreColdStart(t *testing.T) {
+	// A raised floor (FAK_GATE_MIN_WORKERS) lets an operator keep more workers alive
+	// under pressure; the gate still only LOWERS the cap (5 -> 3), never raises it.
+	got := ApplyGateBackpressure(coldGateBaseline(t), GateCheck{
+		Hook:         turntaxmeter.HookLatencyStats{Count: 40, P99MS: 900},
+		HookBudgetMS: turntaxmeter.DefaultHookP99BudgetMS,
+		MinWorkers:   3,
+	})
+	if !got.OK || got.Cap != 3 || got.Headroom != 3 {
+		t.Fatalf("custom floor 3: got ok=%v cap/headroom=%d/%d, want SPAWN_OK 3/3", got.OK, got.Cap, got.Headroom)
+	}
+}
+
+func TestApplyGateBackpressureFloorAtOrAboveCapIsNoOp(t *testing.T) {
+	// The gate cannot manufacture capacity: a floor at or above the existing cap
+	// leaves the SPAWN_OK preflight untouched rather than relabeling it.
+	base := coldGateBaseline(t)
+	got := ApplyGateBackpressure(base, GateCheck{
+		Hook:         turntaxmeter.HookLatencyStats{Count: 40, P99MS: 900},
+		HookBudgetMS: turntaxmeter.DefaultHookP99BudgetMS,
+		MinWorkers:   10,
+	})
+	if !sameAdmission(got, base) {
+		t.Fatalf("floor above cap must be a no-op; got %+v, want %+v", got, base)
+	}
+}
+
+func TestApplyGateBackpressureWarmFleetStillFreezesAndRefuses(t *testing.T) {
+	// The warm-fleet contract is unchanged: a fleet already at/above the floor freezes
+	// at its live count and refuses, so the sweep terminates on gate pressure.
+	got := ApplyGateBackpressure(gateBaseline(t), GateCheck{
+		Hook:         turntaxmeter.HookLatencyStats{Count: 40, P99MS: 900},
+		HookBudgetMS: turntaxmeter.DefaultHookP99BudgetMS,
+	})
+	if got.OK || got.Verdict != PreflightRefuseGate || got.Cap != 2 || got.Headroom != 0 {
+		t.Fatalf("warm fleet must freeze at live and refuse; got ok=%v verdict=%s cap/headroom=%d/%d, want REFUSE_GATE 2/0", got.OK, got.Verdict, got.Cap, got.Headroom)
+	}
+}
+
 func TestApplyGateBackpressureOverheadBreachRefuses(t *testing.T) {
 	got := ApplyGateBackpressure(gateBaseline(t), GateCheck{OverheadBreach: true})
 	if got.OK || got.Verdict != PreflightRefuseGate {

@@ -10,9 +10,15 @@ package dispatchtick
 // 250ms budget (internal/turntaxmeter/hooklat.go) -- the fast inner loop saturates
 // silently while the slow outer loop commands more load. This is the missing UP edge:
 // a breached hook-latency rollup (or a standing overhead-budget breach) LOWERS the
-// effective cap, never raises it, and when it is the SOLE binding term the tick
-// refuses with the closed GATE_PRESSURE token so the sweep terminates on it like any
-// other refusal.
+// effective cap, never raises it, and when it is the SOLE binding term for a WARM
+// fleet the tick refuses with the closed GATE_PRESSURE token so the sweep terminates
+// on it like any other refusal.
+//
+// The one liveness carve-out (the cold-start floor, DefaultGateMinWorkers): pressure
+// throttles GROWTH, not existence. A COLD fleet is held to a minimal floor rather than
+// frozen at a zero cap, because a slow kernel that never admitted its first worker
+// could never clear the backlog whose windowed p99 gates it -- the signal would never
+// recover on its own and the fleet would deadlock. See ApplyGateBackpressure.
 //
 // It is deliberately a COMPOSABLE fold over the PreflightResult rather than another
 // branch inside EvaluatePreflight: the signal is the measured rollup the impure shell
@@ -38,6 +44,15 @@ const PreflightRefuseGate = "REFUSE_GATE"
 // the loop routes to a replan.
 const GatePressure = "GATE_PRESSURE"
 
+// DefaultGateMinWorkers is the cold-start floor: the fewest workers the gate admits
+// even under sustained pressure. Backpressure must throttle GROWTH, never liveness --
+// a floor of 0 is the deadlock this constant exists to forbid: a cold fleet (0 live)
+// pressured to a 0 cap can never start the first worker, so the slow kernel never
+// clears its own backlog and the windowed p99 that gates it never recovers. Holding a
+// minimal presence keeps the fleet live while still refusing to GROW onto a slow
+// kernel. The impure shell overlays FAK_GATE_MIN_WORKERS on top of this.
+const DefaultGateMinWorkers = 1
+
 // GateCheck carries the MEASURED gate-health state the backpressure term folds. The
 // signal is the guard-hook latency rollup total (the p99 tail the budget judges) and a
 // standing overhead-budget breach flag -- both computed by the impure shell from the
@@ -57,6 +72,21 @@ type GateCheck struct {
 	// lifecycle rung (internal/turntaxmeter.CheckSpan). It is already an accumulated
 	// verdict, so unlike the hook tail it carries no separate sample floor.
 	OverheadBreach bool
+	// MinWorkers is the cold-start floor the backpressure fold holds to even under
+	// pressure: the fewest workers admitted so throttling stays a brake on GROWTH
+	// rather than a deadlock at zero. Zero (the default) means DefaultGateMinWorkers;
+	// the impure shell sets it from FAK_GATE_MIN_WORKERS.
+	MinWorkers int
+}
+
+// floor resolves the cold-start allowance the pressured fold holds to. A zero or
+// negative MinWorkers means the built-in DefaultGateMinWorkers, so the zero-value
+// GateCheck keeps the correct liveness-preserving default and stays hermetic.
+func (g GateCheck) floor() int {
+	if g.MinWorkers <= 0 {
+		return DefaultGateMinWorkers
+	}
+	return g.MinWorkers
 }
 
 // gatePressure reads the measured gate-health state back to a spawn-reluctance
@@ -74,15 +104,23 @@ func gatePressure(g GateCheck) (bool, string) {
 }
 
 // ApplyGateBackpressure folds gate health into an already-evaluated preflight as the
-// fifth cap term. Degraded gate health freezes the fleet at its current live count --
-// admit no NEW worker onto a slow kernel -- which can only LOWER the effective cap.
+// fifth cap term. Degraded gate health holds the fleet at max(live, floor) -- admit no
+// NEW worker onto a slow kernel BEYOND a minimal cold-start presence -- which can only
+// LOWER the effective cap, never raise it.
+//
+// Backpressure throttles GROWTH, not liveness. A WARM fleet (live at or above the
+// floor) freezes at its live count and refuses with PreflightRefuseGate, exactly as
+// before: the sweep stops on it like any other refusal. A COLD fleet (live below the
+// floor) is instead lowered to the floor and kept SPAWN_OK, so a slow kernel still
+// gets its minimal presence rather than deadlocking at a zero cap forever -- the first
+// worker must be admitted for the kernel to clear the very backlog whose windowed p99
+// gates it, or the gate could never recover on its own.
 //
 // The fold is a no-op when the preflight ALREADY refused for a higher-precedence
 // reason (host / seat / at-cap / account): the fleet is then already not growing, so
 // gate pressure is not the sole binding term and the existing verdict stands. It is
-// also a no-op on a healthy gate or a thin sample. Only a would-be SPAWN_OK whose
-// headroom the gate removes flips to PreflightRefuseGate with a GATE_PRESSURE-token
-// reason that cites the measured cause.
+// also a no-op on a healthy gate, a thin sample, or when the floor meets/exceeds the
+// existing cap (the gate cannot manufacture capacity).
 func ApplyGateBackpressure(res PreflightResult, g GateCheck) PreflightResult {
 	// The gate is bottom-up backpressure on a SAFE-to-spawn preflight only.
 	if !res.OK {
@@ -92,13 +130,27 @@ func ApplyGateBackpressure(res PreflightResult, g GateCheck) PreflightResult {
 	if !pressured || res.Live >= res.Cap {
 		return res
 	}
-	// Freeze at the live count -- admit no NEW worker onto a slow kernel. res.Live <
-	// res.Cap holds here (a SPAWN_OK preflight has headroom), so this only LOWERS the
-	// effective cap.
-	res.Cap = res.Live
-	res.Headroom = 0
-	res.CapTerms.EffectiveCap = res.Cap
+	// Hold at max(live, floor). res.Live < res.Cap holds here (a SPAWN_OK preflight
+	// has headroom), so a floor at or above the cap means the gate cannot bind -- it
+	// never RAISES the cap, so leave the preflight untouched.
+	hold := res.Live
+	if floor := g.floor(); hold < floor {
+		hold = floor
+	}
+	if hold >= res.Cap {
+		return res
+	}
+	res.Cap = hold
+	res.Headroom = hold - res.Live
+	res.CapTerms.EffectiveCap = hold
 	res.CapTerms.Limiting = "gate"
+	if res.Headroom > 0 {
+		// Cold fleet: the gate lowered the cap to the floor (throttling growth) but
+		// left a minimal cold-start allowance, so the verdict stays SPAWN_OK.
+		return res
+	}
+	// Warm fleet (live at/above the floor): no headroom above the hold -- freeze and
+	// refuse with the closed GATE_PRESSURE token so the sweep terminates on it.
 	res.OK = false
 	res.Verdict = PreflightRefuseGate
 	res.Reason = gatePressureReason(cause, g, res.Live)
