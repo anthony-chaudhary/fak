@@ -140,7 +140,7 @@ var tier = map[string]int{
 	"cachevaluereport": 2, // weekly cache-value TREND roll-up (epic #1301 rung A, Track 1): pure Fold over cachevalueledger(1) into a by-week realized-reuse trend, #1066-fenced; imports cachevalueledger(1)+stdlib only, off the hot path.
 	"auditusage":       2, // cross-session audit usage rollup (#1612): folds sink rows from journal(2), loopmgr(1), dispatchaudit(1), and usage ledgers into one CLI report; off the hot path.
 	"harvest":          2, "shipgate": 2, "policy": 2, "modelengine": 2, "ratelimit": 2,
-	"journal": 2, "gitgate": 2, "safecommit": 2, "spec": 2, // spec: the ProvisionalSink/OpsSpec speculation mechanism; composes model+polymodel under abi (off-defconfig, gated by FAK_POLYMODEL).
+	"journal": 2, "gitgate": 2, "safecommit": 2,
 	"storedrv": 2, // content-addressed storage ROUTER: composes the blob/blobfs/blobhttp (tier-1) drivers into one namespace; the abi RegionBackend only when FAK_STORE opts in.
 	"capindex": 2, // protocol-blind capability keystone (#1104 C1): CapRef/Capability/Index/Resolver + skill resolver, imports only abi(0). The gateway-backed MCP/A2A resolvers live in capindexgw(4) so the core stays importable by the tier-3 skill-loader (ctxresidency/ctxmmu, #1106).
 
@@ -628,13 +628,9 @@ func selfRegisters(t *testing.T, internal, pkg string) bool {
 // defconfig (internal/registrations). `agent` registers the "localtools" engine from its
 // init() and is pulled in directly by cmd/fak, never blank-imported. `gateway` registers
 // a per-Server metrics observer from New(), and the server itself is wired by cmd/fak.
-// `spec` (the speculation ProvisionalSink + OpsSpec ops) registers ONLY from its
-// Enabled()-gated Install(), never from init() and never from the defconfig â€” that
-// off-defconfig absence IS the strongest of its two safety gates (the kernel never even
-// links the poly-model lane until a rung flips FAK_POLYMODEL and calls Install; epic
-// #529). A leaf added here is a conscious "wired elsewhere" decision, the same review
+// A leaf added here is a conscious "wired elsewhere" decision, the same review
 // chokepoint as the tier table.
-var regOffList = map[string]bool{"agent": true, "gateway": true, "spec": true}
+var regOffList = map[string]bool{"agent": true, "gateway": true}
 
 // TestRequestPathLeavesRegistered closes the registration-completeness hole: a leaf whose
 // production init() calls abi.Register* MUST be either blank-imported by the defconfig
