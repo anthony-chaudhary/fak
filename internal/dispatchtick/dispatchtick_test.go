@@ -29,6 +29,21 @@ func TestBuildWorkerCommandMatchesBackends(t *testing.T) {
 			want:     []string{"claude", "-p", "--permission-mode", "bypassPermissions", "--fallback-model", "claude-opus-4-8,claude-sonnet-5", "resolve it"},
 		},
 		{
+			// Layer 4: an explicit primary model un-blanks --model, before the prompt.
+			name:    "claude prompt with primary model",
+			backend: "claude",
+			model:   "claude-sonnet-5",
+			want:    []string{"claude", "-p", "--permission-mode", "bypassPermissions", "--model", "claude-sonnet-5", "resolve it"},
+		},
+		{
+			// --model precedes --fallback-model (launcher ordering).
+			name:     "claude primary model then fallback chain",
+			backend:  "claude",
+			model:    "claude-sonnet-5",
+			fallback: "claude-opus-4-8",
+			want:     []string{"claude", "-p", "--permission-mode", "bypassPermissions", "--model", "claude-sonnet-5", "--fallback-model", "claude-opus-4-8", "resolve it"},
+		},
+		{
 			// --fallback-model is Claude-only: opencode pins its own model with -m and never
 			// gets the Claude flag even when a fallback is passed.
 			name:     "opencode ignores claude fallback",
@@ -61,6 +76,33 @@ func TestBuildWorkerCommandMatchesBackends(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("command = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWorkerModelPolicyArgs(t *testing.T) {
+	cases := []struct {
+		name         string
+		backend      string
+		policy       WorkerModelPolicy
+		wantModel    string
+		wantFallback string
+	}{
+		{"claude empty floor", "claude", WorkerModelPolicy{}, "", ""},
+		{"claude primary only", "claude", WorkerModelPolicy{Primary: "claude-sonnet-5"}, "claude-sonnet-5", ""},
+		{"claude primary + chain deduped", "claude", WorkerModelPolicy{Primary: "fable", Chain: []string{"fable", "claude-opus-4-8", "claude-opus-4-8", "claude-sonnet-5"}}, "fable", "claude-opus-4-8,claude-sonnet-5"},
+		{"claude chain element comma-split", "claude", WorkerModelPolicy{Primary: "fable", Chain: []string{"claude-opus-4-8,claude-sonnet-5"}}, "fable", "claude-opus-4-8,claude-sonnet-5"},
+		{"opencode primary, no claude fallback", "opencode", WorkerModelPolicy{Primary: "glm-5.2", Chain: []string{"claude-opus-4-8"}}, "glm-5.2", ""},
+		{"codex primary, no claude fallback", "codex", WorkerModelPolicy{Primary: "gpt-5-codex"}, "gpt-5-codex", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.policy.Model(); got != tc.wantModel {
+				t.Fatalf("Model() = %q, want %q", got, tc.wantModel)
+			}
+			if got := tc.policy.FallbackModel(tc.backend); got != tc.wantFallback {
+				t.Fatalf("FallbackModel(%q) = %q, want %q", tc.backend, got, tc.wantFallback)
 			}
 		})
 	}

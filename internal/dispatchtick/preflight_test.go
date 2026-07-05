@@ -289,6 +289,31 @@ func TestEvaluatePreflightSeatPoolCapsAndDepletes(t *testing.T) {
 	}
 }
 
+func TestEvaluatePreflightUnattributedLiveConsumesSeatHeadroom(t *testing.T) {
+	in := preflightInput()
+	in.MaxWorkers = 20
+	in.Kernel.Target = IntPtr(0)
+	in.Seat = SeatCheck{Total: IntPtr(20), Free: IntPtr(20), Leased: IntPtr(0)}
+	in.OSWorkerProcs = 11
+	got := EvaluatePreflight(in)
+	if got.Verdict != PreflightOKVerdict || got.Seat.Free == nil || *got.Seat.Free != 9 ||
+		got.Seat.Leased == nil || *got.Seat.Leased != 11 || got.Seat.UnattributedLive != 11 {
+		t.Fatalf("preflight = %+v, want unattributed live to consume 11 slots and leave 9 free", got)
+	}
+
+	in.MaxWorkers = 100
+	in.Seat = SeatCheck{Total: IntPtr(4), Free: IntPtr(4), Leased: IntPtr(0)}
+	in.OSWorkerProcs = 4
+	got = EvaluatePreflight(in)
+	if got.Verdict != PreflightRefuseNoSeat || got.Seat.Free == nil || *got.Seat.Free != 0 ||
+		got.Seat.Leased == nil || *got.Seat.Leased != 4 || !got.Seat.Depleted {
+		t.Fatalf("preflight = %+v, want unattributed live to deplete the pool", got)
+	}
+	if got.Map()["seat"].(map[string]any)["unattributed_live"] != 4 {
+		t.Fatalf("seat map = %#v, want unattributed_live=4", got.Map()["seat"])
+	}
+}
+
 func TestEvaluatePreflightBlockedPoolIsNoAccount(t *testing.T) {
 	in := preflightInput()
 	in.MaxWorkers = 10

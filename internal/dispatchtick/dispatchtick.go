@@ -21,6 +21,11 @@ const (
 	WaveSidecarSuffix    = ".wave"
 	AccountSidecarSuffix = ".account"
 	BaseSHASidecarSuffix = ".basesha"
+	// ModelSidecarSuffix records the primary model a worker slot was pinned to (Layer
+	// 5b), written at spawn only when a non-default model is resolved and scraped back
+	// by the witness sweep into WitnessRecord.Model. Absent for a floor (seat-default)
+	// worker, so an unconfigured fleet writes no extra sidecar.
+	ModelSidecarSuffix = ".model"
 	OpencodePromptNotice = "Resolve GitHub issue # from the attached dispatch prompt."
 	// FallbackMaxWorkers is the built-in aspirational ceiling used when the
 	// operator sets no FAK_MAX_WORKERS; see DefaultMaxWorkers for the contract.
@@ -127,6 +132,60 @@ func PreviewPrompt(issue, chars int) string {
 	return fmt.Sprintf("<resolve #%d prompt, %d chars>", issue, chars)
 }
 
+// WorkerModelPolicy is the RESOLVED per-worker model decision for one headless
+// dispatch worker. Primary is the model to pin (via --model for claude, -m for
+// opencode/codex); "" means "use the seat/agent default" — the historical claude
+// floor where no model flag is emitted at all. Chain is the ordered Claude
+// --fallback-model list tried when the primary is overloaded/unavailable. The
+// cmd/fak shell resolves this from flags/env/policy; this leaf stays pure (no I/O)
+// so the resolved shape is unit-tested without spawning anything.
+type WorkerModelPolicy struct {
+	Primary string
+	Chain   []string
+}
+
+// Model is the -m/--model value for the worker command; "" leaves the seat/agent
+// default in place (no model flag), which is the historical claude behavior.
+func (p WorkerModelPolicy) Model() string { return strings.TrimSpace(p.Primary) }
+
+// FallbackModel is the comma-joined Claude --fallback-model chain, deduped against
+// the primary and blanks. It is Claude-specific and print-mode scoped, so a
+// non-claude backend gets "" — opencode/codex pin their own model with -m only.
+func (p WorkerModelPolicy) FallbackModel(backend string) string {
+	if backend != "claude" {
+		return ""
+	}
+	return joinDedupedChain(p.Primary, p.Chain)
+}
+
+// joinDedupedChain returns the ordered, comma-joined fallback chain with blanks, the
+// primary itself, and any duplicate dropped — the same dedup the interactive launcher
+// applies (cmd/fak/accounts_launch.go modelFallbackChain), so both fronts build the
+// chain identically. Each element may itself be comma-separated (an env value stuffed
+// whole into one slot), so it is re-split. A chain that collapses to empty returns "".
+func joinDedupedChain(primary string, chain []string) string {
+	seen := map[string]bool{}
+	if p := strings.ToLower(strings.TrimSpace(primary)); p != "" {
+		seen[p] = true
+	}
+	var out []string
+	for _, part := range chain {
+		for _, m := range strings.Split(part, ",") {
+			m = strings.TrimSpace(m)
+			if m == "" {
+				continue
+			}
+			key := strings.ToLower(m)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, m)
+		}
+	}
+	return strings.Join(out, ",")
+}
+
 // BuildWorkerCommand returns the backend-specific issue-resolution worker argv.
 //
 // fallbackModel is the comma-separated Claude fallback CHAIN handed to `claude -p`
@@ -144,6 +203,12 @@ func BuildWorkerCommand(backend, prompt, model, fallbackModel string) ([]string,
 	switch backend {
 	case "claude":
 		cmd := []string{"claude", "-p", "--permission-mode", "bypassPermissions"}
+		// Un-blank the primary model (Layer 4): claude takes --model (not -m). Gated on
+		// non-empty so an unconfigured fleet is byte-identical to today (model==""), and
+		// emitted BEFORE --fallback-model to match the interactive launcher's ordering.
+		if strings.TrimSpace(model) != "" {
+			cmd = append(cmd, "--model", model)
+		}
 		if strings.TrimSpace(fallbackModel) != "" {
 			cmd = append(cmd, "--fallback-model", fallbackModel)
 		}

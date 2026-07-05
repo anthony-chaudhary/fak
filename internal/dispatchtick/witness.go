@@ -82,6 +82,12 @@ type WitnessRecord struct {
 	Verdict string
 	Witness string
 	Reason  string
+	// Model is the primary model the finished slot was PINNED to (Layer 5b), scraped
+	// from the worker's .model sidecar. Empty when the slot ran on the seat/agent
+	// default (no --model pin) — the historical floor. Layer-2 downgrade re-dispatch
+	// keys off this + Reason: a model-switchable no-commit exit whose ladder head was
+	// Model advances to the NEXT chain model instead of re-storming the same walled one.
+	Model string
 }
 
 // Map renders the record in the exact sidecar shape the Python dispatcher writes:
@@ -107,6 +113,12 @@ func (r WitnessRecord) Map() map[string]any {
 	}
 	if r.Claim == ClaimNoCommit {
 		out["reason"] = r.Reason
+	}
+	// The model key is emitted ONLY when the slot was pinned to a non-default model, so
+	// an unconfigured fleet's sidecar stays byte-identical to before Layer 5b (#the
+	// model-switch program) — a floor worker (model=="") writes no model key at all.
+	if r.Model != "" {
+		out["model"] = r.Model
 	}
 	return out
 }
@@ -158,6 +170,53 @@ func ModelSwitchableReason(reason string) bool {
 		return true
 	}
 	return false
+}
+
+// NextDowngradeModel returns the next model to re-dispatch on after a model-switchable
+// no-commit exit whose slot ran on `current`, walking `chain` (the ordered downgrade
+// ladder). A seat-default slot (current == "") advances to the head of the chain: its
+// walled model was the seat's own default, so the first EXPLICIT chain model is the first
+// genuine switch. A pinned slot advances to the entry AFTER its model. ok is false when the
+// ladder is exhausted (current is the last chain entry, or the chain is empty) — a further
+// switch would just re-offer a model already walled, so the caller must STOP, not loop.
+func NextDowngradeModel(current string, chain []string) (string, bool) {
+	if len(chain) == 0 {
+		return "", false
+	}
+	current = strings.ToLower(strings.TrimSpace(current))
+	if current == "" {
+		return chain[0], true
+	}
+	for i, m := range chain {
+		if strings.ToLower(strings.TrimSpace(m)) == current {
+			if i+1 < len(chain) {
+				return chain[i+1], true
+			}
+			return "", false // last rung: ladder exhausted
+		}
+	}
+	// The walled model is not on the ladder at all — the head is a genuine different model.
+	return chain[0], true
+}
+
+// ModelDowngradeReDispatch maps each issue whose last finished slot exited CLAIM_NO_COMMIT
+// with a MODEL-SWITCHABLE reason (usage_cap / model_unknown / rate_limit) to the NEXT model
+// to re-dispatch it on, walking the downgrade chain from the slot's own .model. This is the
+// pure half of Layer-2 in-tick re-dispatch: a switchable wall is not HELD (unlike a guard
+// refusal) but re-dispatching it on the SAME walled model just walls again, so it advances
+// one rung down the ladder. An issue whose ladder is exhausted is omitted — the caller lets
+// the normal pick/cooldown handle it rather than re-storming a model that will wall.
+func ModelDowngradeReDispatch(records []WitnessRecord, chain []string) map[int]string {
+	out := map[int]string{}
+	for _, rec := range records {
+		if rec.Claim != ClaimNoCommit || !ModelSwitchableReason(rec.Reason) {
+			continue
+		}
+		if next, ok := NextDowngradeModel(rec.Model, chain); ok {
+			out[rec.Issue] = next
+		}
+	}
+	return out
 }
 
 // HeldNoCommitIssues folds this tick's witness records into the issue numbers the

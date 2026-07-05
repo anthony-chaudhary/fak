@@ -3,13 +3,28 @@ package dispatchtick
 import (
 	"crypto/sha256"
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	configaccounts "github.com/anthony-chaudhary/fak/internal/accounts"
 )
 
 const SeatPoolSchema = "fleet-seat-pool/1"
+
+const (
+	// DefaultClaudeSessionsPerAccount is the default concurrent session budget
+	// for one healthy Claude worker account. It models the account pool as
+	// session slots, not a single binary seat.
+	DefaultClaudeSessionsPerAccount = 4
+	DefaultAccountSessionsPerWorker = 1
+)
+
+// SessionsPerAccountEnv retunes the per-account Claude session budget without a
+// rebuild. Keep this in lockstep with tools/fleet_accounts.py and
+// internal/fleetaccounts so every dispatch front door prices the same capacity.
+const SessionsPerAccountEnv = "FAK_SESSIONS_PER_ACCOUNT"
 
 type AccountRow struct {
 	Account        string
@@ -48,6 +63,7 @@ type AccountRouteResult struct {
 
 type AccountWaveInput struct {
 	Rows     []AccountRow
+	Leases   []SeatLease
 	Count    int
 	Product  string
 	WorkKind string
@@ -70,6 +86,8 @@ type AccountWaveLane struct {
 	LoginStatus  string `json:"login_status,omitempty"`
 	CanServe     *bool  `json:"can_serve,omitempty"`
 	Pool         string `json:"pool"`
+	SessionSlot  int    `json:"session_slot,omitempty"`
+	SessionCap   int    `json:"session_cap,omitempty"`
 	Rank         int    `json:"rank"`
 	WaveID       string `json:"wave_id"`
 	Size         int    `json:"size"`
@@ -108,15 +126,18 @@ type SeatLease struct {
 }
 
 type SeatRow struct {
-	Seat      string   `json:"seat"`
-	Tag       string   `json:"tag"`
-	Account   string   `json:"account"`
-	Product   string   `json:"product"`
-	Model     string   `json:"model"`
-	ModelTier int      `json:"model_tier"`
-	Available bool     `json:"available"`
-	State     string   `json:"state"`
-	Workers   []string `json:"workers"`
+	Seat        string   `json:"seat"`
+	Tag         string   `json:"tag"`
+	Account     string   `json:"account"`
+	Product     string   `json:"product"`
+	Model       string   `json:"model"`
+	ModelTier   int      `json:"model_tier"`
+	Available   bool     `json:"available"`
+	State       string   `json:"state"`
+	SessionCap  int      `json:"session_cap,omitempty"`
+	LeasedSlots int      `json:"leased_slots,omitempty"`
+	FreeSlots   int      `json:"free_slots,omitempty"`
+	Workers     []string `json:"workers"`
 }
 
 type SeatPoolResult struct {
@@ -175,6 +196,25 @@ func NormalizeAccountRow(row AccountRow) AccountRow {
 	}
 	row = applyAccountLoginGate(row)
 	return row
+}
+
+func AccountSessionCap(row AccountRow) int {
+	row = NormalizeAccountRow(row)
+	switch row.Product {
+	case "claude":
+		return claudeSessionsPerAccount()
+	default:
+		return DefaultAccountSessionsPerWorker
+	}
+}
+
+func claudeSessionsPerAccount() int {
+	if v := strings.TrimSpace(os.Getenv(SessionsPerAccountEnv)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return DefaultClaudeSessionsPerAccount
 }
 
 func applyAccountLoginGate(row AccountRow) AccountRow {
@@ -264,22 +304,34 @@ func AllocateWave(in AccountWaveInput) AccountWaveResult {
 		tierOrder = append(tierOrder, 1)
 	}
 	lanes := []AccountWaveLane{}
-	seenPools := map[string]bool{}
+	usedPools := map[string]bool{}
+	load := leaseLoadByPool(workers, in.Leases)
 	for _, tier := range tierOrder {
 		if len(lanes) >= n {
 			break
 		}
-		candidates := availableTierCandidates(workers, tier)
+		candidates := uniquePoolRows(availableTierCandidates(workers, tier))
 		sort.Slice(candidates, func(i, j int) bool { return accountRouteLess(candidates[i], candidates[j]) })
-		for _, row := range candidates {
-			if len(lanes) >= n {
+		for len(lanes) < n {
+			best := -1
+			for i, row := range candidates {
+				pool := PoolKey(row)
+				if load[pool] >= AccountSessionCap(row) {
+					continue
+				}
+				if best < 0 || accountWaveSlotLess(row, candidates[best], load[pool], load[PoolKey(candidates[best])]) {
+					best = i
+				}
+			}
+			if best < 0 {
 				break
 			}
+			row := candidates[best]
 			pool := PoolKey(row)
-			if seenPools[pool] {
-				continue
-			}
-			seenPools[pool] = true
+			capacity := AccountSessionCap(row)
+			slot := load[pool] + 1
+			load[pool] = slot
+			usedPools[pool] = true
 			lanes = append(lanes, AccountWaveLane{
 				OK:           true,
 				Reason:       chooseString(tier == target, "wave lane (target tier)", "wave lane (fallback tier)"),
@@ -295,6 +347,8 @@ func AllocateWave(in AccountWaveInput) AccountWaveResult {
 				LoginStatus:  row.LoginStatus,
 				CanServe:     row.CanServe,
 				Pool:         pool,
+				SessionSlot:  slot,
+				SessionCap:   capacity,
 			})
 		}
 	}
@@ -325,16 +379,16 @@ func AllocateWave(in AccountWaveInput) AccountWaveResult {
 		}
 		reason += ")"
 	case shortfall > 0:
-		reason = fmt.Sprintf("granted %d of %d distinct pools; %d short (roster has no more distinct available pools at the requested tiers)", granted, n, shortfall)
+		reason = fmt.Sprintf("granted %d of %d session slot(s) across %d distinct pool(s); %d short (roster has no more available session slots at the requested tiers)", granted, n, len(usedPools), shortfall)
 	default:
-		reason = fmt.Sprintf("granted %d distinct pools", granted)
+		reason = fmt.Sprintf("granted %d session slot(s) across %d distinct pool(s)", granted, len(usedPools))
 	}
 	return AccountWaveResult{
 		OK:                    granted > 0,
 		Requested:             n,
 		Granted:               granted,
 		Shortfall:             shortfall,
-		DistinctPools:         granted,
+		DistinctPools:         len(usedPools),
 		Size:                  granted,
 		WaveID:                waveID,
 		TargetTier:            target,
@@ -350,6 +404,7 @@ func BuildSeatPool(rows []AccountRow, leases []SeatLease, product string) SeatPo
 		wanted = "all"
 	}
 	pool := SeatPoolResult{Schema: SeatPoolSchema, Product: wanted}
+	workers := []AccountRow{}
 	for _, raw := range rows {
 		row := NormalizeAccountRow(raw)
 		if !routableAccount(row) {
@@ -358,41 +413,53 @@ func BuildSeatPool(rows []AccountRow, leases []SeatLease, product string) SeatPo
 		if wanted != "all" && row.Product != wanted {
 			continue
 		}
-		workers := []string{}
-		for _, lease := range leases {
-			if leaseMatchesSeat(lease, row) {
-				worker := strings.TrimSpace(lease.Worker)
-				if worker == "" && lease.PID > 0 {
-					worker = fmt.Sprintf("%d", lease.PID)
-				}
-				if worker == "" {
-					worker = "?"
-				}
-				workers = append(workers, worker)
-			}
+		workers = append(workers, row)
+	}
+	leaseWorkers := leaseWorkersByPool(workers, leases)
+	for _, row := range uniquePoolRows(workers) {
+		capacity := AccountSessionCap(row)
+		if capacity <= 0 {
+			continue
 		}
+		pool.TotalSeats += capacity
+		seatWorkers := append([]string(nil), leaseWorkers[PoolKey(row)]...)
+		leasedSlots := len(seatWorkers)
+		leasedCapped := minInt(leasedSlots, capacity)
+		freeSlots := 0
 		state := "blocked"
 		switch {
-		case len(workers) > 0:
+		case leasedSlots > 0:
 			state = "leased"
-			pool.LeasedSeats++
+			pool.LeasedSeats += leasedCapped
+			if row.Available {
+				freeSlots = capacity - leasedCapped
+				if freeSlots < 0 {
+					freeSlots = 0
+				}
+				pool.FreeSeats += freeSlots
+			} else {
+				pool.BlockedSeats += capacity - leasedCapped
+			}
 		case row.Available:
 			state = "free"
-			pool.FreeSeats++
+			freeSlots = capacity
+			pool.FreeSeats += freeSlots
 		default:
-			pool.BlockedSeats++
+			pool.BlockedSeats += capacity
 		}
-		pool.TotalSeats++
 		pool.Seats = append(pool.Seats, SeatRow{
-			Seat:      PoolKey(row),
-			Tag:       row.Tag,
-			Account:   row.Account,
-			Product:   row.Product,
-			Model:     row.Model,
-			ModelTier: row.ModelTier,
-			Available: row.Available,
-			State:     state,
-			Workers:   workers,
+			Seat:        PoolKey(row),
+			Tag:         row.Tag,
+			Account:     row.Account,
+			Product:     row.Product,
+			Model:       row.Model,
+			ModelTier:   row.ModelTier,
+			Available:   row.Available,
+			State:       state,
+			SessionCap:  capacity,
+			LeasedSlots: leasedSlots,
+			FreeSlots:   freeSlots,
+			Workers:     seatWorkers,
 		})
 	}
 	sort.Slice(pool.Seats, func(i, j int) bool {
@@ -450,6 +517,12 @@ func (l AccountWaveLane) Map() map[string]any {
 	}
 	if l.CanServe != nil {
 		out["can_serve"] = *l.CanServe
+	}
+	if l.SessionSlot > 0 {
+		out["session_slot"] = l.SessionSlot
+	}
+	if l.SessionCap > 0 {
+		out["session_cap"] = l.SessionCap
 	}
 	return out
 }
@@ -514,6 +587,71 @@ func availableTierCandidates(workers []AccountRow, tier int) []AccountRow {
 		}
 	}
 	return candidates
+}
+
+func uniquePoolRows(rows []AccountRow) []AccountRow {
+	byPool := map[string]AccountRow{}
+	order := []string{}
+	for _, row := range rows {
+		pool := PoolKey(row)
+		if _, ok := byPool[pool]; !ok {
+			order = append(order, pool)
+			byPool[pool] = row
+			continue
+		}
+		if accountPoolRowLess(row, byPool[pool]) {
+			byPool[pool] = row
+		}
+	}
+	out := make([]AccountRow, 0, len(order))
+	for _, pool := range order {
+		out = append(out, byPool[pool])
+	}
+	return out
+}
+
+func accountPoolRowLess(a, b AccountRow) bool {
+	if a.Available != b.Available {
+		return a.Available
+	}
+	return accountRouteLess(a, b)
+}
+
+func accountWaveSlotLess(a, b AccountRow, loadA, loadB int) bool {
+	if loadA != loadB {
+		return loadA < loadB
+	}
+	return accountRouteLess(a, b)
+}
+
+func leaseLoadByPool(rows []AccountRow, leases []SeatLease) map[string]int {
+	out := map[string]int{}
+	for pool, workers := range leaseWorkersByPool(rows, leases) {
+		out[pool] = len(workers)
+	}
+	return out
+}
+
+func leaseWorkersByPool(rows []AccountRow, leases []SeatLease) map[string][]string {
+	out := map[string][]string{}
+	for _, lease := range leases {
+		for _, row := range rows {
+			if !leaseMatchesSeat(lease, row) {
+				continue
+			}
+			worker := strings.TrimSpace(lease.Worker)
+			if worker == "" && lease.PID > 0 {
+				worker = fmt.Sprintf("%d", lease.PID)
+			}
+			if worker == "" {
+				worker = "?"
+			}
+			pool := PoolKey(row)
+			out[pool] = append(out[pool], worker)
+			break
+		}
+	}
+	return out
 }
 
 func routableAccount(row AccountRow) bool {

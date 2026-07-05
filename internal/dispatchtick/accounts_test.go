@@ -8,6 +8,29 @@ import (
 
 func boolPtr(v bool) *bool { return &v }
 
+func TestAccountSessionCapEnvKnob(t *testing.T) {
+	claude := AccountRow{Product: "claude"}
+	if got := AccountSessionCap(claude); got != DefaultClaudeSessionsPerAccount {
+		t.Fatalf("default claude cap = %d, want %d", got, DefaultClaudeSessionsPerAccount)
+	}
+
+	t.Setenv(SessionsPerAccountEnv, "7")
+	if got := AccountSessionCap(claude); got != 7 {
+		t.Fatalf("FAK_SESSIONS_PER_ACCOUNT=7 claude cap = %d, want 7", got)
+	}
+	if got := AccountSessionCap(AccountRow{Product: "opencode"}); got != DefaultAccountSessionsPerWorker {
+		t.Fatalf("opencode cap = %d, want %d", got, DefaultAccountSessionsPerWorker)
+	}
+
+	for _, bad := range []string{"0", "-3", "notanint", "  "} {
+		t.Setenv(SessionsPerAccountEnv, bad)
+		if got := AccountSessionCap(claude); got != DefaultClaudeSessionsPerAccount {
+			t.Fatalf("FAK_SESSIONS_PER_ACCOUNT=%q claude cap = %d, want default %d",
+				bad, got, DefaultClaudeSessionsPerAccount)
+		}
+	}
+}
+
 func accountRowsFixture() []AccountRow {
 	return []AccountRow{
 		{Account: ".claude-gem7", Tag: "gem7", Product: "claude", Dir: "C:/Users/u/.claude-gem7", Available: true, ModelTier: 1, Model: "opus", LiveSessions: 4, ActiveSessions: 8},
@@ -71,17 +94,18 @@ func TestRouteAccountNoTierOneFallbackByDefault(t *testing.T) {
 
 func TestAllocateWaveGrantsDistinctPoolsAndUnderfills(t *testing.T) {
 	got := AllocateWave(AccountWaveInput{Rows: accountRowsFixture(), Count: 8, Product: "claude", WorkKind: "engineering"})
-	if !got.OK || got.Granted != 3 || got.Shortfall != 5 || got.DistinctPools != 3 || got.TargetTier != 1 {
-		t.Fatalf("wave = %+v, want 3 granted distinct tier-1 pools and shortfall 5", got)
+	if !got.OK || got.Granted != 8 || got.Shortfall != 0 || got.DistinctPools != 3 || got.TargetTier != 1 {
+		t.Fatalf("wave = %+v, want 8 granted session slots across 3 tier-1 pools", got)
 	}
-	if got.Lanes[0].Tag != "day26" || got.Lanes[0].Rank != 0 || got.Lanes[0].Size != 3 {
-		t.Fatalf("first lane = %+v, want route-weighted day26 rank 0 size 3", got.Lanes[0])
+	if got.Lanes[0].Tag != "day26" || got.Lanes[0].Rank != 0 || got.Lanes[0].Size != 8 ||
+		got.Lanes[0].SessionSlot != 1 || got.Lanes[0].SessionCap != DefaultClaudeSessionsPerAccount {
+		t.Fatalf("first lane = %+v, want route-weighted day26 rank 0 size 8 slot 1/4", got.Lanes[0])
 	}
 	if got.Lanes[0].LoginStatus != "ready" || got.Lanes[0].CanServe == nil || !*got.Lanes[0].CanServe {
 		t.Fatalf("first lane readiness = %+v, want ready/can_serve=true", got.Lanes[0])
 	}
 	m := got.Lanes[0].Map()
-	if m["login_status"] != "ready" || m["can_serve"] != true {
+	if m["login_status"] != "ready" || m["can_serve"] != true || m["session_slot"] != 1 || m["session_cap"] != DefaultClaudeSessionsPerAccount {
 		t.Fatalf("first lane map readiness = %+v, want login_status/can_serve", m)
 	}
 	if got.WaveID == "" || got.Lanes[0].WaveID != got.WaveID {
@@ -89,25 +113,49 @@ func TestAllocateWaveGrantsDistinctPoolsAndUnderfills(t *testing.T) {
 	}
 }
 
-func TestAllocateWaveRefusesExtrasInsteadOfDoubleBookingSeats(t *testing.T) {
+func TestAllocateWaveCapsEachDistinctPoolAtSessionBudget(t *testing.T) {
 	rows := []AccountRow{
 		{Account: ".claude-seat-a", Tag: "seat-a", Product: "claude", Dir: "C:/seats/a", AccountUUID: "acct-a", Available: true, ModelTier: 1},
 		{Account: ".claude-seat-a-copy", Tag: "seat-a-copy", Product: "claude", Dir: "C:/seats/a-copy", AccountUUID: "acct-a", Available: true, ModelTier: 1},
 		{Account: ".claude-seat-b", Tag: "seat-b", Product: "claude", Dir: "C:/seats/b", AccountUUID: "acct-b", Available: true, ModelTier: 1},
 	}
-	got := AllocateWave(AccountWaveInput{Rows: rows, Count: 3, Product: "claude", WorkKind: "engineering"})
-	if !got.OK || got.Requested != 3 || got.Granted != 2 || got.Shortfall != 1 || got.DistinctPools != 2 {
-		t.Fatalf("wave = %+v, want requested=3 granted=2 shortfall=1 distinct_pools=2", got)
+	got := AllocateWave(AccountWaveInput{Rows: rows, Count: 9, Product: "claude", WorkKind: "engineering"})
+	if !got.OK || got.Requested != 9 || got.Granted != 8 || got.Shortfall != 1 || got.DistinctPools != 2 {
+		t.Fatalf("wave = %+v, want requested=9 granted=8 shortfall=1 distinct_pools=2", got)
 	}
-	seenPools := map[string]bool{}
+	byPool := map[string]int{}
 	for _, lane := range got.Lanes {
-		if seenPools[lane.Pool] {
-			t.Fatalf("pool %q was assigned twice in one wave: %+v", lane.Pool, got.Lanes)
+		byPool[lane.Pool]++
+		if lane.Tag == "seat-a-copy" {
+			t.Fatalf("duplicate account row was allocated: %+v", lane)
 		}
-		seenPools[lane.Pool] = true
 	}
-	if !strings.Contains(got.Reason, "granted 2 of 3 distinct pools") || !strings.Contains(got.Reason, "1 short") {
+	for pool, n := range byPool {
+		if n > DefaultClaudeSessionsPerAccount {
+			t.Fatalf("pool %q assigned %d slots, want cap %d", pool, n, DefaultClaudeSessionsPerAccount)
+		}
+	}
+	if !strings.Contains(got.Reason, "granted 8 of 9 session slot") || !strings.Contains(got.Reason, "1 short") {
 		t.Fatalf("reason = %q, want explicit capacity shortfall", got.Reason)
+	}
+}
+
+func TestAllocateWaveSubtractsLiveLeaseSlots(t *testing.T) {
+	rows := []AccountRow{{
+		Account: ".claude-seat-a", Tag: "seat-a", Product: "claude",
+		Dir: "C:/seats/a", AccountUUID: "acct-a", Available: true, ModelTier: 1,
+	}}
+	leases := []SeatLease{
+		{Worker: "resolve-1", Tag: "seat-a", Dir: "C:/seats/a"},
+		{Worker: "resolve-2", Tag: "seat-a", Dir: "C:/seats/a"},
+		{Worker: "resolve-3", Tag: "seat-a", Dir: "C:/seats/a"},
+	}
+	got := AllocateWave(AccountWaveInput{Rows: rows, Leases: leases, Count: 4, Product: "claude", WorkKind: "engineering"})
+	if !got.OK || got.Granted != 1 || got.Shortfall != 3 || got.DistinctPools != 1 {
+		t.Fatalf("wave = %+v, want only the fourth session slot free", got)
+	}
+	if got.Lanes[0].SessionSlot != 4 || got.Lanes[0].SessionCap != DefaultClaudeSessionsPerAccount {
+		t.Fatalf("lane = %+v, want slot 4/%d", got.Lanes[0], DefaultClaudeSessionsPerAccount)
 	}
 }
 
@@ -117,12 +165,19 @@ func TestAllocateWaveCollapsesDuplicatePools(t *testing.T) {
 		{Account: ".claude-b", Tag: "b", Product: "claude", Dir: "C:/b", AccountUUID: "same", Available: true, ModelTier: 1},
 		{Account: ".claude-c", Tag: "c", Product: "claude", Dir: "C:/c", Available: true, ModelTier: 1},
 	}
-	got := AllocateWave(AccountWaveInput{Rows: rows, Count: 3, Product: "claude", WorkKind: "engineering"})
-	if got.Granted != 2 || got.Shortfall != 1 {
-		t.Fatalf("wave = %+v, want duplicate UUID pool collapsed to two grants", got)
+	got := AllocateWave(AccountWaveInput{Rows: rows, Count: 9, Product: "claude", WorkKind: "engineering"})
+	if got.Granted != 8 || got.Shortfall != 1 || got.DistinctPools != 2 {
+		t.Fatalf("wave = %+v, want duplicate UUID pool collapsed to two session-capped pools", got)
 	}
-	if got.Lanes[0].Pool == got.Lanes[1].Pool {
-		t.Fatalf("lanes share a pool: %+v", got.Lanes)
+	pools := map[string]bool{}
+	for _, lane := range got.Lanes {
+		pools[lane.Pool] = true
+		if lane.Tag == "b" {
+			t.Fatalf("duplicate UUID row was allocated: %+v", got.Lanes)
+		}
+	}
+	if len(pools) != 2 {
+		t.Fatalf("pools = %+v, want exactly two collapsed pools", pools)
 	}
 }
 
@@ -161,8 +216,8 @@ func TestRouteAccountSkipsExplicitNonWorkerKinds(t *testing.T) {
 		t.Fatalf("route with excluded row = %+v, want worker account", got)
 	}
 	pool := BuildSeatPool(rows, nil, "claude")
-	if pool.TotalSeats != 1 || pool.Seats[0].Tag != "ok" {
-		t.Fatalf("seat pool = %+v, want only worker seat", pool)
+	if pool.TotalSeats != DefaultClaudeSessionsPerAccount || pool.Seats[0].Tag != "ok" {
+		t.Fatalf("seat pool = %+v, want only worker account's Claude session slots", pool)
 	}
 }
 
@@ -170,11 +225,12 @@ func TestSeatPoolCountsFreeLeasedBlockedAndSkipsDuplicate(t *testing.T) {
 	rows := accountRowsFixture()
 	leases := []SeatLease{{Worker: "resolve-1", Tag: "gem7", Dir: "C:/Users/u/.claude-gem7"}}
 	got := BuildSeatPool(rows, leases, "claude")
-	if got.TotalSeats != 4 || got.FreeSeats != 2 || got.LeasedSeats != 1 || got.BlockedSeats != 1 || got.Depleted {
-		t.Fatalf("seat pool = %+v, want total=4 free=2 leased=1 blocked=1 depleted=false", got)
+	if got.TotalSeats != 16 || got.FreeSeats != 11 || got.LeasedSeats != 1 || got.BlockedSeats != 4 || got.Depleted {
+		t.Fatalf("seat pool = %+v, want total=16 free=11 leased=1 blocked=4 depleted=false", got)
 	}
-	if got.Seats[0].State != "leased" || got.Seats[0].Tag != "gem7" {
-		t.Fatalf("first seat = %+v, want leased gem7", got.Seats[0])
+	if got.Seats[0].State != "leased" || got.Seats[0].Tag != "gem7" ||
+		got.Seats[0].LeasedSlots != 1 || got.Seats[0].FreeSlots != 3 || got.Seats[0].SessionCap != 4 {
+		t.Fatalf("first seat = %+v, want leased gem7 with 3 free slots", got.Seats[0])
 	}
 	for _, seat := range got.Seats {
 		if seat.Tag == "copy" {
@@ -274,7 +330,8 @@ func TestAccountNormalizeAppliesClaudeLoginGate(t *testing.T) {
 	}
 
 	pool := BuildSeatPool([]AccountRow{row}, nil, "claude")
-	if pool.TotalSeats != 1 || pool.FreeSeats != 0 || pool.BlockedSeats != 1 || pool.Seats[0].State != "blocked" {
+	if pool.TotalSeats != DefaultClaudeSessionsPerAccount || pool.FreeSeats != 0 ||
+		pool.BlockedSeats != DefaultClaudeSessionsPerAccount || pool.Seats[0].State != "blocked" {
 		t.Fatalf("seat pool = %+v, want login-blocked seat", pool)
 	}
 }

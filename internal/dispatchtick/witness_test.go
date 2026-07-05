@@ -171,3 +171,49 @@ func TestWitnessRecordMapMirrorsSidecarShape(t *testing.T) {
 		t.Fatalf("graded record must not carry a reason key: %#v", gm)
 	}
 }
+
+// TestNextDowngradeModel walks the downgrade ladder: a seat-default slot advances to the
+// chain head, a pinned slot to the next rung, the last rung exhausts, and an off-ladder
+// model falls to the head.
+func TestNextDowngradeModel(t *testing.T) {
+	chain := []string{"claude-opus-4-8", "claude-sonnet-5"}
+	if m, ok := NextDowngradeModel("", chain); !ok || m != "claude-opus-4-8" {
+		t.Fatalf("seat-default -> %q,%v want claude-opus-4-8,true", m, ok)
+	}
+	if m, ok := NextDowngradeModel("claude-opus-4-8", chain); !ok || m != "claude-sonnet-5" {
+		t.Fatalf("opus -> %q,%v want claude-sonnet-5,true", m, ok)
+	}
+	if _, ok := NextDowngradeModel("claude-sonnet-5", chain); ok {
+		t.Fatalf("last rung must exhaust the ladder")
+	}
+	if _, ok := NextDowngradeModel("anything", nil); ok {
+		t.Fatalf("empty chain must exhaust")
+	}
+	if m, ok := NextDowngradeModel("some-off-ladder-model", chain); !ok || m != "claude-opus-4-8" {
+		t.Fatalf("off-ladder -> %q,%v want head,true", m, ok)
+	}
+}
+
+// TestModelDowngradeReDispatch maps only the model-switchable no-commit slots to their next
+// rung; guard refusals, auth walls, witnessed commits, and exhausted ladders are omitted.
+func TestModelDowngradeReDispatch(t *testing.T) {
+	chain := []string{"claude-opus-4-8", "claude-sonnet-5"}
+	records := []WitnessRecord{
+		{Issue: 10, Claim: ClaimNoCommit, Reason: NoCommitUsageCap},                            // seat-default -> opus
+		{Issue: 11, Claim: ClaimNoCommit, Reason: NoCommitRateLimit, Model: "claude-opus-4-8"}, // -> sonnet
+		{Issue: 12, Claim: ClaimNoCommit, Reason: NoCommitSelfModify},                          // guard refusal: omitted
+		{Issue: 13, Claim: ClaimNoCommit, Reason: NoCommitAuthWall},                            // auth wall: omitted
+		{Issue: 14, Claim: ClaimWitnessed},                                                     // shipped: omitted
+		{Issue: 15, Claim: ClaimNoCommit, Reason: NoCommitRateLimit, Model: "claude-sonnet-5"}, // exhausted: omitted
+	}
+	got := ModelDowngradeReDispatch(records, chain)
+	want := map[int]string{10: "claude-opus-4-8", 11: "claude-sonnet-5"}
+	if len(got) != len(want) {
+		t.Fatalf("downgrade map = %v, want %v", got, want)
+	}
+	for issue, model := range want {
+		if got[issue] != model {
+			t.Fatalf("issue %d -> %q, want %q", issue, got[issue], model)
+		}
+	}
+}

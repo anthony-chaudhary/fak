@@ -111,12 +111,13 @@ type KernelCheck struct {
 }
 
 type SeatCheck struct {
-	Total    *int   `json:"total"`
-	Free     *int   `json:"free,omitempty"`
-	Leased   *int   `json:"leased,omitempty"`
-	Depleted bool   `json:"depleted,omitempty"`
-	Skipped  string `json:"skipped,omitempty"`
-	Error    string `json:"error,omitempty"`
+	Total            *int   `json:"total"`
+	Free             *int   `json:"free,omitempty"`
+	Leased           *int   `json:"leased,omitempty"`
+	Depleted         bool   `json:"depleted,omitempty"`
+	UnattributedLive int    `json:"unattributed_live,omitempty"`
+	Skipped          string `json:"skipped,omitempty"`
+	Error            string `json:"error,omitempty"`
 }
 
 type PreflightInput struct {
@@ -236,14 +237,17 @@ func EvaluatePreflight(in PreflightInput) PreflightResult {
 		aliveKernelForCap = *in.Kernel.Alive
 	}
 	live := maxInt(aliveKernelForCap, in.OSWorkerProcs)
+	seat := accountUnattributedLiveSlots(in.Seat, live)
 	headroom := capacity - live
 
 	seatsDepleted := false
-	if foldSeats && in.Seat.Depleted && *in.Seat.Total <= capPreSeat && in.Seat.Leased != nil && *in.Seat.Leased > 0 {
+	if foldSeats && seat.Depleted && *seat.Total <= capPreSeat && seat.Leased != nil && *seat.Leased > 0 {
 		seatsDepleted = true
 	}
 
-	verdict, reason := classifyPreflight(in, capacity, live, seatsDepleted, hostCapInfo.HostCap)
+	classifyInput := in
+	classifyInput.Seat = seat
+	verdict, reason := classifyPreflight(classifyInput, capacity, live, seatsDepleted, hostCapInfo.HostCap)
 	ok := verdict == PreflightOKVerdict
 	return PreflightResult{
 		Schema:        PreflightSchema,
@@ -258,12 +262,39 @@ func EvaluatePreflight(in PreflightInput) PreflightResult {
 		MaxWorkers:    in.MaxWorkers,
 		HostCap:       hostCapInfo.HostCap,
 		HostCapacity:  hostCapInfo,
-		Seat:          in.Seat,
+		Seat:          seat,
 		Host:          in.Host,
 		Account:       publicAccount(in.Account),
 		Kernel:        in.Kernel,
 		OSWorkerProcs: in.OSWorkerProcs,
 	}
+}
+
+func accountUnattributedLiveSlots(seat SeatCheck, live int) SeatCheck {
+	if seat.Total == nil || *seat.Total <= 0 || live <= 0 {
+		return seat
+	}
+	leased := intValue(seat.Leased)
+	missing := live - leased
+	if missing <= 0 {
+		return seat
+	}
+	total := *seat.Total
+	free := intValue(seat.Free)
+	if seat.Free != nil {
+		adjusted := free - missing
+		if adjusted < 0 {
+			adjusted = 0
+		}
+		seat.Free = IntPtr(adjusted)
+	} else {
+		occupied := minInt(live, total)
+		seat.Free = IntPtr(maxInt(0, total-occupied))
+	}
+	seat.Leased = IntPtr(maxInt(leased, minInt(live, total)))
+	seat.Depleted = seat.Depleted || intValue(seat.Free) == 0
+	seat.UnattributedLive = missing
+	return seat
 }
 
 func capTerms(in PreflightInput, hostCap *int, effective int) CapTerms {
@@ -308,7 +339,7 @@ func classifyPreflight(in PreflightInput, capacity, live int, seatsDepleted bool
 		return PreflightRefuseHost, fmt.Sprintf("host resource guard flagged %d process(es): %s - reap/inspect before growing the fleet", in.Host.Flagged, names)
 	case seatsDepleted:
 		total, leased := intValue(in.Seat.Total), intValue(in.Seat.Leased)
-		return PreflightRefuseNoSeat, fmt.Sprintf("seat pool depleted: 0 of %d routable seat(s) free (%d leased to live worker(s), live=%d); a seat frees when a worker exits - refusing rather than double-book a busy seat", total, leased, live)
+		return PreflightRefuseNoSeat, fmt.Sprintf("seat pool depleted: 0 of %d session slot(s) free (%d leased to live worker(s), live=%d); a slot frees when a worker exits - refusing rather than overbook a busy account", total, leased, live)
 	case live >= capacity:
 		return PreflightRefuseAtCap, fmt.Sprintf("live workers %d >= cap %d (kernel alive=%s, os procs=%d, dos target=%s, host_cap=%s, max-workers=%d)",
 			live, capacity, ptrString(in.Kernel.Alive), in.OSWorkerProcs, ptrString(in.Kernel.Target), ptrString(hostCap), in.MaxWorkers)
@@ -396,7 +427,15 @@ func (k KernelCheck) Map() map[string]any {
 }
 
 func (s SeatCheck) Map() map[string]any {
-	return map[string]any{"total": ptrAny(s.Total), "free": ptrAny(s.Free), "leased": ptrAny(s.Leased), "depleted": s.Depleted, "skipped": s.Skipped, "error": s.Error}
+	return map[string]any{
+		"total":             ptrAny(s.Total),
+		"free":              ptrAny(s.Free),
+		"leased":            ptrAny(s.Leased),
+		"depleted":          s.Depleted,
+		"unattributed_live": s.UnattributedLive,
+		"skipped":           s.Skipped,
+		"error":             s.Error,
+	}
 }
 
 func publicAccount(a AccountCheck) AccountCheck {
