@@ -2246,11 +2246,17 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
     guard = guard or {}
     g_sessions = _int(guard.get("sessions"), 0) or 0
     g_rows = _int(guard.get("rows"), 0) or 0
+    g_child_crashes = _int((guard.get("by_kind") or {}).get("CHILD_CRASH"), 0) or 0
     if g_sessions and g_rows:
+        crash_text = ""
+        if g_child_crashes:
+            crash_text = f", {g_child_crashes} child crash"
+            if g_child_crashes != 1:
+                crash_text += "es"
         reasons.append(
             f"fak guard witnessed {g_rows} kernel decision(s) across {g_sessions} "
             f"dispatch session(s) ({guard.get('denied', 0)} denied, "
-            f"{guard.get('quarantined', 0)} quarantined)")
+            f"{guard.get('quarantined', 0)} quarantined{crash_text})")
     elif g_sessions:
         reasons.append(
             f"fak guard ran {g_sessions} dispatch session(s) but recorded 0 decisions "
@@ -2698,10 +2704,12 @@ def render(p: dict[str, Any]) -> str:
         lines.append(f"║ hooks     : guard layer UNBOUND [{bits}] (#1277)")
     gd = p.get("guard") or {}
     if gd.get("sessions"):
+        child_crashes = _int((gd.get("by_kind") or {}).get("CHILD_CRASH"), 0) or 0
+        crash_bit = f" CRASH={child_crashes}" if child_crashes else ""
         lines.append(
             f"║ guard     : {gd.get('sessions')} session(s) ({gd.get('recent_sessions', 0)} recent), "
             f"{gd.get('rows', 0)} decision(s) [DENY={gd.get('denied', 0)} "
-            f"QUAR={gd.get('quarantined', 0)}]  empty={gd.get('empty_sessions', 0)}")
+            f"QUAR={gd.get('quarantined', 0)}{crash_bit}]  empty={gd.get('empty_sessions', 0)}")
     rs = p.get("run_status") or {}
     if rs.get("count"):
         bits = ", ".join(f"{k}={v}" for k, v in sorted((rs.get("liveness") or {}).items())) or "none"

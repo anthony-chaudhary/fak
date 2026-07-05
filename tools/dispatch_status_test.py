@@ -1805,6 +1805,14 @@ class GuardCoverageFoldTest(unittest.TestCase):
         self.assertIn("guard", mod.render(p))
         self.assertIn("DENY=1", mod.render(p))
 
+    def test_child_crashes_are_rendered_when_present(self) -> None:
+        mod = load()
+        p = build(mod, guard=self._guard(
+            by_kind={"DECIDE": 3, "DENY": 1, "QUARANTINE": 1, "CHILD_CRASH": 2},
+        ))
+        self.assertTrue(any("2 child crashes" in r for r in p["reasons"]))
+        self.assertIn("CRASH=2", mod.render(p))
+
     def test_empty_sessions_reason_when_no_decisions(self) -> None:
         mod = load()
         p = build(mod, guard=self._guard(rows=0, recent_rows=0, empty_sessions=2,
