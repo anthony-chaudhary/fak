@@ -643,3 +643,218 @@ func containsProp(v Verdict, name string, holds bool) bool {
 	}
 	return false
 }
+
+// TestWalkBudgetRowsAndShares is the divide-down witness: a walk emits exactly one
+// budget row per contract dimension (Time/Tokens/Workers/Review, in that order),
+// each carrying the declared cap and the per-worklist-member share (declared cap /
+// worklist length, floored), and every worklist member is annotated with the same
+// share. It also pins the load-bearing distinction between a budgeted-but-floored-to-
+// zero share (workers 2 / 3 members = 0, still budgeted, NOT held) and an unbudgeted
+// dimension (a hold).
+func TestWalkBudgetRowsAndShares(t *testing.T) {
+	s := Super{
+		Name:   "t",
+		Title:  "t",
+		Floor:  0,
+		Budget: GenerationBudget{Stream: "gen/now", MaxMinutes: 30, TokenCeiling: 200000, MaxWorkers: 2, ReviewSlots: 1},
+		Members: []Member{
+			{Kind: KindScorecard, Ref: "a"},
+			{Kind: KindScorecard, Ref: "b"},
+			{Kind: KindScorecard, Ref: "c"},
+		},
+	}
+	rep := Walk(s, []MemberStatus{
+		{Member: s.Members[0], Measured: true, Debt: 3},
+		{Member: s.Members[1], Measured: true, Debt: 2},
+		{Member: s.Members[2], Measured: true, Debt: 1},
+	})
+	if len(rep.Worklist) != 3 {
+		t.Fatalf("worklist len = %d, want 3", len(rep.Worklist))
+	}
+	// Exactly four rows, in the contract's dimension order.
+	wantDims := []string{BudgetTime, BudgetTokens, BudgetWorkers, BudgetReview}
+	if len(rep.Budget) != len(wantDims) {
+		t.Fatalf("budget rows = %d, want %d", len(rep.Budget), len(wantDims))
+	}
+	byDim := map[string]BudgetRow{}
+	for i, row := range rep.Budget {
+		if row.Dimension != wantDims[i] {
+			t.Errorf("budget row[%d] dimension = %q, want %q", i, row.Dimension, wantDims[i])
+		}
+		if row.Stream != "gen/now" {
+			t.Errorf("budget row %q stream = %q, want gen/now", row.Dimension, row.Stream)
+		}
+		if row.Members != 3 {
+			t.Errorf("budget row %q members = %d, want 3", row.Dimension, row.Members)
+		}
+		byDim[row.Dimension] = row
+	}
+	// per_member = declared / worklist length, floored.
+	cases := []struct {
+		dim      string
+		total    int
+		perMem   int
+		budgeted bool
+	}{
+		{BudgetTime, 30, 10, true},
+		{BudgetTokens, 200000, 66666, true},
+		{BudgetWorkers, 2, 0, true}, // 2/3 floors to 0 but the dimension is still BUDGETED
+		{BudgetReview, 1, 0, true},  // 1/3 floors to 0, still budgeted
+	}
+	for _, c := range cases {
+		row := byDim[c.dim]
+		if row.Total != c.total || row.PerMember != c.perMem || row.Budgeted != c.budgeted {
+			t.Errorf("row %q = {total %d per_member %d budgeted %v}, want {total %d per_member %d budgeted %v}",
+				c.dim, row.Total, row.PerMember, row.Budgeted, c.total, c.perMem, c.budgeted)
+		}
+		if row.Hold != "" {
+			t.Errorf("budgeted row %q must not carry a hold reason, got %q", c.dim, row.Hold)
+		}
+	}
+	// Every worklist member carries the same divided share, and nothing is held.
+	for _, it := range rep.Worklist {
+		a := it.Allocation
+		if a.MaxMinutes != 10 || a.TokenCeiling != 66666 || a.MaxWorkers != 0 || a.ReviewSlots != 0 {
+			t.Errorf("member %q allocation = %+v, want minutes 10 tokens 66666 workers 0 review 0", it.Member.Ref, a)
+		}
+		if len(a.Held) != 0 {
+			t.Errorf("member %q must hold no dimensions (all four are budgeted), got %v", it.Member.Ref, a.Held)
+		}
+	}
+}
+
+// TestWalkBudgetHoldForUnbudgetedDimension pins the contract's "no row = hold"
+// case: a dimension with a zero cap is UNBUDGETED — its row carries Budgeted=false
+// and a hold reason, and every worklist member lists it under Held — never silently
+// treated as an unlimited grant.
+func TestWalkBudgetHoldForUnbudgetedDimension(t *testing.T) {
+	s := Super{
+		Name:   "t",
+		Title:  "t",
+		Floor:  0,
+		Budget: GenerationBudget{Stream: "gen/next", MaxMinutes: 20, TokenCeiling: 100000, MaxWorkers: 2}, // ReviewSlots 0 = held
+		Members: []Member{
+			{Kind: KindScorecard, Ref: "a"},
+			{Kind: KindScorecard, Ref: "b"},
+		},
+	}
+	rep := Walk(s, []MemberStatus{
+		{Member: s.Members[0], Measured: true, Debt: 4},
+		{Member: s.Members[1], Measured: true, Debt: 1},
+	})
+	var review BudgetRow
+	for _, row := range rep.Budget {
+		if row.Dimension == BudgetReview {
+			review = row
+		}
+	}
+	if review.Budgeted {
+		t.Error("a zero review cap must render as UNBUDGETED")
+	}
+	if review.Total != 0 || review.PerMember != 0 {
+		t.Errorf("held review row must have total 0 / per_member 0, got total %d per_member %d", review.Total, review.PerMember)
+	}
+	if strings.TrimSpace(review.Hold) == "" {
+		t.Error("an unbudgeted dimension must carry a hold reason for the operator")
+	}
+	for _, it := range rep.Worklist {
+		held := map[string]bool{}
+		for _, h := range it.Allocation.Held {
+			held[h] = true
+		}
+		if !held[BudgetReview] {
+			t.Errorf("member %q must list review under Held, got %v", it.Member.Ref, it.Allocation.Held)
+		}
+		if held[BudgetTime] || held[BudgetTokens] || held[BudgetWorkers] {
+			t.Errorf("member %q wrongly held a budgeted dimension: %v", it.Member.Ref, it.Allocation.Held)
+		}
+		if it.Allocation.ReviewSlots != 0 {
+			t.Errorf("held dimension must allocate 0, got %d", it.Allocation.ReviewSlots)
+		}
+	}
+}
+
+// TestWalkBudgetFloorNeverOverAllocates pins the honesty rung: floored even division
+// means the sum of the per-member shares never exceeds a dimension's declared cap —
+// the divide-down can under-allocate the remainder but never hand out more than the
+// reservation.
+func TestWalkBudgetFloorNeverOverAllocates(t *testing.T) {
+	s := Super{
+		Name:   "t",
+		Title:  "t",
+		Floor:  0,
+		Budget: GenerationBudget{MaxMinutes: 100, TokenCeiling: 100, MaxWorkers: 100, ReviewSlots: 100},
+		Members: []Member{
+			{Kind: KindScorecard, Ref: "a"},
+			{Kind: KindScorecard, Ref: "b"},
+			{Kind: KindScorecard, Ref: "c"}, // 100/3 = 33, 33*3 = 99 <= 100
+		},
+	}
+	rep := Walk(s, []MemberStatus{
+		{Member: s.Members[0], Measured: true, Debt: 1},
+		{Member: s.Members[1], Measured: true, Debt: 1},
+		{Member: s.Members[2], Measured: true, Debt: 1},
+	})
+	n := len(rep.Worklist)
+	for _, row := range rep.Budget {
+		if !row.Budgeted {
+			continue
+		}
+		if row.PerMember*n > row.Total {
+			t.Errorf("dimension %q over-allocates: %d members * %d share = %d > cap %d",
+				row.Dimension, n, row.PerMember, row.PerMember*n, row.Total)
+		}
+	}
+}
+
+// TestWalkBudgetEmptyWorklistZeroShares: a satisfied walk has no members to enter, so
+// nothing is reserved — the four rows are still reported (the declared caps stay
+// visible) but every per-member share is zero.
+func TestWalkBudgetEmptyWorklistZeroShares(t *testing.T) {
+	s := Super{
+		Name:    "t",
+		Title:   "t",
+		Floor:   0,
+		Budget:  GenerationBudget{MaxMinutes: 30, TokenCeiling: 200000, MaxWorkers: 2, ReviewSlots: 1},
+		Members: []Member{{Kind: KindScorecard, Ref: "a"}},
+	}
+	rep := Walk(s, []MemberStatus{{Member: s.Members[0], Measured: true, Debt: 0}})
+	if len(rep.Worklist) != 0 {
+		t.Fatalf("a clean walk must have an empty worklist, got %d", len(rep.Worklist))
+	}
+	if len(rep.Budget) != 4 {
+		t.Fatalf("budget rows must still be reported on a satisfied walk, got %d", len(rep.Budget))
+	}
+	for _, row := range rep.Budget {
+		if row.PerMember != 0 {
+			t.Errorf("dimension %q must reserve 0 with an empty worklist, got %d", row.Dimension, row.PerMember)
+		}
+		if row.Members != 0 {
+			t.Errorf("dimension %q members = %d, want 0", row.Dimension, row.Members)
+		}
+	}
+}
+
+// TestRegistryBudgetsDeclared is the registry budget no-drift witness: every
+// registered intent declares at least one budgeted dimension (no intent silently
+// escapes the budget contract), any Stream it names is a known generation horizon,
+// and a later-horizon (gen/second-next, gen/future) reservation MUST carry an expiry
+// — the contract forbids an open-ended research/design budget.
+func TestRegistryBudgetsDeclared(t *testing.T) {
+	knownStreams := map[string]bool{
+		"gen/now": true, "gen/next": true, "gen/second-next": true, "gen/future": true,
+	}
+	needsExpiry := map[string]bool{"gen/second-next": true, "gen/future": true}
+	for _, s := range Registry() {
+		b := s.Budget
+		if b.MaxMinutes == 0 && b.TokenCeiling == 0 && b.MaxWorkers == 0 && b.ReviewSlots == 0 {
+			t.Errorf("super loop %q declares no budgeted dimension — every intent must reserve at least one", s.Name)
+		}
+		if b.Stream != "" && !knownStreams[b.Stream] {
+			t.Errorf("super loop %q names unknown generation stream %q", s.Name, b.Stream)
+		}
+		if needsExpiry[b.Stream] && strings.TrimSpace(b.Expiry) == "" {
+			t.Errorf("super loop %q is stream %q and must carry an expiry (no open-ended later-horizon budget)", s.Name, b.Stream)
+		}
+	}
+}

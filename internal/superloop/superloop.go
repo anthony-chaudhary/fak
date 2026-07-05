@@ -95,18 +95,100 @@ type Super struct {
 	// Floor is the aggregate-debt threshold at or below which the intent is satisfied
 	// (0 = the intent wants every member clear).
 	Floor int `json:"floor"`
+	// Budget is the DECLARED generation-budget envelope this intent reserves across
+	// the four dimensions the budget contract names (Time/Tokens/Workers/Review;
+	// docs/generation-super-loop-budgets.md). It is the TOP of the cascade — a
+	// planned reservation, not a measured consumption — that [Walk] divides down into
+	// a per-member allocation. A zero cap in any dimension is UNBUDGETED for that
+	// dimension: the contract's "no row = hold for later-horizon work" case, surfaced
+	// as a HOLD, never as an implicit unlimited grant. Priority stays debt-ordered; a
+	// budget only reserves attention (the contract's Core Rule).
+	Budget GenerationBudget `json:"budget"`
+}
+
+// The four budget-dimension tokens the generation-budget contract names
+// (docs/generation-super-loop-budgets.md §Budget Dimensions). They are the stable
+// keys a walk's budget rows and a member's held-dimension list use.
+const (
+	BudgetTime    = "time"    // wall-clock window spent walking/descending (max_minutes)
+	BudgetTokens  = "tokens"  // model/context spend for planning, workers, reviews (token_ceiling)
+	BudgetWorkers = "workers" // concurrent agent/worker seats admitted (max_workers)
+	BudgetReview  = "review"  // stronger-rung review slots consumed before promotion (review_slots)
+)
+
+// GenerationBudget is a super loop's DECLARED reservation across the four budget
+// dimensions. Each cap is a PLANNED operator policy (like [Super].Floor), not a
+// measured number: it says how much recurring capacity this intent reserves, so
+// current work is not diluted and future-facing streams are not silently starved.
+// A zero cap means UNBUDGETED for that dimension — [Walk] renders it as a HOLD row
+// and lists it under each member's held dimensions.
+type GenerationBudget struct {
+	// Stream is the generation horizon this reservation serves (e.g. "gen/now",
+	// "gen/next"), reported so a walk can say which streams received capacity and
+	// which were held. Empty means the envelope is horizon-agnostic.
+	Stream string `json:"stream,omitempty"`
+	// MaxMinutes caps the wall-clock window (Time dimension); 0 = unbudgeted.
+	MaxMinutes int `json:"max_minutes,omitempty"`
+	// TokenCeiling caps model/context spend (Tokens dimension); 0 = unbudgeted.
+	TokenCeiling int `json:"token_ceiling,omitempty"`
+	// MaxWorkers caps concurrent worker seats (Workers dimension); 0 = unbudgeted.
+	MaxWorkers int `json:"max_workers,omitempty"`
+	// ReviewSlots caps stronger-rung review slots (Review dimension); 0 = unbudgeted.
+	ReviewSlots int `json:"review_slots,omitempty"`
+	// Expiry is the recheck date a later-horizon reservation must carry: the contract
+	// requires an expiry on gen/second-next and gen/future shares so a research/design
+	// budget cannot become permanent. Empty is valid only for now/near-term streams.
+	Expiry string `json:"expiry,omitempty"`
+}
+
+// cap returns the declared cap for a dimension token, or 0 (unbudgeted) for an
+// unknown token — the single place the four fields map to their contract keys.
+func (b GenerationBudget) cap(dim string) int {
+	switch dim {
+	case BudgetTime:
+		return b.MaxMinutes
+	case BudgetTokens:
+		return b.TokenCeiling
+	case BudgetWorkers:
+		return b.MaxWorkers
+	case BudgetReview:
+		return b.ReviewSlots
+	default:
+		return 0
+	}
+}
+
+// budgetDims is the ordered dimension table the divide-down folds over: each entry
+// pairs a contract dimension token with its reporting unit. Ordered Time, Tokens,
+// Workers, Review to match the contract's table.
+var budgetDims = []struct {
+	Name string
+	Unit string
+}{
+	{BudgetTime, "minutes"},
+	{BudgetTokens, "tokens"},
+	{BudgetWorkers, "workers"},
+	{BudgetReview, "slots"},
 }
 
 // registry is the curated set of named super loops. It is deliberately small and
 // data-only: each entry binds an operator intent to REAL existing surfaces (every
 // scorecard Ref is a control-pane card key; the no-drift test enforces it), so a
 // super loop can never point an operator at a member that does not exist.
+//
+// Each entry also declares a generation Budget: a PLANNED reservation (not a
+// measured consumption) across the four contract dimensions. The numbers are
+// conservative operator policy — the top of the cascade [Walk] divides down into
+// per-member shares. A dimension left at zero (e.g. Review on the gen/next intents)
+// is deliberately UNBUDGETED, so the walk surfaces the contract's HOLD state instead
+// of pretending a cap exists.
 var registry = []Super{
 	{
-		Name:  "improve-quality",
-		Title: "improve code & content quality",
-		About: "descend the seven-surface sweep, walk the remaining quality scorecards + the gardening loop, then enter the worst-first member to retire its debt",
-		Floor: 0,
+		Name:   "improve-quality",
+		Title:  "improve code & content quality",
+		About:  "descend the seven-surface sweep, walk the remaining quality scorecards + the gardening loop, then enter the worst-first member to retire its debt",
+		Floor:  0,
+		Budget: GenerationBudget{Stream: "gen/now", MaxMinutes: 30, TokenCeiling: 200000, MaxWorkers: 2, ReviewSlots: 1},
 		Members: []Member{
 			// The seven quality SURFACES live in their own nested intent (below) so an
 			// operator can sweep exactly them; improve-quality DESCENDS it, which keeps
@@ -126,10 +208,11 @@ var registry = []Super{
 		// worklist's action column is directly runnable. It is NESTED under
 		// improve-quality (which descends it), so the root tend fold counts each
 		// surface's debt exactly once — the once-only test pins that.
-		Name:  "sweep-surfaces",
-		Title: "sweep the seven quality surfaces worst-first",
-		About: "walk the seven surface scorecards (code, doc-appeal, agent-readiness, code-slop, concept-disambiguation, learning, tooling-quality), then enter the worst-first surface's reduce loop",
-		Floor: 0,
+		Name:   "sweep-surfaces",
+		Title:  "sweep the seven quality surfaces worst-first",
+		About:  "walk the seven surface scorecards (code, doc-appeal, agent-readiness, code-slop, concept-disambiguation, learning, tooling-quality), then enter the worst-first surface's reduce loop",
+		Floor:  0,
+		Budget: GenerationBudget{Stream: "gen/now", MaxMinutes: 25, TokenCeiling: 180000, MaxWorkers: 2, ReviewSlots: 1},
 		Members: []Member{
 			{Kind: KindScorecard, Ref: "code", Why: "code-quality debt: the core correctness/clarity signal", Enter: "/quality-score"},
 			{Kind: KindScorecard, Ref: "appeal", Why: "doc-appeal debt: docs that read machine-written repel human readers", Enter: "/appeal-score"},
@@ -141,10 +224,11 @@ var registry = []Super{
 		},
 	},
 	{
-		Name:  "improve-loops",
-		Title: "improve the agentic + background loops",
-		About: "walk the loop-index scorecard + goal-scoped issue dispatch + the live loop ledgers, then enter the worst-first loop that is in debt or has gone dark",
-		Floor: 0,
+		Name:   "improve-loops",
+		Title:  "improve the agentic + background loops",
+		About:  "walk the loop-index scorecard + goal-scoped issue dispatch + the live loop ledgers, then enter the worst-first loop that is in debt or has gone dark",
+		Floor:  0,
+		Budget: GenerationBudget{Stream: "gen/next", MaxMinutes: 20, TokenCeiling: 150000, MaxWorkers: 2},
 		Members: []Member{
 			{Kind: KindScorecard, Ref: "loopindex", Why: "the agentic-coding loop-index: orient->plan->act->verify->ship->learn stages not yet witnessed at floor"},
 			{Kind: KindScorecard, Ref: "dogfood", Why: "dogfood-loop debt: are we running our own loops, and does packet friction reach the tracker before an outsider does?", Enter: "go run ./cmd/fak dogfood-score"},
@@ -156,10 +240,11 @@ var registry = []Super{
 		},
 	},
 	{
-		Name:  "drain-issues",
-		Title: "drain the issue backlog by operator goal",
-		About: "walk aggregate dispatch progress plus the throughput and high-priority dispatch intents, then revive the goal whose loop is darkest",
-		Floor: 0,
+		Name:   "drain-issues",
+		Title:  "drain the issue backlog by operator goal",
+		About:  "walk aggregate dispatch progress plus the throughput and high-priority dispatch intents, then revive the goal whose loop is darkest",
+		Floor:  0,
+		Budget: GenerationBudget{Stream: "gen/now", MaxMinutes: 30, TokenCeiling: 200000, MaxWorkers: 3, ReviewSlots: 1},
 		Members: []Member{
 			{Kind: KindLoop, Ref: "dispatch", Why: "legacy aggregate issue-resolve progress ledger; keeps the historical backlog-drain signal visible"},
 			{Kind: KindSuperloop, Ref: "drain-throughput", Why: "the throughput issue-drain intent, with its own ledger and enter command"},
@@ -167,28 +252,31 @@ var registry = []Super{
 		},
 	},
 	{
-		Name:  "drain-throughput",
-		Title: "drain open issues for throughput",
-		About: "walk the named throughput dispatch loop ledger and revive the step-budget lane-pressure picker when it goes dark or stale",
-		Floor: 0,
+		Name:   "drain-throughput",
+		Title:  "drain open issues for throughput",
+		About:  "walk the named throughput dispatch loop ledger and revive the step-budget lane-pressure picker when it goes dark or stale",
+		Floor:  0,
+		Budget: GenerationBudget{Stream: "gen/now", MaxMinutes: 15, TokenCeiling: 100000, MaxWorkers: 2},
 		Members: []Member{
 			{Kind: KindLoop, Ref: "loopmgr:issue-resolve-dispatch/claude/throughput", Why: "the named throughput dispatch goal: move open tasks by lane pressure while preserving its own ledger identity", Enter: "go run ./cmd/fak dispatch auto --goal throughput"},
 		},
 	},
 	{
-		Name:  "drain-high-priority",
-		Title: "drain high-priority issues",
-		About: "walk the named high-priority dispatch loop ledger and revive the priority-label picker when it goes dark or stale",
-		Floor: 0,
+		Name:   "drain-high-priority",
+		Title:  "drain high-priority issues",
+		About:  "walk the named high-priority dispatch loop ledger and revive the priority-label picker when it goes dark or stale",
+		Floor:  0,
+		Budget: GenerationBudget{Stream: "gen/now", MaxMinutes: 15, TokenCeiling: 100000, MaxWorkers: 2, ReviewSlots: 1},
 		Members: []Member{
 			{Kind: KindLoop, Ref: "loopmgr:issue-resolve-dispatch/claude/high-priority", Why: "the named high-priority dispatch goal: favor the strongest priority label while sharing the same lane/tree lease fabric", Enter: "go run ./cmd/fak dispatch auto --goal high-priority"},
 		},
 	},
 	{
-		Name:  "manage-benchmarks",
-		Title: "manage benchmark collection and publishing",
-		About: "walk benchmark DX, the nightrun collection loop, and the benchmark control surface, then enter the worst-first benchmark action",
-		Floor: 0,
+		Name:   "manage-benchmarks",
+		Title:  "manage benchmark collection and publishing",
+		About:  "walk benchmark DX, the nightrun collection loop, and the benchmark control surface, then enter the worst-first benchmark action",
+		Floor:  0,
+		Budget: GenerationBudget{Stream: "gen/next", MaxMinutes: 20, TokenCeiling: 120000, MaxWorkers: 1},
 		Members: []Member{
 			{Kind: KindScorecard, Ref: "bench_dx", Why: "benchmark-DX debt means the benchmark surfaces are confusing or incomplete"},
 			{Kind: KindLoop, Ref: "nightrun", Why: "the local benchmark data-collection loop; dark/stale means collection throughput stalled"},
@@ -204,10 +292,11 @@ var registry = []Super{
 		// intent is REACHABLE from here over KindSuperloop edges (directly a member,
 		// or nested like sweep-surfaces under improve-quality), so a new intent cannot
 		// silently escape the root — while a nested intent is still counted only once.
-		Name:  "tend",
-		Title: "tend every operator intent — the super loop of super loops",
-		About: "walk every registered super loop (directly or by descent), and enter the worst-first intent",
-		Floor: 0,
+		Name:   "tend",
+		Title:  "tend every operator intent — the super loop of super loops",
+		About:  "walk every registered super loop (directly or by descent), and enter the worst-first intent",
+		Floor:  0,
+		Budget: GenerationBudget{Stream: "gen/now", MaxMinutes: 60, TokenCeiling: 400000, MaxWorkers: 4, ReviewSlots: 1},
 		Members: []Member{
 			{Kind: KindSuperloop, Ref: "improve-quality", Why: "quality debt is the broadest drag on everything the fleet ships"},
 			{Kind: KindSuperloop, Ref: "improve-loops", Why: "the loops keep everything else tended; a dark loop below starves the rest"},
@@ -415,6 +504,42 @@ type WorkItem struct {
 	Container bool   `json:"container"`
 	Action    string `json:"action"`
 	Detail    string `json:"detail"`
+	// Allocation is this member's divided share of the intent's declared budget —
+	// the top-of-cascade input the drive rung binds to the member's budget.* / cap
+	// env when it enters. It is a reservation, not an enforcement: no cap is applied
+	// here (see [Allocation]).
+	Allocation Allocation `json:"allocation"`
+}
+
+// Allocation is the budget share one worklist member receives from the divide-down.
+// Under even division each worklist member gets the same share, so a per-dimension
+// cap is the intent's declared cap divided (floor) by the number of worklist
+// members. Held names the dimensions the intent left UNBUDGETED (zero cap) — the
+// contract's "no row = hold for later-horizon work" list, carried explicitly so a
+// reader (and the future bind) can tell "0 share of a budgeted dimension" (timeshare
+// a scarce cap) apart from "this dimension is not budgeted at all" (hold).
+type Allocation struct {
+	MaxMinutes   int      `json:"max_minutes,omitempty"`
+	TokenCeiling int      `json:"token_ceiling,omitempty"`
+	MaxWorkers   int      `json:"max_workers,omitempty"`
+	ReviewSlots  int      `json:"review_slots,omitempty"`
+	Held         []string `json:"held,omitempty"`
+}
+
+// BudgetRow is one budget dimension folded for the whole walk: the intent's declared
+// cap (Total), whether the dimension is budgeted at all, and the PerMember share the
+// divide-down hands each worklist member. An unbudgeted dimension (Budgeted false)
+// is a HOLD — zero total, zero share, and a Hold reason — surfaced for the operator
+// rather than silently treated as an unlimited grant.
+type BudgetRow struct {
+	Dimension string `json:"dimension"`
+	Unit      string `json:"unit"`
+	Stream    string `json:"stream,omitempty"`
+	Budgeted  bool   `json:"budgeted"`
+	Total     int    `json:"total"`
+	Members   int    `json:"members"`
+	PerMember int    `json:"per_member"`
+	Hold      string `json:"hold,omitempty"`
 }
 
 // WalkReport is the folded intent-level verdict + the worst-first worklist: the
@@ -433,10 +558,15 @@ type WalkReport struct {
 	Dark       int            `json:"dark"`
 	Worklist   []WorkItem     `json:"worklist"`
 	Statuses   []MemberStatus `json:"statuses"`
-	Verdict    string         `json:"verdict"`
-	Finding    string         `json:"finding"`
-	Reason     string         `json:"reason"`
-	NextAction string         `json:"next_action"`
+	// Budget is the intent's declared generation-budget envelope folded into one row
+	// per contract dimension (Time/Tokens/Workers/Review), each carrying the declared
+	// cap and the per-worklist-member share. Always four rows: an unbudgeted dimension
+	// renders as a HOLD row, which is itself the contract's operator warning.
+	Budget     []BudgetRow `json:"budget"`
+	Verdict    string      `json:"verdict"`
+	Finding    string      `json:"finding"`
+	Reason     string      `json:"reason"`
+	NextAction string      `json:"next_action"`
 }
 
 // Walk folds the member statuses the shell read into the intent-level verdict and a
@@ -510,9 +640,65 @@ func Walk(s Super, statuses []MemberStatus) WalkReport {
 		rep.Worklist[i].Rank = i + 1
 	}
 
+	// Divide the declared budget down across the worklist members: each budgeted
+	// dimension's cap splits evenly (floored) among the members with work, and every
+	// worklist member is annotated with its share; an unbudgeted dimension is held
+	// (see divideBudget). No cap is enforced here — this is the reservation the drive
+	// rung binds to a member's budget.* / cap env when it enters (#2224).
+	rows, alloc := divideBudget(s.Budget, len(rep.Worklist))
+	rep.Budget = rows
+	for i := range rep.Worklist {
+		rep.Worklist[i].Allocation = alloc
+	}
+
 	rep.Satisfied = rep.Unmeasured == 0 && rep.Dark == 0 && rep.TotalDebt <= s.Floor
 	rep.Verdict, rep.Finding, rep.Reason, rep.NextAction = walkVerdict(s, rep)
 	return rep
+}
+
+// divideBudget folds a declared budget into the walk's per-dimension rows and the
+// per-member allocation. n is the number of worklist members the reservation is
+// divided across. Division is even and FLOORED — the sum of member shares never
+// exceeds a dimension's cap — so a small integer cap spread over many members can
+// floor to a zero per-member share (a budgeted-but-scarce dimension the members must
+// timeshare), which is deliberately distinct from an UNBUDGETED dimension (zero cap),
+// reported as a hold. When n is 0 (a satisfied walk with an empty worklist) every
+// share is 0: there is nothing to enter, so nothing to reserve.
+func divideBudget(b GenerationBudget, n int) ([]BudgetRow, Allocation) {
+	rows := make([]BudgetRow, 0, len(budgetDims))
+	var alloc Allocation
+	for _, d := range budgetDims {
+		total := b.cap(d.Name)
+		row := BudgetRow{
+			Dimension: d.Name,
+			Unit:      d.Unit,
+			Stream:    b.Stream,
+			Budgeted:  total > 0,
+			Total:     total,
+			Members:   n,
+		}
+		if total <= 0 {
+			row.Hold = "unbudgeted — held for later-horizon work; declare a " + d.Name + " cap to reserve capacity"
+			alloc.Held = append(alloc.Held, d.Name)
+			rows = append(rows, row)
+			continue
+		}
+		if n > 0 {
+			row.PerMember = total / n
+		}
+		switch d.Name {
+		case BudgetTime:
+			alloc.MaxMinutes = row.PerMember
+		case BudgetTokens:
+			alloc.TokenCeiling = row.PerMember
+		case BudgetWorkers:
+			alloc.MaxWorkers = row.PerMember
+		case BudgetReview:
+			alloc.ReviewSlots = row.PerMember
+		}
+		rows = append(rows, row)
+	}
+	return rows, alloc
 }
 
 // SubwalkStatus folds a completed sub-walk into the member status the parent walk

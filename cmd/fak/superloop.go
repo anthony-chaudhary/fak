@@ -342,6 +342,8 @@ func renderSuperloopWalk(w io.Writer, rep superloop.WalkReport) {
 		rep.TotalDebt, rep.Floor, rep.Members, rep.Walked, rep.Unmeasured, rep.Dark)
 	fmt.Fprintf(w, "  %s\n\n", rep.Reason)
 
+	renderSuperloopBudget(w, rep)
+
 	if len(rep.Worklist) == 0 {
 		fmt.Fprintf(w, "  nothing to enter — every measured member is clean and live\n\n")
 	} else {
@@ -364,6 +366,40 @@ func renderSuperloopWalk(w io.Writer, rep superloop.WalkReport) {
 		fmt.Fprintln(w)
 	}
 	fmt.Fprintf(w, "  → %s\n", rep.NextAction)
+}
+
+// renderSuperloopBudget prints the intent's declared generation budget and the share
+// the divide-down reserves for each worklist member. It shows the DECLARED cap and
+// the PER-MEMBER share side by side so an operator can see reservation vs. dilution
+// at a glance; an unbudgeted dimension prints HELD (the contract's hold state), never
+// a blank that could read as "unlimited". These are planned reservations, not
+// measured consumption — the measured comparison is the future scorecard hook.
+func renderSuperloopBudget(w io.Writer, rep superloop.WalkReport) {
+	if len(rep.Budget) == 0 {
+		return
+	}
+	stream := rep.Budget[0].Stream
+	members := rep.Budget[0].Members
+	header := "  budget — declared reservation"
+	if stream != "" {
+		header = "  budget " + stream + " — declared reservation"
+	}
+	if members > 0 {
+		fmt.Fprintf(w, "%s, divided across %d worklist member(s):\n", header, members)
+	} else {
+		fmt.Fprintf(w, "%s (no members to enter — nothing reserved this walk):\n", header)
+	}
+	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, "  DIMENSION\tDECLARED\tPER-MEMBER")
+	for _, row := range rep.Budget {
+		if !row.Budgeted {
+			fmt.Fprintf(tw, "  %s\t—\tHELD\n", row.Dimension)
+			continue
+		}
+		fmt.Fprintf(tw, "  %s\t%d %s\t%d\n", row.Dimension, row.Total, row.Unit, row.PerMember)
+	}
+	_ = tw.Flush()
+	fmt.Fprintln(w)
 }
 
 func firstName(reg []superloop.Super) string {

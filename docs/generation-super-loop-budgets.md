@@ -7,7 +7,10 @@ description: "Budget contract for recurring super loops that must keep now work 
 
 **Issue:** #1653.
 **Stream:** `gen/second-next`.
-**Status:** planning contract for recurring loop governance.
+**Status:** contract + first hook landed — `fak superloop walk --json` declares and
+divides a per-intent budget (see [Implementation Hooks](#implementation-hooks));
+worker-share reporting, the drive-rung bind, and the planned-vs-measured scorecard
+remain future work.
 
 This page is the continuation packet for agents budgeting generation-aware super
 loops. It defines the minimum budget rows a future command or report should
@@ -116,15 +119,31 @@ If an assumption fails, demote the budget rule or replace it with a measured
 report. Do not create generation branches or hidden worker pools to escape the
 budget.
 
-## Future Implementation Hooks
+## Implementation Hooks
 
-A future implementation should add one narrow, witnessed surface:
+The first hook is **built**; the rest remain future work:
 
-- `fak superloop walk --json` can expose `generation_budget` rows per member.
-- `fak dispatch wave --json` can report generation worker share and held counts.
-- A scorecard can compare planned share against witnessed consumption for the last
-  window.
+- **Built — `fak superloop walk --json` exposes `budget` rows.** Each registered
+  intent declares a `GenerationBudget` (`internal/superloop`), and a walk folds it
+  into one row per dimension (Time/Tokens/Workers/Review). The row carries the
+  declared cap and a **divide-down**: the cap split evenly (floored, so the shares
+  never over-allocate) across the walk's worklist members, with every worklist
+  member annotated with its per-member `allocation`. A dimension with no declared
+  cap renders as a **HOLD** row (`budgeted: false` + a hold reason) and is listed
+  under each member's `allocation.held` — the "no row = hold" case is surfaced, never
+  a silent unlimited grant. These are **declared** reservations (top of the cascade),
+  not measured consumption. The human `walk` render shows the same rows.
+- **Future — `fak dispatch wave --json`** can report generation worker share and held
+  counts, and **bind** each worklist member's divided allocation to the drive rung's
+  `budget.*` / cap env when it enters a member (blocked on the `fak loop drive` cap
+  seam). Today the divide-down is computed and reported but not yet enforced.
+- **Future — a scorecard** can compare planned share against witnessed consumption for
+  the last window (the planned-vs-measured report).
 
-The first useful fixture should prove that now/next/second-next/future rows are
-rendered, later-horizon rows require expiry, and the report keeps priority,
-shared trunk, and runtime gates separate from generation.
+The landed fixtures (`internal/superloop` divide-down/hold/floor tests and the
+`cmd/fak` `walk --json` budget test) prove the rows are rendered, an unbudgeted
+dimension holds, the shares never exceed the declared cap, and later-horizon rows
+require an expiry (`TestRegistryBudgetsDeclared`) — while keeping priority, shared
+trunk, and runtime gates separate from generation. The declared caps in the registry
+are conservative operator policy placeholders; replacing them with a measured report
+is the remaining scorecard hook above.
