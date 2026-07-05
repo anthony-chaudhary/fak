@@ -246,6 +246,26 @@ R8 #2206.
   the R1 counter and the R2 join so "nobody managed context this period and
   nothing was silently lost" is one witnessed screen, not a vibe.
 
+## Generation classification of the rungs
+
+The epic body's first guess was `gen/next`, but the fleet's *applied* evidence
+reclassified the rung program to `gen/now`: the keystone R1 (#2199) closed
+carrying `managed-context`, `generation`, `gen/now` on the
+`Generation G0 - Now / Immediate` milestone, and the newest sibling #2947 was
+filed `gen/now`. Under [`docs/generation.md`](../generation.md) a stream label
+and milestone that disagree with an issue's applied peers are intake drift to
+fix before dispatch — so every rung (R1–R8, #2199–#2206) inherits `gen/now`
+plus `managed-context` unless a later witness demotes it. R5 (#2203) is
+classified `gen/now`: its done-condition (a derived, non-8000 budget with zero
+flags) improves the current default loop with a code witness, not a future
+architecture bet — the `gen/now` test in `docs/generation.md`.
+
+Invalidating assumption: this reads the *applied* labels on R1/#2947 as the
+program's true horizon. If a later reviewer demotes the autoctx program back to
+`gen/next` with evidence (e.g. R5's model-window derivation proves to depend on
+#1860 relay mechanics that are themselves `gen/next`), this classification and
+the per-rung labels should move with that evidence, not stay pinned here.
+
 ## Honesty fences
 
 - WITNESSED (fak's own shed/plan/evict) and OBSERVED (provider `cache_read`)
