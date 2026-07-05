@@ -13,6 +13,7 @@ and runs on CPU — no GPU needed for small models.
 | I want to... | Follow this |
 |---------------|-------------|
 | **Prove the tool-call boundary in 60 seconds** (no model, no download, no key) | [The boundary proof](README.md#tool-call-controls) — one structural DENY |
+| **Watch the 60-second proof without running anything** (recorded terminal cast) | [Install to first DENY verdict](docs/adoption/casts/README.md) — annotated cast + still frame |
 | **See the boundary handle a live attack fixture** (Go only, ~1 min, no downloads) | [AgentDojo red-team demo](examples/agentdojo-redteam/README.md) |
 | **I'm a coding agent** (build/test/run + the rules) | [AGENTS.md](AGENTS.md) |
 | **Run a local model behind my existing coding agent** (no key, no network, one command) | `fak guard --gguf qwen2.5:7b -- claude` |
