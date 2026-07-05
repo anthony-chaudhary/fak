@@ -332,3 +332,55 @@ func formatAmplification(kc kernel.Counters, sum gateway.AdjudicationSummary) st
 	b.WriteByte('\n')
 	return b.String()
 }
+
+// formatTurnsTimeSaved renders the dedicated "turns / time saved" headline for the guard
+// exit summary — the human-legible dual of the amplification/floor lines above. The turns
+// count reconciles with them BY CONSTRUCTION: it folds the same kernel counters through the
+// same callavoid.Account, and splits on the same either/or path boundary, so the two
+// surfaces can never disagree and never double-count.
+//
+//   - Kernel/`fak serve` axis (vDSO hits + in-syscall repairs move the counters): turns
+//     saved is Account's realized AvoidedTurns — the round-trips a naive 1:1 agent would
+//     have spent to reach the same state.
+//   - Flagship `fak guard -- claude` PROXY axis (kc is structurally 0 — Decide increments
+//     none): the witnessed turn-saver is the in-flight grammar repair (a repaired call
+//     spares the failed round-trip + retry a naive agent would pay). Denies are NOT counted
+//     — the callavoid model treats a hard deny as symmetric (both agents propose-and-deny
+//     once), so "K spared" equals the floor-effect line's "K repaired"; denies stay shown
+//     separately by formatAmplification, never folded in here.
+//
+// Time saved = turns × the session's OWN observed mean E2E turn latency (WITNESSED/OBSERVED,
+// never a fabricated tokens/sec). When no turn was timed this session
+// (MeanTurnLatencySeconds == 0), the wall-clock dual is omitted rather than estimated — the
+// honest read is "we spared K round-trips; we cannot price them without a measured latency".
+// Returns "" when nothing was witnessed to report, matching formatAmplification's clean-run
+// silence.
+func formatTurnsTimeSaved(kc kernel.Counters, sum gateway.AdjudicationSummary) string {
+	rep := callavoid.Account(callavoid.TallyFromCounters(callavoid.Counters{
+		EngineCalls: int(kc.EngineCalls),
+		VDSOHits:    int(kc.VDSOHits),
+		Transforms:  int(kc.Transforms),
+		Denies:      int(kc.Denies),
+	}))
+	turns := rep.AvoidedTurns
+	basis := "vDSO cache hits + in-syscall repairs"
+	if rep.MemoHits == 0 && rep.Repairs == 0 {
+		// Proxy path: the kernel amplification axis is empty, so the witnessed turn-saver is
+		// the Decide-path grammar repair (Transformed). Denied is deliberately excluded.
+		turns = float64(sum.Transformed)
+		basis = "in-flight grammar repairs"
+	}
+	if turns < 0.5 { // nothing witnessed — stay quiet, same rule the amplification line uses.
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "fak guard: turns / time saved — ~%.0f naive round-trip(s) spared", turns)
+	if mean := sum.MeanTurnLatencySeconds(); mean > 0 {
+		fmt.Fprintf(&b, " ≈ ~%.1fs of wall-clock (this session's observed ~%.1fs/turn over %d timed turn(s))",
+			turns*mean, mean, sum.E2ELatencyCount)
+	} else {
+		b.WriteString("; wall-clock omitted — no turn latency observed this session")
+	}
+	fmt.Fprintf(&b, ". WITNESSED: %s; time is observed, not modeled\n", basis)
+	return b.String()
+}

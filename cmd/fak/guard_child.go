@@ -1223,6 +1223,7 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 		kc := srv.KernelCounters()
 		fmt.Fprint(os.Stderr, formatAuditSummary(sum, kc))
 		fmt.Fprint(os.Stderr, formatAmplification(kc, sum))
+		fmt.Fprint(os.Stderr, formatTurnsTimeSaved(kc, sum))
 		fmt.Fprint(os.Stderr, formatJournalSummary(auditJournal, auditSeq0))
 		// The guard-hook wall-clock tax (#1993): what the pre+post adjudication hooks
 		// cost per tool call this session. Best-effort — a hook-less session prints

@@ -1331,6 +1331,78 @@ func TestFormatAmplification(t *testing.T) {
 	}
 }
 
+func TestFormatTurnsTimeSaved(t *testing.T) {
+	// KERNEL PATH: vDSO hits + in-syscall repairs move the counters, and the session timed
+	// turns, so the line prints the witnessed turns spared AND the wall-clock dual priced at
+	// the session's own observed mean. The turns count must equal callavoid.Account's
+	// realized AvoidedTurns over the same mapped counters (reconciles with the amplification
+	// line by construction), and the seconds must be turns × mean.
+	kc := kernel.Counters{EngineCalls: 4, VDSOHits: 6, Transforms: 2, Denies: 1}
+	rep := callavoid.Account(callavoid.TallyFromCounters(callavoid.Counters{
+		EngineCalls: 4, VDSOHits: 6, Transforms: 2, Denies: 1,
+	}))
+	kernelSum := gateway.AdjudicationSummary{E2ELatencySumSeconds: 23.0, E2ELatencyCount: 10} // mean 2.3s/turn
+	mean := kernelSum.MeanTurnLatencySeconds()
+	out := formatTurnsTimeSaved(kc, kernelSum)
+	for _, want := range []string{
+		"turns / time saved",
+		fmt.Sprintf("~%.0f naive round-trip(s) spared", rep.AvoidedTurns),
+		fmt.Sprintf("~%.1fs of wall-clock", rep.AvoidedTurns*mean),
+		fmt.Sprintf("~%.1fs/turn", mean),
+		"over 10 timed turn(s)",
+		"WITNESSED: vDSO cache hits + in-syscall repairs",
+		"time is observed, not modeled",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("kernel-path turns/time line missing %q:\n%s", want, out)
+		}
+	}
+
+	// PROXY PATH (flagship fak guard -- claude): kernel counters are 0, but the floor
+	// repaired real proposed calls. Turns spared == the Transformed count (repairs), NOT the
+	// denies. 3 repairs over an observed 2.0s/turn → ~6.0s.
+	proxy := formatTurnsTimeSaved(kernel.Counters{}, gateway.AdjudicationSummary{
+		Transformed: 3, Denied: 2, E2ELatencySumSeconds: 6.0, E2ELatencyCount: 3,
+	})
+	for _, want := range []string{
+		"~3 naive round-trip(s) spared",
+		"~6.0s of wall-clock",
+		"~2.0s/turn",
+		"over 3 timed turn(s)",
+		"WITNESSED: in-flight grammar repairs",
+	} {
+		if !strings.Contains(proxy, want) {
+			t.Errorf("proxy-path turns/time line missing %q:\n%s", want, proxy)
+		}
+	}
+	// Denies must NOT inflate the turns count — only the 3 repairs are credited.
+	if strings.Contains(proxy, "~5 naive") {
+		t.Errorf("proxy line must count repairs only, not repairs+denies:\n%s", proxy)
+	}
+
+	// WITNESSED TURNS BUT NO OBSERVED LATENCY: print turns only, omit the wall-clock dual
+	// rather than fabricate a per-turn cost.
+	untimed := formatTurnsTimeSaved(kernel.Counters{}, gateway.AdjudicationSummary{Transformed: 3})
+	if !strings.Contains(untimed, "~3 naive round-trip(s) spared") {
+		t.Errorf("untimed line must still report turns spared:\n%s", untimed)
+	}
+	if !strings.Contains(untimed, "wall-clock omitted — no turn latency observed this session") {
+		t.Errorf("untimed line must omit wall-clock honestly:\n%s", untimed)
+	}
+	if strings.Contains(untimed, "of wall-clock") {
+		t.Errorf("untimed line must not print a wall-clock estimate:\n%s", untimed)
+	}
+
+	// NOTHING WITNESSED: a pure-Execute kernel run and a clean all-allowed proxy run both
+	// stay quiet, matching the amplification line's clean-run silence.
+	if q := formatTurnsTimeSaved(kernel.Counters{EngineCalls: 5}, gateway.AdjudicationSummary{E2ELatencySumSeconds: 5, E2ELatencyCount: 5}); q != "" {
+		t.Errorf("a pure-Execute run has no witnessed turns saved; want empty, got:\n%s", q)
+	}
+	if q := formatTurnsTimeSaved(kernel.Counters{}, gateway.AdjudicationSummary{Allowed: 9, E2ELatencySumSeconds: 5, E2ELatencyCount: 5}); q != "" {
+		t.Errorf("a clean all-allowed proxy run has no witnessed turns saved; want empty, got:\n%s", q)
+	}
+}
+
 // guardAuditPlan is the pure precedence behind the default-on decision journal:
 // a boot-time FAK_AUDIT_JOURNAL wins (nothing to enable), then --no-audit / --audit
 // off opt out, then --audit PATH, then the repo-local default. Tested without
