@@ -496,6 +496,12 @@ const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--
                  fak_session_reset / fak_context_change) over stdin/stdout)
   fak serve-wiring [--md|--check]
                 (audit fak serve flag -> gateway.Config -> runtime-read wiring)
+  fak lab       status [--all|--json] | report --id ID --state live|idle|draining|down |
+                readiness [--from-status|--json] | target @lab/glm-5.2 [--json] | ls
+                (public-safe lab fleet front door: fold scrubbed reports, derive the
+                 lab-backed dispatch gate, and validate a local @lab/<model> target
+                 alias for 'fak guard --remote-serve' without printing private
+                 coordinates)
 `
 
 const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR --size N --vec a,b,c |
@@ -515,7 +521,7 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
                  [{lane,lane_kind,tree}] so an arbiter on another box SEES the lease;
                  'reap' deletes the expired (reapable) records. VISIBILITY, not atomic
                  acquisition  -  see docs/cli-reference.md)
-  fak guard     [--provider anthropic|openai|gemini|xai] [--base-url URL] [--policy FILE]
+  fak guard     [--provider anthropic|openai|gemini|xai] [--base-url URL | --remote-serve HOST[:PORT]|@lab/glm-5.2] [--policy FILE]
                 [--session-id ID --context-budget-tokens N [--reset-on-budget|--restart-on-budget]]
                 [--restart-limit N] [--restart-seed-dir DIR]
                 [--api-key-env VAR] [--env VAR] [--audit FILE|off] [--no-audit] [--dump-policy] [--quiet]

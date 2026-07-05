@@ -154,6 +154,42 @@ missing reports, and unknown inference all fail closed with a generic next actio
 private roster, pass that roster locally (`--roster <private-roster>`); never commit the
 roster path or any endpoint it resolves.
 
+## Lab inference targets
+
+Readiness answers whether lab-backed work may be admitted. A guarded turn still needs a
+local endpoint target. Keep that second seam local too: the private bridge/tunnel producer
+writes `$FAK_LAB_TARGETS`, or the default fak config file `fleet/lab-targets.json`, with
+private coordinates in an untracked local file:
+
+```json
+{
+  "schema": "fak.lab_targets/v1",
+  "targets": [
+    {
+      "alias": "@lab/glm-5.2",
+      "base_url": "http://localhost:PORT",
+      "model": "glm-5.2",
+      "box_id": "box-a"
+    }
+  ]
+}
+```
+
+Validate the alias without printing the resolved coordinates:
+
+```bash
+fak lab target @lab/glm-5.2 --json
+```
+
+The resolver requires all three witnesses before it admits: `READY_FOR_DEV_WORK`
+readiness, a local target config entry, and a fresh healthy scrubbed report whose
+`inference` block is `ready` or `degraded` for the requested model. Then the user-visible
+guard path is:
+
+```bash
+fak guard --remote-serve @lab/glm-5.2 --probe -- codex
+```
+
 ### First green run (before the private bridge is wired)
 
 To see a populated frame without the bridge, drop a sample report into a directory and

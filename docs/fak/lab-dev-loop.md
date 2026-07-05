@@ -44,6 +44,41 @@ suffix the chat route lives under added to the upstream base for you, and it **p
 not serving the `/v1` surface — fails loud before the gateway binds rather than 404-ing on
 the first turn.
 
+For a user-visible GLM lab setup, do not hand-copy private host or tunnel coordinates
+into the command. The private bridge/tunnel producer writes a local, gitignored target
+config at `$FAK_LAB_TARGETS` or the default fak config path (`fleet/lab-targets.json`):
+
+```json
+{
+  "schema": "fak.lab_targets/v1",
+  "targets": [
+    {
+      "alias": "@lab/glm-5.2",
+      "base_url": "http://localhost:PORT",
+      "model": "glm-5.2",
+      "box_id": "box-a"
+    }
+  ]
+}
+```
+
+The tracked docs and tests use only placeholder aliases and `localhost`. The real file
+stays local. Validate the alias without printing coordinates:
+
+```bash
+fak lab target @lab/glm-5.2 --json
+```
+
+Then run the guarded turn through the alias:
+
+```bash
+fak guard --remote-serve @lab/glm-5.2 --probe -- codex
+```
+
+Alias resolution fails closed unless `fak lab readiness --json` is `READY_FOR_DEV_WORK`,
+the local target config exists, and scrubbed reports contain a fresh healthy
+`inference.ready`/`inference.degraded` row for the requested model.
+
 Because `--remote-serve` forces the OpenAI-compatible wire, the wrapped agent must be one
 that reads `OPENAI_BASE_URL` (Codex, OpenCode, Aider) — not Claude Code, which speaks the
 Anthropic wire (guard rejects `--remote-serve` with `--provider anthropic`).
