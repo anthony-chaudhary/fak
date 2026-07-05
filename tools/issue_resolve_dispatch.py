@@ -2738,6 +2738,7 @@ NO_COMMIT_POLICY_BLOCK = "policy_block"
 NO_COMMIT_AUTH_WALL = "auth_wall"
 NO_COMMIT_OFF_TRUNK = "off_trunk"
 NO_COMMIT_BANNER_NOOP = "banner_noop"
+NO_COMMIT_MISSING_LOG = "missing_log_artifact"
 NO_COMMIT_UNKNOWN = "unknown"
 
 # An opencode/glm worker that prints only its startup banner ("> build · glm-…") and
@@ -2747,6 +2748,9 @@ _NOOP_BANNER_RE = re.compile(r">\s*build\s*[·:]", re.IGNORECASE)
 # "hit your … limit" that _CAP_BANNER_RE already matches.
 _GLM_WALL_RE = re.compile(r"Limit Exhausted|limit will reset at|usage limit reached",
                           re.IGNORECASE)
+_MISSING_API_KEY_RE = re.compile(
+    r"Missing environment variable:\s*`?[A-Z0-9_]*API_KEY`?",
+    re.IGNORECASE)
 
 
 def classify_no_commit_reason(log: Path) -> str:
@@ -2754,14 +2758,21 @@ def classify_no_commit_reason(log: Path) -> str:
     (the guard summary + final turn live at the end) so the witness records a
     STRUCTURED reason rather than an opaque CLAIM_NO_COMMIT. Lets an anti-churn picker
     tell a re-blockable guard refusal (self_modify / policy_block) from a transient
-    wall (auth_wall) or a DOA backend (banner_noop). Pure + FAIL-OPEN: any read error
-    or no recognized signature -> UNKNOWN (never a false positive)."""
+    wall (auth_wall) or a DOA backend (banner_noop). Pure + FAIL-OPEN: a missing log
+    artifact gets a typed missing_log_artifact reason; no recognized signature stays
+    UNKNOWN (never a false positive)."""
+    try:
+        if not log.exists():
+            return NO_COMMIT_MISSING_LOG
+    except OSError:
+        return NO_COMMIT_MISSING_LOG
     tail = _log_tail_text(log)
     if "SELF_MODIFY" in tail:
         return NO_COMMIT_SELF_MODIFY
     if "POLICY_BLOCK" in tail:
         return NO_COMMIT_POLICY_BLOCK
-    if _log_is_cap_banner(log) or _GLM_WALL_RE.search(tail):
+    if (_log_is_cap_banner(log) or _GLM_WALL_RE.search(tail)
+            or _MISSING_API_KEY_RE.search(tail)):
         return NO_COMMIT_AUTH_WALL
     if "OFF_TRUNK" in tail:
         return NO_COMMIT_OFF_TRUNK

@@ -3818,6 +3818,13 @@ class ClassifyNoCommitReasonTest(unittest.TestCase):
                         "the request (HTTP 429)\n")
         self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_AUTH_WALL)
 
+    def test_auth_wall_missing_openai_api_key(self) -> None:
+        mod = load()
+        p = self._write("ERROR: Missing environment variable: `OPENAI_API_KEY`.\n"
+                        "ERROR: Missing environment variable: `OPENAI_API_KEY`.\n"
+                        "fak guard: codex exited abnormally (code 1).\n")
+        self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_AUTH_WALL)
+
     def test_off_trunk(self) -> None:
         mod = load()
         p = self._write("git commit refused: OFF_TRUNK — work on main only.\n")
@@ -3842,6 +3849,14 @@ class ClassifyNoCommitReasonTest(unittest.TestCase):
         mod = load()
         p = self._write("the worker ran a few turns and then exited cleanly\n")
         self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_UNKNOWN)
+
+    def test_missing_log_artifact(self) -> None:
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "resolve-1338-20260629-221102.log"
+            self.assertEqual(mod.classify_no_commit_reason(p),
+                             mod.NO_COMMIT_MISSING_LOG)
 
     def test_self_modify_wins_over_banner(self) -> None:
         mod = load()
@@ -3869,7 +3884,8 @@ class HeldNoCommitIssuesTest(unittest.TestCase):
             {"issue": 33, "reason": mod.NO_COMMIT_AUTH_WALL},
             {"issue": 44, "reason": mod.NO_COMMIT_BANNER_NOOP},
             {"issue": 55, "reason": mod.NO_COMMIT_OFF_TRUNK},
-            {"issue": 66, "reason": mod.NO_COMMIT_UNKNOWN}]}
+            {"issue": 66, "reason": mod.NO_COMMIT_UNKNOWN},
+            {"issue": 77, "reason": mod.NO_COMMIT_MISSING_LOG}]}
         self.assertEqual(mod.held_no_commit_issues(w), set())
 
     def test_mixed_holds_only_reblockable(self) -> None:
