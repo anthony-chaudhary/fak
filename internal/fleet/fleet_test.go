@@ -712,16 +712,17 @@ func TestInferenceReportRoundTripAndValidation(t *testing.T) {
 	if err := WriteReport(dir, "gpu", Report{
 		State: StateLive,
 		Inference: &InferenceStats{
-			Status:    InferenceReady,
-			Engine:    "fak",
-			Model:     "qwen",
-			OutputTPS: 2.25,
+			Status:         InferenceReady,
+			Engine:         "fak",
+			Model:          "qwen",
+			OutputTPS:      2.25,
+			ProbeLatencyMS: 1250,
 		},
 	}); err != nil {
 		t.Fatalf("WriteReport with inference: %v", err)
 	}
 	reps := ReadReports(dir, Roster{Boxes: []Box{{ID: "gpu"}}})
-	if reps[0].Inference == nil || reps[0].Inference.Status != InferenceReady || reps[0].Inference.OutputTPS != 2.25 {
+	if reps[0].Inference == nil || reps[0].Inference.Status != InferenceReady || reps[0].Inference.OutputTPS != 2.25 || reps[0].Inference.ProbeLatencyMS != 1250 {
 		t.Fatalf("inference report did not round-trip: %+v", reps[0].Inference)
 	}
 	if err := WriteReport(dir, "bad", Report{State: StateLive, Inference: &InferenceStats{Status: InferenceStatus("private-ok")}}); err == nil {
@@ -729,6 +730,9 @@ func TestInferenceReportRoundTripAndValidation(t *testing.T) {
 	}
 	if err := WriteReport(dir, "bad", Report{State: StateLive, Inference: &InferenceStats{Status: InferenceReady, OutputTPS: -1}}); err == nil {
 		t.Fatal("negative inference output_tps must be refused")
+	}
+	if err := WriteReport(dir, "bad", Report{State: StateLive, Inference: &InferenceStats{Status: InferenceReady, ProbeLatencyMS: -1}}); err == nil {
+		t.Fatal("negative inference probe_latency_ms must be refused")
 	}
 }
 

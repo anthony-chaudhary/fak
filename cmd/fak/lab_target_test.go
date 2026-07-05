@@ -86,6 +86,54 @@ func TestLabTargetRefusesMissingReadiness(t *testing.T) {
 	}
 }
 
+func TestLabTargetDegradesSlowReadyRouteAndGuardRefusesAlias(t *testing.T) {
+	env := writeLabTargetEnv(t, labTargetEnvOpts{
+		readiness: fleet.LabReadyForDevWork,
+		report: fleet.Report{
+			State: fleet.StateLive,
+			Inference: &fleet.InferenceStats{
+				Status:         fleet.InferenceReady,
+				Engine:         "sglang",
+				Model:          "glm-5.2",
+				ProbeLatencyMS: 143737,
+				Reason:         "v1-models",
+			},
+		},
+		targets: []labTargetConfig{{
+			Alias:   "@lab/glm-5.2",
+			BaseURL: "http://127.0.0.1:18181/v1",
+			Model:   "glm-5.2",
+			BoxID:   "box-a",
+		}},
+	})
+	t.Setenv("FAK_LAB_READINESS", env.readinessPath)
+	t.Setenv("FAK_FLEET_REPORTS", env.reportsDir)
+	t.Setenv("FAK_LAB_TARGETS", env.targetsPath)
+
+	var out bytes.Buffer
+	rc := runLab(&out, io.Discard, []string{"target", "@lab/glm-5.2", "--json"})
+	if rc != 0 {
+		t.Fatalf("slow target should still render a degraded JSON resolution, got rc=%d out=%s", rc, out.String())
+	}
+	var res labTargetResolution
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil {
+		t.Fatalf("lab target did not emit JSON: %v\n%s", err, out.String())
+	}
+	if res.Status != labTargetLatencyDegraded || res.NextAction != "route-latency-exceeds-dev-budget-refresh-report-or-use-fallback" {
+		t.Fatalf("slow target status = %+v", res)
+	}
+	if res.LatencyBudgetMS != labTargetLatencyBudgetMS || res.ProbeLatencyMS != 143737 {
+		t.Fatalf("latency witness = probe %.0f budget %d", res.ProbeLatencyMS, res.LatencyBudgetMS)
+	}
+	if strings.Contains(out.String(), "127.0.0.1") || strings.Contains(out.String(), "18181") {
+		t.Fatalf("degraded target JSON must stay scrubbed and not print local coordinates:\n%s", out.String())
+	}
+
+	if _, err := resolveGuardRemoteServe("@lab/glm-5.2"); err == nil || !strings.Contains(err.Error(), "LAB_TARGET_NOT_READY") {
+		t.Fatalf("guard alias should fail loud on degraded latency, got %v", err)
+	}
+}
+
 func TestLabTargetUsesPerTargetRoster(t *testing.T) {
 	root := t.TempDir()
 	readinessPath := filepath.Join(root, "lab-readiness.json")

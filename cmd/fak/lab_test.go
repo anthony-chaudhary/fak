@@ -95,6 +95,7 @@ func TestLabReportInferenceThenStatusClosesLoop(t *testing.T) {
 		"--engine", "fak",
 		"--model", "qwen",
 		"--output-tps", "1.75",
+		"--probe-latency-ms", "1250",
 	}); rc != 0 {
 		t.Fatalf("lab report with inference exited %d, want 0", rc)
 	}
@@ -116,7 +117,7 @@ func TestLabReportInferenceThenStatusClosesLoop(t *testing.T) {
 			continue
 		}
 		found = true
-		if r.Inference == nil || r.Inference.Status != fleet.InferenceReady || r.Inference.Engine != "fak" || r.Inference.Model != "qwen" || r.Inference.OutputTPS != 1.75 {
+		if r.Inference == nil || r.Inference.Status != fleet.InferenceReady || r.Inference.Engine != "fak" || r.Inference.Model != "qwen" || r.Inference.OutputTPS != 1.75 || r.Inference.ProbeLatencyMS != 1250 {
 			t.Fatalf("box-a inference row = %+v", r.Inference)
 		}
 	}
@@ -161,6 +162,9 @@ func TestLabReportRejectsBadInput(t *testing.T) {
 	}
 	if rc := runLab(io.Discard, io.Discard, []string{"report", "--id", "x", "--state", "live", "--inference", "ready", "--output-tps", "-1"}); rc == 0 {
 		t.Fatal("a negative --output-tps must be refused")
+	}
+	if rc := runLab(io.Discard, io.Discard, []string{"report", "--id", "x", "--state", "live", "--inference", "ready", "--probe-latency-ms", "-1"}); rc == 0 {
+		t.Fatal("a negative --probe-latency-ms must be refused")
 	}
 }
 

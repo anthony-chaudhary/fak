@@ -100,15 +100,16 @@ func (s InferenceStatus) Useful() bool {
 }
 
 // InferenceStats is a scrubbed serving-usefulness report for one box. It names only
-// generic serving facts: status, engine/model labels, a throughput number, and an
-// optional generic reason. It must never carry a host, URL, channel id, token, raw
-// transcript, or private filesystem path.
+// generic serving facts: status, engine/model labels, throughput/latency numbers,
+// and an optional generic reason. It must never carry a host, URL, channel id,
+// token, raw transcript, or private filesystem path.
 type InferenceStats struct {
-	Status    InferenceStatus `json:"status"`               // ready|degraded|warming|blocked|unknown
-	Engine    string          `json:"engine,omitempty"`     // generic engine label, e.g. fak|vllm|sglang|llama
-	Model     string          `json:"model,omitempty"`      // generic model label, never a private path
-	OutputTPS float64         `json:"output_tps,omitempty"` // observed output tok/s when known
-	Reason    string          `json:"reason,omitempty"`     // short scrubbed reason class
+	Status         InferenceStatus `json:"status"`                     // ready|degraded|warming|blocked|unknown
+	Engine         string          `json:"engine,omitempty"`           // generic engine label, e.g. fak|vllm|sglang|llama
+	Model          string          `json:"model,omitempty"`            // generic model label, never a private path
+	OutputTPS      float64         `json:"output_tps,omitempty"`       // observed output tok/s when known
+	ProbeLatencyMS float64         `json:"probe_latency_ms,omitempty"` // scrubbed end-to-end probe latency when known
+	Reason         string          `json:"reason,omitempty"`           // short scrubbed reason class
 }
 
 // Report is one box's current operational state — the seam schema. AgeSec is how
@@ -243,6 +244,9 @@ func normalizeInference(inf *InferenceStats) error {
 	}
 	if inf.OutputTPS < 0 {
 		return fmt.Errorf("inference output_tps must be non-negative")
+	}
+	if inf.ProbeLatencyMS < 0 {
+		return fmt.Errorf("inference probe_latency_ms must be non-negative")
 	}
 	return nil
 }

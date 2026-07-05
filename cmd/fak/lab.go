@@ -214,6 +214,7 @@ func labReport(stdout, stderr io.Writer, argv []string) int {
 	engine := fs.String("engine", "", "generic inference engine label for --inference (optional)")
 	model := fs.String("model", "", "generic model label for --inference (optional; never a private path)")
 	outputTPS := fs.Float64("output-tps", 0, "observed output tokens/sec for --inference (optional)")
+	probeLatencyMS := fs.Float64("probe-latency-ms", 0, "scrubbed end-to-end probe latency in milliseconds for --inference (optional)")
 	reason := fs.String("reason", "", "short generic inference reason for --inference (optional)")
 	reports := fs.String("reports", "", "reports dir (default: $FAK_FLEET_REPORTS or ~/.config/fak/fleet/reports)")
 	if !parseFlags(fs, argv) {
@@ -232,6 +233,10 @@ func labReport(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak lab report: --output-tps must be non-negative")
 		return 2
 	}
+	if *probeLatencyMS < 0 {
+		fmt.Fprintln(stderr, "fak lab report: --probe-latency-ms must be non-negative")
+		return 2
+	}
 
 	dir, err := labReportsDir(*reports)
 	if err != nil {
@@ -239,17 +244,18 @@ func labReport(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	rep := fleet.Report{State: st, Version: *version, Note: *note}
-	if *inference != "" || *engine != "" || *model != "" || *outputTPS > 0 || *reason != "" {
+	if *inference != "" || *engine != "" || *model != "" || *outputTPS > 0 || *probeLatencyMS > 0 || *reason != "" {
 		status := fleet.InferenceStatus(*inference)
 		if status == "" {
 			status = fleet.InferenceUnknown
 		}
 		rep.Inference = &fleet.InferenceStats{
-			Status:    status,
-			Engine:    *engine,
-			Model:     *model,
-			OutputTPS: *outputTPS,
-			Reason:    *reason,
+			Status:         status,
+			Engine:         *engine,
+			Model:          *model,
+			OutputTPS:      *outputTPS,
+			ProbeLatencyMS: *probeLatencyMS,
+			Reason:         *reason,
 		}
 	}
 	if err := fleet.WriteReport(dir, *id, rep); err != nil {

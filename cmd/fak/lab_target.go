@@ -16,10 +16,12 @@ import (
 )
 
 const (
-	labTargetsSchema        = "fak.lab_targets/v1"
-	labTargetResolveSchema  = "fak.lab_target.resolve/v1"
-	labTargetAliasPrefix    = "@lab/"
-	labTargetDefaultCommand = "fak guard --remote-serve @lab/glm-5.2 --probe -- codex"
+	labTargetsSchema         = "fak.lab_targets/v1"
+	labTargetResolveSchema   = "fak.lab_target.resolve/v1"
+	labTargetAliasPrefix     = "@lab/"
+	labTargetDefaultCommand  = "fak guard --remote-serve @lab/glm-5.2 --probe -- codex"
+	labTargetLatencyDegraded = "LATENCY_DEGRADED"
+	labTargetLatencyBudgetMS = 30000
 )
 
 type labTargetsFile struct {
@@ -36,17 +38,27 @@ type labTargetConfig struct {
 }
 
 type labTargetResolution struct {
-	Schema         string `json:"schema"`
-	Alias          string `json:"alias"`
-	MachineClass   string `json:"machine_class"`
-	Status         string `json:"status"`
-	Model          string `json:"model,omitempty"`
-	BoxID          string `json:"box_id,omitempty"`
-	Evidence       string `json:"evidence"`
-	NextAction     string `json:"next_action"`
-	RemoteServeArg string `json:"remote_serve_arg"`
-	GuardCommand   string `json:"guard_command"`
-	baseURL        string
+	Schema          string  `json:"schema"`
+	Alias           string  `json:"alias"`
+	MachineClass    string  `json:"machine_class"`
+	Status          string  `json:"status"`
+	Model           string  `json:"model,omitempty"`
+	BoxID           string  `json:"box_id,omitempty"`
+	Evidence        string  `json:"evidence"`
+	NextAction      string  `json:"next_action"`
+	RemoteServeArg  string  `json:"remote_serve_arg"`
+	GuardCommand    string  `json:"guard_command"`
+	LatencyBudgetMS int     `json:"latency_budget_ms,omitempty"`
+	ProbeLatencyMS  float64 `json:"probe_latency_ms,omitempty"`
+	baseURL         string
+}
+
+type labTargetReportValidation struct {
+	boxID          string
+	evidence       string
+	status         string
+	nextAction     string
+	probeLatencyMS float64
 }
 
 func labTargetPath(flagVal string) (string, error) {
@@ -125,6 +137,9 @@ func resolveGuardRemoteServe(operand string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if res.Status != fleet.LabReadyForDevWork {
+			return "", fmt.Errorf("LAB_TARGET_NOT_READY: status=%s next=%s", res.Status, res.NextAction)
+		}
 		return res.baseURL, nil
 	}
 	return normalizeRemoteServe(operand)
@@ -161,7 +176,7 @@ func resolveLabTarget(alias string, opts labTargetResolveOpts) (labTargetResolut
 	if model == "" {
 		model = strings.TrimPrefix(alias, labTargetAliasPrefix)
 	}
-	boxID, evidence, err := validateLabTargetReport(target, model, opts)
+	validated, err := validateLabTargetReport(target, model, opts)
 	if err != nil {
 		return labTargetResolution{}, err
 	}
@@ -169,22 +184,24 @@ func resolveLabTarget(alias string, opts labTargetResolveOpts) (labTargetResolut
 	// be a lab identifier. Keep the public resolution scrubbed unless the config
 	// explicitly supplied a display-safe box_id.
 	if strings.TrimSpace(target.Roster) != "" && strings.TrimSpace(target.BoxID) == "" {
-		boxID = ""
-	} else if boxID == "" {
-		boxID = strings.TrimSpace(target.BoxID)
+		validated.boxID = ""
+	} else if validated.boxID == "" {
+		validated.boxID = strings.TrimSpace(target.BoxID)
 	}
 	return labTargetResolution{
-		Schema:         labTargetResolveSchema,
-		Alias:          alias,
-		MachineClass:   opts.machineClass,
-		Status:         fleet.LabReadyForDevWork,
-		Model:          model,
-		BoxID:          boxID,
-		Evidence:       evidence,
-		NextAction:     "use-guard-remote-serve-alias",
-		RemoteServeArg: alias,
-		GuardCommand:   "fak guard --remote-serve " + alias + " --probe -- codex",
-		baseURL:        base,
+		Schema:          labTargetResolveSchema,
+		Alias:           alias,
+		MachineClass:    opts.machineClass,
+		Status:          validated.status,
+		Model:           model,
+		BoxID:           validated.boxID,
+		Evidence:        validated.evidence,
+		NextAction:      validated.nextAction,
+		RemoteServeArg:  alias,
+		GuardCommand:    "fak guard --remote-serve " + alias + " --probe -- codex",
+		LatencyBudgetMS: labTargetLatencyBudgetMS,
+		ProbeLatencyMS:  validated.probeLatencyMS,
+		baseURL:         base,
 	}, nil
 }
 
@@ -269,23 +286,24 @@ func findLabTarget(doc labTargetsFile, alias string) (labTargetConfig, bool) {
 	return labTargetConfig{}, false
 }
 
-func validateLabTargetReport(target labTargetConfig, model string, opts labTargetResolveOpts) (boxID, evidence string, err error) {
+func validateLabTargetReport(target labTargetConfig, model string, opts labTargetResolveOpts) (labTargetReportValidation, error) {
 	rosterPath := opts.rosterPath
 	if strings.TrimSpace(rosterPath) == "" {
 		rosterPath = strings.TrimSpace(target.Roster)
 	}
 	ro, err := labTargetRoster(rosterPath)
 	if err != nil {
-		return "", "", err
+		return labTargetReportValidation{}, err
 	}
 	dir, err := labReportsDir(opts.reportsDir)
 	if err != nil {
-		return "", "", err
+		return labTargetReportValidation{}, err
 	}
 	reps := fleet.ReadReports(dir, ro)
 	snap := fleet.Fold(ro, reps, fleet.FoldOpts{})
 	wantBox := strings.TrimSpace(target.BoxID)
 	var sawBox, sawFresh, sawReady bool
+	var slowCandidate *labTargetReportValidation
 	for _, row := range snap.Rows {
 		if wantBox != "" && row.ID != wantBox {
 			continue
@@ -307,18 +325,43 @@ func validateLabTargetReport(target labTargetConfig, model string, opts labTarge
 		if model != "" && !strings.EqualFold(strings.TrimSpace(row.Inference.Model), model) {
 			continue
 		}
-		return row.ID, "scrubbed-fleet-report", nil
+		validated := labTargetReportValidation{
+			boxID:      row.ID,
+			evidence:   "scrubbed-fleet-report",
+			status:     fleet.LabReadyForDevWork,
+			nextAction: "use-guard-remote-serve-alias",
+		}
+		if row.Inference.ProbeLatencyMS > 0 {
+			validated.probeLatencyMS = row.Inference.ProbeLatencyMS
+		}
+		if labTargetProbeLatencyDegraded(row.Inference) {
+			validated.status = labTargetLatencyDegraded
+			validated.nextAction = "route-latency-exceeds-dev-budget-refresh-report-or-use-fallback"
+			if slowCandidate == nil {
+				copy := validated
+				slowCandidate = &copy
+			}
+			continue
+		}
+		return validated, nil
+	}
+	if slowCandidate != nil {
+		return *slowCandidate, nil
 	}
 	switch {
 	case wantBox != "" && !sawBox:
-		return "", "", fmt.Errorf("LAB_TARGET_REPORT_NOT_USEFUL: target box %s is not in the roster", wantBox)
+		return labTargetReportValidation{}, fmt.Errorf("LAB_TARGET_REPORT_NOT_USEFUL: target box %s is not in the roster", wantBox)
 	case !sawFresh:
-		return "", "", errors.New("LAB_TARGET_REPORT_NOT_USEFUL: no fresh healthy report backs this alias")
+		return labTargetReportValidation{}, errors.New("LAB_TARGET_REPORT_NOT_USEFUL: no fresh healthy report backs this alias")
 	case !sawReady:
-		return "", "", errors.New("LAB_TARGET_REPORT_NOT_USEFUL: fresh report exists, but inference is not ready")
+		return labTargetReportValidation{}, errors.New("LAB_TARGET_REPORT_NOT_USEFUL: fresh report exists, but inference is not ready")
 	default:
-		return "", "", fmt.Errorf("LAB_TARGET_REPORT_NOT_USEFUL: no fresh useful report advertises model %s", model)
+		return labTargetReportValidation{}, fmt.Errorf("LAB_TARGET_REPORT_NOT_USEFUL: no fresh useful report advertises model %s", model)
 	}
+}
+
+func labTargetProbeLatencyDegraded(inf *fleet.InferenceStats) bool {
+	return inf != nil && inf.ProbeLatencyMS > float64(labTargetLatencyBudgetMS)
 }
 
 func labTargetRoster(rosterPath string) (fleet.Roster, error) {
