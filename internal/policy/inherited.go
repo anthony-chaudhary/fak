@@ -320,6 +320,7 @@ func secretShapedName(name string) bool {
 	for _, needle := range []string{
 		"TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "COOKIE",
 		"PRIVATE_KEY", "PRIVATEKEY", "AUTHORIZATION", "SESSION_KEY",
+		"UPSTREAM_API_KEY",
 	} {
 		if strings.Contains(up, needle) {
 			return true

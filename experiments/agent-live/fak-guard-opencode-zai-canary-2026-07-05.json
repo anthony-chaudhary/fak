@@ -1,0 +1,60 @@
+{
+  "schema": "fak.agent_live.guard_opencode_zai_canary/v1",
+  "issue": 2953,
+  "captured_at_utc": "2026-07-05T18:15:23Z",
+  "scope": "live this-machine fak guard turn through OpenCode and Z.ai GLM-5.2",
+  "status": "witnessed_low_yield_stopped",
+  "guard_binary": {
+    "path": "%TEMP%/fak-guard-keyfix.exe",
+    "build": "8e1a55fca21f +uncommitted"
+  },
+  "worker": {
+    "backend": "opencode",
+    "model": "zai-coding-plan/glm-5.2",
+    "lane": "docs",
+    "issue": 2953,
+    "pid": 35892,
+    "run": ".dispatch-runs/resolve-2953-20260705-180745.log",
+    "stopped_reason": "low-yield supervision: more than 40 guarded turns, no commit, no issue update, no repo artifact"
+  },
+  "guard": {
+    "provider": "openai",
+    "upstream": "https://api.z.ai/api/coding/paas/v4",
+    "gateway": "http://127.0.0.1:52398/v1",
+    "audit": ".dispatch-runs/guard-audit/docs-opencode-49844-8ec1f275.jsonl",
+    "audit_rows": 73,
+    "audit_sha256": "c0992c19c775ab02f8d5056356335c042da232d8a745329486ffec9475633265",
+    "audit_verify": "OK: 73 hash-chained row(s), chain intact"
+  },
+  "live_metrics_before_stop": {
+    "inference_turns": 46,
+    "prompt_tokens": 2134880,
+    "completion_tokens": 5755,
+    "duration_seconds": 338.90994100000006,
+    "adjudication_total": 1803,
+    "allowed": 70,
+    "denied": 0,
+    "quarantined": 0,
+    "cache_saved_token_equiv": 1900166.4,
+    "cache_status": "PROVEN",
+    "last_tool": "bash"
+  },
+  "secret_boundary": {
+    "proxy_key_env": "FAK_OPENCODE_GUARD_UPSTREAM_API_KEY",
+    "child_env_witness": ".dispatch-runs/opencode-child-key-witness-20260705180536.txt",
+    "child_env_witness_value": "child_key_absent",
+    "new_worker_log_proxy_key_name_present": false,
+    "new_worker_log_env_dump_present": false,
+    "worker_log_public_evidence": false,
+    "worker_log_public_evidence_reason": "log contains generic Authorization/Bearer marker words, so this artifact cites the guard audit and metrics instead"
+  },
+  "supervision": {
+    "lease_id": "resolve-docs",
+    "lease_holder": "local-dispatch-session",
+    "lease_generation": 1,
+    "lease_released": true,
+    "process_tree_stopped": true,
+    "issue_state_after_stop": "OPEN",
+    "commit_after_launch": false
+  }
+}

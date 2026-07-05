@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -232,6 +234,91 @@ class DispatchWorkerTest(unittest.TestCase):
         self.assertEqual(wrapped[0], "/usr/bin/fak")
         self.assertEqual(wrapped[wrapped.index("--provider") + 1], "openai")
         self.assertEqual(wrapped[wrapped.index("--base-url") + 1], "http://127.0.0.1:8131/v1")
+
+    def test_guard_wrap_opencode_injects_inline_provider_repoint(self) -> None:
+        mod = load()
+        raw = ["opencode", "run", "-m", "zai-coding-plan/glm-5.2", "dispatch"]
+        env = {
+            "FLEET_DOGFOOD_GUARD_BASEURL": "https://api.example.test/v1",
+            "FLEET_DOGFOOD_GUARD_ADDR": "127.0.0.1:8137",
+            mod.OPENCODE_GUARD_UPSTREAM_KEY_ENV: "secret-test-key",
+            "OPENCODE_CONFIG_CONTENT": '{"autoupdate":false}',
+        }
+
+        wrapped = mod.guard_wrap(raw, fak_bin="/usr/bin/fak", lane="recall",
+                                 backend="opencode", workspace=Path("."), env=env)
+
+        self.assertEqual(wrapped[wrapped.index("--addr") + 1], "127.0.0.1:8137")
+        self.assertEqual(wrapped[wrapped.index("--api-key-env") + 1],
+                         mod.OPENCODE_GUARD_UPSTREAM_KEY_ENV)
+        self.assertNotIn("secret-test-key", wrapped)
+        cfg = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+        self.assertFalse(cfg["autoupdate"])
+        self.assertEqual(
+            cfg["provider"]["zai-coding-plan"]["options"]["baseURL"],
+            "http://127.0.0.1:8137/v1")
+
+    def test_opencode_inline_repoint_defaults_to_glm_provider(self) -> None:
+        mod = load()
+
+        cfg = json.loads(mod.opencode_guard_config_content(
+            ["opencode", "run", "dispatch"], "http://127.0.0.1:8138/v1"))
+
+        self.assertEqual(
+            cfg["provider"]["zai-coding-plan"]["options"]["baseURL"],
+            "http://127.0.0.1:8138/v1")
+
+    def test_opencode_upstream_key_reads_account_config(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / "opencode" / "opencode.json"
+            cfg.parent.mkdir(parents=True)
+            cfg.write_text(json.dumps({
+                "provider": {
+                    "zai-coding-plan": {
+                        "options": {"apiKey": "secret-from-config"}
+                    }
+                }
+            }), encoding="utf-8")
+
+            got = mod.opencode_upstream_api_key(
+                ["opencode", "run", "-m", "zai-coding-plan/glm-5.2"],
+                {"XDG_CONFIG_HOME": d})
+
+        self.assertEqual(got, "secret-from-config")
+
+    def test_opencode_upstream_key_reads_inline_config_content(self) -> None:
+        mod = load()
+
+        got = mod.opencode_upstream_api_key(
+            ["opencode", "run", "-m", "zai-coding-plan/glm-5.2"],
+            {"OPENCODE_CONFIG_CONTENT": json.dumps({
+                "provider": {
+                    "zai-coding-plan": {
+                        "options": {"apiKey": "{env:ZAI_TEST_KEY}"}
+                    }
+                }
+            }), "ZAI_TEST_KEY": "secret-from-inline-env"})
+
+        self.assertEqual(got, "secret-from-inline-env")
+
+    def test_opencode_upstream_key_reads_explicit_config_path(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / "custom-opencode.json"
+            cfg.write_text(json.dumps({
+                "provider": {
+                    "zai-coding-plan": {
+                        "options": {"apiKey": "secret-from-explicit-config"}
+                    }
+                }
+            }), encoding="utf-8")
+
+            got = mod.opencode_upstream_api_key(
+                ["opencode", "run", "-m", "zai-coding-plan/glm-5.2"],
+                {"OPENCODE_CONFIG": str(cfg)})
+
+        self.assertEqual(got, "secret-from-explicit-config")
 
     def test_guarded_launch_command_opts_out_when_disabled(self) -> None:
         mod = load()

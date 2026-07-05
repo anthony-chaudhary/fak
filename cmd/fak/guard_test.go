@@ -492,6 +492,18 @@ func TestBuildGuardChildIncludesRestartEnv(t *testing.T) {
 	}
 }
 
+func TestBuildGuardChildStripsProxyOnlyUpstreamKey(t *testing.T) {
+	t.Setenv("FAK_OPENCODE_GUARD_UPSTREAM_API_KEY", "guard-upstream-key-for-proxy-only")
+	child := buildGuardChild([]string{"opencode", "run"}, [][2]string{{"OPENAI_BASE_URL", "http://127.0.0.1:18080/v1"}}, false)
+	env := strings.Join(child.Env, "\n")
+	if strings.Contains(env, "FAK_OPENCODE_GUARD_UPSTREAM_API_KEY=") {
+		t.Fatalf("guard child inherited proxy-only upstream key:\n%s", env)
+	}
+	if !strings.Contains(env, "OPENAI_BASE_URL=http://127.0.0.1:18080/v1") {
+		t.Fatalf("guard child lost injected gateway URL:\n%s", env)
+	}
+}
+
 func TestGuardChildTerminalRestorePulseCodexOnly(t *testing.T) {
 	var calls [][2]time.Duration
 	orig := startGuardChildTerminalRestorePulse

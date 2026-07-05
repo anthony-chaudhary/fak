@@ -36,6 +36,7 @@ import json
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import uuid
 from pathlib import Path
@@ -252,6 +253,142 @@ GUARD_OFF_VALUES = frozenset({"0", "off", "false", "no", "", "disable", "disable
 # Raise both floors for a guarded worker (mirrors scripts/dogfood-claude.*, which
 # pre-raise them) without clobbering an operator's explicit value.
 GUARD_TIMEOUT_FLOOR_S = 600
+OPENCODE_DEFAULT_PROVIDER_ID = "zai-coding-plan"
+OPENCODE_GUARD_UPSTREAM_KEY_ENV = "FAK_OPENCODE_GUARD_UPSTREAM_API_KEY"
+
+
+def _opencode_model_provider(command: Sequence[str]) -> str:
+    """Return the provider id from an opencode ``-m provider/model`` argv.
+
+    The issue resolver pins opencode to ``zai-coding-plan/glm-5.2``. The generic
+    dispatch worker may rely on the account default instead; in that case keep the
+    deployed GLM provider id as the override target.
+    """
+    for idx, token in enumerate(command):
+        if token in ("-m", "--model") and idx + 1 < len(command):
+            model = str(command[idx + 1]).strip()
+            if "/" in model:
+                provider, _ = model.split("/", 1)
+                if provider.strip():
+                    return provider.strip()
+    return OPENCODE_DEFAULT_PROVIDER_ID
+
+
+def _deep_merge_config(base: Any, overlay: dict[str, Any]) -> dict[str, Any]:
+    """Small JSON-object merge for OPENCODE_CONFIG_CONTENT overlays."""
+    if not isinstance(base, dict):
+        base = {}
+    merged = dict(base)
+    for key, value in overlay.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_config(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _opencode_guard_addr(env: dict[str, str]) -> str:
+    """Loopback addr for the per-session guard gateway.
+
+    Operators/tests can pin it. Otherwise ask the OS for a free port and pass the
+    same addr both to ``fak guard --addr`` and OpenCode's inline provider config.
+    """
+    pinned = (env.get("FLEET_DOGFOOD_GUARD_ADDR") or "").strip()
+    if pinned:
+        return pinned
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        host, port = sock.getsockname()
+    return f"{host}:{port}"
+
+
+def opencode_guard_config_content(command: Sequence[str], gateway_base_url: str,
+                                  existing: str = "") -> str:
+    """Inline OpenCode config that repoints the selected provider to fak guard.
+
+    OpenCode's named providers do not necessarily honor ``OPENAI_BASE_URL``.
+    ``OPENCODE_CONFIG_CONTENT`` is loaded after project config, so this keeps the
+    override per-child and avoids writing credentials or transient ports to the repo.
+    """
+    provider = _opencode_model_provider(command)
+    overlay = {
+        "provider": {
+            provider: {
+                "options": {
+                    "baseURL": gateway_base_url,
+                },
+            },
+        },
+    }
+    base: Any = {}
+    if existing.strip():
+        try:
+            base = json.loads(existing)
+        except json.JSONDecodeError:
+            base = {}
+    return json.dumps(_deep_merge_config(base, overlay), separators=(",", ":"))
+
+
+def _opencode_config_candidates(env: dict[str, str]) -> list[Path]:
+    home = Path.home()
+    root = Path(env.get("XDG_CONFIG_HOME") or os.environ.get("XDG_CONFIG_HOME")
+                or home / ".config")
+    candidates: list[Path] = []
+    explicit = (env.get("OPENCODE_CONFIG") or os.environ.get("OPENCODE_CONFIG") or "").strip()
+    if explicit:
+        candidates.append(Path(explicit))
+    candidates.extend([
+        root / "opencode" / "opencode.json",
+        root / "opencode" / "opencode.jsonc",
+        root / "opencode.json",
+        root / "opencode.jsonc",
+    ])
+    seen: set[str] = set()
+    out: list[Path] = []
+    for path in candidates:
+        key = str(path)
+        if key not in seen:
+            out.append(path)
+            seen.add(key)
+    return out
+
+
+def _env_substituted_value(value: Any, env: dict[str, str]) -> str:
+    if not isinstance(value, str):
+        return ""
+    stripped = value.strip()
+    if stripped.startswith("{env:") and stripped.endswith("}"):
+        return env.get(stripped[5:-1], os.environ.get(stripped[5:-1], "")).strip()
+    return stripped
+
+
+def opencode_upstream_api_key(command: Sequence[str], env: dict[str, str]) -> str:
+    """Best-effort read of the opencode provider key for guard's upstream hop."""
+    explicit = _env_substituted_value(env.get(OPENCODE_GUARD_UPSTREAM_KEY_ENV), env)
+    if explicit:
+        return explicit
+    provider = _opencode_model_provider(command)
+    if content := (env.get("OPENCODE_CONFIG_CONTENT") or "").strip():
+        try:
+            cfg = json.loads(content)
+        except json.JSONDecodeError:
+            cfg = {}
+        key = (((cfg.get("provider") or {}).get(provider) or {})
+               .get("options") or {}).get("apiKey")
+        resolved = _env_substituted_value(key, env)
+        if resolved:
+            return resolved
+    for path in _opencode_config_candidates(env):
+        try:
+            cfg = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        key = (((cfg.get("provider") or {}).get(provider) or {})
+               .get("options") or {}).get("apiKey")
+        resolved = _env_substituted_value(key, env)
+        if resolved:
+            return resolved
+    return ""
 
 
 def guard_enabled(env: dict[str, str] | None = None) -> bool:
@@ -339,6 +476,18 @@ def guard_wrap(
         if not base:
             return cmd  # don't misroute a local-upstream worker
         extra = ["--base-url", base]
+        if backend == "opencode":
+            addr = _opencode_guard_addr(e)
+            extra = ["--addr", addr, *extra]
+            e["OPENCODE_CONFIG_CONTENT"] = opencode_guard_config_content(
+                cmd, f"http://{addr}/v1",
+                existing=e.get("OPENCODE_CONFIG_CONTENT", ""))
+            upstream_key = opencode_upstream_api_key(cmd, e)
+            if upstream_key:
+                e[OPENCODE_GUARD_UPSTREAM_KEY_ENV] = upstream_key
+                extra = ["--api-key-env", OPENCODE_GUARD_UPSTREAM_KEY_ENV, *extra]
+            elif not base.startswith(("http://127.0.0.1:", "http://localhost:")):
+                return cmd  # remote OpenAI-wire upstreams need a key guard can hold
     audit = guard_audit_path(workspace, lane, backend)
     return [fak_bin, "guard", "--provider", provider, *extra,
             "--audit", str(audit), "--", *cmd]
@@ -522,9 +671,11 @@ def main(argv: list[str] | None = None) -> int:
     # operator will actually run.
     command: list[str] = []
     guarded = False
+    env: dict[str, str] = {}
     if not error:
+        env = child_env(args.lane, backend, workspace)
         command, guarded = guarded_launch_command(
-            build_command(args.lane, backend), args.lane, backend, workspace
+            build_command(args.lane, backend), args.lane, backend, workspace, env
         )
 
     if args.dry_run or error:
@@ -538,7 +689,6 @@ def main(argv: list[str] | None = None) -> int:
             print(render(payload))
         return 0 if not error else 2
 
-    env = child_env(args.lane, backend, workspace)
     if guarded:
         guard_env_augment(env)
     result = launch(command, workspace, env, timeout_s=normalize_timeout(args.timeout_s))

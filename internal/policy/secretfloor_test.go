@@ -31,6 +31,7 @@ func TestStripInheritedSecretsFloor(t *testing.T) {
 		"AWS_SECRET_ACCESS_KEY=abc123shouldstrip",
 		"DB_PASSWORD=hunter2",
 		"HELPER_SESSION_COOKIE=deadbeef",
+		"FAK_OPENCODE_GUARD_UPSTREAM_API_KEY=zai-upstream-key-for-guard-only",
 		"BENIGN_NAME_SECRET_VALUE=sk-live-leaked-in-benign-var",
 		"MALFORMED_NO_EQUALS_ENTRY", // no '=' — preserved verbatim
 	}
@@ -48,7 +49,7 @@ func TestStripInheritedSecretsFloor(t *testing.T) {
 			t.Fatalf("StripInheritedSecrets dropped a var it must keep: %s\nkept=%v", name, kept)
 		}
 	}
-	mustStrip := []string{"GITHUB_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "AWS_SECRET_ACCESS_KEY", "DB_PASSWORD", "HELPER_SESSION_COOKIE", "BENIGN_NAME_SECRET_VALUE"}
+	mustStrip := []string{"GITHUB_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "AWS_SECRET_ACCESS_KEY", "DB_PASSWORD", "HELPER_SESSION_COOKIE", "FAK_OPENCODE_GUARD_UPSTREAM_API_KEY", "BENIGN_NAME_SECRET_VALUE"}
 	for _, name := range mustStrip {
 		if _, ok := keptSet[name]; ok {
 			t.Fatalf("StripInheritedSecrets kept a credential it must strip: %s", name)
