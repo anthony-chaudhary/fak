@@ -88,12 +88,12 @@ func runCadence(stdout, stderr io.Writer, argv []string) int {
 		ledgerPath = filepath.Join(root, filepath.FromSlash(cadencereport.DefaultLedgerRel))
 	}
 	row := cadencereport.RowFromReport(report)
-	prior := readLedgerRows(ledgerPath)
+	prior := readLedgerFile(ledgerPath, cadencereport.ParseLedger)
 	row = cadencereport.ProjectStanding(row, prior)
 	trend := cadencereport.TrendVsLast(row, prior)
 	report.Trend = &trend
 	if *appendHistory {
-		if err := appendLedgerRow(ledgerPath, row); err != nil {
+		if err := appendLedgerFile(ledgerPath, row, cadencereport.AppendLedgerLine); err != nil {
 			fmt.Fprintf(stderr, "fak cadence: append ledger: %v\n", err)
 			return 1
 		}
@@ -129,33 +129,4 @@ func runCadence(stdout, stderr io.Writer, argv []string) int {
 
 func emitCadenceJSON(w io.Writer, r cadencereport.Report) {
 	_ = writeIndentedJSONNoEscape(w, r)
-}
-
-// readLedgerRows reads the durable ledger if present (absent ledger -> no prior
-// rows, the first tick establishes the series).
-func readLedgerRows(path string) []cadencereport.LedgerRow {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	return cadencereport.ParseLedger(string(raw))
-}
-
-// appendLedgerRow appends one JSONL row to the ledger, creating the parent
-// directory on first write.
-func appendLedgerRow(path string, row cadencereport.LedgerRow) error {
-	line, err := cadencereport.AppendLedgerLine(row)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString(line + "\n")
-	return err
 }

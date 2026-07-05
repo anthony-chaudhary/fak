@@ -7,7 +7,6 @@ package milestonereport
 // doc is in doc.go.
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/covmatrix"
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	"github.com/anthony-chaudhary/fak/internal/supportmaturity"
+	"github.com/anthony-chaudhary/fak/internal/trendreport"
 	"github.com/anthony-chaudhary/fak/internal/worktype"
 )
 
@@ -379,32 +379,21 @@ type Trend struct {
 	Summary       string  `json:"summary"`
 }
 
-// Report is one folded milestone-report control-pane envelope.
+// Report is one folded milestone-report control-pane envelope. The common head
+// (schema/ok/verdict/finding/reason/next_action, the ambient stamp, and the two
+// --check --json gate fields) is the embedded trendreport.Envelope; only the
+// milestone dimensions live here.
 type Report struct {
-	Schema      string   `json:"schema"`
-	OK          bool     `json:"ok"`
-	Verdict     string   `json:"verdict"`
-	Finding     string   `json:"finding"`
-	Reason      string   `json:"reason"`
-	NextAction  string   `json:"next_action"`
-	Workspace   string   `json:"workspace"`
-	Commit      string   `json:"commit"`
-	GeneratedAt string   `json:"generated_at"`
-	Date        string   `json:"date"`
-	Maturity    Maturity `json:"maturity"`
-	Epics       Epics    `json:"epics"`
-	Trend       *Trend   `json:"trend,omitempty"`
-	GateExit    *int     `json:"gate_exit,omitempty"`
-	GateMessage string   `json:"gate_message,omitempty"`
+	trendreport.Envelope
+	Maturity Maturity `json:"maturity"`
+	Epics    Epics    `json:"epics"`
+	Trend    *Trend   `json:"trend,omitempty"`
 }
 
-// FoldOpts carries the ambient context the fold stamps onto the envelope.
-type FoldOpts struct {
-	Workspace   string
-	Commit      string
-	GeneratedAt string
-	Date        string
-}
+// FoldOpts carries the ambient context the fold stamps onto the envelope. It is
+// the shared trendreport.Opts; the alias keeps this package's fold signature
+// stable for existing callers.
+type FoldOpts = trendreport.Opts
 
 // Fold folds the two dimensions into one milestone-report envelope. The verdict
 // ladder mirrors cadencereport's REPORT contract, not a second quality gate: it is
@@ -414,13 +403,9 @@ type FoldOpts struct {
 // unmeasured one.
 func Fold(m Maturity, e Epics, opts FoldOpts) Report {
 	r := Report{
-		Schema:      Schema,
-		Workspace:   opts.Workspace,
-		Commit:      opts.Commit,
-		GeneratedAt: opts.GeneratedAt,
-		Date:        opts.Date,
-		Maturity:    m,
-		Epics:       e,
+		Envelope: trendreport.Stamp(Schema, opts),
+		Maturity: m,
+		Epics:    e,
 	}
 
 	var unmeasured []string
@@ -534,11 +519,7 @@ func ParseLedger(content string) []LedgerRow {
 // caller appends it with a newline; keeping the rendering pure makes the writer
 // testable without touching disk.
 func AppendLedgerLine(row LedgerRow) (string, error) {
-	b, err := json.Marshal(row)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
+	return trendreport.AppendLedgerLine(row)
 }
 
 // TrendVsLast computes the per-tick trend of `row` against the most recent prior
@@ -738,25 +719,14 @@ func generationRowLine(row GenerationRow) string {
 //	0  milestone recorded (clear or advisory)
 //	1  a dimension failed to measure (the report is incomplete)
 func CheckGate(r Report) (int, string) {
-	if r.Finding == "milestone_unmeasured" {
-		return 1, "MILESTONE INCOMPLETE: " + r.Reason
-	}
-	return 0, "MILESTONE OK: " + r.Reason
+	v := trendreport.AdvisoryGate("MILESTONE", r.Finding, r.Reason, "milestone_unmeasured")
+	return v.Exit, v.Message
 }
 
 // WithGate returns a copy reconciled to a CheckGate decision, for --check --json.
 func (r Report) WithGate(code int, message string) Report {
-	q := r
-	q.OK = code == 0
-	if code == 0 {
-		q.Verdict = "OK"
-	} else {
-		q.Verdict = "ACTION"
-	}
-	c := code
-	q.GateExit = &c
-	q.GateMessage = message
-	return q
+	r.Envelope = r.Envelope.WithGate(trendreport.GateVerdict{Exit: code, Message: message})
+	return r
 }
 
 // --- small shared helpers ---------------------------------------------------

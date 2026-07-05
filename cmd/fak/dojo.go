@@ -184,11 +184,11 @@ func runDojoRun(stdout, stderr io.Writer, argv []string) int {
 		ledgerPath = filepath.Join(root, filepath.FromSlash(dojo.DefaultLedgerRel))
 	}
 	row := dojo.RowFromReport(report)
-	prior := readDojoLedgerRows(ledgerPath)
+	prior := readLedgerFile(ledgerPath, dojo.ParseLedger)
 	trend := dojo.TrendVsLast(row, prior)
 	report.Trend = &trend
 	if *appendHistory {
-		if err := appendDojoLedgerRow(ledgerPath, row); err != nil {
+		if err := appendLedgerFile(ledgerPath, row, dojo.AppendLedgerLine); err != nil {
 			fmt.Fprintf(stderr, "fak dojo run: append ledger: %v\n", err)
 			return 1
 		}
@@ -515,7 +515,7 @@ func runDojoPost(stdout, stderr io.Writer, argv []string) int {
 		if ledgerPath == "" {
 			ledgerPath = filepath.Join(root, filepath.FromSlash(dojo.DefaultLedgerRel))
 		}
-		rows := readDojoLedgerRows(ledgerPath)
+		rows := readLedgerFile(ledgerPath, dojo.ParseLedger)
 		post = dojopost.TrendFromLedger(rows, *n)
 	case "latest":
 		if *corpus == "" {
@@ -535,7 +535,7 @@ func runDojoPost(stdout, stderr io.Writer, argv []string) int {
 			ledgerPath = filepath.Join(root, filepath.FromSlash(dojo.DefaultLedgerRel))
 		}
 		row := dojo.RowFromReport(report)
-		trend := dojo.TrendVsLast(row, readDojoLedgerRows(ledgerPath))
+		trend := dojo.TrendVsLast(row, readLedgerFile(ledgerPath, dojo.ParseLedger))
 		report.Trend = &trend
 		post = dojopost.RollupFromReport(report, *n)
 	default:
@@ -885,35 +885,6 @@ func dojoHeadCommit(root string) string {
 
 func emitDojoJSON(w io.Writer, r dojo.Report) {
 	_ = writeIndentedJSONNoEscape(w, r)
-}
-
-// readDojoLedgerRows reads the durable ledger if present (absent ledger -> no
-// prior rows, the first tick establishes the series).
-func readDojoLedgerRows(path string) []dojo.LedgerRow {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	return dojo.ParseLedger(string(raw))
-}
-
-// appendDojoLedgerRow appends one JSONL row to the ledger, creating the parent
-// directory on first write.
-func appendDojoLedgerRow(path string, row dojo.LedgerRow) error {
-	line, err := dojo.AppendLedgerLine(row)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString(line + "\n")
-	return err
 }
 
 // --- the compaction lever -------------------------------------------------
