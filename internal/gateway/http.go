@@ -1,12 +1,14 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -33,6 +35,8 @@ const maxBody = 4 << 20
 // request-body ceiling, so the gateway never refuses a body the upstream would
 // have accepted (the silent-truncation 400 in #-resume).
 const maxTranscriptBody = 32 << 20
+
+const epFollowerHeader = "X-Fak-EP-Follower"
 
 // gatewayRoute pairs a ServeMux registration pattern with its handler. Handler
 // builds the mux from routeTable() rather than a sequence of inline HandleFunc
@@ -370,6 +374,121 @@ func requestFromLoopback(r *http.Request) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// startEPFanoutFollowers mirrors an inbound non-streaming chat request from the EP
+// front rank to its follower rank endpoints before the front rank enters the local
+// in-kernel decode. Rank-local expert parallelism reduces the routed-expert delta
+// through a process-group AllReduce; that collective makes progress only if every
+// rank runs the same forward pass. FAK_EP_FANOUT_ADDRS is therefore the temporary
+// single-endpoint bridge for the sharded serve: the front rank receives the client
+// request, followers receive the identical loopback request with X-Fak-EP-Follower
+// set, and every process reaches the collectives concurrently. The follower header
+// prevents recursive fanout if an operator points the bridge at another front rank.
+func (s *Server) startEPFanoutFollowers(w http.ResponseWriter, r *http.Request) (func(), bool) {
+	if r.Header.Get(epFollowerHeader) != "" {
+		return func() {}, true
+	}
+	urls := epFanoutURLsFromEnv()
+	if len(urls) == 0 {
+		return func() {}, true
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxTranscriptBody))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+		return nil, false
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	var meta struct {
+		Stream bool `json:"stream"`
+	}
+	if err := json.Unmarshal(body, &meta); err != nil || meta.Stream {
+		// Malformed bodies will be rejected by the normal decoder below. Streaming EP
+		// needs a coordinated streaming bridge; do not start follower requests whose
+		// bodies the helper would close before the decode finishes.
+		return func() {}, true
+	}
+	results := make(chan epFanoutResult, len(urls))
+	for _, target := range urls {
+		target := target
+		go func() {
+			req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target, bytes.NewReader(body))
+			if err != nil {
+				results <- epFanoutResult{target: target, err: err}
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set(epFollowerHeader, "1")
+			if trace := r.Header.Get("X-Trace-Id"); trace != "" {
+				req.Header.Set("X-Trace-Id", trace)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				results <- epFanoutResult{target: target, err: err}
+				return
+			}
+			defer resp.Body.Close()
+			snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			results <- epFanoutResult{target: target, status: resp.StatusCode, body: string(snippet)}
+		}()
+	}
+	return func() {
+		timeout := durEnv("FAK_EP_FANOUT_WAIT_TIMEOUT_S", 5*time.Second)
+		var timer <-chan time.Time
+		if timeout > 0 {
+			timer = time.After(timeout)
+		}
+		for range urls {
+			select {
+			case res := <-results:
+				if res.err != nil {
+					s.logEPFanout("gateway: EP fanout follower %s failed: %v", res.target, res.err)
+					continue
+				}
+				if res.status < 200 || res.status >= 300 {
+					s.logEPFanout("gateway: EP fanout follower %s status=%d body=%q", res.target, res.status, res.body)
+				}
+			case <-timer:
+				s.logEPFanout("gateway: EP fanout follower wait timed out after %s", timeout)
+				return
+			}
+		}
+	}, true
+}
+
+type epFanoutResult struct {
+	target string
+	status int
+	body   string
+	err    error
+}
+
+func (s *Server) logEPFanout(format string, args ...any) {
+	if s != nil && s.logf != nil {
+		s.logf(format, args...)
+	}
+}
+
+func epFanoutURLsFromEnv() []string {
+	raw := os.Getenv("FAK_EP_FANOUT_ADDRS")
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\n' || r == '\t' || r == ';'
+	})
+	urls := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if !strings.HasPrefix(part, "http://") && !strings.HasPrefix(part, "https://") {
+			part = "http://" + part
+		}
+		urls = append(urls, strings.TrimRight(part, "/")+"/v1/chat/completions")
+	}
+	return urls
+}
+
 // gatewayCredential extracts the presented secret from any of the auth schemes a
 // fak gateway fronts. The OpenAI/fak-native surfaces send
 // "Authorization: Bearer <tok>"; the native Anthropic surface (/v1/messages) is
@@ -412,6 +531,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
+	waitEPFanout, ok := s.startEPFanoutFollowers(w, r)
+	if !ok {
+		return
+	}
+	defer waitEPFanout()
 	var req ChatRequest
 	if !decodeRequestBody(w, r, &req) {
 		return
@@ -567,6 +691,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	if servedHits > 0 {
 		s.metrics.recordServedInline(servedHits)
+	}
+	if anyLivelock(adjs) {
+		asst.Content = prependAdjudicationContentNote(asst.Content, adjs)
 	}
 
 	finish := comp.FinishReason
@@ -1026,6 +1153,7 @@ func denySummary(adjs []ToolAdjudication) string {
 func adjudicationNote(adjs []ToolAdjudication) string {
 	denied := make([]string, 0, len(adjs))
 	repaired := make([]string, 0, len(adjs))
+	allowedLoops := make([]string, 0, len(adjs))
 	hasConfirmRecipe := false
 	for _, a := range adjs {
 		switch {
@@ -1038,11 +1166,13 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 				}
 			}
 			denied = append(denied, entry)
+		case a.Admitted && a.Livelock != nil:
+			allowedLoops = append(allowedLoops, livelockInBandNote(a))
 		case a.Verdict.Kind == "TRANSFORM":
 			repaired = append(repaired, a.Tool)
 		}
 	}
-	if len(denied) == 0 && len(repaired) == 0 {
+	if len(denied) == 0 && len(repaired) == 0 && len(allowedLoops) == 0 {
 		return ""
 	}
 	var b strings.Builder
@@ -1075,7 +1205,26 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 		b.WriteString(strings.Join(repaired, ", "))
 		b.WriteString(".")
 	}
+	if len(allowedLoops) > 0 {
+		if len(denied) > 0 || len(repaired) > 0 {
+			b.WriteString(" ")
+		}
+		b.WriteString("observed repeated admitted tool call(s): ")
+		b.WriteString(strings.Join(allowedLoops, "; "))
+		b.WriteString(". This is advisory: do not repeat a successful identical call unchanged unless you can name the new evidence it will produce.")
+	}
 	return b.String()
+}
+
+func prependAdjudicationContentNote(content string, adjs []ToolAdjudication) string {
+	note := adjudicationNote(adjs)
+	if note == "" {
+		return content
+	}
+	if strings.TrimSpace(content) == "" {
+		return note
+	}
+	return note + "\n" + content
 }
 
 func livelockInBandNote(a ToolAdjudication) string {

@@ -241,6 +241,10 @@ func TestClaudeGLMGCPFakNativeServeWiring(t *testing.T) {
 		"EP_RANKS",                       // >1 launches resident expert-parallel ranks instead
 		"FAK_EP_RANK",                    // sharded rank identity for the EP serve
 		"FAK_EP_COORD_ADDR",              // rank rendezvous for resident EP
+		"FAK_EP_FANOUT_ADDRS",            // rank 0 mirrors a client request to follower ranks
+		"FAK_KQ_INT8",                    // mixed Q5_K/Q6_K experts use the production int8 fallback
+		"GLM_SMOKE_MAX_TOKENS",           // live readiness proves first-token decode, not an 8-token soak
+		"SMOKE_EP",                       // EP readiness fans one request to every rank before the NCCL reduce
 		"--expert-parallel",              // no-cpu-offload resident-expert topology
 		"--context-budget-tokens",        // cap the KV plan (default 1M context => FitTooBig)
 		"build_cuda.sh binary ./cmd/fak", // the canonical -tags cuda fak binary build

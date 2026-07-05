@@ -75,13 +75,16 @@ func (k residentKernel) mul(name string, x any, out, in int) []float32 {
 }
 
 // backendKernel routes matKernel GEMMs through a compute.Backend (the GPU pure kernels) instead of
-// the host residentMatRows. It is the GLM-MoE-DSA forward's device path (#86, partial): the heavy
-// dense GEMMs — MoE/FFN experts + router, and the attention projections — run on the backend, while
-// the DSA index-scoring + sparse-attention glue and the KV cache stay host-resident. The activation
-// stays host-side (prep returns x); mul uploads the resident weight (q8 -> k_q8_gemm, pure; f32 ->
-// the backend's f32 GEMM) and the activation, runs be.MatMul, and reads the result back to host, so
-// it is a drop-in for residentMatRows in the host data flow. The device↔host copy per GEMM keeps the
-// glue simple (correctness-first); a fully device-resident GLM-DSA forward is the next slice.
+// the host residentMatRows when the backend has a matching resident-weight kernel. It is the
+// GLM-MoE-DSA forward's device path (#86, partial): dense Q8/F32/Q4_K weights run on the backend,
+// while raw mixed k-quants in kqw (Q5_K/Q6_K/IQ*) fall back to the existing host k-quant GEMV
+// (and its FAK_KQ_INT8 production int8 path when enabled) until CUDA kernels for those formats
+// exist. The DSA index-scoring glue and KV cache stay host-resident.
+// The activation stays host-side (prep returns x); mul uploads the resident weight (q8 ->
+// k_q8_gemm, q4_k -> k_q4k_gemm, f32 -> backend f32 GEMM) and the activation, runs be.MatMul, and
+// reads the result back to host, so it is a drop-in for residentMatRows in the host data flow. The
+// device↔host copy per GEMM keeps the glue simple (correctness-first); a fully device-resident
+// GLM-DSA forward is the next slice.
 type backendKernel struct{ s *Session }
 
 func (k backendKernel) prep(x []float32) any { return x }
@@ -91,6 +94,14 @@ func (k backendKernel) mul(name string, x any, out, in int) []float32 {
 	xf := x.([]float32)
 	if len(xf) != in {
 		panic("model: backendKernel " + name + " activation length mismatch")
+	}
+	if qt := s.M.kqw[name]; qt != nil {
+		if qt.out != out || qt.in != in {
+			panic("model: resident k-quant tensor shape mismatch: " + name +
+				" stored=[" + itoa(qt.out) + "," + itoa(qt.in) + "]" +
+				" requested=[" + itoa(out) + "," + itoa(in) + "]")
+		}
+		return kQuantMatRows(qt, xf)
 	}
 	wt := s.glmDsaWeightHAL(name, out, in)
 	xt := uploadHostF32Class(be, []int{in}, xf, compute.MemoryActivation, "glm-dsa-activation "+name)
@@ -211,12 +222,13 @@ func (s *Session) glmDsaWeightHAL(name string, out, in int) compute.Tensor {
 		return s.weightHAL(name)
 	}
 	if s.M.kqw[name] != nil {
-		// A resident raw expert-quant weight reached the DEVICE upload path. These MoE experts
-		// must run on the host CPU under --cpu-offload-experts because the device HAL has no
-		// kernels for this store. Name the misconfiguration explicitly instead of falling through
-		// to the opaque "missing resident weight" panic below.
+		// A resident raw k-quant weight reached the DEVICE upload path. The backend HAL has no
+		// kernels for this store; callers that want correctness on mixed Q5_K/Q6_K weights must
+		// route through backendKernel.mul's host k-quant fallback or use --cpu-offload-experts.
+		// Name the misconfiguration explicitly instead of falling through to the opaque
+		// "missing resident weight" panic below.
 		panic("model: glmDsaWeightHAL got resident raw expert-quant weight " + name +
-			" on the device path; serve with --cpu-offload-experts")
+			" on the device upload path; route through the host k-quant fallback or serve with --cpu-offload-experts")
 	}
 	panic("model: glmDsaWeightHAL missing resident weight " + name + " (no f32/q8/q4_k residency)")
 }

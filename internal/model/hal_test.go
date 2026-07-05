@@ -211,6 +211,32 @@ func TestBackendKernelRuntimeUploadsCarryActivationClass(t *testing.T) {
 	}
 }
 
+func TestBackendKernelRoutesResidentKQuantToHost(t *testing.T) {
+	const out, in = 3, qkK
+	name := expertName(0, 12, "down_proj.weight")
+	raw := make([]byte, out*(in/qkK)*q6kBlockBytes)
+	for i := range raw {
+		raw[i] = byte(i*17 + 3)
+	}
+	m := &Model{kqw: map[string]*kQuantTensor{
+		name: quantizeKQuantFromRaw(raw, out, in, kindQ6K),
+	}}
+	be := &uploadClassRecordingBackend{Backend: compute.Default()}
+	s := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
+	k := backendKernel{s: s}
+	x := make([]float32, in)
+	for i := range x {
+		x[i] = float32((i%11)-5) * 0.03125
+	}
+
+	got := k.mul(name, x, out, in)
+	want := kQuantMatRows(m.kqw[name], x)
+	assertSameF32(t, "backend k-quant host fallback", got, want)
+	if len(be.classes) != 0 {
+		t.Fatalf("resident k-quant fallback should not upload through the device HAL, got classes=%v sites=%v", be.classes, be.sites)
+	}
+}
+
 func recordedUploadClass(be *uploadClassRecordingBackend, class compute.MemoryClass, site string) bool {
 	for i := range be.classes {
 		if be.classes[i] == class && be.sites[i] == site {

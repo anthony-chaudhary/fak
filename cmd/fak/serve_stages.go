@@ -233,7 +233,11 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 		expertShard = shard
 		fmt.Printf("fak: expert-parallel rank %d/%d loads experts [%d,%d) of %d resident (sharded serve, #971)\n", rt.ep.rank, rt.ep.ranks, shard.Lo, shard.Hi, numExperts)
 	}
-	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModel(*sf.ggufPath, rt.chatBackend, *sf.cpuOffloadExperts, *sf.contextBudgetTokens, expertShard)
+	expertRanks := 1
+	if rt.ep.sharded {
+		expertRanks = rt.ep.ranks
+	}
+	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModel(*sf.ggufPath, rt.chatBackend, *sf.cpuOffloadExperts, *sf.contextBudgetTokens, expertShard, expertRanks)
 	if loadPhase.Name != "" {
 		rt.startupPhases = append(rt.startupPhases, loadPhase)
 	}

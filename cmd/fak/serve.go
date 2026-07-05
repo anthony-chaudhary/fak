@@ -169,7 +169,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.resetOnBudget = fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
 	sf.cpuOffloadExperts = fs.Bool("cpu-offload-experts", false, "with --gguf --backend: keep the MoE expert GEMMs on host RAM while dense projections + router + attention run on the device — the `--n-cpu-moe` hybrid that lets a model whose experts dwarf VRAM (e.g. GLM-5.2 Q4 ~424GB experts) serve at all on a smaller VRAM pool. The device load uses the memory-lean Q8 quantize-at-load path when the backend advertises quantized upload; otherwise it falls back to F32 weights until that backend implements UploadDtype.")
 	sf.metal = fs.Bool("metal", false, "with --gguf (no --base-url), require the Apple-Silicon Metal GPU forward — GPU prefill + GPU-resident Q8 decode (#67, ~0.99x of llama.cpp-Metal on dense Qwen2.5-7B Q8). Apple-Silicon+cgo builds auto-select Metal when a usable device is present; this flag/FAK_METAL=1 makes absence fail loud instead of falling back to CPU. Mutually exclusive with --backend (Metal is the CPU-session seam, not a compute HAL device). Dense Qwen-class Q8 GGUFs only — a MoE/hybrid model (GLM-5.2, GDN) self-declines to CPU decode.")
-	sf.expertParallel = fs.Int("expert-parallel", 1, "with --gguf: shard the routed MoE experts of a glm_moe_dsa model (GLM-5.2) across N expert-parallel ranks — the lever to move the expert GEMM off the host (the `--cpu-offload-experts` wall) onto resident GPUs (#971). The per-rank residual partials are reduced by one AllReduceSum through the wired Collective. 1 (default) = the unchanged monolith forward. N>1 requires an initialized non-cpu-ref compute.CollectiveBackend; CUDA builds provide that only with -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1) on a box with enough visible GPUs.")
+	sf.expertParallel = fs.Int("expert-parallel", 1, "with --gguf: shard the routed MoE experts of a glm_moe_dsa model (GLM-5.2) across N expert-parallel ranks — the lever to move supported expert GEMMs off the host (the `--cpu-offload-experts` wall) onto resident GPUs (#971). Mixed k-quant expert formats without backend kernels (for example Q5_K/Q6_K today) still use the host k-quant fallback; set FAK_KQ_INT8=1 to use its production int8 path. The per-rank residual partials are reduced by one AllReduceSum through the wired Collective. 1 (default) = the unchanged monolith forward. N>1 requires an initialized non-cpu-ref compute.CollectiveBackend; CUDA builds provide that only with -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1) on a box with enough visible GPUs.")
 	sf.tensorParallel = fs.Int("tensor-parallel", 1, "with --gguf: tensor-parallel rank count for the dense projections (the Megatron column/row split, tensor_parallel.go). 1 (default) = no split. N>1 uses the same initialized device-collective gate as --expert-parallel; CUDA builds require -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1).")
 	sf.budgetWebhook = fs.String("budget-webhook", "", "POST a JSON event to this URL when a served session's context budget crosses the warning threshold (--budget-warn-fraction) or is exhausted (the reset trigger), so an operator/monitor is notified before exhaustion (#743). Empty = off. Needs --context-budget-tokens to have a budget to watch.")
 	sf.budgetWarnFraction = fs.Float64("budget-warn-fraction", 0.8, "consumed share (0..1) of the context budget at which --budget-webhook fires its pre-exhaustion warning (default 0.8 = 80%); <=0 or >=1 disables the warning while the exhaustion event still fires")
@@ -932,7 +932,7 @@ func serveGGUFCPUOffloadPathMemoryPlan(ggufPath string, contextBudgetTokens int,
 	})
 }
 
-func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffloadExperts bool, contextBudgetTokens int, expertShard *ggufload.ExpertShard) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
+func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffloadExperts bool, contextBudgetTokens int, expertShard *ggufload.ExpertShard, expertRanks int) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
 	if ggufPath == "" {
 		return nil, false, nil, gateway.StartupPhase{}
 	}
@@ -993,7 +993,13 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		// uses; only the loader differs. A backend without UploadDtype falls through to the Q8/
 		// f32 arms unchanged (the device Q4_K GEMM needs the quantized-upload seam).
 		fmt.Printf("fak: GGUF device load -> resident Q4_K on backend %q (raw super-blocks, dequant-fused GEMM, ~0.56 B/param vs Q8 ~1 B/param)\n", backend.Name())
-		memPlan, err := fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens)
+		var memPlan compute.MemoryPlan
+		var err error
+		if expertShard != nil && expertRanks > 1 {
+			memPlan, err = fitAndPlanServeGGUFExpertParallelPathOnDevice(ggufPath, backend, expertRanks, contextBudgetTokens)
+		} else {
+			memPlan, err = fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens)
+		}
 		must(err)
 		return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend, q4kOpts...)
 	case backend != nil:

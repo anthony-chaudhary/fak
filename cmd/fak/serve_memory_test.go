@@ -291,7 +291,7 @@ func TestServeGGUFExpertParallelMemoryPlanChargesPerRankExpertBand(t *testing.T)
 	if err := fitServeGGUFExpertParallelOnDevice(ws, fitsPerRank, 4, 8); err != nil {
 		t.Fatalf("EP per-rank plan should fit a backend sized for one expert band: %v", err)
 	}
-	tooSmallForPerRank := serveCapBackend{Backend: compute.Default(), total: 12 << 10, free: 12 << 10, known: true}
+	tooSmallForPerRank := serveCapBackend{Backend: compute.Default(), total: 11 << 10, free: 11 << 10, known: true}
 	err = fitServeGGUFExpertParallelOnDevice(ws, tooSmallForPerRank, 4, 8)
 	if err == nil {
 		t.Fatal("EP per-rank plan over device capacity must be refused")

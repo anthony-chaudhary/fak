@@ -52,7 +52,11 @@ EP_RANKS="${EP_RANKS:-1}"
 FIRST_GPU="${FIRST_GPU:-0}"
 EP_COORD_ADDR="${EP_COORD_ADDR:-127.0.0.1:19071}"
 EP_JOIN_TIMEOUT_S="${EP_JOIN_TIMEOUT_S:-1800}"
+GLM_SMOKE_TIMEOUT_S="${GLM_SMOKE_TIMEOUT_S:-900}"
+GLM_SMOKE_MAX_TOKENS="${GLM_SMOKE_MAX_TOKENS:-1}"
 export FAK_CUDA_ARCH="${FAK_CUDA_ARCH:-sm_80}"
+export FAK_HTTP_WRITE_TIMEOUT_S="${FAK_HTTP_WRITE_TIMEOUT_S:-0}"
+export FAK_KQ_INT8="${FAK_KQ_INT8:-1}"
 export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
 export HF_XET_HIGH_PERFORMANCE="${HF_XET_HIGH_PERFORMANCE:-1}"
 export HOME="${HOME:-/root}" GOCACHE="${GOCACHE:-/tmp/gocache}" GOPATH="${GOPATH:-/tmp/gopath}"
@@ -147,11 +151,58 @@ export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${CUDA_HOME}/lib:${LD_LIBRARY_PATH:-}
 # 4. Serve via the PURE FAK KERNEL. The embedded GGUF tokenizer makes /v1/chat/completions
 #    serve real in-kernel chat; the eager load binds the listener only AFTER the weights are
 #    resident, so /v1/models answering means the model is loaded.
+smoke_body() {
+  printf '{"model":"%s","messages":[{"role":"user","content":"Reply with the single word: ok"}],"max_tokens":%s,"temperature":0,"chat_template_kwargs":{"enable_thinking":false}}' "$MODEL_ID" "$GLM_SMOKE_MAX_TOKENS"
+}
+
+smoke_ready_single() {
+  start=$(date +%s)
+  smoke=$(curl -sS -m "$GLM_SMOKE_TIMEOUT_S" "http://127.0.0.1:$PORT/v1/chat/completions" -H 'Content-Type: application/json' \
+    -d "$(smoke_body)" 2>&1)
+  rc=$?
+  elapsed=$(( $(date +%s) - start ))
+  echo "SMOKE rc=$rc elapsed_s=$elapsed timeout_s=$GLM_SMOKE_TIMEOUT_S max_tokens=$GLM_SMOKE_MAX_TOKENS: $smoke" >>"$LOG"
+  [ "$rc" -eq 0 ] && printf '%s' "$smoke" | grep -q '"content"' && ! printf '%s' "$smoke" | grep -q '"error"'
+}
+
+smoke_ready_ep() {
+  tmp="$(mktemp -d "$GLM_DIR/smoke.XXXXXX")"
+  body="$(smoke_body)"
+  start=$(date +%s)
+  pids=""
+  for r in $(seq 0 $((EP_RANKS - 1))); do
+    rank_port=$((PORT + r))
+    (
+      curl -sS -m "$GLM_SMOKE_TIMEOUT_S" "http://127.0.0.1:${rank_port}/v1/chat/completions" \
+        -H 'Content-Type: application/json' -d "$body" >"$tmp/r${r}.out" 2>"$tmp/r${r}.err"
+      echo $? >"$tmp/r${r}.rc"
+    ) &
+    pids="$pids $!"
+  done
+  ok=1
+  for pid in $pids; do
+    if ! wait "$pid"; then ok=0; fi
+  done
+  elapsed=$(( $(date +%s) - start ))
+  for r in $(seq 0 $((EP_RANKS - 1))); do
+    rc="$(cat "$tmp/r${r}.rc" 2>/dev/null || echo 999)"
+    bytes="$(wc -c <"$tmp/r${r}.out" 2>/dev/null || echo 0)"
+    err="$(cat "$tmp/r${r}.err" 2>/dev/null || true)"
+    echo "SMOKE_EP rank=$r rc=$rc bytes=$bytes elapsed_s=$elapsed err=$err" >>"$LOG"
+    [ "$rc" = "0" ] || ok=0
+  done
+  smoke="$(cat "$tmp/r0.out" 2>/dev/null || true)"
+  echo "SMOKE_EP rank0 elapsed_s=$elapsed timeout_s=$GLM_SMOKE_TIMEOUT_S max_tokens=$GLM_SMOKE_MAX_TOKENS: $smoke" >>"$LOG"
+  rm -rf "$tmp"
+  [ "$ok" -eq 1 ] && printf '%s' "$smoke" | grep -q '"content"' && ! printf '%s' "$smoke" | grep -q '"error"'
+}
+
 smoke_ready() {
-  smoke=$(curl -s -m 120 "http://127.0.0.1:$PORT/v1/chat/completions" -H 'Content-Type: application/json' \
-    -d "{\"model\":\"$MODEL_ID\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with the single word: ok\"}],\"max_tokens\":8,\"temperature\":0,\"chat_template_kwargs\":{\"enable_thinking\":false}}")
-  echo "SMOKE: $smoke" >>"$LOG"
-  printf '%s' "$smoke" | grep -q '"content"' && ! printf '%s' "$smoke" | grep -q '"error"'
+  if [ "$EP_RANKS" -gt 1 ] && [ "${EP_FRONTEND_FANOUT:-1}" != "1" ]; then
+    smoke_ready_ep
+  else
+    smoke_ready_single
+  fi
 }
 
 launch_single_cpu_offload() {
@@ -186,7 +237,7 @@ launch_single_cpu_offload() {
 }
 
 launch_expert_parallel() {
-  ph "LAUNCH_EP fak serve --gguf $SHARD1 --backend cuda --expert-parallel $EP_RANKS --context-budget-tokens $CTX --model $MODEL_ID (NO cpu-offload; routed experts sharded resident across GPUs)"
+  ph "LAUNCH_EP fak serve --gguf $SHARD1 --backend cuda --expert-parallel $EP_RANKS --context-budget-tokens $CTX --model $MODEL_ID (sharded EP; supported Q4_K/Q8/F32 on CUDA, mixed k-quants use host int8 fallback until CUDA kernels land)"
   pids=""
   for r in $(seq 0 $((EP_RANKS - 1))); do
     gpu=$((FIRST_GPU + r))
@@ -194,8 +245,16 @@ launch_expert_parallel() {
     rank_addr="127.0.0.1:${rank_port}"
     [ "$r" -eq 0 ] && rank_addr="$ADDR"
     rank_log="$GLM_DIR/server-rank${r}.log"
+    fanout_addrs=""
+    if [ "$r" -eq 0 ] && [ "${EP_FRONTEND_FANOUT:-1}" = "1" ]; then
+      for pr in $(seq 1 $((EP_RANKS - 1))); do
+        peer_port=$((PORT + pr))
+        fanout_addrs="${fanout_addrs}${fanout_addrs:+,}127.0.0.1:${peer_port}"
+      done
+    fi
     CUDA_VISIBLE_DEVICES="$gpu" \
     FAK_EP_RANK="$r" \
+    FAK_EP_FANOUT_ADDRS="$fanout_addrs" \
     FAK_EP_COORD_ADDR="$EP_COORD_ADDR" \
     FAK_EP_JOIN_TIMEOUT_S="$EP_JOIN_TIMEOUT_S" \
     FAK_Q4K=1 \
