@@ -119,6 +119,10 @@ func computeBaseVerdict(pre map[string]any, preVerdict any, capAny, liveAny any,
 		ok = true
 		verdict = "BLOCKED_ON_ACCOUNT"
 		reasons = append(reasons, "no worker account free right now (switcher will resume when one frees)")
+	case strOf(preVerdict) == "REFUSE_NO_SEAT":
+		ok = true
+		verdict = "BLOCKED_ON_SEAT"
+		reasons = append(reasons, "no dispatch seat free right now (seat pool will resume when one frees)")
 	case strOf(preVerdict) == "REFUSE_AT_CAP":
 		ok = true
 		verdict = "AT_CAP"
@@ -172,9 +176,19 @@ func appendGuardReason(reasons []string, guard map[string]any) []string {
 	gRows := intDefault(guard["rows"], 0)
 	switch {
 	case gSessions > 0 && gRows > 0:
+		crashes := intDefault(mp(guard["by_kind"])["CHILD_CRASH"], 0)
+		mix := fmt.Sprintf("%d denied, %d quarantined",
+			intDefault(guard["denied"], 0), intDefault(guard["quarantined"], 0))
+		if crashes > 0 {
+			suffix := ""
+			if crashes != 1 {
+				suffix = "es"
+			}
+			mix = fmt.Sprintf("%s, %d child crash%s", mix, crashes, suffix)
+		}
 		return append(reasons, fmt.Sprintf(
-			"fak guard witnessed %d kernel decision(s) across %d dispatch session(s) (%d denied, %d quarantined)",
-			gRows, gSessions, intDefault(guard["denied"], 0), intDefault(guard["quarantined"], 0)))
+			"fak guard witnessed %d kernel decision(s) across %d dispatch session(s) (%s)",
+			gRows, gSessions, mix))
 	case gSessions > 0:
 		return append(reasons, fmt.Sprintf(
 			"fak guard ran %d dispatch session(s) but recorded 0 decisions (%d empty) — workers booted under guard but proposed no adjudicated tool call",
