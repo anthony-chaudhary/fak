@@ -56,6 +56,7 @@ not, exactly which budget is exhausted?".
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import datetime as dt
 import functools
 import json
@@ -382,6 +383,67 @@ def _collapse_descendant_pids(pids: set[int], parent_by_pid: dict[int, int | Non
     return roots
 
 
+def _cmdline_from_process_row(row: dict[str, Any]) -> str:
+    cmdline = row.get("cmdline")
+    if cmdline is None:
+        cmdline = row.get("CommandLine")
+    if isinstance(cmdline, (list, tuple)):
+        return " ".join(str(part) for part in cmdline)
+    return str(cmdline or "")
+
+
+def _worker_pids_from_process_rows(
+    rows: list[dict[str, Any]],
+    *,
+    product: str | None = None,
+) -> set[int]:
+    pids: set[int] = set()
+    parent_by_pid: dict[int, int | None] = {}
+    for row in rows:
+        pid = _int(row.get("pid"), _int(row.get("ProcessId")))
+        if pid is None:
+            continue
+        parent_by_pid[pid] = _int(row.get("ppid"), _int(row.get("ParentProcessId"), 0))
+        name = str(row.get("name") or row.get("Name") or "")
+        if not _is_worker_image(name):
+            continue
+        if product is not None and not _image_matches_product(name, product):
+            continue
+        if _is_worker_cmdline(_cmdline_from_process_row(row)):
+            pids.add(pid)
+    return _collapse_descendant_pids(pids, parent_by_pid)
+
+
+def _cmdline_worker_pids_windows(product: str | None = None) -> set[int] | None:
+    if os.name != "nt":
+        return None
+    filter_expr = " OR ".join(
+        f"Name = '{img}.exe'" for img in _WORKER_BACKEND_IMAGES)
+    try:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+             f"Get-CimInstance Win32_Process -Filter \"{filter_expr}\" | "
+             "Select-Object ProcessId,ParentProcessId,Name,CommandLine | "
+             "ConvertTo-Json -Compress"],
+            capture_output=True, text=True, timeout=5,
+            creationflags=_no_window_creationflags(),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    text = (proc.stdout or "").strip()
+    if not text:
+        return set()
+    try:
+        obj = json.loads(text)
+    except ValueError:
+        return None
+    rows = obj if isinstance(obj, list) else [obj]
+    return _worker_pids_from_process_rows(
+        [row for row in rows if isinstance(row, dict)], product=product)
+
+
 def _cmdline_worker_pids(product: str | None = None) -> set[int]:
     """OS-level worker pids by command-line marker.
 
@@ -396,27 +458,39 @@ def _cmdline_worker_pids(product: str | None = None) -> set[int]:
     sibling product's workers pinning it. These generic workers carry no
     ``.backend`` sidecar, so the process image is the only pool signal available.
     """
+    if os.name == "nt":
+        cim = _cmdline_worker_pids_windows(product=product)
+        if cim is not None:
+            return cim
     try:
         import psutil  # type: ignore
     except ImportError:
         psutil = None
     if psutil is not None:
-        pids: set[int] = set()
-        parent_by_pid: dict[int, int | None] = {}
-        for p in psutil.process_iter(["name", "cmdline", "ppid"]):
+        rows: list[dict[str, Any]] = []
+        for p in psutil.process_iter(["name", "ppid"]):
             try:
-                cl = " ".join(p.info.get("cmdline") or [])
-                parent_by_pid[int(p.pid)] = int(p.info.get("ppid") or 0)
+                name = p.info.get("name") or ""
             except (psutil.Error, TypeError):
                 continue
             # Marker on the cmdline AND a real backend image — a shell that merely
             # mentions the marker (a grep, a launcher, an operator inspecting) is
             # not a live worker and must not consume a cap slot.
-            name = p.info.get("name") or ""
-            if (_is_worker_cmdline(cl) and _is_worker_image(name)
-                    and (product is None or _image_matches_product(name, product))):
-                pids.add(int(p.pid))
-        return _collapse_descendant_pids(pids, parent_by_pid)
+            if not _is_worker_image(name):
+                continue
+            if product is not None and not _image_matches_product(name, product):
+                continue
+            try:
+                cl = " ".join(p.cmdline() or [])
+            except psutil.Error:
+                continue
+            rows.append({
+                "pid": int(p.pid),
+                "ppid": int(p.info.get("ppid") or 0),
+                "name": name,
+                "cmdline": cl,
+            })
+        return _worker_pids_from_process_rows(rows, product=product)
     # Fallback when psutil is absent. wmic.exe is removed on Win11 24H2+ (build
     # 26200), so use the supported CIM API; Win32_Process.CommandLine carries the
     # full argv (incl. the prompt/marker), so this is an honest worker count, not 0.
@@ -1185,6 +1259,34 @@ def capacity_limiter(*, max_workers: int, target: Any, host_cap_info: dict[str, 
     return {"primary": primary, "term": term, "raw": raw}
 
 
+def account_unattributed_live_slots(seat: dict[str, Any], live: int) -> dict[str, Any]:
+    """Conservatively charge live workers that lack account sidecars to free slots.
+
+    Sidecar leases are the precise account binding, but older workers or damaged
+    sidecars can leave ``leased`` below the product-scoped live-worker count. In that
+    case the safe operator view is not "all slots free"; subtract the unattributed
+    live workers from free headroom while leaving the hard cap's total-slot term
+    unchanged.
+    """
+    total = _int(seat.get("total"))
+    if total is None or total <= 0 or live <= 0:
+        return seat
+    leased = _int(seat.get("leased")) or 0
+    missing = max(0, live - leased)
+    if missing <= 0:
+        return seat
+    out = dict(seat)
+    free = _int(seat.get("free"))
+    if free is not None:
+        out["free"] = max(0, free - missing)
+    else:
+        out["free"] = max(0, total - min(live, total))
+    out["leased"] = max(leased, min(live, total))
+    out["depleted"] = bool(seat.get("depleted")) or out["free"] == 0
+    out["unattributed_live"] = missing
+    return out
+
+
 def _capacity_limiter_terms(limiter: dict[str, Any]) -> str:
     raw = limiter.get("raw") or {}
     parts = [
@@ -1265,11 +1367,20 @@ def host_resources() -> dict[str, Any]:
 
 def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
              max_threads: int | None = None) -> dict[str, Any]:
-    host = host_check(root, max_threads=max_threads)
-    acct = account_check(root, work_kind=work_kind, product=product)
-    kern = kernel_alive(root)
-    seat = seat_check(root, product=product)
-    host_cap_info = host_capacity(**host_resources())
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        host_f = pool.submit(host_check, root, max_threads=max_threads)
+        acct_f = pool.submit(account_check, root, work_kind=work_kind, product=product)
+        kern_f = pool.submit(kernel_alive, root)
+        seat_f = pool.submit(seat_check, root, product=product)
+        host_res_f = pool.submit(host_resources)
+        alive_proc_f = pool.submit(proc_worker_count, root, product=product)
+        host = host_f.result()
+        acct = acct_f.result()
+        kern = kern_f.result()
+        seat = seat_f.result()
+        host_res = host_res_f.result()
+        alive_proc = alive_proc_f.result()
+    host_cap_info = host_capacity(**host_res)
     host_cap = host_cap_info.get("host_cap")
 
     target = kern.get("target")
@@ -1317,9 +1428,9 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
     # and an opencode (GLM) worker draw on different accounts/rate limits, so each
     # lane fills to its own headroom instead of the two sharing one global cap and
     # starving each other (claude+GLM ran 3 total instead of 3+3 before this).
-    alive_proc = proc_worker_count(root, product=product)
     # MAX of the two views: neither a stale lease nor an unleased orphan hides load.
     live = max(alive_kernel_for_cap or 0, alive_proc)
+    seat = account_unattributed_live_slots(seat, live)
     headroom = cap - live
     limiter = capacity_limiter(max_workers=max_workers, target=target,
                                host_cap_info=host_cap_info, seat=seat,

@@ -87,6 +87,7 @@ RUNS_DIRNAME = ".dispatch-runs"
 # .pid/.backend sidecars so an auditor enumerates a wave straight from disk.
 WAVE_SIDECAR_SUFFIX = ".wave"
 ACCOUNT_SIDECAR_SUFFIX = ".account"
+LEASE_SIDECAR_SUFFIX = ".lease"
 # Commit-time diff-witness binding (residual of #1310/#1324, proposal #2). The
 # dispatcher stamps repo HEAD into a .basesha sidecar at launch (per-worker
 # commit-sha tracking) so a later tick can re-audit the commit THIS worker landed,
@@ -99,7 +100,10 @@ WITNESS_SIDECAR_SUFFIX = ".witness"
 # tick on ANOTHER machine (and a same-host TOCTOU race the log-scan can't close)
 # refuses the collision instead of co-editing the leaf tree. The same-host log
 # scan (live_resolution_lanes) stays the fast path UNDER this lease. The lease id
-# is one safe ref segment; fak's lane names are already that shape.
+# is one safe ref segment; fak's lane names are already that shape. The acquired
+# holder/generation are stamped beside the worker log, then a dead-worker witness
+# sweep releases the lease with `fak leaseref release --id --holder --generation`;
+# TTL+reap stays the crash/failure backstop.
 LEASE_ID_PREFIX = "resolve-"
 # A held lease outlives its worker by this margin past the wall-clock worker
 # timeout, so a crashed worker that never releases is reaped by `fak leaseref
@@ -197,6 +201,42 @@ def worker_model_effort(backend: str, acct: dict) -> tuple[str | None, str | Non
             return "local", None
         return CLAUDE_WORKER_MODEL, str(acct.get("model_effort") or CLAUDE_WORKER_EFFORT)
     return None, None
+
+
+def launch_gate_for_guard(guarded: bool, backend: str) -> dict[str, Any]:
+    """Machine-readable launch readiness for an already-priced worker command.
+
+    ``WOULD_SPAWN`` means capacity/lane/contract gates passed. It does not, by
+    itself, mean a Codex super-loop should approve ``--live``: the worker may have
+    failed open around ``fak guard``. Surface that as data so operators and scripts
+    gate on one field instead of remembering to interpret ``guarded`` separately.
+    """
+    if guarded:
+        return {"ready": True, "guarded": True, "blockers": []}
+    next_action = "make-fak-guard-resolvable"
+    if backend != "claude":
+        next_action = "make-fak-guard-resolvable-and-set-guard-base-url"
+    return {
+        "ready": False,
+        "guarded": False,
+        "blockers": [{
+            "code": "UNGUARDED_WORKER",
+            "reason": "worker command is spawnable but would run without fak guard",
+            "next_action": next_action,
+        }],
+    }
+
+
+def launch_gate_blocked(code: str, reason: str, next_action: str) -> dict[str, Any]:
+    """Machine-readable launch hold for a tick that never reached command pricing."""
+    return {
+        "ready": False,
+        "blockers": [{
+            "code": code,
+            "reason": reason,
+            "next_action": next_action,
+        }],
+    }
 
 
 def repo_root() -> Path:
@@ -433,6 +473,8 @@ def lane_issue_numbers(root: Path, explicit_lane: str | None,
         self_source = ({ln for ln in nums_by_lane if issue_dispatch.is_self_source_tree(trees.get(ln))}
                        if guarded else set())
         held = sorted(ln for ln in nums_by_lane if ln in self_source and nums_by_lane[ln])
+        safe_open = {k: v for k, v in nums_by_lane.items() if k not in self_source and v}
+        safe_lanes_busy = sorted(k for k in safe_open if k in exclude)
         eligible = {k: v for k, v in nums_by_lane.items()
                     if k not in exclude and k not in self_source}
         chosen = max(eligible, key=lambda k: len(eligible[k])) if eligible else None
@@ -445,6 +487,7 @@ def lane_issue_numbers(root: Path, explicit_lane: str | None,
             "by_lane_count": by_lane_count,
             "eligible_by_lane": eligible_ranked,
             "excluded_lanes": sorted(exclude),
+            "safe_lanes_busy": safe_lanes_busy if not explicit_lane else [],
             "self_modify_held": held,
             "router_error": router.get("_error")}
 
@@ -732,7 +775,7 @@ def prune_dead_sidecars(
     """Sweep ``resolve-*.pid`` sidecars whose worker is no longer alive.
 
     A worker that exits NORMALLY leaves its ``.pid`` (and sibling ``.log`` /
-    ``.backend`` / ``.wave`` / ``.account``) sidecars behind forever — the reaper
+    ``.backend`` / ``.wave`` / ``.account`` / ``.lease``) sidecars behind forever — the reaper
     only KILLS live runaways, it never deletes the corpses. Left alone they pile
     up (379 were found on one host) and become landmines for the create-time
     spawn-window liveness fallback: a recycled PID landing in a stale sidecar's
@@ -753,7 +796,7 @@ def prune_dead_sidecars(
     would_prune: list[str] = []
     if not runs_dir.is_dir():
         return {"live": live, "pruned": pruned, "would_prune": would_prune}
-    sibling_suffixes = (".log", ".backend", ".wave", ".account",
+    sibling_suffixes = (".log", ".backend", ".wave", ".account", LEASE_SIDECAR_SUFFIX,
                         BASE_SHA_SIDECAR_SUFFIX, WITNESS_SIDECAR_SUFFIX,
                         REPAIR_ISSUES_SIDECAR_SUFFIX)
     for pid_file in sorted((*runs_dir.glob("resolve-*.pid"),
@@ -1239,6 +1282,36 @@ def write_account_sidecar(out_log: Path, account: dict[str, Any] | None) -> dict
     return rec
 
 
+def write_lease_sidecar(out_log: Path, lease: dict[str, Any] | None) -> dict[str, Any]:
+    """Write the fenced lease token selected for this worker.
+
+    The release path must not infer holder/generation from the current dispatcher
+    process, because the worker is audited by a later tick. Persist only the
+    holder-checked release inputs; a fail-open/no-lease spawn writes nothing.
+    """
+    src = lease or {}
+    if not src.get("acquired"):
+        return {}
+    rec = {k: src.get(k) for k in ("id", "holder", "generation", "session_id", "tree")
+           if src.get(k) is not None}
+    if rec.get("id") and rec.get("holder"):
+        out_log.with_suffix(LEASE_SIDECAR_SUFFIX).write_text(
+            json.dumps(rec, sort_keys=True), encoding="utf-8")
+        return rec
+    return {}
+
+
+def read_lease_sidecar(out_log: Path) -> dict[str, Any] | None:
+    try:
+        rec = json.loads(out_log.with_suffix(LEASE_SIDECAR_SUFFIX).read_text(
+            encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(rec, dict) or not rec.get("id") or not rec.get("holder"):
+        return None
+    return rec
+
+
 EARLY_EXIT_TAIL_CHARS = 8192
 
 
@@ -1306,6 +1379,7 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
                        backend: str,
                        membership: dict[str, Any] | None = None,
                        account: dict[str, Any] | None = None,
+                       lease: dict[str, Any] | None = None,
                        base_sha: str | None = None,
                        spawn_probe_s: float = 0.0,
                        log_prefix: str = "resolve",
@@ -1375,6 +1449,9 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
     acct = write_account_sidecar(out_log, account)
     if acct:
         result["account"] = acct
+    lease_rec = write_lease_sidecar(out_log, lease)
+    if lease_rec:
+        result["lease"] = lease_rec
     if membership is not None:
         result["membership"] = write_wave_sidecar(out_log, **membership)
     early = probe_spawned_worker(proc, out_log, spawn_probe_s)
@@ -1961,6 +2038,48 @@ def lease_holder() -> str:
     return f"{host}:{os.getpid()}"
 
 
+def lease_owner_override() -> str | None:
+    owner = (os.environ.get("FAK_LEASE_OWNER") or "").strip()
+    return owner or None
+
+
+_LEASE_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,199}$")
+_LEASE_SESSION_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def lease_session_id() -> str | None:
+    """Best-effort session binding for `fak leaseref liveness`.
+
+    The lease gate must never fail only because a harness exported a malformed
+    session id, so invalid values are skipped instead of passed to the CLI's
+    stricter ref-segment validator.
+    """
+    sid = (os.environ.get("FAK_LEASE_SESSION_ID")
+           or os.environ.get("CLAUDE_CODE_SESSION_ID") or "").strip()
+    if (not sid or not _LEASE_SESSION_ID_RE.match(sid)
+            or sid.startswith("session-")):
+        return None
+    return sid
+
+
+def _safe_lease_session_segment(raw: str) -> str | None:
+    segment = _LEASE_SESSION_SAFE_RE.sub("-", raw.strip()).strip("-.")
+    if not segment:
+        return None
+    if segment.startswith("session-"):
+        segment = "dispatch-" + segment
+    segment = segment[:200].rstrip("-.")
+    if not segment or not _LEASE_SESSION_ID_RE.match(segment):
+        return None
+    return segment
+
+
+def synthetic_lease_session_id() -> str:
+    host = os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or "host"
+    return (_safe_lease_session_segment(f"dispatch-{host}-{os.getpid()}")
+            or f"dispatch-{os.getpid()}")
+
+
 def lease_id_for_lane(lane: str) -> str:
     return f"{LEASE_ID_PREFIX}{lane}"
 
@@ -1991,16 +2110,34 @@ def _run_lease(root: Path, args: list[str], *, timeout: int = 30) -> dict[str, A
     return {"rc": proc.returncode, "stdout": out, "verdict": doc}
 
 
+def publish_lease_session(root: Path, session_id: str | None, ttl_s: int,
+                          *, runner: Any | None = None) -> dict[str, Any]:
+    """Best-effort heartbeat for a synthetic lease session.
+
+    Publishing is advisory read-side evidence for liveness. A missing/old `fak`
+    binary must not block dispatch, so failures are carried as fail-open evidence
+    and the caller still attempts the actual lease acquire.
+    """
+    if not session_id:
+        return {"published": False, "skipped": "missing session id"}
+    run = runner or _run_lease
+    res = run(root, ["session-publish", "--session", session_id, "--ttl",
+                     str(int(ttl_s)), "--state", "RUNNING"])
+    if res.get("rc") == 0:
+        return {"published": True, "session_id": session_id}
+    return {"published": False, "session_id": session_id, "fail_open": True,
+            "rc": res.get("rc"), "detail": res.get("error") or res.get("skipped")}
+
+
 def acquire_lane_lease(root: Path, lane: str, *, tree: list[str], ttl_s: int,
                        holder: str | None = None,
                        runner: Any | None = None) -> dict[str, Any]:
     """ATOMICALLY take the fenced refs/fak/locks/resolve-<lane> lease before a
     spawn. Returns {"acquired": bool, "refused": bool, "id", "holder", ...}.
 
-    - acquired=True  -> exit 0: we hold the lease; carry the id+holder so a later
-                        tick can renew/reap it. There is no early-release verb yet
-                        (`fak leaseref` exposes only acquire/reap), so the lane is
-                        freed by TTL + reap, not an explicit release on worker exit.
+    - acquired=True  -> exit 0: we hold the lease; carry the id+holder/generation
+                        so the worker sidecar can be released after a later
+                        dead-pid witness. TTL + reap remain the crash backstop.
     - refused=True   -> exit 3: a LIVE peer (this host OR another clone after a
                         fetch) holds the lane; the caller refuses LANE_LEASE_HELD.
     - acquired=False, refused=False -> FAIL OPEN: no fak binary / a git-store
@@ -2008,9 +2145,22 @@ def acquire_lane_lease(root: Path, lane: str, *, tree: list[str], ttl_s: int,
                         the same-host log scan alone, exactly as before the lease.
     """
     run = runner or _run_lease
-    holder = holder or lease_holder()
+    session_id = lease_session_id()
+    requested_holder = holder or lease_owner_override()
+    session_publish: dict[str, Any] | None = None
+    if not session_id and not requested_holder:
+        session_id = synthetic_lease_session_id()
+        session_publish = publish_lease_session(root, session_id, ttl_s,
+                                                runner=run)
     lease_id = lease_id_for_lane(lane)
-    args = ["acquire", "--id", lease_id, "--holder", holder, "--ttl", str(int(ttl_s))]
+    args = ["acquire", "--id", lease_id, "--ttl", str(int(ttl_s))]
+    if requested_holder:
+        args += ["--holder", requested_holder]
+    elif not session_id:
+        requested_holder = lease_holder()
+        args += ["--holder", requested_holder]
+    if session_id:
+        args += ["--session", session_id]
     for t in tree:
         args += ["--tree", t]
     res = run(root, args)
@@ -2018,18 +2168,67 @@ def acquire_lane_lease(root: Path, lane: str, *, tree: list[str], ttl_s: int,
     verdict = res.get("verdict") or {}
     if rc == 0:
         rec = verdict.get("record") if isinstance(verdict, dict) else None
-        return {"acquired": True, "refused": False, "id": lease_id, "holder": holder,
-                "generation": (rec or {}).get("generation") if isinstance(rec, dict) else None,
-                "tree": tree}
+        rec_holder = (rec or {}).get("holder") if isinstance(rec, dict) else None
+        actual_holder = rec_holder or requested_holder
+        out = {"acquired": True, "refused": False, "id": lease_id, "holder": actual_holder,
+               "generation": (rec or {}).get("generation") if isinstance(rec, dict) else None,
+               "session_id": session_id,
+               "tree": tree}
+        if session_publish is not None:
+            out["session_publish"] = session_publish
+        return out
     if rc == LEASE_REFUSED_RC:
         v = verdict.get("verdict") if isinstance(verdict, dict) else None
-        return {"acquired": False, "refused": True, "id": lease_id, "holder": holder,
-                "reason": (v or {}).get("reason") if isinstance(v, dict) else None,
-                "fence_verdict": v, "tree": tree}
+        out = {"acquired": False, "refused": True, "id": lease_id, "holder": requested_holder,
+               "session_id": session_id,
+               "reason": (v or {}).get("reason") if isinstance(v, dict) else None,
+               "fence_verdict": v, "tree": tree}
+        if session_publish is not None:
+            out["session_publish"] = session_publish
+        return out
     # rc in {1,2,127} or unparseable -> fail open (no protection added, loop never wedges).
-    return {"acquired": False, "refused": False, "id": lease_id, "holder": holder,
-            "fail_open": True, "rc": rc, "detail": res.get("error") or res.get("skipped"),
-            "tree": tree}
+    out = {"acquired": False, "refused": False, "id": lease_id, "holder": requested_holder,
+           "session_id": session_id,
+           "fail_open": True, "rc": rc, "detail": res.get("error") or res.get("skipped"),
+           "tree": tree}
+    if session_publish is not None:
+        out["session_publish"] = session_publish
+    return out
+
+
+def release_lane_lease(root: Path, lease: dict[str, Any] | None,
+                       *, runner: Any | None = None) -> dict[str, Any]:
+    """Release a previously-acquired lane lease with holder/generation fencing.
+
+    This never uses ``--force``. A release failure is non-fatal: the original lease
+    TTL plus ``reap_expired_leases`` remains the crash backstop, so this helper can
+    only improve concurrency by freeing a finished worker's lane earlier.
+    """
+    src = lease or {}
+    lease_id = str(src.get("id") or "").strip()
+    holder = str(src.get("holder") or "").strip()
+    if not lease_id or not holder:
+        return {"released": False, "skipped": "missing lease id/holder"}
+    args = ["release", "--id", lease_id, "--holder", holder]
+    generation = src.get("generation")
+    if generation is not None:
+        args += ["--generation", str(generation)]
+    run = runner or _run_lease
+    res = run(root, args)
+    rc = res.get("rc")
+    verdict = res.get("verdict") or {}
+    if rc == 0:
+        return {"released": True, "refused": False, "id": lease_id,
+                "holder": holder, "generation": generation}
+    if rc == LEASE_REFUSED_RC:
+        v = verdict.get("verdict") if isinstance(verdict, dict) else None
+        return {"released": False, "refused": True, "id": lease_id,
+                "holder": holder, "generation": generation,
+                "reason": (v or {}).get("reason") if isinstance(v, dict) else None,
+                "fence_verdict": v}
+    return {"released": False, "refused": False, "id": lease_id,
+            "holder": holder, "generation": generation, "fail_open": True,
+            "rc": rc, "detail": res.get("error") or res.get("skipped")}
 
 
 def reap_expired_leases(root: Path, *, runner: Any | None = None) -> dict[str, Any]:
@@ -2038,18 +2237,44 @@ def reap_expired_leases(root: Path, *, runner: Any | None = None) -> dict[str, A
     drop its lane lease has it swept here once the TTL lapses, so a crash can't
     wedge a lane forever. Fail-open: a reap failure is reported, never raised.
 
-    NOTE: there is deliberately no early-release helper here. `fak leaseref` exposes
-    only acquire/reap (no delete-one-live-lease verb), so a held lane is freed by
-    TTL+reap, not an explicit release. The commit-time diff-witness binding of
-    proposal #2 (#1324) is now wired — :func:`witness_exited_workers` records each
-    finished worker's slot as CLAIM_WITNESSED / CLAIM_UNWITNESSED / CLAIM_NO_COMMIT
-    via `dos commit-audit`, so a slot no longer silently counts as productive on a
-    bare exit. The ONLY remaining residual is the WITNESSED-EARLY-RELEASE of the lane
-    lease, which still needs that delete-one-live verb; until it lands the lease is
-    freed by TTL+reap, exactly as the issue sanctions for a crashed holder."""
+    The normal path now releases with the holder/generation sidecar once
+    :func:`witness_exited_workers` proves the worker pid is dead. This reap remains
+    the crash/failure backstop: if the process dies before sidecar write, the release
+    command is unavailable, or the ref store refuses, the expired lease is still
+    bounded by TTL."""
     run = runner or _run_lease
     res = run(root, ["reap"])
     return {"ok": res.get("rc") == 0, "rc": res.get("rc"), "stdout": res.get("stdout")}
+
+
+def live_lane_lease_lanes(root: Path, *, runner: Any | None = None) -> dict[str, Any]:
+    """Read live refs/fak/locks lane leases for planner-side collision avoidance.
+
+    This is advisory visibility for dry-run/ranking, not the spawn fence itself:
+    live spawning still calls acquire_lane_lease() and must win the atomic lease.
+    A read failure fails open so a broken local fak binary does not wedge the loop.
+    """
+    run = runner or _run_lease
+    res = run(root, ["live"])
+    if res.get("rc") != 0:
+        return {"lanes": [], "fail_open": True, "rc": res.get("rc"),
+                "detail": res.get("error") or res.get("skipped")}
+    doc = res.get("verdict")
+    if not isinstance(doc, list):
+        return {"lanes": [], "fail_open": True, "rc": res.get("rc"),
+                "detail": "unparseable leaseref live output"}
+    lanes: set[str] = set()
+    records: list[dict[str, Any]] = []
+    for row in doc:
+        if not isinstance(row, dict):
+            continue
+        records.append(row)
+        lane = str(row.get("lane") or row.get("id") or "").strip()
+        if lane.startswith(LEASE_ID_PREFIX):
+            lane = lane[len(LEASE_ID_PREFIX):]
+        if lane:
+            lanes.add(lane)
+    return {"lanes": sorted(lanes), "records": records}
 
 
 # A per-process cache of the dos.toml lane->trees map so a tick that probes several
@@ -2175,9 +2400,8 @@ def multi_lane_scope_reason(issue: int, scan: dict[str, Any]) -> str:
 # whatever a sibling pushed to HEAD. EVERYTHING here is FAIL-OPEN and DEAD-PID gated
 # (a live worker may not have committed yet — never mis-blame it), the same discipline
 # as prune_dead_sidecars and the backend-health classifier, so it can only ever ADD a
-# recorded verdict, never wedge the loop. The lane lease is still freed by TTL+reap
-# (`fak leaseref` exposes only acquire/reap, no early-release verb yet), so this binds
-# the slot witness without a deadlock — the increment the issue residual scopes.
+# recorded verdict, never wedge the loop. When a lease sidecar exists, the same sweep
+# also releases it with holder/generation fencing; TTL+reap remains the fallback.
 CLAIM_WITNESSED = "CLAIM_WITNESSED"
 CLAIM_UNWITNESSED = "CLAIM_UNWITNESSED"
 CLAIM_NO_COMMIT = "CLAIM_NO_COMMIT"
@@ -2417,7 +2641,8 @@ def locally_witnessed_issues(root: Path, *, base_ref: str = "origin/main",
 def witness_exited_workers(runs_dir: Path, root: Path, *, live: bool,
                            alive: set[int] | None = None, probe: Any | None = None,
                            git: Any | None = None,
-                           audit_runner: Any | None = None) -> dict[str, Any]:
+                           audit_runner: Any | None = None,
+                           lease_runner: Any | None = None) -> dict[str, Any]:
     """Bind each FINISHED worker's slot to a `dos commit-audit` witness (#1324
     proposal #2). For every ``resolve-<N>-<stamp>.log`` whose pid is provably DEAD and
     not yet witnessed (no ``.witness`` sidecar), find the commit it landed for its
@@ -2430,7 +2655,8 @@ def witness_exited_workers(runs_dir: Path, root: Path, *, live: bool,
     Dead-pid gated (a still-running worker may not have committed yet — never
     mis-blame it) and FAIL-OPEN throughout, exactly like :func:`prune_dead_sidecars`."""
     out: dict[str, Any] = {"live": live, "audited": [], "witnessed": [],
-                           "unwitnessed": [], "no_commit": []}
+                           "unwitnessed": [], "no_commit": [],
+                           "lease_released": [], "lease_release_failed": []}
     if not runs_dir.is_dir():
         return out
     if alive is None and probe is None:
@@ -2468,6 +2694,15 @@ def witness_exited_workers(runs_dir: Path, root: Path, *, live: bool,
             rec = {"issue": issue, "log": log.name, "sha": sha,
                    "claim": CLAIM_WITNESSED if w["witnessed"] else CLAIM_UNWITNESSED,
                    "verdict": w["verdict"], "witness": w["witness"]}
+        if live:
+            lease = read_lease_sidecar(log)
+            if lease:
+                rel = release_lane_lease(root, lease, runner=lease_runner)
+                rec["lease_release"] = rel
+                if rel.get("released"):
+                    out["lease_released"].append(rel)
+                else:
+                    out["lease_release_failed"].append(rel)
         out["audited"].append(rec)
         out[bucket_of[rec["claim"]]].append(rec)
         if live:
@@ -2721,6 +2956,15 @@ def _maybe_dispatch_contract_repair(
                                   "prompt_chars": rec["prompt_chars"]}
     nums = ",".join(str(n) for n in rec["issues"])
     if not live:
+        model, effort = worker_model_effort(backend, acct)
+        preview_prompt = f"<contract-repair prompt, {rec.get('prompt_chars')} chars>"
+        preview_env = dispatch_worker.child_env(REPAIR_LANE, backend, root)
+        preview_command, preview_guarded = dispatch_worker.guarded_launch_command(
+            build_worker_command(backend, preview_prompt, model, effort),
+            REPAIR_LANE, backend, root, preview_env)
+        payload["command"] = preview_command
+        payload["guarded"] = preview_guarded
+        payload["launch_gate"] = launch_gate_for_guard(preview_guarded, backend)
         payload.update({
             "ok": True, "action": "would_repair", "verdict": "WOULD_REPAIR",
             "reason": (f"every scanned candidate fails the contract gate; would "
@@ -2803,6 +3047,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     def finish(payload: dict[str, Any]) -> dict[str, Any]:
         if record_loop:
             payload["loop_ledger"] = record_loop_tick(root, payload, ledger=loop_ledger)
+        _record(root / RUNS_DIRNAME, payload)
         return payload
 
     if backend not in BACKENDS:
@@ -2817,7 +3062,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # unwitnessed / wrong-issue commit is recorded CLAIM_UNWITNESSED instead of
     # silently counting as productive. Live ticks only (the audit + the .witness
     # sidecar write are the side effects); fail-open.
-    witnessed = (witness_exited_workers(runs_dir, root, live=live) if live
+    witnessed = (witness_exited_workers(runs_dir, root, live=live,
+                                        lease_runner=lease_runner) if live
                  else {"skipped": True})
     # Sweep the dead sidecars the reaper leaves behind, BEFORE preflight counts
     # capacity — otherwise stale `.pid` files accumulate and a recycled PID landing
@@ -2856,9 +3102,70 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     acct = pre.get("account") or {}
     account_cap_reroute: dict[str, Any] | None = None
 
+    def _preflight_int(value: Any) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
     def _preflight_public(doc: dict[str, Any]) -> dict[str, Any]:
-        return {"verdict": doc.get("verdict"), "reason": doc.get("reason"),
-                "cap": doc.get("cap"), "live": doc.get("live")}
+        out = {"verdict": doc.get("verdict"), "reason": doc.get("reason"),
+               "cap": doc.get("cap"), "live": doc.get("live")}
+        for key in ("headroom", "max_workers", "host_cap"):
+            if doc.get(key) is not None:
+                out[key] = doc.get(key)
+        limiter = doc.get("capacity_limiter")
+        if isinstance(limiter, dict):
+            out["capacity_limiter"] = limiter
+        seat = doc.get("seat")
+        if isinstance(seat, dict):
+            out["seat"] = {k: seat.get(k) for k in (
+                "total", "free", "leased", "depleted", "unattributed_live")
+                if seat.get(k) is not None}
+        return out
+
+    def _preflight_refusal_hint(doc: dict[str, Any]) -> dict[str, Any] | None:
+        if doc.get("verdict") != "REFUSE_AT_CAP":
+            return None
+        limiter = doc.get("capacity_limiter") if isinstance(doc.get("capacity_limiter"), dict) else {}
+        raw = limiter.get("raw") if isinstance(limiter.get("raw"), dict) else {}
+        term = str(limiter.get("term") or "")
+        maxw = _preflight_int(raw.get("max_workers"))
+        if maxw is None:
+            maxw = _preflight_int(doc.get("max_workers"))
+        host_cap = _preflight_int(raw.get("host_cap"))
+        if host_cap is None:
+            host_cap = _preflight_int(doc.get("host_cap"))
+        live_count = _preflight_int(doc.get("live"))
+        cap_count = _preflight_int(doc.get("cap"))
+        needed = live_count + 1 if live_count is not None else None
+        configured_cap = term == "max_workers" or (
+            maxw is not None and cap_count == maxw
+            and host_cap is not None and host_cap > maxw)
+        host_headroom_available = (
+            host_cap is None or live_count is None or live_count < host_cap)
+        needed_within_host = needed is None or host_cap is None or needed <= host_cap
+        if configured_cap and host_headroom_available and needed_within_host:
+            return {
+                "kind": "configured_max_workers",
+                "message": (
+                    f"configured --max-workers={maxw} is the binding cap; "
+                    + (f"rerun with --max-workers >= {needed} " if needed else "raise --max-workers ")
+                    + (f"(still bounded by host_cap={host_cap}) "
+                       if host_cap is not None else "")
+                    + "only if the operator intends to use available host headroom"),
+                "max_workers": maxw,
+                "required_min": needed,
+                "host_cap": host_cap,
+            }
+        if limiter:
+            return {
+                "kind": term or str(limiter.get("primary") or "capacity"),
+                "message": (f"capacity limiter {limiter.get('primary') or '?'}"
+                            f"/{term or '?'} is binding; do not route around "
+                            "the preflight refusal"),
+            }
+        return None
 
     def _account_public(account: dict[str, Any]) -> dict[str, Any]:
         return {k: account.get(k) for k in ("tag", "tier", "model", "dir")}
@@ -2934,8 +3241,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
             "schema": SCHEMA, "workspace": str(root), "live": live, "backend": backend,
             "max_workers": max_workers, "registry_refresh": reg,
             "timed_out_workers": reaped, "pruned_sidecars": pruned,
-            "preflight": {"verdict": pre.get("verdict"), "reason": pre.get("reason"),
-                          "cap": pre.get("cap"), "live": pre.get("live")},
+            "preflight": _preflight_public(pre),
             "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},
             "backend_health": own_health, "ok": False, "action": "backend_unhealthy",
             "verdict": "BACKEND_UNHEALTHY",
@@ -2960,7 +3266,10 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # busiest-pick exclude so the auto-pick reroutes to a FREE lane (queued
     # elsewhere); an explicitly-named lane that is held is refused below
     # (COLLISION_RISK) rather than raced.
-    held_lanes = live_resolution_lanes(runs_dir)
+    local_held_lanes = live_resolution_lanes(runs_dir)
+    live_leases = live_lane_lease_lanes(root)
+    lease_held_lanes = set(live_leases.get("lanes") or [])
+    held_lanes = local_held_lanes | lease_held_lanes
     pick = lane_issue_numbers(root, lane, exclude=effective_exclude | held_lanes)
     chosen_lane = pick.get("lane")
     live_issues = live_resolution_issues(runs_dir)
@@ -3013,7 +3322,9 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
 
     payload: dict[str, Any] = {
         "schema": SCHEMA, "workspace": str(root), "live": live, "backend": backend,
-        "max_workers": max_workers, "registry_refresh": reg,
+        "max_workers": max_workers, "work_kind": work_kind, "force": bool(force),
+        "contract_scan": int(contract_scan), "repair_batch": int(repair_batch),
+        "registry_refresh": reg,
         "timed_out_workers": reaped,
         # Only surface the realloc block when it actually changed something, so the
         # common (no dead sibling) path's payload is byte-identical to before.
@@ -3026,8 +3337,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         # tick where the sweep ran, so a dry-run payload stays byte-identical.
         **({"witnessed_slots": witnessed} if live else {}),
         **({"account_cap_reroute": account_cap_reroute} if account_cap_reroute else {}),
-        "preflight": {"verdict": pre.get("verdict"), "reason": pre.get("reason"),
-                      "cap": pre.get("cap"), "live": pre.get("live")},
+        "preflight": _preflight_public(pre),
         "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},
         "lane": chosen_lane, "lane_issue_count": len(pick.get("numbers") or []),
         "cooled_recently": sorted(cooled), "target_issue": target,
@@ -3038,21 +3348,49 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         # Surface proactive self-source-tree holds (lane_issue_numbers) only when
         # something is actually held, for the same byte-identical-common-case reason.
         **({"self_modify_held": pick.get("self_modify_held")} if pick.get("self_modify_held") else {}),
+        **({"safe_lanes_busy": pick.get("safe_lanes_busy")} if pick.get("safe_lanes_busy") else {}),
+        **({"lease_held_lanes": sorted(lease_held_lanes)} if lease_held_lanes else {}),
+        **({"lane_leases": live_leases} if live_leases.get("fail_open") else {}),
         "already_live": sorted(live_issues), "held_lanes": sorted(held_lanes),
     }
 
     if not pre_ok:
+        hint = _preflight_refusal_hint(pre)
+        if hint:
+            payload["preflight_hint"] = hint
         payload.update({"ok": False, "action": "refused",
                         "verdict": pre.get("verdict") or "REFUSE",
                         "reason": f"preflight refused: {pre.get('reason')}"})
         return finish(payload)
     if not chosen_lane:
         if pick.get("self_modify_held"):
+            held = sorted(pick.get("self_modify_held"))
+            safe_busy = sorted(pick.get("safe_lanes_busy") or [])
+            blockers = []
+            if safe_busy:
+                blockers.append({
+                    "code": "SAFE_LANES_BUSY",
+                    "reason": "safe non-self-source lanes already have live workers: "
+                    + ", ".join(safe_busy),
+                    "next_action": "wait-for-safe-lane-lease",
+                })
+            blockers.append({
+                "code": "SELF_MODIFY_HOLD",
+                "reason": "every remaining open issue lane maps to the shared source tree"
+                if safe_busy else "every open issue lane maps to the shared source tree",
+                "next_action": "route-non-self-source-lane-or-enable-worktree-isolated-resolver",
+            })
+            if safe_busy:
+                reason = (f"safe non-self-source lanes are busy ({safe_busy}) and "
+                          f"every remaining open issue lane is self-source ({held}); "
+                          f"waiting rather than risking build-poisoning the shared trunk")
+            else:
+                reason = (f"every lane with open issues is self-source ({held}); "
+                          f"refusing to risk build-poisoning the shared trunk — "
+                          f"see #1334 for worktree isolation")
             payload.update({"ok": False, "action": "no_lane", "verdict": "SELF_MODIFY_HOLD",
-                            "reason": (f"every lane with open issues is self-source "
-                                       f"({sorted(pick.get('self_modify_held'))}); "
-                                       f"refusing to risk build-poisoning the shared "
-                                       f"trunk — see #1334 for worktree isolation")})
+                            "launch_gate": {"ready": False, "blockers": blockers},
+                            "reason": reason})
         else:
             payload.update({"ok": False, "action": "no_lane", "verdict": "NO_LANE",
                             "reason": "no lane has open issues (router empty/error)"})
@@ -3144,6 +3482,53 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         rec = issue_worker_prompt.build(target, chosen_lane, workspace=root)
         contract = issue_contract_review(root, rec.get("issue_record"), target)
 
+    # Multi-lane scope is also a per-candidate hold for auto-picks. If the oldest
+    # contract-ready issue names files outside its lane lease, scan forward within
+    # the same bounded window instead of wedging the whole tick on that one broad
+    # issue. A pinned issue still holds exactly, and --force still means "operator
+    # accepts the under-scoped lease" rather than silently substituting a target.
+    multi_lane_skipped: list[dict[str, Any]] = []
+    scope_scan: dict[str, Any] | None = None
+    scan_limit = max(1, contract_scan)
+    while (not force and issue_override is None and not _contract_holds(contract)):
+        scope_scan = scan_multi_lane_scope(
+            root,
+            f"{rec.get('title') or ''}\n{(rec.get('issue_record') or {}).get('body') or ''}",
+            chosen_lane)
+        if not scope_scan.get("multi_lane"):
+            break
+        if scan_pos + 1 >= len(scan_stream):
+            break
+        if len(contract_skipped) + len(multi_lane_skipped) + 1 >= scan_limit:
+            break
+        multi_lane_skipped.append({
+            "issue": target,
+            "lane": chosen_lane,
+            "title": rec.get("title"),
+            "reason": multi_lane_scope_reason(target, scope_scan)[:240],
+            "uncovered_lanes": scope_scan.get("uncovered_lanes"),
+        })
+        scan_pos += 1
+        chosen_lane, target = scan_stream[scan_pos]
+        rec = issue_worker_prompt.build(target, chosen_lane, workspace=root)
+        contract = issue_contract_review(root, rec.get("issue_record"), target)
+        while (_contract_holds(contract) and not contract.get("unavailable")
+               and issue_override is None
+               and scan_pos + 1 < len(scan_stream)
+               and len(contract_skipped) + len(multi_lane_skipped) + 1 < scan_limit):
+            contract_skipped.append({
+                "issue": target,
+                "lane": chosen_lane,
+                "title": rec.get("title"),
+                "score": int(contract.get("score") or 0),
+                "reason": issue_contract_hold_reason(contract)[:200],
+                "missing_fields": _contract_missing_fields(contract),
+            })
+            scan_pos += 1
+            chosen_lane, target = scan_stream[scan_pos]
+            rec = issue_worker_prompt.build(target, chosen_lane, workspace=root)
+            contract = issue_contract_review(root, rec.get("issue_record"), target)
+
     payload["target_issue"] = target
     payload["lane"] = chosen_lane
     payload["lane_issue_count"] = (pick.get("by_lane_count") or {}).get(
@@ -3152,6 +3537,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     payload["issue_title"] = rec.get("title")
     if contract_skipped:
         payload["contract_skipped"] = contract_skipped
+    if multi_lane_skipped:
+        payload["multi_lane_skipped"] = multi_lane_skipped
     if contract_held_prior:
         payload["contract_held_prior"] = len(contract_held_prior)
     payload["issue_contract_gate"] = {
@@ -3227,9 +3614,10 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # rather than admitting a broad rewrite under a narrow lease. Runs on a pinned
     # --issue too (a collision guard, not a readiness one); --force accepts the
     # under-scoped lease transparently. Fail-open on an unavailable taxonomy.
-    scope_scan = scan_multi_lane_scope(
-        root, f"{rec.get('title') or ''}\n{(rec.get('issue_record') or {}).get('body') or ''}",
-        chosen_lane)
+    if scope_scan is None:
+        scope_scan = scan_multi_lane_scope(
+            root, f"{rec.get('title') or ''}\n{(rec.get('issue_record') or {}).get('body') or ''}",
+            chosen_lane)
     if scope_scan.get("multi_lane") and not force:
         payload["multi_lane_scope"] = scope_scan
         payload.update({
@@ -3255,6 +3643,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         chosen_lane, backend, root, preview_env)
     payload["command"] = preview_command
     payload["guarded"] = preview_guarded
+    payload["launch_gate"] = launch_gate_for_guard(preview_guarded, backend)
 
     if not live:
         payload.update({"ok": True, "action": "would_spawn", "verdict": "WOULD_SPAWN",
@@ -3299,6 +3688,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         dispatch_worker.guard_env_augment(env)
     payload["command"] = command
     payload["guarded"] = guarded
+    payload["launch_gate"] = launch_gate_for_guard(guarded, backend)
     # Per-worker commit-sha tracking (#1324 proposal #2): stamp repo HEAD now, before
     # the worker can commit, so a later tick re-audits the commit THIS worker lands
     # (base..HEAD citing #target). Fail-open: a git error -> no base, and the witness
@@ -3306,19 +3696,18 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     rc_head, head_out = _git_capture(root, ["rev-parse", "HEAD"])
     base_sha = head_out.strip() if rc_head == 0 and head_out.strip() else None
     spawned = spawn_issue_worker(command, env, root, runs_dir, target, chosen_lane, backend,
-                                 account=acct, base_sha=base_sha, spawn_probe_s=spawn_probe_s,
+                                 account=acct, lease=lease, base_sha=base_sha,
+                                 spawn_probe_s=spawn_probe_s,
                                  prompt_payload=rec["prompt"] if backend == "opencode" else None)
     early = spawned.get("early_exit") or {}
     if early.get("checked") and not early.get("alive"):
-        # The spawn died immediately, so the lane lease we just took now guards a
-        # worker that never ran. There is no early-release verb yet (`fak leaseref`
-        # exposes only acquire/reap, not a delete-one-live-lease), so the lane is
-        # freed the way the issue sanctions for a crashed holder: the lease TTL
-        # lapses and a later tick's `reap` sweeps it (reap_expired_leases above).
-        # Surface the held lease so the SPAWN_FAILED record is honest about it.
         if lease.get("acquired"):
-            payload["lease_held_until_ttl"] = {"id": lease.get("id"),
-                                               "holder": lease.get("holder")}
+            release = release_lane_lease(root, lease, runner=lease_runner)
+            payload["lease_release"] = release
+            if not release.get("released"):
+                payload["lease_held_until_ttl"] = {"id": lease.get("id"),
+                                                   "holder": lease.get("holder"),
+                                                   "release": release}
         cap_hit = _cap_hit_from_text(
             str(early.get("tail") or ""),
             evidence_log=Path(str(spawned.get("log") or "")).name)
@@ -3373,6 +3762,9 @@ def render(p: dict[str, Any]) -> str:
         f"  target    : #{p.get('target_issue')}  {(p.get('issue_title') or '')[:54]}",
         f"  -> {p.get('reason')}",
     ]
+    hint = p.get("preflight_hint") or {}
+    if hint.get("message"):
+        lines.append(f"  hint      : {hint.get('message')}")
     if p.get("spawned"):
         s = p["spawned"]
         lines.append(f"  spawned pid={s.get('pid')} issue=#{s.get('issue')} log={s.get('log')}")
@@ -3380,6 +3772,11 @@ def render(p: dict[str, Any]) -> str:
     if cs:
         lanes = sorted({str(r.get("lane")) for r in cs if r.get("lane")})
         lines.append(f"  scan      : {len(cs)} contract-held head(s) skipped"
+                     + (f" across lanes [{','.join(lanes)}]" if len(lanes) > 1 else ""))
+    ms = p.get("multi_lane_skipped") or []
+    if ms:
+        lanes = sorted({str(r.get("lane")) for r in ms if r.get("lane")})
+        lines.append(f"  scan      : {len(ms)} multi-lane head(s) skipped"
                      + (f" across lanes [{','.join(lanes)}]" if len(lanes) > 1 else ""))
     cr = p.get("contract_repair") or {}
     if cr.get("batch"):
@@ -3406,8 +3803,23 @@ def render(p: dict[str, Any]) -> str:
         lines.append(f"  witnessed slots: {len(ws.get('witnessed') or [])} witnessed, "
                      f"{len(ws.get('unwitnessed') or [])} CLAIM_UNWITNESSED, "
                      f"{len(ws.get('no_commit') or [])} no-commit")
+    def _gate_suffix(gate: dict[str, Any]) -> str:
+        blockers = gate.get("blockers") or []
+        bits = []
+        for b in blockers[:3]:
+            bits.append(f"{b.get('code')}: {b.get('next_action')}")
+        return "; ".join(bits) if bits else "launch gate is not ready"
+
     if not p.get("live") and p.get("action") == "would_spawn":
-        lines.append("  DRY-RUN — re-run with --live to spawn the issue worker")
+        gate = p.get("launch_gate") or {}
+        if gate.get("ready"):
+            lines.append("  DRY-RUN — re-run with --live to spawn the issue worker")
+        else:
+            lines.append(f"  DRY-RUN — NOT launch-ready ({_gate_suffix(gate)})")
+    elif not p.get("live"):
+        gate = p.get("launch_gate") or {}
+        if gate.get("ready") is False:
+            lines.append(f"  launch gate: BLOCKED ({_gate_suffix(gate)})")
     return "\n".join(lines)
 
 
@@ -3451,8 +3863,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="One guarded tick that spawns an issue-RESOLUTION worker (dry-run by default).")
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
-    ap.add_argument("--max-workers", type=int, default=2,
-                    help="hard cap on live workers, enforced by the preflight (default: 2)")
+    ap.add_argument("--max-workers", type=int, default=20,
+                    help="hard cap on live workers, enforced by the preflight (default: 20)")
     ap.add_argument("--work-kind", default=None,
                     help="switcher work kind (engineering->t1, gardening->t2). Default "
                          "follows --backend: engineering for claude (t1 opus pool), "

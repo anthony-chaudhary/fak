@@ -30,6 +30,12 @@ Safety rails:
     under two accounts (gem7/day30 share one identity, so one transcript can appear twice).
   * A resume target whose config dir is tombstoned (`.DELETED-*`) is skipped.
 
+Managed-cache posture (optional, #2178): by default a resumed child is launched as a bare
+`claude --resume` (guard's own passive posture). Set FAK_MANAGED_CACHE=on|off and, to bill an
+Anthropic API key, FAK_GUARD_API_KEY_ENV=<var> to front each resumed child with its own
+`fak guard <posture> --`, so the resume wave names the SAME cache posture as `fak accounts
+launch` / the dispatch worker. Unset (auto) => byte-identical to the bare launch.
+
   .\fleet_resume_watchdog.ps1                 # dry-run: log what it WOULD resume
   .\fleet_resume_watchdog.ps1 -Live           # actually resume (once per session)
 #>
@@ -175,6 +181,28 @@ function SourceAdmitGate($ledgerPath, $policyPath) {
   # Fail open: a broken governor must not strand all recovery; the tick's cap/spacing
   # still bound launch pressure.
   return [pscustomobject]@{ Admit = $true; Reason = "gate-error:exit-$code $reason"; FailOpen = $true }
+}
+
+function Get-ManagedCachePosture {
+  # #2178 parity for the resume wave: shape the `fak guard` managed-cache flags from the same
+  # two fleet env knobs the Go launchers read (FAK_MANAGED_CACHE / FAK_GUARD_API_KEY_ENV) in
+  # the same stable order (--api-key-env then --managed-cache). auto/empty emits NOTHING, so an
+  # unconfigured fleet's launch stays byte-identical (a bare `claude --resume`, never fronted
+  # with guard). A malformed mode returns @() plus a Warn string rather than throwing -- a
+  # headless launcher warns-and-continues passive instead of stranding the whole resume wave.
+  $raw = ("$env:FAK_MANAGED_CACHE").Trim().ToLowerInvariant()
+  if ($raw -eq '' -or $raw -eq 'auto') {
+    $mode = 'auto'
+  } elseif ($raw -eq 'on' -or $raw -eq 'off') {
+    $mode = $raw
+  } else {
+    return @{ Args = @(); Warn = "FAK_MANAGED_CACHE='$raw': unknown managed-cache mode (auto|on|off) -- ignoring; resuming passive" }
+  }
+  $apiKeyEnv = ("$env:FAK_GUARD_API_KEY_ENV").Trim()
+  $postureArgs = @()
+  if ($apiKeyEnv -ne '') { $postureArgs += @('--api-key-env', $apiKeyEnv) }
+  if ($mode -ne 'auto') { $postureArgs += @('--managed-cache', $mode) }
+  return @{ Args = $postureArgs; Warn = $null }
 }
 
 function AppendJsonLine($path, $obj) {
@@ -422,6 +450,20 @@ try {
   Note "  WARN live-process scan failed ($($_.Exception.Message)) -- duplicate guard inactive this tick"
 }
 
+# Resolve the managed-cache posture ONCE per tick (the env is tick-constant) and warn ONCE.
+# A configured posture fronts each resumed child with its own `fak guard` (#2178 parity); the
+# default leaves the bare `claude --resume` untouched. A posture that cannot be applied (no fak
+# binary) falls back to a direct launch LOUDLY rather than silently dropping the intent.
+$posture = Get-ManagedCachePosture
+[string[]]$resumePostureArgs = @($posture.Args)
+if ($posture.Warn) { Note "  WARN managed-cache: $($posture.Warn)" }
+if ($resumePostureArgs.Count -gt 0 -and -not $FakExe) {
+  Note "  WARN managed-cache posture configured but ``fak`` is unavailable -- resuming children directly (passive, no posture banner)"
+  $resumePostureArgs = @()
+} elseif ($resumePostureArgs.Count -gt 0) {
+  Note ("  managed-cache posture -> fronting resumed children with ``fak guard {0} --``" -f ($resumePostureArgs -join ' '))
+}
+
 foreach ($p in @($plan)) {
   if ($launched -ge $MaxPerTick) { Note "  per-tick cap reached ($MaxPerTick)"; break }
   $sid = $p.session; $sid8 = $sid.Substring(0, 8)
@@ -582,10 +624,22 @@ foreach ($p in @($plan)) {
   $env:JOB_SUPERVISED_WORKER = $null
   $out = Join-Path $LogDir ("resume-{0}-{1}.log" -f $sid8, ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds()))
   $wd = if ($p.cwd -and (Test-Path $p.cwd)) { $p.cwd } else { $FleetDir }
-  $proc = Start-Process -FilePath $ClaudeExe `
-    -ArgumentList @('--resume', $sid, '-p',
-      'Resume where you left off; re-establish any /goal or /loop and continue toward it.',
-      '--dangerously-skip-permissions') `
+  [string[]]$childArgs = @('--resume', $sid, '-p',
+    'Resume where you left off; re-establish any /goal or /loop and continue toward it.',
+    '--dangerously-skip-permissions')
+  # Opted-in + fak resolvable -> front the child with its OWN `fak guard <posture> --`: it
+  # binds its own gateway on its own CLAUDE_CONFIG_DIR seat, prints its own posture banner, and
+  # reaches the ACTIVE 1h-TTL upgrade when API-key-billed -- inheriting no wire from this
+  # watchdog. Guard auto-detects claude -> --provider anthropic (posture flags BEFORE `--`).
+  if ($resumePostureArgs.Count -gt 0 -and $FakExe) {
+    $launchFile = $FakExe
+    [string[]]$launchArgs = @('guard') + $resumePostureArgs + @('--', $ClaudeExe) + $childArgs
+  } else {
+    $launchFile = $ClaudeExe
+    [string[]]$launchArgs = $childArgs
+  }
+  $proc = Start-Process -FilePath $launchFile `
+    -ArgumentList $launchArgs `
     -WorkingDirectory $wd -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput $out -RedirectStandardError "$out.err"
   # record in the durable ledger BEFORE anything else, so a crash can't double-resume.

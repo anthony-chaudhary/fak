@@ -550,6 +550,23 @@ class WorkerCountTest(unittest.TestCase):
         # a sibling product's cap is unaffected — independent per-pool headroom.
         self.assertEqual(mod.proc_worker_count(Path("/nonexistent"), product="opencode"), 0)
 
+    def test_worker_pids_from_process_rows_filters_backend_and_collapses_children(self) -> None:
+        mod = load()
+        rows = [
+            {"ProcessId": 100, "ParentProcessId": 1, "Name": "claude.exe",
+             "CommandLine": "claude -p /dos-kernel:dos-dispatch-loop --lane docs"},
+            {"ProcessId": 101, "ParentProcessId": 100, "Name": "claude.exe",
+             "CommandLine": "claude -p /dos-kernel:dos-dispatch-loop --lane docs"},
+            {"ProcessId": 200, "ParentProcessId": 1, "Name": "powershell.exe",
+             "CommandLine": "rg dos-dispatch-loop"},
+            {"ProcessId": 300, "ParentProcessId": 1, "Name": "opencode.exe",
+             "CommandLine": "opencode resolve GitHub issue #717"},
+        ]
+        self.assertEqual(
+            mod._worker_pids_from_process_rows(rows, product="claude"), {100})
+        self.assertEqual(
+            mod._worker_pids_from_process_rows(rows, product="opencode"), {300})
+
     def test_collapse_descendant_worker_pids_counts_wrapper_tree_once(self) -> None:
         mod = load()
         # The live opencode shape is a .cmd wrapper whose backend child keeps the same
@@ -1084,6 +1101,21 @@ class SeatPoolTest(unittest.TestCase):
         self.assertEqual(pool["total_seats"], 4)
         self.assertEqual(pool["seats"][0]["tag"], "canon")
 
+    def test_same_uuid_collapses_even_before_duplicate_annotation(self) -> None:
+        # Defensive collapse: if two offered rows share one account UUID before the
+        # duplicate-role annotation lands, the seat pool still counts one rate-limit
+        # pool and binds a lease stamped with either row.
+        fa = load_fleet_accounts()
+        rows = [_seat_row("canon", uuid="U1", dir_="/home/u/canon"),
+                _seat_row("copy", uuid="U1", dir_="/home/u/copy")]
+        leases = [{"worker": "copy-worker", "tag": "copy", "dir": "/home/u/copy"}]
+        pool = fa.seat_pool(rows, leases)
+        self.assertEqual(pool["total_seats"], 4)
+        self.assertEqual(len(pool["seats"]), 1)
+        self.assertEqual(pool["leased_seats"], 1)
+        self.assertEqual(pool["free_seats"], 3)
+        self.assertEqual(pool["seats"][0]["workers"], ["copy-worker"])
+
     def test_product_scope_filters_the_pool(self) -> None:
         fa = load_fleet_accounts()
         rows = [_seat_row("a", product="claude"), _seat_row("g", product="opencode")]
@@ -1164,6 +1196,29 @@ class SeatRefusalTest(unittest.TestCase):
                      seat={"total": 3, "free": 2, "leased": 1, "depleted": False})
         p = run_eval(mod, max_workers=10)
         self.assertEqual(p["verdict"], mod.OK_VERDICT)
+
+    def test_unattributed_live_workers_consume_free_slots(self) -> None:
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=11,
+                     seat={"total": 20, "free": 20, "leased": 0, "depleted": False})
+        p = run_eval(mod, max_workers=20)
+        self.assertEqual(p["verdict"], mod.OK_VERDICT)
+        self.assertEqual(p["seat"]["free"], 9)
+        self.assertEqual(p["seat"]["leased"], 11)
+        self.assertEqual(p["seat"]["unattributed_live"], 11)
+        self.assertEqual(p["capacity_limiter"]["raw"]["seat_free"], 9)
+        self.assertEqual(p["capacity_limiter"]["raw"]["seat_leased"], 11)
+
+    def test_unattributed_live_workers_can_deplete_pool(self) -> None:
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=4,
+                     seat={"total": 4, "free": 4, "leased": 0, "depleted": False})
+        p = run_eval(mod, max_workers=100)
+        self.assertEqual(p["cap"], 4)
+        self.assertEqual(p["verdict"], mod.REFUSE_NO_SEAT)
+        self.assertEqual(p["seat"]["free"], 0)
+        self.assertEqual(p["seat"]["leased"], 4)
+        self.assertTrue(p["seat"]["depleted"])
 
     def test_all_blocked_pool_is_no_account_not_no_seat(self) -> None:
         # A pool with no free seat because every seat is THROTTLED (none leased) is a

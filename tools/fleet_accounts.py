@@ -1836,6 +1836,7 @@ def allocate_wave(count: int, *, task_text: str = "", task_class: str = "auto",
                   home: str = USER, policy: dict | None = None,
                   registry: dict | None = None,
                   config_home: str | None = None,
+                  leases: list[dict] | None = None,
                   wave_id: str | None = None) -> dict:
     """Allocate up to ``count`` bounded account session slots for a parallel fan-out
     (an "ultracode" wave), balanced across the roster -- the primitive a wave needs
@@ -1866,7 +1867,9 @@ def allocate_wave(count: int, *, task_text: str = "", task_class: str = "auto",
     Honest under-fill: if the roster can only safely back K < count session slots
     right now, ``granted == K`` and ``shortfall == count - K`` -- never an unbounded
     duplicate that would overbook an account. ``distinct_pools`` is the number of
-    account pools backing those session slots.
+    account pools backing those session slots. Existing live-worker leases subtract
+    from each pool's cap before new lanes are granted, so a running worker consumes
+    one of its account's bounded session slots.
 
     Rank-stamped membership (the typed group). Each granted lane carries its
     ``rank`` in ``[0, granted)``, the shared ``wave_id`` (a deterministic, content-
@@ -1930,7 +1933,10 @@ def allocate_wave(count: int, *, task_text: str = "", task_class: str = "auto",
         tier_order.append(2)
 
     lanes: list[dict] = []
-    pool_load: dict[str, int] = {}
+    lease_workers, _ = _lease_workers_by_pool(workers, list(leases or []))
+    pool_load: dict[str, int] = {
+        pool: len(bound) for pool, bound in lease_workers.items()
+    }
     for tier in tier_order:
         if len(lanes) >= n:
             break
@@ -2093,6 +2099,43 @@ def _lease_matches_seat(lease: dict, row: dict) -> bool:
     return bool(ltag) and ltag == str(row.get("tag") or "").lower()
 
 
+def _pool_row_less(a: dict, b: dict) -> bool:
+    if bool(a.get("available")) != bool(b.get("available")):
+        return bool(a.get("available"))
+    return _route_rank(a) < _route_rank(b)
+
+
+def _unique_pool_rows(rows: list[dict]) -> list[dict]:
+    by_pool: dict[str, dict] = {}
+    order: list[str] = []
+    for row in rows:
+        pool = _pool_key(row)
+        if pool not in by_pool:
+            by_pool[pool] = row
+            order.append(pool)
+            continue
+        if _pool_row_less(row, by_pool[pool]):
+            by_pool[pool] = row
+    return [by_pool[pool] for pool in order]
+
+
+def _lease_worker_label(lease: dict) -> str:
+    return str(lease.get("worker") or lease.get("pid") or "?")
+
+
+def _lease_workers_by_pool(rows: list[dict], leases: list[dict]) -> tuple[dict[str, list[str]], set[int]]:
+    out: dict[str, list[str]] = {}
+    matched: set[int] = set()
+    for i, lease in enumerate(leases):
+        for row in rows:
+            if not _lease_matches_seat(lease, row):
+                continue
+            out.setdefault(_pool_key(row), []).append(_lease_worker_label(lease))
+            matched.add(i)
+            break
+    return out, matched
+
+
 def seat_pool(rows: list[dict], leases: list[dict] | None = None,
               *, product: str | None = None) -> dict:
     """The explicit multi-slot account pool: bounded routable worker session slots
@@ -2122,23 +2165,23 @@ def seat_pool(rows: list[dict], leases: list[dict] | None = None,
     wanted = (product or "").lower()
     seats: list[dict] = []
     double_booked: list[dict] = []
-    matched: set[int] = set()
     total = free = leased = blocked = 0
+    pool_rows: list[dict] = []
     for row in rows:
         if not routable_worker(row):  # excludes duplicate-identity dirs -> one seat per pool
             continue
         if wanted and str(row.get("product") or "").lower() != wanted:
             continue
+        pool_rows.append(row)
+    lease_workers, matched = _lease_workers_by_pool(pool_rows, leases)
+    for row in _unique_pool_rows(pool_rows):
         capacity = max(1, _session_cap(row))
-        bound = [i for i, ls in enumerate(leases) if _lease_matches_seat(ls, row)]
-        matched.update(bound)
-        workers = [str(leases[i].get("worker") or leases[i].get("pid") or "?")
-                   for i in bound]
+        seat_workers = list(lease_workers.get(_pool_key(row), []))
         available = bool(row.get("available"))
-        leased_slots = len(workers)
+        leased_slots = len(seat_workers)
         leased_capped = min(leased_slots, capacity)
         free_slots = 0
-        if workers:
+        if seat_workers:
             state = "leased"
             leased += leased_capped
             if available:
@@ -2159,8 +2202,8 @@ def seat_pool(rows: list[dict], leases: list[dict] | None = None,
         # whenever the seat is not simply available. A leased seat is "busy" even if the
         # underlying account also reads throttled (the live worker IS the reason it is
         # unavailable to a second dispatch, so that takes precedence over cooling).
-        if workers:
-            dispatch_state, hold_reason = "busy", f"leased to {', '.join(workers)}"
+        if seat_workers:
+            dispatch_state, hold_reason = "busy", f"leased to {', '.join(seat_workers)}"
             cooldown = None
         else:
             dispatch_state, hold_reason = _seat_hold_reason(row)
@@ -2183,12 +2226,12 @@ def seat_pool(rows: list[dict], leases: list[dict] | None = None,
             "session_cap": capacity,
             "leased_slots": leased_slots,
             "free_slots": free_slots,
-            "workers": workers,
+            "workers": seat_workers,
         }
         seats.append(seat)
         if leased_slots > capacity:
             double_booked.append({"seat": seat["seat"], "tag": seat["tag"],
-                                  "workers": workers, "session_cap": capacity})
+                                  "workers": seat_workers, "session_cap": capacity})
     unbound = [
         {"worker": str(ls.get("worker") or ls.get("pid") or "?"),
          "tag": ls.get("tag"), "dir": ls.get("dir")}
@@ -2466,6 +2509,7 @@ def main(argv: list[str]) -> int:
             product=product or None,
             allow_tier_fallback=_has_arg(argv, ("--allow-tier-fallback",)),
             strict_tier=strict,
+            leases=live_seat_leases(),
         )
         if not explicit:
             # No count asked => report "all available session slots now", not a shortfall

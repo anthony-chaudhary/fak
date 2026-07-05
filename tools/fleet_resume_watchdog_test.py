@@ -250,10 +250,21 @@ def _seed_ps1_fleet(tmp_path, *, fak_exit, fak_reason, sessions, ledger_rows=())
     claude = tmp_path / "claude.cmd"
     claude.write_text('@echo off\r\necho launched>>"%s"\r\n' % marker, encoding="ascii")
 
+    # The fake `fak` serves two roles: the `resume admit` gate (echo a decision + exit code)
+    # and, once a managed-cache posture is configured, the `fak guard <posture> -- claude ...`
+    # front. The guard branch records the argv it was fronted with (the behavioral witness that
+    # the posture reached the launch) and is inert for the admit-only tests (%1 != "guard").
+    guard_marker = tmp_path / "guard_fronts.txt"
     fak = tmp_path / "fak.cmd"
     fak.write_text(
-        '@echo off\r\necho {"decision":{"reason":"%s"}}\r\nexit /b %d\r\n'
-        % (fak_reason, fak_exit), encoding="ascii")
+        '@echo off\r\n'
+        'if "%1"=="guard" (\r\n'
+        'echo %* >> "' + str(guard_marker) + '"\r\n'
+        'exit /b 0\r\n'
+        ')\r\n'
+        'echo {"decision":{"reason":"' + fak_reason + '"}}\r\n'
+        'exit /b ' + str(fak_exit) + '\r\n',
+        encoding="ascii")
 
     plan = {"plan": [
         {"session": sid, "account": ".claude-t", "resume_account": ".claude-t",
@@ -268,15 +279,20 @@ def _seed_ps1_fleet(tmp_path, *, fak_exit, fak_reason, sessions, ledger_rows=())
             "".join(_json.dumps(r) + "\n" for r in ledger_rows), encoding="utf-8")
 
     return {"fleet": fleet, "reg": reg, "log": log, "marker": marker,
-            "claude": claude, "fak": fak, "ledger": ledger}
+            "claude": claude, "fak": fak, "ledger": ledger, "guard_marker": guard_marker}
 
 
-def _run_ps1_live(tmp_path, paths, *, spacing=0, max_attempts=8):
+def _run_ps1_live(tmp_path, paths, *, spacing=0, max_attempts=8, env_extra=None):
     ps1 = Path(__file__).with_name("fleet_resume_watchdog.ps1")
     env = dict(os.environ)
     env["FLEET_STATE_DIR"] = str(tmp_path / "state")
     env["FAK_RESUME_SOURCE_POLICY"] = str(tmp_path / "policy.json")  # hermetic (missing = permissive)
     env.pop("FAK_EXE", None)
+    # hermetic posture: default OFF unless a test opts in, so ambient env can't perturb it.
+    env.pop("FAK_MANAGED_CACHE", None)
+    env.pop("FAK_GUARD_API_KEY_ENV", None)
+    for k, v in (env_extra or {}).items():
+        env[k] = v
     return _subprocess.run(
         [_POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps1),
          "-Live", "-Probe", "none",
@@ -368,6 +384,46 @@ def test_ps1_gate_error_fails_open_loudly(tmp_path):
     assert "session" not in warn[0], "warning row must be session-less (invisible to retry accounting)"
     assert [x for x in rows if x.get("phase") == "launched"]
     assert "WARN source governor UNAVAILABLE" in r.stdout
+
+
+@_ps1_behavioral
+def test_ps1_fronts_resume_with_guard_when_posture_configured(tmp_path):
+    """#2178 acceptance: with FAK_MANAGED_CACHE=on + FAK_GUARD_API_KEY_ENV set, a live resume
+    is fronted through `fak guard <posture> -- claude --resume ...` (witnessed by the guard
+    front marker), so the resumed child carries the posture from its OWN guard invocation."""
+    sid = "66666666-7777-8888-9999-aaaaaaaaaaaa"
+    paths = _seed_ps1_fleet(tmp_path, fak_exit=0, fak_reason="SOURCE_ADMITTED",
+                            sessions=[sid])
+    r = _run_ps1_live(tmp_path, paths, env_extra={
+        "FAK_MANAGED_CACHE": "on", "FAK_GUARD_API_KEY_ENV": "ANTHROPIC_API_KEY"})
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert paths["guard_marker"].exists(), \
+        "posture configured but the resume was NOT fronted with `fak guard`: " + r.stdout
+    fronted = paths["guard_marker"].read_text(encoding="ascii", errors="replace")
+    # the posture flags reached the guard front, in the Go launchers' stable order
+    assert "--api-key-env ANTHROPIC_API_KEY" in fronted
+    assert "--managed-cache on" in fronted
+    # and the child agent (after `--`) is still the claude --resume for this sid
+    assert "-- " in fronted and "--resume " in fronted and sid in fronted
+    # the launch was recorded once (guard-fronting doesn't disturb the ledger bookkeeping)
+    launched = [x for x in _ledger_rows(paths) if x.get("phase") == "launched"]
+    assert launched and launched[0]["session"] == sid
+    # the operator sees the posture decision in the tick log
+    assert "managed-cache posture" in r.stdout
+
+
+@_ps1_behavioral
+def test_ps1_unconfigured_posture_never_fronts_with_guard(tmp_path):
+    """The default (no FAK_MANAGED_CACHE) must stay byte-identical: claude is launched
+    DIRECTLY, guard is never fronted — the unconfigured fleet is unchanged (#2178)."""
+    sid = "77777777-8888-9999-aaaa-bbbbbbbbbbbb"
+    paths = _seed_ps1_fleet(tmp_path, fak_exit=0, fak_reason="SOURCE_ADMITTED",
+                            sessions=[sid])
+    r = _run_ps1_live(tmp_path, paths)  # no posture env
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not paths["guard_marker"].exists(), "unconfigured fleet must not front with guard"
+    assert paths["marker"].exists(), "claude should have launched directly"
+    assert "managed-cache posture" not in r.stdout
 
 
 def test_ps1_parses_clean():
@@ -519,6 +575,133 @@ def test_toast_routes_to_slack_when_module_flag_set(monkeypatch, tmp_path):
     wd.toast("Account needs re-login", "alpha : run /login", "warn")
     assert posted["title"] == "Account needs re-login"
     assert posted["level"] == "warn"
+
+
+# ---- managed-cache posture (#2178 parity for the resume wave) -------------------
+#
+# These pin the resume watchdog's managed_cache_posture_args to the SAME shaping the Go
+# launchers' guardCachePostureArgs enforces (cmd/fak/guard_cache_posture_test.go), and the
+# resume_child_argv fronting decision: opted-in + fak present => `fak guard <posture> --`,
+# otherwise the bare `claude --resume` that shipped before this knob. The helpers read the
+# env live at call time, so monkeypatch.setenv suffices (no import-time reload needed).
+
+
+def _posture(monkeypatch, *, mode=None, api_key_env=None):
+    wd = _reload({})
+    for k in (wd.FLEET_MANAGED_CACHE_ENV, wd.FLEET_GUARD_API_KEY_ENV_ENV):
+        monkeypatch.delenv(k, raising=False)
+    if mode is not None:
+        monkeypatch.setenv(wd.FLEET_MANAGED_CACHE_ENV, mode)
+    if api_key_env is not None:
+        monkeypatch.setenv(wd.FLEET_GUARD_API_KEY_ENV_ENV, api_key_env)
+    return wd
+
+
+def test_posture_auto_no_key_emits_nothing(monkeypatch):
+    # The unconfigured fleet: auto (or unset) + no api-key-env emits NOTHING, so the resume
+    # argv stays byte-identical to the bare `claude --resume` and guard keeps its own auto.
+    wd = _posture(monkeypatch)
+    assert wd.managed_cache_posture_args() == ([], None)
+    wd = _posture(monkeypatch, mode="auto")
+    assert wd.managed_cache_posture_args() == ([], None)
+    wd = _posture(monkeypatch, mode="  AUTO  ")  # case/whitespace-insensitive
+    assert wd.managed_cache_posture_args() == ([], None)
+
+
+def test_posture_api_key_alone_lets_auto_activate(monkeypatch):
+    # api-key-env alone (mode auto) makes guard's AUTO resolve ACTIVE on the Anthropic wire
+    # without forcing the mode -- so it emits --api-key-env but no --managed-cache.
+    wd = _posture(monkeypatch, api_key_env="ANTHROPIC_API_KEY")
+    assert wd.managed_cache_posture_args() == (["--api-key-env", "ANTHROPIC_API_KEY"], None)
+
+
+def test_posture_on_and_off_are_emitted_explicitly(monkeypatch):
+    wd = _posture(monkeypatch, mode="on")
+    assert wd.managed_cache_posture_args() == (["--managed-cache", "on"], None)
+    wd = _posture(monkeypatch, mode="OFF")  # normalized lower
+    assert wd.managed_cache_posture_args() == (["--managed-cache", "off"], None)
+
+
+def test_posture_key_and_mode_stable_order(monkeypatch):
+    # Both knobs together, stable order: --api-key-env then --managed-cache (matches Go).
+    wd = _posture(monkeypatch, mode="on", api_key_env="ANTHROPIC_API_KEY")
+    args, warn = wd.managed_cache_posture_args()
+    assert args == ["--api-key-env", "ANTHROPIC_API_KEY", "--managed-cache", "on"]
+    assert warn is None
+
+
+def test_posture_malformed_warns_not_raises(monkeypatch):
+    # A headless worker must warn-and-continue passive on a bad mode, never raise (which would
+    # strand the WHOLE resume wave). No flags, and a warning naming the offending token.
+    wd = _posture(monkeypatch, mode="active")
+    args, warn = wd.managed_cache_posture_args()
+    assert args == []
+    assert warn and "active" in warn and "auto|on|off" in warn
+
+
+def test_resume_child_argv_default_is_bare_claude(monkeypatch):
+    # No posture configured -> the exact pre-#2188 argv, never fronted with guard.
+    wd = _reload({})
+    monkeypatch.setattr(wd, "CLAUDE_EXE", "/bin/claude")
+    monkeypatch.setattr(wd, "FAK_EXE", "/bin/fak")  # present, but posture empty => no guard
+    argv = wd.resume_child_argv("SID", [])
+    assert argv == ["/bin/claude", "--resume", "SID", "-p", wd.RESUME_PROMPT,
+                    "--dangerously-skip-permissions"]
+    assert "guard" not in argv
+
+
+def test_resume_child_argv_fronts_with_guard_when_opted_in(monkeypatch):
+    # Opted-in + fak resolvable -> `fak guard <posture> -- claude --resume ...`, posture BEFORE
+    # `--` so guard parses it and the agent (after `--`) never sees it.
+    wd = _reload({})
+    monkeypatch.setattr(wd, "CLAUDE_EXE", "/bin/claude")
+    monkeypatch.setattr(wd, "FAK_EXE", "/bin/fak")
+    posture = ["--api-key-env", "ANTHROPIC_API_KEY", "--managed-cache", "on"]
+    argv = wd.resume_child_argv("SID", posture)
+    assert argv == ["/bin/fak", "guard", "--api-key-env", "ANTHROPIC_API_KEY",
+                    "--managed-cache", "on", "--", "/bin/claude", "--resume", "SID",
+                    "-p", wd.RESUME_PROMPT, "--dangerously-skip-permissions"]
+    # posture is strictly before the `--` separator; the claude flags are strictly after.
+    sep = argv.index("--")
+    assert "--managed-cache" in argv[:sep] and "--resume" in argv[sep:]
+
+
+def test_resume_child_argv_falls_back_when_fak_missing(monkeypatch):
+    # Opted-in but fak not on PATH -> cannot front; fall back to the bare direct launch
+    # (the caller warns; the argv must not reference a None fak binary).
+    wd = _reload({})
+    monkeypatch.setattr(wd, "CLAUDE_EXE", "/bin/claude")
+    monkeypatch.setattr(wd, "FAK_EXE", None)
+    argv = wd.resume_child_argv("SID", ["--managed-cache", "on"])
+    assert argv == ["/bin/claude", "--resume", "SID", "-p", wd.RESUME_PROMPT,
+                    "--dangerously-skip-permissions"]
+    assert "guard" not in argv and None not in argv
+
+
+def test_powershell_watchdog_fronts_posture_with_guard():
+    # #2178 parity: the .ps1 (the Windows scheduled-task launcher) must carry the SAME
+    # managed-cache override surface as the .py -- reading the same two env knobs, fronting
+    # opted-in resumes with `fak guard <posture> --`, and warning-not-throwing on a bad mode.
+    ps1 = Path(__file__).with_name("fleet_resume_watchdog.ps1").read_text(encoding="utf-8")
+    assert "Get-ManagedCachePosture" in ps1
+    assert "FAK_MANAGED_CACHE" in ps1 and "FAK_GUARD_API_KEY_ENV" in ps1
+    assert "--managed-cache" in ps1 and "--api-key-env" in ps1
+    # opted-in launch fronts with guard, posture BEFORE the `--` separator
+    assert "@('guard') + $resumePostureArgs + @('--', $ClaudeExe)" in ps1
+    # gated on fak being resolvable, else a direct launch (never a None-binary front)
+    assert "$resumePostureArgs.Count -gt 0 -and $FakExe" in ps1
+    # a malformed mode warns and resumes passive rather than stranding the wave
+    assert "unknown managed-cache mode (auto|on|off)" in ps1
+
+
+def test_py_and_ps1_name_the_same_posture_env_knobs():
+    # The .py and .ps1 launchers MUST name the identical env knobs so an operator configures the
+    # posture once and it applies whichever watchdog the box runs (#2178's single-policy intent).
+    wd = _reload({})
+    ps1 = Path(__file__).with_name("fleet_resume_watchdog.ps1").read_text(encoding="utf-8")
+    assert wd.FLEET_MANAGED_CACHE_ENV == "FAK_MANAGED_CACHE"
+    assert wd.FLEET_GUARD_API_KEY_ENV_ENV == "FAK_GUARD_API_KEY_ENV"
+    assert wd.FLEET_MANAGED_CACHE_ENV in ps1 and wd.FLEET_GUARD_API_KEY_ENV_ENV in ps1
 
 
 if __name__ == "__main__":

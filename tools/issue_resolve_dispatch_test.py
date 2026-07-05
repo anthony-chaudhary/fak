@@ -9,7 +9,11 @@ directly.
 from __future__ import annotations
 
 import importlib.util
+import atexit
+import os
+import shutil
 import sys
+import tempfile
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -24,6 +28,9 @@ def load():
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    runs_tmp = Path(tempfile.mkdtemp(prefix="issue-resolve-test-runs-"))
+    atexit.register(shutil.rmtree, runs_tmp, ignore_errors=True)
+    mod.RUNS_DIRNAME = runs_tmp
     return mod
 
 
@@ -607,6 +614,7 @@ class EvaluateTest(unittest.TestCase):
         mod.lane_issue_numbers = lambda root, lane, exclude=None: pick
         mod.live_resolution_issues = lambda runs_dir: set(live_issues or [])
         mod.live_resolution_lanes = lambda runs_dir: set(held_lanes or [])
+        mod.live_lane_lease_lanes = lambda root: {"lanes": []}
         mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set(cooled or [])
         mod.locally_witnessed_issues = lambda root, **k: set()
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
@@ -659,6 +667,41 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["lane"], "gateway")
         self.assertEqual(p["target_issue"], 467)
         self.assertIn("467", p["reason"])
+
+    def test_would_spawn_unguarded_is_not_launch_ready(self) -> None:
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467],
+                          "by_lane_count": {"gateway": 1}})
+        mod.dispatch_worker.guarded_launch_command = (
+            lambda command, lane, backend, root, env: (list(command), False))
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "WOULD_SPAWN")
+        self.assertFalse(p["guarded"])
+        self.assertFalse(p["launch_gate"]["ready"])
+        self.assertEqual(p["launch_gate"]["blockers"][0]["code"], "UNGUARDED_WORKER")
+        rendered = mod.render(p)
+        self.assertIn("NOT launch-ready", rendered)
+        self.assertNotIn("re-run with --live", rendered)
+
+    def test_guarded_would_spawn_is_launch_ready(self) -> None:
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467],
+                          "by_lane_count": {"gateway": 1}})
+        mod.dispatch_worker.guarded_launch_command = (
+            lambda command, lane, backend, root, env: (["fak", "guard", "--", *command], True))
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertTrue(p["launch_gate"]["ready"])
+        self.assertEqual(p["launch_gate"]["blockers"], [])
+        self.assertIn("re-run with --live", mod.render(p))
 
     def test_issue_contract_hold_blocks_spawn(self) -> None:
         mod = load()
@@ -716,6 +759,38 @@ class EvaluateTest(unittest.TestCase):
         self.assertIn("ISSUE_SCOPE_INCOMPLETE", p["contract_skipped"][0]["reason"])
         # The recorded gate is the CHOSEN issue's (passing), not the skipped head's.
         self.assertTrue(p["issue_contract_gate"]["ok"])
+
+    def test_multi_lane_scope_scans_to_next_safe_issue(self) -> None:
+        """A broad head issue should not wedge a lane when a later candidate fits
+        the lane lease. The scan is bounded and transparent like contract holds."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "docs", "numbers": [467, 466],
+                          "by_lane_count": {"docs": 2},
+                          "eligible_by_lane": [["docs", [467, 466]]]})
+
+        def scope(root, text, lane):
+            if "title 467" in text:
+                return {
+                    "multi_lane": True,
+                    "chosen_lane": lane,
+                    "chosen_tree": ["docs/**"],
+                    "uncovered_lanes": ["tools"],
+                    "uncovered": [{"path": "tools/status.py", "lanes": ["tools"]}],
+                }
+            return {"multi_lane": False, "chosen_lane": lane,
+                    "chosen_tree": ["docs/**"], "uncovered_lanes": [],
+                    "uncovered": []}
+
+        mod.scan_multi_lane_scope = scope
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "WOULD_SPAWN")
+        self.assertEqual(p["target_issue"], 466)
+        self.assertEqual([r["issue"] for r in p["multi_lane_skipped"]], [467])
+        self.assertIn("multi-lane head", mod.render(p))
 
     def test_contract_scan_bounded_holds_when_none_ready(self) -> None:
         """When every scanned issue is thin, the tick still HOLDs (the floor is
@@ -860,6 +935,8 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["verdict"], "WOULD_REPAIR")
         self.assertEqual(p["action"], "would_repair")
         self.assertEqual(p["contract_repair"]["batch"], [467, 466])
+        self.assertIn("launch_gate", p)
+        self.assertIn("guarded", p)
         self.assertEqual(p["contract_held_prior"], 2)
 
     def test_hold_tick_records_skipped_and_final_target(self) -> None:
@@ -928,6 +1005,8 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["verdict"], "WOULD_REPAIR")
         self.assertEqual(p["action"], "would_repair")
         self.assertEqual(p["contract_repair"]["batch"], [467, 466])
+        self.assertIn("launch_gate", p)
+        self.assertIn("guarded", p)
         self.assertEqual(mod.tick_exit_code(p), 0)  # benign: work was dispatched
 
     def test_all_thin_live_spawns_repair_worker_with_repair_prefix(self) -> None:
@@ -1202,13 +1281,43 @@ class EvaluateTest(unittest.TestCase):
         self._patch(
             mod,
             pre={"verdict": "REFUSE_AT_CAP", "reason": "2/2 live", "cap": 2,
-                 "live": 2, "account": {}},
+                 "live": 2, "max_workers": 2, "host_cap": 16,
+                 "capacity_limiter": {
+                     "primary": "configured_max",
+                     "term": "max_workers",
+                     "raw": {"max_workers": 2, "host_cap": 16},
+                 },
+                 "account": {}},
             pick={"lane": "gateway", "numbers": [467], "by_lane_count": {}})
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
                          lane=None, live=False)
         self.assertFalse(p["ok"])
         self.assertEqual(p["verdict"], "REFUSE_AT_CAP")
         self.assertIn("preflight refused", p["reason"])
+        self.assertEqual(p["preflight"]["capacity_limiter"]["term"], "max_workers")
+        self.assertEqual(p["preflight_hint"]["kind"], "configured_max_workers")
+        self.assertEqual(p["preflight_hint"]["required_min"], 3)
+        self.assertIn("--max-workers=2", mod.render(p))
+
+    def test_refused_at_host_cap_surfaces_live_limiter(self) -> None:
+        mod = load()
+        self._patch(
+            mod,
+            pre={"verdict": "REFUSE_AT_CAP", "reason": "16/16 live", "cap": 1,
+                 "live": 16, "max_workers": 1, "host_cap": 16,
+                 "capacity_limiter": {
+                     "primary": "leases",
+                     "term": "live",
+                     "raw": {"max_workers": 1, "host_cap": 16},
+                 },
+                 "account": {}},
+            pick={"lane": "gateway", "numbers": [467], "by_lane_count": {}})
+        p = mod.evaluate(ROOT, max_workers=1, work_kind="engineering",
+                         lane=None, live=False)
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["preflight_hint"]["kind"], "live")
+        self.assertIn("capacity limiter leases/live", p["preflight_hint"]["message"])
+        self.assertNotIn("rerun with --max-workers", p["preflight_hint"]["message"])
 
     def test_no_lane_when_router_empty(self) -> None:
         mod = load()
@@ -1223,15 +1332,88 @@ class EvaluateTest(unittest.TestCase):
         # Every lane with open issues is fak's own source tree -- distinct from the
         # plain "router empty" NO_LANE case, and named in the payload so an operator
         # (or the fleet dashboard) can see WHY, not just that nothing was picked.
+        import json
+        import tempfile
         mod = load()
         self._patch(mod, pre=self.SPAWN_OK,
                     pick={"lane": None, "numbers": [], "by_lane_count": {},
                           "self_modify_held": ["cmd", "gateway"]})
-        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
-                          lane=None, live=False)
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            p = mod.evaluate(root, max_workers=2, work_kind="engineering",
+                             lane=None, live=False)
+            last_tick = json.loads(
+                (root / mod.RUNS_DIRNAME / "last-resolve-tick-claude.json")
+                .read_text(encoding="utf-8"))
         self.assertFalse(p["ok"])
         self.assertEqual(p["verdict"], "SELF_MODIFY_HOLD")
         self.assertEqual(p["self_modify_held"], ["cmd", "gateway"])
+        self.assertFalse(p["launch_gate"]["ready"])
+        self.assertEqual(p["launch_gate"]["blockers"][0]["code"], "SELF_MODIFY_HOLD")
+        self.assertIn("route-non-self-source", p["launch_gate"]["blockers"][0]["next_action"])
+        self.assertIn("launch gate: BLOCKED", mod.render(p))
+        self.assertEqual(last_tick["verdict"], "SELF_MODIFY_HOLD")
+        self.assertEqual(last_tick["launch_gate"]["blockers"][0]["code"],
+                         "SELF_MODIFY_HOLD")
+
+    def test_no_lane_waits_when_safe_lanes_are_busy_before_self_source(self) -> None:
+        import json
+        import tempfile
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": None, "numbers": [], "by_lane_count": {},
+                          "safe_lanes_busy": ["docs", "tools"],
+                          "self_modify_held": ["cmd", "gateway"]},
+                    held_lanes=["docs", "tools"])
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            p = mod.evaluate(root, max_workers=2, work_kind="engineering",
+                             lane=None, live=False)
+            last_tick = json.loads(
+                (root / mod.RUNS_DIRNAME / "last-resolve-tick-claude.json")
+                .read_text(encoding="utf-8"))
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "SELF_MODIFY_HOLD")
+        self.assertEqual(p["safe_lanes_busy"], ["docs", "tools"])
+        self.assertEqual(p["launch_gate"]["blockers"][0]["code"], "SAFE_LANES_BUSY")
+        self.assertEqual(p["launch_gate"]["blockers"][0]["next_action"],
+                         "wait-for-safe-lane-lease")
+        self.assertEqual(p["launch_gate"]["blockers"][1]["code"], "SELF_MODIFY_HOLD")
+        self.assertEqual(last_tick["launch_gate"]["blockers"][0]["code"],
+                         "SAFE_LANES_BUSY")
+
+    def test_live_lane_lease_blocks_dry_run_candidate(self) -> None:
+        import tempfile
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "docs", "numbers": [2042], "by_lane_count": {"docs": 1},
+                          "eligible_by_lane": [["docs", [2042]]]})
+        mod.live_lane_lease_lanes = lambda root: {
+            "lanes": ["docs"],
+            "records": [{"lane": "resolve-docs", "tree": ["docs/**"]}],
+        }
+        seen: dict = {}
+
+        def picker(root, lane, exclude=None):
+            seen["exclude"] = set(exclude or set())
+            return {
+                "lane": None,
+                "numbers": [],
+                "by_lane_count": {"docs": 1, "gateway": 1},
+                "eligible_by_lane": [],
+                "safe_lanes_busy": ["docs"],
+                "self_modify_held": ["gateway"],
+            }
+
+        mod.lane_issue_numbers = picker
+        with tempfile.TemporaryDirectory() as d:
+            p = mod.evaluate(Path(d), max_workers=2, work_kind="engineering",
+                             lane=None, live=False)
+        self.assertIn("docs", seen["exclude"])
+        self.assertEqual(p["lease_held_lanes"], ["docs"])
+        self.assertEqual(p["held_lanes"], ["docs"])
+        self.assertFalse(p["launch_gate"]["ready"])
+        self.assertEqual(p["launch_gate"]["blockers"][0]["code"], "SAFE_LANES_BUSY")
 
     def test_live_reports_spawn_failed_when_worker_exits_silent_immediately(self) -> None:
         mod = load()
@@ -1271,13 +1453,14 @@ class EvaluateTest(unittest.TestCase):
         mod = load()
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
+            runs = root / mod.RUNS_DIRNAME
             self._patch(mod, pre=self.SPAWN_OK,
                         pick={"lane": "tools", "numbers": [1402], "by_lane_count": {}})
 
             def fake_spawn(*_args, **_kwargs):
                 return {
                     "pid": 303,
-                    "log": str(root / ".dispatch-runs" / "resolve-1402.log"),
+                    "log": str(runs / "resolve-1402.log"),
                     "issue": 1402,
                     "lane": "tools",
                     "backend": "claude",
@@ -1299,7 +1482,7 @@ class EvaluateTest(unittest.TestCase):
             self.assertEqual(p["verdict"], "SPAWN_FAILED")
             self.assertIn("with code 1", p["reason"])
             self.assertEqual(p["quota_cap"]["source"], "early_exit")
-            self.assertTrue((root / ".dispatch-runs" / "account-cap-claude.json").exists())
+            self.assertTrue((runs / "account-cap-claude.json").exists())
 
 
 class BuildWorkerCommandTest(unittest.TestCase):
@@ -1643,6 +1826,16 @@ class LaneIssueNumbersSelfModifyHoldTest(unittest.TestCase):
         self._router(mod)
         picked = mod.lane_issue_numbers(ROOT, None, exclude={"docs"}, guarded=True)
         self.assertEqual(picked["lane"], "tools")
+        self.assertEqual(picked["safe_lanes_busy"], ["docs"])
+        self.assertEqual(picked["self_modify_held"], ["gateway"])
+
+    def test_safe_lanes_busy_surfaces_when_only_self_source_remains(self) -> None:
+        mod = load()
+        self._router(mod)
+        picked = mod.lane_issue_numbers(ROOT, None, exclude={"docs", "tools"},
+                                        guarded=True)
+        self.assertIsNone(picked["lane"])
+        self.assertEqual(picked["safe_lanes_busy"], ["docs", "tools"])
         self.assertEqual(picked["self_modify_held"], ["gateway"])
 
     def test_default_guarded_reads_dispatch_worker_guard_enabled(self) -> None:
@@ -2322,6 +2515,38 @@ class WaveMembershipTest(unittest.TestCase):
             self.assertEqual(len(sidecars), 1)
             self.assertEqual(json.loads(sidecars[0].read_text(encoding="utf-8")), account)
 
+    def test_spawn_stamps_lease_sidecar(self) -> None:
+        import json
+        import tempfile
+        from unittest import mock
+        mod = load()
+
+        class _FakePopen:
+            def __init__(self, argv, **kwargs):
+                self.pid = 10
+
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            lease = {
+                "acquired": True,
+                "id": "resolve-tools",
+                "holder": "session-1",
+                "generation": 4,
+                "session_id": "sess-1",
+                "tree": ["tools/**"],
+            }
+            with mock.patch.object(mod.subprocess, "Popen", _FakePopen):
+                res = mod.spawn_issue_worker(["true"], {}, runs, runs,
+                                             issue=2, lane="tools", backend="claude",
+                                             lease=lease)
+            self.assertEqual(res["lease"]["id"], "resolve-tools")
+            sidecars = list(runs.glob("*.lease"))
+            self.assertEqual(len(sidecars), 1)
+            self.assertEqual(json.loads(sidecars[0].read_text(encoding="utf-8")),
+                             {"id": "resolve-tools", "holder": "session-1",
+                              "generation": 4, "session_id": "sess-1",
+                              "tree": ["tools/**"]})
+
     def test_opencode_spawn_stages_prompt_and_unwraps_npm_shim(self) -> None:
         import tempfile
         from unittest import mock
@@ -2533,17 +2758,39 @@ class LaneLeaseHelperTest(unittest.TestCase):
             return {"rc": 0, "verdict": {"verdict": {"ok": True},
                                          "record": {"id": "resolve-gateway", "generation": 2}}}
         out = mod.acquire_lane_lease(ROOT, "gateway", tree=["internal/gateway/**"],
-                                     ttl_s=900, runner=runner)
+                                     ttl_s=900, holder="owner-1", runner=runner)
         self.assertTrue(out["acquired"])
         self.assertFalse(out["refused"])
         self.assertEqual(out["id"], "resolve-gateway")
         self.assertEqual(out["generation"], 2)
 
+    def test_live_lane_lease_lanes_strips_resolve_prefix(self) -> None:
+        mod = load()
+
+        def runner(root, args, **k):
+            self.assertEqual(args, ["live"])
+            return {"rc": 0, "verdict": [
+                {"lane": "resolve-docs", "tree": ["docs/**"]},
+                {"lane": "resolve-tools", "tree": ["tools/**"]},
+            ]}
+
+        out = mod.live_lane_lease_lanes(ROOT, runner=runner)
+        self.assertEqual(out["lanes"], ["docs", "tools"])
+        self.assertEqual(len(out["records"]), 2)
+
+    def test_live_lane_lease_lanes_fails_open_on_bad_output(self) -> None:
+        mod = load()
+        out = mod.live_lane_lease_lanes(
+            ROOT, runner=lambda root, args, **k: {"rc": 0, "verdict": {"bad": True}})
+        self.assertEqual(out["lanes"], [])
+        self.assertTrue(out["fail_open"])
+
     def test_acquire_exit3_is_refused(self) -> None:
         mod = load()
         def runner(root, args, **k):
             return {"rc": 3, "verdict": {"verdict": {"ok": False, "reason": "LEASE_HELD"}}}
-        out = mod.acquire_lane_lease(ROOT, "docs", tree=["docs/**"], ttl_s=900, runner=runner)
+        out = mod.acquire_lane_lease(ROOT, "docs", tree=["docs/**"], ttl_s=900,
+                                     holder="owner-1", runner=runner)
         self.assertTrue(out["refused"])
         self.assertFalse(out["acquired"])
         self.assertEqual(out["reason"], "LEASE_HELD")
@@ -2574,13 +2821,114 @@ class LaneLeaseHelperTest(unittest.TestCase):
         self.assertIn("docs/**", argv)
         self.assertIn("internal/spec/**", argv)
 
+    def test_acquire_binds_current_session_when_valid(self) -> None:
+        # New leases should not become another legacy host:pid record. When the
+        # harness exposes a valid session id, pass it through to `fak leaseref
+        # acquire --session` so the read-side liveness witness can classify the
+        # lane by the owning session descriptor heartbeat. With no explicit holder,
+        # omit --holder so the CLI mints the structured <node-id>/<session-id>
+        # holder and then read that holder back from the returned record.
+        mod = load()
+        seen: dict = {}
+        def runner(root, args, **k):
+            self.assertEqual(args[0], "acquire")
+            seen["args"] = list(args)
+            return {"rc": 0, "verdict": {"verdict": {"ok": True},
+                                         "record": {"id": "resolve-docs",
+                                                    "holder": "node-a/sess_7-abc",
+                                                    "generation": 1}}}
+        with mock.patch.dict(os.environ, {"FAK_LEASE_SESSION_ID": "sess_7-abc",
+                                          "CLAUDE_CODE_SESSION_ID": "",
+                                          "FAK_LEASE_OWNER": ""}, clear=False):
+            out = mod.acquire_lane_lease(ROOT, "docs", tree=["docs/**"],
+                                         ttl_s=900, runner=runner)
+        self.assertTrue(out["acquired"])
+        self.assertEqual(out["session_id"], "sess_7-abc")
+        self.assertEqual(out["holder"], "node-a/sess_7-abc")
+        argv = seen["args"]
+        self.assertNotIn("--holder", argv)
+        self.assertEqual(argv[argv.index("--session") + 1], "sess_7-abc")
+        self.assertNotIn("session_publish", out)
+
+    def test_acquire_without_session_env_mints_and_publishes_session(self) -> None:
+        mod = load()
+        calls: list[list[str]] = []
+        def runner(root, args, **k):
+            calls.append(list(args))
+            if args[0] == "session-publish":
+                self.assertEqual(args[args.index("--session") + 1],
+                                 "dispatch-HOST-ONE-1234")
+                self.assertEqual(args[args.index("--ttl") + 1], "900")
+                return {"rc": 0, "verdict": {"id": "dispatch-HOST-ONE-1234"}}
+            self.assertEqual(args[0], "acquire")
+            return {"rc": 0, "verdict": {"verdict": {"ok": True},
+                                         "record": {"id": "resolve-docs",
+                                                    "holder": "node-a/dispatch-HOST-ONE-1234",
+                                                    "generation": 1}}}
+        env = {"FAK_LEASE_SESSION_ID": "", "CLAUDE_CODE_SESSION_ID": "",
+               "FAK_LEASE_OWNER": "", "COMPUTERNAME": "HOST ONE"}
+        with mock.patch.dict(os.environ, env, clear=False):
+            with mock.patch.object(mod.os, "getpid", return_value=1234):
+                out = mod.acquire_lane_lease(ROOT, "docs", tree=["docs/**"],
+                                             ttl_s=900, runner=runner)
+        self.assertTrue(out["acquired"])
+        self.assertEqual(out["session_id"], "dispatch-HOST-ONE-1234")
+        self.assertEqual(out["holder"], "node-a/dispatch-HOST-ONE-1234")
+        self.assertEqual(out["session_publish"],
+                         {"published": True, "session_id": "dispatch-HOST-ONE-1234"})
+        self.assertEqual([c[0] for c in calls], ["session-publish", "acquire"])
+        argv = calls[1]
+        self.assertNotIn("--holder", argv)
+        self.assertEqual(argv[argv.index("--session") + 1],
+                         "dispatch-HOST-ONE-1234")
+
+    def test_acquire_honors_explicit_holder_with_session(self) -> None:
+        mod = load()
+        seen: dict = {}
+        def runner(root, args, **k):
+            self.assertEqual(args[0], "acquire")
+            seen["args"] = list(args)
+            return {"rc": 0, "verdict": {"verdict": {"ok": True},
+                                         "record": {"id": "resolve-docs",
+                                                    "holder": "owner-7",
+                                                    "generation": 1}}}
+        with mock.patch.dict(os.environ, {"FAK_LEASE_SESSION_ID": "sess_7-abc",
+                                          "CLAUDE_CODE_SESSION_ID": ""}, clear=False):
+            out = mod.acquire_lane_lease(ROOT, "docs", tree=["docs/**"],
+                                         ttl_s=900, holder="owner-7", runner=runner)
+        self.assertTrue(out["acquired"])
+        argv = seen["args"]
+        self.assertEqual(argv[argv.index("--holder") + 1], "owner-7")
+        self.assertEqual(argv[argv.index("--session") + 1], "sess_7-abc")
+
+    def test_acquire_skips_invalid_session_binding(self) -> None:
+        # Fail open to the holder-only lease rather than breaking admission when
+        # an external harness exports something that cannot be a refs/fak segment.
+        mod = load()
+        for sid in ("bad/session", "session-already-prefixed"):
+            seen: dict = {}
+            def runner(root, args, **k):
+                self.assertEqual(args[0], "acquire")
+                seen["args"] = list(args)
+                return {"rc": 0, "verdict": {"verdict": {"ok": True},
+                                             "record": {"id": "resolve-docs",
+                                                        "holder": "owner-7",
+                                                        "generation": 1}}}
+            with mock.patch.dict(os.environ, {"FAK_LEASE_SESSION_ID": sid,
+                                              "CLAUDE_CODE_SESSION_ID": ""}, clear=False):
+                out = mod.acquire_lane_lease(ROOT, "docs", tree=["docs/**"],
+                                             ttl_s=900, holder="owner-7", runner=runner)
+            self.assertTrue(out["acquired"], sid)
+            self.assertIsNone(out["session_id"], sid)
+            self.assertNotIn("--session", seen["args"], sid)
+
     def test_acquire_other_exit_fails_open(self) -> None:
         mod = load()
         for rc in (1, 2, 127):
             def runner(root, args, _rc=rc, **k):
                 return {"rc": _rc, "verdict": None}
             out = mod.acquire_lane_lease(ROOT, "gateway", tree=["internal/gateway/**"],
-                                         ttl_s=900, runner=runner)
+                                         ttl_s=900, holder="owner-1", runner=runner)
             self.assertFalse(out["acquired"], rc)
             self.assertFalse(out["refused"], rc)
             self.assertTrue(out["fail_open"], rc)
@@ -2593,6 +2941,41 @@ class LaneLeaseHelperTest(unittest.TestCase):
         out = mod.acquire_lane_lease(ROOT, "gateway", tree=["internal/gateway/**"], ttl_s=900)
         self.assertTrue(out["fail_open"])
         self.assertEqual(out["rc"], 127)
+
+    def test_release_argv_carries_holder_and_generation(self) -> None:
+        mod = load()
+        seen: dict = {}
+        def runner(root, args, **k):
+            seen["args"] = list(args)
+            return {"rc": 0, "verdict": {"ok": True}}
+        out = mod.release_lane_lease(
+            ROOT,
+            {"id": "resolve-docs", "holder": "sess-7", "generation": 3},
+            runner=runner)
+        self.assertTrue(out["released"])
+        argv = seen["args"]
+        self.assertEqual(argv[0], "release")
+        self.assertEqual(argv[argv.index("--id") + 1], "resolve-docs")
+        self.assertEqual(argv[argv.index("--holder") + 1], "sess-7")
+        self.assertEqual(argv[argv.index("--generation") + 1], "3")
+        self.assertNotIn("--force", argv)
+
+    def test_release_refusal_and_failure_leave_backstop(self) -> None:
+        mod = load()
+        def refused(root, args, **k):
+            return {"rc": 3, "verdict": {"verdict": {"ok": False, "reason": "STALE_LEASE"}}}
+        out = mod.release_lane_lease(
+            ROOT, {"id": "resolve-docs", "holder": "sess-7"}, runner=refused)
+        self.assertFalse(out["released"])
+        self.assertTrue(out["refused"])
+        self.assertEqual(out["reason"], "STALE_LEASE")
+
+        def failed(root, args, **k):
+            return {"rc": 1, "error": "git store busy"}
+        out = mod.release_lane_lease(
+            ROOT, {"id": "resolve-docs", "holder": "sess-7"}, runner=failed)
+        self.assertFalse(out["released"])
+        self.assertTrue(out["fail_open"])
 
     def test_lane_tree_falls_back_to_convention(self) -> None:
         # A dos doctor failure (no taxonomy) -> the internal/<lane>/** convention.
@@ -2704,10 +3087,9 @@ class EvaluateLeaseGateTest(unittest.TestCase):
         self.assertTrue(did["spawn"])
         self.assertTrue(p["lease"].get("fail_open"))
 
-    def test_spawn_failure_surfaces_lease_held_until_ttl(self) -> None:
-        # `fak leaseref` has no delete-one-live verb, so a worker that died at exec
-        # leaves its lane lease held until the TTL lapses and a later tick's `reap`
-        # sweeps it. The SPAWN_FAILED record must be honest about that held lease.
+    def test_spawn_failure_releases_acquired_lease(self) -> None:
+        # A worker that dies during the spawn probe is already proven dead, so the
+        # dispatcher releases its lane immediately with the acquired holder/generation.
         mod = load()
         def spawn(*a, **k):
             return {"pid": 9, "log": "resolve-467.log", "issue": 467, "lane": "gateway",
@@ -2718,12 +3100,15 @@ class EvaluateLeaseGateTest(unittest.TestCase):
         def lease_runner(root, args, **k):
             if args[0] == "acquire":
                 return {"rc": 0, "verdict": {"verdict": {"ok": True},
-                                             "record": {"id": "resolve-gateway", "generation": 1}}}
+                                             "record": {"id": "resolve-gateway",
+                                                        "holder": "node-a/dispatch-session",
+                                                        "generation": 1}}}
             return {"rc": 0, "verdict": None}
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering", lane="gateway",
                          live=True, spawn_probe_s=5.0, lease_runner=lease_runner)
         self.assertEqual(p["verdict"], "SPAWN_FAILED")
-        self.assertEqual(p["lease_held_until_ttl"]["id"], "resolve-gateway")
+        self.assertTrue(p["lease_release"]["released"])
+        self.assertNotIn("lease_held_until_ttl", p)
 
     def test_dry_run_never_touches_the_lease(self) -> None:
         # The gate is AFTER the dry-run return, so a dry-run plans without holding a
@@ -2930,6 +3315,40 @@ class WitnessExitedWorkersTest(unittest.TestCase):
             self.assertEqual(len(out["witnessed"]), 1)
             self.assertEqual(out["witnessed"][0]["claim"], "CLAIM_WITNESSED")
 
+    def test_dead_worker_releases_recorded_lane_lease(self) -> None:
+        import json
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            log = self._mk(runs, 1324, "20260629-120150", pid=4248)
+            log.with_suffix(".lease").write_text(json.dumps({
+                "id": "resolve-docs",
+                "holder": "session-1",
+                "generation": 5,
+                "tree": ["docs/**"],
+            }), encoding="utf-8")
+            def git(root, args):
+                return (0, "cafef00d\x1ffix: bind (#1324)\n")
+            def audit(root, sha):
+                return {"verdict": "OK", "witness": "diff-witnessed"}
+            seen: dict = {}
+            def lease_runner(root, args, **k):
+                seen["args"] = list(args)
+                return {"rc": 0, "verdict": {"ok": True}}
+            out = mod.witness_exited_workers(runs, ROOT, live=True, probe=self._dead,
+                                             git=git, audit_runner=audit,
+                                             lease_runner=lease_runner)
+            self.assertEqual(len(out["lease_released"]), 1)
+            self.assertEqual(out["lease_released"][0]["id"], "resolve-docs")
+            argv = seen["args"]
+            self.assertEqual(argv[0], "release")
+            self.assertEqual(argv[argv.index("--holder") + 1], "session-1")
+            self.assertEqual(argv[argv.index("--generation") + 1], "5")
+            self.assertNotIn("--force", argv)
+            side = json.loads(log.with_suffix(".witness").read_text(encoding="utf-8"))
+            self.assertTrue(side["lease_release"]["released"])
+
     def test_no_resolving_commit_is_claim_no_commit(self) -> None:
         import tempfile
         mod = load()
@@ -2979,19 +3398,27 @@ class WitnessExitedWorkersTest(unittest.TestCase):
             self.assertEqual(out["audited"], [])
 
     def test_dry_run_audits_but_writes_no_sidecar(self) -> None:
+        import json
         import tempfile
         mod = load()
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
             log = self._mk(runs, 1324, "20260629-120500", pid=4247)
+            log.with_suffix(".lease").write_text(json.dumps({
+                "id": "resolve-docs", "holder": "session-1", "generation": 5,
+            }), encoding="utf-8")
             def git(root, args):
                 return (0, "cafef00d\x1ffix: bind (#1324)\n")
             def audit(root, sha):
                 return {"verdict": "ABSTAIN", "witness": "abstain"}
+            def boom_release(root, args, **k):
+                raise AssertionError("dry-run witness must not release a lease")
             out = mod.witness_exited_workers(runs, ROOT, live=False, probe=self._dead,
-                                             git=git, audit_runner=audit)
+                                             git=git, audit_runner=audit,
+                                             lease_runner=boom_release)
             self.assertEqual(out["unwitnessed"][0]["claim"], "CLAIM_UNWITNESSED")
             self.assertFalse(log.with_suffix(".witness").exists())
+            self.assertEqual(out["lease_released"], [])
 
     def test_no_pid_sidecar_is_not_auditable(self) -> None:
         import tempfile

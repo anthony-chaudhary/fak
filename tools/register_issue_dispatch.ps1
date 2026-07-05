@@ -4,24 +4,26 @@ DoS-SAFE issue dispatcher always-on.
 
 Unlike register_dos_dispatch_watchdog.ps1 (which respawns the kernel supervisor
 `dos loop --enact` and spawns workers with NO host/account preflight), this task
-runs ONE guarded issue-resolution tick every few minutes. Each tick:
+runs one guarded issue-dispatch refill every few minutes. Each refill:
 
-  * preflights `fak dispatch tick`  -> host guard clean, an account is
-    free, AND live workers < cap, else it REFUSES (the no-DoS guarantee: the live
-    worker population can never exceed the cap), and
-  * pins the switcher-chosen account, then launches at most one lane worker.
+  * preflights `fak dispatch auto`  -> host guard clean, distinct accounts
+    free, live workers < cap, and routed issue work exists, else it declines
+    without treating capacity/no-work backpressure as a crash, and
+  * launches the refill needed to bring the worker population up to the live
+    account/host/work ceiling.
 
 SAFE BY DEFAULT: installed WITHOUT -Live, the tick is DRY-RUN -- the task only
 LOGS the plan it would run, spawning nothing. Add -Live to actually spawn workers
 (an explicit opt-in to autonomous spawning). -MaxWorkers is the operator's outer
-ceiling (default 8, or the FAK_MAX_WORKERS env knob at install time); the
+ceiling (default 20, or the FAK_MAX_WORKERS env knob at install time); the
 preflight's adaptive cap = min(this, host_cap, seats) is the real DoS bound, so a
 loaded box or a depleted account pool throttles below it.
 NOTE: an already-installed task keeps the -MaxWorkers it was registered with (the
 value is baked into the stored argument list) -- re-run install to pick up a new one.
 
   .\register_issue_dispatch.ps1                       # install, DRY-RUN (logs plans, spawns nothing)
-  .\register_issue_dispatch.ps1 -Live -MaxWorkers 8   # install, LIVE (bounded autonomous spawning)
+  .\register_issue_dispatch.ps1 -Live -MaxWorkers 20  # install, LIVE auto-refill (bounded autonomous spawning)
+  .\register_issue_dispatch.ps1 -Mode resolve -Live   # install, LIVE single-tick canary
   .\register_issue_dispatch.ps1 -TaskName FleetIssueDispatchThroughput -Goal throughput
   .\register_issue_dispatch.ps1 -TaskName FleetIssueDispatchPriority -Goal high-priority
   .\register_issue_dispatch.ps1 -Action preview        # print the task action without installing
@@ -33,17 +35,20 @@ param(
   [ValidateSet('install','remove','status','preview')] [string]$Action = 'install',
   [string]$TaskName   = 'FleetIssueDispatch',
   [string]$Workspace  = $(Split-Path -Parent $PSScriptRoot),
-  # Default mirrors dispatch_preflight.DEFAULT_MAX_WORKERS: built-in 8, retunable
+  # Default mirrors dispatchtick.DefaultMaxWorkers: built-in 20, retunable
   # via FAK_MAX_WORKERS (read once here at install; the value is baked into the task).
-  [int]$MaxWorkers    = $(if ($env:FAK_MAX_WORKERS -match '^[1-9]\d*$') { [int]$env:FAK_MAX_WORKERS } else { 8 }),
+  [int]$MaxWorkers    = $(if ($env:FAK_MAX_WORKERS -match '^[1-9]\d*$') { [int]$env:FAK_MAX_WORKERS } else { 20 }),
   [int]$EveryMinutes  = 10,
   # Which tick the always-on task runs:
-  #   resolve (default) -> fak dispatch tick: spawns an ISSUE-resolution
-  #     worker on one concrete open issue (cites #N so the close path fires). This
-  #     is the arm that moves the open-issue counter on a plan-empty repo.
+  #   auto (default) -> fak dispatch auto: sizes a refill from live account,
+  #     host, and work headroom, then launches the priced safe set. This is the
+  #     default background arm for keeping Claude accounts utilized.
+  #   resolve -> fak dispatch tick: spawns at most one ISSUE-resolution
+  #     worker on one concrete open issue (cites #N so the close path fires).
+  #     Use as a canary or for deliberately serialized operation.
   #   loop -> issue_dispatch.py: spawns the generic /dos-dispatch-loop worker that
   #     resolves units from the PLAN portfolio (use when the repo ships PLAN-*.md).
-  [ValidateSet('resolve','loop')] [string]$Mode = 'resolve',
+  [ValidateSet('auto','resolve','loop')] [string]$Mode = 'auto',
   # Worker backend (resolve mode only): claude = opus (t1); opencode = glm-5.2 (t2,
   # a separate zai-coding-plan quota pool). Route a lane to opencode to relieve the
   # opus weekly-quota ceiling. Pair with -Lane to dedicate a task to one lane.
@@ -52,7 +57,8 @@ param(
   # Comma-separated lanes to drop from the busiest-pick (e.g. the opus task excludes
   # 'docs' so the glm task owns it). Ignored when -Lane is set.
   [string]$ExcludeLane = '',
-  # Optional resolve-mode goal. A named goal is passed to `fak dispatch tick` and
+  # Optional auto/resolve-mode goal. A named goal is passed to `fak dispatch auto`
+  # / `fak dispatch tick` and
   # suffixes the scheduler wrapper loop id, so throughput and high-priority tasks
   # are visible as separate actors in the loop ledger and lease holders.
   [string]$Goal = '',
@@ -148,8 +154,8 @@ function Get-DispatchGoalConfig {
 
 $goalCfg = Get-DispatchGoalConfig -Goal $Goal -GoalProfile $GoalProfile
 $goalProfileInput = ([string]$GoalProfile).Trim()
-if ($Mode -ne 'resolve' -and ($goalCfg.Goal -or $goalProfileInput)) {
-  throw "-Goal and -GoalProfile are supported only with -Mode resolve"
+if ($Mode -eq 'loop' -and ($goalCfg.Goal -or $goalProfileInput)) {
+  throw "-Goal and -GoalProfile are supported only with -Mode auto or -Mode resolve"
 }
 
 # Register the tick through `fak loop run` via the ScheduledTasks cmdlets, NOT
@@ -158,7 +164,19 @@ if ($Mode -ne 'resolve' -and ($goalCfg.Goal -or $goalProfileInput)) {
 # protect it did not survive the PowerShell -> schtasks /TR handoff. Splitting
 # Execute (fak/go) from Argument (fak args + child args) keeps Task Scheduler out of
 # nested shell quoting while the loop ledger records the child exit code and duration.
-if ($Mode -eq 'resolve') {
+if ($Mode -eq 'auto') {
+  $tickName = 'fak dispatch auto'
+  $fakChild = Resolve-FakLoopAction -Workspace $Workspace -FakExe $FakExe
+  $childArgs = @($fakChild.Execute)
+  $childArgs += [string[]]$fakChild.PrefixArgs
+  $childArgs += @('dispatch', 'auto', '--workspace', $Workspace, '--max-workers', [string]$MaxWorkers, '--json')
+  if ($Live) { $childArgs += '--live' }
+  if ($Backend -ne 'claude') { $childArgs += @('--backend', $Backend) }
+  if ($Lane)                 { $childArgs += @('--lane', $Lane) }
+  if ($ExcludeLane)          { $childArgs += @('--exclude-lane', $ExcludeLane) }
+  if ($goalCfg.Goal)         { $childArgs += @('--goal', $goalCfg.Goal) }
+  if ($goalProfileInput)     { $childArgs += @('--goal-profile', $goalCfg.Profile) }
+} elseif ($Mode -eq 'resolve') {
   $tickName = 'fak dispatch tick'
   $fakChild = Resolve-FakLoopAction -Workspace $Workspace -FakExe $FakExe
   $childArgs = @($fakChild.Execute)
@@ -180,7 +198,10 @@ if ($Mode -eq 'resolve') {
   $childArgs = @($py, $tick, '--workspace', $Workspace, '--max-workers', [string]$MaxWorkers, '--json')
   if ($Live) { $childArgs += '--live' }
 }
-if ($Mode -eq 'resolve') {
+if ($Mode -eq 'auto') {
+  $wrapperLoop = "issue-dispatch-auto/task-scheduler/$Backend"
+  if ($goalCfg.Token) { $wrapperLoop += "/$($goalCfg.Token)" }
+} elseif ($Mode -eq 'resolve') {
   $wrapperLoop = "issue-resolve-dispatch/task-scheduler/$Backend"
   if ($goalCfg.Token) { $wrapperLoop += "/$($goalCfg.Token)" }
 } else {
@@ -222,7 +243,20 @@ $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -Ru
 $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
                -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
 Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `
-               -Principal $principal -Settings $settings -Force | Out-Null
+               -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
+
+$installed = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+$installedAction = @($installed.Actions)[0]
+if (-not $installedAction) {
+  throw "scheduled task $TaskName installed without an action"
+}
+if ([string]$installedAction.Execute -ne [string]$taskAction.Execute -or
+    [string]$installedAction.Arguments -ne [string]$taskAction.Arguments -or
+    [string]$installedAction.WorkingDirectory -ne [string]$taskAction.WorkingDirectory) {
+  throw ("scheduled task $TaskName action mismatch after install; " +
+         "expected '$($taskAction.Execute) $($taskAction.Arguments)' but found " +
+         "'$($installedAction.Execute) $($installedAction.Arguments)'")
+}
 
 $runMode = if ($Live) { "LIVE (bounded autonomous spawning, cap=$MaxWorkers)" } else { "DRY-RUN (logs plans, spawns nothing)" }
 $goalText = if ($goalCfg.Token) { ", goal=$($goalCfg.Token)" } else { "" }

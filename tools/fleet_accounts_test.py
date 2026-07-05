@@ -6,13 +6,17 @@ import contextlib
 import io
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+ROOT = Path(__file__).resolve().parent.parent
+
+sys.path.insert(0, str(ROOT / "tools"))
 
 import fleet_accounts  # noqa: E402
 
@@ -824,6 +828,23 @@ class WaveAllocationTest(unittest.TestCase):
         self.assertTrue(all(lane["session_cap"] == 4 for lane in w["lanes"]))
         self.assertEqual({lane["tag"] for lane in w["lanes"]}, {"gem5", "gem7", "gem8"})
 
+    def test_wave_subtracts_live_lease_slots(self) -> None:
+        login_dir(self.home, ".claude-gem8-acct", uuid="uuid-8", email="gem8@x.ai")
+        leases = [
+            {"worker": f"resolve-{i}", "tag": "gem8",
+             "dir": str(self.home / ".claude-gem8-acct")}
+            for i in range(3)
+        ]
+        w = fleet_accounts.allocate_wave(
+            4, task_class="t1", home=str(self.home),
+            config_home=str(self.config_home), registry={}, leases=leases)
+        self.assertTrue(w["ok"])
+        self.assertEqual(w["granted"], 1)
+        self.assertEqual(w["shortfall"], 3)
+        self.assertEqual(w["distinct_pools"], 1)
+        self.assertEqual(w["lanes"][0]["session_slot"], 4)
+        self.assertEqual(w["lanes"][0]["session_cap"], 4)
+
     def test_wave_beats_naive_resolve_burst(self) -> None:
         # THE witness: identical roster, identical registry; the only change is wave vs
         # a burst of resolve(). naive collapses to one pool, wave spreads across all three.
@@ -924,6 +945,141 @@ class WaveAllocationTest(unittest.TestCase):
         pinned = fleet_accounts.allocate_wave(3, wave_id="W-42", **kw)
         self.assertEqual(pinned["wave_id"], "W-42")
         self.assertEqual({lane["wave_id"] for lane in pinned["lanes"]}, {"W-42"})
+
+
+class LaunchWaveDetachedScriptTest(unittest.TestCase):
+    """Contract tests for the PowerShell detached-wave planner.
+
+    The script is the high-throughput front door over ``fleet-accounts wave``. These
+    tests replace ``fak`` with a tiny PowerShell fixture, so no account roster,
+    preflight probe, or worker launch is touched.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.fake_fak = self.tmp / "fake-fak.ps1"
+        self.fake_fak.write_text(
+            """
+$Rest = $args
+if ($Rest -contains '-h' -or $Rest -contains '--help') {
+  Write-Output 'Usage: fak fleet-accounts wave'
+  Write-Output '  --count N'
+  exit 0
+}
+if ($Rest -contains 'definitely-no-such-product') {
+  [ordered]@{
+    ok = $false
+    requested = 1
+    granted = 0
+    shortfall = 1
+    distinct_pools = 0
+    size = 0
+    wave_id = 'wave-empty'
+    target_tier = 1
+    reason = 'no available account for a wave'
+    lanes = @()
+  } | ConvertTo-Json -Depth 12
+  exit 0
+}
+[ordered]@{
+  ok = $true
+  requested = 2
+  granted = 2
+  shortfall = 0
+  distinct_pools = 2
+  size = 2
+  wave_id = 'wave-test'
+  target_tier = 1
+  reason = 'granted 2 session slot(s) across 2 distinct pool(s)'
+  lanes = @(
+    [ordered]@{
+      tag = 'acct-a'
+      selected_tier = 1
+      session_slot = 1
+      session_cap = 4
+      pool = 'uuid:a'
+      config_dir = 'C:\\fake\\acct-a'
+      rank = 0
+      wave_id = 'wave-test'
+      size = 2
+    },
+    [ordered]@{
+      tag = 'acct-b'
+      selected_tier = 1
+      session_slot = 1
+      session_cap = 4
+      pool = 'uuid:b'
+      config_dir = 'C:\\fake\\acct-b'
+      rank = 1
+      wave_id = 'wave-test'
+      size = 2
+    }
+  )
+} | ConvertTo-Json -Depth 12
+exit 0
+""",
+            encoding="utf-8",
+        )
+        self.addCleanup(self._tmp.cleanup)
+
+    def _powershell(self) -> str:
+        exe = shutil.which("powershell") or shutil.which("pwsh")
+        if not exe:
+            self.skipTest("PowerShell unavailable")
+        return exe
+
+    def _run_launcher(self, *, product: str = "claude", launch: bool = False) -> subprocess.CompletedProcess[str]:
+        cmd = [self._powershell(), "-NoProfile", "-NonInteractive"]
+        if os.name == "nt":
+            cmd += ["-ExecutionPolicy", "Bypass"]
+        cmd += [
+            "-File", str(ROOT / "tools" / "launch_wave_detached.ps1"),
+            "-Count", "2",
+            "-SkipPreflight",
+            "-Json",
+            "-FakExe", str(self.fake_fak),
+            "-Workspace", str(ROOT),
+            "-PointerFile", ".claude/goal-prompts/resolve-top-issue-witnessed.md",
+            "-Product", product,
+        ]
+        if launch:
+            cmd.append("-Launch")
+        return subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, timeout=30)
+
+    def _json_plan(self, **kwargs: object) -> dict:
+        proc = self._run_launcher(**kwargs)
+        self.assertEqual(proc.returncode, 0, proc.stderr + proc.stdout)
+        return json.loads(proc.stdout)
+
+    def test_json_plan_refuses_launch_flag_before_any_spawn_path(self) -> None:
+        proc = self._run_launcher(launch=True)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("-Json is a dry-run plan format", proc.stderr + proc.stdout)
+
+    def test_json_plan_preserves_wave_membership_and_verdict_fields(self) -> None:
+        doc = self._json_plan()
+        self.assertTrue(doc["ok"])
+        self.assertEqual(doc["verdict"], "WOULD_WAVE")
+        self.assertEqual(doc["action"], "would_wave")
+        self.assertFalse(doc["live"])
+        self.assertFalse(doc["launch"])
+        self.assertEqual(doc["size"], 2)
+        self.assertEqual(doc["wave_id"], "wave-test")
+        self.assertEqual(doc["granted"], 2)
+        self.assertEqual(doc["distinct_pools"], 2)
+        self.assertEqual([lane["rank"] for lane in doc["lanes"]], [0, 1])
+        self.assertEqual({lane["wave_id"] for lane in doc["lanes"]}, {"wave-test"})
+        self.assertEqual({lane["size"] for lane in doc["lanes"]}, {2})
+
+    def test_json_plan_returns_structured_account_refusal(self) -> None:
+        doc = self._json_plan(product="definitely-no-such-product")
+        self.assertFalse(doc["ok"])
+        self.assertEqual(doc["verdict"], "WAVE_NO_SEATS")
+        self.assertEqual(doc["action"], "no_seats")
+        self.assertEqual(doc["allocation_requested"], 2)
+        self.assertEqual(doc["granted"], 0)
+        self.assertEqual(doc["reason"], "no available account for a wave")
 
 
 class IdentityReconciliationTest(unittest.TestCase):
