@@ -110,8 +110,9 @@ other in mind produces the "I lowered the budget and nothing changed" surprise.
   whole turns past the anchor: a cache-preserving shed. `--ctx-view-budget` (8000) is
   the O(1) `ctxplan` planner's resident-VIEW budget: it re-materializes history as a
   bounded planned view in place of the raw transcript. Shed vs planned view - a size
-  cut on the tail vs a re-plan of what stays resident (see the context-management
-  family below).
+  cut on the tail vs a re-plan of what stays resident. The sizing rule for both is in
+  the [long-context defaults doctrine](../long-context-defaults.md): HardContextCap is
+  a hard cap, not a target, and the resident budget must leave output reserve.
 
 ### managed cache - the knob, the lever, the tier, and the restart plan
 

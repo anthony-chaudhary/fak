@@ -9,6 +9,8 @@ description: "fak's deterministic token-saving-defaults scorecard: which stackin
 
 The question a cost-conscious operator asks the moment they run `fak guard -- claude` / `fak serve`: **of every token-saving method fak knows how to stack, which ones are ON by default — and are the high-value, low-loss ones turned on out of the box, or left dark behind a flag nobody flips?** Every number below is re-derived from the entrypoint source (`cmd/fak/guard.go`, `cmd/fak/serve.go`, the `Default*` constants in `internal/gateway/gateway.go`, and `internal/gateway/messages.go`) by `fak token-defaults-scorecard` — a lever's on/off state is the binary's real behavior, never a claim in the roster. The headline metric is **token-defaults-debt**: the count of concrete defects — a high-value saver left off, an on-by-default saver with no honest note, a default no test locks, a front door out of step. Driving it to zero means a user who runs fak with no flags gets the full stack of safe savings, each honestly labeled, none able to regress unnoticed.
 
+Budget size is governed separately by the [long-context defaults doctrine](../long-context-defaults.md): the advertised context window is a hard cap, not a target, and resident budgets should be labeled as witnessed, observed, modeled, or fallback.
+
 > Regenerate: `go run ./cmd/fak token-defaults-scorecard --markdown > docs/serving/token-defaults-scorecard.md`
 
 ## Headline

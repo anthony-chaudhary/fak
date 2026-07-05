@@ -47,7 +47,10 @@ fak is an **agent kernel**: a gateway you put in front of the model that keeps t
 provider's prompt-cache prefix byte-identical while shedding old turns, and (in the
 fused path) runs the model with an addressable, bit-exact KV cache. Its token-saving
 *defaults* are audited by `fak token-defaults-scorecard`
-([scorecard doc](serving/token-defaults-scorecard.md)). On by default today:
+([scorecard doc](serving/token-defaults-scorecard.md)). The budget-size policy for
+those bounded defaults lives in the [long-context defaults doctrine](long-context-defaults.md):
+the advertised context window is a hard cap, not a resident-context target. On by default
+today:
 
 | Saver | Loss | What it does | Lever |
 |---|---|---|---|

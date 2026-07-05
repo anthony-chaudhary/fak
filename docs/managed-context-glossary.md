@@ -16,6 +16,10 @@ silently assuming, and what remains fully user-controlled. Entries grounded in s
 name the real Go type or function behind them. The relay vocabulary is called out as a
 planned, data-only extension until the #1860 relay rungs consume it.
 
+For the separate budget-sizing doctrine behind long-context defaults, see
+[`long-context-defaults.md`](long-context-defaults.md): it defines HardContextCap, MVC,
+MECW, target resident budget, output reserve, and provenance labels.
+
 **How to read each entry:**
 
 - **What fak manages** — the mechanism runs without you; you do not have to track it.
