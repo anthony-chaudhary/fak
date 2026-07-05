@@ -208,6 +208,7 @@ class DispatchWorkerTest(unittest.TestCase):
         self.assertEqual(wrapped[0], "/usr/bin/fak")
         self.assertEqual(wrapped[1], "guard")
         self.assertEqual(wrapped[wrapped.index("--provider") + 1], "anthropic")
+        self.assertEqual(wrapped[wrapped.index("--precompact-hook") + 1], "enforce")
         self.assertIn("--audit", wrapped)
         # The raw worker argv is preserved verbatim AFTER the `--` separator.
         sep = wrapped.index("--")

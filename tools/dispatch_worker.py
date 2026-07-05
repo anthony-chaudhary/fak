@@ -255,6 +255,12 @@ GUARD_OFF_VALUES = frozenset({"0", "off", "false", "no", "", "disable", "disable
 GUARD_TIMEOUT_FLOOR_S = 600
 OPENCODE_DEFAULT_PROVIDER_ID = "zai-coding-plan"
 OPENCODE_GUARD_UPSTREAM_KEY_ENV = "FAK_OPENCODE_GUARD_UPSTREAM_API_KEY"
+# Headless Claude workers should not merely observe the PreCompact hook posture.
+# The live fleet failure class was `compact=fired` while issue-resolution workers
+# continued tens of thousands of tokens past the compact threshold; interactive
+# `fak guard` can keep its shadow default, but unattended dispatch needs the
+# actuator enforced at launch.
+CLAUDE_GUARD_PRECOMPACT_ARGS = ["--precompact-hook", "enforce"]
 
 
 def _opencode_model_provider(command: Sequence[str]) -> str:
@@ -470,6 +476,8 @@ def guard_wrap(
         return cmd
     provider = guard_provider(backend)
     extra: list[str] = []
+    if backend == "claude":
+        extra = [*extra, *CLAUDE_GUARD_PRECOMPACT_ARGS]
     if backend != "claude":
         e = env if env is not None else os.environ
         base = (e.get("FLEET_DOGFOOD_GUARD_BASEURL") or "").strip()
