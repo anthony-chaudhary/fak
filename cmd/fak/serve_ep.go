@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
@@ -123,9 +124,22 @@ func dialEPGroup(cfg epRankConfig) (*fakmodel.DistComm, error) {
 		ln.Close()
 		return g, nil
 	}
-	conn, err := net.Dial("tcp", cfg.coordAddr)
+	timeout, err := epJoinTimeout()
 	if err != nil {
-		return nil, fmt.Errorf("expert-parallel rank %d dial coordinator %q: %w", cfg.rank, cfg.coordAddr, err)
+		return nil, err
+	}
+	deadline := time.Now().Add(timeout)
+	var conn net.Conn
+	var lastErr error
+	for {
+		conn, lastErr = net.DialTimeout("tcp", cfg.coordAddr, 5*time.Second)
+		if lastErr == nil {
+			break
+		}
+		if timeout == 0 || time.Now().After(deadline) {
+			return nil, fmt.Errorf("expert-parallel rank %d dial coordinator %q timed out after %s: %w", cfg.rank, cfg.coordAddr, timeout, lastErr)
+		}
+		time.Sleep(2 * time.Second)
 	}
 	g, err := fakmodel.Join(conn, cfg.rank, cfg.ranks)
 	if err != nil {
@@ -133,6 +147,19 @@ func dialEPGroup(cfg epRankConfig) (*fakmodel.DistComm, error) {
 		return nil, fmt.Errorf("expert-parallel rank %d join: %w", cfg.rank, err)
 	}
 	return g, nil
+}
+
+func epJoinTimeout() (time.Duration, error) {
+	const defaultJoinTimeout = 30 * time.Minute
+	raw := os.Getenv("FAK_EP_JOIN_TIMEOUT_S")
+	if raw == "" {
+		return defaultJoinTimeout, nil
+	}
+	sec, err := strconv.Atoi(raw)
+	if err != nil || sec < 0 {
+		return 0, fmt.Errorf("FAK_EP_JOIN_TIMEOUT_S=%q must be a non-negative integer seconds value", raw)
+	}
+	return time.Duration(sec) * time.Second, nil
 }
 
 // joinDevicePGIfSupported is the opt-in upgrade over the host DistComm reduce: on a backend that

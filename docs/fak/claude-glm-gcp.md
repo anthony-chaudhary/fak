@@ -80,6 +80,7 @@ model turns arrive.
 | `a2-high-a100-40gb` | cheapest GLM-sized A100 path; tighter host/VRAM headroom | 29.39 | 17h 0m |
 | `a2-ultra-a100-80gb` | recommended budget dev tier when A100 quota is available | 40.55 | 12h 19m |
 | `a3-ultra-h200` | Hopper/H200 fallback with much shorter budget window | 84.81 | 5h 53m |
+| `a3-mega-h100` | H100 Mega fallback when standard A3 High is stocked out but Mega quota/capacity exists | 90.00 | 5h 33m |
 | `a3-high-h100` | demo/Hopper tier; useful for short witnessed runs | 88.49 | 5h 39m |
 | `a4-b200` | Blackwell target; quota/reservation gated | 90.00 | 5h 33m |
 
@@ -97,6 +98,15 @@ Use `MAX_RUNTIME_ACTION=stop` only when you deliberately want to preserve the bo
 for faster next-day bring-up; `delete` is the zero-residual-cost default. Use
 `MAX_RUNTIME_MINUTES=<n>` to make the cap stricter than the computed `$500 / hourly`
 window, for example `MAX_RUNTIME_MINUTES=480` for an eight-hour workday.
+
+If an on-demand full-size H100 create fails with
+`ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS`, first try any `zonesAvailable` hint GCP
+returns. If the stockout is broad, `PROVISIONING_MODEL=FLEX_START
+REQUEST_VALID_FOR_DURATION=2h` queues the VM request instead of failing fast, but it
+uses preemptible GPU quota; verify that quota is at least the tier's GPU count before
+expecting Flex-start to work. `a3-mega-h100` uses the separate `NVIDIA_H100_MEGA`
+quota family and is the practical full-size fallback when `a3-high-h100` is stocked
+out but Mega capacity exists.
 
 Before apply, create a Cloud Billing budget scoped to the project at **$500** with
 50% / 80% / 100% actual-spend alerts. Treat that as an alerting plane, not the cap:
@@ -137,6 +147,7 @@ via the pure fak kernel by default:
 ```bash
 GCP_TIER=a2-ultra-a100-80gb ./scripts/gcp-glm-serve.sh                 # A100, pure fak kernel (default)
 GCP_TIER=a2-ultra-a100-80gb SERVE=llamacpp ./scripts/gcp-glm-serve.sh  # A100, llama.cpp benchmark node
+GCP_TIER=a3-mega-h100 SERVE=fak ./scripts/gcp-glm-serve.sh             # H100 Mega, pure fak kernel
 GCP_TIER=a4-b200 ./scripts/gcp-glm-serve.sh                            # Blackwell, stock SGLang/vLLM
 ```
 
@@ -146,7 +157,20 @@ registry — the most-provisionable tier that clears the DSA floor. The datacent
 and `a2-high-a100-40gb` (8-GPU datacenter server 40GB, ~$29.39/hr). Knobs: `GCP_TIER`, `SERVE`, `GCP_ZONE`,
 `ENGINE`/`QUANT` (the sm_90 stock path), `GLM_GGUF_REPO`/`GLM_GGUF_SUBDIR` (the fak/llama.cpp
 GGUF, default `unsloth/GLM-5.2-GGUF` `UD-Q4_K_M`), `NCPU_MOE`, `GLM_PORT`, `HF_TOKEN`,
-`TAILSCALE_AUTHKEY`, `MAX_DAILY_USD`, `MAX_RUNTIME_MINUTES`, and `MAX_RUNTIME_ACTION`.
+`CTX` (stock SGLang/vLLM context, default 65536), `EP_RANKS` (pure-fak resident
+expert-parallel ranks; `1` keeps the cpu-offload smoke path, `8` launches one rank per
+full-size GPU for the no-cpu-offload path), `TAILSCALE_AUTHKEY`, `MAX_DAILY_USD`,
+`MAX_RUNTIME_MINUTES`, and `MAX_RUNTIME_ACTION`.
+
+For a **pure fak performance attempt** on a full-HBM 8-GPU tier, set `SERVE=fak
+EP_RANKS=8`. That runs the resident expert-parallel topology: one fak rank per GPU,
+`FAK_Q4K=1`, `-tags cuda,nccl`, and `--expert-parallel 8`, instead of the
+single-process `--cpu-offload-experts` smoke path.
+
+The stock SGLang/vLLM path defaults `CTX=65536` because Claude Code's GLM dogfood probe
+asks for a large Anthropic turn: the witnessed run used 32,641 input tokens plus a
+32,000-token output ceiling. A 32,768-token serve window fails that request before the
+model starts.
 
 > **Why A100 needs a different serve.** GLM-5.2's DSA kernels in stock SGLang/vLLM are gated
 > to Hopper (sm_90) / Blackwell (sm_100); on Ampere (datacenter GPU, sm_80) the preflight
@@ -202,6 +226,7 @@ FAK_GLM_GCP_BASE_URL=http://fak-glm-serve:8000/v1 claude-glm-gcp
 | model-server URL | `FAK_GLM_GCP_BASE_URL` (default `http://127.0.0.1:8200/v1`) |
 | model id | `glm-5.2` (the SGLang/vLLM `--served-model-name`) — every Claude tier maps onto it |
 | timeout | `900s` (the openai-backend floor, for GLM's big prefill) |
+| provider extra body | `{"chat_template_kwargs":{"enable_thinking":false}}` (keeps probe output in `content`) |
 
 Override any of those with the normal `FAK_DOGFOOD_*` env vars (`FAK_DOGFOOD_BASE_URL`
 overrides the preset URL; `FAK_DOGFOOD_MODEL` overrides the id; `FAK_DOGFOOD_PORT` the
@@ -227,6 +252,7 @@ which is not stood up from the implementing host — same gate as
 | The fak-native **`glm_moe_dsa` forward is bit-exact** on datacenter GPU (sm_80) **at q8**: cosine 1.0, argmax-exact (incl. the cpu-offload hybrid) | `experiments/glm-gpu-witness/a100-glm52-*.json` (`TestCUDAGLMMoeDsaBackendForward` …) | ✅ witnessed (q8) on sm_80 |
 | The resident-**Q4_K** serve path (`--cpu-offload-experts`) is cosine-witnessed end to end | — (the q8 forward is; the served Q4_K path is not) | ⏳ not yet |
 | The wire end-to-end (Anthropic `/v1/messages` → kernel) | `claude-glm-gcp --smoke` (offline mock planner; no model needed) | ✅ runnable here |
+| A **live GLM-5.2 turn** through the preset against SGLang W4AFP8 on 8x H100 Mega | `experiments/agent-live/dogfood-claude-glm52-gcp-20260705.json`; gateway `/v1/messages` 200 in 11.8s | ✅ witnessed |
 | A **live GLM-5.2 turn** through the preset (pure fak kernel **or** llama.cpp) | needs the GCP node up (Half A `--apply`) → `claude-glm-gcp --probe` | ⏳ hardware-gated |
 
 The pure-fak-kernel serve command is **wired** and the `glm_moe_dsa` forward is **witnessed at

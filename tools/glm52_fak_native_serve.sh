@@ -48,8 +48,13 @@ MODEL_ID="${MODEL_ID:-glm-5.2}"
 CTX="${CTX:-8192}"
 FAK_BIN="${FAK_BIN:-/usr/local/bin/fak}"
 GO_VERSION="${GO_VERSION:-1.26.4}"
+EP_RANKS="${EP_RANKS:-1}"
+FIRST_GPU="${FIRST_GPU:-0}"
+EP_COORD_ADDR="${EP_COORD_ADDR:-127.0.0.1:19071}"
+EP_JOIN_TIMEOUT_S="${EP_JOIN_TIMEOUT_S:-1800}"
 export FAK_CUDA_ARCH="${FAK_CUDA_ARCH:-sm_80}"
 export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
+export HF_XET_HIGH_PERFORMANCE="${HF_XET_HIGH_PERFORMANCE:-1}"
 export HOME="${HOME:-/root}" GOCACHE="${GOCACHE:-/tmp/gocache}" GOPATH="${GOPATH:-/tmp/gopath}"
 
 # locate the fak checkout root from this script's location (tools/<this>).
@@ -61,6 +66,17 @@ PHASE="$GLM_DIR/PHASE"
 LOG="$GLM_DIR/fak_native_serve.log"
 mkdir -p "$GLM_DIR" "$GOCACHE" "$GOPATH"
 ph(){ echo "$(date -u +%H:%M:%S) $*" | tee -a "$LOG"; echo "$*" > "$PHASE"; }
+
+case "$EP_RANKS" in
+  ''|*[!0-9]*) ph "BAD_EP_RANKS $EP_RANKS"; exit 12 ;;
+esac
+case "$FIRST_GPU" in
+  ''|*[!0-9]*) ph "BAD_FIRST_GPU $FIRST_GPU"; exit 12 ;;
+esac
+if [ "$EP_RANKS" -gt 1 ]; then
+  export FAK_CUDA_NCCL=1
+  REBUILD_FAK="${REBUILD_FAK:-1}"
+fi
 
 export PATH="/usr/local/go/bin:${CUDA_HOME}/bin:$PATH"
 
@@ -131,32 +147,102 @@ export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${CUDA_HOME}/lib:${LD_LIBRARY_PATH:-}
 # 4. Serve via the PURE FAK KERNEL. The embedded GGUF tokenizer makes /v1/chat/completions
 #    serve real in-kernel chat; the eager load binds the listener only AFTER the weights are
 #    resident, so /v1/models answering means the model is loaded.
-ph "LAUNCH fak serve --gguf $SHARD1 --backend cuda --cpu-offload-experts --context-budget-tokens $CTX --model $MODEL_ID (large load; resident-Q4_K path)"
-"$FAK_BIN" serve \
-  --addr "$ADDR" \
-  --gguf "$SHARD1" \
-  --backend cuda \
-  --cpu-offload-experts \
-  --context-budget-tokens "$CTX" \
-  --model "$MODEL_ID" \
-  > "$GLM_DIR/server.log" 2>&1 &
-SRV=$!
-ph "SERVER_PID=$SRV"
+smoke_ready() {
+  smoke=$(curl -s -m 120 "http://127.0.0.1:$PORT/v1/chat/completions" -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$MODEL_ID\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with the single word: ok\"}],\"max_tokens\":8,\"temperature\":0,\"chat_template_kwargs\":{\"enable_thinking\":false}}")
+  echo "SMOKE: $smoke" >>"$LOG"
+  printf '%s' "$smoke" | grep -q '"content"' && ! printf '%s' "$smoke" | grep -q '"error"'
+}
+
+launch_single_cpu_offload() {
+  ph "LAUNCH fak serve --gguf $SHARD1 --backend cuda --cpu-offload-experts --context-budget-tokens $CTX --model $MODEL_ID (large load; resident-Q4_K path)"
+  "$FAK_BIN" serve \
+    --addr "$ADDR" \
+    --gguf "$SHARD1" \
+    --backend cuda \
+    --cpu-offload-experts \
+    --context-budget-tokens "$CTX" \
+    --model "$MODEL_ID" \
+    > "$GLM_DIR/server.log" 2>&1 &
+  SRV=$!
+  ph "SERVER_PID=$SRV"
+
+  # 360 x 20s ~= 2 h, covering the large UD-Q4_K_M load.
+  for _ in $(seq 1 360); do
+    if ! kill -0 "$SRV" 2>/dev/null; then ph "SERVER_EXITED_EARLY"; tail -40 "$GLM_DIR/server.log" >>"$LOG" 2>&1; exit 40; fi
+    if curl -sf -m 5 "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1 || curl -sf -m 5 "http://127.0.0.1:$PORT/v1/models" >/dev/null 2>&1; then
+      if smoke_ready; then
+        ph "GLM52_FAK_NATIVE_SERVE_READY port=$PORT model=$MODEL_ID ep_ranks=1"
+        wait "$SRV"
+        rc=$?
+        ph "SERVER_EXITED rc=$rc"
+        exit "$rc"
+      fi
+      ph "SMOKE_FAIL"; exit 41
+    fi
+    sleep 20
+  done
+  ph "HEALTH_TIMEOUT"; tail -20 "$GLM_DIR/server.log" >>"$LOG" 2>&1; exit 42
+}
+
+launch_expert_parallel() {
+  ph "LAUNCH_EP fak serve --gguf $SHARD1 --backend cuda --expert-parallel $EP_RANKS --context-budget-tokens $CTX --model $MODEL_ID (NO cpu-offload; routed experts sharded resident across GPUs)"
+  pids=""
+  for r in $(seq 0 $((EP_RANKS - 1))); do
+    gpu=$((FIRST_GPU + r))
+    rank_port=$((PORT + r))
+    rank_addr="127.0.0.1:${rank_port}"
+    [ "$r" -eq 0 ] && rank_addr="$ADDR"
+    rank_log="$GLM_DIR/server-rank${r}.log"
+    CUDA_VISIBLE_DEVICES="$gpu" \
+    FAK_EP_RANK="$r" \
+    FAK_EP_COORD_ADDR="$EP_COORD_ADDR" \
+    FAK_EP_JOIN_TIMEOUT_S="$EP_JOIN_TIMEOUT_S" \
+    FAK_Q4K=1 \
+    "$FAK_BIN" serve \
+      --addr "$rank_addr" \
+      --gguf "$SHARD1" \
+      --backend cuda \
+      --expert-parallel "$EP_RANKS" \
+      --context-budget-tokens "$CTX" \
+      --model "$MODEL_ID" \
+      > "$rank_log" 2>&1 &
+    pid=$!
+    pids="$pids $pid"
+    ph "EP_RANK_PID rank=$r gpu=$gpu port=$rank_port pid=$pid log=$rank_log"
+  done
+
+  # 360 x 20s ~= 2 h. Rank 0 binds the public endpoint only after every rank loads its
+  # expert shard, joins the DistComm/device-PG group, and the model is ready.
+  for _ in $(seq 1 360); do
+    for pid in $pids; do
+      if ! kill -0 "$pid" 2>/dev/null; then
+        ph "EP_RANK_EXITED_EARLY pid=$pid"
+        for lf in "$GLM_DIR"/server-rank*.log; do echo "--- $lf ---" >>"$LOG"; tail -40 "$lf" >>"$LOG" 2>&1 || true; done
+        for opid in $pids; do kill "$opid" 2>/dev/null || true; done
+        exit 40
+      fi
+    done
+    if curl -sf -m 5 "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1 || curl -sf -m 5 "http://127.0.0.1:$PORT/v1/models" >/dev/null 2>&1; then
+      if smoke_ready; then
+        grep -hiE "expert-parallel|device-NCCL|DistComm|rank .*joined|loads experts|collective" "$GLM_DIR"/server-rank*.log >>"$LOG" 2>&1 || true
+        ph "GLM52_FAK_NATIVE_SERVE_READY port=$PORT model=$MODEL_ID ep_ranks=$EP_RANKS"
+        wait $pids
+        rc=$?
+        ph "EP_SERVER_EXITED rc=$rc"
+        exit "$rc"
+      fi
+      ph "SMOKE_FAIL"; for pid in $pids; do kill "$pid" 2>/dev/null || true; done; exit 41
+    fi
+    sleep 20
+  done
+  ph "HEALTH_TIMEOUT"; for lf in "$GLM_DIR"/server-rank*.log; do echo "--- $lf ---" >>"$LOG"; tail -20 "$lf" >>"$LOG" 2>&1 || true; done; for pid in $pids; do kill "$pid" 2>/dev/null || true; done; exit 42
+}
 
 # 5. Health-check: detect a crashed load immediately, and assert a REAL chat answer before
 #    declaring ready (a server that bound but cannot decode must NOT greenlight a witness).
-#    360 x 20s ~= 2 h, covering the large UD-Q4_K_M load.
-for _ in $(seq 1 360); do
-  if ! kill -0 "$SRV" 2>/dev/null; then ph "SERVER_EXITED_EARLY"; tail -40 "$GLM_DIR/server.log" >>"$LOG" 2>&1; exit 40; fi
-  if curl -sf -m 5 "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1 || curl -sf -m 5 "http://127.0.0.1:$PORT/v1/models" >/dev/null 2>&1; then
-    smoke=$(curl -s -m 120 "http://127.0.0.1:$PORT/v1/chat/completions" -H 'Content-Type: application/json' \
-      -d "{\"model\":\"$MODEL_ID\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with the single word: ok\"}],\"max_tokens\":8}")
-    echo "SMOKE: $smoke" >>"$LOG"
-    if printf '%s' "$smoke" | grep -q '"content"' && ! printf '%s' "$smoke" | grep -q '"error"'; then
-      ph "GLM52_FAK_NATIVE_SERVE_READY port=$PORT model=$MODEL_ID"; exit 0
-    fi
-    ph "SMOKE_FAIL"; exit 41
-  fi
-  sleep 20
-done
-ph "HEALTH_TIMEOUT"; tail -20 "$GLM_DIR/server.log" >>"$LOG" 2>&1; exit 42
+if [ "$EP_RANKS" -gt 1 ]; then
+  launch_expert_parallel
+else
+  launch_single_cpu_offload
+fi

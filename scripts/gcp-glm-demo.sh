@@ -36,6 +36,7 @@
 # Knobs (env) — the serve knobs (SERVE, GLM_GGUF_*, HF_TOKEN, ...) pass straight through
 # to scripts/gcp-glm-serve.sh; this script adds only the demo-specific ones:
 #   GCP_TIER          gcp_accel.py tier slug          (default a3-high-h100 — the 8x H100 demo tier)
+#   EP_RANKS          pure-fak resident EP ranks       (default 8 — one rank per H100)
 #   VM_NAME           instance name                   (default fak-glm-demo)
 #   PROBE_PROMPT      the headless probe turn          (default "say pong")
 #   PROBE_TURNS       how many cache-warming turns     (default 2 — turn 2 is where reuse must bite)
@@ -56,6 +57,7 @@ VM_NAME="${VM_NAME:-fak-glm-demo}"
 # it's the whole point of "demoable working fak kernel", AND the cache-value witness
 # (fak_gateway_kv_prefix_reused_tokens_total) only exists when fak itself serves the model.
 SERVE="${SERVE:-fak}"
+EP_RANKS="${EP_RANKS:-8}"
 GLM_PORT="${GLM_PORT:-8000}"
 LOCAL_TUNNEL_PORT="${LOCAL_TUNNEL_PORT:-8200}"
 PROBE_PROMPT="${PROBE_PROMPT:-say pong}"
@@ -86,7 +88,7 @@ GCP_ZONE="${GCP_ZONE:-${GLM_DEFAULT_ZONE}}"
 # We never re-implement the gcloud/serve rendering; we COMPOSE it, then add the demo's
 # probe + cache-value + teardown steps around it.
 render_serve_plan() {
-  GCP_TIER="$GCP_TIER" VM_NAME="$VM_NAME" GLM_PORT="$GLM_PORT" SERVE="$SERVE" \
+  GCP_TIER="$GCP_TIER" VM_NAME="$VM_NAME" GLM_PORT="$GLM_PORT" SERVE="$SERVE" EP_RANKS="$EP_RANKS" \
   LOCAL_TUNNEL_PORT="$LOCAL_TUNNEL_PORT" GCP_ZONE="$GCP_ZONE" \
     bash "$ROOT/scripts/gcp-glm-serve.sh" --plan
 }
@@ -152,7 +154,7 @@ teardown() {
 trap teardown EXIT
 
 log "DEMO step 1 — provision + serve GLM-5.2 on $VM_NAME via the pure fak kernel"
-GCP_TIER="$GCP_TIER" VM_NAME="$VM_NAME" GLM_PORT="$GLM_PORT" SERVE="$SERVE" \
+GCP_TIER="$GCP_TIER" VM_NAME="$VM_NAME" GLM_PORT="$GLM_PORT" SERVE="$SERVE" EP_RANKS="$EP_RANKS" \
 LOCAL_TUNNEL_PORT="$LOCAL_TUNNEL_PORT" GCP_ZONE="$GCP_ZONE" GCP_PROJECT="$GCP_PROJECT" \
   bash "$ROOT/scripts/gcp-glm-serve.sh" --apply
 

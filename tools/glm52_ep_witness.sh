@@ -19,6 +19,7 @@
 #   FIRST_GPU    lowest visible GPU index (default 1, to leave GPU0 for a peer); ranks use FIRST_GPU..FIRST_GPU+RANKS-1
 #   OUT          result file (default ./glm52-ep-witness-RESULT.txt)
 #   PORT         serve port (default 8071)
+#   COORD_ADDR   local rank rendezvous address (default 127.0.0.1:$PORT+1000)
 #   FAK_CUDA_ARCH  GPU arch (default sm_80 = A100/Ampere)
 #   SMOKE_S      decode wait bound (default 540); SMOKE_TOKENS max_tokens (default 16)
 #   LOAD_MAX_S   max seconds to wait for load+ready (default 1200)
@@ -29,6 +30,7 @@ export FAK_CUDA_ARCH="${FAK_CUDA_ARCH:-sm_80}" FAK_CUDA_NCCL=1 CUDA_HOME="${CUDA
 RANKS="${RANKS:-7}"
 FIRST_GPU="${FIRST_GPU:-1}"
 PORT="${PORT:-8071}"
+COORD_ADDR="${COORD_ADDR:-127.0.0.1:$((PORT + 1000))}"
 OUT="${OUT:-./glm52-ep-witness-RESULT.txt}"
 DONE="${OUT}.done"
 SMOKE_S="${SMOKE_S:-540}"; SMOKE_TOKENS="${SMOKE_TOKENS:-16}"
@@ -60,23 +62,47 @@ else
   log "BUILD_FAIL"; tail -30 "$ROOT/build_nccl.log" | tee -a "$OUT"; echo 94 >"$DONE"; exit 94
 fi
 
-log "== expert-parallel resident serve (experts resident across GPU $VIS, NO cpu-offload) =="
+log "== expert-parallel resident serve (sharded ranks across GPU $VIS, NO cpu-offload) =="
 t=$(date +%s)
-CUDA_VISIBLE_DEVICES="$VIS" "$ROOT/fakbin_nccl" serve --addr "127.0.0.1:$PORT" \
-  --gguf "$SHARD" --backend cuda --expert-parallel "$RANKS" \
-  --context-budget-tokens 4096 --model glm-5.2 >"$ROOT/serve_ep.log" 2>&1 &
-SRV=$!
+pids=""
+for r in $(seq 0 "$((RANKS - 1))"); do
+  gpu=$((FIRST_GPU + r))
+  rank_port=$((PORT + r))
+  rank_log="$ROOT/serve_ep_rank${r}.log"
+  log "LAUNCH_RANK rank=$r gpu=$gpu port=$rank_port coord=$COORD_ADDR log=$rank_log"
+  CUDA_VISIBLE_DEVICES="$gpu" \
+  FAK_EP_RANK="$r" \
+  FAK_EP_COORD_ADDR="$COORD_ADDR" \
+  FAK_EP_JOIN_TIMEOUT_S="${FAK_EP_JOIN_TIMEOUT_S:-1800}" \
+  FAK_Q4K=1 \
+  "$ROOT/fakbin_nccl" serve --addr "127.0.0.1:$rank_port" \
+    --gguf "$SHARD" --backend cuda --expert-parallel "$RANKS" \
+    --context-budget-tokens 4096 --model glm-5.2 >"$rank_log" 2>&1 &
+  pids="$pids $!"
+done
 ready=0; iters=$(( LOAD_MAX_S / 15 ))
 for _ in $(seq 1 "$iters"); do
-  kill -0 "$SRV" 2>/dev/null || { log "SERVER_DIED"; tail -40 "$ROOT/serve_ep.log" | tee -a "$OUT"; echo 96 >"$DONE"; exit 96; }
+  for pid in $pids; do
+    kill -0 "$pid" 2>/dev/null || {
+      log "SERVER_DIED pid=$pid"
+      for lf in "$ROOT"/serve_ep_rank*.log; do echo "--- $lf ---" | tee -a "$OUT"; tail -40 "$lf" | tee -a "$OUT"; done
+      for opid in $pids; do kill "$opid" 2>/dev/null || true; done
+      echo 96 >"$DONE"; exit 96
+    }
+  done
   curl -sf -m 5 "http://127.0.0.1:$PORT/v1/models" >/dev/null 2>&1 && { ready=1; break; }
   sleep 15
 done
 L=$(( $(date +%s) - t ))
-if [ "$ready" != 1 ]; then log "LOAD_TIMEOUT ${L}s"; tail -40 "$ROOT/serve_ep.log" | tee -a "$OUT"; kill "$SRV" 2>/dev/null; echo 97 >"$DONE"; exit 97; fi
+if [ "$ready" != 1 ]; then
+  log "LOAD_TIMEOUT ${L}s"
+  for lf in "$ROOT"/serve_ep_rank*.log; do echo "--- $lf ---" | tee -a "$OUT"; tail -40 "$lf" | tee -a "$OUT"; done
+  for pid in $pids; do kill "$pid" 2>/dev/null || true; done
+  echo 97 >"$DONE"; exit 97
+fi
 log "LOAD_READY ${L}s"
 log "-- expert-parallel / collective evidence --"
-grep -iE "expert-parallel|collective|nccl|rank|resident=|allreduce" "$ROOT/serve_ep.log" | tail -14 | tee -a "$OUT"
+grep -hiE "expert-parallel|collective|nccl|rank|resident=|allreduce|loads experts|joined" "$ROOT"/serve_ep_rank*.log | tail -30 | tee -a "$OUT"
 
 log "-- EP decode smoke --"
 ts=$(date +%s)
@@ -84,11 +110,17 @@ SM=$(curl -s -m "$SMOKE_S" "http://127.0.0.1:$PORT/v1/chat/completions" -H 'Cont
   -d "{\"model\":\"glm-5.2\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with the single word: ok\"}],\"max_tokens\":$SMOKE_TOKENS}")
 DT=$(( $(date +%s) - ts ))
 log "SMOKE(${SMOKE_TOKENS}tok,${DT}s)=${SM:0:280}"
-printf '%s' "$SM" | grep -q '"content"' && ! printf '%s' "$SM" | grep -q '"error"' && log "SMOKE_OK" || log "SMOKE_FAIL"
+if printf '%s' "$SM" | grep -q '"content"' && ! printf '%s' "$SM" | grep -q '"error"'; then
+  log "SMOKE_OK"
+else
+  log "SMOKE_FAIL"
+  for pid in $pids; do kill "$pid" 2>/dev/null || true; done
+  echo 98 >"$DONE"; exit 98
+fi
 CT=$(printf '%s' "$SM" | grep -oE '"completion_tokens":[0-9]+' | grep -oE '[0-9]+' | head -1)
 [ -n "$CT" ] && [ "$DT" -gt 0 ] && log "EP_DECODE tok=$CT wall=${DT}s rate=$(awk "BEGIN{printf \"%.4f\", $CT/$DT}")tok/s"
 log "-- per-GPU state after decode (proves >1 GPU resident+used) --"
 nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv,noheader | tee -a "$OUT"
-kill "$SRV" 2>/dev/null
+for pid in $pids; do kill "$pid" 2>/dev/null || true; done
 log "EP_WITNESS_DONE rc=0 load_s=$L"
 echo 0 >"$DONE"

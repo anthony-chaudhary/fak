@@ -49,6 +49,8 @@
 #   ENGINE          sglang | vllm                      (the sm_90 stock engine; default sglang)
 #   QUANT           fp8 | w4afp8 | nvfp4 | bf16         (sm_90 stock quant; default fp8)
 #   GLM_PORT        served /v1 port on the VM           (default 8000)
+#   CTX             stock SGLang/vLLM served context    (default 65536; fits Claude's 32k+32k probe)
+#   EP_RANKS        pure-fak resident expert-parallel ranks (default 1; set 8 on full-HBM H100/H200/A100-80GB to avoid cpu-offload)
 #   GLM_GGUF_REPO   HF repo for the fak/llama.cpp GGUF  (default unsloth/GLM-5.2-GGUF)
 #   GLM_GGUF_SUBDIR GGUF quant subdir                   (default UD-Q4_K_M, ~466 GB)
 #   NCPU_MOE        llama.cpp experts-on-host count     (default 999 = all; fak offload is flag-driven)
@@ -65,6 +67,10 @@
 #   MAX_DAILY_USD   hard operating envelope for this VM       (default 500; 0 disables)
 #   MAX_RUNTIME_MINUTES  override the computed max lifetime   (default: floor(MAX_DAILY_USD / tier_hourly * 60))
 #   MAX_RUNTIME_ACTION   stop | delete when lifetime expires  (default delete)
+#   PROVISIONING_MODEL   STANDARD | SPOT | FLEX_START         (default STANDARD/fail-fast)
+#   REQUEST_VALID_FOR_DURATION  Flex-start queue window       (default 2h when FLEX_START)
+#   VM_MAX_RUN_DURATION  gcloud max-run-duration              (default MAX_RUNTIME_MINUTES minutes for SPOT/FLEX_START)
+#   VM_TERMINATION_ACTION  STOP | DELETE for gcloud timeout   (default mirrors MAX_RUNTIME_ACTION)
 set -euo pipefail
 
 SELF="${BASH_SOURCE[0]}"
@@ -76,6 +82,8 @@ VM_NAME="${VM_NAME:-fak-glm-serve}"
 ENGINE="${ENGINE:-sglang}"
 QUANT="${QUANT:-fp8}"
 GLM_PORT="${GLM_PORT:-8000}"
+CTX="${CTX:-65536}"
+EP_RANKS="${EP_RANKS:-1}"
 LOCAL_TUNNEL_PORT="${LOCAL_TUNNEL_PORT:-8200}"
 FAK_REPO_URL="${FAK_REPO_URL:-https://github.com/anthony-chaudhary/fak.git}"
 SERVE="${SERVE:-}"   # empty => resolved from the tier's arch below (sm_80→fak, sm_90+→sglang/vllm)
@@ -90,6 +98,10 @@ GRACE_MINUTES="${GRACE_MINUTES:-90}" # never reap within this many minutes of bo
 MAX_DAILY_USD="${MAX_DAILY_USD:-500}"
 MAX_RUNTIME_MINUTES="${MAX_RUNTIME_MINUTES:-}"
 MAX_RUNTIME_ACTION="${MAX_RUNTIME_ACTION:-delete}"
+PROVISIONING_MODEL="${PROVISIONING_MODEL:-}"
+REQUEST_VALID_FOR_DURATION="${REQUEST_VALID_FOR_DURATION:-2h}"
+VM_MAX_RUN_DURATION="${VM_MAX_RUN_DURATION:-}"
+VM_TERMINATION_ACTION="${VM_TERMINATION_ACTION:-}"
 
 MODE="plan"
 case "${1:-}" in
@@ -106,10 +118,21 @@ die() { printf '\033[31m[gcp-glm] %s\033[0m\n' "$*" >&2; exit 1; }
 if [ "$ENGINE" != "sglang" ] && [ "$ENGINE" != "vllm" ]; then
   die "ENGINE must be 'sglang' or 'vllm' (got '$ENGINE')"
 fi
+case "$EP_RANKS" in
+  ''|*[!0-9]*) die "EP_RANKS must be a positive integer (got '$EP_RANKS')" ;;
+esac
+if [ "$EP_RANKS" -lt 1 ]; then
+  die "EP_RANKS must be >= 1 (got '$EP_RANKS')"
+fi
 case "$MAX_RUNTIME_ACTION" in
   stop|delete) ;;
   *) die "MAX_RUNTIME_ACTION must be 'stop' or 'delete' (got '$MAX_RUNTIME_ACTION')" ;;
 esac
+case "$PROVISIONING_MODEL" in
+  ""|STANDARD|SPOT|FLEX_START) ;;
+  *) die "PROVISIONING_MODEL must be STANDARD, SPOT, or FLEX_START (got '$PROVISIONING_MODEL')" ;;
+esac
+if [ "$PROVISIONING_MODEL" = "STANDARD" ]; then PROVISIONING_MODEL=""; fi
 
 # --- resolve the tier from the single registry (tools/gcp_accel.py) -----------
 # emit-shell prints eval-able GLM_* assignments (machine type, accelerator flag, GPU
@@ -146,6 +169,22 @@ fi
 case "$MAX_RUNTIME_MINUTES" in
   ''|*[!0-9]*) die "MAX_RUNTIME_MINUTES must be a non-negative integer (got '$MAX_RUNTIME_MINUTES')" ;;
 esac
+if [ -n "$PROVISIONING_MODEL" ] && [ -z "$VM_MAX_RUN_DURATION" ] && [ "$MAX_RUNTIME_MINUTES" != "0" ]; then
+  VM_MAX_RUN_DURATION="${MAX_RUNTIME_MINUTES}m"
+fi
+if [ -n "$VM_MAX_RUN_DURATION" ] && [ -z "$VM_TERMINATION_ACTION" ]; then
+  case "$MAX_RUNTIME_ACTION" in
+    stop) VM_TERMINATION_ACTION="STOP" ;;
+    delete) VM_TERMINATION_ACTION="DELETE" ;;
+  esac
+fi
+case "$VM_TERMINATION_ACTION" in
+  ""|STOP|DELETE) ;;
+  *) die "VM_TERMINATION_ACTION must be STOP or DELETE (got '$VM_TERMINATION_ACTION')" ;;
+esac
+if [ "$PROVISIONING_MODEL" = "FLEX_START" ] && [ -z "$REQUEST_VALID_FOR_DURATION" ]; then
+  die "REQUEST_VALID_FOR_DURATION is required for PROVISIONING_MODEL=FLEX_START"
+fi
 
 # --- resolve the serve path: explicit SERVE wins; else by the tier's GPU arch -----------
 # sm_90+ (Hopper/Blackwell) defaults to the stock SGLang/vLLM DSA path; sm_80 (Ampere/A100)
@@ -160,6 +199,12 @@ case "$SERVE" in
   fak|llamacpp|sglang|vllm) ;;
   *) die "SERVE must be one of: fak | llamacpp | sglang | vllm (got '$SERVE')" ;;
 esac
+if [ "$EP_RANKS" -gt 1 ] && [ "$SERVE" != "fak" ]; then
+  die "EP_RANKS=$EP_RANKS only applies to SERVE=fak (pure fak resident expert-parallel); got SERVE=$SERVE"
+fi
+if [ "$EP_RANKS" -gt "$GLM_GPU_COUNT" ]; then
+  die "EP_RANKS=$EP_RANKS exceeds tier '$GCP_TIER' GPU count ($GLM_GPU_COUNT); choose a full-HBM tier or lower EP_RANKS"
+fi
 # The stock DSA engines cannot run below sm_90; fak + llamacpp run on Ampere by design
 # (that is the whole point of the A100 path), so only the stock engines are arch-gated here.
 if { [ "$SERVE" = "sglang" ] || [ "$SERVE" = "vllm" ]; } && [ "$cap" -lt 90 ] 2>/dev/null; then
@@ -230,10 +275,13 @@ systemd-run --unit=glm52serve --collect \\
   --setenv=GLM_SUBDIR="${GLM_GGUF_SUBDIR}" \\
   --setenv=PORT="${GLM_PORT}" \\
   --setenv=MODEL_ID="glm-5.2" \\
+  --setenv=EP_RANKS="${EP_RANKS}" \\
+  --setenv=EP_JOIN_TIMEOUT_S=1800 \\
   --setenv=FAK_CUDA_ARCH="sm_${cap}" \\
   --setenv=HF_TOKEN="${RENDER_HF_TOKEN}" \\
   --setenv=HUGGING_FACE_HUB_TOKEN="${RENDER_HF_TOKEN}" \\
   --setenv=HF_HUB_ENABLE_HF_TRANSFER=1 \\
+  --setenv=HF_XET_HIGH_PERFORMANCE=1 \\
   --property=Restart=on-failure --property=RestartSec=15 \\
   /usr/bin/env bash /opt/fak/tools/glm52_fak_native_serve.sh
 TAIL
@@ -257,6 +305,7 @@ systemd-run --unit=glm52serve --collect \\
   --setenv=HF_TOKEN="${RENDER_HF_TOKEN}" \\
   --setenv=HUGGING_FACE_HUB_TOKEN="${RENDER_HF_TOKEN}" \\
   --setenv=HF_HUB_ENABLE_HF_TRANSFER=1 \\
+  --setenv=HF_XET_HIGH_PERFORMANCE=1 \\
   --property=Restart=on-failure --property=RestartSec=15 \\
   /usr/bin/env bash /opt/fak/tools/glm52_stage_serve_dgx3.sh
 TAIL
@@ -271,6 +320,7 @@ systemd-run --unit=glm52serve --collect \\
   --setenv=ENGINE="${ENGINE}" \\
   --setenv=QUANT="${QUANT}" \\
   --setenv=PORT="${GLM_PORT}" \\
+  --setenv=CTX="${CTX}" \\
   --setenv=HF_TOKEN="${RENDER_HF_TOKEN}" \\
   --setenv=HUGGING_FACE_HUB_TOKEN="${RENDER_HF_TOKEN}" \\
   --property=Restart=on-failure --property=RestartSec=10 \\
@@ -370,9 +420,9 @@ render_startup_script() {
 # one-line human description of the resolved serve path, for the plan summary.
 describe_serve() {
   case "$SERVE" in
-    fak)      echo "serve=PURE FAK KERNEL (native glm_moe_dsa: --backend cuda --cpu-offload-experts) gguf=${GLM_GGUF_REPO}/${GLM_GGUF_SUBDIR}" ;;
+    fak)      echo "serve=PURE FAK KERNEL (native glm_moe_dsa: EP_RANKS=${EP_RANKS}; 1=--cpu-offload-experts, >1=resident expert-parallel) gguf=${GLM_GGUF_REPO}/${GLM_GGUF_SUBDIR}" ;;
     llamacpp) echo "serve=llama.cpp MLA BENCHMARK baseline (n-cpu-moe=${NCPU_MOE}) gguf=${GLM_GGUF_REPO}/${GLM_GGUF_SUBDIR}" ;;
-    *)        echo "serve=${SERVE} (stock DSA, sm_90+) quant=${QUANT}" ;;
+    *)        echo "serve=${SERVE} (stock DSA, sm_90+) quant=${QUANT} ctx=${CTX}" ;;
   esac
 }
 
@@ -388,6 +438,18 @@ print_gcloud() {
   # SA (which also needs roles/compute.instanceAdmin.v1). Without it the reaper would
   # only ever log REAP_DENIED. ON_IDLE=none if you don't want the box self-managing.
   printf ' \\\n  --scopes=cloud-platform'
+  if [ -n "$PROVISIONING_MODEL" ]; then
+    printf ' \\\n  --provisioning-model=%q' "$PROVISIONING_MODEL"
+  fi
+  if [ -n "$VM_MAX_RUN_DURATION" ]; then
+    printf ' \\\n  --max-run-duration=%q' "$VM_MAX_RUN_DURATION"
+  fi
+  if [ -n "$VM_TERMINATION_ACTION" ]; then
+    printf ' \\\n  --instance-termination-action=%q' "$VM_TERMINATION_ACTION"
+  fi
+  if [ "$PROVISIONING_MODEL" = "FLEX_START" ]; then
+    printf ' \\\n  --request-valid-for-duration=%q' "$REQUEST_VALID_FOR_DURATION"
+  fi
   printf ' \\\n  --metadata-from-file=startup-script=<(rendered startup script)'
   if [ -n "${GCP_PROJECT:-}" ]; then printf ' \\\n  --project=%q' "$GCP_PROJECT"; fi
   echo
@@ -421,6 +483,9 @@ if [ "$MODE" = "plan" ]; then
   else
     log "budget guard: MAX_DAILY_USD=$MAX_DAILY_USD => self-${MAX_RUNTIME_ACTION} after ${MAX_RUNTIME_MINUTES}min on this tier (indicative price; verify billing before apply)."
   fi
+  if [ -n "$PROVISIONING_MODEL" ]; then
+    log "capacity request: PROVISIONING_MODEL=$PROVISIONING_MODEL max-run=${VM_MAX_RUN_DURATION:-none} termination=${VM_TERMINATION_ACTION:-default}${PROVISIONING_MODEL:+ request-valid=${REQUEST_VALID_FOR_DURATION}}."
+  fi
   echo "# gcloud command this would run:"
   print_gcloud
   echo "# --- VM startup script (cloud-init) ---"
@@ -442,15 +507,30 @@ trap 'rm -f "$TMP_STARTUP"' EXIT
 render_startup_script > "$TMP_STARTUP"
 
 log "creating $VM_NAME ($GLM_MACHINE_TYPE, $GLM_ACCEL_FLAG) in $GCP_ZONE under project $GCP_PROJECT"
-gcloud compute instances create "$VM_NAME" \
-  --project="$GCP_PROJECT" \
-  --zone="$GCP_ZONE" \
-  --machine-type="$GLM_MACHINE_TYPE" \
-  --accelerator="$GLM_ACCEL_FLAG" --maintenance-policy=TERMINATE \
-  --image-family="$GLM_IMAGE_FAMILY" --image-project="$GLM_IMAGE_PROJECT" \
-  --boot-disk-size=1000GB --boot-disk-type=pd-ssd \
-  --scopes=cloud-platform \
+CREATE_ARGS=(
+  compute instances create "$VM_NAME"
+  --project="$GCP_PROJECT"
+  --zone="$GCP_ZONE"
+  --machine-type="$GLM_MACHINE_TYPE"
+  --accelerator="$GLM_ACCEL_FLAG" --maintenance-policy=TERMINATE
+  --image-family="$GLM_IMAGE_FAMILY" --image-project="$GLM_IMAGE_PROJECT"
+  --boot-disk-size=1000GB --boot-disk-type=pd-ssd
+  --scopes=cloud-platform
   --metadata-from-file=startup-script="$TMP_STARTUP"
+)
+if [ -n "$PROVISIONING_MODEL" ]; then
+  CREATE_ARGS+=(--provisioning-model="$PROVISIONING_MODEL")
+fi
+if [ -n "$VM_MAX_RUN_DURATION" ]; then
+  CREATE_ARGS+=(--max-run-duration="$VM_MAX_RUN_DURATION")
+fi
+if [ -n "$VM_TERMINATION_ACTION" ]; then
+  CREATE_ARGS+=(--instance-termination-action="$VM_TERMINATION_ACTION")
+fi
+if [ "$PROVISIONING_MODEL" = "FLEX_START" ]; then
+  CREATE_ARGS+=(--request-valid-for-duration="$REQUEST_VALID_FOR_DURATION")
+fi
+gcloud "${CREATE_ARGS[@]}"
 
 log "VM created. The GLM-5.2 load is multi-hundred-GB and takes minutes; watch it with:"
 log "  gcloud compute ssh $VM_NAME --zone $GCP_ZONE -- 'journalctl -u glm52serve -f'"
