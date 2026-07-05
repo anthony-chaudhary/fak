@@ -3661,6 +3661,31 @@ class EvaluateLeaseGateTest(unittest.TestCase):
         self.assertEqual(p["target_issue"], 466)     # 467 held (self_modify) -> advanced
         self.assertEqual(p["held_no_commit"], [467])  # the recorded reason was honored
 
+    def test_holds_preview_confirm_no_commit_issue_and_advances(self) -> None:
+        # #2969: opencode can stop immediately after the preview-confirm guard tells
+        # it to re-issue the call with _fak_confirm. That is unresolved guard feedback,
+        # not a productive worker completion, so the next live tick holds that issue
+        # and advances instead of relaunching the same guard loop.
+        mod = load()
+        def spawn(*a, **k):
+            return {"pid": 9, "log": "resolve-2721.log", "issue": 2721,
+                    "lane": "gateway", "backend": "opencode"}
+        self._stub(mod, spawn=spawn, numbers=(2719, 2721))
+        mod.witness_exited_workers = lambda runs_dir, root, **k: {
+            "live": True, "audited": [{"issue": 2719, "claim": "CLAIM_NO_COMMIT"}],
+            "witnessed": [], "unwitnessed": [],
+            "no_commit": [{"issue": 2719, "claim": "CLAIM_NO_COMMIT",
+                           "reason": mod.NO_COMMIT_PREVIEW_CONFIRM}]}
+        def lease_runner(root, args, **k):
+            return {"rc": 0, "verdict": {"verdict": {"ok": True},
+                                         "record": {"id": "resolve-gateway",
+                                                    "generation": 1}}}
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering", lane="gateway",
+                         live=True, lease_runner=lease_runner)
+        self.assertEqual(p["verdict"], "SPAWNED")
+        self.assertEqual(p["target_issue"], 2721)
+        self.assertEqual(p["held_no_commit"], [2719])
+
 
 class SubjectCitesIssueTest(unittest.TestCase):
     """The per-worker commit binding key (#1324 proposal #2): a subject is THIS
@@ -4057,6 +4082,16 @@ class ClassifyNoCommitReasonTest(unittest.TestCase):
         p = self._write("git commit refused: OFF_TRUNK — work on main only.\n")
         self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_OFF_TRUNK)
 
+    def test_preview_confirm_feedback(self) -> None:
+        mod = load()
+        p = self._write(
+            "tool call refused: REQUIRE_WITNESS/ESCALATE\n"
+            "{\"_fak_confirm\":\"fak-3bff999a1f01335d\"}\n"
+            "step=20\n"
+            "exiting loop\n")
+        self.assertEqual(mod.classify_no_commit_reason(p),
+                         mod.NO_COMMIT_PREVIEW_CONFIRM)
+
     def test_banner_noop_small_log(self) -> None:
         mod = load()
         # The 122-byte opencode no-op: spawn banner + "> build · glm-…" and nothing.
@@ -4095,15 +4130,16 @@ class ClassifyNoCommitReasonTest(unittest.TestCase):
 
 class HeldNoCommitIssuesTest(unittest.TestCase):
     """held_no_commit_issues reads the recorded no-commit reason and HOLDS only the
-    re-blockable guard refusals (self_modify / policy_block); a transient auth_wall or
-    an UNKNOWN is left to the time cooldown, not structurally held (#1396)."""
+    re-blockable guard refusals; a transient auth_wall or an UNKNOWN is left to the
+    time cooldown, not structurally held (#1396)."""
 
-    def test_holds_self_modify_and_policy_block(self) -> None:
+    def test_holds_reblockable_guard_feedback(self) -> None:
         mod = load()
         w = {"no_commit": [
             {"issue": 11, "reason": mod.NO_COMMIT_SELF_MODIFY},
-            {"issue": 22, "reason": mod.NO_COMMIT_POLICY_BLOCK}]}
-        self.assertEqual(mod.held_no_commit_issues(w), {11, 22})
+            {"issue": 22, "reason": mod.NO_COMMIT_POLICY_BLOCK},
+            {"issue": 33, "reason": mod.NO_COMMIT_PREVIEW_CONFIRM}]}
+        self.assertEqual(mod.held_no_commit_issues(w), {11, 22, 33})
 
     def test_does_not_hold_auth_wall_banner_offtrunk_or_unknown(self) -> None:
         mod = load()

@@ -2972,6 +2972,7 @@ NO_COMMIT_POLICY_BLOCK = "policy_block"
 NO_COMMIT_AUTH_WALL = "auth_wall"
 NO_COMMIT_OFF_TRUNK = "off_trunk"
 NO_COMMIT_BANNER_NOOP = "banner_noop"
+NO_COMMIT_PREVIEW_CONFIRM = "preview_confirm_feedback"
 NO_COMMIT_MISSING_LOG = "missing_log_artifact"
 NO_COMMIT_UNKNOWN = "unknown"
 
@@ -2984,6 +2985,9 @@ _GLM_WALL_RE = re.compile(r"Limit Exhausted|limit will reset at|usage limit reac
                           re.IGNORECASE)
 _MISSING_API_KEY_RE = re.compile(
     r"Missing environment variable:\s*`?[A-Z0-9_]*API_KEY`?",
+    re.IGNORECASE)
+_PREVIEW_CONFIRM_FEEDBACK_RE = re.compile(
+    r"(REQUIRE_WITNESS\s*/\s*ESCALATE|preview-confirm|_fak_confirm)",
     re.IGNORECASE)
 
 
@@ -3010,6 +3014,8 @@ def classify_no_commit_reason(log: Path) -> str:
         return NO_COMMIT_AUTH_WALL
     if "OFF_TRUNK" in tail:
         return NO_COMMIT_OFF_TRUNK
+    if _PREVIEW_CONFIRM_FEEDBACK_RE.search(tail) and "exiting loop" in tail.lower():
+        return NO_COMMIT_PREVIEW_CONFIRM
     try:
         small = log.stat().st_size <= _STUB_LOG_MAX_BYTES
     except OSError:
@@ -3026,8 +3032,12 @@ def classify_no_commit_reason(log: Path) -> str:
 # AUTH_WALL is deliberately NOT in this set -- it is a transient credit cap that the
 # picker SHOULD re-probe after its cooldown window; a BANNER_NOOP is owned by the
 # backend-health self-suppress gate; OFF_TRUNK / UNKNOWN fall through to the plain
-# time cooldown. Only the two re-blockable guard refusals are held by structure.
-_HOLD_NO_COMMIT_REASONS = frozenset({NO_COMMIT_SELF_MODIFY, NO_COMMIT_POLICY_BLOCK})
+# time cooldown. Only re-blockable guard feedback is held by structure.
+_HOLD_NO_COMMIT_REASONS = frozenset({
+    NO_COMMIT_SELF_MODIFY,
+    NO_COMMIT_POLICY_BLOCK,
+    NO_COMMIT_PREVIEW_CONFIRM,
+})
 
 
 def held_no_commit_issues(witnessed: dict[str, Any] | None) -> set[int]:
