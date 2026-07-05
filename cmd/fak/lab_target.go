@@ -285,7 +285,7 @@ func validateLabTargetReport(target labTargetConfig, model string, opts labTarge
 	reps := fleet.ReadReports(dir, ro)
 	snap := fleet.Fold(ro, reps, fleet.FoldOpts{})
 	wantBox := strings.TrimSpace(target.BoxID)
-	var sawBox, sawFresh, sawUseful bool
+	var sawBox, sawFresh, sawReady bool
 	for _, row := range snap.Rows {
 		if wantBox != "" && row.ID != wantBox {
 			continue
@@ -297,10 +297,13 @@ func validateLabTargetReport(target labTargetConfig, model string, opts labTarge
 			continue
 		}
 		sawFresh = true
-		if !row.Inference.Status.Useful() {
+		// Fleet summaries count degraded inference as "useful" for operator triage, but a
+		// lab target alias feeds an interactive guarded dev session. Admit only a ready
+		// route so a degraded/fallback heartbeat cannot silently become a guard target.
+		if row.Inference.Status != fleet.InferenceReady {
 			continue
 		}
-		sawUseful = true
+		sawReady = true
 		if model != "" && !strings.EqualFold(strings.TrimSpace(row.Inference.Model), model) {
 			continue
 		}
@@ -311,8 +314,8 @@ func validateLabTargetReport(target labTargetConfig, model string, opts labTarge
 		return "", "", fmt.Errorf("LAB_TARGET_REPORT_NOT_USEFUL: target box %s is not in the roster", wantBox)
 	case !sawFresh:
 		return "", "", errors.New("LAB_TARGET_REPORT_NOT_USEFUL: no fresh healthy report backs this alias")
-	case !sawUseful:
-		return "", "", errors.New("LAB_TARGET_REPORT_NOT_USEFUL: fresh report exists, but inference is not ready/degraded")
+	case !sawReady:
+		return "", "", errors.New("LAB_TARGET_REPORT_NOT_USEFUL: fresh report exists, but inference is not ready")
 	default:
 		return "", "", fmt.Errorf("LAB_TARGET_REPORT_NOT_USEFUL: no fresh useful report advertises model %s", model)
 	}

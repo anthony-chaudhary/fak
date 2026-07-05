@@ -160,6 +160,8 @@ func TestLabTargetRefusesStaleOrNonUsefulReports(t *testing.T) {
 		stale  bool
 	}{
 		{name: "warming", report: fleet.Report{State: fleet.StateLive, Inference: &fleet.InferenceStats{Status: fleet.InferenceWarming, Model: "glm-5.2"}}},
+		{name: "degraded", report: fleet.Report{State: fleet.StateLive, Inference: &fleet.InferenceStats{Status: fleet.InferenceDegraded, Model: "glm-5.2", Reason: "route-degraded"}}},
+		{name: "model-mismatch", report: fleet.Report{State: fleet.StateLive, Inference: &fleet.InferenceStats{Status: fleet.InferenceReady, Model: "qwen", Reason: "v1-models"}}},
 		{name: "stale-ready", report: readyGLMReport(), stale: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
