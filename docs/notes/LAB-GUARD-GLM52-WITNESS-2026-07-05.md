@@ -1,6 +1,6 @@
 # Lab GLM-5.2 guarded route witness — 2026-07-05
 
-Status: partial witness for #2953.
+Status: witnessed for #2953; public push is still pending behind shared `main`.
 
 ## Scrubbed setup
 
@@ -48,7 +48,7 @@ filesystem paths are recorded here.
 
 The response body contained `GLM52_OK`.
 
-### 4. Guarded minimal OpenAI client
+### 4. Guarded OpenAI client with a hash-chained guard decision
 
 Command shape:
 
@@ -56,27 +56,63 @@ Command shape:
 fak guard --remote-serve @lab/glm-5.2 --api-key-env <dummy-local-key> --provider openai --probe -- python <smoke-client>
 ```
 
-The child client used `OPENAI_BASE_URL` injected by `fak guard` and posted one
-OpenAI-compatible chat request. It returned:
+The child client used `OPENAI_BASE_URL` injected by `fak guard` and did both in the
+same guarded session:
+
+1. posted one OpenAI-compatible chat request to `glm-5.2`;
+2. posted one safe `/v1/fak/adjudicate` request for an intentionally unknown
+   placeholder tool, proving the local guard journal path without executing a tool.
+
+The child returned:
 
 ```json
-{"status":200,"has_ok":true,"bytes":323}
+{
+  "adjudicate_elapsed_sec": 0.023,
+  "adjudicate_reason": "DEFAULT_DENY",
+  "adjudicate_status": 200,
+  "adjudicate_verdict": "DENY",
+  "chat_bytes": 323,
+  "chat_elapsed_sec": 230.4,
+  "chat_has_ok": true,
+  "chat_status": 200,
+  "ok": true
+}
 ```
 
-Guard summary for that run:
+Guard/audit summary for that run:
 
 - upstream: `<local-proxy>/v1` on the OpenAI wire
 - model response observed: `GLM52_OK`
-- guard audit journal: created, but contained `0` decision rows because the minimal
-  smoke client made no tool calls.
+- gateway log recorded `POST /v1/chat/completions` as HTTP 200
+- gateway log recorded `POST /v1/fak/adjudicate` as HTTP 200
+- guard summary: `1 kernel decision(s) — 0 allowed, 1 denied, 0 repaired, 0 quarantined`
+- audit journal: `.dispatch-runs/guard-audit/lab-glm52-combo-20260705-135108.jsonl`
+- verification:
+
+```text
+fak audit verify .dispatch-runs/guard-audit/lab-glm52-combo-20260705-135108.jsonl
+OK: 1 hash-chained row(s), chain intact
+```
+
+Scrubbed audit fold:
+
+```json
+{
+  "audit_rows": 1,
+  "kinds": {"DENY": 1},
+  "reasons": {"DEFAULT_DENY": 1},
+  "tools": {"fak_lab_glm52_smoke_unknown_tool": 1},
+  "verdicts": {"DENY": 1}
+}
+```
+
+The denied placeholder tool was never executed; it exists only to force one
+deterministic guard decision row in the same live session that reached lab GLM-5.2.
 
 ## Not yet
 
-- `fak guard --remote-serve @lab/glm-5.2 --probe -- codex` did not complete within a
-  20-minute harness timeout. The Codex prompt path is too heavy for the current
-  bridge-proxy route and remains open.
-- A nonzero guard audit decision row was not captured in this minimal smoke because the
-  child made no tool calls.
+- The exact unshaped `fak guard --remote-serve @lab/glm-5.2 --probe -- codex` path
+  timed out earlier. A shaped Codex smoke subsequently completed under 10 minutes and
+  is tracked in #2974.
 - The public commits carrying the alias/private-roster support are local only until the
   shared `main` non-fast-forward is reconciled.
-
