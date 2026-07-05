@@ -579,6 +579,30 @@ class PruneDeadSidecarsTest(unittest.TestCase):
             self.assertEqual(out["pruned"], ["resolve-825-20260625-213720.pid"])
             self.assertEqual(sorted(p.name for p in runs.glob("resolve-825-*")), [])
 
+    def test_live_prune_keeps_witness_sidecar_for_cooldown(self) -> None:
+        import os
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            pid_file = self._mk(
+                runs, 826, "20260625-213721", pid=58752, mtime=now - 4000,
+                siblings=(".log", mod.WITNESS_SIDECAR_SUFFIX))
+            witness = pid_file.with_suffix(mod.WITNESS_SIDECAR_SUFFIX)
+            witness.write_text('{"claim": "CLAIM_NO_COMMIT", "issue": 826}',
+                               encoding="utf-8")
+            os.utime(witness, (now - 10 * 60, now - 10 * 60))
+            def probe(pid):
+                return {"alive": False}
+            out = mod.prune_dead_sidecars(runs, live=True, now_ts=now, probe=probe)
+            cooled = mod.recently_attempted_issues(
+                runs, cooldown_min=120, now_ts=now)
+            self.assertEqual(out["pruned"], ["resolve-826-20260625-213721.pid"])
+            self.assertFalse(pid_file.exists())
+            self.assertTrue(witness.exists())
+            self.assertEqual(cooled, {826})
+
     def test_dead_repair_sidecar_and_issues_sibling_are_pruned(self) -> None:
         # Repair corpses (pid + the .issues batch sidecar) are swept like resolve
         # corpses, so stale repair sidecars never pin the seat count or the
