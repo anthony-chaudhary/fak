@@ -30,6 +30,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import dispatch_worker as dw  # noqa: E402
 
 GLM_BASE = "http://127.0.0.1:8001/v1"
+LAB_PROXY_BASE = "http://127.0.0.1:18080/v1"
 
 
 def _env(base: str | None) -> dict[str, str]:
@@ -50,6 +51,16 @@ def test_opencode_guarded_when_base_url_set() -> None:
     assert "--provider" in cmd and cmd[cmd.index("--provider") + 1] == "openai", joined
     assert "--base-url" in cmd and cmd[cmd.index("--base-url") + 1] == GLM_BASE, joined
     # The real worker argv survives intact after the `--` separator.
+    assert cmd[cmd.index("--") + 1:] == raw, joined
+
+
+def test_opencode_guarded_with_loopback_lab_proxy_base() -> None:
+    raw = dw.build_command("glm", "opencode")
+    cmd, guarded = dw.guarded_launch_command(raw, "glm", "opencode", ROOT, env=_env(LAB_PROXY_BASE))
+    assert guarded is True, "opencode should be guarded when the lab proxy base is configured"
+    joined = " ".join(cmd)
+    assert "--base-url" in cmd and cmd[cmd.index("--base-url") + 1] == LAB_PROXY_BASE, joined
+    assert "guard" in cmd and cmd[cmd.index("--provider") + 1] == "openai", joined
     assert cmd[cmd.index("--") + 1:] == raw, joined
 
 

@@ -59,6 +59,18 @@ Set it in the node's dispatch config / scheduled-task env (the same place
 export FLEET_DOGFOOD_GUARD_BASEURL="http://127.0.0.1:8001/v1"   # the discovered GLM /v1
 ```
 
+On this Windows dev host, persist the same local-only value in the user environment
+after the private lab proxy is up. The value is intentionally not checked into the
+public repo:
+
+```powershell
+[Environment]::SetEnvironmentVariable(
+  "FLEET_DOGFOOD_GUARD_BASEURL",
+  "<local-lab-openai-v1-base>",
+  "User"
+)
+```
+
 Or let the launcher do both — discover, export, and front the worker:
 
 ```bash
