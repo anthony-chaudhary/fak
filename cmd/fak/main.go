@@ -449,6 +449,8 @@ func main() {
 		cmdGrafana(os.Args[2:])
 	case "cachevalue":
 		cmdCachevalue(os.Args[2:])
+	case "savings":
+		cmdSavings(os.Args[2:])
 	case "marketing":
 		cmdMarketing(os.Args[2:])
 	case "news":
