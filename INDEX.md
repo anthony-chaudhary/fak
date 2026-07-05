@@ -170,6 +170,7 @@ front page.
 
 ### Latest working notes
 
+- [Triage: R7 relay-by-default admission for headless goal sessions (#2205)](docs/notes/AUTOCTX-R7-RELAY-DEFAULT-ADMISSION-TRIAGE-2026-07-05.md) — classifies the autoctx R7 rung as `gen/next` from #2198's own `Labels-intended`, maps the mechanism-vs-witness gap (relay mechanism ships in `internal/chatrelay`/`cmd/fak/chatrelay.go` but no admission-time relay-by-default seam exists and no gate consumes the `RELAY_*` vocabulary yet), and records the stale blocker — #1860 is now CLOSED, so R7 is unblocked-but-unbuilt, not P2-blocked-on-an-in-flight-epic. Triage only; #2205 stays OPEN. Recommends label repair (`managed-context`, `generation`, `gen/next`) + milestone `Generation G1`.
 - [Lab GLM-5.2 guarded route witness — 2026-07-05](docs/notes/LAB-GUARD-GLM52-WITNESS-2026-07-05.md) -- auto-indexed dated note.
 - [The preview-confirm loop on raw `gh` — and the sanctioned way around it](docs/notes/CONFIRM-GATE-DEADLOCK-2026-07-04.md) -- auto-indexed dated note.
 - [Out-of-band operator control — a closed control vocabulary for a running session](docs/notes/OUT-OF-BAND-OPERATOR-CONTROL-2026-07-05.md) -- auto-indexed dated note.
