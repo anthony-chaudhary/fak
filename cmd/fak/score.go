@@ -22,6 +22,10 @@ import (
 // The value runs the handler with the remaining argv and never returns (each handler os.Exit's,
 // or productScorecard exits with its own status). Keys are the legacy verb minus its
 // -scorecard/-score/-rsi suffix, so `fak score <name>` reads as the thing being scored.
+//
+// CONVENTION (#2247): a new scorecard lands HERE, under `fak score <name>`, never as another
+// top-level *-scorecard verb. score_test.go pins every legacy scorecard spelling to its route,
+// so a scorecard reachable only at the root reds the contract.
 var scoreRoutes = map[string]func(argv []string){
 	"conflation":          cmdConflationScorecard,
 	"concept-usage":       cmdConceptUsageScore,
@@ -29,10 +33,14 @@ var scoreRoutes = map[string]func(argv []string){
 	"dojo-rsi":            cmdDojoRSI,
 	"guard-rsi":           cmdGuardRSIScorecard,
 	"guard-verdict-rsi":   cmdGuardVerdictRSI,
+	"loop":                cmdLoopScore,
 	"loop-index":          cmdLoopIndexScorecard,
 	"milestone":           cmdMilestoneScorecard,
 	"product":             func(argv []string) { os.Exit(runProductScorecard(os.Stdout, os.Stderr, argv)) },
+	"propagation":         cmdPropagationScorecard,
+	"repo-hygiene":        cmdRepoHygieneScorecard,
 	"skill-effectiveness": cmdSkillEffectivenessScorecard,
+	"sota-coverage":       cmdSOTACoverageScorecard,
 	"support-maturity":    cmdSupportMaturityScorecard,
 	"token-defaults":      cmdTokenDefaultsScorecard,
 	"ui-quality":          cmdUIQualityScore,

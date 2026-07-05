@@ -16,10 +16,14 @@ func TestScoreRoutesCoverTheMetaVerbs(t *testing.T) {
 		"dojo-rsi",
 		"guard-rsi",
 		"guard-verdict-rsi",
+		"loop",
 		"loop-index",
 		"milestone",
 		"product",
+		"propagation",
+		"repo-hygiene",
 		"skill-effectiveness",
+		"sota-coverage",
 		"support-maturity",
 		"token-defaults",
 		"ui-quality",
@@ -39,6 +43,41 @@ func TestScoreRoutesCoverTheMetaVerbs(t *testing.T) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("scoreRoutes = %v, want %v", got, want)
+		}
+	}
+}
+
+// TestScoreRoutesCoverEveryLegacyScorecardVerb pins the #2247 consolidation: every legacy
+// top-level *-scorecard/*-score verb named there routes under `fak score <fold>`, where the
+// fold is the legacy verb minus its -scorecard/-score suffix. A scorecard verb reachable only
+// at the root is the defect this contract exists to catch -- the namespace, not the root, is
+// where scorecards land.
+func TestScoreRoutesCoverEveryLegacyScorecardVerb(t *testing.T) {
+	legacyToFold := map[string]string{
+		"concept-usage-score":           "concept-usage",
+		"conflation-scorecard":          "conflation",
+		"dogfood-score":                 "dogfood",
+		"guard-rsi-scorecard":           "guard-rsi",
+		"loop-index-scorecard":          "loop-index",
+		"loop-score":                    "loop",
+		"milestone-scorecard":           "milestone",
+		"product-scorecard":             "product",
+		"propagation-scorecard":         "propagation",
+		"repo-hygiene-scorecard":        "repo-hygiene",
+		"skill-effectiveness-scorecard": "skill-effectiveness",
+		"sota-coverage-scorecard":       "sota-coverage",
+		"support-maturity-scorecard":    "support-maturity",
+		"token-defaults-scorecard":      "token-defaults",
+		"ui-quality-scorecard":          "ui-quality",
+	}
+	for legacy, fold := range legacyToFold {
+		route, ok := scoreRoutes[fold]
+		if !ok {
+			t.Errorf("legacy verb %q has no `fak score %s` route -- the #2247 consolidation contract", legacy, fold)
+			continue
+		}
+		if route == nil {
+			t.Errorf("`fak score %s` (legacy %q) routes to a nil handler", fold, legacy)
 		}
 	}
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	maturityscore "github.com/anthony-chaudhary/fak/internal/maturity"
+	"github.com/anthony-chaudhary/fak/internal/trendreport"
 )
 
 // Schema is the stable control-pane schema identifier for the report envelope.
@@ -156,26 +157,17 @@ type Trend struct {
 	Summary                 string `json:"summary"`
 }
 
-// Report is one folded cadence-report control-pane envelope.
+// Report is one folded cadence-report control-pane envelope. The common head
+// (schema/ok/verdict/finding/reason/next_action, the ambient stamp, and the two
+// --check --json gate fields) is the embedded trendreport.Envelope; only the
+// cadence dimensions live here.
 type Report struct {
-	Schema      string   `json:"schema"`
-	OK          bool     `json:"ok"`
-	Verdict     string   `json:"verdict"`
-	Finding     string   `json:"finding"`
-	Reason      string   `json:"reason"`
-	NextAction  string   `json:"next_action"`
-	Workspace   string   `json:"workspace"`
-	Commit      string   `json:"commit"`
-	GeneratedAt string   `json:"generated_at"`
-	Date        string   `json:"date"`
-	Scores      Scores   `json:"scores"`
-	Maturity    Maturity `json:"maturity"`
-	Work        Work     `json:"work"`
-	Releases    Releases `json:"releases"`
-	Trend       *Trend   `json:"trend,omitempty"`
-	// gate fields, set only for the --check --json envelope.
-	GateExit    *int   `json:"gate_exit,omitempty"`
-	GateMessage string `json:"gate_message,omitempty"`
+	trendreport.Envelope
+	Scores   Scores   `json:"scores"`
+	Maturity Maturity `json:"maturity"`
+	Work     Work     `json:"work"`
+	Releases Releases `json:"releases"`
+	Trend    *Trend   `json:"trend,omitempty"`
 }
 
 // LedgerRow is one durable, append-only history line (a flattened projection of
@@ -334,15 +326,11 @@ func Fold(scores Scores, work Work, releases Releases, opts FoldOpts) Report {
 // and callers that only exercise the original three-dimension fold.
 func FoldWithMaturity(scores Scores, maturity Maturity, work Work, releases Releases, opts FoldOpts) Report {
 	r := Report{
-		Schema:      Schema,
-		Workspace:   opts.Workspace,
-		Commit:      opts.Commit,
-		GeneratedAt: opts.GeneratedAt,
-		Date:        opts.Date,
-		Scores:      scores,
-		Maturity:    maturity,
-		Work:        work,
-		Releases:    releases,
+		Envelope: trendreport.Stamp(Schema, opts),
+		Scores:   scores,
+		Maturity: maturity,
+		Work:     work,
+		Releases: releases,
 	}
 
 	var unmeasured []string
@@ -407,13 +395,10 @@ func FoldWithMaturity(scores Scores, maturity Maturity, work Work, releases Rele
 	return r
 }
 
-// FoldOpts carries the ambient context the fold stamps onto the envelope.
-type FoldOpts struct {
-	Workspace   string
-	Commit      string
-	GeneratedAt string
-	Date        string
-}
+// FoldOpts carries the ambient context the fold stamps onto the envelope. It is
+// the shared trendreport.Opts; the alias keeps this package's fold signature
+// stable for existing callers.
+type FoldOpts = trendreport.Opts
 
 // RowFromReport projects a folded report into one durable ledger row.
 func RowFromReport(r Report) LedgerRow {
@@ -572,8 +557,8 @@ func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
 		maturityScoreDelta, last.MaturityScore, row.MaturityScore,
 		maturityDebtDelta, last.MaturityDebt, row.MaturityDebt,
 		maturityBacklogDelta, last.MaturityBacklog, row.MaturityBacklog,
-		directionWord(workCommitsDelta), workCommitsDelta, last.WorkCommits, row.WorkCommits,
-		directionWord(workShipsDelta), workShipsDelta, last.WorkShips, row.WorkShips,
+		trendreport.DirectionWord(workCommitsDelta), workCommitsDelta, last.WorkCommits, row.WorkCommits,
+		trendreport.DirectionWord(workShipsDelta), workShipsDelta, last.WorkShips, row.WorkShips,
 		last.Date, row.WorkShips, row.WorkWindowDays)
 	if standingComparable {
 		summary = fmt.Sprintf("standing %+d (%d->%d; health %s->%s; difficulty %+d, %d->%d); ",
@@ -639,18 +624,6 @@ func trendDirection(debtDelta, standingDelta int, standingComparable bool) strin
 	return "flat"
 }
 
-// directionWord renders the sign of a per-tick delta as a trend word
-// (up | down | flat). Shared by the commit and ship deltas in TrendVsLast.
-func directionWord(delta int) string {
-	if delta > 0 {
-		return "up"
-	}
-	if delta < 0 {
-		return "down"
-	}
-	return "flat"
-}
-
 // latestBefore returns the most recent prior row, comparing by (date, then
 // generated_at) so a same-day re-run trends against the earlier same-day tick.
 // A row with the exact same generated_at as `row` is excluded (idempotent
@@ -665,11 +638,7 @@ func latestBefore(row LedgerRow, prior []LedgerRow) (LedgerRow, bool) {
 // caller appends it to the ledger file with a newline; keeping the rendering
 // pure makes the writer testable without touching disk.
 func AppendLedgerLine(row LedgerRow) (string, error) {
-	b, err := json.Marshal(row)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
+	return trendreport.AppendLedgerLine(row)
 }
 
 // --- render + gate ---------------------------------------------------------
@@ -764,25 +733,14 @@ func maturityRouteSuffix(m Maturity) string {
 //	0  cadence recorded (clear or score-regression advisory)
 //	1  a dimension failed to measure (the report is incomplete)
 func CheckGate(r Report) (int, string) {
-	if r.Finding == "cadence_unmeasured" {
-		return 1, "CADENCE INCOMPLETE: " + r.Reason
-	}
-	return 0, "CADENCE OK: " + r.Reason
+	v := trendreport.AdvisoryGate("CADENCE", r.Finding, r.Reason, "cadence_unmeasured")
+	return v.Exit, v.Message
 }
 
 // WithGate returns a copy reconciled to a CheckGate decision, for --check --json.
 func (r Report) WithGate(code int, message string) Report {
-	q := r
-	q.OK = code == 0
-	if code == 0 {
-		q.Verdict = "OK"
-	} else {
-		q.Verdict = "ACTION"
-	}
-	c := code
-	q.GateExit = &c
-	q.GateMessage = message
-	return q
+	r.Envelope = r.Envelope.WithGate(trendreport.GateVerdict{Exit: code, Message: message})
+	return r
 }
 
 // --- small tolerant decoders (shared shape with internal/gardenbundle) ------

@@ -716,7 +716,8 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
                  (parent verb for the meta-scorecards / RSI loops -- one grouped surface for the
                  tooling an operator does not drive day to day. 'fak score list' names them:
                  conflation, concept-usage, dogfood, dojo-rsi, guard-rsi, guard-verdict-rsi,
-                 loop-index, milestone, product, skill-effectiveness, support-maturity,
+                 loop, loop-index, milestone, product, propagation, repo-hygiene,
+                 skill-effectiveness, sota-coverage, support-maturity,
                  token-defaults, ui-quality. Each
                  forwards to the same handler the legacy top-level verb ran, so
                  'fak score conflation --json' == the old 'fak conflation-scorecard --json';

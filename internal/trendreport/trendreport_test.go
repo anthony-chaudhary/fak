@@ -6,59 +6,13 @@ import (
 	"testing"
 )
 
-// row is a minimal concrete LedgerRow standing in for the consumers' richer rows:
-// it carries the (date, generated_at) key Row requires plus one payload field, so
-// the generic ledger plumbing can be exercised without importing a real consumer.
+// row is a minimal concrete ledger row standing in for the consumers' richer
+// rows, so the generic append-line marshaller can be exercised without importing
+// a real consumer.
 type row struct {
 	Date        string `json:"date"`
 	GeneratedAt string `json:"generated_at"`
 	Debt        int    `json:"debt"`
-}
-
-func (r row) Key() (string, string) { return r.Date, r.GeneratedAt }
-
-func TestParseLedgerToleratesBlankBadAndDatelessLines(t *testing.T) {
-	content := strings.Join([]string{
-		`{"date":"2026-06-01","generated_at":"2026-06-01T00:00:00Z","debt":5}`,
-		``,                     // blank line skipped
-		`   `,                  // whitespace-only skipped
-		`{not json}`,           // unparseable skipped
-		`{"generated_at":"x"}`, // no Date skipped (can't order it)
-		`{"date":"2026-06-02","generated_at":"2026-06-02T00:00:00Z","debt":3}`,
-	}, "\n")
-
-	rows := ParseLedger[row](content)
-	if len(rows) != 2 {
-		t.Fatalf("want 2 valid rows, got %d: %+v", len(rows), rows)
-	}
-	if rows[0].Date != "2026-06-01" || rows[0].Debt != 5 {
-		t.Errorf("row[0] wrong: %+v", rows[0])
-	}
-	if rows[1].Date != "2026-06-02" || rows[1].Debt != 3 {
-		t.Errorf("row[1] wrong: %+v", rows[1])
-	}
-}
-
-func TestParseLedgerEmptyAndNoValidRows(t *testing.T) {
-	if rows := ParseLedger[row](""); rows != nil {
-		t.Errorf("empty content should yield nil, got %+v", rows)
-	}
-	if rows := ParseLedger[row]("\n\n{bad}\n{\"generated_at\":\"x\"}\n"); rows != nil {
-		t.Errorf("no-valid-row content should yield nil, got %+v", rows)
-	}
-}
-
-func TestParseLedgerPreservesFileOrder(t *testing.T) {
-	// Deliberately out of date order on disk: ParseLedger returns file order, not
-	// sorted order (LatestBefore does the ordering).
-	content := strings.Join([]string{
-		`{"date":"2026-06-09","generated_at":"b","debt":9}`,
-		`{"date":"2026-06-02","generated_at":"a","debt":2}`,
-	}, "\n")
-	rows := ParseLedger[row](content)
-	if len(rows) != 2 || rows[0].Date != "2026-06-09" || rows[1].Date != "2026-06-02" {
-		t.Fatalf("file order not preserved: %+v", rows)
-	}
 }
 
 func TestAppendLedgerLineRoundTrips(t *testing.T) {
@@ -77,77 +31,6 @@ func TestAppendLedgerLineRoundTrips(t *testing.T) {
 	if back != r {
 		t.Errorf("round-trip mismatch: got %+v want %+v", back, r)
 	}
-	// A parser fed the rendered line recovers exactly the row.
-	rows := ParseLedger[row](line)
-	if len(rows) != 1 || rows[0] != r {
-		t.Errorf("ParseLedger of rendered line wrong: %+v", rows)
-	}
-}
-
-func TestLatestBefore(t *testing.T) {
-	prior := []row{
-		{Date: "2026-06-01", GeneratedAt: "2026-06-01T00:00:00Z", Debt: 10},
-		{Date: "2026-06-03", GeneratedAt: "2026-06-03T08:00:00Z", Debt: 6},
-		{Date: "2026-06-03", GeneratedAt: "2026-06-03T20:00:00Z", Debt: 5}, // later same-day
-		{Date: "2026-06-02", GeneratedAt: "2026-06-02T00:00:00Z", Debt: 8},
-	}
-	tests := []struct {
-		name     string
-		row      row
-		prior    []row
-		wantOK   bool
-		wantDate string
-		wantGen  string
-	}{
-		{
-			name:     "picks most recent by (date, generated_at)",
-			row:      row{Date: "2026-06-04", GeneratedAt: "2026-06-04T00:00:00Z"},
-			prior:    prior,
-			wantOK:   true,
-			wantDate: "2026-06-03",
-			wantGen:  "2026-06-03T20:00:00Z",
-		},
-		{
-			name:   "no prior rows -> not found",
-			row:    row{Date: "2026-06-04", GeneratedAt: "2026-06-04T00:00:00Z"},
-			prior:  nil,
-			wantOK: false,
-		},
-		{
-			name: "excludes the idempotent same-generated_at re-append",
-			row:  row{Date: "2026-06-03", GeneratedAt: "2026-06-03T20:00:00Z"},
-			prior: []row{
-				{Date: "2026-06-03", GeneratedAt: "2026-06-03T20:00:00Z", Debt: 5},
-			},
-			wantOK: false,
-		},
-		{
-			name: "same-generated_at excluded, earlier same-day kept",
-			row:  row{Date: "2026-06-03", GeneratedAt: "2026-06-03T20:00:00Z"},
-			prior: []row{
-				{Date: "2026-06-03", GeneratedAt: "2026-06-03T08:00:00Z", Debt: 6},
-				{Date: "2026-06-03", GeneratedAt: "2026-06-03T20:00:00Z", Debt: 5},
-			},
-			wantOK:   true,
-			wantDate: "2026-06-03",
-			wantGen:  "2026-06-03T08:00:00Z",
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got, ok := LatestBefore(tc.row, tc.prior)
-			if ok != tc.wantOK {
-				t.Fatalf("ok = %v, want %v (got row %+v)", ok, tc.wantOK, got)
-			}
-			if !tc.wantOK {
-				return
-			}
-			gd, gg := got.Key()
-			if gd != tc.wantDate || gg != tc.wantGen {
-				t.Errorf("got (%s,%s), want (%s,%s)", gd, gg, tc.wantDate, tc.wantGen)
-			}
-		})
-	}
 }
 
 func TestDirectionWord(t *testing.T) {
@@ -162,22 +45,6 @@ func TestDirectionWord(t *testing.T) {
 	for _, c := range cases {
 		if got := DirectionWord(c.delta); got != c.want {
 			t.Errorf("DirectionWord(%d) = %q, want %q", c.delta, got, c.want)
-		}
-	}
-}
-
-func TestDirectionWordF(t *testing.T) {
-	cases := []struct {
-		delta float64
-		want  string
-	}{
-		{0.1, "up"},
-		{-0.1, "down"},
-		{0, "flat"},
-	}
-	for _, c := range cases {
-		if got := DirectionWordF(c.delta); got != c.want {
-			t.Errorf("DirectionWordF(%v) = %q, want %q", c.delta, got, c.want)
 		}
 	}
 }

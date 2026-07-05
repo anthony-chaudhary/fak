@@ -108,10 +108,10 @@ func runMilestoneReport(stdout, stderr io.Writer, argv []string) int {
 		ledgerPath = filepath.Join(root, filepath.FromSlash(milestonereport.DefaultLedgerRel))
 	}
 	row := milestonereport.RowFromReport(report)
-	prior := readMilestoneLedgerRows(ledgerPath)
+	prior := readLedgerFile(ledgerPath, milestonereport.ParseLedger)
 	report = report.WithTrend(milestonereport.TrendVsLast(row, prior))
 	if *appendHistory {
-		if err := appendMilestoneLedgerRow(ledgerPath, row); err != nil {
+		if err := appendLedgerFile(ledgerPath, row, milestonereport.AppendLedgerLine); err != nil {
 			fmt.Fprintf(stderr, "fak milestone report: append ledger: %v\n", err)
 			return 1
 		}
@@ -186,7 +186,7 @@ func runMilestonePost(stdout, stderr io.Writer, argv []string) int {
 			Date:        now.Format("2006-01-02"),
 		})
 		ledgerPath := filepath.Join(root, filepath.FromSlash(milestonereport.DefaultLedgerRel))
-		report = report.WithTrend(milestonereport.TrendVsLast(milestonereport.RowFromReport(report), readMilestoneLedgerRows(ledgerPath)))
+		report = report.WithTrend(milestonereport.TrendVsLast(milestonereport.RowFromReport(report), readLedgerFile(ledgerPath, milestonereport.ParseLedger)))
 	}
 
 	card := milestonepost.Fold(report)
@@ -231,33 +231,4 @@ func resolveMilestoneSource(flagVal string) string {
 		return flagVal
 	}
 	return defaultSource()
-}
-
-// readMilestoneLedgerRows reads the durable ledger if present (absent ledger -> no
-// prior rows, the first tick establishes the series).
-func readMilestoneLedgerRows(path string) []milestonereport.LedgerRow {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	return milestonereport.ParseLedger(string(raw))
-}
-
-// appendMilestoneLedgerRow appends one JSONL row to the ledger, creating the parent
-// directory on first write.
-func appendMilestoneLedgerRow(path string, row milestonereport.LedgerRow) error {
-	line, err := milestonereport.AppendLedgerLine(row)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString(line + "\n")
-	return err
 }

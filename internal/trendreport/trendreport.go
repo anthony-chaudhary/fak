@@ -1,66 +1,17 @@
 package trendreport
 
-// trendreport.go is the generic, consumer-agnostic substrate three trend-reports
-// (internal/cadencereport, internal/milestonereport, and the dojo board) currently
-// re-declare verbatim: the durable-JSONL ledger plumbing (parse / latest-prior /
-// append-line), the per-tick direction word, the embeddable control-pane envelope,
-// and the advisory gate whose only failing finding is the caller's *_unmeasured
-// token. It imports nothing internal (stdlib + generics only) so it can sit at the
-// foundation tier and a fourth report is authored without copy-paste.
-//
-// Migrating the existing consumers onto this substrate is a documented FOLLOW-ON
-// (#1437): this lane only CREATES the shared spine + its tests. The consumers stay
-// byte-identical until they are switched over in a later, behavior-preserving wave.
+// trendreport.go is the generic, consumer-agnostic ENVELOPE substrate the fak
+// trend-reports (internal/cadencereport, internal/milestonereport, the dojo
+// board) used to re-declare verbatim: the embeddable control-pane envelope, the
+// advisory gate whose only failing finding is the caller's *_unmeasured token,
+// the per-tick direction word, and the JSONL append-line marshaller. The ledger
+// READ plumbing (parse / latest-prior) lives in internal/jsonlledger — the
+// substrate the consumers already delegate to — so it is deliberately NOT
+// re-declared here. This package imports nothing internal (stdlib + generics
+// only) so it sits at the foundation tier and a fourth report is authored
+// without copy-paste.
 
-import (
-	"bufio"
-	"encoding/json"
-	"sort"
-	"strings"
-)
-
-// Row is the one thing a durable ledger line must expose for the generic ledger
-// plumbing to order it: the (date, generated_at) key the parser keeps a line on
-// and latestBefore sorts by. cadencereport.LedgerRow and milestonereport.LedgerRow
-// both already carry these fields; a consumer satisfies Row with a one-line method.
-//
-// Date is the coarse ordering key (a YYYY-MM-DD tick); GeneratedAt breaks a
-// same-day tie so a same-day re-run trends against the earlier same-day tick. A
-// row whose Date is empty is treated as not-a-row by ParseLedger (a hand-edit
-// can't crash the reader).
-type Row interface {
-	Key() (date, generatedAt string)
-}
-
-// ParseLedger parses an append-only JSONL ledger into []T, tolerating blank lines
-// and skipping any line that is not a valid row OR carries no Date (so a hand-edit
-// can't crash the reader). Rows are returned in file order. T must be a concrete
-// row type (not a pointer) that satisfies Row; the parser unmarshals each line into
-// a fresh T and keeps it only when its Date key is non-empty.
-//
-// This is the generic form of the identical ParseLedger both cadencereport and
-// milestonereport hand-roll: same scanner buffer, same blank-line + bad-line +
-// empty-Date tolerance, lifted to be row-type-agnostic.
-func ParseLedger[T Row](content string) []T {
-	var rows []T
-	sc := bufio.NewScanner(strings.NewReader(content))
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		var row T
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			continue
-		}
-		if date, _ := row.Key(); date == "" {
-			continue
-		}
-		rows = append(rows, row)
-	}
-	return rows
-}
+import "encoding/json"
 
 // AppendLedgerLine renders the JSONL line for a row (no trailing newline). The
 // caller appends it to the ledger file with a newline; keeping the rendering pure
@@ -74,56 +25,9 @@ func AppendLedgerLine[T any](row T) (string, error) {
 	return string(b), nil
 }
 
-// LatestBefore returns the most recent prior row relative to `row`, comparing by
-// (date, then generated_at) so a same-day re-run trends against the earlier
-// same-day tick. A prior row with the exact same generated_at as `row` is excluded
-// (idempotent re-append). With no eligible prior the second result is false — the
-// caller renders that as the "new" / first-tick trend.
-//
-// This is the generic form of the byte-identical latestBefore both consumers
-// hand-roll; it operates on the Row key, never on a concrete field name.
-func LatestBefore[T Row](row T, prior []T) (T, bool) {
-	_, rowGen := row.Key()
-	cands := make([]T, 0, len(prior))
-	for _, p := range prior {
-		_, pGen := p.Key()
-		if pGen != "" && pGen == rowGen {
-			continue
-		}
-		cands = append(cands, p)
-	}
-	if len(cands) == 0 {
-		var zero T
-		return zero, false
-	}
-	sort.SliceStable(cands, func(i, j int) bool {
-		di, gi := cands[i].Key()
-		dj, gj := cands[j].Key()
-		if di != dj {
-			return di < dj
-		}
-		return gi < gj
-	})
-	return cands[len(cands)-1], true
-}
-
 // DirectionWord renders the sign of a per-tick integer delta as a trend word
 // (up | down | flat). Shared by the per-dimension delta lines across the reports.
 func DirectionWord(delta int) string {
-	switch {
-	case delta > 0:
-		return "up"
-	case delta < 0:
-		return "down"
-	default:
-		return "flat"
-	}
-}
-
-// DirectionWordF is the float form of DirectionWord, for dimensions whose delta is
-// a percentage (the milestone climb/roadmap deltas). A zero delta — including a
-// tiny one that rounds to zero — is "flat".
-func DirectionWordF(delta float64) string {
 	switch {
 	case delta > 0:
 		return "up"
