@@ -2,10 +2,10 @@ package chatrelay
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
+	"github.com/anthony-chaudhary/fak/internal/slackenv"
 )
 
 // Token / channel resolution mirrors internal/blockerpost: one gitignored .env.slack.local
@@ -33,7 +33,7 @@ func ResolveToken() string {
 			return v
 		}
 	}
-	if v := envFileValue("FAK_CHATRELAY_TOKEN"); v != "" {
+	if v := slackenv.FileValue("FAK_CHATRELAY_TOKEN"); v != "" {
 		return v
 	}
 	return scoreboard.ResolveToken()
@@ -48,34 +48,5 @@ func ResolveChannel() string {
 			return v
 		}
 	}
-	return envFileValue("FAK_CHATRELAY_CHANNEL")
-}
-
-// envFileValue walks up from the cwd looking for .env.slack.local and returns the value of
-// the first `KEY=...` line for key (an optional `export ` prefix is tolerated). Mirrors the
-// scoreboard/blockerpost resolver so one gitignored file configures every workspace.
-func envFileValue(key string) string {
-	dir, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	for i := 0; i < 6; i++ {
-		p := filepath.Join(dir, ".env.slack.local")
-		if b, err := os.ReadFile(p); err == nil {
-			for _, ln := range strings.Split(string(b), "\n") {
-				ln = strings.TrimSpace(ln)
-				ln = strings.TrimPrefix(ln, "export ")
-				ln = strings.TrimSpace(ln)
-				if v, ok := strings.CutPrefix(ln, key+"="); ok {
-					return strings.TrimSpace(v)
-				}
-			}
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return ""
+	return slackenv.FileValue("FAK_CHATRELAY_CHANNEL")
 }
