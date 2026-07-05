@@ -154,6 +154,7 @@ func firstClassHarnessFloorProfiles() []harnessFloorProfile {
 				{"ReadMcpResourceDirTool", `{"server":"dos","uri":"x"}`},
 				{"mcp__dos__dos_verify", `{"plan":"AUTH","phase":"AUTH2"}`},
 				{"mcp__dos__dos_arbitrate", `{"lane":"x"}`},
+				{"dos_dos_arbitrate", `{"lane":"x"}`},
 				{"mcp__fak__fak_tools_search", `{"query":"tool","detail_level":"name"}`},
 				{"mcp__fak__fak_index_lane", `{"path":"README.md"}`},
 				{"mcp__fak__fak_index_leaves", `{"query":"gateway"}`},

@@ -79,6 +79,7 @@
 
     "mcp__dos__dos_verify",
     "mcp__dos__dos_arbitrate",
+    "dos_dos_arbitrate",
     "mcp__dos__dos_recall",
     "mcp__dos__dos_review",
     "mcp__dos__dos_status",

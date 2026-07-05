@@ -161,6 +161,7 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"DesignSync allowed (ultracode orchestration)", "DesignSync", `{"method":"list_projects"}`, abi.VerdictAllow},
 		{"read-only DOS verb dos_verify allowed", "mcp__dos__dos_verify", `{"plan":"AUTH","phase":"AUTH2"}`, abi.VerdictAllow},
 		{"read-only DOS verb dos_arbitrate allowed", "mcp__dos__dos_arbitrate", `{"lane":"x"}`, abi.VerdictAllow},
+		{"opencode DOS arbitrate spelling allowed", "dos_dos_arbitrate", `{"lane":"x"}`, abi.VerdictAllow},
 		{"fak MCP tool search allowed", "mcp__fak__fak_tools_search", `{"query":"tool","detail_level":"name"}`, abi.VerdictAllow},
 		{"fak MCP index lane allowed", "mcp__fak__fak_index_lane", `{"path":"README.md"}`, abi.VerdictAllow},
 		{"fak MCP capabilities allowed", "mcp__fak__fak_capabilities", `{"intent":"inspect guard loop"}`, abi.VerdictAllow},
@@ -171,6 +172,7 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		// closed, and a destructive Bash arg is still refused even though Bash is allowed.
 		{"unlisted tool still fails closed", "exfiltrate_to_prod", `{"target":"prod"}`, abi.VerdictDeny},
 		{"unlisted DOS-shaped mutation verb still fails closed", "mcp__dos__dos_commit", `{}`, abi.VerdictDeny},
+		{"opencode DOS-shaped mutation verb still fails closed", "dos_dos_commit", `{}`, abi.VerdictDeny},
 		{"danger arg still denied after widening the floor", "Bash", `{"command":"rm -rf /important"}`, abi.VerdictDeny},
 
 		// OpenCode (lowercase tool names; camelCase filePath) — the same floor must hold.
