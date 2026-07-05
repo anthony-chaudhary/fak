@@ -79,13 +79,215 @@ func classifyReversibility(tool string, args map[string]any) (ReversibilityClass
 	if hasDryRunPreview(cmd, args) {
 		return ReversibilityReversible, ""
 	}
-	if commandOutwardFacing(cmd) || toolOutwardFacing(tool) {
-		return ReversibilityOutwardFacing, dryRunHint(tool, cmd)
+	return classifyAgainstFamilies(reversibilityFamilies, tool, cmd)
+}
+
+// familyMatchInput carries the precomputed views of one pending call that
+// family matchers key on: the raw and lowered command, its operator-split
+// segments, its whole-command word stream, and the lowered tool name.
+type familyMatchInput struct {
+	cmd       string
+	lowerCmd  string
+	segs      [][]string
+	words     []string
+	lowerTool string
+}
+
+// reversibilityFamily declares one escalated family in a single place: every
+// surface that blocks it AND the redirect surfaced with the escalation. The
+// classifier and the dry-run hint both read the SAME entry, so a family
+// cannot be added to the block without deciding its redirect, and a redirect
+// cannot name a surface the block never fires on (#2748, #2746).
+type reversibilityFamily struct {
+	name  string
+	class ReversibilityClass
+	// Block surfaces — any non-zero surface participates in the match.
+	heads        []string                       // command segment head verbs
+	prefixes     [][]string                     // command segment word prefixes
+	cmdContains  []string                       // lowered whole-command substrings
+	toolContains []string                       // lowered tool-name substrings
+	matchCmd     func(in familyMatchInput) bool // payload-shaped matchers (curl flags, SQL words)
+	// Redirect surfaced when this family blocks ("" = no sanctioned sidestep).
+	hint string
+}
+
+func (f *reversibilityFamily) matches(in familyMatchInput) bool {
+	if segmentHeadIs(in.segs, f.heads...) {
+		return true
 	}
-	if commandIrreversible(cmd) || toolIrreversible(tool) {
-		return ReversibilityIrreversible, dryRunHint(tool, cmd)
+	for _, p := range f.prefixes {
+		if segmentHasPrefix(in.segs, p...) {
+			return true
+		}
+	}
+	for _, sub := range f.cmdContains {
+		if strings.Contains(in.lowerCmd, sub) {
+			return true
+		}
+	}
+	for _, sub := range f.toolContains {
+		if strings.Contains(in.lowerTool, sub) {
+			return true
+		}
+	}
+	return f.matchCmd != nil && f.matchCmd(in)
+}
+
+// reversibilityClassOrder fixes the escalation precedence: a call matching
+// both an outward-facing family and an irreversible family previews as
+// outward-facing, whatever the table order.
+var reversibilityClassOrder = []ReversibilityClass{ReversibilityOutwardFacing, ReversibilityIrreversible}
+
+func classifyAgainstFamilies(families []reversibilityFamily, tool, cmd string) (ReversibilityClass, string) {
+	in := familyMatchInput{
+		cmd:       cmd,
+		lowerCmd:  strings.ToLower(cmd),
+		segs:      commandSegments(cmd),
+		words:     commandWords(cmd),
+		lowerTool: strings.ToLower(tool),
+	}
+	for _, class := range reversibilityClassOrder {
+		for i := range families {
+			if families[i].class != class {
+				continue
+			}
+			if families[i].matches(in) {
+				return class, families[i].hint
+			}
+		}
 	}
 	return ReversibilityReversible, ""
+}
+
+// reversibilityFamilies is the single source of truth for the escalated
+// outward/destructive families (#2748). Within a class, earlier entries win
+// the redirect when a call matches several families, so the hinted families
+// stay first, in redirect-priority order.
+//
+// `gh` is deliberately NOT a family here (operator decision, 2026-07-05). Every gh
+// write — issue/pr/release create·comment·edit·close·reopen·merge·upload and `gh api`
+// mutations — targets the operator's OWN authenticated GitHub and is reversible in
+// practice (issues/PRs edit·close·reopen; a release can be deleted), so the
+// preview-confirm pause was pure friction on routine fleet work — the #2650/#2651
+// confirm-loop lesson — while the Claude Code allow-list already admits `Bash(gh …)`.
+// curl/httpie POSTs stay gated (http-write below): those reach ARBITRARY hosts, not
+// the authenticated gh surface, so the outbound floor still holds for the general case.
+var reversibilityFamilies = []reversibilityFamily{
+	// An MCP tool literally named create_issue / issue_create is still
+	// escalated; the redirect points at the compiled `fak issue create` verb
+	// (cmd/fak/issue_create.go), a trusted-binary sidestep the kernel admits.
+	// Raw `gh issue create` is no longer escalated (see the gh note above), so
+	// a Bash gh call never reaches this family.
+	{
+		name:         "issue-create-tool",
+		class:        ReversibilityOutwardFacing,
+		toolContains: []string{"create_issue", "issue_create"},
+		hint:         "file it with the sanctioned compiled verb: fak issue create --title … --body-file … (a trusted-binary path the kernel admits)",
+	},
+	// A Bash `slack …` HEAD (or an MCP tool whose name contains "slack") is
+	// escalated; the redirect points at the compiled `fak slack send` verb
+	// (cmd/fak/slack.go). Matched on the segment HEAD — not a bare substring —
+	// so `git push origin slack-feature` keeps the git-push redirect below,
+	// and sendmail/mail/mutt (no fak equivalent) stay a separate family with
+	// no redirect.
+	{
+		name:         "slack",
+		class:        ReversibilityOutwardFacing,
+		heads:        []string{"slack"},
+		toolContains: []string{"slack"},
+		hint:         "send it with the sanctioned compiled verb: fak slack send (a trusted-binary path the kernel admits)",
+	},
+	// git push is escalated; the redirect names the compiled sidestep FIRST —
+	// a safe, non-force push the kernel admits because its command head is
+	// `fak`, not `git push` — with the --dry-run preview kept as the secondary
+	// option. Before #2651's pattern was generalized here, this hint named
+	// only `git push --dry-run`, which previews nothing and funnels the agent
+	// straight back to the gated real push (the confirm loop in
+	// docs/notes/CONFIRM-GATE-DEADLOCK-2026-07-04.md).
+	{
+		name:         "git-push",
+		class:        ReversibilityOutwardFacing,
+		prefixes:     [][]string{{"git", "push"}},
+		toolContains: []string{"git_push"},
+		hint:         "push with the safe compiled verb: fak sync push (a trusted-binary non-force push the kernel admits), or preview first with git push --dry-run",
+	},
+	{
+		name:     "npm-publish",
+		class:    ReversibilityOutwardFacing,
+		prefixes: [][]string{{"npm", "publish"}},
+		hint:     "try npm publish --dry-run first",
+	},
+	// Outward families below carry no sanctioned sidestep yet (hint "").
+	{
+		name:  "mail",
+		class: ReversibilityOutwardFacing,
+		heads: []string{"sendmail", "mail", "mutt"},
+	},
+	{
+		name:         "webhook",
+		class:        ReversibilityOutwardFacing,
+		cmdContains:  []string{"webhook"},
+		toolContains: []string{"webhook"},
+	},
+	{
+		name:         "registry-publish",
+		class:        ReversibilityOutwardFacing,
+		prefixes:     [][]string{{"docker", "push"}, {"cargo", "publish"}, {"gem", "push"}, {"twine", "upload"}},
+		toolContains: []string{"publish", "upload"},
+	},
+	{
+		name:  "http-write",
+		class: ReversibilityOutwardFacing,
+		matchCmd: func(in familyMatchInput) bool {
+			return curlWrites(in.cmd) || httpieWrites(in.segs)
+		},
+	},
+	{
+		name:         "messaging-tool",
+		class:        ReversibilityOutwardFacing,
+		toolContains: []string{"send_email", "sendemail", "email", "send_mail", "post_message"},
+	},
+	{
+		name:         "pr-create-tool",
+		class:        ReversibilityOutwardFacing,
+		toolContains: []string{"create_pr", "pr_create"},
+	},
+	{
+		name:  "fs-destroy",
+		class: ReversibilityIrreversible,
+		heads: []string{"rm", "rmdir", "del", "erase", "shred", "truncate", "mkfs", "remove-item"},
+	},
+	{
+		name:     "git-destroy",
+		class:    ReversibilityIrreversible,
+		prefixes: [][]string{{"git", "clean"}, {"git", "reset", "hard"}},
+	},
+	{
+		name:     "infra-destroy",
+		class:    ReversibilityIrreversible,
+		prefixes: [][]string{{"terraform", "destroy"}, {"kubectl", "delete"}},
+	},
+	// Payload scans stay whole-command on purpose: SQL statements and dd
+	// targets arrive as arguments to a client binary, never as the head.
+	{
+		name:  "sql-drop",
+		class: ReversibilityIrreversible,
+		matchCmd: func(in familyMatchInput) bool {
+			return orderedWords(in.words, "drop", "database") || orderedWords(in.words, "drop", "table")
+		},
+	},
+	{
+		name:  "dd-device-write",
+		class: ReversibilityIrreversible,
+		matchCmd: func(in familyMatchInput) bool {
+			return containsWord(in.words, "dd") && strings.Contains(in.lowerCmd, "of=/dev/")
+		},
+	},
+	{
+		name:         "destructive-tool",
+		class:        ReversibilityIrreversible,
+		toolContains: []string{"delete", "remove", "destroy", "truncate", "unlink", "rmdir"},
+	},
 }
 
 func commandText(args map[string]any) string {
@@ -110,78 +312,6 @@ func hasDryRunPreview(cmd string, args map[string]any) bool {
 	}
 	lower := strings.ToLower(cmd)
 	return strings.Contains(lower, "--dry-run") || strings.Contains(lower, "--preview")
-}
-
-func commandOutwardFacing(cmd string) bool {
-	segs := commandSegments(cmd)
-	lower := strings.ToLower(cmd)
-	switch {
-	case segmentHeadIs(segs, "slack", "sendmail", "mail", "mutt"):
-		return true
-	case strings.Contains(lower, "webhook"):
-		return true
-	case segmentHasPrefix(segs, "git", "push"):
-		return true
-	case segmentHasPrefix(segs, "docker", "push"), segmentHasPrefix(segs, "npm", "publish"),
-		segmentHasPrefix(segs, "cargo", "publish"), segmentHasPrefix(segs, "gem", "push"),
-		segmentHasPrefix(segs, "twine", "upload"):
-		return true
-	// `gh` is deliberately NOT escalated here (operator decision, 2026-07-05). Every gh
-	// write — issue/pr/release create·comment·edit·close·reopen·merge·upload and `gh api`
-	// mutations — targets the operator's OWN authenticated GitHub and is reversible in
-	// practice (issues/PRs edit·close·reopen; a release can be deleted), so the
-	// preview-confirm pause was pure friction on routine fleet work — the #2650/#2651
-	// confirm-loop lesson — while the Claude Code allow-list already admits `Bash(gh …)`.
-	// curl/httpie POSTs stay gated below: those reach ARBITRARY hosts, not the
-	// authenticated gh surface, so the outbound floor still holds for the general case.
-	case curlWrites(cmd), httpieWrites(segs):
-		return true
-	default:
-		return false
-	}
-}
-
-func commandIrreversible(cmd string) bool {
-	segs := commandSegments(cmd)
-	words := commandWords(cmd)
-	lower := strings.ToLower(cmd)
-	switch {
-	case segmentHeadIs(segs, "rm", "rmdir", "del", "erase", "shred", "truncate", "mkfs", "remove-item"):
-		return true
-	case segmentHasPrefix(segs, "git", "clean"), segmentHasPrefix(segs, "git", "reset", "hard"):
-		return true
-	case segmentHasPrefix(segs, "terraform", "destroy"), segmentHasPrefix(segs, "kubectl", "delete"):
-		return true
-	// Payload scans stay whole-command on purpose: SQL statements and dd
-	// targets arrive as arguments to a client binary, never as the head.
-	case orderedWords(words, "drop", "database"), orderedWords(words, "drop", "table"):
-		return true
-	case containsWord(words, "dd") && strings.Contains(lower, "of=/dev/"):
-		return true
-	default:
-		return false
-	}
-}
-
-func toolOutwardFacing(tool string) bool {
-	lower := strings.ToLower(tool)
-	if strings.Contains(lower, "slack") || strings.Contains(lower, "webhook") ||
-		strings.Contains(lower, "publish") || strings.Contains(lower, "upload") ||
-		strings.Contains(lower, "send_email") || strings.Contains(lower, "sendemail") ||
-		strings.Contains(lower, "email") || strings.Contains(lower, "send_mail") ||
-		strings.Contains(lower, "post_message") || strings.Contains(lower, "git_push") ||
-		strings.Contains(lower, "create_issue") || strings.Contains(lower, "issue_create") ||
-		strings.Contains(lower, "create_pr") || strings.Contains(lower, "pr_create") {
-		return true
-	}
-	return false
-}
-
-func toolIrreversible(tool string) bool {
-	lower := strings.ToLower(tool)
-	return strings.Contains(lower, "delete") || strings.Contains(lower, "remove") ||
-		strings.Contains(lower, "destroy") || strings.Contains(lower, "truncate") ||
-		strings.Contains(lower, "unlink") || strings.Contains(lower, "rmdir")
 }
 
 var curlWriteFlagRE = regexp.MustCompile(`(?i)(^|[;&|()]|[[:space:]])curl(\.exe)?\b.*([[:space:]]-[Xx][[:space:]]*(POST|PUT|PATCH|DELETE)\b|[[:space:]]--request(=|[[:space:]]+)(POST|PUT|PATCH|DELETE)\b|[[:space:]](-d|--data|--data-raw|--data-binary|--form)(=|[[:space:]]|$))`)
@@ -210,39 +340,6 @@ func httpWriteVerb(w string) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func dryRunHint(tool, cmd string) string {
-	lowerTool, lowerCmd := strings.ToLower(tool), strings.ToLower(cmd)
-	switch {
-	// An MCP tool literally named create_issue / issue_create is still escalated by
-	// toolOutwardFacing; point it at the compiled `fak issue create` verb
-	// (cmd/fak/issue_create.go), a trusted-binary sidestep the kernel admits. Raw
-	// `gh issue create` is no longer escalated (see commandOutwardFacing), so a Bash
-	// gh call never reaches this hint.
-	case strings.Contains(lowerTool, "create_issue") || strings.Contains(lowerTool, "issue_create"):
-		return "file it with the sanctioned compiled verb: fak issue create --title … --body-file … (a trusted-binary path the kernel admits)"
-	// A Bash `slack …` HEAD (or an MCP tool whose name contains "slack") is escalated
-	// outward-facing by commandOutwardFacing/toolOutwardFacing; point it at the compiled
-	// `fak slack send` verb (cmd/fak/slack.go), a trusted-binary sidestep the kernel
-	// admits. Matched on the segment HEAD — mirroring the classifier — not a bare
-	// substring, so `git push origin slack-feature` keeps its own git-push hint below,
-	// and sendmail/mail/mutt (no fak equivalent) fall through to the empty default.
-	case strings.Contains(lowerTool, "slack") || segmentHeadIs(commandSegments(cmd), "slack"):
-		return "send it with the sanctioned compiled verb: fak slack send (a trusted-binary path the kernel admits)"
-	// git push is escalated outward-facing; name the compiled sidestep FIRST — a safe,
-	// non-force push the kernel admits because its command head is `fak`, not `git push`
-	// — with the --dry-run preview kept as the secondary option. Before #2651's pattern
-	// was generalized here, this hint named only `git push --dry-run`, which previews
-	// nothing and funnels the agent straight back to the gated real push (the confirm
-	// loop in docs/notes/CONFIRM-GATE-DEADLOCK-2026-07-04.md).
-	case strings.Contains(lowerCmd, "git push") || strings.Contains(lowerTool, "git_push"):
-		return "push with the safe compiled verb: fak sync push (a trusted-binary non-force push the kernel admits), or preview first with git push --dry-run"
-	case strings.Contains(lowerCmd, "npm publish"):
-		return "try npm publish --dry-run first"
-	default:
-		return ""
 	}
 }
 
