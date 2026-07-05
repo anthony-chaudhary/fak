@@ -37,6 +37,56 @@ func TestLivelockDetectorFiresOnThirdIdenticalFailure(t *testing.T) {
 	}
 }
 
+func TestLivelockDetectorFiresOnThirdIdenticalAllowedCall(t *testing.T) {
+	d := NewLivelockDetector(3)
+	obs := LivelockObservation{
+		TraceID:    "trace-allow",
+		Tool:       "shell_command",
+		ArgsDigest: "sha256:abc",
+	}
+	for i := 1; i <= 2; i++ {
+		if env, ok := d.ObserveAllowed(obs); ok {
+			t.Fatalf("turn %d fired early: %+v", i, env)
+		}
+	}
+	env, ok := d.ObserveAllowed(obs)
+	if !ok {
+		t.Fatal("third identical allowed call did not fire")
+	}
+	if env.Event != LivelockEvent || env.RepeatCount != 3 || env.Tool != "shell_command" || env.Verdict != "ALLOW" {
+		t.Fatalf("envelope = %+v, want LIVELOCK_DETECTED repeat=3 ALLOW shell_command@sha256:abc", env)
+	}
+	if env.SuggestedChange != "change_approach_stop_repeating_successful_call_or_summarize_result" {
+		t.Fatalf("suggested change = %q", env.SuggestedChange)
+	}
+}
+
+func TestLivelockDetectorFiresOnThirdIdenticalTransform(t *testing.T) {
+	d := NewLivelockDetector(3)
+	obs := LivelockObservation{
+		TraceID:    "trace-transform",
+		Tool:       "Bash",
+		ArgsDigest: "sha256:abc",
+		Verdict:    "TRANSFORM",
+		Reason:     "REPAIR",
+	}
+	for i := 1; i <= 2; i++ {
+		if env, ok := d.ObserveAdmitted(obs); ok {
+			t.Fatalf("turn %d fired early: %+v", i, env)
+		}
+	}
+	env, ok := d.ObserveAdmitted(obs)
+	if !ok {
+		t.Fatal("third identical transform did not fire")
+	}
+	if env.Event != LivelockEvent || env.RepeatCount != 3 || env.Tool != "Bash" || env.Verdict != "TRANSFORM" || env.Reason != "REPAIR" {
+		t.Fatalf("envelope = %+v, want LIVELOCK_DETECTED repeat=3 TRANSFORM Bash@sha256:abc", env)
+	}
+	if env.SuggestedChange != "change_approach_stop_repeating_successful_call_or_summarize_result" {
+		t.Fatalf("suggested change = %q", env.SuggestedChange)
+	}
+}
+
 func TestLivelockDetectorResetsOnDifferentFailureAndClear(t *testing.T) {
 	d := NewLivelockDetector(3)
 	obs := LivelockObservation{TraceID: "trace-1", Tool: "Bash", ArgsDigest: "sha256:one", Verdict: "DENY", Reason: "POLICY_BLOCK"}

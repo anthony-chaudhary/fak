@@ -14,8 +14,8 @@ const (
 	DefaultLivelockThreshold = 3
 )
 
-// LivelockObservation is one refused/quarantined tool-call outcome, identified without
-// carrying raw arguments. TraceID scopes the consecutive run to one agent session.
+// LivelockObservation is one repeated tool-call outcome, identified without carrying
+// raw arguments. TraceID scopes the consecutive run to one agent session.
 type LivelockObservation struct {
 	TraceID     string
 	Tool        string
@@ -25,7 +25,7 @@ type LivelockObservation struct {
 	Disposition string
 }
 
-// LivelockEnvelope is the structured nudge returned once an identical failing call
+// LivelockEnvelope is the structured nudge returned once an identical tool call
 // repeats enough times in one session.
 type LivelockEnvelope struct {
 	Schema          string `json:"schema"`
@@ -47,7 +47,7 @@ type livelockRun struct {
 	last  LivelockObservation
 }
 
-// LivelockDetector tracks consecutive identical failures per trace. It is intentionally
+// LivelockDetector tracks consecutive identical tool-call outcomes per trace. It is intentionally
 // small and caller-synchronized; gateway guards it with its server mutex.
 type LivelockDetector struct {
 	threshold int
@@ -98,6 +98,22 @@ func (d *LivelockDetector) Clear(trace string) {
 }
 
 func (d *LivelockDetector) ObserveFailure(obs LivelockObservation) (LivelockEnvelope, bool) {
+	return d.observe(obs)
+}
+
+func (d *LivelockDetector) ObserveAllowed(obs LivelockObservation) (LivelockEnvelope, bool) {
+	obs.Verdict = "ALLOW"
+	return d.ObserveAdmitted(obs)
+}
+
+func (d *LivelockDetector) ObserveAdmitted(obs LivelockObservation) (LivelockEnvelope, bool) {
+	if strings.TrimSpace(obs.Verdict) == "" {
+		obs.Verdict = "ALLOW"
+	}
+	return d.observe(obs)
+}
+
+func (d *LivelockDetector) observe(obs LivelockObservation) (LivelockEnvelope, bool) {
 	if d == nil || strings.TrimSpace(obs.TraceID) == "" {
 		return LivelockEnvelope{}, false
 	}
@@ -155,6 +171,9 @@ func suggestedLivelockChange(obs LivelockObservation) string {
 		return "change_approach_wait_or_fetch_merge_before_retry"
 	case "ESCALATE":
 		return "change_approach_escalate_or_not_yet_with_witness"
+	}
+	if strings.EqualFold(obs.Verdict, "ALLOW") || strings.EqualFold(obs.Verdict, "TRANSFORM") {
+		return "change_approach_stop_repeating_successful_call_or_summarize_result"
 	}
 	switch strings.ToUpper(obs.Reason) {
 	case "STALE_BASE_DELETION", "OFF_TRUNK", "MERGE_IN_PROGRESS", "COLLISION_RISK":
