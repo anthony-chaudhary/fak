@@ -126,13 +126,15 @@ func commandOutwardFacing(cmd string) bool {
 		segmentHasPrefix(segs, "cargo", "publish"), segmentHasPrefix(segs, "gem", "push"),
 		segmentHasPrefix(segs, "twine", "upload"):
 		return true
-	case segmentHasPrefix(segs, "gh", "issue", "create"), segmentHasPrefix(segs, "gh", "issue", "comment"),
-		segmentHasPrefix(segs, "gh", "issue", "edit"), segmentHasPrefix(segs, "gh", "issue", "close"),
-		segmentHasPrefix(segs, "gh", "issue", "reopen"), segmentHasPrefix(segs, "gh", "pr", "create"),
-		segmentHasPrefix(segs, "gh", "pr", "comment"), segmentHasPrefix(segs, "gh", "pr", "merge"),
-		segmentHasPrefix(segs, "gh", "release", "create"), segmentHasPrefix(segs, "gh", "release", "upload"):
-		return true
-	case curlWrites(cmd), httpieWrites(segs), ghAPIWrites(segs):
+	// `gh` is deliberately NOT escalated here (operator decision, 2026-07-05). Every gh
+	// write — issue/pr/release create·comment·edit·close·reopen·merge·upload and `gh api`
+	// mutations — targets the operator's OWN authenticated GitHub and is reversible in
+	// practice (issues/PRs edit·close·reopen; a release can be deleted), so the
+	// preview-confirm pause was pure friction on routine fleet work — the #2650/#2651
+	// confirm-loop lesson — while the Claude Code allow-list already admits `Bash(gh …)`.
+	// curl/httpie POSTs stay gated below: those reach ARBITRARY hosts, not the
+	// authenticated gh surface, so the outbound floor still holds for the general case.
+	case curlWrites(cmd), httpieWrites(segs):
 		return true
 	default:
 		return false
@@ -202,20 +204,6 @@ func httpieWrites(segs [][]string) bool {
 	return false
 }
 
-func ghAPIWrites(segs [][]string) bool {
-	for _, seg := range segs {
-		if len(seg) < 2 || seg[0] != "gh" || seg[1] != "api" {
-			continue
-		}
-		for i, w := range seg {
-			if (w == "x" || w == "method") && i+1 < len(seg) && httpWriteVerb(seg[i+1]) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func httpWriteVerb(w string) bool {
 	switch strings.ToLower(w) {
 	case "post", "put", "patch", "delete":
@@ -228,12 +216,12 @@ func httpWriteVerb(w string) bool {
 func dryRunHint(tool, cmd string) string {
 	lowerTool, lowerCmd := strings.ToLower(tool), strings.ToLower(cmd)
 	switch {
-	// Raw `gh issue create` is escalated by design; the sanctioned path is the
-	// compiled `fak issue create` verb (cmd/fak/issue_create.go), a trusted-binary
-	// sidestep the kernel admits. Name it so the agent recovers in one step instead
-	// of chasing the unsatisfiable preview-confirm token loop on the raw-gh path.
-	case segmentHasPrefix(commandSegments(cmd), "gh", "issue", "create") ||
-		strings.Contains(lowerTool, "create_issue") || strings.Contains(lowerTool, "issue_create"):
+	// An MCP tool literally named create_issue / issue_create is still escalated by
+	// toolOutwardFacing; point it at the compiled `fak issue create` verb
+	// (cmd/fak/issue_create.go), a trusted-binary sidestep the kernel admits. Raw
+	// `gh issue create` is no longer escalated (see commandOutwardFacing), so a Bash
+	// gh call never reaches this hint.
+	case strings.Contains(lowerTool, "create_issue") || strings.Contains(lowerTool, "issue_create"):
 		return "file it with the sanctioned compiled verb: fak issue create --title … --body-file … (a trusted-binary path the kernel admits)"
 	case strings.Contains(lowerCmd, "git push") || strings.Contains(lowerTool, "git_push"):
 		return "try git push --dry-run first"

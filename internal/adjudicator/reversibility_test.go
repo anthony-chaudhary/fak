@@ -39,11 +39,37 @@ func TestReversibilityClassifiesCommands(t *testing.T) {
 			hint: "try git push --dry-run first",
 		},
 		{
-			name: "gh issue create escalation names the fak issue create sidestep",
+			// gh is operator-relaxed (2026-07-05): every gh write targets the
+			// operator's own authenticated GitHub and is reversible in practice, so
+			// the outbound preview-confirm pause no longer fires for the gh family.
+			name: "gh issue create is reversible (gh surface relaxed)",
 			tool: "Bash",
 			args: map[string]any{"command": `gh issue create --title "bug" --body "repro"`},
-			want: ReversibilityOutwardFacing,
-			hint: "file it with the sanctioned compiled verb: fak issue create --title … --body-file … (a trusted-binary path the kernel admits)",
+			want: ReversibilityReversible,
+		},
+		{
+			name: "gh issue close is reversible",
+			tool: "Bash",
+			args: map[string]any{"command": "gh issue close 123 --reason completed"},
+			want: ReversibilityReversible,
+		},
+		{
+			name: "gh pr merge is reversible (gh surface relaxed)",
+			tool: "Bash",
+			args: map[string]any{"command": "gh pr merge 42 --squash"},
+			want: ReversibilityReversible,
+		},
+		{
+			name: "gh release create is reversible (gh surface relaxed)",
+			tool: "Bash",
+			args: map[string]any{"command": "gh release create v1.2.3 --notes done"},
+			want: ReversibilityReversible,
+		},
+		{
+			name: "gh api write is reversible (gh surface relaxed)",
+			tool: "Bash",
+			args: map[string]any{"command": "gh api -X POST /repos/o/r/issues -f title=x"},
+			want: ReversibilityReversible,
 		},
 		{
 			name: "http write is outward-facing",
