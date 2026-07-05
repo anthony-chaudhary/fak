@@ -1129,10 +1129,16 @@ func generationFit(c Candidate) GenerationFit {
 	} else if stream != "" {
 		g.Flags = append(g.Flags, "generation_horizon_cue_missing")
 	}
-	if generationEvidenceNamed(c, lower) {
+	ev := generationEvidence(c, lower)
+	if ev.complete() {
 		g.Evidence = 20
 	} else if stream != "" {
-		g.Flags = append(g.Flags, "generation_promotion_evidence_missing")
+		// Name WHICH evidence kind is missing, not a single opaque flag. The
+		// acceptance criteria require promotion, demotion/retirement, and an
+		// invalidating assumption as three distinct nameables; an operator (or a
+		// future agent) reading the readout must see exactly which one is absent to
+		// continue without rereading the generation epic's evidence rubric.
+		g.Flags = append(g.Flags, ev.missingFlags()...)
 	}
 	if generationOrthogonalityNamed(lower) {
 		g.Orthogonality = 20
@@ -1250,12 +1256,52 @@ func generationHorizonMatches(stream, text string) bool {
 	}
 }
 
-func generationEvidenceNamed(c Candidate, text string) bool {
-	hasPromotion := hasAny(text, "promotion", "promote", "readiness", "dogfood", "default-on", "move toward now")
-	hasDemotion := hasAny(text, "demotion", "demote", "retirement", "retire", "park", "parking")
-	hasInvalidating := hasAny(text, "invalidating assumption", "assumption could fail", "if this assumption fails", "recheck")
-	hasWitness := strings.TrimSpace(c.Witness) != "" || hasAny(text, "witness", "captured command", "focused test", "readout")
-	return hasPromotion && hasDemotion && hasInvalidating && hasWitness
+// generationEvidenceParts records, per evidence kind, whether the candidate names
+// it. The acceptance criteria treat promotion, demotion/retirement, and an
+// invalidating assumption as three separately-required nameables (plus a witness),
+// so the fit score reports each independently instead of collapsing them into one
+// boolean — that is what lets the readout name the specific gap.
+type generationEvidenceParts struct {
+	promotion    bool
+	demotion     bool
+	invalidating bool
+	witness      bool
+}
+
+func generationEvidence(c Candidate, text string) generationEvidenceParts {
+	return generationEvidenceParts{
+		promotion:    hasAny(text, "promotion", "promote", "readiness", "dogfood", "default-on", "move toward now"),
+		demotion:     hasAny(text, "demotion", "demote", "retirement", "retire", "park", "parking"),
+		invalidating: hasAny(text, "invalidating assumption", "assumption could fail", "if this assumption fails", "recheck"),
+		witness:      strings.TrimSpace(c.Witness) != "" || hasAny(text, "witness", "captured command", "focused test", "readout"),
+	}
+}
+
+// complete reports whether all four evidence kinds are named — the unchanged rule
+// for awarding the evidence axis its full points.
+func (e generationEvidenceParts) complete() bool {
+	return e.promotion && e.demotion && e.invalidating && e.witness
+}
+
+// missingFlags names each absent evidence kind as its own flag. The promotion flag
+// keeps its original spelling (generation_promotion_evidence_missing) so an existing
+// readout string never silently disappears; the demotion/invalidating/witness flags
+// are the added granularity criterion 3 and 4 need.
+func (e generationEvidenceParts) missingFlags() []string {
+	var flags []string
+	if !e.promotion {
+		flags = append(flags, "generation_promotion_evidence_missing")
+	}
+	if !e.demotion {
+		flags = append(flags, "generation_demotion_evidence_missing")
+	}
+	if !e.invalidating {
+		flags = append(flags, "generation_invalidating_assumption_missing")
+	}
+	if !e.witness {
+		flags = append(flags, "generation_evidence_witness_missing")
+	}
+	return flags
 }
 
 func generationOrthogonalityNamed(text string) bool {

@@ -107,6 +107,45 @@ func TestReviewCandidateFlagsGenerationMismatch(t *testing.T) {
 	}
 }
 
+// TestReviewCandidateNamesMissingEvidenceKind proves the evidence axis reports WHICH
+// of promotion / demotion / invalidating-assumption / witness is absent, not a single
+// opaque flag. This is the criterion-3+4 delta for #1648: a future agent reading the
+// readout must see the specific evidence gap to continue without rereading the epic.
+func TestReviewCandidateNamesMissingEvidenceKind(t *testing.T) {
+	c := completeCandidate()
+	c.Generation = "gen/next"
+	c.Title = "generation(next): add branchless feature gating"
+	c.Labels = []string{"generation", "gen/next"}
+	c.WhyNow = "Next gen near-term foundation work needs a gate, handoff, and operator visibility before it is agent-runnable."
+	// Names promotion, the invalidating assumption, and orthogonality — but NOT any
+	// demotion/retirement evidence, so exactly one evidence kind should be flagged.
+	c.InScope = "Add the generation checklist with promotion readiness and runtime feature gate boundaries."
+	c.OutOfScope = "Priority, shared trunk, and runtime feature gates remain orthogonal."
+	c.DoneCondition = "The issue names promotion evidence and states its horizon foundation gate."
+	c.Witness = "Captured command witness from fak issue contract."
+	c.Assumptions = []string{"Invalidating assumption: generation labels stay available during issue grooming."}
+	review := ReviewCandidate(c, Options{})
+	if !review.OK {
+		t.Fatalf("missing evidence kind is advisory, got refused review: %+v", review)
+	}
+	flags := review.GenerationFit.Flags
+	if !has(flags, "generation_demotion_evidence_missing") {
+		t.Fatalf("generation fit flags = %v, want the specific demotion-evidence gap named", flags)
+	}
+	for _, unwanted := range []string{
+		"generation_promotion_evidence_missing",
+		"generation_invalidating_assumption_missing",
+		"generation_evidence_witness_missing",
+	} {
+		if has(flags, unwanted) {
+			t.Fatalf("generation fit flags = %v, want only the demotion gap, got %s", flags, unwanted)
+		}
+	}
+	if review.GenerationFit.Evidence != 0 {
+		t.Fatalf("generation fit = %+v, want no evidence points when a kind is missing", review.GenerationFit)
+	}
+}
+
 func TestReviewIssueDraftRefusesUnexpandedTemplateTokens(t *testing.T) {
 	body := strings.Join([]string{
 		"## Generation stream",
