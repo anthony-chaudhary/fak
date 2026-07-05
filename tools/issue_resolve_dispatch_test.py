@@ -992,6 +992,65 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual([r["issue"] for r in p["dirty_path_skipped"]], [2719])
         self.assertIn("dirty-path head", mod.render(p))
 
+    def test_same_issue_wip_scans_to_next_clean_issue(self) -> None:
+        """A prior same-issue resolver log with still-dirty files holds that
+        candidate only; the picker can still admit a later disjoint issue."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "tools", "numbers": [2718, 2721],
+                          "by_lane_count": {"tools": 2},
+                          "eligible_by_lane": [["tools", [2718, 2721]]]})
+        mod.dirty_repo_paths = lambda root: {
+            "paths": ["cmd/fak/knownbad.go"], "unavailable": False}
+
+        def same_issue_wip(runs_dir, issue, dirty_paths, **_kw):
+            if issue == 2718:
+                return {
+                    "collides": True,
+                    "issue": 2718,
+                    "dirty_paths": ["cmd/fak/knownbad.go"],
+                    "evidence": [{"log": "resolve-2718-20260705-191407.log"}],
+                }
+            return {"collides": False, "dirty_paths": []}
+
+        mod.same_issue_wip_collision = same_issue_wip
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "WOULD_SPAWN")
+        self.assertEqual(p["target_issue"], 2721)
+        self.assertEqual([r["issue"] for r in p["same_issue_wip_skipped"]], [2718])
+        self.assertIn("same-issue WIP head", mod.render(p))
+
+    def test_same_issue_wip_holds_when_no_clean_candidate(self) -> None:
+        """A final/pinned same-issue WIP candidate is a typed safety hold, not a
+        launch-ready dry-run."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "tools", "numbers": [2718],
+                          "by_lane_count": {"tools": 1},
+                          "eligible_by_lane": [["tools", [2718]]]})
+        mod.dirty_repo_paths = lambda root: {
+            "paths": ["cmd/fak/knownbad.go"], "unavailable": False}
+        mod.same_issue_wip_collision = lambda runs_dir, issue, dirty_paths, **_kw: {
+            "collides": True,
+            "issue": issue,
+            "dirty_paths": ["cmd/fak/knownbad.go"],
+            "evidence": [{"log": "resolve-2718-20260705-191407.log"}],
+        }
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["action"], "same_issue_wip")
+        self.assertEqual(p["verdict"], "SAME_ISSUE_WIP")
+        self.assertEqual(p["launch_gate"]["blockers"][0]["code"],
+                         "SAME_ISSUE_WIP")
+        self.assertIn("cmd/fak/knownbad.go", p["reason"])
+        self.assertIn("resolve-2718-20260705-191407.log", p["reason"])
+
     def test_dirty_path_collision_holds_when_no_clean_candidate(self) -> None:
         """A final/pinned dirty-path candidate is a safety hold, not a launch-ready
         dry-run."""
@@ -3962,7 +4021,7 @@ class TickExitCodeTest(unittest.TestCase):
     def test_benign_no_work_and_backpressure_exit_zero(self) -> None:
         mod = load()
         for action in ("no_issue", "no_lane", "lane_busy", "lane_leased",
-                       "dirty_path_collision",
+                       "same_issue_wip", "dirty_path_collision",
                        "refused", "weekly_capped", "backend_unhealthy"):
             with self.subTest(action=action):
                 # ok=False on every benign verdict, yet the tick ran correctly.
@@ -3989,8 +4048,9 @@ class TickExitCodeTest(unittest.TestCase):
         # spawn_failed is the ONLY emitted action outside the benign set.
         mod = load()
         emitted = {"spawned", "would_spawn", "no_issue", "no_lane", "lane_busy",
-                   "lane_leased", "dirty_path_collision", "multi_lane_scope",
-                   "refused", "weekly_capped", "backend_unhealthy", "spawn_failed"}
+                   "lane_leased", "same_issue_wip", "dirty_path_collision",
+                   "multi_lane_scope", "refused", "weekly_capped",
+                   "backend_unhealthy", "spawn_failed"}
         self.assertEqual(emitted - mod.BENIGN_ACTIONS, {"spawn_failed"})
 
 
@@ -4088,6 +4148,52 @@ class DirtyPathCollisionTest(unittest.TestCase):
             "old/path.go",
             "new/path.go",
         ])
+
+
+class SameIssueWipCollisionTest(unittest.TestCase):
+    def test_recent_same_issue_log_with_dirty_path_collides(self) -> None:
+        import os
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            log = runs / "resolve-2718-20260705-191407.log"
+            log.write_text(
+                "Final report: W6 implementation left as working-tree changes.\n"
+                "Uncommitted files:\n"
+                "- cmd/fak/knownbad.go\n",
+                encoding="utf-8",
+            )
+            os.utime(log, (now - 60, now - 60))
+
+            scan = mod.same_issue_wip_collision(
+                runs, 2718, ["cmd/fak/knownbad.go", "docs/other.md"],
+                now_ts=now)
+
+        self.assertTrue(scan["collides"])
+        self.assertEqual(scan["dirty_paths"], ["cmd/fak/knownbad.go"])
+        self.assertEqual(scan["evidence"][0]["log"],
+                         "resolve-2718-20260705-191407.log")
+
+    def test_ignores_other_issue_and_stale_log(self) -> None:
+        import os
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            other = runs / "resolve-9999-20260705-191407.log"
+            other.write_text("Uncommitted: cmd/fak/knownbad.go\n", encoding="utf-8")
+            stale = runs / "resolve-2718-20260701-191407.log"
+            stale.write_text("Uncommitted: cmd/fak/knownbad.go\n", encoding="utf-8")
+            os.utime(other, (now - 60, now - 60))
+            os.utime(stale, (now - 3 * 24 * 3600, now - 3 * 24 * 3600))
+
+            scan = mod.same_issue_wip_collision(
+                runs, 2718, ["cmd/fak/knownbad.go"], now_ts=now)
+
+        self.assertFalse(scan["collides"])
 
 
 if __name__ == "__main__":

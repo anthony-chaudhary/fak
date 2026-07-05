@@ -149,6 +149,10 @@ DEFAULT_REPAIR_BATCH = 5
 # (anti-churn for un-repairables). A SUCCESSFUL repair needs no cooldown escape:
 # its edit bumps the issue's updatedAt, which re-admits it past the hold ledger.
 DEFAULT_REPAIR_COOLDOWN_MIN = 360
+# Same-issue WIP hold (#2975): a finished resolver can leave useful local
+# working-tree changes without a commit. If the same issue is immediately picked
+# again, the second worker stacks onto uncommitted WIP that no live lease owns.
+SAME_ISSUE_WIP_LOOKBACK_MIN = 24 * 60
 # Active guard-livelock spawn hold: once a live guarded worker is repeatedly
 # receiving the same quarantined tool_result, adding more resolver workers just
 # consumes seats while the guard bug is already witnessed. This launcher-side
@@ -2713,6 +2717,112 @@ def dirty_path_collision_reason(issue: int, scan: dict[str, Any]) -> str:
             f"clear, or dispatch a disjoint issue")
 
 
+_SAME_ISSUE_WIP_RE = re.compile(
+    r"\b(uncommitted|working[- ]tree|working tree changes|left .* working[- ]tree|"
+    r"not committed|without a commit|no commit|commit blocked)\b",
+    re.IGNORECASE,
+)
+_SAME_ISSUE_WIP_CLAIMS = frozenset({"CLAIM_NO_COMMIT", "CLAIM_UNWITNESSED"})
+
+
+def _read_log_tail(path: Path, *, max_bytes: int = 128 * 1024) -> str:
+    try:
+        with open(path, "rb") as fh:
+            try:
+                fh.seek(0, os.SEEK_END)
+                size = fh.tell()
+                fh.seek(max(0, size - max_bytes), os.SEEK_SET)
+            except OSError:
+                pass
+            return fh.read(max_bytes).decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def same_issue_wip_collision(
+    runs_dir: Path,
+    issue: int | None,
+    dirty_paths: list[str],
+    *,
+    lookback_min: int = SAME_ISSUE_WIP_LOOKBACK_MIN,
+    now_ts: float | None = None,
+) -> dict[str, Any]:
+    """Detect same-issue uncommitted WIP left by a previous finished resolver.
+
+    This is intentionally narrower than the generic dirty-path guard: it needs a
+    recent ``resolve-<issue>-*.log`` (or no-commit witness) for the SAME issue and
+    a still-dirty repo path named in that artifact. Unrelated dirty paths and old
+    logs fail open so a hot shared tree can still dispatch disjoint work.
+    """
+    if issue is None or lookback_min <= 0 or not runs_dir.is_dir() or not dirty_paths:
+        return {"collides": False, "dirty_paths": []}
+    import time
+    now = now_ts if now_ts is not None else time.time()
+    horizon = now - lookback_min * 60
+    matches: list[dict[str, Any]] = []
+    for log in sorted(runs_dir.glob(f"resolve-{int(issue)}-*.log"),
+                      key=lambda p: p.stat().st_mtime if p.exists() else 0,
+                      reverse=True):
+        try:
+            mtime = log.stat().st_mtime
+        except OSError:
+            continue
+        if mtime < horizon:
+            continue
+        text = _read_log_tail(log)
+        witness_claim = ""
+        witness_path = log.with_suffix(WITNESS_SIDECAR_SUFFIX)
+        if witness_path.exists():
+            try:
+                doc = json.loads(witness_path.read_text(encoding="utf-8"))
+                witness_claim = str(doc.get("claim") or "")
+            except (OSError, ValueError, AttributeError):
+                witness_claim = ""
+        if not (_SAME_ISSUE_WIP_RE.search(text)
+                or witness_claim in _SAME_ISSUE_WIP_CLAIMS):
+            continue
+        dirty = []
+        for p in dirty_paths:
+            norm = normalize_repo_path(p)
+            if norm and text_mentions_repo_path(text, norm) and norm not in dirty:
+                dirty.append(norm)
+        if dirty:
+            matches.append({
+                "log": log.name,
+                "path": str(log),
+                "mtime": mtime,
+                "witness_claim": witness_claim or None,
+                "dirty_paths": dirty,
+            })
+    if not matches:
+        return {"collides": False, "dirty_paths": []}
+    paths: list[str] = []
+    for match in matches:
+        for p in match.get("dirty_paths") or []:
+            if p not in paths:
+                paths.append(p)
+    return {
+        "collides": True,
+        "issue": int(issue),
+        "dirty_paths": paths,
+        "evidence": matches[:3],
+    }
+
+
+def same_issue_wip_reason(issue: int, scan: dict[str, Any]) -> str:
+    paths = ", ".join(str(p) for p in (scan.get("dirty_paths") or [])[:8])
+    more = ""
+    if len(scan.get("dirty_paths") or []) > 8:
+        more = f" (+{len(scan.get('dirty_paths') or []) - 8} more)"
+    evidence = scan.get("evidence") or []
+    log = evidence[0].get("log") if evidence and isinstance(evidence[0], dict) else None
+    source = f" in {log}" if log else ""
+    return (f"issue #{issue} has recent same-issue uncommitted WIP{source} "
+            f"naming dirty local path(s): {paths}{more} — refusing "
+            f"SAME_ISSUE_WIP so a second resolver cannot stack onto unfinished "
+            f"work; continue/commit those paths first, or dispatch a disjoint issue")
+
+
 # --- Commit-time diff-witness binding (residual of #1310/#1324, proposal #2) ---
 # The fenced lane-lease above is the UPSTREAM half of the verified loop: it denies a
 # colliding spawn before it starts. This is the DOWNSTREAM half: a worker's slot only
@@ -3991,17 +4101,39 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # Pinned issues still hold exactly. Dirty-path collisions are never force-
     # bypassed; multi-lane scope keeps its existing --force escape hatch.
     dirty_path_skipped: list[dict[str, Any]] = []
+    same_issue_wip_skipped: list[dict[str, Any]] = []
     multi_lane_skipped: list[dict[str, Any]] = []
     scope_scan: dict[str, Any] | None = None
     dirty_scan: dict[str, Any] | None = None
+    wip_scan: dict[str, Any] | None = None
     scan_limit = max(1, contract_scan)
     while issue_override is None and not _contract_holds(contract):
+        wip_scan = same_issue_wip_collision(
+            runs_dir, target, list(dirty_paths_doc.get("paths") or []))
         dirty_scan = dirty_path_collision(
             _candidate_text(rec), list(dirty_paths_doc.get("paths") or []))
-        if dirty_scan.get("collides"):
+        if wip_scan.get("collides"):
             if scan_pos + 1 >= len(scan_stream):
                 break
-            if len(contract_skipped) + len(dirty_path_skipped) + len(multi_lane_skipped) + 1 >= scan_limit:
+            if (len(contract_skipped) + len(same_issue_wip_skipped)
+                    + len(dirty_path_skipped) + len(multi_lane_skipped) + 1 >= scan_limit):
+                break
+            same_issue_wip_skipped.append({
+                "issue": target,
+                "lane": chosen_lane,
+                "title": rec.get("title"),
+                "reason": same_issue_wip_reason(target, wip_scan)[:240],
+                "dirty_paths": wip_scan.get("dirty_paths"),
+                "evidence": wip_scan.get("evidence"),
+            })
+            _advance_candidate()
+            scope_scan = None
+            dirty_scan = None
+        elif dirty_scan.get("collides"):
+            if scan_pos + 1 >= len(scan_stream):
+                break
+            if (len(contract_skipped) + len(same_issue_wip_skipped)
+                    + len(dirty_path_skipped) + len(multi_lane_skipped) + 1 >= scan_limit):
                 break
             dirty_path_skipped.append({
                 "issue": target,
@@ -4018,7 +4150,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                 break
             if scan_pos + 1 >= len(scan_stream):
                 break
-            if len(contract_skipped) + len(dirty_path_skipped) + len(multi_lane_skipped) + 1 >= scan_limit:
+            if (len(contract_skipped) + len(same_issue_wip_skipped)
+                    + len(dirty_path_skipped) + len(multi_lane_skipped) + 1 >= scan_limit):
                 break
             multi_lane_skipped.append({
                 "issue": target,
@@ -4034,7 +4167,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         while (_contract_holds(contract) and not contract.get("unavailable")
                and issue_override is None
                and scan_pos + 1 < len(scan_stream)
-               and len(contract_skipped) + len(dirty_path_skipped) + len(multi_lane_skipped) + 1 < scan_limit):
+               and (len(contract_skipped) + len(same_issue_wip_skipped)
+                    + len(dirty_path_skipped) + len(multi_lane_skipped) + 1 < scan_limit)):
             contract_skipped.append({
                 "issue": target,
                 "lane": chosen_lane,
@@ -4053,6 +4187,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     payload["issue_title"] = rec.get("title")
     if contract_skipped:
         payload["contract_skipped"] = contract_skipped
+    if same_issue_wip_skipped:
+        payload["same_issue_wip_skipped"] = same_issue_wip_skipped
     if dirty_path_skipped:
         payload["dirty_path_skipped"] = dirty_path_skipped
     if multi_lane_skipped:
@@ -4124,6 +4260,26 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
             "bypassed": True,
             "gate_reason": issue_contract_hold_reason(contract),
         }
+
+    # Same-issue WIP guard (#2975): hold before command pricing if a previous
+    # finished resolver for THIS issue left named local working-tree files dirty.
+    if wip_scan is None:
+        wip_scan = same_issue_wip_collision(
+            runs_dir, target, list(dirty_paths_doc.get("paths") or []))
+    if wip_scan.get("collides"):
+        payload["same_issue_wip"] = wip_scan
+        reason = same_issue_wip_reason(target, wip_scan)
+        payload["launch_gate"] = launch_gate_blocked(
+            "SAME_ISSUE_WIP", reason,
+            "continue-or-commit-same-issue-wip-or-pick-disjoint-issue")
+        payload.update({
+            "ok": False,
+            "action": "same_issue_wip",
+            "verdict": "SAME_ISSUE_WIP",
+            "reason": reason,
+        })
+        _record(runs_dir, payload)
+        return finish(payload)
 
     # Dirty-path collision guard (#2977): hold before command pricing if the
     # chosen issue explicitly names a path already dirty in this checkout. This
@@ -4310,6 +4466,11 @@ def render(p: dict[str, Any]) -> str:
         lanes = sorted({str(r.get("lane")) for r in cs if r.get("lane")})
         lines.append(f"  scan      : {len(cs)} contract-held head(s) skipped"
                      + (f" across lanes [{','.join(lanes)}]" if len(lanes) > 1 else ""))
+    ws = p.get("same_issue_wip_skipped") or []
+    if ws:
+        lanes = sorted({str(r.get("lane")) for r in ws if r.get("lane")})
+        lines.append(f"  scan      : {len(ws)} same-issue WIP head(s) skipped"
+                     + (f" across lanes [{','.join(lanes)}]" if len(lanes) > 1 else ""))
     ds = p.get("dirty_path_skipped") or []
     if ds:
         lanes = sorted({str(r.get("lane")) for r in ds if r.get("lane")})
@@ -4383,6 +4544,7 @@ BENIGN_ACTIONS = frozenset({
     "repair_spawned", "would_repair",                    # contract grooming dispatched
     "repair_in_flight",                                  # a groomer is already on it
     "no_issue", "no_lane", "lane_busy", "lane_leased",   # nothing to spawn
+    "same_issue_wip",                                    # same issue has local WIP
     "dirty_path_collision",                              # local WIP collision guard
     "active_guard_livelock",                             # live guard loop fuse
     "active_compact_runaway",                            # live compact-control loop fuse
