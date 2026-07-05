@@ -131,6 +131,7 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"Codex update_plan allowed (planning seam)", "update_plan", `{"plan":[{"step":"inspect","status":"in_progress"}]}`, abi.VerdictAllow},
 		{"Codex goal read allowed", "get_goal", `{}`, abi.VerdictAllow},
 		{"Codex goal update allowed", "update_goal", `{"status":"complete"}`, abi.VerdictAllow},
+		{"Codex context-tip allowed (managed-context advisory seam)", "emit_context_tip", `{"message":"checkpoint before compaction"}`, abi.VerdictAllow},
 		{"Codex MCP resource list allowed", "list_mcp_resources", `{}`, abi.VerdictAllow},
 		{"Codex MCP resource read allowed", "read_mcp_resource", `{"server":"dos","uri":"x"}`, abi.VerdictAllow},
 		{"Codex tool search allowed", "tool_search_tool", `{"query":"dos verify"}`, abi.VerdictAllow},
@@ -160,6 +161,11 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"DesignSync allowed (ultracode orchestration)", "DesignSync", `{"method":"list_projects"}`, abi.VerdictAllow},
 		{"read-only DOS verb dos_verify allowed", "mcp__dos__dos_verify", `{"plan":"AUTH","phase":"AUTH2"}`, abi.VerdictAllow},
 		{"read-only DOS verb dos_arbitrate allowed", "mcp__dos__dos_arbitrate", `{"lane":"x"}`, abi.VerdictAllow},
+		{"fak MCP tool search allowed", "mcp__fak__fak_tools_search", `{"query":"tool","detail_level":"name"}`, abi.VerdictAllow},
+		{"fak MCP index lane allowed", "mcp__fak__fak_index_lane", `{"path":"README.md"}`, abi.VerdictAllow},
+		{"fak MCP capabilities allowed", "mcp__fak__fak_capabilities", `{"intent":"inspect guard loop"}`, abi.VerdictAllow},
+		{"fak MCP context value allowed", "mcp__fak__fak_context_value", `{}`, abi.VerdictAllow},
+		{"fak MCP effectful memory run remains denied by default", "mcp__fak__fak_memory_run", `{"driver":"recall","apply":true}`, abi.VerdictDeny},
 
 		// Admitting orchestration does NOT widen the danger floor: a still-unlisted tool fails
 		// closed, and a destructive Bash arg is still refused even though Bash is allowed.
