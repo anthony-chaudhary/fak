@@ -93,6 +93,12 @@ type auditDiagnosis struct {
 	// Friction: what the floor decided across the corpus (verdict + reason counts).
 	Friction guardrsi.Fold `json:"friction"`
 
+	// AllowRowsMissingArgsLabel counts ALLOW rows whose call shape cannot be rendered
+	// without falling back to a digest. It is an observability gap, not an integrity
+	// failure: the hash chain can be SOUND while the operator still cannot tell what
+	// repeated allowed calls were trying to do.
+	AllowRowsMissingArgsLabel int `json:"allow_rows_missing_args_label,omitempty"`
+
 	// LivelockCandidates are repeated identical outcome identities in an otherwise
 	// sound journal. They are diagnostic, not integrity findings: a hash chain can be
 	// SOUND while the wrapped session is stuck re-emitting the same allowed call or
@@ -159,6 +165,7 @@ func diagnoseRows(path string, rows []journal.Row) auditDiagnosis {
 		d.LinearOK = true
 		return d
 	}
+	d.AllowRowsMissingArgsLabel = countAllowRowsMissingArgsLabel(rows)
 	d.LivelockCandidates = diagnoseLivelockCandidates(rows, auditDiagnoseLivelockThreshold)
 	if len(d.LivelockCandidates) > 0 {
 		d.LivelockThreshold = auditDiagnoseLivelockThreshold
@@ -235,6 +242,19 @@ func diagnoseRows(path string, rows []journal.Row) auditDiagnosis {
 		d.Verdict = diagVerdictInterleaved
 	}
 	return d
+}
+
+func countAllowRowsMissingArgsLabel(rows []journal.Row) int {
+	n := 0
+	for _, r := range rows {
+		if strings.ToUpper(strings.TrimSpace(r.Verdict)) != "ALLOW" {
+			continue
+		}
+		if strings.TrimSpace(r.ArgsLabel) == "" {
+			n++
+		}
+	}
+	return n
 }
 
 type auditLivelockKey struct {
@@ -470,6 +490,9 @@ func renderAuditDiagnosis(d auditDiagnosis) string {
 	}
 	if f.BlankReasonOnDeny > 0 {
 		out("    ⚠ %d block(s) carried no reason (a closed-vocabulary reason should accompany every deny)\n", f.BlankReasonOnDeny)
+	}
+	if d.AllowRowsMissingArgsLabel > 0 {
+		out("    label gap: %d ALLOW row(s) missing args_label (operator must fall back to digest-only diagnosis)\n", d.AllowRowsMissingArgsLabel)
 	}
 	if len(d.LivelockCandidates) > 0 {
 		out("  loop candidates: %d repeated outcome identity(s) at threshold %d\n", len(d.LivelockCandidates), d.LivelockThreshold)

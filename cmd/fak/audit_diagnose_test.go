@@ -259,6 +259,47 @@ func TestRunAuditDiagnose_RenderAndJSONReportRepeatedAllowedCallLabel(t *testing
 	}
 }
 
+func TestRunAuditDiagnose_ReportsMissingAllowArgsLabels(t *testing.T) {
+	var rows []journal.Row
+	prev := ""
+	cases := []journal.Row{
+		{Kind: "DECIDE", Tool: "Bash", Verdict: "ALLOW", Reason: "NONE", ArgsDigest: "sha256:no-label"},
+		{Kind: "DECIDE", Tool: "Read", Verdict: "ALLOW", Reason: "NONE", ArgsDigest: "sha256:label", ArgsLabel: "keys=filePath"},
+		{Kind: "DENY", Tool: "Bash", Verdict: "DENY", Reason: "POLICY_BLOCK", ArgsDigest: "sha256:deny-no-label"},
+	}
+	for i, row := range cases {
+		r, h := mintRow(uint64(i+1), prev, row)
+		rows = append(rows, r)
+		prev = h
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "guard-audit.jsonl")
+	writeRowsFile(t, path, rows)
+
+	var stdout, stderr bytes.Buffer
+	code := runAuditDiagnose(&stdout, &stderr, path, false)
+	if code != 0 {
+		t.Fatalf("sound missing-label journal should exit 0, got %d (stderr=%s)", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "label gap: 1 ALLOW row(s) missing args_label") {
+		t.Fatalf("render missing label-gap line:\n%s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runAuditDiagnose(&stdout, &stderr, path, true)
+	if code != 0 {
+		t.Fatalf("sound missing-label journal --json should exit 0, got %d (stderr=%s)", code, stderr.String())
+	}
+	var d auditDiagnosis
+	if err := json.Unmarshal(stdout.Bytes(), &d); err != nil {
+		t.Fatalf("--json output not parseable: %v\n%s", err, stdout.String())
+	}
+	if d.AllowRowsMissingArgsLabel != 1 {
+		t.Fatalf("AllowRowsMissingArgsLabel = %d, want 1", d.AllowRowsMissingArgsLabel)
+	}
+}
+
 func TestRunAuditDiagnose_RenderReportsRepeatedQuarantine(t *testing.T) {
 	var rows []journal.Row
 	prev := ""
