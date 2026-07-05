@@ -3762,6 +3762,9 @@ class WitnessExitedWorkersTest(unittest.TestCase):
             out = mod.witness_exited_workers(runs, ROOT, live=True, probe=self._dead,
                                              git=boom_git, lease_runner=lease_runner)
             self.assertEqual(out["audited"], [])
+            self.assertEqual(out["lease_release_retried"], [
+                {"log": log.name, "id": "resolve-tools", "released": True}
+            ])
             self.assertEqual(len(out["lease_released"]), 1)
             self.assertEqual(out["lease_release_failed"], [])
             self.assertEqual(out["lease_released"][0]["id"], "resolve-tools")

@@ -3062,7 +3062,8 @@ def witness_exited_workers(runs_dir: Path, root: Path, *, live: bool,
     mis-blame it) and FAIL-OPEN throughout, exactly like :func:`prune_dead_sidecars`."""
     out: dict[str, Any] = {"live": live, "audited": [], "witnessed": [],
                            "unwitnessed": [], "no_commit": [],
-                           "lease_released": [], "lease_release_failed": []}
+                           "lease_released": [], "lease_release_failed": [],
+                           "lease_release_retried": []}
     if not runs_dir.is_dir():
         return out
     if alive is None and probe is None:
@@ -3099,6 +3100,11 @@ def witness_exited_workers(runs_dir: Path, root: Path, *, live: bool,
                     lease = read_lease_sidecar(log)
                     if lease:
                         rel = release_lane_lease(root, lease, runner=lease_runner)
+                        out["lease_release_retried"].append({
+                            "log": log.name,
+                            "id": lease.get("id"),
+                            "released": bool(rel.get("released")),
+                        })
                         if rel.get("released"):
                             out["lease_released"].append(rel)
                         else:
