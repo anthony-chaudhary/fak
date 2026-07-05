@@ -9,9 +9,13 @@ This is the concrete adapter-neutral contract for user-level shared task state.
 It is the rung where humans and agents can co-edit a task board or plan without
 turning edits into unstructured chat.
 
-The runtime reference is `internal/sharedtask`; the executable fixture validator
-is `internal/sharedtask/contract.go` (run it with
-`go test ./internal/sharedtask -run TestContract`).
+What ships in-tree today are the JSON envelope schemas
+(`tools/schemas/shared-*.json`) and the runnable fixtures under
+`examples/shared-task-record/` and `examples/shared-task-record-verdicts/`. The
+in-memory runtime reference fold (`internal/sharedtask`) and its executable
+fixture validator are described below as the intended reference behavior but are
+not yet wired into the live tree; the fixtures are validated against the schemas,
+not yet against a runtime fold (see [Validate](#validate)).
 
 ## Envelopes
 
@@ -153,7 +157,9 @@ Materialized journal:
 
 ## Runtime Reference Fold
 
-`internal/sharedtask` ships the in-memory reference behavior:
+`internal/sharedtask` is the intended in-memory reference fold. It is not yet
+present in the live tree; the behavior below is the contract this fold is
+expected to satisfy once wired:
 
 - accepted patches advance the materialized record revision and emit an event row;
 - `replace /title` and `replace /state` are current-base scalar edits;
@@ -172,14 +178,16 @@ Materialized journal:
 
 ## Validate
 
-```bash
-go test ./internal/sharedtask -run TestContract -v
-```
+The fixtures and envelope schemas that ship in-tree are self-validating as data:
+every fixture file declares its `schema`, and the schemas it names live under
+`tools/schemas/shared-*.json`. The per-schema fixture counts are pinned in each
+example's `EXAMPLE-OUTPUT.md`.
 
-This runs the doc-example, sequence-fixture, and verdict-fixture witnesses
+The `go test ./internal/sharedtask -run TestContract` runtime witness
 (`TestContractDocExamplesValidate`, `TestContractSequenceFixtureValidates`,
-`TestContractVerdictsFixtureValidates`), each pinning the exact per-schema
-fixture counts.
+`TestContractVerdictsFixtureValidates`) is the intended validator once the
+`internal/sharedtask` fold is wired; it is not runnable in the live tree yet.
+Until then the fixtures document the contract shape without a runtime write-gate.
 
 ## Honest Scope
 
