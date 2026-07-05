@@ -14,7 +14,7 @@ package main
 //
 //	fak lab status [--roster F] [--reports DIR] [--group G] [--class C] [--all] [--json]
 //	fak lab report --id ID --state live|idle|draining|down [--version V] [--note N] [--inference ready|degraded|warming|blocked|unknown] [--reports DIR]
-//	fak lab readiness [--file F] [--status STATUS] [--write F|--write-default] [--json]
+//	fak lab readiness [--file F] [--status STATUS|--from-status] [--write F|--write-default] [--json]
 //	fak lab ls     [--roster F] [--group G] [--class C] [--json]
 //
 // THE PUBLIC/PRIVATE BOUNDARY IS A DATA CONTRACT. The embedded roster is generic (an
@@ -259,8 +259,11 @@ func labReadiness(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("lab readiness", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	file := fs.String("file", "", "readiness record path (default: $FAK_LAB_READINESS or ~/.config/fak/fleet/lab-readiness.json)")
+	rosterPath := fs.String("roster", "", "with --from-status: roster file (default: the embedded generic lab roster)")
+	reports := fs.String("reports", "", "with --from-status: reports dir (default: $FAK_FLEET_REPORTS or ~/.config/fak/fleet/reports)")
 	machineClass := fs.String("class", "gpu-server", "generic machine class")
 	status := fs.String("status", "", "emit this readiness status instead of reading a file")
+	fromStatus := fs.Bool("from-status", false, "derive readiness from scrubbed lab status/inference reports instead of reading a record")
 	nextAction := fs.String("next-action", "", "generic next action for --status")
 	evidence := fs.String("evidence", "", "generic evidence label for --status")
 	writePath := fs.String("write", "", "write the emitted --status record to this path")
@@ -273,31 +276,42 @@ func labReadiness(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak lab readiness: use only one of --write or --write-default")
 		return 2
 	}
+	if *fromStatus && *status != "" {
+		fmt.Fprintln(stderr, "fak lab readiness: use only one of --status or --from-status")
+		return 2
+	}
 
 	var rec fleet.LabReadiness
-	if *status != "" {
+	emitRecord := *status != "" || *fromStatus
+	if *fromStatus {
+		ro, ok := labLoadRoster(stderr, *rosterPath)
+		if !ok {
+			return 2
+		}
+		dir, err := labReportsDir(*reports)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak lab readiness: %v\n", err)
+			return 2
+		}
+		var reps []fleet.Report
+		if labReportsPopulated(dir) {
+			reps = fleet.ReadReports(dir, ro)
+		}
+		snap := fleet.Fold(ro, reps, fleet.FoldOpts{})
+		rec = labReadinessFromSnapshot(*machineClass, snap, time.Now())
+		if probs := rec.Validate(); len(probs) > 0 {
+			fmt.Fprintf(stderr, "fak lab readiness: invalid record: %s\n", strings.Join(probs, "; "))
+			return 2
+		}
+	} else if *status != "" {
 		rec = fleet.NewLabReadiness(*machineClass, *status, *nextAction, *evidence, time.Now())
 		if probs := rec.Validate(); len(probs) > 0 {
 			fmt.Fprintf(stderr, "fak lab readiness: invalid record: %s\n", strings.Join(probs, "; "))
 			return 2
 		}
-		if *writeDefault {
-			path, err := labReadinessPath(*file)
-			if err != nil {
-				fmt.Fprintf(stderr, "fak lab readiness: %v\n", err)
-				return 1
-			}
-			*writePath = path
-		}
-		if *writePath != "" {
-			if err := writeIndentedJSONFile(*writePath, rec); err != nil {
-				fmt.Fprintf(stderr, "fak lab readiness: write %s: %v\n", *writePath, err)
-				return 1
-			}
-		}
 	} else {
 		if *writePath != "" || *writeDefault {
-			fmt.Fprintln(stderr, "fak lab readiness: --write/--write-default requires --status")
+			fmt.Fprintln(stderr, "fak lab readiness: --write/--write-default requires --status or --from-status")
 			return 2
 		}
 		path, err := labReadinessPath(*file)
@@ -314,6 +328,23 @@ func labReadiness(stdout, stderr io.Writer, argv []string) int {
 			if err != nil {
 				fmt.Fprintf(stderr, "fak lab readiness: invalid %s: %v\n", path, err)
 				rec = fleet.IndeterminateLabReadiness(*machineClass, "fix-lab-readiness-record", "invalid-readiness-record", time.Now())
+			}
+		}
+	}
+
+	if emitRecord {
+		if *writeDefault {
+			path, err := labReadinessPath(*file)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak lab readiness: %v\n", err)
+				return 1
+			}
+			*writePath = path
+		}
+		if *writePath != "" {
+			if err := writeIndentedJSONFile(*writePath, rec); err != nil {
+				fmt.Fprintf(stderr, "fak lab readiness: write %s: %v\n", *writePath, err)
+				return 1
 			}
 		}
 	}
@@ -336,6 +367,41 @@ func labReadiness(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	return 1
+}
+
+func labReadinessFromSnapshot(machineClass string, snap fleet.Snapshot, now time.Time) fleet.LabReadiness {
+	var reported, useful, warming, blocked int
+	for _, row := range snap.Rows {
+		if row.Err != "" || row.Inference == nil || row.AgeSec > fleet.DefaultStaleSec {
+			continue
+		}
+		reported++
+		switch row.Inference.Status {
+		case fleet.InferenceReady, fleet.InferenceDegraded:
+			if row.State.Healthy() {
+				useful++
+			}
+		case fleet.InferenceWarming:
+			warming++
+		case fleet.InferenceBlocked:
+			blocked++
+		}
+	}
+	if useful > 0 {
+		return fleet.NewLabReadiness(machineClass, fleet.LabReadyForDevWork, "admit-lab-backed-dispatch", "scrubbed-fleet-report", now)
+	}
+	switch {
+	case warming > 0:
+		return fleet.NewLabReadiness(machineClass, fleet.LabWaitPrivateRecover, "wait-lab-inference-ready", "scrubbed-fleet-report", now)
+	case blocked > 0:
+		return fleet.NewLabReadiness(machineClass, fleet.LabWaitPrivateRecover, "recover-lab-inference", "scrubbed-fleet-report", now)
+	case reported > 0:
+		return fleet.NewLabReadiness(machineClass, fleet.LabIndeterminate, "publish-inference-report", "no-useful-lab-report", now)
+	}
+	if snap.Reachable == 0 {
+		return fleet.NewLabReadiness(machineClass, fleet.LabIndeterminate, "publish-lab-readiness", "no-fresh-lab-report", now)
+	}
+	return fleet.NewLabReadiness(machineClass, fleet.LabIndeterminate, "publish-inference-report", "no-useful-lab-report", now)
 }
 
 func labLs(stdout, stderr io.Writer, argv []string) int {

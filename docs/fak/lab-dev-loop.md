@@ -136,6 +136,17 @@ Use `ready` or `degraded` only when the serving stack can take inference work. U
 generic; never publish a URL, host, channel id, token, private model path, or raw bridge
 transcript.
 
+After reports are populated, derive the dispatch gate from the scrubbed status instead of
+hand-marking readiness:
+
+```bash
+fak lab readiness --from-status --write-default --json
+```
+
+This writes `READY_FOR_DEV_WORK` only when at least one healthy reported box has useful
+fresh inference (`ready` or `degraded`). Warming, stale, or missing inference reports hold
+lab-backed dispatch closed.
+
 ## Boundary rules (do not trip)
 
 - The private control plane stays in `fak-private`. Never add `private bridge/control packages` or

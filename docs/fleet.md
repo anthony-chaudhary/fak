@@ -140,6 +140,20 @@ generic next-action class. It must not name a host, endpoint, channel, token, ac
 raw transcript, or private filesystem path. Super-loop and issue-dispatch planning should
 treat anything other than `READY_FOR_DEV_WORK` as no lab-machine capacity.
 
+The readiness record does not have to be hand-authored. Once the private bridge or a
+self-reporting box has written scrubbed `fak.fleet.report/v1` files with inference status,
+derive and publish the gate from those reports:
+
+```bash
+fak lab readiness --from-status --write-default --json
+```
+
+`--from-status` admits lab-backed dispatch only when at least one healthy box reports
+fresh `inference.ready` or `inference.degraded`; `warming`, `blocked`, stale reports,
+missing reports, and unknown inference all fail closed with a generic next action. With a
+private roster, pass that roster locally (`--roster <private-roster>`); never commit the
+roster path or any endpoint it resolves.
+
 ### First green run (before the private bridge is wired)
 
 To see a populated frame without the bridge, drop a sample report into a directory and

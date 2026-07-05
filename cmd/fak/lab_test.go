@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/fleet"
 )
@@ -262,5 +263,100 @@ func TestLabReadinessWriteDefaultRejectsConflictingWrite(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "only one") {
 		t.Fatalf("conflict error should explain the flag problem, got:\n%s", stderr.String())
+	}
+}
+
+func TestLabReadinessFromStatusAdmitsUsefulInference(t *testing.T) {
+	reportsDir := t.TempDir()
+	readinessPath := filepath.Join(t.TempDir(), "lab-readiness.json")
+	t.Setenv("FAK_FLEET_REPORTS", reportsDir)
+	t.Setenv("FAK_LAB_READINESS", readinessPath)
+
+	if err := fleet.WriteReport(reportsDir, "box-a", fleet.Report{
+		State: fleet.StateLive,
+		Inference: &fleet.InferenceStats{
+			Status: fleet.InferenceReady,
+			Engine: "fak",
+			Model:  "glm-5.2",
+			Reason: "v1-models",
+		},
+	}); err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+
+	var out bytes.Buffer
+	rc := runLab(&out, io.Discard, []string{"readiness", "--from-status", "--write-default", "--json"})
+	if rc != 0 {
+		t.Fatalf("readiness --from-status should admit useful inference, got %d: %s", rc, out.String())
+	}
+	var rec fleet.LabReadiness
+	if err := json.Unmarshal(out.Bytes(), &rec); err != nil {
+		t.Fatalf("readiness --from-status did not emit JSON: %v\n%s", err, out.String())
+	}
+	if rec.Status != fleet.LabReadyForDevWork || !rec.AdmitLabDispatch {
+		t.Fatalf("readiness from useful inference = %+v, want READY_FOR_DEV_WORK admitting", rec)
+	}
+	if rec.Evidence != "scrubbed-fleet-report" {
+		t.Fatalf("evidence = %q, want scrubbed-fleet-report", rec.Evidence)
+	}
+	if _, err := os.Stat(readinessPath); err != nil {
+		t.Fatalf("--write-default did not persist the derived readiness record: %v", err)
+	}
+}
+
+func TestLabReadinessFromStatusHoldsWarmingInference(t *testing.T) {
+	reportsDir := t.TempDir()
+	t.Setenv("FAK_FLEET_REPORTS", reportsDir)
+
+	if err := fleet.WriteReport(reportsDir, "box-a", fleet.Report{
+		State:     fleet.StateLive,
+		Inference: &fleet.InferenceStats{Status: fleet.InferenceWarming, Engine: "fak", Reason: "loading"},
+	}); err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+
+	var out bytes.Buffer
+	rc := runLab(&out, io.Discard, []string{"readiness", "--from-status", "--json"})
+	if rc != 1 {
+		t.Fatalf("warming inference should fail closed, got %d: %s", rc, out.String())
+	}
+	var rec fleet.LabReadiness
+	if err := json.Unmarshal(out.Bytes(), &rec); err != nil {
+		t.Fatalf("readiness --from-status did not emit JSON: %v\n%s", err, out.String())
+	}
+	if rec.Status != fleet.LabWaitPrivateRecover || rec.AdmitLabDispatch {
+		t.Fatalf("readiness from warming inference = %+v, want WAIT_PRIVATE_RECOVERY hold", rec)
+	}
+	if rec.NextAction != "wait-lab-inference-ready" {
+		t.Fatalf("next_action = %q, want wait-lab-inference-ready", rec.NextAction)
+	}
+}
+
+func TestLabReadinessFromStatusRequiresNoManualStatus(t *testing.T) {
+	var stderr bytes.Buffer
+	rc := runLab(io.Discard, &stderr, []string{"readiness", "--from-status", "--status", fleet.LabReadyForDevWork})
+	if rc != 2 {
+		t.Fatalf("--from-status + --status should exit 2, got %d", rc)
+	}
+	if !strings.Contains(stderr.String(), "use only one of --status or --from-status") {
+		t.Fatalf("missing conflict diagnostic:\n%s", stderr.String())
+	}
+}
+
+func TestLabReadinessFromSnapshotIgnoresStaleUsefulInference(t *testing.T) {
+	rec := labReadinessFromSnapshot("gpu-server", fleet.Snapshot{
+		Reachable: 1,
+		Rows: []fleet.BoxRow{{
+			ID:        "box-a",
+			State:     fleet.StateLive,
+			AgeSec:    fleet.DefaultStaleSec + 1,
+			Inference: &fleet.InferenceStats{Status: fleet.InferenceReady, Model: "glm-5.2"},
+		}},
+	}, time.Now())
+	if rec.AdmitLabDispatch || rec.Status == fleet.LabReadyForDevWork {
+		t.Fatalf("stale ready inference must fail closed, got %+v", rec)
+	}
+	if rec.Evidence != "no-useful-lab-report" {
+		t.Fatalf("evidence = %q, want no-useful-lab-report", rec.Evidence)
 	}
 }
