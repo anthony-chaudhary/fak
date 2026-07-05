@@ -2954,6 +2954,85 @@ def locally_witnessed_issues(root: Path, *, base_ref: str = "origin/main",
     return out_issues
 
 
+def _candidate_issue_numbers(eligible_lanes: list[Any] | None,
+                             fallback: list[int] | None = None) -> set[int]:
+    out: set[int] = set()
+    for entry in eligible_lanes or []:
+        try:
+            nums = entry[1] or []
+        except (TypeError, IndexError, KeyError):
+            continue
+        for n in nums:
+            try:
+                out.add(int(n))
+            except (TypeError, ValueError):
+                continue
+    if not out:
+        for n in fallback or []:
+            try:
+                out.add(int(n))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def commit_audit_abstain_holds(root: Path, candidates: set[int], *,
+                               git: Any | None = None,
+                               audit_runner: Any | None = None,
+                               scan_limit: int = 300) -> list[dict[str, Any]]:
+    """Recent candidate-bound test commits whose witness ABSTAINs become holds.
+
+    A still-open issue with a matching test-only commit should not be normal
+    resolver fuel again: either the closure witness needs to learn the shape, or a
+    human needs to handle the mismatch. Fail-open on git/audit errors.
+    """
+    wanted = {int(n) for n in candidates if n is not None}
+    if not wanted:
+        return []
+    git = git or _git_capture
+    audit = audit_runner or _run_commit_audit
+    rc, out = git(root, ["log", "--no-color", "-n", str(int(scan_limit)),
+                         "--pretty=format:%H%x1f%B%x1e"])
+    if rc != 0 or not out:
+        return []
+    records: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for entry in out.split("\x1e"):
+        entry = entry.strip()
+        if not entry:
+            continue
+        sha, sep, text = entry.partition("\x1f")
+        if not sep or not sha:
+            continue
+        nums = {int(m.group(1)) for m in _ISSUE_TOKEN_RE.finditer(text or "")} & wanted
+        nums -= seen
+        if not nums:
+            continue
+        first_line = next((line.strip() for line in (text or "").splitlines()
+                           if line.strip()), "")
+        row = audit(root, sha.strip()) or {}
+        verdict = str(row.get("verdict") or "").upper()
+        if verdict != "ABSTAIN":
+            continue
+        test_files = row.get("test_files") or []
+        test_subject = first_line.startswith("test(") or first_line.startswith("test:")
+        if not test_files and not test_subject:
+            continue
+        for issue in sorted(nums):
+            records.append({
+                "issue": issue,
+                "sha": sha.strip(),
+                "code": "COMMIT_AUDIT_ABSTAIN",
+                "verdict": verdict,
+                "witness": row.get("witness"),
+                "claim_kind": row.get("claim_kind"),
+                "reason": row.get("reason") or "commit-audit abstained",
+                "test_files": test_files,
+            })
+            seen.add(issue)
+    return records
+
+
 def witness_exited_workers(runs_dir: Path, root: Path, *, live: bool,
                            alive: set[int] | None = None, probe: Any | None = None,
                            git: Any | None = None,
@@ -3614,7 +3693,6 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         refreshed_ts = None
     contract_held_prior = contract_held_issues(
         runs_dir, ttl_h=contract_hold_ttl_h, updated_ts=refreshed_ts)
-    skip = live_issues | cooled | held_no_commit | contract_held_prior | local_witnessed
     # The cross-lane candidate stream the bounded contract scan walks (busiest
     # lane's oldest candidate first, then each other eligible lane's, round-robin).
     # Falls back to the single chosen lane when the router fold predates the
@@ -3622,6 +3700,12 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     eligible_lanes = pick.get("eligible_by_lane")
     if not eligible_lanes and chosen_lane:
         eligible_lanes = [[chosen_lane, pick.get("numbers") or []]]
+    audit_abstain_holds = commit_audit_abstain_holds(
+        root, _candidate_issue_numbers(eligible_lanes, pick.get("numbers") or []))
+    audit_abstain_held = {int(r["issue"]) for r in audit_abstain_holds
+                          if r.get("issue") is not None}
+    skip = (live_issues | cooled | held_no_commit | contract_held_prior
+            | local_witnessed | audit_abstain_held)
     scan_stream = contract_scan_stream(eligible_lanes, skip)
     if scan_stream:
         chosen_lane, target = scan_stream[0]
@@ -3661,6 +3745,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         # the common (nothing held) payload stays byte-identical to before (#1396).
         **({"held_no_commit": sorted(held_no_commit)} if held_no_commit else {}),
         **({"locally_witnessed": sorted(local_witnessed)} if local_witnessed else {}),
+        **({"commit_audit_abstain_held": audit_abstain_holds}
+           if audit_abstain_holds else {}),
         # Surface proactive self-source-tree holds (lane_issue_numbers) only when
         # something is actually held, for the same byte-identical-common-case reason.
         **({"self_modify_held": pick.get("self_modify_held")} if pick.get("self_modify_held") else {}),
@@ -3784,7 +3870,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                         "reason": (f"every open issue on {where} is "
                                    f"either live ({sorted(live_issues)}), locally "
                                    f"witnessed ({sorted(local_witnessed)}), in "
-                                   f"cooldown ({sorted(cooled)}), or contract-held "
+                                   f"cooldown ({sorted(cooled)}), commit-audit-abstain "
+                                   f"held ({sorted(audit_abstain_held)}), or contract-held "
                                    f"within the last {contract_hold_ttl_h}h "
                                    f"({len(contract_held_prior)} issue(s) awaiting "
                                    f"a contract backfill) — nothing fresh to "

@@ -778,6 +778,7 @@ class EvaluateTest(unittest.TestCase):
         mod.live_lane_lease_lanes = lambda root: {"lanes": []}
         mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set(cooled or [])
         mod.locally_witnessed_issues = lambda root, **k: set()
+        mod.commit_audit_abstain_holds = lambda root, candidates, **k: []
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": prompt_chars, "title": f"title {n}"}
         mod.issue_contract_review = passing_issue_contract
@@ -1172,6 +1173,40 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["target_issue"], 2293)
         self.assertEqual(p["locally_witnessed"], [1444])
         self.assertEqual(reviewed, [2293])
+
+    def test_commit_audit_abstain_test_commit_holds_candidate(self) -> None:
+        """A matching test-scope commit whose witness ABSTAINS is a visible hold,
+        not normal resolver fuel for a duplicate worker."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "ci", "numbers": [2867, 2293],
+                          "by_lane_count": {"ci": 2},
+                          "eligible_by_lane": [["ci", [2867, 2293]]]})
+        mod.commit_audit_abstain_holds = lambda root, candidates, **k: [{
+            "issue": 2867,
+            "sha": "41f23ea7",
+            "code": "COMMIT_AUDIT_ABSTAIN",
+            "verdict": "ABSTAIN",
+            "witness": "abstain",
+            "claim_kind": "none",
+            "reason": "subject makes no checkable code/test claim",
+            "test_files": ["internal/boundarylint/changedetector_test.go"],
+        }]
+        reviewed: list[int] = []
+
+        def counting_review(root, issue, number, **_kw):
+            reviewed.append(number)
+            return passing_issue_contract()
+
+        mod.issue_contract_review = counting_review
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+        self.assertEqual(p["verdict"], "WOULD_SPAWN")
+        self.assertEqual(p["target_issue"], 2293)
+        self.assertEqual(reviewed, [2293])
+        self.assertEqual(p["commit_audit_abstain_held"][0]["issue"], 2867)
+        self.assertEqual(p["commit_audit_abstain_held"][0]["code"],
+                         "COMMIT_AUDIT_ABSTAIN")
 
     def test_all_prior_contract_holds_plan_repair_worker(self) -> None:
         """A tick whose picker is empty only because the hold ledger skipped every
@@ -3528,6 +3563,40 @@ class AuditCommitWitnessTest(unittest.TestCase):
         mod = load()
         out = mod.audit_commit_witness(ROOT, "abc", runner=lambda root, sha: {})
         self.assertFalse(out["witnessed"])
+
+
+class CommitAuditAbstainHoldsTest(unittest.TestCase):
+    """Recent candidate-bound test commits whose audit ABSTAINS are surfaced as
+    closure-witness mismatch holds instead of being selected again."""
+
+    def test_test_scope_abstain_commit_holds_matching_candidate(self) -> None:
+        mod = load()
+        log = (
+            "41f23ea7\x1f"
+            "test(boundarylint): cover cmp-diff change-detector lint (#2867) (fak boundarylint)\n"
+            "\x1e"
+        )
+
+        def git(root, args):
+            return (0, log)
+
+        def audit(root, sha):
+            return {
+                "sha": sha,
+                "verdict": "ABSTAIN",
+                "witness": "abstain",
+                "claim_kind": "none",
+                "reason": "subject makes no checkable code/test claim",
+                "test_files": ["internal/boundarylint/changedetector_test.go"],
+            }
+
+        rows = mod.commit_audit_abstain_holds(
+            ROOT, {2867, 9999}, git=git, audit_runner=audit)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["issue"], 2867)
+        self.assertEqual(rows[0]["code"], "COMMIT_AUDIT_ABSTAIN")
+        self.assertEqual(rows[0]["test_files"],
+                         ["internal/boundarylint/changedetector_test.go"])
 
 
 class WitnessExitedWorkersTest(unittest.TestCase):
