@@ -74,6 +74,10 @@ func TestFidelityDeriverIsTotalAndShared(t *testing.T) {
 	if len(rows) != 1 || rows[0].Fidelity != FidelityLossless {
 		t.Fatalf("provider row fidelity = %+v, want one lossless row", rows)
 	}
+	rows = NewSavingsRows(compactionObs(), mustDay(t, "2026-07-01"))
+	if len(rows) != 1 || rows[0].Fidelity != FidelityBounded {
+		t.Fatalf("compaction row fidelity = %+v, want one bounded row", rows)
+	}
 }
 
 // TestFoldAuditReconcilesAndExcludesBlind is the core #2780/#2782 check: per-date and

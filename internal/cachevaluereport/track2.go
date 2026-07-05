@@ -172,6 +172,13 @@ type SavingsRow struct {
 	OutputPerMTokUSD float64 `json:"output_per_mtok_usd,omitempty"`
 	PricingSource    string  `json:"pricing_source,omitempty"`
 	DollarStatus     string  `json:"dollar_status,omitempty"`
+
+	// Fidelity is the mechanism's context-faithfulness class, stamped at write from
+	// Fidelity(Mechanism) so a producer can never drift from the prose ("lossless"
+	// for a byte-identical provider prompt-cache hit, "bounded" for bounded-lossy
+	// compaction shedding). It is additive/omitempty: readers predating it ignore it,
+	// and the audit fold derives it from Mechanism for rows written before this field.
+	Fidelity string `json:"fidelity,omitempty"`
 }
 
 // NetUSDComputed re-derives the NET from the row's own component $ fields, so a
@@ -295,6 +302,7 @@ func NewSavingsRows(obs SavingsObservation, now time.Time) []SavingsRow {
 		row := base
 		row.Provider = strings.TrimSpace(obs.Provider)
 		row.Mechanism = "provider_prompt_cache"
+		row.Fidelity = Fidelity(row.Mechanism)
 		row.InputTokens = obs.InputTokens
 		row.CacheReadTokens = obs.CacheReadTokens
 		row.CacheCreationTokens = obs.CacheCreationTokens
@@ -323,6 +331,7 @@ func NewSavingsRows(obs SavingsObservation, now time.Time) []SavingsRow {
 		row := base
 		row.Provider = "fak"
 		row.Mechanism = "compaction_shed"
+		row.Fidelity = Fidelity(row.Mechanism)
 		row.CompactionShedTokens = obs.CompactionShedTokens
 		row.CompactionFired = obs.CompactionFired
 		row.CompactionBailed = obs.CompactionBailed
