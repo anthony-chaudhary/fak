@@ -853,9 +853,9 @@ def read_leaseref_records_and_sessions(root: Path) -> tuple[list[dict[str, Any]]
             cwd=root, capture_output=True, text=True, timeout=10,
             creationflags=_win_creationflags())
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return [], str(exc)
+        return [], {}, str(exc)
     if proc.returncode != 0:
-        return [], (proc.stderr or proc.stdout or "git for-each-ref failed").strip()[-500:]
+        return [], {}, (proc.stderr or proc.stdout or "git for-each-ref failed").strip()[-500:]
 
     records: list[dict[str, Any]] = []
     sessions: dict[str, dict[str, Any]] = {}

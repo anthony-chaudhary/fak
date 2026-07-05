@@ -688,6 +688,72 @@ class LeaseStateTest(unittest.TestCase):
             ],
         }
 
+    @staticmethod
+    def _swap_run(mod, fake):
+        """Temporarily replace mod.subprocess.run; returns a restore thunk."""
+        orig = mod.subprocess.run
+        mod.subprocess.run = fake
+        return lambda: setattr(mod.subprocess, "run", orig)
+
+    def test_read_leaseref_returns_triple_when_git_read_fails(self) -> None:
+        # The git-error return paths must carry the SAME 3-tuple arity as the
+        # happy path. When `git for-each-ref` returns non-zero, a 2-tuple return
+        # makes read_lease_state's `records, sessions, err = ...` unpack raise
+        # ValueError, which crashes the whole status-card render (froze the
+        # operator card for ~3 days, 2026-07-02..05).
+        mod = load()
+
+        class _Boom:
+            returncode = 128
+            stdout = ""
+            stderr = "fatal: not a git repository"
+
+        restore = self._swap_run(mod, lambda *a, **k: _Boom())
+        try:
+            triple = mod.read_leaseref_records_and_sessions(Path("."))
+        finally:
+            restore()
+        self.assertEqual(len(triple), 3)
+        records, sessions, err = triple  # must not raise
+        self.assertEqual(records, [])
+        self.assertEqual(sessions, {})
+        self.assertIn("not a git repository", err)
+
+    def test_read_leaseref_returns_triple_on_git_oserror(self) -> None:
+        mod = load()
+
+        def _raise(*a, **k):
+            raise OSError("git binary missing")
+
+        restore = self._swap_run(mod, _raise)
+        try:
+            triple = mod.read_leaseref_records_and_sessions(Path("."))
+        finally:
+            restore()
+        self.assertEqual(len(triple), 3)
+        _records, sessions, err = triple
+        self.assertEqual(sessions, {})
+        self.assertIn("git binary missing", err)
+
+    def test_read_lease_state_survives_git_read_failure(self) -> None:
+        # End-to-end: the caller that actually crashed must degrade to a
+        # read_error dict, not raise, when the lease-ref read fails.
+        mod = load()
+
+        class _Boom:
+            returncode = 128
+            stdout = ""
+            stderr = "fatal: not a git repository"
+
+        restore = self._swap_run(mod, lambda *a, **k: _Boom())
+        try:
+            state = mod.read_lease_state(Path("."), self._backlog())
+        finally:
+            restore()
+        self.assertIn("read_error", state)
+        self.assertEqual(state["active_count"], 0)
+        self.assertEqual(state["blocking_count"], 0)
+
     def test_summarize_leases_marks_blocking_and_non_blocking_active_leases(self) -> None:
         mod = load()
         state = mod.summarize_leases([
