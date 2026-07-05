@@ -1,0 +1,146 @@
+// drivestate.go — the OPERATOR-HOLD vocabulary + durable-store fold the resume
+// watchdog reads so it never resurrects a session an operator deliberately paused,
+// drained, or stopped. It is the pure leaf behind the guard step in watchdog.go
+// (DecideWatchdogRow) and the `fak resume hold` / `fak resume release` operator
+// surface.
+//
+// # Why this lives in the Claude-UUID keyspace
+//
+// The watchdog keys every decision on the plan row's Session — the Claude Code
+// transcript UUID (== CLAUDE_CODE_SESSION_ID, the id `claude --resume` takes). The
+// out-of-band operator control plane (internal/session.Table, `fak session
+// pause/stop <id>`) keys on the GATEWAY TRACE / guard --session-id instead — a
+// DISJOINT namespace that never carries the transcript UUID (a resumed child even
+// has CLAUDE_CODE_SESSION_ID stripped, see WatchdogChildEnvDrop). So an operator's
+// `fak session stop` records durable intent the watchdog CANNOT join to a plan row.
+// This store closes that gap: a hold recorded in the ONE key the operator surface
+// and the watchdog actually share.
+//
+// # Why NOT the Descriptor registry
+//
+// Two reasons the descriptor drive-state can't be the source: (1) no join key
+// (above); (2) a Stopped Descriptor is TTL-GC'd after 30 minutes — a terminal-Stop
+// veto stored there would evaporate. This store is append-only and never swept, so a
+// Stop persists (durable across GC) until the operator explicitly releases it.
+//
+// # Pure by construction
+//
+// The shell reads resume_drivestate.jsonl and hands FoldDriveStates the parsed rows;
+// the fold returns the one current drive-state per session. No clock, no I/O — same
+// rows in, same map out. The store is APPEND-ONLY, so slice order IS write order and
+// the fold is "last row per session wins": a later `running` row RELEASES an earlier
+// hold, which is exactly what `fak resume release` writes. A hold is reversed ONLY by
+// the operator, never by the watchdog.
+package resume
+
+import "strings"
+
+// WatchdogDriveState is the operator's recorded drive-state for one session, in the
+// same closed vocabulary as internal/session.RunState (mirrored here as strings so
+// this foundation leaf does not import the session package and cannot be reddened by
+// churn in it). The empty value is "no opinion" — a session with no recorded state is
+// never held.
+type WatchdogDriveState string
+
+const (
+	// DriveRunning: live / released. A `running` row LIFTS a prior paused/draining/stopped
+	// hold (the reversible-release write `fak resume release` appends). Never a hold.
+	DriveRunning WatchdogDriveState = "running"
+	// DriveThrottled: still advancing under a tightened pace — not a hold (the watchdog only
+	// fires on a DEAD session anyway; a throttled-but-live one is not on the plan).
+	DriveThrottled WatchdogDriveState = "throttled"
+	// DrivePaused: an operator held the session at a boundary — a reversible hold.
+	DrivePaused WatchdogDriveState = "paused"
+	// DriveDraining: an operator is winding the session down gracefully — do not relaunch.
+	DriveDraining WatchdogDriveState = "draining"
+	// DriveStopped: an operator terminated the session — terminal intent. Durable (the store
+	// has no TTL, so it outlives the descriptor registry's 30-min GC) and reversed only by an
+	// explicit operator release, never by the watchdog.
+	DriveStopped WatchdogDriveState = "stopped"
+)
+
+// normalizeDriveState maps a raw stored token to the closed vocabulary, returning ""
+// (inert) for any unrecognized value — an unknown token never holds a session and
+// never clobbers a prior valid state in the fold.
+func normalizeDriveState(s string) WatchdogDriveState {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "running":
+		return DriveRunning
+	case "throttled":
+		return DriveThrottled
+	case "paused":
+		return DrivePaused
+	case "draining":
+		return DriveDraining
+	case "stopped":
+		return DriveStopped
+	default:
+		return ""
+	}
+}
+
+// HeldByOperator reports whether this drive-state means the operator has deliberately
+// held the session, so the watchdog must NOT auto-resume it. Only paused/draining/
+// stopped hold; running/throttled/"" (the zero value) fall through to today's behavior
+// — the per-key fail-open the guard depends on (an absent session reads "" → not held).
+// Exported so the operator `fak resume hold --list` surface and this guard share one
+// predicate.
+func (s WatchdogDriveState) HeldByOperator() bool {
+	return s == DrivePaused || s == DriveDraining || s == DriveStopped
+}
+
+// HoldReason is the closed human one-liner the watchdog logs when it stands down on an
+// operator hold. Each names its drive-state so a log grep never conflates a per-session
+// operator hold with the account-level "tombstoned" (policy) skip. Exported so the guard
+// (watchdog.go) and any operator surface render one wording.
+func (s WatchdogDriveState) HoldReason() string {
+	switch s {
+	case DriveStopped:
+		return "operator stopped this session (durable drive-state hold) — a session the operator terminated is never auto-resumed"
+	case DriveDraining:
+		return "operator is draining this session (drive-state hold) — do not relaunch a session being wound down"
+	case DrivePaused:
+		return "operator paused this session (drive-state hold) — releasing it is the operator's call (`fak resume release`), not the watchdog's"
+	default:
+		return "operator drive-state hold"
+	}
+}
+
+// DriveStateRow is one append-only line of the resume_drivestate.jsonl store, reduced
+// to the typed facts the fold reads. The shell parses the JSONL (jsonlledger.Parse);
+// unknown fields are dropped, not trusted. TS is carried for humans/audit only — the
+// fold orders by FILE order (append-only ⇒ chronological), never by parsing a timestamp.
+type DriveStateRow struct {
+	// TS is the row's ISO-8601 write time (audit only; the fold ignores it).
+	TS string `json:"ts,omitempty"`
+	// Session is the Claude transcript UUID this state applies to (the watchdog's key).
+	Session string `json:"session"`
+	// State is the drive-state token (running/throttled/paused/draining/stopped).
+	State string `json:"state"`
+	// Reason is the optional human note recorded with the hold.
+	Reason string `json:"reason,omitempty"`
+	// Via names what wrote the row (e.g. "fak resume hold"), for provenance.
+	Via string `json:"via,omitempty"`
+}
+
+// FoldDriveStates folds the append-only rows into the one current drive-state per
+// session the guard reads: last row per session wins (the store is append-only, so
+// slice order is write order), and an unknown/blank state token is ignored so it never
+// clobbers a prior valid state. A later `running` row therefore releases an earlier
+// hold — the reversible-release contract `fak resume release` relies on. Total over any
+// input: nil/empty rows yield an empty map (no holds).
+func FoldDriveStates(rows []DriveStateRow) map[string]WatchdogDriveState {
+	out := make(map[string]WatchdogDriveState, len(rows))
+	for _, r := range rows {
+		sid := strings.TrimSpace(r.Session)
+		if sid == "" {
+			continue
+		}
+		st := normalizeDriveState(r.State)
+		if st == "" {
+			continue // unknown token: leave any prior state for this session intact
+		}
+		out[sid] = st
+	}
+	return out
+}

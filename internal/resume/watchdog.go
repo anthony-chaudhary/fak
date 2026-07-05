@@ -9,12 +9,19 @@
 //
 // The ordered guard chain the Python main loop applied inline, as one total function:
 //
-//  1. self-guard    — never resume the session the watchdog itself runs inside (a live
+//  1. self-guard      — never resume the session the watchdog itself runs inside (a live
 //     operator session can briefly look like a stopped autonomous worker, and a
 //     self-resume races two `claude` processes on one transcript);
-//  2. policy guard  — never resume onto an account the fleet policy no longer offers as
+//  2. operator-hold   — never resume a session an operator DELIBERATELY paused / drained /
+//     stopped via the durable, UUID-keyed drive-state store (resume_drivestate.jsonl,
+//     written by `fak resume hold`). Operator intent OUTRANKS transcript-forensic resume,
+//     and this sits above the retry gate so it beats even a proven re-death revive — the
+//     watchdog must not resurrect what the operator terminated. It is keyed by the Claude
+//     transcript UUID the plan row already carries (the descriptor registry is a disjoint
+//     keyspace — guardTraceID — so it can never provide this join);
+//  3. policy guard    — never resume onto an account the fleet policy no longer offers as
 //     a worker (a stale plan file can predate a tombstone);
-//  3. retry gate    — the outcome-aware once-gate (RetryGate): blocked unless the last
+//  4. retry gate      — the outcome-aware once-gate (RetryGate): blocked unless the last
 //     attempt failed recoverably and the attempt budget is not spent.
 //
 // The verdict carries the closed action token plus the attempt number a launch would
@@ -96,7 +103,16 @@ const (
 	// WatchdogSkipBlocked: the outcome-aware retry gate blocks a new resume (already
 	// took, auth wall, attempt cap, or operator-settled). The reason carries the why.
 	WatchdogSkipBlocked WatchdogAction = "skip_blocked"
+	// WatchdogSkipOperatorHold: an operator deliberately drove this session to a hold
+	// (paused / draining) or a terminal stop via the durable drive-state store — operator
+	// drive-state OUTRANKS transcript-forensic resume, so never resurrect it, even past a
+	// re-death latch. The reason names which drive-state held it.
+	WatchdogSkipOperatorHold WatchdogAction = "skip_operator_hold"
 )
+
+// The operator drive-state vocabulary (WatchdogDriveState, HeldByOperator, HoldReason) and the
+// durable-store fold (DriveStateRow, FoldDriveStates) live in drivestate.go — the pure leaf the
+// shell folds resume_drivestate.jsonl through before handing this guard its DriveStates map.
 
 // WatchdogGuards is the tick-constant context every row is judged against.
 type WatchdogGuards struct {
@@ -109,6 +125,12 @@ type WatchdogGuards struct {
 	WorkerAccounts map[string]bool `json:"worker_accounts,omitempty"`
 	// MaxAttempts is the retry gate's give-up cap; <= 0 takes DefaultMaxResumeAttempts.
 	MaxAttempts int `json:"max_attempts,omitempty"`
+	// DriveStates maps a session id (the Claude transcript UUID the plan row carries) to the
+	// operator drive-state the SHELL folded from the durable drive-state store. A nil/empty
+	// map, a session with no entry, or a running/throttled/unknown token all leave the
+	// operator-hold guard INERT (fail-open, per-key — NOT the roster-style "absent ⇒ skip"
+	// rule the worker-account guard uses; the guard fires only on an explicit held token).
+	DriveStates map[string]WatchdogDriveState `json:"drive_states,omitempty"`
 }
 
 // WatchdogRowDecision is the leaf's verdict for one plan row.
@@ -130,6 +152,14 @@ func DecideWatchdogRow(row WatchdogPlanRow, g WatchdogGuards, history []Attempt,
 	if g.SelfSID != "" && row.Session == g.SelfSID {
 		return WatchdogRowDecision{Action: WatchdogSkipSelf,
 			Reason: "this is the live session running the watchdog (self-resume guard)"}
+	}
+	// Operator-hold: an operator deliberately paused/drained/stopped this session via the
+	// durable drive-state store. It sits ABOVE the policy and retry gates (and the shell has
+	// already applied ReviveOutcome before this call), so an operator Stop beats a proven
+	// re-death revive, a spent cap, and a non-worker account alike. Fail-open per key: only
+	// an explicit held token fires — a missing/running/unknown state falls through.
+	if st := g.DriveStates[row.Session]; st.HeldByOperator() {
+		return WatchdogRowDecision{Action: WatchdogSkipOperatorHold, Reason: st.HoldReason()}
 	}
 	if len(g.WorkerAccounts) > 0 && !g.WorkerAccounts[row.Account] {
 		return WatchdogRowDecision{Action: WatchdogSkipNonWorker,

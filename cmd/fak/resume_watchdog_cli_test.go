@@ -241,6 +241,110 @@ func TestResumeWatchdogAuthDispositionDoesNotSpawnWorker(t *testing.T) {
 	}
 }
 
+// rwHoldTestEnv isolates account discovery (so the worker-policy guard stays inert) and the
+// self-guard, so a drive-state test exercises exactly the operator-hold path.
+func rwHoldTestEnv(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("FLEET_CLAUDE_EXE", "claude")
+	t.Setenv("FLEET_USER_HOME", filepath.Join(home, "empty-home"))
+	t.Setenv("FLEET_CONFIG_HOME", filepath.Join(home, "empty-config"))
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "") // keep the self-guard inert regardless of the ambient session
+}
+
+func TestResumeWatchdogOperatorHoldDoesNotSpawn(t *testing.T) {
+	rwHoldTestEnv(t)
+	regDir := t.TempDir()
+	logDir := t.TempDir()
+	sid := "sid-hold-1234567890"
+	plan := `{"plan":[{"session":"` + sid + `","account":".claude-a","project":"P","disp":"STOPPED_MIDTOOL"}]}`
+	if err := os.WriteFile(filepath.Join(regDir, "resume_plan.json"), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The operator stopped this session (`fak resume hold --state stopped`).
+	drive := `{"ts":"2026-07-05T00:00:00Z","session":"` + sid + `","state":"stopped","via":"fak resume hold"}` + "\n"
+	if err := os.WriteFile(filepath.Join(regDir, "resume_drivestate.jsonl"), []byte(drive), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldBroker := launchSpawnBroker
+	oldSpawn := rwSpawnResumeLaunch
+	brokered := false
+	spawned := false
+	launchSpawnBroker = func(a launchBrokerAttempt) launchBrokerGrant {
+		brokered = true
+		return allowLaunchBrokerGrant(a, "unit-test-allow")
+	}
+	rwSpawnResumeLaunch = func(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir string, grant launchBrokerGrant) (int, error) {
+		spawned = true
+		return 12345, nil
+	}
+	t.Cleanup(func() { launchSpawnBroker = oldBroker; rwSpawnResumeLaunch = oldSpawn })
+
+	var out, errb bytes.Buffer
+	rc := runResumeWatchdog(&out, &errb, []string{
+		"--live", "--no-refresh", "--reg-dir", regDir, "--log-dir", logDir, "--spacing-sec", "0",
+	})
+	if rc != 0 {
+		t.Fatalf("watchdog rc=%d stderr=%s stdout=%s", rc, errb.String(), out.String())
+	}
+	if brokered || spawned {
+		t.Fatalf("operator-held session reached the launch path: brokered=%v spawned=%v", brokered, spawned)
+	}
+	got := out.String() + errb.String()
+	if !strings.Contains(got, "SKIP") || !strings.Contains(strings.ToLower(got), "operator") {
+		t.Fatalf("watchdog output missing the operator-hold skip:\n%s", got)
+	}
+	if ledger, _ := os.ReadFile(filepath.Join(regDir, "resume_ledger.jsonl")); strings.Contains(string(ledger), `"phase":"launched"`) {
+		t.Fatalf("held session recorded a launch:\n%s", ledger)
+	}
+}
+
+func TestResumeWatchdogReleaseReEnablesResume(t *testing.T) {
+	rwHoldTestEnv(t)
+	regDir := t.TempDir()
+	logDir := t.TempDir()
+	sid := "sid-rel-1234567890"
+	plan := `{"plan":[{"session":"` + sid + `","account":".claude-a","project":"P","disp":"STOPPED_MIDTOOL"}]}`
+	if err := os.WriteFile(filepath.Join(regDir, "resume_plan.json"), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Paused, then released — the later `running` row lifts the hold (fold-agnostic: a running
+	// row releases a paused hold under either a sticky or a last-writer-wins fold).
+	drive := `{"ts":"2026-07-05T00:00:00Z","session":"` + sid + `","state":"paused","via":"fak resume hold"}` + "\n" +
+		`{"ts":"2026-07-05T00:01:00Z","session":"` + sid + `","state":"running","via":"fak resume release"}` + "\n"
+	if err := os.WriteFile(filepath.Join(regDir, "resume_drivestate.jsonl"), []byte(drive), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldBroker := launchSpawnBroker
+	oldSpawn := rwSpawnResumeLaunch
+	launchSpawnBroker = func(a launchBrokerAttempt) launchBrokerGrant { return allowLaunchBrokerGrant(a, "unit-test-allow") }
+	rwSpawnResumeLaunch = func(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir string, grant launchBrokerGrant) (int, error) {
+		return 12345, nil
+	}
+	t.Cleanup(func() { launchSpawnBroker = oldBroker; rwSpawnResumeLaunch = oldSpawn })
+
+	// Dry-run: a released session is resume-eligible again (WOULD RESUME), and is NOT skipped
+	// as an operator hold.
+	var out, errb bytes.Buffer
+	rc := runResumeWatchdog(&out, &errb, []string{
+		"--no-refresh", "--reg-dir", regDir, "--log-dir", logDir, "--spacing-sec", "0",
+	})
+	if rc != 0 {
+		t.Fatalf("watchdog rc=%d stderr=%s stdout=%s", rc, errb.String(), out.String())
+	}
+	got := out.String() + errb.String()
+	if strings.Contains(strings.ToLower(got), "operator paused") || strings.Contains(strings.ToLower(got), "operator stopped") {
+		t.Fatalf("released session was still treated as an operator hold:\n%s", got)
+	}
+	if !strings.Contains(got, "WOULD RESUME") {
+		t.Fatalf("released session should be resume-eligible (WOULD RESUME):\n%s", got)
+	}
+}
+
 func TestResumeWatchdogStatusJSONLaunchedNoProgressRed(t *testing.T) {
 	reg := t.TempDir()
 	if err := os.WriteFile(filepath.Join(reg, "resume_plan.json"), []byte(`{"plan":[

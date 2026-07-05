@@ -47,6 +47,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
+	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/resume/rehome"
@@ -172,6 +173,11 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 		SelfSID:        selfSID,
 		WorkerAccounts: rwWorkerAccounts(home),
 		MaxAttempts:    *maxAttempts,
+		// Honor an operator's durable pause/drain/stop of a specific session (`fak resume
+		// hold`). Keyed by the Claude transcript UUID the plan row carries — the one key the
+		// watchdog and the operator surface share (the descriptor registry is guardTraceID-
+		// keyed, a disjoint space). Fail-open: an absent/unreadable store leaves the guard inert.
+		DriveStates: rwLoadDriveStates(regDir),
 	}
 
 	history := rwLoadHistory(ledgerPath)
@@ -805,6 +811,38 @@ func rwSpawnResume(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir
 	// Detach: the tick never waits on the resumed session.
 	_ = cmd.Process.Release()
 	return pid, nil
+}
+
+// rwDriveStateLedger is the durable, UUID-keyed operator drive-state store the watchdog reads
+// to honor an operator's pause/drain/stop of a specific session. It lives in the SAME regDir
+// the tick already resolves, so `fak resume hold` / `fak resume release` (the writer) and this
+// reader always agree on the file. It is deliberately NOT the descriptor registry
+// (session-registry.json): that store is keyed by guardTraceID, a disjoint keyspace from the
+// Claude transcript UUID the plan row carries, AND it is TTL-GC'd — a Stopped descriptor would
+// evaporate 30 min after the last stamp, so a durable Stop veto must live in an un-swept file.
+func rwDriveStateLedger(regDir string) string {
+	return filepath.Join(regDir, "resume_drivestate.jsonl")
+}
+
+// rwLoadDriveStates reads the append-only drive-state store and folds it — through the pure
+// leaf resume.FoldDriveStates — into the one current operator drive-state per session id (the
+// Claude transcript UUID the plan row carries). The fold is last-row-wins per session with one
+// exception: a Stop is STICKY (terminal), so a later paused/running row can never revive a
+// session the operator deliberately stopped, while a `running` release DOES lift a prior
+// paused/draining hold. There is no TTL — a hold survives the descriptor registry's 30-minute
+// GC. A missing / unreadable / empty file yields a nil map, which leaves the operator-hold
+// guard INERT (fail-open, matching rwWorkerAccounts) — an absent store never strands a
+// legitimately-crashed session.
+func rwLoadDriveStates(regDir string) map[string]resume.WatchdogDriveState {
+	raw, err := os.ReadFile(rwDriveStateLedger(regDir))
+	if err != nil {
+		return nil
+	}
+	states := resume.FoldDriveStates(jsonlledger.Parse[resume.DriveStateRow](string(raw), nil))
+	if len(states) == 0 {
+		return nil
+	}
+	return states
 }
 
 // rwWorkerAccounts is the set of account dir-basenames policy still offers as workers.

@@ -16,7 +16,12 @@ import (
 //   - a resumed child's env drops the parent's guard-gateway/model-API wiring and
 //     harness identity, and pins CLAUDE_CONFIG_DIR to the resume target (the 2026-07-01
 //     whole-wave-crash fix);
-//   - probe mode "auto" resolves to a real probe only on a live tick.
+//   - probe mode "auto" resolves to a real probe only on a live tick;
+//   - the operator-hold guard (drivestate.go) refuses a session an operator paused/
+//     drained/stopped via the durable drive-state store, sits ABOVE the policy and retry
+//     gates (so it beats a proven re-death revive, a spent cap, and a non-worker account),
+//     yields only to the self-guard, and is inert (fail-open) for a running/absent/unknown
+//     drive-state.
 
 func TestDecideWatchdogRowSelfGuard(t *testing.T) {
 	row := WatchdogPlanRow{Session: "sid-self", Account: ".claude-x"}
@@ -212,6 +217,107 @@ func TestReviveOutcomeThroughWatchdogGate(t *testing.T) {
 	if d := DecideWatchdogRow(row, WatchdogGuards{MaxAttempts: 1}, hist, outcome); d.Action != WatchdogSkipBlocked ||
 		!strings.Contains(d.Reason, "cap") {
 		t.Fatalf("cap + revive = %s (%s), want skip_blocked cap", d.Action, d.Reason)
+	}
+}
+
+func TestDecideWatchdogRowOperatorHoldGuard(t *testing.T) {
+	row := WatchdogPlanRow{Session: "sid-held", Account: ".claude-x"}
+	for _, st := range []WatchdogDriveState{DrivePaused, DriveDraining, DriveStopped} {
+		g := WatchdogGuards{DriveStates: map[string]WatchdogDriveState{"sid-held": st}}
+		d := DecideWatchdogRow(row, g, nil, OutcomeUnknown)
+		if d.Action != WatchdogSkipOperatorHold {
+			t.Fatalf("drive-state %s: action = %s, want skip_operator_hold", st, d.Action)
+		}
+		if !strings.Contains(strings.ToLower(d.Reason), "operator") {
+			t.Fatalf("drive-state %s: reason %q must name the operator hold", st, d.Reason)
+		}
+	}
+	// Inert (per-key fail-open) for a live / absent / unknown state: a nil map, a session with
+	// no entry, running/throttled, and an unrecognized token all fall through to launch — an
+	// absent hold must never strand a crashed session (matching the worker-policy guard).
+	for name, g := range map[string]WatchdogGuards{
+		"nil map":       {},
+		"absent sid":    {DriveStates: map[string]WatchdogDriveState{"other": DriveStopped}},
+		"running":       {DriveStates: map[string]WatchdogDriveState{"sid-held": DriveRunning}},
+		"throttled":     {DriveStates: map[string]WatchdogDriveState{"sid-held": DriveThrottled}},
+		"unknown token": {DriveStates: map[string]WatchdogDriveState{"sid-held": WatchdogDriveState("weird")}},
+	} {
+		if d := DecideWatchdogRow(row, g, nil, OutcomeUnknown); d.Action != WatchdogLaunch {
+			t.Fatalf("%s: operator-hold guard must be inert (fail-open), got %s (%s)", name, d.Action, d.Reason)
+		}
+	}
+}
+
+func TestOperatorHoldOutranksReviveCapAndPolicy(t *testing.T) {
+	// A stopped operator hold must beat every lower-precedence path: a revived re-death that
+	// WOULD otherwise LAUNCH, a spent attempt cap, and a non-worker account — and must itself
+	// yield to the self-guard (never race two `claude` on one transcript).
+	dead := ReDeathEvidence{ProcessScanOK: true, TranscriptIdleSeconds: 3600}
+	revived, ok := ReviveOutcome(OutcomeProgressed, dead)
+	if !ok {
+		t.Fatal("precondition: proven death must revive the latch (else this test is vacuous)")
+	}
+	held := map[string]WatchdogDriveState{"sid-h": DriveStopped}
+	row := WatchdogPlanRow{Session: "sid-h", Account: ".claude-worker"}
+	hist := []Attempt{{Phase: "launched"}}
+
+	// Precondition (not vacuous): WITHOUT the hold, the revived row would LAUNCH.
+	if d := DecideWatchdogRow(row, WatchdogGuards{}, hist, revived); d.Action != WatchdogLaunch {
+		t.Fatalf("precondition: revived row without a hold should launch, got %s", d.Action)
+	}
+	// Beats the revived re-death latch.
+	if d := DecideWatchdogRow(row, WatchdogGuards{DriveStates: held}, hist, revived); d.Action != WatchdogSkipOperatorHold {
+		t.Fatalf("hold vs revive = %s (%s), want skip_operator_hold", d.Action, d.Reason)
+	}
+	// Beats a spent attempt cap.
+	if d := DecideWatchdogRow(row, WatchdogGuards{DriveStates: held, MaxAttempts: 1}, hist, revived); d.Action != WatchdogSkipOperatorHold {
+		t.Fatalf("hold vs cap = %s (%s), want skip_operator_hold", d.Action, d.Reason)
+	}
+	// Beats the worker-policy guard: a non-worker account that is ALSO held reports the hold,
+	// not skip_non_worker (operator-hold sits above the policy guard).
+	g := WatchdogGuards{DriveStates: held, WorkerAccounts: map[string]bool{".claude-other": true}}
+	if d := DecideWatchdogRow(row, g, nil, OutcomeUnknown); d.Action != WatchdogSkipOperatorHold {
+		t.Fatalf("hold vs policy = %s (%s), want skip_operator_hold (hold outranks policy)", d.Action, d.Reason)
+	}
+	// But the self-guard still comes first.
+	self := WatchdogGuards{SelfSID: "sid-h", DriveStates: held}
+	if d := DecideWatchdogRow(row, self, nil, OutcomeUnknown); d.Action != WatchdogSkipSelf {
+		t.Fatalf("self vs hold = %s (%s), want skip_self (the self-guard is first)", d.Action, d.Reason)
+	}
+}
+
+func TestFoldDriveStatesReleaseAndHeldPredicate(t *testing.T) {
+	// Last row per session wins: a later `running` row RELEASES an earlier paused hold, and an
+	// unknown token never clobbers a prior valid state. (Deliberately avoids the stopped-then-
+	// running case, whose result differs under a sticky vs last-writer fold.)
+	rows := []DriveStateRow{
+		{Session: "a", State: "paused"},
+		{Session: "b", State: "stopped"},
+		{Session: "a", State: "running"},     // releases a's pause
+		{Session: "b", State: "weird-token"}, // ignored — b stays stopped
+		{Session: "", State: "paused"},       // no session id — dropped
+	}
+	got := FoldDriveStates(rows)
+	if got["a"].HeldByOperator() {
+		t.Fatalf("a should be released by the later running row, got %q (held)", got["a"])
+	}
+	if got["b"] != DriveStopped || !got["b"].HeldByOperator() {
+		t.Fatalf("b should stay stopped despite the unknown later token, got %q", got["b"])
+	}
+	if _, ok := got[""]; ok {
+		t.Fatal("a row with no session id must be dropped")
+	}
+	// The held vocabulary, and a reason lexically distinct from the account-level "tombstoned".
+	if DriveRunning.HeldByOperator() || DriveThrottled.HeldByOperator() || WatchdogDriveState("").HeldByOperator() {
+		t.Fatal("running / throttled / empty must not be holds")
+	}
+	for _, st := range []WatchdogDriveState{DrivePaused, DriveDraining, DriveStopped} {
+		if !st.HeldByOperator() {
+			t.Fatalf("%s must be a hold", st)
+		}
+		if r := strings.ToLower(st.HoldReason()); !strings.Contains(r, "operator") || strings.Contains(r, "tombstoned") {
+			t.Fatalf("%s hold reason %q must name the operator and not collide with the account 'tombstoned' reason", st, st.HoldReason())
+		}
 	}
 }
 

@@ -64,6 +64,10 @@ func runResume(stdout, stderr io.Writer, argv []string) int {
 		return runResumeAdmit(stdout, stderr, argv[1:])
 	case "watchdog":
 		return runResumeWatchdog(stdout, stderr, argv[1:])
+	case "hold":
+		return runResumeHold(stdout, stderr, argv[1:])
+	case "release":
+		return runResumeRelease(stdout, stderr, argv[1:])
 	case "resolve":
 		return runResumeResolve(stdout, stderr, argv[1:])
 	case "why":
@@ -72,7 +76,7 @@ func runResume(stdout, stderr io.Writer, argv []string) int {
 		resumeUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak resume: unknown subcommand %q (want plan, validate, scan, sweep, stopped, status, admit, watchdog, resolve, or why)\n", argv[0])
+		fmt.Fprintf(stderr, "fak resume: unknown subcommand %q (want plan, validate, scan, sweep, stopped, status, admit, watchdog, hold, release, resolve, or why)\n", argv[0])
 		resumeUsage(stderr)
 		return 2
 	}
@@ -990,6 +994,147 @@ func upper(s string) string {
 	return string(b)
 }
 
+// runResumeHold is the operator WRITER half of the drive-state alignment: it records a durable
+// pause / drain / stop of a specific session in the UUID-keyed drive-state store the watchdog
+// reads, so an operator's intent for a session is HONORED by the automatic resume layer instead
+// of being fought by it. This is the one operator surface that lands in the watchdog's own
+// keyspace — the Claude transcript UUID `claude --resume` takes — because the `fak session`
+// control plane is keyed by the disjoint gateway trace and can never reach the watchdog.
+//
+//	fak resume hold <session-id>                 # pause auto-resume (reversible)
+//	fak resume hold <session-id> --state stopped # terminal: never auto-resume again
+//	fak resume hold --list                       # show the current effective holds
+//
+// A hold is durable (no TTL — it survives the descriptor registry's 30-min GC) and reversible
+// only by the operator (`fak resume release`), never by the watchdog. Exit 0 ok, 1 runtime, 2 usage.
+func runResumeHold(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("resume hold", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "resume")
+	state := fs.String("state", "paused", "drive-state to record: paused (reversible hold), draining, or stopped (terminal intent — never auto-resume)")
+	reason := fs.String("reason", "", "optional operator note recorded with the hold")
+	regDirFlag := fs.String("reg-dir", "", "registry dir holding resume_drivestate.jsonl (default: the same regDir the watchdog resolves — $FLEET_REG_DIR, else the host Fleet registry, else <repo>/tools/_registry)")
+	list := fs.Bool("list", false, "list the current effective operator holds instead of setting one")
+	asJSON := fs.Bool("json", false, "with --list, emit the holds as JSON")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	regDir := resolveSweepRegDir(*regDirFlag)
+	if *list || fs.NArg() == 0 {
+		return renderResumeHolds(stdout, stderr, regDir, *asJSON)
+	}
+	sid := strings.TrimSpace(fs.Arg(0))
+	st, ok := normalizeHoldState(*state)
+	if !ok {
+		fmt.Fprintf(stderr, "fak resume hold: bad --state %q (want paused, draining, or stopped)\n", *state)
+		return 2
+	}
+	if err := os.MkdirAll(regDir, 0o755); err != nil {
+		fmt.Fprintf(stderr, "fak resume hold: create registry dir %q: %v\n", regDir, err)
+		return 1
+	}
+	rwAppendLedger(rwDriveStateLedger(regDir), map[string]any{
+		"ts": rwNowISO(), "session": sid, "state": string(st),
+		"reason": strings.TrimSpace(*reason), "via": "fak resume hold",
+	})
+	if st == resume.DriveStopped {
+		fmt.Fprintf(stdout, "held %s as stopped (terminal intent) — the resume watchdog will never auto-resume it; the hold is durable (it outlives the descriptor registry's 30-minute GC) and reversed only by `fak resume release %s`\n",
+			shortID(sid), shortID(sid))
+	} else {
+		fmt.Fprintf(stdout, "held %s as %s — the resume watchdog will not auto-resume it; release with `fak resume release %s`\n",
+			shortID(sid), st, shortID(sid))
+	}
+	return 0
+}
+
+// runResumeRelease reverses an operator hold by appending a `running` row to the drive-state
+// store, then re-folds through the SAME pure leaf the watchdog reads (resume.FoldDriveStates)
+// and reports the state that actually results — so it stays correct whether the fold treats a
+// release as lifting every hold or a terminal stop as sticky. It is the operator's explicit
+// reversal — the ONE thing that un-holds a session; the watchdog never does. Exit 0 released,
+// 1 runtime, 2 usage, 3 the hold is terminal and still stands after the release.
+func runResumeRelease(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("resume release", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "resume")
+	regDirFlag := fs.String("reg-dir", "", "registry dir holding resume_drivestate.jsonl (default: the same regDir the watchdog resolves)")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if fs.NArg() == 0 {
+		fmt.Fprintln(stderr, "fak resume release: need a <session-id> to release")
+		return 2
+	}
+	sid := strings.TrimSpace(fs.Arg(0))
+	regDir := resolveSweepRegDir(*regDirFlag)
+	if err := os.MkdirAll(regDir, 0o755); err != nil {
+		fmt.Fprintf(stderr, "fak resume release: create registry dir %q: %v\n", regDir, err)
+		return 1
+	}
+	rwAppendLedger(rwDriveStateLedger(regDir), map[string]any{
+		"ts": rwNowISO(), "session": sid, "state": string(resume.DriveRunning), "via": "fak resume release",
+	})
+	// Report the state the watchdog will now read. If a hold survives the release, the store's
+	// fold treats it as terminal — say so instead of falsely claiming a clear.
+	if st := rwLoadDriveStates(regDir)[sid]; st.HeldByOperator() {
+		fmt.Fprintf(stderr, "fak resume release: recorded a release for %s, but it is still held (%s) — the store treats this hold as terminal; remove its row from %s to fully clear it.\n",
+			shortID(sid), st, rwDriveStateLedger(regDir))
+		return 3
+	}
+	fmt.Fprintf(stdout, "released %s — the resume watchdog may auto-resume it again if it dies\n", shortID(sid))
+	return 0
+}
+
+// normalizeHoldState maps an operator --state token to the closed drive-state a hold records.
+// It accepts the imperative aliases (pause/drain/stop) as well as the state tokens, and refuses
+// running/throttled (use `fak resume release` to clear a hold, not `hold --state running`).
+func normalizeHoldState(s string) (resume.WatchdogDriveState, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "paused", "pause", "hold", "":
+		return resume.DrivePaused, true
+	case "draining", "drain":
+		return resume.DriveDraining, true
+	case "stopped", "stop":
+		return resume.DriveStopped, true
+	}
+	return "", false
+}
+
+// renderResumeHolds prints (or emits as JSON) the current effective operator holds — the
+// sessions the watchdog will not auto-resume. It folds the store to the latest state per
+// session and keeps only the held ones, so a released session drops off the list.
+func renderResumeHolds(stdout, stderr io.Writer, regDir string, asJSON bool) int {
+	states := rwLoadDriveStates(regDir)
+	type holdRow struct {
+		Session string `json:"session"`
+		State   string `json:"state"`
+	}
+	rows := make([]holdRow, 0, len(states))
+	for sid, st := range states {
+		if st.HeldByOperator() {
+			rows = append(rows, holdRow{Session: sid, State: string(st)})
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Session < rows[j].Session })
+	if asJSON {
+		return encodeJSONOrFail(stdout, stderr, map[string]any{
+			"schema":  "fak.resume-holds.v1",
+			"reg_dir": regDir,
+			"holds":   rows,
+		}, "fak resume hold --list")
+	}
+	if len(rows) == 0 {
+		fmt.Fprintf(stdout, "no operator holds in %s — the watchdog may auto-resume any dead session\n", rwDriveStateLedger(regDir))
+		return 0
+	}
+	fmt.Fprintf(stdout, "operator holds (%s):\n", rwDriveStateLedger(regDir))
+	for _, r := range rows {
+		fmt.Fprintf(stdout, "  %-12s %s\n", shortID(r.Session), r.State)
+	}
+	fmt.Fprintln(stdout, "  release one with `fak resume release <session-id>`")
+	return 0
+}
+
 func resumeUsage(w io.Writer) {
 	fmt.Fprint(w, `fak resume — the deterministic RESUME-CACHE decision
 
@@ -1017,6 +1162,10 @@ func resumeUsage(w io.Writer) {
   fak resume watchdog [--live] [--window-h H] [--max-per-tick N] [--max-attempts N]
                       [--spacing-sec S] [--probe MODE] [--reg-dir DIR] [--log-dir DIR]
                       [--no-refresh]
+
+  fak resume hold <session-id> [--state paused|draining|stopped] [--reason S] [--reg-dir DIR]
+  fak resume hold --list [--reg-dir DIR] [--json]
+  fak resume release <session-id> [--reg-dir DIR]
 
   fak resume resolve <session-id> [--home DIR] [--cwd DIR] [--dry-run]
                      [--no-probe] [--wait] [--no-wait] [--json]
@@ -1096,6 +1245,19 @@ once-gate (a resume that died recoverably stays eligible up to the attempt cap; 
 finish or an auth wall burns it), and the host-wide per-source admission. DRY-RUN by
 default: pass --live (or FAK_LIVE=1) to actually spawn, capped per tick and paced between
 spawns. Launches are recorded in the durable resume ledger BEFORE anything else.
+
+hold / release align the automatic resume layer with the operator: "hold" records a durable
+pause/drain/stop of a specific session so the watchdog will NOT auto-resume it, and "release"
+reverses it. The hold outranks the watchdog's transcript-forensic resume (it beats even a
+proven re-death), has no TTL (it survives the descriptor registry's 30-minute GC), and is
+reversed ONLY by the operator, never by the watchdog. It is keyed by the Claude session id
+"claude --resume" takes — the one key the operator surface and the watchdog share (the
+"fak session pause/stop" control plane is keyed by the disjoint gateway trace, so it cannot
+reach the watchdog on its own). --state stopped is terminal intent; the default paused is a
+reversible hold. "hold --list" shows the current holds.
+
+example (stop the watchdog from resurrecting a session you deliberately ended):
+  fak resume hold <session-id> --state stopped --reason "superseded by #1234"
 
 example (resume a 250k session idle 2h on a 5-minute cache):
   fak resume plan --resident-tokens 250000 --idle-seconds 7200
