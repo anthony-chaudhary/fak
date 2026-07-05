@@ -106,6 +106,8 @@ func main() {
 		cmdWhatsChanged(os.Args[2:])
 	case "affected":
 		cmdAffected(os.Args[2:])
+	case "blast":
+		cmdBlast(os.Args[2:])
 	case "preflight":
 		cmdPreflight(os.Args[2:])
 	case "attest":
