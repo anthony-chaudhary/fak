@@ -31,6 +31,7 @@ type codexLaunchOptions struct {
 	baseURL         string
 	remoteServe     string
 	model           string
+	managedCache    string // managed-cache posture: auto|on|off (auto/"" => omit; carried for a future cache-capable wire)
 	auditPath       string
 	noAudit         bool
 	quiet           bool
@@ -61,6 +62,7 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 	baseURL := fs.String("base-url", "", "upstream provider base URL; advanced override passed to fak guard")
 	remoteServe := fs.String("remote-serve", "", "send inference to a remote fak serve (HOST or HOST:PORT), while this local guard adjudicates")
 	model := fs.String("model", "", "upstream model id override passed to fak guard")
+	managedCache := fs.String("managed-cache", os.Getenv(fleetManagedCacheEnv), "managed-cache posture forwarded to fak guard: auto|on|off (default: $"+fleetManagedCacheEnv+", else auto). The openai wire has no cache_control today, so this is passive there; the flag is carried so a cache-capable wire lands managed")
 	auditPath := fs.String("audit", "", "write guard's decision journal to this file (or 'off')")
 	noAudit := fs.Bool("no-audit", false, "disable guard's decision journal")
 	quiet := fs.Bool("quiet", false, "suppress guard's startup banner and exit summary")
@@ -84,6 +86,11 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak codex: %v\n", err)
 		return 2
 	}
+	mcMode, mcErr := normalizeManagedCacheMode(*managedCache)
+	if mcErr != nil {
+		fmt.Fprintf(stderr, "fak codex: %v\n", mcErr)
+		return 2
+	}
 	*ggufPath = pathutil.ExpandTilde(*ggufPath)
 	*tokenizerPath = pathutil.ExpandTilde(*tokenizerPath)
 
@@ -99,6 +106,7 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 		baseURL:         *baseURL,
 		remoteServe:     *remoteServe,
 		model:           *model,
+		managedCache:    mcMode,
 		auditPath:       *auditPath,
 		noAudit:         *noAudit,
 		quiet:           *quiet,
@@ -159,6 +167,11 @@ func buildCodexLaunchArgv(fakBin string, o codexLaunchOptions) []string {
 	appendKV("--base-url", o.baseURL)
 	appendKV("--remote-serve", o.remoteServe)
 	appendKV("--model", o.model)
+	// Managed-cache posture: emit only a non-default on|off (auto is guard's own default), so an
+	// unconfigured `fak codex` argv is byte-identical to before this flag existed.
+	if m := strings.TrimSpace(o.managedCache); m != "" && m != guardManagedCacheAuto {
+		argv = append(argv, "--managed-cache", m)
+	}
 	appendKV("--audit", o.auditPath)
 	if o.noAudit {
 		argv = append(argv, "--no-audit")

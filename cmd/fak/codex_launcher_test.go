@@ -78,6 +78,46 @@ func TestBuildCodexLaunchArgvAdvancedFlagsAndPassthrough(t *testing.T) {
 	}
 }
 
+func TestBuildCodexLaunchArgvManagedCache(t *testing.T) {
+	// A non-default posture is forwarded to guard as --managed-cache <mode>...
+	got := buildCodexLaunchArgv("fak", codexLaunchOptions{
+		skipPermissions: true,
+		splitMode:       "auto",
+		splitWhere:      "bottom",
+		splitInterval:   time.Second,
+		managedCache:    "on",
+		codexConfig:     true,
+	})
+	want := []string{
+		"fak", "guard",
+		"--split", "auto",
+		"--split-where", "bottom",
+		"--split-interval", "1s",
+		"--managed-cache", "on",
+		"--",
+		"codex",
+		"--dangerously-bypass-approvals-and-sandbox",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("buildCodexLaunchArgv managed-cache = %#v\nwant %#v", got, want)
+	}
+
+	// ...but auto (guard's own default) emits nothing, so an unconfigured argv is unchanged.
+	for _, mode := range []string{"", "auto"} {
+		got := buildCodexLaunchArgv("fak", codexLaunchOptions{
+			skipPermissions: true,
+			splitMode:       "auto",
+			splitWhere:      "bottom",
+			splitInterval:   time.Second,
+			managedCache:    mode,
+			codexConfig:     true,
+		})
+		if strings.Contains(strings.Join(got, " "), "--managed-cache") {
+			t.Fatalf("managedCache=%q must emit no --managed-cache, got %#v", mode, got)
+		}
+	}
+}
+
 func TestBuildCodexLaunchArgvSkipPermissionsOff(t *testing.T) {
 	got := buildCodexLaunchArgv("fak", codexLaunchOptions{
 		skipPermissions: false,

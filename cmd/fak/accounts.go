@@ -104,6 +104,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	launchUltracode := fs.Bool("ultracode", true, "(launch) run Claude in ultracode (xhigh reasoning + dynamic multi-agent workflow orchestration) by default, via --settings '{\"ultracode\":true}'; --ultracode=false launches without it. Claude-only; ignored for other agents")
 	launchModel := fs.String("model", defaultLaunchModel, "(launch) model id a switched Claude launch pins via --model; defaults to Fable 5 ("+defaultLaunchModel+") so every seat starts on it regardless of its own saved default; --model '' launches with the seat's saved default. Claude-only; ignored for other agents")
 	launchFallbackModel := fs.String("fallback-model", defaultLaunchFallbackModel, "(launch) comma-separated Claude fallback CHAIN, tried in order when the default Fable 5 startup is unavailable — an unknown/invalid model OR a usage/rate limit (e.g. Fable's weekly cap -> Opus); empty disables. Default: Opus 4.8 ("+defaultLaunchFallbackModel+"). Ignored when --model is explicit")
+	launchManagedCache := fs.String("managed-cache", os.Getenv(fleetManagedCacheEnv), "(launch) managed-cache posture for the guard session: auto|on|off (default: $"+fleetManagedCacheEnv+", else auto). auto stays PASSIVE on a subscription-OAuth seat; on forces the stable-prefix 1h-TTL cache upgrade; set $"+fleetGuardAPIKeyEnvEnv+" so auto resolves ACTIVE on an API-key-billed seat")
 	rotateFlag := fs.Bool("rotate", false, "(launch) launch the NEXT account in the rotation instead of the active/named seat — the round-robin off a walled account")
 	afterSeat := fs.String("after", "", "(next/launch) rotate to the account bucket AFTER this seat (default: the named seat, else the active seat)")
 	noHeadroom := fs.Bool("no-headroom", false, "(next/launch --rotate) ignore the live runtime headroom signal and rotate stable-by-name; by default rotation prefers the account with room and sorts walled/capped accounts last")
@@ -288,6 +289,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			model:         strings.TrimSpace(*launchModel),
 			modelExplicit: flagSet(fs, "model"),
 			fallbackModel: strings.TrimSpace(*launchFallbackModel),
+			managedCache:  strings.TrimSpace(*launchManagedCache),
 			dryRun:        *dryRun,
 			passthrough:   fs.Args(),
 			registryPath:  *registryPath,

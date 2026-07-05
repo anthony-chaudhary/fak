@@ -155,6 +155,36 @@ An Anthropic Pro/Max subscription token (`sk-ant-oat…`) rides as
 The roster declares the account and the env var that holds the token; the Bearer-vs-key
 header choice is made downstream by the Anthropic adapter at dispatch.
 
+## Managed-cache posture across launchers
+
+Every fak launcher that fronts an agent with `fak guard` — `fak accounts launch`,
+`fak codex`, and the dispatch worker (`fak dispatch tick`/`auto`) — can hand guard a
+**managed-cache posture** that decides whether the gateway upgrades the stable-prefix
+`cache_control` breakpoint to the **1h-TTL** tier on the outbound Anthropic wire.
+
+**A subscription seat stays passive by default, on purpose.** Guard's own `--managed-cache
+auto` follows a never-speculate rule: it will not manage a wire whose billing it cannot see.
+A Pro/Max seat authenticates with subscription OAuth (`Authorization: Bearer`), whose cache
+economics guard does not own, so `auto` resolves **passive** there and no launcher silently
+flips it. Nothing changes for a subscription fleet unless you ask for it.
+
+**An API-key-billed fleet reaches ACTIVE without hand-editing any launcher**, via two env
+knobs read once per launch and threaded onto the child's guard argv (not its environment, so
+a *resumed* child — whose gateway env is deliberately stripped — keeps the posture):
+
+| Knob | Effect |
+|------|--------|
+| `FAK_GUARD_API_KEY_ENV=ANTHROPIC_API_KEY` | Names the env var holding the API key. On the Anthropic wire this is the explicit opt-IN to API billing that lets `auto` resolve **ACTIVE** (guard bills the key, not the seat's subscription). |
+| `FAK_MANAGED_CACHE=on\|off\|auto` | Forces the posture. `on` upgrades regardless of billing; `off` disables; `auto` (default) defers to the billing signal above. |
+
+`fak accounts launch --managed-cache <mode>` and `fak codex --managed-cache <mode>` expose
+the same lever per-launch (defaulting to `$FAK_MANAGED_CACHE`); the dispatch worker reads the
+env knobs only. An unknown mode fails loud at the front-ends; the headless worker warns and
+falls back to `auto` so a fleet turn never dies over a cache-posture typo. Either way the
+guard child prints the RESOLVED posture in its startup banner, so the worker log witnesses
+whether the 1h upgrade actually engaged. An unconfigured fleet emits no `--managed-cache`
+flag at all — the guard argv is byte-identical to before this knob existed.
+
 ## What is shipped, and what is not
 
 **Shipped:** the resolver. A roster resolves a routed plan — the scout and every

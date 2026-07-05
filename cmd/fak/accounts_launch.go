@@ -43,6 +43,7 @@ type launchOpts struct {
 	skipPermissions bool     // pass --dangerously-skip-permissions to the agent
 	ultracode       bool     // pass --settings '{"ultracode":true}' to Claude (workflow mode)
 	model           string   // pass --model <id> to Claude (default Fable); empty => the seat's own default
+	guardCacheArgs  []string // managed-cache posture flags spliced into `fak guard` (--api-key-env / --managed-cache); nil => guard's own auto
 	passthrough     []string // extra args appended to the agent command (everything after `--`)
 }
 
@@ -132,9 +133,13 @@ func buildLaunchArgv(fakBin string, o launchOpts) []string {
 	if !o.useGuard {
 		return agentCmd
 	}
-	// `fak guard -- <agent ...>`: guard binds the in-process gateway, installs the capability
-	// floor, and execs the agent with the gateway URL injected into the child only.
-	argv := []string{fakBin, "guard", "--"}
+	// `fak guard [posture] -- <agent ...>`: guard binds the in-process gateway, installs the
+	// capability floor, and execs the agent with the gateway URL injected into the child only.
+	// The managed-cache posture flags (guardCacheArgs) go BEFORE `--` so guard parses them; nil
+	// keeps the argv byte-identical to a launch that never configured a posture.
+	argv := []string{fakBin, "guard"}
+	argv = append(argv, o.guardCacheArgs...)
+	argv = append(argv, "--")
 	return append(argv, agentCmd...)
 }
 
@@ -154,6 +159,7 @@ type launchParams struct {
 	model         string // default Fable — the model a switched Claude launch pins via --model ("" => seat default)
 	modelExplicit bool
 	fallbackModel string // default Opus 4.8 — comma-separated fallback CHAIN tried when the default Fable startup is unavailable
+	managedCache  string // managed-cache posture: auto|on|off (default $FAK_MANAGED_CACHE, else auto)
 	dryRun        bool   // print the plan, do not exec
 	passthrough   []string
 	registryPath  string
@@ -263,12 +269,24 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		fakBin = "fak" // fall back to PATH resolution if the binary path can't be read
 	}
 	warnIfAccountsLaunchStaleBinary(stderr, fakBin, p.useGuard)
+	// Managed-cache posture (epic #1844 C6): a launched seat's guard session used to inherit
+	// guard's own auto default, which stays PASSIVE on a subscription-OAuth seat. Resolve the
+	// posture from --managed-cache (defaulted to $FAK_MANAGED_CACHE) plus $FAK_GUARD_API_KEY_ENV
+	// so an API-key-billed seat can reach ACTIVE without hand-editing this launcher. Fail loud on
+	// a bad mode. The flags ride the guard argv (guardCacheArgs), so a resumed child keeps them.
+	mcMode, mcErr := normalizeManagedCacheMode(p.managedCache)
+	if mcErr != nil {
+		fmt.Fprintf(stderr, "fak accounts launch: %v\n", mcErr)
+		return 2
+	}
+	guardCacheArgs := guardCachePostureArgs(mcMode, os.Getenv(fleetGuardAPIKeyEnvEnv))
 	argv := buildLaunchArgv(fakBin, launchOpts{
 		command:         command,
 		useGuard:        p.useGuard,
 		skipPermissions: p.skipPerms,
 		ultracode:       p.ultracode,
 		model:           p.model,
+		guardCacheArgs:  guardCacheArgs,
 		passthrough:     p.passthrough,
 	})
 	env := append(os.Environ(), "CLAUDE_CONFIG_DIR="+home.Dir)
@@ -317,6 +335,9 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 	fmt.Fprintf(stderr, "  permissions       = %s\n", permWord)
 	fmt.Fprintf(stderr, "  ultracode         = %s\n", ultracodeWord)
 	fmt.Fprintf(stderr, "  model             = %s\n", modelWord)
+	if p.useGuard {
+		fmt.Fprintf(stderr, "  managed-cache     = %s\n", accountsLaunchManagedCacheWord(mcMode, os.Getenv(fleetGuardAPIKeyEnvEnv)))
+	}
 	fmt.Fprintf(stderr, "  command           = %s\n", strings.Join(grant.SanitizedArgv, " "))
 	fmt.Fprintf(stderr, "  agent_run         = %s policy_digest=%s broker=%s\n",
 		grant.Metadata.AgentRunID, grant.Metadata.PolicyDigest, grant.Reason)
@@ -355,6 +376,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 				skipPermissions: p.skipPerms,
 				ultracode:       p.ultracode,
 				model:           fallback,
+				guardCacheArgs:  guardCacheArgs,
 				passthrough:     p.passthrough,
 			})
 			fallbackGrant := launchSpawnBroker(newLaunchBrokerAttempt("accounts_launch", guardAgentBaseName(command), fallbackArgv, envMap(env), home.Dir))

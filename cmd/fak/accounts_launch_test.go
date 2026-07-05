@@ -115,6 +115,20 @@ func TestBuildLaunchArgv(t *testing.T) {
 			opts: launchOpts{command: "codex", useGuard: true, skipPermissions: true, model: defaultLaunchModel},
 			want: []string{fakBin, "guard", "--", "codex", "--dangerously-bypass-approvals-and-sandbox"},
 		},
+		{
+			// The managed-cache posture flags ride the guard argv, spliced between `guard` and
+			// `--` so guard parses them and the agent never sees them.
+			name: "claude managed-cache posture rides the guard argv before --",
+			opts: launchOpts{command: "claude", useGuard: true, skipPermissions: true, guardCacheArgs: []string{"--api-key-env", "ANTHROPIC_API_KEY", "--managed-cache", "on"}},
+			want: []string{fakBin, "guard", "--api-key-env", "ANTHROPIC_API_KEY", "--managed-cache", "on", "--", "claude", "--dangerously-skip-permissions"},
+		},
+		{
+			// With guard OFF there is no guard process to carry the posture, so the flags are
+			// dropped — the posture is a guard-session concept, not an agent flag.
+			name: "guard off drops the managed-cache posture",
+			opts: launchOpts{command: "claude", useGuard: false, skipPermissions: true, guardCacheArgs: []string{"--managed-cache", "on"}},
+			want: []string{"claude", "--dangerously-skip-permissions"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

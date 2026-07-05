@@ -51,6 +51,18 @@ type dispatchTickOptions struct {
 	SpawnProbeS    float64
 	LoopLedger     string
 	RecordLoop     bool
+	// WorkerModel un-blanks the claude worker model to an explicit id (highest-precedence
+	// model pin); empty falls back to the lane_models pin, the benchmark gate, else the
+	// seat default. PinWorkerModel turns on the benchmark gate (a model-accounting run that
+	// pins the account/default model so it measures a KNOWN model, not a silently-switched
+	// one). Both default off, so a normal claude tick stays on the seat default + fallback.
+	WorkerModel    string
+	PinWorkerModel bool
+	// ModelDowngrade turns on Layer-2 in-tick re-dispatch: when the target issue's last
+	// finished slot exited with a model-switchable no-commit reason (usage_cap /
+	// model_unknown / rate_limit), re-dispatch it on the NEXT downgrade-chain model instead
+	// of the same walled one. Default off, so the live claude fleet is byte-identical.
+	ModelDowngrade bool
 	Account        *dispatchtick.Account
 	Membership     *dispatchtick.Membership
 }
@@ -164,6 +176,9 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	spawnProbeS := fs.Float64("spawn-probe-s", dispatchtick.DefaultSpawnProbeS, "seconds to wait after spawn to catch immediate empty-log exits")
 	loopLedger := fs.String("loop-ledger", "", "append this tick to a fak loop ledger (default: FAK_LOOP_LEDGER or .fak/loops.jsonl)")
 	noLoopLedger := fs.Bool("no-loop-ledger", false, "disable loop-ledger append for this tick")
+	workerModel := fs.String("worker-model", "", "pin the claude worker to this exact --model id (un-blanks the seat default; empty falls back to the lane_models pin/benchmark gate/seat default)")
+	pinWorkerModel := fs.Bool("pin-worker-model", false, "benchmark gate: pin the claude worker to the account/default model (model-accounting run) instead of the seat default + fallback chain")
+	modelDowngrade := fs.Bool("model-downgrade", false, "Layer-2 in-tick re-dispatch: when the target's last slot exited model-switchable (usage_cap/model_unknown/rate_limit), re-dispatch it on the next downgrade-chain model")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 
 	accountTag := fs.String("account-tag", "", "internal: forced account tag (used by dispatch wave)")
@@ -223,6 +238,9 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 		SpawnProbeS:    maxFloat64(0, *spawnProbeS),
 		LoopLedger:     *loopLedger,
 		RecordLoop:     !*noLoopLedger,
+		WorkerModel:    firstString(strings.TrimSpace(*workerModel), strings.TrimSpace(os.Getenv("FLEET_DISPATCH_WORKER_MODEL"))),
+		PinWorkerModel: *pinWorkerModel || dispatchBoolValue(os.Getenv("FLEET_DISPATCH_PIN_MODEL")),
+		ModelDowngrade: *modelDowngrade || dispatchBoolValue(os.Getenv("FLEET_DISPATCH_MODEL_DOWNGRADE")),
 	}
 	if *accountTag != "" || *accountTier != "" || *accountModel != "" || *accountDir != "" {
 		opts.Account = &dispatchtick.Account{
@@ -271,8 +289,8 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	// the pick's hold set below (#1396).
 	witnessedSlots := map[string]any{"skipped": true}
 	heldNoCommit := map[int]bool{}
+	var witnessRecords []dispatchtick.WitnessRecord
 	if opts.Live {
-		var witnessRecords []dispatchtick.WitnessRecord
 		witnessedSlots, witnessRecords = witnessExitedWorkers(root, runsDir, true)
 		heldNoCommit = dispatchtick.HeldNoCommitIssues(witnessRecords)
 	}
@@ -473,10 +491,17 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		promptChars = len(prompt)
 		payload["prompt_chars"] = promptChars
 	}
-	model := account.Model
-	if opts.Backend != "opencode" && opts.Backend != "codex" {
-		model = ""
+	modelPolicy := resolveWorkerModelPolicy(opts.Backend, pick.Lane, opts.WorkerModel, account, dispatchTickPolicy(root), opts.PinWorkerModel)
+	// Layer 2: if the target's last slot walled on a model-switchable reason this tick,
+	// re-dispatch it on the next downgrade-chain model instead of the resolved one. Live +
+	// --model-downgrade only, so the default fleet is unaffected.
+	if opts.Live && opts.ModelDowngrade {
+		if dp, fired := applyModelDowngrade(opts.Backend, target, witnessRecords); fired {
+			modelPolicy = dp
+			payload["model_downgrade"] = map[string]any{"issue": target, "model": dp.Model}
+		}
 	}
+	model := modelPolicy.Model
 	fallbackModel := dispatchWorkerFallbackModel(opts.Backend)
 	preview, err := dispatchtick.BuildWorkerCommand(opts.Backend, dispatchtick.PreviewPrompt(target, promptChars), model, fallbackModel)
 	if err != nil {
@@ -484,6 +509,12 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	}
 	if fallbackModel != "" {
 		payload["worker_fallback_model"] = fallbackModel
+	}
+	// Surface the resolved model only when the resolver UN-BLANKED it (an explicit/lane pin
+	// or the benchmark gate). A default claude tick keeps the seat default, so its payload
+	// stays byte-identical to before this seam.
+	if modelPolicy.pinned() {
+		payload["worker_model"] = dispatchWorkerModelMap(modelPolicy)
 	}
 	launchPreview, guardedPreview := guardedDispatchCommand(root, pick.Lane, opts.Backend, preview)
 	payload["command"] = dispatchtick.LaunchCommandShape(preview, root, account)
@@ -645,6 +676,10 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		spawned.Startup = writeDispatchStartupBundleSidecar(spawned.Log, bundle)
 	}
 	payload["spawned"] = dispatchSpawnMap(spawned)
+	// Layer 5b: record the pinned model as a .model sidecar so the witness sweep can scrape
+	// it back into WitnessRecord.Model (and Layer-2 downgrade can read what the slot ran on).
+	// Written only when the model was un-blanked — a seat-default worker leaves no sidecar.
+	writeDispatchModelSidecar(spawned.Log, model)
 	if reason, failed := dispatchEarlyExitFailureReason(opts.Backend, spawned.PID, target, spawned.EarlyExit); failed {
 		payload["ok"] = false
 		payload["action"] = "spawn_failed"
@@ -810,7 +845,41 @@ func guardedDispatchCommand(root, lane, backend string, command []string) ([]str
 	}
 	fakBin := resolveDispatchFakBin(root)
 	baseURL := strings.TrimSpace(os.Getenv("FLEET_DOGFOOD_GUARD_BASEURL"))
-	return dispatchtick.GuardedLaunchCommand(command, fakBin, lane, backend, root, baseURL)
+	guarded, ok := dispatchtick.GuardedLaunchCommand(command, fakBin, lane, backend, root, baseURL)
+	if !ok {
+		return guarded, ok
+	}
+	// Resolve the fleet managed-cache posture (FAK_MANAGED_CACHE / FAK_GUARD_API_KEY_ENV) in
+	// THIS tick process and splice it into the child's guard argv — the worker's guard reads
+	// the flag, not the env, so a resumed child (whose gateway env is stripped, b2926823) still
+	// carries it. A headless fleet turn must not die over a cache-posture typo: warn to the
+	// worker log and fall back to auto (no flag) so the wave still launches.
+	postureArgs, postureErr := fleetGuardCachePostureArgs()
+	if postureErr != nil {
+		fmt.Fprintf(os.Stderr, "fak dispatch: %v; using managed-cache auto\n", postureErr)
+		postureArgs = nil
+	}
+	return spliceGuardPostureArgs(guarded, postureArgs), ok
+}
+
+// spliceGuardPostureArgs inserts extra `fak guard` flags immediately before the `--` that
+// separates guard's own flags from the wrapped agent command, so guard parses them and the
+// agent never sees them. A nil/empty posture, or an argv with no `--` (already-unguarded),
+// returns the argv unchanged — an unconfigured fleet's command is byte-identical to before.
+func spliceGuardPostureArgs(argv, postureArgs []string) []string {
+	if len(postureArgs) == 0 {
+		return argv
+	}
+	for i, a := range argv {
+		if a == "--" {
+			out := make([]string, 0, len(argv)+len(postureArgs))
+			out = append(out, argv[:i]...)
+			out = append(out, postureArgs...)
+			out = append(out, argv[i:]...)
+			return out
+		}
+	}
+	return argv
 }
 
 // dispatchWorkerFallbackModel resolves the Claude fallback CHAIN a headless dispatch
