@@ -273,6 +273,60 @@ class ActiveGuardLivelockTest(unittest.TestCase):
         self.assertFalse(hold["active"])
 
 
+class ActiveCompactRunawayTest(unittest.TestCase):
+    def test_live_worker_past_compact_becomes_spawn_hold(self) -> None:
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / ".dispatch-runs"
+            runs.mkdir(parents=True)
+            log = runs / "resolve-2311-20260705-205323.log"
+            lines = [
+                "fak-turn trace=guard ok compact=fired finish=tool_use "
+                "budget=spent:81.5k ctx:81.1k/48.0k dist:33.1k-past-compact",
+                "fak-turn trace=guard ok compact=fired finish=tool_use "
+                "budget=spent:83.7k ctx:83.3k/48.0k dist:35.3k-past-compact",
+                "fak-turn trace=guard ok compact=fired finish=tool_use "
+                "budget=spent:93.9k ctx:93.5k/48.0k dist:45.5k-past-compact",
+            ]
+            log.write_text("\n".join(lines), encoding="utf-8")
+            log.with_suffix(".pid").write_text("1234\n", encoding="utf-8")
+            mod.dispatch_preflight.resolve_sidecar_pid_is_live = lambda pid_file: True
+
+            hold = mod.active_compact_runaway_hold(root, runs)
+
+        self.assertTrue(hold["active"])
+        self.assertIn("#2311", hold["reason"])
+        self.assertEqual(hold["candidates"][0]["issue"], 2311)
+        self.assertEqual(hold["candidates"][0]["count"], 3)
+        self.assertEqual(hold["candidates"][0]["max_past_k"], 45.5)
+
+    def test_compact_runaway_requires_repeated_past_compact_tool_turns(self) -> None:
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / ".dispatch-runs"
+            runs.mkdir(parents=True)
+            log = runs / "resolve-2311-20260705-205323.log"
+            lines = [
+                "fak-turn trace=guard ok compact=fired finish=tool_use "
+                "budget=spent:51.5k ctx:51.1k/48.0k dist:3.1k-past-compact",
+                "fak-turn trace=guard ok compact=fired finish=tool_use "
+                "budget=spent:83.7k ctx:83.3k/48.0k dist:35.3k-past-compact",
+                "fak-turn trace=guard ok compact=fired finish=stop "
+                "budget=spent:93.9k ctx:93.5k/48.0k dist:45.5k-past-compact",
+            ]
+            log.write_text("\n".join(lines), encoding="utf-8")
+            log.with_suffix(".pid").write_text("1234\n", encoding="utf-8")
+            mod.dispatch_preflight.resolve_sidecar_pid_is_live = lambda pid_file: True
+
+            hold = mod.active_compact_runaway_hold(root, runs)
+
+        self.assertFalse(hold["active"])
+
+
 class LiveResolutionLanesTest(unittest.TestCase):
     """The pre-spawn lane-lease set (#1310): a lane is HELD when it already has a
     live worker. Read from the ``# fak-spawn ... lane=<L>`` header
@@ -700,6 +754,7 @@ class EvaluateTest(unittest.TestCase):
                 "prompt_chars": 10})
         mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}  # hermetic: not capped
         mod.active_guard_livelock_hold = lambda root, runs_dir, **k: {"active": False}
+        mod.active_compact_runaway_hold = lambda root, runs_dir, **k: {"active": False}
         mod.reap_timed_out_workers = lambda runs_dir, **k: {
             "timeout_s": k.get("timeout_s"), "live": k.get("live"),
             "candidates": [], "reaped": [], "would_reap": []}
@@ -931,6 +986,31 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["launch_gate"]["blockers"][0]["code"],
                          "ACTIVE_GUARD_LIVELOCK")
         self.assertIn("guard result livelock", p["reason"])
+        self.assertIn("launch gate: BLOCKED", mod.render(p))
+
+    def test_active_compact_runaway_blocks_spawn(self) -> None:
+        """A live compact-control runaway pauses new issue spawns before the
+        launcher adds more workers to the same failing regime."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "docs", "numbers": [2311],
+                          "by_lane_count": {"docs": 1},
+                          "eligible_by_lane": [["docs", [2311]]]})
+        mod.active_compact_runaway_hold = lambda root, runs_dir, **k: {
+            "active": True,
+            "reason": "live worker #2311 is already past compact by 45.5k tokens",
+            "candidates": [{"issue": 2311, "count": 3, "max_past_k": 45.5}],
+        }
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["action"], "active_compact_runaway")
+        self.assertEqual(p["verdict"], "ACTIVE_COMPACT_RUNAWAY")
+        self.assertEqual(p["launch_gate"]["blockers"][0]["code"],
+                         "ACTIVE_COMPACT_RUNAWAY")
+        self.assertIn("past compact", p["reason"])
         self.assertIn("launch gate: BLOCKED", mod.render(p))
 
     def test_contract_scan_bounded_holds_when_none_ready(self) -> None:

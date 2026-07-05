@@ -157,6 +157,15 @@ DEFAULT_REPAIR_COOLDOWN_MIN = 360
 # quarantined result.
 ACTIVE_GUARD_LIVELOCK_MIN_COUNT = 10
 _AUDIT_LOG_RE = re.compile(r"audit log\s*:\s*(.+?\.jsonl)")
+# Active compact-runaway spawn hold: a worker that is already far past the
+# compact threshold while still taking tool turns is not healthy headroom. This
+# catches the guard/control-plane loop before a new worker compounds the same
+# context burn.
+ACTIVE_COMPACT_RUNAWAY_MIN_COUNT = 3
+ACTIVE_COMPACT_RUNAWAY_MIN_PAST_K = 20.0
+_CTX_BUDGET_RE = re.compile(r"\bctx:(\d+(?:\.\d+)?)k/(\d+(?:\.\d+)?)k")
+_DIST_PAST_COMPACT_RE = re.compile(r"\bdist:(\d+(?:\.\d+)?)k-past-compact")
+_COMPACT_FIELD_RE = re.compile(r"\bcompact=(\S+)")
 # The pseudo-lane a repair worker runs under (guard-audit naming, child env). It
 # takes NO lane lease -- it edits GitHub issues, not repo files; admission is
 # serialized by the live repair-sidecar scan instead (max one in flight).
@@ -345,6 +354,123 @@ def active_guard_livelock_hold(root: Path, runs_dir: Path, *,
             f"live worker #{top.get('issue') or '?'} is already in a guard "
             f"result livelock: {top.get('tool')} {top.get('reason')} "
             f"digest={str(top.get('digest') or '')[:12]} count={top.get('count')}"
+        ),
+    }
+
+
+def _compact_runaway_from_log(
+    log: Path,
+    *,
+    min_count: int = ACTIVE_COMPACT_RUNAWAY_MIN_COUNT,
+    min_past_k: float = ACTIVE_COMPACT_RUNAWAY_MIN_PAST_K,
+) -> dict[str, Any]:
+    """Return positive evidence that one live worker is past compact and looping.
+
+    The guard's debug line is intentionally enough evidence here: once several
+    consecutive tool turns are tens of thousands of tokens past the compact
+    threshold, another resolver spawn is more likely to multiply the failure
+    mode than add useful throughput.
+    """
+    try:
+        lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return {"runaway": False, "unavailable": True, "log": str(log)}
+    hits: list[dict[str, Any]] = []
+    for line in lines:
+        if "fak-turn" not in line or "finish=tool_use" not in line:
+            continue
+        ctx_m = _CTX_BUDGET_RE.search(line)
+        if not ctx_m:
+            continue
+        try:
+            ctx_k = float(ctx_m.group(1))
+            limit_k = float(ctx_m.group(2))
+        except ValueError:
+            continue
+        past_k = max(0.0, ctx_k - limit_k)
+        dist_m = _DIST_PAST_COMPACT_RE.search(line)
+        if dist_m:
+            try:
+                past_k = max(past_k, float(dist_m.group(1)))
+            except ValueError:
+                pass
+        if past_k < min_past_k:
+            continue
+        compact_m = _COMPACT_FIELD_RE.search(line)
+        hits.append({
+            "ctx_k": ctx_k,
+            "limit_k": limit_k,
+            "past_k": past_k,
+            "compact": compact_m.group(1) if compact_m else "",
+            "line": line[-320:],
+        })
+    if len(hits) < min_count:
+        return {
+            "runaway": False,
+            "log": str(log),
+            "count": len(hits),
+            "max_past_k": round(max((h["past_k"] for h in hits), default=0.0), 1),
+        }
+    last = hits[-1]
+    return {
+        "runaway": True,
+        "log": str(log),
+        "count": len(hits),
+        "max_past_k": round(max(h["past_k"] for h in hits), 1),
+        "ctx_k": last["ctx_k"],
+        "limit_k": last["limit_k"],
+        "past_k": round(last["past_k"], 1),
+        "compact": last["compact"],
+        "sample": last["line"],
+    }
+
+
+def active_compact_runaway_hold(
+    root: Path,
+    runs_dir: Path,
+    *,
+    min_count: int = ACTIVE_COMPACT_RUNAWAY_MIN_COUNT,
+    min_past_k: float = ACTIVE_COMPACT_RUNAWAY_MIN_PAST_K,
+) -> dict[str, Any]:
+    """Positive live-worker evidence that compact control is already failing."""
+    del root
+    candidates: list[dict[str, Any]] = []
+    for log in sorted(runs_dir.glob("resolve-*.log")):
+        pid_file = log.with_suffix(".pid")
+        if not pid_file.exists():
+            continue
+        if not dispatch_preflight.resolve_sidecar_pid_is_live(pid_file):
+            continue
+        hit = _compact_runaway_from_log(
+            log,
+            min_count=min_count,
+            min_past_k=min_past_k,
+        )
+        if not hit.get("runaway"):
+            continue
+        issue = None
+        m = _LOG_ISSUE_RE.search(log.name)
+        if m:
+            try:
+                issue = int(m.group(1))
+            except ValueError:
+                issue = None
+        hit["issue"] = issue
+        candidates.append(hit)
+    if not candidates:
+        return {"active": False}
+    candidates.sort(
+        key=lambda h: (float(h.get("max_past_k") or 0.0), int(h.get("count") or 0)),
+        reverse=True,
+    )
+    top = candidates[0]
+    return {
+        "active": True,
+        "candidates": candidates[:5],
+        "reason": (
+            f"live worker #{top.get('issue') or '?'} is already past compact "
+            f"by {top.get('max_past_k')}k tokens across {top.get('count')} "
+            "tool-use turns"
         ),
     }
 
@@ -3563,6 +3689,21 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
             "reason": reason,
         })
         return finish(payload)
+    compact_runaway = active_compact_runaway_hold(root, runs_dir)
+    if compact_runaway.get("active"):
+        reason = str(compact_runaway.get("reason") or "active compact runaway")
+        payload["active_compact_runaway"] = compact_runaway
+        payload["launch_gate"] = launch_gate_blocked(
+            "ACTIVE_COMPACT_RUNAWAY",
+            reason,
+            "wait-for-loop-worker-to-exit-or-fix-compact-control")
+        payload.update({
+            "ok": False,
+            "action": "active_compact_runaway",
+            "verdict": "ACTIVE_COMPACT_RUNAWAY",
+            "reason": reason,
+        })
+        return finish(payload)
     if not chosen_lane:
         if pick.get("self_modify_held"):
             held = sorted(pick.get("self_modify_held"))
@@ -4094,6 +4235,7 @@ BENIGN_ACTIONS = frozenset({
     "no_issue", "no_lane", "lane_busy", "lane_leased",   # nothing to spawn
     "dirty_path_collision",                              # local WIP collision guard
     "active_guard_livelock",                             # live guard loop fuse
+    "active_compact_runaway",                            # live compact-control loop fuse
     "multi_lane_scope",                                  # issue spans lanes the lease can't cover (#2615)
     "issue_contract_hold",                               # issue needs scope before spawn
     "refused",                                           # preflight backpressure (host at cap / no account)
