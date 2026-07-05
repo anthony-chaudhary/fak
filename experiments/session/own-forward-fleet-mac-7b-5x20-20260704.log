@@ -1,0 +1,12 @@
+measuring prefill cost at lengths [256 864 1472 2048 2080 2688] ...
+  prefill(256) = 4076 ms (62.8 tok/s)
+  prefill(864) = 16098 ms (53.7 tok/s)
+  prefill(1472) = 32308 ms (45.6 tok/s)
+  prefill(2048) = 52019 ms (39.4 tok/s)
+  prefill(2080) = 53271 ms (39.0 tok/s)
+  prefill(2688) = 78636 ms (34.2 tok/s)
+cell T=20 C=5 P=2048: running arms B,C live (best of 1) ...
+  A_naive 7212.9s (pf 6523763[anchor 1.01] + dc 689166)  B_tuned 1002.1s  C_fak 798.2s | NET vs naive 9.0×  vs tuned 1.26×  (turn-tax 7.2×) | exact prefill-tok A/C 73.8× B/C 3.6×
+validate: arm A FULLY LIVE at P=256 T=8 C=3 D=16 R=32 (best of 1) ...
+  arm-A prefill: live 168748 ms | computed raw 177551 (raw/live 1.05) | anchor 0.99 → anchored 176406 (anchored/live 1.05); decode A/B 1.01
+wrote ~/tmp/fak-fleet-ownforward/session-7b-5x20.json
