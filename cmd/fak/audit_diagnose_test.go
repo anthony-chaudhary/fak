@@ -198,6 +198,66 @@ func TestDiagnoseRows_IgnoresRepeatedAllowedCallLivelock(t *testing.T) {
 	}
 }
 
+func TestDiagnoseRows_IgnoresAllowedRowsForEveryToolAndBreaksRuns(t *testing.T) {
+	var rows []journal.Row
+	prev := ""
+	seq := uint64(1)
+	for _, tool := range []string{"shell_command", "apply_patch", "read_mcp_resource", "tool_result"} {
+		for i := 0; i < 3; i++ {
+			r, h := mintRow(seq, prev, journal.Row{
+				Kind:       "DECIDE",
+				Tool:       tool,
+				Verdict:    "ALLOW",
+				Reason:     "NONE",
+				ArgsDigest: "sha256:allow-" + tool,
+				ArgsLabel:  "tool=" + tool,
+				CallSeq:    1000 + seq,
+			})
+			rows = append(rows, r)
+			prev = h
+			seq++
+		}
+	}
+	for i := 0; i < 3; i++ {
+		q, h := mintRow(seq, prev, journal.Row{
+			Kind:       "QUARANTINE",
+			Tool:       "tool_result",
+			Verdict:    "QUARANTINE",
+			Reason:     "SECRET_EXFIL",
+			ArgsDigest: "sha256:poison",
+			ArgsLabel:  "tool=tool_result",
+			CallSeq:    2000 + seq,
+		})
+		rows = append(rows, q)
+		prev = h
+		seq++
+		a, h := mintRow(seq, prev, journal.Row{
+			Kind:       "DECIDE",
+			Tool:       "shell_command",
+			Verdict:    "ALLOW",
+			Reason:     "NONE",
+			ArgsDigest: "sha256:interleaved-allow",
+			ArgsLabel:  "tool=shell_command",
+			CallSeq:    2000 + seq,
+		})
+		rows = append(rows, a)
+		prev = h
+		seq++
+	}
+
+	d := diagnoseRows("x", rows)
+	if d.Verdict != diagVerdictSound {
+		t.Fatalf("sound mixed journal should stay SOUND: %+v", d)
+	}
+	if len(d.LivelockCandidates) != 1 {
+		t.Fatalf("want exactly one quarantine candidate, got %+v", d.LivelockCandidates)
+	}
+	c := d.LivelockCandidates[0]
+	if c.Verdict != "QUARANTINE" || c.Tool != "tool_result" || c.Count != 3 || c.LongestRun != 1 {
+		t.Fatalf("ALLOW rows should be ignored as candidates and break repeated quarantine runs, got %+v", c)
+	}
+}
+
 func TestRunAuditDiagnose_RenderAndJSONReportRepeatedQuarantineCallLabel(t *testing.T) {
 	var rows []journal.Row
 	prev := ""
