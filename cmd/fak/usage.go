@@ -551,7 +551,7 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
                  gh and --fetch-existing verifies against the tracker -- both leave an
                  issues-sync.json receipt beside the report, which dogfood-score's chain
                  axis and the improve-loops super loop read)
-  fak gh-spam-comments [--repo owner/repo] [--since 24h|RFC3339] [--apply] [--json]
+  fak dev gh-spam-comments [--repo owner/repo] [--since 24h|RFC3339] [--apply] [--json]
                 (GitHub issue/PR comment spam sweeper: scans comments from gh, ignores
                  trusted insiders by author_association (OWNER/COLLABORATOR/MEMBER) plus
                  any --trust-user login, flags outsider links to GitHub release-download

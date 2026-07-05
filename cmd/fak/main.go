@@ -84,6 +84,9 @@ func main() {
 		}
 		verb = "dev " + v
 		argv = rest
+		if dispatchDevOnlyVerb(v, rest) {
+			return
+		}
 		os.Args = append([]string{os.Args[0], v}, rest...)
 	}
 	switch os.Args[1] {
@@ -469,8 +472,6 @@ func main() {
 		cmdHorizonRecovery(os.Args[2:])
 	case "dogfood-issues":
 		cmdDogfoodIssues(os.Args[2:])
-	case "gh-spam-comments":
-		cmdGHSpamComments(os.Args[2:])
 	case "issue":
 		cmdIssue(os.Args[2:])
 	case "complain":

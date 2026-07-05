@@ -26,6 +26,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -52,6 +53,9 @@ func resolveDevVerb(argv []string, stdout, stderr io.Writer) (verb string, rest 
 		fmt.Fprintf(stderr, "fak dev: unknown flag %q — 'fak dev' (or --help) lists the dev tier\n", argv[0])
 		return "", nil, 2
 	}
+	if isDevOnlyVerb(tok) {
+		return tok, argv[1:], -1
+	}
 	if tier, ok := devindex.TierOf(tok); ok {
 		switch tier {
 		case devindex.TierDev:
@@ -76,6 +80,25 @@ func resolveDevVerb(argv []string, stdout, stderr io.Writer) (verb string, rest 
 	}
 	fmt.Fprintln(stderr, "  'fak dev' lists the dev tier; 'fak help --all' lists every verb.")
 	return "", nil, 2
+}
+
+func dispatchDevOnlyVerb(verb string, argv []string) bool {
+	switch verb {
+	case "gh-spam-comments":
+		cmdGHSpamComments(argv)
+		return true
+	default:
+		return false
+	}
+}
+
+func isDevOnlyVerb(verb string) bool {
+	for _, v := range devOnlyVerbs() {
+		if v.Name == verb {
+			return true
+		}
+	}
+	return false
 }
 
 // printDevListing renders the dev tier, one line per verb with its catalog
@@ -109,5 +132,18 @@ func devTierVerbs() []devindex.Verb {
 			out = append(out, v)
 		}
 	}
+	out = append(out, devOnlyVerbs()...)
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+func devOnlyVerbs() []devindex.Verb {
+	return []devindex.Verb{
+		{
+			Name:     "gh-spam-comments",
+			Synopsis: "scan GitHub issue/PR comments for untrusted release-archive spam and optionally hide it as SPAM",
+			Lane:     "cmd",
+			Tier:     devindex.TierDev,
+		},
+	}
 }

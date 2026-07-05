@@ -39,6 +39,11 @@ func TestResolveDevVerbDispatchesDevTier(t *testing.T) {
 	if v, _, code, _, _ := resolveDev(t, "SWEEP"); code != -1 || v != "sweep" {
 		t.Errorf("resolveDevVerb(SWEEP) = (%q, %d), want lowercased dispatch", v, code)
 	}
+	// Dev-only commands do not have a bare top-level dispatch case, but still
+	// route through the dev namespace.
+	if v, rest, code, _, _ := resolveDev(t, "gh-spam-comments", "--json"); code != -1 || v != "gh-spam-comments" || len(rest) != 1 || rest[0] != "--json" {
+		t.Errorf("resolveDevVerb(gh-spam-comments) = (%q, %v, %d), want dev-only dispatch", v, rest, code)
+	}
 }
 
 func TestResolveDevVerbRefusesFrontdoor(t *testing.T) {
@@ -84,7 +89,7 @@ func TestDevListingIsDevTierOnly(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("bare `fak dev` exit = %d, want 0 (the listing)", code)
 	}
-	for _, want := range []string{"  sweep\t", "  commit\t", "  scorecard\t"} {
+	for _, want := range []string{"  sweep\t", "  commit\t", "  scorecard\t", "  gh-spam-comments\t"} {
 		if !strings.Contains(out, strings.ReplaceAll(want, "\t", "")) {
 			t.Errorf("dev listing missing dev verb %q", strings.TrimSpace(want))
 		}
