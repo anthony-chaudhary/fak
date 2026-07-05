@@ -61,6 +61,9 @@ tools/_walltime.*
 # Local live-dogfood scratch state: try-it PID files, logs, and one-off console proof
 # artifacts. Regenerated per operator session.
 .dogfood/
+# Per-session agent scratch dirs (issue-comment drafts, scratch src/test, index dumps).
+.scratch/
+.cscratch/
 
 # Scratch / temp leaks that occasionally land in the tree when a tool writes to a relative
 # path instead of an absolute temp dir (e.g. a flattened C...scratchpad...json at the repo
