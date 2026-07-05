@@ -573,11 +573,18 @@ class PruneDeadSidecarsTest(unittest.TestCase):
             runs = Path(d)
             self._mk(runs, 825, "20260625-213720", pid=58752, mtime=now - 4000,
                      siblings=(".log", ".backend", ".wave", ".account"))
+            log = runs / "resolve-825-20260625-213720.log"
+            log.write_text("worker transcript\n", encoding="utf-8")
             def probe(pid):
                 return {"alive": False}
             out = mod.prune_dead_sidecars(runs, live=True, now_ts=now, probe=probe)
             self.assertEqual(out["pruned"], ["resolve-825-20260625-213720.pid"])
-            self.assertEqual(sorted(p.name for p in runs.glob("resolve-825-*")), [])
+            self.assertTrue(log.exists())
+            self.assertEqual(log.read_text(encoding="utf-8"), "worker transcript\n")
+            self.assertEqual(
+                sorted(p.name for p in runs.glob("resolve-825-*")),
+                ["resolve-825-20260625-213720.log"],
+            )
 
     def test_live_prune_keeps_witness_sidecar_for_cooldown(self) -> None:
         import os

@@ -1027,9 +1027,11 @@ def prune_dead_sidecars(
     process is gone, and only once it is at least ``min_age_s`` old (so a sidecar
     written microseconds ago, before its child has fully materialised, is never
     swept out from under a just-spawned worker). Dry-run reports ``would_prune``;
-    ``live`` actually unlinks. The matching non-``.pid`` process sidecars are
-    removed with the ``.pid`` so a half-pruned run never confuses the wave auditor;
-    ``.witness`` is retained as the durable no-commit / cooldown record.
+    ``live`` actually unlinks. The matching non-``.pid`` process metadata sidecars
+    are removed with the ``.pid`` so a half-pruned run never confuses the wave
+    auditor; resolve ``.log`` files and ``.witness`` records are retained as the
+    durable transcript/cooldown evidence. Repair logs remain disposable and are
+    swept with their repair-only sidecars.
     """
     import time
     now = now_ts if now_ts is not None else time.time()
@@ -1037,8 +1039,14 @@ def prune_dead_sidecars(
     would_prune: list[str] = []
     if not runs_dir.is_dir():
         return {"live": live, "pruned": pruned, "would_prune": would_prune}
-    sibling_suffixes = (".log", ".backend", ".wave", ".account", LEASE_SIDECAR_SUFFIX,
-                        BASE_SHA_SIDECAR_SUFFIX, REPAIR_ISSUES_SIDECAR_SUFFIX)
+    resolve_sibling_suffixes = (
+        ".backend", ".wave", ".account", LEASE_SIDECAR_SUFFIX,
+        BASE_SHA_SIDECAR_SUFFIX,
+    )
+    repair_sibling_suffixes = (
+        ".log", ".backend", ".account", LEASE_SIDECAR_SUFFIX,
+        BASE_SHA_SIDECAR_SUFFIX, REPAIR_ISSUES_SIDECAR_SUFFIX,
+    )
     for pid_file in sorted((*runs_dir.glob("resolve-*.pid"),
                             *runs_dir.glob("repair-*.pid"))):
         if not _ANY_WORKER_LOG_RE.search(pid_file.name):
@@ -1060,6 +1068,11 @@ def prune_dead_sidecars(
             pruned.append(pid_file.name)
         except OSError:
             continue
+        sibling_suffixes = (
+            repair_sibling_suffixes
+            if pid_file.name.startswith("repair-")
+            else resolve_sibling_suffixes
+        )
         for suf in sibling_suffixes:
             sib = stem.with_suffix(suf)
             try:
