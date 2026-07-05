@@ -794,18 +794,64 @@ func DeriveIdentity(dir string) Identity {
 	if !ok {
 		return id
 	}
-	if b, err := os.ReadFile(filepath.Join(dir, ".claude.json")); err == nil {
-		var c claudeConfig
-		if json.Unmarshal(b, &c) == nil {
-			id.Email = c.OAuthAccount.EmailAddress
-			id.AccountUUID = c.OAuthAccount.AccountUUID
-		}
-	}
+	id.Email, id.AccountUUID = stateIdentity(dir)
 	if fi, err := os.Stat(filepath.Join(dir, ".credentials.json")); err == nil && !fi.IsDir() {
 		id.HasCreds = true
 	}
 	id.TokenFP = tokenFingerprint(dir)
 	return id
+}
+
+// stateIdentity resolves who a config home is logged in as. A named home (launched with
+// CLAUDE_CONFIG_DIR=<dir>) has exactly one state file, <dir>/.claude.json. The DEFAULT home
+// (~/.claude) has TWO writers: an explicit CLAUDE_CONFIG_DIR=~/.claude launch writes
+// <dir>/.claude.json, while a bare `claude` writes the profile-root ~/.claude.json — so after
+// a bare /login the in-dir copy still carries the PREVIOUS account and the registry row lies
+// about the seat's live identity (the stale-default-row regression: creds bill the new
+// account while every roster surface still names the old one). For the default home the
+// fresher of the two files wins; a file with no oauthAccount never outranks one that has it.
+func stateIdentity(dir string) (email, uuid string) {
+	inDir := filepath.Join(dir, ".claude.json")
+	email, uuid = readOAuthAccount(inDir)
+	if filepath.Base(dir) != ".claude" {
+		return email, uuid
+	}
+	root := filepath.Join(filepath.Dir(dir), ".claude.json")
+	rEmail, rUUID := readOAuthAccount(root)
+	if rEmail == "" && rUUID == "" {
+		return email, uuid
+	}
+	if (email == "" && uuid == "") || newerFile(root, inDir) {
+		return rEmail, rUUID
+	}
+	return email, uuid
+}
+
+// readOAuthAccount reads the oauthAccount identity out of one .claude.json state file;
+// zero values mean absent, unreadable, or not logged in.
+func readOAuthAccount(path string) (email, uuid string) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", ""
+	}
+	var c claudeConfig
+	if json.Unmarshal(b, &c) != nil {
+		return "", ""
+	}
+	return c.OAuthAccount.EmailAddress, c.OAuthAccount.AccountUUID
+}
+
+// newerFile reports whether a was modified after b; a missing/unstat-able file sorts oldest.
+func newerFile(a, b string) bool {
+	afi, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bfi, err := os.Stat(b)
+	if err != nil {
+		return true
+	}
+	return afi.ModTime().After(bfi.ModTime())
 }
 
 // tokenFingerprint returns a short, non-secret fingerprint of a config home's setup

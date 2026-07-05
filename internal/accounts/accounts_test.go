@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fixture is a small well-formed registry: gem8 is the live default, q is tombstoned
@@ -552,6 +553,62 @@ func TestDiscover(t *testing.T) {
 	}
 	if !qn.Identity.HasCreds || !qn.Identity.Exists {
 		t.Errorf("q-seat should have creds + exist: %+v", qn.Identity)
+	}
+}
+
+// TestDeriveIdentityDefaultSeatFreshestStateFile pins the two-writer reality of the DEFAULT
+// home: a bare `claude` writes the profile-root ~/.claude.json while an explicit
+// CLAUDE_CONFIG_DIR=~/.claude launch writes ~/.claude/.claude.json. After a bare /login the
+// in-dir copy is STALE — identity must follow the freshest file that names an account, and a
+// named seat must never read the profile-root file at all.
+func TestDeriveIdentityDefaultSeatFreshestStateFile(t *testing.T) {
+	home := t.TempDir()
+	def := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(def, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(path, email, uuid string, mtime time.Time) {
+		body := `{"oauthAccount":{"emailAddress":"` + email + `","accountUuid":"` + uuid + `"}}`
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, mtime, mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().Add(-time.Hour)
+	inDir := filepath.Join(def, ".claude.json")
+	root := filepath.Join(home, ".claude.json")
+
+	// Bare /login: the profile-root file is fresher → its identity wins over the stale seed.
+	write(inDir, "stale@example.test", "uuid-stale", old)
+	write(root, "fresh@example.test", "uuid-fresh", old.Add(30*time.Minute))
+	if id := DeriveIdentity(def); id.Email != "fresh@example.test" || id.AccountUUID != "uuid-fresh" {
+		t.Errorf("default seat should follow the fresher profile-root state file, got %+v", id)
+	}
+
+	// Explicit CLAUDE_CONFIG_DIR login: the in-dir file is fresher → it wins.
+	write(inDir, "indir@example.test", "uuid-indir", old.Add(45*time.Minute))
+	if id := DeriveIdentity(def); id.Email != "indir@example.test" {
+		t.Errorf("fresher in-dir state file should win, got %+v", id)
+	}
+
+	// A fresher file with NO oauthAccount never outranks one that names an account.
+	if err := os.WriteFile(inDir, []byte(`{"numStartups":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if id := DeriveIdentity(def); id.Email != "fresh@example.test" {
+		t.Errorf("identity-less in-dir file must fall back to the root identity, got %+v", id)
+	}
+
+	// A named seat never reads the profile-root file, even when it is fresher.
+	named := filepath.Join(home, ".claude-worker-seat")
+	if err := os.MkdirAll(named, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(named, ".claude.json"), "worker@example.test", "uuid-worker", old)
+	if id := DeriveIdentity(named); id.Email != "worker@example.test" {
+		t.Errorf("named seat must ignore the profile-root state file, got %+v", id)
 	}
 }
 
