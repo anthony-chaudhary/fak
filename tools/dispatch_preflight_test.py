@@ -613,6 +613,23 @@ class WorkerCountTest(unittest.TestCase):
                         "name": "fak.exe", "cmdline": ""}
             self.assertEqual(mod.live_resolve_worker_pids(runs, alive={27800}, probe=probe), {27800})
 
+    def test_live_resolve_worker_pids_counts_temp_fak_guard_root(self) -> None:
+        # Build-verification and canary guard binaries live outside the tree as
+        # fak-*.exe. They are still sidecar-authenticated guarded roots, subject to
+        # the same create-time window as fak.exe.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            now = 1_000_000.0
+            side = runs / "resolve-2042-20260705-182420.pid"
+            side.write_text("54324", encoding="utf-8")
+            side.with_suffix(".backend").write_text("opencode", encoding="utf-8")
+            os.utime(side, (now, now))
+            def probe(pid):
+                return {"alive": True, "create_time": now - 1,
+                        "name": "fak-verify.exe", "cmdline": ""}
+            self.assertEqual(mod.live_resolve_worker_pids(runs, alive={54324}, probe=probe), {54324})
+
     def test_live_resolve_worker_pids_rejects_old_fak_pid_after_sidecar(self) -> None:
         # `fak.exe` is accepted only as a sidecar-authenticated guarded root.
         # A stale sidecar whose pid was later reused by an unrelated fak command

@@ -885,7 +885,7 @@ def _probe_image_is_worker_backend(probe: dict[str, Any]) -> bool:
     if not name:
         return False
     stem = name[:-4] if name.endswith(".exe") else name
-    return stem in _SIDECAR_WORKER_IMAGES
+    return stem in _SIDECAR_WORKER_IMAGES or stem.startswith("fak-")
 
 
 def _sidecar_process_matches(pid: int, sidecar_mtime: float, *,
