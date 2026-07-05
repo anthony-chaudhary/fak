@@ -173,7 +173,7 @@ func TestRunAuditDiagnose_RenderReportsEmptyJournal(t *testing.T) {
 	}
 }
 
-func TestDiagnoseRows_ReportsRepeatedAllowedCallLivelock(t *testing.T) {
+func TestDiagnoseRows_IgnoresRepeatedAllowedCallLivelock(t *testing.T) {
 	var rows []journal.Row
 	prev := ""
 	for i := uint64(1); i <= 4; i++ {
@@ -190,32 +190,26 @@ func TestDiagnoseRows_ReportsRepeatedAllowedCallLivelock(t *testing.T) {
 		prev = h
 	}
 	d := diagnoseRows("x", rows)
-	if d.Verdict != diagVerdictSound || len(d.LivelockCandidates) != 1 {
-		t.Fatalf("sound repeated-allow journal should expose one livelock candidate: %+v", d)
+	if d.Verdict != diagVerdictSound {
+		t.Fatalf("sound repeated-allow journal should stay SOUND: %+v", d)
 	}
-	c := d.LivelockCandidates[0]
-	if c.Tool != "shell_command" || c.Verdict != "ALLOW" || c.DigestKind != "args_digest" || c.Digest != "sha256:repeat" || c.Count != 4 || c.LongestRun != 4 {
-		t.Fatalf("wrong repeated allowed candidate: %+v", c)
-	}
-	if c.CallLabel != "command=python dispatch_status.py" {
-		t.Fatalf("candidate should carry the redacted call label, got %+v", c)
-	}
-	if c.FirstSeq != 1 || c.LastSeq != 4 || c.FirstCallSeq != 101 || c.LastCallSeq != 104 {
-		t.Fatalf("candidate should carry row/call sequence bounds, got %+v", c)
+	if len(d.LivelockCandidates) != 0 {
+		t.Fatalf("repeated ALLOW/NONE rows should not become livelock candidates: %+v", d.LivelockCandidates)
 	}
 }
 
-func TestRunAuditDiagnose_RenderAndJSONReportRepeatedAllowedCallLabel(t *testing.T) {
+func TestRunAuditDiagnose_RenderAndJSONReportRepeatedQuarantineCallLabel(t *testing.T) {
 	var rows []journal.Row
 	prev := ""
 	for i := uint64(1); i <= 3; i++ {
 		r, h := mintRow(i, prev, journal.Row{
-			Kind:       "DECIDE",
-			Tool:       "shell_command",
-			Verdict:    "ALLOW",
-			Reason:     "NONE",
+			Kind:       "QUARANTINE",
+			Tool:       "tool_result",
+			Verdict:    "QUARANTINE",
+			Reason:     "SECRET_EXFIL",
 			ArgsDigest: "sha256:repeat",
-			ArgsLabel:  "command=git status",
+			ArgsLabel:  "tool=tool_result",
+			CallSeq:    100 + i,
 		})
 		rows = append(rows, r)
 		prev = h
@@ -227,14 +221,16 @@ func TestRunAuditDiagnose_RenderAndJSONReportRepeatedAllowedCallLabel(t *testing
 	var stdout, stderr bytes.Buffer
 	code := runAuditDiagnose(&stdout, &stderr, path, false)
 	if code != 0 {
-		t.Fatalf("sound allowed-call journal should exit 0, got %d (stderr=%s)", code, stderr.String())
+		t.Fatalf("sound quarantine journal should exit 0, got %d (stderr=%s)", code, stderr.String())
 	}
 	out := stdout.String()
 	for _, want := range []string{
 		"loop candidates",
-		"shell_command",
-		"call_label=command=git status",
+		"tool_result",
+		"SECRET_EXFIL",
+		"call_label=tool=tool_result",
 		"args_digest=sha256:repeat",
+		"seq=1..3",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("render missing %q:\n%s", want, out)
@@ -248,14 +244,21 @@ func TestRunAuditDiagnose_RenderAndJSONReportRepeatedAllowedCallLabel(t *testing
 	stderr.Reset()
 	code = runAuditDiagnose(&stdout, &stderr, path, true)
 	if code != 0 {
-		t.Fatalf("sound allowed-call journal --json should exit 0, got %d (stderr=%s)", code, stderr.String())
+		t.Fatalf("sound quarantine journal --json should exit 0, got %d (stderr=%s)", code, stderr.String())
 	}
 	var d auditDiagnosis
 	if err := json.Unmarshal(stdout.Bytes(), &d); err != nil {
 		t.Fatalf("--json output not parseable: %v\n%s", err, stdout.String())
 	}
-	if len(d.LivelockCandidates) != 1 || d.LivelockCandidates[0].CallLabel != "command=git status" {
+	if len(d.LivelockCandidates) != 1 || d.LivelockCandidates[0].CallLabel != "tool=tool_result" {
 		t.Fatalf("json candidate missing call_label: %+v", d.LivelockCandidates)
+	}
+	c := d.LivelockCandidates[0]
+	if c.Tool != "tool_result" || c.Verdict != "QUARANTINE" || c.Reason != "SECRET_EXFIL" || c.Count != 3 || c.LongestRun != 3 {
+		t.Fatalf("wrong quarantine livelock candidate: %+v", c)
+	}
+	if c.FirstSeq != 1 || c.LastSeq != 3 || c.FirstCallSeq != 101 || c.LastCallSeq != 103 {
+		t.Fatalf("candidate should carry row/call sequence bounds, got %+v", c)
 	}
 }
 

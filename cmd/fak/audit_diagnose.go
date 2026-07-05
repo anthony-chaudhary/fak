@@ -373,6 +373,9 @@ func auditLivelockKeyForRow(r journal.Row) (auditLivelockKey, bool) {
 	if verdict == "RESULT_DENY" {
 		verdict = "QUARANTINE"
 	}
+	if verdict != "DENY" && verdict != "QUARANTINE" {
+		return auditLivelockKey{}, false
+	}
 	if tool == "" || verdict == "" {
 		return auditLivelockKey{}, false
 	}
