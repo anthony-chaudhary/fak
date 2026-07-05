@@ -159,10 +159,46 @@ def preflight(root: Path, *, max_workers: int, work_kind: str,
                     root, timeout=120)
 
 
+def lane_priority_scores(root: Path,
+                         issue_nums: dict[str, list[int]]) -> dict[str, int]:
+    """Map each lane to the highest issue_triage score among ITS open issues.
+
+    ``issue_nums`` is ``{lane: [open issue numbers]}`` from the router fold. Shells to
+    ``issue_triage.py --json`` once, joins its per-issue ``score`` (P0=1000 / P1=400 /
+    P2=150 plus the orphan/stale bonuses) to each lane's issue set, and returns
+    ``{lane: max(score)}`` for every lane with at least one scored issue. A lane whose
+    issues carry no triage row is simply absent (the caller reads it as priority 0).
+
+    FAIL-OPEN by construction: any triage read/parse error yields ``{}`` so the single
+    caller (``pick_lane``) falls straight back to raw-count ranking — a gh/triage
+    hiccup never wedges or reshapes the tick beyond its historical behavior."""
+    if not issue_nums:
+        return {}
+    doc = run_json([_py(), str(root / "tools" / "issue_triage.py"), "--json"],
+                   root, timeout=130)
+    rows = doc.get("rows") if isinstance(doc, dict) else None
+    if not isinstance(rows, list):
+        return {}
+    score_by_num: dict[int, int] = {}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        num, score = r.get("number"), r.get("score")
+        if isinstance(num, int) and isinstance(score, int):
+            score_by_num[num] = score
+    out: dict[str, int] = {}
+    for lane, nums in issue_nums.items():
+        scored = [score_by_num[n] for n in nums if n in score_by_num]
+        if scored:
+            out[lane] = max(scored)
+    return out
+
+
 def pick_lane(root: Path, explicit: str | None,
               busy: set[str] | None = None,
               guarded: bool | None = None) -> dict[str, Any]:
-    """The lane with the most open issues, or an explicit override.
+    """The highest-priority lane by issue_triage score (open-issue count as the
+    tiebreak), or an explicit override.
 
     When ``busy`` names lanes that already have a live dispatched worker (from
     ``busy_lanes``), the richest lane NOT already in flight is preferred, so a
@@ -193,9 +229,11 @@ def pick_lane(root: Path, explicit: str | None,
     lanes = router.get("lanes") or {}
     counts = {}
     trees = {}
+    issue_nums: dict[str, list[int]] = {}
     for ln, info in lanes.items():
         iss = info.get("issues") if isinstance(info, dict) else info
         counts[ln] = len(iss) if hasattr(iss, "__len__") else 0
+        issue_nums[ln] = list(iss) if isinstance(iss, (list, tuple)) else []
         trees[ln] = info.get("tree") if isinstance(info, dict) else None
     if explicit:
         return {"lane": explicit, "issues": counts.get(explicit, 0), "by_lane": counts,
@@ -214,11 +252,18 @@ def pick_lane(root: Path, explicit: str | None,
     free = {ln: n for ln, n in dispatchable.items() if ln not in busy}
     pool = free or dispatchable
     stacked = not free   # every dispatchable lane with open issues is already being worked
-    # Highest open-issue count first; lane name as a stable lexicographic tiebreak so
-    # the pick is deterministic across ticks rather than dependent on router order.
-    lane = sorted(pool, key=lambda k: (-pool[k], k))[0]
+    # Priority-weight the pick (#2064): rank the pool by the highest issue_triage score
+    # in each lane FIRST, raw open-issue count only as the tiebreak, so a single
+    # sequential seat resolves the highest-VALUE leaf across lanes instead of always
+    # draining the lane with the biggest (often low-priority) backlog. `priority` is
+    # empty on any triage read error, collapsing the key to the historical count order.
+    priority = lane_priority_scores(root, {ln: issue_nums.get(ln, []) for ln in pool})
+    # Highest triage priority first, then highest open-issue count, then lane name as a
+    # stable lexicographic tiebreak so the pick is deterministic across ticks.
+    lane = sorted(pool, key=lambda k: (-priority.get(k, 0), -pool[k], k))[0]
     return {"lane": lane, "issues": counts[lane], "by_lane": counts,
             "busy": sorted(busy), "stacked": stacked,
+            "lane_priority": priority.get(lane, 0), "priority_by_lane": priority,
             "self_modify_held": held, "router_error": router.get("_error")}
 
 

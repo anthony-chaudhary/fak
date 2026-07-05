@@ -91,6 +91,89 @@ class PickLaneTest(unittest.TestCase):
         self.assertEqual(pick["issues"], 3)
 
 
+class PickLanePriorityTest(unittest.TestCase):
+    """#2064: pick_lane ranks the pool by the highest issue_triage score in a lane
+    FIRST and raw open-issue count only as the tiebreak, so a single sequential seat
+    resolves the highest-VALUE leaf across lanes instead of always draining the lane
+    with the biggest (often low-priority docs) backlog. Fails OPEN to count-only
+    ranking when triage data is unavailable — the historical behavior."""
+
+    # docs has the bigger backlog; gateway holds the single high-priority (P0) leaf.
+    LANES = {"lanes": {"docs": {"issues": [1, 2, 3, 4]},
+                       "gateway": {"issues": [9]}}}
+
+    def _wire(self, mod, triage) -> None:
+        """Route the router call to LANES and the issue_triage call to `triage`,
+        distinguished by which tool the cmd names — the real two-subprocess shape."""
+        def run_json(cmd, cwd, timeout):
+            if any("issue_triage.py" in str(part) for part in cmd):
+                return json.loads(json.dumps(triage))
+            return json.loads(json.dumps(self.LANES))
+        mod.run_json = run_json
+
+    def test_high_value_lane_beats_bigger_low_value_backlog(self) -> None:
+        mod = load()
+        self._wire(mod, {"rows": [
+            {"number": 1, "score": 150}, {"number": 2, "score": 150},
+            {"number": 3, "score": 150}, {"number": 4, "score": 150},
+            {"number": 9, "score": 1300}]})   # gateway #9 = orphan P0
+        pick = mod.pick_lane(ROOT, None, guarded=False)
+        self.assertEqual(pick["lane"], "gateway")   # P0 leaf beats docs' 4x P2
+        self.assertEqual(pick["issues"], 1)
+        self.assertEqual(pick["lane_priority"], 1300)
+        self.assertEqual(pick["priority_by_lane"], {"docs": 150, "gateway": 1300})
+
+    def test_count_breaks_ties_within_a_priority_tier(self) -> None:
+        mod = load()
+        # every leaf is the same priority -> the count tiebreak keeps the old order.
+        self._wire(mod, {"rows": [
+            {"number": 1, "score": 150}, {"number": 2, "score": 150},
+            {"number": 3, "score": 150}, {"number": 4, "score": 150},
+            {"number": 9, "score": 150}]})
+        pick = mod.pick_lane(ROOT, None, guarded=False)
+        self.assertEqual(pick["lane"], "docs")      # tie on priority -> bigger backlog
+        self.assertEqual(pick["lane_priority"], 150)
+
+    def test_fails_open_to_count_when_triage_unavailable(self) -> None:
+        mod = load()
+        # a triage read error (no rows) collapses to legacy raw-count ranking.
+        self._wire(mod, {"_error": "gh unavailable"})
+        pick = mod.pick_lane(ROOT, None, guarded=False)
+        self.assertEqual(pick["lane"], "docs")      # richest backlog, unchanged
+        self.assertEqual(pick["lane_priority"], 0)
+        self.assertEqual(pick["priority_by_lane"], {})
+
+    def test_priority_never_overrides_the_self_source_hold(self) -> None:
+        mod = load()
+        # gateway is the highest-priority lane but is self-source-held under guard;
+        # the hard exclude must win — priority ranking only ever orders the SAFE pool.
+        lanes = {"lanes": {"docs": {"issues": [1, 2], "tree": ["docs/**"]},
+                           "gateway": {"issues": [9], "tree": ["internal/gateway/**"]}}}
+
+        def run_json(cmd, cwd, timeout):
+            if any("issue_triage.py" in str(part) for part in cmd):
+                return {"rows": [{"number": 1, "score": 150},
+                                 {"number": 2, "score": 150},
+                                 {"number": 9, "score": 1300}]}
+            return json.loads(json.dumps(lanes))
+        mod.run_json = run_json
+        pick = mod.pick_lane(ROOT, None, guarded=True)
+        self.assertEqual(pick["lane"], "docs")           # gateway held despite its P0
+        self.assertEqual(pick["self_modify_held"], ["gateway"])
+
+    def test_busy_high_value_lane_still_rotates_to_free_pool(self) -> None:
+        mod = load()
+        # the P0 lane is already in flight -> the seat rotates to the free lane even
+        # though gateway outranks it, because priority orders the FREE pool.
+        self._wire(mod, {"rows": [
+            {"number": 1, "score": 150}, {"number": 2, "score": 150},
+            {"number": 3, "score": 150}, {"number": 4, "score": 150},
+            {"number": 9, "score": 1300}]})
+        pick = mod.pick_lane(ROOT, None, busy={"gateway"}, guarded=False)
+        self.assertEqual(pick["lane"], "docs")
+        self.assertFalse(pick["stacked"])
+
+
 class WorkerEnvTest(unittest.TestCase):
     def test_pins_config_dir_drops_ambient_token_and_sets_witness(self) -> None:
         mod = load()
