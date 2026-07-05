@@ -149,6 +149,14 @@ DEFAULT_REPAIR_BATCH = 5
 # (anti-churn for un-repairables). A SUCCESSFUL repair needs no cooldown escape:
 # its edit bumps the issue's updatedAt, which re-admits it past the hold ledger.
 DEFAULT_REPAIR_COOLDOWN_MIN = 360
+# Active guard-livelock spawn hold: once a live guarded worker is repeatedly
+# receiving the same quarantined tool_result, adding more resolver workers just
+# consumes seats while the guard bug is already witnessed. This launcher-side
+# fuse is deliberately conservative and fail-open: it only fires when a live
+# resolve log names a guard-audit journal and that journal proves a repeated
+# quarantined result.
+ACTIVE_GUARD_LIVELOCK_MIN_COUNT = 10
+_AUDIT_LOG_RE = re.compile(r"audit log\s*:\s*(.+?\.jsonl)")
 # The pseudo-lane a repair worker runs under (guard-audit naming, child env). It
 # takes NO lane lease -- it edits GitHub issues, not repo files; admission is
 # serialized by the live repair-sidecar scan instead (max one in flight).
@@ -236,6 +244,108 @@ def launch_gate_blocked(code: str, reason: str, next_action: str) -> dict[str, A
             "reason": reason,
             "next_action": next_action,
         }],
+    }
+
+
+def _audit_path_from_log(log: Path, root: Path) -> Path | None:
+    try:
+        text = log.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    found: Path | None = None
+    for match in _AUDIT_LOG_RE.finditer(text):
+        raw = match.group(1).strip().strip("`'\"")
+        if not raw:
+            continue
+        cand = Path(raw)
+        if not cand.is_absolute():
+            cand = root / cand
+        found = cand
+    return found
+
+
+def _guard_result_livelock(journal: Path, *,
+                           min_count: int = ACTIVE_GUARD_LIVELOCK_MIN_COUNT) -> dict[str, Any]:
+    """Return positive evidence for repeated quarantined tool_result rows.
+
+    This is the result-side analogue of the status-card livelock fold, scoped to
+    active worker journals. The key includes reason + digest so unrelated
+    quarantines do not trip the fuse.
+    """
+    counts: dict[tuple[str, str, str], int] = {}
+    try:
+        lines = journal.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return {"livelock": False, "unavailable": True, "path": str(journal)}
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        verdict = str(row.get("verdict") or "").upper()
+        tool = str(row.get("tool") or row.get("name") or "")
+        if verdict != "QUARANTINE" or tool != "tool_result":
+            continue
+        reason = str(row.get("reason") or "")
+        digest = str(row.get("args_digest") or row.get("digest") or "")
+        if not digest:
+            continue
+        key = (tool, reason, digest)
+        counts[key] = counts.get(key, 0) + 1
+    if not counts:
+        return {"livelock": False, "path": str(journal)}
+    (tool, reason, digest), count = max(counts.items(), key=lambda item: item[1])
+    if count < min_count:
+        return {"livelock": False, "path": str(journal), "count": count}
+    return {
+        "livelock": True,
+        "path": str(journal),
+        "tool": tool,
+        "reason": reason,
+        "digest": digest,
+        "count": count,
+    }
+
+
+def active_guard_livelock_hold(root: Path, runs_dir: Path, *,
+                               min_count: int = ACTIVE_GUARD_LIVELOCK_MIN_COUNT) -> dict[str, Any]:
+    """Positive live-worker evidence that should pause new resolver spawns."""
+    candidates: list[dict[str, Any]] = []
+    for log in sorted(runs_dir.glob("resolve-*.log")):
+        pid_file = log.with_suffix(".pid")
+        if not pid_file.exists():
+            continue
+        if not dispatch_preflight.resolve_sidecar_pid_is_live(pid_file):
+            continue
+        audit = _audit_path_from_log(log, root)
+        if not audit:
+            continue
+        hit = _guard_result_livelock(audit, min_count=min_count)
+        if not hit.get("livelock"):
+            continue
+        issue = None
+        m = _LOG_ISSUE_RE.search(log.name)
+        if m:
+            try:
+                issue = int(m.group(1))
+            except ValueError:
+                issue = None
+        hit.update({"log": str(log), "issue": issue})
+        candidates.append(hit)
+    if not candidates:
+        return {"active": False}
+    candidates.sort(key=lambda h: int(h.get("count") or 0), reverse=True)
+    top = candidates[0]
+    return {
+        "active": True,
+        "candidates": candidates[:5],
+        "reason": (
+            f"live worker #{top.get('issue') or '?'} is already in a guard "
+            f"result livelock: {top.get('tool')} {top.get('reason')} "
+            f"digest={str(top.get('digest') or '')[:12]} count={top.get('count')}"
+        ),
     }
 
 
@@ -3438,6 +3548,21 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                         "verdict": pre.get("verdict") or "REFUSE",
                         "reason": f"preflight refused: {pre.get('reason')}"})
         return finish(payload)
+    guard_livelock = active_guard_livelock_hold(root, runs_dir)
+    if guard_livelock.get("active"):
+        reason = str(guard_livelock.get("reason") or "active guard livelock")
+        payload["active_guard_livelock"] = guard_livelock
+        payload["launch_gate"] = launch_gate_blocked(
+            "ACTIVE_GUARD_LIVELOCK",
+            reason,
+            "wait-for-loop-worker-to-exit-or-fix-guard-result-livelock")
+        payload.update({
+            "ok": False,
+            "action": "active_guard_livelock",
+            "verdict": "ACTIVE_GUARD_LIVELOCK",
+            "reason": reason,
+        })
+        return finish(payload)
     if not chosen_lane:
         if pick.get("self_modify_held"):
             held = sorted(pick.get("self_modify_held"))
@@ -3968,6 +4093,7 @@ BENIGN_ACTIONS = frozenset({
     "repair_in_flight",                                  # a groomer is already on it
     "no_issue", "no_lane", "lane_busy", "lane_leased",   # nothing to spawn
     "dirty_path_collision",                              # local WIP collision guard
+    "active_guard_livelock",                             # live guard loop fuse
     "multi_lane_scope",                                  # issue spans lanes the lease can't cover (#2615)
     "issue_contract_hold",                               # issue needs scope before spawn
     "refused",                                           # preflight backpressure (host at cap / no account)

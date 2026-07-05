@@ -212,6 +212,67 @@ class LiveResolutionIssuesTest(unittest.TestCase):
             self.assertEqual(mod.live_resolution_issues(runs, probe=probe), set())
 
 
+class ActiveGuardLivelockTest(unittest.TestCase):
+    def test_live_result_quarantine_journal_becomes_spawn_hold(self) -> None:
+        import json
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / ".dispatch-runs"
+            audit_dir = runs / "guard-audit"
+            audit_dir.mkdir(parents=True)
+            audit = audit_dir / "tools-claude-1234.jsonl"
+            rows = [{
+                "verdict": "QUARANTINE",
+                "tool": "tool_result",
+                "reason": "SECRET_EXFIL",
+                "args_digest": "abc123",
+            } for _ in range(10)]
+            audit.write_text("\n".join(json.dumps(r) for r in rows),
+                             encoding="utf-8")
+            log = runs / "resolve-2720-20260705-202908.log"
+            log.write_text(f"audit log  : {audit}\n", encoding="utf-8")
+            log.with_suffix(".pid").write_text("1234\n", encoding="utf-8")
+            mod.dispatch_preflight.resolve_sidecar_pid_is_live = lambda pid_file: True
+
+            hold = mod.active_guard_livelock_hold(root, runs)
+
+        self.assertTrue(hold["active"])
+        self.assertIn("#2720", hold["reason"])
+        self.assertEqual(hold["candidates"][0]["issue"], 2720)
+        self.assertEqual(hold["candidates"][0]["count"], 10)
+        self.assertEqual(hold["candidates"][0]["reason"], "SECRET_EXFIL")
+        self.assertEqual(hold["candidates"][0]["digest"], "abc123")
+
+    def test_below_threshold_result_quarantine_fails_open(self) -> None:
+        import json
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / ".dispatch-runs"
+            audit_dir = runs / "guard-audit"
+            audit_dir.mkdir(parents=True)
+            audit = audit_dir / "tools-claude-1234.jsonl"
+            rows = [{
+                "verdict": "QUARANTINE",
+                "tool": "tool_result",
+                "reason": "SECRET_EXFIL",
+                "args_digest": "abc123",
+            } for _ in range(9)]
+            audit.write_text("\n".join(json.dumps(r) for r in rows),
+                             encoding="utf-8")
+            log = runs / "resolve-2720-20260705-202908.log"
+            log.write_text(f"audit log  : {audit}\n", encoding="utf-8")
+            log.with_suffix(".pid").write_text("1234\n", encoding="utf-8")
+            mod.dispatch_preflight.resolve_sidecar_pid_is_live = lambda pid_file: True
+
+            hold = mod.active_guard_livelock_hold(root, runs)
+
+        self.assertFalse(hold["active"])
+
+
 class LiveResolutionLanesTest(unittest.TestCase):
     """The pre-spawn lane-lease set (#1310): a lane is HELD when it already has a
     live worker. Read from the ``# fak-spawn ... lane=<L>`` header
@@ -638,6 +699,7 @@ class EvaluateTest(unittest.TestCase):
                 "prompt": "repair " + ",".join(str(r.get("number")) for r in rows),
                 "prompt_chars": 10})
         mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}  # hermetic: not capped
+        mod.active_guard_livelock_hold = lambda root, runs_dir, **k: {"active": False}
         mod.reap_timed_out_workers = lambda runs_dir, **k: {
             "timeout_s": k.get("timeout_s"), "live": k.get("live"),
             "candidates": [], "reaped": [], "would_reap": []}
@@ -845,6 +907,31 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["launch_gate"]["blockers"][0]["code"],
                          "DIRTY_PATH_COLLISION")
         self.assertIn("cmd/fak/knownbad.go", p["reason"])
+
+    def test_active_guard_livelock_blocks_spawn(self) -> None:
+        """A live result-side guard livelock pauses new issue spawns before the
+        launcher compounds the failing worker class."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "ci", "numbers": [2867],
+                          "by_lane_count": {"ci": 1},
+                          "eligible_by_lane": [["ci", [2867]]]})
+        mod.active_guard_livelock_hold = lambda root, runs_dir, **k: {
+            "active": True,
+            "reason": "live worker #2720 is already in a guard result livelock",
+            "candidates": [{"issue": 2720, "count": 50}],
+        }
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["action"], "active_guard_livelock")
+        self.assertEqual(p["verdict"], "ACTIVE_GUARD_LIVELOCK")
+        self.assertEqual(p["launch_gate"]["blockers"][0]["code"],
+                         "ACTIVE_GUARD_LIVELOCK")
+        self.assertIn("guard result livelock", p["reason"])
+        self.assertIn("launch gate: BLOCKED", mod.render(p))
 
     def test_contract_scan_bounded_holds_when_none_ready(self) -> None:
         """When every scanned issue is thin, the tick still HOLDs (the floor is
