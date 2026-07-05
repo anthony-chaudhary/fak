@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
 
 // guard_account_failover.go — the guard's ACCOUNT-FAILOVER closure: the on-box roster walk behind
@@ -26,14 +28,16 @@ import (
 // gateway or a real `claude`. The guard wires it in one line; everything else lives here.
 
 // accountFailover holds the guard's session-scoped failover state: which account keys are already
-// known-walled (so the picker never re-selects them), and the config dir currently in force (so
-// the per-request token source follows the adopted account across turns). It is safe for
-// concurrent use — the planner's failover hook and the per-request apiKeyFunc can run on different
-// turns' goroutines.
+// known-walled (so the picker never re-selects them), which keys the operator deliberately rehomed
+// off (excluded from auto-reselection but NOT walled — the seat may be perfectly healthy), and the
+// config dir currently in force (so the per-request token source follows the adopted account
+// across turns). It is safe for concurrent use — the planner's failover hook, the per-request
+// apiKeyFunc, and the gateway's operator-rehome route can run on different goroutines.
 type accountFailover struct {
 	homeRoot   string
 	mu         sync.Mutex
 	walled     map[string]bool // account keys (uuid:/tok:) proven walled this session
+	moved      map[string]bool // account keys the operator rehomed OFF this session (never auto-reselect)
 	currentDir string          // config dir the live token is read from; advances on each adopted swap
 	now        func() time.Time
 }
@@ -48,6 +52,7 @@ func newAccountFailover(homeRoot, pinnedDir string, now func() time.Time) *accou
 	return &accountFailover{
 		homeRoot:   homeRoot,
 		walled:     map[string]bool{},
+		moved:      map[string]bool{},
 		currentDir: pinnedDir,
 		now:        now,
 	}
@@ -103,7 +108,7 @@ func (a *accountFailover) failover(reason string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	dir, token, ok := pickFailoverAccount(homes, a.walled, a.now())
+	dir, token, ok := pickFailoverAccount(homes, a.excludedLocked(), a.now())
 	if !ok {
 		return "", false
 	}
@@ -111,6 +116,84 @@ func (a *accountFailover) failover(reason string) (string, bool) {
 	// account on every subsequent turn, and return the live token for THIS re-send.
 	a.currentDir = dir
 	return token, true
+}
+
+// excludedLocked returns the union of every account key the picker must skip: the seats an
+// account-scoped 403 proved walled AND the seats the operator deliberately rehomed off. Caller
+// must hold a.mu. The two sets stay separate so the status area can keep labeling only the
+// genuinely walled seats as walled.
+func (a *accountFailover) excludedLocked() map[string]bool {
+	out := make(map[string]bool, len(a.walled)+len(a.moved))
+	for k := range a.walled {
+		out[k] = true
+	}
+	for k := range a.moved {
+		out[k] = true
+	}
+	return out
+}
+
+// forceRehome is the OPERATOR "switch seat now" body behind POST /v1/fak/account/rehome — the
+// on-demand form of failover. It picks the next available sibling seat (enabled, logged in, live
+// token, not walled/rehomed-off) and adopts it exactly the way failover does, so the per-request
+// token source follows on the session's next upstream turn. The seat moved off is recorded in the
+// moved set — a later automatic failover must never bounce the session back onto a seat the
+// operator deliberately left — but is NOT marked walled: it was not proven bad, and the status
+// area must not claim it was. When no sibling qualifies the state is left untouched (the session
+// keeps its current seat) and the error names the real fix. The returned metadata is seat display
+// identity only — never a token.
+func (a *accountFailover) forceRehome(reason string) (gateway.AccountRehome, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if strings.TrimSpace(reason) == "" {
+		reason = "operator_rehome"
+	}
+	homes, err := accounts.Discover(a.homeRoot)
+	if err != nil {
+		return gateway.AccountRehome{}, fmt.Errorf("account roster unreadable under %s: %v", a.homeRoot, err)
+	}
+	fromDir := a.currentDir
+	fromKey := accountKeyForDir(fromDir)
+	// "Next available" means a DIFFERENT seat: exclude the current account by key (which also
+	// covers a second dir name for the same account), and — for a seat with no derivable
+	// identity — by dir, so the picker can never hand back the seat being left.
+	excluded := a.excludedLocked()
+	if fromKey != "" {
+		excluded[fromKey] = true
+	}
+	candidates := make([]accounts.Home, 0, len(homes))
+	for _, h := range homes {
+		if guardCleanDir(h.Dir) == guardCleanDir(fromDir) {
+			continue
+		}
+		candidates = append(candidates, h)
+	}
+	dir, _, ok := pickFailoverAccount(candidates, excluded, a.now())
+	if !ok {
+		return gateway.AccountRehome{}, fmt.Errorf("no available sibling seat: every other seat is walled, already rehomed off, disabled, or has no live token — log in on another seat (`claude /login` under its CLAUDE_CONFIG_DIR) or enroll one (`fak accounts add`)")
+	}
+	// Adopt: record the seat being left as operator-moved, then advance the sticky dir so the
+	// per-request token source reads the adopted seat from the next turn on.
+	if fromKey != "" {
+		a.moved[fromKey] = true
+	}
+	a.currentDir = dir
+	res := gateway.AccountRehome{Reason: reason}
+	res.From, res.FromEmail = seatDisplayIdentity(homes, fromDir)
+	res.To, res.ToEmail = seatDisplayIdentity(homes, dir)
+	return res, nil
+}
+
+// seatDisplayIdentity resolves a config dir to its roster display identity (seat name + email).
+// A dir no discovered home matches falls back to the dir's base name so the operator still sees
+// WHICH directory moved, never an empty field.
+func seatDisplayIdentity(homes []accounts.Home, dir string) (name, email string) {
+	for _, h := range homes {
+		if guardCleanDir(h.Dir) == guardCleanDir(dir) {
+			return h.Name, h.Identity.Email
+		}
+	}
+	return filepath.Base(guardCleanDir(dir)), ""
 }
 
 // pickFailoverAccount is the PURE selection core: among discovered homes, choose one that (a) is

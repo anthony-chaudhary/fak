@@ -545,6 +545,10 @@ func cmdGuard(argv []string) {
 		// session has no seat "in use", so the status area shows nodes only).
 		guardActiveAccountDir func() string
 		guardWalledAccounts   func() map[string]bool
+		// guardAccountRehome, when set on the pinned path, is the operator "switch seat
+		// now" function the gateway serves at POST /v1/fak/account/rehome (`fak accounts
+		// rehome`) — the on-demand form of the failover above.
+		guardAccountRehome func(reason string) (gateway.AccountRehome, error)
 	)
 	tUpstream := time.Now()
 	if localModel && !localAlongside {
@@ -594,6 +598,7 @@ func cmdGuard(argv []string) {
 			if homeRoot, hErr := os.UserHomeDir(); hErr == nil && strings.TrimSpace(homeRoot) != "" {
 				af = newAccountFailover(homeRoot, us.claudeConfigDir, nil)
 				accountFailoverFunc = af.failover
+				guardAccountRehome = af.forceRehome
 			}
 			// Feed the live accounts+nodes status area: the ACTIVE seat follows a failover
 			// (af.currentConfigDir), and af.walledKeys marks the seats an account-scoped 403
@@ -989,6 +994,14 @@ func cmdGuard(argv []string) {
 		localAlong:   localAlongside,
 		localAlias:   localAlias,
 	}))
+
+	// Operator seat switch (POST /v1/fak/account/rehome, `fak accounts rehome`): the
+	// on-demand form of the account failover. Wired only when the failover state exists
+	// (pinned Claude subscription with a resolvable home root); everywhere else the
+	// route stays inert (404). See guard_account_failover.go / gateway/account_rehome.go.
+	if guardAccountRehome != nil {
+		srv.SetAccountRehomeFunc(guardAccountRehome)
+	}
 
 	// First-class harness resource tracking (epic #2044): start sampling THIS process's
 	// own hardware-resource use (CPU/RSS/IO — the guard process hosts the in-process

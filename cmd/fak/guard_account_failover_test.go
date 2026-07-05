@@ -135,6 +135,71 @@ func TestAccountFailoverStickyAdvance(t *testing.T) {
 	}
 }
 
+// TestForceRehomeAdoptsNextAvailable proves the operator "switch seat now" verb: the current seat
+// is left (recorded moved, NOT walled — it was not proven bad), the next available sibling is
+// adopted so currentConfigDir advances, and the from/to display metadata names both seats.
+func TestForceRehomeAdoptsNextAvailable(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	future := now.Add(time.Hour).UnixMilli()
+	root := t.TempDir()
+	a := mkFailoverHome(t, root, ".claude-a", "a@x.test", "u-a", "sk-ant-oat01-a", future)
+	b := mkFailoverHome(t, root, ".claude-b", "b@x.test", "u-b", "sk-ant-oat01-b", future)
+
+	af := newAccountFailover(root, a.Dir, func() time.Time { return now })
+	res, err := af.forceRehome("")
+	if err != nil {
+		t.Fatalf("forceRehome: %v", err)
+	}
+	// Names come from accounts.Discover (the ".claude-" prefix stripped), not the raw dir.
+	if res.From != "a" || res.FromEmail != "a@x.test" || res.To != "b" || res.ToEmail != "b@x.test" {
+		t.Fatalf("rehome metadata = %+v, want a(a@x.test) -> b(b@x.test)", res)
+	}
+	if res.Reason != "operator_rehome" {
+		t.Fatalf("empty reason defaulted to %q, want operator_rehome", res.Reason)
+	}
+	if got := af.currentConfigDir(); got != b.Dir {
+		t.Fatalf("currentConfigDir after rehome = %q, want the adopted %q", got, b.Dir)
+	}
+	// The seat moved off is excluded from reselection but NOT reported walled: it was
+	// deliberately left, not proven bad — the status area must not claim otherwise.
+	if walled := af.walledKeys(); walled != nil {
+		t.Fatalf("walledKeys after an operator rehome = %v, want nil (moved is not walled)", walled)
+	}
+	// A later swap (operator or automatic) must never bounce back to the abandoned seat:
+	// with no third seat, both the operator verb and the 403 failover report no target.
+	if _, err := af.forceRehome("again"); err == nil {
+		t.Fatal("second forceRehome with no third seat must refuse")
+	}
+	if got := af.currentConfigDir(); got != b.Dir {
+		t.Fatalf("a refused rehome moved currentConfigDir to %q, want it untouched at %q", got, b.Dir)
+	}
+	if _, ok := af.failover("failover_account"); ok {
+		t.Fatal("automatic failover after an operator rehome must not re-adopt the moved-off seat")
+	}
+}
+
+// TestForceRehomeNoSiblingLeavesStateUntouched proves a refused swap is side-effect free: the
+// current seat stays in force and is not poisoned for a later automatic failover.
+func TestForceRehomeNoSiblingLeavesStateUntouched(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	root := t.TempDir()
+	only := mkFailoverHome(t, root, ".claude-only", "only@x.test", "u-only", "sk-ant-oat01-only", now.Add(time.Hour).UnixMilli())
+
+	af := newAccountFailover(root, only.Dir, func() time.Time { return now })
+	if _, err := af.forceRehome("operator_rehome"); err == nil {
+		t.Fatal("forceRehome with a single-seat roster must refuse")
+	}
+	if got := af.currentConfigDir(); got != only.Dir {
+		t.Fatalf("refused rehome advanced currentConfigDir to %q, want the pinned %q", got, only.Dir)
+	}
+	af.mu.Lock()
+	movedLen := len(af.moved)
+	af.mu.Unlock()
+	if movedLen != 0 {
+		t.Fatalf("refused rehome recorded %d moved seat(s), want 0 (state untouched)", movedLen)
+	}
+}
+
 // sanity: the fixture writes a parseable credentials doc (guards against a fmt drift silently
 // making every readLiveAccessToken fail, which would make the tests above vacuously pass on the
 // "no token" branch).
