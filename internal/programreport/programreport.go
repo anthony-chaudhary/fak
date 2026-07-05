@@ -17,7 +17,6 @@ package programreport
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
@@ -345,23 +344,9 @@ func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
 // latestBefore returns the most recent prior row (by date, then generated_at),
 // excluding a row with the exact same generated_at (idempotent re-append).
 func latestBefore(row LedgerRow, prior []LedgerRow) (LedgerRow, bool) {
-	cands := make([]LedgerRow, 0, len(prior))
-	for _, p := range prior {
-		if p.GeneratedAt != "" && p.GeneratedAt == row.GeneratedAt {
-			continue
-		}
-		cands = append(cands, p)
-	}
-	if len(cands) == 0 {
-		return LedgerRow{}, false
-	}
-	sort.SliceStable(cands, func(i, j int) bool {
-		if cands[i].Date != cands[j].Date {
-			return cands[i].Date < cands[j].Date
-		}
-		return cands[i].GeneratedAt < cands[j].GeneratedAt
-	})
-	return cands[len(cands)-1], true
+	return jsonlledger.LatestBefore(row, prior,
+		func(r LedgerRow) string { return r.Date },
+		func(r LedgerRow) string { return r.GeneratedAt })
 }
 
 // --- render + gate ----------------------------------------------------------

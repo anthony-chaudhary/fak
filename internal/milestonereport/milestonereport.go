@@ -592,23 +592,9 @@ func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
 // generated_at). A row with the exact same generated_at as `row` is excluded
 // (idempotent re-append), mirroring cadencereport.
 func latestBefore(row LedgerRow, prior []LedgerRow) (LedgerRow, bool) {
-	cands := make([]LedgerRow, 0, len(prior))
-	for _, p := range prior {
-		if p.GeneratedAt != "" && p.GeneratedAt == row.GeneratedAt {
-			continue
-		}
-		cands = append(cands, p)
-	}
-	if len(cands) == 0 {
-		return LedgerRow{}, false
-	}
-	sort.SliceStable(cands, func(i, j int) bool {
-		if cands[i].Date != cands[j].Date {
-			return cands[i].Date < cands[j].Date
-		}
-		return cands[i].GeneratedAt < cands[j].GeneratedAt
-	})
-	return cands[len(cands)-1], true
+	return jsonlledger.LatestBefore(row, prior,
+		func(r LedgerRow) string { return r.Date },
+		func(r LedgerRow) string { return r.GeneratedAt })
 }
 
 // --- render + gate ----------------------------------------------------------

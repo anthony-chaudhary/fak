@@ -36,6 +36,40 @@ func TestParseNilKeepAcceptsEveryWellFormedRow(t *testing.T) {
 	}
 }
 
+func TestLatestBefore(t *testing.T) {
+	date := func(r row) string { return r.Date }
+	// tiebreak reuses a field; model it with a second helper over a struct that
+	// carries a gen stamp.
+	type grow struct {
+		Date string
+		Gen  string
+	}
+	d := func(r grow) string { return r.Date }
+	tb := func(r grow) string { return r.Gen }
+
+	prior := []grow{
+		{Date: "2026-07-01", Gen: "a"},
+		{Date: "2026-07-03", Gen: "b"},
+		{Date: "2026-07-02", Gen: "c"},
+	}
+	// newest by date is 2026-07-03/b
+	got, ok := LatestBefore(grow{Date: "2026-07-04", Gen: "self"}, prior, d, tb)
+	if !ok || got.Gen != "b" {
+		t.Fatalf("want newest row b, got %+v ok=%v", got, ok)
+	}
+
+	// self-exclusion: the reference row's own non-empty tiebreak is skipped.
+	got, ok = LatestBefore(grow{Date: "z", Gen: "b"}, prior, d, tb)
+	if !ok || got.Gen != "c" {
+		t.Fatalf("want c after excluding self gen b, got %+v ok=%v", got, ok)
+	}
+
+	// empty prior -> zero,false
+	if _, ok := LatestBefore(row{}, nil, date, date); ok {
+		t.Errorf("empty prior should return ok=false")
+	}
+}
+
 func TestParseHandlesLineLongerThanDefaultScannerBuffer(t *testing.T) {
 	// bufio.Scanner's default 64 KiB token limit would drop this line; the 1 MiB
 	// buffer this package configures must let it through.
