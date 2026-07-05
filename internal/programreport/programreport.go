@@ -15,12 +15,12 @@ package programreport
 // 100%.
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	"github.com/anthony-chaudhary/fak/internal/worktype"
 )
 
@@ -283,24 +283,7 @@ func dirFor(p Programs, c worktype.Class) string {
 
 // ParseLedger parses an append-only JSONL ledger, tolerating blank + garbled lines.
 func ParseLedger(content string) []LedgerRow {
-	var rows []LedgerRow
-	sc := bufio.NewScanner(strings.NewReader(content))
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		var row LedgerRow
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			continue
-		}
-		if row.Date == "" {
-			continue
-		}
-		rows = append(rows, row)
-	}
-	return rows
+	return jsonlledger.Parse(content, func(r LedgerRow) bool { return r.Date != "" })
 }
 
 // AppendLedgerLine renders the JSONL line for a row (no trailing newline).

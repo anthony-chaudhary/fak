@@ -6,12 +6,12 @@ package cadencereport
 // is in doc.go.
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	maturityscore "github.com/anthony-chaudhary/fak/internal/maturity"
 )
 
@@ -522,24 +522,7 @@ func standingPointDelta(healthDeltaBP int) int {
 // skipping any line that is not a valid row (so a hand-edit can't crash the
 // reader). Rows are returned in file order.
 func ParseLedger(content string) []LedgerRow {
-	var rows []LedgerRow
-	sc := bufio.NewScanner(strings.NewReader(content))
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		var row LedgerRow
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			continue
-		}
-		if row.Date == "" {
-			continue
-		}
-		rows = append(rows, row)
-	}
-	return rows
+	return jsonlledger.Parse(content, func(r LedgerRow) bool { return r.Date != "" })
 }
 
 // TrendVsLast computes the per-tick trend of `row` against the most recent prior
