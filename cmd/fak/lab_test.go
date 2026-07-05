@@ -347,6 +347,43 @@ func TestLabReadinessFromStatusHoldsWarmingInference(t *testing.T) {
 	}
 }
 
+func TestLabReadinessFromStatusHoldsSlowProbeLatency(t *testing.T) {
+	reportsDir := t.TempDir()
+	t.Setenv("FAK_FLEET_REPORTS", reportsDir)
+
+	if err := fleet.WriteReport(reportsDir, "box-a", fleet.Report{
+		State: fleet.StateLive,
+		Inference: &fleet.InferenceStats{
+			Status:         fleet.InferenceReady,
+			Engine:         "route-proxy",
+			Model:          "glm-5.2",
+			ProbeLatencyMS: float64(labTargetLatencyBudgetMS) + 24,
+			Reason:         "route-chat-timeout",
+		},
+	}); err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+
+	var out bytes.Buffer
+	rc := runLab(&out, io.Discard, []string{"readiness", "--from-status", "--json"})
+	if rc != 1 {
+		t.Fatalf("slow ready inference should fail closed, got %d: %s", rc, out.String())
+	}
+	var rec fleet.LabReadiness
+	if err := json.Unmarshal(out.Bytes(), &rec); err != nil {
+		t.Fatalf("readiness --from-status did not emit JSON: %v\n%s", err, out.String())
+	}
+	if rec.Status != fleet.LabWaitPrivateRecover || rec.AdmitLabDispatch {
+		t.Fatalf("readiness from slow ready inference = %+v, want WAIT_PRIVATE_RECOVERY hold", rec)
+	}
+	if rec.NextAction != "route-latency-exceeds-dev-budget-refresh-report-or-use-fallback" {
+		t.Fatalf("next_action = %q, want route latency hold", rec.NextAction)
+	}
+	if rec.Evidence != "scrubbed-fleet-report" {
+		t.Fatalf("evidence = %q, want scrubbed-fleet-report", rec.Evidence)
+	}
+}
+
 func TestLabReadinessFromStatusRequiresNoManualStatus(t *testing.T) {
 	var stderr bytes.Buffer
 	rc := runLab(io.Discard, &stderr, []string{"readiness", "--from-status", "--status", fleet.LabReadyForDevWork})

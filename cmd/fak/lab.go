@@ -381,7 +381,7 @@ func labReadiness(stdout, stderr io.Writer, argv []string) int {
 }
 
 func labReadinessFromSnapshot(machineClass string, snap fleet.Snapshot, now time.Time) fleet.LabReadiness {
-	var reported, useful, warming, blocked int
+	var reported, useful, warming, blocked, latencyDegraded int
 	for _, row := range snap.Rows {
 		if row.Err != "" || row.Inference == nil || row.AgeSec > fleet.DefaultStaleSec {
 			continue
@@ -390,6 +390,10 @@ func labReadinessFromSnapshot(machineClass string, snap fleet.Snapshot, now time
 		switch row.Inference.Status {
 		case fleet.InferenceReady, fleet.InferenceDegraded:
 			if row.State.Healthy() {
+				if labTargetProbeLatencyDegraded(row.Inference) {
+					latencyDegraded++
+					continue
+				}
 				useful++
 			}
 		case fleet.InferenceWarming:
@@ -402,6 +406,8 @@ func labReadinessFromSnapshot(machineClass string, snap fleet.Snapshot, now time
 		return fleet.NewLabReadiness(machineClass, fleet.LabReadyForDevWork, "admit-lab-backed-dispatch", "scrubbed-fleet-report", now)
 	}
 	switch {
+	case latencyDegraded > 0:
+		return fleet.NewLabReadiness(machineClass, fleet.LabWaitPrivateRecover, "route-latency-exceeds-dev-budget-refresh-report-or-use-fallback", "scrubbed-fleet-report", now)
 	case warming > 0:
 		return fleet.NewLabReadiness(machineClass, fleet.LabWaitPrivateRecover, "wait-lab-inference-ready", "scrubbed-fleet-report", now)
 	case blocked > 0:
