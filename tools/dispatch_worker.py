@@ -261,6 +261,16 @@ OPENCODE_GUARD_UPSTREAM_KEY_ENV = "FAK_OPENCODE_GUARD_UPSTREAM_API_KEY"
 # `fak guard` can keep its shadow default, but unattended dispatch needs the
 # actuator enforced at launch.
 CLAUDE_GUARD_PRECOMPACT_ARGS = ["--precompact-hook", "enforce"]
+# Pair the posture actuator with guard's hard budget restart path. The 48k line
+# mirrors gateway.DefaultCompactHistoryBudget; the finite restart limit prevents a
+# bad issue prompt from creating an unbounded relaunch loop.
+CLAUDE_GUARD_CONTEXT_BUDGET_TOKENS = "48000"
+CLAUDE_GUARD_RESTART_LIMIT = "2"
+CLAUDE_GUARD_BUDGET_ARGS = [
+    "--context-budget-tokens", CLAUDE_GUARD_CONTEXT_BUDGET_TOKENS,
+    "--restart-on-budget",
+    "--restart-limit", CLAUDE_GUARD_RESTART_LIMIT,
+]
 
 
 def _opencode_model_provider(command: Sequence[str]) -> str:
@@ -475,9 +485,15 @@ def guard_wrap(
     if not cmd or not fak_bin:
         return cmd
     provider = guard_provider(backend)
+    audit = guard_audit_path(workspace, lane, backend)
     extra: list[str] = []
     if backend == "claude":
-        extra = [*extra, *CLAUDE_GUARD_PRECOMPACT_ARGS]
+        extra = [
+            *extra,
+            *CLAUDE_GUARD_PRECOMPACT_ARGS,
+            "--session-id", audit.stem,
+            *CLAUDE_GUARD_BUDGET_ARGS,
+        ]
     if backend != "claude":
         e = env if env is not None else os.environ
         base = (e.get("FLEET_DOGFOOD_GUARD_BASEURL") or "").strip()
@@ -496,7 +512,6 @@ def guard_wrap(
                 extra = ["--api-key-env", OPENCODE_GUARD_UPSTREAM_KEY_ENV, *extra]
             elif not base.startswith(("http://127.0.0.1:", "http://localhost:")):
                 return cmd  # remote OpenAI-wire upstreams need a key guard can hold
-    audit = guard_audit_path(workspace, lane, backend)
     return [fak_bin, "guard", "--provider", provider, *extra,
             "--audit", str(audit), "--", *cmd]
 

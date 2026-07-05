@@ -209,7 +209,12 @@ class DispatchWorkerTest(unittest.TestCase):
         self.assertEqual(wrapped[1], "guard")
         self.assertEqual(wrapped[wrapped.index("--provider") + 1], "anthropic")
         self.assertEqual(wrapped[wrapped.index("--precompact-hook") + 1], "enforce")
+        self.assertEqual(wrapped[wrapped.index("--context-budget-tokens") + 1], "48000")
+        self.assertIn("--restart-on-budget", wrapped)
+        self.assertEqual(wrapped[wrapped.index("--restart-limit") + 1], "2")
         self.assertIn("--audit", wrapped)
+        audit = Path(wrapped[wrapped.index("--audit") + 1])
+        self.assertEqual(wrapped[wrapped.index("--session-id") + 1], audit.stem)
         # The raw worker argv is preserved verbatim AFTER the `--` separator.
         sep = wrapped.index("--")
         self.assertEqual(wrapped[sep + 1:], raw)
