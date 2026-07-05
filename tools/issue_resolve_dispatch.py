@@ -1529,6 +1529,13 @@ def _github_cli_config_dir(base: dict[str, str] | None = None) -> str | None:
     return None
 
 
+def _opencode_temp_dir(runs_dir: Path, lane: str) -> Path:
+    safe_lane = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(lane or "worker")).strip("-")
+    if not safe_lane:
+        safe_lane = "worker"
+    return runs_dir / ".opencode-tmp" / safe_lane
+
+
 def opencode_worker_env(account_dir: str | None, lane: str, workspace: Path,
                         runs_dir: Path) -> dict[str, str]:
     """Child env for an opencode/glm worker: the account pinned via XDG_CONFIG_HOME
@@ -1542,6 +1549,10 @@ def opencode_worker_env(account_dir: str | None, lane: str, workspace: Path,
     gh_config = _github_cli_config_dir()
     if gh_config:
         env.setdefault("GH_CONFIG_DIR", gh_config)
+    scratch = _opencode_temp_dir(runs_dir, lane)
+    scratch.mkdir(parents=True, exist_ok=True)
+    for key in ("TEMP", "TMP", "TMPDIR"):
+        env[key] = str(scratch)
     return env
 
 

@@ -145,6 +145,28 @@ class OpencodeWorkerEnvTest(unittest.TestCase):
                     str(account), "contract-repair", root, root / ".dispatch-runs")
         self.assertEqual(env["GH_CONFIG_DIR"], str(explicit))
 
+    def test_temp_vars_are_inside_dispatch_runs(self) -> None:
+        import os
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            account = root / "opencode"
+            account.mkdir()
+            runs = root / ".dispatch-runs"
+            with mock.patch.dict(os.environ, {
+                "TEMP": str(root / "external-temp"),
+                "TMP": str(root / "external-tmp"),
+                "TMPDIR": str(root / "external-tmpdir"),
+            }, clear=True):
+                env = mod.opencode_worker_env(str(account), "docs/tools", root, runs)
+
+            expected = root / ".dispatch-runs" / ".opencode-tmp" / "docs-tools"
+            self.assertTrue(expected.is_dir())
+            self.assertEqual(env["TEMP"], str(expected))
+            self.assertEqual(env["TMP"], str(expected))
+            self.assertEqual(env["TMPDIR"], str(expected))
+
 
 class CooldownTest(unittest.TestCase):
     def test_recent_log_is_in_cooldown_old_one_is_not(self) -> None:
