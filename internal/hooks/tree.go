@@ -113,6 +113,10 @@ func HygieneGates() []HygieneGate {
 		{"BRAND_CONSISTENCY", gateBrandConsistencyTree, false},
 		{"TIER_DECLARED", gateTierDeclaredTree, false},
 		{"NEW_PYTHON_TOOL", gatePythonToolTree, false},
+		// GOD_FILE_GROWTH ships default-ON like NEW_PYTHON_TOOL: the grandfathered
+		// baseline (godfile_baseline.go) freezes today's offenders at-size, so the
+		// tree is clean the moment the gate lands — only NEW growth can red it.
+		{"GOD_FILE_GROWTH", gateGodFileGrowthTree, false},
 		{"HARDWARE_TELL", gateHardwareTreeTell, false},
 		// DEAD_CODE (the slop-prevention twin of NEW_PYTHON_TOOL) is DefaultOff: the tree still
 		// carries pre-existing dead unexported symbols the /slop-score loop is retiring, so it
