@@ -637,6 +637,21 @@ summary  = "An issue was held back from dispatch because its declared paths inte
 fix      = "Wait for the known-bad signature to clear (auto-release, W6) or land the elected fixer (W5); an issue disjoint from every live signature dispatches normally. Floor: `fak dispatch route` / `fak dispatch skipped` known-bad hold over the internal/knownbad ledger."
 see_also = ["internal/knownbad", "fak dispatch route", "fak dispatch skipped", "docs/blast-radius-containment-cohort.md"]
 
+# Blast-radius containment W5 (#2717, epic #2712): a SECOND `fak knownbad claim` on a
+# signature already owned by a fixer is refused with this token and the WINNER's identity,
+# so the losing agent gets a pointer to the elected fixer instead of racing a second edit to
+# the shared tree. Exactly-one is enforced by the EXCLUSIVE dos lease
+# (refs/fak/locks/knownbad-<sig>), not by ledger bookkeeping; this is the structured,
+# `dos check-reason`-verifiable form of that refusal. DISTINCT from BLOCKED_BY_KNOWN_BAD:
+# that holds a DISPATCH candidate off an intersecting tree; this elects the single agent that
+# OWNS the fix (so the held issues have a nameable owner to park behind).
+[reasons.KNOWN_BAD_ALREADY_CLAIMED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A `fak knownbad claim` lost the fixer election: a different agent already holds the exclusive lease electing it as this known-bad signature's sole fixer. The refusal returns the current fixer's identity so the loser parks behind them instead of racing a second edit to the shared tree."
+fix      = "Park behind the named fixer (the W4 scope-hold points held issues at them) and wait for the witness-gated auto-release (W6); do not open a competing fix. Floor: `fak knownbad claim <signature>` over the exclusive-lease seam (internal/leaseref)."
+see_also = ["internal/knownbad", "fak knownbad claim", "internal/leaseref", "docs/blast-radius-containment-cohort.md"]
+
 [reasons.GATE_LATENCY_REGRESSION]
 category = "OPERATOR_GATE"
 refusal  = true

@@ -65,6 +65,16 @@ type Record struct {
 	Status           string   `json:"status"`
 	Note             string   `json:"note,omitempty"`
 	FailureHash      string   `json:"failure_hash,omitempty"`
+	// ClaimedBy names the single elected fixer that holds the exclusive lease
+	// electing it as this signature's sole owner-of-the-fix (W5, #2717). It is
+	// bookkeeping the scope-hold (W4) and operator (W7) surfaces read to point a
+	// parked agent at the owner — the exactly-one invariant itself is enforced by
+	// the exclusive lease at refs/fak/locks/<LeaseID(signature)>, never by this
+	// stamp. Empty on an unclaimed row; omitempty keeps a pre-W5 row byte-identical.
+	ClaimedBy string `json:"claimed_by,omitempty"`
+	// ClaimedAtUnix is the unix-seconds instant the claim row was appended (0 when
+	// unclaimed) — the companion to ClaimedBy.
+	ClaimedAtUnix int64 `json:"claimed_at_unix,omitempty"`
 }
 
 // Query is a match request: the tree globs a worker (or the dispatcher) is about
@@ -177,6 +187,37 @@ func Signature(reasonClass string, treeGlobs []string, failureHash string) strin
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
+// leaseIDTag prefixes a fixer-election lease id so its ref basename under
+// refs/fak/locks/ is greppable and cannot collide with another lease kind, and so
+// the id is a valid ref segment even if a signature's body ever led with a dash.
+const leaseIDTag = "knownbad-"
+
+// LeaseID derives the exclusive-lease ref id that elects the single fixer for a
+// signature (W5, #2717): the mutex is a lease at refs/fak/locks/<LeaseID>, so two
+// agents deriving the id from the SAME signature contend for the SAME ref and the
+// arbiter admits exactly one holder. The "sha256:" scheme prefix and any byte that
+// is not ref-safe (leaseref.validID: [A-Za-z0-9._-], no colon) are dropped, yielding
+// one safe segment "knownbad-<hex>". A signature with no usable content returns "",
+// which the shell refuses rather than acquiring a degenerate lease.
+func LeaseID(signature string) string {
+	s := strings.TrimSpace(signature)
+	if i := strings.IndexByte(s, ':'); i >= 0 {
+		s = s[i+1:] // drop the "sha256:" scheme — a colon is ref-illegal
+	}
+	var b strings.Builder
+	for _, c := range []byte(s) {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9',
+			c == '-', c == '_', c == '.':
+			b.WriteByte(c)
+		}
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	return leaseIDTag + b.String()
+}
+
 // NewRecord builds a well-formed open record: normalized+deduped tree globs, the
 // derived signature, and the schema/status stamped. discoveredAtUnix and
 // ttlSeconds are supplied as data (clock-injected by the shell) so the
@@ -230,6 +271,42 @@ func Match(records []Record, q Query, nowUnix int64) []Record {
 		}
 	}
 	return out
+}
+
+// Claimed reports whether a row records an elected fixer (a non-empty ClaimedBy).
+func (r Record) Claimed() bool { return strings.TrimSpace(r.ClaimedBy) != "" }
+
+// WithClaim returns a copy of r stamped with the elected fixer and the claim
+// instant, leaving the signature/tree/reason untouched: a claim SUPERSEDES an
+// earlier row for the same signature via the append-to-supersede idiom, it does not
+// mutate the failure it points at. Recording the claimant is bookkeeping the
+// scope-hold and operator surfaces read — the exactly-one invariant is enforced by
+// the exclusive lease, not this stamp — so a caller must have WON the lease before
+// appending the returned row.
+func (r Record) WithClaim(claimant string, claimedAtUnix int64) Record {
+	out := r
+	out.ClaimedBy = strings.TrimSpace(claimant)
+	out.ClaimedAtUnix = claimedAtUnix
+	return out
+}
+
+// FindLatestLive returns the most recent LIVE record carrying signature and whether
+// one was found. Later rows supersede earlier ones (the append-to-supersede idiom),
+// so the last live row is the current state of that signature — the tree to lease
+// over and whether a claim already stands. A signature with no live row cannot be
+// claimed: it was never recorded, or it has been resolved/expired, so there is no
+// live failure to elect a fixer for.
+func FindLatestLive(records []Record, signature string, nowUnix int64) (Record, bool) {
+	sig := strings.TrimSpace(signature)
+	var found Record
+	ok := false
+	for _, r := range records {
+		if strings.TrimSpace(r.Signature) == sig && r.Live(nowUnix) {
+			found = r
+			ok = true
+		}
+	}
+	return found, ok
 }
 
 // ParseLedger folds JSONL bytes into records. It is deliberately robust for a

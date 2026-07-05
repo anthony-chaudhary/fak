@@ -145,6 +145,77 @@ func TestMatch(t *testing.T) {
 	}
 }
 
+// LeaseID turns a signature into one safe ref segment ("knownbad-<hex>"), strips
+// the "sha256:" scheme (a colon is ref-illegal), is stable for the same signature
+// (two agents derive the same mutex), and returns "" for a signature with no
+// ref-safe content.
+func TestLeaseID(t *testing.T) {
+	sig := Signature("build", []string{"internal/foo/**"}, "")
+	id := LeaseID(sig)
+	if !strings.HasPrefix(id, "knownbad-") {
+		t.Fatalf("LeaseID(%q) = %q, want a knownbad- prefix", sig, id)
+	}
+	if strings.ContainsRune(id, ':') || strings.ContainsAny(id, "/ \t") {
+		t.Errorf("LeaseID produced a non-ref-safe id: %q", id)
+	}
+	if len(id) != len("knownbad-")+64 {
+		t.Errorf("LeaseID(%q) = %q, want knownbad- + 64 hex", sig, id)
+	}
+	// Stable: the same signature yields the same mutex id.
+	if LeaseID(sig) != id {
+		t.Errorf("LeaseID is not deterministic for %q", sig)
+	}
+	// The colon scheme is stripped, not carried through.
+	if LeaseID("sha256:deadBEEF01") != "knownbad-deadBEEF01" {
+		t.Errorf("LeaseID did not strip the sha256: scheme: %q", LeaseID("sha256:deadBEEF01"))
+	}
+	// No usable content -> "" (the shell refuses rather than lease a degenerate id).
+	for _, empty := range []string{"", "   ", "sha256:", "::::", "/\\ "} {
+		if got := LeaseID(empty); got != "" {
+			t.Errorf("LeaseID(%q) = %q, want empty", empty, got)
+		}
+	}
+}
+
+// WithClaim stamps the fixer without mutating the signature/tree, Claimed reflects
+// the stamp, and FindLatestLive returns the LATEST live row for a signature (so a
+// superseding claim row wins over the original) while skipping other signatures and
+// dead rows.
+func TestClaimStampAndFindLatestLive(t *testing.T) {
+	const now = int64(1_000_000)
+	orig := NewRecord("build", []string{"internal/foo/**"}, "foo broke", "agent-1", "", now-10, 0)
+	if orig.Claimed() {
+		t.Fatalf("a fresh record must not be Claimed()")
+	}
+	claim := orig.WithClaim("fixer-7", now)
+	if !claim.Claimed() || claim.ClaimedBy != "fixer-7" || claim.ClaimedAtUnix != now {
+		t.Fatalf("WithClaim did not stamp the fixer: %+v", claim)
+	}
+	if claim.Signature != orig.Signature || len(claim.TreeGlobs) != len(orig.TreeGlobs) || claim.ReasonClass != orig.ReasonClass {
+		t.Errorf("WithClaim mutated the failure it points at: %+v vs %+v", claim, orig)
+	}
+	if orig.Claimed() {
+		t.Errorf("WithClaim mutated the receiver instead of returning a copy")
+	}
+
+	other := NewRecord("test", []string{"internal/bar/**"}, "", "a2", "", now-5, 0)
+	dead := NewRecord("lint", []string{"internal/qux/**"}, "expired", "a3", "", now-500, 100) // TTL elapsed by `now`
+	records := []Record{orig, other, claim, dead}
+
+	got, ok := FindLatestLive(records, orig.Signature, now)
+	if !ok || !got.Claimed() || got.ClaimedBy != "fixer-7" {
+		t.Fatalf("FindLatestLive did not return the superseding claim row: %+v ok=%v", got, ok)
+	}
+	// An unknown signature is not found.
+	if _, ok := FindLatestLive(records, "sha256:nope", now); ok {
+		t.Errorf("FindLatestLive found a signature that is not in the ledger")
+	}
+	// A signature whose only rows are dead is not live/claimable.
+	if _, ok := FindLatestLive([]Record{dead}, dead.Signature, now); ok {
+		t.Errorf("FindLatestLive returned a signature with no live row")
+	}
+}
+
 // ParseLedger round-trips a written line and skips blank, malformed, and
 // foreign-schema rows without erroring — the shared-ledger robustness property.
 func TestParseLedgerRobust(t *testing.T) {

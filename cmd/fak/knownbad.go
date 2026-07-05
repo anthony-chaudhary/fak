@@ -10,13 +10,21 @@ package main
 //       known-bad signature, printing the matching record(s). Exit is non-zero
 //       (with --json, matched:false) when nothing matches, so a worker OR the
 //       dispatcher can short-circuit before burning a cycle.
+//   fak knownbad claim <signature> [--by ID] [--ttl S] [--json]
+//       elects EXACTLY ONE fixer for a live signature by acquiring an EXCLUSIVE dos
+//       lease over its broken tree (W5, #2717). The first claimant wins (exit 0) and
+//       is stamped onto the ledger; a second, competing claimant is REFUSED (exit 3,
+//       reason KNOWN_BAD_ALREADY_CLAIMED) and told the current fixer's identity so it
+//       parks behind them instead of racing a second edit to the shared tree.
 //
-// All impurity lives here: the ledger read/write, the clock (Unix seconds,
-// injected as `nowUnix` so runKnownBad is deterministic under test), and flag
-// parsing. The signature derivation, tree intersection, and liveness are the pure
+// All impurity lives here: the ledger read/write, the exclusive-lease store (git
+// refs, via internal/leaseref), the clock (Unix seconds, injected as `nowUnix` so
+// runKnownBad is deterministic under test), and flag parsing. The signature
+// derivation, tree intersection, liveness, and the lease-id derivation are the pure
 // core in internal/knownbad.
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -27,6 +35,8 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/knownbad"
+	"github.com/anthony-chaudhary/fak/internal/leaseref"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 func cmdKnownBad(argv []string) {
@@ -35,7 +45,7 @@ func cmdKnownBad(argv []string) {
 
 func runKnownBad(stdout, stderr io.Writer, argv []string, nowUnix int64) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "fak knownbad: expected a subcommand (record|match)")
+		fmt.Fprintln(stderr, "fak knownbad: expected a subcommand (record|match|claim)")
 		return 2
 	}
 	switch argv[0] {
@@ -43,11 +53,13 @@ func runKnownBad(stdout, stderr io.Writer, argv []string, nowUnix int64) int {
 		return runKnownBadRecord(stdout, stderr, argv[1:], nowUnix)
 	case "match":
 		return runKnownBadMatch(stdout, stderr, argv[1:], nowUnix)
+	case "claim":
+		return runKnownBadClaim(stdout, stderr, argv[1:], nowUnix)
 	case "-h", "--help", "help":
-		fmt.Fprintln(stderr, "fak knownbad: record | match  (fleet-wide known-bad signature ledger)")
+		fmt.Fprintln(stderr, "fak knownbad: record | match | claim  (fleet-wide known-bad signature ledger)")
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak knownbad: unknown subcommand %q (want record|match)\n", argv[0])
+		fmt.Fprintf(stderr, "fak knownbad: unknown subcommand %q (want record|match|claim)\n", argv[0])
 		return 2
 	}
 }
@@ -170,6 +182,158 @@ func runKnownBadMatch(stdout, stderr io.Writer, argv []string, nowUnix int64) in
 	if len(matches) > 0 {
 		return 3
 	}
+	return 0
+}
+
+// reasonKnownBadAlreadyClaimed is the closed-vocabulary refusal a LOSING claim
+// carries: a DIFFERENT agent already holds the exclusive lease electing it as this
+// signature's sole fixer. Registered in dos.toml [reasons.KNOWN_BAD_ALREADY_CLAIMED]
+// so the refusal is `dos check-reason`-verifiable, not free text. The loser is always
+// handed the WINNER's identity (a pointer to the fixer), never a bare "refused".
+const reasonKnownBadAlreadyClaimed = "KNOWN_BAD_ALREADY_CLAIMED"
+
+// knownBadClaimResult is the claim verb's --json shape. On a win OK is true, Record is
+// the stamped claim row, and Fixer is the claimant; on a loss OK is false, Reason is
+// KNOWN_BAD_ALREADY_CLAIMED, and Fixer is the WINNER (the pointer the loser needs),
+// with the underlying lease verdict carried as evidence.
+type knownBadClaimResult struct {
+	Schema    string                 `json:"schema"`
+	OK        bool                   `json:"ok"`
+	Signature string                 `json:"signature"`
+	LeaseID   string                 `json:"lease_id"`
+	Fixer     string                 `json:"fixer,omitempty"`
+	Reason    string                 `json:"reason,omitempty"`
+	Detail    string                 `json:"detail,omitempty"`
+	Record    *knownbad.Record       `json:"record,omitempty"`
+	Lease     *leaseref.FenceVerdict `json:"lease,omitempty"`
+}
+
+// runKnownBadClaim elects exactly one fixer for a live known-bad signature (W5,
+// #2717). The signature is the sole positional argument (flags first). The exclusive
+// lease at refs/fak/locks/knownbad-<sig> IS the exactly-one gate: AcquireFenced
+// CAS-creates the ref when free, renews it for the same holder (an idempotent
+// re-claim), and refuses a different live holder — so two racing claimants can both
+// append-intend, but only one can own the ref. The ledger stamp is bookkeeping the
+// winner writes AFTER winning; it never decides the election.
+func runKnownBadClaim(stdout, stderr io.Writer, argv []string, nowUnix int64) int {
+	fs := flag.NewFlagSet("knownbad claim", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	by := fs.String("by", "", "claimant id (default: $FAK_AGENT_ID, else hostname)")
+	session := fs.String("session", "", "owning session id for lease-liveness reap (a dead claimant's lease is reaped by the session path)")
+	ttl := fs.Int64("ttl", 0, "claim lease lifetime in seconds (0 = no expiry)")
+	dir := fs.String("dir", "", "repo dir for the exclusive-lease store (default: git discovery from cwd)")
+	ledger := fs.String("ledger", "", "ledger path override (default: <root>/"+knownbad.DefaultLedgerRel+")")
+	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(stderr, "fak knownbad claim: exactly one <signature> is required (flags first): fak knownbad claim [--by ID] [--ttl S] <signature>")
+		return 2
+	}
+	sig := strings.TrimSpace(fs.Arg(0))
+	leaseID := knownbad.LeaseID(sig)
+	if leaseID == "" {
+		fmt.Fprintf(stderr, "fak knownbad claim: %q is not a usable signature (no ref-safe content)\n", sig)
+		return 2
+	}
+
+	// Find the signature's live record to learn the broken tree to lease over. A
+	// signature with no live row cannot be claimed — never recorded, or already
+	// resolved/expired, so there is no live failure to elect a fixer for.
+	ledgerPath := knownBadLedgerPath(*ledger)
+	records, err := readKnownBadLedger(ledgerPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak knownbad claim: %v\n", err)
+		return 1
+	}
+	sigRec, found := knownbad.FindLatestLive(records, sig, nowUnix)
+	if !found {
+		fmt.Fprintf(stderr, "fak knownbad claim: no LIVE known-bad signature %s in %s (record it first, or it has been resolved)\n", sig, ledgerPath)
+		return 2
+	}
+
+	claimant := knownBadDiscoverer(*by)
+	*dir = pathutil.ExpandTilde(*dir)
+	store := leaseref.NewInDir(*dir)
+	ctx := context.Background()
+	req := leaseref.Record{
+		ID:         leaseID,
+		TreeGlobs:  append([]string(nil), sigRec.TreeGlobs...),
+		Holder:     claimant,
+		SessionID:  strings.TrimSpace(*session),
+		TTLSeconds: *ttl,
+	}
+	// The exclusive lease is the exactly-one gate. A simultaneous CREATE loses the CAS
+	// as LEASE_CONTENDED, which names no winner; retry a bounded number of times so the
+	// loser re-reads the now-committed ref and resolves to a definitive LEASE_HELD
+	// carrying the winner — turning an ambiguous race into a nameable fixer.
+	var verdict leaseref.FenceVerdict
+	for attempt := 0; attempt < 5; attempt++ {
+		if _, verdict, err = store.AcquireFenced(ctx, req, time.Unix(nowUnix, 0)); err != nil {
+			fmt.Fprintf(stderr, "fak knownbad claim: acquire exclusive lease: %v\n", err)
+			return 1
+		}
+		if verdict.OK || verdict.Reason != leaseref.ReasonLeaseContended {
+			break
+		}
+	}
+
+	if !verdict.OK {
+		// Lost the election. A different live holder refuses LEASE_HELD carrying the
+		// winner; a simultaneous-CREATE race loses the CAS as LEASE_CONTENDED, which
+		// carries NO holder — so re-read the ref to recover the winner's identity. The
+		// loser must always get a pointer to the fixer, never a bare "refused".
+		fixer := verdict.Holder
+		if fixer == "" {
+			if cur, ok, gerr := store.Get(ctx, leaseID); gerr == nil && ok {
+				fixer = cur.Holder
+			}
+		}
+		res := knownBadClaimResult{
+			Schema:    knownbad.Schema,
+			OK:        false,
+			Signature: sig,
+			LeaseID:   leaseID,
+			Fixer:     fixer,
+			Reason:    reasonKnownBadAlreadyClaimed,
+			Detail:    verdict.Detail,
+			Lease:     &verdict,
+		}
+		if *asJSON {
+			if code := knownBadEmitJSON(stdout, stderr, res); code != 0 {
+				return code
+			}
+		} else {
+			fmt.Fprintf(stdout, "refused: known-bad %s already claimed by fixer %q (%s); park behind them — do not open a competing fix\n",
+				sig, fixer, reasonKnownBadAlreadyClaimed)
+		}
+		return leaserefRefused
+	}
+
+	// Won the election: stamp the claimant onto the ledger as a superseding row. The
+	// lease guarantees we are the sole writer of this claim, so the append is not a
+	// race — but if it fails we surface an error rather than claim a silent success.
+	claimRec := sigRec.WithClaim(claimant, nowUnix)
+	if err := appendKnownBadRow(ledgerPath, claimRec); err != nil {
+		fmt.Fprintf(stderr, "fak knownbad claim: won the exclusive lease but could not record the claim: %v\n", err)
+		return 1
+	}
+	res := knownBadClaimResult{
+		Schema:    knownbad.Schema,
+		OK:        true,
+		Signature: sig,
+		LeaseID:   leaseID,
+		Fixer:     claimant,
+		Detail:    verdict.Detail,
+		Record:    &claimRec,
+		Lease:     &verdict,
+	}
+	if *asJSON {
+		return knownBadEmitJSON(stdout, stderr, res)
+	}
+	fmt.Fprintf(stdout, "claimed: known-bad %s -> fixer %q owns the fix (exclusive lease %s over %s)\n",
+		sig, claimant, leaseID, strings.Join(claimRec.TreeGlobs, ","))
 	return 0
 }
 
