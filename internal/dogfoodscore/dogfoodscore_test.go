@@ -40,7 +40,7 @@ func TestScanConflation_DetectsClaimOverError(t *testing.T) {
 		stopErrLine(),
 		asstLine("Everything is working fine — the hook ran successfully with no errors."),
 	}, "\n")
-	hadErr, hits := scanTranscriptBytes([]byte(conflating), "sess-conflate")
+	hadErr, hits := scanTranscriptBytes([]byte(conflating), "sess-conflate", DefaultConflationContextEvents)
 	if !hadErr {
 		t.Fatalf("expected the transcript to register a Stop-hook error")
 	}
@@ -58,7 +58,7 @@ func TestScanConflation_DetectsClaimOverError(t *testing.T) {
 // session (which echoes the phrase from its task prompt) would be miscounted.
 func TestScanConflation_AssistantDiscussingThePhraseDoesNotSelfTrigger(t *testing.T) {
 	discuss := asstLine("The paste shows a 'Stop hook error: No stderr output' line; everything is working fine on my end though.")
-	hadErr, hits := scanTranscriptBytes([]byte(discuss), "sess-discuss")
+	hadErr, hits := scanTranscriptBytes([]byte(discuss), "sess-discuss", DefaultConflationContextEvents)
 	if hadErr {
 		t.Fatalf("an assistant merely quoting the phrase is not a live harness error")
 	}
@@ -74,7 +74,7 @@ func TestScanConflation_GenuineFeedbackFormIsAHit(t *testing.T) {
 		stopErrLine(),
 		asstLine("The memory-sync Stop hook ran clean (no errors). Nothing further needed."),
 	}, "\n")
-	hadErr, hits := scanTranscriptBytes([]byte(conflating), "sess-9e977dd8")
+	hadErr, hits := scanTranscriptBytes([]byte(conflating), "sess-9e977dd8", DefaultConflationContextEvents)
 	if !hadErr {
 		t.Fatalf("the genuine 'Stop hook feedback: ... No stderr output' form must register as an error")
 	}
@@ -92,7 +92,7 @@ func TestScanConflation_HarnessLineIsMatchedTrigger(t *testing.T) {
 		exitStatus,
 		asstLine("The cleanup completed cleanly with no errors."),
 	}, "\n")
-	hadErr, hits := scanTranscriptBytes([]byte(transcript), "sess-distinct-errors")
+	hadErr, hits := scanTranscriptBytes([]byte(transcript), "sess-distinct-errors", DefaultConflationContextEvents)
 	if !hadErr {
 		t.Fatalf("expected distinct Stop-hook signatures to register as errors")
 	}
@@ -116,7 +116,7 @@ func TestScanConflation_SuccessClaimParaphraseCorpus(t *testing.T) {
 			stopErrLine(),
 			asstLine(claim),
 		}, "\n")
-		hadErr, hits := scanTranscriptBytes([]byte(transcript), "sess-paraphrase")
+		hadErr, hits := scanTranscriptBytes([]byte(transcript), "sess-paraphrase", DefaultConflationContextEvents)
 		if !hadErr {
 			t.Fatalf("claim %q: expected Stop-hook error to register", claim)
 		}
@@ -132,7 +132,7 @@ func TestScanConflation_SafeNegativeCorpus(t *testing.T) {
 			stopErrLine(),
 			asstLine(text),
 		}, "\n")
-		hadErr, hits := scanTranscriptBytes([]byte(transcript), "sess-safe-quote")
+		hadErr, hits := scanTranscriptBytes([]byte(transcript), "sess-safe-quote", DefaultConflationContextEvents)
 		if !hadErr {
 			t.Fatalf("safe text %q: expected Stop-hook error to register", text)
 		}
@@ -145,7 +145,7 @@ func TestScanConflation_SafeNegativeCorpus(t *testing.T) {
 			goalGateLine(),
 			asstLine(claim),
 		}, "\n")
-		hadErr, hits := scanTranscriptBytes([]byte(transcript), "sess-safe-gate")
+		hadErr, hits := scanTranscriptBytes([]byte(transcript), "sess-safe-gate", DefaultConflationContextEvents)
 		if hadErr || len(hits) != 0 {
 			t.Fatalf("goal-gate plus claim %q = hadErr:%v hits:%+v, want no error and no hit", claim, hadErr, hits)
 		}
@@ -159,7 +159,7 @@ func TestScanConflation_GoalGateIsNotAnError(t *testing.T) {
 		goalGateLine(),
 		asstLine("All good, the build passed and everything is working."),
 	}, "\n")
-	hadErr, hits := scanTranscriptBytes([]byte(benign), "sess-gate")
+	hadErr, hits := scanTranscriptBytes([]byte(benign), "sess-gate", DefaultConflationContextEvents)
 	if hadErr {
 		t.Fatalf("the keep-working goal-gate is not a Stop-hook error")
 	}
@@ -171,7 +171,7 @@ func TestScanConflation_GoalGateIsNotAnError(t *testing.T) {
 func TestScanConflation_CleanClaimIsNotAHit(t *testing.T) {
 	// A success claim with NO Stop-hook error anywhere is honest, not a conflation.
 	clean := asstLine("All good — the build passed and the run completed cleanly.")
-	hadErr, hits := scanTranscriptBytes([]byte(clean), "sess-clean")
+	hadErr, hits := scanTranscriptBytes([]byte(clean), "sess-clean", DefaultConflationContextEvents)
 	if hadErr {
 		t.Fatalf("no Stop-hook error was present; got hadErr=true")
 	}
@@ -186,7 +186,7 @@ func TestScanConflation_ErrorWithNoClaimIsNotAHit(t *testing.T) {
 		stopErrLine(),
 		asstLine("The Stop hook reported an error; the memory archive may not have synced. Investigating."),
 	}, "\n")
-	hadErr, hits := scanTranscriptBytes([]byte(honest), "sess-honest")
+	hadErr, hits := scanTranscriptBytes([]byte(honest), "sess-honest", DefaultConflationContextEvents)
 	if !hadErr {
 		t.Fatalf("expected the Stop-hook error to be registered")
 	}
@@ -204,9 +204,43 @@ func TestScanConflation_ClaimFarFromErrorIsNotAHit(t *testing.T) {
 		b.WriteString(asstLine("Working on the next step.") + "\n")
 	}
 	b.WriteString(asstLine("All clear, everything is working now."))
-	_, hits := scanTranscriptBytes([]byte(b.String()), "sess-far")
+	_, hits := scanTranscriptBytes([]byte(b.String()), "sess-far", DefaultConflationContextEvents)
 	if len(hits) != 0 {
 		t.Fatalf("a claim outside the context window of the error must not be a hit, got %d", len(hits))
+	}
+}
+
+// conflationAtDistance places a genuine Stop-hook error, then (distance-1) neutral
+// filler events, then a success claim exactly `distance` events after the error.
+func conflationAtDistance(distance int) string {
+	lines := []string{stopErrLine()}
+	for i := 1; i < distance; i++ {
+		lines = append(lines, asstLine("Working on the next step."))
+	}
+	lines = append(lines, asstLine("All clear, everything is working now."))
+	return strings.Join(lines, "\n")
+}
+
+// The ctx window is a closed boundary AND a real knob, not a baked constant: a claim
+// exactly ctx events after the error is a hit, the ctx+1 event is excluded, and
+// narrowing ctx re-scopes what counts. The last two assertions cannot hold unless ctx
+// is threaded as a parameter — they pin the semantics #1948 asked to lock.
+func TestScanConflation_ContextWindowBoundaryAndConfigurable(t *testing.T) {
+	const ctx = DefaultConflationContextEvents // 3
+	if _, hits := scanTranscriptBytes([]byte(conflationAtDistance(ctx)), "sess-at-ctx", ctx); len(hits) != 1 {
+		t.Fatalf("claim exactly ctx=%d events after the error must be a hit, got %d", ctx, len(hits))
+	}
+	if _, hits := scanTranscriptBytes([]byte(conflationAtDistance(ctx+1)), "sess-past-ctx", ctx); len(hits) != 0 {
+		t.Fatalf("claim at ctx+1=%d events is out of window and must be excluded, got %d", ctx+1, len(hits))
+	}
+	// A distance-2 claim is a hit at the default window but must fall out when ctx is
+	// narrowed to 1 — proving the window is configurable, not hardcoded.
+	body := conflationAtDistance(2)
+	if _, hits := scanTranscriptBytes([]byte(body), "sess-cfg-default", DefaultConflationContextEvents); len(hits) != 1 {
+		t.Fatalf("distance-2 claim is a hit at the default ctx window, got %d", len(hits))
+	}
+	if _, hits := scanTranscriptBytes([]byte(body), "sess-cfg-narrow", 1); len(hits) != 0 {
+		t.Fatalf("distance-2 claim must be excluded when ctx is narrowed to 1, got %d", len(hits))
 	}
 }
 

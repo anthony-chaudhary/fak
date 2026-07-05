@@ -39,7 +39,18 @@ const (
 	// DefaultConflationWindowHours scopes the realized half to recent sessions so a
 	// long-fixed historical conflation does not keep the score red forever.
 	DefaultConflationWindowHours = 72
-	harnessLineClip              = 240
+	// DefaultConflationContextEvents is how many events may separate a genuine
+	// Stop-hook error from a success claim for the two to count as the same turn.
+	// At the default 3, a claim within 3 events after the error is a conflation and
+	// the 4th event is intentionally out of window. Exposed as a flag so a harness
+	// that grows to emit more intermediate events can widen the window rather than
+	// silently start missing conflations.
+	DefaultConflationContextEvents = 3
+	// DefaultConflationSampleCap bounds how many conflation hits are retained as
+	// displayed evidence samples; the score still counts every hit. Exposed as a
+	// flag so a high-frequency conflation run can surface more than the first few.
+	DefaultConflationSampleCap = 6
+	harnessLineClip            = 240
 )
 
 // SuccessClaimRe matches an assistant turn asserting the run went fine. It is broad
@@ -133,6 +144,13 @@ type Options struct {
 	Now         time.Time
 	ClaudeHome  string
 	WindowHours int
+	// ContextEvents is the max event distance between a Stop-hook error and a
+	// success claim for the two to be charged as one conflation (default
+	// DefaultConflationContextEvents).
+	ContextEvents int
+	// SampleCap bounds how many conflation hits are kept as displayed samples
+	// (default DefaultConflationSampleCap); the score counts every hit regardless.
+	SampleCap int
 }
 
 func (o Options) normalize() Options {
@@ -144,6 +162,12 @@ func (o Options) normalize() Options {
 	}
 	if o.WindowHours <= 0 {
 		o.WindowHours = DefaultConflationWindowHours
+	}
+	if o.ContextEvents <= 0 {
+		o.ContextEvents = DefaultConflationContextEvents
+	}
+	if o.SampleCap <= 0 {
+		o.SampleCap = DefaultConflationSampleCap
 	}
 	return o
 }
@@ -241,14 +265,14 @@ func scanConflation(opts Options) Evidence {
 			}
 			ev.TranscriptsScanned++
 			session := strings.TrimSuffix(entry.Name(), ".jsonl")
-			hadErr, hits := scanTranscriptBytes(readFile(path), session)
+			hadErr, hits := scanTranscriptBytes(readFile(path), session, opts.ContextEvents)
 			if hadErr {
 				ev.TranscriptsWithError++
 			}
 			ev.ConflationTurns += len(hits)
-			if len(ev.ConflationHits) < 6 {
+			if len(ev.ConflationHits) < opts.SampleCap {
 				for _, h := range hits {
-					if len(ev.ConflationHits) >= 6 {
+					if len(ev.ConflationHits) >= opts.SampleCap {
 						break
 					}
 					ev.ConflationHits = append(ev.ConflationHits, h)
@@ -261,17 +285,19 @@ func scanConflation(opts Options) Evidence {
 
 // scanTranscriptBytes is the pure core: given a transcript's bytes, return whether it
 // reported any Stop-hook error and the conflation hits within it. Exposed for tests.
-func scanTranscriptBytes(raw []byte, session string) (hadError bool, hits []ConflationHit) {
+func scanTranscriptBytes(raw []byte, session string, ctx int) (hadError bool, hits []ConflationHit) {
 	if len(raw) == 0 {
 		return false, nil
 	}
+	if ctx <= 0 {
+		ctx = DefaultConflationContextEvents
+	}
 	lines := strings.Split(string(raw), "\n")
 	// Sliding context: a success claim is a conflation only if a GENUINE Stop-hook error
-	// — emitted by a NON-assistant event — sits within a few events of the claim. The
+	// — emitted by a NON-assistant event — sits within `ctx` events of the claim. The
 	// error must come from a different event than the claim, so an assistant turn that
 	// merely quotes or discusses "Stop hook error" never self-triggers (that text is
 	// pasted/prompt echo, not a live hook failure the model narrated over).
-	const ctx = 3
 	errAt := -1 // index of the most recent genuine (non-assistant) Stop-hook-error event
 	errLine := ""
 	for i, line := range lines {

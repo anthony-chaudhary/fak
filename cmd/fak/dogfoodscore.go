@@ -17,6 +17,8 @@ func runDogfoodScore(stdout, stderr io.Writer, argv []string) int {
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	claudeHome := fs.String("claude-home", "", "user home holding ~/.claude*/projects (default: detected)")
 	windowHours := fs.Int("window-hours", dogfoodscore.DefaultConflationWindowHours, "only score sessions newer than this many hours")
+	contextEvents := fs.Int("context-events", dogfoodscore.DefaultConflationContextEvents, "max event distance between a Stop-hook error and a success claim for the two to count as one conflation")
+	sampleCap := fs.Int("sample-cap", dogfoodscore.DefaultConflationSampleCap, "max conflation hits retained as displayed evidence samples (the score counts every hit)")
 	asJSON := fs.Bool("json", false, "emit control-pane JSON")
 	asMarkdown := fs.Bool("markdown", false, "emit scorecard markdown")
 	comparePath := fs.String("compare", "", "compare against a prior --json payload")
@@ -32,9 +34,11 @@ func runDogfoodScore(stdout, stderr io.Writer, argv []string) int {
 		root = repoRoot()
 	}
 	payload := dogfoodscore.Build(dogfoodscore.Options{
-		Root:        root,
-		ClaudeHome:  *claudeHome,
-		WindowHours: *windowHours,
+		Root:          root,
+		ClaudeHome:    *claudeHome,
+		WindowHours:   *windowHours,
+		ContextEvents: *contextEvents,
+		SampleCap:     *sampleCap,
 	})
 	if *comparePath != "" {
 		base, ok := readCompareBase(stderr, "fak dogfood-score", *comparePath)
