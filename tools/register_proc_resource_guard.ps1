@@ -9,7 +9,9 @@ process pinning one core to 100% (a stuck spin loop / wedged terminal), which ha
 normal thread count and so trips nothing else.
 
 Report-only by default (logs to tools/_watchdog/proc_guard.log; never kills). Pass
--Enact to flip it to reaping: it then reaps flagged NON-protected runaways + orphans,
+-Enact to flip it to reaping: it then reaps flagged NON-protected runaways, orphaned
+helpers, and orphaned/idle launcher shells (bash/sh/pwsh with a dead owner or no live
+children -- always scanned so report-only installs log kill candidates for the soak),
 and a CPU pin only after it has held the threshold across every sample window
 (default 4 samples x 2s = 6s sustained), so a legitimate compile/test burst is never
 killed. It never touches an OS-critical process (System/csrss/lsass/...) or its own
@@ -91,16 +93,21 @@ if ($py -match '(?i)python\.exe$') { $c = $py -replace '(?i)python\.exe$','pytho
 elseif ($py -match '(?i)\\py\.exe$') { $c = $py -replace '(?i)py\.exe$','pyw.exe'; if (Test-Path $c) { $pyw = $c } }
 
 # The guard scans every live process; it flags thread/handle runaways, reaps orphaned
-# dos_mcp.server helpers, and (the single-threaded-core-pin witness) a process holding
-# >$MaxCpuPct% of one core sustained across $CpuSamples windows. --enact only added with -Enact.
+# dos_mcp.server helpers, reaps orphaned/idle launcher shells (bash/sh/pwsh with a dead
+# owner or zero live children -- the Git-for-Windows sh.exe hook-child sprawl the
+# find/grep reaper never sees), and (the single-threaded-core-pin witness) a process
+# holding >$MaxCpuPct% of one core sustained across $CpuSamples windows. --reap-idle-shells
+# is always passed so report-only installs still LOG idle/orphan-shell kill candidates to
+# the jsonl (the dry-run soak before flipping), while --enact -- only added with -Enact --
+# is what actually reaps any of them.
 $enactArg = if ($Enact) { ' --enact' } else { '' }
 $useNative = $FakExe -and (Test-Path $FakExe)
 if ($useNative) {
   $guardExe = $FakExe
-  $guardArgs = "process-guard report --reap-orphans --max-cpu-pct $MaxCpuPct --cpu-window $CpuWindow --cpu-samples $CpuSamples$enactArg"
+  $guardArgs = "process-guard report --reap-orphans --reap-idle-shells --max-cpu-pct $MaxCpuPct --cpu-window $CpuWindow --cpu-samples $CpuSamples$enactArg"
 } else {
   $guardExe = ''
-  $guardArgs = "`"$Guard`" --reap-orphans --max-cpu-pct $MaxCpuPct --cpu-window $CpuWindow --cpu-samples $CpuSamples$enactArg"
+  $guardArgs = "`"$Guard`" --reap-orphans --reap-idle-shells --max-cpu-pct $MaxCpuPct --cpu-window $CpuWindow --cpu-samples $CpuSamples$enactArg"
 }
 
 $trigger  = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
@@ -140,7 +147,7 @@ try {
   }
 }
 
-$mode = if ($Enact) { "ENACT (reaps runaways/orphans + CPU pins >$MaxCpuPct%/core sustained ${CpuSamples}x${CpuWindow}s)" } else { 'REPORT-ONLY (logs intentions only)' }
+$mode = if ($Enact) { "ENACT (reaps runaways/orphans/idle+orphan shells + CPU pins >$MaxCpuPct%/core sustained ${CpuSamples}x${CpuWindow}s)" } else { 'REPORT-ONLY (logs kill candidates, incl. idle/orphan shells; kills nothing)' }
 Write-Output "installed $TaskName - every $EveryMin min, $mode"
 if ($useNative) { Write-Output "  guard: native fak process-guard ($FakExe)" }
 else { Write-Output "  guard: legacy Python fallback ($Guard)" }
