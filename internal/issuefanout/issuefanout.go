@@ -306,6 +306,20 @@ func Build(in Input) (Plan, error) {
 	if len(plan.Candidates) < MinFanout {
 		return Plan{}, refusef("issuefanout: area filter leaves %d candidates, below the fan-out floor %d", len(plan.Candidates), MinFanout)
 	}
+	// The leaf's one promise is that every follow-on is dispatchable the moment
+	// it is filed. A hostile or malformed input (a leaf outside the marker-key
+	// alphabet, a title/spine tripping the private-boundary screen) would
+	// otherwise flow silently into candidates the issue contract refuses after
+	// filing — so Build reviews its own output and refuses the input instead.
+	for _, c := range plan.Candidates {
+		if r := issuecontract.ReviewCandidate(c, issuecontract.Options{}); r.Dispatchability != issuecontract.Dispatchable {
+			detail := strings.Join(r.Reasons, ", ")
+			if len(r.MissingFields) > 0 {
+				detail += "; missing/invalid: " + strings.Join(r.MissingFields, ", ")
+			}
+			return Plan{}, refusef("issuefanout: candidate %s fails the issue contract (%s) — fix the input field it names (the leaf must fit the marker-key alphabet; title/spine must not carry private-boundary text)", c.Key, detail)
+		}
+	}
 	return plan, nil
 }
 
