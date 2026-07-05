@@ -151,6 +151,28 @@ func TestDiagnoseRows_EmptyJournalIsSound(t *testing.T) {
 	}
 }
 
+func TestRunAuditDiagnose_RenderReportsEmptyJournal(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "guard-audit.jsonl")
+	writeRowsFile(t, path, nil)
+
+	var stdout, stderr bytes.Buffer
+	code := runAuditDiagnose(&stdout, &stderr, path, false)
+	if code != 0 {
+		t.Fatalf("empty journal should exit 0, got %d (stderr=%s)", code, stderr.String())
+	}
+	for _, want := range []string{
+		"rows           : 0",
+		"empty journal",
+		"no adjudicated row",
+		"child startup/auth",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("render missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
 func TestDiagnoseRows_ReportsRepeatedAllowedCallLivelock(t *testing.T) {
 	var rows []journal.Row
 	prev := ""

@@ -403,6 +403,9 @@ func renderAuditDiagnosis(d auditDiagnosis) string {
 			out("                   %d row(s) reference a parent that is not in the file (a dropped/edited row).\n", d.OrphanRows)
 		}
 	}
+	if d.Rows == 0 {
+		out("  empty journal  : guard created a trail but recorded no adjudicated row; check child startup/auth, hook binding, or whether the agent reached tool use\n")
+	}
 
 	// Friction fold: what the floor decided. Sorted for a stable render.
 	f := d.Friction
