@@ -55,10 +55,19 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      # Self-test the cachevalue-SPECIFIC packages only. We deliberately do NOT run
+      # `go test ./cmd/fak` here: that compiles the whole, heavily-developed cmd/fak
+      # TEST package, so an unrelated in-flight compile break in ANY cmd/fak test file
+      # would fail this job and SILENTLY drop the daily post. That is exactly what
+      # lapsed the #cache-value cadence (~58h STALE): the 2026-07-03 scheduled run
+      # failed only on `undefined: dispatchCodexProcessPIDsExcludingParents` in an
+      # unrelated dispatch_tick_test.go, never on cachevalue code. The `go run ./cmd/fak
+      # cachevalue feed --dry-run` render step below is the real end-to-end CLI smoke
+      # test (go run compiles only non-test files), matching every sibling *-feed.yml,
+      # none of which gate their post on `go test ./cmd/fak`.
       - name: cachevalue feed self-test
         run: |
           go test ./internal/cachevaluereport ./internal/cachevaluepost
-          go test ./cmd/fak -run TestCachevalue
 
       # Always render the card to the step summary (and as the artifact) so the run is
       # auditable even when nothing posts (missing secret / manual dry-run / fork).
