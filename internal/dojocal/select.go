@@ -1,7 +1,6 @@
 package dojocal
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dojo"
+	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 )
 
 const (
@@ -270,24 +270,9 @@ func AppendJournalLine(row JournalRow) (string, error) {
 
 // ParseJournal parses committed dojo-RSI JSONL, skipping torn or foreign rows.
 func ParseJournal(content string) []JournalRow {
-	var rows []JournalRow
-	sc := bufio.NewScanner(strings.NewReader(content))
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		var row JournalRow
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			continue
-		}
-		if row.Schema != JournalSchema {
-			continue
-		}
-		rows = append(rows, row)
-	}
-	return rows
+	return jsonlledger.Parse(content, func(r JournalRow) bool {
+		return r.Schema == JournalSchema
+	})
 }
 
 // FoldTrend summarizes the KEEP/REVERT journal for the CI feed.

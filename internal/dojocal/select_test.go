@@ -133,6 +133,24 @@ func TestJournalTrendCountsKeepRoutesAndFloorEscalate(t *testing.T) {
 	}
 }
 
+// TestParseJournalSkipsBlankMalformedAndForeignRows pins ParseJournal's
+// tolerance contract: blank lines, torn (unparseable) lines, and rows another
+// schema wrote fold away silently; committed rows survive in file order.
+func TestParseJournalSkipsBlankMalformedAndForeignRows(t *testing.T) {
+	content := `{"schema":"` + JournalSchema + `","tick":1,"decision":"KEEP"}` + "\n" +
+		"\n" + // blank line tolerated
+		`{"schema":"some-other-ledger/1","tick":9}` + "\n" + // foreign schema skipped
+		`{torn` + "\n" + // torn line skipped
+		`{"schema":"` + JournalSchema + `","tick":2,"decision":"REVERT"}` + "\n"
+	rows := ParseJournal(content)
+	if len(rows) != 2 {
+		t.Fatalf("want 2 journal rows, got %d: %+v", len(rows), rows)
+	}
+	if rows[0].Tick != 1 || rows[1].Tick != 2 || rows[1].Decision != "REVERT" {
+		t.Fatalf("rows out of order or wrong: %+v", rows)
+	}
+}
+
 func mustSelectTime(t *testing.T, s string) time.Time {
 	t.Helper()
 	tm, err := time.Parse(time.RFC3339, s)

@@ -21,7 +21,6 @@ package cachevaluereport
 // into those rows.
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -30,6 +29,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
+	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 )
 
@@ -396,23 +396,9 @@ func savingsDollarStatus(p SavingsPricing) string {
 // kernel-ledger parser it skips blank and unparseable lines rather than failing,
 // so a partially-written ledger still folds.
 func ParseSavingsLedger(content string) []SavingsRow {
-	var rows []SavingsRow
-	sc := bufio.NewScanner(strings.NewReader(content))
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		var row SavingsRow
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			continue
-		}
-		if row.Date == "" {
-			continue
-		}
-		normalizeSavingsDimensions(&row)
-		rows = append(rows, row)
+	rows := jsonlledger.Parse(content, func(r SavingsRow) bool { return r.Date != "" })
+	for i := range rows {
+		normalizeSavingsDimensions(&rows[i])
 	}
 	return rows
 }
