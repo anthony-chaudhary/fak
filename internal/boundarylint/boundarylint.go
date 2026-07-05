@@ -59,11 +59,40 @@ func DefaultRules() []Rule {
 	}
 }
 
+// DefaultTestRules is the policy family for the repo's OWN test files — the tells
+// where a test's assertion freezes a current value instead of stating an invariant.
+// It is a separate set from DefaultRules because the two run over disjoint file
+// classes: Scan deliberately skips _test.go, ScanTests walks only _test.go. Enforced
+// over the repo by TestTestSuitePolicy and reported by `fak boundary`.
+func DefaultTestRules() []Rule {
+	return []Rule{
+		ChangeDetectorTest{},
+	}
+}
+
 var ignoreRe = regexp.MustCompile(`//\s*boundarylint:ignore\s+([A-Z0-9_,\s]+)`)
 
 // Scan walks each root, parses every non-test Go file once, runs rules, and drops any
 // finding suppressed by a //boundarylint:ignore comment on its line or the line above.
 func Scan(roots []string, rules []Rule) ([]Finding, error) {
+	return scanFiltered(roots, rules, func(path string) bool {
+		return strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go")
+	})
+}
+
+// ScanTests is Scan's counterpart for the test suite: it walks ONLY _test.go files.
+// The two walks partition the tree so a rule runs over exactly the file class its
+// tell is about — DefaultRules over production source, DefaultTestRules over tests —
+// with the same skip-dirs and the same //boundarylint:ignore suppression contract.
+func ScanTests(roots []string, rules []Rule) ([]Finding, error) {
+	return scanFiltered(roots, rules, func(path string) bool {
+		return strings.HasSuffix(path, "_test.go")
+	})
+}
+
+// scanFiltered is the shared walk behind Scan and ScanTests: keep decides which
+// file paths are parsed and linted.
+func scanFiltered(roots []string, rules []Rule, keep func(path string) bool) ([]Finding, error) {
 	var findings []Finding
 	for _, root := range roots {
 		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -76,7 +105,7 @@ func Scan(roots []string, rules []Rule) ([]Finding, error) {
 				}
 				return nil
 			}
-			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			if !keep(path) {
 				return nil
 			}
 			fset := token.NewFileSet()

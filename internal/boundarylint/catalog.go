@@ -40,6 +40,12 @@ var Catalog = []CatalogEntry{
 		Note:   "http.Get/Post/Head/PostForm and http.DefaultClient cannot carry a timeout; a dead peer hangs forever.",
 	},
 	{
+		Code:   "CHANGE_DETECTOR_TEST",
+		Title:  "test freezes a current value instead of asserting an invariant",
+		Status: StatusEnforced,
+		Note:   "enforced by DefaultTestRules over _test.go. A magic enumeration count (len(verbs)==109), a wholly-literal list equality, or a pinned version string passes/fails on churn, not correctness — assert the relation the value must hold, or //boundarylint:ignore CHANGE_DETECTOR_TEST a deliberate fixed-width invariant.",
+	},
+	{
 		Code:   "UNCHECKED_HTTP_STATUS",
 		Title:  "response body used without checking StatusCode",
 		Status: StatusProposed,

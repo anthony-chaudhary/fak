@@ -9,6 +9,12 @@ package main
 //	internal/pathlint      UNEXPANDED_USER_PATH      a -gguf/-hf/-dir path flag opened without ~ expansion
 //	internal/urllint       UNVERIFIED_EXTERNAL_URL   a hardcoded download URL outside the audited chokepoint
 //	internal/boundarylint  MISSING_HTTP_TIMEOUT      outbound HTTP that can hang forever
+//	internal/boundarylint  CHANGE_DETECTOR_TEST      a _test.go assertion that freezes a value instead of an invariant
+//
+// The change-detector family runs over _test.go files and honors the same shrink-only
+// ratchet as the TestTestSuitePolicy gate: only a tell in a file NOT yet grandfathered
+// (changeDetectorBaseline) is reported, so the verb stays green on the existing backlog
+// and surfaces exactly the NEW change-detector an operator must convert to an invariant.
 //
 // These checks already existed as the package test TestBoundaryPolicy — so fak
 // COULD prove them under `go test`, but fak itself never RAN them. This verb is the
@@ -103,6 +109,18 @@ func runBoundary(stdout, stderr io.Writer, argv []string) int {
 		tells = append(tells, boundaryTell{Code: f.Code, Linter: "boundarylint", Detail: f.String()})
 	}
 
+	// boundarylint-test: the change-detector family over _test.go, ratcheted — only
+	// NEW (non-grandfathered) tells are reported, so this stays green on the existing
+	// backlog and surfaces exactly the change-detector an operator must convert.
+	testFindings, err := boundarylint.ScanNewChangeDetectors(root)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak boundary: boundarylint-test: %v\n", err)
+		return 2
+	}
+	for _, f := range testFindings {
+		tells = append(tells, boundaryTell{Code: f.Code, Linter: "boundarylint-test", Detail: f.String()})
+	}
+
 	byLinter := map[string]int{}
 	for _, t := range tells {
 		byLinter[t.Linter]++
@@ -132,11 +150,11 @@ func runBoundary(stdout, stderr io.Writer, argv []string) int {
 
 func writeBoundaryHuman(w io.Writer, rep boundaryReport) {
 	if rep.OK {
-		fmt.Fprintln(w, "boundary: clean — no boundary tells (pathlint, urllint, boundarylint)")
+		fmt.Fprintln(w, "boundary: clean — no boundary tells (pathlint, urllint, boundarylint, boundarylint-test)")
 		return
 	}
-	fmt.Fprintf(w, "boundary: %d tell(s) — %d pathlint · %d urllint · %d boundarylint\n",
-		rep.Count, rep.ByLinter["pathlint"], rep.ByLinter["urllint"], rep.ByLinter["boundarylint"])
+	fmt.Fprintf(w, "boundary: %d tell(s) — %d pathlint · %d urllint · %d boundarylint · %d boundarylint-test\n",
+		rep.Count, rep.ByLinter["pathlint"], rep.ByLinter["urllint"], rep.ByLinter["boundarylint"], rep.ByLinter["boundarylint-test"])
 	for _, t := range rep.Tells {
 		fmt.Fprintf(w, "  %s\n", t.Detail)
 	}
