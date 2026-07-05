@@ -117,6 +117,12 @@ func (s *Server) routeTable() []gatewayRoute {
 		// of every supervised loop and its live progress (the observability half of the
 		// loop control plane; complements the loopmgr ledger `fak loop status` reads).
 		{"/v1/fak/loops", s.handleFakLoops},
+		// /v1/fak/account/rehome is the operator "switch seat now" button: force the
+		// live guarded session onto the next available account (the on-demand form of
+		// the 403-triggered account failover). Inert (404) unless the host installs a
+		// swap function via SetAccountRehomeFunc — fak guard does, on the pinned
+		// Claude-subscription path. See account_rehome.go.
+		{"/v1/fak/account/rehome", s.handleFakAccountRehome},
 		{"/v1/models", s.handleModels},
 		// Multi-node dev-server READ plane (#2297, epic #2254 plane 1): the
 		// coordinator clone's live lease view (the dos_arbitrate live_leases

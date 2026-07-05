@@ -833,6 +833,13 @@ type Server struct {
 	harnessSnapshotMu       sync.Mutex
 	harnessSnapshotProvider func() SessionHarness
 
+	// accountRehomeFn is the optional operator seat-switch function behind
+	// POST /v1/fak/account/rehome. fak guard wires it to its account-failover state
+	// (see cmd/fak/guard_account_failover.go); nil everywhere else keeps the route
+	// inert. Guarded by accountRehomeMu. See account_rehome.go.
+	accountRehomeMu sync.Mutex
+	accountRehomeFn func(reason string) (AccountRehome, error)
+
 	// planner generates the assistant turn for the /v1/chat/completions proxy. A
 	// live HTTPPlanner/ReplicaRouter when BaseURL/ReplicaBaseURLs are set, else the
 	// offline MockPlanner. Settable in-package for tests.

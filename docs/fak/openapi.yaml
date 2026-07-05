@@ -1232,6 +1232,57 @@ paths:
         '405':
           description: Wrong HTTP method (GET only).
 
+  /v1/fak/account/rehome:
+    post:
+      tags: [fak-native]
+      summary: Force the session onto the next available account (operator seat switch)
+      description: |
+        The operator "switch seat now" button for a live guarded session — the
+        on-demand form of the 403-triggered account failover. The current seat is
+        excluded from auto-reselection for the rest of the session and the next
+        available sibling seat (enabled, logged in, live token) is adopted; the swap
+        takes effect on the session's next upstream request. Inert (404) unless the
+        host wired a swap function (`SetAccountRehomeFunc`) — `fak guard` does on the
+        pinned Claude-subscription path. The response carries seat display metadata
+        only, never a credential. Operator CLI: `fak accounts rehome`.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, description: 'Reason token recorded on the swap (default: operator_rehome).' }
+            example: { reason: operator_rehome }
+      responses:
+        '200':
+          description: The seat switch that was applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  from: { type: string }
+                  from_email: { type: string }
+                  to: { type: string }
+                  to_email: { type: string }
+                  reason: { type: string }
+              example: { from: seat-a, from_email: a@example.test, to: seat-b, to_email: b@example.test, reason: operator_rehome }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: No account roster is in force on this gateway (not a guarded subscription session).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409':
+          description: No available sibling seat — every other seat is excluded, disabled, or has no live token. The session keeps its current seat.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example: { error: { message: "no available sibling seat", type: invalid_request_error, code: account_rehome_unavailable, param: null } }
+
   # -------------------------------------------------------------------------
   # MCP-over-HTTP
   # -------------------------------------------------------------------------
