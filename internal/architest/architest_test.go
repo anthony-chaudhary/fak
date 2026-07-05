@@ -73,7 +73,7 @@ var tier = map[string]int{
 	"amdgpu":               1, // AMD GPU fact probe and perf-counter JSON fold for Windows harness diagnostics; imports windowgate(1), off the hot path.
 	"accounts":             1, "accountobs": 1, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "cacheobs": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
 	// stdlib-only foundation leaves (import nothing internal); off the hot path.
-	"auditpane": 1, "bgloop": 1, "binstamp": 1, "cachewitness": 1, "cmdutil": 1, "codexmemory": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "experiments": 1, "fleetaccounts": 1, "flock": 1, "issuecontractrepair": 1, "maputil": 1, "mathx": 1, "newleaf": 1, "newmodel": 1, "numfmt": 1, "randhex": 1, "selfinstall": 1, "sessionaudit": 1, "strmatch": 1,
+	"auditpane": 1, "bgloop": 1, "binstamp": 1, "cachewitness": 1, "cmdutil": 1, "codexmemory": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "experiments": 1, "fleetaccounts": 1, "flock": 1, "issuecontractrepair": 1, "jsonlledger": 1, "maputil": 1, "mathx": 1, "newleaf": 1, "newmodel": 1, "numfmt": 1, "randhex": 1, "selfinstall": 1, "sessionaudit": 1, "strmatch": 1,
 	"chatrelay":            1,                // pure Slack chat-relay client (the inbound complement to the scoreboard publishers): posts/reads a channel via the shared slackenv resolver; rides slackwire(1) for transport, off the hot path.
 	"sessionsignals":       1,                // shared closed vocabulary of terminal-turn transcript signals (limit-reset banners, auth/credit/access walls, transient API errors) ported from tools/fleet_session_signals.py; the one taxonomy the resume sweep/stopped/watchdog family classifies with. Stdlib-only, imports nothing internal, off the hot path.
 	"sessiondesc":          1,                // pure session-descriptor join schema (fak.session.descriptor.v1, #2214): folds gateway drive-state / leaseref / harness-identity rows into one exact-join record with a closed absence vocabulary; stdlib-only, imports nothing internal, off the hot path.
@@ -321,6 +321,7 @@ var tier = map[string]int{
 	"qwen36nodereports":     2, // qwen36 node-report harvester: reads/unzips node artifacts and folds a versioned report; tool-shaped mechanism leaf, shells out off the hot path, imports nothing internal.
 	"trajctl":               1,
 	"waiting":               1, // R3 waiting-on-human queue (#2272, epic #2269): pure fold over loopmgr's loop-event ledger turning each blocked-on-operator notify into one kernel object with age, held resources, deadline, and the safe default that fires on expiry; ack-closure honestly fenced not_yet pending the R2 escalation packet (#2271); imports loopmgr(1), off the hot path.
+	"chatopsdetach": 1,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
