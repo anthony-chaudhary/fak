@@ -89,6 +89,11 @@ except ImportError:  # pragma: no cover - only when run outside tools/ on sys.pa
 SCHEMA = "fak-score-signal/1"
 SIGNAL_LABEL = "score-signal"
 DEBT_LABEL = "tech-debt"
+# The tracked evidence artifact every score delta is measured against — the pinned
+# per-metric debt baseline the control pane folds the current run against (#1967).
+# Naming it in the Root-point section gives the resolving worker the exact file that
+# minted the failing score, closing the "issue names the item but not the origin" gap.
+BASELINE_ARTIFACT = "tools/scorecard_baseline.json"
 MARKER_RE = re.compile(r"fak-score-signal:\s*([A-Za-z0-9_\-]+)")
 # The NOTED-DELTA marker (#981): a second stable comment recording the delta the
 # issue currently reports, so a worsening regression on an already-open ticket can
@@ -335,6 +340,41 @@ def render_issue(cand: dict[str, Any], commit: str, today: str,
             seen_paths.add(path)
             path_hint_lines.append(f"- `{path}`")
 
+    # The Root-point section (#1967): the at-origin evidence bundle so the issue names
+    # WHERE the failing score was minted, not just the score item. Four fields — the
+    # producer command that re-mints the score, the source paths owning the debt, the
+    # tracked evidence artifact it is measured against, and the SMALLEST-PATH gate that
+    # would have caught this at origin. The producer command is the per-metric re-measure
+    # when the pane knows one, else the portfolio fold. The smallest-path gate re-runs
+    # only THAT metric, not the whole portfolio, so the acceptance is the narrowest check
+    # that proves the specific regression retired.
+    producer_cmd = remeasure or "python tools/scorecard_control_pane.py --json"
+    smallest_gate = (f"`{remeasure}` (re-run only the `{label}` producer, worst-first)"
+                     if remeasure else
+                     "`python tools/scorecard_control_pane.py --check` "
+                     f"(no per-metric producer for `{key}`; the portfolio check is "
+                     "the narrowest gate available)")
+    root_point_paths = [source] if source else (
+        [remeasure] if remeasure and remeasure.startswith("tools/") else [])
+    root_point_paths.append(BASELINE_ARTIFACT)
+    seen_rp = set()
+    rp_path_lines = []
+    for path in root_point_paths:
+        if path and path not in seen_rp:
+            seen_rp.add(path)
+            rp_path_lines.append(f"`{path}`")
+    root_point = (
+        "### Root-point\n"
+        "Where the failing score was minted, so the fix lands at the origin control:\n"
+        f"- **Producer command:** `{producer_cmd}` — re-mints the `{label}` score.\n"
+        f"- **Source paths:** {', '.join(rp_path_lines)} — the debt these own.\n"
+        f"- **Evidence artifact:** `{BASELINE_ARTIFACT}` — the pinned baseline this "
+        f"delta is measured against"
+        + (f" (@{cand['baseline_commit']})" if cand.get("baseline_commit") else "")
+        + ".\n"
+        f"- **At-origin gate (smallest path):** {smallest_gate} — the narrowest check "
+        "that would have caught this rise where the score is produced.\n\n")
+
     body = (
         f"> Auto-filed by **score-signal** (`tools/score_signal.py`, {today}) from "
         f"the CI scorecard control pane @{commit or 'unknown'}. A measured debt "
@@ -346,6 +386,7 @@ def render_issue(cand: dict[str, Any], commit: str, today: str,
         + ".\n\n"
         f"**Severity:** {severity}\n\n"
         + fix_loc
+        + root_point
         + "**What to do**\n"
         + "\n".join(do_lines)
         + "\n\n### Parent context\n"
@@ -379,7 +420,9 @@ def render_issue(cand: dict[str, Any], commit: str, today: str,
         + "`python tools/scorecard_control_pane.py --json` show the regression retired "
         "or accepted.\n\n"
         "### Acceptance gate\n"
-        + (f"`{remeasure}` followed by " if remeasure else "")
+        "Smallest path first — prove THIS metric retired, then the portfolio holds: "
+        + (f"`{remeasure}` shows the `{label}` debt back at/below baseline, followed by "
+           if remeasure else "")
         + "`python tools/scorecard_control_pane.py --check` passes or the accepted "
         "trade-off is re-pinned.\n\n"
         "### Lane\n"

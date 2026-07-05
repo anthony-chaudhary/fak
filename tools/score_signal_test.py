@@ -143,6 +143,38 @@ def test_render_issue_has_marker_evidence_and_contract():
     assert "+6" in issue["title"] and "code-slop" in issue["title"]
 
 
+# --- #1967: the Root-point section names the origin of the failing score ------
+def test_render_issue_has_root_point_section_with_four_fields():
+    # The auto-filed issue must carry a Root-point section naming WHERE the failing
+    # score was minted: producer command, source paths, evidence artifact, and the
+    # smallest-path at-origin gate (the issue's Done condition, #1967).
+    cand = {"key": "slop", "label": "code-slop", "delta": 6, "from": 4, "to": 10,
+            "grade": "B", "portfolio_regressed": False, "baseline_commit": "base123"}
+    body = ss.render_issue(cand, commit="head456", today="2026-06-26",
+                           tools={"slop": "tools/code_slop_scorecard.py"},
+                           available=SKILLS)["body"]
+    assert "### Root-point" in body, "the named Root-point section is present"
+    assert "Producer command:" in body and "tools/code_slop_scorecard.py" in body, \
+        "producer command that re-mints the score"
+    assert "Source paths:" in body, "source paths owning the debt"
+    assert ("Evidence artifact:" in body
+            and ss.BASELINE_ARTIFACT in body), "the tracked baseline evidence artifact"
+    assert "At-origin gate (smallest path):" in body, "the smallest-path at-origin gate"
+
+
+def test_root_point_gate_degrades_to_portfolio_when_no_producer():
+    # A scorecard with no per-metric re-measure still gets a Root-point section; the
+    # smallest-path gate honestly degrades to the portfolio --check, never asserting a
+    # per-metric producer that does not exist.
+    cand = {"key": "mystery", "label": "mystery-metric", "delta": 3, "from": 1, "to": 4,
+            "grade": None, "portfolio_regressed": False, "baseline_commit": ""}
+    body = ss.render_issue(cand, commit="c", today="2026-06-26", tools={},
+                           available=SKILLS)["body"]
+    assert "### Root-point" in body
+    assert "scorecard_control_pane.py --check" in body, "gate degrades to portfolio check"
+    assert ss.BASELINE_ARTIFACT in body, "evidence artifact still named"
+
+
 def test_render_issue_blocking_when_portfolio_regressed():
     cand = {"key": "code", "label": "code", "delta": 9, "from": 30, "to": 39,
             "grade": "C", "portfolio_regressed": True, "baseline_commit": "base123"}
