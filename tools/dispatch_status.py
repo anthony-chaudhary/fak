@@ -91,6 +91,9 @@ GUARD_AUDIT_DIRNAME = "guard-audit"
 _GUARD_DENY_KINDS = ("DENY", "RESULT_DENY")
 _GUARD_QUARANTINE_KIND = "QUARANTINE"
 _GUARD_RECENT_LOOKBACK_MIN = 90
+_GUARD_LIVELOCK_THRESHOLD = 3
+_GUARD_LIVELOCK_MIN_COUNT = 10
+_GUARD_LIVELOCK_LIMIT = 10
 # resolve-<N>-<stamp>.log written by issue_resolve_dispatch.spawn_issue_worker.
 _RESOLVE_LOG_RE = re.compile(r"resolve-(\d+)-(\d{8}-\d{6})\.log$")
 _LEASEREF_PREFIX = "refs/fak/locks/"
@@ -1697,6 +1700,66 @@ def backend_hook_failures(
     return out
 
 
+def _guard_livelock_candidates(name: str, text: str) -> list[dict[str, Any]]:
+    counts: dict[tuple[str, str, str, str, str], int] = {}
+    longest: dict[tuple[str, str, str, str, str], int] = {}
+    last_key: tuple[str, str, str, str, str] | None = None
+    run_len = 0
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        digest = str(row.get("args_digest") or row.get("result_digest") or "")
+        if not digest:
+            continue
+        key = (
+            str(row.get("kind") or "UNKNOWN"),
+            str(row.get("verdict") or ""),
+            str(row.get("tool") or ""),
+            str(row.get("reason") or ""),
+            digest,
+        )
+        counts[key] = counts.get(key, 0) + 1
+        if key == last_key:
+            run_len += 1
+        else:
+            last_key = key
+            run_len = 1
+        longest[key] = max(longest.get(key, 0), run_len)
+
+    out: list[dict[str, Any]] = []
+    for key, count in counts.items():
+        max_run = longest.get(key, 0)
+        if count < _GUARD_LIVELOCK_MIN_COUNT and max_run < _GUARD_LIVELOCK_THRESHOLD:
+            continue
+        kind, verdict, tool, reason, digest = key
+        out.append({
+            "file": name,
+            "count": count,
+            "longest_run": max_run,
+            "kind": kind,
+            "verdict": verdict,
+            "tool": tool,
+            "reason": reason,
+            "digest": digest,
+        })
+    return out
+
+
+def _guard_livelock_label(row: dict[str, Any]) -> str:
+    tool = row.get("tool") or row.get("kind") or "?"
+    reason = row.get("reason") or row.get("verdict") or "?"
+    digest = str(row.get("digest") or "")
+    short = digest[:12] if digest else "-"
+    return (f"{row.get('file')} {tool}/{reason} digest={short} "
+            f"count={row.get('count')} run={row.get('longest_run')}")
+
+
 def guard_coverage(
     runs_dir: Path,
     *,
@@ -1723,6 +1786,8 @@ def guard_coverage(
       * ``rows`` / ``recent_rows`` — total / recent kernel decisions
       * ``by_kind`` — the decision mix (DECIDE/DENY/RESULT_DENY/QUARANTINE/VDSO_HIT/…)
       * ``denied`` / ``quarantined`` — derived refusal counts
+      * ``livelock_candidates`` — bounded repeated digest candidates from recent
+        journals (count + longest consecutive run)
       * ``evidence`` — the most-recent journal filenames
     """
     import time
@@ -1740,6 +1805,8 @@ def guard_coverage(
         "quarantined": 0,
         "lookback_min": lookback_min,
         "evidence": [],
+        "livelock_threshold": _GUARD_LIVELOCK_THRESHOLD,
+        "livelock_candidates": [],
     }
     if not audit_dir.is_dir():
         return payload
@@ -1747,6 +1814,7 @@ def guard_coverage(
     now_ts = time.time() if now_ts is None else now_ts
     horizon = now_ts - lookback_min * 60
     by_kind: dict[str, int] = {}
+    livelock_candidates: list[dict[str, Any]] = []
     files: list[tuple[float, str, int]] = []  # (mtime, name, rows) for evidence/recency
     for jp in audit_dir.glob("*.jsonl"):
         try:
@@ -1772,11 +1840,16 @@ def guard_coverage(
         if mtime >= horizon:
             payload["recent_sessions"] += 1
             payload["recent_rows"] += rows
+            livelock_candidates.extend(_guard_livelock_candidates(jp.name, text))
         files.append((mtime, jp.name, rows))
 
     payload["by_kind"] = dict(sorted(by_kind.items()))
     payload["denied"] = sum(by_kind.get(k, 0) for k in _GUARD_DENY_KINDS)
     payload["quarantined"] = by_kind.get(_GUARD_QUARANTINE_KIND, 0)
+    livelock_candidates.sort(
+        key=lambda r: (-int(r.get("longest_run") or 0), -int(r.get("count") or 0),
+                       str(r.get("file") or "")))
+    payload["livelock_candidates"] = livelock_candidates[:_GUARD_LIVELOCK_LIMIT]
     files.sort(key=lambda r: r[0], reverse=True)
     payload["evidence"] = [name for _, name, _ in files[:5]]
     return payload
@@ -2253,10 +2326,13 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             crash_text = f", {g_child_crashes} child crash"
             if g_child_crashes != 1:
                 crash_text += "es"
+        loop_text = ""
+        if guard.get("livelock_candidates"):
+            loop_text = f"; loop candidate: {_guard_livelock_label(guard['livelock_candidates'][0])}"
         reasons.append(
             f"fak guard witnessed {g_rows} kernel decision(s) across {g_sessions} "
             f"dispatch session(s) ({guard.get('denied', 0)} denied, "
-            f"{guard.get('quarantined', 0)} quarantined{crash_text})")
+            f"{guard.get('quarantined', 0)} quarantined{crash_text}){loop_text}")
     elif g_sessions:
         reasons.append(
             f"fak guard ran {g_sessions} dispatch session(s) but recorded 0 decisions "
@@ -2706,10 +2782,16 @@ def render(p: dict[str, Any]) -> str:
     if gd.get("sessions"):
         child_crashes = _int((gd.get("by_kind") or {}).get("CHILD_CRASH"), 0) or 0
         crash_bit = f" CRASH={child_crashes}" if child_crashes else ""
+        loop_bit = ""
+        if gd.get("livelock_candidates"):
+            top = gd["livelock_candidates"][0]
+            loop_bit = (f"  loop={top.get('tool') or top.get('kind')}/"
+                        f"{top.get('reason') or top.get('verdict')} "
+                        f"x{top.get('count')} run={top.get('longest_run')}")
         lines.append(
             f"║ guard     : {gd.get('sessions')} session(s) ({gd.get('recent_sessions', 0)} recent), "
             f"{gd.get('rows', 0)} decision(s) [DENY={gd.get('denied', 0)} "
-            f"QUAR={gd.get('quarantined', 0)}{crash_bit}]  empty={gd.get('empty_sessions', 0)}")
+            f"QUAR={gd.get('quarantined', 0)}{crash_bit}]  empty={gd.get('empty_sessions', 0)}{loop_bit}")
     rs = p.get("run_status") or {}
     if rs.get("count"):
         bits = ", ".join(f"{k}={v}" for k, v in sorted((rs.get("liveness") or {}).items())) or "none"

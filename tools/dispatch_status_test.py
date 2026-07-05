@@ -1784,6 +1784,25 @@ class GuardCoverageScanTest(unittest.TestCase):
         self.assertEqual(out["rows"], 2)
         self.assertEqual(out["by_kind"].get("MALFORMED"), 1)
 
+    def test_repeated_allow_and_quarantine_rows_become_livelock_candidates(self) -> None:
+        mod = load()
+        now = 3_000_000.0
+        allow = ('{"kind":"DECIDE","verdict":"ALLOW","tool":"Read","reason":"NONE",'
+                 '"args_digest":"allowdigest"}')
+        quarantine = ('{"kind":"QUARANTINE","verdict":"QUARANTINE","tool":"tool_result",'
+                      '"reason":"SECRET_EXFIL","args_digest":"quardigest"}')
+        with tempfile.TemporaryDirectory() as d:
+            audit = Path(d) / mod.GUARD_AUDIT_DIRNAME
+            self._journal(audit, "loop-claude-1-aaaa.jsonl",
+                          [allow, allow, allow] + [quarantine] * 10,
+                          mtime=now)
+            out = mod.guard_coverage(Path(d), now_ts=now)
+        candidates = out["livelock_candidates"]
+        self.assertTrue(any(c["tool"] == "Read" and c["longest_run"] == 3
+                            for c in candidates))
+        self.assertTrue(any(c["tool"] == "tool_result" and c["count"] == 10
+                            for c in candidates))
+
 
 class GuardCoverageFoldTest(unittest.TestCase):
     """build_payload + render surface the guard rollup (payload section, reason, card)."""
@@ -1812,6 +1831,19 @@ class GuardCoverageFoldTest(unittest.TestCase):
         ))
         self.assertTrue(any("2 child crashes" in r for r in p["reasons"]))
         self.assertIn("CRASH=2", mod.render(p))
+
+    def test_livelock_candidate_is_rendered_when_present(self) -> None:
+        mod = load()
+        p = build(mod, guard=self._guard(livelock_candidates=[{
+            "file": "loop-claude-1-aaaa.jsonl",
+            "tool": "Read",
+            "reason": "NONE",
+            "digest": "allowdigest",
+            "count": 3,
+            "longest_run": 3,
+        }]))
+        self.assertTrue(any("loop candidate:" in r for r in p["reasons"]))
+        self.assertIn("loop=Read/NONE x3 run=3", mod.render(p))
 
     def test_empty_sessions_reason_when_no_decisions(self) -> None:
         mod = load()
