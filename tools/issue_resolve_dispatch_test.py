@@ -4195,6 +4195,28 @@ class SameIssueWipCollisionTest(unittest.TestCase):
 
         self.assertFalse(scan["collides"])
 
+    def test_no_commit_witness_sidecar_is_wip_evidence(self) -> None:
+        import json
+        import os
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            log = runs / "resolve-2718-20260705-191407.log"
+            log.write_text("Changed cmd/fak/knownbad.go\n", encoding="utf-8")
+            log.with_suffix(mod.WITNESS_SIDECAR_SUFFIX).write_text(
+                json.dumps({"claim": "CLAIM_NO_COMMIT"}), encoding="utf-8")
+            os.utime(log, (now - 60, now - 60))
+
+            scan = mod.same_issue_wip_collision(
+                runs, 2718, ["cmd/fak/knownbad.go"], now_ts=now)
+            reason = mod.same_issue_wip_reason(2718, scan)
+
+        self.assertTrue(scan["collides"])
+        self.assertEqual(scan["evidence"][0]["witness_claim"], "CLAIM_NO_COMMIT")
+        self.assertIn("CLAIM_NO_COMMIT", reason)
+
 
 if __name__ == "__main__":
     unittest.main()

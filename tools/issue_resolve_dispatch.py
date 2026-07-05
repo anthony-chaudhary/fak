@@ -2815,8 +2815,12 @@ def same_issue_wip_reason(issue: int, scan: dict[str, Any]) -> str:
     if len(scan.get("dirty_paths") or []) > 8:
         more = f" (+{len(scan.get('dirty_paths') or []) - 8} more)"
     evidence = scan.get("evidence") or []
-    log = evidence[0].get("log") if evidence and isinstance(evidence[0], dict) else None
+    first = evidence[0] if evidence and isinstance(evidence[0], dict) else {}
+    log = first.get("log") if first else None
+    claim = first.get("witness_claim") if first else None
     source = f" in {log}" if log else ""
+    if claim:
+        source += f" ({claim})"
     return (f"issue #{issue} has recent same-issue uncommitted WIP{source} "
             f"naming dirty local path(s): {paths}{more} — refusing "
             f"SAME_ISSUE_WIP so a second resolver cannot stack onto unfinished "
