@@ -53,6 +53,10 @@ import (
 //	                                   (with headroom tiers) AND every excluded seat with the reason it
 //	                                   is out (duplicate/reserved/disabled/tombstoned/unservable), plus
 //	                                   a registry-drift check against disk truth
+//	fak accounts rehome [--addr URL]   OPERATOR seat switch on a LIVE `fak guard` session: force it onto
+//	                                   the next available account NOW (POST /v1/fak/account/rehome — the
+//	                                   on-demand form of the 403 account failover). Nothing in the
+//	                                   registry changes; distinct from a tombstone's rehome target
 //	fak accounts resolve <name> [--env] the live config dir serving <name>, following a tombstone's rehome
 //	fak accounts discover [--write]    emit (or MERGE-and-write) a registry.json from ~/.claude* (disk truth)
 //	fak accounts sync                  project the registry into the dos + job roster views AND
@@ -65,7 +69,7 @@ func cmdAccounts(argv []string) { os.Exit(runAccounts(os.Stdout, os.Stderr, argv
 
 func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|set-role|set-default|launch|next|rotation|list|status|doctor|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write> [flags]")
+		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|set-role|set-default|launch|next|rotation|rehome|list|status|doctor|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write> [flags]")
 		return 2
 	}
 	sub, rest := argv[0], argv[1:]
@@ -95,7 +99,9 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	addSuffix := fs.String("suffix", firstNonEmpty(os.Getenv("FAK_ACCOUNT_SUFFIX"), "-netra"), "(add) config-dir suffix: dir is ~/.claude-<name> when <name> already ends with it, else ~/.claude-<name><suffix>")
 	addNoSync := fs.Bool("no-sync", false, "(add) skip regenerating the roster views after adding (just write the registry)")
 	rmRehome := fs.String("rehome-to", "", "(remove) live seat to rehome the tombstoned account to (default: the registry's anchor seat)")
-	rmReason := fs.String("reason", "", "(remove) tombstone_reason recorded in the registry")
+	rmReason := fs.String("reason", "", "(remove) tombstone_reason recorded in the registry; (rehome) reason token recorded on the live seat switch")
+	rehomeAddr := fs.String("addr", defaultSessionAddr(), "(rehome) gateway base URL of the LIVE fak guard session (from the guard banner, or $FAK_ADDR)")
+	rehomeKey := fs.String("key", defaultGatewayBearerToken(), "(rehome) bearer credential (only if the gateway sets --require-key)")
 	rmArchive := fs.Bool("archive", false, "(remove) ALSO rename the config dir to <dir>.DELETED-<date> and repoint the registry (name+dir+rehome refs) in one command; refuses the live CLAUDE_CONFIG_DIR seat")
 	roleFlag := fs.String("role", "", "(set-role) the role to point at --name (active|anchor); may also be given as the first positional")
 	launchGuard := fs.Bool("guard", true, "(launch) wrap the agent in `fak guard` so the kernel adjudicates every tool call and the prompt-cache/compaction (vCache) layer is on; --guard=false launches the agent directly")
@@ -180,6 +186,11 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		// seat out?" — the question that costs a source-dive when a bucket silently
 		// disappears from rotation (a stale label, a duplicate collapse, a tombstone).
 		return accountsRotation(stdout, stderr, *registryPath, *homeDir, *asJSON, !*noHeadroom)
+
+	case "rehome":
+		// The LIVE-session seat switch (accounts_rehome.go): talks to a running fak guard
+		// gateway, never to the registry — the registry-side rehome is `remove --rehome-to`.
+		return runAccountsRehome(stdout, stderr, *rehomeAddr, *rehomeKey, *rmReason, *asJSON)
 
 	case "pull":
 		return accountsPull(stdout, stderr, positional, *registryPath, *homeDir, *dryRun)
