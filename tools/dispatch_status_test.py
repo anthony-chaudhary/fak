@@ -1881,7 +1881,7 @@ class GuardCoverageScanTest(unittest.TestCase):
         self.assertEqual(out["rows"], 2)
         self.assertEqual(out["by_kind"].get("MALFORMED"), 1)
 
-    def test_repeated_allow_and_quarantine_rows_become_livelock_candidates(self) -> None:
+    def test_repeated_allow_none_rows_do_not_become_livelock_candidates(self) -> None:
         mod = load()
         now = 3_000_000.0
         allow = ('{"kind":"DECIDE","verdict":"ALLOW","tool":"Read","reason":"NONE",'
@@ -1895,8 +1895,7 @@ class GuardCoverageScanTest(unittest.TestCase):
                           mtime=now)
             out = mod.guard_coverage(Path(d), now_ts=now)
         candidates = out["livelock_candidates"]
-        self.assertTrue(any(c["tool"] == "Read" and c["longest_run"] == 3
-                            for c in candidates))
+        self.assertFalse(any(c["tool"] == "Read" for c in candidates))
         self.assertTrue(any(c["tool"] == "tool_result" and c["count"] == 10
                             for c in candidates))
 

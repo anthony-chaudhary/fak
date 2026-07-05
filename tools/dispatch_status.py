@@ -1808,6 +1808,8 @@ def _guard_livelock_candidates(name: str, text: str) -> list[dict[str, Any]]:
             row = json.loads(line)
         except ValueError:
             continue
+        if not _guard_row_can_livelock(row):
+            continue
         digest = str(row.get("args_digest") or row.get("result_digest") or "")
         if not digest:
             continue
@@ -1843,6 +1845,14 @@ def _guard_livelock_candidates(name: str, text: str) -> list[dict[str, Any]]:
             "digest": digest,
         })
     return out
+
+
+def _guard_row_can_livelock(row: dict[str, Any]) -> bool:
+    kind = str(row.get("kind") or "").upper()
+    verdict = str(row.get("verdict") or "").upper()
+    if kind in _GUARD_DENY_KINDS or kind == _GUARD_QUARANTINE_KIND:
+        return True
+    return verdict in (*_GUARD_DENY_KINDS, _GUARD_QUARANTINE_KIND)
 
 
 def _guard_livelock_label(row: dict[str, Any]) -> str:
