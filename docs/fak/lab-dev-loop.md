@@ -147,11 +147,18 @@ Pick by what the lab box can give you; each is honest about any request shaping:
 - **Explicit Codex smoke mode.** A dedicated smoke that sends the minimal Codex-compatible
   request and states plainly what it trimmed — honest shaping over a green-looking full run.
 
-The live sub-10-minute Codex witness through the lab GLM-5.2 route is **not yet** captured
-from a laptop/desktop that has no lab compute of its own: it needs a faster serving lane or
-tunnel on the lab side to record. Small guarded clients are witnessed; the Codex-sized
-prompt waits on one of the routes above. See #2974 for the tracking issue and #2952/#2953
-for the resolver and live-witness siblings.
+The explicit smoke route is now witnessed from this machine: the private loopback proxy
+collapsed the no-repo/no-tools Codex request to the final user prompt, capped output at 16
+tokens, stripped tool schemas, and recorded that shaping as a **smoke-only** route. With
+that shaping, the command above returned `GLM52_OK` through `fak guard
+--remote-serve @lab/glm-5.2` in 282.8s. This proves the end-to-end wiring and lab inference
+for a Codex-shaped client.
+
+The unshaped full Codex coding turn is still **not yet** witnessed: the fixed Codex
+system+developer prompt remains too large for the current bridge/model latency envelope
+inside the probe window. Closing that stronger path still requires a faster serving lane,
+a lower-latency direct tunnel, or real prompt compaction before the wire. See #2974 for the
+tracking issue and #2952/#2953 for the resolver and live-witness siblings.
 
 ## Driving it from Slack (private bridge)
 
