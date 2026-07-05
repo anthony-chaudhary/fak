@@ -83,6 +83,56 @@ func TestLabTargetRefusesMissingReadiness(t *testing.T) {
 	}
 }
 
+func TestLabTargetUsesPerTargetRoster(t *testing.T) {
+	root := t.TempDir()
+	readinessPath := filepath.Join(root, "lab-readiness.json")
+	reportsDir := filepath.Join(root, "reports")
+	targetsPath := filepath.Join(root, "lab-targets.json")
+	rosterPath := filepath.Join(root, "private-roster.json")
+
+	rec := fleet.NewLabReadiness("gpu-server", fleet.LabReadyForDevWork, "admit-lab-backed-dispatch", "scrubbed-fleet-report", time.Now())
+	if err := writeIndentedJSONFile(readinessPath, rec); err != nil {
+		t.Fatalf("write readiness: %v", err)
+	}
+	ro := fleet.Roster{Schema: fleet.RosterSchema, Boxes: []fleet.Box{{
+		ID: "private-a", Class: "a100x8", Group: "lab",
+	}}}
+	if err := writeIndentedJSONFile(rosterPath, ro); err != nil {
+		t.Fatalf("write roster: %v", err)
+	}
+	if err := fleet.WriteReport(reportsDir, "private-a", readyGLMReport()); err != nil {
+		t.Fatalf("write private report: %v", err)
+	}
+	doc := labTargetsFile{Schema: labTargetsSchema, Targets: []labTargetConfig{{
+		Alias:   "@lab/glm-5.2",
+		BaseURL: "http://127.0.0.1:18181",
+		Model:   "glm-5.2",
+		Roster:  rosterPath,
+	}}}
+	if err := writeIndentedJSONFile(targetsPath, doc); err != nil {
+		t.Fatalf("write targets: %v", err)
+	}
+	t.Setenv("FAK_LAB_READINESS", readinessPath)
+	t.Setenv("FAK_FLEET_REPORTS", reportsDir)
+	t.Setenv("FAK_LAB_TARGETS", targetsPath)
+
+	var out bytes.Buffer
+	rc := runLab(&out, io.Discard, []string{"target", "@lab/glm-5.2", "--json"})
+	if rc != 0 {
+		t.Fatalf("lab target should resolve with per-target roster, got rc=%d out=%s", rc, out.String())
+	}
+	var res labTargetResolution
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil {
+		t.Fatalf("lab target did not emit JSON: %v\n%s", err, out.String())
+	}
+	if res.BoxID != "" || res.Evidence != "scrubbed-fleet-report" {
+		t.Fatalf("resolution = %+v", res)
+	}
+	if strings.Contains(out.String(), rosterPath) || strings.Contains(out.String(), "private-a") || strings.Contains(out.String(), "18181") {
+		t.Fatalf("target JSON must not print local/private coordinates:\n%s", out.String())
+	}
+}
+
 func TestLabTargetRefusesMissingConfig(t *testing.T) {
 	env := writeLabTargetEnv(t, labTargetEnvOpts{
 		readiness: fleet.LabReadyForDevWork,

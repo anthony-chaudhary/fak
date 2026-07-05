@@ -56,14 +56,16 @@ config at `$FAK_LAB_TARGETS` or the default fak config path (`fleet/lab-targets.
       "alias": "@lab/glm-5.2",
       "base_url": "http://localhost:PORT",
       "model": "glm-5.2",
-      "box_id": "box-a"
+      "roster": "C:/local/private/roster.json"
     }
   ]
 }
 ```
 
 The tracked docs and tests use only placeholder aliases and `localhost`. The real file
-stays local. Validate the alias without printing coordinates:
+stays local. `box_id` is optional and should be a display-safe generic ID if present;
+when the target validates against a private roster, omit `box_id` so the resolver does
+not print the private report key. Validate the alias without printing coordinates:
 
 ```bash
 fak lab target @lab/glm-5.2 --json

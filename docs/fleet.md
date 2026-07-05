@@ -169,11 +169,15 @@ private coordinates in an untracked local file:
       "alias": "@lab/glm-5.2",
       "base_url": "http://localhost:PORT",
       "model": "glm-5.2",
-      "box_id": "box-a"
+      "roster": "C:/local/private/roster.json"
     }
   ]
 }
 ```
+
+`box_id` is optional. Use it only for a display-safe generic box ID; when the entry
+points at a private roster, omit `box_id` so `fak lab target --json` can validate the
+scrubbed report without printing the private report key.
 
 Validate the alias without printing the resolved coordinates:
 

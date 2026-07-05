@@ -32,6 +32,7 @@ type labTargetConfig struct {
 	BaseURL string `json:"base_url"`
 	Model   string `json:"model,omitempty"`
 	BoxID   string `json:"box_id,omitempty"`
+	Roster  string `json:"roster,omitempty"`
 }
 
 type labTargetResolution struct {
@@ -164,7 +165,12 @@ func resolveLabTarget(alias string, opts labTargetResolveOpts) (labTargetResolut
 	if err != nil {
 		return labTargetResolution{}, err
 	}
-	if boxID == "" {
+	// When a local target config points at a private roster, the matched report key can
+	// be a lab identifier. Keep the public resolution scrubbed unless the config
+	// explicitly supplied a display-safe box_id.
+	if strings.TrimSpace(target.Roster) != "" && strings.TrimSpace(target.BoxID) == "" {
+		boxID = ""
+	} else if boxID == "" {
 		boxID = strings.TrimSpace(target.BoxID)
 	}
 	return labTargetResolution{
@@ -247,6 +253,9 @@ func validateLabTargets(doc labTargetsFile) []string {
 		if strings.TrimSpace(t.BoxID) != t.BoxID || strings.ContainsAny(t.BoxID, "/\\") {
 			probs = append(probs, fmt.Sprintf("targets[%d].box_id must be a clean roster id when set", i))
 		}
+		if strings.TrimSpace(t.Roster) != t.Roster {
+			probs = append(probs, fmt.Sprintf("targets[%d].roster must not carry leading/trailing whitespace", i))
+		}
 	}
 	return probs
 }
@@ -261,7 +270,11 @@ func findLabTarget(doc labTargetsFile, alias string) (labTargetConfig, bool) {
 }
 
 func validateLabTargetReport(target labTargetConfig, model string, opts labTargetResolveOpts) (boxID, evidence string, err error) {
-	ro, err := labTargetRoster(opts.rosterPath)
+	rosterPath := opts.rosterPath
+	if strings.TrimSpace(rosterPath) == "" {
+		rosterPath = strings.TrimSpace(target.Roster)
+	}
+	ro, err := labTargetRoster(rosterPath)
 	if err != nil {
 		return "", "", err
 	}
