@@ -140,6 +140,10 @@ DEFAULT_CONTRACT_SCAN = 8
 # across ticks instead of re-reviewing the same thin heads forever.
 DEFAULT_CONTRACT_HOLD_TTL_H = 24
 _CONTRACT_HOLD_LEDGER = "contract-holds.jsonl"
+# Multi-lane scope holds (#2971): an issue that names file families outside the
+# chosen lane lease needs a split/reroute, not another identical launch tick.
+DEFAULT_MULTI_LANE_HOLD_TTL_H = 24
+_MULTI_LANE_HOLD_LEDGER = "multi-lane-holds.jsonl"
 # Contract-repair dispatch: when the WHOLE scan window fails the gate, the tick
 # spawns one worker to bring the held issues up to contract themselves (gh issue
 # edit) instead of idling until a human grooms the backlog. The batch bounds one
@@ -1239,6 +1243,97 @@ def record_contract_holds(runs_dir: Path, rows: list[dict[str, Any]], *,
                 }, ensure_ascii=False) + "\n")
     except OSError:
         pass  # fail-open: a missed skip re-reviews next tick, never blocks one
+
+
+def multi_lane_held_records(
+    runs_dir: Path,
+    *,
+    ttl_h: int = DEFAULT_MULTI_LANE_HOLD_TTL_H,
+    now_ts: float | None = None,
+    updated_ts: dict[int, float] | None = None,
+    only: set[int] | None = None,
+) -> list[dict[str, Any]]:
+    """Recent MULTI_LANE_SCOPE rows, deduped to the latest verdict per issue."""
+    if ttl_h <= 0:
+        return []
+    ledger = runs_dir / _MULTI_LANE_HOLD_LEDGER
+    if not ledger.is_file():
+        return []
+    import time
+    now = now_ts if now_ts is not None else time.time()
+    horizon = now - ttl_h * 3600
+    held: dict[int, tuple[float, int, dict[str, Any]]] = {}
+    try:
+        lines = ledger.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    only_set = {int(n) for n in only} if only is not None else None
+    for idx, line in enumerate(lines):
+        try:
+            row = json.loads(line)
+            ts = float(row.get("ts") or 0)
+            if ts < horizon:
+                continue
+            n = int(row.get("issue"))
+            if only_set is not None and n not in only_set:
+                continue
+            if updated_ts and (updated_ts.get(n) or 0.0) > ts:
+                continue
+            uncovered_lanes = row.get("uncovered_lanes") or []
+            rec = {
+                "issue": n,
+                "number": n,
+                "lane": str(row.get("lane") or ""),
+                "title": str(row.get("title") or "")[:200],
+                "reason": str(row.get("reason") or "")[:240],
+                "uncovered_lanes": [str(l) for l in uncovered_lanes if l][:24],
+            }
+            prev = held.get(n)
+            if prev is None or ts > prev[0] or (ts == prev[0] and idx > prev[1]):
+                held[n] = (ts, idx, rec)
+        except (TypeError, ValueError):
+            continue
+    return [rec for _ts, _idx, rec in sorted(held.values(),
+                                            key=lambda item: (item[0], item[1]))]
+
+
+def multi_lane_held_issues(
+    runs_dir: Path,
+    *,
+    ttl_h: int = DEFAULT_MULTI_LANE_HOLD_TTL_H,
+    now_ts: float | None = None,
+    updated_ts: dict[int, float] | None = None,
+) -> set[int]:
+    """Issue numbers held for operator split/reroute after MULTI_LANE_SCOPE."""
+    return {int(r.get("issue") or 0) for r in multi_lane_held_records(
+        runs_dir, ttl_h=ttl_h, now_ts=now_ts, updated_ts=updated_ts)}
+
+
+def record_multi_lane_holds(runs_dir: Path, rows: list[dict[str, Any]], *,
+                            live: bool, now_ts: float | None = None) -> None:
+    """Append live MULTI_LANE_SCOPE holds so the next tick advances."""
+    if not live or not rows:
+        return
+    import time
+    now = now_ts if now_ts is not None else time.time()
+    iso = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ledger = runs_dir / _MULTI_LANE_HOLD_LEDGER
+    try:
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        with ledger.open("a", encoding="utf-8") as f:
+            for r in rows:
+                f.write(json.dumps({
+                    "utc": iso,
+                    "ts": now,
+                    "issue": int(r.get("issue") or 0),
+                    "lane": str(r.get("lane") or "")[:80],
+                    "title": str(r.get("title") or "")[:200],
+                    "reason": str(r.get("reason") or "")[:240],
+                    "uncovered_lanes": [str(l) for l in
+                                        (r.get("uncovered_lanes") or []) if l][:24],
+                }, ensure_ascii=False) + "\n")
+    except OSError:
+        pass  # fail-open: a missed skip repeats one refusal, never blocks work
 
 
 def _parse_gh_timestamp(value: Any) -> float | None:
@@ -3859,7 +3954,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # verdict: a GitHub updatedAt bump (a human backfill; one bulk gh call,
     # fail-open) OR a fresh local contract overlay (a repair worker's landed
     # backfill — the write path a worker can actually complete on this host).
-    if contract_hold_ttl_h > 0:
+    if contract_hold_ttl_h > 0 or DEFAULT_MULTI_LANE_HOLD_TTL_H > 0:
         refreshed_ts = open_issue_updated_map(root)
         for n, ts in contract_overlay_times(runs_dir).items():
             refreshed_ts[n] = max(refreshed_ts.get(n) or 0.0, ts)
@@ -3867,6 +3962,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         refreshed_ts = None
     contract_held_prior = contract_held_issues(
         runs_dir, ttl_h=contract_hold_ttl_h, updated_ts=refreshed_ts)
+    multi_lane_held_prior = multi_lane_held_issues(
+        runs_dir, ttl_h=DEFAULT_MULTI_LANE_HOLD_TTL_H, updated_ts=refreshed_ts)
     # The cross-lane candidate stream the bounded contract scan walks (busiest
     # lane's oldest candidate first, then each other eligible lane's, round-robin).
     # Falls back to the single chosen lane when the router fold predates the
@@ -3879,6 +3976,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     audit_abstain_held = {int(r["issue"]) for r in audit_abstain_holds
                           if r.get("issue") is not None}
     skip = (live_issues | cooled | held_no_commit | contract_held_prior
+            | multi_lane_held_prior
             | local_witnessed | audit_abstain_held)
     scan_stream = contract_scan_stream(eligible_lanes, skip)
     if scan_stream:
@@ -3918,6 +4016,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         # Surface the structurally-held issues only when something is actually held, so
         # the common (nothing held) payload stays byte-identical to before (#1396).
         **({"held_no_commit": sorted(held_no_commit)} if held_no_commit else {}),
+        **({"multi_lane_held_prior": len(multi_lane_held_prior)}
+           if multi_lane_held_prior else {}),
         **({"locally_witnessed": sorted(local_witnessed)} if local_witnessed else {}),
         **({"commit_audit_abstain_held": audit_abstain_holds}
            if audit_abstain_holds else {}),
@@ -4045,7 +4145,9 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                                    f"either live ({sorted(live_issues)}), locally "
                                    f"witnessed ({sorted(local_witnessed)}), in "
                                    f"cooldown ({sorted(cooled)}), commit-audit-abstain "
-                                   f"held ({sorted(audit_abstain_held)}), or contract-held "
+                                   f"held ({sorted(audit_abstain_held)}), "
+                                   f"multi-lane-held ({sorted(multi_lane_held_prior)}), "
+                                   f"or contract-held "
                                    f"within the last {contract_hold_ttl_h}h "
                                    f"({len(contract_held_prior)} issue(s) awaiting "
                                    f"a contract backfill) — nothing fresh to "
@@ -4222,6 +4324,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                             "reason": issue_contract_hold_reason(contract)[:200],
                             "missing_fields": _contract_missing_fields(contract)})
     record_contract_holds(runs_dir, ledger_rows, live=live)
+    record_multi_lane_holds(runs_dir, multi_lane_skipped, live=live)
     if contract_hold and not force:
         # Self-serve before idling: a genuine all-scanned-fail tick dispatches a
         # contract-REPAIR worker on the held candidates instead of just holding.
@@ -4317,7 +4420,16 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     if scope_scan is None:
         scope_scan = scan_multi_lane_scope(root, _candidate_text(rec), chosen_lane)
     if scope_scan.get("multi_lane") and not force:
+        hold_row = {
+            "issue": target,
+            "lane": chosen_lane,
+            "title": rec.get("title"),
+            "reason": multi_lane_scope_reason(target, scope_scan),
+            "uncovered_lanes": scope_scan.get("uncovered_lanes"),
+        }
+        record_multi_lane_holds(runs_dir, [hold_row], live=live)
         payload["multi_lane_scope"] = scope_scan
+        payload["multi_lane_hold"] = hold_row
         payload.update({
             "ok": False,
             "action": "multi_lane_scope",

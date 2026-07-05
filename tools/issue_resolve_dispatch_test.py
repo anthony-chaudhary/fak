@@ -795,6 +795,9 @@ class EvaluateTest(unittest.TestCase):
         mod.contract_held_issues = lambda runs_dir, **k: set()
         mod.contract_held_records = lambda runs_dir, **k: []
         mod.record_contract_holds = lambda runs_dir, rows, **k: None
+        mod.multi_lane_held_issues = lambda runs_dir, **k: set()
+        mod.multi_lane_held_records = lambda runs_dir, **k: []
+        mod.record_multi_lane_holds = lambda runs_dir, rows, **k: None
         # Hermetic next()-queue seams: no real gh updatedAt fetch, no live repair
         # worker, no repair cooldown, and a pure repair-prompt fold.
         mod.open_issue_updated_map = lambda root, **k: {}
@@ -963,6 +966,66 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["target_issue"], 466)
         self.assertEqual([r["issue"] for r in p["multi_lane_skipped"]], [467])
         self.assertIn("multi-lane head", mod.render(p))
+
+    def test_prior_multi_lane_hold_skips_candidate(self) -> None:
+        """A live MULTI_LANE_SCOPE hold from a previous tick advances later
+        dry-runs instead of repeatedly selecting the same parent issue."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "docs", "numbers": [2319, 2320],
+                          "by_lane_count": {"docs": 2},
+                          "eligible_by_lane": [["docs", [2319, 2320]]]})
+        mod.multi_lane_held_issues = lambda runs_dir, **k: {2319}
+        reviewed: list[int] = []
+
+        def counting_review(root, issue, number, **_kw):
+            reviewed.append(number)
+            return passing_issue_contract()
+
+        mod.issue_contract_review = counting_review
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "WOULD_SPAWN")
+        self.assertEqual(p["target_issue"], 2320)
+        self.assertEqual(reviewed, [2320])
+        self.assertEqual(p["multi_lane_held_prior"], 1)
+
+    def test_multi_lane_scope_live_records_hold_when_no_safe_candidate(self) -> None:
+        """A live final MULTI_LANE_SCOPE refusal records the exact split action so
+        subsequent ticks can skip the parent until it changes."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "docs", "numbers": [2319],
+                          "by_lane_count": {"docs": 1},
+                          "eligible_by_lane": [["docs", [2319]]]})
+
+        def scope(root, text, lane):
+            return {
+                "multi_lane": True,
+                "chosen_lane": lane,
+                "chosen_tree": ["docs/**"],
+                "uncovered_lanes": ["tools"],
+                "uncovered": [{"path": "tools/seo_aeo_scorecard.py",
+                               "lanes": ["tools"]}],
+            }
+
+        seen: dict = {}
+        mod.scan_multi_lane_scope = scope
+        mod.record_multi_lane_holds = (
+            lambda runs_dir, rows, **k: seen.update({"rows": rows, "live": k.get("live")}))
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=True)
+
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["action"], "multi_lane_scope")
+        self.assertEqual(p["verdict"], "MULTI_LANE_SCOPE")
+        self.assertTrue(seen["live"])
+        self.assertEqual(seen["rows"][0]["issue"], 2319)
+        self.assertEqual(seen["rows"][0]["uncovered_lanes"], ["tools"])
+        self.assertIn("tools/seo_aeo_scorecard.py", seen["rows"][0]["reason"])
 
     def test_dirty_path_collision_scans_to_next_clean_issue(self) -> None:
         """A candidate naming dirty local WIP is skipped before launch pricing,
@@ -1195,6 +1258,33 @@ class EvaluateTest(unittest.TestCase):
             # ...and 0 disables the gate outright.
             self.assertEqual(mod.contract_held_issues(runs, ttl_h=0,
                                                       now_ts=1_000_100.0), set())
+
+    def test_multi_lane_hold_ledger_roundtrip_ttl_and_update_escape(self) -> None:
+        import tempfile
+        mod = load()
+        rows = [{
+            "issue": 2319,
+            "lane": "docs",
+            "title": "multi lane",
+            "reason": "Split into per-lane child issues",
+            "uncovered_lanes": ["tools"],
+        }]
+        with tempfile.TemporaryDirectory() as td:
+            runs = Path(td)
+            mod.record_multi_lane_holds(runs, rows, live=False, now_ts=1_000_000.0)
+            self.assertEqual(mod.multi_lane_held_issues(runs, ttl_h=24,
+                                                        now_ts=1_000_100.0), set())
+            mod.record_multi_lane_holds(runs, rows, live=True, now_ts=1_000_000.0)
+            self.assertEqual(mod.multi_lane_held_issues(runs, ttl_h=24,
+                                                        now_ts=1_000_100.0), {2319})
+            records = mod.multi_lane_held_records(runs, ttl_h=24,
+                                                  now_ts=1_000_100.0)
+            self.assertEqual(records[0]["uncovered_lanes"], ["tools"])
+            self.assertEqual(mod.multi_lane_held_issues(
+                runs, ttl_h=24, now_ts=1_000_000.0 + 25 * 3600), set())
+            self.assertEqual(mod.multi_lane_held_issues(
+                runs, ttl_h=24, now_ts=1_000_100.0,
+                updated_ts={2319: 1_000_010.0}), set())
 
     def test_prior_contract_holds_advance_the_scan(self) -> None:
         """An issue held on a PRIOR tick is skipped without a re-review, so the
@@ -1552,8 +1642,10 @@ class EvaluateTest(unittest.TestCase):
              "candidates": [{"pid": 101}], "reaped": [{"pid": 101}], "would_reap": []})
         mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}
         mod.contract_held_issues = lambda runs_dir, **k: set()
+        mod.multi_lane_held_issues = lambda runs_dir, **k: set()
         mod.open_issue_updated_map = lambda root, **k: {}
         mod.record_contract_holds = lambda runs_dir, rows, **k: None
+        mod.record_multi_lane_holds = lambda runs_dir, rows, **k: None
         mod.lane_issue_numbers = lambda root, lane, exclude=None: {
             "lane": "gateway", "numbers": [467], "by_lane_count": {"gateway": 1}}
         mod.live_resolution_issues = lambda runs_dir: set()
@@ -2639,6 +2731,7 @@ class WeeklyCapGateTest(unittest.TestCase):
         mod.live_resolution_lanes = lambda runs_dir: set()
         mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set()
         mod.contract_held_issues = lambda runs_dir, **k: set()
+        mod.multi_lane_held_issues = lambda runs_dir, **k: set()
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": 900, "title": f"title {n}"}
         mod.issue_contract_review = passing_issue_contract
@@ -3384,6 +3477,10 @@ class EvaluateLeaseGateTest(unittest.TestCase):
         mod.live_resolution_lanes = lambda runs_dir: set()  # same-host scan: free
         mod.live_lane_lease_lanes = lambda root: {"lanes": []}
         mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set()
+        mod.contract_held_issues = lambda runs_dir, **k: set()
+        mod.multi_lane_held_issues = lambda runs_dir, **k: set()
+        mod.record_contract_holds = lambda runs_dir, rows, **k: None
+        mod.record_multi_lane_holds = lambda runs_dir, rows, **k: None
         mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}
         mod.check_backend_health = lambda runs_dir, **k: {"state": "healthy"}
         mod.read_dead_backends = lambda runs_dir, **k: []
