@@ -91,8 +91,26 @@ func TestGuardWrapClaudeFrontsWithFakGuardAnthropic(t *testing.T) {
 	if wrapped[indexOf(wrapped, "--provider")+1] != "anthropic" {
 		t.Error("claude provider must be anthropic")
 	}
+	if wrapped[indexOf(wrapped, "--precompact-hook")+1] != "enforce" {
+		t.Error("claude precompact hook must be enforced")
+	}
+	if wrapped[indexOf(wrapped, "--context-budget-tokens")+1] != "48000" {
+		t.Error("claude guard context budget must be wired")
+	}
+	if !contains(wrapped, "--restart-on-budget") {
+		t.Error("claude guard must restart on budget exhaustion")
+	}
+	if wrapped[indexOf(wrapped, "--restart-limit")+1] != "2" {
+		t.Error("claude guard restart limit must be finite")
+	}
 	if !contains(wrapped, "--audit") {
 		t.Error("must pass --audit")
+	}
+	audit := wrapped[indexOf(wrapped, "--audit")+1]
+	wantSessionID := strings.TrimSuffix(filepath.Base(audit), filepath.Ext(audit))
+	if wrapped[indexOf(wrapped, "--session-id")+1] != wantSessionID {
+		t.Errorf("session id must derive from unique audit path: got %q want %q",
+			wrapped[indexOf(wrapped, "--session-id")+1], wantSessionID)
 	}
 	// The raw worker argv is preserved verbatim AFTER the `--` separator.
 	sep := indexOf(wrapped, "--")

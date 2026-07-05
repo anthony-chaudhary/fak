@@ -48,6 +48,21 @@ var guardOffValues = map[string]struct{}{
 // 60s/90s floors. Mirrors dispatch_worker.GUARD_TIMEOUT_FLOOR_S.
 const guardTimeoutFloorS = 600
 
+// Claude guard args mirror tools/dispatch_worker.py. Headless workers need the
+// PreCompact actuator in enforce mode, plus guard's hard budget restart path so
+// a compact-runaway session is relaunched instead of only nudged in stderr.
+const (
+	claudeGuardContextBudgetTokens = "48000"
+	claudeGuardRestartLimit        = "2"
+)
+
+var claudeGuardArgs = []string{
+	"--precompact-hook", "enforce",
+	"--context-budget-tokens", claudeGuardContextBudgetTokens,
+	"--restart-on-budget",
+	"--restart-limit", claudeGuardRestartLimit,
+}
+
 // guardEnabled reports whether to front a worker with `fak guard`. Dogfood-by-default
 // (ON); a node opts out with FLEET_DOGFOOD_GUARD in {0,off,false,no,"",disable,disabled}.
 // Mirrors dispatch_worker.guard_enabled: an ABSENT key is ON, a present-but-off value
@@ -194,6 +209,11 @@ func guardWrap(command []string, fakBin, lane, backend, workspace string, env ma
 	}
 	provider := guardProvider(backend)
 	var extra []string
+	audit := guardAuditPath(workspace, lane, backend)
+	if backend == "claude" {
+		extra = append(extra, claudeGuardArgs...)
+		extra = append(extra, "--session-id", strings.TrimSuffix(filepath.Base(audit), filepath.Ext(audit)))
+	}
 	if backend != "claude" {
 		base := strings.TrimSpace(env["FLEET_DOGFOOD_GUARD_BASEURL"])
 		if base == "" {
@@ -201,7 +221,6 @@ func guardWrap(command []string, fakBin, lane, backend, workspace string, env ma
 		}
 		extra = []string{"--base-url", base}
 	}
-	audit := guardAuditPath(workspace, lane, backend)
 	out := []string{fakBin, "guard", "--provider", provider}
 	out = append(out, extra...)
 	out = append(out, "--audit", audit, "--")
