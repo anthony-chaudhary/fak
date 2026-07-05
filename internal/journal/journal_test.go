@@ -88,8 +88,8 @@ func TestMemoryJournalAddsMetaArgsLabelForBlobArgs(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("wrote %d rows, want 1", len(rows))
 	}
-	if rows[0].ArgsLabel != "" {
-		t.Fatalf("unsafe meta ArgsLabel should be dropped, got %q", rows[0].ArgsLabel)
+	if rows[0].ArgsLabel != "tool=shell_command" {
+		t.Fatalf("unsafe meta ArgsLabel should fall back to tool label, got %q", rows[0].ArgsLabel)
 	}
 
 	call.Meta[MetaArgsLabel] = "command=git status path=fak"
@@ -100,6 +100,26 @@ func TestMemoryJournalAddsMetaArgsLabelForBlobArgs(t *testing.T) {
 	}
 	if n, err := VerifyRows(rows); err != nil || n != 2 {
 		t.Fatalf("meta ArgsLabel must not affect hash-chain verification: n=%d err=%v", n, err)
+	}
+}
+
+func TestMemoryJournalAddsFallbackArgsLabelForOpaqueAllowedCall(t *testing.T) {
+	j := OpenMemory()
+	call := &abi.ToolCall{
+		Tool: "bash",
+		Args: abi.Ref{Kind: abi.RefBlob, Digest: "sha256:opaque-args", Len: 0},
+	}
+	j.Emit(abi.Event{Kind: abi.EvDecide, Call: call, Verdict: &abi.Verdict{Kind: abi.VerdictAllow, By: "test"}})
+
+	rows := j.Recent(0)
+	if len(rows) != 1 {
+		t.Fatalf("wrote %d rows, want 1", len(rows))
+	}
+	if got := rows[0].ArgsLabel; got != "tool=bash" {
+		t.Fatalf("fallback ArgsLabel = %q, want tool=bash", got)
+	}
+	if n, err := VerifyRows(rows); err != nil || n != 1 {
+		t.Fatalf("fallback ArgsLabel must not affect hash-chain verification: n=%d err=%v", n, err)
 	}
 }
 

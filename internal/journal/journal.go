@@ -416,6 +416,9 @@ func rowFromEvent(ev abi.Event) (Row, bool) {
 		if row.ArgsLabel == "" {
 			row.ArgsLabel = argsLabelFromMeta(c.Meta)
 		}
+		if row.ArgsLabel == "" {
+			row.ArgsLabel = fallbackArgsLabel(c.Tool)
+		}
 	}
 	if v := ev.Verdict; v != nil {
 		row.Verdict = verdictName(v.Kind)
@@ -511,6 +514,13 @@ func argsLabelFromMeta(meta map[string]string) string {
 		return ""
 	}
 	return safeProvidedArgsLabel(meta[MetaArgsLabel])
+}
+
+func fallbackArgsLabel(tool string) string {
+	if atom := safeAtom(tool); atom != "" {
+		return "tool=" + atom
+	}
+	return ""
 }
 
 func argsLabelForObject(obj map[string]any) string {
