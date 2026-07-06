@@ -110,6 +110,11 @@ func (r Registry) renderDos() string {
 	for _, h := range r.activeHomes() {
 		writeNameDirRow(&b, h)
 		writeLoginRowFields(&b, h)
+		// email: the resolved login identity, so a dos-side consumer can dedup phantom
+		// duplicate seats (two dirs on ONE login → one rate-limit bucket) by login rather
+		// than by the copy-prone credential token. The job view already carries this; a
+		// dos switcher keying on it agrees with `fak accounts list`'s registry reconcile.
+		b.WriteString("    email: " + yamlScalar(h.Identity.Email) + "\n")
 	}
 	// active_default: the name+config_dir of the ACTIVE-role seat — the account a bare launch /
 	// watchdog should use. Emitted as a top-level scalar so the existing flat `accounts:`

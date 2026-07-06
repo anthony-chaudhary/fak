@@ -70,6 +70,10 @@ func TestRenderDosView(t *testing.T) {
 		"    can_serve: true\n",
 		"    login_status: needs_login\n",
 		"    can_serve: false\n",
+		// email is carried on dos rows too (not just job) so a dos-side switcher can dedup
+		// phantom duplicate seats by resolved login instead of the copy-prone creds token.
+		"    email: day24@netra.test\n",
+		"    email: gem8@netra.test\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("dos view missing %q in:\n%s", want, got)
