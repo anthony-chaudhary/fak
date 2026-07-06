@@ -46,7 +46,7 @@ func runSweep(stdout, stderr io.Writer, argv []string) int {
 	lane := fs.String("lane", "", "with --apply: the lane to commit")
 	unit := fs.Int("unit", 0, "with --apply: commit only sub-unit N of the lane (from groups[].units[].index; 0 = the whole lane)")
 	msg := fs.String("m", "", "with --apply: the commit subject (a `(fak <lane>)` trailer is appended if absent)")
-	push := fs.Bool("push", false, "with --apply: push after a VERIFIED commit (plain push, never --force)")
+	push := fs.Bool("push", false, "with --apply: push after a VERIFIED commit through the safe sync path (never --force)")
 	noOrigin := fs.Bool("no-origin", false, "skip the per-path origin/<trunk> relation probe (NEW/AHEAD/ALREADY); faster, but a stale already-shipped duplicate is no longer flagged")
 	var only pathList
 	fs.Var(&only, "path", "with --apply: restrict the commit to these repo-relative paths (repeatable; default: every dirty path in the lane)")
