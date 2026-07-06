@@ -25,7 +25,7 @@ const (
 	// 5b), written at spawn only when a non-default model is resolved and scraped back
 	// by the witness sweep into WitnessRecord.Model. Absent for a floor (seat-default)
 	// worker, so an unconfigured fleet writes no extra sidecar.
-	ModelSidecarSuffix = ".model"
+	ModelSidecarSuffix   = ".model"
 	OpencodePromptNotice = "Resolve GitHub issue # from the attached dispatch prompt."
 	// FallbackMaxWorkers is the built-in aspirational ceiling used when the
 	// operator sets no FAK_MAX_WORKERS; see DefaultMaxWorkers for the contract.
