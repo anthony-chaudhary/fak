@@ -128,15 +128,15 @@ flip + refusal reason + dogfood. The "P2 (blocked)" in the body is accurate.
   through a standalone driver at all — if a later design admits the relay at the
   `internal/sessionreset` seam, the blocker set narrows; re-check before dispatch.)
 
-## Recommended intake repair (label-only, no scope change)
+## Intake repair (applied 2026-07-05)
 
 To end the classification drift on the live issue without touching build state:
 
-- Add `managed-context`, `generation`, `gen/next` (the epic's own
-  `Labels-intended`; all three labels exist in the repo). *(Applied — the issue
-  carries all three as of 2026-07-05.)*
+- Added `managed-context`, `generation`, `gen/next` (the epic's own
+  `Labels-intended`; all three labels exist in the repo). **Applied** — the issue
+  carries all three as of 2026-07-05.
 - Set milestone `Generation G1 - Next Gen` to agree with `gen/next` (per the
-  generation contract's stream↔milestone agreement rule).
+  generation contract's stream↔milestone agreement rule). **Applied** at triage.
 - Keep state OPEN; the "Blocked by: #1860" body line should be sharpened, not
   removed — the live dependency is the OPEN G/H children of the closed umbrella
   (#1888, #1889, #1894 at minimum), so reword it to "Blocked by: #1860's
@@ -154,5 +154,6 @@ this does not fully resolve it" escape hatch. Separate defect for the loop: a
 `docs(...)`-typed / triage-verbed commit referencing `(#N)` must not arm
 close-resolved for #N.
 
-These are recommendations recorded for an operator/peer with issue-write scope;
-this triage pass commits the classification note only.
+Labels and milestone were applied this pass. The remaining recommendation (the
+body reword) is left to an operator/peer with issue-write scope; this pass
+commits the corrected classification note only — no build-state change.
