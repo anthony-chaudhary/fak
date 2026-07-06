@@ -228,7 +228,10 @@ R8 #2206.
 - **R3 — Placement dual-write.** Cache breakpoint placement consumes the
   residency plan: `SegStable` segments and `cache_control` positions derive
   from one structure, so prefix stability is a contract in code, not
-  discipline (binds promptmmu/syspromptmmu to #1603's design).
+  discipline (binds promptmmu/syspromptmmu to #1603's design). Derivation
+  contract (the single structure, the advisory shadow-mode check, the #555 /
+  prune test targets, and the `fak_harness_coherence` witness):
+  [`CONCEPT-R3-PLACEMENT-DUAL-WRITE-2026-07-06.md`](CONCEPT-R3-PLACEMENT-DUAL-WRITE-2026-07-06.md).
 - **R4 — The context-plan-required gate.** Advisory lint: every new `cmd/fak`
   verb or skill carries a declared context plan (enters / pages / warms), in
   the maturity-ladder style — evidence the author did not write. L7 as code.

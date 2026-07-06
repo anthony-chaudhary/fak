@@ -172,6 +172,7 @@ front page.
 
 ### Latest working notes
 
+- [R3 placement dual-write: one structure, two projections](docs/notes/CONCEPT-R3-PLACEMENT-DUAL-WRITE-2026-07-06.md) -- auto-indexed dated note.
 - [GLM-5.2 readiness warmup-gate contract (#3051), 2026-07-06](docs/notes/GLM52-READINESS-WARMUP-GATE-CONTRACT-3051-2026-07-06.md) -- auto-indexed dated note.
 - [GLM-5.2 first-request cold tax vs. KV-prefix caching — an ablation, 2026-07-06](docs/notes/GLM52-COLD-START-VS-CACHING-ABLATION-2026-07-06.md) -- auto-indexed dated note.
 - [GLM-5.2 compile-cache persistence contract (#3052), 2026-07-06](docs/notes/GLM52-COMPILE-CACHE-PERSISTENCE-CONTRACT-3052-2026-07-06.md) -- auto-indexed dated note.
