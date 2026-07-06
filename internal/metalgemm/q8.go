@@ -16,6 +16,7 @@ int  mg_q8_upload(const signed char* codes, const float* scales, int out, int in
 void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y);
 void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float* xd, float* Ycat, const int* yoff);
 void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y);
+void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float* Xd, int P, float* Ycat, const int* yoff);
 void mg_q8_reset(void);
 */
 import "C"
@@ -104,6 +105,41 @@ func (w *Q8Weight) GEMM(Xq []int8, Xd []float32, P int, Y []float32) {
 	}
 	C.mg_q8_gemm(w.id, (*C.schar)(unsafe.Pointer(&Xq[0])), (*C.float)(unsafe.Pointer(&Xd[0])),
 		C.int(P), (*C.float)(unsafe.Pointer(&Y[0])))
+}
+
+// GEMMGroupQ8 runs one batched prefill GEMM per weight in ws, all reading the SAME Q8_0 activation
+// panel X[P, In], in a SINGLE Metal command buffer. It is the prefill twin of GEMVGroupQ8 for
+// Qwen3.6's linear_attn in-proj groups: one upload of the activation panel and one submit/sync
+// covers several Q8-minority projections.
+func GEMMGroupQ8(ws []*Q8Weight, Xq []int8, Xd []float32, P int) [][]float32 {
+	n := len(ws)
+	if n == 0 || P <= 0 || ws[0] == nil || len(Xq) < P*ws[0].In || len(Xd) < P*ws[0].Nblk {
+		return nil
+	}
+	in, nblk := ws[0].In, ws[0].Nblk
+	wids := make([]C.int, n)
+	yoff := make([]C.int, n+1)
+	off := 0
+	for i, w := range ws {
+		if w == nil || w.id < 0 || w.In != in || w.Nblk != nblk {
+			return nil
+		}
+		wids[i] = w.id
+		yoff[i] = C.int(off)
+		off += P * w.Out
+	}
+	yoff[n] = C.int(off)
+	ycat := make([]float32, off)
+	C.mg_q8_gemm_group(&wids[0], C.int(n), (*C.schar)(unsafe.Pointer(&Xq[0])), (*C.float)(unsafe.Pointer(&Xd[0])),
+		C.int(P), (*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0])
+	out := make([][]float32, n)
+	o := 0
+	for i, w := range ws {
+		sz := P * w.Out
+		out[i] = ycat[o : o+sz : o+sz]
+		o += sz
+	}
+	return out
 }
 
 // ID returns the backend handle for this matrix.

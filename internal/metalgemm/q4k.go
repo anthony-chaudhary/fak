@@ -18,6 +18,8 @@ void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat);
 void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, const int* yoff);
 void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y);
 int  mg_q6k_upload(const unsigned char* raw, int out, int in);
+void mg_q6k_gemv(int wid, const float* x, float* y);
+void mg_q6k_gemm(int wid, const float* X, int P, float* Y);
 void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, float* y);
 int  mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int* down_wids, int n, const float* x, float* Ycat);
 void mg_q4k_gemm(int wid, const float* X, int P, float* Y, double* out_gpu_ms);
@@ -212,6 +214,26 @@ func UploadQ6K(raw []byte, out, in int) *Q6KWeight {
 
 // ID returns the backend handle for this matrix.
 func (w *Q6KWeight) ID() int { return int(w.id) }
+
+// GEMV computes y[Out] = W · x for one f32 activation row. It is the standalone decode/head
+// twin of the Q6_K GEMV already used inside FusedMLPQ6Down.
+func (w *Q6KWeight) GEMV(x, y []float32) {
+	if w == nil || w.id < 0 || len(x) < w.In || len(y) < w.Out {
+		return
+	}
+	C.mg_q6k_gemv(w.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])))
+}
+
+// GEMM computes Y[P, Out] = X[P, In] · Wᵀ for a resident Q6_K matrix. It is the prefill twin of
+// the Q6_K GEMV used by the mixed Q4_K/Q6_K fused decode MLP. The kernel keeps the Q6_K bytes on
+// the GPU and only moves the f32 activation panel/result, so q4_k_m dense down_proj no longer falls
+// back to the CPU batched k-quant loop during hybrid Qwen prefill.
+func (w *Q6KWeight) GEMM(X []float32, P int, Y []float32) {
+	if w == nil || w.id < 0 || P <= 0 || len(X) < P*w.In || len(Y) < P*w.Out {
+		return
+	}
+	C.mg_q6k_gemm(w.id, (*C.float)(unsafe.Pointer(&X[0])), C.int(P), (*C.float)(unsafe.Pointer(&Y[0])))
+}
 
 // FusedMLPQ6Down runs a whole dense SwiGLU MLP for one decode token — y = down( silu(gate·x) *
 // (up·x) ) — in ONE Metal command buffer, exactly like FusedMLP, but with a Q6_K down_proj

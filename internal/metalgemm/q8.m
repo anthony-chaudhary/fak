@@ -320,6 +320,54 @@ void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y
     }
 }
 
+// mg_q8_gemm_group runs n batched prefill GEMMs that SHARE one activation panel X[P,in] but apply
+// n DIFFERENT resident Q8 weights, into ONE command buffer. This is the Q8 prefill twin of
+// mg_q8_gemv_group and the grouped sibling of mg_q8_gemm: Qwen3.6 linear_attn in-proj groups pay one
+// X upload and one submit/sync instead of one per projection. Each weight writes a token-major
+// [P,out_i] block into Ycat at yoff[i] (element offset).
+void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float* Xd, int P, float* Ycat, const int* yoff) {
+    if (n <= 0 || P <= 0) return;
+    @autoreleasepool {
+        Q8W W0 = gQ8[wids[0]];
+        long ytot = (long)yoff[n];
+        q8_grow_scratch((long)P * W0.in, (long)P * W0.nblk, ytot);
+        memcpy(gQ8XBuf.contents,  Xq, (size_t)P * W0.in);
+        memcpy(gQ8XDBuf.contents, Xd, (size_t)P * W0.nblk * 4);
+
+        const int BM = 64;  // output rows per threadgroup; must match Q8_BM in the MSL source
+        const int BN = 64;  // token-tile width;            must match Q8_BN in the MSL source
+        const int TG = 256; // threads per threadgroup;     must match Q8_TG in the MSL source
+        id<MTLCommandBuffer> cmd = [gQueue commandBuffer];
+        id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
+        [e setComputePipelineState:psoQ8Gemm];
+        [e setBuffer:gQ8XBuf  offset:0 atIndex:2]; // shared X panel for every weight
+        [e setBuffer:gQ8XDBuf offset:0 atIndex:3];
+        [e setBytes:&P length:sizeof(int) atIndex:7];
+        for (int i = 0; i < n; i++) {
+            Q8W W = gQ8[wids[i]];
+            int rowBlocks = (W.out + BM - 1) / BM;
+            [e setBuffer:(__bridge id<MTLBuffer>)W.codes  offset:0 atIndex:0];
+            [e setBuffer:(__bridge id<MTLBuffer>)W.scales offset:0 atIndex:1];
+            [e setBuffer:gQ8YBuf offset:(NSUInteger)((long)yoff[i] * 4) atIndex:4];
+            [e setBytes:&W.nblk length:sizeof(int) atIndex:5];
+            [e setBytes:&W.out  length:sizeof(int) atIndex:6];
+            for (int t0 = 0; t0 < P; t0 += BN) {
+                int nt = P - t0;
+                if (nt > BN) nt = BN;
+                [e setBytes:&t0 length:sizeof(int) atIndex:8];
+                [e setBytes:&nt length:sizeof(int) atIndex:9];
+                [e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks, 1, 1)
+                    threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG, 1, 1)];
+            }
+        }
+        [e endEncoding];
+        [cmd commit];
+        [cmd waitUntilCompleted];
+
+        memcpy(Ycat, gQ8YBuf.contents, (size_t)ytot * 4);
+    }
+}
+
 // --- accessors for the GPU-resident decode forward (decode.m) ---
 // The resident decode forward (issue #67) chains all of a token's matmuls into ONE command
 // buffer, so it needs to BIND each projection's resident Q8 weight buffers directly into its
