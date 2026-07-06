@@ -70,11 +70,14 @@ type issueContractCounts struct {
 	GenerationFitAvg      int            `json:"generation_fit_avg,omitempty"`
 	GenerationFitMeasured int            `json:"generation_fit_measured,omitempty"`
 	GenerationMismatches  int            `json:"generation_mismatches,omitempty"`
+	ModelTierTagged       int            `json:"model_tier_tagged,omitempty"`
+	ModelTierFlagged      int            `json:"model_tier_flagged,omitempty"`
 	ByReason              map[string]int `json:"by_reason"`
 	ByLane                map[string]int `json:"by_lane"`
 	ByWorkUnit            map[string]int `json:"by_work_unit"`
 	ByExpectedStepBucket  map[string]int `json:"by_expected_step_bucket"`
 	ByGeneration          map[string]int `json:"by_generation,omitempty"`
+	ByRequiredTier        map[string]int `json:"by_required_tier,omitempty"`
 }
 
 type issueContractBatchGroup struct {
@@ -143,6 +146,7 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 	live := fs.Bool("live", false, "review as an armed live/scheduled producer")
 	dedupeChecked := fs.Bool("dedupe-checked", false, "producer proved marker dedupe against existing issues")
 	dedupeCap := fs.Int("dedupe-cap", 0, "bounded issue scan cap proven before live sync")
+	strictModelTier := fs.Bool("strict-model-tier", false, "hold issues with missing/invalid/contradictory model-tier metadata triage-only")
 	asJSON := fs.Bool("json", false, "emit machine-readable review/result")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -185,9 +189,10 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 		OK:     true,
 	}
 	opts := issuecontract.Options{
-		Live:          *live,
-		DedupeChecked: *dedupeChecked,
-		DedupeCap:     *dedupeCap,
+		Live:            *live,
+		DedupeChecked:   *dedupeChecked,
+		DedupeCap:       *dedupeCap,
+		StrictModelTier: *strictModelTier,
 	}
 	if mode == "issues" {
 		issues, err := decodeIssueContractIssues(b)
@@ -246,6 +251,7 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 		ByWorkUnit:           map[string]int{},
 		ByExpectedStepBucket: map[string]int{},
 		ByGeneration:         map[string]int{},
+		ByRequiredTier:       map[string]int{},
 	}
 	batches := map[string]*issueContractBatchGroup{}
 	duplicateGroups := map[string]*issueContractDuplicateGroup{}
@@ -284,6 +290,15 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 				counts.GenerationMismatches++
 			}
 			counts.ByGeneration[issueContractBucketValue(review.GenerationFit.Stream, "(unclassified)")]++
+		}
+		if issueContractReviewHasModelTier(review) {
+			counts.ModelTierTagged++
+			if review.ModelTier.Required != "" {
+				counts.ByRequiredTier[review.ModelTier.Required]++
+			}
+		}
+		if len(review.ModelTier.Flags) > 0 {
+			counts.ModelTierFlagged++
 		}
 		for _, reason := range review.Reasons {
 			counts.ByReason[reason]++
@@ -336,6 +351,9 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 	} else {
 		counts.ByGeneration = nil
 	}
+	if counts.ModelTierTagged == 0 {
+		counts.ByRequiredTier = nil
+	}
 	groups := make([]issueContractBatchGroup, 0, len(batches))
 	for _, group := range batches {
 		if len(group.ByReason) == 0 {
@@ -380,6 +398,14 @@ func issueContractReviewHasGenerationFit(review issuecontract.Review) bool {
 		strings.TrimSpace(review.GenerationFit.LabelStream) != "" ||
 		strings.TrimSpace(review.GenerationFit.BodyStream) != "" ||
 		len(review.GenerationFit.Flags) > 0
+}
+
+// issueContractReviewHasModelTier reports whether the review resolved at least
+// one model tier (required or optimal). A review that only carries missing-tier
+// flags is NOT counted as tagged — the flag count is the separate signal.
+func issueContractReviewHasModelTier(review issuecontract.Review) bool {
+	return strings.TrimSpace(review.ModelTier.Required) != "" ||
+		strings.TrimSpace(review.ModelTier.Optimal) != ""
 }
 
 func issueContractAddDuplicateGroup(groups map[string]*issueContractDuplicateGroup, review issuecontract.Review, stepBudget int) {
@@ -893,6 +919,10 @@ func renderIssueContract(r issueContractResult) string {
 		lines = append(lines, fmt.Sprintf("  generation_fit: measured=%d avg=%d mismatches=%d",
 			r.Counts.GenerationFitMeasured, r.Counts.GenerationFitAvg, r.Counts.GenerationMismatches))
 	}
+	if r.Counts.ModelTierTagged > 0 || r.Counts.ModelTierFlagged > 0 {
+		lines = append(lines, fmt.Sprintf("  model_tier: tagged=%d flagged=%d",
+			r.Counts.ModelTierTagged, r.Counts.ModelTierFlagged))
+	}
 	if len(r.Counts.ByReason) > 0 {
 		lines = append(lines, "  reasons: "+renderIssueContractReasonCounts(r.Counts.ByReason))
 	}
@@ -907,6 +937,9 @@ func renderIssueContract(r issueContractResult) string {
 	}
 	if len(r.Counts.ByGeneration) > 0 {
 		lines = append(lines, "  generations: "+renderIssueContractReasonCounts(r.Counts.ByGeneration))
+	}
+	if len(r.Counts.ByRequiredTier) > 0 {
+		lines = append(lines, "  required_tiers: "+renderIssueContractReasonCounts(r.Counts.ByRequiredTier))
 	}
 	for i, group := range r.BatchGroups {
 		if i >= 8 {
@@ -1006,6 +1039,11 @@ func renderIssueContract(r issueContractResult) string {
 				issueContractBucketValue(review.GenerationFit.Stream, "(unclassified)"),
 				review.GenerationFit.Total)
 		}
+		if issueContractReviewHasModelTier(review) {
+			line += fmt.Sprintf(" model_tier=%s/%s",
+				issueContractBucketValue(review.ModelTier.Required, "?"),
+				issueContractBucketValue(review.ModelTier.Optimal, "?"))
+		}
 		lines = append(lines, line)
 		for _, reason := range review.Reasons {
 			lines = append(lines, "    refuses: "+reason)
@@ -1015,6 +1053,9 @@ func renderIssueContract(r issueContractResult) string {
 		}
 		for _, flag := range review.GenerationFit.Flags {
 			lines = append(lines, "    generation_flag: "+flag)
+		}
+		for _, flag := range review.ModelTier.Flags {
+			lines = append(lines, "    model_tier_flag: "+flag)
 		}
 	}
 	return strings.Join(lines, "\n")
@@ -1072,6 +1113,7 @@ func issueUsage(w io.Writer) {
   fak issue contract --from-plan PLAN.json [--json]
   fak issue contract --from-issues ISSUES.json [--json]
                      [--live --dedupe-checked --dedupe-cap N]
+                     [--strict-model-tier]
   fak issue cohort   --from-plan PLAN.json [--json]
   fak issue cohort   --from-issues ISSUES.json [--json]
                      [--live --dedupe-checked --dedupe-cap N] [--max-wave N]
@@ -1093,7 +1135,10 @@ producer syncs them. Exit 0 means dispatchable; exit 3 means the candidate is
 triage-only or refused with closed reasons such as ISSUE_SCOPE_INCOMPLETE,
 ISSUE_UNROUTED, ISSUE_NOT_DISPATCH_LEAF, ISSUE_OVERSIZED_EXPECTED_STEPS,
 ISSUE_NOISE_CONTROL_INCOMPLETE, ISSUE_AGENT_CONTEXT_INCOMPLETE,
-ISSUE_PRIVATE_BOUNDARY, or ISSUE_LIVE_UNARMORED.
+ISSUE_PRIVATE_BOUNDARY, or ISSUE_LIVE_UNARMORED. Every review also reports a
+model_tier readout (required/optimal tier, source, and missing/invalid/
+contradictory flags); --strict-model-tier turns a flagged issue triage-only
+with ISSUE_MODEL_TIER_INCOMPLETE instead of leaving it advisory.
 
 The cohort command plans a whole BATCH (1..1000) of candidates at creation time:
 it partitions the dispatchable leaves into concurrency-safe waves (the same

@@ -841,6 +841,150 @@ func TestReviewIssueDraftParsesCombinedDoneWitnessSection(t *testing.T) {
 	}
 }
 
+func TestReviewIssueModelTierFromLabels(t *testing.T) {
+	c := completeCandidate()
+	c.Labels = []string{"enhancement", "model-tier", "tier/T1-required", "tier/T1-optimal", "priority/P1"}
+	review := ReviewCandidate(c, Options{})
+	if !review.OK || review.Dispatchability != Dispatchable {
+		t.Fatalf("model-tier labels must not change dispatchability by default: %+v", review)
+	}
+	mt := review.ModelTier
+	if mt.Required != "T1" || mt.Optimal != "T1" {
+		t.Fatalf("model tier = %+v, want required/optimal T1 from labels", mt)
+	}
+	if mt.RequiredSource != "label" || mt.OptimalSource != "label" {
+		t.Fatalf("model tier sources = %+v, want label source", mt)
+	}
+	if len(mt.Flags) != 0 {
+		t.Fatalf("model tier flags = %v, want none for a fully-tagged issue", mt.Flags)
+	}
+}
+
+func TestReviewIssueModelTierBodyFallback(t *testing.T) {
+	body := issueProofSectionBody(
+		"The contract reads the body tier fields.",
+		"go test ./internal/issuecontract",
+	) + "\n" + strings.Join([]string{
+		"### Model tier",
+		"- Required model tier: `tier/T1-required`",
+		"- Optimal model tier: `tier/T0-optimal`",
+	}, "\n")
+	// No labels on the draft — the body fields are the documented fallback.
+	review := ReviewIssueDraft(IssueDraft{
+		Number: 3041,
+		Title:  "issuecontract: parse model-tier body fields",
+		Body:   body,
+	}, Options{})
+	mt := review.ModelTier
+	if mt.Required != "T1" || mt.Optimal != "T0" {
+		t.Fatalf("model tier = %+v, want body fallback required T1 / optimal T0", mt)
+	}
+	if mt.RequiredSource != "body" || mt.OptimalSource != "body" {
+		t.Fatalf("model tier sources = %+v, want body source", mt)
+	}
+	// Optimal T0 is MORE demanding than the required T1 floor, so no contradiction.
+	if len(mt.Flags) != 0 {
+		t.Fatalf("model tier flags = %v, want none (optimal T0 meets required T1)", mt.Flags)
+	}
+}
+
+func TestReviewIssueModelTierMissingAndInvalidFields(t *testing.T) {
+	// No tier metadata at all -> both roles flagged missing, advisory only.
+	review := ReviewCandidate(completeCandidate(), Options{})
+	for _, want := range []string{"model_tier_required_missing", "model_tier_optimal_missing"} {
+		if !has(review.ModelTier.Flags, want) {
+			t.Fatalf("model tier flags = %v, want %s", review.ModelTier.Flags, want)
+		}
+	}
+	if !review.OK || review.Dispatchability != Dispatchable {
+		t.Fatalf("missing tier metadata is advisory by default: %+v", review)
+	}
+
+	// Present but unparseable body field -> invalid, not silently dropped.
+	c := completeCandidate()
+	c.RequiredModelTier = "frontier"
+	c.OptimalModelTier = "tier/T1-optimal"
+	review = ReviewCandidate(c, Options{})
+	if !has(review.ModelTier.Flags, "model_tier_required_invalid") {
+		t.Fatalf("model tier flags = %v, want required invalid for unparseable field", review.ModelTier.Flags)
+	}
+	if review.ModelTier.Optimal != "T1" || review.ModelTier.OptimalSource != "body" {
+		t.Fatalf("model tier = %+v, want optimal T1 still parsed from body", review.ModelTier)
+	}
+}
+
+func TestReviewIssueModelTierContradictoryLabels(t *testing.T) {
+	// Two distinct required labels -> conflict; the floor cannot be decided.
+	c := completeCandidate()
+	c.Labels = []string{"tier/T0-required", "tier/T1-required", "tier/T1-optimal"}
+	review := ReviewCandidate(c, Options{})
+	if !has(review.ModelTier.Flags, "model_tier_required_conflict") {
+		t.Fatalf("model tier flags = %v, want required conflict for two required labels", review.ModelTier.Flags)
+	}
+	if review.ModelTier.Required != "" {
+		t.Fatalf("model tier = %+v, want no decided required tier under conflict", review.ModelTier)
+	}
+	if !review.OK {
+		t.Fatalf("contradictory labels are advisory by default: %+v", review)
+	}
+
+	// Optimal less demanding than the required floor -> contradiction (T0 is the
+	// most demanding tier, so a T2 optimal cannot meet a T0 requirement).
+	c = completeCandidate()
+	c.Labels = []string{"tier/T0-required", "tier/T2-optimal"}
+	review = ReviewCandidate(c, Options{})
+	if review.ModelTier.Required != "T0" || review.ModelTier.Optimal != "T2" {
+		t.Fatalf("model tier = %+v, want required T0 / optimal T2 parsed", review.ModelTier)
+	}
+	if !has(review.ModelTier.Flags, "model_tier_contradiction") {
+		t.Fatalf("model tier flags = %v, want contradiction (optimal T2 below required T0 floor)", review.ModelTier.Flags)
+	}
+}
+
+func TestReviewIssueModelTierPriorityDisambiguation(t *testing.T) {
+	c := completeCandidate()
+	// A priority label and a stray "P1" body field must NOT be read as tier T1 —
+	// "Priority/P1 is not model tier T1" (the issue's stated confusion risk).
+	c.Labels = []string{"enhancement", "priority/P1"}
+	c.Priority = "P1"
+	c.RequiredModelTier = "P1"
+	review := ReviewCandidate(c, Options{})
+	mt := review.ModelTier
+	if mt.Required != "" || mt.Optimal != "" {
+		t.Fatalf("model tier = %+v, want P1 NOT read as model tier T1", mt)
+	}
+	if !has(mt.Flags, "model_tier_required_invalid") {
+		t.Fatalf("model tier flags = %v, want the stray P1 field flagged invalid, not parsed as T1", mt.Flags)
+	}
+	if !has(mt.Flags, "model_tier_optimal_missing") {
+		t.Fatalf("model tier flags = %v, want optimal missing (no tier label present)", mt.Flags)
+	}
+	if !review.OK {
+		t.Fatalf("priority-only labels stay advisory and dispatchable: %+v", review)
+	}
+}
+
+func TestReviewIssueModelTierStrictModeHolds(t *testing.T) {
+	c := completeCandidate() // fully scoped and routed, but carries no tier tags
+	advisory := ReviewCandidate(c, Options{})
+	if !advisory.OK || advisory.Dispatchability != Dispatchable {
+		t.Fatalf("default review must stay dispatchable despite missing tier: %+v", advisory)
+	}
+	strict := ReviewCandidate(c, Options{StrictModelTier: true})
+	if strict.OK || strict.Dispatchability != TriageOnly || strict.Verdict != "needs_scope" {
+		t.Fatalf("strict review = %+v, want triage-only needs-scope hold", strict)
+	}
+	if !has(strict.Reasons, ReasonModelTierIncomplete) {
+		t.Fatalf("strict reasons = %v, want %s", strict.Reasons, ReasonModelTierIncomplete)
+	}
+	// A fully-tagged issue passes even under strict mode.
+	c.Labels = []string{"tier/T1-required", "tier/T1-optimal"}
+	tagged := ReviewCandidate(c, Options{StrictModelTier: true})
+	if !tagged.OK || tagged.Dispatchability != Dispatchable {
+		t.Fatalf("strict review of a fully-tagged issue must pass: %+v", tagged)
+	}
+}
+
 func issueProofSectionBody(done, witness string) string {
 	return issueProofSectionBodyWithLikelyFiles(done, witness, true)
 }

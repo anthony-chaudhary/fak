@@ -335,6 +335,93 @@ func TestIssueContractReportsGenerationFit(t *testing.T) {
 	}
 }
 
+func TestIssueContractModelTierReadout(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "issues.json")
+	body := []issuecontract.IssueDraft{{
+		Number: 3041,
+		Title:  "modeltier(C4): issue contract parses required and optimal model-tier tags",
+		Body:   completeIssueDraftBody(),
+		Labels: []issuecontract.IssueLabel{
+			{Name: "guardrsi"},
+			{Name: "tier/T1-required"},
+			{Name: "tier/T1-optimal"},
+			{Name: "priority/P1"},
+		},
+	}}
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := runIssue(&out, &errb, []string{"contract", "--from-issues", path, "--json"})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
+	}
+	var got struct {
+		Counts struct {
+			ModelTierTagged  int            `json:"model_tier_tagged"`
+			ModelTierFlagged int            `json:"model_tier_flagged"`
+			ByRequiredTier   map[string]int `json:"by_required_tier"`
+		} `json:"counts"`
+		Reviews []struct {
+			ModelTier struct {
+				Required       string   `json:"required"`
+				Optimal        string   `json:"optimal"`
+				RequiredSource string   `json:"required_source"`
+				OptimalSource  string   `json:"optimal_source"`
+				Flags          []string `json:"flags"`
+			} `json:"model_tier"`
+		} `json:"reviews"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out.String())
+	}
+	if got.Counts.ModelTierTagged != 1 || got.Counts.ModelTierFlagged != 0 || got.Counts.ByRequiredTier["T1"] != 1 {
+		t.Fatalf("model tier counts = %+v, want one T1-tagged, unflagged review", got.Counts)
+	}
+	if len(got.Reviews) != 1 || got.Reviews[0].ModelTier.Required != "T1" ||
+		got.Reviews[0].ModelTier.Optimal != "T1" ||
+		got.Reviews[0].ModelTier.RequiredSource != "label" ||
+		got.Reviews[0].ModelTier.OptimalSource != "label" ||
+		len(got.Reviews[0].ModelTier.Flags) != 0 {
+		t.Fatalf("model tier review = %+v, want T1/T1 from labels with no flags", got.Reviews)
+	}
+
+	// Strict mode on an untagged (but otherwise dispatchable) issue holds it
+	// triage-only with the closed reason; default mode leaves it dispatchable.
+	untagged := []issuecontract.IssueDraft{{
+		Number: 3042,
+		Title:  "guardrsi: untagged block reasons",
+		Body:   completeIssueDraftBody(),
+		Labels: []issuecontract.IssueLabel{{Name: "guardrsi"}},
+	}}
+	ub, err := json.Marshal(untagged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upath := filepath.Join(t.TempDir(), "untagged.json")
+	if err := os.WriteFile(upath, ub, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errb.Reset()
+	if code := runIssue(&out, &errb, []string{"contract", "--from-issues", upath}); code != 0 {
+		t.Fatalf("default untagged exit = %d, want 0 (advisory)\nstdout:\n%s", code, out.String())
+	}
+	out.Reset()
+	errb.Reset()
+	code = runIssue(&out, &errb, []string{"contract", "--from-issues", upath, "--strict-model-tier"})
+	if code != 3 {
+		t.Fatalf("strict untagged exit = %d, want 3\nstdout:\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), issuecontract.ReasonModelTierIncomplete) {
+		t.Fatalf("strict untagged output missing %s:\n%s", issuecontract.ReasonModelTierIncomplete, out.String())
+	}
+}
+
 func TestIssueContractFlagsBatchGroupsOverDeclaredCap(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "candidates.json")
 	candidates := make([]issuecontract.Candidate, 0, 3)
