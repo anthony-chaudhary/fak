@@ -426,6 +426,10 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		return mcpDecodeCall[ContextRestoreRequest](p.Arguments, "fak_context_restore", func(req ContextRestoreRequest) (any, error) {
 			return s.restoreContext(req)
 		})
+	case "fak_context_spans":
+		return mcpDecodeCall[ContextSpansRequest](p.Arguments, "fak_context_spans", func(req ContextSpansRequest) (any, error) {
+			return s.contextSpans(req), nil
+		})
 	default:
 		return nil, &rpcError{Code: rpcInvalidParams, Message: "unknown tool: " + p.Name}
 	}
@@ -734,6 +738,16 @@ func toolDescriptors() []map[string]any {
   "required": ["id"],
   "properties": {
     "id": {"type": "string", "description": "the content-address handle (sha256 hex) a compaction tombstone embedded as id=<hex>"},
+    "trace_id": {"type": "string", "description": "session trace id; omitted uses the gateway default trace (your own session under fak guard)"}
+  }
+}`),
+		},
+		{
+			"name":        "fak_context_spans",
+			"description": "List the restorable content-address handles a session trace currently holds — the DISCOVERY counterpart to fak_context_restore. Returns one SAFE row per dropped span: its id (the sha256-hex handle to pass to fak_context_restore), a descriptor (the orientation excerpt, never the full bytes), its size in bytes (the cost proxy), the evidence cluster/kind edges when a source carries them, and its suppression status. Restorable is the one bit that says whether fak_context_restore would page the handle back in: a span an operator sealed (quarantine) or tombstoned (context control) is LISTED as not restorable, and its bytes are never offered here. Read-only enumeration: it surfaces WHAT is recoverable so a model can decide what to restore, and never pages any bytes back in itself. An empty or unknown trace is a valid empty answer (Count 0), not an error. Pass {trace_id?}; omitted uses the gateway default trace (your own session under fak guard).",
+			"inputSchema": json.RawMessage(`{
+  "type": "object",
+  "properties": {
     "trace_id": {"type": "string", "description": "session trace id; omitted uses the gateway default trace (your own session under fak guard)"}
   }
 }`),

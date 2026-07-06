@@ -62,6 +62,13 @@ type restoreEntry struct {
 	bytes      []byte
 	sealed     bool
 	tombstoned bool
+	// cluster and kind are the evidence-cluster and evidence-kind edges the enumeration tool
+	// (fak_context_spans) surfaces alongside the handle. They are EMPTY for the current
+	// compaction-tombstone source — a dropped originating task carries no cluster membership — and
+	// exist so a richer span source (issue #3062) can populate the decisive→cluster edges without a
+	// second stash shape. stashRestore leaves them zero; contextSpans reads them (empty in, empty out).
+	cluster string
+	kind    string
 }
 
 // sessionCtxRestore is one trace's ordered stash of restore entries (oldest first, so overflow drops
