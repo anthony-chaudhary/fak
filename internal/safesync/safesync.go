@@ -46,18 +46,38 @@ type Entry struct {
 }
 
 type Assessment struct {
-	OK         bool    `json:"ok"`
-	State      string  `json:"state"`
-	Head       string  `json:"head,omitempty"`
-	Target     string  `json:"target,omitempty"`
-	TargetRef  string  `json:"target_ref,omitempty"`
-	Branch     string  `json:"branch,omitempty"`
-	WriteCount int     `json:"write_count,omitempty"`
-	Identical  []Entry `json:"identical,omitempty"`
-	Divergent  []Entry `json:"divergent,omitempty"`
-	Reason     string  `json:"reason,omitempty"`
-	Applied    bool    `json:"applied,omitempty"`
-	NewHead    string  `json:"new_head,omitempty"`
+	OK         bool       `json:"ok"`
+	State      string     `json:"state"`
+	Head       string     `json:"head,omitempty"`
+	Target     string     `json:"target,omitempty"`
+	TargetRef  string     `json:"target_ref,omitempty"`
+	Branch     string     `json:"branch,omitempty"`
+	WriteCount int        `json:"write_count,omitempty"`
+	Identical  []Entry    `json:"identical,omitempty"`
+	Divergent  []Entry    `json:"divergent,omitempty"`
+	Reason     string     `json:"reason,omitempty"`
+	Applied    bool       `json:"applied,omitempty"`
+	NewHead    string     `json:"new_head,omitempty"`
+	PushAudit  *PushAudit `json:"push_audit,omitempty"`
+}
+
+// PushAudit is optional, read-only evidence attached by higher-level callers when an
+// ahead branch is not just "needs push" but would be refused by the pre-push commit
+// honesty audit. The safesync core stays git-only; cmd/fak fills this when DOS is
+// available in a fak workspace.
+type PushAudit struct {
+	OK        bool                `json:"ok"`
+	Range     string              `json:"range,omitempty"`
+	Residuals []PushAuditResidual `json:"residuals,omitempty"`
+}
+
+type PushAuditResidual struct {
+	SHA       string `json:"sha,omitempty"`
+	Subject   string `json:"subject,omitempty"`
+	Verdict   string `json:"verdict,omitempty"`
+	ClaimKind string `json:"claim_kind,omitempty"`
+	Witness   string `json:"witness,omitempty"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 type GitError struct {
