@@ -204,7 +204,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		})
 		sendLocked("content_block_stop", map[string]any{"type": "content_block_stop", "index": oi})
 	}
-	if dropped > 0 || anyRepaired(adjs) {
+	if dropped > 0 || anyRepaired(adjs) || anyLivelock(adjs) {
 		if note := adjudicationNote(adjs); note != "" {
 			emitAnthropicTextBlock(sendLocked, &outIdx, note)
 		}

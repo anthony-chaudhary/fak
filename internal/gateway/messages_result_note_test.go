@@ -1,8 +1,12 @@
 package gateway
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 )
 
 // qadm builds a QUARANTINE ResultAdmission with the given tool_call_id, tool, and reason.
@@ -100,6 +104,84 @@ func TestResultAdmissionNoteOnceDedup(t *testing.T) {
 	}
 	if b := s.resultAdmissionNoteOnce("", adms); b == "" {
 		t.Fatal("empty trace should fall back to the un-deduped note (repeat)")
+	}
+}
+
+func TestResultAdmissionNoteOnceSurfacesRepeatedQuarantineLivelock(t *testing.T) {
+	s := &Server{}
+	mk := func() []ResultAdmission {
+		return []ResultAdmission{{
+			ToolCallID:   "tc1",
+			Tool:         "tool_result",
+			ResultDigest: "sha256:abc",
+			Verdict:      WireVerdict{Kind: "QUARANTINE", Reason: "SECRET_EXFIL", Disposition: "TERMINAL"},
+		}}
+	}
+
+	first := mk()
+	s.annotateResultLivelock("sess-A", first)
+	if got := s.resultAdmissionNoteOnce("sess-A", first); got == "" || strings.Contains(got, "LIVELOCK_DETECTED") {
+		t.Fatalf("first quarantine should announce without livelock, got: %s", got)
+	}
+
+	second := mk()
+	s.annotateResultLivelock("sess-A", second)
+	if got := s.resultAdmissionNoteOnce("sess-A", second); got != "" {
+		t.Fatalf("second replay should still be deduped before threshold, got: %s", got)
+	}
+
+	third := mk()
+	s.annotateResultLivelock("sess-A", third)
+	got := s.resultAdmissionNoteOnce("sess-A", third)
+	for _, want := range []string{"LIVELOCK_DETECTED repeat=3", "repeated_result=tool_result@sha256:abc", "SECRET_EXFIL"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("third replay note missing %q: %s", want, got)
+		}
+	}
+}
+
+func TestAdmitInboundResultsAnnotatesRepeatedQuarantineLivelock(t *testing.T) {
+	srv := newResultStackServer(t)
+	const (
+		trace  = "trace-result-loop"
+		secret = "sk-abcdef0123456789abcdef0123"
+	)
+	poison := `{"page":"config loaded. api_key=` + secret + ` was found in env"}`
+	wantDigest := guardrsi.ArgsDigest(poison)
+	mk := func() []agent.Message {
+		return []agent.Message{
+			{Role: agent.RoleSystem, Content: "you are a helper"},
+			{Role: agent.RoleUser, Content: "look up the config"},
+			{Role: agent.RoleTool, ToolCallID: "call_1", Name: "fetch_url", Content: poison},
+		}
+	}
+
+	for turn := 1; turn <= 3; turn++ {
+		messages := mk()
+		adms, err := srv.admitInboundResults(context.Background(), messages, nil, trace)
+		if err != nil {
+			t.Fatalf("turn %d admitInboundResults: %v", turn, err)
+		}
+		if len(adms) != 1 || adms[0].Verdict.Kind != "QUARANTINE" {
+			t.Fatalf("turn %d admissions = %+v, want one QUARANTINE", turn, adms)
+		}
+		if adms[0].ResultDigest != wantDigest {
+			t.Fatalf("turn %d result digest = %q, want original-content digest %q", turn, adms[0].ResultDigest, wantDigest)
+		}
+		if strings.Contains(messages[2].Content, secret) {
+			t.Fatalf("turn %d model-facing content still leaks the secret: %q", turn, messages[2].Content)
+		}
+		if turn < 3 && adms[0].Livelock != nil {
+			t.Fatalf("turn %d fired result livelock early: %+v", turn, adms[0].Livelock)
+		}
+		if turn == 3 {
+			if adms[0].Livelock == nil {
+				t.Fatalf("third repeated quarantine missing livelock: %+v", adms[0])
+			}
+			if adms[0].Livelock.RepeatCount != 3 || adms[0].Livelock.ArgsDigest != wantDigest {
+				t.Fatalf("third livelock = %+v, want repeat=3 digest=%s", adms[0].Livelock, wantDigest)
+			}
+		}
 	}
 }
 

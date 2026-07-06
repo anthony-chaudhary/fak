@@ -7,7 +7,7 @@ import (
 
 // The whole point of the refusal-note seam (#2750): a BRAND-NEW refusal kind
 // that carries actionable Meta must surface in-band on the content channel by
-// registering ONE renderer — with no edit to the denySummary / adjudicationNote
+// registering ONE renderer - with no edit to the denySummary / adjudicationNote
 // call sites. Before the seam, every new kind (reversibility, remedy, livelock)
 // had to hand-stitch another note call at each site; this test pins that a fresh
 // kind now rides the generic fold instead.
@@ -15,7 +15,7 @@ func TestRefusalNoteSeamSurfacesNewKindWithoutCallSiteEdit(t *testing.T) {
 	saved := refusalNotes
 	defer func() { refusalNotes = saved }()
 	// Register a new refusal kind whose actionable Meta lives in a Detail key that
-	// no existing renderer reads — proving the surfacing is generic, not bespoke.
+	// no existing renderer reads - proving the surfacing is generic, not bespoke.
 	refusalNotes = append(append([]refusalNote(nil), saved...), refusalNote{
 		render: func(a ToolAdjudication) string {
 			if h := a.Verdict.Detail["witness_hint"]; h != "" {
@@ -46,7 +46,7 @@ func TestRefusalNoteSeamSurfacesNewKindWithoutCallSiteEdit(t *testing.T) {
 }
 
 // The seam must preserve the pinned rendering ORDER of the existing notes
-// (reversibility recipe, then sanctioned alternative) — the wire tests read the
+// (reversibility recipe, then sanctioned alternative) - the wire tests read the
 // confirm token adjacent to the recipe, so a reordered fold would be a silent
 // regression.
 func TestRefusalNoteSeamPreservesOrderAndConfirmRecipe(t *testing.T) {

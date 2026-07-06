@@ -234,7 +234,7 @@ func (s *Server) completeGeminiTurn(ctx context.Context, req *agent.GeminiGenera
 	// extension, so a dropped or repaired call is otherwise invisible — the agent
 	// re-proposes a denied call forever, or proceeds unaware its args were
 	// rewritten. Whenever a drop or repair happened, prepend a short text part.
-	if dropped > 0 || anyRepaired(adjs) {
+	if dropped > 0 || anyRepaired(adjs) || anyLivelock(adjs) {
 		if note := adjudicationNote(adjs); note != "" {
 			parts = prependGeminiTextPart(parts, note)
 		}

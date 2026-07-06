@@ -70,7 +70,9 @@ type turnSafetyDelta struct {
 // any reports whether the delta has any SAFETY action worth rendering — a clean ALLOW-everything
 // turn has none of the three, so the safety= suffix stays absent. placementUnlocked is deliberately
 // excluded: it is a cache-attribution signal rendered in the fak= slice, not the safety= suffix.
-func (d turnSafetyDelta) any() bool { return d.blocked > 0 || d.repaired > 0 || d.quarantined > 0 }
+func (d turnSafetyDelta) any() bool {
+	return d.blocked > 0 || d.repaired > 0 || d.quarantined > 0 || d.livelock.Event != ""
+}
 
 // foldTurnSafety derives a turn's safety delta from the SAME per-turn slices the proxy already
 // computes — the proposed-call adjudications (adjs) and the inbound result admissions (results) —
@@ -81,14 +83,14 @@ func (d turnSafetyDelta) any() bool { return d.blocked > 0 || d.repaired > 0 || 
 func foldTurnSafety(adjs []ToolAdjudication, results []ResultAdmission) turnSafetyDelta {
 	var d turnSafetyDelta
 	for _, a := range adjs {
+		if a.Livelock != nil && d.livelock.Event == "" {
+			d.livelock = *a.Livelock
+		}
 		switch {
 		case !a.Admitted:
 			d.blocked++
 			if d.topReason == "" && a.Verdict.Reason != "" {
 				d.topReason = a.Verdict.Reason
-			}
-			if a.Livelock != nil && d.livelock.Event == "" {
-				d.livelock = *a.Livelock
 			}
 		case a.Verdict.Kind == "TRANSFORM":
 			d.repaired++
@@ -99,6 +101,9 @@ func foldTurnSafety(adjs []ToolAdjudication, results []ResultAdmission) turnSafe
 			d.quarantined++
 			if d.topReason == "" && r.Verdict.Reason != "" {
 				d.topReason = r.Verdict.Reason
+			}
+			if r.Livelock != nil && d.livelock.Event == "" {
+				d.livelock = *r.Livelock
 			}
 		}
 	}

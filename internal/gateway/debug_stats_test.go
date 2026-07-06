@@ -388,6 +388,103 @@ func TestAdjudicateProposedServedAnnotatesLivelockOnThirdDeniedCall(t *testing.T
 	}
 }
 
+func TestAdjudicateProposedServedAnnotatesLivelockOnThirdAllowedCall(t *testing.T) {
+	s := newTestServer(t)
+	var lines []string
+	s.debugStatsf = func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) }
+
+	call := []agent.ToolCall{{
+		ID: "call-1", Type: "function",
+		Function: agent.Func{Name: "allow_read", Arguments: `{"path":"same"}`},
+	}}
+	var third []ToolAdjudication
+	for i := 0; i < 3; i++ {
+		kept, adjs, dropped, _, _ := s.adjudicateProposedServed(context.Background(), call, "trace-allowed-loop")
+		if dropped != 0 || len(kept) != 1 || len(adjs) != 1 || !adjs[0].Admitted {
+			t.Fatalf("turn %d adjudications = %+v kept=%d dropped=%d, want one allowed call", i+1, adjs, len(kept), dropped)
+		}
+		if i < 2 && adjs[0].Livelock != nil {
+			t.Fatalf("turn %d fired livelock early: %+v", i+1, adjs[0].Livelock)
+		}
+		if i == 2 {
+			third = adjs
+		}
+		s.recordTurnSafety("trace-allowed-loop", adjs, nil)
+		s.logInferenceTurn("trace-allowed-loop", "anthropic_messages", true,
+			agent.Usage{PromptTokens: 20, CacheReadInputTokens: 80}, "end_turn", time.Millisecond, false)
+	}
+	if len(third) != 1 || third[0].Livelock == nil {
+		t.Fatalf("third identical allow did not carry livelock envelope: %+v", third)
+	}
+	env := third[0].Livelock
+	if env.Event != "LIVELOCK_DETECTED" || env.RepeatCount != 3 || env.Tool != "allow_read" || env.Verdict != "ALLOW" {
+		t.Fatalf("livelock envelope = %+v, want event repeat=3 tool=allow_read verdict=ALLOW", env)
+	}
+	for _, want := range []string{
+		"livelock=LIVELOCK_DETECTED",
+		"repeat=3",
+		"repeated_call=allow_read@sha256:",
+		"approach=change_approach_stop_repeating_successful_call_or_summarize_result",
+	} {
+		if !strings.Contains(lines[2], want) {
+			t.Fatalf("third debug line missing %q: %s", want, lines[2])
+		}
+	}
+	note := adjudicationNote(third)
+	if !strings.Contains(note, "observed repeated admitted tool call") || !strings.Contains(note, "LIVELOCK_DETECTED repeat=3") {
+		t.Fatalf("in-band note missing allowed livelock envelope: %s", note)
+	}
+}
+
+func TestAdjudicateProposedServedAnnotatesLivelockOnThirdTransform(t *testing.T) {
+	s := newTestServer(t)
+	var lines []string
+	s.debugStatsf = func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) }
+
+	base := ToolAdjudication{
+		ToolCallID: "call-1",
+		Tool:       "repair_shell",
+		ArgsDigest: "sha256:abc",
+		Admitted:   true,
+		Verdict:    WireVerdict{Kind: "TRANSFORM", Reason: "REPAIR", Disposition: "RETRYABLE"},
+	}
+	var third []ToolAdjudication
+	for i := 0; i < 3; i++ {
+		adjs := []ToolAdjudication{base}
+		s.annotateToolLivelock("trace-transform-loop", adjs)
+		if i < 2 && adjs[0].Livelock != nil {
+			t.Fatalf("turn %d fired livelock early: %+v", i+1, adjs[0].Livelock)
+		}
+		if i == 2 {
+			third = adjs
+		}
+		s.recordTurnSafety("trace-transform-loop", adjs, nil)
+		s.logInferenceTurn("trace-transform-loop", "anthropic_messages", true,
+			agent.Usage{PromptTokens: 20, CacheReadInputTokens: 80}, "end_turn", time.Millisecond, false)
+	}
+	if len(third) != 1 || third[0].Livelock == nil {
+		t.Fatalf("third identical transform did not carry livelock envelope: %+v", third)
+	}
+	env := third[0].Livelock
+	if env.Event != "LIVELOCK_DETECTED" || env.RepeatCount != 3 || env.Tool != "repair_shell" || env.Verdict != "TRANSFORM" {
+		t.Fatalf("livelock envelope = %+v, want event repeat=3 tool=repair_shell verdict=TRANSFORM", env)
+	}
+	for _, want := range []string{
+		"livelock=LIVELOCK_DETECTED",
+		"repeat=3",
+		"repeated_call=repair_shell@sha256:abc",
+		"approach=change_approach_stop_repeating_successful_call_or_summarize_result",
+	} {
+		if !strings.Contains(lines[2], want) {
+			t.Fatalf("third debug line missing %q: %s", want, lines[2])
+		}
+	}
+	note := adjudicationNote(third)
+	if !strings.Contains(note, "observed repeated admitted tool call") || !strings.Contains(note, "LIVELOCK_DETECTED repeat=3") {
+		t.Fatalf("in-band note missing transform livelock envelope: %s", note)
+	}
+}
+
 // TestOnAuthRefresh_CountsAndPrintsDistinctLine proves the 401 token-rotation self-heal hook is
 // observable on BOTH surfaces: it bumps the per-outcome metric and emits a `fak-turn auth-refresh`
 // line DISTINCT from the 429/5xx `fak-turn retry` line, so an operator can tell a credential

@@ -133,6 +133,74 @@ func TestGeminiGenerateContentAdjudicates(t *testing.T) {
 	}
 }
 
+func TestGeminiGenerateContentSurfacesAdmittedLivelockInBand(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterAdjudicator(0, toolAdj{})
+
+	inbound := []byte(`{"contents":[{"role":"user","parts":[{"text":"call tools"}]}],` +
+		`"tools":[{"functionDeclarations":[{"name":"allow_loop","parameters":{"type":"object"}}]}]}`)
+
+	upstreamHits := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model","parts":[` +
+			`{"functionCall":{"name":"allow_loop","args":{"x":1},"id":"g1"}}]},` +
+			`"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3,"totalTokenCount":10}}`))
+	}))
+	defer upstream.Close()
+
+	srv, err := New(Config{EngineID: "test", Model: "gemini-test", BaseURL: upstream.URL, Provider: "gemini", VDSO: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	var body geminiGenerateContentResponse
+	for i := 0; i < 3; i++ {
+		req, _ := http.NewRequest("POST", ts.URL+"/v1beta/models/gemini-test:generateContent", bytes.NewReader(inbound))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Trace-Id", "gemini-admitted-loop")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("turn %d post: %v", i+1, err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Fatalf("turn %d status = %d: %s", i+1, resp.StatusCode, raw)
+		}
+		body = geminiGenerateContentResponse{}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatalf("turn %d decode: %v (%s)", i+1, err, raw)
+		}
+	}
+	if upstreamHits != 3 {
+		t.Fatalf("upstream hits = %d, want 3", upstreamHits)
+	}
+	parts := body.Candidates[0].Content.Parts
+	var texts, names []string
+	for _, p := range parts {
+		if p.Text != "" {
+			texts = append(texts, p.Text)
+		}
+		if p.FunctionCall != nil {
+			names = append(names, p.FunctionCall.Name)
+		}
+	}
+	allText := strings.Join(texts, "\n")
+	if !strings.Contains(allText, "observed repeated admitted tool call") || !strings.Contains(allText, "LIVELOCK_DETECTED repeat=3") {
+		t.Fatalf("Gemini response did not surface admitted livelock in-band: texts=%v parts=%+v", texts, parts)
+	}
+	if len(names) != 1 || names[0] != "allow_loop" {
+		t.Fatalf("admitted repeated functionCall should still survive, got %v", names)
+	}
+}
+
 // TestGeminiStreamGenerateContentSynthesizesSSE proves the streaming route emits a
 // well-formed Gemini SSE data frame carrying the finished, already-adjudicated
 // candidate — so a Gemini CLI client (which defaults to streamGenerateContent)

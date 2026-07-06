@@ -181,13 +181,28 @@ func (s *Server) annotateToolLivelock(trace string, adjs []ToolAdjudication) {
 		env guardrsi.LivelockEnvelope
 	}
 	var hits []hit
-	sawFailure := false
+	sawObservation := false
 	for i := range adjs {
 		a := adjs[i]
-		if a.Admitted || a.Verdict.Kind == "ALLOW" || a.Verdict.Kind == "TRANSFORM" {
+		switch {
+		case a.Admitted && (a.Verdict.Kind == "ALLOW" || a.Verdict.Kind == "TRANSFORM") && a.Verdict.Reason != "SERVED_INLINE":
+			sawObservation = true
+			env, ok := s.livelock.ObserveAdmitted(guardrsi.LivelockObservation{
+				TraceID:     trace,
+				Tool:        a.Tool,
+				ArgsDigest:  a.ArgsDigest,
+				Verdict:     a.Verdict.Kind,
+				Reason:      a.Verdict.Reason,
+				Disposition: a.Verdict.Disposition,
+			})
+			if ok {
+				hits = append(hits, hit{idx: i, env: env})
+			}
+			continue
+		case a.Admitted || a.Verdict.Kind == "ALLOW" || a.Verdict.Kind == "TRANSFORM":
 			continue
 		}
-		sawFailure = true
+		sawObservation = true
 		env, ok := s.livelock.ObserveFailure(guardrsi.LivelockObservation{
 			TraceID:     trace,
 			Tool:        a.Tool,
@@ -200,7 +215,7 @@ func (s *Server) annotateToolLivelock(trace string, adjs []ToolAdjudication) {
 			hits = append(hits, hit{idx: i, env: env})
 		}
 	}
-	if !sawFailure {
+	if !sawObservation {
 		s.livelock.Clear(trace)
 	}
 	s.livelockMu.Unlock()

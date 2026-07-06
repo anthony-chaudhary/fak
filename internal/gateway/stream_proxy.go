@@ -195,10 +195,19 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 			return true
 		}
 	}
+	emittedAdjudicationNote := false
+	if anyLivelock(adjs) {
+		if note := adjudicationNote(adjs); note != "" {
+			if err := emitContent(note); err != nil {
+				return true
+			}
+			emittedAdjudicationNote = true
+		}
+	}
 	// Parity with the buffered path: when every proposed call was refused AND the turn
 	// carried no content of its own, give even a fak-unaware client an actionable note
 	// (which tools were denied and why) rather than an empty turn.
-	if len(kept) == 0 && dropped > 0 && guard.streamed() == "" && remaining == "" {
+	if !emittedAdjudicationNote && len(kept) == 0 && dropped > 0 && guard.streamed() == "" && remaining == "" {
 		if err := emitContent(denySummary(adjs)); err != nil {
 			return true
 		}

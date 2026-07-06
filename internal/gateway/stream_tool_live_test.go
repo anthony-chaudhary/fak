@@ -59,6 +59,24 @@ func postStream(t *testing.T, url string, body map[string]any) (int, []byte) {
 	return resp.StatusCode, out
 }
 
+func postStreamTrace(t *testing.T, url, trace string, body map[string]any) (int, []byte) {
+	t.Helper()
+	raw, _ := json.Marshal(body)
+	req, err := http.NewRequest("POST", url+"/v1/chat/completions", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Trace-Id", trace)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, out
+}
+
 // TestToolBearingStreamHoldsNativeCallsAndStreamsContentLive proves the rung: a
 // tool-bearing stream=true request now takes the LIVE path. Content streams as the
 // model emits it, the native delta.tool_calls are HELD and adjudicated (denied dropped,
@@ -123,6 +141,58 @@ func TestToolBearingStreamHoldsNativeCallsAndStreamsContentLive(t *testing.T) {
 	// it never carries the arguments).
 	if strings.Contains(string(raw), `"k":"v"`) {
 		t.Fatalf("denied call arguments leaked into the stream: %s", raw)
+	}
+}
+
+func TestToolBearingStreamSurfacesAdmittedLivelockInBand(t *testing.T) {
+	sse := strings.Join([]string{
+		`data: {"model":"served-x","choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}`,
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"allow_loop","arguments":"{\"x\":1}"}}]}}]}`,
+		`data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":9,"completion_tokens":4,"total_tokens":13}}`,
+		"data: [DONE]",
+		"",
+	}, "\n\n")
+
+	hits := 0
+	up := sseUpstream(t, &hits, sse)
+	defer up.Close()
+	ts := liveStreamServer(t, up.URL)
+	defer ts.Close()
+
+	body := map[string]any{
+		"model":    "x:model",
+		"messages": []map[string]string{{"role": "user", "content": "do it"}},
+		"tools":    []map[string]any{{"type": "function", "function": map[string]any{"name": "allow_loop"}}},
+		"stream":   true,
+	}
+	var raw []byte
+	for i := 0; i < 3; i++ {
+		code, out := postStreamTrace(t, ts.URL, "stream-admitted-loop", body)
+		if code != http.StatusOK {
+			t.Fatalf("turn %d status = %d: %s", i+1, code, out)
+		}
+		raw = out
+	}
+	if hits != 3 {
+		t.Fatalf("upstream hits = %d, want 3", hits)
+	}
+	chunks, sawDone := parseSSEChunks(t, raw)
+	if !sawDone {
+		t.Fatalf("missing [DONE]: %s", raw)
+	}
+
+	var content strings.Builder
+	var tools []ChatDeltaToolCall
+	for _, c := range chunks {
+		content.WriteString(c.Choices[0].Delta.Content)
+		tools = append(tools, c.Choices[0].Delta.ToolCalls...)
+	}
+	text := content.String()
+	if !strings.Contains(text, "observed repeated admitted tool call") || !strings.Contains(text, "LIVELOCK_DETECTED repeat=3") {
+		t.Fatalf("stream did not surface admitted livelock in-band: %q\nraw=%s", text, raw)
+	}
+	if len(tools) != 1 || tools[0].Function.Name != "allow_loop" {
+		t.Fatalf("admitted repeated call should still survive, got tools=%+v raw=%s", tools, raw)
 	}
 }
 
