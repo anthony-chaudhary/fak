@@ -25,6 +25,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessres"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/rehydrate"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/toolprocgate"
@@ -1127,6 +1128,21 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 	}
 }
 
+// guardChildTreeKill is the destructive escalation used when a wrapped child does not exit
+// within the graceful-interrupt window. It defaults to procguard.KillPID — a process-TREE
+// kill (native job termination / taskkill /T on Windows, process-group/descendant SIGKILL on
+// POSIX) — so the child's own descendants (the node runtime, MCP/tool subprocesses a `claude`
+// spawns) are reaped too. A bare child.Process.Kill() only reaps the immediate PID and leaves
+// that subtree orphaned; across a budget restart those orphans accumulate under one guard
+// parent (#2989: three live claude children from two restarts, poisoning dispatch preflight
+// with unattributed_live). Injectable for tests. Mirrors fleetKillPID in fleet.go.
+var guardChildTreeKill = procguard.KillPID
+
+// stopGuardChild stops the wrapped child on restart/timeout. It first asks politely
+// (os.Interrupt) and waits out the grace window; if the child is still alive it escalates to a
+// TREE kill of the child's PID so no descendant subtree survives the transition. Returning
+// only after <-wait guarantees the previous child is fully reaped before the caller relaunches,
+// so a budget restart is single-child (#2989).
 func stopGuardChild(child *exec.Cmd, wait <-chan error, grace time.Duration) {
 	if child == nil || child.Process == nil {
 		return
@@ -1136,7 +1152,8 @@ func stopGuardChild(child *exec.Cmd, wait <-chan error, grace time.Duration) {
 	case <-wait:
 		return
 	case <-time.After(grace):
-		_ = child.Process.Kill()
+		// Tree-kill: reap the child AND its descendants, not just the immediate PID.
+		guardChildTreeKill(child.Process.Pid)
 		<-wait
 	}
 }
@@ -1197,9 +1214,13 @@ func formatVCacheSnapshotPointer(turns int, path string) string {
 	if turns <= 0 {
 		return ""
 	}
-	return fmt.Sprintf(
-		"fak guard: cache window — recorded %d turn(s) to %s; replay THIS session's realized cache multiplier offline with `fak vcache score` (no flags reads this snapshot), or `fak vcache observe` for the per-sub-concept panels.\n",
-		turns, path)
+	var b strings.Builder
+	b.WriteString(guardSection("cache window"))
+	b.WriteString(guardRow("recorded", fmt.Sprintf("%d turn(s)", turns)))
+	b.WriteString(guardRow("to", path))
+	b.WriteString(guardRow("replay realized multiplier", "fak vcache score"))
+	b.WriteString(guardNote("no flags reads this snapshot; `fak vcache observe` renders the per-sub-concept panels"))
+	return b.String()
 }
 
 // guardSummaryResetPrefix is the terminal escape the exit summary emits before its first line
@@ -1284,23 +1305,29 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 		// mis-colored or invisible. Emit a soft reset (SGR reset + show-cursor) onto a clean
 		// baseline FIRST, but only when stderr is a real terminal: piping the summary to a file or
 		// a JSON capture must stay byte-clean, so a non-TTY stderr gets no escape bytes.
-		fmt.Fprint(os.Stderr, guardSummaryResetPrefix(guardFdIsTerminal(int(os.Stderr.Fd()))))
+		summaryTTY := guardFdIsTerminal(int(os.Stderr.Fd()))
+		fmt.Fprint(os.Stderr, guardSummaryResetPrefix(summaryTTY))
 		fmt.Fprintln(os.Stderr)
 		sum := srv.AdjudicationSummary()
 		kc := srv.KernelCounters()
-		fmt.Fprint(os.Stderr, formatAuditSummary(sum, kc))
-		fmt.Fprint(os.Stderr, formatAmplification(kc, sum))
-		fmt.Fprint(os.Stderr, formatTurnsTimeSaved(kc, sum))
-		fmt.Fprint(os.Stderr, formatJournalSummary(auditJournal, auditSeq0))
+		// Each formatter returns byte-clean text (no escape bytes — pure and unit-tested);
+		// color is layered on HERE, gated on a real terminal, so the section rules read as
+		// headings and the demoted notes recede while the value rows stand out, yet a piped
+		// or JSON-captured summary stays exactly the plain text the tests assert.
+		emit := func(text string) { fmt.Fprint(os.Stderr, guardColorizeSummary(text, summaryTTY)) }
+		emit(formatAuditSummary(sum, kc))
+		emit(formatAmplification(kc, sum))
+		emit(formatTurnsTimeSaved(kc, sum))
+		emit(formatJournalSummary(auditJournal, auditSeq0))
 		// The guard-hook wall-clock tax (#1993): what the pre+post adjudication hooks
 		// cost per tool call this session. Best-effort — a hook-less session prints
 		// nothing rather than a vacuous zero row.
-		fmt.Fprint(os.Stderr, guardHookLatencySummaryLine(sessionWindow, time.Now()))
+		emit(guardHookLatencySummaryLine(sessionWindow, time.Now()))
 		// The tool process table (#2445): any event-stream monitor that went silent
 		// past its cadence this session folded to a killed TOOL_HEARTBEAT_STALLED —
 		// surface that count here (silence is not success). Best-effort, empty when
 		// nothing is outstanding.
-		fmt.Fprint(os.Stderr, guardToolprocSummary(time.Now()))
+		emit(guardToolprocSummary(time.Now()))
 	}
 	// Append cache-value observation to ledger (epic #1072, issue #1075).
 	stats := cacheobs.Default.Snapshot()
