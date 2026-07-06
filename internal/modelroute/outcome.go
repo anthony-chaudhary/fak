@@ -52,14 +52,20 @@ import (
 //   - Latency is the wall-clock the served call took.
 //   - Quality is a 0..1 score for the served answer (1 == ground-truth match, a
 //     judge score, a thumbs-up rate, … — the producer's chosen quality signal).
+//   - Verify names HOW that Quality was established (self-report / larger-model
+//     judge / DOS git-witness) — the provenance of the signal, and the axis that
+//     makes lower-tier routing observably SAFE. See verify.go. The zero value is
+//     VerifyNone (self-reported, unverified), so an outcome recorded without a
+//     stated provenance is conservatively treated as unchecked, never promoted.
 //
 // The zero Outcome is a valid "all zero" measurement; a decision with NO outcome
 // is represented by the ABSENCE of an OutcomeRecord, not a zero Outcome (see the
 // package note), so the two are never conflated.
 type Outcome struct {
-	Cost    float64       `json:"cost"`       // rough $ the served call spent
-	Latency time.Duration `json:"latency_ns"` // wall-clock the served call took
-	Quality float64       `json:"quality"`    // 0..1 quality score for the answer
+	Cost    float64       `json:"cost"`             // rough $ the served call spent
+	Latency time.Duration `json:"latency_ns"`       // wall-clock the served call took
+	Quality float64       `json:"quality"`          // 0..1 quality score for the answer
+	Verify  Verification  `json:"verify,omitempty"` // provenance of Quality (verify.go); "" == self-reported
 }
 
 // AspectRuleKey is the per-(aspect,rule) key the feedback corpus aggregates on —
