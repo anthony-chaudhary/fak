@@ -366,6 +366,112 @@ class DispatchWorkerTest(unittest.TestCase):
             cfg_overlay["provider"]["deepseek-ai"]["options"]["baseURL"],
             "http://127.0.0.1:8139/v1")
 
+    def test_guard_wrap_opencode_non_default_provider_ignores_global_glm_base_without_config(self) -> None:
+        mod = load()
+        raw = ["opencode", "run", "-m", "deepseek-ai/deepseek-v4-pro", "dispatch"]
+        env = {
+            mod.OPENCODE_GUARD_BASE_URL_ENV: "http://127.0.0.1:18080/v1",
+            "FLEET_DOGFOOD_GUARD_ADDR": "127.0.0.1:8140",
+        }
+
+        wrapped = mod.guard_wrap(raw, fak_bin="/usr/bin/fak", lane="docs",
+                                 backend="opencode", workspace=Path("."), env=env)
+
+        self.assertEqual(wrapped, raw)
+        self.assertNotIn("OPENCODE_CONFIG_CONTENT", env)
+
+    def test_guard_wrap_opencode_provider_specific_base_url_beats_account_and_global(self) -> None:
+        mod = load()
+        raw = ["opencode", "run", "-m", "deepseek-ai/deepseek-v4-pro", "dispatch"]
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / "opencode" / "opencode.json"
+            cfg.parent.mkdir(parents=True)
+            cfg.write_text(json.dumps({
+                "provider": {
+                    "deepseek-ai": {
+                        "options": {
+                            "baseURL": "https://integrate.api.nvidia.com/v1",
+                            "apiKey": "{env:NVIDIA_TEST_KEY}",
+                        }
+                    }
+                }
+            }), encoding="utf-8")
+            env = {
+                "XDG_CONFIG_HOME": d,
+                "NVIDIA_TEST_KEY": "secret-nim-key",
+                mod.OPENCODE_GUARD_BASE_URL_ENV: "http://127.0.0.1:18080/v1",
+                f"{mod.OPENCODE_GUARD_BASE_URL_ENV}_DEEPSEEK_AI": "http://dgx.local:8000/v1",
+                "FLEET_DOGFOOD_GUARD_ADDR": "127.0.0.1:8141",
+            }
+
+            wrapped = mod.guard_wrap(raw, fak_bin="/usr/bin/fak", lane="docs",
+                                     backend="opencode", workspace=Path("."), env=env)
+
+        self.assertEqual(wrapped[wrapped.index("--base-url") + 1],
+                         "http://dgx.local:8000/v1")
+        cfg_overlay = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+        self.assertEqual(
+            cfg_overlay["provider"]["deepseek-ai"]["options"]["baseURL"],
+            "http://127.0.0.1:8141/v1")
+
+    def test_guard_wrap_opencode_default_provider_config_beats_legacy_global_glm_override(self) -> None:
+        mod = load()
+        raw = ["opencode", "run", "-m", "zai-coding-plan/glm-5.2", "dispatch"]
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / "opencode" / "opencode.json"
+            cfg.parent.mkdir(parents=True)
+            cfg.write_text(json.dumps({
+                "provider": {
+                    "zai-coding-plan": {
+                        "options": {
+                            "baseURL": "https://api.z.ai/api/coding/paas/v4",
+                            "apiKey": "{env:ZAI_TEST_KEY}",
+                        }
+                    }
+                }
+            }), encoding="utf-8")
+            env = {
+                "XDG_CONFIG_HOME": d,
+                "ZAI_TEST_KEY": "secret-zai-key",
+                mod.OPENCODE_GUARD_BASE_URL_ENV: "http://127.0.0.1:18080/v1",
+                "FLEET_DOGFOOD_GUARD_ADDR": "127.0.0.1:8142",
+            }
+
+            wrapped = mod.guard_wrap(raw, fak_bin="/usr/bin/fak", lane="glm",
+                                     backend="opencode", workspace=Path("."), env=env)
+
+        self.assertEqual(wrapped[wrapped.index("--base-url") + 1],
+                         "https://api.z.ai/api/coding/paas/v4")
+
+    def test_guard_wrap_opencode_default_provider_specific_base_url_beats_account_config(self) -> None:
+        mod = load()
+        raw = ["opencode", "run", "-m", "zai-coding-plan/glm-5.2", "dispatch"]
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / "opencode" / "opencode.json"
+            cfg.parent.mkdir(parents=True)
+            cfg.write_text(json.dumps({
+                "provider": {
+                    "zai-coding-plan": {
+                        "options": {
+                            "baseURL": "https://api.z.ai/api/coding/paas/v4",
+                            "apiKey": "{env:ZAI_TEST_KEY}",
+                        }
+                    }
+                }
+            }), encoding="utf-8")
+            env = {
+                "XDG_CONFIG_HOME": d,
+                "ZAI_TEST_KEY": "secret-zai-key",
+                f"{mod.OPENCODE_GUARD_BASE_URL_ENV}_ZAI_CODING_PLAN": "http://127.0.0.1:18080/v1",
+                "FLEET_DOGFOOD_GUARD_ADDR": "127.0.0.1:8143",
+            }
+
+            wrapped = mod.guard_wrap(raw, fak_bin="/usr/bin/fak", lane="glm",
+                                     backend="opencode", workspace=Path("."), env=env)
+
+        self.assertEqual(wrapped[wrapped.index("--base-url") + 1],
+                         "http://127.0.0.1:18080/v1")
+
     def test_opencode_upstream_key_reads_explicit_config_path(self) -> None:
         mod = load()
         with tempfile.TemporaryDirectory() as d:

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # dogfood-opencode-glm.sh — front the opencode/GLM dispatch lane with the kernel
 # (issue #730). The claude lane is guarded by default; the opencode lane fronts a
-# LOCAL GLM server, so `fak guard --provider openai` would misroute it to the public
-# OpenAI API unless `FLEET_DOGFOOD_GUARD_BASEURL` names that local upstream. This
-# launcher discovers the GLM /v1 base URL, exports that env, and execs the dispatch
-# worker so `guard_wrap` fronts opencode with
+# LOCAL GLM server, so `fak guard --provider openai` needs the selected provider's
+# upstream URL. This launcher discovers the GLM /v1 base URL, exports the precise
+# provider-scoped env (`FLEET_DOGFOOD_GUARD_BASEURL_ZAI_CODING_PLAN`), and keeps the
+# legacy global fallback for older callers. Then it execs the dispatch worker so
+# `guard_wrap` fronts opencode with
 # `fak guard --provider openai --base-url <glm> -- opencode …`.
 #
 #   ┌──────────┐   /v1/chat/...   ┌──────────────────────┐   /v1/chat/...   ┌───────────┐
@@ -85,10 +86,12 @@ if ! GLM_BASE="$(discover_glm_base_url)"; then
        (the actual endpoint flip on a GLM-serving node is deferred — see
         docs/fak/opencode-glm-guard.md for the discovery + activation steps)."
 fi
+export FLEET_DOGFOOD_GUARD_BASEURL_ZAI_CODING_PLAN="$GLM_BASE"
 export FLEET_DOGFOOD_GUARD_BASEURL="$GLM_BASE"
-log "FLEET_DOGFOOD_GUARD_BASEURL=$GLM_BASE  (opencode will be guarded on the OpenAI wire)"
+log "FLEET_DOGFOOD_GUARD_BASEURL_ZAI_CODING_PLAN=$GLM_BASE  (opencode/zai-coding-plan will be guarded on the OpenAI wire)"
 
 if [ "$MODE" = "print-env" ]; then
+  printf 'export FLEET_DOGFOOD_GUARD_BASEURL_ZAI_CODING_PLAN=%q\n' "$GLM_BASE"
   printf 'export FLEET_DOGFOOD_GUARD_BASEURL=%q\n' "$GLM_BASE"
   exit 0
 fi

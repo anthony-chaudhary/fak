@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -254,6 +255,7 @@ GUARD_OFF_VALUES = frozenset({"0", "off", "false", "no", "", "disable", "disable
 # pre-raise them) without clobbering an operator's explicit value.
 GUARD_TIMEOUT_FLOOR_S = 600
 OPENCODE_DEFAULT_PROVIDER_ID = "zai-coding-plan"
+OPENCODE_GUARD_BASE_URL_ENV = "FLEET_DOGFOOD_GUARD_BASEURL"
 OPENCODE_GUARD_UPSTREAM_KEY_ENV = "FAK_OPENCODE_GUARD_UPSTREAM_API_KEY"
 # Headless Claude workers should not merely observe the PreCompact hook posture.
 # The live fleet failure class was `compact=fired` while issue-resolution workers
@@ -433,6 +435,40 @@ def opencode_upstream_base_url(command: Sequence[str], env: dict[str, str]) -> s
     return ""
 
 
+def _env_key_suffix(value: str) -> str:
+    suffix = re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_").upper()
+    return suffix or "DEFAULT"
+
+
+def opencode_guard_base_url(command: Sequence[str], env: dict[str, str]) -> str:
+    """Resolve the upstream URL that ``fak guard`` should proxy for opencode.
+
+    Precedence is intentionally provider-scoped:
+
+    1. ``FLEET_DOGFOOD_GUARD_BASEURL_<PROVIDER>`` names an explicit local/DGX
+       or lab endpoint for the selected provider, e.g. ``..._DEEPSEEK_AI``.
+    2. The selected provider's opencode account config ``options.baseURL``.
+    3. Legacy ``FLEET_DOGFOOD_GUARD_BASEURL`` only for the default GLM provider.
+
+    The legacy global variable is not allowed to hijack non-default providers.
+    That was the NIM DeepSeek failure mode: a process-wide GLM URL silently
+    caught a worker pinned to ``deepseek-ai/deepseek-v4-pro``.
+    """
+    provider_id = _opencode_model_provider(command)
+    provider_env = f"{OPENCODE_GUARD_BASE_URL_ENV}_{_env_key_suffix(provider_id)}"
+    provider_base = (env.get(provider_env) or "").strip()
+    if provider_base:
+        return provider_base
+
+    configured_base = opencode_upstream_base_url(command, env)
+    if configured_base:
+        return configured_base
+
+    if provider_id == OPENCODE_DEFAULT_PROVIDER_ID:
+        return (env.get(OPENCODE_GUARD_BASE_URL_ENV) or "").strip()
+    return ""
+
+
 def guard_enabled(env: dict[str, str] | None = None) -> bool:
     """Whether to front a worker with ``fak guard``. Dogfood-by-default (ON); a node
     opts out with ``FLEET_DOGFOOD_GUARD`` in {0,off,false,no,disable}."""
@@ -503,9 +539,9 @@ def guard_wrap(
     * ``fak_bin`` is ``None`` (no binary resolved -> fail open), or
     * the backend fronts a LOCAL upstream we have not been told the base URL of.
       ``claude`` proxies the public Anthropic API (passthrough/subscription) with no
-      base-URL override; ``opencode`` (and friends) front a local server (e.g. a GLM
-      endpoint), so guard would MISROUTE them to the provider's public API unless
-      ``FLEET_DOGFOOD_GUARD_BASEURL`` names that upstream. We refuse to misroute.
+      base-URL override; ``opencode`` resolves the selected provider's upstream
+      through :func:`opencode_guard_base_url`, so one GLM/DGX override cannot
+      silently catch a different provider such as NVIDIA NIM DeepSeek.
     """
     cmd = list(command)
     if not cmd or not fak_bin:
@@ -522,16 +558,8 @@ def guard_wrap(
         ]
     if backend != "claude":
         e = env if env is not None else os.environ
-        provider_id = _opencode_model_provider(cmd) if backend == "opencode" else ""
-        configured_base = opencode_upstream_base_url(cmd, e) if backend == "opencode" else ""
-        env_base = (e.get("FLEET_DOGFOOD_GUARD_BASEURL") or "").strip()
-        # A global dogfood base URL is normally the local GLM lab gateway. Do not
-        # let that process-wide default misroute an explicitly pinned non-GLM
-        # opencode provider such as NVIDIA NIM DeepSeek.
-        if backend == "opencode" and provider_id != OPENCODE_DEFAULT_PROVIDER_ID and configured_base:
-            base = configured_base
-        else:
-            base = env_base or configured_base
+        base = opencode_guard_base_url(cmd, e) if backend == "opencode" else (
+            e.get(OPENCODE_GUARD_BASE_URL_ENV) or "").strip()
         if not base:
             return cmd  # don't misroute a local-upstream worker
         extra = ["--base-url", base]
