@@ -1,0 +1,40 @@
+{
+  "rows": [
+    {
+      "row": {
+        "question_id": "lcb-sample-001",
+        "question_title": "Two Sum Lite",
+        "question_content": "Return the indices of the two numbers in nums that add up to target.",
+        "platform": "leetcode",
+        "difficulty": "Easy",
+        "contest_date": "2024-09-01T00:00:00",
+        "starter_code": "class Solution:\n    def twoSum(self, nums, target):",
+        "public_test_cases": "[{\"input\": \"[2,7,11,15]\\n9\", \"output\": \"[0,1]\", \"testtype\": \"functional\"}]"
+      }
+    },
+    {
+      "row": {
+        "question_id": "lcb-sample-002",
+        "question_title": "Sum To N",
+        "question_content": "Read N from stdin and print the sum 1..N.",
+        "platform": "atcoder",
+        "difficulty": "Medium",
+        "contest_date": "2024-10-15T00:00:00",
+        "starter_code": "",
+        "public_test_cases": "[{\"input\": \"5\", \"output\": \"15\", \"testtype\": \"stdin\"}]"
+      }
+    },
+    {
+      "row": {
+        "question_id": "lcb-sample-003",
+        "question_title": "Max Subarray",
+        "question_content": "Return the maximum subarray sum of the given array.",
+        "platform": "codeforces",
+        "difficulty": "Hard",
+        "contest_date": "2024-11-20T00:00:00",
+        "starter_code": "",
+        "public_test_cases": ""
+      }
+    }
+  ]
+}

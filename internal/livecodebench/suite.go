@@ -57,11 +57,60 @@ var knownArms = map[string]bool{
 
 // Suite is a normalized, release-pinned LiveCodeBench problem set.
 type Suite struct {
-	Schema         string    `json:"schema"`
-	Benchmark      string    `json:"benchmark"`
-	Model          string    `json:"model,omitempty"`
-	ReleaseVersion string    `json:"release_version"`
-	Problems       []Problem `json:"problems"`
+	Schema         string     `json:"schema"`
+	Benchmark      string     `json:"benchmark"`
+	Model          string     `json:"model,omitempty"`
+	ReleaseVersion string     `json:"release_version"`
+	Provenance     Provenance `json:"provenance"`
+	Problems       []Problem  `json:"problems"`
+}
+
+// Provenance pins where a normalized Suite came from, so a reader can trace a
+// result back to an exact dataset version and problem window instead of an
+// implicit "the benchmark". A normalized suite MUST carry it (see
+// Suite.Validate) — an unsourced suite cannot back an honest result, and its
+// ProblemCount must equal the number of problems it ships so the header cannot
+// drift from the body.
+type Provenance struct {
+	DatasetID       string `json:"dataset_id"`                  // HF dataset, e.g. "livecodebench/code_generation_lite"
+	Revision        string `json:"revision"`                    // dataset config/revision the rows were read at (e.g. "release_v2")
+	Split           string `json:"split,omitempty"`             // dataset split, e.g. "test"
+	FetchedAt       string `json:"fetched_at,omitempty"`        // RFC3339; injected by the caller, never read from the wall clock in pure code
+	ProblemCount    int    `json:"problem_count"`               // number of problems the suite carries; must equal len(Problems)
+	ContestDateFrom string `json:"contest_date_from,omitempty"` // YYYY-MM-DD, oldest contest_date in the suite
+	ContestDateTo   string `json:"contest_date_to,omitempty"`   // YYYY-MM-DD, newest contest_date in the suite
+}
+
+// validate checks a Provenance against the problem count it heads. dataset_id and
+// revision are required (an unsourced or unpinned suite is refused), the count
+// must match, and any recorded dates must be well-formed.
+func (p Provenance) validate(problems int) error {
+	if strings.TrimSpace(p.DatasetID) == "" {
+		return fmt.Errorf("livecodebench suite: provenance.dataset_id is required (an unsourced suite cannot back a result)")
+	}
+	if strings.TrimSpace(p.Revision) == "" {
+		return fmt.Errorf("livecodebench suite: provenance.revision is required (pin the dataset config/revision, never implicit)")
+	}
+	if p.ProblemCount != problems {
+		return fmt.Errorf("livecodebench suite: provenance.problem_count %d does not match problems %d", p.ProblemCount, problems)
+	}
+	if p.FetchedAt != "" {
+		if _, err := time.Parse(time.RFC3339, p.FetchedAt); err != nil {
+			return fmt.Errorf("livecodebench suite: provenance.fetched_at %q is not RFC3339", p.FetchedAt)
+		}
+	}
+	for _, d := range []struct{ name, val string }{
+		{"contest_date_from", p.ContestDateFrom},
+		{"contest_date_to", p.ContestDateTo},
+	} {
+		if d.val == "" {
+			continue
+		}
+		if _, err := time.Parse(dateLayout, d.val); err != nil {
+			return fmt.Errorf("livecodebench suite: provenance.%s %q is not YYYY-MM-DD", d.name, d.val)
+		}
+	}
+	return nil
 }
 
 // Problem carries the LCB-native fields for one benchmark question.
@@ -159,6 +208,9 @@ func (s Suite) Validate() error {
 	}
 	if len(s.Problems) == 0 {
 		return fmt.Errorf("livecodebench suite: at least one problem is required")
+	}
+	if err := s.Provenance.validate(len(s.Problems)); err != nil {
+		return err
 	}
 	seen := map[string]bool{}
 	for i, p := range s.Problems {

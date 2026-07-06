@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -22,6 +23,9 @@ func main() {
 func run(argv []string) int {
 	if len(argv) > 0 && argv[0] == "export" {
 		return runExport(argv[1:])
+	}
+	if len(argv) > 0 && argv[0] == "fetch" {
+		return runFetch(argv[1:])
 	}
 
 	fs := flag.NewFlagSet("livecodebench", flag.ContinueOnError)
@@ -118,6 +122,124 @@ func runExport(argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+// runFetch implements `livecodebench fetch`: it turns upstream LiveCodeBench
+// rows into a normalized, release-pinned Suite JSON with a provenance header.
+// Two sources, exactly one required: --from FILE replays a committed/offline
+// rows file deterministically (the CI path, no network); --fetch GETs the
+// HuggingFace datasets-server rows for --release-version (the only networked
+// path, opt-in). The normalize + provenance logic is pure in
+// internal/livecodebench; this is the only place that reads a file or the wire.
+func runFetch(argv []string) int {
+	fs := flag.NewFlagSet("livecodebench fetch", flag.ContinueOnError)
+	release := fs.String("release-version", "", "LCB dataset release to pin (release_v1..release_v6 or release_latest)")
+	from := fs.String("from", "", "read upstream rows from a local JSON file (offline replay) instead of the network")
+	doFetch := fs.Bool("fetch", false, "GET the HuggingFace datasets-server rows for --release-version (network; opt-in)")
+	scenario := fs.String("scenario", "codegeneration", "LCB scenario to tag normalized problems with")
+	dataset := fs.String("dataset", "livecodebench/code_generation_lite", "HuggingFace dataset id to record and (with --fetch) read")
+	split := fs.String("split", "test", "dataset split to read")
+	revision := fs.String("revision", "", "dataset revision to record in provenance (default: the resolved release)")
+	limit := fs.Int("limit", 100, "with --fetch, number of rows to request (datasets-server caps per request)")
+	offset := fs.Int("offset", 0, "with --fetch, row offset to request")
+	model := fs.String("model", "", "optional model identity to record on the suite")
+	fetchedAt := fs.String("fetched-at", "", "RFC3339 fetch timestamp to record (default: now for --fetch, empty for --from)")
+	out := fs.String("out", "", "file to write the normalized suite to (default: stdout)")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "livecodebench fetch: unexpected positional arguments")
+		return 2
+	}
+	if strings.TrimSpace(*release) == "" {
+		fmt.Fprintln(os.Stderr, "livecodebench fetch: --release-version is required (pin the release, never implicit)")
+		return 2
+	}
+	hasFrom := strings.TrimSpace(*from) != ""
+	if hasFrom == *doFetch {
+		fmt.Fprintln(os.Stderr, "livecodebench fetch: choose exactly one source: --from FILE (offline) or --fetch (network)")
+		return 2
+	}
+
+	stamp := strings.TrimSpace(*fetchedAt)
+	var raw []byte
+	var err error
+	if hasFrom {
+		raw, err = os.ReadFile(*from)
+	} else {
+		if stamp == "" {
+			stamp = time.Now().UTC().Format(time.RFC3339)
+		}
+		raw, err = fetchHFRows(*dataset, *release, *split, *offset, *limit)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "livecodebench fetch: %v\n", err)
+		return 1
+	}
+
+	ups, err := livecodebench.ParseUpstreamRows(raw)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "livecodebench fetch: %v\n", err)
+		return 1
+	}
+	suite, err := livecodebench.Normalize(ups, livecodebench.NormalizeOptions{
+		Release:   *release,
+		Scenario:  livecodebench.Scenario(*scenario),
+		DatasetID: *dataset,
+		Revision:  *revision,
+		Split:     *split,
+		FetchedAt: stamp,
+		Model:     *model,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "livecodebench fetch: %v\n", err)
+		return 1
+	}
+
+	w := io.Writer(os.Stdout)
+	if *out != "" {
+		file, cerr := os.Create(*out)
+		if cerr != nil {
+			fmt.Fprintf(os.Stderr, "livecodebench fetch: %v\n", cerr)
+			return 1
+		}
+		defer file.Close()
+		w = file
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(suite); err != nil {
+		fmt.Fprintf(os.Stderr, "livecodebench fetch: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "livecodebench fetch: %d problem(s), release %s, dataset %s\n",
+		len(suite.Problems), suite.ReleaseVersion, suite.Provenance.DatasetID)
+	return 0
+}
+
+// fetchHFRows GETs the HuggingFace datasets-server /rows endpoint for a dataset
+// config (the LCB release) and split. It returns the raw JSON body for
+// ParseUpstreamRows; the datasets-server rows shape is the envelope that parser
+// already understands. This is the sole networked call in the fetch path.
+func fetchHFRows(dataset, config, split string, offset, length int) ([]byte, error) {
+	u := fmt.Sprintf("https://datasets-server.huggingface.co/rows?dataset=%s&config=%s&split=%s&offset=%d&length=%d",
+		url.QueryEscape(dataset), url.QueryEscape(config), url.QueryEscape(split), offset, length)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := (&http.Client{Timeout: 90 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("datasets-server HTTP %d for dataset=%s config=%s", resp.StatusCode, dataset, config)
+	}
+	return io.ReadAll(resp.Body)
 }
 
 // preflightInputFromFlags probes the live host. The classifier

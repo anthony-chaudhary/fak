@@ -15,6 +15,14 @@ func validSuite() Suite {
 		Benchmark:      Benchmark,
 		Model:          "test-model",
 		ReleaseVersion: "release_v6",
+		Provenance: Provenance{
+			DatasetID:       "livecodebench/code_generation_lite",
+			Revision:        "release_v6",
+			Split:           "test",
+			ProblemCount:    2,
+			ContestDateFrom: "2025-11-03",
+			ContestDateTo:   "2025-12-15",
+		},
 		Problems: []Problem{
 			{
 				QuestionID:  "lc-0001",
@@ -74,6 +82,9 @@ func TestSuiteValidateRejections(t *testing.T) {
 		{"wrong benchmark", func(s *Suite) { s.Benchmark = "swebench" }, "benchmark"},
 		{"missing release", func(s *Suite) { s.ReleaseVersion = " " }, "release_version is required"},
 		{"no problems", func(s *Suite) { s.Problems = nil }, "at least one problem"},
+		{"missing provenance dataset", func(s *Suite) { s.Provenance.DatasetID = "" }, "provenance.dataset_id"},
+		{"missing provenance revision", func(s *Suite) { s.Provenance.Revision = " " }, "provenance.revision"},
+		{"provenance count mismatch", func(s *Suite) { s.Provenance.ProblemCount = 99 }, "problem_count"},
 		{"missing question id", func(s *Suite) { s.Problems[0].QuestionID = "" }, "question_id is required"},
 		{"unknown scenario", func(s *Suite) { s.Problems[0].Scenario = "codereview" }, "not supported"},
 		{"duplicate id in scenario", func(s *Suite) {
