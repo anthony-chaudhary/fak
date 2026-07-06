@@ -134,11 +134,17 @@ func TestSafePush_BehindStops(t *testing.T) {
 	if res.Pushed || res.Reason != PushReasonBehind || res.Divergence != string(PushBehind) {
 		t.Fatalf("behind push = %+v, want STOP with reason BEHIND", res)
 	}
-	if !strings.Contains(res.Detail, "integrate in place") || strings.Contains(res.Detail, "force") == false {
-		// detail must name the safe next step and warn against force
-		if !strings.Contains(res.Detail, "never force-push") {
-			t.Errorf("BEHIND detail should guide integrate-then-push and warn against force: %q", res.Detail)
-		}
+	if !strings.Contains(res.Detail, "fak sync apply --fetch --remote origin --branch main") {
+		t.Errorf("BEHIND detail should name the safe sync recovery command: %q", res.Detail)
+	}
+	if !strings.Contains(res.Detail, "write set is clean") {
+		t.Errorf("BEHIND detail should explain the clean-write-set guard: %q", res.Detail)
+	}
+	if !strings.Contains(res.Detail, "never force-push") {
+		t.Errorf("BEHIND detail should warn against force-push: %q", res.Detail)
+	}
+	if strings.Contains(res.Detail, "git merge") {
+		t.Errorf("BEHIND detail should not steer agents to raw git merge: %q", res.Detail)
 	}
 }
 

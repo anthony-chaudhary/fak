@@ -173,7 +173,7 @@ func SafePush(ctx context.Context, opts PushOptions) (PushResult, error) {
 		res.Divergence = string(div)
 		if DecidePush(div) == PushStop {
 			res.Reason = PushReasonBehind
-			res.Detail = "behind " + remoteRef + "; integrate in place (`fak sync apply` or `git merge " + remoteRef + "`) then re-run — never force-push"
+			res.Detail = "behind " + remoteRef + "; run `fak sync apply --fetch --remote " + remote + " --branch " + branch + "` to fast-forward only when the write set is clean, then re-run `fak sync push`; never force-push, stash, reset, or raw-merge peer work"
 			return res, nil
 		}
 		// PushRetry: the rejection was a race (HEAD already contains the remote).
