@@ -706,6 +706,31 @@ jobs:
           # empty-journal keep.
           go test ./internal/guardrsi/
 
+      # Behavior-contract scorecard (#2900, Hermes epic #2871): the testing-quality
+      # sibling of the code-slop stick, codifying Hermes' rubric as a fak law. It
+      # classifies every Test func as a behavior CONTRACT (asserts an invariant — a
+      # relation between two computed values) or a CHANGE-DETECTOR (only freezes a
+      # literal count / config-version / enumeration list — the test breaks on every
+      # legitimate change and asserts nothing real) and reports the change-detector
+      # debt to retire. Two-tier like its scorecard siblings:
+      #   * the tool's own unit tests are HARD — a real regression suite that locks the
+      #     deliberately low-false-positive classifier (a bare scalar compare is NOT a
+      #     freeze; a test carrying any real invariant is exonerated);
+      #   * the detector itself runs ADVISORY over the tree — the change-detector debt
+      #     is a work-list surfaced as a ::warning::, retired worst-first (replace a
+      #     frozen count/list with a relation between two computed values), then RATCHET
+      #     to HARD once the debt is driven down, exactly as docs/demo-quality did.
+      # Pure-stdlib static Go analysis (no `go` shell, no network), repo root like the
+      # other honesty gates.
+      - name: behavior-contract scorecard (contract-vs-change-detector tests; unit tests HARD, detector advisory)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/behavior_contract_scorecard_test.py
+          echo "::group::behavior-contract-scorecard (advisory change-detector debt work-list)"
+          python tools/behavior_contract_scorecard.py \
+            || echo "::warning title=change-detector-debt::change-detector test debt present (advisory) — a test freezes a literal count/version/enumeration and asserts no invariant; retire worst-first (assert a relation between two computed values), see tools/behavior_contract_scorecard.py and #2900"
+          echo "::endgroup::"
+
       # Public-copy leak gate: the machine backstop for the redact-needle floor.
       # The local pre-commit hook (tools/githooks/pre-commit) only fires on a clone
       # that ran `install_trunk_guard.py`; an un-armed clone — or any path that
