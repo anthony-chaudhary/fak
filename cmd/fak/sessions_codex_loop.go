@@ -69,6 +69,7 @@ type codexLoopRecentReport struct {
 	LastTokenTotalSum int64                  `json:"last_token_total_sum,omitempty"`
 	Verdict           string                 `json:"verdict"`
 	Reason            string                 `json:"reason,omitempty"`
+	NextAction        string                 `json:"next_action,omitempty"`
 	TopRepeated       []codexRepeatedOutcome `json:"top_repeated,omitempty"`
 	Diagnoses         []codexLoopDiagnosis   `json:"diagnoses"`
 }
@@ -378,6 +379,11 @@ func diagnoseRecentCodexLoops(codexHome string, sinceHours float64, limit int) (
 		r.Reason = "recent_codex_sessions_have_livelock_advisories"
 	default:
 		r.Verdict = "OK"
+	}
+	if r.UnguardedCount > 0 {
+		r.NextAction = "launch future Codex sessions through `fak codex` or `fak guard -- codex`; direct Codex sessions cannot use the gateway's repeated-result fuse"
+	} else if r.Verdict == "LOOP" {
+		r.NextAction = "inspect the top repeated outcome and add or tighten a hard fuse for that tool/result class"
 	}
 	return r, nil
 }
@@ -893,6 +899,9 @@ func renderCodexLoopRecentReport(r codexLoopRecentReport) string {
 	fmt.Fprintf(&b, "  tool traffic   : calls=%d outputs=%d\n", r.ToolCalls, r.ToolOutputs)
 	if r.LastTokenTotalSum > 0 {
 		fmt.Fprintf(&b, "  last-token sum : %d\n", r.LastTokenTotalSum)
+	}
+	if r.NextAction != "" {
+		fmt.Fprintf(&b, "  next action    : %s\n", r.NextAction)
 	}
 	if len(r.TopRepeated) > 0 {
 		fmt.Fprintf(&b, "  top repeated outcomes:\n")

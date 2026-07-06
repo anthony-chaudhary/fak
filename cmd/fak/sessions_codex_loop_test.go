@@ -150,6 +150,9 @@ func TestSessionsCodexLoopRecentScansCodexHome(t *testing.T) {
 	if len(r.Diagnoses) == 0 || !strings.Contains(r.Diagnoses[0].NextAction, "fak codex") {
 		t.Fatalf("direct-provider diagnosis did not point at guarded launch path: %+v", r.Diagnoses)
 	}
+	if !strings.Contains(r.NextAction, "fak codex") {
+		t.Fatalf("recent next_action = %q, want guarded launch guidance", r.NextAction)
+	}
 	if strings.Contains(stdout.String(), "step") {
 		t.Fatalf("recent report leaked raw tool arguments:\n%s", stdout.String())
 	}
@@ -165,6 +168,7 @@ func TestSessionsCodexLoopRecentScansCodexHome(t *testing.T) {
 		"verdict        : LOOP",
 		"LOOP=1 ACTION=0 OK=1",
 		"providers      : openai=2 unguarded=2",
+		"next action    : launch future Codex sessions through `fak codex`",
 		"update_plan",
 		"loop-session verdict=LOOP",
 	} {
