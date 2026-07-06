@@ -59,6 +59,26 @@ func TestNormalizeFromUpstreamSample(t *testing.T) {
 	}
 }
 
+// TestCommittedSuiteFixtureLoads pins the offline CI fixture (#2090 acceptance:
+// a committed <=3-problem suite that loads with no network). It is the exact
+// output of `livecodebench fetch --from testdata/upstream_sample.json`, so a
+// drift between the normalizer and the committed fixture fails here.
+func TestCommittedSuiteFixtureLoads(t *testing.T) {
+	s, err := LoadSuiteFile("testdata/suite_release_v2_sample.json")
+	if err != nil {
+		t.Fatalf("committed suite fixture must load: %v", err)
+	}
+	if s.ReleaseVersion != "release_v2" {
+		t.Errorf("release = %q, want release_v2", s.ReleaseVersion)
+	}
+	if len(s.Problems) != 3 || s.Provenance.ProblemCount != 3 {
+		t.Errorf("problems=%d provenance.count=%d, want 3/3", len(s.Problems), s.Provenance.ProblemCount)
+	}
+	if s.Provenance.DatasetID == "" {
+		t.Error("committed fixture must carry a provenance dataset_id")
+	}
+}
+
 func TestNormalizeRequiresProvenanceDataset(t *testing.T) {
 	ups := []UpstreamProblem{{QuestionID: "q1", QuestionContent: "do a thing", ContestDate: "2024-01-01"}}
 	_, err := Normalize(ups, NormalizeOptions{Release: "release_v2"})

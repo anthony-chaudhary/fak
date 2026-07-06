@@ -76,6 +76,65 @@ func TestRunExportRejectsUnsupportedFormat(t *testing.T) {
 	}
 }
 
+// TestRunFetchFromWritesNormalizedSuite pins #2090: `livecodebench fetch --from`
+// replays a committed/offline upstream rows file into a normalized, sourced
+// Suite JSON with a provenance header, with no network. The written suite must
+// re-load and validate (proving the provenance/count invariant holds).
+func TestRunFetchFromWritesNormalizedSuite(t *testing.T) {
+	from := filepath.Join("..", "..", "internal", "livecodebench", "testdata", "upstream_sample.json")
+	dir := t.TempDir()
+	out := filepath.Join(dir, "suite.json")
+
+	code := run([]string{"fetch", "--from", from, "--release-version", "release_v2", "--revision", "release_v2", "--out", out})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read fetch output: %v", err)
+	}
+	var suite struct {
+		Schema         string `json:"schema"`
+		ReleaseVersion string `json:"release_version"`
+		Provenance     struct {
+			DatasetID    string `json:"dataset_id"`
+			Revision     string `json:"revision"`
+			ProblemCount int    `json:"problem_count"`
+		} `json:"provenance"`
+		Problems []struct {
+			QuestionID string `json:"question_id"`
+		} `json:"problems"`
+	}
+	if err := json.Unmarshal(raw, &suite); err != nil {
+		t.Fatalf("fetch output not valid JSON: %v\n%s", err, raw)
+	}
+	if suite.Schema != "fak.livecodebench-suite.v1" {
+		t.Fatalf("schema = %q", suite.Schema)
+	}
+	if suite.ReleaseVersion != "release_v2" {
+		t.Fatalf("release = %q, want release_v2", suite.ReleaseVersion)
+	}
+	if suite.Provenance.DatasetID == "" || suite.Provenance.ProblemCount != len(suite.Problems) {
+		t.Fatalf("provenance %+v does not match %d problems", suite.Provenance, len(suite.Problems))
+	}
+	if len(suite.Problems) != 3 {
+		t.Fatalf("problem count = %d, want 3", len(suite.Problems))
+	}
+}
+
+// TestRunFetchRequiresExactlyOneSource guards the source flags: with neither
+// --from nor --fetch (or both), fetch must refuse rather than silently do
+// nothing or attempt an unintended network call.
+func TestRunFetchRequiresExactlyOneSource(t *testing.T) {
+	if code := run([]string{"fetch", "--release-version", "release_v2"}); code == 0 {
+		t.Fatal("exit = 0 with no source, want nonzero")
+	}
+	from := filepath.Join("..", "..", "internal", "livecodebench", "testdata", "upstream_sample.json")
+	if code := run([]string{"fetch", "--release-version", "release_v2", "--from", from, "--fetch"}); code == 0 {
+		t.Fatal("exit = 0 with both sources, want nonzero")
+	}
+}
+
 // TestRunPreflightNeverProbesNetworkByDefault pins #2111: --preflight must
 // never emit a benchmark number, and without --probe-dataset/--probe-gateway
 // it must not attempt network I/O -- the dataset and gateway gates report
