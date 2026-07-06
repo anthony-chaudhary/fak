@@ -2,20 +2,17 @@
 
 [![ci](https://github.com/anthony-chaudhary/fak/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/ci.yml) [![release artifacts](https://github.com/anthony-chaudhary/fak/actions/workflows/release-artifacts.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/release-artifacts.yml)
 
-<!-- readme-verified: 2026-07-04 vs VERSION 0.37.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. 2026-07-04: token-savings value prop foregrounded — "Token savings, set and forget" section + the 6-defaults scorecard link, "What you get" bullet reframed to the set-and-forget catch-all; honest provider-owned-vs-fak-authored split preserved (SESSION-CACHE-SAVINGS ablation). Same day: refocused on the long-session TREND — fak-authored share climbs ~1%→~11% with length (new BENCHMARK-AUTHORITY row; shed token counts WITNESSED, % is MODELED, n=2 thin, peak-not-pool). 2026-07-03: release pin refreshed for v0.37.0. 2026-07-01: front page halved; overflow: docs/README-legacy.md. Same day: hero video + gallery/video links re-surfaced; examples generalized to the hardware/harness sweep (HARDWARE-MATRIX + supported/); guided tutorial surfaced (Pick-your-path + docs map). -->
+<!-- readme-verified: 2026-07-06 vs VERSION 0.37.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. 2026-07-06: concision pass (front_page_focus) — collapsed the triple preamble lead to one (single_lead), glossed KV cache + vDSO for the first-screen reader (jargon), and trimmed the token/perf sections' duplicated trend prose; score 64→81 (D→B). 2026-07-04: token-savings value prop foregrounded — "Token savings, set and forget" section + the 6-defaults scorecard link, "What you get" bullet reframed to the set-and-forget catch-all; honest provider-owned-vs-fak-authored split preserved (SESSION-CACHE-SAVINGS ablation). Same day: refocused on the long-session TREND — fak-authored share climbs ~1%→~11% with length (new BENCHMARK-AUTHORITY row; shed token counts WITNESSED, % is MODELED, n=2 thin, peak-not-pool). 2026-07-03: release pin refreshed for v0.37.0. 2026-07-01: front page halved; overflow: docs/README-legacy.md. Same day: hero video + gallery/video links re-surfaced; examples generalized to the hardware/harness sweep (HARDWARE-MATRIX + supported/); guided tutorial surfaced (Pick-your-path + docs map). -->
 
-**fak is a fused agent kernel** — a single Go binary you drop in front of the AI agent you already run.
+<!-- lead source: docs/adoption/pitch-ladder.md (rung 1). Edit the ladder first; keep this lead consistent with its one-sentence pitch. State the pitch ONCE here — do not restate it before the first `## ` (front_page_focus single_lead). -->
+**fak is a fused agent kernel** — one static Go binary you drop in front of the AI agent
+you already run. It treats every tool call like a syscall: the model proposes, the kernel
+disposes. It checks each call, routes work, and reuses the stable setup in long sessions,
+so the same agent loop comes out more controlled, cheaper, and faster.
 
-<!-- lead source: docs/adoption/pitch-ladder.md (rung 1). Edit the ladder first; keep this lead consistent with its one-sentence pitch. -->
-fak in one line: fak treats every agent tool call like a syscall — the model proposes, the
-kernel disposes. One static Go binary sits in front of an agent's tool calls. It checks
-each call, routes work, and reuses the stable setup in long sessions. The same agent loop
-comes out more controlled, cheaper, and faster.
-
-Use one binary with the agent you already run. It works with Claude Code, Codex, Cursor,
-and OpenAI / Anthropic / MCP clients. `fak guard -- claude` wraps your normal agent in one
-command. Your model, IDE, and keys stay exactly as they are. `fak` points one base URL at
-itself for you.
+It works with Claude Code, Codex, Cursor, and OpenAI / Anthropic / MCP clients.
+`fak guard -- claude` wraps your normal agent in one command — `fak` repoints one base URL
+at itself, and your model, IDE, and keys stay exactly as they are.
 
 [![fak in 41 seconds: the cost curves draw the reuse win, then the capability matrix, the three-pillar stat card with its honest single-stream fence, and the eight-axis benchmark sweep build in](visuals/hero-video.gif)](visuals/hero-video.mp4)
 
@@ -35,8 +32,9 @@ Every figure traces to [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md), and the
 ledger is [CLAIMS.md](CLAIMS.md):
 
 - **~4.1× less work than a tuned warm-cache stack** on a 50-turn × 5-agent run. `fak`
-  reuses the shared prompt prefix: the system prompt, tools, and *KV cache* of the work
-  so far. It shares that prefix across agents instead of re-paying for it. Reuse climbs
+  reuses the shared prompt prefix: the system prompt, tools, and the model's scratchpad of
+  the work so far (the *KV cache*). It shares that prefix across agents instead of re-paying
+  for it. Reuse climbs
   to **6.95×** across the model ladder (~60× versus a naive re-send loop; the tuned
   figure is the honest bar).
 - **One kernel, four hardware platforms.** The same correctness gates run on Apple Metal
@@ -96,33 +94,28 @@ tied`: a deterministic offline lens.
 
 ## Token savings, set and forget
 
-The longer a session runs, the more of the savings fak authors itself. Run `fak guard` and
-six safe token-savers turn on by default, no flags. On a short session the provider's prompt
-cache does nearly all the saving; as the session grows, fak's own compaction trims the old
-middle turns the cache can no longer reuse, so its share climbs — on our two longest measured
-sessions it went from ~1% (39 turns) to about **11%** (106 turns, 1.67M tokens shed), and it
-keeps climbing with length ([authority](BENCHMARK-AUTHORITY.md)).
+Run `fak guard` and six safe token-savers turn on by default, no flags — this is the stack
+behind the growing-share number above.
 
 | Default saver | What it does | Touches your output? |
 |---|---|:--:|
 | Provider prompt-cache passthrough | forwards the cache breakpoints byte-for-byte so the provider's discount holds | no |
 | Tool-floor pruning | drops tool definitions the policy would deny anyway | no |
-| vDSO dedup | answers an identical repeated call from the previous result | no |
+| Repeated-call dedup (vDSO) | answers an identical repeated call from the previous result, no round-trip | no |
 | History compaction | sheds the un-cacheable middle of a long session past a budget | working set kept |
 | Oversized-result elision | shrinks a scrolled-past tool result to head and tail | working set kept |
 | Planned context view | re-materializes history under a token budget | working set kept |
 
-The first three savers are lossless — they cannot change a single output token. The last
-three keep the model's working set intact and note what they shed; compaction is the one
-whose take grows with length. The honest split most cost pitches skip: on the Claude Code
-route the provider's prompt-cache discount is still the bigger number, and fak's other job
-is to keep it alive — it holds the cached prefix byte-for-byte identical as the session grows
-(the thing that breaks when a session outgrows the window or a summarizer rewrites it) and
-relays the provider's own saved-token count rather than claiming it. fak's ~11% is a
-longest-session peak from a thin sample, not a fleet average. You tune none of it:
-`fak token-defaults-scorecard` (grade A, six of six on) proves the stack stays on, and every
-`fak info` line shows the live `provider X% + fak Y%` split. Full attribution on a real
-session: [what fak changed, and what the provider did](docs/notes/SESSION-CACHE-SAVINGS-ABLATION-2026-06-29.md).
+The first three savers are lossless — they cannot change a single output token; the last
+three keep the model's working set intact and note what they shed. The honest split most cost
+pitches skip: on the Claude Code route the provider's prompt-cache discount is still the
+bigger number, and fak's other job is to keep it alive — holding the cached prefix
+byte-for-byte identical (the thing that breaks when a session outgrows the window or a
+summarizer rewrites it) and relaying the provider's own saved-token count rather than claiming
+it. fak's ~11% is a longest-session peak from a thin sample, not a fleet average. You tune
+none of it: `fak token-defaults-scorecard` (grade A) proves the stack stays on, and every
+`fak info` line shows the live `provider X% + fak Y%` split. Full attribution:
+[what fak changed, and what the provider did](docs/notes/SESSION-CACHE-SAVINGS-ABLATION-2026-06-29.md).
 
 ## Run the model in the kernel
 
@@ -138,18 +131,18 @@ GPU flags are in the walkthrough linked above.
 
 ## The performance value proposition
 
-A long agent session burns money by re-solving the same setup. A 100k-token conversation
-re-sends its whole transcript every turn. A 5-agent fleet also pays for the same shared
-system prompt five times over. `fak` does the shared work once, two ways:
+A long agent session burns money by re-solving the same setup: a 100k-token conversation
+re-sends its whole transcript every turn, and a 5-agent fleet pays for the same shared system
+prompt five times over. `fak` does the shared work once, two ways:
 
 - **Reuse the shared prefix across agents.** The system prompt, tool table, and instructions
-  are identical for every agent in a fleet. `fak` computes that prefix once. It reuses the
-  prefix (copy-on-write) for all agents, which is the ~4.1× figure above.
+  are identical for every agent in a fleet, so `fak` computes that prefix once and reuses it
+  (copy-on-write) for all of them — the ~4.1× figure above.
 - **Shed history without losing the cache hit.** Past ~48k resident tokens, `fak guard` (on
   by default) drops the old middle turns while copying the provider's cache prefix through
   byte-for-byte, so the prompt-cache discount holds. (Summarizing instead would rewrite the
   prompt and bust the cache.) On any doubt `fak` forwards the original prompt unchanged and
-  relays the provider's own `cache_read` number rather than claiming the hit. Tune with
+  relays the provider's own `cache_read` number. Tune with
   `fak guard --compact-history-budget <tokens>` (`0` disables).
 
 How and why:
