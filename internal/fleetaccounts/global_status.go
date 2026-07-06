@@ -237,7 +237,12 @@ func RenderGlobalStatusReport(rep GlobalStatusReport, includeAccounts bool) stri
 		rep.Totals.FreeSlots, rep.Totals.TotalSlots, rep.Totals.LeasedSlots,
 		rep.Totals.BlockedSlots, rep.Totals.Pools)
 	if rep.StaleTotals.Accounts > 0 {
-		fmt.Fprintf(&b, "  stale excluded: %d free / %d total   accounts=%d\n",
+		staleLabel := "stale excluded"
+		if rep.IncludeStale {
+			staleLabel = "stale included"
+		}
+		fmt.Fprintf(&b, "  %s: %d free / %d total   accounts=%d\n",
+			staleLabel,
 			rep.StaleTotals.FreeSlots, rep.StaleTotals.TotalSlots, rep.StaleTotals.Accounts)
 	}
 

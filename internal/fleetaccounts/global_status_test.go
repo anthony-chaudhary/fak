@@ -70,6 +70,10 @@ func TestGlobalStatusIncludeStaleAndNodeGrouping(t *testing.T) {
 	if !strings.Contains(strings.Join(rep.Warnings, "\n"), "stale node node-b included by request") {
 		t.Fatalf("warnings = %+v, want stale included warning", rep.Warnings)
 	}
+	rendered := RenderGlobalStatusReport(rep, false)
+	if !strings.Contains(rendered, "stale included: 0 free / 2 total") {
+		t.Fatalf("include-stale render mislabeled stale capacity:\n%s", rendered)
+	}
 }
 
 func statusSnapshotForTest(node string, generatedAt time.Time, accounts ...StatusAccount) StatusSnapshot {
