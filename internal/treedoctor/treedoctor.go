@@ -61,28 +61,28 @@ const DefaultTrunk = "origin/main"
 
 // LockState is the diagnosis of the commit lock.
 type LockState struct {
-	Path      string
-	Present   bool
-	HolderPID int
-	Stale     bool // a dead holder still owns it — wedges the commit lane
+	Path      string `json:"path"`
+	Present   bool   `json:"present"`
+	HolderPID int    `json:"holder_pid,omitempty"`
+	Stale     bool   `json:"stale"` // a dead holder still owns it — wedges the commit lane
 }
 
 // WorktreeState classifies one worktree for the prune decision.
 type WorktreeState struct {
-	Path     string
-	Head     string
-	IsMain   bool   // the RepoRoot itself — never a prune candidate
-	Merged   bool   // HEAD is an ancestor of Trunk (commits already on the trunk)
-	Live     bool   // touched within LiveWindow — an active session, keep
-	DirtyN   int    // count of uncommitted entries (informational)
-	Prunable bool   // Merged && !Live && !IsMain — safe to remove
-	Keep     string // human reason it is kept ("" when Prunable)
+	Path     string `json:"path"`
+	Head     string `json:"head,omitempty"`
+	IsMain   bool   `json:"is_main"`  // the RepoRoot itself — never a prune candidate
+	Merged   bool   `json:"merged"`   // HEAD is an ancestor of Trunk (commits already on the trunk)
+	Live     bool   `json:"live"`     // touched within LiveWindow — an active session, keep
+	DirtyN   int    `json:"dirty_n"`  // count of uncommitted entries (informational)
+	Prunable bool   `json:"prunable"` // Merged && !Live && !IsMain — safe to remove
+	Keep     string `json:"keep,omitempty"`
 }
 
 // Report is the full read-only diagnosis.
 type Report struct {
-	Lock      LockState
-	Worktrees []WorktreeState
+	Lock      LockState       `json:"lock"`
+	Worktrees []WorktreeState `json:"worktrees"`
 }
 
 // StaleLockWedged reports whether the commit lock is currently wedged by a dead holder.
