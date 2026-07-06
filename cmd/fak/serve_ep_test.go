@@ -14,6 +14,28 @@ func TestEPJoinTimeoutRejectsBadEnv(t *testing.T) {
 	}
 }
 
+func TestEPRequireDevicePGEnv(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want bool
+	}{
+		{"", false},
+		{"0", false},
+		{"false", false},
+		{"1", true},
+		{"true", true},
+		{"YES", true},
+		{" on ", true},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			t.Setenv("FAK_EP_REQUIRE_DEVICE_PG", tc.raw)
+			if got := epRequireDevicePG(); got != tc.want {
+				t.Fatalf("epRequireDevicePG(%q) = %v, want %v", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestEPJoinTimeoutZeroMakesWorkerDialFailFast(t *testing.T) {
 	t.Setenv("FAK_EP_JOIN_TIMEOUT_S", "0")
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

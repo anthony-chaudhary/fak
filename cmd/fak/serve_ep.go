@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -160,6 +161,19 @@ func epJoinTimeout() (time.Duration, error) {
 		return 0, fmt.Errorf("FAK_EP_JOIN_TIMEOUT_S=%q must be a non-negative integer seconds value", raw)
 	}
 	return time.Duration(sec) * time.Second, nil
+}
+
+// epRequireDevicePG reports whether a sharded expert-parallel serve must fail closed unless the
+// multi-process device NCCL process-group collective is actually wired. The host DistComm reduce is
+// correct and useful for development, but the GCP resident-EP demo's performance claim needs the
+// device tensor rung, not a host fallback.
+func epRequireDevicePG() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_EP_REQUIRE_DEVICE_PG"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 // joinDevicePGIfSupported is the opt-in upgrade over the host DistComm reduce: on a backend that

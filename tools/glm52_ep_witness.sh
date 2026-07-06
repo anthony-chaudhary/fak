@@ -26,7 +26,7 @@
 set -uo pipefail
 export PATH="/usr/local/go/bin:/usr/local/cuda/bin:$PATH"
 export GOCACHE="${GOCACHE:-/tmp/gocache}" GOPATH="${GOPATH:-/tmp/gopath}" GOTOOLCHAIN="${GOTOOLCHAIN:-auto}"
-export FAK_CUDA_ARCH="${FAK_CUDA_ARCH:-sm_80}" FAK_CUDA_NCCL=1 CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
+export FAK_CUDA_ARCH="${FAK_CUDA_ARCH:-sm_80}" FAK_CUDA_NCCL=1 FAK_EP_REQUIRE_DEVICE_PG="${FAK_EP_REQUIRE_DEVICE_PG:-1}" CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
 RANKS="${RANKS:-7}"
 FIRST_GPU="${FIRST_GPU:-1}"
 PORT="${PORT:-8071}"
@@ -74,6 +74,7 @@ for r in $(seq 0 "$((RANKS - 1))"); do
   FAK_EP_RANK="$r" \
   FAK_EP_COORD_ADDR="$COORD_ADDR" \
   FAK_EP_JOIN_TIMEOUT_S="${FAK_EP_JOIN_TIMEOUT_S:-1800}" \
+  FAK_EP_REQUIRE_DEVICE_PG="$FAK_EP_REQUIRE_DEVICE_PG" \
   FAK_Q4K=1 \
   "$ROOT/fakbin_nccl" serve --addr "127.0.0.1:$rank_port" \
     --gguf "$SHARD" --backend cuda --expert-parallel "$RANKS" \

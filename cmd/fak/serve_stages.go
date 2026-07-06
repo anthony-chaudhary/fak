@@ -260,14 +260,27 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 		// reduce through the device-NCCL tensor rung instead of the host DistComm reduce. Any
 		// other build (no cuda/nccl tag, or a backend without the seam) falls through unchanged
 		// to today's NewDistCommCollective(group) — zero behavior change on every existing path.
+		requireDevicePG := epRequireDevicePG()
 		devColl, devErr := joinDevicePGIfSupported(rt.chatBackend, group, rt.ep)
 		if devErr != nil {
+			if requireDevicePG {
+				fmt.Fprintf(os.Stderr, "fak serve: FAK_EP_REQUIRE_DEVICE_PG=1 but expert-parallel rank %d/%d could not join the device-NCCL process group: %v\n", rt.ep.rank, rt.ep.ranks, devErr)
+				os.Exit(2)
+			}
 			fmt.Printf("fak: expert-parallel rank %d/%d: device-NCCL process group unavailable (%v) — falling back to host DistComm reduce\n", rt.ep.rank, rt.ep.ranks, devErr)
 		}
 		if devColl != nil {
 			inKernelModel.SetExpertParallelCollective(devColl)
 			fmt.Printf("fak: expert-parallel rank %d/%d joined the process group (device-NCCL tensor reduce, #971 follow-on)\n", rt.ep.rank, rt.ep.ranks)
 		} else {
+			if requireDevicePG {
+				backend := "<nil>"
+				if rt.chatBackend != nil {
+					backend = rt.chatBackend.Name()
+				}
+				fmt.Fprintf(os.Stderr, "fak serve: FAK_EP_REQUIRE_DEVICE_PG=1 but backend %q does not expose the multi-process device-NCCL ProcessGroupBackend. Build with FAK_CUDA_NCCL=1 (-tags cuda,nccl) and run one rank per visible GPU, or unset FAK_EP_REQUIRE_DEVICE_PG for the host DistComm development rung.\n", backend)
+				os.Exit(2)
+			}
 			inKernelModel.SetExpertParallelCollective(fakmodel.NewDistCommCollective(group))
 			fmt.Printf("fak: expert-parallel rank %d/%d joined the process group (host DistComm reduce, #971) — device-NCCL tensor rung stays separate\n", rt.ep.rank, rt.ep.ranks)
 		}

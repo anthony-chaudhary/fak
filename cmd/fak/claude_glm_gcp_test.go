@@ -111,6 +111,8 @@ func TestClaudeGLMGCPBringupPlanWiring(t *testing.T) {
 		`--setenv=CTX="${CTX}"`,
 		`EP_RANKS="${EP_RANKS:-1}"`,
 		`--setenv=EP_RANKS="${EP_RANKS}"`,
+		`FAK_EP_REQUIRE_DEVICE_PG="${FAK_EP_REQUIRE_DEVICE_PG:-}"`,
+		`--setenv=FAK_EP_REQUIRE_DEVICE_PG="${FAK_EP_REQUIRE_DEVICE_PG}"`,
 		`EP_RANKS=$EP_RANKS exceeds tier`,
 		`MODE="plan"`,
 	} {
@@ -241,6 +243,7 @@ func TestClaudeGLMGCPFakNativeServeWiring(t *testing.T) {
 		"EP_RANKS",                       // >1 launches resident expert-parallel ranks instead
 		"FAK_EP_RANK",                    // sharded rank identity for the EP serve
 		"FAK_EP_COORD_ADDR",              // rank rendezvous for resident EP
+		"FAK_EP_REQUIRE_DEVICE_PG",       // perf-grade EP refuses host DistComm fallback by default
 		"FAK_EP_FANOUT_ADDRS",            // rank 0 mirrors a client request to follower ranks
 		"FAK_KQ_INT8",                    // mixed Q5_K/Q6_K experts use the production int8 fallback
 		"GLM_SMOKE_MAX_TOKENS",           // live readiness proves first-token decode, not an 8-token soak
@@ -423,7 +426,7 @@ func TestClaudeGLMGCPA100StockEngineFailsClosed(t *testing.T) {
 }
 
 // TestClaudeGLMGCPDemoPlanWiring locks the one-command demo orchestrator's contract from the
-// script text (runs on every OS, no bash needed): it defaults to the 8x H100 tier, forces the
+// script text (runs on every OS, no bash needed): it defaults to the 8x H100 Mega tier, forces the
 // PURE FAK KERNEL serve (so the cache-value metric exists at all), composes the canonical
 // bring-up rather than re-implementing it, and renders the probe -> cache-value -> teardown
 // steps. This is the host-witnessable half of epic #1476 C1 (#1477).
@@ -431,11 +434,18 @@ func TestClaudeGLMGCPDemoPlanWiring(t *testing.T) {
 	root := repoRootFromTest(t)
 	demo := readRepoTextForClaudeGLMGCP(t, root, "scripts", "gcp-glm-demo.sh")
 	for _, want := range []string{
-		`GCP_TIER="${GCP_TIER:-a3-high-h100}"`,      // the 8x H100 demo tier (GLM-5.2 needs 640 GB)
+		`GCP_TIER="${GCP_TIER:-a3-mega-h100}"`,      // the 8x H100 Mega demo tier (GLM-5.2 needs 640 GB)
 		`SERVE="${SERVE:-fak}"`,                     // the PURE FAK KERNEL — the goal, and the metric's precondition
 		`EP_RANKS="${EP_RANKS:-8}"`,                 // resident expert-parallel by default for the H100 demo
+		`wait_for_remote_ready`,                     // apply waits for the VM-side service instead of deleting immediately
+		`collect_remote_witness`,                    // apply preserves remote serve logs for the pure-kernel/device-PG claim
+		`run_probe_turns`,                           // apply drives the headless turns itself
+		"dogfood-claude.ps1",                        // WSL/Windows apply can use the native Claude Code runner
+		`summarize_probe_perf`,                      // apply gates the "performant" part with probe duration evidence
+		`scrape_cache_value`,                        // apply records the cache-value witness before teardown
 		"scripts/gcp-glm-serve.sh",                  // composes the canonical bring-up, never re-implements it
 		"claude-glm-gcp --probe",                    // step 2: the cache-warming probe turns
+		"performance-summary.json",                  // step 3: the duration/throughput witness
 		"fak_gateway_kv_prefix_reused_tokens_total", // step 3: the WITNESSED cache-value datum (#1010)
 		"gcloud compute instances delete",           // step 4: teardown — the demo leaves zero cost
 		`MODE="plan"`,                               // plan-by-default
@@ -444,8 +454,48 @@ func TestClaudeGLMGCPDemoPlanWiring(t *testing.T) {
 	}
 }
 
+func TestClaudeGLMGCPDemoApplyDoesNotDeleteBeforeWitness(t *testing.T) {
+	root := repoRootFromTest(t)
+	demo := readRepoTextForClaudeGLMGCP(t, root, "scripts", "gcp-glm-demo.sh")
+	for _, want := range []string{
+		"wait_for_remote_ready",
+		"collect_remote_witness",
+		"start_tunnel",
+		"run_probe_turns",
+		"powershell.exe",
+		"summarize_probe_perf",
+		"scrape_cache_value",
+		"REMOTE_FAIL phase=",
+		"DEMO complete; witnesses copied under",
+	} {
+		requireContainsForClaudeGLMGCP(t, demo, want)
+	}
+	applyIdx := strings.Index(demo, `bash "$ROOT/scripts/gcp-glm-serve.sh" --apply`)
+	if applyIdx < 0 {
+		t.Fatalf("apply marker missing from demo apply path")
+	}
+	tail := demo[applyIdx:]
+	waitIdx := strings.Index(tail, "wait_for_remote_ready")
+	collectIdx := strings.Index(tail, `collect_remote_witness "ready"`)
+	probeIdx := strings.Index(tail, "run_probe_turns")
+	perfIdx := strings.Index(tail, "summarize_probe_perf")
+	scrapeIdx := strings.Index(tail, "scrape_cache_value")
+	doneIdx := strings.Index(tail, "DEMO complete; witnesses copied under")
+	for name, idx := range map[string]int{"wait": waitIdx, "collect": collectIdx, "probe": probeIdx, "perf": perfIdx, "scrape": scrapeIdx, "done": doneIdx} {
+		if idx < 0 {
+			t.Fatalf("%s marker missing from demo apply path", name)
+		}
+	}
+	if !(waitIdx < collectIdx && collectIdx < probeIdx && probeIdx < perfIdx && perfIdx < scrapeIdx && scrapeIdx < doneIdx) {
+		t.Fatalf("demo apply ordering is wrong: apply=%d wait=%d collect=%d probe=%d perf=%d scrape=%d done=%d", applyIdx, waitIdx, collectIdx, probeIdx, perfIdx, scrapeIdx, doneIdx)
+	}
+	if strings.Contains(demo, "cache-value scrape + teardown is the operator's next step") {
+		t.Fatalf("demo apply still exits after provisioning and leaves the witness as an operator next step")
+	}
+}
+
 // TestClaudeGLMGCPDemoPlanRendersWithoutCreds runs the demo orchestrator with no creds and
-// asserts the rendered plan resolves the 8x H100 shape, forces the pure fak-kernel native
+// asserts the rendered plan resolves the 8x H100 Mega shape, forces the pure fak-kernel native
 // serve even on sm_90 (where the serve script would otherwise pick stock SGLang), and prints
 // the cache-value scrape + teardown. The live turn stays hardware-gated; the plan is proven here.
 func TestClaudeGLMGCPDemoPlanRendersWithoutCreds(t *testing.T) {
@@ -466,7 +516,7 @@ func TestClaudeGLMGCPDemoPlanRendersWithoutCreds(t *testing.T) {
 	text := string(out)
 	for _, want := range []string{
 		"gcloud compute instances create",           // step 1: provision (from the composed serve plan)
-		"a3-highgpu-8g",                             // the 8x H100 machine type — the default tier resolved
+		"a3-megagpu-8g",                             // the 8x H100 Mega machine type — the default tier resolved
 		"glm52_fak_native_serve.sh",                 // SERVE=fak forced the pure kernel even on sm_90
 		"EP_RANKS=8",                                // the H100 demo uses resident expert-parallel, not cpu-offload
 		"fak_gateway_kv_prefix_reused_tokens_total", // step 3: the cache-value witness

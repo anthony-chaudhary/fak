@@ -50,6 +50,7 @@
 #   FAK_DOGFOOD_API_KEY_ENV optional upstream API key env var for BACKEND=openai
 #   FAK_DOGFOOD_TIMEOUT_S planner/write timeout      (default 300s, or 900s for BACKEND=openai|gguf)
 #   FAK_DOGFOOD_PROVIDER_EXTRA_BODY_JSON extra JSON merged into upstream provider requests
+#   FAK_DOGFOOD_CLAUDE_BIN Claude Code executable (default claude, or claude.exe on WSL/Windows)
 #   FAK_DOGFOOD_CLAUDE_DEBUG Claude Code debug filter (default api; 0/off/none disables)
 #   FAK_DOGFOOD_CLAUDE_DEBUG_FILE optional Claude Code --debug-file path
 #   FAK_DOGFOOD_ACCOUNT  account tag for the switcher (default: an isolated .claude-faklocal dogfood account)
@@ -142,6 +143,7 @@ DEFAULT_OPENAI_BASE_URL=""
 DEFAULT_MODEL=""
 DEFAULT_PROVIDER_EXTRA_BODY=""
 DEFAULT_UPSTREAM_API_KEY_ENV=""
+DEFAULT_OPENAI_TOOL_MESSAGES_AS_TEXT=""
 case "$PRESET" in
   "") ;;
   qwen36|qwen36-local)
@@ -162,7 +164,7 @@ case "$PRESET" in
     DEFAULT_BACKEND="openai"
     DEFAULT_OPENAI_BASE_URL="${FAK_GLM_GCP_BASE_URL:-http://127.0.0.1:8200/v1}"
     DEFAULT_MODEL="${FAK_GLM_GCP_MODEL:-glm-5.2}"
-    DEFAULT_PROVIDER_EXTRA_BODY=""
+    DEFAULT_PROVIDER_EXTRA_BODY='{"chat_template_kwargs":{"enable_thinking":false}}'
     ;;
   mac)
     # MacBook dogfood preset: point Claude Code at an already-running fak serve on
@@ -176,6 +178,7 @@ case "$PRESET" in
     DEFAULT_MODEL="${FAK_MAC_MODEL:-lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M}"
     DEFAULT_PROVIDER_EXTRA_BODY=""
     DEFAULT_UPSTREAM_API_KEY_ENV="FAK_GATEWAY_KEY"
+    DEFAULT_OPENAI_TOOL_MESSAGES_AS_TEXT="1"
     ;;
   *) die "unknown FAK_DOGFOOD_PRESET=$PRESET (want qwen36-local | glm-gcp | mac)" ;;
 esac
@@ -206,16 +209,47 @@ SHIM_PORT="${FAK_DOGFOOD_SHIM_PORT:-8099}"
 OPENAI_BASE_URL="${FAK_DOGFOOD_BASE_URL:-$DEFAULT_OPENAI_BASE_URL}"
 UPSTREAM_API_KEY_ENV="${FAK_DOGFOOD_API_KEY_ENV:-$DEFAULT_UPSTREAM_API_KEY_ENV}"
 PROVIDER_EXTRA_BODY="${FAK_DOGFOOD_PROVIDER_EXTRA_BODY_JSON:-${FAK_DOGFOOD_EXTRA_BODY_JSON:-$DEFAULT_PROVIDER_EXTRA_BODY}}"
+OPENAI_TOOL_MESSAGES_AS_TEXT="${FAK_DOGFOOD_OPENAI_TOOL_MESSAGES_AS_TEXT:-$DEFAULT_OPENAI_TOOL_MESSAGES_AS_TEXT}"
 CLAUDE_DEBUG="${FAK_DOGFOOD_CLAUDE_DEBUG:-api}"
 CLAUDE_DEBUG_FILE="${FAK_DOGFOOD_CLAUDE_DEBUG_FILE:-}"
+CLAUDE_BIN="${FAK_DOGFOOD_CLAUDE_BIN:-}"
+if [ -z "$CLAUDE_BIN" ]; then
+  if command -v claude >/dev/null 2>&1; then
+    CLAUDE_BIN="claude"
+  elif command -v claude.exe >/dev/null 2>&1; then
+    CLAUDE_BIN="claude.exe"
+  else
+    CLAUDE_BIN="claude"
+  fi
+fi
+CLAUDE_BIN_PATH="$(command -v "$CLAUDE_BIN" 2>/dev/null || true)"
+WINDOWS_CLAUDE_BIN=""
+case "$CLAUDE_BIN:$CLAUDE_BIN_PATH" in
+  *.exe:*|*:/mnt/?/Users/*) WINDOWS_CLAUDE_BIN=1 ;;
+esac
 BIN="$ROOT/tools/.bin/fak"
 # Durability guard: never build outside the repo (see ROOT note above). If BIN ever
 # resolves above the module root again, refuse rather than polluting an external dir.
 case "$BIN" in "$FAK_DIR"/*) : ;; *) die "refusing to build outside the repo: $BIN (expected under $FAK_DIR)" ;; esac
 # The account switcher globs FLEET_USER_HOME/.claude*; on this Mac the accounts live
 # under $HOME, so point it there (the default is a Windows path). This is the alignment
-# seam with `fak fleet-accounts`, the native switcher front door.
-export FLEET_USER_HOME="${FLEET_USER_HOME:-$HOME}"
+# seam with `fak fleet-accounts`, the native switcher front door. When WSL invokes the
+# Windows Claude binary, resolve accounts under the mounted Windows profile so the binary
+# can read its own config dir.
+if [ -n "$WINDOWS_CLAUDE_BIN" ] && [ -z "${FLEET_USER_HOME:-}" ]; then
+  case "$CLAUDE_BIN_PATH" in
+    /mnt/?/Users/*/*)
+      _drive="${CLAUDE_BIN_PATH#/mnt/}"
+      _drive="${_drive%%/*}"
+      _rest="${CLAUDE_BIN_PATH#/mnt/?/Users/}"
+      _win_user="${_rest%%/*}"
+      export FLEET_USER_HOME="/mnt/${_drive}/Users/${_win_user}"
+      ;;
+    *) export FLEET_USER_HOME="$HOME" ;;
+  esac
+else
+  export FLEET_USER_HOME="${FLEET_USER_HOME:-$HOME}"
+fi
 
 CLAUDE_DEBUG_ARGS=()
 case "$(printf '%s' "$CLAUDE_DEBUG" | tr 'A-Z' 'a-z')" in
@@ -575,22 +609,30 @@ fi
 POLICY="${FAK_DOGFOOD_POLICY:-$FAK_DIR/examples/dogfood-claude-policy.json}"
 
 # --- start fak serve (the kernel) in front of the model -----------------------
-if [ -z "${FAK_PLANNER_TIMEOUT_S:-}" ]; then
-  # The in-kernel 7B Q8 CPU forward is much slower than the shim/ollama path — a real Claude
-  # Code turn (a multi-thousand-token tool prompt prefilled on CPU) can take minutes — so the
-  # kernel arm raises the floor to 900s (matching BACKEND=openai) to avoid a 502 mid-turn.
-  # FAK_HTTP_WRITE_TIMEOUT_S and API_TIMEOUT_MS derive from it below.
-  if [ "$BACKEND" = "openai" ] || [ -n "$KERNEL_BACKEND" ]; then
-    export FAK_PLANNER_TIMEOUT_S="${FAK_DOGFOOD_TIMEOUT_S:-900}"
-  else
-    export FAK_PLANNER_TIMEOUT_S="${FAK_DOGFOOD_TIMEOUT_S:-300}"
+ensure_timeout_floor() {
+  local name="$1" floor="$2" cur
+  cur="${!name:-}"
+  if ! [[ "$cur" =~ ^[0-9]+$ ]] || [ "$cur" -lt "$floor" ]; then
+    export "$name=$floor"
   fi
+}
+# The in-kernel 7B Q8 CPU forward is much slower than the shim/ollama path — a real Claude
+# Code turn (a multi-thousand-token tool prompt prefilled on CPU) can take minutes — so the
+# kernel arm raises the floor to 900s (matching BACKEND=openai) to avoid a 502 mid-turn.
+# FAK_HTTP_WRITE_TIMEOUT_S and API_TIMEOUT_MS derive from it below. A stale lower inherited
+# value is lifted to the floor; an explicit higher value still wins.
+if [ "$BACKEND" = "openai" ] || [ -n "$KERNEL_BACKEND" ]; then
+  timeout_floor="${FAK_DOGFOOD_TIMEOUT_S:-900}"
+else
+  timeout_floor="${FAK_DOGFOOD_TIMEOUT_S:-300}"
 fi
-if [ -z "${FAK_HTTP_WRITE_TIMEOUT_S:-}" ]; then
-  export FAK_HTTP_WRITE_TIMEOUT_S="${FAK_DOGFOOD_TIMEOUT_S:-$FAK_PLANNER_TIMEOUT_S}"
-fi
+ensure_timeout_floor FAK_PLANNER_TIMEOUT_S "$timeout_floor"
+ensure_timeout_floor FAK_HTTP_WRITE_TIMEOUT_S "${FAK_DOGFOOD_TIMEOUT_S:-$FAK_PLANNER_TIMEOUT_S}"
 if [ -n "$PROVIDER_EXTRA_BODY" ] && [ -z "${FAK_PROVIDER_EXTRA_BODY_JSON:-}" ]; then
   export FAK_PROVIDER_EXTRA_BODY_JSON="$PROVIDER_EXTRA_BODY"
+fi
+if [ -n "$OPENAI_TOOL_MESSAGES_AS_TEXT" ] && [ -z "${FAK_OPENAI_TOOL_MESSAGES_AS_TEXT:-}" ]; then
+  export FAK_OPENAI_TOOL_MESSAGES_AS_TEXT="$OPENAI_TOOL_MESSAGES_AS_TEXT"
 fi
 
 # --engine is the registered engine fak_syscall dispatches an ALLOWED tool call to
@@ -657,7 +699,11 @@ fi  # end "start our own kernel" path (skipped when ATTACHED)
 ACCOUNT_DIR="$(resolve_account_dir)"
 # Claude Code appends /v1/messages itself, so the base URL must NOT include /v1.
 export ANTHROPIC_BASE_URL="http://127.0.0.1:$PORT"
-export CLAUDE_CONFIG_DIR="$ACCOUNT_DIR"
+if [ -n "$WINDOWS_CLAUDE_BIN" ] && command -v wslpath >/dev/null 2>&1; then
+  export CLAUDE_CONFIG_DIR="$(wslpath -w "$ACCOUNT_DIR")"
+else
+  export CLAUDE_CONFIG_DIR="$ACCOUNT_DIR"
+fi
 if [ "$BACKEND" = "anthropic" ]; then
   # Real Claude API upstream: fak is a TRANSPARENT hop. Leave the model tiers and the
   # API key ALONE — Claude Code uses its real models (claude-opus-4-8, …) and its own
@@ -676,8 +722,11 @@ else
   export ANTHROPIC_SMALL_FAST_MODEL="$MODEL"
 fi
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-1}"
-if [ -z "${API_TIMEOUT_MS:-}" ] && [ -n "${FAK_PLANNER_TIMEOUT_S:-}" ] && [ "$FAK_PLANNER_TIMEOUT_S" -gt 0 ] 2>/dev/null; then
-  export API_TIMEOUT_MS="$((FAK_PLANNER_TIMEOUT_S * 1000))"
+if [ -n "${FAK_PLANNER_TIMEOUT_S:-}" ] && [ "$FAK_PLANNER_TIMEOUT_S" -gt 0 ] 2>/dev/null; then
+  api_timeout_floor="$((FAK_PLANNER_TIMEOUT_S * 1000))"
+  if ! [[ "${API_TIMEOUT_MS:-}" =~ ^[0-9]+$ ]] || [ "$API_TIMEOUT_MS" -lt "$api_timeout_floor" ]; then
+    export API_TIMEOUT_MS="$api_timeout_floor"
+  fi
 fi
 
 print_env() {
@@ -697,6 +746,7 @@ EOF
 log "Claude Code wired:"
 log "  ANTHROPIC_BASE_URL = $ANTHROPIC_BASE_URL   (native /v1/messages on the kernel)"
 log "  CLAUDE_CONFIG_DIR  = $CLAUDE_CONFIG_DIR    (account: ${FAK_DOGFOOD_ACCOUNT:-faklocal})"
+log "  claude binary      = $CLAUDE_BIN"
 log "  model (all tiers)  = ${MODEL:-mock}"
 [ -n "$KERNEL_BACKEND" ] && log "  forward            = fak's OWN in-kernel pure-Go decode over $GGUF  (NO Python, NO proxy)"
 [ -n "$PRESET" ] && log "  preset             = $PRESET"
@@ -731,7 +781,7 @@ case "$MODE" in
     log "one live turn through Claude Code (headless): \"$PROBE_PROMPT\""
     log "Claude stderr/debug -> /tmp/fak-claude.log"
     set +e
-    claude "${CLAUDE_DEBUG_ARGS[@]}" -p "$PROBE_PROMPT" --output-format json --dangerously-skip-permissions >"$OUT" 2>/tmp/fak-claude.log
+    "$CLAUDE_BIN" "${CLAUDE_DEBUG_ARGS[@]}" -p "$PROBE_PROMPT" --output-format json --dangerously-skip-permissions >"$OUT" 2>/tmp/fak-claude.log
     rc=$?
     set -e
     if [ $rc -ne 0 ]; then cat /tmp/fak-claude.log >&2; die "claude probe exited $rc"; fi
@@ -751,6 +801,6 @@ PY
       log "launching interactive Claude Code (Ctrl-C to stop; kernel shuts down on exit)"
     fi
     shift || true
-    exec claude "${CLAUDE_DEBUG_ARGS[@]}" --dangerously-skip-permissions "$@"
+    exec "$CLAUDE_BIN" "${CLAUDE_DEBUG_ARGS[@]}" --dangerously-skip-permissions "$@"
     ;;
 esac

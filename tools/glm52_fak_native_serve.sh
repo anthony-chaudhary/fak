@@ -80,6 +80,13 @@ esac
 if [ "$EP_RANKS" -gt 1 ]; then
   export FAK_CUDA_NCCL=1
   REBUILD_FAK="${REBUILD_FAK:-1}"
+  if [ -z "${FAK_EP_REQUIRE_DEVICE_PG:-}" ]; then
+    export FAK_EP_REQUIRE_DEVICE_PG=1
+  else
+    export FAK_EP_REQUIRE_DEVICE_PG
+  fi
+else
+  export FAK_EP_REQUIRE_DEVICE_PG="${FAK_EP_REQUIRE_DEVICE_PG:-0}"
 fi
 
 export PATH="/usr/local/go/bin:${CUDA_HOME}/bin:$PATH"
@@ -241,7 +248,7 @@ launch_single_cpu_offload() {
 }
 
 launch_expert_parallel() {
-  ph "LAUNCH_EP fak serve --gguf $SHARD1 --backend cuda --expert-parallel $EP_RANKS --context-budget-tokens $CTX --model $MODEL_ID (sharded EP; supported Q4_K/Q8/F32 on CUDA, mixed k-quants use host int8 fallback until CUDA kernels land)"
+  ph "LAUNCH_EP fak serve --gguf $SHARD1 --backend cuda --expert-parallel $EP_RANKS --context-budget-tokens $CTX --model $MODEL_ID (sharded EP; require_device_pg=$FAK_EP_REQUIRE_DEVICE_PG; supported Q4_K/Q8/F32 on CUDA, mixed k-quants use host int8 fallback until CUDA kernels land)"
   pids=""
   for r in $(seq 0 $((EP_RANKS - 1))); do
     gpu=$((FIRST_GPU + r))
@@ -261,6 +268,7 @@ launch_expert_parallel() {
     FAK_EP_FANOUT_ADDRS="$fanout_addrs" \
     FAK_EP_COORD_ADDR="$EP_COORD_ADDR" \
     FAK_EP_JOIN_TIMEOUT_S="$EP_JOIN_TIMEOUT_S" \
+    FAK_EP_REQUIRE_DEVICE_PG="$FAK_EP_REQUIRE_DEVICE_PG" \
     FAK_Q4K=1 \
     "$FAK_BIN" serve \
       --addr "$rank_addr" \

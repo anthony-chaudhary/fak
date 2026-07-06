@@ -66,11 +66,29 @@ def test_a100_emit_shell_reports_sub_dsa_compute_cap():
     assert int(got["GLM_COMPUTE_CAP"]) < 90
 
 
+def test_h100_mega_tier_uses_separate_quota_family():
+    mega = gcp_accel.by_slug("a3-mega-h100")
+    assert mega is not None
+    assert mega.machine_type == "a3-megagpu-8g"
+    assert mega.accelerator_type == "nvidia-h100-mega-80gb"
+    assert mega.gpu_count == 8
+    assert mega.compute_capability == "90"
+    assert mega.common_zones[0] == "us-central1-c"
+    assert probe.GPU_FAMILY["nvidia-h100-mega-80gb"] == "NVIDIA_H100_MEGA"
+
+    out = gcp_accel.emit_shell("a3-mega-h100")
+    lines = dict(line.split("=", 1) for line in out.splitlines())
+    import shlex
+    got = {k: shlex.split(v)[0] if v else "" for k, v in lines.items()}
+    assert got["GLM_MACHINE_TYPE"] == "a3-megagpu-8g"
+    assert got["GLM_ACCEL_FLAG"] == "type=nvidia-h100-mega-80gb,count=8"
+
+
 def test_a100_tiers_rank_below_hopper_above_l4():
     pos = {t.slug: i for i, t in enumerate(gcp_accel.fallback_ladder())}
     # Datacenter A100 outranks the cheap Ada/Turing proof tiers (better serving choice) but
     # sits below the Hopper baseline in the preference ladder.
-    assert pos["a3-high-h100"] < pos["a2-ultra-a100-80gb"] < pos["g2-l4"]
+    assert pos["a3-mega-h100"] < pos["a3-high-h100"] < pos["a2-ultra-a100-80gb"] < pos["g2-l4"]
     assert pos["a2-ultra-a100-80gb"] < pos["a2-high-a100-40gb"]
     assert pos["g2-l4"] < pos["g2-l4-32"] < pos["n1-t4"]
 

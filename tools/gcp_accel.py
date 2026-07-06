@@ -133,6 +133,33 @@ TIERS: tuple[AccelTier, ...] = (
         ),
     ),
     AccelTier(
+        slug="a3-mega-h100",
+        machine_type="a3-megagpu-8g",
+        accelerator_type="nvidia-h100-mega-80gb",
+        gpu_label="NVIDIA H100 Mega (Hopper)",
+        gpu_count=8,
+        gpu_mem_gb_each=80,
+        vcpus=208,
+        host_mem_gb=1872,
+        gen_rank=31,
+        arch="hopper",
+        compute_capability="90",
+        approx_usd_per_hour=90.0,
+        common_zones=(
+            "us-central1-c",
+            "us-central1-a",
+            "us-central1-b",
+            "us-east5-a",
+            "europe-west4-b",
+        ),
+        blackwell=False,
+        notes=(
+            "H100 Mega fallback for full 8-GPU GLM-5.2 serves when a3-highgpu-8g "
+            "is quota-ok but stocked out. Uses the separate NVIDIA_H100_MEGA quota "
+            "family and the same sm_90 pure-fak-kernel serve path."
+        ),
+    ),
+    AccelTier(
         slug="a3-high-h100",
         machine_type="a3-highgpu-8g",
         accelerator_type="nvidia-h100-80gb",

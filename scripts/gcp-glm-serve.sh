@@ -51,6 +51,8 @@
 #   GLM_PORT        served /v1 port on the VM           (default 8000)
 #   CTX             stock SGLang/vLLM served context    (default 65536; fits Claude's 32k+32k probe)
 #   EP_RANKS        pure-fak resident expert-parallel ranks (default 1; set 8 on full-HBM H100/H200/A100-80GB to avoid cpu-offload)
+#   FAK_EP_REQUIRE_DEVICE_PG  for EP_RANKS>1, require the multi-process device-NCCL reduce
+#                   instead of falling back to host DistComm (default: 1 when EP_RANKS>1)
 #   GLM_GGUF_REPO   HF repo for the fak/llama.cpp GGUF  (default unsloth/GLM-5.2-GGUF)
 #   GLM_GGUF_SUBDIR GGUF quant subdir                   (default UD-Q4_K_M, ~466 GB)
 #   NCPU_MOE        llama.cpp experts-on-host count     (default 999 = all; fak offload is flag-driven)
@@ -124,6 +126,14 @@ esac
 if [ "$EP_RANKS" -lt 1 ]; then
   die "EP_RANKS must be >= 1 (got '$EP_RANKS')"
 fi
+FAK_EP_REQUIRE_DEVICE_PG="${FAK_EP_REQUIRE_DEVICE_PG:-}"
+if [ -z "$FAK_EP_REQUIRE_DEVICE_PG" ]; then
+  if [ "$EP_RANKS" -gt 1 ]; then FAK_EP_REQUIRE_DEVICE_PG=1; else FAK_EP_REQUIRE_DEVICE_PG=0; fi
+fi
+case "$FAK_EP_REQUIRE_DEVICE_PG" in
+  0|1|true|false|yes|no|on|off) ;;
+  *) die "FAK_EP_REQUIRE_DEVICE_PG must be boolean-ish (0/1/true/false/yes/no/on/off; got '$FAK_EP_REQUIRE_DEVICE_PG')" ;;
+esac
 case "$MAX_RUNTIME_ACTION" in
   stop|delete) ;;
   *) die "MAX_RUNTIME_ACTION must be 'stop' or 'delete' (got '$MAX_RUNTIME_ACTION')" ;;
@@ -277,6 +287,7 @@ systemd-run --unit=glm52serve --collect \\
   --setenv=MODEL_ID="glm-5.2" \\
   --setenv=EP_RANKS="${EP_RANKS}" \\
   --setenv=EP_JOIN_TIMEOUT_S=1800 \\
+  --setenv=FAK_EP_REQUIRE_DEVICE_PG="${FAK_EP_REQUIRE_DEVICE_PG}" \\
   --setenv=FAK_CUDA_ARCH="sm_${cap}" \\
   --setenv=HF_TOKEN="${RENDER_HF_TOKEN}" \\
   --setenv=HUGGING_FACE_HUB_TOKEN="${RENDER_HF_TOKEN}" \\
