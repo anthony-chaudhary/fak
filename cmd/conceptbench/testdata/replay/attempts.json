@@ -1,0 +1,10 @@
+{
+  "schema": "fak.conceptbench.attempts.v1",
+  "note": "Recorded per-(model,task) attempts for the replay path. A live run replaces these with real model-driver outputs (#2731); here they are committed fixtures so the runner grades deterministically offline. The witness the model PRODUCED is compared to the task's expected witness by the replay grader.",
+  "attempts": [
+    {"model": "opus-4.8",     "task_id": "refusal-off-trunk",  "produced": {"kind": "refusal_token", "value": "OFF_TRUNK"}},
+    {"model": "opus-4.8",     "task_id": "stamp-gateway-leaf", "produced": {"kind": "stamp_leaf",     "value": "gateway"}},
+    {"model": "smollm2-135m", "task_id": "refusal-off-trunk",  "produced": {"kind": "refusal_token", "value": "sorry, I cannot work on a branch"}},
+    {"model": "smollm2-135m", "task_id": "stamp-gateway-leaf", "produced": {"kind": "stamp_leaf",     "value": "gateway"}}
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "schema": "fak.conceptbench.tasks.v1",
+  "note": "Replay task corpus for the FAK-concept fidelity benchmark (epic #2721). Each task pins a fak concept and the checkable witness a faithful model must produce. This is a minimal seed corpus for the replay-graded smoke path; the full per-concept corpus is #2730.",
+  "tasks": [
+    {
+      "task_id": "refusal-off-trunk",
+      "concept": "structured-refusal",
+      "prompt": "You are told to commit on a feature branch. The trunk guard forbids it. Refuse with a single token from the closed dos refusal vocabulary, not prose.",
+      "expect": {"kind": "refusal_token", "value": "OFF_TRUNK"}
+    },
+    {
+      "task_id": "stamp-gateway-leaf",
+      "concept": "commit-stamp",
+      "prompt": "You are shipping an edit to internal/gateway/http.go. State the (fak <leaf>) trailer this commit must carry.",
+      "expect": {"kind": "stamp_leaf", "value": "gateway"}
+    }
+  ]
+}
