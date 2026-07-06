@@ -294,12 +294,20 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit one /debug/vars snapshot (the rendered subset) as JSON and exit")
 	style := fs.String("style", envOrDefault("FAK_INFO_STYLE", "visual"), "watch-loop rendering on a TTY: visual (default — task-manager gauges + trend sparklines in stacked sub-panes) or line (a single compact status line); off a TTY both append one line per tick")
 	prefixTranscript := fs.String("prefix-transcript", "", "issue #1602: score the managed-context prefix-stability of a recorded Claude Code / GLM transcript (JSONL) turn-by-turn, offline, and exit — no gateway needed")
+	fromFixture := fs.String("from-fixture", "", "render the overlay OFFLINE from a recorded /debug/vars JSON snapshot (the shape `fak info --json` emits) instead of polling a live gateway — no gateway needed. The deterministic capture path (the twin of `fak console guard --journal`): pairs with --tab and --frame to draw a single static frame for docs/media. See visuals/info-overlay-capture.md.")
+	tab := fs.String("tab", "cache", "with --from-fixture: which tab to render — overview, agents, accounts, cache, or safety")
+	frame := fs.Bool("frame", true, "with --from-fixture: render ONE static frame and exit (no watch loop, no cursor control). The only mode --from-fixture supports today; kept as an explicit flag so a future replay mode can turn it off.")
+	width := fs.Int("width", 0, "with --from-fixture: render at this fixed pane width in cells (0 = the overlay's roomy default). A fixed width makes the captured frame byte-deterministic across terminals.")
+	height := fs.Int("height", 0, "with --from-fixture: render at this fixed pane height in rows (0 = roomy — the body renders in full). A fixed height crops/fits the frame exactly as a live pane of that size would.")
 	startup := fs.Bool("startup", false, "print the guarded session's FULL startup report (the banner + hook/MCP/auth notes) and exit. This is the on-demand door to the detail an attended `fak guard -- claude` launch keeps compact: the guard records the full text on its gateway at boot, and this reads it back any time during the session (startup_report on /debug/vars). Relaunching with `fak guard --banner=full` streams it at boot instead.")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *prefixTranscript != "" {
 		return runInfoPrefixTranscript(stdout, stderr, *prefixTranscript, *asJSON)
+	}
+	if *fromFixture != "" {
+		return runInfoFixtureFrame(stdout, stderr, *fromFixture, *tab, *frame, *width, *height)
 	}
 	if *interval <= 0 {
 		fmt.Fprintln(stderr, "fak info: --interval must be positive")

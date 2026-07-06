@@ -89,7 +89,17 @@ baseline and prints the cost / latency / quality delta — a deterministic offli
 ## Token savings, set and forget
 
 Run `fak guard` and six safe token-savers turn on by default, no flags — this is the stack
-behind the growing-share number above.
+behind the growing-share number above. `fak guard --split` opens a live status pane beside
+the agent that reads the savings at a glance — how much text is being reused, how much
+cheaper that made it, and the running total saved:
+
+[![The fak info overlay, cache tab: a horizontal gauge shows the cache 51% reused ("saving money"), split default cache 46% + fak 54%, with +65,144 tokens saved so far and per-metric trend bars for save, hit, work, and calls avoided](visuals/info-overlay-screenshot.png)](visuals/info-overlay-video.mp4)
+
+<sub>The live `fak info` pane, not a mock: a real `fak info --from-fixture` render of the
+tabbed overlay, captured per tab. The tab-cycle walks overview · agents · accounts · cache ·
+safety — [silent GIF](visuals/info-overlay-video.gif) · [MP4](visuals/info-overlay-video.mp4).
+Regeneration + the payload-free note: [visuals/info-overlay-capture.md](visuals/info-overlay-capture.md).</sub>
+
 
 | Default saver | What it does | Touches your output? |
 |---|---|:--:|

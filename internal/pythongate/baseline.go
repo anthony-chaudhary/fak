@@ -303,6 +303,7 @@ var grandfathered = []string{
 	"tools/industry_freshness_cadence.py",
 	"tools/industry_scorecard_test.py",
 	"tools/industry_scorecard.py",
+	"tools/info_overlay_gen.py",
 	"tools/init_private_repo.py",
 	"tools/install_agent_command_test.py",
 	"tools/install_agent_command.py",
