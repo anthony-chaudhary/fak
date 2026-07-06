@@ -1,0 +1,27 @@
+[36m[gcp-glm-demo][0m DEMO step 1 — provision + serve GLM-5.2 on fak-glm-demo via the pure fak kernel
+[36m[gcp-glm][0m creating fak-glm-demo (a3-megagpu-8g, type=nvidia-h100-mega-80gb,count=8) in us-central1-c under project <redacted-project>
+ERROR: (gcloud.compute.instances.create) You do not currently have an active account selected.
+Please run:
+
+  $ gcloud auth login
+
+to obtain new credentials.
+
+If you have already logged in with a different account, run:
+
+  $ gcloud config set account ACCOUNT
+
+to select an already authenticated account to use.
+[36m[gcp-glm-demo][0m tearing down fak-glm-demo (zero residual cost)
+ERROR: (gcloud.compute.instances.delete) You do not currently have an active account selected.
+Please run:
+
+  $ gcloud auth login
+
+to obtain new credentials.
+
+If you have already logged in with a different account, run:
+
+  $ gcloud config set account ACCOUNT
+
+to select an already authenticated account to use.
