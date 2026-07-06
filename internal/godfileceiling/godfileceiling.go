@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // HardCeiling is the global LOC ceiling: a tracked .go file not in the Baseline may not
@@ -173,6 +175,7 @@ func Repin(measured map[string]int, old map[string]int) (accepted map[string]int
 func MeasureTree(root string) (map[string]int, error) {
 	cmd := exec.Command("git", "ls-files", "*.go")
 	cmd.Dir = root
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git ls-files: %w", err)
