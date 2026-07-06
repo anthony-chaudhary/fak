@@ -34,6 +34,15 @@ type Fold struct {
 	UnknownVerdict    int            `json:"unknown_verdict"`
 	BlankReasonOnDeny int            `json:"blank_reason_on_deny"`
 	WitnesslessBlock  int            `json:"witnessless_block"`
+	// ChildCrash counts CHILD_CRASH rows: a supervised child (the wrapped agent, or
+	// guard itself) died abnormally — a signal, an OOM kill, or a non-zero exit. A
+	// crash is the WORST honesty hole a session can carry (the guard front door
+	// failed to keep a session alive), so it ranks above every verdict-quality gap in
+	// WorstBucket and takes a full per-row penalty in VerdictQuality. ByCrashClass
+	// splits the count by the row's closed-vocabulary Reason (SIGNAL_CRASH / OOM /
+	// NONZERO_EXIT) so the worst-bucket lever names the dominant class.
+	ChildCrash   int            `json:"child_crash"`
+	ByCrashClass map[string]int `json:"by_crash_class"`
 }
 
 type Bucket struct {
@@ -133,7 +142,7 @@ func DiagnoseAuditGap(root string) string {
 }
 
 func FoldRows(paths []string) Fold {
-	fold := Fold{ByVerdict: map[string]int{}, ByReason: map[string]int{}}
+	fold := Fold{ByVerdict: map[string]int{}, ByReason: map[string]int{}, ByCrashClass: map[string]int{}}
 	for _, path := range paths {
 		b, err := os.ReadFile(path)
 		if err != nil {
@@ -146,6 +155,21 @@ func FoldRows(paths []string) Fold {
 			}
 			var row map[string]any
 			if err := json.Unmarshal([]byte(line), &row); err != nil {
+				continue
+			}
+			// A CHILD_CRASH row is not a kernel decision — the wrapped child died
+			// abnormally. It carries no verdict, so it never enters the verdict/reason
+			// accounting below (that would misread its crash-class Reason as a denial
+			// reason and its non-verdict Kind as an unknown verdict). It counts on its
+			// own worst-honesty-hole axis, keyed by the closed crash class.
+			if strings.EqualFold(strings.TrimSpace(asString(row["kind"])), "CHILD_CRASH") {
+				fold.TotalRows++
+				fold.ChildCrash++
+				class := strings.TrimSpace(asString(row["reason"]))
+				if class == "" {
+					class = "UNCLASSIFIED"
+				}
+				fold.ByCrashClass[class]++
 				continue
 			}
 			verdict := normalizeVerdict(asString(row["verdict"]), asString(row["kind"]))
@@ -177,11 +201,22 @@ func VerdictQuality(f Fold) float64 {
 	if f.TotalRows <= 0 {
 		return 0
 	}
-	penalty := (float64(f.BlankReasonOnDeny+f.UnknownVerdict) + 0.5*float64(f.WitnesslessBlock)) / float64(f.TotalRows)
+	// A CHILD_CRASH takes a FULL per-row penalty (weight 1.0, alongside blank-reason
+	// and unknown-verdict): a session the guard failed to keep alive is the worst
+	// honesty hole, so a crash moves the metric as hard as an unexplained block.
+	penalty := (float64(f.BlankReasonOnDeny+f.UnknownVerdict+f.ChildCrash) + 0.5*float64(f.WitnesslessBlock)) / float64(f.TotalRows)
 	return mathx.Round3(math.Max(0, 1-penalty) * 100)
 }
 
 func WorstBucket(f Fold) Bucket {
+	if f.ChildCrash > 0 {
+		class, _ := topCount(f.ByCrashClass)
+		return Bucket{
+			Bucket: "child_crash",
+			Count:  f.ChildCrash,
+			Lever:  fmt.Sprintf("a supervised child died abnormally (worst class %q); harden the front door so a session survives — the guard's job is to keep the wrapped agent alive, and a crash is a deeper hole than any verdict-quality gap", class),
+		}
+	}
 	if f.BlankReasonOnDeny > 0 {
 		return Bucket{
 			Bucket: "blank_reason_on_deny",
@@ -235,6 +270,7 @@ func RunIteration(root, auditPath string, witness map[string]any) Iteration {
 	repaired.UnknownVerdict = 0
 	repaired.BlankReasonOnDeny = 0
 	repaired.WitnesslessBlock = 0
+	repaired.ChildCrash = 0
 	next := VerdictQuality(repaired)
 	delta := mathx.Round3(next - base)
 	haveWitness := false
@@ -302,8 +338,8 @@ func RenderIteration(it Iteration) string {
 		fmt.Sprintf("  rows %d  verdict-quality %.3g -> %.3g (delta %.3g)  kept=%v", it.Fold.TotalRows, it.BaselineQuality, it.ReplayedQuality, it.MeasuredDelta, it.Kept),
 		fmt.Sprintf("  by_verdict: %s", mapString(it.Fold.ByVerdict)),
 	}
-	if it.Fold.BlankReasonOnDeny > 0 || it.Fold.UnknownVerdict > 0 || it.Fold.WitnesslessBlock > 0 {
-		lines = append(lines, fmt.Sprintf("  honesty holes: blank_reason_on_deny=%d unknown_verdict=%d witnessless_block=%d", it.Fold.BlankReasonOnDeny, it.Fold.UnknownVerdict, it.Fold.WitnesslessBlock))
+	if it.Fold.BlankReasonOnDeny > 0 || it.Fold.UnknownVerdict > 0 || it.Fold.WitnesslessBlock > 0 || it.Fold.ChildCrash > 0 {
+		lines = append(lines, fmt.Sprintf("  honesty holes: child_crash=%d blank_reason_on_deny=%d unknown_verdict=%d witnessless_block=%d", it.Fold.ChildCrash, it.Fold.BlankReasonOnDeny, it.Fold.UnknownVerdict, it.Fold.WitnesslessBlock))
 	}
 	lines = append(lines,
 		fmt.Sprintf("  candidate: [%s] %s", it.Candidate.Bucket, it.Candidate.Lever),
