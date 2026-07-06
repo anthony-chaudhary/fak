@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/guardtrace"
@@ -97,7 +98,7 @@ func runGuardReplay(fixturePath, wire, policyPath, auditPath string, noAudit boo
 		VDSO:                 true,
 		Invalidation:         "global",
 		Version:              appversion.Current(),
-		CtxViewBudget:        8000,
+		CtxViewBudget:        agent.DefaultCtxViewBudget,
 		CompactHistoryBudget: gateway.DefaultCompactHistoryBudget,
 		ElideResultBytes:     gateway.DefaultElideResultBytes,
 		ToolFloorDenies:      adjudicator.Default.NeverAdmits,
