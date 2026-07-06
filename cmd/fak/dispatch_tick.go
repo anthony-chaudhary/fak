@@ -62,9 +62,12 @@ type dispatchTickOptions struct {
 	// finished slot exited with a model-switchable no-commit reason (usage_cap /
 	// model_unknown / rate_limit), re-dispatch it on the NEXT downgrade-chain model instead
 	// of the same walled one. Default off, so the live claude fleet is byte-identical.
-	ModelDowngrade bool
-	Account        *dispatchtick.Account
-	Membership     *dispatchtick.Membership
+	ModelDowngrade          bool
+	CodexLoopGate           string
+	CodexLoopGateSinceHours float64
+	CodexLoopGateLimit      int
+	Account                 *dispatchtick.Account
+	Membership              *dispatchtick.Membership
 }
 
 type dispatchLanePick struct {
@@ -102,6 +105,8 @@ const dispatchLeaseTreeSidecarSuffix = ".lease-tree.json"
 const dispatchLeaseIDSidecarSuffix = ".lease-id"
 const dispatchStartupBundleSidecarSuffix = ".startup.json"
 const dispatchStartupBundleSchema = "fleet-worker-startup-bundle/1"
+const dispatchCodexLoopGateDefaultSinceHours = 24
+const dispatchCodexLoopGateDefaultLimit = 20
 
 var dispatchResolvePIDRE = regexp.MustCompile(`^(?:resolve|repair)-\d+-\d{8}-\d{6}\.pid$`)
 var dispatchGoalPIDRE = regexp.MustCompile(`^.+-\d{8}-\d{6}\.pid$`)
@@ -128,17 +133,18 @@ func runDispatchTick(stdout, stderr io.Writer, argv []string) int {
 }
 
 var dispatchTickBenignActions = map[string]bool{
-	"spawned":             true,
-	"would_spawn":         true,
-	"refused":             true,
-	"no_lane":             true,
-	"no_issue":            true,
-	"self_modify_hold":    true,
-	"in_flight_duplicate": true,
-	"collision_risk":      true,
-	"lane_busy":           true,
-	"lane_leased":         true,
-	"broker_denied":       true,
+	"spawned":                 true,
+	"would_spawn":             true,
+	"refused":                 true,
+	"no_lane":                 true,
+	"no_issue":                true,
+	"self_modify_hold":        true,
+	"in_flight_duplicate":     true,
+	"collision_risk":          true,
+	"lane_busy":               true,
+	"lane_leased":             true,
+	"broker_denied":           true,
+	"codex_loop_gate_refused": true,
 }
 
 func dispatchTickExitCode(payload map[string]any) int {
@@ -179,6 +185,9 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	workerModel := fs.String("worker-model", "", "pin the claude worker to this exact --model id (un-blanks the seat default; empty falls back to the lane_models pin/benchmark gate/seat default)")
 	pinWorkerModel := fs.Bool("pin-worker-model", false, "benchmark gate: pin the claude worker to the account/default model (model-accounting run) instead of the seat default + fallback chain")
 	modelDowngrade := fs.Bool("model-downgrade", false, "Layer-2 in-tick re-dispatch: when the target's last slot exited model-switchable (usage_cap/model_unknown/rate_limit), re-dispatch it on the next downgrade-chain model")
+	codexLoopGate := fs.String("codex-loop-gate", dispatchCodexLoopGateDefaultThreshold(), "for live Codex workers, audit recent Codex sessions before spawn and refuse at threshold: loop|action|off (default: $FLEET_CODEX_LOOP_GATE or loop)")
+	codexLoopGateSinceHours := fs.Float64("codex-loop-gate-since-hours", dispatchCodexLoopGateDefaultSinceHoursValue(), "with --codex-loop-gate, only scan Codex sessions modified within N hours (0 = all)")
+	codexLoopGateLimit := fs.Int("codex-loop-gate-limit", dispatchCodexLoopGateDefaultLimitValue(), "with --codex-loop-gate, maximum newest Codex sessions to scan")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 
 	accountTag := fs.String("account-tag", "", "internal: forced account tag (used by dispatch wave)")
@@ -217,30 +226,33 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 		return dispatchTickOptions{}, false, 2
 	}
 	opts := dispatchTickOptions{
-		Workspace:      root,
-		MaxWorkers:     *maxWorkers,
-		WorkKind:       wk,
-		Lane:           strings.TrimSpace(*lane),
-		TargetIssue:    *targetIssue,
-		LeaseID:        strings.TrimSpace(*leaseID),
-		LeaseTree:      dispatchSplitCSV(*leaseTree),
-		Backend:        b,
-		Goal:           goalID,
-		GoalProfile:    profile,
-		ExcludeLanes:   dispatchSplitCSV(*excludeLane),
-		Live:           *live,
-		Refresh:        !*noRefresh,
-		PreferNewest:   *preferNewest,
-		Generation:     strings.TrimSpace(*generationFlag),
-		View:           strings.TrimSpace(*view),
-		CooldownMin:    *cooldownMin,
-		WorkerTimeoutS: *workerTimeoutS,
-		SpawnProbeS:    maxFloat64(0, *spawnProbeS),
-		LoopLedger:     *loopLedger,
-		RecordLoop:     !*noLoopLedger,
-		WorkerModel:    firstString(strings.TrimSpace(*workerModel), strings.TrimSpace(os.Getenv("FLEET_DISPATCH_WORKER_MODEL"))),
-		PinWorkerModel: *pinWorkerModel || dispatchBoolValue(os.Getenv("FLEET_DISPATCH_PIN_MODEL")),
-		ModelDowngrade: *modelDowngrade || dispatchBoolValue(os.Getenv("FLEET_DISPATCH_MODEL_DOWNGRADE")),
+		Workspace:               root,
+		MaxWorkers:              *maxWorkers,
+		WorkKind:                wk,
+		Lane:                    strings.TrimSpace(*lane),
+		TargetIssue:             *targetIssue,
+		LeaseID:                 strings.TrimSpace(*leaseID),
+		LeaseTree:               dispatchSplitCSV(*leaseTree),
+		Backend:                 b,
+		Goal:                    goalID,
+		GoalProfile:             profile,
+		ExcludeLanes:            dispatchSplitCSV(*excludeLane),
+		Live:                    *live,
+		Refresh:                 !*noRefresh,
+		PreferNewest:            *preferNewest,
+		Generation:              strings.TrimSpace(*generationFlag),
+		View:                    strings.TrimSpace(*view),
+		CooldownMin:             *cooldownMin,
+		WorkerTimeoutS:          *workerTimeoutS,
+		SpawnProbeS:             maxFloat64(0, *spawnProbeS),
+		LoopLedger:              *loopLedger,
+		RecordLoop:              !*noLoopLedger,
+		WorkerModel:             firstString(strings.TrimSpace(*workerModel), strings.TrimSpace(os.Getenv("FLEET_DISPATCH_WORKER_MODEL"))),
+		PinWorkerModel:          *pinWorkerModel || dispatchBoolValue(os.Getenv("FLEET_DISPATCH_PIN_MODEL")),
+		ModelDowngrade:          *modelDowngrade || dispatchBoolValue(os.Getenv("FLEET_DISPATCH_MODEL_DOWNGRADE")),
+		CodexLoopGate:           strings.TrimSpace(*codexLoopGate),
+		CodexLoopGateSinceHours: maxFloat64(0, *codexLoopGateSinceHours),
+		CodexLoopGateLimit:      *codexLoopGateLimit,
 	}
 	if *accountTag != "" || *accountTier != "" || *accountModel != "" || *accountDir != "" {
 		opts.Account = &dispatchtick.Account{
@@ -555,6 +567,20 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		return finish(payload), nil
 	}
 
+	if gate, refused, err := dispatchCodexLoopGateForTick(opts, account); err != nil {
+		return nil, err
+	} else if gate != nil {
+		payload["codex_loop_gate"] = gate
+		if refused {
+			payload["ok"] = false
+			payload["action"] = "codex_loop_gate_refused"
+			payload["verdict"] = "CODEX_LOOP_GATE_REFUSED"
+			payload["reason"] = fmt.Sprintf("Codex loop gate refused live dispatch: fail-on=%s verdict=%s reason=%s",
+				dispatchMapString(gate, "fail_on"), dispatchMapString(gate, "verdict"), dispatchMapString(gate, "reason"))
+			return finish(payload), nil
+		}
+	}
+
 	if !opts.Live {
 		payload["ok"] = true
 		payload["action"] = "would_spawn"
@@ -564,6 +590,77 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	}
 
 	return dispatchTickLiveSpawn(root, runsDir, opts, pick, account, model, target, promptRec, payload, finish)
+}
+
+func dispatchCodexLoopGateForTick(opts dispatchTickOptions, account dispatchtick.Account) (map[string]any, bool, error) {
+	if !opts.Live || opts.Backend != "codex" {
+		return nil, false, nil
+	}
+	threshold := strings.ToLower(strings.TrimSpace(opts.CodexLoopGate))
+	if threshold == "" {
+		threshold = dispatchCodexLoopGateDefaultThreshold()
+	}
+	if threshold == "" || threshold == "off" || threshold == "none" || threshold == "false" || threshold == "0" {
+		return nil, false, nil
+	}
+	if _, ok := codexLoopFailOnRank(threshold); !ok {
+		return nil, false, fmt.Errorf("invalid --codex-loop-gate %q (want loop, action, or off)", opts.CodexLoopGate)
+	}
+	limit := opts.CodexLoopGateLimit
+	if limit <= 0 {
+		limit = dispatchCodexLoopGateDefaultLimitValue()
+	}
+	rep, err := diagnoseRecentCodexLoops(account.Dir, opts.CodexLoopGateSinceHours, limit)
+	if err != nil {
+		return nil, false, fmt.Errorf("Codex loop gate audit failed: %w", err)
+	}
+	gateCode, _ := codexLoopFailOnExitCode(rep.Verdict, threshold)
+	return dispatchCodexLoopGatePayload(rep, threshold), gateCode != 0, nil
+}
+
+func dispatchCodexLoopGateDefaultThreshold() string {
+	return firstString(strings.TrimSpace(os.Getenv("FLEET_CODEX_LOOP_GATE")), "loop")
+}
+
+func dispatchCodexLoopGateDefaultSinceHoursValue() float64 {
+	raw := strings.TrimSpace(os.Getenv("FLEET_CODEX_LOOP_GATE_SINCE_HOURS"))
+	if raw == "" {
+		return dispatchCodexLoopGateDefaultSinceHours
+	}
+	if n, err := strconv.ParseFloat(raw, 64); err == nil && n >= 0 {
+		return n
+	}
+	return dispatchCodexLoopGateDefaultSinceHours
+}
+
+func dispatchCodexLoopGateDefaultLimitValue() int {
+	raw := strings.TrimSpace(os.Getenv("FLEET_CODEX_LOOP_GATE_LIMIT"))
+	if raw == "" {
+		return dispatchCodexLoopGateDefaultLimit
+	}
+	if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+		return n
+	}
+	return dispatchCodexLoopGateDefaultLimit
+}
+
+func dispatchCodexLoopGatePayload(rep codexLoopRecentReport, threshold string) map[string]any {
+	return map[string]any{
+		"schema":       rep.Schema,
+		"codex_home":   rep.CodexHome,
+		"fail_on":      codexLoopFailOnName(threshold),
+		"verdict":      rep.Verdict,
+		"reason":       rep.Reason,
+		"since_hours":  rep.SinceHours,
+		"limit":        rep.Limit,
+		"scanned":      rep.Scanned,
+		"loop_count":   rep.LoopCount,
+		"action_count": rep.ActionCount,
+		"ok_count":     rep.OKCount,
+		"tool_calls":   rep.ToolCalls,
+		"tool_outputs": rep.ToolOutputs,
+		"top_repeated": rep.TopRepeated,
+	}
 }
 
 func liveIssueSet(details map[int]dispatchLiveScope) map[int]bool {

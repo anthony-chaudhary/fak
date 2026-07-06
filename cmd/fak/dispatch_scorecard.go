@@ -392,7 +392,7 @@ func dispatchScoreWaveExecutionPlan(root string) dispatchPlanProbe {
 	plan := dispatchWaveExecutionPlans(root, "claude", "engineering", "", dispatchGoalProfileThroughput, "wave-score", 0, price.RunTargets, []dispatchtick.AccountWaveLane{
 		{Tag: "acct-a", Account: ".claude-a", ConfigDir: "acct-a", Model: "claude", SelectedTier: 1, Rank: 0, WaveID: "wave-score", Size: 2},
 		{Tag: "acct-b", Account: ".claude-b", ConfigDir: "acct-b", Model: "claude", SelectedTier: 1, Rank: 1, WaveID: "wave-score", Size: 2},
-	}, false)
+	}, false, dispatchCodexLoopGateDefaultThreshold(), dispatchCodexLoopGateDefaultSinceHoursValue(), dispatchCodexLoopGateDefaultLimitValue())
 	pass := len(plan) == 2 &&
 		plan[0].Account["tag"] != plan[1].Account["tag"] &&
 		plan[0].Target.LeaseID != plan[1].Target.LeaseID &&

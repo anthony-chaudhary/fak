@@ -133,6 +133,9 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	excludeLane := fs.String("exclude-lane", "", "comma-separated lanes to drop from the step-budget pick")
 	settleS := fs.Float64("settle-s", 2.0, "seconds to wait after each live spawn")
 	noLedger := fs.Bool("no-loop-ledger", false, "disable loop-ledger append for spawned ticks")
+	codexLoopGate := fs.String("codex-loop-gate", dispatchCodexLoopGateDefaultThreshold(), "for live Codex workers, audit recent Codex sessions before spawn and refuse at threshold: loop|action|off")
+	codexLoopGateSinceHours := fs.Float64("codex-loop-gate-since-hours", dispatchCodexLoopGateDefaultSinceHoursValue(), "with --codex-loop-gate, only scan Codex sessions modified within N hours (0 = all)")
+	codexLoopGateLimit := fs.Int("codex-loop-gate-limit", dispatchCodexLoopGateDefaultLimitValue(), "with --codex-loop-gate, maximum newest Codex sessions to scan")
 	live := fs.Bool("live", false, "actually spawn workers")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 	if !parseFlags(fs, argv) {
@@ -245,7 +248,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 		}
 		rec["price"] = price
 		rec["planned_lanes"] = append([]string(nil), price.RunLanes...)
-		executionPlan = dispatchWaveExecutionPlans(root, backendNorm, wk, goalID, profile, waveID, shortfall, price.RunTargets, lanes, !*noLedger)
+		executionPlan = dispatchWaveExecutionPlans(root, backendNorm, wk, goalID, profile, waveID, shortfall, price.RunTargets, lanes, !*noLedger, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit)
 		executionPlanID := dispatchWaveExecutionPlanID(executionPlan)
 		rec["execution_plan_id"] = executionPlanID
 		rec["execution_plan"] = executionPlan
@@ -253,7 +256,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 			rec["stop_reason"] = "priced fan-out found no launchable lane"
 			return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 		}
-		executionAudit := auditDispatchWaveExecutionPlan(root, *maxWorkers, excludedLanes, executionPlan)
+		executionAudit := auditDispatchWaveExecutionPlan(root, *maxWorkers, excludedLanes, executionPlan, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit)
 		rec["execution_plan_audit"] = executionAudit
 		prelaunchGate := dispatchWavePrelaunchGateFromAudit(executionPlanID, executionAudit)
 		rec["prelaunch_gate"] = prelaunchGate
@@ -298,7 +301,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	}
 	for i := 0; i < limit; i++ {
 		row := executionPlan[i]
-		payload, err := evaluateDispatchTick(dispatchWaveExecutionTickOptions(root, *maxWorkers, dispatchSplitCSV(*excludeLane), row, *live, i == 0), stderr)
+		payload, err := evaluateDispatchTick(dispatchWaveExecutionTickOptions(root, *maxWorkers, dispatchSplitCSV(*excludeLane), row, *live, i == 0, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit), stderr)
 		if err != nil {
 			ticks = append(ticks, map[string]any{"ok": false, "error": err.Error(), "rank": i})
 			rec["stop_reason"] = err.Error()
@@ -697,13 +700,13 @@ func dispatchTickArgsForLaunchTarget(cand dispatchWaveCandidate) []string {
 	return args
 }
 
-func auditDispatchWaveExecutionPlan(root string, maxWorkers int, exclude []string, plan []dispatchWaveExecutionPlan) []dispatchWaveExecutionAudit {
+func auditDispatchWaveExecutionPlan(root string, maxWorkers int, exclude []string, plan []dispatchWaveExecutionPlan, codexLoopGate string, codexLoopGateSinceHours float64, codexLoopGateLimit int) []dispatchWaveExecutionAudit {
 	if len(plan) == 0 {
 		return nil
 	}
 	out := make([]dispatchWaveExecutionAudit, 0, len(plan))
 	for _, row := range plan {
-		payload, err := evaluateDispatchTick(dispatchWaveExecutionTickOptions(root, maxWorkers, exclude, row, false, false), io.Discard)
+		payload, err := evaluateDispatchTick(dispatchWaveExecutionTickOptions(root, maxWorkers, exclude, row, false, false, codexLoopGate, codexLoopGateSinceHours, codexLoopGateLimit), io.Discard)
 		audit := dispatchWaveExecutionAudit{
 			Rank:    row.Rank,
 			Target:  row.Target,
@@ -728,7 +731,7 @@ func auditDispatchWaveExecutionPlan(root string, maxWorkers int, exclude []strin
 	return out
 }
 
-func dispatchWaveExecutionTickOptions(root string, maxWorkers int, exclude []string, row dispatchWaveExecutionPlan, live bool, refresh bool) dispatchTickOptions {
+func dispatchWaveExecutionTickOptions(root string, maxWorkers int, exclude []string, row dispatchWaveExecutionPlan, live bool, refresh bool, codexLoopGate string, codexLoopGateSinceHours float64, codexLoopGateLimit int) dispatchTickOptions {
 	acct := dispatchWaveAccountFromPlan(row.Account)
 	mem := dispatchtick.Membership{
 		Rank:      row.Rank,
@@ -737,23 +740,26 @@ func dispatchWaveExecutionTickOptions(root string, maxWorkers int, exclude []str
 		Shortfall: row.Shortfall,
 	}
 	return dispatchTickOptions{
-		Workspace:      root,
-		MaxWorkers:     maxWorkers,
-		WorkKind:       row.WorkKind,
-		Lane:           row.Target.Lane,
-		TargetIssue:    row.Target.Issue,
-		LeaseID:        row.Target.LeaseID,
-		LeaseTree:      append([]string(nil), row.Target.Tree...),
-		Backend:        row.Backend,
-		ExcludeLanes:   append([]string(nil), exclude...),
-		Live:           live,
-		Refresh:        refresh,
-		CooldownMin:    dispatchtick.DefaultCooldownMinutes,
-		WorkerTimeoutS: dispatchtick.DefaultWorkerTimeoutS,
-		SpawnProbeS:    dispatchtick.DefaultSpawnProbeS,
-		RecordLoop:     live && row.RecordLoop,
-		Account:        &acct,
-		Membership:     &mem,
+		Workspace:               root,
+		MaxWorkers:              maxWorkers,
+		WorkKind:                row.WorkKind,
+		Lane:                    row.Target.Lane,
+		TargetIssue:             row.Target.Issue,
+		LeaseID:                 row.Target.LeaseID,
+		LeaseTree:               append([]string(nil), row.Target.Tree...),
+		Backend:                 row.Backend,
+		ExcludeLanes:            append([]string(nil), exclude...),
+		Live:                    live,
+		Refresh:                 refresh,
+		CooldownMin:             dispatchtick.DefaultCooldownMinutes,
+		WorkerTimeoutS:          dispatchtick.DefaultWorkerTimeoutS,
+		SpawnProbeS:             dispatchtick.DefaultSpawnProbeS,
+		RecordLoop:              live && row.RecordLoop,
+		CodexLoopGate:           strings.TrimSpace(codexLoopGate),
+		CodexLoopGateSinceHours: codexLoopGateSinceHours,
+		CodexLoopGateLimit:      codexLoopGateLimit,
+		Account:                 &acct,
+		Membership:              &mem,
 	}
 }
 
@@ -917,7 +923,7 @@ func dispatchWaveExecutionPlanID(plan []dispatchWaveExecutionPlan) string {
 	return dispatchStablePlanID(plan)
 }
 
-func dispatchWaveExecutionPlans(root, backend, workKind, goal, goalProfile, waveID string, shortfall int, targets []dispatchWaveCandidate, lanes []dispatchtick.AccountWaveLane, recordLoop bool) []dispatchWaveExecutionPlan {
+func dispatchWaveExecutionPlans(root, backend, workKind, goal, goalProfile, waveID string, shortfall int, targets []dispatchWaveCandidate, lanes []dispatchtick.AccountWaveLane, recordLoop bool, codexLoopGate string, codexLoopGateSinceHours float64, codexLoopGateLimit int) []dispatchWaveExecutionPlan {
 	limit := minInt(len(targets), len(lanes))
 	if limit <= 0 {
 		return nil
@@ -927,7 +933,7 @@ func dispatchWaveExecutionPlans(root, backend, workKind, goal, goalProfile, wave
 		target := targets[i]
 		acct := accountFromWaveLane(lanes[i])
 		mem := dispatchtick.Membership{Rank: i, WaveID: waveID, Size: limit, Shortfall: shortfall}
-		args := dispatchWaveExecutionTickArgs(root, backend, workKind, goal, goalProfile, target, acct, mem, recordLoop)
+		args := dispatchWaveExecutionTickArgs(root, backend, workKind, goal, goalProfile, target, acct, mem, recordLoop, codexLoopGate, codexLoopGateSinceHours, codexLoopGateLimit)
 		out = append(out, dispatchWaveExecutionPlan{
 			Rank:                i,
 			WaveID:              waveID,
@@ -947,7 +953,7 @@ func dispatchWaveExecutionPlans(root, backend, workKind, goal, goalProfile, wave
 	return out
 }
 
-func dispatchWaveExecutionTickArgs(root, backend, workKind, goal, goalProfile string, target dispatchWaveCandidate, account dispatchtick.Account, membership dispatchtick.Membership, recordLoop bool) []string {
+func dispatchWaveExecutionTickArgs(root, backend, workKind, goal, goalProfile string, target dispatchWaveCandidate, account dispatchtick.Account, membership dispatchtick.Membership, recordLoop bool, codexLoopGate string, codexLoopGateSinceHours float64, codexLoopGateLimit int) []string {
 	args := []string{"--workspace", root, "--backend", backend}
 	if strings.TrimSpace(workKind) != "" {
 		args = append(args, "--work-kind", workKind)
@@ -961,6 +967,13 @@ func dispatchWaveExecutionTickArgs(root, backend, workKind, goal, goalProfile st
 	args = append(args, dispatchTickArgsForLaunchTarget(target)...)
 	if !recordLoop {
 		args = append(args, "--no-loop-ledger")
+	}
+	if backend == "codex" {
+		args = append(args,
+			"--codex-loop-gate", firstString(strings.TrimSpace(codexLoopGate), dispatchCodexLoopGateDefaultThreshold()),
+			"--codex-loop-gate-since-hours", fmt.Sprint(codexLoopGateSinceHours),
+			"--codex-loop-gate-limit", fmt.Sprint(codexLoopGateLimit),
+		)
 	}
 	if account.Tag != "" {
 		args = append(args, "--account-tag", account.Tag)
