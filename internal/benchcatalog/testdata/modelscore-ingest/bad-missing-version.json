@@ -1,0 +1,16 @@
+{
+  "schema": "fak.benchcatalog.snapshot.v1",
+  "benchmark": "swe-bench-verified",
+  "version": "",
+  "rows": [
+    {
+      "model": "opus",
+      "score": 74.5,
+      "metric": "pct-resolved",
+      "source": "https://www.swebench.com/",
+      "as_of": "2026-07-06",
+      "confidence": "official",
+      "illustrative": true
+    }
+  ]
+}

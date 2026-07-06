@@ -1,0 +1,34 @@
+{
+  "schema": "fak.benchcatalog.snapshot.v1",
+  "benchmark": "swe-bench-verified",
+  "version": "verified",
+  "rows": [
+    {
+      "model": "opus",
+      "score": 74.5,
+      "metric": "pct-resolved",
+      "source": "https://www.swebench.com/",
+      "as_of": "2026-07-06",
+      "confidence": "official",
+      "illustrative": true
+    },
+    {
+      "model": "sonnet",
+      "score": 70.3,
+      "metric": "pct-resolved",
+      "source": "https://www.swebench.com/",
+      "as_of": "2026-07-06",
+      "confidence": "official",
+      "illustrative": true
+    },
+    {
+      "model": "glm-5.2",
+      "score": 62.8,
+      "metric": "pct-resolved",
+      "source": "https://www.swebench.com/",
+      "as_of": "2026-07-06",
+      "confidence": "vendor_reported",
+      "illustrative": true
+    }
+  ]
+}

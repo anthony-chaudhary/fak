@@ -1,0 +1,15 @@
+{
+  "schema": "fak.benchcatalog.snapshot.v1",
+  "benchmark": "swe-bench-verified",
+  "version": "verified",
+  "rows": [
+    {
+      "model": "mystery-model",
+      "score": 99.9,
+      "metric": "pct-resolved",
+      "as_of": "2026-07-06",
+      "confidence": "unknown",
+      "illustrative": true
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "schema": "fak.benchcatalog.snapshot.v1",
+  "benchmark": "terminal-bench",
+  "version": "2.1",
+  "rows": [
+    {
+      "model": "opus",
+      "score": 58.4,
+      "metric": "pct-resolved",
+      "harness": "terminus-2",
+      "source": "https://www.tbench.ai/leaderboard/terminal-bench/2.1",
+      "as_of": "2026-07-06",
+      "confidence": "official",
+      "illustrative": true
+    },
+    {
+      "model": "sonnet",
+      "score": 49.1,
+      "metric": "pct-resolved",
+      "harness": "terminus-2",
+      "source": "https://www.tbench.ai/leaderboard/terminal-bench/2.1",
+      "as_of": "2026-07-06",
+      "confidence": "official",
+      "illustrative": true
+    },
+    {
+      "model": "glm-5.2",
+      "score": 41.7,
+      "metric": "pct-resolved",
+      "harness": "terminus-2",
+      "source": "https://www.tbench.ai/leaderboard/terminal-bench/2.1",
+      "as_of": "2026-07-06",
+      "confidence": "community",
+      "illustrative": true
+    }
+  ]
+}
