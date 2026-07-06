@@ -236,10 +236,12 @@ func (r Registry) NextInRotation(after string) (RotationSeat, bool) {
 
 // NextInRotationWithHeadroom is NextInRotation with an OPTIONAL per-bucket headroom signal.
 // With a signal the pool is ordered most-headroom-first, so "next" is the BEST-headroom
-// bucket that is not the anchor's own bucket — a rotate never re-hands the walled/capped seat
-// the caller is leaving, and it prefers the account with the most room rather than the mere
-// next name in the ring. Without a signal it is the historical stable round-robin. ok is false
-// on an empty pool, or when the anchor's bucket is the pool's only one.
+// bucket that is not the anchor's own bucket AND is not known-runtime-walled. A rotate never
+// re-hands the walled/capped seat the caller is leaving, does not launch a second known-capped
+// bucket just because it is "next", and prefers the account with the most room rather than the
+// mere next name in the ring. Without a signal it is the historical stable round-robin. ok is
+// false on an empty pool, when the anchor's bucket is the pool's only one, or when every
+// non-anchor candidate is runtime-walled by the injected signal.
 func (r Registry) NextInRotationWithHeadroom(after string, hr RotationHeadroom) (RotationSeat, bool) {
 	res := r.RotationPlanWithHeadroom(hr)
 	if len(res.Pool) == 0 {
@@ -257,9 +259,12 @@ func (r Registry) NextInRotationWithHeadroom(after string, hr RotationHeadroom) 
 			if afterKey != "" && s.Account == afterKey {
 				continue
 			}
+			if rotationSeatRuntimeWalled(s) {
+				continue
+			}
 			return s, true
 		}
-		return RotationSeat{}, false // every pool seat is the anchor's bucket; nowhere else to go
+		return RotationSeat{}, false // every candidate is the anchor's bucket or known-walled
 	}
 	idx := -1
 	for i, s := range res.Pool {
@@ -275,6 +280,13 @@ func (r Registry) NextInRotationWithHeadroom(after string, hr RotationHeadroom) 
 		return RotationSeat{}, false // the only bucket; nowhere else to rotate
 	}
 	return res.Pool[(idx+1)%len(res.Pool)], true
+}
+
+// rotationSeatRuntimeWalled reports whether the caller-supplied headroom signal says this
+// bucket is known blocked/capped right now. Negative scores are the closed "walled" band from
+// cmd/fak/accounts_headroom.go; nil/zero scores remain launchable (no signal / unknown).
+func rotationSeatRuntimeWalled(s RotationSeat) bool {
+	return s.Headroom != nil && *s.Headroom < 0
 }
 
 // bucketKey returns the account-bucket key of the seat named `name`, or "" when the name is

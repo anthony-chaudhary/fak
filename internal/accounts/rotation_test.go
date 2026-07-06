@@ -239,6 +239,39 @@ func TestNextInRotationHeadroomPrefersRoom(t *testing.T) {
 	}
 }
 
+func TestNextInRotationHeadroomRejectsKnownWalledCandidates(t *testing.T) {
+	reg := Registry{Homes: []Home{
+		active("alice", "u-alice", "alice@x.test"),
+		active("bob", "u-bob", "bob@x.test"),
+	}}
+	hr := RotationHeadroom{"uuid:u-alice": 1, "uuid:u-bob": -1}
+
+	if got, ok := reg.NextInRotationWithHeadroom("alice", hr); ok {
+		t.Fatalf("NextInRotationWithHeadroom(alice) = %q,true; want no launchable non-anchor candidate", got.Name)
+	}
+	res := reg.RotationPlanWithHeadroom(hr)
+	if got := poolNames(res); len(got) != 2 || got[0] != "alice" || got[1] != "bob" {
+		t.Fatalf("rotation report should still show the walled bucket: %v", got)
+	}
+	if res.Pool[1].Headroom == nil || *res.Pool[1].Headroom >= 0 {
+		t.Fatalf("bob should carry the walled score in the diagnostic plan: %+v", res.Pool[1])
+	}
+}
+
+func TestNextInRotationHeadroomFreshStartSkipsKnownWalled(t *testing.T) {
+	reg := Registry{Homes: []Home{
+		active("alice", "u-alice", "alice@x.test"),
+		active("bob", "u-bob", "bob@x.test"),
+	}}
+	hr := RotationHeadroom{"uuid:u-alice": -1, "uuid:u-bob": 0}
+	if got, ok := reg.NextInRotationWithHeadroom("", hr); !ok || got.Name != "bob" {
+		t.Fatalf("fresh start should skip walled alice and choose unknown bob; got %q,%v", got.Name, ok)
+	}
+	if got, ok := reg.NextInRotationWithHeadroom("bob", hr); ok {
+		t.Fatalf("rotating off bob should not launch known-walled alice; got %q,true", got.Name)
+	}
+}
+
 func TestRotationPolicyDefaultsAndViewRead(t *testing.T) {
 	// No views -> sane defaults: reserved held out.
 	def := Registry{}.RotationPolicy()

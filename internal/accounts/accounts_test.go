@@ -612,6 +612,47 @@ func TestDeriveIdentityDefaultSeatFreshestStateFile(t *testing.T) {
 	}
 }
 
+func TestDeriveIdentityRejectsPlaceholderClaudeOAuthCreds(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude-july4-netra")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(dir, ".claude.json"),
+		[]byte(`{"oauthAccount":{"emailAddress":"july4@example.test","accountUuid":"uuid-july4"}}`),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(dir, ".credentials.json"),
+		[]byte(`{"claudeAiOauth":{"expiresAt":0,"scopes":["user:profile"],"subscriptionType":"max"}}`),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	id := DeriveIdentity(dir)
+	if !id.Exists || id.Email != "july4@example.test" || id.AccountUUID != "uuid-july4" {
+		t.Fatalf("identity = %+v, want july4 identity", id)
+	}
+	if id.HasCreds {
+		t.Fatalf("placeholder .credentials.json without access/refresh token must not read as live creds: %+v", id)
+	}
+
+	if err := os.WriteFile(
+		filepath.Join(dir, ".credentials.json"),
+		[]byte(`{"claudeAiOauth":{"accessToken":"access","refreshToken":"refresh"}}`),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if id := DeriveIdentity(dir); !id.HasCreds {
+		t.Fatalf("credentials with access/refresh token should read as live creds: %+v", id)
+	}
+}
+
 // TestMergeDiscovered proves the regenerator is non-destructive: authored policy fields on a
 // known home survive a rescan, identity is refreshed from disk, a brand-new config dir is
 // added as an active seat, and a registry entry whose dir vanished is kept (not silently

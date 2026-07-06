@@ -795,11 +795,50 @@ func DeriveIdentity(dir string) Identity {
 		return id
 	}
 	id.Email, id.AccountUUID = stateIdentity(dir)
-	if fi, err := os.Stat(filepath.Join(dir, ".credentials.json")); err == nil && !fi.IsDir() {
-		id.HasCreds = true
-	}
+	id.HasCreds = hasClaudeCredentials(dir)
 	id.TokenFP = tokenFingerprint(dir)
 	return id
+}
+
+// hasClaudeCredentials reports whether a config home has a credential Claude can
+// actually use. A placeholder .credentials.json with a claudeAiOauth object but no
+// access/refresh token is not a login; that was the july4-netra drift where fak said
+// "ready" while Claude and the job switcher correctly saw a missing session/login.
+// Legacy/minimal fixtures that only prove the file exists still read as credentials
+// when they do not carry a claudeAiOauth object.
+func hasClaudeCredentials(dir string) bool {
+	if tok, err := os.ReadFile(filepath.Join(dir, ".oauth-token")); err == nil {
+		trimmed := string(bytes.TrimSpace(tok))
+		if strings.HasPrefix(trimmed, "sk-ant-oat") {
+			return true
+		}
+	}
+	path := filepath.Join(dir, ".credentials.json")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	if fi, err := os.Stat(path); err != nil || fi.IsDir() {
+		return false
+	}
+	var doc map[string]any
+	if json.Unmarshal(b, &doc) != nil {
+		return true
+	}
+	raw, ok := doc["claudeAiOauth"]
+	if !ok {
+		return true
+	}
+	oauth, ok := raw.(map[string]any)
+	if !ok {
+		return false
+	}
+	for _, key := range []string{"accessToken", "refreshToken"} {
+		if v, ok := oauth[key].(string); ok && strings.TrimSpace(v) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // stateIdentity resolves who a config home is logged in as. A named home (launched with
