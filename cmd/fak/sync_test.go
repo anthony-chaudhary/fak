@@ -31,6 +31,38 @@ func TestRunSyncCheckInSyncJSON(t *testing.T) {
 	}
 }
 
+func TestRunSyncCheckInSyncSurfacesDirtyWorktree(t *testing.T) {
+	clone := syncCLIFixture(t)
+	syncGit(t, clone, "merge", "--ff-only", "origin/work")
+
+	old := syncWorktree
+	syncWorktree = func(ctx context.Context, repo string) (safesync.Worktree, bool) {
+		if repo != clone {
+			t.Fatalf("repo = %q, want %q", repo, clone)
+		}
+		return safesync.Worktree{
+			Dirty:      true,
+			TotalDirty: 4,
+			Stampable:  1,
+			Lanes:      1,
+			Junk:       3,
+			NextAction: "remove 3 junk path(s) if you own them, then rerun `fak sweep --json`",
+		}, true
+	}
+	t.Cleanup(func() { syncWorktree = old })
+
+	var out, errb bytes.Buffer
+	code := runSync(&out, &errb, []string{"check", "--repo", clone, "--remote", "origin", "--branch", "work"})
+	if code != syncExitOK {
+		t.Fatalf("exit = %d, want ok; stderr=%s stdout=%s", code, errb.String(), out.String())
+	}
+	for _, want := range []string{"in sync", "worktree dirty: 4 path(s)", "next: remove 3 junk path(s)"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("sync output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
 func TestRunSyncCheckRefusesDivergentDirtyPath(t *testing.T) {
 	clone := syncCLIFixture(t)
 	syncWriteFile(t, filepath.Join(clone, "a.txt"), "LOCAL EDIT\n")

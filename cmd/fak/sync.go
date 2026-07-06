@@ -25,6 +25,7 @@ const (
 func cmdSync(argv []string) { os.Exit(runSync(os.Stdout, os.Stderr, argv)) }
 
 var syncAheadAudit = defaultSyncAheadAudit
+var syncWorktree = defaultSyncWorktree
 
 func runSync(stdout, stderr io.Writer, argv []string) int {
 	command := "check"
@@ -108,6 +109,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	if info.State == safesync.StateAhead {
 		info = annotateAheadPushAudit(context.Background(), info, pathutil.ExpandTilde(*repo), *remote)
 	}
+	info = annotateSyncWorktree(context.Background(), info, pathutil.ExpandTilde(*repo))
 
 	if *asJSON {
 		if err := writeIndentedJSON(stdout, info); err != nil {
@@ -166,6 +168,7 @@ func renderSync(w io.Writer, command string, info safesync.Assessment) {
 	switch info.State {
 	case safesync.StateInSync:
 		fmt.Fprintln(w, "in sync: local branch already matches the remote; nothing to do")
+		renderSyncWorktree(w, info)
 	case safesync.StateAhead:
 		fmt.Fprintf(w, "%s: %s\n", info.State, info.Reason)
 		if info.PushAudit != nil && !info.PushAudit.OK {
@@ -181,8 +184,10 @@ func renderSync(w io.Writer, command string, info safesync.Assessment) {
 				}
 			}
 		}
+		renderSyncWorktree(w, info)
 	case safesync.StateDiverged, safesync.StateNoRemoteRef:
 		fmt.Fprintf(w, "%s: %s\n", info.State, info.Reason)
+		renderSyncWorktree(w, info)
 	case safesync.StateBehind:
 		status := "REFUSED"
 		if info.Applied {
@@ -201,9 +206,53 @@ func renderSync(w io.Writer, command string, info safesync.Assessment) {
 		if info.Applied {
 			fmt.Fprintf(w, "  HEAD -> %s (novel local work on other paths preserved)\n", short(info.NewHead))
 		}
+		renderSyncWorktree(w, info)
 	default:
 		fmt.Fprintf(w, "%s: %s\n", info.State, info.Reason)
+		renderSyncWorktree(w, info)
 	}
+}
+
+func renderSyncWorktree(w io.Writer, info safesync.Assessment) {
+	if info.Worktree == nil || !info.Worktree.Dirty {
+		return
+	}
+	fmt.Fprintf(w, "worktree dirty: %d path(s) across %d lane(s), %d no-lane, %d junk\n",
+		info.Worktree.TotalDirty, info.Worktree.Lanes, info.Worktree.NoLane, info.Worktree.Junk)
+	if info.Worktree.NextAction != "" {
+		fmt.Fprintf(w, "  next: %s\n", info.Worktree.NextAction)
+	}
+}
+
+func annotateSyncWorktree(ctx context.Context, info safesync.Assessment, repo string) safesync.Assessment {
+	wt, ok := syncWorktree(ctx, repo)
+	if !ok || wt.TotalDirty == 0 {
+		return info
+	}
+	info.Worktree = &wt
+	return info
+}
+
+func defaultSyncWorktree(ctx context.Context, repo string) (safesync.Worktree, bool) {
+	entries, err := gitStatusDirty(ctx, repo)
+	if err != nil {
+		return safesync.Worktree{}, false
+	}
+	if len(entries) == 0 {
+		return safesync.Worktree{}, true
+	}
+	plan := classifyDirty(entries, hooksLaneResolver(repo), originProbeFor(ctx, repo))
+	return safesync.Worktree{
+		Dirty:        true,
+		TotalDirty:   plan.TotalDirty,
+		Stampable:    stampableCount(plan),
+		Lanes:        len(plan.Groups),
+		NoLane:       len(plan.NoLane),
+		Junk:         len(plan.Junk),
+		OldestPath:   plan.OldestDirtyPath,
+		OldestAgeSec: plan.OldestDirtyAgeSeconds,
+		NextAction:   plan.NextAction,
+	}, true
 }
 
 func annotateAheadPushAudit(ctx context.Context, info safesync.Assessment, repo, remote string) safesync.Assessment {

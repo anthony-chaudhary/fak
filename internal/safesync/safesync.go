@@ -59,6 +59,7 @@ type Assessment struct {
 	Applied    bool       `json:"applied,omitempty"`
 	NewHead    string     `json:"new_head,omitempty"`
 	PushAudit  *PushAudit `json:"push_audit,omitempty"`
+	Worktree   *Worktree  `json:"worktree,omitempty"`
 }
 
 // PushAudit is optional, read-only evidence attached by higher-level callers when an
@@ -78,6 +79,20 @@ type PushAuditResidual struct {
 	ClaimKind string `json:"claim_kind,omitempty"`
 	Witness   string `json:"witness,omitempty"`
 	Reason    string `json:"reason,omitempty"`
+}
+
+// Worktree is optional dirty-tree guidance attached by the CLI. It deliberately does not affect
+// the branch sync verdict: a checkout can be remote-in-sync while still carrying local work.
+type Worktree struct {
+	Dirty        bool   `json:"dirty"`
+	TotalDirty   int    `json:"total_dirty,omitempty"`
+	Stampable    int    `json:"stampable,omitempty"`
+	Lanes        int    `json:"lanes,omitempty"`
+	NoLane       int    `json:"no_lane,omitempty"`
+	Junk         int    `json:"junk,omitempty"`
+	OldestPath   string `json:"oldest_path,omitempty"`
+	OldestAgeSec int64  `json:"oldest_age_seconds,omitempty"`
+	NextAction   string `json:"next_action,omitempty"`
 }
 
 type GitError struct {
