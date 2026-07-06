@@ -323,6 +323,7 @@ var tier = map[string]int{
 	"waiting":               1, // R3 waiting-on-human queue (#2272, epic #2269): pure fold over loopmgr's loop-event ledger turning each blocked-on-operator notify into one kernel object with age, held resources, deadline, and the safe default that fires on expiry; ack-closure honestly fenced not_yet pending the R2 escalation packet (#2271); imports loopmgr(1), off the hot path.
 	"chatopsdetach":         1, // detached-execution decision kernel for chatops act verbs (#2265, epic #2259 C5): the pure fold that routes an inbound act verb + its guarded-dispatch admission verdict to dispatch-once / re-ack / structured-refuse over a command-nonce spool, plus the stall-to-blockers escalation judge. State in, decision out; imports nothing internal, off the hot path — the seam the (not-yet-landed) chatops door binds to.
 	"godfileceiling":        1,
+	"microagent":            4,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
