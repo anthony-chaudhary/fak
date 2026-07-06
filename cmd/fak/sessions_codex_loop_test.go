@@ -134,8 +134,14 @@ func TestSessionsCodexLoopRecentScansCodexHome(t *testing.T) {
 	if r.Verdict != "LOOP" || r.LoopCount != 1 || r.OKCount != 1 || r.Scanned != 2 {
 		t.Fatalf("wrong recent report: %+v", r)
 	}
+	if r.ProviderCounts["openai"] != 2 || r.UnguardedCount != 2 {
+		t.Fatalf("provider fold = counts=%v unguarded=%d, want openai=2 unguarded=2", r.ProviderCounts, r.UnguardedCount)
+	}
 	if len(r.TopRepeated) != 1 || r.TopRepeated[0].Tool != "update_plan" || r.TopRepeated[0].Count != 3 {
 		t.Fatalf("wrong top repeated fold: %+v", r.TopRepeated)
+	}
+	if len(r.Diagnoses) == 0 || !strings.Contains(r.Diagnoses[0].NextAction, "fak codex") {
+		t.Fatalf("direct-provider diagnosis did not point at guarded launch path: %+v", r.Diagnoses)
 	}
 	if strings.Contains(stdout.String(), "step") {
 		t.Fatalf("recent report leaked raw tool arguments:\n%s", stdout.String())
@@ -151,6 +157,7 @@ func TestSessionsCodexLoopRecentScansCodexHome(t *testing.T) {
 		"fak sessions codex-loop --recent",
 		"verdict        : LOOP",
 		"LOOP=1 ACTION=0 OK=1",
+		"providers      : openai=2 unguarded=2",
 		"update_plan",
 		"loop-session verdict=LOOP",
 	} {

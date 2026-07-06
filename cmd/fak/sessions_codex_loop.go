@@ -62,6 +62,8 @@ type codexLoopRecentReport struct {
 	LoopCount         int                    `json:"loop_count"`
 	ActionCount       int                    `json:"action_count"`
 	OKCount           int                    `json:"ok_count"`
+	ProviderCounts    map[string]int         `json:"provider_counts,omitempty"`
+	UnguardedCount    int                    `json:"unguarded_count,omitempty"`
 	ToolCalls         int                    `json:"tool_calls"`
 	ToolOutputs       int                    `json:"tool_outputs"`
 	LastTokenTotalSum int64                  `json:"last_token_total_sum,omitempty"`
@@ -265,12 +267,13 @@ func diagnoseRecentCodexLoops(codexHome string, sinceHours float64, limit int) (
 		return codexLoopRecentReport{}, err
 	}
 	r := codexLoopRecentReport{
-		Schema:     codexLoopRecentSchema,
-		CodexHome:  home,
-		SinceHours: sinceHours,
-		Limit:      normalizedCodexLoopLimit(limit),
-		Verdict:    "OK",
-		Diagnoses:  make([]codexLoopDiagnosis, 0, len(paths)),
+		Schema:         codexLoopRecentSchema,
+		CodexHome:      home,
+		SinceHours:     sinceHours,
+		Limit:          normalizedCodexLoopLimit(limit),
+		Verdict:        "OK",
+		ProviderCounts: map[string]int{},
+		Diagnoses:      make([]codexLoopDiagnosis, 0, len(paths)),
 	}
 	for _, path := range paths {
 		fh, err := os.Open(path)
@@ -290,6 +293,12 @@ func diagnoseRecentCodexLoops(codexHome string, sinceHours float64, limit int) (
 		r.ToolCalls += d.ToolCalls
 		r.ToolOutputs += d.ToolOutputs
 		r.LastTokenTotalSum += d.LastTokenTotal
+		if provider := strings.TrimSpace(d.ModelProvider); provider != "" {
+			r.ProviderCounts[provider]++
+			if !strings.EqualFold(provider, "fak") {
+				r.UnguardedCount++
+			}
+		}
 		switch d.Verdict {
 		case "LOOP":
 			r.LoopCount++
@@ -313,6 +322,9 @@ func diagnoseRecentCodexLoops(codexHome string, sinceHours float64, limit int) (
 	})
 	if len(r.TopRepeated) > 5 {
 		r.TopRepeated = r.TopRepeated[:5]
+	}
+	if len(r.ProviderCounts) == 0 {
+		r.ProviderCounts = nil
 	}
 	switch {
 	case r.LoopCount > 0:
@@ -743,6 +755,14 @@ func classifyCodexLoopDiagnosis(d *codexLoopDiagnosis) {
 	if strings.EqualFold(top.Tool, "create_goal") && strings.Contains(strings.ToLower(top.OutputExcerpt), "unfinished goal") {
 		d.NextAction = "for create_goal, read/continue the existing goal instead of creating a new one; hard-fuse repeated unfinished-goal failures after the first repeat"
 	}
+	if d.ModelProvider != "" && !strings.EqualFold(d.ModelProvider, "fak") {
+		d.NextAction = "launch future Codex sessions through `fak codex` or `fak guard -- codex`; direct model_provider=" + d.ModelProvider + " sessions cannot use the gateway's repeated-result fuse"
+		d.ObservabilityGaps = append(d.ObservabilityGaps,
+			"this Codex session bypassed fak guard (model_provider="+d.ModelProvider+"), so the gateway could not hard-fuse the repeated tool outcome",
+			"the Codex session final status records tokens/time but not the top repeated tool outcome that consumed them",
+		)
+		return
+	}
 	d.ObservabilityGaps = append(d.ObservabilityGaps,
 		"the live gateway emitted an advisory livelock note but still admitted the next identical host-tool call",
 		"the Codex session final status records tokens/time but not the top repeated tool outcome that consumed them",
@@ -820,6 +840,13 @@ func renderCodexLoopRecentReport(r codexLoopRecentReport) string {
 	b.WriteByte('\n')
 	fmt.Fprintf(&b, "  scope          : scanned=%d limit=%d since_hours=%s\n", r.Scanned, r.Limit, trimFloat(r.SinceHours))
 	fmt.Fprintf(&b, "  session counts : LOOP=%d ACTION=%d OK=%d\n", r.LoopCount, r.ActionCount, r.OKCount)
+	if len(r.ProviderCounts) > 0 {
+		fmt.Fprintf(&b, "  providers      : %s", formatCodexProviderCounts(r.ProviderCounts))
+		if r.UnguardedCount > 0 {
+			fmt.Fprintf(&b, " unguarded=%d", r.UnguardedCount)
+		}
+		b.WriteByte('\n')
+	}
 	fmt.Fprintf(&b, "  tool traffic   : calls=%d outputs=%d\n", r.ToolCalls, r.ToolOutputs)
 	if r.LastTokenTotalSum > 0 {
 		fmt.Fprintf(&b, "  last-token sum : %d\n", r.LastTokenTotalSum)
@@ -857,6 +884,21 @@ func renderCodexLoopRecentReport(r codexLoopRecentReport) string {
 		}
 	}
 	return b.String()
+}
+
+func formatCodexProviderCounts(counts map[string]int) string {
+	keys := make([]string, 0, len(counts))
+	for key := range counts {
+		if strings.TrimSpace(key) != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%d", key, counts[key]))
+	}
+	return strings.Join(parts, " ")
 }
 
 func normalizeCodexLoopText(s string) string {
