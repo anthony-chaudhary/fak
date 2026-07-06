@@ -55,7 +55,9 @@ PORT="${PORT:-8000}"
 CTX="${CTX:-131072}"               # served context; GLM-5.2 supports up to 1M
 PREFLIGHT="${PREFLIGHT:-1}"         # set 0 to bypass the gate (NOT recommended)
 ENGINE_ARGS="${ENGINE_ARGS:-}"      # extra engine-specific flags, recorded in the shell command
+SPECULATIVE="${SPECULATIVE:-1}"     # set 0 to skip EAGLE for first-smoke/debug starts
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 log(){ echo "[$(date +%T)] $*"; }
 
@@ -66,7 +68,7 @@ fi
 # 1. Readiness gate. Fails closed unless this node clears the DSA arch + VRAM floor.
 if [ "${PREFLIGHT}" = "1" ]; then
   log "preflight: GLM-5.2 ${ENGINE} readiness on this node (quant=${QUANT}) ..."
-  if ! python "${HERE}/tools/glm52_serve_preflight.py" \
+  if ! "${PYTHON_BIN}" "${HERE}/tools/glm52_serve_preflight.py" \
         --engine "${ENGINE}" --quant "${QUANT}" --require-ready \
         --markdown "${HERE}/glm52-${ENGINE}-preflight.md"; then
     log "PREFLIGHT BLOCKED — this node cannot serve GLM-5.2 in ${ENGINE}."
@@ -74,6 +76,31 @@ if [ "${PREFLIGHT}" = "1" ]; then
     exit 1
   fi
   log "preflight OK."
+fi
+
+if [ "${ENGINE}" = "sglang" ]; then
+  log "dependency check: jinja2>=3.1.0 for SGLang chat templates ..."
+  if ! "${PYTHON_BIN}" - <<'PY'
+import re
+import sys
+
+try:
+    import jinja2
+except Exception as exc:
+    print(f"jinja2 import failed: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+version = getattr(jinja2, "__version__", "0")
+parts = tuple(int(p) for p in re.findall(r"\d+", version)[:3])
+parts = parts + (0,) * (3 - len(parts))
+if parts < (3, 1, 0):
+    print(f"jinja2 {version} is too old; need >=3.1.0", file=sys.stderr)
+    raise SystemExit(1)
+PY
+  then
+    log "PREFLIGHT BLOCKED - install/upgrade with: ${PYTHON_BIN} -m pip install --upgrade 'jinja2>=3.1.0'"
+    exit 1
+  fi
 fi
 
 # 2. Quant-specific engine flags. NVFP4 is Blackwell-only (FP4 tensor cores);
@@ -93,6 +120,12 @@ log "launching ${ENGINE} for ${MODEL} (tp=${TP} ctx=${CTX} quant=${QUANT}) on :$
 if [ "${ENGINE}" = "sglang" ]; then
   # SGLang GLM-5.2 cookbook (H200 low-latency profile): EAGLE MTP speculative decode.
   # SGLang auto-selects the DSA KV-cache dtype per arch (bf16 on Hopper, fp8 on Blackwell).
+  SG_SPEC_FLAGS=""
+  if [ "${SPECULATIVE}" = "1" ]; then
+    SG_SPEC_FLAGS="--speculative-algorithm EAGLE --speculative-num-steps 5 --speculative-eagle-topk 1 --speculative-num-draft-tokens 6"
+  else
+    log "speculative decode disabled (SPECULATIVE=${SPECULATIVE})"
+  fi
   sglang serve \
     --model-path "${MODEL}" \
     --served-model-name "${SERVED_NAME}" \
@@ -103,10 +136,7 @@ if [ "${ENGINE}" = "sglang" ]; then
     --mem-fraction-static 0.85 \
     ${SG_QFLAGS} \
     ${ENGINE_ARGS} \
-    --speculative-algorithm EAGLE \
-    --speculative-num-steps 5 \
-    --speculative-eagle-topk 1 \
-    --speculative-num-draft-tokens 6 \
+    ${SG_SPEC_FLAGS} \
     --host 0.0.0.0 --port "${PORT}" \
     > "${HERE}/glm52-sglang-server.log" 2>&1 &
 else
@@ -136,12 +166,20 @@ for _ in $(seq 1 180); do
     log "HEALTHY. models:"
     curl -s "http://127.0.0.1:${PORT}/v1/models" | head -c 400; echo
     log "smoke completion:"
-    curl -s "http://127.0.0.1:${PORT}/v1/chat/completions" \
+    SMOKE="$(curl -sf -m 120 "http://127.0.0.1:${PORT}/v1/chat/completions" \
       -H 'Content-Type: application/json' \
-      -d "{\"model\":\"${SERVED_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: GLM52_OK\"}],\"max_tokens\":8,\"temperature\":0}" \
-      | head -c 500; echo
+      -d "{\"model\":\"${SERVED_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: GLM52_OK\"}],\"max_tokens\":32,\"temperature\":0,\"chat_template_kwargs\":{\"enable_thinking\":false}}")" || SMOKE=""
+    printf '%s' "${SMOKE}" | head -c 500; echo
+    if ! printf '%s' "${SMOKE}" | grep -q 'GLM52_OK'; then
+      log "smoke completion failed; refusing READY"
+      tail -80 "${HERE}/glm52-${ENGINE}-server.log" || true
+      exit 1
+    fi
     log "GLM52_${ENGINE}_READY on :${PORT} — now run tools/glm52_serving_witness.py against it."
-    exit 0
+    wait "${SRV_PID}"
+    rc=$?
+    log "SERVER_EXITED rc=${rc}"
+    exit "${rc}"
   fi
   sleep 10
 done

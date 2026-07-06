@@ -63,6 +63,7 @@ GPU_FAMILY = {
     "nvidia-gb200": "NVIDIA_GB200",
     "nvidia-h200-141gb": "NVIDIA_H200",
     "nvidia-h100-80gb": "NVIDIA_H100",
+    "nvidia-h100-mega-80gb": "NVIDIA_H100_MEGA",
     "nvidia-l4": "NVIDIA_L4",
 }
 

@@ -145,6 +145,35 @@ ACCOUNT_CAP_RUNS_DIR = os.environ.get(
 # verdict only within this window. Matches account_probe's own anti-spam interval scale.
 PROBE_LEDGER_FRESH_MIN = float(os.environ.get("FLEET_PROBE_FRESH_MIN", "20"))
 
+NIM_DEEPSEEK_V4_PRO_MODEL = "deepseek-ai/deepseek-v4-pro"
+NIM_KIMI_K26_MODEL = "moonshotai/kimi-k2.6"
+NIM_GLM52_MODEL = "z-ai/glm-5.2"
+
+# Benchmark-ranked NVIDIA NIM coding seats, snapshot 2026-07-06.
+NIM_CODING_SEAT_PROFILES = {
+    "nim-deepseek-v4-pro": {
+        "model_tier": 1,
+        "model": NIM_DEEPSEEK_V4_PRO_MODEL,
+        "agent": "opencode",
+    },
+    "nim-kimi-k26": {
+        "model_tier": 1,
+        "model": NIM_KIMI_K26_MODEL,
+        "agent": "opencode",
+    },
+    "nim-glm52": {
+        "model_tier": 1,
+        "model": NIM_GLM52_MODEL,
+        "agent": "opencode",
+    },
+}
+
+DEFAULT_NIM_CODING_ROUTE_WEIGHTS = {
+    "opencode:nim-deepseek-v4-pro": 30,
+    "opencode:nim-kimi-k26": 20,
+    "opencode:nim-glm52": 10,
+}
+
 # Built-in defaults, used when no policy file is present. Keep backup or
 # break-glass accounts off the auto-resume roster until the operator opts in.
 DEFAULT_POLICY = {
@@ -166,7 +195,9 @@ DEFAULT_POLICY = {
     # touching an account's model-tier inference (a bare account_profiles entry WOULD
     # clobber the inferred tier and silently drop the account out of routing).
     # e.g. {"gem7": 10} to prefer the roomy account, {"gem8": -10} to push a near-capped one down.
-    "route_weights": {},
+    # The built-in NVIDIA NIM coding seats use this same map for their benchmark rank:
+    # opencode-nim-deepseek-v4-pro > opencode-nim-kimi-k26 > opencode-nim-glm52.
+    "route_weights": dict(DEFAULT_NIM_CODING_ROUTE_WEIGHTS),
     "routing": {
         "light_confidence": 0.999,
         "hard_tier1_fallback": "stop",
@@ -314,6 +345,9 @@ def _model_tier_from_name(model: object) -> int:
         return 1
     if "opus-4.6" in text or "opus46" in compact or text in ("opus", "claude-opus"):
         return 1
+    if ("deepseek-v4-pro" in text or "deepseekv4pro" in compact
+            or "kimi-k2.6" in text or "kimik26" in compact):
+        return 1
     if "glm-5.2" in text or "glm52" in compact:
         return 2
     return 3
@@ -393,6 +427,12 @@ def account_profile(row: dict, policy: dict | None = None) -> dict:
 
     if product == "opencode":
         models = _safe_opencode_models(str(row.get("dir") or ""))
+        seat = NIM_CODING_SEAT_PROFILES.get(tag.lower())
+        if seat:
+            raw = dict(seat)
+            if not raw.get("small_model"):
+                raw["small_model"] = models.get("small_model", "")
+            return _clean_profile(raw, source=f"default:nvidia-nim-coding:{tag}")
         model = models.get("model", "")
         tier = _model_tier_from_name(model)
         if tier == 3 and ("glm" in tag.lower() or "zai" in tag.lower()
@@ -1228,11 +1268,71 @@ def annotate_accounts(rows: list[dict], registry: dict | None = None,
                 "registry_age_min": None,
             })
         out.append(r)
+    _reconcile_identity_peer_availability(out)
     out.sort(key=lambda r: (r.get("product", ""),
                             r["kind"] != "worker",
                             not r.get("available", False),
                             r["tag"]))
     return out
+
+
+def _reconcile_identity_peer_availability(rows: list[dict]) -> None:
+    """Promote the canonical dir when a same-account duplicate has fresher success.
+
+    ``fak accounts`` and identity reconciliation deliberately collapse several dirs onto
+    one Anthropic account bucket. Runtime status is still keyed by dir basename, so a stale
+    auth block on the canonical dir can hide the whole bucket even while a duplicate/default
+    dir is actively serving it. Only auth-shaped blocks are repaired here; usage/access/credit
+    walls remain account-wide blocks.
+    """
+    by_uuid: dict[str, list[dict]] = {}
+    for r in rows:
+        if r.get("product") != "claude" or r.get("kind") != "worker":
+            continue
+        uuid = str(r.get("account_uuid") or "").strip()
+        if not uuid:
+            continue
+        by_uuid.setdefault(uuid, []).append(r)
+    for group in by_uuid.values():
+        if len(group) < 2:
+            continue
+        canonical = next((r for r in group if r.get("identity_role") == "canonical"), None)
+        if not canonical or canonical.get("available"):
+            continue
+        kind = str(canonical.get("block_kind") or "").lower()
+        if kind and kind != "auth":
+            continue
+        peers = [r for r in group if r is not canonical and r.get("available")]
+        if not peers:
+            continue
+        peer = sorted(
+            peers,
+            key=lambda r: (
+                -int(r.get("live_sessions") or 0),
+                -int(r.get("active_sessions") or 0),
+                str(r.get("tag") or ""),
+            ),
+        )[0]
+        canonical.update({
+            "available": True,
+            "blocked": False,
+            "block_kind": None,
+            "block_reason": "",
+            "reset": None,
+            "weekly": None,
+            "throttled": False,
+            "status_source": "identity-peer",
+            "active_sessions": max(
+                int(canonical.get("active_sessions") or 0),
+                int(peer.get("active_sessions") or 0),
+            ),
+            "live_sessions": max(
+                int(canonical.get("live_sessions") or 0),
+                int(peer.get("live_sessions") or 0),
+            ),
+            "auth_blocked_sessions": int(canonical.get("auth_blocked_sessions") or 0)
+            + int(peer.get("auth_blocked_sessions") or 0),
+        })
 
 
 def read_account_identity(acct_dir: str) -> dict:

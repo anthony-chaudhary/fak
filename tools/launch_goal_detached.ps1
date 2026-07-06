@@ -77,6 +77,12 @@ param(
   [string]$Tier        = 'auto',
   # Pin a specific account by tag/basename instead of routing (rare; for debugging).
   [string]$Account     = '',
+  # Force the worker's model via `claude --model <v>` (e.g. opus, sonnet, or a full id).
+  # Empty (default) = pass no --model, so the account's own default model is used
+  # (historically Fable 5 on the promo seats). Set it to escape a model-specific usage
+  # cap: a Fable-limited seat still serves on opus/sonnet, which the switcher-picked
+  # account authenticates for the same way. Additive — empty keeps prior behavior.
+  [string]$Model       = '',
   # Optional fak binary. Empty probes this repo's tools\.bin/fak.exe, repo-root fak.exe,
   # then PATH fak.
   [string]$FakExe      = '',
@@ -268,8 +274,12 @@ if ($r.oauth_token) { $env:CLAUDE_CODE_OAUTH_TOKEN = "$($r.oauth_token)" }
 else { Remove-Item Env:CLAUDE_CODE_OAUTH_TOKEN -ErrorAction SilentlyContinue }
 
 # Start-Process => detached child in its own process tree; -Redirect* keep the streams.
+# --model (when -Model is set) forces the worker off the account's default model, so a
+# Fable-usage-capped seat still serves on opus/sonnet under the same OAuth (#Fable-cap).
+$claudeArgs = @("-p", "--permission-mode", "bypassPermissions")
+if ($Model) { $claudeArgs = @("-p", "--model", $Model, "--permission-mode", "bypassPermissions") }
 $p = Start-Process -FilePath $claude `
-  -ArgumentList @("-p", "--permission-mode", "bypassPermissions") `
+  -ArgumentList $claudeArgs `
   -WorkingDirectory $Workspace `
   -RedirectStandardInput  $inF `
   -RedirectStandardOutput $logOut `

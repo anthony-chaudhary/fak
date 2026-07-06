@@ -545,6 +545,40 @@ class FleetAccountsTest(unittest.TestCase):
         self.assertEqual(by_account["opencode-zai2"]["small_model"], "zai-coding-plan/glm-4.5-air")
         self.assertNotIn("provider", by_account["opencode-zai2"])
 
+    def test_nim_coding_seats_rank_as_tier1_opencode_workers(self) -> None:
+        seats = [
+            ("opencode-nim-deepseek-v4-pro", "nim-deepseek-v4-pro",
+             fleet_accounts.NIM_DEEPSEEK_V4_PRO_MODEL, 30),
+            ("opencode-nim-kimi-k26", "nim-kimi-k26",
+             fleet_accounts.NIM_KIMI_K26_MODEL, 20),
+            ("opencode-nim-glm52", "nim-glm52",
+             fleet_accounts.NIM_GLM52_MODEL, 10),
+        ]
+        for account, _, _, _ in seats:
+            opencode_dir(self.config_home, account, config={})
+
+        rows = fleet_accounts.annotate_accounts(
+            fleet_accounts.discover_accounts(str(self.home),
+                                             config_home=str(self.config_home)),
+            registry={},
+        )
+        by_account = {r["account"]: r for r in rows}
+
+        for account, tag, model, weight in seats:
+            row = by_account[account]
+            self.assertEqual(row["kind"], "worker")
+            self.assertEqual(row["product"], "opencode")
+            self.assertEqual(row["tag"], tag)
+            self.assertEqual(row["model_tier"], 1)
+            self.assertEqual(row["model"], model)
+            self.assertEqual(row["profile_source"], f"default:nvidia-nim-coding:{tag}")
+            self.assertEqual(row["route_weight"], weight)
+
+        routed = fleet_accounts.route_account(
+            rows, "implement the feature", "engineering", product="opencode")
+        self.assertTrue(routed["ok"])
+        self.assertEqual(routed["account"]["account"], "opencode-nim-deepseek-v4-pro")
+
     def test_route_account_defaults_hard_to_tier1_and_light_to_tier2(self) -> None:
         account_dir(self.home, ".claude")
         opencode_dir(self.config_home, "opencode-zai2",

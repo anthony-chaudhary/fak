@@ -59,6 +59,7 @@ export FAK_HTTP_WRITE_TIMEOUT_S="${FAK_HTTP_WRITE_TIMEOUT_S:-0}"
 export FAK_KQ_INT8="${FAK_KQ_INT8:-1}"
 export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
 export HF_XET_HIGH_PERFORMANCE="${HF_XET_HIGH_PERFORMANCE:-1}"
+export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
 export HOME="${HOME:-/root}" GOCACHE="${GOCACHE:-/tmp/gocache}" GOPATH="${GOPATH:-/tmp/gopath}"
 
 # locate the fak checkout root from this script's location (tools/<this>).
@@ -70,6 +71,23 @@ PHASE="$GLM_DIR/PHASE"
 LOG="$GLM_DIR/fak_native_serve.log"
 mkdir -p "$GLM_DIR" "$GOCACHE" "$GOPATH"
 ph(){ echo "$(date -u +%H:%M:%S) $*" | tee -a "$LOG"; echo "$*" > "$PHASE"; }
+
+have_nccl_headers() {
+  [ -f "${NCCL_HOME:-}/include/nccl.h" ] ||
+  [ -f "${NCCL_HOME:-}/usr/include/nccl.h" ] ||
+  [ -f "${CUDA_HOME}/include/nccl.h" ] ||
+  [ -f "${CUDA_HOME}/targets/x86_64-linux/include/nccl.h" ] ||
+  [ -f /usr/include/nccl.h ]
+}
+
+have_nccl_lib() {
+  [ -e "${NCCL_HOME:-}/lib/libnccl.so" ] ||
+  [ -e "${NCCL_HOME:-}/lib64/libnccl.so" ] ||
+  [ -e "${NCCL_HOME:-}/usr/lib/x86_64-linux-gnu/libnccl.so" ] ||
+  [ -e "${CUDA_HOME}/lib64/libnccl.so" ] ||
+  [ -e "${CUDA_HOME}/targets/x86_64-linux/lib/libnccl.so" ] ||
+  [ -e /usr/lib/x86_64-linux-gnu/libnccl.so ]
+}
 
 case "$EP_RANKS" in
   ''|*[!0-9]*) ph "BAD_EP_RANKS $EP_RANKS"; exit 12 ;;
@@ -87,6 +105,10 @@ if [ "$EP_RANKS" -gt 1 ]; then
   fi
 else
   export FAK_EP_REQUIRE_DEVICE_PG="${FAK_EP_REQUIRE_DEVICE_PG:-0}"
+fi
+if [ "${FAK_CUDA_NCCL:-0}" = "1" ] && { ! have_nccl_headers || ! have_nccl_lib; }; then
+  ph "NCCL_DEV_MISSING headers=$(have_nccl_headers && echo yes || echo no) lib=$(have_nccl_lib && echo yes || echo no) (install libnccl-dev/libnccl2 or set NCCL_HOME)"
+  exit 13
 fi
 
 export PATH="/usr/local/go/bin:${CUDA_HOME}/bin:$PATH"
@@ -121,6 +143,7 @@ fi
 
 # 2. Download the GGUF shards (resumable; the HF CLI skips already-complete files).
 if [ -z "$PRESTAGED_SHARD1" ]; then
+ph "HF_DOWNLOAD_BACKEND disable_xet=${HF_HUB_DISABLE_XET:-}"
 ph "DOWNLOAD_START repo=$REPO subdir=$SUBDIR dir=$GLM_DIR"
 if command -v hf >/dev/null 2>&1; then
   hf download "$REPO" --include "$SUBDIR/*" --local-dir "$GLM_DIR" >>"$LOG" 2>&1; DL_RC=$?
