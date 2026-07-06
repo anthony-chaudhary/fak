@@ -275,6 +275,7 @@ hygiene:
 	@go test ./internal/pythongate -run TestNoNewPythonTools
 	@go test ./internal/windowgate -run TestTrackedTreeHasNoPopups
 	@go test ./internal/benchlineagegate -run TestEveryBenchEmitterStampsLineage
+	@go test ./internal/godfileceiling -run TestLiveTreeUnderCeiling
 	@echo "hygiene OK"
 
 # demo-audit: full local demo health gate. Static checks are network-free; dynamic checks
