@@ -60,6 +60,14 @@ const (
 	// turns (for example malformed JSON/args). These are NOT session-stop policy input; the hook
 	// uses them only to continue the turn so the model can repair the call shape.
 	guardStopHookToolFeedbackMetricName = "fak_guard_tool_feedback_consecutive"
+	// guardStopHookFakVerbCallsMetricName is the cumulative admitted MCP fak-verb call counter.
+	// At a clean stop, 0 means fak was present but never used as a substrate (#3093).
+	guardStopHookFakVerbCallsMetricName = "fak_mcp_verb_calls_total"
+
+	// guardStopHookUnusedEnvMode gates the unused-substrate advisory: off|shadow (default
+	// shadow). It is advisory-only — it NEVER blocks a stop (no enforce rung) — so it rides its
+	// own knob rather than the deny-all mode, whose enforce path holds the turn open.
+	guardStopHookUnusedEnvMode = "FAK_GUARD_UNUSED_SUBSTRATE_MODE"
 
 	// The graduated back-off ladder. Rather than a single cliff (continue N times, then a hard
 	// stop), the auto-continue guidance firms up with the consecutive deny-all depth, and the
@@ -285,6 +293,10 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) int {
 		return 0
 	}
 	if stage == guardStopHookAllow {
+		// Advisory-only (never blocks the stop): a clean completion that used ZERO fak verbs is
+		// the unused-substrate pathology — fak present as a passive guard but never engaged as a
+		// substrate (#3093). Emit before the handoff gate; the stop is still allowed regardless.
+		emitUnusedSubstrateAdvisory(stderr, signals)
 		return runGuardTaskHandoffGate(stderr, guardTaskHandoffConfig{
 			Mode: *handoffModeFlag,
 			File: *handoffFileFlag,
@@ -293,6 +305,31 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) int {
 		})
 	}
 	return 0
+}
+
+// emitUnusedSubstrateAdvisory prints a one-line advisory (never blocks the stop) when a
+// session reaches a clean completion having called ZERO fak verbs — the #3093 pathology
+// where fak is present but inert. It fires only when the gateway actually reported the
+// counter (FakVerbCallsSeen), so an older gateway that omits the metric stays silent, and
+// only in shadow mode (the default; `off` suppresses it). There is deliberately no enforce
+// rung: a run legitimately may not need fak, so this is visibility, not a gate.
+func emitUnusedSubstrateAdvisory(stderr io.Writer, signals guardStopHookSignals) {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv(guardStopHookUnusedEnvMode)))
+	if mode == "" {
+		mode = guardPreCompactModeShadow // default: advise
+	}
+	if mode == guardPreCompactModeOff {
+		return
+	}
+	if !signals.FakVerbCallsSeen || signals.FakVerbCalls > 0 {
+		return // metric absent, or fak was used — nothing to advise.
+	}
+	fmt.Fprintln(stderr,
+		"fak guard Stop: heads-up — this session is ending clean having called ZERO fak verbs "+
+			"(fak_mcp_verb_calls_total=0). fak was present as a guard but never used as a substrate: "+
+			"no fak_index_work / fak_admit / fak_adjudicate / fak_memory_run. If this run was meant to "+
+			"leverage fak, check the MCP server is wired to THIS workspace and reach for the fak verbs "+
+			"(fak_index_work to pull ranked open work; fak_admit before a write). Advisory only — the stop is allowed.")
 }
 
 func runGuardTaskHandoffGate(stderr io.Writer, cfg guardTaskHandoffConfig) int {
@@ -643,6 +680,12 @@ func mergeGuardStopHookIntoSettings(path, fakBin string) error {
 type guardStopHookSignals struct {
 	DenyAllConsecutive      int
 	ToolFeedbackConsecutive int
+	// FakVerbCalls is the cumulative admitted MCP fak-verb call count this process
+	// (fak_mcp_verb_calls_total). 0 at a clean stop means fak was present but never used as a
+	// substrate — the #3093 unused-substrate pathology. Absence is tolerated (older gateway):
+	// FakVerbCallsSeen distinguishes "counter reported 0" from "counter not on the scrape".
+	FakVerbCalls     int
+	FakVerbCallsSeen bool
 }
 
 func fetchGuardStopHookSignals(ctx context.Context, metricsURL string, timeout time.Duration) (guardStopHookSignals, error) {
@@ -701,6 +744,9 @@ func parseGuardStopHookSignals(metrics string) (guardStopHookSignals, error) {
 			foundDenyAll = true
 		case guardStopHookToolFeedbackMetricName:
 			out.ToolFeedbackConsecutive = int(value)
+		case guardStopHookFakVerbCallsMetricName:
+			out.FakVerbCalls = int(value)
+			out.FakVerbCallsSeen = true
 		}
 	}
 	if !foundDenyAll {
