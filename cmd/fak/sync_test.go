@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -61,6 +62,53 @@ func TestRunSyncCheckAheadNamesSafePush(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "fak sync push --remote origin --branch work") {
 		t.Fatalf("human output should name safe push path, got:\n%s", out.String())
+	}
+}
+
+func TestRunSyncCheckAheadSurfacesPushAuditResidual(t *testing.T) {
+	clone := syncCLIFixture(t)
+	syncGit(t, clone, "merge", "--ff-only", "origin/work")
+	syncWriteFile(t, filepath.Join(clone, "local.txt"), "local\n")
+	syncGit(t, clone, "add", "local.txt")
+	syncGit(t, clone, "commit", "-m", "test(experiments): add data artifacts (fak experiments)")
+
+	old := syncAheadAudit
+	syncAheadAudit = func(ctx context.Context, repo, targetRef string) (safesync.PushAudit, bool) {
+		if targetRef != "origin/work" {
+			t.Fatalf("targetRef = %q, want origin/work", targetRef)
+		}
+		return safesync.PushAudit{
+			OK:    false,
+			Range: targetRef + "..HEAD",
+			Residuals: []safesync.PushAuditResidual{{
+				SHA:       "abc12345",
+				Subject:   "test(experiments): add data artifacts (fak experiments)",
+				Verdict:   "CLAIM_UNWITNESSED",
+				ClaimKind: "test",
+				Witness:   "subject-only",
+				Reason:    "claims tests but the diff touches no test file",
+			}},
+		}, true
+	}
+	t.Cleanup(func() { syncAheadAudit = old })
+
+	var out, errb bytes.Buffer
+	code := runSync(&out, &errb, []string{"check", "--repo", clone, "--remote", "origin", "--branch", "work", "--json"})
+	if code != syncExitRefused {
+		t.Fatalf("exit = %d, want refused; stderr=%s stdout=%s", code, errb.String(), out.String())
+	}
+	var got safesync.Assessment
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("sync JSON did not decode: %v\n%s", err, out.String())
+	}
+	if got.PushAudit == nil || got.PushAudit.OK || len(got.PushAudit.Residuals) != 1 {
+		t.Fatalf("push audit = %+v, want one blocking residual", got.PushAudit)
+	}
+	if !strings.Contains(got.Reason, "pre-push audit would block") {
+		t.Fatalf("reason should name pre-push audit blocker, got %q", got.Reason)
+	}
+	if got.PushAudit.Residuals[0].Witness != "subject-only" {
+		t.Fatalf("residual = %+v, want subject-only witness", got.PushAudit.Residuals[0])
 	}
 }
 

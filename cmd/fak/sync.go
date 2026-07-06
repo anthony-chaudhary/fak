@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -20,6 +23,8 @@ const (
 )
 
 func cmdSync(argv []string) { os.Exit(runSync(os.Stdout, os.Stderr, argv)) }
+
+var syncAheadAudit = defaultSyncAheadAudit
 
 func runSync(stdout, stderr io.Writer, argv []string) int {
 	command := "check"
@@ -100,6 +105,9 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak sync: %v\n", err)
 		return syncExitInternal
 	}
+	if info.State == safesync.StateAhead {
+		info = annotateAheadPushAudit(context.Background(), info, pathutil.ExpandTilde(*repo), *remote)
+	}
 
 	if *asJSON {
 		if err := writeIndentedJSON(stdout, info); err != nil {
@@ -158,7 +166,22 @@ func renderSync(w io.Writer, command string, info safesync.Assessment) {
 	switch info.State {
 	case safesync.StateInSync:
 		fmt.Fprintln(w, "in sync: local branch already matches the remote; nothing to do")
-	case safesync.StateAhead, safesync.StateDiverged, safesync.StateNoRemoteRef:
+	case safesync.StateAhead:
+		fmt.Fprintf(w, "%s: %s\n", info.State, info.Reason)
+		if info.PushAudit != nil && !info.PushAudit.OK {
+			fmt.Fprintf(w, "  pre-push audit: BLOCKED (%d residual claim(s) in %s)\n", len(info.PushAudit.Residuals), info.PushAudit.Range)
+			for _, r := range info.PushAudit.Residuals {
+				subject := r.Subject
+				if subject == "" {
+					subject = "(subject unavailable)"
+				}
+				fmt.Fprintf(w, "    RESIDUAL  %s  %s  %s\n", short(r.SHA), r.Witness, subject)
+				if r.Reason != "" {
+					fmt.Fprintf(w, "              %s\n", r.Reason)
+				}
+			}
+		}
+	case safesync.StateDiverged, safesync.StateNoRemoteRef:
 		fmt.Fprintf(w, "%s: %s\n", info.State, info.Reason)
 	case safesync.StateBehind:
 		status := "REFUSED"
@@ -181,4 +204,101 @@ func renderSync(w io.Writer, command string, info safesync.Assessment) {
 	default:
 		fmt.Fprintf(w, "%s: %s\n", info.State, info.Reason)
 	}
+}
+
+func annotateAheadPushAudit(ctx context.Context, info safesync.Assessment, repo, remote string) safesync.Assessment {
+	audit, ok := syncAheadAudit(ctx, repo, info.TargetRef)
+	if !ok {
+		return info
+	}
+	info.PushAudit = &audit
+	if !audit.OK && len(audit.Residuals) > 0 {
+		branch := info.Branch
+		if branch == "" {
+			branch = "main"
+		}
+		if remote == "" {
+			remote = "origin"
+		}
+		info.Reason = fmt.Sprintf("local branch is ahead of remote, but the pre-push audit would block on %d residual claim(s); repair or get an operator decision before running `fak sync push --remote %s --branch %s`", len(audit.Residuals), remote, branch)
+	}
+	return info
+}
+
+type syncCommitAuditRow struct {
+	SHA       string `json:"sha"`
+	Verdict   string `json:"verdict"`
+	ClaimKind string `json:"claim_kind"`
+	Witness   string `json:"witness"`
+	Reason    string `json:"reason"`
+}
+
+func defaultSyncAheadAudit(ctx context.Context, repo, targetRef string) (safesync.PushAudit, bool) {
+	if strings.TrimSpace(repo) == "" {
+		repo = "."
+	}
+	if _, err := os.Stat(filepath.Join(repo, "dos.toml")); err != nil {
+		return safesync.PushAudit{}, false
+	}
+	if _, err := exec.LookPath("dos"); err != nil {
+		return safesync.PushAudit{}, false
+	}
+	rangeSpec := targetRef + "..HEAD"
+	cmd := exec.CommandContext(ctx, "dos", "commit-audit", "--json", rangeSpec)
+	cmd.Dir = repo
+	out, err := cmd.Output()
+	if err != nil {
+		if exit, ok := err.(*exec.ExitError); ok && len(out) == 0 {
+			out = exit.Stderr
+		}
+	}
+	rows, ok := parseSyncCommitAuditRows(out)
+	if !ok {
+		return safesync.PushAudit{}, false
+	}
+	audit := safesync.PushAudit{OK: true, Range: rangeSpec}
+	for _, row := range rows {
+		if row.Verdict != "CLAIM_UNWITNESSED" {
+			continue
+		}
+		audit.OK = false
+		audit.Residuals = append(audit.Residuals, safesync.PushAuditResidual{
+			SHA:       row.SHA,
+			Subject:   syncCommitSubject(ctx, repo, row.SHA),
+			Verdict:   row.Verdict,
+			ClaimKind: row.ClaimKind,
+			Witness:   row.Witness,
+			Reason:    row.Reason,
+		})
+	}
+	return audit, true
+}
+
+func parseSyncCommitAuditRows(raw []byte) ([]syncCommitAuditRow, bool) {
+	raw = []byte(strings.TrimSpace(string(raw)))
+	if len(raw) == 0 {
+		return nil, false
+	}
+	var rows []syncCommitAuditRow
+	if err := json.Unmarshal(raw, &rows); err == nil {
+		return rows, true
+	}
+	var one syncCommitAuditRow
+	if err := json.Unmarshal(raw, &one); err == nil {
+		return []syncCommitAuditRow{one}, true
+	}
+	return nil, false
+}
+
+func syncCommitSubject(ctx context.Context, repo, sha string) string {
+	if strings.TrimSpace(sha) == "" {
+		return ""
+	}
+	cmd := exec.CommandContext(ctx, "git", "log", "-1", "--format=%s", sha)
+	cmd.Dir = repo
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
