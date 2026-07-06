@@ -63,8 +63,9 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	// transient non-fast-forward race (a peer landed between fetch and push, but HEAD
 	// already contains origin) and stops with a clear next step when genuinely behind.
 	if command == "push" {
+		repoPath := pathutil.ExpandTilde(*repo)
 		res, err := safesync.SafePush(context.Background(), safesync.PushOptions{
-			Repo:       pathutil.ExpandTilde(*repo),
+			Repo:       repoPath,
 			Remote:     *remote,
 			Branch:     *branch,
 			MaxRetries: *retries,
@@ -73,6 +74,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak sync: %v\n", err)
 			return syncExitInternal
 		}
+		res = annotatePushWorktree(context.Background(), res, repoPath)
 		if *asJSON {
 			if err := writeIndentedJSON(stdout, res); err != nil {
 				fmt.Fprintf(stderr, "fak sync: %v\n", err)
@@ -159,9 +161,11 @@ func renderSyncPush(w io.Writer, res safesync.PushResult) {
 			attempts = fmt.Sprintf("%d attempts", res.Attempts)
 		}
 		fmt.Fprintf(w, "pushed %s -> %s/%s (%s)\n", res.Branch, res.Remote, res.Branch, attempts)
+		renderWorktree(w, res.Worktree)
 		return
 	}
 	fmt.Fprintf(w, "[REFUSED] not pushed (%s): %s\n", res.Reason, res.Detail)
+	renderWorktree(w, res.Worktree)
 }
 
 func renderSync(w io.Writer, command string, info safesync.Assessment) {
@@ -214,23 +218,44 @@ func renderSync(w io.Writer, command string, info safesync.Assessment) {
 }
 
 func renderSyncWorktree(w io.Writer, info safesync.Assessment) {
-	if info.Worktree == nil || !info.Worktree.Dirty {
+	renderWorktree(w, info.Worktree)
+}
+
+func renderWorktree(w io.Writer, wt *safesync.Worktree) {
+	if wt == nil || !wt.Dirty {
 		return
 	}
 	fmt.Fprintf(w, "worktree dirty: %d path(s) across %d lane(s), %d no-lane, %d junk\n",
-		info.Worktree.TotalDirty, info.Worktree.Lanes, info.Worktree.NoLane, info.Worktree.Junk)
-	if info.Worktree.NextAction != "" {
-		fmt.Fprintf(w, "  next: %s\n", info.Worktree.NextAction)
+		wt.TotalDirty, wt.Lanes, wt.NoLane, wt.Junk)
+	if wt.NextAction != "" {
+		fmt.Fprintf(w, "  next: %s\n", wt.NextAction)
 	}
 }
 
 func annotateSyncWorktree(ctx context.Context, info safesync.Assessment, repo string) safesync.Assessment {
-	wt, ok := syncWorktree(ctx, repo)
-	if !ok || wt.TotalDirty == 0 {
+	wt := lookupSyncWorktree(ctx, repo)
+	if wt == nil {
 		return info
 	}
-	info.Worktree = &wt
+	info.Worktree = wt
 	return info
+}
+
+func annotatePushWorktree(ctx context.Context, res safesync.PushResult, repo string) safesync.PushResult {
+	wt := lookupSyncWorktree(ctx, repo)
+	if wt == nil {
+		return res
+	}
+	res.Worktree = wt
+	return res
+}
+
+func lookupSyncWorktree(ctx context.Context, repo string) *safesync.Worktree {
+	wt, ok := syncWorktree(ctx, repo)
+	if !ok || wt.TotalDirty == 0 {
+		return nil
+	}
+	return &wt
 }
 
 func defaultSyncWorktree(ctx context.Context, repo string) (safesync.Worktree, bool) {

@@ -74,13 +74,14 @@ const (
 
 // PushResult is the structured outcome of SafePush.
 type PushResult struct {
-	Pushed     bool   `json:"pushed"`
-	Attempts   int    `json:"attempts"`
-	Branch     string `json:"branch,omitempty"`
-	Remote     string `json:"remote,omitempty"`
-	Reason     string `json:"reason,omitempty"`     // "" | one of the PushReason* constants
-	Divergence string `json:"divergence,omitempty"` // last classified divergence on a non-ff
-	Detail     string `json:"detail,omitempty"`
+	Pushed     bool      `json:"pushed"`
+	Attempts   int       `json:"attempts"`
+	Branch     string    `json:"branch,omitempty"`
+	Remote     string    `json:"remote,omitempty"`
+	Reason     string    `json:"reason,omitempty"`     // "" | one of the PushReason* constants
+	Divergence string    `json:"divergence,omitempty"` // last classified divergence on a non-ff
+	Detail     string    `json:"detail,omitempty"`
+	Worktree   *Worktree `json:"worktree,omitempty"`
 }
 
 // SafePush pushes repo's branch (or SourceRef:TargetRef when SourceRef is set) to remote,
