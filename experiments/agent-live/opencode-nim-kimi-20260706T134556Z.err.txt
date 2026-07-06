@@ -1,0 +1,33 @@
+timestamp=2026-07-06T13:45:56.578Z level=INFO run=40183050 message="creating instance" directory="C:\\work\\fak"
+timestamp=2026-07-06T13:45:56.579Z level=INFO run=40183050 message=fromDirectory directory="C:\\work\\fak"
+timestamp=2026-07-06T13:45:56.687Z level=INFO run=40183050 message=bootstrapping directory="C:\\work\\fak"
+timestamp=2026-07-06T13:45:56.691Z level=INFO run=40183050 message=loading path="C:\\work\\fak\\.dispatch-runs\\opencode-kimi-pin-20260706T134556Z\\opencode\\config.json"
+timestamp=2026-07-06T13:45:56.692Z level=INFO run=40183050 message=loading path="C:\\work\\fak\\.dispatch-runs\\opencode-kimi-pin-20260706T134556Z\\opencode\\opencode.json"
+timestamp=2026-07-06T13:45:56.703Z level=INFO run=40183050 message=loading path="C:\\work\\fak\\.dispatch-runs\\opencode-kimi-pin-20260706T134556Z\\opencode\\opencode.jsonc"
+timestamp=2026-07-06T13:45:56.704Z level=INFO run=40183050 message=loading path="C:\\work\\fak\\opencode.json"
+timestamp=2026-07-06T13:45:56.745Z level=INFO run=40183050 message="all LSPs are disabled"
+timestamp=2026-07-06T13:45:56.746Z level=INFO run=40183050 message="all formatters are disabled"
+timestamp=2026-07-06T13:45:56.746Z level=INFO run=40183050 message=init
+timestamp=2026-07-06T13:45:56.949Z level=INFO run=40183050 message=created id=ses_0c852522affeI4zXvX9uOL9tSu slug=kind-eagle version=1.17.9 projectID=5b54367f100f6bc1fbf30c5508aaf944ce629a0d directory="C:\\work\\fak" path="" workspaceID=undefined parentID=undefined title="New session - 2026-07-06T13:45:56.949Z" agent=undefined model=undefined metadata=undefined permission="[{\"permission\":\"question\",\"pattern\":\"*\",\"action\":\"deny\"},{\"permission\":\"plan_enter\",\"pattern\":\"*\",\"action\":\"deny\"},{\"permission\":\"plan_exit\",\"pattern\":\"*\",\"action\":\"deny\"}]" cost=0 tokens.input=0 tokens.output=0 tokens.reasoning=0 tokens.cache.read=0 tokens.cache.write=0 time.created=1783345556949 time.updated=1783345556949
+timestamp=2026-07-06T13:45:56.959Z level=INFO run=40183050 message="event connected"
+timestamp=2026-07-06T13:45:57.003Z level=INFO run=40183050 message="booting location services" directory="C:\\work\\fak" workspaceID=undefined
+timestamp=2026-07-06T13:45:57.175Z level=INFO run=40183050 message="watcher backend" directory="C:\\work\\fak" platform=win32 backend=windows
+timestamp=2026-07-06T13:45:57.586Z level=INFO run=40183050 message="project copy refresh started" projectID=5b54367f100f6bc1fbf30c5508aaf944ce629a0d
+timestamp=2026-07-06T13:45:57.661Z level=INFO run=40183050 message=loop session.id=ses_0c852522affeI4zXvX9uOL9tSu step=0
+
+> build · kimi-k2.6
+
+timestamp=2026-07-06T13:45:57.677Z level=INFO run=40183050 message=stream providerID=moonshotai modelID=kimi-k2.6 session.id=ses_0c852522affeI4zXvX9uOL9tSu small=true agent=title mode=primary
+timestamp=2026-07-06T13:45:57.689Z level=INFO run=40183050 message="llm runtime selected" llm.runtime=ai-sdk llm.provider=moonshotai llm.model=kimi-k2.6
+timestamp=2026-07-06T13:45:57.743Z level=INFO run=40183050 message="project copy refresh done" projectID=5b54367f100f6bc1fbf30c5508aaf944ce629a0d updated=[] removed=[]
+timestamp=2026-07-06T13:45:58.024Z level=INFO run=40183050 message=tracking hash=c82c36719a6bca2115c745a75e59754a6b753dc1 cwd="C:\\work\\fak" git="C:\\Users\\USER\\.local\\share\\opencode\\snapshot\\5b54367f100f6bc1fbf30c5508aaf944ce629a0d\\e4cee0cad587169c62cc5d5c07dd08e87e20963c"
+timestamp=2026-07-06T13:45:58.035Z level=INFO run=40183050 message="shell tool using shell" shell="C:\\Program Files\\WindowsApps\\Microsoft.PowerShell_7.6.3.0_x64__8wekyb3d8bbwe\\pwsh.EXE"
+timestamp=2026-07-06T13:45:58.523Z level=INFO run=40183050 message=init count=46
+timestamp=2026-07-06T13:45:58.539Z level=INFO run=40183050 message=process session.id=ses_0c852522affeI4zXvX9uOL9tSu messageID=msg_f37adb09f001Y5MPh3zkeuI6D8
+timestamp=2026-07-06T13:45:58.540Z level=INFO run=40183050 message=stream providerID=moonshotai modelID=kimi-k2.6 session.id=ses_0c852522affeI4zXvX9uOL9tSu small=false agent=build mode=primary
+timestamp=2026-07-06T13:45:58.541Z level=INFO run=40183050 message="llm runtime selected" llm.runtime=ai-sdk llm.provider=moonshotai llm.model=kimi-k2.6
+timestamp=2026-07-06T13:46:01.350Z level=INFO run=40183050 message=tracking hash=c82c36719a6bca2115c745a75e59754a6b753dc1 cwd="C:\\work\\fak" git="C:\\Users\\USER\\.local\\share\\opencode\\snapshot\\5b54367f100f6bc1fbf30c5508aaf944ce629a0d\\e4cee0cad587169c62cc5d5c07dd08e87e20963c"
+timestamp=2026-07-06T13:46:01.603Z level=INFO run=40183050 message=loop session.id=ses_0c852522affeI4zXvX9uOL9tSu step=1
+timestamp=2026-07-06T13:46:01.604Z level=INFO run=40183050 message="exiting loop" session.id=ses_0c852522affeI4zXvX9uOL9tSu
+timestamp=2026-07-06T13:46:01.619Z level=INFO run=40183050 message="disposing instance" directory="C:\\work\\fak"
+timestamp=2026-07-06T13:46:01.846Z level=INFO run=40183050 message=loading path="C:\\work\\fak\\opencode.json"

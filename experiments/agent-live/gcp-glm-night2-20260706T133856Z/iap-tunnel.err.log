@@ -1,0 +1,2066 @@
+WARNING: 
+
+To increase the performance of the tunnel, consider installing NumPy. For instructions,
+please see https://cloud.google.com/iap/docs/using-tcp-forwarding#increasing_the_tcp_upload_bandwidth
+
+Testing if tunnel connection works.
+ERROR: [8] Error during local connection to [('127.0.0.1', 60561)]: [WinError 10054] An existing connection was forcibly closed by the remote host
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 814, in RunReceiveLocalData
+    data = conn.recv(utils.SUBPROTOCOL_MAX_DATA_FRAME_SIZE)
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+ERROR: [12] Error during local connection to [('127.0.0.1', 61910)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [13] Error during local connection to [('127.0.0.1', 61992)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [14] Error during local connection to [('127.0.0.1', 61996)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [15] Error during local connection to [('127.0.0.1', 51942)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [16] Error during local connection to [('127.0.0.1', 51947)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [17] Error during local connection to [('127.0.0.1', 51969)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [18] Error during local connection to [('127.0.0.1', 51973)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [19] Error during local connection to [('127.0.0.1', 55156)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [20] Error during local connection to [('127.0.0.1', 55164)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [21] Error during local connection to [('127.0.0.1', 55208)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [22] Error during local connection to [('127.0.0.1', 55214)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [23] Error during local connection to [('127.0.0.1', 49320)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [24] Error during local connection to [('127.0.0.1', 49323)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [25] Error during local connection to [('127.0.0.1', 49369)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [26] Error during local connection to [('127.0.0.1', 49372)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [27] Error during local connection to [('127.0.0.1', 55575)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [28] Error during local connection to [('127.0.0.1', 55582)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [29] Error during local connection to [('127.0.0.1', 55626)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [30] Error during local connection to [('127.0.0.1', 55628)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [31] Error during local connection to [('127.0.0.1', 55667)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [32] Error during local connection to [('127.0.0.1', 55680)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [33] Error during local connection to [('127.0.0.1', 55740)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [34] Error during local connection to [('127.0.0.1', 55746)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [35] Error during local connection to [('127.0.0.1', 56490)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [36] Error during local connection to [('127.0.0.1', 56497)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [37] Error during local connection to [('127.0.0.1', 56548)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [38] Error during local connection to [('127.0.0.1', 56550)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [39] Error during local connection to [('127.0.0.1', 56598)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [40] Error during local connection to [('127.0.0.1', 56600)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [41] Error during local connection to [('127.0.0.1', 56627)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [42] Error during local connection to [('127.0.0.1', 56629)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [43] Error during local connection to [('127.0.0.1', 56712)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [44] Error during local connection to [('127.0.0.1', 56716)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [45] Error during local connection to [('127.0.0.1', 58005)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [46] Error during local connection to [('127.0.0.1', 58007)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [47] Error during local connection to [('127.0.0.1', 58064)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [48] Error during local connection to [('127.0.0.1', 58069)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [49] Error during local connection to [('127.0.0.1', 58117)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [50] Error during local connection to [('127.0.0.1', 58120)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [51] Error during local connection to [('127.0.0.1', 50482)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [52] Error during local connection to [('127.0.0.1', 50487)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [53] Error during local connection to [('127.0.0.1', 50519)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [54] Error during local connection to [('127.0.0.1', 50523)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [55] Error during local connection to [('127.0.0.1', 59091)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [56] Error during local connection to [('127.0.0.1', 59095)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [57] Error during local connection to [('127.0.0.1', 62683)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [58] Error during local connection to [('127.0.0.1', 62685)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [59] Error during local connection to [('127.0.0.1', 52157)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [60] Error during local connection to [('127.0.0.1', 52159)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [61] Error during local connection to [('127.0.0.1', 52201)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [62] Error during local connection to [('127.0.0.1', 52204)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [63] Error during local connection to [('127.0.0.1', 52270)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [64] Error during local connection to [('127.0.0.1', 52274)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [65] Error during local connection to [('127.0.0.1', 64225)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [66] Error during local connection to [('127.0.0.1', 64229)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [67] Error during local connection to [('127.0.0.1', 51901)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [68] Error during local connection to [('127.0.0.1', 51903)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [69] Error during local connection to [('127.0.0.1', 55443)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [70] Error during local connection to [('127.0.0.1', 55446)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [71] Error during local connection to [('127.0.0.1', 55463)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [72] Error during local connection to [('127.0.0.1', 55567)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [73] Error during local connection to [('127.0.0.1', 55604)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [74] Error during local connection to [('127.0.0.1', 55606)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [75] Error during local connection to [('127.0.0.1', 55638)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [76] Error during local connection to [('127.0.0.1', 55640)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [77] Error during local connection to [('127.0.0.1', 55672)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [78] Error during local connection to [('127.0.0.1', 55674)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [79] Error during local connection to [('127.0.0.1', 55711)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [80] Error during local connection to [('127.0.0.1', 55713)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [81] Error during local connection to [('127.0.0.1', 50771)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [82] Error during local connection to [('127.0.0.1', 50773)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [83] Error during local connection to [('127.0.0.1', 50830)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [84] Error during local connection to [('127.0.0.1', 50834)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [85] Error during local connection to [('127.0.0.1', 55737)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [86] Error during local connection to [('127.0.0.1', 55739)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [87] Error during local connection to [('127.0.0.1', 55791)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [88] Error during local connection to [('127.0.0.1', 55793)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [89] Error during local connection to [('127.0.0.1', 55865)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [90] Error during local connection to [('127.0.0.1', 55873)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [91] Error during local connection to [('127.0.0.1', 55952)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [92] Error during local connection to [('127.0.0.1', 55957)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [93] Error during local connection to [('127.0.0.1', 56075)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [94] Error during local connection to [('127.0.0.1', 56078)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [95] Error during local connection to [('127.0.0.1', 56144)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [96] Error during local connection to [('127.0.0.1', 56150)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [97] Error during local connection to [('127.0.0.1', 55595)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [98] Error during local connection to [('127.0.0.1', 55601)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [99] Error during local connection to [('127.0.0.1', 55702)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [100] Error during local connection to [('127.0.0.1', 58438)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [101] Error during local connection to [('127.0.0.1', 60689)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [102] Error during local connection to [('127.0.0.1', 60698)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [103] Error during local connection to [('127.0.0.1', 60750)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [104] Error during local connection to [('127.0.0.1', 60753)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [105] Error during local connection to [('127.0.0.1', 56233)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [106] Error during local connection to [('127.0.0.1', 56242)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [107] Error during local connection to [('127.0.0.1', 56299)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [108] Error during local connection to [('127.0.0.1', 56302)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [109] Error during local connection to [('127.0.0.1', 56350)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [110] Error during local connection to [('127.0.0.1', 56353)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [111] Error during local connection to [('127.0.0.1', 57113)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [112] Error during local connection to [('127.0.0.1', 57128)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [113] Error during local connection to [('127.0.0.1', 57204)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [114] Error during local connection to [('127.0.0.1', 57209)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [115] Error during local connection to [('127.0.0.1', 57242)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [116] Error during local connection to [('127.0.0.1', 57244)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [117] Error during local connection to [('127.0.0.1', 57293)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [118] Error during local connection to [('127.0.0.1', 57297)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [119] Error during local connection to [('127.0.0.1', 57337)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [120] Error during local connection to [('127.0.0.1', 57339)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [121] Error during local connection to [('127.0.0.1', 57389)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [122] Error during local connection to [('127.0.0.1', 57391)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [123] Error during local connection to [('127.0.0.1', 57475)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [124] Error during local connection to [('127.0.0.1', 57477)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [125] Error during local connection to [('127.0.0.1', 57534)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [126] Error during local connection to [('127.0.0.1', 57539)]: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4003: 'failed to connect to backend']. (Failed to connect to port 8000)
+ERROR: [127] Error during local connection to [('127.0.0.1', 58132)]: [WinError 10054] An existing connection was forcibly closed by the remote host
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 814, in RunReceiveLocalData
+    data = conn.recv(utils.SUBPROTOCOL_MAX_DATA_FRAME_SIZE)
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+ERROR: [131] Error during local connection to [('127.0.0.1', 54602)]: [WinError 10054] An existing connection was forcibly closed by the remote host
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 814, in RunReceiveLocalData
+    data = conn.recv(utils.SUBPROTOCOL_MAX_DATA_FRAME_SIZE)
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+ERROR: [130] Error during local connection to [('127.0.0.1', 54593)]: [WinError 10054] An existing connection was forcibly closed by the remote host
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 814, in RunReceiveLocalData
+    data = conn.recv(utils.SUBPROTOCOL_MAX_DATA_FRAME_SIZE)
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+ERROR: [132] Error during local connection to [('127.0.0.1', 55574)]: Error while connecting [4047: 'Failed to lookup instance'].
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4047: 'Failed to lookup instance'].
+ERROR: [133] Error during local connection to [('127.0.0.1', 49795)]: Error while connecting [4047: 'Failed to lookup instance'].
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4047: 'Failed to lookup instance'].
+ERROR: [134] Error during local connection to [('127.0.0.1', 57705)]: Error while connecting [4047: 'Failed to lookup instance'].
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4047: 'Failed to lookup instance'].
+ERROR: [135] Error during local connection to [('127.0.0.1', 53623)]: Error while connecting [4047: 'Failed to lookup instance'].
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4047: 'Failed to lookup instance'].
+ERROR: [136] Error during local connection to [('127.0.0.1', 60925)]: Error while connecting [4047: 'Failed to lookup instance'].
+Traceback (most recent call last):
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 805, in RunReceiveLocalData
+    websocket_conn = self._InitiateConnection(
+        conn,
+    ...<4 lines>...
+        conn_id=conn_id,
+    )
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\compute\iap_tunnel.py", line 771, in _InitiateConnection
+    new_websocket.InitiateConnection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 149, in InitiateConnection
+    self._WaitForOpenOrRaiseError()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\api_lib\compute\iap_tunnel_websocket.py", line 441, in _WaitForOpenOrRaiseError
+    raise ConnectionCreationError(error_msg)
+googlecloudsdk.api_lib.compute.iap_tunnel_websocket.ConnectionCreationError: Error while connecting [4047: 'Failed to lookup instance'].

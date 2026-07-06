@@ -1,0 +1,14 @@
+[dogfood] building fak -> C:\work\fak\tools\.bin\fak.exe
+[dogfood] using OpenAI-compatible backend http://127.0.0.1:8200/v1 (model: glm-5.2)
+[dogfood] starting kernel: fak serve --addr 127.0.0.1:8080 --provider openai --model glm-5.2 --base-url http://127.0.0.1:8200/v1 --policy C:\work\fak\examples\dogfood-claude-policy.json
+[dogfood] kernel healthy: {"engine":"inkernel","model":"glm-5.2","ok":true,"planner":"proxy"}
+
+[dogfood] Claude Code wired:
+[dogfood]   ANTHROPIC_BASE_URL = http://127.0.0.1:8080   (native /v1/messages on the kernel)
+[dogfood]   CLAUDE_CONFIG_DIR  = C:\Users\USER\.claude-faklocal    (account: faklocal)
+[dogfood]   model (all tiers)  = glm-5.2
+[dogfood] one live turn through Claude Code (headless): "say pong"
+[dogfood] transcript -> experiments\agent-live\gcp-glm-night2-20260706T133856Z\dogfood-claude-glm52-sglang-win.json
+[dogfood] result: pong
+[dogfood] subtype=success  is_error=False  turns=1  model=glm-5.2
+[dogfood] live turn ok - Claude Code completed a turn against the local kernel-fronted model

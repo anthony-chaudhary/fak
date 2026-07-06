@@ -1,0 +1,10 @@
+[dogfood] building fak -> C:\work\fak\tools\.bin\fak.exe
+[dogfood] using OpenAI-compatible backend http://127.0.0.1:8200/v1 (model: glm-5.2)
+[dogfood] starting kernel: fak serve --addr 127.0.0.1:8080 --provider openai --model glm-5.2 --base-url http://127.0.0.1:8200/v1
+[dogfood] kernel healthy: {"engine":"inkernel","model":"glm-5.2","ok":true,"planner":"proxy"}
+
+[dogfood] Claude Code wired:
+[dogfood]   ANTHROPIC_BASE_URL = http://127.0.0.1:8080   (native /v1/messages on the kernel)
+[dogfood]   CLAUDE_CONFIG_DIR  = C:\Users\USER\.claude-faklocal    (account: faklocal)
+[dogfood]   model (all tiers)  = glm-5.2
+[dogfood] one live turn through Claude Code (headless): "say pong"

@@ -1,0 +1,4 @@
+model=moonshotai/kimi-k2.6
+version=0.37.0
+head=95508ae5
+used=claude-code-terminal

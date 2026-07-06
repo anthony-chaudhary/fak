@@ -1,0 +1,226 @@
+===rank0===
+fak: in-kernel chat decode → device backend "cuda"
+{"schema":"fak.watchdog-autoheal.v1","verb":"serve","summary":true,"elapsed_ms":5,"specs":4,"noop":4}
+fak: expert-parallel rank 0/8 loads experts [0,32) of 256 resident (sharded serve, #971)
+fak: GGUF device load -> resident Q4_K on backend "cuda" (raw super-blocks, dequant-fused GEMM, ~0.56 B/param vs Q8 ~1 B/param)
+fak: loading model 0% (1/1809 tensors, 0.7 GB, 2s elapsed, 0.38 GB/s)
+fak: loading model 5% (92/1809 tensors, 10.0 GB, 13s elapsed, 0.76 GB/s)
+fak: loading model 10% (183/1809 tensors, 31.1 GB, 25s elapsed, 1.24 GB/s)
+fak: loading model 15% (274/1809 tensors, 50.5 GB, 33s elapsed, 1.55 GB/s)
+fak: loading model 20% (365/1809 tensors, 71.6 GB, 42s elapsed, 1.72 GB/s)
+fak: loading model 25% (456/1809 tensors, 92.8 GB, 54s elapsed, 1.72 GB/s)
+fak: loading model 30% (547/1809 tensors, 113.8 GB, 1m7s elapsed, 1.70 GB/s)
+fak: loading model 35% (638/1809 tensors, 135.0 GB, 1m18s elapsed, 1.72 GB/s)
+fak: loading model 40% (729/1809 tensors, 156.1 GB, 1m30s elapsed, 1.74 GB/s)
+fak: loading model 45% (820/1809 tensors, 177.1 GB, 1m43s elapsed, 1.73 GB/s)
+fak: loading model 50% (911/1809 tensors, 198.2 GB, 1m53s elapsed, 1.76 GB/s)
+fak: loading model 55% (1002/1809 tensors, 219.3 GB, 2m1s elapsed, 1.81 GB/s)
+fak: loading model 60% (1093/1809 tensors, 240.4 GB, 2m13s elapsed, 1.81 GB/s)
+fak: loading model 65% (1184/1809 tensors, 261.5 GB, 2m27s elapsed, 1.78 GB/s)
+fak: loading model 70% (1275/1809 tensors, 282.6 GB, 2m36s elapsed, 1.82 GB/s)
+fak: loading model 76% (1366/1809 tensors, 303.8 GB, 2m46s elapsed, 1.82 GB/s)
+fak: loading model 81% (1457/1809 tensors, 324.9 GB, 2m56s elapsed, 1.85 GB/s)
+fak: loading model 86% (1548/1809 tensors, 346.0 GB, 3m3s elapsed, 1.89 GB/s)
+fak: loading model 91% (1639/1809 tensors, 367.1 GB, 3m14s elapsed, 1.89 GB/s)
+fak: loading model 96% (1730/1809 tensors, 389.0 GB, 3m22s elapsed, 1.93 GB/s)
+fak: loading model 100% (1809/1809 tensors, 406.4 GB, 3m29s elapsed, 1.94 GB/s)
+fak: load-path breakdown (resident = raw bytes, no dequant; dequant = f32 round-trip):
+fak:   Q4_K  expert  resident=7200 (47.5 GB)  dequant=0 (0.0 GB)
+fak:   Q6_K  expert  resident=96 (0.9 GB)  dequant=0 (0.0 GB)
+fak:   F32   dense   resident=0 (0.0 GB)  dequant=706 (0.5 GB)
+fak:   Q6_K  dense   resident=0 (0.0 GB)  dequant=1 (0.7 GB)
+fak:   Q8_0  dense   resident=0 (0.0 GB)  dequant=712 (16.9 GB)
+fak: resident: Q4_K=7200 tensors/48600.00MiB  rawExpertQuant=96/945.00MiB  Q8=946/19737.21MiB  f32=552/3634.64MiB  total=72916.86MiB  decode=67.65GiB/tok
+fak: expert-parallel rank 0/8 joined the process group (device-NCCL tensor reduce, #971 follow-on)
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+2026/07/06 13:05:56 gateway: expert-parallel ranks=8 rank-local (sharded serve) — reducing through the serve's DistComm process group, device-collective wiring skipped
+2026/07/06 13:05:56 WARNING: binding 0.0.0.0:8000 with NO --require-key set — the kernel gateway is exposed without authentication
+2026/07/06 13:05:56 fak gateway listening on http://[::]:8000  (engine=inkernel model=glm-5.2 vdso=true auth=false)
+2026/07/06 13:05:56 fak cache: idle — realized KV-prefix reuse appears here per in-kernel turn (scrape /metrics fak_gateway_kv_prefix_* for the full family)
+2026/07/06 13:06:07 {"bytes":71,"duration_ms":0.057,"event":"gateway_http_request","method":"GET","path":"/healthz","route":"/healthz","status":200,"trace_id":"default","user_agent":"curl/7.81.0"}
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+2026/07/06 13:07:43 inkernel_chat model=glm-5.2 q4k=true prompt=29tok reused=0tok prefill=29tok/95.43s/0.3tok/s decode=1tok/0.00s/10109.9tok/s
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+2026/07/06 13:07:43 {"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cached_prompt_tokens":0,"compaction_fired":false,"completion_tokens":1,"context_event":false,"duration_ms":95834.14,"event":"gateway_inference_turn","finish_reason":"length","model":"glm-5.2","prompt_tokens":29,"stream":false,"total_tokens":30,"trace_id":"default","wire":"openai_chat_completions"}
+2026/07/06 13:07:43 {"bytes":272,"duration_ms":95930.956,"event":"gateway_http_request","method":"POST","path":"/v1/chat/completions","route":"/v1/chat/completions","status":200,"trace_id":"default","user_agent":"curl/7.81.0"}
+2026/07/06 13:37:29 {"bytes":1117,"duration_ms":0.134,"event":"gateway_http_request","method":"GET","path":"/v1/models","route":"/v1/models","status":200,"trace_id":"default","user_agent":"curl/7.81.0"}
+2026/07/06 13:38:58 {"bytes":1117,"duration_ms":0.151,"event":"gateway_http_request","method":"GET","path":"/v1/models","route":"/v1/models","status":200,"trace_id":"default","user_agent":"Mozilla/5.0 (Windows NT 10.0; Microsoft Windows 10.0.26200; en-US) PowerShell/7.6.3"}
+2026/07/06 13:39:00 {"bytes":1117,"duration_ms":0.097,"event":"gateway_http_request","method":"GET","path":"/v1/models","route":"/v1/models","status":200,"trace_id":"default","user_agent":"Mozilla/5.0 (Windows NT 10.0; Microsoft Windows 10.0.26200; en-US) PowerShell/7.6.3"}
+2026/07/06 13:39:18 {"bytes":1117,"duration_ms":0.123,"event":"gateway_http_request","method":"GET","path":"/v1/models","route":"/v1/models","status":200,"trace_id":"default","user_agent":"Mozilla/5.0 (Windows NT 10.0; Microsoft Windows 10.0.26200; en-US) PowerShell/7.6.3"}
+2026/07/06 13:40:14 {"bytes":71,"duration_ms":0.075,"event":"gateway_http_request","method":"GET","path":"/healthz","route":"/healthz","status":200,"trace_id":"default","user_agent":"Mozilla/5.0 (Windows NT; Windows NT 10.0; en-US) WindowsPowerShell/5.1.26100.8737"}
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+2026/07/06 13:45:17 gateway: upstream model error: context canceled
+2026/07/06 13:45:17 {"bytes":92,"duration_ms":299432.826,"event":"gateway_http_request","method":"POST","path":"/v1/chat/completions","route":"/v1/chat/completions","status":502,"trace_id":"default","user_agent":"Go-http-client/1.1"}
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+2026/07/06 13:55:17 gateway: upstream model error: context canceled
+2026/07/06 13:55:17 gateway: EP fanout follower http://127.0.0.1:8005/v1/chat/completions failed: Post "http://127.0.0.1:8005/v1/chat/completions": context canceled
+2026/07/06 13:55:17 gateway: EP fanout follower http://127.0.0.1:8002/v1/chat/completions failed: Post "http://127.0.0.1:8002/v1/chat/completions": context canceled
+2026/07/06 13:55:17 gateway: EP fanout follower http://127.0.0.1:8006/v1/chat/completions failed: Post "http://127.0.0.1:8006/v1/chat/completions": context canceled
+2026/07/06 13:55:17 gateway: EP fanout follower http://127.0.0.1:8001/v1/chat/completions failed: Post "http://127.0.0.1:8001/v1/chat/completions": context canceled
+2026/07/06 13:55:17 gateway: EP fanout follower http://127.0.0.1:8004/v1/chat/completions failed: Post "http://127.0.0.1:8004/v1/chat/completions": context canceled
+2026/07/06 13:55:17 gateway: EP fanout follower http://127.0.0.1:8003/v1/chat/completions failed: Post "http://127.0.0.1:8003/v1/chat/completions": context canceled
+2026/07/06 13:55:17 gateway: EP fanout follower http://127.0.0.1:8007/v1/chat/completions failed: Post "http://127.0.0.1:8007/v1/chat/completions": context canceled
+2026/07/06 13:55:17 {"bytes":92,"duration_ms":299368.371,"event":"gateway_http_request","method":"POST","path":"/v1/chat/completions","route":"/v1/chat/completions","status":502,"trace_id":"default","user_agent":"Go-http-client/1.1"}
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+2026/07/06 14:00:17 gateway: upstream model error: context canceled
+2026/07/06 14:00:17 gateway: EP fanout follower http://127.0.0.1:8006/v1/chat/completions failed: Post "http://127.0.0.1:8006/v1/chat/completions": context canceled
+2026/07/06 14:00:17 gateway: EP fanout follower http://127.0.0.1:8001/v1/chat/completions failed: Post "http://127.0.0.1:8001/v1/chat/completions": context canceled
+2026/07/06 14:00:17 gateway: EP fanout follower http://127.0.0.1:8002/v1/chat/completions failed: Post "http://127.0.0.1:8002/v1/chat/completions": context canceled
+2026/07/06 14:00:17 gateway: EP fanout follower http://127.0.0.1:8004/v1/chat/completions failed: Post "http://127.0.0.1:8004/v1/chat/completions": context canceled
+2026/07/06 14:00:17 gateway: EP fanout follower http://127.0.0.1:8007/v1/chat/completions failed: Post "http://127.0.0.1:8007/v1/chat/completions": context canceled
+2026/07/06 14:00:17 gateway: EP fanout follower http://127.0.0.1:8005/v1/chat/completions failed: Post "http://127.0.0.1:8005/v1/chat/completions": context canceled
+2026/07/06 14:00:17 gateway: EP fanout follower http://127.0.0.1:8003/v1/chat/completions failed: Post "http://127.0.0.1:8003/v1/chat/completions": context canceled
+2026/07/06 14:00:17 {"bytes":92,"duration_ms":899420.87,"event":"gateway_http_request","method":"POST","path":"/v1/chat/completions","route":"/v1/chat/completions","status":502,"trace_id":"default","user_agent":"Go-http-client/1.1"}
+2026/07/06 14:00:18 gateway: upstream model error: context canceled
+2026/07/06 14:00:18 gateway: EP fanout follower http://127.0.0.1:8001/v1/chat/completions failed: Post "http://127.0.0.1:8001/v1/chat/completions": context canceled
+2026/07/06 14:00:18 gateway: EP fanout follower http://127.0.0.1:8004/v1/chat/completions failed: Post "http://127.0.0.1:8004/v1/chat/completions": context canceled
+2026/07/06 14:00:18 gateway: EP fanout follower http://127.0.0.1:8005/v1/chat/completions failed: Post "http://127.0.0.1:8005/v1/chat/completions": context canceled
+2026/07/06 14:00:18 gateway: EP fanout follower http://127.0.0.1:8007/v1/chat/completions failed: Post "http://127.0.0.1:8007/v1/chat/completions": context canceled
+2026/07/06 14:00:18 gateway: EP fanout follower http://127.0.0.1:8003/v1/chat/completions failed: Post "http://127.0.0.1:8003/v1/chat/completions": context canceled
+2026/07/06 14:00:18 gateway: EP fanout follower http://127.0.0.1:8006/v1/chat/completions failed: Post "http://127.0.0.1:8006/v1/chat/completions": context canceled
+2026/07/06 14:00:18 gateway: EP fanout follower http://127.0.0.1:8002/v1/chat/completions failed: Post "http://127.0.0.1:8002/v1/chat/completions": context canceled
+2026/07/06 14:00:18 {"bytes":92,"duration_ms":298835.791,"event":"gateway_http_request","method":"POST","path":"/v1/chat/completions","route":"/v1/chat/completions","status":502,"trace_id":"default","user_agent":"Go-http-client/1.1"}
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+2026/07/06 14:00:26 {"bytes":1117,"duration_ms":0.115,"event":"gateway_http_request","method":"GET","path":"/v1/models","route":"/v1/models","status":200,"trace_id":"default","user_agent":"Mozilla/5.0 (Windows NT 10.0; Microsoft Windows 10.0.26200; en-US) PowerShell/7.6.3"}
+2026/07/06 14:00:51 gateway: upstream model error: context canceled
+2026/07/06 14:00:51 gateway: EP fanout follower http://127.0.0.1:8007/v1/chat/completions failed: Post "http://127.0.0.1:8007/v1/chat/completions": context canceled
+2026/07/06 14:00:51 gateway: EP fanout follower http://127.0.0.1:8004/v1/chat/completions failed: Post "http://127.0.0.1:8004/v1/chat/completions": context canceled
+2026/07/06 14:00:51 gateway: EP fanout follower http://127.0.0.1:8006/v1/chat/completions failed: Post "http://127.0.0.1:8006/v1/chat/completions": context canceled
+2026/07/06 14:00:51 gateway: EP fanout follower http://127.0.0.1:8002/v1/chat/completions failed: Post "http://127.0.0.1:8002/v1/chat/completions": context canceled
+2026/07/06 14:00:51 gateway: EP fanout follower http://127.0.0.1:8005/v1/chat/completions failed: Post "http://127.0.0.1:8005/v1/chat/completions": context canceled
+2026/07/06 14:00:51 gateway: EP fanout follower http://127.0.0.1:8001/v1/chat/completions failed: Post "http://127.0.0.1:8001/v1/chat/completions": context canceled
+2026/07/06 14:00:51 gateway: EP fanout follower http://127.0.0.1:8003/v1/chat/completions failed: Post "http://127.0.0.1:8003/v1/chat/completions": context canceled
+2026/07/06 14:00:51 {"bytes":92,"duration_ms":29026.942,"event":"gateway_http_request","method":"POST","path":"/v1/chat/completions","route":"/v1/chat/completions","status":502,"trace_id":"default","user_agent":"Go-http-client/1.1"}
+2026/07/06 14:00:51 {"bytes":83809,"duration_ms":4.018,"event":"gateway_http_request","method":"GET","path":"/metrics","route":"/metrics","status":200,"trace_id":"default","user_agent":"Mozilla/5.0 (Windows NT 10.0; Microsoft Windows 10.0.26200; en-US) PowerShell/7.6.3"}
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+===rank1===
+fak: in-kernel chat decode → device backend "cuda"
+{"schema":"fak.watchdog-autoheal.v1","verb":"serve","summary":true,"elapsed_ms":5,"specs":4,"noop":4}
+fak: expert-parallel rank 1/8 loads experts [32,64) of 256 resident (sharded serve, #971)
+fak: GGUF device load -> resident Q4_K on backend "cuda" (raw super-blocks, dequant-fused GEMM, ~0.56 B/param vs Q8 ~1 B/param)
+fak: loading model 0% (1/1809 tensors, 0.7 GB, 1s elapsed, 0.54 GB/s)
+fak: loading model 5% (92/1809 tensors, 10.0 GB, 17s elapsed, 0.59 GB/s)
+fak: loading model 10% (183/1809 tensors, 31.1 GB, 26s elapsed, 1.17 GB/s)
+fak: loading model 15% (274/1809 tensors, 50.5 GB, 36s elapsed, 1.41 GB/s)
+fak: loading model 20% (365/1809 tensors, 71.6 GB, 45s elapsed, 1.60 GB/s)
+fak: loading model 25% (456/1809 tensors, 92.8 GB, 56s elapsed, 1.66 GB/s)
+fak: loading model 30% (547/1809 tensors, 113.8 GB, 1m5s elapsed, 1.76 GB/s)
+fak: loading model 35% (638/1809 tensors, 135.0 GB, 1m12s elapsed, 1.86 GB/s)
+fak: loading model 40% (729/1809 tensors, 156.1 GB, 1m23s elapsed, 1.88 GB/s)
+fak: loading model 45% (820/1809 tensors, 177.1 GB, 1m33s elapsed, 1.90 GB/s)
+fak: loading model 50% (911/1809 tensors, 198.2 GB, 1m46s elapsed, 1.86 GB/s)
+fak: loading model 55% (1002/1809 tensors, 219.3 GB, 1m59s elapsed, 1.84 GB/s)
+fak: loading model 60% (1093/1809 tensors, 240.4 GB, 2m9s elapsed, 1.87 GB/s)
+fak: loading model 65% (1184/1809 tensors, 261.5 GB, 2m17s elapsed, 1.90 GB/s)
+fak: loading model 70% (1275/1809 tensors, 282.6 GB, 2m25s elapsed, 1.94 GB/s)
+fak: loading model 76% (1366/1809 tensors, 303.8 GB, 2m38s elapsed, 1.92 GB/s)
+fak: loading model 81% (1457/1809 tensors, 324.9 GB, 2m47s elapsed, 1.95 GB/s)
+fak: loading model 86% (1548/1809 tensors, 346.0 GB, 3m1s elapsed, 1.91 GB/s)
+fak: loading model 91% (1639/1809 tensors, 367.1 GB, 3m10s elapsed, 1.93 GB/s)
+fak: loading model 96% (1730/1809 tensors, 389.0 GB, 3m17s elapsed, 1.97 GB/s)
+fak: loading model 100% (1809/1809 tensors, 406.4 GB, 3m25s elapsed, 1.98 GB/s)
+fak: load-path breakdown (resident = raw bytes, no dequant; dequant = f32 round-trip):
+fak:   Q4_K  expert  resident=7200 (47.5 GB)  dequant=0 (0.0 GB)
+fak:   Q6_K  expert  resident=96 (0.9 GB)  dequant=0 (0.0 GB)
+fak:   F32   dense   resident=0 (0.0 GB)  dequant=706 (0.5 GB)
+fak:   Q6_K  dense   resident=0 (0.0 GB)  dequant=1 (0.7 GB)
+fak:   Q8_0  dense   resident=0 (0.0 GB)  dequant=712 (16.9 GB)
+fak: resident: Q4_K=7200 tensors/48600.00MiB  rawExpertQuant=96/945.00MiB  Q8=946/19737.21MiB  f32=552/3634.64MiB  total=72916.86MiB  decode=67.65GiB/tok
+fak: expert-parallel rank 1/8 joined the process group (device-NCCL tensor reduce, #971 follow-on)
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+2026/07/06 13:05:56 gateway: expert-parallel ranks=8 rank-local (sharded serve) — reducing through the serve's DistComm process group, device-collective wiring skipped
+2026/07/06 13:05:56 fak gateway listening on http://127.0.0.1:8001  (engine=inkernel model=glm-5.2 vdso=true auth=false)
+2026/07/06 13:05:56 fak cache: idle — realized KV-prefix reuse appears here per in-kernel turn (scrape /metrics fak_gateway_kv_prefix_* for the full family)
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+2026/07/06 13:07:43 inkernel_chat model=glm-5.2 q4k=true prompt=29tok reused=0tok prefill=29tok/95.48s/0.3tok/s decode=1tok/0.00s/6469.2tok/s
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+2026/07/06 13:07:43 {"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cached_prompt_tokens":0,"compaction_fired":false,"completion_tokens":1,"context_event":false,"duration_ms":95927.025,"event":"gateway_inference_turn","finish_reason":"length","model":"glm-5.2","prompt_tokens":29,"stream":false,"total_tokens":30,"trace_id":"default","wire":"openai_chat_completions"}
+2026/07/06 13:07:43 {"bytes":272,"duration_ms":95929.902,"event":"gateway_http_request","method":"POST","path":"/v1/chat/completions","route":"/v1/chat/completions","status":200,"trace_id":"default","user_agent":"Go-http-client/1.1"}
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+2026/07/06 13:55:17 gateway: upstream model error: context canceled
+2026/07/06 13:55:17 {"bytes":92,"duration_ms":299141.626,"event":"gateway_http_request","method":"POST","path":"/v1/chat/completions","route":"/v1/chat/completions","status":502,"trace_id":"default","user_agent":"Go-http-client/1.1"}
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+2026/07/06 14:00:17 gateway: upstream model error: context canceled
+2026/07/06 14:00:17 {"bytes":92,"duration_ms":898892.28,"event":"gateway_http_request","method":"POST","path":"/v1/chat/completions","route":"/v1/chat/completions","status":502,"trace_id":"default","user_agent":"Go-http-client/1.1"}
+2026/07/06 14:00:18 gateway: upstream model error: context canceled
+2026/07/06 14:00:18 {"bytes":92,"duration_ms":298650.318,"event":"gateway_http_request","method":"POST","path":"/v1/chat/completions","route":"/v1/chat/completions","status":502,"trace_id":"default","user_agent":"Go-http-client/1.1"}
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+2026/07/06 14:00:51 gateway: upstream model error: context canceled
+2026/07/06 14:00:51 {"bytes":92,"duration_ms":28820.42,"event":"gateway_http_request","method":"POST","path":"/v1/chat/completions","route":"/v1/chat/completions","status":502,"trace_id":"default","user_agent":"Go-http-client/1.1"}
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+===rank7===
+fak: in-kernel chat decode → device backend "cuda"
+{"schema":"fak.watchdog-autoheal.v1","verb":"serve","summary":true,"elapsed_ms":5,"specs":4,"noop":4}
+fak: expert-parallel rank 7/8 loads experts [224,256) of 256 resident (sharded serve, #971)
+fak: GGUF device load -> resident Q4_K on backend "cuda" (raw super-blocks, dequant-fused GEMM, ~0.56 B/param vs Q8 ~1 B/param)
+fak: loading model 0% (1/1809 tensors, 0.7 GB, 2s elapsed, 0.46 GB/s)
+fak: loading model 5% (92/1809 tensors, 10.0 GB, 16s elapsed, 0.64 GB/s)
+fak: loading model 10% (183/1809 tensors, 31.1 GB, 25s elapsed, 1.22 GB/s)
+fak: loading model 15% (274/1809 tensors, 50.5 GB, 34s elapsed, 1.49 GB/s)
+fak: loading model 20% (365/1809 tensors, 71.6 GB, 43s elapsed, 1.68 GB/s)
+fak: loading model 25% (456/1809 tensors, 92.8 GB, 52s elapsed, 1.77 GB/s)
+fak: loading model 30% (547/1809 tensors, 113.8 GB, 1m3s elapsed, 1.81 GB/s)
+fak: loading model 35% (638/1809 tensors, 135.0 GB, 1m14s elapsed, 1.81 GB/s)
+fak: loading model 40% (729/1809 tensors, 156.1 GB, 1m25s elapsed, 1.83 GB/s)
+fak: loading model 45% (820/1809 tensors, 177.1 GB, 1m37s elapsed, 1.82 GB/s)
+fak: loading model 50% (911/1809 tensors, 198.2 GB, 1m48s elapsed, 1.84 GB/s)
+fak: loading model 55% (1002/1809 tensors, 219.3 GB, 1m56s elapsed, 1.89 GB/s)
+fak: loading model 60% (1093/1809 tensors, 240.4 GB, 2m6s elapsed, 1.91 GB/s)
+fak: loading model 65% (1184/1809 tensors, 261.5 GB, 2m14s elapsed, 1.95 GB/s)
+fak: loading model 70% (1275/1809 tensors, 282.6 GB, 2m29s elapsed, 1.89 GB/s)
+fak: loading model 76% (1366/1809 tensors, 303.8 GB, 2m39s elapsed, 1.91 GB/s)
+fak: loading model 81% (1457/1809 tensors, 324.9 GB, 2m46s elapsed, 1.96 GB/s)
+fak: loading model 86% (1548/1809 tensors, 346.0 GB, 2m54s elapsed, 1.98 GB/s)
+fak: loading model 91% (1639/1809 tensors, 367.1 GB, 3m4s elapsed, 2.00 GB/s)
+fak: loading model 96% (1730/1809 tensors, 389.0 GB, 3m12s elapsed, 2.02 GB/s)
+fak: loading model 100% (1809/1809 tensors, 406.4 GB, 3m22s elapsed, 2.01 GB/s)
+fak: load-path breakdown (resident = raw bytes, no dequant; dequant = f32 round-trip):
+fak:   Q4_K  expert  resident=7200 (47.5 GB)  dequant=0 (0.0 GB)
+fak:   Q6_K  expert  resident=96 (0.9 GB)  dequant=0 (0.0 GB)
+fak:   F32   dense   resident=0 (0.0 GB)  dequant=706 (0.5 GB)
+fak:   Q6_K  dense   resident=0 (0.0 GB)  dequant=1 (0.7 GB)
+fak:   Q8_0  dense   resident=0 (0.0 GB)  dequant=712 (16.9 GB)
+fak: resident: Q4_K=7200 tensors/48600.00MiB  rawExpertQuant=96/945.00MiB  Q8=946/19737.21MiB  f32=552/3634.64MiB  total=72916.86MiB  decode=67.65GiB/tok
+fak: expert-parallel rank 7/8 joined the process group (device-NCCL tensor reduce, #971 follow-on)
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+2026/07/06 13:05:57 gateway: expert-parallel ranks=8 rank-local (sharded serve) — reducing through the serve's DistComm process group, device-collective wiring skipped
+2026/07/06 13:05:57 fak gateway listening on http://127.0.0.1:8007  (engine=inkernel model=glm-5.2 vdso=true auth=false)
+2026/07/06 13:05:57 fak cache: idle — realized KV-prefix reuse appears here per in-kernel turn (scrape /metrics fak_gateway_kv_prefix_* for the full family)
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+2026/07/06 13:07:43 inkernel_chat model=glm-5.2 q4k=true prompt=29tok reused=0tok prefill=29tok/95.35s/0.3tok/s decode=1tok/0.00s/8514.4tok/s
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+2026/07/06 13:07:43 {"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cached_prompt_tokens":0,"compaction_fired":false,"completion_tokens":1,"context_event":false,"duration_ms":95615.306,"event":"gateway_inference_turn","finish_reason":"length","model":"glm-5.2","prompt_tokens":29,"stream":false,"total_tokens":30,"trace_id":"default","wire":"openai_chat_completions"}
+2026/07/06 13:07:43 {"bytes":272,"duration_ms":95619.326,"event":"gateway_http_request","method":"POST","path":"/v1/chat/completions","route":"/v1/chat/completions","status":200,"trace_id":"default","user_agent":"Go-http-client/1.1"}
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+2026/07/06 13:55:17 gateway: upstream model error: context canceled
+2026/07/06 13:55:17 {"bytes":92,"duration_ms":299140.957,"event":"gateway_http_request","method":"POST","path":"/v1/chat/completions","route":"/v1/chat/completions","status":502,"trace_id":"default","user_agent":"Go-http-client/1.1"}
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+2026/07/06 14:00:17 gateway: upstream model error: context canceled
+2026/07/06 14:00:17 {"bytes":92,"duration_ms":898891.945,"event":"gateway_http_request","method":"POST","path":"/v1/chat/completions","route":"/v1/chat/completions","status":502,"trace_id":"default","user_agent":"Go-http-client/1.1"}
+2026/07/06 14:00:18 gateway: upstream model error: context canceled
+2026/07/06 14:00:18 {"bytes":92,"duration_ms":298649.669,"event":"gateway_http_request","method":"POST","path":"/v1/chat/completions","route":"/v1/chat/completions","status":502,"trace_id":"default","user_agent":"Go-http-client/1.1"}
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+2026/07/06 14:00:51 gateway: upstream model error: context canceled
+2026/07/06 14:00:51 {"bytes":92,"duration_ms":28819.67,"event":"gateway_http_request","method":"POST","path":"/v1/chat/completions","route":"/v1/chat/completions","status":502,"trace_id":"default","user_agent":"Go-http-client/1.1"}
+fak: session side-ref publish failed for default: leaseref: hash-object exited 128
+===procs===
+  46572    6600    01:03:34 42.5  4.4 /usr/local/bin/fak serve --addr 0.0.0.0:8000 --gguf /opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf --backend cuda --expert-parallel 8 --context-budget-tokens 8192 --model glm-5.2
+  46576    6600    01:03:34 42.7  4.4 /usr/local/bin/fak serve --addr 127.0.0.1:8001 --gguf /opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf --backend cuda --expert-parallel 8 --context-budget-tokens 8192 --model glm-5.2
+  46580    6600    01:03:34 42.8  4.4 /usr/local/bin/fak serve --addr 127.0.0.1:8002 --gguf /opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf --backend cuda --expert-parallel 8 --context-budget-tokens 8192 --model glm-5.2
+  46584    6600    01:03:34 37.1  4.4 /usr/local/bin/fak serve --addr 127.0.0.1:8003 --gguf /opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf --backend cuda --expert-parallel 8 --context-budget-tokens 8192 --model glm-5.2
+  46588    6600    01:03:34 41.7  4.4 /usr/local/bin/fak serve --addr 127.0.0.1:8004 --gguf /opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf --backend cuda --expert-parallel 8 --context-budget-tokens 8192 --model glm-5.2
+  46592    6600    01:03:34 41.8  4.4 /usr/local/bin/fak serve --addr 127.0.0.1:8005 --gguf /opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf --backend cuda --expert-parallel 8 --context-budget-tokens 8192 --model glm-5.2
+  46596    6600    01:03:34 43.2  4.4 /usr/local/bin/fak serve --addr 127.0.0.1:8006 --gguf /opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf --backend cuda --expert-parallel 8 --context-budget-tokens 8192 --model glm-5.2
+  46600    6600    01:03:34 42.1  4.4 /usr/local/bin/fak serve --addr 127.0.0.1:8007 --gguf /opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf --backend cuda --expert-parallel 8 --context-budget-tokens 8192 --model glm-5.2
+===nvidia===
+0, 30341 MiB, 81559 MiB, 100 %
+1, 29501 MiB, 81559 MiB, 100 %
+2, 30173 MiB, 81559 MiB, 100 %
+3, 29205 MiB, 81559 MiB, 0 %
+4, 29213 MiB, 81559 MiB, 100 %
+5, 29549 MiB, 81559 MiB, 100 %
+6, 30077 MiB, 81559 MiB, 100 %
+7, 29741 MiB, 81559 MiB, 100 %

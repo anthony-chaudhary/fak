@@ -1,0 +1,1 @@
+{"id":"msg_fak_1783349584696989600","type":"message","role":"assistant","model":"groq/compound","content":[{"type":"text","text":"pong"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":920,"output_tokens":395}}

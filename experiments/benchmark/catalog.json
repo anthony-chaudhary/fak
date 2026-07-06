@@ -1242,5 +1242,18 @@
       "timestamp": "20260629T132955Z"
     }
   ],
-  "version": "1.0"
+  "version": "1.0",
+  "workload_kinds": [
+    "model-benchmark",
+    "gpu-benchmark",
+    "qwen36",
+    "radix-benchmark",
+    "session-benchmark",
+    "fan-benchmark",
+    "agent-live",
+    "turn-tax",
+    "parity",
+    "livecodebench",
+    "concept-benchmark"
+  ]
 }

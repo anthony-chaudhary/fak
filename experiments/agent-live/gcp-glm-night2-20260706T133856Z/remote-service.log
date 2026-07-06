@@ -1,0 +1,121 @@
+===phase===
+GLM52_FAK_NATIVE_SERVE_READY port=8000 model=glm-5.2 ep_ranks=8
+===service===
+● glm52serve.service - /usr/bin/env bash /opt/fak/tools/glm52_fak_native_serve.sh
+     Loaded: loaded (/run/systemd/transient/glm52serve.service; transient)
+  Transient: yes
+     Active: active (running) since Mon 2026-07-06 12:31:31 UTC; 1h 33min ago
+   Main PID: 6600 (bash)
+      Tasks: 1704 (limit: 629145)
+     Memory: 1.0T
+        CPU: 4h 6min 50.387s
+     CGroup: /system.slice/glm52serve.service
+             ├─ 6600 bash /opt/fak/tools/glm52_fak_native_serve.sh
+             ├─46572 /usr/local/bin/fak serve --addr 0.0.0.0:8000 --gguf /opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf --backend cuda --expert-parallel 8 --context-budget-tokens 8192 --model glm-5.2
+             ├─46576 /usr/local/bin/fak serve --addr 127.0.0.1:8001 --gguf /opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf --backend cuda --expert-parallel 8 --context-budget-tokens 8192 --model glm-5.2
+             ├─46580 /usr/local/bin/fak serve --addr 127.0.0.1:8002 --gguf /opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf --backend cuda --expert-parallel 8 --context-budget-tokens 8192 --model glm-5.2
+             ├─46584 /usr/local/bin/fak serve --addr 127.0.0.1:8003 --gguf /opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf --backend cuda --expert-parallel 8 --context-budget-tokens 8192 --model glm-5.2
+             ├─46588 /usr/local/bin/fak serve --addr 127.0.0.1:8004 --gguf /opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf --backend cuda --expert-parallel 8 --context-budget-tokens 8192 --model glm-5.2
+             ├─46592 /usr/local/bin/fak serve --addr 127.0.0.1:8005 --gguf /opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf --backend cuda --expert-parallel 8 --context-budget-tokens 8192 --model glm-5.2
+             ├─46596 /usr/local/bin/fak serve --addr 127.0.0.1:8006 --gguf /opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf --backend cuda --expert-parallel 8 --context-budget-tokens 8192 --model glm-5.2
+             └─46600 /usr/local/bin/fak serve --addr 127.0.0.1:8007 --gguf /opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf --backend cuda --expert-parallel 8 --context-budget-tokens 8192 --model glm-5.2
+
+Jul 06 13:02:07 fak-glm-night2 env[46568]: 13:02:07 LAUNCH_EP fak serve --gguf /opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf --backend cuda --expert-parallel 8 --context-budget-tokens 8192 --model glm-5.2 (sharded EP; require_device_pg=1; supported Q4_K/Q8/F32 on CUDA, mixed k-quants use host int8 fallback until CUDA kernels land)
+Jul 06 13:02:07 fak-glm-night2 env[46574]: 13:02:07 EP_RANK_PID rank=0 gpu=0 port=8000 pid=46572 log=/opt/glm52-q4/server-rank0.log
+Jul 06 13:02:07 fak-glm-night2 env[46578]: 13:02:07 EP_RANK_PID rank=1 gpu=1 port=8001 pid=46576 log=/opt/glm52-q4/server-rank1.log
+Jul 06 13:02:07 fak-glm-night2 env[46582]: 13:02:07 EP_RANK_PID rank=2 gpu=2 port=8002 pid=46580 log=/opt/glm52-q4/server-rank2.log
+Jul 06 13:02:07 fak-glm-night2 env[46586]: 13:02:07 EP_RANK_PID rank=3 gpu=3 port=8003 pid=46584 log=/opt/glm52-q4/server-rank3.log
+Jul 06 13:02:07 fak-glm-night2 env[46590]: 13:02:07 EP_RANK_PID rank=4 gpu=4 port=8004 pid=46588 log=/opt/glm52-q4/server-rank4.log
+Jul 06 13:02:07 fak-glm-night2 env[46594]: 13:02:07 EP_RANK_PID rank=5 gpu=5 port=8005 pid=46592 log=/opt/glm52-q4/server-rank5.log
+Jul 06 13:02:07 fak-glm-night2 env[46598]: 13:02:07 EP_RANK_PID rank=6 gpu=6 port=8006 pid=46596 log=/opt/glm52-q4/server-rank6.log
+Jul 06 13:02:07 fak-glm-night2 env[46602]: 13:02:07 EP_RANK_PID rank=7 gpu=7 port=8007 pid=46600 log=/opt/glm52-q4/server-rank7.log
+Jul 06 13:07:43 fak-glm-night2 env[48499]: 13:07:43 GLM52_FAK_NATIVE_SERVE_READY port=8000 model=glm-5.2 ep_ranks=8
+===journal===
+Jul 06 12:31:31 fak-glm-night2 systemd[1]: Started /usr/bin/env bash /opt/fak/tools/glm52_fak_native_serve.sh.
+Jul 06 12:31:31 fak-glm-night2 env[6609]: 12:31:31 INSTALL_GO 1.26.4
+Jul 06 12:31:33 fak-glm-night2 env[6676]: 12:31:33 GO go version go1.26.4 linux/amd64
+Jul 06 12:31:33 fak-glm-night2 env[6744]: 12:31:33 HF_DOWNLOAD_BACKEND disable_xet=1
+Jul 06 12:31:33 fak-glm-night2 env[6747]: 12:31:33 DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_S dir=/opt/glm52-q4
+Jul 06 13:01:50 fak-glm-night2 env[6812]: 13:01:50 DOWNLOAD_DONE rc=0 shards=10
+Jul 06 13:01:50 fak-glm-night2 env[6818]: 13:01:50 SHARD1=/opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf
+Jul 06 13:01:50 fak-glm-night2 env[6821]: 13:01:50 BUILD_FAK_CUDA arch=sm_90 out=/usr/local/bin/fak
+Jul 06 13:02:07 fak-glm-night2 env[46565]: 13:02:07 FAK_BIN_READY /usr/local/bin/fak
+Jul 06 13:02:07 fak-glm-night2 env[46568]: 13:02:07 LAUNCH_EP fak serve --gguf /opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf --backend cuda --expert-parallel 8 --context-budget-tokens 8192 --model glm-5.2 (sharded EP; require_device_pg=1; supported Q4_K/Q8/F32 on CUDA, mixed k-quants use host int8 fallback until CUDA kernels land)
+Jul 06 13:02:07 fak-glm-night2 env[46574]: 13:02:07 EP_RANK_PID rank=0 gpu=0 port=8000 pid=46572 log=/opt/glm52-q4/server-rank0.log
+Jul 06 13:02:07 fak-glm-night2 env[46578]: 13:02:07 EP_RANK_PID rank=1 gpu=1 port=8001 pid=46576 log=/opt/glm52-q4/server-rank1.log
+Jul 06 13:02:07 fak-glm-night2 env[46582]: 13:02:07 EP_RANK_PID rank=2 gpu=2 port=8002 pid=46580 log=/opt/glm52-q4/server-rank2.log
+Jul 06 13:02:07 fak-glm-night2 env[46586]: 13:02:07 EP_RANK_PID rank=3 gpu=3 port=8003 pid=46584 log=/opt/glm52-q4/server-rank3.log
+Jul 06 13:02:07 fak-glm-night2 env[46590]: 13:02:07 EP_RANK_PID rank=4 gpu=4 port=8004 pid=46588 log=/opt/glm52-q4/server-rank4.log
+Jul 06 13:02:07 fak-glm-night2 env[46594]: 13:02:07 EP_RANK_PID rank=5 gpu=5 port=8005 pid=46592 log=/opt/glm52-q4/server-rank5.log
+Jul 06 13:02:07 fak-glm-night2 env[46598]: 13:02:07 EP_RANK_PID rank=6 gpu=6 port=8006 pid=46596 log=/opt/glm52-q4/server-rank6.log
+Jul 06 13:02:07 fak-glm-night2 env[46602]: 13:02:07 EP_RANK_PID rank=7 gpu=7 port=8007 pid=46600 log=/opt/glm52-q4/server-rank7.log
+Jul 06 13:07:43 fak-glm-night2 env[48499]: 13:07:43 GLM52_FAK_NATIVE_SERVE_READY port=8000 model=glm-5.2 ep_ranks=8
+===native===
+12:31:31 INSTALL_GO 1.26.4
+12:31:33 GO go version go1.26.4 linux/amd64
+12:31:33 HF_DOWNLOAD_BACKEND disable_xet=1
+12:31:33 DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_S dir=/opt/glm52-q4
+
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+Fetching 10 files:  10%|█         | 1/10 [00:00<00:07,  1.13it/s]
+Fetching 10 files:  20%|██        | 2/10 [19:02<1:29:36, 672.04s/it]
+Fetching 10 files:  30%|███       | 3/10 [21:03<49:01, 420.18s/it]  
+Fetching 10 files:  60%|██████    | 6/10 [22:04<10:22, 155.55s/it]
+Fetching 10 files: 100%|██████████| 10/10 [30:16<00:00, 137.41s/it]
+Fetching 10 files: 100%|██████████| 10/10 [30:16<00:00, 181.62s/it]
+[32m✓ Downloaded[0m
+  path: /opt/glm52-q4
+13:01:50 DOWNLOAD_DONE rc=0 shards=10
+13:01:50 SHARD1=/opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf
+13:01:50 BUILD_FAK_CUDA arch=sm_90 out=/usr/local/bin/fak
+[cuda] nvcc compile kernels (sm_90) ...
+[cuda] nvcc compile NCCL collectives (sm_90) ...
+[cuda] nvcc compile multi-process NCCL process group (sm_90) ...
+cuda_nccl_pg.cu(43): warning #550-D: variable "g_pg_rank" was set but never used
+  static int g_pg_rank = -1;
+             ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+[cuda] built 265400 byte libfakcuda.a
+[cuda] go build -tags cuda,nccl -o /usr/local/bin/fak ./cmd/fak ...
+go: downloading golang.org/x/term v0.44.0
+go: downloading golang.org/x/sys v0.46.0
+[cuda] OK binary /usr/local/bin/fak
+13:02:07 FAK_BIN_READY /usr/local/bin/fak
+13:02:07 LAUNCH_EP fak serve --gguf /opt/glm52-q4/UD-Q4_K_S/GLM-5.2-UD-Q4_K_S-00001-of-00010.gguf --backend cuda --expert-parallel 8 --context-budget-tokens 8192 --model glm-5.2 (sharded EP; require_device_pg=1; supported Q4_K/Q8/F32 on CUDA, mixed k-quants use host int8 fallback until CUDA kernels land)
+13:02:07 EP_RANK_PID rank=0 gpu=0 port=8000 pid=46572 log=/opt/glm52-q4/server-rank0.log
+13:02:07 EP_RANK_PID rank=1 gpu=1 port=8001 pid=46576 log=/opt/glm52-q4/server-rank1.log
+13:02:07 EP_RANK_PID rank=2 gpu=2 port=8002 pid=46580 log=/opt/glm52-q4/server-rank2.log
+13:02:07 EP_RANK_PID rank=3 gpu=3 port=8003 pid=46584 log=/opt/glm52-q4/server-rank3.log
+13:02:07 EP_RANK_PID rank=4 gpu=4 port=8004 pid=46588 log=/opt/glm52-q4/server-rank4.log
+13:02:07 EP_RANK_PID rank=5 gpu=5 port=8005 pid=46592 log=/opt/glm52-q4/server-rank5.log
+13:02:07 EP_RANK_PID rank=6 gpu=6 port=8006 pid=46596 log=/opt/glm52-q4/server-rank6.log
+13:02:07 EP_RANK_PID rank=7 gpu=7 port=8007 pid=46600 log=/opt/glm52-q4/server-rank7.log
+SMOKE rc=0 elapsed_s=96 timeout_s=900 max_tokens=1: {"id":"chatcmpl-fak-1783343263593789381","object":"chat.completion","created":1783343263,"model":"glm-5.2","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"length"}],"usage":{"prompt_tokens":29,"completion_tokens":1,"total_tokens":30}}
+fak: expert-parallel rank 0/8 loads experts [0,32) of 256 resident (sharded serve, #971)
+fak: expert-parallel rank 0/8 joined the process group (device-NCCL tensor reduce, #971 follow-on)
+2026/07/06 13:05:56 gateway: expert-parallel ranks=8 rank-local (sharded serve) — reducing through the serve's DistComm process group, device-collective wiring skipped
+fak: expert-parallel rank 1/8 loads experts [32,64) of 256 resident (sharded serve, #971)
+fak: expert-parallel rank 1/8 joined the process group (device-NCCL tensor reduce, #971 follow-on)
+2026/07/06 13:05:56 gateway: expert-parallel ranks=8 rank-local (sharded serve) — reducing through the serve's DistComm process group, device-collective wiring skipped
+fak: expert-parallel rank 2/8 loads experts [64,96) of 256 resident (sharded serve, #971)
+fak: expert-parallel rank 2/8 joined the process group (device-NCCL tensor reduce, #971 follow-on)
+2026/07/06 13:05:57 gateway: expert-parallel ranks=8 rank-local (sharded serve) — reducing through the serve's DistComm process group, device-collective wiring skipped
+fak: expert-parallel rank 3/8 loads experts [96,128) of 256 resident (sharded serve, #971)
+fak: expert-parallel rank 3/8 joined the process group (device-NCCL tensor reduce, #971 follow-on)
+2026/07/06 13:05:56 gateway: expert-parallel ranks=8 rank-local (sharded serve) — reducing through the serve's DistComm process group, device-collective wiring skipped
+fak: expert-parallel rank 4/8 loads experts [128,160) of 256 resident (sharded serve, #971)
+fak: expert-parallel rank 4/8 joined the process group (device-NCCL tensor reduce, #971 follow-on)
+2026/07/06 13:05:57 gateway: expert-parallel ranks=8 rank-local (sharded serve) — reducing through the serve's DistComm process group, device-collective wiring skipped
+fak: expert-parallel rank 5/8 loads experts [160,192) of 256 resident (sharded serve, #971)
+fak: expert-parallel rank 5/8 joined the process group (device-NCCL tensor reduce, #971 follow-on)
+2026/07/06 13:05:57 gateway: expert-parallel ranks=8 rank-local (sharded serve) — reducing through the serve's DistComm process group, device-collective wiring skipped
+fak: expert-parallel rank 6/8 loads experts [192,224) of 256 resident (sharded serve, #971)
+fak: expert-parallel rank 6/8 joined the process group (device-NCCL tensor reduce, #971 follow-on)
+2026/07/06 13:05:56 gateway: expert-parallel ranks=8 rank-local (sharded serve) — reducing through the serve's DistComm process group, device-collective wiring skipped
+fak: expert-parallel rank 7/8 loads experts [224,256) of 256 resident (sharded serve, #971)
+fak: expert-parallel rank 7/8 joined the process group (device-NCCL tensor reduce, #971 follow-on)
+2026/07/06 13:05:57 gateway: expert-parallel ranks=8 rank-local (sharded serve) — reducing through the serve's DistComm process group, device-collective wiring skipped
+13:07:43 GLM52_FAK_NATIVE_SERVE_READY port=8000 model=glm-5.2 ep_ranks=8

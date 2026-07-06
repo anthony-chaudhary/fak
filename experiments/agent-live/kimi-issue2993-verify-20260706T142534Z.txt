@@ -1,0 +1,1 @@
+model=moon4, issue=#2993, tests=pass, changed_files=internal/journal/crash.go,internal/guardrsi/guardrsi.go,internal/guardrsi/crash_fold_test.go,cmd/fak/audit_diagnose.go,cmd/fak/audit_diagnose_test.go, verdict=verified

@@ -1,0 +1,17 @@
+{
+  "schema": "fak.nvidia-nim-kimi.direct-probe.v1",
+  "captured_utc": "2026-07-06T13:39:17.9715077Z",
+  "endpoint": "https://integrate.api.nvidia.com/v1",
+  "model": "moonshotai/kimi-k2.6",
+  "models_endpoint_has_model": true,
+  "completion_id": "chatcmpl-85691a476c557851",
+  "completion_model": "moonshotai/kimi-k2.6",
+  "finish_reason": "stop",
+  "content": " pong",
+  "usage": {
+    "prompt_tokens": 14,
+    "total_tokens": 17,
+    "completion_tokens": 3,
+    "prompt_tokens_details": null
+  }
+}

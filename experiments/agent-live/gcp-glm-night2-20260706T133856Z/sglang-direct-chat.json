@@ -1,0 +1,38 @@
+{
+  "started_at": "2026-07-06T14:54:42.6503737Z",
+  "ended_at": "2026-07-06T14:54:43.6825648Z",
+  "elapsed_ms": 1032.0,
+  "endpoint": "http://127.0.0.1:8200/v1/chat/completions",
+  "model": "glm-5.2",
+  "content": "pong",
+  "response": {
+    "id": "07e3b8622b9646119469bbb82d5ba654",
+    "object": "chat.completion",
+    "created": 1783349683,
+    "model": "glm-5.2",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "pong",
+          "reasoning_content": null,
+          "tool_calls": null
+        },
+        "logprobs": null,
+        "finish_reason": "stop",
+        "matched_stop": 154827
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 11,
+      "total_tokens": 13,
+      "completion_tokens": 2,
+      "prompt_tokens_details": null,
+      "reasoning_tokens": 0
+    },
+    "metadata": {
+      "weight_version": "default"
+    }
+  }
+}
