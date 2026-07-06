@@ -59,8 +59,8 @@ func (s *Server) resources() []mcpResource {
 					"name":             "fak-gateway",
 					"version":          s.version,
 					"protocolVersions": mcpProtocolVersions,
-					"tools":            toolCatalogSummary(),
-					"selfFeatureQuery": selfFeatureSummary(),
+					"tools":            s.toolCatalogSummary(),
+					"selfFeatureQuery": s.selfFeatureSummary(),
 					"cacheSemantics": map[string]string{
 						"resource": mcpCacheSemanticsURI,
 						"schema":   mcpCacheSemanticsSchema,
@@ -180,9 +180,9 @@ func mcpCacheHint(result map[string]any, ttlMs int, scope string) map[string]any
 	return result
 }
 
-func selfFeatureSummary() map[string]any {
+func (s *Server) selfFeatureSummary() map[string]any {
 	cat, err := selfquery.Load("", selfquery.Options{
-		Tools: selfquery.ToolDescriptorsFromMaps(toolDescriptors()),
+		Tools: selfquery.ToolDescriptorsFromMaps(s.exposedToolDescriptors()),
 	})
 	if err != nil {
 		return map[string]any{
@@ -261,8 +261,8 @@ func (s *Server) readResource(params json.RawMessage) (any, *rpcError) {
 // toolCatalogSummary projects the tools/list descriptors down to {name,
 // description} — the same source of truth the tool registry serves, so the
 // capabilities resource can never list a tool the server does not actually offer.
-func toolCatalogSummary() []map[string]string {
-	tds := toolDescriptors()
+func (s *Server) toolCatalogSummary() []map[string]string {
+	tds := s.exposedToolDescriptors()
 	out := make([]map[string]string, 0, len(tds))
 	for _, td := range tds {
 		name, _ := td["name"].(string)

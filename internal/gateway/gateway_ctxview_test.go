@@ -104,6 +104,27 @@ func TestCtxViewOnRewritesHistoryUnderBudget(t *testing.T) {
 	}
 }
 
+func TestCtxViewSkipsStructuredToolContinuation(t *testing.T) {
+	ctx := context.Background()
+	const budget = 8
+	on := &Server{
+		ctxView: &agent.CtxViewPlanner{Enabled: true, Budget: budget},
+		logf:    func(string, ...any) {},
+	}
+	session := []agent.Message{
+		{Role: agent.RoleSystem, Content: "You are a coding agent."},
+		{Role: agent.RoleUser, Content: "read the file"},
+		{Role: agent.RoleAssistant, ToolCalls: []agent.ToolCall{{
+			ID: "call_1", Type: "function", Function: agent.Func{Name: "Read", Arguments: `{"file_path":"main.go"}`},
+		}}},
+		{Role: agent.RoleTool, ToolCallID: "call_1", Name: "Read", Content: "package main"},
+	}
+
+	if got := on.maybePlanMessages(ctx, "tool-session", session); !reflect.DeepEqual(got, session) {
+		t.Fatalf("ctxview must not rewrite structured tool continuations:\n got=%+v\nwant=%+v", got, session)
+	}
+}
+
 // TestSessionPlannerPathMatchesStateless is the equivalence witness at the GATEWAY seam: a
 // keyed request (the per-session incremental planner, O(c·N)) renders the SAME history a
 // trace-less request (the stateless full-scan, O(N²)) does, for the same budget. The cost

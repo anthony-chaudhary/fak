@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -180,7 +181,7 @@ func (s *Server) handleMethod(ctx context.Context, method string, params json.Ra
 	case "ping":
 		return map[string]any{}, nil
 	case "tools/list":
-		return mcpCacheHint(map[string]any{"tools": toolDescriptors()}, mcpCatalogTTLMillis, mcpCacheScopePublic), nil
+		return mcpCacheHint(map[string]any{"tools": s.exposedToolDescriptors()}, mcpCatalogTTLMillis, mcpCacheScopePublic), nil
 	case "tools/call":
 		return s.callTool(ctx, params)
 	case "resources/list":
@@ -281,6 +282,13 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 	}
 	if e := mcpUnmarshalParams(params, &p, "tools/call"); e != nil {
 		return nil, e
+	}
+	// The --expose allowlist is authoritative for INVOCATION too, not just
+	// discovery: a tool the operator hid is answered "unknown tool" — the SAME
+	// message the default arm gives a name that does not exist — so a client
+	// cannot distinguish a hidden tool from a non-existent one (no existence leak).
+	if s.exposeAllow != nil && !s.exposeAllow(p.Name) {
+		return nil, &rpcError{Code: rpcInvalidParams, Message: "unknown tool: " + p.Name}
 	}
 	switch p.Name {
 	case "fak_syscall":
@@ -413,6 +421,10 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 	case "fak_context_value":
 		return mcpDecodeCall[ContextValueRequest](p.Arguments, "fak_context_value", func(req ContextValueRequest) (any, error) {
 			return s.CtxValueReportFor(s.traceFor(req.TraceID)), nil
+		})
+	case "fak_context_restore":
+		return mcpDecodeCall[ContextRestoreRequest](p.Arguments, "fak_context_restore", func(req ContextRestoreRequest) (any, error) {
+			return s.restoreContext(req)
 		})
 	default:
 		return nil, &rpcError{Code: rpcInvalidParams, Message: "unknown tool: " + p.Name}
@@ -714,6 +726,18 @@ func toolDescriptors() []map[string]any {
   }
 }`),
 		},
+		{
+			"name":        "fak_context_restore",
+			"description": "Page a compacted-away ORIGINATING task back in by its content-address handle. When a long fak guard -- claude session compacts, the stub it leaves may carry a tombstone like \"[fak] originating task (compacted, id=<hex>): \\\"…\\\"\": that id is a callable handle. Pass {id} (the <hex>) to get back the FULL verbatim first-user-turn JSON fak dropped from the wire, plus the orientation excerpt — so a model resuming past the compaction can recover WHAT it was asked to do instead of only the lossy excerpt. Read-only recovery: returns bytes fak already had and dropped; never re-enters the request path, never fabricates. Trust-gated: a span an operator later sealed (quarantine) or tombstoned (context control) is REFUSED, not resurrected. An unknown/evicted id returns a miss. Omitted trace_id uses the gateway default trace (your own session under fak guard).",
+			"inputSchema": json.RawMessage(`{
+  "type": "object",
+  "required": ["id"],
+  "properties": {
+    "id": {"type": "string", "description": "the content-address handle (sha256 hex) a compaction tombstone embedded as id=<hex>"},
+    "trace_id": {"type": "string", "description": "session trace id; omitted uses the gateway default trace (your own session under fak guard)"}
+  }
+}`),
+		},
 	}
 }
 
@@ -723,6 +747,87 @@ func toolDescriptors() []map[string]any {
 // is protocol-blind (issue #1108, C5).
 func ToolDescriptorsForResolver() []map[string]any {
 	return toolDescriptors()
+}
+
+// toolRegistryNames returns the bare names of every tool in the built-in
+// registry, in registry order. It is the universe compileToolExposeAllow
+// validates --expose patterns against and exposedToolDescriptors filters.
+func toolRegistryNames() []string {
+	all := toolDescriptors()
+	names := make([]string, 0, len(all))
+	for _, td := range all {
+		if n, _ := td["name"].(string); n != "" {
+			names = append(names, n)
+		}
+	}
+	return names
+}
+
+// compileToolExposeAllow turns the raw --expose patterns (Config.ExposeTools)
+// into an allowlist predicate over tool names. Each raw entry may be
+// comma-separated; entries are trimmed and empties dropped, so `--expose a,b`
+// and `--expose a --expose b` compile identically. An empty result set returns
+// (nil, nil) — the full-surface default. Otherwise every pattern is validated
+// as a path.Match glob that matches ≥1 registered tool; a malformed glob or a
+// zero-match pattern is a fail-loud error (a typo must never silently hide the
+// whole surface). The returned predicate reports whether a tool NAME matches
+// any pattern.
+func compileToolExposeAllow(raw []string) (func(string) bool, error) {
+	var patterns []string
+	for _, entry := range raw {
+		for _, p := range strings.Split(entry, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				patterns = append(patterns, p)
+			}
+		}
+	}
+	if len(patterns) == 0 {
+		return nil, nil
+	}
+	names := toolRegistryNames()
+	for _, p := range patterns {
+		matched := false
+		for _, n := range names {
+			ok, err := path.Match(p, n)
+			if err != nil {
+				return nil, fmt.Errorf("gateway: --expose pattern %q is not a valid glob: %w", p, err)
+			}
+			if ok {
+				matched = true
+			}
+		}
+		if !matched {
+			return nil, fmt.Errorf("gateway: --expose pattern %q matches no known tool (have: %s)", p, strings.Join(names, ", "))
+		}
+	}
+	return func(name string) bool {
+		for _, p := range patterns {
+			if ok, _ := path.Match(p, name); ok {
+				return true
+			}
+		}
+		return false
+	}, nil
+}
+
+// exposedToolDescriptors is toolDescriptors filtered by the optional --expose
+// allowlist. It is the SINGLE choke point every discovery view routes through
+// (tools/list, fak_tools_search, the capabilities resource + self-feature
+// catalog, fak_feature_query, fak_capabilities), so a hidden tool never appears
+// in any of them. When no allowlist is in force (s.exposeAllow == nil) it
+// returns the full registry unchanged — byte-for-byte the pre-allowlist surface.
+func (s *Server) exposedToolDescriptors() []map[string]any {
+	all := toolDescriptors()
+	if s == nil || s.exposeAllow == nil {
+		return all
+	}
+	out := make([]map[string]any, 0, len(all))
+	for _, td := range all {
+		if n, _ := td["name"].(string); s.exposeAllow(n) {
+			out = append(out, td)
+		}
+	}
+	return out
 }
 
 // memoryInputSchema is the {driver|query, intent, k, budget, image_dir, apply} shape
@@ -766,7 +871,7 @@ func (s *Server) toolsSearch(req ToolsSearchRequest) (ToolsSearchResponse, error
 		return ToolsSearchResponse{}, fmt.Errorf("invalid detail_level: %s (must be name, description, or full)", level)
 	}
 
-	allTools := toolDescriptors()
+	allTools := s.exposedToolDescriptors()
 	result := make([]map[string]any, 0, len(allTools))
 
 	for _, t := range allTools {

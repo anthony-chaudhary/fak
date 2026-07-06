@@ -814,6 +814,14 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 	out, outcome := agent.CompactAnthropicHistoryWithOptions(req.Raw, opts)
 	req.Raw = out
 	s.metrics.observeCompaction(outcome, false)
+	// Restore handle: when this fire tombstoned the session's originating task, the outcome carries
+	// the dropped turn's bytes and the sha256-hex handle the stub embedded. Stash digest→bytes under
+	// this trace so a model resuming past the compaction can call fak_context_restore(id) to page the
+	// full task back in (ctxrestore.go). Empty on every non-tombstone fire (the goal-pin path
+	// preserves the task verbatim and mints no handle), where stashRestore no-ops.
+	if outcome.Reason == agent.CompactReasonNone && outcome.RestoreID != "" {
+		s.stashRestore(trace, outcome.RestoreID, outcome.RestoreExcerpt, outcome.RestoreBytes)
+	}
 	return outcome.Reason == agent.CompactReasonNone, outcome.Reason
 }
 

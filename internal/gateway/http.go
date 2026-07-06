@@ -1451,6 +1451,19 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if s.inKernelModelButChatIsMock {
 		health["in_kernel_model_but_chat_is_mock"] = true
 	}
+	// #2336: a recent recovered panic on a served completion route disqualifies
+	// the unqualified ok:true — a green liveness probe over crashing completions
+	// keeps watchdogs routing work to a broken native serve. Window-bounded
+	// (servedFailureWindow), so an aged-out failure restores the plain report.
+	if route, msg, age, failed := s.servedFailure.recent(time.Now()); failed {
+		health["ok"] = false
+		health["recent_served_failure"] = map[string]any{
+			"route":          route,
+			"error":          msg,
+			"age_seconds":    int(age / time.Second),
+			"window_seconds": int(servedFailureWindow / time.Second),
+		}
+	}
 	writeJSON(w, http.StatusOK, health)
 }
 

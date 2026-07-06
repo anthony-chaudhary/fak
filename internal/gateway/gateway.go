@@ -440,6 +440,21 @@ type Config struct {
 	// imports no policy internals — the host (cmd/fak) supplies the floor predicate, mirroring
 	// ReloadPolicy / DecideSession. Anthropic passthrough only; inert on every other wire.
 	ToolFloorDenies func(toolName string) bool
+
+	// ExposeTools, when non-empty, is an ALLOWLIST of tool-name glob patterns that
+	// restricts BOTH the advertised MCP surface (tools/list, fak_tools_search,
+	// fak_feature_query, fak_capabilities, the capabilities resource) and what
+	// tools/call will invoke: a tool whose name matches no pattern is neither
+	// listed nor callable, and an attempt to call it answers "unknown tool"
+	// exactly as a non-existent tool would — hiding a tool never leaks that it
+	// exists. Patterns are path.Match globs over the bare tool name (e.g.
+	// "fak_index_*", "fak_capabilities"). A single entry may be comma-separated
+	// ("fak_index_*,fak_capabilities") and the flag may repeat; New splits/trims.
+	// nil/empty (the default) exposes the full registry, byte-for-byte the
+	// pre-allowlist surface. New fails LOUD on a pattern that is a malformed glob
+	// or matches ZERO known tools, so a typo aborts startup rather than silently
+	// shrinking the surface to nothing. Set by `fak serve --expose`.
+	ExposeTools []string
 	// RouteManifest, when non-nil, makes the gateway classify each fak_syscall tool
 	// call into a modelroute.Subject and route it: for a single-model (PICK) plan the
 	// chosen model id is written to abi.ToolCall.Engine BEFORE Submit, so the kernel
@@ -782,7 +797,8 @@ type Server struct {
 	feed           *coherenceFeed                   // the cross-agent "what changed" feed (vdso coherence bus)
 	sessionFeed    *sessionFeed                     // the drive-state revision feed (#630; host-pushed via PublishSessionRevision)
 	metrics        *gatewayMetrics
-	traceSeq       uint64 // mints a non-empty TraceID when the wire omits one (atomic)
+	servedFailure  servedFailure // recent served-turn panic behind /healthz honesty (#2336); see served_failure.go
+	traceSeq       uint64        // mints a non-empty TraceID when the wire omits one (atomic)
 	reloadPolicy   PolicyReloadFunc
 	resetTrace     TraceResetFunc
 	observeTrace   TraceObserveFunc
@@ -916,6 +932,16 @@ type Server struct {
 	ctxValueMu sync.Mutex
 	ctxValue   map[string]*sessionCtxValue
 
+	// ctxRestore holds, per session trace, the content-addressed stash of ORIGINATING tasks the
+	// Anthropic-passthrough compaction dropped (ctxrestore.go). A fired tombstone hands the gateway
+	// the dropped turn's bytes + its sha256-hex handle (agent.CompactOutcome.RestoreID/RestoreBytes),
+	// which this table records so fak_context_restore(id) can page the full task back in for a model
+	// resuming past the compaction. Minted lazily by stashRestore, bounded by maxCtxRestoreSessions
+	// with the same generational reset as ctxValue. Guarded by ctxRestoreMu. READ-ONLY recovery:
+	// restore returns bytes fak already dropped from the wire; it never re-enters the request path.
+	ctxRestoreMu sync.Mutex
+	ctxRestore   map[string]*sessionCtxRestore
+
 	// turnSafetyMu guards turnSafety, the per-trace stash of the LAST turn's adjudication
 	// SAFETY delta (calls blocked / repaired this turn, results quarantined this turn). The
 	// per-turn fak-turn debug line (debug_stats.go) already shows the turn's cache/token
@@ -1047,6 +1073,13 @@ type Server struct {
 	// tools[] unchanged.
 	toolFloorDenies func(toolName string) bool
 
+	// exposeAllow mirrors Config.ExposeTools compiled to a predicate: non-nil ⇔ an
+	// allowlist is in force, and it reports whether a tool NAME is exposed. nil (the
+	// default) exposes every tool. exposedToolDescriptors (the single filter used by
+	// every discovery view) and the tools/call guard are its only readers; both fall
+	// open to the full surface when it is nil.
+	exposeAllow func(toolName string) bool
+
 	// systemBlockDrop is the same inbound-prune seam for typed Anthropic system[]
 	// blocks: true means this named block element may be removed after the cached
 	// system breakpoint. nil leaves system[] byte-for-byte unchanged.
@@ -1175,6 +1208,15 @@ func New(cfg Config) (*Server, error) {
 		if err := cfg.RouteAccounts.Validate(); err != nil {
 			return nil, fmt.Errorf("gateway: route accounts: %w", err)
 		}
+	}
+	// The MCP tool-exposure allowlist (--expose) narrows which tools are advertised
+	// AND callable. It is the same class of boundary as the route manifest — it
+	// decides what a client can reach — so compile-and-validate it here and fail
+	// loud on a malformed or zero-match pattern rather than let a typo silently
+	// shrink the surface to nothing at first connect. Empty ⇒ nil ⇒ full surface.
+	exposeAllow, err := compileToolExposeAllow(cfg.ExposeTools)
+	if err != nil {
+		return nil, err
 	}
 	model := cfg.Model
 	if model == "" {
@@ -1336,6 +1378,7 @@ func New(cfg Config) (*Server, error) {
 		elideResultBytes:           cfg.ElideResultBytes,
 		cacheTTL1H:                 cfg.CacheTTL1H || envEnabled("FAK_ABLATE_TTL_1H"),
 		toolFloorDenies:            cfg.ToolFloorDenies,
+		exposeAllow:                exposeAllow,
 		cacheStream:                cacheStream,
 		rungObs:                    rungObs,
 		feed:                       newCoherenceFeed(0),
@@ -1710,6 +1753,9 @@ func (s *Server) maybePlanMessages(ctx context.Context, trace string, messages [
 	if s.ctxView == nil || !s.ctxView.Enabled {
 		return messages
 	}
+	if hasStructuredToolContinuation(messages) {
+		return messages
+	}
 	// With a stable session trace, plan through the PERSISTENT per-session index — the
 	// incremental O(c·N) path, output-equivalent to the stateless full-scan but without
 	// rebuilding the lossless store every turn. Without a trace (a one-shot caller), fall
@@ -1727,6 +1773,15 @@ func (s *Server) maybePlanMessages(ctx context.Context, trace string, messages [
 		return messages
 	}
 	return planned
+}
+
+func hasStructuredToolContinuation(messages []agent.Message) bool {
+	for _, m := range messages {
+		if len(m.ToolCalls) > 0 || m.FunctionCall != nil || m.ToolCallID != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) observeDecodedCtxViewRewrite(trace string, full, planned []agent.Message) {

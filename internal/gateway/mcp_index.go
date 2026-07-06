@@ -268,7 +268,7 @@ func (s *Server) featureQuery(req FeatureQueryRequest) (selfquery.Response, erro
 		return selfquery.Response{}, errors.New("fak_feature_query requires query")
 	}
 	cat, err := selfquery.Load(req.Root, selfquery.Options{
-		Tools: selfquery.ToolDescriptorsFromMaps(toolDescriptors()),
+		Tools: selfquery.ToolDescriptorsFromMaps(s.exposedToolDescriptors()),
 	})
 	if err != nil {
 		return selfquery.Response{}, err
@@ -304,7 +304,7 @@ var capabilitiesInputSchema = json.RawMessage(`{
 
 func (s *Server) capabilities(req CapabilitiesRequest) (selfquery.CapabilitiesResponse, error) {
 	cat, err := selfquery.Load(req.Root, selfquery.Options{
-		Tools: selfquery.ToolDescriptorsFromMaps(toolDescriptors()),
+		Tools: selfquery.ToolDescriptorsFromMaps(s.exposedToolDescriptors()),
 	})
 	if err != nil {
 		return selfquery.CapabilitiesResponse{}, err

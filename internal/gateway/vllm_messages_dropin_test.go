@@ -301,3 +301,93 @@ func TestMessagesWirePreservesToolResultNameForOpenAIUpstream(t *testing.T) {
 		t.Fatalf("upstream tool result = %+v, want tool_call_id call_1 with name allow_read", *toolResult)
 	}
 }
+
+func TestMessagesWireTextToolModeSkipsCtxViewForToolContinuation(t *testing.T) {
+	t.Setenv("FAK_OPENAI_TOOL_MESSAGES_AS_TEXT", "1")
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterAdjudicator(0, toolAdj{})
+
+	var captured []agent.Message
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read upstream body: %v", err)
+		}
+		var req struct {
+			Messages []agent.Message `json:"messages"`
+		}
+		if err := json.Unmarshal(raw, &req); err != nil {
+			t.Fatalf("decode upstream request: %v\n%s", err, raw)
+		}
+		captured = req.Messages
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"saw the result"},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":4,"total_tokens":16}}`))
+	}))
+	defer upstream.Close()
+
+	srv, err := New(Config{
+		EngineID:      "test",
+		Model:         "qwen3.6-27b",
+		BaseURL:       upstream.URL + "/v1",
+		Provider:      "openai-compatible",
+		VDSO:          true,
+		CtxViewBudget: 8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	body, err := json.Marshal(map[string]any{
+		"model":      "qwen3.6-27b",
+		"max_tokens": 128,
+		"messages": []map[string]any{
+			{"role": "user", "content": "read main.go"},
+			{"role": "assistant", "content": []map[string]any{
+				{"type": "tool_use", "id": "call_1", "name": "allow_read", "input": map[string]any{"path": "main.go"}},
+			}},
+			{"role": "user", "content": []map[string]any{
+				{"type": "tool_result", "tool_use_id": "call_1", "content": "package main"},
+			}},
+		},
+		"tools": []map[string]any{
+			{"name": "allow_read", "input_schema": map[string]any{"type": "object"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	httpResp, err := http.Post(ts.URL+"/v1/messages", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer httpResp.Body.Close()
+	respRaw, _ := io.ReadAll(httpResp.Body)
+	if httpResp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200: %s", httpResp.StatusCode, respRaw)
+	}
+	var sawToolCallText, sawToolResponseText bool
+	for _, msg := range captured {
+		if msg.Role == agent.RoleTool {
+			t.Fatalf("text tool mode sent native role=tool upstream: %+v", captured)
+		}
+		if msg.Role == agent.RoleAssistant && strings.TrimSpace(msg.Content) == "" {
+			t.Fatalf("ctxview dropped the assistant tool_use into an empty assistant turn: %+v", captured)
+		}
+		if msg.Role == agent.RoleAssistant && strings.Contains(msg.Content, "<tool_call>") {
+			sawToolCallText = true
+		}
+		if msg.Role == agent.RoleUser && strings.Contains(msg.Content, "<tool_response>") {
+			sawToolResponseText = true
+		}
+	}
+	if !sawToolCallText || !sawToolResponseText {
+		t.Fatalf("tool continuation was not lowered to text blocks: sawToolCall=%v sawToolResponse=%v messages=%+v",
+			sawToolCallText, sawToolResponseText, captured)
+	}
+}
