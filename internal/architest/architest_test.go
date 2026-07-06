@@ -177,6 +177,7 @@ var tier = map[string]int{
 	"advmodel":         2,
 	"modelroute":       1, // per-aspect + ensemble model-routing policy spine (Route + Combine); pure, stdlib-only, imports nothing internal.
 	"modelscore":       1, // durable raw model-capability evidence registry (#3038): unbounded native-unit benchmark/cost/context rows with provenance; a Profile keeps raw evidence separate from any tier policy. Pure, stdlib-only, imports nothing internal, off the hot path.
+	"toon":             1, // general JSON<->TOON codec (#3065): lossless, type-preserving Encode/Decode + TabularEligibility, the round-trip generalization of memview's flat-subset encoder. Pure, stdlib-only, imports nothing internal, off the hot path.
 	"simhash":          1, // reference vector-similarity primitive (embed/cosine/top-k); the observability layer's near-duplicate / outlier-query substrate. Deterministic, stdlib-only, imports nothing internal.
 	"issuededup":       1, // write-time near-duplicate gate for issue producers (#2504): simhash embed + TopK over title / title+body axes into advisory dup-risk verdicts. Imports simhash(1) only, off the hot path.
 	"trajectory":       3, // trajectory data plane: folds the abi event stream into per-trace Turn rows + JSONL export; an abi.Emitter that optionally stamps a simhash query embedding. Imports abi+simhash.
