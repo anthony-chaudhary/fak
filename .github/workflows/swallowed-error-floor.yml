@@ -1,0 +1,128 @@
+name: swallowed-error-floor
+
+# Swallowed-error floor (#2899, hermes-inspiration epic #2871): no silent
+# `except` — every caught error is witnessed (logged/recorded with context) or
+# re-raised, never swallowed. Hermes carries ~3,656 bare `except:` sites; fak's
+# ethos is "report incomplete as `not yet` with evidence, never silently", so
+# the Go analogs of `except: pass` are gated here as a FLOOR (green at-or-below
+# the pinned baseline, red only on a NEW site — never red on the existing tree):
+#
+#   class A — empty `if ... err != nil { }` branch (whitespace-only body).
+#             HARD ZERO: the committed tree has none; any new one is red.
+#   class B — bare `_ = err` discard of a caught error variable.
+#             Grandfathered per-file at today's 2 sites (gardenbundle, maturity);
+#             a new site in any file — including those two — is red.
+#
+# The scan is pure text over tracked *.go files, so the count is identical on
+# every OS (no build tags, no type info — safe to pin from any host). It is an
+# under-approximation by design: multi-line `if` conditions, comment-only
+# bodies, and type-aware unchecked-return analysis (errcheck) are NOT covered.
+# Remaining slices of #2899 live outside this lane: an errcheck-style
+# type-aware pass (baseline must be pinned from Linux — counts are
+# build-tag-dependent) and the `fak guard` session exit line counting
+# suppressed errors at runtime.
+#
+# Remediation when red: witness the error (log/record it with context) or
+# return it. Do not widen the grandfather list; it only shrinks.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancel a PR's superseded in-flight runs on a re-push; every trunk commit
+# keeps its own floor verdict (group falls back to the unique SHA on main).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  swallowed-error-floor:
+    name: swallowed-error floor (A hard-zero; B grandfathered at 2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: scan tracked Go files for swallowed errors
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, re, subprocess, sys
+
+          # Grandfathered bare `_ = err` sites at the #2899 baseline. Per-file
+          # counts, not line numbers, so unrelated edits cannot false-red the
+          # floor. This list only ever shrinks.
+          GRANDFATHERED_BLANK_ERR = {
+              "internal/gardenbundle/gardenbundle.go": 1,
+              "internal/maturity/maturity.go": 1,
+          }
+
+          # Lookahead keeps empty composite literals in the condition (always
+          # parenthesized in Go, so followed by ')') from reading as a body.
+          RE_EMPTY_BRANCH = re.compile(
+              r'if[^\n{]*\berr\s*!=\s*nil[^\n{]*\{\s*\}(?=\s*(?:\n|else\b|\}|$))')
+          RE_BLANK_ERR = re.compile(r'^\s*_\s*=\s*err\s*$', re.M)
+          SKIP_DIRS = ("vendor/", "testdata/", "third_party/")
+
+          out = subprocess.check_output(["git", "ls-files", "-z", "--", "*.go"])
+          files = [f.decode() for f in out.split(b"\0") if f]
+
+          a_hits, b_by_file, n = [], {}, 0
+          for name in files:
+              if any(s in name for s in SKIP_DIRS) or name.endswith(".pb.go"):
+                  continue
+              n += 1
+              with open(name, encoding="utf-8", errors="replace") as fh:
+                  text = fh.read()
+              for m in RE_EMPTY_BRANCH.finditer(text):
+                  a_hits.append(f"{name}:{text.count(chr(10), 0, m.start()) + 1}")
+              for m in RE_BLANK_ERR.finditer(text):
+                  line = text.count(chr(10), 0, m.start()) + 1
+                  b_by_file.setdefault(name, []).append(f"{name}:{line}")
+
+          b_total = sum(len(v) for v in b_by_file.values())
+          baseline = sum(GRANDFATHERED_BLANK_ERR.values())
+          new_b = []
+          for name, hits in sorted(b_by_file.items()):
+              allowed = GRANDFATHERED_BLANK_ERR.get(name, 0)
+              if len(hits) > allowed:
+                  new_b.extend(hits)
+          slack = [f for f, allowed in GRANDFATHERED_BLANK_ERR.items()
+                   if len(b_by_file.get(f, [])) < allowed]
+
+          red = bool(a_hits or new_b)
+          lines = [
+              "## Swallowed-error floor (#2899)",
+              f"- tracked Go files scanned: {n}",
+              f"- suppressed-error sites this run: {len(a_hits) + b_total} "
+              f"(baseline {baseline})",
+              f"- class A empty `if err != nil {{}}` branches: {len(a_hits)} (floor 0)",
+              f"- class B bare `_ = err` discards: {b_total} "
+              f"(grandfathered {baseline}, new {len(new_b)})",
+              f"- verdict: {'RED — new swallowed error(s)' if red else 'green (at or below floor)'}",
+          ]
+          report = "\n".join(lines)
+          print(report)
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as fh:
+                  fh.write(report + "\n")
+
+          if a_hits:
+              print("\nnew empty error branches (witness the error or return it):")
+              for h in a_hits:
+                  print(f"  {h}")
+          if new_b:
+              print("\nnew bare `_ = err` discards (witness the error or return it):")
+              for h in new_b:
+                  print(f"  {h}")
+          if slack and not red:
+              print("\nadvisory: grandfathered site(s) removed in "
+                    + ", ".join(sorted(slack))
+                    + " — tighten GRANDFATHERED_BLANK_ERR in this workflow.")
+          sys.exit(1 if red else 0)
+          PY
