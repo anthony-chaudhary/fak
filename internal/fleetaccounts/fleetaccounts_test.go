@@ -138,6 +138,45 @@ func TestProfileTierInference(t *testing.T) {
 	}
 }
 
+// TestModelTierFromNameGeminiFlashIsTier2 pins the v1 model taxonomy, including the
+// Gemini 3.5 Flash → tier 2 classification (the GCP Vertex lightweight seat). It also
+// guards the existing tiers against regression, and asserts the Vertex OpenAI-compat
+// upstream id (`google/gemini-3.5-flash`) — the one the dispatch seat actually sends —
+// resolves to tier 2, not tier 3.
+func TestModelTierFromNameGeminiFlashIsTier2(t *testing.T) {
+	cases := []struct {
+		model string
+		tier  int
+	}{
+		// Gemini 3.5 Flash: the new tier-2 lightweight seat, in every id shape it appears.
+		{"gemini-3.5-flash", 2},
+		{"google/gemini-3.5-flash", 2},
+		{"Gemini 3.5 Flash", 2},
+		{"gemini_3.5_flash", 2},
+		// Fable 5 is the restricted apex model: tier 0, in every id shape it appears.
+		{"claude-fable-5", 0},
+		{"fable-5", 0},
+		{"fable5", 0},
+		{"Fable 5", 0},
+		{"claude-fable-5-preview", 0},
+		// GLM-5.2 stays tier 2; the frontier set stays tier 1; unknowns stay tier 3.
+		{"glm-5.2", 2},
+		{"zai-coding-plan/glm-5.2", 2},
+		{"gpt-5.5", 1},
+		{"opus-4.6", 1},
+		{"deepseek-v4-pro", 1},
+		{"kimi-k2.6", 1},
+		{"gemini-3.5-pro", 3}, // only Flash is tier 2; Pro is not classified here
+		{"llama3.2", 3},
+		{"", 3},
+	}
+	for _, tc := range cases {
+		if got := modelTierFromName(tc.model); got != tc.tier {
+			t.Errorf("modelTierFromName(%q) = %d, want %d", tc.model, got, tc.tier)
+		}
+	}
+}
+
 func TestNIMCodingSeatsRankAsTierOneOpencode(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")

@@ -51,12 +51,19 @@ func ClassifyTask(taskText, taskClass string, pol Policy) TaskClass {
 		requested = "auto"
 	}
 	switch {
+	case apexRequested(requested):
+		// Apex (Fable 5) is the ONLY tier a task-text heuristic can never reach: it is
+		// selected exclusively by this explicit operator request, so the restricted
+		// model is used only in the clear cases it is asked for — see apextier.go.
+		return TaskClass{"apex", 1.0,
+			"operator explicitly requested the apex tier (Fable 5); tier 0 is never inferred",
+			TierApex, threshold}
 	case in(requested, "light", "easy", "tier2", "t2", "2"):
-		return TaskClass{"light", 1.0, "operator requested light/tier2", 2, threshold}
+		return TaskClass{"light", 1.0, "operator requested light/tier2", TierLight, threshold}
 	case in(requested, "hard", "default", "tier1", "t1", "1"):
-		return TaskClass{"hard", 1.0, "operator requested hard/tier1", 1, threshold}
+		return TaskClass{"hard", 1.0, "operator requested hard/tier1", TierFrontier, threshold}
 	case in(requested, "tier3", "t3", "3"):
-		return TaskClass{"tier3", 1.0, "operator requested tier3", 3, threshold}
+		return TaskClass{"tier3", 1.0, "operator requested tier3", TierOther, threshold}
 	}
 	if gardeningWorkKinds[requested] {
 		return TaskClass{"gardening", 1.0,
@@ -66,20 +73,23 @@ func ClassifyTask(taskText, taskClass string, pol Policy) TaskClass {
 		return TaskClass{"engineering", 1.0,
 			"operator stated work_kind=" + requested + " (engineering -> tier1)", 1, threshold}
 	}
+	// Task-text inference never targets apex: its ceiling is the frontier tier, so an
+	// unclassified request can escalate at most to tier 1, never to the restricted
+	// Fable-5 tier 0.
 	text := strings.TrimSpace(wsRun.ReplaceAllString(taskText, " "))
 	if text == "" {
-		return TaskClass{"hard", 0.5, "no task text; defaulting to max-quality tier", 1, threshold}
+		return TaskClass{"hard", 0.5, "no task text; defaulting to max-quality tier", TierFrontier, threshold}
 	}
 	if len(text) <= 80 && !hardTaskHintRE.MatchString(text) {
 		for _, p := range lightTaskPatterns {
 			if p.MatchString(text) {
 				return TaskClass{"light", threshold,
-					"short trivial prompt matched v1 light-task allowlist", 2, threshold}
+					"short trivial prompt matched v1 light-task allowlist", TierLight, threshold}
 			}
 		}
 	}
 	return TaskClass{"hard", 1.0 - threshold,
-		"not a high-confidence trivial prompt; defaulting to max-quality tier", 1, threshold}
+		"not a high-confidence trivial prompt; defaulting to max-quality tier", TierFrontier, threshold}
 }
 
 func in(s string, opts ...string) bool {
@@ -189,11 +199,22 @@ func RouteAccount(rows []Account, taskText, taskClass string, allowTierFallback,
 	target := task.TargetTier
 	fallbackPolicy := strings.ToLower(pol.Routing.HardTier1Fallback)
 	effectiveAllow := allowTierFallback || in(fallbackPolicy, "allow", "fallback", "tier2", "t2")
+	// The fallback ladder. Crucially, no non-apex target ever lists tier 0, so a tier-0
+	// (Fable 5) account is unreachable except when apex was explicitly targeted — the
+	// account-side half of the apex restriction (see apextier.go).
 	tierOrder := []int{target}
-	if target == 2 && !strictTier {
-		tierOrder = append(tierOrder, 1)
-	} else if effectiveAllow {
-		tierOrder = append(tierOrder, 2)
+	switch {
+	case target == TierApex:
+		// Apex is scarce and explicit-only: never escalate INTO it, and when no apex
+		// account is offered, degrade DOWN to the frontier tier — never sideways or up
+		// — unless the caller pinned the exact tier.
+		if !strictTier {
+			tierOrder = append(tierOrder, TierFrontier)
+		}
+	case target == TierLight && !strictTier:
+		tierOrder = append(tierOrder, TierFrontier)
+	case effectiveAllow:
+		tierOrder = append(tierOrder, TierLight)
 	}
 
 	for _, tier := range tierOrder {

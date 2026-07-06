@@ -174,9 +174,13 @@ func excludedMatch(tag, account string, exclude []string, identityValues ...stri
 
 var nonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
 
-// modelTierFromName is the small v1 model taxonomy. Tier 1 is the max-quality frontier
-// set; tier 2 is GLM-5.2 for lightweight work; everything else is tier 3.
+// modelTierFromName is the small v1 model taxonomy. Tier 0 is the restricted apex
+// model (Fable 5 — see apextier.go); tier 1 is the max-quality frontier set; tier 2 is
+// the lightweight-work set (GLM-5.2 and Gemini 3.5 Flash); everything else is tier 3.
 func modelTierFromName(model string) int {
+	if IsApexModel(model) {
+		return TierApex
+	}
 	text := strings.ToLower(model)
 	text = strings.ReplaceAll(text, "_", "-")
 	text = strings.ReplaceAll(text, " ", "-")
@@ -193,6 +197,11 @@ func modelTierFromName(model string) int {
 		return 1
 	}
 	if strings.Contains(text, "glm-5.2") || strings.Contains(compact, "glm52") {
+		return 2
+	}
+	// Gemini 3.5 Flash — Google's fast/lightweight tier, served via GCP Vertex AI on the
+	// OpenAI-compatible endpoint as `google/gemini-3.5-flash`. Lightweight work, tier 2.
+	if strings.Contains(text, "gemini-3.5-flash") || strings.Contains(compact, "gemini35flash") {
 		return 2
 	}
 	return 3
@@ -225,11 +234,17 @@ func cleanProfile(raw ProfileOverride, source string) Profile {
 		Agent:         raw.Agent,
 		ProfileSource: source,
 	}
-	if p.ModelTier != 1 && p.ModelTier != 2 && p.ModelTier != 3 {
+	// An explicit profile tier of 0 means "unset" (fall through to name inference),
+	// NOT apex: the apex tier is reached only by naming a Fable-5 model, never by
+	// setting model_tier:0 in a profile. That keeps the restricted apex tier out of
+	// reach of a casual numeric override — see apextier.go.
+	if p.ModelTier != TierFrontier && p.ModelTier != TierLight && p.ModelTier != TierOther {
 		p.ModelTier = modelTierFromName(raw.Model)
 	}
-	if p.ModelTier != 1 && p.ModelTier != 2 && p.ModelTier != 3 {
-		p.ModelTier = 3
+	// An INFERRED apex (tier 0 from a Fable-5 name) is kept; anything still outside the
+	// taxonomy falls to tier 3.
+	if !validModelTier(p.ModelTier) {
+		p.ModelTier = TierOther
 	}
 	return p
 }

@@ -73,11 +73,19 @@ func AllocateWave(rows []Account, req WaveRequest, pol Policy) WaveResult {
 
 	fallbackPolicy := strings.ToLower(pol.Routing.HardTier1Fallback)
 	effectiveAllow := req.AllowTierFallback || in(fallbackPolicy, "allow", "fallback", "tier2", "t2")
+	// The same fallback ladder as RouteAccount: no non-apex target lists tier 0, so an
+	// apex (Fable 5) seat is never swept into a hard/light wave. An explicit apex target
+	// degrades DOWN to frontier (never sideways to light) when no apex seat is offered.
 	tierOrder := []int{target}
-	if target == 2 && !strict {
-		tierOrder = append(tierOrder, 1)
-	} else if effectiveAllow {
-		tierOrder = append(tierOrder, 2)
+	switch {
+	case target == TierApex:
+		if !strict {
+			tierOrder = append(tierOrder, TierFrontier)
+		}
+	case target == TierLight && !strict:
+		tierOrder = append(tierOrder, TierFrontier)
+	case effectiveAllow:
+		tierOrder = append(tierOrder, TierLight)
 	}
 
 	var lanes []WaveLane
