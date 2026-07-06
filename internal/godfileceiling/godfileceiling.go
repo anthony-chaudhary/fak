@@ -185,6 +185,14 @@ func MeasureTree(root string) (map[string]int, error) {
 		if rel == "" || Excluded(rel) {
 			continue
 		}
+		// _test.go files are graded by the tests KPI, not architecture — they churn
+		// constantly (every new leaf appends a row to a shared *_test.go), so pinning
+		// them reds the gate on unrelated growth. Match internal/hooks/gate_godfile.go
+		// and tools/code_quality_scorecard.py, which both exclude tests from the
+		// architecture corpus.
+		if strings.HasSuffix(rel, "_test.go") {
+			continue
+		}
 		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
 		if err != nil {
 			// A tracked path we cannot read (deleted in the working tree) is skipped, not

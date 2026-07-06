@@ -32,7 +32,11 @@
 // tools/code_quality_scorecard.py's n_lines so the gate and the scorecard agree on what
 // a god-file is. The measured set is `git ls-files '*.go'` minus the same non-first-party
 // trees the scorecard excludes (testdata, vendor, and the agent-machinery checkout dirs
-// that hold full repo COPIES) — see ExcludeDirs.
+// that hold full repo COPIES) — see ExcludeDirs — and minus *_test.go, which the
+// architecture corpus grades under the tests KPI rather than as god-files. Test files
+// churn on every new leaf (a shared *_test.go gains a row per package), so pinning them
+// would red the gate on growth unrelated to any monolith; internal/hooks/gate_godfile.go
+// (the god-file/function GROWTH ratchet, #2868) excludes them for the same reason.
 //
 // # Regenerating the baseline
 //

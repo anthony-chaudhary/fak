@@ -2,6 +2,7 @@ package godfileceiling
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -174,7 +175,8 @@ func TestLiveTreeUnderCeiling(t *testing.T) {
 }
 
 // TestBaselineIsConsistent guards the shipped baseline: every pin must be a real god-file
-// (over the hard ceiling), else it does not belong in the ratchet.
+// (over the hard ceiling) and never a _test.go (those are graded by the tests KPI, not
+// architecture, and churn per new leaf — see doc.go), else it does not belong in the ratchet.
 func TestBaselineIsConsistent(t *testing.T) {
 	for rel, cap := range Baseline {
 		if cap <= HardCeiling {
@@ -183,6 +185,28 @@ func TestBaselineIsConsistent(t *testing.T) {
 		}
 		if rel != filepath.ToSlash(rel) {
 			t.Errorf("baseline path %q must be forward-slashed", rel)
+		}
+		if strings.HasSuffix(rel, "_test.go") {
+			t.Errorf("baseline pins %s: a _test.go file must not be pinned (tests KPI grades them; MeasureTree excludes them)", rel)
+		}
+	}
+}
+
+// TestMeasureTreeExcludesTests covers the _test.go exclusion end-to-end: MeasureTree over
+// the real tracked tree must return zero _test.go paths, so an over-ceiling test file (a
+// shared *_test.go that gains a row per new leaf) can never red the gate. This is the
+// fix for the spurious grew-past-cap that a pinned architest_test.go produced.
+func TestMeasureTreeExcludesTests(t *testing.T) {
+	measured, err := MeasureTree(repoRoot(t))
+	if err != nil {
+		t.Skipf("cannot measure tree (git unavailable?): %v", err)
+	}
+	if len(measured) == 0 {
+		t.Skip("no tracked .go files measured — not a git checkout")
+	}
+	for rel := range measured {
+		if strings.HasSuffix(rel, "_test.go") {
+			t.Errorf("MeasureTree included a _test.go file %q — tests must be excluded from the god-file corpus", rel)
 		}
 	}
 }
