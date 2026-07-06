@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
 )
@@ -68,6 +69,33 @@ func TestClassifyDirtyGroupsByLane(t *testing.T) {
 	}
 	if n := stampableCount(plan); n != 3 {
 		t.Fatalf("stampableCount = %d, want 3", n)
+	}
+}
+
+func TestClassifyDirtyRollsUpOldestDirtyAge(t *testing.T) {
+	entries := []dirtyEntry{
+		{Path: "docs/newer.md", Status: "M", MTime: 2000, AgeSeconds: 60},
+		{Path: "docs/older.md", Status: "M", MTime: 1000, AgeSeconds: 1060},
+		{Path: "gateway/http.go", Status: "M", MTime: 1500, AgeSeconds: 560},
+	}
+	plan := classifyDirty(entries, prefixResolver, nil)
+	if plan.OldestDirtyPath != "docs/older.md" || plan.OldestDirtyMTime != 1000 || plan.OldestDirtyAgeSeconds != 1060 {
+		t.Fatalf("plan oldest = %q/%d/%d, want docs/older.md/1000/1060",
+			plan.OldestDirtyPath, plan.OldestDirtyMTime, plan.OldestDirtyAgeSeconds)
+	}
+	byLane := map[string]sweepGroup{}
+	for _, g := range plan.Groups {
+		byLane[g.Lane] = g
+	}
+	docs := byLane["docs"]
+	if docs.OldestDirtyPath != "docs/older.md" || docs.OldestDirtyMTime != 1000 || docs.OldestDirtyAgeSeconds != 1060 {
+		t.Fatalf("docs oldest = %q/%d/%d, want docs/older.md/1000/1060",
+			docs.OldestDirtyPath, docs.OldestDirtyMTime, docs.OldestDirtyAgeSeconds)
+	}
+	gateway := byLane["gateway"]
+	if gateway.OldestDirtyPath != "gateway/http.go" || gateway.OldestDirtyMTime != 1500 || gateway.OldestDirtyAgeSeconds != 560 {
+		t.Fatalf("gateway oldest = %q/%d/%d, want gateway/http.go/1500/560",
+			gateway.OldestDirtyPath, gateway.OldestDirtyMTime, gateway.OldestDirtyAgeSeconds)
 	}
 }
 
@@ -290,6 +318,30 @@ func TestRenderSweepPlanIncludesScore(t *testing.T) {
 	}
 }
 
+func TestRenderSweepPlanIncludesOldestAge(t *testing.T) {
+	plan := sweepPlan{
+		TotalDirty:            1,
+		OldestDirtyPath:       "docs/a.md",
+		OldestDirtyAgeSeconds: 2 * 3600,
+		Groups: []sweepGroup{{
+			Lane:                  "docs",
+			Trailer:               "(fak docs)",
+			Paths:                 []string{"docs/a.md"},
+			Score:                 100,
+			OldestDirtyPath:       "docs/a.md",
+			OldestDirtyAgeSeconds: 2 * 3600,
+		}},
+	}
+	var out bytes.Buffer
+	renderSweepPlan(&out, plan)
+	got := out.String()
+	for _, want := range []string{"oldest dirty: 2h at docs/a.md", "oldest: 2h at docs/a.md"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered sweep plan missing %q:\n%s", want, got)
+		}
+	}
+}
+
 // TestRenderSweepPlanShowsSubUnits proves a too-large lane renders the directory-coherent sub-unit
 // block with a per-unit `--apply --unit N` hint, while an unsplit lane still renders exactly the
 // single whole-lane hint (the sub-unit block must not leak into the small-lane path).
@@ -434,6 +486,31 @@ func TestParsePorcelainZ(t *testing.T) {
 	}
 	if got[2].Path != "internal/old/gone.go" || got[2].Status != "D" {
 		t.Fatalf("entry2 = %+v", got[2])
+	}
+}
+
+func TestAnnotateDirtyAgesStatsExistingPaths(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(root, "docs", "a.md")
+	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mtime := time.Unix(1_700, 0)
+	if err := os.Chtimes(p, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+	got := annotateDirtyAges(root, []dirtyEntry{
+		{Path: "docs/a.md", Status: "M"},
+		{Path: "docs/missing.md", Status: "D"},
+	}, time.Unix(2_000, 0))
+	if got[0].MTime != 1_700 || got[0].AgeSeconds != 300 {
+		t.Fatalf("existing path age = %d/%d, want 1700/300", got[0].MTime, got[0].AgeSeconds)
+	}
+	if got[1].MTime != 0 || got[1].AgeSeconds != 0 {
+		t.Fatalf("missing path should omit age, got %d/%d", got[1].MTime, got[1].AgeSeconds)
 	}
 }
 

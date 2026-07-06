@@ -335,6 +335,6 @@ acceptance target:
   name|provider|base_url[|api_key_env[|model_hint]]
 
 model-account roster:
-  a fak-route account roster from 'fak route --accounts-dump'; readiness probes OpenAI-compatible/local accounts only, while acceptance also classifies native provider accounts as supported-unprobed.
+  a fak-route account roster from 'fak route --accounts-dump'; readiness probes OpenAI-compatible/local accounts (openai, openai-responses, xai, deepseek, local) only, while acceptance also classifies native provider accounts as supported-unprobed.
 `)
 }

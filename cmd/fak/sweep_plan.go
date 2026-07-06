@@ -86,13 +86,13 @@ type sweepGroup struct {
 
 // sweepPlan is the full grouped view of a dirty working tree.
 type sweepPlan struct {
-	TotalDirty             int          `json:"total_dirty"`
-	OldestDirtyPath        string       `json:"oldest_dirty_path,omitempty"`
-	OldestDirtyMTime       int64        `json:"oldest_dirty_mtime,omitempty"`
-	OldestDirtyAgeSeconds  int64        `json:"oldest_dirty_age_seconds,omitempty"`
-	Groups                 []sweepGroup `json:"groups"`
-	NoLane                 []sweepEntry `json:"no_lane,omitempty"`
-	Junk                   []sweepEntry `json:"junk,omitempty"`
+	TotalDirty            int          `json:"total_dirty"`
+	OldestDirtyPath       string       `json:"oldest_dirty_path,omitempty"`
+	OldestDirtyMTime      int64        `json:"oldest_dirty_mtime,omitempty"`
+	OldestDirtyAgeSeconds int64        `json:"oldest_dirty_age_seconds,omitempty"`
+	Groups                []sweepGroup `json:"groups"`
+	NoLane                []sweepEntry `json:"no_lane,omitempty"`
+	Junk                  []sweepEntry `json:"junk,omitempty"`
 }
 
 // atomicUnitTarget is the largest number of paths a single sweep sub-commit should carry. A lane
