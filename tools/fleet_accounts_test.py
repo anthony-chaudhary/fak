@@ -545,6 +545,31 @@ class FleetAccountsTest(unittest.TestCase):
         self.assertEqual(by_account["opencode-zai2"]["small_model"], "zai-coding-plan/glm-4.5-air")
         self.assertNotIn("provider", by_account["opencode-zai2"])
 
+    def test_model_tier_from_name_gemini_flash_is_tier2(self) -> None:
+        # Mirror of the Go TestModelTierFromNameGeminiFlashIsTier2 (the two ports stay
+        # logic-identical): Gemini 3.5 Flash is the new tier-2 lightweight GCP Vertex seat,
+        # in every id shape it appears; the existing tiers are unchanged.
+        cases = [
+            ("gemini-3.5-flash", 2),
+            ("google/gemini-3.5-flash", 2),
+            ("Gemini 3.5 Flash", 2),
+            ("gemini_3.5_flash", 2),
+            ("glm-5.2", 2),
+            ("zai-coding-plan/glm-5.2", 2),
+            ("gpt-5.5", 1),
+            ("opus-4.6", 1),
+            ("deepseek-v4-pro", 1),
+            ("kimi-k2.6", 1),
+            ("gemini-3.5-pro", 3),  # only Flash is tier 2
+            ("llama3.2", 3),
+            ("", 3),
+        ]
+        for model, tier in cases:
+            self.assertEqual(
+                fleet_accounts._model_tier_from_name(model), tier,
+                f"_model_tier_from_name({model!r})",
+            )
+
     def test_nim_coding_seats_rank_as_tier1_opencode_workers(self) -> None:
         seats = [
             ("opencode-nim-deepseek-v4-pro", "nim-deepseek-v4-pro",
@@ -657,6 +682,33 @@ class FleetAccountsTest(unittest.TestCase):
         self.assertTrue(engineering["ok"])
         self.assertEqual(engineering["selected_tier"], 1)
         self.assertEqual(engineering["account"]["product"], "claude")
+
+    def test_route_account_skips_live_leased_pool(self) -> None:
+        opencode_dir(self.config_home, "opencode",
+                     config={"model": "zai-coding-plan/glm-5.2"})
+        opencode_dir(self.config_home, "opencode-zai2",
+                     config={"model": "zai-coding-plan/glm-5.2"})
+        rows = fleet_accounts.annotate_accounts(
+            fleet_accounts.discover_accounts(str(self.home),
+                                             config_home=str(self.config_home)),
+            registry={},
+        )
+
+        routed = fleet_accounts.route_account(
+            rows,
+            "review and clean up the backlog",
+            "gardening",
+            product="opencode",
+            leases=[{
+                "worker": "resolve-3032-20260706-143708",
+                "tag": "default",
+                "dir": str(self.config_home / "opencode"),
+            }],
+        )
+
+        self.assertTrue(routed["ok"])
+        self.assertEqual(routed["selected_tier"], 2)
+        self.assertEqual(routed["account"]["account"], "opencode-zai2")
 
     def test_route_account_gardening_upshifts_to_tier1_when_no_tier2(self) -> None:
         # No tier-2 account exists. A gardening task must NOT stall: it up-shifts to

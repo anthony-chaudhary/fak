@@ -112,6 +112,30 @@ class FeasibilityTest(unittest.TestCase):
         self.assertEqual(e["precision"], "official")
 
 
+class ConceptBenchmarkKindTest(unittest.TestCase):
+    def test_registered_and_hardware_agnostic(self):
+        # #2740: the concept-fidelity runner is a first-class workload-kind.
+        self.assertIn("concept-benchmark", MOD.KINDS)
+        # model-agnostic policy-fidelity workload: feasible on every bench-node,
+        # including the Apple mac (no CUDA / served-coding-model gate).
+        feas, note = MOD.feasible(
+            {"gpu": "Apple M3 Pro", "os": "macOS", "arch": "arm64"}, "concept-benchmark")
+        self.assertTrue(feas, note)
+
+    def test_surfaces_as_a_coverage_cell(self):
+        p = plan()
+        # no synth run tags concept-benchmark, so it is an empty coverage cell on
+        # every bench-node -- the planner lists it as a schedulable workload.
+        for mid in ("busy", "mac", "newnv", "thin"):
+            cell = p["matrix"][mid]["concept-benchmark"]
+            self.assertTrue(cell["feasible"], f"{mid} concept-benchmark must be feasible")
+            self.assertEqual(cell["runs"], 0, f"{mid} concept-benchmark must read empty")
+        e = entry(p, "busy", "concept-benchmark")
+        self.assertIsNotNone(e, "concept-benchmark must appear in the ranked plan")
+        self.assertTrue(e["is_empty"])
+        self.assertIn("concept-benchmark", MOD.render_md(p))
+
+
 class AgentHostExclusionTest(unittest.TestCase):
     def test_agent_host_never_a_target(self):
         p = plan()
@@ -174,7 +198,7 @@ class FourIntentTest(unittest.TestCase):
 
     def test_rendered_doc_has_all_four_sections(self):
         md = MOD.render_md(plan())
-        self.assertIn("| machine | model | gpu | qwen36 | radix | session | fan | agent-live | turn-tax | parity | livecodebench |", md)
+        self.assertIn("| machine | model | gpu | qwen36 | radix | session | fan | agent-live | turn-tax | parity | livecodebench | concept-bench |", md)
         for header in ("### Benchmark perf", "### Learn / collect new data",
                        "### Prevent regression", "### Fill coverage gaps"):
             self.assertIn(header, md)
@@ -280,6 +304,20 @@ class RealCatalogSmokeTest(unittest.TestCase):
         self.assertEqual(set(p["by_intent"]), set(MOD.INTENTS))
         self.assertGreater(p["totals"]["bench_nodes"], 0)
         self.assertIn("PLAN ONLY", MOD.render_md(p))
+
+    def test_declared_workload_kinds_are_all_schedulable(self):
+        # #2740: the catalog declares a workload-kind registry; every kind it names must
+        # be one the planner can schedule (in KIND_META), and concept-benchmark is in it.
+        path = ROOT / "experiments" / "benchmark" / "catalog.json"
+        cat = MOD.load_catalog(path)
+        if cat is None:
+            self.skipTest("real catalog not present")
+        declared = cat.get("workload_kinds")
+        if not declared:
+            self.skipTest("catalog declares no workload_kinds")
+        self.assertIn("concept-benchmark", declared)
+        self.assertLessEqual(set(declared), set(MOD.KINDS),
+                             "every catalog-declared workload_kind must be schedulable by the planner")
 
 
 if __name__ == "__main__":

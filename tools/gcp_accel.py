@@ -156,7 +156,9 @@ TIERS: tuple[AccelTier, ...] = (
         notes=(
             "H100 Mega fallback for full 8-GPU GLM-5.2 serves when a3-highgpu-8g "
             "is quota-ok but stocked out. Uses the separate NVIDIA_H100_MEGA quota "
-            "family and the same sm_90 pure-fak-kernel serve path."
+            "family; stock GLM-5.2 serving defaults to W4AFP8 on this 640 GB shape "
+            "only as a temporary compatibility path; SERVE=fak is the intended "
+            "pure-kernel target."
         ),
     ),
     AccelTier(

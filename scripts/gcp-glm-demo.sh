@@ -59,7 +59,8 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # The demo tier is the 8x H100 Mega shape by default — the current GCP fallback that has
 # succeeded for GLM-5.2 and carries the separate NVIDIA_H100_MEGA quota family. GLM-5.2 at
-# UD-Q4_K_M is ~466 GB, so it only fits across the 640 GB of an 8x80GB H100/H100-Mega node.
+# UD-Q4_K_S still needs the 640 GB of an 8x80GB H100/H100-Mega node, and keeps the demo on
+# the pure-Q4_K expert path instead of UD-Q4_K_M's slow mixed Q5_K/Q6_K host seam.
 GCP_TIER="${GCP_TIER:-a3-mega-h100}"
 VM_NAME="${VM_NAME:-fak-glm-demo}"
 # The demo is the PURE FAK KERNEL demo: force SERVE=fak even on sm_90+ H100, where the
@@ -268,6 +269,14 @@ run_probe_turns() {
     elif command -v powershell.exe >/dev/null 2>&1 && [ -f "$ROOT/scripts/dogfood-claude.ps1" ]; then
       local ps_script
       ps_script="$(wslpath -w "$ROOT/scripts/dogfood-claude.ps1")"
+      # We are invoking a Win32 process (powershell.exe) FROM wsl, so the glm-gcp preset
+      # env vars must cross with the /w flag (WSL->Win32). /u is the OPPOSITE direction
+      # (Win32->WSL) and would silently drop them, leaving the .ps1 with no preset -> it
+      # falls back to the local SmolLM2-135M shim instead of fronting the GLM tunnel. These
+      # are plain string/URL values (no path), so /w alone, never /wp (no path translation).
+      local wsl_env="FAK_DOGFOOD_PRESET/w:FAK_GLM_GCP_BASE_URL/w:FAK_DOGFOOD_TIMEOUT_S/w:FAK_DOGFOOD_NO_ATTACH/w"
+      [ -z "${WSLENV:-}" ] || wsl_env="$wsl_env:$WSLENV"
+      WSLENV="$wsl_env" \
       FAK_DOGFOOD_PRESET=glm-gcp \
       FAK_GLM_GCP_BASE_URL="http://127.0.0.1:${LOCAL_TUNNEL_PORT}/v1" \
       FAK_DOGFOOD_TIMEOUT_S="$PROBE_TIMEOUT_S" \

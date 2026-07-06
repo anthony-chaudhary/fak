@@ -45,6 +45,18 @@ RUNS_DIR = BENCHMARK_DIR / "runs" / "by-machine"
 CATALOG_PATH = BENCHMARK_DIR / "catalog.json"
 SCHEMAS_DIR = ROOT / "tools" / "schemas"
 
+# Canonical fleet workload-kinds the bench planner (tools/bench_plan.py) schedules as
+# (machine x kind) coverage cells. Declared here so the generated catalog carries the
+# kind REGISTRY durably: build_catalog() rebuilds the top-level dict with a fixed key
+# set, so a hand-added "workload_kinds" would be dropped on the next rebuild. Keep this
+# list in step with bench_plan.py's KIND_META (tools/bench_plan_test.py asserts the
+# catalog's declared kinds are all schedulable by the planner).
+CANONICAL_WORKLOAD_KINDS = [
+    "model-benchmark", "gpu-benchmark", "qwen36", "radix-benchmark",
+    "session-benchmark", "fan-benchmark", "agent-live", "turn-tax",
+    "parity", "livecodebench", "concept-benchmark",
+]
+
 
 def normalize_run_path(path_str: str) -> str:
     """Strip a stale leading ``fak/`` (or ``fak\\``) segment from a run path.
@@ -316,13 +328,20 @@ def build_catalog() -> Dict:
     print("[bench_catalog] Building indexes...", file=sys.stderr)
     indexes = build_indexes(runs)
 
+    # Preserve any operator-added kinds beyond the canonical set (append, don't reorder).
+    existing_kinds = existing.get("workload_kinds") or []
+    workload_kinds = list(CANONICAL_WORKLOAD_KINDS) + [
+        k for k in existing_kinds if k not in CANONICAL_WORKLOAD_KINDS
+    ]
+
     catalog = {
         "$schema": "benchmark/catalog.v1",
         "version": existing.get("version", "1.0"),
         "last_updated": datetime.now(timezone.utc).isoformat(),
         "machines": machines,
         "runs": runs,
-        "index": indexes
+        "index": indexes,
+        "workload_kinds": workload_kinds,
     }
     update_machine_stats(catalog)
 

@@ -144,6 +144,2454 @@
       "gaps": [
         "the scorecards each redeclare their ladder; no shared code names the pattern"
       ]
+    },
+    {
+      "id": "gpu-server",
+      "canonical": "gpu server",
+      "signal": "doc-only",
+      "evidence": "GPU server",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "GpuServer",
+      "named_symbol": "",
+      "doc_anchor": "docs/glossary.md",
+      "definition": "the recurring heading (80 docs, concentrated in docs/benchmarks/, docs/nightrun/, docs/notes/) for the lab's private 8-GPU datacenter box that big-model benchmarks run on; docs/gpu-server-private-boundary.md mandates 'GPU server' as the scrubbed public name for it (no host/IP/path/token), so the phrase is itself a deliberate anonymization convention, not a code artifact",
+      "aliases": [],
+      "verdict": "named-doc",
+      "gaps": [
+        "define 'GPU server' in the glossary as the sanctioned public alias for the private lab host and link docs/gpu-server-private-boundary.md as its contract"
+      ]
+    },
+    {
+      "id": "mcp-server",
+      "canonical": "mcp server",
+      "signal": "doc-only",
+      "evidence": "MCP server",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "McpServer",
+      "named_symbol": "",
+      "doc_anchor": "docs/glossary.md",
+      "definition": "the recurring heading (53 docs, mostly docs/integrations/ and docs/FAQ.md) for fak's Model Context Protocol server surface: `fak serve --stdio` (or POST /mcp over HTTP) speaking JSON-RPC 2.0 and exposing the fak_* adjudication tools; an external-protocol term applied to fak's own gateway, not a distinct code identifier",
+      "aliases": [],
+      "verdict": "named-doc",
+      "gaps": [
+        "bind the heading to the gateway MCP dispatch it names (the `fak serve --stdio` / /mcp surface reporting serverInfo.name fak-gateway)"
+      ]
+    },
+    {
+      "id": "worked-example",
+      "canonical": "worked example",
+      "signal": "doc-only",
+      "evidence": "Worked Example",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "WorkedExample",
+      "named_symbol": "",
+      "doc_anchor": "docs/glossary.md",
+      "definition": "a doc-structure convention (40 docs, heaviest in docs/explainers/): a section that walks one concrete scenario end-to-end with real numbers or a real fixture (e.g. addressable-kv-cache.md replays the exact TestWriteTimeEvictEqualsNeverSaw fixture); it names a writing pattern, not a system concept",
+      "aliases": [],
+      "verdict": "named-doc",
+      "gaps": [
+        "consider whether 'Worked Example' should be a detector-ignore structural heading rather than a nameable concept"
+      ]
+    },
+    {
+      "id": "compatibility-matrix",
+      "canonical": "compatibility matrix",
+      "signal": "doc-only",
+      "evidence": "Compatibility matrix",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "CompatibilityMatrix",
+      "named_symbol": "",
+      "doc_anchor": "docs/glossary.md",
+      "definition": "the recurring heading (34 docs) whose canonical artifact is docs/integrations/compatibility-matrix.md: the per-tool table answering 'can this agent tool repoint its base URL at fak serve' across the OpenAI/Anthropic/MCP wires; other docs reference that one table rather than defining their own",
+      "aliases": [],
+      "verdict": "named-doc",
+      "gaps": [
+        "bind the phrase to docs/integrations/compatibility-matrix.md as the single owning artifact"
+      ]
+    },
+    {
+      "id": "live-mode",
+      "canonical": "live mode",
+      "signal": "doc-only",
+      "evidence": "Live mode",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "LiveMode",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "mostly a matching artifact: the 32-doc presence count is dominated by the substring inside 'Live Model ...' text/headings ('live model' contains 'live mode' under alphanumeric normalization); the only literal heading found is a code-block comment '# Live mode' in docs/fak/related-items.md for running fleet watchdog tools with --live (act) instead of dry-run",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider marking this a detector false-positive of substring normalization ('live model' inflates it) or a detector-ignore structural heading"
+      ]
+    },
+    {
+      "id": "threat-model",
+      "canonical": "threat model",
+      "signal": "doc-only",
+      "evidence": "threat model",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ThreatModel",
+      "named_symbol": "",
+      "doc_anchor": "docs/glossary.md",
+      "definition": "the recurring security-doctrine heading (28 docs; docs/fak/security.md, docs/FAQ.md, docs/playbooks/): fak's stated attacker assumption — the model is the untrusted program and the attacker controls everything it reads (prompt, retrieved docs, tool results), so refusal is gated by two structural gates rather than a classifier; a real system concept with no code identifier",
+      "aliases": [],
+      "verdict": "named-doc",
+      "gaps": [
+        "define the threat model in the glossary and point every playbook's threat-model section at the canonical docs/fak/security.md statement"
+      ]
+    },
+    {
+      "id": "triage-decision",
+      "canonical": "triage decision",
+      "signal": "doc-only",
+      "evidence": "Triage decision",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "TriageDecision",
+      "named_symbol": "",
+      "doc_anchor": "docs/glossary.md",
+      "definition": "a doc-section convention of the docs/notes/RESEARCH-*-triage notes (24 docs): the closing verdict section answering 'Adopt? Defend against? Ignore?' for an externally-scouted paper/repo, with reasons; it is the structured outcome slot of the research-triage workflow, not a code concept",
+      "aliases": [],
+      "verdict": "named-doc",
+      "gaps": [
+        "consider promoting the adopt/defend/ignore verdict to a structured field (or glossary entry) instead of a free-prose heading"
+      ]
+    },
+    {
+      "id": "master-ledger",
+      "canonical": "master ledger",
+      "signal": "doc-only",
+      "evidence": "Master ledger",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "MasterLedger",
+      "named_symbol": "",
+      "doc_anchor": "docs/glossary.md",
+      "definition": "the per-theorem verdict table in docs/proofs/README.md — every module proof's theorem, deterministic witness test, and live verdict filled from actual test runs; the 22-doc presence is because every docs/proofs/*.md page defers its current verdict to 'the master ledger (README.md)'",
+      "aliases": [],
+      "verdict": "named-doc",
+      "gaps": [
+        "bind the phrase to docs/proofs/README.md as the owning artifact (it is a specific table, not a generic term)"
+      ]
+    },
+    {
+      "id": "readiness-score",
+      "canonical": "readiness score",
+      "signal": "doc-only",
+      "evidence": "readiness score",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ReadinessScore",
+      "named_symbol": "",
+      "doc_anchor": "docs/glossary.md",
+      "definition": "an overloaded phrase (19 docs) with two senses: (1) docs/fleet.md 'The readiness score' — the deliberately simple 0-100 operator blend `score` for a fleet node; (2) the *-READINESS-SCORECARD family (agent/persona/popularization/release) where 'readiness' is a scorecard dimension re-derived by tools/*.py; no single code identifier backs either",
+      "aliases": [],
+      "verdict": "named-doc",
+      "gaps": [
+        "disambiguate the fleet 0-100 node score from the scorecard-family readiness scores in the glossary"
+      ]
+    },
+    {
+      "id": "acceptance-criteria",
+      "canonical": "acceptance criteria",
+      "signal": "doc-only",
+      "evidence": "Acceptance criteria",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "AcceptanceCriteria",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-structure convention (17 docs; heaviest in docs/notes/verification-ladder-epics.md) listing numbered, testable conditions an epic/slice must satisfy before it counts as done — often naming the exact regression tests; a spec-writing pattern, not a system concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'Acceptance criteria' should be a detector-ignore structural heading (standard spec section)"
+      ]
+    },
+    {
+      "id": "honest-status",
+      "canonical": "honest status",
+      "signal": "doc-only",
+      "evidence": "Honest status",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "HonestStatus",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-section convention of the honesty culture (17 docs; benchmark results and docs/notes/track-* parity trackers): a status section whose verdicts are read from the tree + git log, 'not from any worker's say-so', explicitly separating shipped vs scaffold vs deferred; a reporting discipline rather than a code concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "define the honest-status reporting discipline in the glossary and link it to the CLAIMS.md provenance tags it mirrors"
+      ]
+    },
+    {
+      "id": "local-models",
+      "canonical": "local models",
+      "signal": "doc-only",
+      "evidence": "Local models",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "LocalModels",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-structure convention of the integration guides (17 docs; docs/integrations/aider|cline|continue|claude|zed|vscode|jetbrains.md): the config-recipe section for fronting a locally-served model (Ollama, Qwen presets) with fak serve, paired with a sibling 'Cloud providers' section; a template slot, not a system concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'Local models' should be a detector-ignore structural heading of the integration-guide template"
+      ]
+    },
+    {
+      "id": "durable-ledger",
+      "canonical": "durable ledger",
+      "signal": "doc-only",
+      "evidence": "durable ledger",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "DurableLedger",
+      "named_symbol": "",
+      "doc_anchor": "docs/glossary.md",
+      "definition": "the recurring heading (16 docs; docs/cadence/README.md, docs/nightrun/README.md) for an append-only JSONL history file committed to the trunk as durable evidence (cadence history.jsonl rows, nightrun collected.jsonl rows) — 'durable trunk evidence, not a regenerable build artifact'; a real cross-cutting data-discipline concept",
+      "aliases": [],
+      "verdict": "named-doc",
+      "gaps": [
+        "define 'durable ledger' in the glossary and bind it to the concrete JSONL artifacts (docs/cadence/history.jsonl, docs/nightrun/collected.jsonl) it names"
+      ]
+    },
+    {
+      "id": "debt-metric",
+      "canonical": "debt metric",
+      "signal": "doc-only",
+      "evidence": "Debt Metric",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "DebtMetric",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (15 docs, anchored in docs/generation.md) for the lightweight `debt_score` each generation lane carries in the milestone report — an operator signal, explicitly not a priority score or gate; the concept exists as a JSON field name but no named code identifier",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind the heading to the `debt_score` field it describes (name the producer that computes it)"
+      ]
+    },
+    {
+      "id": "provenance-labels",
+      "canonical": "provenance labels",
+      "signal": "doc-only",
+      "evidence": "Provenance Labels",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ProvenanceLabels",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (14 docs, anchored in docs/long-context-defaults.md) for the closed evidence-provenance vocabulary (WITNESSED / OBSERVED / ...) that grades how a quoted number or budget is known — local witnessed run vs external telemetry vs assumption; a real honesty-vocabulary concept with no code identifier",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "define the closed label vocabulary in the glossary and bind it to the CLAIMS.md tag set it parallels"
+      ]
+    },
+    {
+      "id": "remaining-gap",
+      "canonical": "remaining gap",
+      "signal": "doc-only",
+      "evidence": "Remaining gap",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "RemainingGap",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-structure convention of the honesty culture (14 docs; docs/notes/ audits and backlogs): the section that names what is still missing after the work described — e.g. the missing grammar compiler in STRUCTURED-GENERATION-SOTA-BACKLOG, operator decisions in the DOS usage audit; a reporting pattern, not a system concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'Remaining gap' should be a detector-ignore structural heading (honesty-section template slot)"
+      ]
+    },
+    {
+      "id": "short-answer",
+      "canonical": "short answer",
+      "signal": "doc-only",
+      "evidence": "Short answer",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ShortAnswer",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-structure convention (14 docs): the opening TL;DR slot — a '## Short answer' section (docs/notes/STRUCTURED-GENERATION-SOTA-BACKLOG) or a bold '**Short answer.**' lead paragraph in docs/explainers/ — giving the one-paragraph verdict before the long form; pure writing pattern",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'Short answer' should be a detector-ignore structural heading"
+      ]
+    },
+    {
+      "id": "capability-matrix",
+      "canonical": "capability matrix",
+      "signal": "doc-only",
+      "evidence": "Capability Matrix",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "CapabilityMatrix",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (13 docs) whose canonical artifact is docs/adoption/compare/matrix.md — the one-page build-vs-buy table scoring fak against three neighbouring product categories on the six capabilities fak claims; also reused generically (e.g. VTOOLCALL note's topology capability table)",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind the phrase to docs/adoption/compare/matrix.md and distinguish generic reuse of the term from that owning artifact"
+      ]
+    },
+    {
+      "id": "public-tree",
+      "canonical": "public tree",
+      "signal": "doc-only",
+      "evidence": "Public tree",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "PublicTree",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring term (13 docs, anchored at docs/gpu-server-private-boundary.md '## Public tree') for the public fak repository side of the public/private lab boundary: it may keep scrubbed GPU-server evidence but only in generic language (no lab host/IP/path/token) and must pass the scrub; a real boundary concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "define 'public tree' vs the private lab side in the glossary, anchored to docs/gpu-server-private-boundary.md"
+      ]
+    },
+    {
+      "id": "scout-calibration",
+      "canonical": "scout calibration",
+      "signal": "doc-only",
+      "evidence": "Scout calibration",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ScoutCalibration",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-section convention of docs/notes/RESEARCH-*-triage notes (13 docs): the section grading whether the research scout's topic scoring (topic, score, term hits, freshness/stars signals) surfaced an on-mission candidate — feedback that tunes the scout; a workflow concept with no code identifier in these docs",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind 'scout calibration' to the scout tool/topic-scoring config it calibrates, or define the scout itself in the glossary"
+      ]
+    },
+    {
+      "id": "context-mmu-quarantine",
+      "canonical": "context-mmu quarantine",
+      "signal": "doc-only",
+      "evidence": "Context-MMU Quarantine",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ContextMmuQuarantine",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (12 docs, anchored in docs/fak/agent-integration-architecture.md) for the mechanism that holds tool results flagged with certain taints OUT of the agent's context (the context-MMU's quarantine), so poisoned content never enters the model's window; a system concept whose docs heading carries no single code identifier",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind the heading to the quarantine implementation it describes (the ctxmmu/ifc taint-hold path) so the concept has a named symbol"
+      ]
+    },
+    {
+      "id": "mcp-tools",
+      "canonical": "mcp tools",
+      "signal": "doc-only",
+      "evidence": "MCP Tools",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "McpTools",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (12 docs; docs/integrations/cursor.md, docs/supported/apis-and-protocols.md) for the fixed set of fak_* tools the MCP server exposes (fak_adjudicate, fak_syscall, fak_admit, fak_changes, fak_revoke, fak_context_change), each mirroring a fak-native request DTO",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind the heading to the registered tool list in the gateway MCP dispatch so docs and code cannot drift on the tool set"
+      ]
+    },
+    {
+      "id": "private-bridge",
+      "canonical": "private bridge",
+      "signal": "doc-only",
+      "evidence": "private bridge",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "PrivateBridge",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring term (12 docs; docs/fak/lab-dev-loop.md, docs/fleet.md, docs/nightrun/) for the private Slack-protocol control channel that reaches the lab GPU boxes — it carries a host, channel id, and token that never enter the public repo; the public entry point is the stub docs/private-comms-channel.md; a deliberately unbound (private) system concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "define 'private bridge' in the glossary as the private-side control channel and keep docs/private-comms-channel.md as its only public anchor"
+      ]
+    },
+    {
+      "id": "vllm-automatic-prefix-caching",
+      "canonical": "vllm automatic prefix caching",
+      "signal": "doc-only",
+      "evidence": "vLLM Automatic Prefix Caching",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "VllmPrefixCaching",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "an external technology (12 docs; anchored in docs/fak-vs-alternatives-comparison.md and the cache-frontier/benchmark docs): vLLM's per-instance KV prefix cache (APC), used as a comparison baseline for fak's cross-agent/cross-session reuse claims — never a fak component",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "mark as an external-technology heading (detector-ignore for naming debt) rather than a fak concept to bind"
+      ]
+    },
+    {
+      "id": "cloud-providers",
+      "canonical": "cloud providers",
+      "signal": "doc-only",
+      "evidence": "Cloud providers",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "CloudProviders",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-structure convention of the integration guides (11 docs; docs/integrations/aider|claude|cline|continue|jetbrains|vscode|zed.md): the config-recipe section for fronting a hosted API (OpenAI, Anthropic) with fak serve, sibling of the 'Local models' section; a template slot, not a system concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'Cloud providers' should be a detector-ignore structural heading of the integration-guide template"
+      ]
+    },
+    {
+      "id": "honest-gaps",
+      "canonical": "honest gaps",
+      "signal": "doc-only",
+      "evidence": "Honest gaps",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "HonestGaps",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-structure convention of the honesty culture (11 docs; docs/serving/, docs/notes/): a table/list of real, named failure modes or missing pieces that have no closing witness yet — per the doctrine that a named gap is catalog-complete even when unclosed; a reporting pattern, not a system concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'Honest gaps' should be a detector-ignore structural heading (honesty-section template slot)"
+      ]
+    },
+    {
+      "id": "named-residual",
+      "canonical": "named residual",
+      "signal": "doc-only",
+      "evidence": "Named residual",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "NamedResidual",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-section convention of docs/notes/RESEARCH-*-triage notes (11 docs): the section naming the residual gap an external candidate exposes in fak (e.g. audit provenance, floor coverage), explicitly 'FILED not built' — the gap becomes an issue rather than immediate work; a triage-workflow concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "define 'named residual' in the glossary and require each one to link the filed issue that carries it"
+      ]
+    },
+    {
+      "id": "adjudication-cost",
+      "canonical": "adjudication cost",
+      "signal": "doc-only",
+      "evidence": "Adjudication Cost",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "AdjudicationCost",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (10 docs; docs/fak/agent-integration-architecture.md, docs/webbench-real-measurements-summary.md) for the measured per-call overhead of kernel adjudication — in-process p50 ~1,300 ns, vDSO hit p50 ~50 ns, i.e. the sub-millisecond tax the gate adds; a measured quantity with no code identifier",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind the quoted numbers to the benchmark that produces them so the heading is regenerable, not hand-copied"
+      ]
+    },
+    {
+      "id": "target-model",
+      "canonical": "target model",
+      "signal": "doc-only",
+      "evidence": "target model",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "TargetModel",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-section convention of benchmark/results docs (10 docs; e.g. docs/benchmarks/IN-KERNEL-MODEL-RESULTS.md '## The target model'): the section naming the model under test and why it was chosen (SmolLM2-135M as the tractable, checkable Llama-architecture target); a results-doc template slot",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'target model' should be a detector-ignore structural heading of the results-doc template"
+      ]
+    },
+    {
+      "id": "verification-ladder",
+      "canonical": "verification ladder",
+      "signal": "doc-only",
+      "evidence": "Verification Ladder",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "VerificationLadder",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a core doctrine concept (10 docs; docs/notes/verification-ladder-doctrine.md, verification-ladder-epics.md, docs/standards/symptom-witness.md): the ordered set of verification rungs, cheapest to costliest, with the discipline 'start at the lowest rung that could conclusively establish the property; climb only on INDETERMINATE or risk'; a system concept the standards docs build on",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "define the ladder in the glossary and bind each rung name to the mechanism (or spec section in docs/standards/verification-ladder-spec.md) that implements it"
+      ]
+    },
+    {
+      "id": "acceptance-checklist",
+      "canonical": "acceptance checklist",
+      "signal": "doc-only",
+      "evidence": "Acceptance checklist",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "AcceptanceChecklist",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (9 docs) whose main artifact is docs/integrations/harness-acceptance-checklist.md: the six items (one wire + five dialect facts) that must be documented before an agent path is advertised as a first-class fak launcher; also reused for the branch-regime role-term checklist",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind the phrase to docs/integrations/harness-acceptance-checklist.md as the owning artifact"
+      ]
+    },
+    {
+      "id": "generation-contract",
+      "canonical": "generation contract",
+      "signal": "doc-only",
+      "evidence": "Generation Contract",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "GenerationContract",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the title concept of docs/generation.md (9 docs reference it): generation is the product horizon of a piece of work (gen/now / gen/next / gen/future) — 'which horizon is this optimizing for and what evidence would move it closer to now' — explicitly not priority, not branch strategy, not a runtime flag; the contract the generation-*.md family builds on",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "define 'generation contract' in the glossary anchored to docs/generation.md and the gen/now|next|future label vocabulary"
+      ]
+    },
+    {
+      "id": "load-bearing-invariants",
+      "canonical": "load-bearing invariants",
+      "signal": "doc-only",
+      "evidence": "load-bearing invariants",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "LoadBearingInvariants",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-section convention (9 docs; docs/benchmarks/ROPE-SCALING-RESULTS.md, SLIDING-WINDOW-RESULTS.md, docs/dispatch-loop.md): the section enumerating the hard guarantees a feature rests on (e.g. 'unset == default == byte-identical'), each backed by a named test rather than asserted; a writing discipline for guarantees, not one system concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'load-bearing invariants' should be a detector-ignore structural heading, while requiring each listed invariant to name its witnessing test"
+      ]
+    },
+    {
+      "id": "schema-validation",
+      "canonical": "schema validation",
+      "signal": "doc-only",
+      "evidence": "Schema Validation",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "SchemaValidation",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (9 docs; anchored in docs/benchmark/README.md) for validating benchmark artifacts against the JSON Schemas in tools/schemas/ (machine-specs.v1.json, run-manifest.v1.json, ...); a generic engineering term applied to the benchmark artifact pipeline",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind the heading to the tools/schemas/*.json files and the validator that enforces them"
+      ]
+    },
+    {
+      "id": "support-maturity-honesty-fence",
+      "canonical": "support-maturity honesty fence",
+      "signal": "doc-only",
+      "evidence": "support-maturity honesty fence",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "SupportMaturityFence",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the title concept of docs/standards/support-maturity-honesty-fence.md (9 docs reference it): the graded, ordered ladder (M0 none -> M1 fenced -> M2 loads -> ... correct/optimized/SOTA-parity) that replaces the fuzzy word 'supported', from the support-maturity epic #1243; a real standards concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "define the M-ladder in the glossary and bind each M-level to the check that grades it"
+      ]
+    },
+    {
+      "id": "closure-honesty",
+      "canonical": "closure honesty",
+      "signal": "doc-only",
+      "evidence": "Closure honesty",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ClosureHonesty",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (8 docs, anchored in docs/dispatch-status.md) for the dispatch-loop metric separating diff-witnessed closures from claimed ones: closure_rate = TRUE_RESOLVED / (TRUE_RESOLVED + CLAIMED_CLOSED), plus honest_close_rate crediting the DATA rung; a measured fleet-health concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind 'closure honesty' to the closure_rate/honest_close_rate fields and the tool that computes them"
+      ]
+    },
+    {
+      "id": "core-concepts",
+      "canonical": "core concepts",
+      "signal": "doc-only",
+      "evidence": "Core concepts",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "CoreConcepts",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-structure convention (8 docs; docs/FAQ.md, docs/fak/faq.md): the FAQ section grouping the mental-model questions (model as untrusted program, tool call as syscall, one boundary for security and performance); a navigation heading, not a system concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'Core concepts' should be a detector-ignore structural heading"
+      ]
+    },
+    {
+      "id": "fan-out-benchmark",
+      "canonical": "fan-out benchmark",
+      "signal": "doc-only",
+      "evidence": "Fan-out Benchmark",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "FanoutBenchmark",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (8 docs; docs/benchmarking/README.md, docs/fak-vs-alternatives-comparison.md, CLAIMS.md) for the fanbench experiment: one master goal fanned to N=1..1024 sub-agents with a shared prefix ladder, measuring cross-agent dedup uplift and prefix-KV reuse geometry; the docs phrase for what cmd/fanbench (and the live fanrun capstone) measures",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind the heading to cmd/fanbench / FANOUT-BENCH-RESULTS.md so the doc phrase and the tool are one concept"
+      ]
+    },
+    {
+      "id": "health-checks",
+      "canonical": "health checks",
+      "signal": "doc-only",
+      "evidence": "Health checks",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "HealthChecks",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-structure convention of the integration guides (8 docs; docs/integrations/*): the boilerplate section showing `curl http://127.0.0.1:8080/healthz` against a running fak serve; a template slot around the /healthz endpoint, not a distinct concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'Health checks' should be a detector-ignore structural heading of the integration-guide template"
+      ]
+    },
+    {
+      "id": "mcp-over-stdio",
+      "canonical": "mcp over stdio",
+      "signal": "doc-only",
+      "evidence": "MCP over stdio",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "McpOverStdio",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (8 docs; docs/fak/agent-integration-architecture.md, FAQ, integrations) for the `fak serve --stdio` transport: newline-delimited JSON-RPC over stdin/stdout with no listener and no auth surface, serving the same dispatch as HTTP /mcp; a transport-mode concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind the heading to the --stdio serve path so the transport contract (no listener, no auth surface) is stated once"
+      ]
+    },
+    {
+      "id": "openai-compatible-surface",
+      "canonical": "openai-compatible surface",
+      "signal": "doc-only",
+      "evidence": "OpenAI-compatible surface",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "OpenAiCompatibleSurface",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (8 docs; anchored in docs/fak/api-reference.md) for the gateway's POST /v1/chat/completions adjudication proxy — the wire that lets any OpenAI-speaking tool point its base URL at fak; an API-surface concept, not a code identifier",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind the heading to the gateway chat-completions handler it documents"
+      ]
+    },
+    {
+      "id": "operator-readout",
+      "canonical": "operator readout",
+      "signal": "doc-only",
+      "evidence": "Operator Readout",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "OperatorReadout",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (8 docs, anchored in docs/managed-context-continuous-usage.md) for the minimum honest status text an operator must be shown after a hidden context reset or long-run handoff — what survived, what was rebuilt, what is unverified; an operator-honesty convention of the managed-context docs",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "define the readout's required fields in the glossary and bind them to the surface that emits it"
+      ]
+    },
+    {
+      "id": "operator-runbook",
+      "canonical": "operator runbook",
+      "signal": "doc-only",
+      "evidence": "Operator Runbook",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "OperatorRunbook",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-structure convention (8 docs; docs/playbooks/coding-dev-agent.md, devops-sre.md, docs/notes/RELAY-OPERATOR-RUNBOOK): the step-by-step human procedure section (ship-gate flow, change-request escalation, start/observe/tune/park-resume); a document kind, not a system concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'Operator Runbook' should be a detector-ignore structural heading (a document genre)"
+      ]
+    },
+    {
+      "id": "rate-limiting",
+      "canonical": "rate limiting",
+      "signal": "doc-only",
+      "evidence": "Rate Limiting",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "RateLimiting",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (8 docs; docs/fak/server-config.md, docs/integrations/customer-support-playbook.md) for the gateway's per-key admitted-call quota, configured via FAK_RATELIMIT_* env vars or a policy `rate_limit` block (default disabled); a generic term for a specific config surface",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind the heading to the FAK_RATELIMIT_* / policy rate_limit config surface it documents"
+      ]
+    },
+    {
+      "id": "session-value-stack",
+      "canonical": "session value stack",
+      "signal": "doc-only",
+      "evidence": "Session Value Stack",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "SessionValueStack",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (8 docs; anchored in docs/benchmarking/README.md) for the multi-turn x multi-agent session-efficiency benchmark: ~4.1x vs a tuned warm per-agent KV cache on a 50-turn x 5-agent session (the ~60x figure is only vs the naive re-prefill floor); detailed in the private SESSION-VALUE-STACK-DECK.md companion",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind the heading to the sessionbench artifact/tool that produces the 4.1x number"
+      ]
+    },
+    {
+      "id": "frozen-trajectory-cache-cliff",
+      "canonical": "frozen-trajectory cache cliff",
+      "signal": "doc-only",
+      "evidence": "frozen-trajectory cache cliff",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "FrozenTrajectoryCacheCliff",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the title concept of docs/explainers/frozen-trajectory-cache-cliff.md (7 docs reference it): vendors' 90%+ prompt-cache hit rates are bought with rigidity — prompt caching is a prefix match, so any byte change in the prefix invalidates everything after it; a named explanatory concept in fak's cache-positioning argument",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "define 'frozen-trajectory cache cliff' in the glossary anchored to its explainer"
+      ]
+    },
+    {
+      "id": "implementation-hooks",
+      "canonical": "implementation hooks",
+      "signal": "doc-only",
+      "evidence": "Implementation Hooks",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ImplementationHooks",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-section convention of the docs/generation-*.md family (7 docs), almost always as the longer heading 'Future Implementation Hooks': the list of concrete next slices, each meant to become a separate issue so the spec is not silently deferred into code; a spec-template slot largely subsumed by the 'Future Implementation Hooks' row",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider merging this row with 'Future Implementation Hooks' (the shorter phrase mostly matches inside the longer heading) or marking it detector-ignore"
+      ]
+    },
+    {
+      "id": "measurement-plan",
+      "canonical": "measurement plan",
+      "signal": "doc-only",
+      "evidence": "Measurement plan",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "MeasurementPlan",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-section convention of research notes (7 docs; e.g. docs/notes/RESEARCH-grammar-constrained-tool-call-decoding): the section stating how a claim will actually be measured (which corpus, which models, which execution path) before any number is quoted; a research-note template slot",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'Measurement plan' should be a detector-ignore structural heading of the research-note template"
+      ]
+    },
+    {
+      "id": "one-command-setup",
+      "canonical": "one-command setup",
+      "signal": "doc-only",
+      "evidence": "One-command setup",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "OneCommandSetup",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-structure convention of the integration guides (7 docs; docs/integrations/* 'Quick Start: One-command setup', docs/fak/agent-integration-architecture.md): the fastest single command/script (e.g. scripts/dogfood-claude.sh) that builds fak and puts the kernel in front of a given tool; a quickstart template slot",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'One-command setup' should be a detector-ignore structural heading of the integration-guide template"
+      ]
+    },
+    {
+      "id": "parent-context",
+      "canonical": "parent context",
+      "signal": "doc-only",
+      "evidence": "Parent context",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ParentContext",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-section convention of grooming/cohort docs (7 docs; docs/blast-radius-containment-cohort.md, docs/notes/ backlogs): the per-item section naming the parent epic/milestone/program the item belongs to and its dependency siblings; a backlog-template slot, not a system concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'Parent context' should be a detector-ignore structural heading of the grooming template"
+      ]
+    },
+    {
+      "id": "related-issues",
+      "canonical": "related issues",
+      "signal": "doc-only",
+      "evidence": "Related Issues",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "RelatedIssues",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-structure convention (7 docs; docs/webbench-blockers.md, docs/notes/ design notes): the section listing the GitHub issues (with status) that track or intersect the doc's topic; a cross-reference template slot, not a system concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'Related Issues' should be a detector-ignore structural heading"
+      ]
+    },
+    {
+      "id": "test-runner",
+      "canonical": "test runner",
+      "signal": "doc-only",
+      "evidence": "test runner",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "TestRunner",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (7 docs, anchored at docs/dev-tooling.md '## The test runner') for `fak test`, the host-aware runner that resolves the right go test invocation per tier and on Windows routes through test.ps1/WSL to dodge the OS-policy block; a real tool the heading names but no doc binds explicitly",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind the heading to the `fak test` verb (cmd/fak) it documents"
+      ]
+    },
+    {
+      "id": "benchmark-infrastructure",
+      "canonical": "benchmark infrastructure",
+      "signal": "doc-only",
+      "evidence": "Benchmark Infrastructure",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "BenchmarkInfrastructure",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (6 docs; docs/benchmarking/ and docs/benchmark/ subtrees) for the sweep/measurement plumbing as a whole — YAML sweep configs + Python orchestrator, demo servers (cmd/demorace), cross-machine run/manifest design; an umbrella term for a doc subtree, not one artifact",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consolidate the two overlapping subtrees (docs/benchmark/ vs docs/benchmarking/) or define which one 'benchmark infrastructure' names"
+      ]
+    },
+    {
+      "id": "collective-seam",
+      "canonical": "collective seam",
+      "signal": "doc-only",
+      "evidence": "Collective seam",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "CollectiveSeam",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (6 docs; docs/serving/native-device-mesh-collectives.md, docs/explainers/multi-gpu-tensor-parallelism.md) for the cross-rank reduction interface: compute.CollectiveBackend declares the four canonical Megatron collectives, with the exact CPU reference in internal/compute/collective.go; the doc phrase for a seam that DOES have code behind it but no matching identifier named 'collective seam'",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind the heading to compute.CollectiveBackend so the doc term and the interface are one concept"
+      ]
+    },
+    {
+      "id": "comparison-table",
+      "canonical": "comparison table",
+      "signal": "doc-only",
+      "evidence": "Comparison Table",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ComparisonTable",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-structure convention of benchmark docs (6 docs; docs/benchmark/QUICKSTART.md 'generate comparison table' via fak bench-runs table, docs/benchmarks/ A/B arm tables): the side-by-side results table or the command that generates it; a template slot, not a system concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'Comparison Table' should be a detector-ignore structural heading"
+      ]
+    },
+    {
+      "id": "completion-bar",
+      "canonical": "completion bar",
+      "signal": "doc-only",
+      "evidence": "Completion Bar",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "CompletionBar",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-section convention of the GPU benchmark runbooks (6 docs; docs/benchmarks/GPU-SERVER-GLM52-VLLM-AGENTIC-BENCHMARKS.md, VLLM-EP-EPLB-MOE-BASELINE-RUNBOOK.md): the closed checklist of conditions that must ALL hold before the benchmark counts as complete (preflight READY, artifacts present, ...); a runbook honesty gate written as a heading",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "define 'completion bar' in the glossary as the runbook completion-gate convention (or mark detector-ignore as a runbook template slot)"
+      ]
+    },
+    {
+      "id": "core-rule",
+      "canonical": "core rule",
+      "signal": "doc-only",
+      "evidence": "Core Rule",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "CoreRule",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-structure convention of the docs/generation-*.md family (6 docs): the opening section stating the one-line normative rule of the model being specified (e.g. 'Capacity is a constraint model, not a priority model', 'Generation is a planning horizon, not an isolation boundary'); a spec-template slot",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'Core Rule' should be a detector-ignore structural heading of the generation-spec template"
+      ]
+    },
+    {
+      "id": "coverage-matrix",
+      "canonical": "coverage matrix",
+      "signal": "doc-only",
+      "evidence": "coverage matrix",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "CoverageMatrix",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (6 docs) for a coverage-hole grid: docs/coverage-matrix.md is the Model x Backend matrix generated by `fak coverage-matrix`; docs/bench-plan.md has the bench-node x workload-kind matrix ('.' = feasible hole, '-' = infeasible); docs/HARDWARE-MATRIX.md the platform matrix — same idea, three artifacts",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind the phrase to the `fak coverage-matrix` generator and disambiguate it from the bench-plan and hardware matrices in the glossary"
+      ]
+    },
+    {
+      "id": "debugging-a-denied-operation",
+      "canonical": "debugging a denied operation",
+      "signal": "doc-only",
+      "evidence": "Debugging a denied operation",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "DeniedOperationDebugging",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-structure convention of the integration guides (6 docs; docs/integrations/aider|cline|continue|jetbrains|vscode|zed.md): the boilerplate section showing how to reproduce a DENY offline (preflight against the same policy) when the fronted tool reports a blocked operation; a template slot around the preflight verb",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether this should be a detector-ignore structural heading of the integration-guide template"
+      ]
+    },
+    {
+      "id": "executive-summary",
+      "canonical": "executive summary",
+      "signal": "doc-only",
+      "evidence": "Executive Summary",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ExecutiveSummary",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a generic doc-structure convention (6 docs; docs/fak-vs-alternatives-comparison.md, docs/prefill-elimination-explained.md, docs/proofs/safety-case doc, benchmarking docs): the standard opening summary section; pure document boilerplate with no repo-specific meaning",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "mark 'Executive Summary' as a detector-ignore structural heading"
+      ]
+    },
+    {
+      "id": "fact-check-notes",
+      "canonical": "fact-check notes",
+      "signal": "doc-only",
+      "evidence": "Fact-check notes",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "FactCheckNotes",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-section convention of the docs/launch/ assets (6 docs; show-hn.md, reddit-*.md, x-thread.md, lobsters-and-blog.md): the preserved audit trail of the adversarial fact-check each launch asset ran against the honesty ledger (CLAIMS.md), listing every claim changed and why the survivors are ledger-clean; a launch-workflow convention",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "define the launch fact-check discipline in the glossary and bind it to CLAIMS.md as the ledger it audits against"
+      ]
+    },
+    {
+      "id": "fastest-path",
+      "canonical": "fastest path",
+      "signal": "doc-only",
+      "evidence": "Fastest path",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "FastestPath",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-structure convention (6 docs; docs/qwen36-claude-dogfood-playbook.md, docs/integrations/openai-codex.md): the opening quickstart section giving the minimal command sequence ('two commands, two terminals') to get running; a template slot, not a system concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'Fastest path' should be a detector-ignore structural heading"
+      ]
+    },
+    {
+      "id": "future-implementation-hooks",
+      "canonical": "future implementation hooks",
+      "signal": "doc-only",
+      "evidence": "Future Implementation Hooks",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "FutureImplementationHooks",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-section convention of the docs/generation-*.md spec family (6 docs; agent-capacity-model, portfolio-rsi-score, proof-of-value-simulator, real-options-model, sunset-criteria, loop-scheduling): the closing list of concrete next slices, each intended to become a separate issue 'so this spec is not silently deferred into code'; a spec-template slot",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'Future Implementation Hooks' should be a detector-ignore structural heading, while requiring each hook to link its filed issue"
+      ]
+    },
+    {
+      "id": "generation-classification",
+      "canonical": "generation classification",
+      "signal": "doc-only",
+      "evidence": "Generation classification",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "GenerationClassification",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-section convention of grooming artifacts (6 docs; docs/notes/GENERATION-* and audit notes, docs/cache-frontier/): the section classifying an issue into gen/now / gen/next / gen/future per docs/generation.md, with the promotion evidence that would move it closer to now; the applied form of the generation contract",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind the classification vocabulary to docs/generation.md and consider a structured label instead of a prose heading"
+      ]
+    },
+    {
+      "id": "generation-stays-orthogonal",
+      "canonical": "generation stays orthogonal",
+      "signal": "doc-only",
+      "evidence": "Generation Stays Orthogonal",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "GenerationOrthogonality",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-section convention of the docs/generation-future-*.md specs (6 docs): the section proving a proposed model (RSI score, proof-of-value simulator) touches none of the three axes the generation contract keeps separate (priority, branch strategy, runtime exposure); a contract-compliance template slot",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether this should be a detector-ignore structural heading of the generation-spec template (it restates the docs/generation.md contract)"
+      ]
+    },
+    {
+      "id": "honest-boundaries",
+      "canonical": "honest boundaries",
+      "signal": "doc-only",
+      "evidence": "Honest boundaries",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "HonestBoundaries",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-section convention of the honesty culture (6 docs; docs/serving/cxl-memory-pool.md, hardware-aware-cache.md, docs/explainers/, docs/notes/): the section stating exactly what the described feature does NOT do ('kept, not papered over') — e.g. the plane is payload-free, physical pooling is the adapter's job; a reporting pattern",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'Honest boundaries' should be a detector-ignore structural heading (honesty-section template slot)"
+      ]
+    },
+    {
+      "id": "interactive-claude-code",
+      "canonical": "interactive claude code",
+      "signal": "doc-only",
+      "evidence": "Interactive Claude Code",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "InteractiveClaudeCode",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (6 docs; anchored in docs/qwen36-claude-dogfood-playbook.md) for launching an interactive Claude Code session against a local model through fak (the fak-qwen36-claude preset without --probe) — the dogfood surface where Claude Code runs on Qwen3.6 behind the kernel; a usage-mode name, not a code identifier",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind the heading to the preset/launcher it names (fak-qwen36-claude) so the mode has one canonical entry point"
+      ]
+    },
+    {
+      "id": "metadata-contract",
+      "canonical": "metadata contract",
+      "signal": "doc-only",
+      "evidence": "Metadata contract",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "MetadataContract",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (6 docs; anchored in docs/playbooks/research-agent.md) for what the admit_and_log metadata must carry and why: audit visibility (would_deny names the exact policy gap admitted) plus the promotion-ledger signal; a policy-surface contract stated only in prose",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind the contract to the admit_and_log metadata fields (would_deny etc.) in the policy/verdict schema"
+      ]
+    },
+    {
+      "id": "one-line-test",
+      "canonical": "one-line test",
+      "signal": "doc-only",
+      "evidence": "one-line test",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "OneLineTest",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-structure convention of docs/explainers/ (6 docs; agent-virtual-filesystem.md, memory-engineering.md): the closing single-sentence litmus question ('if your stack cannot answer X, you have features, not engineering') that compresses the explainer into one falsifiable test of the reader's own system; a rhetorical template slot",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'one-line test' should be a detector-ignore structural heading of the explainer template"
+      ]
+    },
+    {
+      "id": "priority-order",
+      "canonical": "priority order",
+      "signal": "doc-only",
+      "evidence": "Priority order",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "PriorityOrder",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-structure convention (6 docs; docs/notes/ fix lists and next-steps sections): an ordered list of actions ranked by what to do first ('Fixes (in priority order)', 'Next steps (priority order)'); generic list boilerplate, not a system concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "mark 'Priority order' as a detector-ignore structural heading"
+      ]
+    },
+    {
+      "id": "readiness-ladder",
+      "canonical": "readiness ladder",
+      "signal": "doc-only",
+      "evidence": "readiness ladder",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ReadinessLadder",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (6 docs, anchored in docs/persona-scorecard/README.md) for the ordered verdict vocabulary the persona scorecards grade with (e.g. '* served' = every hard affordance present); the rung table that turns scorecard evidence into a closed verdict; a scorecard-family concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "define the ladder's verdict vocabulary once (glossary or shared scorecard doc) instead of per-scorecard tables"
+      ]
+    },
+    {
+      "id": "reuse-curve",
+      "canonical": "reuse curve",
+      "signal": "doc-only",
+      "evidence": "Reuse Curve",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ReuseCurve",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (6 docs; docs/benchmarking/FINAL-ANALYSIS.md, SESSION-SUMMARY.md) for the benchmark chart of KV-reuse speedup scaling across model sizes (135M -> 3B), built from the demo server's /api/curve endpoint; a benchmark-artifact name with no code identifier",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind the heading to the /api/curve producer and the artifact file that stores the curve"
+      ]
+    },
+    {
+      "id": "shared-state-ladder",
+      "canonical": "shared state ladder",
+      "signal": "doc-only",
+      "evidence": "Shared state ladder",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "SharedStateLadder",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the title concept of docs/shared-state-ladder.md (6 docs reference it): the vocabulary that keeps five related-but-different kinds of shared state in fak from being treated as one feature; a real taxonomy concept whose only home is that doc",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "define 'shared state ladder' in the glossary anchored to docs/shared-state-ladder.md and name its five rungs"
+      ]
+    },
+    {
+      "id": "ship-discipline",
+      "canonical": "ship discipline",
+      "signal": "doc-only",
+      "evidence": "Ship discipline",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ShipDiscipline",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-section convention of grooming notes (6 docs; docs/notes/MANAGED-CACHE-PROVING-GROUND, AGENTIC-LIVE-STATUS, WORKER-UNIT-CONSERVATION): the per-issue block restating the trunk rules — trunk only, commit by explicit path, Conventional-Commits subject + (fak <leaf>) stamp — plus an honest-scope fence for the claim being shipped; a restatement of the AGENTS.md contract as a template slot",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'Ship discipline' should be a detector-ignore structural heading (it restates the AGENTS.md/CLAUDE.md trunk contract per issue)"
+      ]
+    },
+    {
+      "id": "sota-comparison",
+      "canonical": "sota comparison",
+      "signal": "doc-only",
+      "evidence": "SOTA Comparison",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "SotaComparison",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (6 docs; docs/webbench-baselines.md, docs/webbench-real-measurements-summary.md) for comparing fak's webbench numbers against published state-of-the-art baselines — explicitly tracked as still-to-run live work (checklists of pending measurements) versus the modeled floor already published; a benchmark-program concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "bind the heading to the webbench baseline artifacts and keep the modeled-vs-measured distinction explicit when the live runs land"
+      ]
+    },
+    {
+      "id": "standing-at-a-glance",
+      "canonical": "standing at a glance",
+      "signal": "doc-only",
+      "evidence": "Standing at a glance",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "StandingAtAGlance",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a doc-structure convention of the scorecard READMEs (6+ docs; docs/*-scorecard/README.md, docs/PRODUCT-STATUS.md): the section holding the regenerable one-line chart block (score, grade, debt counts) emitted by each scorecard's tools/*.py generator; a scorecard-template slot, not a system concept",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "consider whether 'Standing at a glance' should be a detector-ignore structural heading of the scorecard template"
+      ]
+    },
+    {
+      "id": "baton-schema",
+      "canonical": "baton schema",
+      "signal": "doc-only",
+      "evidence": "baton schema",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "BatonSchema",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (5 docs, docs/notes/) for the fak.relay.baton.v1 relay-handoff wire contract: a data-only, pointer-only object a relay leg writes at a safe point for its successor (commits, ledger rows, issue numbers, memory slugs, file globs — never transcript bytes or a model-written recap). Pinned in RELAY-BATON-SCHEMA-2026-07-01.md; explicitly no Go type or CLI consumes the format yet.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Define a Go type for fak.relay.baton.v1 (e.g. in a relay leaf) and cross-link it from RELAY-BATON-SCHEMA-2026-07-01.md"
+      ]
+    },
+    {
+      "id": "by-intent",
+      "canonical": "by intent",
+      "signal": "doc-only",
+      "evidence": "By intent",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ByIntentPlanView",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring section (5 docs) of the generated benchmark plan (docs/bench-plan.md and its copies) that groups the planner's recommended runs by operator intent (e.g. Benchmark perf), asserting all four operator intents are surfaced. A generated-report grouping convention, not a system object.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Declare the four operator intents as a closed vocabulary in the bench planner and cite it from the By intent section"
+      ]
+    },
+    {
+      "id": "cache-family",
+      "canonical": "cache family",
+      "signal": "doc-only",
+      "evidence": "cache family",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "CacheFamily",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the glossary concept (5 docs; heading in docs/fak/concept-glossary.md) that disentangles the overloaded 'cache' root into planes, each answering a different question: storage (KV cache), virtualization (vCache), metadata (cachemeta), etc. A naming/disambiguation device for docs, not a runtime object.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Add a stable anchor for the cache-family planes table in concept-glossary.md and cite it from the other cache docs"
+      ]
+    },
+    {
+      "id": "cache-frontier-operating-plan",
+      "canonical": "cache frontier operating plan",
+      "signal": "doc-only",
+      "evidence": "Cache frontier operating plan",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "CacheFrontierPlan",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the title concept (5 docs) of docs/CACHE-FRONTIER-OPERATING-PLAN.md: the project-management spine for fak's caching value-add that introduces no new benchmark claim but keeps existing claims, demos, and scorecards pointed at one product outcome (fak as the default memory/reuse kernel for long-running agents). A planning doc, not code.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Register the operating plan under a short stable slug in llms.txt so other docs can reference it by name"
+      ]
+    },
+    {
+      "id": "cache-value-roll-up",
+      "canonical": "cache-value roll-up",
+      "signal": "doc-only",
+      "evidence": "Cache-Value Roll-Up",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "CacheValueRollup",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (5 docs; title of docs/cache-value-rollup.md) naming the front-door report for whether fak's cache work is paying off; it keeps the kernel-reuse proof and provider-dollar economics in separate tracks so trends never blend unlike evidence. Related to the fak cachevalue CLI but the roll-up itself is a doc-level concept with no identifier.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Bind the roll-up doc to the fak cachevalue report command output with a named schema so the concept has a code-side anchor"
+      ]
+    },
+    {
+      "id": "claude-code-integration",
+      "canonical": "claude code integration",
+      "signal": "doc-only",
+      "evidence": "Claude Code Integration",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ClaudeCodeIntegration",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (5 docs) for wiring fak as a kernel-adjudicated gateway in front of Claude Code / the Anthropic API (docs/integrations/claude.md guide; the dogfood-claude.sh walkthrough in docs/fak/agent-integration-architecture.md). Names an integration with an external harness, not an internal identifier.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Pick one canonical integration page (docs/integrations/claude.md) and make the other headings link to it instead of restating the setup"
+      ]
+    },
+    {
+      "id": "corrected-asset",
+      "canonical": "corrected asset",
+      "signal": "doc-only",
+      "evidence": "CORRECTED ASSET",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "CorrectedAsset",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring section (5 docs, all in docs/launch/) marking the paste-ready corrected version of a launch post after an adversarial fact-check pass; it follows the fact-check notes explaining which claims were re-fenced to stay ledger-clean. A doc-structure convention of the launch subtree, not a system concept.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Document the launch-doc section grammar (draft / problems found / corrected asset) once in a docs/launch README"
+      ]
+    },
+    {
+      "id": "gate-evidence",
+      "canonical": "gate evidence",
+      "signal": "doc-only",
+      "evidence": "Gate evidence",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "GateEvidence",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring section (5 docs; heading in docs/stable-releases/2026-06-stable.md) carrying the JSON gate record for a stable-release promotion — candidate sha/tag, codename, and per-gate results such as ci_green. An evidence-block convention of release records rather than a named code object.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Name the gate-record JSON shape (e.g. fak.release-gate.v1) and validate the checked-in blocks against it"
+      ]
+    },
+    {
+      "id": "generation-specific-witness-ladders",
+      "canonical": "generation-specific witness ladders",
+      "signal": "doc-only",
+      "evidence": "Generation-Specific Witness Ladders",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "GenerationWitnessLadders",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (5 docs; title of docs/generation-witness-ladders.md, issue #1659, stream gen/second-next) — a design memo defining a witness-ladder taxonomy per generation horizon that a later gen/next or gen/now stream could enforce with a lint or fak hygiene gate. Explicitly a compatibility policy, not yet a runtime gate.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Ship the fak hygiene lint that checks an issue's witness against its generation ladder rung"
+      ]
+    },
+    {
+      "id": "honest-limits",
+      "canonical": "honest limits",
+      "signal": "doc-only",
+      "evidence": "Honest limits",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "HonestLimits",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring caveat section (5 docs, docs/integrations/ and docs/notes/) that lists what a feature or result does NOT cover before a reader relies on it (e.g. the agent-memory gate only sees model-proposed tool calls, never out-of-band SDK writes). A doc-honesty convention, sibling of Honest residue and Scope fences.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Standardize the caveat-section family (Honest limits / Honest residue / Scope fences) under one named convention in a doc style guide"
+      ]
+    },
+    {
+      "id": "honest-one-liner",
+      "canonical": "honest one-liner",
+      "signal": "doc-only",
+      "evidence": "honest one-liner",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "HonestOneLiner",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring section (5 docs, mostly docs/notes/) giving the single-sentence, fenced summary of what a measurement actually proved — e.g. the session-cache-savings ablation's admission that the provider cache did ~99.9% of the visible saving and fak's contribution was pricing it honestly and catching bad tool calls. A doc-structure convention.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Add the honest one-liner slot to the notes template so every measurement note carries one"
+      ]
+    },
+    {
+      "id": "honest-residue",
+      "canonical": "honest residue",
+      "signal": "doc-only",
+      "evidence": "Honest residue",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "HonestResidue",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring benchmark-results section (5 docs, concentrated in docs/benchmarks/) that labels the known gaps and unproven parts left after a result — 'labeled, not hidden' (e.g. CDB-RESULTS: pages are tool results by design; the ranker is extractive token-overlap). A doc-honesty convention, not a system object.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Fold Honest residue into the same named caveat-section convention as Honest limits and Scope fences"
+      ]
+    },
+    {
+      "id": "long-context-defaults-doctrine",
+      "canonical": "long-context defaults doctrine",
+      "signal": "doc-only",
+      "evidence": "Long-context defaults doctrine",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "LongContextDefaultsDoctrine",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (5 docs; title of docs/long-context-defaults.md): the canonical policy layer above the mechanism docs stating that the model's advertised context window is a hard cap not a target, and governing how large --compact-history-budget, --ctx-view-budget, and future automatic context-budget defaults may make the model-visible working set.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Reference the doctrine page from the flag help text of --compact-history-budget and --ctx-view-budget so the policy is discoverable from the CLI"
+      ]
+    },
+    {
+      "id": "metrics-endpoint",
+      "canonical": "metrics endpoint",
+      "signal": "doc-only",
+      "evidence": "Metrics Endpoint",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "MetricsEndpoint",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (5 docs, docs/fak/) documenting fak serve's GET /metrics Prometheus endpoint — HTTP latency/status, verdict counters, and kernel counters (submits, denies, vDSO hits). A real gateway feature that in docs is only ever named by this generic heading, with no single code identifier called out.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Name the metrics handler/registry in internal/gateway and link the doc heading to that symbol"
+      ]
+    },
+    {
+      "id": "missing-evidence",
+      "canonical": "missing evidence",
+      "signal": "doc-only",
+      "evidence": "Missing Evidence",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "MissingEvidence",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring benchmark submission-packet section (5 docs, docs/benchmarks/) enumerating the artifacts that do not exist yet and must be checked in and hash-pinned before the packet can leave the BLOCKED_PRECREDENTIAL state (e.g. official repo revision, run contract, raw-arm generations). A packet-structure convention.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Turn the missing-evidence list into a machine-checkable checklist a CI gate can diff against the tree"
+      ]
+    },
+    {
+      "id": "model-integration",
+      "canonical": "model integration",
+      "signal": "doc-only",
+      "evidence": "Model Integration",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ModelIntegration",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring phrase (4 docs); as a heading it is a to-do checklist subsection of docs/webbench-real-measurements-summary.md for wiring a real model API (Claude, GPT-4, or local) into the WebBench measurement rig — connect API, turn-by-turn execution, capture real token counts. A generic work-item label, not a repo concept.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Rename the checklist section to name the specific rig (e.g. WebBench live-model arm) to stop the generic phrase drifting"
+      ]
+    },
+    {
+      "id": "one-paragraph-version",
+      "canonical": "one-paragraph version",
+      "signal": "doc-only",
+      "evidence": "one-paragraph version",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "OneParagraphVersion",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring summary section (5 docs: EXECUTIVE-ROLLUP, model-routing, explainers, notes) titled 'The one-paragraph version' — a single-paragraph honest abstract of the whole doc placed near the top. Purely a doc-structure convention for skimmability.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Add the one-paragraph-version slot to the shared doc template so new rollups and notes include it consistently"
+      ]
+    },
+    {
+      "id": "policy-manifest-schema",
+      "canonical": "policy manifest schema",
+      "signal": "doc-only",
+      "evidence": "Policy Manifest Schema",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "PolicyManifestSchema",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (5 docs; section of docs/fak/server-config.md) documenting the JSON capability-floor manifest loaded by --policy, versioned fak-policy/v1, with fak policy --dump emitting the built-in DefaultPolicy as a template. The manifest is real and consumed by code, but the schema is described only in docs under this heading.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Check in a JSON Schema for fak-policy/v1 and validate example policies against it in CI"
+      ]
+    },
+    {
+      "id": "portfolio-fold",
+      "canonical": "portfolio fold",
+      "signal": "doc-only",
+      "evidence": "Portfolio fold",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "PortfolioFold",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring section (5 docs, docs/notes/ score notes) that folds one score or observability run into the portfolio-level scorecard numbers — e.g. the scorecard_control_pane.py totals (finding, total_debt, grade_debt, measured, errored). A score-note reporting convention, not a code object.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Name the fold output shape emitted by tools/scorecard_control_pane.py and cite it from the Portfolio fold sections"
+      ]
+    },
+    {
+      "id": "promotion-rules",
+      "canonical": "promotion rules",
+      "signal": "doc-only",
+      "evidence": "Promotion Rules",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "PromotionRules",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring generation-planning section (5 docs, docs/notes/GENERATION-*) stating the evidence-driven rules for moving backlog items between horizons: future -> second-next -> next -> now, each transition requiring a named kind of evidence (concrete option, simulation/policy evidence, landed gate or witness). Process doctrine, not code.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Consolidate the duplicated Promotion Rules text into docs/generation.md and link the notes to it"
+      ]
+    },
+    {
+      "id": "quick-reference",
+      "canonical": "quick reference",
+      "signal": "doc-only",
+      "evidence": "Quick Reference",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "QuickReference",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring section (5 docs: benchmark README, troubleshooting, integrations) giving a condensed command or vocabulary lookup — first-time setup commands, common commands, decision vocabulary. A generic doc-structure convention with no repo-specific meaning.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Leave as a generic convention; at most note it in a doc style guide rather than naming a concept after it"
+      ]
+    },
+    {
+      "id": "reproduce-a-denial-offline",
+      "canonical": "reproduce a denial offline",
+      "signal": "doc-only",
+      "evidence": "Reproduce a denial offline",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "OfflineDenialRepro",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring integration-guide section (5 docs: docs/integrations/amp, gemini-cli, opencode, roo-code) showing the same fak preflight invocation that reproduces a policy denial fully offline (verdict=DENY reason=POLICY_BLOCK) with no model or network. A copy-pasted harness-guide convention demonstrating the preflight verb.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Extract the shared offline-denial repro into one include or canonical page the four integration guides link to"
+      ]
+    },
+    {
+      "id": "scope-fences",
+      "canonical": "scope fences",
+      "signal": "doc-only",
+      "evidence": "Scope fences",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ScopeFences",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring notes section (5 docs, docs/notes/) that states what a number or result explicitly does NOT claim — e.g. the managed-cache proving ground grades witness reachability, never savings quality. Part of the repo's caveat-section family (with Honest limits / Honest residue); a doc-honesty convention.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Fold Scope fences into the single named caveat-section convention shared with Honest limits and Honest residue"
+      ]
+    },
+    {
+      "id": "shared-objects",
+      "canonical": "shared objects",
+      "signal": "doc-only",
+      "evidence": "Shared objects",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "SharedObjects",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (5 docs; section of docs/fak/api-reference.md) grouping the wire objects shared across all fak-native API responses — chiefly the verdict object (WireVerdict). A doc-organization heading for the API reference, not itself a system concept (the objects under it are).",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Give each shared wire object its own anchor and link them from the endpoint sections instead of relying on the grouping heading"
+      ]
+    },
+    {
+      "id": "shared-task-record-contract",
+      "canonical": "shared task record contract",
+      "signal": "doc-only",
+      "evidence": "Shared task record contract",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "SharedTaskRecordContract",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (5 docs; title of docs/shared-task-record-contract.md): the adapter-neutral contract for user-level shared task state — the rung where humans and agents co-edit a task board without turning edits into unstructured chat. Ships as JSON envelope schemas (tools/schemas/shared-*.json), runnable fixtures under examples/shared-task-record*, and an in-memory reference fold in internal/sharedtask.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Bind the doc contract to the internal/sharedtask types with explicit symbol links so drift between schema and fold is catchable"
+      ]
+    },
+    {
+      "id": "windows-powershell",
+      "canonical": "windows powershell",
+      "signal": "doc-only",
+      "evidence": "Windows PowerShell",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "WindowsPowerShellSection",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "an external technology name (5 docs) used as a platform-marker heading for Windows-specific instruction variants — quick starts and manual wiring that give the PowerShell ($env:) equivalents of the bash steps (docs/integrations/claude.md, docs/fak/tutorial.md, playbooks). Not a repo concept; a platform-section convention.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Adopt one consistent heading form for platform variants (e.g. 'Windows (PowerShell)') across guides"
+      ]
+    },
+    {
+      "id": "agent-programming-grammar",
+      "canonical": "agent programming grammar",
+      "signal": "doc-only",
+      "evidence": "agent programming grammar",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "AgentProgrammingGrammar",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (4 docs) of docs/standards/agent-grammar.md, a normative standard fixing the grammar an agent fleet coordinates by — nouns, verbs, and closed vocabularies — so a second implementation can be conformance-checked, the role internal/abi's golden freeze plays for the ABI; the companion note CONCEPT-AGENT-PROGRAMMING-GRAMMAR-2026-06-28.md explains why and catalogs under-expressed concepts G1-G9.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Ship the conformance checker the standard promises so the grammar is enforced, not just written"
+      ]
+    },
+    {
+      "id": "agentrun-boundary",
+      "canonical": "agentrun boundary",
+      "signal": "doc-only",
+      "evidence": "AgentRun boundary",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "AgentRunBoundary",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (4 docs; heading in docs/notes/CONCEPT-TOOL-PROCESS-TABLE-2026-07-02.md) naming the authority boundary for a fleet of nested agents, distinct from the tool process table's lifetime engine: an AgentRun owns one agent loop, SpawnAttempt is the only pre-exec path to a child run, PolicyDigest pins the policy snapshot, and the launch ToolCallID is the join key; public contract in docs/agent-run-leak-prevention.md.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Introduce the AgentRun type in the toolprocgate/leaf code so the boundary vocabulary has a code symbol behind it"
+      ]
+    },
+    {
+      "id": "benchmark-control",
+      "canonical": "benchmark control",
+      "signal": "doc-only",
+      "evidence": "Benchmark Control",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "BenchmarkControl",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (4 docs; section of docs/fak/server-config.md) for the FAK_BENCH_* environment variable table controlling quantized-GEMM benchmark shapes (prefix length, batch sizes, rectangular dims). A config-reference section convention; the variables exist in code but the grouping name does not.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Group the FAK_BENCH_* variables under one named config struct in code matching the doc section"
+      ]
+    },
+    {
+      "id": "budget-dimensions",
+      "canonical": "budget dimensions",
+      "signal": "doc-only",
+      "evidence": "Budget Dimensions",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "BudgetDimensions",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (4 docs; section of docs/generation-super-loop-budgets.md) defining the four budgets every recurring super-loop plan must make visible — time (max_minutes/cadence), tokens (token_ceiling/prompt_budget), workers (max_workers/lane leases), and review (reviewer/deadline/escalation). Planning doctrine for loop plans, not a code type.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Encode the four budget rows as required fields in the super-loop plan schema so a plan without them fails validation"
+      ]
+    },
+    {
+      "id": "checked-in-artifacts",
+      "canonical": "checked-in artifacts",
+      "signal": "doc-only",
+      "evidence": "Checked-In Artifacts",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "CheckedInArtifacts",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring benchmark submission-packet section (4 docs, docs/benchmarks/) listing the hash-pinned artifacts tracked in-repo (runbooks, results scaffolds, fixtures) with SHA-256 columns to re-derive via sha256sum before promoting a result. A packet-structure convention supporting evidence integrity.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Add a CI check that recomputes the pinned SHA-256 table so a drifted artifact fails loudly"
+      ]
+    },
+    {
+      "id": "closed-verdict-vocabulary",
+      "canonical": "closed verdict vocabulary",
+      "signal": "doc-only",
+      "evidence": "closed verdict vocabulary",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ClosedVerdictVocabulary",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (4 docs; heading in docs/standards/verification-ladder-spec.md) that the spec's Verdict set is closed and additive — a new verdict is a new named value plus a fold arm, never a free-text field — mirroring the kernel's closed VerdictKind in internal/abi/types.go. A design principle stated in the standard, itself unnamed in code.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Add a conformance test asserting the spec's verdict table and the kernel VerdictKind enum stay in sync"
+      ]
+    },
+    {
+      "id": "current-evidence",
+      "canonical": "current evidence",
+      "signal": "doc-only",
+      "evidence": "Current evidence",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "CurrentEvidence",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring notes section (4 docs, docs/notes/) inventorying the evidence that already exists in-tree at time of writing — concrete symbols, gates, and commands (e.g. internal/taskmgr.ReviewHandoff behavior) — before the note proposes next steps. A note-structure convention grounding proposals in shipped state.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Add the current-evidence slot to the notes template so proposals always start from shipped state"
+      ]
+    },
+    {
+      "id": "demotion-path",
+      "canonical": "demotion path",
+      "signal": "doc-only",
+      "evidence": "Demotion Path",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "DemotionPath",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring generation-planning section (4 docs, docs/notes/GENERATION-*) prescribing what happens when a promoted item's gate regresses: record the failed gate with evidence, move off gen/now only if the horizon changed, prefer demotion/parking/retirement over stale labels. The inverse of Promotion Rules; process doctrine, not code.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Merge the demotion path into docs/generation.md next to the promotion verbs it inverts"
+      ]
+    },
+    {
+      "id": "downstream-rule",
+      "canonical": "downstream rule",
+      "signal": "doc-only",
+      "evidence": "Downstream rule",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "DownstreamRule",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring research-note section (4 docs, docs/notes/RESEARCH-span-* and RESEARCH-memory-*) stating the rule any downstream consumer of the note's result must obey — e.g. a quoted span reward must report raw/expected attention mass, normalized reward, and the verifier verdict, else it is raw telemetry. A research-note contract convention.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Collect the downstream rules into one enforcement checklist a result-quoting doc can be linted against"
+      ]
+    },
+    {
+      "id": "evidence-gate",
+      "canonical": "evidence gate",
+      "signal": "doc-only",
+      "evidence": "Evidence Gate",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "EvidenceGate",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring benchmark submission-packet section (4 docs, docs/benchmarks/) listing the conditions that must ALL be true before a fak result may be submitted upstream or copied into BENCHMARK-AUTHORITY.md (pinned release version, explicit date window, etc.) — the reason a packet ships with no number. A packet-gating convention.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Express the gate conditions as a machine-checkable contract the packet CI can evaluate"
+      ]
+    },
+    {
+      "id": "exclusion-baseline",
+      "canonical": "exclusion baseline",
+      "signal": "doc-only",
+      "evidence": "exclusion baseline",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ExclusionBaseline",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (4 docs; defined in docs/host-defender-exclusions.md) naming the one-paste Windows Defender path and process exclusion set for fleet hosts — repo tree, Git install, agent scratch dir, and the processes a tool call spawns — removing the synchronous real-time-scan tax on every agent tool call, with an honest coverage-cost note.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Ship the baseline as a checked-in PowerShell script so hosts apply the same set instead of hand-copying the table"
+      ]
+    },
+    {
+      "id": "five-benchmarks",
+      "canonical": "five benchmarks",
+      "signal": "doc-only",
+      "evidence": "Five Benchmarks",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "FiveBenchmarks",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "a recurring heading (4 docs) used in two distinct senses: the survey table of five external agentic leaderboards (BFCL V4, GAIA2, Galileo v2, Vals Index, AA Agentic Index) in docs/notes/AGENTIC-LEADERBOARD-SURVEY-1068, and the GLM-5.2 note's five locally reproducible on-box benchmarks. Not one fixed set — the name is overloaded across notes.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Disambiguate the two senses by renaming one heading (e.g. 'the five leaderboards' vs 'the five on-box benchmarks')"
+      ]
+    },
+    {
+      "id": "four-axes",
+      "canonical": "four axes",
+      "signal": "doc-only",
+      "evidence": "Four Axes",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "FourAxes",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (4 docs; section of docs/generation-future-portfolio-rsi-score.md) naming the four component axes of the composite portfolio RSI score — a vector (starting with generation balance B) always reported alongside the folded scalar because single numbers hide diverging axis health; every input is a count or ordinal bucket, no invented dollars.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Name the four axes as fields of the RSI score's emitted JSON so the doc concept has a data-shape anchor"
+      ]
+    },
+    {
+      "id": "gateway-serving",
+      "canonical": "gateway serving",
+      "signal": "doc-only",
+      "evidence": "Gateway serving",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "GatewayServing",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring release-notes section (4 docs, docs/releases/) grouping changes to the fak serve gateway (internal/gateway) — e.g. v0.5.0's cross-agent tier-2 scoped invalidation and revocation. A release-notes category label for an area of the system, not itself an identifier.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Fix the release-notes category list (gateway serving, in-kernel model, etc.) in a release template so categories stay stable across versions"
+      ]
+    },
+    {
+      "id": "hardware-catalog",
+      "canonical": "hardware catalog",
+      "signal": "doc-only",
+      "evidence": "Hardware Catalog",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "HardwareCatalog",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (4 docs; title of docs/notes/HARDWARE-CATALOG.md) tracking all benchmark machines with full specs, onboarding procedures, and baseline runs (e.g. node-macos-a, workstation-a); the live machine-readable copy is experiments/benchmark/catalog.json managed via tools/bench_catalog.py.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Generate the markdown catalog from catalog.json so the doc and the machine-readable registry cannot drift"
+      ]
+    },
+    {
+      "id": "harness-integration-acceptance-checklist",
+      "canonical": "harness integration acceptance checklist",
+      "signal": "doc-only",
+      "evidence": "Harness integration acceptance checklist",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "HarnessAcceptanceChecklist",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (4 docs; title of docs/integrations/harness-acceptance-checklist.md): the acceptance checklist for putting fak in front of an agent harness, covering both compatibility surfaces — the model/provider wire (the easy half: repoint one base URL) and the host-tool dialect (tool names, arg shapes, denial behavior) that a working wire silently hides.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Link each docs/integrations/<harness>.md guide to its filled-in copy of the checklist"
+      ]
+    },
+    {
+      "id": "in-kernel-model-engine",
+      "canonical": "in-kernel model engine",
+      "signal": "doc-only",
+      "evidence": "in-kernel model engine",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "InKernelModelEngine",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (4 docs; FAQ headings) for fak's from-scratch pure-Go transformer forward pass, shipped as the default 'inkernel' engine: loads GGUF/safetensors into process address space, decodes over the kernel-owned KV cache, and is a correctness reference (bit-exact/argmax-exact vs a HuggingFace oracle) rather than a production serving engine. The component is real code, but no identifier is literally named 'in-kernel model engine'.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Add a glossary entry mapping 'in-kernel model engine' to the concrete engine leaf and the inkernel engine name used in code"
+      ]
+    },
+    {
+      "id": "install-the-binary",
+      "canonical": "install the binary",
+      "signal": "doc-only",
+      "evidence": "Install the binary",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "InstallBinary",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring instruction heading (4 docs; e.g. docs/fak/deployment-guide.md) for installing the prebuilt static fak binary — the one-line install.sh that downloads, verifies SHA-256, and installs to PATH, plus env knobs like FAK_VERSION. An install-doc section convention, not a system concept.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Make one canonical install section and have the other docs link to it instead of duplicating the curl line"
+      ]
+    },
+    {
+      "id": "intake-rules",
+      "canonical": "intake rules",
+      "signal": "doc-only",
+      "evidence": "Intake Rules",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "IntakeRules",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring generation-process section (4 docs; canonical in docs/generation.md) giving the labeling rules at issue creation: add generation plus exactly one stream label, bind the matching milestone, use needs-triage rather than guessing, never use gen/future as a dumping ground, and state the horizon-specific witness in the body. Backlog process doctrine.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Enforce the intake rules with an issue-template or triage lint instead of prose only"
+      ]
+    },
+    {
+      "id": "integration-points",
+      "canonical": "integration points",
+      "signal": "doc-only",
+      "evidence": "Integration Points",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "IntegrationPoints",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring architecture-doc section (4 docs, mostly docs/fak/) listing where external systems plug into fak — e.g. the fak serve gateway's protocol entry points table (OpenAI-compatible /v1/chat/completions, Anthropic /v1/messages). A doc-organization convention, not one named object.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Keep one authoritative entry-point table in the API reference and make architecture docs link to it"
+      ]
+    },
+    {
+      "id": "lifecycle-ladder",
+      "canonical": "lifecycle ladder",
+      "signal": "doc-only",
+      "evidence": "lifecycle ladder",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "LifecycleLadder",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (4 docs; docs/MATURITY-SCORECARD.md and CONCEPT-MATURITY-LADDER-2026-06-29.md) naming the closed, total-ordered feature-maturity ladder every internal/<leaf> lane in dos.toml is placed on: proposed -> prototyped -> tested -> dogfooded -> default, plus a benchmarked badge — each rung reached by evidence the author did not write.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Name the ladder rungs as a closed enum in the maturity tooling so the scorecard and docs share one vocabulary"
+      ]
+    },
+    {
+      "id": "long-session-economics",
+      "canonical": "long-session economics",
+      "signal": "doc-only",
+      "evidence": "Long-session economics",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "LongSessionEconomics",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (4 docs; title of docs/explainers/long-session-economics.md): the explainer of why long agent runs get expensive — every turn re-sends the whole transcript, provider prompt caches only discount while the prompt front stays byte-for-byte identical — written for readers with no fak internals. An explainer-level concept, not a code object.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Cross-link the explainer from the cache-value roll-up so the economics narrative and the evidence report reference each other"
+      ]
+    },
+    {
+      "id": "machine-registry",
+      "canonical": "machine registry",
+      "signal": "doc-only",
+      "evidence": "Machine Registry",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "MachineRegistry",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring heading (4 docs; section of docs/notes/HARDWARE-CATALOG.md) pointing at the live machine-readable benchmark-machine catalog: experiments/benchmark/catalog.json, managed via tools/bench_catalog.py. The registry file is real; the name exists only as this doc heading.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Adopt 'machine registry' as the documented name of catalog.json inside tools/bench_catalog.py help text"
+      ]
+    },
+    {
+      "id": "measurement-status",
+      "canonical": "measurement status",
+      "signal": "doc-only",
+      "evidence": "Measurement Status",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "MeasurementStatus",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring benchmark-results section (4 docs: SWEBENCH, SESSION-VALUE-STACK, webbench docs) declaring dataset, model, run count, artifacts, and a status label per number — MEASURED vs THEORETICAL (MODELED) vs not measured/verified. The evidence-labeling convention that keeps modeled numbers from posing as measured ones.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Close the status label vocabulary (MEASURED/MODELED/NOT-MEASURED) in one definition doc all results pages cite"
+      ]
+    },
+    {
+      "id": "portable-agent-routing-schema",
+      "canonical": "portable agent-routing schema",
+      "signal": "doc-only",
+      "evidence": "portable agent-routing schema",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "AgentRoutingSchema",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (4 docs; title of docs/standards/agent-routing-schema.md): a normative, declarative, version-tagged routing file that — unlike request-granularity LLM routers (OpenRouter, LiteLLM, etc.) — routes at aspect granularity (whole request, one tool call, sub-query, planner state, reasoning step) to different models, with ensembles folded by a Reduction as first-class plans.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Check in a JSON Schema plus valid/invalid fixtures for the routing file, matching the fixture pattern the other standards already use"
+      ]
+    },
+    {
+      "id": "portable-taint-check-schema",
+      "canonical": "portable taint-check schema",
+      "signal": "doc-only",
+      "evidence": "portable taint-check schema",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "TaintCheckSchema",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (4 docs; title of docs/standards/taint-check-schema.md): a normative portable contract for provenance-keyed information-flow control — kernel-authored taints stamped on values and propagated, refusing tainted-to-sensitive-sink flows before execution, because content detectors are sound-but-evadable while provenance cannot be paraphrased away. Shipped spine in internal/ifc (Ref.Taint).",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Publish the schema file itself (not just the standard prose) with conformance fixtures under docs/standards/fixtures/"
+      ]
+    },
+    {
+      "id": "problems-found",
+      "canonical": "problems found",
+      "signal": "doc-only",
+      "evidence": "Problems found",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "ProblemsFound",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring docs/launch section (4 docs) recording the adversarial fact-check of a draft launch post: each numbered problem names a mislabeled or non-ledger-backed claim (e.g. splicing a WebVoyager number with a different rig's vs-tuned figure) and its fix. Pairs with the CORRECTED ASSET section; a launch-subtree convention.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Document the launch fact-check workflow (draft / problems found / corrected asset) once so new launch docs follow it"
+      ]
+    },
+    {
+      "id": "promotion-verbs",
+      "canonical": "promotion verbs",
+      "signal": "doc-only",
+      "evidence": "Promotion Verbs",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "PromotionVerbs",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring generation-process section (4 docs; canonical in docs/generation.md) defining the closed verb set for moving backlog items between horizons: promote (evidence retired the blocker), demote (assumption failed or witness regressed), retire (obsolete/superseded), park (true but ownerless). A process vocabulary, not code.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Mirror the four verbs as label-transition commands in the triage tooling so the vocabulary is executable"
+      ]
+    },
+    {
+      "id": "queried-skill-loader",
+      "canonical": "queried skill loader",
+      "signal": "doc-only",
+      "evidence": "queried skill loader",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "QueriedSkillLoader",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (4 docs; title of docs/SKILL-LOADER-QUERY-EPIC.md): the epic thesis that a skill should be queried/faulted in like a KV page rather than loaded up front — removing the O(N) system-prompt tax of listing all skill descriptions, making a skill a paged capability with zero marginal context cost at rest, eviction under pressure, and HIT serving on repeat invocation.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Name the loader component in code once the epic lands and bind the epic doc to that leaf"
+      ]
+    },
+    {
+      "id": "recommended-path",
+      "canonical": "recommended path",
+      "signal": "doc-only",
+      "evidence": "Recommended Path",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "RecommendedPath",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring section (4 docs, docs/benchmarking/) giving a phased recommendation out of an analysis — e.g. Phase 0 proxy mode (fak serve --base-url), Phase 1 external SGLang/vLLM engine, Phase 2 KV-coherence via abi.RegisterKVBackend. An analysis-conclusion convention, not a system object.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Promote the currently-live recommended path into a maintained doc instead of leaving it inside dated analyses"
+      ]
+    },
+    {
+      "id": "related-reading",
+      "canonical": "related reading",
+      "signal": "doc-only",
+      "evidence": "Related reading",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "RelatedReading",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring cross-link section (4 docs, docs/explainers/ and notes) listing companion docs with one-line reasons to read each (e.g. memory-engineering linking the four memory explainers). A pure doc-structure convention for navigation.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Keep as a convention; optionally lint that the links resolve (dead-link check already exists in the index freshness tooling)"
+      ]
+    },
+    {
+      "id": "relay-reason-vocabulary",
+      "canonical": "relay reason vocabulary",
+      "signal": "doc-only",
+      "evidence": "Relay reason vocabulary",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "RelayReasonVocabulary",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (4 docs; title of docs/notes/RELAY-REASON-VOCABULARY-2026-07-01.md): a data-only closed token vocabulary for relay legs — every row in the dos check-reason shape (token, category, summary, fix) — so legs never explain state with prose. Explicitly not consumed by any gate yet and not the exclusive dos.toml reason table.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Wire the vocabulary into a dos.toml reasons floor with its own maintenance witness, as the doc says a future floor must"
+      ]
+    },
+    {
+      "id": "security-model",
+      "canonical": "security model",
+      "signal": "doc-only",
+      "evidence": "Security Model",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "SecurityModel",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring architecture-doc section (4 docs) describing a component's security design: default-deny posture and the closed refusal vocabulary in docs/fak/agent-integration-architecture.md; no-generic-exec, method-allowlist controls in docs/agent-machine-link-protocol.md. A section convention naming per-component security designs, not one object.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Add a top-level security overview that links each per-component Security Model section"
+      ]
+    },
+    {
+      "id": "security-posture",
+      "canonical": "security posture",
+      "signal": "doc-only",
+      "evidence": "Security posture",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "SecurityPosture",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring section/phrase (4 docs) describing the operational security stance of an integration — e.g. the Slack control foundation's rules (gate on immutable user IDs, one control channel, dedupe on event_id, lethal-trifecta governing rule) and a FAQ heading on completing an agent security posture. A doc convention overlapping with Security Model.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Pick one of 'Security Model' / 'Security posture' as the standard section name to stop the near-duplicate headings"
+      ]
+    },
+    {
+      "id": "six-primitives",
+      "canonical": "six primitives",
+      "signal": "doc-only",
+      "evidence": "six primitives",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "SixPrimitives",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (4 docs; heading in docs/notes/context-safety-visual-primitive-schemas-1217.md) naming the six context-safety visualization primitives, each specified by what kernel surface it consumes — e.g. the context-event ledger ribbon consuming the hash-chained journal's CAP_EVICT/CAP_FAULT/CAP_VERSION_BIND rows and cache-event recorder tiers. A design-note taxonomy, not shipped code.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Give each primitive a short stable name and anchor so later implementation issues can bind to them individually"
+      ]
+    },
+    {
+      "id": "socket-mode",
+      "canonical": "socket mode",
+      "signal": "doc-only",
+      "evidence": "Socket Mode",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "SocketMode",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "an external Slack technology (4 docs; heading in docs/notes/SLACK-CONTROL-FOUNDATION-2026-07-02.md): Slack's WebSocket-based delivery where events, slash commands, and block_actions arrive over a pre-authenticated socket with zero public ingress — documented as the transport choice for the planned Slack control channel. Not a repo concept.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "No naming action needed beyond marking it external; link the note to Slack's official Socket Mode docs where cited"
+      ]
+    },
+    {
+      "id": "source-map",
+      "canonical": "source map",
+      "signal": "doc-only",
+      "evidence": "Source map",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "SourceMap",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring section (4 docs: CACHE-FRONTIER-OPERATING-PLAN and notes) listing the source docs and links behind a page 'so the next agent does not re-trace' them — a bibliography of repo-internal pointers. A doc-navigation convention; unrelated to JavaScript source maps.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Rename or subtitle the section to avoid collision with the JS 'source map' term (e.g. 'Source map (doc pointers)')"
+      ]
+    },
+    {
+      "id": "status-legend",
+      "canonical": "status legend",
+      "signal": "doc-only",
+      "evidence": "Status legend",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "StatusLegend",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring section (4 docs, docs/notes/) defining the closed status tokens a doc's tables use — e.g. runnable-now, run-contract-shipped, hardware-gated, adapter-gap, negative-witness in the benchmark run-packets note. A per-doc vocabulary-table convention; the token sets differ between docs.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Unify the overlapping per-doc status vocabularies into one shared legend the notes can import"
+      ]
+    },
+    {
+      "id": "system-prompt-mutation-schema",
+      "canonical": "system-prompt-mutation schema",
+      "signal": "doc-only",
+      "evidence": "system-prompt-mutation schema",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "SystemPromptMutationSchema",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (4 docs; title of docs/standards/system-prompt-mutation-schema.md, plus negative fixtures under docs/standards/fixtures/system-prompt-mutation-invalid/): a portable normative schema for gating a self-improving agent's edits to its own base context, targeting the documented failure modes of context collapse / brevity bias (ACE) and misevolution.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Ship a validator that consumes the schema and rejects the checked-in invalid fixtures in CI"
+      ]
+    },
+    {
+      "id": "verdict-object",
+      "canonical": "verdict object",
+      "signal": "doc-only",
+      "evidence": "verdict object",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "VerdictObject",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring API-reference heading (4 docs; docs/fak/api-reference.md 'The verdict object') for the wire shape every fak-native response carries — fields kind (closed set ALLOW/DENY/TRANSFORM/QUARANTINE/REQUIRE_WITNESS/DEFER), reason (closed refusal vocabulary), by (adjudicator). The code name is WireVerdict; the doc heading uses this unnamed generic phrase instead.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Retitle the section to 'The verdict object (WireVerdict)' so the doc phrase and code symbol bind explicitly"
+      ]
+    },
+    {
+      "id": "verification-commands",
+      "canonical": "verification commands",
+      "signal": "doc-only",
+      "evidence": "Verification Commands",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "VerificationCommands",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring section (4 docs: docs/branch-regime-shadow-cutover.md, docs/benchmarking/README.md 'DOS Verification Commands') listing the minimum proof-bundle commands to verify a claimed state — git ls-remote, fak release status, go test, dos verify invocations. A proof-checklist convention, not a code object.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Standardize the section as a required block in runbooks so every claimed cutover ships its command bundle"
+      ]
+    },
+    {
+      "id": "verification-ladder-spec",
+      "canonical": "verification-ladder spec",
+      "signal": "doc-only",
+      "evidence": "verification-ladder spec",
+      "evidence_kind": "heading",
+      "current_name": "",
+      "proposed_name": "VerificationLadderSpec",
+      "named_symbol": "",
+      "doc_anchor": "",
+      "definition": "the recurring concept (4 docs; title of docs/standards/verification-ladder-spec.md, plus negative fixtures under docs/standards/fixtures/verification-ladder-invalid/): the normative spec that verification picks the smallest rung that conclusively establishes a property and climbs only on INDETERMINATE or elevated risk — the agent-kernel restatement of five Linux mechanisms (seccomp fold, least-privilege caps, AppArmor complain-to-enforce, integrity ladder, eBPF verifier), with the doctrine note as companion.",
+      "aliases": [],
+      "verdict": "hinted",
+      "gaps": [
+        "Name the spec's ladder rungs in code (a closed rung enum) so conforming implementations can be checked mechanically"
+      ]
     }
   ]
 }

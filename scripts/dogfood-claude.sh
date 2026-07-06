@@ -16,19 +16,43 @@
 #   ./scripts/dogfood-claude.sh --smoke         # curl the wire (no model intelligence needed), then exit
 #   ./scripts/dogfood-claude.sh --print-env     # print the export lines for your own `claude` invocation
 #   ./scripts/dogfood-claude.sh --list-accounts # show the account switcher's roster, then exit
-#   ./scripts/dogfood-claude.sh --install       # COPY `fak` (repo-independent) + symlink the `fak-dogfood`/`fak-qwen36-claude`/`claude-glm-gcp`/`claude-mac` launchers onto PATH
+#   ./scripts/dogfood-claude.sh --install       # COPY `fak` (repo-independent) + symlink the `fak-dogfood`/`fak-qwen36-claude`/`claude-glm-gcp`/`claude-gemini-gcp`/`claude-groq-qwen36`/`claude-groq-compound`/`claude-nim-kimi`/`claude-nim-deepseek`/`claude-mac` launchers onto PATH
 #   fak-qwen36-claude --probe "hi"              # installed Qwen3.6 local preset
 #   claude-glm-gcp --probe "say pong"           # installed GLM-5.2-on-GCP preset (set FAK_GLM_GCP_BASE_URL first)
+#   claude-gemini-gcp --probe "say pong"        # installed Gemini-3.5-Flash-on-GCP-Vertex preset (set FAK_GEMINI_GCP_PROJECT + FAK_GEMINI_GCP_KEY first)
+#   claude-groq-qwen36 --probe "say pong"       # installed Groq Qwen3.6-27B preset (set FAK_GROQ_API_KEY first)
+#   claude-groq-compound --probe "say pong"     # installed Groq Compound lower-tier preset
+#   claude-nim-kimi --probe "say pong"          # installed NVIDIA NIM Kimi K2.6 preset (set NVIDIA_API_KEY first)
+#   claude-nim-deepseek --probe "say pong"      # installed NVIDIA NIM DeepSeek V4 Pro preset (set NVIDIA_API_KEY first)
 #   claude-mac --probe "say pong"               # installed Mac fak-serve preset (set FAK_MAC_GATEWAY first)
 #
 # Knobs (env):
-#   FAK_DOGFOOD_PRESET   qwen36-local | glm-gcp | mac (auto from the invoked name: fak-qwen36-claude / claude-glm-gcp / claude-mac)
+#   FAK_DOGFOOD_PRESET   qwen36-local | glm-gcp | gemini-gcp | groq-qwen36 | groq-compound | nim-kimi | nim-deepseek-v4-pro | mac (auto from the invoked name: fak-qwen36-claude / claude-glm-gcp / claude-gemini-gcp / claude-groq-qwen36 / claude-groq-compound / claude-nim-kimi / claude-nim-deepseek / claude-mac)
 #   FAK_GLM_GCP_BASE_URL the glm-gcp preset's GLM-5.2 /v1 base URL (a Tailscale host, or a localhost
 #                          SSH/IAP tunnel to the GCP serving node; default http://127.0.0.1:8200/v1).
 #                          Stand the node up with scripts/gcp-glm-serve.sh.
+#   FAK_GEMINI_GCP_PROJECT / FAK_GEMINI_GCP_LOCATION  the gemini-gcp preset's GCP project + region
+#                          (location default global) — used to build the Vertex OpenAI-compat base
+#                          URL when FAK_GEMINI_GCP_BASE_URL is not set. FAK_GEMINI_GCP_PROJECT falls back
+#                          to GCP_PROJECT.
+#   FAK_GEMINI_GCP_BASE_URL  explicit Vertex OpenAI-compat base (.../endpoints/openapi); overrides the built one
+#   FAK_GEMINI_GCP_MODEL the gemini-gcp preset's upstream model id (default google/gemini-3.5-flash)
+#   FAK_GEMINI_GCP_KEY   bearer token for Vertex — a GCP access token, e.g. `$(gcloud auth print-access-token)`
+#   FAK_GROQ_API_KEY     Groq API key for the groq-qwen36 preset
+#   FAK_GROQ_BASE_URL    Groq OpenAI-compatible base (default https://api.groq.com/openai/v1)
+#   FAK_GROQ_MODEL       Groq Qwen model slug (default qwen/qwen3.6-27b)
+#   FAK_DOGFOOD_PROVIDER_MAX_TOKENS optional upstream max_tokens cap (groq-compound default 8192)
+#   FAK_NIM_KIMI_API_KEY_ENV env var holding the NVIDIA NIM bearer (default NVIDIA_API_KEY)
+#   FAK_NIM_KIMI_BASE_URL    NVIDIA NIM OpenAI-compatible base (default https://integrate.api.nvidia.com/v1)
+#   FAK_NIM_KIMI_MODEL       NVIDIA NIM Kimi model slug (default moonshotai/kimi-k2.6)
+#   FAK_NIM_DEEPSEEK_API_KEY_ENV env var holding the NVIDIA NIM bearer (default NVIDIA_API_KEY)
+#   FAK_NIM_DEEPSEEK_BASE_URL    NVIDIA NIM OpenAI-compatible base (default https://integrate.api.nvidia.com/v1)
+#   FAK_NIM_DEEPSEEK_MODEL       NVIDIA NIM DeepSeek model slug (default deepseek-ai/deepseek-v4-pro)
 #   FAK_MAC_GATEWAY      the mac preset's fak serve gateway base URL, e.g. http://<macbook-ip>:8080
 #   FAK_MAC_MODEL        the mac preset's served model id (default lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M)
 #   FAK_GATEWAY_KEY      bearer used by the mac preset when the gateway requires --require-key-env
+#   FAK_MAC_SSH_HOST     mac preset ssh host for fetching ~/.fak-gateway-key when FAK_GATEWAY_KEY is empty
+#   FAK_MAC_SSH_KEY      optional ssh identity for the mac preset key fetch
 #   FAK_DOGFOOD_PORT     fak serve port              (default 8080)
 #   FAK_DOGFOOD_MODEL    served model id             (default: first ollama model, else qwen2.5:1.5b)
 #   FAK_DOGFOOD_BACKEND  ollama | shim | openai | gguf | anthropic
@@ -48,6 +72,10 @@
 #   FAK_DOGFOOD_BASE_URL OpenAI-compatible upstream  (required for BACKEND=openai, e.g. http://127.0.0.1:8131/v1;
 #                                                     optional override for BACKEND=anthropic)
 #   FAK_DOGFOOD_API_KEY_ENV optional upstream API key env var for BACKEND=openai
+#   FAK_DOGFOOD_PROBE_OUT override --probe transcript path (default: experiments/agent-live/dogfood-claude-probe.json)
+#   FAK_DOGFOOD_PROBE_ERR override --probe stderr path (default: /tmp/fak-claude.log, or <PROBE_OUT>.err.log when PROBE_OUT is set)
+#   FAK_DOGFOOD_PROBE_TOOLS override --probe Claude Code tools (default empty = disabled; set default or Read,Write,Edit,Bash for tool probes)
+#   FAK_DOGFOOD_PROBE_ALLOWED_TOOLS optional --probe allow-list for Claude Code tools
 #   FAK_DOGFOOD_TIMEOUT_S planner/write timeout      (default 300s, or 900s for BACKEND=openai|gguf)
 #   FAK_DOGFOOD_PROVIDER_EXTRA_BODY_JSON extra JSON merged into upstream provider requests
 #   FAK_DOGFOOD_CLAUDE_BIN Claude Code executable (default claude, or claude.exe on WSL/Windows)
@@ -85,6 +113,29 @@ cd "$FAK_DIR"
 log()  { printf '\033[36m[dogfood]\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[33m[dogfood] %s\033[0m\n' "$*" >&2; }
 die()  { printf '\033[31m[dogfood] %s\033[0m\n' "$*" >&2; exit 1; }
+
+ensure_mac_gateway_key() {
+  [ "${PRESET:-}" = "mac" ] || return 0
+  local env_name="${1:-}"
+  [ -n "$env_name" ] || return 0
+  local current="${!env_name:-}"
+  [ -n "$current" ] && return 0
+  [ -n "${FAK_MAC_SSH_HOST:-}" ] || return 0
+
+  local ssh_key="${FAK_MAC_SSH_KEY:-$HOME/.ssh/id_ed25519_prod_to_laptop}"
+  local ssh_args=(-n -o BatchMode=yes -o NumberOfPasswordPrompts=0 -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o ConnectionAttempts=1)
+  [ -n "$ssh_key" ] && ssh_args+=(-i "$ssh_key")
+
+  log "fetching Mac gateway bearer from configured Mac SSH host"
+  local secret
+  if ! secret="$(ssh "${ssh_args[@]}" "$FAK_MAC_SSH_HOST" 'cat ~/.fak-gateway-key' 2>&1)"; then
+    die "fetch gateway key over ssh failed: $secret
+set $env_name directly, or set FAK_MAC_SSH_HOST / FAK_MAC_SSH_KEY for the Mac preset"
+  fi
+  secret="$(printf '%s' "$secret" | tr -d '\r\n')"
+  [ -n "$secret" ] || die "fetch gateway key over ssh: empty key"
+  export "$env_name=$secret"
+}
 
 # --- -Kernel / --kernel alias: FAK_DOGFOOD_BACKEND=gguf (fak's OWN in-kernel forward) ---
 # The Windows twin (dogfood-claude.ps1) accepts -Kernel as an alias for the gguf backend;
@@ -134,7 +185,12 @@ if [ -z "$PRESET" ]; then
   case "$INVOKED_NAME" in
     fak-qwen36-claude) PRESET="qwen36-local" ;;
     claude-glm-gcp)    PRESET="glm-gcp" ;;
-    claude-mac)        PRESET="mac" ;;
+    claude-gemini-gcp) PRESET="gemini-gcp" ;;
+    claude-groq-qwen36) PRESET="groq-qwen36" ;;
+    claude-groq-compound) PRESET="groq-compound" ;;
+    claude-nim-kimi)    PRESET="nim-kimi" ;;
+    claude-nim-deepseek) PRESET="nim-deepseek-v4-pro" ;;
+    claude-mac)         PRESET="mac" ;;
   esac
 fi
 
@@ -144,6 +200,7 @@ DEFAULT_MODEL=""
 DEFAULT_PROVIDER_EXTRA_BODY=""
 DEFAULT_UPSTREAM_API_KEY_ENV=""
 DEFAULT_OPENAI_TOOL_MESSAGES_AS_TEXT=""
+DEFAULT_PROVIDER_MAX_TOKENS=""
 case "$PRESET" in
   "") ;;
   qwen36|qwen36-local)
@@ -166,6 +223,77 @@ case "$PRESET" in
     DEFAULT_MODEL="${FAK_GLM_GCP_MODEL:-glm-5.2}"
     DEFAULT_PROVIDER_EXTRA_BODY='{"chat_template_kwargs":{"enable_thinking":false}}'
     ;;
+  gemini-gcp)
+    # Gemini 3.5 Flash served by GCP Vertex AI (its OpenAI-compatible endpoint) fronted by
+    # `fak serve --provider openai`, so every tool call still crosses the kernel floor. This
+    # is the `claude-glm-gcp` wire pointed at a Google-MANAGED model instead of a self-hosted
+    # GPU node — there is no VM to stand up, only GCP creds. The bearer is a short-lived GCP
+    # access token (`gcloud auth print-access-token`) held in FAK_GEMINI_GCP_KEY; Vertex reads
+    # it as `Authorization: Bearer`, exactly like the mac preset's gateway key. The upstream id
+    # is `google/gemini-3.5-flash` (a Vertex tier-2 lightweight seat). fak's openai backend
+    # appends /chat/completions to the base, so the base is the Vertex .../endpoints/openapi.
+    PRESET="gemini-gcp"
+    DEFAULT_BACKEND="openai"
+    # An explicit FAK_GEMINI_GCP_BASE_URL wins; otherwise build the Vertex OpenAI-compat base
+    # from the project + location (default global). A project is required when no full
+    # base URL is given — the same fail-loud posture the mac preset takes for its gateway.
+    if [ -n "${FAK_GEMINI_GCP_BASE_URL:-}" ]; then
+      DEFAULT_OPENAI_BASE_URL="$FAK_GEMINI_GCP_BASE_URL"
+    else
+      _gem_proj="${FAK_GEMINI_GCP_PROJECT:-${GCP_PROJECT:-}}"
+      _gem_loc="${FAK_GEMINI_GCP_LOCATION:-global}"
+      [ -n "$_gem_proj" ] || die "FAK_DOGFOOD_PRESET=gemini-gcp needs FAK_GEMINI_GCP_BASE_URL, or a project via FAK_GEMINI_GCP_PROJECT / GCP_PROJECT (the Vertex OpenAI-compat base is built from project+location)"
+      if [ "$_gem_loc" = "global" ]; then
+        _gem_host="aiplatform.googleapis.com"
+      else
+        _gem_host="${_gem_loc}-aiplatform.googleapis.com"
+      fi
+      DEFAULT_OPENAI_BASE_URL="https://${_gem_host}/v1beta1/projects/${_gem_proj}/locations/${_gem_loc}/endpoints/openapi"
+    fi
+    DEFAULT_MODEL="${FAK_GEMINI_GCP_MODEL:-google/gemini-3.5-flash}"
+    DEFAULT_UPSTREAM_API_KEY_ENV="FAK_GEMINI_GCP_KEY"
+    # Vertex's OpenAI-compatible Gemini route accepts the first Claude tool call, but
+    # rejects the follow-up tool-result message shape unless fak serializes it as text.
+    DEFAULT_OPENAI_TOOL_MESSAGES_AS_TEXT="1"
+    ;;
+  groq-qwen36|groq)
+    # Groq's OpenAI-compatible endpoint fronted by `fak serve --provider openai`,
+    # so Claude Code talks to the local kernel while inference runs on Groq.
+    PRESET="groq-qwen36"
+    DEFAULT_BACKEND="openai"
+    DEFAULT_OPENAI_BASE_URL="${FAK_GROQ_BASE_URL:-https://api.groq.com/openai/v1}"
+    DEFAULT_MODEL="${FAK_GROQ_MODEL:-qwen/qwen3.6-27b}"
+    DEFAULT_UPSTREAM_API_KEY_ENV="FAK_GROQ_API_KEY"
+    ;;
+  groq-compound)
+    # Groq's lower-quality Compound model, fronted by the same OpenAI-compatible
+    # endpoint and request-limited account. Groq accepts longer prompts here, but
+    # rejects max_tokens above 8192, so cap the upstream output budget.
+    PRESET="groq-compound"
+    DEFAULT_BACKEND="openai"
+    DEFAULT_OPENAI_BASE_URL="${FAK_GROQ_BASE_URL:-https://api.groq.com/openai/v1}"
+    DEFAULT_MODEL="${FAK_GROQ_MODEL:-groq/compound}"
+    DEFAULT_UPSTREAM_API_KEY_ENV="FAK_GROQ_API_KEY"
+    DEFAULT_PROVIDER_MAX_TOKENS="8192"
+    ;;
+  nim-kimi)
+    # NVIDIA NIM's OpenAI-compatible endpoint fronted by `fak serve --provider openai`,
+    # so Claude Code talks to the local kernel while inference runs on Kimi K2.6.
+    PRESET="nim-kimi"
+    DEFAULT_BACKEND="openai"
+    DEFAULT_OPENAI_BASE_URL="${FAK_NIM_KIMI_BASE_URL:-https://integrate.api.nvidia.com/v1}"
+    DEFAULT_MODEL="${FAK_NIM_KIMI_MODEL:-moonshotai/kimi-k2.6}"
+    DEFAULT_UPSTREAM_API_KEY_ENV="${FAK_NIM_KIMI_API_KEY_ENV:-NVIDIA_API_KEY}"
+    ;;
+  nim-deepseek-v4-pro)
+    # NVIDIA NIM's OpenAI-compatible endpoint fronted by `fak serve --provider openai`,
+    # so Claude Code talks to the local kernel while inference runs on DeepSeek V4 Pro.
+    PRESET="nim-deepseek-v4-pro"
+    DEFAULT_BACKEND="openai"
+    DEFAULT_OPENAI_BASE_URL="${FAK_NIM_DEEPSEEK_BASE_URL:-https://integrate.api.nvidia.com/v1}"
+    DEFAULT_MODEL="${FAK_NIM_DEEPSEEK_MODEL:-deepseek-ai/deepseek-v4-pro}"
+    DEFAULT_UPSTREAM_API_KEY_ENV="${FAK_NIM_DEEPSEEK_API_KEY_ENV:-NVIDIA_API_KEY}"
+    ;;
   mac)
     # MacBook dogfood preset: point Claude Code at an already-running fak serve on
     # the Mac (often serving Qwen3.6-27B through Metal/LM Studio/llama-server).
@@ -180,7 +308,7 @@ case "$PRESET" in
     DEFAULT_UPSTREAM_API_KEY_ENV="FAK_GATEWAY_KEY"
     DEFAULT_OPENAI_TOOL_MESSAGES_AS_TEXT="1"
     ;;
-  *) die "unknown FAK_DOGFOOD_PRESET=$PRESET (want qwen36-local | glm-gcp | mac)" ;;
+  *) die "unknown FAK_DOGFOOD_PRESET=$PRESET (want qwen36-local | glm-gcp | gemini-gcp | groq-qwen36 | groq-compound | nim-kimi | nim-deepseek-v4-pro | mac)" ;;
 esac
 
 PORT="${FAK_DOGFOOD_PORT:-8080}"
@@ -210,6 +338,7 @@ OPENAI_BASE_URL="${FAK_DOGFOOD_BASE_URL:-$DEFAULT_OPENAI_BASE_URL}"
 UPSTREAM_API_KEY_ENV="${FAK_DOGFOOD_API_KEY_ENV:-$DEFAULT_UPSTREAM_API_KEY_ENV}"
 PROVIDER_EXTRA_BODY="${FAK_DOGFOOD_PROVIDER_EXTRA_BODY_JSON:-${FAK_DOGFOOD_EXTRA_BODY_JSON:-$DEFAULT_PROVIDER_EXTRA_BODY}}"
 OPENAI_TOOL_MESSAGES_AS_TEXT="${FAK_DOGFOOD_OPENAI_TOOL_MESSAGES_AS_TEXT:-$DEFAULT_OPENAI_TOOL_MESSAGES_AS_TEXT}"
+PROVIDER_MAX_TOKENS="${FAK_DOGFOOD_PROVIDER_MAX_TOKENS:-$DEFAULT_PROVIDER_MAX_TOKENS}"
 CLAUDE_DEBUG="${FAK_DOGFOOD_CLAUDE_DEBUG:-api}"
 CLAUDE_DEBUG_FILE="${FAK_DOGFOOD_CLAUDE_DEBUG_FILE:-}"
 CLAUDE_BIN="${FAK_DOGFOOD_CLAUDE_BIN:-}"
@@ -283,6 +412,11 @@ if [ "$MODE" = "install" ]; then
   name="fak-dogfood"
   qwen_name="fak-qwen36-claude"
   glm_name="claude-glm-gcp"
+  gemini_name="claude-gemini-gcp"
+  groq_name="claude-groq-qwen36"
+  groq_compound_name="claude-groq-compound"
+  nim_kimi_name="claude-nim-kimi"
+  nim_deepseek_name="claude-nim-deepseek"
   mac_name="claude-mac"
   if [ -n "${FAK_DOGFOOD_BINDIR:-}" ]; then
     cands="$FAK_DOGFOOD_BINDIR"
@@ -301,6 +435,11 @@ if [ "$MODE" = "install" ]; then
   ln -sf "$target" "$bindir/$name"
   ln -sf "$target" "$bindir/$qwen_name"
   ln -sf "$target" "$bindir/$glm_name"
+  ln -sf "$target" "$bindir/$gemini_name"
+  ln -sf "$target" "$bindir/$groq_name"
+  ln -sf "$target" "$bindir/$groq_compound_name"
+  ln -sf "$target" "$bindir/$nim_kimi_name"
+  ln -sf "$target" "$bindir/$nim_deepseek_name"
   ln -sf "$target" "$bindir/$mac_name"
   log "building fak -> $BIN"
   build_fak "$BIN"
@@ -312,15 +451,20 @@ if [ "$MODE" = "install" ]; then
   log "installed: $bindir/$name -> $target"
   log "installed: $bindir/$qwen_name -> $target"
   log "installed: $bindir/$glm_name -> $target"
+  log "installed: $bindir/$gemini_name -> $target (preset gemini-gcp: fak -> GCP Vertex Gemini 3.5 Flash)"
+  log "installed: $bindir/$groq_name -> $target (preset groq-qwen36: fak -> Groq qwen/qwen3.6-27b)"
+  log "installed: $bindir/$groq_compound_name -> $target (preset groq-compound: fak -> Groq groq/compound)"
+  log "installed: $bindir/$nim_kimi_name -> $target (preset nim-kimi: fak -> NVIDIA NIM moonshotai/kimi-k2.6)"
+  log "installed: $bindir/$nim_deepseek_name -> $target (preset nim-deepseek-v4-pro: fak -> NVIDIA NIM deepseek-ai/deepseek-v4-pro)"
   log "installed: $bindir/$mac_name -> $target"
   log "installed: $bindir/fak  (copied; re-run --install to refresh)"
   # The launcher symlinks RUN the in-tree script, so they depend on the clone staying put
   # — only the copied `fak` binary above is repo-independent. Warn clearly so a later
   # move/delete of the clone is not a silent breakage (the install-path contract).
-  warn "the $name/$qwen_name/$glm_name/$mac_name launchers are symlinks INTO this clone ($SCRIPT_DIR);"
+  warn "the $name/$qwen_name/$glm_name/$gemini_name/$groq_name/$groq_compound_name/$nim_kimi_name/$nim_deepseek_name/$mac_name launchers are symlinks INTO this clone ($SCRIPT_DIR);"
   warn "they break if you move or delete it. The copied \`fak\` binary survives a move — re-run --install after one."
   case ":$PATH:" in
-    *":$bindir:"*) log "ready — run \`fak serve --help\`, \`$name --probe\`, \`$qwen_name --probe\`, \`$glm_name --probe\`, or \`$mac_name --probe\` from anywhere" ;;
+    *":$bindir:"*) log "ready — run \`fak serve --help\`, \`$name --probe\`, \`$qwen_name --probe\`, \`$glm_name --probe\`, \`$groq_name --probe\`, \`$nim_kimi_name --probe\`, \`$nim_deepseek_name --probe\`, or \`$mac_name --probe\` from anywhere" ;;
     *)             log "NOTE: $bindir is not on PATH — add it: export PATH=\"$bindir:\$PATH\"" ;;
   esac
   exit 0
@@ -521,12 +665,26 @@ for row in rows:
 start_openai_backend() {
   command -v python3 >/dev/null || die "python3 required for BACKEND=openai model discovery"
   [ -n "$OPENAI_BASE_URL" ] || die "FAK_DOGFOOD_BASE_URL is required when FAK_DOGFOOD_BACKEND=openai"
-  BASE_URL="$(normalize_openai_base_url "$OPENAI_BASE_URL")" || die "OpenAI-compatible endpoint is not reachable at $OPENAI_BASE_URL (/models or /v1/models)"
+  ensure_mac_gateway_key "$UPSTREAM_API_KEY_ENV"
+  if ! BASE_URL="$(normalize_openai_base_url "$OPENAI_BASE_URL")"; then
+    if [ "$PRESET" = "gemini-gcp" ] && [ -n "$MODEL" ]; then
+      # Vertex's OpenAI-compatible Gemini endpoint exposes chat/completions but may not
+      # expose /models. With a pinned model, let fak serve perform the real request.
+      BASE_URL="${OPENAI_BASE_URL%/}"
+      MODELS_PROBE_SKIPPED=1
+    else
+      die "OpenAI-compatible endpoint is not reachable at $OPENAI_BASE_URL (/models or /v1/models)"
+    fi
+  fi
   if [ -z "$MODEL" ]; then
     MODEL="$(curl_openai_json "$BASE_URL/models" | first_openai_model_from_models || true)"
   fi
   [ -n "$MODEL" ] || die "could not resolve model from $BASE_URL/models; set FAK_DOGFOOD_MODEL"
-  log "using OpenAI-compatible backend $BASE_URL (model: $MODEL)"
+  if [ -n "${MODELS_PROBE_SKIPPED:-}" ]; then
+    log "using OpenAI-compatible backend $BASE_URL (model: $MODEL; /models probe skipped)"
+  else
+    log "using OpenAI-compatible backend $BASE_URL (model: $MODEL)"
+  fi
 }
 
 # The provider wire fak serve speaks UPSTREAM. The 'anthropic' backend fronts the
@@ -633,6 +791,9 @@ if [ -n "$PROVIDER_EXTRA_BODY" ] && [ -z "${FAK_PROVIDER_EXTRA_BODY_JSON:-}" ]; 
 fi
 if [ -n "$OPENAI_TOOL_MESSAGES_AS_TEXT" ] && [ -z "${FAK_OPENAI_TOOL_MESSAGES_AS_TEXT:-}" ]; then
   export FAK_OPENAI_TOOL_MESSAGES_AS_TEXT="$OPENAI_TOOL_MESSAGES_AS_TEXT"
+fi
+if [ -n "$PROVIDER_MAX_TOKENS" ] && [ -z "${FAK_PROVIDER_MAX_TOKENS:-}" ]; then
+  export FAK_PROVIDER_MAX_TOKENS="$PROVIDER_MAX_TOKENS"
 fi
 
 # --engine is the registered engine fak_syscall dispatches an ALLOWED tool call to
@@ -777,14 +938,40 @@ case "$MODE" in
     print_env
     ;;
   probe)
-    OUT="$FAK_DIR/experiments/agent-live/dogfood-claude-probe.json"
+    OUT="${FAK_DOGFOOD_PROBE_OUT:-$FAK_DIR/experiments/agent-live/dogfood-claude-probe.json}"
+    if [ -n "${FAK_DOGFOOD_PROBE_ERR:-}" ]; then
+      CLAUDE_PROBE_ERR="$FAK_DOGFOOD_PROBE_ERR"
+    elif [ -n "${FAK_DOGFOOD_PROBE_OUT:-}" ]; then
+      CLAUDE_PROBE_ERR="$OUT.err.log"
+    else
+      CLAUDE_PROBE_ERR="/tmp/fak-claude.log"
+    fi
     log "one live turn through Claude Code (headless): \"$PROBE_PROMPT\""
-    log "Claude stderr/debug -> /tmp/fak-claude.log"
+    log "Claude stderr/debug -> $CLAUDE_PROBE_ERR"
+    mkdir -p "$(dirname "$OUT")"
+    mkdir -p "$(dirname "$CLAUDE_PROBE_ERR")"
+    PROBE_TOOLS="${FAK_DOGFOOD_PROBE_TOOLS:-}"
+    PROBE_ALLOWED_TOOLS="${FAK_DOGFOOD_PROBE_ALLOWED_TOOLS:-}"
+    CLAUDE_PROBE_ARGS=(
+      "${CLAUDE_DEBUG_ARGS[@]}"
+      --bare
+      --system-prompt "You are a terse assistant. Follow the user instruction exactly."
+      -p "$PROBE_PROMPT"
+      --output-format json
+      --dangerously-skip-permissions
+      --safe-mode
+      --tools "$PROBE_TOOLS"
+      --disable-slash-commands
+      --no-session-persistence
+    )
+    if [ -n "$PROBE_ALLOWED_TOOLS" ]; then
+      CLAUDE_PROBE_ARGS+=(--allowedTools "$PROBE_ALLOWED_TOOLS")
+    fi
     set +e
-    "$CLAUDE_BIN" "${CLAUDE_DEBUG_ARGS[@]}" -p "$PROBE_PROMPT" --output-format json --dangerously-skip-permissions >"$OUT" 2>/tmp/fak-claude.log
+    "$CLAUDE_BIN" "${CLAUDE_PROBE_ARGS[@]}" >"$OUT" 2>"$CLAUDE_PROBE_ERR"
     rc=$?
     set -e
-    if [ $rc -ne 0 ]; then cat /tmp/fak-claude.log >&2; die "claude probe exited $rc"; fi
+    if [ $rc -ne 0 ]; then cat "$CLAUDE_PROBE_ERR" >&2; die "claude probe exited $rc"; fi
     log "transcript -> $OUT"
     python3 - "$OUT" <<'PY'
 import json,sys

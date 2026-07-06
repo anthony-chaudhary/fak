@@ -94,6 +94,16 @@ class TestCommittedCatalog(unittest.TestCase):
         self.assertEqual(roles.count("agent-host"), 1,
                          "exactly one node is kept for agent use")
 
+    def test_declares_concept_benchmark_workload_kind(self):
+        # #2740: the catalog carries the workload-kind registry so the planner can
+        # surface a concept-benchmark coverage cell per bench-node.
+        kinds = self.catalog.get("workload_kinds")
+        self.assertIsInstance(kinds, list, "catalog must declare a workload_kinds registry")
+        self.assertIn("concept-benchmark", kinds)
+        for k in kinds:
+            self.assertIn(k, bc.CANONICAL_WORKLOAD_KINDS,
+                          f"declared workload_kind {k!r} is not canonical")
+
 
 class TestNonDestructiveBuild(unittest.TestCase):
     def test_build_preserves_runs_with_no_local_dirs(self):
@@ -161,6 +171,33 @@ class TestNonDestructiveBuild(unittest.TestCase):
 
             self.assertEqual({r["run_id"] for r in cat["runs"]}, {"r1", "r2"},
                              "path-less runs must not collapse onto a shared empty key")
+
+    def test_build_emits_workload_kinds_registry(self):
+        # #2740: a rebuild must carry the canonical workload-kind registry (incl
+        # concept-benchmark) so a hand-added key is not silently dropped on regen.
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            bench = td / "experiments" / "benchmark"
+            (bench / "machines").mkdir(parents=True)
+            seed = {
+                "$schema": "benchmark/catalog.v1", "version": "1.0", "last_updated": None,
+                "machines": {}, "runs": [],
+                "index": {"by_model": {}, "by_precision": {}, "by_date": {}},
+            }
+            (bench / "catalog.json").write_text(json.dumps(seed), encoding="utf-8")
+
+            saved = (bc.ROOT, bc.BENCHMARK_DIR, bc.MACHINES_DIR, bc.RUNS_DIR, bc.CATALOG_PATH)
+            try:
+                bc.ROOT, bc.BENCHMARK_DIR = td, bench
+                bc.MACHINES_DIR = bench / "machines"
+                bc.RUNS_DIR = bench / "runs" / "by-machine"
+                bc.CATALOG_PATH = bench / "catalog.json"
+                cat = bc.build_catalog()
+            finally:
+                (bc.ROOT, bc.BENCHMARK_DIR, bc.MACHINES_DIR, bc.RUNS_DIR, bc.CATALOG_PATH) = saved
+
+            self.assertIn("concept-benchmark", cat.get("workload_kinds", []),
+                          "rebuild must emit the concept-benchmark workload-kind")
 
 
 class TestProvenanceStamp(unittest.TestCase):

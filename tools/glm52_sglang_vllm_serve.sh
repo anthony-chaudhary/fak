@@ -56,8 +56,13 @@ CTX="${CTX:-131072}"               # served context; GLM-5.2 supports up to 1M
 PREFLIGHT="${PREFLIGHT:-1}"         # set 0 to bypass the gate (NOT recommended)
 ENGINE_ARGS="${ENGINE_ARGS:-}"      # extra engine-specific flags, recorded in the shell command
 SPECULATIVE="${SPECULATIVE:-1}"     # set 0 to skip EAGLE for first-smoke/debug starts
+DISABLE_PREFILL_CUDA_GRAPH="${DISABLE_PREFILL_CUDA_GRAPH:-auto}" # auto disables the W4AFP8 DSA crash path
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+# Xet has repeatedly stalled large GLM-5.2 staging after preallocating checkpoint
+# shards. Default to the plain Hugging Face path unless an operator explicitly opts in.
+export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
 
 log(){ echo "[$(date +%T)] $*"; }
 
@@ -126,6 +131,11 @@ if [ "${ENGINE}" = "sglang" ]; then
   else
     log "speculative decode disabled (SPECULATIVE=${SPECULATIVE})"
   fi
+  SG_GRAPH_FLAGS=""
+  if [ "${DISABLE_PREFILL_CUDA_GRAPH}" = "1" ] || { [ "${DISABLE_PREFILL_CUDA_GRAPH}" = "auto" ] && [ "${QUANT}" = "w4afp8" ]; }; then
+    SG_GRAPH_FLAGS="--disable-prefill-cuda-graph"
+    log "prefill CUDA graph disabled (DISABLE_PREFILL_CUDA_GRAPH=${DISABLE_PREFILL_CUDA_GRAPH}, quant=${QUANT})"
+  fi
   sglang serve \
     --model-path "${MODEL}" \
     --served-model-name "${SERVED_NAME}" \
@@ -135,6 +145,7 @@ if [ "${ENGINE}" = "sglang" ]; then
     --reasoning-parser glm45 --tool-call-parser glm47 \
     --mem-fraction-static 0.85 \
     ${SG_QFLAGS} \
+    ${SG_GRAPH_FLAGS} \
     ${ENGINE_ARGS} \
     ${SG_SPEC_FLAGS} \
     --host 0.0.0.0 --port "${PORT}" \

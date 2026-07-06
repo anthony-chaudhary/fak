@@ -26,7 +26,9 @@
 #                 Stand it up to compare fak apples-to-apples. SERVE=llamacpp.
 #   * sglang|vllm — stock DSA engines, sm_90+ only (tools/glm52_sglang_vllm_serve.sh), gated
 #                 by tools/glm52_serve_preflight.py (fails CLOSED below sm_90). DEFAULT on
-#                 Hopper/Blackwell (the witnessed sm_90 real-serving path).
+#                 Hopper/Blackwell (the witnessed sm_90 real-serving path). This is a
+#                 temporary stock compatibility path; the intended kernel target remains
+#                 SERVE=fak on every tier where the pure FAK kernel can serve the model.
 #
 # So "whatever is available" includes A100: GCP_TIER=a2-ultra-a100-80gb serves GLM-5.2 via
 # the pure fak kernel by default, with SERVE=llamacpp for the benchmark comparison.
@@ -47,14 +49,15 @@
 #   GCP_ZONE        compute zone                       (default: the tier's first common zone)
 #   VM_NAME         instance name                      (default fak-glm-serve)
 #   ENGINE          sglang | vllm                      (the sm_90 stock engine; default sglang)
-#   QUANT           fp8 | w4afp8 | nvfp4 | bf16         (sm_90 stock quant; default fp8)
+#   QUANT           fp8 | w4afp8 | nvfp4 | bf16         (sm_90 stock quant; default fp8,
+#                                                        except H100 tiers default w4afp8)
 #   GLM_PORT        served /v1 port on the VM           (default 8000)
 #   CTX             stock SGLang/vLLM served context    (default 65536; fits Claude's 32k+32k probe)
 #   EP_RANKS        pure-fak resident expert-parallel ranks (default 1; set 8 on full-HBM H100/H200/A100-80GB to avoid cpu-offload)
 #   FAK_EP_REQUIRE_DEVICE_PG  for EP_RANKS>1, require the multi-process device-NCCL reduce
 #                   instead of falling back to host DistComm (default: 1 when EP_RANKS>1)
 #   GLM_GGUF_REPO   HF repo for the fak/llama.cpp GGUF  (default unsloth/GLM-5.2-GGUF)
-#   GLM_GGUF_SUBDIR GGUF quant subdir                   (default UD-Q4_K_M, ~466 GB)
+#   GLM_GGUF_SUBDIR GGUF quant subdir                   (default UD-Q4_K_S, pure-Q4_K experts for CUDA)
 #   FAK_STARTUP_PATCH_FILE  optional local patch to apply after the VM clones FAK_REPO_URL
 #   NCCL_APT_VERSION optional apt version for libnccl2/libnccl-dev (default 2.30.7-1+cuda12.9)
 #   NCPU_MOE        llama.cpp experts-on-host count     (default 999 = all; fak offload is flag-driven)
@@ -85,7 +88,7 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 GCP_TIER="${GCP_TIER:-a3-ultra-h200}"
 VM_NAME="${VM_NAME:-fak-glm-serve}"
 ENGINE="${ENGINE:-sglang}"
-QUANT="${QUANT:-fp8}"
+QUANT="${QUANT:-}"
 GLM_PORT="${GLM_PORT:-8000}"
 CTX="${CTX:-65536}"
 EP_RANKS="${EP_RANKS:-1}"
@@ -95,7 +98,7 @@ FAK_REPO_REF="${FAK_REPO_REF:-}"
 FAK_STARTUP_PATCH_FILE="${FAK_STARTUP_PATCH_FILE:-}"
 SERVE="${SERVE:-}"   # empty => resolved from the tier's arch below (sm_80→fak, sm_90+→sglang/vllm)
 GLM_GGUF_REPO="${GLM_GGUF_REPO:-unsloth/GLM-5.2-GGUF}"
-GLM_GGUF_SUBDIR="${GLM_GGUF_SUBDIR:-UD-Q4_K_M}"
+GLM_GGUF_SUBDIR="${GLM_GGUF_SUBDIR:-UD-Q4_K_S}"
 NCCL_APT_VERSION="${NCCL_APT_VERSION:-2.30.7-1+cuda12.9}"
 NCPU_MOE="${NCPU_MOE:-999}"
 GLM_STAGE_DIR="${GLM_STAGE_DIR:-/opt/glm52-q4}"
@@ -159,6 +162,12 @@ TIER_SHELL="$("$PY" "$ROOT/tools/gcp_accel.py" --emit-shell "$GCP_TIER")" \
 eval "$TIER_SHELL"   # defines GLM_MACHINE_TYPE, GLM_ACCEL_FLAG, GLM_IMAGE_FAMILY, ...
 
 GCP_ZONE="${GCP_ZONE:-${GLM_DEFAULT_ZONE}}"
+if [ -z "$QUANT" ]; then
+  case "${GLM_ACCEL_TYPE:-}" in
+    nvidia-h100*|nvidia-h100-mega*) QUANT="w4afp8" ;;
+    *) QUANT="fp8" ;;
+  esac
+fi
 
 compute_budget_minutes() {
   "$PY" - "$GLM_APPROX_USD_HR" "$MAX_DAILY_USD" <<'PY'
@@ -384,6 +393,7 @@ systemd-run --unit=glm52serve --collect \\
   --setenv=QUANT="${QUANT}" \\
   --setenv=PORT="${GLM_PORT}" \\
   --setenv=CTX="${CTX}" \\
+  --setenv=HF_HUB_DISABLE_XET="\${HF_HUB_DISABLE_XET:-1}" \\
   --setenv=HF_TOKEN="${RENDER_HF_TOKEN}" \\
   --setenv=HUGGING_FACE_HUB_TOKEN="${RENDER_HF_TOKEN}" \\
   --property=Restart=on-failure --property=RestartSec=10 \\

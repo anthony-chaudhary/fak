@@ -67,6 +67,7 @@ KIND_META: dict[str, dict[str, Any]] = {
     "turn-tax":          {"cmd": "go run ./cmd/fak turntax --suite turntax-airline", "model": (None, "n/a"),                    "headline": False},
     "parity":            {"cmd": "go run ./cmd/paritybench",                        "model": (None, "n/a"),                     "headline": False},
     "livecodebench":     {"cmd": "go run ./cmd/livecodebench --check --json",        "model": ("served-coding-model", "official"), "headline": True},
+    "concept-benchmark": {"cmd": "go run ./cmd/conceptbench --replay cmd/conceptbench/testdata/replay", "model": (None, "n/a"), "headline": False},
 }
 KINDS: list[str] = list(KIND_META)
 MODEL_KINDS = {k for k, v in KIND_META.items() if v["model"][0] is not None}
@@ -85,6 +86,7 @@ RECHECK_DAYS = {
     "model-benchmark": 7, "gpu-benchmark": 7,
     "qwen36": 14, "radix-benchmark": 14, "session-benchmark": 14, "fan-benchmark": 14,
     "agent-live": 30, "turn-tax": 30, "parity": 30, "livecodebench": 30,
+    "concept-benchmark": 30,
 }
 DEFAULT_RECHECK_DAYS = 14
 DEFAULT_STALE_HORIZON_DAYS = 14

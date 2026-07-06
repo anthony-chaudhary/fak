@@ -335,9 +335,9 @@ def _session_cap(row: dict) -> int:
 def _model_tier_from_name(model: object) -> int:
     """Small v1 model taxonomy.
 
-    Tier 1 is the max-quality frontier set the operator named. Tier 2 is GLM-5.2
-    for obvious lightweight work. Everything else is tier 3 until explicitly
-    classified later.
+    Tier 1 is the max-quality frontier set the operator named. Tier 2 is the
+    lightweight-work set (GLM-5.2 and Gemini 3.5 Flash). Everything else is tier 3
+    until explicitly classified later.
     """
     text = str(model or "").lower().replace("_", "-").replace(" ", "-")
     compact = re.sub(r"[^a-z0-9]+", "", text)
@@ -349,6 +349,10 @@ def _model_tier_from_name(model: object) -> int:
             or "kimi-k2.6" in text or "kimik26" in compact):
         return 1
     if "glm-5.2" in text or "glm52" in compact:
+        return 2
+    # Gemini 3.5 Flash — Google's fast/lightweight tier, served via GCP Vertex AI on
+    # the OpenAI-compatible endpoint as `google/gemini-3.5-flash`. Lightweight, tier 2.
+    if "gemini-3.5-flash" in text or "gemini35flash" in compact:
         return 2
     return 3
 
@@ -1824,6 +1828,7 @@ def route_account(rows: list[dict], task_text: str = "", task_class: str = "auto
                   *, allow_tier_fallback: bool = False,
                   strict_tier: bool = False,
                   product: str | None = None,
+                  leases: list[dict] | None = None,
                   policy: dict | None = None) -> dict:
     """Choose an account by task difficulty and model tier.
 
@@ -1867,7 +1872,12 @@ def route_account(rows: list[dict], task_text: str = "", task_class: str = "auto
             "blocked_target_accounts": [],
         }
 
-    available = [r for r in workers if r.get("available")]
+    lease_workers, _ = _lease_workers_by_pool(workers, list(leases or []))
+    def _pool_has_free_slot(row: dict) -> bool:
+        pool = _pool_key(row)
+        return len(lease_workers.get(pool, [])) < max(1, _session_cap(row))
+
+    available = [r for r in workers if r.get("available") and _pool_has_free_slot(r)]
     target = int(task["target_tier"])
     fallback_policy = str(pol.get("routing", {}).get("hard_tier1_fallback", "stop")).lower()
     effective_allow_fallback = allow_tier_fallback or fallback_policy in (
@@ -2718,6 +2728,7 @@ def main(argv: list[str]) -> int:
             allow_tier_fallback=_has_arg(argv, ("--allow-tier-fallback",)),
             strict_tier=strict,
             product=product or None,
+            leases=live_seat_leases(),
         )
         print(json.dumps(doc, indent=1))
         return 0 if doc.get("ok") else 1

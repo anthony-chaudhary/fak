@@ -19,20 +19,23 @@
 #     two numbers side by side without holding {weights, hardware, precision, ctx} equal.
 #
 # HOW IT SERVES (the load-speed doc, GLM52-FAK-NATIVE-SERVE-LOAD-SPEED-2026-06-25):
-#   fak serve --gguf <shard1> --backend cuda --cpu-offload-experts --context-budget-tokens 8192
+#   fak serve --gguf <shard1> --backend cuda --cpu-offload-experts --context-budget-tokens 4096
 #   * --backend cuda  : prefill+decode run on the GPU HAL (needs a -tags cuda build + a GPU).
 #   * --cpu-offload-experts : the ~424 GB MoE experts stay on host RAM (the A100s hold
 #     attention/shared/dense); the device load uses the direct-resident-Q4_K path (no
 #     Q4_K->f32->Q8 round-trip).
-#   * --context-budget-tokens 8192 : the default 1M context plans a 533 GiB KV -> FitTooBig.
+#   * --context-budget-tokens 4096 : the default 1M context plans a 533 GiB KV -> FitTooBig;
+#     8192 also overfills the 8-way resident EP path on 80 GB H100s once CUDA reports usable
+#     capacity (~74.6 GiB).
 #
 # HONEST SCOPE: this asserts NO throughput/quality number, and makes NO live-serve claim. It
 # builds the cuda fak binary, stages the checkpoint, stands the endpoint up, and health-checks
 # a REAL chat completion — a live GLM-5.2 serve turn is hardware+load-gated until that gate
 # passes on a real A100. The witnessed claim is the Q8 forward correctness (cosine 1.0, sm_80);
-# the resident-Q4_K serve path is not yet cosine-witnessed, and load time on the dynamic-mixed
-# UD-Q4_K_M is the open perf item (the resident-Q4_K path only fully fires on pure-Q4_K
-# tensors). Run tools/glm52_e2e_after_serve_dgx3.sh against this endpoint for the #413 evidence.
+# the resident-Q4_K serve path is not yet cosine-witnessed. Default to UD-Q4_K_S here because
+# the mixed UD-Q4_K_M experts include Q5_K/Q6_K tensors that currently route through the slow
+# host k-quant seam; the pure-Q4_K expert path is the performant CUDA demo target. Run
+# tools/glm52_e2e_after_serve_dgx3.sh against this endpoint for the #413 evidence.
 #
 # Usage (RUN ON THE GPU HOST, detached so a disconnect does not orphan a large load):
 #   systemd-run --unit=glm52serve --collect bash tools/glm52_fak_native_serve.sh
@@ -41,11 +44,11 @@ set -uo pipefail
 
 GLM_DIR="${GLM_DIR:-/opt/glm52-q4}"
 REPO="${GLM_REPO:-unsloth/GLM-5.2-GGUF}"
-SUBDIR="${GLM_SUBDIR:-UD-Q4_K_M}"
+SUBDIR="${GLM_SUBDIR:-UD-Q4_K_S}"
 PORT="${PORT:-8000}"
 ADDR="${ADDR:-0.0.0.0:${PORT}}"
 MODEL_ID="${MODEL_ID:-glm-5.2}"
-CTX="${CTX:-8192}"
+CTX="${CTX:-4096}"
 FAK_BIN="${FAK_BIN:-/usr/local/bin/fak}"
 GO_VERSION="${GO_VERSION:-1.26.4}"
 EP_RANKS="${EP_RANKS:-1}"
@@ -71,6 +74,43 @@ PHASE="$GLM_DIR/PHASE"
 LOG="$GLM_DIR/fak_native_serve.log"
 mkdir -p "$GLM_DIR" "$GOCACHE" "$GOPATH"
 ph(){ echo "$(date -u +%H:%M:%S) $*" | tee -a "$LOG"; echo "$*" > "$PHASE"; }
+
+COMPLETE_SHARD1=""
+SHARD_STATUS=""
+SHARD_PRESENT=0
+SHARD_TOTAL=0
+complete_shard1_in_dir() {
+  _d="$1"
+  COMPLETE_SHARD1=""
+  SHARD_STATUS=""
+  SHARD_PRESENT=0
+  SHARD_TOTAL=0
+  _s1=$(ls "$_d"/*-00001-of-*.gguf 2>/dev/null | sort | head -1) || true
+  [ -n "$_s1" ] || return 1
+  _base="${_s1##*/}"
+  _total="${_base##*-of-}"
+  _total="${_total%.gguf}"
+  case "$_total" in
+    ''|*[!0-9]*) SHARD_STATUS="dir=$_d invalid_total=$_total"; return 1 ;;
+  esac
+  SHARD_TOTAL=$((10#$_total))
+  _prefix="${_s1%00001-of-${_total}.gguf}"
+  _missing=""
+  for _i in $(seq 1 "$SHARD_TOTAL"); do
+    _path="${_prefix}$(printf "%05d-of-%s.gguf" "$_i" "$_total")"
+    if [ -s "$_path" ]; then
+      SHARD_PRESENT=$((SHARD_PRESENT + 1))
+    else
+      _missing="${_missing}${_missing:+,}${_i}"
+    fi
+  done
+  if [ "$SHARD_PRESENT" -eq "$SHARD_TOTAL" ]; then
+    COMPLETE_SHARD1="$_s1"
+    return 0
+  fi
+  SHARD_STATUS="dir=$_d shards=${SHARD_PRESENT}/${SHARD_TOTAL} missing=${_missing:-unknown}"
+  return 1
+}
 
 have_nccl_headers() {
   [ -f "${NCCL_HOME:-}/include/nccl.h" ] ||
@@ -125,14 +165,15 @@ fi
 ph "GO $(go version 2>/dev/null || echo missing)"
 
 # 1b. Prefer a COMPLETE local-NVMe copy over the slow /projects NFS (~2.9 GB/s vs ~0.055 GB/s,
-#     ~53x; cold load ~44m vs ~1h41m). The verified copy lives FLAT in /mnt/sglang_dv3/glm52-q4/
-#     (no UD-Q4_K_M subdir). Resolve NVMe-first and LOG the winner LOUDLY so a silent
+#     ~53x; cold load ~44m vs ~1h41m). A verified copy may live FLAT in /mnt/sglang_dv3/glm52-q4/
+#     (no quant subdir). Resolve NVMe-first and LOG the winner LOUDLY so a silent
 #     fall-through to the slow NFS path is impossible to miss (the bug that caused a 62-min load).
 PRESTAGED_SHARD1=""
 for _d in /mnt/sglang_dv3/glm52-q4 "$GLM_DIR/$SUBDIR" "$GLM_DIR"; do
-  _s1=$(ls "$_d"/*-00001-of-*.gguf 2>/dev/null | head -1) || true
-  [ -n "$_s1" ] && [ "$(ls "$_d"/GLM-5.2-UD-Q4_K_M-*-of-*.gguf 2>/dev/null | wc -l)" -ge 11 ] || continue
-  PRESTAGED_SHARD1="$_s1"; break
+  if complete_shard1_in_dir "$_d"; then
+    PRESTAGED_SHARD1="$COMPLETE_SHARD1"; break
+  fi
+  [ -n "$SHARD_STATUS" ] && ph "PARTIAL_PRESTAGED $SHARD_STATUS (will resume HF download)"
 done
 if [ -n "$PRESTAGED_SHARD1" ]; then
   case "$PRESTAGED_SHARD1" in
@@ -152,11 +193,13 @@ elif command -v huggingface-cli >/dev/null 2>&1; then
 else
   ph "NO_HF_CLI install huggingface_hub first"; exit 10
 fi
-SHARDS=$(ls "$GLM_DIR/$SUBDIR"/*.gguf 2>/dev/null | wc -l)
-ph "DOWNLOAD_DONE rc=$DL_RC shards=$SHARDS"
-[ "${DL_RC:-1}" -eq 0 ] && [ "${SHARDS:-0}" -ge 1 ] || { ph "DOWNLOAD_FAIL"; exit 20; }
-SHARD1=$(ls "$GLM_DIR/$SUBDIR"/*-00001-of-*.gguf 2>/dev/null | head -1)
-[ -n "$SHARD1" ] || SHARD1=$(ls "$GLM_DIR/$SUBDIR"/*.gguf 2>/dev/null | sort | head -1)
+if complete_shard1_in_dir "$GLM_DIR/$SUBDIR"; then
+  SHARD1="$COMPLETE_SHARD1"
+else
+  SHARD1=$(ls "$GLM_DIR/$SUBDIR"/*-00001-of-*.gguf 2>/dev/null | head -1)
+fi
+ph "DOWNLOAD_DONE rc=$DL_RC shards=${SHARD_PRESENT}/${SHARD_TOTAL}"
+[ "${DL_RC:-1}" -eq 0 ] && [ -n "$SHARD1" ] && [ "$SHARD_PRESENT" -eq "$SHARD_TOTAL" ] || { ph "DOWNLOAD_FAIL ${SHARD_STATUS:-dir=$GLM_DIR/$SUBDIR}"; exit 20; }
 ph "SHARD1=$SHARD1"
 else
   SHARD1="$PRESTAGED_SHARD1"

@@ -291,16 +291,22 @@ def test_build_payload_folds_and_flags_error() -> None:
 
 # --- live smoke over the real committed catalog ---------------------------------
 
-def test_live_real_catalog_is_clean_with_honest_coverage_debt() -> None:
+def test_live_real_catalog_is_clean_and_positioned() -> None:
+    """The 2026-07-03 seed pinned a birth band (score 15..60, large coverage debt).
+    The 2026-07-05 positioning sweep mapped the discovered space: a row for every
+    signal, glossary anchors for the load-bearing concepts. The pin is now a
+    ratchet - rows stay clean, the universe stays real, and coverage may drift
+    only a little as new hedges/literals/identifiers land before the next sweep."""
     root = ie.repo_root()
     payload = ie.collect(root)
     assert payload.get("verdict") != "AUDIT_ERROR", payload.get("reason")
     c = payload["corpus"]
-    assert c["rows"] >= 10, "the seed catalog positions a real starting set"
+    assert c["rows"] >= 200, "the positioned catalog covers the discovered space"
     assert c["naming_defects"] == 0, \
         f"positioned rows must be clean: {[k['defects'] for k in payload['kpis'] if k['defects']]}"
-    assert c["coverage_debt"] > 0, "birth state: the implicit space is only partly mapped"
-    assert 15 <= c["score"] <= 60, f"score {c['score']} outside the honest birth band"
+    assert c["coverage_debt"] <= 25, \
+        f"coverage debt {c['coverage_debt']} - tree growth reopens debt; sweep before it piles up"
+    assert c["score"] >= 85, f"score {c['score']} regressed below the swept ratchet"
     assert c["coverage"]["discovered"] >= 50, "detectors must find a real universe"
 
 
