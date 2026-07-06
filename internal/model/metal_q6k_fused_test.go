@@ -165,6 +165,53 @@ func TestMetalFusedMLPQ6DownMatchesCPU(t *testing.T) {
 	}
 }
 
+// TestMetalQwen35SharedExpertFusedMatchesCPU is the wiring gate for the singular Qwen3.5/3.6
+// shared expert: qwen35SharedExpert should take the same resident-Q4_K/Metal fused MLP route as
+// dense and routed experts when gate/up are Q4_K and down is Q6_K, then apply the scalar
+// shared_expert_gate. The CPU reference uses the same resident tensors with MetalQ4K disabled.
+func TestMetalQwen35SharedExpertFusedMatchesCPU(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("no Metal device available")
+	}
+	defer metalgemm.ResetQ4K()
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+
+	const H, I = 256, 512
+	gn := qwen35SharedExpertName(0, "gate_proj.weight")
+	un := qwen35SharedExpertName(0, "up_proj.weight")
+	dn := qwen35SharedExpertName(0, "down_proj.weight")
+	sgn := qwen35SharedExpertName(0, "gate.weight")
+	scalarGate := make([]float32, H) // sigmoid(0) = 0.5, so the test is not gate-saturation-vacuous.
+	m := &Model{
+		Cfg: Config{HiddenSize: H, SharedIntermediateSize: I},
+		q4kw: map[string]*q4kTensor{
+			gn: randomQ4KTensor(I, H, 31),
+			un: randomQ4KTensor(I, H, 32),
+		},
+		kqw: map[string]*kQuantTensor{
+			dn: randomQ6KTensor(H, I, 34),
+		},
+		q8w: map[string]*q8Tensor{
+			sgn: quantizeQ8(scalarGate, 1, H),
+		},
+	}
+	x := randomVecF(H, 35)
+
+	cpu := &Session{M: m}
+	ref := qwen35SharedExpert(m, 0, x, sessionQ4KKernel{cpu})
+
+	gpu := &Session{M: m, MetalQ4K: true}
+	got := qwen35SharedExpert(m, 0, x, sessionQ4KKernel{gpu})
+
+	cos, maxRel := cosineAndMaxRel(ref, got)
+	if cos < 0.9999 || maxRel > 5e-3 {
+		t.Fatalf("Qwen shared expert fused path: cosine=%.6f maxRel=%.4g (want cos>=0.9999 maxRel<=5e-3)\n  ref[:4]=%v\n  got[:4]=%v",
+			cos, maxRel, ref[:4], got[:4])
+	}
+	t.Logf("Qwen shared expert fused path matches CPU: cosine=%.6f maxRel=%.4g", cos, maxRel)
+}
+
 // buildFusedExpertBatch uploads n experts' resident Q4_K gate/up + Q6_K down at shape (H,I) and
 // returns the metalgemm handles + the shared token activation x[H]. Shared by the batch correctness
 // gate and the batch benchmark so both exercise the exact same residency the live decode uses.

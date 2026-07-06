@@ -456,12 +456,31 @@ func qwen35SharedExpert(m *Model, layer int, xn any, mat matKernel) []float32 {
 	if I == 0 {
 		I = cfg.expertIntermediate()
 	}
-	g := mat.mul(qwen35SharedExpertName(layer, "gate_proj.weight"), xn, I, H)
-	u := mat.mul(qwen35SharedExpertName(layer, "up_proj.weight"), xn, I, H)
+	gn := qwen35SharedExpertName(layer, "gate_proj.weight")
+	un := qwen35SharedExpertName(layer, "up_proj.weight")
+	dn := qwen35SharedExpertName(layer, "down_proj.weight")
+	if !cfg.ActGeluTanh && !cfg.ActGeluErf &&
+		!m.has(qwen35SharedExpertName(layer, "gate_proj.bias")) &&
+		!m.has(qwen35SharedExpertName(layer, "up_proj.bias")) &&
+		!m.has(qwen35SharedExpertName(layer, "down_proj.bias")) {
+		if sk, ok := mat.(sessionQ4KKernel); ok {
+			if xf, ok2 := xn.([]float32); ok2 {
+				if out := sk.s.q4kFusedMLP(gn, un, dn, xf); out != nil {
+					gate := sigmoid(mat.mul(qwen35SharedExpertName(layer, "gate.weight"), xn, 1, H)[0])
+					for i := 0; i < H; i++ {
+						out[i] *= gate
+					}
+					return out
+				}
+			}
+		}
+	}
+	g := mat.mul(gn, xn, I, H)
+	u := mat.mul(un, xn, I, H)
 	for i := 0; i < I; i++ {
 		g[i] = act(g[i], cfg) * u[i]
 	}
-	out := mat.mul(qwen35SharedExpertName(layer, "down_proj.weight"), mat.prep(g), H, I)
+	out := mat.mul(dn, mat.prep(g), H, I)
 	// Scalar sigmoid gate: shared_expert_gate is a hidden->1 projection.
 	gate := sigmoid(mat.mul(qwen35SharedExpertName(layer, "gate.weight"), xn, 1, H)[0])
 	for i := 0; i < H; i++ {
