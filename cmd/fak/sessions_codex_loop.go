@@ -124,8 +124,9 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 	sinceHours := fs.Float64("since-hours", 24, "with --recent, only scan files modified within N hours (0 = all)")
 	limit := fs.Int("limit", 20, "with --recent, cap sessions scanned after newest-first sorting")
 	asJSON := fs.Bool("json", false, "emit a machine-readable diagnosis")
+	failOn := fs.String("fail-on", "none", "exit 1 when verdict reaches this threshold: none|loop|action (action also fails LOOP)")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: fak sessions codex-loop [--session ID | --path FILE | --recent] [--codex-home DIR] [--json]")
+		fmt.Fprintln(stderr, "usage: fak sessions codex-loop [--session ID | --path FILE | --recent] [--codex-home DIR] [--json] [--fail-on none|loop|action]")
 		fs.PrintDefaults()
 	}
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
@@ -141,11 +142,25 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak sessions codex-loop: %v\n", err)
 			return 1
 		}
+		gateCode, ok := codexLoopFailOnExitCode(r.Verdict, *failOn)
+		if !ok {
+			fmt.Fprintf(stderr, "fak sessions codex-loop: invalid --fail-on %q (want none, loop, or action)\n", *failOn)
+			return 2
+		}
 		if *asJSON {
-			return encodeJSONOrFail(stdout, stderr, r, "fak sessions codex-loop")
+			if code := encodeJSONOrFail(stdout, stderr, r, "fak sessions codex-loop"); code != 0 {
+				return code
+			}
+			if gateCode != 0 {
+				fmt.Fprintf(stderr, "fak sessions codex-loop: gate REFUSE fail-on=%s verdict=%s reason=%s\n", codexLoopFailOnName(*failOn), r.Verdict, r.Reason)
+			}
+			return gateCode
 		}
 		fmt.Fprint(stdout, renderCodexLoopRecentReport(r))
-		return 0
+		if gateCode != 0 {
+			fmt.Fprintf(stderr, "fak sessions codex-loop: gate REFUSE fail-on=%s verdict=%s reason=%s\n", codexLoopFailOnName(*failOn), r.Verdict, r.Reason)
+		}
+		return gateCode
 	}
 	if strings.TrimSpace(*path) != "" && strings.TrimSpace(*sessionID) != "" {
 		fmt.Fprintln(stderr, "fak sessions codex-loop: use only one of --path or --session")
@@ -167,11 +182,77 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak sessions codex-loop: %v\n", err)
 		return 1
 	}
+	gateCode, ok := codexLoopFailOnExitCode(d.Verdict, *failOn)
+	if !ok {
+		fmt.Fprintf(stderr, "fak sessions codex-loop: invalid --fail-on %q (want none, loop, or action)\n", *failOn)
+		return 2
+	}
 	if *asJSON {
-		return encodeJSONOrFail(stdout, stderr, d, "fak sessions codex-loop")
+		if code := encodeJSONOrFail(stdout, stderr, d, "fak sessions codex-loop"); code != 0 {
+			return code
+		}
+		if gateCode != 0 {
+			fmt.Fprintf(stderr, "fak sessions codex-loop: gate REFUSE fail-on=%s verdict=%s reason=%s\n", codexLoopFailOnName(*failOn), d.Verdict, d.Reason)
+		}
+		return gateCode
 	}
 	fmt.Fprint(stdout, renderCodexLoopDiagnosis(d))
-	return 0
+	if gateCode != 0 {
+		fmt.Fprintf(stderr, "fak sessions codex-loop: gate REFUSE fail-on=%s verdict=%s reason=%s\n", codexLoopFailOnName(*failOn), d.Verdict, d.Reason)
+	}
+	return gateCode
+}
+
+func codexLoopFailOnExitCode(verdict, failOn string) (int, bool) {
+	threshold, ok := codexLoopFailOnRank(failOn)
+	if !ok {
+		return 2, false
+	}
+	if threshold == 0 {
+		return 0, true
+	}
+	rank := codexLoopVerdictRank(verdict)
+	if rank >= threshold {
+		return 1, true
+	}
+	return 0, true
+}
+
+func codexLoopFailOnRank(failOn string) (int, bool) {
+	switch strings.ToLower(strings.TrimSpace(failOn)) {
+	case "", "none", "off", "false", "0":
+		return 0, true
+	case "action", "any":
+		return 1, true
+	case "loop":
+		return 2, true
+	default:
+		return 0, false
+	}
+}
+
+func codexLoopFailOnName(failOn string) string {
+	switch rank, ok := codexLoopFailOnRank(failOn); {
+	case !ok:
+		return strings.TrimSpace(failOn)
+	case rank == 1:
+		return "action"
+	case rank == 2:
+		return "loop"
+	default:
+		return "none"
+	}
+}
+
+func codexLoopVerdictRank(verdict string) int {
+	switch strings.ToUpper(strings.TrimSpace(verdict)) {
+	case "LOOP":
+		return 2
+	case "ACTION":
+		return 1
+	default:
+		return 0
+	}
 }
 
 func diagnoseRecentCodexLoops(codexHome string, sinceHours float64, limit int) (codexLoopRecentReport, error) {

@@ -81,6 +81,19 @@ func TestSessionsCodexLoopDiagnosesRepeatedGoalFailure(t *testing.T) {
 			t.Fatalf("human render missing %q:\n%s", want, stdout.String())
 		}
 	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runSessions(&stdout, &stderr, []string{"codex-loop", "--path", path, "--json", "--fail-on", "loop"})
+	if code != 1 {
+		t.Fatalf("codex-loop --fail-on loop exited %d, want 1 stderr=%s", code, stderr.String())
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &d); err != nil {
+		t.Fatalf("fail-on JSON did not decode: %v\n%s", err, stdout.String())
+	}
+	if d.Verdict != "LOOP" || !strings.Contains(stderr.String(), "gate REFUSE fail-on=loop verdict=LOOP") {
+		t.Fatalf("fail-on gate did not preserve LOOP diagnosis/stderr: diagnosis=%+v stderr=%s", d, stderr.String())
+	}
 }
 
 func TestSessionsCodexLoopRecentScansCodexHome(t *testing.T) {
@@ -144,6 +157,23 @@ func TestSessionsCodexLoopRecentScansCodexHome(t *testing.T) {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("human render missing %q:\n%s", want, stdout.String())
 		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runSessions(&stdout, &stderr, []string{"codex-loop", "--recent", "--codex-home", home, "--limit", "2", "--fail-on", "loop"})
+	if code != 1 {
+		t.Fatalf("codex-loop --recent --fail-on loop exited %d, want 1 stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "verdict        : LOOP") || !strings.Contains(stderr.String(), "gate REFUSE fail-on=loop verdict=LOOP") {
+		t.Fatalf("recent fail-on did not emit diagnosis and gate refusal:\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runSessions(&stdout, &stderr, []string{"codex-loop", "--recent", "--codex-home", home, "--fail-on", "urgent"})
+	if code != 2 || !strings.Contains(stderr.String(), "invalid --fail-on") {
+		t.Fatalf("invalid fail-on exited %d stderr=%s", code, stderr.String())
 	}
 }
 
