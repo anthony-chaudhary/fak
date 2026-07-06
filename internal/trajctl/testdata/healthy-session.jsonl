@@ -1,0 +1,4 @@
+{"type":"user","timestamp":"2026-07-03T00:00:00.000Z","message":{"content":[{"type":"text","text":"finish the next trajctl phase"}]}}
+{"type":"assistant","timestamp":"2026-07-03T00:01:00.000Z","message":{"id":"healthy-1","model":"claude-sonnet-4-5","usage":{"input_tokens":400,"output_tokens":300,"cache_read_input_tokens":1000,"cache_creation_input_tokens":100},"content":[{"type":"tool_use","name":"Read","input":{"file_path":"internal/trajctl/commitscorer.go"}}]}}
+{"type":"user","timestamp":"2026-07-03T00:01:10.000Z","message":{"content":[{"type":"tool_result","content":"read commitscorer.go"}]}}
+{"type":"assistant","timestamp":"2026-07-03T00:02:00.000Z","message":{"id":"healthy-2","model":"claude-sonnet-4-5","usage":{"input_tokens":500,"output_tokens":900,"cache_read_input_tokens":1500,"cache_creation_input_tokens":100},"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"internal/trajctl/commitscorer.go"}}]}}

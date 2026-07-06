@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+
+	"github.com/anthony-chaudhary/fak/internal/sessionaudit"
 )
 
 // scorer.go — issue #2536, spine step 3 of the trajectory-control epic (#2533):
@@ -28,6 +30,14 @@ type EvidenceWindow struct {
 	// resolve it. A phase with no entry — or whose candidate commits all fail to
 	// verify — has made no witnessed progress.
 	PhaseCommits map[string][]string
+	// PriorScores is the existing curve for the objective set, in append order.
+	// Behavioral scorers use it to detect high-activity/flat-progress divergence
+	// without reading the ledger themselves.
+	PriorScores []ScoreRow
+	// Sessions are already-analyzed sessionaudit rows for the current evidence
+	// window. The parser remains in internal/sessionaudit; trajctl only folds the
+	// structured signals.
+	Sessions []sessionaudit.Session
 	// Resolve confirms one evidence pointer, reused from the audit fold. A nil
 	// resolver treats every pointer as unknown, so a missing resolver scores 0
 	// rather than silently crediting unverified work (fail-closed).
