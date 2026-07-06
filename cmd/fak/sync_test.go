@@ -46,7 +46,7 @@ func TestRunSyncCheckInSyncSurfacesDirtyWorktree(t *testing.T) {
 			Stampable:  1,
 			Lanes:      1,
 			Junk:       3,
-			NextAction: "remove 3 junk path(s) if you own them, then rerun `fak sweep --json`",
+			NextAction: "remove 3 junk path(s) with `fak sweep --clean-junk` if you own them, then rerun `fak sweep --json`",
 		}, true
 	}
 	t.Cleanup(func() { syncWorktree = old })
@@ -56,7 +56,7 @@ func TestRunSyncCheckInSyncSurfacesDirtyWorktree(t *testing.T) {
 	if code != syncExitOK {
 		t.Fatalf("exit = %d, want ok; stderr=%s stdout=%s", code, errb.String(), out.String())
 	}
-	for _, want := range []string{"in sync", "worktree dirty: 4 path(s)", "next: remove 3 junk path(s)"} {
+	for _, want := range []string{"in sync", "worktree dirty: 4 path(s)", "next: remove 3 junk path(s)", "fak sweep --clean-junk"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("sync output missing %q:\n%s", want, out.String())
 		}
@@ -81,7 +81,7 @@ func TestRunSyncCheckInSyncJSONSurfacesDirtyWorktree(t *testing.T) {
 			Junk:         2,
 			OldestPath:   "wave.err",
 			OldestAgeSec: 600,
-			NextAction:   "remove 2 junk path(s) if you own them, then rerun `fak sweep --json`",
+			NextAction:   "remove 2 junk path(s) with `fak sweep --clean-junk` if you own them, then rerun `fak sweep --json`",
 		}, true
 	}
 	t.Cleanup(func() { syncWorktree = old })
@@ -104,7 +104,7 @@ func TestRunSyncCheckInSyncJSONSurfacesDirtyWorktree(t *testing.T) {
 	if got.Worktree.OldestPath != "wave.err" || got.Worktree.OldestAgeSec != 600 {
 		t.Fatalf("worktree = %+v, want oldest dirty metadata", got.Worktree)
 	}
-	if !strings.Contains(got.Worktree.NextAction, "remove 2 junk path(s)") {
+	if !strings.Contains(got.Worktree.NextAction, "remove 2 junk path(s)") || !strings.Contains(got.Worktree.NextAction, "fak sweep --clean-junk") {
 		t.Fatalf("next action = %q", got.Worktree.NextAction)
 	}
 }
@@ -124,7 +124,7 @@ func TestRunSyncPushSurfacesDirtyWorktree(t *testing.T) {
 			Stampable:  1,
 			Lanes:      1,
 			Junk:       3,
-			NextAction: "remove 3 junk path(s) if you own them, then rerun `fak sweep --json`",
+			NextAction: "remove 3 junk path(s) with `fak sweep --clean-junk` if you own them, then rerun `fak sweep --json`",
 		}, true
 	}
 	t.Cleanup(func() { syncWorktree = old })
@@ -134,7 +134,7 @@ func TestRunSyncPushSurfacesDirtyWorktree(t *testing.T) {
 	if code != syncExitOK {
 		t.Fatalf("exit = %d, want ok; stderr=%s stdout=%s", code, errb.String(), out.String())
 	}
-	for _, want := range []string{"pushed work -> origin/work", "worktree dirty: 4 path(s)", "next: remove 3 junk path(s)"} {
+	for _, want := range []string{"pushed work -> origin/work", "worktree dirty: 4 path(s)", "next: remove 3 junk path(s)", "fak sweep --clean-junk"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("sync push output missing %q:\n%s", want, out.String())
 		}
@@ -156,7 +156,7 @@ func TestRunSyncPushJSONSurfacesDirtyWorktree(t *testing.T) {
 			Stampable:  1,
 			Lanes:      1,
 			Junk:       3,
-			NextAction: "remove 3 junk path(s) if you own them, then rerun `fak sweep --json`",
+			NextAction: "remove 3 junk path(s) with `fak sweep --clean-junk` if you own them, then rerun `fak sweep --json`",
 		}, true
 	}
 	t.Cleanup(func() { syncWorktree = old })
@@ -176,7 +176,7 @@ func TestRunSyncPushJSONSurfacesDirtyWorktree(t *testing.T) {
 	if got.Worktree.TotalDirty != 4 || got.Worktree.Junk != 3 {
 		t.Fatalf("worktree = %+v, want dirty totals", got.Worktree)
 	}
-	if !strings.Contains(got.Worktree.NextAction, "remove 3 junk path(s)") {
+	if !strings.Contains(got.Worktree.NextAction, "remove 3 junk path(s)") || !strings.Contains(got.Worktree.NextAction, "fak sweep --clean-junk") {
 		t.Fatalf("next action = %q", got.Worktree.NextAction)
 	}
 }

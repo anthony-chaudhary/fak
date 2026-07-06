@@ -14,7 +14,7 @@ func TestRunDoneCheckRedOnDirtyPaths(t *testing.T) {
 	})
 	oldSweepNext := doneSweepNextActionForDirty
 	doneSweepNextActionForDirty = func(ctx context.Context, root string) string {
-		return "remove 3 junk path(s) if you own them, then rerun `fak sweep --json`"
+		return "remove 3 junk path(s) with `fak sweep --clean-junk` if you own them, then rerun `fak sweep --json`"
 	}
 	t.Cleanup(func() { doneSweepNextActionForDirty = oldSweepNext })
 
@@ -30,7 +30,7 @@ func TestRunDoneCheckRedOnDirtyPaths(t *testing.T) {
 	if report.MissingWitness != "clean_path_state" {
 		t.Fatalf("missing witness = %q, want clean_path_state", report.MissingWitness)
 	}
-	for _, want := range []string{"next from sweep", "remove 3 junk path(s)", "fak sweep --json", "fak sweep --apply --lane <lane>", "fak commit --path"} {
+	for _, want := range []string{"next from sweep", "remove 3 junk path(s)", "fak sweep --clean-junk", "fak sweep --json", "fak sweep --apply --lane <lane>", "fak commit --path"} {
 		if !strings.Contains(report.NextStep, want) {
 			t.Fatalf("dirty next step missing %q: %q", want, report.NextStep)
 		}
