@@ -98,6 +98,25 @@ func TestGuardCodexGatewayModel(t *testing.T) {
 	}
 }
 
+func TestGuardCodexLoopGateConfigCodexOnly(t *testing.T) {
+	cfg, ok := guardCodexLoopGateConfig([]string{"codex", "exec"}, "loop", "C:/tmp/codex", 12, 7, true)
+	if !ok {
+		t.Fatal("codex command did not enable loop gate config")
+	}
+	if cfg.Threshold != "loop" || cfg.CodexHome != "C:/tmp/codex" || cfg.SinceHours != 12 || cfg.Limit != 7 || !cfg.Quiet {
+		t.Fatalf("wrong loop gate config: %+v", cfg)
+	}
+	for _, command := range [][]string{
+		nil,
+		{"claude"},
+		{"opencode"},
+	} {
+		if cfg, ok := guardCodexLoopGateConfig(command, "loop", "", 24, 20, false); ok {
+			t.Fatalf("non-Codex command got loop gate config: command=%v cfg=%+v", command, cfg)
+		}
+	}
+}
+
 // guardCodexConfigArgs builds the ordered `-c key=value` overrides that define the `fak`
 // provider in Codex's config. The provider id is used bare in model_provider= (Codex reads
 // it as the id), while name/base_url/wire_api/env_key are TOML string literals carrying

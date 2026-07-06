@@ -80,6 +80,19 @@ func guardCodexGatewayModel(command []string, model, provider string) string {
 	return model
 }
 
+func guardCodexLoopGateConfig(command []string, threshold, codexHome string, sinceHours float64, limit int, quiet bool) (codexLoopGateConfig, bool) {
+	if len(command) == 0 || !guardIsCodex(command[0]) {
+		return codexLoopGateConfig{}, false
+	}
+	return codexLoopGateConfig{
+		Threshold:  threshold,
+		CodexHome:  codexHome,
+		SinceHours: sinceHours,
+		Limit:      limit,
+		Quiet:      quiet,
+	}, true
+}
+
 // guardCodexConfigArgs builds the ordered `-c key=value` override arguments that point
 // Codex at the gateway. Each value is a TOML literal, so strings carry their double quotes
 // verbatim (guard execs the child directly, with no shell to strip them — Codex's own TOML

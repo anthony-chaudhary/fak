@@ -182,6 +182,9 @@ func cmdGuard(argv []string) {
 	replayWire := fs.String("replay-wire", "anthropic", "with --replay-trace: the provider wire to replay over (anthropic = the `fak guard -- claude` flagship /v1/messages path; openai = the codex/opencode /v1/chat/completions path).")
 	codexConfig := fs.Bool("codex-config", true, "when wrapping Codex, inject per-run -c model_provider/model_providers.fak overrides so Codex talks to the in-process gateway over the Responses wire. Codex-only; pass --codex-config=false if you already configured the fak provider yourself.")
 	codexHome := fs.String("codex-home", "", "Codex home directory for `codex login` auth.json when wrapping Codex (default: $CODEX_HOME or ~/.codex). Used only for ChatGPT-subscription OAuth; --api-key-env keeps API billing explicit.")
+	codexLoopGate := fs.String("codex-loop-gate", "loop", "Codex-only launch gate: audit recent Codex sessions before wrapping a Codex child and refuse at threshold loop|action|off")
+	codexLoopGateSinceHours := fs.Float64("codex-loop-gate-since-hours", 24, "with --codex-loop-gate, only scan Codex sessions modified within N hours (0 = all)")
+	codexLoopGateLimit := fs.Int("codex-loop-gate-limit", 20, "with --codex-loop-gate, maximum newest Codex sessions to scan")
 	mcpRegister := fs.Bool("mcp-register", true, "register fak's own MCP self-query surface (fak_index_*, fak_memory_*, fak_tools_search) into the wrapped Claude Code child by default, via a session-scoped --mcp-config pointing at this gateway's /mcp endpoint. Claude-only; ADDS to any project/user MCP config the child already loads, never replaces it. Every call is still re-adjudicated by the guard floor — this widens discovery, not the danger floor. Pass --mcp-register=false if you already supply your own MCP config.")
 	managedCacheMode := fs.String("managed-cache", guardManagedCacheAuto, "actively manage the provider prompt-cache on the outbound Anthropic wire: auto|on|off (epic #1844 C6). ACTIVE upgrades the stable-prefix cache_control breakpoint to Anthropic's 1h TTL tier, so a long session that idles past the default 5m cache window (a human stepping away, a slow tool, a rate-limit stall) re-enters on a 0.1x cache READ instead of re-writing the whole prefix; the upgrade is byte-safe (only an existing stable system/tools-head breakpoint is extended, volatile heads refused) and witnessed on /metrics as fak_gateway_cache_ttl_upgrade_total. AUTO (default) activates ONLY when this session provably bills an API key (--api-key-env resolved a key on the Anthropic wire) — there the 2x one-time 1h write premium vs repeated 1.25x prefix re-writes is the operator's own dollars; a subscription-OAuth or passthrough session stays passive. on forces it; off disables.")
 	compress := fs.Bool("compress", false, "activate the native context-compressor for this session: shrink benign tool results (ANSI/control strip, CR-redraw collapse, duplicate-line fold, JSON minify) before they enter model context, only when the saving clears the worth-it floor and never on poison, with the original preserved (reversible). Equivalent to FAK_COMPRESSOR=native for this process; an explicit FAK_COMPRESSOR wins. See `fak headroom bench` for the savings and `fak headroom status` for the live decision breakdown.")
@@ -301,6 +304,11 @@ func cmdGuard(argv []string) {
 	if len(command) == 0 {
 		fs.Usage()
 		os.Exit(2)
+	}
+	if cfg, ok := guardCodexLoopGateConfig(command, *codexLoopGate, *codexHome, *codexLoopGateSinceHours, *codexLoopGateLimit, *quiet); ok {
+		if code := runCodexLoopGate(os.Stderr, cfg); code != 0 {
+			os.Exit(code)
+		}
 	}
 	if code := runGuardSessionPressureGate(os.Stderr, guardSessionPressureGateConfig{
 		Threshold:     *sessionPressureGate,
