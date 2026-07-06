@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
@@ -37,7 +38,8 @@ import (
 //	fak fleet-accounts wave [--count N] [--work-kind K] [--product P] [--t1|--t2|--t3]
 //	                                          allocate account session slots for fan-out
 //	fak fleet-accounts seats [--product P] [--json]   the explicit seat pool (M distinct seats)
-//	fak fleet-accounts status                 the watchdog status fold (roster + availability)
+//	fak fleet-accounts status [--provider P] [--tier N|--t1|--t2|--t3] [--group-by provider,tier]
+//	                                          compact rollups over provider/tier/model/state + mixed-limit warnings
 //
 // NOT yet ported (documented follow-on, see issue #1415): the ACTIVE network probe
 // (`probe`, which delegates to tools/account_probe.py), the probe-LEDGER freshness
@@ -58,13 +60,19 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fleet-accounts "+mode, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "emit JSON instead of a human table")
-	account := fs.String("account", "", "(resolve) pin to this account tag/basename")
+	account := fs.String("account", "", "(resolve) pin to this account tag/basename; (status) filter tag/basename substring")
 	workKind := fs.String("work-kind", "", "(resolve) operator work-kind (gardening|engineering|...) — wins over tier")
 	task := fs.String("task", "", "(resolve) task text for the light/hard heuristic")
-	product := fs.String("product", "", "(resolve/seats) scope to a product family (claude|opencode)")
-	t1 := fs.Bool("t1", false, "(resolve) pin tier 1")
-	t2 := fs.Bool("t2", false, "(resolve) pin tier 2")
-	t3 := fs.Bool("t3", false, "(resolve) pin tier 3")
+	product := fs.String("product", "", "(resolve/seats/status) scope to a product family (claude|opencode)")
+	provider := fs.String("provider", "", "(status) scope to a derived provider family (anthropic|groq|nvidia-nim|google|...)")
+	tier := fs.Int("tier", 0, "(status) filter by model tier 1|2|3")
+	state := fs.String("state", "", "(status) filter by state (ready|usage|auth|blocked|duplicate|excluded|non-account)")
+	modelFilter := fs.String("model", "", "(status) filter by model substring")
+	groupBy := fs.String("group-by", "provider,tier", "(status) comma-separated rollup dimensions: provider,product,tier,model,state,agent")
+	showAccounts := fs.Bool("accounts", false, "(status) include matching per-account rows after rollups")
+	t1 := fs.Bool("t1", false, "(resolve/status) pin/filter tier 1")
+	t2 := fs.Bool("t2", false, "(resolve/status) pin/filter tier 2")
+	t3 := fs.Bool("t3", false, "(resolve/status) pin/filter tier 3")
 	allowFallback := fs.Bool("allow-tier-fallback", false, "(resolve) allow a tier-1 target to fall back to tier 2")
 	faklocalOK := fs.Bool("faklocal-ok", false, "(resolve) synthesize the dogfood .claude-faklocal account when pinned")
 	count := -1
@@ -85,8 +93,8 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 	rows := fleetaccounts.AnnotatedRoster(paths.Home, paths.ConfigHome, pol, reg)
 
 	switch mode {
-	case "list", "roster", "status":
-		if *asJSON || mode == "json" {
+	case "list", "roster":
+		if *asJSON {
 			return emitRosterJSON(stdout, stderr, paths, rows)
 		}
 		exampleNote := ""
@@ -95,6 +103,27 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 		}
 		fmt.Fprint(stdout, fleetaccounts.RenderList(rows, paths.Home, paths.PolicyPath,
 			faFileExists(paths.PolicyPath), exampleNote))
+		return 0
+
+	case "status":
+		filter := fleetaccounts.StatusFilter{
+			Product: *product, Provider: *provider, Tier: statusTierFilter(*tier, *t1, *t2, *t3),
+			State: *state, Account: *account, Model: *modelFilter,
+		}
+		report := fleetaccounts.BuildStatusReport(rows, fleetSeatLeases(repoRoot), fleetaccounts.StatusOptions{
+			Filter:  filter,
+			GroupBy: fleetAccountsSplitCSV(*groupBy),
+		})
+		if *asJSON {
+			out, err := json.MarshalIndent(report, "", " ")
+			if err != nil {
+				fmt.Fprintln(stderr, "fleet-accounts: marshal:", err)
+				return 1
+			}
+			fmt.Fprintln(stdout, string(out))
+			return 0
+		}
+		fmt.Fprint(stdout, fleetaccounts.RenderStatusReport(report, *showAccounts || statusFilterRequested(filter)))
 		return 0
 
 	case "json":
@@ -177,6 +206,42 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "note: the active network probe + mutating ops (relogin/top-up/launch) remain on tools/fleet_accounts.py (issue #1415).")
 		return 2
 	}
+}
+
+func fleetAccountsSplitCSV(raw string) []string {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func statusTierFilter(tier int, t1, t2, t3 bool) int {
+	if tier > 0 {
+		return tier
+	}
+	switch {
+	case t1:
+		return 1
+	case t2:
+		return 2
+	case t3:
+		return 3
+	default:
+		return 0
+	}
+}
+
+func statusFilterRequested(f fleetaccounts.StatusFilter) bool {
+	return strings.TrimSpace(f.Product) != "" ||
+		strings.TrimSpace(f.Provider) != "" ||
+		f.Tier > 0 ||
+		strings.TrimSpace(f.State) != "" ||
+		strings.TrimSpace(f.Account) != "" ||
+		strings.TrimSpace(f.Model) != ""
 }
 
 func fleetSeatLeases(repoRoot string) []fleetaccounts.Lease {
