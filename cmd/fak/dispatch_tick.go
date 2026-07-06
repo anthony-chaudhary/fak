@@ -606,6 +606,14 @@ func dispatchCodexLoopGateForTick(opts dispatchTickOptions, account dispatchtick
 	if _, ok := codexLoopFailOnRank(threshold); !ok {
 		return nil, false, fmt.Errorf("invalid --codex-loop-gate %q (want loop, action, or off)", opts.CodexLoopGate)
 	}
+	if d, ok, err := diagnoseCurrentCodexLoop(account.Dir); ok {
+		if err != nil {
+			return nil, false, fmt.Errorf("Codex current-thread gate audit failed: %w", err)
+		}
+		if codexLoopDiagnosisUnguarded(d) {
+			return dispatchCodexLoopCurrentThreadPayload(d, threshold), true, nil
+		}
+	}
 	limit := opts.CodexLoopGateLimit
 	if limit <= 0 {
 		limit = dispatchCodexLoopGateDefaultLimitValue()
@@ -647,6 +655,7 @@ func dispatchCodexLoopGateDefaultLimitValue() int {
 func dispatchCodexLoopGatePayload(rep codexLoopRecentReport, threshold string) map[string]any {
 	return map[string]any{
 		"schema":       rep.Schema,
+		"source":       "recent",
 		"codex_home":   rep.CodexHome,
 		"fail_on":      codexLoopFailOnName(threshold),
 		"verdict":      rep.Verdict,
@@ -660,6 +669,23 @@ func dispatchCodexLoopGatePayload(rep codexLoopRecentReport, threshold string) m
 		"tool_calls":   rep.ToolCalls,
 		"tool_outputs": rep.ToolOutputs,
 		"top_repeated": rep.TopRepeated,
+	}
+}
+
+func dispatchCodexLoopCurrentThreadPayload(d codexLoopDiagnosis, threshold string) map[string]any {
+	return map[string]any{
+		"schema":           d.Schema,
+		"source":           "current_thread",
+		"fail_on":          "unguarded",
+		"threshold":        codexLoopFailOnName(threshold),
+		"verdict":          d.Verdict,
+		"reason":           codexLoopDiagnosisGateReason(d, "unguarded"),
+		"path":             d.Path,
+		"session_id":       d.SessionID,
+		"model_provider":   d.ModelProvider,
+		"tool_calls":       d.ToolCalls,
+		"tool_outputs":     d.ToolOutputs,
+		"repeated_outputs": d.RepeatedOutcomes,
 	}
 }
 

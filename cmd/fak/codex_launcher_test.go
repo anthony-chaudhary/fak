@@ -199,6 +199,7 @@ func TestRunCodexExecSeam(t *testing.T) {
 }
 
 func TestRunCodexLoopGateRefusesBeforeSpawn(t *testing.T) {
+	t.Setenv("CODEX_THREAD_ID", "")
 	home := codexLauncherLoopFixture(t)
 	orig := codexLaunchRun
 	codexLaunchRun = func(_, _ io.Writer, _, _ []string) int {
@@ -234,6 +235,41 @@ func TestRunCodexLoopGateRefusesBeforeSpawn(t *testing.T) {
 	}
 }
 
+func TestRunCodexLoopGateRefusesCurrentDirectThread(t *testing.T) {
+	home, threadID := codexLauncherCurrentThreadFixture(t)
+	t.Setenv("CODEX_THREAD_ID", threadID)
+	orig := codexLaunchRun
+	codexLaunchRun = func(_, _ io.Writer, _, _ []string) int {
+		t.Fatal("codex child spawned despite current-thread direct-provider refusal")
+		return 99
+	}
+	t.Cleanup(func() { codexLaunchRun = orig })
+
+	var out, errb bytes.Buffer
+	rc := runCodex(&out, &errb, []string{
+		"--split", "off",
+		"--codex-home", home,
+		"--loop-gate", "loop",
+		"--loop-gate-since-hours", "0",
+		"--",
+		"exec", "do x",
+	})
+	if rc != 1 {
+		t.Fatalf("runCodex current-thread gate rc=%d, want 1; stdout=%s stderr=%s", rc, out.String(), errb.String())
+	}
+	got := errb.String()
+	for _, want := range []string{
+		"current-thread gate REFUSE fail-on=unguarded verdict=OK reason=codex_session_bypassed_fak_guard",
+		"session        : " + threadID + " provider=openai",
+		"next action    : launch future Codex sessions through `fak codex`",
+		"pass --loop-gate off to launch anyway after an operator decision",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("current-thread gate stderr missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestRunCodexLoopGateOffAllowsSpawn(t *testing.T) {
 	home := codexLauncherLoopFixture(t)
 	orig := codexLaunchRun
@@ -261,6 +297,7 @@ func TestRunCodexLoopGateOffAllowsSpawn(t *testing.T) {
 }
 
 func TestRunCodexLoopGateInvalidThreshold(t *testing.T) {
+	t.Setenv("CODEX_THREAD_ID", "")
 	orig := codexLaunchRun
 	codexLaunchRun = func(_, _ io.Writer, _, _ []string) int {
 		t.Fatal("codex child spawned despite invalid loop gate")
@@ -305,4 +342,21 @@ func codexLauncherLoopFixture(t *testing.T) string {
 		`{"timestamp":"2026-07-06T02:25:28.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_3","output":"Plan updated"}}`,
 	})
 	return home
+}
+
+func codexLauncherCurrentThreadFixture(t *testing.T) (string, string) {
+	t.Helper()
+	home := filepath.Join(t.TempDir(), "codex-home")
+	sessionsDir := filepath.Join(home, "sessions", "2026", "07", "06")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	threadID := "019f3540-52dd-7001-b559-2818dc14ede6"
+	path := filepath.Join(sessionsDir, "rollout-2026-07-06T09-30-00-"+threadID+".jsonl")
+	writeCodexLoopFixture(t, path, []string{
+		`{"timestamp":"2026-07-06T16:30:00.000Z","type":"session_meta","payload":{"session_id":"019f3540-52dd-7001-b559-2818dc14ede6","originator":"codex-tui","cli_version":"0.142.5","model_provider":"openai","git":{"commit_hash":"111ff04","branch":"main"}}}`,
+		`{"timestamp":"2026-07-06T16:30:02.000Z","type":"response_item","payload":{"type":"function_call","name":"shell_command","arguments":"{\"command\":\"git status --short\"}","call_id":"shell_1"}}`,
+		`{"timestamp":"2026-07-06T16:30:03.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"shell_1","output":"## main"}}`,
+	})
+	return home, threadID
 }

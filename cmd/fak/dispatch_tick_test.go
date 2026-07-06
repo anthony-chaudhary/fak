@@ -822,6 +822,7 @@ func TestDispatchTickLiveBrokerDenyDoesNotSpawnWorker(t *testing.T) {
 }
 
 func TestDispatchTickLiveCodexLoopGateRefusesGuardlessSpawn(t *testing.T) {
+	t.Setenv("CODEX_THREAD_ID", "")
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
 	root := t.TempDir()
 	home := t.TempDir()
@@ -895,6 +896,31 @@ func TestDispatchTickLiveCodexLoopGateRefusesGuardlessSpawn(t *testing.T) {
 	repeated, _ := top[0].(map[string]any)
 	if dispatchMapString(repeated, "tool") != "update_plan" || dispatchMapInt(repeated, "count") != 3 {
 		t.Fatalf("top repeated = %#v, want update_plan count=3", repeated)
+	}
+}
+
+func TestDispatchCodexLoopGateRefusesCurrentDirectThread(t *testing.T) {
+	home, threadID := codexLauncherCurrentThreadFixture(t)
+	t.Setenv("CODEX_THREAD_ID", threadID)
+	gate, refused, err := dispatchCodexLoopGateForTick(dispatchTickOptions{
+		Live:          true,
+		Backend:       "codex",
+		CodexLoopGate: "loop",
+	}, dispatchtick.Account{Dir: home})
+	if err != nil {
+		t.Fatalf("dispatchCodexLoopGateForTick: %v", err)
+	}
+	if !refused {
+		t.Fatalf("current direct thread was not refused: %#v", gate)
+	}
+	if dispatchMapString(gate, "source") != "current_thread" ||
+		dispatchMapString(gate, "fail_on") != "unguarded" ||
+		dispatchMapString(gate, "threshold") != "loop" ||
+		dispatchMapString(gate, "verdict") != "OK" ||
+		dispatchMapString(gate, "reason") != "codex_session_bypassed_fak_guard" ||
+		dispatchMapString(gate, "session_id") != threadID ||
+		dispatchMapString(gate, "model_provider") != "openai" {
+		t.Fatalf("current-thread gate payload = %#v", gate)
 	}
 }
 

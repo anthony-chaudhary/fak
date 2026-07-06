@@ -254,6 +254,23 @@ func runCodexLoopGate(stderr io.Writer, cfg codexLoopGateConfig) int {
 		fmt.Fprintf(stderr, "fak codex: invalid --loop-gate %q (want loop, action, or off)\n", cfg.Threshold)
 		return 2
 	}
+	if d, ok, err := diagnoseCurrentCodexLoop(cfg.CodexHome); ok {
+		if err != nil {
+			fmt.Fprintf(stderr, "fak codex: current-thread gate audit failed: %v\n", err)
+			return 1
+		}
+		if codexLoopDiagnosisUnguarded(d) {
+			fmt.Fprintf(stderr, "fak codex: current-thread gate REFUSE fail-on=unguarded verdict=%s reason=%s\n",
+				d.Verdict, codexLoopDiagnosisGateReason(d, "unguarded"))
+			fmt.Fprint(stderr, renderCodexLoopDiagnosis(d))
+			fmt.Fprintln(stderr, "fak codex: pass --loop-gate off to launch anyway after an operator decision.")
+			return 1
+		}
+		if !cfg.Quiet {
+			fmt.Fprintf(stderr, "fak codex: current-thread gate allow provider=%s verdict=%s session=%s\n",
+				firstString(strings.TrimSpace(d.ModelProvider), "-"), d.Verdict, firstString(strings.TrimSpace(d.SessionID), "-"))
+		}
+	}
 	rep, err := diagnoseRecentCodexLoops(cfg.CodexHome, cfg.SinceHours, cfg.Limit)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak codex: loop gate audit failed: %v\n", err)

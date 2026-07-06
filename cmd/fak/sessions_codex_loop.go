@@ -489,6 +489,29 @@ func resolveCodexLoopSessionPath(codexHome, sessionID, path string) (string, err
 	return matches[0].path, nil
 }
 
+func diagnoseCurrentCodexLoop(codexHome string) (codexLoopDiagnosis, bool, error) {
+	if strings.TrimSpace(os.Getenv("CODEX_THREAD_ID")) == "" {
+		return codexLoopDiagnosis{}, false, nil
+	}
+	resolved, err := resolveCodexLoopSessionPath(codexHome, "", "")
+	if err != nil && strings.TrimSpace(codexHome) != "" {
+		resolved, err = resolveCodexLoopSessionPath("", "", "")
+	}
+	if err != nil {
+		return codexLoopDiagnosis{}, true, err
+	}
+	fh, err := os.Open(resolved)
+	if err != nil {
+		return codexLoopDiagnosis{}, true, fmt.Errorf("open %s: %w", resolved, err)
+	}
+	defer fh.Close()
+	d, err := diagnoseCodexLoop(fh, resolved)
+	if err != nil {
+		return codexLoopDiagnosis{}, true, err
+	}
+	return d, true, nil
+}
+
 func resolvedCodexLoopHome(codexHome string) (string, error) {
 	home := strings.TrimSpace(codexHome)
 	if home == "" {
@@ -798,6 +821,7 @@ func classifyCodexLoopDiagnosis(d *codexLoopDiagnosis) {
 			return
 		}
 		d.Verdict = "OK"
+		applyCodexLoopUnguardedGuidance(d)
 		return
 	}
 	top := d.RepeatedOutcomes[0]
@@ -807,18 +831,31 @@ func classifyCodexLoopDiagnosis(d *codexLoopDiagnosis) {
 	if strings.EqualFold(top.Tool, "create_goal") && strings.Contains(strings.ToLower(top.OutputExcerpt), "unfinished goal") {
 		d.NextAction = "for create_goal, read/continue the existing goal instead of creating a new one; hard-fuse repeated unfinished-goal failures after the first repeat"
 	}
-	if d.ModelProvider != "" && !strings.EqualFold(d.ModelProvider, "fak") {
-		d.NextAction = "launch future Codex sessions through `fak codex` or `fak guard -- codex`; direct model_provider=" + d.ModelProvider + " sessions cannot use the gateway's repeated-result fuse"
-		d.ObservabilityGaps = append(d.ObservabilityGaps,
-			"this Codex session bypassed fak guard (model_provider="+d.ModelProvider+"), so the gateway could not hard-fuse the repeated tool outcome",
-			"the Codex session final status records tokens/time but not the top repeated tool outcome that consumed them",
-		)
+	if applyCodexLoopUnguardedGuidance(d) {
 		return
 	}
 	d.ObservabilityGaps = append(d.ObservabilityGaps,
 		"the live gateway emitted an advisory livelock note but still admitted the next identical host-tool call",
 		"the Codex session final status records tokens/time but not the top repeated tool outcome that consumed them",
 	)
+}
+
+func applyCodexLoopUnguardedGuidance(d *codexLoopDiagnosis) bool {
+	if !codexLoopDiagnosisUnguarded(*d) {
+		return false
+	}
+	d.NextAction = "launch future Codex sessions through `fak codex` or `fak guard -- codex`; direct model_provider=" + d.ModelProvider + " sessions cannot use the gateway's repeated-result fuse"
+	if len(d.RepeatedOutcomes) > 0 {
+		d.ObservabilityGaps = append(d.ObservabilityGaps,
+			"this Codex session bypassed fak guard (model_provider="+d.ModelProvider+"), so the gateway could not hard-fuse the repeated tool outcome",
+			"the Codex session final status records tokens/time but not the top repeated tool outcome that consumed them",
+		)
+		return true
+	}
+	d.ObservabilityGaps = append(d.ObservabilityGaps,
+		"this Codex session bypassed fak guard (model_provider="+d.ModelProvider+"), so the gateway cannot hard-fuse repeated tool outcomes inside this process",
+	)
+	return true
 }
 
 func renderCodexLoopDiagnosis(d codexLoopDiagnosis) string {
