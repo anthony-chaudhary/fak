@@ -124,6 +124,7 @@ $PresetBaseUrl    = ''
 $PresetModel      = ''
 $PresetApiKeyEnv  = ''   # env var holding the upstream bearer token (authenticated remotes)
 $PresetExtraBody  = ''
+$PresetOpenAIToolMessagesAsText = ''
 if ($Preset) {
   switch ($Preset) {
     'qwen36' {
@@ -140,9 +141,10 @@ if ($Preset) {
       $PresetExtraBody = '{"top_k":20,"chat_template_kwargs":{"preserve_thinking":true}}'
     }
     'glm-gcp' {
-      $PresetBackend = 'openai'
-      $PresetBaseUrl = if ($env:FAK_GLM_GCP_BASE_URL) { $env:FAK_GLM_GCP_BASE_URL } else { 'http://127.0.0.1:8200/v1' }
-      $PresetModel   = if ($env:FAK_GLM_GCP_MODEL)    { $env:FAK_GLM_GCP_MODEL }    else { 'glm-5.2' }
+      $PresetBackend   = 'openai'
+      $PresetBaseUrl   = if ($env:FAK_GLM_GCP_BASE_URL) { $env:FAK_GLM_GCP_BASE_URL } else { 'http://127.0.0.1:8200/v1' }
+      $PresetModel     = if ($env:FAK_GLM_GCP_MODEL)    { $env:FAK_GLM_GCP_MODEL }    else { 'glm-5.2' }
+      $PresetExtraBody = '{"chat_template_kwargs":{"enable_thinking":false}}'
     }
     'mac' {
       # Point fak at the always-on Mac node (node-macos-a) running fak serve over Tailscale.
@@ -152,6 +154,7 @@ if ($Preset) {
       $PresetBaseUrl   = if ($env:FAK_MAC_GATEWAY)  { $env:FAK_MAC_GATEWAY }  else { Die 'FAK_DOGFOOD_PRESET=mac requires FAK_MAC_GATEWAY=http://<tailscale-ip>:8080' }
       $PresetModel     = if ($env:FAK_MAC_MODEL)    { $env:FAK_MAC_MODEL }    else { 'lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M' }
       $PresetApiKeyEnv = 'FAK_GATEWAY_KEY'
+      $PresetOpenAIToolMessagesAsText = '1'
     }
     default { Die "unknown FAK_DOGFOOD_PRESET=$Preset (want qwen36-local|glm-gcp|mac)" }
   }
@@ -169,6 +172,7 @@ $KernelBackend = ($Backend -eq 'gguf')
 $OpenaiBackend    = ($Backend -eq 'openai')
 $OpenaiBaseUrl    = if ($env:FAK_DOGFOOD_BASE_URL)      { $env:FAK_DOGFOOD_BASE_URL }      else { $PresetBaseUrl }
 $OpenaiApiKeyEnv  = if ($env:FAK_DOGFOOD_API_KEY_ENV)   { $env:FAK_DOGFOOD_API_KEY_ENV }   elseif ($PresetApiKeyEnv) { $PresetApiKeyEnv } else { '' }
+$OpenAIToolMessagesAsText = if ($env:FAK_DOGFOOD_OPENAI_TOOL_MESSAGES_AS_TEXT) { $env:FAK_DOGFOOD_OPENAI_TOOL_MESSAGES_AS_TEXT } elseif ($PresetOpenAIToolMessagesAsText) { $PresetOpenAIToolMessagesAsText } else { '' }
 # The 'anthropic' upstream fronts the REAL Claude API — Claude Code keeps its own
 # real model tiers (claude-opus-4-8, etc.), so the single-model override is OFF and
 # the default 'model' is empty. Local backends still map every tier onto one model.
@@ -255,6 +259,13 @@ function Test-PortFree { param([int]$p)
 function Get-UsablePort { param([int]$p)
   for ($i = 0; $i -lt 50; $i++) { if (Test-PortFree ($p + $i)) { return ($p + $i) } }
   Die "no free port near $p"
+}
+function Ensure-TimeoutFloor { param([string]$name, [int]$floor)
+  $raw = [System.Environment]::GetEnvironmentVariable($name)
+  $parsed = 0
+  if (-not [int]::TryParse($raw, [ref]$parsed) -or $parsed -lt $floor) {
+    Set-Item -Path "Env:$name" -Value ([string]$floor)
+  }
 }
 function Wait-Url { param([string]$url, [int]$timeoutSec = 120)
   for ($i = 0; $i -lt ($timeoutSec * 2); $i++) {
@@ -500,9 +511,9 @@ try {
   # the kernel arm raises the floor higher (900s) to avoid a 502 mid-turn.
   # The remote openai backend (GLM-5.2 on GCP) is a big model with a long prefill — give
   # its turns the same generous 900s floor as the slow in-kernel CPU forward.
-  $TimeoutFloor = if ($KernelBackend -or $OpenaiBackend) { '900' } else { '300' }
-  if (-not $env:FAK_PLANNER_TIMEOUT_S)    { $env:FAK_PLANNER_TIMEOUT_S = $TimeoutFloor }
-  if (-not $env:FAK_HTTP_WRITE_TIMEOUT_S) { $env:FAK_HTTP_WRITE_TIMEOUT_S = $TimeoutFloor }
+  $TimeoutFloor = if ($KernelBackend -or $OpenaiBackend) { 900 } else { 300 }
+  Ensure-TimeoutFloor 'FAK_PLANNER_TIMEOUT_S' $TimeoutFloor
+  Ensure-TimeoutFloor 'FAK_HTTP_WRITE_TIMEOUT_S' ([int]$env:FAK_PLANNER_TIMEOUT_S)
   # Claude Code's OWN client request timeout must outlast a slow CPU turn, or the harness
   # aborts the request before fak's forward finishes prefilling the multi-thousand-token
   # prompt — fatal exactly on the kernel (gguf) arm, whose pure-Go CPU forward is the
@@ -510,11 +521,16 @@ try {
   # from the planner timeout (seconds -> ms) unless the operator already pinned it. The
   # gateway also emits SSE pings during a slow generation, so the raised ceiling, not an
   # idle disconnect, is what governs.
-  if (-not $env:API_TIMEOUT_MS -and [int]$env:FAK_PLANNER_TIMEOUT_S -gt 0) {
-    $env:API_TIMEOUT_MS = [string]([int]$env:FAK_PLANNER_TIMEOUT_S * 1000)
+  $apiTimeoutFloor = [int64]$env:FAK_PLANNER_TIMEOUT_S * 1000
+  $apiTimeout = 0L
+  if (-not [int64]::TryParse($env:API_TIMEOUT_MS, [ref]$apiTimeout) -or $apiTimeout -lt $apiTimeoutFloor) {
+    $env:API_TIMEOUT_MS = [string]$apiTimeoutFloor
   }
   if ($PresetExtraBody -and -not $env:FAK_PROVIDER_EXTRA_BODY_JSON) {
     $env:FAK_PROVIDER_EXTRA_BODY_JSON = $PresetExtraBody
+  }
+  if ($OpenAIToolMessagesAsText -and -not $env:FAK_OPENAI_TOOL_MESSAGES_AS_TEXT) {
+    $env:FAK_OPENAI_TOOL_MESSAGES_AS_TEXT = $OpenAIToolMessagesAsText
   }
   $Port = Get-UsablePort $Port
   $serveArgs = @('serve', '--addr', "127.0.0.1:$Port", '--provider', $Provider)

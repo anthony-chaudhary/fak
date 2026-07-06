@@ -47,6 +47,8 @@
 #   PROBE_TIMEOUT_S   timeout floor for each Claude Code probe turn (default 900)
 #   WITNESS_DIR       where apply-mode probe/metrics evidence is copied
 #   PERF_MAX_DURATION_MS  max per-turn Claude probe duration (default 60000; 0 disables)
+#   FAK_STARTUP_PATCH_FILE  optional local patch applied after the VM clones FAK_REPO_URL
+#   FAK_REPO_REF    optional commit/ref checked out before applying FAK_STARTUP_PATCH_FILE
 #   CACHE_VALUE_MIN_REUSED  minimum reused-token counter required after probes (default 1)
 #   KEEP              1 = skip teardown (debug)         (default empty = always tear down)
 set -euo pipefail
@@ -118,7 +120,8 @@ case "$PERF_MAX_DURATION_MS" in ''|*[!0-9]*) die "PERF_MAX_DURATION_MS must be a
 # probe + cache-value + teardown steps around it.
 render_serve_plan() {
   GCP_TIER="$GCP_TIER" VM_NAME="$VM_NAME" GLM_PORT="$GLM_PORT" SERVE="$SERVE" EP_RANKS="$EP_RANKS" \
-  LOCAL_TUNNEL_PORT="$LOCAL_TUNNEL_PORT" GCP_ZONE="$GCP_ZONE" \
+  LOCAL_TUNNEL_PORT="$LOCAL_TUNNEL_PORT" GCP_ZONE="$GCP_ZONE" FAK_STARTUP_PATCH_FILE="${FAK_STARTUP_PATCH_FILE:-}" \
+  FAK_REPO_REF="${FAK_REPO_REF:-}" \
     bash "$ROOT/scripts/gcp-glm-serve.sh" --plan
 }
 
@@ -146,6 +149,11 @@ while [ "\$(date +%s)" -lt "\$deadline" ]; do
     echo "READY phase=\$phase"
     cat /tmp/glm52-models.json
     exit 0
+  fi
+  if [ -z "\$phase" ] && journalctl -u google-startup-scripts.service -n 40 --no-pager 2>/dev/null | grep -Eq 'startup-script.*failed|error while communicating with "startup-script"|Script "startup-script" failed'; then
+    echo "REMOTE_FAIL phase=STARTUP_SCRIPT_FAIL confirmation=1" >&2
+    journalctl -u google-startup-scripts.service -n 160 --no-pager >&2 || true
+    exit 2
   fi
   if printf '%s' "\$phase" | grep -Eq '(^| )(BAD_|.*_FAIL|.*_TIMEOUT|.*_EXITED_EARLY|SMOKE_FAIL|NO_HF_CLI|HEALTH_TIMEOUT)( |$)'; then
     if [ "\$phase" = "\$last_fail" ]; then
@@ -459,6 +467,8 @@ trap cleanup EXIT
 log "DEMO step 1 — provision + serve GLM-5.2 on $VM_NAME via the pure fak kernel"
 GCP_TIER="$GCP_TIER" VM_NAME="$VM_NAME" GLM_PORT="$GLM_PORT" SERVE="$SERVE" EP_RANKS="$EP_RANKS" \
 LOCAL_TUNNEL_PORT="$LOCAL_TUNNEL_PORT" GCP_ZONE="$GCP_ZONE" GCP_PROJECT="$GCP_PROJECT" \
+FAK_STARTUP_PATCH_FILE="${FAK_STARTUP_PATCH_FILE:-}" \
+FAK_REPO_REF="${FAK_REPO_REF:-}" \
   bash "$ROOT/scripts/gcp-glm-serve.sh" --apply
 
 if ! wait_for_remote_ready; then

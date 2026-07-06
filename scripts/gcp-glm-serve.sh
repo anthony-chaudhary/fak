@@ -55,9 +55,12 @@
 #                   instead of falling back to host DistComm (default: 1 when EP_RANKS>1)
 #   GLM_GGUF_REPO   HF repo for the fak/llama.cpp GGUF  (default unsloth/GLM-5.2-GGUF)
 #   GLM_GGUF_SUBDIR GGUF quant subdir                   (default UD-Q4_K_M, ~466 GB)
+#   FAK_STARTUP_PATCH_FILE  optional local patch to apply after the VM clones FAK_REPO_URL
+#   NCCL_APT_VERSION optional apt version for libnccl2/libnccl-dev (default 2.30.7-1+cuda12.9)
 #   NCPU_MOE        llama.cpp experts-on-host count     (default 999 = all; fak offload is flag-driven)
 #   HF_TOKEN        Hugging Face token for the checkpoint (passed to the VM if set)
 #   FAK_REPO_URL    repo to clone on the VM            (default the public fak remote)
+#   FAK_REPO_REF    optional commit/ref to checkout before applying a startup patch
 #   TAILSCALE_AUTHKEY  optional tailscale authkey to join the private overlay on boot
 #   LOCAL_TUNNEL_PORT  local port the printed tunnel binds (default 8200 — the preset default)
 #   ON_IDLE         stop | delete — idle-gardener action when this box serves no model turns
@@ -88,9 +91,12 @@ CTX="${CTX:-65536}"
 EP_RANKS="${EP_RANKS:-1}"
 LOCAL_TUNNEL_PORT="${LOCAL_TUNNEL_PORT:-8200}"
 FAK_REPO_URL="${FAK_REPO_URL:-https://github.com/anthony-chaudhary/fak.git}"
+FAK_REPO_REF="${FAK_REPO_REF:-}"
+FAK_STARTUP_PATCH_FILE="${FAK_STARTUP_PATCH_FILE:-}"
 SERVE="${SERVE:-}"   # empty => resolved from the tier's arch below (sm_80→fak, sm_90+→sglang/vllm)
 GLM_GGUF_REPO="${GLM_GGUF_REPO:-unsloth/GLM-5.2-GGUF}"
 GLM_GGUF_SUBDIR="${GLM_GGUF_SUBDIR:-UD-Q4_K_M}"
+NCCL_APT_VERSION="${NCCL_APT_VERSION:-2.30.7-1+cuda12.9}"
 NCPU_MOE="${NCPU_MOE:-999}"
 GLM_STAGE_DIR="${GLM_STAGE_DIR:-/opt/glm52-q4}"
 LLAMA_DIR="${LLAMA_DIR:-/opt/llama.cpp}"
@@ -234,9 +240,16 @@ fi
 if [ "$MODE" = "apply" ]; then
   RENDER_HF_TOKEN="${HF_TOKEN:-}"
   RENDER_TS_AUTHKEY="${TAILSCALE_AUTHKEY:-}"
+  if [ -n "$FAK_STARTUP_PATCH_FILE" ]; then
+    [ -f "$FAK_STARTUP_PATCH_FILE" ] || die "FAK_STARTUP_PATCH_FILE does not exist: $FAK_STARTUP_PATCH_FILE"
+    RENDER_HAS_STARTUP_PATCH=1
+  else
+    RENDER_HAS_STARTUP_PATCH=0
+  fi
 else
   RENDER_HF_TOKEN="$([ -n "${HF_TOKEN:-}" ] && printf '%s' '***REDACTED — set HF_TOKEN in the --apply env***' || printf '')"
   RENDER_TS_AUTHKEY="$([ -n "${TAILSCALE_AUTHKEY:-}" ] && printf '%s' '***REDACTED — set TAILSCALE_AUTHKEY in the --apply env***' || printf '')"
+  RENDER_HAS_STARTUP_PATCH="$([ -n "$FAK_STARTUP_PATCH_FILE" ] && printf 1 || printf 0)"
 fi
 
 # --- the VM startup script (cloud-init) ---------------------------------------
@@ -264,6 +277,25 @@ fi
 install -d -o root -g root /opt
 git clone "${FAK_REPO_URL}" /opt/fak || (cd /opt/fak && git pull --ff-only)
 cd /opt/fak
+if [ -n "${FAK_REPO_REF}" ]; then
+  git checkout --detach "${FAK_REPO_REF}"
+fi
+if [ "${RENDER_HAS_STARTUP_PATCH}" = "1" ]; then
+  { set +x; } 2>/dev/null || true
+  PATCH_ATTR_URL="http://metadata.google.internal/computeMetadata/v1/instance/attributes/fak-startup-patch-b64"
+  if ! curl -fsS --max-time 30 -H 'Metadata-Flavor: Google' "\${PATCH_ATTR_URL}" -o /tmp/fak-startup.patch.b64; then
+    echo "STARTUP_PATCH_METADATA_MISSING: fak-startup-patch-b64 metadata item was required but unavailable" >&2
+    exit 18
+  fi
+  if [ ! -s /tmp/fak-startup.patch.b64 ]; then
+    echo "STARTUP_PATCH_METADATA_EMPTY: fak-startup-patch-b64 was empty" >&2
+    exit 18
+  fi
+  base64 -d /tmp/fak-startup.patch.b64 | gzip -dc >/tmp/fak-startup.patch
+  git apply --whitespace=nowarn /tmp/fak-startup.patch
+  git status --short
+  { set -x; } 2>/dev/null || true
+fi
 
 # The GLM-5.2 checkpoint is gated on Hugging Face; export the token for the fetch.
 export HF_TOKEN="${RENDER_HF_TOKEN}"
@@ -277,12 +309,32 @@ render_startup_tail_fak() {
   cat <<TAIL
 python3 -m pip install -q --upgrade "huggingface_hub[hf_transfer,hf_xet]" >/dev/null 2>&1 || pip3 install -q --upgrade huggingface_hub || true
 export HF_HUB_ENABLE_HF_TRANSFER=1
+export HF_HUB_DISABLE_XET="\${HF_HUB_DISABLE_XET:-1}"
+install_nccl_dev() {
+  apt-get update -y || true
+  if ! apt-cache show libnccl-dev >/dev/null 2>&1; then
+    . /etc/os-release
+    repo="ubuntu\${VERSION_ID//./}/x86_64"
+    curl -fsSL "https://developer.download.nvidia.com/compute/cuda/repos/\${repo}/cuda-keyring_1.1-1_all.deb" -o /tmp/cuda-keyring.deb
+    dpkg -i /tmp/cuda-keyring.deb
+    apt-get update -y
+  fi
+  apt-get install -y "libnccl2=${NCCL_APT_VERSION}" "libnccl-dev=${NCCL_APT_VERSION}" || apt-get install -y libnccl2 libnccl-dev
+}
+if [ "${EP_RANKS}" -gt 1 ]; then
+  install_nccl_dev
+  if ! { [ -f /usr/include/nccl.h ] || [ -f /usr/local/cuda/include/nccl.h ] || [ -f /usr/local/cuda/targets/x86_64-linux/include/nccl.h ]; }; then
+    echo "NCCL_HEADERS_MISSING: install libnccl-dev or set NCCL_HOME before launching EP_RANKS=${EP_RANKS}" >&2
+    exit 17
+  fi
+fi
 # Durable unit; restarts on a transient crash. Logs: journalctl -u glm52serve and
 # ${GLM_STAGE_DIR}/fak_native_serve.log. FAK_CUDA_ARCH tracks the tier's compute capability.
 systemd-run --unit=glm52serve --collect \\
   --setenv=GLM_DIR="${GLM_STAGE_DIR}" \\
   --setenv=GLM_REPO="${GLM_GGUF_REPO}" \\
   --setenv=GLM_SUBDIR="${GLM_GGUF_SUBDIR}" \\
+  --setenv=HF_HUB_DISABLE_XET="\${HF_HUB_DISABLE_XET}" \\
   --setenv=PORT="${GLM_PORT}" \\
   --setenv=MODEL_ID="glm-5.2" \\
   --setenv=EP_RANKS="${EP_RANKS}" \\
@@ -462,6 +514,9 @@ print_gcloud() {
     printf ' \\\n  --request-valid-for-duration=%q' "$REQUEST_VALID_FOR_DURATION"
   fi
   printf ' \\\n  --metadata-from-file=startup-script=<(rendered startup script)'
+  if [ "$RENDER_HAS_STARTUP_PATCH" = "1" ]; then
+    printf ',fak-startup-patch-b64=<(gzip -9c FAK_STARTUP_PATCH_FILE | base64)'
+  fi
   if [ -n "${GCP_PROJECT:-}" ]; then printf ' \\\n  --project=%q' "$GCP_PROJECT"; fi
   echo
 }
@@ -514,8 +569,17 @@ command -v gcloud >/dev/null || die "gcloud not found — install the Cloud SDK"
 [ -n "${GCP_PROJECT:-}" ] || die "GCP_PROJECT is required for --apply"
 
 TMP_STARTUP="$(mktemp)"
-trap 'rm -f "$TMP_STARTUP"' EXIT
+TMP_STARTUP_PATCH_B64=""
+trap 'rm -f "$TMP_STARTUP" ${TMP_STARTUP_PATCH_B64:+"$TMP_STARTUP_PATCH_B64"}' EXIT
 render_startup_script > "$TMP_STARTUP"
+if [ "$RENDER_HAS_STARTUP_PATCH" = "1" ]; then
+  TMP_STARTUP_PATCH_B64="$(mktemp)"
+  gzip -9c "$FAK_STARTUP_PATCH_FILE" | base64 | fold -w 76 > "$TMP_STARTUP_PATCH_B64"
+fi
+METADATA_FROM_FILE="startup-script=$TMP_STARTUP"
+if [ "$RENDER_HAS_STARTUP_PATCH" = "1" ]; then
+  METADATA_FROM_FILE+=",fak-startup-patch-b64=$TMP_STARTUP_PATCH_B64"
+fi
 
 log "creating $VM_NAME ($GLM_MACHINE_TYPE, $GLM_ACCEL_FLAG) in $GCP_ZONE under project $GCP_PROJECT"
 CREATE_ARGS=(
@@ -527,7 +591,7 @@ CREATE_ARGS=(
   --image-family="$GLM_IMAGE_FAMILY" --image-project="$GLM_IMAGE_PROJECT"
   --boot-disk-size=1000GB --boot-disk-type=pd-ssd
   --scopes=cloud-platform
-  --metadata-from-file=startup-script="$TMP_STARTUP"
+  --metadata-from-file="$METADATA_FROM_FILE"
 )
 if [ -n "$PROVISIONING_MODEL" ]; then
   CREATE_ARGS+=(--provisioning-model="$PROVISIONING_MODEL")
