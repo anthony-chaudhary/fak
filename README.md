@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/anthony-chaudhary/fak/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/ci.yml) [![release artifacts](https://github.com/anthony-chaudhary/fak/actions/workflows/release-artifacts.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/release-artifacts.yml)
 
-<!-- readme-verified: 2026-07-06 vs VERSION 0.37.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. 2026-07-06 (4): re-trimmed to the 250-line budget after passes (2)+(3) merged mid-edit — folded the in-kernel-model boundary bullet into token-serving, dropped the WSL test aside and the duplicated no-key sentence, tightened the token-savings paragraph around the new ~15%→~75% span (numbers unchanged, still authority-traced). 2026-07-06 (3): corrected the long-session fak-authored share — the stale "~1%→~11% peak" is now the WITNESSED per-session span "~15% → ~75%, climbing with horizon" (2026-07-06 ledger: longest session 746,956 shed / 247,074 provider cache-read = 75.1%); BENCHMARK-AUTHORITY row rewritten with the per-session evidence + fences (peak-not-pool, token counts witnessed / % derived). Fixed in both the "What you get" bullet and the "Token savings" section. 2026-07-06 (2): goal pass — user-friendly feature notes added (crash-resume watchdog + cache-safe resume point in "More ways to run it"; the ~50.7% no-cache_control placement witness, CLAIMS.md #806, in "Token savings"; compaction described plainly as "trim from the middle out"); most-technical asides removed (the ~60×-vs-naive aside, the Q8_0-band detail, the f32-parity/build-tag prose, the 48k-resident-token detail); one-glance bold lead added (lcd_onramp); back under the 250-line budget (front_page_focus). 2026-07-06: concision pass (front_page_focus) — collapsed the triple preamble lead to one (single_lead), glossed KV cache + vDSO for the first-screen reader (jargon), and trimmed the token/perf sections' duplicated trend prose; score 64→81 (D→B). 2026-07-04: token-savings value prop foregrounded — "Token savings, set and forget" section + the 6-defaults scorecard link; honest provider-owned-vs-fak-authored split preserved (SESSION-CACHE-SAVINGS ablation). Same day: refocused on the long-session TREND — fak-authored share climbs ~1%→~11% with length (BENCHMARK-AUTHORITY row; shed token counts WITNESSED, % is MODELED, n=2 thin, peak-not-pool). 2026-07-03: release pin refreshed for v0.37.0. 2026-07-01: front page halved; overflow: docs/README-legacy.md. -->
+<!-- readme-verified: 2026-07-06 vs VERSION 0.37.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. 2026-07-06 (5): RETRACTED the "~15%→~75% fak share" from passes (3)/(4) — a forensic audit found compaction_shed_tokens is CUMULATIVE across fires and re-counts the same aged middle turns each fire (fak keeps no compacted body; re-trims the client's full re-sent history every turn), so 746,956 shed >> the session's ~250-300K live-context ceiling (~4.8× over-count) and ratioing it against provider cache_read is not like-for-like. Reframed to the WITNESSED PER-FIRE trim (~107K/fire on the longest 2026-07-06 session) + the fleet fak-authored share ~0.3–16% (`fak cachevalue report`). BENCHMARK-AUTHORITY row rewritten with the retraction + per-fire framing. 2026-07-06 (4): re-trimmed to the 250-line budget after passes (2)+(3) merged mid-edit — folded the in-kernel-model boundary bullet into token-serving, dropped the WSL test aside and the duplicated no-key sentence, tightened the token-savings paragraph around the new ~15%→~75% span (numbers unchanged, still authority-traced). 2026-07-06 (3): corrected the long-session fak-authored share — the stale "~1%→~11% peak" is now the WITNESSED per-session span "~15% → ~75%, climbing with horizon" (2026-07-06 ledger: longest session 746,956 shed / 247,074 provider cache-read = 75.1%); BENCHMARK-AUTHORITY row rewritten with the per-session evidence + fences (peak-not-pool, token counts witnessed / % derived). Fixed in both the "What you get" bullet and the "Token savings" section. 2026-07-06 (2): goal pass — user-friendly feature notes added (crash-resume watchdog + cache-safe resume point in "More ways to run it"; the ~50.7% no-cache_control placement witness, CLAIMS.md #806, in "Token savings"; compaction described plainly as "trim from the middle out"); most-technical asides removed (the ~60×-vs-naive aside, the Q8_0-band detail, the f32-parity/build-tag prose, the 48k-resident-token detail); one-glance bold lead added (lcd_onramp); back under the 250-line budget (front_page_focus). 2026-07-06: concision pass (front_page_focus) — collapsed the triple preamble lead to one (single_lead), glossed KV cache + vDSO for the first-screen reader (jargon), and trimmed the token/perf sections' duplicated trend prose; score 64→81 (D→B). 2026-07-04: token-savings value prop foregrounded — "Token savings, set and forget" section + the 6-defaults scorecard link; honest provider-owned-vs-fak-authored split preserved (SESSION-CACHE-SAVINGS ablation). Same day: refocused on the long-session TREND — fak-authored share climbs ~1%→~11% with length (BENCHMARK-AUTHORITY row; shed token counts WITNESSED, % is MODELED, n=2 thin, peak-not-pool). 2026-07-03: release pin refreshed for v0.37.0. 2026-07-01: front page halved; overflow: docs/README-legacy.md. -->
 
 <!-- lead source: docs/adoption/pitch-ladder.md (rung 1). Edit the ladder first; keep this lead consistent with its one-sentence pitch. State the pitch ONCE here — do not restate it before the first `## ` (front_page_focus single_lead). -->
 **One binary in front of the agent you already run: safer tool calls, a smaller token bill, and long sessions that pick themselves back up.**
@@ -41,11 +41,11 @@ ledger is [CLAIMS.md](CLAIMS.md):
   sweep, per box: [docs/HARDWARE-MATRIX.md](docs/HARDWARE-MATRIX.md).
 - **Your token savings grow the longer you run.** `fak guard` turns on six safe
   token-savers by default (no flags). On a short session the provider's prompt cache does
-  nearly all the work; as the session gets long, fak's *own* share climbs — from **~15%**
-  of witnessed per-session savings up to **~75%** on the longest one (747K tokens trimmed
-  from old turns the cache could no longer reuse), on top of the provider discount. Peak,
-  not fleet average; token counts witnessed, the % a derived ratio.
-  [The savers + the honest split](docs/serving/token-defaults-scorecard.md).
+  nearly all the work; as the session gets long, fak's compaction lever kicks in and trims
+  the stale middle of the transcript — on our longest measured session, **~107K tokens per
+  trim**, firing again and again as the session grows. Each trim is history you'd otherwise
+  re-send and re-pay for every remaining turn, so it saves on top of the provider discount.
+  [How trimming works + the honest split](docs/serving/token-defaults-scorecard.md).
 - **The guard tax is ~362 ns per call:** the allow/deny decision runs in-process
   (measured, Apple M3 Pro), no network hop.
 
@@ -102,11 +102,12 @@ behind the growing-share number above.
 
 The first three savers are lossless — they cannot change a single output token; the last
 three keep the model's working set intact and note what they shed. The honest split most
-cost pitches skip: early in a session the provider's prompt-cache discount is the bigger
-number, and fak's job there is keeping that discount alive — holding the cached prefix
-byte-identical and relaying the provider's own saved-token count rather than claiming it.
-The longer the session runs, the more the balance tips to fak: its authored share climbs
-from ~15% toward ~75% on the longest witnessed sessions (peak, not fleet average). If your
+cost pitches skip: on the Claude Code route the provider's prompt-cache discount is the
+bigger number, and fak's job there is keeping that discount alive — holding the cached
+prefix byte-identical and relaying the provider's own saved-token count rather than claiming
+it. fak's own authored slice on top (compaction trims plus prefix reuse) is the smaller
+number: fleet-wide it's ~0.3–16% of the total saved (`fak cachevalue report`), climbing on
+long, actively-compacting sessions. If your
 client never sets cache markers at all (a raw SDK, a hand-rolled client), fak places the
 provider's cache breakpoint for it — in the offline witness that cut prompt-cache spend by
 about half (~50.7%, break-even at turn 2; mechanism witnessed, dollars modeled —
