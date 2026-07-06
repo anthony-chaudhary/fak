@@ -324,6 +324,7 @@ var tier = map[string]int{
 	"chatopsdetach":         1, // detached-execution decision kernel for chatops act verbs (#2265, epic #2259 C5): the pure fold that routes an inbound act verb + its guarded-dispatch admission verdict to dispatch-once / re-ack / structured-refuse over a command-nonce spool, plus the stall-to-blockers escalation judge. State in, decision out; imports nothing internal, off the hot path — the seam the (not-yet-landed) chatops door binds to.
 	"godfileceiling":        1,
 	"microagent":            4,
+	"sessionsearch":         2, // witnessed cross-session recall (#2913): pure TF-IDF inverted index over the guard tool-process journal + cache-safe suffix injection proven byte-stable via cachemeta + a recall-usefulness witness; imports toolproc(2)+cachemeta(1), off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
