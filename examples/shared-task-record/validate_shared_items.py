@@ -134,6 +134,7 @@ def main(argv: list[str]) -> int:
 
     checked = 0
     parity_pairs = 0
+    by_schema: dict[str, int] = {}
     for d in dirs:
         fixtures = sorted(d.glob("*.json"))
         if not fixtures:
@@ -146,6 +147,7 @@ def main(argv: list[str]) -> int:
                 print(f"REFUSED {exc}", file=sys.stderr)
                 return 1
             checked += 1
+            by_schema[projection["schema"]] = by_schema.get(projection["schema"], 0) + 1
 
             sidecar = render_surface("sidecar", projection)
             slack = render_surface("slack", projection)
@@ -158,10 +160,12 @@ def main(argv: list[str]) -> int:
                 return 1
             parity_pairs += 1
 
+    counts = ", ".join(f"{k}={v}" for k, v in sorted(by_schema.items()))
     print(
         f"ok: {checked} fixture(s) pass the schema write gate; "
         f"{parity_pairs} render id-stable on sidecar and slack"
     )
+    print(f"per-schema: {counts}")
     return 0
 
 

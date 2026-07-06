@@ -36,6 +36,23 @@
       "kind": "gemini",
       "cred_env": "GEMINI_API_KEY",
       "label": "your Google Gemini account"
+    },
+    {
+      "id": "deepseek",
+      "kind": "deepseek",
+      "cred_env": "DEEPSEEK_API_KEY",
+      "context_tokens": 1000000,
+      "max_output_tokens": 384000,
+      "label": "DeepSeek V4 OpenAI-compatible API at https://api.deepseek.com; 1M context, 384K max output"
+    },
+    {
+      "id": "deepseek-anthropic",
+      "kind": "anthropic",
+      "base_url": "https://api.deepseek.com/anthropic",
+      "cred_env": "DEEPSEEK_API_KEY",
+      "context_tokens": 1000000,
+      "max_output_tokens": 384000,
+      "label": "DeepSeek V4 Anthropic-compatible API; visible in acceptance but not probed as OpenAI /models"
     }
   ],
   "default": "openai-personal",
@@ -48,6 +65,25 @@
     { "model": "drafter-a", "account": "openai-personal", "upstream_model": "gpt-5.5" },
     { "model": "drafter-b", "account": "gemini", "upstream_model": "gemini-3-pro" },
     { "model": "judge", "account": "claude-sub", "upstream_model": "claude-opus-4-6" },
-    { "model": "tiny-classifier", "account": "local", "upstream_model": "llama3.2" }
+    { "model": "tiny-classifier", "account": "local", "upstream_model": "llama3.2" },
+    { "model": "deepseek-pro", "account": "deepseek", "upstream_model": "deepseek-v4-pro" },
+    { "model": "deepseek-flash", "account": "deepseek", "upstream_model": "deepseek-v4-flash" },
+    { "model": "deepseek-pro-anthropic", "account": "deepseek-anthropic", "upstream_model": "deepseek-v4-pro" },
+    {
+      "model": "deepseek-chat-compat",
+      "account": "deepseek",
+      "upstream_model": "deepseek-chat",
+      "compatibility_only": true,
+      "deprecated_after_utc": "2026-07-24 15:59 UTC",
+      "deprecated_alias_for": "deepseek-v4-flash non-thinking mode"
+    },
+    {
+      "model": "deepseek-reasoner-compat",
+      "account": "deepseek",
+      "upstream_model": "deepseek-reasoner",
+      "compatibility_only": true,
+      "deprecated_after_utc": "2026-07-24 15:59 UTC",
+      "deprecated_alias_for": "deepseek-v4-flash thinking mode"
+    }
   ]
 }
