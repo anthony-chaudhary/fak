@@ -28,7 +28,9 @@
       "named_symbol": "",
       "doc_anchor": "",
       "definition": "the textbook linear-congruential PRNG (state*1103515245 + 12345, masked to 31 bits) re-implemented inline in 14+ files (bench, benchids, cmdutil, agent) for deterministic jitter/ids - the multiplier and increment are never named, so the shared PRNG convention is invisible",
-      "aliases": ["12345"],
+      "aliases": [
+        "12345"
+      ],
       "verdict": "hinted",
       "gaps": [
         "name the constants (lcgMultiplier / lcgIncrement) or extract one deterministicRand helper and point the inline copies at it"
@@ -43,13 +45,12 @@
       "current_name": "statusOverloaded",
       "proposed_name": "",
       "named_symbol": "statusOverloaded",
-      "doc_anchor": "",
+      "doc_anchor": "docs/glossary.md",
       "definition": "the non-standard HTTP 529 the Anthropic API returns when overloaded, load-bearing in stream-retry and account-rotation paths - internal/agent/retry.go names it (const statusOverloaded = 529) but ~8 other production files (gateway, attemptbudget, agent siblings) still use the bare literal, and no doc mentions either form",
       "aliases": [],
-      "verdict": "named-code",
+      "verdict": "explicit",
       "gaps": [
-        "spread the named constant to the bare-literal sites (gateway, attemptbudget) - the name exists but is package-private and unshared",
-        "mention the 529 overload semantics in the model-accounts / gateway docs"
+        "spread the named constant to the bare-literal sites (gateway, attemptbudget) - the name exists but is package-private and unshared"
       ]
     }
   ]

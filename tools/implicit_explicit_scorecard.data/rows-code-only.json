@@ -9,12 +9,12 @@
       "current_name": "WeightBearing",
       "proposed_name": "",
       "named_symbol": "WeightBearing",
-      "doc_anchor": "",
+      "doc_anchor": "docs/glossary.md",
       "definition": "the engine-interface predicate saying whether an engine actually carries model weights (real inference: DynamoEngine true) or is a stub/proxy (readEngine, localEngine false) - a load-bearing trust distinction that appears in 13 production files and zero docs",
       "aliases": [],
-      "verdict": "named-code",
+      "verdict": "explicit",
       "gaps": [
-        "write the weight-bearing vs stub engine distinction into docs/generation.md or the glossary so the term is searchable outside the code"
+        "docs/generation.md still never draws the weight-bearing vs stub distinction where engines are introduced; the glossary entry is the only anchor"
       ]
     },
     {
@@ -26,12 +26,12 @@
       "current_name": "AdmissionVerdict",
       "proposed_name": "",
       "named_symbol": "AdmissionVerdict",
-      "doc_anchor": "",
+      "doc_anchor": "docs/glossary.md",
       "definition": "the cachemeta verdict string recording whether an entry was admitted to the cache and why (AdmissionFromVerdict maps abi verdict kinds onto it) - in 12 production files, never mentioned in the cache docs",
       "aliases": [],
-      "verdict": "named-code",
+      "verdict": "explicit",
       "gaps": [
-        "add the admission-verdict concept to the addressable-KV-cache explainer / glossary"
+        "the addressable-KV-cache explainer still does not mention admission verdicts; the glossary entry is the only doc anchor"
       ]
     },
     {
@@ -43,12 +43,12 @@
       "current_name": "EvidenceRef",
       "proposed_name": "",
       "named_symbol": "EvidenceRef",
-      "doc_anchor": "",
+      "doc_anchor": "docs/glossary.md",
       "definition": "the struct that points a witness at an artifact it can read back (a file path, a git object) - the unit of witnessable evidence in taskmgr/loopmgr, in 17 production files and zero docs despite the witness pipeline being a headline concept",
       "aliases": [],
-      "verdict": "named-code",
+      "verdict": "explicit",
       "gaps": [
-        "the witness/claims docs talk about evidence constantly but never name EvidenceRef - anchor the code term in the witness explainer"
+        "the witness explainer itself still never names EvidenceRef; only the glossary anchors it"
       ]
     },
     {
@@ -60,12 +60,12 @@
       "current_name": "RealRunner",
       "proposed_name": "",
       "named_symbol": "RealRunner",
-      "doc_anchor": "",
+      "doc_anchor": "docs/glossary.md",
       "definition": "the repo-wide convention of a RealRunner function - the production process-runner injected where tests substitute a fake - independently re-declared in mergepreview, modver, releasestale and more (19 files), never documented as the convention it is",
       "aliases": [],
-      "verdict": "named-code",
+      "verdict": "explicit",
       "gaps": [
-        "document the runner-seam convention (dev-tooling or CONTRIBUTING) so new packages copy it deliberately instead of by osmosis"
+        "CONTRIBUTING/dev-tooling still does not teach the seam; the glossary entry is the only doc anchor"
       ]
     },
     {
@@ -77,12 +77,12 @@
       "current_name": "ConfigureBackgroundCommand",
       "proposed_name": "",
       "named_symbol": "ConfigureBackgroundCommand",
-      "doc_anchor": "",
+      "doc_anchor": "docs/glossary.md",
       "definition": "the internal/windowgate helper every spawned subprocess passes through so background commands never flash a console window on Windows (no-op elsewhere) - called from 77 production files, invisible in the docs",
       "aliases": [],
-      "verdict": "named-code",
+      "verdict": "explicit",
       "gaps": [
-        "one paragraph in dev-tooling on why every exec.Cmd must route through windowgate, so the 78th call site is written on purpose"
+        "dev-tooling still lacks the why-windowgate paragraph; the glossary entry is the only doc anchor"
       ]
     },
     {
@@ -94,12 +94,15 @@
       "current_name": "ParseFlags",
       "proposed_name": "",
       "named_symbol": "ParseFlags",
-      "doc_anchor": "",
+      "doc_anchor": "docs/glossary.md",
       "definition": "the convention that every CLI verb declares its own ParseFlags/parseFlags helper (139 production files) with reject-args and or-help variants - the single most repeated declared name in the tree, described nowhere",
-      "aliases": ["ParseFlagsRejectArgs", "ParseFlagsOrHelp"],
-      "verdict": "named-code",
+      "aliases": [
+        "ParseFlagsRejectArgs",
+        "ParseFlagsOrHelp"
+      ],
+      "verdict": "explicit",
       "gaps": [
-        "document the verb-flag-parsing convention and its variants in the CLI contributor notes"
+        "the CLI contributor notes still do not teach the convention; the glossary entry is the only doc anchor"
       ]
     },
     {
@@ -111,12 +114,14 @@
       "current_name": "writeIndentedJSON",
       "proposed_name": "",
       "named_symbol": "writeIndentedJSON",
-      "doc_anchor": "",
+      "doc_anchor": "docs/glossary.md",
       "definition": "the helper (declared per package, 59 production files) that emits the canonical two-space-indented JSON for --json verb output, with a no-escape variant - the de-facto JSON output contract of the CLI, stated in no doc",
-      "aliases": ["writeIndentedJSONNoEscape"],
-      "verdict": "named-code",
+      "aliases": [
+        "writeIndentedJSONNoEscape"
+      ],
+      "verdict": "explicit",
       "gaps": [
-        "name the --json output contract (indentation, escaping) in the CLI reference; today it is only inferable from the helper"
+        "the CLI reference still does not state the --json contract; the glossary entry is the only doc anchor"
       ]
     },
     {
@@ -128,12 +133,12 @@
       "current_name": "ExpandTilde",
       "proposed_name": "",
       "named_symbol": "ExpandTilde",
-      "doc_anchor": "",
+      "doc_anchor": "docs/glossary.md",
       "definition": "the internal/pathutil helper that expands a leading ~ in user-supplied paths (54 production files) - the reason ~/foo works in every fak flag, a behavior users rely on that no doc promises",
       "aliases": [],
-      "verdict": "named-code",
+      "verdict": "explicit",
       "gaps": [
-        "promise the ~-expansion behavior in the CLI reference (it is user-visible, not an implementation detail)"
+        "the CLI reference still does not promise ~-expansion; the glossary entry is the only doc anchor"
       ]
     }
   ]

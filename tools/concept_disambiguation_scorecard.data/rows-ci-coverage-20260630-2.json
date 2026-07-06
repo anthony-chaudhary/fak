@@ -469,17 +469,17 @@
    "gaps": []
   },
   {
-   "id": "x-ci-coverage-pool-seenpools",
-   "canonical": "seenpools (pool identifier)",
+   "id": "x-ci-coverage-pool-uniquepoolrows",
+   "canonical": "uniquePoolRows (pool dedupe helper)",
    "family": "pool",
    "kind": "symbol",
-   "definition": "seenpools is the concrete pool identifier in dispatch: it the bookkeeping set of already-seen pools.",
-   "distinction": "seenpools the bookkeeping set of already-seen pools; it is a specific tree identifier in the pool namespace, not the broader sibling concept referenced by x2-pool-pagedkvpool.",
+   "definition": "uniquePoolRows is the dispatch helper that dedupes account rows to one representative row per pool key - the successor of the retired seenPools bookkeeping set.",
+   "distinction": "uniquePoolRows dedupes candidate account rows by pool key during wave allocation; it is a specific tree identifier in the pool namespace, not the broader sibling concept referenced by x2-pool-pagedkvpool.",
    "distinct_from": [
     "x2-pool-pagedkvpool"
    ],
    "aliases": [],
-   "grounding": "seenpools",
+   "grounding": "uniquepoolrows",
    "grounding_kind": "symbol",
    "glossary_anchor": "",
    "parent": "",

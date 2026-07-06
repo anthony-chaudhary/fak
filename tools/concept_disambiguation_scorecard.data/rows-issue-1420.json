@@ -290,57 +290,6 @@
       "gaps": []
     },
     {
-      "id": "x-issue1420-plan-blockingcandidates",
-      "canonical": "BlockingCandidates (dispatch lease blockers)",
-      "family": "plan",
-      "kind": "symbol",
-      "definition": "BlockingCandidates is the dispatch-status list of candidate work items that an active lease blocks from being launched safely.",
-      "distinction": "It is the concrete blocked-candidate list on a lease row, not the boolean BlocksCandidate summary flag.",
-      "distinct_from": [
-        "x-plan-candidatetaskids"
-      ],
-      "aliases": [],
-      "grounding": "blockingcandidates",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "",
-      "verdict": "defined",
-      "gaps": []
-    },
-    {
-      "id": "x-issue1420-plan-blockscandidate",
-      "canonical": "BlocksCandidate (dispatch lease blocker flag)",
-      "family": "plan",
-      "kind": "symbol",
-      "definition": "BlocksCandidate is the dispatch-status tri-state flag indicating whether a live lease blocks any currently available candidate work.",
-      "distinction": "It is the yes/no blocker flag, not the BlockingCandidates list that names which candidates are blocked.",
-      "distinct_from": [
-        "x-issue1420-plan-blockingcandidates"
-      ],
-      "aliases": [],
-      "grounding": "blockscandidate",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "",
-      "verdict": "defined",
-      "gaps": []
-    },
-    {
-      "id": "x-issue1420-plan-candidatesourceavailable",
-      "canonical": "CandidateSourceAvailable (dispatch status input)",
-      "family": "plan",
-      "kind": "symbol",
-      "definition": "CandidateSourceAvailable records whether dispatch-status had a candidate source to compare live leases against when classifying blockers.",
-      "distinction": "It is source-availability metadata for blocker classification, not a candidate item or candidate score.",
-      "distinct_from": [
-        "x-plan-candidatetaskids"
-      ],
-      "aliases": [],
-      "grounding": "candidatesourceavailable",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "",
-      "verdict": "defined",
-      "gaps": []
-    },
-    {
       "id": "x-issue1420-plan-plannedcreates",
       "canonical": "PlannedCreates (dogfood issue receipt count)",
       "family": "plan",
