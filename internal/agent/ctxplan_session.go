@@ -39,6 +39,7 @@ import (
 	"context"
 	"hash/fnv"
 	"io"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/session"
@@ -49,6 +50,19 @@ import (
 // candidate set per turn. Construct it with NewSessionPlanner or CtxViewPlanner.NewSession; the
 // zero value is not usable (the store/index are nil).
 type SessionPlanner struct {
+	// mu serializes the per-turn mutating path (ingest/plan/render) and the read accessors that
+	// touch store/index, so ONE planner is safe under concurrent use. The gateway pins every
+	// keyless request on a stateless wire (OpenAI /v1/chat/completions) to a SINGLE shared trace
+	// ("default"), and sessionPlannerFor releases sessionPlannerMu before RenderTurn — so many
+	// UNRELATED conversations hit the same SessionPlanner concurrently. Without this lock those
+	// goroutines mutated the unsynchronized MemStore/Index/fprints at once, which fatally paniced
+	// with "concurrent map writes" (MemStore.Add) and tore the append-only-contract state apart
+	// (divergesFromIngested indexed a concurrently-reset fprints slice). A "fatal error" is
+	// unrecoverable, so the gateway's complete() recover could not catch it — it took the process
+	// down. The lock makes the mutating turn atomic per instance; turns of ONE conversation are
+	// still logically serial, so it never contends on the happy path.
+	mu sync.Mutex
+
 	// Budget is the O(1) resident-token window each planned turn materializes under — the same
 	// meaning as CtxViewPlanner.Budget.
 	Budget int
@@ -118,6 +132,8 @@ func NewSessionPlanner(budget int) *SessionPlanner {
 // This composes ONLY the CONFIGURED cap (MaxTokensPerTurn). Use ApplyThroughput for the
 // runtime-OBSERVED signal (#1585), or ApplyPaceAndThroughput to fold both in one call.
 func (sp *SessionPlanner) ApplyPace(pace session.Pace, baselineOutput int) int {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
 	sp.Budget = pace.ComposePlannerBudget(sp.baseBudget, baselineOutput)
 	return sp.Budget
 }
@@ -141,6 +157,8 @@ func (sp *SessionPlanner) ApplyPace(pace session.Pace, baselineOutput int) int {
 // idempotent-and-restorable contract ApplyPace already established. A Throughput with no
 // signal (either axis zero) is a no-op. It returns the new Budget.
 func (sp *SessionPlanner) ApplyThroughput(t session.Throughput) int {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
 	sp.Budget = t.ComposePlannerBudgetForThroughput(sp.baseBudget)
 	return sp.Budget
 }
@@ -153,6 +171,8 @@ func (sp *SessionPlanner) ApplyThroughput(t session.Throughput) int {
 // from baseBudget, so this is idempotent and fully restorable when both signals clear. It
 // returns the new Budget.
 func (sp *SessionPlanner) ApplyPaceAndThroughput(pace session.Pace, t session.Throughput, baselineOutput int) int {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
 	sp.Budget = pace.ComposePace(t, sp.baseBudget, baselineOutput)
 	return sp.Budget
 }
@@ -296,6 +316,8 @@ func (sp *SessionPlanner) pins() []string {
 // defaults). It is opt-in: a SessionPlanner created without it has a nil tenure table and is
 // behavior-preserving. Calling it again replaces the table (resetting recurrence history).
 func (sp *SessionPlanner) EnableTenuring(threshold int, ttlMillis int64) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
 	sp.tenure = newTenureTable(threshold, ttlMillis)
 }
 
@@ -304,6 +326,8 @@ func (sp *SessionPlanner) EnableTenuring(threshold int, ttlMillis int64) {
 // rollup and whether it is currently tenured (promoted). With tenuring disabled (the default)
 // it is a no-op returning (zero, false): a command is always safe to re-derive each turn.
 func (sp *SessionPlanner) RecordCommand(command string, nowMillis int64) (Rollup, bool) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
 	return sp.tenure.Record(command, nowMillis)
 }
 
@@ -312,6 +336,8 @@ func (sp *SessionPlanner) RecordCommand(command string, nowMillis int64) (Rollup
 // "re-derive this turn" signal. The caller uses the rollup as a CACHE of derived context; a
 // false result means fall back to re-deriving (heuristicForecast), never a correctness change.
 func (sp *SessionPlanner) CommandRollup(command string) (Rollup, bool) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
 	return sp.tenure.Rollup(command)
 }
 
@@ -319,6 +345,8 @@ func (sp *SessionPlanner) CommandRollup(command string) (Rollup, bool) {
 // has gone quiet past its TTL back to young (dropping its rollup cache, keeping its history).
 // It returns the commands demoted this sweep. A no-op with tenuring disabled.
 func (sp *SessionPlanner) SweepTenure(nowMillis int64) []string {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
 	return sp.tenure.Sweep(nowMillis)
 }
 
@@ -339,6 +367,16 @@ func (sp *SessionPlanner) forecast() ctxplan.Forecast {
 // path. It is pure (no I/O): the result is the deterministic plan a caller can EXPLAIN and audit
 // before rendering. RenderTurn is the I/O peer that pages the selected spans' bytes in.
 func (sp *SessionPlanner) PlanTurn(messages []Message) ctxplan.Plan {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	return sp.planTurnLocked(messages)
+}
+
+// planTurnLocked is PlanTurn's body with the caller already holding sp.mu — the shared core so
+// RenderTurn plans under a SINGLE lock acquisition instead of re-entering PlanTurn (which would
+// deadlock on the non-reentrant mutex). It touches the mutating store/index and so must never be
+// called without the lock held.
+func (sp *SessionPlanner) planTurnLocked(messages []Message) ctxplan.Plan {
 	sp.ingest(messages)
 	if sp.Layout != nil {
 		return sp.index.PlanLayout(sp.forecast(), ctxplan.Budget{Tokens: sp.Budget}, nil, *sp.Layout)
@@ -352,7 +390,9 @@ func (sp *SessionPlanner) PlanTurn(messages []Message) ctxplan.Plan {
 // persistent bounded index instead of a fresh full-scan store every turn. A span the gate
 // declines mid-render stays out of context (it is skipped, never emitted as poison).
 func (sp *SessionPlanner) RenderTurn(ctx context.Context, messages []Message) []Message {
-	plan := sp.PlanTurn(messages)
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	plan := sp.planTurnLocked(messages)
 	out := make([]Message, 0, len(plan.Selected))
 	for _, s := range plan.Selected {
 		body, err := sp.store.Materialize(ctx, s.ID)
@@ -367,18 +407,30 @@ func (sp *SessionPlanner) RenderTurn(ctx context.Context, messages []Message) []
 // Index returns the persistent candidate index the planner maintains — the accessor a caller
 // persists alongside the recall core image (recall.PersistIndex(dir, sp.Index())) so a resumed
 // session re-attaches it. The returned index is the LIVE one (not a copy); it is exposed for
-// persistence + audit, not for external mutation.
-func (sp *SessionPlanner) Index() *ctxplan.Index { return sp.index }
+// persistence + audit, not for external mutation. The pointer read is taken under sp.mu so it
+// never tears against a concurrent resetConversation (which swaps in a fresh index); a caller
+// that reads THROUGH the pointer must still do so off the hot turn path (its documented use).
+func (sp *SessionPlanner) Index() *ctxplan.Index {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	return sp.index
+}
 
 // Materialize pages a span's bytes in through the store's trust gate — the demand-page backing
 // for a pruned/elided span. A span the bounded probe left out of a turn's candidate set is not
 // lost: it stays in the lossless store and Materialize recovers its VERBATIM bytes, exactly as a
 // forecast miss is one demand-page away, never a lost fact.
 func (sp *SessionPlanner) Materialize(ctx context.Context, id string) ([]byte, error) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
 	return sp.store.Materialize(ctx, id)
 }
 
 // Len reports how many messages have been lowered into the store+index — the indexed span count
 // N. After T appended turns it is exactly the message count (each message is Add-ed once), the
 // witness that maintenance is O(total spans), not O(turns²).
-func (sp *SessionPlanner) Len() int { return sp.index.Len() }
+func (sp *SessionPlanner) Len() int {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	return sp.index.Len()
+}
