@@ -49,6 +49,13 @@ func dispatchPreflight(root string, stderr io.Writer, maxWorkers int, workKind, 
 	// can only lower the effective cap, never raise it.
 	res := dispatchtick.EvaluatePreflight(in)
 	res = dispatchtick.ApplyGateBackpressure(res, dispatchPreflightGate(root))
+	// The rate_budget cap term (docs/safe-to-raise-cap-checklist.md): fold the MEASURED,
+	// backend-scoped burst of GENUINE concurrency rate-limit worker exits UP into
+	// admission so a fleet storming a throttled seat backs off (and routes to another
+	// provider) instead of re-storming it. Fake 429s -- weekly caps, model caps, login
+	// walls -- are excluded by the reason=rate_limit taxonomy filter; it only lowers the
+	// effective cap, so a zero-signal fold is byte-identical to before.
+	res = dispatchtick.ApplyRateLimitBackpressure(res, dispatchPreflightRateLimit(root, product))
 	return res.Map(), nil
 }
 
@@ -126,6 +133,130 @@ func dispatchGateMinWorkers() int {
 		return n
 	}
 	return dispatchtick.DefaultGateMinWorkers
+}
+
+// dispatchRateLimitDefaultWindow scopes the rate_budget term's lookback to a RECENT
+// burst. A concurrency 429 is transient (a shared seat is momentarily saturated), so the
+// window must be short enough that an aged burst stops holding the backend once the
+// storm clears -- 15 minutes holds enough recent worker exits to see a genuine cluster
+// while letting it age out on its own, the recovery property a whole-stream fold lacks.
+const dispatchRateLimitDefaultWindow = 15 * time.Minute
+
+// dispatchRateLimitWindow resolves the rate_budget lookback from FAK_RATELIMIT_WINDOW: a
+// Go duration (e.g. "20m") windows the count; "0" or "off" DISABLES the term (zero-value
+// fold, a no-op); an empty or unparseable value falls back to the default.
+func dispatchRateLimitWindow() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("FAK_RATELIMIT_WINDOW"))
+	switch {
+	case raw == "":
+		return dispatchRateLimitDefaultWindow
+	case raw == "0" || strings.EqualFold(raw, "off"):
+		return 0
+	}
+	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+		return d
+	}
+	return dispatchRateLimitDefaultWindow
+}
+
+// dispatchRateLimitThreshold resolves the burst arming threshold from
+// FAK_RATELIMIT_MIN_429, falling back to dispatchtick.DefaultRateLimitMin429. A zero or
+// negative override is ignored (kept at the default) so the term cannot be armed on a
+// single stray 429.
+func dispatchRateLimitThreshold() int {
+	raw := strings.TrimSpace(os.Getenv("FAK_RATELIMIT_MIN_429"))
+	if raw == "" {
+		return dispatchtick.DefaultRateLimitMin429
+	}
+	if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+		return n
+	}
+	return dispatchtick.DefaultRateLimitMin429
+}
+
+// dispatchRateLimitMinWorkers resolves the cold-start floor from FAK_RATELIMIT_MIN_WORKERS,
+// falling back to dispatchtick.DefaultRateLimitMinWorkers. A negative override is ignored;
+// the pure fold's floor() re-clamps a zero back to the default, so the one-probe liveness
+// carve-out cannot be removed through the env.
+func dispatchRateLimitMinWorkers() int {
+	raw := strings.TrimSpace(os.Getenv("FAK_RATELIMIT_MIN_WORKERS"))
+	if raw == "" {
+		return dispatchtick.DefaultRateLimitMinWorkers
+	}
+	if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+		return n
+	}
+	return dispatchtick.DefaultRateLimitMinWorkers
+}
+
+// dispatchPreflightRateLimit folds the MEASURED, backend-scoped burst of GENUINE
+// concurrency rate-limit worker exits into the rate_budget admission term
+// (dispatchtick.ApplyRateLimitBackpressure). It counts the finished worker slots whose
+// .witness sidecar graded CLAIM_NO_COMMIT with reason=rate_limit (a transient 429/529
+// overload the classifier read from the worker log tail -- never a self-report) within a
+// recent window on THIS product's backend.
+//
+// The DISAMBIGUATION is the taxonomy filter (the load-bearing correctness of this term):
+// usage_cap (weekly/quota), model_unknown (model cap), and auth_wall (login) are DISTINCT
+// classifier reasons and are never counted here, because backing off concurrency does not
+// clear any of them -- they are owned by the seat gate, the Layer-2 downgrade ladder, and
+// the auth flow. Only reason=rate_limit -- the residual transient-overload class the
+// classifier's precedence leaves after skimming those off -- drives concurrency backoff.
+//
+// Fail-open and byte-identical when idle: a disabled window (FAK_RATELIMIT_WINDOW=0/off),
+// a missing runs dir, or zero recent rate_limit exits yields the zero-value check, a no-op
+// fold that leaves the preflight untouched.
+func dispatchPreflightRateLimit(root, product string) dispatchtick.RateLimitCheck {
+	window := dispatchRateLimitWindow()
+	if window <= 0 {
+		return dispatchtick.RateLimitCheck{}
+	}
+	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
+	if st, err := os.Stat(runsDir); err != nil || !st.IsDir() {
+		return dispatchtick.RateLimitCheck{}
+	}
+	cutoff := time.Now().Add(-window)
+	matches := []string{}
+	for _, pattern := range []string{"resolve-*" + dispatchtick.WitnessSidecarSuffix, "repair-*" + dispatchtick.WitnessSidecarSuffix} {
+		got, _ := filepath.Glob(filepath.Join(runsDir, pattern))
+		matches = append(matches, got...)
+	}
+	count := 0
+	for _, wf := range matches {
+		info, err := os.Stat(wf)
+		if err != nil || info.ModTime().Before(cutoff) {
+			continue // aged out of the window -> not part of the current burst
+		}
+		stem := strings.TrimSuffix(wf, dispatchtick.WitnessSidecarSuffix)
+		if product != "" {
+			backend := ""
+			if b, err := os.ReadFile(stem + ".backend"); err == nil {
+				backend = strings.TrimSpace(string(b))
+			}
+			if !dispatchBackendInProduct(backend, product) {
+				continue // a different backend's 429s must not throttle this one
+			}
+		}
+		doc, err := dispatchReadJSONFile(wf)
+		if err != nil {
+			continue
+		}
+		if dispatchStringValue(doc["claim"]) != dispatchtick.ClaimNoCommit {
+			continue
+		}
+		// The disambiguation: ONLY reason=rate_limit -- a weekly/usage cap, a model cap,
+		// or a login wall is a different reason and is deliberately not counted.
+		if dispatchStringValue(doc["reason"]) != dispatchtick.NoCommitRateLimit {
+			continue
+		}
+		count++
+	}
+	return dispatchtick.RateLimitCheck{
+		Recent:     count,
+		Window:     window,
+		Threshold:  dispatchRateLimitThreshold(),
+		MinWorkers: dispatchRateLimitMinWorkers(),
+	}
 }
 
 func dispatchPreflightHost(_ string, _ io.Writer) dispatchtick.HostCheck {

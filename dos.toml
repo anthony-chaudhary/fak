@@ -964,6 +964,34 @@ summary  = "the spawn preflight refused because degraded gate health is the sole
 fix      = "let the fleet drain and re-measure: reduce the hook path taxing every tool call (#2073) or fix the over-budget lifecycle rung until the p99 recovers under budget, then the preflight admits again. The fold abstains on a thin sample and never RAISES the cap. Floor: go test ./internal/dispatchtick -run TestApplyGateBackpressure."
 see_also = ["internal/dispatchtick/preflight_gate.go", "internal/turntaxmeter/hooklat.go", "GATE_LATENCY_REGRESSION", "OVERHEAD_BUDGET_EXCEEDED"]
 
+# The rate_budget admission cap term (the fifth term in the documented effective-cap
+# formula, docs/safe-to-raise-cap-checklist.md: min(max-workers, dos target, host cap,
+# seats, RATE BUDGET)). EvaluatePreflight folds the first four and ApplyGateBackpressure
+# adds gate health; internal/dispatchtick.ApplyRateLimitBackpressure adds this one. When a
+# backend's recent worker exits show a BURST of GENUINE concurrency rate-limit walls
+# (transient 429/529 overload -- reason=rate_limit in the .witness sidecar), the fleet is
+# storming a throttled seat: each extra concurrent spawn 429s on its first request, exits
+# banner-only, and lands 0 commits. The fold counts those exits within a recent window (per
+# backend) and, at/above the threshold, freezes the backend at its live count and refuses
+# with THIS token so the sweep terminates on it and the loop routes to a DIFFERENT
+# provider/backend (GLM/opencode, codex, another Claude seat) instead of re-storming the
+# throttled one. DISAMBIGUATION (load-bearing): ONLY reason=rate_limit counts. A weekly/
+# usage cap (usage_cap), a model-specific cap (model_unknown), and a login/credit wall
+# (auth_wall) are each a DISTINCT classifier reason and are DELIBERATELY EXCLUDED, because
+# backing off concurrency does not clear them (they need a seat reset, a model downgrade, or
+# a re-login) and are owned by the seat gate / Layer-2 downgrade / auth flow -- freezing the
+# fleet on a weekly-cap "429" would starve the multi-account goal exactly when the other
+# providers are healthy. The signal is the classifier's own verdict from the worker log
+# tail, never a self-report; a sub-threshold count abstains, the fold never RAISES the cap,
+# and it never freezes below a one-probe cold-start floor.
+# Floor: `go test ./internal/dispatchtick -run TestApplyRateLimitBackpressure`.
+[reasons.RATE_LIMIT_BACKOFF]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "the spawn preflight refused because a burst of GENUINE concurrency rate-limit walls (transient 429/529 overload, reason=rate_limit) on this backend is the sole binding admission term -- the fleet was storming a throttled seat, so it froze at its live count and admits no new concurrent load until the burst ages out. Weekly/usage caps (usage_cap), model caps (model_unknown), and login walls (auth_wall) are excluded -- they are not concurrency backoff."
+fix      = "let the throttled backend drain and route new work to a DIFFERENT provider/backend (GLM/opencode, codex, another Claude seat) while the 429 burst ages out of the window; the preflight re-admits this backend once recent rate_limit exits fall below the threshold. Tune with FAK_RATELIMIT_WINDOW / FAK_RATELIMIT_MIN_429 (0/off disables). The fold abstains below the threshold and never RAISES the cap. Floor: go test ./internal/dispatchtick -run TestApplyRateLimitBackpressure."
+see_also = ["internal/dispatchtick/preflight_ratelimit.go", "internal/dispatchtick/witness.go", "docs/safe-to-raise-cap-checklist.md", "GATE_PRESSURE"]
+
 # Verification-ladder INDETERMINATE (#1210, C2/G2 of the agent-programming-grammar
 # epic #1208): the first-class verdict the declarable verification ladder
 # (docs/standards/verification-ladder-spec.md) folds to when a cheap rung could NOT
