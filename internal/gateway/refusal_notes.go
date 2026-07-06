@@ -1,6 +1,10 @@
 package gateway
 
-import "strings"
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
 
 // refusalNote is one "actionable half of a refusal" renderer: given a refused
 // ToolAdjudication it emits the in-band remedy string for that refusal facet
@@ -9,7 +13,7 @@ import "strings"
 //
 // The registry below is the single seam every content-channel wire folds over
 // (#2750). A NEW refusal kind that carries actionable Meta is surfaced by
-// appending its renderer here — NOT by hand-stitching another call at each
+// appending its renderer here - NOT by hand-stitching another call at each
 // denySummary / adjudicationNote site, which is exactly how reversibilityGateNote,
 // remedyNote, and livelockInBandNote each grew a bespoke retrofit.
 type refusalNote struct {
@@ -44,4 +48,112 @@ func renderRefusalNotes(a ToolAdjudication) (notes string, confirmRecipe bool) {
 		}
 	}
 	return strings.Join(parts, " "), confirmRecipe
+}
+
+// denySummary renders a short human-readable note when every proposed tool_call
+// was refused, so a client that ignores the `fak` extension still adapts.
+func denySummary(adjs []ToolAdjudication) string {
+	parts := make([]string, 0, len(adjs))
+	for _, a := range adjs {
+		part := fmt.Sprintf("%s: %s (%s/%s)", a.Tool, a.Verdict.Kind, reasonOrKind(a.Verdict), a.Verdict.Disposition)
+		if notes, _ := renderRefusalNotes(a); notes != "" {
+			part += " " + notes
+		}
+		parts = append(parts, part)
+	}
+	return "All proposed tool calls were refused by the fak kernel: " + strings.Join(parts, "; ")
+}
+
+// adjudicationNote renders a short, agent-readable summary of the kernel's
+// non-trivial decisions (drops + repairs) on a turn, for clients that read only
+// the in-band content channel and never the `fak` extension — Claude Code on the
+// Anthropic wire is exactly that client. It is the difference between a denied
+// call SILENTLY VANISHING (the agent re-proposes it, or proceeds on a false
+// premise) and the agent being told "fak refused rm -rf for POLICY_BLOCK" so it
+// can adapt. Returns "" when every call was a clean ALLOW (nothing worth saying).
+func adjudicationNote(adjs []ToolAdjudication) string {
+	denied := make([]string, 0, len(adjs))
+	repaired := make([]string, 0, len(adjs))
+	allowedLoops := make([]string, 0, len(adjs))
+	hasConfirmRecipe := false
+	for _, a := range adjs {
+		switch {
+		case !a.Admitted:
+			entry := fmt.Sprintf("%s (%s/%s)", a.Tool, reasonOrKind(a.Verdict), a.Verdict.Disposition)
+			if notes, recipe := renderRefusalNotes(a); notes != "" {
+				entry += " " + notes
+				if recipe {
+					hasConfirmRecipe = true
+				}
+			}
+			denied = append(denied, entry)
+		case a.Admitted && a.Livelock != nil:
+			allowedLoops = append(allowedLoops, livelockInBandNote(a))
+		case a.Verdict.Kind == "TRANSFORM":
+			repaired = append(repaired, a.Tool)
+		}
+	}
+	if len(denied) == 0 && len(repaired) == 0 && len(allowedLoops) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("[fak] ")
+	if len(denied) > 0 {
+		b.WriteString("refused ")
+		b.WriteString(strconv.Itoa(len(denied)))
+		b.WriteString(" tool call(s): ")
+		joined := strings.Join(denied, "; ")
+		b.WriteString(joined)
+		if !strings.HasSuffix(joined, ".") {
+			b.WriteString(".")
+		}
+		// The blanket "do not re-propose" trailer contradicts the preview-confirm
+		// recipe, whose sanctioned recovery IS re-proposing the same call (plus the
+		// confirm key). Witnessed wedging a fleet session for 1h+: the agent obeyed
+		// the trailer, never echoed the token, and the push never happened. When any
+		// denied call carries a confirm recipe, the trailer must except it.
+		if hasConfirmRecipe {
+			b.WriteString(" A preview-confirm refusal is a pause, not a denial: the sanctioned next step is to re-propose that same call with only the _fak_confirm key added. This is per-tool feedback, not a session stop. Do not re-propose any other refused call unchanged; choose an allowed alternative. A session stop only comes from a declared stop policy.")
+		} else {
+			b.WriteString(" This is per-tool feedback, not a session stop. Do not re-propose a refused call unchanged; fix the arguments/tool choice or choose an allowed alternative. A session stop only comes from a declared stop policy.")
+		}
+	}
+	if len(repaired) > 0 {
+		if len(denied) > 0 {
+			b.WriteString(" ")
+		}
+		b.WriteString("repaired arguments for: ")
+		b.WriteString(strings.Join(repaired, ", "))
+		b.WriteString(".")
+	}
+	if len(allowedLoops) > 0 {
+		if len(denied) > 0 || len(repaired) > 0 {
+			b.WriteString(" ")
+		}
+		b.WriteString("observed repeated admitted tool call(s): ")
+		b.WriteString(strings.Join(allowedLoops, "; "))
+		b.WriteString(". This is advisory: do not repeat a successful identical call unchanged unless you can name the new evidence it will produce.")
+	}
+	return b.String()
+}
+
+func prependAdjudicationContentNote(content string, adjs []ToolAdjudication) string {
+	note := adjudicationNote(adjs)
+	if note == "" {
+		return content
+	}
+	if strings.TrimSpace(content) == "" {
+		return note
+	}
+	return note + "\n" + content
+}
+
+func livelockInBandNote(a ToolAdjudication) string {
+	if a.Livelock == nil {
+		return ""
+	}
+	return fmt.Sprintf("LIVELOCK_DETECTED repeat=%d repeated_call=%s approach=%s",
+		a.Livelock.RepeatCount,
+		livelockCallLabel(*a.Livelock),
+		a.Livelock.SuggestedChange)
 }
