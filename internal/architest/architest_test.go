@@ -259,7 +259,7 @@ var tier = map[string]int{
 	"ideascout":        1, // inbound arXiv/GitHub idea scout and issue planner; stdlib-only shell/network I/O off the hot path.
 	"loopindex":        1, // pure S0 agentic-loop scorecard: folds orient->plan->act->verify->ship->learn probes into loop-index + loopindex_debt; stdlib-only, off the hot path.
 	"loopmap":          1, // queryable loop-stage -> tool map over loopindex(1); off the hot path.
-	"superloop":        1, // operator-intent meta-loop: pure registry+Classify(super-vs-normal)+Walk(worst-first worklist) over member loops/scorecards/gardens; stdlib-only, off the hot path.
+	"superloop":        1, // operator-intent meta-loop: pure registry+Classify(super-vs-normal)+Walk(worst-first worklist) over member loops/scorecards/gardens, plus the C6 model-fit eval (#3043) grading read-only meta decisions; imports modelroute(1) for the single-sourced risk class, off the hot path.
 	"sessionobs":       1, // SESSION-OBSERVABILITY-for-RSI scorecard: the value-side complement to tools/session_audit.py â€” grades how far our coding-session data has climbed the capture->structure->link->aggregate->learn ladder, folding the missing rungs into one sessionobs_debt integer. Pure scorer (Record/Outcome/Pipeline/Score), stdlib-only, imports nothing internal, off the hot path.
 	"compactcohere":    1, // fak<->harness context-manager COHERENCE policy (#1131): attributes a served turn's prefix event (stable/fak_cut/fak_world_break/harness_rewrite/cold_ttl) + a standing PreCompact block/allow posture to suppress Claude Code's cache-destroying auto-compaction while fak's cache-preserving compaction copes. Pure sensor+policy, stdlib-only, imports nothing internal, off the hot path.
 	"loopdrive":        1,
