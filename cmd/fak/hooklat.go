@@ -164,8 +164,13 @@ func formatGuardHookLatencyLine(r turntaxmeter.HookLatencyRollup, v turntaxmeter
 	case v.Thin:
 		state = fmt.Sprintf("alarm abstains: n=%d < %d", v.Count, turntaxmeter.MinHookAlarmSamples)
 	}
-	return fmt.Sprintf("fak guard: hook-latency — n=%d p50=%.0fms p90=%.0fms p99=%.0fms max=%.0fms per hook firing, pre+post per tool call (%s; %s)\n",
-		r.Total.Count, r.Total.P50MS, r.Total.P90MS, r.Total.P99MS, r.Total.MaxMS, windowLabel, state)
+	var b strings.Builder
+	b.WriteString(guardSection("hook-latency"))
+	b.WriteString(guardRow("n="+fmt.Sprintf("%d", r.Total.Count),
+		fmt.Sprintf("p50=%.0fms p90=%.0fms p99=%.0fms max=%.0fms", r.Total.P50MS, r.Total.P90MS, r.Total.P99MS, r.Total.MaxMS)))
+	b.WriteString(guardRow("basis", "per hook firing, pre+post per tool call ("+windowLabel+")"))
+	b.WriteString(guardRow("verdict", state))
+	return b.String()
 }
 
 // guardHookLatencySummaryLine reads the workspace's own hook-observation stream

@@ -1126,7 +1126,7 @@ func TestFormatAuditSummary(t *testing.T) {
 	pruned := formatAuditSummary(gateway.AdjudicationSummary{
 		Total: 4, Allowed: 4, ToolPruneCount: 5, ToolPruneTurns: 2,
 	})
-	for _, want := range []string{"tool-floor prune", "dropped 5 unreachable tool def(s)", "across 2 turn(s)", "byte-identical"} {
+	for _, want := range []string{"tool-floor prune", "5 unreachable tool def(s)", "across 2 turn(s)", "byte-identical"} {
 		if !strings.Contains(pruned, want) {
 			t.Errorf("tool-prune summary missing %q:\n%s", want, pruned)
 		}
@@ -1193,7 +1193,7 @@ func TestFormatAuditSummarySplitsToolFeedbackFromDenyAllStop(t *testing.T) {
 func TestFormatVCacheSnapshotPointer(t *testing.T) {
 	got := formatVCacheSnapshotPointer(122, "/cfg/fak/vcache-turns.jsonl")
 	for _, want := range []string{
-		"cache window", "recorded 122 turn(s)", "/cfg/fak/vcache-turns.jsonl",
+		"cache window", "122 turn(s)", "/cfg/fak/vcache-turns.jsonl",
 		"fak vcache score", "fak vcache observe",
 	} {
 		if !strings.Contains(got, want) {
@@ -1337,7 +1337,7 @@ func TestFormatAmplification(t *testing.T) {
 	// line must NOT stay silent — it must surface the floor effect, framed as repairs/denies
 	// applied (NOT "calls avoided", since the client still executes every allowed tool).
 	proxy := formatAmplification(kernel.Counters{}, gateway.AdjudicationSummary{Transformed: 3, Denied: 2})
-	for _, want := range []string{"floor effect", "3 call(s) repaired", "2 denied", "proxy path"} {
+	for _, want := range []string{"floor effect", "repaired in-flight", "3 call(s)", "denied before round-trip", "2 call(s)", "proxy path"} {
 		if !strings.Contains(proxy, want) {
 			t.Errorf("proxy floor-effect line missing %q:\n%s", want, proxy)
 		}

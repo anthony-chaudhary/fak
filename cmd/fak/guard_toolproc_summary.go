@@ -20,6 +20,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/toolproc"
@@ -47,8 +48,12 @@ func guardToolprocSummaryLine(journalPath string, nowMS int64) string {
 	if c.Running == 0 && c.StalledMonitors == 0 {
 		return "" // nothing outstanding — stay quiet rather than print a vacuous zero row
 	}
-	return fmt.Sprintf("fak guard: tool processes — running=%d stalled_monitors=%d (a stalled monitor is silence folded to TOOL_HEARTBEAT_STALLED with kill advice; `fak toolproc ps --events %s`)\n",
-		c.Running, c.StalledMonitors, journalPath)
+	var b strings.Builder
+	b.WriteString(guardSection("tool processes"))
+	b.WriteString(guardRow("running", fmt.Sprintf("%d", c.Running)))
+	b.WriteString(guardRow("stalled monitors", fmt.Sprintf("%d", c.StalledMonitors)))
+	b.WriteString(guardNote("a stalled monitor is silence folded to TOOL_HEARTBEAT_STALLED with kill advice; `fak toolproc ps --events " + journalPath + "`"))
+	return b.String()
 }
 
 // guardToolprocSummary is the exit-summary caller: it locates the workspace

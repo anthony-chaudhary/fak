@@ -66,8 +66,12 @@ func TestFormatGuardHookLatencyLine(t *testing.T) {
 	r := hookRollupFixture()
 	v := turntaxmeter.JudgeHookLatency(r.Total, turntaxmeter.DefaultHookP99BudgetMS)
 	got := formatGuardHookLatencyLine(r, v, "session window")
-	if !strings.HasPrefix(got, "fak guard: hook-latency — n=13") || !strings.Contains(got, "session window") {
-		t.Fatalf("exit-summary line = %q", got)
+	// The exit summary shares the guard section grammar: a "guard · hook-latency" header
+	// then aligned rows. The line must name the section, the sample count, and the window.
+	for _, want := range []string{"guard · hook-latency", "n=13", "session window"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("exit-summary line missing %q: %q", want, got)
+		}
 	}
 	if !strings.HasSuffix(got, "\n") {
 		t.Fatalf("summary line must be newline-terminated, got %q", got)

@@ -32,13 +32,15 @@ func formatJournalSummary(j *journal.Journal, seq0 uint64) string {
 	}
 	seq, _, writeErr := j.Stats()
 	var b strings.Builder
-	fmt.Fprintf(&b, "fak guard: audit journal — %d decision(s) appended this session; chain now holds %d hash-chained row(s) at %s",
-		seq-seq0, seq, path)
+	b.WriteString(guardSection("audit journal"))
+	appended := fmt.Sprintf("%d decision(s) appended this session", seq-seq0)
 	if writeErr > 0 {
-		fmt.Fprintf(&b, " (%d write error(s))", writeErr)
+		appended += fmt.Sprintf("  (%d write error(s))", writeErr)
 	}
-	b.WriteByte('\n')
-	fmt.Fprintf(&b, "  verify the tamper-evident chain: fak audit verify %s\n", path)
+	b.WriteString(guardRow("appended", appended))
+	b.WriteString(guardRow("chain now holds", fmt.Sprintf("%d hash-chained row(s)", seq)))
+	b.WriteString(guardRow("at", path))
+	b.WriteString(guardRow("verify the chain", "fak audit verify "+path))
 	return b.String()
 }
 
@@ -50,21 +52,24 @@ func formatJournalSummary(j *journal.Journal, seq0 uint64) string {
 // exposes, so the line can never overstate the protection.
 func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counters) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "fak guard: %d kernel decision(s) — %d allowed, %d denied, %d repaired, %d quarantined",
-		sum.Total, sum.Allowed, sum.Denied, sum.Transformed, sum.Quarantined)
-	// Deferred (a non-blocking admit, e.g. a tool result let through) and escalated
-	// (held pending a witness) are normal, non-error outcomes — show them only when
-	// they happened so the common clean line stays short, and never under "errored".
+	b.WriteString(guardSection("audit"))
+	// The verdict tally is the section's headline row: the fixed outcome labels stay to the
+	// left, the variable counts line up as a comma-run of "N label" pairs in the value column.
+	// Deferred (a non-blocking admit, e.g. a tool result let through) and escalated (held
+	// pending a witness) are normal, non-error outcomes — appended only when they happened so
+	// the common clean row stays short, and never under "errored".
+	verdicts := fmt.Sprintf("%d allowed, %d denied, %d repaired, %d quarantined",
+		sum.Allowed, sum.Denied, sum.Transformed, sum.Quarantined)
 	if sum.Deferred > 0 {
-		fmt.Fprintf(&b, ", %d deferred", sum.Deferred)
+		verdicts += fmt.Sprintf(", %d deferred", sum.Deferred)
 	}
 	if sum.Escalated > 0 {
-		fmt.Fprintf(&b, ", %d escalated", sum.Escalated)
+		verdicts += fmt.Sprintf(", %d escalated", sum.Escalated)
 	}
 	if sum.Errored > 0 {
-		fmt.Fprintf(&b, ", %d errored", sum.Errored)
+		verdicts += fmt.Sprintf(", %d errored", sum.Errored)
 	}
-	b.WriteByte('\n')
+	b.WriteString(guardRow(fmt.Sprintf("%d kernel decision(s)", sum.Total), verdicts))
 	cacheSavings := sum.MechanismSavings()
 	if len(kcOpt) > 0 && kcOpt[0].VDSOHits > 0 {
 		cacheSavings.FakVDSOAvoidedCalls = uint64(kcOpt[0].VDSOHits)
@@ -82,7 +87,11 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 		// Lead with whether the lever is ENABLED so "0 fired" can't read as "disabled": budget>0
 		// with all-under_budget bails is compaction ON and correctly idle (nothing sprawled past
 		// the cut), the opposite of OFF.
+		// The state VALUE stays short and scannable on the row; the WHY (when it needs one)
+		// drops to a demoted note so a tighter-budget misread can't hide, without bloating the
+		// row into a paragraph.
 		status := fmt.Sprintf("ENABLED, budget %d tok", sum.CompactionBudget)
+		statusNote := ""
 		if sum.CompactionBudget <= 0 {
 			status = "DISABLED (budget 0; body forwarded byte-for-byte)"
 		} else if sum.CompactionFired == 0 && sum.CompactionShedTokens == 0 {
@@ -92,15 +101,18 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 			// This is the dormant-on-real-Claude-Code-traffic pathology (#1407), the opposite of
 			// "nothing sprawled" — call it out so a tighter budget isn't misread as the fix.
 			if sum.CompactionAnchorStarved > 0 {
-				status = fmt.Sprintf("ENABLED but ANCHOR-STARVED, budget %d tok — the cache_control anchor protects MORE than the budget so it cannot fire (NOT a short session; --compact-anchor-head is default-on, so either it was disabled or the traffic carries no stable system/tools breakpoint to re-anchor on, #1407)", sum.CompactionBudget)
+				status = fmt.Sprintf("ENABLED but ANCHOR-STARVED, budget %d tok — cannot fire", sum.CompactionBudget)
+				statusNote = "the cache_control anchor protects MORE than the budget so it cannot fire (NOT a short session; --compact-anchor-head is default-on, so either it was disabled or the traffic carries no stable system/tools breakpoint to re-anchor on, #1407)"
 			}
 		}
-		fmt.Fprintf(&b, "fak guard: compaction [%s] — %d fired, %d bailed, %d off; shed %d token(s)\n",
-			status,
-			sum.CompactionFired,
-			sum.CompactionBailed,
-			sum.CompactionOff,
-			sum.CompactionShedTokens)
+		b.WriteString(guardSection("compaction"))
+		b.WriteString(guardRow("state", status))
+		if statusNote != "" {
+			b.WriteString(guardNote(statusNote))
+		}
+		b.WriteString(guardRow("fired/bailed/off",
+			fmt.Sprintf("%d fired, %d bailed, %d off; shed %d token(s)",
+				sum.CompactionFired, sum.CompactionBailed, sum.CompactionOff, sum.CompactionShedTokens)))
 		// Break the bailed lump out by reason (same shape as the deny "blocked:" loop below):
 		// without this, N bailed conflates under_budget (benign, working-as-designed) with
 		// no_breakpoint (can't fire) and prefix_mismatch (the ONLY fak-fault cache signal — call
@@ -112,11 +124,10 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 			}
 			sort.Strings(reasons)
 			for _, r := range reasons {
-				note := ""
+				b.WriteString(guardRow("  bailed: "+r, fmt.Sprintf("x%d", sum.CompactionBailReasons[r])))
 				if r == "prefix_mismatch" || r == "splice_failed" || r == "redecode_failed" {
-					note = "  ⚠ fak-fault: a fired rewrite would have burst the cache — must stay 0"
+					b.WriteString(guardNote("⚠ fak-fault: a fired rewrite would have burst the cache — must stay 0"))
 				}
-				fmt.Fprintf(&b, "  bailed: %-16s x%d%s\n", r, sum.CompactionBailReasons[r], note)
 			}
 		}
 		// Anchor-starved is a SUBSET of the under_budget bails above, surfaced apart because it is
@@ -124,8 +135,8 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 		// one means the anchor swallowed the conversation so no budget tightening can ever make it
 		// fire — only a re-anchor (#1407 / opt-in head-anchored firing #1408) can.
 		if sum.CompactionAnchorStarved > 0 {
-			fmt.Fprintf(&b, "  ⚠ anchor-starved x%d — protected prefix exceeds the %d-tok budget; compaction cannot fire on this traffic regardless of session length (a re-anchor is the fix, not a tighter budget: --compact-anchor-head is default-on, so either it was disabled or the traffic carries no stable system/tools breakpoint — #1407)\n",
-				sum.CompactionAnchorStarved, sum.CompactionBudget)
+			b.WriteString(guardRow("  ⚠ anchor-starved", fmt.Sprintf("x%d", sum.CompactionAnchorStarved)))
+			b.WriteString(guardNote(fmt.Sprintf("protected prefix exceeds the %d-tok budget; compaction cannot fire on this traffic regardless of session length (a re-anchor is the fix, not a tighter budget: --compact-anchor-head is default-on, so either it was disabled or the traffic carries no stable system/tools breakpoint — #1407)", sum.CompactionBudget)))
 		}
 	}
 	// Tool-floor prune (the INBOUND tools[] lever): how many unreachable tool DEFINITIONS fak
@@ -135,8 +146,10 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 	// fired, so the common run — and the dominant Claude Code path, whose single breakpoint sits on
 	// the LAST tool so nothing is droppable — stays quiet rather than printing a vacuous 0.
 	if sum.ToolPruneCount > 0 {
-		fmt.Fprintf(&b, "fak guard: tool-floor prune — dropped %d unreachable tool def(s) from tools[] across %d turn(s) (uncached-token saving; cache prefix byte-identical)\n",
-			sum.ToolPruneCount, sum.ToolPruneTurns)
+		b.WriteString(guardSection("tool-floor prune"))
+		b.WriteString(guardRow("dropped",
+			fmt.Sprintf("%d unreachable tool def(s) from tools[] across %d turn(s)", sum.ToolPruneCount, sum.ToolPruneTurns)))
+		b.WriteString(guardNote("uncached-token saving; cache prefix byte-identical"))
 	}
 	// Deny-all stops: turns the floor refused ENTIRELY, which the wire reports to the client as
 	// end_turn so it does not hang hunting for a dropped tool_use block (the v0.15.0 contract).
@@ -145,8 +158,11 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 	// Stop-hook lever that auto-resumes the agent past it, so a session that hit the false stop
 	// tells the operator both that it happened and how to keep the loop moving next time.
 	if sum.DenyAllStops > 0 {
-		fmt.Fprintf(&b, "fak guard: deny-all stops — %d turn(s) had every proposed tool call set aside, reported to the client as end_turn (a stop the agent did not choose; the model wanted to act and the floor set all of it aside). Keep the agent moving past these with --deny-all-continue=enforce (auto-resumes the agent with 'choose an allowed alternative', bounded).\n",
-			sum.DenyAllStops)
+		b.WriteString(guardSection("deny-all stops"))
+		b.WriteString(guardRow("turns fully refused",
+			fmt.Sprintf("%d turn(s) — reported to the client as end_turn", sum.DenyAllStops)))
+		b.WriteString(guardNote("a stop the agent did not choose; the model wanted to act and the floor set all of it aside"))
+		b.WriteString(guardNote("keep the agent moving with --deny-all-continue=enforce (auto-resumes with 'choose an allowed alternative', bounded)"))
 	}
 	// Tool-feedback turns: the RETRYABLE sibling of the deny-all stops above. Every proposed
 	// tool call was refused as model-fixable feedback (e.g. MALFORMED args), so the turn is
@@ -156,17 +172,21 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 	// session ending (#2632). A session stop comes only from a declared stop policy, never from
 	// accumulated tool refusals. Printed only when it happened so a clean run stays quiet.
 	if sum.ToolFeedbackTurns > 0 {
-		fmt.Fprintf(&b, "fak guard: tool-feedback turns — %d turn(s) had every proposed tool call returned as RETRYABLE feedback (per-tool, model-fixable; the turn was NOT stopped — the model can fix the arguments or tool choice and retry). This is a tool-refusal count, not a session stop: a stop comes only from a declared stop policy.\n",
-			sum.ToolFeedbackTurns)
+		b.WriteString(guardSection("tool-feedback turns"))
+		b.WriteString(guardRow("retryable refusals",
+			fmt.Sprintf("%d turn(s) — every proposed call returned as RETRYABLE feedback", sum.ToolFeedbackTurns)))
+		b.WriteString(guardNote("per-tool, model-fixable; the turn was NOT stopped — the model can fix the arguments or tool choice and retry"))
+		b.WriteString(guardNote("a tool-refusal count, not a session stop: a stop comes only from a declared stop policy"))
 	}
 	if len(sum.ByReason) > 0 {
+		b.WriteString(guardSection("blocked by reason"))
 		reasons := make([]string, 0, len(sum.ByReason))
 		for r := range sum.ByReason {
 			reasons = append(reasons, r)
 		}
 		sort.Strings(reasons)
 		for _, r := range reasons {
-			fmt.Fprintf(&b, "  blocked: %-16s x%d\n", r, sum.ByReason[r])
+			b.WriteString(guardRow("  blocked: "+r, fmt.Sprintf("x%d", sum.ByReason[r])))
 		}
 	}
 	// A DEFAULT_DENY is a tool the floor never enumerated (a harness verb, an MCP tool,
@@ -176,8 +196,8 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 	// for POLICY_BLOCK / SECRET_EXFIL: those are the danger floor (an arg-rule like rm -rf
 	// or an explicit deny), which the allow overlay cannot and should not lift.
 	if sum.ByReason["DEFAULT_DENY"] > 0 {
-		b.WriteString("  to always-allow a blocked tool for future sessions (operator, out-of-band from the agent):\n")
-		b.WriteString("    fak guard allow --from-journal        # lists what was blocked + the exact allow command\n")
+		b.WriteString(guardNote("to always-allow a blocked tool for future sessions (operator, out-of-band from the agent):"))
+		b.WriteString(guardNote("fak guard allow --from-journal   # lists what was blocked + the exact allow command"))
 	}
 	return b.String()
 }
@@ -190,26 +210,32 @@ func formatCacheAttribution(s gateway.MechanismSavings) string {
 	fak := s.FakTokenEquiv()
 	total := s.TotalTokenEquiv()
 	var b strings.Builder
+	// The section names the two owners once; the headline row carries the split, and the
+	// breakdown row carries the per-mechanism facets that used to trail the same sentence.
 	if total > 0 {
-		fmt.Fprintf(&b, "fak guard: avoided-spend attribution — provider ~%s (%.0f%%) + fak ~%s (%.0f%%) = ~%s token-equiv",
+		b.WriteString(guardSection("avoided-spend attribution"))
+		b.WriteString(guardRow("owner split", fmt.Sprintf("provider ~%s (%.0f%%) + fak ~%s (%.0f%%) = ~%s token-equiv",
 			gateway.HumanTokenEquiv(provider), provider/total*100,
 			gateway.HumanTokenEquiv(fak), fak/total*100,
-			gateway.HumanTokenEquiv(total))
+			gateway.HumanTokenEquiv(total))))
 	} else {
-		fmt.Fprintf(&b, "fak guard: cache attribution — provider net ~%s + fak ~%s = ~%s token-equiv (not yet positive)",
+		b.WriteString(guardSection("cache attribution"))
+		b.WriteString(guardRow("owner split", fmt.Sprintf("provider net ~%s + fak ~%s = ~%s token-equiv (not yet positive)",
 			gateway.HumanTokenEquiv(provider),
 			gateway.HumanTokenEquiv(fak),
-			gateway.HumanTokenEquiv(total))
+			gateway.HumanTokenEquiv(total))))
 	}
-	fmt.Fprintf(&b, " [provider read rebate %s, write premium %s; fak compaction %s, KV-prefix %s",
+	breakdown := fmt.Sprintf("[provider read rebate %s, write premium %s; fak compaction %s, KV-prefix %s",
 		gateway.HumanTokenEquiv(s.ProviderPromptCacheReadTokenEquiv),
 		gateway.HumanTokenEquiv(s.ProviderPromptCacheWritePremiumTokenEquiv),
 		gateway.HumanTokenEquiv(float64(s.FakCompactionShedTokens)),
 		gateway.HumanTokenEquiv(float64(s.FakKVPrefixReusedTokens)))
 	if s.FakVDSOAvoidedCalls > 0 {
-		fmt.Fprintf(&b, "; vDSO %d avoided call(s)", s.FakVDSOAvoidedCalls)
+		breakdown += fmt.Sprintf("; vDSO %d avoided call(s)", s.FakVDSOAvoidedCalls)
 	}
-	b.WriteString("]. provider is OBSERVED/provider-relayed; fak is WITNESSED/fak-authored.\n")
+	breakdown += "]"
+	b.WriteString(guardRow("breakdown", breakdown))
+	b.WriteString(guardNote("provider is OBSERVED/provider-relayed; fak is WITNESSED/fak-authored"))
 	return b.String()
 }
 
@@ -253,9 +279,17 @@ func formatFakSliceDiagnostic(sum gateway.AdjudicationSummary) string {
 	// "the provider is doing the caching; fak's own shed did not fire" rather than a dead
 	// end. This is the fak-OWN cache-value path (outbound compaction-shed on the passthrough
 	// #555) — see docs/notes/GUARD-OWN-CACHE-VALUE-PATH.md for how to make it fire.
-	return fmt.Sprintf("fak guard: fak-slice diagnostic — F is ~0 because %s.\n"+
-		"  see: fak cachevalue report   (provider-vs-fak owner split over all sessions; docs/notes/GUARD-OWN-CACHE-VALUE-PATH.md)\n",
-		strings.Join(reasons, "; "))
+	var b strings.Builder
+	b.WriteString(guardSection("fak-slice diagnostic"))
+	// One reason per row so each distinct cause reads apart, not buried in a semicolon-run.
+	// The headline names the finding once; the rows carry the WHY.
+	b.WriteString(guardRow("finding", "F is ~0 this session — the provider owns the caching, fak's own shed did not fire"))
+	for _, r := range reasons {
+		b.WriteString(guardRow("  because", r))
+	}
+	b.WriteString(guardRow("see", "fak cachevalue report"))
+	b.WriteString(guardNote("provider-vs-fak owner split over all sessions; docs/notes/GUARD-OWN-CACHE-VALUE-PATH.md"))
+	return b.String()
 }
 
 func fakSliceDiagnosticRelevant(sum gateway.AdjudicationSummary) bool {
@@ -305,8 +339,12 @@ func formatAmplification(kc kernel.Counters, sum gateway.AdjudicationSummary) st
 	// silently blank when the floor was actually doing its job.
 	if rep.MemoHits == 0 && rep.Repairs == 0 {
 		if sum.Transformed > 0 || sum.Denied > 0 {
-			return fmt.Sprintf("fak guard: floor effect — %d call(s) repaired in-flight, %d denied before a wasted round-trip (proxy path: the kernel adjudicates with Decide, so the in-kernel vDSO/amplification axis does not apply)\n",
-				sum.Transformed, sum.Denied)
+			var b strings.Builder
+			b.WriteString(guardSection("floor effect"))
+			b.WriteString(guardRow("repaired in-flight", fmt.Sprintf("%d call(s)", sum.Transformed)))
+			b.WriteString(guardRow("denied before round-trip", fmt.Sprintf("%d call(s)", sum.Denied)))
+			b.WriteString(guardNote("proxy path: the kernel adjudicates with Decide, so the in-kernel vDSO/amplification axis does not apply"))
+			return b.String()
 		}
 		return ""
 	}
@@ -317,8 +355,9 @@ func formatAmplification(kc kernel.Counters, sum gateway.AdjudicationSummary) st
 	// is capped at 1/ValidateFloor (=100×), not +Inf — Amplification is always finite on
 	// this path. The only +Inf case is zero executed work, which means zero memo hits and
 	// zero repairs, which the guard above has already returned the empty string for.
-	fmt.Fprintf(&b, "fak guard: avoided-call amplification — %.2f× (%s); spared ~%.0f naive round-trip(s) of %d proposed",
-		rep.Amplification, rep.Status, rep.AvoidedTurns, rep.RawTurns)
+	b.WriteString(guardSection("avoided-call amplification"))
+	b.WriteString(guardRow("amplification", fmt.Sprintf("%.2f× (%s)", rep.Amplification, rep.Status)))
+	b.WriteString(guardRow("round-trips spared", fmt.Sprintf("~%.0f naive round-trip(s) of %d proposed", rep.AvoidedTurns, rep.RawTurns)))
 	parts := make([]string, 0, 2)
 	if rep.MemoHits > 0 {
 		parts = append(parts, fmt.Sprintf("%d served from the vDSO cache", rep.MemoHits))
@@ -327,9 +366,8 @@ func formatAmplification(kc kernel.Counters, sum gateway.AdjudicationSummary) st
 		parts = append(parts, fmt.Sprintf("%d repaired in-syscall", rep.Repairs))
 	}
 	if len(parts) > 0 {
-		fmt.Fprintf(&b, " — %s", strings.Join(parts, ", "))
+		b.WriteString(guardRow("from", strings.Join(parts, ", ")))
 	}
-	b.WriteByte('\n')
 	return b.String()
 }
 
@@ -374,13 +412,14 @@ func formatTurnsTimeSaved(kc kernel.Counters, sum gateway.AdjudicationSummary) s
 		return ""
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "fak guard: turns / time saved — ~%.0f naive round-trip(s) spared", turns)
+	b.WriteString(guardSection("turns / time saved"))
+	b.WriteString(guardRow("round-trips spared", fmt.Sprintf("~%.0f naive round-trip(s) spared", turns)))
 	if mean := sum.MeanTurnLatencySeconds(); mean > 0 {
-		fmt.Fprintf(&b, " ≈ ~%.1fs of wall-clock (this session's observed ~%.1fs/turn over %d timed turn(s))",
-			turns*mean, mean, sum.E2ELatencyCount)
+		b.WriteString(guardRow("wall-clock", fmt.Sprintf("≈ ~%.1fs of wall-clock", turns*mean)))
+		b.WriteString(guardNote(fmt.Sprintf("this session's observed ~%.1fs/turn over %d timed turn(s)", mean, sum.E2ELatencyCount)))
 	} else {
-		b.WriteString("; wall-clock omitted — no turn latency observed this session")
+		b.WriteString(guardRow("wall-clock", "wall-clock omitted — no turn latency observed this session"))
 	}
-	fmt.Fprintf(&b, ". WITNESSED: %s; time is observed, not modeled\n", basis)
+	b.WriteString(guardRow("basis", fmt.Sprintf("WITNESSED: %s; time is observed, not modeled", basis)))
 	return b.String()
 }
