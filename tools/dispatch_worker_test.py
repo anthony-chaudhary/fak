@@ -293,6 +293,28 @@ class DispatchWorkerTest(unittest.TestCase):
 
         self.assertEqual(got, "secret-from-config")
 
+    def test_opencode_upstream_base_url_reads_account_config(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / "opencode" / "opencode.json"
+            cfg.parent.mkdir(parents=True)
+            cfg.write_text(json.dumps({
+                "provider": {
+                    "deepseek-ai": {
+                        "options": {
+                            "baseURL": "https://integrate.api.nvidia.com/v1",
+                            "apiKey": "{env:NVIDIA_TEST_KEY}",
+                        }
+                    }
+                }
+            }), encoding="utf-8")
+
+            got = mod.opencode_upstream_base_url(
+                ["opencode", "run", "-m", "deepseek-ai/deepseek-v4-pro"],
+                {"XDG_CONFIG_HOME": d})
+
+        self.assertEqual(got, "https://integrate.api.nvidia.com/v1")
+
     def test_opencode_upstream_key_reads_inline_config_content(self) -> None:
         mod = load()
 
@@ -307,6 +329,42 @@ class DispatchWorkerTest(unittest.TestCase):
             }), "ZAI_TEST_KEY": "secret-from-inline-env"})
 
         self.assertEqual(got, "secret-from-inline-env")
+
+    def test_guard_wrap_opencode_non_default_provider_config_beats_global_glm_base(self) -> None:
+        mod = load()
+        raw = ["opencode", "run", "-m", "deepseek-ai/deepseek-v4-pro", "dispatch"]
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / "opencode" / "opencode.json"
+            cfg.parent.mkdir(parents=True)
+            cfg.write_text(json.dumps({
+                "provider": {
+                    "deepseek-ai": {
+                        "options": {
+                            "baseURL": "https://integrate.api.nvidia.com/v1",
+                            "apiKey": "{env:NVIDIA_TEST_KEY}",
+                        }
+                    }
+                }
+            }), encoding="utf-8")
+            env = {
+                "XDG_CONFIG_HOME": d,
+                "NVIDIA_TEST_KEY": "secret-nim-key",
+                "FLEET_DOGFOOD_GUARD_BASEURL": "http://127.0.0.1:18080/v1",
+                "FLEET_DOGFOOD_GUARD_ADDR": "127.0.0.1:8139",
+            }
+
+            wrapped = mod.guard_wrap(raw, fak_bin="/usr/bin/fak", lane="docs",
+                                     backend="opencode", workspace=Path("."), env=env)
+
+        self.assertEqual(wrapped[wrapped.index("--base-url") + 1],
+                         "https://integrate.api.nvidia.com/v1")
+        self.assertEqual(wrapped[wrapped.index("--api-key-env") + 1],
+                         mod.OPENCODE_GUARD_UPSTREAM_KEY_ENV)
+        self.assertNotIn("secret-nim-key", wrapped)
+        cfg_overlay = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+        self.assertEqual(
+            cfg_overlay["provider"]["deepseek-ai"]["options"]["baseURL"],
+            "http://127.0.0.1:8139/v1")
 
     def test_opencode_upstream_key_reads_explicit_config_path(self) -> None:
         mod = load()

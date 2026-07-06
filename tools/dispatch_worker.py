@@ -407,6 +407,32 @@ def opencode_upstream_api_key(command: Sequence[str], env: dict[str, str]) -> st
     return ""
 
 
+def opencode_upstream_base_url(command: Sequence[str], env: dict[str, str]) -> str:
+    """Best-effort read of the selected opencode provider's upstream base URL."""
+    provider = _opencode_model_provider(command)
+    if content := (env.get("OPENCODE_CONFIG_CONTENT") or "").strip():
+        try:
+            cfg = json.loads(content)
+        except json.JSONDecodeError:
+            cfg = {}
+        base = (((cfg.get("provider") or {}).get(provider) or {})
+                .get("options") or {}).get("baseURL")
+        resolved = _env_substituted_value(base, env)
+        if resolved:
+            return resolved
+    for path in _opencode_config_candidates(env):
+        try:
+            cfg = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        base = (((cfg.get("provider") or {}).get(provider) or {})
+                .get("options") or {}).get("baseURL")
+        resolved = _env_substituted_value(base, env)
+        if resolved:
+            return resolved
+    return ""
+
+
 def guard_enabled(env: dict[str, str] | None = None) -> bool:
     """Whether to front a worker with ``fak guard``. Dogfood-by-default (ON); a node
     opts out with ``FLEET_DOGFOOD_GUARD`` in {0,off,false,no,disable}."""
@@ -496,7 +522,16 @@ def guard_wrap(
         ]
     if backend != "claude":
         e = env if env is not None else os.environ
-        base = (e.get("FLEET_DOGFOOD_GUARD_BASEURL") or "").strip()
+        provider_id = _opencode_model_provider(cmd) if backend == "opencode" else ""
+        configured_base = opencode_upstream_base_url(cmd, e) if backend == "opencode" else ""
+        env_base = (e.get("FLEET_DOGFOOD_GUARD_BASEURL") or "").strip()
+        # A global dogfood base URL is normally the local GLM lab gateway. Do not
+        # let that process-wide default misroute an explicitly pinned non-GLM
+        # opencode provider such as NVIDIA NIM DeepSeek.
+        if backend == "opencode" and provider_id != OPENCODE_DEFAULT_PROVIDER_ID and configured_base:
+            base = configured_base
+        else:
+            base = env_base or configured_base
         if not base:
             return cmd  # don't misroute a local-upstream worker
         extra = ["--base-url", base]
