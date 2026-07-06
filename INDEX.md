@@ -175,6 +175,7 @@ front page.
 - [GLM-5.2 readiness warmup-gate contract (#3051), 2026-07-06](docs/notes/GLM52-READINESS-WARMUP-GATE-CONTRACT-3051-2026-07-06.md) -- auto-indexed dated note.
 - [GLM-5.2 first-request cold tax vs. KV-prefix caching — an ablation, 2026-07-06](docs/notes/GLM52-COLD-START-VS-CACHING-ABLATION-2026-07-06.md) -- auto-indexed dated note.
 - [GLM-5.2 compile-cache persistence contract (#3052), 2026-07-06](docs/notes/GLM52-COMPILE-CACHE-PERSISTENCE-CONTRACT-3052-2026-07-06.md) -- auto-indexed dated note.
+- [GLM-5.2 on GPU server 2 / GPU server 3: the theoretical throughput ceiling and the 80% drive, 2026-07-06](docs/notes/GLM52-DGX-THEORETICAL-CEILING-2026-07-06.md) -- a roofline upper bound for GLM-5.2 UD-Q4_K_M on the two identical 8-GPU sm_80 lab nodes (single-stream decode ~150-200 tok/s practical vs the 23.2 WITNESSED, aggregate ~11-14k, prefill ~11-14k), the ESTIMATED active-set inputs the ceiling scales inversely with, and the L1-L10 lever map that seeds epic #3073's concurrent-ticket fleet aimed at 80% in a day.
 - [Qwen3.6-27B pure-fak kernel — remaining perf levers + CPU/SSD offload (2026-07-06)](docs/notes/MAC-QWEN36-DECODE-PERF-AND-OFFLOAD-SOTA-2026-07-06.md) -- auto-indexed dated note.
 - [Built-in compaction audit](docs/notes/BUILT-IN-COMPACTION-AUDIT-2026-07-06.md) -- auto-indexed dated note.
 - [NVIDIA NIM coding seats - 2026-07-06](docs/notes/NVIDIA-NIM-CODING-SEATS-2026-07-06.md) -- auto-indexed dated note.
