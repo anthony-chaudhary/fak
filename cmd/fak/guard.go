@@ -1173,6 +1173,24 @@ func cmdGuard(argv []string) {
 		os.Exit(1)
 	}
 	injected = append(injected, toolprocHookEnv...)
+	// Discoverability affordance (#3092): a SessionStart hook that injects a one-line hint
+	// naming fak's MCP entry verbs into the first turn, so the agent reaches past Claude
+	// Code's deferred-tool wall instead of running as a generic coder. Merged into the SAME
+	// --settings file the hooks above wrote. On by default; FAK_GUARD_AFFORDANCE_MODE=off opts
+	// out for a lean harness.
+	sessionStartSettings := toolprocSettings
+	if sessionStartSettings == "" {
+		sessionStartSettings = stopHookInstall.SettingsPath
+	}
+	if sessionStartSettings == "" {
+		sessionStartSettings = preCompactInstall.SettingsPath
+	}
+	command, _, err = installGuardSessionStartHook(command, os.Getenv(guardSessionStartEnvMode), sessionStartSettings)
+	if err != nil {
+		cancel()
+		fmt.Fprintf(os.Stderr, "fak guard: Claude SessionStart hook setup failed: %v\n", err)
+		os.Exit(1)
+	}
 	// First-class `fak guard -- codex`: Codex reads custom upstreams from `-c`
 	// provider overrides, not OPENAI_BASE_URL. Repoint only Codex children, after the
 	// Claude-specific hook installers have had a chance to no-op.

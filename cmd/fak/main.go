@@ -304,6 +304,11 @@ func main() {
 		// gateway's deny-all consecutive gauge and, in enforce mode, blocks an unchosen
 		// end_turn so the agent auto-continues past a fully-refused turn (bounded).
 		cmdGuardStopHook(os.Args[2:])
+	case "guard-sessionstart":
+		// Hidden: Claude Code SessionStart hook actuator installed by `fak guard`. Injects a
+		// one-line affordance naming fak's MCP entry verbs into the first turn, so the agent
+		// reaches past the deferred-tool wall instead of running as a generic coder (#3092).
+		cmdGuardSessionStart(os.Args[2:])
 	case guard.TrampolineVerb:
 		// Hidden: the Landlock hook-floor re-exec trampoline (Linux). `fak guard
 		// --landlock-hooks` re-execs itself into this verb, which applies the
