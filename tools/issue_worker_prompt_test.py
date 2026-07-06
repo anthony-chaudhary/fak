@@ -122,6 +122,78 @@ class RenderPromptTest(unittest.TestCase):
         self.assertIn("no body", p)
 
 
+class OriginQualityChecksTest(unittest.TestCase):
+    """#1987: every dispatch packet names the per-lane origin-quality checks — each
+    with its command, expected artifact, and refusal mode — and a QA-dogfood-spine
+    issue's packet additionally names the at-origin score control to run before
+    handoff (the #1961 spine done condition)."""
+
+    QA = {
+        "number": 1987,
+        "title": "include origin-quality checks in every fleet dispatch packet",
+        "body": "<!-- fak-qa-dogfood-spine:QD-027 -->\nParent: #1961",
+        "labels": [{"name": "testing"}, {"name": "track/E-testing-quality"}],
+        "state": "OPEN",
+    }
+    PLAIN = {"number": 500, "title": "t", "body": "b", "labels": [], "state": "OPEN"}
+
+    def test_every_packet_names_the_origin_gate_with_all_three_parts(self) -> None:
+        # command + expected artifact + refusal mode are all present in every packet.
+        mod = load()
+        p = mod.render_prompt(self.PLAIN, "gateway", workspace="C:/work/fak")
+        self.assertIn("origin-quality checks", p)
+        self.assertIn("BEFORE final handoff", p)
+        self.assertIn("expected artifact", p)
+        self.assertIn("refusal mode", p)
+        self.assertIn("make ci", p)                 # the full gate command
+        self.assertIn("go test ./internal/gateway", p)  # the lane gate command
+        self.assertIn("ARCH_LAYER_VIOLATION", p)    # the Go-lane refusal mode
+
+    def test_tools_lane_names_the_pythongate_refusal(self) -> None:
+        mod = load()
+        p = mod.render_prompt(self.PLAIN, "tools", workspace="C:/work/fak")
+        self.assertIn("python tools/<touched>_test.py", p)
+        self.assertIn("REASON_NEW_PYTHON_TOOL", p)  # the tools-lane refusal mode
+
+    def test_docs_lane_names_the_claims_lint_refusal(self) -> None:
+        mod = load()
+        p = mod.render_prompt(self.PLAIN, "docs", workspace="C:/work/fak")
+        self.assertIn("make claims-lint", p)
+        self.assertIn("[SHIPPED]", p)
+
+    def test_core_lane_names_the_self_modify_refusal(self) -> None:
+        mod = load()
+        p = mod.render_prompt(self.PLAIN, "abi", workspace="C:/work/fak")
+        self.assertIn("CORE_SELF_MODIFY", p)
+
+    def test_cmd_lane_targets_the_cmd_package(self) -> None:
+        mod = load()
+        p = mod.render_prompt(self.PLAIN, "cmd", workspace="C:/work/fak")
+        self.assertIn("go test ./cmd/fak", p)
+
+    def test_qa_dogfood_packet_names_the_at_origin_score_control(self) -> None:
+        # the #1961 done condition: a QA-dogfood issue's packet names the exact origin
+        # checks to run before final handoff.
+        mod = load()
+        p = mod.render_prompt(self.QA, "tools", workspace="C:/work/fak")
+        self.assertIn("at-origin score control", p)
+        self.assertIn("QA-dogfood spine", p)
+        self.assertIn("BEFORE handoff", p)
+
+    def test_plain_issue_omits_the_at_origin_score_control_line(self) -> None:
+        # a non-spine issue still gets the lane+full gate, but not the spine-only line.
+        mod = load()
+        p = mod.render_prompt(self.PLAIN, "tools", workspace="C:/work/fak")
+        self.assertIn("origin-quality checks", p)
+        self.assertNotIn("at-origin score control", p)
+
+    def test_track_label_alone_marks_a_qa_dogfood_issue(self) -> None:
+        mod = load()
+        no_marker = dict(self.QA, body="no spine marker here")
+        self.assertTrue(mod._is_qa_dogfood(no_marker))
+        self.assertFalse(mod._is_qa_dogfood(self.PLAIN))
+
+
 class RenderRepairPromptTest(unittest.TestCase):
     ROWS = [
         {"number": 1207, "title": "docs(docs): session-lifecycle one-pager",

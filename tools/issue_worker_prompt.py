@@ -163,6 +163,72 @@ def _windows_shell_guidance(host_os: str | None = None) -> str:
     )
 
 
+def _is_qa_dogfood(issue: dict[str, Any]) -> bool:
+    """True iff this issue is on the at-origin QA-dogfood spine (#1961). Detected by
+    the ``fak-qa-dogfood-spine:`` marker its bodies carry, or the
+    ``track/E-testing-quality`` track label — either witnesses the spine membership
+    that makes the at-origin score control a hard handoff gate, not just advice."""
+    if "fak-qa-dogfood-spine:" in (issue.get("body") or ""):
+        return True
+    labs = issue.get("labels") or []
+    names = {lab.get("name") for lab in labs if isinstance(lab, dict) and lab.get("name")}
+    return "track/E-testing-quality" in names
+
+
+def _origin_gate_line(lane: str) -> str:
+    """The lane's own origin-quality gate as one (command → expected artifact;
+    refusal mode) line. Lanes are classified by gate FAMILY, not enumerated — fak's
+    taxonomy is ~200 pairwise-disjoint leaf trees, so a per-leaf table would rot; the
+    classifier keys off the handful of non-Go lanes and defaults every
+    ``internal/<leaf>`` (and ``cmd``) to its Go package gate."""
+    if lane in ("tools", "scripts"):
+        return ("command `python tools/<touched>_test.py` (the touched tool's own "
+                "hermetic test) → expected artifact: an OK/passing test run; refusal "
+                "mode: a NEW `tools/*.py` reds the pythongate ratchet "
+                "(`go test ./internal/pythongate -run TestNoNewPythonTools`, "
+                "`REASON_NEW_PYTHON_TOOL`) — port new tooling to a `fak` subcommand instead")
+    if lane == "docs":
+        return ("command `make claims-lint` → expected artifact: a clean claims-lint "
+                "run; refusal mode: an unstamped or overclaimed `- [` line in CLAIMS.md "
+                "reds the lint (each claim needs exactly one [SHIPPED]/[SIMULATED]/[STUB] tag)")
+    if lane in ("abi", "release", "dos", "global"):
+        return (f"command `go test ./internal/{lane} -count=1` → expected artifact: a "
+                "green package test; refusal mode: a pathspec commit into this hard-self "
+                "core-lock surface is refused `CORE_SELF_MODIFY` — use the operator / "
+                "maintenance-witness path, never a self-report")
+    pkg = "./cmd/fak" if lane == "cmd" else f"./internal/{lane}"
+    return (f"command `go test {pkg} -count=1` + `go vet {pkg}` → expected artifact: a "
+            "green package test + clean vet; refusal mode: an upward/cross-tier import "
+            "reds architest (`ARCH_LAYER_VIOLATION`), and the pre-commit hook refuses the "
+            "commit until the package is green")
+
+
+def _origin_quality_checks(lane: str, issue: dict[str, Any]) -> str:
+    """The per-lane origin-quality-check block for a dispatch packet (#1987): name the
+    exact checks a worker must run WHERE the work is created, before final handoff —
+    each with its command, expected artifact, and refusal mode. Every packet carries
+    the lane gate + the full gate; a QA-dogfood-spine issue additionally carries the
+    at-origin score-control line, so its packet names the exact origin checks to run
+    before handoff (the #1961 spine's done condition)."""
+    lines = [
+        "origin-quality checks (run these where the work is created, BEFORE final "
+        "handoff — the at-origin QA-dogfood rule, #1961):",
+        f"- lane gate ({lane}): {_origin_gate_line(lane)}.",
+        "- full gate (every lane): command `make ci` (build + vet + test + claims-lint; "
+        "a native-Windows host runs the tests under WSL `./test.ps1`) → expected "
+        "artifact: a green gate log; refusal mode: the pre-commit / commit-msg hook "
+        "refuses the commit until it is green.",
+    ]
+    if _is_qa_dogfood(issue):
+        lines.append(
+            "- at-origin score control (QA-dogfood spine): this issue is on the "
+            "at-origin QA-dogfood spine — run the score/check it names at the origin it "
+            "names (task / session / turn / issue), read that evidence, and record the "
+            "result in your final report BEFORE handoff; do not defer it to an "
+            "after-the-fact scorecard.")
+    return "\n".join(lines)
+
+
 def render_prompt(issue: dict[str, Any], lane: str, *, workspace: str,
                   host_os: str | None = None) -> str:
     """Render the resolution prompt for ONE issue. Pure: no I/O.
@@ -180,6 +246,7 @@ def render_prompt(issue: dict[str, Any], lane: str, *, workspace: str,
     generation_frame = _generation_frame(issue)
     win_hint = _windows_shell_guidance(host_os)
     win_hint_block = f"\n{win_hint}\n" if win_hint else ""
+    origin_checks = _origin_quality_checks(lane, issue)
 
     return f"""your goal: resolve GitHub issue #{n} ({title}) with the smallest correct \
 change that genuinely closes it, then ship it on `main` citing `#{n}` in the \
@@ -213,6 +280,8 @@ increment and say in your report what remains.
 - Run the gate yourself before claiming done: the lane's own test \
 (`go test ./... -count=1` for the touched package, or the doc/lint check the \
 issue names). A claim with no gate run is not done.
+
+{origin_checks}
 
 git laws (enforced below the agent — breaking them refuses your commit):
 - Work on `main` ONLY. Never branch / new-worktree (the OFF_TRUNK guard refuses it).
