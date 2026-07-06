@@ -84,6 +84,7 @@ var (
 		"openai-compatible": true,
 		"openai":            true,
 		"xai":               true,
+		"deepseek":          true,
 	}
 	nativeProviders = map[string]bool{
 		"anthropic": true,
