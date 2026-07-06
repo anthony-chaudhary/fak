@@ -100,26 +100,34 @@ GLM-5.2 serve host.
 
 ## Generation classification
 
-**`generation` + `gen/next`; milestone `Generation G1 - Next Gen`.**
+**`generation` + `gen/now`; milestone `Generation G0 - Now / Immediate`.**
 
-Applied from [`docs/generation.md`](../generation.md); consistent with the sibling
-#3052 classification in
-[`GLM52-COMPILE-CACHE-PERSISTENCE-CONTRACT-3052-2026-07-06.md`](GLM52-COMPILE-CACHE-PERSISTENCE-CONTRACT-3052-2026-07-06.md)
-(same ~500s-tax cohort, same evidence bar).
+Applied from [`docs/generation.md`](../generation.md). This note originally proposed
+`gen/next`; it was **reconciled to `gen/now`** to match the earlier sibling triage
+on the issue (2026-07-06T21:06:13Z). The reconciliation reasoning is recorded here
+because the first draft's `gen/next` argument was wrong on a load-bearing point.
 
-- **Why `gen/next`, not `gen/now`.** gen/next is a "near-term foundation that should
-  be runnable by agents soon, but still needs a gate, dogfood run, schema, or
-  default-exposure proof." #3051 is exactly that: it adds a readiness **gate** whose
-  acceptance witness is a **real GPU fresh-boot dogfood** (first real turn warm),
-  and **no runtime code exists yet to witness**. gen/now's bar — "improves the
-  current product / operator loop with a **clear witness** and no future-architecture
-  dependency" — fails on *clear witness*: there is no cheap current-path test that
-  proves "first real turn is warm"; that proof is inherently a GPU-host dogfood.
+- **Why `gen/now`, not `gen/next`.** gen/now "improves the current product / operator
+  loop with a **clear witness** and no future-architecture dependency," where the
+  Code/CLI evidence bar is *a focused test that proves the new behavior*. #3051 meets
+  it: the GLM-5.2 dogfood serve is a **current** operator loop, and the gate's core
+  behavior is **cheaply unit-testable** — a fake backend that delays first-token,
+  asserting `markReady`/`/health` does not flip until warmup yields a token. No
+  future-architecture dependency: the architectural companions are #3052 (persist
+  compile caches) and #3053 (de-conflate the warmup tax from `cache_bit`).
+- **Why the first draft's `gen/next` was wrong.** It claimed "no cheap current-path
+  witness — the proof is inherently a GPU-host dogfood." That conflated two witnesses:
+  the *classification* witness (the gate-logic focused test, cheap) with the
+  *shipped/promotion* witness (the warm-first-turn latency number, GPU-only). Only the
+  latter needs the host. It also leaned on "consistency with #3052," but #3052's
+  witness is inherently a **two-boot GPU dogfood** (compile-cache survives a real
+  process restart — not cheaply testable → `gen/next` fits it), whereas #3051's gate
+  is unit-testable. The two siblings legitimately differ.
 - **Why not `gen/second-next`.** It needs no cross-engine compatibility contract or
   new serving architecture — it runs on the existing SGLang/vLLM serve path and only
   moves *when* the readiness signal flips. That keeps it out of the architecture-
   option horizon.
-- **Promotion evidence (→ `gen/now`).** A fresh-boot dogfood witness showing
+- **Promotion evidence (→ shipped / witnessed).** A fresh-boot dogfood witness showing
   `/healthz` reports healthy **only after** warmup-first-token; the operator's first
   real turn on that boot is warm-path (~1s class), not ~500s; a cold request is not
   canceled by any client cap; and `fak_gateway_time_to_ready_seconds` reports the
