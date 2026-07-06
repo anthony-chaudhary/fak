@@ -476,6 +476,48 @@ func TestLintCommitMessage_featNoSymptomNote(t *testing.T) {
 	}
 }
 
+// TestLintCommitMessage_testSubjectWithoutWitnessBlocks mirrors the #3004 residual class: a
+// `test(...)` subject over data-only dogfood artifacts passes the message grammar but
+// `dos commit-audit` can only grade it subject-only. Preview must block before that commit lands.
+func TestLintCommitMessage_testSubjectWithoutWitnessBlocks(t *testing.T) {
+	root := writeLintRepo(t)
+	r := LintCommitMessage(
+		"test(experiments): add GLM dogfood artifacts (fak experiments)",
+		[]string{
+			"experiments/agent-live/dogfood-claude-glm52-gcp-20260705.json",
+			"experiments/agent-live/gcp-glm-demo-20260706T042643Z/driver.out.log",
+		},
+		root,
+	)
+	if r.OK {
+		t.Fatalf("data-only test subject should block, got OK notes=%v", r.Notes)
+	}
+	if !hasIssueContaining(r, "test/CI witness path") {
+		t.Fatalf("want test witness issue, got issues=%v", r.Issues)
+	}
+}
+
+func TestLintCommitMessage_testSubjectWithWitnessPathPasses(t *testing.T) {
+	root := writeLintRepo(t)
+	cases := []struct {
+		name  string
+		paths []string
+	}{
+		{"go-test", []string{"internal/gateway/server_test.go"}},
+		{"python-test", []string{"tools/check_commit_msg_test.py"}},
+		{"fixture", []string{"internal/gateway/testdata/case.json"}},
+		{"ci-workflow", []string{".github/workflows/ci.yml"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := LintCommitMessage("test(gateway): add regression coverage (fak gateway)", tc.paths, root)
+			if hasIssueContaining(r, "test/CI witness path") {
+				t.Fatalf("witness path should satisfy test(...) guard, got issues=%v", r.Issues)
+			}
+		})
+	}
+}
+
 // TestLintCommitMessage_fixDocsOnlyNoSymptomNote — a fix that touches no Go source (docs/config
 // only) has no testable symptom surface, so it is not nudged.
 func TestLintCommitMessage_fixDocsOnlyNoSymptomNote(t *testing.T) {

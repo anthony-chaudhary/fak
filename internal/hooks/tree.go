@@ -129,6 +129,13 @@ func HygieneGates() []HygieneGate {
 		// and it flips DefaultOff:false (the C5 enforcement gate) once the tree is migrated
 		// to zero bare dev spellings outside bare_dev_allowlist.txt.
 		{"BARE_DEV_SPELLING", gateBareDevSpellingTree, true},
+		// SWALLOWED_ERROR (issue #2899, hermes-inspiration epic #2871) is DefaultOff: the tree
+		// still carries pre-existing `_ = <call>()` error discards (the Go `except: pass`) that
+		// predate the floor, so wiring it always-on would red `make ci` against known debt. It is
+		// the always-available audit sweep (`fak hygiene --gates SWALLOWED_ERROR`) that proves the
+		// retirement, and flips DefaultOff:false — the enforcement gate that HOLDS the line at zero
+		// un-witnessed discards — once the tree is clean.
+		{"SWALLOWED_ERROR", gateSwallowedErrorTree, true},
 	}
 }
 

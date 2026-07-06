@@ -103,6 +103,9 @@ func LintCommitMessageWithOptions(message string, paths []string, root string, r
 			if w := fixWantsSymptomWitness(r.Subject, paths); w != "" {
 				r.Notes = append(r.Notes, w)
 			}
+			if w := testSubjectNeedsWitness(r.Subject, paths); w != "" {
+				r.Issues = append(r.Issues, w)
+			}
 		}
 	}
 
@@ -554,11 +557,57 @@ func fixWantsSymptomWitness(subject string, paths []string) string {
 		"`dos commit-audit` (which grades the diff's KIND, not that the bug is gone). See #1326."
 }
 
+// testSubjectNeedsWitness returns a blocking issue when a `test(...)` subject is backed only by
+// artifacts/prose/config paths. `dos commit-audit` grades that shape as CLAIM_UNWITNESSED
+// (subject-only), so reject it before the immutable local commit can block later safe pushes.
+func testSubjectNeedsWitness(subject string, paths []string) string {
+	m := subjectRE.FindStringSubmatch(subject)
+	if m == nil || m[1] != "test" || len(paths) == 0 {
+		return ""
+	}
+	for _, p := range paths {
+		if isTestOrCIWitnessPath(p) {
+			return ""
+		}
+	}
+	return "test(...) subject has no test/CI witness path: include a real test or CI witness " +
+		"(`*_test.go`, `*_test.py`, `testdata/`, `tests/`, `.github/workflows/`, etc.) or use " +
+		"`chore(...)`/`docs(...)` for data-only artifacts. Otherwise `dos commit-audit` reports " +
+		"`CLAIM_UNWITNESSED`/subject-only."
+}
+
 // isGoTestPath reports whether a repo path is a Go test file (basename `*_test.go`). It matches
 // the language's own definition of a gating test and deliberately mirrors witness.isGatingTestPath
 // so the two surfaces agree on what counts as a symptom witness.
 func isGoTestPath(p string) bool {
 	return strings.HasSuffix(baseName(normPath(p)), "_test.go")
+}
+
+func isTestOrCIWitnessPath(p string) bool {
+	q := strings.ToLower(normPath(p))
+	name := strings.ToLower(baseName(q))
+	if isGoTestPath(q) {
+		return true
+	}
+	if strings.HasPrefix(q, ".github/workflows/") {
+		return true
+	}
+	switch {
+	case strings.HasSuffix(name, "_test.py"),
+		strings.HasPrefix(name, "test_"),
+		strings.Contains(name, ".test."),
+		strings.Contains(name, ".spec."),
+		name == "test.ps1",
+		name == "test.sh":
+		return true
+	}
+	for _, seg := range strings.Split(q, "/") {
+		switch seg {
+		case "test", "tests", "testdata":
+			return true
+		}
+	}
+	return false
 }
 
 // isGoSourcePath reports whether a repo path is non-test Go SOURCE — a `.go` file that is not a

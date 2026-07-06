@@ -144,6 +144,7 @@ func TestBareDevSpelling_EmbeddedAllowlistParses(t *testing.T) {
 var knownDefaultOffGates = map[string]bool{
 	"BARE_DEV_SPELLING": true, // C4 spelling migration in flight (#2228, #2233)
 	"DEAD_CODE":         true, // pre-existing dead symbols being retired by /slop-score
+	"SWALLOWED_ERROR":   true, // pre-existing `_ = <call>()` error discards being retired (#2899)
 }
 
 // TestBareDevSpelling_RegisteredDefaultOff pins the ratchet-in-flight contract: the gate is
