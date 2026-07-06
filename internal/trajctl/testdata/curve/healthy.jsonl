@@ -1,0 +1,4 @@
+{"schema":"fak-trajctl/1","kind":"objective","objective":{"id":"traj-healthy","statement":"ship the curve fold","status":"active"}}
+{"schema":"fak-trajctl/1","kind":"score","score":{"objective_id":"traj-healthy","value":0.25,"method":"witnessed-commit-progress","version":"1","witness":"W3","unix_millis":1000}}
+{"schema":"fak-trajctl/1","kind":"score","score":{"objective_id":"traj-healthy","value":0.5,"method":"witnessed-commit-progress","version":"1","witness":"W3","unix_millis":2000}}
+{"schema":"fak-trajctl/1","kind":"score","score":{"objective_id":"traj-healthy","value":0.75,"method":"witnessed-commit-progress","version":"1","witness":"W3","unix_millis":3000}}

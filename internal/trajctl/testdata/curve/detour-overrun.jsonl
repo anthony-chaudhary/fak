@@ -1,0 +1,5 @@
+{"schema":"fak-trajctl/1","kind":"objective","objective":{"id":"traj-epic","statement":"the parent objective","status":"paused"}}
+{"schema":"fak-trajctl/1","kind":"objective","objective":{"id":"traj-detour","parent_id":"traj-epic","statement":"repair the broken linker flag","budget":{"turns":2},"status":"active"}}
+{"schema":"fak-trajctl/1","kind":"score","score":{"objective_id":"traj-detour","value":0.1,"method":"witnessed-commit-progress","version":"1","witness":"W3","unix_millis":1000}}
+{"schema":"fak-trajctl/1","kind":"score","score":{"objective_id":"traj-detour","value":0.1,"method":"witnessed-commit-progress","version":"1","witness":"W3","unix_millis":2000}}
+{"schema":"fak-trajctl/1","kind":"score","score":{"objective_id":"traj-detour","value":0.1,"method":"witnessed-commit-progress","version":"1","witness":"W3","unix_millis":3000}}

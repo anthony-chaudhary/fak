@@ -1,0 +1,42 @@
+{
+  "schema": "fak-trajctl-curve/1",
+  "objectives": [
+    {
+      "objective_id": "traj-stall",
+      "status": "active",
+      "signal": "STALL",
+      "latest": 0.25,
+      "delta": 0,
+      "detail": "flat progress (delta +0.00) with an active divergence signal",
+      "methods": [
+        {
+          "method": "activity-progress-divergence",
+          "version": "1",
+          "points": [
+            {
+              "value": 0.8,
+              "witness": "W2",
+              "unix_millis": 2000
+            }
+          ]
+        },
+        {
+          "method": "witnessed-commit-progress",
+          "version": "1",
+          "points": [
+            {
+              "value": 0.25,
+              "witness": "W3",
+              "unix_millis": 1000
+            },
+            {
+              "value": 0.25,
+              "witness": "W3",
+              "unix_millis": 2000
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

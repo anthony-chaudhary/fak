@@ -1,0 +1,37 @@
+{
+  "schema": "fak-trajctl-curve/1",
+  "objectives": [
+    {
+      "objective_id": "traj-detour",
+      "parent_id": "traj-epic",
+      "status": "active",
+      "signal": "DETOUR_OVERRUN",
+      "latest": 0.1,
+      "delta": 0,
+      "detail": "detour ran 1 turns past a 2-turn budget while parent \"traj-epic\" is paused",
+      "methods": [
+        {
+          "method": "witnessed-commit-progress",
+          "version": "1",
+          "points": [
+            {
+              "value": 0.1,
+              "witness": "W3",
+              "unix_millis": 1000
+            },
+            {
+              "value": 0.1,
+              "witness": "W3",
+              "unix_millis": 2000
+            },
+            {
+              "value": 0.1,
+              "witness": "W3",
+              "unix_millis": 3000
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

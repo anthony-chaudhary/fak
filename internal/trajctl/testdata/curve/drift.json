@@ -1,0 +1,36 @@
+{
+  "schema": "fak-trajctl-curve/1",
+  "objectives": [
+    {
+      "objective_id": "traj-drift",
+      "status": "active",
+      "signal": "DRIFT",
+      "latest": 0.25,
+      "delta": -0.25,
+      "detail": "progress declined 0.50 -\u003e 0.25 (delta -0.25)",
+      "methods": [
+        {
+          "method": "witnessed-commit-progress",
+          "version": "1",
+          "points": [
+            {
+              "value": 0.75,
+              "witness": "W3",
+              "unix_millis": 1000
+            },
+            {
+              "value": 0.5,
+              "witness": "W3",
+              "unix_millis": 2000
+            },
+            {
+              "value": 0.25,
+              "witness": "W3",
+              "unix_millis": 3000
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

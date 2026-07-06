@@ -1,0 +1,4 @@
+{"schema":"fak-trajctl/1","kind":"objective","objective":{"id":"traj-stall","statement":"land the stalled feature","status":"active"}}
+{"schema":"fak-trajctl/1","kind":"score","score":{"objective_id":"traj-stall","value":0.25,"method":"witnessed-commit-progress","version":"1","witness":"W3","unix_millis":1000}}
+{"schema":"fak-trajctl/1","kind":"score","score":{"objective_id":"traj-stall","value":0.25,"method":"witnessed-commit-progress","version":"1","witness":"W3","unix_millis":2000}}
+{"schema":"fak-trajctl/1","kind":"score","score":{"objective_id":"traj-stall","value":0.8,"method":"activity-progress-divergence","version":"1","witness":"W2","evidence":[{"kind":"transcript-span","ref":"session-stall","detail":"activity=0.80 flat_commit_delta=0.00"}],"unix_millis":2000,"session_id":"session-stall"}}

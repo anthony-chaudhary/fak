@@ -1,0 +1,145 @@
+{
+  "schema": "fak-trajctl-curve/1",
+  "objectives": [
+    {
+      "objective_id": "traj-detour",
+      "parent_id": "traj-epic",
+      "status": "active",
+      "signal": "DETOUR_OVERRUN",
+      "latest": 0.1,
+      "delta": 0,
+      "detail": "detour ran 1 turns past a 2-turn budget while parent \"traj-epic\" is paused",
+      "methods": [
+        {
+          "method": "witnessed-commit-progress",
+          "version": "1",
+          "points": [
+            {
+              "value": 0.1,
+              "witness": "W3",
+              "unix_millis": 1000
+            },
+            {
+              "value": 0.1,
+              "witness": "W3",
+              "unix_millis": 2000
+            },
+            {
+              "value": 0.1,
+              "witness": "W3",
+              "unix_millis": 3000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "objective_id": "traj-drift",
+      "status": "active",
+      "signal": "DRIFT",
+      "latest": 0.25,
+      "delta": -0.25,
+      "detail": "progress declined 0.50 -\u003e 0.25 (delta -0.25)",
+      "methods": [
+        {
+          "method": "witnessed-commit-progress",
+          "version": "1",
+          "points": [
+            {
+              "value": 0.75,
+              "witness": "W3",
+              "unix_millis": 1000
+            },
+            {
+              "value": 0.5,
+              "witness": "W3",
+              "unix_millis": 2000
+            },
+            {
+              "value": 0.25,
+              "witness": "W3",
+              "unix_millis": 3000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "objective_id": "traj-stall",
+      "status": "active",
+      "signal": "STALL",
+      "latest": 0.25,
+      "delta": 0,
+      "detail": "flat progress (delta +0.00) with an active divergence signal",
+      "methods": [
+        {
+          "method": "activity-progress-divergence",
+          "version": "1",
+          "points": [
+            {
+              "value": 0.8,
+              "witness": "W2",
+              "unix_millis": 2000
+            }
+          ]
+        },
+        {
+          "method": "witnessed-commit-progress",
+          "version": "1",
+          "points": [
+            {
+              "value": 0.25,
+              "witness": "W3",
+              "unix_millis": 1000
+            },
+            {
+              "value": 0.25,
+              "witness": "W3",
+              "unix_millis": 2000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "objective_id": "traj-epic",
+      "status": "paused",
+      "signal": "HEALTHY",
+      "latest": 0,
+      "delta": 0,
+      "detail": "progress 0.00 (delta +0.00)",
+      "methods": []
+    },
+    {
+      "objective_id": "traj-healthy",
+      "status": "active",
+      "signal": "HEALTHY",
+      "latest": 0.75,
+      "delta": 0.25,
+      "detail": "progress 0.75 (delta +0.25)",
+      "methods": [
+        {
+          "method": "witnessed-commit-progress",
+          "version": "1",
+          "points": [
+            {
+              "value": 0.25,
+              "witness": "W3",
+              "unix_millis": 1000
+            },
+            {
+              "value": 0.5,
+              "witness": "W3",
+              "unix_millis": 2000
+            },
+            {
+              "value": 0.75,
+              "witness": "W3",
+              "unix_millis": 3000
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
