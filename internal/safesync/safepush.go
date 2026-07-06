@@ -233,6 +233,7 @@ var transientPushNetworkNeedles = []string{
 	"connection timed out",       // TCP connect/read timeout
 	"operation timed out",        // curl's phrasing of the same
 	"connection reset",           // mid-transfer reset
+	"connection was reset",       // Windows/curl: "Recv failure: Connection was reset"
 	"connection refused",         // remote/proxy momentarily not accepting
 	"the remote end hung up",     // git transport dropped mid-conversation
 	"early eof",                  // truncated transfer

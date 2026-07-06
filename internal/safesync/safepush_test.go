@@ -224,6 +224,7 @@ func TestIsTransientPushNetwork(t *testing.T) {
 		"fatal: the remote end hung up unexpectedly",
 		"error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502",
 		"fatal: unable to access 'https://github.com/x/y/': Failed to connect to github.com port 443: Connection timed out",
+		"fatal: unable to access 'https://github.com/x/y.git/': Recv failure: Connection was reset",
 		"fatal: early EOF",
 		// GitHub's most common transient SSH throttle, both OpenSSH phrasings.
 		"kex_exchange_identification: Connection closed by remote host\r\nfatal: Could not read from remote repository.",
