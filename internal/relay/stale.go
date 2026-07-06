@@ -23,13 +23,17 @@ type StaleOutcome struct {
 	Evidence string `json:"evidence,omitempty"`
 }
 
-// CheckBatonStale re-verifies b's ProgressCursor against git through the D1 verifier and,
-// on divergence, returns a RELAY_BATON_STALE outcome naming the culprit claim and its git
-// evidence. A fresh cursor returns the zero (non-stale) outcome. Pure over the injected
-// Resolver: it reads no clock and does I/O only through the resolver.
+// CheckBatonStale re-verifies b's ProgressCursor and populated tombstone header against
+// git through the injected resolver and, on divergence, returns a RELAY_BATON_STALE
+// outcome naming the culprit claim and its git evidence. A fresh cursor and fresh
+// tombstone return the zero (non-stale) outcome. Pure over the injected Resolver: it
+// reads no clock and does I/O only through the resolver.
 func CheckBatonStale(b Baton, r Resolver) StaleOutcome {
 	rr := VerifyReload(b.ProgressCursor, r)
 	if rr.Verdict == ReloadFresh {
+		if out := checkTombstoneStale(b.Tombstone, r); out.Stale {
+			return out
+		}
 		return StaleOutcome{Stale: false}
 	}
 	return StaleOutcome{
@@ -37,5 +41,38 @@ func CheckBatonStale(b Baton, r Resolver) StaleOutcome {
 		Reason:   ReasonBatonStale,
 		Culprit:  rr.Anchor,
 		Evidence: rr.Reason,
+	}
+}
+
+func checkTombstoneStale(t Tombstone, r Resolver) StaleOutcome {
+	if t.Reason == "" && t.AtSHA == "" && t.Note == "" {
+		return StaleOutcome{Stale: false}
+	}
+	if t.AtSHA == "" {
+		return StaleOutcome{
+			Stale:    true,
+			Reason:   ReasonBatonStale,
+			Culprit:  "tombstone.at_sha",
+			Evidence: "tombstone.at_sha is empty; no tombstone git anchor to verify against git",
+		}
+	}
+	res := r.Resolve(Artifact{Kind: string(ArtifactCommit), Ref: t.AtSHA})
+	switch res.Verdict {
+	case ResolveVerified:
+		return StaleOutcome{Stale: false}
+	case ResolveDangling:
+		return StaleOutcome{
+			Stale:    true,
+			Reason:   ReasonBatonStale,
+			Culprit:  "tombstone.at_sha",
+			Evidence: "tombstone.at_sha has diverged from git: " + res.Detail,
+		}
+	default:
+		return StaleOutcome{
+			Stale:    true,
+			Reason:   ReasonBatonStale,
+			Culprit:  "tombstone.at_sha",
+			Evidence: "tombstone.at_sha could not be verified against git: " + res.Detail,
+		}
 	}
 }
