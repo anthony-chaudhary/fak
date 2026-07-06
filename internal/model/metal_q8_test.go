@@ -1,4 +1,4 @@
-//go:build darwin && cgo && fakmetal
+//go:build darwin && arm64 && cgo
 
 package model
 
@@ -131,6 +131,47 @@ func TestMetalQ8GemmMatchesCPU(t *testing.T) {
 		}
 		metalgemm.ResetQ8()
 	}
+}
+
+// TestMetalQ8GemmGroupMatchesSingles verifies GEMMGroupQ8 (n weights sharing one activation panel,
+// one command buffer) returns the same panels as a single GEMM per weight. Different output sizes
+// exercise the token-major y-offset packing used by the Qwen3.6 linear_attn in-proj group.
+func TestMetalQ8GemmGroupMatchesSingles(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("no Metal device available")
+	}
+	defer metalgemm.ResetQ8()
+	const in, P = 1024, 7
+	outs := []int{512, 1024, 256, 1536}
+	qp := quantizeBatchPanel(randomVecF(P*in, 63), P, in)
+	ws := make([]*metalgemm.Q8Weight, len(outs))
+	singles := make([][]float32, len(outs))
+	for i, out := range outs {
+		qt := quantizeQ8(randomVecF(out*in, int64(500+i)), out, in)
+		w := metalgemm.UploadQ8(qt.q, qt.d, out, in)
+		if w == nil {
+			t.Fatalf("UploadQ8(%d,%d) returned nil", out, in)
+		}
+		ws[i] = w
+		y := make([]float32, P*out)
+		w.GEMM(qp.q, qp.d, P, y)
+		singles[i] = y
+	}
+	group := metalgemm.GEMMGroupQ8(ws, qp.q, qp.d, P)
+	if len(group) != len(ws) {
+		t.Fatalf("GEMMGroupQ8 returned %d results, want %d", len(group), len(ws))
+	}
+	for i := range ws {
+		if len(group[i]) != P*outs[i] {
+			t.Fatalf("group[%d] len=%d want %d", i, len(group[i]), P*outs[i])
+		}
+		for j := range group[i] {
+			if d := group[i][j] - singles[i][j]; d > 1e-3 || d < -1e-3 {
+				t.Fatalf("group[%d][%d]=%g != single %g", i, j, group[i][j], singles[i][j])
+			}
+		}
+	}
+	t.Logf("GEMMGroupQ8 matches single GEMM across %d weights (outs=%v P=%d)", len(ws), outs, P)
 }
 
 // TestMetalQ8GemmDispatchMatchesCPU proves the model-level dispatcher used by the resident-Q4_K

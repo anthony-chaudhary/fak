@@ -15,9 +15,34 @@ func (s *Session) q8GemmDispatch(name string, qt *q8Tensor, Xq *q8Panel) []float
 	return qGemm8(qt, Xq)
 }
 
+// q8GemmGroupDispatch always declines in the pure-Go build (no Metal); the caller fills each member
+// through q8GemmDispatch.
+func (s *Session) q8GemmGroupDispatch(names []string, Xq *q8Panel, P int) [][]float32 {
+	return nil
+}
+
+// kQuantGemmDispatch is the resident K-quant prefill twin; pure-Go builds always use the CPU batch
+// implementation.
+func (s *Session) kQuantGemmDispatch(name string, qt *kQuantTensor, Xf []float32, P int) []float32 {
+	Y := make([]float32, P*qt.out)
+	kQuantMatRowsIntoBatch(qt, Xf, P, Y)
+	return Y
+}
+
+// kQuantMatRowsIntoDispatch is the decode/head GEMV twin for resident K-quant tensors. Pure-Go
+// builds always use the existing CPU implementation.
+func (s *Session) kQuantMatRowsIntoDispatch(name string, qt *kQuantTensor, xf, y []float32) {
+	kQuantMatRowsInto(qt, xf, y)
+}
+
 // q4kMatRowsDispatch is the decode-GEMV twin: always the CPU q4kMatRows in the pure-Go build.
 func (s *Session) q4kMatRowsDispatch(name string, qt *q4kTensor, xf []float32) []float32 {
 	return q4kMatRows(qt, xf)
+}
+
+// q8MatRowsDispatch is the Q8-minority decode twin; pure-Go builds always use CPU qMatRows.
+func (s *Session) q8MatRowsDispatch(name string, qt *q8Tensor, xf []float32) []float32 {
+	return qMatRows(qt, s.quantizeVecQ8(xf))
 }
 
 // q4kGroupDispatch always declines in the pure-Go build (no Metal) so mulGroup loops the per-call

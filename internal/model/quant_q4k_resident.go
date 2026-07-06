@@ -52,8 +52,9 @@ func (m *Model) kqHeadName() string {
 // the dequant path. Mirrors headQ4K for the kqw store.
 func (s *Session) headKQuant(xf []float32) []float32 {
 	y, t := s.headLogitsBuf()
-	qt := s.M.kqw[s.M.kqHeadName()]
-	kQuantMatRowsInto(qt, xf, y)
+	name := s.M.kqHeadName()
+	qt := s.M.kqw[name]
+	s.kQuantMatRowsIntoDispatch(name, qt, xf, y)
 	logitScaleInPlace(y, s.M.Cfg)
 	s.phaseEnd("lm_head_kquant", t)
 	return y

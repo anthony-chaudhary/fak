@@ -443,15 +443,15 @@ func (k sessionQ4KKernel) mul(name string, x any, out, in int) []float32 {
 	// Quant matmul weights with no resident Q4_K or k-quant copy (qwen3.5 attn_qkv → split
 	// q/k/v) fall back to the proven Q8_0 GEMV. The f32 activation is quantized on demand for
 	// this minority, so prep staying the identity for the Q4_K majority is fine.
-	return qMatRows(k.s.M.q8(name), quantizeVecQ8(xf))
+	return k.s.q8MatRowsDispatch(name, k.s.M.q8(name), xf)
 }
 
 // mulGroup applies several weights that share ONE prepared activation xn (same in), returning one
 // result per name in order. Under the resident-Q4_K session kernel with MetalQ4K it runs the
-// q4_k-resident members of the group in a SINGLE Metal command buffer (q4kGroupDispatch) — the
-// decode lever (one command buffer instead of one-per-matmul) — and falls the Q8 minority back to
-// the per-call CPU GEMV. Every other kernel (and the pure-Go build) loops mul; the results are
-// bit-identical either way (GEMVGroup == per-weight GEMV, pinned by TestMetalQ4KGemvGroupMatchesSingle).
+// q4_k-resident members and uploaded Q8-minority members through grouped Metal GEMVs — the decode
+// lever (one command buffer per resident format instead of one-per-matmul). Every other kernel (and
+// the pure-Go build) loops mul; the results are bit-identical either way (GEMVGroup/GEMVGroupQ8 ==
+// per-weight GEMV, pinned by the Metal group parity tests).
 func mulGroup(mat matKernel, names []string, xn any, outs []int, in int) [][]float32 {
 	if sk, ok := mat.(sessionQ4KKernel); ok {
 		if xf, ok2 := xn.([]float32); ok2 {

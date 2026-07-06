@@ -135,13 +135,10 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 			// and dots it against all P token columns (a GEMM), amortizing the expensive Q6_K/Q5_K
 			// super-block dequant P-fold instead of the old per-token GEMV loop that re-dequantized
 			// every block P times — the #2378 prefill-wall lever (~78% of prefill was this dequant).
-			// It is ONE parForRange over qt.out rows (serial over tokens INSIDE the row body), so it
-			// does not re-enter parDispatchMu (parFor is not re-entrant) and stays bit-identical to
-			// the per-token kQuantMatRowsInto loop. Same Y layout (P×qt.out row-major); still lands
-			// in the q6kTime profile bucket.
-			Y := make([]float32, P*qt.out)
-			kQuantMatRowsIntoBatch(qt, Xf, P, Y)
-			return Y
+			// The dispatch uses the Metal Q6_K GEMM when available; otherwise it is the same CPU
+			// kQuantMatRowsIntoBatch loop. Same Y layout (P×qt.out row-major); still lands in the
+			// q6kTime profile bucket.
+			return s.kQuantGemmDispatch(name, qt, Xf, P)
 		}
 		return s.q8GemmDispatch(name, m.q8(name), Xq)
 	}
@@ -170,36 +167,43 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 			return Y
 		}
 	}
-	// pgroup runs a group of projections that SHARE one activation panel Xf (a layer's q/k/v,
-	// gate/up, or the GDN in_proj quad) through the batched one-command-buffer q4_k GEMM group,
-	// collapsing the per-weight submit/sync round-trips that dominate prefill. It returns results
-	// in `names` order: the q4_k-resident majority is filled by metalgemm.GEMMGroup (via
-	// q4kGemmGroupDispatch) and any nil member (Q8/Q6_K minority, or a declined upload / non-Metal
-	// build) is filled by the same per-weight `proj`, so the result is identical to calling proj
-	// per name — just fewer command buffers. Xq is the pre-quantized Q8 panel proj needs for the
-	// minority fallback.
+	// pgroup runs projections that SHARE one activation panel Xf/Xq (a layer's q/k/v, gate/up, or
+	// the GDN in_proj quad) through grouped Metal paths: q4_k-resident members via
+	// q4kGemmGroupDispatch and Q8-minority members via q8GemmGroupDispatch. Any nil member (Q6_K,
+	// singleton, declined upload, or non-Metal build) is filled by the same per-weight `proj`, so
+	// the result is identical to calling proj per name — just fewer command buffers.
 	pgroup := func(names []string, Xf []float32, Xq *q8Panel) [][]float32 {
+		out := make([][]float32, len(names))
 		t0 := time.Now()
-		out := s.q4kGemmGroupDispatch(names, Xf, P)
+		q4out := s.q4kGemmGroupDispatch(names, Xf, P)
 		if profile {
-			dt := time.Since(t0) // the grouped GEMM+roundtrip, so the profile split stays honest
-			gemmTime += dt
-			// The grouped dispatch fills ONLY the q4_k-resident members in one Metal command
-			// buffer (the q4_k dequant-GEMM + submit/sync roundtrip); every nil member is filled
-			// below by the per-weight proj, which buckets itself. So the grouped time is q4_k-Metal
-			// work and lands in q4kTime — keeping q4k_metal-vs-q8_cpu the honest split.
-			q4kTime += dt
-			// out != nil ⟺ GEMMGroup actually dispatched (one command buffer) and freshly stored
-			// its on-GPU execute window; read it HERE, before the nil→make reassignment below, and
-			// only when it dispatched — a declined group (out == nil) ran no GEMMGroup, so
-			// LastGEMMGPUMs would be a stale prior value and the per-weight proj fallbacks below
-			// bucket their own GPU time instead.
-			if out != nil {
+			dt := time.Since(t0)
+			if q4out != nil {
+				gemmTime += dt
+				q4kTime += dt
 				q4kGPUCompute += time.Duration(metalgemm.LastGEMMGPUMs() * float64(time.Millisecond))
 			}
 		}
-		if out == nil {
-			out = make([][]float32, len(names))
+		if q4out != nil {
+			for i := range q4out {
+				out[i] = q4out[i]
+			}
+		}
+		t0 = time.Now()
+		q8out := s.q8GemmGroupDispatch(names, Xq, P)
+		if profile {
+			dt := time.Since(t0)
+			if q8out != nil {
+				gemmTime += dt
+				q8Time += dt
+			}
+		}
+		if q8out != nil {
+			for i := range q8out {
+				if out[i] == nil {
+					out[i] = q8out[i]
+				}
+			}
 		}
 		for i, name := range names {
 			if out[i] == nil {

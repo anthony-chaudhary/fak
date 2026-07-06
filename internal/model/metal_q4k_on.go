@@ -119,6 +119,81 @@ func (s *Session) q8GemmDispatch(name string, qt *q8Tensor, Xq *q8Panel) []float
 	return Y
 }
 
+// q8GemmGroupDispatch is the grouped prefill-GEMM twin for Q8-minority projections that share one
+// activation panel. Qwen3.6 linear_attn in-proj groups are all Q8 because the reorder keeps them out
+// of raw-Q4_K residency; grouping them pays one Metal command-buffer roundtrip instead of one per
+// projection. Non-Q8 names are left nil for the caller's existing fallback.
+func (s *Session) q8GemmGroupDispatch(names []string, Xq *q8Panel, P int) [][]float32 {
+	if os.Getenv("FAK_Q8_GEMM_GROUP") != "1" || !s.MetalQ4K || !metalgemm.Available() || Xq == nil || P <= 0 {
+		return nil
+	}
+	n := len(names)
+	ws := make([]*metalgemm.Q8Weight, 0, n)
+	pos := make([]int, 0, n)
+	for i, name := range names {
+		if s.M.q4kw[name] != nil || s.M.kqw[name] != nil {
+			continue
+		}
+		qt := s.M.q8w[name]
+		if qt == nil {
+			continue
+		}
+		w := s.M.metalQ8Weight(name, qt)
+		if w == nil {
+			continue
+		}
+		ws = append(ws, w)
+		pos = append(pos, i)
+	}
+	if len(ws) < 2 {
+		return nil
+	}
+	grouped := metalgemm.GEMMGroupQ8(ws, Xq.q, Xq.d, P)
+	if grouped == nil {
+		return nil
+	}
+	out := make([][]float32, n)
+	for j, i := range pos {
+		out[i] = grouped[j]
+	}
+	return out
+}
+
+// kQuantGemmDispatch is the prefill-GEMM twin for resident K-quant tensors in the q4_k_m mix. The
+// dense down_proj tensors load as Q6_K in kqw; under MetalQ4K they can use the resident Q6_K GEMM
+// instead of the CPU kQuantMatRowsIntoBatch loop. Other K-quant kinds stay on the proven CPU path.
+func (s *Session) kQuantGemmDispatch(name string, qt *kQuantTensor, Xf []float32, P int) []float32 {
+	Y := make([]float32, P*qt.out)
+	if !s.MetalQ4K || !metalgemm.Available() || qt.kind != kindQ6K {
+		kQuantMatRowsIntoBatch(qt, Xf, P, Y)
+		return Y
+	}
+	w := s.M.metalQ6KWeight(name, qt)
+	if w == nil {
+		kQuantMatRowsIntoBatch(qt, Xf, P, Y)
+		return Y
+	}
+	w.GEMM(Xf, P, Y)
+	return Y
+}
+
+// kQuantMatRowsIntoDispatch is the decode/head GEMV twin for resident K-quant tensors. Qwen3.6
+// q4_k_m commonly stores the LM head as Q6_K in kqw; under MetalQ4K this keeps that head projection
+// on the same resident Metal path as Q6_K MLP down_proj instead of paying the CPU kQuantMatRows
+// escape every generated token.
+func (s *Session) kQuantMatRowsIntoDispatch(name string, qt *kQuantTensor, xf, y []float32) {
+	if !s.MetalQ4K || !metalgemm.Available() || qt.kind != kindQ6K {
+		kQuantMatRowsInto(qt, xf, y)
+		return
+	}
+	w := s.M.metalQ6KWeight(name, qt)
+	if w == nil {
+		kQuantMatRowsInto(qt, xf, y)
+		return
+	}
+	w.GEMV(xf, y)
+}
+
 // q4kMatRowsDispatch is the decode-GEMV twin of q4kGemmDispatch: under MetalQ4K it runs the q4_k
 // GEMV on the GPU (q4k_gemv) instead of the CPU q4kMatRows. Routing BOTH decode and prefill q4_k
 // matmuls to the GPU is what lets metalQ4KWeight free the CPU copy (single residency) — the fix
@@ -136,52 +211,117 @@ func (s *Session) q4kMatRowsDispatch(name string, qt *q4kTensor, xf []float32) [
 	return y
 }
 
+// q8MatRowsDispatch is the decode-GEMV twin for Q8-minority projections in the resident-Q4_K
+// lane. Qwen3.6's linear_attn.* and some full-attention projections are not raw-Q4_K eligible, so
+// leaving them on CPU creates a host/device ping-pong inside the otherwise-resident Metal decode.
+// With MetalQ4K enabled and the Q8 upload budget satisfied, this runs the Q8_0 GEMV on Metal; if
+// upload is declined (tight unified-memory budget, no device, or table full) it preserves the
+// existing CPU qMatRows fallback.
+func (s *Session) q8MatRowsDispatch(name string, qt *q8Tensor, xf []float32) []float32 {
+	if !s.MetalQ4K || !metalgemm.Available() {
+		return qMatRows(qt, s.quantizeVecQ8(xf))
+	}
+	w := s.M.metalQ8Weight(name, qt)
+	if w == nil {
+		return qMatRows(qt, s.quantizeVecQ8(xf))
+	}
+	qv := s.quantizeVecQ8(xf)
+	y := make([]float32, qt.out)
+	w.GEMV(qv.q, qv.d, y)
+	return y
+}
+
 // q4kGroupDispatch runs a group of matmuls that share one f32 activation xf (a layer's gate/up,
-// q/k/v, or the GDN in_proj quad) in ONE Metal command buffer: the q4_k-resident members go through
-// metalgemm.GEMVGroup (one commit/waitUntilCompleted, dispatches pipelined), and any Q8/Q6_K
-// minority member falls back to the per-call CPU GEMV. Returns nil — so the caller (mulGroup) loops
-// the per-call path — unless MetalQ4K is on, a device is present, AND at least two members are
-// q4_k-resident (so a command buffer is worth amortizing). Results are bit-identical to calling
-// q4kMatRowsDispatch per name.
+// q/k/v, or the GDN in_proj quad) through resident Metal paths: q4_k-resident members go through
+// metalgemm.GEMVGroup on the f32 activation, and Q8-minority members go through GEMVGroupQ8 on one
+// shared Q8_0 activation. Any Q6_K member, declined upload, or singleton not already covered falls
+// back to the per-call dispatch. Returns nil — so the caller (mulGroup) loops the historical path —
+// only when no member could be Metal-routed. Results are bit-identical to calling the per-name
+// dispatches, up to the existing Metal float-order tolerance.
 func (s *Session) q4kGroupDispatch(names []string, xf []float32, outs []int) [][]float32 {
 	if !s.MetalQ4K || !metalgemm.Available() {
 		return nil
 	}
 	n := len(names)
-	ws := make([]*metalgemm.Q4KWeight, 0, n)
-	pos := make([]int, 0, n) // index in names of each grouped (q4_k-resident, uploaded) member
+	out := make([][]float32, n)
+	routed := false
+
+	q4ws := make([]*metalgemm.Q4KWeight, 0, n)
+	q4pos := make([]int, 0, n) // index in names of each grouped (q4_k-resident, uploaded) member
+	q8ws := make([]*metalgemm.Q8Weight, 0, n)
+	q8pos := make([]int, 0, n) // index in names of each grouped (Q8-minority, uploaded) member
 	for i, name := range names {
-		qt := s.M.q4kw[name]
+		if qt := s.M.q4kw[name]; qt != nil {
+			w := s.M.metalQ4KWeight(name, qt) // uploads once + frees the CPU copy on success
+			if w == nil {
+				continue
+			}
+			q4ws = append(q4ws, w)
+			q4pos = append(q4pos, i)
+			continue
+		}
+		if s.M.kqw[name] != nil {
+			continue // Q5_K/Q6_K stays on the proven k-quant CPU path unless a fused MLP handles it.
+		}
+		qt := s.M.q8w[name]
 		if qt == nil {
 			continue
 		}
-		w := s.M.metalQ4KWeight(name, qt) // uploads once + frees the CPU copy on success
+		w := s.M.metalQ8Weight(name, qt)
 		if w == nil {
 			continue
 		}
-		ws = append(ws, w)
-		pos = append(pos, i)
+		q8ws = append(q8ws, w)
+		q8pos = append(q8pos, i)
 	}
-	if len(ws) < 2 {
-		return nil // not enough resident members to amortize a command buffer
+
+	if len(q4ws) >= 2 {
+		if grouped := metalgemm.GEMVGroup(q4ws, xf); grouped != nil {
+			for j, i := range q4pos {
+				out[i] = grouped[j]
+			}
+			routed = true
+		}
 	}
-	grouped := metalgemm.GEMVGroup(ws, xf)
-	if grouped == nil {
+
+	var qv q8Vec
+	qvOK := false
+	getQ8 := func() q8Vec {
+		if !qvOK {
+			qv = s.quantizeVecQ8(xf)
+			qvOK = true
+		}
+		return qv
+	}
+	if len(q8ws) > 0 {
+		q := getQ8()
+		if grouped := metalgemm.GEMVGroupQ8(q8ws, q.q, q.d); grouped != nil {
+			for j, i := range q8pos {
+				out[i] = grouped[j]
+			}
+			routed = true
+		}
+	}
+
+	if !routed {
 		return nil
 	}
-	out := make([][]float32, n)
-	for j, i := range pos {
-		out[i] = grouped[j]
-	}
-	// Fill the non-grouped members (Q8/Q6_K minority) per-call, exactly as sessionQ4KKernel.mul.
+
+	// Fill every member not covered by a grouped Metal dispatch, exactly as sessionQ4KKernel.mul.
 	for i, name := range names {
 		if out[i] != nil {
 			continue
 		}
 		if qt := s.M.q4kw[name]; qt != nil {
 			out[i] = s.q4kMatRowsDispatch(name, qt, xf) // GPU upload declined → its own dispatch
+		} else if qt := s.M.kqw[name]; qt != nil {
+			y := make([]float32, qt.out)
+			s.kQuantMatRowsIntoDispatch(name, qt, xf, y)
+			out[i] = y
 		} else {
-			out[i] = qMatRows(s.M.q8(name), quantizeVecQ8(xf))
+			qt := s.M.q8(name)
+			q := getQ8()
+			out[i] = qMatRows(qt, q)
 		}
 	}
 	return out

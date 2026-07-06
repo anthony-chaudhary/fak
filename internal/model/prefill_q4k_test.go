@@ -345,3 +345,15 @@ func TestQ4KGemmGroupDispatchDeclinesWithoutMetal(t *testing.T) {
 		t.Fatalf("q4kGemmGroupDispatch without MetalQ4K = %v, want nil (default prefill path must be untouched)", got)
 	}
 }
+
+// TestQ4KDecodeGroupDispatchDeclinesWithoutMetal is the decode twin of the prefill group guard:
+// Q4_K/Q8 Metal grouping is opt-in, so a default session must decline and let mulGroup use the
+// historical per-name CPU dispatch. This pins the pure-Go/non-Metal behavior while the Metal build
+// routes Q4_K and Q8 resident groups through the device.
+func TestQ4KDecodeGroupDispatchDeclinesWithoutMetal(t *testing.T) {
+	m := &Model{}
+	s := m.NewSession() // MetalQ4K defaults false
+	if got := s.q4kGroupDispatch([]string{"a", "b"}, make([]float32, 8), []int{4, 4}); got != nil {
+		t.Fatalf("q4kGroupDispatch without MetalQ4K = %v, want nil (default decode path must be untouched)", got)
+	}
+}

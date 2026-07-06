@@ -43,6 +43,75 @@ func randomQ6KTensor(out, in int, seed int64) *kQuantTensor {
 	return &kQuantTensor{out: out, in: in, nblk: nblk, kind: kindQ6K, raw: raw}
 }
 
+// TestMetalQ6KGemmMatchesCPU pins the Q6_K prefill primitive used by the Qwen3.6 q4_k_m hybrid
+// path: Y[P,out] = X[P,in] · W^T must match the existing CPU kQuantMatRowsIntoBatch reference.
+func TestMetalQ6KGemmMatchesCPU(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("no Metal device available")
+	}
+	defer metalgemm.ResetQ4K()
+	cases := []struct {
+		out, in, P int
+	}{
+		{256, 512, 3},
+		{1024, 1024, 5},
+	}
+	for _, c := range cases {
+		qt := randomQ6KTensor(c.out, c.in, int64(100+c.out+c.in+c.P))
+		X := randomVecF(c.P*c.in, int64(200+c.out+c.in+c.P))
+		ref := make([]float32, c.P*c.out)
+		kQuantMatRowsIntoBatch(qt, X, c.P, ref)
+
+		w := metalgemm.UploadQ6K(qt.raw, c.out, c.in)
+		if w == nil {
+			t.Fatalf("UploadQ6K returned nil (out=%d in=%d P=%d)", c.out, c.in, c.P)
+		}
+		got := make([]float32, c.P*c.out)
+		w.GEMM(X, c.P, got)
+		cos, maxRel := cosineAndMaxRel(ref, got)
+		if cos < 0.9999 || maxRel > 5e-3 {
+			t.Fatalf("Q6K GEMM [out=%d in=%d P=%d]: cosine=%.6f maxRel=%.4g (want cos>=0.9999 maxRel<=5e-3)\n  ref[:4]=%v\n  got[:4]=%v",
+				c.out, c.in, c.P, cos, maxRel, ref[:4], got[:4])
+		}
+		metalgemm.ResetQ4K()
+	}
+}
+
+// TestMetalQ6KGemvMatchesCPU pins the standalone Q6_K decode/head primitive used by the
+// resident-k-quant LM head dispatch.
+func TestMetalQ6KGemvMatchesCPU(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("no Metal device available")
+	}
+	defer metalgemm.ResetQ4K()
+	cases := []struct {
+		out, in int
+	}{
+		{64, 256},
+		{96, 512},
+		{128, 1024},
+	}
+	for _, c := range cases {
+		qt := randomQ6KTensor(c.out, c.in, int64(7000+c.out+c.in))
+		x := randomVecF(c.in, int64(7100+c.out+c.in))
+		ref := kQuantMatRows(qt, x)
+
+		w := metalgemm.UploadQ6K(qt.raw, c.out, c.in)
+		if w == nil {
+			t.Fatalf("UploadQ6K returned nil (out=%d in=%d)", c.out, c.in)
+		}
+		got := make([]float32, c.out)
+		w.GEMV(x, got)
+
+		cos, maxRel := cosineAndMaxRel(ref, got)
+		if cos < 0.9999 || maxRel > 5e-3 {
+			t.Fatalf("Q6K GEMV [out=%d in=%d]: cosine=%.6f maxRel=%.4g (want cos>=0.9999 maxRel<=5e-3)\n  ref[:4]=%v\n  got[:4]=%v",
+				c.out, c.in, cos, maxRel, ref[:4], got[:4])
+		}
+		metalgemm.ResetQ4K()
+	}
+}
+
 // TestMetalFusedMLPQ6DownMatchesCPU is the Stage B gate: gate/up Q4_K + down Q6_K, fused on the GPU
 // in one command buffer, must match the CPU reference (q4kMatRowsRange → silu·up → kQuantMatRows).
 func TestMetalFusedMLPQ6DownMatchesCPU(t *testing.T) {
