@@ -143,6 +143,7 @@ func (m *Model) expertParallelRankPartial(layer int, xn any, mat matKernel, pick
 	H := m.Cfg.HiddenSize
 	s := plan.Shards[rank]
 	p := make([]float32, H)
+	owned := make([]routePick, 0, len(picks))
 	for _, pk := range picks {
 		if pk.expert < s.Lo || pk.expert >= s.Hi {
 			continue
@@ -153,6 +154,12 @@ func (m *Model) expertParallelRankPartial(layer int, xn any, mat matKernel, pick
 		if !m.hasWeight(expertName(layer, pk.expert, "gate_proj.weight")) {
 			return nil, fmt.Errorf("model: expert-parallel rank %d missing resident band expert %d at layer %d (sharded load did not admit [%d,%d))", rank, pk.expert, layer, s.Lo, s.Hi)
 		}
+		owned = append(owned, pk)
+	}
+	if xf, ok := xn.([]float32); ok && len(owned) > 0 && m.hostBatchedGLMExperts(layer, xf, p, owned) {
+		return p, nil
+	}
+	for _, pk := range owned {
 		out := expertSwiGLU(m, layer, pk.expert, xn, mat)
 		for i := 0; i < H; i++ {
 			p[i] += pk.weight * out[i]

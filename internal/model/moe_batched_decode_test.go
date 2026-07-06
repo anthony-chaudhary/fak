@@ -3,6 +3,7 @@ package model
 import (
 	"math"
 	"math/rand"
+	"strings"
 	"testing"
 )
 
@@ -113,6 +114,79 @@ func TestMoEFFNBatchedMatchesLoop(t *testing.T) {
 		t.Fatalf("delta is all-zero; test is vacuous (experts contributed nothing)")
 	}
 	t.Logf("moeFFN batched == per-expert loop, max|Δ|=0 over %d picks / %d experts", len(picks), E)
+}
+
+type panicExpertMatKernel struct{ base matKernel }
+
+func (p panicExpertMatKernel) prep(x []float32) any { return p.base.prep(x) }
+func (p panicExpertMatKernel) mul(name string, x any, out, in int) []float32 {
+	if strings.Contains(name, ".mlp.experts.") {
+		panic("expert matmul fallback used: " + name)
+	}
+	return p.base.mul(name, x, out, in)
+}
+
+func TestRankLocalEPPartialUsesBatchedResidentExperts(t *testing.T) {
+	const H, MI, E = 256, 256, 4
+	cfg := Config{
+		HiddenSize: H, NumLayers: 1, NumHeads: 1, NumKVHeads: 1, HeadDim: 2,
+		IntermediateSize: MI, MoEIntermediateSize: MI, VocabSize: 4,
+		RMSNormEps: 1e-5, RopeTheta: 10000,
+		NumExperts: E, NumExpertsPerTok: 2, NormTopKProb: true, EOSTokenID: -1,
+	}
+	rng := rand.New(rand.NewSource(5252))
+	mkQ4K := func(out, in int) *q4kTensor {
+		nblk := in / qkK
+		raw := make([]byte, out*nblk*q4kBlockBytes)
+		blk := make([]byte, q4kBlockBytes)
+		for o := 0; o < out; o++ {
+			for b := 0; b < nblk; b++ {
+				randQ4KBlock(rng, blk)
+				copy(raw[(o*nblk+b)*q4kBlockBytes:], blk)
+			}
+		}
+		return quantizeQ4KFromRaw(raw, out, in)
+	}
+	mkQ6K := func(out, in int) *kQuantTensor {
+		nblk := in / qkK
+		raw := make([]byte, out*nblk*q6kBlockBytes)
+		for i := range raw {
+			raw[i] = byte(rng.Intn(256))
+		}
+		return quantizeKQuantFromRaw(raw, out, in, kindQ6K)
+	}
+	m := &Model{Cfg: cfg, q4kw: map[string]*q4kTensor{}, kqw: map[string]*kQuantTensor{}}
+	for e := 0; e < E; e++ {
+		m.q4kw[expertName(0, e, "gate_proj.weight")] = mkQ4K(MI, H)
+		m.q4kw[expertName(0, e, "up_proj.weight")] = mkQ4K(MI, H)
+		m.kqw[expertName(0, e, "down_proj.weight")] = mkQ6K(H, MI)
+	}
+	xn := make([]float32, H)
+	for i := range xn {
+		xn[i] = float32(rng.NormFloat64())
+	}
+	picks := []routePick{{expert: 0, weight: 0.6}, {expert: 1, weight: 0.4}}
+	plan, err := ExpertParallelPlan(E, 2)
+	if err != nil {
+		t.Fatalf("ExpertParallelPlan: %v", err)
+	}
+	want := make([]float32, H)
+	if !m.hostBatchedGLMExperts(0, xn, want, picks) {
+		t.Fatal("hostBatchedGLMExperts declined test fixture")
+	}
+	got, err := m.expertParallelRankPartial(0, xn, panicExpertMatKernel{residentKernel{m}}, picks, plan, 0)
+	if err != nil {
+		t.Fatalf("expertParallelRankPartial: %v", err)
+	}
+	var maxAbs float64
+	for i := 0; i < H; i++ {
+		if d := math.Abs(float64(got[i] - want[i])); d > maxAbs {
+			maxAbs = d
+		}
+	}
+	if maxAbs != 0 {
+		t.Fatalf("rank-local batched partial max|Δ|=%g, want 0", maxAbs)
+	}
 }
 
 func TestQ4KExpertStatsRecordRoutedExpertsWithoutFakingMetal(t *testing.T) {
