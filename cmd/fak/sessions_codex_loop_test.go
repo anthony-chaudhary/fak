@@ -83,6 +83,70 @@ func TestSessionsCodexLoopDiagnosesRepeatedGoalFailure(t *testing.T) {
 	}
 }
 
+func TestSessionsCodexLoopRecentScansCodexHome(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "codex-home")
+	sessionsDir := filepath.Join(home, "sessions", "2026", "07", "05")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	loopPath := filepath.Join(sessionsDir, "rollout-2026-07-05T19-24-43-loop.jsonl")
+	writeCodexLoopFixture(t, loopPath, []string{
+		`{"timestamp":"2026-07-06T02:24:43.315Z","type":"session_meta","payload":{"session_id":"loop-session","originator":"codex-tui","cli_version":"0.142.5","model_provider":"openai","git":{"commit_hash":"4926739","branch":"main"}}}`,
+		`{"timestamp":"2026-07-06T02:25:03.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"one\",\"status\":\"in_progress\"}]}","call_id":"plan_1"}}`,
+		`{"timestamp":"2026-07-06T02:25:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_1","output":"Plan updated"}}`,
+		`{"timestamp":"2026-07-06T02:25:04.100Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"output_tokens":20,"total_tokens":1020},"last_token_usage":{"input_tokens":1000,"output_tokens":20,"total_tokens":1020}}}}`,
+		`{"timestamp":"2026-07-06T02:25:15.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"two\",\"status\":\"in_progress\"}]}","call_id":"plan_2"}}`,
+		`{"timestamp":"2026-07-06T02:25:16.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_2","output":"Plan updated"}}`,
+		`{"timestamp":"2026-07-06T02:25:16.100Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":2000,"output_tokens":30,"total_tokens":2030},"last_token_usage":{"input_tokens":1000,"output_tokens":10,"total_tokens":1010}}}}`,
+		`{"timestamp":"2026-07-06T02:25:27.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"three\",\"status\":\"in_progress\"}]}","call_id":"plan_3"}}`,
+		`{"timestamp":"2026-07-06T02:25:28.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_3","output":"Plan updated"}}`,
+		`{"timestamp":"2026-07-06T02:25:28.100Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":3000,"output_tokens":40,"total_tokens":3040},"last_token_usage":{"input_tokens":1000,"output_tokens":10,"total_tokens":1010}}}}`,
+	})
+	okPath := filepath.Join(sessionsDir, "rollout-2026-07-05T19-25-43-ok.jsonl")
+	writeCodexLoopFixture(t, okPath, []string{
+		`{"timestamp":"2026-07-06T02:25:43.315Z","type":"session_meta","payload":{"session_id":"ok-session","originator":"codex-tui","cli_version":"0.142.5","model_provider":"openai","git":{"commit_hash":"4926739","branch":"main"}}}`,
+		`{"timestamp":"2026-07-06T02:25:44.000Z","type":"response_item","payload":{"type":"function_call","name":"shell_command","arguments":"{\"command\":\"git status --short\"}","call_id":"shell_1"}}`,
+		`{"timestamp":"2026-07-06T02:25:45.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"shell_1","output":"## main"}}`,
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := runSessions(&stdout, &stderr, []string{"codex-loop", "--recent", "--codex-home", home, "--limit", "2", "--json"})
+	if code != 0 {
+		t.Fatalf("codex-loop --recent --json exited %d stderr=%s", code, stderr.String())
+	}
+	var r codexLoopRecentReport
+	if err := json.Unmarshal(stdout.Bytes(), &r); err != nil {
+		t.Fatalf("json did not decode: %v\n%s", err, stdout.String())
+	}
+	if r.Verdict != "LOOP" || r.LoopCount != 1 || r.OKCount != 1 || r.Scanned != 2 {
+		t.Fatalf("wrong recent report: %+v", r)
+	}
+	if len(r.TopRepeated) != 1 || r.TopRepeated[0].Tool != "update_plan" || r.TopRepeated[0].Count != 3 {
+		t.Fatalf("wrong top repeated fold: %+v", r.TopRepeated)
+	}
+	if strings.Contains(stdout.String(), "step") {
+		t.Fatalf("recent report leaked raw tool arguments:\n%s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runSessions(&stdout, &stderr, []string{"codex-loop", "--recent", "--codex-home", home, "--limit", "2"})
+	if code != 0 {
+		t.Fatalf("codex-loop --recent human exited %d stderr=%s", code, stderr.String())
+	}
+	for _, want := range []string{
+		"fak sessions codex-loop --recent",
+		"verdict        : LOOP",
+		"LOOP=1 ACTION=0 OK=1",
+		"update_plan",
+		"loop-session verdict=LOOP",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("human render missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
 func writeCodexLoopFixture(t *testing.T, path string, lines []string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {

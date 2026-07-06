@@ -21,6 +21,7 @@ import (
 )
 
 const codexLoopSchema = "fak.sessions.codex_loop.v1"
+const codexLoopRecentSchema = "fak.sessions.codex_loop_recent.v1"
 
 type codexLoopDiagnosis struct {
 	Schema            string                 `json:"schema"`
@@ -50,6 +51,24 @@ type codexLoopDiagnosis struct {
 	Reason            string                 `json:"reason,omitempty"`
 	NextAction        string                 `json:"next_action,omitempty"`
 	ObservabilityGaps []string               `json:"observability_gaps,omitempty"`
+}
+
+type codexLoopRecentReport struct {
+	Schema            string                 `json:"schema"`
+	CodexHome         string                 `json:"codex_home"`
+	SinceHours        float64                `json:"since_hours,omitempty"`
+	Limit             int                    `json:"limit"`
+	Scanned           int                    `json:"scanned"`
+	LoopCount         int                    `json:"loop_count"`
+	ActionCount       int                    `json:"action_count"`
+	OKCount           int                    `json:"ok_count"`
+	ToolCalls         int                    `json:"tool_calls"`
+	ToolOutputs       int                    `json:"tool_outputs"`
+	LastTokenTotalSum int64                  `json:"last_token_total_sum,omitempty"`
+	Verdict           string                 `json:"verdict"`
+	Reason            string                 `json:"reason,omitempty"`
+	TopRepeated       []codexRepeatedOutcome `json:"top_repeated,omitempty"`
+	Diagnoses         []codexLoopDiagnosis   `json:"diagnoses"`
 }
 
 type codexRepeatedOutcome struct {
@@ -101,13 +120,32 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 	sessionID := fs.String("session", "", "Codex session id to find under --codex-home/sessions")
 	path := fs.String("path", "", "explicit Codex session JSONL path")
 	codexHome := fs.String("codex-home", "", "Codex home directory (default: $CODEX_HOME or ~/.codex)")
+	recent := fs.Bool("recent", false, "scan recent Codex session JSONL files instead of one path")
+	sinceHours := fs.Float64("since-hours", 24, "with --recent, only scan files modified within N hours (0 = all)")
+	limit := fs.Int("limit", 20, "with --recent, cap sessions scanned after newest-first sorting")
 	asJSON := fs.Bool("json", false, "emit a machine-readable diagnosis")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: fak sessions codex-loop [--session ID | --path FILE] [--codex-home DIR] [--json]")
+		fmt.Fprintln(stderr, "usage: fak sessions codex-loop [--session ID | --path FILE | --recent] [--codex-home DIR] [--json]")
 		fs.PrintDefaults()
 	}
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
+	}
+	if *recent {
+		if strings.TrimSpace(*path) != "" || strings.TrimSpace(*sessionID) != "" {
+			fmt.Fprintln(stderr, "fak sessions codex-loop: --recent cannot be combined with --path or --session")
+			return 2
+		}
+		r, err := diagnoseRecentCodexLoops(*codexHome, *sinceHours, *limit)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak sessions codex-loop: %v\n", err)
+			return 1
+		}
+		if *asJSON {
+			return encodeJSONOrFail(stdout, stderr, r, "fak sessions codex-loop")
+		}
+		fmt.Fprint(stdout, renderCodexLoopRecentReport(r))
+		return 0
 	}
 	if strings.TrimSpace(*path) != "" && strings.TrimSpace(*sessionID) != "" {
 		fmt.Fprintln(stderr, "fak sessions codex-loop: use only one of --path or --session")
@@ -136,6 +174,131 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
+func diagnoseRecentCodexLoops(codexHome string, sinceHours float64, limit int) (codexLoopRecentReport, error) {
+	home, err := resolvedCodexLoopHome(codexHome)
+	if err != nil {
+		return codexLoopRecentReport{}, err
+	}
+	paths, err := discoverRecentCodexLoopSessionPaths(home, sinceHours, limit)
+	if err != nil {
+		return codexLoopRecentReport{}, err
+	}
+	r := codexLoopRecentReport{
+		Schema:     codexLoopRecentSchema,
+		CodexHome:  home,
+		SinceHours: sinceHours,
+		Limit:      normalizedCodexLoopLimit(limit),
+		Verdict:    "OK",
+		Diagnoses:  make([]codexLoopDiagnosis, 0, len(paths)),
+	}
+	for _, path := range paths {
+		fh, err := os.Open(path)
+		if err != nil {
+			return r, fmt.Errorf("open %s: %w", path, err)
+		}
+		d, derr := diagnoseCodexLoop(fh, path)
+		cerr := fh.Close()
+		if derr != nil {
+			return r, fmt.Errorf("diagnose %s: %w", path, derr)
+		}
+		if cerr != nil {
+			return r, fmt.Errorf("close %s: %w", path, cerr)
+		}
+		r.Diagnoses = append(r.Diagnoses, d)
+		r.Scanned++
+		r.ToolCalls += d.ToolCalls
+		r.ToolOutputs += d.ToolOutputs
+		r.LastTokenTotalSum += d.LastTokenTotal
+		switch d.Verdict {
+		case "LOOP":
+			r.LoopCount++
+		case "ACTION":
+			r.ActionCount++
+		default:
+			r.OKCount++
+		}
+		if len(d.RepeatedOutcomes) > 0 {
+			r.TopRepeated = append(r.TopRepeated, d.RepeatedOutcomes[0])
+		}
+	}
+	sort.Slice(r.TopRepeated, func(i, j int) bool {
+		if r.TopRepeated[i].TokenTotal != r.TopRepeated[j].TokenTotal {
+			return r.TopRepeated[i].TokenTotal > r.TopRepeated[j].TokenTotal
+		}
+		if r.TopRepeated[i].Count != r.TopRepeated[j].Count {
+			return r.TopRepeated[i].Count > r.TopRepeated[j].Count
+		}
+		return r.TopRepeated[i].Tool < r.TopRepeated[j].Tool
+	})
+	if len(r.TopRepeated) > 5 {
+		r.TopRepeated = r.TopRepeated[:5]
+	}
+	switch {
+	case r.LoopCount > 0:
+		r.Verdict = "LOOP"
+		r.Reason = "recent_codex_sessions_have_repeated_tool_outputs"
+	case r.ActionCount > 0:
+		r.Verdict = "ACTION"
+		r.Reason = "recent_codex_sessions_have_livelock_advisories"
+	default:
+		r.Verdict = "OK"
+	}
+	return r, nil
+}
+
+func discoverRecentCodexLoopSessionPaths(home string, sinceHours float64, limit int) ([]string, error) {
+	root := filepath.Join(home, "sessions")
+	type candidate struct {
+		path  string
+		mtime time.Time
+	}
+	var cutoff time.Time
+	if sinceHours > 0 {
+		cutoff = time.Now().Add(-time.Duration(sinceHours * float64(time.Hour)))
+	}
+	var matches []candidate
+	walkErr := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".jsonl") {
+			return nil
+		}
+		info, ierr := d.Info()
+		if ierr != nil {
+			return nil
+		}
+		if !cutoff.IsZero() && info.ModTime().Before(cutoff) {
+			return nil
+		}
+		matches = append(matches, candidate{path: p, mtime: info.ModTime()})
+		return nil
+	})
+	if errors.Is(walkErr, os.ErrNotExist) {
+		return nil, nil
+	}
+	if walkErr != nil {
+		return nil, fmt.Errorf("walk %s: %w", root, walkErr)
+	}
+	sort.Slice(matches, func(i, j int) bool { return matches[i].mtime.After(matches[j].mtime) })
+	limit = normalizedCodexLoopLimit(limit)
+	if len(matches) > limit {
+		matches = matches[:limit]
+	}
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		out = append(out, m.path)
+	}
+	return out, nil
+}
+
+func normalizedCodexLoopLimit(limit int) int {
+	if limit <= 0 {
+		return 20
+	}
+	return limit
+}
+
 func resolveCodexLoopSessionPath(codexHome, sessionID, path string) (string, error) {
 	if p := strings.TrimSpace(path); p != "" {
 		return filepath.Clean(expandCodexLoopTilde(p)), nil
@@ -144,24 +307,17 @@ func resolveCodexLoopSessionPath(codexHome, sessionID, path string) (string, err
 	if sessionID == "" {
 		return "", errors.New("need --session ID or --path FILE")
 	}
-	home := strings.TrimSpace(codexHome)
-	if home == "" {
-		home = os.Getenv("CODEX_HOME")
+	home, err := resolvedCodexLoopHome(codexHome)
+	if err != nil {
+		return "", err
 	}
-	if home == "" {
-		userHome, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolve home: %w", err)
-		}
-		home = filepath.Join(userHome, ".codex")
-	}
-	root := filepath.Join(expandCodexLoopTilde(home), "sessions")
+	root := filepath.Join(home, "sessions")
 	type candidate struct {
 		path  string
 		mtime time.Time
 	}
 	var matches []candidate
-	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -186,6 +342,21 @@ func resolveCodexLoopSessionPath(codexHome, sessionID, path string) (string, err
 	}
 	sort.Slice(matches, func(i, j int) bool { return matches[i].mtime.After(matches[j].mtime) })
 	return matches[0].path, nil
+}
+
+func resolvedCodexLoopHome(codexHome string) (string, error) {
+	home := strings.TrimSpace(codexHome)
+	if home == "" {
+		home = os.Getenv("CODEX_HOME")
+	}
+	if home == "" {
+		userHome, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve home: %w", err)
+		}
+		home = filepath.Join(userHome, ".codex")
+	}
+	return filepath.Clean(expandCodexLoopTilde(home)), nil
 }
 
 func expandCodexLoopTilde(path string) string {
@@ -554,6 +725,55 @@ func renderCodexLoopDiagnosis(d codexLoopDiagnosis) string {
 	}
 	if d.NextAction != "" {
 		fmt.Fprintf(&b, "  next action    : %s\n", d.NextAction)
+	}
+	return b.String()
+}
+
+func renderCodexLoopRecentReport(r codexLoopRecentReport) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "fak sessions codex-loop --recent: %s\n", r.CodexHome)
+	fmt.Fprintf(&b, "  verdict        : %s", r.Verdict)
+	if r.Reason != "" {
+		fmt.Fprintf(&b, " (%s)", r.Reason)
+	}
+	b.WriteByte('\n')
+	fmt.Fprintf(&b, "  scope          : scanned=%d limit=%d since_hours=%s\n", r.Scanned, r.Limit, trimFloat(r.SinceHours))
+	fmt.Fprintf(&b, "  session counts : LOOP=%d ACTION=%d OK=%d\n", r.LoopCount, r.ActionCount, r.OKCount)
+	fmt.Fprintf(&b, "  tool traffic   : calls=%d outputs=%d\n", r.ToolCalls, r.ToolOutputs)
+	if r.LastTokenTotalSum > 0 {
+		fmt.Fprintf(&b, "  last-token sum : %d\n", r.LastTokenTotalSum)
+	}
+	if len(r.TopRepeated) > 0 {
+		fmt.Fprintf(&b, "  top repeated outcomes:\n")
+		for _, out := range r.TopRepeated {
+			fmt.Fprintf(&b, "    %s output_digest=%s count=%d longest_run=%d tokens=%d",
+				out.Tool, out.OutputDigest, out.Count, out.LongestRun, out.TokenTotal)
+			if out.ArgsDigestCount > 0 {
+				fmt.Fprintf(&b, " args_digests=%d", out.ArgsDigestCount)
+			}
+			b.WriteByte('\n')
+			if out.OutputExcerpt != "" {
+				fmt.Fprintf(&b, "      output: %s\n", out.OutputExcerpt)
+			}
+		}
+	}
+	if len(r.Diagnoses) > 0 {
+		fmt.Fprintf(&b, "  sessions:\n")
+		for _, d := range r.Diagnoses {
+			label := firstNonEmpty(d.SessionID, filepath.Base(d.Path))
+			fmt.Fprintf(&b, "    %s verdict=%s", label, d.Verdict)
+			if d.Reason != "" {
+				fmt.Fprintf(&b, " reason=%s", d.Reason)
+			}
+			if d.LastTokenTotal > 0 {
+				fmt.Fprintf(&b, " last_tokens=%d", d.LastTokenTotal)
+			}
+			if len(d.RepeatedOutcomes) > 0 {
+				top := d.RepeatedOutcomes[0]
+				fmt.Fprintf(&b, " top=%s:%d", top.Tool, top.Count)
+			}
+			b.WriteByte('\n')
+		}
 	}
 	return b.String()
 }
