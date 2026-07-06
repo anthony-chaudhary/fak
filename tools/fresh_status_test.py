@@ -165,7 +165,7 @@ def test_git_pane_smoke_on_real_repo() -> None:
     pane = fs.git_pane(fs.repo_root())
     # In this repo git is available, so the pane must report a sha + branch.
     assert pane["key"] == "git"
-    assert pane["verdict"] in ("OK", "ERROR")
+    assert pane["verdict"] in ("OK", "ACTION", "ERROR")
     if pane["verdict"] == "OK":
         assert pane["sha"] and isinstance(pane["dirty"], int)
         # Push-lag dimension is always carried; when fully pushed (ahead 0/None)
@@ -173,6 +173,9 @@ def test_git_pane_smoke_on_real_repo() -> None:
         assert "push_lag_seconds" in pane
         if not pane.get("ahead"):
             assert pane["push_lag_seconds"] is None
+        assert "dirty_lag_seconds" in pane
+        if not pane.get("dirty"):
+            assert pane["dirty_lag_seconds"] is None
 
 
 def _git(repo, *args, now_env=None):
@@ -221,13 +224,47 @@ def test_git_pane_push_lag_trips_action(tmp_path=None) -> None:
     assert ok_pane["verdict"] == "OK" and ok_pane["ahead"] == 1
 
 
+def test_git_pane_dirty_lag_trips_action(tmp_path=None) -> None:
+    """An old dirty path trips the git pane to ACTION with a sweep nudge. This is
+    a dirty-mtime signal, not a claim that the hunk is complete."""
+    import os
+    import subprocess
+    import tempfile
+    from datetime import timedelta
+    try:
+        td = tempfile.mkdtemp()
+        repo = Path(td)
+        _git(repo, "init", "-q", "-b", "main")
+        (repo / "a.txt").write_text("a", encoding="utf-8")
+        _git(repo, "add", "a.txt")
+        _git(repo, "commit", "-q", "-m", "A", "--no-gpg-sign")
+        dirty = repo / "b.txt"
+        dirty.write_text("b", encoding="utf-8")
+        old = NOW.timestamp()
+        os.utime(dirty, (old, old))
+    except (OSError, subprocess.SubprocessError):
+        return
+    future = NOW + timedelta(hours=2)
+    pane = fs.git_pane(repo, now=future, dirty_lag_action_seconds=45 * 60)
+    assert pane["dirty"] == 1
+    assert pane["dirty_lag_seconds"] is not None and pane["dirty_lag_seconds"] > 45 * 60
+    assert pane["oldest_dirty_path"] == "b.txt"
+    assert pane["dirty_lag_stale"] is True
+    assert pane["verdict"] == "ACTION" and pane["ok"] is False
+    assert "fak sweep --json" in pane["reason"]
+    ok_pane = fs.git_pane(repo, now=future, dirty_lag_action_seconds=10 ** 9)
+    assert ok_pane["verdict"] == "OK" and ok_pane["dirty_lag_stale"] is False
+
+
 # --- the rollup fold: verdict ladder ----------------------------------------
 
 def _panes(git_v="OK", bench_v="OK", work_v="SKIP", ind_v="OK", *, bench_stale=False) -> list:
     return [
         {"key": "git", "label": "git", "verdict": git_v, "ok": git_v == "OK",
          "reason": "abc (main), clean", "sha": "abc", "branch": "main", "dirty": 0,
-         "ahead": 0, "behind": 0},
+         "ahead": 0, "behind": 0, "push_lag_seconds": None, "oldest_unpushed_ts": None,
+         "dirty_lag_seconds": None, "oldest_dirty_path": None, "oldest_dirty_mtime": None,
+         "push_lag_stale": False, "dirty_lag_stale": False},
         {"key": "benchmarks", "label": "benchmarks", "verdict": bench_v,
          "ok": bench_v == "OK", "reason": "55 runs", "stale": bench_stale,
          "provenance": {"measured": 1, "modeled": 1, "functional": 1, "unknown": 1}, "runs": 55,
@@ -273,11 +310,26 @@ def test_fold_git_push_lag_points_to_push_not_repo_fix() -> None:
     panes = _panes()
     panes[0].update({"verdict": "ACTION", "ok": False, "ahead": 3,
                      "push_lag_seconds": 50 * 60,
+                     "push_lag_stale": True,
                      "reason": "abc (main), clean tree, +3/-0 vs upstream, 3 unpushed, oldest 50m old"})
     out = _fold(panes)
     assert out["verdict"] == "ACTION"
     assert "push to origin" in out["next_action"] and "50m" in out["next_action"]
     assert "not a repo" not in out["next_action"]
+
+
+def test_fold_git_dirty_lag_points_to_sweep() -> None:
+    panes = _panes()
+    panes[0].update({"verdict": "ACTION", "ok": False, "dirty": 7,
+                     "dirty_lag_seconds": 80 * 60,
+                     "oldest_dirty_path": "internal/x/y.go",
+                     "dirty_lag_stale": True,
+                     "reason": "abc (main), 7 dirty, oldest dirty 80m old at internal/x/y.go"})
+    out = _fold(panes)
+    assert out["verdict"] == "ACTION"
+    assert "fak sweep --json" in out["next_action"]
+    assert "internal/x/y.go" in out["next_action"]
+    assert "push to origin" not in out["next_action"]
 
 
 def test_render_lists_every_pane() -> None:

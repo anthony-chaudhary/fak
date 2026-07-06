@@ -17,19 +17,21 @@ standing this minute?".
 
   python tools/fresh_status.py            # human rollup
   python tools/fresh_status.py --json      # machine control-pane payload
-  python tools/fresh_status.py --check     # advisory gate: non-zero only on a
-                                           # HARD failure or stale benchmarks
+  python tools/fresh_status.py --check     # advisory gate: non-zero only on ACTION
   python tools/fresh_status.py --write-doc # regenerate the committed snapshot doc
 
 Four domain panes, each a PURE fold over data that already exists — never a
 re-measure:
 
   * git        — HEAD sha + branch + dirty count + ahead/behind vs upstream + push
-                 lag. The "crystal clear on git" center. A HARD pane (git is ground
-                 truth). Push lag (age of the oldest unpushed commit) is the
-                 keep-git-up-to-date velocity gate: past --push-lag-mins it trips
-                 ACTION, so committed work that silently stopped reaching origin
-                 fails --check instead of sitting unnoticed.
+                 lag + dirty lag. The "crystal clear on git" center. A HARD pane
+                 (git is ground truth). Push lag (age of the oldest unpushed commit)
+                 is the keep-git-up-to-date velocity gate: past --push-lag-mins it
+                 trips ACTION, so committed work that silently stopped reaching
+                 origin fails --check instead of sitting unnoticed. Dirty lag (age
+                 of the oldest dirty path by filesystem mtime) is the matching
+                 uncommitted-backlog nudge: it cannot prove a hunk is complete, so
+                 it points to `fak sweep --json` rather than auto-committing.
   * benchmarks — experiments/benchmark/catalog.json: run/machine counts, newest-run
                  staleness, and a per-benchmark provenance tag via the shared
                  bench_provenance classifier (measured | modeled | functional |
@@ -45,10 +47,11 @@ re-measure:
                  A SOFT pane (the sub-tool can be slow / scan a data dir).
 
 Verdict ladder (mirrors scorecard_control_pane.fold): a HARD pane that errors is
-ACTION; benchmark staleness past the threshold is ACTION; otherwise OK. SOFT
-panes that can't report degrade to SKIP and never trip the rollup. ``--check``
-exits non-zero ONLY on ACTION — the same advisory contract as the scorecard
-ratchet (debt may stay/fall, a gate fails only on a real regression).
+ACTION; benchmark staleness or git freshness lag past the threshold is ACTION;
+otherwise OK. SOFT panes that can't report degrade to SKIP and never trip the
+rollup. ``--check`` exits non-zero ONLY on ACTION — the same advisory contract
+as the scorecard ratchet (debt may stay/fall, a gate fails only on a real
+regression).
 
 Pure-stdlib Python, repo-root resolved like the other honesty gates, no network
 by default. The benchmark/provenance/freshness math is split from the live
@@ -86,6 +89,11 @@ STALE_DAYS = 30
 # stalled or failed push, never on a normal in-flight commit.
 DEFAULT_PUSH_LAG_ACTION_SECONDS = 45 * 60
 
+# Uncommitted dirty work is the commit-side sibling of push lag. This uses path
+# mtimes, not intent, so the action is a nudge to inspect with `fak sweep --json`
+# rather than a claim that every old dirty hunk is ready to commit.
+DEFAULT_DIRTY_LAG_ACTION_SECONDS = 45 * 60
+
 
 def repo_root(start: Path | None = None) -> Path:
     here = (start or Path(__file__)).resolve()
@@ -109,8 +117,35 @@ def head_commit(root: Path) -> str:
     return _git_line(["rev-parse", "--short", "HEAD"], root) or "unknown"
 
 
+def _dirty_paths_from_porcelain(porcelain: str) -> list[str]:
+    paths: list[str] = []
+    for raw in porcelain.splitlines():
+        if not raw.strip() or len(raw) < 4:
+            continue
+        path = raw[3:].strip()
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1].strip()
+        if path:
+            paths.append(path.strip('"'))
+    return paths
+
+
+def _oldest_dirty_path(root: Path, paths: list[str]) -> tuple[str | None, int | None]:
+    oldest_path: str | None = None
+    oldest_ts: int | None = None
+    for rel in paths:
+        try:
+            ts = int((root / rel).stat().st_mtime)
+        except OSError:
+            continue
+        if oldest_ts is None or ts < oldest_ts:
+            oldest_path, oldest_ts = rel, ts
+    return oldest_path, oldest_ts
+
+
 def git_pane(root: Path, *, now: datetime | None = None,
-             push_lag_action_seconds: int = DEFAULT_PUSH_LAG_ACTION_SECONDS) -> dict[str, Any]:
+             push_lag_action_seconds: int = DEFAULT_PUSH_LAG_ACTION_SECONDS,
+             dirty_lag_action_seconds: int = DEFAULT_DIRTY_LAG_ACTION_SECONDS) -> dict[str, Any]:
     """HEAD sha + branch + dirty count + ahead/behind vs upstream + push lag — the center.
 
     A HARD pane: if ``git rev-parse`` cannot answer at all we report ERROR (the
@@ -122,7 +157,9 @@ def git_pane(root: Path, *, now: datetime | None = None,
     also measure how long the OLDEST unpushed commit has been waiting to reach
     origin. Past ``push_lag_action_seconds`` the pane trips ACTION so the rollup
     and ``--check`` nudge a push. ``now`` is injectable so the lag is deterministic
-    in tests.
+    in tests. Dirty lag is the matching uncommitted-backlog signal: path mtimes
+    approximate "work waiting in the tree" and point to `fak sweep --json`, not an
+    automatic commit.
     """
     now = now or datetime.now(timezone.utc)
     sha = _git_line(["rev-parse", "--short", "HEAD"], root)
@@ -133,9 +170,16 @@ def git_pane(root: Path, *, now: datetime | None = None,
             "reason": "git rev-parse HEAD failed — not a repo or git unavailable",
             "sha": None, "branch": None, "dirty": None, "ahead": None, "behind": None,
             "push_lag_seconds": None, "oldest_unpushed_ts": None,
+            "dirty_lag_seconds": None, "oldest_dirty_path": None, "oldest_dirty_mtime": None,
+            "push_lag_stale": False, "dirty_lag_stale": False,
         }
     porcelain = _git_line(["status", "--porcelain"], root)
-    dirty = len([ln for ln in porcelain.splitlines() if ln.strip()]) if porcelain else 0
+    dirty_paths = _dirty_paths_from_porcelain(porcelain)
+    dirty = len(dirty_paths)
+    oldest_dirty_path, oldest_dirty_mtime = _oldest_dirty_path(root, dirty_paths)
+    dirty_lag_seconds = None
+    if oldest_dirty_mtime is not None:
+        dirty_lag_seconds = max(0, int(now.timestamp()) - oldest_dirty_mtime)
     ahead = behind = None
     counts = _git_line(["rev-list", "--left-right", "--count", "@{upstream}...HEAD"], root)
     if counts:
@@ -155,8 +199,18 @@ def git_pane(root: Path, *, now: datetime | None = None,
             oldest_unpushed_ts = min(stamps)
             push_lag_seconds = max(0, int(now.timestamp()) - oldest_unpushed_ts)
     stale_push = push_lag_seconds is not None and push_lag_seconds > push_lag_action_seconds
+    stale_dirty = (dirty_lag_seconds is not None
+                   and dirty_lag_seconds > dirty_lag_action_seconds)
     bits = [f"{sha} ({branch or 'detached'})"]
-    bits.append(f"{dirty} dirty" if dirty else "clean tree")
+    if dirty:
+        bits.append(f"{dirty} dirty")
+        if dirty_lag_seconds is not None:
+            mins = dirty_lag_seconds // 60
+            path = oldest_dirty_path or "unknown"
+            bits.append(f"oldest dirty {mins}m old at {path} — run fak sweep --json"
+                        if stale_dirty else f"oldest dirty {mins}m at {path}")
+    else:
+        bits.append("clean tree")
     if ahead is not None:
         bits.append(f"+{ahead}/-{behind} vs upstream")
     if push_lag_seconds is not None:
@@ -164,12 +218,17 @@ def git_pane(root: Path, *, now: datetime | None = None,
         bits.append(f"{ahead} unpushed, oldest {mins}m old — push to origin"
                     if stale_push else f"{ahead} unpushed, oldest {mins}m")
     return {
-        "key": "git", "label": "git", "ok": not stale_push,
-        "verdict": "ACTION" if stale_push else "OK",
+        "key": "git", "label": "git", "ok": not (stale_push or stale_dirty),
+        "verdict": "ACTION" if stale_push or stale_dirty else "OK",
         "reason": ", ".join(bits),
         "sha": sha, "branch": branch or None, "dirty": dirty,
         "ahead": ahead, "behind": behind,
         "push_lag_seconds": push_lag_seconds, "oldest_unpushed_ts": oldest_unpushed_ts,
+        "dirty_lag_seconds": dirty_lag_seconds,
+        "oldest_dirty_path": oldest_dirty_path,
+        "oldest_dirty_mtime": oldest_dirty_mtime,
+        "push_lag_stale": stale_push,
+        "dirty_lag_stale": stale_dirty,
     }
 
 
@@ -321,8 +380,8 @@ def fold(panes: list[dict[str, Any]], *, workspace: str, commit: str,
          generated_at: str) -> dict[str, Any]:
     """Fold the domain panes into one control-pane payload + verdict.
 
-    HARD failures (a pane with verdict ERROR or a benchmark ACTION) trip the
-    rollup to ACTION; SOFT SKIPs never do. The verdict ladder mirrors
+    HARD failures (a pane with verdict ERROR or ACTION) trip the rollup to
+    ACTION; SOFT SKIPs never do. The verdict ladder mirrors
     scorecard_control_pane.fold so a loop runner reads the same envelope.
     """
     {p["key"]: p for p in panes}
@@ -337,10 +396,17 @@ def fold(panes: list[dict[str, Any]], *, workspace: str, commit: str,
         first = actionable[0]
         if first["key"] == "git" and first.get("verdict") == "ERROR":
             next_action = "fix the git context (not a repo / git unavailable) before trusting any other pane"
-        elif first["key"] == "git":
+        elif first["key"] == "git" and first.get("push_lag_stale"):
             mins = (first.get("push_lag_seconds") or 0) // 60
             next_action = (f"push to origin — {first.get('ahead')} commit(s) have been unpushed "
                            f"for {mins}m; committed work is not reaching the remote")
+        elif first["key"] == "git" and first.get("dirty_lag_stale"):
+            mins = (first.get("dirty_lag_seconds") or 0) // 60
+            path = first.get("oldest_dirty_path") or "unknown path"
+            next_action = (f"run `fak sweep --json` — {first.get('dirty')} dirty path(s), "
+                           f"oldest {mins}m old at {path}; inspect by lane before committing")
+        elif first["key"] == "git":
+            next_action = f"resolve the git pane: {first['reason']}"
         elif first["key"] == "benchmarks" and first.get("stale"):
             next_action = ("refresh the benchmark catalog — run the relevant bench + "
                            "`python tools/bench_catalog.py build`")
@@ -444,13 +510,15 @@ def enrich_catalog_engines(root: Path, catalog: dict[str, Any] | None) -> dict[s
 
 def collect(root: Path, *, python: str = "", timeout: int = 60,
             now: datetime | None = None,
-            push_lag_action_seconds: int = DEFAULT_PUSH_LAG_ACTION_SECONDS
+            push_lag_action_seconds: int = DEFAULT_PUSH_LAG_ACTION_SECONDS,
+            dirty_lag_action_seconds: int = DEFAULT_DIRTY_LAG_ACTION_SECONDS
             ) -> list[dict[str, Any]]:
     """Collect all four domain panes from the live tree (git + 1 file read + 2
     sub-tools). ``now`` is injectable so freshness is deterministic in tests."""
     python = python or sys.executable
     now = now or datetime.now(timezone.utc)
-    git = git_pane(root, now=now, push_lag_action_seconds=push_lag_action_seconds)
+    git = git_pane(root, now=now, push_lag_action_seconds=push_lag_action_seconds,
+                   dirty_lag_action_seconds=dirty_lag_action_seconds)
     bench = fold_benchmarks(enrich_catalog_engines(root, load_catalog(root)), now=now)
     plan_payload, plan_err = run_tool(root, "plan_audit.py", "--json", python=python, timeout=timeout)
     work = fold_work(plan_payload, plan_err)
@@ -528,7 +596,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     ap.add_argument("--check", action="store_true",
-                    help="advisory gate: exit non-zero only on a HARD pane failure or stale benchmarks")
+                    help="advisory gate: exit non-zero only on an ACTION pane")
     ap.add_argument("--write-doc", action="store_true",
                     help="regenerate the committed snapshot note under docs/notes/")
     ap.add_argument("--date", default="", help="snapshot date YYYY-MM-DD for --write-doc (default: today UTC)")
@@ -536,6 +604,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--push-lag-mins", type=int, default=DEFAULT_PUSH_LAG_ACTION_SECONDS // 60,
                     help="trip the git pane to ACTION when the oldest unpushed commit is older "
                          "than this many minutes (the keep-git-up-to-date velocity gate)")
+    ap.add_argument("--dirty-lag-mins", type=int, default=DEFAULT_DIRTY_LAG_ACTION_SECONDS // 60,
+                    help="trip the git pane to ACTION when the oldest dirty path mtime is older "
+                         "than this many minutes (advisory: inspect with fak sweep --json)")
     args = ap.parse_args(argv)
 
     try:
@@ -546,7 +617,8 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(args.workspace).resolve() if args.workspace else repo_root()
     now = datetime.now(timezone.utc)
     panes = collect(root, timeout=args.timeout, now=now,
-                    push_lag_action_seconds=max(0, args.push_lag_mins) * 60)
+                    push_lag_action_seconds=max(0, args.push_lag_mins) * 60,
+                    dirty_lag_action_seconds=max(0, args.dirty_lag_mins) * 60)
     payload = fold(panes, workspace=str(root), commit=head_commit(root),
                    generated_at=now.strftime("%Y-%m-%dT%H:%M:%SZ"))
 
