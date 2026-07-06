@@ -352,9 +352,19 @@ func isSweepJunk(e dirtyEntry) bool {
 	if rootLevel && isPrivateUseOnly(base) {
 		return true
 	}
+	baseLower := strings.ToLower(base)
+	// Root command-output spills are one-off shell artifacts, not source lanes. Keep this root-only:
+	// experiments/testdata logs can be deliberate evidence and are handled by lane ownership.
+	if rootLevel {
+		for _, suf := range []string{".err", ".out", ".log", ".tmp", "_out.json", "_err.json", "_output.json"} {
+			if strings.HasSuffix(baseLower, suf) {
+				return true
+			}
+		}
+	}
 	// Captured per-run stdio logs left behind in an experiment dir.
 	for _, suf := range []string{".run.err", ".run.out", ".run.log"} {
-		if strings.HasSuffix(base, suf) {
+		if strings.HasSuffix(baseLower, suf) {
 			return true
 		}
 	}
