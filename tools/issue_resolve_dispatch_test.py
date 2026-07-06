@@ -2015,14 +2015,16 @@ class BuildWorkerCommandTest(unittest.TestCase):
         mod = load()
         self.assertEqual(
             mod.build_worker_command("opencode", "PROMPT", "zai-coding-plan/glm-5.2"),
-            ["opencode", "run", "--print-logs", "--dangerously-skip-permissions",
+            ["opencode", "run", "--pure", "--print-logs",
+             "--dangerously-skip-permissions",
              "-m", "zai-coding-plan/glm-5.2", mod.OPENCODE_PROMPT_NOTICE])
 
     def test_opencode_command_without_model(self) -> None:
         mod = load()
         self.assertEqual(
             mod.build_worker_command("opencode", "PROMPT", None),
-            ["opencode", "run", "--print-logs", "--dangerously-skip-permissions",
+            ["opencode", "run", "--pure", "--print-logs",
+             "--dangerously-skip-permissions",
              mod.OPENCODE_PROMPT_NOTICE])
 
     def test_opencode_command_keeps_full_prompt_out_of_argv(self) -> None:
@@ -2036,10 +2038,11 @@ class BuildWorkerCommandTest(unittest.TestCase):
     def test_opencode_prompt_file_is_attached_before_notice(self) -> None:
         mod = load()
         got = mod.attach_opencode_prompt_file(
-            ["opencode", "run", "--print-logs", "-m", "glm", mod.OPENCODE_PROMPT_NOTICE],
+            ["opencode", "run", "--pure", "--print-logs", "-m", "glm",
+             mod.OPENCODE_PROMPT_NOTICE],
             r"C:\work\fak\.dispatch-runs\resolve-2588.prompt.txt")
         self.assertEqual(got, [
-            "opencode", "run", "--print-logs", "-m", "glm",
+            "opencode", "run", "--pure", "--print-logs", "-m", "glm",
             "--file", r"C:\work\fak\.dispatch-runs\resolve-2588.prompt.txt",
             "--", mod.OPENCODE_PROMPT_NOTICE])
 

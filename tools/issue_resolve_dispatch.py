@@ -1401,7 +1401,11 @@ def build_worker_command(backend: str, prompt: str, model: str | None,
         # Keep the full dispatch prompt out of argv. The live spawn path writes it
         # beside the log and attaches it with ``--file``; this short notice keeps
         # process listings small while preserving the issue-worker liveness marker.
-        cmd = ["opencode", "run", "--print-logs", "--dangerously-skip-permissions"]
+        # Detached issue workers should not inherit account/project MCP tools; the
+        # built-in tool path still runs through fak guard, and --pure avoids a model
+        # spending the first turn on plugin tools that the guard will refuse.
+        cmd = ["opencode", "run", "--pure", "--print-logs",
+               "--dangerously-skip-permissions"]
         if model:
             cmd += ["-m", model]  # pin the exact model so the run is reproducible/traced
         cmd.append(OPENCODE_PROMPT_NOTICE)
