@@ -35,15 +35,17 @@ import (
 func cmdSweep(argv []string) { os.Exit(runSweep(os.Stdout, os.Stderr, argv)) }
 
 // runSweep is the `fak sweep` shim. Default: enumerate the dirty tree, group it by lane, and
-// REPORT the plan (text, or --json for a loop). With --apply --lane L -m S it commits exactly
-// lane L's dirty paths (optionally narrowed by --path) through the safe-commit path. Exit codes
-// mirror `fak commit`: 0 ok, 2 usage, 3 a pre-commit refusal, 1 a raced/failed commit.
+// REPORT the plan (text, or --json for a loop). With --clean-junk it removes only freshly
+// classified junk files. With --apply --lane L -m S it commits exactly lane L's dirty paths
+// (optionally narrowed by --path) through the safe-commit path. Exit codes mirror `fak commit`:
+// 0 ok, 2 usage, 3 a pre-commit refusal, 1 a raced/failed commit or cleanup failure.
 func runSweep(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("sweep", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	verbFlagUsage(fs, "sweep")
 	dir := fs.String("dir", "", "repo directory (default: discover from cwd)")
 	asJSON := fs.Bool("json", false, "emit the plan as JSON")
+	cleanJunk := fs.Bool("clean-junk", false, "remove only paths freshly classified as junk files, then report what changed")
 	apply := fs.Bool("apply", false, "commit one lane group (requires --lane and -m); default is plan-only")
 	lane := fs.String("lane", "", "with --apply: the lane to commit")
 	unit := fs.Int("unit", 0, "with --apply: commit only sub-unit N of the lane (from groups[].units[].index; 0 = the whole lane)")
@@ -62,6 +64,10 @@ func runSweep(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak sweep: could not resolve a git repo root (pass --dir)")
 		return 2
 	}
+	if *cleanJunk && *apply {
+		fmt.Fprintln(stderr, "fak sweep: --clean-junk and --apply are separate actions; run one at a time")
+		return 2
+	}
 
 	entries, err := gitStatusDirty(ctx(), root)
 	if err != nil {
@@ -74,6 +80,21 @@ func runSweep(stdout, stderr io.Writer, argv []string) int {
 	}
 	plan := classifyDirty(entries, hooksLaneResolver(root), origin)
 
+	if *cleanJunk {
+		res := cleanSweepJunk(root, plan)
+		if *asJSON {
+			if err := writeIndentedJSON(stdout, res); err != nil {
+				fmt.Fprintf(stderr, "fak sweep --clean-junk: %v\n", err)
+				return 1
+			}
+		} else {
+			renderSweepCleanJunk(stdout, res)
+		}
+		if !res.OK {
+			return 1
+		}
+		return 0
+	}
 	if *apply {
 		return runSweepApply(stdout, stderr, root, plan, *lane, *msg, only, *unit, *push)
 	}
@@ -86,6 +107,118 @@ func runSweep(stdout, stderr io.Writer, argv []string) int {
 	}
 	renderSweepPlan(stdout, plan)
 	return 0
+}
+
+type sweepCleanJunkResult struct {
+	OK         bool                    `json:"ok"`
+	Removed    []string                `json:"removed,omitempty"`
+	Skipped    []string                `json:"skipped,omitempty"`
+	Refused    []sweepCleanJunkRefusal `json:"refused,omitempty"`
+	NextAction string                  `json:"next_action,omitempty"`
+}
+
+type sweepCleanJunkRefusal struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+	Detail string `json:"detail,omitempty"`
+}
+
+func cleanSweepJunk(root string, plan sweepPlan) sweepCleanJunkResult {
+	res := sweepCleanJunkResult{OK: true}
+	if len(plan.Junk) == 0 {
+		res.NextAction = "no junk paths classified; run `fak sweep --json` to inspect remaining work"
+		return res
+	}
+	for _, e := range plan.Junk {
+		full, ok, reason := sweepCleanPath(root, e.Path)
+		if !ok {
+			res.Refused = append(res.Refused, sweepCleanJunkRefusal{Path: e.Path, Reason: "unsafe_path", Detail: reason})
+			continue
+		}
+		st, err := os.Lstat(full)
+		if err != nil {
+			if os.IsNotExist(err) {
+				res.Skipped = append(res.Skipped, e.Path)
+				continue
+			}
+			res.Refused = append(res.Refused, sweepCleanJunkRefusal{Path: e.Path, Reason: "stat_failed", Detail: err.Error()})
+			continue
+		}
+		if st.IsDir() {
+			res.Refused = append(res.Refused, sweepCleanJunkRefusal{
+				Path:   e.Path,
+				Reason: "directory_refused",
+				Detail: "sweep only deletes junk files; inspect and remove directories by hand",
+			})
+			continue
+		}
+		if err := os.Remove(full); err != nil {
+			res.Refused = append(res.Refused, sweepCleanJunkRefusal{Path: e.Path, Reason: "remove_failed", Detail: err.Error()})
+			continue
+		}
+		res.Removed = append(res.Removed, e.Path)
+	}
+	res.OK = len(res.Refused) == 0
+	if res.OK {
+		res.NextAction = "rerun `fak sweep --json` to inspect remaining work"
+	} else {
+		res.NextAction = "inspect refused junk paths, then rerun `fak sweep --json`"
+	}
+	return res
+}
+
+func sweepCleanPath(root, path string) (string, bool, string) {
+	norm := normSweepPath(path)
+	if strings.TrimSpace(norm) == "" {
+		return "", false, "empty path"
+	}
+	cleanRel := filepath.Clean(filepath.FromSlash(norm))
+	if filepath.IsAbs(cleanRel) || cleanRel == "." || cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+string(filepath.Separator)) {
+		return "", false, "path escapes the repository"
+	}
+	full := filepath.Join(root, cleanRel)
+	absRoot, rootErr := filepath.Abs(root)
+	absFull, fullErr := filepath.Abs(full)
+	if rootErr != nil || fullErr != nil {
+		return "", false, "could not resolve absolute path"
+	}
+	rel, err := filepath.Rel(absRoot, absFull)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false, "path escapes the repository"
+	}
+	return full, true, ""
+}
+
+func renderSweepCleanJunk(w io.Writer, res sweepCleanJunkResult) {
+	if len(res.Removed) == 0 && len(res.Skipped) == 0 && len(res.Refused) == 0 {
+		fmt.Fprintln(w, "no junk paths classified")
+	} else {
+		if len(res.Removed) > 0 {
+			fmt.Fprintf(w, "removed %d junk path(s):\n", len(res.Removed))
+			for _, p := range res.Removed {
+				fmt.Fprintf(w, "  %s\n", p)
+			}
+		}
+		if len(res.Skipped) > 0 {
+			fmt.Fprintf(w, "skipped %d already-gone junk path(s):\n", len(res.Skipped))
+			for _, p := range res.Skipped {
+				fmt.Fprintf(w, "  %s\n", p)
+			}
+		}
+		if len(res.Refused) > 0 {
+			fmt.Fprintf(w, "refused %d junk path(s):\n", len(res.Refused))
+			for _, r := range res.Refused {
+				detail := ""
+				if r.Detail != "" {
+					detail = " - " + r.Detail
+				}
+				fmt.Fprintf(w, "  %s  %s%s\n", r.Path, r.Reason, detail)
+			}
+		}
+	}
+	if res.NextAction != "" {
+		fmt.Fprintf(w, "next: %s\n", res.NextAction)
+	}
 }
 
 // runSweepApply commits one lane group — or one directory-coherent sub-unit of it — through the

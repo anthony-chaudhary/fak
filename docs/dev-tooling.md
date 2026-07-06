@@ -188,6 +188,7 @@ path.
 
 ```bash
 fak sweep                                        # group the dirty tree by lane; --json for a loop
+fak sweep --clean-junk                           # optional: remove only classified junk files you own
 make test-fast                                   # green the smoke tier first
 fak commit --preview -m "<subject>" --path <p>   # lint the first subject/stamp before git is touched
 fak commit --path <p> -m "<subject>"             # preferred commit path for a narrow change
@@ -207,6 +208,9 @@ stamp/lane mismatch up front, which is the only place you can fix them on a shar
 trunk. `fak sweep --apply --lane <lane> -m "<subj>"` is the layer above it for a
 dirty tree: it reuses the same lane resolver, appends the `(fak <lane>)` trailer when
 needed, and commits exactly that lane's dirty paths through the safe-commit path.
+When the sweep report starts with junk, `fak sweep --clean-junk` removes only
+freshly classified junk files and refuses directories or unsafe paths; rerun
+`fak sweep --json` afterward before committing lane work.
 Publish finished work with `fak sync push`; it is the push-side sibling of
 `fak sync check/apply`, so moving-trunk races get retried without pull/stash/reset,
 and the output still reports the remaining dirty-tree next action.

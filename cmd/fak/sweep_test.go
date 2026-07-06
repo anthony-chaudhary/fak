@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -82,7 +84,7 @@ func TestSweepNextActionPriority(t *testing.T) {
 		want string
 	}{
 		{"clean", sweepPlan{}, "working tree is clean"},
-		{"junk first", sweepPlan{TotalDirty: 2, Junk: []sweepEntry{{dirtyEntry: dirtyEntry{Path: "wave.err"}}}, Groups: []sweepGroup{{Lane: "docs", Paths: []string{"docs/a.md"}}}}, "remove 1 junk path(s)"},
+		{"junk first", sweepPlan{TotalDirty: 2, Junk: []sweepEntry{{dirtyEntry: dirtyEntry{Path: "wave.err"}}}, Groups: []sweepGroup{{Lane: "docs", Paths: []string{"docs/a.md"}}}}, "`fak sweep --clean-junk`"},
 		{"no lane before stampable", sweepPlan{TotalDirty: 2, NoLane: []sweepEntry{{dirtyEntry: dirtyEntry{Path: "TODO"}}}, Groups: []sweepGroup{{Lane: "docs", Paths: []string{"docs/a.md"}}}}, "inspect 1 no-lane path(s)"},
 		{"unit first", sweepPlan{TotalDirty: 11, Groups: []sweepGroup{{Lane: "docs", Paths: []string{"docs/a.md"}, Units: []sweepSubUnit{{Index: 1, Paths: []string{"docs/a.md"}}}}}}, "--lane docs --unit 1"},
 		{"lane group", sweepPlan{TotalDirty: 1, Groups: []sweepGroup{{Lane: "docs", Paths: []string{"docs/a.md"}}}}, "--apply --lane docs -m"},
@@ -94,6 +96,92 @@ func TestSweepNextActionPriority(t *testing.T) {
 				t.Fatalf("sweepNextAction = %q, want substring %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRunSweepCleanJunkJSONRemovesClassifiedJunk(t *testing.T) {
+	root := t.TempDir()
+	sweepGit(t, root, "init")
+	junk := filepath.Join(root, "wave.err")
+	if err := os.WriteFile(junk, []byte("stderr\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runSweep(&out, &errb, []string{"--dir", root, "--clean-junk", "--json", "--no-origin"})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%s stdout=%s", code, errb.String(), out.String())
+	}
+	var got sweepCleanJunkResult
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode clean-junk JSON: %v\n%s", err, out.String())
+	}
+	if !got.OK || len(got.Removed) != 1 || got.Removed[0] != "wave.err" {
+		t.Fatalf("result = %+v, want wave.err removed", got)
+	}
+	if _, err := os.Stat(junk); !os.IsNotExist(err) {
+		t.Fatalf("wave.err still exists or stat failed unexpectedly: %v", err)
+	}
+	if !strings.Contains(got.NextAction, "fak sweep --json") {
+		t.Fatalf("next action = %q, want rerun sweep", got.NextAction)
+	}
+}
+
+func TestCleanSweepJunkRefusesDirectoriesAndEscapes(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "capture.log"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(root, "..", "outside.err")
+	plan := sweepPlan{Junk: []sweepEntry{
+		{dirtyEntry: dirtyEntry{Path: "capture.log"}},
+		{dirtyEntry: dirtyEntry{Path: "../outside.err"}},
+		{dirtyEntry: dirtyEntry{Path: filepath.ToSlash(outside)}},
+	}}
+	got := cleanSweepJunk(root, plan)
+	if got.OK {
+		t.Fatalf("result unexpectedly OK: %+v", got)
+	}
+	if len(got.Refused) != 3 {
+		t.Fatalf("refused = %+v, want directory plus two unsafe paths", got.Refused)
+	}
+	if got.Refused[0].Reason != "directory_refused" {
+		t.Fatalf("first refusal = %+v, want directory_refused", got.Refused[0])
+	}
+	if got.Refused[1].Reason != "unsafe_path" || got.Refused[2].Reason != "unsafe_path" {
+		t.Fatalf("escape refusals = %+v, want unsafe_path", got.Refused)
+	}
+	if _, err := os.Stat(filepath.Join(root, "capture.log")); err != nil {
+		t.Fatalf("directory should remain for manual inspection: %v", err)
+	}
+}
+
+func TestRenderSweepCleanJunkText(t *testing.T) {
+	var out bytes.Buffer
+	renderSweepCleanJunk(&out, sweepCleanJunkResult{
+		OK:      false,
+		Removed: []string{"wave.err"},
+		Skipped: []string{"route.err"},
+		Refused: []sweepCleanJunkRefusal{{
+			Path:   "capture.log",
+			Reason: "directory_refused",
+			Detail: "manual inspection required",
+		}},
+		NextAction: "inspect refused junk paths, then rerun `fak sweep --json`",
+	})
+	got := out.String()
+	for _, want := range []string{
+		"removed 1 junk path(s):",
+		"  wave.err",
+		"skipped 1 already-gone junk path(s):",
+		"  route.err",
+		"refused 1 junk path(s):",
+		"  capture.log  directory_refused - manual inspection required",
+		"next: inspect refused junk paths, then rerun `fak sweep --json`",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered text missing %q:\n%s", want, got)
+		}
 	}
 }
 
@@ -724,5 +812,15 @@ func TestRunSweepApplyValidation(t *testing.T) {
 	// Unknown lane -> pre-commit refusal (3).
 	if code := runSweepApply(&out, &errb, t.TempDir(), plan, "gateway", "feat: x", nil, 0, false); code != 3 {
 		t.Fatalf("unknown lane: exit = %d, want 3", code)
+	}
+}
+
+func sweepGit(t *testing.T, cwd string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = cwd
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v in %s: %v\n%s", args, cwd, err, out)
 	}
 }

@@ -201,7 +201,7 @@ func sweepNextAction(plan sweepPlan) string {
 		return "working tree is clean; nothing to sweep"
 	}
 	if len(plan.Junk) > 0 {
-		return fmt.Sprintf("remove %d junk path(s) if you own them, then rerun `fak sweep --json`", len(plan.Junk))
+		return fmt.Sprintf("remove %d junk path(s) with `fak sweep --clean-junk` if you own them, then rerun `fak sweep --json`", len(plan.Junk))
 	}
 	if len(plan.NoLane) > 0 {
 		return fmt.Sprintf("inspect %d no-lane path(s); commit each with `fak commit --path <path> ...` or remove it if it is scratch", len(plan.NoLane))

@@ -62,7 +62,7 @@ const usageCoreText = `usage:
                  {"edits":[{"path":"p","content":"..."},{"path":"q","delete":true}],
                  "checks":["go test ./pkg"]}. Exit 0 applied/dry-run OK, 1 rolled back
                  or refused, 2 usage.)
-  fak sweep     [--dir DIR] [--json] | --apply --lane L -m "SUBJECT" [--path P ...] [--push]
+  fak sweep     [--dir DIR] [--json] | --clean-junk [--json] | --apply --lane L -m "SUBJECT" [--path P ...] [--push]
                 (DRIVE A DIRTY MULTI-SESSION TREE TOWARD ZERO: the layer above fak commit.
                  Default mode REPORTS the working tree grouped by lane — every stampable
                  change under the (fak <leaf>) trailer its paths imply (the SAME dos.toml
@@ -71,10 +71,11 @@ const usageCoreText = `usage:
                  no inferable lane. It never invents a subject — with --apply --lane L -m S it
                  commits exactly lane L's dirty paths (narrow with --path) through the safe
                  commit path (appends the (fak L) stamp, pre-lints, refuses OFF_TRUNK / a
-                 pathspec race / an off-lane stamp). Each lane group carries a score and
-                 score notes for batch-size/mixed-status/untracked/deletion risk; --json
-                 feeds a drive-to-zero loop.
-                 Exit 0 ok, 2 usage, 3 a pre-commit refusal, 1 a raced/failed commit)
+                 pathspec race / an off-lane stamp). With --clean-junk it removes only the
+                 freshly classified junk FILE paths and refuses directories/unsafe paths; use it
+                 only when you own the junk. Each lane group carries a score and score notes for
+                 batch-size/mixed-status/untracked/deletion risk; --json feeds a drive-to-zero loop.
+                 Exit 0 ok, 2 usage, 3 a pre-commit refusal, 1 cleanup/raced/failed commit)
   fak sync      [check|apply|push] [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
                 (SAFE SYNC/PUSH for a dirty shared worktree. check is read-only except
                  optional --fetch and reports the dirty-tree sweep next action. apply
