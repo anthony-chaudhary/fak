@@ -81,6 +81,24 @@ Alias resolution fails closed unless `fak lab readiness --json` is `READY_FOR_DE
 the local target config exists, and scrubbed reports contain a fresh healthy
 `inference.ready`/`inference.degraded` row for the requested model.
 
+A status 200 is not enough: a route can answer and still be too slow to develop on.
+The resolver applies a scrubbed **latency budget** (default 30s) to the fresh report's
+`probe_latency_ms`. A `ready` row whose probe latency exceeds the budget resolves to
+`LATENCY_DEGRADED` with next action
+`route-latency-exceeds-dev-budget-refresh-report-or-use-fallback`, `fak lab readiness`
+holds lab-backed dispatch closed instead of advertising `READY_FOR_DEV_WORK`, and
+`fak guard --remote-serve @lab/glm-5.2` refuses the alias with `LAB_TARGET_NOT_READY`
+rather than binding a route a coding worker cannot use. The producer records the scrubbed
+sample when self-reporting the box:
+
+```bash
+fak lab report --id mac-a --state live \
+  --inference ready --engine fak --model glm-5.2 --probe-latency-ms 143737
+```
+
+`fak lab target @lab/glm-5.2 --json` echoes the decision as `latency_budget_ms` and
+`probe_latency_ms` so the degraded status is visible without printing route coordinates.
+
 Because `--remote-serve` forces the OpenAI-compatible wire, the wrapped agent must be one
 that reads `OPENAI_BASE_URL` (Codex, OpenCode, Aider) — not Claude Code, which speaks the
 Anthropic wire (guard rejects `--remote-serve` with `--provider anthropic`).
@@ -224,6 +242,16 @@ Use `ready` or `degraded` only when the serving stack can take inference work. U
 `warming`, `blocked`, or `unknown` when it cannot. The model/engine/reason labels must stay
 generic; never publish a URL, host, channel id, token, private model path, or raw bridge
 transcript.
+
+When you have a scrubbed end-to-end probe latency, record it with `--probe-latency-ms`.
+A `ready`/`degraded` box whose sample exceeds the developer-useful budget (default 30s) is
+held out of `READY_FOR_DEV_WORK` and surfaced as a latency-degraded route, so a 200-but-slow
+lane never advertises itself as usable:
+
+```bash
+fak lab report --id mac-a --state live \
+  --inference ready --engine fak --model glm-5.2 --probe-latency-ms 143737
+```
 
 After reports are populated, derive the dispatch gate from the scrubbed status instead of
 hand-marking readiness:
