@@ -319,6 +319,29 @@ class RealCatalogSmokeTest(unittest.TestCase):
         self.assertLessEqual(set(declared), set(MOD.KINDS),
                              "every catalog-declared workload_kind must be schedulable by the planner")
 
+    def test_concept_benchmark_surfaces_as_a_coverage_cell_in_real_catalog(self):
+        # #2740 DoD acceptance ("a planner run showing the new workload-kind cell"),
+        # pinned as a regression witness: fold the REAL catalog and assert the planner
+        # surfaces a feasible concept-benchmark coverage cell on at least one bench-node
+        # and names it in the rendered plan doc. The synth-catalog test above proves the
+        # surfacing LOGIC; this guards the live catalog+registry wiring from silently
+        # dropping the cell (e.g. a dropped workload_kinds entry or KIND_META row).
+        path = ROOT / "experiments" / "benchmark" / "catalog.json"
+        cat = MOD.load_catalog(path)
+        if cat is None:
+            self.skipTest("real catalog not present")
+        p = MOD.build_plan(cat, now=MOD.parse_stamp(NOW), machine_filter=None,
+                           intent_filter="all", top=10, recheck_days=dict(MOD.RECHECK_DAYS),
+                           stale_horizon=14)
+        cells = [cell for mm in p["matrix"].values()
+                 for k, cell in mm.items() if k == "concept-benchmark"]
+        self.assertTrue(cells, "the real catalog produced no concept-benchmark cell")
+        self.assertTrue(any(c.get("feasible") for c in cells),
+                        "concept-benchmark must be feasible on at least one bench-node "
+                        "(it is hardware-agnostic: no CUDA / served-coding-model gate)")
+        self.assertIn("concept-benchmark", MOD.render_md(p),
+                      "the rendered plan doc must name the concept-benchmark workload-kind")
+
 
 if __name__ == "__main__":
     unittest.main()
