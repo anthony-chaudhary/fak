@@ -92,10 +92,18 @@ type Index struct {
 	entries []entry
 }
 
-// Add stores a vector under id with optional metadata. A repeated id is appended,
-// not replaced — the caller owns id uniqueness; TopK can legitimately return the
-// same logical item twice if it was added twice.
+// Add stores a vector under id with optional metadata. Re-adding an existing id
+// replaces the stored entry in place (#2504): an index rebuilt from overlapping
+// reads — paged gh output, an upsert-style corpus — must never hold two vectors
+// for one logical item, or TopK double-reports it. The scan is linear, like TopK;
+// corpora here are thousands of rows, not millions.
 func (ix *Index) Add(id string, v Vector, meta string) {
+	for i := range ix.entries {
+		if ix.entries[i].id == id {
+			ix.entries[i] = entry{id: id, meta: meta, vec: v}
+			return
+		}
+	}
 	ix.entries = append(ix.entries, entry{id: id, meta: meta, vec: v})
 }
 

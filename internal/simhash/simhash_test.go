@@ -135,6 +135,28 @@ func TestTopKDeterministicTieBreak(t *testing.T) {
 	}
 }
 
+// TestIndexAddReplacesRepeatedID — re-adding an id replaces the stored entry
+// instead of appending a twin (#2504): an index rebuilt from overlapping paged
+// reads must not report one logical item twice from TopK.
+func TestIndexAddReplacesRepeatedID(t *testing.T) {
+	var ix Index
+	ix.AddText("42", "original wording of the stored issue", "old")
+	ix.AddText("42", "a completely different replacement text", "new")
+	if ix.Len() != 1 {
+		t.Fatalf("len = %d, want 1 after repeated-id Add", ix.Len())
+	}
+	got := ix.TopK(Embed("a completely different replacement text"), 0)
+	if len(got) != 1 {
+		t.Fatalf("topk len = %d, want 1: %+v", len(got), got)
+	}
+	if got[0].ID != "42" || got[0].Meta != "new" {
+		t.Fatalf("surviving entry = %+v, want the replacement (id 42, meta new)", got[0])
+	}
+	if got[0].Score < 0.999 {
+		t.Fatalf("replacement vector not stored: self-similarity %.3f", got[0].Score)
+	}
+}
+
 // TestTopKAllWhenKExceedsLen — k larger than the corpus returns the whole corpus,
 // ranked, rather than truncating or padding.
 func TestTopKAllWhenKExceedsLen(t *testing.T) {
