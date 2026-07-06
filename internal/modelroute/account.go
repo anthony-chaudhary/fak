@@ -397,6 +397,8 @@ func (r Roster) ResolveDecision(d Decision) (ResolvedPlan, error) { return r.Res
 //     reserved local token; a known kind; a credential reference that is an env-var
 //     NAME (not a pasted secret); a remote account carries a credential, a LOCAL
 //     account carries a loopback base_url and no remote host (the residency invariant);
+//     each rate-limit field non-negative, and no per-minute ceiling above its per-day
+//     counterpart (a 0 per-day = unlimited exempts the request-gated-only profile);
 //   - each binding: a non-empty, delimiter-free model bound to a real account, unique
 //     per model id, with an upstream that may carry provider namespace slashes but
 //     not the route's kind delimiter or whitespace;
@@ -443,6 +445,19 @@ func (r Roster) Validate() error {
 		}
 		if a.TokensPerDay < 0 {
 			return fmt.Errorf("modelroute: account %q tokens_per_day must be non-negative", a.ID)
+		}
+		// A per-minute ceiling above its per-day ceiling is internally contradictory —
+		// the minute cap could never be reached without breaching the day cap first, so
+		// the pair describes no real budget. A zero per-day field is "no daily cap"
+		// (unlimited), under which ANY minute cap is consistent: that is the
+		// request-gated-only / tokens-unlimited profile, so it stays exempt.
+		if a.RequestsPerDay > 0 && a.RequestsPerMinute > a.RequestsPerDay {
+			return fmt.Errorf("modelroute: account %q requests_per_minute (%d) exceeds requests_per_day (%d) — the minute ceiling cannot be higher than the whole-day ceiling",
+				a.ID, a.RequestsPerMinute, a.RequestsPerDay)
+		}
+		if a.TokensPerDay > 0 && a.TokensPerMinute > a.TokensPerDay {
+			return fmt.Errorf("modelroute: account %q tokens_per_minute (%d) exceeds tokens_per_day (%d) — the minute ceiling cannot be higher than the whole-day ceiling",
+				a.ID, a.TokensPerMinute, a.TokensPerDay)
 		}
 		if a.CredEnv != "" && !envNameRE.MatchString(a.CredEnv) {
 			return fmt.Errorf("modelroute: account %q cred_env %q is not an env-var name "+

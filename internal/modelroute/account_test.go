@@ -251,6 +251,12 @@ func TestValidateRejections(t *testing.T) {
 		"negative tokens per day": {
 			Accounts: []Account{{ID: "a", Kind: KindOpenAI, CredEnv: "K", TokensPerDay: -1}},
 		},
+		"requests per minute above requests per day": {
+			Accounts: []Account{{ID: "a", Kind: KindOpenAI, CredEnv: "K", RequestsPerMinute: 1000, RequestsPerDay: 250}},
+		},
+		"tokens per minute above tokens per day": {
+			Accounts: []Account{{ID: "a", Kind: KindOpenAI, CredEnv: "K", TokensPerMinute: 400000, TokensPerDay: 200000}},
+		},
 		"upstream model with colon delimiter": {
 			Accounts: []Account{{ID: "a", Kind: KindOpenAI, CredEnv: "K"}},
 			Bindings: []Binding{{Model: "x", Account: "a", UpstreamModel: "bad:model"}},
