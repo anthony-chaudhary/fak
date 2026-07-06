@@ -1,15 +1,36 @@
 # GLM-5.2 compile-cache persistence contract (#3052), 2026-07-06
 
-**Status:** specification + generation classification. The runtime implementation
-is **not yet shipped and not yet witnessed** — this note pins the exact contract a
-follow-on serve/infra pass implements in one shot, and classifies #3052's horizon
-so it can be dispatched. It does not itself make a second boot fast; it names the
-witness that would.
+**Status:** contract + runtime mechanism shipped (L1 + L3); acceptance witness (L4)
+still open. The tuple-keyed cache pinning and the `COMPILE_CACHE hit|rebuild`
+operator readout now ship in the serve wrapper, and the key/state seam is unit-
+tested in Go. What is **not yet witnessed** is the payoff: a two-boot dogfood on
+real GPU hardware showing boot2 ≪ boot1. This note pins the contract, records the
+shipped slices, and names the remaining witness — it does not itself make a second
+boot fast on a host with no accelerator.
 
-**Scope of this pass:** triage-only. #3052 routed to the `docs` lane and carried no
-generation label and no milestone (intake drift). The deliverable here is the
-classification + the implementable contract; the code lands under the serve/infra
-lanes named in [Decomposition](#decomposition).
+**Implementation status (2026-07-06).**
+
+- **Shipped — L1 (serve wrapper).** `tools/glm52_sglang_vllm_serve.sh` now derives
+  the tuple key, pins `TORCHINDUCTOR_CACHE_DIR` / `TRITON_CACHE_DIR` /
+  `DG_JIT_CACHE_DIR` (+ legacy `DG_CACHE_DIR`) / `VLLM_CACHE_ROOT` / `HF_HUB_CACHE`
+  under `${PERSIST_ROOT}/${CACHE_KEY}`, and prints the `COMPILE_CACHE hit|rebuild`
+  readout before launch. Gated behind `COMPILE_CACHE_PERSIST` (default on, opt-out).
+- **Shipped — L3 (bench/gate seam).** `internal/vllmcompile.CacheTuple.Key()`,
+  `NormalizeArch`, `Readout`, and `Block.WithCacheTuple` make the operator readout
+  and the tuned-baseline gate read one key; the wrapper's shell key is
+  byte-identical to `CacheTuple.Key()` and both are pinned by `cachekey_test.go`.
+- **Open — L2 (persist the store).** `scripts/gcp-glm-serve.sh` must mount a
+  persistent disk at `PERSIST_ROOT` (or bake a pre-warmed cache into the serve
+  image); until then the wrapper's default `PERSIST_ROOT` is repo-local and does
+  **not** survive a VM re-create — it warns when so.
+- **Open — L4 (acceptance witness).** A two-boot dogfood on a fixed tuple showing
+  boot2 ≪ boot1, plus a tuple-change forcing an observed rebuild. Needs a real
+  Hopper/Blackwell node; it is the gen/next → gen/now promotion evidence, and is
+  un-witnessable on the driver host (no accelerator).
+
+**Scope of the original triage pass:** #3052 routed to the `docs` lane and carried
+no generation label and no milestone (intake drift). That pass classified the
+horizon and pinned the implementable contract; this pass lands L1 + L3.
 
 ## The problem, in one line
 
@@ -97,12 +118,12 @@ path read one source of truth, and a cold boot is never quoted as a tuned baseli
 
 The runtime work is one issue but several leaves, in the lanes that own the files:
 
-| Leaf | Lane | File(s) | What it does |
-|---|---|---|---|
-| L1 pin cache dirs + emit readout | serve/tools | `tools/glm52_sglang_vllm_serve.sh`, `tools/glm52_serve_preflight.py` | export the tuple-keyed dirs; print `COMPILE_CACHE hit\|rebuild` (the largest slice of the fix) |
-| L2 persist the store | infra/gcp | `scripts/gcp-glm-serve.sh` | mount a persistent disk at `PERSIST_ROOT`, or bake a pre-warmed cache into the serve image |
-| L3 surface the gate | cmd/serve | `internal/vllmcompile`, preflight | feed `CompileCacheKey` / `CompileCacheEnabled` from the live tuple so bench + operator agree |
-| L4 witness | infra | `experiments/agent-live/` | two-boot dogfood on a fixed tuple: capture ready-time(boot1) ≫ ready-time(boot2) — the acceptance proof and the gen/next→gen/now promotion evidence |
+| Leaf | Lane | File(s) | What it does | State |
+|---|---|---|---|---|
+| L1 pin cache dirs + emit readout | serve/tools | `tools/glm52_sglang_vllm_serve.sh`, `tools/glm52_serve_preflight.py` | export the tuple-keyed dirs; print `COMPILE_CACHE hit\|rebuild` (the largest slice of the fix) | **shipped** |
+| L2 persist the store | infra/gcp | `scripts/gcp-glm-serve.sh` | mount a persistent disk at `PERSIST_ROOT`, or bake a pre-warmed cache into the serve image | open |
+| L3 surface the gate | cmd/serve | `internal/vllmcompile`, preflight | feed `CompileCacheKey` / `CompileCacheEnabled` from the live tuple so bench + operator agree | **shipped** |
+| L4 witness | infra | `experiments/agent-live/` | two-boot dogfood on a fixed tuple: capture ready-time(boot1) ≫ ready-time(boot2) — the acceptance proof and the gen/next→gen/now promotion evidence | open (needs GPU) |
 
 ## Generation classification
 

@@ -75,6 +75,7 @@ if [ "${PREFLIGHT}" = "1" ]; then
   log "preflight: GLM-5.2 ${ENGINE} readiness on this node (quant=${QUANT}) ..."
   if ! "${PYTHON_BIN}" "${HERE}/tools/glm52_serve_preflight.py" \
         --engine "${ENGINE}" --quant "${QUANT}" --require-ready \
+        --out "${HERE}/glm52-${ENGINE}-preflight.json" \
         --markdown "${HERE}/glm52-${ENGINE}-preflight.md"; then
     log "PREFLIGHT BLOCKED — this node cannot serve GLM-5.2 in ${ENGINE}."
     log "See glm52-${ENGINE}-preflight.md. On a GPU server use tools/glm52_serve.sh (llama.cpp)."
@@ -119,6 +120,68 @@ case "${QUANT}" in
   *)      SG_QFLAGS="" ;;
 esac
 SG_QFLAGS="${QUANT_FLAGS:-${SG_QFLAGS}}"
+
+# 2.5 Compile-cache persistence (#3052). DeepGEMM JIT pre-compile, torch.compile /
+#     TorchInductor codegen, and Triton kernel compile are deterministic functions
+#     of (model, quant, arch, tp, ctx, engine, engine ver, torch ver). Pin their
+#     cache dirs to a persistent, tuple-KEYED location so a second boot of the same
+#     config reuses the artifacts instead of re-paying the ~500s JIT tax every time.
+#     Invalidation is structural: any tuple field change resolves to a different
+#     directory, so a stale cache can never silently mis-serve. The key format is
+#     kept byte-identical to internal/vllmcompile.CacheTuple.Key() (contract:
+#     docs/notes/GLM52-COMPILE-CACHE-PERSISTENCE-CONTRACT-3052-2026-07-06.md).
+#     Set COMPILE_CACHE_PERSIST=0 to opt out; point PERSIST_ROOT at a persistent
+#     disk mount (default is repo-local and does NOT survive a VM re-create).
+COMPILE_CACHE_PERSIST="${COMPILE_CACHE_PERSIST:-1}"
+PERSIST_ROOT="${PERSIST_ROOT:-${HERE}/.compile-cache}"
+if [ "${COMPILE_CACHE_PERSIST}" = "1" ]; then
+  _cc_slug(){ printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//'; }
+
+  # GPU arch digits (sm<NN>): prefer the preflight JSON, else nvidia-smi, else unknown.
+  CC_RAW=""
+  if [ -f "${HERE}/glm52-${ENGINE}-preflight.json" ]; then
+    CC_RAW="$("${PYTHON_BIN}" -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("summary",{}).get("compute_cap") or "")' "${HERE}/glm52-${ENGINE}-preflight.json" 2>/dev/null || true)"
+  fi
+  if [ -z "${CC_RAW}" ] && command -v nvidia-smi >/dev/null 2>&1; then
+    CC_RAW="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n1)"
+  fi
+  ARCH_DIGITS="$(printf '%s' "${CC_RAW}" | grep -oE '[0-9]+' | tr -d '\n')"
+  [ -z "${ARCH_DIGITS}" ] && ARCH_DIGITS="unknown"
+
+  # Engine + torch versions pin the toolchain so a backend upgrade forces a rebuild.
+  ENGINE_VER="$("${PYTHON_BIN}" -c "import ${ENGINE},sys; print(getattr(${ENGINE},'__version__','unknown') or 'unknown')" 2>/dev/null || echo unknown)"
+  TORCH_VER="$("${PYTHON_BIN}" -c "import torch; print(torch.__version__)" 2>/dev/null || echo unknown)"
+
+  CACHE_KEY="$(_cc_slug "${MODEL}")/$(_cc_slug "${QUANT}")/sm${ARCH_DIGITS}/tp${TP}/ctx${CTX}/$(_cc_slug "${ENGINE}")-$(_cc_slug "${ENGINE_VER}")-torch$(_cc_slug "${TORCH_VER}")"
+  CACHE_DIR="${PERSIST_ROOT}/${CACHE_KEY}"
+
+  # Hit iff the keyed dir already holds artifacts; else this boot rebuilds them.
+  CACHE_STATE="rebuild"
+  if [ -d "${CACHE_DIR}" ] && [ -n "$(ls -A "${CACHE_DIR}" 2>/dev/null)" ]; then
+    CACHE_STATE="hit"
+  fi
+
+  mkdir -p "${CACHE_DIR}/inductor" "${CACHE_DIR}/triton" "${CACHE_DIR}/deepgemm" "${CACHE_DIR}/vllm" "${PERSIST_ROOT}/hf"
+  export TORCHINDUCTOR_CACHE_DIR="${CACHE_DIR}/inductor"
+  export TRITON_CACHE_DIR="${CACHE_DIR}/triton"
+  export DG_JIT_CACHE_DIR="${CACHE_DIR}/deepgemm"   # DeepGEMM JIT; older builds read DG_CACHE_DIR
+  export DG_CACHE_DIR="${CACHE_DIR}/deepgemm"
+  export VLLM_CACHE_ROOT="${CACHE_DIR}/vllm"
+  export HF_HUB_CACHE="${PERSIST_ROOT}/hf"
+
+  # Canonical operator readout (byte-identical to vllmcompile.Readout) + human note.
+  printf 'COMPILE_CACHE %s dir=%s tuple=%s\n' "${CACHE_STATE}" "${CACHE_DIR}" "${CACHE_KEY}"
+  if [ "${CACHE_STATE}" = "hit" ]; then
+    log "compile cache warm — reusing persisted JIT/compile artifacts; this boot skips most of the warmup tax"
+  else
+    log "compile cache cold — this boot pays the DeepGEMM/torch.compile JIT tax; the next identical boot reuses ${CACHE_DIR}"
+  fi
+  case "${PERSIST_ROOT}" in
+    "${HERE}"*) log "NOTE: PERSIST_ROOT is repo-local (${PERSIST_ROOT}); point it at a persistent disk mount to survive a VM re-create" ;;
+  esac
+else
+  log "COMPILE_CACHE disabled (COMPILE_CACHE_PERSIST=0) — every boot recomputes JIT/compile artifacts"
+fi
 
 # 3. Launch the engine. SGLang >= v0.5.13.post1 registers GlmMoeDsaForCausalLM.
 log "launching ${ENGINE} for ${MODEL} (tp=${TP} ctx=${CTX} quant=${QUANT}) on :${PORT} ..."
