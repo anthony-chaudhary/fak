@@ -101,6 +101,9 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	addToken := fs.String("token", "", "(add) the setup-token (sk-ant-oat…); '-' or empty with --no-login reads stdin")
 	addSuffix := fs.String("suffix", firstNonEmpty(os.Getenv("FAK_ACCOUNT_SUFFIX"), "-netra"), "(add) config-dir suffix: dir is ~/.claude-<name> when <name> already ends with it, else ~/.claude-<name><suffix>")
 	addNoSync := fs.Bool("no-sync", false, "(add) skip regenerating the roster views after adding (just write the registry)")
+	addAdopt := fs.Bool("adopt", false, "(add) enroll by ADOPTING an existing login instead of running `claude setup-token`: copy the source seat's live credential bundle (.credentials.json and/or .oauth-token) into the new isolated dir. Turns the current default login into a rotation seat in one command")
+	addFrom := fs.String("from", "", "(add --adopt) source seat to copy the login bundle from: a seat name, a config-dir path, or empty for the default ~/.claude seat")
+	addForce := fs.Bool("force", false, "(add --adopt) reconcile an EXISTING target dir/registry row in place (refresh creds + re-derive identity + upsert) instead of refusing")
 	rmRehome := fs.String("rehome-to", "", "(remove) live seat to rehome the tombstoned account to (default: the registry's anchor seat)")
 	rmReason := fs.String("reason", "", "(remove) tombstone_reason recorded in the registry; (rehome) reason token recorded on the live seat switch")
 	rehomeAddr := fs.String("addr", defaultSessionAddr(), "(rehome) gateway base URL of the LIVE fak guard session (from the guard banner, or $FAK_ADDR)")
@@ -217,10 +220,13 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		return accountsGateWrite(stdout, stderr, *gateDir, *homeDir, *asJSON)
 
 	case "add":
-		// The end-to-end "enroll a brand-new account" verb: log in to an ISOLATED config dir
-		// (never ~/.claude), probe its identity, upsert the canonical registry, seed the
+		// The end-to-end "enroll an account" verb: land a login in an ISOLATED config dir
+		// (never ~/.claude), record its identity, upsert the canonical registry, seed the
 		// account dir's markers, and regenerate the roster views — one command for what was a
-		// multi-file, multi-tool runbook.
+		// multi-file, multi-tool runbook. Two credential sources: the default runs `claude
+		// setup-token` interactively for a BRAND-NEW login; `--adopt` copies an EXISTING
+		// login's bundle from a source seat (default ~/.claude) so the account you are already
+		// logged into becomes a rotation seat with no setup-token and no hand-scripting.
 		return runAccountsAdd(stdout, stderr, addParams{
 			name:         *addName,
 			reserved:     *addReserved,
@@ -229,6 +235,9 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			token:        *addToken,
 			suffix:       *addSuffix,
 			noSync:       *addNoSync,
+			adopt:        *addAdopt,
+			from:         *addFrom,
+			force:        *addForce,
 			homeDir:      *homeDir,
 			registryPath: *registryPath,
 			dosView:      *dosView,

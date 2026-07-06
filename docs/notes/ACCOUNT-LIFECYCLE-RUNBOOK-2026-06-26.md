@@ -39,6 +39,12 @@ The shell entry points (the shared `shortcuts.ps1` profile):
 # add: one command — isolated-dir login, identity probe, twin-check, registry + views
 fak accounts add <name>
 
+# add by ADOPTING the login you're already in (no `claude setup-token`): copies the
+# current ~/.claude credential bundle into a new isolated seat, so the account you just
+# `/login`'d becomes a rotation seat. --from <seat|dir> adopts a different source;
+# --force reconciles an already-seeded seat in place.
+fak accounts add <name> --adopt
+
 # remove: one command — tombstone + archive the dir + repoint the registry + resync views
 fak accounts remove --name <seat> --archive
 

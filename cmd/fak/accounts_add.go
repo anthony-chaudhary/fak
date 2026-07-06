@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 // saveAccountsRegistry persists reg to path, printing the shared "fak accounts: %v"
@@ -36,35 +37,48 @@ type addParams struct {
 	suffix   string
 	noSync   bool
 
+	// adopt enrolls by copying an EXISTING login bundle from `from` (default ~/.claude)
+	// instead of running interactive `claude setup-token`; force reconciles an existing
+	// target dir/registry row in place rather than refusing.
+	adopt bool
+	from  string
+	force bool
+
 	homeDir      string
 	registryPath string
 	dosView      string
 	jobView      string
 }
 
-// runAccountsAdd is the end-to-end "enroll a brand-new account" flow. It is deliberately the
+// runAccountsAdd is the end-to-end "enroll an account" flow. It is deliberately the
 // ONLY place the multi-file account-enrollment runbook lives, so adding an account is one
 // command instead of: hand-edit three rosters, hand-derive the uuid, work around the
 // out-of-tree guard, remember the projects/ marker. The steps, in order:
 //
 //  1. resolve an ISOLATED config dir (~/.claude-<name>[-suffix]); refuse to clobber ~/.claude
-//     or an existing dir, so a stray login never lands on the live session.
-//  2. obtain the setup-token — either by running `CLAUDE_CONFIG_DIR=<dir> claude setup-token`
-//     (inheriting the TTY for the browser+paste), or from --token/stdin with --no-login.
-//  3. write <dir>/.oauth-token, but twin-check FIRST (GateTokenWrite) so we never enroll a
-//     token that belongs to a DIFFERENT account already on disk (the cross-account smear).
-//  4. probe the OAuth profile endpoint for the email + account UUID — ground truth that also
-//     proves the credential works.
-//  5. seed the dir's markers so every consumer recognizes it: .claude.json (identity, so the
+//     or an existing dir, so a stray login never lands on the live session. With
+//     --adopt --force an existing target dir is allowed (reconcile in place).
+//  2. obtain the credential. Default: run `CLAUDE_CONFIG_DIR=<dir> claude setup-token`
+//     (inheriting the TTY for the browser+paste), or read --token/stdin with --no-login, then
+//     twin-check (GateTokenWrite) and write <dir>/.oauth-token. With --adopt: copy the EXISTING
+//     login bundle (.credentials.json and/or .oauth-token) from the source seat (--from, else
+//     ~/.claude) — the account you are already logged into becomes a rotation seat with no
+//     setup-token. A copied .oauth-token is still twin-checked.
+//  3. record identity. Default: probe the OAuth profile endpoint for the email + account UUID —
+//     ground truth that also proves the credential works. With --adopt: derive identity from
+//     the copied disk state (DeriveIdentity) — the credential is already a proven live login;
+//     fall back to a token probe only if disk identity is empty and a token was copied.
+//  4. seed the dir's markers so every consumer recognizes it: .claude.json (identity, so the
 //     roster shows WHO it is, not "-"), projects/ (the fleet discovery gate), and settings.json
 //     (the registry's defaults.settings, so the seat launches WITH the bypass/permission
 //     defaults instead of "losing" them until a later sync).
-//  6. upsert the canonical registry record (identity + policy) and SaveRegistry.
-//  7. regenerate the roster views (sync) so the dos + job rosters reflect the new account (this
+//  5. upsert the canonical registry record (identity + policy) and SaveRegistry. Under --force
+//     an existing row for the name is replaced in place, not duplicated.
+//  6. regenerate the roster views (sync) so the dos + job rosters reflect the new account (this
 //     also re-projects settings.json across the whole roster).
 func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 	if p.name == "" {
-		fmt.Fprintln(stderr, "usage: fak accounts add --name <name> [--reserved] [--chrome-profile P] [--no-login [--token -]]")
+		fmt.Fprintln(stderr, "usage: fak accounts add --name <name> [--reserved] [--chrome-profile P] [--no-login [--token -]] [--adopt [--from <seat|dir>] [--force]]")
 		return 2
 	}
 	if p.homeDir == "" {
@@ -77,15 +91,26 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 	// uses the same handle the rosters show.
 	rosterName := rosterAccountName(p.name, p.suffix)
 	dir := accountDir(p.homeDir, p.name, p.suffix)
-	// Refuse to ever target the live default seat or an existing dir — a new account gets a
-	// fresh, isolated home so no login can clobber ~/.claude.
+	// The TARGET must never be the live default seat — a new account gets a fresh, isolated
+	// home so no login can clobber ~/.claude. This holds even under --force.
 	if filepath.Clean(dir) == filepath.Clean(filepath.Join(p.homeDir, ".claude")) {
 		fmt.Fprintln(stderr, "fak accounts: refusing to add into the default ~/.claude seat")
 		return 1
 	}
+	// A never-clobber-an-existing-dir guard, so a stray add can't overwrite a live seat.
+	// `--adopt --force` is the deliberate exception: it reconciles an already-seeded dir in
+	// place (refresh creds, re-derive identity, upsert the row). A tombstoned (.DELETED) dir
+	// is never a reconcile target.
+	reconcile := p.adopt && p.force
 	if _, err := os.Stat(dir); err == nil {
-		fmt.Fprintf(stderr, "fak accounts: config dir already exists: %s (pick another --name)\n", dir)
-		return 1
+		if !reconcile {
+			fmt.Fprintf(stderr, "fak accounts: config dir already exists: %s (pick another --name, or pass --adopt --force to reconcile it)\n", dir)
+			return 1
+		}
+		if strings.Contains(strings.ToLower(filepath.Base(dir)), ".deleted") {
+			fmt.Fprintf(stderr, "fak accounts: refusing to reconcile a tombstoned (.DELETED) dir: %s\n", dir)
+			return 1
+		}
 	}
 
 	// Load the canonical registry up front so a duplicate name fails before we log in.
@@ -99,8 +124,8 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		reg = loaded
 	}
 	for _, h := range reg.Homes {
-		if h.Name == rosterName {
-			fmt.Fprintf(stderr, "fak accounts: %q is already in the registry\n", rosterName)
+		if h.Name == rosterName && !reconcile {
+			fmt.Fprintf(stderr, "fak accounts: %q is already in the registry (pass --adopt --force to reconcile it)\n", rosterName)
 			return 1
 		}
 	}
@@ -110,38 +135,85 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		return 1
 	}
 
-	// Step 2: obtain the token.
-	token, err := obtainToken(stdout, stderr, dir, p)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
-		return 1
-	}
-	token = strings.TrimSpace(token)
-	if !strings.HasPrefix(token, "sk-ant-oat") {
-		fmt.Fprintf(stderr, "fak accounts: not a setup-token (want sk-ant-oat…), got %d chars\n", len(token))
-		return 1
-	}
+	// Step 2 (identity holder): the enrollment identity. adopt derives it from the copied
+	// disk state; setup-token derives it from the profile probe. Set in the branch below.
+	var id accounts.ProbedIdentity
 
-	// Step 3: twin-check BEFORE persisting, then write the token.
-	verdict := accounts.GateTokenWrite(dir, token, p.homeDir)
-	if !verdict.Allow {
-		fmt.Fprintf(stderr, "fak accounts: REFUSED (%s): %s\n", verdict.Reason, verdict.Detail)
-		return 1
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".oauth-token"), []byte(token+"\n"), 0o600); err != nil {
-		fmt.Fprintf(stderr, "fak accounts: write token: %v\n", err)
-		return 1
-	}
-
-	// Step 4: probe identity (ground truth + proves the credential works).
-	id, err := accounts.ProbeToken(nil, "", token)
-	if err != nil {
-		// A probe failure is not fatal to enrollment (the dir + token are written), but it
-		// means we cannot record identity and the credential may be bad — surface it loudly.
-		fmt.Fprintf(stderr, "fak accounts: warning: identity probe failed: %v\n", err)
-		fmt.Fprintln(stderr, "  the seat is created with a token but no recorded identity; run `fak accounts discover --write` after first login")
+	if p.adopt {
+		// ADOPT: copy an EXISTING login's bundle from the source seat into the isolated dir,
+		// instead of minting a fresh setup-token. The source is already an enrolled, twin-clean
+		// login, so the credential is proven by being live; we still twin-check a copied
+		// .oauth-token, since that is the exact surface GateTokenWrite guards.
+		src, err := resolveSourceSeat(p.homeDir, p.from, reg)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+			return 1
+		}
+		if sameDir(src, dir) {
+			fmt.Fprintf(stderr, "fak accounts: --from source and target are the same dir (%s)\n", dir)
+			return 1
+		}
+		copied, err := copyLoginBundle(src, dir)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak accounts: adopt from %s: %v\n", src, err)
+			return 1
+		}
+		// If a token came across, twin-check it against the rest of the tree (the smear guard).
+		if tok, terr := os.ReadFile(filepath.Join(dir, ".oauth-token")); terr == nil {
+			if verdict := accounts.GateTokenWrite(dir, string(tok), p.homeDir); !verdict.Allow {
+				fmt.Fprintf(stderr, "fak accounts: REFUSED (%s): %s\n", verdict.Reason, verdict.Detail)
+				return 1
+			}
+		}
+		fmt.Fprintf(stdout, "adopted login from %s (%s)\n", src, strings.Join(copied, ", "))
+		// Derive identity from the copied disk state — no network probe: the credential is a
+		// proven live login. Fall back to a token probe only when disk identity is empty AND a
+		// token was copied (a bundle that carried only a bare token, no .claude.json).
+		derived := accounts.DeriveIdentity(dir)
+		id = accounts.ProbedIdentity{Email: derived.Email, AccountUUID: derived.AccountUUID}
+		if id.Email == "" && id.AccountUUID == "" {
+			if tok, terr := os.ReadFile(filepath.Join(dir, ".oauth-token")); terr == nil {
+				if probed, perr := accounts.ProbeToken(nil, "", string(tok)); perr == nil {
+					id = probed
+				}
+			}
+		}
+		if id.Email != "" || id.AccountUUID != "" {
+			fmt.Fprintf(stdout, "adopted identity: %s (%s)\n", id.Email, id.AccountUUID)
+		} else {
+			fmt.Fprintln(stderr, "fak accounts: warning: adopted a credential but could not derive identity; run `fak accounts discover --write` after first login")
+		}
 	} else {
-		fmt.Fprintf(stdout, "probed identity: %s (%s)\n", id.Email, id.AccountUUID)
+		// SETUP-TOKEN: mint (or read) a brand-new setup-token, twin-check, write, then probe.
+		token, err := obtainToken(stdout, stderr, dir, p)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+			return 1
+		}
+		token = strings.TrimSpace(token)
+		if !strings.HasPrefix(token, "sk-ant-oat") {
+			fmt.Fprintf(stderr, "fak accounts: not a setup-token (want sk-ant-oat…), got %d chars\n", len(token))
+			return 1
+		}
+		verdict := accounts.GateTokenWrite(dir, token, p.homeDir)
+		if !verdict.Allow {
+			fmt.Fprintf(stderr, "fak accounts: REFUSED (%s): %s\n", verdict.Reason, verdict.Detail)
+			return 1
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".oauth-token"), []byte(token+"\n"), 0o600); err != nil {
+			fmt.Fprintf(stderr, "fak accounts: write token: %v\n", err)
+			return 1
+		}
+		probed, err := accounts.ProbeToken(nil, "", token)
+		if err != nil {
+			// A probe failure is not fatal to enrollment (the dir + token are written), but it
+			// means we cannot record identity and the credential may be bad — surface it loudly.
+			fmt.Fprintf(stderr, "fak accounts: warning: identity probe failed: %v\n", err)
+			fmt.Fprintln(stderr, "  the seat is created with a token but no recorded identity; run `fak accounts discover --write` after first login")
+		} else {
+			id = probed
+			fmt.Fprintf(stdout, "probed identity: %s (%s)\n", id.Email, id.AccountUUID)
+		}
 	}
 
 	// Step 5: seed markers so every consumer recognizes the seat.
@@ -163,7 +235,9 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		fmt.Fprintln(stderr, "fak accounts: warning: could not seed settings.json for the new seat")
 	}
 
-	// Step 6: upsert the canonical registry record.
+	// Step 6: upsert the canonical registry record. A reconcile (--adopt --force) REPLACES an
+	// existing row for the name in place (refreshing its dir + identity + these flags) rather
+	// than appending a duplicate; a fresh add appends.
 	home := accounts.Home{
 		Name:          rosterName,
 		Dir:           dir,
@@ -171,11 +245,11 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		ChromeProfile: p.chrome,
 		Identity:      accounts.DeriveIdentity(dir),
 	}
-	reg.Homes = append(reg.Homes, home)
+	verb := upsertHome(&reg, home)
 	if !saveAccountsRegistry(stderr, p.registryPath, reg) {
 		return 1
 	}
-	fmt.Fprintf(stdout, "registry: added %s -> %s\n", rosterName, dir)
+	fmt.Fprintf(stdout, "registry: %s %s -> %s\n", verb, rosterName, dir)
 
 	// Step 7: regenerate the roster views.
 	if !p.noSync {
@@ -186,8 +260,108 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		fmt.Fprintf(stdout, "synced %d roster view(s)\n", synced)
 	}
 
-	fmt.Fprintf(stdout, "added account %q (dir=%s, reserved=%v) — ~/.claude untouched\n", rosterName, dir, p.reserved)
+	action := "added"
+	if reconcile {
+		action = "reconciled"
+	}
+	fmt.Fprintf(stdout, "%s account %q (dir=%s, reserved=%v) — ~/.claude untouched\n", action, rosterName, dir, p.reserved)
 	return 0
+}
+
+// resolveSourceSeat resolves the --from source for an adopt: an empty value is the default
+// ~/.claude seat; a value that names an existing directory (or is path-shaped) is used as-is;
+// otherwise it is treated as a seat NAME and resolved through the registry (its Dir), falling
+// back to the ~/.claude-<name>[-suffix] convention. It never returns a nonexistent dir without
+// saying so, so an adopt fails loudly rather than copying from thin air.
+func resolveSourceSeat(homeDir, from string, reg accounts.Registry) (string, error) {
+	if strings.TrimSpace(from) == "" {
+		return filepath.Join(homeDir, ".claude"), nil
+	}
+	from = strings.TrimSpace(from)
+	// A path-shaped value (separator, ~, or an existing dir) is taken literally.
+	if strings.ContainsAny(from, `/\`) || strings.HasPrefix(from, "~") {
+		clean := filepath.Clean(pathutil.ExpandTilde(from))
+		if fi, err := os.Stat(clean); err != nil || !fi.IsDir() {
+			return "", fmt.Errorf("--from source dir not found: %s", clean)
+		}
+		return clean, nil
+	}
+	// A bare name: prefer the registry's recorded Dir for that seat, else the dir convention.
+	for _, h := range reg.Homes {
+		if h.Name == from && h.Dir != "" {
+			if fi, err := os.Stat(h.Dir); err == nil && fi.IsDir() {
+				return h.Dir, nil
+			}
+		}
+	}
+	// "default" is the well-known handle for ~/.claude.
+	if from == "default" {
+		return filepath.Join(homeDir, ".claude"), nil
+	}
+	cand := accountDir(homeDir, from, firstNonEmpty(os.Getenv("FAK_ACCOUNT_SUFFIX"), "-netra"))
+	if fi, err := os.Stat(cand); err == nil && fi.IsDir() {
+		return cand, nil
+	}
+	return "", fmt.Errorf("--from %q: no such seat (not a registry name, and %s does not exist)", from, cand)
+}
+
+// copyLoginBundle copies an EXISTING login's credential bundle from src into dst for an adopt.
+// It copies whichever of .credentials.json (the auto-refreshing session) and .oauth-token (the
+// static setup-token) the source carries, at 0600, and seeds dst/.claude.json's oauthAccount
+// from the source's identity so the seat shows WHO it is. At least one credential file must
+// exist, else it errors (an adopt from a not-logged-in dir is refused rather than half-done).
+// It returns the human labels of what it copied for the summary line.
+func copyLoginBundle(src, dst string) (copied []string, err error) {
+	for _, name := range []string{".credentials.json", ".oauth-token"} {
+		sp := filepath.Join(src, name)
+		b, rerr := os.ReadFile(sp)
+		if rerr != nil {
+			continue // absent is fine; we require only that at least one exists
+		}
+		if fi, serr := os.Stat(sp); serr == nil && fi.IsDir() {
+			continue
+		}
+		if werr := os.WriteFile(filepath.Join(dst, name), b, 0o600); werr != nil {
+			return copied, fmt.Errorf("copy %s: %w", name, werr)
+		}
+		copied = append(copied, name)
+	}
+	if len(copied) == 0 {
+		return nil, fmt.Errorf("source %s carries no login (.credentials.json / .oauth-token) to adopt", src)
+	}
+	// Seed identity from the source's oauthAccount so the roster shows WHO, not "-". The source
+	// dir's fresher .claude.json (root vs in-dir) is resolved by DeriveIdentity's stateIdentity.
+	sid := accounts.DeriveIdentity(src)
+	if err := seedClaudeJSON(dst, accounts.ProbedIdentity{Email: sid.Email, AccountUUID: sid.AccountUUID}); err != nil {
+		return copied, fmt.Errorf("seed identity: %w", err)
+	}
+	return copied, nil
+}
+
+// upsertHome replaces an existing registry row for home.Name in place (so --adopt --force
+// refreshes rather than duplicates) or appends it when the name is new. It returns "added" or
+// "updated" for the caller's summary line.
+func upsertHome(reg *accounts.Registry, home accounts.Home) string {
+	for i := range reg.Homes {
+		if reg.Homes[i].Name == home.Name {
+			// Preserve authored policy the row already carries; refresh dir + identity + the
+			// add-time flags. Keep any role/note/rehome the seat had.
+			existing := reg.Homes[i]
+			existing.Dir = home.Dir
+			existing.Identity = home.Identity
+			existing.Reserved = home.Reserved
+			if home.ChromeProfile != "" {
+				existing.ChromeProfile = home.ChromeProfile
+			}
+			// A reconcile re-activates a seat that had been tombstoned.
+			existing.Status = ""
+			existing.Enabled = nil
+			reg.Homes[i] = existing
+			return "updated"
+		}
+	}
+	reg.Homes = append(reg.Homes, home)
+	return "added"
 }
 
 // rosterAccountName canonicalizes a --name to the suffixed roster handle (e.g. day26 ->
