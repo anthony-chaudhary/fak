@@ -1203,7 +1203,7 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	// describing it. The all-denied case is just the special case where there is
 	// no surviving prose and no tool_use block, so the note becomes the whole turn
 	// (the previous denySummary behavior, now generalized to partial denies too).
-	if dropped > 0 || anyRepaired(adjs) {
+	if dropped > 0 || anyRepaired(adjs) || anyLivelock(adjs) {
 		if note := adjudicationNote(adjs); note != "" {
 			blocks = prependTextBlock(blocks, note)
 		}
@@ -1300,6 +1300,7 @@ func resultAdmissionNote(adms []ResultAdmission) string {
 	n := 0
 	counts := map[string]int{}
 	order := make([]string, 0, 4)
+	livelocks := make([]string, 0, 1)
 	for _, a := range adms {
 		if a.Verdict.Kind != "QUARANTINE" {
 			continue
@@ -1313,6 +1314,9 @@ func resultAdmissionNote(adms []ResultAdmission) string {
 			order = append(order, reason)
 		}
 		counts[reason]++
+		if a.Livelock != nil {
+			livelocks = append(livelocks, resultLivelockInBandNote(a))
+		}
 	}
 	if n == 0 {
 		return ""
@@ -1329,9 +1333,13 @@ func resultAdmissionNote(adms []ResultAdmission) string {
 			parts = append(parts, reason)
 		}
 	}
-	return "[fak] " + strconv.Itoa(n) + " " + noun + " " + verb + " held out of context (" +
+	note := "[fak] " + strconv.Itoa(n) + " " + noun + " " + verb + " held out of context (" +
 		strings.Join(parts, ", ") + ") — paged out, not lost; retrievable via the kernel page-in gate. " +
 		"Routine guard behavior, not an error you caused; see the `fak` extension for per-result detail."
+	if len(livelocks) > 0 {
+		note += " " + strings.Join(livelocks, " ")
+	}
+	return note
 }
 
 // resultAdmissionNoteOnce is resultAdmissionNote with PER-SESSION dedup: it emits the
@@ -1371,6 +1379,9 @@ func (s *Server) resultAdmissionNoteOnce(trace string, adms []ResultAdmission) s
 		}
 		key := resultNoteKey(a)
 		if _, already := seen[key]; already {
+			if a.Livelock != nil {
+				fresh = append(fresh, a)
+			}
 			continue
 		}
 		seen[key] = struct{}{}
@@ -1378,6 +1389,15 @@ func (s *Server) resultAdmissionNoteOnce(trace string, adms []ResultAdmission) s
 	}
 	s.notedResultsMu.Unlock()
 	return resultAdmissionNote(fresh)
+}
+
+func resultLivelockInBandNote(a ResultAdmission) string {
+	if a.Livelock == nil {
+		return ""
+	}
+	return "LIVELOCK_DETECTED repeat=" + strconv.Itoa(a.Livelock.RepeatCount) +
+		" repeated_result=" + livelockCallLabel(*a.Livelock) +
+		" approach=" + a.Livelock.SuggestedChange
 }
 
 // resultNoteKey is the stable per-result dedup key. The tool_call_id is replayed
@@ -1395,6 +1415,15 @@ func resultNoteKey(a ResultAdmission) string {
 func anyRepaired(adjs []ToolAdjudication) bool {
 	for _, a := range adjs {
 		if a.Admitted && a.Verdict.Kind == "TRANSFORM" {
+			return true
+		}
+	}
+	return false
+}
+
+func anyLivelock(adjs []ToolAdjudication) bool {
+	for _, a := range adjs {
+		if a.Livelock != nil {
 			return true
 		}
 	}

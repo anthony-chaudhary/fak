@@ -593,9 +593,11 @@ type ToolAdjudication struct {
 // ResultAdmission is one inbound tool result admitted before it is forwarded to
 // an upstream model on the OpenAI-compatible proxy path.
 type ResultAdmission struct {
-	ToolCallID string      `json:"tool_call_id,omitempty"`
-	Tool       string      `json:"tool"`
-	Verdict    WireVerdict `json:"verdict"`
+	ToolCallID   string                     `json:"tool_call_id,omitempty"`
+	Tool         string                     `json:"tool"`
+	ResultDigest string                     `json:"result_digest,omitempty"`
+	Verdict      WireVerdict                `json:"verdict"`
+	Livelock     *guardrsi.LivelockEnvelope `json:"livelock,omitempty"`
 }
 
 // itoa is the package-local alias for numfmt.Itoa. The hand-rolled body was
