@@ -776,6 +776,7 @@ func runKnownBadTestsWitness(root string, treeGlobs []string) knownBadWitnessRes
 	args := append([]string{"test"}, pkgs...)
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = root
+	configureDispatchHelperCommand(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return knownBadWitnessResult{OK: false, Kind: witnessKindTests, Detail: fmt.Sprintf("go test %s not green: %v", strings.Join(pkgs, " "), knownBadFirstLine(out))}
@@ -794,6 +795,7 @@ func runKnownBadVerifyWitness(root string, treeGlobs []string, commit string) kn
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "dos", "verify", commit, "--workspace", root)
 	cmd.Dir = root
+	configureDispatchHelperCommand(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return knownBadWitnessResult{OK: false, Kind: witnessKindVerify, Detail: fmt.Sprintf("dos verify %s not green: %v", commit, knownBadFirstLine(out))}
