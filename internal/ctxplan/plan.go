@@ -114,16 +114,19 @@ type Budget struct {
 // so the materialized view reads like a coherent history even though SELECTION was by
 // density). It carries the cost/benefit/density the optimizer used, for EXPLAIN.
 type Selection struct {
-	ID         string  `json:"id"`
-	Step       int     `json:"step"`
-	Role       string  `json:"role,omitempty"`
-	Descriptor string  `json:"descriptor,omitempty"`
-	Area       string  `json:"area,omitempty"`
-	Precision  string  `json:"precision,omitempty"`
-	Cost       int     `json:"cost"`
-	Benefit    float64 `json:"benefit"`
-	Density    float64 `json:"density"`
-	Pinned     bool    `json:"pinned,omitempty"`
+	ID               string  `json:"id"`
+	Step             int     `json:"step"`
+	Role             string  `json:"role,omitempty"`
+	Descriptor       string  `json:"descriptor,omitempty"`
+	Area             string  `json:"area,omitempty"`
+	Precision        string  `json:"precision,omitempty"`
+	EvidenceCluster  string  `json:"evidence_cluster,omitempty"`
+	EvidenceKind     string  `json:"evidence_kind,omitempty"`
+	Cost             int     `json:"cost"`
+	Benefit          float64 `json:"benefit"`
+	Density          float64 `json:"density"`
+	Pinned           bool    `json:"pinned,omitempty"`
+	MinEvidenceFloor bool    `json:"min_evidence_floor,omitempty"`
 }
 
 // Elision is one span the plan keeps COLD — out of the resident view but RECOVERABLE.
@@ -132,15 +135,17 @@ type Selection struct {
 // presence of a recovery handle is exactly what faithful.go checks to distinguish a
 // planned view from lossy compaction.
 type Elision struct {
-	ID        string  `json:"id"`
-	Step      int     `json:"step"`
-	Role      string  `json:"role,omitempty"`
-	Area      string  `json:"area,omitempty"`
-	Precision string  `json:"precision,omitempty"`
-	Digest    string  `json:"digest,omitempty"` // content address — the page-back-in handle
-	Cost      int     `json:"cost"`
-	Benefit   float64 `json:"benefit"`
-	Reason    string  `json:"reason"` // over_budget | sealed | tombstoned | pointer
+	ID              string  `json:"id"`
+	Step            int     `json:"step"`
+	Role            string  `json:"role,omitempty"`
+	Area            string  `json:"area,omitempty"`
+	Precision       string  `json:"precision,omitempty"`
+	EvidenceCluster string  `json:"evidence_cluster,omitempty"`
+	EvidenceKind    string  `json:"evidence_kind,omitempty"`
+	Digest          string  `json:"digest,omitempty"` // content address — the page-back-in handle
+	Cost            int     `json:"cost"`
+	Benefit         float64 `json:"benefit"`
+	Reason          string  `json:"reason"` // over_budget | sealed | tombstoned | pointer
 }
 
 // Elision reasons.
@@ -160,22 +165,34 @@ const (
 	ObjCoverage = "coverage"       // submodular greedy: marginal benefit/cost, relevance discounted by covered intents (1-1/e)
 )
 
+// Binding constraints surfaced in Plan/Explain so operators can see whether the turn was
+// shaped by the evidence floor or by the ordinary resident budget cap.
+const (
+	BindResidentBudgetCap = "resident_budget_cap"
+	BindPinsOverBudget    = "pins_over_budget"
+	BindMinEvidenceFloor  = "min_evidence_floor"
+)
+
 // Plan is the planner's chosen O(1) view: the resident Selected set, the cold-but-
 // recoverable Elided set, and the cost/benefit accounting — the analogue of a query
 // plan plus its EXPLAIN. Selected+Elided partition every candidate (faithful.go proves
 // it), so a Plan never destroys a span; it only decides which are resident.
 type Plan struct {
-	ID           string      `json:"plan_id,omitempty"`
-	Budget       int         `json:"budget"`
-	Objective    string      `json:"objective"`
-	Horizon      int         `json:"horizon,omitempty"`
-	Selected     []Selection `json:"selected"`
-	Elided       []Elision   `json:"elided"`
-	Candidates   int         `json:"candidates"`
-	CostUsed     int         `json:"cost_used"`
-	PinnedTokens int         `json:"pinned_tokens"`
-	Benefit      float64     `json:"benefit"`     // sum of selected benefits — the objective achieved
-	OverBudget   bool        `json:"over_budget"` // pins alone exceeded the budget (they stay; nothing else fits)
+	ID                    string      `json:"plan_id,omitempty"`
+	Budget                int         `json:"budget"`
+	Objective             string      `json:"objective"`
+	Horizon               int         `json:"horizon,omitempty"`
+	Selected              []Selection `json:"selected"`
+	Elided                []Elision   `json:"elided"`
+	Candidates            int         `json:"candidates"`
+	CostUsed              int         `json:"cost_used"`
+	PinnedTokens          int         `json:"pinned_tokens"`
+	MinEvidenceTokens     int         `json:"min_evidence_tokens,omitempty"`
+	MinEvidenceClusters   []string    `json:"min_evidence_clusters,omitempty"`
+	MinEvidenceOverBudget bool        `json:"min_evidence_over_budget,omitempty"`
+	BindingConstraint     string      `json:"binding_constraint,omitempty"`
+	Benefit               float64     `json:"benefit"`     // sum of selected benefits — the objective achieved
+	OverBudget            bool        `json:"over_budget"` // pins alone exceeded the budget (they stay; nothing else fits)
 }
 
 // Optimize is the planner: it chooses the resident view that maximizes total benefit
@@ -242,11 +259,17 @@ func OptimizeWithReleases(cands []Candidate, b Budget, pins, released map[string
 	live, dupElided := dedup(live, pins)
 	p.Elided = append(p.Elided, dupElided...)
 
-	var pinned, free []Candidate
-	for _, c := range live {
-		if pins[c.Cell.ID] {
+	floorRows, floorClusters := minEvidenceFloorRows(live, pins)
+	p.MinEvidenceClusters = floorClusters
+
+	var pinned, floor, free []Candidate
+	for i, c := range live {
+		switch {
+		case pins[c.Cell.ID]:
 			pinned = append(pinned, c)
-		} else {
+		case floorRows[i]:
+			floor = append(floor, c)
+		default:
 			free = append(free, c)
 		}
 	}
@@ -254,17 +277,56 @@ func OptimizeWithReleases(cands []Candidate, b Budget, pins, released map[string
 	// Pins are non-negotiable: select them all and charge their cost first.
 	used := 0
 	for _, c := range pinned {
-		p.Selected = append(p.Selected, selectionOf(c, true))
+		p.Selected = append(p.Selected, selectionOf(c, true, floorRowsByID(floorRows, live, c.Cell.ID)))
 		used += c.Cost
 		p.Benefit += c.Benefit
 	}
 	p.PinnedTokens = used
+	for i, c := range live {
+		if floorRows[i] {
+			p.MinEvidenceTokens += c.Cost
+		}
+	}
 	remaining := budgetTokens - used
 	if remaining < 0 {
 		// The pins alone overrun the budget (used > budgetTokens >= 0 implies used > 0, so
-		// pins genuinely exist). They stay (correctness over thrift); the optimizer adds
-		// nothing more. A higher rung that must shrink pins reports this.
+		// pins genuinely exist). Pins stay, and any minimum-evidence floor also stays: when
+		// lower-bound evidence and required roots do not fit, fail open to more resident
+		// context rather than silently keeping an unsupported tiny fact.
 		p.OverBudget = true
+		for _, c := range floor {
+			p.Selected = append(p.Selected, selectionOf(c, false, true))
+			used += c.Cost
+			p.Benefit += c.Benefit
+		}
+		if len(floor) > 0 {
+			p.MinEvidenceOverBudget = true
+			p.BindingConstraint = BindMinEvidenceFloor
+		} else {
+			p.BindingConstraint = BindPinsOverBudget
+		}
+		for _, c := range free {
+			p.Elided = append(p.Elided, elisionOf(c, ElideOverBudget))
+		}
+		finalize(&p, used)
+		return p
+	}
+
+	// The minimum evidence floor is the lower-bound twin of the resident budget cap: a
+	// decisive evidence span cannot ride alone if its marked cluster says local support is
+	// needed. Pay those cluster spans before optional/background evidence. If they do not fit,
+	// fail open by preserving the whole cluster and flagging OverBudget instead of silently
+	// keeping a tiny unsupported needle.
+	for _, c := range floor {
+		p.Selected = append(p.Selected, selectionOf(c, false, true))
+		used += c.Cost
+		p.Benefit += c.Benefit
+	}
+	remaining = budgetTokens - used
+	if remaining < 0 {
+		p.OverBudget = true
+		p.MinEvidenceOverBudget = true
+		p.BindingConstraint = BindMinEvidenceFloor
 		for _, c := range free {
 			p.Elided = append(p.Elided, elisionOf(c, ElideOverBudget))
 		}
@@ -288,12 +350,17 @@ func OptimizeWithReleases(cands []Candidate, b Budget, pins, released map[string
 	}
 	for i, c := range free {
 		if chosen[i] {
-			p.Selected = append(p.Selected, selectionOf(c, false))
+			p.Selected = append(p.Selected, selectionOf(c, false, false))
 			used += c.Cost
 			p.Benefit += c.Benefit
 		} else {
 			p.Elided = append(p.Elided, elisionOf(c, ElideOverBudget))
 		}
+	}
+	if p.MinEvidenceTokens > 0 {
+		p.BindingConstraint = BindMinEvidenceFloor
+	} else if hasOverBudgetElision(p) {
+		p.BindingConstraint = BindResidentBudgetCap
 	}
 	finalize(&p, used)
 	return p
@@ -509,6 +576,76 @@ func betterRep(a, b Candidate, pins map[string]bool) bool {
 	return candidateStepIDLess(a, b)
 }
 
+// minEvidenceFloorRows returns the live candidate rows that must be resident as a minimum
+// evidence floor. A cluster is floor-paid when it contains a decisive span with positive
+// benefit (or a decisive pin). Then every live span in that cluster rides together as the
+// semantic neighborhood for the fact.
+func minEvidenceFloorRows(live []Candidate, pins map[string]bool) (map[int]bool, []string) {
+	clusterNeeded := map[string]bool{}
+	for _, c := range live {
+		cluster := evidenceCluster(c.Cell)
+		if cluster == "" {
+			continue
+		}
+		if NormEvidenceKind(evidenceKind(c.Cell)) != EvidenceDecisive {
+			continue
+		}
+		if c.Benefit > 0 || pins[c.Cell.ID] {
+			clusterNeeded[cluster] = true
+		}
+	}
+	rows := map[int]bool{}
+	clusters := make([]string, 0, len(clusterNeeded))
+	for cluster := range clusterNeeded {
+		clusters = append(clusters, cluster)
+	}
+	sort.Strings(clusters)
+	for i, c := range live {
+		if clusterNeeded[evidenceCluster(c.Cell)] {
+			rows[i] = true
+		}
+	}
+	return rows, clusters
+}
+
+func evidenceCluster(s Span) string {
+	if s.EvidenceCluster != "" {
+		return s.EvidenceCluster
+	}
+	if s.Attrs != nil {
+		return s.Attrs["evidence_cluster"]
+	}
+	return ""
+}
+
+func evidenceKind(s Span) string {
+	if s.EvidenceKind != "" {
+		return s.EvidenceKind
+	}
+	if s.Attrs != nil {
+		return s.Attrs["evidence_kind"]
+	}
+	return ""
+}
+
+func floorRowsByID(rows map[int]bool, live []Candidate, id string) bool {
+	for i, c := range live {
+		if rows[i] && c.Cell.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func hasOverBudgetElision(p Plan) bool {
+	for _, e := range p.Elided {
+		if e.Reason == ElideOverBudget {
+			return true
+		}
+	}
+	return false
+}
+
 // candidateStepIDLess is the deterministic total tie-break the planners share: lower step
 // wins, then lower ID. It is the final fallback after each planner's primary key (pin
 // preference, marginal benefit, …), so identical inputs always order byte-identically.
@@ -611,17 +748,20 @@ func coverageTieBreak(a, b Candidate, margA, margB float64) bool {
 	return candidateStepIDLess(a, b)
 }
 
-func selectionOf(c Candidate, pinned bool) Selection {
+func selectionOf(c Candidate, pinned bool, minEvidenceFloor bool) Selection {
 	return Selection{
 		ID: c.Cell.ID, Step: c.Cell.Step, Role: c.Cell.Role, Descriptor: c.Cell.Descriptor,
 		Area: c.Area, Precision: c.Precision,
+		EvidenceCluster: evidenceCluster(c.Cell), EvidenceKind: NormEvidenceKind(evidenceKind(c.Cell)),
 		Cost: c.Cost, Benefit: c.Benefit, Density: c.density(), Pinned: pinned,
+		MinEvidenceFloor: minEvidenceFloor,
 	}
 }
 
 func elisionOf(c Candidate, reason string) Elision {
 	return Elision{
-		ID: c.Cell.ID, Step: c.Cell.Step, Role: c.Cell.Role, Area: c.Area, Precision: c.Precision, Digest: c.Cell.Digest,
+		ID: c.Cell.ID, Step: c.Cell.Step, Role: c.Cell.Role, Area: c.Area, Precision: c.Precision,
+		EvidenceCluster: evidenceCluster(c.Cell), EvidenceKind: NormEvidenceKind(evidenceKind(c.Cell)), Digest: c.Cell.Digest,
 		Cost: c.Cost, Benefit: c.Benefit, Reason: reason,
 	}
 }
@@ -644,11 +784,17 @@ func (p Plan) Explain() string {
 	if p.OverBudget {
 		fmt.Fprintf(&b, "  WARNING: pins (%d tokens) exceed the budget; they stay resident, nothing else fits\n", p.PinnedTokens)
 	}
+	if p.MinEvidenceTokens > 0 {
+		fmt.Fprintf(&b, "  MIN-EVIDENCE-FLOOR: clusters=%s tokens=%d over_budget=%v binding=%s\n",
+			strings.Join(p.MinEvidenceClusters, ","), p.MinEvidenceTokens, p.MinEvidenceOverBudget, p.BindingConstraint)
+	}
 	fmt.Fprintf(&b, "  RESIDENT (%d span(s), %d tokens):\n", len(p.Selected), p.CostUsed)
 	for _, s := range p.Selected {
 		pin := " "
 		if s.Pinned {
 			pin = "*" // forced resident
+		} else if s.MinEvidenceFloor {
+			pin = "!" // paid by the minimum-evidence floor
 		}
 		fmt.Fprintf(&b, "   %s [step %d] %-16s cost=%-5d benefit=%.3f density=%.4f\n",
 			pin, s.Step, truncate(s.Role, 16), s.Cost, s.Benefit, s.Density)

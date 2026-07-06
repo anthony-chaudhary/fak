@@ -163,6 +163,43 @@ func TestRecommendBudgetForForecastStaticPath(t *testing.T) {
 	}
 }
 
+func TestPlanQueryDefaultBudgetPaysMinEvidenceFloorColdStart(t *testing.T) {
+	// Cold start has no observed faults yet, so DefaultBudgetBounds would otherwise let the
+	// first-turn recommendation hug the low end of the resident spectrum. A marked decisive
+	// evidence cluster is the lower-bound counterweight: if the local support is larger than
+	// the default target, the planner fails open and preserves the cluster instead of
+	// materializing only the tiny needle.
+	f := Forecast{Intents: []string{"serial"}}
+	recommended := RecommendBudgetForForecast(f, DefaultBudgetBounds()).Tokens
+	spans := []Span{
+		{
+			ID: "needle", Step: 0, Role: "tool", Descriptor: "serial number",
+			Digest: "d-needle", Bytes: 4,
+			EvidenceCluster: "serial-case", EvidenceKind: EvidenceDecisive,
+		},
+		{
+			ID: "support", Step: 1, Role: "tool", Descriptor: "serial number surrounding evidence",
+			Digest: "d-support", Bytes: int64((recommended + 10) * 4),
+			EvidenceCluster: "serial-case", EvidenceKind: EvidenceSupport,
+		},
+	}
+
+	view := PlanQuery{Intents: f.Intents}.Plan(spans, nil)
+	if view.Budget != recommended {
+		t.Fatalf("query resolved budget = %d, want static recommendation %d", view.Budget, recommended)
+	}
+	if !view.Plan.MinEvidenceOverBudget || !view.Plan.OverBudget {
+		t.Fatalf("cold-start evidence floor should fail open over budget: %+v", view.Plan)
+	}
+	if view.CostUsed <= view.Budget {
+		t.Fatalf("floor was not actually paid: cost=%d budget=%d", view.CostUsed, view.Budget)
+	}
+	got := selectedIDs(view.Plan)
+	if !got["needle"] || !got["support"] {
+		t.Fatalf("default-budget path isolated the evidence cluster: selected=%v", got)
+	}
+}
+
 // TestRecommendBudgetFeedsOptimize ties the recommendation back to the planner it sizes: the
 // recommended Budget is a normal Budget Optimize accepts, and a larger recommended W keeps at
 // least as many spans resident as a smaller one (the MONOTONE-recall frontier — more budget

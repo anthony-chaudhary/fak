@@ -15,6 +15,16 @@ func cand(id string, step, cost int, benefit float64) Candidate {
 	return Candidate{Cell: Span{ID: id, Step: step, Digest: "d-" + id}, Cost: cost, Benefit: benefit}
 }
 
+func evidenceCand(id string, step, cost int, benefit float64, cluster, kind string) Candidate {
+	return Candidate{
+		Cell: Span{
+			ID: id, Step: step, Digest: "d-" + id,
+			EvidenceCluster: cluster, EvidenceKind: kind,
+		},
+		Cost: cost, Benefit: benefit,
+	}
+}
+
 func TestBenefitSealedAndTombstonedScoreZero(t *testing.T) {
 	f := Forecast{Intents: []string{"refund fee"}}
 	relevant := Span{ID: "a", Role: "tool", Descriptor: "the refund fee was 25 dollars", Durability: DurabilityDurable}
@@ -98,6 +108,71 @@ func TestPinsAreForcedAndChargedFirst(t *testing.T) {
 	// Budget 8, pin costs 5 -> 3 left -> exactly one of a/b (cost 3) fits.
 	if p.CostUsed != 8 {
 		t.Errorf("expected the pin (5) + one cost-3 span = 8 used, got %d", p.CostUsed)
+	}
+}
+
+func TestMinEvidenceFloorKeepsDecisiveClusterNeighborhood(t *testing.T) {
+	// A tiny decisive fact should not beat its local support into an isolated resident
+	// needle. Once the decisive row in cluster case-42 is needed, the planner pays the
+	// whole evidence cluster before optional/background spans, even though the support rows
+	// carry no isolated benefit.
+	cands := []Candidate{
+		evidenceCand("support-before", 0, 2, 0, "case-42", EvidenceSupport),
+		evidenceCand("needle", 1, 1, 10, "case-42", EvidenceDecisive),
+		evidenceCand("support-after", 2, 2, 0, "case-42", EvidenceSupport),
+		cand("distractor", 3, 4, 8),
+	}
+	p := Optimize(cands, Budget{Tokens: 5}, nil, ObjGreedy)
+	got := selectedIDs(p)
+	for _, id := range []string{"support-before", "needle", "support-after"} {
+		if !got[id] {
+			t.Fatalf("minimum evidence floor must keep %s resident; selected=%v", id, got)
+		}
+	}
+	if got["distractor"] {
+		t.Fatalf("optional distractor should lose to the paid evidence floor; selected=%v", got)
+	}
+	if p.MinEvidenceTokens != 5 {
+		t.Fatalf("MinEvidenceTokens = %d, want 5", p.MinEvidenceTokens)
+	}
+	if p.BindingConstraint != BindMinEvidenceFloor {
+		t.Fatalf("BindingConstraint = %q, want %q", p.BindingConstraint, BindMinEvidenceFloor)
+	}
+	if p.OverBudget {
+		t.Fatal("the cluster fits the budget, so the floor should not mark over-budget")
+	}
+	exp := p.Explain()
+	if !strings.Contains(exp, "MIN-EVIDENCE-FLOOR") || !strings.Contains(exp, "case-42") {
+		t.Fatalf("Explain must surface the paid evidence floor, got:\n%s", exp)
+	}
+}
+
+func TestMinEvidenceFloorFailsOpenOverBudget(t *testing.T) {
+	// When the required pins + evidence floor cannot fit the target, the planner preserves
+	// the evidence cluster and reports over-budget. It must not silently keep only the tiny
+	// decisive span just to satisfy the resident cap.
+	cands := []Candidate{
+		evidenceCand("support", 0, 4, 0, "case-oversize", EvidenceSupport),
+		evidenceCand("needle", 1, 2, 10, "case-oversize", EvidenceDecisive),
+		cand("optional", 2, 1, 5),
+	}
+	p := Optimize(cands, Budget{Tokens: 3}, nil, ObjGreedy)
+	got := selectedIDs(p)
+	if !got["support"] || !got["needle"] {
+		t.Fatalf("over-budget floor must preserve the whole decisive cluster, selected=%v", got)
+	}
+	if got["optional"] {
+		t.Fatalf("optional evidence should not be selected after an over-budget floor, selected=%v", got)
+	}
+	if !p.OverBudget || !p.MinEvidenceOverBudget {
+		t.Fatalf("floor overflow should be explicit: OverBudget=%v MinEvidenceOverBudget=%v",
+			p.OverBudget, p.MinEvidenceOverBudget)
+	}
+	if p.CostUsed <= p.Budget {
+		t.Fatalf("fail-open floor should exceed the target budget: used=%d budget=%d", p.CostUsed, p.Budget)
+	}
+	if p.BindingConstraint != BindMinEvidenceFloor {
+		t.Fatalf("BindingConstraint = %q, want %q", p.BindingConstraint, BindMinEvidenceFloor)
 	}
 }
 

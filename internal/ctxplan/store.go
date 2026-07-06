@@ -17,16 +17,24 @@ import (
 // higher-tier follow-on (it imports both that package and ctxplan, so it lives above
 // this leaf, not inside it).
 type Span struct {
-	ID         string            `json:"id"`                   // stable address in the store (e.g. "span:3")
-	Step       int               `json:"step"`                 // ordinal position in the history
-	Role       string            `json:"role,omitempty"`       // the producer (tool name, "user", "system")
-	Descriptor string            `json:"descriptor"`           // SAFE extractive/sealed descriptor; never sealed bytes
-	Digest     string            `json:"digest,omitempty"`     // content address — the recovery handle for an elided span
-	Bytes      int64             `json:"bytes"`                // size (the token-cost proxy)
-	Durability string            `json:"durability,omitempty"` // turn | session | bounded | durable
-	Sealed     bool              `json:"sealed,omitempty"`     // quarantined by the trust gate — never resident
-	Tombstoned bool              `json:"tombstoned,omitempty"` // suppressed by context control — never resident
-	Attrs      map[string]string `json:"attrs,omitempty"`      // open bag; Attrs["utility"] carries a learned outcome-utility if present
+	ID         string `json:"id"`                   // stable address in the store (e.g. "span:3")
+	Step       int    `json:"step"`                 // ordinal position in the history
+	Role       string `json:"role,omitempty"`       // the producer (tool name, "user", "system")
+	Descriptor string `json:"descriptor"`           // SAFE extractive/sealed descriptor; never sealed bytes
+	Digest     string `json:"digest,omitempty"`     // content address — the recovery handle for an elided span
+	Bytes      int64  `json:"bytes"`                // size (the token-cost proxy)
+	Durability string `json:"durability,omitempty"` // turn | session | bounded | durable
+	// EvidenceCluster groups a decisive fact with the local context needed to interpret it.
+	// When any decisive span in a cluster is needed, the planner pays the cluster's minimum
+	// evidence floor before spending the remaining budget on optional/background spans.
+	EvidenceCluster string `json:"evidence_cluster,omitempty"`
+	// EvidenceKind classifies a span's role in that cluster: decisive, support, current, or
+	// optional. Unknown/empty stays optional; Attrs carries the same keys for adapters that
+	// cannot grow the struct yet.
+	EvidenceKind string            `json:"evidence_kind,omitempty"`
+	Sealed       bool              `json:"sealed,omitempty"`     // quarantined by the trust gate — never resident
+	Tombstoned   bool              `json:"tombstoned,omitempty"` // suppressed by context control — never resident
+	Attrs        map[string]string `json:"attrs,omitempty"`      // open bag; Attrs["utility"] carries a learned outcome-utility if present
 }
 
 // Durability classes — the temporal axis from CONTEXT-IS-NOT-MEMORY.md, mirrored here as
@@ -40,8 +48,25 @@ const (
 	DurabilityDurable = "durable"
 )
 
+// Evidence-kind classes. Only EvidenceDecisive triggers the cluster floor; the remaining
+// kinds explain the local neighborhood that rides with it. Unknown classes normalize to
+// EvidenceOptional so an adapter typo cannot force arbitrary context resident.
+const (
+	EvidenceOptional   = "optional"
+	EvidencePinned     = "pinned_root"
+	EvidenceCurrent    = "current"
+	EvidenceDecisive   = "decisive"
+	EvidenceSupport    = "support"
+	EvidenceBackground = "background"
+)
+
 var durabilityRank = map[string]int{
 	DurabilityTurn: 0, DurabilitySession: 1, DurabilityBounded: 2, DurabilityDurable: 3,
+}
+
+var evidenceKinds = map[string]bool{
+	EvidenceOptional: true, EvidencePinned: true, EvidenceCurrent: true,
+	EvidenceDecisive: true, EvidenceSupport: true, EvidenceBackground: true,
 }
 
 // NormDurability maps any class string to the canonical vocabulary, failing closed to turn
@@ -51,6 +76,15 @@ func NormDurability(s string) string {
 		return s
 	}
 	return DurabilityTurn
+}
+
+// NormEvidenceKind maps any evidence-kind string into the closed vocabulary, failing
+// closed to optional. The planner uses this only for residency priority, never trust.
+func NormEvidenceKind(s string) string {
+	if evidenceKinds[s] {
+		return s
+	}
+	return EvidenceOptional
 }
 
 // durabilityAdmitSet folds a list of durability classes into a NORMALIZED admit set — the
