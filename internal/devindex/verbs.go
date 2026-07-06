@@ -128,6 +128,7 @@ var verbManifest = []Verb{
 	{Name: "frontierswe", Synopsis: "FrontierSWE long-horizon time-to-solution benchmark surface (describe/eval/compare)", Lane: "cmd"},
 	{Name: "fused", Synopsis: "the fused-kernel thesis in one turn: classify/explain/run a classical + a weight op through one deny floor", Lane: "cmd"},
 	{Name: "garden", Synopsis: "the issue-garden: triage and groom GitHub issues (kind/priority/area)", Lane: "cmd"},
+	{Name: "git-maint", Synopsis: "lock-aware safe object-DB consolidation: build midx + commit-graph, fold loose objects, never prune", Lane: "gitgate"},
 	{Name: "grafana", Synopsis: "export fak fleet metrics as a Grafana dashboard/datasource", Lane: "cmd"},
 	{Name: "guard", Synopsis: "wrap an agent harness: deny/repair/quarantine proposed tool calls (the one-command front door)", Lane: "gateway"},
 	{Name: "guard-precompact", Synopsis: "internal: Claude Code PreCompact hook actuator installed by fak guard", Lane: "cmd"},
