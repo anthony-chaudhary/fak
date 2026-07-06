@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -74,6 +75,18 @@ func messageText(out []responsesOutputItem) string {
 	}
 	return b.String()
 }
+
+type countingResponsesPlanner struct {
+	comp  *agent.Completion
+	calls int
+}
+
+func (p *countingResponsesPlanner) Complete(ctx context.Context, m []agent.Message, t []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+	p.calls++
+	return p.comp, nil
+}
+
+func (*countingResponsesPlanner) Model() string { return "counting" }
 
 // TestResponsesProxyAllowsBenignAndDropsDenied is the core #925 witness: the kernel
 // verdict pass runs on the Responses wire. The stub proposes three calls — allow_a
@@ -160,6 +173,123 @@ func TestResponsesAllDeniedSynthesizesText(t *testing.T) {
 	}
 	if !strings.Contains(messageText(resp.Output), "refused by the fak kernel") {
 		t.Errorf("output_text = %q, want the deny summary", messageText(resp.Output))
+	}
+}
+
+func TestResponsesAllowedLivelockIsVisibleInOutputText(t *testing.T) {
+	srv := newTestServer(t)
+	srv.planner = stubPlanner{comp: &agent.Completion{
+		Message: agent.Message{Role: agent.RoleAssistant, ToolCalls: []agent.ToolCall{
+			{ID: "c_a", Type: "function", Function: agent.Func{Name: "allow_a", Arguments: `{"x":1}`}},
+		}},
+		FinishReason: "tool_calls",
+	}}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	var resp responsesResponse
+	for i := 0; i < 3; i++ {
+		resp = postResponsesTrace(t, ts.URL, "responses-allowed-loop", map[string]any{
+			"model": "m",
+			"input": "repeat the same tool call",
+			"tools": []map[string]any{{"type": "function", "name": "allow_a"}},
+		})
+	}
+	if _, ok := functionCallItems(resp.Output)["allow_a"]; !ok {
+		t.Fatalf("third allowed turn dropped the function_call: %+v", resp.Output)
+	}
+	text := messageText(resp.Output)
+	if !strings.Contains(text, "observed repeated admitted tool call") ||
+		!strings.Contains(text, "LIVELOCK_DETECTED repeat=3") {
+		t.Fatalf("third allowed turn did not surface livelock in output_text: %q", text)
+	}
+}
+
+func TestResponsesLowInfoUpdatePlanReceiptFusesBeforePlanner(t *testing.T) {
+	srv := newTestServer(t)
+	planner := &countingResponsesPlanner{comp: &agent.Completion{
+		Message:      agent.Message{Role: agent.RoleAssistant, Content: "planner reached"},
+		FinishReason: "stop",
+	}}
+	srv.planner = planner
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	var resp responsesResponse
+	for i := 1; i <= 3; i++ {
+		resp = postResponsesTrace(t, ts.URL, "responses-update-plan-receipt-loop", map[string]any{
+			"model": "client",
+			"input": []map[string]any{
+				{"type": "message", "role": "user", "content": "continue the goal"},
+				{"type": "function_call", "call_id": "plan_" + itoa(uint64(i)), "name": "update_plan", "arguments": `{"plan":[{"step":"` + itoa(uint64(i)) + `","status":"in_progress"}]}`},
+				{"type": "function_call_output", "call_id": "plan_" + itoa(uint64(i)), "output": "Plan updated"},
+			},
+		})
+	}
+	if planner.calls != 2 {
+		t.Fatalf("planner calls = %d, want 2; third repeated receipt should fuse before another model turn", planner.calls)
+	}
+	text := messageText(resp.Output)
+	for _, want := range []string{
+		"stopped repeated low-information tool-result loop",
+		"LIVELOCK_DETECTED repeat=3",
+		"repeated_result=update_plan@sha256:",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("fuse response missing %q: %s", want, text)
+		}
+	}
+	if resp.Fak == nil || len(resp.Fak.ResultAdmissions) != 1 {
+		t.Fatalf("fuse response missing result admission: %+v", resp.Fak)
+	}
+	adm := resp.Fak.ResultAdmissions[0]
+	if adm.Tool != "update_plan" || adm.ResultDigest == "" || adm.Livelock == nil || adm.Livelock.Reason != lowInfoReceiptReason {
+		t.Fatalf("wrong low-info admission: %+v", adm)
+	}
+}
+
+func TestResponsesLowInfoUpdatePlanReceiptResetsAfterEffectfulResult(t *testing.T) {
+	srv := newTestServer(t)
+	planner := &countingResponsesPlanner{comp: &agent.Completion{
+		Message:      agent.Message{Role: agent.RoleAssistant, Content: "planner reached"},
+		FinishReason: "stop",
+	}}
+	srv.planner = planner
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	trace := "responses-update-plan-receipt-reset"
+	for i := 1; i <= 2; i++ {
+		_ = postResponsesTrace(t, ts.URL, trace, map[string]any{
+			"model": "client",
+			"input": []map[string]any{
+				{"type": "message", "role": "user", "content": "continue the goal"},
+				{"type": "function_call", "call_id": "plan_" + itoa(uint64(i)), "name": "update_plan", "arguments": `{"plan":[{"step":"` + itoa(uint64(i)) + `","status":"in_progress"}]}`},
+				{"type": "function_call_output", "call_id": "plan_" + itoa(uint64(i)), "output": "Plan updated"},
+			},
+		})
+	}
+	_ = postResponsesTrace(t, ts.URL, trace, map[string]any{
+		"model": "client",
+		"input": []map[string]any{
+			{"type": "message", "role": "user", "content": "inspect files"},
+			{"type": "function_call", "call_id": "shell_1", "name": "shell_command", "arguments": `{"command":"git status --short"}`},
+			{"type": "function_call_output", "call_id": "shell_1", "output": "Exit code: 0\nOutput:\n M file.go"},
+		},
+	})
+	resp := postResponsesTrace(t, ts.URL, trace, map[string]any{
+		"model": "client",
+		"input": []map[string]any{
+			{"type": "message", "role": "user", "content": "continue the goal"},
+			{"type": "function_call", "call_id": "plan_3", "name": "update_plan", "arguments": `{"plan":[{"step":"three","status":"in_progress"}]}`},
+			{"type": "function_call_output", "call_id": "plan_3", "output": "Plan updated"},
+		},
+	})
+	if planner.calls != 4 {
+		t.Fatalf("planner calls = %d, want 4; effectful result should reset the low-info receipt fuse", planner.calls)
+	}
+	if text := messageText(resp.Output); strings.Contains(text, "stopped repeated low-information") {
+		t.Fatalf("fuse fired despite effectful reset: %s", text)
 	}
 }
 

@@ -198,6 +198,28 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, "upstream cache invalidation failed")
 		return
 	}
+	if note := lowInfoReceiptFuseNote(resultAdmissions); note != "" {
+		resp := responsesResponse{
+			ID:        "resp_fak_" + itoa(uint64(time.Now().UnixNano())),
+			Object:    "response",
+			CreatedAt: time.Now().Unix(),
+			Model:     reqModel,
+			Status:    "completed",
+			Output: responsesOutputFromAssistant(agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: note,
+			}),
+			OutputText: note,
+			Usage:      responsesUsage{},
+			Fak:        fakExtFrom(nil, resultAdmissions),
+		}
+		if req.Stream {
+			s.writeResponsesStream(w, resp)
+		} else {
+			writeJSON(w, http.StatusOK, resp)
+		}
+		return
+	}
 
 	began := time.Now()
 	comp, err := s.completeServed(ctx, sessionTurn, messages, tools,
@@ -240,6 +262,9 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	if servedHits > 0 {
 		s.metrics.recordServedInline(servedHits)
+	}
+	if anyLivelock(adjs) {
+		asst.Content = prependAdjudicationContentNote(asst.Content, adjs)
 	}
 
 	// finishReason drives both the logged turn classification and the Responses
@@ -491,6 +516,19 @@ func responsesOutputFromAssistant(asst agent.Message) []responsesOutputItem {
 		})
 	}
 	return out
+}
+
+func lowInfoReceiptFuseNote(adms []ResultAdmission) string {
+	for _, adm := range adms {
+		if adm.Livelock == nil || adm.Livelock.Reason != lowInfoReceiptReason {
+			continue
+		}
+		return "[fak] stopped repeated low-information tool-result loop: " +
+			adm.Livelock.Event + " repeat=" + itoa(uint64(adm.Livelock.RepeatCount)) +
+			" repeated_result=" + resultToolLabel(adm) + "@" + adm.ResultDigest +
+			". Stop calling " + resultToolLabel(adm) + " until effect-capable work changes state; continue from the existing state or ask for operator input."
+	}
+	return ""
 }
 
 // responsesStatusFor maps the planner finish reason to a Responses status. A turn

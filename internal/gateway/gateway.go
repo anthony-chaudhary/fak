@@ -940,11 +940,17 @@ type Server struct {
 	placementMu    sync.Mutex
 	placementFired map[string]bool
 
-	// livelock tracks consecutive identical refused tool calls per trace so the third
+	// livelock tracks consecutive identical tool-call outcomes per trace so the third
 	// repeat can be surfaced as a structured LIVELOCK_DETECTED envelope inside the same
 	// turn stream. It records only tool names and args digests, never raw arguments.
 	livelockMu sync.Mutex
 	livelock   *guardrsi.LivelockDetector
+
+	// resultLivelock is the result-side sibling for replayed inbound tool_result
+	// quarantines. It is separate from livelock so a normal proposed tool call in the
+	// same trace does not reset the "same quarantined result replayed again" run.
+	resultLivelockMu sync.Mutex
+	resultLivelock   *guardrsi.LivelockDetector
 
 	// prunedToolDefs remembers, per served trace, tool definitions fak removed from the
 	// advertised Anthropic tools[] because the capability floor could never admit them. If
@@ -2727,6 +2733,14 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 			continue
 		}
 		tool := messages[i].Name
+		var origin agent.ToolCall
+		var hasOrigin bool
+		if messages[i].ToolCallID != "" {
+			origin, hasOrigin = callByID[messages[i].ToolCallID]
+		}
+		if tool == "" && hasOrigin {
+			tool = origin.Function.Name
+		}
 		if tool == "" {
 			// A nameless tool result is still untrusted cross-boundary input. Admit it
 			// under a placeholder so the content screen + fail-closed taint still fire
@@ -2734,19 +2748,21 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 			tool = "tool_result"
 		}
 		var originSeq uint64
-		if messages[i].ToolCallID != "" {
-			if orig, ok := callByID[messages[i].ToolCallID]; ok {
-				originSeq = s.originSeqFor(traceID, orig)
-			}
+		if hasOrigin {
+			originSeq = s.originSeqFor(traceID, origin)
 		}
+		resultDigest := guardrsi.ArgsDigest(messages[i].Content)
 		wv, envlp, aerr := s.admitOpWithSeq(ctx, "proxy_admit", tool, messages[i].Content, "", traceID, originSeq)
 		if aerr != nil {
 			// A result we cannot even admit is held out fail-closed rather than
 			// forwarded raw to the model.
 			messages[i].Content = `{"_quarantined":true,"boundary":"proxy","reason":"ADMIT_ERROR"}`
 			admissions = append(admissions, ResultAdmission{
-				ToolCallID: messages[i].ToolCallID, Tool: messages[i].Name,
-				Verdict: WireVerdict{Kind: "QUARANTINE", Reason: "ADMIT_ERROR", Disposition: "TERMINAL"}})
+				ToolCallID:   messages[i].ToolCallID,
+				Tool:         tool,
+				ResultDigest: resultDigest,
+				Verdict:      WireVerdict{Kind: "QUARANTINE", Reason: "ADMIT_ERROR", Disposition: "TERMINAL"},
+			})
 			quarantinedIdx = append(quarantinedIdx, i)
 			continue
 		}
@@ -2766,7 +2782,7 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 		// the content is still forwarded (the parent sees it) but the admission records it
 		// visibly unverified. Placed before the vDSO fill (ALLOW-only) so a demoted, unbacked
 		// claim can never warm the cache either.
-		if demoted, ok := subagentDoneVerdict(messages[i].Name, messages[i].Content, wv); ok {
+		if demoted, ok := subagentDoneVerdict(tool, messages[i].Content, wv); ok {
 			wv = demoted
 		}
 		// Warm the vDSO from this ADMITTED result (opt-in, default off): only a plain
@@ -2778,12 +2794,15 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 				s.fillVDSOFromResult(ctx, orig, messages[i].Content, traceID)
 			}
 		}
-		admissions = append(admissions, ResultAdmission{
-			ToolCallID: messages[i].ToolCallID,
-			Tool:       messages[i].Name,
-			Verdict:    wv,
-		})
+		adm := ResultAdmission{
+			ToolCallID:   messages[i].ToolCallID,
+			Tool:         tool,
+			ResultDigest: resultDigest,
+			Verdict:      wv,
+		}
+		admissions = append(admissions, adm)
 	}
+	s.annotateResultLivelock(traceID, admissions)
 	// Defense in depth (candidate #14): a result the kernel just quarantined may have been
 	// admitted as benign on an EARLIER turn and prefilled into the in-kernel KV cache. Drop
 	// any cached prefix that attended to it so a later turn re-prefills instead of replaying
@@ -2793,6 +2812,86 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 		return admissions, err
 	}
 	return admissions, nil
+}
+
+func (s *Server) annotateResultLivelock(trace string, adms []ResultAdmission) {
+	if s == nil || trace == "" {
+		return
+	}
+	s.resultLivelockMu.Lock()
+	if s.resultLivelock == nil {
+		s.resultLivelock = guardrsi.NewLivelockDetector(guardrsi.DefaultLivelockThreshold)
+	}
+	type hit struct {
+		idx int
+		env guardrsi.LivelockEnvelope
+	}
+	var hits []hit
+	sawObservation := false
+	for i := range adms {
+		a := adms[i]
+		if a.Verdict.Kind == "QUARANTINE" {
+			sawObservation = true
+			env, ok := s.resultLivelock.ObserveFailure(guardrsi.LivelockObservation{
+				TraceID:     trace,
+				Tool:        resultToolLabel(a),
+				ArgsDigest:  a.ResultDigest,
+				Verdict:     a.Verdict.Kind,
+				Reason:      a.Verdict.Reason,
+				Disposition: a.Verdict.Disposition,
+			})
+			if ok {
+				hits = append(hits, hit{idx: i, env: env})
+			}
+			continue
+		}
+		if resultAdmissionIsLowInfoReceipt(a) {
+			sawObservation = true
+			env, ok := s.resultLivelock.ObserveAdmitted(guardrsi.LivelockObservation{
+				TraceID:    trace,
+				Tool:       resultToolLabel(a),
+				ArgsDigest: a.ResultDigest,
+				Verdict:    "ALLOW",
+				Reason:     lowInfoReceiptReason,
+			})
+			if ok {
+				hits = append(hits, hit{idx: i, env: env})
+			}
+		}
+	}
+	if !sawObservation {
+		s.resultLivelock.Clear(trace)
+	}
+	s.resultLivelockMu.Unlock()
+
+	for _, h := range hits {
+		env := h.env
+		adms[h.idx].Livelock = &env
+	}
+}
+
+func resultToolLabel(a ResultAdmission) string {
+	if a.Tool != "" {
+		return a.Tool
+	}
+	return "tool_result"
+}
+
+const lowInfoReceiptReason = "LOW_INFO_RECEIPT"
+
+func resultAdmissionIsLowInfoReceipt(a ResultAdmission) bool {
+	if a.Verdict.Kind != "ALLOW" {
+		return false
+	}
+	if !isUpdatePlanTool(a.Tool) {
+		return false
+	}
+	return a.ResultDigest == guardrsi.ArgsDigest("Plan updated")
+}
+
+func isUpdatePlanTool(tool string) bool {
+	tool = strings.ToLower(strings.TrimSpace(tool))
+	return tool == "update_plan" || tool == "functions.update_plan"
 }
 
 // fillVDSOFromResult warms the vDSO tier-2 cache from one ADMITTED inbound tool_result
