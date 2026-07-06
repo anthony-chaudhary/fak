@@ -109,33 +109,6 @@ kernel void q4k_gemv(device const uchar* W [[buffer(0)]],
     if (lid == 0) Y[o] = acc;
 }
 
-// q4k_gemv_pair computes TWO Q4_K GEMVs that share the same activation x and geometry. It is the
-// gate/up front half of a fused SwiGLU MLP in one dispatch instead of two separate q4k_gemv dispatches:
-// gid.y selects gate(0) vs up(1), gid.x is the output row. The math is byte-for-byte the same
-// q4k_block_dot reduction as q4k_gemv; only the dispatch shape changes.
-kernel void q4k_gemv_pair(device const uchar* W0 [[buffer(0)]],
-                          device const uchar* W1 [[buffer(1)]],
-                          device const float* X  [[buffer(2)]],
-                          device float*       Y0 [[buffer(3)]],
-                          device float*       Y1 [[buffer(4)]],
-                          constant int&    nblk [[buffer(5)]],
-                          constant int&     out [[buffer(6)]],
-                          uint2 gid [[threadgroup_position_in_grid]],
-                          uint lid [[thread_index_in_threadgroup]]) {
-    uint o = gid.x;
-    uint which = gid.y;
-    if (o >= (uint)out || which > 1) return;
-    device const uchar* W = (which == 0) ? W0 : W1;
-    device float* Y = (which == 0) ? Y0 : Y1;
-    device const uchar* row = W + (long)o * nblk * 144;
-    float acc = 0.0f;
-    for (int b = (int)lid; b < nblk; b += 32) {
-        acc += q4k_block_dot(row + (long)b * 144, X + (long)b * 256);
-    }
-    acc = simd_sum(acc);
-    if (lid == 0) Y[o] = acc;
-}
-
 // q4k_gemm: the REGISTER-BLOCKED TILED prefill GEMM (issue #1085 — the prefill kernel lever from
 // MAC-QWEN36-27B-Q4K-METAL-PERF-DIAGNOSIS-2026-06-26).
 //
@@ -425,7 +398,7 @@ kernel void q6k_gemm(device const uchar* W [[buffer(0)]],
 }
 )MSL";
 
-static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemvPair, psoQ4KGemm, psoQ4KGemmMM, psoQ4KSwiGLU, psoQ6KGemv, psoQ6KGemm;
+static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemm, psoQ4KGemmMM, psoQ4KSwiGLU, psoQ6KGemv, psoQ6KGemm;
 static int gQ4KReady;
 static int gQ4KUseMM = 0; // 1 → prefer the simdgroup-matrix GEMM (mg_q4k_set_use_mm / FAK_Q4K_MM)
 
@@ -448,7 +421,6 @@ static int q4k_init(void) {
     id<MTLLibrary> lib = [gDev newLibraryWithSource:kQ4KSrc options:nil error:&err];
     if (lib == nil) { NSLog(@"q4k: library compile failed: %@", err); return 0; }
     psoQ4KGemv = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_gemv"] error:&err];
-    psoQ4KGemvPair = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_gemv_pair"] error:&err];
     psoQ4KGemm = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_gemm"] error:&err];
     // q4k_gemm_mm (simdgroup-matrix variant) is optional: if the MSL feature is unavailable or the
     // pipeline fails to build, psoQ4KGemmMM stays nil and the dispatcher falls back to psoQ4KGemm.
@@ -456,7 +428,7 @@ static int q4k_init(void) {
     psoQ4KSwiGLU = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_swiglu"] error:&err];
     psoQ6KGemv = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q6k_gemv"] error:&err];
     psoQ6KGemm = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q6k_gemm"] error:&err];
-    if (!psoQ4KGemv || !psoQ4KGemvPair || !psoQ4KGemm || !psoQ4KSwiGLU || !psoQ6KGemv || !psoQ6KGemm) { NSLog(@"q4k: pipeline build failed: %@", err); return 0; }
+    if (!psoQ4KGemv || !psoQ4KGemm || !psoQ4KSwiGLU || !psoQ6KGemv || !psoQ6KGemm) { NSLog(@"q4k: pipeline build failed: %@", err); return 0; }
     gQ4KReady = 1;
     return 1;
 }
@@ -530,34 +502,20 @@ void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y
 
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
 
-        // (1) gate = G·x and up = U·x (independent), one encoder. Same-geometry gate/up take
-        // the paired dispatch (one q4k_gemv_pair grid with gid.y selecting gate vs up); the
-        // fallback keeps the historical two-dispatch path for any odd geometry.
+        // (1) gate = G·x and up = U·x (independent), one encoder
         id<MTLComputeCommandEncoder> e1 = [cb computeCommandEncoder];
-        if (G.nblk == U.nblk && G.out == U.out) {
-            [e1 setComputePipelineState:psoQ4KGemvPair];
-            [e1 setBuffer:(__bridge id<MTLBuffer>)G.buf offset:0 atIndex:0];
-            [e1 setBuffer:(__bridge id<MTLBuffer>)U.buf offset:0 atIndex:1];
-            [e1 setBuffer:xb offset:0 atIndex:2];
-            [e1 setBuffer:gMlpGate offset:0 atIndex:3];
-            [e1 setBuffer:gMlpUp offset:0 atIndex:4];
-            [e1 setBytes:&G.nblk length:sizeof(int) atIndex:5];
-            [e1 setBytes:&G.out  length:sizeof(int) atIndex:6];
-            [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)G.out,2,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
-        } else {
-            [e1 setComputePipelineState:psoQ4KGemv];
-            [e1 setBuffer:xb offset:0 atIndex:1];
-            [e1 setBuffer:(__bridge id<MTLBuffer>)G.buf offset:0 atIndex:0];
-            [e1 setBuffer:gMlpGate offset:0 atIndex:2];
-            [e1 setBytes:&G.nblk length:sizeof(int) atIndex:3];
-            [e1 setBytes:&G.out  length:sizeof(int) atIndex:4];
-            [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)G.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
-            [e1 setBuffer:(__bridge id<MTLBuffer>)U.buf offset:0 atIndex:0];
-            [e1 setBuffer:gMlpUp offset:0 atIndex:2];
-            [e1 setBytes:&U.nblk length:sizeof(int) atIndex:3];
-            [e1 setBytes:&U.out  length:sizeof(int) atIndex:4];
-            [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)U.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
-        }
+        [e1 setComputePipelineState:psoQ4KGemv];
+        [e1 setBuffer:xb offset:0 atIndex:1];
+        [e1 setBuffer:(__bridge id<MTLBuffer>)G.buf offset:0 atIndex:0];
+        [e1 setBuffer:gMlpGate offset:0 atIndex:2];
+        [e1 setBytes:&G.nblk length:sizeof(int) atIndex:3];
+        [e1 setBytes:&G.out  length:sizeof(int) atIndex:4];
+        [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)G.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
+        [e1 setBuffer:(__bridge id<MTLBuffer>)U.buf offset:0 atIndex:0];
+        [e1 setBuffer:gMlpUp offset:0 atIndex:2];
+        [e1 setBytes:&U.nblk length:sizeof(int) atIndex:3];
+        [e1 setBytes:&U.out  length:sizeof(int) atIndex:4];
+        [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)U.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
         [e1 endEncoding];
 
         // (2) inter = silu(gate) * up
@@ -747,21 +705,24 @@ int mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int*
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
 
         // Stage 1: for every expert, gate = G_e*x and up = U_e*x into its own I-wide slice
-        // (offset e*I). One encoder holds all n paired GEMV dispatches; distinct output slices avoid a
+        // (offset e*I). One encoder holds all 2n GEMV dispatches; distinct output slices avoid a
         // false write-after-write hazard across experts.
         id<MTLComputeCommandEncoder> e1 = [cb computeCommandEncoder];
-        [e1 setComputePipelineState:psoQ4KGemvPair];
-        [e1 setBuffer:xb offset:0 atIndex:2];
+        [e1 setComputePipelineState:psoQ4KGemv];
+        [e1 setBuffer:xb offset:0 atIndex:1];
         for (int e = 0; e < n; e++) {
             Q4KW G = gQ4[gate_wids[e]], U = gQ4[up_wids[e]];
             NSUInteger off = (NSUInteger)((long)e * I * 4);
             [e1 setBuffer:(__bridge id<MTLBuffer>)G.buf offset:0 atIndex:0];
-            [e1 setBuffer:(__bridge id<MTLBuffer>)U.buf offset:0 atIndex:1];
-            [e1 setBuffer:gMlpGateK offset:off atIndex:3];
-            [e1 setBuffer:gMlpUpK offset:off atIndex:4];
-            [e1 setBytes:&G.nblk length:sizeof(int) atIndex:5];
-            [e1 setBytes:&G.out  length:sizeof(int) atIndex:6];
-            [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)G.out,2,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
+            [e1 setBuffer:gMlpGateK offset:off atIndex:2];
+            [e1 setBytes:&G.nblk length:sizeof(int) atIndex:3];
+            [e1 setBytes:&G.out  length:sizeof(int) atIndex:4];
+            [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)G.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
+            [e1 setBuffer:(__bridge id<MTLBuffer>)U.buf offset:0 atIndex:0];
+            [e1 setBuffer:gMlpUpK offset:off atIndex:2];
+            [e1 setBytes:&U.nblk length:sizeof(int) atIndex:3];
+            [e1 setBytes:&U.out  length:sizeof(int) atIndex:4];
+            [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)U.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
         }
         [e1 endEncoding];
 
@@ -822,30 +783,18 @@ void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, f
 
         // (1) gate = G·x and up = U·x (independent), one encoder — IDENTICAL to mg_q4k_mlp.
         id<MTLComputeCommandEncoder> e1 = [cb computeCommandEncoder];
-        if (G.nblk == U.nblk && G.out == U.out) {
-            [e1 setComputePipelineState:psoQ4KGemvPair];
-            [e1 setBuffer:(__bridge id<MTLBuffer>)G.buf offset:0 atIndex:0];
-            [e1 setBuffer:(__bridge id<MTLBuffer>)U.buf offset:0 atIndex:1];
-            [e1 setBuffer:xb offset:0 atIndex:2];
-            [e1 setBuffer:gMlpGate offset:0 atIndex:3];
-            [e1 setBuffer:gMlpUp offset:0 atIndex:4];
-            [e1 setBytes:&G.nblk length:sizeof(int) atIndex:5];
-            [e1 setBytes:&G.out  length:sizeof(int) atIndex:6];
-            [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)G.out,2,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
-        } else {
-            [e1 setComputePipelineState:psoQ4KGemv];
-            [e1 setBuffer:xb offset:0 atIndex:1];
-            [e1 setBuffer:(__bridge id<MTLBuffer>)G.buf offset:0 atIndex:0];
-            [e1 setBuffer:gMlpGate offset:0 atIndex:2];
-            [e1 setBytes:&G.nblk length:sizeof(int) atIndex:3];
-            [e1 setBytes:&G.out  length:sizeof(int) atIndex:4];
-            [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)G.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
-            [e1 setBuffer:(__bridge id<MTLBuffer>)U.buf offset:0 atIndex:0];
-            [e1 setBuffer:gMlpUp offset:0 atIndex:2];
-            [e1 setBytes:&U.nblk length:sizeof(int) atIndex:3];
-            [e1 setBytes:&U.out  length:sizeof(int) atIndex:4];
-            [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)U.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
-        }
+        [e1 setComputePipelineState:psoQ4KGemv];
+        [e1 setBuffer:xb offset:0 atIndex:1];
+        [e1 setBuffer:(__bridge id<MTLBuffer>)G.buf offset:0 atIndex:0];
+        [e1 setBuffer:gMlpGate offset:0 atIndex:2];
+        [e1 setBytes:&G.nblk length:sizeof(int) atIndex:3];
+        [e1 setBytes:&G.out  length:sizeof(int) atIndex:4];
+        [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)G.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
+        [e1 setBuffer:(__bridge id<MTLBuffer>)U.buf offset:0 atIndex:0];
+        [e1 setBuffer:gMlpUp offset:0 atIndex:2];
+        [e1 setBytes:&U.nblk length:sizeof(int) atIndex:3];
+        [e1 setBytes:&U.out  length:sizeof(int) atIndex:4];
+        [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)U.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
         [e1 endEncoding];
 
         // (2) inter = silu(gate) * up — IDENTICAL to mg_q4k_mlp.
