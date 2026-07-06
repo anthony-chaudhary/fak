@@ -20,6 +20,18 @@ This document catalogs all configuration options for `fak serve`, the gateway se
 | `--addr` | string | `127.0.0.1:8080` | HTTP listen address for OpenAI-compatible and fak-native endpoints. Ignored with `--stdio`. Required unless `--stdio` is set. |
 | `--stdio` | bool | `false` | Serve MCP over stdin/stdout (newline-delimited JSON-RPC) instead of HTTP. |
 
+> **Working directory matters — `fak serve` binds the tree it is launched in.**
+> The dojo corpus (`.dojo/`), the dev index, and session-state all resolve against the
+> **workspace root**, which defaults to the current directory (the nearest `dos.toml`
+> upward, else cwd). Launched from a *non-fak* cwd — e.g. an MCP client that registers the
+> server with `"cwd": "."` while the client itself runs in a sibling repo — `fak serve`
+> silently indexes that foreign tree instead of a fak checkout, and the substrate
+> contributes nothing to the intended repo. `fak serve` emits a loud stderr advisory
+> (`not a fak workspace`) when no `dos.toml` is found upward from cwd, but does **not**
+> refuse (an operator may run outside a fak workspace deliberately). To bind the fak tree
+> explicitly regardless of launch cwd, set the MCP server config `cwd` to your fak
+> workspace root rather than `"."`.
+
 ### Upstream Model Configuration (Proxy Mode)
 
 | Flag | Type | Default | Description |

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -204,6 +206,14 @@ func cmdServe(argv []string) {
 		return
 	}
 
+	// Advisory (#3094): a serve launched from a non-fak cwd silently indexes whatever
+	// tree it was dropped into (dojo corpus, devindex, session state all resolve against
+	// the workspace root — cwd by default). That mis-binding is how a `/goal` run in a
+	// SIBLING repo left the fak substrate pointed at the wrong tree and contributing no
+	// value. Emit a loud, one-line advisory when no dos.toml is found upward from cwd, but
+	// fail OPEN — serve anyway (an operator may deliberately run outside a fak workspace).
+	warnIfNotFakWorkspace(os.Stderr)
+
 	// Install the capability floor fail-loud: a bad manifest aborts startup rather
 	// than silently falling back to a more permissive default. Time it as the first
 	// startup phase.
@@ -226,6 +236,26 @@ func cmdServe(argv []string) {
 	rt.buildGateway(sf)
 	rt.wireGateway(sf)
 	rt.run(sf)
+}
+
+// warnIfNotFakWorkspace emits a loud stderr advisory when the serve cwd is not inside a
+// fak workspace (no dos.toml found walking upward). It never blocks startup — the caller
+// serves regardless. This is the #3094 mis-binding guard: fak serve's dojo corpus,
+// devindex, and session-state planes all resolve against the workspace root, which
+// defaults to cwd; launched from a sibling repo they silently bind the wrong tree.
+func warnIfNotFakWorkspace(stderr io.Writer) {
+	if _, err := branchrole.FindRoot(""); err == nil {
+		return // inside a fak workspace (dos.toml found) — nothing to warn about.
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		wd = "(unknown cwd)"
+	}
+	fmt.Fprintf(stderr,
+		"fak serve: WARNING — no dos.toml found upward from cwd %q; this is not a fak workspace. "+
+			"The dojo corpus, devindex, and session-state planes will bind THIS cwd, not a fak repo. "+
+			"Launch fak serve from a fak checkout, or set the MCP server config \"cwd\" to your fak workspace root.\n",
+		wd)
 }
 
 // buildGateway loads the optional model-routing policy, constructs the gateway
