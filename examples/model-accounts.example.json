@@ -32,10 +32,37 @@
       "label": "your Anthropic Pro/Max subscription (an sk-ant-oat token; the Bearer + oauth-2025-04-20 beta header is applied by the dispatch adapter, not by the roster)"
     },
     {
+      "id": "july6netra_groq",
+      "kind": "openai",
+      "base_url": "https://api.groq.com/openai/v1",
+      "cred_env": "FAK_GROQ_API_KEY",
+      "requests_per_minute": 30,
+      "requests_per_day": 1000,
+      "tokens_per_minute": 8000,
+      "tokens_per_day": 200000,
+      "label": "Groq OpenAI-compatible account for Alibaba Cloud Qwen3.6 27B; set the key in FAK_GROQ_API_KEY, never in this file"
+    },
+    {
+      "id": "july6netra_groq_compound",
+      "kind": "openai",
+      "base_url": "https://api.groq.com/openai/v1",
+      "cred_env": "FAK_GROQ_API_KEY",
+      "requests_per_minute": 30,
+      "requests_per_day": 250,
+      "label": "Groq OpenAI-compatible account for groq/compound lower-quality tier; request-count limited, no token cap recorded"
+    },
+    {
       "id": "gemini",
       "kind": "gemini",
       "cred_env": "GEMINI_API_KEY",
-      "label": "your Google Gemini account"
+      "label": "your Google Gemini account (native generativelanguage wire, AI Studio key)"
+    },
+    {
+      "id": "gemini-gcp-vertex",
+      "kind": "openai",
+      "base_url": "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/YOUR_GCP_PROJECT/locations/us-central1/endpoints/openapi",
+      "cred_env": "FAK_GEMINI_GCP_KEY",
+      "label": "Gemini on your GCP account via Vertex AI's OpenAI-compatible endpoint; the bearer in FAK_GEMINI_GCP_KEY is a GCP access token ($(gcloud auth print-access-token)). This is the seat the claude-gemini-gcp launcher fronts — see docs/fak/claude-gemini-gcp.md"
     },
     {
       "id": "deepseek",
@@ -62,8 +89,11 @@
     { "model": "large", "account": "claude-sub", "upstream_model": "claude-opus-4-6" },
     { "model": "guard-a", "account": "openai-work", "upstream_model": "gpt-5.5" },
     { "model": "guard-b", "account": "claude-sub", "upstream_model": "claude-opus-4-6" },
+    { "model": "qwen36-groq", "account": "july6netra_groq", "upstream_model": "qwen/qwen3.6-27b" },
+    { "model": "groq-compound", "account": "july6netra_groq_compound", "upstream_model": "groq/compound" },
     { "model": "drafter-a", "account": "openai-personal", "upstream_model": "gpt-5.5" },
     { "model": "drafter-b", "account": "gemini", "upstream_model": "gemini-3-pro" },
+    { "model": "gemini-flash", "account": "gemini-gcp-vertex", "upstream_model": "google/gemini-3.5-flash" },
     { "model": "judge", "account": "claude-sub", "upstream_model": "claude-opus-4-6" },
     { "model": "tiny-classifier", "account": "local", "upstream_model": "llama3.2" },
     { "model": "deepseek-pro", "account": "deepseek", "upstream_model": "deepseek-v4-pro" },
