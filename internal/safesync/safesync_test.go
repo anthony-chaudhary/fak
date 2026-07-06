@@ -154,6 +154,25 @@ func TestDivergedRefuses(t *testing.T) {
 	}
 }
 
+func TestAheadNamesSafePushPath(t *testing.T) {
+	clone := behindClone(t)
+	git(t, clone, "merge", "--ff-only", "origin/work")
+	writeFile(t, filepath.Join(clone, "local.txt"), "local\n")
+	git(t, clone, "add", "local.txt")
+	git(t, clone, "commit", "-m", "local")
+
+	info, err := Assess(context.Background(), Options{Repo: clone, Remote: "origin", Branch: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.State != StateAhead || info.OK {
+		t.Fatalf("assessment = %+v, want ahead refusal", info)
+	}
+	if !strings.Contains(info.Reason, "fak sync push --remote origin --branch work") {
+		t.Fatalf("ahead reason should name safe push path, got %q", info.Reason)
+	}
+}
+
 func TestRenameWriteSetRefuses(t *testing.T) {
 	clone := behindClone(t)
 	head := revString(t, clone, "HEAD")

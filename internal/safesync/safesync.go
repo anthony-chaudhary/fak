@@ -131,7 +131,7 @@ func Assess(ctx context.Context, opts Options) (Assessment, error) {
 	}
 	if targetIsAncestor {
 		base.State = StateAhead
-		base.Reason = "local branch is ahead of remote; nothing to fast-forward (push instead)"
+		base.Reason = fmt.Sprintf("local branch is ahead of remote; nothing to fast-forward; run `fak sync push --remote %s --branch %s` to publish through the safe push path", opts.Remote, branch)
 		return base, nil
 	}
 	headIsAncestor, err := isAncestor(ctx, run, opts.Repo, head, target)
