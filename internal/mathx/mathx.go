@@ -15,6 +15,22 @@ func Round3(v float64) float64 {
 	return math.Round(v*1000) / 1000
 }
 
+// Ratio divides num by den, guarding the zero-denominator case the way report
+// builders want it: a positive numerator over zero is +Inf (an unbounded
+// multiplier), and 0/0 is 0 (no signal), never a NaN or a panic. It is the
+// exact copy that was pasted as a local `ratio`/`safeRatio` into the vcache
+// report leaves; a variant that returns 1 for 0/0 (or omits the +Inf branch)
+// is a DIFFERENT behavior and stays local rather than sharing this one.
+func Ratio(num, den float64) float64 {
+	if den == 0 {
+		if num > 0 {
+			return math.Inf(1)
+		}
+		return 0
+	}
+	return num / den
+}
+
 // ArgmaxF32 returns the index of the largest element of v — the canonical
 // greedy-decode / logits pick that was copy-pasted as a local argmax into every
 // bench and diagnostic binary. The first maximum wins on ties (lowest index),

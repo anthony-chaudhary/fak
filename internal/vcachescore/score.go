@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 	"github.com/anthony-chaudhary/fak/internal/vcachechain"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
@@ -293,7 +294,7 @@ func Score(in Input) Report {
 
 	activeSource := "planned"
 	activeProven := planned.Status == vcachegov.ProofProven
-	activeMultiplier := ratio(planned.BaselineTokenEquiv, planned.VCacheTokenEquiv)
+	activeMultiplier := mathx.Ratio(planned.BaselineTokenEquiv, planned.VCacheTokenEquiv)
 	var observed *vcachegov.TelemetrySavingsProof
 	if len(in.TelemetryRows) > 0 {
 		p := vcachegov.ProveTelemetrySavings(vcachegov.TelemetrySavingsInput{
@@ -305,7 +306,7 @@ func Score(in Input) Report {
 		observed = &p
 		activeSource = "telemetry"
 		activeProven = p.Status == vcachegov.ProofProven
-		activeMultiplier = ratio(p.BaselineTokenEquiv, p.ActualTokenEquiv)
+		activeMultiplier = mathx.Ratio(p.BaselineTokenEquiv, p.ActualTokenEquiv)
 	}
 	twoX := activeProven &&
 		activeMultiplier >= in.TwoXThreshold &&
@@ -378,7 +379,7 @@ func planeReport(planned vcachegov.StarSavingsProof, observed *vcachegov.Telemet
 		Forecast: PlaneValueReport{
 			Available:          true,
 			Provenance:         "FORECAST",
-			Multiplier:         ratio(planned.BaselineTokenEquiv, planned.VCacheTokenEquiv),
+			Multiplier:         mathx.Ratio(planned.BaselineTokenEquiv, planned.VCacheTokenEquiv),
 			SavedTokenEquiv:    planned.SavedTokenEquiv,
 			BaselineTokenEquiv: planned.BaselineTokenEquiv,
 			CostTokenEquiv:     planned.VCacheTokenEquiv,
@@ -389,7 +390,7 @@ func planeReport(planned vcachegov.StarSavingsProof, observed *vcachegov.Telemet
 		rep.ProviderObserved = PlaneValueReport{
 			Available:          true,
 			Provenance:         "OBSERVED",
-			Multiplier:         ratio(observed.BaselineTokenEquiv, observed.ActualTokenEquiv),
+			Multiplier:         mathx.Ratio(observed.BaselineTokenEquiv, observed.ActualTokenEquiv),
 			SavedTokenEquiv:    observed.SavedTokenEquiv,
 			BaselineTokenEquiv: observed.BaselineTokenEquiv,
 			CostTokenEquiv:     observed.ActualTokenEquiv,
@@ -423,7 +424,7 @@ func planeEvidence(in PlaneEvidenceInput, defaultProvenance, missingReason strin
 	}
 	multiplier := in.Multiplier
 	if multiplier == 0 && baseline > 0 && cost > 0 {
-		multiplier = ratio(baseline, cost)
+		multiplier = mathx.Ratio(baseline, cost)
 	}
 	return PlaneValueReport{
 		Available:          true,
@@ -873,16 +874,6 @@ func grade(score int) string {
 	default:
 		return "F"
 	}
-}
-
-func ratio(num, den float64) float64 {
-	if den == 0 {
-		if num > 0 {
-			return math.Inf(1)
-		}
-		return 0
-	}
-	return num / den
 }
 
 func clamp01(x float64) float64 {

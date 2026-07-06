@@ -4,6 +4,7 @@ import (
 	"math"
 	"sort"
 
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 	"github.com/anthony-chaudhary/fak/internal/vcachechain"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
@@ -267,7 +268,7 @@ func ObserveWithOptions(turns []Turn, opt Options) Report {
 	if rep.Aggregate.BaselineTokenEquiv > 0 {
 		rep.HitRate = rep.Aggregate.CacheReadTokens / rep.Aggregate.BaselineTokenEquiv
 	}
-	rep.Multiplier = ratio(rep.Aggregate.BaselineTokenEquiv, rep.Aggregate.ActualTokenEquiv)
+	rep.Multiplier = mathx.Ratio(rep.Aggregate.BaselineTokenEquiv, rep.Aggregate.ActualTokenEquiv)
 	if residentN > 0 {
 		rep.MeanPrefixTokens = residentSum / float64(residentN)
 	}
@@ -507,14 +508,4 @@ func sortRankedByWeightDesc(ranked []vcachecal.RankedVBlock) {
 		}
 		return wi > wj
 	})
-}
-
-func ratio(num, den float64) float64 {
-	if den == 0 {
-		if num > 0 {
-			return math.Inf(1)
-		}
-		return 0
-	}
-	return num / den
 }
