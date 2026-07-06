@@ -75,7 +75,14 @@ class) → re-measure. Owned by #2741.
 
 **Roll-up:**
 - [ ] #2739 — report + per-(model×concept) leaderboard + `result_claim_allowed` honesty gate
-- [ ] #2740 — `cmd/conceptbench` runner + contract mode + catalog workload-kind
+- [x] #2740 — `cmd/conceptbench` runner + contract mode + catalog workload-kind —
+  **shipped**: `cmd/conceptbench` (replay runner + `--contract` honesty gate + core-budget
+  knobs + `fak.conceptbench.report.v1`) with a replay-backed smoke test; `concept-benchmark`
+  workload-kind wired into `tools/bench_plan.py` (`KIND_META`/`KINDS`/`RECHECK_DAYS`) and
+  declared in `experiments/benchmark/catalog.json` `workload_kinds`. Witness: `go test
+  ./cmd/conceptbench` green, `python tools/bench_plan_test.py` green (27 tests incl.
+  `ConceptBenchmarkKindTest`), and a `bench_plan.py` run surfacing the `concept-benchmark`
+  coverage cell on every bench-node.
 - [ ] #2741 — analysis: what we learned + which fak affordances to adapt per model
 - [ ] #2742 — research: SOTA methodology alignment (τ-bench / BFCL / Terminal-Bench / MCP-Bench)
 
