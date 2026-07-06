@@ -7,16 +7,17 @@ body-ref updates, and materialized journals.
 
 ```text
 +---------------+     +---------------------------+     +---------------------------+
-| fixture files | --> | internal/sharedtask       | --> | task record sequence,     |
-+---------------+     | contract validator        |     | revision chain, journal,  |
-                      | (sequence witness)        |     | artifact refs validate    |
-                      +---------------------------+     | (exit 0)                  |
-                                                        +---------------------------+
+| fixture files | --> | tools/schemas/shared-*    | --> | each fixture validates,   |
++---------------+     | JSON envelope schemas     |     | and its id-stable core    |
+                      | + shared-item read parity |     | fields render the same on |
+                      | (validate_shared_items.py)|     | sidecar and Slack (exit 0)|
+                      +---------------------------+     +---------------------------+
 ```
 
-Prerequisites: the Go toolchain from the repo root; no network, API key, model, or
-GPU is needed. The validation run completes in seconds and is deterministic: it
-reads the fixture files and returns the same verdict on every run.
+Prerequisites: Python 3 from the repo root; no network, API key, model, GPU, or
+third-party package is needed. The validation run completes in seconds and is
+deterministic: it reads the fixture files and returns the same verdict on every
+run.
 
 Run:
 
@@ -24,13 +25,20 @@ Run:
 bash examples/shared-task-record/run.sh
 ```
 
-(the script is one command: `go test ./internal/sharedtask -run
-TestContractSequenceFixtureValidates -v`)
+(the script is one command: `python3 examples/shared-task-record/validate_shared_items.py
+examples/shared-task-record`)
+
+The Go contract fold (`internal/sharedtask`) that used to run this witness was
+retired as an unwired package (`faa9a66b8`, issue #2743); the live validation
+authority is now the JSON envelope schemas under `tools/schemas/shared-*.json`,
+which is what `validate_shared_items.py` reads.
 
 ## What You See
 
-The command exits 0 when the task record sequence, revision chain, journal, and
-artifact references validate against the shared schemas.
+The command exits 0 when every fixture validates against the schema it names
+(the write gate), and each item's id-stable core fields render identically on
+both surfaces (the shared-item read-parity property from #2216). A fixture that
+fails validation is REFUSED with a typed reason, never rendered best-effort.
 
 ## What This Does Not Claim
 
