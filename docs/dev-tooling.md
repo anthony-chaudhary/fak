@@ -193,6 +193,7 @@ fak commit --preview -m "<subject>" --path <p>   # lint the first subject/stamp 
 fak commit --path <p> -m "<subject>"             # preferred commit path for a narrow change
 # or:
 fak sweep --apply --lane <lane> -m "<subject>"   # preferred commit path for a whole lane group
+fak sync push                                    # safe publish path; retries moving-trunk races
 # subject: Conventional-Commits, verb-led, with a (fak <leaf>) trailer, e.g.
 #   fix(gateway): treat same-tick ready as positive (fak gateway)
 ```
@@ -206,10 +207,13 @@ stamp/lane mismatch up front, which is the only place you can fix them on a shar
 trunk. `fak sweep --apply --lane <lane> -m "<subj>"` is the layer above it for a
 dirty tree: it reuses the same lane resolver, appends the `(fak <lane>)` trailer when
 needed, and commits exactly that lane's dirty paths through the safe-commit path.
+Publish finished work with `fak sync push`; it is the push-side sibling of
+`fak sync check/apply`, so moving-trunk races get retried without pull/stash/reset,
+and the output still reports the remaining dirty-tree next action.
 Raw `git commit -s -- <explicit paths>` remains the fallback when the binary is not
 available; do not use `git add -A`. Work directly on `main`; the trunk guard refuses
 an off-trunk commit (`OFF_TRUNK`). Default is to ship: once `make ci` is green,
-commit and push.
+commit and push through `fak sync push`.
 
 Full contributor contract: [`CONTRIBUTING.md`](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md). How a *feature*
 attaches as a leaf behind a `Register*` seam: [`EXTENDING.md`](https://github.com/anthony-chaudhary/fak/blob/main/EXTENDING.md). A

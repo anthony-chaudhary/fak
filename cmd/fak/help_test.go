@@ -77,6 +77,37 @@ func TestVerbWallSectionsCarvesDepth(t *testing.T) {
 	}
 }
 
+func TestSyncHelpNamesPushAndDirtyGuidance(t *testing.T) {
+	if cat := helpCatalog(); cat != nil {
+		var synopsis string
+		for _, v := range cat.Verbs() {
+			if v.Name == "sync" {
+				synopsis = v.Synopsis
+				break
+			}
+		}
+		if !strings.Contains(synopsis, "sync/push") {
+			t.Fatalf("sync catalog synopsis = %q, want it to name sync/push", synopsis)
+		}
+	}
+
+	sections := verbWallSections([]string{"sync"})
+	if len(sections) == 0 {
+		t.Fatal("verbWallSections found no wall block for 'sync'")
+	}
+	joined := strings.Join(sections, "")
+	for _, want := range []string{
+		"[check|apply|push]",
+		"SAFE SYNC/PUSH",
+		"dirty-tree sweep next action",
+		"safe push path",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("sync wall block missing %q:\n%s", want, joined)
+		}
+	}
+}
+
 // TestSuggestVerb pins did-you-mean: a near-miss typo maps to the real verb, and
 // garbage maps to nothing rather than a random suggestion.
 func TestSuggestVerb(t *testing.T) {

@@ -54,7 +54,7 @@ var overviewGroups = []struct {
 		{"done", "pre-claim self-check: paths clean + tests + claims-lint + witness"},
 		{"commit", "safe shared-trunk commit by explicit pathspec (never git add -A)"},
 		{"sweep", "drive a dirty multi-session tree toward zero, one lane at a time"},
-		{"sync", "safe fast-forward sync for a dirty shared worktree; never pull/stash/reset"},
+		{"sync", "safe sync/push for a dirty shared worktree; never pull/stash/reset"},
 		{"merge", "predict a shared-trunk merge before starting it"},
 	}},
 	{"guard + serve (the front doors)", []overviewEntry{

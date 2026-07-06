@@ -75,12 +75,15 @@ const usageCoreText = `usage:
                  score notes for batch-size/mixed-status/untracked/deletion risk; --json
                  feeds a drive-to-zero loop.
                  Exit 0 ok, 2 usage, 3 a pre-commit refusal, 1 a raced/failed commit)
-  fak sync      [check|apply] [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
-                (SAFE FAST-FORWARD SYNC for a dirty shared worktree. check is read-only
-                 except optional --fetch. apply fast-forwards only when every path Git would
-                 write is clean at HEAD or already byte-identical to the remote-tracking
-                 version, preserving unrelated local work. Never uses pull, stash, reset,
-                 clean, or add. Exit 0 safe/applied/in-sync, 2 usage, 3 refused, 4 internal.)
+  fak sync      [check|apply|push] [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
+                (SAFE SYNC/PUSH for a dirty shared worktree. check is read-only except
+                 optional --fetch and reports the dirty-tree sweep next action. apply
+                 fast-forwards only when every path Git would write is clean at HEAD or
+                 already byte-identical to the remote-tracking version, preserving unrelated
+                 local work. push publishes through the safe push path, retries transient
+                 moving-trunk races, and reports the remaining dirty-tree next action after
+                 the push. Never uses pull, stash, reset, clean, add, merge, or force-push.
+                 Exit 0 safe/applied/pushed/in-sync, 2 usage, 3 refused, 4 internal.)
   fak merge     --dry-run [--dir DIR] [--target REF | REF] [--trunk B] [--json]
                 (SHARED-TRUNK MERGE PREVIEW: predict 'git merge origin/<trunk>' before
                  starting it. Uses Git's merge-tree machinery without touching the
