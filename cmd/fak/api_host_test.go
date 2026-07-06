@@ -129,6 +129,50 @@ func writeAPIHostModelAccountsRoster(t *testing.T, baseURL string) string {
 	return path
 }
 
+func writeAPIHostDeepSeekModelAccountsRoster(t *testing.T, openAIBaseURL, anthropicBaseURL string) string {
+	t.Helper()
+	body := fmt.Sprintf(`{
+  "version": "fak-accounts/v1",
+  "accounts": [
+    {
+      "id": "deepseek",
+      "kind": "deepseek",
+      "base_url": %q,
+      "cred_env": "DEEPSEEK_API_KEY",
+      "context_tokens": 1000000,
+      "max_output_tokens": 384000
+    },
+    {
+      "id": "deepseek-anthropic",
+      "kind": "anthropic",
+      "base_url": %q,
+      "cred_env": "DEEPSEEK_API_KEY",
+      "context_tokens": 1000000,
+      "max_output_tokens": 384000
+    }
+  ],
+  "default": "deepseek",
+  "bindings": [
+    {"model":"deepseek-pro","account":"deepseek","upstream_model":"deepseek-v4-pro"},
+    {"model":"deepseek-flash","account":"deepseek","upstream_model":"deepseek-v4-flash"},
+    {"model":"deepseek-pro-anthropic","account":"deepseek-anthropic","upstream_model":"deepseek-v4-pro"},
+    {
+      "model": "deepseek-chat-compat",
+      "account": "deepseek",
+      "upstream_model": "deepseek-chat",
+      "compatibility_only": true,
+      "deprecated_after_utc": "2026-07-24 15:59 UTC",
+      "deprecated_alias_for": "deepseek-v4-flash non-thinking mode"
+    }
+  ]
+}`, openAIBaseURL, anthropicBaseURL)
+	path := filepath.Join(t.TempDir(), "deepseek-model-accounts.json")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write DeepSeek model account roster: %v", err)
+	}
+	return path
+}
+
 func TestAPIHostReadinessFromModelAccountsRoster(t *testing.T) {
 	server := apiHostTestServer()
 	defer server.Close()
@@ -161,6 +205,46 @@ func TestAPIHostReadinessFromModelAccountsRoster(t *testing.T) {
 	}
 	if len(report.Probes) != 1 || report.Probes[0].Name != "local-probe" || report.Probes[0].ModelHint != "m1" {
 		t.Fatalf("unexpected readiness probes: %+v\n%s", report.Probes, stdout.String())
+	}
+}
+
+func TestAPIHostReadinessFromModelAccountsIncludesDeepSeekOpenAIOnly(t *testing.T) {
+	server := apiHostTestServer()
+	defer server.Close()
+	t.Setenv("DEEPSEEK_API_KEY", "sk-must-not-print")
+	roster := writeAPIHostDeepSeekModelAccountsRoster(t, server.URL+"/ok", server.URL+"/anthropic")
+	var stdout, stderr bytes.Buffer
+
+	rc := runAPIHost(&stdout, &stderr, []string{
+		"readiness",
+		"--from-model-accounts", roster,
+	})
+	if rc != 0 {
+		t.Fatalf("runAPIHost readiness rc=%d stderr=%q stdout=%s", rc, stderr.String(), stdout.String())
+	}
+	var report struct {
+		Summary struct {
+			Targets         int  `json:"targets"`
+			ModelsConfirmed int  `json:"models_confirmed"`
+			ReadinessGate   bool `json:"readiness_gate"`
+		} `json:"summary"`
+		Probes []struct {
+			Name      string   `json:"name"`
+			ModelHint string   `json:"model_hint"`
+			Models    []string `json:"models"`
+		} `json:"probes"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal JSON report: %v\n%s", err, stdout.String())
+	}
+	if report.Summary.Targets != 1 || report.Summary.ModelsConfirmed != 1 || !report.Summary.ReadinessGate {
+		t.Fatalf("unexpected readiness summary: %+v\n%s", report.Summary, stdout.String())
+	}
+	if len(report.Probes) != 1 || report.Probes[0].Name != "deepseek" || report.Probes[0].ModelHint == "" {
+		t.Fatalf("unexpected DeepSeek readiness probes: %+v\n%s", report.Probes, stdout.String())
+	}
+	if strings.Contains(stdout.String(), "sk-must-not-print") {
+		t.Fatalf("readiness output leaked the credential value:\n%s", stdout.String())
 	}
 }
 
@@ -209,6 +293,61 @@ func TestAPIHostAcceptanceFromModelAccountsRosterKeepsNativeAccounts(t *testing.
 	}
 	if statuses["claude-sub"] != "WIRE_SUPPORTED_UNPROBED" || providers["claude-sub"] != "anthropic" {
 		t.Fatalf("native account row wrong: statuses=%v providers=%v", statuses, providers)
+	}
+}
+
+func TestAPIHostAcceptanceFromModelAccountsKeepsDeepSeekAnthropicUnprobed(t *testing.T) {
+	server := apiHostTestServer()
+	defer server.Close()
+	t.Setenv("DEEPSEEK_API_KEY", "sk-must-not-print")
+	roster := writeAPIHostDeepSeekModelAccountsRoster(t, server.URL+"/ok", server.URL+"/anthropic")
+	var stdout, stderr bytes.Buffer
+
+	rc := runAPIHost(&stdout, &stderr, []string{
+		"acceptance",
+		"--from-model-accounts", roster,
+		"--root", t.TempDir(),
+	})
+	if rc != 0 {
+		t.Fatalf("runAPIHost acceptance rc=%d stderr=%q stdout=%s", rc, stderr.String(), stdout.String())
+	}
+	var report struct {
+		Summary struct {
+			Targets               int  `json:"targets"`
+			ReadyForLiveBridgeRun int  `json:"ready_for_live_bridge_run"`
+			WireSupportedUnprobed int  `json:"wire_supported_unprobed"`
+			AcceptanceGate        bool `json:"acceptance_gate"`
+		} `json:"summary"`
+		Targets []struct {
+			Name            string `json:"name"`
+			Provider        string `json:"provider"`
+			Status          string `json:"status"`
+			ReadinessStatus string `json:"readiness_status"`
+		} `json:"targets"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal JSON report: %v\n%s", err, stdout.String())
+	}
+	if report.Summary.Targets != 2 || report.Summary.ReadyForLiveBridgeRun != 1 ||
+		report.Summary.WireSupportedUnprobed != 1 || !report.Summary.AcceptanceGate {
+		t.Fatalf("unexpected acceptance summary: %+v\n%s", report.Summary, stdout.String())
+	}
+	statuses := map[string]string{}
+	providers := map[string]string{}
+	readiness := map[string]string{}
+	for _, row := range report.Targets {
+		statuses[row.Name] = row.Status
+		providers[row.Name] = row.Provider
+		readiness[row.Name] = row.ReadinessStatus
+	}
+	if statuses["deepseek"] != "READY_FOR_LIVE_BRIDGE_RUN" || providers["deepseek"] != "deepseek" || readiness["deepseek"] != "MODELS_CONFIRMED" {
+		t.Fatalf("DeepSeek OpenAI-compatible row wrong: statuses=%v providers=%v readiness=%v", statuses, providers, readiness)
+	}
+	if statuses["deepseek-anthropic"] != "WIRE_SUPPORTED_UNPROBED" || providers["deepseek-anthropic"] != "anthropic" || readiness["deepseek-anthropic"] != "NOT_PROBED" {
+		t.Fatalf("DeepSeek Anthropic row wrong: statuses=%v providers=%v readiness=%v", statuses, providers, readiness)
+	}
+	if strings.Contains(stdout.String(), "sk-must-not-print") {
+		t.Fatalf("acceptance output leaked the credential value:\n%s", stdout.String())
 	}
 }
 

@@ -105,7 +105,7 @@ func printModelCard(s modelStats, temp float64, maxNew int, sampling string) {
 	fmt.Fprintf(os.Stderr, "⚙️  device %s · %d threads · backends available: [%s]\n",
 		s.device, s.threads, strings.Join(s.backends, ", "))
 	if !hasGPUBackend(s.backends) {
-		fmt.Fprintln(os.Stderr, "    └─ no GPU backend in this build — rebuild `-tags cuda` on an NVIDIA box (or `-tags fakmetal` on Apple) and pass `-backend cuda` to run on the GPU")
+		fmt.Fprintln(os.Stderr, "    └─ no GPU backend in this build — rebuild `-tags cuda` on an NVIDIA box (Metal auto-compiles on darwin/arm64+cgo, no tag needed) and pass `-backend cuda` to run on the GPU")
 	}
 
 	fmt.Fprintf(os.Stderr, "🎯 sampling: %s · temp %.2f · max %d tok/reply · %s weights\n",

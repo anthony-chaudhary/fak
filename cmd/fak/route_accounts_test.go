@@ -115,6 +115,59 @@ func TestRouteAccountsBindsEnsembleAcrossAccounts(t *testing.T) {
 	}
 }
 
+func TestRouteAccountsBindsDeepSeekProfile(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "sk-must-not-print")
+	roster := writeAPIHostDeepSeekModelAccountsRoster(t, "https://api.deepseek.com", "https://api.deepseek.com/anthropic")
+	manifest := filepath.Join(t.TempDir(), "deepseek-route.json")
+	body := `{
+  "version": "fak-route/v1",
+  "default": {
+    "members": [{"model": "deepseek-pro", "role": "primary"}],
+    "reason": "DeepSeek V4 Pro profile witness"
+  }
+}`
+	if err := os.WriteFile(manifest, []byte(body), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	code, out, errs := runRT("--manifest", manifest, "--accounts", roster, "--json")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s out=%s", code, errs, out)
+	}
+	var rep struct {
+		Binding struct {
+			Members []struct {
+				Model           string `json:"model"`
+				Account         string `json:"account"`
+				Kind            string `json:"kind"`
+				BaseURL         string `json:"base_url"`
+				CredEnv         string `json:"cred_env"`
+				UpstreamModel   string `json:"upstream_model"`
+				Local           bool   `json:"local"`
+				EngineRoute     string `json:"engine_route"`
+				ContextTokens   int    `json:"context_tokens"`
+				MaxOutputTokens int    `json:"max_output_tokens"`
+			} `json:"members"`
+		} `json:"binding"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	if len(rep.Binding.Members) != 1 {
+		t.Fatalf("want one bound DeepSeek member, got %d:\n%s", len(rep.Binding.Members), out)
+	}
+	m := rep.Binding.Members[0]
+	if m.Account != "deepseek" || m.Kind != "deepseek" || m.BaseURL != "https://api.deepseek.com" ||
+		m.CredEnv != "DEEPSEEK_API_KEY" || m.UpstreamModel != "deepseek-v4-pro" ||
+		m.Local || m.EngineRoute != "deepseek:deepseek/deepseek-v4-pro" ||
+		m.ContextTokens != 1000000 || m.MaxOutputTokens != 384000 {
+		t.Fatalf("DeepSeek binding wrong: %+v\n%s", m, out)
+	}
+	if strings.Contains(out, "sk-must-not-print") {
+		t.Fatalf("route output leaked a secret:\n%s", out)
+	}
+}
+
 // The CLI output (human and JSON) carries credential ENV-VAR NAMES, never secrets,
 // even when the env var holds a key.
 func TestRouteAccountsNeverPrintsSecret(t *testing.T) {

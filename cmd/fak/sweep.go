@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"flag"
 	"os"
@@ -189,7 +191,23 @@ func gitStatusDirty(ctx context.Context, root string) ([]dirtyEntry, error) {
 	if code != 0 {
 		return nil, fmt.Errorf("git status exited %d: %s", code, strings.TrimSpace(out))
 	}
-	return parsePorcelainZ(out), nil
+	return annotateDirtyAges(root, parsePorcelainZ(out), time.Now()), nil
+}
+
+func annotateDirtyAges(root string, entries []dirtyEntry, now time.Time) []dirtyEntry {
+	for i := range entries {
+		p := filepath.Join(root, filepath.FromSlash(normSweepPath(entries[i].Path)))
+		st, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		mtime := st.ModTime().Unix()
+		entries[i].MTime = mtime
+		if age := int64(now.Sub(st.ModTime()).Seconds()); age > 0 {
+			entries[i].AgeSeconds = age
+		}
+	}
+	return entries
 }
 
 // hooksLaneResolver derives a path's lane through the SAME engine the pre-commit lint binds to:
@@ -253,6 +271,9 @@ func renderSweepPlan(w io.Writer, plan sweepPlan) {
 	}
 	fmt.Fprintf(w, "dirty paths: %d  (%d stampable across %d lane(s), %d no-lane, %d junk)\n",
 		plan.TotalDirty, stampableCount(plan), len(plan.Groups), len(plan.NoLane), len(plan.Junk))
+	if plan.OldestDirtyPath != "" {
+		fmt.Fprintf(w, "oldest dirty: %s at %s\n", sweepAgeLabel(plan.OldestDirtyAgeSeconds), plan.OldestDirtyPath)
+	}
 
 	if len(plan.Groups) > 0 {
 		fmt.Fprintln(w, "\nstampable lane groups — commit each with an ACCURATE subject:")
@@ -262,6 +283,9 @@ func renderSweepPlan(w io.Writer, plan sweepPlan) {
 				already[p] = true
 			}
 			fmt.Fprintf(w, "\n  lane %-12s score %3d  %s  (%d path(s))\n", g.Lane, g.Score, g.Trailer, len(g.Paths))
+			if g.OldestDirtyPath != "" {
+				fmt.Fprintf(w, "    oldest: %s at %s\n", sweepAgeLabel(g.OldestDirtyAgeSeconds), g.OldestDirtyPath)
+			}
 			if g.AllAlready {
 				// The whole lane is byte-identical to the trunk: nothing to commit. This is the line
 				// that turns a multi-probe investigation into one glance.
@@ -293,6 +317,9 @@ func renderSweepPlan(w io.Writer, plan sweepPlan) {
 						dir = "(repo root)"
 					}
 					fmt.Fprintf(w, "      unit %d  dir %-24s score %3d  (%d path(s))\n", u.Index, dir, u.Score, len(u.Paths))
+					if u.OldestDirtyPath != "" {
+						fmt.Fprintf(w, "        oldest: %s at %s\n", sweepAgeLabel(u.OldestDirtyAgeSeconds), u.OldestDirtyPath)
+					}
 					for _, p := range u.Paths {
 						tag := ""
 						if already[p] {
@@ -316,5 +343,20 @@ func renderSweepPlan(w io.Writer, plan sweepPlan) {
 		for _, e := range plan.Junk {
 			fmt.Fprintf(w, "  %-2s %s\n", e.Status, e.Path)
 		}
+	}
+}
+
+func sweepAgeLabel(seconds int64) string {
+	switch {
+	case seconds <= 0:
+		return "now"
+	case seconds < 60:
+		return fmt.Sprintf("%ds", seconds)
+	case seconds < 3600:
+		return fmt.Sprintf("%dm", seconds/60)
+	case seconds < 86400:
+		return fmt.Sprintf("%dh", seconds/3600)
+	default:
+		return fmt.Sprintf("%dd", seconds/86400)
 	}
 }

@@ -45,9 +45,11 @@ type originProbe func(path string) originRelation
 
 // dirtyEntry is one `git status --porcelain` record: a path, its XY status, untracked-ness.
 type dirtyEntry struct {
-	Path      string `json:"path"`
-	Status    string `json:"status"` // trimmed porcelain XY ("M", "A", "D", "??", ...)
-	Untracked bool   `json:"untracked"`
+	Path       string `json:"path"`
+	Status     string `json:"status"` // trimmed porcelain XY ("M", "A", "D", "??", ...)
+	Untracked  bool   `json:"untracked"`
+	MTime      int64  `json:"mtime,omitempty"`       // working-tree file mtime unix seconds, when stattable
+	AgeSeconds int64  `json:"age_seconds,omitempty"` // age at sweep time, when stattable
 }
 
 // sweepEntry is a classified dirty path.
@@ -60,11 +62,14 @@ type sweepEntry struct {
 
 // sweepGroup is the unit one commit would cover: every stampable path in a single lane.
 type sweepGroup struct {
-	Lane         string   `json:"lane"`
-	Trailer      string   `json:"suggested_trailer"`
-	Paths        []string `json:"paths"`
-	Score        int      `json:"score"`                   // 0-100 apply-readiness score for this lane group
-	ScoreReasons []string `json:"score_reasons,omitempty"` // why Score dropped below 100
+	Lane                  string   `json:"lane"`
+	Trailer               string   `json:"suggested_trailer"`
+	Paths                 []string `json:"paths"`
+	Score                 int      `json:"score"`                   // 0-100 apply-readiness score for this lane group
+	ScoreReasons          []string `json:"score_reasons,omitempty"` // why Score dropped below 100
+	OldestDirtyPath       string   `json:"oldest_dirty_path,omitempty"`
+	OldestDirtyMTime      int64    `json:"oldest_dirty_mtime,omitempty"`
+	OldestDirtyAgeSeconds int64    `json:"oldest_dirty_age_seconds,omitempty"`
 	// AlreadyShipped lists the paths in this lane whose working-tree blob is byte-identical to
 	// origin/<trunk> — pure no-ops that a commit would not change. Populated only when the origin
 	// probe ran; omitted otherwise so the JSON shape is unchanged for callers that never asked.
@@ -81,10 +86,13 @@ type sweepGroup struct {
 
 // sweepPlan is the full grouped view of a dirty working tree.
 type sweepPlan struct {
-	TotalDirty int          `json:"total_dirty"`
-	Groups     []sweepGroup `json:"groups"`
-	NoLane     []sweepEntry `json:"no_lane,omitempty"`
-	Junk       []sweepEntry `json:"junk,omitempty"`
+	TotalDirty             int          `json:"total_dirty"`
+	OldestDirtyPath        string       `json:"oldest_dirty_path,omitempty"`
+	OldestDirtyMTime       int64        `json:"oldest_dirty_mtime,omitempty"`
+	OldestDirtyAgeSeconds  int64        `json:"oldest_dirty_age_seconds,omitempty"`
+	Groups                 []sweepGroup `json:"groups"`
+	NoLane                 []sweepEntry `json:"no_lane,omitempty"`
+	Junk                   []sweepEntry `json:"junk,omitempty"`
 }
 
 // atomicUnitTarget is the largest number of paths a single sweep sub-commit should carry. A lane
@@ -101,11 +109,14 @@ const atomicUnitTarget = 10
 // invariant — a split never drops or reclassifies an in-progress change). Units are ordered
 // deterministically by Dir so the Index a loop reads is stable across runs on the same tree.
 type sweepSubUnit struct {
-	Index        int      `json:"index"`                   // 1-based, stable order — the `--unit N` selector
-	Dir          string   `json:"dir"`                     // immediate parent directory of this unit's paths ("" = repo root)
-	Paths        []string `json:"paths"`                   // sorted; a subset of the parent group's Paths
-	Score        int      `json:"score"`                   // scoreSweepGroup over THIS slice — proof the split raised per-unit readiness
-	ScoreReasons []string `json:"score_reasons,omitempty"` // why this sub-unit's Score dropped below 100
+	Index                 int      `json:"index"`                   // 1-based, stable order — the `--unit N` selector
+	Dir                   string   `json:"dir"`                     // immediate parent directory of this unit's paths ("" = repo root)
+	Paths                 []string `json:"paths"`                   // sorted; a subset of the parent group's Paths
+	Score                 int      `json:"score"`                   // scoreSweepGroup over THIS slice — proof the split raised per-unit readiness
+	ScoreReasons          []string `json:"score_reasons,omitempty"` // why this sub-unit's Score dropped below 100
+	OldestDirtyPath       string   `json:"oldest_dirty_path,omitempty"`
+	OldestDirtyMTime      int64    `json:"oldest_dirty_mtime,omitempty"`
+	OldestDirtyAgeSeconds int64    `json:"oldest_dirty_age_seconds,omitempty"`
 }
 
 // laneResolver maps a repo-relative path to its `(fak <lane>)` leaf, "" when none can be inferred.
@@ -123,6 +134,7 @@ func classifyDirty(entries []dirtyEntry, resolve laneResolver, origin originProb
 		origin = func(string) originRelation { return originUnknown }
 	}
 	plan := sweepPlan{TotalDirty: len(entries)}
+	plan.OldestDirtyPath, plan.OldestDirtyMTime, plan.OldestDirtyAgeSeconds = oldestDirty(entries)
 	byLane := map[string][]sweepEntry{}
 	for _, e := range entries {
 		se := sweepEntry{dirtyEntry: e}
@@ -163,18 +175,34 @@ func classifyDirty(entries []dirtyEntry, resolve laneResolver, origin originProb
 			}
 		}
 		score, reasons := scoreSweepGroup(dirty)
+		oldestPath, oldestMTime, oldestAge := oldestDirty(dirty)
 		plan.Groups = append(plan.Groups, sweepGroup{
-			Lane:           lane,
-			Trailer:        "(fak " + lane + ")",
-			Paths:          paths,
-			Score:          score,
-			ScoreReasons:   reasons,
-			AlreadyShipped: already,
-			AllAlready:     len(already) > 0 && len(already) == len(paths),
-			Units:          splitLaneUnits(dirty, atomicUnitTarget),
+			Lane:                  lane,
+			Trailer:               "(fak " + lane + ")",
+			Paths:                 paths,
+			Score:                 score,
+			ScoreReasons:          reasons,
+			OldestDirtyPath:       oldestPath,
+			OldestDirtyMTime:      oldestMTime,
+			OldestDirtyAgeSeconds: oldestAge,
+			AlreadyShipped:        already,
+			AllAlready:            len(already) > 0 && len(already) == len(paths),
+			Units:                 splitLaneUnits(dirty, atomicUnitTarget),
 		})
 	}
 	return plan
+}
+
+func oldestDirty(entries []dirtyEntry) (path string, mtime, age int64) {
+	for _, e := range entries {
+		if e.MTime == 0 {
+			continue
+		}
+		if mtime == 0 || e.MTime < mtime {
+			path, mtime, age = e.Path, e.MTime, e.AgeSeconds
+		}
+	}
+	return path, mtime, age
 }
 
 func scoreSweepGroup(entries []dirtyEntry) (int, []string) {
@@ -259,12 +287,16 @@ func splitLaneUnits(entries []dirtyEntry, target int) []sweepSubUnit {
 			paths[j] = e.Path
 		}
 		score, reasons := scoreSweepGroup(bucket)
+		oldestPath, oldestMTime, oldestAge := oldestDirty(bucket)
 		units = append(units, sweepSubUnit{
-			Index:        i + 1,
-			Dir:          dir,
-			Paths:        paths,
-			Score:        score,
-			ScoreReasons: reasons,
+			Index:                 i + 1,
+			Dir:                   dir,
+			Paths:                 paths,
+			Score:                 score,
+			ScoreReasons:          reasons,
+			OldestDirtyPath:       oldestPath,
+			OldestDirtyMTime:      oldestMTime,
+			OldestDirtyAgeSeconds: oldestAge,
 		})
 	}
 	return units

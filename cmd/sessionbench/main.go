@@ -60,6 +60,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/intlist"
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
@@ -68,20 +69,20 @@ import (
 // wall-clock per component — the same least-contended-sample methodology the model-baseline
 // docs use for the bandwidth-sensitive decode numbers, so a transient fleet-load spike on one
 // rep cannot inflate an arm and skew the ratio.
-func bestLiveB(m *model.Model, quant, vocab, P, T, C, D, R, reps int) (px, inc, dc float64) {
+func bestLiveB(m *model.Model, quant, vocab, P, T, C, D, R, reps int, metal bool) (px, inc, dc float64) {
 	px, inc, dc = math.MaxFloat64, math.MaxFloat64, math.MaxFloat64
 	for r := 0; r < reps; r++ {
-		p, i, d := liveB(m, quant, vocab, P, T, C, D, R)
+		p, i, d := liveB(m, quant, vocab, P, T, C, D, R, metal)
 		px, inc, dc = math.Min(px, p), math.Min(inc, i), math.Min(dc, d)
 		runtime.GC()
 	}
 	return
 }
 
-func bestLiveC(m *model.Model, quant, vocab, P, T, C, D, R, reps int) (pf, cl, dc float64) {
+func bestLiveC(m *model.Model, quant, vocab, P, T, C, D, R, reps int, metal bool) (pf, cl, dc float64) {
 	pf, cl, dc = math.MaxFloat64, math.MaxFloat64, math.MaxFloat64
 	for r := 0; r < reps; r++ {
-		p, c, d := liveC(m, quant, vocab, P, T, C, D, R)
+		p, c, d := liveC(m, quant, vocab, P, T, C, D, R, metal)
 		pf, cl, dc = math.Min(pf, p), math.Min(cl, c), math.Min(dc, d)
 		runtime.GC()
 	}
@@ -195,7 +196,7 @@ type prefillModel struct {
 	MS   []float64 `json:"ms"` // best-of-reps prefill wall-clock at each Lens[i]
 }
 
-func measurePrefill(m *model.Model, quant, vocab int, lens []int, reps int) prefillModel {
+func measurePrefill(m *model.Model, quant, vocab int, lens []int, reps int, metal bool) prefillModel {
 	pm := prefillModel{}
 	for _, L := range lens {
 		ids := lcgIDs(L, vocab, uint64(1000+L))
@@ -203,6 +204,7 @@ func measurePrefill(m *model.Model, quant, vocab int, lens []int, reps int) pref
 		for r := 0; r < reps; r++ {
 			s := m.NewSession()
 			s.Quant = quant != 0
+			s.Metal = metal
 			t0 := time.Now()
 			s.Prefill(ids)
 			ds = append(ds, time.Since(t0))
@@ -243,13 +245,14 @@ func (pm prefillModel) cost(L int) float64 {
 // (paid once per agent — the live anchor for prefillCost(P)) from the incremental result
 // prefill and from decode, so the caller can re-scale the sampled prefill model to arm B's
 // live timebase (removing cross-time contention drift in the computed arm-A projection).
-func liveB(m *model.Model, quant, vocab, P, T, C, D, R int) (prefixMS, incMS, decodeMS float64) {
+func liveB(m *model.Model, quant, vocab, P, T, C, D, R int, metal bool) (prefixMS, incMS, decodeMS float64) {
 	prefix := lcgIDs(P, vocab, 1)
 	ids0 := lcgIDs(C, vocab, 991)
 	var px, inc, dc time.Duration
 	for a := 0; a < C; a++ {
 		s := m.NewSession()
 		s.Quant = quant != 0
+		s.Metal = metal
 		t0 := time.Now()
 		s.Prefill(prefix)
 		px += time.Since(t0)
@@ -273,13 +276,23 @@ func liveB(m *model.Model, quant, vocab, P, T, C, D, R int) (prefixMS, incMS, de
 }
 
 // liveC runs arm C (fak fused: prefix once + clone + batched decode + incremental).
-func liveC(m *model.Model, quant, vocab, P, T, C, D, R int) (prefillMS, cloneMS, decodeMS float64) {
+//
+// metal only accelerates the ONE shared-prefix prefill on `base` below (a plain *Session — the
+// Metal-resident forward, internal/model/metal_decode.go, is wired there). The batched decode
+// that follows (bs.StepBatch) runs through *BatchSession, which has no Metal field and no Metal
+// code path at all (batch.go/batch_step.go never reference .Metal) — so arm C's decode stays on
+// CPU regardless of this flag. That gap is exactly what
+// docs/notes/OWN-FORWARD-MULTI-AGENT-FLEET-MAC-2026-07-04.md's "decode batching gave ~0% gain"
+// finding traces to structurally: there is currently no GPU decode-batching implementation to
+// benefit from, Metal or otherwise.
+func liveC(m *model.Model, quant, vocab, P, T, C, D, R int, metal bool) (prefillMS, cloneMS, decodeMS float64) {
 	prefix := lcgIDs(P, vocab, 1)
 	ids0 := lcgIDs(C, vocab, 991)
 	var pf, cl, dc time.Duration
 
 	base := m.NewSession()
 	base.Quant = quant != 0
+	base.Metal = metal
 	t0 := time.Now()
 	base.Prefill(prefix)
 	pf += time.Since(t0)
@@ -313,7 +326,7 @@ func liveC(m *model.Model, quant, vocab, P, T, C, D, R int) (prefillMS, cloneMS,
 }
 
 // liveA runs arm A fully (only for small-scale validation — quadratic re-prefill).
-func liveA(m *model.Model, quant, vocab, P, T, C, D, R int) (prefillMS, decodeMS float64) {
+func liveA(m *model.Model, quant, vocab, P, T, C, D, R int, metal bool) (prefillMS, decodeMS float64) {
 	prefix := lcgIDs(P, vocab, 1)
 	ids0 := lcgIDs(C, vocab, 991)
 	var pf, dc time.Duration
@@ -323,6 +336,7 @@ func liveA(m *model.Model, quant, vocab, P, T, C, D, R int) (prefillMS, decodeMS
 		for t := 0; t < T; t++ {
 			s := m.NewSession()
 			s.Quant = quant != 0
+			s.Metal = metal
 			t0 := time.Now()
 			s.Prefill(ctx) // re-prefill the WHOLE context so far
 			pf += time.Since(t0)
@@ -436,6 +450,7 @@ func main() {
 	synthetic := flag.String("synthetic", "", "run weightless on a synthetic model at a named shape (tiny|smollm2-135m|qwen25-1.5b|qwen25-7b) — no -hf/-dir needed; ratios faithful, absolute wall-clock is this-box; tiny is the CPU-tractable wiring shape for unattended nightrun")
 	lean := flag.Bool("lean", false, "memory-lean quantize-at-load (requires -hf; implies -quant)")
 	quantF := flag.Bool("quant", false, "use the Q8_0 quantized lane (else f32) — opt-in, matching batch/model/radixbench")
+	metalF := flag.Bool("metal", false, "run the single-session forward (arms A/B's per-agent decode, arm C's ONE shared-prefix prefill) through the Apple-Silicon Metal GPU path (auto-compiled on darwin/arm64+cgo, no build tag needed; requires -quant or -lean, and a dense non-MoE/non-hybrid model). Does NOT accelerate arm C's batched decode (BatchSession.StepBatch has no Metal path at all) — see liveC's doc comment. Fails loud if requested but unavailable, matching `fak serve --metal`.")
 	prefix := flag.Int("prefix", 2048, "shared prefix tokens (system prompt + tool schemas)")
 	turnsArg := flag.String("turns", "50", "comma-separated turn counts to sweep")
 	agentsArg := flag.String("agents", "5", "comma-separated agent counts to sweep")
@@ -455,6 +470,21 @@ func main() {
 	if *quantF || *lean {
 		quant = 1
 	}
+	if *metalF {
+		if quant == 0 {
+			fmt.Fprintln(os.Stderr, "-metal requires -quant or -lean (the Metal decode/prefill path only runs the Q8_0 lane)")
+			os.Exit(2)
+		}
+		if !metalgemm.Available() {
+			if !metalgemm.Compiled() {
+				fmt.Fprintln(os.Stderr, "-metal requested but this binary has no Metal support — build on darwin/arm64 with cgo enabled.")
+			} else {
+				fmt.Fprintln(os.Stderr, "-metal requested but no usable Metal device is available on this host.")
+			}
+			os.Exit(1)
+		}
+	}
+	metal := *metalF
 	turns := intlist.Parse(*turnsArg)
 	agents := intlist.Parse(*agentsArg)
 	if *countsOnly {
@@ -482,6 +512,7 @@ func main() {
 	// warm
 	ws := m.NewSession()
 	ws.Quant = quant != 0
+	ws.Metal = metal
 	ws.Prefill(lcgIDs(8, vocab, 77))
 	ws.Step(1)
 
@@ -495,7 +526,7 @@ func main() {
 	maxCtx := *prefix + maxT*(*decode+*result)
 	lens := sampleLens(*prefix, maxCtx)
 	fmt.Fprintf(os.Stderr, "measuring prefill cost at lengths %v ...\n", lens)
-	pm := measurePrefill(m, quant, vocab, lens, 2)
+	pm := measurePrefill(m, quant, vocab, lens, 2, metal)
 	for i, L := range pm.Lens {
 		fmt.Fprintf(os.Stderr, "  prefill(%d) = %.0f ms (%.1f tok/s)\n", L, pm.MS[i], float64(L)/(pm.MS[i]/1e3))
 	}
@@ -507,8 +538,8 @@ func main() {
 				continue
 			}
 			fmt.Fprintf(os.Stderr, "cell T=%d C=%d P=%d: running arms B,C live (best of %d) ...\n", T, C, *prefix, *reps)
-			bPx, bInc, bDc := bestLiveB(m, quant, vocab, *prefix, T, C, *decode, *result, *reps)
-			cPf, cCl, cDc := bestLiveC(m, quant, vocab, *prefix, T, C, *decode, *result, *reps)
+			bPx, bInc, bDc := bestLiveB(m, quant, vocab, *prefix, T, C, *decode, *result, *reps, metal)
+			cPf, cCl, cDc := bestLiveC(m, quant, vocab, *prefix, T, C, *decode, *result, *reps, metal)
 			bPf := bPx + bInc
 			// Anchor the sampled prefill model to arm B's LIVE prefix prefill (same time window
 			// as arms B,C) so contention drift between the sampling phase and the arm runs does
@@ -552,11 +583,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "validate: arm A FULLY LIVE at P=%d T=%d C=%d D=%d R=%d (best of %d) ...\n", P, T, C, D, R, *reps)
 		aPfLive, aDcLive := math.MaxFloat64, math.MaxFloat64
 		for r := 0; r < *reps; r++ {
-			p, d := liveA(m, quant, vocab, P, T, C, D, R)
+			p, d := liveA(m, quant, vocab, P, T, C, D, R, metal)
 			aPfLive, aDcLive = math.Min(aPfLive, p), math.Min(aDcLive, d)
 			runtime.GC()
 		}
-		bPx, _, bDcSmall := bestLiveB(m, quant, vocab, P, T, C, D, R, *reps)
+		bPx, _, bDcSmall := bestLiveB(m, quant, vocab, P, T, C, D, R, *reps, metal)
 		aPfComputedRaw := computeAPrefill(pm, P, T, C, D, R)
 		anchor := 1.0
 		if base := pm.cost(P); base > 0 && C > 0 {
@@ -582,8 +613,10 @@ func main() {
 
 	report := map[string]any{
 		"app_version": appversion.Current(),
-		"engine":      "fak sessionbench (multi-agent session value stack, Q8=" + boolStr(quant != 0) + ")",
+		"engine":      "fak sessionbench (multi-agent session value stack, Q8=" + boolStr(quant != 0) + ", metal=" + boolStr(metal) + ")",
 		"model":       name,
+		"metal":       metal,
+		"metal_note":  "Metal (when true) accelerates arms A/B's per-agent single-session decode + all plain-session prefills, INCLUDING arm C's one shared-prefix prefill — but NOT arm C's batched decode (BatchSession.StepBatch has no Metal path at all, by design gap; see cmd/sessionbench liveC doc comment).",
 		"timing_mode": "live_BC_sampled_A",
 		"go_threads":  runtime.GOMAXPROCS(0),
 		"headline": "fak vs a WARM per-agent-KV cache (B/C = net_value_add_vs_tuned) — the honest serving baseline; " +

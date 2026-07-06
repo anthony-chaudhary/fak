@@ -267,7 +267,7 @@ func parseFlags() *benchFlags {
 		decodeSteps:           flag.Int("decode-steps", 32, "tokens to decode"),
 		decodePrompt:          flag.Int("decode-prompt", 16, "prompt length before decode"),
 		quant:                 flag.Bool("quant", false, "use the Q8_0 quantized forward path (else f32)"),
-		metal:                 flag.Bool("metal", false, "run prefill projections on the Metal GPU backend (requires Apple Silicon+cgo and -tags fakmetal; implies -quant for the Q8 weight store; with -q4k, routes Q4_K tensors through MetalQ4K)"),
+		metal:                 flag.Bool("metal", false, "run prefill projections on the Metal GPU backend (auto-compiled on darwin/arm64+cgo, no build tag needed; implies -quant for the Q8 weight store; with -q4k, routes Q4_K tensors through MetalQ4K)"),
 		verify:                flag.Bool("verify", false, "with -metal: cross-check the Metal prefill's last-token logits against the CPU Q8 path (argmax agreement + max|Δ|) and exit"),
 		backendName:           flag.String("backend", "legacy", "execution backend: legacy or a compute backend name"),
 		requireNonReference:   flag.Bool("require-non-reference", false, "fail unless -backend selects a non-reference compute backend"),
@@ -326,7 +326,7 @@ func validateFlags(f *benchFlags) {
 			fmt.Fprintln(os.Stderr, "-q4k currently runs through the legacy resident-Q4_K session path; omit -backend")
 			os.Exit(2)
 		case *f.verify:
-			fmt.Fprintln(os.Stderr, "-q4k -verify is not wired; use go test ./internal/model -tags fakmetal -run MetalQ4K for the parity gate")
+			fmt.Fprintln(os.Stderr, "-q4k -verify is not wired; use go test ./internal/model -run MetalQ4K for the parity gate (darwin/arm64+cgo auto-compiles Metal, no build tag needed)")
 			os.Exit(2)
 		}
 	}
@@ -501,7 +501,7 @@ func resolveMetal(f *benchFlags) {
 			if metalgemm.Compiled() {
 				fmt.Fprintln(os.Stderr, "metal: no usable Metal device; falling back to CPU resident Q4_K")
 			} else {
-				fmt.Fprintln(os.Stderr, "metal: backend not compiled in (requires darwin/arm64 with cgo and -tags fakmetal); falling back to CPU resident Q4_K")
+				fmt.Fprintln(os.Stderr, "metal: backend not compiled in (requires darwin/arm64 with cgo — auto-compiled, no build tag needed); falling back to CPU resident Q4_K")
 			}
 			*f.metal = false
 		}
@@ -512,7 +512,7 @@ func resolveMetal(f *benchFlags) {
 		if metalgemm.Compiled() {
 			fmt.Fprintln(os.Stderr, "metal: no usable Metal device; falling back to CPU Q8 prefill")
 		} else {
-			fmt.Fprintln(os.Stderr, "metal: backend not compiled in (requires darwin/arm64 with cgo and -tags fakmetal); falling back to CPU Q8 prefill")
+			fmt.Fprintln(os.Stderr, "metal: backend not compiled in (requires darwin/arm64 with cgo — auto-compiled, no build tag needed); falling back to CPU Q8 prefill")
 		}
 		*f.metal = false
 	}
