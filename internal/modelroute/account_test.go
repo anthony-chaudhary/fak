@@ -167,8 +167,8 @@ func TestEngineRouteIsStructurallyHonestAboutLocality(t *testing.T) {
 // Every REMOTE kind's route embeds a floor-recognized keyword, and the LOCAL kind's
 // route is local-prefixed — so the floor never fails OPEN on a route it can't classify.
 func TestEngineRouteRemoteKindsCarryAFloorKeyword(t *testing.T) {
-	keywords := []string{"openai", "anthropic", "gemini", "xai"}
-	for _, k := range []ProviderKind{KindOpenAI, KindOpenAIResponses, KindAnthropic, KindGemini, KindXAI} {
+	keywords := []string{"openai", "anthropic", "gemini", "xai", "deepseek"}
+	for _, k := range []ProviderKind{KindOpenAI, KindOpenAIResponses, KindAnthropic, KindGemini, KindXAI, KindDeepSeek} {
 		route := Target{Kind: k, Account: "acct", UpstreamModel: "m"}.EngineRoute()
 		hit := false
 		for _, kw := range keywords {
@@ -233,11 +233,56 @@ func TestValidateRejections(t *testing.T) {
 			Version:  "fak-accounts/v2",
 			Accounts: []Account{{ID: "a", Kind: KindOpenAI, CredEnv: "K"}},
 		},
+		"negative context tokens": {
+			Accounts: []Account{{ID: "a", Kind: KindOpenAI, CredEnv: "K", ContextTokens: -1}},
+		},
+		"negative max output tokens": {
+			Accounts: []Account{{ID: "a", Kind: KindOpenAI, CredEnv: "K", MaxOutputTokens: -1}},
+		},
+		"deprecated deepseek alias without compatibility marker": {
+			Accounts: []Account{{ID: "deepseek", Kind: KindDeepSeek, CredEnv: DeepSeekAPIKeyEnv}},
+			Bindings: []Binding{{Model: "legacy-chat", Account: "deepseek", UpstreamModel: "deepseek-chat"}},
+		},
+		"deprecated deepseek alias missing retirement date": {
+			Accounts: []Account{{ID: "deepseek", Kind: KindDeepSeek, CredEnv: DeepSeekAPIKeyEnv}},
+			Bindings: []Binding{{Model: "legacy-chat", Account: "deepseek", UpstreamModel: "deepseek-chat", CompatibilityOnly: true, DeprecatedAliasFor: DeepSeekV4FlashModel + " non-thinking mode"}},
+		},
+		"compatibility marker on non-deprecated alias": {
+			Accounts: []Account{{ID: "deepseek", Kind: KindDeepSeek, CredEnv: DeepSeekAPIKeyEnv}},
+			Bindings: []Binding{{Model: "deepseek-pro", Account: "deepseek", UpstreamModel: DeepSeekV4ProModel, CompatibilityOnly: true}},
+		},
 	}
 	for name, r := range cases {
 		if err := r.Validate(); err == nil {
 			t.Fatalf("Validate(%s) should fail", name)
 		}
+	}
+}
+
+func TestValidateAcceptsDeepSeekCompatibilityAliasesWhenMarked(t *testing.T) {
+	r := Roster{
+		Accounts: []Account{{ID: "deepseek", Kind: KindDeepSeek, CredEnv: DeepSeekAPIKeyEnv}},
+		Bindings: []Binding{
+			{
+				Model:              "deepseek-chat-compat",
+				Account:            "deepseek",
+				UpstreamModel:      "deepseek-chat",
+				CompatibilityOnly:  true,
+				DeprecatedAfterUTC: DeepSeekLegacyAliasRetiresUTC,
+				DeprecatedAliasFor: DeepSeekV4FlashModel + " non-thinking mode",
+			},
+			{
+				Model:              "deepseek-reasoner-compat",
+				Account:            "deepseek",
+				UpstreamModel:      "deepseek-reasoner",
+				CompatibilityOnly:  true,
+				DeprecatedAfterUTC: DeepSeekLegacyAliasRetiresUTC,
+				DeprecatedAliasFor: DeepSeekV4FlashModel + " thinking mode",
+			},
+		},
+	}
+	if err := r.Validate(); err != nil {
+		t.Fatalf("compatibility aliases should validate with explicit retirement metadata: %v", err)
 	}
 }
 
@@ -382,6 +427,26 @@ func TestDefaultRosterIsValidAndMixesProviders(t *testing.T) {
 	if !small.Local() {
 		t.Fatalf("default should route 'small' to a local server, got %+v", small)
 	}
+	ds, err := r.Resolve("deepseek-pro")
+	if err != nil {
+		t.Fatalf("resolve deepseek-pro: %v", err)
+	}
+	if ds.Kind != KindDeepSeek || ds.Account != "deepseek" || ds.UpstreamModel != DeepSeekV4ProModel || ds.BaseURL != DeepSeekOpenAIBaseURL {
+		t.Fatalf("default DeepSeek Pro binding wrong: %+v", ds)
+	}
+	if ds.ContextTokens != DeepSeekV4ContextTokens || ds.MaxOutputTokens != DeepSeekV4MaxOutputTokens {
+		t.Fatalf("default DeepSeek metadata wrong: %+v", ds)
+	}
+	if ds.Local() || !strings.HasPrefix(ds.EngineRoute(), "deepseek:") {
+		t.Fatalf("DeepSeek target should be a remote deepseek route: %+v route=%q", ds, ds.EngineRoute())
+	}
+	dsa, err := r.Resolve("deepseek-pro-anthropic")
+	if err != nil {
+		t.Fatalf("resolve deepseek-pro-anthropic: %v", err)
+	}
+	if dsa.Kind != KindAnthropic || dsa.BaseURL != DeepSeekAnthropicBaseURL {
+		t.Fatalf("DeepSeek Anthropic profile wrong: %+v", dsa)
+	}
 	// The same provider kind under two distinct accounts = the switch.
 	codex, ok := r.account("codex")
 	if !ok || codex.Kind != KindOpenAIResponses {
@@ -401,5 +466,8 @@ func TestKindBaseURLDefaults(t *testing.T) {
 	}
 	if KindBaseURL(KindLocal) != "" {
 		t.Fatalf("local kind must have no public default base url, got %q", KindBaseURL(KindLocal))
+	}
+	if KindBaseURL(KindDeepSeek) != DeepSeekOpenAIBaseURL {
+		t.Fatalf("deepseek default base url wrong: %q", KindBaseURL(KindDeepSeek))
 	}
 }

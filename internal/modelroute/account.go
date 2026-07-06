@@ -65,6 +65,29 @@ import (
 // current); a roster naming a different major is refused.
 const RosterVersion = "fak-accounts/v1"
 
+const (
+	// DeepSeekProviderKey is the account-roster provider key for DeepSeek's
+	// OpenAI-compatible wire.
+	DeepSeekProviderKey = "deepseek"
+	// DeepSeekAPIKeyEnv is the credential env-var name DeepSeek examples use.
+	DeepSeekAPIKeyEnv = "DEEPSEEK_API_KEY"
+	// DeepSeekOpenAIBaseURL is DeepSeek's OpenAI-compatible API root.
+	DeepSeekOpenAIBaseURL = "https://api.deepseek.com"
+	// DeepSeekAnthropicBaseURL is DeepSeek's Anthropic-compatible API root.
+	DeepSeekAnthropicBaseURL = "https://api.deepseek.com/anthropic"
+	// DeepSeekV4ProModel is the DeepSeek V4 Pro API model id.
+	DeepSeekV4ProModel = "deepseek-v4-pro"
+	// DeepSeekV4FlashModel is the DeepSeek V4 Flash API model id.
+	DeepSeekV4FlashModel = "deepseek-v4-flash"
+	// DeepSeekV4ContextTokens is the documented DeepSeek V4 context window.
+	DeepSeekV4ContextTokens = 1_000_000
+	// DeepSeekV4MaxOutputTokens is the documented DeepSeek V4 maximum output.
+	DeepSeekV4MaxOutputTokens = 384_000
+	// DeepSeekLegacyAliasRetiresUTC is the documented retirement time for the
+	// legacy deepseek-chat / deepseek-reasoner aliases.
+	DeepSeekLegacyAliasRetiresUTC = "2026-07-24 15:59 UTC"
+)
+
 // ---------------------------------------------------------------------------
 // PROVIDER KIND — the wire protocol an account speaks (a CLOSED additive set).
 // ---------------------------------------------------------------------------
@@ -73,10 +96,11 @@ const RosterVersion = "fak-accounts/v1"
 // rather than imported from internal/agent ON PURPOSE: modelroute is pure stdlib by
 // contract (the property that lets it compose with the frozen ABI seam without
 // pulling the agent loop into the routing spine), and internal/agent is not stdlib.
-// The five remote kinds mirror agent.Provider 1:1; "local" is the modelroute
-// addition (an on-box, OpenAI-compatible server). The named cost of the boundary: a
-// new provider must be added in BOTH places. It is a CLOSED set — a new kind is an
-// added constant + validation, never manifest free text.
+// Most remote kinds mirror agent.Provider 1:1; "local" is the modelroute addition
+// (an on-box, OpenAI-compatible server), and DeepSeek is an OpenAI-compatible remote
+// profile with its own default host. The named cost of the boundary: a new native
+// provider must be added in BOTH places. It is a CLOSED set — a new kind is an added
+// constant + validation, never manifest free text.
 type ProviderKind string
 
 const (
@@ -92,6 +116,10 @@ const (
 	KindGemini ProviderKind = "gemini"
 	// KindXAI is the xAI Grok chat-completions wire (OpenAI-compatible).
 	KindXAI ProviderKind = "xai"
+	// KindDeepSeek is DeepSeek's OpenAI-compatible Chat Completions wire. The
+	// Anthropic-compatible DeepSeek endpoint is represented as KindAnthropic with
+	// DeepSeekAnthropicBaseURL, so generic /models readiness does not mis-probe it.
+	KindDeepSeek ProviderKind = DeepSeekProviderKey
 	// KindLocal is an on-box, OpenAI-compatible server (ollama / vLLM / llama.cpp /
 	// the in-kernel model). It is the ONLY local kind, so locality is exactly
 	// Kind == KindLocal — there is no separate flag. A call routed to it is
@@ -103,7 +131,7 @@ const (
 // knownKind reports whether k is one of the closed ProviderKind set.
 func knownKind(k ProviderKind) bool {
 	switch k {
-	case KindOpenAI, KindOpenAIResponses, KindAnthropic, KindGemini, KindXAI, KindLocal:
+	case KindOpenAI, KindOpenAIResponses, KindAnthropic, KindGemini, KindXAI, KindDeepSeek, KindLocal:
 		return true
 	}
 	return false
@@ -128,6 +156,8 @@ func KindBaseURL(k ProviderKind) string {
 		return "https://generativelanguage.googleapis.com/v1beta"
 	case KindXAI:
 		return "https://api.x.ai/v1"
+	case KindDeepSeek:
+		return DeepSeekOpenAIBaseURL
 	}
 	return ""
 }
@@ -149,11 +179,13 @@ var envNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // the secret itself; it is required for a remote account and forbidden-to-be-a-secret
 // for all.
 type Account struct {
-	ID      string       `json:"id"`
-	Kind    ProviderKind `json:"kind"`
-	BaseURL string       `json:"base_url,omitempty"`
-	CredEnv string       `json:"cred_env,omitempty"`
-	Label   string       `json:"label,omitempty"`
+	ID              string       `json:"id"`
+	Kind            ProviderKind `json:"kind"`
+	BaseURL         string       `json:"base_url,omitempty"`
+	CredEnv         string       `json:"cred_env,omitempty"`
+	Label           string       `json:"label,omitempty"`
+	ContextTokens   int          `json:"context_tokens,omitempty"`
+	MaxOutputTokens int          `json:"max_output_tokens,omitempty"`
 }
 
 // Binding maps ONE routed model id (a Plan member's Model, or a Plan's Scout) to the
@@ -163,9 +195,12 @@ type Account struct {
 // an ensemble can span accounts/providers — the "mix and match at any level" the goal
 // asks for.
 type Binding struct {
-	Model         string `json:"model"`
-	Account       string `json:"account"`
-	UpstreamModel string `json:"upstream_model,omitempty"`
+	Model              string `json:"model"`
+	Account            string `json:"account"`
+	UpstreamModel      string `json:"upstream_model,omitempty"`
+	CompatibilityOnly  bool   `json:"compatibility_only,omitempty"`
+	DeprecatedAfterUTC string `json:"deprecated_after_utc,omitempty"`
+	DeprecatedAliasFor string `json:"deprecated_alias_for,omitempty"`
 }
 
 // Roster is the on-disk account-switcher manifest: the accounts a user brings and the
@@ -184,12 +219,14 @@ type Roster struct {
 // upstream wire model name. It is a VALUE — the dispatch wiring turns it into an
 // agent.HTTPPlanner; this package never does I/O. CredEnv is a NAME, never the secret.
 type Target struct {
-	Model         string       `json:"model"`          // the routed id (the Plan member / scout)
-	Account       string       `json:"account"`        // the resolved Account.ID
-	Kind          ProviderKind `json:"kind"`           // the provider wire
-	BaseURL       string       `json:"base_url"`       // concrete (account override or kind default)
-	CredEnv       string       `json:"cred_env"`       // env var NAME for the credential ("" = local)
-	UpstreamModel string       `json:"upstream_model"` // the wire model name
+	Model           string       `json:"model"`          // the routed id (the Plan member / scout)
+	Account         string       `json:"account"`        // the resolved Account.ID
+	Kind            ProviderKind `json:"kind"`           // the provider wire
+	BaseURL         string       `json:"base_url"`       // concrete (account override or kind default)
+	CredEnv         string       `json:"cred_env"`       // env var NAME for the credential ("" = local)
+	UpstreamModel   string       `json:"upstream_model"` // the wire model name
+	ContextTokens   int          `json:"context_tokens,omitempty"`
+	MaxOutputTokens int          `json:"max_output_tokens,omitempty"`
 }
 
 // Local reports whether this target dispatches to an on-box server. It is DERIVED
@@ -206,7 +243,7 @@ func (t Target) Remote() bool { return !t.Local() }
 // "local:" (which internal/engine's residency PDP reads as on-box, residency-exempt,
 // via a first-checked early-return) and a remote target "<kind>:" where <kind> is one
 // of the floor-recognized keywords (openai / openai-responses⊃openai / anthropic /
-// gemini / xai) — so the floor's local/remote decision is the account's DECLARED kind,
+// gemini / xai / deepseek) — so the floor's local/remote decision is the account's DECLARED kind,
 // never a guess from whether the model name contains "openai". The account/upstream
 // follow for legibility and so a downstream dispatcher can recover the binding. The
 // invariant `engine.remoteRoute(EngineRoute()) == Remote()` is pinned by a
@@ -278,12 +315,14 @@ func (r Roster) Resolve(modelID string) (Target, error) {
 		baseURL = KindBaseURL(a.Kind)
 	}
 	return Target{
-		Model:         modelID,
-		Account:       a.ID,
-		Kind:          a.Kind,
-		BaseURL:       baseURL,
-		CredEnv:       a.CredEnv,
-		UpstreamModel: upstream,
+		Model:           modelID,
+		Account:         a.ID,
+		Kind:            a.Kind,
+		BaseURL:         baseURL,
+		CredEnv:         a.CredEnv,
+		UpstreamModel:   upstream,
+		ContextTokens:   a.ContextTokens,
+		MaxOutputTokens: a.MaxOutputTokens,
 	}, nil
 }
 
@@ -355,6 +394,12 @@ func (r Roster) Validate() error {
 		if !knownKind(a.Kind) {
 			return fmt.Errorf("modelroute: account %q has unknown kind %q", a.ID, a.Kind)
 		}
+		if a.ContextTokens < 0 {
+			return fmt.Errorf("modelroute: account %q context_tokens must be non-negative", a.ID)
+		}
+		if a.MaxOutputTokens < 0 {
+			return fmt.Errorf("modelroute: account %q max_output_tokens must be non-negative", a.ID)
+		}
 		if a.CredEnv != "" && !envNameRE.MatchString(a.CredEnv) {
 			return fmt.Errorf("modelroute: account %q cred_env %q is not an env-var name "+
 				"(it must NAME the variable holding the key, e.g. OPENAI_API_KEY — never the secret itself)", a.ID, a.CredEnv)
@@ -394,6 +439,9 @@ func (r Roster) Validate() error {
 		if !seen[b.Account] {
 			return fmt.Errorf("modelroute: binding for model %q names unknown account %q", b.Model, b.Account)
 		}
+		if err := validateDeprecatedAliasBinding(b); err != nil {
+			return err
+		}
 	}
 	if r.Default != "" && !seen[r.Default] {
 		return fmt.Errorf("modelroute: default account %q is not a defined account", r.Default)
@@ -414,6 +462,42 @@ func safeRouteToken(what, tok string) error {
 		return fmt.Errorf("modelroute: %s %q contains a route delimiter (:, /, space) — it must be a plain token", what, tok)
 	}
 	return nil
+}
+
+func validateDeprecatedAliasBinding(b Binding) error {
+	upstream := b.UpstreamModel
+	if upstream == "" {
+		upstream = b.Model
+	}
+	aliasFor, deprecated := deepSeekDeprecatedAliasFor(upstream)
+	if !deprecated {
+		if b.CompatibilityOnly {
+			return fmt.Errorf("modelroute: binding for model %q is marked compatibility_only but upstream %q is not a known deprecated alias", b.Model, upstream)
+		}
+		return nil
+	}
+	if !b.CompatibilityOnly {
+		return fmt.Errorf("modelroute: binding for model %q uses deprecated DeepSeek alias %q; bind %q/%q instead, or mark compatibility_only with deprecated_after_utc=%q",
+			b.Model, upstream, DeepSeekV4ProModel, DeepSeekV4FlashModel, DeepSeekLegacyAliasRetiresUTC)
+	}
+	if b.DeprecatedAfterUTC != DeepSeekLegacyAliasRetiresUTC {
+		return fmt.Errorf("modelroute: compatibility binding for deprecated DeepSeek alias %q must carry deprecated_after_utc=%q", upstream, DeepSeekLegacyAliasRetiresUTC)
+	}
+	if strings.TrimSpace(b.DeprecatedAliasFor) == "" {
+		return fmt.Errorf("modelroute: compatibility binding for deprecated DeepSeek alias %q must name deprecated_alias_for=%q", upstream, aliasFor)
+	}
+	return nil
+}
+
+func deepSeekDeprecatedAliasFor(model string) (string, bool) {
+	switch strings.TrimSpace(model) {
+	case "deepseek-chat":
+		return DeepSeekV4FlashModel + " non-thinking mode", true
+	case "deepseek-reasoner":
+		return DeepSeekV4FlashModel + " thinking mode", true
+	default:
+		return "", false
+	}
 }
 
 // isLoopbackBaseURL reports whether a base URL points at the local box (so a KindLocal
@@ -495,6 +579,8 @@ func DefaultRoster() Roster {
 			{ID: "openai-work", Kind: KindOpenAI, CredEnv: "OPENAI_WORK_API_KEY", Label: "a SECOND OpenAI account — the switch: same kind, different credential"},
 			{ID: "codex", Kind: KindOpenAIResponses, CredEnv: "OPENAI_API_KEY", Label: "OpenAI Responses API (codex's native wire)"},
 			{ID: "claude-sub", Kind: KindAnthropic, CredEnv: "CLAUDE_CODE_OAUTH_TOKEN", Label: "your Anthropic Pro/Max subscription (sk-ant-oat token; Bearer+oauth-beta scheme applied by the dispatch adapter)"},
+			{ID: "deepseek", Kind: KindDeepSeek, CredEnv: DeepSeekAPIKeyEnv, ContextTokens: DeepSeekV4ContextTokens, MaxOutputTokens: DeepSeekV4MaxOutputTokens, Label: "DeepSeek V4 OpenAI-compatible API: 1M context, 384K max output"},
+			{ID: "deepseek-anthropic", Kind: KindAnthropic, BaseURL: DeepSeekAnthropicBaseURL, CredEnv: DeepSeekAPIKeyEnv, ContextTokens: DeepSeekV4ContextTokens, MaxOutputTokens: DeepSeekV4MaxOutputTokens, Label: "DeepSeek V4 Anthropic-compatible API; visible to acceptance, not probed as OpenAI /models"},
 		},
 		Default: "openai-personal",
 		Bindings: []Binding{
@@ -503,6 +589,11 @@ func DefaultRoster() Roster {
 			{Model: "large", Account: "claude-sub", UpstreamModel: "claude-opus-4-6"},
 			{Model: "guard-a", Account: "openai-work", UpstreamModel: "gpt-5.5"},
 			{Model: "guard-b", Account: "claude-sub", UpstreamModel: "claude-opus-4-6"},
+			{Model: "deepseek-pro", Account: "deepseek", UpstreamModel: DeepSeekV4ProModel},
+			{Model: "deepseek-flash", Account: "deepseek", UpstreamModel: DeepSeekV4FlashModel},
+			{Model: "deepseek-pro-anthropic", Account: "deepseek-anthropic", UpstreamModel: DeepSeekV4ProModel},
+			{Model: "deepseek-chat-compat", Account: "deepseek", UpstreamModel: "deepseek-chat", CompatibilityOnly: true, DeprecatedAfterUTC: DeepSeekLegacyAliasRetiresUTC, DeprecatedAliasFor: DeepSeekV4FlashModel + " non-thinking mode"},
+			{Model: "deepseek-reasoner-compat", Account: "deepseek", UpstreamModel: "deepseek-reasoner", CompatibilityOnly: true, DeprecatedAfterUTC: DeepSeekLegacyAliasRetiresUTC, DeprecatedAliasFor: DeepSeekV4FlashModel + " thinking mode"},
 		},
 	}
 }

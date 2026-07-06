@@ -91,6 +91,18 @@ type Row struct {
 	CapDigest string `json:"cap_digest,omitempty"` // capability content digest
 	CapFrom   string `json:"cap_from,omitempty"`   // source version (for CAP_VERSION_BIND)
 	CapTo     string `json:"cap_to,omitempty"`     // target version (for CAP_VERSION_BIND)
+
+	// Crash fields (for CHILD_CRASH: the supervised-child abnormal-exit witness). A
+	// crash is NOT a kernel decision — it happens outside the adjudication path when
+	// the wrapped agent (or guard itself) dies — so it never flows through the ABI
+	// emitter; AppendCrash writes it directly, like Cut's boundary anchor. These are
+	// NOT part of the hash-chain pre-image (chainHash lists the chained fields
+	// explicitly, so appending them here leaves every existing journal verifying
+	// byte-for-byte). The chained forensic identity of a crash — its Kind, the agent
+	// (Tool), the session (TraceID), and the closed-vocabulary class (Reason) — rides
+	// the frozen decision fields above; ExitCode is a debugging convenience layered
+	// on top.
+	ExitCode int `json:"exit_code,omitempty"` // the child's exit code (-1 when signaled); 0 omitted
 }
 
 // Journal is a hash-chained append-only ledger with an in-process live stream.
