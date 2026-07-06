@@ -56,6 +56,7 @@ type doneCheck struct {
 }
 
 var doneRunnerForCommand doneRunner = doneRealRunner
+var doneSweepNextActionForDirty = defaultDoneSweepNextActionForDirty
 
 func cmdDone(argv []string) { os.Exit(runDone(os.Stdout, os.Stderr, argv)) }
 
@@ -150,12 +151,29 @@ func doneCleanCheck(ctx context.Context, opt doneOptions, runner doneRunner) don
 	if dirty != "" {
 		check.Detail = dirty
 		check.MissingWitness = "clean_path_state"
-		check.NextStep = "run `fak sweep --json` to group dirty work, then commit only intended paths with `fak sweep --apply --lane <lane> -m \"...\" [--push]` or `fak commit --path <path> ...`; narrow --paths or remove unrelated dirty work before claiming done"
+		check.NextStep = doneDirtyNextStep(ctx, opt)
 		return check
 	}
 	check.OK = true
 	check.Detail = "selected paths are clean"
 	return check
+}
+
+func doneDirtyNextStep(ctx context.Context, opt doneOptions) string {
+	base := "run `fak sweep --json` to group dirty work, then commit only intended paths with `fak sweep --apply --lane <lane> -m \"...\" [--push]` or `fak commit --path <path> ...`; narrow --paths or remove unrelated dirty work before claiming done"
+	if action := doneSweepNextActionForDirty(ctx, opt.Dir); strings.TrimSpace(action) != "" {
+		return "run `fak sweep --json`; next from sweep: " + strings.TrimSpace(action) + "; after that, commit only intended paths with `fak sweep --apply --lane <lane> -m \"...\" [--push]` or `fak commit --path <path> ...`; narrow --paths before claiming done"
+	}
+	return base
+}
+
+func defaultDoneSweepNextActionForDirty(ctx context.Context, root string) string {
+	entries, err := gitStatusDirty(ctx, root)
+	if err != nil {
+		return ""
+	}
+	plan := classifyDirty(entries, hooksLaneResolver(root), originProbeFor(ctx, root))
+	return plan.NextAction
 }
 
 func doneCommandCheck(ctx context.Context, dir string, runner doneRunner, name, missing, next string, argv ...string) doneCheck {
