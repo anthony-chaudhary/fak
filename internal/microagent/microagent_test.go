@@ -391,3 +391,58 @@ func TestSpawnRefusalsAndClose(t *testing.T) {
 		t.Fatalf("Spawn(nil agent) = %v, want ErrNilAgent", err)
 	}
 }
+
+// errStep is the sentinel a failing agent returns to drive the EventError
+// retirement branch: a non-cancel error, distinct from any context error.
+var errStep = errors.New("microagent test: step failed")
+
+// errAgent fails on its first Step with a non-cancel error (no ctx involved).
+type errAgent struct{}
+
+func (errAgent) Step(context.Context, microagent.Gateway) (bool, error) {
+	return false, errStep
+}
+
+// TestErrorRetiresWithEventError pins the last #2002 lifecycle edge (scope 3):
+// a Step that returns a non-cancel error retires the agent as EventError — NOT
+// EventCancel — even though retire() cancels the job ctx first. The one Reap
+// result carries that error (errors.Is), the ONE audit sink sees exactly one
+// error event and zero cancels, and the per-agent session entry lands Stopped
+// with an "error: ..." reason. This is the branch the smoke/queue/cancel tests
+// never take, so without it EventError has zero coverage.
+func TestErrorRetiresWithEventError(t *testing.T) {
+	sink := &countingSink{}
+	tbl := session.NewTable()
+	h, err := microagent.NewHost(stubPlanner{}, microagent.Config{Workers: 2, Sessions: tbl, Audit: sink})
+	if err != nil {
+		t.Fatalf("NewHost: %v", err)
+	}
+	defer h.Close()
+
+	if err := h.Spawn("boom", errAgent{}); err != nil {
+		t.Fatalf("Spawn(boom): %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := h.Drain(ctx); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+
+	rs := h.Reap()
+	if len(rs) != 1 {
+		t.Fatalf("reaped %d results, want 1", len(rs))
+	}
+	if r := rs[0]; r.Done || !errors.Is(r.Err, errStep) || r.Steps != 1 {
+		t.Fatalf("result: done=%v err=%v steps=%d, want done=false err=errStep steps=1", r.Done, r.Err, r.Steps)
+	}
+	if got := sink.kind(microagent.EventError); got != 1 {
+		t.Errorf("audit sink saw %d error events, want 1", got)
+	}
+	if got := sink.kind(microagent.EventCancel); got != 0 {
+		t.Errorf("audit sink saw %d cancels, want 0 (a Step error is not a cancel)", got)
+	}
+	wantReason := "error: " + errStep.Error()
+	if st := tbl.Get("boom"); st.Run != session.Stopped || st.Reason != wantReason {
+		t.Errorf("session boom: run=%v reason=%q, want Stopped/%q", st.Run, st.Reason, wantReason)
+	}
+}
