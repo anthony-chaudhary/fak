@@ -1,0 +1,170 @@
+[36m[gcp-glm-demo][0m DEMO step 1 — provision + serve GLM-5.2 on fak-glm-demo via the pure fak kernel
+[36m[gcp-glm][0m creating fak-glm-demo (a3-megagpu-8g, type=nvidia-h100-mega-80gb,count=8) in us-central1-c under project <redacted-project>
+Created [https://www.googleapis.com/compute/v1/projects/<redacted-project>/zones/us-central1-c/instances/fak-glm-demo].
+WARNING: Some requests generated warnings:
+ - Disk size: '1000 GB' is larger than image size: '50 GB'. You might need to resize the root repartition manually if the operating system does not support automatic resizing. See https://cloud.google.com/compute/docs/disks/add-persistent-disk#resize_pd for details.
+
+[36m[gcp-glm][0m VM created. The GLM-5.2 load is multi-hundred-GB and takes minutes; watch it with:
+[36m[gcp-glm][0m   gcloud compute ssh fak-glm-demo --zone us-central1-c -- 'journalctl -u glm52serve -f'
+[36m[gcp-glm-demo][0m waiting for VM-side fak serve to become ready (timeout 180m)
+WARNING: 
+
+To increase the performance of the tunnel, consider installing NumPy. For instructions,
+please see https://cloud.google.com/iap/docs/using-tcp-forwarding#increasing_the_tcp_upload_bandwidth
+
+Warning: Permanently added 'compute.2060148115295869555' (ED25519) to the list of known hosts.
+WAIT phase=none
+WAIT phase=none
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+WAIT phase=DOWNLOAD_START repo=unsloth/GLM-5.2-GGUF subdir=UD-Q4_K_M dir=/opt/glm52-q4
+REMOTE_FAIL phase=BUILD_FAK_FAIL confirmation=1
+WAIT phase=BUILD_FAK_FAIL
+REMOTE_FAIL phase=BUILD_FAK_FAIL confirmation=2
+Jul 06 03:57:35 fak-glm-demo env[47915]: 03:57:22 SHARD1=/opt/glm52-q4/UD-Q4_K_M/GLM-5.2-UD-Q4_K_M-00001-of-00011.gguf
+Jul 06 03:57:35 fak-glm-demo env[47915]: 03:57:22 BUILD_FAK_CUDA arch=sm_90 out=/usr/local/bin/fak
+Jul 06 03:57:35 fak-glm-demo env[47915]: [cuda] nvcc compile kernels (sm_90) ...
+Jul 06 03:57:35 fak-glm-demo env[47915]: [cuda] nvcc compile NCCL collectives (sm_90) ...
+Jul 06 03:57:35 fak-glm-demo env[47915]: [cuda] nvcc compile multi-process NCCL process group (sm_90) ...
+Jul 06 03:57:35 fak-glm-demo env[47915]: cuda_nccl_pg.cu(43): warning #550-D: variable "g_pg_rank" was set but never used
+Jul 06 03:57:35 fak-glm-demo env[47915]:   static int g_pg_rank = -1;
+Jul 06 03:57:35 fak-glm-demo env[47915]:              ^
+Jul 06 03:57:35 fak-glm-demo env[47915]: Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+Jul 06 03:57:35 fak-glm-demo env[47915]: [cuda] built 265400 byte libfakcuda.a
+Jul 06 03:57:35 fak-glm-demo env[47915]: [cuda] go build -tags cuda,nccl -o /usr/local/bin/fak ./cmd/fak ...
+Jul 06 03:57:35 fak-glm-demo env[47915]: go: downloading golang.org/x/term v0.44.0
+Jul 06 03:57:35 fak-glm-demo env[47915]: go: downloading golang.org/x/sys v0.46.0
+Jul 06 03:57:35 fak-glm-demo env[47915]: # github.com/anthony-chaudhary/fak/cmd/fak
+Jul 06 03:57:35 fak-glm-demo env[47915]: cmd/fak/audit_diagnose.go:489:7: f.ChildCrash undefined (type guardrsi.Fold has no field or method ChildCrash)
+Jul 06 03:57:35 fak-glm-demo env[47915]: cmd/fak/audit_diagnose.go:490:34: f.ByCrashClass undefined (type guardrsi.Fold has no field or method ByCrashClass)
+Jul 06 03:57:35 fak-glm-demo env[47915]: cmd/fak/audit_diagnose.go:491:45: f.ByCrashClass undefined (type guardrsi.Fold has no field or method ByCrashClass)
+Jul 06 03:57:35 fak-glm-demo env[47915]: cmd/fak/knownbad.go:146:34: undefined: knownbad.DefaultRecordTTLSeconds
+Jul 06 03:57:35 fak-glm-demo env[47915]: cmd/fak/knownbad.go:282:29: undefined: knownbad.LatestState
+Jul 06 03:57:35 fak-glm-demo env[47915]: cmd/fak/knownbad.go:705:23: sigRec.WithRevoke undefined (type knownbad.Record has no field or method WithRevoke)
+Jul 06 03:57:35 fak-glm-demo env[47915]: 03:57:35 BUILD_FAK_FAIL
+Jul 06 03:57:35 fak-glm-demo systemd[1]: glm52serve.service: Main process exited, code=exited, status=30/n/a
+Jul 06 03:57:35 fak-glm-demo systemd[1]: glm52serve.service: Failed with result 'exit-code'.
+Jul 06 03:57:35 fak-glm-demo systemd[1]: glm52serve.service: Consumed 43min 25.668s CPU time.
+Jul 06 03:57:50 fak-glm-demo systemd[1]: glm52serve.service: Scheduled restart job, restart counter is at 1.
+Jul 06 03:57:50 fak-glm-demo systemd[1]: Stopped /usr/bin/env bash /opt/fak/tools/glm52_fak_native_serve.sh.
+Jul 06 03:57:50 fak-glm-demo systemd[1]: glm52serve.service: Consumed 43min 25.668s CPU time.
+Jul 06 03:57:50 fak-glm-demo systemd[1]: Started /usr/bin/env bash /opt/fak/tools/glm52_fak_native_serve.sh.
+Jul 06 03:57:50 fak-glm-demo env[48049]: 03:57:50 GO go version go1.26.4 linux/amd64
+Jul 06 03:57:50 fak-glm-demo env[48061]: 03:57:50 USING_PRESTAGED shard1=/opt/glm52-q4/UD-Q4_K_M/GLM-5.2-UD-Q4_K_M-00001-of-00011.gguf (WARN: NOT local NVMe — if this is /projects NFS the load is ~53x slower; stage to /mnt/sglang_dv3/glm52-q4 for the fast path)
+Jul 06 03:57:50 fak-glm-demo env[48064]: 03:57:50 SHARD1=/opt/glm52-q4/UD-Q4_K_M/GLM-5.2-UD-Q4_K_M-00001-of-00011.gguf (pre-staged; HF download skipped)
+Jul 06 03:57:50 fak-glm-demo env[48067]: 03:57:50 BUILD_FAK_CUDA arch=sm_90 out=/usr/local/bin/fak
+Jul 06 03:57:54 fak-glm-demo env[48541]: 03:57:54 BUILD_FAK_FAIL
+Jul 06 03:57:54 fak-glm-demo env[48543]:   static int g_pg_rank = -1;
+Jul 06 03:57:54 fak-glm-demo env[48543]:              ^
+Jul 06 03:57:54 fak-glm-demo env[48543]: Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+Jul 06 03:57:54 fak-glm-demo env[48543]: [cuda] built 265400 byte libfakcuda.a
+Jul 06 03:57:54 fak-glm-demo env[48543]: [cuda] go build -tags cuda,nccl -o /usr/local/bin/fak ./cmd/fak ...
+Jul 06 03:57:54 fak-glm-demo env[48543]: go: downloading golang.org/x/term v0.44.0
+Jul 06 03:57:54 fak-glm-demo env[48543]: go: downloading golang.org/x/sys v0.46.0
+Jul 06 03:57:54 fak-glm-demo env[48543]: # github.com/anthony-chaudhary/fak/cmd/fak
+Jul 06 03:57:54 fak-glm-demo env[48543]: cmd/fak/audit_diagnose.go:489:7: f.ChildCrash undefined (type guardrsi.Fold has no field or method ChildCrash)
+Jul 06 03:57:54 fak-glm-demo env[48543]: cmd/fak/audit_diagnose.go:490:34: f.ByCrashClass undefined (type guardrsi.Fold has no field or method ByCrashClass)
+Jul 06 03:57:54 fak-glm-demo env[48543]: cmd/fak/audit_diagnose.go:491:45: f.ByCrashClass undefined (type guardrsi.Fold has no field or method ByCrashClass)
+Jul 06 03:57:54 fak-glm-demo env[48543]: cmd/fak/knownbad.go:146:34: undefined: knownbad.DefaultRecordTTLSeconds
+Jul 06 03:57:54 fak-glm-demo env[48543]: cmd/fak/knownbad.go:282:29: undefined: knownbad.LatestState
+Jul 06 03:57:54 fak-glm-demo env[48543]: cmd/fak/knownbad.go:705:23: sigRec.WithRevoke undefined (type knownbad.Record has no field or method WithRevoke)
+Jul 06 03:57:54 fak-glm-demo env[48543]: 03:57:35 BUILD_FAK_FAIL
+Jul 06 03:57:54 fak-glm-demo env[48543]: 03:57:50 GO go version go1.26.4 linux/amd64
+Jul 06 03:57:54 fak-glm-demo env[48543]: 03:57:50 USING_PRESTAGED shard1=/opt/glm52-q4/UD-Q4_K_M/GLM-5.2-UD-Q4_K_M-00001-of-00011.gguf (WARN: NOT local NVMe — if this is /projects NFS the load is ~53x slower; stage to /mnt/sglang_dv3/glm52-q4 for the fast path)
+Jul 06 03:57:54 fak-glm-demo env[48543]: 03:57:50 SHARD1=/opt/glm52-q4/UD-Q4_K_M/GLM-5.2-UD-Q4_K_M-00001-of-00011.gguf (pre-staged; HF download skipped)
+Jul 06 03:57:54 fak-glm-demo env[48543]: 03:57:50 BUILD_FAK_CUDA arch=sm_90 out=/usr/local/bin/fak
+Jul 06 03:57:54 fak-glm-demo env[48543]: [cuda] nvcc compile kernels (sm_90) ...
+Jul 06 03:57:54 fak-glm-demo env[48543]: [cuda] nvcc compile NCCL collectives (sm_90) ...
+Jul 06 03:57:54 fak-glm-demo env[48543]: [cuda] nvcc compile multi-process NCCL process group (sm_90) ...
+Jul 06 03:57:54 fak-glm-demo env[48543]: cuda_nccl_pg.cu(43): warning #550-D: variable "g_pg_rank" was set but never used
+Jul 06 03:57:54 fak-glm-demo env[48543]:   static int g_pg_rank = -1;
+Jul 06 03:57:54 fak-glm-demo env[48543]:              ^
+Jul 06 03:57:54 fak-glm-demo env[48543]: Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+Jul 06 03:57:54 fak-glm-demo env[48543]: [cuda] built 265400 byte libfakcuda.a
+Jul 06 03:57:54 fak-glm-demo env[48543]: [cuda] go build -tags cuda,nccl -o /usr/local/bin/fak ./cmd/fak ...
+Jul 06 03:57:54 fak-glm-demo env[48543]: # github.com/anthony-chaudhary/fak/cmd/fak
+Jul 06 03:57:54 fak-glm-demo env[48543]: cmd/fak/audit_diagnose.go:489:7: f.ChildCrash undefined (type guardrsi.Fold has no field or method ChildCrash)
+Jul 06 03:57:54 fak-glm-demo env[48543]: cmd/fak/audit_diagnose.go:490:34: f.ByCrashClass undefined (type guardrsi.Fold has no field or method ByCrashClass)
+Jul 06 03:57:54 fak-glm-demo env[48543]: cmd/fak/audit_diagnose.go:491:45: f.ByCrashClass undefined (type guardrsi.Fold has no field or method ByCrashClass)
+Jul 06 03:57:54 fak-glm-demo env[48543]: cmd/fak/knownbad.go:146:34: undefined: knownbad.DefaultRecordTTLSeconds
+Jul 06 03:57:54 fak-glm-demo env[48543]: cmd/fak/knownbad.go:282:29: undefined: knownbad.LatestState
+Jul 06 03:57:54 fak-glm-demo env[48543]: cmd/fak/knownbad.go:705:23: sigRec.WithRevoke undefined (type knownbad.Record has no field or method WithRevoke)
+Jul 06 03:57:54 fak-glm-demo env[48543]: 03:57:54 BUILD_FAK_FAIL
+Jul 06 03:57:54 fak-glm-demo systemd[1]: glm52serve.service: Main process exited, code=exited, status=30/n/a
+Jul 06 03:57:54 fak-glm-demo systemd[1]: glm52serve.service: Failed with result 'exit-code'.
+Jul 06 03:57:54 fak-glm-demo systemd[1]: glm52serve.service: Consumed 7.363s CPU time.
+Jul 06 03:58:09 fak-glm-demo systemd[1]: glm52serve.service: Scheduled restart job, restart counter is at 2.
+Jul 06 03:58:09 fak-glm-demo systemd[1]: Stopped /usr/bin/env bash /opt/fak/tools/glm52_fak_native_serve.sh.
+Jul 06 03:58:09 fak-glm-demo systemd[1]: glm52serve.service: Consumed 7.363s CPU time.
+Jul 06 03:58:09 fak-glm-demo systemd[1]: Started /usr/bin/env bash /opt/fak/tools/glm52_fak_native_serve.sh.
+Jul 06 03:58:09 fak-glm-demo env[48608]: 03:58:09 GO go version go1.26.4 linux/amd64
+Jul 06 03:58:09 fak-glm-demo env[48620]: 03:58:09 USING_PRESTAGED shard1=/opt/glm52-q4/UD-Q4_K_M/GLM-5.2-UD-Q4_K_M-00001-of-00011.gguf (WARN: NOT local NVMe — if this is /projects NFS the load is ~53x slower; stage to /mnt/sglang_dv3/glm52-q4 for the fast path)
+Jul 06 03:58:09 fak-glm-demo env[48623]: 03:58:09 SHARD1=/opt/glm52-q4/UD-Q4_K_M/GLM-5.2-UD-Q4_K_M-00001-of-00011.gguf (pre-staged; HF download skipped)
+Jul 06 03:58:09 fak-glm-demo env[48626]: 03:58:09 BUILD_FAK_CUDA arch=sm_90 out=/usr/local/bin/fak
+Jul 06 03:58:14 fak-glm-demo env[49184]: 03:58:14 BUILD_FAK_FAIL
+Jul 06 03:58:14 fak-glm-demo env[49186]: [cuda] nvcc compile multi-process NCCL process group (sm_90) ...
+Jul 06 03:58:14 fak-glm-demo env[49186]: cuda_nccl_pg.cu(43): warning #550-D: variable "g_pg_rank" was set but never used
+Jul 06 03:58:14 fak-glm-demo env[49186]:   static int g_pg_rank = -1;
+Jul 06 03:58:14 fak-glm-demo env[49186]:              ^
+Jul 06 03:58:14 fak-glm-demo env[49186]: Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+Jul 06 03:58:14 fak-glm-demo env[49186]: [cuda] built 265400 byte libfakcuda.a
+Jul 06 03:58:14 fak-glm-demo env[49186]: [cuda] go build -tags cuda,nccl -o /usr/local/bin/fak ./cmd/fak ...
+Jul 06 03:58:14 fak-glm-demo env[49186]: # github.com/anthony-chaudhary/fak/cmd/fak
+Jul 06 03:58:14 fak-glm-demo env[49186]: cmd/fak/audit_diagnose.go:489:7: f.ChildCrash undefined (type guardrsi.Fold has no field or method ChildCrash)
+Jul 06 03:58:14 fak-glm-demo env[49186]: cmd/fak/audit_diagnose.go:490:34: f.ByCrashClass undefined (type guardrsi.Fold has no field or method ByCrashClass)
+Jul 06 03:58:14 fak-glm-demo env[49186]: cmd/fak/audit_diagnose.go:491:45: f.ByCrashClass undefined (type guardrsi.Fold has no field or method ByCrashClass)
+Jul 06 03:58:14 fak-glm-demo env[49186]: cmd/fak/knownbad.go:146:34: undefined: knownbad.DefaultRecordTTLSeconds
+Jul 06 03:58:14 fak-glm-demo env[49186]: cmd/fak/knownbad.go:282:29: undefined: knownbad.LatestState
+Jul 06 03:58:14 fak-glm-demo env[49186]: cmd/fak/knownbad.go:705:23: sigRec.WithRevoke undefined (type knownbad.Record has no field or method WithRevoke)
+Jul 06 03:58:14 fak-glm-demo env[49186]: 03:57:54 BUILD_FAK_FAIL
+Jul 06 03:58:14 fak-glm-demo env[49186]: 03:58:09 GO go version go1.26.4 linux/amd64
+Jul 06 03:58:14 fak-glm-demo env[49186]: 03:58:09 USING_PRESTAGED shard1=/opt/glm52-q4/UD-Q4_K_M/GLM-5.2-UD-Q4_K_M-00001-of-00011.gguf (WARN: NOT local NVMe — if this is /projects NFS the load is ~53x slower; stage to /mnt/sglang_dv3/glm52-q4 for the fast path)
+Jul 06 03:58:14 fak-glm-demo env[49186]: 03:58:09 SHARD1=/opt/glm52-q4/UD-Q4_K_M/GLM-5.2-UD-Q4_K_M-00001-of-00011.gguf (pre-staged; HF download skipped)
+Jul 06 03:58:14 fak-glm-demo env[49186]: 03:58:09 BUILD_FAK_CUDA arch=sm_90 out=/usr/local/bin/fak
+Jul 06 03:58:14 fak-glm-demo env[49186]: [cuda] nvcc compile kernels (sm_90) ...
+Jul 06 03:58:14 fak-glm-demo env[49186]: [cuda] nvcc compile NCCL collectives (sm_90) ...
+Jul 06 03:58:14 fak-glm-demo env[49186]: [cuda] nvcc compile multi-process NCCL process group (sm_90) ...
+Jul 06 03:58:14 fak-glm-demo env[49186]: cuda_nccl_pg.cu(43): warning #550-D: variable "g_pg_rank" was set but never used
+Jul 06 03:58:14 fak-glm-demo env[49186]:   static int g_pg_rank = -1;
+Jul 06 03:58:14 fak-glm-demo env[49186]:              ^
+Jul 06 03:58:14 fak-glm-demo env[49186]: Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+Jul 06 03:58:14 fak-glm-demo env[49186]: [cuda] built 265400 byte libfakcuda.a
+Jul 06 03:58:14 fak-glm-demo env[49186]: [cuda] go build -tags cuda,nccl -o /usr/local/bin/fak ./cmd/fak ...
+Jul 06 03:58:14 fak-glm-demo env[49186]: # github.com/anthony-chaudhary/fak/cmd/fak
+Jul 06 03:58:14 fak-glm-demo env[49186]: cmd/fak/audit_diagnose.go:489:7: f.ChildCrash undefined (type guardrsi.Fold has no field or method ChildCrash)
+Jul 06 03:58:14 fak-glm-demo env[49186]: cmd/fak/audit_diagnose.go:490:34: f.ByCrashClass undefined (type guardrsi.Fold has no field or method ByCrashClass)
+Jul 06 03:58:14 fak-glm-demo env[49186]: cmd/fak/audit_diagnose.go:491:45: f.ByCrashClass undefined (type guardrsi.Fold has no field or method ByCrashClass)
+Jul 06 03:58:14 fak-glm-demo env[49186]: cmd/fak/knownbad.go:146:34: undefined: knownbad.DefaultRecordTTLSeconds
+Jul 06 03:58:14 fak-glm-demo env[49186]: cmd/fak/knownbad.go:282:29: undefined: knownbad.LatestState
+Jul 06 03:58:14 fak-glm-demo env[49186]: cmd/fak/knownbad.go:705:23: sigRec.WithRevoke undefined (type knownbad.Record has no field or method WithRevoke)
+Jul 06 03:58:14 fak-glm-demo env[49186]: 03:58:14 BUILD_FAK_FAIL
+Jul 06 03:58:14 fak-glm-demo systemd[1]: glm52serve.service: Main process exited, code=exited, status=30/n/a
+Jul 06 03:58:14 fak-glm-demo systemd[1]: glm52serve.service: Failed with result 'exit-code'.
+Jul 06 03:58:14 fak-glm-demo systemd[1]: glm52serve.service: Consumed 7.359s CPU time.
+[36m[gcp-glm-demo][0m collecting remote serve logs -> /mnt/c/work/fak/experiments/agent-live/gcp-glm-demo-20260706T034356Z/failed-ready-logs.tgz
+WARNING: 
+
+To increase the performance of the tunnel, consider installing NumPy. For instructions,
+please see https://cloud.google.com/iap/docs/using-tcp-forwarding#increasing_the_tcp_upload_bandwidth
+
+[36m[gcp-glm-demo][0m tearing down fak-glm-demo (zero residual cost)
+Deleted [https://www.googleapis.com/compute/v1/projects/<redacted-project>/zones/us-central1-c/instances/fak-glm-demo].

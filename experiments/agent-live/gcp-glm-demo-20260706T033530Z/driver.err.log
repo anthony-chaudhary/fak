@@ -1,0 +1,186 @@
+[36m[gcp-glm-demo][0m DEMO step 1 — provision + serve GLM-5.2 on fak-glm-demo via the pure fak kernel
+[36m[gcp-glm][0m creating fak-glm-demo (a3-megagpu-8g, type=nvidia-h100-mega-80gb,count=8) in us-central1-c under project <redacted-project>
+Created [https://www.googleapis.com/compute/v1/projects/<redacted-project>/zones/us-central1-c/instances/fak-glm-demo].
+WARNING: Some requests generated warnings:
+ - Disk size: '1000 GB' is larger than image size: '50 GB'. You might need to resize the root repartition manually if the operating system does not support automatic resizing. See https://cloud.google.com/compute/docs/disks/add-persistent-disk#resize_pd for details.
+
+[36m[gcp-glm][0m VM created. The GLM-5.2 load is multi-hundred-GB and takes minutes; watch it with:
+[36m[gcp-glm][0m   gcloud compute ssh fak-glm-demo --zone us-central1-c -- 'journalctl -u glm52serve -f'
+[36m[gcp-glm-demo][0m waiting for VM-side fak serve to become ready (timeout 180m)
+WARNING: 
+
+To increase the performance of the tunnel, consider installing NumPy. For instructions,
+please see https://cloud.google.com/iap/docs/using-tcp-forwarding#increasing_the_tcp_upload_bandwidth
+
+Warning: Permanently added 'compute.3789786257767701620' (ED25519) to the list of known hosts.
+WAIT phase=none
+WAIT phase=none
+REMOTE_FAIL phase=STARTUP_SCRIPT_FAIL confirmation=1
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: ODcyLAorICAgICAgICBnZW5fcmFuaz0zMSwKKyAgICAgICAgYXJjaD0iaG9wcGVyIiwKKyAgICAg
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: ICAgY29tcHV0ZV9jYXBhYmlsaXR5PSI5MCIsCisgICAgICAgIGFwcHJveF91c2RfcGVyX2hvdXI9
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: OTAuMCwKKyAgICAgICAgY29tbW9uX3pvbmVzPSgKKyAgICAgICAgICAgICJ1cy1jZW50cmFsMS1j
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: IiwKKyAgICAgICAgICAgICJ1cy1jZW50cmFsMS1hIiwKKyAgICAgICAgICAgICJ1cy1jZW50cmFs
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: MS1iIiwKKyAgICAgICAgICAgICJ1cy1lYXN0NS1hIiwKKyAgICAgICAgICAgICJldXJvcGUtd2Vz
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: dDQtYiIsCisgICAgICAgICksCisgICAgICAgIGJsYWNrd2VsbD1GYWxzZSwKKyAgICAgICAgbm90
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: ZXM9KAorICAgICAgICAgICAgIkgxMDAgTWVnYSBmYWxsYmFjayBmb3IgZnVsbCA4LUdQVSBHTE0t
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: NS4yIHNlcnZlcyB3aGVuIGEzLWhpZ2hncHUtOGcgIgorICAgICAgICAgICAgImlzIHF1b3RhLW9r
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: IGJ1dCBzdG9ja2VkIG91dC4gVXNlcyB0aGUgc2VwYXJhdGUgTlZJRElBX0gxMDBfTUVHQSBxdW90
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: YSAiCisgICAgICAgICAgICAiZmFtaWx5IGFuZCB0aGUgc2FtZSBzbV85MCBwdXJlLWZhay1rZXJu
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: ZWwgc2VydmUgcGF0aC4iCisgICAgICAgICksCisgICAgKSwKICAgICBBY2NlbFRpZXIoCiAgICAg
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: ICAgIHNsdWc9ImEzLWhpZ2gtaDEwMCIsCiAgICAgICAgIG1hY2hpbmVfdHlwZT0iYTMtaGlnaGdw
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: dS04ZyIsCmRpZmYgLS1naXQgYS90b29scy9nY3BfYWNjZWxfdGVzdC5weSBiL3Rvb2xzL2djcF9h
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Y2NlbF90ZXN0LnB5CmluZGV4IDhhNzM3MGU3Li4xNTQ5MzU2YyAxMDA2NDQKLS0tIGEvdG9vbHMv
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Z2NwX2FjY2VsX3Rlc3QucHkKKysrIGIvdG9vbHMvZ2NwX2FjY2VsX3Rlc3QucHkKQEAgLTY2LDEx
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: ICs2NiwyOSBAQCBkZWYgdGVzdF9hMTAwX2VtaXRfc2hlbGxfcmVwb3J0c19zdWJfZHNhX2NvbXB1
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: dGVfY2FwKCk6CiAgICAgYXNzZXJ0IGludChnb3RbIkdMTV9DT01QVVRFX0NBUCJdKSA8IDkwCiAK
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: IAorZGVmIHRlc3RfaDEwMF9tZWdhX3RpZXJfdXNlc19zZXBhcmF0ZV9xdW90YV9mYW1pbHkoKToK
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: KyAgICBtZWdhID0gZ2NwX2FjY2VsLmJ5X3NsdWcoImEzLW1lZ2EtaDEwMCIpCisgICAgYXNzZXJ0
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: IG1lZ2EgaXMgbm90IE5vbmUKKyAgICBhc3NlcnQgbWVnYS5tYWNoaW5lX3R5cGUgPT0gImEzLW1l
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Z2FncHUtOGciCisgICAgYXNzZXJ0IG1lZ2EuYWNjZWxlcmF0b3JfdHlwZSA9PSAibnZpZGlhLWgx
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: MDAtbWVnYS04MGdiIgorICAgIGFzc2VydCBtZWdhLmdwdV9jb3VudCA9PSA4CisgICAgYXNzZXJ0
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: IG1lZ2EuY29tcHV0ZV9jYXBhYmlsaXR5ID09ICI5MCIKKyAgICBhc3NlcnQgbWVnYS5jb21tb25f
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: em9uZXNbMF0gPT0gInVzLWNlbnRyYWwxLWMiCisgICAgYXNzZXJ0IHByb2JlLkdQVV9GQU1JTFlb
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Im52aWRpYS1oMTAwLW1lZ2EtODBnYiJdID09ICJOVklESUFfSDEwMF9NRUdBIgorCisgICAgb3V0
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: ID0gZ2NwX2FjY2VsLmVtaXRfc2hlbGwoImEzLW1lZ2EtaDEwMCIpCisgICAgbGluZXMgPSBkaWN0
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: KGxpbmUuc3BsaXQoIj0iLCAxKSBmb3IgbGluZSBpbiBvdXQuc3BsaXRsaW5lcygpKQorICAgIGlt
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: cG9ydCBzaGxleAorICAgIGdvdCA9IHtrOiBzaGxleC5zcGxpdCh2KVswXSBpZiB2IGVsc2UgIiIg
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Zm9yIGssIHYgaW4gbGluZXMuaXRlbXMoKX0KKyAgICBhc3NlcnQgZ290WyJHTE1fTUFDSElORV9U
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: WVBFIl0gPT0gImEzLW1lZ2FncHUtOGciCisgICAgYXNzZXJ0IGdvdFsiR0xNX0FDQ0VMX0ZMQUci
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: XSA9PSAidHlwZT1udmlkaWEtaDEwMC1tZWdhLTgwZ2IsY291bnQ9OCIKKworCiBkZWYgdGVzdF9h
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: MTAwX3RpZXJzX3JhbmtfYmVsb3dfaG9wcGVyX2Fib3ZlX2w0KCk6CiAgICAgcG9zID0ge3Quc2x1
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: ZzogaSBmb3IgaSwgdCBpbiBlbnVtZXJhdGUoZ2NwX2FjY2VsLmZhbGxiYWNrX2xhZGRlcigpKX0K
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: ICAgICAjIERhdGFjZW50ZXIgQTEwMCBvdXRyYW5rcyB0aGUgY2hlYXAgQWRhL1R1cmluZyBwcm9v
+Jul 06 03:39:32 fak-glm-demo google_metadata_script_runner[4099]: startup-script: ZiB0aWVycyAoYmV0dGVyIHNlcnZpbmcgY2hvaWNlKSBidXQKICAgICAjIHNpdHMgYmVsb3cgdGhl
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: IEhvcHBlciBiYXNlbGluZSBpbiB0aGUgcHJlZmVyZW5jZSBsYWRkZXIuCi0gICAgYXNzZXJ0IHBv
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: c1siYTMtaGlnaC1oMTAwIl0gPCBwb3NbImEyLXVsdHJhLWExMDAtODBnYiJdIDwgcG9zWyJnMi1s
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: NCJdCisgICAgYXNzZXJ0IHBvc1siYTMtbWVnYS1oMTAwIl0gPCBwb3NbImEzLWhpZ2gtaDEwMCJd
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: IDwgcG9zWyJhMi11bHRyYS1hMTAwLTgwZ2IiXSA8IHBvc1siZzItbDQiXQogICAgIGFzc2VydCBw
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: b3NbImEyLXVsdHJhLWExMDAtODBnYiJdIDwgcG9zWyJhMi1oaWdoLWExMDAtNDBnYiJdCiAgICAg
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: YXNzZXJ0IHBvc1siZzItbDQiXSA8IHBvc1siZzItbDQtMzIiXSA8IHBvc1sibjEtdDQiXQogCmRp
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: ZmYgLS1naXQgYS90b29scy9nbG01Ml9lcF93aXRuZXNzLnNoIGIvdG9vbHMvZ2xtNTJfZXBfd2l0
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: bmVzcy5zaAppbmRleCBlODZhZDFlNy4uZTk0MTJhZGQgMTAwNjQ0Ci0tLSBhL3Rvb2xzL2dsbTUy
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: X2VwX3dpdG5lc3Muc2gKKysrIGIvdG9vbHMvZ2xtNTJfZXBfd2l0bmVzcy5zaApAQCAtMjYsNyAr
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: MjYsNyBAQAogc2V0IC11byBwaXBlZmFpbAogZXhwb3J0IFBBVEg9Ii91c3IvbG9jYWwvZ28vYmlu
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Oi91c3IvbG9jYWwvY3VkYS9iaW46JFBBVEgiCiBleHBvcnQgR09DQUNIRT0iJHtHT0NBQ0hFOi0v
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: dG1wL2dvY2FjaGV9IiBHT1BBVEg9IiR7R09QQVRIOi0vdG1wL2dvcGF0aH0iIEdPVE9PTENIQUlO
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: PSIke0dPVE9PTENIQUlOOi1hdXRvfSIKLWV4cG9ydCBGQUtfQ1VEQV9BUkNIPSIke0ZBS19DVURB
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: X0FSQ0g6LXNtXzgwfSIgRkFLX0NVREFfTkNDTD0xIENVREFfSE9NRT0iJHtDVURBX0hPTUU6LS91
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: c3IvbG9jYWwvY3VkYX0iCitleHBvcnQgRkFLX0NVREFfQVJDSD0iJHtGQUtfQ1VEQV9BUkNIOi1z
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: bV84MH0iIEZBS19DVURBX05DQ0w9MSBGQUtfRVBfUkVRVUlSRV9ERVZJQ0VfUEc9IiR7RkFLX0VQ
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: X1JFUVVJUkVfREVWSUNFX1BHOi0xfSIgQ1VEQV9IT01FPSIke0NVREFfSE9NRTotL3Vzci9sb2Nh
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: bC9jdWRhfSIKIFJBTktTPSIke1JBTktTOi03fSIKIEZJUlNUX0dQVT0iJHtGSVJTVF9HUFU6LTF9
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: IgogUE9SVD0iJHtQT1JUOi04MDcxfSIKQEAgLTc0LDYgKzc0LDcgQEAgZm9yIHIgaW4gJChzZXEg
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: MCAiJCgoUkFOS1MgLSAxKSkiKTsgZG8KICAgRkFLX0VQX1JBTks9IiRyIiBcCiAgIEZBS19FUF9D
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: T09SRF9BRERSPSIkQ09PUkRfQUREUiIgXAogICBGQUtfRVBfSk9JTl9USU1FT1VUX1M9IiR7RkFL
+Jul 06 03:39:33 fak-glm-demo google_metadata_script_runner[4099]: startup-script: X0VQX0pPSU5fVElNRU9VVF9TOi0xODAwfSIgXAorICBGQUtfRVBfUkVRVUlSRV9ERVZJQ0VfUEc9
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: IiRGQUtfRVBfUkVRVUlSRV9ERVZJQ0VfUEciIFwKICAgRkFLX1E0Sz0xIFwKICAgIiRST09UL2Zh
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: a2Jpbl9uY2NsIiBzZXJ2ZSAtLWFkZHIgIjEyNy4wLjAuMTokcmFua19wb3J0IiBcCiAgICAgLS1n
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Z3VmICIkU0hBUkQiIC0tYmFja2VuZCBjdWRhIC0tZXhwZXJ0LXBhcmFsbGVsICIkUkFOS1MiIFwK
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: ZGlmZiAtLWdpdCBhL3Rvb2xzL2dsbTUyX2Zha19uYXRpdmVfc2VydmUuc2ggYi90b29scy9nbG01
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Ml9mYWtfbmF0aXZlX3NlcnZlLnNoCmluZGV4IGQ2ZjdiYjY0Li42MDk3Y2I2NCAxMDA2NDQKLS0t
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: IGEvdG9vbHMvZ2xtNTJfZmFrX25hdGl2ZV9zZXJ2ZS5zaAorKysgYi90b29scy9nbG01Ml9mYWtf
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: bmF0aXZlX3NlcnZlLnNoCkBAIC03MSw2ICs3MSwyMyBAQCBMT0c9IiRHTE1fRElSL2Zha19uYXRp
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: dmVfc2VydmUubG9nIgogbWtkaXIgLXAgIiRHTE1fRElSIiAiJEdPQ0FDSEUiICIkR09QQVRIIgog
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: cGgoKXsgZWNobyAiJChkYXRlIC11ICslSDolTTolUykgJCoiIHwgdGVlIC1hICIkTE9HIjsgZWNo
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: byAiJCoiID4gIiRQSEFTRSI7IH0KIAoraGF2ZV9uY2NsX2hlYWRlcnMoKSB7CisgIFsgLWYgIiR7
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: TkNDTF9IT01FOi19L2luY2x1ZGUvbmNjbC5oIiBdIHx8CisgIFsgLWYgIiR7TkNDTF9IT01FOi19
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: L3Vzci9pbmNsdWRlL25jY2wuaCIgXSB8fAorICBbIC1mICIke0NVREFfSE9NRX0vaW5jbHVkZS9u
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Y2NsLmgiIF0gfHwKKyAgWyAtZiAiJHtDVURBX0hPTUV9L3RhcmdldHMveDg2XzY0LWxpbnV4L2lu
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Y2x1ZGUvbmNjbC5oIiBdIHx8CisgIFsgLWYgL3Vzci9pbmNsdWRlL25jY2wuaCBdCit9CisKK2hh
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: dmVfbmNjbF9saWIoKSB7CisgIFsgLWUgIiR7TkNDTF9IT01FOi19L2xpYi9saWJuY2NsLnNvIiBd
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: IHx8CisgIFsgLWUgIiR7TkNDTF9IT01FOi19L2xpYjY0L2xpYm5jY2wuc28iIF0gfHwKKyAgWyAt
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: ZSAiJHtOQ0NMX0hPTUU6LX0vdXNyL2xpYi94ODZfNjQtbGludXgtZ251L2xpYm5jY2wuc28iIF0g
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: fHwKKyAgWyAtZSAiJHtDVURBX0hPTUV9L2xpYjY0L2xpYm5jY2wuc28iIF0gfHwKKyAgWyAtZSAi
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: JHtDVURBX0hPTUV9L3RhcmdldHMveDg2XzY0LWxpbnV4L2xpYi9saWJuY2NsLnNvIiBdIHx8Cisg
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: IFsgLWUgL3Vzci9saWIveDg2XzY0LWxpbnV4LWdudS9saWJuY2NsLnNvIF0KK30KKwogY2FzZSAi
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: JEVQX1JBTktTIiBpbgogICAnJ3wqWyEwLTldKikgcGggIkJBRF9FUF9SQU5LUyAkRVBfUkFOS1Mi
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: OyBleGl0IDEyIDs7CiBlc2FjCkBAIC04MCw2ICs5NywxNyBAQCBlc2FjCiBpZiBbICIkRVBfUkFO
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: S1MiIC1ndCAxIF07IHRoZW4KICAgZXhwb3J0IEZBS19DVURBX05DQ0w9MQogICBSRUJVSUxEX0ZB
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Sz0iJHtSRUJVSUxEX0ZBSzotMX0iCisgIGlmIFsgLXogIiR7RkFLX0VQX1JFUVVJUkVfREVWSUNF
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: X1BHOi19IiBdOyB0aGVuCisgICAgZXhwb3J0IEZBS19FUF9SRVFVSVJFX0RFVklDRV9QRz0xCisg
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: IGVsc2UKKyAgICBleHBvcnQgRkFLX0VQX1JFUVVJUkVfREVWSUNFX1BHCisgIGZpCitlbHNlCisg
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: IGV4cG9ydCBGQUtfRVBfUkVRVUlSRV9ERVZJQ0VfUEc9IiR7RkFLX0VQX1JFUVVJUkVfREVWSUNF
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: X1BHOi0wfSIKK2ZpCitpZiBbICIke0ZBS19DVURBX05DQ0w6LTB9IiA9ICIxIiBdICYmIHsgISBo
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: YXZlX25jY2xfaGVhZGVycyB8fCAhIGhhdmVfbmNjbF9saWI7IH07IHRoZW4KKyAgcGggIk5DQ0xf
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: REVWX01JU1NJTkcgaGVhZGVycz0kKGhhdmVfbmNjbF9oZWFkZXJzICYmIGVjaG8geWVzIHx8IGVj
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: aG8gbm8pIGxpYj0kKGhhdmVfbmNjbF9saWIgJiYgZWNobyB5ZXMgfHwgZWNobyBubykgKGluc3Rh
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: bGwgbGlibmNjbC1kZXYvbGlibmNjbDIgb3Igc2V0IE5DQ0xfSE9NRSkiCisgIGV4aXQgMTMKIGZp
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: CiAKIGV4cG9ydCBQQVRIPSIvdXNyL2xvY2FsL2dvL2Jpbjoke0NVREFfSE9NRX0vYmluOiRQQVRI
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: IgpAQCAtMjQxLDcgKzI2OSw3IEBAIGxhdW5jaF9zaW5nbGVfY3B1X29mZmxvYWQoKSB7CiB9CiAK
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: IGxhdW5jaF9leHBlcnRfcGFyYWxsZWwoKSB7Ci0gIHBoICJMQVVOQ0hfRVAgZmFrIHNlcnZlIC0t
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Z2d1ZiAkU0hBUkQxIC0tYmFja2VuZCBjdWRhIC0tZXhwZXJ0LXBhcmFsbGVsICRFUF9SQU5LUyAt
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: LWNvbnRleHQtYnVkZ2V0LXRva2VucyAkQ1RYIC0tbW9kZWwgJE1PREVMX0lEIChzaGFyZGVkIEVQ
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: OyBzdXBwb3J0ZWQgUTRfSy9ROC9GMzIgb24gQ1VEQSwgbWl4ZWQgay1xdWFudHMgdXNlIGhvc3Qg
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: aW50OCBmYWxsYmFjayB1bnRpbCBDVURBIGtlcm5lbHMgbGFuZCkiCisgIHBoICJMQVVOQ0hfRVAg
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: ZmFrIHNlcnZlIC0tZ2d1ZiAkU0hBUkQxIC0tYmFja2VuZCBjdWRhIC0tZXhwZXJ0LXBhcmFsbGVs
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: ICRFUF9SQU5LUyAtLWNvbnRleHQtYnVkZ2V0LXRva2VucyAkQ1RYIC0tbW9kZWwgJE1PREVMX0lE
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: IChzaGFyZGVkIEVQOyByZXF1aXJlX2RldmljZV9wZz0kRkFLX0VQX1JFUVVJUkVfREVWSUNFX1BH
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: OyBzdXBwb3J0ZWQgUTRfSy9ROC9GMzIgb24gQ1VEQSwgbWl4ZWQgay1xdWFudHMgdXNlIGhvc3Qg
+Jul 06 03:39:34 fak-glm-demo google_metadata_script_runner[4099]: startup-script: aW50OCBmYWxsYmFjayB1bnRpbCBDVURBIGtlcm5lbHMgbGFuZCkiCiAgIHBpZHM9IiIKICAgZm9y
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: IHIgaW4gJChzZXEgMCAkKChFUF9SQU5LUyAtIDEpKSk7IGRvCiAgICAgZ3B1PSQoKEZJUlNUX0dQ
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: VSArIHIpKQpAQCAtMjYxLDYgKzI4OSw3IEBAIGxhdW5jaF9leHBlcnRfcGFyYWxsZWwoKSB7CiAg
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: ICAgRkFLX0VQX0ZBTk9VVF9BRERSUz0iJGZhbm91dF9hZGRycyIgXAogICAgIEZBS19FUF9DT09S
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: RF9BRERSPSIkRVBfQ09PUkRfQUREUiIgXAogICAgIEZBS19FUF9KT0lOX1RJTUVPVVRfUz0iJEVQ
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: X0pPSU5fVElNRU9VVF9TIiBcCisgICAgRkFLX0VQX1JFUVVJUkVfREVWSUNFX1BHPSIkRkFLX0VQ
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: X1JFUVVJUkVfREVWSUNFX1BHIiBcCiAgICAgRkFLX1E0Sz0xIFwKICAgICAiJEZBS19CSU4iIHNl
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: cnZlIFwKICAgICAgIC0tYWRkciAiJHJhbmtfYWRkciIgXAo=' ']'
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + cat
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + grep -q 'PATCH REDACTED' /tmp/fak-startup.patch.b64
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + base64 -d /tmp/fak-startup.patch.b64
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + git apply --whitespace=nowarn /tmp/fak-startup.patch
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + git status --short
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script:  M cmd/fak/claude_glm_gcp_test.go
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script:  M cmd/fak/serve_ep.go
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script:  M cmd/fak/serve_ep_test.go
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script:  M cmd/fak/serve_stages.go
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script:  M scripts/dogfood-claude.sh
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script:  M scripts/gcp-glm-demo.sh
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script:  M scripts/gcp-glm-serve.sh
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script:  M tools/gcp_accel.py
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script:  M tools/gcp_accel_test.py
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script:  M tools/glm52_ep_witness.sh
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script:  M tools/glm52_fak_native_serve.sh
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + export HF_TOKEN=
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + HF_TOKEN=
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + export HUGGING_FACE_HUB_TOKEN=
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + HUGGING_FACE_HUB_TOKEN=
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + python3 -m pip install -q --upgrade 'huggingface_hub[hf_transfer,hf_xet]'
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + export HF_HUB_ENABLE_HF_TRANSFER=1
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + HF_HUB_ENABLE_HF_TRANSFER=1
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + '[' 8 -gt 1 ']'
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + apt-get update -y
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Get:1 file:/var/cudnn-local-repo-ubuntu2404-9.13.0  InRelease [1572 B]
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Get:1 file:/var/cudnn-local-repo-ubuntu2404-9.13.0  InRelease [1572 B]
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Hit:2 http://us-central1.gce.archive.ubuntu.com/ubuntu jammy InRelease
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Hit:3 http://us-central1.gce.archive.ubuntu.com/ubuntu jammy-updates InRelease
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Hit:4 http://us-central1.gce.archive.ubuntu.com/ubuntu jammy-backports InRelease
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Hit:5 http://packages.cloud.google.com/apt apt-transport-artifact-registry-stable InRelease
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Hit:6 https://nvidia.github.io/libnvidia-container/stable/deb/amd64  InRelease
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Hit:7 https://us-apt.pkg.dev/projects/gce-ai-infra gpudirect-gib-apt InRelease
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Hit:8 http://security.ubuntu.com/ubuntu jammy-security InRelease
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Reading package lists...
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: W: http://packages.cloud.google.com/apt/dists/apt-transport-artifact-registry-stable/InRelease: Key is stored in legacy trusted.gpg keyring (/etc/apt/trusted.gpg), see the DEPRECATION section in apt-key(8) for details.
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: W: https://us-apt.pkg.dev/projects/gce-ai-infra/dists/gpudirect-gib-apt/InRelease: Key is stored in legacy trusted.gpg keyring (/etc/apt/trusted.gpg), see the DEPRECATION section in apt-key(8) for details.
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + apt-get install -y libnccl2 libnccl-dev
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Reading package lists...
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Building dependency tree...
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: Reading state information...
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: E: Unable to locate package libnccl2
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: E: Unable to locate package libnccl-dev
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + true
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + '[' -f /usr/include/nccl.h ']'
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + '[' -f /usr/local/cuda/include/nccl.h ']'
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + '[' -f /usr/local/cuda/targets/x86_64-linux/include/nccl.h ']'
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + echo 'NCCL_HEADERS_MISSING: install libnccl-dev or set NCCL_HOME before launching EP_RANKS=8'
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: NCCL_HEADERS_MISSING: install libnccl-dev or set NCCL_HOME before launching EP_RANKS=8
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: startup-script: + exit 17
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: Script "startup-script" failed with error: exit status 17
+Jul 06 03:39:35 fak-glm-demo google_metadata_script_runner[4099]: Finished running startup scripts.
+[36m[gcp-glm-demo][0m collecting remote serve logs -> /mnt/c/work/fak/experiments/agent-live/gcp-glm-demo-20260706T033530Z/failed-ready-logs.tgz
+WARNING: 
+
+To increase the performance of the tunnel, consider installing NumPy. For instructions,
+please see https://cloud.google.com/iap/docs/using-tcp-forwarding#increasing_the_tcp_upload_bandwidth
+
+[36m[gcp-glm-demo][0m tearing down fak-glm-demo (zero residual cost)
+Deleted [https://www.googleapis.com/compute/v1/projects/<redacted-project>/zones/us-central1-c/instances/fak-glm-demo].

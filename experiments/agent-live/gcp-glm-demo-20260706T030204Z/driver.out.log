@@ -1,0 +1,35 @@
+NAME          ZONE           MACHINE_TYPE   PREEMPTIBLE  INTERNAL_IP  EXTERNAL_IP     STATUS
+fak-glm-demo  us-central1-c  a3-megagpu-8g               10.128.0.60  136.65.248.117  RUNNING
+
+# --- then, from this laptop ---
+# 1) Open a private path to the VM's /v1 (it has no public ingress). Either:
+#    a. SSH/IAP tunnel — local :8200 -> VM :8000:
+gcloud compute ssh fak-glm-demo --zone us-central1-c --project <redacted-project> \
+  --tunnel-through-iap -- -N -L 8200:localhost:8000
+#       then point the preset at the tunnel (this is the preset's default port):
+export FAK_GLM_GCP_BASE_URL=http://127.0.0.1:8200/v1
+#    b. or, if the VM joined Tailscale, dial it directly:
+# export FAK_GLM_GCP_BASE_URL=http://fak-glm-demo:8000/v1
+
+# 2) Use GLM-5.2 from here through the kernel — one preset command:
+claude-glm-gcp --probe "say pong"     # one witnessable headless turn
+claude-glm-gcp                         # interactive Claude Code on GLM-5.2
+# (run scripts/dogfood-claude.sh --install once so claude-glm-gcp is on PATH;
+#  on Windows: .\scripts\dogfood-claude.ps1 --install)
+Generating public/private rsa key pair.
+Your identification has been saved in /home/user/.ssh/google_compute_engine
+Your public key has been saved in /home/user/.ssh/google_compute_engine.pub
+The key fingerprint is:
+SHA256:<redacted> user@redacted-host
+The key's randomart image is:
++---[RSA 3072]----+
+| . .+o .         |
+|. oo. + .        |
+|. .+ + + .       |
+|.o .* = .        |
+|. =oo+. S.       |
+| ..E=.oo...      |
+|  .o**o+..       |
+| + +.+o . .      |
+|=oo.o .  o.      |
++----[SHA256]-----+

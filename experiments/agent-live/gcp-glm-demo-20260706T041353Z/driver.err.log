@@ -1,0 +1,186 @@
+[36m[gcp-glm-demo][0m DEMO step 1 — provision + serve GLM-5.2 on fak-glm-demo via the pure fak kernel
+[36m[gcp-glm][0m creating fak-glm-demo (a3-megagpu-8g, type=nvidia-h100-mega-80gb,count=8) in us-central1-c under project <redacted-project>
+Created [https://www.googleapis.com/compute/v1/projects/<redacted-project>/zones/us-central1-c/instances/fak-glm-demo].
+WARNING: Some requests generated warnings:
+ - Disk size: '1000 GB' is larger than image size: '50 GB'. You might need to resize the root repartition manually if the operating system does not support automatic resizing. See https://cloud.google.com/compute/docs/disks/add-persistent-disk#resize_pd for details.
+
+[36m[gcp-glm][0m VM created. The GLM-5.2 load is multi-hundred-GB and takes minutes; watch it with:
+[36m[gcp-glm][0m   gcloud compute ssh fak-glm-demo --zone us-central1-c -- 'journalctl -u glm52serve -f'
+[36m[gcp-glm-demo][0m waiting for VM-side fak serve to become ready (timeout 180m)
+WARNING: 
+
+To increase the performance of the tunnel, consider installing NumPy. For instructions,
+please see https://cloud.google.com/iap/docs/using-tcp-forwarding#increasing_the_tcp_upload_bandwidth
+
+Warning: Permanently added 'compute.8128591516158825805' (ED25519) to the list of known hosts.
+WAIT phase=none
+WAIT phase=none
+REMOTE_FAIL phase=STARTUP_SCRIPT_FAIL confirmation=1
+Jul 06 04:17:11 fak-glm-demo google_metadata_script_runner[4080]: startup-script: Gwm39RfRcdrWBf3LOKzpLJ0InLWBp0Ie7iFY49UxyNBBOi560WOgDCTnbU0JxXKCR/6abEIvE/xi
+Jul 06 04:17:11 fak-glm-demo google_metadata_script_runner[4080]: startup-script: mD9n6kDD4gt271Uf2wjtClrFLTdgNhYXjJ29P3WrNmxOlrRC8+WgUOuH/tCTKfVouK4ZPFqDei+w
+Jul 06 04:17:11 fak-glm-demo google_metadata_script_runner[4080]: startup-script: rYpUquVo0vNMRNrezSJqKJ4usMZFWbWJvRzkwyNdwF55QIpqAzrAWecFwEpP0uWE2QhyoKh1og3f
+Jul 06 04:17:11 fak-glm-demo google_metadata_script_runner[4080]: startup-script: ojRmQa9dv+AEka6DSLgdpmJ6zU20r7Ql9VD1ZIm763ZJDp14o3/Kkk73TCoIGCTBpoW4aKER0f6k
+Jul 06 04:17:11 fak-glm-demo google_metadata_script_runner[4080]: startup-script: xWaqzYpE1yI5gdYwQLGMtD+bA7ioyVK2QxDzommJxypowwV8hNW8osU0wJjn4MRpV5kYCYZrXOtL
+Jul 06 04:17:11 fak-glm-demo google_metadata_script_runner[4080]: startup-script: 6xKDjToyCnYf46sbkzPw5mJaRjNDppvLhYgrTPgG7rtuR803nW5ku1om2NIVVtUC5lcWF1nnGks2
+Jul 06 04:17:11 fak-glm-demo google_metadata_script_runner[4080]: startup-script: fAO7uD2rgLzhWxMCGMynbgVme7uxFyGnNtOP7ZDflr+t/75aMuE3QqkAdqiGNoiMzQHeByy/vMHF
+Jul 06 04:17:11 fak-glm-demo google_metadata_script_runner[4080]: startup-script: Osr704JVprVB0a9pCws/3k5TWF//rn/+6LsbNIXFwQMt4evHrCXQ7XupioJ/PboskL3I5dfkASxs
+Jul 06 04:17:11 fak-glm-demo google_metadata_script_runner[4080]: startup-script: HExzeLBrhiTQz6uCC/hMIN8567o6+H6CfULssbPohRs8OZ5lE6aoLKZfFOIgylCJaTjkVDvpy5Op
+Jul 06 04:17:11 fak-glm-demo google_metadata_script_runner[4080]: startup-script: fbZrhivVz+FiR4Rl/C8bDx5sdKwsMAEmerER1Jd8yWo22/1mxSBlc0wZ/fsGzK86ZMbGY92jFHfk
+Jul 06 04:17:11 fak-glm-demo google_metadata_script_runner[4080]: startup-script: Un98705pW8O8z+Hv76VkFFuQ2JkVGGC39/f4W1ZWYLYZZLOUi4/ZwjHHIC8nXJseDZTFhtQfDdZo
+Jul 06 04:17:11 fak-glm-demo google_metadata_script_runner[4080]: startup-script: tjX76YTEnLdAEPrnlThY2x3xMDs7F+x2XmiCMQv0i8dDv5R9LR1qyp8afAIgpkNethTtwmrdAXhQ
+Jul 06 04:17:11 fak-glm-demo google_metadata_script_runner[4080]: startup-script: iEEKR62JjwbyMktHUfxM/7UpbycvaUtjWH2kdwi94lBQP0T3dilfh7iqMjCk9zNx1ePkSWrJnKWt
+Jul 06 04:17:11 fak-glm-demo google_metadata_script_runner[4080]: startup-script: pK3DsC9nI72XUrhod7XqC7+VvGLrPr1Cops/yth6J+wf/YzqFESIo2/Xv9sQIcMWp2O0fVIotrwF
+Jul 06 04:17:11 fak-glm-demo google_metadata_script_runner[4080]: startup-script: gB7n47fO2SEV+nAnkmg/P8/610j+5TJXUkWnFx3zidm0PN4f8wy1jYbFfBDtTqf/in/+OEcIOFys
+Jul 06 04:17:11 fak-glm-demo google_metadata_script_runner[4080]: startup-script: fAnY9Yx/SaFI/itRuYkIUtHOlC1YFxD9zueo8aHLlAKkcR8NFWk8dUhhgfIzP8dj7kd9USn3CSHd
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: Vb4Z5eN8xKEOCI7RMtvw1WgdAAZT+GMZEBVBYly879gTzPMbmnGeSFcMDuoxD1ww0kUASWjZOffj
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: unjiPDzlCA2VOGmY4+EHRRbW601lj3yXiTrel/2VlUgqJCG4GmUhHgqOTSV0A2++gAafjS8I/QMQ
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: 5Wh4i28vpDdp/LXY1css80OmU4Ihm1+qVw7yohpaEG+oAg7/Vmo5w1ku0uj3m9HXT9jSP7niQA75
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: DLZ8rUxqc/AN9Ct8lo0zPS0p19CDj4gQGhJpl/2h+imay7HVfTIs9Auhm21dtlZzg1fq5au9wwOS
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: vS9z6c3qimjruhi7Uw26scZ0GoahLSmkDDhIKEP6dC0gp47OibzHxmt0v4NU/pwvF/AaY1rh8EqJ
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: 1wu/5/MpaXquqnYURV0Q+1EhVeL1Y0maD7Ap9qjrS05Z8Y0y+mFzHT03ebwoYIZlpGXOdbdcbdSw
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: XGAV+gUN04CkxsPYaCo1ZXOEefDtZjeJUKDurImKJbqpzFVzdYPVIAmnVzq9yGaeDgSXzbEjMCrH
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: +NxYQIeHDyyZfoAQhNn12j+6IL6ztHwbjUjZnEsZW3n5Ydua6JWVVXlybfC5ylC+gORB7Qullcn6
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: OG13dDuZntxaUDCXZC2kruVpz4ij35rQD14JnQApf4gucKsoL2E18GvpF1ItbFDAbzYTJyyK9OaI
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: GilR5WttCu7CbKJUr5gbjr1jwwL2h9quYrcitt2dza85oEAhGJZXcYORUj5UFOZagINsxEFDfrUV
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: 2YTkLxN01r9lsiDVPN14qFmwwODDIC2ZhuPX+K7b9MPsHXEOfwZ70hwklUgdRMlIQwPhU0HYjBcH
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: Ge1IUWdpT9Jf3LpQ82akfne3MJT/dqVehQSnJmBMRIRg6UH8LiBS625AomjWXTFmxOTy5TQgS2OE
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: 5J4s8wKP5uOt6ajtm6kXpF+BbvmjOHeswm1HsxR4XC1eieijyumIJBJD8LUQArmRUws5Cho0cFR0
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: x05UOhwgWLDUEvhO9uq6OTwFIvl/KAUMu3JwfAIDOUrGO7aVXLCbNGgBwbaj3fdZn6FZuecPHq4B
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: l4id+dYXLmJE/VLiKGfKl3gvQsD2b1Rz/F+XazuVd26n9DxMv/364frX57dWeqpzBLrPw6+rLpJQ
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: pql6SbRyEntJ2AUvhWnK63GfQ2futAgMl/OzhHjEGmm9l8X4GqL5fEB4fc3SfRUzW5/2jTKIwDlj
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: wrdK9pBYgzvGSLOmihKL4mLVBLoQRgcqHpC8VOYqdhtzOrAZtSLZy0gstBlnd3yuQaK3+r1NUj2n
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: ky3oBlo7kZGa67Awd3zmWSkPecm00hX+l2r7PjbQ6ZVPVBj1rn4uTDPIYTO0xoIqDKeuCry14mVD
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: MyoDa6XGSU2NVK2JLVUG9vuO1Ve0wkAhuY2uR5cSXdtLN1iDamYiB0sPFeWMdsSFKpZoZ4o+Xg+3
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: IIMKpEAJEyX60rCdI8/ORLbh6koEEhA/kf5pRpjmVfYRkgXa3K644jFFt6ZKSmCHRiTBaEADbCKh
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: AAcqLF8XwlSOq45G/dn7SLQe4WNPAsUHpek5k7J0IqO14TjLZldZJgyj1OCEKxqjS8BM37nNo11I
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: GWmwNwvR+ED0VhN9uRdafu6rrvMS8wtaHYGK1ieYLPzHbKA55EdINbxogVwjF7NigQEnw4m0PY4S
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: L+syL/P80fPGABwQeLJhfgaRGfUKMQwxmDH9lvc1rJM1K+Z57MjkECbDohBPrOQJG8aw35jPQYCb
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: bFtxuYsrw712FOM4OfVEjH2SPuptyGwNZcscu9LUaasnyZIyx+faavzrVpc0jLrjX0UDD97cjFp8
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: t1rcKEe2kvZRSA8HDql9zCr6wEY4yhA1XB1hys9aGEEuqjVjdRYGHoOV2bYNtIO915YCeLSkZw9j
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: jGtkMODLLh+q4l75UNCdVyC3guVXeXNNDAHKy8OROP+jtgQ+g1a4BI07U1eLTK59O9rhQRmpGDrj
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: h4QbaYSMM48IRSprZhTlK3VrHpdz5c6T0sGhYtViWxZTvSqhZQpcwQql24ybW3qN2YDoDj0faOMK
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: jhOr2I0scou+ZSh5gCmmsxlEey1Zt6tBFFgwOWiKs8F5Mef5VBCKcD4KVgIAoyQ66GTkTyhwqjhw
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: qXOmDDh3AHi5FtGR1nosxYM10ELXeFnzG4gOMg/2wiviw3g9saCy9Acg2qD4I+jVtqBvdcRp3zA1
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: LblkXg7Y8i14AYHnotXx0fjtBAWTZNGx5A5ILAS/PC4m/Kqc5AefwRfrL+3apx8MakeuAQQwyO6H
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: xkz1iyE6T9ADpEvBrmar088CzNnbidx51Y5+ycnTW3LPuc4kVykm5tVruN1PpJ53zzgXgvSUIga4
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: ItUEgCo5m+7kSxBa+UViu+l7IfI8jf4CfRUJCB6bttmmRizq3zJvXXllMXtSjQCR0Ixh6lvlNh14
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: e17y3fBNhxlmNqSHGc3zK5v/OV7xp55v2cKLY71wynk8gSNgeJ1Yil/0LeJW3BAQvjEmG0qF4Wod
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: F3HYdwVrmd4ijUoI/ll2XUh2nlDmkg2uMLvdkbZelxXja2gXYa6nJbahROGvpvLx9H6lG988wlpl
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: aW6lxybTisjqbxpv3Vp0gxgqs+juH/2MYPK6pUeGe8s9GYi4g04R0VKjicXIxHWlIDRst80mxxfh
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: 8FgjjQP/g5qUdEc9RwhJ+mZaGHPaqNvSvQqh1KAlZswqioDUfCWk3pu2gvE1blQegzbzS44ueFzV
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: L4RaKZZ5NC0r8fX6ruHMZvStfyiHE6EZzzePPAM7VrGekwsIQ6SNMTzusdy9g3xoIjN9K0oeoBK3
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: vLbUi+gBbhGN8cc8n2qo26IQTiSLrq+JQRyPIFMIa4pWTXGsAoZOIFwZw3lZzAb0+LxqwIaLw4Gs
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: 9J0NxC4GIP7KgZxEqW8/gZ0LOjuPXNpg25LDEd1uMAlndguZw9ZMcCNMX/6tY+i5b9Yz5IZwU0f9
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: Y6SNDYwnqBBN/BOxeHwihhlvijP3lpML+fWKt02oLpNE0ydiMFLoDZbjIOop3whmnyKXyZdlvUFZ
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: 20gqFhDQ01xA55jQSCD5IjBO3AE/oP/VZG/8INKb+4H/+SMxUX/RGH//Lt/sDU5Z7zer+8oEL9kp
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: Ji5W8Sg3+sdEq1hTwEZrVpXG/GaJusyMFYzV6yhoygLMVZoHtYGlYRwSgHK0zXxSOzjmj+zmsCNj
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: GAZnRjqP/E+vPGpTLyWhQifpfwEVpMdyMRHCFN0jlOBnes7LD7rxpO9cKWGEfSr5lbb6jA5wYo1C
+Jul 06 04:17:12 fak-glm-demo google_metadata_script_runner[4080]: startup-script: f6owZu5HIPb4xdcBZ048E96h18M306uIWrzi0VwhwYO9mNPi0CAcl5Otmb4ChWzyjtRFL6Pot9+P
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: tP/qHSMwVrSgbxRF/m2YbMRYbU8pZAz+jJ86516DA5vzlWfpdCaGoJ8ClCuTaJujweTaMyZYwJFO
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: GHsVl8TL8wtlV6Tu3sPPlXYaCOG6aoq/p393ogrf0SgWOzz0aDi/SJTJyVD22/euDsuV44FVpqiD
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: CVLpUMwuZCB57oeRf7tB7M2PISLrKCYbaGFS+zXcon/YIF/osHILdMwtiV7AgPI8HE2fmH7gshY4
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: jutLQJxfu7iypIKLq064CifkSPIBD9dzvriO235PEPRtFrtL2FGyxC8NOVaiAYs/fLTshMuEbmwn
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: oj/kem66+/krQiL5YWyPnpLadMGRc3G7qUSMHm1QFOYyMRzdGgzidS5/cVFE9jiu1Va+dPXkVQay
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: Y8neTzSD3Qlw9RgLcUXG4K2sNz3LZmvH43RSXhYzF4AXX0aM8W03dNyu0TsfBH+ZOLRwC2IWIGQl
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: cCuJEptXzDNsf5RqDrJZTkwyCm8eHbHwnonaC1HY6eVVO42KP1Fcicjo+NdVOtE4JqVGsDwyJZJs
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: A/cyVqpSiJSFSxekkSBSoirl9KIVckrH+oCyPiBhNdqYEbD9Sk2cmgrYlZMbpQjqQLrkocE2tTag
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: PPxXzvyhCgjHOpfOvk5LORJC2nDOOLE4H7iko1EgNljRY6V7oyayF4jB7s6EGT0DNFaKLmuJOTTa
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: ZaJcoDbatuZfWwTgSScazLlN0WWCU/gtH/z+hB/VPgwOwZd4eVm7BiLHSJ3FaKPdC931iuANilyn
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: rsnVtTgori6DMz6eFdw1SIcxpHYZsrNpOpbqgpYebq8gvVXles6+NnTLB4mDhjQK8rcP2RY6HB2k
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: qyKQ6Jl3olar/cR3EFoFMD4Wdz2URLl5iJ1nM5qiXRtG39cxmGAquew10ksmqm1Lv/kSBDcfoIUL
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: YV8vGnVgHelFwThmYhHuBXsGr62PaPvLRFlfN3rTE3xjRRVrJFA/rZCJyuk/bPcU7mpbgPmt1GCL
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: yoXSsVwa6BsxP8kt59OS9sIXksojd1NKfk6LYpSsgqPsjC8FvSNRy6FV7MOWqEiAjqQUBEbtj7Wj
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: cKTPXUW7McS53vADlQ09w/mESZlYhH1OKtxIrdxQdKWvV+DQATaLpZnIaCz2eSangqNtM2PszTQh
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: tdoIUIkyiPHAiDF/8SQMLYHyCCn1clqMi3nJgRwSBCVEONWWqlApNBIPzim24mmYjGmCIvAtkkvF
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: YEcvg3Y0VbL3pkqw7PcqCWzM49QmgRprHqBHpbegs7LUFaNFpQjJ6EOrf1BViC+5852QGGO5ejga
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: I5WPtZMHgHmtQRcw/c0KFz8FB5WsgxveSlQj6xSWjysBjcrhJekbLjXCWNQWPQ90Nue7Es2Nw9CQ
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: bLdwEjxhk8MqZFrVMwlIm6txVj8V1kStkQaLjWa9bnPxPEsK/BD5qwQNC1H6zM9Yl21HH3m0OrH6
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: votfe1Wtwf8ImAAl43b4ioNUNV2jQaUNLkZHvZ6iH6qU2bG0ezFEjUUH1tYvOFg9+zgtvVFbjs3r
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: 1/m4ez7kQKnAqCC+XaxWY8Vp3nwqzlbzsdI4g2w0KWZ8b1VUPEf5KNmKYYaTARqun/ZiWDzbBYGi
+Jul 06 04:17:13 fak-glm-demo google_metadata_script_runner[4080]: startup-script: frAKTS/Xy7sBItyMHJfuOqpiAi8tAx4mH+CiGJBKMSAxn+PPTMoXTIm8bhoEweUhaC09HBKp5MWy
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: NqHKmEMqQRymNd93lRP2Iic3T3J2U5OohKR2nZNL7F0mMnH8hpvEMM3p1GwPmTCokKHeqSN90Fkr
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: KNrn3TjpxB0rF/EZcnl64aJMdlQ4M6MB0af5aD7kcD5it+fpdBEJMGrcduaFBmTQZjjYJA/LL9gU
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: m3rnLptzxX3/Gq5O8M7VV/FukCoRpR/Sd9L+6Dqb2b4Wl42xrJLyLaVkXRJyYISVBJ52tadVK0pU
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: LUE9qFiTORv9aksuzs9DLcoTfj4mq+QmNfACFru4K1NUeU+2C0N3oWUrcRdoWyN7AT41obfh73wc
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: v2k3IB2Yk26AnRhqhAdcwtiVmgFJmCSoc8dqsmiMslx5VGjochiKq3OkqpeJDOlMaQHHQzqitwAx
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: XjgbIwRoHLzCVoIQUJAOEs8jw8ypyuXV0Be9wMEnTVfzjtuf5JeN2C4cvzEjxwUnHsuKpG1jSWIS
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: IYE/L5/G1bthLZrHtXCcjgM2fSt9o2n0GyiLks2wNI2dh1PD6CYj7KoSwtaracpmnVaNzWr8SH2L
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: jozrw1bkgVK1Upyo9dPVHam1qTSHcydqjJyRKgRVKU+mfou4hZ5FmHQiF4EClPGnUjsUdABtwBt6
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: qq6XvTKmv1UxRYWNYF4Xn0JMwOYWprA4ZePX2tKqdZ/+knBIRNzuVAIkGk0FcMYrqcMSRUUKSbe2
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: JXOPOurz/wDDCz7o8E2HiVAQChDr6b2mmXtY+EcZtUl/liFMg1assOos+Cx7h0OpKEnyjahJb7m0
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: W7iEj83pj9k7gEVcYgYgB5SKQpa9azeKIsaIjch+/JQA3qYKJytfvF0o79ePHqeDx+tf/4lQ3qaK
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: Jw+/e7gknpffrgf1In1f4ngr4b3jPleFW0MucD3g93wkL42z2drlbDap/IP/g4nC2GD5y1o6K2g1
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: rSUVV/7+AGLlW5/4lQfgn45X9iW0/WDdpflmmkbmy/laXhj9DSWp2NBnUcXjSsRzNWtVlBDnoT/K
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: zrVusuYnyjCLORK+jsyIrg5tyAqZcm6Y82/CneFc9Grt+3Xv1fPDn1/5pLZ/f/igW87Pymu62CO/
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: FZh3TqJPAOayxLsgGpy+nFmQdhAR3pS2iXBpVDconJ27x/k+PkiUR7QjqgaAh4V7xezFUd1r79bX
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: sIQ1r+KXWsC2OHdhuMFpLcSPJ6CRPkDdmLOPJI4uiqwap875D2CSvqvKuAgTfoa5xH+5PAxOxdEl
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: mCc3hFzg0J1PhxUnvAwW3cMVT7b5H8zaICxHcrmTPfS5DCvPx5PoXjB+O3qB7TT0rGoB2VrRii+3
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: NfSsOeR2VHKrTzmrF7Q7+huq9tsjZILsZOd4lCSJuvhTjHg4mcFtKY+23elVXJiThPfpTYAMOFyu
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: F2UlEuzOEYIbfMDjKUhorzWlp61T/M4L9qGZ+ntfnvIr4r36QxvFu4EZcMHI9D/9mDFERteNAxK2
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: OHtJf5EpPvBoPYX6R18Uf+SL4jNE1cz2R+JGdhJF+LRjsPhwxMWgRwn+7ES6WzzQv350jRqKwbUX
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: rGmNyQtSdC/TIQZeUgEh9BvTb8b9CSGPsj/cYIygRJ2OxKzKZnRBk1ikdvwujTZfsq96khCu3281
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: XWEUeAGPlPHSASluWHj7zywwec4DJMfZLG4pOLqvCJG4CsZEPAs0qbBdkWzLidsW4SBfOhJfYh3x
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: k1YhqiaG5N6eVipDSzThMYqjzkur/8BgkkeHPy0OTHKASGHak5WpK78tHSpqI9qxI9wMxoYQtbcv
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: i7zPSBs+NWSuvHrzBbvNFSPlqHYv5LF72pcVufsYlBgpxZO/k6Hm2jR28Gwn8ij+EnUVn9zyULRe
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: B32SKBS4Cu2Dxm9cIJjB28Wto6eaLrnmAP+yTtc+KFg1hMyusF5ceYa/oyMYl9QMbnGwzN8e/G6f
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: uqv9seZsxwIk2k9M07CgsvXylO1bpwFvK7W6wyx9yx5lb3U4fr51tLvjuklj2847LWlQ+cwqJkn0
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: KQGD2TxyIV2KExNsv6CFYDPH5sT0JpGts6J4G8nfA8aURvfcQO1oZRZIkHfnE0KcRmvcJU0wEZsP
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: iOgCy2qM7MPC6fxcQopzB4PLeDyhHczQ8ot3eLcUoYEvY8oKl8zT/ujdxNaf+SoJuStzU7EpLMVj
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: b7Ko4pvMEf2wib/JwVZwwgqAS0T8qgBak07CD4Jj0yirSowVdMlSYlMCyLtMht/lVNWgF0SwBDFV
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: csQlyR7BvC7qnnTZ+sBqkmqwTZaL7qsykSVWIoXs2cp1c8gPvauL36wv34UE6XC/kbrM3zJa2Xd4
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: ynj7uzPZr9o1RorfRk1r8mbZ22xdkcPW9vb31fPyXNt4FP+peUBSbcuBARjFsmBzOkYlBNLHGRLl
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: oXSOobtJfwuyNUrLrX+wEcaQaJkEKZzLlRIqFRIWHH21UkGV6hxBzQ2pvCLm0EDkV+3i7Dra/W9b
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: 3LSilua6oEZ0ZBDJfakmy7A/V2s3hMOFBRmW1GKQ2h1BEqdPWVqVCFpNAvW5oYt1e4I8JwmkCSuc
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: 3fbQljevwjaNfSwWs+n5BPhVdVJ8r9/g4KJ4l//c21Fp+omYRIkLWV1yqRFxwZH3ubS50EQH7XBS
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: BucsOr+YZHNOUSzOz6XpNSbV8gCcolBO33kS7rXy2P4uMZlMZGyNJvJ3nErB4XzBw192jg8lxI8t
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: y3i0X1ycyyN25VrcE/So8TVykDj278aqZcESFwuX6X2evgvkUsiKCpiqfnlnVpqgzzYwGvGYj4kF
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: 4+Q5p0NPEQkc84qvRJg9IlmNZPqMO8QR+5yqMquKQtscLpgxCC/EonTIuJ3wRM9fvXoZX9EIvPy2
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: J0iz0q9fgqIRrxPosR9I1ejhtZ+P9juqoPfkM/xVOs7NzjgQqDFwFNdUBg1IJlP/S4cMAcH28bqd
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: 8LGihkbK9qL1Rx1JN+ohZ6TjghlpaWckrGxJwCjmvvmcdcplZ3xZgZBktAjx7IgoyN0PHnSihw0B
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: ofJiEA+as8m/Iv+M0u7dBw8h9uRtdQyZZphY8F4n+tLJcC6UimfvyR8fG0SfYI8yzt2yrbvE5+a+
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: +XhzWBdqI9PVb4yD7WD39ziE45irGHnsCpwe4aZcYMfKuof8FpYbxfAWbN4dtOV44McSV6seFBip
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: XLBEPMdBYUEpK6jMbrE8IDxCdweR8zVUOxZOUe3DseU7gd1h6u0O09L5876Ysq2eKxSy8X/JaZjE
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: K26LTdqi1F8Uf8Km6KMJF43nATsyHP5gx4M7NlaF5RnmEnS02Uzb9fI1JN27A3Oc+L3aXMfqosMw
+Jul 06 04:17:14 fak-glm-demo google_metadata_script_runner[4080]: startup-script: IWrcMtCS7Zcrq7tJoT4SBbWDMn7uWM95ZcT8DkKQNGpJXTRr4iZLKjVW6bIn+3RQvnZq9aQNBJUY
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: XI6JQs1Lmj3PKoDg1pmNB17O/IljVgusDtovEmE/mnOxzZp3CfiAH119a80prx+UrRKIQXIZEELc
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: Upt3/9BVGjDUZUijvrL+AjJ9x8+0eIKhEGXyghSAHyyIcgA0pnzFOEV7z8HLYoXvPY8k/jRILROz
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: 436RDoIz8cPUj6VaQsiWQmejqljtZNxAQflQnVu54G1nthzAitSkpECCG2+cfBGkXi6NyvSqnjxW
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: xVxWGVlfqWsrTKpvQujaVLjUHBR4AzLfZn4QnE+fHgj5ibOHWtOnz8e1vvueFa+a2RSqcjY/C3wu
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: 6djJqhV/C668V0VmHOrKbpRxxrYrLWPJGFMr4RLOsJgUH/y6wrOAtyqehcpn3vBRt98seBMWfAl/
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: wpPwd5jlWsXb1oLxjTNAxNg14ZZzpPRxSI/E7UyzIRE1CSl2gQtPIsaKCy4pzslhvo0OBzOimaOM
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: gshui1mWegpVrUXrgPMhBksJDDg2fiVklCHEK1t4zlHiZvE55OJKVaOcn2aVVe7k1kY5TAhju4tf
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: lWjVNNGVt6OPzRGraaJ7CGNSXZzOTcGrFlnYEMPKWx1nV0/dTpFsFIA3xDD/+IMuuNcUo9sxVGj8
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: 9WPVeqK5AawpHEkE9T4nAkQTtBqs5Ar0RA82zmChlEip7Pfnk1xrz+B3Xzmm43K/JTx7VdkCj+as
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: jrruJ0GyAW38Osw3QJjkNLQsLN1QgynhT2peAbUhTXmlEuZ0sPW/U+VK17HSGhrVVArRb1opCq6n
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: 6yv1CnmVXlqcna7Cut0WS731uCDtpq5wovkgo2lYXsYCN26/wA0scOM2C9xoN5ZLXxjxISq1V+dG
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: MlAtGizk8pWSxs2TP2yjULoVhA+/WFjQjQKFJLJ4Fr9+M3eXO2Fcfb3SzMBMZOG9sf7CpMflAyCk
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: VLvwF6k5ZUcJ5LrRv7bgwIbhgH9lI3wlfdh83vruQ/duWIGGGNpolA1yjddYepQE+lXIMc26/ojE
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: O4XdcB/MwSLC/Gmd/tHfqtIvIFFVf38S6u4Pl6rtih4PvbZeb2uDbhO84CPJiGAsHmyNB5o5F3G7
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: P+1+JYW5MHog/UEWPCsQMmqhx2OpIo9cIinqFqbTVPpcrJr5k+j1Kvva56Pl/zQb2icQdIL3bSk6
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: vXoDSW+eQo6vkYjeNKV82kynv7jUJAs3Qxt2gOAx9lZvt6MZduUl99GWvAQWxVQpseQf7zfntBgb
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: Mj0rudZM46ix/Nqujc7yW+t/KYJxg7Vv4yaKsbFAMVbb9epmvc2qWa9uaKub9XTWMN66wbpXscXe
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: hq/KqXq+unEzX9VcsgAMAV9VEIiFWmDAES5EiT7oRTRU/hgYvcwO90wyXp98ih3Mg+SvGMNCwHJw
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: 9ypLWMgb+BYfaW0pos2SpcaqgUjmI80X0/pTUTa4yHC8llZN00mEI5uoo62DHTNb0o2wbLOOJkaF
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: CW9LZ2/gC5+Lwv8FKv4fI4KvmOBTBd4gEX6JyMsHSAdbF3yDL2uiVYPw+L8E9eS0PSs60FvMhedQ
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: AkuxYWv88nIXyT/1jMwl8CnHtEwJ++TV6W1uXhqKPKDyok8wrSxOH1dXFghF/u9QGXKXRPsZVT5J
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: uF2y+jBJt7p0+WwBpCdYwFKixAGAi6ToY3WR44ZV+tJK7SXECYPXD99/1ZJ1rTr8r1sWKrYaYFbz
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: ZAku4r5pCZWFxfB3rWqjzf8fUPwY2vYyBAA=' ']'
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: + cat
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: + grep -q 'PATCH REDACTED' /tmp/fak-startup.patch.b64
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: + base64 -d /tmp/fak-startup.patch.b64
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: + gzip -dc
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: + git apply --whitespace=nowarn /tmp/fak-startup.patch
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: error: patch failed: cmd/fak/done.go:150
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: error: cmd/fak/done.go: patch does not apply
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: error: patch failed: cmd/fak/done_test.go:24
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: startup-script: error: cmd/fak/done_test.go: patch does not apply
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: Script "startup-script" failed with error: exit status 1
+Jul 06 04:17:15 fak-glm-demo google_metadata_script_runner[4080]: Finished running startup scripts.
+[36m[gcp-glm-demo][0m collecting remote serve logs -> /mnt/c/work/fak/experiments/agent-live/gcp-glm-demo-20260706T041353Z/failed-ready-logs.tgz
+WARNING: 
+
+To increase the performance of the tunnel, consider installing NumPy. For instructions,
+please see https://cloud.google.com/iap/docs/using-tcp-forwarding#increasing_the_tcp_upload_bandwidth
+
+[36m[gcp-glm-demo][0m tearing down fak-glm-demo (zero residual cost)
+Deleted [https://www.googleapis.com/compute/v1/projects/<redacted-project>/zones/us-central1-c/instances/fak-glm-demo].
