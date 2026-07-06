@@ -94,6 +94,13 @@ func TestSessionsCodexLoopDiagnosesRepeatedGoalFailure(t *testing.T) {
 	if d.Verdict != "LOOP" || !strings.Contains(stderr.String(), "gate REFUSE fail-on=loop verdict=LOOP") {
 		t.Fatalf("fail-on gate did not preserve LOOP diagnosis/stderr: diagnosis=%+v stderr=%s", d, stderr.String())
 	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runSessions(&stdout, &stderr, []string{"codex-loop", "--path", path, "--json", "--fail-on", "unguarded"})
+	if code != 0 {
+		t.Fatalf("guarded fak-provider session failed --fail-on unguarded: exit=%d stderr=%s", code, stderr.String())
+	}
 }
 
 func TestSessionsCodexLoopRecentScansCodexHome(t *testing.T) {
@@ -174,6 +181,17 @@ func TestSessionsCodexLoopRecentScansCodexHome(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "verdict        : LOOP") || !strings.Contains(stderr.String(), "gate REFUSE fail-on=loop verdict=LOOP") {
 		t.Fatalf("recent fail-on did not emit diagnosis and gate refusal:\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runSessions(&stdout, &stderr, []string{"codex-loop", "--recent", "--codex-home", home, "--limit", "2", "--fail-on", "unguarded"})
+	if code != 1 {
+		t.Fatalf("codex-loop --recent --fail-on unguarded exited %d, want 1 stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "providers      : openai=2 unguarded=2") ||
+		!strings.Contains(stderr.String(), "gate REFUSE fail-on=unguarded verdict=LOOP reason=recent_codex_sessions_include_2_unguarded_provider_session(s)") {
+		t.Fatalf("recent unguarded gate did not emit provider evidence:\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
 	}
 
 	stdout.Reset()

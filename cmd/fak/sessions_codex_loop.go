@@ -126,9 +126,9 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 	sinceHours := fs.Float64("since-hours", 24, "with --recent, only scan files modified within N hours (0 = all)")
 	limit := fs.Int("limit", 20, "with --recent, cap sessions scanned after newest-first sorting")
 	asJSON := fs.Bool("json", false, "emit a machine-readable diagnosis")
-	failOn := fs.String("fail-on", "none", "exit 1 when verdict reaches this threshold: none|loop|action (action also fails LOOP)")
+	failOn := fs.String("fail-on", "none", "exit 1 when verdict/posture reaches this threshold: none|loop|action|unguarded (action also fails LOOP)")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: fak sessions codex-loop [--session ID | --path FILE | --recent] [--codex-home DIR] [--json] [--fail-on none|loop|action]")
+		fmt.Fprintln(stderr, "usage: fak sessions codex-loop [--session ID | --path FILE | --recent] [--codex-home DIR] [--json] [--fail-on none|loop|action|unguarded]")
 		fs.PrintDefaults()
 	}
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
@@ -144,9 +144,9 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak sessions codex-loop: %v\n", err)
 			return 1
 		}
-		gateCode, ok := codexLoopFailOnExitCode(r.Verdict, *failOn)
+		gateCode, ok := codexLoopFailOnRecentExitCode(r, *failOn)
 		if !ok {
-			fmt.Fprintf(stderr, "fak sessions codex-loop: invalid --fail-on %q (want none, loop, or action)\n", *failOn)
+			fmt.Fprintf(stderr, "fak sessions codex-loop: invalid --fail-on %q (want none, loop, action, or unguarded)\n", *failOn)
 			return 2
 		}
 		if *asJSON {
@@ -154,13 +154,13 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 				return code
 			}
 			if gateCode != 0 {
-				fmt.Fprintf(stderr, "fak sessions codex-loop: gate REFUSE fail-on=%s verdict=%s reason=%s\n", codexLoopFailOnName(*failOn), r.Verdict, r.Reason)
+				fmt.Fprintf(stderr, "fak sessions codex-loop: gate REFUSE fail-on=%s verdict=%s reason=%s\n", codexLoopFailOnName(*failOn), r.Verdict, codexLoopRecentGateReason(r, *failOn))
 			}
 			return gateCode
 		}
 		fmt.Fprint(stdout, renderCodexLoopRecentReport(r))
 		if gateCode != 0 {
-			fmt.Fprintf(stderr, "fak sessions codex-loop: gate REFUSE fail-on=%s verdict=%s reason=%s\n", codexLoopFailOnName(*failOn), r.Verdict, r.Reason)
+			fmt.Fprintf(stderr, "fak sessions codex-loop: gate REFUSE fail-on=%s verdict=%s reason=%s\n", codexLoopFailOnName(*failOn), r.Verdict, codexLoopRecentGateReason(r, *failOn))
 		}
 		return gateCode
 	}
@@ -184,9 +184,9 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak sessions codex-loop: %v\n", err)
 		return 1
 	}
-	gateCode, ok := codexLoopFailOnExitCode(d.Verdict, *failOn)
+	gateCode, ok := codexLoopFailOnDiagnosisExitCode(d, *failOn)
 	if !ok {
-		fmt.Fprintf(stderr, "fak sessions codex-loop: invalid --fail-on %q (want none, loop, or action)\n", *failOn)
+		fmt.Fprintf(stderr, "fak sessions codex-loop: invalid --fail-on %q (want none, loop, action, or unguarded)\n", *failOn)
 		return 2
 	}
 	if *asJSON {
@@ -194,15 +194,54 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 			return code
 		}
 		if gateCode != 0 {
-			fmt.Fprintf(stderr, "fak sessions codex-loop: gate REFUSE fail-on=%s verdict=%s reason=%s\n", codexLoopFailOnName(*failOn), d.Verdict, d.Reason)
+			fmt.Fprintf(stderr, "fak sessions codex-loop: gate REFUSE fail-on=%s verdict=%s reason=%s\n", codexLoopFailOnName(*failOn), d.Verdict, codexLoopDiagnosisGateReason(d, *failOn))
 		}
 		return gateCode
 	}
 	fmt.Fprint(stdout, renderCodexLoopDiagnosis(d))
 	if gateCode != 0 {
-		fmt.Fprintf(stderr, "fak sessions codex-loop: gate REFUSE fail-on=%s verdict=%s reason=%s\n", codexLoopFailOnName(*failOn), d.Verdict, d.Reason)
+		fmt.Fprintf(stderr, "fak sessions codex-loop: gate REFUSE fail-on=%s verdict=%s reason=%s\n", codexLoopFailOnName(*failOn), d.Verdict, codexLoopDiagnosisGateReason(d, *failOn))
 	}
 	return gateCode
+}
+
+func codexLoopFailOnRecentExitCode(r codexLoopRecentReport, failOn string) (int, bool) {
+	if codexLoopFailOnName(failOn) == "unguarded" {
+		if r.UnguardedCount > 0 {
+			return 1, true
+		}
+		return 0, true
+	}
+	return codexLoopFailOnExitCode(r.Verdict, failOn)
+}
+
+func codexLoopFailOnDiagnosisExitCode(d codexLoopDiagnosis, failOn string) (int, bool) {
+	if codexLoopFailOnName(failOn) == "unguarded" {
+		if codexLoopDiagnosisUnguarded(d) {
+			return 1, true
+		}
+		return 0, true
+	}
+	return codexLoopFailOnExitCode(d.Verdict, failOn)
+}
+
+func codexLoopRecentGateReason(r codexLoopRecentReport, failOn string) string {
+	if codexLoopFailOnName(failOn) == "unguarded" && r.UnguardedCount > 0 {
+		return fmt.Sprintf("recent_codex_sessions_include_%d_unguarded_provider_session(s)", r.UnguardedCount)
+	}
+	return r.Reason
+}
+
+func codexLoopDiagnosisGateReason(d codexLoopDiagnosis, failOn string) string {
+	if codexLoopFailOnName(failOn) == "unguarded" && codexLoopDiagnosisUnguarded(d) {
+		return "codex_session_bypassed_fak_guard"
+	}
+	return d.Reason
+}
+
+func codexLoopDiagnosisUnguarded(d codexLoopDiagnosis) bool {
+	provider := strings.TrimSpace(d.ModelProvider)
+	return provider != "" && !strings.EqualFold(provider, "fak")
 }
 
 func codexLoopFailOnExitCode(verdict, failOn string) (int, bool) {
@@ -234,6 +273,10 @@ func codexLoopFailOnRank(failOn string) (int, bool) {
 }
 
 func codexLoopFailOnName(failOn string) string {
+	switch strings.ToLower(strings.TrimSpace(failOn)) {
+	case "unguarded", "direct":
+		return "unguarded"
+	}
 	switch rank, ok := codexLoopFailOnRank(failOn); {
 	case !ok:
 		return strings.TrimSpace(failOn)

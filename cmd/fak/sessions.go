@@ -10,7 +10,7 @@ package main
 //	fak sessions discover [--project SUB] [--root DIR ...] [--since-days N]   list the transcripts found
 //	fak sessions score    [--project SUB] [--root DIR ...] [--max N] [--corpus OUT] [--json]
 //	                                                                          fold + witness + score the corpus
-//	fak sessions codex-loop [--session ID | --path FILE | --recent] [--codex-home DIR] [--json] [--fail-on none|loop|action]
+//	fak sessions codex-loop [--session ID | --path FILE | --recent] [--codex-home DIR] [--json] [--fail-on none|loop|action|unguarded]
 //	                                                                          diagnose Codex JSONL for repeated tool loops
 //
 // It reads transcripts and shells `git` (read-only) off any hot path; it writes
@@ -71,7 +71,7 @@ usage:
   fak sessions discover [--project SUB] [--root DIR ...] [--since-days N]
   fak sessions score    [--project SUB] [--root DIR ...] [--max N] [--corpus OUT] [--json]
   fak sessions learn    [--corpus IN] [--project SUB] [--root DIR ...] [--max N] [--json]
-  fak sessions codex-loop [--session ID | --path FILE | --recent] [--codex-home DIR] [--json] [--fail-on none|loop|action]
+  fak sessions codex-loop [--session ID | --path FILE | --recent] [--codex-home DIR] [--json] [--fail-on none|loop|action|unguarded]
 
 Start here:
   fak sessions score        fold THIS host's fak sessions, witness their commits, and
