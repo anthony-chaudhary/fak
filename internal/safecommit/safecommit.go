@@ -45,6 +45,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/gitgate"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
+	"github.com/anthony-chaudhary/fak/internal/safesync"
 	"github.com/anthony-chaudhary/fak/internal/witness"
 )
 
@@ -413,16 +414,21 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 
 	// (8) Optional push — only after a verified commit, by exact SHA refspec (never --force).
 	// Pushing the verified SHA, rather than the mutable branch tip after unlock, prevents a
-	// peer's later local commit from being swept into this push. A rejection (e.g.
-	// non-fast-forward) surfaces honestly; the commit stands for a human to integrate. We
-	// never pull --rebase --autostash (it strands .git/rebase-merge).
+	// peer's later local commit from being swept into this push. The push itself goes through
+	// safesync.SafePush so transient transport/non-ff races get the same retry and
+	// integrate-through-`fak sync apply` guidance as `fak sync push`. We never pull --rebase
+	// --autostash (it strands .git/rebase-merge).
 	if opts.Push {
-		pushArgs := pushVerifiedArgs(ctx, run, opts.Dir, trunk, res.SHA)
-		if out, code, perr := run(ctx, opts.Dir, pushArgs...); perr != nil {
-			return res, fmt.Errorf("safecommit: git not executable: %w", perr)
-		} else if code != 0 {
+		pushed, err := pushVerifiedCommit(ctx, run, opts.Dir, trunk, res.SHA)
+		if err != nil {
+			return res, err
+		}
+		if !pushed.Pushed {
 			res.Reason = ReasonPushRejected
-			res.Detail = trimDetail(out)
+			res.Detail = trimDetail(pushed.Detail)
+			if res.Detail == "" {
+				res.Detail = pushed.Reason
+			}
 			return res, nil
 		}
 		res.Pushed = true
@@ -431,10 +437,10 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	return res, nil
 }
 
-func pushVerifiedArgs(ctx context.Context, run Runner, dir, trunk, sha string) []string {
+func pushVerifiedCommit(ctx context.Context, run Runner, dir, trunk, sha string) (safesync.PushResult, error) {
 	sha = strings.TrimSpace(sha)
 	if sha == "" {
-		return []string{"push"}
+		return safesync.PushResult{Reason: safesync.PushReasonError, Detail: "verified commit SHA missing; not pushed"}, nil
 	}
 	remote := gitConfigValue(ctx, run, dir, "branch."+trunk+".remote")
 	if remote == "" {
@@ -444,7 +450,31 @@ func pushVerifiedArgs(ctx context.Context, run Runner, dir, trunk, sha string) [
 	if mergeRef == "" {
 		mergeRef = "refs/heads/" + trunk
 	}
-	return []string{"push", remote, sha + ":" + mergeRef}
+	return safesync.SafePush(ctx, safesync.PushOptions{
+		Repo:      dir,
+		Remote:    remote,
+		Branch:    branchFromMergeRef(mergeRef, trunk),
+		SourceRef: sha,
+		TargetRef: mergeRef,
+		Runner:    safeSyncRunner(run),
+	})
+}
+
+func safeSyncRunner(run Runner) safesync.Runner {
+	return func(ctx context.Context, repo string, args ...string) safesync.RunResult {
+		out, code, err := run(ctx, repo, args...)
+		b := []byte(out)
+		return safesync.RunResult{Stdout: b, Stderr: b, Code: code, Err: err}
+	}
+}
+
+func branchFromMergeRef(mergeRef, fallback string) string {
+	const prefix = "refs/heads/"
+	mergeRef = strings.TrimSpace(mergeRef)
+	if branch, ok := strings.CutPrefix(mergeRef, prefix); ok && strings.TrimSpace(branch) != "" {
+		return branch
+	}
+	return fallback
 }
 
 func gitConfigValue(ctx context.Context, run Runner, dir, key string) string {

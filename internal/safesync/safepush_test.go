@@ -119,6 +119,38 @@ func TestSafePush_TransientRaceRetries(t *testing.T) {
 	}
 }
 
+func TestSafePush_SourceRefspecClassifiesAgainstSource(t *testing.T) {
+	sr := &scriptedRunner{
+		push:      []RunResult{nonFF(), {Code: 0}},
+		fetch:     RunResult{Code: 0},
+		ancestors: map[string]int{"origin/main..abc123": 0}, // remote IS ancestor of pushed source -> retry
+	}
+	res, err := SafePush(context.Background(), PushOptions{
+		Repo:      ".",
+		Remote:    "origin",
+		Branch:    "main",
+		SourceRef: "abc123",
+		TargetRef: "refs/heads/main",
+		Runner:    sr.run,
+	})
+	if err != nil {
+		t.Fatalf("SafePush: %v", err)
+	}
+	if !res.Pushed || res.Attempts != 2 || res.Divergence != string(PushAhead) {
+		t.Fatalf("source-refspec push = %+v, want pushed on attempt 2 after an 'ahead' reclassify", res)
+	}
+	joined := strings.Join(sr.calls, "|")
+	if !strings.Contains(joined, "push origin abc123:refs/heads/main") {
+		t.Fatalf("push must publish the exact source refspec, calls=%v", sr.calls)
+	}
+	if strings.Contains(joined, "push origin main") {
+		t.Fatalf("source-refspec push must not fall back to mutable branch-tip push, calls=%v", sr.calls)
+	}
+	if !strings.Contains(joined, "merge-base --is-ancestor origin/main abc123") {
+		t.Fatalf("source-refspec push must classify the pushed source, calls=%v", sr.calls)
+	}
+}
+
 func TestSafePush_BehindStops(t *testing.T) {
 	// Rejected non-ff; after fetch HEAD is an ancestor of the remote (genuinely behind):
 	// STOP with a clear integrate-then-push next step, never auto-merge.

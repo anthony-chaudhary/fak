@@ -56,6 +56,8 @@ type PushOptions struct {
 	Repo       string
 	Remote     string
 	Branch     string // default: current branch
+	SourceRef  string // optional exact source to push, e.g. a verified commit SHA
+	TargetRef  string // optional destination ref when SourceRef is set; default refs/heads/<branch>
 	MaxRetries int    // total push attempts; default 3
 	Runner     Runner `json:"-"`
 }
@@ -81,8 +83,9 @@ type PushResult struct {
 	Detail     string `json:"detail,omitempty"`
 }
 
-// SafePush pushes repo's branch to remote, retrying a TRANSIENT non-ff rejection (a
-// re-fetch shows HEAD already contains the remote) up to MaxRetries times. A genuine
+// SafePush pushes repo's branch (or SourceRef:TargetRef when SourceRef is set) to remote,
+// retrying a TRANSIENT non-ff rejection (a re-fetch shows the pushed source already
+// contains the remote) up to MaxRetries times. A genuine
 // behind/diverged state returns Reason=BEHIND with a clear integrate-then-push next
 // step; it never integrates for you. Non-destructive: only push + fetch + read-only
 // merge-base; never force/merge/reset/stash. err is returned only when a read-only git
@@ -115,11 +118,13 @@ func SafePush(ctx context.Context, opts PushOptions) (PushResult, error) {
 	}
 	res := PushResult{Branch: branch, Remote: remote}
 	remoteRef := remote + "/" + branch
+	pushArgs := safePushArgs(remote, branch, opts.SourceRef, opts.TargetRef)
+	compareRef := safePushCompareRef(opts.SourceRef)
 
 	lastNetDetail := "" // non-empty when the most recent failure was transient network
 	for attempt := 1; attempt <= max; attempt++ {
 		res.Attempts = attempt
-		pr := run(ctx, repo, "push", remote, branch)
+		pr := run(ctx, repo, pushArgs...)
 		if pr.Err != nil {
 			res.Reason = PushReasonGitMissing
 			res.Detail = pr.Err.Error()
@@ -149,7 +154,7 @@ func SafePush(ctx context.Context, opts PushOptions) (PushResult, error) {
 			return res, nil
 		}
 		lastNetDetail = ""
-		// Non-ff: fetch the remote ref, then re-classify HEAD against it.
+		// Non-ff: fetch the remote ref, then re-classify the pushed source against it.
 		if fr := run(ctx, repo, "fetch", remote, branch); fr.Err != nil || fr.Code != 0 {
 			fmsg := runDetail(fr)
 			if fr.Err == nil && isTransientPushNetwork(fmsg) {
@@ -166,7 +171,7 @@ func SafePush(ctx context.Context, opts PushOptions) (PushResult, error) {
 			res.Detail = "fetch " + remoteRef + " failed: " + pushFirstLine(fmsg)
 			return res, nil
 		}
-		div, err := classifyPushDivergence(ctx, run, repo, remoteRef)
+		div, err := classifyPushDivergence(ctx, run, repo, compareRef, remoteRef)
 		if err != nil {
 			return res, err
 		}
@@ -195,6 +200,26 @@ func SafePush(ctx context.Context, opts PushOptions) (PushResult, error) {
 	res.Reason = PushReasonExhausted
 	res.Detail = "push still rejected after " + strconv.Itoa(max) + " attempts; the trunk is moving fast — retry shortly"
 	return res, nil
+}
+
+func safePushArgs(remote, branch, sourceRef, targetRef string) []string {
+	sourceRef = strings.TrimSpace(sourceRef)
+	if sourceRef == "" {
+		return []string{"push", remote, branch}
+	}
+	targetRef = strings.TrimSpace(targetRef)
+	if targetRef == "" {
+		targetRef = "refs/heads/" + branch
+	}
+	return []string{"push", remote, sourceRef + ":" + targetRef}
+}
+
+func safePushCompareRef(sourceRef string) string {
+	sourceRef = strings.TrimSpace(sourceRef)
+	if sourceRef == "" {
+		return "HEAD"
+	}
+	return sourceRef
 }
 
 // transientPushNetworkNeedles are the (lowercased) signatures of push/fetch
@@ -314,16 +339,16 @@ func cancelledResult(res PushResult, err error) PushResult {
 	return res
 }
 
-// classifyPushDivergence compares HEAD to the (already fetched) remote ref.
-func classifyPushDivergence(ctx context.Context, run Runner, repo, remoteRef string) (PushDivergence, error) {
-	remoteInHead, err := isAncestor(ctx, run, repo, remoteRef, "HEAD")
+// classifyPushDivergence compares the pushed local ref to the (already fetched) remote ref.
+func classifyPushDivergence(ctx context.Context, run Runner, repo, localRef, remoteRef string) (PushDivergence, error) {
+	remoteInHead, err := isAncestor(ctx, run, repo, remoteRef, localRef)
 	if err != nil {
 		return "", err
 	}
 	if remoteInHead {
-		return PushAhead, nil // remote is an ancestor of HEAD (or equal): the rejection was a race
+		return PushAhead, nil // remote is an ancestor of localRef (or equal): the rejection was a race
 	}
-	headInRemote, err := isAncestor(ctx, run, repo, "HEAD", remoteRef)
+	headInRemote, err := isAncestor(ctx, run, repo, localRef, remoteRef)
 	if err != nil {
 		return "", err
 	}

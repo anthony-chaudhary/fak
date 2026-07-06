@@ -943,6 +943,8 @@ func TestHappyPath_verifiesAndPushes(t *testing.T) {
 func TestPushRejected_leavesCommitIntact(t *testing.T) {
 	g := &fakeGit{reply: onTrunkBase()}
 	g.reply["push"] = reply{out: "! [rejected] main -> main (non-fast-forward)\n", code: 1}
+	g.reply["merge-base --is-ancestor origin/main abc123"] = reply{code: 1}
+	g.reply["merge-base --is-ancestor abc123 origin/main"] = reply{code: 0}
 	opts := baseOpts()
 	opts.Push = true
 
@@ -955,6 +957,12 @@ func TestPushRejected_leavesCommitIntact(t *testing.T) {
 	}
 	if res.Reason != ReasonPushRejected {
 		t.Fatalf("want PUSH_REJECTED, got %q", res.Reason)
+	}
+	if !strings.Contains(res.Detail, "fak sync apply --fetch --remote origin --branch main") {
+		t.Fatalf("push rejection should name the safe sync recovery path, detail=%q", res.Detail)
+	}
+	if strings.Contains(res.Detail, "git merge") {
+		t.Fatalf("push rejection must not steer agents to raw git merge, detail=%q", res.Detail)
 	}
 	if g.sawSubcommand("reset") {
 		t.Fatalf("a push rejection must never unwind the commit; calls=%v", g.calls)
