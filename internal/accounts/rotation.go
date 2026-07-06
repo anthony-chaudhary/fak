@@ -242,16 +242,94 @@ func (r Registry) NextInRotation(after string) (RotationSeat, bool) {
 // mere next name in the ring. Without a signal it is the historical stable round-robin. ok is
 // false on an empty pool, when the anchor's bucket is the pool's only one, or when every
 // non-anchor candidate is runtime-walled by the injected signal.
+//
+// It is the (RotationSeat, bool) face of NextRotationDecision — a caller that also wants WHY a
+// rotate found nothing (to explain it to a human without re-deriving the reason from the plan)
+// calls NextRotationDecision directly.
 func (r Registry) NextInRotationWithHeadroom(after string, hr RotationHeadroom) (RotationSeat, bool) {
+	d := r.NextRotationDecision(after, hr)
+	return d.Seat, d.OK
+}
+
+// RotationNoCandidateReason is the CLOSED set of reasons a rotate returned no seat. It lets the
+// decision explain itself once, at the point it is made, instead of every caller recomputing the
+// plan and a downstream printer guessing the reason by re-scanning the pool. "" (RotationOK)
+// means a seat WAS returned.
+type RotationNoCandidateReason string
+
+const (
+	// RotationOK — a seat was returned (Decision.OK is true).
+	RotationOK RotationNoCandidateReason = ""
+	// RotationEmptyPool — no eligible seats at all (every seat reserved/disabled/tombstoned/
+	// unservable). Nothing to rotate over.
+	RotationEmptyPool RotationNoCandidateReason = "empty_pool"
+	// RotationOnlyBucket — the anchor's bucket is the pool's ONLY bucket, so there is nowhere
+	// else to rotate. Not a wall: the anchor may well have room — you are simply already on the
+	// sole account.
+	RotationOnlyBucket RotationNoCandidateReason = "only_bucket"
+	// RotationAllOthersWalled — the pool has other buckets, but every non-anchor candidate is
+	// runtime-walled (usage/weekly-capped). Whether this is a real dead-end depends on the anchor:
+	// if the anchor itself has room (Decision.AnchorRoom), the fix is "just don't rotate".
+	RotationAllOthersWalled RotationNoCandidateReason = "others_walled"
+)
+
+// RotationDecision is the full, self-explaining result of a rotate: the chosen seat when OK, and
+// when not OK the typed Reason plus the context a caller needs to render a message that names the
+// anchor and its room state — so "rotate found nothing" never again reads as "your accounts are
+// walled" when the account you are already on has room. It carries the Plan it was decided against
+// so callers stop recomputing RotationPlanWithHeadroom just to print the failure.
+type RotationDecision struct {
+	// Seat is the account to rotate onto; the zero RotationSeat when OK is false.
+	Seat RotationSeat `json:"seat"`
+	// OK is true when Seat is a real rotation target; false when Reason explains why none exists.
+	OK bool `json:"ok"`
+	// Reason is the closed cause when OK is false; RotationOK ("") when OK is true.
+	Reason RotationNoCandidateReason `json:"reason,omitempty"`
+	// Anchor is the pool seat for the bucket we rotated OFF (resolved from `after`), when the
+	// anchor is a known pool bucket. Empty on a fresh start or when `after` names no pool bucket.
+	Anchor RotationSeat `json:"anchor,omitempty"`
+	// AnchorRoom reports whether the anchor bucket itself has room (headroom >= 0) — the "you are
+	// already on the account with room, just don't rotate" signal. False when there is no anchor.
+	AnchorRoom bool `json:"anchor_room"`
+	// Walled lists the non-anchor pool seats that are runtime-walled (the buckets a human would be
+	// told are capped). Populated for RotationAllOthersWalled.
+	Walled []RotationSeat `json:"walled,omitempty"`
+	// Plan is the rotation plan this decision was made against, so a caller can render the full
+	// pool without recomputing it.
+	Plan RotationResult `json:"plan"`
+}
+
+// NextRotationDecision is the reason-returning core behind NextInRotationWithHeadroom. It makes
+// the same choice — the best non-anchor, non-walled bucket in headroom mode; the next distinct
+// bucket in the ring in stable mode — but returns WHY when it finds nothing, distinguishing an
+// empty pool from a single-bucket pool from an all-others-walled pool, and resolving the anchor
+// seat and its room state so the caller can tell a human "you are already on the roomy account"
+// instead of "everything is walled". Pure over the plan (Refresh the registry first for a live
+// answer).
+func (r Registry) NextRotationDecision(after string, hr RotationHeadroom) RotationDecision {
 	res := r.RotationPlanWithHeadroom(hr)
+	d := RotationDecision{Plan: res}
 	if len(res.Pool) == 0 {
-		return RotationSeat{}, false
+		d.Reason = RotationEmptyPool
+		return d
 	}
 	afterKey := r.bucketKey(after)
+
+	// Resolve the anchor seat (the bucket we are rotating OFF) and its room state, so a
+	// no-candidate result can name it. The anchor is a pool bucket matched by name or account key;
+	// a fresh start (empty anchor) or an anchor outside the pool leaves d.Anchor zero.
+	for _, s := range res.Pool {
+		if (after != "" && s.Name == after) || (afterKey != "" && s.Account == afterKey) {
+			d.Anchor = s
+			d.AnchorRoom = !rotationSeatRuntimeWalled(s)
+			break
+		}
+	}
+
 	if len(hr) > 0 {
-		// Headroom mode: the pool is already ordered most-headroom-first, so the first seat
-		// that is NOT the anchor's bucket is the best account to rotate onto. A fresh start
-		// (empty anchor) returns pool[0], the highest-headroom bucket.
+		// Headroom mode: the pool is already ordered most-headroom-first, so the first seat that
+		// is NOT the anchor's bucket AND is not walled is the best account to rotate onto. Collect
+		// the non-anchor walled buckets along the way so a dead-end result can name them.
 		for _, s := range res.Pool {
 			if after != "" && s.Name == after {
 				continue
@@ -260,12 +338,22 @@ func (r Registry) NextInRotationWithHeadroom(after string, hr RotationHeadroom) 
 				continue
 			}
 			if rotationSeatRuntimeWalled(s) {
+				d.Walled = append(d.Walled, s)
 				continue
 			}
-			return s, true
+			d.Seat, d.OK = s, true
+			return d
 		}
-		return RotationSeat{}, false // every candidate is the anchor's bucket or known-walled
+		// No launchable non-anchor bucket. If we saw walled candidates, that is the reason;
+		// otherwise the anchor's bucket was the only one (every other pool seat WAS the anchor).
+		if len(d.Walled) > 0 {
+			d.Reason = RotationAllOthersWalled
+		} else {
+			d.Reason = RotationOnlyBucket
+		}
+		return d
 	}
+
 	idx := -1
 	for i, s := range res.Pool {
 		if (after != "" && s.Name == after) || (afterKey != "" && s.Account == afterKey) {
@@ -274,12 +362,15 @@ func (r Registry) NextInRotationWithHeadroom(after string, hr RotationHeadroom) 
 		}
 	}
 	if idx < 0 {
-		return res.Pool[0], true // unknown / not-in-pool seat -> start of rotation
+		d.Seat, d.OK = res.Pool[0], true // unknown / not-in-pool seat -> start of rotation
+		return d
 	}
 	if len(res.Pool) == 1 {
-		return RotationSeat{}, false // the only bucket; nowhere else to rotate
+		d.Reason = RotationOnlyBucket // the only bucket; nowhere else to rotate
+		return d
 	}
-	return res.Pool[(idx+1)%len(res.Pool)], true
+	d.Seat, d.OK = res.Pool[(idx+1)%len(res.Pool)], true
+	return d
 }
 
 // rotationSeatRuntimeWalled reports whether the caller-supplied headroom signal says this

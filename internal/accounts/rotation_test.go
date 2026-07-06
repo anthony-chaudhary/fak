@@ -272,6 +272,93 @@ func TestNextInRotationHeadroomFreshStartSkipsKnownWalled(t *testing.T) {
 	}
 }
 
+// TestNextRotationDecisionReasons proves the reason-returning decision distinguishes the four
+// outcomes the (RotationSeat, bool) face collapses — a seat, an empty pool, a single bucket, and
+// an all-others-walled pool — AND that the all-others-walled case carries the anchor and its room
+// state, so a caller can tell a human "you are already on the roomy account" rather than
+// "everything is walled". This is the confusion the reason type exists to kill (the day26NEW case:
+// the anchor bucket had room, only the OTHER bucket was capped).
+func TestNextRotationDecisionReasons(t *testing.T) {
+	t.Run("ok returns the seat with no reason", func(t *testing.T) {
+		reg := Registry{Homes: []Home{
+			active("alice", "u-alice", "alice@x.test"),
+			active("bob", "u-bob", "bob@x.test"),
+		}}
+		d := reg.NextRotationDecision("alice", nil)
+		if !d.OK || d.Seat.Name != "bob" || d.Reason != RotationOK {
+			t.Fatalf("rotate off alice = %+v; want OK bob reason=RotationOK", d)
+		}
+	})
+
+	t.Run("empty pool", func(t *testing.T) {
+		reg := Registry{Homes: []Home{
+			{Name: "old", Status: StatusTombstoned, RehomeTo: "old"},
+		}}
+		d := reg.NextRotationDecision("", nil)
+		if d.OK || d.Reason != RotationEmptyPool {
+			t.Fatalf("empty pool = %+v; want !OK reason=RotationEmptyPool", d)
+		}
+	})
+
+	t.Run("only bucket names the anchor", func(t *testing.T) {
+		reg := Registry{Homes: []Home{active("solo", "u-solo", "solo@x.test")}}
+		d := reg.NextRotationDecision("solo", nil)
+		if d.OK || d.Reason != RotationOnlyBucket {
+			t.Fatalf("single bucket = %+v; want !OK reason=RotationOnlyBucket", d)
+		}
+		if d.Anchor.Name != "solo" {
+			t.Fatalf("only-bucket decision should carry the anchor seat; got %q", d.Anchor.Name)
+		}
+	})
+
+	t.Run("all others walled, anchor has room (the day26NEW case)", func(t *testing.T) {
+		reg := Registry{Homes: []Home{
+			active("july6", "u-july6", "july6@x.test"),
+			active("day26", "u-day26", "day26@x.test"),
+		}}
+		// july6 has room (+1), day26 is walled (-1); rotating OFF july6 must find nothing to land
+		// on and report WHY with the anchor's room state intact.
+		hr := RotationHeadroom{"uuid:u-july6": 1, "uuid:u-day26": -1}
+		d := reg.NextRotationDecision("july6", hr)
+		if d.OK {
+			t.Fatalf("rotate off july6 should find no launchable bucket; got seat %q", d.Seat.Name)
+		}
+		if d.Reason != RotationAllOthersWalled {
+			t.Fatalf("reason = %q; want RotationAllOthersWalled", d.Reason)
+		}
+		if d.Anchor.Name != "july6" || !d.AnchorRoom {
+			t.Fatalf("decision must carry the roomy anchor: anchor=%q room=%v", d.Anchor.Name, d.AnchorRoom)
+		}
+		if names := seatNames(d.Walled); len(names) != 1 || names[0] != "day26" {
+			t.Fatalf("Walled = %v; want [day26]", names)
+		}
+	})
+
+	t.Run("all others walled, anchor also walled is a real dead-end", func(t *testing.T) {
+		reg := Registry{Homes: []Home{
+			active("alice", "u-alice", "alice@x.test"),
+			active("bob", "u-bob", "bob@x.test"),
+		}}
+		hr := RotationHeadroom{"uuid:u-alice": -1, "uuid:u-bob": -1}
+		d := reg.NextRotationDecision("alice", hr)
+		if d.OK || d.Reason != RotationAllOthersWalled {
+			t.Fatalf("both walled = %+v; want !OK reason=RotationAllOthersWalled", d)
+		}
+		if d.AnchorRoom {
+			t.Fatal("anchor alice is walled — AnchorRoom must be false so the printer says 'wait for reset', not 'just don't rotate'")
+		}
+	})
+}
+
+// seatNames is a local test helper mirroring the cmd-side rotationSeatNames.
+func seatNames(seats []RotationSeat) []string {
+	out := make([]string, 0, len(seats))
+	for _, s := range seats {
+		out = append(out, s.Name)
+	}
+	return out
+}
+
 func TestRotationPolicyDefaultsAndViewRead(t *testing.T) {
 	// No views -> sane defaults: reserved held out.
 	def := Registry{}.RotationPolicy()

@@ -451,19 +451,16 @@ func accountsNext(stdout, stderr io.Writer, registryPath, homeDir, after string,
 	if useHeadroom {
 		hr = rotationHeadroom(homeDir)
 	}
-	seat, ok := reg.NextInRotationWithHeadroom(after, hr)
-	if !ok {
-		plan := reg.RotationPlanWithHeadroom(hr)
-		if len(plan.Pool) == 0 {
-			fmt.Fprintln(stderr, "fak accounts next: no eligible accounts in rotation "+
-				"(every seat is reserved, disabled, tombstoned, or has no live credentials)")
-		} else {
-			fmt.Fprintf(stderr, "fak accounts next: only one account bucket in rotation (%s) — "+
-				"nowhere else to rotate; enroll another with `fak accounts add`\n", plan.Pool[0].Name)
-		}
+	dec := reg.NextRotationDecision(after, hr)
+	if !dec.OK {
+		// Same anchor-aware printer `launch --rotate` uses, so `next` and `launch --rotate` give
+		// the IDENTICAL explanation for the identical failure (and name the roomy anchor when the
+		// only reason there is nowhere to rotate is that you are already on the account with room).
+		printRotationNoCandidate(stderr, "fak accounts next", dec)
 		printAccountFixSummary(stderr, fixes, "account fixes")
 		return 1
 	}
+	seat := dec.Seat
 	switch {
 	case asJSON:
 		stdout.Write(mustJSON(seat))

@@ -219,13 +219,13 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 				anchor = picked
 			}
 		}
-		seat, ok := reg.NextInRotationWithHeadroom(anchor, hr)
-		if !ok {
-			plan := reg.RotationPlanWithHeadroom(hr)
-			printRotationNoCandidate(stderr, "fak accounts launch --rotate", plan)
+		dec := reg.NextRotationDecision(anchor, hr)
+		if !dec.OK {
+			printRotationNoCandidate(stderr, "fak accounts launch --rotate", dec)
 			printAccountFixSummary(stderr, fixes, "account fixes")
 			return 1
 		}
+		seat := dec.Seat
 		if anchor != "" {
 			rotNote := fmt.Sprintf("fak accounts launch: rotating off %q -> %q", anchor, seat.Name)
 			if seat.Headroom != nil {

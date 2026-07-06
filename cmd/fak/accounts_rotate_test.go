@@ -152,8 +152,10 @@ func TestAccountsNextSingleBucketFailsLoud(t *testing.T) {
 	if rc != 1 {
 		t.Fatalf("next --after solo-seat rc=%d, want 1; stderr=%s", rc, errb.String())
 	}
-	if !strings.Contains(errb.String(), "only one account bucket") {
-		t.Fatalf("expected single-bucket message, got %q", errb.String())
+	// The anchor IS the sole bucket, so the message names it and steers to plain launch rather
+	// than the old anchorless "only one account bucket" phrasing.
+	if !strings.Contains(errb.String(), "already on the only account bucket") || !strings.Contains(errb.String(), "solo-seat") {
+		t.Fatalf("expected anchor-named single-bucket message, got %q", errb.String())
 	}
 }
 
@@ -264,10 +266,16 @@ func TestAccountsNextAndLaunchRotateRefuseWeeklyCappedAlternative(t *testing.T) 
 	if called {
 		t.Fatal("launch runner was called even though the only non-anchor account was weekly-capped")
 	}
-	for _, want := range []string{"no runtime-launchable account", "usage/weekly-capped", "bob-seat"} {
+	// alice-seat (the anchor) has room; only the OTHER bucket (bob-seat) is weekly-capped — so the
+	// refusal must name the roomy anchor and steer to plain launch, NOT read as an all-walled
+	// dead-end. This is the day26NEW/july6 confusion the anchor-aware message exists to kill.
+	for _, want := range []string{"already on the only account with room", "alice-seat", "capped bucket(s): bob-seat", "without --rotate"} {
 		if !strings.Contains(launchErr.String(), want) {
 			t.Fatalf("launch stderr missing %q:\n%s", want, launchErr.String())
 		}
+	}
+	if strings.Contains(launchErr.String(), "no runtime-launchable account") {
+		t.Fatalf("roomy-anchor refusal should not use the all-walled dead-end wording:\n%s", launchErr.String())
 	}
 	if strings.Contains(launchOut.String(), "guard -- claude") {
 		t.Fatalf("launch stdout should not emit a guard command for capped bob:\n%s", launchOut.String())
