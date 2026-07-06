@@ -274,6 +274,9 @@ func renderSweepPlan(w io.Writer, plan sweepPlan) {
 	if plan.OldestDirtyPath != "" {
 		fmt.Fprintf(w, "oldest dirty: %s at %s\n", sweepAgeLabel(plan.OldestDirtyAgeSeconds), plan.OldestDirtyPath)
 	}
+	if plan.NextAction != "" {
+		fmt.Fprintf(w, "next: %s\n", plan.NextAction)
+	}
 
 	if len(plan.Groups) > 0 {
 		fmt.Fprintln(w, "\nstampable lane groups — commit each with an ACCURATE subject:")

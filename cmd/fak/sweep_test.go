@@ -348,6 +348,7 @@ func TestRenderSweepPlanIncludesOldestAge(t *testing.T) {
 		TotalDirty:            1,
 		OldestDirtyPath:       "docs/a.md",
 		OldestDirtyAgeSeconds: 2 * 3600,
+		NextAction:            "run `fak sweep --apply --lane docs -m \"docs(docs): update note\"`",
 		Groups: []sweepGroup{{
 			Lane:                  "docs",
 			Trailer:               "(fak docs)",
@@ -360,7 +361,7 @@ func TestRenderSweepPlanIncludesOldestAge(t *testing.T) {
 	var out bytes.Buffer
 	renderSweepPlan(&out, plan)
 	got := out.String()
-	for _, want := range []string{"oldest dirty: 2h at docs/a.md", "oldest: 2h at docs/a.md"} {
+	for _, want := range []string{"oldest dirty: 2h at docs/a.md", "next: run `fak sweep --apply --lane docs", "oldest: 2h at docs/a.md"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("rendered sweep plan missing %q:\n%s", want, got)
 		}
