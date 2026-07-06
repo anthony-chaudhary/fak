@@ -66,3 +66,49 @@ fak_gateway_inference_cached_prompt_tokens_total 150
 		t.Fatalf("stderr missing aggregate cache-bit scope:\n%s", stderr.String())
 	}
 }
+
+// #3053: --warmup-tax-seconds emits the first-request warmup cost as a SEPARATE
+// OBSERVED signal in the record and annotates it in the human summary as warmup-
+// dominated (not cache-accelerated), de-conflated from the aggregate cache_bit.
+func TestRunSwebenchCacheWitnessEmitsWarmupTaxSeparately(t *testing.T) {
+	dir := t.TempDir()
+	body := filepath.Join(dir, "metrics.prom")
+	const metricsBody = `fak_gateway_kv_prefix_turns_total 7
+fak_gateway_kv_prefix_prompt_tokens_total 16384
+fak_gateway_kv_prefix_reused_tokens_total 15000
+fak_gateway_kv_prefix_turns_by_regime_total{regime="frozen"} 5
+fak_gateway_kv_prefix_turns_by_regime_total{regime="partial"} 1
+fak_gateway_kv_prefix_turns_by_regime_total{regime="cold"} 1
+fak_gateway_inference_cached_prompt_tokens_total 2048
+`
+	if err := os.WriteFile(body, []byte(metricsBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	rc := runSwebenchCacheWitness(&stdout, &stderr, []string{"--metrics-file", body, "--warmup-tax-seconds", "511.3"})
+	if rc != 0 {
+		t.Fatalf("rc=%d stderr=%s", rc, stderr.String())
+	}
+	var rec cachewitness.Record
+	if err := json.Unmarshal(stdout.Bytes(), &rec); err != nil {
+		t.Fatalf("stdout JSON: %v\n%s", err, stdout.String())
+	}
+	if rec.WarmupTax == nil {
+		t.Fatalf("record missing warmup tax:\n%s", stdout.String())
+	}
+	if rec.WarmupTax.TimeToFirstReadySeconds != 511.3 || rec.WarmupTax.Provenance != cachewitness.Observed {
+		t.Fatalf("warmup tax = %+v, want 511.3s OBSERVED", rec.WarmupTax)
+	}
+	if rec.WarmupTax.Scope != cachewitness.WarmupTaxScope {
+		t.Fatalf("warmup scope = %q, want %q", rec.WarmupTax.Scope, cachewitness.WarmupTaxScope)
+	}
+	// The WITNESSED reuse is untouched and distinct from the OBSERVED warmup latency.
+	if rec.KVPrefix.ReusedTokens != 15000 {
+		t.Fatalf("warmup tax mutated reused_tokens: %d, want 15000", rec.KVPrefix.ReusedTokens)
+	}
+	if !strings.Contains(stderr.String(), "first-request warmup tax (OBSERVED") ||
+		!strings.Contains(stderr.String(), "NOT cache-accelerated") {
+		t.Fatalf("stderr missing de-conflated warmup-tax annotation:\n%s", stderr.String())
+	}
+}

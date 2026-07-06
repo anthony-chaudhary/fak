@@ -42,6 +42,8 @@ func runSwebenchCacheWitness(stdout, stderr io.Writer, argv []string) int {
 	baselineFile := fs.String("baseline", "", "optional run-start /metrics body to subtract from the end scrape, producing a per-run delta")
 	out := fs.String("out", "", "write the Record JSON here (default: stdout)")
 	timeout := fs.Float64("timeout-seconds", 15, "HTTP fetch timeout in seconds")
+	warmupTaxSeconds := fs.Float64("warmup-tax-seconds", 0, "measured serve boot->first-ready warmup latency (the one-time cold tax); emitted as a SEPARATE OBSERVED signal, de-conflated from cache_bit, so a ~500s cold turn is never read as cache-accelerated (#3053)")
+	warmupTaxLowerBound := fs.Bool("warmup-tax-lower-bound", false, "the --warmup-tax-seconds reading was cut off by a client timeout cap, so it is a lower bound, not a measured figure")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -90,6 +92,14 @@ func runSwebenchCacheWitness(stdout, stderr io.Writer, argv []string) int {
 		rec = rec.Sub(base)
 	}
 
+	// The first-request warmup tax is a DIFFERENT axis from KV-prefix reuse: attach it
+	// as a separate OBSERVED signal so the cold turn's ~500s can never be absorbed into
+	// the cache-value story (#3053). A /metrics scrape cannot witness a per-boot cost, so
+	// it only appears when the operator supplies the measured latency.
+	if *warmupTaxSeconds > 0 {
+		rec = rec.WithWarmupTax(*warmupTaxSeconds, *warmupTaxLowerBound)
+	}
+
 	enc, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
 		fmt.Fprintf(stderr, "fak swebench cache-witness: marshal: %v\n", err)
@@ -118,6 +128,17 @@ func runSwebenchCacheWitness(stdout, stderr io.Writer, argv []string) int {
 			k.ReusedTokens, k.PromptTokens, 100*k.ReuseRatio(), k.Turns, k.FrozenTurns, k.PartialTurns, k.ColdTurns)
 	}
 	fmt.Fprintf(stderr, "fak in-kernel KV-prefix cache (WITNESSED, %s): %s\n", scope, bit)
+	// De-conflate the one-time warmup tax from the cache bit: a cold first turn's
+	// latency is warmup-dominated (axis A), NOT cache-accelerated (axis B). Printed
+	// on its own line so it is never read next to an unqualified cache_bit (#3053).
+	if wt := rec.WarmupTax; wt != nil {
+		bound := ""
+		if wt.LowerBoundOnly {
+			bound = " (lower bound; cut off by a client timeout cap)"
+		}
+		fmt.Fprintf(stderr, "first-request warmup tax (OBSERVED, %s): %.1fs%s — warmup-dominated, NOT cache-accelerated; distinct axis from kv_prefix reuse (#3053)\n",
+			wt.Scope, wt.TimeToFirstReadySeconds, bound)
+	}
 	fmt.Fprintf(stderr, "provider cache_read (OBSERVED, relayed): %d tokens\n", rec.ProviderCacheReadTokens)
 	if rec.WitnessWindow != nil {
 		fmt.Fprintf(stderr, "witness window: %s -> %s (gateway uptime turns %d)\n",

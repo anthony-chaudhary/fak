@@ -159,6 +159,129 @@ func TestCacheBitIsAggregateRunScopeNotSolvedTurnAttribution(t *testing.T) {
 	}
 }
 
+// #3053: the first-request warmup tax is a SEPARATE OBSERVED signal, de-conflated
+// from the aggregate cache_bit. Attaching it must never touch the WITNESSED KV-prefix
+// reuse (CacheBit / reused_tokens): the ~500s cold turn is warmup-dominated, not
+// cache-accelerated, and the two axes stay orthogonal.
+func TestWarmupTaxIsSeparateObservedSignalDeConflatedFromCacheBit(t *testing.T) {
+	r, err := Parse("u", sampleMetrics)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	beforeReused := r.KVPrefix.ReusedTokens
+	beforeBit := r.CacheBit()
+
+	wr := r.WithWarmupTax(511.3, false)
+	if wr.WarmupTax == nil {
+		t.Fatal("WithWarmupTax left WarmupTax nil")
+	}
+	if wr.WarmupTax.TimeToFirstReadySeconds != 511.3 {
+		t.Errorf("warmup tax = %v, want 511.3", wr.WarmupTax.TimeToFirstReadySeconds)
+	}
+	if wr.WarmupTax.Scope != WarmupTaxScope {
+		t.Errorf("warmup scope = %q, want %q", wr.WarmupTax.Scope, WarmupTaxScope)
+	}
+	if wr.WarmupTax.Provenance != Observed {
+		t.Errorf("warmup provenance = %q, want OBSERVED (serve-side latency, not fak's cache)", wr.WarmupTax.Provenance)
+	}
+	if wr.Provenance["warmup_tax"] != Observed {
+		t.Errorf("warmup_tax provenance map entry = %q, want OBSERVED", wr.Provenance["warmup_tax"])
+	}
+	// The WITNESSED cache axis is untouched: reuse and the cache bit are unchanged.
+	if wr.KVPrefix.ReusedTokens != beforeReused {
+		t.Errorf("warmup tax mutated reused_tokens: %d -> %d", beforeReused, wr.KVPrefix.ReusedTokens)
+	}
+	if wr.CacheBit() != beforeBit {
+		t.Errorf("warmup tax changed CacheBit(): %v -> %v", beforeBit, wr.CacheBit())
+	}
+	if wr.Provenance["kv_prefix"] != Witnessed {
+		t.Errorf("kv_prefix provenance = %q, want WITNESSED", wr.Provenance["kv_prefix"])
+	}
+	// The receiver's provenance map must not have been mutated in place (copy semantics).
+	if _, ok := r.Provenance["warmup_tax"]; ok {
+		t.Error("WithWarmupTax mutated the receiver's provenance map in place")
+	}
+
+	// JSON: the warmup latency and the WITNESSED reuse are distinct fields — a reader
+	// cannot fold the warmup tax into the cache-value story.
+	b, err := json.Marshal(wr)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	js := string(b)
+	for _, needle := range []string{
+		`"warmup_tax"`,
+		`"time_to_first_ready_seconds":511.3`,
+		`"scope":"serve-boot-warmup-first-token"`,
+		`"provenance":"OBSERVED"`,
+	} {
+		if !strings.Contains(js, needle) {
+			t.Errorf("warmup-tax JSON missing %q: %s", needle, js)
+		}
+	}
+	// The warmup latency must never appear as a reused-token count (no conflation).
+	if strings.Contains(js, `"reused_tokens":511`) {
+		t.Errorf("warmup latency leaked into a reused-token field: %s", js)
+	}
+}
+
+// A pure /metrics scrape cannot witness a per-boot one-time cost, so Parse must never
+// fabricate a warmup tax: WarmupTax stays nil and is omitted from the JSON.
+func TestParseDoesNotFabricateWarmupTax(t *testing.T) {
+	r, err := Parse("u", sampleMetrics)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if r.WarmupTax != nil {
+		t.Errorf("Parse fabricated a warmup tax from a /metrics scrape: %+v", r.WarmupTax)
+	}
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), "warmup_tax") {
+		t.Errorf("absent warmup tax must be omitted from JSON: %s", b)
+	}
+}
+
+// A reading cut off by a client timeout cap is reported honestly as a lower bound,
+// not as an exact measured figure.
+func TestWarmupTaxLowerBoundIsHonest(t *testing.T) {
+	r, err := Parse("u", sampleMetrics)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	wr := r.WithWarmupTax(180, true)
+	if !wr.WarmupTax.LowerBoundOnly {
+		t.Error("LowerBoundOnly = false, want true")
+	}
+	if !strings.Contains(wr.WarmupTax.Note, "Lower bound only") {
+		t.Errorf("note does not flag the lower bound: %q", wr.WarmupTax.Note)
+	}
+}
+
+// The warmup tax survives a JSON round-trip with its OBSERVED provenance intact.
+func TestWarmupTaxRoundTripsJSON(t *testing.T) {
+	r, err := Parse("u", sampleMetrics)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	b, err := json.Marshal(r.WithWarmupTax(501.2, false))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var back Record
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if back.WarmupTax == nil || back.WarmupTax.TimeToFirstReadySeconds != 501.2 || back.WarmupTax.Provenance != Observed {
+		t.Errorf("round-trip lost the warmup tax or its provenance: %+v", back.WarmupTax)
+	}
+	if back.Provenance["warmup_tax"] != Observed {
+		t.Errorf("round-trip lost warmup_tax provenance: %+v", back.Provenance)
+	}
+}
+
 func TestReuseRatioZeroWhenNoTurns(t *testing.T) {
 	var k KVPrefixWitness // all zero
 	if got := k.ReuseRatio(); got != 0 {

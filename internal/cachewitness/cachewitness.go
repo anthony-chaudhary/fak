@@ -79,6 +79,15 @@ type Record struct {
 	// served, relayed verbatim. Provenance: OBSERVED. 0 on the pure in-kernel path.
 	ProviderCacheReadTokens uint64 `json:"provider_cache_read_tokens"`
 
+	// --- OBSERVED: the one-time serve warmup tax (a DIFFERENT axis from any cache) ---
+
+	// WarmupTax is the first-request boot→first-ready warmup cost as its OWN first-class
+	// signal, de-conflated from cache_bit (#3053). Provenance: OBSERVED — a serve-side
+	// wall-clock reading, never summed into or derived from the WITNESSED KV-prefix reuse.
+	// nil unless the operator supplied the measured latency; a /metrics scrape cannot
+	// witness a per-boot one-time cost, so Parse never fabricates it.
+	WarmupTax *WarmupTax `json:"warmup_tax,omitempty"`
+
 	// CacheValue is the PUBLISHABLE view of the realized reuse, framed in the only
 	// family #1066's honesty fence permits (marginal-over-tuned-warm-KV) and
 	// self-fencing against the forbidden vs-naive multiple. Derived from KVPrefix.
@@ -109,6 +118,15 @@ const WarmKVMarginalFamily = "marginal-over-tuned-warm-KV (internal/swebench cos
 // witness: aggregate KV-prefix reuse across the parsed run or witness window.
 // It deliberately does not claim per-turn solved-ticket attribution.
 const CacheBitScopeAggregateRun = "aggregate-run-kv-prefix-reuse"
+
+// WarmupTaxScope names the exact axis WarmupTax measures: the ONE-TIME serve
+// boot→first-ready wall clock (weight load into VRAM + CUDA graph capture +
+// DeepGEMM/torch JIT compile + KV-pool alloc), paid once per server process. It is
+// axis A of the cold-start-vs-caching ablation — orthogonal to the KV-prefix reuse
+// (axis B) that CacheBit() / kv_prefix.reused_tokens witness. A reader must never
+// fold this latency into the cache-value story: a ~500s cold turn is warmup-
+// dominated, not cache-accelerated. See docs/notes/GLM52-COLD-START-VS-CACHING-ABLATION-2026-07-06.md.
+const WarmupTaxScope = "serve-boot-warmup-first-token"
 
 // RegimeFrozenFloor and RegimeColdCeil expose the live cacheobs bucket thresholds
 // to witness consumers. The definitions remain in cacheobs; cachewitness must not
@@ -202,6 +220,57 @@ func (k KVPrefixWitness) ReuseRatio() float64 {
 // honestly as "did not bite".
 func (r Record) CacheBit() bool {
 	return r.KVPrefix.ReusedTokens > 0
+}
+
+// WarmupTax is the first-request one-time warmup cost surfaced as its OWN first-class
+// signal, de-conflated from the aggregate cache_bit (#3053). Provenance: OBSERVED — a
+// serve-side wall-clock reading, NEVER summed into or derived from the WITNESSED
+// kv_prefix.reused_tokens. It exists so a reader can never absorb a ~500s cold turn's
+// warmup cost into the cache-value story: the warmup axis (weight load + CUDA graph +
+// JIT) and the KV-prefix-reuse axis are orthogonal.
+type WarmupTax struct {
+	// TimeToFirstReadySeconds is the measured boot→warmup-first-token wall clock: the
+	// one-time backend warmup a cold first request pays. Distinct from per-turn latency
+	// and from any KV-prefix reuse.
+	TimeToFirstReadySeconds float64 `json:"time_to_first_ready_seconds"`
+	// Scope pins the exact axis (WarmupTaxScope), so the reading is self-describing.
+	Scope string `json:"scope"`
+	// Provenance is always OBSERVED for this field — see the type doc.
+	Provenance Provenance `json:"provenance"`
+	// LowerBoundOnly marks a reading cut off by a client timeout cap (e.g. the 180s
+	// HttpClient cap in the night2 ablation), so the true warmup time is only bounded
+	// below, not measured — reported honestly rather than as an exact figure.
+	LowerBoundOnly bool `json:"lower_bound_only,omitempty"`
+	// Note carries the one-line honesty caveat a reader can cite.
+	Note string `json:"note"`
+}
+
+// WithWarmupTax attaches the first-request warmup tax as a separate OBSERVED signal,
+// de-conflated from the WITNESSED cache_bit. seconds is the measured boot→first-ready
+// wall clock; lowerBound marks a reading a client timeout cap cut short. It never
+// touches KVPrefix, CacheValue, or CacheBit() — the warmup axis and the cache-value
+// axis stay orthogonal (#3053). Returns a copy; the receiver is unmodified, including
+// its provenance map (which is cloned, not mutated in place).
+func (r Record) WithWarmupTax(seconds float64, lowerBound bool) Record {
+	out := r
+	note := "One-time serve boot→first-ready warmup (weight load + CUDA graph capture + DeepGEMM/JIT compile); warmup-dominated, NOT cache-accelerated. OBSERVED serve-side latency, never summed into or derived from the WITNESSED kv_prefix.reused_tokens (#3053)."
+	if lowerBound {
+		note = "Lower bound only — reading cut off by a client timeout cap, so true warmup >= this. " + note
+	}
+	out.WarmupTax = &WarmupTax{
+		TimeToFirstReadySeconds: seconds,
+		Scope:                   WarmupTaxScope,
+		Provenance:              Observed,
+		LowerBoundOnly:          lowerBound,
+		Note:                    note,
+	}
+	prov := make(map[string]Provenance, len(r.Provenance)+1)
+	for k, v := range r.Provenance {
+		prov[k] = v
+	}
+	prov["warmup_tax"] = Observed
+	out.Provenance = prov
+	return out
 }
 
 // Sub returns the per-run delta from a cumulative end scrape and a cumulative
