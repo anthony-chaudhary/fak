@@ -215,25 +215,27 @@ var reversibilityFamilies = []reversibilityFamily{
 		name:     "npm-publish",
 		class:    ReversibilityOutwardFacing,
 		prefixes: [][]string{{"npm", "publish"}},
-		hint:     "try npm publish --dry-run first",
+		hint:     "preview the package publish first: npm publish --dry-run",
 	},
-	// Outward families below carry no sanctioned sidestep yet (hint "").
 	{
 		name:  "mail",
 		class: ReversibilityOutwardFacing,
 		heads: []string{"sendmail", "mail", "mutt"},
+		hint:  "review the exact recipient and body in a draft before confirming the live mail send",
 	},
 	{
 		name:         "webhook",
 		class:        ReversibilityOutwardFacing,
 		cmdContains:  []string{"webhook"},
 		toolContains: []string{"webhook"},
+		hint:         "send to a test endpoint or use the endpoint's dry-run mode before confirming the live webhook",
 	},
 	{
 		name:         "registry-publish",
 		class:        ReversibilityOutwardFacing,
 		prefixes:     [][]string{{"docker", "push"}, {"cargo", "publish"}, {"gem", "push"}, {"twine", "upload"}},
 		toolContains: []string{"publish", "upload"},
+		hint:         "use the registry's check or dry-run path before publishing, such as cargo publish --dry-run or twine check",
 	},
 	{
 		name:  "http-write",
@@ -241,31 +243,37 @@ var reversibilityFamilies = []reversibilityFamily{
 		matchCmd: func(in familyMatchInput) bool {
 			return curlWrites(in.cmd) || httpieWrites(in.segs)
 		},
+		hint: "use a read-only request, a test endpoint, or the service's dry-run mode before confirming the live HTTP write",
 	},
 	{
 		name:         "messaging-tool",
 		class:        ReversibilityOutwardFacing,
 		toolContains: []string{"send_email", "sendemail", "email", "send_mail", "post_message"},
+		hint:         "use the sanctioned compiled verb when one exists, such as fak slack send for Slack, or review recipient/body before confirming",
 	},
 	{
 		name:         "pr-create-tool",
 		class:        ReversibilityOutwardFacing,
 		toolContains: []string{"create_pr", "pr_create"},
+		hint:         "preview the pull request title, body, and target branch with the host's draft or dry-run path before confirming creation",
 	},
 	{
 		name:  "fs-destroy",
 		class: ReversibilityIrreversible,
 		heads: []string{"rm", "rmdir", "del", "erase", "shred", "truncate", "mkfs", "remove-item"},
+		hint:  "use a preview or quarantine path first, such as Remove-Item -WhatIf or git clean -nd for git cleanup",
 	},
 	{
 		name:     "git-destroy",
 		class:    ReversibilityIrreversible,
 		prefixes: [][]string{{"git", "clean"}, {"git", "reset", "hard"}},
+		hint:     "inspect first with git status and a non-mutating preview such as git clean -nd; preserve shared work instead of resetting it",
 	},
 	{
 		name:     "infra-destroy",
 		class:    ReversibilityIrreversible,
 		prefixes: [][]string{{"terraform", "destroy"}, {"kubectl", "delete"}},
+		hint:     "preview infrastructure deletion first with terraform plan -destroy or kubectl diff/delete --dry-run=server",
 	},
 	// Payload scans stay whole-command on purpose: SQL statements and dd
 	// targets arrive as arguments to a client binary, never as the head.
@@ -275,6 +283,7 @@ var reversibilityFamilies = []reversibilityFamily{
 		matchCmd: func(in familyMatchInput) bool {
 			return orderedWords(in.words, "drop", "database") || orderedWords(in.words, "drop", "table")
 		},
+		hint: "inspect or back up the schema first, then use a transaction that rolls back before confirming the DROP",
 	},
 	{
 		name:  "dd-device-write",
@@ -282,11 +291,13 @@ var reversibilityFamilies = []reversibilityFamily{
 		matchCmd: func(in familyMatchInput) bool {
 			return containsWord(in.words, "dd") && strings.Contains(in.lowerCmd, "of=/dev/")
 		},
+		hint: "write to an image file first and inspect the target device before confirming a raw device write",
 	},
 	{
 		name:         "destructive-tool",
 		class:        ReversibilityIrreversible,
 		toolContains: []string{"delete", "remove", "destroy", "truncate", "unlink", "rmdir"},
+		hint:         "use the tool's preview or dry-run mode, or move the target to quarantine first, before confirming destruction",
 	},
 }
 

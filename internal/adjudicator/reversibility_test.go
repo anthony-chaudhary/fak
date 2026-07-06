@@ -13,11 +13,12 @@ import (
 
 func TestReversibilityClassifiesCommands(t *testing.T) {
 	cases := []struct {
-		name string
-		tool string
-		args map[string]any
-		want ReversibilityClass
-		hint string
+		name         string
+		tool         string
+		args         map[string]any
+		want         ReversibilityClass
+		hint         string
+		hintContains []string
 	}{
 		{
 			name: "ordinary read-only command is reversible",
@@ -68,12 +69,14 @@ func TestReversibilityClassifiesCommands(t *testing.T) {
 			hint: "send it with the sanctioned compiled verb: fak slack send (a trusted-binary path the kernel admits)",
 		},
 		{
-			// Floor preservation: mail/mutt have NO fak verb, so naming verbs for
-			// slack/git-push must not relax their escalation nor invent a hint.
-			name: "mail head stays outward-facing with no fak-verb hint",
-			tool: "Bash",
-			args: map[string]any{"command": "echo done | mail -s ci ops@example.invalid"},
-			want: ReversibilityOutwardFacing,
+			// Floor preservation: mail/mutt have no fak verb, so naming verbs for
+			// slack/git-push must not relax their escalation; they still get a
+			// concrete review path instead of an empty redirect.
+			name:         "mail head stays outward-facing with a concrete review hint",
+			tool:         "Bash",
+			args:         map[string]any{"command": "echo done | mail -s ci ops@example.invalid"},
+			want:         ReversibilityOutwardFacing,
+			hintContains: []string{"recipient", "body"},
 		},
 		{
 			// gh is operator-relaxed (2026-07-05): every gh write targets the
@@ -208,6 +211,11 @@ func TestReversibilityClassifiesCommands(t *testing.T) {
 			if tc.hint != "" && got.DryRunHint != tc.hint {
 				t.Fatalf("DryRunHint = %q, want %q", got.DryRunHint, tc.hint)
 			}
+			for _, want := range tc.hintContains {
+				if !strings.Contains(got.DryRunHint, want) {
+					t.Fatalf("DryRunHint = %q, want substring %q", got.DryRunHint, want)
+				}
+			}
 			if tc.want == ReversibilityReversible && got.ConfirmToken != "" {
 				t.Fatalf("reversible call got confirm token %q", got.ConfirmToken)
 			}
@@ -231,8 +239,143 @@ func TestRedirectComesFromTheBlockingFamily(t *testing.T) {
 	if env.Class != ReversibilityOutwardFacing {
 		t.Fatalf("curl write must stay outward-facing, got %q", env.Class)
 	}
-	if env.DryRunHint != "" {
-		t.Fatalf("http-write escalation borrowed another family's redirect: %q", env.DryRunHint)
+	if env.DryRunHint == "" {
+		t.Fatalf("http-write escalation must carry its own redirect")
+	}
+	if strings.Contains(env.DryRunHint, "fak sync push") {
+		t.Fatalf("http-write escalation borrowed the git-push redirect: %q", env.DryRunHint)
+	}
+}
+
+func TestReversibilityFamiliesDeclareRedirects(t *testing.T) {
+	for _, family := range reversibilityFamilies {
+		if strings.TrimSpace(family.hint) == "" {
+			t.Fatalf("reversibility family %q escalates without a redirect hint", family.name)
+		}
+	}
+}
+
+func TestNonReversibleRepresentativeCorpusCarriesRedirect(t *testing.T) {
+	cases := []struct {
+		name    string
+		tool    string
+		args    map[string]any
+		want    ReversibilityClass
+		wantFak string
+	}{
+		{
+			name:    "bash git push names fak sync push",
+			tool:    "Bash",
+			args:    map[string]any{"command": "git push origin main"},
+			want:    ReversibilityOutwardFacing,
+			wantFak: "fak sync push",
+		},
+		{
+			name:    "mcp issue create names fak issue create",
+			tool:    "create_issue",
+			args:    map[string]any{"title": "bug", "body": "repro"},
+			want:    ReversibilityOutwardFacing,
+			wantFak: "fak issue create",
+		},
+		{
+			name:    "bash slack names fak slack send",
+			tool:    "Bash",
+			args:    map[string]any{"command": "slack send -c ops 'done'"},
+			want:    ReversibilityOutwardFacing,
+			wantFak: "fak slack send",
+		},
+		{
+			name: "npm publish",
+			tool: "Bash",
+			args: map[string]any{"command": "npm publish"},
+			want: ReversibilityOutwardFacing,
+		},
+		{
+			name: "mail head",
+			tool: "Bash",
+			args: map[string]any{"command": "echo done | mail ops@example.invalid"},
+			want: ReversibilityOutwardFacing,
+		},
+		{
+			name: "webhook command",
+			tool: "Bash",
+			args: map[string]any{"command": "webhook notify ops"},
+			want: ReversibilityOutwardFacing,
+		},
+		{
+			name: "registry publish",
+			tool: "Bash",
+			args: map[string]any{"command": "docker push registry.example.invalid/app:latest"},
+			want: ReversibilityOutwardFacing,
+		},
+		{
+			name: "http write",
+			tool: "Bash",
+			args: map[string]any{"command": "curl -X POST https://example.invalid/hook -d ok"},
+			want: ReversibilityOutwardFacing,
+		},
+		{
+			name: "messaging tool",
+			tool: "send_email",
+			args: map[string]any{"to": "ops@example.invalid", "body": "done"},
+			want: ReversibilityOutwardFacing,
+		},
+		{
+			name: "pr create tool",
+			tool: "create_pr",
+			args: map[string]any{"title": "fix", "body": "details"},
+			want: ReversibilityOutwardFacing,
+		},
+		{
+			name: "filesystem destroy",
+			tool: "Bash",
+			args: map[string]any{"command": "rm -rf build"},
+			want: ReversibilityIrreversible,
+		},
+		{
+			name: "git destroy",
+			tool: "Bash",
+			args: map[string]any{"command": "git reset --hard HEAD~1"},
+			want: ReversibilityIrreversible,
+		},
+		{
+			name: "infra destroy",
+			tool: "Bash",
+			args: map[string]any{"command": "terraform destroy -auto-approve"},
+			want: ReversibilityIrreversible,
+		},
+		{
+			name: "sql drop",
+			tool: "Bash",
+			args: map[string]any{"command": `psql -c "drop table users"`},
+			want: ReversibilityIrreversible,
+		},
+		{
+			name: "raw device write",
+			tool: "Bash",
+			args: map[string]any{"command": "dd if=image.bin of=/dev/sda"},
+			want: ReversibilityIrreversible,
+		},
+		{
+			name: "destructive tool",
+			tool: "delete_file",
+			args: map[string]any{"path": "tmp/cache.bin"},
+			want: ReversibilityIrreversible,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ClassifyReversibility(tc.tool, tc.args)
+			if got.Class != tc.want {
+				t.Fatalf("ClassifyReversibility() class = %q, want %q; envelope=%+v", got.Class, tc.want, got)
+			}
+			if strings.TrimSpace(got.DryRunHint) == "" {
+				t.Fatalf("non-reversible call carried no redirect hint: %+v", got)
+			}
+			if tc.wantFak != "" && !strings.Contains(got.DryRunHint, tc.wantFak) {
+				t.Fatalf("DryRunHint = %q, want sanctioned verb %q", got.DryRunHint, tc.wantFak)
+			}
+		})
 	}
 }
 

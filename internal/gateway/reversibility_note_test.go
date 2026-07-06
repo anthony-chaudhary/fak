@@ -7,6 +7,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
+const gitPushRemedy = "push with the safe compiled verb: fak sync push (a trusted-binary non-force push the kernel admits), or preview first with git push --dry-run"
+
 // The sanctioned-alternative sentence flows through ONE field (Detail["remedy"])
 // and ONE renderer (remedyNote) for BOTH refusing rungs (#2749). The arg-predicate
 // rung stamps its rule's fix as Meta["fix"]; the reversibility rung stamps its
@@ -28,14 +30,14 @@ func TestRemedySeamUnifiesBothRungs(t *testing.T) {
 	}
 
 	// Reversibility escalation: its preview dry-run hint rides Meta["dry_run_hint"].
-	claim := `{"class":"outward-facing","preview":"outward-facing command: git push origin main","confirm_token":"fak-0011223344556677","dry_run_hint":"try git push --dry-run first"}`
+	claim := `{"class":"outward-facing","preview":"outward-facing command: git push origin main","confirm_token":"fak-0011223344556677","dry_run_hint":"` + gitPushRemedy + `"}`
 	rev := renderVerdict(abi.Verdict{
 		Kind:    abi.VerdictRequireWitness,
 		By:      "monitor/reversibility",
 		Payload: abi.WitnessPayload{Claim: claim},
-		Meta:    map[string]string{"dry_run_hint": "try git push --dry-run first"},
+		Meta:    map[string]string{"dry_run_hint": gitPushRemedy},
 	}, nil)
-	if rev.Detail["remedy"] != "try git push --dry-run first" {
+	if rev.Detail["remedy"] != gitPushRemedy {
 		t.Fatalf("reversibility sanctioned alternative not on the unified remedy field: %+v", rev.Detail)
 	}
 
@@ -46,7 +48,7 @@ func TestRemedySeamUnifiesBothRungs(t *testing.T) {
 	if got := remedyNote(argAdj); got != "sanctioned alternative: use fak issue create" {
 		t.Fatalf("remedyNote(arg-rule) = %q", got)
 	}
-	if got := remedyNote(revAdj); got != "sanctioned alternative: try git push --dry-run first" {
+	if got := remedyNote(revAdj); got != "sanctioned alternative: "+gitPushRemedy {
 		t.Fatalf("remedyNote(reversibility) = %q", got)
 	}
 
@@ -56,7 +58,7 @@ func TestRemedySeamUnifiesBothRungs(t *testing.T) {
 	if !strings.Contains(recipe, "fak-0011223344556677") {
 		t.Fatalf("recipe dropped its confirm token: %q", recipe)
 	}
-	if strings.Contains(recipe, "try git push --dry-run first") {
+	if strings.Contains(recipe, gitPushRemedy) {
 		t.Fatalf("recipe still embeds the alternative (it must ride the remedy seam): %q", recipe)
 	}
 }
@@ -67,7 +69,7 @@ func TestRemedySeamUnifiesBothRungs(t *testing.T) {
 // ESCALATE, the full preview envelope JSON in Detail["claim"], and the preview
 // dry-run hint lifted onto the unified Detail["remedy"] seam (#2749).
 func reversibilityRefusal() ToolAdjudication {
-	claim := `{"class":"outward-facing","preview":"outward-facing command: git push origin main","confirm_token":"fak-0011223344556677","dry_run_hint":"try git push --dry-run first"}`
+	claim := `{"class":"outward-facing","preview":"outward-facing command: git push origin main","confirm_token":"fak-0011223344556677","dry_run_hint":"` + gitPushRemedy + `"}`
 	return ToolAdjudication{
 		Tool:     "PowerShell",
 		Admitted: false,
@@ -75,7 +77,7 @@ func reversibilityRefusal() ToolAdjudication {
 			Kind:        "REQUIRE_WITNESS",
 			By:          "monitor/reversibility",
 			Disposition: "ESCALATE",
-			Detail:      map[string]string{"claim": claim, "remedy": "try git push --dry-run first"},
+			Detail:      map[string]string{"claim": claim, "remedy": gitPushRemedy},
 		},
 	}
 }
@@ -92,7 +94,7 @@ func TestAdjudicationNoteCarriesReversibilityConfirmRecipe(t *testing.T) {
 		"outward-facing command: git push origin main",
 		"re-propose it byte-identical",
 		`"_fak_confirm":"fak-0011223344556677"`,
-		"try git push --dry-run first",
+		"fak sync push",
 		// The trailer must sanction the re-propose, not forbid it: the generic
 		// "do not re-propose" trailer alongside the confirm recipe was a live
 		// contradiction that wedged a fleet session (the agent obeyed the
@@ -100,7 +102,7 @@ func TestAdjudicationNoteCarriesReversibilityConfirmRecipe(t *testing.T) {
 		"A preview-confirm refusal is a pause, not a denial",
 		// The trailer joins the note's terminal period without doubling it
 		// (the old unconditional ". Do not..." rendered "first.. Do not").
-		"try git push --dry-run first. A preview-confirm refusal",
+		"git push --dry-run. A preview-confirm refusal",
 		"This is per-tool feedback, not a session stop",
 		"A session stop only comes from a declared stop policy",
 	} {
