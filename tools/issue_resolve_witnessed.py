@@ -12,7 +12,10 @@ loop can move real issues, because the keep-bit is a git fact:
 
   for each candidate:
     re-run `dos commit-audit <sha> --json`     # env-authored, re-verified HERE
-    iff verdict==OK and witness==diff-witnessed:
+    iff verdict==OK and witness==diff-witnessed
+        and the CLAIM KIND binds resolution (a code/test claim over non-doc
+        paths, or the issue itself is a docs rung — a docs/triage commit that
+        merely references #N witnesses a note, never #N's feature witness):
        gh issue close <n> --comment "<sha> (<subject>) resolves this; ..."
 
 The re-verification is the whole point (.claude/rsi-loop-dod.md: "no keep on a
@@ -46,6 +49,10 @@ except (AttributeError, ValueError):
 
 SCHEMA = "fleet-issue-resolve-witnessed/1"
 WITNESS_OK = "diff-witnessed"
+# Claim kinds that can BIND a close (#2998): a diff-witnessed doc/triage claim
+# witnesses only that a note shipped — it never resolves a non-docs issue.
+RESOLVING_CLAIM_KINDS = {"code_effect", "test_cover"}
+NONRESOLVING_HOLD = "CLAIM_KIND_NONRESOLVING"
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -122,8 +129,46 @@ def reverify(root: Path, sha: str) -> dict[str, Any]:
     verdict = str(doc.get("verdict") or "")
     witness = str(doc.get("witness") or "")
     ok = verdict.upper() == "OK" and witness == WITNESS_OK
+    # Carry the audit's claim kind + code-path evidence so the caller can check
+    # the claim BINDS resolution (#2998). touches_code is tri-state: None when
+    # the audit row carried no file lists (legacy shape — nothing to bind on).
+    claim_kind = str(doc.get("claim_kind") or "") or None
+    file_keys = [k for k in ("source_files", "test_files") if k in doc]
+    touches_code = (any(bool(doc.get(k)) for k in file_keys)
+                    if file_keys else None)
     return {"witness_ok": ok, "verdict": verdict or None, "witness": witness or None,
+            "claim_kind": claim_kind, "touches_code": touches_code,
             "reason": None if ok else f"commit-audit verdict={verdict or '?'} witness={witness or '?'}"}
+
+
+def issue_is_docs_rung(title: str) -> bool:
+    """A docs-shaped issue MAY be resolved by a doc claim (#2998 carve-out)."""
+    t = (title or "").lstrip().lower()
+    return t.startswith(("docs(", "docs:", "doc(", "doc:"))
+
+
+def claim_binds_resolution(rv: dict[str, Any], row: dict[str, Any]) -> tuple[bool, str | None]:
+    """Does the re-verified claim KIND bind resolution of this issue? (#2998)
+
+    audit-OK + subject-references-(#N) is NOT resolves-#N: a docs/triage commit
+    is diff-witnessed for its own doc claim yet witnesses nothing about #N's
+    feature. Bind iff the claim is a code/test claim over non-doc paths, or the
+    issue itself is a docs rung. Unknown kind (legacy audit shape) fails OPEN —
+    the hold fires only on a KNOWN non-binding claim, it never wedges the arm.
+    """
+    kind = rv.get("claim_kind")
+    if not kind:
+        return True, None
+    if kind in RESOLVING_CLAIM_KINDS:
+        touches = rv.get("touches_code")
+        if touches is None or touches:
+            return True, None
+        return False, (f"{NONRESOLVING_HOLD}: {kind} claim with a docs-only "
+                       f"diff cannot resolve #{row.get('number')}")
+    if issue_is_docs_rung(str(row.get("title") or "")):
+        return True, None
+    return False, (f"{NONRESOLVING_HOLD}: {kind} claim (docs/triage-shaped) "
+                   f"cannot resolve a non-docs issue")
 
 
 def origin_main_resolvable(root: Path) -> bool:
@@ -179,7 +224,7 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
     # it must not wedge the loop.
     gate_active = require_pushed and origin_main_resolvable(root)
     planned, results = [], []
-    closed = skipped = skipped_unpushed = failed = 0
+    closed = skipped = skipped_nonresolving = skipped_unpushed = failed = 0
     for row in candidates:
         rv = reverify(root, row["sha"])
         item = {**row, **rv, "command": close_cmd(row)}
@@ -187,6 +232,13 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
         if not rv["witness_ok"]:
             item["action"] = "skip_unwitnessed"
             skipped += 1
+            results.append(item)
+            continue
+        binds, hold_reason = claim_binds_resolution(rv, row)
+        if not binds:
+            item["action"] = "skip_nonresolving"
+            item["reason"] = hold_reason
+            skipped_nonresolving += 1
             results.append(item)
             continue
         if gate_active and not reachable_from_origin(root, row["sha"]):
@@ -220,7 +272,9 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
                         "disabled" if not require_pushed else "no-origin-ref"),
         "counts": {"closed": closed, "would_close": sum(
             1 for r in results if r.get("action") == "would_close"),
-            "skipped_unwitnessed": skipped, "skipped_unpushed": skipped_unpushed,
+            "skipped_unwitnessed": skipped,
+            "skipped_nonresolving": skipped_nonresolving,
+            "skipped_unpushed": skipped_unpushed,
             "failed": failed},
         "closure_rate_before": audit.get("closure_rate"),
         "results": results,
@@ -243,6 +297,7 @@ def render(p: dict[str, Any]) -> str:
                      f"{audit:<22} {decision:<9} {reason}")
     lines.append(f"  -> closed={c.get('closed')} would_close={c.get('would_close')} "
                  f"skipped={c.get('skipped_unwitnessed')} "
+                 f"nonresolving={c.get('skipped_nonresolving')} "
                  f"unpushed={c.get('skipped_unpushed')} failed={c.get('failed')}  "
                  f"(gate={p.get('pushed_gate')}, closure_rate before={p.get('closure_rate_before')})")
     if not p.get("live"):
@@ -253,7 +308,7 @@ def render(p: dict[str, Any]) -> str:
 def close_decision(action: str) -> str:
     if action in {"closed", "would_close"}:
         return "close"
-    if action in {"skip_unwitnessed", "skip_unpushed"}:
+    if action in {"skip_unwitnessed", "skip_nonresolving", "skip_unpushed"}:
         return "hold"
     if action == "close_failed":
         return "failed"

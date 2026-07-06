@@ -160,6 +160,106 @@ class ReverifyArrayParsingTest(unittest.TestCase):
         self.assertEqual(rv["reason"], "no witnessing sha")
 
 
+class ClaimKindGateTest(unittest.TestCase):
+    """The #2998 binding gate: audit-OK + subject-references-(#N) is NOT
+    resolves-#N. The witnessed instance: 687cf4d, a docs-only triage note whose
+    subject referenced (#2205), closed feature rung #2205. A doc claim binds
+    only a docs rung; a code/test claim binds only over non-doc paths."""
+
+    def test_doc_claim_on_feature_issue_is_held(self) -> None:
+        mod = load()
+        rv = {"witness_ok": True, "claim_kind": "doc", "touches_code": False}
+        row = {"number": 2205, "title": "feat(autoctx): relay-default admission"}
+        binds, reason = mod.claim_binds_resolution(rv, row)
+        self.assertFalse(binds)
+        self.assertIn("CLAIM_KIND_NONRESOLVING", reason)
+
+    def test_doc_claim_on_docs_rung_binds(self) -> None:
+        mod = load()
+        rv = {"witness_ok": True, "claim_kind": "doc", "touches_code": False}
+        row = {"number": 9, "title": "docs(guard): restart continuity contract"}
+        self.assertEqual(mod.claim_binds_resolution(rv, row), (True, None))
+
+    def test_code_effect_over_source_paths_binds(self) -> None:
+        mod = load()
+        rv = {"witness_ok": True, "claim_kind": "code_effect", "touches_code": True}
+        row = {"number": 5, "title": "fix(guard): budget restart"}
+        self.assertEqual(mod.claim_binds_resolution(rv, row), (True, None))
+
+    def test_code_effect_with_docs_only_diff_is_held(self) -> None:
+        mod = load()
+        rv = {"witness_ok": True, "claim_kind": "code_effect", "touches_code": False}
+        row = {"number": 5, "title": "fix(guard): budget restart"}
+        binds, reason = mod.claim_binds_resolution(rv, row)
+        self.assertFalse(binds)
+        self.assertIn("CLAIM_KIND_NONRESOLVING", reason)
+
+    def test_missing_claim_kind_fails_open(self) -> None:
+        mod = load()
+        # legacy audit shape (no claim_kind): nothing to bind on — do not wedge.
+        rv = {"witness_ok": True}
+        row = {"number": 5, "title": "fix(guard): budget restart"}
+        self.assertEqual(mod.claim_binds_resolution(rv, row), (True, None))
+
+    def test_evaluate_holds_doc_claim_and_never_calls_gh(self) -> None:
+        mod = load()
+        mod.load_audit = lambda root, audit_json, max_commits: {
+            "closure_rate": 0.5,
+            "issues": [
+                {"number": 2205, "title": "feat(autoctx): relay rung",
+                 "bucket": "OPEN_WITNESSED",
+                 "witnessed_commits": [{"sha": "687cf4d", "subject":
+                                        "docs(autoctx): triage note (#2205)"}]},
+            ]}
+        mod.origin_main_resolvable = lambda root: False
+        mod.reverify = lambda root, sha: {
+            "witness_ok": True, "verdict": "OK", "witness": "diff-witnessed",
+            "claim_kind": "doc", "touches_code": False, "reason": None}
+
+        def boom(cmd, cwd, timeout):
+            raise AssertionError("a held issue must never reach gh issue close")
+
+        mod.run_capture = boom
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        self.assertEqual(p["results"][0]["action"], "skip_nonresolving")
+        self.assertIn("CLAIM_KIND_NONRESOLVING", p["results"][0]["reason"])
+        self.assertEqual(p["counts"]["skipped_nonresolving"], 1)
+        self.assertEqual(p["counts"]["closed"], 0)
+        # the hold renders as a "hold" decision, not a close/failure.
+        self.assertEqual(mod.close_decision("skip_nonresolving"), "hold")
+        self.assertIn("nonresolving=1", mod.render(p))
+
+
+class ReverifyClaimKindExtractionTest(unittest.TestCase):
+    def test_extracts_claim_kind_and_code_paths_from_array(self) -> None:
+        mod = load()
+        mod.run_capture = lambda cmd, cwd, timeout: (0, (
+            '[{"sha":"abc","verdict":"OK","witness":"diff-witnessed",'
+            '"claim_kind":"code_effect","source_files":["a.go"],"test_files":[]}]'), "")
+        rv = mod.reverify(ROOT, "abc")
+        self.assertTrue(rv["witness_ok"])
+        self.assertEqual(rv["claim_kind"], "code_effect")
+        self.assertTrue(rv["touches_code"])
+
+    def test_doc_claim_with_no_code_paths(self) -> None:
+        mod = load()
+        mod.run_capture = lambda cmd, cwd, timeout: (0, (
+            '[{"sha":"687cf4d","verdict":"OK","witness":"diff-witnessed",'
+            '"claim_kind":"doc","source_files":[],"test_files":[]}]'), "")
+        rv = mod.reverify(ROOT, "687cf4d")
+        self.assertTrue(rv["witness_ok"])   # the audit gate still passes...
+        self.assertEqual(rv["claim_kind"], "doc")
+        self.assertFalse(rv["touches_code"])  # ...but the claim cannot bind
+
+    def test_legacy_row_without_kind_or_files_is_tristate_none(self) -> None:
+        mod = load()
+        mod.run_capture = lambda cmd, cwd, timeout: (0,
+            '[{"sha":"abc","verdict":"OK","witness":"diff-witnessed"}]', "")
+        rv = mod.reverify(ROOT, "abc")
+        self.assertIsNone(rv["claim_kind"])
+        self.assertIsNone(rv["touches_code"])
+
+
 class CloseShapeTest(unittest.TestCase):
     def test_close_comment_cites_sha_and_subject(self) -> None:
         mod = load()
