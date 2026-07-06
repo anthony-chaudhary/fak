@@ -84,15 +84,16 @@ type PushAuditResidual struct {
 // Worktree is optional dirty-tree guidance attached by the CLI. It deliberately does not affect
 // the branch sync verdict: a checkout can be remote-in-sync while still carrying local work.
 type Worktree struct {
-	Dirty        bool   `json:"dirty"`
-	TotalDirty   int    `json:"total_dirty,omitempty"`
-	Stampable    int    `json:"stampable,omitempty"`
-	Lanes        int    `json:"lanes,omitempty"`
-	NoLane       int    `json:"no_lane,omitempty"`
-	Junk         int    `json:"junk,omitempty"`
-	OldestPath   string `json:"oldest_path,omitempty"`
-	OldestAgeSec int64  `json:"oldest_age_seconds,omitempty"`
-	NextAction   string `json:"next_action,omitempty"`
+	Dirty        bool     `json:"dirty"`
+	TotalDirty   int      `json:"total_dirty,omitempty"`
+	Stampable    int      `json:"stampable,omitempty"`
+	Lanes        int      `json:"lanes,omitempty"`
+	NoLane       int      `json:"no_lane,omitempty"`
+	Junk         int      `json:"junk,omitempty"`
+	JunkPaths    []string `json:"junk_paths,omitempty"`
+	OldestPath   string   `json:"oldest_path,omitempty"`
+	OldestAgeSec int64    `json:"oldest_age_seconds,omitempty"`
+	NextAction   string   `json:"next_action,omitempty"`
 }
 
 type GitError struct {

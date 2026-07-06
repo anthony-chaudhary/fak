@@ -227,9 +227,19 @@ func renderWorktree(w io.Writer, wt *safesync.Worktree) {
 	}
 	fmt.Fprintf(w, "worktree dirty: %d path(s) across %d lane(s), %d no-lane, %d junk\n",
 		wt.TotalDirty, wt.Lanes, wt.NoLane, wt.Junk)
+	if len(wt.JunkPaths) > 0 {
+		fmt.Fprintf(w, "  junk: %s\n", pathPreview(wt.JunkPaths, 5))
+	}
 	if wt.NextAction != "" {
 		fmt.Fprintf(w, "  next: %s\n", wt.NextAction)
 	}
+}
+
+func pathPreview(paths []string, limit int) string {
+	if limit <= 0 || len(paths) <= limit {
+		return strings.Join(paths, ", ")
+	}
+	return fmt.Sprintf("%s, +%d more", strings.Join(paths[:limit], ", "), len(paths)-limit)
 }
 
 func annotateSyncWorktree(ctx context.Context, info safesync.Assessment, repo string) safesync.Assessment {
@@ -274,10 +284,22 @@ func defaultSyncWorktree(ctx context.Context, repo string) (safesync.Worktree, b
 		Lanes:        len(plan.Groups),
 		NoLane:       len(plan.NoLane),
 		Junk:         len(plan.Junk),
+		JunkPaths:    sweepEntryPaths(plan.Junk),
 		OldestPath:   plan.OldestDirtyPath,
 		OldestAgeSec: plan.OldestDirtyAgeSeconds,
 		NextAction:   plan.NextAction,
 	}, true
+}
+
+func sweepEntryPaths(entries []sweepEntry) []string {
+	if len(entries) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(entries))
+	for _, e := range entries {
+		paths = append(paths, e.Path)
+	}
+	return paths
 }
 
 func annotateAheadPushAudit(ctx context.Context, info safesync.Assessment, repo, remote string) safesync.Assessment {

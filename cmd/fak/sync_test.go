@@ -46,6 +46,7 @@ func TestRunSyncCheckInSyncSurfacesDirtyWorktree(t *testing.T) {
 			Stampable:  1,
 			Lanes:      1,
 			Junk:       3,
+			JunkPaths:  []string{"wave.err", "route.err", "tick.dryrun.err"},
 			NextAction: "remove 3 junk path(s) with `fak sweep --clean-junk` if you own them, then rerun `fak sweep --json`",
 		}, true
 	}
@@ -56,7 +57,7 @@ func TestRunSyncCheckInSyncSurfacesDirtyWorktree(t *testing.T) {
 	if code != syncExitOK {
 		t.Fatalf("exit = %d, want ok; stderr=%s stdout=%s", code, errb.String(), out.String())
 	}
-	for _, want := range []string{"in sync", "worktree dirty: 4 path(s)", "next: remove 3 junk path(s)", "fak sweep --clean-junk"} {
+	for _, want := range []string{"in sync", "worktree dirty: 4 path(s)", "junk: wave.err, route.err, tick.dryrun.err", "next: remove 3 junk path(s)", "fak sweep --clean-junk"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("sync output missing %q:\n%s", want, out.String())
 		}
@@ -79,6 +80,7 @@ func TestRunSyncCheckInSyncJSONSurfacesDirtyWorktree(t *testing.T) {
 			Lanes:        2,
 			NoLane:       1,
 			Junk:         2,
+			JunkPaths:    []string{"wave.err", "route.err"},
 			OldestPath:   "wave.err",
 			OldestAgeSec: 600,
 			NextAction:   "remove 2 junk path(s) with `fak sweep --clean-junk` if you own them, then rerun `fak sweep --json`",
@@ -100,6 +102,9 @@ func TestRunSyncCheckInSyncJSONSurfacesDirtyWorktree(t *testing.T) {
 	}
 	if got.Worktree.TotalDirty != 5 || got.Worktree.NoLane != 1 || got.Worktree.Junk != 2 {
 		t.Fatalf("worktree = %+v, want dirty totals", got.Worktree)
+	}
+	if strings.Join(got.Worktree.JunkPaths, ",") != "wave.err,route.err" {
+		t.Fatalf("junk paths = %+v, want wave.err, route.err", got.Worktree.JunkPaths)
 	}
 	if got.Worktree.OldestPath != "wave.err" || got.Worktree.OldestAgeSec != 600 {
 		t.Fatalf("worktree = %+v, want oldest dirty metadata", got.Worktree)
@@ -124,6 +129,7 @@ func TestRunSyncPushSurfacesDirtyWorktree(t *testing.T) {
 			Stampable:  1,
 			Lanes:      1,
 			Junk:       3,
+			JunkPaths:  []string{"wave.err", "route.err", "tick.dryrun.err"},
 			NextAction: "remove 3 junk path(s) with `fak sweep --clean-junk` if you own them, then rerun `fak sweep --json`",
 		}, true
 	}
@@ -134,7 +140,7 @@ func TestRunSyncPushSurfacesDirtyWorktree(t *testing.T) {
 	if code != syncExitOK {
 		t.Fatalf("exit = %d, want ok; stderr=%s stdout=%s", code, errb.String(), out.String())
 	}
-	for _, want := range []string{"pushed work -> origin/work", "worktree dirty: 4 path(s)", "next: remove 3 junk path(s)", "fak sweep --clean-junk"} {
+	for _, want := range []string{"pushed work -> origin/work", "worktree dirty: 4 path(s)", "junk: wave.err, route.err, tick.dryrun.err", "next: remove 3 junk path(s)", "fak sweep --clean-junk"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("sync push output missing %q:\n%s", want, out.String())
 		}
@@ -156,6 +162,7 @@ func TestRunSyncPushJSONSurfacesDirtyWorktree(t *testing.T) {
 			Stampable:  1,
 			Lanes:      1,
 			Junk:       3,
+			JunkPaths:  []string{"wave.err", "route.err", "tick.dryrun.err"},
 			NextAction: "remove 3 junk path(s) with `fak sweep --clean-junk` if you own them, then rerun `fak sweep --json`",
 		}, true
 	}
@@ -176,8 +183,36 @@ func TestRunSyncPushJSONSurfacesDirtyWorktree(t *testing.T) {
 	if got.Worktree.TotalDirty != 4 || got.Worktree.Junk != 3 {
 		t.Fatalf("worktree = %+v, want dirty totals", got.Worktree)
 	}
+	if strings.Join(got.Worktree.JunkPaths, ",") != "wave.err,route.err,tick.dryrun.err" {
+		t.Fatalf("junk paths = %+v, want all classified junk paths", got.Worktree.JunkPaths)
+	}
 	if !strings.Contains(got.Worktree.NextAction, "remove 3 junk path(s)") || !strings.Contains(got.Worktree.NextAction, "fak sweep --clean-junk") {
 		t.Fatalf("next action = %q", got.Worktree.NextAction)
+	}
+}
+
+func TestDefaultSyncWorktreeIncludesJunkPaths(t *testing.T) {
+	root := t.TempDir()
+	syncGit(t, root, "init")
+	syncWriteFile(t, filepath.Join(root, "wave.err"), "stderr\n")
+	syncWriteFile(t, filepath.Join(root, "route.err"), "stderr\n")
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	syncWriteFile(t, filepath.Join(root, "docs", "note.md"), "note\n")
+
+	got, ok := defaultSyncWorktree(context.Background(), root)
+	if !ok {
+		t.Fatal("defaultSyncWorktree returned ok=false")
+	}
+	if !got.Dirty || got.Junk != 2 {
+		t.Fatalf("worktree = %+v, want two junk paths", got)
+	}
+	if strings.Join(got.JunkPaths, ",") != "route.err,wave.err" {
+		t.Fatalf("junk paths = %+v, want route.err,wave.err", got.JunkPaths)
+	}
+	if !strings.Contains(got.NextAction, "fak sweep --clean-junk") {
+		t.Fatalf("next action = %q, want clean-junk guidance", got.NextAction)
 	}
 }
 
