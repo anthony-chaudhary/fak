@@ -176,6 +176,7 @@ var tier = map[string]int{
 	"wirescreen":       2, // local-model-on-the-wire proposer spine: registers an abi.SemanticScreen that ctxmmu consults after its regex floor (#569) + the ScreenDigest useful-page-out (#570) + the pre-send redactor (#572); imports only abi by default â€” the -tags fakwiremodel model arm (#569) adds model/tokenizer/ggufload (all tier-1).
 	"advmodel":         2,
 	"modelroute":       1, // per-aspect + ensemble model-routing policy spine (Route + Combine); pure, stdlib-only, imports nothing internal.
+	"modelscore":       1, // durable raw model-capability evidence registry (#3038): unbounded native-unit benchmark/cost/context rows with provenance; a Profile keeps raw evidence separate from any tier policy. Pure, stdlib-only, imports nothing internal, off the hot path.
 	"simhash":          1, // reference vector-similarity primitive (embed/cosine/top-k); the observability layer's near-duplicate / outlier-query substrate. Deterministic, stdlib-only, imports nothing internal.
 	"trajectory":       3, // trajectory data plane: folds the abi event stream into per-trace Turn rows + JSONL export; an abi.Emitter that optionally stamps a simhash query embedding. Imports abi+simhash.
 	"trajhook":         3, // pluggable trajectory scorer/tap seam (the "trivial skill does gardening" enabler): app code registers Scorers over Turn rows without a core edit. Imports trajectory+simhash.

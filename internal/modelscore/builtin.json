@@ -1,0 +1,130 @@
+{
+  "schema": "fak.modelscore-registry.v1",
+  "models": [
+    {
+      "model": "opus",
+      "notes": "Frontier tier stand-in. Illustrative fixture rows — replace with ingested leaderboard evidence before any policy trusts these figures.",
+      "benchmarks": [
+        {
+          "benchmark": "terminal-bench",
+          "version": "2.1",
+          "score": 55.0,
+          "unit": "pct-resolved",
+          "harness": "example-agent",
+          "provenance": {
+            "source": "https://www.tbench.ai/leaderboard/terminal-bench/2.1",
+            "as_of": "2026-07-06",
+            "confidence": 0.2,
+            "illustrative": true
+          }
+        },
+        {
+          "benchmark": "swe-bench-verified",
+          "score": 70.0,
+          "unit": "pct-resolved",
+          "provenance": {
+            "source": "https://www.swebench.com/",
+            "as_of": "2026-07-06",
+            "confidence": 0.2,
+            "illustrative": true
+          }
+        },
+        {
+          "benchmark": "frontier-swe",
+          "score": 12.0,
+          "unit": "pct-resolved",
+          "provenance": {
+            "source": "https://www.frontierswe.com/",
+            "as_of": "2026-07-06",
+            "confidence": 0.2,
+            "illustrative": true
+          }
+        }
+      ],
+      "cost": {
+        "in": 3.0,
+        "out": 15.0,
+        "provenance": {
+          "source": "internal/modelroute/cost.go FrontierAnchor",
+          "as_of": "2026-07-06",
+          "confidence": 0.5,
+          "illustrative": true
+        }
+      },
+      "context": {
+        "tokens": 200000,
+        "provenance": {
+          "source": "illustrative fixture",
+          "as_of": "2026-07-06",
+          "confidence": 0.2,
+          "illustrative": true
+        }
+      }
+    },
+    {
+      "model": "glm-5.2",
+      "notes": "Mid tier stand-in. Illustrative fixture rows.",
+      "benchmarks": [
+        {
+          "benchmark": "swe-bench-verified",
+          "score": 48.0,
+          "unit": "pct-resolved",
+          "provenance": {
+            "source": "https://www.swebench.com/",
+            "as_of": "2026-07-06",
+            "confidence": 0.2,
+            "illustrative": true
+          }
+        },
+        {
+          "benchmark": "frontier-swe",
+          "score": 3.0,
+          "unit": "pct-resolved",
+          "provenance": {
+            "source": "https://www.frontierswe.com/",
+            "as_of": "2026-07-06",
+            "confidence": 0.2,
+            "illustrative": true
+          }
+        }
+      ],
+      "cost": {
+        "in": 1.0,
+        "out": 5.0,
+        "provenance": {
+          "source": "internal/modelroute/cost.go DefaultPrices mid",
+          "as_of": "2026-07-06",
+          "confidence": 0.5,
+          "illustrative": true
+        }
+      }
+    },
+    {
+      "model": "gemini-3.5-flash",
+      "notes": "Small/fast tier stand-in. Illustrative fixture rows.",
+      "benchmarks": [
+        {
+          "benchmark": "swe-bench-verified",
+          "score": 30.0,
+          "unit": "pct-resolved",
+          "provenance": {
+            "source": "https://www.swebench.com/",
+            "as_of": "2026-07-06",
+            "confidence": 0.2,
+            "illustrative": true
+          }
+        }
+      ],
+      "cost": {
+        "in": 0.25,
+        "out": 1.25,
+        "provenance": {
+          "source": "internal/modelroute/cost.go DefaultPrices small",
+          "as_of": "2026-07-06",
+          "confidence": 0.5,
+          "illustrative": true
+        }
+      }
+    }
+  ]
+}
