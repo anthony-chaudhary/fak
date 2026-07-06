@@ -109,6 +109,13 @@ func TestSavingsNamedFrontier(t *testing.T) {
 	}
 }
 
+func TestDefaultPricesClassifiesGroqCompoundAsSmallTier(t *testing.T) {
+	book := DefaultPrices()
+	if got, want := book["groq-compound"], book["small"]; got != want {
+		t.Fatalf("groq-compound price = %+v, want small-tier %+v", got, want)
+	}
+}
+
 // A $0 baseline (all-local book) is honestly "not estimated", never a divide.
 func TestSavingsZeroBaselineNotEstimated(t *testing.T) {
 	s := EstimateSavings(dec("local"), nil, "local")

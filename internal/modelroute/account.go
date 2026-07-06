@@ -86,6 +86,23 @@ const (
 	// DeepSeekLegacyAliasRetiresUTC is the documented retirement time for the
 	// legacy deepseek-chat / deepseek-reasoner aliases.
 	DeepSeekLegacyAliasRetiresUTC = "2026-07-24 15:59 UTC"
+	// GroqAPIKeyEnv is the credential env-var name the Groq examples use.
+	GroqAPIKeyEnv = "FAK_GROQ_API_KEY"
+	// GroqOpenAIBaseURL is Groq's OpenAI-compatible API root.
+	GroqOpenAIBaseURL = "https://api.groq.com/openai/v1"
+	// GroqQwen36Model is the Groq model slug for Alibaba Cloud Qwen3.6 27B.
+	GroqQwen36Model = "qwen/qwen3.6-27b"
+	// GroqQwen36* limits record the published per-account ceiling for this model.
+	GroqQwen36RequestsPerMinute = 30
+	GroqQwen36RequestsPerDay    = 1_000
+	GroqQwen36TokensPerMinute   = 8_000
+	GroqQwen36TokensPerDay      = 200_000
+	// GroqCompoundModel is Groq's lower-quality Compound routing model slug.
+	GroqCompoundModel = "groq/compound"
+	// GroqCompound* limits are request-count ceilings; this profile has no token
+	// minute/day limit, so the token fields stay zero in the account metadata.
+	GroqCompoundRequestsPerMinute = 30
+	GroqCompoundRequestsPerDay    = 250
 )
 
 // ---------------------------------------------------------------------------
@@ -179,13 +196,17 @@ var envNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // the secret itself; it is required for a remote account and forbidden-to-be-a-secret
 // for all.
 type Account struct {
-	ID              string       `json:"id"`
-	Kind            ProviderKind `json:"kind"`
-	BaseURL         string       `json:"base_url,omitempty"`
-	CredEnv         string       `json:"cred_env,omitempty"`
-	Label           string       `json:"label,omitempty"`
-	ContextTokens   int          `json:"context_tokens,omitempty"`
-	MaxOutputTokens int          `json:"max_output_tokens,omitempty"`
+	ID                string       `json:"id"`
+	Kind              ProviderKind `json:"kind"`
+	BaseURL           string       `json:"base_url,omitempty"`
+	CredEnv           string       `json:"cred_env,omitempty"`
+	Label             string       `json:"label,omitempty"`
+	ContextTokens     int          `json:"context_tokens,omitempty"`
+	MaxOutputTokens   int          `json:"max_output_tokens,omitempty"`
+	RequestsPerMinute int          `json:"requests_per_minute,omitempty"`
+	RequestsPerDay    int          `json:"requests_per_day,omitempty"`
+	TokensPerMinute   int          `json:"tokens_per_minute,omitempty"`
+	TokensPerDay      int          `json:"tokens_per_day,omitempty"`
 }
 
 // Binding maps ONE routed model id (a Plan member's Model, or a Plan's Scout) to the
@@ -219,14 +240,18 @@ type Roster struct {
 // upstream wire model name. It is a VALUE — the dispatch wiring turns it into an
 // agent.HTTPPlanner; this package never does I/O. CredEnv is a NAME, never the secret.
 type Target struct {
-	Model           string       `json:"model"`          // the routed id (the Plan member / scout)
-	Account         string       `json:"account"`        // the resolved Account.ID
-	Kind            ProviderKind `json:"kind"`           // the provider wire
-	BaseURL         string       `json:"base_url"`       // concrete (account override or kind default)
-	CredEnv         string       `json:"cred_env"`       // env var NAME for the credential ("" = local)
-	UpstreamModel   string       `json:"upstream_model"` // the wire model name
-	ContextTokens   int          `json:"context_tokens,omitempty"`
-	MaxOutputTokens int          `json:"max_output_tokens,omitempty"`
+	Model             string       `json:"model"`          // the routed id (the Plan member / scout)
+	Account           string       `json:"account"`        // the resolved Account.ID
+	Kind              ProviderKind `json:"kind"`           // the provider wire
+	BaseURL           string       `json:"base_url"`       // concrete (account override or kind default)
+	CredEnv           string       `json:"cred_env"`       // env var NAME for the credential ("" = local)
+	UpstreamModel     string       `json:"upstream_model"` // the wire model name
+	ContextTokens     int          `json:"context_tokens,omitempty"`
+	MaxOutputTokens   int          `json:"max_output_tokens,omitempty"`
+	RequestsPerMinute int          `json:"requests_per_minute,omitempty"`
+	RequestsPerDay    int          `json:"requests_per_day,omitempty"`
+	TokensPerMinute   int          `json:"tokens_per_minute,omitempty"`
+	TokensPerDay      int          `json:"tokens_per_day,omitempty"`
 }
 
 // Local reports whether this target dispatches to an on-box server. It is DERIVED
@@ -245,7 +270,9 @@ func (t Target) Remote() bool { return !t.Local() }
 // of the floor-recognized keywords (openai / openai-responses⊃openai / anthropic /
 // gemini / xai / deepseek) — so the floor's local/remote decision is the account's DECLARED kind,
 // never a guess from whether the model name contains "openai". The account/upstream
-// follow for legibility and so a downstream dispatcher can recover the binding. The
+// follow for legibility; upstream model ids may contain provider namespace slashes
+// (for example qwen/qwen3.6-27b), so consumers that parse this shape must split only
+// on the first slash after the account id. The
 // invariant `engine.remoteRoute(EngineRoute()) == Remote()` is pinned by a
 // cross-package test, not left coincidental.
 func (t Target) EngineRoute() string {
@@ -315,14 +342,18 @@ func (r Roster) Resolve(modelID string) (Target, error) {
 		baseURL = KindBaseURL(a.Kind)
 	}
 	return Target{
-		Model:           modelID,
-		Account:         a.ID,
-		Kind:            a.Kind,
-		BaseURL:         baseURL,
-		CredEnv:         a.CredEnv,
-		UpstreamModel:   upstream,
-		ContextTokens:   a.ContextTokens,
-		MaxOutputTokens: a.MaxOutputTokens,
+		Model:             modelID,
+		Account:           a.ID,
+		Kind:              a.Kind,
+		BaseURL:           baseURL,
+		CredEnv:           a.CredEnv,
+		UpstreamModel:     upstream,
+		ContextTokens:     a.ContextTokens,
+		MaxOutputTokens:   a.MaxOutputTokens,
+		RequestsPerMinute: a.RequestsPerMinute,
+		RequestsPerDay:    a.RequestsPerDay,
+		TokensPerMinute:   a.TokensPerMinute,
+		TokensPerDay:      a.TokensPerDay,
 	}, nil
 }
 
@@ -367,7 +398,8 @@ func (r Roster) ResolveDecision(d Decision) (ResolvedPlan, error) { return r.Res
 //     NAME (not a pasted secret); a remote account carries a credential, a LOCAL
 //     account carries a loopback base_url and no remote host (the residency invariant);
 //   - each binding: a non-empty, delimiter-free model bound to a real account, unique
-//     per model id, with a delimiter-free upstream;
+//     per model id, with an upstream that may carry provider namespace slashes but
+//     not the route's kind delimiter or whitespace;
 //   - a Default (when set) naming a real account.
 //
 // A misconfigured switch must fail here, never fall through to an arbitrary account,
@@ -400,6 +432,18 @@ func (r Roster) Validate() error {
 		if a.MaxOutputTokens < 0 {
 			return fmt.Errorf("modelroute: account %q max_output_tokens must be non-negative", a.ID)
 		}
+		if a.RequestsPerMinute < 0 {
+			return fmt.Errorf("modelroute: account %q requests_per_minute must be non-negative", a.ID)
+		}
+		if a.RequestsPerDay < 0 {
+			return fmt.Errorf("modelroute: account %q requests_per_day must be non-negative", a.ID)
+		}
+		if a.TokensPerMinute < 0 {
+			return fmt.Errorf("modelroute: account %q tokens_per_minute must be non-negative", a.ID)
+		}
+		if a.TokensPerDay < 0 {
+			return fmt.Errorf("modelroute: account %q tokens_per_day must be non-negative", a.ID)
+		}
 		if a.CredEnv != "" && !envNameRE.MatchString(a.CredEnv) {
 			return fmt.Errorf("modelroute: account %q cred_env %q is not an env-var name "+
 				"(it must NAME the variable holding the key, e.g. OPENAI_API_KEY — never the secret itself)", a.ID, a.CredEnv)
@@ -429,8 +473,8 @@ func (r Roster) Validate() error {
 		if err := safeRouteToken("binding model", b.Model); err != nil {
 			return err
 		}
-		if b.UpstreamModel != "" && strings.ContainsAny(b.UpstreamModel, ":/ \t") {
-			return fmt.Errorf("modelroute: binding for model %q has an upstream_model %q containing a route delimiter (:, /, space)", b.Model, b.UpstreamModel)
+		if b.UpstreamModel != "" && strings.ContainsAny(b.UpstreamModel, ": \t") {
+			return fmt.Errorf("modelroute: binding for model %q has an upstream_model %q containing a route delimiter (: or space)", b.Model, b.UpstreamModel)
 		}
 		if boundModels[b.Model] {
 			return fmt.Errorf("modelroute: duplicate binding for model %q", b.Model)
@@ -579,6 +623,26 @@ func DefaultRoster() Roster {
 			{ID: "openai-work", Kind: KindOpenAI, CredEnv: "OPENAI_WORK_API_KEY", Label: "a SECOND OpenAI account — the switch: same kind, different credential"},
 			{ID: "codex", Kind: KindOpenAIResponses, CredEnv: "OPENAI_API_KEY", Label: "OpenAI Responses API (codex's native wire)"},
 			{ID: "claude-sub", Kind: KindAnthropic, CredEnv: "CLAUDE_CODE_OAUTH_TOKEN", Label: "your Anthropic Pro/Max subscription (sk-ant-oat token; Bearer+oauth-beta scheme applied by the dispatch adapter)"},
+			{
+				ID:                "july6netra_groq",
+				Kind:              KindOpenAI,
+				BaseURL:           GroqOpenAIBaseURL,
+				CredEnv:           GroqAPIKeyEnv,
+				RequestsPerMinute: GroqQwen36RequestsPerMinute,
+				RequestsPerDay:    GroqQwen36RequestsPerDay,
+				TokensPerMinute:   GroqQwen36TokensPerMinute,
+				TokensPerDay:      GroqQwen36TokensPerDay,
+				Label:             "Groq OpenAI-compatible account for Alibaba Cloud Qwen3.6 27B; credential stays in FAK_GROQ_API_KEY",
+			},
+			{
+				ID:                "july6netra_groq_compound",
+				Kind:              KindOpenAI,
+				BaseURL:           GroqOpenAIBaseURL,
+				CredEnv:           GroqAPIKeyEnv,
+				RequestsPerMinute: GroqCompoundRequestsPerMinute,
+				RequestsPerDay:    GroqCompoundRequestsPerDay,
+				Label:             "Groq OpenAI-compatible account for groq/compound lower-quality tier; request-count limited, no token cap recorded",
+			},
 			{ID: "deepseek", Kind: KindDeepSeek, CredEnv: DeepSeekAPIKeyEnv, ContextTokens: DeepSeekV4ContextTokens, MaxOutputTokens: DeepSeekV4MaxOutputTokens, Label: "DeepSeek V4 OpenAI-compatible API: 1M context, 384K max output"},
 			{ID: "deepseek-anthropic", Kind: KindAnthropic, BaseURL: DeepSeekAnthropicBaseURL, CredEnv: DeepSeekAPIKeyEnv, ContextTokens: DeepSeekV4ContextTokens, MaxOutputTokens: DeepSeekV4MaxOutputTokens, Label: "DeepSeek V4 Anthropic-compatible API; visible to acceptance, not probed as OpenAI /models"},
 		},
@@ -589,6 +653,8 @@ func DefaultRoster() Roster {
 			{Model: "large", Account: "claude-sub", UpstreamModel: "claude-opus-4-6"},
 			{Model: "guard-a", Account: "openai-work", UpstreamModel: "gpt-5.5"},
 			{Model: "guard-b", Account: "claude-sub", UpstreamModel: "claude-opus-4-6"},
+			{Model: "qwen36-groq", Account: "july6netra_groq", UpstreamModel: GroqQwen36Model},
+			{Model: "groq-compound", Account: "july6netra_groq_compound", UpstreamModel: GroqCompoundModel},
 			{Model: "deepseek-pro", Account: "deepseek", UpstreamModel: DeepSeekV4ProModel},
 			{Model: "deepseek-flash", Account: "deepseek", UpstreamModel: DeepSeekV4FlashModel},
 			{Model: "deepseek-pro-anthropic", Account: "deepseek-anthropic", UpstreamModel: DeepSeekV4ProModel},

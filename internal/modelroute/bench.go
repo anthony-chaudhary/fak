@@ -74,7 +74,8 @@ func DefaultLatencies() LatencyBook {
 		"frontier": 120, "large": 120, // Opus-class — the SOTA baseline tier
 		"mid": 60, "medium": 60, "default": 60, // balanced mid tier
 		"small": 20, "tiny": 20, "mini": 20, "nano": 20, // small/fast tier
-		"local": 2, "in-kernel": 2, "on-device": 2, "kernel": 2, // no marginal compute
+		"groq-compound": 20,                                             // request-routed Groq Compound: lower-quality small/fast tier
+		"local":         2, "in-kernel": 2, "on-device": 2, "kernel": 2, // no marginal compute
 	}
 }
 

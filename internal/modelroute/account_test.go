@@ -239,6 +239,22 @@ func TestValidateRejections(t *testing.T) {
 		"negative max output tokens": {
 			Accounts: []Account{{ID: "a", Kind: KindOpenAI, CredEnv: "K", MaxOutputTokens: -1}},
 		},
+		"negative requests per minute": {
+			Accounts: []Account{{ID: "a", Kind: KindOpenAI, CredEnv: "K", RequestsPerMinute: -1}},
+		},
+		"negative requests per day": {
+			Accounts: []Account{{ID: "a", Kind: KindOpenAI, CredEnv: "K", RequestsPerDay: -1}},
+		},
+		"negative tokens per minute": {
+			Accounts: []Account{{ID: "a", Kind: KindOpenAI, CredEnv: "K", TokensPerMinute: -1}},
+		},
+		"negative tokens per day": {
+			Accounts: []Account{{ID: "a", Kind: KindOpenAI, CredEnv: "K", TokensPerDay: -1}},
+		},
+		"upstream model with colon delimiter": {
+			Accounts: []Account{{ID: "a", Kind: KindOpenAI, CredEnv: "K"}},
+			Bindings: []Binding{{Model: "x", Account: "a", UpstreamModel: "bad:model"}},
+		},
 		"deprecated deepseek alias without compatibility marker": {
 			Accounts: []Account{{ID: "deepseek", Kind: KindDeepSeek, CredEnv: DeepSeekAPIKeyEnv}},
 			Bindings: []Binding{{Model: "legacy-chat", Account: "deepseek", UpstreamModel: "deepseek-chat"}},
@@ -256,6 +272,23 @@ func TestValidateRejections(t *testing.T) {
 		if err := r.Validate(); err == nil {
 			t.Fatalf("Validate(%s) should fail", name)
 		}
+	}
+}
+
+func TestValidateAcceptsNamespacedUpstreamModelSlug(t *testing.T) {
+	r := Roster{
+		Accounts: []Account{{ID: "groq", Kind: KindOpenAI, BaseURL: GroqOpenAIBaseURL, CredEnv: GroqAPIKeyEnv}},
+		Bindings: []Binding{{Model: "qwen36-groq", Account: "groq", UpstreamModel: GroqQwen36Model}},
+	}
+	if err := r.Validate(); err != nil {
+		t.Fatalf("provider namespaced upstream slugs such as %q should validate: %v", GroqQwen36Model, err)
+	}
+	tg, err := r.Resolve("qwen36-groq")
+	if err != nil {
+		t.Fatalf("resolve Groq Qwen: %v", err)
+	}
+	if tg.EngineRoute() != "openai:groq/qwen/qwen3.6-27b" {
+		t.Fatalf("namespaced upstream should remain visible in EngineRoute, got %q", tg.EngineRoute())
 	}
 }
 
@@ -439,6 +472,32 @@ func TestDefaultRosterIsValidAndMixesProviders(t *testing.T) {
 	}
 	if ds.Local() || !strings.HasPrefix(ds.EngineRoute(), "deepseek:") {
 		t.Fatalf("DeepSeek target should be a remote deepseek route: %+v route=%q", ds, ds.EngineRoute())
+	}
+	groq, err := r.Resolve("qwen36-groq")
+	if err != nil {
+		t.Fatalf("resolve qwen36-groq: %v", err)
+	}
+	if groq.Kind != KindOpenAI || groq.Account != "july6netra_groq" || groq.BaseURL != GroqOpenAIBaseURL ||
+		groq.CredEnv != GroqAPIKeyEnv || groq.UpstreamModel != GroqQwen36Model ||
+		groq.RequestsPerMinute != GroqQwen36RequestsPerMinute || groq.RequestsPerDay != GroqQwen36RequestsPerDay ||
+		groq.TokensPerMinute != GroqQwen36TokensPerMinute || groq.TokensPerDay != GroqQwen36TokensPerDay {
+		t.Fatalf("default Groq Qwen3.6 binding wrong: %+v", groq)
+	}
+	if groq.Local() || groq.EngineRoute() != "openai:july6netra_groq/qwen/qwen3.6-27b" {
+		t.Fatalf("Groq target should be remote OpenAI-compatible route: %+v route=%q", groq, groq.EngineRoute())
+	}
+	compound, err := r.Resolve("groq-compound")
+	if err != nil {
+		t.Fatalf("resolve groq-compound: %v", err)
+	}
+	if compound.Kind != KindOpenAI || compound.Account != "july6netra_groq_compound" || compound.BaseURL != GroqOpenAIBaseURL ||
+		compound.CredEnv != GroqAPIKeyEnv || compound.UpstreamModel != GroqCompoundModel ||
+		compound.RequestsPerMinute != GroqCompoundRequestsPerMinute || compound.RequestsPerDay != GroqCompoundRequestsPerDay ||
+		compound.TokensPerMinute != 0 || compound.TokensPerDay != 0 {
+		t.Fatalf("default Groq Compound binding wrong: %+v", compound)
+	}
+	if compound.Local() || compound.EngineRoute() != "openai:july6netra_groq_compound/groq/compound" {
+		t.Fatalf("Groq Compound target should be remote OpenAI-compatible route: %+v route=%q", compound, compound.EngineRoute())
 	}
 	dsa, err := r.Resolve("deepseek-pro-anthropic")
 	if err != nil {

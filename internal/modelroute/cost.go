@@ -59,10 +59,12 @@ var FrontierAnchor = Price{In: 3, Out: 15}
 // `fak route --prices model=in/out,...`.
 func DefaultPrices() PriceBook {
 	return PriceBook{
+		"apex": {6, 30}, "fable": {6, 30}, // Fable 5 apex tier — priciest (2x frontier); restricted, use only when clearly needed (see fleetaccounts/apextier.go)
 		"frontier": {3, 15}, "large": {3, 15}, // Opus-class — the SOTA baseline tier
 		"mid": {1, 5}, "medium": {1, 5}, "default": {1, 5}, // balanced mid tier
 		"small": {0.25, 1.25}, "tiny": {0.25, 1.25}, "mini": {0.25, 1.25}, "nano": {0.25, 1.25}, // small/fast tier
-		"local": {0, 0}, "in-kernel": {0, 0}, "on-device": {0, 0}, "kernel": {0, 0}, // no marginal $
+		"groq-compound": {0.25, 1.25},                                                       // request-routed Groq Compound: lower-quality small/fast tier
+		"local":         {0, 0}, "in-kernel": {0, 0}, "on-device": {0, 0}, "kernel": {0, 0}, // no marginal $
 	}
 }
 

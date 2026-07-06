@@ -281,6 +281,13 @@ func TestMemberLatencyUnpricedIsFrontier(t *testing.T) {
 	}
 }
 
+func TestDefaultLatenciesClassifiesGroqCompoundAsSmallTier(t *testing.T) {
+	lat := DefaultLatencies()
+	if got, want := lat["groq-compound"], lat["small"]; got != want {
+		t.Fatalf("groq-compound latency = %v, want small-tier %v", got, want)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Committed fixtures (examples/routing-bench/) — canonical-form + the documented
 // aggregates. The routing-bench analogue of TestRoutingPresetsRoundTrip: the
