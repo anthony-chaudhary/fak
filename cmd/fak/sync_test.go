@@ -63,6 +63,52 @@ func TestRunSyncCheckInSyncSurfacesDirtyWorktree(t *testing.T) {
 	}
 }
 
+func TestRunSyncCheckInSyncJSONSurfacesDirtyWorktree(t *testing.T) {
+	clone := syncCLIFixture(t)
+	syncGit(t, clone, "merge", "--ff-only", "origin/work")
+
+	old := syncWorktree
+	syncWorktree = func(ctx context.Context, repo string) (safesync.Worktree, bool) {
+		if repo != clone {
+			t.Fatalf("repo = %q, want %q", repo, clone)
+		}
+		return safesync.Worktree{
+			Dirty:        true,
+			TotalDirty:   5,
+			Stampable:    2,
+			Lanes:        2,
+			NoLane:       1,
+			Junk:         2,
+			OldestPath:   "wave.err",
+			OldestAgeSec: 600,
+			NextAction:   "remove 2 junk path(s) if you own them, then rerun `fak sweep --json`",
+		}, true
+	}
+	t.Cleanup(func() { syncWorktree = old })
+
+	var out, errb bytes.Buffer
+	code := runSync(&out, &errb, []string{"check", "--repo", clone, "--remote", "origin", "--branch", "work", "--json"})
+	if code != syncExitOK {
+		t.Fatalf("exit = %d, want ok; stderr=%s stdout=%s", code, errb.String(), out.String())
+	}
+	var got safesync.Assessment
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("sync JSON did not decode: %v\n%s", err, out.String())
+	}
+	if got.Worktree == nil || !got.Worktree.Dirty {
+		t.Fatalf("worktree = %+v, want dirty metadata", got.Worktree)
+	}
+	if got.Worktree.TotalDirty != 5 || got.Worktree.NoLane != 1 || got.Worktree.Junk != 2 {
+		t.Fatalf("worktree = %+v, want dirty totals", got.Worktree)
+	}
+	if got.Worktree.OldestPath != "wave.err" || got.Worktree.OldestAgeSec != 600 {
+		t.Fatalf("worktree = %+v, want oldest dirty metadata", got.Worktree)
+	}
+	if !strings.Contains(got.Worktree.NextAction, "remove 2 junk path(s)") {
+		t.Fatalf("next action = %q", got.Worktree.NextAction)
+	}
+}
+
 func TestRunSyncCheckRefusesDivergentDirtyPath(t *testing.T) {
 	clone := syncCLIFixture(t)
 	syncWriteFile(t, filepath.Join(clone, "a.txt"), "LOCAL EDIT\n")
