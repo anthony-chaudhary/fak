@@ -150,7 +150,7 @@ func doneCleanCheck(ctx context.Context, opt doneOptions, runner doneRunner) don
 	if dirty != "" {
 		check.Detail = dirty
 		check.MissingWitness = "clean_path_state"
-		check.NextStep = "commit the intended paths with fak commit, narrow --paths, or remove unrelated dirty work before claiming done"
+		check.NextStep = "run `fak sweep --json` to group dirty work, then commit only intended paths with `fak sweep --apply --lane <lane> -m \"...\" [--push]` or `fak commit --path <path> ...`; narrow --paths or remove unrelated dirty work before claiming done"
 		return check
 	}
 	check.OK = true

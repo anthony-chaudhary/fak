@@ -24,6 +24,11 @@ func TestRunDoneCheckRedOnDirtyPaths(t *testing.T) {
 	if report.MissingWitness != "clean_path_state" {
 		t.Fatalf("missing witness = %q, want clean_path_state", report.MissingWitness)
 	}
+	for _, want := range []string{"fak sweep --json", "fak sweep --apply --lane <lane>", "fak commit --path"} {
+		if !strings.Contains(report.NextStep, want) {
+			t.Fatalf("dirty next step missing %q: %q", want, report.NextStep)
+		}
+	}
 }
 
 func TestRunDoneCheckGreenOnLoopgateWitnessedCommit(t *testing.T) {
