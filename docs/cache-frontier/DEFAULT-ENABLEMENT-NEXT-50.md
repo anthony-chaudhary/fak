@@ -105,7 +105,7 @@ These are ordered for product usefulness, with pure fak and API/provider work fi
 
 | # | Lane | Item | Default/evidence target |
 |---:|---|---|---|
-| 1 | Scoring | Define `fak.cache.default_usefulness.v1` with the facets above. | `fak vcache score --json` and cachevalue reports can expose per-plane fields without breaking the old schema. |
+| 1 | Scoring | Define `fak.cache.default_usefulness.v1` with the facets above. | `fak vcache score --json` and cachevalue reports can expose per-plane fields without breaking the old schema. **Landed (#1519):** the `fak.cache.default_usefulness.v1` schema and all seven weighted facets (net-realized-value, agentic-activation, cold-path-correctness, granularity, default-coverage, drift-resistance, operator-actionable) are defined in `internal/vcachescore/score.go` (`DefaultUsefulnessReport`/`DefaultUsefulnessFacets`, `029304d0`) and ride additively on `fak.vcache.score.v1` — witnessed by `internal/vcachescore/schema_compat_test.go` (`b4e0dcbd`), which proves both compat halves: the pre-facet JSON still decodes without loss and the current report keeps every legacy key alongside the v1 facets, so the per-plane fields expose without breaking the old schema. |
 | 2 | Scoring | Add `agentic_activation` counters to the report contract. | A provider-only cache run can score provider value high while showing fak-authored cache mechanisms at zero. |
 | 3 | Scoring | Split `active_source` into `provider_observed`, `kernel_witnessed`, `context_witnessed`, and `forecast`. | No report can imply provider telemetry is fak-owned reuse. |
 | 4 | Scoring | Add a cold-path correctness bit to every cache score. | Active warming is refused when correctness depends on a hit. |
