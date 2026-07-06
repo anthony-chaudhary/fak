@@ -172,6 +172,8 @@ front page.
 
 ### Latest working notes
 
+- [GLM-5.2 L2 cont-batching sweep (#3079): gen/now triage + GPU-server benchmark blocker](docs/notes/GLM52-DGX2-LANEB-L2-CONTBATCH-TRIAGE-2026-07-06.md) -- auto-indexed dated note.
+- [GLM-5.2 L5 quant sweep (#3077): triage + witness gate](docs/notes/GLM52-L5-QUANT-SWEEP-TRIAGE-2026-07-06.md) -- auto-indexed dated note.
 - [R3 placement dual-write: one structure, two projections](docs/notes/CONCEPT-R3-PLACEMENT-DUAL-WRITE-2026-07-06.md) -- auto-indexed dated note.
 - [GLM-5.2 readiness warmup-gate contract (#3051), 2026-07-06](docs/notes/GLM52-READINESS-WARMUP-GATE-CONTRACT-3051-2026-07-06.md) -- auto-indexed dated note.
 - [GLM-5.2 first-request cold tax vs. KV-prefix caching — an ablation, 2026-07-06](docs/notes/GLM52-COLD-START-VS-CACHING-ABLATION-2026-07-06.md) -- auto-indexed dated note.
