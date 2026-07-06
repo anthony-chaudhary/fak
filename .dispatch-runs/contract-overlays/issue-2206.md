@@ -169,3 +169,56 @@ re-routing R8 before its inputs land.
 Re-grooms update this file in place; no new issue filed — the dependency stays
 tracked on #1918 and #2200. This section supersedes the "Assumptions" block's
 "R1 and R2 have landed" reading with the verified HEAD state above.
+
+## Mis-close correction (2026-07-06): R2 (2200) was falsely CLOSED — R8's blocker is now HIDDEN behind a green dependency
+
+<!-- Recorded 2026-07-06 by the fleet worker re-routed to 2206 (route: lane=docs).
+Updates the 2026-07-05 "Dispatch witness" section above, whose load-bearing
+premise "R2 2200 ... still OPEN" is now contradicted by a mis-close. The substance
+(no join code exists) is UNCHANGED and re-verified below. This is a record
+correction, NOT a resolution of 2206 — R8 stays blocked and OPEN. No build-state
+change. This pass deliberately keeps the bare issue numbers out of its commit
+subject so the close-resolved arm cannot bind a docs note to a blocked rung again. -->
+
+Between the 2026-07-05 blocked-report above and this pass, the DOS dispatch loop's
+close-resolved arm CLOSED issue 2200 (R2, the one-ledger join) at
+2026-07-06T01:15:37Z, reason COMPLETED, citing commit `93d81c9` as the "resolving
+commit" (`dos commit-audit` verdict OK / diff-witnessed).
+
+`93d81c9` is THIS FILE's own 2026-07-05 commit — `docs(dispatch): record R8
+blocked-on-... dispatch witness for issue 2206 (fak docs)` — a docs-only overlay
+note (1 file, +171 lines) that DECLARES R8 blocked on R2. It ships zero join code.
+The arm bound 2200 to it because the string `2200` appeared in that commit's SUBJECT
+LINE (`blocked-on-...2200`); the guarded `Refs 2206 (triage only)` in the same
+commit's BODY correctly did NOT close 2206. This is the exact loop defect the R7
+note (`AUTOCTX-R7-RELAY-DEFAULT-ADMISSION-TRIAGE-2026-07-05.md`, "Mis-close
+correction") flagged: a `docs(...)`-typed / triage-verbed commit referencing an
+issue number must not arm close-resolved for that issue.
+
+Why this correction matters (it is not cosmetic): R2's live one-ledger join STILL
+does not exist. Re-verified this pass — `git log --all --grep=2200` returns only
+`93d81c9`; the only per-turn cache-context join in the tree is #1607's
+`internal/vcacheobserve` `JoinContext` / `fak vcache context-join`, an OFFLINE
+attribution report joining a provider-cache Turn stream to LifecycleEvents
+(`context_reset`/`compaction`/`page_fault`/`prefix_mutation`), which the spine note
+itself distinguishes from R2: "#1607 designed the join; this rung is the live single
+record both programs read." So R8's "joined residency+warmth roll-up
+(provenance-separated)" has no source rows. But a dispatcher who now runs
+`gh issue view 2200` sees `CLOSED / COMPLETED` and would wrongly conclude R2 landed
+and R8 is unblocked — walking straight into the fabricated-witness trap the epic's
+honesty fence forbids (the "delete-a-row-refuses-green" check is vacuously green over
+an empty joined ledger; WITNESSED and OBSERVED cannot be separated in a record that
+does not exist). The mis-close makes R8 look MORE dispatchable while its input is
+exactly as absent as before.
+
+R8 (2206) remains blocked on BOTH inputs, re-verified at this HEAD:
+- #1918's base operator-readout render surface is still absent — no verb renders the
+  seven-line screen; the `resident_view` / `page_faults` field names have no render
+  site in `cmd/fak/*.go` or `internal/devindex/verbs.go`.
+- R2's live one-ledger join is absent; issue 2200's CLOSED status is a false green.
+
+Highest-value next step (OUT of this 2206 lane; needs issue-write scope this worker's
+floor refuses): REOPEN issue 2200 with a comment that `93d81c9` is a docs note, not
+the join, so the loop stops treating R2 as done. Then build R2's live single record,
+then #1918's readout verb, then R8 extends it. Only then does R8's witness (C9-style
+re-derivation + delete-a-row-refuses-green) have real rows to stand on.
