@@ -47,6 +47,23 @@ func TestRunSyncCheckRefusesDivergentDirtyPath(t *testing.T) {
 	}
 }
 
+func TestRunSyncCheckAheadNamesSafePush(t *testing.T) {
+	clone := syncCLIFixture(t)
+	syncGit(t, clone, "merge", "--ff-only", "origin/work")
+	syncWriteFile(t, filepath.Join(clone, "local.txt"), "local\n")
+	syncGit(t, clone, "add", "local.txt")
+	syncGit(t, clone, "commit", "-m", "local")
+
+	var out, errb bytes.Buffer
+	code := runSync(&out, &errb, []string{"check", "--repo", clone, "--remote", "origin", "--branch", "work"})
+	if code != syncExitRefused {
+		t.Fatalf("exit = %d, want refused; stderr=%s stdout=%s", code, errb.String(), out.String())
+	}
+	if !strings.Contains(out.String(), "fak sync push --remote origin --branch work") {
+		t.Fatalf("human output should name safe push path, got:\n%s", out.String())
+	}
+}
+
 func TestRunSyncApplySafeFastForward(t *testing.T) {
 	clone := syncCLIFixture(t)
 	syncWriteFile(t, filepath.Join(clone, "a.txt"), "v2\n")     // already target bytes
