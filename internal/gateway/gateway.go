@@ -3050,6 +3050,21 @@ func (s *Server) contextChange(ctx context.Context, req ContextChangeRequest) (C
 		return ContextChangeResponse{}, fmt.Errorf("persist core image: %w", err)
 	}
 	s.logf("gateway: context change %s step=%d image=%s requested_by=%s", ch.Action, ch.Step, imageDir, ch.RequestedBy)
+	// Trust-propagate the operator tombstone onto the restore stash: a span the operator just
+	// suppressed in the persisted recall image must NOT stay resurrectable through its
+	// content-addressed restore handle, or fak_context_restore would defeat the very suppression this
+	// action recorded. This is the shipped SETTER the restore trust gate was waiting for (see
+	// ctxrestore_gate.go); restoreContext already refuses a set flag. We key on ch.Digest — the
+	// APPLIED change's resolved content-address (always populated on an applied tombstone, unlike the
+	// caller-supplied req.Digest which may be blank on a step-only request) — so a step-only tombstone
+	// still suppresses the matching handle. The digest is a content-address, so tombstoneRestore flips
+	// it across ALL traces that stashed it; 0 is a valid no-op (this digest was never a live restore
+	// handle). This does not change the response contract or error behavior.
+	if ch.Action == recall.ContextActionTombstone {
+		if suppressed := s.tombstoneRestore(ch.Digest); suppressed > 0 {
+			s.logf("gateway: context change tombstone digest=%s suppressed %d restore handle(s) on the wire", ch.Digest, suppressed)
+		}
+	}
 	return contextChangeResponse(imageDir, ch, sess.Tombstoned(ch.Step)), nil
 }
 
