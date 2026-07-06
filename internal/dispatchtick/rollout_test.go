@@ -6,9 +6,11 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
 
-// acct builds a routable, deterministic account row at an explicit ModelTier so a
-// test never depends on the tier-inference heuristics.
-func acct(tag string, tier int, avail bool) AccountRow {
+// rolloutAcct builds a routable, deterministic account row at an explicit ModelTier
+// so a test never depends on the tier-inference heuristics. It is named distinctly
+// from the C5 tierroute_test.go acct helper (a different signature) to avoid a
+// same-package redeclaration in the shared dispatchtick test binary.
+func rolloutAcct(tag string, tier int, avail bool) AccountRow {
 	return AccountRow{
 		Account:   ".claude-" + tag,
 		Tag:       tag,
@@ -22,7 +24,7 @@ func acct(tag string, tier int, avail bool) AccountRow {
 // poolAll is a full pool: a frontier (T1), a mid (T2) and a routine (T3) account,
 // all available. For routine work the tier route picks the cheapest (T3).
 func poolAll() []AccountRow {
-	return []AccountRow{acct("frontier", 1, true), acct("mid", 2, true), acct("local", 3, true)}
+	return []AccountRow{rolloutAcct("frontier", 1, true), rolloutAcct("mid", 2, true), rolloutAcct("local", 3, true)}
 }
 
 // routineIssue is the tier metadata for low-risk routine work: required and
@@ -148,7 +150,7 @@ func TestCanaryRollsBackOnRegression(t *testing.T) {
 
 func TestCanaryRouteRefusedAndNotCheaperKeepLiveSelection(t *testing.T) {
 	// Route refused: no account is available at all -> keep the live selection.
-	none := []AccountRow{acct("frontier", 1, false), acct("local", 3, false)}
+	none := []AccountRow{rolloutAcct("frontier", 1, false), rolloutAcct("local", 3, false)}
 	d := EvaluateRollout(RolloutInput{
 		Mode:        RolloutCanary,
 		Class:       modelroute.ClassRoutine,
@@ -166,7 +168,7 @@ func TestCanaryRouteRefusedAndNotCheaperKeepLiveSelection(t *testing.T) {
 
 	// Would-choose is MORE capable than current (only a frontier account is up, but
 	// current is already the cheapest). Canary never upgrades routine work.
-	onlyFrontier := []AccountRow{acct("frontier", 1, true), acct("local", 3, false)}
+	onlyFrontier := []AccountRow{rolloutAcct("frontier", 1, true), rolloutAcct("local", 3, false)}
 	up := EvaluateRollout(RolloutInput{
 		Mode:        RolloutCanary,
 		Class:       modelroute.ClassRoutine,
