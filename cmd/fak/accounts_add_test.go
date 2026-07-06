@@ -139,6 +139,97 @@ func TestRunAccountsAddAdopt_CopiesBoth(t *testing.T) {
 	}
 }
 
+// TestRunAccountsAddAdopt_SkipsCrossAccountTwinToken is the july8-style case: the login we adopt
+// FROM carries a live session (.credentials.json) AND a static .oauth-token that is byte-identical
+// to a DIFFERENT account's seat (the token-twin smear). Adopting must copy the clean session and
+// SKIP the foreign token — so the new seat runs on its own bucket instead of tripping the
+// GateTokenWrite refusal and leaving a half-created dir.
+func TestRunAccountsAddAdopt_SkipsCrossAccountTwinToken(t *testing.T) {
+	t.Setenv("FAK_JOB_ROSTER", "")
+	t.Setenv("FAK_DOS_ROSTER", "")
+	t.Setenv("FAK_ACCOUNT_SUFFIX", "-netra")
+	home := t.TempDir()
+	const twinTok = "sk-ant-oat01-SHARED-TWIN-TOKEN"
+	// The seat that legitimately OWNS the token (a different account, already enrolled).
+	mkLoggedInSeat(t, home, ".claude-owner-netra", "owner@example.test", "u-owner", twinTok)
+	// The default seat we adopt FROM: its own live session, but the SAME token smeared onto it.
+	mkLoggedInSeat(t, home, ".claude", "july8@example.test", "u-july8", twinTok)
+	regPath := filepath.Join(home, "registry.json")
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{
+		"add", "--name", "july8", "--adopt",
+		"--registry", regPath, "--home", home,
+	})
+	if rc != 0 {
+		t.Fatalf("adopt with a twin token must SUCCEED by skipping it, got rc=%d stderr=%s stdout=%s", rc, errb.String(), out.String())
+	}
+	if !strings.Contains(out.String(), "skipped cross-account twin") {
+		t.Fatalf("expected a skipped-twin note in the summary, got:\n%s", out.String())
+	}
+	dir := filepath.Join(home, ".claude-july8-netra")
+	// The live session must be adopted…
+	if _, err := os.Stat(filepath.Join(dir, ".credentials.json")); err != nil {
+		t.Fatalf("adopted seat missing .credentials.json: %v", err)
+	}
+	// …and the foreign token must NOT have followed it.
+	if _, err := os.Stat(filepath.Join(dir, ".oauth-token")); err == nil {
+		t.Fatalf("adopt copied the cross-account twin .oauth-token it should have skipped")
+	}
+	// The seat is enrolled, active, and carries NO token fingerprint (so twin audits stay clean).
+	h := findHome(t, regPath, "july8-netra")
+	if h.Name == "" || !h.Active() {
+		t.Fatalf("july8-netra not enrolled active: %+v", h)
+	}
+	if h.Identity.Email != "july8@example.test" {
+		t.Fatalf("adopted identity wrong: %+v", h.Identity)
+	}
+	if h.Identity.TokenFP != "" {
+		t.Fatalf("adopted seat must not carry a token fingerprint after skipping the twin: %+v", h.Identity)
+	}
+	if !h.Identity.HasCreds {
+		t.Fatalf("adopted seat should still have has_creds=true via .credentials.json: %+v", h.Identity)
+	}
+}
+
+// TestRunAccountsAddAdopt_KeepsTokenWhenNoSession guards the narrowness of the twin-skip: a source
+// whose ONLY credential is a .oauth-token (no live .credentials.json) must still copy that token —
+// dropping it would leave the seat with no credential at all. Here the token is the source's OWN
+// (no foreign sibling), so the copy is kept AND passes the smear gate.
+func TestRunAccountsAddAdopt_KeepsTokenWhenNoSession(t *testing.T) {
+	t.Setenv("FAK_JOB_ROSTER", "")
+	t.Setenv("FAK_DOS_ROSTER", "")
+	t.Setenv("FAK_ACCOUNT_SUFFIX", "-netra")
+	home := t.TempDir()
+	const tok = "sk-ant-oat01-TOKEN-ONLY-SOURCE"
+	// The adopt source: token ONLY, no .credentials.json (a distinct dir from the target). No
+	// sibling shares this token, so it is the source's own — the twin-skip must NOT fire.
+	src := filepath.Join(home, ".claude-toksrc-netra")
+	if err := os.MkdirAll(filepath.Join(src, "projects"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, ".oauth-token"), []byte(tok+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	regPath := filepath.Join(home, "registry.json")
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{
+		"add", "--name", "tokonly", "--adopt", "--from", "toksrc-netra",
+		"--registry", regPath, "--home", home,
+	})
+	if rc != 0 {
+		t.Fatalf("adopt of a token-only source must SUCCEED (the token is the only credential), rc=%d stderr=%s", rc, errb.String())
+	}
+	dir := filepath.Join(home, ".claude-tokonly-netra")
+	if _, err := os.Stat(filepath.Join(dir, ".oauth-token")); err != nil {
+		t.Fatalf("token-only adopt must keep the .oauth-token (it is the sole credential): %v", err)
+	}
+	if strings.Contains(out.String(), "skipped cross-account twin") {
+		t.Fatalf("twin-skip must NOT fire when the token is the source's own and its only credential:\n%s", out.String())
+	}
+}
+
 func TestRunAccountsAddAdopt_NoCredsRefused(t *testing.T) {
 	t.Setenv("FAK_JOB_ROSTER", "")
 	t.Setenv("FAK_DOS_ROSTER", "")

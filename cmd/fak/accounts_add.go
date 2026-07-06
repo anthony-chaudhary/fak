@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -153,10 +155,17 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 			fmt.Fprintf(stderr, "fak accounts: --from source and target are the same dir (%s)\n", dir)
 			return 1
 		}
-		copied, err := copyLoginBundle(src, dir)
+		copied, skipped, err := copyLoginBundle(src, dir, p.homeDir)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak accounts: adopt from %s: %v\n", src, err)
 			return 1
+		}
+		if skipped != "" {
+			// A cross-account twin setup-token was deliberately left behind (the source's live
+			// .credentials.json is the real credential; carrying the twin would trip the
+			// GateTokenWrite smear guard and burn the OTHER account's bucket). Surface it so the
+			// operator knows WHY the seat has no .oauth-token.
+			fmt.Fprintf(stdout, "skipped cross-account twin .oauth-token from %s (%s); seat runs on its own .credentials.json\n", src, skipped)
 		}
 		// If a token came across, twin-check it against the rest of the tree (the smear guard).
 		if tok, terr := os.ReadFile(filepath.Join(dir, ".oauth-token")); terr == nil {
@@ -311,8 +320,21 @@ func resolveSourceSeat(homeDir, from string, reg accounts.Registry) (string, err
 // from the source's identity so the seat shows WHO it is. At least one credential file must
 // exist, else it errors (an adopt from a not-logged-in dir is refused rather than half-done).
 // It returns the human labels of what it copied for the summary line.
-func copyLoginBundle(src, dst string) (copied []string, err error) {
+//
+// homeRoot is the dir under which sibling seats are discovered; when set, a source .oauth-token
+// that is a KNOWN cross-account twin (its fingerprint already belongs to a DIFFERENT account's
+// live login among the siblings) is deliberately SKIPPED as long as the source also carries a
+// live .credentials.json — that session is the real credential, and carrying the twin would only
+// trip the GateTokenWrite smear guard and burn the other account's rate-limit bucket. The
+// skipped token's short fingerprint is returned so the caller can explain the omission. Passing
+// "" for homeRoot disables the sibling lookup and copies both files (the prior behavior).
+func copyLoginBundle(src, dst, homeRoot string) (copied []string, skippedTwin string, err error) {
+	skipToken := twinTokenToSkip(src, homeRoot)
 	for _, name := range []string{".credentials.json", ".oauth-token"} {
+		if name == ".oauth-token" && skipToken != "" {
+			skippedTwin = skipToken
+			continue
+		}
 		sp := filepath.Join(src, name)
 		b, rerr := os.ReadFile(sp)
 		if rerr != nil {
@@ -322,20 +344,103 @@ func copyLoginBundle(src, dst string) (copied []string, err error) {
 			continue
 		}
 		if werr := os.WriteFile(filepath.Join(dst, name), b, 0o600); werr != nil {
-			return copied, fmt.Errorf("copy %s: %w", name, werr)
+			return copied, skippedTwin, fmt.Errorf("copy %s: %w", name, werr)
 		}
 		copied = append(copied, name)
 	}
 	if len(copied) == 0 {
-		return nil, fmt.Errorf("source %s carries no login (.credentials.json / .oauth-token) to adopt", src)
+		return nil, skippedTwin, fmt.Errorf("source %s carries no login (.credentials.json / .oauth-token) to adopt", src)
 	}
 	// Seed identity from the source's oauthAccount so the roster shows WHO, not "-". The source
 	// dir's fresher .claude.json (root vs in-dir) is resolved by DeriveIdentity's stateIdentity.
 	sid := accounts.DeriveIdentity(src)
 	if err := seedClaudeJSON(dst, accounts.ProbedIdentity{Email: sid.Email, AccountUUID: sid.AccountUUID}); err != nil {
-		return copied, fmt.Errorf("seed identity: %w", err)
+		return copied, skippedTwin, fmt.Errorf("seed identity: %w", err)
 	}
-	return copied, nil
+	return copied, skippedTwin, nil
+}
+
+// twinTokenToSkip decides whether the source's .oauth-token is a cross-account twin that must NOT
+// ride along into the adopted seat. It returns the token's short fingerprint (to explain the
+// skip) only when ALL of these hold: the source carries a usable live .credentials.json (so the
+// seat still has a credential without the token), the source carries a .oauth-token, and that
+// token's fingerprint matches a SIBLING home under homeRoot whose live login names a DIFFERENT
+// account than the source's own login. That is exactly the GateTokenWrite refusal condition —
+// caught here so the adopt copies the clean session instead of copying-then-refusing. It returns
+// "" (copy the token) whenever homeRoot is unset, the token is the only credential, or the token
+// legitimately belongs to the source's own account.
+func twinTokenToSkip(src, homeRoot string) string {
+	if homeRoot == "" {
+		return ""
+	}
+	fp := tokenFingerprintFor(filepath.Join(src, ".oauth-token"))
+	if fp == "" {
+		return "" // no token to skip
+	}
+	// The token may only be dropped when a real session credential remains. hasLiveCredentials
+	// mirrors the launcher's "can this dir actually serve" check on .credentials.json alone.
+	if !hasLiveSessionCred(src) {
+		return "" // token is the only credential — keep it
+	}
+	srcAcct := accounts.DeriveIdentity(src).AccountKey()
+	homes, derr := accounts.Discover(homeRoot)
+	if derr != nil {
+		return ""
+	}
+	for _, h := range homes {
+		if h.Identity.TokenFP != fp {
+			continue
+		}
+		other := h.Identity.AccountKey()
+		if other == "" {
+			continue
+		}
+		// A sibling carries this exact token AND is logged into a different account than the
+		// source: the token is that other account's. Skipping it keeps july8's seat off july7's
+		// bucket. When srcAcct is "" (source login unknown) any identified other-owner is enough
+		// to treat the token as foreign.
+		if srcAcct == "" || other != srcAcct {
+			return fp
+		}
+	}
+	return ""
+}
+
+// hasLiveSessionCred reports whether dir carries a usable auto-refreshing session credential
+// (.credentials.json with a non-empty claudeAiOauth access/refresh token) — the credential that
+// lets a seat serve WITHOUT a .oauth-token. It is deliberately narrow: a bare .oauth-token does
+// NOT count here, since the whole point is deciding whether the token is redundant.
+func hasLiveSessionCred(dir string) bool {
+	b, err := os.ReadFile(filepath.Join(dir, ".credentials.json"))
+	if err != nil {
+		return false
+	}
+	var doc struct {
+		ClaudeAiOauth struct {
+			AccessToken  string `json:"accessToken"`
+			RefreshToken string `json:"refreshToken"`
+		} `json:"claudeAiOauth"`
+	}
+	if json.Unmarshal(b, &doc) != nil {
+		return false
+	}
+	return strings.TrimSpace(doc.ClaudeAiOauth.AccessToken) != "" ||
+		strings.TrimSpace(doc.ClaudeAiOauth.RefreshToken) != ""
+}
+
+// tokenFingerprintFor returns the same short fingerprint accounts.DeriveIdentity records for a
+// dir's .oauth-token, computed for an explicit token-file path. "" means absent/empty.
+func tokenFingerprintFor(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	tok := strings.TrimSpace(string(b))
+	if tok == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(tok))
+	return hex.EncodeToString(sum[:6])
 }
 
 // upsertHome replaces an existing registry row for home.Name in place (so --adopt --force
