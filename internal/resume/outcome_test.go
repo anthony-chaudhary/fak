@@ -61,6 +61,45 @@ func TestNewTurnsAfter(t *testing.T) {
 	}
 }
 
+// ResumeModels attributes the recovery turns' model: the latest post-launch model is what
+// the resume is on now; the distinct set exposes a mid-resume drift; pre-launch turns and
+// the no-launch floor attribute nothing.
+func TestResumeModels(t *testing.T) {
+	times := []int64{10, 20, 30, 40}
+	models := []string{"claude-fable-5", "claude-opus-4-8", "claude-opus-4-8", "claude-sonnet-5"}
+
+	// After 15: turns at 20/30/40 count. Latest is the sonnet turn at 40; distinct is
+	// opus then sonnet, in first-appearance order (the pre-launch fable turn is excluded).
+	latest, distinct := ResumeModels(times, models, 15)
+	if latest != "claude-sonnet-5" {
+		t.Errorf("latest = %q, want claude-sonnet-5", latest)
+	}
+	if len(distinct) != 2 || distinct[0] != "claude-opus-4-8" || distinct[1] != "claude-sonnet-5" {
+		t.Errorf("distinct = %v, want [claude-opus-4-8 claude-sonnet-5]", distinct)
+	}
+
+	// A single-model recovery: one distinct entry, latest equal to it.
+	latest, distinct = ResumeModels(times[:2], models[:2], 15)
+	if latest != "claude-opus-4-8" || len(distinct) != 1 || distinct[0] != "claude-opus-4-8" {
+		t.Errorf("single-model = %q %v, want claude-opus-4-8 [claude-opus-4-8]", latest, distinct)
+	}
+
+	// No launch on record (sinceUnix <= 0) attributes nothing.
+	if latest, distinct = ResumeModels(times, models, 0); latest != "" || distinct != nil {
+		t.Errorf("no-launch floor = %q %v, want \"\" nil", latest, distinct)
+	}
+
+	// Nothing landed after the last turn: no attribution.
+	if latest, distinct = ResumeModels(times, models, 40); latest != "" || distinct != nil {
+		t.Errorf("nothing-after = %q %v, want \"\" nil", latest, distinct)
+	}
+
+	// Mismatched slice lengths fail closed to no attribution rather than panicking.
+	if latest, _ = ResumeModels(times, models[:1], 5); latest != "" {
+		t.Errorf("mismatched-lengths latest = %q, want \"\"", latest)
+	}
+}
+
 // RetryGate is the outcome-aware once-gate: blocked unless the last attempt failed
 // recoverably and the cap has room; operator settles and auth walls are final.
 func TestRetryGate(t *testing.T) {

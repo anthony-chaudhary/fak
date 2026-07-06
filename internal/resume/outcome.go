@@ -162,6 +162,42 @@ func NewTurnsAfter(turnUnixTimes []int64, sinceUnix int64) int {
 	return n
 }
 
+// ResumeModels attributes a model to a resume's progress. Given the real-turn timestamps
+// and the parallel model of each turn (turnModels[i] ran the turn at turnUnixTimes[i]), it
+// returns the LATEST model that ran strictly after sinceUnix — the one the resume is on
+// now — and the distinct models seen after it in first-appearance order. A resume whose
+// turns span more than one model (a re-home mid-flight) yields a multi-element distinct
+// set, so a monitor can tell "took, on the intended model" from "took, but drifted." A
+// zero/negative sinceUnix, mismatched slice lengths, or no post-launch turn yields the
+// empty string and nil: there is no resume progress to attribute a model to. It answers
+// only WHICH model the recovery turns ran on — never whether that is the RIGHT model; the
+// expectation policy lives with the operator's caller, not this leaf.
+func ResumeModels(turnUnixTimes []int64, turnModels []string, sinceUnix int64) (latest string, distinct []string) {
+	if sinceUnix <= 0 || len(turnUnixTimes) != len(turnModels) {
+		return "", nil
+	}
+	var latestUnix int64
+	seen := map[string]bool{}
+	for i, t := range turnUnixTimes {
+		if t <= sinceUnix {
+			continue
+		}
+		m := turnModels[i]
+		if m == "" {
+			continue
+		}
+		if !seen[m] {
+			seen[m] = true
+			distinct = append(distinct, m)
+		}
+		if t >= latestUnix {
+			latestUnix = t
+			latest = m
+		}
+	}
+	return latest, distinct
+}
+
 // RetryDecision is the outcome-aware once-gate verdict: whether a NEW automatic resume of
 // this session is blocked, and the closed human reason.
 type RetryDecision struct {
