@@ -20,8 +20,10 @@ package devindex
 //     a Go literal, not a file the catalog loads. The map literal also makes a
 //     duplicate key a compile error — "no verb in two tiers" by construction.
 //   - Keyed by CANONICAL name (the manifest Name where curated); alias spellings
-//     resolve through the manifest in TierOf. The one uncataloged multi-spelling
-//     verb (llmd-smoke / llm-d-smoke) carries both spellings explicitly.
+//     resolve through the manifest in TierOf. The multi-spelling verb llmd-smoke /
+//     llm-d-smoke is now cataloged (verbs.go carries llm-d-smoke as an alias), so
+//     TierOf canonicalizes either spelling; both keys below are kept for a direct,
+//     manifest-free lookup and stay in agreement.
 //
 // The Landlock trampoline verb (`case guard.TrampolineVerb:`) is a non-literal
 // case the mainDispatchVerbs scan never emits; it stays invisible here exactly as
