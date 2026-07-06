@@ -146,6 +146,7 @@ func collectTokenDefaultsScorecard(root string) map[string]any {
 	gateway := read("internal/gateway/gateway.go")
 	tui := read("cmd/fak/tui.go")
 	messages := read("internal/gateway/messages.go")
+	agentSeam := read("internal/agent/ctxplan_seam.go")
 	bothWire := func(needle string) bool { return strings.Contains(serve, needle) && strings.Contains(guard, needle) }
 
 	// ---- the regression locks: each failing check is one unit of token_defaults_debt ----
@@ -159,7 +160,8 @@ func collectTokenDefaultsScorecard(root string) map[string]any {
 	require(strings.Contains(gateway, "DefaultElideResultBytes = DocumentedElideResultBytes"), "gateway.DefaultElideResultBytes must arm oversized-result elision on by default at the documented threshold")
 	require(bothWire(`fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget`), "both front doors must wire compact-history-budget to gateway.DefaultCompactHistoryBudget")
 	require(bothWire(`fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes`), "both front doors must wire elide-result-bytes to gateway.DefaultElideResultBytes")
-	require(bothWire(`fs.Int("ctx-view-budget", 8000`), "both front doors must default ctx-view-budget ON at the conservative 8000-resident-token budget (witness: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md)")
+	require(strings.Contains(agentSeam, "const DefaultCtxViewBudget = 8000"), "agent.DefaultCtxViewBudget must stay default-on at the witnessed 8000-resident-token budget")
+	require(bothWire(`fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget`), "both front doors must default ctx-view-budget ON by wiring it to agent.DefaultCtxViewBudget (the witnessed 8000-resident-token budget: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md)")
 	require(strings.Contains(serve, `fs.Bool("vdso", true`), "serve.go must default vDSO on")
 	require(reVDSOTrue.MatchString(guard), "guard.go must set VDSO true")
 	require(bothWire("ToolFloorDenies:"), "both front doors must wire ToolFloorDenies")
@@ -204,7 +206,7 @@ func collectTokenDefaultsScorecard(root string) map[string]any {
 		},
 		{
 			key: "ctxview", label: "ctxview — ctxplan O(1) planned view (re-materialize history under a budget)",
-			class: "bounded", on: bothWire(`fs.Int("ctx-view-budget", 8000`),
+			class: "bounded", on: strings.Contains(agentSeam, "const DefaultCtxViewBudget = 8000") && bothWire(`fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget`),
 			witnessed: true, blocker: "", flag: "--ctx-view-budget", gated: false, noted: true, locked: true,
 		},
 	}

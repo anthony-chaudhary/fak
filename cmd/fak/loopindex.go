@@ -109,7 +109,7 @@ func collectLoopIndex(root string) loopindex.Loop {
 			liProbe("context_gc", "context is ref-counted / GC'd (internal/contextq + internal/ctxmmu)",
 				false, exists("internal/contextq") && exists("internal/ctxmmu")),
 			liProbe("ctxview_budget_default", "the ctxplan planned view is default-on in both front doors (one-read orient under a budget)",
-				false, bothDoors(`fs.Int("ctx-view-budget", 8000`)),
+				false, bothDoors(`fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget`)),
 		},
 	}
 

@@ -119,6 +119,81 @@ func TestTrajctlCloseUnknownObjective(t *testing.T) {
 	}
 }
 
+// TestTrajctlCurveEndToEnd drives the curve fold through the CLI: a ledger with a
+// declining objective and a rising one folds into a schema-pinned, worst-first
+// report (DRIFT before HEALTHY), a single --objective fold reports that
+// objective's signal, and an unknown id fails closed (exit 1).
+func TestTrajctlCurveEndToEnd(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "trajctl.jsonl")
+	mustAppend := func(row trajctl.Row) {
+		t.Helper()
+		if err := trajctl.Append(ledger, row); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+	w3 := func(id string, v float64, ms int64) trajctl.Row {
+		return trajctl.ScoreRecord(trajctl.ScoreRow{
+			ObjectiveID: id, Value: v, Method: trajctl.CommitScorerMethod,
+			Version: trajctl.CommitScorerVersion, Witness: trajctl.W3, UnixMillis: ms,
+		})
+	}
+	mustAppend(trajctl.ObjectiveRecord(trajctl.Objective{ID: "obj-drift", Statement: "declining", Status: trajctl.StatusActive}))
+	mustAppend(w3("obj-drift", 0.75, 1000))
+	mustAppend(w3("obj-drift", 0.25, 2000))
+	mustAppend(trajctl.ObjectiveRecord(trajctl.Objective{ID: "obj-healthy", Statement: "rising", Status: trajctl.StatusActive}))
+	mustAppend(w3("obj-healthy", 0.25, 1000))
+	mustAppend(w3("obj-healthy", 0.75, 2000))
+
+	// No id: worst-first listing, DRIFT ahead of HEALTHY, pinned schema.
+	var out, errb bytes.Buffer
+	if code := runTrajctl(&out, &errb, []string{"curve", "--ledger", ledger, "--json"}); code != 0 {
+		t.Fatalf("curve --json exit=%d stderr=%q", code, errb.String())
+	}
+	var rep trajctl.CurveReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("curve --json: %v (out=%q)", err, out.String())
+	}
+	if rep.Schema != trajctl.CurveSchema {
+		t.Fatalf("schema = %q, want %q", rep.Schema, trajctl.CurveSchema)
+	}
+	if len(rep.Objectives) != 2 ||
+		rep.Objectives[0].ObjectiveID != "obj-drift" || rep.Objectives[0].Signal != trajctl.SignalDrift ||
+		rep.Objectives[1].ObjectiveID != "obj-healthy" || rep.Objectives[1].Signal != trajctl.SignalHealthy {
+		t.Fatalf("worst-first report = %+v", rep.Objectives)
+	}
+
+	// Single objective fold.
+	out.Reset()
+	errb.Reset()
+	if code := runTrajctl(&out, &errb, []string{"curve", "--objective", "obj-drift", "--ledger", ledger, "--json"}); code != 0 {
+		t.Fatalf("curve --objective exit=%d stderr=%q", code, errb.String())
+	}
+	rep = trajctl.CurveReport{}
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("curve --objective --json: %v", err)
+	}
+	if len(rep.Objectives) != 1 || rep.Objectives[0].Signal != trajctl.SignalDrift {
+		t.Fatalf("single fold = %+v, want one DRIFT", rep.Objectives)
+	}
+
+	// Text render carries the signal token.
+	out.Reset()
+	errb.Reset()
+	if code := runTrajctl(&out, &errb, []string{"curve", "--ledger", ledger}); code != 0 {
+		t.Fatalf("curve text exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "DRIFT") || !strings.Contains(out.String(), "HEALTHY") {
+		t.Fatalf("curve text = %q, want DRIFT and HEALTHY", out.String())
+	}
+
+	// Unknown objective fails closed.
+	out.Reset()
+	errb.Reset()
+	if code := runTrajctl(&out, &errb, []string{"curve", "--objective", "ghost", "--ledger", ledger}); code != 1 {
+		t.Fatalf("curve --objective ghost exit=%d, want 1 (stderr=%q)", code, errb.String())
+	}
+}
+
 // TestTrajctlDeclareFromGoal imports loopdrive.Spec's Objective/Plan/Budget
 // from a real GOAL.md, defaulting --id to the frontmatter 'loop:' id.
 func TestTrajctlDeclareFromGoal(t *testing.T) {

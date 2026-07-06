@@ -364,7 +364,7 @@ func TestAccountsLaunchBrokerAllowCarriesMetadata(t *testing.T) {
 	}
 }
 
-func TestRunAccountsLaunchFallsBackToOpus48WhenDefaultFableUnavailable(t *testing.T) {
+func TestRunAccountsLaunchFallsBackToFableWhenDefaultOpusUnavailable(t *testing.T) {
 	home := t.TempDir()
 	regPath, _ := launchRegistry(t, home)
 
@@ -373,7 +373,7 @@ func TestRunAccountsLaunchFallsBackToOpus48WhenDefaultFableUnavailable(t *testin
 	accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) launchRunResult {
 		calls = append(calls, append([]string(nil), argv...))
 		if len(calls) == 1 {
-			return launchRunResult{Code: 1, Stderr: `error: model "fable" is not available for this account`}
+			return launchRunResult{Code: 1, Stderr: `error: model "claude-opus-4-8" is not available for this account`}
 		}
 		return launchRunResult{Code: 0}
 	}
@@ -389,7 +389,7 @@ func TestRunAccountsLaunchFallsBackToOpus48WhenDefaultFableUnavailable(t *testin
 	}
 	first, second := strings.Join(calls[0], " "), strings.Join(calls[1], " ")
 	if !strings.Contains(first, "--model "+defaultLaunchModel) {
-		t.Fatalf("primary launch did not use default Fable model: %q", first)
+		t.Fatalf("primary launch did not use default Opus model: %q", first)
 	}
 	for _, want := range []string{"--model " + defaultLaunchFallbackModel, "--settings " + ultracodeSettingsArg} {
 		if !strings.Contains(second, want) {
@@ -403,11 +403,11 @@ func TestRunAccountsLaunchFallsBackToOpus48WhenDefaultFableUnavailable(t *testin
 	}
 }
 
-// TestRunAccountsLaunchFallsBackWhenDefaultFableHitsWeeklyLimit is the goal case: a usage/weekly
+// TestRunAccountsLaunchFallsBackWhenDefaultOpusHitsWeeklyLimit is the goal case: a usage/weekly
 // limit is NOT an "unknown model" error, so the old unknown-model-only detector would have let the
-// walled Fable startup fail without ever trying Opus. The broadened classifier recognizes the cap
-// and the chain falls forward to Opus 4.8.
-func TestRunAccountsLaunchFallsBackWhenDefaultFableHitsWeeklyLimit(t *testing.T) {
+// walled Opus startup fail without ever trying the fallback. The broadened classifier recognizes
+// the cap and the chain falls forward to Fable 5.
+func TestRunAccountsLaunchFallsBackWhenDefaultOpusHitsWeeklyLimit(t *testing.T) {
 	home := t.TempDir()
 	regPath, _ := launchRegistry(t, home)
 
@@ -433,7 +433,7 @@ func TestRunAccountsLaunchFallsBackWhenDefaultFableHitsWeeklyLimit(t *testing.T)
 		t.Fatalf("launch attempts = %d, want primary + fallback; calls=%#v", len(calls), calls)
 	}
 	if second := strings.Join(calls[1], " "); !strings.Contains(second, "--model "+defaultLaunchFallbackModel) {
-		t.Fatalf("weekly-limit fallback did not switch to Opus: %q", second)
+		t.Fatalf("weekly-limit fallback did not switch to Fable: %q", second)
 	}
 	if !strings.Contains(errb.String(), "usage-limit") {
 		t.Fatalf("fallback plan should name the usage-limit kind:\n%s", errb.String())
@@ -441,8 +441,8 @@ func TestRunAccountsLaunchFallsBackWhenDefaultFableHitsWeeklyLimit(t *testing.T)
 }
 
 // TestRunAccountsLaunchWalksMultiModelFallbackChain proves --fallback-model is an ordered CHAIN,
-// not a single retry: Fable and the first fallback are both unavailable, and the launch walks on
-// to the second fallback, which starts.
+// not a single retry: the default and the first fallback are both unavailable, and the launch walks
+// on to the second fallback, which starts.
 func TestRunAccountsLaunchWalksMultiModelFallbackChain(t *testing.T) {
 	home := t.TempDir()
 	regPath, _ := launchRegistry(t, home)
@@ -453,7 +453,7 @@ func TestRunAccountsLaunchWalksMultiModelFallbackChain(t *testing.T) {
 		models = append(models, modelArg(argv))
 		if len(models) < 3 {
 			// A transient throttle is bucket-scoped (no model-name gate), so each hop fires and
-			// the chain walks Fable -> Opus -> Sonnet regardless of which id the error names.
+			// the chain walks opus -> fable -> sonnet regardless of which id the error names.
 			return launchRunResult{Code: 1, Stderr: `Error 429: too many requests`}
 		}
 		return launchRunResult{Code: 0}
@@ -463,13 +463,13 @@ func TestRunAccountsLaunchWalksMultiModelFallbackChain(t *testing.T) {
 	var out, errb bytes.Buffer
 	rc := runAccounts(&out, &errb, []string{
 		"launch", "--name", "gem8-seat",
-		"--fallback-model", "claude-opus-4-8,claude-sonnet-5",
+		"--fallback-model", "fable,claude-sonnet-5",
 		"--registry", regPath, "--home", home,
 	})
 	if rc != 0 {
 		t.Fatalf("chain launch rc=%d stderr=%s", rc, errb.String())
 	}
-	want := []string{defaultLaunchModel, "claude-opus-4-8", "claude-sonnet-5"}
+	want := []string{defaultLaunchModel, "fable", "claude-sonnet-5"}
 	if !reflect.DeepEqual(models, want) {
 		t.Fatalf("fallback chain models = %#v, want %#v", models, want)
 	}
@@ -519,10 +519,10 @@ func TestLaunchModelUnavailableClassifier(t *testing.T) {
 		want   launchModelUnavailKind
 	}{
 		// Unknown / invalid / unentitled model — must name the model dimension AND the tried id.
-		{`error: model "fable" is not available for this account`, launchModelUnknown},
-		{`invalid model: fable`, launchModelUnknown},
-		{`model_not_found: fable`, launchModelUnknown},
-		{`your account does not have access to model fable`, launchModelUnknown},
+		{`error: model "claude-opus-4-8" is not available for this account`, launchModelUnknown},
+		{`invalid model: claude-opus-4-8`, launchModelUnknown},
+		{`model_not_found: claude-opus-4-8`, launchModelUnknown},
+		{`your account does not have access to model claude-opus-4-8`, launchModelUnknown},
 		// Usage / weekly / session caps — the class the old unknown-model-only detector MISSED.
 		// They are bucket-scoped and need not name the model id at all.
 		{`Claude usage limit reached — your weekly limit resets at 2026-07-10`, launchModelUsageLimit},
@@ -533,7 +533,7 @@ func TestLaunchModelUnavailableClassifier(t *testing.T) {
 		{`overloaded_error: the server is overloaded`, launchModelRateLimit},
 		// Not a model-unavailability the chain should act on.
 		{`network unavailable while contacting provider`, launchModelAvailable},
-		{`model claude-opus-4-8 is not available`, launchModelAvailable}, // names a DIFFERENT model than fable
+		{`model fable is not available`, launchModelAvailable}, // names a DIFFERENT model than the default (opus)
 		{`permission denied`, launchModelAvailable},
 		{`Error: Not logged in. Run /login`, launchModelAvailable}, // auth wall — a model switch cannot fix it
 	}

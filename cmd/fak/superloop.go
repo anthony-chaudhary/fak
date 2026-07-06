@@ -51,6 +51,8 @@ func runSuperloop(stdout, stderr io.Writer, argv []string) int {
 		return runSuperloopExplain(stdout, stderr, argv[1:])
 	case "walk":
 		return runSuperloopWalk(stdout, stderr, argv[1:])
+	case "modelfit":
+		return runSuperloopModelfit(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		superloopUsage(stdout)
 		return 0
@@ -165,6 +167,29 @@ func runSuperloopWalk(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	return 1
+}
+
+// runSuperloopModelfit renders the C6 model-fit eval (#3043): the OFFLINE,
+// fixture-backed grade of which cheaper models can do read-only super-loop
+// watchdog/meta work reliably. It grades the built-in SIMULATED sample rows (no
+// live model is queried, so it runs anywhere) against the built-in fixtures and
+// emits per-model suitability + the risk class each passing model is cleared for.
+// It mutates nothing and always exits 0 when it emits: this is an operator readout,
+// not a gate — suitability is per-model, and a suitable verdict clears read-only
+// meta RECOMMENDATION only, never mutation.
+func runSuperloopModelfit(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("superloop modelfit", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "emit the eval report as JSON")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	rep := superloop.SimulatedReport()
+	if *asJSON {
+		return encodeJSONOrFail(stdout, stderr, rep, "fak superloop modelfit")
+	}
+	superloop.Render(stdout, rep)
+	return 0
 }
 
 // superloopCollector holds the cheap committed surfaces read ONCE per walk (the
@@ -429,6 +454,8 @@ func superloopUsage(w io.Writer) {
   fak superloop list                  the named super loops + their members
   fak superloop explain <name>        why <name> is a super loop, not a normal loop
   fak superloop walk <name> [--json]  walk its members' status, fold a worst-first plan
+  fak superloop modelfit [--json]     offline model-fit eval: which cheaper models can
+                                      do read-only watchdog/meta work reliably (#3043)
 
 A SUPER LOOP is keyed on an operator intent ("improve quality"), not a task. Its tick
 WALKS its member loops/scorecards/gardens to read their status FIRST, SELECTS the

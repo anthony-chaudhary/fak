@@ -42,7 +42,7 @@ type launchOpts struct {
 	useGuard        bool     // wrap the agent in `fak guard` (kernel adjudication + vCache)
 	skipPermissions bool     // pass --dangerously-skip-permissions to the agent
 	ultracode       bool     // pass --settings '{"ultracode":true}' to Claude (workflow mode)
-	model           string   // pass --model <id> to Claude (default Fable); empty => the seat's own default
+	model           string   // pass --model <id> to Claude (default Opus 4.8); empty => the seat's own default
 	guardCacheArgs  []string // managed-cache posture flags spliced into `fak guard` (--api-key-env / --managed-cache); nil => guard's own auto
 	passthrough     []string // extra args appended to the agent command (everything after `--`)
 }
@@ -54,20 +54,20 @@ type launchOpts struct {
 // only emits it for Claude, since --settings is Claude-specific.
 const ultracodeSettingsArg = `{"ultracode":true}`
 
-// defaultLaunchModel is the Fable 5 model alias an account-switched Claude launch pins by
+// defaultLaunchModel is the Opus 4.8 model id an account-switched Claude launch pins by
 // default. The switcher passes it explicitly via --model so every seat a launch lands on
 // starts on the same model regardless of that seat's OWN saved default. `--model ""` opts
 // out and lets the seat's saved default stand. Like ultracode it is emitted for Claude only:
 // --model is a Claude-specific flag and the id names a Claude model, meaningless to other
-// agents.
-const defaultLaunchModel = "fable"
+// agents. Pinned to Opus 4.8 as the fleet primary (was Fable 5); Fable remains the fallback.
+const defaultLaunchModel = "claude-opus-4-8"
 
 // defaultLaunchFallbackModel is the default fallback CHAIN (`--fallback-model`, comma-separated)
-// tried in order when the default Fable 5 launch is refused before a session starts because the
-// model is unavailable — unknown/invalid OR a usage/rate limit (e.g. Fable's weekly cap). It
-// lands on the explicit Opus 4.8 id; ultracode is preserved by reusing the same launchOpts. A
-// caller can widen it, e.g. `--fallback-model claude-opus-4-8,claude-sonnet-5`.
-const defaultLaunchFallbackModel = "claude-opus-4-8"
+// tried in order when the default Opus 4.8 launch is refused before a session starts because the
+// model is unavailable — unknown/invalid OR a usage/rate limit (e.g. an Opus weekly cap). It
+// lands on the cheaper Fable 5 alias; ultracode is preserved by reusing the same launchOpts. A
+// caller can widen it, e.g. `--fallback-model fable,claude-sonnet-5`.
+const defaultLaunchFallbackModel = "fable"
 
 // launchSkipPermsFlag returns the agent-specific flag that hands permission authority to
 // fak's capability floor — i.e. suppresses the agent's OWN per-call approval prompts, because
@@ -156,9 +156,9 @@ type launchParams struct {
 	useGuard      bool   // default true
 	skipPerms     bool   // default true
 	ultracode     bool   // default true — put Claude in ultracode (workflow) mode via --settings
-	model         string // default Fable — the model a switched Claude launch pins via --model ("" => seat default)
+	model         string // default Opus 4.8 — the model a switched Claude launch pins via --model ("" => seat default)
 	modelExplicit bool
-	fallbackModel string // default Opus 4.8 — comma-separated fallback CHAIN tried when the default Fable startup is unavailable
+	fallbackModel string // default Fable 5 — comma-separated fallback CHAIN tried when the default Opus 4.8 startup is unavailable
 	managedCache  string // managed-cache posture: auto|on|off (default $FAK_MANAGED_CACHE, else auto)
 	dryRun        bool   // print the plan, do not exec
 	passthrough   []string
@@ -392,7 +392,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 }
 
 // modelFallbackChain returns the ordered list of Claude model ids to try, in order, when the
-// default startup model is unavailable — the "Fable 5 -> Opus 4.8 -> ..." chain. It reads the
+// default startup model is unavailable — the "Opus 4.8 -> Fable 5 -> ..." chain. It reads the
 // (comma-separated) --fallback-model list, dropping blanks, the primary model itself, and any
 // duplicate so the chain never re-launches a model already attempted. ok is false when auto
 // fallback does not apply at all: a non-Claude agent (the id is a Claude model, meaningless
@@ -523,6 +523,25 @@ var launchModelUnknownSignals = []string{
 // launched fable does not fire a fable fallback). Everything else — including auth/login walls and
 // ordinary crashes — returns launchModelAvailable so the chain is never burned on a failure a
 // model switch cannot fix.
+// launchModelAlias returns the friendly alias for a known model id (and the canonical id for an
+// alias), so classifyLaunchModelUnavailable matches a stderr that names the tried model in EITHER
+// form — the CLI prints "opus" as often as "claude-opus-4-8". Returns a sentinel that can't occur
+// in real stderr for an unmapped id, so the "names a different model" guard stays strict rather
+// than matching on an empty substring.
+func launchModelAlias(id string) string {
+	switch strings.ToLower(strings.TrimSpace(id)) {
+	case "claude-opus-4-8", "opus":
+		return "opus"
+	case "claude-sonnet-5", "sonnet":
+		return "sonnet"
+	case "claude-haiku-4-5-20251001", "haiku":
+		return "haiku"
+	case "claude-fable-5", "fable":
+		return "fable"
+	}
+	return "\x00" // no alias known; never a substring of real stderr
+}
+
 func classifyLaunchModelUnavailable(stderr, tried string) launchModelUnavailKind {
 	text := strings.ToLower(stderr)
 	tried = strings.ToLower(strings.TrimSpace(tried))
@@ -539,9 +558,11 @@ func classifyLaunchModelUnavailable(stderr, tried string) launchModelUnavailKind
 	if !strings.Contains(text, "model") {
 		return launchModelAvailable
 	}
-	// The default id surfaces as the friendly alias "fable" as often as its canonical form, so
-	// accept either for the first hop; a later hop (opus, sonnet, ...) matches on its own id.
-	if tried != "" && !strings.Contains(text, tried) && !strings.Contains(text, "fable") {
+	// A model id surfaces as its friendly alias ("opus", "fable", "sonnet") as often as its
+	// canonical form ("claude-opus-4-8"), so accept the alias of whatever id was tried on this hop
+	// as naming the same model. A stderr that names a DIFFERENT model than the one we tried is not
+	// a signal to fall the chain forward.
+	if tried != "" && !strings.Contains(text, tried) && !strings.Contains(text, launchModelAlias(tried)) {
 		return launchModelAvailable
 	}
 	for _, sig := range launchModelUnknownSignals {

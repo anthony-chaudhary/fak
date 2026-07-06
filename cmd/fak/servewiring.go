@@ -75,6 +75,7 @@ var servewiringData = []wiringRow{
 	{"vdso", "--vdso / --invalidation", "VDSO", verdictWired, "internal/kernel/kernel.go:348", "dedup fast path + tier-2 invalidation granularity"},
 	{"vdsoproxyfill", "--vdso-proxy-fill", "VDSOProxyFill", verdictOffByDefault, "internal/gateway/gateway.go:1868", "warms the vDSO tier-2 cache from admitted inbound tool_result blocks; off by default"},
 	{"toolfloor", "(adjudicator.Default.NeverAdmits)", "ToolFloorDenies", verdictWired, "internal/gateway/messages.go:392", "prunes provably-unreachable tool defs from the Anthropic passthrough; default-on, fail-safe"},
+	{"expose", "--expose", "ExposeTools", verdictOffByDefault, "internal/gateway/mcp.go:exposedToolDescriptors", "allowlist of tool-name globs that narrows BOTH tools/list discovery AND tools/call invocation to the named tools (a hidden tool answers \"unknown tool\", no existence leak); a malformed or zero-match pattern fails startup loud; empty (default) exposes the full surface"},
 	{"decidesession", "(host func, default-on)", "DecideSession", verdictWired, "internal/gateway/session_admit.go:57", "run-state refusal + TurnsLeft debit + budget + pace, before the model turn"},
 	{"debitsession", "(host func, default-on)", "DebitSession", verdictWired, "internal/gateway/session_admit.go:157", "debits TokensLeft + context budget after the planner returns"},
 	{"nativeserve", "--native", "Native", verdictOffByDefault, "internal/gateway/messages.go:153", "routes non-streaming /v1/messages through fak's owned agent.RunArm loop; off by default"},

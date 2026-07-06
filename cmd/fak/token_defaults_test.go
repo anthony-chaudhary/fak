@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
 
@@ -96,9 +97,12 @@ func TestTokenDefault_ElideDefaultsOn(t *testing.T) {
 // cache prefix byte-identical with exact recall) — docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md.
 // The planner is fail-open (only ever shortens; falls open to the full history on any doubt).
 func TestTokenDefault_CtxViewDefaultsOn(t *testing.T) {
+	if agent.DefaultCtxViewBudget <= 0 {
+		t.Fatalf("agent.DefaultCtxViewBudget must be default-on (>0), got %d", agent.DefaultCtxViewBudget)
+	}
 	for _, f := range []string{"serve.go", "guard.go"} {
-		if !strings.Contains(readEntrypoint(t, f), `fs.Int("ctx-view-budget", 8000`) {
-			t.Errorf("%s must default --ctx-view-budget to 8000 (on; fail-open planner, witnessed)", f)
+		if !strings.Contains(readEntrypoint(t, f), `fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget`) {
+			t.Errorf("%s must wire --ctx-view-budget to agent.DefaultCtxViewBudget (default-on; fail-open planner, witnessed)", f)
 		}
 	}
 }

@@ -451,6 +451,18 @@ func targetJSON(t modelroute.Target) map[string]any {
 	if t.MaxOutputTokens != 0 {
 		out["max_output_tokens"] = t.MaxOutputTokens
 	}
+	if t.RequestsPerMinute != 0 {
+		out["requests_per_minute"] = t.RequestsPerMinute
+	}
+	if t.RequestsPerDay != 0 {
+		out["requests_per_day"] = t.RequestsPerDay
+	}
+	if t.TokensPerMinute != 0 {
+		out["tokens_per_minute"] = t.TokensPerMinute
+	}
+	if t.TokensPerDay != 0 {
+		out["tokens_per_day"] = t.TokensPerDay
+	}
 	return out
 }
 
@@ -541,6 +553,18 @@ func accountMeta(a modelroute.Account) string {
 	}
 	if a.MaxOutputTokens != 0 {
 		parts = append(parts, fmt.Sprintf("max_output=%d", a.MaxOutputTokens))
+	}
+	if a.RequestsPerMinute != 0 {
+		parts = append(parts, fmt.Sprintf("rpm=%d", a.RequestsPerMinute))
+	}
+	if a.RequestsPerDay != 0 {
+		parts = append(parts, fmt.Sprintf("rpd=%d", a.RequestsPerDay))
+	}
+	if a.TokensPerMinute != 0 {
+		parts = append(parts, fmt.Sprintf("tpm=%d", a.TokensPerMinute))
+	}
+	if a.TokensPerDay != 0 {
+		parts = append(parts, fmt.Sprintf("tpd=%d", a.TokensPerDay))
 	}
 	if len(parts) == 0 {
 		return ""

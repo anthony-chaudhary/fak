@@ -41,8 +41,8 @@ import (
 //	fak accounts set-default --name <n> alias for `set-role active` (the launch/active seat)
 //	fak accounts launch [--name <n>]   start claude UNDER `fak guard` on a seat (the active role by
 //	                                   default): cache/vCache ON + the kernel as the permission system
-//	                                   (--dangerously-skip-permissions). Claude launches default to Fable 5
-//	                                   (--model fable) with one startup fallback to Opus 4.8;
+//	                                   (--dangerously-skip-permissions). Claude launches default to Opus 4.8
+//	                                   (--model claude-opus-4-8) with a startup fallback to Fable 5;
 //	                                   --model '' uses the seat's own saved default.
 //	                                   --guard=false / --skip-permissions=false opt out
 //	fak accounts list                  table of every seat: name, lifecycle, LOGIN status, TRUE identity, creds, rehome, flags
@@ -114,8 +114,8 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	launchSkipPerms := fs.Bool("skip-permissions", true, "(launch) pass --dangerously-skip-permissions to claude so fak's capability floor — not Claude's own prompts — is the permission system; --skip-permissions=false lets Claude prompt")
 	launchCommand := fs.String("command", "claude", "(launch) the agent command to start under the resolved seat")
 	launchUltracode := fs.Bool("ultracode", true, "(launch) run Claude in ultracode (xhigh reasoning + dynamic multi-agent workflow orchestration) by default, via --settings '{\"ultracode\":true}'; --ultracode=false launches without it. Claude-only; ignored for other agents")
-	launchModel := fs.String("model", defaultLaunchModel, "(launch) model id a switched Claude launch pins via --model; defaults to Fable 5 ("+defaultLaunchModel+") so every seat starts on it regardless of its own saved default; --model '' launches with the seat's saved default. Claude-only; ignored for other agents")
-	launchFallbackModel := fs.String("fallback-model", defaultLaunchFallbackModel, "(launch) comma-separated Claude fallback CHAIN, tried in order when the default Fable 5 startup is unavailable — an unknown/invalid model OR a usage/rate limit (e.g. Fable's weekly cap -> Opus); empty disables. Default: Opus 4.8 ("+defaultLaunchFallbackModel+"). Ignored when --model is explicit")
+	launchModel := fs.String("model", defaultLaunchModel, "(launch) model id a switched Claude launch pins via --model; defaults to Opus 4.8 ("+defaultLaunchModel+") so every seat starts on it regardless of its own saved default; --model '' launches with the seat's saved default. Claude-only; ignored for other agents")
+	launchFallbackModel := fs.String("fallback-model", defaultLaunchFallbackModel, "(launch) comma-separated Claude fallback CHAIN, tried in order when the default Opus 4.8 startup is unavailable — an unknown/invalid model OR a usage/rate limit (e.g. an Opus weekly cap -> Fable); empty disables. Default: Fable 5 ("+defaultLaunchFallbackModel+"). Ignored when --model is explicit")
 	launchManagedCache := fs.String("managed-cache", os.Getenv(fleetManagedCacheEnv), "(launch) managed-cache posture for the guard session: auto|on|off (default: $"+fleetManagedCacheEnv+", else auto). auto stays PASSIVE on a subscription-OAuth seat; on forces the stable-prefix 1h-TTL cache upgrade; set $"+fleetGuardAPIKeyEnvEnv+" so auto resolves ACTIVE on an API-key-billed seat")
 	rotateFlag := fs.Bool("rotate", false, "(launch) launch the NEXT account in the rotation instead of the active/named seat — the round-robin off a walled account")
 	afterSeat := fs.String("after", "", "(next/launch) rotate to the account bucket AFTER this seat (default: the named seat, else the active seat)")

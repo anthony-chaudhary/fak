@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -27,6 +29,7 @@ import (
 func cmdTreeDoctor(argv []string) {
 	fs := flag.NewFlagSet("tree-doctor", flag.ExitOnError)
 	apply := fs.Bool("apply", false, "perform the safe reclaim (reap stale lock, prune merged-not-live worktrees); default is report-only")
+	asJSON := fs.Bool("json", false, "emit a machine-readable diagnosis/action report")
 	root := fs.String("root", "", "repo root to inspect (default: discover from cwd)")
 	trunk := fs.String("trunk", "", "merge target a worktree must be folded into to be prunable (default: origin/main)")
 	_ = fs.Parse(argv)
@@ -42,44 +45,94 @@ func cmdTreeDoctor(argv []string) {
 
 	opts := treedoctor.Options{RepoRoot: repoRoot, Trunk: *trunk}
 	rep, actions := treedoctor.Sweep(context.Background(), gitRunner, opts, *apply)
+	if *asJSON {
+		jsonRep := rep
+		if *apply && len(actions) > 0 {
+			jsonRep = treedoctor.Diagnose(context.Background(), gitRunner, opts)
+		}
+		if err := renderTreeDoctorJSON(os.Stdout, treeDoctorJSON{
+			Schema:      "fak-tree-doctor/1",
+			Apply:       *apply,
+			RepoRoot:    repoRoot,
+			Trunk:       treeDoctorTrunk(*trunk),
+			NeedsAction: treeDoctorNeedsAction(jsonRep),
+			Report:      jsonRep,
+			Actions:     actions,
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "tree-doctor: encode json: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
-	// Report.
+	renderTreeDoctorText(os.Stdout, rep, actions, *apply)
+}
+
+type treeDoctorJSON struct {
+	Schema      string            `json:"schema"`
+	Apply       bool              `json:"apply"`
+	RepoRoot    string            `json:"repo_root"`
+	Trunk       string            `json:"trunk"`
+	NeedsAction bool              `json:"needs_action"`
+	Report      treedoctor.Report `json:"report"`
+	Actions     []string          `json:"actions,omitempty"`
+}
+
+func renderTreeDoctorJSON(w io.Writer, payload treeDoctorJSON) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func treeDoctorTrunk(trunk string) string {
+	trunk = strings.TrimSpace(trunk)
+	if trunk == "" {
+		return treedoctor.DefaultTrunk
+	}
+	return trunk
+}
+
+func treeDoctorNeedsAction(rep treedoctor.Report) bool {
+	return rep.Lock.Stale || len(rep.PrunableWorktrees()) > 0
+}
+
+func renderTreeDoctorText(w io.Writer, rep treedoctor.Report, actions []string, apply bool) {
 	if rep.Lock.Present {
 		if rep.Lock.Stale {
-			fmt.Printf("commit lock: STALE — held by dead PID %d at %s\n", rep.Lock.HolderPID, rep.Lock.Path)
+			fmt.Fprintf(w, "commit lock: STALE — held by dead PID %d at %s\n", rep.Lock.HolderPID, rep.Lock.Path)
 		} else {
-			fmt.Printf("commit lock: held by live PID %d (ok)\n", rep.Lock.HolderPID)
+			fmt.Fprintf(w, "commit lock: held by live PID %d (ok)\n", rep.Lock.HolderPID)
 		}
 	} else {
-		fmt.Println("commit lock: none")
+		fmt.Fprintln(w, "commit lock: none")
 	}
 	prunable := 0
-	for _, w := range rep.Worktrees {
+	for _, wt := range rep.Worktrees {
 		switch {
-		case w.IsMain:
+		case wt.IsMain:
 			// don't list the main checkout
-		case w.Prunable:
+		case wt.Prunable:
 			prunable++
-			fmt.Printf("worktree PRUNABLE: %s (merged, not live)\n", w.Path)
+			fmt.Fprintf(w, "worktree PRUNABLE: %s (merged, not live)\n", wt.Path)
 		default:
-			fmt.Printf("worktree keep:     %s (%s)\n", w.Path, w.Keep)
+			fmt.Fprintf(w, "worktree keep:     %s (%s)\n", wt.Path, wt.Keep)
 		}
 	}
 	if prunable == 0 && !rep.Lock.Stale {
-		fmt.Println("tree is clean — nothing to reclaim")
+		fmt.Fprintln(w, "tree is clean — nothing to reclaim")
 	}
 
 	if len(actions) > 0 {
 		verb := "planned"
-		if *apply {
+		if apply {
 			verb = "applied"
 		}
-		fmt.Printf("\n%s actions (%d):\n", verb, len(actions))
+		fmt.Fprintf(w, "\n%s actions (%d):\n", verb, len(actions))
 		for _, a := range actions {
-			fmt.Println("  - " + a)
+			fmt.Fprintln(w, "  - "+a)
 		}
-		if !*apply {
-			fmt.Println("\nrun with --apply to perform these.")
+		if !apply {
+			fmt.Fprintln(w, "\nrun with --apply to perform these.")
 		}
 	}
 }

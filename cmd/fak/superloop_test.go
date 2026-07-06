@@ -218,3 +218,64 @@ func TestRenderSuperloopWalkMarksSurfaceAsDescend(t *testing.T) {
 		t.Fatalf("surface member should render as a descend pointer:\n%s", out.String())
 	}
 }
+
+// TestSuperloopModelFitCLIRendersReadout exercises the operator readout end to end:
+// `fak superloop modelfit` grades the built-in simulated rows offline and renders the
+// per-model suitability + risk-class table, exiting 0. The name carries "ModelFit" so
+// the issue's acceptance gate (`-run SuperLoop|ModelFit`, case-sensitive) witnesses it.
+func TestSuperloopModelFitCLIRendersReadout(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := runSuperloop(&out, &errb, []string{"modelfit"}); code != 0 {
+		t.Fatalf("modelfit should exit 0 (a readout, not a gate); got %d, stderr=%s", code, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{
+		superloop.EvalSchema,           // the versioned eval tag
+		"read-only ceiling",            // the mutation ceiling is stated
+		"security-release-destructive", // the class a pass never grants
+		"SIM",                          // rows are simulated stand-ins
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("modelfit readout missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestSuperloopModelFitCLIJSON pins the machine-readable path: `--json` emits a valid
+// EvalReport carrying the schema, the fixture count, and per-model suitability rows.
+func TestSuperloopModelFitCLIJSON(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := runSuperloop(&out, &errb, []string{"modelfit", "--json"}); code != 0 {
+		t.Fatalf("modelfit --json should exit 0; got %d, stderr=%s", code, errb.String())
+	}
+	var rep superloop.EvalReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("modelfit --json is not valid JSON: %v\n%s", err, out.String())
+	}
+	if rep.Schema != superloop.EvalSchema {
+		t.Errorf("report schema = %q, want %q", rep.Schema, superloop.EvalSchema)
+	}
+	if rep.Fixtures != len(superloop.Fixtures()) {
+		t.Errorf("report graded %d fixtures, want %d", rep.Fixtures, len(superloop.Fixtures()))
+	}
+	if len(rep.Models) == 0 {
+		t.Fatal("modelfit --json emitted no model rows")
+	}
+	var anyCleared, anyRefused bool
+	for _, m := range rep.Models {
+		if !m.Simulated {
+			t.Errorf("model %q must be marked simulated in the offline readout", m.Model)
+		}
+		if m.Suitable {
+			anyCleared = true
+			if m.ClearedFor == "" {
+				t.Errorf("suitable model %q must name the class it is cleared for", m.Model)
+			}
+		} else {
+			anyRefused = true
+		}
+	}
+	if !anyCleared || !anyRefused {
+		t.Errorf("expected the eval to both clear and refuse a model; cleared=%v refused=%v", anyCleared, anyRefused)
+	}
+}

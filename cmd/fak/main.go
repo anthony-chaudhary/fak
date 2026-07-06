@@ -265,6 +265,8 @@ func main() {
 		cmdWorkflowAudit(os.Args[2:])
 	case "tree-doctor":
 		cmdTreeDoctor(os.Args[2:])
+	case "git-maint":
+		cmdGitMaint(os.Args[2:])
 	case "self-update":
 		cmdSelfUpdate(os.Args[2:])
 	case "slack":

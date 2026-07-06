@@ -49,6 +49,13 @@ const trajctlUsage = `fak trajctl - trajectory-control objective lifecycle (over
   fak trajctl list [--status active|paused|met|abandoned|open|all] [--ledger FILE] [--json]
       List objectives in id order. Default --status is "open" (active+paused).
 
+  fak trajctl curve [--objective ID] [--ledger FILE] [--json]
+      Fold the accumulated score rows into a time-ordered curve per
+      (objective, method) and derive one closed-vocabulary signal:
+      HEALTHY | STALL | DRIFT | DETOUR_OVERRUN. With --objective, fold that
+      one objective; without it, list every open objective worst-first.
+      --json emits the pinned ` + trajctl.CurveSchema + ` report.
+
 Ledger default: <root>/` + trajctl.DefaultLedgerRel + `
 Exit: 0 ok, 2 usage error, 1 ledger/parse failure.`
 
@@ -65,6 +72,8 @@ func runTrajctl(stdout, stderr io.Writer, argv []string) int {
 		return runTrajctlClose(stdout, stderr, rest)
 	case "list":
 		return runTrajctlList(stdout, stderr, rest)
+	case "curve":
+		return runTrajctlCurve(stdout, stderr, rest)
 	case "-h", "--help", "help":
 		fmt.Fprintln(stdout, trajctlUsage)
 		return 0
@@ -274,6 +283,57 @@ func trajctlListMatches(filter string, status trajctl.ObjectiveStatus) bool {
 	default:
 		return string(status) == filter
 	}
+}
+
+func runTrajctlCurve(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak trajctl curve", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	objective := fs.String("objective", "", "objective id to fold (default: worst-first across all open objectives)")
+	ledger := fs.String("ledger", "", "ledger path override (default: <root>/"+trajctl.DefaultLedgerRel+")")
+	asJSON := fs.Bool("json", false, "emit the pinned "+trajctl.CurveSchema+" report as JSON")
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
+		return code
+	}
+
+	path := trajctlLedgerPath(*ledger)
+	st := trajctl.Fold(trajctl.ReadLedgerFile(path))
+
+	var rep trajctl.CurveReport
+	if *objective != "" {
+		r, ok := st.CurveReportFor(*objective)
+		if !ok {
+			fmt.Fprintf(stderr, "fak trajctl curve: unknown objective %q\n", *objective)
+			return 1
+		}
+		rep = r
+	} else {
+		rep = st.OpenCurves()
+	}
+
+	if *asJSON {
+		return trajctlEmitJSON(stdout, stderr, rep)
+	}
+	return trajctlRenderCurve(stdout, rep, path, *objective)
+}
+
+// trajctlRenderCurve prints one worst-first line per objective: id, signal,
+// latest progress + delta, optional parent, and the human-readable detail.
+func trajctlRenderCurve(stdout io.Writer, rep trajctl.CurveReport, path, objective string) int {
+	if len(rep.Objectives) == 0 {
+		if objective == "" {
+			fmt.Fprintf(stdout, "no open objectives in %s\n", path)
+		}
+		return 0
+	}
+	for _, oc := range rep.Objectives {
+		parent := ""
+		if oc.ParentID != "" {
+			parent = " parent=" + oc.ParentID
+		}
+		fmt.Fprintf(stdout, "%-24s %-14s latest=%.2f delta=%+.2f%s  %s\n",
+			oc.ObjectiveID, oc.Signal, oc.Latest, oc.Delta, parent, oc.Detail)
+	}
+	return 0
 }
 
 func trajctlEmitObjective(stdout, stderr io.Writer, obj trajctl.Objective, verb string, asJSON bool) int {

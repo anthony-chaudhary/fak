@@ -168,6 +168,118 @@ func TestRouteAccountsBindsDeepSeekProfile(t *testing.T) {
 	}
 }
 
+func TestRouteAccountsBindsGroqQwen36Profile(t *testing.T) {
+	t.Setenv("FAK_GROQ_API_KEY", "fake-groq-secret-value")
+	roster := writeDumpedRoster(t)
+	manifest := filepath.Join(t.TempDir(), "groq-route.json")
+	body := `{
+  "version": "fak-route/v1",
+  "default": {
+    "members": [{"model": "qwen36-groq", "role": "primary"}],
+    "reason": "Groq Qwen3.6 27B profile witness"
+  }
+}`
+	if err := os.WriteFile(manifest, []byte(body), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	code, out, errs := runRT("--manifest", manifest, "--accounts", roster, "--json")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s out=%s", code, errs, out)
+	}
+	var rep struct {
+		Binding struct {
+			Members []struct {
+				Model             string `json:"model"`
+				Account           string `json:"account"`
+				Kind              string `json:"kind"`
+				BaseURL           string `json:"base_url"`
+				CredEnv           string `json:"cred_env"`
+				UpstreamModel     string `json:"upstream_model"`
+				Local             bool   `json:"local"`
+				EngineRoute       string `json:"engine_route"`
+				RequestsPerMinute int    `json:"requests_per_minute"`
+				RequestsPerDay    int    `json:"requests_per_day"`
+				TokensPerMinute   int    `json:"tokens_per_minute"`
+				TokensPerDay      int    `json:"tokens_per_day"`
+			} `json:"members"`
+		} `json:"binding"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	if len(rep.Binding.Members) != 1 {
+		t.Fatalf("want one bound Groq member, got %d:\n%s", len(rep.Binding.Members), out)
+	}
+	m := rep.Binding.Members[0]
+	if m.Account != "july6netra_groq" || m.Kind != "openai" || m.BaseURL != "https://api.groq.com/openai/v1" ||
+		m.CredEnv != "FAK_GROQ_API_KEY" || m.UpstreamModel != "qwen/qwen3.6-27b" ||
+		m.Local || m.EngineRoute != "openai:july6netra_groq/qwen/qwen3.6-27b" ||
+		m.RequestsPerMinute != 30 || m.RequestsPerDay != 1000 ||
+		m.TokensPerMinute != 8000 || m.TokensPerDay != 200000 {
+		t.Fatalf("Groq Qwen3.6 binding wrong: %+v\n%s", m, out)
+	}
+	if strings.Contains(out, "fake-groq-secret-value") {
+		t.Fatalf("route output leaked a Groq key value:\n%s", out)
+	}
+}
+
+func TestRouteAccountsBindsGroqCompoundProfile(t *testing.T) {
+	t.Setenv("FAK_GROQ_API_KEY", "fake-groq-secret-value")
+	roster := writeDumpedRoster(t)
+	manifest := filepath.Join(t.TempDir(), "groq-compound-route.json")
+	body := `{
+  "version": "fak-route/v1",
+  "default": {
+    "members": [{"model": "groq-compound", "role": "primary"}],
+    "reason": "Groq Compound lower-quality tier witness"
+  }
+}`
+	if err := os.WriteFile(manifest, []byte(body), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	code, out, errs := runRT("--manifest", manifest, "--accounts", roster, "--json")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s out=%s", code, errs, out)
+	}
+	var rep struct {
+		Binding struct {
+			Members []struct {
+				Model             string `json:"model"`
+				Account           string `json:"account"`
+				Kind              string `json:"kind"`
+				BaseURL           string `json:"base_url"`
+				CredEnv           string `json:"cred_env"`
+				UpstreamModel     string `json:"upstream_model"`
+				Local             bool   `json:"local"`
+				EngineRoute       string `json:"engine_route"`
+				RequestsPerMinute int    `json:"requests_per_minute"`
+				RequestsPerDay    int    `json:"requests_per_day"`
+				TokensPerMinute   int    `json:"tokens_per_minute"`
+				TokensPerDay      int    `json:"tokens_per_day"`
+			} `json:"members"`
+		} `json:"binding"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	if len(rep.Binding.Members) != 1 {
+		t.Fatalf("want one bound Groq Compound member, got %d:\n%s", len(rep.Binding.Members), out)
+	}
+	m := rep.Binding.Members[0]
+	if m.Account != "july6netra_groq_compound" || m.Kind != "openai" || m.BaseURL != "https://api.groq.com/openai/v1" ||
+		m.CredEnv != "FAK_GROQ_API_KEY" || m.UpstreamModel != "groq/compound" ||
+		m.Local || m.EngineRoute != "openai:july6netra_groq_compound/groq/compound" ||
+		m.RequestsPerMinute != 30 || m.RequestsPerDay != 250 ||
+		m.TokensPerMinute != 0 || m.TokensPerDay != 0 {
+		t.Fatalf("Groq Compound binding wrong: %+v\n%s", m, out)
+	}
+	if strings.Contains(out, "fake-groq-secret-value") {
+		t.Fatalf("route output leaked a Groq key value:\n%s", out)
+	}
+}
+
 // The CLI output (human and JSON) carries credential ENV-VAR NAMES, never secrets,
 // even when the env var holds a key.
 func TestRouteAccountsNeverPrintsSecret(t *testing.T) {

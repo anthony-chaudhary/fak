@@ -11,13 +11,15 @@ package main
 //
 //	fak resume status --store ~/.claude/projects/<project>
 //	fak resume status --store DIR [--ledger FILE] [--max-attempts N] [--all] [--json]
+//	fak resume status --store DIR --expect-model claude-opus-4-8   # flag resumes that took off-model
 //
 // This is the wire half of internal/resume's outcome fold (ClassifyOutcome / RetryGate /
 // FoldResumeState). It does only the I/O the pure leaf must not: walk the store, read the
 // ledger JSONL into typed Attempts, read each transcript's terminal turn and classify its
 // text against the wall vocabularies into a TerminalSignal, count the real turns that
-// landed after the last launch, and render the fold. The leaf never sees transcript
-// content; the goal string is shell-side display context only.
+// landed after the last launch and attribute the MODEL they ran on (so `--expect-model`
+// can flag a resume that took but drifted off Opus 4.8), and render the fold. The leaf
+// never sees transcript content; the goal string is shell-side display context only.
 
 import (
 	"bufio"
@@ -48,6 +50,7 @@ func runResumeStatus(stdout, stderr io.Writer, argv []string) int {
 	ledger := fs.String("ledger", defaultResumeLedger(), "durable resume ledger JSONL (the record every launcher appends to)")
 	maxAttempts := fs.Int("max-attempts", resume.DefaultMaxResumeAttempts, "give-up cap on automatic resumes of one session")
 	all := fs.Bool("all", false, "also report sessions that ended cleanly and have no resume history")
+	expectModel := fs.String("expect-model", "", "model a resume is expected to run on (e.g. claude-opus-4-8); flags any resume that took on a different model as off-model")
 	asJSON := fs.Bool("json", false, "emit the raw per-session rows as JSON instead of the human table")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -96,6 +99,18 @@ func runResumeStatus(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
+	// Flag off-model resumes against the operator's expectation (e.g. --expect-model
+	// claude-opus-4-8). A resume that has not produced a post-launch turn yet has no model
+	// to attribute, so it is never off-model — only a resume that TOOK on the wrong model is.
+	expect := strings.TrimSpace(*expectModel)
+	offModel := 0
+	for i := range rows {
+		if resumeOffModel(rows[i], expect) {
+			rows[i].OffModel = true
+			offModel++
+		}
+	}
+
 	// Fire-now first, then the sessions waiting on a reset / admission, then the walls a
 	// human owns, then the quiet tail — the runbook order an agent reads top-down. Ties
 	// break on session id so two runs render identically.
@@ -108,17 +123,30 @@ func runResumeStatus(stdout, stderr io.Writer, argv []string) int {
 	})
 
 	if *asJSON {
-		return encodeJSONOrFail(stdout, stderr, map[string]any{
+		payload := map[string]any{
 			"schema":        "fak.resume-status.v1",
 			"store":         *store,
 			"ledger_path":   *ledger,
 			"host_admitted": admit.Admit,
 			"admit_reason":  admit.Reason,
 			"sessions":      rows,
-		}, "fak resume status")
+		}
+		if expect != "" {
+			payload["expect_model"] = expect
+			payload["off_model_count"] = offModel
+		}
+		return encodeJSONOrFail(stdout, stderr, payload, "fak resume status")
 	}
-	renderResumeStatus(stdout, *store, rows, admit)
+	renderResumeStatus(stdout, *store, rows, admit, expect, offModel)
 	return 0
+}
+
+// resumeOffModel reports whether a resume that TOOK is running on a model other than the
+// expected one. No expectation, or a resume with no attributed model (it has not produced a
+// post-launch turn yet), is never off-model — there is nothing to compare, and a not-yet-
+// taken resume must not be smeared as a wrong-model failure.
+func resumeOffModel(r statusRow, expect string) bool {
+	return expect != "" && r.ResumeModel != "" && r.ResumeModel != expect
 }
 
 // foldStatusRow runs the whole per-session fold chain — crash diagnosis, terminal-turn
@@ -132,7 +160,12 @@ func foldStatusRow(sid string, tr statusTranscript, hist []resume.Attempt, admit
 
 	outcome := resume.ClassifyOutcome(classifyTerminalSignal(tr.terminalText, tr.terminalFound))
 	attempts := resume.CountAttempts(hist)
-	newTurns := resume.NewTurnsAfter(tr.turnTimes, resume.LastLaunchUnix(hist))
+	lastLaunch := resume.LastLaunchUnix(hist)
+	newTurns := resume.NewTurnsAfter(tr.turnTimes, lastLaunch)
+	// Which model actually served the recovery turns — the rung that turns "the resume
+	// took" into "the resume took, on Opus 4.8" (or, when it drifted, "took, but on the
+	// wrong model"). Empty until a real turn lands after the last launch.
+	resumeModel, resumeModels := resume.ResumeModels(tr.turnTimes, tr.turnModels, lastLaunch)
 	settled := false
 	for _, a := range hist {
 		if a.ManualOverride || strings.HasPrefix(strings.ToLower(strings.TrimSpace(a.Action)), "consolidate") {
@@ -168,6 +201,8 @@ func foldStatusRow(sid string, tr statusTranscript, hist []resume.Attempt, admit
 		Goal:             tr.goal,
 		Attempts:         attempts,
 		NewTurns:         newTurns,
+		ResumeModel:      resumeModel,
+		ResumeModels:     resumeModels,
 		Outcome:          outcome,
 		State:            state,
 		RetryBlocked:     gate.Blocked,
@@ -238,12 +273,22 @@ func actionRank(a resume.NextAction) int {
 // context (which session, its /goal, when it last moved), and the folded runbook action —
 // the one deterministic thing to DO about the session now, with its exact command.
 type statusRow struct {
-	SessionID        string             `json:"session_id"`
-	Crash            resume.CrashKind   `json:"crash"`
-	LimitReason      string             `json:"limit_reason,omitempty"`
-	Goal             string             `json:"goal,omitempty"`
-	Attempts         int                `json:"attempts"`
-	NewTurns         int                `json:"new_turns_since_resume"`
+	SessionID   string           `json:"session_id"`
+	Crash       resume.CrashKind `json:"crash"`
+	LimitReason string           `json:"limit_reason,omitempty"`
+	Goal        string           `json:"goal,omitempty"`
+	Attempts    int              `json:"attempts"`
+	NewTurns    int              `json:"new_turns_since_resume"`
+	// ResumeModel is the model that served the most recent turn after the last launch —
+	// what the resume is running on now — empty until a resume produces a real turn.
+	ResumeModel string `json:"resume_model,omitempty"`
+	// ResumeModels is the distinct set of models the post-launch turns ran on (>1 ⇒ the
+	// session drifted models mid-resume, e.g. a re-home onto a different account/model).
+	ResumeModels []string `json:"resume_models,omitempty"`
+	// OffModel is set by the CLI when --expect-model is given and a resume that took is
+	// running on a different model. Pure display state, computed against the operator's
+	// expectation — the fold itself takes no view on which model is "right".
+	OffModel         bool               `json:"off_model,omitempty"`
 	Outcome          resume.Outcome     `json:"outcome"`
 	State            resume.ResumeState `json:"resume_state"`
 	RetryBlocked     bool               `json:"retry_blocked"`
@@ -316,8 +361,13 @@ func loadResumeHistory(path string) map[string][]resume.Attempt {
 // closed events for the crash diagnosis, the real-turn timestamps for the new-turns
 // count, the terminal user/assistant turn for the outcome, and the /goal for display.
 type statusTranscript struct {
-	events        []resume.Event
-	turnTimes     []int64
+	events    []resume.Event
+	turnTimes []int64
+	// turnModels is parallel to turnTimes: turnModels[i] is the model that ran the real
+	// turn at turnTimes[i]. It is the model attribution a resume monitor needs — the ledger
+	// records which account a resume launched on, but only the transcript's own turns say
+	// which MODEL actually served the recovery.
+	turnModels    []string
 	lastUnix      int64
 	terminalFound bool
 	terminalText  string
@@ -414,6 +464,7 @@ func scanTranscriptForStatus(r io.Reader) statusTranscript {
 				out.events = append(out.events, resume.Event{Kind: resume.EventRealAssistant, PromptTokens: prompt})
 				if ts > 0 {
 					out.turnTimes = append(out.turnTimes, ts)
+					out.turnModels = append(out.turnModels, m.Model)
 				}
 			}
 		}
@@ -446,10 +497,14 @@ func classifyTerminalSignal(text string, found bool) resume.TerminalSignal {
 // renderResumeStatus prints the runbook: the per-session journey table keyed on the folded
 // next-action, an action rollup, and a copy-pasteable command block for the fire-eligible
 // sessions — the one-call answer to "which dead sessions do I resume, and how?".
-func renderResumeStatus(w io.Writer, store string, rows []statusRow, admit resume.SourceDecision) {
+func renderResumeStatus(w io.Writer, store string, rows []statusRow, admit resume.SourceDecision, expect string, offModel int) {
 	counts := map[resume.NextAction]int{}
+	onModel := 0
 	for _, r := range rows {
 		counts[r.NextAction]++
+		if expect != "" && r.ResumeModel == expect {
+			onModel++
+		}
 	}
 	fmt.Fprintf(w, "resume status — %d session(s) in %s\n", len(rows), store)
 	fmt.Fprintf(w, "  next: %d run   %d wait-reset   %d hold-admission   %d wait-progress   %d login   %d gave-up   %d done\n",
@@ -458,18 +513,25 @@ func renderResumeStatus(w io.Writer, store string, rows []statusRow, admit resum
 	if !admit.Admit {
 		fmt.Fprintf(w, "  host admission: REFUSED (%s) — %d run-eligible session(s) held\n", admit.Reason, counts[resume.ActHoldAdmission])
 	}
+	if expect != "" {
+		flag := ""
+		if offModel > 0 {
+			flag = fmt.Sprintf("  ⚠ %d resume(s) took on the WRONG model", offModel)
+		}
+		fmt.Fprintf(w, "  model: expect %s — %d on-model, %d off-model%s\n", shortModel(expect), onModel, offModel, flag)
+	}
 	fmt.Fprintln(w)
 
-	fmt.Fprintf(w, "%-10s %-13s %-12s %-13s %6s %6s %8s  %s\n",
-		"session", "next", "state", "crash", "att", "new", "idle", "goal")
+	fmt.Fprintf(w, "%-10s %-13s %-12s %-13s %6s %6s %-10s %8s  %s\n",
+		"session", "next", "state", "crash", "att", "new", "model", "idle", "goal")
 	for _, r := range rows {
 		crash := string(r.Crash)
 		if r.LimitReason != "" {
 			crash = r.LimitReason
 		}
-		fmt.Fprintf(w, "%-10s %-13s %-12s %-13s %6d %6d %8s  %s\n",
+		fmt.Fprintf(w, "%-10s %-13s %-12s %-13s %6d %6d %-10s %8s  %s\n",
 			shortID(r.SessionID), r.NextAction, r.State, crash, r.Attempts, r.NewTurns,
-			humanIdle(r.IdleSeconds), truncateGoal(r.Goal, 40))
+			modelCell(r), humanIdle(r.IdleSeconds), truncateGoal(r.Goal, 40))
 	}
 
 	// The runbook: the exact command for every session the fold says to fire now. An agent
@@ -488,6 +550,32 @@ func renderResumeStatus(w io.Writer, store string, rows []statusRow, admit resum
 	}
 	fmt.Fprintln(w, "\n  next-action, new-turns and outcome are read from each transcript's own turns — the")
 	fmt.Fprintln(w, "  ledger's \"launched\" row alone cannot tell a resume that took from one that no-op'd.")
+}
+
+// modelCell renders a row's resume model for the table: the short model name, a leading "!"
+// when it took on the wrong model, and a "…" suffix when the resume drifted across more than
+// one model mid-flight. "-" when no post-launch turn has attributed a model yet.
+func modelCell(r statusRow) string {
+	if r.ResumeModel == "" {
+		return "-"
+	}
+	cell := shortModel(r.ResumeModel)
+	if len(r.ResumeModels) > 1 {
+		cell += "…"
+	}
+	if r.OffModel {
+		cell = "!" + cell
+	}
+	return cell
+}
+
+// shortModel trims the "claude-" vendor prefix so the model column stays scannable:
+// claude-opus-4-8 → opus-4-8, claude-fable-5 → fable-5. An empty model renders as "-".
+func shortModel(m string) string {
+	if m == "" {
+		return "-"
+	}
+	return strings.TrimPrefix(m, "claude-")
 }
 
 // truncateGoal keeps the table scannable; the full goal rides the JSON.

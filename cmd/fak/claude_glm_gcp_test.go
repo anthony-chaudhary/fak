@@ -75,6 +75,41 @@ func TestClaudeQwen36DogfoodLauncherPreset(t *testing.T) {
 	}
 }
 
+func TestClaudeGroqDogfoodLauncherPresets(t *testing.T) {
+	root := repoRootFromTest(t)
+	sh := readRepoTextForClaudeGLMGCP(t, root, "scripts", "dogfood-claude.sh")
+	ps1 := readRepoTextForClaudeGLMGCP(t, root, "scripts", "dogfood-claude.ps1")
+
+	for _, want := range []string{
+		`claude-groq-qwen36) PRESET="groq-qwen36" ;;`,
+		`claude-groq-compound) PRESET="groq-compound" ;;`,
+		`DEFAULT_OPENAI_BASE_URL="${FAK_GROQ_BASE_URL:-https://api.groq.com/openai/v1}"`,
+		`DEFAULT_MODEL="${FAK_GROQ_MODEL:-qwen/qwen3.6-27b}"`,
+		`DEFAULT_MODEL="${FAK_GROQ_MODEL:-groq/compound}"`,
+		`DEFAULT_UPSTREAM_API_KEY_ENV="FAK_GROQ_API_KEY"`,
+		`DEFAULT_PROVIDER_MAX_TOKENS="8192"`,
+		`PROVIDER_MAX_TOKENS="${FAK_DOGFOOD_PROVIDER_MAX_TOKENS:-$DEFAULT_PROVIDER_MAX_TOKENS}"`,
+		`export FAK_PROVIDER_MAX_TOKENS="$PROVIDER_MAX_TOKENS"`,
+		`groq_compound_name="claude-groq-compound"`,
+	} {
+		requireContainsForClaudeGLMGCP(t, sh, want)
+	}
+	for _, want := range []string{
+		"'groq-qwen36'",
+		"'groq-compound'",
+		"$PresetBaseUrl   = if ($env:FAK_GROQ_BASE_URL)",
+		"else { 'qwen/qwen3.6-27b' }",
+		"else { 'groq/compound' }",
+		"$PresetApiKeyEnv = 'FAK_GROQ_API_KEY'",
+		"$PresetProviderMaxTokens = '8192'",
+		"$ProviderMaxTokens = if ($env:FAK_DOGFOOD_PROVIDER_MAX_TOKENS)",
+		"$env:FAK_PROVIDER_MAX_TOKENS = $ProviderMaxTokens",
+		"claude-groq-compound.cmd",
+	} {
+		requireContainsForClaudeGLMGCP(t, ps1, want)
+	}
+}
+
 func TestClaudeMacDogfoodBashLauncherPreset(t *testing.T) {
 	root := repoRootFromTest(t)
 	sh := readRepoTextForClaudeGLMGCP(t, root, "scripts", "dogfood-claude.sh")
@@ -86,10 +121,38 @@ func TestClaudeMacDogfoodBashLauncherPreset(t *testing.T) {
 		`DEFAULT_MODEL="${FAK_MAC_MODEL:-lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M}"`,
 		`DEFAULT_UPSTREAM_API_KEY_ENV="FAK_GATEWAY_KEY"`,
 		`UPSTREAM_API_KEY_ENV="${FAK_DOGFOOD_API_KEY_ENV:-$DEFAULT_UPSTREAM_API_KEY_ENV}"`,
+		`ensure_mac_gateway_key "$UPSTREAM_API_KEY_ENV"`,
+		`FAK_MAC_SSH_HOST`,
+		`BatchMode=yes`,
+		`NumberOfPasswordPrompts=0`,
+		`cat ~/.fak-gateway-key`,
+		`FAK_DOGFOOD_PROBE_TOOLS`,
+		`FAK_DOGFOOD_PROBE_ALLOWED_TOOLS`,
 		`mac_name="claude-mac"`,
 		`ln -sf "$target" "$bindir/$mac_name"`,
 	} {
 		requireContainsForClaudeGLMGCP(t, sh, want)
+	}
+}
+
+func TestClaudeMacDogfoodPowerShellLauncherPreset(t *testing.T) {
+	root := repoRootFromTest(t)
+	ps1 := readRepoTextForClaudeGLMGCP(t, root, "scripts", "dogfood-claude.ps1")
+	for _, want := range []string{
+		"'mac'",
+		"$PresetApiKeyEnv = 'FAK_GATEWAY_KEY'",
+		"Ensure-MacGatewayKey $OpenaiApiKeyEnv",
+		"FAK_MAC_SSH_HOST",
+		"'BatchMode=yes'",
+		"'NumberOfPasswordPrompts=0'",
+		"cat ~/.fak-gateway-key",
+		"FAK_OPENAI_TOOL_MESSAGES_AS_TEXT",
+		"FAK_DOGFOOD_PROBE_TOOLS",
+		"FAK_DOGFOOD_PROBE_ALLOWED_TOOLS",
+		"examples\\dogfood-claude-policy.json",
+		"$serveArgs += @('--policy', $Policy)",
+	} {
+		requireContainsForClaudeGLMGCP(t, ps1, want)
 	}
 }
 
@@ -107,6 +170,8 @@ func TestClaudeGLMGCPBringupPlanWiring(t *testing.T) {
 		"PROVISIONING_MODEL",
 		"REQUEST_VALID_FOR_DURATION",
 		"--request-valid-for-duration",
+		`QUANT="${QUANT:-}"`,
+		`nvidia-h100*|nvidia-h100-mega*) QUANT="w4afp8"`,
 		`CTX="${CTX:-65536}"`,
 		`--setenv=CTX="${CTX}"`,
 		`EP_RANKS="${EP_RANKS:-1}"`,
@@ -115,6 +180,7 @@ func TestClaudeGLMGCPBringupPlanWiring(t *testing.T) {
 		`--setenv=FAK_EP_REQUIRE_DEVICE_PG="${FAK_EP_REQUIRE_DEVICE_PG}"`,
 		`export HF_HUB_DISABLE_XET="\${HF_HUB_DISABLE_XET:-1}"`,
 		`--setenv=HF_HUB_DISABLE_XET="\${HF_HUB_DISABLE_XET}"`,
+		`--setenv=HF_HUB_DISABLE_XET="\${HF_HUB_DISABLE_XET:-1}"`,
 		`apt-get install -y libnccl2 libnccl-dev`,
 		`cuda-keyring_1.1-1_all.deb`,
 		`libnccl2=${NCCL_APT_VERSION}`,
@@ -256,23 +322,27 @@ func TestClaudeGLMGCPFakNativeServeWiring(t *testing.T) {
 	root := repoRootFromTest(t)
 	serve := readRepoTextForClaudeGLMGCP(t, root, "tools", "glm52_fak_native_serve.sh")
 	for _, want := range []string{
-		"--backend cuda",                 // prefill+decode on the GPU HAL
-		"--cpu-offload-experts",          // the ~424 GB MoE experts stay on host RAM
-		"EP_RANKS",                       // >1 launches resident expert-parallel ranks instead
-		"FAK_EP_RANK",                    // sharded rank identity for the EP serve
-		"FAK_EP_COORD_ADDR",              // rank rendezvous for resident EP
-		"FAK_EP_REQUIRE_DEVICE_PG",       // perf-grade EP refuses host DistComm fallback by default
-		"NCCL_DEV_MISSING",               // EP fails before the huge download when NCCL headers/libs are absent
-		"HF_DOWNLOAD_BACKEND",            // records whether the giant GGUF fetch uses Xet or the plain HF path
-		"HF_HUB_DISABLE_XET",             // Xet can stall after preallocating large shards on the live VM
-		"FAK_EP_FANOUT_ADDRS",            // rank 0 mirrors a client request to follower ranks
-		"FAK_KQ_INT8",                    // mixed Q5_K/Q6_K experts use the production int8 fallback
-		"GLM_SMOKE_MAX_TOKENS",           // live readiness proves first-token decode, not an 8-token soak
-		"SMOKE_EP",                       // EP readiness fans one request to every rank before the NCCL reduce
-		"--expert-parallel",              // no-cpu-offload resident-expert topology
-		"--context-budget-tokens",        // cap the KV plan (default 1M context => FitTooBig)
-		"build_cuda.sh binary ./cmd/fak", // the canonical -tags cuda fak binary build
-		"GLM52_FAK_NATIVE_SERVE_READY",   // the real-chat-completion health gate
+		"--backend cuda",                    // prefill+decode on the GPU HAL
+		"--cpu-offload-experts",             // the ~424 GB MoE experts stay on host RAM
+		"EP_RANKS",                          // >1 launches resident expert-parallel ranks instead
+		"FAK_EP_RANK",                       // sharded rank identity for the EP serve
+		"FAK_EP_COORD_ADDR",                 // rank rendezvous for resident EP
+		"FAK_EP_REQUIRE_DEVICE_PG",          // perf-grade EP refuses host DistComm fallback by default
+		"NCCL_DEV_MISSING",                  // EP fails before the huge download when NCCL headers/libs are absent
+		"HF_DOWNLOAD_BACKEND",               // records whether the giant GGUF fetch uses Xet or the plain HF path
+		"HF_HUB_DISABLE_XET",                // Xet can stall after preallocating large shards on the live VM
+		`SUBDIR="${GLM_SUBDIR:-UD-Q4_K_S}"`, // default to pure-Q4_K experts; UD-Q4_K_M's mixed experts are slow today
+		"PARTIAL_PRESTAGED",                 // shard1 alone is not enough; partial directories must resume HF download
+		"DOWNLOAD_FAIL",                     // refuses to launch unless all numbered shards are present
+		"FAK_EP_FANOUT_ADDRS",               // rank 0 mirrors a client request to follower ranks
+		"FAK_KQ_INT8",                       // mixed Q5_K/Q6_K experts use the production int8 fallback
+		`CTX="${CTX:-4096}"`,                // keeps 8-way resident EP under reported 80 GB H100 capacity
+		"GLM_SMOKE_MAX_TOKENS",              // live readiness proves first-token decode, not an 8-token soak
+		"SMOKE_EP",                          // EP readiness fans one request to every rank before the NCCL reduce
+		"--expert-parallel",                 // no-cpu-offload resident-expert topology
+		"--context-budget-tokens",           // cap the KV plan (default 1M context => FitTooBig)
+		"build_cuda.sh binary ./cmd/fak",    // the canonical -tags cuda fak binary build
+		"GLM52_FAK_NATIVE_SERVE_READY",      // the real-chat-completion health gate
 	} {
 		requireContainsForClaudeGLMGCP(t, serve, want)
 	}
@@ -324,8 +394,12 @@ func TestClaudeGLMGCPSGLangServeUsesPython3Preflight(t *testing.T) {
 	for _, want := range []string{
 		`PYTHON_BIN="${PYTHON_BIN:-python3}"`,
 		`SPECULATIVE="${SPECULATIVE:-1}"`,
+		`DISABLE_PREFILL_CUDA_GRAPH="${DISABLE_PREFILL_CUDA_GRAPH:-auto}"`,
+		`export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"`,
 		`if [ "${SPECULATIVE}" = "1" ]; then`,
 		`log "speculative decode disabled (SPECULATIVE=${SPECULATIVE})"`,
+		`SG_GRAPH_FLAGS="--disable-prefill-cuda-graph"`,
+		`log "prefill CUDA graph disabled (DISABLE_PREFILL_CUDA_GRAPH=${DISABLE_PREFILL_CUDA_GRAPH}, quant=${QUANT})"`,
 		`if ! "${PYTHON_BIN}" "${HERE}/tools/glm52_serve_preflight.py"`,
 		`dependency check: jinja2>=3.1.0`,
 	} {
@@ -464,6 +538,8 @@ func TestClaudeGLMGCPDemoPlanWiring(t *testing.T) {
 		`collect_remote_witness`,                               // apply preserves remote serve logs for the pure-kernel/device-PG claim
 		`run_probe_turns`,                                      // apply drives the headless turns itself
 		"dogfood-claude.ps1",                                   // WSL/Windows apply can use the native Claude Code runner
+		"WSLENV=",                                              // WSL->Windows PowerShell receives the glm-gcp preset env
+		"FAK_DOGFOOD_PRESET/w",                                 // ...with the /w flag (WSL->Win32); /u is the wrong direction and drops it -> SmolLM2 fallback
 		`summarize_probe_perf`,                                 // apply gates the "performant" part with probe duration evidence
 		`scrape_cache_value`,                                   // apply records the cache-value witness before teardown
 		"scripts/gcp-glm-serve.sh",                             // composes the canonical bring-up, never re-implements it

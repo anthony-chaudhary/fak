@@ -322,6 +322,10 @@ type rwResumeProgress struct {
 	Outcome      resume.Outcome
 	NewTurns     int
 	ProgressUnix int64
+	// ProgressModel is the model that served the recovery turns — the witness that a resume
+	// took AND on which model, so the durable ledger can later prove not just "it recovered"
+	// but "it recovered on Opus 4.8" (or flag that it drifted onto something else).
+	ProgressModel string
 }
 
 // rwReadResumeProgress reads the newest transcript copy for a session and returns the
@@ -350,6 +354,7 @@ func rwReadResumeProgress(home, sid string, hist []resume.Attempt) rwResumeProgr
 			}
 		}
 	}
+	out.ProgressModel, _ = resume.ResumeModels(tr.turnTimes, tr.turnModels, lastLaunch)
 	return out
 }
 
@@ -361,7 +366,7 @@ func rwRecordResumeProgress(ledgerPath, mode, sid string, progress rwResumeProgr
 	if recorded[sid] || rwHasProgressWitness(events, sid, lastLaunch) {
 		return
 	}
-	rwAppendLedger(ledgerPath, map[string]any{
+	row := map[string]any{
 		"ts":                      time.Unix(progress.ProgressUnix, 0).UTC().Format("2006-01-02T15:04:05Z"),
 		"session":                 sid,
 		"phase":                   "progress",
@@ -369,7 +374,11 @@ func rwRecordResumeProgress(ledgerPath, mode, sid string, progress rwResumeProgr
 		"new_turns":               progress.NewTurns,
 		"progress_witnessed_at":   time.Unix(progress.ProgressUnix, 0).UTC().Format("2006-01-02T15:04:05Z"),
 		"progress_witness_source": "transcript_real_turn_after_resume",
-	})
+	}
+	if progress.ProgressModel != "" {
+		row["progress_model"] = progress.ProgressModel
+	}
+	rwAppendLedger(ledgerPath, row)
 	recorded[sid] = true
 }
 

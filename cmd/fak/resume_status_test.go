@@ -95,6 +95,98 @@ func TestResumeStatusUnknownSubcommandListsStatus(t *testing.T) {
 	}
 }
 
+// statusTookOffModelFixture is a resume that TOOK — a clean real turn after the launch —
+// but on claude-fable-5 rather than the intended Opus 4.8. This is the July-2 wave shape:
+// productive, yet off-model. The status readout must prove BOTH facts.
+const statusTookOffModelFixture = `{"type":"user","timestamp":"2020-01-01T00:00:00Z","message":{"role":"user","content":"go"}}
+{"type":"assistant","timestamp":"2020-01-01T00:00:05Z","isApiErrorMessage":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"You've hit your session limit · resets 8pm"}],"usage":{"input_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":0}}}
+{"type":"assistant","timestamp":"2020-01-01T01:00:00Z","message":{"role":"assistant","model":"claude-fable-5","content":[{"type":"text","text":"back, but on fable"}],"usage":{"input_tokens":4000,"cache_read_input_tokens":90000,"cache_creation_input_tokens":0,"output_tokens":300}}}
+{"type":"user","timestamp":"2020-01-01T01:00:10Z","message":{"role":"user","content":"keep going"}}
+`
+
+// TestResumeStatusModelAttribution proves the model rung: a resume that took on Opus 4.8
+// carries resume_model=claude-opus-4-8 and is on-model; a resume that took on fable-5 is
+// flagged off-model against --expect-model claude-opus-4-8, in both the JSON and the table.
+func TestResumeStatusModelAttribution(t *testing.T) {
+	store := t.TempDir()
+	for name, body := range map[string]string{
+		"tookopus1.jsonl": statusTookFixture,         // took on claude-opus-4-8
+		"tookfab12.jsonl": statusTookOffModelFixture, // took on claude-fable-5 (off-model)
+	} {
+		if err := os.WriteFile(filepath.Join(store, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ledger := filepath.Join(t.TempDir(), "resume_ledger.jsonl")
+	rows := `{"ts":"2020-01-01T00:30:00Z","session":"tookopus1","phase":"launched","action":"auto_resume"}` + "\n" +
+		`{"ts":"2020-01-01T00:30:00Z","session":"tookfab12","phase":"launched","action":"auto_resume"}` + "\n"
+	if err := os.WriteFile(ledger, []byte(rows), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// JSON path: attribution + off-model verdict against the Opus 4.8 expectation.
+	out, errb, code := runResumeStatusAt("--store", store, "--ledger", ledger,
+		"--expect-model", "claude-opus-4-8", "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
+	}
+	var doc struct {
+		ExpectModel   string `json:"expect_model"`
+		OffModelCount int    `json:"off_model_count"`
+		Sessions      []struct {
+			SessionID    string   `json:"session_id"`
+			ResumeModel  string   `json:"resume_model"`
+			ResumeModels []string `json:"resume_models"`
+			OffModel     bool     `json:"off_model"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, out)
+	}
+	if doc.ExpectModel != "claude-opus-4-8" || doc.OffModelCount != 1 {
+		t.Errorf("expect_model=%q off_model_count=%d, want claude-opus-4-8 / 1", doc.ExpectModel, doc.OffModelCount)
+	}
+	var sawOpus, sawFab bool
+	for _, s := range doc.Sessions {
+		switch s.SessionID {
+		case "tookopus1":
+			sawOpus = true
+			if s.ResumeModel != "claude-opus-4-8" || s.OffModel {
+				t.Errorf("tookopus1 model=%q off=%v, want claude-opus-4-8 / false", s.ResumeModel, s.OffModel)
+			}
+		case "tookfab12":
+			sawFab = true
+			if s.ResumeModel != "claude-fable-5" || !s.OffModel {
+				t.Errorf("tookfab12 model=%q off=%v, want claude-fable-5 / true", s.ResumeModel, s.OffModel)
+			}
+		}
+	}
+	if !sawOpus || !sawFab {
+		t.Fatalf("missing fixture sessions (opus=%v fab=%v):\n%s", sawOpus, sawFab, out)
+	}
+
+	// Human table: the model column and the off-model rollup warning must be present.
+	human, _, hcode := runResumeStatusAt("--store", store, "--ledger", ledger, "--expect-model", "claude-opus-4-8")
+	if hcode != 0 {
+		t.Fatalf("human exit = %d, want 0", hcode)
+	}
+	if !strings.Contains(human, "opus-4-8") || !strings.Contains(human, "!fable-5") {
+		t.Errorf("table missing model cells (on-model opus-4-8 / off-model !fable-5):\n%s", human)
+	}
+	if !strings.Contains(human, "1 off-model") || !strings.Contains(human, "WRONG model") {
+		t.Errorf("table missing off-model rollup warning:\n%s", human)
+	}
+
+	// Without --expect-model, the model column still renders but nothing is flagged off-model.
+	plain, _, _ := runResumeStatusAt("--store", store, "--ledger", ledger)
+	if !strings.Contains(plain, "fable-5") {
+		t.Errorf("plain table should still show the resume model column:\n%s", plain)
+	}
+	if strings.Contains(plain, "off-model") || strings.Contains(plain, "!fable-5") {
+		t.Errorf("plain table must not flag off-model without --expect-model:\n%s", plain)
+	}
+}
+
 // TestResumeStatusJSON: --json emits the per-session fold, with the closed schema tag and
 // the folded resume_state each session reached.
 func TestResumeStatusJSON(t *testing.T) {
