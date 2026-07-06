@@ -40,7 +40,16 @@ type codexLaunchOptions struct {
 	gpuBackend      string
 	tokenizerPath   string
 	codexConfig     bool
+	codexHome       string
 	passthrough     []string
+}
+
+type codexLoopGateConfig struct {
+	Threshold  string
+	CodexHome  string
+	SinceHours float64
+	Limit      int
+	Quiet      bool
 }
 
 var codexLaunchRun = execCodexLaunchChild
@@ -71,6 +80,10 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 	gpuBackend := fs.String("backend", "", "with --gguf: compute backend")
 	tokenizerPath := fs.String("tokenizer", "", "with --gguf: tokenizer override")
 	codexConfig := fs.Bool("codex-config", true, "let guard inject per-run Codex -c provider overrides (default true)")
+	codexHome := fs.String("codex-home", "", "Codex home for auth and loop-gate transcript audit (default: $CODEX_HOME or ~/.codex)")
+	loopGate := fs.String("loop-gate", "loop", "before launching, audit recent Codex sessions and refuse at threshold: loop|action|off")
+	loopGateSinceHours := fs.Float64("loop-gate-since-hours", 24, "with --loop-gate, only scan Codex sessions modified within N hours (0 = all)")
+	loopGateLimit := fs.Int("loop-gate-limit", 20, "with --loop-gate, maximum newest Codex sessions to scan")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: fak codex [launcher flags] [-- <codex args...>]")
 		fmt.Fprintln(stderr, "  e.g. fak codex")
@@ -93,6 +106,7 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 	}
 	*ggufPath = pathutil.ExpandTilde(*ggufPath)
 	*tokenizerPath = pathutil.ExpandTilde(*tokenizerPath)
+	*codexHome = pathutil.ExpandTilde(*codexHome)
 
 	fakBin := tuiExecutable()
 	launch := codexLaunchOptions{
@@ -115,9 +129,22 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 		gpuBackend:      *gpuBackend,
 		tokenizerPath:   *tokenizerPath,
 		codexConfig:     *codexConfig,
+		codexHome:       *codexHome,
 		passthrough:     fs.Args(),
 	}
 	argvOut := buildCodexLaunchArgv(fakBin, launch)
+
+	if !launch.dryRun {
+		if rc := runCodexLoopGate(stderr, codexLoopGateConfig{
+			Threshold:  *loopGate,
+			CodexHome:  *codexHome,
+			SinceHours: *loopGateSinceHours,
+			Limit:      *loopGateLimit,
+			Quiet:      *quiet,
+		}); rc != 0 {
+			return rc
+		}
+	}
 
 	fmt.Fprintln(stderr, "fak codex: launching Codex through fak guard")
 	fmt.Fprintln(stderr, "  view        = agent 80% / fak info 20% (--split "+launch.splitMode+")")
@@ -188,6 +215,7 @@ func buildCodexLaunchArgv(fakBin string, o codexLaunchOptions) []string {
 	if !o.codexConfig {
 		argv = append(argv, "--codex-config=false")
 	}
+	appendKV("--codex-home", o.codexHome)
 
 	argv = append(argv, "--", "codex")
 	if o.skipPermissions {
@@ -213,6 +241,35 @@ func execCodexLaunchChild(stdout, stderr io.Writer, argv, env []string) int {
 		}
 		fmt.Fprintf(stderr, "fak codex: %v\n", err)
 		return 1
+	}
+	return 0
+}
+
+func runCodexLoopGate(stderr io.Writer, cfg codexLoopGateConfig) int {
+	threshold := strings.ToLower(strings.TrimSpace(cfg.Threshold))
+	if threshold == "" || threshold == "off" || threshold == "none" || threshold == "false" || threshold == "0" {
+		return 0
+	}
+	if _, ok := codexLoopFailOnRank(threshold); !ok {
+		fmt.Fprintf(stderr, "fak codex: invalid --loop-gate %q (want loop, action, or off)\n", cfg.Threshold)
+		return 2
+	}
+	rep, err := diagnoseRecentCodexLoops(cfg.CodexHome, cfg.SinceHours, cfg.Limit)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak codex: loop gate audit failed: %v\n", err)
+		return 1
+	}
+	gateCode, _ := codexLoopFailOnExitCode(rep.Verdict, threshold)
+	if gateCode != 0 {
+		fmt.Fprintf(stderr, "fak codex: loop gate REFUSE fail-on=%s verdict=%s reason=%s\n",
+			codexLoopFailOnName(threshold), rep.Verdict, rep.Reason)
+		fmt.Fprint(stderr, renderCodexLoopRecentReport(rep))
+		fmt.Fprintln(stderr, "fak codex: pass --loop-gate off to launch anyway after an operator decision.")
+		return 1
+	}
+	if !cfg.Quiet {
+		fmt.Fprintf(stderr, "fak codex: loop gate allow fail-on=%s verdict=%s scanned=%d\n",
+			codexLoopFailOnName(threshold), rep.Verdict, rep.Scanned)
 	}
 	return 0
 }
