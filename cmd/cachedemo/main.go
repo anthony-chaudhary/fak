@@ -2,7 +2,15 @@
 // durable, WITNESSED gateway-usage and cache-savings ledgers and tells the per-turn
 // story of how a single fak-guarded coding session earns cache value across turns —
 // the provider prompt cache reading a stable prefix back, AND fak's own authored slice
-// (compaction shed + tool prune) keeping the resent window from growing unbounded.
+// (per-fire compaction trim + tool prune) holding the re-sent window inside budget.
+//
+// HONESTY LAW (#3095, retraction 2026-07-06): compaction_shed_tokens is CUMULATIVE
+// across fires (fak re-trims the full re-sent history every turn and keeps no compacted
+// body), so the session sum re-counts the same aged middle and over-counts distinct
+// tokens. This demo therefore cites shed PER FIRE as the honest headline, labels every
+// cumulative sum as a re-counted over-count ceiling (not distinct tokens), never ratios
+// shed against cache_read, and books the fak $ at the price-honest 0.1× cache-read
+// marginal on warm fires (#2794/#2798). The distinct-token COUNT axis is open in #3095.
 //
 // It is a read-only fold over recorded evidence: it never hits a live model, never
 // needs an API key or GPU, and prints only counts/token totals (never a prompt byte).
@@ -115,9 +123,16 @@ func renderDemo(rep cachevaluereport.FleetBenefitReport, spine *gatewayusageledg
 }
 
 // renderSpine tells the multi-turn story of ONE real session: across N turns the
-// provider caches a stable prefix (read back cheaply), while fak sheds stale turns so
-// that prefix stops growing without bound. The "without fak" counterfactual is the
-// tokens fak dropped that would otherwise re-enter the resent window every later turn.
+// provider caches a stable prefix (read back cheaply), while fak fires compaction to
+// trim the client's re-sent history so the window stays inside budget.
+//
+// HONESTY LAW (#3095, retraction 2026-07-06): compaction_shed_tokens is CUMULATIVE
+// across fires — fak keeps no compacted body, it re-trims the FULL re-sent history
+// every turn, so the same aged middle is dropped AND counted on every subsequent fire.
+// The session sum therefore over-counts distinct tokens (~4.8× on the witnessed
+// long session). So we headline shed PER FIRE (shed / fired), print the session sum
+// only under an explicit "cumulative, re-counts the same middle each fire" label, and
+// NEVER ratio it against cache_read (a different cumulative in a different currency).
 func renderSpine(b *strings.Builder, s *gatewayusageledger.Row) {
 	c := s.Counters
 	fmt.Fprintf(b, "PER-TURN SPINE — one witnessed guard session (pid %d, %s, %.0f min)\n",
@@ -135,23 +150,36 @@ func renderSpine(b *strings.Builder, s *gatewayusageledger.Row) {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("  fak-authored slice (WITNESSED — fak keeps the resent window bounded):\n")
+	b.WriteString("  fak-authored slice (WITNESSED — fak trims the re-sent history to hold budget):\n")
 	fmt.Fprintf(b, "    compaction fired ......... %d turns  (bailed %d — bail is a positive: no profitable shed)\n", c.CompactionFired, c.CompactionBailed)
-	fmt.Fprintf(b, "    turns shed ............... %s  (dropped from the resent history)\n", commas(c.CompactionDroppedTurns))
-	fmt.Fprintf(b, "    tokens shed .............. %s  (would otherwise re-enter EVERY later turn's prefix)\n", commas(c.CompactionShedTokens))
+	fmt.Fprintf(b, "    turns dropped ............ %s across those fires (cumulative — re-trimmed each fire)\n", commas(c.CompactionDroppedTurns))
+	// Per-fire is the honest headline: the marginal history fak trims each time it
+	// fires. The session sum is cumulative and re-counts the same middle, so it is
+	// shown only under an explicit label, never as distinct tokens.
+	if c.CompactionFired > 0 {
+		fmt.Fprintf(b, "    shed PER FIRE ............ ~%s tokens  (%s cumulative ÷ %d fires — the honest marginal)\n",
+			commas(c.CompactionShedTokens/c.CompactionFired), commas(c.CompactionShedTokens), c.CompactionFired)
+	} else {
+		fmt.Fprintf(b, "    shed (cumulative) ........ %s tokens\n", commas(c.CompactionShedTokens))
+	}
 	fmt.Fprintf(b, "    tool results pruned ...... %s across %s turns\n", commas(c.ToolPruneCount), commas(c.ToolPruneTurns))
 	if len(c.CompactionBailReasons) > 0 {
 		fmt.Fprintf(b, "    bail reasons ............. %s\n", fmtReasons(c.CompactionBailReasons))
 	}
 	b.WriteString("\n")
 
-	// The multi-turn crux: without fak's shed, the dropped turns would be re-sent on
-	// each remaining turn. Even a conservative once-per-turn lower bound is large.
-	if c.CompactionShedTokens > 0 && c.CachedTurns > 1 {
-		fmt.Fprintf(b, "  Multi-turn effect: those %s shed tokens are removed from the prefix that every\n", commas(c.CompactionShedTokens))
-		fmt.Fprintf(b, "  subsequent turn re-sends. Left resident, the window grows unbounded and each\n")
-		fmt.Fprintf(b, "  later turn pays to carry stale context. fak's shed is what keeps a %d-turn\n", c.CachedTurns)
-		fmt.Fprintf(b, "  session inside budget — the provider cache alone cannot shrink the window.\n\n")
+	// The multi-turn crux, stated honestly: fak firing compaction repeatedly is what
+	// holds a long session inside budget. We do NOT claim the cumulative sum is
+	// distinct tokens saved (that is the retracted double-count); the load-bearing
+	// fact is that WITHOUT the per-fire trim the re-sent window grows unbounded.
+	if c.CompactionFired > 0 && c.CachedTurns > 1 {
+		fmt.Fprintf(b, "  Multi-turn effect: fak fired compaction %d times over %d turns, trimming ~%s\n",
+			c.CompactionFired, c.CachedTurns, commas(c.CompactionShedTokens/c.CompactionFired))
+		fmt.Fprintf(b, "  tokens of aged history per fire. That repeated trim — not any one-time saving —\n")
+		fmt.Fprintf(b, "  is what keeps the re-sent window inside budget as the session grows; the\n")
+		fmt.Fprintf(b, "  provider cache reduces the PRICE of the prefix but cannot shrink its SIZE.\n")
+		fmt.Fprintf(b, "  (Honest $ value of shed = per-fire count × 0.1× cache-read marginal on warm\n")
+		fmt.Fprintf(b, "  fires, #2794/#2798; the distinct-token COUNT axis is open in epic #3095.)\n\n")
 	}
 }
 
@@ -164,14 +192,19 @@ func renderFleet(b *strings.Builder, r cachevaluereport.FleetBenefitReport, sinc
 	}
 	b.WriteString("\n")
 	fmt.Fprintf(b, "  sessions folded .......... %d usage rows, %d exit sessions\n", r.UsageRows, r.ExitSessions)
-	fmt.Fprintf(b, "  saved token-equivalent ... provider %s + fak %s = %s total\n",
+	// The fak $ figure is now price-honest (shed booked at 0.1× cache-read marginal
+	// on warm fires, #2794/#2798). The fak COUNT/token-equiv still rides the
+	// cumulative-re-counted shed (epic #3095 open), so it is labeled COUNT-AXIS OPEN
+	// and the saved-token-equiv split is presented as an over-count ceiling, not a
+	// settled distinct-token figure.
+	fmt.Fprintf(b, "  API cost avoided ......... provider $%.2f (OBSERVED) + fak $%.2f (WITNESSED, price-honest) = $%.2f\n",
+		r.ProviderAPICostAvoidedUSD, r.FakAPICostAvoidedUSD, r.ObservedAPICostAvoidedUSD)
+	fmt.Fprintf(b, "  saved token-equiv ........ provider %s + fak %s = %s  [fak count = CUMULATIVE, re-counted per fire → over-count ceiling, #3095]\n",
 		commasF(r.ProviderPromptCacheTokenEq), commasF(r.FakAuthoredTokenEq), commasF(r.TotalSavedTokenEq))
 	if r.FakSharePct != nil {
-		fmt.Fprintf(b, "  fak share ................ %.1f%% of saved token-equivalent is fak-authored\n", *r.FakSharePct)
+		fmt.Fprintf(b, "  fak share (count-axis) ... %.1f%% — an UPPER BOUND off the over-counted shed; honest owner share is ~0.3–16%% via `fak cachevalue report`\n", *r.FakSharePct)
 	}
-	fmt.Fprintf(b, "  API cost avoided ......... provider $%.2f (OBSERVED) + fak $%.2f (WITNESSED) = $%.2f\n",
-		r.ProviderAPICostAvoidedUSD, r.FakAPICostAvoidedUSD, r.ObservedAPICostAvoidedUSD)
-	fmt.Fprintf(b, "  context shed ............. %s WITNESSED tokens kept out of the resent window\n", commas(r.ContextExtensionTokens))
+	fmt.Fprintf(b, "  context shed ............. %s cumulative shed tokens (NOT distinct — re-trimmed each fire, #3095)\n", commas(r.ContextExtensionTokens))
 	if r.SpanDays > 0 {
 		prov := ""
 		if r.RateProvisional {
@@ -182,6 +215,8 @@ func renderFleet(b *strings.Builder, r cachevaluereport.FleetBenefitReport, sinc
 	}
 	b.WriteString("\n")
 	fmt.Fprintf(b, "  provenance: %s\n", r.Provenance)
+	b.WriteString("  note: fak $ is price-honest (0.1× marginal, #2794/#2798); the shed token COUNT is\n")
+	b.WriteString("        cumulative-re-counted pending epic #3095 — cite shed PER FIRE, never the session sum.\n")
 }
 
 // --- small local helpers (kept here so the demo has no cmd/fak dependency) ---
