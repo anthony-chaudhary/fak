@@ -39,7 +39,13 @@ type accountFailover struct {
 	walled     map[string]bool // account keys (uuid:/tok:) proven walled this session
 	moved      map[string]bool // account keys the operator rehomed OFF this session (never auto-reselect)
 	currentDir string          // config dir the live token is read from; advances on each adopted swap
-	now        func() time.Time
+	// lastNoTarget is the typed reason the most recent failover/rehome found no sibling to adopt
+	// (FailoverFoundTarget when the last attempt succeeded or none has run). The auto arm cannot
+	// print on the hot path, so it stashes the reason here for the operator-facing surfaces (the
+	// status endpoint, the terminal-403 message) to render the account-level fix — the single
+	// reason both the auto and operator paths share instead of each guessing or discarding it.
+	lastNoTarget failoverNoTargetReason
+	now          func() time.Time
 }
 
 // newAccountFailover seeds the state with the initially-pinned config dir (the account the guard
@@ -106,16 +112,37 @@ func (a *accountFailover) failover(reason string) (string, bool) {
 
 	homes, err := accounts.Discover(a.homeRoot)
 	if err != nil {
+		a.lastNoTarget = FailoverNoSiblings // roster unreadable — treat as nothing to fail over to
 		return "", false
 	}
-	dir, token, ok := pickFailoverAccount(homes, a.excludedLocked(), a.now())
+	dir, token, noTarget, ok := pickFailoverAccount(homes, a.excludedLocked(), a.now())
 	if !ok {
+		// Record WHY no sibling qualified so the terminal 403 surface (and the status endpoint) can
+		// name the account-level fix instead of a bare "no failover target". The auto arm cannot
+		// print here (it is on the hot path), so it stashes the reason for the operator-facing
+		// surfaces to read — the same single reason forceRehome renders inline.
+		a.lastNoTarget = noTarget
 		return "", false
 	}
+	a.lastNoTarget = FailoverFoundTarget
 	// Adopt it: advance the sticky dir so the per-request token source follows the permitted
 	// account on every subsequent turn, and return the live token for THIS re-send.
 	a.currentDir = dir
 	return token, true
+}
+
+// lastNoTargetReason returns the reason the most recent failover/rehome found no sibling to adopt
+// (FailoverFoundTarget when the last attempt succeeded or none has run). It lets the operator-facing
+// surfaces — the status endpoint and the terminal-403 message — report the account-level fix the
+// auto arm could not print on the hot path. Safe for concurrent use; a nil receiver reports
+// FailoverFoundTarget (nothing to report).
+func (a *accountFailover) lastNoTargetReason() failoverNoTargetReason {
+	if a == nil {
+		return FailoverFoundTarget
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.lastNoTarget
 }
 
 // excludedLocked returns the union of every account key the picker must skip: the seats an
@@ -168,9 +195,13 @@ func (a *accountFailover) forceRehome(reason string) (gateway.AccountRehome, err
 		}
 		candidates = append(candidates, h)
 	}
-	dir, _, ok := pickFailoverAccount(candidates, excluded, a.now())
+	dir, _, noTarget, ok := pickFailoverAccount(candidates, excluded, a.now())
 	if !ok {
-		return gateway.AccountRehome{}, fmt.Errorf("no available sibling seat: every other seat is walled, already rehomed off, disabled, or has no live token — log in on another seat (`claude /login` under its CLAUDE_CONFIG_DIR) or enroll one (`fak accounts add`)")
+		a.lastNoTarget = noTarget
+		// Name the ACTUAL closest miss (walled / needs-login / disabled / none) and its one fix,
+		// derived from the picker's typed reason — instead of the old OR-of-every-possible-cause
+		// string that the picker's own knowledge could already narrow.
+		return gateway.AccountRehome{}, fmt.Errorf("no available sibling seat: %s — %s", noTarget.describe(), noTarget.fix())
 	}
 	// Adopt: record the seat being left as operator-moved, then advance the sticky dir so the
 	// per-request token source reads the adopted seat from the next turn on.
@@ -196,27 +227,112 @@ func seatDisplayIdentity(homes []accounts.Home, dir string) (name, email string)
 	return filepath.Base(guardCleanDir(dir)), ""
 }
 
+// failoverNoTargetReason is the CLOSED set of reasons pickFailoverAccount found no sibling to fail
+// over to. Like rotation's RotationNoCandidateReason, it lets the picker explain itself ONCE at the
+// point of decision, so the auto-failover terminal path and the operator forceRehome message derive
+// the SAME account-level diagnosis instead of each hand-writing (or discarding) it. The tiers are
+// ordered by how close a seat came to qualifying, so the reason names the CLOSEST miss — the most
+// actionable thing the operator can fix: a seat that only needs a login beats one that is disabled.
+type failoverNoTargetReason string
+
+const (
+	// FailoverFoundTarget — a sibling qualified (returned with ok=true).
+	FailoverFoundTarget failoverNoTargetReason = ""
+	// FailoverNoSiblings — the roster has no OTHER seat at all besides the ones excluded this
+	// session. Enroll one (`fak accounts add`).
+	FailoverNoSiblings failoverNoTargetReason = "no_siblings"
+	// FailoverAllWalled — every candidate sibling is on an account already proven walled (or
+	// operator-rehomed off) this session. Nothing to do but wait for a reset or enroll another.
+	FailoverAllWalled failoverNoTargetReason = "all_walled"
+	// FailoverNeedsLogin — a sibling exists and is not walled, but no seat holds a live token
+	// (creds missing/expired/torn). The fix is a login (`claude /login` under its CLAUDE_CONFIG_DIR).
+	FailoverNeedsLogin failoverNoTargetReason = "needs_login"
+	// FailoverAllDisabled — siblings exist but every one is disabled/tombstoned/identity-mismatched
+	// (CanServe false for a non-credential reason). Re-enable or remove them.
+	FailoverAllDisabled failoverNoTargetReason = "all_disabled"
+)
+
+// describe renders the closest-miss STATE for a no-target reason — what is true of the sibling
+// seats — so a message reads "<state> — <fix>". Empty for FailoverFoundTarget.
+func (r failoverNoTargetReason) describe() string {
+	switch r {
+	case FailoverNoSiblings:
+		return "no other seat is enrolled"
+	case FailoverAllWalled:
+		return "every other seat is on an account already walled or rehomed off this session"
+	case FailoverNeedsLogin:
+		return "a seat is available but none holds a live login token"
+	case FailoverAllDisabled:
+		return "every other seat is disabled, tombstoned, or has a mismatched identity"
+	default:
+		return ""
+	}
+}
+
+// fix renders the one actionable next step for a no-target reason, so both the auto and operator
+// paths speak with one voice. Empty for FailoverFoundTarget (there is nothing to fix).
+func (r failoverNoTargetReason) fix() string {
+	switch r {
+	case FailoverNoSiblings:
+		return "enroll another account (`fak accounts add`)"
+	case FailoverAllWalled:
+		return "wait for a reset, or enroll another account (`fak accounts add`)"
+	case FailoverNeedsLogin:
+		return "log in on another seat (`claude /login` under its CLAUDE_CONFIG_DIR)"
+	case FailoverAllDisabled:
+		return "re-enable or remove the disabled seats (`fak accounts`), then log one in"
+	default:
+		return ""
+	}
+}
+
 // pickFailoverAccount is the PURE selection core: among discovered homes, choose one that (a) is
 // not on an already-walled account, (b) CanServe (exists, enabled, has creds, no identity lie),
 // and (c) holds a live, non-expired access token right now. It returns that home's dir and live
-// token, or ok=false when none qualifies. Deterministic given (homes, walled, now): homes arrive
-// sorted by name from Discover, and the first qualifying one wins, so the choice is stable.
-func pickFailoverAccount(homes []accounts.Home, walled map[string]bool, now time.Time) (dir, token string, ok bool) {
+// token with reason FailoverFoundTarget, or ok=false with the CLOSED reason the closest sibling
+// missed by — so a caller can tell the operator WHY failover could not help, not just that it
+// couldn't. Deterministic given (homes, walled, now): homes arrive sorted by name from Discover,
+// and the first qualifying one wins, so the choice is stable.
+func pickFailoverAccount(homes []accounts.Home, walled map[string]bool, now time.Time) (dir, token string, reason failoverNoTargetReason, ok bool) {
+	// Track the closest miss so the reason names the most-actionable gap. A seat that only needs a
+	// login is a better thing to tell the operator than a walled or disabled one, so the miss tiers
+	// are ranked by recoverability (needs-login beats disabled beats walled) and the CLOSEST one wins.
+	var sawSibling, sawNonWalled, sawNeedsLogin bool
 	for _, h := range homes {
+		sawSibling = true
 		key := h.Identity.AccountKey()
 		if key != "" && walled[key] {
 			continue // this account is known-walled this session
 		}
-		if !h.CanServe() {
-			continue // not launch-ready (missing dir/creds, disabled, tombstoned, identity lie)
+		sawNonWalled = true
+		if h.CanServe() {
+			tok, live := readLiveAccessToken(h.Dir, now)
+			if live {
+				return h.Dir, tok, FailoverFoundTarget, true
+			}
+			// Serveable per the login report but the access token is expired/torn right now — the
+			// fix is a fresh login, same actionable class as a NeedsLogin seat.
+			sawNeedsLogin = true
+			continue
 		}
-		tok, live := readLiveAccessToken(h.Dir, now)
-		if !live {
-			continue // creds present but the access token is expired/torn — not usable right now
+		// Not launch-ready: a NeedsLogin seat (creds absent) is one login away, so it counts as the
+		// recoverable miss; a truly disabled/tombstoned/identity-mismatched seat does not.
+		if h.LoginStatus() == accounts.LoginNeedsLogin || h.LoginStatus() == accounts.LoginIdentityMismatch {
+			sawNeedsLogin = true
 		}
-		return h.Dir, tok, true
 	}
-	return "", "", false
+	switch {
+	case !sawSibling:
+		return "", "", FailoverNoSiblings, false
+	case !sawNonWalled:
+		return "", "", FailoverAllWalled, false
+	case sawNeedsLogin:
+		// At least one non-walled sibling is one login away — the most actionable miss.
+		return "", "", FailoverNeedsLogin, false
+	default:
+		// Non-walled siblings exist but every one is disabled/tombstoned (no login can fix them here).
+		return "", "", FailoverAllDisabled, false
+	}
 }
 
 // accountKeyForDir returns the AccountKey (uuid:/tok:) for a config dir, or "" when the dir is

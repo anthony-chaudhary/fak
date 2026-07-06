@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,16 +68,19 @@ func TestPickFailoverAccount(t *testing.T) {
 		homes := []accounts.Home{walled, good}
 
 		walledSet := map[string]bool{walled.Identity.AccountKey(): true}
-		dir, tok, ok := pickFailoverAccount(homes, walledSet, now)
+		dir, tok, reason, ok := pickFailoverAccount(homes, walledSet, now)
 		if !ok {
 			t.Fatal("expected a permitted sibling to be picked")
+		}
+		if reason != FailoverFoundTarget {
+			t.Fatalf("a successful pick must report FailoverFoundTarget, got %q", reason)
 		}
 		if dir != good.Dir || tok != "sk-ant-oat01-good" {
 			t.Fatalf("picked (%q,%q), want the good sibling (%q,sk-ant-oat01-good)", dir, tok, good.Dir)
 		}
 	})
 
-	t.Run("no target when every non-walled sibling has a dead or missing token", func(t *testing.T) {
+	t.Run("no target when every non-walled sibling has a dead or missing token -> needs_login", func(t *testing.T) {
 		root := t.TempDir()
 		walled := mkFailoverHome(t, root, ".claude-walled", "walled@x.test", "u-walled", "sk-ant-oat01-walled", future)
 		expired := mkFailoverHome(t, root, ".claude-expired", "exp@x.test", "u-exp", "sk-ant-oat01-exp", now.Add(-time.Minute).UnixMilli())
@@ -84,8 +88,33 @@ func TestPickFailoverAccount(t *testing.T) {
 		homes := []accounts.Home{walled, expired, nocreds}
 
 		walledSet := map[string]bool{walled.Identity.AccountKey(): true}
-		if _, _, ok := pickFailoverAccount(homes, walledSet, now); ok {
+		_, _, reason, ok := pickFailoverAccount(homes, walledSet, now)
+		if ok {
 			t.Fatal("no live permitted sibling exists — failover must report no target")
+		}
+		// The non-walled siblings CanServe but hold no live token — the fix is a login, and the
+		// reason must say so specifically rather than an OR-of-every-cause.
+		if reason != FailoverNeedsLogin {
+			t.Fatalf("dead-token siblings should report FailoverNeedsLogin, got %q", reason)
+		}
+	})
+
+	t.Run("all siblings walled -> all_walled", func(t *testing.T) {
+		root := t.TempDir()
+		a := mkFailoverHome(t, root, ".claude-a", "a@x.test", "u-a", "sk-ant-oat01-a", future)
+		b := mkFailoverHome(t, root, ".claude-b", "b@x.test", "u-b", "sk-ant-oat01-b", future)
+		homes := []accounts.Home{a, b}
+		walledSet := map[string]bool{a.Identity.AccountKey(): true, b.Identity.AccountKey(): true}
+		_, _, reason, ok := pickFailoverAccount(homes, walledSet, now)
+		if ok || reason != FailoverAllWalled {
+			t.Fatalf("every seat walled should report (!ok, FailoverAllWalled), got (ok=%v, %q)", ok, reason)
+		}
+	})
+
+	t.Run("empty roster -> no_siblings", func(t *testing.T) {
+		_, _, reason, ok := pickFailoverAccount(nil, map[string]bool{}, now)
+		if ok || reason != FailoverNoSiblings {
+			t.Fatalf("empty roster should report (!ok, FailoverNoSiblings), got (ok=%v, %q)", ok, reason)
 		}
 	})
 
@@ -98,7 +127,7 @@ func TestPickFailoverAccount(t *testing.T) {
 		homes := []accounts.Home{a, b, other}
 
 		walledSet := map[string]bool{a.Identity.AccountKey(): true}
-		dir, _, ok := pickFailoverAccount(homes, walledSet, now)
+		dir, _, _, ok := pickFailoverAccount(homes, walledSet, now)
 		if !ok || dir != other.Dir {
 			t.Fatalf("picked (%q,%v), want the distinct account %q (both same-account dirs are walled)", dir, ok, other.Dir)
 		}
@@ -186,8 +215,17 @@ func TestForceRehomeNoSiblingLeavesStateUntouched(t *testing.T) {
 	only := mkFailoverHome(t, root, ".claude-only", "only@x.test", "u-only", "sk-ant-oat01-only", now.Add(time.Hour).UnixMilli())
 
 	af := newAccountFailover(root, only.Dir, func() time.Time { return now })
-	if _, err := af.forceRehome("operator_rehome"); err == nil {
+	_, err := af.forceRehome("operator_rehome")
+	if err == nil {
 		t.Fatal("forceRehome with a single-seat roster must refuse")
+	}
+	// The refusal must name the SPECIFIC closest miss (no other seat enrolled) and its fix, not
+	// an OR-of-every-possible-cause — the discarded-reason defect this change closes.
+	if !strings.Contains(err.Error(), "no other seat is enrolled") || !strings.Contains(err.Error(), "fak accounts add") {
+		t.Fatalf("single-seat refusal should name the no-siblings reason + fix, got: %v", err)
+	}
+	if got := af.lastNoTargetReason(); got != FailoverNoSiblings {
+		t.Fatalf("lastNoTargetReason after a single-seat refusal = %q, want FailoverNoSiblings", got)
 	}
 	if got := af.currentConfigDir(); got != only.Dir {
 		t.Fatalf("refused rehome advanced currentConfigDir to %q, want the pinned %q", got, only.Dir)
