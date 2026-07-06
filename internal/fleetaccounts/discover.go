@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	configaccounts "github.com/anthony-chaudhary/fak/internal/accounts"
 )
@@ -127,7 +128,140 @@ func ReadAccountIdentity(acctDir string) Identity {
 // classifyRow applies policy + structure checks to one discovered dir. The caller has
 // already confirmed acctDir is an account dir (projects/ for Claude, opencode.json for
 // opencode) before invoking this.
-func classifyRow(acctDir, product, account string, pol Policy) Account {
+type accountsRegistryIndex struct {
+	activeNames          map[string]bool
+	activeDirs           map[string]bool
+	tombstonedNames      map[string]configaccounts.Home
+	tombstonedDirs       map[string]configaccounts.Home
+	tombstonedIdentities map[string]configaccounts.Home
+}
+
+func loadAccountsRegistry(home string) configaccounts.Registry {
+	path := strings.TrimSpace(os.Getenv("FAK_ACCOUNTS_REGISTRY"))
+	if path == "" && home != "" {
+		path = filepath.Join(home, ".claude-accounts", "registry.json")
+	}
+	if path == "" {
+		return configaccounts.Registry{}
+	}
+	reg, err := configaccounts.LoadRegistry(path)
+	if err != nil {
+		return configaccounts.Registry{}
+	}
+	return reg.Refresh()
+}
+
+func indexAccountsRegistry(reg configaccounts.Registry) accountsRegistryIndex {
+	idx := accountsRegistryIndex{
+		activeNames:          map[string]bool{},
+		activeDirs:           map[string]bool{},
+		tombstonedNames:      map[string]configaccounts.Home{},
+		tombstonedDirs:       map[string]configaccounts.Home{},
+		tombstonedIdentities: map[string]configaccounts.Home{},
+	}
+	for _, h := range reg.Homes {
+		name := strings.ToLower(strings.TrimSpace(h.Name))
+		dir := pathKey(h.Dir)
+		ident := h.Identity.AccountKey()
+		if h.Active() {
+			if name != "" {
+				idx.activeNames[name] = true
+			}
+			if dir != "" {
+				idx.activeDirs[dir] = true
+			}
+			continue
+		}
+		if name != "" {
+			idx.tombstonedNames[name] = h
+		}
+		if dir != "" {
+			idx.tombstonedDirs[dir] = h
+		}
+		if ident != "" {
+			idx.tombstonedIdentities[ident] = h
+		}
+	}
+	return idx
+}
+
+func pathKey(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	return strings.ToLower(filepath.Clean(path))
+}
+
+func registryLookupKeys(account, tag, product string) map[string]bool {
+	out := map[string]bool{}
+	for _, k := range []string{account, tag} {
+		k = strings.ToLower(strings.TrimSpace(k))
+		if k != "" {
+			out[k] = true
+		}
+	}
+	if product == "claude" {
+		switch {
+		case account == ".claude":
+			out["default"] = true
+		case strings.HasPrefix(account, ".claude-"):
+			out[strings.ToLower(strings.TrimPrefix(account, ".claude-"))] = true
+		}
+	}
+	return out
+}
+
+func accountsRegistryReason(h configaccounts.Home, fallback string) string {
+	reason := strings.TrimSpace(h.TombstoneReason)
+	if reason == "" {
+		reason = fallback
+	}
+	if h.RehomeTo != "" && !strings.Contains(strings.ToLower(reason), "rehome") {
+		reason += "; rehome -> " + h.RehomeTo
+	}
+	return reason
+}
+
+func accountsRegistryExclusion(acctDir, product, account, tag string, id Identity, idx accountsRegistryIndex) string {
+	keys := registryLookupKeys(account, tag, product)
+	dkey := pathKey(acctDir)
+	for k := range keys {
+		if h, ok := idx.tombstonedNames[k]; ok {
+			return accountsRegistryReason(h, "tombstoned in fak accounts registry")
+		}
+	}
+	if dkey != "" {
+		if h, ok := idx.tombstonedDirs[dkey]; ok {
+			return accountsRegistryReason(h, "tombstoned in fak accounts registry")
+		}
+	}
+
+	for k := range keys {
+		if idx.activeNames[k] {
+			return ""
+		}
+	}
+	if dkey != "" && idx.activeDirs[dkey] {
+		return ""
+	}
+
+	identityKey := ""
+	if id.AccountUUID != "" {
+		identityKey = "uuid:" + id.AccountUUID
+	}
+	if identityKey != "" {
+		if h, ok := idx.tombstonedIdentities[identityKey]; ok {
+			return accountsRegistryReason(h, "same account identity as tombstoned fak accounts registry seat")
+		}
+	}
+	return ""
+}
+
+func classifyRow(acctDir, product, account string, pol Policy, acctIdx accountsRegistryIndex) Account {
 	tag := AccountTag(account)
 	note := pol.Notes[tag]
 	base := Account{Dir: acctDir, Product: product, Account: account, Tag: tag, Notes: note}
@@ -147,6 +281,11 @@ func classifyRow(acctDir, product, account string, pol Policy) Account {
 	id := Identity{}
 	if product == "claude" {
 		id = ReadAccountIdentity(acctDir)
+	}
+	if reason := accountsRegistryExclusion(acctDir, product, account, tag, id, acctIdx); reason != "" {
+		base.Kind = KindExcluded
+		base.Reason = reason
+		return base
 	}
 	if hit := excludedMatch(tag, account, pol.Exclude, id.LoginEmail); hit != "" {
 		base.Kind = KindExcluded
@@ -214,6 +353,12 @@ func claudeLoginStatus(acctDir, tag string) (configaccounts.LoginStatus, bool) {
 		Identity: configaccounts.DeriveIdentity(acctDir),
 	}
 	st := h.LoginStatus()
+	if st == configaccounts.LoginNeedsLogin {
+		exp := ReadCredExpiry(acctDir)
+		if exp.HasExpiry && !exp.NeedsLogin(time.Now().UTC()) {
+			return configaccounts.LoginReady, true
+		}
+	}
 	return st, st == configaccounts.LoginReady
 }
 
@@ -224,7 +369,7 @@ func claudeLoginStatus(acctDir, tag string) (configaccounts.LoginStatus, bool) {
 // classifyRow. This is the glob-then-classify idiom discoverClaude and
 // discoverOpencode share; only the glob pattern, the product tag, and the
 // second gate differ between them.
-func discoverProduct(root, pattern, product string, pol Policy, extraCheck func(acctDir string) (reason string)) []Account {
+func discoverProduct(root, pattern, product string, pol Policy, acctIdx accountsRegistryIndex, extraCheck func(acctDir string) (reason string)) []Account {
 	var rows []Account
 	matches, _ := filepath.Glob(filepath.Join(root, pattern))
 	for _, acctDir := range matches {
@@ -242,13 +387,13 @@ func discoverProduct(root, pattern, product string, pol Policy, extraCheck func(
 				Tag: tag, Kind: KindNonAccount, Reason: reason, Notes: note})
 			continue
 		}
-		rows = append(rows, classifyRow(acctDir, product, account, pol))
+		rows = append(rows, classifyRow(acctDir, product, account, pol, acctIdx))
 	}
 	return rows
 }
 
-func discoverClaude(home string, pol Policy) []Account {
-	return discoverProduct(home, ".claude*", "claude", pol, func(acctDir string) string {
+func discoverClaude(home string, pol Policy, acctIdx accountsRegistryIndex) []Account {
+	return discoverProduct(home, ".claude*", "claude", pol, acctIdx, func(acctDir string) string {
 		pst, perr := os.Stat(filepath.Join(acctDir, "projects"))
 		if perr != nil || !pst.IsDir() {
 			return "no projects/ subdir"
@@ -257,8 +402,8 @@ func discoverClaude(home string, pol Policy) []Account {
 	})
 }
 
-func discoverOpencode(configHome string, pol Policy) []Account {
-	return discoverProduct(configHome, "opencode*", "opencode", pol, func(acctDir string) string {
+func discoverOpencode(configHome string, pol Policy, acctIdx accountsRegistryIndex) []Account {
+	return discoverProduct(configHome, "opencode*", "opencode", pol, acctIdx, func(acctDir string) string {
 		for _, m := range OpencodeMarkerFiles {
 			if mst, merr := os.Stat(filepath.Join(acctDir, m)); merr == nil && !mst.IsDir() {
 				return ""
@@ -438,7 +583,8 @@ func derefInt(p *int) int {
 // shared Claude identities. Rows are sorted by (product, kind != worker, tag) to match
 // fleet_accounts.discover_accounts.
 func Discover(home, configHome string, pol Policy) []Account {
-	rows := append(discoverClaude(home, pol), discoverOpencode(configHome, pol)...)
+	acctIdx := indexAccountsRegistry(loadAccountsRegistry(home))
+	rows := append(discoverClaude(home, pol, acctIdx), discoverOpencode(configHome, pol, acctIdx)...)
 	reconcileIdentities(rows)
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].Product != rows[j].Product {

@@ -45,6 +45,25 @@ const (
 // (the opencode.json/jsonc is the switch seam, the way projects/ is for Claude).
 var OpencodeMarkerFiles = []string{"opencode.json", "opencode.jsonc"}
 
+const (
+	// Benchmark-ranked NVIDIA NIM coding seats, snapshot 2026-07-06.
+	NIMDeepSeekV4ProModel = "deepseek-ai/deepseek-v4-pro"
+	NIMKimiK26Model       = "moonshotai/kimi-k2.6"
+	NIMGLM52Model         = "z-ai/glm-5.2"
+)
+
+var nimCodingSeatProfiles = map[string]ProfileOverride{
+	"nim-deepseek-v4-pro": {ModelTier: 1, Model: NIMDeepSeekV4ProModel, Agent: "opencode"},
+	"nim-kimi-k26":        {ModelTier: 1, Model: NIMKimiK26Model, Agent: "opencode"},
+	"nim-glm52":           {ModelTier: 1, Model: NIMGLM52Model, Agent: "opencode"},
+}
+
+var defaultNIMCodingRouteWeights = map[string]int{
+	"opencode:nim-deepseek-v4-pro": 30,
+	"opencode:nim-kimi-k26":        20,
+	"opencode:nim-glm52":           10,
+}
+
 // Policy is the operator-editable account policy (accounts_policy.json), applying
 // uniformly to BOTH products. Exclude substrings tombstone accounts; IncludeOnly (when
 // non-empty) is an allowlist. AccountProfiles overrides model-tier inference; RouteWeights
@@ -79,7 +98,8 @@ type Routing struct {
 }
 
 // DefaultPolicy mirrors fleet_accounts.DEFAULT_POLICY: backup/breakglass off the
-// auto-resume roster, conservative tier inference, no profile/weight overrides.
+// auto-resume roster, conservative tier inference, and built-in route bias for the
+// current NVIDIA NIM coding-seat trio.
 func DefaultPolicy() Policy {
 	return Policy{
 		Exclude:     []string{"backup", "breakglass"},
@@ -88,8 +108,12 @@ func DefaultPolicy() Policy {
 			"backup": "break-glass backup account; never auto-resume",
 		},
 		AccountProfiles: map[string]ProfileOverride{},
-		RouteWeights:    map[string]int{},
-		LaneModels:      map[string]string{},
+		RouteWeights: map[string]int{
+			"opencode:nim-deepseek-v4-pro": defaultNIMCodingRouteWeights["opencode:nim-deepseek-v4-pro"],
+			"opencode:nim-kimi-k26":        defaultNIMCodingRouteWeights["opencode:nim-kimi-k26"],
+			"opencode:nim-glm52":           defaultNIMCodingRouteWeights["opencode:nim-glm52"],
+		},
+		LaneModels: map[string]string{},
 		Routing: Routing{
 			LightConfidence:   0.999,
 			HardTier1Fallback: "stop",
@@ -162,6 +186,10 @@ func modelTierFromName(model string) int {
 	}
 	if strings.Contains(text, "opus-4.6") || strings.Contains(compact, "opus46") ||
 		text == "opus" || text == "claude-opus" {
+		return 1
+	}
+	if strings.Contains(text, "deepseek-v4-pro") || strings.Contains(compact, "deepseekv4pro") ||
+		strings.Contains(text, "kimi-k2.6") || strings.Contains(compact, "kimik26") {
 		return 1
 	}
 	if strings.Contains(text, "glm-5.2") || strings.Contains(compact, "glm52") {
@@ -245,6 +273,12 @@ func accountProfile(row Account, pol Policy) Profile {
 	}
 	if product == "opencode" {
 		models := safeOpencodeModels(row.Dir)
+		if ov, ok := nimCodingSeatProfiles[strings.ToLower(tag)]; ok {
+			if ov.SmallModel == "" {
+				ov.SmallModel = models["small_model"]
+			}
+			return cleanProfile(ov, "default:nvidia-nim-coding:"+tag)
+		}
 		model := models["model"]
 		tier := modelTierFromName(model)
 		tl, al := strings.ToLower(tag), strings.ToLower(row.Account)

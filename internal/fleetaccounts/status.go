@@ -475,6 +475,7 @@ func Annotate(rows []Account, reg Registry) []Account {
 		if r.Kind == KindWorker {
 			st := computeRuntimeStatus(r.Account, reg)
 			applyStatus(r, st)
+			applyFreshProbeLoginOverride(r)
 			applyLoginGate(r)
 			applyCredExpiryGate(r, time.Now().UTC())
 		} else {
@@ -493,6 +494,7 @@ func Annotate(rows []Account, reg Registry) []Account {
 			r.RegistryAgeMin = nil
 		}
 	}
+	reconcileIdentityPeerAvailability(out)
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Product != out[j].Product {
 			return out[i].Product < out[j].Product
@@ -508,6 +510,76 @@ func Annotate(rows []Account, reg Registry) []Account {
 		return out[i].Tag < out[j].Tag
 	})
 	return out
+}
+
+func reconcileIdentityPeerAvailability(rows []Account) {
+	byUUID := map[string][]int{}
+	for i := range rows {
+		r := rows[i]
+		if r.Product != "claude" || r.Kind != KindWorker {
+			continue
+		}
+		uuid := derefStr(r.AccountUUID)
+		if uuid == "" {
+			continue
+		}
+		byUUID[uuid] = append(byUUID[uuid], i)
+	}
+	for _, group := range byUUID {
+		if len(group) < 2 {
+			continue
+		}
+		canon := -1
+		for _, i := range group {
+			if derefStr(rows[i].IdentityRole) == "canonical" {
+				canon = i
+				break
+			}
+		}
+		if canon < 0 || accountCanBeOffered(rows[canon]) || accountLoginBlocked(rows[canon]) {
+			continue
+		}
+		if kind := strings.ToLower(derefStr(rows[canon].BlockKind)); kind != "" && kind != "auth" {
+			continue
+		}
+		peer := -1
+		for _, i := range group {
+			if i == canon || !accountCanBeOffered(rows[i]) {
+				continue
+			}
+			if peer < 0 || identityPeerStatusLess(rows[i], rows[peer]) {
+				peer = i
+			}
+		}
+		if peer < 0 {
+			continue
+		}
+		applyIdentityPeerStatus(&rows[canon], rows[peer])
+	}
+}
+
+func identityPeerStatusLess(a, b Account) bool {
+	if derefInt(a.LiveSessions) != derefInt(b.LiveSessions) {
+		return derefInt(a.LiveSessions) > derefInt(b.LiveSessions)
+	}
+	if derefInt(a.ActiveSessions) != derefInt(b.ActiveSessions) {
+		return derefInt(a.ActiveSessions) > derefInt(b.ActiveSessions)
+	}
+	return a.Tag < b.Tag
+}
+
+func applyIdentityPeerStatus(dst *Account, peer Account) {
+	dst.Available = boolp(true)
+	dst.Blocked = boolp(false)
+	dst.BlockKind = nil
+	dst.BlockReason = strp("")
+	dst.Reset = nil
+	dst.Weekly = nil
+	dst.Throttled = boolp(false)
+	dst.StatusSource = strp("identity-peer")
+	dst.ActiveSessions = intp(fleetMaxInt(derefInt(dst.ActiveSessions), derefInt(peer.ActiveSessions)))
+	dst.LiveSessions = intp(fleetMaxInt(derefInt(dst.LiveSessions), derefInt(peer.LiveSessions)))
+	dst.AuthBlockedSessions = intp(derefInt(dst.AuthBlockedSessions) + derefInt(peer.AuthBlockedSessions))
 }
 
 func applyStatus(r *Account, st RuntimeStatus) {
@@ -549,6 +621,28 @@ func applyLoginGate(r *Account) {
 	r.BlockKind = strp("auth")
 	r.BlockReason = strp(accountLoginBlockReason(*r))
 	r.Throttled = boolp(false)
+}
+
+func applyFreshProbeLoginOverride(r *Account) {
+	if r.Product != "claude" || r.Kind != KindWorker {
+		return
+	}
+	switch derefStr(r.StatusSource) {
+	case "probe", "probe-ledger":
+	default:
+		return
+	}
+	if ReadCredExpiry(r.Dir).HasExpiry {
+		r.LoginStatus = strp(string(configaccounts.LoginReady))
+		r.CanServe = boolp(true)
+	}
+}
+
+func fleetMaxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func accountCanBeOffered(r Account) bool {

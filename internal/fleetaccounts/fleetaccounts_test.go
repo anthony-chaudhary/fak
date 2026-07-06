@@ -78,6 +78,11 @@ func find(rows []Account, account string) *Account {
 	return nil
 }
 
+func jsonPath(s string) string {
+	b, _ := json.Marshal(s)
+	return strings.Trim(string(b), `"`)
+}
+
 func TestDiscoverClassifiesBothProducts(t *testing.T) {
 	home, cfg, _ := fixture(t)
 	rows := Discover(home, cfg, DefaultPolicy())
@@ -130,6 +135,64 @@ func TestProfileTierInference(t *testing.T) {
 	}
 	if derefStr(glm.Model) != "zai-coding-plan/glm-5.2" {
 		t.Errorf("opencode glm model = %q", derefStr(glm.Model))
+	}
+}
+
+func TestNIMCodingSeatsRankAsTierOneOpencode(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	cfg := filepath.Join(root, "cfg")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seats := []struct {
+		account string
+		tag     string
+		model   string
+		weight  int
+	}{
+		{"opencode-nim-deepseek-v4-pro", "nim-deepseek-v4-pro", NIMDeepSeekV4ProModel, 30},
+		{"opencode-nim-kimi-k26", "nim-kimi-k26", NIMKimiK26Model, 20},
+		{"opencode-nim-glm52", "nim-glm52", NIMGLM52Model, 10},
+	}
+	for _, seat := range seats {
+		dir := filepath.Join(cfg, seat.account)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(`{}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	pol := DefaultPolicy()
+	rows := AnnotatedRoster(home, cfg, pol, Registry{})
+	for _, seat := range seats {
+		row := find(rows, seat.account)
+		if row == nil {
+			t.Fatalf("%s not discovered", seat.account)
+		}
+		if row.Kind != KindWorker || row.Product != "opencode" || row.Tag != seat.tag {
+			t.Fatalf("%s classified as kind/product/tag=%q/%q/%q",
+				seat.account, row.Kind, row.Product, row.Tag)
+		}
+		if row.ModelTier == nil || *row.ModelTier != 1 {
+			t.Errorf("%s tier = %v want 1", seat.account, row.ModelTier)
+		}
+		if derefStr(row.Model) != seat.model {
+			t.Errorf("%s model = %q want %q", seat.account, derefStr(row.Model), seat.model)
+		}
+		if derefStr(row.ProfileSource) != "default:nvidia-nim-coding:"+seat.tag {
+			t.Errorf("%s profile_source = %q", seat.account, derefStr(row.ProfileSource))
+		}
+		if row.RouteWeight == nil || *row.RouteWeight != seat.weight {
+			t.Errorf("%s route_weight = %v want %d", seat.account, row.RouteWeight, seat.weight)
+		}
+	}
+
+	route := RouteAccount(rows, "implement the feature", "engineering", false, false, "opencode", pol)
+	if !route.OK || route.Account == nil || route.Account.Account != "opencode-nim-deepseek-v4-pro" {
+		t.Fatalf("engineering opencode route = %+v, want deepseek NIM seat first", route)
 	}
 }
 
@@ -224,6 +287,73 @@ func TestAvailableExcludesBlockedAndDuplicate(t *testing.T) {
 	}
 	if got[".claude-backup-acct"] {
 		t.Errorf("excluded backup must not be available")
+	}
+}
+
+func TestPickerUsesAccountsRegistryAndIdentityPeerAvailability(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	cfg := filepath.Join(root, "cfg")
+	for _, d := range []string{
+		filepath.Join(home, ".claude", "projects"),
+		filepath.Join(home, ".claude-july4-netra", "projects"),
+		filepath.Join(home, ".claude-gem8NEW-netra", "projects"),
+		filepath.Join(cfg, "empty"),
+		filepath.Join(home, ".claude-accounts"),
+	} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(p, body string) {
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	july4ID := `{"oauthAccount":{"accountUuid":"uuid-july4","emailAddress":"july4@example.com","organizationUuid":"org-july4","organizationType":"claude_max"}}`
+	gem8ID := `{"oauthAccount":{"accountUuid":"uuid-gem8","emailAddress":"gem8@example.com","organizationUuid":"org-gem8","organizationType":"claude_max"}}`
+	for _, dir := range []string{".claude", ".claude-july4-netra"} {
+		write(filepath.Join(home, dir, ".claude.json"), july4ID)
+		write(filepath.Join(home, dir, ".credentials.json"), `{}`)
+	}
+	write(filepath.Join(home, ".claude-gem8NEW-netra", ".claude.json"), gem8ID)
+	write(filepath.Join(home, ".claude-gem8NEW-netra", ".credentials.json"), `{}`)
+	accountsReg := `{"version":"fak-config-homes/v1","homes":[` +
+		`{"name":"default","dir":"` + jsonPath(filepath.Join(home, ".claude")) + `"},` +
+		`{"name":"july4-netra","dir":"` + jsonPath(filepath.Join(home, ".claude-july4-netra")) + `"},` +
+		`{"name":"gem8NEW-netra","dir":"` + jsonPath(filepath.Join(home, ".claude-gem8NEW-netra")) + `","status":"tombstoned","rehome_to":"july4-netra","tombstone_reason":"retired in fak accounts registry"}` +
+		`],"roles":{"active":"july4-netra","anchor":"default"}}`
+	write(filepath.Join(home, ".claude-accounts", "registry.json"), accountsReg)
+
+	reg := Registry{
+		GeneratedUTC: "2026-07-06T02:24:02Z",
+		Auth: map[string]any{
+			".claude-july4-netra": map[string]any{
+				"block_kind": "auth", "block_reason": "auth/login required",
+				"seen_utc": "2026-07-06T02:02:02Z",
+			},
+		},
+		Sessions: []Session{
+			{Account: ".claude", Project: "work", Disp: "LIVE", AgeMin: 1, hasAge: true},
+			{Account: ".claude-july4-netra", Project: "work", Disp: "INFRA_AUTH", Action: "BLOCKED_AUTH", AgeMin: 22, hasAge: true, Last: "Not logged in"},
+		},
+	}
+	rows := AnnotatedRoster(home, cfg, DefaultPolicy(), reg)
+	gem8 := find(rows, ".claude-gem8NEW-netra")
+	if gem8 == nil || gem8.Kind != KindExcluded || !strings.Contains(gem8.Reason, "retired in fak accounts registry") {
+		t.Fatalf("gem8NEW row = %+v, want excluded by fak accounts registry", gem8)
+	}
+	july4 := find(rows, ".claude-july4-netra")
+	if july4 == nil || !derefBool(july4.Available) || derefStr(july4.StatusSource) != "identity-peer" {
+		t.Fatalf("july4 row = %+v, want available via identity-peer", july4)
+	}
+	if derefInt(july4.LiveSessions) != 1 || derefInt(july4.AuthBlockedSessions) != 1 {
+		t.Fatalf("july4 sessions live/auth = %d/%d, want 1/1",
+			derefInt(july4.LiveSessions), derefInt(july4.AuthBlockedSessions))
+	}
+	resolved := Resolve(rows, home, ResolveRequest{WorkKind: "engineering", Product: "claude"}, DefaultPolicy())
+	if !resolved.OK || resolved.Account != ".claude-july4-netra" {
+		t.Fatalf("resolved = %+v, want july4-netra", resolved)
 	}
 }
 
