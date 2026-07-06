@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -90,6 +91,7 @@ type sweepPlan struct {
 	OldestDirtyPath       string       `json:"oldest_dirty_path,omitempty"`
 	OldestDirtyMTime      int64        `json:"oldest_dirty_mtime,omitempty"`
 	OldestDirtyAgeSeconds int64        `json:"oldest_dirty_age_seconds,omitempty"`
+	NextAction            string       `json:"next_action,omitempty"`
 	Groups                []sweepGroup `json:"groups"`
 	NoLane                []sweepEntry `json:"no_lane,omitempty"`
 	Junk                  []sweepEntry `json:"junk,omitempty"`
@@ -190,7 +192,33 @@ func classifyDirty(entries []dirtyEntry, resolve laneResolver, origin originProb
 			Units:                 splitLaneUnits(dirty, atomicUnitTarget),
 		})
 	}
+	plan.NextAction = sweepNextAction(plan)
 	return plan
+}
+
+func sweepNextAction(plan sweepPlan) string {
+	if plan.TotalDirty == 0 {
+		return "working tree is clean; nothing to sweep"
+	}
+	if len(plan.Junk) > 0 {
+		return fmt.Sprintf("remove %d junk path(s) if you own them, then rerun `fak sweep --json`", len(plan.Junk))
+	}
+	if len(plan.NoLane) > 0 {
+		return fmt.Sprintf("inspect %d no-lane path(s); commit each with `fak commit --path <path> ...` or remove it if it is scratch", len(plan.NoLane))
+	}
+	for _, g := range plan.Groups {
+		if g.AllAlready {
+			continue
+		}
+		if len(g.Units) > 0 {
+			return fmt.Sprintf("run `fak sweep --apply --lane %s --unit 1 -m \"<type>(%s): <verb> <what>\"` for the first stampable sub-unit", g.Lane, g.Lane)
+		}
+		return fmt.Sprintf("run `fak sweep --apply --lane %s -m \"<type>(%s): <verb> <what>\"` for the first stampable lane group", g.Lane, g.Lane)
+	}
+	if len(plan.Groups) > 0 {
+		return "discard already-shipped working copies, then rerun `fak sweep --json`"
+	}
+	return "inspect the dirty paths, then rerun `fak sweep --json`"
 }
 
 func oldestDirty(entries []dirtyEntry) (path string, mtime, age int64) {

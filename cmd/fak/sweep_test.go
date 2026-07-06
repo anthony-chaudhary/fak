@@ -67,8 +67,33 @@ func TestClassifyDirtyGroupsByLane(t *testing.T) {
 	if len(plan.Junk) != 2 {
 		t.Fatalf("len(Junk) = %d, want 2", len(plan.Junk))
 	}
+	if !strings.Contains(plan.NextAction, "remove 2 junk path(s)") {
+		t.Fatalf("NextAction = %q, want junk cleanup first", plan.NextAction)
+	}
 	if n := stampableCount(plan); n != 3 {
 		t.Fatalf("stampableCount = %d, want 3", n)
+	}
+}
+
+func TestSweepNextActionPriority(t *testing.T) {
+	cases := []struct {
+		name string
+		plan sweepPlan
+		want string
+	}{
+		{"clean", sweepPlan{}, "working tree is clean"},
+		{"junk first", sweepPlan{TotalDirty: 2, Junk: []sweepEntry{{dirtyEntry: dirtyEntry{Path: "wave.err"}}}, Groups: []sweepGroup{{Lane: "docs", Paths: []string{"docs/a.md"}}}}, "remove 1 junk path(s)"},
+		{"no lane before stampable", sweepPlan{TotalDirty: 2, NoLane: []sweepEntry{{dirtyEntry: dirtyEntry{Path: "TODO"}}}, Groups: []sweepGroup{{Lane: "docs", Paths: []string{"docs/a.md"}}}}, "inspect 1 no-lane path(s)"},
+		{"unit first", sweepPlan{TotalDirty: 11, Groups: []sweepGroup{{Lane: "docs", Paths: []string{"docs/a.md"}, Units: []sweepSubUnit{{Index: 1, Paths: []string{"docs/a.md"}}}}}}, "--lane docs --unit 1"},
+		{"lane group", sweepPlan{TotalDirty: 1, Groups: []sweepGroup{{Lane: "docs", Paths: []string{"docs/a.md"}}}}, "--apply --lane docs -m"},
+		{"all already", sweepPlan{TotalDirty: 1, Groups: []sweepGroup{{Lane: "docs", Paths: []string{"docs/a.md"}, AllAlready: true}}}, "discard already-shipped"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sweepNextAction(tc.plan); !strings.Contains(got, tc.want) {
+				t.Fatalf("sweepNextAction = %q, want substring %q", got, tc.want)
+			}
+		})
 	}
 }
 
