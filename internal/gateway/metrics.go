@@ -309,6 +309,13 @@ type gatewayMetrics struct {
 	denyAllConsecutive      uint64 // consecutive deny-all turns ending the most recent served turn (reset by any non-deny-all turn)
 	toolFeedbackTurns       uint64 // cumulative retryable tool-feedback turns (all proposed calls rejected as model-fixable feedback)
 	toolFeedbackConsecutive uint64 // consecutive retryable tool-feedback turns ending the most recent served turn
+
+	// fakVerbCalls counts admitted MCP fak-verb (tools/call) invocations since process
+	// start — the signal that fak was actually USED as a substrate, not merely present as a
+	// passive guard. The guard-stophook polls it to warn when a long run ends having called
+	// ZERO fak verbs (the #3093 unused-substrate pathology). Atomic, off the deny-all lock —
+	// a one-increment-per-tools/call path with no coupling to the stop families.
+	fakVerbCalls uint64
 }
 
 type inflightEntry struct {
@@ -487,6 +494,26 @@ func (m *gatewayMetrics) observeUpstreamRetry(wait time.Duration) {
 	if wait > 0 {
 		atomic.AddUint64(&m.upstreamRetryWaitNS, uint64(wait))
 	}
+}
+
+// observeFakVerbCall records one admitted MCP fak-verb (tools/call) invocation. Called
+// from the single tools/call choke point after the --expose allow gate, so it counts only
+// verbs the operator actually exposed and the client actually called. Atomic and off the
+// request-critical path; a nil metrics receiver is a no-op.
+func (m *gatewayMetrics) observeFakVerbCall() {
+	if m == nil {
+		return
+	}
+	atomic.AddUint64(&m.fakVerbCalls, 1)
+}
+
+// fakVerbCallsSnapshot reads the cumulative fak-verb call counter. Used by the metrics
+// renderer and available to any read-time fold.
+func (m *gatewayMetrics) fakVerbCallsSnapshot() uint64 {
+	if m == nil {
+		return 0
+	}
+	return atomic.LoadUint64(&m.fakVerbCalls)
 }
 
 // observeUpstreamAuthRefresh counts one 401 token-rotation self-heal by outcome ("recovered" /
@@ -940,6 +967,9 @@ func (m *gatewayMetrics) writeDenyAllMetrics(b *strings.Builder) {
 		"Consecutive retryable tool-feedback turns ending the most recent served turn. The guard Stop-hook may continue the turn from this signal, but a session stop must come from a separate declared stop policy, not from malformed tool calls accidentally accumulating as hard deny-all.",
 		"gauge")
 	fmt.Fprintf(b, "fak_guard_tool_feedback_consecutive %d\n", feedbackConsec)
+	writeCounter(b, "fak_mcp_verb_calls_total",
+		"Admitted MCP fak-verb (tools/call) invocations since process start — the signal that fak was USED as a substrate, not merely present as a passive guard. The guard Stop-hook reads this to warn when a long run ends having called ZERO fak verbs (the unused-substrate pathology: fak available but inert).",
+		int64(m.fakVerbCallsSnapshot()))
 }
 
 // sessionRunStates is the closed vocabulary of session DRIVE-state tokens the

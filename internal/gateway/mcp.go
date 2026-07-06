@@ -290,6 +290,9 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 	if s.exposeAllow != nil && !s.exposeAllow(p.Name) {
 		return nil, &rpcError{Code: rpcInvalidParams, Message: "unknown tool: " + p.Name}
 	}
+	// Count every admitted fak-verb call (the #3093 unused-substrate signal). Placed after
+	// the --expose gate so a hidden tool answered "unknown" does not count as a real use.
+	s.metrics.observeFakVerbCall()
 	switch p.Name {
 	case "fak_syscall":
 		req := decodeSyscallArgs(p.Arguments)
