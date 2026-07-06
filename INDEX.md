@@ -173,6 +173,7 @@ front page.
 
 ### Latest working notes
 
+- [Triage + contract: R8 readout that proves the doctrine — overlay counter + one-ledger join (#2206)](docs/notes/AUTOCTX-R8-READOUT-CONTRACT-TRIAGE-2026-07-06.md) -- auto-indexed dated note.
 - [Triage — #3080: KV paging + context-budget tuning for concurrent GLM-5.2 streams (GPU server 2 · Lane B)](docs/notes/GLM52-DGX2-LANEB-KV-BUDGET-TRIAGE-2026-07-06.md) -- auto-indexed dated note.
 - [GLM-5.2 L2 cont-batching sweep (#3079): gen/now triage + GPU-server benchmark blocker](docs/notes/GLM52-DGX2-LANEB-L2-CONTBATCH-TRIAGE-2026-07-06.md) -- auto-indexed dated note.
 - [GLM-5.2 L5 quant sweep (#3077): triage + witness gate](docs/notes/GLM52-L5-QUANT-SWEEP-TRIAGE-2026-07-06.md) -- auto-indexed dated note.
