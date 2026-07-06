@@ -1,4 +1,4 @@
-package adjudicator_test
+package policy
 
 // Flag-bypass / headless-allow capability-floor conformance (issue #2921, child of
 // the "mine Hermes for what a kernel does better" epic #2908 track C).
@@ -10,22 +10,25 @@ package adjudicator_test
 // caller that can set the flag has a full bypass. A floor with a `force` escape
 // hatch and a headless default-allow is not a floor.
 //
-// fak's capability floor has NEITHER. Adjudicator.Adjudicate(ctx, *abi.ToolCall)
+// fak's capability floor has NEITHER. adjudicator.Adjudicate(ctx, *abi.ToolCall)
 // is a PURE function of (installed Policy, ToolCall): there is no `force`
 // parameter, no interactive/headless/TTY/session-mode input, and no env-based
 // auto-approve. abi.ToolCall.Meta is an OPEN map whose "unknown keys MUST be
-// ignored" (types.go) and which decide.go documents as model-controlled and
+// ignored" (abi/types.go) and which decide.go documents as model-controlled and
 // unable to widen authority. The ONLY way to admit a denied capability is to
 // change the reviewed, in-git Policy — never a runtime flag, env var, or headless
 // mode. These tests are the executable regression witnesses for that structural
 // guarantee: the same structural deny applies interactive OR headless, flag-set
 // OR unset.
 //
-// Sibling conformance witnesses for other bypass axes:
-//   - internal/policy/isolation_capfloor_conformance_test.go — a stronger
-//     process-isolation tier never bypasses the #2018 adjudication floor.
-//   - internal/adjudicator/dogfood_manifest_test.go — the shipped floor's
-//     verdict matrix; a manifest edit that silently widens it fails there.
+// This lives in internal/policy (not internal/adjudicator) because the adjudicator
+// tree is a hard-self core lock (internal/corelocks core_locks.toml); it drives the
+// floor through the adjudicator's EXPORTED API, exactly like the sibling
+// isolation_capfloor_conformance_test.go in this package. Related witnesses:
+//   - isolation_capfloor_conformance_test.go — a stronger process-isolation tier
+//     never bypasses the #2018 adjudication floor.
+//   - internal/adjudicator/dogfood_manifest_test.go — the shipped floor's verdict
+//     matrix; a manifest edit that silently widens it fails there.
 
 import (
 	"context"

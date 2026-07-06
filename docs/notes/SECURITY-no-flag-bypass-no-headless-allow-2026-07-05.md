@@ -74,7 +74,7 @@ The [#2921](https://github.com/anthony-chaudhary/fak/issues/2921) acceptance —
 matrix of **(interactive | headless) × (flag-set | flag-unset)** proving the floor
 holds identically — is locked as a Go regression test:
 
-- **`internal/adjudicator/flag_bypass_capfloor_conformance_test.go`**
+- **`internal/policy/flag_bypass_capfloor_conformance_test.go`**
   - `TestFloorHoldsAcrossFlagAndHeadlessMatrix` re-adjudicates every deny/allow
     rung (name-deny, self-modify, arg-value deny, the hardwired egress floor,
     default-deny, and one affirmative allow) in every matrix cell. The flag axis
