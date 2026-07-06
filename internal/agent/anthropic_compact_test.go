@@ -774,6 +774,9 @@ func TestCompactSystemOnlyBreakpoint(t *testing.T) {
 	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
 		t.Fatalf("system-only compacted body failed to decode: %v", err)
 	}
+	// pfxEnd<0 seats the stub at the HEAD of the array; it must be a user turn or Anthropic 400s
+	// (DecodeAnthropicMessagesRequest does not enforce the leading role, so assert it explicitly).
+	assertFirstMessageUser(t, out)
 	// The whole array head (system + the messages `[`) must be byte-identical.
 	var obj map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &obj)

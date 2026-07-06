@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -837,8 +838,13 @@ type HTTPPlanner struct {
 	OpenAIToolMessagesAsText bool
 	Temperature              float64
 	MaxTokens                int
-	Client                   *http.Client
-	QuarantineTranscript     bool
+	// MaxTokensCap clamps the outbound provider request's output-token ceiling after
+	// caller/session sampling overrides. Zero leaves the request unchanged. This is for
+	// OpenAI-compatible providers that reject Claude Code's large default max_tokens even
+	// when the account has no token-rate quota.
+	MaxTokensCap         int
+	Client               *http.Client
+	QuarantineTranscript bool
 
 	// CoherenceShaper, when non-nil, is applied to the outbound messages just before
 	// the request is marshaled — the GLM52-HOSTED-CACHE-COHERENCE §A4 hook. The agent
@@ -946,6 +952,7 @@ func NewProviderHTTPPlanner(provider, baseURL, model, apiKey string) (*HTTPPlann
 	if pv == ProviderOpenAI || pv == ProviderXAI {
 		p.OpenAIToolMessagesAsText = envTruthy("FAK_OPENAI_TOOL_MESSAGES_AS_TEXT")
 	}
+	p.MaxTokensCap = envPositiveInt("FAK_PROVIDER_MAX_TOKENS")
 	return p, nil
 }
 
@@ -956,6 +963,18 @@ func envTruthy(key string) bool {
 	default:
 		return false
 	}
+}
+
+func envPositiveInt(key string) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }
 
 // effectiveAPIKey is the credential the upstream hop authenticates with when the

@@ -53,6 +53,26 @@ func TestHTTPPlannerHonorsPerRequestMaxTokens(t *testing.T) {
 	}
 }
 
+func TestHTTPPlannerCapsProviderMaxTokens(t *testing.T) {
+	t.Setenv("FAK_PROVIDER_MAX_TOKENS", "8192")
+	var body map[string]any
+	ts := captureUpstream(t, &body)
+	defer ts.Close()
+
+	planner, err := NewProviderHTTPPlanner("openai", ts.URL, "gpt-test", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs := []Message{{Role: RoleUser, Content: "hi"}}
+
+	if _, err := planner.Complete(context.Background(), msgs, nil, WithMaxTokens(32768)); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if got := jsonInt(body["max_tokens"]); got != 8192 {
+		t.Fatalf("max_tokens on the wire = %d, want provider cap 8192", got)
+	}
+}
+
 func TestHTTPPlannerDefaultsMaxTokensWhenOmitted(t *testing.T) {
 	var body map[string]any
 	ts := captureUpstream(t, &body)

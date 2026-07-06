@@ -342,6 +342,9 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 	if sp.MaxTokens != nil && *sp.MaxTokens > 0 {
 		maxTokens = *sp.MaxTokens
 	}
+	if p.MaxTokensCap > 0 && maxTokens > p.MaxTokensCap {
+		maxTokens = p.MaxTokensCap
+	}
 	temperature := p.Temperature
 	if sp.Temperature != nil {
 		temperature = *sp.Temperature

@@ -34,9 +34,13 @@ package agent
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
+	"strings"
 )
 
 // compactStubPrefix marks the synthetic message that stands in for the dropped turns, so
@@ -44,6 +48,56 @@ import (
 // than silently lost. It is emitted as a user-role text message between the protected
 // prefix and the kept recent window.
 const compactStubPrefix = "[fak] compacted "
+
+// compactGoalMarker is the wire sentinel that PINS a message across compaction: a message in the
+// compactible middle whose text content carries this marker is HOISTED out of the drop range
+// verbatim rather than laundered into the stub, so a session's standing goal / instruction
+// survives a compaction it would otherwise fall into. It is the byte-level passthrough counterpart
+// of the decoded planner's RoleGoal GC-root pin (chat.go RoleGoal, ctxplan_session.go): the
+// flagship `fak guard -- claude` passthrough forwards raw bytes and never sees the decoded
+// RoleGoal, so on this surface the goal is marked in the message TEXT instead. A host injects it
+// (e.g. a harness /goal that prefixes the instruction) or a user types it at the start of a
+// standing instruction. Absent from every message, compaction is byte-for-byte unchanged.
+const compactGoalMarker = "[fak:goal]"
+
+// compactTombstonePrefix leads the excerpt line the stub carries when this compaction is about to
+// drop the session's ORIGINATING task (the first user turn) and no [fak:goal] pin covers it. It is
+// the automatic, lossy counterpart to the verbatim goal pin: even an UNMARKED task leaves a trace
+// in the stub instead of being laundered into a bare turn count (the model-switch symptom where a
+// resuming model finds only "[fak] compacted N earlier turn(s) ... detail is omitted" and no longer
+// knows what it was asked to do). It is kept DISTINCT from compactStubPrefix so an operator (or a
+// test) can tell the count sentinel from the task excerpt, and so it does not read as a second
+// "[fak] compacted " match. Because it sits in the stub CONTENT — after the protected prefix — the
+// cached prefix bytes are untouched; the tombstone only widens the un-cached span the provider
+// re-bills anyway.
+const compactTombstonePrefix = "[fak] originating task (compacted): "
+
+// compactTombstoneCap bounds the originating-task excerpt (in runes) so the tombstone stays
+// low-volume — it records WHAT the dropped context was, not a replay of it. Long tasks are trimmed
+// with an ellipsis; the point is orientation, not fidelity (the verbatim [fak:goal] pin is the
+// fidelity path).
+const compactTombstoneCap = 240
+
+// compactRestoreIDField is the token in the tombstone stub that carries the CALLABLE handle for the
+// dropped originating task: a content-address (sha256 hex, the ctxplan.Digest scheme) a resuming
+// model can present to fak_context_restore to page the full task bytes back in. The lossy excerpt is
+// orientation; this handle is the recovery edge — the excerpt says WHAT was dropped, the id says how
+// to get ALL of it. It is only emitted when the compaction path can back the handle with the bytes
+// (the gateway stashes digest→bytes on a fired tombstone); a bare byte-level caller with no CAS to
+// populate leaves it empty and the stub stays excerpt-only. Kept as a labelled `id=<hex>` field
+// inside the tombstone line (not a second line) so it rides the same low-volume, cache-untouched
+// stub and a human/test can read the handle without parsing.
+const compactRestoreIDField = "id="
+
+// originatingTaskDigestID content-addresses the originating-task bytes with the SAME sha256-hex
+// scheme as ctxplan.Digest / recall / blob / memq, so a compaction-minted handle and a
+// ctxplan/recall handle are interchangeable recovery addresses. Kept local (a two-line helper) so
+// the byte-level agent package depends on no mechanism package — the address is a pure function of
+// the bytes, computable here with nothing but crypto/sha256.
+func originatingTaskDigestID(taskBytes []byte) string {
+	sum := sha256.Sum256(taskBytes)
+	return hex.EncodeToString(sum[:])
+}
 
 // Compaction bail-reason vocabulary — the closed set of identity-return causes, surfaced on
 // CompactOutcome so the gateway can label a metric and an operator can see WHY compaction did
@@ -86,6 +140,19 @@ type CompactOutcome struct {
 	ProtectedPrefixTokens int
 	SuffixTokens          int
 	AnchorStarved         bool
+	// Restore handle for a tombstoned originating task. On a FIRED compaction that drops the
+	// session's first user turn (the automatic tombstone path — see originatingTaskExcerptAndBytes),
+	// RestoreID is the content-address (sha256 hex, the ctxplan.Digest scheme) embedded in the stub,
+	// and RestoreBytes is the FULL raw JSON of that dropped turn. A gateway with a per-session CAS
+	// stashes RestoreID→RestoreBytes so fak_context_restore(id) can page the task back in; a
+	// byte-level caller with no CAS ignores them and the stub embeds no id (compactStubContent leaves
+	// the handle out when the caller passes an empty id). All are zero on every non-tombstone
+	// outcome — the goal-pin path preserves the task verbatim and mints no handle. RestoreExcerpt is
+	// the same bounded orientation line embedded in the stub, carried alongside so a stashing gateway
+	// need not re-derive it from the bytes.
+	RestoreID      string
+	RestoreExcerpt string
+	RestoreBytes   []byte
 }
 
 // CompactAnchor selects where the protected (verbatim-copied) prefix ends.
@@ -293,6 +360,14 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 		return raw, CompactOutcome{Reason: CompactReasonWindowNoDrop} // nothing drops / empty window
 	}
 
+	// Goal pin (#845, the passthrough half): if a goal-marked message sits in the compactible
+	// middle, hoist it out verbatim so the drop cannot launder the session's active goal. Absent
+	// any goal marker this is a no-op — lastGoalPinInRange returns -1 and the contiguous path below
+	// runs byte-for-byte unchanged (the "no goal ⇒ no change" invariant, mirroring pins()).
+	if lastGoalPinInRange(elems, pfxEnd+1, keepStart) >= 0 {
+		return compactWithGoalPin(raw, elems, spans, pfxEnd, keepStart, opts, suffixTokens)
+	}
+
 	// 3b. Role alternation (F7): the synthetic stub is one message inserted BETWEEN the
 	//     protected prefix (ends at pfxEnd) and the kept window (starts at keepStart). Anthropic
 	//     rejects two consecutive same-role messages (400), and the stub's content is text — so
@@ -307,16 +382,16 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 	if pfxEnd >= 0 {
 		prefixLastRole = messageRole(elems[pfxEnd])
 	}
+	// Stub role: the opposite of the prefix's last message role, so it alternates with its LEFT
+	// neighbor. When pfxEnd<0 the stub has NO left neighbor — it LEADS the array — so it must be a
+	// user turn (Anthropic 400s on a leading non-user message). prefixLastRole=="" leaves stubRole at
+	// its "user" default, which is exactly the leading-user requirement; the snap below then forces
+	// the kept window head to alternate (an assistant turn) on the stub's RIGHT. (Picking the stub
+	// role to alternate with the kept head instead — the old system-only branch — could seat a
+	// leading ASSISTANT stub whenever the kept head was a user turn, an invalid body.)
 	stubRole := "user"
 	if prefixLastRole == "user" {
 		stubRole = "assistant"
-	}
-	if prefixLastRole == "" { // system-only: alternate against the kept window head instead
-		if messageRole(elems[keepStart]) == "user" {
-			stubRole = "assistant"
-		} else {
-			stubRole = "user"
-		}
 	}
 	// Snap the kept window so its first message alternates with the stub. If it collides,
 	// drop one more message (flipping the kept-first role); never cross back over pfxEnd+1.
@@ -344,6 +419,20 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 	}
 	dropped := keepStart - (pfxEnd + 1)
 
+	// Tombstone the originating task: when this drop would launder the session's first user turn
+	// (no user turn survives in the protected prefix, and this is the no-goal path — a marked goal
+	// is hoisted verbatim by compactWithGoalPin above, never here), embed a bounded excerpt of it in
+	// the stub content so a model resuming past the compaction sees WHAT it was asked to do instead
+	// of a bare turn count. Empty ⇒ the stub is byte-identical to before, so every case the pin
+	// already covered is unchanged. We also content-address the FULL dropped turn (restoreID/
+	// restoreBytes) so a gateway with a per-session CAS can back a fak_context_restore handle — the
+	// excerpt is orientation, the handle is the recovery edge that pages the whole task back in.
+	tombstone, taskBytes := originatingTaskExcerptAndBytes(elems, pfxEnd+1, keepStart)
+	restoreID := ""
+	if len(taskBytes) > 0 {
+		restoreID = originatingTaskDigestID(taskBytes)
+	}
+
 	// shedTokens: the estimated tokens removed from the outbound body — the sum over the dropped
 	// MIDDLE [pfxEnd+1, keepStart), minus the stub's own ~cost. Same ~4-chars/token currency as
 	// the budget and the provider input_tokens, so it is the CLAIMED-savings half of the
@@ -352,7 +441,7 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 	for i := pfxEnd + 1; i < keepStart; i++ {
 		shedTokens += len(elems[i]) / 4
 	}
-	if shedTokens -= compactStubTokenCost(dropped); shedTokens < 0 {
+	if shedTokens -= compactStubTokenCost(dropped, tombstone, restoreID); shedTokens < 0 {
 		shedTokens = 0
 	}
 
@@ -387,13 +476,16 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 	// 4. Splice on ORIGINAL bytes. The prefix span [0, spans[pfxEnd].end) (or just the
 	//    array-open when pfxEnd<0) is copied verbatim; then the stub; then the kept
 	//    elements verbatim; then the verbatim tail from the array close onward.
-	out, ok := spliceCompacted(raw, spans, pfxEnd, keepStart, len(elems), dropped, stubRole)
+	out, ok := spliceCompacted(raw, spans, pfxEnd, keepStart, len(elems), dropped, stubRole, tombstone, restoreID)
 	// 5. Prove it: the spliced body must still decode AND keep the protected prefix bytes
 	//    intact, or we ship identity rather than a broken/cache-busting body.
 	if outcome, good := compactSpliceVerdict(raw, out, ok, spans, pfxEnd); !good {
 		return raw, outcome
 	}
-	return out, CompactOutcome{Reason: CompactReasonNone, Dropped: dropped, ShedTokens: shedTokens}
+	return out, CompactOutcome{
+		Reason: CompactReasonNone, Dropped: dropped, ShedTokens: shedTokens,
+		RestoreID: restoreID, RestoreExcerpt: tombstone, RestoreBytes: taskBytes,
+	}
 }
 
 // headBurstEconomics prices a head-anchored drop for the CacheBurstPaysBack gate.
@@ -716,12 +808,110 @@ func messageRole(el json.RawMessage) string {
 	return m.Role
 }
 
+// compactStubContent builds the synthetic stub's text: the drop-count sentinel, plus — when a
+// tombstone excerpt is supplied — a second line carrying a bounded excerpt of the compacted
+// originating task AND, when restoreID is set, a callable content-address handle (id=<hex>) a
+// resuming model can present to fak_context_restore to page the full task back in. compactStubBytes
+// and compactStubTokenCost BOTH derive from this one function so the shed-token estimate can never
+// drift from the bytes actually emitted. An empty tombstone yields the exact pre-tombstone text (the
+// byte-identical default); an empty restoreID (a bare byte-level caller with no CAS to back the
+// handle) yields the excerpt-only tombstone line.
+func compactStubContent(dropped int, tombstone, restoreID string) string {
+	base := fmt.Sprintf("%s%d earlier turn(s) to stay within the context budget; their detail is omitted from this request.", compactStubPrefix, dropped)
+	if tombstone == "" {
+		return base
+	}
+	// The tombstone line: the orientation excerpt, plus — when the compaction path can back a
+	// handle with the bytes (restoreID set) — a labelled content-address the model can present to
+	// fak_context_restore to page the full task back in. The id rides INSIDE the tombstone line
+	// (before the excerpt) so a resuming model reads "what + how to recover" in one place and the
+	// stub stays a single low-volume, cache-untouched addition.
+	line := compactTombstonePrefix
+	if restoreID != "" {
+		line += compactRestoreIDField + restoreID + " "
+	}
+	return base + "\n" + line + strconv.Quote(tombstone)
+}
+
 // compactStubTokenCost estimates the synthetic stub message's own ~token cost (the same
 // ~4-chars/token basis the budget uses), so the reported shed is NET of the message we add
-// back. The stub text is fixed apart from the drop count, so this is a close estimate.
-func compactStubTokenCost(dropped int) int {
-	stub := fmt.Sprintf("%s%d earlier turn(s) to stay within the context budget; their detail is omitted from this request.", compactStubPrefix, dropped)
+// back. tombstone must be the SAME excerpt passed to the stub, so the estimate tracks the bytes.
+func compactStubTokenCost(dropped int, tombstone, restoreID string) int {
+	stub := compactStubContent(dropped, tombstone, restoreID)
 	return (len(stub) + len(`{"role":"assistant","content":""}`)) / 4
+}
+
+// compactStubBytes marshals the synthetic stub message that stands in for the dropped middle
+// turns. Shared by the contiguous drop (spliceCompacted) and the goal-pinned drop
+// (spliceCompactedWithGoal) so both emit a byte-identical stub for the same (role, count,
+// tombstone). tombstone is the bounded originating-task excerpt (empty on the goal path, where the
+// pin already preserves the task verbatim). An out-of-range stubRole falls back to "user".
+func compactStubBytes(stubRole string, dropped int, tombstone, restoreID string) ([]byte, error) {
+	if stubRole != "user" && stubRole != "assistant" {
+		stubRole = "user"
+	}
+	return json.Marshal(map[string]any{
+		"role":    stubRole,
+		"content": compactStubContent(dropped, tombstone, restoreID),
+	})
+}
+
+// originatingTaskDigest returns a bounded, single-line, text-only excerpt of the session's FIRST
+// user turn WHEN this compaction is about to drop it — i.e. the first user turn falls in the dropped
+// range [dropStart, keepStart) and no user turn survives ahead of it in the protected prefix. It is
+// the automatic tombstone for an UNMARKED originating task: the verbatim [fak:goal] pin covers a
+// MARKED standing goal, but a plain first task (the common case) would otherwise be laundered into a
+// bare turn count. Returns "" — leaving the stub byte-identical to the pre-tombstone default — when
+// the task already survives (protected or kept), when there is no user turn in range, or when the
+// turn is not pure text (a tool_result/image turn, which is never an originating task anyway).
+func originatingTaskDigest(elems []json.RawMessage, dropStart, keepStart int) string {
+	excerpt, _ := originatingTaskExcerptAndBytes(elems, dropStart, keepStart)
+	return excerpt
+}
+
+// originatingTaskExcerptAndBytes is originatingTaskDigest that ALSO returns the FULL raw bytes of the
+// dropped originating-task turn, so the caller can content-address them (originatingTaskDigestID) and
+// stash them behind the restore handle. The excerpt is the lossy orientation trace embedded in the
+// stub; the bytes are what a fak_context_restore(id) pages back in verbatim. Both are empty in exactly
+// the same cases originatingTaskDigest returns "" (task survives, no user turn in range, non-text
+// turn), so a caller that gets an empty excerpt also gets nil bytes and mints no handle. The returned
+// slice aliases the input element (the caller stashes it before any mutation, and the byte functions
+// only ever read it), matching the verbatim-copy discipline of the surrounding splice.
+func originatingTaskExcerptAndBytes(elems []json.RawMessage, dropStart, keepStart int) (string, []byte) {
+	firstUser := -1
+	for i := 0; i < len(elems) && i < keepStart; i++ {
+		if messageRole(elems[i]) == "user" {
+			firstUser = i
+			break
+		}
+	}
+	if firstUser < dropStart || firstUser >= keepStart {
+		return "", nil // no user turn, or the task survives in the protected prefix / kept window
+	}
+	text, ok := elementTextContent(elems[firstUser])
+	if !ok {
+		return "", nil // tool/image blocks — not a task to excerpt; keep the bare stub
+	}
+	// Strip a leading [fak:goal] marker a preamble may carry (defensive — a marked goal is hoisted,
+	// not dropped, so this path rarely sees one), then collapse all whitespace runs to single spaces
+	// so the excerpt is one low-volume line, then bound it.
+	text = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), compactGoalMarker))
+	text = strings.Join(strings.Fields(text), " ")
+	if text == "" {
+		return "", nil
+	}
+	return truncateRunes(text, compactTombstoneCap), elems[firstUser]
+}
+
+// truncateRunes shortens s to at most limit runes, appending a single ellipsis rune when it trims,
+// so a long originating task cannot blow the tombstone's low-volume budget. Rune-based so it never
+// splits a multi-byte character.
+func truncateRunes(s string, limit int) string {
+	r := []rune(s)
+	if len(r) <= limit {
+		return s
+	}
+	return string(r[:limit]) + "…"
 }
 
 // spliceCompacted assembles the rewritten body from original byte spans: the verbatim
@@ -730,15 +920,8 @@ func compactStubTokenCost(dropped int) int {
 // then the verbatim tail from the array close onward. It never re-serializes a protected or
 // kept element, so their bytes (and thus the cached prefix) are preserved exactly. ok is
 // false if the stub cannot be marshalled (it never realistically fails).
-func spliceCompacted(raw []byte, spans []elementSpan, pfxEnd, keepStart, n, dropped int, stubRole string) ([]byte, bool) {
-	if stubRole != "user" && stubRole != "assistant" {
-		stubRole = "user"
-	}
-	stub := map[string]any{
-		"role":    stubRole,
-		"content": fmt.Sprintf("%s%d earlier turn(s) to stay within the context budget; their detail is omitted from this request.", compactStubPrefix, dropped),
-	}
-	stubBytes, err := json.Marshal(stub)
+func spliceCompacted(raw []byte, spans []elementSpan, pfxEnd, keepStart, n, dropped int, stubRole, tombstone, restoreID string) ([]byte, bool) {
+	stubBytes, err := compactStubBytes(stubRole, dropped, tombstone, restoreID)
 	if err != nil {
 		return nil, false
 	}
@@ -772,6 +955,231 @@ func spliceCompacted(raw []byte, spans []elementSpan, pfxEnd, keepStart, n, drop
 // isJSONSpace reports whether b is JSON insignificant whitespace.
 func isJSONSpace(b byte) bool {
 	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+}
+
+// --- goal pin (#845, the byte-level passthrough half) ---------------------------
+
+// isCompactGoalText reports whether an extracted message text declares itself a pinned goal — the
+// marker leads the text (after optional whitespace) or begins a line, so a wrapping preamble (a
+// harness system-reminder block prepended to the user turn) does not hide it. A message that merely
+// mentions the marker mid-sentence is NOT a goal: the leading / line-start rule keeps a quoted
+// marker from over-pinning while staying robust to a benign preamble.
+func isCompactGoalText(text string) bool {
+	if strings.HasPrefix(strings.TrimSpace(text), compactGoalMarker) {
+		return true
+	}
+	return strings.Contains(text, "\n"+compactGoalMarker)
+}
+
+// isGoalPinnedMessage reports whether a messages[] element is a pinnable goal: a pure-text
+// user/assistant turn (no tool_use/tool_result blocks — elementTextContent returns ok only for
+// text, so hoisting it out of its original position can never orphan a tool pair) whose text
+// carries the goal marker.
+func isGoalPinnedMessage(el json.RawMessage) bool {
+	text, ok := elementTextContent(el)
+	if !ok {
+		return false // tool blocks / unparseable content — never hoist
+	}
+	if r := messageRole(el); r != "user" && r != "assistant" {
+		return false
+	}
+	return isCompactGoalText(text)
+}
+
+// lastGoalPinInRange returns the index of the LAST (most recent = active) goal-marked message in
+// [start, end), or -1 if none. The active goal wins when several are marked, matching the decoded
+// planner's "the session's ACTIVE goal" semantics (ctxplan_session.go).
+func lastGoalPinInRange(elems []json.RawMessage, start, end int) int {
+	if start < 0 {
+		start = 0
+	}
+	if end > len(elems) {
+		end = len(elems)
+	}
+	g := -1
+	for i := start; i < end; i++ {
+		if isGoalPinnedMessage(elems[i]) {
+			g = i
+		}
+	}
+	return g
+}
+
+// oppositeRole returns the alternating partner role. Only "user"/"assistant" alternate on the
+// Anthropic wire; any other input maps to "user" (a safe default the callers guard around).
+func oppositeRole(role string) string {
+	if role == "user" {
+		return "assistant"
+	}
+	return "user"
+}
+
+// compactWithGoalPin is the goal-preserving variant of the contiguous drop: when a goal-marked
+// message sits in the compactible middle [pfxEnd+1, keepStart), it is HOISTED out verbatim to sit
+// beside the synthetic stub (which still stands in for the rest of the dropped middle), so the drop
+// sheds the middle's bulk WITHOUT laundering the session's active goal. Everything else — the
+// verbatim protected prefix, the cache_control-span guard, the head-anchored burst economics, the
+// re-decode + prefix/tail byte-equality proof, and fail-safe identity on any ambiguity — is
+// identical to the no-goal path in CompactAnthropicHistoryWithOptions.
+//
+// The hoist reorders one small text message, which creates two synthetic-adjacent role boundaries
+// (prefix↔pair and pair↔kept-window). A single controllable-role stub cannot sit between two fixed
+// DIFFERENT-role neighbors, so the hoisted pair is ordered [goal,stub] when the prefix's last role
+// already differs from the goal's (prefix↔goal alternates on its own) and [stub,goal] otherwise;
+// then the kept-window start is advanced FORWARD until its role alternates with the pair. Because
+// advancing only GROWS the drop range, the pinned goal is re-resolved to the last goal in the final
+// range each step, so a goal the advance would otherwise swallow is pinned instead of dropped.
+func compactWithGoalPin(raw []byte, elems []json.RawMessage, spans []elementSpan, pfxEnd, keepStart int, opts CompactOptions, suffixTokens int) ([]byte, CompactOutcome) {
+	n := len(elems)
+	prefixLastRole := ""
+	if pfxEnd >= 0 {
+		prefixLastRole = messageRole(elems[pfxEnd])
+	}
+	// Resolve the pinned goal and the kept-window boundary to a fixed point: advancing keepStart can
+	// swallow (and thus re-pin) a later goal, which can change the goal's role and the required
+	// boundary. keepStart only increases, so this terminates (bounded by n).
+	var goalIdx int
+	var stubRole string
+	var goalBeforeStub bool
+	for {
+		goalIdx = lastGoalPinInRange(elems, pfxEnd+1, keepStart)
+		if goalIdx < 0 {
+			// No goal remains in the (only-ever-growing) drop range — impossible on entry and after
+			// any forward advance, so this is a defensive identity, never a silent goal drop.
+			return raw, CompactOutcome{Reason: CompactReasonWindowNoDrop}
+		}
+		goalRole := messageRole(elems[goalIdx])
+		if goalRole != "user" && goalRole != "assistant" {
+			return raw, CompactOutcome{Reason: CompactReasonWindowNoDrop} // unpinnable role — fail safe
+		}
+		stubRole = oppositeRole(goalRole)
+		// Order the hoisted pair. With a protected message before the pair (pfxEnd>=0) a single
+		// controllable-role stub cannot sit between two fixed DIFFERENT-role neighbors, so put the
+		// goal first exactly when the prefix's last role already differs from it. With NO protected
+		// message before the pair (pfxEnd<0: system-only OR the head anchor), the pair LEADS the
+		// messages array, whose first element Anthropic REQUIRES to be role "user" — so lead with
+		// whichever pair element is the user turn (the goal when it is a user turn, else the
+		// user-role stub). goalRole is guaranteed user/assistant by the guard above.
+		if pfxEnd < 0 {
+			goalBeforeStub = goalRole == "user"
+		} else {
+			goalBeforeStub = prefixLastRole != "" && prefixLastRole != goalRole
+		}
+		// wantKeptRole: the role the kept-window head must carry to alternate with whichever element
+		// is LAST in the hoisted pair. [stub,goal] ⇒ kept-first ≠ goalRole ⇒ == stubRole;
+		// [goal,stub] ⇒ kept-first ≠ stubRole ⇒ == goalRole.
+		wantKeptRole := stubRole
+		if goalBeforeStub {
+			wantKeptRole = goalRole
+		}
+		if keepStart < n && messageRole(elems[keepStart]) == wantKeptRole && !messageHasToolResult(elems[keepStart]) {
+			break
+		}
+		keepStart++
+		if keepStart >= n {
+			return raw, CompactOutcome{Reason: CompactReasonWindowNoDrop} // can't seat the kept window — identity
+		}
+	}
+	// At least one NON-goal message must drop, else we would only reorder the goal (a churn of bytes
+	// and cache for no shrink).
+	dropped := (keepStart - (pfxEnd + 1)) - 1
+	if dropped <= 0 {
+		return raw, CompactOutcome{Reason: CompactReasonWindowNoDrop}
+	}
+	// Dropping cache_control-marked history bursts the cached suffix — the same conservative posture
+	// as the no-goal path. This also guarantees the hoisted goal carries no breakpoint, so
+	// relocating it never moves a cached anchor.
+	if rangeHasCacheControl(elems, pfxEnd+1, keepStart) {
+		return raw, CompactOutcome{Reason: CompactReasonCachedSpan}
+	}
+	// shed = the dropped middle, minus the hoisted goal (survives) and the stub (added back).
+	shedTokens := 0
+	for i := pfxEnd + 1; i < keepStart; i++ {
+		if i == goalIdx {
+			continue
+		}
+		shedTokens += len(elems[i]) / 4
+	}
+	if shedTokens -= compactStubTokenCost(dropped, "", ""); shedTokens < 0 {
+		shedTokens = 0
+	}
+	// Head-anchored economics gate — identical to CompactAnthropicHistoryWithOptions.
+	if opts.Anchor == CompactAnchorHead && pfxEnd < 0 {
+		readMult, writeMult := opts.ReadMult, opts.WriteMult
+		if readMult <= 0 {
+			readMult = defaultCacheReadMult
+		}
+		if writeMult <= 0 {
+			writeMult = defaultCacheWriteMult
+		}
+		droppedCachedTokens, invalidatedSuffixTokens := headBurstEconomics(elems, pfxEnd+1, keepStart)
+		// The hoisted goal is re-inserted verbatim and re-read every future turn, so it is NOT part
+		// of the per-turn cached-read saving — exclude it from droppedCachedTokens (mirroring the
+		// shedTokens loop above), else the gate over-credits the saving and can fire a burst the true
+		// economics would reject. invalidatedSuffixTokens (the one-time penalty over [keepStart, …])
+		// is unaffected: the goal sits before keepStart.
+		if droppedCachedTokens -= len(elems[goalIdx]) / 4; droppedCachedTokens < 0 {
+			droppedCachedTokens = 0
+		}
+		if opts.ColdCache {
+			invalidatedSuffixTokens = 0
+		}
+		if !CacheBurstPaysBack(opts.TotalTurns, opts.CurrentTurn, droppedCachedTokens, invalidatedSuffixTokens, readMult, writeMult) {
+			return raw, CompactOutcome{Reason: CompactReasonBurstUnprofitable, SuffixTokens: suffixTokens}
+		}
+	}
+	out, ok := spliceCompactedWithGoal(raw, spans, pfxEnd, keepStart, goalIdx, n, dropped, stubRole, goalBeforeStub)
+	if outcome, good := compactSpliceVerdict(raw, out, ok, spans, pfxEnd); !good {
+		return raw, outcome
+	}
+	return out, CompactOutcome{Reason: CompactReasonNone, Dropped: dropped, ShedTokens: shedTokens}
+}
+
+// spliceCompactedWithGoal assembles the goal-preserving rewrite from original byte spans: the
+// verbatim protected prefix, then the hoisted pair (the synthetic stub for the dropped middle plus
+// the goal message copied VERBATIM) in the caller-chosen order, then the verbatim kept window, then
+// the verbatim tail. The goal's bytes (and the protected prefix + body tail) are never
+// re-serialized, so the cached prefix is preserved exactly. ok is false only if the stub cannot be
+// marshalled (it never realistically fails).
+func spliceCompactedWithGoal(raw []byte, spans []elementSpan, pfxEnd, keepStart, goalIdx, n, dropped int, stubRole string, goalBeforeStub bool) ([]byte, bool) {
+	// Empty tombstone AND restore id: the goal pin already preserves the standing task verbatim, so
+	// the stub here stays the bare count sentinel (byte-identical to the pre-tombstone goal path) and
+	// mints no restore handle.
+	stubBytes, err := compactStubBytes(stubRole, dropped, "", "")
+	if err != nil {
+		return nil, false
+	}
+	goalBytes := raw[spans[goalIdx].start:spans[goalIdx].end]
+
+	prefixEnd := arrayContentStart(spans)
+	if pfxEnd >= 0 {
+		prefixEnd = spans[pfxEnd].end
+	}
+	keptFrom := spans[keepStart].start
+	bodyTail := raw[spans[n-1].end:]
+
+	var b bytes.Buffer
+	b.Grow(len(raw))
+	b.Write(raw[:prefixEnd]) // verbatim protected prefix (includes `[` when pfxEnd<0)
+	lead := pfxEnd >= 0       // a comma precedes the first hoisted element only if a protected element did
+	writeMiddle := func(p []byte) {
+		if lead {
+			b.WriteByte(',')
+		}
+		lead = true
+		b.Write(p)
+	}
+	if goalBeforeStub {
+		writeMiddle(goalBytes)
+		writeMiddle(stubBytes)
+	} else {
+		writeMiddle(stubBytes)
+		writeMiddle(goalBytes)
+	}
+	b.WriteByte(',')                      // separator before the kept window (always present)
+	b.Write(raw[keptFrom:spans[n-1].end]) // verbatim kept elements (keepStart..n-1)
+	b.Write(bodyTail)                     // verbatim `]` + any trailing top-level keys
+	return b.Bytes(), true
 }
 
 // --- ctxplan-view twin (#927, the deferred #555 req.Raw transform) ---------------

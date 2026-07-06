@@ -50,10 +50,13 @@ type CtxViewPlanner struct {
 // seam is the documented default.
 var ErrCtxSeamDisabled = errors.New("agent: ctxplan seam disabled (set CtxViewPlanner.Enabled or FAK_CTXPLAN_SEAM=on)")
 
-// DefaultCtxViewBudget is the O(1) resident window the seam plans under when no explicit
-// Budget is set. It is a conservative seed (a few thousand tokens), not a tuned constant
-// — the same posture ctxplan.DefaultWeights takes.
-const DefaultCtxViewBudget = 4096
+// DefaultCtxViewBudget is the O(1) resident-token window the ctxview planner uses when no
+// explicit Budget is set. It is the SINGLE SOURCE OF TRUTH for the ctxview default: the
+// serve/guard front doors default their --ctx-view-budget flag to this same constant (rather
+// than a bare literal), so the seam's zero-fallback, the session fallback, and the gateway
+// front-door default can never drift apart. The value is the witnessed default-on budget
+// (docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md; fleet-realized 75.1% reuse, #1114).
+const DefaultCtxViewBudget = 8000
 
 // NewCtxViewPlanner builds a seam gated by the FAK_CTXPLAN_SEAM config. On ("on"/"1"/
 // "true") enables it; anything else (including unset, the default) leaves it disabled.
