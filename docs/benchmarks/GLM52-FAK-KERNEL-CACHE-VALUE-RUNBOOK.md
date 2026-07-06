@@ -50,6 +50,32 @@ reports honestly whether fak's own cache engaged in the aggregate run/window
 (`reused_tokens > 0`) versus an all-cold run; the /metrics family does not attribute reuse to a
 specific solved-ticket turn.
 
+**The warmup tax is a THIRD axis — never read a cold first turn as cache behavior.**
+`cache_bit_scope` is `aggregate-run-kv-prefix-reuse`: `cache_bit=true` means the KV-prefix cache
+engaged *somewhere* in the window (the warm sub-second turns), **not** that the cold first turn
+was cache-accelerated. On the GLM-5.2 cache-value run the cold first turns (~511s / ~501s, per
+[#3053](https://github.com/anthony-chaudhary/fak/issues/3053)) carry `cache_bit=true` alongside
+the warm turns purely as that scope artifact. Their cost is one-time backend **warmup** — weight
+load + CUDA graph capture + DeepGEMM/JIT compile — a different axis from KV-prefix reuse entirely.
+The ablation proves it: a fixed 11-token `say pong` prefix (nothing meaningful to reuse) still pays
+the cold tax (`experiments/agent-live/gcp-glm-night2-20260706T133856Z/`). So when reading
+`cache-witness.json`, treat a multi-hundred-second first turn as **warmup-dominated**, never as a
+cache-value datum.
+
+| Axis | Where it lives | Provenance | Never do |
+|---|---|---|---|
+| KV-prefix reuse | `kv_prefix.reused_tokens` (`fak_gateway_kv_prefix_reused_tokens_total`) | **WITNESSED** | attribute a cold-turn latency to it |
+| Warmup tax (boot → warmup-first-token) | serve-side `fak_serving_time_to_first_token_seconds` (OBSERVED latency) | **OBSERVED** | sum it into `reused_tokens`, or read `cache_bit` as covering it |
+
+The fence holds the same way the WITNESSED/OBSERVED split does: the warmup tax is a serve-side
+**OBSERVED** latency reading, never derived from or summed into the WITNESSED `reused_tokens`.
+
+> **Remaining code work (tracked in [#3053](https://github.com/anthony-chaudhary/fak/issues/3053)):**
+> emit the warmup tax as its own first-class `time_to_first_ready` field on `cachewitness.Record`,
+> sourced from the serve `fak_serving_time_to_first_token_seconds` histogram, so the emitted packet —
+> not just this runbook — carries the de-conflation. That change lands in `internal/cachewitness`
+> (code lane), out of this docs note's scope.
+
 ## 3. Serve GLM-5.2 from the pure kernel (on the box)
 
 ```bash
