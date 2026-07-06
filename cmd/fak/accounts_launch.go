@@ -222,13 +222,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		seat, ok := reg.NextInRotationWithHeadroom(anchor, hr)
 		if !ok {
 			plan := reg.RotationPlanWithHeadroom(hr)
-			if len(plan.Pool) == 0 {
-				fmt.Fprintln(stderr, "fak accounts launch --rotate: no eligible accounts in rotation "+
-					"(every seat is reserved, disabled, tombstoned, or has no live credentials)")
-			} else {
-				fmt.Fprintf(stderr, "fak accounts launch --rotate: only one account bucket in rotation (%s) — "+
-					"nowhere else to rotate; enroll another with `fak accounts add`\n", plan.Pool[0].Name)
-			}
+			printRotationNoCandidate(stderr, "fak accounts launch --rotate", plan)
 			printAccountFixSummary(stderr, fixes, "account fixes")
 			return 1
 		}

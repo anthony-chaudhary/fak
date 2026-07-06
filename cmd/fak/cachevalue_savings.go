@@ -93,7 +93,28 @@ func cachevalueSavingsPricing(provider, context string) cachevaluereport.Savings
 			Source:           source,
 		}
 	}
-	return cachevaluereport.SavingsPricing{Source: "none", DollarBlind: true}
+	// No env override and no known price table for this model: the row is dollar-blind.
+	// Stamp an explicit "unpriced:<provider>/<context>" source rather than an opaque
+	// "none" so the ledger row names WHICH model it could not price (#2782) — the lint
+	// and audit key off DollarBlind, but a human reading the raw JSONL gets the model too.
+	return cachevaluereport.SavingsPricing{Source: unpricedSource(provider, context), DollarBlind: true}
+}
+
+// unpricedSource renders the "unpriced:<provider>/<context>" pricing_source stamped on
+// a dollar-blind row, degrading gracefully when either dimension is blank.
+func unpricedSource(provider, context string) string {
+	model := strings.TrimSpace(provider)
+	if c := strings.TrimSpace(context); c != "" {
+		if model == "" {
+			model = c
+		} else {
+			model += "/" + c
+		}
+	}
+	if model == "" {
+		return "unpriced"
+	}
+	return "unpriced:" + model
 }
 
 func cachevaluePriceFromEnv(name string) (float64, bool) {

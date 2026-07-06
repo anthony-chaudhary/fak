@@ -251,7 +251,7 @@ func modelAccountBaseURL(a modelroute.Account) string {
 
 func modelAccountSupportsModelsProbe(k modelroute.ProviderKind) bool {
 	switch k {
-	case modelroute.KindOpenAI, modelroute.KindOpenAIResponses, modelroute.KindXAI, modelroute.KindLocal:
+	case modelroute.KindOpenAI, modelroute.KindOpenAIResponses, modelroute.KindXAI, modelroute.KindDeepSeek, modelroute.KindLocal:
 		return true
 	default:
 		return false
@@ -266,6 +266,8 @@ func modelAccountAPIHostProvider(k modelroute.ProviderKind) string {
 		return "gemini"
 	case modelroute.KindXAI:
 		return "xai"
+	case modelroute.KindDeepSeek:
+		return "deepseek"
 	case modelroute.KindLocal, modelroute.KindOpenAIResponses:
 		return "openai-compatible"
 	default:

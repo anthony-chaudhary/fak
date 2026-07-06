@@ -137,6 +137,36 @@ func TestHeadroomFromRosterBucketBestScore(t *testing.T) {
 	}
 }
 
+func TestHeadroomWeeklyLimitDominatesBucketPeerAvailability(t *testing.T) {
+	rows := []fleetaccounts.Account{
+		// Same bucket u-gem8: one row carries a current weekly usage cap while a stale peer row
+		// still says available. Weekly caps are account-wide, so the bucket is walled.
+		{
+			Product: "claude", AccountUUID: hrStr("u-gem8"), Available: hrBool(false),
+			Blocked: hrBool(true), BlockKind: hrStr("usage"), Throttled: hrBool(true),
+			Weekly: hrStr("Jul 2, 6am (America/Los_Angeles)"),
+		},
+		{Product: "claude", AccountUUID: hrStr("u-gem8"), Available: hrBool(true), Blocked: hrBool(false)},
+	}
+	hr := headroomFromRoster(rows, hrNow)
+	assertWalled(t, "active weekly cap should wall the whole bucket", hr["uuid:u-gem8"])
+}
+
+func TestHeadroomExpiredWeeklyLimitDoesNotDominateBucketPeerAvailability(t *testing.T) {
+	rows := []fleetaccounts.Account{
+		{
+			Product: "claude", AccountUUID: hrStr("u-gem8"), Available: hrBool(false),
+			Blocked: hrBool(true), BlockKind: hrStr("usage"), Throttled: hrBool(true),
+			Weekly: hrStr("Jun 29, 6am (America/Los_Angeles)"),
+		},
+		{Product: "claude", AccountUUID: hrStr("u-gem8"), Available: hrBool(true), Blocked: hrBool(false)},
+	}
+	hr := headroomFromRoster(rows, hrNow)
+	if got := hr["uuid:u-gem8"]; got <= 1 {
+		t.Fatalf("expired weekly cap should not dominate a fresh peer; got %v, want offerable > 1", got)
+	}
+}
+
 // TestHeadroomFromRosterEmptyIsNil ensures an empty/irrelevant roster yields a nil signal, so
 // the pure planner falls back to stable-by-name rather than a spurious all-zero headroom order.
 func TestHeadroomFromRosterEmptyIsNil(t *testing.T) {

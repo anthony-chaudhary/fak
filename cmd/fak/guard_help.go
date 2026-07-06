@@ -97,7 +97,8 @@ var guardFlagGroups = []guardFlagGroup{
 		"gguf", "local", "alongside", "backend", "tokenizer", "remote-serve",
 	}},
 	{"Child-harness wiring (Claude / Codex)", []string{
-		"codex-config", "codex-home", "mcp-register",
+		"codex-config", "codex-home", "codex-loop-gate", "codex-loop-gate-limit",
+		"codex-loop-gate-since-hours", "mcp-register",
 	}},
 	{"Observability & UI", []string{
 		"banner", "quiet", "split", "split-where", "split-interval", "split-dry-run",

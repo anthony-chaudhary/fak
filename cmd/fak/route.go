@@ -322,8 +322,8 @@ func accountSurface(r modelroute.Roster, report modelroute.AccountReadinessRepor
 			status = string(obs.Status)
 			credState = string(obs.Credential)
 		}
-		sb.WriteString(fmt.Sprintf("  %-16s %-16s status=%-18s credential=%-12s [%s] key=$%-20s %s\n",
-			a.ID, string(a.Kind), status, credState, loc, cred, base))
+		sb.WriteString(fmt.Sprintf("  %-16s %-16s status=%-18s credential=%-12s [%s] key=$%-20s %s%s\n",
+			a.ID, string(a.Kind), status, credState, loc, cred, base, accountMeta(a)))
 	}
 	sb.WriteString("\nbindings (model id -> account / upstream wire model):\n")
 	for _, b := range r.Bindings {
@@ -435,7 +435,7 @@ func routeJSON(d modelroute.Decision, red *modelroute.Result, sav modelroute.Sav
 // the credential ENV-VAR NAME (cred_env), never a secret, plus the local/remote flag
 // and the abi.ToolCall.Engine route the dispatcher would write.
 func targetJSON(t modelroute.Target) map[string]any {
-	return map[string]any{
+	out := map[string]any{
 		"model":          t.Model,
 		"account":        t.Account,
 		"kind":           string(t.Kind),
@@ -445,6 +445,13 @@ func targetJSON(t modelroute.Target) map[string]any {
 		"local":          t.Local(),
 		"engine_route":   t.EngineRoute(),
 	}
+	if t.ContextTokens != 0 {
+		out["context_tokens"] = t.ContextTokens
+	}
+	if t.MaxOutputTokens != 0 {
+		out["max_output_tokens"] = t.MaxOutputTokens
+	}
+	return out
 }
 
 func targetsJSON(ts []modelroute.Target) []map[string]any {
@@ -525,6 +532,20 @@ func orDash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+func accountMeta(a modelroute.Account) string {
+	var parts []string
+	if a.ContextTokens != 0 {
+		parts = append(parts, fmt.Sprintf("context=%d", a.ContextTokens))
+	}
+	if a.MaxOutputTokens != 0 {
+		parts = append(parts, fmt.Sprintf("max_output=%d", a.MaxOutputTokens))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, " ") + ")"
 }
 
 func labelStr(m map[string]string) string {

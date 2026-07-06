@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +36,7 @@ const (
 	doctorWaitReset      doctorAction = "wait_reset"       // fresh usage limit; recovers by itself
 	doctorTopUp          doctorAction = "top_up"           // fresh credit wall; needs billing, not code
 	doctorPrune          doctorAction = "prune"            // config dir vanished; tombstone+rehome (auto with --write)
+	doctorHydrate        doctorAction = "hydrate"          // canonical same-account home is missing creds/sessions; copy from ready peer
 	doctorEnableOrRemove doctorAction = "enable_or_remove" // explicitly disabled; operator judgment
 	doctorDedupe         doctorAction = "dedupe"           // duplicate identity bucket; retire the extra seat
 )
@@ -48,6 +50,7 @@ type doctorSeat struct {
 	Reason    string       `json:"reason,omitempty"`
 	Command   string       `json:"command,omitempty"`
 	Reset     string       `json:"reset,omitempty"`
+	Source    string       `json:"source,omitempty"`
 	Applied   bool         `json:"applied,omitempty"`
 	ApplyNote string       `json:"apply_note,omitempty"`
 }
@@ -93,26 +96,37 @@ func accountsDoctor(stdout, stderr io.Writer, registryPath, dosView, jobView str
 	if write {
 		for i := range report.Seats {
 			s := &report.Seats[i]
-			if s.Action != doctorPrune {
+			if s.Action != doctorPrune && s.Action != doctorHydrate {
 				continue
 			}
-			// The exact audited remove path: tombstone + rehome to the anchor, move any
-			// roles off the seat, defer the view re-sync to one pass below. A seat the
-			// remove path refuses (e.g. no anchor to rehome to) stays reported, not fixed.
-			var out, errBuf bytes.Buffer
-			code := runAccountsRemove(&out, &errBuf, removeParams{
-				name:         s.Name,
-				reason:       "fak accounts doctor: config directory missing",
-				registryPath: registryPath,
-				dosView:      dosView,
-				jobView:      jobView,
-				noSync:       true,
-			})
-			if code == 0 {
-				s.Applied = true
-				s.ApplyNote = strings.TrimSpace(out.String())
-			} else {
-				s.ApplyNote = "skipped: " + strings.TrimSpace(errBuf.String())
+			switch s.Action {
+			case doctorPrune:
+				// The exact audited remove path: tombstone + rehome to the anchor, move any
+				// roles off the seat, defer the view re-sync to one pass below. A seat the
+				// remove path refuses (e.g. no anchor to rehome to) stays reported, not fixed.
+				var out, errBuf bytes.Buffer
+				code := runAccountsRemove(&out, &errBuf, removeParams{
+					name:         s.Name,
+					reason:       "fak accounts doctor: config directory missing",
+					registryPath: registryPath,
+					dosView:      dosView,
+					jobView:      jobView,
+					noSync:       true,
+				})
+				if code == 0 {
+					s.Applied = true
+					s.ApplyNote = strings.TrimSpace(out.String())
+				} else {
+					s.ApplyNote = "skipped: " + strings.TrimSpace(errBuf.String())
+				}
+			case doctorHydrate:
+				note, err := applyAccountHydrate(reg, s.Name, s.Source)
+				if err != nil {
+					s.ApplyNote = "skipped: " + err.Error()
+				} else {
+					s.Applied = true
+					s.ApplyNote = note
+				}
 			}
 		}
 		applied := 0
@@ -156,6 +170,7 @@ func buildAccountsDoctorReport(registryPath string, reg accounts.Registry) acctD
 	for _, obs := range login.Seats {
 		report.Seats = append(report.Seats, foldDoctorSeat(obs, report.ProbeLedger))
 	}
+	markHydrateRepairs(&report, login.Seats)
 	foldDoctorReportCounts(&report)
 	return report
 }
@@ -193,12 +208,177 @@ func summarizeAccountFixes(report acctDoctorReport) acctFixSummary {
 			Name:    s.Name,
 			Status:  s.Status,
 			Action:  action,
-			Command: s.Command,
+			Command: firstNonEmpty(s.Command, s.Source),
 			Reason:  s.Reason,
 			Reset:   s.Reset,
 		})
 	}
 	return sum
+}
+
+func markHydrateRepairs(report *acctDoctorReport, seats []accounts.LoginObservation) {
+	byName := map[string]accounts.LoginObservation{}
+	for _, obs := range seats {
+		byName[obs.Name] = obs
+	}
+	for i := range report.Seats {
+		s := &report.Seats[i]
+		if s.Action != doctorRelogin || accounts.LoginStatus(s.Status) != accounts.LoginNeedsLogin {
+			continue
+		}
+		target, ok := byName[s.Name]
+		if !ok || target.Account == "" || target.IdentityRole != accounts.RoleCanonical {
+			continue
+		}
+		var src accounts.LoginObservation
+		for _, peerName := range target.Peers {
+			peer, ok := byName[peerName]
+			if !ok || peer.Account != target.Account || peer.Status != accounts.LoginReady || !peer.HasCreds || peer.Dir == "" {
+				continue
+			}
+			if src.Name == "" || hydrateSourceRank(peer) > hydrateSourceRank(src) || (hydrateSourceRank(peer) == hydrateSourceRank(src) && peer.Name < src.Name) {
+				src = peer
+			}
+		}
+		if src.Name == "" {
+			continue
+		}
+		s.Action = doctorHydrate
+		s.AutoFix = true
+		s.Source = src.Name
+		s.Reason = "canonical home missing live credentials/sessions; same account is ready in " + src.Name
+		s.Command = "fak accounts doctor --write"
+	}
+}
+
+func hydrateSourceRank(obs accounts.LoginObservation) int {
+	if strings.EqualFold(obs.Name, "default") {
+		return 1
+	}
+	return 2
+}
+
+func applyAccountHydrate(reg accounts.Registry, targetName, sourceName string) (string, error) {
+	target, ok := homeByName(reg, targetName)
+	if !ok {
+		return "", fmt.Errorf("target %q not in registry", targetName)
+	}
+	source, ok := homeByName(reg, sourceName)
+	if !ok {
+		return "", fmt.Errorf("source %q not in registry", sourceName)
+	}
+	if target.Identity.AccountKey() == "" || target.Identity.AccountKey() != source.Identity.AccountKey() {
+		return "", fmt.Errorf("source %q and target %q are not the same account bucket", sourceName, targetName)
+	}
+	if target.Dir == "" || source.Dir == "" {
+		return "", fmt.Errorf("source/target config dir missing")
+	}
+	if err := os.MkdirAll(target.Dir, 0o755); err != nil {
+		return "", err
+	}
+	backupDir := filepath.Join(target.Dir, "backups")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		return "", err
+	}
+	stamp := time.Now().UTC().Format("20060102T150405Z")
+	copiedCred := ""
+	if fileExists(filepath.Join(source.Dir, ".credentials.json")) {
+		if err := backupIfExists(filepath.Join(target.Dir, ".credentials.json"), backupDir, ".credentials.json.before-hydrate-"+stamp+".bak"); err != nil {
+			return "", err
+		}
+		if err := copyFile(filepath.Join(source.Dir, ".credentials.json"), filepath.Join(target.Dir, ".credentials.json")); err != nil {
+			return "", err
+		}
+		if err := backupIfExists(filepath.Join(target.Dir, ".oauth-token"), backupDir, ".oauth-token.before-hydrate-"+stamp+".bak"); err != nil {
+			return "", err
+		}
+		_ = os.Remove(filepath.Join(target.Dir, ".oauth-token"))
+		copiedCred = ".credentials.json"
+	} else if fileExists(filepath.Join(source.Dir, ".oauth-token")) {
+		if err := backupIfExists(filepath.Join(target.Dir, ".oauth-token"), backupDir, ".oauth-token.before-hydrate-"+stamp+".bak"); err != nil {
+			return "", err
+		}
+		if err := copyFile(filepath.Join(source.Dir, ".oauth-token"), filepath.Join(target.Dir, ".oauth-token")); err != nil {
+			return "", err
+		}
+		copiedCred = ".oauth-token"
+	} else {
+		return "", fmt.Errorf("source %q has no credential file to copy", sourceName)
+	}
+	copiedSessions, err := copyMissingProjectFiles(filepath.Join(source.Dir, "projects"), filepath.Join(target.Dir, "projects"))
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("hydrated %s from %s: copied %s and %d missing project file(s)", targetName, sourceName, copiedCred, copiedSessions), nil
+}
+
+func fileExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && !fi.IsDir()
+}
+
+func backupIfExists(path, backupDir, name string) error {
+	if !fileExists(path) {
+		return nil
+	}
+	return copyFile(path, filepath.Join(backupDir, name))
+}
+
+func copyMissingProjectFiles(srcRoot, dstRoot string) (int, error) {
+	if fi, err := os.Stat(srcRoot); err != nil || !fi.IsDir() {
+		return 0, nil
+	}
+	copied := 0
+	err := filepath.WalkDir(srcRoot, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(srcRoot, path)
+		if err != nil || rel == "." {
+			return err
+		}
+		dst := filepath.Join(dstRoot, rel)
+		if d.IsDir() {
+			return os.MkdirAll(dst, 0o755)
+		}
+		if fileExists(dst) {
+			return nil
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if err := copyFile(path, dst); err != nil {
+			return err
+		}
+		copied++
+		return nil
+	})
+	return copied, err
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	tmp := dst + ".tmp"
+	out, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		_ = os.Remove(tmp)
+		return copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(tmp)
+		return closeErr
+	}
+	_ = os.Remove(dst)
+	return os.Rename(tmp, dst)
 }
 
 func accountFixSummary(registryPath string, reg accounts.Registry) acctFixSummary {

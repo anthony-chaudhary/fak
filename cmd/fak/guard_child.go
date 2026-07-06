@@ -1190,6 +1190,48 @@ func guardSummaryResetPrefix(isTTY bool) string {
 	return "\x1b[0m\x1b[?25h"
 }
 
+// guardClassifyChildCrash maps a completed child's exit into the closed crash
+// vocabulary for a CHILD_CRASH journal row. It is pure and portable (no Unix-only
+// syscall.WaitStatus — it reads only the exit code and the ProcessState's portable
+// String(), so the SAME classification runs on the Windows dev host and the Unix
+// fleet). isCrash is false for a clean exit (nil runErr, or a zero exit code) and
+// for a run failure that never produced a child (a spawn error is reported by the
+// caller's existing path, not journaled as a crash). When isCrash is true, class
+// is one of the journal.Crash* constants and exitCode is the child's code (-1 when
+// the platform reports a signaled kill).
+//
+//   - A signaled kill that looks like an OOM (exit 137 = 128+SIGKILL, or a state
+//     string naming "killed") -> OOM: a resource exhaustion the loop tracks apart
+//     from a logic fault.
+//   - Any other signaled kill (ExitCode -1, or a state string naming "signal") ->
+//     SIGNAL_CRASH: SIGSEGV/SIGABRT/an external kill.
+//   - A plain non-zero exit (a Go panic the runtime turned into exit 2, an
+//     unrecovered error) -> NONZERO_EXIT.
+func guardClassifyChildCrash(runErr error, childState *os.ProcessState) (class string, exitCode int, isCrash bool) {
+	ee, isExit := runErr.(*exec.ExitError)
+	if !isExit {
+		return "", 0, false // nil, or a spawn failure the caller reports directly
+	}
+	code := ee.ExitCode()
+	if code == 0 {
+		return "", 0, false // an ExitError that somehow carries a clean code is not a crash
+	}
+	stateStr := ""
+	if childState != nil {
+		stateStr = strings.ToLower(childState.String())
+	}
+	signaled := code < 0 || strings.Contains(stateStr, "signal")
+	oom := code == 137 || strings.Contains(stateStr, "killed")
+	switch {
+	case oom:
+		return journal.CrashOOM, code, true
+	case signaled:
+		return journal.CrashSignal, code, true
+	default:
+		return journal.CrashNonzeroExit, code, true
+	}
+}
+
 func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler) {
 	var currentRefusals []guardRefusalCarry
 
@@ -1266,6 +1308,16 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 	// Flush + fsync the durable trail before exit so a row returned to the agent is
 	// never lost to a buffered write (Close is safe on a nil/in-memory journal).
 	if auditJournal != nil {
+		// If the wrapped child died abnormally, record a durable CHILD_CRASH row BEFORE
+		// close so the guard-RSI loop — which folds only this journal — can see the
+		// crash that verdict rows structurally cannot carry. Written directly through
+		// the chain (a crash is not a kernel decision); a clean exit writes nothing.
+		if class, code, isCrash := guardClassifyChildCrash(runErr, childState); isCrash {
+			row := auditJournal.AppendCrash(agentName, guardTraceID, class, code)
+			if !quiet {
+				fmt.Fprintf(os.Stderr, "fak guard: recorded CHILD_CRASH (%s, exit %d) to the audit journal at seq %d\n", class, code, row.Seq)
+			}
+		}
 		var err error
 		currentRefusals, err = guardWriteRefusalCarryForwardAndReturn(auditJournal, auditSeq0, guardTraceID, guardFindReasonRoot())
 		if err != nil && !quiet {

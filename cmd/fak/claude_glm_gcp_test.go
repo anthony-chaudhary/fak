@@ -113,6 +113,19 @@ func TestClaudeGLMGCPBringupPlanWiring(t *testing.T) {
 		`--setenv=EP_RANKS="${EP_RANKS}"`,
 		`FAK_EP_REQUIRE_DEVICE_PG="${FAK_EP_REQUIRE_DEVICE_PG:-}"`,
 		`--setenv=FAK_EP_REQUIRE_DEVICE_PG="${FAK_EP_REQUIRE_DEVICE_PG}"`,
+		`export HF_HUB_DISABLE_XET="\${HF_HUB_DISABLE_XET:-1}"`,
+		`--setenv=HF_HUB_DISABLE_XET="\${HF_HUB_DISABLE_XET}"`,
+		`apt-get install -y libnccl2 libnccl-dev`,
+		`cuda-keyring_1.1-1_all.deb`,
+		`libnccl2=${NCCL_APT_VERSION}`,
+		`libnccl-dev=${NCCL_APT_VERSION}`,
+		`NCCL_HEADERS_MISSING`,
+		`FAK_REPO_REF="${FAK_REPO_REF:-}"`,
+		`git checkout --detach "${FAK_REPO_REF}"`,
+		`FAK_STARTUP_PATCH_FILE="${FAK_STARTUP_PATCH_FILE:-}"`,
+		`RENDER_STARTUP_PATCH_B64="$(gzip -9c "$FAK_STARTUP_PATCH_FILE" | base64 | fold -w 76)"`,
+		`base64 -d /tmp/fak-startup.patch.b64 | gzip -dc >/tmp/fak-startup.patch`,
+		`git apply --whitespace=nowarn /tmp/fak-startup.patch`,
 		`EP_RANKS=$EP_RANKS exceeds tier`,
 		`MODE="plan"`,
 	} {
@@ -244,6 +257,9 @@ func TestClaudeGLMGCPFakNativeServeWiring(t *testing.T) {
 		"FAK_EP_RANK",                    // sharded rank identity for the EP serve
 		"FAK_EP_COORD_ADDR",              // rank rendezvous for resident EP
 		"FAK_EP_REQUIRE_DEVICE_PG",       // perf-grade EP refuses host DistComm fallback by default
+		"NCCL_DEV_MISSING",               // EP fails before the huge download when NCCL headers/libs are absent
+		"HF_DOWNLOAD_BACKEND",            // records whether the giant GGUF fetch uses Xet or the plain HF path
+		"HF_HUB_DISABLE_XET",             // Xet can stall after preallocating large shards on the live VM
 		"FAK_EP_FANOUT_ADDRS",            // rank 0 mirrors a client request to follower ranks
 		"FAK_KQ_INT8",                    // mixed Q5_K/Q6_K experts use the production int8 fallback
 		"GLM_SMOKE_MAX_TOKENS",           // live readiness proves first-token decode, not an 8-token soak
@@ -434,21 +450,23 @@ func TestClaudeGLMGCPDemoPlanWiring(t *testing.T) {
 	root := repoRootFromTest(t)
 	demo := readRepoTextForClaudeGLMGCP(t, root, "scripts", "gcp-glm-demo.sh")
 	for _, want := range []string{
-		`GCP_TIER="${GCP_TIER:-a3-mega-h100}"`,      // the 8x H100 Mega demo tier (GLM-5.2 needs 640 GB)
-		`SERVE="${SERVE:-fak}"`,                     // the PURE FAK KERNEL — the goal, and the metric's precondition
-		`EP_RANKS="${EP_RANKS:-8}"`,                 // resident expert-parallel by default for the H100 demo
-		`wait_for_remote_ready`,                     // apply waits for the VM-side service instead of deleting immediately
-		`collect_remote_witness`,                    // apply preserves remote serve logs for the pure-kernel/device-PG claim
-		`run_probe_turns`,                           // apply drives the headless turns itself
-		"dogfood-claude.ps1",                        // WSL/Windows apply can use the native Claude Code runner
-		`summarize_probe_perf`,                      // apply gates the "performant" part with probe duration evidence
-		`scrape_cache_value`,                        // apply records the cache-value witness before teardown
-		"scripts/gcp-glm-serve.sh",                  // composes the canonical bring-up, never re-implements it
-		"claude-glm-gcp --probe",                    // step 2: the cache-warming probe turns
-		"performance-summary.json",                  // step 3: the duration/throughput witness
-		"fak_gateway_kv_prefix_reused_tokens_total", // step 3: the WITNESSED cache-value datum (#1010)
-		"gcloud compute instances delete",           // step 4: teardown — the demo leaves zero cost
-		`MODE="plan"`,                               // plan-by-default
+		`GCP_TIER="${GCP_TIER:-a3-mega-h100}"`,                 // the 8x H100 Mega demo tier (GLM-5.2 needs 640 GB)
+		`SERVE="${SERVE:-fak}"`,                                // the PURE FAK KERNEL — the goal, and the metric's precondition
+		`EP_RANKS="${EP_RANKS:-8}"`,                            // resident expert-parallel by default for the H100 demo
+		`FAK_STARTUP_PATCH_FILE="${FAK_STARTUP_PATCH_FILE:-}"`, // apply can run an unpushed local proof-path patch on the VM
+		`FAK_REPO_REF="${FAK_REPO_REF:-}"`,                     // apply can pin the VM clone to the patch base
+		`wait_for_remote_ready`,                                // apply waits for the VM-side service instead of deleting immediately
+		`collect_remote_witness`,                               // apply preserves remote serve logs for the pure-kernel/device-PG claim
+		`run_probe_turns`,                                      // apply drives the headless turns itself
+		"dogfood-claude.ps1",                                   // WSL/Windows apply can use the native Claude Code runner
+		`summarize_probe_perf`,                                 // apply gates the "performant" part with probe duration evidence
+		`scrape_cache_value`,                                   // apply records the cache-value witness before teardown
+		"scripts/gcp-glm-serve.sh",                             // composes the canonical bring-up, never re-implements it
+		"claude-glm-gcp --probe",                               // step 2: the cache-warming probe turns
+		"performance-summary.json",                             // step 3: the duration/throughput witness
+		"fak_gateway_kv_prefix_reused_tokens_total",            // step 3: the WITNESSED cache-value datum (#1010)
+		"gcloud compute instances delete",                      // step 4: teardown — the demo leaves zero cost
+		`MODE="plan"`,                                          // plan-by-default
 	} {
 		requireContainsForClaudeGLMGCP(t, demo, want)
 	}
@@ -466,6 +484,7 @@ func TestClaudeGLMGCPDemoApplyDoesNotDeleteBeforeWitness(t *testing.T) {
 		"summarize_probe_perf",
 		"scrape_cache_value",
 		"REMOTE_FAIL phase=",
+		"STARTUP_SCRIPT_FAIL",
 		"DEMO complete; witnesses copied under",
 	} {
 		requireContainsForClaudeGLMGCP(t, demo, want)

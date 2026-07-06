@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -215,6 +216,61 @@ func TestAccountsLaunchRotateReportsActionableFixes(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "account fixes") {
 		t.Fatalf("dry-run stdout should stay scriptable, got:\n%s", out.String())
+	}
+}
+
+func TestAccountsNextAndLaunchRotateRefuseWeeklyCappedAlternative(t *testing.T) {
+	home := t.TempDir()
+	regPath, _, _, _ := rotateRegistry(t, home)
+	regDir := filepath.Join(home, "runtime-registry")
+	if err := os.MkdirAll(regDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runtime := `{"generated_utc":"2026-07-06T12:00:00Z",` +
+		`"throttle":{".claude-bob-seat":{"reset":"Jul 9, 6am (America/Los_Angeles)","weekly":"Jul 9, 6am (America/Los_Angeles)"}},` +
+		`"auth":{},"sessions":[]}`
+	if err := os.WriteFile(filepath.Join(regDir, "sessions.json"), []byte(runtime), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(home, "cfg")
+	if err := os.MkdirAll(cfg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FLEET_USER_HOME", home)
+	t.Setenv("FLEET_CONFIG_HOME", cfg)
+	t.Setenv("FLEET_REG_DIR", regDir)
+	t.Setenv("FLEET_POLICY_PATH", filepath.Join(home, "missing-policy.json"))
+
+	var nextOut, nextErr bytes.Buffer
+	if rc := runAccounts(&nextOut, &nextErr, []string{"next", "--after", "alice-seat", "--registry", regPath, "--home", home}); rc != 1 {
+		t.Fatalf("next should refuse capped bob rc=%d stdout=%s stderr=%s", rc, nextOut.String(), nextErr.String())
+	}
+	if strings.Contains(nextOut.String(), "CLAUDE_CONFIG_DIR") || strings.Contains(nextOut.String(), "next: bob-seat") {
+		t.Fatalf("next stdout should not offer capped bob:\n%s", nextOut.String())
+	}
+
+	oldRun := accountsLaunchRun
+	called := false
+	accountsLaunchRun = func(_, _ io.Writer, _ []string, _ []string) launchRunResult {
+		called = true
+		return launchRunResult{Code: 0}
+	}
+	t.Cleanup(func() { accountsLaunchRun = oldRun })
+
+	var launchOut, launchErr bytes.Buffer
+	if rc := runAccounts(&launchOut, &launchErr, []string{"launch", "--rotate", "--registry", regPath, "--home", home}); rc != 1 {
+		t.Fatalf("launch --rotate should refuse capped bob rc=%d stdout=%s stderr=%s", rc, launchOut.String(), launchErr.String())
+	}
+	if called {
+		t.Fatal("launch runner was called even though the only non-anchor account was weekly-capped")
+	}
+	for _, want := range []string{"no runtime-launchable account", "usage/weekly-capped", "bob-seat"} {
+		if !strings.Contains(launchErr.String(), want) {
+			t.Fatalf("launch stderr missing %q:\n%s", want, launchErr.String())
+		}
+	}
+	if strings.Contains(launchOut.String(), "guard -- claude") {
+		t.Fatalf("launch stdout should not emit a guard command for capped bob:\n%s", launchOut.String())
 	}
 }
 

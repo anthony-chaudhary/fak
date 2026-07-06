@@ -73,6 +73,12 @@ func TestRunAuditUsage_RealFixtures(t *testing.T) {
 	if _, err := logger.Append(usagelog.Row{Verb: "audit", ExitCode: 1}); err != nil {
 		t.Fatalf("usagelog.Append: %v", err)
 	}
+	// Close the append handle before the rollup reads the file: a leaked handle
+	// keeps usage.jsonl open past the test, and on Windows that blocks t.TempDir's
+	// RemoveAll cleanup ("being used by another process").
+	if err := logger.Close(); err != nil {
+		t.Fatalf("usagelog.Close: %v", err)
+	}
 
 	// Real loop-ledger fixture, built through loopmgr.Append.
 	if _, err := loopmgr.Append(loopLedger, loopmgr.Event{LoopID: "l1", Kind: loopmgr.EventFire}); err != nil {
@@ -149,6 +155,12 @@ func TestRunAuditUsage_ChainBroken_SurfacesFinding(t *testing.T) {
 	}
 	if _, err := logger.Append(usagelog.Row{Verb: "audit", ExitCode: 0}); err != nil {
 		t.Fatalf("usagelog.Append: %v", err)
+	}
+	// Close the append handle before the tamper step re-reads and rewrites the
+	// file: a leaked handle keeps usage.jsonl open past the test, and on Windows
+	// that blocks t.TempDir's RemoveAll cleanup ("being used by another process").
+	if err := logger.Close(); err != nil {
+		t.Fatalf("usagelog.Close: %v", err)
 	}
 
 	// Tamper the chain: corrupt row 1's recorded hash so Verify's recomputed

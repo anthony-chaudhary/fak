@@ -35,6 +35,8 @@ import (
 //	                                   ~/.claude), identity probe, twin-check, registry + views
 //	fak accounts remove --name <n> [--archive]  tombstone an account in the registry + regenerate views;
 //	                                   --archive ALSO renames the dir to .DELETED-<date> + repoints the registry, in one go
+//	fak accounts restore --name <n>    reverse `remove --archive`: rename .DELETED dir back,
+//	                                   clear tombstone fields, repair rehome refs, resync views
 //	fak accounts set-role <role> --name <n> point a role (active|anchor) at <n> + regenerate views
 //	fak accounts set-default --name <n> alias for `set-role active` (the launch/active seat)
 //	fak accounts launch [--name <n>]   start claude UNDER `fak guard` on a seat (the active role by
@@ -46,9 +48,10 @@ import (
 //	fak accounts list                  table of every seat: name, lifecycle, LOGIN status, TRUE identity, creds, rehome, flags
 //	fak accounts status [--json]       observable login report: closed status, can_serve, warnings, next action
 //	fak accounts doctor [--json] [--write] fold every seat into ONE closed recovery action (none|relogin|
-//	                                   wait_reset|top_up|prune|enable_or_remove|dedupe) with the exact command;
+//	                                   wait_reset|top_up|prune|hydrate|enable_or_remove|dedupe) with the exact command;
 //	                                   --write applies the deterministic repairs (tombstone+rehome a seat whose
-//	                                   config dir vanished). Exit 1 while actions remain, 0 when clean
+//	                                   config dir vanished; hydrate a canonical home from a ready same-account peer).
+//	                                   Exit 1 while actions remain, 0 when clean
 //	fak accounts rotation [--json]     the FULL witnessed rotation decision: the pool in launch order
 //	                                   (with headroom tiers) AND every excluded seat with the reason it
 //	                                   is out (duplicate/reserved/disabled/tombstoned/unservable), plus
@@ -69,7 +72,7 @@ func cmdAccounts(argv []string) { os.Exit(runAccounts(os.Stdout, os.Stderr, argv
 
 func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|set-role|set-default|launch|next|rotation|rehome|list|status|doctor|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write> [flags]")
+		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|restore|set-role|set-default|launch|next|rotation|rehome|list|status|doctor|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write> [flags]")
 		return 2
 	}
 	sub, rest := argv[0], argv[1:]
@@ -248,6 +251,18 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			noSync:       *addNoSync,
 		})
 
+	case "restore":
+		// Reverse the reversible half of `remove --archive`: bring the .DELETED config dir
+		// back under its live name, clear tombstone policy fields, repair rehome refs that
+		// pointed at the archived handle, and regenerate generated roster views.
+		return runAccountsRestore(stdout, stderr, restoreParams{
+			name:         *addName,
+			registryPath: *registryPath,
+			dosView:      *dosView,
+			jobView:      *jobView,
+			noSync:       *addNoSync,
+		})
+
 	case "set-role":
 		// Point a well-known role (active|anchor) at --name — the deterministic one-command way
 		// to move the launch seat OR the rehome anchor INDEPENDENTLY. The role is the first
@@ -328,7 +343,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		return accountsVersion(stdout, *asJSON)
 
 	default:
-		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want add|remove|set-role|set-default|launch|next|rotation|list|status|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write)\n", sub)
+		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want add|remove|restore|set-role|set-default|launch|next|rotation|list|status|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write)\n", sub)
 		return 2
 	}
 }
@@ -339,7 +354,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 // VISIBLE — compare it against source, or `go install …/cmd/fak@latest`.
 func accountsVersion(stdout io.Writer, asJSON bool) int {
 	verbs := []string{
-		"add", "remove", "set-role", "set-default", "launch", "next", "rotation", "list", "status", "resolve", "pull",
+		"add", "remove", "restore", "set-role", "set-default", "launch", "next", "rotation", "list", "status", "resolve", "pull",
 		"discover", "sync", "check", "validate", "version", "check-twins", "gate-write",
 	}
 	if asJSON {

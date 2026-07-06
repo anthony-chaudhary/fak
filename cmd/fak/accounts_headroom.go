@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
@@ -58,24 +59,52 @@ func rotationHeadroom(homeDir string) accounts.RotationHeadroom {
 // by the SAME account-bucket key the config registry dedups on ("uuid:<AccountUUID>"), so the
 // scores line up with the pool seats. It scores only Claude worker rows (the config-plane
 // rotation is over Claude CLAUDE_CONFIG_DIR seats) that carry a resolved AccountUUID. When
-// several dirs map to one bucket the BEST score wins: a bucket has room if ANY of its dirs can
-// be offered (one rate-limit window, served by whichever dir holds live creds). now anchors the
-// walled tier's reset-soonness tie-break (injected for deterministic tests). It is pure — no
-// I/O — so the banded tiering is unit-tested directly.
+// several dirs map to one bucket, login/auth noise still uses the BEST score (a duplicate dir
+// can prove the shared account is usable), but an active usage/weekly throttle dominates the
+// whole bucket because it is account-wide. now anchors the walled tier's reset-soonness
+// tie-break (injected for deterministic tests). It is pure — no I/O — so the banded tiering is
+// unit-tested directly.
 func headroomFromRoster(rows []fleetaccounts.Account, now time.Time) accounts.RotationHeadroom {
-	hr := accounts.RotationHeadroom{}
+	type bucketHeadroom struct {
+		best      float64
+		haveBest  bool
+		limit     float64
+		haveLimit bool
+	}
+	buckets := map[string]bucketHeadroom{}
 	for _, r := range rows {
 		if r.Product != "claude" || r.AccountUUID == nil || *r.AccountUUID == "" {
 			continue
 		}
 		key := "uuid:" + *r.AccountUUID
 		score := bucketScore(r, now)
-		if cur, ok := hr[key]; !ok || score > cur {
-			hr[key] = score
+		b := buckets[key]
+		if !b.haveBest || score > b.best {
+			b.best = score
+			b.haveBest = true
 		}
+		if accountUsageLimitActive(r, now) {
+			limit := score
+			if limit >= 0 {
+				limit = -1
+			}
+			if !b.haveLimit || limit > b.limit {
+				b.limit = limit
+				b.haveLimit = true
+			}
+		}
+		buckets[key] = b
 	}
-	if len(hr) == 0 {
+	if len(buckets) == 0 {
 		return nil
+	}
+	hr := accounts.RotationHeadroom{}
+	for key, b := range buckets {
+		if b.haveLimit {
+			hr[key] = b.limit
+			continue
+		}
+		hr[key] = b.best
 	}
 	return hr
 }
@@ -108,6 +137,33 @@ func bucketScore(r fleetaccounts.Account, now time.Time) float64 {
 	default:
 		return 0 // unknown — no runtime availability signal
 	}
+}
+
+// accountUsageLimitActive reports a clear account-wide usage cap. Unlike auth/login noise,
+// this must dominate the whole account bucket: a duplicate or stale peer row marked available
+// cannot safely reopen a bucket while a current weekly/session usage wall is known.
+func accountUsageLimitActive(r fleetaccounts.Account, now time.Time) bool {
+	kind := strings.ToLower(headroomString(r.BlockKind))
+	throttled := r.Throttled != nil && *r.Throttled
+	if kind != "usage" && !throttled {
+		return false
+	}
+	reset := firstNonEmpty(headroomString(r.Weekly), headroomString(r.Reset))
+	if reset == "" {
+		return true
+	}
+	t, ok := fleetaccounts.ResetInstant(reset, now)
+	if !ok {
+		return true
+	}
+	return !t.Before(now)
+}
+
+func headroomString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return strings.TrimSpace(*p)
 }
 
 // liveLoad reads a row's live session count for the offerable load tie-break, preferring

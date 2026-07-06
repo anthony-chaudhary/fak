@@ -224,7 +224,7 @@ func TestRunAccountsVersion(t *testing.T) {
 		t.Fatalf("version rc=%d stderr=%s", rc, errb.String())
 	}
 	got := out.String()
-	for _, want := range []string{"fak ", "fak-config-homes/v1", "remove", "status", "version"} {
+	for _, want := range []string{"fak ", "fak-config-homes/v1", "remove", "restore", "status", "version"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("version output missing %q:\n%s", want, got)
 		}
@@ -325,6 +325,157 @@ func TestRunAccountsRemoveArchive(t *testing.T) {
 		if data, err := os.ReadFile(realDosView); err == nil && strings.Contains(string(data), anchorName) {
 			t.Fatalf("test leaked its temp-dir roster into the REAL dos view %s (contains %q)", realDosView, anchorName)
 		}
+	}
+}
+
+func TestRunAccountsRestoreArchive(t *testing.T) {
+	t.Setenv("FAK_JOB_ROSTER", "")
+	t.Setenv("FAK_DOS_ROSTER", "")
+	home := t.TempDir()
+	seat := mkHome(t, home, ".claude-old-seat", "old@example.test", true)
+	anchor := mkHome(t, home, ".claude-anchor-seat", "anchor@example.test", true)
+
+	reg := `{"version":"fak-config-homes/v1","homes":[` +
+		`{"name":"old-seat","dir":"` + jsonPath(seat) + `"},` +
+		`{"name":"follower","status":"tombstoned","rehome_to":"old-seat"},` +
+		`{"name":"anchor-seat","dir":"` + jsonPath(anchor) + `","default":true}` +
+		`]}`
+	regPath := filepath.Join(home, "registry.json")
+	if err := os.WriteFile(regPath, []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if rc := runAccounts(&out, &errb, []string{
+		"remove", "--name", "old-seat", "--archive", "--rehome-to", "anchor-seat",
+		"--registry", regPath, "--home", home,
+	}); rc != 0 {
+		t.Fatalf("remove --archive rc=%d stderr=%s", rc, errb.String())
+	}
+	if _, err := os.Stat(seat); err == nil {
+		t.Fatalf("remove should rename original dir away: %s", seat)
+	}
+	archived, _ := filepath.Glob(filepath.Join(home, ".claude-old-seat.DELETED-*"))
+	if len(archived) != 1 {
+		t.Fatalf("want one archived dir, got %v", archived)
+	}
+
+	out.Reset()
+	errb.Reset()
+	if rc := runAccounts(&out, &errb, []string{
+		"restore", "--name", "old-seat",
+		"--registry", regPath, "--home", home,
+	}); rc != 0 {
+		t.Fatalf("restore rc=%d stderr=%s stdout=%s", rc, errb.String(), out.String())
+	}
+	if _, err := os.Stat(seat); err != nil {
+		t.Fatalf("restore should recreate original dir %s: %v", seat, err)
+	}
+	if _, err := os.Stat(archived[0]); err == nil {
+		t.Fatalf("restore should rename archive away: %s", archived[0])
+	}
+
+	got, err := accounts.LoadRegistry(regPath)
+	if err != nil {
+		t.Fatalf("registry should validate after restore: %v", err)
+	}
+	var restored, follower accounts.Home
+	for _, h := range got.Homes {
+		switch h.Name {
+		case "old-seat":
+			restored = h
+		case "follower":
+			follower = h
+		}
+		if strings.HasPrefix(h.Name, "old-seat.DELETED-") {
+			t.Fatalf("restore left archived registry handle behind: %+v", h)
+		}
+	}
+	if restored.Name == "" || !restored.Active() || restored.Dir != seat || !restored.EnabledOrDefault() {
+		t.Fatalf("old-seat not restored active: %+v", restored)
+	}
+	if follower.RehomeTo != "old-seat" {
+		t.Fatalf("follower rehome_to = %q, want old-seat", follower.RehomeTo)
+	}
+	dosView := filepath.Join(home, ".claude", "accounts.yaml")
+	dos, err := os.ReadFile(dosView)
+	if err != nil {
+		t.Fatalf("dos view should be regenerated under temp home: %v", err)
+	}
+	if !strings.Contains(string(dos), "name: old-seat") || strings.Contains(string(dos), "old-seat.DELETED-") {
+		t.Fatalf("generated dos view did not reflect restored active seat:\n%s", dos)
+	}
+}
+
+func TestRunAccountsRestoreInPlace(t *testing.T) {
+	t.Setenv("FAK_JOB_ROSTER", "")
+	t.Setenv("FAK_DOS_ROSTER", "")
+	home := t.TempDir()
+	seat := mkHome(t, home, ".claude-plain-seat", "plain@example.test", true)
+	anchor := mkHome(t, home, ".claude-anchor-seat", "anchor@example.test", true)
+
+	reg := `{"version":"fak-config-homes/v1","homes":[` +
+		`{"name":"plain-seat","dir":"` + jsonPath(seat) + `"},` +
+		`{"name":"anchor-seat","dir":"` + jsonPath(anchor) + `","default":true}` +
+		`]}`
+	regPath := filepath.Join(home, "registry.json")
+	if err := os.WriteFile(regPath, []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// remove WITHOUT --archive: tombstones in place, dir left untouched.
+	var out, errb bytes.Buffer
+	if rc := runAccounts(&out, &errb, []string{
+		"remove", "--name", "plain-seat", "--rehome-to", "anchor-seat",
+		"--registry", regPath, "--home", home,
+	}); rc != 0 {
+		t.Fatalf("remove rc=%d stderr=%s", rc, errb.String())
+	}
+	if _, err := os.Stat(seat); err != nil {
+		t.Fatalf("plain remove must leave the dir in place: %s: %v", seat, err)
+	}
+	if archived, _ := filepath.Glob(filepath.Join(home, ".claude-plain-seat.DELETED-*")); len(archived) != 0 {
+		t.Fatalf("plain remove must not archive the dir, got %v", archived)
+	}
+
+	// restore: no archive exists, so it must take the in-place un-tombstone path.
+	out.Reset()
+	errb.Reset()
+	if rc := runAccounts(&out, &errb, []string{
+		"restore", "--name", "plain-seat",
+		"--registry", regPath, "--home", home,
+	}); rc != 0 {
+		t.Fatalf("in-place restore rc=%d stderr=%s stdout=%s", rc, errb.String(), out.String())
+	}
+	if !strings.Contains(out.String(), "in place") {
+		t.Fatalf("expected in-place restore message, got:\n%s", out.String())
+	}
+	if _, err := os.Stat(seat); err != nil {
+		t.Fatalf("in-place restore must not move the dir: %s: %v", seat, err)
+	}
+
+	got, err := accounts.LoadRegistry(regPath)
+	if err != nil {
+		t.Fatalf("registry should validate after in-place restore: %v", err)
+	}
+	var restored accounts.Home
+	for _, h := range got.Homes {
+		if h.Name == "plain-seat" {
+			restored = h
+		}
+	}
+	if restored.Name == "" || !restored.Active() || restored.Dir != seat || !restored.EnabledOrDefault() {
+		t.Fatalf("plain-seat not restored active in place: %+v", restored)
+	}
+	if restored.RehomeTo != "" || restored.TombstonedAt != "" || restored.TombstoneReason != "" {
+		t.Fatalf("in-place restore left tombstone fields set: %+v", restored)
+	}
+	dos, err := os.ReadFile(filepath.Join(home, ".claude", "accounts.yaml"))
+	if err != nil {
+		t.Fatalf("dos view should be regenerated: %v", err)
+	}
+	if !strings.Contains(string(dos), "name: plain-seat") {
+		t.Fatalf("generated dos view missing restored seat:\n%s", dos)
 	}
 }
 

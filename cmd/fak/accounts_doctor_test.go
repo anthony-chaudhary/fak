@@ -168,3 +168,66 @@ func TestAccountsDoctorIdentityMismatchRequiresRelogin(t *testing.T) {
 		t.Fatalf("doctor should route identity mismatch to relogin:\n%s", got)
 	}
 }
+
+func TestAccountsDoctorWriteHydratesCanonicalPeer(t *testing.T) {
+	t.Setenv("FLEET_REG_DIR", "")
+	t.Setenv("FAK_DOS_ROSTER", "")
+	t.Setenv("FAK_JOB_ROSTER", "")
+	home := t.TempDir()
+	src := filepath.Join(home, ".claude")
+	dst := filepath.Join(home, ".claude-july4-netra")
+	for _, d := range []string{src, dst} {
+		if err := os.MkdirAll(filepath.Join(d, "projects", "C--work-fak"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := `{"oauthAccount":{"emailAddress":"july4@example.test","accountUuid":"uuid-july4"}}`
+		if err := os.WriteFile(filepath.Join(d, ".claude.json"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	validCred := `{"claudeAiOauth":{"accessToken":"access","refreshToken":"refresh"}}`
+	if err := os.WriteFile(filepath.Join(src, ".credentials.json"), []byte(validCred), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	placeholder := `{"claudeAiOauth":{"expiresAt":0,"scopes":["user:profile"],"subscriptionType":"max"}}`
+	if err := os.WriteFile(filepath.Join(dst, ".credentials.json"), []byte(placeholder), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dst, ".oauth-token"), []byte("stale-token\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "projects", "C--work-fak", "session-a.jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg := `{"version":"fak-config-homes/v1","homes":[` +
+		`{"name":"default","dir":"` + jsonPath(src) + `"},` +
+		`{"name":"july4-netra","dir":"` + jsonPath(dst) + `"}` +
+		`],"roles":{"active":"july4-netra","anchor":"default"}}`
+	regPath := filepath.Join(home, "registry.json")
+	if err := os.WriteFile(regPath, []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{"doctor", "--write", "--registry", regPath, "--home", home})
+	if rc != 1 {
+		t.Fatalf("doctor --write rc=%d, want 1 because duplicate default remains; stderr=%s\nout=%s", rc, errb.String(), out.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "hydrate") || !strings.Contains(got, "APPLIED: hydrated july4-netra from default") {
+		t.Fatalf("doctor --write should hydrate canonical peer:\n%s", got)
+	}
+	cred, err := os.ReadFile(filepath.Join(dst, ".credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(cred) != validCred {
+		t.Fatalf("target credentials not hydrated: %s", string(cred))
+	}
+	if _, err := os.Stat(filepath.Join(dst, ".oauth-token")); !os.IsNotExist(err) {
+		t.Fatalf("target stale oauth token should be removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "projects", "C--work-fak", "session-a.jsonl")); err != nil {
+		t.Fatalf("session transcript not copied: %v", err)
+	}
+}
