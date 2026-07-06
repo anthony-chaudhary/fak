@@ -1,0 +1,137 @@
+{
+  "gateway": {
+    "uptime_seconds": 8040,
+    "inflight_requests": 3,
+    "vdso": true
+  },
+  "runtime": {
+    "num_goroutine": 28,
+    "memory": {
+      "heap_alloc_bytes": 49283072,
+      "sys_bytes": 75497472,
+      "num_gc": 18
+    }
+  },
+  "kernel": {
+    "submits": 0,
+    "admitted": 0,
+    "denies": 0,
+    "transforms": 0,
+    "quarantines": 0,
+    "result_denies": 0
+  },
+  "inference": {
+    "turns": 4,
+    "completion_tokens": 0,
+    "output_tokens_per_second": 41.2,
+    "mean_ttft_seconds": 0.9,
+    "inflight_max_age_seconds": 2.1
+  },
+  "sessions": [
+    {
+      "trace_id": "main-trace-01",
+      "run": "running",
+      "parent_trace": "",
+      "generation": 0,
+      "priority": 0,
+      "turns_left": 6,
+      "tokens_left": 372000,
+      "context_tokens_left": 0,
+      "elapsed_seconds": 134,
+      "assumptions": 0
+    },
+    {
+      "trace_id": "sub-trace-02",
+      "run": "running",
+      "parent_trace": "main-trace-01",
+      "generation": 1,
+      "priority": 0,
+      "turns_left": 3,
+      "tokens_left": 118000,
+      "context_tokens_left": 0,
+      "elapsed_seconds": 41,
+      "assumptions": 0
+    }
+  ],
+  "upstream": {
+    "errors_by_kind": null,
+    "retries": 0,
+    "auth_refresh_by_outcome": null
+  },
+  "vcache": {
+    "cache_read_tokens": 142400,
+    "saved_token_equiv": 65144,
+    "hit_rate": 0.51,
+    "multiplier": 1.6,
+    "status": "PROVEN"
+  },
+  "cache_attribution": {
+    "provider_token_equiv": 65100,
+    "fak_token_equiv": 77300,
+    "total_token_equiv": 142400,
+    "provider_prompt_cache_read_token_equiv": 0,
+    "provider_prompt_cache_write_premium_token_equiv": 0,
+    "fak_compaction_shed_tokens": 0,
+    "fak_kv_prefix_reused_tokens": 0,
+    "fak_vdso_avoided_calls": 3
+  },
+  "managed_cache": null,
+  "prefix_stability": null,
+  "managed_context": null,
+  "endpoints": {
+    "accounts": [
+      {
+        "name": "seat-a",
+        "email": "seat-a@example.com",
+        "active": true,
+        "can_serve": true,
+        "login_status": "ok"
+      },
+      {
+        "name": "seat-b",
+        "email": "seat-b@example.com",
+        "walled": true,
+        "can_serve": false,
+        "login_status": "ok"
+      },
+      {
+        "name": "seat-c",
+        "email": "seat-c@example.com",
+        "can_serve": true,
+        "login_status": "ok"
+      }
+    ],
+    "nodes": [
+      {
+        "role": "kernel",
+        "id": "this-host",
+        "kind": "host",
+        "detail": "fak guard + agent + adjudication"
+      },
+      {
+        "role": "serving",
+        "id": "api.provider.example",
+        "kind": "proxy",
+        "detail": "provider API"
+      }
+    ]
+  },
+  "adjudication": {
+    "total": 46,
+    "allowed": 41,
+    "denied": 3,
+    "transformed": 1,
+    "quarantined": 1,
+    "deferred": 2,
+    "escalated": 1,
+    "errored": 0,
+    "by_reason": {
+      "DEFAULT_DENY": 2,
+      "SECRET_IN_ARGS": 1,
+      "UNVERIFIED_RESULT": 1
+    },
+    "cached_prompt_tokens": 0,
+    "cached_turns": 0
+  },
+  "harness": null
+}
