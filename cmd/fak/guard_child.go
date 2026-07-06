@@ -950,6 +950,25 @@ func guardRestartEnv(ev guardBudgetRestartEvent) [][2]string {
 	return env
 }
 
+// guardRestartRelaunchCommand returns the command to relaunch the wrapped child with after a
+// budget restart. For a recognized agent (Claude Code) it REATTACHES the existing transcript by
+// appending the agent's resume flag (`--continue`), so the relaunched child resumes the same
+// conversation the carryover seed was captured from instead of booting a cold, empty session and
+// reporting "I don't have the task" (#3055). The FAK_RESET_* env vars guardRestartEnv sets are
+// advisory only — no in-child reader consumes them — so continuity must come from the agent's own
+// resume path: the exact flag formatGuardResumeGuidance already tells operators to run by hand, and
+// the one guardMaybeRecoverAuthCrash already auto-injects on the auth-crash path. Idempotent via
+// guardAppendContinueFlag: a second restart in the same session never stacks the flag. For an
+// unrecognized agent fak cannot guess a safe resume syntax, so command is returned unchanged and
+// the relaunch falls back to today's cold behavior (the headless/no-continue seed-prompt handback
+// is the separate #3056 rung).
+func guardRestartRelaunchCommand(command []string, agentName string) []string {
+	if flag, ok := guardContinueFlagForAgent(agentName); ok {
+		return guardAppendContinueFlag(command, flag)
+	}
+	return command
+}
+
 func guardRestartLimitStatus(limit int, ev guardBudgetRestartEvent) string {
 	reason := strings.TrimSpace(ev.Reason)
 	if reason == "" {
@@ -1083,6 +1102,12 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			}
 			srv.SetDefaultTraceID(ev.ToTraceID)
 			extraEnv = guardRestartEnv(ev)
+			// #3055: reattach the existing transcript on relaunch. The FAK_RESET_* env vars
+			// set above are advisory only (Claude Code reads none of them), so continuity comes
+			// from the wrapped agent's own resume flag — a recognized child resumes the captured
+			// conversation instead of booting cold and losing the task. Idempotent across repeated
+			// restarts; an unrecognized agent is relaunched unchanged.
+			command = guardRestartRelaunchCommand(command, agentName)
 			// Let the triggering response finish flushing to the wrapped client before
 			// stopping the process that initiated it.
 			time.Sleep(750 * time.Millisecond)
