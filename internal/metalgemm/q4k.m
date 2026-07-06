@@ -334,16 +334,22 @@ inline float q6k_block_dot(device const uchar* blk, device const float* xs) {
     float acc = 0.0f;
     int qlOff = 0, qhOff = 0, scOff = 0;
     for (int n = 0; n < 256; n += 128) {
-        for (int l = 0; l < 32; l++) {
-            int is = l / 16;
-            int q1 = (int)((ql[qlOff + l +  0] & 0x0f) | (((qh[qhOff + l] >> 0) & 3) << 4)) - 32;
-            int q2 = (int)((ql[qlOff + l + 32] & 0x0f) | (((qh[qhOff + l] >> 2) & 3) << 4)) - 32;
-            int q3 = (int)((ql[qlOff + l +  0] >> 4)   | (((qh[qhOff + l] >> 4) & 3) << 4)) - 32;
-            int q4 = (int)((ql[qlOff + l + 32] >> 4)   | (((qh[qhOff + l] >> 6) & 3) << 4)) - 32;
-            acc += d * (float)sc[scOff + is + 0] * (float)q1 * xs[n + l +  0];
-            acc += d * (float)sc[scOff + is + 2] * (float)q2 * xs[n + l + 32];
-            acc += d * (float)sc[scOff + is + 4] * (float)q3 * xs[n + l + 64];
-            acc += d * (float)sc[scOff + is + 6] * (float)q4 * xs[n + l + 96];
+        for (int is = 0; is < 2; is++) {
+            float ds1 = d * (float)sc[scOff + is + 0];
+            float ds2 = d * (float)sc[scOff + is + 2];
+            float ds3 = d * (float)sc[scOff + is + 4];
+            float ds4 = d * (float)sc[scOff + is + 6];
+            for (int li = 0; li < 16; li++) {
+                int l = is * 16 + li;
+                int q1 = (int)((ql[qlOff + l +  0] & 0x0f) | (((qh[qhOff + l] >> 0) & 3) << 4)) - 32;
+                int q2 = (int)((ql[qlOff + l + 32] & 0x0f) | (((qh[qhOff + l] >> 2) & 3) << 4)) - 32;
+                int q3 = (int)((ql[qlOff + l +  0] >> 4)   | (((qh[qhOff + l] >> 4) & 3) << 4)) - 32;
+                int q4 = (int)((ql[qlOff + l + 32] >> 4)   | (((qh[qhOff + l] >> 6) & 3) << 4)) - 32;
+                acc += ds1 * (float)q1 * xs[n + l +  0];
+                acc += ds2 * (float)q2 * xs[n + l + 32];
+                acc += ds3 * (float)q3 * xs[n + l + 64];
+                acc += ds4 * (float)q4 * xs[n + l + 96];
+            }
         }
         qlOff += 64;
         qhOff += 32;

@@ -335,3 +335,136 @@ func BenchmarkMetalFusedMLPQ6DownBatch(b *testing.B) {
 		b.ReportMetric(secs/float64(b.N)*1e3, "ms/layer")
 	}
 }
+
+// BenchmarkMetalSessionFusedMLPQ6Down times the actual Session.q4kFusedMLP path the Qwen3.6
+// dense MLP takes (Q4_K gate/up + Q6_K down) at the real shape. This is the focused baseline
+// for dense MLP kernel changes because it exercises Session dispatch, GPU upload, and the fused
+// mixed-quant command buffer instead of only the lower-level metalgemm entry point.
+func BenchmarkMetalSessionFusedMLPQ6Down(b *testing.B) {
+	if !metalgemm.Available() {
+		b.Skip("no Metal device available")
+	}
+	defer metalgemm.ResetQ4K()
+	const H, I = 5120, 17408
+	gn := layerName(0, "mlp.gate_proj.weight")
+	un := layerName(0, "mlp.up_proj.weight")
+	dn := layerName(0, "mlp.down_proj.weight")
+	m := &Model{
+		Cfg: Config{HiddenSize: H, IntermediateSize: I},
+		q4kw: map[string]*q4kTensor{
+			gn: randomQ4KTensor(I, H, 41),
+			un: randomQ4KTensor(I, H, 42),
+		},
+		kqw: map[string]*kQuantTensor{
+			dn: randomQ6KTensor(H, I, 43),
+		},
+		q8w: map[string]*q8Tensor{},
+	}
+	s := &Session{M: m, MetalQ4K: true}
+	x := randomVecF(H, 44)
+	if out := s.q4kFusedMLP(gn, un, dn, x); out == nil || len(out) != H {
+		b.Fatalf("q4kFusedMLP declined or returned len %d, want %d", len(out), H)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if out := s.q4kFusedMLP(gn, un, dn, x); out == nil || len(out) != H {
+			b.Fatalf("q4kFusedMLP declined during benchmark")
+		}
+	}
+	b.StopTimer()
+	if secs := b.Elapsed().Seconds(); secs > 0 {
+		b.ReportMetric(secs/float64(b.N)*1e3, "ms/mlp")
+	}
+}
+
+// BenchmarkMetalMixedDenseMLPComponents splits the real dense Qwen3.6 MLP shape into the kernels
+// that make up FusedMLPQ6Down. It is the measurement harness for deciding whether the next dense
+// decode edit should target Q4_K gate/up GEMV, Q6_K down GEMV, or only command-buffer wiring.
+func BenchmarkMetalMixedDenseMLPComponents(b *testing.B) {
+	if !metalgemm.Available() {
+		b.Skip("no Metal device available")
+	}
+	defer metalgemm.ResetQ4K()
+	const H, I = 5120, 17408
+	gate := metalgemm.UploadQ4K(randomQ4KTensor(I, H, 51).raw, I, H)
+	up := metalgemm.UploadQ4K(randomQ4KTensor(I, H, 52).raw, I, H)
+	down := metalgemm.UploadQ6K(randomQ6KTensor(H, I, 53).raw, H, I)
+	if gate == nil || up == nil || down == nil {
+		b.Fatal("upload returned nil")
+	}
+	x := randomVecF(H, 54)
+	g, u, inter := make([]float32, I), make([]float32, I), make([]float32, I)
+	y := make([]float32, H)
+	rowQ4Bytes := func(out, in int) float64 { return float64(out) * float64(in) / 256.0 * 144.0 }
+	rowQ6Bytes := func(out, in int) float64 { return float64(out) * float64(in) / 256.0 * 210.0 }
+	gateUpBytes := 2 * rowQ4Bytes(I, H)
+	downBytes := rowQ6Bytes(H, I)
+	mlpBytes := gateUpBytes + downBytes
+
+	// Trust check: the fused mixed-quant path must agree with the lower-level separate path.
+	gate.GEMV(x, g)
+	up.GEMV(x, u)
+	for j := 0; j < I; j++ {
+		inter[j] = silu(g[j]) * u[j]
+	}
+	ySep := make([]float32, H)
+	down.GEMV(inter, ySep)
+	if !metalgemm.FusedMLPQ6Down(gate, up, down, x, y) {
+		b.Fatal("FusedMLPQ6Down declined")
+	}
+	cos, maxRel := cosineAndMaxRel(ySep, y)
+	if cos < 0.9999 || maxRel > 5e-3 {
+		b.Fatalf("FusedMLPQ6Down separate check: cosine=%.6f maxRel=%.4g (want cos>=0.9999 maxRel<=5e-3)", cos, maxRel)
+	}
+
+	b.Run("fused_mixed", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			metalgemm.FusedMLPQ6Down(gate, up, down, x, y)
+		}
+		b.StopTimer()
+		if s := b.Elapsed().Seconds(); s > 0 {
+			b.ReportMetric(mlpBytes*float64(b.N)/s/1e9, "GB/s")
+			b.ReportMetric(s/float64(b.N)*1e3, "ms/mlp")
+		}
+	})
+	b.Run("q4_gate_up_separate", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			gate.GEMV(x, g)
+			up.GEMV(x, u)
+		}
+		b.StopTimer()
+		if s := b.Elapsed().Seconds(); s > 0 {
+			b.ReportMetric(gateUpBytes*float64(b.N)/s/1e9, "GB/s")
+			b.ReportMetric(s/float64(b.N)*1e3, "ms/gateup")
+		}
+	})
+	b.Run("q6_down", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			down.GEMV(inter, y)
+		}
+		b.StopTimer()
+		if s := b.Elapsed().Seconds(); s > 0 {
+			b.ReportMetric(downBytes*float64(b.N)/s/1e9, "GB/s")
+			b.ReportMetric(s/float64(b.N)*1e3, "ms/down")
+		}
+	})
+	b.Run("separate_host_swiglu", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			gate.GEMV(x, g)
+			up.GEMV(x, u)
+			for j := 0; j < I; j++ {
+				inter[j] = silu(g[j]) * u[j]
+			}
+			down.GEMV(inter, y)
+		}
+		b.StopTimer()
+		if s := b.Elapsed().Seconds(); s > 0 {
+			b.ReportMetric(mlpBytes*float64(b.N)/s/1e9, "GB/s")
+			b.ReportMetric(s/float64(b.N)*1e3, "ms/mlp")
+		}
+	})
+}
