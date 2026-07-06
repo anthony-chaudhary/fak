@@ -71,4 +71,12 @@ Dimension coverage target: A×8, B×5, C×6, D×5, E×5, F×5, G×4, H×4, I×3,
 ```
 gh issue list --label popularization --state open        # the 50 units of work
 python tools/seo_aeo_scorecard.py                        # new docs don't red SEO
+python tools/popularization_readiness_scorecard.py       # dim K: does the front door convert?
 ```
+
+The last command is the epic's own self-verifying number: the dimension-K
+[popularization-readiness scorecard](../popularization-scorecard/README.md) models a
+first-time visitor's funnel (land → orient → trust → install → act) and drives
+`popularization_debt` toward 0 — a missing hero command or an unreachable adoption doc
+raises debt, so the epic ratchets itself down over time and folds into
+`tools/scorecard_control_pane.py`.
