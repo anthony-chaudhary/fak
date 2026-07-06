@@ -248,3 +248,133 @@ The four turn-verdict words (the `ok` slot in the line above):
 - **rebate** — a **cost refund** from a *confirmed* cache hit, booked over an uncached
   baseline; the net saving subtracts the **write premium**, so a cold-write turn reads
   negative until reads repay it.
+
+---
+
+## Doctrine vocabulary: the recurring doc terms, defined once
+
+The implicit-explicit scorecard (`tools/implicit_explicit_scorecard.py`) found each of
+these used as a heading across dozens of docs with no definition anywhere in the tree.
+They are defined here, once, with one canonical spelling each.
+
+### Honest fence
+
+An explicit statement of what a claim does **not** cover, placed next to the claim so it
+cannot be overread. This is the repo's core rhetorical device: every measured number and
+every shipped feature carries a fence naming the boundary of the evidence. Canonical
+spelling: **honest fence** — the drifted variants *honesty fence*, *honest boundary*, and
+*honesty gate* all mean this concept and should converge on the canonical form.
+
+### Honest scope
+
+The recurring section that states what a feature deliberately does not attempt. The
+scope-declaration counterpart of the honest fence: a **fence** guards one specific claim;
+a **scope** declares a whole feature's deliberate limits up front.
+
+### Trust boundary
+
+The line between what the kernel verifies and what it merely receives from an untrusted
+agent. Claims cross the boundary only by carrying evidence the kernel can re-check
+(a diff, a ledger line, an artifact path) — a bare self-report never does. This is the
+load-bearing idea behind `dos verify`, the witness pipeline, and every scorecard.
+
+### Honesty ledger
+
+The recurring doc section recording which of a feature's claims are proven and which are
+still open. It is a **doc-section convention**, not a system component: no runtime
+artifact is written under this name, and a doc using the heading is summarizing its own
+claim status, not pointing at a file.
+
+### Ground truth
+
+The section pointing at the artifact or command a reader can run to verify a claim
+themselves — fak's evidence-over-assertion convention. If a doc asserts a number, its
+ground-truth section says where the number comes from and how to regenerate it.
+
+### Promotion gate
+
+The criteria a claim or feature must meet to move up a maturity rung (measured → default,
+experimental → supported, simulated → shipped). Also written as *Promotion rule*; the
+gate is the criteria, the rule is the sentence stating them.
+
+### Hot path
+
+The latency-critical code route. In fak the term is used for two routes: the model-engine
+decode loop (`internal/engine`) and the gateway per-request serve path
+(`internal/gateway`). A doc invoking the hot path should say which of the two it means.
+
+### Verdict ladder
+
+The ordered best-to-worst verdict scale a scorecard defines for its rows — for the
+implicit-explicit scorecard: explicit → named-code → named-doc → hinted → latent. Every
+fak scorecard names such a ladder; the ladder position doubles as the distance-from-done
+used to order worst-first backlogs.
+
+### Unmeasured-containment residual
+
+The standing residual that fak's privacy / prompt-injection containment is a design
+posture, not a measured leakage number. Research triages repeat the italicized phrase
+*containment is not a measured number* — this entry names the residual so it can be
+tracked instead of re-hedged.
+
+## Code concepts the docs never named
+
+Each of these is a load-bearing identifier or convention in `internal/` + `cmd/` that the
+implicit-explicit scorecard found in a dozen-plus production files with zero doc
+mentions. One-paragraph definitions, so the code term is searchable outside the code.
+
+### `WeightBearing` — does the engine carry real weights?
+
+The engine-interface predicate saying whether an engine actually carries model weights
+(real inference: `DynamoEngine` reports true) or is a stub / proxy (`readEngine`,
+`localEngine` report false). It is a trust distinction: benchmark and generation claims
+are only weight-bearing when the engine is.
+
+### `AdmissionVerdict` — why a cache entry was (or was not) admitted
+
+The cachemeta verdict string recording whether an entry was admitted to the addressable
+KV cache and why; `AdmissionFromVerdict` maps abi verdict kinds onto it.
+
+### `EvidenceRef` — the unit of witnessable evidence
+
+The taskmgr/loopmgr struct that points a witness at an artifact it can read back (a file
+path, a git object). The witness/claims docs talk about evidence constantly; this is the
+code type that evidence is.
+
+### The `RealRunner` seam
+
+The repo-wide convention of a `RealRunner` function: the production process-runner
+injected where tests substitute a fake, independently re-declared per package
+(mergepreview, modver, releasestale, and more). New packages should copy the seam
+deliberately, not by osmosis.
+
+### `ConfigureBackgroundCommand` — the windowgate rule
+
+The `internal/windowgate` helper every spawned subprocess passes through so background
+commands never flash a console window on Windows (a no-op elsewhere). Every `exec.Cmd`
+in the tree must route through it — the convention is why fak spawns are silent.
+
+### The per-verb `ParseFlags` convention
+
+Every CLI verb declares its own `ParseFlags`/`parseFlags` helper, with reject-args and
+or-help variants — the single most repeated declared name in the tree. The convention
+keeps each verb's flag surface local to the verb file instead of a central flag table.
+
+### `writeIndentedJSON` — the `--json` output contract
+
+The per-package helper that emits the canonical two-space-indented JSON for `--json` verb
+output, with a no-escape variant (`writeIndentedJSONNoEscape`) for payloads containing
+HTML-meaningful characters. This is the de-facto JSON output contract of the CLI.
+
+### `ExpandTilde` — promised `~` expansion
+
+The `internal/pathutil` helper that expands a leading `~` in user-supplied paths — the
+reason `~/foo` works in every fak flag. User-visible behavior, now promised here rather
+than only inferable from the helper.
+
+### `statusOverloaded` — provider overload 529
+
+The non-standard HTTP 529 the Anthropic API returns when overloaded, load-bearing in the
+stream-retry and account-rotation paths. `internal/agent/retry.go` names it
+(`const statusOverloaded = 529`); gateway and attempt-budget sites still carry the bare
+literal and should adopt the name.

@@ -1,6 +1,6 @@
 ---
 title: "fak account switcher: bring your own model accounts"
-description: "How fak's account switcher routes each aspect of a request to a chosen account and provider wire — OpenAI, Codex, Anthropic, Gemini, or local — so you can mix providers per tool call, step, or ensemble half."
+description: "How fak's account switcher routes each aspect of a request to a chosen account and provider wire — OpenAI, Codex, Anthropic, Gemini, DeepSeek, or local — so you can mix providers per tool call, step, or ensemble half."
 ---
 
 # The account switcher: bring your own accounts, mix and match
@@ -8,7 +8,7 @@ description: "How fak's account switcher routes each aspect of a request to a ch
 `fak route` decides *which* model — or which ensemble of models — serves an aspect of
 a request. The account switcher decides *whose account* runs that model, over which
 provider's wire. Together they let you point fak's routing at your own OpenAI, Codex,
-Anthropic, Gemini, and local accounts, and mix providers at any level: the cheap
+Anthropic, Gemini, DeepSeek, and local accounts, and mix providers at any level: the cheap
 aspect to a local model, the hard reasoning step to your OpenAI account, and a
 two-model guard ensemble whose halves run on two *different* accounts.
 
@@ -47,13 +47,23 @@ dispatch layer turns a Target into a live planner; the resolver itself does no I
     { "id": "openai-personal", "kind": "openai",           "cred_env": "OPENAI_API_KEY" },
     { "id": "openai-work",     "kind": "openai",           "cred_env": "OPENAI_WORK_API_KEY" },
     { "id": "codex",           "kind": "openai-responses", "cred_env": "OPENAI_API_KEY" },
-    { "id": "claude-sub",      "kind": "anthropic",        "cred_env": "CLAUDE_CODE_OAUTH_TOKEN" }
+    { "id": "claude-sub",      "kind": "anthropic",        "cred_env": "CLAUDE_CODE_OAUTH_TOKEN" },
+    { "id": "deepseek",        "kind": "deepseek",         "cred_env": "DEEPSEEK_API_KEY",
+      "context_tokens": 1000000, "max_output_tokens": 384000 },
+    { "id": "deepseek-anthropic", "kind": "anthropic",
+      "base_url": "https://api.deepseek.com/anthropic", "cred_env": "DEEPSEEK_API_KEY",
+      "context_tokens": 1000000, "max_output_tokens": 384000 }
   ],
   "default": "openai-personal",
   "bindings": [
     { "model": "small",   "account": "local",           "upstream_model": "llama3.2" },
     { "model": "guard-a", "account": "openai-work",      "upstream_model": "gpt-5.5" },
-    { "model": "guard-b", "account": "claude-sub",       "upstream_model": "claude-opus-4-6" }
+    { "model": "guard-b", "account": "claude-sub",       "upstream_model": "claude-opus-4-6" },
+    { "model": "deepseek-pro", "account": "deepseek", "upstream_model": "deepseek-v4-pro" },
+    { "model": "deepseek-flash", "account": "deepseek", "upstream_model": "deepseek-v4-flash" },
+    { "model": "deepseek-chat-compat", "account": "deepseek", "upstream_model": "deepseek-chat",
+      "compatibility_only": true, "deprecated_after_utc": "2026-07-24 15:59 UTC",
+      "deprecated_alias_for": "deepseek-v4-flash non-thinking mode" }
   ]
 }
 ```
@@ -122,12 +132,19 @@ fak api-host acceptance --from-model-accounts examples/model-accounts.example.js
 ```
 
 `readiness` converts only OpenAI-compatible or local accounts into `/models` probe targets
-(`openai`, `openai-responses`, `xai`, and `local`). Native provider accounts are not guessed into
+(`openai`, `openai-responses`, `xai`, `deepseek`, and `local`). Native provider accounts are not guessed into
 an OpenAI-shaped probe. `acceptance` keeps every account with a probeable base URL visible:
 OpenAI-compatible/local accounts can become `READY_FOR_LIVE_BRIDGE_RUN`, while native
 Anthropic/Gemini accounts are reported as `WIRE_SUPPORTED_UNPROBED`. Model hints come from the
 roster bindings, so the API-host report stays tied to the same abstract model ids the route policy
 uses.
+
+DeepSeek V4 uses `deepseek-v4-pro` / `deepseek-v4-flash` on the OpenAI-compatible base
+`https://api.deepseek.com`; its Anthropic-compatible profile uses
+`https://api.deepseek.com/anthropic`. The legacy `deepseek-chat` and `deepseek-reasoner`
+aliases are accepted only when marked `compatibility_only`, with the documented retirement
+metadata `2026-07-24 15:59 UTC`, so a new roster does not silently bind to an alias that is
+about to disappear.
 
 ## Residency is declared, not guessed
 
