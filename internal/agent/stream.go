@@ -439,9 +439,10 @@ type openAIStreamChunk struct {
 	Model   string `json:"model"`
 	Choices []struct {
 		Delta struct {
-			Role      string `json:"role"`
-			Content   string `json:"content"`
-			ToolCalls []struct {
+			Role             string `json:"role"`
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			ToolCalls        []struct {
 				Index    int    `json:"index"`
 				ID       string `json:"id"`
 				Type     string `json:"type"`
@@ -625,12 +626,13 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	}
 
 	var (
-		content strings.Builder
-		rawBuf  bytes.Buffer // reconstructs the wire transcript for Completion.Raw
-		toolAcc = map[int]*ToolCall{}
-		usage   Usage
-		model   string
-		finish  string
+		content   strings.Builder
+		reasoning strings.Builder
+		rawBuf    bytes.Buffer // reconstructs the wire transcript for Completion.Raw
+		toolAcc   = map[int]*ToolCall{}
+		usage     Usage
+		model     string
+		finish    string
 	)
 	// Idle-read deadline: an upstream that opens the stream then goes silent (a transient
 	// overload / "API issue") fails in ≤streamStallTimeout() rather than blocking the
@@ -680,6 +682,9 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 					}
 				}
 			}
+			if ch.Delta.ReasoningContent != "" {
+				reasoning.WriteString(ch.Delta.ReasoningContent)
+			}
 			for _, tcd := range ch.Delta.ToolCalls {
 				acc := toolAcc[tcd.Index]
 				if acc == nil {
@@ -711,7 +716,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		calls = append(calls, *toolAcc[idx])
 	}
 	comp := normalizeCompletionToolCalls(&Completion{
-		Message:      Message{Role: RoleAssistant, Content: content.String(), ToolCalls: calls},
+		Message:      Message{Role: RoleAssistant, Content: content.String(), ReasoningContent: reasoning.String(), ToolCalls: calls},
 		FinishReason: finish,
 		Usage:        usage,
 		Model:        model,

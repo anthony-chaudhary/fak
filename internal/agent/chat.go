@@ -100,11 +100,11 @@ type Message struct {
 	ThinkingSignature string   `json:"thinking_signature,omitempty"`
 	RedactedThinking  []string `json:"redacted_thinking,omitempty"`
 
-	// ReasoningContent carries the reasoning block a Qwen3.5-style reasoning model
-	// (e.g. Ornith) emits inside <think>…</think>, split off the in-kernel decode path
-	// so it does not leak into Content (and thus into downstream Claude Code context).
-	// It mirrors the `reasoning_content` field vLLM produces with --reasoning-parser
-	// qwen3. Additive over the OpenAI shape; an OpenAI client simply ignores it.
+	// ReasoningContent carries the reasoning block an OpenAI-compatible reasoning model
+	// (DeepSeek V4, GLM/Qwen via vLLM --reasoning-parser qwen3, or fak's in-kernel
+	// split) emits beside the final answer. It is deliberately separate from Content so
+	// reasoning text is not treated as final answer text, while still round-tripping when
+	// a provider requires it on a later tool-result turn.
 	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
@@ -122,6 +122,7 @@ func (m *Message) UnmarshalJSON(raw []byte) error {
 		Thinking          string          `json:"thinking,omitempty"`
 		ThinkingSignature string          `json:"thinking_signature,omitempty"`
 		RedactedThinking  []string        `json:"redacted_thinking,omitempty"`
+		ReasoningContent  string          `json:"reasoning_content,omitempty"`
 	}
 	if err := json.Unmarshal(raw, &aux); err != nil {
 		return err
@@ -139,6 +140,7 @@ func (m *Message) UnmarshalJSON(raw []byte) error {
 	m.Thinking = aux.Thinking
 	m.ThinkingSignature = aux.ThinkingSignature
 	m.RedactedThinking = aux.RedactedThinking
+	m.ReasoningContent = aux.ReasoningContent
 	return nil
 }
 

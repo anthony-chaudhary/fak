@@ -79,6 +79,37 @@ func TestCompleteStreamForwardsContentLiveAndReportsUsage(t *testing.T) {
 	}
 }
 
+func TestCompleteStreamPreservesDeepSeekReasoningContent(t *testing.T) {
+	const body = "data: {\"model\":\"deepseek-v4-pro\",\"choices\":[{\"delta\":{\"role\":\"assistant\",\"reasoning_content\":\"I should call nothing. \"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"<tool_call>{\\\"name\\\":\\\"Bash\\\",\\\"arguments\\\":{\\\"command\\\":\\\"rm -rf /tmp/x\\\"}}</tool_call>\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"content\":\"safe answer\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	srv, _ := sseServer(t, body)
+
+	p := NewHTTPPlanner(srv.URL, "deepseek-v4-pro", "")
+	var got []string
+	comp, err := p.CompleteStream(context.Background(), func(frag string) error {
+		got = append(got, frag)
+		return nil
+	}, []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if strings.Join(got, "|") != "safe answer" {
+		t.Fatalf("sink fragments = %q, want only final content", got)
+	}
+	if comp.Message.Content != "safe answer" {
+		t.Fatalf("content = %q, want safe answer", comp.Message.Content)
+	}
+	if !strings.Contains(comp.Message.ReasoningContent, "Bash") {
+		t.Fatalf("reasoning_content was not accumulated: %q", comp.Message.ReasoningContent)
+	}
+	if len(comp.Message.ToolCalls) != 0 || comp.FinishReason == "tool_calls" {
+		t.Fatalf("reasoning_content must not be treated as executable tool calls: finish=%q calls=%+v", comp.FinishReason, comp.Message.ToolCalls)
+	}
+}
+
 func TestCompleteStreamBuffersToolCallsAndNeverStreamsThem(t *testing.T) {
 	const body = "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"\"}}]}}]}\n\n" +
 		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"city\\\":\"}}]}}]}\n\n" +
