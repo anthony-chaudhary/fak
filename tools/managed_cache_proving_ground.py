@@ -17,8 +17,10 @@ timestamp, never the wall clock), and it does three things:
 
   1. VALIDATE — every ledger row is checked against its schema contract: exact
      schema string, closed mechanism/session_type vocabulary, non-negative counters,
-     and the Track-2 savings identity ``saved = 0.9*cache_read - 0.25*cache_creation``
-     (internal/cachevaluereport/track2.go providerSavedTokenEquiv). A row that
+     the Track-2 savings identity ``saved = 0.9*cache_read - 0.25*cache_creation``
+     (internal/cachevaluereport/track2.go providerSavedTokenEquiv), and the #2816
+     anti-reward-hack contract that a row booking a positive GROSS saving while its
+     NET is negative (the burst-happy compaction signature) is rejected. A row that
      drifts is a named violation, not a silent skip.
 
   2. FOLD — each managed-cache concept (the #1844 lever family) is resolved to a
@@ -130,6 +132,11 @@ def _nonneg(row: dict, key: str) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
 
 
+def _num(v):
+    """The value if it is a real number (bool excluded), else None."""
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
 def validate_savings_row(row: dict, where: str) -> list[str]:
     v: list[str] = []
     if row.get("schema") != SAVINGS_SCHEMA:
@@ -151,6 +158,21 @@ def validate_savings_row(row: dict, where: str) -> list[str]:
         got = row.get("saved_token_equiv")
         if not isinstance(got, (int, float)) or abs(want - got) > FORMULA_TOLERANCE:
             v.append(f"{where}: SAVED_FORMULA_MISMATCH want {want} got {got}")
+    # #2816 anti-reward-hack guardrail. A row may not book a positive GROSS saving while
+    # carrying a NEGATIVE net — the burst-happy compaction signature: a fire that sheds
+    # tokens (compaction_shed_tokens / saved_token_equiv > 0, priced at 1.0x) but busts the
+    # provider cache so the true NET is negative. An RSI loop rewarded on gross fak_share
+    # would learn to fire it, so the reward must be fak_share_net and a gross-up with
+    # negative net is a contract violation here, not a silently-banked win. Provider rows
+    # set net == gross (track2.go), so a cold write-only baseline (net<0 AND gross<0) never
+    # trips this — it bites exactly the value-destroying fak-authored fire.
+    net = row.get("net_saved_token_equiv")
+    gross = row.get("saved_token_equiv")
+    shed = row.get("compaction_shed_tokens", 0)
+    gross_positive = (_num(gross) is not None and gross > 0) or (_num(shed) is not None and shed > 0)
+    if _num(net) is not None and net < 0 and gross_positive:
+        v.append(f"{where}: NET_NEGATIVE_GROSS_UP saved={gross} shed={shed} net={net} "
+                 f"(#2816: gross-up with negative net is a value-destroying fire; reward on fak_share_net)")
     return v
 
 

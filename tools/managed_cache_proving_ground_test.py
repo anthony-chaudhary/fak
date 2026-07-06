@@ -215,6 +215,49 @@ def test_cli_exit_codes():
     print("test_cli_exit_codes OK")
 
 
+def test_anti_reward_hack_net_negative_gross_up():
+    """#2816: an RSI loop optimizing fak_share MUST optimize fak_share_net.
+
+    A burst-happy compaction fire sheds tokens (positive GROSS) but busts the provider
+    cache (negative NET). Such a gross-up-with-negative-net row is REJECTED by the row
+    contract, and folding it raises the violation_count above a clean baseline — so a
+    synthetic burst-happy policy scores WORSE, not better (the issue's acceptance).
+    """
+    burst = _savings_row(mechanism="compaction_shed", provider="fak",
+                         cache_read_tokens=0, cache_creation_tokens=0,
+                         saved_token_equiv=500.0, net_saved_token_equiv=-800.0,
+                         compaction_shed_tokens=500)
+    assert any("NET_NEGATIVE_GROSS_UP" in v for v in
+               pg.validate_savings_row(burst, "x:1")), pg.validate_savings_row(burst, "x:1")
+
+    # A healthy fire (net >= 0, no gross-up) is accepted.
+    healthy = _savings_row(mechanism="compaction_shed", provider="fak",
+                           cache_read_tokens=0, cache_creation_tokens=0,
+                           saved_token_equiv=500.0, net_saved_token_equiv=500.0,
+                           compaction_shed_tokens=500)
+    assert pg.validate_savings_row(healthy, "x:1") == [], pg.validate_savings_row(healthy, "x:1")
+
+    # A cold write-only PROVIDER baseline has a negative net, but its gross is negative
+    # too (net == gross, track2.go) — that is not a gross-up, so it must NOT be flagged.
+    # Guards against mislabeling the honest passthrough baseline as a reward-hack.
+    cold = _savings_row(cache_read_tokens=0, cache_creation_tokens=1000,
+                        saved_token_equiv=-250.0, net_saved_token_equiv=-250.0)
+    assert pg.validate_savings_row(cold, "x:1") == [], pg.validate_savings_row(cold, "x:1")
+
+    # Acceptance: the burst-happy policy scores WORSE through the ratchet — its row lifts
+    # the fold's violation_count above a clean baseline, tripping REGRESSION_VIOLATIONS.
+    with tempfile.TemporaryDirectory() as td:
+        clean = _write_root(Path(td), [_savings_row()], [_usage_row()], [_value_row()])
+        baseline = pg.baseline_snapshot(pg.build_report(clean))
+        assert pg.build_report(clean)["violation_count"] == 0
+        hacked = _write_root(Path(td), [_savings_row(), burst], [_usage_row()], [_value_row()])
+        report = pg.build_report(hacked)
+        assert report["violation_count"] >= 1, report["violations"]
+        problems = pg.check_against_baseline(report, baseline)
+        assert any(p.startswith("REGRESSION_VIOLATIONS") for p in problems), problems
+    print("test_anti_reward_hack_net_negative_gross_up OK")
+
+
 def test_live_repo_smoke():
     """The committed ledgers must always parse and fold — the proving ground's floor."""
     report = pg.build_report(ROOT)
@@ -236,5 +279,6 @@ if __name__ == "__main__":
     test_rung_fold()
     test_baseline_ratchet()
     test_cli_exit_codes()
+    test_anti_reward_hack_net_negative_gross_up()
     test_live_repo_smoke()
     print("managed_cache_proving_ground_test OK")
