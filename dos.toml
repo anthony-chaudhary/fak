@@ -90,6 +90,7 @@ concurrent = [
   "trajctl",
   "waiting",
   "chatopsdetach",
+  "godfileceiling",
   # They landed by hand / during the new_leaf.py path-bug window, so the `# new-leaf:lane`
   # auto-insert never fired. All are real, architest-tiered packages.
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
@@ -219,6 +220,7 @@ concurrent = [
   "tuiplugin",
   "issuefanout", # #2522: internal/issuefanout leaf (the spine-first + fan-out follow-on planner); cmd/fak/issue_fanout.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
   "chatopsdetach",
+  "godfileceiling",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -317,6 +319,7 @@ autopick = [
   "tuiplugin",
   "issuefanout", # #2522: internal/issuefanout leaf (the spine-first + fan-out follow-on planner), see [lanes].concurrent note
   "chatopsdetach",
+  "godfileceiling",
   # new-leaf:lane
 ]
 
@@ -497,6 +500,7 @@ waiting = ["internal/waiting/**"]
 tuiplugin = ["internal/tuiplugin/**"]
 issuefanout = ["internal/issuefanout/**"] # #2522: internal/issuefanout leaf (the spine-first + fan-out follow-on planner); cmd/fak/issue_fanout.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
 chatopsdetach = ["internal/chatopsdetach/**"]
+godfileceiling = ["internal/godfileceiling/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
@@ -666,6 +670,24 @@ refusal  = true
 summary  = "A `fak knownbad resolve` was refused because the fix is not witnessed: the green test over the broken tree (and/or the `dos verify` binding the fixer's commit) did not pass, so the signature stays open and the parked fleet is NOT released. A self-report never clears a known-bad -- only an independent green/verify does."
 fix      = "Land the real fix, then re-run `fak knownbad resolve <signature>` so the witness (a green `fak affected`/`go test` over the broken tree, or a `dos verify` on the fixer commit) passes; only a witnessed green flips open -> resolved and drops the fixer's lease. Floor: `fak knownbad resolve <signature> --witness tests|verify` over the internal/knownbad ledger."
 see_also = ["internal/knownbad", "fak knownbad resolve", "internal/affectedtests", "docs/blast-radius-containment-cohort.md"]
+
+# Blast-radius containment W8 (#2720, epic #2712): a `fak knownbad claim`/`resolve`/`revoke`
+# was aimed at a signature that WAS recorded but is no longer live -- its bounded TTL lapsed
+# (auto-expired), an operator revoked it, or it was already resolved. There is nothing left to
+# act on: the signature already stopped matching, so the fleet is already released. This is the
+# safety-valve's structured "you are chasing a phantom" signal -- distinct from a plain usage
+# error for a signature that was NEVER recorded (a typo'd/made-up id, which stays a bare exit-2
+# because there is nothing to point the caller at). W8 is what makes scope-hold trustworthy: a
+# hold that cannot self-expire is a liability, so every signature carries a bounded TTL AND a
+# revoke escape hatch, and this reason names the refusal a worker gets for acting on one that
+# has already released. DISTINCT from KNOWN_BAD_NOT_WITNESSED (that is a LIVE signature whose
+# resolve lacked a witness -- still held); this is a signature that is already GONE.
+[reasons.KNOWN_BAD_EXPIRED_OR_REVOKED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A `fak knownbad claim`/`resolve`/`revoke` targeted a signature that is no longer live: its bounded TTL lapsed (auto-expired), an operator revoked it, or it was already resolved. The signature already stopped matching -- there is nothing left to claim, resolve, or revoke, and the parked fleet is already released."
+fix      = "Stop chasing the aged-out/revoked signature -- the hold has already lifted, so the intersecting work is dispatchable again. If the failure is genuinely still live it re-fires and re-records a fresh signature (with a fresh TTL); act on THAT. Floor: `fak knownbad match --tree <tree>` returns matched:false for an expired/revoked signature over the internal/knownbad ledger."
+see_also = ["internal/knownbad", "fak knownbad revoke", "fak knownbad match", "docs/blast-radius-containment-cohort.md"]
 
 [reasons.GATE_LATENCY_REGRESSION]
 category = "OPERATOR_GATE"
