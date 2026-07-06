@@ -19,8 +19,11 @@ package accounts
 // place with no external step.
 //
 // The merge is a faithful port of csync's `deep_merge`: the defaults win for every leaf key
-// they name, dict values recurse, and every other key the account already has (theme, model,
-// effortLevel, …) is left untouched. It is idempotent — a second projection reports no change
+// they name, dict values recurse, and every other key the account already has (theme,
+// effortLevel, …) is left untouched. The one exception is `model` (see seatSettingsDefaults and
+// #3091): it is SEAT-OWNED, so an already-set per-seat model is preserved and a fresh seat is
+// seeded with the launch default (Opus 4.8), never the registry-pinned fallback. It is
+// idempotent — a second projection reports no change
 // — because the serialized form is byte-stable (sorted keys, 2-space indent, trailing newline),
 // exactly matching csync's `json.dumps(..., indent=2, sort_keys=True) + "\n"` so the two
 // implementations cannot drift.
@@ -66,6 +69,46 @@ func (r Registry) DefaultsSettings() (map[string]any, bool) {
 	return settings, true
 }
 
+// ProjectedDefaultModel is the model the projection seeds into a seat that carries no model of
+// its own: Opus 4.8, matching cmd/fak's compiled-in defaultLaunchModel so a bare `claude
+// --resume`, a direct `claude` under a seat's CLAUDE_CONFIG_DIR, or a guard budget-restart
+// relaunch — none of which pass --model — inherits the SAME primary the account-switched launcher
+// pins. It MUST stay equal to that launch default; cmd/fak binds them with a guard test.
+//
+// The registry's defaults.settings block historically pinned model=claude-fable-5 — the fleet
+// launch FALLBACK, not the primary — so the deep-merge force-overwrote every seat's model back to
+// fable-5 on each sync/add, and only the launch path (which passes --model explicitly) honored
+// opus (#3091). The projection now overrides that pinned value with the launch default and treats
+// model as seat-owned. Fable 5 stays the launch fallback CHAIN and is not touched here.
+const ProjectedDefaultModel = "claude-opus-4-8"
+
+// seatSettingsDefaults specializes the registry defaults overlay for one seat's current settings,
+// applying the `model` carve-out (#3091). When the defaults pin a model:
+//   - if the seat already carries its own model, model is DROPPED from the overlay so the merge
+//     preserves the seat's choice (a hand-set "model":"sonnet" survives the next sync/add);
+//   - otherwise model is SEEDED as ProjectedDefaultModel (the launch default), not whatever the
+//     registry pinned (historically the fable-5 fallback).
+//
+// When the defaults name no model at all there is nothing to reconcile, so the defaults are
+// returned as-is. The shared registry defaults map is never mutated: a shallow copy is taken only
+// on the model-adjusting paths, and that is sufficient because model is a top-level scalar in the
+// settings block (the recursion in deepMergeJSON never reaches inside it).
+func seatSettingsDefaults(defaults, seat map[string]any) map[string]any {
+	if _, pins := defaults["model"]; !pins {
+		return defaults
+	}
+	overlay := make(map[string]any, len(defaults))
+	for k, v := range defaults {
+		overlay[k] = v
+	}
+	if _, seatHasModel := seat["model"]; seatHasModel {
+		delete(overlay, "model")
+	} else {
+		overlay["model"] = ProjectedDefaultModel
+	}
+	return overlay
+}
+
 // ProjectSettings deep-merges the registry's defaults.settings block into each home's
 // settings.json, writing through the injected writeFn (kept injectable so the projection is
 // unit-tested without touching disk, the same seam pattern as accountsLaunchRun). It returns a
@@ -75,8 +118,9 @@ func (r Registry) DefaultsSettings() (map[string]any, bool) {
 // A home is skipped — recorded, never written — when it is tombstoned (an inactive seat must
 // not be reseeded) or carries no dir. For an active seat the existing settings.json is read
 // tolerantly (a missing or unparseable file reads as {} and is (re)created), the defaults are
-// merged in, and the file is rewritten ONLY when the merge changed something, so a re-run over
-// an already-synced roster writes nothing.
+// merged in — with the seat-owned `model` carve-out (seatSettingsDefaults) applied first — and
+// the file is rewritten ONLY when the merge changed something, so a re-run over an already-synced
+// roster writes nothing.
 func (r Registry) ProjectSettings(homes []Home, writeFn func(path string, b []byte) error) ([]SettingsResult, bool, error) {
 	defaults, ok := r.DefaultsSettings()
 	if !ok {
@@ -97,7 +141,8 @@ func (r Registry) ProjectSettings(homes []Home, writeFn func(path string, b []by
 		}
 		path := filepath.Join(h.Dir, settingsFilename)
 		res.Path = path
-		merged, changed := deepMergeJSON(readSettings(path), defaults)
+		current := readSettings(path)
+		merged, changed := deepMergeJSON(current, seatSettingsDefaults(defaults, current))
 		if changed {
 			b, err := marshalSettings(merged)
 			if err != nil {
