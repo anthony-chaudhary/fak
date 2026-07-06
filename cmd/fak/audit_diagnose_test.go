@@ -429,6 +429,54 @@ func TestRunAuditDiagnose_RenderReportsChildCrashClass(t *testing.T) {
 	}
 }
 
+func TestRunAuditDiagnose_RenderReportsRateLimitExitSeparately(t *testing.T) {
+	r, _ := mintRow(1, "", journal.Row{
+		Kind:     "CHILD_CRASH",
+		Tool:     "claude",
+		TraceID:  "guard",
+		Reason:   "NONZERO_EXIT",
+		By:       "guard-supervisor",
+		ExitCode: 1,
+		Witness:  "fak-turn trace=guard FAILED reason=rate_limited wire=anthropic_messages kind=session_limit announced_wait=1h5m45s",
+	})
+	dir := t.TempDir()
+	path := filepath.Join(dir, "guard-audit.jsonl")
+	writeRowsFile(t, path, []journal.Row{r})
+
+	var stdout, stderr bytes.Buffer
+	code := runAuditDiagnose(&stdout, &stderr, path, false)
+	if code != 0 {
+		t.Fatalf("sound rate-limit-exit journal should exit 0, got %d (stderr=%s)", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"floor activity : 1 decision",
+		"rate-limit exit:",
+		"session_limit",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("render missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "child crash:") || strings.Contains(out, "NONZERO_EXIT") {
+		t.Fatalf("rate-limit exit should not render as child crash/NONZERO_EXIT:\n%s", out)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runAuditDiagnose(&stdout, &stderr, path, true)
+	if code != 0 {
+		t.Fatalf("sound rate-limit-exit journal --json should exit 0, got %d (stderr=%s)", code, stderr.String())
+	}
+	var d auditDiagnosis
+	if err := json.Unmarshal(stdout.Bytes(), &d); err != nil {
+		t.Fatalf("--json output not parseable: %v\n%s", err, stdout.String())
+	}
+	if d.Friction.ChildCrash != 0 || d.Friction.RateLimitExit != 1 || d.Friction.ByRateLimitClass["session_limit"] != 1 {
+		t.Fatalf("json friction = %+v, want rate-limit exit outside child crash", d.Friction)
+	}
+}
+
 // TestRunAuditDiagnose_InterleavedExitsZero writes an interleaved-but-intact journal to a
 // temp file and confirms the command exits 0 (a fleet user's default journal is trustworthy)
 // and the render names the INTERLEAVED verdict.

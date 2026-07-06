@@ -78,3 +78,43 @@ func TestUnclassifiedCrashStillCounts(t *testing.T) {
 		t.Fatalf("unclassified crash should still be the worst bucket: %+v", WorstBucket(fold))
 	}
 }
+
+func TestRateLimitedChildExitDoesNotPolluteCrashBucket(t *testing.T) {
+	p := writeJournal(t, []map[string]any{
+		{"verdict": "ALLOW", "kind": "DECIDE"},
+		{
+			"kind":      "CHILD_CRASH",
+			"reason":    "NONZERO_EXIT",
+			"tool":      "claude",
+			"trace_id":  "guard",
+			"exit_code": 1,
+			"witness":   "fak-turn trace=guard FAILED reason=rate_limited wire=anthropic_messages kind=session_limit announced_wait=1h5m45s",
+		},
+	})
+	fold := FoldRows([]string{p})
+	if fold.TotalRows != 2 {
+		t.Fatalf("total rows = %d, want 2", fold.TotalRows)
+	}
+	if fold.ChildCrash != 0 || len(fold.ByCrashClass) != 0 {
+		t.Fatalf("rate-limited exit polluted crash bucket: %+v", fold)
+	}
+	if fold.RateLimitExit != 1 || fold.ByRateLimitClass["session_limit"] != 1 {
+		t.Fatalf("fold = %+v, want one session_limit rate-limit exit", fold)
+	}
+	if got := VerdictQuality(fold); got != 100 {
+		t.Fatalf("rate-limit exit should not carry crash-quality penalty, got quality %v", got)
+	}
+	if worst := WorstBucket(fold); worst.Bucket == "child_crash" {
+		t.Fatalf("rate-limit exit must not be worst child_crash bucket: %+v", worst)
+	}
+}
+
+func TestRateLimitedChildExitReasonIsTyped(t *testing.T) {
+	p := writeJournal(t, []map[string]any{
+		{"kind": "CHILD_CRASH", "reason": "RATE_LIMIT_EXIT", "tool": "claude", "trace_id": "guard", "exit_code": 1},
+	})
+	fold := FoldRows([]string{p})
+	if fold.ChildCrash != 0 || fold.RateLimitExit != 1 || fold.ByRateLimitClass["rate_limited"] != 1 {
+		t.Fatalf("fold = %+v, want typed RATE_LIMIT_EXIT outside child_crash", fold)
+	}
+}

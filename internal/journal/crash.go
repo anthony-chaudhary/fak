@@ -45,6 +45,11 @@ const (
 	// panic the runtime turned into exit 2, an unrecovered error, a terminal upstream
 	// failure) — abnormal, but a clean process teardown rather than a signal.
 	CrashNonzeroExit = "NONZERO_EXIT"
+	// CrashRateLimitExit is a child that exited non-zero because the upstream provider
+	// reported a rate/session/usage limit. The child stopped, but this is a provider
+	// capacity outcome rather than process instability, so diagnosis folds it outside
+	// the child-crash quality bucket.
+	CrashRateLimitExit = "RATE_LIMIT_EXIT"
 )
 
 // AppendCrash records one supervised-child abnormal exit as a durable, chained

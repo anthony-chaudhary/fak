@@ -491,6 +491,11 @@ func renderAuditDiagnosis(d auditDiagnosis) string {
 			out("    child crash: %-12s x%d\n", c, f.ByCrashClass[c])
 		}
 	}
+	if f.RateLimitExit > 0 {
+		for _, c := range sortedKeys(f.ByRateLimitClass) {
+			out("    rate-limit exit: %-12s x%d\n", c, f.ByRateLimitClass[c])
+		}
+	}
 	if f.BlankReasonOnDeny > 0 {
 		out("    ⚠ %d block(s) carried no reason (a closed-vocabulary reason should accompany every deny)\n", f.BlankReasonOnDeny)
 	}

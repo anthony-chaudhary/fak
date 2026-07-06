@@ -43,6 +43,12 @@ type Fold struct {
 	// NONZERO_EXIT) so the worst-bucket lever names the dominant class.
 	ChildCrash   int            `json:"child_crash"`
 	ByCrashClass map[string]int `json:"by_crash_class"`
+	// RateLimitExit counts supervised-child non-zero exits whose bounded row
+	// evidence names provider capacity (rate_limited/session_limit/usage_limit).
+	// These are terminal outcomes, but not process instability, so they do not
+	// enter ChildCrash or VerdictQuality's crash penalty.
+	RateLimitExit    int            `json:"rate_limit_exit,omitempty"`
+	ByRateLimitClass map[string]int `json:"by_rate_limit_class,omitempty"`
 }
 
 type Bucket struct {
@@ -142,7 +148,7 @@ func DiagnoseAuditGap(root string) string {
 }
 
 func FoldRows(paths []string) Fold {
-	fold := Fold{ByVerdict: map[string]int{}, ByReason: map[string]int{}, ByCrashClass: map[string]int{}}
+	fold := Fold{ByVerdict: map[string]int{}, ByReason: map[string]int{}, ByCrashClass: map[string]int{}, ByRateLimitClass: map[string]int{}}
 	for _, path := range paths {
 		b, err := os.ReadFile(path)
 		if err != nil {
@@ -164,6 +170,11 @@ func FoldRows(paths []string) Fold {
 			// own worst-honesty-hole axis, keyed by the closed crash class.
 			if strings.EqualFold(strings.TrimSpace(asString(row["kind"])), "CHILD_CRASH") {
 				fold.TotalRows++
+				if class, ok := childRateLimitExitClass(row); ok {
+					fold.RateLimitExit++
+					fold.ByRateLimitClass[class]++
+					continue
+				}
 				fold.ChildCrash++
 				class := strings.TrimSpace(asString(row["reason"]))
 				if class == "" {
@@ -195,6 +206,32 @@ func FoldRows(paths []string) Fold {
 		}
 	}
 	return fold
+}
+
+func childRateLimitExitClass(row map[string]any) (string, bool) {
+	fields := []string{
+		asString(row["reason"]),
+		asString(row["witness"]),
+		asString(row["args_label"]),
+	}
+	for _, raw := range fields {
+		low := strings.ToLower(strings.TrimSpace(raw))
+		switch {
+		case low == "":
+			continue
+		case strings.Contains(low, "session_limit"):
+			return "session_limit", true
+		case strings.Contains(low, "weekly_limit"):
+			return "weekly_limit", true
+		case strings.Contains(low, "usage_limit"):
+			return "usage_limit", true
+		case strings.Contains(low, "rate_limited") || strings.Contains(low, "rate limit") || strings.Contains(low, "ratelimit"):
+			return "rate_limited", true
+		case strings.Contains(low, "rate_limit_exit"):
+			return "rate_limited", true
+		}
+	}
+	return "", false
 }
 
 func VerdictQuality(f Fold) float64 {
