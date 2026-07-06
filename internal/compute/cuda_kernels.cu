@@ -1166,3 +1166,80 @@ extern "C" void fcuda_awq_gemm(const uint8_t *dW, const float *dScales, const fl
   dim3 blocks(out, P);
   k_awq_gemm<<<blocks, threads, 0, g_stream>>>(dW, dScales, dX, dY, out, in, P);
 }
+
+// ---- GPTQ (AutoGPTQ/GPTQModel) int32-packed weight-only kernels -----------------
+// GPTQ format: 4/8-bit codes packed pack=32/bits per int32 along the INPUT dim
+// (qweight [in/pack, out]), zero-points packed the same way along the OUTPUT dim
+// (qzeros [nGroups, out/pack]), and per-group f32 scales [nGroups, out]. An optional
+// int32 g_idx [in] carries the activation-order group of each input; when NULL the
+// group is i/groupSize (clamped to nGroups-1). Dequant mirrors internal/model/gptq.go
+// bit-for-bit: weight[o,i] = (code(i,o) - (zero(g,o)+1)) * scale[g,o], the AutoGPTQ
+// convention (unpack(qzeros)+1 is the effective zero point). The dequant is fused into
+// the GEMV tile and accumulated in F32 — no full dequant buffer is materialized.
+
+// gptqCode unpacks the 4/8-bit code at (input i, output o) from int32-packed qweight.
+__device__ __forceinline__ uint32_t gptqCode(const uint32_t *dW, int i, int o, int out,
+                                             int pack, int bits, uint32_t mask) {
+  uint32_t v = dW[(size_t)(i / pack) * out + o];
+  return (v >> (uint32_t((i % pack) * bits))) & mask;
+}
+
+// gptqZero unpacks the effective zero point at (group g, output o): AutoGPTQ stores
+// zero-1, so the +1 here matches the CPU resident oracle's qt.zero().
+__device__ __forceinline__ uint32_t gptqZero(const uint32_t *dZeros, int g, int o, int outPack,
+                                             int pack, int bits, uint32_t mask) {
+  uint32_t v = dZeros[(size_t)g * outPack + (o / pack)];
+  return ((v >> (uint32_t((o % pack) * bits))) & mask) + 1u;
+}
+
+// k_gptq_gemv computes y = W @ x where W is a GPTQ int32-packed [out, in] weight.
+// One block per output row; threads collaborate on the dot product with a tree reduction.
+__global__ void k_gptq_gemv(const uint32_t *dW, const uint32_t *dZeros, const float *dScales,
+                            const int32_t *dGidx, const float *dX, float *dY,
+                            int out, int in, int bits, int groupSize, int nGroups) {
+  int o = blockIdx.x;
+  if (o >= out) return;
+  int pack = 32 / bits;
+  uint32_t mask = (1u << bits) - 1u;
+  int outPack = out / pack;
+
+  __shared__ float red[256];
+  float local = 0.f;
+
+  for (int i = threadIdx.x; i < in; i += blockDim.x) {
+    int g;
+    if (dGidx) {
+      g = dGidx[i];
+    } else {
+      g = i / groupSize;
+      if (g >= nGroups) g = nGroups - 1;
+    }
+    uint32_t code = gptqCode(dW, i, o, out, pack, bits, mask);
+    uint32_t zero = gptqZero(dZeros, g, o, outPack, pack, bits, mask);
+    float w = ((float)(int32_t)code - (float)(int32_t)zero) * dScales[(size_t)g * out + o];
+    local += w * dX[i];
+  }
+
+  red[threadIdx.x] = local;
+  __syncthreads();
+  for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+    if (threadIdx.x < s) {
+      red[threadIdx.x] += red[threadIdx.x + s];
+    }
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) {
+    dY[o] = red[0];
+  }
+}
+
+// C API for GPTQ kernels
+
+// fcuda_gptq_gemv: y[out] = GPTQ[out, in] @ x[in]. dGidx may be NULL (group = i/groupSize).
+extern "C" void fcuda_gptq_gemv(const uint32_t *dW, const uint32_t *dZeros, const float *dScales,
+                                const int32_t *dGidx, const float *dX, float *dY,
+                                int out, int in, int bits, int groupSize, int nGroups) {
+  int threads = 256;
+  k_gptq_gemv<<<out, threads, 0, g_stream>>>(dW, dZeros, dScales, dGidx, dX, dY,
+                                             out, in, bits, groupSize, nGroups);
+}

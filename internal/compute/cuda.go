@@ -149,6 +149,24 @@ const (
 // records the realized value. Do not read a pass from this value alone.
 const cudaAWQCosineMin = 0.995
 
+// cudaGPTQCosineMin is the cuda backend's RECORDED Approx cosine floor for the native packed
+// GPTQ device GEMV (#3030 — the GPU remainder of #300's CPU-resident GPTQ spine). GPTQ is a
+// 4/8-bit weight-only format: codes packed 32/bits per int32 along the input dim, per-GROUP
+// (not per-channel) int32-packed zero-points, and per-group f32 scales, with the AutoGPTQ
+// zero+1 convention (weight = (code-(zero+1))·scale[g,o]). fcuda_gptq_gemv dequant-fuses the
+// unpack into the GEMV tile and accumulates in F32 — the same dequant-fused structure as the
+// Q4_K / AWQ 4-bit lanes, so the floor is the SAME 0.995 those 4-bit lanes record. The witness
+// reference is an f32 dequant of the SAME packed qweight/qzeros/scales (dequantGPTQWeight), so
+// this gate isolates the device tile's arithmetic (reduction-order drift) against the host GPTQ
+// dequant — the same class cudaQ4KCosineMin bounds, NOT the true-f32→4-bit reconstruction error.
+//
+// IMPORTANT (honest handoff, identical to cudaAWQCosineMin): this RECORDS the threshold; it does
+// NOT assert the path passes it. The realized cosine is measured on a CUDA node (the win32 build
+// host has no CUDA toolkit / GPU); on this host the -tags cuda witness skips, fails-closed, naming
+// the missing runner. This floor is a reasoned target derived from the analogous 4-bit dequant-
+// fused lanes; the first GPU run records the realized value. Do not read a pass from this value.
+const cudaGPTQCosineMin = 0.995
+
 // cudaFlashAttnCosineMin is the cuda backend's RECORDED Approx cosine floor for the fused
 // flash/online-softmax attention kernel (#486) — the device-vs-cpuref-f32 logit cosine a witness
 // must clear. The flash kernel computes the SAME math as the cpuref reference — softmax(scale·q·k)
@@ -1228,6 +1246,38 @@ func (c *cudaBackend) AWQBatchedMatMul(w, scales, X Tensor, P int) Tensor {
 	yp := c.cf(y)
 
 	C.fcuda_awq_gemm((*C.uint8_t)(wp), (*C.float)(sp), (*C.float)(xp), yp, C.int(out), C.int(in), C.int(P))
+	return y
+}
+
+// ---- GPTQ (AutoGPTQ/GPTQModel) int32-packed weight-only matmul ------------------
+
+// GPTQMatMul computes y = W @ x where W is a native packed GPTQ 4/8-bit quantized weight,
+// dequant-fused into the device GEMV tile (the GPU remainder of the CPU-resident spine, #3030).
+// The operands mirror internal/model/gptq.go's resident layout exactly:
+//   - qweight: int32-packed codes [in/pack, out]   (pack = 32/bits)
+//   - qzeros:  int32-packed zero-points [nGroups, out/pack]
+//   - scales:  f32 [nGroups, out]
+//   - gidx:    optional int32 [in] activation-order group index; pass the zero Tensor
+//              (Tensor{}) for the group = i/groupSize path (no g_idx / desc_act off).
+// The quant tensors are staged resident as raw device bytes (their host dtype label is
+// cosmetic — the kernel reads only the device pointers + these explicit dims). Output is F32 [out].
+func (c *cudaBackend) GPTQMatMul(qweight, qzeros, scales, gidx, x Tensor, out, in, bits, groupSize, nGroups int) Tensor {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	y, _ := c.devTr([]int{out}, F32)
+
+	wp := (*C.uint32_t)(qweight.buf.(*cudaBuf).ptr)
+	zp := (*C.uint32_t)(qzeros.buf.(*cudaBuf).ptr)
+	sp := (*C.float)(scales.buf.(*cudaBuf).ptr)
+	var gp *C.int32_t
+	if gidx.buf != nil {
+		gp = (*C.int32_t)(gidx.buf.(*cudaBuf).ptr)
+	}
+	xp := (*C.float)(x.buf.(*cudaBuf).ptr)
+	yp := c.cf(y)
+
+	C.fcuda_gptq_gemv(wp, zp, sp, gp, xp, yp,
+		C.int(out), C.int(in), C.int(bits), C.int(groupSize), C.int(nGroups))
 	return y
 }
 

@@ -195,6 +195,18 @@ void fcuda_awq_gemv(const uint8_t *dW, const float *dScales, const float *dX, fl
 /* fcuda_awq_gemm: Y[P,out] = X[P,in] @ AWQ[out,in]^T (batched AWQ matmul). */
 void fcuda_awq_gemm(const uint8_t *dW, const float *dScales, const float *dX, float *dY, int out, int in, int P);
 
+/* GPTQ (AutoGPTQ/GPTQModel) int32-packed weight-only kernels.
+ * Codes are packed pack=32/bits per int32 along the input dim (dW [in/pack, out]);
+ * zero-points are packed the same way along the output dim (dZeros [nGroups, out/pack]);
+ * dScales is f32 [nGroups, out]. dGidx is an optional int32 [in] activation-order group
+ * index (NULL => group = i/groupSize, clamped to nGroups-1). Dequant mirrors
+ * internal/model/gptq.go: weight[o,i] = (code - (zero+1)) * scale[g,o]. */
+
+/* fcuda_gptq_gemv: y[out] = GPTQ[out,in] @ x[in], dequant fused into the GEMV tile. */
+void fcuda_gptq_gemv(const uint32_t *dW, const uint32_t *dZeros, const float *dScales,
+                     const int32_t *dGidx, const float *dX, float *dY,
+                     int out, int in, int bits, int groupSize, int nGroups);
+
 /* CUDA-graph decode: capture one token's whole op stream on g_stream, then replay it as a
  * single launch — collapsing ~600 WSL CUDA calls/token into one (the only way past the
  * proven ~12 tok/s op-per-call floor). begin starts capture; end_launch ends it,
