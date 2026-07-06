@@ -58,10 +58,36 @@ const StatusOpen = "open"
 // evidence-backed and must be refused by the shell.
 const StatusResolved = "resolved"
 
+// StatusRevoked is the terminal status the UNWITNESSED release valve (W8, #2720)
+// stamps onto a superseding row to retract a signature WITHOUT a witnessed fix: a
+// mis-recorded, stale, or wrong signature an operator kills by hand. It is the
+// deliberate counterpart to StatusResolved — resolve closes a signature on proven
+// evidence (a green/verify), revoke closes it on operator judgement (the failure
+// was never real, or the tree was wrong) with the reason stamped in RevokeReason.
+// Like a resolved row it is never Live (Live is true only for "open"), so the
+// dispatcher scope-hold (W4), the fixer-election lease consumer (W5), Match, and
+// the operator card (W7) all drop it the moment the row is appended — the SAME
+// supersede path a resolve takes, minus the witness gate. Distinct from an EXPIRED
+// row (a live "open" row whose TTL has lapsed): both stop matching, but a revoke is
+// an explicit human retraction the ledger records, an expiry is the passive
+// self-healing a bounded TTL gives every signature.
+const StatusRevoked = "revoked"
+
 // DefaultLedgerRel is the repo-relative, fleet-visible ledger the cmd shell
 // appends to by default — the same docs/nightrun/*.jsonl idiom the other fak
 // ledgers use.
 const DefaultLedgerRel = "docs/nightrun/known-bad.jsonl"
+
+// DefaultRecordTTLSeconds is the bounded default lifetime a `record` stamps when the
+// discoverer does not pass an explicit --ttl: 45 minutes. It exists so a signature
+// SELF-HEALS if its fix lands quietly (or the discovery was spurious) and nobody runs
+// `resolve`/`revoke` — the ledger stops matching on its own rather than parking the
+// fleet forever on a stale row. It is a floor, not a cap: an explicit `--ttl 0`
+// still means "no expiry" for a signature an operator is sure is durable, and any
+// positive `--ttl` overrides the default. The window is a few dispatch cycles — long
+// enough that a real shared bug is not un-held before a fixer is elected (W5), short
+// enough that a forgotten signature does not outlive the failure it names.
+const DefaultRecordTTLSeconds int64 = 45 * 60
 
 // Record is one appended known-bad ledger row: a durable, cross-trace statement
 // that a shared failure exists over a tree. The required fields are the ones the
@@ -105,6 +131,22 @@ type Record struct {
 	// row; the shell refuses to append a resolved row with an empty Witness (that
 	// would be a self-report release, the exact failure W6 exists to forbid).
 	Witness string `json:"witness,omitempty"`
+	// RevokedBy names the operator (or agent) that retracted this signature WITHOUT a
+	// witnessed fix (W8, #2720) — the unwitnessed release valve for a mis-recorded or
+	// stale signature. It is the deliberate escape hatch resolve does NOT provide (a
+	// resolve demands evidence), so unlike ResolvedBy it carries no witness — instead
+	// RevokeReason states WHY the human killed the row. Empty on a non-revoked row;
+	// omitempty keeps a pre-W8 row byte-identical.
+	RevokedBy string `json:"revoked_by,omitempty"`
+	// RevokedAtUnix is the unix-seconds instant the revoke row was appended (0 when not
+	// revoked) — the companion to RevokedBy.
+	RevokedAtUnix int64 `json:"revoked_at_unix,omitempty"`
+	// RevokeReason is the free-text justification the operator stamps when revoking:
+	// "signature was spurious", "tree was wrong", "fix landed without a green".
+	// Unlike Witness (a closed vocabulary of evidence kinds) this is human prose — a
+	// revoke is a JUDGEMENT, not a proof, so it records the why for the audit trail
+	// rather than a machine-checkable witness. Empty on a non-revoked row.
+	RevokeReason string `json:"revoke_reason,omitempty"`
 }
 
 // Query is a match request: the tree globs a worker (or the dispatcher) is about
@@ -276,6 +318,13 @@ func NewRecord(reasonClass string, treeGlobs []string, note, discoveredBy, failu
 // status "open" (case-insensitive) AND either no TTL (<=0, never expires) or not
 // yet expired (discovered_at + ttl > now). Liveness is a pure function of the row
 // plus the supplied clock — never a wall-clock read.
+//
+// Both terminal statuses (resolved on a witness, revoked by an operator) and a
+// lapsed TTL make this false, so all three retraction paths — witnessed resolve
+// (W6), unwitnessed revoke (W8), and passive expiry (W8) — flow through the same
+// supersede-aware Match/FindLatestLive fold: a signature stops matching the moment
+// its LATEST row is not Live, whether that row is resolved, revoked, or an open row
+// whose bounded TTL has lapsed.
 func (r Record) Live(nowUnix int64) bool {
 	if !strings.EqualFold(strings.TrimSpace(r.Status), StatusOpen) {
 		return false
@@ -379,6 +428,33 @@ func (r Record) WithResolve(resolvedBy string, resolvedAtUnix int64, witness str
 	return out
 }
 
+// Revoked reports whether a row retracts a signature by operator judgement (status
+// "revoked", case-insensitive) rather than a witnessed fix. Like a resolved row it is
+// terminal — Live is false for it, so the dispatcher hold, Match, and the operator
+// card all drop it.
+func (r Record) Revoked() bool {
+	return strings.EqualFold(strings.TrimSpace(r.Status), StatusRevoked)
+}
+
+// WithRevoke returns a copy of r stamped as revoked with the operator, the revoke
+// instant, and the human justification. It is the UNWITNESSED counterpart to
+// WithResolve: a revoke closes a signature on judgement (the failure was spurious,
+// the tree was wrong, the fix landed without a green) NOT on evidence, so it stamps a
+// prose reason instead of a witness kind. Like a resolve it SUPERSEDES an earlier row
+// for the same signature via append-to-supersede, leaving the signature/tree/reason
+// untouched. There is no gate to run first — the whole point of revoke is that it does
+// not require one — so this is the terminal stamp a human's retraction records.
+func (r Record) WithRevoke(revokedBy string, revokedAtUnix int64, revokeReason string) Record {
+	out := r
+	out.Status = StatusRevoked
+	out.RevokedBy = strings.TrimSpace(revokedBy)
+	out.RevokedAtUnix = revokedAtUnix
+	out.RevokeReason = strings.TrimSpace(revokeReason)
+	// Claim bookkeeping is preserved (same as WithResolve) so the operator card can
+	// still name who had owned the now-retracted fix.
+	return out
+}
+
 // WithClaim returns a copy of r stamped with the elected fixer and the claim
 // instant, leaving the signature/tree/reason untouched: a claim SUPERSEDES an
 // earlier row for the same signature via the append-to-supersede idiom, it does not
@@ -416,6 +492,40 @@ func FindLatestLive(records []Record, signature string, nowUnix int64) (Record, 
 		return Record{}, false
 	}
 	return latest, true
+}
+
+// LatestState folds the ledger to a signature's LATEST row and classifies WHY it is
+// not actionable when it is not live — the distinction the shell needs to choose
+// between a plain "never recorded" usage error and a STRUCTURED refuse for acting on a
+// signature that WAS recorded but has since been retracted (resolved, revoked, or
+// expired). It returns the latest row, whether the signature was seen at all, and a
+// terse state string: "live" (open + unexpired), "resolved", "revoked", "expired" (an
+// open row whose TTL lapsed), or "" when the signature was never recorded. Same
+// append-to-supersede discipline as FindLatestLive: only the LATEST row decides.
+func LatestState(records []Record, signature string, nowUnix int64) (rec Record, seen bool, state string) {
+	sig := strings.TrimSpace(signature)
+	for _, r := range records {
+		if strings.TrimSpace(r.Signature) == sig {
+			rec = r
+			seen = true
+		}
+	}
+	if !seen {
+		return Record{}, false, ""
+	}
+	switch {
+	case rec.Live(nowUnix):
+		return rec, true, "live"
+	case rec.Resolved():
+		return rec, true, "resolved"
+	case rec.Revoked():
+		return rec, true, "revoked"
+	default:
+		// An open row whose bounded TTL has lapsed — the passive expiry path. Any
+		// other non-live status a future child adds also lands here as "expired"
+		// (retracted-by-time) unless it declares its own predicate above.
+		return rec, true, "expired"
+	}
 }
 
 // ParseLedger folds JSONL bytes into records. It is deliberately robust for a
