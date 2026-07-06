@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"os"
 	"strconv"
 	"strings"
 
@@ -48,6 +49,25 @@ func renderChatML(messages []Message) string {
 // call or tool result, its output is byte-for-byte identical to the old renderChatML.
 func renderChatMLTools(messages []Message, tools []ToolDef) string {
 	return renderTranscriptTools(messages, tools) + "<|im_start|>assistant\n"
+}
+
+const qwenNoThinkAssistantSeed = "<think>\n\n</think>\n\n"
+
+// renderInKernelChatMLTools is the live in-kernel prompt renderer. For Qwen3.5/Qwen3.6 hybrid
+// reasoning checkpoints it mirrors tokenizer.apply_chat_template(enable_thinking=false) by
+// pre-seeding an empty reasoning block after the assistant header. Otherwise short max_tokens turns
+// spend their whole budget inside an unclosed <think> block; splitReasoning then correctly returns
+// empty visible content. FAK_INKERNEL_ENABLE_THINKING=1 keeps the raw reasoning mode for diagnosis.
+func renderInKernelChatMLTools(messages []Message, tools []ToolDef, cfg model.Config) string {
+	chat := renderChatMLTools(messages, tools)
+	if inKernelSuppressQwenThinking(cfg) {
+		chat += qwenNoThinkAssistantSeed
+	}
+	return chat
+}
+
+func inKernelSuppressQwenThinking(cfg model.Config) bool {
+	return cfg.IsQwen35Hybrid() && os.Getenv("FAK_INKERNEL_ENABLE_THINKING") != "1"
 }
 
 // renderTranscript renders the messages as complete ChatML turns WITHOUT the trailing
@@ -126,6 +146,7 @@ func renderTranscriptTools(messages []Message, tools []ToolDef) string {
 		b.WriteString(spec)
 		b.WriteString("<|im_end|>\n")
 	}
+	toolByID := make(map[string]string)
 	for _, m := range messages {
 		role, content := m.Role, m.Content
 		switch role {
@@ -135,20 +156,21 @@ func renderTranscriptTools(messages []Message, tools []ToolDef) string {
 			// A tool result reads as user-supplied context to the model. When the result
 			// carries a tool name, wrap it in Qwen's canonical <tool_response> grammar so a
 			// tool-trained model recognizes the multi-turn tool flow; otherwise keep the
-			// historical bare "name: content" form (byte-identical to the pre-tool path).
+			// historical bare content form (byte-identical to the pre-tool path).
 			role = "user"
-			if m.Name != "" {
-				content = "<tool_response>\n" + m.Name + ": " + content + "\n</tool_response>"
+			name := strings.TrimSpace(m.Name)
+			if name == "" && strings.TrimSpace(m.ToolCallID) != "" {
+				name = toolByID[strings.TrimSpace(m.ToolCallID)]
 			}
+			content = qwenToolResponseBlock(name, content)
 		case "assistant":
 			for _, tc := range m.ToolCalls {
 				// Canonical Qwen2.5 <tool_call> block: arguments as a JSON VALUE, not a
 				// quoted string, so it round-trips cleanly through LiftTextToolCalls.
-				args := strings.TrimSpace(tc.Function.Arguments)
-				if args == "" || !json.Valid([]byte(args)) {
-					args = "{}"
+				if id, name := strings.TrimSpace(tc.ID), strings.TrimSpace(tc.Function.Name); id != "" && name != "" {
+					toolByID[id] = name
 				}
-				content += "\n<tool_call>\n{\"name\": " + strconv.Quote(tc.Function.Name) + ", \"arguments\": " + args + "}\n</tool_call>"
+				content += qwenToolCallBlock(tc.Function.Name, tc.Function.Arguments)
 			}
 		}
 		b.WriteString("<|im_start|>")
@@ -158,6 +180,26 @@ func renderTranscriptTools(messages []Message, tools []ToolDef) string {
 		b.WriteString("<|im_end|>\n")
 	}
 	return b.String()
+}
+
+func qwenToolResponseBlock(name, content string) string {
+	if strings.TrimSpace(name) == "" {
+		return content
+	}
+	return "<tool_response>\n" + strings.TrimSpace(name) + ": " + content + "\n</tool_response>"
+}
+
+func qwenToolCallBlock(name, args string) string {
+	args = qwenToolCallArgs(args)
+	return "\n<tool_call>\n{\"name\": " + strconv.Quote(strings.TrimSpace(name)) + ", \"arguments\": " + args + "}\n</tool_call>"
+}
+
+func qwenToolCallArgs(args string) string {
+	args = strings.TrimSpace(args)
+	if args == "" || !json.Valid([]byte(args)) {
+		return "{}"
+	}
+	return args
 }
 
 // inKernelStopIDs mirrors cmd/fakchat.stopIDs: <|im_end|>, <|endoftext|>, and any

@@ -110,6 +110,7 @@ func DecodeAnthropicMessagesRequest(raw []byte) (*AnthropicMessagesRequest, erro
 	for _, m := range in.Messages {
 		out.Messages = append(out.Messages, decodeAnthropicMessage(m)...)
 	}
+	bindAnthropicToolResultNames(out.Messages)
 	for _, t := range in.Tools {
 		out.Tools = append(out.Tools, ToolDef{
 			Type: "function",
@@ -121,6 +122,34 @@ func DecodeAnthropicMessagesRequest(raw []byte) (*AnthropicMessagesRequest, erro
 		})
 	}
 	return out, nil
+}
+
+// bindAnthropicToolResultNames restores the tool name that Anthropic tool_result
+// blocks do not carry. The matching assistant tool_use appears earlier in the same
+// stateless transcript; preserving the name keeps the downstream OpenAI/in-kernel
+// prompt in the canonical named <tool_response> shape instead of a bare user blob.
+func bindAnthropicToolResultNames(messages []Message) {
+	toolByID := make(map[string]string)
+	for i := range messages {
+		m := &messages[i]
+		switch m.Role {
+		case RoleAssistant:
+			for _, tc := range m.ToolCalls {
+				id := strings.TrimSpace(tc.ID)
+				name := strings.TrimSpace(tc.Function.Name)
+				if id != "" && name != "" {
+					toolByID[id] = name
+				}
+			}
+		case RoleTool:
+			if strings.TrimSpace(m.Name) != "" {
+				continue
+			}
+			if name := toolByID[strings.TrimSpace(m.ToolCallID)]; name != "" {
+				m.Name = name
+			}
+		}
+	}
 }
 
 // decodeAnthropicMessage converts one inbound message into zero or more canonical

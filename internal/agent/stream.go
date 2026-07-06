@@ -371,20 +371,21 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 			return nil, err
 		}
 		reqBody, err = adapter.MarshalRequest(adapterRequest{
-			Model:               modelID,
-			Messages:            safeMessages,
-			Tools:               tools,
-			Temperature:         temperature,
-			OmitTemperature:     forceResponsesStream,
-			OmitMaxOutputTokens: forceResponsesStream,
-			MaxTokens:           maxTokens,
-			TopP:                sp.TopP,
-			TopK:                sp.TopK,
-			Stop:                sp.Stop,
-			ResponseFormat:      sp.ResponseFormat,
-			LogitBias:           sp.LogitBias,
-			ExtraBody:           extraBody,
-			Stream:              stream || forceResponsesStream,
+			Model:                    modelID,
+			Messages:                 safeMessages,
+			Tools:                    tools,
+			Temperature:              temperature,
+			OmitTemperature:          forceResponsesStream,
+			OmitMaxOutputTokens:      forceResponsesStream,
+			MaxTokens:                maxTokens,
+			TopP:                     sp.TopP,
+			TopK:                     sp.TopK,
+			Stop:                     sp.Stop,
+			ResponseFormat:           sp.ResponseFormat,
+			LogitBias:                sp.LogitBias,
+			ExtraBody:                extraBody,
+			Stream:                   stream || forceResponsesStream,
+			OpenAIToolMessagesAsText: p.OpenAIToolMessagesAsText,
 		})
 		if err != nil {
 			return nil, err

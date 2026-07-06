@@ -3,6 +3,8 @@ package agent
 import (
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // TestRenderChatML pins the ChatML shape the in-kernel planner feeds the tokenizer:
@@ -38,6 +40,20 @@ func TestRenderChatMLToolResult(t *testing.T) {
 		"<|im_start|>assistant\n"
 	if got != want {
 		t.Fatalf("tool-result render drift:\nwant: %q\n got: %q", want, got)
+	}
+}
+
+func TestRenderChatMLToolResultInfersNameFromPriorCall(t *testing.T) {
+	got := renderChatML([]Message{
+		{Role: "user", Content: "read it"},
+		{Role: "assistant", ToolCalls: []ToolCall{{
+			ID:       "call_1",
+			Function: Func{Name: "Read", Arguments: `{"file_path":"main.go"}`},
+		}}},
+		{Role: "tool", ToolCallID: "call_1", Content: "package main"},
+	})
+	if !strings.Contains(got, "<tool_response>\nRead: package main\n</tool_response>") {
+		t.Fatalf("tool result without name should render with the prior tool_call name:\n%s", got)
 	}
 }
 
@@ -193,5 +209,23 @@ func TestRenderChatMLNoSystem(t *testing.T) {
 	want := "<|im_start|>user\nping<|im_end|>\n<|im_start|>assistant\n"
 	if got != want {
 		t.Fatalf("no-system render drift:\nwant: %q\n got: %q", want, got)
+	}
+}
+
+func TestRenderInKernelQwenHybridSuppressesThinking(t *testing.T) {
+	t.Setenv("FAK_INKERNEL_ENABLE_THINKING", "")
+	cfg := model.Config{LayerTypes: []string{"linear_attention"}}
+	got := renderInKernelChatMLTools([]Message{{Role: "user", Content: "ping"}}, nil, cfg)
+	if !strings.HasSuffix(got, "<|im_start|>assistant\n"+qwenNoThinkAssistantSeed) {
+		t.Fatalf("Qwen hybrid prompt should pre-seed empty thinking, got %q", got)
+	}
+	plain := renderInKernelChatMLTools([]Message{{Role: "user", Content: "ping"}}, nil, model.Config{})
+	if strings.Contains(plain, qwenNoThinkAssistantSeed) {
+		t.Fatalf("non-Qwen prompt unexpectedly got no-think seed: %q", plain)
+	}
+	t.Setenv("FAK_INKERNEL_ENABLE_THINKING", "1")
+	raw := renderInKernelChatMLTools([]Message{{Role: "user", Content: "ping"}}, nil, cfg)
+	if strings.Contains(raw, qwenNoThinkAssistantSeed) {
+		t.Fatalf("FAK_INKERNEL_ENABLE_THINKING=1 should leave raw thinking mode: %q", raw)
 	}
 }

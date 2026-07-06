@@ -829,10 +829,14 @@ type HTTPPlanner struct {
 	Provider             Provider
 	Adapter              TranscriptAdapter
 	ExtraBody            json.RawMessage
-	Temperature          float64
-	MaxTokens            int
-	Client               *http.Client
-	QuarantineTranscript bool
+	// OpenAIToolMessagesAsText is an opt-in compatibility mode for OpenAI-compatible
+	// upstreams whose chat template accepts Qwen text tool blocks but rejects native
+	// role=tool continuation messages. Default false preserves the normal OpenAI wire.
+	OpenAIToolMessagesAsText bool
+	Temperature              float64
+	MaxTokens                int
+	Client                   *http.Client
+	QuarantineTranscript     bool
 
 	// CoherenceShaper, when non-nil, is applied to the outbound messages just before
 	// the request is marshaled — the GLM52-HOSTED-CACHE-COHERENCE §A4 hook. The agent
@@ -937,7 +941,19 @@ func NewProviderHTTPPlanner(provider, baseURL, model, apiKey string) (*HTTPPlann
 			return nil, err
 		}
 	}
+	if pv == ProviderOpenAI || pv == ProviderXAI {
+		p.OpenAIToolMessagesAsText = envTruthy("FAK_OPENAI_TOOL_MESSAGES_AS_TEXT")
+	}
 	return p, nil
+}
+
+func envTruthy(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 // effectiveAPIKey is the credential the upstream hop authenticates with when the

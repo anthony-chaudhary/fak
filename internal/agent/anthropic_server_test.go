@@ -68,6 +68,9 @@ func TestDecodeAnthropicMessagesRequest(t *testing.T) {
 	if tr.Role != RoleTool || tr.ToolCallID != "toolu_01ABC" || tr.Content != "a.go\nb.go" {
 		t.Errorf("tool_result not mapped to RoleTool keyed by id: %+v", tr)
 	}
+	if tr.Name != "Bash" {
+		t.Errorf("tool_result name = %q, want Bash from matching tool_use", tr.Name)
+	}
 	if len(req.Tools) != 1 || req.Tools[0].Function.Name != "Bash" {
 		t.Fatalf("tools not mapped: %+v", req.Tools)
 	}
@@ -147,6 +150,35 @@ func TestDecodeAnthropicParallelToolResults(t *testing.T) {
 	}
 	if req.Messages[0].ToolCallID != "t1" || req.Messages[1].ToolCallID != "t2" {
 		t.Errorf("tool_result ids/order wrong: %+v", req.Messages)
+	}
+}
+
+func TestDecodeAnthropicToolResultNamesFromPriorToolUse(t *testing.T) {
+	body := `{"model":"m","messages":[
+		{"role":"assistant","content":[
+			{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"a.go"}},
+			{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"go test ./..."}}
+		]},
+		{"role":"user","content":[
+			{"type":"tool_result","tool_use_id":"t1","content":"package main"},
+			{"type":"tool_result","tool_use_id":"t2","content":"ok"}
+		]}
+	]}`
+	req, err := DecodeAnthropicMessagesRequest([]byte(body))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(req.Messages) != 3 {
+		t.Fatalf("messages = %d, want assistant plus two tool results: %+v", len(req.Messages), req.Messages)
+	}
+	if req.Messages[1].Name != "Read" || req.Messages[2].Name != "Bash" {
+		t.Fatalf("tool result names = %q / %q, want Read / Bash", req.Messages[1].Name, req.Messages[2].Name)
+	}
+	rendered := renderTranscriptTools(req.Messages, nil)
+	for _, want := range []string{"<tool_response>\nRead: package main\n</tool_response>", "<tool_response>\nBash: ok\n</tool_response>"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered transcript missing %q:\n%s", want, rendered)
+		}
 	}
 }
 

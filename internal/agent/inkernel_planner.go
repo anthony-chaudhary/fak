@@ -622,7 +622,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		presPenalty = *sp.PresencePenalty
 	}
 
-	chat := renderChatMLTools(messages, tools)
+	chat := renderInKernelChatMLTools(messages, tools, p.m.Cfg)
 	ids, err := p.tok.Encode(chat)
 	if err != nil {
 		return nil, err

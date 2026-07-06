@@ -75,6 +75,11 @@ type adapterRequest struct {
 	// it; every other adapter ignores the field, so a streamed request to them is
 	// byte-identical to a buffered one.
 	Stream bool
+	// OpenAIToolMessagesAsText lowers prior assistant tool_calls and role=tool
+	// continuation messages into Qwen text blocks for OpenAI-compatible servers that
+	// accept tool schemas but reject OpenAI's continuation fields. It is opt-in only;
+	// the default OpenAI/vLLM/SGLang wire keeps native tool_calls + role=tool.
+	OpenAIToolMessagesAsText bool
 }
 
 // NewTranscriptAdapter returns the adapter for a provider.
@@ -181,9 +186,13 @@ func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 	if len(r.Tools) > 0 {
 		toolChoice = "auto"
 	}
+	messages := r.Messages
+	if r.OpenAIToolMessagesAsText {
+		messages = openAIToolMessagesAsText(messages)
+	}
 	req := openAIRequest{
 		Model:          r.Model,
-		Messages:       r.Messages,
+		Messages:       messages,
 		Tools:          openAICompatibleTools(r.Tools),
 		ToolChoice:     toolChoice,
 		Temperature:    r.Temperature,
@@ -200,6 +209,51 @@ func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 		req.StreamOptions = &openAIStreamOptions{IncludeUsage: true}
 	}
 	return marshalWithExtraBody(req, r.ExtraBody)
+}
+
+func openAIToolMessagesAsText(messages []Message) []Message {
+	if len(messages) == 0 {
+		return messages
+	}
+	out := make([]Message, 0, len(messages))
+	toolByID := make(map[string]string)
+	for _, m := range messages {
+		msg := m
+		switch msg.Role {
+		case RoleAssistant:
+			content := msg.Content
+			for _, tc := range msg.ToolCalls {
+				name := strings.TrimSpace(tc.Function.Name)
+				if id := strings.TrimSpace(tc.ID); id != "" && name != "" {
+					toolByID[id] = name
+				}
+				if name != "" {
+					content += qwenToolCallBlock(name, tc.Function.Arguments)
+				}
+			}
+			if msg.FunctionCall != nil {
+				if name := strings.TrimSpace(msg.FunctionCall.Name); name != "" {
+					content += qwenToolCallBlock(name, msg.FunctionCall.Arguments)
+				}
+			}
+			msg.Content = content
+			msg.ToolCalls = nil
+			msg.FunctionCall = nil
+		case RoleTool:
+			name := strings.TrimSpace(msg.Name)
+			if name == "" && strings.TrimSpace(msg.ToolCallID) != "" {
+				name = toolByID[strings.TrimSpace(msg.ToolCallID)]
+			}
+			msg.Role = RoleUser
+			msg.Content = qwenToolResponseBlock(name, msg.Content)
+			msg.ToolCalls = nil
+			msg.FunctionCall = nil
+			msg.ToolCallID = ""
+			msg.Name = ""
+		}
+		out = append(out, msg)
+	}
+	return out
 }
 
 func openAICompatibleTools(tools []ToolDef) []ToolDef {

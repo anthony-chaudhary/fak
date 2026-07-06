@@ -247,6 +247,50 @@ func TestProviderAdaptersMarshalNativeToolShapes(t *testing.T) {
 	}
 }
 
+func TestOpenAIAdapterToolMessagesAsTextLowersContinuation(t *testing.T) {
+	adapter := openAIAdapter{provider: ProviderOpenAI}
+	messages := adapterTestMessages("# fak")
+	messages[3].Name = "" // force ID -> tool name inference from the prior assistant call
+
+	body, err := adapter.MarshalRequest(adapterRequest{
+		Model:                    "qwen3.6-27b",
+		Messages:                 messages,
+		Tools:                    adapterTestTools(),
+		MaxTokens:                128,
+		OpenAIToolMessagesAsText: true,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var req openAIRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("decode request: %v\n%s", err, body)
+	}
+	if len(req.Tools) != 1 || req.ToolChoice != "auto" {
+		t.Fatalf("tool schema advertisement was lost: tools=%d choice=%q", len(req.Tools), req.ToolChoice)
+	}
+	for _, msg := range req.Messages {
+		if msg.Role == RoleTool {
+			t.Fatalf("compat request still carries role=tool: %+v", req.Messages)
+		}
+		if len(msg.ToolCalls) != 0 || msg.FunctionCall != nil || msg.ToolCallID != "" {
+			t.Fatalf("compat request still carries native continuation fields: %+v", req.Messages)
+		}
+	}
+	if got := req.Messages[2].Content; !strings.Contains(got, `<tool_call>`) || !strings.Contains(got, `"name": "lookup"`) {
+		t.Fatalf("assistant tool call was not lowered into Qwen text: %q", got)
+	}
+	if got, want := req.Messages[3].Content, "<tool_response>\nlookup: # fak\n</tool_response>"; got != want {
+		t.Fatalf("tool result content = %q, want %q", got, want)
+	}
+	if req.Messages[3].Role != RoleUser {
+		t.Fatalf("tool result role = %q, want user", req.Messages[3].Role)
+	}
+	if len(messages[2].ToolCalls) != 1 || messages[3].ToolCallID != "call_1" {
+		t.Fatalf("MarshalRequest mutated caller messages: %+v", messages)
+	}
+}
+
 func TestProviderAdaptersOmitToolChoiceWithoutTools(t *testing.T) {
 	messages := []Message{{Role: RoleUser, Content: "plain question"}}
 	for _, provider := range []Provider{ProviderOpenAI, ProviderOpenAIResponses, ProviderXAI} {
@@ -1436,6 +1480,43 @@ func TestHTTPPlannerLiftsTextToolCallsBeforeReturn(t *testing.T) {
 	}
 	if tc.Function.Arguments != `{"city":"SFO"}` {
 		t.Fatalf("arguments = %q, want compact object JSON", tc.Function.Arguments)
+	}
+}
+
+func TestHTTPPlannerOpenAIToolMessagesAsTextEnvRewritesUpstreamRequest(t *testing.T) {
+	t.Setenv("FAK_OPENAI_TOOL_MESSAGES_AS_TEXT", "true")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req openAIRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode upstream request: %v", err)
+		}
+		for _, msg := range req.Messages {
+			if msg.Role == RoleTool {
+				t.Fatalf("upstream request still has role=tool: %+v", req.Messages)
+			}
+			if len(msg.ToolCalls) != 0 || msg.FunctionCall != nil || msg.ToolCallID != "" {
+				t.Fatalf("upstream request still has native tool continuation fields: %+v", req.Messages)
+			}
+		}
+		if got := req.Messages[2].Content; !strings.Contains(got, `<tool_call>`) {
+			t.Fatalf("assistant call was not lowered: %q", got)
+		}
+		if got := req.Messages[3].Content; got != "<tool_response>\nlookup: # fak\n</tool_response>" {
+			t.Fatalf("tool result was not lowered with inferred name: %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer upstream.Close()
+
+	planner, err := NewProviderHTTPPlanner("openai", upstream.URL, "qwen3.6-27b", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := adapterTestMessages("# fak")
+	messages[3].Name = ""
+	if _, err := planner.Complete(context.Background(), messages, adapterTestTools()); err != nil {
+		t.Fatalf("complete: %v", err)
 	}
 }
 
