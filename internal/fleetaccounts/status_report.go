@@ -28,13 +28,15 @@ type StatusFilter struct {
 
 // StatusReport is the compact account/switcher rollup behind `fak fleet-accounts status`.
 type StatusReport struct {
-	Schema   string          `json:"schema"`
-	Filters  StatusFilter    `json:"filters"`
-	GroupBy  []string        `json:"group_by"`
-	Totals   StatusTotals    `json:"totals"`
-	Rollups  []StatusRollup  `json:"rollups"`
-	Accounts []StatusAccount `json:"accounts"`
-	Warnings []string        `json:"warnings"`
+	Schema      string          `json:"schema"`
+	Node        string          `json:"node,omitempty"`
+	GeneratedAt string          `json:"generated_at,omitempty"`
+	Filters     StatusFilter    `json:"filters"`
+	GroupBy     []string        `json:"group_by"`
+	Totals      StatusTotals    `json:"totals"`
+	Rollups     []StatusRollup  `json:"rollups"`
+	Accounts    []StatusAccount `json:"accounts"`
+	Warnings    []string        `json:"warnings"`
 }
 
 // StatusTotals folds both account counts and slot counts. Slots are counted once per
@@ -61,6 +63,7 @@ type StatusTotals struct {
 // StatusAccount is the per-account row in the report. CapacityCounted=false means the row
 // is visible but its pool was already counted by a better representative.
 type StatusAccount struct {
+	Node            string   `json:"node,omitempty"`
 	Account         string   `json:"account"`
 	Tag             string   `json:"tag"`
 	Product         string   `json:"product"`
@@ -211,6 +214,8 @@ func normalizeGroupBy(raw []string) []string {
 				g = "state"
 			case "agents":
 				g = "agent"
+			case "nodes":
+				g = "node"
 			}
 			if !statusDimensionSupported(g) || seen[g] {
 				continue
@@ -227,7 +232,7 @@ func normalizeGroupBy(raw []string) []string {
 
 func statusDimensionSupported(g string) bool {
 	switch g {
-	case "provider", "product", "tier", "model", "state", "agent":
+	case "provider", "product", "tier", "model", "state", "agent", "node":
 		return true
 	default:
 		return false
@@ -512,6 +517,11 @@ func statusRollupFor(byKey map[string]*StatusRollup, a StatusAccount, groupBy []
 
 func statusDimension(a StatusAccount, dim string) string {
 	switch dim {
+	case "node":
+		if a.Node == "" {
+			return "local"
+		}
+		return a.Node
 	case "provider":
 		return a.Provider
 	case "product":
@@ -535,6 +545,20 @@ func statusDimension(a StatusAccount, dim string) string {
 		return a.Agent
 	default:
 		return "unknown"
+	}
+}
+
+// StampStatusReport adds portable snapshot metadata after a local status report is built.
+// The node label is operator-supplied rather than os.Hostname-derived so a committed or
+// shared report does not accidentally leak a private host name.
+func StampStatusReport(rep *StatusReport, node, generatedAt string) {
+	if rep == nil {
+		return
+	}
+	rep.Node = strings.TrimSpace(node)
+	rep.GeneratedAt = strings.TrimSpace(generatedAt)
+	for i := range rep.Accounts {
+		rep.Accounts[i].Node = rep.Node
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
@@ -39,7 +40,8 @@ import (
 //	                                          allocate account session slots for fan-out
 //	fak fleet-accounts seats [--product P] [--json]   the explicit seat pool (M distinct seats)
 //	fak fleet-accounts status [--provider P] [--tier N|--t1|--t2|--t3] [--group-by provider,tier]
-//	                                          compact rollups over provider/tier/model/state + mixed-limit warnings
+//	                                          compact rollups over provider/tier/model/state + mixed-limit warnings;
+//	                                          repeat --snapshot FILE for all-node rollups
 //
 // NOT yet ported (documented follow-on, see issue #1415): the ACTIVE network probe
 // (`probe`, which delegates to tools/account_probe.py), the probe-LEDGER freshness
@@ -70,6 +72,11 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 	modelFilter := fs.String("model", "", "(status) filter by model substring")
 	groupBy := fs.String("group-by", "provider,tier", "(status) comma-separated rollup dimensions: provider,product,tier,model,state,agent")
 	showAccounts := fs.Bool("accounts", false, "(status) include matching per-account rows after rollups")
+	nodeLabel := fs.String("node", "local", "(status) node label stamped into local JSON snapshots; never inferred from private hostnames")
+	freshWithin := fs.String("fresh-within", "30m", "(status --snapshot) freshness window for node snapshots")
+	includeStale := fs.Bool("include-stale", false, "(status --snapshot) include stale snapshots in free-now totals")
+	var statusSnapshots fleetStatusSnapshotFlags
+	fs.Var(&statusSnapshots, "snapshot", "(status) read a fleet-account-status/1 JSON snapshot; repeat for all-node rollups")
 	t1 := fs.Bool("t1", false, "(resolve/status) pin/filter tier 1")
 	t2 := fs.Bool("t2", false, "(resolve/status) pin/filter tier 2")
 	t3 := fs.Bool("t3", false, "(resolve/status) pin/filter tier 3")
@@ -110,10 +117,41 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 			Product: *product, Provider: *provider, Tier: statusTierFilter(*tier, *t1, *t2, *t3),
 			State: *state, Account: *account, Model: *modelFilter,
 		}
+		if len(statusSnapshots) > 0 {
+			window, err := time.ParseDuration(*freshWithin)
+			if err != nil || window <= 0 {
+				fmt.Fprintf(stderr, "fleet-accounts status: invalid --fresh-within %q\n", *freshWithin)
+				return 2
+			}
+			snaps, err := loadFleetAccountStatusSnapshots(statusSnapshots)
+			if err != nil {
+				fmt.Fprintf(stderr, "fleet-accounts status: %v\n", err)
+				return 1
+			}
+			report := fleetaccounts.BuildGlobalStatusReport(snaps, fleetaccounts.GlobalStatusOptions{
+				Filter:       filter,
+				GroupBy:      fleetAccountsSplitCSV(*groupBy),
+				FreshWithin:  window,
+				IncludeStale: *includeStale,
+				Now:          time.Now().UTC(),
+			})
+			if *asJSON {
+				out, err := json.MarshalIndent(report, "", " ")
+				if err != nil {
+					fmt.Fprintln(stderr, "fleet-accounts: marshal:", err)
+					return 1
+				}
+				fmt.Fprintln(stdout, string(out))
+				return 0
+			}
+			fmt.Fprint(stdout, fleetaccounts.RenderGlobalStatusReport(report, *showAccounts || statusFilterRequested(filter)))
+			return 0
+		}
 		report := fleetaccounts.BuildStatusReport(rows, fleetSeatLeases(repoRoot), fleetaccounts.StatusOptions{
 			Filter:  filter,
 			GroupBy: fleetAccountsSplitCSV(*groupBy),
 		})
+		fleetaccounts.StampStatusReport(&report, *nodeLabel, time.Now().UTC().Format(time.RFC3339))
 		if *asJSON {
 			out, err := json.MarshalIndent(report, "", " ")
 			if err != nil {
@@ -206,6 +244,41 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "note: the active network probe + mutating ops (relogin/top-up/launch) remain on tools/fleet_accounts.py (issue #1415).")
 		return 2
 	}
+}
+
+type fleetStatusSnapshotFlags []string
+
+func (f *fleetStatusSnapshotFlags) String() string { return strings.Join(*f, ",") }
+func (f *fleetStatusSnapshotFlags) Set(v string) error {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return fmt.Errorf("empty --snapshot")
+	}
+	*f = append(*f, v)
+	return nil
+}
+
+func loadFleetAccountStatusSnapshots(paths []string) ([]fleetaccounts.StatusSnapshot, error) {
+	out := make([]fleetaccounts.StatusSnapshot, 0, len(paths))
+	for i, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read snapshot %s: %w", path, err)
+		}
+		var rep fleetaccounts.StatusReport
+		if err := json.Unmarshal(data, &rep); err != nil {
+			return nil, fmt.Errorf("decode snapshot %s: %w", path, err)
+		}
+		if rep.Schema != fleetaccounts.StatusReportSchema {
+			return nil, fmt.Errorf("snapshot %s has schema %q, want %s", path, rep.Schema, fleetaccounts.StatusReportSchema)
+		}
+		node := strings.TrimSpace(rep.Node)
+		if node == "" {
+			node = fmt.Sprintf("node-%d", i+1)
+		}
+		out = append(out, fleetaccounts.StatusSnapshot{Node: node, Path: path, Report: rep})
+	}
+	return out, nil
 }
 
 func fleetAccountsSplitCSV(raw string) []string {
