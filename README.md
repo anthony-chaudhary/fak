@@ -2,13 +2,14 @@
 
 [![ci](https://github.com/anthony-chaudhary/fak/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/ci.yml) [![release artifacts](https://github.com/anthony-chaudhary/fak/actions/workflows/release-artifacts.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/release-artifacts.yml)
 
-<!-- readme-verified: 2026-07-06 vs VERSION 0.37.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. 2026-07-06: concision pass (front_page_focus) — collapsed the triple preamble lead to one (single_lead), glossed KV cache + vDSO for the first-screen reader (jargon), and trimmed the token/perf sections' duplicated trend prose; score 64→81 (D→B). 2026-07-04: token-savings value prop foregrounded — "Token savings, set and forget" section + the 6-defaults scorecard link, "What you get" bullet reframed to the set-and-forget catch-all; honest provider-owned-vs-fak-authored split preserved (SESSION-CACHE-SAVINGS ablation). Same day: refocused on the long-session TREND — fak-authored share climbs ~1%→~11% with length (new BENCHMARK-AUTHORITY row; shed token counts WITNESSED, % is MODELED, n=2 thin, peak-not-pool). 2026-07-03: release pin refreshed for v0.37.0. 2026-07-01: front page halved; overflow: docs/README-legacy.md. Same day: hero video + gallery/video links re-surfaced; examples generalized to the hardware/harness sweep (HARDWARE-MATRIX + supported/); guided tutorial surfaced (Pick-your-path + docs map). -->
+<!-- readme-verified: 2026-07-06 vs VERSION 0.37.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. 2026-07-06 (3): corrected the long-session fak-authored share — the stale "~1%→~11% peak" is now the WITNESSED per-session span "~15% → ~75%, climbing with horizon" (2026-07-06 ledger: longest session 746,956 shed / 247,074 provider cache-read = 75.1%); BENCHMARK-AUTHORITY row rewritten with the per-session evidence + fences (peak-not-pool, token counts witnessed / % derived). Fixed in both the "What you get" bullet and the "Token savings" section. 2026-07-06 (2): goal pass — user-friendly feature notes added (crash-resume watchdog + cache-safe resume point in "More ways to run it"; the ~50.7% no-cache_control placement witness, CLAIMS.md #806, in "Token savings"; compaction described plainly as "trim from the middle out"); most-technical asides removed (the ~60×-vs-naive aside, the Q8_0-band detail, the f32-parity/build-tag prose, the 48k-resident-token detail); one-glance bold lead added (lcd_onramp); back under the 250-line budget (front_page_focus). 2026-07-06: concision pass (front_page_focus) — collapsed the triple preamble lead to one (single_lead), glossed KV cache + vDSO for the first-screen reader (jargon), and trimmed the token/perf sections' duplicated trend prose; score 64→81 (D→B). 2026-07-04: token-savings value prop foregrounded — "Token savings, set and forget" section + the 6-defaults scorecard link; honest provider-owned-vs-fak-authored split preserved (SESSION-CACHE-SAVINGS ablation). Same day: refocused on the long-session TREND — fak-authored share climbs ~1%→~11% with length (BENCHMARK-AUTHORITY row; shed token counts WITNESSED, % is MODELED, n=2 thin, peak-not-pool). 2026-07-03: release pin refreshed for v0.37.0. 2026-07-01: front page halved; overflow: docs/README-legacy.md. -->
 
 <!-- lead source: docs/adoption/pitch-ladder.md (rung 1). Edit the ladder first; keep this lead consistent with its one-sentence pitch. State the pitch ONCE here — do not restate it before the first `## ` (front_page_focus single_lead). -->
-**fak is a fused agent kernel** — one static Go binary you drop in front of the AI agent
-you already run. It treats every tool call like a syscall: the model proposes, the kernel
-disposes. It checks each call, routes work, and reuses the stable setup in long sessions,
-so the same agent loop comes out more controlled, cheaper, and faster.
+**One binary in front of the agent you already run: safer tool calls, a smaller token bill, and long sessions that pick themselves back up.**
+
+fak is a fused agent kernel. It treats every tool call like a syscall: the model proposes,
+the kernel disposes. It checks each call, routes work, and reuses the stable setup in long
+sessions, so the same agent loop comes out more controlled, cheaper, and faster.
 
 It works with Claude Code, Codex, Cursor, and OpenAI / Anthropic / MCP clients.
 `fak guard -- claude` wraps your normal agent in one command — `fak` repoints one base URL
@@ -32,22 +33,20 @@ Every figure traces to [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md), and the
 ledger is [CLAIMS.md](CLAIMS.md):
 
 - **~4.1× less work than a tuned warm-cache stack** on a 50-turn × 5-agent run. `fak`
-  reuses the shared prompt prefix: the system prompt, tools, and the model's scratchpad of
-  the work so far (the *KV cache*). It shares that prefix across agents instead of re-paying
-  for it. Reuse climbs
-  to **6.95×** across the model ladder (~60× versus a naive re-send loop; the tuned
-  figure is the honest bar).
-- **One kernel, four hardware platforms.** The same correctness gates run on Apple Metal
-  and AMD Vulkan. They also run on NVIDIA CUDA (Ada + Ampere) across macOS, Windows, WSL2,
-  and Linux. On CUDA, in-kernel decode reaches ~120 tok/s on a single RTX 4070, inside
-  llama.cpp's Q8_0 band of 120 +/- 15 tok/s. The sweep, per box:
-  [docs/HARDWARE-MATRIX.md](docs/HARDWARE-MATRIX.md).
+  computes the shared setup — the system prompt, tools, and the model's scratchpad of the
+  work so far (the *KV cache*) — once and reuses it across every agent, instead of
+  re-paying for it per agent. Reuse climbs to **6.95×** across the model ladder.
+- **One kernel, four hardware platforms.** The same correctness gates run on Apple Metal,
+  AMD Vulkan, and NVIDIA CUDA across macOS, Windows, WSL2, and Linux; on CUDA, in-kernel
+  decode reaches ~120 tok/s on a single RTX 4070 (inside llama.cpp's measured band). The
+  sweep, per box: [docs/HARDWARE-MATRIX.md](docs/HARDWARE-MATRIX.md).
 - **Your token savings grow the longer you run.** `fak guard` turns on six safe
-  token-savers by default (no flags). On a short session the provider's prompt cache
-  does nearly all the work; as the session gets long, fak's *own* share climbs — on our
-  longest measured session it reached **~11%** (1.67M tokens trimmed from old turns the
-  cache could no longer reuse), up from ~1% on a shorter run. That is fak's slice on top
-  of the provider discount, not the discount itself.
+  token-savers by default (no flags). On a short session the provider's prompt cache does
+  nearly all the work; as the session gets long, fak's *own* share climbs — on witnessed
+  sessions it runs from **~15% up to ~75%**, on top of the provider discount, as the horizon
+  grows (the longest measured session: 747K tokens trimmed from old turns the cache could no
+  longer reuse = 75% of that session's savings). Peak, not fleet average; token counts
+  witnessed, the % a derived ratio.
   [The savers + the honest split](docs/serving/token-defaults-scorecard.md).
 - **The guard tax is ~362 ns per call:** the allow/deny decision runs in-process
   (measured, Apple M3 Pro), no network hop.
@@ -64,10 +63,10 @@ fak guard --provider openai --api-key-env OPENAI_API_KEY -- opencode   # an Open
 ```
 
 `fak guard` starts a gateway in-process on loopback and injects the base URL into the child
-process only. It forwards your real upstream credential
-(and the `cache_control` prompt-cache breakpoints) byte-for-byte, so there is no cost
-regression. On that same boundary, it checks every tool call against a built-in secure
-capability floor: a reviewable allow-list. On exit it prints a compact decision summary:
+process only. Your credential and the provider's prompt-cache markers pass through
+byte-for-byte, so there is no cost regression. On that same boundary it checks every tool
+call against a built-in secure capability floor: a reviewable allow-list. On exit it prints
+a compact decision summary:
 `fak guard: 131 kernel decisions; 121 allowed / 5 denied / 2 repaired / 0 quarantined / 3 deferred`.
 
 ![The fak guard TUI decision pane: every tool call the agent proposes is listed with its verdict — ALLOW, or DENY with a reason such as POLICY_BLOCK — folded live from the hash-chained guard decision journal](visuals/guard-tui-screenshot.png)
@@ -88,9 +87,8 @@ fak routebench                  # -> COST / LATENCY / QUALITY delta vs a one-mod
 fak benchmarks list --offline   # -> the zero-asset benchmark set
 ```
 
-`fak routebench` replays a built-in 8-case corpus through a routing policy versus a
-single-model baseline and prints `routed is ~20% cheaper, ~10% less total compute, quality
-tied`: a deterministic offline lens.
+`fak routebench` replays a built-in corpus through a routing policy versus a one-model
+baseline and prints the cost / latency / quality delta — a deterministic offline lens.
 
 ## Token savings, set and forget
 
@@ -102,51 +100,53 @@ behind the growing-share number above.
 | Provider prompt-cache passthrough | forwards the cache breakpoints byte-for-byte so the provider's discount holds | no |
 | Tool-floor pruning | drops tool definitions the policy would deny anyway | no |
 | Repeated-call dedup (vDSO) | answers an identical repeated call from the previous result, no round-trip | no |
-| History compaction | sheds the un-cacheable middle of a long session past a budget | working set kept |
+| History compaction | trims a long session from the middle out, past a budget | working set kept |
 | Oversized-result elision | shrinks a scrolled-past tool result to head and tail | working set kept |
 | Planned context view | re-materializes history under a token budget | working set kept |
 
 The first three savers are lossless — they cannot change a single output token; the last
-three keep the model's working set intact and note what they shed. The honest split most cost
-pitches skip: on the Claude Code route the provider's prompt-cache discount is still the
-bigger number, and fak's other job is to keep it alive — holding the cached prefix
-byte-for-byte identical (the thing that breaks when a session outgrows the window or a
-summarizer rewrites it) and relaying the provider's own saved-token count rather than claiming
-it. fak's ~11% is a longest-session peak from a thin sample, not a fleet average. You tune
-none of it: `fak token-defaults-scorecard` (grade A) proves the stack stays on, and every
-`fak info` line shows the live `provider X% + fak Y%` split. Full attribution:
+three keep the model's working set intact and note what they shed. The honest split most
+cost pitches skip: early in a session the provider's prompt-cache discount is the bigger
+number, and fak's job there is to keep that discount alive — holding the cached prefix
+byte-identical and relaying the provider's own saved-token count rather than claiming it.
+But the longer the session runs, the more the balance tips to fak: its own authored share
+climbs from ~15% toward ~75% on the longest witnessed sessions (peak, not fleet average).
+And if your
+client never sets cache markers at all (a raw SDK, a hand-rolled client), fak places the
+provider's cache breakpoint for it — in the offline dollar witness that placement cut
+prompt-cache spend by about half (~50.7%, break-even at turn 2; mechanism witnessed,
+dollars modeled —
+[the witness](docs/notes/FAK-OFFENSIVE-CACHE-PLACEMENT-SAVINGS-WITNESS-2026-07-01.md)).
+You tune none of it: every `fak info` line shows the live `provider X% + fak Y%` split.
+Full attribution:
 [what fak changed, and what the provider did](docs/notes/SESSION-CACHE-SAVINGS-ABLATION-2026-06-29.md).
 
 ## Run the model in the kernel
 
 The kernel can also host the model. `fak guard --gguf qwen2.5:7b -- claude` loads a local
-GGUF model in-process: no API key, no network, your data never leaves the box, and the kernel
-owns the KV cache so the same reuse and quarantine machinery applies. The path is profiled on
-Apple Metal, AMD Vulkan, and CUDA, where f32 in-kernel decode reaches parity with a quantized
-llama.cpp ([head-to-head](docs/benchmarks/LLAMACPP-HEADTOHEAD-RESULTS.md)).
+GGUF model in-process: no API key, no network, your data never leaves the box, and the
+kernel owns the model's memory, so the same reuse and quarantine machinery applies.
 
 The honest fence: a small local model is a quality ramp, not a frontier coder. Use `--gguf`
-for offline or privacy-bound work and the proxy path for the best reasoning; build tags and
-GPU flags are in the walkthrough linked above.
+for offline or privacy-bound work and the proxy path for the best reasoning
+([head-to-head vs llama.cpp](docs/benchmarks/LLAMACPP-HEADTOHEAD-RESULTS.md)).
 
 ## The performance value proposition
 
 A long agent session burns money by re-solving the same setup: a 100k-token conversation
-re-sends its whole transcript every turn, and a 5-agent fleet pays for the same shared system
-prompt five times over. `fak` does the shared work once, two ways:
+re-sends its whole transcript every turn, and a 5-agent fleet pays for the same shared
+system prompt five times over. `fak` does the shared work once, two ways:
 
-- **Reuse the shared prefix across agents.** The system prompt, tool table, and instructions
-  are identical for every agent in a fleet, so `fak` computes that prefix once and reuses it
-  (copy-on-write) for all of them — the ~4.1× figure above.
-- **Shed history without losing the cache hit.** Past ~48k resident tokens, `fak guard` (on
-  by default) drops the old middle turns while copying the provider's cache prefix through
-  byte-for-byte, so the prompt-cache discount holds. (Summarizing instead would rewrite the
-  prompt and bust the cache.) On any doubt `fak` forwards the original prompt unchanged and
-  relays the provider's own `cache_read` number. Tune with
-  `fak guard --compact-history-budget <tokens>` (`0` disables).
+- **Reuse the shared prefix across agents.** The setup is identical for every agent in a
+  fleet, so `fak` computes it once and shares it (copy-on-write) — the ~4.1× figure above.
+- **Trim long sessions from the middle out.** Past a budget, `fak guard` (on by default)
+  sheds the old middle turns while keeping the cached head and your recent turns
+  byte-for-byte, so the provider's prompt-cache discount keeps paying. (Summarizing
+  instead would rewrite the prompt and bust the cache.) On any doubt `fak` forwards the
+  prompt unchanged. Tune with `fak guard --compact-history-budget <tokens>` (`0` disables).
 
 How and why:
-[docs/explainers/long-sessions-keep-the-cache-hit.md](docs/explainers/long-sessions-keep-the-cache-hit.md);
+[long sessions keep the cache hit](docs/explainers/long-sessions-keep-the-cache-hit.md);
 the paying-off trend: [docs/cache-value-rollup.md](docs/cache-value-rollup.md). Prefer to
 watch: [four wins, by example, a 29-second silent MP4](visuals/worked-examples-video.mp4).
 
@@ -157,24 +157,25 @@ watch: [four wins, by example, a 29-second silent MP4](visuals/worked-examples-v
 - Always-on gateway: `fak node` installs `fak serve` as a real system service (macOS
   launchd, Linux systemd `--user`, a Windows Scheduled Task); credentials stay on the host.
   See [docs/fak/node-setup.md](docs/fak/node-setup.md).
-- Codex, Cursor, MCP hosts: keep your normal model wire and let the agent ask the
-  kernel for verdicts over MCP. See
-  [docs/integrations/openai-codex.md](docs/integrations/openai-codex.md),
-  [docs/integrations/cursor.md](docs/integrations/cursor.md), and [examples/mcp](examples/mcp).
+- Crashed or stopped mid-run: `fak resume watchdog` sweeps for dead sessions and relaunches
+  them with `claude --resume` (dry-run by default; `--live` to act) — and never resurrects
+  a session you deliberately paused with `fak resume hold`. Before a dormant session
+  restarts, `fak resume plan` tells you whether the resume keeps the warm prompt cache
+  (the cheap path) or must re-read the history cold at full price.
+- Codex, Cursor, MCP hosts: keep your normal model wire and let the agent ask the kernel
+  for verdicts over MCP: [Codex](docs/integrations/openai-codex.md) ·
+  [Cursor](docs/integrations/cursor.md) · [examples/mcp](examples/mcp).
 - Any OpenAI- or Anthropic-compatible client: put `fak serve` in front of a model
   endpoint and point the client at it: [GETTING-STARTED.md](GETTING-STARTED.md) ·
   [docs/fak/api-reference.md](docs/fak/api-reference.md).
 - From Slack: every `fak guard` session posts a durable run-card to a channel you name,
-  and `fak chatrelay` bridges a served model into a channel as a chatbot — your own
-  workspace bot, nothing baked into source. See
-  [docs/fak/slack-sessions.md](docs/fak/slack-sessions.md).
+  and `fak chatrelay` bridges a served model into a channel as a chatbot.
+  See [docs/fak/slack-sessions.md](docs/fak/slack-sessions.md).
 
-Witnessed live in front of Claude Code (a measured 5-run A/B ablation), opencode, and
-Codex. 41 of 47 surveyed harnesses and frameworks repoint with one base URL. The
-catalogue: [docs/supported/README.md](docs/supported/README.md). Surface table + benchmark
-list: [overflow page](docs/README-legacy.md#what-the-kernel-does). Every claim in
+Witnessed live in front of Claude Code, opencode, and Codex; 41 of 47 surveyed harnesses
+repoint with one base URL ([the catalogue](docs/supported/README.md)). Surface table +
+benchmark list: [overflow page](docs/README-legacy.md#what-the-kernel-does). Every claim in
 [CLAIMS.md](CLAIMS.md) carries exactly one tag: `[SHIPPED]`, `[SIMULATED]`, or `[STUB]`.
-The lint gate enforces that honesty ledger.
 
 ## Tool-call controls
 
@@ -197,15 +198,13 @@ fak preflight --tool refund_payment --args "{}"     # -> DENY (DEFAULT_DENY): no
 fak agent --offline                                 # the injection / destructive-op A/B, fully offline
 ```
 
-Starter floors cover coding agents and customer support. They also cover DevOps, trading,
-and clinical/PHI workflows. More domain floors live in the catalogue. Each floor names the
-dangerous action it denies and carries a witness command. Point your agent at one with
-`fak guard --policy examples/<file>`. The catalogue:
+Starter floors cover coding agents, customer support, DevOps, trading, and clinical/PHI
+workflows; each names the dangerous action it denies and carries a witness command. Point
+your agent at one with `fak guard --policy examples/<file>`. The catalogue:
 [examples/README.md](examples/README.md) and the
 [per-domain table](docs/README-legacy.md#use-cases-by-domain). Every refusal cites a closed
-reason code you can assert on (`POLICY_BLOCK`, `SECRET_EXFIL`, …). Read
-[POLICY.md](POLICY.md) and [docs/integrations/agent-memory.md](docs/integrations/agent-memory.md),
-or watch the boundary work: [the agent-kernel explainer, a 44-second silent MP4](visuals/agent-kernel-video.mp4).
+reason code you can assert on (`POLICY_BLOCK`, `SECRET_EXFIL`, …). More:
+[POLICY.md](POLICY.md) · [the boundary at work, a 44-second silent MP4](visuals/agent-kernel-video.mp4).
 
 ![Two columns with the same four responsibilities labeled identically on both sides — reverse proxy / gateway, policy / capability floor, result quarantine, audit journal. Left, the usual governed-serving stack runs them as four separate processes with four configs, four ports, and network hops between them; right, one static fak binary holds the same four as in-process stages — one process, one config. A blue arrow reads "four processes → one": you add flags, not components](docs/adoption/diagrams/single-binary.svg)
 
