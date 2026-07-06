@@ -25,6 +25,7 @@ func TestEngineRouteAgreesWithResidencyFloor(t *testing.T) {
 		modelroute.KindAnthropic,
 		modelroute.KindGemini,
 		modelroute.KindXAI,
+		modelroute.KindDeepSeek,
 		modelroute.KindLocal,
 	}
 	for _, k := range kinds {
