@@ -45,6 +45,7 @@ scaling laws, the explainers) live one level up in [`docs/`](../) and at the
 | Run fully offline on an edge / air-gapped node (audited, compliant) | [edge-quickstart.md](edge-quickstart.md) |
 | Guard the opencode/GLM dispatch lane | [opencode-glm-guard.md](opencode-glm-guard.md) |
 | Use GLM-5.2 from the GCP kernel setup (the `claude-glm-gcp` preset) | [claude-glm-gcp.md](claude-glm-gcp.md) |
+| Run Gemini 3.5 Flash from your GCP account as a tier-2 seat (the `claude-gemini-gcp` preset) | [claude-gemini-gcp.md](claude-gemini-gcp.md) |
 
 ## Loops, dogfooding, and self-improvement
 

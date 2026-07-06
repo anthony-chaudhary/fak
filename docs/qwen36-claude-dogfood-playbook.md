@@ -52,6 +52,8 @@ That installs the PATH commands for the common local and remote dogfood paths:
 | `fak-dogfood` | generic Claude Code dogfood launcher |
 | `fak-qwen36-claude` | Qwen3.6 local preset launcher |
 | `claude-glm-gcp` | GLM-5.2 remote-node preset launcher |
+| `claude-groq-qwen36` | Groq Qwen3.6-27B preset launcher; set `FAK_GROQ_API_KEY` first |
+| `claude-groq-compound` | Groq Compound lower-tier preset launcher; set `FAK_GROQ_API_KEY` first |
 | `claude-mac` | MacBook fak-gateway preset launcher; set `FAK_MAC_GATEWAY` first |
 
 On Windows the same presets are installed as `.cmd` shims.
@@ -69,6 +71,52 @@ fak-qwen36-claude --probe "Reply with exactly the word: pong"
 ```bash
 fak-qwen36-claude
 ```
+
+### What command uses Groq Qwen3.6-27B?
+
+Set the key in the environment, not in the repo, then run the preset:
+
+```bash
+export FAK_GROQ_API_KEY="..."
+claude-groq-qwen36 --probe "Reply with exactly the word: pong"
+```
+
+PowerShell:
+
+```powershell
+$env:FAK_GROQ_API_KEY = "..."
+$env:FAK_DOGFOOD_PRESET = "groq-qwen36"
+.\scripts\dogfood-claude.ps1 --probe "Reply with exactly the word: pong"
+```
+
+The preset fronts `https://api.groq.com/openai/v1` with `fak serve --provider openai`
+and maps every Claude Code tier to `qwen/qwen3.6-27b`. The model-account roster records
+the Groq limit metadata as 30 requests/minute, 1,000 requests/day, 8,000 tokens/minute,
+and 200,000 tokens/day; keep probes small.
+
+### What command uses Groq Compound?
+
+Set the same Groq key in the environment, then run the lower-tier preset:
+
+```bash
+export FAK_GROQ_API_KEY="..."
+claude-groq-compound --probe "Reply with exactly the word: pong"
+```
+
+PowerShell:
+
+```powershell
+$env:FAK_GROQ_API_KEY = "..."
+$env:FAK_DOGFOOD_PRESET = "groq-compound"
+.\scripts\dogfood-claude.ps1 --probe "Reply with exactly the word: pong"
+```
+
+The preset uses upstream model slug `groq/compound`. The model-account roster records
+it as a separate request-count-limited lower-tier target: 30 requests/minute and 250
+requests/day, with no token-minute or token-day cap recorded. The launcher still caps
+the upstream `max_tokens` field at 8192, because Groq rejects a larger per-response
+output budget for `groq/compound`. That keeps it available for longer prompts without
+inheriting the Qwen3.6 token-per-minute cap.
 
 ### What command uses an already-running MacBook fak gateway?
 

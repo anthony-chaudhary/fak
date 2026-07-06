@@ -201,6 +201,7 @@ feeds it; unreachable on the shipped binary).
 | `vdso` | wired | `--vdso / --invalidation` | `VDSO` | `internal/kernel/kernel.go:348` | dedup fast path + tier-2 invalidation granularity |
 | `vdsoproxyfill` | off-by-default (wired) | `--vdso-proxy-fill` | `VDSOProxyFill` | `internal/gateway/gateway.go:1868` | warms the vDSO tier-2 cache from admitted inbound tool_result blocks; off by default |
 | `toolfloor` | wired | `(adjudicator.Default.NeverAdmits)` | `ToolFloorDenies` | `internal/gateway/messages.go:392` | prunes provably-unreachable tool defs from the Anthropic passthrough; default-on, fail-safe |
+| `expose` | off-by-default (wired) | `--expose` | `ExposeTools` | `internal/gateway/mcp.go:exposedToolDescriptors` | allowlist of tool-name globs that narrows BOTH tools/list discovery AND tools/call invocation to the named tools (a hidden tool answers "unknown tool", no existence leak); a malformed or zero-match pattern fails startup loud; empty (default) exposes the full surface |
 | `decidesession` | wired | `(host func, default-on)` | `DecideSession` | `internal/gateway/session_admit.go:57` | run-state refusal + TurnsLeft debit + budget + pace, before the model turn |
 | `debitsession` | wired | `(host func, default-on)` | `DebitSession` | `internal/gateway/session_admit.go:157` | debits TokensLeft + context budget after the planner returns |
 | `nativeserve` | off-by-default (wired) | `--native` | `Native` | `internal/gateway/messages.go:153` | routes non-streaming /v1/messages through fak's owned agent.RunArm loop; off by default |

@@ -378,3 +378,121 @@ The non-standard HTTP 529 the Anthropic API returns when overloaded, load-bearin
 stream-retry and account-rotation paths. `internal/agent/retry.go` names it
 (`const statusOverloaded = 529`); gateway and attempt-budget sites still carry the bare
 literal and should adopt the name.
+
+## Recurring doc concepts, bound to the artifact each one names
+
+The most-used doc headings with no code identifier behind them. Each entry says what
+the term means here and which artifact (if any) is its canonical home.
+
+### GPU server
+
+The lab's private 8-GPU datacenter box that big-model benchmarks run on — under its
+mandated scrubbed public name. `docs/gpu-server-private-boundary.md` requires this
+exact phrase (no host, IP, path, or token) in anything public, so the term is a
+deliberate anonymization convention, not a machine name.
+
+### MCP server
+
+fak's Model Context Protocol surface: `fak serve --stdio` (or `POST /mcp` over HTTP)
+speaking JSON-RPC 2.0 and exposing the `fak_*` adjudication tools. An external-protocol
+term applied to fak's own gateway — there is deliberately no distinct code component by
+this name.
+
+### Compatibility matrix
+
+The per-tool table answering "can this agent tool repoint its base URL at `fak serve`"
+across the OpenAI / Anthropic / MCP wires. Canonical artifact:
+`docs/integrations/compatibility-matrix.md`; other docs reference that table rather than
+defining their own.
+
+### Worked example
+
+A doc-writing convention: the section that walks one concrete scenario end-to-end with
+real numbers or a real fixture (the addressable-KV-cache explainer replays an exact test
+fixture, for instance). It names a writing pattern, not a system concept.
+
+### Threat model
+
+fak's stated attacker assumption: the model is the untrusted program, and the attacker
+controls everything it reads — prompt, retrieved docs, tool results. Refusal therefore
+hangs on structural gates, not on a classifier judging intent. A real system concept;
+its doctrine home is `docs/fak/security.md`.
+
+### Triage decision
+
+The closing verdict slot of a `docs/notes/RESEARCH-*-triage` note: Adopt, defend
+against, or ignore the externally-scouted paper/repo, with reasons. The structured
+outcome of the research-triage workflow.
+
+### Master ledger
+
+The per-theorem verdict table in `docs/proofs/README.md` — every module proof's theorem,
+deterministic witness test, and live verdict filled from actual test runs. Every other
+`docs/proofs/*.md` page defers its current verdict to the master ledger rather than
+restating it.
+
+### Readiness score
+
+An overloaded phrase with two senses that should not be conflated: (1) the deliberately
+simple 0–100 operator blend for a fleet node in `docs/fleet.md`; (2) the readiness
+dimension re-derived by the `*-READINESS-SCORECARD` family (`tools/*.py`). No single
+code identifier backs either sense.
+
+### Durable ledger
+
+An append-only JSONL history file committed to the trunk as durable evidence — cadence
+`history.jsonl` rows, nightrun `collected.jsonl` rows. Durable trunk evidence, not a
+regenerable build artifact; the discipline is what separates a ledger from a report.
+
+## Repo-wide helper conventions and other load-bearing identifiers
+
+The implicit-explicit scorecard found each identifier below declared or used across a
+dozen-plus production files with zero doc mentions. One honest line each, so the name is
+searchable outside the code. Where a line says *per-package*, the identifier is a
+convention independently re-declared in many packages — copy it deliberately.
+
+| Identifier | What it is |
+|---|---|
+| `firstNonEmpty` | Returns the first non-blank string argument; re-declared 31 times per package instead of shared. |
+| `encodeJSONOrFail` | cmd/fak: writes a value as indented JSON to stdout, else reports the encode error and returns 1. |
+| `parseFloat` | cmd/dojorsi: Sscanf-based float parse tolerating a trailing format suffix; distinct from stdlib strconv.ParseFloat. |
+| `ContainsAny` | strmatch: reports whether a string contains any of the variadic substrings; replaced six per-package copies. |
+| `formatFloat` | fleetcap: renders integral floats as bare integers, else with the caller's fallback verb. |
+| `ActiveResolver` | abi: returns the registered RegionBackend's Resolver, or nil when no backend is registered. |
+| `ledgerPath` | Convention: local/flag variable holding a JSONL ledger file path across command and report packages. |
+| `ResolveToken` | Per-post-package Slack bot token resolver: package env vars, then .env.slack.local, then scoreboard fallback. |
+| `sortedKeys` | Per-package copy returning lexicographically sorted map keys; superseded by generic maputil.SortedKeys. |
+| `numWorkers` | model: package var capping matmul parallelism (GOMAXPROCS default, FAK_WORKERS/FAK_BUDGET overrides); read via NumWorkers(). |
+| `ResolveChannel` | Per-post-package Slack channel resolver from env then .env.slack.local; empty means require explicit --channel. |
+| `resolveRoot` | cmd/fak: explicit --root, else `git rev-parse --show-toplevel`, else empty string. |
+| `verbFlagUsage` | cmd/fak: sets FlagSet.Usage so `fak <verb> --help` prints catalog deep help above flag defaults. |
+| `MarshalReport` | benchcli: marshals a bench report with the lineage stamp spliced in; required by the lineage gate. |
+| `configureDispatchHelperCommand` | cmd/fak per-OS seam: hides console windows for background dispatch helper processes on Windows; no-op on Unix. |
+| `requireMethod` | gateway: enforces one HTTP method on a handler, writing the standard 405 and returning false on mismatch. |
+| `LoadRegistry` | Per-package registry file loader (accounts, fleetaccounts, grafanapost, loopmgr) with differing failure semantics. |
+| `MarshalJSON` | Repo json.Marshaler implementations rendering closed-vocabulary types (Severity, Outcome, CheckKind, ...) as strings. |
+| `ReadLedgerFile` | Per-package best-effort JSONL ledger reader returning nil when absent; cmd/fak adds generic readLedgerFile[T]. |
+| `registryPath` | Convention: local/flag variable holding a registry JSON path (loop registry, accounts sessions.json). |
+| `AppendLedgerLine` | Per-package pure renderer of one ledger row to its JSONL line; the caller appends the newline. |
+| `findRepoRoot` | Stat-walk up to the nearest .git directory, falling back to start; three copies coexist. |
+| `marshalArtifact` | turnbench: canonical indented-JSON-plus-newline artifact encoding shared by every report JSON() method. |
+| `dispatchSubcommands` | cmd/fak: shared group-verb router; a missing or unknown verb prints the hint and exits 2. |
+| `quantizeVecQ8` | Quantizes one activation vector to Q8_0; scalar reference in compute, hot-path copies in model. |
+| `ropeRowQKInto` | model: applies RoPE rotation in place to the query and key head rows at one position. |
+| `TotalBytes` | Recurring struct-field name for an accumulated byte total across agent, compute, gateway, memgate, model. |
+| `defaultSource` | cmd/fak: post source label - FAK_SCOREBOARD_SOURCE env var, else the hostname, else empty. |
+| `NormDurability` | Maps a durability-class string to the canonical vocabulary, failing closed to turn; declared in ctxplan and memq. |
+| `WriteHeader` | gateway statusRecorder method recording the first status code written so metrics label by actual status. |
+| `defaultLoopLedger` | cmd/fak: loop ledger path - FAK_LOOP_LEDGER env var, else .fak/loops.jsonl. |
+| `expertName` | model: builds the GGUF tensor name for one MoE expert from layer, expert index, and suffix. |
+| `FetchExistingIssues` | Per-package `gh issue list --json` fetcher used to classify create-vs-update for planned issues. |
+| `HeadCommit` | Returns `git rev-parse --short HEAD` under a root, or "unknown"; five per-package copies. |
+| `verdictName` | Maps abi.VerdictKind to its ALLOW/DENY/... name; seven copies across packages and commands. |
+| `WriteReport` | benchcli: lineage-stamped report file write; fleet: validated status report write behind a file-safe key guard. |
+| `configHome` | guardrsi: user config dir - XDG_CONFIG_HOME, APPDATA, HOME/.config, then os.UserHomeDir fallback. |
+| `envFileValue` | Ten per-package one-line wrappers delegating .env.slack.local key lookup to slackenv.FileValue. |
+| `firstString` | Two same-named helpers: first non-blank variadic string (cmd/fak); first string among JSON keys (fleetmon). |
+| `ListenAndServe` | gateway Server method: synchronous bind measured as a boot phase, then Serve; warns on no-auth non-loopback bind. |
+| `ScoreComponent` | One named scorecard axis (Name, Value, Unit); struct re-declared in four scoring packages. |
+| `TrackedTree` | hooks: the `git ls-files` tracked-path set read once and shared across hygiene gates, with a file cache. |
+| `UpstreamStatusError` | agent: error carrying the upstream's non-2xx status, Retry-After, and sanitized limit metadata for downstream surfacing. |

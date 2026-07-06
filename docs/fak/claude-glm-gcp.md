@@ -29,8 +29,9 @@ model turn needs the GCP node up — see [What is proven here](#what-is-proven-h
 ## The one command: `gcp-glm-demo.sh`
 
 If you just want the whole demo as a single reviewable command, `scripts/gcp-glm-demo.sh`
-chains the four steps end to end, **plan-by-default**, defaulting to the **8× H100** tier
-(`a3-high-h100`, 640 GB — GLM-5.2 at `UD-Q4_K_M` is ~466 GB, so it needs the 8-GPU shape):
+chains the four steps end to end, **plan-by-default**, defaulting to the **8× H100 Mega** tier
+(`a3-mega-h100`, 640 GB — GLM-5.2 at Q4 still needs the full 8-GPU shape; the demo defaults to
+the pure-Q4_K `UD-Q4_K_S` experts, which hit the CUDA resident-Q4_K fast path):
 
 1. **provision + serve** GLM-5.2 through the **pure fak kernel** (it forces `SERVE=fak`
    even on sm_90, where the bring-up would otherwise pick stock SGLang — this is the whole
@@ -137,9 +138,15 @@ It picks the serve path from the tier's GPU arch (override with `SERVE=`):
 
 | `SERVE` | what runs | default on |
 |---|---|---|
-| `fak` | the **pure fak kernel** — fak serves GLM-5.2 (`glm_moe_dsa`) through its *own* CUDA kernels (`tools/glm52_fak_native_serve.sh`: `fak serve --gguf <shard1> --backend cuda --cpu-offload-experts --context-budget-tokens 8192`). **Preferred.** | Ampere (datacenter GPU, sm_80) |
+| `fak` | the **pure fak kernel** — fak serves GLM-5.2 (`glm_moe_dsa`) through its *own* CUDA kernels (`tools/glm52_fak_native_serve.sh`: `fak serve --gguf <shard1> --backend cuda --cpu-offload-experts --context-budget-tokens 4096`). **Preferred.** | Ampere (datacenter GPU, sm_80) |
 | `llamacpp` | the **benchmark baseline** — the *same* checkpoint under llama.cpp MLA + CPU expert-offload (`tools/private GLM-5.2 stage runner`, the GPU server example brought to GCP). Stand it up to compare fak apples-to-apples. | — (opt-in, any tier) |
 | `sglang` / `vllm` | stock DSA engines (`tools/glm52_sglang_vllm_serve.sh`), gated by `tools/glm52_serve_preflight.py` (fails closed below sm_90). | Hopper / Blackwell (sm_90+) |
+
+**Direction of travel:** the desired GLM-5.2 serving target is the pure fak kernel
+(`SERVE=fak`) on every GPU tier that can carry it. SGLang/vLLM exists here as a
+temporary stock compatibility path: it proves the GCP node, checkpoint, networking,
+Claude preset, and OpenAI-compatible endpoint while the FAK-native H100/H200/B200
+serve catches up on throughput and full live-turn coverage.
 
 So **"whatever is available" includes datacenter GPU** — `GCP_TIER=a2-ultra-a100-80gb` serves GLM-5.2
 via the pure fak kernel by default:
@@ -147,6 +154,7 @@ via the pure fak kernel by default:
 ```bash
 GCP_TIER=a2-ultra-a100-80gb ./scripts/gcp-glm-serve.sh                 # A100, pure fak kernel (default)
 GCP_TIER=a2-ultra-a100-80gb SERVE=llamacpp ./scripts/gcp-glm-serve.sh  # A100, llama.cpp benchmark node
+GCP_TIER=a3-mega-h100 ./scripts/gcp-glm-serve.sh                       # H100 Mega, stock SGLang W4AFP8
 GCP_TIER=a3-mega-h100 SERVE=fak ./scripts/gcp-glm-serve.sh             # H100 Mega, pure fak kernel
 GCP_TIER=a4-b200 ./scripts/gcp-glm-serve.sh                            # Blackwell, stock SGLang/vLLM
 ```
@@ -156,7 +164,7 @@ registry — the most-provisionable tier that clears the DSA floor. The datacent
 `a2-ultra-a100-80gb` (8-GPU datacenter server 80GB, 640 GB VRAM, ~$40.55/hr — the same shape as the GPU server example)
 and `a2-high-a100-40gb` (8-GPU datacenter server 40GB, ~$29.39/hr). Knobs: `GCP_TIER`, `SERVE`, `GCP_ZONE`,
 `ENGINE`/`QUANT` (the sm_90 stock path), `GLM_GGUF_REPO`/`GLM_GGUF_SUBDIR` (the fak/llama.cpp
-GGUF, default `unsloth/GLM-5.2-GGUF` `UD-Q4_K_M`), `NCPU_MOE`, `GLM_PORT`, `HF_TOKEN`,
+GGUF, default `unsloth/GLM-5.2-GGUF` `UD-Q4_K_S`), `NCPU_MOE`, `GLM_PORT`, `HF_TOKEN`,
 `CTX` (stock SGLang/vLLM context, default 65536), `EP_RANKS` (pure-fak resident
 expert-parallel ranks; `1` keeps the cpu-offload smoke path, `8` launches one rank per
 full-size GPU for the no-cpu-offload path), `TAILSCALE_AUTHKEY`, `MAX_DAILY_USD`,
@@ -170,7 +178,12 @@ single-process `--cpu-offload-experts` smoke path.
 The stock SGLang/vLLM path defaults `CTX=65536` because Claude Code's GLM dogfood probe
 asks for a large Anthropic turn: the witnessed run used 32,641 input tokens plus a
 32,000-token output ceiling. A 32,768-token serve window fails that request before the
-model starts.
+model starts. Stock quant defaults to FP8 on H200/B200 and W4AFP8 on H100 tiers, because
+FP8 GLM-5.2 does not fit in the 640 GB H100 shapes while W4AFP8 does.
+For W4AFP8, the stock SGLang wrapper also disables prefill CUDA graph capture by default
+(`DISABLE_PREFILL_CUDA_GRAPH=auto`) because that GLM/DSA path can crash after successful
+weight load during prefill graph warmup; set `DISABLE_PREFILL_CUDA_GRAPH=0` only when the
+upstream path is known fixed for the installed SGLang/FlashInfer stack.
 
 > **Why A100 needs a different serve.** GLM-5.2's DSA kernels in stock SGLang/vLLM are gated
 > to Hopper (sm_90) / Blackwell (sm_100); on Ampere (datacenter GPU, sm_80) the preflight
@@ -257,9 +270,10 @@ which is not stood up from the implementing host — same gate as
 
 The pure-fak-kernel serve command is **wired** and the `glm_moe_dsa` forward is **witnessed at
 q8** (cosine 1.0, sm_80); a live serve turn stays **hardware+load-gated** — the resident-Q4_K
-serve path is not yet cosine-witnessed, and the **load** on the dynamic-mixed `UD-Q4_K_M` is
-the open perf item (the resident-Q4_K path fully fires only on pure-Q4_K tensors; see
-`docs/notes/GLM52-FAK-NATIVE-SERVE-LOAD-SPEED-2026-06-25.md`). The remaining step is
+serve path is not yet cosine-witnessed. The demo now defaults to the pure-Q4_K `UD-Q4_K_S`
+experts so the resident-Q4_K path fully fires; the dynamic-mixed `UD-Q4_K_M` (whose Q5_K/Q6_K
+experts route through the slower host k-quant seam) stays available via `GLM_GGUF_SUBDIR` but is
+the slower load (see `docs/notes/GLM52-FAK-NATIVE-SERVE-LOAD-SPEED-2026-06-25.md`). The remaining step is
 operational: run Half A `--apply` on an authenticated host with datacenter GPU (or H200/B200) quota, open
 the tunnel, and run `claude-glm-gcp --probe "say pong"`.
 
@@ -275,7 +289,7 @@ the tunnel, and run `claude-glm-gcp --probe "say pong"`.
 
 ## Refs
 
-- `scripts/gcp-glm-demo.sh` — the **one-command demo** (plan/apply): provision → pure-fak serve → probe → cache-value → teardown, default tier `a3-high-h100` (8× H100)
+- `scripts/gcp-glm-demo.sh` — the **one-command demo** (plan/apply): provision → pure-fak serve → probe → cache-value → teardown, default tier `a3-mega-h100` (8× H100 Mega)
 - `scripts/gcp-glm-serve.sh` — the GCP bring-up (plan/apply), `SERVE=fak|llamacpp|sglang|vllm`
 - `scripts/dogfood-claude.sh` / `.ps1` — the launcher + the `glm-gcp` preset
 - `tools/gcp_accel.py` — the GCP accelerator registry (datacenter GPU tiers + `--emit-shell` feeds the bring-up)

@@ -8,7 +8,7 @@ description: "How fak's account switcher routes each aspect of a request to a ch
 `fak route` decides *which* model — or which ensemble of models — serves an aspect of
 a request. The account switcher decides *whose account* runs that model, over which
 provider's wire. Together they let you point fak's routing at your own OpenAI, Codex,
-Anthropic, Gemini, DeepSeek, and local accounts, and mix providers at any level: the cheap
+Anthropic, Gemini, Groq, DeepSeek, and local accounts, and mix providers at any level: the cheap
 aspect to a local model, the hard reasoning step to your OpenAI account, and a
 two-model guard ensemble whose halves run on two *different* accounts.
 
@@ -24,6 +24,9 @@ decision and the cost lens).
 accounts can target the *same* provider kind (`openai-personal` and `openai-work`),
 which is the switch: you choose which credential serves a model. An account names the
 env var that holds its key (`cred_env`); the secret itself never lives in the file.
+OpenAI-compatible providers such as Groq are represented as `kind: "openai"` plus their
+provider `base_url`, so the wire adapter stays generic while the account id names whose
+credential is being used.
 
 **Binding** — maps one routed model id (a `small`/`large`/`guard-a` from your routing
 manifest, or a plan's scout) to an account plus the upstream model name to send on the
@@ -48,6 +51,13 @@ dispatch layer turns a Target into a live planner; the resolver itself does no I
     { "id": "openai-work",     "kind": "openai",           "cred_env": "OPENAI_WORK_API_KEY" },
     { "id": "codex",           "kind": "openai-responses", "cred_env": "OPENAI_API_KEY" },
     { "id": "claude-sub",      "kind": "anthropic",        "cred_env": "CLAUDE_CODE_OAUTH_TOKEN" },
+    { "id": "july6netra_groq", "kind": "openai",
+      "base_url": "https://api.groq.com/openai/v1", "cred_env": "FAK_GROQ_API_KEY",
+      "requests_per_minute": 30, "requests_per_day": 1000,
+      "tokens_per_minute": 8000, "tokens_per_day": 200000 },
+    { "id": "july6netra_groq_compound", "kind": "openai",
+      "base_url": "https://api.groq.com/openai/v1", "cred_env": "FAK_GROQ_API_KEY",
+      "requests_per_minute": 30, "requests_per_day": 250 },
     { "id": "deepseek",        "kind": "deepseek",         "cred_env": "DEEPSEEK_API_KEY",
       "context_tokens": 1000000, "max_output_tokens": 384000 },
     { "id": "deepseek-anthropic", "kind": "anthropic",
@@ -59,6 +69,8 @@ dispatch layer turns a Target into a live planner; the resolver itself does no I
     { "model": "small",   "account": "local",           "upstream_model": "llama3.2" },
     { "model": "guard-a", "account": "openai-work",      "upstream_model": "gpt-5.5" },
     { "model": "guard-b", "account": "claude-sub",       "upstream_model": "claude-opus-4-6" },
+    { "model": "qwen36-groq", "account": "july6netra_groq", "upstream_model": "qwen/qwen3.6-27b" },
+    { "model": "groq-compound", "account": "july6netra_groq_compound", "upstream_model": "groq/compound" },
     { "model": "deepseek-pro", "account": "deepseek", "upstream_model": "deepseek-v4-pro" },
     { "model": "deepseek-flash", "account": "deepseek", "upstream_model": "deepseek-v4-flash" },
     { "model": "deepseek-chat-compat", "account": "deepseek", "upstream_model": "deepseek-chat",
@@ -138,6 +150,18 @@ OpenAI-compatible/local accounts can become `READY_FOR_LIVE_BRIDGE_RUN`, while n
 Anthropic/Gemini accounts are reported as `WIRE_SUPPORTED_UNPROBED`. Model hints come from the
 roster bindings, so the API-host report stays tied to the same abstract model ids the route policy
 uses.
+
+Groq Qwen3.6 uses the OpenAI-compatible base `https://api.groq.com/openai/v1`, credential
+env var `FAK_GROQ_API_KEY`, and upstream model slug `qwen/qwen3.6-27b`. The example records
+the current account/model limits as metadata: 30 requests/minute, 1,000 requests/day,
+8,000 tokens/minute, and 200,000 tokens/day. Groq Compound uses the same base and env var
+under the separate account id `july6netra_groq_compound`, bound as the lower-quality
+`groq-compound` target to upstream slug `groq/compound`; its metadata is request-only:
+30 requests/minute and 250 requests/day, with no token-minute or token-day cap recorded.
+The Claude dogfood launcher separately caps the outbound `max_tokens` field at 8192 for
+`groq/compound`, because Groq rejects larger per-response output budgets. Those values
+are advisory metadata for routing and launchers; the v1 resolver does not throttle
+requests.
 
 DeepSeek V4 uses `deepseek-v4-pro` / `deepseek-v4-flash` on the OpenAI-compatible base
 `https://api.deepseek.com`; its Anthropic-compatible profile uses
