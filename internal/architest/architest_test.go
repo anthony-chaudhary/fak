@@ -178,6 +178,7 @@ var tier = map[string]int{
 	"modelroute":       1, // per-aspect + ensemble model-routing policy spine (Route + Combine); pure, stdlib-only, imports nothing internal.
 	"modelscore":       1, // durable raw model-capability evidence registry (#3038): unbounded native-unit benchmark/cost/context rows with provenance; a Profile keeps raw evidence separate from any tier policy. Pure, stdlib-only, imports nothing internal, off the hot path.
 	"simhash":          1, // reference vector-similarity primitive (embed/cosine/top-k); the observability layer's near-duplicate / outlier-query substrate. Deterministic, stdlib-only, imports nothing internal.
+	"issuededup":       1, // write-time near-duplicate gate for issue producers (#2504): simhash embed + TopK over title / title+body axes into advisory dup-risk verdicts. Imports simhash(1) only, off the hot path.
 	"trajectory":       3, // trajectory data plane: folds the abi event stream into per-trace Turn rows + JSONL export; an abi.Emitter that optionally stamps a simhash query embedding. Imports abi+simhash.
 	"trajhook":         3, // pluggable trajectory scorer/tap seam (the "trivial skill does gardening" enabler): app code registers Scorers over Turn rows without a core edit. Imports trajectory+simhash.
 	"sessionimage":     4, // portable, model-agnostic SESSION image: composes recall(3)+session(1)+trajectory(3)+ctxplan(1) into one versioned, sha256-integrity bundle + a .faksession tar (dump/pack/unpack/rehydrate across hosts/users/VMs/model changes). Integrator: imports tier-3 composers, off the hot path.
@@ -300,6 +301,7 @@ var tier = map[string]int{
 	"launchlatency":    1, // dispatch→heartbeat worker launch-latency histogram + p50/p95 (reuses fleetmetrics percentiles); stdlib-only, off the hot path.
 	"closurerate":      1, // closure-rate + witnessed-close-rate + claimed-without-witness honesty counters over a close ledger; stdlib-only, off the hot path.
 	"issuecost":        1, // per-issue worker elapsed/attempts/outcome ledger → median+p95 (reuses fleetmetrics); stdlib-only, off the hot path.
+	"issuededup":       1, // write-time near-duplicate gate for issue producers (#2504): simhash embed + TopK dup-risk verdicts over title / title+body; imports only simhash(1), off the hot path.
 	"mutationbudget":   1, // GitHub mutation throttle guard: holds close/comment bursts with an actionable reason when remaining API budget < reserve; stdlib-only, off the hot path.
 	"completiondist":   1, // fold historical issue-closure durations into a distribution (median/p95/buckets) for the capacity model; reuses fleetmetrics+fleetcap; stdlib-only, off the hot path.
 	"fleetfreeze":      1, // operator freeze/dry-run gate: holds new spawns while allowing witness-close + status-refresh; stdlib-only, off the hot path.
