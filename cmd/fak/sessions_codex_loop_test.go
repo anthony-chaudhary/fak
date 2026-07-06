@@ -103,6 +103,41 @@ func TestSessionsCodexLoopDiagnosesRepeatedGoalFailure(t *testing.T) {
 	}
 }
 
+func TestSessionsCodexLoopDefaultsToCurrentCodexThread(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "codex-home")
+	sessionsDir := filepath.Join(home, "sessions", "2026", "07", "06")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	threadID := "019f3540-52dd-7001-b559-2818dc14ede6"
+	t.Setenv("CODEX_THREAD_ID", threadID)
+	path := filepath.Join(sessionsDir, "rollout-2026-07-06T09-30-00-"+threadID+".jsonl")
+	writeCodexLoopFixture(t, path, []string{
+		`{"timestamp":"2026-07-06T16:30:00.000Z","type":"session_meta","payload":{"session_id":"019f3540-52dd-7001-b559-2818dc14ede6","originator":"codex-tui","cli_version":"0.142.5","model_provider":"openai","git":{"commit_hash":"111ff04","branch":"main"}}}`,
+		`{"timestamp":"2026-07-06T16:30:02.000Z","type":"response_item","payload":{"type":"function_call","name":"shell_command","arguments":"{\"command\":\"git status --short\"}","call_id":"shell_1"}}`,
+		`{"timestamp":"2026-07-06T16:30:03.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"shell_1","output":"## main"}}`,
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := runSessions(&stdout, &stderr, []string{"codex-loop", "--codex-home", home, "--json", "--fail-on", "unguarded"})
+	if code != 1 {
+		t.Fatalf("codex-loop default current thread exited %d, want 1 stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var d codexLoopDiagnosis
+	if err := json.Unmarshal(stdout.Bytes(), &d); err != nil {
+		t.Fatalf("json did not decode: %v\n%s", err, stdout.String())
+	}
+	if d.SessionID != threadID || filepath.Clean(d.Path) != filepath.Clean(path) {
+		t.Fatalf("current-thread resolver picked wrong session: got id=%q path=%q want id=%q path=%q", d.SessionID, d.Path, threadID, path)
+	}
+	if d.Verdict != "OK" || d.ModelProvider != "openai" {
+		t.Fatalf("diagnosis = verdict=%s provider=%s, want OK/openai: %+v", d.Verdict, d.ModelProvider, d)
+	}
+	if !strings.Contains(stderr.String(), "gate REFUSE fail-on=unguarded verdict=OK reason=codex_session_bypassed_fak_guard") {
+		t.Fatalf("unguarded current-thread gate did not name the direct-provider reason:\n%s", stderr.String())
+	}
+}
+
 func TestSessionsCodexLoopRecentScansCodexHome(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "codex-home")
 	sessionsDir := filepath.Join(home, "sessions", "2026", "07", "05")

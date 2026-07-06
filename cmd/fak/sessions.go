@@ -83,7 +83,8 @@ Start here:
                             folds this host's sessions live.
   fak sessions codex-loop   point at one Codex TUI JSONL session, or use --recent to scan
                             the local Codex store, and expose repeated tool outputs,
-                            token burn, livelock notices, and abort/status.
+                            token burn, livelock notices, and abort/status. With neither
+                            --session nor --path, it audits $CODEX_THREAD_ID when set.
 `)
 }
 

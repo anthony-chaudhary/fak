@@ -120,7 +120,7 @@ type codexOutcomeAccum struct {
 func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("sessions codex-loop", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	sessionID := fs.String("session", "", "Codex session id to find under --codex-home/sessions")
+	sessionID := fs.String("session", "", "Codex session id to find under --codex-home/sessions (default: $CODEX_THREAD_ID when set)")
 	path := fs.String("path", "", "explicit Codex session JSONL path")
 	codexHome := fs.String("codex-home", "", "Codex home directory (default: $CODEX_HOME or ~/.codex)")
 	recent := fs.Bool("recent", false, "scan recent Codex session JSONL files instead of one path")
@@ -447,7 +447,10 @@ func resolveCodexLoopSessionPath(codexHome, sessionID, path string) (string, err
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
-		return "", errors.New("need --session ID or --path FILE")
+		sessionID = strings.TrimSpace(os.Getenv("CODEX_THREAD_ID"))
+	}
+	if sessionID == "" {
+		return "", errors.New("need --session ID, --path FILE, or CODEX_THREAD_ID")
 	}
 	home, err := resolvedCodexLoopHome(codexHome)
 	if err != nil {
