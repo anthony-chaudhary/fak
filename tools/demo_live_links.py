@@ -379,6 +379,77 @@ def missing_json_keys(text: str, keys: list[str]) -> list[str]:
     return [key for key in keys if key not in data]
 
 
+def net_value_from_api(api_text: str) -> dict[str, Any]:
+    """Fold a hosted model-demo API body into the net-value witness.
+
+    The live model demos (ctxdemo, demorace) report a model ladder, and demorace
+    also reports an exact, timing-free prefill-token work-elimination ratio. This
+    extracts the rung the live run actually served (the smallest present rung) and
+    the measured fak delta, so the audit can prove the public card names the same
+    model/rung the deployment serves and records a net-of-cost witness. Non-model
+    demos (no "models" list) return an empty, defect-free witness so the check is a
+    no-op for them.
+    """
+    try:
+        data = json.loads(api_text)
+    except (ValueError, TypeError):
+        return {"rung": "", "present_rungs": [], "ratio": None, "defects": ["<invalid-json>"]}
+    if not isinstance(data, dict):
+        return {"rung": "", "present_rungs": [], "ratio": None, "defects": ["<non-object-json>"]}
+    models = data.get("models")
+    if not isinstance(models, list):
+        return {"rung": "", "present_rungs": [], "ratio": None, "defects": []}
+    present: list[str] = []
+    for m in models:
+        if not isinstance(m, dict):
+            continue
+        name = m.get("name") or m.get("Name") or ""
+        is_present = m.get("present")
+        if is_present is None:
+            is_present = m.get("Present")
+        if name and is_present:
+            present.append(str(name))
+    ratio_block = data.get("prefill_tok_ratio_a_over_c")
+    ratio = ratio_block if isinstance(ratio_block, dict) else None
+    defects: list[str] = []
+    if not present:
+        defects.append("no model rung present; live run cannot back a net-true headline")
+    return {
+        "rung": present[0] if present else "",
+        "present_rungs": present,
+        "ratio": ratio,
+        "defects": defects,
+    }
+
+
+def card_rung_defects(
+    links: list[dict[str, Any]], witnesses: list[dict[str, Any]]
+) -> list[str]:
+    """Cross-check that each hosted model-demo CARD names the rung its live API served.
+
+    This binds the public card copy to the live witness: the headline can neither
+    drift ahead of nor lag behind the deployed model rung. Cards for non-model demos
+    (no live rung in the witness) are skipped.
+    """
+    by_href = {w.get("href"): w for w in witnesses}
+    defects: list[str] = []
+    for row in links:
+        if not row.get("card"):
+            continue
+        witness = by_href.get(row.get("href"))
+        if not witness:
+            continue
+        rung = (witness.get("net_value") or {}).get("rung") or ""
+        if not rung:
+            continue
+        if rung not in (row.get("text") or ""):
+            defects.append(
+                f"hosted card {row['href']} does not name its live model rung "
+                f"{rung}; card copy and live API disagree"
+            )
+    return defects
+
+
 def probe_live_witness(url: str, timeout_s: float, *,
                        fetcher: Any = fetch_url_text) -> dict[str, Any]:
     spec = HOSTED_WITNESSES.get(url)
@@ -396,6 +467,7 @@ def probe_live_witness(url: str, timeout_s: float, *,
 
     api_url = spec.get("api", "")
     api: dict[str, Any] | None = None
+    net_value: dict[str, Any] | None = None
     if api_url:
         api = fetcher(api_url, timeout_s)
         if not api.get("ok"):
@@ -404,6 +476,9 @@ def probe_live_witness(url: str, timeout_s: float, *,
             missing = missing_json_keys(str(api.get("text", "")), list(spec.get("api_keys", [])))
             for key in missing:
                 defects.append(f"api witness {api_url} missing key: {key}")
+            net_value = net_value_from_api(str(api.get("text", "")))
+            for defect in net_value.get("defects", []):
+                defects.append(f"net-value witness {api_url}: {defect}")
 
     return {
         "href": url,
@@ -412,6 +487,7 @@ def probe_live_witness(url: str, timeout_s: float, *,
         "page_status": page.get("status", 0),
         "api": api_url,
         "api_status": api.get("status", 0) if api else 0,
+        "net_value": net_value,
         "defects": defects,
     }
 
@@ -677,6 +753,7 @@ def collect_html(workspace: Path, doc: str, html: str, *,
                     live_defects.append(f"HTTPS alternative is reachable; update hosted demo link to https:// {alt}")
         if require_https:
             live_defects.extend(https_transport_defects(https_probes))
+        live_defects.extend(card_rung_defects(audit["links"], witnesses))
         audit["probes"] = probes
         audit["https_probes"] = https_probes
         audit["witnesses"] = witnesses
@@ -917,6 +994,12 @@ def render(payload: dict[str, Any]) -> str:
             status = "OK" if w["ok"] else "FAIL"
             api = f" api={w['api_status']}" if w.get("api") else ""
             lines.append(f"  {status:4} page={w['page_status']}{api} {w['href']}")
+    nv_lines = net_value_lines(audit)
+    if nv_lines:
+        lines.append("")
+        lines.append("net-value witnesses:")
+        for line in nv_lines:
+            lines.append(f"  {line}")
     if audit.get("defects"):
         lines.append("")
         lines.append("defects:")
@@ -1030,6 +1113,27 @@ def render_summary_line(audit: dict[str, Any]) -> str:
     )
 
 
+def net_value_lines(audit: dict[str, Any]) -> list[str]:
+    """One net-value witness line per live model demo: the served rung and the
+    measured, timing-free prefill-token work-elimination delta."""
+    lines: list[str] = []
+    for witness in audit.get("witnesses") or []:
+        net_value = witness.get("net_value") or {}
+        rung = net_value.get("rung")
+        if not rung:
+            continue
+        ratio = net_value.get("ratio") or {}
+        ratio_part = ""
+        raw = ratio.get("ratio")
+        if isinstance(raw, (int, float)):
+            ratio_part = (
+                f"; prefill work {ratio.get('a')}->{ratio.get('c')} tok "
+                f"= {raw:.1f}x eliminated"
+            )
+        lines.append(f"net-value: {witness['href']} rung={rung}{ratio_part}")
+    return lines
+
+
 def render_status(payload: dict[str, Any]) -> str:
     """Compact deployment matrix: one row per hosted/local-only browser demo."""
     audit = payload.get("audit") or {}
@@ -1070,6 +1174,8 @@ def render_status(payload: dict[str, Any]) -> str:
         )
         for defect in row.get("defects", [])[:2]:
             lines.append(f"  - {row['demo']}: {defect}")
+    for line in net_value_lines(audit):
+        lines.append(line)
     if audit.get("defects"):
         lines.append("defects:")
         for defect in audit["defects"]:

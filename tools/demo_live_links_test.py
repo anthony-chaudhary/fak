@@ -379,6 +379,110 @@ def test_probe_live_witness_rejects_missing_witness_spec() -> None:
     assert witness["defects"] == ["no hosted witness registered"], witness
 
 
+# Real hosted-API bodies captured 2026-07-07 from the live demos; the net-value
+# witness is extracted from these exact shapes (demorace lowercases model keys,
+# ctxdemo capitalizes them).
+DEMORACE_LADDER = (
+    '{"gomaxprocs":4,"models":['
+    '{"name":"SmolLM2-135M","kind":"dir","present":true,"params":"0.14B"},'
+    '{"name":"Qwen2.5-0.5B","kind":"hf","present":false,"params":"0.5B"}],'
+    '"prefill_tok_ratio_a_over_c":{"a":15200,"c":1152,"ratio":13.194444444444445,'
+    '"note":"exact prefill-token work-elimination (timing-free)"}}'
+)
+CTXDEMO_SCENARIOS = (
+    '{"gomaxprocs":4,"models":['
+    '{"Name":"SmolLM2-135M","Params":"0.14B","Present":true},'
+    '{"Name":"Qwen2.5-0.5B","Params":"0.5B","Present":false}],"scenarios":[]}'
+)
+
+
+def test_net_value_from_api_extracts_demorace_rung_and_ratio() -> None:
+    nv = dl.net_value_from_api(DEMORACE_LADDER)
+    assert nv["rung"] == "SmolLM2-135M", nv
+    assert nv["present_rungs"] == ["SmolLM2-135M"], nv
+    assert round(nv["ratio"]["ratio"], 1) == 13.2, nv
+    assert nv["defects"] == [], nv
+
+
+def test_net_value_from_api_extracts_ctxdemo_capitalized_rung() -> None:
+    nv = dl.net_value_from_api(CTXDEMO_SCENARIOS)
+    assert nv["rung"] == "SmolLM2-135M", nv
+    assert nv["ratio"] is None, nv
+    assert nv["defects"] == [], nv
+
+
+def test_net_value_from_api_flags_model_demo_with_no_rung_present() -> None:
+    body = '{"models":[{"name":"SmolLM2-135M","present":false}]}'
+    nv = dl.net_value_from_api(body)
+    assert nv["rung"] == "", nv
+    assert any("no model rung present" in d for d in nv["defects"]), nv
+
+
+def test_net_value_from_api_ignores_non_model_api() -> None:
+    nv = dl.net_value_from_api('{"suites":[]}')
+    assert nv["rung"] == "", nv
+    assert nv["present_rungs"] == [], nv
+    assert nv["defects"] == [], nv
+
+
+def test_net_value_from_api_rejects_malformed_bodies() -> None:
+    assert dl.net_value_from_api("not-json")["defects"] == ["<invalid-json>"]
+    assert dl.net_value_from_api("[]")["defects"] == ["<non-object-json>"]
+
+
+def test_probe_live_witness_attaches_net_value() -> None:
+    pages = {
+        "http://136.111.250.205/demorace/": {
+            "ok": True, "status": 200,
+            "text": "<title>fak · reuse demo</title>", "error": "",
+        },
+        "http://136.111.250.205/demorace/api/ladder": {
+            "ok": True, "status": 200, "text": DEMORACE_LADDER, "error": "",
+        },
+    }
+
+    def fake_fetch(url: str, timeout_s: float) -> dict[str, object]:
+        return pages[url]
+
+    witness = dl.probe_live_witness("http://136.111.250.205/demorace/", 1.0, fetcher=fake_fetch)
+    assert witness["ok"], witness
+    assert witness["net_value"]["rung"] == "SmolLM2-135M", witness
+
+
+def test_card_rung_defects_flags_card_not_naming_live_rung() -> None:
+    links = [{"href": "http://136.111.250.205/demorace/", "text": "race", "card": True}]
+    witnesses = [{"href": "http://136.111.250.205/demorace/",
+                  "net_value": {"rung": "SmolLM2-135M"}}]
+    defects = dl.card_rung_defects(links, witnesses)
+    assert len(defects) == 1, defects
+    assert "does not name its live model rung SmolLM2-135M" in defects[0], defects
+
+
+def test_card_rung_defects_passes_when_card_names_rung() -> None:
+    links = [{"href": "http://136.111.250.205/demorace/",
+              "text": "hosted · live model research · SmolLM2-135M race", "card": True}]
+    witnesses = [{"href": "http://136.111.250.205/demorace/",
+                  "net_value": {"rung": "SmolLM2-135M"}}]
+    assert dl.card_rung_defects(links, witnesses) == []
+
+
+def test_card_rung_defects_skips_non_model_cards() -> None:
+    links = [{"href": "http://136.111.250.205:8150/", "text": "turntax", "card": True}]
+    witnesses = [{"href": "http://136.111.250.205:8150/",
+                  "net_value": {"rung": ""}}]
+    assert dl.card_rung_defects(links, witnesses) == []
+
+
+def test_net_value_lines_render_rung_and_delta() -> None:
+    audit = {"witnesses": [{"href": "http://136.111.250.205/demorace/",
+                            "net_value": {"rung": "SmolLM2-135M",
+                                          "ratio": {"a": 15200, "c": 1152, "ratio": 13.19}}}]}
+    lines = dl.net_value_lines(audit)
+    assert len(lines) == 1, lines
+    assert "rung=SmolLM2-135M" in lines[0], lines
+    assert "13.2x eliminated" in lines[0], lines
+
+
 def test_hosted_status_matrix_folds_http_https_and_witness_state() -> None:
     href = "http://136.111.250.205:8150/"
     audit = {
