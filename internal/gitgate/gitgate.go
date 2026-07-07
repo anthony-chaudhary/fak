@@ -141,8 +141,12 @@ var defaultHazards = []hazard{
 	// Never --autostash in the shared tree: an aborted/conflicted rebase pops the
 	// stash back as a working-tree blob, dumping a peer's in-flight WIP into your
 	// tree and leaving a dangling `autostash` stash (CLAUDE.md / [[fak-shared-tree-high-churn-commit]]).
-	{sub: "rebase", long: "--autostash", law: "autostash refused: never `rebase --autostash` in the shared tree — an abort pops the stash into your working tree, sweeping a peer's WIP (CLAUDE.md). Reach a clean tree first (stash explicit paths or commit your work), THEN `git rebase` with no autostash."},
-	{sub: "pull", long: "--autostash", law: "autostash refused: never `pull --rebase --autostash` in the shared tree — a conflict abort pops the stash into your working tree, sweeping a peer's WIP (CLAUDE.md). Reach a clean tree first, then `git fetch` + `git rebase origin/main` with no autostash."},
+	// The remedy MUST name `git merge`, not `git rebase`: rebase is refused
+	// categorically below (sub=="rebase") for the shared trunk, so a remedy that
+	// says "then rebase" points the agent straight at another refusal — the
+	// self-refuting-remedy loop (docs/notes/CONFIRM-GATE-DEADLOCK-2026-07-04.md).
+	{sub: "rebase", long: "--autostash", law: "autostash refused: never `rebase --autostash` in the shared tree — an abort pops the stash into your working tree, sweeping a peer's WIP (CLAUDE.md). Reach a clean tree first (stash explicit paths or commit your work), then `git fetch` + `git merge origin/main` in place — never rebase the shared trunk."},
+	{sub: "pull", long: "--autostash", law: "autostash refused: never `pull --rebase --autostash` in the shared tree — a conflict abort pops the stash into your working tree, sweeping a peer's WIP (CLAUDE.md). Reach a clean tree first (stash explicit paths or commit your work), then `git fetch` + `git merge origin/main` in place — never rebase the shared trunk."},
 	// Never destroy the shared working tree: `reset --hard` discards tracked-file
 	// changes and `clean -f` deletes untracked files — both sweep a peer's WIP
 	// (AGENTS.md destructive-op list). A `--soft`/`--mixed` reset and a `clean -n`

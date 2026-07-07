@@ -202,6 +202,31 @@ func TestClassify(t *testing.T) {
 	}
 }
 
+// TestAutostashRemedyNamesMergeNotRebase pins the self-refuting-remedy fix: the
+// autostash refusal's remedy must recommend `git merge` (gitgate's own sanctioned
+// move) and never `git rebase` — rebase is refused categorically for the shared
+// trunk (Classify below), so a remedy that says "then rebase" points the agent
+// straight at another refusal (the self-refuting-remedy loop of
+// docs/notes/CONFIRM-GATE-DEADLOCK-2026-07-04.md).
+func TestAutostashRemedyNamesMergeNotRebase(t *testing.T) {
+	g := New()
+	law, denied := g.Classify("git pull --autostash origin main")
+	if !denied {
+		t.Fatalf("git pull --autostash must be refused; law=%q", law)
+	}
+	if !strings.Contains(law, "git merge origin/main") {
+		t.Errorf("autostash remedy must recommend `git merge origin/main`; law=%q", law)
+	}
+	if strings.Contains(law, "rebase origin/main") {
+		t.Errorf("autostash remedy still recommends `git rebase origin/main`, a categorically-refused command; law=%q", law)
+	}
+	// And the command the remedy names must itself clear gitgate — merge is not
+	// refused, rebase is.
+	if _, mergeDenied := g.Classify("git merge origin/main"); mergeDenied {
+		t.Errorf("the recommended `git merge origin/main` is itself refused by gitgate")
+	}
+}
+
 // TestUnwrapShellSources pins the pure recovery layer directly: every yielded source
 // always includes the original command, the recovered `$(...)`/backtick bodies and
 // `bash -c` strings are present, and the pass is bounded + crash-free on adversarial input.
