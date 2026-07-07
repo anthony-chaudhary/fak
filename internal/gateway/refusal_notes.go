@@ -156,7 +156,13 @@ func livelockInBandNote(a ToolAdjudication) string {
 		a.Livelock.RepeatCount,
 		livelockCallLabel(*a.Livelock),
 		a.Livelock.SuggestedChange)
-	if a.Livelock.Fuse {
+	if a.Livelock.Escalate {
+		// The retryable fuse itself was ignored turn after turn. This refusal is now
+		// TERMINAL: the turn escalates to a deny-all and the session's bounded give-up
+		// policy will end it. Tell the model the loop is over so it stops and reports
+		// the blocker instead of burning more tokens re-proposing the same call.
+		note += " ABORT=terminal (this identical call has been refused too many times; it will NOT be admitted — stop retrying, end the turn, and report the blocker with a witness)"
+	} else if a.Livelock.Fuse {
 		// The advisory note repeated for several turns and the loop kept going, so the
 		// fuse converted this call into a refusal. Say so plainly: the model must change
 		// approach, not re-propose — re-proposing the identical call fuses again.

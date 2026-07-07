@@ -1368,6 +1368,17 @@ func unwrapHTTPPlanner(p agent.Planner) *agent.HTTPPlanner {
 	return hp
 }
 
+// reasonSecretExfil / reasonSecretDiscovered are the closed-vocabulary result-quarantine
+// reason codes for credential-shaped bytes. They are called out specially by the
+// retrievability banner because — unlike every other quarantine class — the page-in gate
+// re-screens on release and refuses any bytes that still match, so a secret NEVER pages
+// back into context. (Mirror of internal/abi.ReasonSecretExfil / ReasonSecretDiscovered,
+// duplicated as local literals to avoid an import solely for two banner strings.)
+const (
+	reasonSecretExfil      = "SECRET_EXFIL"
+	reasonSecretDiscovered = "RESULT_SECRET_DISCOVERED"
+)
+
 // resultAdmissionNote names any inbound tool result the kernel PAGED OUT so a quarantine
 // stub does not read as a broken tool — in ONE line. A quarantine is a routine safety
 // precaution (most often a credential-shaped string or injection-shaped text in the
@@ -1420,8 +1431,34 @@ func resultAdmissionNote(adms []ResultAdmission) string {
 			parts = append(parts, reason)
 		}
 	}
+	// The retrievability clause must be HONEST per reason class. Most quarantines
+	// (TRUST_VIOLATION / OVERSIZE / injection-shaped text) page back in via the kernel
+	// page-in gate. Secret-class quarantines (SECRET_EXFIL / RESULT_SECRET_DISCOVERED)
+	// do NOT: the page-in gate re-screens on release and refuses any bytes that still
+	// match, so a credential-shaped result never returns to context — by design.
+	// Telling a worker such bytes are "retrievable" is false AND actively harmful: it
+	// baits a retrieval loop (worker #2704 re-read the same held result to ~125k tokens
+	// chasing a promise the gate would never honor). So name the secret class honestly
+	// and give it a concrete next step instead of a false promise.
+	hasSecret := counts[reasonSecretExfil] > 0 || counts[reasonSecretDiscovered] > 0
+	hasNonSecret := false
+	for _, r := range order {
+		if r != reasonSecretExfil && r != reasonSecretDiscovered {
+			hasNonSecret = true
+			break
+		}
+	}
+	var retrievability string
+	switch {
+	case hasSecret && !hasNonSecret:
+		retrievability = "held; credential-shaped bytes will NOT page back into context (secrets are absolute by design — the page-in gate re-screens and refuses release). If this was a placeholder/example or config value, do not re-read to retrieve it — proceed without the secret, or ask the operator to whitelist the value's shape."
+	case hasSecret && hasNonSecret:
+		retrievability = "paged out, not lost. Non-secret results are retrievable via the kernel page-in gate; credential-shaped results (SECRET_EXFIL) will NOT page back — do not re-read to retrieve them, proceed without them or ask the operator to whitelist the shape."
+	default:
+		retrievability = "paged out, not lost; retrievable via the kernel page-in gate."
+	}
 	note := "[fak] " + strconv.Itoa(n) + " " + noun + " " + verb + " held out of context (" +
-		strings.Join(parts, ", ") + ") — paged out, not lost; retrievable via the kernel page-in gate. " +
+		strings.Join(parts, ", ") + ") — " + retrievability + " " +
 		"Routine guard behavior, not an error you caused; see the `fak` extension for per-result detail."
 	if len(livelocks) > 0 {
 		note += " " + strings.Join(livelocks, " ")
@@ -1485,7 +1522,9 @@ func resultLivelockInBandNote(a ResultAdmission) string {
 	note := "LIVELOCK_DETECTED repeat=" + strconv.Itoa(a.Livelock.RepeatCount) +
 		" repeated_result=" + livelockCallLabel(*a.Livelock) +
 		" approach=" + a.Livelock.SuggestedChange
-	if a.Livelock.Fuse {
+	if a.Livelock.Escalate {
+		note += " ABORT=terminal (re-reading this same result keeps producing the same held/paged-out stub — it will NOT change; stop re-reading, proceed without it or report the blocker)"
+	} else if a.Livelock.Fuse {
 		note += " fuse=armed"
 	}
 	return note

@@ -62,6 +62,41 @@ func TestResultAdmissionNoteShrink(t *testing.T) {
 	}
 }
 
+// TestResultAdmissionNoteSecretRetrievabilityIsHonest pins the #2704 fix: the banner must
+// NOT promise a credential-shaped (SECRET_EXFIL) result is "retrievable via the page-in
+// gate" — the gate re-screens and refuses release, so that promise is false and baits a
+// retrieval loop. A secret-only batch says the bytes will NOT page back and gives a
+// concrete next step; a non-secret batch keeps the retrievable phrasing; a mixed batch
+// distinguishes the two.
+func TestResultAdmissionNoteSecretRetrievabilityIsHonest(t *testing.T) {
+	// Secret-only: no false "retrievable" promise; must say it will NOT page back.
+	secret := resultAdmissionNote([]ResultAdmission{qadm("tc1", "Read", "SECRET_EXFIL")})
+	if strings.Contains(secret, "retrievable via the kernel page-in gate") {
+		t.Errorf("secret-only note must not promise retrievability; got: %s", secret)
+	}
+	if !strings.Contains(secret, "NOT page back") {
+		t.Errorf("secret-only note must say the bytes will NOT page back; got: %s", secret)
+	}
+	if !strings.Contains(secret, "SECRET_EXFIL") {
+		t.Errorf("secret-only note should still name the reason code; got: %s", secret)
+	}
+
+	// Non-secret: keeps the retrievable phrasing (those really do page back).
+	nonsecret := resultAdmissionNote([]ResultAdmission{qadm("tc1", "WebFetch", "TRUST_VIOLATION")})
+	if !strings.Contains(nonsecret, "retrievable via the kernel page-in gate") {
+		t.Errorf("non-secret note should keep the retrievable phrasing; got: %s", nonsecret)
+	}
+
+	// Mixed: must distinguish — non-secret retrievable, secret NOT.
+	mixed := resultAdmissionNote([]ResultAdmission{
+		qadm("tc1", "WebFetch", "TRUST_VIOLATION"),
+		qadm("tc2", "Read", "SECRET_EXFIL"),
+	})
+	if !strings.Contains(mixed, "NOT page back") {
+		t.Errorf("mixed note must say the secret result will NOT page back; got: %s", mixed)
+	}
+}
+
 // TestResultAdmissionNoteOnceDedup pins the A half: a held result is announced ONCE per
 // session (trace), even though the client replays it — and re-quarantines it — every turn.
 // A genuinely NEW held result on a later turn still emits; the dedup is per-trace.

@@ -253,14 +253,30 @@ func (s *Server) annotateToolLivelock(trace string, adjs []ToolAdjudication) map
 		// refusal is retryable per-tool feedback (not a deny-all session stop): the
 		// existing adjudicationNote machinery renders LIVELOCK_FUSE as "fak refused this
 		// repeated call", which is the structural break the advisory note alone never was.
-		if env.Fuse && adjs[h.idx].Admitted {
+		//
+		// Terminal escalation: once the run passes the ABORT count (env.Escalate), even
+		// the retryable fuse has been ignored turn after turn — the model keeps
+		// re-proposing the identical call and the auto-continue burns tokens without end
+		// (worker #2704: an identical Bash call fused at 6, then spun to ~125k tokens
+		// because RETRYABLE feedback is auto-continued). Stamp the refusal TERMINAL so
+		// toolRejectionIsRetryableFeedback returns false and the all-refused turn becomes
+		// a deny-all — the bounded give-up path that actually ends the session. This only
+		// engages far above the fuse, so the advisory + retryable fuse always fire first.
+		switch {
+		case env.Fuse && adjs[h.idx].Admitted:
+			disposition := "RETRYABLE"
+			by := "livelock-fuse"
+			if env.Escalate {
+				disposition = "TERMINAL"
+				by = "livelock-abort"
+			}
 			adjs[h.idx].Admitted = false
 			adjs[h.idx].RepairedArguments = nil
 			adjs[h.idx].Verdict = WireVerdict{
 				Kind:        "DENY",
 				Reason:      ReasonLivelockFuse,
-				By:          "livelock-fuse",
-				Disposition: "RETRYABLE",
+				By:          by,
+				Disposition: disposition,
 			}
 			if fused == nil {
 				fused = map[string]struct{}{}
@@ -268,6 +284,13 @@ func (s *Server) annotateToolLivelock(trace string, adjs []ToolAdjudication) map
 			if id := adjs[h.idx].ToolCallID; id != "" {
 				fused[id] = struct{}{}
 			}
+		case env.Escalate && !adjs[h.idx].Admitted && toolRejectionIsRetryableFeedback(adjs[h.idx].Verdict):
+			// An ALREADY-denied call the model keeps re-proposing past the abort count:
+			// its per-tool refusal is being ignored just like the admitted loop, so lift
+			// its retryable disposition to TERMINAL and let the all-refused turn escalate
+			// to a deny-all stop. (MALFORMED/MISROUTE reasons stay retryable by classifier
+			// design — those are genuinely fixable, not a stuck loop.)
+			adjs[h.idx].Verdict.Disposition = "TERMINAL"
 		}
 	}
 	return fused

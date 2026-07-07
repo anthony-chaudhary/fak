@@ -55,6 +55,48 @@ func TestAnnotateToolLivelockFusesRepeatedAdmittedCall(t *testing.T) {
 	}
 }
 
+// TestAnnotateToolLivelockEscalatesToTerminalDenyAll proves the terminal rung: an
+// identical admitted call that survives the retryable fuse and keeps repeating past the
+// abort count (threshold*3 = 9) is stamped TERMINAL, so the all-refused turn becomes a
+// deny-all session stop instead of the retryable feedback that let #2704 spin forever.
+func TestAnnotateToolLivelockEscalatesToTerminalDenyAll(t *testing.T) {
+	s := &Server{}
+	mk := func() []ToolAdjudication {
+		return []ToolAdjudication{{
+			ToolCallID: "tc-loop",
+			Tool:       "Bash",
+			ArgsDigest: "sha256:abc",
+			Admitted:   true,
+			Verdict:    WireVerdict{Kind: "ALLOW"},
+		}}
+	}
+	// Repeats 1..8: the fuse (6) arms but the disposition stays RETRYABLE feedback.
+	var adjs []ToolAdjudication
+	for i := 1; i <= 8; i++ {
+		adjs = mk()
+		s.annotateToolLivelock("sess-abort", adjs)
+		if i >= 6 && !toolRejectionIsRetryableFeedback(adjs[0].Verdict) {
+			t.Fatalf("repeat %d: fused refusal must stay retryable before the abort count, got %+v", i, adjs[0].Verdict)
+		}
+	}
+	// Repeat 9: the terminal rung arms — the refusal is now non-retryable, so the
+	// whole-turn outcome is a deny-all stop.
+	adjs = mk()
+	s.annotateToolLivelock("sess-abort", adjs)
+	if adjs[0].Verdict.Kind != "DENY" || adjs[0].Verdict.Reason != ReasonLivelockFuse {
+		t.Fatalf("repeat 9 verdict = %+v, want DENY/%s", adjs[0].Verdict, ReasonLivelockFuse)
+	}
+	if toolRejectionIsRetryableFeedback(adjs[0].Verdict) {
+		t.Fatalf("repeat 9 refusal must NOT be retryable (terminal escalation), got %+v", adjs[0].Verdict)
+	}
+	if adjs[0].Livelock == nil || !adjs[0].Livelock.Escalate {
+		t.Fatalf("repeat 9 adjudication should carry an escalate=true envelope, got %+v", adjs[0].Livelock)
+	}
+	if got := adjudicationOutcomeForTurn(adjs, 0, 0); got != adjudicationOutcomeDenyAll {
+		t.Fatalf("a terminally-escalated turn = %v, want deny-all session stop", got)
+	}
+}
+
 // TestAnnotateToolLivelockFuseDropsKeptCall proves the whole served path: a fused
 // call is removed from kept (never reaches the wire) and counted in dropped.
 func TestAnnotateToolLivelockFuseDropsKeptCall(t *testing.T) {
