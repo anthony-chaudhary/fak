@@ -1,0 +1,39 @@
+{
+  "schema": "fak-trajctl-health/1",
+  "commit": "f00dfeed",
+  "window": "7d",
+  "calibration": {
+    "methods": [
+      {
+        "method": "judge-verdict",
+        "version": "2",
+        "agreement": 0.31,
+        "baseline_agreement": 0.82,
+        "samples": 40
+      },
+      {
+        "method": "witnessed-commit-progress",
+        "version": "1",
+        "agreement": 0.97,
+        "baseline_agreement": 0.96,
+        "samples": 61
+      }
+    ]
+  },
+  "metrics": {
+    "stall_rate": {
+      "scope": "fleet",
+      "current": 0.09,
+      "baseline": 0.08,
+      "sessions": 25
+    },
+    "nudge_outcomes": [
+      {
+        "nudge": "re-anchor",
+        "success_rate": 0.74,
+        "baseline_success_rate": 0.75,
+        "samples": 12
+      }
+    ]
+  }
+}

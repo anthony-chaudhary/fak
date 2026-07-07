@@ -142,6 +142,10 @@ ISSUE_CREATE_PRODUCERS = {
         "check_issue_contract(",
         "issue_contract_draft(",
     ],
+    "tools/trajctl_signal.py": [
+        "check_issue_contract(",
+        "issue_contract_draft(",
+    ],
 }
 
 

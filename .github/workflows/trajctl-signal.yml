@@ -1,0 +1,96 @@
+name: trajctl-signal
+
+# Turn a TRAJECTORY-HEALTH regression (a trajctl calibration collapse, a
+# stall-rate spike, a nudge-outcome regression) into a specific, deduped,
+# lane-routed GitHub issue the dispatch loop can resolve — the trajectory-health
+# sibling of score-signal / gate-signal / bench-signal (#2574, epic #2533).
+#
+# SAFE BY DEFAULT — and, for now, DRY-RUN ONLY: the live producer that folds the
+# `fak-trajctl/1` ledger into the `fak-trajctl-health/1` envelope this feeder
+# consumes is the epic's source work (#2566 the comparison metric, #2561 the
+# second source) and has not landed. Until it does, this scheduled run proves the
+# feeder end-to-end every day — the pure plan/dedup core via its self-test FIRST,
+# then the full CLI path (envelope load -> relevance filter -> label-scoped dedup
+# against the real open backlog -> worst-first cap -> contract-ready render) as a
+# dry-run over the committed regressed fixture — and files NOTHING. The fixture
+# plan is surfaced to the step summary + an artifact so the rendered contract
+# stays reviewable. When the live fold lands, add the fold step + the
+# operator-armed live rung the way gate-signal.yml does (dry-run on schedule,
+# `workflow_dispatch` live=true to arm), keeping the same storm bounds: marker
+# dedup, dedupe-to-update, and the worst-first --max-issues cap.
+on:
+  schedule:
+    # Daily 09:13 UTC — an off-the-hour minute clear of the other scheduled jobs
+    # (garden 06:23, dogfood 06:41, dogfood-coverage 07:13, steering-guard 07:33,
+    # score-signal 07:41, gate-signal 07:53, bench-signal 08:03, scoreboard-feed
+    # 08:17, 08:27/08:43/08:47/08:57, 09:07/09:37 feeds).
+    - cron: "13 9 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: trajctl-signal
+  cancel-in-progress: false
+
+jobs:
+  trajctl-signal:
+    name: trajctl health regression -> issue (dry-run)
+    if: github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # The plan/dedup logic FIRST: a planned issue below is only meaningful if
+      # the pure core that produced it is itself proven correct.
+      - name: trajctl-signal self-test
+        run: python tools/trajctl_signal_test.py
+
+      # Plan the issues (dry-run) over the committed regressed fixture — the full
+      # CLI path including the label-scoped dedup fetch against the REAL open
+      # backlog. Nothing is filed: there is no `--live` in this workflow.
+      - name: plan trajctl-signal issues (dry-run over the committed fixture)
+        run: |
+          python tools/trajctl_signal.py \
+            --from tools/trajctl_signal.data/regressed-health.json \
+            --json > trajctl-signal-plan.json
+          python tools/trajctl_signal.py \
+            --from tools/trajctl_signal.data/regressed-health.json \
+            > trajctl-signal-plan.txt
+          cat trajctl-signal-plan.txt
+
+      - name: payload -> step summary
+        if: always()
+        run: |
+          {
+            echo "## trajctl-signal plan"
+            echo "_Mode: dry-run (nothing filed). The live health-fold producer is #2566/#2561's seam; until it lands this run proves the feeder over the committed regressed fixture._"
+            echo '```'
+            cat trajctl-signal-plan.txt 2>/dev/null || echo "(no plan)"
+            echo '```'
+            echo '<details><summary>machine plan</summary>'
+            echo
+            echo '```json'
+            cat trajctl-signal-plan.json 2>/dev/null || echo "{}"
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload plan artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trajctl-signal-plan
+          path: |
+            trajctl-signal-plan.json
+            trajctl-signal-plan.txt
+          if-no-files-found: ignore

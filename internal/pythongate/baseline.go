@@ -511,6 +511,8 @@ var grandfathered = []string{
 	"tools/tool_coverage_audit.py",
 	"tools/tooling_quality_scorecard_test.py",
 	"tools/tooling_quality_scorecard.py",
+	"tools/trajctl_signal_test.py",
+	"tools/trajctl_signal.py",
 	"tools/transcript_workload_smoke_test.py",
 	"tools/transcript_workload.py",
 	"tools/turntax_plot.py",
