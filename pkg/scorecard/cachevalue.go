@@ -199,6 +199,32 @@ func GrossNetDivergenceKPI(gross, net float64) KPI {
 	return k
 }
 
+// CacheValueSubAspectKeys is the canonical, ordered set of the four D1 sub-aspect KPI keys
+// #2815 names -- the same exported-canonical-list treatment AThemeWitnesses / CThemeArms get,
+// so the four sub-aspects are themselves an enumerable, addressable set (not four string
+// literals scattered across the KPI builders). It is the "individually retirable" contract as
+// data: a consumer folds D1 once, then iterates these keys to retire the heaviest sub-aspect
+// defect worst-first, and D1SubAspectKPIs yields them in exactly this order.
+var CacheValueSubAspectKeys = []string{
+	"observation_completeness", // A-theme: fraction of witnesses present per fire
+	"valuation_basis_honesty",  // B3: fraction of fak $ figures carrying a basis
+	"ablation_coverage",        // C-theme: fraction of arms wired
+	"gross_net_divergence",     // D: |fak_share_gross - fak_share_net| normalized
+}
+
+// D1SubAspectKPIs builds the four cache-value sub-aspect KPIs from the caller-supplied facts,
+// in CacheValueSubAspectKeys order. Each KPI is INDIVIDUALLY RETIRABLE -- a consumer can score,
+// inspect, or retire any one sub-aspect standalone without folding the whole card -- and
+// ComposeD1 folds exactly this slice, so the enumeration and the D1 headline can never drift.
+func D1SubAspectKPIs(f CacheValueFacts) []KPI {
+	return []KPI{
+		ObservationCompletenessKPI(f.FireWitnessCounts),
+		ValuationBasisHonestyKPI(f.DollarFigures, f.DollarFiguresWithBasis),
+		AblationCoverageKPI(f.AblationArmsWired),
+		GrossNetDivergenceKPI(f.FakShareGross, f.FakShareNet),
+	}
+}
+
 // ComposeD1 folds the four cache-value sub-aspects into the D1 headline payload. The
 // composite corpus.value is the D1 headline an RSI loop trends; cachevalue_debt is the count
 // of sub-aspect defects (each individually retirable). Each raw sub-aspect 0..1 score is also
@@ -206,13 +232,7 @@ func GrossNetDivergenceKPI(gross, net float64) KPI {
 // from one payload. The strict grade curve (GradeStrict) is used because this is a
 // provenance-honesty card, like the conflation card it sits beside.
 func ComposeD1(f CacheValueFacts) Payload {
-	kpis := []KPI{
-		ObservationCompletenessKPI(f.FireWitnessCounts),
-		ValuationBasisHonestyKPI(f.DollarFigures, f.DollarFiguresWithBasis),
-		AblationCoverageKPI(f.AblationArmsWired),
-		GrossNetDivergenceKPI(f.FakShareGross, f.FakShareNet),
-	}
-	return Fold(CacheValueScoreSchema, kpis, "cachevalue_debt", nil, Messages{
+	return Fold(CacheValueScoreSchema, D1SubAspectKPIs(f), "cachevalue_debt", nil, Messages{
 		Finding:         "cache-value sub-aspects carry debt: the fak-authored share is not yet honestly observed / based / ablated / net-aligned",
 		FindingClean:    "cache-value sub-aspects clean: observation, valuation basis, ablation coverage and gross/net divergence all pass",
 		NextAction:      "retire the heaviest sub-aspect defect worst-first by adding the real thing (capture the witness / label the basis / wire the arm / converge net->gross)",

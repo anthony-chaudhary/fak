@@ -217,6 +217,48 @@ func TestComposeD1Deterministic(t *testing.T) {
 	}
 }
 
+// The four D1 sub-aspects #2815 names are an enumerable, canonical set: CacheValueSubAspectKeys
+// lists exactly the four issue-contract keys in order, D1SubAspectKPIs yields one KPI per key in
+// that same order, and folding that slice is byte-identical to ComposeD1 -- so the enumeration
+// (the "individually retirable" contract as data) can never drift from the D1 headline.
+func TestD1SubAspectKPIsEnumerationMatchesContractAndComposesToD1(t *testing.T) {
+	wantKeys := []string{"observation_completeness", "valuation_basis_honesty", "ablation_coverage", "gross_net_divergence"}
+	if len(CacheValueSubAspectKeys) != len(wantKeys) {
+		t.Fatalf("CacheValueSubAspectKeys=%v want the four #2815 sub-aspects %v", CacheValueSubAspectKeys, wantKeys)
+	}
+	for i, want := range wantKeys {
+		if CacheValueSubAspectKeys[i] != want {
+			t.Errorf("CacheValueSubAspectKeys[%d]=%q want %q", i, CacheValueSubAspectKeys[i], want)
+		}
+	}
+
+	f := CacheValueFacts{
+		FireWitnessCounts:      []int{3, 5},
+		DollarFigures:          7,
+		DollarFiguresWithBasis: 5,
+		AblationArmsWired:      2,
+		FakShareGross:          0.20,
+		FakShareNet:            0.05,
+	}
+	kpis := D1SubAspectKPIs(f)
+	if len(kpis) != len(CacheValueSubAspectKeys) {
+		t.Fatalf("D1SubAspectKPIs returned %d KPIs, want %d (one per sub-aspect)", len(kpis), len(CacheValueSubAspectKeys))
+	}
+	// each KPI is the sub-aspect at the matching canonical position -- individually addressable
+	for i, key := range CacheValueSubAspectKeys {
+		if kpis[i].Key != key {
+			t.Errorf("D1SubAspectKPIs[%d].Key=%q want %q", i, kpis[i].Key, key)
+		}
+	}
+	// folding the enumerated KPIs is identical to ComposeD1 -- enumeration and headline can't drift
+	fromEnum := Fold(CacheValueScoreSchema, D1SubAspectKPIs(f), "cachevalue_debt", nil, Messages{Grade: GradeStrict})
+	d1 := ComposeD1(f)
+	if fromEnum.Corpus["value"] != d1.Corpus["value"] || fromEnum.Corpus["cachevalue_debt"] != d1.Corpus["cachevalue_debt"] {
+		t.Errorf("enumerated fold diverged from ComposeD1: value %v/%v debt %v/%v",
+			fromEnum.Corpus["value"], d1.Corpus["value"], fromEnum.Corpus["cachevalue_debt"], d1.Corpus["cachevalue_debt"])
+	}
+}
+
 // honestBaseline is the pinned "last accepted honest" floor the D2 gate ratchets against:
 // gross == net (no inflation) and every fak $ figure labelled. It mirrors #2783's corrected
 // last-2h corpus (net ~3.4%).
