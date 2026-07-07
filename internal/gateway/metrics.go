@@ -163,6 +163,18 @@ type gatewayMetrics struct {
 	toolPruneCount    uint64 // WITNESSED: total tool defs removed across all prune turns
 	toolPrunedPropose uint64 // WITNESSED: pruned tool names later proposed, deduped once per trace/tool
 
+	// toolRefMu guards the tool_reference SANITIZE accumulators (a correctness transform, not a
+	// cache saving): the client's INTERNAL `tool_reference` blocks — emitted inside a ToolSearch
+	// tool_result — are not a valid Anthropic tool_result.content type, so a body carrying one is
+	// 400'd upstream as malformed. sanitizeAnthropicToolReferences rewrites each into a wire-valid
+	// text block before relay. WITNESSED (fak authored the rewrite):
+	//   - toolRefTurns:     turns on which >=1 tool_reference block was converted.
+	//   - toolRefConverted: cumulative tool_reference blocks converted across all those turns.
+	// A body with no tool_reference records nothing (the common turn), exactly like a clean prune.
+	toolRefMu        sync.Mutex
+	toolRefTurns     uint64 // WITNESSED: turns where >=1 tool_reference block was converted to text
+	toolRefConverted uint64 // WITNESSED: total tool_reference blocks converted across all sanitize turns
+
 	// resetShadowMu guards the per-session resetScore SHADOW accumulators (#792). The reset
 	// policy (reset_score.go) recommends cut-vs-reset; this folds the recommend-only verdict
 	// stream into /metrics so an operator sees the cut-vs-reset pressure WITHOUT the policy ever
@@ -841,6 +853,31 @@ func (m *gatewayMetrics) inboundPrunedToolProposalSnapshot() uint64 {
 	return m.toolPrunedPropose
 }
 
+// observeToolRefSanitize records that a turn converted one or more Claude-Code-internal
+// tool_reference blocks into wire-valid text blocks. A body with no tool_reference records nothing
+// (out.Reason != ToolRefReasonNone), so the common turn is silent — exactly as a clean prune is.
+// WITNESSED: fak authored the rewrite that kept the body from being 400'd upstream.
+func (m *gatewayMetrics) observeToolRefSanitize(out agent.ToolRefOutcome) {
+	if m == nil || out.Reason != agent.ToolRefReasonNone || out.Converted <= 0 {
+		return
+	}
+	m.toolRefMu.Lock()
+	m.toolRefTurns++
+	m.toolRefConverted += uint64(out.Converted)
+	m.toolRefMu.Unlock()
+}
+
+// toolRefSanitizeSnapshot reads the WITNESSED tool_reference-sanitize accumulators under their
+// lock. Pure read — the exit summary and the Prometheus surface fold the same two numbers.
+func (m *gatewayMetrics) toolRefSanitizeSnapshot() (turns, converted uint64) {
+	if m == nil {
+		return 0, 0
+	}
+	m.toolRefMu.Lock()
+	defer m.toolRefMu.Unlock()
+	return m.toolRefTurns, m.toolRefConverted
+}
+
 // recordResetShadow folds one compacted turn's resetScore SHADOW verdict into the recommend-only
 // accumulators. The reset policy NEVER acts in shadow mode (reset_shadow.go); this only counts what
 // it WOULD recommend, bucketed by the closed ResetReason, so an operator can watch the cut-vs-reset
@@ -1171,6 +1208,16 @@ type AdjudicationSummary struct {
 	ToolPruneTurns uint64 `json:"tool_prune_turns"`
 	ToolPruneCount uint64 `json:"tool_prune_count"`
 
+	// ToolRefTurns / ToolRefConverted witness the tool_reference SANITIZE correctness transform:
+	// the client's INTERNAL tool_reference blocks (emitted inside a ToolSearch tool_result) are not
+	// a valid Anthropic tool_result.content type, so fak rewrites each into a wire-valid text block
+	// before relay to keep the body from being 400'd upstream. ToolRefTurns counts turns with >=1
+	// conversion; ToolRefConverted the total blocks converted. Zero on a harness that never surfaces
+	// tool-discovery results back into a tool_result — nonzero means fak repaired a body the provider
+	// would otherwise have rejected as malformed.
+	ToolRefTurns     uint64 `json:"tool_ref_turns"`
+	ToolRefConverted uint64 `json:"tool_ref_converted"`
+
 	// DenyAllStops is how many served turns this session had EVERY proposed tool call
 	// refused by the floor, which the wire reports as end_turn — a STOP the agent did not
 	// choose (it wanted to act, the floor blocked all of it). Surfaced in the guard exit
@@ -1242,6 +1289,7 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	// snapshot already copied it under compactMu); only attach a non-empty map so a clean
 	// session keeps the JSON field absent (omitempty).
 	sum.ToolPruneTurns, sum.ToolPruneCount = m.inboundToolPruneSnapshot()
+	sum.ToolRefTurns, sum.ToolRefConverted = m.toolRefSanitizeSnapshot()
 	sum.DenyAllStops, _ = m.denyAllSnapshot()
 	sum.ToolFeedbackTurns, _ = m.toolFeedbackSnapshot()
 	if len(comp.bailReasons) > 0 {
@@ -3088,6 +3136,15 @@ func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
 	writeCounter(b, "fak_gateway_inbound_tools_pruned_total", "WITNESSED (fak authored): cumulative unreachable tool DEFINITIONS dropped from the outbound tools[] across the session. A pure uncached-token saving — the pruner drops only tools after the cache_control breakpoint and re-proves the protected prefix is byte-identical, so a counted prune never bursts the provider-side upstream cache.", int64(pruneCount))
 	writeCounter(b, "fak_gateway_inbound_tools_prune_turns_total", "WITNESSED (fak authored): turns on which at least one unreachable tool def was pruned from tools[]. Zero on a harness (e.g. Claude Code) whose single cache_control breakpoint sits on the LAST tool, since nothing is then droppable.", int64(pruneTurns))
 	writeCounter(b, "fak_gateway_inbound_tools_pruned_then_proposed_total", "WITNESSED (fak authored): pruned tool definition names that the model later proposed anyway, counted once per trace/tool. Nonzero means the advertised floor and observed model behavior drifted; call-time adjudication still default-denies the proposal.", int64(m.inboundPrunedToolProposalSnapshot()))
+
+	// The tool_reference SANITIZE family (a CORRECTNESS transform, not a cache saving). WITNESSED:
+	// how many Claude-Code-internal tool_reference blocks fak rewrote into wire-valid text blocks so
+	// the body was not 400'd upstream as malformed. Nonzero means fak repaired a body the provider
+	// would otherwise have rejected outright (witnessed defect: session b98cf818, killed by a
+	// ToolSearch tool_result carrying tool_reference blocks).
+	refTurns, refConverted := m.toolRefSanitizeSnapshot()
+	writeCounter(b, "fak_gateway_tool_reference_converted_total", "WITNESSED (fak authored): cumulative Claude-Code-internal tool_reference content blocks rewritten into wire-valid text blocks across the session. tool_reference is not a valid Anthropic tool_result.content type; converting it in place keeps a ToolSearch-bearing body from being rejected upstream with a 400 malformed error.", int64(refConverted))
+	writeCounter(b, "fak_gateway_tool_reference_sanitize_turns_total", "WITNESSED (fak authored): turns on which at least one tool_reference block was converted. Zero on a harness that never replays tool-discovery results into a tool_result; nonzero means fak repaired a body the provider would otherwise have 400'd as malformed.", int64(refTurns))
 }
 
 // resetShadowSnapshot is a lock-free copy of the resetScore SHADOW accumulators for rendering.

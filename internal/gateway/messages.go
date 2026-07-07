@@ -199,6 +199,16 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// history (auto-compaction), never fak. The observation is folded after the served turn, once
 	// the provider's cache counters are known.
 	inboundPrefixDigest := inboundProtectedPrefixDigest(req.Raw)
+	// Tool-reference sanitization (correctness, runs on EVERY wire, before any shrinker or the
+	// prefix-digest matters for cache accounting): the Claude Code client emits its INTERNAL
+	// `tool_reference` blocks inside a ToolSearch tool_result, which is not a valid Anthropic
+	// tool_result.content block type — a body carrying one is 400'd upstream as malformed
+	// (witnessed: session b98cf818, which died on turn 2 right after a ToolSearch result). Rewrite
+	// each into a wire-valid `text` block naming the tool so the body forwards cleanly and the model
+	// still sees which tools the search surfaced. Fail-safe (identity on any ambiguity) and placed
+	// AFTER the digest — a tool_reference only ever lives in a late-turn tool_result, never in the
+	// cached protected prefix, so this leaves the digest's harness-coherence meaning intact.
+	s.sanitizeAnthropicToolReferences(req)
 	// Managed-cache 1h TTL upgrade (#1850 / epic #1844 C6): when the lever is on
 	// (fak guard --managed-cache, auto-on for API-key-billed sessions; or the
 	// FAK_ABLATE_TTL_1H ablation arm), extend an existing stable-head cache_control
@@ -876,6 +886,25 @@ func (s *Server) maybeElideAnthropicRaw(req *agent.AnthropicMessagesRequest) (fi
 	req.Raw = out
 	s.metrics.observeUncachedTrim(outcome)
 	return outcome.Reason == agent.ElideReasonNone
+}
+
+// sanitizeAnthropicToolReferences rewrites the Claude Code client's INTERNAL `tool_reference`
+// content blocks (emitted inside a ToolSearch/tool-discovery tool_result) into wire-valid `text`
+// blocks before req.Raw is forwarded upstream. `tool_reference` is not a valid Anthropic
+// tool_result.content block type, so a body carrying one is 400'd as malformed (witnessed:
+// session b98cf818). Unlike the cache-preserving shrinkers this is a CORRECTNESS fix, so it runs
+// on EVERY wire and needs no cache anchor — agent.SanitizeAnthropicToolReferences is fail-safe
+// (returns req.Raw unchanged on any ambiguity, converts rather than drops, and never edits any
+// byte outside a tool_reference block). Runs BEFORE the shrinkers so they operate on an already
+// well-formed body. Returns whether it FIRED.
+func (s *Server) sanitizeAnthropicToolReferences(req *agent.AnthropicMessagesRequest) (fired bool) {
+	if req == nil || len(req.Raw) == 0 {
+		return false
+	}
+	out, outcome := agent.SanitizeAnthropicToolReferences(req.Raw)
+	req.Raw = out
+	s.metrics.observeToolRefSanitize(outcome)
+	return outcome.Reason == agent.ToolRefReasonNone
 }
 
 // maybePlanAnthropicRaw is the ctxplan planned-view req.Raw transform for the Anthropic
