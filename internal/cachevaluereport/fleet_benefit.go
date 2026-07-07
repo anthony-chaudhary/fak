@@ -296,10 +296,10 @@ func providerTokenEqFromRow(row SavingsRow) float64 {
 }
 
 func fakTokenEqFromRow(row SavingsRow) float64 {
-	if row.NetSavedTokenEquiv != 0 {
-		return row.NetSavedTokenEquiv
-	}
-	return float64(row.CompactionShedTokens)
+	// Shared with the owner-attribution fold so a legacy (unpriced) warm-fire row is
+	// re-priced at the 0.1x cache-read marginal in BOTH roll-ups, never the raw 1.0x
+	// this used to book here (#2798).
+	return fakAuthoredTokenEquiv(row.NetSavedTokenEquiv, row.CompactionShedTokens, row.CompactionCacheReadTokens)
 }
 
 func (r *FleetBenefitReport) fillFinding() {

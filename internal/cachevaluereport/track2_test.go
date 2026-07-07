@@ -340,6 +340,189 @@ func TestNewSavingsRowsSplitsProviderAndCompaction(t *testing.T) {
 	if compaction.CompactionShedTokens != 3000 || !approxTrack2(compaction.CompactionSavedUSD, 0.015) {
 		t.Fatalf("compaction row did not price shed tokens: %+v", compaction)
 	}
+	// No cache_read witnessed at the fire -> observed-COLD -> shed keeps the full-input
+	// basis (1.0x), the pre-#2794 number, and the row is labeled FULL_INPUT (#2796).
+	if compaction.ValuationBasis != ValuationBasisFullInput {
+		t.Fatalf("observed-cold compaction basis = %q, want %s", compaction.ValuationBasis, ValuationBasisFullInput)
+	}
+	if provider.ValuationBasis != ValuationBasisObservedNet {
+		t.Fatalf("provider basis = %q, want %s", provider.ValuationBasis, ValuationBasisObservedNet)
+	}
+}
+
+// TestWarmCompactionShedPricedAtMarginal is the #2794 witness: a compaction fire that
+// landed on a WARM prefix (the provider reported cache_read at the fire) drops tokens the
+// provider would have billed as cache_reads at 0.1x, so the avoided cost is shed*0.1x, not
+// the full-input shed*1.0x the pre-fix report booked. The row is labeled CACHE_READ_MARGINAL.
+func TestWarmCompactionShedPricedAtMarginal(t *testing.T) {
+	warm := NewSavingsRows(SavingsObservation{
+		SessionType:               "guard",
+		Provider:                  "anthropic",
+		Context:                   "claude",
+		CompactionShedTokens:      3000,
+		CompactionCacheReadTokens: 50_000, // a warm fire: provider served the prefix from cache
+		CompactionFired:           1,
+		Pricing:                   SavingsPricing{InputPerMTokUSD: 5, OutputPerMTokUSD: 25},
+	}, twoTrackNow)
+	if len(warm) != 1 {
+		t.Fatalf("want one compaction row, got %d: %+v", len(warm), warm)
+	}
+	row := warm[0]
+	if row.ValuationBasis != ValuationBasisCacheReadMarginal {
+		t.Fatalf("warm fire basis = %q, want %s", row.ValuationBasis, ValuationBasisCacheReadMarginal)
+	}
+	// 3000 shed * 0.1x = 300 token-equiv; priced at $5/MTok = $0.0015 (a tenth of the
+	// $0.015 an observed-cold fire of the same shed would book).
+	if !approxTrack2(row.SavedTokenEquiv, 300) {
+		t.Fatalf("warm shed token-equiv = %.4f, want 300 (shed*0.1x)", row.SavedTokenEquiv)
+	}
+	if !approxTrack2(row.CompactionSavedUSD, 0.0015) {
+		t.Fatalf("warm shed $ = %.6f, want 0.0015 (marginal, not full-input 0.015)", row.CompactionSavedUSD)
+	}
+}
+
+// TestShedValueAgreesWithFireGate is the #2798 acceptance: the value the report books for
+// a shed token on a warm fire must equal the value the fire gate
+// (agent.CacheBurstBreakEvenTurns) prices that same token at. Both consult a single 0.1x
+// read multiplier; this asserts they have not drifted.
+//
+// The canonical source of that 0.1 is gateway.CacheReadMultiplier (internal/gateway/
+// cache_pricing.go), pinned by gateway's own cache_pricing_test.go. It is copied down —
+// NOT imported — into agent.defaultCacheReadMult (agent must not import gateway: cycle) and
+// into this package's two constants (cachevaluereport is architest tier 2 and must not
+// import the tier-4 gateway/agent packages). So a real cross-package symbol pin is
+// architecturally impossible here; the honest guard is (1) lock this file's two marginals to
+// ONE value (providerCacheReadMultiplier), so no same-file edit can split the compaction and
+// provider bases, and (2) assert that shared value still equals the documented 0.1 mirror,
+// with a literal that names what it mirrors so a reviewer changing the canonical constant
+// knows to sweep every copy. If gateway.CacheReadMultiplier ever moves, gateway's pin test
+// fails first; this test's literal is the reminder that this copy must move with it.
+func TestShedValueAgreesWithFireGate(t *testing.T) {
+	const shed = 10_000
+	// canonicalReadMarginal mirrors gateway.CacheReadMultiplier / agent.defaultCacheReadMult
+	// (both unexported or tier-4, hence uninmportable here). Named, not a bare 0.1, so the
+	// drift it guards is legible.
+	const canonicalReadMarginal = 0.1
+	// (1) Lock this file's two marginals together: the compaction shed and the provider
+	// read rebate must price a cached token identically — the single-source-of-truth the
+	// pre-#2798 split (compaction 1.0x vs provider 0.1x) violated.
+	if compactionShedMarginalMultiplier != providerCacheReadMultiplier {
+		t.Fatalf("in-file marginals split: compaction %.3f vs provider %.3f — one source of truth broken (#2798)",
+			compactionShedMarginalMultiplier, providerCacheReadMultiplier)
+	}
+	// (2) That shared value must still equal the canonical 0.1 the fire gate uses.
+	if compactionShedMarginalMultiplier != canonicalReadMarginal {
+		t.Fatalf("report marginal %.3f drifted from canonical fire-gate readMult %.3f (gateway.CacheReadMultiplier) — sweep all copies (#2798)",
+			compactionShedMarginalMultiplier, canonicalReadMarginal)
+	}
+	rows := NewSavingsRows(SavingsObservation{
+		Provider:                  "anthropic",
+		Context:                   "claude",
+		CompactionShedTokens:      shed,
+		CompactionCacheReadTokens: 1, // any positive read => warm
+		CompactionFired:           1,
+		Pricing:                   SavingsPricing{InputPerMTokUSD: 5},
+	}, twoTrackNow)
+	if len(rows) != 1 {
+		t.Fatalf("want one compaction row, got %d", len(rows))
+	}
+	// The fire gate values the shed token at shed*marginal per turn; the report must
+	// book the same shed*marginal token-equivalent, not shed*1.0x.
+	wantTokenEquiv := float64(shed) * canonicalReadMarginal
+	if !approxTrack2(rows[0].SavedTokenEquiv, wantTokenEquiv) {
+		t.Fatalf("reported shed value = %.1f, fire-gate value = %.1f — they must agree (#2798)",
+			rows[0].SavedTokenEquiv, wantTokenEquiv)
+	}
+}
+
+// TestFakAuthoredTokenEquivRollupsAgree locks the invariant that the two roll-ups which
+// credit fak's authored token-equivalent — the fleet-benefit report (fakTokenEqFromRow) and
+// the owner-attribution fold (foldOwnerAttribution) — derive it the SAME way, because both
+// now route through the shared fakAuthoredTokenEquiv (#2798). The regression it guards is
+// real: the fold re-priced a legacy (unpriced) warm-fire row at the 0.1x cache-read marginal
+// while the fleet report booked the raw shed at 1.0x, so the same historical row inflated
+// fak's fleet token-equiv 10x on one page and not the other.
+func TestFakAuthoredTokenEquivRollupsAgree(t *testing.T) {
+	cases := []struct {
+		name            string
+		netSaved        float64
+		shed, cacheRead uint64
+		want            float64
+	}{
+		{"priced row uses its net token-equiv", 250, 3000, 1500, 250},
+		{"legacy warm re-priced at 0.1x marginal", 0, 3000, 1500, 300},
+		{"legacy cold keeps full input 1.0x", 0, 3000, 0, 3000},
+		{"nothing shed credits nothing", 0, 0, 0, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := fakAuthoredTokenEquiv(tc.netSaved, tc.shed, tc.cacheRead); !approxTrack2(got, tc.want) {
+				t.Fatalf("fakAuthoredTokenEquiv = %.4f, want %.4f", got, tc.want)
+			}
+			// The fleet-benefit roll-up must credit exactly the shared value, row for row.
+			row := SavingsRow{
+				Provider: "fak", Mechanism: "compaction_shed",
+				NetSavedTokenEquiv: tc.netSaved, CompactionShedTokens: tc.shed,
+				CompactionCacheReadTokens: tc.cacheRead,
+			}
+			if fr := fakTokenEqFromRow(row); !approxTrack2(fr, tc.want) {
+				t.Fatalf("fakTokenEqFromRow = %.4f, want %.4f (must match shared helper)", fr, tc.want)
+			}
+			// The owner-attribution fold must credit exactly the shared value, bucket for bucket.
+			owner := foldOwnerAttribution(nil, []SavingsBucket{{
+				Period: "2026-W26", Provider: "fak", Mechanism: "compaction_shed",
+				NetSavedTokenEquiv: tc.netSaved, CompactionShedTokens: tc.shed,
+				CompactionCacheReadTokens: tc.cacheRead,
+			}})
+			if len(owner) != 1 {
+				t.Fatalf("foldOwnerAttribution returned %d buckets, want 1", len(owner))
+			}
+			if !approxTrack2(owner[0].FakAuthoredTokenEquiv, tc.want) {
+				t.Fatalf("fold FakAuthoredTokenEquiv = %.4f, want %.4f (must match shared helper)",
+					owner[0].FakAuthoredTokenEquiv, tc.want)
+			}
+		})
+	}
+}
+
+// TestRenderRefusesUnlabeledFakDollar is the #2796 render acceptance: the P&L table must
+// stamp the price basis onto every fak dollar figure, and must REFUSE (render a marker, not
+// a bare number) a nonzero fak $ that carries no inferable basis. A warm fak bucket renders
+// its CACHE_READ_MARGINAL basis; a cold one renders FULL_INPUT.
+func TestRenderRefusesUnlabeledFakDollar(t *testing.T) {
+	// A warm compaction bucket: cache_read witnessed at the fires, so the $ is marginal.
+	warm := []SavingsRow{{
+		Date: "2026-06-22", Provider: "fak", Mechanism: "compaction_shed",
+		CompactionShedTokens: 3000, CompactionCacheReadTokens: 50_000,
+		SavedTokenEquiv: 300, NetSavedTokenEquiv: 300, CompactionSavedUSD: 0.0015,
+		ValuationBasis: ValuationBasisCacheReadMarginal,
+	}}
+	out := RenderTwoTrack(FoldTwoTrack(nil, warm, twoTrackNow))
+	if !strings.Contains(out, string(ValuationBasisCacheReadMarginal)) {
+		t.Fatalf("warm fak $ must render its CACHE_READ_MARGINAL basis:\n%s", out)
+	}
+
+	// A cold compaction bucket keeps the full-input basis label.
+	cold := []SavingsRow{{
+		Date: "2026-06-22", Provider: "fak", Mechanism: "compaction_shed",
+		CompactionShedTokens: 3000, SavedTokenEquiv: 3000, NetSavedTokenEquiv: 3000,
+		CompactionSavedUSD: 0.015, ValuationBasis: ValuationBasisFullInput,
+	}}
+	out = RenderTwoTrack(FoldTwoTrack(nil, cold, twoTrackNow))
+	if !strings.Contains(out, string(ValuationBasisFullInput)) {
+		t.Fatalf("cold fak $ must render its FULL_INPUT basis:\n%s", out)
+	}
+
+	// A fak bucket with a nonzero $ but an unknown mechanism has no inferable basis: the
+	// renderer must refuse it, not print a bare dollar figure.
+	unlabeled := []SavingsRow{{
+		Date: "2026-06-22", Provider: "fak", Mechanism: "compaction_mystery",
+		CompactionSavedUSD: 9.99,
+	}}
+	out = RenderTwoTrack(FoldTwoTrack(nil, unlabeled, twoTrackNow))
+	if !strings.Contains(out, "REFUSED:no-basis") {
+		t.Fatalf("unlabeled fak $ must be REFUSED, not printed bare:\n%s", out)
+	}
 }
 
 // TestNewSavingsRowsPricesUpgradedCreationAt1hTier is the #2179 fix witness: a

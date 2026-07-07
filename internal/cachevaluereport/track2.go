@@ -45,6 +45,37 @@ const DefaultSavingsLedgerRel = "docs/nightrun/cache-savings.jsonl"
 
 const providerCacheReadMultiplier = 0.1
 
+// compactionShedMarginalMultiplier is the marginal value of a compaction-shed token
+// when the fire landed on a WARM prefix. It is deliberately the SAME 0.1x the fire
+// gate prices a shed token at (agent.defaultCacheReadMult, consulted by
+// agent.CacheBurstBreakEvenTurns / headBurstEconomics): a token the provider would
+// have billed as a cache_read at 0.1x, not fresh input at 1.0x, is only worth its
+// 0.1x read cost when compaction drops it. Booking it at 1.0x — the pre-#2794 report
+// convention — over-credited fak's compaction 10x on every warm fire and was the
+// single source of the inflated fak_share (#2798). This constant and the gate's
+// readMult are the ONE source of truth for that marginal; a test asserts they agree.
+const compactionShedMarginalMultiplier = 0.1
+
+// ValuationBasis names the price basis a saved-token / $ figure was booked at, so a
+// number can never be read without knowing how it was priced — the exact gap that let
+// 1.0x-on-warm slip through (#2796). Every fak $ figure carries one; a renderer refuses
+// to print an unlabeled fak dollar.
+type ValuationBasis string
+
+const (
+	// ValuationBasisFullInput prices a shed token at the full input rate (1.0x). Honest
+	// ONLY for an observed-COLD fire — one the provider did not already have cached, so
+	// dropping it avoids a fresh-input billing. #2794 keeps 1.0x for this case alone.
+	ValuationBasisFullInput ValuationBasis = "FULL_INPUT"
+	// ValuationBasisCacheReadMarginal prices a shed token at the cache-read marginal
+	// (0.1x) — correct for a WARM fire, where the dropped token would have been billed
+	// as a cache_read, not fresh input. This is compactionShedMarginalMultiplier.
+	ValuationBasisCacheReadMarginal ValuationBasis = "CACHE_READ_MARGINAL"
+	// ValuationBasisObservedNet is the fully-netted provider-observed value (read rebate
+	// minus write premium), the provider prompt-cache row's basis.
+	ValuationBasisObservedNet ValuationBasis = "OBSERVED_NET"
+)
+
 const (
 	// SavingsDollarStatusBlind marks rows whose token axes are observed but whose
 	// dollar axes are intentionally unpriced because no trusted base price was configured.
@@ -80,6 +111,15 @@ type SavingsObservation struct {
 	CacheCreationTokens  uint64
 	OutputTokens         uint64
 	CompactionShedTokens uint64
+
+	// CompactionCacheReadTokens is the OBSERVED provider cache_read_input_tokens seen
+	// at compaction fires (gateway AdjudicationSummary.CompactionCacheReadTokens). It is
+	// the warm/cold signal #2794 prices on: a fire with cache_read>0 landed on a WARM
+	// prefix, so its shed tokens are worth only the 0.1x cache-read marginal, not 1.0x
+	// fresh input. Zero means observed-cold (or no witness), and the shed keeps the
+	// full-input basis. Not a claim fak preserved the cache (byte-identity is) — just the
+	// provider's relayed read count, used to pick the honest price basis.
+	CompactionCacheReadTokens uint64
 
 	// CacheCreationTokensUpgraded is the subset of CacheCreationTokens written while
 	// the managed-cache 1h TTL-upgrade rung (--managed-cache) was active for that
@@ -142,6 +182,12 @@ type SavingsRow struct {
 	// dropped before the turn was sent — a fak-authored token saving on the spend side.
 	CompactionShedTokens uint64 `json:"compaction_shed_tokens,omitempty"`
 
+	// CompactionCacheReadTokens is the OBSERVED provider cache_read_input_tokens at the
+	// compaction fires this row rolls up — the warm/cold witness #2794 prices on. It is
+	// persisted so a reader (and InferValuationBasis on a legacy row) can tell a warm fire
+	// (>0, shed valued at the 0.1x marginal) from an observed-cold one (0, shed at 1.0x).
+	CompactionCacheReadTokens uint64 `json:"compaction_cache_read_tokens,omitempty"`
+
 	// CompactionFired / CompactionBailed / CompactionAnchorStarved are the WITNESSED health
 	// counters persisted per #2039 so a fired-but-shed-zero session leaves a row, not silence.
 	// CompactionBudget is the resident-token threshold the lever fires past (0 = OFF).
@@ -179,6 +225,36 @@ type SavingsRow struct {
 	// compaction shedding). It is additive/omitempty: readers predating it ignore it,
 	// and the audit fold derives it from Mechanism for rows written before this field.
 	Fidelity string `json:"fidelity,omitempty"`
+
+	// ValuationBasis names the price basis the row's fak $ figures were booked at
+	// (#2796) — FULL_INPUT for an observed-cold compaction fire, CACHE_READ_MARGINAL
+	// for a warm one (the 0.1x #2794 case), OBSERVED_NET for the provider prompt-cache
+	// row. A fak dollar figure without a basis is refused at render (basisOrRefuse). It
+	// is omitempty for back-compat: rows written before this field are basis-inferred by
+	// InferValuationBasis from the mechanism at fold time.
+	ValuationBasis ValuationBasis `json:"valuation_basis,omitempty"`
+}
+
+// InferValuationBasis derives the price basis for a row written before ValuationBasis
+// existed, so the fold and the render-refusal never trip on a legacy ledger. Provider
+// prompt-cache rows are OBSERVED_NET; a compaction row with a witnessed warm read is
+// CACHE_READ_MARGINAL; a compaction row without one is FULL_INPUT. Non-dollar rows and
+// unknown mechanisms return empty (no fak $ to label).
+func (r SavingsRow) InferValuationBasis() ValuationBasis {
+	if r.ValuationBasis != "" {
+		return r.ValuationBasis
+	}
+	switch {
+	case r.Mechanism == "provider_prompt_cache":
+		return ValuationBasisObservedNet
+	case r.Mechanism == "compaction_shed":
+		if r.CompactionCacheReadTokens > 0 {
+			return ValuationBasisCacheReadMarginal
+		}
+		return ValuationBasisFullInput
+	default:
+		return ""
+	}
 }
 
 // NetUSDComputed re-derives the NET from the row's own component $ fields, so a
@@ -200,11 +276,12 @@ type SavingsBucket struct {
 	Mechanism string `json:"mechanism"`
 	Sessions  int    `json:"sessions"`
 
-	InputTokens          uint64 `json:"input_tokens"`
-	CacheReadTokens      uint64 `json:"cache_read_tokens"`
-	CacheCreationTokens  uint64 `json:"cache_creation_tokens"`
-	OutputTokens         uint64 `json:"output_tokens"`
-	CompactionShedTokens uint64 `json:"compaction_shed_tokens"`
+	InputTokens               uint64 `json:"input_tokens"`
+	CacheReadTokens           uint64 `json:"cache_read_tokens"`
+	CacheCreationTokens       uint64 `json:"cache_creation_tokens"`
+	OutputTokens              uint64 `json:"output_tokens"`
+	CompactionShedTokens      uint64 `json:"compaction_shed_tokens"`
+	CompactionCacheReadTokens uint64 `json:"compaction_cache_read_tokens,omitempty"`
 
 	// Compaction health (#2039): fired/bailed/anchor_starved let the report
 	// distinguish a lever that FIRED from one that was idle. CompactionBudget is
@@ -311,6 +388,7 @@ func NewSavingsRows(obs SavingsObservation, now time.Time) []SavingsRow {
 		if row.CacheCreationTokensUpgraded > 0 {
 			row.CacheCreationTierProvenance = CacheCreationTierProvenanceGatewayAttributed
 		}
+		row.ValuationBasis = ValuationBasisObservedNet
 		row.SavedTokenEquiv = providerSavedTokenEquiv(obs.CacheReadTokens, obs.CacheCreationTokens, row.CacheCreationTokensUpgraded)
 		row.NetSavedTokenEquiv = row.SavedTokenEquiv
 		row.InputPerMTokUSD = obs.Pricing.InputPerMTokUSD
@@ -333,20 +411,63 @@ func NewSavingsRows(obs SavingsObservation, now time.Time) []SavingsRow {
 		row.Mechanism = "compaction_shed"
 		row.Fidelity = Fidelity(row.Mechanism)
 		row.CompactionShedTokens = obs.CompactionShedTokens
+		row.CompactionCacheReadTokens = obs.CompactionCacheReadTokens
 		row.CompactionFired = obs.CompactionFired
 		row.CompactionBailed = obs.CompactionBailed
 		row.CompactionAnchorStarved = obs.CompactionAnchorStarved
 		row.CompactionBudget = obs.CompactionBudget
-		row.SavedTokenEquiv = float64(obs.CompactionShedTokens)
+		// Price the shed at the honest marginal (#2794/#2798). A fire on a WARM prefix
+		// (CompactionCacheReadTokens>0) drops tokens the provider would have billed as
+		// cache_reads at 0.1x, so the avoided cost is shed×0.1x — the SAME marginal the
+		// fire gate (agent.CacheBurstBreakEvenTurns) values a dropped cached token at. Only
+		// an observed-COLD fire (no cache_read witnessed) avoids a full-input billing and
+		// keeps the 1.0x basis. ValuationBasis records which, so the number is never read
+		// without its price basis.
+		mult, basis := compactionShedValuation(obs.CompactionCacheReadTokens)
+		row.ValuationBasis = basis
+		row.SavedTokenEquiv = float64(obs.CompactionShedTokens) * mult
 		row.NetSavedTokenEquiv = row.SavedTokenEquiv
 		row.InputPerMTokUSD = obs.Pricing.InputPerMTokUSD
 		row.OutputPerMTokUSD = obs.Pricing.OutputPerMTokUSD
-		row.CompactionSavedUSD = perMTok(obs.Pricing.InputPerMTokUSD, float64(obs.CompactionShedTokens))
+		// Price the $ from the SAME marginal token-equiv (row.SavedTokenEquiv = shed×mult),
+		// not from the raw shed count, so the $ and the token-equiv can never disagree on
+		// the shed token's value — the single-source-of-truth invariant of #2798.
+		row.CompactionSavedUSD = perMTok(obs.Pricing.InputPerMTokUSD, row.SavedTokenEquiv)
 		row.NetUSD = row.NetUSDComputed()
 		normalizeSavingsDimensions(&row)
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+// compactionShedValuation returns the marginal multiplier and its ValuationBasis for a
+// compaction fire, given the OBSERVED provider cache_read at the fire. A warm fire
+// (cache_read>0) prices shed at compactionShedMarginalMultiplier (0.1x, the fire gate's
+// readMult) under CACHE_READ_MARGINAL; an observed-cold fire keeps 1.0x under FULL_INPUT.
+// This is the ONE place the shed token's marginal is decided (#2794/#2798).
+func compactionShedValuation(compactionCacheRead uint64) (mult float64, basis ValuationBasis) {
+	if compactionCacheRead > 0 {
+		return compactionShedMarginalMultiplier, ValuationBasisCacheReadMarginal
+	}
+	return 1.0, ValuationBasisFullInput
+}
+
+// fakAuthoredTokenEquiv is the fak-authored token-equivalent a compaction row or bucket
+// represents, and the ONE place that decision is made (#2798). It returns the priced
+// NetSavedTokenEquiv when the row already carries one (every row emitted since #2794 does),
+// and otherwise re-prices the raw shed at its honest witnessed marginal (warm→0.1x,
+// cold→1.0x via compactionShedValuation) — never the raw 1.0x that over-credited fak's
+// compaction 10x on warm fires pre-#2794. A legacy row persisted before the priced fields
+// existed reaches the fallback; a warm one (compactionCacheRead>0) is discounted, a cold one
+// keeps full input. Sharing this keeps the fleet-benefit roll-up (fakTokenEqFromRow) and the
+// owner-attribution fold from disagreeing on such a row, which they did while each carried
+// its own copy of the fallback.
+func fakAuthoredTokenEquiv(netSavedTokenEquiv float64, shed, compactionCacheRead uint64) float64 {
+	if netSavedTokenEquiv != 0 {
+		return netSavedTokenEquiv
+	}
+	mult, _ := compactionShedValuation(compactionCacheRead)
+	return float64(shed) * mult
 }
 
 // providerSavedTokenEquiv is the read rebate plus the write axis's saved-token-equiv
@@ -512,6 +633,7 @@ func foldSavings(rows []SavingsRow) []SavingsBucket {
 		b.CacheCreationTokens += row.CacheCreationTokens
 		b.OutputTokens += row.OutputTokens
 		b.CompactionShedTokens += row.CompactionShedTokens
+		b.CompactionCacheReadTokens += row.CompactionCacheReadTokens
 		b.CompactionFired += row.CompactionFired
 		b.CompactionBailed += row.CompactionBailed
 		b.CompactionAnchorStarved += row.CompactionAnchorStarved
@@ -810,11 +932,11 @@ func foldOwnerAttribution(track1 []Bucket, track2 []SavingsBucket) []OwnerAttrib
 		switch {
 		case b.Provider == "fak" || strings.HasPrefix(b.Mechanism, "compaction"):
 			dst.FakCompactionShedTokens += b.CompactionShedTokens
-			if b.NetSavedTokenEquiv != 0 {
-				dst.FakAuthoredTokenEquiv += b.NetSavedTokenEquiv
-			} else {
-				dst.FakAuthoredTokenEquiv += float64(b.CompactionShedTokens)
-			}
+			// A legacy bucket with no priced token-equiv is re-priced at its honest
+			// witnessed marginal (warm→0.1x, cold→1.0x) rather than the raw 1.0x that
+			// inflated fak_share pre-#2794 — the same rule the fleet-benefit roll-up uses,
+			// via the shared fakAuthoredTokenEquiv (#2798).
+			dst.FakAuthoredTokenEquiv += fakAuthoredTokenEquiv(b.NetSavedTokenEquiv, b.CompactionShedTokens, b.CompactionCacheReadTokens)
 		case b.Mechanism == "provider_prompt_cache":
 			if b.NetSavedTokenEquiv != 0 {
 				dst.ProviderPromptCacheTokenEquiv += b.NetSavedTokenEquiv
@@ -833,6 +955,33 @@ func foldOwnerAttribution(track1 []Bucket, track2 []SavingsBucket) []OwnerAttrib
 		out = append(out, b)
 	}
 	return out
+}
+
+// fakDollarBasisOrRefuse returns the price basis for a bucket's fak dollar figure and
+// whether it may be printed (#2796). A bucket whose fak $ is zero has nothing to label
+// (basis "", ok true). A fak-authored bucket with a nonzero CompactionSavedUSD must carry
+// an inferable basis — warm (cache_read>0 → CACHE_READ_MARGINAL) or cold (FULL_INPUT); a
+// provider bucket is OBSERVED_NET. ok is false only when a nonzero fak $ has no inferable
+// basis at all, which is the refusal the renderer prints instead of a bare number.
+func (b SavingsBucket) fakDollarBasisOrRefuse() (ValuationBasis, bool) {
+	isFak := b.Provider == "fak" || strings.HasPrefix(b.Mechanism, "compaction")
+	if !isFak {
+		if b.Mechanism == "provider_prompt_cache" {
+			return ValuationBasisObservedNet, true
+		}
+		return "", true
+	}
+	if b.CompactionSavedUSD == 0 {
+		return "", true
+	}
+	// A nonzero fak $ must carry an inferable basis. Only the compaction_shed mechanism has
+	// one (warm→marginal, cold→full-input); any other fak-authored mechanism carrying a
+	// dollar figure is unpriced-by-basis and must be refused rather than printed bare (#2796).
+	if b.Mechanism != "compaction_shed" {
+		return "", false
+	}
+	_, basis := compactionShedValuation(b.CompactionCacheReadTokens)
+	return basis, true
 }
 
 func breakEvenLabel(broke bool) string {
@@ -875,6 +1024,14 @@ func RenderTwoTrack(r TwoTrackReport) string {
 			pricing := b.DollarStatus
 			if pricing == "" {
 				pricing = "priced"
+			}
+			// A fak $ figure must never render without its price basis (#2796). Stamp the
+			// basis into the pricing cell for fak buckets; refuse (mark, don't print a bare
+			// number) when a nonzero fak $ has no inferable basis.
+			if basis, ok := b.fakDollarBasisOrRefuse(); !ok {
+				pricing = "REFUSED:no-basis"
+			} else if basis != "" {
+				pricing = pricing + ":" + string(basis)
 			}
 			fmt.Fprintf(&sb, "  %-9s  %-16s  %-23s  %5d  %10.4f  %10.4f  %10.4f  %10.4f  %12.4f  %-13s  %12.4f%s\n",
 				b.Period, b.Provider, b.Mechanism, b.Sessions, b.RebateUSD, b.CompactionSavedUSD, b.WritePremiumUSD, b.SpendUSD,
