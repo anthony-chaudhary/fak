@@ -6,8 +6,10 @@
           {
             "command": "python",
             "args": [
-              "-c",
-              "import subprocess,sys; subprocess.call([sys.executable,'-m','dos.cli','hook','posttool','--workspace','.']); sys.exit(0)"
+              "tools/dos_hook.py",
+              "posttool",
+              "--workspace",
+              "."
             ],
             "type": "command"
           }
@@ -33,8 +35,10 @@
           {
             "command": "python",
             "args": [
-              "-c",
-              "import subprocess,sys; subprocess.call([sys.executable,'-m','dos.cli','hook','pretool','--workspace','.']); sys.exit(0)"
+              "tools/dos_hook.py",
+              "pretool",
+              "--workspace",
+              "."
             ],
             "type": "command"
           }
