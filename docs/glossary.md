@@ -149,6 +149,12 @@ opposed to `decode`, which emits one token at a time. It lives only in `internal
 
 ## Adjacent kernel vocabulary (so the cluster stops blurring)
 
+- **kernel (the word itself)** — three unrelated senses share it: fak as
+  OS-metaphor reference monitor (this page's **agent** row), the compute-kernel
+  arithmetic paths (`internal/model/kernel.go`), and the literal CUDA
+  `__global__` kernels in `internal/compute/cuda_kernels.cu`. The full
+  disambiguation, with the header-to-silicon depth ladder, is
+  [what is a CUDA kernel?](explainers/what-is-a-cuda-kernel.md).
 - **vDSO** (`internal/vdso`) — virtual dynamic shared object, a fast, safe read path borrowed
   from the OS-kernel term. A 3-tier local cache (pure / content / static) consulted *before
   the entire adjudicator chain*. A hit answers a repeated call with no engine round-trip
