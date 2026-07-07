@@ -144,6 +144,22 @@ _CONTRACT_HOLD_LEDGER = "contract-holds.jsonl"
 # chosen lane lease needs a split/reroute, not another identical launch tick.
 DEFAULT_MULTI_LANE_HOLD_TTL_H = 24
 _MULTI_LANE_HOLD_LEDGER = "multi-lane-holds.jsonl"
+# Dirty-path / same-issue-WIP collision holds (#2977/#2975 durability): a chosen
+# issue that names a path already dirty in this shared checkout — or that stacks
+# onto a prior resolver's uncommitted same-issue WIP — will collide IDENTICALLY on
+# the next tick, because the dirty tree does not shrink between 5-minute ticks.
+# Unlike the contract and multi-lane gates, the collision gates had NO durable hold,
+# so the picker re-selected the same colliding head every tick, re-refused it, and
+# burned the bounded scan budget (contract_scan) on the same 2-3 heads instead of
+# reaching disjoint solvable work. This ledger gives a collision the same durable,
+# TTL-bounded skip the other gates have: hold the colliding issue for the window so
+# the cumulative scan advances past it. The TTL is short (a collision clears the
+# moment a peer commits/reverts the dirty path — a LOCAL event that no gh updatedAt
+# reflects), so the hold re-checks the live tree every few hours rather than pinning
+# the issue for a day. Set to 0 to disable (readers return empty, matching the
+# contract/multi-lane TTL<=0 short-circuit).
+DEFAULT_COLLISION_HOLD_TTL_H = 3
+_COLLISION_HOLD_LEDGER = "collision-holds.jsonl"
 # Operator-forced contract-gate bypass ledger (#2637): every time --force downgrades
 # a FAILED issue-contract readiness gate to advisory and spawns anyway, one row is
 # appended here with the operator's structured --force-reason. This is the durable,
@@ -1383,6 +1399,125 @@ def record_multi_lane_holds(runs_dir: Path, rows: list[dict[str, Any]], *,
                     "reason": str(r.get("reason") or "")[:240],
                     "uncovered_lanes": [str(l) for l in
                                         (r.get("uncovered_lanes") or []) if l][:24],
+                }, ensure_ascii=False) + "\n")
+    except OSError:
+        pass  # fail-open: a missed skip repeats one refusal, never blocks work
+
+
+def collision_held_records(
+    runs_dir: Path,
+    *,
+    ttl_h: int = DEFAULT_COLLISION_HOLD_TTL_H,
+    now_ts: float | None = None,
+    updated_ts: dict[int, float] | None = None,
+    only: set[int] | None = None,
+) -> list[dict[str, Any]]:
+    """Recent DIRTY_PATH_COLLISION / SAME_ISSUE_WIP holds, deduped to the latest
+    verdict per issue. Mirrors ``multi_lane_held_records`` over its own ledger so a
+    still-colliding issue leaves the candidate stream instead of being re-refused
+    every tick. A local-tree collision (``dirty_path`` / ``same_issue_wip``) clears
+    only on a LOCAL commit/revert, so it is NOT re-admitted on a remote ``updatedAt``
+    bump -- that void re-entered the same colliding head every tick while the local
+    dirty condition was unchanged. Any OTHER (content-keyed) hold is still re-admitted
+    early when the issue's gh ``updatedAt`` is newer than the hold, and the advance
+    loop re-runs the live collision check on the re-admitted head. The 3h TTL bounds
+    every hold regardless."""
+    if ttl_h <= 0:
+        return []
+    ledger = runs_dir / _COLLISION_HOLD_LEDGER
+    if not ledger.is_file():
+        return []
+    import time
+    now = now_ts if now_ts is not None else time.time()
+    horizon = now - ttl_h * 3600
+    held: dict[int, tuple[float, int, dict[str, Any]]] = {}
+    try:
+        lines = ledger.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    only_set = {int(n) for n in only} if only is not None else None
+    for idx, line in enumerate(lines):
+        try:
+            row = json.loads(line)
+            ts = float(row.get("ts") or 0)
+            if ts < horizon:
+                continue
+            n = int(row.get("issue"))
+            if only_set is not None and n not in only_set:
+                continue
+            kind = str(row.get("kind") or "")
+            # A local-tree collision (dirty_path / same_issue_wip) clears on a LOCAL
+            # commit or revert, not on a remote body edit. Re-admitting such a hold
+            # just because gh ``updatedAt`` bumped voids the hold while the local
+            # dirty condition is unchanged -- the head re-enters the pool and
+            # re-collides every tick (the #3045-style retry loop). Gate the early
+            # ``updated_ts`` re-admit to holds whose verdict a body edit can actually
+            # change (contract / multi-lane-scope live on their own ledgers, but a
+            # future collision kind keyed on issue CONTENT belongs here); the 3h TTL
+            # still expires local-collision holds, and the advance loop re-runs the
+            # live collision check on anything it does re-admit.
+            _local_collision = kind in ("dirty_path", "same_issue_wip")
+            if (updated_ts and not _local_collision
+                    and (updated_ts.get(n) or 0.0) > ts):
+                continue
+            rec = {
+                "issue": n,
+                "number": n,
+                "kind": kind,
+                "lane": str(row.get("lane") or ""),
+                "title": str(row.get("title") or "")[:200],
+                "reason": str(row.get("reason") or "")[:240],
+                "dirty_paths": [str(p) for p in (row.get("dirty_paths") or []) if p][:24],
+            }
+            prev = held.get(n)
+            if prev is None or ts > prev[0] or (ts == prev[0] and idx > prev[1]):
+                held[n] = (ts, idx, rec)
+        except (TypeError, ValueError):
+            continue
+    return [rec for _ts, _idx, rec in sorted(held.values(),
+                                            key=lambda item: (item[0], item[1]))]
+
+
+def collision_held_issues(
+    runs_dir: Path,
+    *,
+    ttl_h: int = DEFAULT_COLLISION_HOLD_TTL_H,
+    now_ts: float | None = None,
+    updated_ts: dict[int, float] | None = None,
+) -> set[int]:
+    """Issue numbers held after a dirty-path / same-issue-WIP collision this window."""
+    return {int(r.get("issue") or 0) for r in collision_held_records(
+        runs_dir, ttl_h=ttl_h, now_ts=now_ts, updated_ts=updated_ts)}
+
+
+def record_collision_holds(runs_dir: Path, rows: list[dict[str, Any]], *,
+                           live: bool, now_ts: float | None = None) -> None:
+    """Append live dirty-path / same-issue-WIP collision holds so the next tick's
+    scan starts past them. Fail-open (a missed skip repeats one refusal, never
+    blocks work), and dry-run ticks (``live`` false) never touch the ledger."""
+    if not live or not rows:
+        return
+    import time
+    now = now_ts if now_ts is not None else time.time()
+    iso = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ledger = runs_dir / _COLLISION_HOLD_LEDGER
+    try:
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        with ledger.open("a", encoding="utf-8") as f:
+            for r in rows:
+                issue = int(r.get("issue") or 0)
+                if issue <= 0:
+                    continue
+                f.write(json.dumps({
+                    "utc": iso,
+                    "ts": now,
+                    "issue": issue,
+                    "kind": str(r.get("kind") or "")[:40],
+                    "lane": str(r.get("lane") or "")[:80],
+                    "title": str(r.get("title") or "")[:200],
+                    "reason": str(r.get("reason") or "")[:240],
+                    "dirty_paths": [str(p) for p in
+                                    (r.get("dirty_paths") or []) if p][:24],
                 }, ensure_ascii=False) + "\n")
     except OSError:
         pass  # fail-open: a missed skip repeats one refusal, never blocks work
@@ -4032,7 +4167,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # verdict: a GitHub updatedAt bump (a human backfill; one bulk gh call,
     # fail-open) OR a fresh local contract overlay (a repair worker's landed
     # backfill — the write path a worker can actually complete on this host).
-    if contract_hold_ttl_h > 0 or DEFAULT_MULTI_LANE_HOLD_TTL_H > 0:
+    if (contract_hold_ttl_h > 0 or DEFAULT_MULTI_LANE_HOLD_TTL_H > 0
+            or DEFAULT_COLLISION_HOLD_TTL_H > 0):
         refreshed_ts = open_issue_updated_map(root)
         for n, ts in contract_overlay_times(runs_dir).items():
             refreshed_ts[n] = max(refreshed_ts.get(n) or 0.0, ts)
@@ -4042,6 +4178,14 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         runs_dir, ttl_h=contract_hold_ttl_h, updated_ts=refreshed_ts)
     multi_lane_held_prior = multi_lane_held_issues(
         runs_dir, ttl_h=DEFAULT_MULTI_LANE_HOLD_TTL_H, updated_ts=refreshed_ts)
+    # ...AND an issue whose last tick collided with dirty local WIP (dirty-path or
+    # same-issue-WIP). The dirty tree does not shrink between 5-minute ticks, so a
+    # colliding head would re-collide identically; holding it lets the bounded scan
+    # advance to disjoint work instead of re-refusing the same 2-3 heads forever
+    # (the durability the raw #2977/#2975 gates lacked). The short TTL re-checks the
+    # live tree periodically, so a committed/reverted path re-admits on its own.
+    collision_held_prior = collision_held_issues(
+        runs_dir, ttl_h=DEFAULT_COLLISION_HOLD_TTL_H, updated_ts=refreshed_ts)
     # The cross-lane candidate stream the bounded contract scan walks (busiest
     # lane's oldest candidate first, then each other eligible lane's, round-robin).
     # Falls back to the single chosen lane when the router fold predates the
@@ -4054,7 +4198,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     audit_abstain_held = {int(r["issue"]) for r in audit_abstain_holds
                           if r.get("issue") is not None}
     skip = (live_issues | cooled | held_no_commit | contract_held_prior
-            | multi_lane_held_prior
+            | multi_lane_held_prior | collision_held_prior
             | local_witnessed | audit_abstain_held)
     scan_stream = contract_scan_stream(eligible_lanes, skip)
     if scan_stream:
@@ -4393,6 +4537,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         payload["multi_lane_skipped"] = multi_lane_skipped
     if contract_held_prior:
         payload["contract_held_prior"] = len(contract_held_prior)
+    if collision_held_prior:
+        payload["collision_held_prior"] = len(collision_held_prior)
     payload["issue_contract_gate"] = {
         "ok": bool(contract.get("ok")),
         "unavailable": bool(contract.get("unavailable")),
@@ -4416,6 +4562,13 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                             "missing_fields": _contract_missing_fields(contract)})
     record_contract_holds(runs_dir, ledger_rows, live=live)
     record_multi_lane_holds(runs_dir, multi_lane_skipped, live=live)
+    # Give every collision the scan advanced PAST the same durable hold the terminal
+    # collision below gets, so next tick's skip set starts beyond them.
+    record_collision_holds(
+        runs_dir,
+        [{**r, "kind": "same_issue_wip"} for r in same_issue_wip_skipped]
+        + [{**r, "kind": "dirty_path"} for r in dirty_path_skipped],
+        live=live)
     if contract_hold and not force:
         # Self-serve before idling: a genuine all-scanned-fail tick dispatches a
         # contract-REPAIR worker on the held candidates instead of just holding.
@@ -4511,6 +4664,12 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
             "verdict": "SAME_ISSUE_WIP",
             "reason": reason,
         })
+        if issue_override is None:
+            record_collision_holds(runs_dir, [{
+                "kind": "same_issue_wip", "issue": target, "lane": chosen_lane,
+                "title": rec.get("title"), "reason": reason[:240],
+                "dirty_paths": wip_scan.get("dirty_paths"),
+            }], live=live)
         _record(runs_dir, payload)
         return finish(payload)
 
@@ -4532,6 +4691,12 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
             "verdict": "DIRTY_PATH_COLLISION",
             "reason": reason,
         })
+        if issue_override is None:
+            record_collision_holds(runs_dir, [{
+                "kind": "dirty_path", "issue": target, "lane": chosen_lane,
+                "title": rec.get("title"), "reason": reason[:240],
+                "dirty_paths": dirty_scan.get("dirty_paths"),
+            }], live=live)
         _record(runs_dir, payload)
         return finish(payload)
 

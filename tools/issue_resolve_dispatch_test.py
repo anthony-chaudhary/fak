@@ -820,6 +820,9 @@ class EvaluateTest(unittest.TestCase):
         mod.multi_lane_held_issues = lambda runs_dir, **k: set()
         mod.multi_lane_held_records = lambda runs_dir, **k: []
         mod.record_multi_lane_holds = lambda runs_dir, rows, **k: None
+        mod.collision_held_issues = lambda runs_dir, **k: set()
+        mod.collision_held_records = lambda runs_dir, **k: []
+        mod.record_collision_holds = lambda runs_dir, rows, **k: None
         # Hermetic next()-queue seams: no real gh updatedAt fetch, no live repair
         # worker, no repair cooldown, and a pure repair-prompt fold.
         mod.open_issue_updated_map = lambda root, **k: {}
@@ -1308,6 +1311,58 @@ class EvaluateTest(unittest.TestCase):
                 runs, ttl_h=24, now_ts=1_000_100.0,
                 updated_ts={2319: 1_000_010.0}), set())
 
+    def test_collision_hold_ledger_roundtrip_ttl_and_update_escape(self) -> None:
+        """A dirty-path / same-issue-WIP collision earns the same durable, TTL-bounded
+        skip the contract and multi-lane gates have, so the picker stops re-refusing
+        the same colliding head every tick. Dry runs never write; the TTL expires the
+        hold; a fresh gh updatedAt does NOT void a local-tree hold (it clears on a
+        local commit/revert), but still re-admits a content-keyed hold early."""
+        import tempfile
+        mod = load()
+        rows = [{
+            "issue": 2779,
+            "kind": "dirty_path",
+            "lane": "claude",
+            "title": "guard collision",
+            "reason": "names dirty local path(s): cmd/fak/guard.go",
+            "dirty_paths": ["cmd/fak/guard.go"],
+        }]
+        with tempfile.TemporaryDirectory() as td:
+            runs = Path(td)
+            # Dry-run tick never pollutes the durable ledger.
+            mod.record_collision_holds(runs, rows, live=False, now_ts=1_000_000.0)
+            self.assertEqual(mod.collision_held_issues(runs, ttl_h=3,
+                                                       now_ts=1_000_100.0), set())
+            # A live collision hold is durable and skips the issue next tick.
+            mod.record_collision_holds(runs, rows, live=True, now_ts=1_000_000.0)
+            self.assertEqual(mod.collision_held_issues(runs, ttl_h=3,
+                                                       now_ts=1_000_100.0), {2779})
+            records = mod.collision_held_records(runs, ttl_h=3, now_ts=1_000_100.0)
+            self.assertEqual(records[0]["kind"], "dirty_path")
+            self.assertEqual(records[0]["dirty_paths"], ["cmd/fak/guard.go"])
+            # Past the TTL the hold lapses so the live tree is re-checked.
+            self.assertEqual(mod.collision_held_issues(
+                runs, ttl_h=3, now_ts=1_000_000.0 + 4 * 3600), set())
+            # A gh updatedAt bump does NOT void a LOCAL-tree collision hold: the
+            # dirty path clears on a local commit/revert, not on a remote body edit,
+            # so re-admitting on updatedAt re-entered the same colliding head every
+            # tick (the #3045-style retry loop). The hold now survives the bump; only
+            # the local TTL/commit clears it.
+            self.assertEqual(mod.collision_held_issues(
+                runs, ttl_h=3, now_ts=1_000_100.0,
+                updated_ts={2779: 1_000_010.0}), {2779})
+            # A CONTENT-keyed (non-local) collision kind still re-admits early on a
+            # fresh updatedAt (a body edit can genuinely change that verdict) — the
+            # fix is scoped to local-tree kinds, not a blanket disable.
+            content_rows = [{**rows[0], "issue": 4242, "kind": "content_probe"}]
+            mod.record_collision_holds(runs, content_rows, live=True, now_ts=1_000_000.0)
+            self.assertEqual(mod.collision_held_issues(
+                runs, ttl_h=3, now_ts=1_000_100.0,
+                updated_ts={4242: 1_000_010.0}), {2779})  # 4242 re-admitted, 2779 stays held
+            # TTL<=0 disables the ledger entirely (kill switch).
+            self.assertEqual(mod.collision_held_issues(runs, ttl_h=0,
+                                                       now_ts=1_000_100.0), set())
+
     def test_prior_contract_holds_advance_the_scan(self) -> None:
         """An issue held on a PRIOR tick is skipped without a re-review, so the
         bounded scan window advances across ticks instead of pinning to the head."""
@@ -1717,6 +1772,26 @@ class EvaluateTest(unittest.TestCase):
         mod.record_contract_forced_bypass(runs_dir, row, live=True)
         mod.record_contract_forced_bypass(runs_dir, row, live=True)
         self.assertEqual(mod.contract_forced_bypass_count(runs_dir), 2)
+
+    def test_render_surfaces_forced_bypass_count(self) -> None:
+        """DONE-CONDITION #3 (#2637): the operator-facing render surfaces the forced
+        bypass — its structured reason, the gate reason, and the running count — so a
+        bypassed guard is visible, not silent telemetry."""
+        mod = load()
+        payload = {
+            "verdict": "SPAWNED", "ok": True, "backend": "claude", "live": True,
+            "target_issue": 2633, "issue_title": "thin issue",
+            "issue_contract_forced": {
+                "bypassed": True,
+                "gate_reason": "score:41<floor:100",
+                "reason": "operator: dispatch top backlog issue",
+                "bypass_count": 7,
+            },
+        }
+        rendered = mod.render(payload)
+        self.assertIn("contract gate bypassed", rendered)
+        self.assertIn("operator: dispatch top backlog issue", rendered)
+        self.assertIn("total bypasses 7", rendered)
 
     def test_issue_override_pins_target(self) -> None:
         """--issue pins an explicit target, overriding the freshest-first auto-pick."""
