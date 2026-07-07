@@ -82,6 +82,12 @@ func PreCommitGates() []Gate {
 		{Name: "INDEX_SYNC", ModeEnv: "FLEET_INDEX_GUARD", EscapeEnv: "ALLOW_INDEX_DRIFT", Check: gateIndexSync},
 		{Name: "PROVENANCE_LABEL", ModeEnv: "FLEET_PROVENANCE_GUARD", EscapeEnv: "ALLOW_PROVENANCE_DRIFT", Check: gateProvenanceLabel},
 		{Name: "HARDWARE_TELL", ModeEnv: "FLEET_HW_GUARD", EscapeEnv: "FLEET_ALLOW_HW", Check: gateHardwareTell},
+		// E2E_OVER_MOCKS is ADVISORY (issue #2901): DefaultMode "warn" so it never blocks a commit
+		// out of the box — it names the security-critical floor/quarantine surface a diff touched
+		// and asks for a witnessed end-to-end run (the /verify output), not a green mock. Set
+		// FLEET_E2E_GUARD=block to hard-enforce it ("failing the merge otherwise"), or ALLOW_NO_E2E=1
+		// to skip it once.
+		{Name: "E2E_OVER_MOCKS", ModeEnv: "FLEET_E2E_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_NO_E2E", Check: gateE2EOverMocks},
 		// PRIOR_ART is ADVISORY: DefaultMode "warn" so it never blocks a commit out of the box —
 		// it only prints the SOTA reference + a `Prior-art:` suggestion. Set FLEET_PRIORART_GUARD=block
 		// to hard-enforce it, or ALLOW_NO_PRIOR_ART=1 to skip it once. It runs LAST.
