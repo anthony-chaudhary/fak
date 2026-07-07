@@ -174,6 +174,7 @@ front page.
 
 ### Latest working notes
 
+- [trajctl dogfood — the witness report (2026-07-07)](docs/notes/TRAJCTL-DOGFOOD-2026-07-07.md) — the witness step of the trajectory-control spine (#2541, epic #2533): the `declare → score → curve → (steer)` spin run end-to-end on one real long-horizon session (the epic build-out itself), scoring seven plan phases against their real landing commits through the production `trajctlhook.RunTurnEnd` sampler + the real `git cat-file` resolver. Real `fak-trajctl/1` ledger rows, a monotonically-rising 0.14→0.86 W3 curve that holds at 6/7 (the nudge #2540 is unlanded), and a **verified-abstention** regime-gate decision (`HEALTHY → withhold`). Honest miss list: no live sampler producer and no live phase→commit binding source (both filed as #3129), the parked CLI (#2765), and the SHA-existence-not-semantic-match scorer blind spot (#2566/#2568).
 - [Triage + contract: R8 readout that proves the doctrine — overlay counter + one-ledger join (#2206)](docs/notes/AUTOCTX-R8-READOUT-CONTRACT-TRIAGE-2026-07-06.md) -- auto-indexed dated note.
 - [GLM-5.2 L4 flash-attention + CUDA-graph decode (#3076): gen/now triage + GPU server-3 witness gate](docs/notes/GLM52-DGX3-LANEA-L4-FA-CUDAGRAPH-TRIAGE-2026-07-06.md) -- auto-indexed dated note.
 - [Triage — #3080: KV paging + context-budget tuning for concurrent GLM-5.2 streams (GPU server 2 · Lane B)](docs/notes/GLM52-DGX2-LANEB-KV-BUDGET-TRIAGE-2026-07-06.md) -- auto-indexed dated note.
