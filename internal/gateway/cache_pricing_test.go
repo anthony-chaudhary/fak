@@ -256,6 +256,43 @@ func TestFakTokenEquivWarmShedPricedAtMarginal(t *testing.T) {
 	}
 }
 
+// TestFakShareCollapsesUnderWarmShedDiscount is the #2794 headline acceptance: on warm
+// traffic, booking compaction shed at full input (1.0x) over-credits fak's SHARE of the
+// period's cache value — the adversarial audit found ~7.7x-10x overstatement. Pricing the
+// warm shed at the 0.1x cache-read marginal (what those tokens actually cost as provider
+// cache_reads) collapses that phantom share back to the honest few-percent the corrected
+// report shows (~3.4% vs ~26% gross on the live last-2h window). This pins the CORRECTION
+// end to end through MechanismSavings: fak_share = FakTokenEquiv / TotalTokenEquiv.
+func TestFakShareCollapsesUnderWarmShedDiscount(t *testing.T) {
+	const (
+		cachedRead = 100_000 // provider cache_reads this session -> 90_000 read-rebate token-equiv
+		shed       = 30_000  // compaction shed on WARM fires
+	)
+	warm := AdjudicationSummary{
+		CachedPromptTokens:        cachedRead,
+		CompactionShedTokens:      shed,
+		CompactionCacheReadTokens: 1, // >0 => warm: the shed tokens were already provider cache_reads
+	}.MechanismSavings()
+
+	// Corrected: warm shed priced at the 0.1x cache-read marginal.
+	correctedShare := 100 * warm.FakTokenEquiv() / warm.TotalTokenEquiv()
+
+	// Gross: the pre-#2794 booking that valued the same shed at full input (1.0x).
+	grossFakTeq := float64(shed) * 1.0
+	grossShare := 100 * grossFakTeq / (warm.ProviderTokenEquiv() + grossFakTeq)
+
+	if grossShare <= 20 {
+		t.Fatalf("gross (full-input) fak share = %.2f%%, want the >20%% over-credit the audit found", grossShare)
+	}
+	if correctedShare >= 5 {
+		t.Fatalf("corrected (marginal) fak share = %.2f%%, want the honest few-percent (<5%%)", correctedShare)
+	}
+	// The overstatement factor must land in the ~7.7x-10x band the adversarial audit reported.
+	if factor := grossShare / correctedShare; factor < 7.0 {
+		t.Fatalf("warm-traffic overstatement factor = %.2fx, want >= 7x (audit found 7.7x-10x)", factor)
+	}
+}
+
 // TestMechanismSavingsWritePremiumAttributesUpgradedTokensAt1h is the #2179 repro: a
 // session whose cache-creation tokens were ALL written while the managed-cache 1h
 // TTL-upgrade rung was active must price that write at CacheWrite1hMultiplier
