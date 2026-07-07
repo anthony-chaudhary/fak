@@ -72,6 +72,16 @@ type anthropicInboundBlock struct {
 	ToolUseID string          `json:"tool_use_id"`
 	Content   json.RawMessage `json:"content"`
 	IsError   bool            `json:"is_error"`
+	// thinking / redacted_thinking (assistant, extended thinking): ThinkingText is the
+	// reasoning prose (JSON key "thinking", distinct from a text block's "text"); Signature
+	// signs it for the Anthropic round-trip; Data is the opaque redacted payload.
+	ThinkingText string `json:"thinking"`
+	Signature    string `json:"signature"`
+	Data         string `json:"data"`
+	// image (user / tool_result): Source is the {type,media_type,data|url} object. It is
+	// kept RAW because the canonical Message has no image field — the decoder only needs to
+	// know a block IS an image (so it emits a non-empty placeholder rather than collapsing).
+	Source json.RawMessage `json:"source"`
 }
 
 type anthropicInboundTool struct {
@@ -173,6 +183,9 @@ func decodeAnthropicMessage(m anthropicInboundMessage) []Message {
 	case "assistant":
 		var text strings.Builder
 		var calls []ToolCall
+		var thinking string
+		var signature string
+		var redacted []string
 		for _, b := range blocks {
 			switch b.Type {
 			case "text":
@@ -183,9 +196,28 @@ func decodeAnthropicMessage(m anthropicInboundMessage) []Message {
 					Type:     "function",
 					Function: Func{Name: b.Name, Arguments: inputToArgs(b.Input)},
 				})
+			case "thinking":
+				// Extended-thinking replay (#3120): preserve the reasoning text and its
+				// signature so a later re-emit keeps the block wire-valid. Dropping it and
+				// reordering the turn is a documented Anthropic 400 on a thinking-enabled wire.
+				if b.ThinkingText != "" {
+					thinking = joinNonEmpty(thinking, b.ThinkingText, "\n")
+				}
+				if b.Signature != "" {
+					signature = b.Signature
+				}
+			case "redacted_thinking":
+				if b.Data != "" {
+					redacted = append(redacted, b.Data)
+				}
+			default:
+				// Parent-class guard (#3118): any other block type (image on an assistant
+				// turn, or a future client-internal type) becomes a non-empty text marker
+				// instead of silently vanishing and collapsing the turn to empty content.
+				appendText(&text, unknownBlockPlaceholder(b))
 			}
 		}
-		return assistantMessages(text.String(), calls)
+		return assistantMessagesWithThinking(text.String(), calls, thinking, signature, redacted)
 	default: // user (and any other role): text + tool_result fan-out
 		var msgs []Message
 		var text strings.Builder
@@ -199,9 +231,40 @@ func decodeAnthropicMessage(m anthropicInboundMessage) []Message {
 				})
 			case "text":
 				appendText(&text, b.Text)
+			default:
+				// #3118/#3119: an image (or any unrecognized) block on a user turn becomes a
+				// non-empty text marker so an image-only user turn never decodes to empty.
+				appendText(&text, unknownBlockPlaceholder(b))
 			}
 		}
 		return appendUserText(msgs, &text)
+	}
+}
+
+// unknownBlockPlaceholder renders the non-empty in-band text that stands in for a content
+// block the decoder does not fold into a first-class field (#3118). It names the block type
+// (and, for an image, marks it) so a message made ENTIRELY of such blocks never collapses to
+// empty content — the shape a strict non-passthrough downstream 400s. Never returns "".
+func unknownBlockPlaceholder(b anthropicInboundBlock) string {
+	switch b.Type {
+	case "image":
+		return "[image]"
+	case "":
+		return "[content block]"
+	default:
+		return "[" + b.Type + " block]"
+	}
+}
+
+// joinNonEmpty joins a and b with sep, skipping the separator when either side is empty.
+func joinNonEmpty(a, b, sep string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	default:
+		return a + sep + b
 	}
 }
 
@@ -289,8 +352,25 @@ func canonRole(role string) string {
 // the turn is empty (no content AND no tool calls), else a single assistant Message.
 // Shared by the Anthropic and Gemini content decoders, which assemble identical turns.
 func assistantMessages(text string, calls []ToolCall) []Message {
-	msg := Message{Role: RoleAssistant, Content: text, ToolCalls: calls}
-	if msg.Content == "" && len(msg.ToolCalls) == 0 {
+	return assistantMessagesWithThinking(text, calls, "", "", nil)
+}
+
+// assistantMessagesWithThinking is assistantMessages plus preserved extended-thinking
+// (#3120): the reasoning text, its signature, and any redacted_thinking payloads ride the
+// canonical Message so the outbound Anthropic re-encode (textAndToolUseBlocks) can replay
+// them in order. A turn that carries ONLY thinking (no visible text, no tool call) is still
+// emitted — dropping it would desync the assistant/user alternation and lose the signature
+// a later turn needs.
+func assistantMessagesWithThinking(text string, calls []ToolCall, thinking, signature string, redacted []string) []Message {
+	msg := Message{
+		Role:              RoleAssistant,
+		Content:           text,
+		ToolCalls:         calls,
+		Thinking:          thinking,
+		ThinkingSignature: signature,
+		RedactedThinking:  redacted,
+	}
+	if msg.Content == "" && len(msg.ToolCalls) == 0 && msg.Thinking == "" && len(msg.RedactedThinking) == 0 {
 		return nil
 	}
 	return []Message{msg}
@@ -332,7 +412,10 @@ func asJSONString(raw json.RawMessage) (string, bool) {
 
 // parseAnthropicText folds a `system`/`content` field that may be a bare string OR
 // an array of {type:"text",text:...} (or {type:"tool_result"...}) blocks into a
-// single string. Non-text blocks contribute their text payload only.
+// single string. A text-less block (image, or any type the decoder does not fold into a
+// first-class field) contributes a non-empty placeholder naming it, so a tool_result whose
+// content is ENTIRELY such blocks never collapses to empty content (#3118/#3119) — the
+// shape a strict non-passthrough downstream 400s.
 func parseAnthropicText(raw json.RawMessage) string {
 	if len(skipSpace(raw)) == 0 {
 		return ""
@@ -353,7 +436,11 @@ func parseAnthropicText(raw json.RawMessage) string {
 		// A nested tool_result.content array of text blocks.
 		if len(blk.Content) > 0 {
 			appendText(&b, parseAnthropicText(blk.Content))
+			continue
 		}
+		// Text-less, contentless block (image / unknown): keep a non-empty marker so an
+		// all-image or all-unknown content array never folds to the empty string.
+		appendText(&b, unknownBlockPlaceholder(blk))
 	}
 	return b.String()
 }

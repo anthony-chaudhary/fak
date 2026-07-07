@@ -178,3 +178,131 @@ func toolReferenceText(name string) string {
 	}
 	return fmt.Sprintf("[tool: %s]", name)
 }
+
+// EmptyContentOutcome is the observable verdict of one empty-content-gate attempt. Reason==""
+// (EmptyContentReasonNone) means FIRED — Repaired is then the number of empty tool_result.content
+// arrays backfilled with a placeholder text block. Any other Reason means the body was returned
+// unchanged for that reason (silence must not read as success).
+type EmptyContentOutcome struct {
+	Reason   string
+	Repaired int
+}
+
+const (
+	EmptyContentReasonNone       = ""              // FIRED: at least one empty content array was repaired
+	EmptyContentReasonEmptyBody  = "empty_body"    // nil/empty raw
+	EmptyContentReasonNonJSON    = "non_json"      // body is not a JSON object
+	EmptyContentReasonNoMsgsKey  = "no_messages"   // no "messages" key
+	EmptyContentReasonNoMsgs     = "no_messages_a" // messages[] could not be decoded / is empty
+	EmptyContentReasonNoEmpty    = "no_empty"      // every tool_result.content is already non-empty
+	EmptyContentReasonSpliceFail = "splice_failed" // the edits overlapped or fell out of range
+	EmptyContentReasonRedecode   = "redecode_fail" // the spliced body failed to re-decode as JSON
+)
+
+// emptyToolResultText is the placeholder that backfills a tool_result whose content array is empty.
+// A tool_result MUST carry non-empty content on the Messages API — an empty array is itself a 400 —
+// so a result that lost every block (all sanitized away, or empty at the source) still forwards.
+const emptyToolResultText = "[no tool output]"
+
+// RepairEmptyToolResultContent is the general form of the tool_reference sanitizer (#3118): the
+// OUTBOUND empty-content gate. It scans the passthrough body for any `tool_result` whose `content`
+// is an EMPTY array (`[]`) — the shape a strict upstream 400s as "empty content" — and splices a
+// single wire-valid `text` placeholder block into it, leaving every other byte untouched. Where the
+// per-type tool_reference sanitizer catches ONE known client-internal block, this seam catches the
+// residual: any content array that ended up empty for ANY reason (a future client-internal type not
+// yet special-cased, or a genuinely empty source result). It is meant to run AFTER
+// SanitizeAnthropicToolReferences, on the already-converted body, as the last correctness backstop
+// before verbatim forward. Fail-safe: on any parse ambiguity, no empty array, a failed splice, or a
+// body that fails to re-decode, it returns its input UNCHANGED (identity).
+func RepairEmptyToolResultContent(raw []byte) ([]byte, EmptyContentOutcome) {
+	if len(raw) == 0 {
+		return raw, EmptyContentOutcome{Reason: EmptyContentReasonEmptyBody}
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return raw, EmptyContentOutcome{Reason: EmptyContentReasonNonJSON}
+	}
+	msgsRaw, ok := obj["messages"]
+	if !ok {
+		return raw, EmptyContentOutcome{Reason: EmptyContentReasonNoMsgsKey}
+	}
+	elems, spans, ok := decodeArrayElements(raw, msgsRaw)
+	if !ok || len(elems) == 0 {
+		return raw, EmptyContentOutcome{Reason: EmptyContentReasonNoMsgs}
+	}
+
+	var edits []spliceEdit
+	for i, el := range elems {
+		edits = append(edits, collectEmptyContentEdits(spans[i].start, el)...)
+	}
+	if len(edits) == 0 {
+		return raw, EmptyContentOutcome{Reason: EmptyContentReasonNoEmpty}
+	}
+
+	out, ok := applySpliceEdits(raw, edits)
+	if !ok {
+		return raw, EmptyContentOutcome{Reason: EmptyContentReasonSpliceFail}
+	}
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(out, &probe); err != nil {
+		return raw, EmptyContentOutcome{Reason: EmptyContentReasonRedecode}
+	}
+	return out, EmptyContentOutcome{Reason: EmptyContentReasonNone, Repaired: len(edits)}
+}
+
+// collectEmptyContentEdits scans one messages[] element and returns one splice edit per tool_result
+// whose content array is empty, each INSERTING a placeholder text block between the array brackets.
+// msgBase is the element's absolute start byte; every returned edit span is absolute. It mirrors
+// collectToolReferenceEdits' key-located spans so a sibling field can never mis-locate an edit.
+func collectEmptyContentEdits(msgBase int, el json.RawMessage) []spliceEdit {
+	mcStart, mcEnd, ok := objectValueSpan(el, "content")
+	if !ok {
+		return nil
+	}
+	mContent := el[mcStart:mcEnd]
+	if len(mContent) == 0 || mContent[0] != '[' {
+		return nil
+	}
+	blocks, blockSpans, ok := arrayElementSpans(mContent)
+	if !ok {
+		return nil
+	}
+	var edits []spliceEdit
+	for j, blk := range blocks {
+		var b struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(blk, &b) != nil || b.Type != "tool_result" {
+			continue
+		}
+		cStart, cEnd, ok := objectValueSpan(blk, "content")
+		if !ok {
+			continue
+		}
+		cVal := blk[cStart:cEnd]
+		if !isEmptyJSONArray(cVal) {
+			continue // string content, or a non-empty array — nothing to repair
+		}
+		repl, err := json.Marshal([]map[string]string{{"type": "text", "text": emptyToolResultText}})
+		if err != nil {
+			continue
+		}
+		// Replace the whole `[]` value with a one-element array. The value's absolute span is
+		// [blkBase+cStart, blkBase+cEnd); blkBase is the block's absolute start.
+		blkBase := msgBase + mcStart + blockSpans[j].start
+		absStart := blkBase + cStart
+		absEnd := blkBase + cEnd
+		edits = append(edits, spliceEdit{start: absStart, end: absEnd, repl: repl})
+	}
+	return edits
+}
+
+// isEmptyJSONArray reports whether v is a JSON empty array — `[]` with only interior whitespace.
+func isEmptyJSONArray(v json.RawMessage) bool {
+	t := skipSpace(v)
+	if len(t) == 0 || t[0] != '[' {
+		return false
+	}
+	inner := skipSpace(t[1:])
+	return len(inner) > 0 && inner[0] == ']'
+}

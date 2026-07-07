@@ -175,6 +175,18 @@ type gatewayMetrics struct {
 	toolRefTurns     uint64 // WITNESSED: turns where >=1 tool_reference block was converted to text
 	toolRefConverted uint64 // WITNESSED: total tool_reference blocks converted across all sanitize turns
 
+	// emptyContentMu guards the general-form OUTBOUND EMPTY-CONTENT GATE accumulators (#3118):
+	// the residual backstop to the tool_reference sanitizer above. Where that converts one known
+	// client-internal block type, this catches any tool_result whose content array ended up EMPTY
+	// for ANY reason (a future client-internal type, or a genuinely empty source result) and
+	// backfills a placeholder text block, since an empty content array is itself a 400. WITNESSED:
+	//   - emptyContentTurns:    turns on which >=1 empty tool_result.content array was repaired.
+	//   - emptyContentRepaired: cumulative empty content arrays backfilled across all those turns.
+	// A body with no empty content array records nothing (the common turn), like a clean sanitize.
+	emptyContentMu       sync.Mutex
+	emptyContentTurns    uint64 // WITNESSED: turns where >=1 empty tool_result.content array was repaired
+	emptyContentRepaired uint64 // WITNESSED: total empty content arrays backfilled across all repair turns
+
 	// resetShadowMu guards the per-session resetScore SHADOW accumulators (#792). The reset
 	// policy (reset_score.go) recommends cut-vs-reset; this folds the recommend-only verdict
 	// stream into /metrics so an operator sees the cut-vs-reset pressure WITHOUT the policy ever
@@ -876,6 +888,30 @@ func (m *gatewayMetrics) toolRefSanitizeSnapshot() (turns, converted uint64) {
 	m.toolRefMu.Lock()
 	defer m.toolRefMu.Unlock()
 	return m.toolRefTurns, m.toolRefConverted
+}
+
+// observeEmptyContentRepair records that a turn backfilled one or more empty tool_result.content
+// arrays with a placeholder text block (#3118). A body with no empty content array records nothing
+// (out.Reason != EmptyContentReasonNone), so the common turn is silent. WITNESSED: fak authored the
+// repair that kept the body from being 400'd upstream as "empty content".
+func (m *gatewayMetrics) observeEmptyContentRepair(out agent.EmptyContentOutcome) {
+	if m == nil || out.Reason != agent.EmptyContentReasonNone || out.Repaired <= 0 {
+		return
+	}
+	m.emptyContentMu.Lock()
+	m.emptyContentTurns++
+	m.emptyContentRepaired += uint64(out.Repaired)
+	m.emptyContentMu.Unlock()
+}
+
+// emptyContentRepairSnapshot reads the WITNESSED empty-content-gate accumulators under their lock.
+func (m *gatewayMetrics) emptyContentRepairSnapshot() (turns, repaired uint64) {
+	if m == nil {
+		return 0, 0
+	}
+	m.emptyContentMu.Lock()
+	defer m.emptyContentMu.Unlock()
+	return m.emptyContentTurns, m.emptyContentRepaired
 }
 
 // recordResetShadow folds one compacted turn's resetScore SHADOW verdict into the recommend-only
@@ -3143,8 +3179,17 @@ func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
 	// would otherwise have rejected outright (witnessed defect: session b98cf818, killed by a
 	// ToolSearch tool_result carrying tool_reference blocks).
 	refTurns, refConverted := m.toolRefSanitizeSnapshot()
-	writeCounter(b, "fak_gateway_tool_reference_converted_total", "WITNESSED (fak authored): cumulative Claude-Code-internal tool_reference content blocks rewritten into wire-valid text blocks across the session. tool_reference is not a valid Anthropic tool_result.content type; converting it in place keeps a ToolSearch-bearing body from being rejected upstream with a 400 malformed error.", int64(refConverted))
+	writeCounter(b, "fak_gateway_tool_reference_converted_total", "WITNESSED (fak authored): cumulative Claude-Code-internal tool_reference content blocks rewritten into wire-valid text blocks across the session. tool_reference is not a valid Anthropic tool_result.content type; converting it in place keeps a ToolSearch-bearing body from being 400'd by the API as malformed.", int64(refConverted))
 	writeCounter(b, "fak_gateway_tool_reference_sanitize_turns_total", "WITNESSED (fak authored): turns on which at least one tool_reference block was converted. Zero on a harness that never replays tool-discovery results into a tool_result; nonzero means fak repaired a body the provider would otherwise have 400'd as malformed.", int64(refTurns))
+
+	// The general-form EMPTY-CONTENT GATE family (#3118): the residual backstop to the
+	// tool_reference sanitizer above. WITNESSED: how many tool_result.content arrays fak found
+	// EMPTY (for ANY reason) and backfilled with a placeholder text block, since an empty content
+	// array is itself a 400. Nonzero means fak repaired a body a future client-internal block type
+	// (or a genuinely empty source result) would otherwise have gotten rejected upstream.
+	emptyTurns, emptyRepaired := m.emptyContentRepairSnapshot()
+	writeCounter(b, "fak_gateway_empty_tool_result_repaired_total", "WITNESSED (fak authored): cumulative empty tool_result.content arrays backfilled with a placeholder text block across the session. The general form of the tool_reference sanitizer — it catches any content array that ended up empty for ANY reason, since an empty array is itself a 400 upstream.", int64(emptyRepaired))
+	writeCounter(b, "fak_gateway_empty_tool_result_repair_turns_total", "WITNESSED (fak authored): turns on which at least one empty tool_result.content array was repaired. Zero on the common turn; nonzero means fak repaired a body the provider would otherwise have 400'd as empty content.", int64(emptyTurns))
 }
 
 // resetShadowSnapshot is a lock-free copy of the resetScore SHADOW accumulators for rendering.

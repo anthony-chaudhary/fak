@@ -904,7 +904,16 @@ func (s *Server) sanitizeAnthropicToolReferences(req *agent.AnthropicMessagesReq
 	out, outcome := agent.SanitizeAnthropicToolReferences(req.Raw)
 	req.Raw = out
 	s.metrics.observeToolRefSanitize(outcome)
-	return outcome.Reason == agent.ToolRefReasonNone
+	// General-form empty-content gate (#3118): the residual backstop. The per-type sanitizer above
+	// converts tool_reference blocks; this runs on the ALREADY-converted body and backfills any
+	// tool_result whose content array is STILL empty (a future client-internal block type not yet
+	// special-cased, or a genuinely empty source result) with a placeholder text block — an empty
+	// content array is itself a 400 upstream. Same correctness discipline: every wire, no cache
+	// anchor, fail-safe identity on any ambiguity.
+	repaired, repairOutcome := agent.RepairEmptyToolResultContent(req.Raw)
+	req.Raw = repaired
+	s.metrics.observeEmptyContentRepair(repairOutcome)
+	return outcome.Reason == agent.ToolRefReasonNone || repairOutcome.Reason == agent.EmptyContentReasonNone
 }
 
 // maybePlanAnthropicRaw is the ctxplan planned-view req.Raw transform for the Anthropic
