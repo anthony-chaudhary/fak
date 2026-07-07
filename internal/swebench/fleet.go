@@ -8,8 +8,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/codelint"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -411,6 +413,15 @@ func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 func runShell(ctx context.Context, dir, cmd string) string {
 	c := exec.CommandContext(ctx, "bash", "-c", cmd)
 	windowgate.ConfigureBackgroundCommand(c)
+	// The agent's bash tool runs model-supplied build/test/reproduce commands that fork
+	// their own descendant tree (make, go test, pytest, background workers). Bare
+	// CommandContext ctx-cancel is single-PID (windowgate only hides the window; it is
+	// not a tree kill), so on a per-instance timeout that whole subtree is orphaned in
+	// the worktree (#3106, same defect class as eval.go/runner.go). Tree-kill on cancel
+	// and bound the reap. procguard's Windows Cancel sets cmd.Cancel (not SysProcAttr),
+	// so it composes with windowgate's HideWindow/CreateNoWindow above.
+	procguard.ConfigureProcessTreeCancel(c)
+	c.WaitDelay = 10 * time.Second
 	c.Dir = dir
 	out, err := c.CombinedOutput()
 	s := string(out)
