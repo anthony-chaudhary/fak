@@ -83,7 +83,7 @@ kernel), in addition to the CLA grant to Netra.
   `.\fak\test.ps1 ./internal/<pkg>/`. `go build` / `go vet` work natively; only test
   *execution* is blocked on the Windows host. See the Windows note in
   [`fak/GETTING-STARTED.md`](GETTING-STARTED.md) for why. **Never commit a red tree.**
-- **Add a feature as a leaf, not a core edit** — `python tools/new_leaf.py <name> --tier
+- **Add a feature as a leaf, not a core edit** — `fak new-leaf <name> --tier
   <tier> [--register]` stamps a conforming skeleton and wires the layering/registration.
   The frozen ABI (`internal/abi`) is additive-only and human-owned; everything else
   attaches through a `Register*` seam. `internal/architest` fails the build on an upward/
@@ -132,7 +132,7 @@ guard:
 - **Add a per-agent integration recipe** under [`docs/integrations/`](docs/integrations/)
   for a harness that doesn't have one yet (the pattern is in the existing
   `claude.md` / `cursor.md` recipes). The lowest-friction first PR.
-- **Stamp a new leaf** with `python tools/new_leaf.py <name> --tier <tier> [--register]`
+- **Stamp a new leaf** with `fak new-leaf <name> --tier <tier> [--register]`
   and fill it in — the additive extension path that never edits core. Start from
   [`EXTENDING.md`](EXTENDING.md).
 - **Retire one doc-debt item** the docs scorecard names —

@@ -26,7 +26,7 @@ review opinion.
 
 | Gate | Question | The mechanism | Run it |
 |------|----------|---------------|--------|
-| **1. Plug in** | Where does my code attach? | a `Register*` seam + `internal/architest` layering gate | `python tools/new_leaf.py …` / add a backend file |
+| **1. Plug in** | Where does my code attach? | a `Register*` seam + `internal/architest` layering gate | `fak new-leaf …` / add a backend file |
 | **2. Prove correct** | Does it preserve behavior? | the Reference/Approx correctness class + a deterministic witness test | `.\fak\test.ps1 ./internal/<pkg>/` |
 | **3. Prove faster** | Is it actually a win? | the non-forgeable keep-bit (`shipgate.Evaluate` via `cmd/rsicycle`) | `go run ./cmd/rsicycle …` |
 
@@ -102,7 +102,7 @@ Scaffold one with the golden-path tool — it stamps a green-by-construction ske
 declares the tier in `architest`, and (with `--register`) wires the blank-import:
 
 ```bash
-python tools/new_leaf.py myfastcache --tier mechanism --register --summary "prefix-aware fast cache"
+fak new-leaf myfastcache --tier mechanism --register --summary "prefix-aware fast cache"
 ```
 
 See the full seam table and the "how a new idea bakes in" walkthrough in

@@ -210,7 +210,7 @@ unavailable, and say so.
   mechanically with `fak claim-check` (the verb the standard names): it takes a claim +
   baseline + witness and returns `net-true` / `strawman` / `not-yet` against the six questions
   (exit 0 / 3 / 3); `fak claim-check --self-test` grades the built-in honest+strawman corpus.
-- **Add a feature as a leaf, not a core edit.** `python tools/new_leaf.py <name> --tier
+- **Add a feature as a leaf, not a core edit.** `fak new-leaf <name> --tier
   <tier> [--register]` stamps a conforming skeleton; the frozen ABI (`fak/internal/abi`)
   is additive-only and human-owned. `internal/architest` fails the build on a bad import.
 - **New tooling is Go, not Python.** The repo is a Go project; the ~460 `tools/*.py` scripts
@@ -272,7 +272,7 @@ route around the guard (that just trips the next one).
 | `FRESH_DELETION` | a staged commit deletes a path added within the recent trunk window, but the commit message does not mention that path | restore the path if the deletion is collateral; if intentional, name the deleted path in the commit message or override once with `FLEET_ALLOW_FRESH_DELETE=1` |
 | `MESSAGE_RACE` | a safecommit operation landed a commit whose subject/body differs from the requested message | do not push it as verified; inspect the intact commit, recover through a witnessed follow-up/operator path, and avoid raw `git commit` on the shared tree |
 | `NEVER_AMEND_SHARED` | a git command would rewrite shared trunk history (`commit --amend`, rebase, `pull --rebase`, or force-push) | do not amend, rebase, or force-push in the shared tree. Make a new path-scoped commit, or fetch and merge the configured trunk in place; push only with a plain fast-forward push. |
-| `ARCH_LAYER_VIOLATION` | an upward/cross-tier import, or a new leaf with no declared tier | invert the dependency through a registration seam, or push the shared type down a layer; declare a new leaf's tier (`python tools/new_leaf.py`). Floor: `internal/architest` |
+| `ARCH_LAYER_VIOLATION` | an upward/cross-tier import, or a new leaf with no declared tier | invert the dependency through a registration seam, or push the shared type down a layer; declare a new leaf's tier (`fak new-leaf`). Floor: `internal/architest` |
 | `OUT_OF_DIRECTION` | request-path logic in an untyped language, or a non-Go package blank-imported into the kernel | keep the request path Go-only; a non-Go seam stays off-path behind a typed, re-validated boundary. Floor: architest `TestHotPathHasNoExec` |
 | `FILE_ADMISSION` | a staged path is private-only content, a **noisy one-off operational artifact** (GPU reserve/availability status, dispatch telemetry, scratch dump — by the `fak:operator-private` marker or the loose-ops-doc name backstop), regenerable junk, or an oversized blob | move private-only code + operator-only status to `fak-private`; mark a one-off ops doc `fak:operator-private` (or gitignore it); a genuine curated note goes under `docs/notes/` in scrubbed language; drop or gitignore junk; put real data under `experiments/` or `testdata/`. See [`docs/gpu-server-private-boundary.md`](docs/gpu-server-private-boundary.md) |
 | `PUBLIC_LEAK` | staged content matches a redact-needle | remove or redact the needle before committing; `FLEET_ALLOW_LEAK=1` overrides once, only for an intentional adversarial fixture |

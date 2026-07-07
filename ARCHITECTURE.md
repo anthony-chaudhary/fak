@@ -36,7 +36,7 @@ vaporware "everything is an interface."
 Leaves form a **layered DAG**: a leaf may import lower-tier leaves (e.g. a `composer`
 imports `mechanism`s and `foundation`), never a higher tier — `internal/architest`
 fails the build on an upward import. A new idea is still a brand new directory + one
-blank-import line in `internal/registrations` (use `python tools/new_leaf.py`). Because
+blank-import line in `internal/registrations` (use `fak new-leaf`). Because
 each leaf is its **own directory**, two ideas added in parallel by two fleet workers
 edit **disjoint files** and cannot collide — which is what keeps the `dos-arbitrate`
 file-tree leases disjoint (`dos.toml` declares one lane per leaf), regardless of the
