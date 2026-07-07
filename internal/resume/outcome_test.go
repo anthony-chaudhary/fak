@@ -149,6 +149,142 @@ func TestRetryGateIgnoresStatusOnlyLedgerRows(t *testing.T) {
 	}
 }
 
+// The earned-budget curve is the #3124 fix: instead of a flat DefaultMaxResumeAttempts
+// for every session, the cap is read from the session's own launch spacing. A launch
+// that ran a productive stretch before the next fired (gap >= ProgressGapSeconds) earns
+// budget; one that re-stranded almost immediately (gap < ProgressGapSeconds) costs it.
+func TestEarnedResumeBudgetCurve(t *testing.T) {
+	const base = DefaultMaxResumeAttempts
+	gap := ProgressGapSeconds // one full progress interval
+
+	// A launch t seconds after the previous one.
+	at := func(unix int64) Attempt { return Attempt{UnixSeconds: unix, Phase: "launched"} }
+	// Build a history whose consecutive launch gaps are exactly the given seconds.
+	fromGaps := func(gaps ...int64) []Attempt {
+		var h []Attempt
+		var t int64 = 1_000_000 // arbitrary non-zero epoch so every timestamp is measurable
+		h = append(h, at(t))
+		for _, g := range gaps {
+			t += g
+			h = append(h, at(t))
+		}
+		return h
+	}
+
+	cases := []struct {
+		name    string
+		history []Attempt
+		want    int
+	}{
+		{"no history: base", nil, base},
+		{"one launch: no interval evidence, base", fromGaps(), base},
+		{"single progress gap earns +1", fromGaps(gap), base + 1},
+		{"single thrash gap costs -1", fromGaps(5), base - 1},
+		{"all-progress climbs toward the ceiling", fromGaps(gap, gap, gap), base + 3},
+		{"sustained progress clamps at the ceiling", fromGaps(gap, gap, gap, gap, gap, gap, gap, gap), MaxEarnedResumeBudget},
+		{"all-thrash sinks toward the floor", fromGaps(1, 1, 1, 1, 1), base - 5},
+		{"sustained thrash clamps at the floor", fromGaps(1, 1, 1, 1, 1, 1, 1, 1, 1, 1), MinEarnedResumeBudget},
+		{"mixed nets out", fromGaps(gap, 5, gap, 5), base}, // +1 -1 +1 -1 == base
+		{"gap exactly at the threshold counts as progress", fromGaps(ProgressGapSeconds), base + 1},
+		{"gap one under the threshold is thrash", fromGaps(ProgressGapSeconds - 1), base - 1},
+	}
+	for _, tc := range cases {
+		if got := EarnedResumeBudget(tc.history); got != tc.want {
+			t.Errorf("%s: EarnedResumeBudget = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
+// Absence of timestamp evidence must never REDUCE a session's budget below the flat
+// default — an untimestamped ledger (older launchers, or rows that dropped the field)
+// folds back to exactly DefaultMaxResumeAttempts, not the thrash floor.
+func TestEarnedResumeBudgetUntimestampedIsNeutral(t *testing.T) {
+	history := []Attempt{
+		{Phase: "launched"}, {Phase: "launched"}, {Phase: "launched"}, {Phase: "launched"},
+	}
+	if got := EarnedResumeBudget(history); got != DefaultMaxResumeAttempts {
+		t.Fatalf("untimestamped launches must fold to the flat base %d, got %d", DefaultMaxResumeAttempts, got)
+	}
+	// A history mixing timestamped progress with untimestamped rows credits only the
+	// measurable gap and treats the zero-timestamp boundaries as neutral, not as thrash.
+	mixed := []Attempt{
+		{UnixSeconds: 1_000_000, Phase: "launched"},
+		{UnixSeconds: 1_000_000 + ProgressGapSeconds, Phase: "launched"}, // +1 measurable progress
+		{Phase: "launched"}, // gap into/out of a zero-stamp row is unmeasurable → neutral
+	}
+	if got := EarnedResumeBudget(mixed); got != DefaultMaxResumeAttempts+1 {
+		t.Fatalf("one measurable progress gap + neutral unmeasured gaps: want %d, got %d", DefaultMaxResumeAttempts+1, got)
+	}
+}
+
+// Only fired launches shape the budget: bookkeeping rows (deferred/status/queued) carry
+// no resume, so their timestamps must not be read as launch gaps.
+func TestEarnedResumeBudgetCountsOnlyLaunches(t *testing.T) {
+	// Two real launches a full progress interval apart, with dense bookkeeping rows
+	// interleaved between them. If the bookkeeping timestamps were counted, the tight
+	// gaps would register as thrash; they must be skipped, leaving one progress interval.
+	history := []Attempt{
+		{UnixSeconds: 1_000_000, Phase: "launched"},
+		{UnixSeconds: 1_000_001, Phase: "status"},
+		{UnixSeconds: 1_000_002, Phase: "deferred"},
+		{UnixSeconds: 1_000_003, Phase: "queued"},
+		{UnixSeconds: 1_000_000 + ProgressGapSeconds, Phase: "launched"},
+	}
+	if got := EarnedResumeBudget(history); got != DefaultMaxResumeAttempts+1 {
+		t.Fatalf("bookkeeping rows must not count as launch gaps: want %d, got %d", DefaultMaxResumeAttempts+1, got)
+	}
+}
+
+// RetryGate wires the earned budget in: with maxAttempts <= 0 (the "use the earned
+// budget" sentinel), a thrashing session is cut off EARLIER than the flat default, while
+// an explicit positive cap is honored literally and un-earned.
+func TestRetryGateUsesEarnedBudget(t *testing.T) {
+	// Four fired launches, each re-stranding within seconds → all-thrash → budget cut to
+	// base-3 = 5. Attempts (4) is under 5, so a recoverable wall still retries.
+	thrash := []Attempt{
+		{UnixSeconds: 1_000_000, Phase: "launched"},
+		{UnixSeconds: 1_000_003, Phase: "launched"},
+		{UnixSeconds: 1_000_006, Phase: "launched"},
+		{UnixSeconds: 1_000_009, Phase: "launched"},
+	}
+	if b := EarnedResumeBudget(thrash); b != DefaultMaxResumeAttempts-3 {
+		t.Fatalf("precondition: earned budget = %d, want %d", b, DefaultMaxResumeAttempts-3)
+	}
+	if d := RetryGate(thrash, OutcomeRecoverable, 0); d.Blocked {
+		t.Fatalf("4 thrash attempts under the earned cap (5) must still retry: %q", d.Reason)
+	}
+	// One more thrash launch (5 attempts) meets the earned cap of 5 → blocked, EARLIER
+	// than the flat 8 a progress-blind gate would have allowed.
+	thrash5 := append(thrash, Attempt{UnixSeconds: 1_000_012, Phase: "launched"})
+	if b := EarnedResumeBudget(thrash5); b != DefaultMaxResumeAttempts-4 {
+		t.Fatalf("precondition: earned budget = %d, want %d", b, DefaultMaxResumeAttempts-4)
+	}
+	d := RetryGate(thrash5, OutcomeRecoverable, 0)
+	if !d.Blocked {
+		t.Fatalf("a thrashing session at its earned cap must be blocked before the flat default: %q", d.Reason)
+	}
+
+	// The SAME attempt count on a PROGRESSING session (each resume ran a full interval)
+	// earns budget instead, so the recoverable wall is still retried where the thrashing
+	// one was cut off — progress-earned, not flat.
+	prog5 := []Attempt{
+		{UnixSeconds: 1_000_000, Phase: "launched"},
+		{UnixSeconds: 1_000_000 + 1*ProgressGapSeconds, Phase: "launched"},
+		{UnixSeconds: 1_000_000 + 2*ProgressGapSeconds, Phase: "launched"},
+		{UnixSeconds: 1_000_000 + 3*ProgressGapSeconds, Phase: "launched"},
+		{UnixSeconds: 1_000_000 + 4*ProgressGapSeconds, Phase: "launched"},
+	}
+	if d := RetryGate(prog5, OutcomeRecoverable, 0); d.Blocked {
+		t.Fatalf("a progressing session at 5 attempts earned more budget and must still retry: %q", d.Reason)
+	}
+
+	// An explicit positive cap is an override: honored literally, NOT earned. Even a
+	// strongly-progressing history is blocked once it meets the caller's explicit cap.
+	if d := RetryGate(prog5, OutcomeRecoverable, 2); !d.Blocked {
+		t.Fatalf("an explicit cap of 2 must block at 5 attempts regardless of earned progress: %q", d.Reason)
+	}
+}
+
 // FoldResumeState's precedence: pending, settled, took (proven progress wins even at
 // the cap), gave-up (auth wall or spent cap), re-stranded, else launched-unproven.
 func TestFoldResumeState(t *testing.T) {

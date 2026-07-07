@@ -120,8 +120,98 @@ func (a Attempt) settled() bool {
 }
 
 // DefaultMaxResumeAttempts is the give-up cap on automatic resumes of one session,
-// matching the watchdog's FAK_MAX_ATTEMPTS default.
+// matching the watchdog's FAK_MAX_ATTEMPTS default. It is the BASE the earned-budget
+// curve (EarnedResumeBudget) pivots around: a session making real progress earns up to
+// MaxEarnedResumeBudget attempts, a stalled one is cut down toward MinEarnedResumeBudget.
 const DefaultMaxResumeAttempts = 8
+
+// The earned-budget curve floor and ceiling. A thrashing session (every resume
+// re-strands within ProgressGapSeconds, doing no work) is cut toward the floor so we
+// stop burning attempts on a session that never moves; a session that keeps making real
+// progress between resumes earns up to the ceiling. Both are clamps on
+// EarnedResumeBudget, never on an explicit operator-set cap.
+const (
+	// MinEarnedResumeBudget is the fewest resumes a thrashing session can earn — enough
+	// to survive a genuine but transient double-wall, but far below the flat 8 a
+	// progress-blind cap would have handed it.
+	MinEarnedResumeBudget = 2
+	// MaxEarnedResumeBudget is the most a consistently-progressing session can earn above
+	// the base — a session that keeps doing real work between resumes is worth resuming
+	// past the flat cap rather than abandoning mid-progress.
+	MaxEarnedResumeBudget = 12
+)
+
+// ProgressGapSeconds is the minimum wall-clock gap between two consecutive fired launches
+// for the earlier launch to count as PROGRESS rather than THRASH. A resume that produced
+// real work ran for a meaningful stretch before the session re-stranded and the next
+// resume fired; a resume that re-hit its wall within this window did essentially nothing.
+// Ten minutes is deliberately conservative — a usage-limit re-strand is typically
+// seconds, real coding work is minutes-plus — so a borderline gap is read as progress,
+// never as thrash.
+const ProgressGapSeconds int64 = 600
+
+// EarnedResumeBudget is the progress-earned give-up cap: instead of granting every
+// session the flat DefaultMaxResumeAttempts, it reads the session's own launch history as
+// evidence of whether prior resumes did real work, and returns a budget the session
+// earned. The signal is purely the spacing of the fired launches already on the ledger —
+// no transcript content, no clock, same history in, same budget out:
+//
+//   - Each consecutive pair of fired launches whose gap is >= ProgressGapSeconds is a
+//     PROGRESS interval (the earlier resume ran productively before re-stranding) and
+//     earns +1 above the base.
+//   - Each pair whose gap is < ProgressGapSeconds is a THRASH interval (the resume
+//     re-stranded almost immediately, doing no work) and costs -1 below the base.
+//   - A gap we cannot measure (either launch missing a timestamp) is neutral: absence of
+//     evidence never REDUCES a session's budget, so an untimestamped history folds back
+//     to exactly the flat default.
+//
+// The result is clamped to [MinEarnedResumeBudget, MaxEarnedResumeBudget]. Fewer than two
+// fired launches carries no interval evidence, so the base DefaultMaxResumeAttempts is
+// returned unchanged — the first resumes of a fresh session are never rationed on
+// evidence that does not exist yet.
+func EarnedResumeBudget(history []Attempt) int {
+	launches := launchUnixTimes(history)
+	if len(launches) < 2 {
+		return DefaultMaxResumeAttempts
+	}
+	budget := DefaultMaxResumeAttempts
+	for i := 1; i < len(launches); i++ {
+		prev, cur := launches[i-1], launches[i]
+		if prev <= 0 || cur <= 0 {
+			continue // unmeasurable gap: neutral, never a penalty
+		}
+		gap := cur - prev
+		if gap < 0 {
+			gap = -gap // ledger rows need not be strictly ordered; distance is what matters
+		}
+		if gap >= ProgressGapSeconds {
+			budget++
+		} else {
+			budget--
+		}
+	}
+	if budget < MinEarnedResumeBudget {
+		budget = MinEarnedResumeBudget
+	}
+	if budget > MaxEarnedResumeBudget {
+		budget = MaxEarnedResumeBudget
+	}
+	return budget
+}
+
+// launchUnixTimes is the ordered timestamps of the fired launches in a history — the raw
+// signal EarnedResumeBudget folds. It keeps only rows that count as a launch (the same
+// IsLaunch rule CountAttempts uses), preserving ledger order so the gaps between
+// consecutive resumes are read as they actually happened.
+func launchUnixTimes(history []Attempt) []int64 {
+	var out []int64
+	for _, a := range history {
+		if a.IsLaunch() {
+			out = append(out, a.UnixSeconds)
+		}
+	}
+	return out
+}
 
 // CountAttempts is the number of fired launches in a session's ledger history.
 func CountAttempts(history []Attempt) int {
@@ -210,10 +300,16 @@ type RetryDecision struct {
 // row ⇒ never again" with "blocked unless the last attempt failed recoverably and we are
 // under the attempt cap" — so a resume that immediately re-hit a usage-limit wall is
 // retried past the reset instead of being permanently stranded, while a clean finish or
-// an auth wall stays burned. maxAttempts <= 0 takes DefaultMaxResumeAttempts.
+// an auth wall stays burned.
+//
+// The cap is progress-EARNED, not flat (#3124): maxAttempts <= 0 means "use the earned
+// budget", so the cap is EarnedResumeBudget(history) — a session making real progress
+// between resumes earns more attempts, a thrashing one earns fewer, rather than every
+// session getting the same blind DefaultMaxResumeAttempts. A positive maxAttempts is an
+// explicit operator/caller override and is honored literally, un-earned.
 func RetryGate(history []Attempt, outcome Outcome, maxAttempts int) RetryDecision {
 	if maxAttempts <= 0 {
-		maxAttempts = DefaultMaxResumeAttempts
+		maxAttempts = EarnedResumeBudget(history)
 	}
 	if len(history) == 0 {
 		return RetryDecision{Blocked: false, Reason: "first resume"}
