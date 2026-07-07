@@ -21,6 +21,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/repoguard"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackoutbox"
@@ -90,8 +91,23 @@ func (c execLoopCommand) Kill() error {
 	if c.cmd == nil || c.cmd.Process == nil {
 		return nil
 	}
-	return c.cmd.Process.Kill()
+	// Tree kill, not a bare single-PID kill (#3101, sibling of #2989). The wrapped child is a
+	// user-supplied agent CLI after `--` (or `fak guard -- <agent>`) that spawns a descendant
+	// subtree (node runtime + MCP/tool subprocesses). c.cmd.Process.Kill() reaps only the
+	// immediate PID and orphans that subtree; on a `fak loop drive --deadline` loop that
+	// re-spawns the agent every turn, the orphans accumulate and poison dispatch preflight
+	// (unattributed_live -> REFUSE_NO_SEAT), exactly as #2989 did. procguard.KillPID reaps the
+	// whole tree (taskkill /T /F on Windows, process-group/descendant SIGKILL on POSIX).
+	loopTreeKill(c.cmd.Process.Pid)
+	return nil
 }
+
+// loopTreeKill is the destructive tree reaper for the loop supervisor's kill sink. Fixing this
+// one seam fixes every loopCommand.Kill() call site at once (the START-ledger-append failure in
+// runLoop, the onStart ledger-callback error in loop drive, and both deadline-expiry hot paths
+// in waitLoopDriveCommand). Injectable for tests. Mirrors fleetKillPID (fleet.go) and
+// guardChildTreeKill (guard_child.go).
+var loopTreeKill = procguard.KillPID
 
 var loopExecutable = os.Executable
 
