@@ -392,6 +392,42 @@ def grade_issue(
     }
 
 
+# Typed coverage verdict tokens — a machine-actionable label so a partial audit
+# is never mistaken for a complete witness. `COVERAGE_INCOMPLETE` is the
+# dispatch-consumable signal that a cap was hit and the recommended caps below
+# should be applied before trusting the closure rate.
+COVERAGE_COMPLETE = "COVERAGE_COMPLETE"
+COVERAGE_INCOMPLETE = "COVERAGE_INCOMPLETE"
+
+
+def recommend_caps(
+    *,
+    issues_truncated: bool,
+    commits_truncated: bool,
+    issue_limit: int,
+    max_commits: int,
+    total_commits: int | None,
+) -> dict[str, Any]:
+    """Machine-actionable caps that would clear the truncation, plus the exact
+    re-run command. A truncated issue fetch doubles the issue cap (gh gives no
+    total, so headroom is the honest move); a truncated commit window jumps above
+    the known history (+1000 for growth) or doubles when the total is unknown."""
+    rec_issue_limit = issue_limit * 2 if issues_truncated else issue_limit
+    if commits_truncated:
+        rec_max_commits = (total_commits + 1000 if total_commits is not None
+                           else max_commits * 2)
+    else:
+        rec_max_commits = max_commits
+    return {
+        "issue_limit": rec_issue_limit,
+        "max_commits": rec_max_commits,
+        "command": (
+            f"python tools/issue_closure_audit.py "
+            f"--issue-limit {rec_issue_limit} --max-commits {rec_max_commits}"
+        ),
+    }
+
+
 def compute_coverage(
     *,
     issues_fetched: int,
@@ -407,7 +443,8 @@ def compute_coverage(
     disproportionately the *closed* ones, the population this auditor grades.
     Likewise a git-log window narrower than the repo's history can fail to bind
     a closed issue's resolving commit. Either case makes `closure_rate` a number
-    over a *slice*, not the backlog — so we surface it loudly rather than letting
+    over a *slice*, not the backlog — so we surface it loudly (typed `verdict`
+    plus machine-actionable `recommended` caps) rather than letting
     `issues_audited` read as comprehensive.
     """
     issues_truncated = issues_fetched >= issue_limit
@@ -428,14 +465,23 @@ def compute_coverage(
             f"{total_commits if total_commits is not None else '?'} commit(s); a "
             f"resolving commit older than the window can't bind — raise --max-commits"
         )
+    complete = not (issues_truncated or commits_truncated)
     return {
-        "complete": not (issues_truncated or commits_truncated),
+        "complete": complete,
+        "verdict": COVERAGE_COMPLETE if complete else COVERAGE_INCOMPLETE,
         "issues_truncated": issues_truncated,
         "commits_truncated": commits_truncated,
         "issues_fetched": issues_fetched,
         "issue_limit": issue_limit,
         "commits_total": total_commits,
         "commits_window": max_commits,
+        "recommended": recommend_caps(
+            issues_truncated=issues_truncated,
+            commits_truncated=commits_truncated,
+            issue_limit=issue_limit,
+            max_commits=max_commits,
+            total_commits=total_commits,
+        ),
         "notes": notes,
     }
 
@@ -473,6 +519,10 @@ def build_payload(
 
     coverage = coverage or {"complete": True, "notes": []}
     incomplete = not coverage.get("complete", True)
+    # Guarantee a typed coverage verdict on the block even if the caller handed us
+    # a bare {complete, notes} dict — dispatch keys off this token, not prose.
+    coverage.setdefault(
+        "verdict", COVERAGE_INCOMPLETE if incomplete else COVERAGE_COMPLETE)
     coverage_note = "; ".join(coverage.get("notes") or [])
 
     # `ok` is checked FIRST by fleet_control_pane.classify_loop_status and
@@ -550,6 +600,10 @@ def build_payload(
         "workspace": workspace,
         "closure_rate": closure_rate,
         "honest_close_rate": honest_close_rate,
+        # `partial` marks the closure-rate / claimed-closed summaries as a slice,
+        # not the whole backlog — mirrors coverage.verdict==COVERAGE_INCOMPLETE so
+        # a consumer that reads only the rate still learns it is not final.
+        "partial": incomplete,
         "regression_rate": None,  # honest placeholder: needs the verdict-journal trail a live cycle writes
         "coverage": coverage,
         "counts": counts,
@@ -640,9 +694,10 @@ def collect(
 
 def render(payload: dict[str, Any]) -> str:
     counts = payload.get("counts") or {}
+    partial = " [PARTIAL — over a slice, not the full backlog]" if payload.get("partial") else ""
     lines = [
         f"issue-closure audit: {payload.get('verdict')} ({payload.get('finding')})",
-        f"closure_rate={payload.get('closure_rate')} "
+        f"closure_rate={payload.get('closure_rate')}{partial} "
         f"honest_close_rate={payload.get('honest_close_rate')}  "
         f"next: {payload.get('next_action')}",
         (
@@ -656,8 +711,12 @@ def render(payload: dict[str, Any]) -> str:
     ]
     coverage = payload.get("coverage") or {}
     if not coverage.get("complete", True):
+        lines.append(f"  ! coverage: {coverage.get('verdict', COVERAGE_INCOMPLETE)}")
         for note in coverage.get("notes") or []:
-            lines.append(f"  ! partial coverage: {note}")
+            lines.append(f"    - {note}")
+        rec = coverage.get("recommended") or {}
+        if rec.get("command"):
+            lines.append(f"  → re-run for full coverage: {rec['command']}")
     # Show only the actionable rows so the console stays a dos-top-style glance.
     actionable = [g for g in payload.get("issues", []) if g.get("bucket") in (CLAIMED_CLOSED, OPEN_WITNESSED)]
     if actionable:
@@ -670,10 +729,11 @@ def render(payload: dict[str, Any]) -> str:
 
 def render_md(payload: dict[str, Any], *, date: str) -> str:
     counts = payload.get("counts") or {}
+    partial = " ⚠ **partial** (over a slice, not the full backlog)" if payload.get("partial") else ""
     out = [
         f"# Issue closure audit — {date}",
         "",
-        f"- **closure_rate**: `{payload.get('closure_rate')}` "
+        f"- **closure_rate**: `{payload.get('closure_rate')}`{partial} "
         f"(TRUE_RESOLVED / (TRUE_RESOLVED + CLAIMED_CLOSED) — strict diff-witness)",
         f"- **honest_close_rate**: `{payload.get('honest_close_rate')}` "
         f"((TRUE_RESOLVED + DATA_RESOLVED) / closed-with-claim — credits the data rung)",
@@ -682,7 +742,12 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
     ]
     coverage = payload.get("coverage") or {}
     if not coverage.get("complete", True):
-        out.append(f"- **coverage**: ⚠ partial — {'; '.join(coverage.get('notes') or [])}")
+        out.append(
+            f"- **coverage**: `{coverage.get('verdict', COVERAGE_INCOMPLETE)}` — "
+            f"{'; '.join(coverage.get('notes') or [])}")
+        rec = coverage.get("recommended") or {}
+        if rec.get("command"):
+            out.append(f"- **recommended caps**: `{rec['command']}`")
     elif coverage:
         out.append(
             f"- **coverage**: complete "

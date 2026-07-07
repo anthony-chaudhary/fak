@@ -379,6 +379,94 @@ class CoverageTest(unittest.TestCase):
         self.assertEqual(p["coverage"]["issues_fetched"], 5)
 
 
+class CoverageVerdictTest(unittest.TestCase):
+    """The issue-#2640 witness: a truncated audit must expose a TYPED coverage
+    verdict and MACHINE-actionable recommended caps, and mark its summaries partial."""
+
+    def test_complete_coverage_is_typed_complete_no_partial(self):
+        cov = m.compute_coverage(
+            issues_fetched=65, issue_limit=1000,
+            commits_scanned=2000, max_commits=2000, total_commits=1092,
+        )
+        self.assertEqual(cov["verdict"], m.COVERAGE_COMPLETE)
+        # Recommended caps equal the current caps when nothing is truncated.
+        self.assertEqual(cov["recommended"]["issue_limit"], 1000)
+        self.assertEqual(cov["recommended"]["max_commits"], 2000)
+
+    def test_truncated_both_caps_yields_typed_incomplete_and_recommended(self):
+        # The exact witness fixture: issues_fetched == issue_limit AND
+        # commits_window (max_commits) < commits_total.
+        cov = m.compute_coverage(
+            issues_fetched=1000, issue_limit=1000,
+            commits_scanned=2000, max_commits=2000, total_commits=5134,
+        )
+        self.assertFalse(cov["complete"])
+        self.assertTrue(cov["issues_truncated"])
+        self.assertTrue(cov["commits_truncated"])
+        # Typed verdict token, not just complete=false.
+        self.assertEqual(cov["verdict"], m.COVERAGE_INCOMPLETE)
+        # Machine-actionable caps that would clear the truncation.
+        rec = cov["recommended"]
+        self.assertGreater(rec["issue_limit"], 1000)            # raised past the cap
+        self.assertGreater(rec["max_commits"], 5134)            # jumps above history
+        # A followable next command with the raised flags.
+        self.assertIn("--issue-limit", rec["command"])
+        self.assertIn("--max-commits", rec["command"])
+        self.assertIn(str(rec["issue_limit"]), rec["command"])
+        self.assertIn(str(rec["max_commits"]), rec["command"])
+
+    def test_commits_truncated_total_unknown_doubles_window(self):
+        cov = m.compute_coverage(
+            issues_fetched=65, issue_limit=1000,
+            commits_scanned=2000, max_commits=2000, total_commits=None,
+        )
+        self.assertEqual(cov["verdict"], m.COVERAGE_INCOMPLETE)
+        self.assertEqual(cov["recommended"]["max_commits"], 4000)  # 2x when total unknown
+
+    def test_payload_marks_summaries_partial_on_incomplete_coverage(self):
+        # A truncated audit feeding build_payload: closure-rate summaries are marked
+        # partial (machine field) and the coverage block keeps its typed verdict.
+        cov = m.compute_coverage(
+            issues_fetched=1000, issue_limit=1000,
+            commits_scanned=2000, max_commits=2000, total_commits=5134,
+        )
+        issues = [_issue(1, state="CLOSED", reason="COMPLETED")]
+        refs = {1: [{"sha": "w1", "subject": "fix", "kind": m.RESOLVING}]}
+        p = m.build_payload(
+            workspace="C:/work/fleet", issues=issues, refs=refs,
+            audits={"w1": _audit()}, coverage=cov,
+        )
+        self.assertTrue(p["partial"])                              # summaries flagged partial
+        self.assertFalse(p["ok"])                                  # not a final health witness
+        self.assertEqual(p["coverage"]["verdict"], m.COVERAGE_INCOMPLETE)
+        self.assertIn("command", p["coverage"]["recommended"])
+
+    def test_payload_backfills_typed_verdict_on_bare_coverage(self):
+        # A caller that passes a bare {complete, notes} still gets a typed verdict.
+        p = m.build_payload(
+            workspace="C:/work/fleet", issues=[_issue(2, state="CLOSED", reason="COMPLETED")],
+            refs={}, audits={}, coverage={"complete": False, "notes": ["hit the cap"]},
+        )
+        self.assertTrue(p["partial"])
+        self.assertEqual(p["coverage"]["verdict"], m.COVERAGE_INCOMPLETE)
+
+    def test_render_marks_closure_rate_partial(self):
+        cov = m.compute_coverage(
+            issues_fetched=1000, issue_limit=1000,
+            commits_scanned=2000, max_commits=2000, total_commits=5134,
+        )
+        p = m.build_payload(
+            workspace="C:/work/fleet",
+            issues=[_issue(1, state="CLOSED", reason="COMPLETED")],
+            refs={1: [{"sha": "w1", "subject": "fix", "kind": m.RESOLVING}]},
+            audits={"w1": _audit()}, coverage=cov,
+        )
+        text = m.render(p)
+        self.assertIn("PARTIAL", text)
+        self.assertIn(m.COVERAGE_INCOMPLETE, text)
+        self.assertIn("--issue-limit", text)  # the recommended re-run command is shown
+
+
 class CollectWiringTest(unittest.TestCase):
     def test_collect_only_audits_resolving_commits_for_fetched_issues(self):
         seen: list[str] = []
