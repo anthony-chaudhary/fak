@@ -62,6 +62,7 @@ var tier = map[string]int{
 	"benchruns":            1, // pure benchmark-run catalog reader/renderer over experiments/benchmark artifacts; stdlib-only, off the hot path.
 	"benchckpt":            1, // per-cell write-ahead checkpoint/resume ledger the compute-bench executors write through (#2382); stdlib-only, off the hot path.
 	"benchlineagegate":     1, // pure benchmark-emitter lineage hygiene gate; stdlib-only source scanner, off the hot path.
+	"conceptbench":         1, // dos-refereed conceptbench grader (#2732): maps a concept + transcript + fixture to a referee-sourced verdict; imports taskmgr(1)+hooks(1), off the hot path.
 	"cachevalueledger":     1, // durable, append-only cache-value observation ledger for fak sessions; JSONL persistence over cacheobs stats.
 	"cacheprice":           1, // the ONE source of truth for the provider prompt-cache price multipliers (read 0.1x / write 1.25x / 2.0x): a pure leaf gateway(4) and resume(1) read (and the agent(4) fire gate is test-pinned to) so an identical cached token is priced identically (#2798). Imports nothing internal, off the hot path.
 	"gatewayusageledger":   1, // durable, append-only gateway usage-counter ledger (#1610); JSONL persistence over a stdlib-only Counters mirror, no internal/gateway or internal/kernel import.
