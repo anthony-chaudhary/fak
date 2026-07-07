@@ -253,9 +253,9 @@ The four turn-verdict words (the `ok` slot in the line above):
 
 ## Doctrine vocabulary: the recurring doc terms, defined once
 
-The implicit-explicit scorecard (`tools/implicit_explicit_scorecard.py`) found each of
-these used as a heading across dozens of docs with no definition anywhere in the tree.
-They are defined here, once, with one canonical spelling each.
+Each of these recurring terms was used as a heading across dozens of docs with no
+definition anywhere in the tree. They are defined here, once, with one canonical
+spelling each.
 
 ### Honest fence
 

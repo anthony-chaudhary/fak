@@ -310,8 +310,6 @@ var grandfathered = []string{
 	"tools/install_doc_anchors_test.py",
 	"tools/install_trunk_guard.py",
 	"tools/intent_literal_scorecard_test.py",
-	"tools/implicit_explicit_scorecard_test.py",
-	"tools/implicit_explicit_scorecard.py",
 	"tools/intent_literal_scorecard.py",
 	"tools/issue_closure_audit_test.py",
 	"tools/issue_closure_audit.py",
