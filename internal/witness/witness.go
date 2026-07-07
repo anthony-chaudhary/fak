@@ -53,8 +53,10 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -96,6 +98,14 @@ func commandRunner(ctx context.Context, dir string, argv ...string) (string, int
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	windowgate.ConfigureBackgroundCommand(cmd)
+	// commandRunner runs arbitrary FAIL_TO_PASS/PASS_TO_PASS verification commands
+	// (`go test`, pytest, docker) that fork their own descendant tree — the toolchain
+	// plus the spawned test binary. Bare CommandContext ctx-cancel is single-PID
+	// (windowgate only hides the window; it is not a tree kill), so a deadline-cancel
+	// of a hung verification orphans that subtree (#3106 defect class). Tree-kill on
+	// cancel and bound the reap, mirroring internal/nightrun/run.go.
+	procguard.ConfigureProcessTreeCancel(cmd)
+	cmd.WaitDelay = 10 * time.Second
 	if dir != "" {
 		cmd.Dir = dir
 	}
