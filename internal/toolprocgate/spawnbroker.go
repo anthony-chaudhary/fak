@@ -37,6 +37,12 @@ type CapabilityEnvelope struct {
 	Capabilities     []abi.Capability `json:"capabilities,omitempty"`
 	DeadlineMS       int64            `json:"deadline_ms,omitempty"`
 	HeartbeatEveryMS int64            `json:"heartbeat_every_ms,omitempty"`
+	// LaneTree is the inherited FS capability floor: the lane-tree patterns
+	// (dos.toml [lanes.trees] syntax, e.g. "internal/toolprocgate/**") the
+	// child's tool calls may touch, adjudicated by LaneFloor.AdmitTouch.
+	// Empty means no floor was granted — the floor fails closed, it never
+	// widens to the whole workspace.
+	LaneTree []string `json:"lane_tree,omitempty"`
 }
 
 type EnvVar struct {
@@ -154,6 +160,7 @@ func (b *SpawnBroker) Audits() []SpawnAudit {
 	for i := range out {
 		out[i].EnvNames = cloneStrings(out[i].EnvNames)
 		out[i].CapabilityEnvelope.Capabilities = cloneCaps(out[i].CapabilityEnvelope.Capabilities)
+		out[i].CapabilityEnvelope.LaneTree = cloneStrings(out[i].CapabilityEnvelope.LaneTree)
 	}
 	return out
 }
@@ -230,6 +237,11 @@ func normalizeSpawnAttempt(a SpawnAttempt) (SpawnAttempt, error) {
 	if !slices.Contains(envp.Capabilities, CapAgentRunSpawn) {
 		return SpawnAttempt{}, fmt.Errorf("MISSING_SPAWN_CAPABILITY")
 	}
+	tree, err := normalizeLaneTree(envp.LaneTree)
+	if err != nil {
+		return SpawnAttempt{}, err
+	}
+	envp.LaneTree = tree
 
 	a.Argv = argv
 	a.Env = env
@@ -334,6 +346,7 @@ func auditForAttempt(a SpawnAttempt) SpawnAudit {
 			Capabilities:     normalizeCaps(a.Envelope.Capabilities),
 			DeadlineMS:       a.Envelope.DeadlineMS,
 			HeartbeatEveryMS: a.Envelope.HeartbeatEveryMS,
+			LaneTree:         cloneStrings(a.Envelope.LaneTree),
 		},
 	}
 }
