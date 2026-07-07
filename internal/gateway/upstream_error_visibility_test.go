@@ -375,6 +375,63 @@ func TestUpstreamError400DetailIsScrubbedAndBounded(t *testing.T) {
 	}
 }
 
+// A 429/5xx that fak's retry loop stopped at the in-handler ceiling (#2258) must surface with its
+// OWN code and a message that steers the wrapped model toward RECOVERY (park/resume, or re-issue
+// after the reset) — NOT the generic "back off and retry" that reads identically to a plain
+// throttle and sends a confused agent into a futile in-handler retry loop. This is the "in the
+// failure case it must be clear / if the model is confused it should recover" guarantee: because
+// RetryCeilingError unwraps to *UpstreamStatusError, its arm must win over the generic 429 arm, and
+// it must keep the real upstream status + Retry-After so a Retry-After-honoring harness still backs
+// off correctly.
+func TestUpstreamErrorStatus_RetryCeilingSteersToRecovery(t *testing.T) {
+	cause := &agent.UpstreamStatusError{Status: http.StatusTooManyRequests, RetryAfter: "4200"}
+	rc := &agent.RetryCeilingError{Cause: cause, Wait: 70 * time.Minute, Ceiling: 90 * time.Second}
+
+	status, code, msg := upstreamErrorStatus(rc)
+	if status != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429 (the real upstream status is preserved)", status)
+	}
+	if code != "upstream_retry_ceiling" {
+		t.Fatalf("code = %q, want upstream_retry_ceiling (a ceiling bail must NOT read as a bare throttle)", code)
+	}
+	lower := strings.ToLower(msg)
+	// It must NAME that fak already retried and that the wait is too long to hold in-handler.
+	if !strings.Contains(lower, "already retried") {
+		t.Fatalf("message must say fak already retried: %q", msg)
+	}
+	// It must STEER to recovery, not to an immediate retry.
+	if !strings.Contains(lower, "do not retry this turn immediately") {
+		t.Fatalf("message must tell the model NOT to retry immediately: %q", msg)
+	}
+	if !strings.Contains(lower, "park") || !strings.Contains(lower, "resume") {
+		t.Fatalf("message must point at the park/resume recovery path: %q", msg)
+	}
+	// It must name the real reset wait inline so the model knows how long the window is.
+	if !strings.Contains(msg, "1h10m0s") {
+		t.Fatalf("message must name the announced wait inline: %q", msg)
+	}
+	// Guard the mis-message this whole arm exists to prevent: it must NOT carry the generic
+	// throttle's "back off and retry" wording that steers a confused agent into a futile loop.
+	if strings.Contains(lower, "back off and retry") {
+		t.Fatalf("ceiling bail must NOT wear the generic 'back off and retry' wording: %q", msg)
+	}
+}
+
+// A ceiling bail wrapping a 529 overload (not a 429) must preserve THAT status — the arm keys on
+// the real upstream status, so an overload that got stopped at the ceiling stays a 529 downstream,
+// not a flattened 429.
+func TestUpstreamErrorStatus_RetryCeilingPreservesUnderlyingStatus(t *testing.T) {
+	cause := &agent.UpstreamStatusError{Status: 529, RetryAfter: "600"}
+	rc := &agent.RetryCeilingError{Cause: cause, Wait: 10 * time.Minute, Ceiling: 90 * time.Second}
+	status, code, _ := upstreamErrorStatus(rc)
+	if status != 529 {
+		t.Fatalf("status = %d, want 529 (the ceiling arm preserves the underlying overload status)", status)
+	}
+	if code != "upstream_retry_ceiling" {
+		t.Fatalf("code = %q, want upstream_retry_ceiling", code)
+	}
+}
+
 // The counter family must render on the /metrics text scrape with the kind label, so a stall is
 // scrapeable as fak_gateway_upstream_errors_total{kind="stalled"}.
 func TestUpstreamErrorsRenderOnMetrics(t *testing.T) {

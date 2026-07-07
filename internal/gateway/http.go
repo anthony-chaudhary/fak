@@ -736,6 +736,36 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 		return http.StatusGatewayTimeout, "upstream_stalled",
 			"upstream stalled — the model or provider opened the stream then went silent within the idle window"
 	}
+	// A 429/5xx that fak's retry loop DELIBERATELY stopped at the in-handler ceiling (#2258):
+	// the provider-named wait was longer than a wrapped client can hold open, so fak surfaced
+	// the truth NOW instead of sleeping past the client's own request timeout. This unwraps to
+	// a *UpstreamStatusError, so it MUST precede the generic `se` arm below — otherwise a
+	// ceiling bail wears the costume of a plain throttle and the message tells the model to
+	// "back off and retry," the one thing that cannot work here: an immediate in-handler retry
+	// hits the same wall, and the wait exceeds what the client can absorb. That misdirection is
+	// exactly the "if the model is confused it should be able to query and recover" gap — the
+	// generic 429 wording steers a confused agent into a futile retry loop instead of recovery.
+	//
+	// So give it a distinct code and a message aimed at the wrapped MODEL, not just an operator:
+	// stop retrying this turn, the condition will NOT self-heal in-handler, and the recovery is
+	// to PARK/RESUME (a supervisor — `fak guard`, #2256 — carries it across the reset) or to
+	// re-issue the whole turn AFTER the named wait, not to hammer it now. The status stays the
+	// real upstream status and the Retry-After still rides downstream (writeUpstreamErr), so a
+	// harness that DOES honor Retry-After backs off correctly; the code+message are the
+	// machine- and human-branchable signal that this was fak's own ceiling stop, not a bare
+	// provider throttle. The announced wait and ceiling are already on the operator-only
+	// /debug/vars FAILED line (debugErrorDetail, relayed=true); here we name the wait inline so
+	// the model reading the wire knows how long the real reset is.
+	var rc *agent.RetryCeilingError
+	if errors.As(err, &rc) {
+		status := http.StatusTooManyRequests
+		if rc.Cause != nil && rc.Cause.Status != 0 {
+			status = rc.Cause.Status
+		}
+		return status, "upstream_retry_ceiling",
+			fmt.Sprintf("upstream is rate-limited/overloaded (HTTP %d) and fak already retried: the provider-named wait (~%s) is LONGER than this client can hold a request open, so fak surfaced the truth now instead of sleeping past your timeout. Do NOT retry this turn immediately — an in-handler retry hits the same wall. Recover instead: let a supervisor park and resume it across the reset (fak guard, which carries the turn), or re-issue the whole turn only AFTER the wait named in the Retry-After response header. This will not self-heal by hammering.",
+				status, rc.Wait.Round(time.Second))
+	}
 	var se *agent.UpstreamStatusError
 	if errors.As(err, &se) {
 		// A 4xx is a REQUEST error the client can act on. Until now every 4xx collapsed

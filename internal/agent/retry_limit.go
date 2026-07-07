@@ -95,7 +95,28 @@ func isAccountCap429(status int, body []byte, h http.Header, now time.Time) bool
 // the transient Retry-After/exponential behavior is byte-for-byte unchanged.
 func classifyLimit429(status int, body []byte, h http.Header, now time.Time) (cls resume.LimitClassification, capWait string) {
 	cls, ok := resume.ClassifyLimitResponseWithHeader(status, body, h)
-	if !ok || cls.Reason == resume.LimitRate {
+	if !ok {
+		return cls, ""
+	}
+	// A body-only LimitRate verdict is the "server-side throttle" catch-all: a bare 429 whose
+	// body named no session/weekly/usage cap. But the OPERATIVE question for rehoming is not
+	// "what did the body say" — it is "how long is this wait." A throttle clears in seconds; a
+	// capped subscription seat answering a generic 429 whose ONLY cap signal is a far-future
+	// reset header (or a large Retry-After) is a de-facto account cap that holds for hours, and
+	// treating it as temporary is exactly the "a 4-hour wait shouldn't be considered temporary"
+	// confusion. So before surrendering to the transient schedule, promote a LimitRate 429 whose
+	// machine-readable wait exceeds what the client can survive in-handler (inHandlerWaitCeiling)
+	// to the generic usage cap, so isAccountCap429 fires and the loop rehomes to a free seat
+	// instead of sleeping toward a reset no wrapped client can outlast. A short/absent wait is
+	// left untouched: the throttle keeps its seat and rides the exponential backoff unchanged.
+	if cls.Reason == resume.LimitRate {
+		if wait, ok := durationCap429(h, now); ok && wait > inHandlerWaitCeiling() {
+			secs := int(math.Ceil(wait.Seconds()))
+			if secs < 1 {
+				secs = 1
+			}
+			return resume.LimitClassification{Reason: resume.LimitUsage, ResetHint: cls.ResetHint}, strconv.Itoa(secs)
+		}
 		return cls, ""
 	}
 	if reset, ok := unifiedResetFor(cls.Reason, h, now); ok {
@@ -106,6 +127,34 @@ func classifyLimit429(status int, body []byte, h http.Header, now time.Time) (cl
 		return cls, strconv.Itoa(secs)
 	}
 	return cls, strconv.Itoa(int(capProbeInterval().Seconds()))
+}
+
+// durationCap429 derives the machine-readable wait a generic 429 announced, from the two
+// signals the provider can relay WITHOUT naming a cap in the body: the unified reset headers
+// (the earliest future window reset, via unifiedResetFor with no window preference) and a
+// Retry-After header. The larger of the two wins — a provider that relays both is telling us
+// the seat is unavailable until the later instant. ok is false when neither signal is present
+// (a bare 429 with no wait hint at all — a real transient throttle), so the caller leaves it on
+// the transient path. This is the ONLY place a 429's wait magnitude — not its body taxonomy —
+// decides whether it is cap-like, keeping the "how long is the wait" judgment in one seam.
+func durationCap429(h http.Header, now time.Time) (time.Duration, bool) {
+	var wait time.Duration
+	var have bool
+	if reset, ok := unifiedResetFor("", h, now); ok {
+		if d := reset.Sub(now); d > wait {
+			wait = d
+		}
+		have = true
+	}
+	if ra := h.Get("Retry-After"); ra != "" {
+		if d, ok := parseRetryAfter(ra, now); ok {
+			if d > wait {
+				wait = d
+			}
+			have = true
+		}
+	}
+	return wait, have
 }
 
 // unifiedResetFor resolves the reset instant for a classified cap from the provider's

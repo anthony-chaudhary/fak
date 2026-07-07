@@ -80,6 +80,48 @@ func TestClassifyLimit429_CapWithoutResetUsesProbeFloor(t *testing.T) {
 	}
 }
 
+// The "a 4-hour wait shouldn't be considered temporary" fix: a GENERIC-body 429 (no
+// session/weekly/usage keyword — it would classify LimitRate on the body alone) whose ONLY cap
+// signal is a far-future machine-readable wait must promote to a rehome-worthy account cap, so
+// isAccountCap429 fires and the loop rehomes instead of sleeping toward a reset no wrapped client
+// can outlast. The promotion keys on the WAIT MAGNITUDE (past the in-handler ceiling), not the
+// body taxonomy — from a unified reset header OR a large Retry-After.
+func TestClassifyLimit429_LongWaitPromotesGenericThrottle(t *testing.T) {
+	now := time.Now()
+	longReset := http.Header{}
+	longReset.Set("Anthropic-Ratelimit-Unified-5h-Reset", strconv.FormatInt(now.Add(4*time.Hour).Unix(), 10))
+	cls, capWait := classifyLimit429(429, []byte("Too many requests"), longReset, now)
+	if cls.Reason != resume.LimitUsage {
+		t.Fatalf("reason = %q, want %q (a 4h-wait generic 429 is a de-facto cap, not a throttle)", cls.Reason, resume.LimitUsage)
+	}
+	secs, err := strconv.Atoi(capWait)
+	if err != nil || secs < int((4*time.Hour-time.Minute).Seconds()) {
+		t.Fatalf("capWait = %q, want the ~4h reset delta in seconds", capWait)
+	}
+	if !isAccountCap429(429, []byte("Too many requests"), longReset, now) {
+		t.Fatal("a generic 429 with a 4h reset must be a rehome-worthy account cap")
+	}
+
+	// Same promotion from a large Retry-After alone (no unified header).
+	ra := http.Header{}
+	ra.Set("Retry-After", "14400") // 4h
+	if !isAccountCap429(429, []byte("Too many requests"), ra, now) {
+		t.Fatal("a generic 429 with Retry-After: 14400 must promote to a rehome-worthy cap")
+	}
+
+	// The negative fence: a SHORT wait (under the in-handler ceiling) stays a transient throttle —
+	// it keeps its seat and rides the exponential backoff, no rehome. 30s is well under the 90s
+	// default ceiling.
+	shortReset := http.Header{}
+	shortReset.Set("Anthropic-Ratelimit-Unified-5h-Reset", strconv.FormatInt(now.Add(30*time.Second).Unix(), 10))
+	if cls, capWait := classifyLimit429(429, []byte("Too many requests"), shortReset, now); cls.Reason != resume.LimitRate || capWait != "" {
+		t.Fatalf("short-wait throttle = (%q, %q), want (rate_limited, \"\") — a brief wait keeps its seat", cls.Reason, capWait)
+	}
+	if isAccountCap429(429, []byte("Too many requests"), shortReset, now) {
+		t.Fatal("a 30s-wait generic 429 must NOT be an account cap — it is a real transient throttle")
+	}
+}
+
 // A plain server-side throttle (rate_limited) and a non-429 must leave the wait decision
 // untouched: capWait stays empty so Retry-After / exponential behavior is unchanged.
 func TestClassifyLimit429_ThrottleAndNon429Unchanged(t *testing.T) {
