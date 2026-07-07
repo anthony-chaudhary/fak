@@ -43,6 +43,28 @@
       "apples_to_apples": true,
       "comparison_note": "HONEST NO-CLAIM, the audit's single biggest open risk. fak proves the shipped prefix is byte-identical, which makes a cache hit ELIGIBLE; whether the provider's lookup CASCADES to the head breakpoint after the middle is dropped (vs missing at the shifted recent breakpoint and re-billing the dropped middle as fresh input) is unverified by direct telemetry. If the cascade fails, the claimed shed savings collapse toward zero on the compacting turn. No fak_value is asserted until witnessed shed is correlated against observed cache_read on real Anthropic traffic (off vs on). The byte-identity row above is a mechanism lead; THIS is the cost realization, deliberately kept separate so the first is never read as the second.",
       "measured_on": "2026-06-25"
+    },
+    {
+      "id": "compaction-measured-fidelity-sweep",
+      "dim_id": "compaction-cache-preservation",
+      "axis": "MEASURED load-bearing-fact retention at a bounded peak over a 100/200/300-turn goal — the fidelity a relay's durable externalize buys that the cache-preserving sliding-window drop (the apples-to-apples competitor) cannot",
+      "category": "client-compaction",
+      "competitor": "LangChain trim_messages (sliding-window drop) — the one competitor design that ALSO preserves the prompt cache; benchmarked in the same 4-arm sweep against auto-compaction (summarize-in-place) and Anthropic API context-editing (clear_tool_uses + memory tool)",
+      "competitor_class": "sota",
+      "competitor_value": 0.064,
+      "competitor_source": "LangChain trim_messages (sliding-window drop, cache-preserving) — docs/notes/COMPACTION-VS-INDUSTRY-2026-06-25.md 'Where each approach lands' table ('No — closest analog to fak', 'Drops turns'); mechanism web-sourced 2026-06.",
+      "fak_value": 1.0,
+      "unit": "fraction of load-bearing facts retained at 300 turns (hermetic analytic model; higher is better)",
+      "higher_is_better": true,
+      "verdict": "lead",
+      "status": "shipped",
+      "qualitative": false,
+      "fak_commit": "",
+      "fak_artifact": "internal/bench/testdata/relayvscompaction_report.json",
+      "fak_doc": "internal/bench/relayvscompaction.go — 4-arm sweep (StrategyRelay/StrategyCompaction/StrategySlidingWindow/StrategyContextEditing) at 100/200/300 turns; witness `go test ./internal/bench -run RelayVsCompaction`. At 300 turns the model measures load-bearing-fact retention relay 1.000 vs sliding_window 0.064 vs compaction 0.389 vs context_editing 1.000, at peaks relay 120000 (60%) / sliding 126000 (63%) / context_editing 160000 (80%) / compaction 192571 (96%) of a 200k window, and cache-bust relay 90000 / sliding 0 / compaction 786322 / context_editing 2800000 tokens.",
+      "apples_to_apples": true,
+      "comparison_note": "MEASURED (bench-witnessed) fidelity lead, NOT the categorical mechanism lead of the byte-identity row above. Framed against the sliding-window drop because it is the ONE competitor that also preserves the prompt cache (per the audit doc), so a peak/cache tie isolates the honest difference: the relay externalizes every load-bearing fact to a durable store before discarding, so it stays lossless (1.000); a trailing-window drop keeps only the recent ~60% window, so at 300 turns it retains just 0.064 of the goal's facts. NOT cherry-picked — the full 4-arm result is in fak_doc: the sliding window is actually CHEAPER on raw billed tokens (3.62M vs relay 3.85M) and busts zero cache, and context-editing matches the relay's fidelity (1.000) — so no single arm dominates. The honest, non-overclaimed headline the bench proves is that the RELAY is the only arm simultaneously bounded-peak, cache-preserving, AND lossless; every competitor sacrifices at least one axis. FENCE: hermetic ANALYTIC model (issue permits it) — the SIGN under the named constants in the report's `model`, not a provider-billed total; a live leg-record run feeds the same shape via BuildRelayVsCompactionReportFromRecords to promote it.",
+      "measured_on": "2026-07-07"
     }
   ]
 }

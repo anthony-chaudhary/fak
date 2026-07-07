@@ -17,8 +17,15 @@
     "relay_arm_frac": 0.6,
     "facts_per_turn": 3,
     "cache_read_mult": 0.1,
-    "cache_write_mult": 1.25
+    "cache_write_mult": 1.25,
+    "sliding_window_keep_frac": 0.6,
+    "context_editing_trigger_frac": 0.8,
+    "context_editing_keep_frac": 0.5
   },
+  "strategies": [
+    "relay",
+    "compaction"
+  ],
   "sweep": [
     {
       "goal_turns": 6,

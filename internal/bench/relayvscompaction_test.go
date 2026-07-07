@@ -194,6 +194,89 @@ func TestRelayVsCompactionSavingsGate(t *testing.T) {
 	}
 }
 
+// TestRelayVsCompactionFourArmSweep is the witness for issue #2709: the sweep
+// widens from two arms (relay, compaction) to FOUR by adding the two additional
+// SOTA competitor mechanisms the operator asked to compare against — a
+// LangChain-style sliding-window drop (`trim_messages`, the one competitor design
+// that ALSO preserves the prompt cache) and Anthropic API context-editing
+// (`clear_tool_uses` + memory tool). It pins that all four arms are present at the
+// 100/200/300-turn horizons and that the MEASURED numbers reproduce the honest,
+// NON-cherry-picked story: the relay is the only arm that is simultaneously
+// bounded-peak, cache-preserving, AND lossless — each competitor sacrifices at
+// least one axis. No single scalar dominates; the relay's lead over the
+// cache-preserving sliding window is specifically FIDELITY.
+func TestRelayVsCompactionFourArmSweep(t *testing.T) {
+	r := BuildRelayVsCompactionReport()
+
+	// The report advertises all four arms.
+	if got := r.Strategies; len(got) != 4 ||
+		got[0] != StrategyRelay || got[1] != StrategyCompaction ||
+		got[2] != StrategySlidingWindow || got[3] != StrategyContextEditing {
+		t.Fatalf("strategies = %v; want [relay compaction sliding_window context_editing]", got)
+	}
+
+	// Every requested horizon carries all four arms with the honest relations the
+	// model guarantees by construction.
+	byDur := map[int]RVCPoint{}
+	for _, p := range r.Sweep {
+		byDur[p.GoalTurns] = p
+	}
+	for _, h := range RVCSavingsGateHorizons() { // {100, 200, 300}
+		p, ok := byDur[h]
+		if !ok {
+			t.Fatalf("horizon %d missing from the sweep", h)
+		}
+		if p.SlidingWindow == nil || p.ContextEditing == nil {
+			t.Fatalf("horizon %d missing a new arm: sliding=%v context=%v", h, p.SlidingWindow, p.ContextEditing)
+		}
+		sw, ce := *p.SlidingWindow, *p.ContextEditing
+
+		// Fidelity: the relay externalizes (lossless); the cache-preserving sliding
+		// window drops old turns irrecoverably, so it LOSES load-bearing facts — the
+		// honest apples-to-apples separation the issue names. Context-editing recovers
+		// cleared content via the memory tool, so it stays lossless like the relay.
+		if p.Relay.Accuracy != 1.0 {
+			t.Errorf("h%d: relay accuracy = %.3f; want 1.0 (lossless)", h, p.Relay.Accuracy)
+		}
+		if ce.Accuracy != 1.0 {
+			t.Errorf("h%d: context_editing accuracy = %.3f; want 1.0 (recoverable via memory tool)", h, ce.Accuracy)
+		}
+		if !(sw.Accuracy < p.Relay.Accuracy) {
+			t.Errorf("h%d: sliding_window accuracy %.3f not < relay %.3f (a trailing-window drop must lose facts)", h, sw.Accuracy, p.Relay.Accuracy)
+		}
+		if !(p.Compaction.Accuracy < 1.0) {
+			t.Errorf("h%d: compaction accuracy %.3f not < 1.0 (lossy summary)", h, p.Compaction.Accuracy)
+		}
+
+		// Peak: the relay, the sliding window, and context-editing all stay off the
+		// wall; only compaction is pinned near the ceiling.
+		for name, arm := range map[string]RVCArm{"relay": p.Relay, "sliding_window": sw, "context_editing": ce} {
+			if !(arm.PeakContext < p.Compaction.PeakContext) {
+				t.Errorf("h%d: %s peak %d not < compaction %d (must stay off the wall)", h, name, arm.PeakContext, p.Compaction.PeakContext)
+			}
+		}
+
+		// Cache: the sliding window is a PURE drop (cache-preserving — zero forced
+		// re-writes), while context-editing accepts a cache invalidation on every
+		// clear, so it busts strictly more cache than the relay's O(1) baton reset.
+		if sw.CacheBustTokens != 0 {
+			t.Errorf("h%d: sliding_window cache-bust = %d; want 0 (a drop preserves the cache)", h, sw.CacheBustTokens)
+		}
+		if !(ce.CacheBustTokens > p.Relay.CacheBustTokens) {
+			t.Errorf("h%d: context_editing cache-bust %d not > relay %d (a clear invalidates the cache)", h, ce.CacheBustTokens, p.Relay.CacheBustTokens)
+		}
+	}
+
+	// The headline the scorecard row cites: at the deepest horizon the relay is the
+	// ONLY arm that is lossless (accuracy 1.0) AND off the wall, while the
+	// cache-preserving competitor has collapsed on fidelity.
+	deep := byDur[300]
+	if !(deep.Relay.Accuracy == 1.0 && deep.SlidingWindow.Accuracy < 0.5 && deep.Relay.PeakContext < deep.Compaction.PeakContext) {
+		t.Errorf("300-turn headline broke: relay acc %.3f / sliding acc %.3f / relay peak %d vs compaction %d",
+			deep.Relay.Accuracy, deep.SlidingWindow.Accuracy, deep.Relay.PeakContext, deep.Compaction.PeakContext)
+	}
+}
+
 // TestRelayVsCompactionFlatInvariant isolates the O(1) claim: doubling the goal
 // duration leaves the relay's peak context UNCHANGED while compaction's total
 // work (rotations, billed tokens) scales up. This is the property that makes a

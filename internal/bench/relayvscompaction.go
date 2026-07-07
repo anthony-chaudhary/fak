@@ -56,11 +56,18 @@ import (
 	"sort"
 )
 
-// The two context strategies the bench compares, as stable labels an OBSERVED leg
-// record tags its run with.
+// The context strategies the bench compares, as stable labels an OBSERVED leg
+// record tags its run with. Relay and Compaction are the original two arms
+// (#1906/#2707) carried on both the analytic AND the OBSERVED path; SlidingWindow
+// and ContextEditing are the two additional SOTA competitor arms (#2709) modeled
+// analytically so the sweep compares against MORE of the field than the two
+// summarizer-vs-relay arms — the operator asked for a comparison against
+// "builtin auto-compaction OR other SOTA methods" (plural).
 const (
-	StrategyRelay      = "relay"
-	StrategyCompaction = "compaction"
+	StrategyRelay          = "relay"
+	StrategyCompaction     = "compaction"
+	StrategySlidingWindow  = "sliding_window"
+	StrategyContextEditing = "context_editing"
 )
 
 // RVCModel is the hermetic, named constant set the comparison runs over. Every
@@ -99,6 +106,24 @@ type RVCModel struct {
 	// (Anthropic-style: a cache read is ~0.1x base, a cache write ~1.25x base).
 	CacheReadMult  float64 `json:"cache_read_mult"`
 	CacheWriteMult float64 `json:"cache_write_mult"`
+	// SlidingWindowKeepFrac is the fraction of the window a sliding-window drop
+	// (LangChain `trim_messages`) keeps as a trailing recent window, discarding
+	// the OLDEST turns when the resident context exceeds it. It is the doc's
+	// "closest analog to fak": a DROP (not a summary rewrite), so it is
+	// cache-preserving — but LOSSY, because unlike the relay it does not
+	// externalize the dropped turns to a durable store, so their load-bearing
+	// facts are gone irrecoverably.
+	SlidingWindowKeepFrac float64 `json:"sliding_window_keep_frac"`
+	// ContextEditingTriggerFrac / ContextEditingKeepFrac model Anthropic API
+	// context-editing (`clear_tool_uses`): when the window reaches the trigger it
+	// clears old tool RESULTS server-side down to the keep floor. Docs:
+	// "Invalidates cached prompt prefixes when content is cleared" — so a clear
+	// BUSTS the cache (the post-clear prefix is re-sent uncached), but the cleared
+	// content is RECOVERABLE via the paired memory tool, so no load-bearing fact
+	// is lost (it trades cache cost for fidelity, the opposite bet from the
+	// sliding window).
+	ContextEditingTriggerFrac float64 `json:"context_editing_trigger_frac"`
+	ContextEditingKeepFrac    float64 `json:"context_editing_keep_frac"`
 }
 
 // DefaultRVCModel is the representative constant set. The numbers are chosen so
@@ -118,6 +143,14 @@ func DefaultRVCModel() RVCModel {
 		FactsPerTurn:          3,
 		CacheReadMult:         0.1,
 		CacheWriteMult:        1.25,
+		// The sliding window keeps the same ~60% trailing window the relay arms
+		// at, so the two bounded strategies are compared at the SAME peak — the
+		// honest apples-to-apples: they differ on fidelity/cost, not on peak.
+		SlidingWindowKeepFrac: 0.60,
+		// Context-editing fires earlier than compaction (it clears tool bloat
+		// proactively) and clears down to a mid-window floor.
+		ContextEditingTriggerFrac: 0.80,
+		ContextEditingKeepFrac:    0.50,
 	}
 }
 
@@ -175,11 +208,18 @@ type RVCArm struct {
 	Accuracy         float64 `json:"accuracy"`
 }
 
-// RVCPoint is both strategies at one duration.
+// RVCPoint is every modeled strategy at one duration. Relay and Compaction are
+// always present (the original two arms, on both the analytic and OBSERVED path).
+// SlidingWindow and ContextEditing are the two additional SOTA competitor arms
+// (#2709); they are pointers with `omitempty` so the OBSERVED leg-record path —
+// which only captures relay/compaction runs — omits them rather than emitting an
+// empty, unwitnessed arm. The analytic sweep populates all four.
 type RVCPoint struct {
-	GoalTurns  int    `json:"goal_turns"`
-	Relay      RVCArm `json:"relay"`
-	Compaction RVCArm `json:"compaction"`
+	GoalTurns      int     `json:"goal_turns"`
+	Relay          RVCArm  `json:"relay"`
+	Compaction     RVCArm  `json:"compaction"`
+	SlidingWindow  *RVCArm `json:"sliding_window,omitempty"`
+	ContextEditing *RVCArm `json:"context_editing,omitempty"`
 }
 
 // RVCDelta is the relay's win over compaction, reported at the DEEPEST duration
@@ -238,6 +278,13 @@ type RelayVsCompactionReport struct {
 	Schema     string     `json:"schema"`
 	Provenance Provenance `json:"provenance"`
 	Model      RVCModel   `json:"model"`
+	// Strategies is the ordered set of context-management arms modeled at EVERY
+	// swept duration. The analytic path carries all four (relay, compaction,
+	// sliding_window, context_editing — #2709 widened the field from two);
+	// the OBSERVED leg-record path carries only the two it captured. A row that
+	// cites this report as a MEASURED artifact should confirm len(Strategies) >= 4
+	// at the requested horizons.
+	Strategies []string   `json:"strategies"`
 	Sweep      []RVCPoint `json:"sweep"`
 	// FlatPeakContext is the done-condition witness: the relay's peak context is
 	// IDENTICAL across every swept duration (bounded by the per-leg ceiling,
@@ -361,6 +408,121 @@ func simulateRelay(m RVCModel, goalTurns int) RVCArm {
 	return finishArm(StrategyRelay, m, rotations, peak, billed, cacheHits, cacheTotal, cacheBust, factsTotal, factsTotal)
 }
 
+// simulateSlidingWindow replays the SAME goal under a LangChain-style
+// `trim_messages` sliding window: keep a trailing recent window up to
+// SlidingWindowKeepFrac of the ceiling, dropping the OLDEST turns when the
+// resident context exceeds it. The drop re-uses the still-cached system prefix +
+// retained window verbatim (no summary rewrite), so it is CACHE-PRESERVING — the
+// one competitor design, with the relay, that reasons about preservation. Its
+// weakness is FIDELITY: the dropped turns are gone with no externalization to a
+// durable store, so their load-bearing facts are lost irrecoverably (the relay
+// externalizes before it discards). This is the honest apples-to-apples arm: it
+// ties the relay on the bounded-peak / cache axes and separates only on accuracy.
+func simulateSlidingWindow(m RVCModel, goalTurns int) RVCArm {
+	cap := int(m.SlidingWindowKeepFrac * float64(m.WindowCeiling))
+	resident := m.SystemPrefix
+	cacheValidUpTo := 0
+	peak := resident
+	var billed float64
+	var cacheHits, cacheTotal, cacheBust, bustPending int
+	rotations := 0
+	factsInWindow := 0
+	factsRetained := 0
+	factsTotal := 0
+
+	for turn := 0; turn < goalTurns; turn++ {
+		cached := min(cacheValidUpTo, resident)
+		uncached := resident - cached
+		if bustPending > 0 {
+			cacheBust += min(bustPending, uncached)
+			bustPending = 0
+		}
+		billed += float64(cached)*m.CacheReadMult + float64(uncached)*m.CacheWriteMult
+		cacheHits += cached
+		cacheTotal += resident
+		cacheValidUpTo = resident
+
+		factsTotal += m.FactsPerTurn
+		factsInWindow += m.FactsPerTurn
+		factsRetained += m.FactsPerTurn
+		resident += m.GrowthPerTurn
+		if resident > peak {
+			peak = resident
+		}
+
+		// Trim: drop the oldest turns (after the stable system prefix) to bring the
+		// resident context back under the trailing-window cap. It is a DROP, not a
+		// summary rewrite: the system prefix stays cached and the retained window
+		// was already cached, so no content is force-rewritten (cache-preserving —
+		// bustPending stays 0). But the dropped turns are irrecoverable, so a
+		// proportional slice of the still-live facts is lost with no way to re-derive
+		// them (no durable externalize gate).
+		if resident > cap {
+			rotations++
+			dropped := resident - cap
+			transcript := resident - m.SystemPrefix
+			lost := int(float64(dropped) / float64(transcript) * float64(factsInWindow))
+			factsRetained -= lost
+			factsInWindow -= lost
+			resident = cap
+			cacheValidUpTo = min(cacheValidUpTo, resident)
+		}
+	}
+	return finishArm(StrategySlidingWindow, m, rotations, peak, billed, cacheHits, cacheTotal, cacheBust, factsTotal, factsRetained)
+}
+
+// simulateContextEditing replays the SAME goal under Anthropic API
+// context-editing (`clear_tool_uses`): grow until the trigger, then clear old
+// tool results down to the keep floor. Per the provider docs a clear
+// "Invalidates cached prompt prefixes when content is cleared", so the post-clear
+// prefix is re-sent UNCACHED next turn (a cache-bust cost); but the cleared
+// content is RECOVERABLE via the paired memory tool, so every load-bearing fact
+// is retained. It is the mirror image of the sliding window: it keeps fidelity
+// (accuracy 1.0) and pays cache, where the sliding window keeps cache and pays
+// fidelity — and the relay is the only arm that keeps both.
+func simulateContextEditing(m RVCModel, goalTurns int) RVCArm {
+	trigger := int(m.ContextEditingTriggerFrac * float64(m.WindowCeiling))
+	keep := int(m.ContextEditingKeepFrac * float64(m.WindowCeiling))
+	resident := m.SystemPrefix
+	cacheValidUpTo := 0
+	peak := resident
+	var billed float64
+	var cacheHits, cacheTotal, cacheBust, bustPending int
+	rotations := 0
+	factsTotal := 0
+
+	for turn := 0; turn < goalTurns; turn++ {
+		cached := min(cacheValidUpTo, resident)
+		uncached := resident - cached
+		if bustPending > 0 {
+			cacheBust += min(bustPending, uncached)
+			bustPending = 0
+		}
+		billed += float64(cached)*m.CacheReadMult + float64(uncached)*m.CacheWriteMult
+		cacheHits += cached
+		cacheTotal += resident
+		cacheValidUpTo = resident
+
+		factsTotal += m.FactsPerTurn
+		resident += m.GrowthPerTurn
+		if resident > peak {
+			peak = resident
+		}
+
+		// Clear at the trigger: shrink to the keep floor and invalidate the cache
+		// prefix from the clear point. The next turn re-sends the post-clear prefix
+		// uncached (bustPending). Facts are preserved: the memory tool makes the
+		// cleared content recoverable, so retained == produced.
+		if resident >= trigger {
+			rotations++
+			resident = keep
+			cacheValidUpTo = 0
+			bustPending = resident
+		}
+	}
+	return finishArm(StrategyContextEditing, m, rotations, peak, billed, cacheHits, cacheTotal, cacheBust, factsTotal, factsTotal)
+}
+
 func finishArm(strategy string, m RVCModel, rotations, peak int, billed float64, cacheHits, cacheTotal, cacheBust, factsTotal, factsRetained int) RVCArm {
 	arm := RVCArm{
 		Strategy:         strategy,
@@ -391,10 +553,14 @@ func BuildRelayVsCompactionReport() RelayVsCompactionReport {
 func BuildRelayVsCompactionReportFor(m RVCModel, durations []int) RelayVsCompactionReport {
 	sweep := make([]RVCPoint, 0, len(durations))
 	for _, n := range durations {
+		sw := simulateSlidingWindow(m, n)
+		ce := simulateContextEditing(m, n)
 		sweep = append(sweep, RVCPoint{
-			GoalTurns:  n,
-			Relay:      simulateRelay(m, n),
-			Compaction: simulateCompaction(m, n),
+			GoalTurns:      n,
+			Relay:          simulateRelay(m, n),
+			Compaction:     simulateCompaction(m, n),
+			SlidingWindow:  &sw,
+			ContextEditing: &ce,
 		})
 	}
 	return assembleRVCReport(m, sweep, simulatedRVCProvenance())
@@ -488,6 +654,7 @@ func assembleRVCReport(m RVCModel, sweep []RVCPoint, provenance Provenance) Rela
 		Schema:               "relayvscompaction.v1",
 		Provenance:           provenance,
 		Model:                m,
+		Strategies:           rvcStrategies(sweep),
 		Sweep:                sweep,
 		FlatPeakContext:      flat,
 		RelayPeakContext:     relayPeak,
@@ -506,6 +673,27 @@ func assembleRVCReport(m RVCModel, sweep []RVCPoint, provenance Provenance) Rela
 		DemotionRetirement:  "If a live run shows compaction matching the relay on BOTH cost and fidelity for a goal class (e.g. a compaction that re-queries git), the relay's complexity is not justified for that class and this bench demotes the claim rather than defending it.",
 		InvalidatingUnknown: "The single assumption most likely to flip the result is #1: that compaction does not re-derive dropped facts from the durable store. If it does, the fidelity advantage collapses and only the peak-context and cache advantages remain.",
 	}
+}
+
+// rvcStrategies is the ordered arm roster the sweep actually carries: relay and
+// compaction always (the original two), then sliding_window and context_editing
+// when the points populate them (the analytic path — #2709). It is derived from
+// the sweep rather than asserted so the OBSERVED path (two arms) and the analytic
+// path (four) each report exactly what they modeled — an honest arm count, never
+// a fabricated fourth arm the records do not back.
+func rvcStrategies(sweep []RVCPoint) []string {
+	if len(sweep) == 0 {
+		return nil
+	}
+	strategies := []string{StrategyRelay, StrategyCompaction}
+	p := sweep[0]
+	if p.SlidingWindow != nil {
+		strategies = append(strategies, StrategySlidingWindow)
+	}
+	if p.ContextEditing != nil {
+		strategies = append(strategies, StrategyContextEditing)
+	}
+	return strategies
 }
 
 // computeSavingsGates evaluates the explicit ≥50% billed-savings gate (issue

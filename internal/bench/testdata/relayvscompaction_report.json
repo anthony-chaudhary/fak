@@ -17,8 +17,17 @@
     "relay_arm_frac": 0.6,
     "facts_per_turn": 3,
     "cache_read_mult": 0.1,
-    "cache_write_mult": 1.25
+    "cache_write_mult": 1.25,
+    "sliding_window_keep_frac": 0.6,
+    "context_editing_trigger_frac": 0.8,
+    "context_editing_keep_frac": 0.5
   },
+  "strategies": [
+    "relay",
+    "compaction",
+    "sliding_window",
+    "context_editing"
+  ],
   "sweep": [
     {
       "goal_turns": 40,
@@ -45,6 +54,30 @@
         "load_bearing_facts": 120,
         "facts_retained": 107,
         "accuracy": 0.8917
+      },
+      "sliding_window": {
+        "strategy": "sliding_window",
+        "rotations": 21,
+        "peak_context_tokens": 126000,
+        "peak_context_frac": 0.63,
+        "billed_tokens": 500000,
+        "cache_hit_rate": 0.9669,
+        "cache_bust_tokens": 0,
+        "load_bearing_facts": 120,
+        "facts_retained": 58,
+        "accuracy": 0.4833
+      },
+      "context_editing": {
+        "strategy": "context_editing",
+        "rotations": 2,
+        "peak_context_tokens": 160000,
+        "peak_context_frac": 0.8,
+        "billed_tokens": 865900,
+        "cache_hit_rate": 0.8867,
+        "cache_bust_tokens": 200000,
+        "load_bearing_facts": 120,
+        "facts_retained": 120,
+        "accuracy": 1
       }
     },
     {
@@ -72,6 +105,30 @@
         "load_bearing_facts": 240,
         "facts_retained": 178,
         "accuracy": 0.7417
+      },
+      "sliding_window": {
+        "strategy": "sliding_window",
+        "rotations": 61,
+        "peak_context_tokens": 126000,
+        "peak_context_frac": 0.63,
+        "billed_tokens": 980000,
+        "cache_hit_rate": 0.9857,
+        "cache_bust_tokens": 0,
+        "load_bearing_facts": 240,
+        "facts_retained": 58,
+        "accuracy": 0.2417
+      },
+      "context_editing": {
+        "strategy": "context_editing",
+        "rotations": 6,
+        "peak_context_tokens": 160000,
+        "peak_context_frac": 0.8,
+        "billed_tokens": 2082300,
+        "cache_hit_rate": 0.8821,
+        "cache_bust_tokens": 600000,
+        "load_bearing_facts": 240,
+        "facts_retained": 240,
+        "accuracy": 1
       }
     },
     {
@@ -99,6 +156,30 @@
         "load_bearing_facts": 300,
         "facts_retained": 204,
         "accuracy": 0.68
+      },
+      "sliding_window": {
+        "strategy": "sliding_window",
+        "rotations": 81,
+        "peak_context_tokens": 126000,
+        "peak_context_frac": 0.63,
+        "billed_tokens": 1220000,
+        "cache_hit_rate": 0.9889,
+        "cache_bust_tokens": 0,
+        "load_bearing_facts": 300,
+        "facts_retained": 58,
+        "accuracy": 0.1933
+      },
+      "context_editing": {
+        "strategy": "context_editing",
+        "rotations": 8,
+        "peak_context_tokens": 160000,
+        "peak_context_frac": 0.8,
+        "billed_tokens": 2690500,
+        "cache_hit_rate": 0.8814,
+        "cache_bust_tokens": 800000,
+        "load_bearing_facts": 300,
+        "facts_retained": 300,
+        "accuracy": 1
       }
     },
     {
@@ -126,6 +207,30 @@
         "load_bearing_facts": 480,
         "facts_retained": 302,
         "accuracy": 0.6292
+      },
+      "sliding_window": {
+        "strategy": "sliding_window",
+        "rotations": 141,
+        "peak_context_tokens": 126000,
+        "peak_context_frac": 0.63,
+        "billed_tokens": 1940000,
+        "cache_hit_rate": 0.9933,
+        "cache_bust_tokens": 0,
+        "load_bearing_facts": 480,
+        "facts_retained": 58,
+        "accuracy": 0.1208
+      },
+      "context_editing": {
+        "strategy": "context_editing",
+        "rotations": 14,
+        "peak_context_tokens": 160000,
+        "peak_context_frac": 0.8,
+        "billed_tokens": 4515100,
+        "cache_hit_rate": 0.8803,
+        "cache_bust_tokens": 1400000,
+        "load_bearing_facts": 480,
+        "facts_retained": 480,
+        "accuracy": 1
       }
     },
     {
@@ -153,6 +258,30 @@
         "load_bearing_facts": 600,
         "facts_retained": 327,
         "accuracy": 0.545
+      },
+      "sliding_window": {
+        "strategy": "sliding_window",
+        "rotations": 181,
+        "peak_context_tokens": 126000,
+        "peak_context_frac": 0.63,
+        "billed_tokens": 2420000,
+        "cache_hit_rate": 0.9947,
+        "cache_bust_tokens": 0,
+        "load_bearing_facts": 600,
+        "facts_retained": 58,
+        "accuracy": 0.0967
+      },
+      "context_editing": {
+        "strategy": "context_editing",
+        "rotations": 18,
+        "peak_context_tokens": 160000,
+        "peak_context_frac": 0.8,
+        "billed_tokens": 5731500,
+        "cache_hit_rate": 0.88,
+        "cache_bust_tokens": 1800000,
+        "load_bearing_facts": 600,
+        "facts_retained": 600,
+        "accuracy": 1
       }
     },
     {
@@ -180,6 +309,30 @@
         "load_bearing_facts": 900,
         "facts_retained": 350,
         "accuracy": 0.3889
+      },
+      "sliding_window": {
+        "strategy": "sliding_window",
+        "rotations": 281,
+        "peak_context_tokens": 126000,
+        "peak_context_frac": 0.63,
+        "billed_tokens": 3620000,
+        "cache_hit_rate": 0.9966,
+        "cache_bust_tokens": 0,
+        "load_bearing_facts": 900,
+        "facts_retained": 58,
+        "accuracy": 0.0644
+      },
+      "context_editing": {
+        "strategy": "context_editing",
+        "rotations": 28,
+        "peak_context_tokens": 160000,
+        "peak_context_frac": 0.8,
+        "billed_tokens": 8772500,
+        "cache_hit_rate": 0.8796,
+        "cache_bust_tokens": 2800000,
+        "load_bearing_facts": 900,
+        "facts_retained": 900,
+        "accuracy": 1
       }
     },
     {
@@ -207,6 +360,30 @@
         "load_bearing_facts": 960,
         "facts_retained": 350,
         "accuracy": 0.3646
+      },
+      "sliding_window": {
+        "strategy": "sliding_window",
+        "rotations": 301,
+        "peak_context_tokens": 126000,
+        "peak_context_frac": 0.63,
+        "billed_tokens": 3860000,
+        "cache_hit_rate": 0.9968,
+        "cache_bust_tokens": 0,
+        "load_bearing_facts": 960,
+        "facts_retained": 58,
+        "accuracy": 0.0604
+      },
+      "context_editing": {
+        "strategy": "context_editing",
+        "rotations": 30,
+        "peak_context_tokens": 160000,
+        "peak_context_frac": 0.8,
+        "billed_tokens": 9380700,
+        "cache_hit_rate": 0.8795,
+        "cache_bust_tokens": 3000000,
+        "load_bearing_facts": 960,
+        "facts_retained": 960,
+        "accuracy": 1
       }
     }
   ],
