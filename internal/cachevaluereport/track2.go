@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/cacheprice"
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
@@ -43,18 +44,23 @@ const SavingsLedgerSchema = "fak-cache-savings-ledger/1"
 // per the #1303 "sibling file" option, so the two provenances never share a row.
 const DefaultSavingsLedgerRel = "docs/nightrun/cache-savings.jsonl"
 
-const providerCacheReadMultiplier = 0.1
+// providerCacheReadMultiplier is the price of a cached-prefix READ relative to base input.
+// It READS the canonical cacheprice.ReadMultiplier (a tier-1 leaf this tier-2 package may
+// import) rather than re-declaring the 0.1 literal, so the provider-rebate math here and the
+// gateway/agent/resume pricing surfaces value an identical cached token identically by
+// CONSTRUCTION (#2798) — not by a drift-pin test mirroring a bare literal.
+const providerCacheReadMultiplier = cacheprice.ReadMultiplier
 
-// compactionShedMarginalMultiplier is the marginal value of a compaction-shed token
-// when the fire landed on a WARM prefix. It is deliberately the SAME 0.1x the fire
-// gate prices a shed token at (agent.defaultCacheReadMult, consulted by
-// agent.CacheBurstBreakEvenTurns / headBurstEconomics): a token the provider would
-// have billed as a cache_read at 0.1x, not fresh input at 1.0x, is only worth its
-// 0.1x read cost when compaction drops it. Booking it at 1.0x — the pre-#2794 report
-// convention — over-credited fak's compaction 10x on every warm fire and was the
-// single source of the inflated fak_share (#2798). This constant and the gate's
-// readMult are the ONE source of truth for that marginal; a test asserts they agree.
-const compactionShedMarginalMultiplier = 0.1
+// compactionShedMarginalMultiplier is the marginal value of a compaction-shed token when the
+// fire landed on a WARM prefix: a token the provider would have billed as a cache_read, not
+// fresh input at 1.0x, is only worth its read-cost marginal when compaction drops it. Booking
+// it at 1.0x — the pre-#2794 report convention — over-credited fak's compaction 10x on every
+// warm fire and was the single source of the inflated fak_share (#2798). It READS the SAME
+// canonical cacheprice.ReadMultiplier the fire gate is pinned to (agent.defaultCacheReadMult,
+// consulted by agent.CacheBurstBreakEvenTurns / headBurstEconomics), so the report's shed
+// marginal and the gate's readMult are one symbol — they agree by construction, not by a
+// swept literal.
+const compactionShedMarginalMultiplier = cacheprice.ReadMultiplier
 
 // ValuationBasis names the price basis a saved-token / $ figure was booked at, so a
 // number can never be read without knowing how it was priced — the exact gap that let

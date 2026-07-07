@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/cacheprice"
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 )
 
@@ -383,37 +384,24 @@ func TestWarmCompactionShedPricedAtMarginal(t *testing.T) {
 
 // TestShedValueAgreesWithFireGate is the #2798 acceptance: the value the report books for
 // a shed token on a warm fire must equal the value the fire gate
-// (agent.CacheBurstBreakEvenTurns) prices that same token at. Both consult a single 0.1x
-// read multiplier; this asserts they have not drifted.
+// (agent.CacheBurstBreakEvenTurns) prices that same token at. Both now READ the canonical
+// cacheprice.ReadMultiplier, so agreement is by CONSTRUCTION; this test pins the report's
+// end-to-end pricing path to that canonical symbol, so a regression in the PATH (not just the
+// constant) is still caught.
 //
-// The canonical source of that 0.1 is gateway.CacheReadMultiplier (internal/gateway/
-// cache_pricing.go), pinned by gateway's own cache_pricing_test.go. It is copied down —
-// NOT imported — into agent.defaultCacheReadMult (agent must not import gateway: cycle) and
-// into this package's two constants (cachevaluereport is architest tier 2 and must not
-// import the tier-4 gateway/agent packages). So a real cross-package symbol pin is
-// architecturally impossible here; the honest guard is (1) lock this file's two marginals to
-// ONE value (providerCacheReadMultiplier), so no same-file edit can split the compaction and
-// provider bases, and (2) assert that shared value still equals the documented 0.1 mirror,
-// with a literal that names what it mirrors so a reviewer changing the canonical constant
-// knows to sweep every copy. If gateway.CacheReadMultiplier ever moves, gateway's pin test
-// fails first; this test's literal is the reminder that this copy must move with it.
+// History: the multiplier used to live in gateway (tier 4), uninmportable from this tier-2
+// package, so both of this file's constants copied the 0.1 literal down and a test mirrored
+// it. The tier-1 cacheprice leaf removed that wall — this package now imports the real symbol,
+// and the compaction shed marginal, the provider read rebate, and the fire gate's readMult are
+// ONE source (cacheprice.ReadMultiplier), not three literal copies swept by comment.
 func TestShedValueAgreesWithFireGate(t *testing.T) {
 	const shed = 10_000
-	// canonicalReadMarginal mirrors gateway.CacheReadMultiplier / agent.defaultCacheReadMult
-	// (both unexported or tier-4, hence uninmportable here). Named, not a bare 0.1, so the
-	// drift it guards is legible.
-	const canonicalReadMarginal = 0.1
-	// (1) Lock this file's two marginals together: the compaction shed and the provider
-	// read rebate must price a cached token identically — the single-source-of-truth the
-	// pre-#2798 split (compaction 1.0x vs provider 0.1x) violated.
-	if compactionShedMarginalMultiplier != providerCacheReadMultiplier {
-		t.Fatalf("in-file marginals split: compaction %.3f vs provider %.3f — one source of truth broken (#2798)",
-			compactionShedMarginalMultiplier, providerCacheReadMultiplier)
-	}
-	// (2) That shared value must still equal the canonical 0.1 the fire gate uses.
-	if compactionShedMarginalMultiplier != canonicalReadMarginal {
-		t.Fatalf("report marginal %.3f drifted from canonical fire-gate readMult %.3f (gateway.CacheReadMultiplier) — sweep all copies (#2798)",
-			compactionShedMarginalMultiplier, canonicalReadMarginal)
+	// Both report marginals source cacheprice.ReadMultiplier; assert the VALUE has not been
+	// hand-edited off the canonical read multiplier (a source-line revert to a bare literal is
+	// invisible to the compiler but shows up here as a value drift).
+	if compactionShedMarginalMultiplier != cacheprice.ReadMultiplier || providerCacheReadMultiplier != cacheprice.ReadMultiplier {
+		t.Fatalf("report marginals (compaction %.3f, provider %.3f) drifted from canonical cacheprice.ReadMultiplier %.3f — one source of truth broken (#2798)",
+			compactionShedMarginalMultiplier, providerCacheReadMultiplier, cacheprice.ReadMultiplier)
 	}
 	rows := NewSavingsRows(SavingsObservation{
 		Provider:                  "anthropic",
@@ -426,9 +414,9 @@ func TestShedValueAgreesWithFireGate(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("want one compaction row, got %d", len(rows))
 	}
-	// The fire gate values the shed token at shed*marginal per turn; the report must
-	// book the same shed*marginal token-equivalent, not shed*1.0x.
-	wantTokenEquiv := float64(shed) * canonicalReadMarginal
+	// The fire gate values the shed token at shed*marginal per turn; the report's pricing path
+	// must book the same shed*cacheprice.ReadMultiplier token-equivalent, not shed*1.0x.
+	wantTokenEquiv := float64(shed) * cacheprice.ReadMultiplier
 	if !approxTrack2(rows[0].SavedTokenEquiv, wantTokenEquiv) {
 		t.Fatalf("reported shed value = %.1f, fire-gate value = %.1f — they must agree (#2798)",
 			rows[0].SavedTokenEquiv, wantTokenEquiv)
