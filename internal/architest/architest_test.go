@@ -153,6 +153,7 @@ var tier = map[string]int{
 	"browseraction": 3,                // browser/computer-use action-mediation harness: composes webbench actions with policy/adjudicator, off the live request path.
 	"demo":          3,                // CLI 60-second proof composer: folds agentdemo(3)+kernel(2)+abi(0) into ALLOW/DENY/QUARANTINE evidence for `fak demo`, off the hot path.
 	"memq":          3, "headroom": 3, // memq: the memory-operation algebra composed over recall (tier 3). headroom: the context-compression seam over ctxmmu/abi (its doc.go declares composer/3).
+	"sessionctl":    3, // out-of-band session-control ops (#2755): turn-boundary redirect/set-objective constraints applied to a session. Composes adjudicator(2)+abi(0), off the hot path.
 	"memvaluescore": 3, // unbounded memory-value scorecard (frontier/pressure/debt) over the committed memory mirror + recall-events ledger; composes recall(3)+memoryread(1)+pkg/scorecard, off the hot path.
 	"selfquery":     3, // unified self-feature catalog over devindex, memq, gateway-supplied tool descriptors, and capindex cards; composer view, off the hot path.
 
