@@ -263,6 +263,75 @@ def lane_priority_scores(root: Path,
     return out
 
 
+def held_self_source_lanes(root: Path) -> dict[str, Any]:
+    """The self-modify-HELD lanes carrying their file tree AND their open issue numbers.
+
+    This is the ONE primitive neither ``pick_lane`` nor ``lane_candidates`` exposes:
+    ``pick_lane`` reports held lane NAMES only (``self_modify_held``) and
+    ``lane_candidates`` DROPS self-source lanes entirely. The unguarded escape
+    (``escape_self_source``) needs both halves the guarded path throws away — the
+    ``tree`` (to price a lane via ``dos arbitrate``) and the open issue NUMBERS (to
+    rank the held lanes by ``issue_triage`` score). So it re-reads the router ONCE
+    (the same ``run_json`` call ``pick_lane`` makes) and keeps precisely the lanes the
+    guard would hold: ``is_self_source_tree`` trees with at least one open issue.
+
+    Read-only and FAIL-OPEN: any router hiccup yields ``{'held': [], 'router_error': …}``
+    so the escape simply finds nothing to do rather than wedging — it never fabricates a
+    lane the guarded pick would not itself have held."""
+    router = run_json([_py(), str(root / "tools" / "issue_lane_router.py"), "--json"],
+                      root, timeout=130)
+    lanes = router.get("lanes") or {}
+    held: list[dict[str, Any]] = []
+    for ln, info in lanes.items():
+        iss = info.get("issues") if isinstance(info, dict) else info
+        tree = info.get("tree") if isinstance(info, dict) else None
+        nums = [n for n in (iss or []) if isinstance(n, int)]
+        if nums and is_self_source_tree(tree):
+            held.append({"lane": ln, "issue_nums": nums, "tree": list(tree or [])})
+    return {"held": held, "router_error": router.get("_error")}
+
+
+def rank_held_by_triage(root: Path, held: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Order held self-source lanes highest-VALUE first: by ``issue_triage`` score, then
+    open-issue count, then lane name.
+
+    Reuses ``lane_priority_scores`` (the #2064 per-lane triage-score join) so the escape
+    ranks by the SAME score the guarded pick uses — a P1 self-source lane (#3091 accounts
+    740, #2354 security 704) is drained before a P2 one. FAIL-OPEN identically: a triage
+    read error collapses every score to 0, leaving the deterministic count-then-name
+    order (never a crash, never an empty ranking). Each returned row is the input row
+    plus a ``score`` field."""
+    priority = lane_priority_scores(
+        root, {h["lane"]: h.get("issue_nums", []) for h in held})
+    scored = [{**h, "score": priority.get(h["lane"], 0)} for h in held]
+    scored.sort(key=lambda h: (-h["score"], -len(h.get("issue_nums", [])), h["lane"]))
+    return scored
+
+
+def escape_candidates(root: Path,
+                      safe_lane_priority: dict[str, int] | None) -> dict[str, Any]:
+    """The Arm-1 SIGNAL: the held self-source P1s a guarded tick legally cannot spawn,
+    surfaced LOUDLY so the silent docs fall-through becomes an actionable field.
+
+    A guarded tick holds every ``cmd/**``/``internal/**`` lane (#1397), so its highest
+    triage score can be a *docs* leaf while the real top P1 (#3091 accounts) sits
+    unreachable — the "loop grinds docs" symptom. This ranks the held lanes and marks the
+    top one ``preferred=True`` iff it OUT-SCORES the best safe (dispatchable) lane, i.e.
+    the exact condition under which the operator/super-loop should run
+    ``--escape-self-source`` instead of draining another low-value safe lane. It NEVER
+    changes ``chosen``/``members`` — the guarded spawn cannot target a held lane; this is
+    purely a payload signal. ``safe_lane_priority`` is the guarded pool's
+    ``{lane: score}`` (``priority_by_lane`` from ``pick_lane``, or issue-count as the
+    wave's proxy)."""
+    ranked = rank_held_by_triage(root, held_self_source_lanes(root)["held"])
+    best_safe = max(safe_lane_priority.values(), default=0) if safe_lane_priority else 0
+    top = ranked[0]["score"] if ranked else None
+    for i, r in enumerate(ranked):
+        r["preferred"] = bool(i == 0 and top is not None and top > best_safe)
+    return {"escape_candidates": ranked, "top_held_score": top,
+            "best_safe_score": best_safe}
+
+
 def pick_lane(root: Path, explicit: str | None,
               busy: set[str] | None = None,
               guarded: bool | None = None) -> dict[str, Any]:
@@ -370,12 +439,17 @@ def _safe_unlink(path: Path) -> None:
 
 
 def _write_inflight_marker(runs_dir: Path, lane: str, pid: int,
-                           account: str | None = None) -> str | None:
-    """Record {lane, pid, account} so a LATER tick sees this lane AND this account are
-    in flight and spreads to a different one. ``account`` (the worker's pinned
-    CLAUDE_CONFIG_DIR) lets the next wave avoid double-loading an account that already
-    has a live worker — the cross-tick ACCOUNT de-confliction (#2060), the twin of the
-    cross-tick LANE de-confliction. Best-effort: a write failure never blocks the
+                           account: str | None = None,
+                           guarded: bool = True) -> str | None:
+    """Record {lane, pid, account, guarded} so a LATER tick sees this lane AND this
+    account are in flight and spreads to a different one. ``account`` (the worker's
+    pinned CLAUDE_CONFIG_DIR) lets the next wave avoid double-loading an account that
+    already has a live worker — the cross-tick ACCOUNT de-confliction (#2060), the twin
+    of the cross-tick LANE de-confliction. ``guarded`` self-describes whether this
+    worker is fronted by ``fak guard`` (the default) or is an unguarded escape worker,
+    so ``guarded_worker_in_flight`` can read the build-integrity gate off the marker set
+    alone — the escape must not land an unguarded self-source commit while a guarded
+    peer's ``go build`` could be poisoned. Best-effort: a write failure never blocks the
     spawn."""
     try:
         runs_dir.mkdir(parents=True, exist_ok=True)
@@ -383,6 +457,7 @@ def _write_inflight_marker(runs_dir: Path, lane: str, pid: int,
         path.write_text(
             json.dumps({"lane": lane, "pid": int(pid),
                         "account": account or None,
+                        "guarded": bool(guarded),
                         "stamp": dt.datetime.now(dt.timezone.utc).isoformat()}),
             encoding="utf-8")
         return str(path)
@@ -463,6 +538,48 @@ def busy_accounts(runs_dir: Path, *, is_alive: Callable[[int], bool] | None = No
     return accounts
 
 
+def guarded_worker_in_flight(runs_dir: Path, *,
+                             is_alive: Callable[[int], bool] | None = None,
+                             now: float | None = None,
+                             ttl_seconds: int = INFLIGHT_TTL_SECONDS) -> bool:
+    """True iff a currently-live dispatched worker is GUARDED — the build-integrity gate
+    an unguarded escape must clear before it lands a self-source commit.
+
+    Folds the SAME inflight markers ``busy_lanes``/``busy_accounts`` read, counting a
+    marker only when its pid is alive and its file is within ``ttl_seconds``. A guarded
+    peer may be mid-edit on the shared Go source, so its ``go build`` can be transiently
+    red; an unguarded escape worker that commits self-source in that window would ship on
+    top of a poisoned build. Reading the gate off the marker set (not a live process
+    probe) keeps it hermetic and injectable. A marker with NO ``guarded`` field predates
+    the escape work, when every worker was guarded, so it is treated as guarded — an old
+    marker never opens the gate by omission. Prunes the dead/unreadable/stale markers it
+    scans, the same self-heal as its siblings; a first live guarded marker short-circuits
+    to ``True`` (the remaining markers are pruned by the next ``busy_lanes`` pass)."""
+    alive = is_alive or _pid_is_alive
+    if not runs_dir.is_dir():
+        return False
+    when = now if now is not None else time.time()
+    for marker in sorted(runs_dir.glob(f"{INFLIGHT_PREFIX}*.json")):
+        try:
+            rec = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            _safe_unlink(marker)
+            continue
+        raw_pid = (rec or {}).get("pid")
+        pid = int(raw_pid) if isinstance(raw_pid, int) else (
+            int(raw_pid) if isinstance(raw_pid, str) and raw_pid.strip().isdigit() else 0)
+        try:
+            stale = (when - marker.stat().st_mtime) > ttl_seconds
+        except OSError:
+            stale = True
+        if pid <= 0 or stale or not alive(pid):
+            _safe_unlink(marker)
+            continue
+        if bool((rec or {}).get("guarded", True)):
+            return True
+    return False
+
+
 def _truthy_env(value: str | None) -> bool:
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -530,8 +647,13 @@ def worker_env(account_dir: str | None, lane: str, workspace: Path) -> dict[str,
 
 
 def spawn_detached(command: list[str], env: dict[str, str], cwd: Path,
-                   log_dir: Path, lane: str) -> dict[str, Any]:
-    """Launch the worker DETACHED so it outlives this tick; log to a dated file."""
+                   log_dir: Path, lane: str, guarded: bool = True) -> dict[str, Any]:
+    """Launch the worker DETACHED so it outlives this tick; log to a dated file.
+
+    ``guarded`` records whether THIS worker is fronted by ``fak guard`` so the in-flight
+    marker self-describes its guard status; a later tick reads it via
+    ``guarded_worker_in_flight`` as the build-integrity gate before an unguarded escape
+    lands a self-source commit."""
     log_dir.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
     out_log = log_dir / f"dispatch-{lane}-{stamp}.log"
@@ -554,7 +676,8 @@ def spawn_detached(command: list[str], env: dict[str, str], cwd: Path,
     # both (cross-tick lane + account de-confliction). Best-effort and pid-keyed;
     # busy_lanes/busy_accounts prune it on death.
     marker = _write_inflight_marker(log_dir, lane, proc.pid,
-                                    account=env.get("CLAUDE_CONFIG_DIR"))
+                                    account=env.get("CLAUDE_CONFIG_DIR"),
+                                    guarded=guarded)
     return {"pid": proc.pid, "log": str(out_log), "inflight": marker}
 
 
@@ -620,6 +743,20 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     }
     if lease_busy.get("error"):
         payload["lease_busy_error"] = lease_busy.get("error")
+    # Build-integrity gate (UNGATED): reads the same inflight markers busy_lanes already
+    # folded above — a pure local file read, no shell-out — so it is cheap and hermetic
+    # enough to surface every tick. An unguarded escape worker consults it before landing
+    # a self-source commit while a guarded peer's go build could be transiently red.
+    payload["guarded_worker_in_flight"] = guarded_worker_in_flight(root / RUNS_DIRNAME)
+    # Arm-1 signal (GATED): surface the held self-source P1s the guarded pick legally
+    # cannot spawn, but ONLY when a lane is actually held. The gate is load-bearing for
+    # both cost and hermeticity: escape_candidates() re-shells to issue_lane_router +
+    # issue_triage(gh), so firing it unconditionally would add two live shell-outs to
+    # every default tick (measured ~450x slower under the hermetic pinned suite, which
+    # stubs pick_lane but not run_json). Under every test stub self_modify_held is
+    # empty, so this never fires there — the default path stays byte-for-byte unchanged.
+    if lane_pick.get("self_modify_held"):
+        payload.update(escape_candidates(root, lane_pick.get("priority_by_lane")))
 
     if not pre_ok:
         hint = preflight_refusal_hint(pre)
@@ -651,7 +788,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     env = worker_env(acct.get("dir"), chosen, root)
     if guarded:
         dispatch_worker.guard_env_augment(env)
-    spawned = spawn_detached(launch_command, env, root, root / RUNS_DIRNAME, chosen)
+    spawned = spawn_detached(launch_command, env, root, root / RUNS_DIRNAME, chosen,
+                             guarded=guarded)
     payload.update({"ok": True, "action": "spawned", "verdict": "SPAWNED",
                     "spawned": spawned,
                     "reason": (f"spawned worker pid {spawned['pid']} on lane '{chosen}' "
@@ -912,7 +1050,8 @@ def _spawn_wave_member(root: Path, lane: str, seat: dict[str, Any], wave_id: str
     env.update(_wave_env(rank, wave_id, size, shortfall))
     if guarded:
         dispatch_worker.guard_env_augment(env)
-    spawned = spawn_detached(launch_command, env, root, root / RUNS_DIRNAME, lane)
+    spawned = spawn_detached(launch_command, env, root, root / RUNS_DIRNAME, lane,
+                             guarded=guarded)
     spawned["guarded"] = guarded
     try:
         Path(spawned["log"]).with_suffix(".wave").write_text(
@@ -1015,6 +1154,17 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
     }
     if lease_busy.get("error"):
         payload["lease_busy_error"] = lease_busy.get("error")
+    # Build-integrity gate (UNGATED, same rationale as evaluate): a local marker read the
+    # wave already did via busy_lanes/busy_accounts, no shell-out, so it rides every wave.
+    payload["guarded_worker_in_flight"] = guarded_worker_in_flight(root / RUNS_DIRNAME)
+    # Arm-1 signal (GATED, same rationale as evaluate): only when a self-source lane is
+    # actually held. The wave has no per-lane triage score computed, so it passes the
+    # candidate issue-COUNT as the safe-priority proxy — enough to decide whether a held
+    # P1 out-ranks the best dispatchable lane and warrants an escape. Under WaveTest's
+    # stub lane_candidates returns no self_modify_held, so this never fires hermetically.
+    if cand.get("self_modify_held"):
+        payload.update(escape_candidates(
+            root, {c["lane"]: c["issues"] for c in candidates}))
 
     if not refusal:
         preflight_seed = first_preflight

@@ -1087,6 +1087,197 @@ class SpawnInflightMarkerTest(unittest.TestCase):
                 mod.busy_accounts(runs, is_alive=lambda pid: pid == 4243),
                 {r"C:\U\.claude-day30-netra"})
 
+    def _spawn(self, mod, runs: Path, lane: str, pid: int, **kw):
+        class FakeProc:
+            pass
+        FakeProc.pid = pid
+        with warnings.catch_warnings(), \
+                mock.patch.object(mod.subprocess, "Popen", lambda *a, **k: FakeProc()), \
+                mock.patch.object(mod.shutil, "which", lambda x: x):
+            warnings.simplefilter("ignore", ResourceWarning)
+            out = mod.spawn_detached(["claude", "-p", "x"], {}, runs.parent, runs, lane,
+                                     **kw)
+        return json.loads(Path(out["inflight"]).read_text(encoding="utf-8"))
+
+    def test_spawn_detached_records_guarded_true_by_default(self) -> None:
+        # The default worker is guard-fronted, so the marker self-describes guarded=True
+        # and guarded_worker_in_flight can read the build-integrity gate off it.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            rec = self._spawn(mod, Path(d) / "runs", "gateway", 5100)
+            self.assertIs(rec["guarded"], True)
+
+    def test_spawn_detached_records_guarded_false_for_escape_worker(self) -> None:
+        # An explicitly-unguarded escape worker stamps guarded=False so a later tick can
+        # tell it apart from a guard-fronted peer.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            rec = self._spawn(mod, Path(d) / "runs", "internal-accounts", 5101,
+                              guarded=False)
+            self.assertIs(rec["guarded"], False)
+
+
+class GuardedWorkerInFlightTest(unittest.TestCase):
+    """guarded_worker_in_flight folds the same inflight markers as busy_lanes and reports
+    whether any LIVE worker is guarded — the build-integrity gate an unguarded escape
+    must clear before it lands a self-source commit on top of a possibly-red build."""
+
+    def _marker(self, mod, runs: Path, lane: str, pid: int, guarded) -> Path:
+        runs.mkdir(parents=True, exist_ok=True)
+        p = runs / f"{mod.INFLIGHT_PREFIX}{lane}-{pid}.json"
+        rec = {"lane": lane, "pid": pid}
+        if guarded is not None:
+            rec["guarded"] = guarded
+        p.write_text(json.dumps(rec), encoding="utf-8")
+        return p
+
+    def test_live_guarded_marker_closes_the_gate(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._marker(mod, runs, "gateway", 111, True)
+            self.assertTrue(
+                mod.guarded_worker_in_flight(runs, is_alive=lambda pid: True))
+
+    def test_live_unguarded_marker_leaves_gate_open(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._marker(mod, runs, "internal-accounts", 222, False)
+            self.assertFalse(
+                mod.guarded_worker_in_flight(runs, is_alive=lambda pid: True))
+
+    def test_missing_guarded_field_is_treated_as_guarded(self) -> None:
+        # A marker predating the escape work has no `guarded` field; back then every
+        # worker was guarded, so it must NOT open the gate by omission.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._marker(mod, runs, "docs", 333, None)
+            self.assertTrue(
+                mod.guarded_worker_in_flight(runs, is_alive=lambda pid: True))
+
+    def test_dead_guarded_marker_pruned_and_gate_open(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            m = self._marker(mod, runs, "gateway", 444, True)
+            self.assertFalse(
+                mod.guarded_worker_in_flight(runs, is_alive=lambda pid: False))
+            self.assertFalse(m.exists())     # dead marker pruned in the same pass
+
+    def test_stale_guarded_marker_pruned_and_gate_open(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            m = self._marker(mod, runs, "gateway", 555, True)
+            old = os.path.getmtime(m) - (mod.INFLIGHT_TTL_SECONDS + 100)
+            os.utime(m, (old, old))
+            self.assertFalse(
+                mod.guarded_worker_in_flight(runs, is_alive=lambda pid: True))
+            self.assertFalse(m.exists())
+
+    def test_missing_runs_dir_leaves_gate_open(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            self.assertFalse(
+                mod.guarded_worker_in_flight(Path(d) / "nope",
+                                             is_alive=lambda pid: True))
+
+    def test_guarded_peer_closes_gate_even_beside_an_unguarded_worker(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._marker(mod, runs, "internal-accounts", 666, False)
+            self._marker(mod, runs, "gateway", 667, True)
+            self.assertTrue(
+                mod.guarded_worker_in_flight(runs, is_alive=lambda pid: True))
+
+
+class EscapeSignalTest(unittest.TestCase):
+    """The Arm-1 escape SIGNAL: held_self_source_lanes → rank_held_by_triage →
+    escape_candidates surface the held self-source P1s a guarded tick legally cannot
+    spawn, marking the top one `preferred` iff it out-scores the best dispatchable lane —
+    so the loop stops silently grinding docs while a P1 sits unreachable."""
+
+    # A router with: a self-source P1 lane, a self-source P2 lane, a self-source lane
+    # with NO open issues, and a non-self-source docs lane. Only the first two are held.
+    ROUTER = {"lanes": {
+        "internal-accounts": {"issues": [3091], "tree": ["internal/accounts/**"]},
+        "cmd-fak": {"issues": [2036, 2037], "tree": ["cmd/fak/**"]},
+        "internal-empty": {"issues": [], "tree": ["internal/empty/**"]},
+        "docs": {"issues": [10, 11], "tree": ["docs/**"]},
+    }}
+
+    def _stub(self, mod, router=None, scores=None):
+        router = self.ROUTER if router is None else router
+        mod.run_json = lambda cmd, cwd, timeout: router
+        if scores is not None:
+            mod.lane_priority_scores = lambda root, mapping: scores
+
+    def test_held_keeps_only_self_source_lanes_with_open_issues(self) -> None:
+        mod = load()
+        self._stub(mod)
+        held = mod.held_self_source_lanes(ROOT)
+        lanes = {h["lane"] for h in held["held"]}
+        self.assertEqual(lanes, {"internal-accounts", "cmd-fak"})
+        acct = next(h for h in held["held"] if h["lane"] == "internal-accounts")
+        self.assertEqual(acct["issue_nums"], [3091])
+        self.assertEqual(acct["tree"], ["internal/accounts/**"])
+        self.assertIsNone(held["router_error"])
+
+    def test_held_fail_open_on_router_error(self) -> None:
+        mod = load()
+        self._stub(mod, router={"_error": "router boom"})
+        held = mod.held_self_source_lanes(ROOT)
+        self.assertEqual(held["held"], [])
+        self.assertEqual(held["router_error"], "router boom")
+
+    def test_rank_orders_by_score_then_count_then_name(self) -> None:
+        mod = load()
+        self._stub(mod, scores={"internal-accounts": 740, "cmd-fak": 300})
+        ranked = mod.rank_held_by_triage(
+            ROOT, mod.held_self_source_lanes(ROOT)["held"])
+        self.assertEqual([r["lane"] for r in ranked],
+                         ["internal-accounts", "cmd-fak"])
+        self.assertEqual(ranked[0]["score"], 740)
+
+    def test_rank_fail_open_collapses_to_count_then_name(self) -> None:
+        # A triage read error collapses every score to 0; the deterministic
+        # count-then-name order survives (cmd-fak has 2 issues, internal-accounts 1).
+        mod = load()
+        self._stub(mod, scores={})
+        ranked = mod.rank_held_by_triage(
+            ROOT, mod.held_self_source_lanes(ROOT)["held"])
+        self.assertEqual([r["lane"] for r in ranked],
+                         ["cmd-fak", "internal-accounts"])
+        self.assertTrue(all(r["score"] == 0 for r in ranked))
+
+    def test_escape_preferred_when_top_held_outscores_best_safe(self) -> None:
+        mod = load()
+        self._stub(mod, scores={"internal-accounts": 740, "cmd-fak": 300})
+        out = mod.escape_candidates(ROOT, {"docs": 100, "recall": 90})
+        self.assertEqual(out["top_held_score"], 740)
+        self.assertEqual(out["best_safe_score"], 100)
+        self.assertTrue(out["escape_candidates"][0]["preferred"])
+        self.assertFalse(out["escape_candidates"][1]["preferred"])
+
+    def test_escape_not_preferred_when_best_safe_outscores(self) -> None:
+        mod = load()
+        self._stub(mod, scores={"internal-accounts": 740, "cmd-fak": 300})
+        out = mod.escape_candidates(ROOT, {"gateway": 900})
+        self.assertEqual(out["top_held_score"], 740)
+        self.assertEqual(out["best_safe_score"], 900)
+        self.assertFalse(any(r["preferred"] for r in out["escape_candidates"]))
+
+    def test_escape_empty_when_no_self_source_held(self) -> None:
+        mod = load()
+        self._stub(mod, router={"lanes": {"docs": {"issues": [1], "tree": ["docs/**"]}}},
+                   scores={})
+        out = mod.escape_candidates(ROOT, {"docs": 5})
+        self.assertEqual(out["escape_candidates"], [])
+        self.assertIsNone(out["top_held_score"])
+
 
 class EvaluateBusyWiringTest(unittest.TestCase):
     """The single tick computes busy_lanes, threads it into pick_lane, and surfaces
