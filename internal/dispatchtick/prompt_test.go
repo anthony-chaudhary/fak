@@ -72,6 +72,51 @@ func TestIssuePromptDoesNotLeakUnrelatedIssueData(t *testing.T) {
 	}
 }
 
+func TestIssuePromptRendersGenerationGuidance(t *testing.T) {
+	// #1404 parity: the Go renderer must carry the same generation intent/frame
+	// worker-contract block that tools/issue_worker_prompt.py emits, so the Python
+	// prompt renderer can be retired without dropping the horizon-risk steering. The
+	// stream is derived from the issue's gen/* label.
+	in := sampleIssuePrompt()
+	in.Labels = []string{"enhancement", "gen/now"}
+	p := RenderIssuePrompt(in)
+	for _, want := range []string{
+		"Generation intent: now - immediate trunk-safe product/operator work; do not wait for a future architecture bet.",
+		"Generation is orthogonal to priority, shared trunk, and runtime feature gates.",
+		"Generation frame: stream=gen/now; allowed risk=low, trunk-safe, reversible;",
+		"When closing generation work, name promotion evidence, demotion/retirement evidence, and at least one invalidating assumption in the artifact or final report.",
+	} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("prompt missing generation guidance %q:\n%s", want, p)
+		}
+	}
+	// Steering precedes data: the generation guidance renders before the raw body.
+	if strings.Index(p, "Generation intent:") > strings.Index(p, "issue body (verbatim") {
+		t.Fatalf("generation guidance should render before the raw issue body:\n%s", p)
+	}
+}
+
+func TestIssuePromptGenerationGuidanceDefaultsUnclassified(t *testing.T) {
+	// An issue with no gen/* label renders the unclassified/triage-only frame,
+	// matching the Python default (never guess a horizon).
+	in := sampleIssuePrompt()
+	in.Labels = []string{"enhancement"}
+	p := RenderIssuePrompt(in)
+	for _, want := range []string{
+		"Generation intent: unclassified - read docs/generation.md and avoid guessing; keep needs-triage if the horizon is unclear.",
+		"Generation frame: stream=unclassified; allowed risk=triage only;",
+	} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("prompt missing unclassified generation guidance %q:\n%s", want, p)
+		}
+	}
+	for _, unwanted := range []string{"stream=gen/now", "stream=gen/next", "stream=gen/future"} {
+		if strings.Contains(p, unwanted) {
+			t.Fatalf("unclassified prompt leaked a classified frame %q:\n%s", unwanted, p)
+		}
+	}
+}
+
 func TestIssuePromptExtractsAgentIssueBrief(t *testing.T) {
 	in := sampleIssuePrompt()
 	in.Body = strings.Join([]string{

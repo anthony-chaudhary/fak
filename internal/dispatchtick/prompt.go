@@ -66,9 +66,12 @@ func RenderIssuePrompt(in IssuePromptInput) string {
 		body = "(no body - read the title and `gh issue view` for the full thread)"
 	}
 	labels := labelsLine(in.Labels)
+	generationBlock := renderGenerationGuidance(in.Labels)
 	return fmt.Sprintf(`your goal: resolve GitHub issue #%[1]d (%[2]s) with the smallest correct change that genuinely closes it, then ship it on the configured development branch `+"`%[8]s`"+` citing `+"`#%[1]d`"+` in the commit subject - OR end with a final report naming the exact gate you could not reach and why. Do NOT fabricate a pass.
 
 read first: run `+"`gh issue view %[1]d`"+` for the live issue, then orient with `+"`AGENTS.md`"+` (build/test/run + the hard rules) and `+"`llms.txt`"+` (the doc map). Then run `+"`fak memory-read`"+` for the committed fleet memory (lane quirks, known blockers, host gotchas) - a Claude worker gets this auto-injected, an opencode worker does NOT, so this read is how both backends start warm (it is a harmless no-op if the mirror is absent). This issue routed to the `+"`%[3]s`"+` lane (its file-tree). Labels: %[4]s.
+
+%[10]s
 
 %[7]s
 
@@ -98,7 +101,7 @@ git laws (enforced below the agent - breaking them refuses your commit):
 acceptance (your stop condition): a committed change on the configured development branch `+"`%[8]s`"+` whose subject cites `+"`#%[1]d`"+` and whose gate you actually ran is green - OR a final report that names the specific missing artifact/host capability and the smallest next step. Honesty over a green-looking lie: the repo keeps a witness ledger and a self-authored "done" is re-checked against git. If you discovered a durable fact worth keeping (a lane quirk, a host gotcha, a blocker), surface it explicitly in your final message so an operator or Claude peer can record it to the memory mirror - an opencode worker has no auto-memory write path of its own.
 
 workspace: %[6]s. lane: %[3]s. issue: #%[1]d.
-`, in.Number, title, strings.TrimSpace(in.Lane), labels, body, strings.TrimSpace(in.Workspace), agentBrief, developmentBranch, resumeWitness)
+`, in.Number, title, strings.TrimSpace(in.Lane), labels, body, strings.TrimSpace(in.Workspace), agentBrief, developmentBranch, resumeWitness, generationBlock)
 }
 
 func promptDevelopmentBranch(branch string) string {
@@ -107,6 +110,62 @@ func promptDevelopmentBranch(branch string) string {
 		return "main"
 	}
 	return branch
+}
+
+// renderGenerationGuidance mirrors tools/issue_worker_prompt.py's generation
+// block so the native Go renderer preserves the same horizon-risk steering the
+// Python worker prompt carried (#1404). The stream is derived from the issue's
+// gen/* label; an issue with no gen/* label renders the unclassified/triage-only
+// frame, matching the Python default.
+func renderGenerationGuidance(labels []string) string {
+	return fmt.Sprintf("Generation intent: %s. Generation is orthogonal to priority, shared trunk, and runtime feature gates.\nGeneration frame: %s.\nWhen closing generation work, name promotion evidence, demotion/retirement evidence, and at least one invalidating assumption in the artifact or final report.",
+		generationIntentLine(labels), generationFrameLine(labels))
+}
+
+func generationStream(labels []string) string {
+	for _, label := range labels {
+		switch strings.TrimSpace(label) {
+		case "gen/now":
+			return "now"
+		case "gen/next":
+			return "next"
+		case "gen/second-next":
+			return "second-next"
+		case "gen/future":
+			return "future"
+		}
+	}
+	return ""
+}
+
+func generationIntentLine(labels []string) string {
+	switch generationStream(labels) {
+	case "now":
+		return "now - immediate trunk-safe product/operator work; do not wait for a future architecture bet"
+	case "next":
+		return "next - near-term foundation; keep gated or dogfooded until promotion evidence lands"
+	case "second-next":
+		return "second-next - architectural option; preserve assumptions and compatibility evidence"
+	case "future":
+		return "future - research or long-horizon option; do not treat it as lower priority by default"
+	default:
+		return "unclassified - read docs/generation.md and avoid guessing; keep needs-triage if the horizon is unclear"
+	}
+}
+
+func generationFrameLine(labels []string) string {
+	switch generationStream(labels) {
+	case "now":
+		return "stream=gen/now; allowed risk=low, trunk-safe, reversible; proof bar=focused test or captured command output before closing; scope width=one leaf or one operator surface; expected artifact=shipped code, doc, report, or configuration on main"
+	case "next":
+		return "stream=gen/next; allowed risk=moderate only behind a gate, dogfood path, or handoff contract; proof bar=contract test plus promotion evidence that names what moves it toward now; scope width=near-term foundation, one prompt/dispatch/report seam; expected artifact=agent-runnable schema, prompt frame, gated behavior, or operator readout"
+	case "second-next":
+		return "stream=gen/second-next; allowed risk=architectural exploration, never default exposure; proof bar=simulation, compatibility policy, or dependency edge with demotion criteria; scope width=cross-generation option or interface boundary; expected artifact=design memo, compatibility test, lifecycle model, or prototype behind an explicit gate"
+	case "future":
+		return "stream=gen/future; allowed risk=research and option valuation only, not current-product commitment; proof bar=sourced memo, kill criteria, or decision model with assumptions stated; scope width=long-horizon market, standards, benchmark, or portfolio option; expected artifact=research note, scorecard, simulator spec, or narrative that preserves non-goals"
+	default:
+		return "stream=unclassified; allowed risk=triage only; proof bar=classify the horizon from issue evidence before implementation; scope width=label/milestone repair or a clarification note; expected artifact=updated labels, milestone, or final report naming why classification is blocked"
+	}
 }
 
 var privatePromptRedactions = []struct {
