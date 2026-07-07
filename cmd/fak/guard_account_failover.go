@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
 
@@ -101,34 +102,59 @@ func (a *accountFailover) walledKeys() map[string]bool {
 // future turns follow it — or ("", false) when every sibling is walled/absent (the caller surfaces
 // the account-scoped 403 terminally). The current account is added to the walled set FIRST so the
 // picker cannot hand back the very credential that just failed.
+//
+// When the wall is a LIVE 429 account cap (reason == agent.RehomedSeat), it ALSO persists a
+// self-recovering cooldown for the walled account to the fleet-shared store — so the cap outlives
+// this process and the next `fak guard`/`fak accounts launch` (via guardrotate.Plan / the login
+// overlay) automatically avoids the just-capped account instead of re-selecting it. The 403
+// org/region/billing wall (reason == "failover_account") is NOT a timed cap and stays in-memory
+// only: a default cooldown window would wrongly re-admit a durably-blocked org after it elapses.
+// The persist is done AFTER releasing the lock (disk I/O off the mutex) and is best-effort.
 func (a *accountFailover) failover(reason string) (string, bool) {
+	token, walledKey, ok := a.failoverLocked()
+	// Persist a durable cooldown for a live 429 account cap so the wall is visible fleet-wide and
+	// to the next launch — not just to this session's in-memory walled set. Gated on the cap reason
+	// and done off the lock; fail-open (a store error never affects the in-process swap above).
+	isAccountCap := reason == agent.RehomedSeat
+	if walledKey != "" && isAccountCap {
+		_, _ = recordRehomeCooldown(os.Stderr, walledKey, reason, isAccountCap, a.now())
+	}
+	return token, ok
+}
+
+// failoverLocked is failover's mutex-held core: it walls the current account in-memory, picks a
+// permitted sibling, and advances the sticky dir. It returns the adopted token, the account KEY it
+// just walled (so the caller can persist a cooldown off the lock), and ok. walledKey is "" when the
+// current dir had no derivable identity.
+func (a *accountFailover) failoverLocked() (token, walledKey string, ok bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	// Mark the account currently in force as walled so it is never re-selected this session.
-	if key := accountKeyForDir(a.currentDir); key != "" {
-		a.walled[key] = true
+	walledKey = accountKeyForDir(a.currentDir)
+	if walledKey != "" {
+		a.walled[walledKey] = true
 	}
 
 	homes, err := accounts.Discover(a.homeRoot)
 	if err != nil {
 		a.lastNoTarget = FailoverNoSiblings // roster unreadable — treat as nothing to fail over to
-		return "", false
+		return "", walledKey, false
 	}
-	dir, token, noTarget, ok := pickFailoverAccount(homes, a.excludedLocked(), a.now())
+	dir, tok, noTarget, ok := pickFailoverAccount(homes, a.excludedLocked(), a.now())
 	if !ok {
 		// Record WHY no sibling qualified so the terminal 403 surface (and the status endpoint) can
 		// name the account-level fix instead of a bare "no failover target". The auto arm cannot
 		// print here (it is on the hot path), so it stashes the reason for the operator-facing
 		// surfaces to read — the same single reason forceRehome renders inline.
 		a.lastNoTarget = noTarget
-		return "", false
+		return "", walledKey, false
 	}
 	a.lastNoTarget = FailoverFoundTarget
 	// Adopt it: advance the sticky dir so the per-request token source follows the permitted
 	// account on every subsequent turn, and return the live token for THIS re-send.
 	a.currentDir = dir
-	return token, true
+	return tok, walledKey, true
 }
 
 // lastNoTargetReason returns the reason the most recent failover/rehome found no sibling to adopt

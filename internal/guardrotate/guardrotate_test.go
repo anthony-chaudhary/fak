@@ -258,6 +258,108 @@ func TestHomeForDirUnknownDir(t *testing.T) {
 	}
 }
 
+// TestPersistCooldownForRehomeWritesUsageCap: a live 429 account-cap rehome (isAccountCap true)
+// records a self-recovering usage-limit cooldown keyed on the walled account, honoring an
+// explicit reset when the reason names one.
+func TestPersistCooldownForRehomeWritesUsageCap(t *testing.T) {
+	now := grMustTime(t, "2026-07-07T12:00:00Z")
+	store := grStore(t, now, now) // empty store
+	entry, wrote := PersistCooldownForRehome(store, "uuid:u-alice", "resets at 2026-07-07T17:00:00Z", "resets at 2026-07-07T17:00:00Z", true, now)
+	if !wrote {
+		t.Fatal("a 429 account cap must persist a cooldown")
+	}
+	if entry.Kind != accounts.CooldownUsageLimit {
+		t.Fatalf("kind = %q, want usage-limit", entry.Kind)
+	}
+	want := grMustTime(t, "2026-07-07T17:00:00Z")
+	if !entry.ResetAt.Equal(want) {
+		t.Fatalf("reset = %v, want explicit %v", entry.ResetAt, want)
+	}
+	// And it is now readable back as an active cooldown.
+	if _, ok := store.CooledDown("uuid:u-alice", now); !ok {
+		t.Fatal("the walled account must read as cooled after persist")
+	}
+}
+
+// TestPersistCooldownForRehomeDefaultWindow: with no explicit reset in the reason, the default
+// usage-limit window (1h) is applied.
+func TestPersistCooldownForRehomeDefaultWindow(t *testing.T) {
+	now := grMustTime(t, "2026-07-07T12:00:00Z")
+	store := grStore(t, now, now)
+	entry, wrote := PersistCooldownForRehome(store, "uuid:u-alice", "rehomed_seat", "rehomed_seat", true, now)
+	if !wrote {
+		t.Fatal("expected a write")
+	}
+	if got := entry.ResetAt.Sub(now); got != accounts.DefaultCooldownWindow {
+		t.Fatalf("default window = %v, want %v", got, accounts.DefaultCooldownWindow)
+	}
+}
+
+// TestPersistCooldownForRehomeSkipsOrgWall is the correctness guard on the reason gate: a 403
+// org/region/billing wall (isAccountCap false) is NOT a timed cap and must NOT be persisted —
+// a default window would wrongly re-admit a durably-blocked org after it elapses.
+func TestPersistCooldownForRehomeSkipsOrgWall(t *testing.T) {
+	now := grMustTime(t, "2026-07-07T12:00:00Z")
+	store := grStore(t, now, now)
+	if _, wrote := PersistCooldownForRehome(store, "uuid:u-alice", "failover_account", "failover_account", false, now); wrote {
+		t.Fatal("a 403 org-wall (isAccountCap=false) must NOT persist a cooldown")
+	}
+	if _, ok := store.CooledDown("uuid:u-alice", now); ok {
+		t.Fatal("the org-walled account must NOT read as cooled")
+	}
+}
+
+// TestPersistCooldownForRehomeEmptyAccountNoop / nil store: fail-open guards.
+func TestPersistCooldownForRehomeGuards(t *testing.T) {
+	now := grMustTime(t, "2026-07-07T12:00:00Z")
+	store := grStore(t, now, now)
+	if _, wrote := PersistCooldownForRehome(store, "", "rehomed_seat", "", true, now); wrote {
+		t.Fatal("empty account must not write")
+	}
+	if _, wrote := PersistCooldownForRehome(nil, "uuid:u-alice", "rehomed_seat", "", true, now); wrote {
+		t.Fatal("nil store must not write")
+	}
+}
+
+// TestLive429RehomePersistThenNextLaunchRotatesOff is the END-TO-END proof of the automatic
+// loop the user asked for: a live 429 account-cap rehome persists a cooldown for the capped
+// account, and a SUBSEQUENT launch (Plan) then automatically rotates OFF that account onto a
+// seat with room — without any launch-time re-detection. This is the "on 429, cool it AND the
+// next spawn avoids it" behavior, proven across the write side and the read side together.
+func TestLive429RehomePersistThenNextLaunchRotatesOff(t *testing.T) {
+	now := grMustTime(t, "2026-07-07T12:00:00Z")
+	reg := accounts.Registry{Homes: []accounts.Home{
+		grHome("alice", "/home/.claude", "u-alice"),
+		grHome("bob", "/home/.claude-bob", "u-bob"),
+	}}
+
+	// (1) A live 429 on alice's account rehomes and persists the cooldown.
+	store := grStore(t, now, now) // start with nothing cooled
+	if _, wrote := PersistCooldownForRehome(store, "uuid:u-alice", "rehomed_seat", "rehomed_seat", true, now); !wrote {
+		t.Fatal("the 429 rehome must persist alice's cooldown")
+	}
+
+	// (2) The NEXT launch builds headroom that folds in the just-written cooldown (alice walled,
+	// bob offerable) — exactly what rotationHeadroom + applyCooldownToHeadroom produce — and Plan
+	// rotates off alice onto bob. This is the automatic avoidance a bare `fak guard` now gets.
+	hr := accounts.RotationHeadroom{}
+	for _, e := range store.Active(now) {
+		hr[e.Account] = -1 // cooled -> walled, mirroring applyCooldownToHeadroom
+	}
+	hr["uuid:u-bob"] = 1.5 // bob offerable per the roster
+
+	dir, note, ok := Plan(reg, store, hr, "/home/.claude", now)
+	if !ok {
+		t.Fatal("the next launch must rotate off the account the 429 just cooled")
+	}
+	if note.From != "alice" || note.To != "bob" {
+		t.Fatalf("note = %+v, want rotate alice->bob", note)
+	}
+	if guardWantDir(dir) != guardWantDir("/home/.claude-bob") {
+		t.Fatalf("rotated dir = %q, want bob's dir", dir)
+	}
+}
+
 // guardWantDir normalizes a dir the same way Plan's match does, so the rotated-dir assertion
 // is robust to the absolute/clean/case-fold canonicalization Serve's returned Dir carries on
 // each platform (the test's /home/... literals resolve differently on Windows vs POSIX).

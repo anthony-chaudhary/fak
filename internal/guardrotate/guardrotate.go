@@ -14,6 +14,7 @@ package guardrotate
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -86,6 +87,65 @@ func Plan(reg accounts.Registry, store *accounts.CooldownStore, hr accounts.Rota
 		ResetAt:  entry.ResetAt,
 		Headroom: dec.Seat.Headroom,
 	}, true
+}
+
+// PersistCooldownForRehome records a self-recovering usage-limit cooldown for the account a
+// LIVE 429 account-cap rehome just walled, so the cap outlives the guard process and the next
+// launch (via Plan / the login overlay) avoids the just-capped account instead of re-selecting
+// it. It is the durable half of the automatic-on-429 loop: the in-process seat swap already
+// hops the running session off the cap, but only an in-memory mark; this makes the wall
+// fleet-visible and launch-visible.
+//
+// It only records when isAccountCap is true — i.e. the wall is a timed 429 usage/session/weekly
+// cap that genuinely self-recovers. A 403 org/region/billing wall (isAccountCap false) must NOT
+// be recorded: it is not a timed cap, and a default cooldown window would wrongly re-admit a
+// durably-blocked org after it elapses. An explicit reset parsed from resetSource wins over the
+// kind's default window. account is the bucket key (uuid:…/tok:…). Returns the entry and whether
+// it wrote; a false with no write is the correct outcome for both an empty account and a non-cap
+// wall. The store is mutated in place; the caller persists it (Save) — kept separate so this
+// stays pure over the in-memory store and unit-testable without disk.
+func PersistCooldownForRehome(store *accounts.CooldownStore, account, reason, resetSource string, isAccountCap bool, now time.Time) (accounts.CooldownEntry, bool) {
+	if store == nil || !isAccountCap || strings.TrimSpace(account) == "" {
+		return accounts.CooldownEntry{}, false
+	}
+	entry := store.Cool(account, accounts.CooldownUsageLimit, cooldownReasonLine(reason), now, parseRehomeReset(resetSource))
+	return entry, true
+}
+
+// parseRehomeReset pulls an explicit absolute reset time (RFC3339) out of a limit reason, so a
+// long weekly cap is held to its real reset rather than the 1h default. Only the unambiguous
+// RFC3339 forms are trusted; a looser phrasing yields the zero time and the caller's default
+// window stands. Mirrors accounts_cooldown.go's parseCooldownReset so the live-429 and
+// launch-exit writers parse a reset identically.
+func parseRehomeReset(reason string) time.Time {
+	m := rehomeResetRE.FindStringSubmatch(reason)
+	if m == nil {
+		return time.Time{}
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05"} {
+		if ts, err := time.Parse(layout, m[1]); err == nil {
+			return ts.UTC()
+		}
+	}
+	return time.Time{}
+}
+
+var rehomeResetRE = regexp.MustCompile(`(?i)resets?\s+at\s+(\d{4}-\d{2}-\d{2}[tT]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:z|[+-]\d{2}:?\d{2})?)`)
+
+// cooldownReasonLine renders a short, credential-safe reason line for a persisted cooldown from
+// an arbitrary reason string (a remedy label like "rehomed_seat", or a limit message). It never
+// carries anything token-like: it trims and truncates. An empty reason yields a stable default
+// label so a persisted entry always names why it exists.
+func cooldownReasonLine(reason string) string {
+	r := strings.TrimSpace(reason)
+	if r == "" {
+		return "live usage cap (429)"
+	}
+	const max = 160
+	if len(r) > max {
+		r = r[:max] + "…"
+	}
+	return r
 }
 
 // hasRoom reports whether a seat's headroom score proves it is OFFERABLE right now — the

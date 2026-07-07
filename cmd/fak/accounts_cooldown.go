@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
+	"github.com/anthony-chaudhary/fak/internal/guardrotate"
 )
 
 // accounts_cooldown.go is the WRITE + resolve side of the account usage-limit
@@ -172,6 +173,44 @@ func recordLaunchCooldown(stderr io.Writer, account, launchStderr string, kind l
 	}
 	fmt.Fprintf(stderr, "fak accounts launch: cooled account %q (%s) until %s — it drops from the servable pool until then\n",
 		account, ck, entry.ResetAt.Format(time.RFC3339))
+	return entry, true
+}
+
+// recordRehomeCooldown persists a usage-limit cooldown for an account that a LIVE
+// mid-session 429 account-cap rehome just walled — closing the gap where the guard's
+// in-process failover swapped seats but left the cap invisible to the fleet-shared store
+// (so the next `fak guard`/`fak accounts launch` re-selected the just-capped account). The
+// live rehome already proved the cap by classifying the 429 as an account cap
+// (isAccountCap429), so the caller passes isAccountCap=true; the pure write decision (kind =
+// usage-limit, reset parsed from the reason, else default window) lives in
+// guardrotate.PersistCooldownForRehome so it is unit-tested independently of this package.
+// Keyed on the account bucket, so every seat sharing the cap cools together — exactly like the
+// launch-exit writer recordLaunchCooldown, but fired from the running session instead of a
+// bounced child's exit.
+//
+// Best-effort and fail-open: an empty account, a non-cap wall, or an unreadable/unwritable
+// store is logged and skipped, never fatal to the session. now is injected so the caller (and
+// tests) control the clock. Returns the recorded entry and true when a cooldown was written.
+func recordRehomeCooldown(stderr io.Writer, account, reason string, isAccountCap bool, now time.Time) (accounts.CooldownEntry, bool) {
+	if !isAccountCap || strings.TrimSpace(account) == "" {
+		return accounts.CooldownEntry{}, false
+	}
+	path := defaultCooldownStorePath()
+	store, err := accounts.LoadCooldownStore(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak guard: cooldown store unreadable (%s): %v — not persisting the 429 wall\n", path, err)
+		return accounts.CooldownEntry{}, false
+	}
+	entry, wrote := guardrotate.PersistCooldownForRehome(store, account, reason, reason, isAccountCap, now)
+	if !wrote {
+		return accounts.CooldownEntry{}, false
+	}
+	if err := store.Save(); err != nil {
+		fmt.Fprintf(stderr, "fak guard: cooldown store unwritable (%s): %v — not persisting the 429 wall\n", path, err)
+		return accounts.CooldownEntry{}, false
+	}
+	fmt.Fprintf(stderr, "fak guard: account cooled by a live usage cap until %s — it drops from the servable pool (and the next launch avoids it) until then\n",
+		entry.ResetAt.Format(time.RFC3339))
 	return entry, true
 }
 
