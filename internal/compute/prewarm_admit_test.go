@@ -197,3 +197,60 @@ func TestPlanPrewarmAdmission(t *testing.T) {
 		t.Fatalf("TokensWarmed = %d, want 6144 (defer/skip tokens excluded)", stats.TokensWarmed)
 	}
 }
+
+// TestDecidePrewarmAdmissionSecretClassDefaultDeny pins the fence-0 security gate (issue
+// #1527): a prefix classified secret/regulated is refused for active warming BY DEFAULT — no
+// pre-warm/pin is scheduled — even when every economics fence is otherwise inviting, while a
+// byte-identical NON-secret prefix still warms. The decision surface only ever emits warm
+// verdicts, so refusing the warm never blocks the ordinary send: the secret prefix stays
+// sendable, it is simply never pre-warmed or pinned.
+func TestDecidePrewarmAdmissionSecretClassDefaultDeny(t *testing.T) {
+	// An otherwise-perfect warm candidate: byte-known, free pool, long window, fast warm — it
+	// would land hot (WarmNow) if it were not secret.
+	base := PrewarmCandidate{
+		PrefixByteKnown:   true,
+		WarmPoolFree:      true,
+		ToolLatencyMillis: 5000,
+		WarmMillis:        100,
+		ResidencyMillis:   10000,
+		PrefixTokens:      4096,
+	}
+
+	// Control: not secret -> the economics fences admit it, so it warms. This is what proves
+	// the fence gates ONLY secret content and leaves ordinary warming untouched.
+	if got := DecidePrewarmAdmission(base); got.Verdict != WarmNow || got.Reason != ReasonLandsHot {
+		t.Fatalf("non-secret control: got %v/%q, want warm_now/%q", got.Verdict, got.Reason, ReasonLandsHot)
+	}
+
+	// Secret-classified: the SAME inviting candidate is refused for warming by default.
+	secret := base
+	secret.SecretClassified = true
+	got := DecidePrewarmAdmission(secret)
+	if got.Verdict != WarmSkip || got.Reason != ReasonSecretClass {
+		t.Fatalf("secret candidate: got %v/%q, want warm_skip/%q", got.Verdict, got.Reason, ReasonSecretClass)
+	}
+	// Default-deny is unconditional: no defer is scheduled either — a WarmDefer would still
+	// pin/warm the prefix later, which a secret classification must never do.
+	if got.DeferMillis != 0 || got.Verdict == WarmNow || got.Verdict == WarmDefer {
+		t.Fatalf("secret candidate scheduled active warming (verdict %v, defer %d ms); a secret prefix must schedule no warm/pin at all", got.Verdict, got.DeferMillis)
+	}
+
+	// Fence-0 DOMINATES every other fence: with the trigger unproven, the pool full, and no
+	// window, a secret prefix still reports the secret-class refusal — the security reason wins
+	// over the economics reasons, so a secret classification is never masked by another skip.
+	secretAndUnwarmable := PrewarmCandidate{SecretClassified: true} // byte-unknown + pool-full + no window
+	if got := DecidePrewarmAdmission(secretAndUnwarmable); got.Verdict != WarmSkip || got.Reason != ReasonSecretClass {
+		t.Fatalf("secret+otherwise-unwarmable: got %v/%q, want warm_skip/%q (secret reason must win)", got.Verdict, got.Reason, ReasonSecretClass)
+	}
+
+	// At the plan/aggregate level the secret candidate rolls into Skipped and contributes ZERO
+	// TokensWarmed — its 4096 PrefixTokens are never prefilled: "no pre-warm/pin is scheduled"
+	// holds for the whole cache report, not only the single decision.
+	items, stats := PlanPrewarmAdmission([]PrewarmCandidate{secret})
+	if len(items) != 1 || items[0].Decision.Reason != ReasonSecretClass {
+		t.Fatalf("plan item for secret: got %+v, want one WarmSkip/secret_classified", items)
+	}
+	if (stats != PrewarmStats{Candidates: 1, Skipped: 1}) {
+		t.Fatalf("plan stats for secret: got %+v, want Candidates=1 Skipped=1 (Warmed/Deferred/TokensWarmed all 0)", stats)
+	}
+}

@@ -25,11 +25,13 @@ package compute
 // discard_admit.go taking a bare `WillDiscard bool` and batchsched taking bare `lengths`.
 // Given a candidate it returns one of three verdicts:
 //
-//   WarmSkip  — fail-safe: do not warm. The prefix is not byte-known (we will not warm a
-//               continuation we cannot prove), or the warm pool has no free lowest-priority
-//               capacity (pollution gate), or there is no latency window to exploit, or the
-//               window is too short for the warm to land hot. The zero value, so a
-//               default-constructed decision warms nothing.
+//   WarmSkip  — fail-safe: do not warm. The prefix is classified secret/regulated (the
+//               default-deny security fence — no secret bytes are ever pre-warmed or pinned),
+//               or the prefix is not byte-known (we will not warm a continuation we cannot
+//               prove), or the warm pool has no free lowest-priority capacity (pollution
+//               gate), or there is no latency window to exploit, or the window is too short
+//               for the warm to land hot. The zero value, so a default-constructed decision
+//               warms nothing.
 //   WarmNow   — warm the byte-known prefix now: it completes before the request AND survives
 //               (within the residency budget) until the request arrives — it lands hot.
 //   WarmDefer — warming now lands too early: a lowest-priority prefix is reclaimed within the
@@ -38,6 +40,16 @@ package compute
 //               distance knob, in closed form.
 //
 // THE FENCES (carried verbatim from the issue's prefetch prior art, load-bearing here).
+//   - Secret-class default-deny (issue #1527; parent epic #1490). A prefix classified
+//     secret/regulated is NEVER admitted for active warming: pre-warm/pin would place secret
+//     bytes into a persistent, lowest-priority cache window that outlives the turn, so warming
+//     is refused BY DEFAULT for that content (SecretClassified true -> WarmSkip /
+//     ReasonSecretClass). This fence is checked FIRST, ahead of every economics fence, so no
+//     other property (byte-known, free pool, inviting window) can schedule a warm for a secret
+//     prefix. It gates ONLY active warming — the ordinary send path never routes through this
+//     decision, so a secret/regulated prefix is still SENT normally; it is simply never
+//     pre-warmed or pinned. This is the security gate that makes epic #1490's default-on
+//     warming (rows 06-08) safe to arm.
 //   - Zero mis-speculation risk. The prefix BEFORE the tool-result slot is byte-determined,
 //     so this is a pure prefetch, not a speculation: it cannot be wrong, and so it needs no
 //     effect-witnessed invalidation (the closed-loop machinery the riskier siblings #809(b)/
@@ -101,6 +113,10 @@ func (v PrewarmVerdict) String() string {
 type PrewarmReason string
 
 const (
+	// ReasonSecretClass: the prefix is classified secret/regulated, so active warming
+	// (pre-warm/pin) is refused BY DEFAULT — no secret bytes are placed into a persistent
+	// cache window (fence 0, issue #1527). The ordinary send path is never gated by this.
+	ReasonSecretClass PrewarmReason = "secret_classified"
 	// ReasonPrefixNotKnown: the continuation prefix is not proven byte-known, so warming it
 	// would be speculation, which this pure-prefetch primitive forbids (fence 1).
 	ReasonPrefixNotKnown PrewarmReason = "prefix_not_byte_known"
@@ -126,6 +142,13 @@ const (
 // the session/serve layers above it. All millisecond fields are predicted/budgeted values
 // the caller supplies; the decision is pure integer arithmetic over them.
 type PrewarmCandidate struct {
+	// SecretClassified is the security fence (issue #1527): true iff the prefix carries a
+	// secret/regulated classification. When true the candidate is refused for active warming
+	// BY DEFAULT (fence 0 -> WarmSkip / ReasonSecretClass) so no secret bytes are pre-warmed
+	// or pinned into a persistent cache window. False (the zero value) leaves warming to the
+	// economics fences below. This gate governs ONLY warming — a caller's ordinary send path
+	// does not route through this decision, so a secret prefix is still sent normally.
+	SecretClassified bool
 	// PrefixByteKnown is the deterministic trigger: true iff the next request's prefix up to
 	// the tool-result slot is byte-determined NOW (the tool-call boundary projection of a
 	// byte-stable prefix fingerprint). False (the zero value) -> fail-closed: never warmed.
@@ -167,6 +190,16 @@ type PrewarmDecision struct {
 // answer). The positive verdict WarmNow means exactly "this warm lands hot": it completes
 // before the request AND survives until the request within the residency budget.
 func DecidePrewarmAdmission(c PrewarmCandidate) PrewarmDecision {
+	// Fence 0 — secret-class default-deny (issue #1527). A prefix classified secret/regulated
+	// is NEVER admitted for active warming: pre-warm/pin would place secret bytes into a
+	// persistent, lowest-priority cache window that outlives the turn, which the default
+	// security posture refuses. This gate short-circuits BEFORE every economics fence so no
+	// property (byte-known, free pool, inviting window) can schedule a warm for secret content.
+	// It gates ONLY warming — the ordinary send path never routes through this decision, so a
+	// secret prefix is still sent normally; it is simply never pre-warmed or pinned.
+	if c.SecretClassified {
+		return PrewarmDecision{Verdict: WarmSkip, Reason: ReasonSecretClass}
+	}
 	// Fence 1 — zero mis-speculation: only ever warm a byte-determined continuation. A prefix
 	// we cannot prove byte-known would be speculation, which this pure-prefetch primitive
 	// forbids; never warm it.
@@ -222,7 +255,7 @@ type PrewarmStats struct {
 	Candidates   int // total candidates decided
 	Warmed       int // WarmNow: byte-known prefixes warmed to land hot
 	Deferred     int // WarmDefer: warms scheduled closer to completion (prefetch-distance)
-	Skipped      int // WarmSkip: not warmed (unknown prefix, pool pressure, or no/short window)
+	Skipped      int // WarmSkip: not warmed (secret-classified, unknown prefix, pool pressure, or no/short window)
 	TokensWarmed int // Σ PrefixTokens over WarmNow candidates — the prefill rows that land hot
 }
 
