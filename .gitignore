@@ -92,6 +92,10 @@ tools/_walltime.*
 /cp_scratch*.json
 /after.json
 /_dloop_*.json
+# Root-level stderr redirect dumps (`fak ... 2> route.err.txt`) — per-session
+# throwaway, often empty. Scoped to the root so a tracked `*.err.txt` fixture in a
+# package (e.g. experiments/agent-live/*.err.txt) is never hidden.
+/*.err.txt
 **/rmverifytmp/
 **/*verifytmp/
 
