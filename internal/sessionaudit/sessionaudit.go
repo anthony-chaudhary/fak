@@ -123,6 +123,7 @@ type Session struct {
 	TSMin             string                 `json:"ts_min,omitempty"`
 	TSMax             string                 `json:"ts_max,omitempty"`
 	WallSeconds       *float64               `json:"wall_s"`
+	Behavior          Behavior               `json:"behavior"`
 }
 
 type Aggregate struct {
@@ -338,6 +339,7 @@ func Analyze(path string) Session {
 	defer f.Close()
 
 	seen := map[string]bool{}
+	lens := newBehaviorLens()
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 64*1024*1024)
 	for sc.Scan() {
@@ -359,11 +361,12 @@ func Analyze(path string) Session {
 				s.TSMax = r.Timestamp
 			}
 		}
+		lens.observeRecord(r)
 		switch r.Type {
 		case "assistant":
-			analyzeAssistant(&s, r, seen)
+			analyzeAssistant(&s, r, seen, lens)
 		case "user":
-			analyzeUser(&s, r)
+			analyzeUser(&s, r, lens)
 		}
 	}
 	if err := sc.Err(); err != nil {
@@ -371,6 +374,7 @@ func Analyze(path string) Session {
 		return s
 	}
 	finalizeSession(&s)
+	s.Behavior = lens.summary()
 	return s
 }
 
@@ -636,6 +640,8 @@ type transcriptRecord struct {
 	Type                 string        `json:"type"`
 	Timestamp            string        `json:"timestamp"`
 	IsMeta               bool          `json:"isMeta"`
+	IsCompactSummary     bool          `json:"isCompactSummary"`
+	LastPrompt           string        `json:"lastPrompt"`
 	InterruptedMessageID string        `json:"interruptedMessageId"`
 	Message              transcriptMsg `json:"message"`
 }
@@ -663,14 +669,17 @@ type serverToolUse struct {
 }
 
 type contentBlock struct {
-	Type    string          `json:"type"`
-	Name    string          `json:"name"`
-	Input   json.RawMessage `json:"input"`
-	Content json.RawMessage `json:"content"`
-	Text    json.RawMessage `json:"text"`
+	Type      string          `json:"type"`
+	Name      string          `json:"name"`
+	ID        string          `json:"id"`
+	ToolUseID string          `json:"tool_use_id"`
+	IsError   bool            `json:"is_error"`
+	Input     json.RawMessage `json:"input"`
+	Content   json.RawMessage `json:"content"`
+	Text      json.RawMessage `json:"text"`
 }
 
-func analyzeAssistant(s *Session, r transcriptRecord, seen map[string]bool) {
+func analyzeAssistant(s *Session, r transcriptRecord, seen map[string]bool, lens *behaviorLens) {
 	msg := r.Message
 	if msg.ID != nil {
 		if seen[*msg.ID] {
@@ -715,6 +724,7 @@ func analyzeAssistant(s *Session, r transcriptRecord, seen map[string]bool) {
 			}
 			s.Tools[name]++
 			s.ToolInputChars += txtLen(b.Input)
+			lens.noteToolUse(b.ID, name, b.Input, canonicalArgs(b.Input))
 		case "thinking":
 			s.NThinking++
 		case "text":
@@ -726,7 +736,7 @@ func analyzeAssistant(s *Session, r transcriptRecord, seen map[string]bool) {
 	}
 }
 
-func analyzeUser(s *Session, r transcriptRecord) {
+func analyzeUser(s *Session, r transcriptRecord, lens *behaviorLens) {
 	if len(r.Message.Content) == 0 {
 		return
 	}
@@ -736,6 +746,7 @@ func analyzeUser(s *Session, r transcriptRecord) {
 			if b.Type == "tool_result" {
 				s.NToolResult++
 				s.ToolResultChars += txtLen(b.Content)
+				lens.noteToolResult(b.ToolUseID, b.IsError, txtStr(b.Content, 4000))
 			}
 		}
 		return
