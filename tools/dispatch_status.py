@@ -29,6 +29,7 @@ target and host clean), 1 when something needs an operator's eye.
 from __future__ import annotations
 
 import argparse
+import calendar
 import concurrent.futures
 import json
 import os
@@ -2315,6 +2316,19 @@ def collect(root: Path, *, max_workers: int, fast: bool,
         low_yield = low_yield_f.result()
         ships = ships_f.result()
 
+    # Watch decision (#2642): explain WHY the health-watch (no-)acts, folded from
+    # the trailing window of progress rows. Pure-local read, informational only —
+    # never launches work or changes caps. The scheduled-task classification reuses
+    # the watchdog query; follow-ups are listed when a caller supplies them.
+    now_ts = time.time()
+    progress_records = read_dispatch_progress(root)
+    watch = watch_decision(
+        progress_records, now_ts=now_ts,
+        sched_task={"installed": wd.get("installed"), "status": wd.get("status")})
+    # Backlog arrival-vs-service rate (#2634): numeric supply/demand meter folded
+    # from the same trailing progress window. Pure-local read, informational only.
+    backlog_rate = backlog_rates(progress_records, now_ts=now_ts)
+
     return build_payload(root=root, pre=pre, sup=sup, wd=wd, backlog=backlog,
                          closure=closure, max_workers=max_workers, fast=fast,
                          silent=silent, weekly_cap=weekly_cap, throughput=throughput,
@@ -2325,7 +2339,387 @@ def collect(root: Path, *, max_workers: int, fast: bool,
                          worker_leases=worker_leases, seat_inventory=seat_inventory,
                          lab_readiness=lab_readiness, resolve_ticks=resolve_ticks,
                          resolver_preflight=resolver_preflight,
-                         low_yield=low_yield, ships=ships)
+                         low_yield=low_yield, ships=ships, watch=watch,
+                         backlog_rate=backlog_rate)
+
+
+# ---------------------------------------------------------------------------
+# Watch decision (#2642): emit WHY a long health-watch intentionally no-ops.
+# ---------------------------------------------------------------------------
+#
+# The overnight ef59064f dispatch-health watch correctly stayed hands-off on a
+# healthy-but-busy fleet by comparing raw counters against independent witnesses
+# instead of treating every scary surface as an operator action: closures kept
+# advancing (closed_by_loop_total 772 -> 791) while the backlog stayed high
+# because new arrivals outpaced service. That reasoning lived only in an
+# operator's head. This pure fold turns a trailing window of progress rows into a
+# compact, cited verdict so the "intentionally no-op" case is emitted, not
+# re-derived by hand each watch. Informational ONLY: it never launches work or
+# changes worker caps (issue Done condition).
+
+WATCH_DECISION_SCHEMA = "fleet-watch-decision/1"
+WATCH_DEFAULT_WINDOW_HOURS = 6.0
+PROGRESS_LOG = "progress.jsonl"
+
+# Backlog arrival-vs-service rate (#2634). The watch verdict above (#2642) names
+# the trend qualitatively; this fold quantifies it — a numeric service rate
+# (closes/h), arrival rate (closes + net backlog growth ≈ new issues/h), and a
+# BACKLOG_OUTPACED flag that fires only when arrivals demonstrably outrun a
+# *working* dispatcher for K consecutive windows. Requiring service > 0 is what
+# separates 'outpaced' (a supply/demand trend) from 'stalled' (a malfunction —
+# already surfaced by the watch verdict). Informational only: it is the meter,
+# never the controller — it launches nothing and touches no worker cap.
+BACKLOG_RATE_SCHEMA = "fleet-backlog-rate/1"
+BACKLOG_RATE_WINDOW_HOURS = 6.0
+BACKLOG_RATE_WINDOWS = 4
+BACKLOG_RATE_K = 2
+
+
+def _iso_epoch(ts: Any) -> float | None:
+    """Epoch seconds for a UTC ISO stamp like ``2026-07-07T03:30:44Z`` (naive UTC).
+
+    Progress rows are always written in ``...Z`` UTC; we tolerate a trailing
+    fractional part or ``+00:00`` offset and return None on anything unparseable
+    so a malformed row is skipped, not fatal.
+    """
+    if not ts:
+        return None
+    s = str(ts).strip().replace("Z", "")
+    s = s.split("+")[0].split(".")[0]
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"):
+        try:
+            return float(calendar.timegm(time.strptime(s, fmt)))
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+def read_dispatch_progress(root: Path) -> list[dict[str, Any]]:
+    """The close-arm's per-tick rows (utc, open_now, closed_by_loop_total, ...)
+    from ``.dispatch-runs/progress.jsonl``. Pure-local read; [] when absent."""
+    log = root / RUNS_DIRNAME / PROGRESS_LOG
+    if not log.exists():
+        return []
+    out: list[dict[str, Any]] = []
+    try:
+        for line in log.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(rec, dict):
+                out.append(rec)
+    except OSError:
+        return []
+    return out
+
+
+def _classify_sched_task(sched: dict[str, Any] | None) -> str:
+    """clean / self_healing / unresolved_unknown / unknown for a scheduled-task
+    result — never asserts ``malfunction`` without a recovery witness (a red
+    LastTaskResult that the next tick recovered is self-healing, #2636)."""
+    if not sched or sched.get("installed") is False:
+        return "unknown"
+    lr = _int(sched.get("last_result"))
+    status = str(sched.get("status") or "").strip().lower()
+    if lr is not None and lr != 0:
+        return "self_healing" if sched.get("recovered") else "unresolved_unknown"
+    if lr == 0 or status in ("ready", "running"):
+        return "clean"
+    return "unknown"
+
+
+def _watch_row_witness(rec: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "utc": rec.get("utc"),
+        "open_now": _int(rec.get("open_now")),
+        "closed_by_loop_total": _int(rec.get("closed_by_loop_total")),
+        "closed_now": _int(rec.get("closed_now")),
+        "audit_error": rec.get("audit_error"),
+    }
+
+
+def watch_decision(progress_records: list[dict[str, Any]], *, now_ts: float,
+                   window_hours: float = WATCH_DEFAULT_WINDOW_HOURS,
+                   sched_task: dict[str, Any] | None = None,
+                   follow_ups: list[Any] | None = None,
+                   closure_status: str | None = None,
+                   idle_floor: int = 0) -> dict[str, Any]:
+    """Fold a trailing window of dispatch-progress rows into a cited verdict that
+    explains the monitor's decision, especially the intentional no-op:
+
+      OUTPACED     — closures advance but backlog rises (arrivals outpace
+                     service); healthy-busy, keep watching, do NOT hand-launch.
+      DRAINING     — closures advance and backlog falls; healthy, no action.
+      KEEPING_PACE — closures advance and backlog holds; no action.
+      STALLED      — no closures while a backlog persists/rises; a candidate for
+                     an operator look (surfaced, never auto-actioned).
+      HEALTHY_IDLE — no closures because the backlog is at/below ``idle_floor``.
+      INSUFFICIENT_DATA — fewer than two rows land in the window.
+
+    Pure and informational only (issue #2642): the verdict is a report, it never
+    dispatches work or changes caps. ``action_needed`` merely flags STALLED for a
+    human glance.
+    """
+    cutoff = now_ts - window_hours * 3600.0
+    rows: list[tuple[float, dict[str, Any]]] = []
+    for rec in progress_records or []:
+        if not isinstance(rec, dict):
+            continue
+        ep = _iso_epoch(rec.get("utc"))
+        if ep is None or ep < cutoff or ep > now_ts + 3600.0:
+            continue
+        rows.append((ep, rec))
+    rows.sort(key=lambda kv: kv[0])
+
+    follow = sorted({int(n) for n in (follow_ups or []) if _int(n) is not None})
+    sched = dict(sched_task or {})
+    sched.setdefault("classification", _classify_sched_task(sched))
+
+    base = {
+        "schema": WATCH_DECISION_SCHEMA,
+        "window_hours": float(window_hours),
+        "rows_in_window": len(rows),
+        "scheduled_task": sched,
+        "follow_ups": follow,
+    }
+
+    if len(rows) < 2:
+        base.update({
+            "verdict": "INSUFFICIENT_DATA",
+            "action_needed": False,
+            "why": (f"fewer than two progress rows in the trailing "
+                    f"{window_hours:g}h window — cannot judge a trend"),
+            "audit_status": closure_status,
+            "cited": {},
+            "witness_rows": [_watch_row_witness(r) for _e, r in rows],
+        })
+        return base
+
+    first, last = rows[0][1], rows[-1][1]
+    open_start = _int(first.get("open_now"))
+    open_end = _int(last.get("open_now"))
+    loop_start = _int(first.get("closed_by_loop_total"))
+    loop_end = _int(last.get("closed_by_loop_total"))
+    open_delta = (open_end - open_start
+                  if open_start is not None and open_end is not None else None)
+    loop_delta = (loop_end - loop_start
+                  if loop_start is not None and loop_end is not None else None)
+    closes_in_window = sum(
+        c for _e, r in rows if (c := _int(r.get("closed_now")) or 0) > 0)
+    closing = bool((loop_delta or 0) > 0 or closes_in_window > 0)
+
+    if closure_status is not None:
+        audit_status = closure_status
+    else:
+        err = last.get("audit_error")
+        audit_status = "clean" if err in (None, "", "null") else f"error: {err}"
+
+    if closing:
+        if open_delta is not None and open_delta > 0:
+            verdict, action = "OUTPACED", False
+            why = (f"dispatcher advanced closures (closed_by_loop_total "
+                   f"{loop_start}->{loop_end}, +{closes_in_window} witnessed) while "
+                   f"the backlog rose (open_now {open_start}->{open_end}, "
+                   f"+{open_delta}): new arrivals outpace service, not a stalled "
+                   f"dispatcher — keep watching, do not hand-launch work")
+        elif open_delta is not None and open_delta < 0:
+            verdict, action = "DRAINING", False
+            why = (f"dispatcher advanced closures (closed_by_loop_total "
+                   f"{loop_start}->{loop_end}) and the backlog fell (open_now "
+                   f"{open_start}->{open_end}, {open_delta}): healthy drain, no action")
+        else:
+            verdict, action = "KEEPING_PACE", False
+            why = (f"dispatcher advanced closures (closed_by_loop_total "
+                   f"{loop_start}->{loop_end}) and the backlog held near "
+                   f"{open_end}: keeping pace, no action")
+    else:
+        if (open_end or 0) <= idle_floor and (open_delta or 0) <= 0:
+            verdict, action = "HEALTHY_IDLE", False
+            why = (f"no closures over the window and the backlog sits at "
+                   f"{open_end} (<= idle_floor {idle_floor}): nothing to close, "
+                   f"healthy-idle, no action")
+        else:
+            verdict, action = "STALLED", True
+            trend = (f"rose +{open_delta}" if (open_delta or 0) > 0
+                     else f"held at {open_end}")
+            why = (f"no closures over the window (closed_by_loop_total flat at "
+                   f"{loop_end}) while the backlog {trend}: dispatcher may be "
+                   f"stalled — a candidate for an operator look (informational)")
+
+    base.update({
+        "verdict": verdict,
+        "action_needed": action,
+        "why": why,
+        "audit_status": audit_status,
+        "cited": {
+            "open_now_start": open_start,
+            "open_now_end": open_end,
+            "open_now_delta": open_delta,
+            "closed_by_loop_total_start": loop_start,
+            "closed_by_loop_total_end": loop_end,
+            "closed_by_loop_total_delta": loop_delta,
+            "closed_now_sum": closes_in_window,
+            "first_utc": first.get("utc"),
+            "last_utc": last.get("utc"),
+        },
+        "witness_rows": [_watch_row_witness(first), _watch_row_witness(last)],
+    })
+    return base
+
+
+def _epoch_iso(ep: float | None) -> str | None:
+    """Inverse of ``_iso_epoch`` — a naive-UTC ``...Z`` stamp for a window edge."""
+    if ep is None:
+        return None
+    try:
+        return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ep))
+    except (ValueError, OSError):
+        return None
+
+
+def _backlog_anchor(parsed: list[tuple[float, int, int]],
+                    t: float) -> tuple[float, int, int] | None:
+    """The newest ``(epoch, open_now, closed_by_loop_total)`` row at or before ``t``.
+
+    ``parsed`` is epoch-sorted, so a window edge anchors on the last-known counter
+    values as of that instant — giving each sub-window an exact ``window_hours``
+    span rather than the span between whichever raw rows happened to land inside it.
+    """
+    best: tuple[float, int, int] | None = None
+    for row in parsed:
+        if row[0] <= t:
+            best = row
+        else:
+            break
+    return best
+
+
+def backlog_rates(progress_records: list[dict[str, Any]], *, now_ts: float,
+                  window_hours: float = BACKLOG_RATE_WINDOW_HOURS,
+                  windows: int = BACKLOG_RATE_WINDOWS,
+                  k_consecutive: int = BACKLOG_RATE_K) -> dict[str, Any]:
+    """Fold trailing progress rows into arrival-rate vs service-rate (#2634).
+
+    Anchoring on the newest progress row at or before each of the trailing
+    ``windows`` window edges, each ``window_hours``-long sub-window yields:
+
+      * service rate = Δ``closed_by_loop_total`` / window_hours       (closes/h)
+      * arrival rate = (Δ``open_now`` + Δ``closed_by_loop_total``) / window_hours
+        (closes + net backlog growth ≈ new arrivals/h)
+
+    ``backlog_outpaced`` fires only when the newest ``k_consecutive`` computable
+    windows each show arrival > service AND service > 0 — the dispatcher is
+    demonstrably *closing* work yet arrivals still outrun it. The service > 0
+    clause is exactly what tells 'outpaced' apart from 'stalled': a rising
+    backlog with zero service is STALLED, not OUTPACED.
+
+    Pure and informational only (this is the meter, not the controller): the
+    verdict/flag is a report; it never dispatches work or changes worker caps.
+    """
+    parsed: list[tuple[float, int, int]] = []
+    for rec in progress_records or []:
+        if not isinstance(rec, dict):
+            continue
+        ep = _iso_epoch(rec.get("utc"))
+        open_now = _int(rec.get("open_now"))
+        closed = _int(rec.get("closed_by_loop_total"))
+        if ep is None or open_now is None or closed is None:
+            continue
+        parsed.append((ep, open_now, closed))
+    parsed.sort(key=lambda r: r[0])
+
+    w_secs = window_hours * 3600.0
+    # boundaries[0]=now (newest edge) .. boundaries[windows]=oldest edge.
+    boundaries = [now_ts - i * w_secs for i in range(windows + 1)]
+    anchors = [_backlog_anchor(parsed, t) for t in boundaries]
+
+    per_window: list[dict[str, Any]] = []
+    for i in range(windows):
+        newer, older = anchors[i], anchors[i + 1]
+        row: dict[str, Any] = {
+            "index": i,
+            "start_utc": _epoch_iso(boundaries[i + 1]),
+            "end_utc": _epoch_iso(boundaries[i]),
+        }
+        if newer is None or older is None or newer[0] <= older[0]:
+            row["computable"] = False
+            per_window.append(row)
+            continue
+        open_delta = newer[1] - older[1]
+        closed_delta = newer[2] - older[2]
+        service_rate = closed_delta / window_hours
+        arrival_rate = (open_delta + closed_delta) / window_hours
+        row.update({
+            "computable": True,
+            "open_delta": open_delta,
+            "closed_delta": closed_delta,
+            "arrival_rate_per_hour": round(arrival_rate, 3),
+            "service_rate_per_hour": round(service_rate, 3),
+            "outpaced": arrival_rate > service_rate and service_rate > 0,
+            "serviced": service_rate > 0,
+        })
+        per_window.append(row)
+
+    # Consecutive run of outpaced windows counted from the newest edge inward.
+    run = 0
+    for win in per_window:
+        if win.get("computable") and win.get("outpaced"):
+            run += 1
+        else:
+            break
+    backlog_outpaced = run >= k_consecutive
+
+    base: dict[str, Any] = {
+        "schema": BACKLOG_RATE_SCHEMA,
+        "window_hours": float(window_hours),
+        "windows": int(windows),
+        "k_consecutive": int(k_consecutive),
+        "consecutive_outpaced_windows": run,
+        "backlog_outpaced": backlog_outpaced,
+        "per_window": per_window,
+    }
+
+    # Headline aggregate rates over the full evaluated span (oldest→newest anchor).
+    non_null = [a for a in anchors if a is not None]
+    if len(non_null) >= 2 and non_null[0][0] > non_null[-1][0]:
+        newest_a, oldest_a = non_null[0], non_null[-1]
+        elapsed_h = (newest_a[0] - oldest_a[0]) / 3600.0
+        open_delta = newest_a[1] - oldest_a[1]
+        closed_delta = newest_a[2] - oldest_a[2]
+        service_rate = closed_delta / elapsed_h
+        arrival_rate = (open_delta + closed_delta) / elapsed_h
+        if service_rate <= 0 and arrival_rate > 0:
+            verdict = "STALLED"
+        elif arrival_rate > service_rate:
+            verdict = "OUTPACED"
+        elif arrival_rate < service_rate:
+            verdict = "DRAINING"
+        else:
+            verdict = "KEEPING_PACE"
+        flag_bit = (f"; BACKLOG_OUTPACED ({run} consecutive outpaced window(s) "
+                    f">= K={k_consecutive})") if backlog_outpaced else ""
+        base.update({
+            "arrival_rate_per_hour": round(arrival_rate, 3),
+            "service_rate_per_hour": round(service_rate, 3),
+            "span_hours": round(elapsed_h, 3),
+            "verdict": verdict,
+            "why": (f"arrival {arrival_rate:.2f}/h vs service {service_rate:.2f}/h "
+                    f"over {elapsed_h:.1f}h: {verdict.lower()}{flag_bit}"),
+        })
+    else:
+        base.update({
+            "arrival_rate_per_hour": None,
+            "service_rate_per_hour": None,
+            "span_hours": None,
+            "verdict": "INSUFFICIENT_DATA",
+            "why": (f"fewer than two anchorable progress rows across the trailing "
+                    f"{windows}x{window_hours:g}h windows — cannot derive rates"),
+        })
+    return base
 
 
 def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
@@ -2346,7 +2740,9 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                   resolve_ticks: dict[str, Any] | None = None,
                   resolver_preflight: dict[str, Any] | None = None,
                   low_yield: dict[str, Any] | None = None,
-                  ships: dict[str, Any] | None = None) -> dict[str, Any]:
+                  ships: dict[str, Any] | None = None,
+                  watch: dict[str, Any] | None = None,
+                  backlog_rate: dict[str, Any] | None = None) -> dict[str, Any]:
     # --- dispatcher liveness / capacity ---
     cap = _int(pre.get("cap"))
     live = _int(pre.get("live"))
@@ -2645,6 +3041,18 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             f"{ships.get('worker_count')} worker(s) via (fak-worker) trailer ({top})"
             f"{unk_bit} — best-effort aid, not a witness (#2065)")
 
+    # Backlog arrival-vs-service rate (#2634): surface a numeric BACKLOG_OUTPACED
+    # so an operator reads the supply/demand trend without hand-diffing counters.
+    # Informational — a reason line, never a flip of ok (this is the meter).
+    backlog_rate = backlog_rate or {}
+    if backlog_rate.get("backlog_outpaced"):
+        reasons.append(
+            f"backlog OUTPACED: arrival {backlog_rate.get('arrival_rate_per_hour')}/h > "
+            f"service {backlog_rate.get('service_rate_per_hour')}/h for "
+            f"{backlog_rate.get('consecutive_outpaced_windows')} consecutive "
+            f"{backlog_rate.get('window_hours')}h window(s) — healthy but supply-bound, "
+            f"not stalled; do not hand-launch (#2634)")
+
     lab_readiness = lab_readiness or {}
     if lab_readiness.get("schema") and not lab_readiness.get("commands"):
         lab_readiness = {**lab_readiness, "commands": _lab_readiness_commands()}
@@ -2719,6 +3127,8 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             "loop_per_window": None if tp_na else (throughput.get("loop") or {}).get("per_window"),
             "last_loop_close_age_min": None if tp_na else (throughput.get("loop") or {}).get("last_loop_close_age_min"),
         },
+        "watch_decision": watch or {},
+        "backlog_rate": backlog_rate or {},
         "workers": {
             "silent_count": len(silent),
             "silent": silent,
@@ -2926,6 +3336,28 @@ def render(p: dict[str, Any]) -> str:
         lines.append(
             f"║ rate      : {tp.get('verdict')}  {tp.get('completed_rate_per_hour')}/h completed "
             f"over the {tp.get('primary_window_hours')}h analysis window (target {tp.get('target_per_hour')}/h)")
+    watch = p.get("watch_decision") or {}
+    if watch.get("schema"):
+        cite = watch.get("cited") or {}
+        wh = watch.get("window_hours") or 0
+        fu = watch.get("follow_ups") or []
+        fu_bit = (" follow-ups=" + ",".join(f"#{n}" for n in fu)) if fu else ""
+        lines.append(
+            f"║ watch     : {watch.get('verdict')} "
+            f"({'LOOK' if watch.get('action_needed') else 'no action'}; {wh:g}h) "
+            f"open {cite.get('open_now_start')}->{cite.get('open_now_end')} "
+            f"loop-closed {cite.get('closed_by_loop_total_start')}->"
+            f"{cite.get('closed_by_loop_total_end')} audit={watch.get('audit_status')} "
+            f"sched={(watch.get('scheduled_task') or {}).get('classification')}{fu_bit}")
+    br = p.get("backlog_rate") or {}
+    if br.get("schema") and br.get("verdict") != "INSUFFICIENT_DATA":
+        flag = " BACKLOG_OUTPACED" if br.get("backlog_outpaced") else ""
+        lines.append(
+            f"║ supply    : {br.get('verdict')}{flag} "
+            f"arrival {br.get('arrival_rate_per_hour')}/h vs service "
+            f"{br.get('service_rate_per_hour')}/h over {br.get('span_hours')}h "
+            f"({br.get('consecutive_outpaced_windows')}/{br.get('k_consecutive')} "
+            f"consecutive @ {br.get('window_hours'):g}h)")
     w = p.get("workers") or {}
     sc = w.get("silent_count") or 0
     if sc:
@@ -3198,6 +3630,28 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
                 + (f"{last} min ago." if last is not None else "**none on record**.")
                 + " A gh-rate far above the loop-rate means humans/peers are draining "
                 "the backlog, not the dispatcher."]
+
+    watch = payload.get("watch_decision") or {}
+    if watch.get("schema"):
+        cite = watch.get("cited") or {}
+        wh = watch.get("window_hours") or 0
+        fu = watch.get("follow_ups") or []
+        sched = watch.get("scheduled_task") or {}
+        out += ["", "## Watch decision (why no action)", "",
+                f"`verdict` = **{watch.get('verdict')}** "
+                f"({'operator look suggested' if watch.get('action_needed') else 'intentionally no action'}"
+                f", trailing **{wh:g}h**) — {watch.get('why')}",
+                "",
+                f"- `open_now`: {cite.get('open_now_start')} -> {cite.get('open_now_end')} "
+                f"(delta {cite.get('open_now_delta')})",
+                f"- `closed_by_loop_total`: {cite.get('closed_by_loop_total_start')} -> "
+                f"{cite.get('closed_by_loop_total_end')} "
+                f"(+{cite.get('closed_now_sum')} witnessed closes in window)",
+                f"- closure audit: {watch.get('audit_status')}",
+                f"- scheduled task: {sched.get('classification')} "
+                f"(status={sched.get('status') or '-'})",
+                f"- follow-up tickets from this watch: "
+                + (", ".join(f"#{n}" for n in fu) if fu else "none listed")]
 
     leases = payload.get("leases") or {}
     out += ["", "## Active lane leases", ""]

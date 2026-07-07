@@ -2332,5 +2332,263 @@ class ShipsPerWorkerPayloadTest(unittest.TestCase):
         self.assertIn("| _unattributed_ | 1 |", md)
 
 
+def _prow(utc: str, *, open_now: int, loop_total: int, closed_now: int = 0,
+          audit_error=None) -> dict:
+    return {"schema": "fleet-issue-resolve-progress/1", "utc": utc,
+            "open_now": open_now, "closed_by_loop_total": loop_total,
+            "closed_now": closed_now, "audit_error": audit_error}
+
+
+class WatchDecisionTest(unittest.TestCase):
+    """#2642: the trailing-window watch digest that explains WHY the monitor
+    (intentionally) takes no action, reproducing the ef59064f OUTPACED shape."""
+
+    def _now(self, mod, utc: str) -> float:
+        return mod._iso_epoch(utc)
+
+    def test_ef59064f_shape_is_outpaced_not_stalled(self) -> None:
+        # closures keep advancing (772 -> 791) while the backlog rises (700 -> 764)
+        # over the 6h watch: arrivals outpace service, NOT a stalled dispatcher.
+        mod = load()
+        rows = [
+            _prow("2026-07-06T18:15:00Z", open_now=700, loop_total=772, closed_now=0),
+            _prow("2026-07-06T20:00:00Z", open_now=730, loop_total=780, closed_now=8),
+            _prow("2026-07-06T22:00:00Z", open_now=752, loop_total=787, closed_now=7),
+            _prow("2026-07-07T00:15:00Z", open_now=764, loop_total=791, closed_now=4),
+        ]
+        wd = mod.watch_decision(rows, now_ts=self._now(mod, "2026-07-07T00:15:00Z"),
+                                window_hours=6.0)
+        self.assertEqual(wd["verdict"], "OUTPACED")
+        self.assertNotEqual(wd["verdict"], "STALLED")
+        self.assertFalse(wd["action_needed"])  # informational — never hand-launch
+        c = wd["cited"]
+        self.assertEqual(c["open_now_start"], 700)
+        self.assertEqual(c["open_now_end"], 764)
+        self.assertEqual(c["closed_by_loop_total_start"], 772)
+        self.assertEqual(c["closed_by_loop_total_end"], 791)
+        self.assertEqual(c["closed_now_sum"], 19)
+        self.assertEqual(wd["audit_status"], "clean")
+        self.assertIn("outpace", wd["why"])
+
+    def test_stalled_when_backlog_persists_without_closes(self) -> None:
+        mod = load()
+        rows = [
+            _prow("2026-07-06T20:00:00Z", open_now=500, loop_total=772, closed_now=0),
+            _prow("2026-07-07T00:00:00Z", open_now=540, loop_total=772, closed_now=0),
+        ]
+        wd = mod.watch_decision(rows, now_ts=self._now(mod, "2026-07-07T00:00:00Z"))
+        self.assertEqual(wd["verdict"], "STALLED")
+        self.assertTrue(wd["action_needed"])
+
+    def test_draining_when_backlog_falls_while_closing(self) -> None:
+        mod = load()
+        rows = [
+            _prow("2026-07-06T20:00:00Z", open_now=540, loop_total=772, closed_now=5),
+            _prow("2026-07-07T00:00:00Z", open_now=500, loop_total=790, closed_now=6),
+        ]
+        wd = mod.watch_decision(rows, now_ts=self._now(mod, "2026-07-07T00:00:00Z"))
+        self.assertEqual(wd["verdict"], "DRAINING")
+        self.assertFalse(wd["action_needed"])
+
+    def test_healthy_idle_when_backlog_drained(self) -> None:
+        mod = load()
+        rows = [
+            _prow("2026-07-06T20:00:00Z", open_now=0, loop_total=800, closed_now=0),
+            _prow("2026-07-07T00:00:00Z", open_now=0, loop_total=800, closed_now=0),
+        ]
+        wd = mod.watch_decision(rows, now_ts=self._now(mod, "2026-07-07T00:00:00Z"))
+        self.assertEqual(wd["verdict"], "HEALTHY_IDLE")
+        self.assertFalse(wd["action_needed"])
+
+    def test_insufficient_data_with_one_row(self) -> None:
+        mod = load()
+        rows = [_prow("2026-07-07T00:00:00Z", open_now=500, loop_total=772)]
+        wd = mod.watch_decision(rows, now_ts=self._now(mod, "2026-07-07T00:00:00Z"))
+        self.assertEqual(wd["verdict"], "INSUFFICIENT_DATA")
+        self.assertFalse(wd["action_needed"])
+
+    def test_rows_outside_window_are_excluded(self) -> None:
+        mod = load()
+        rows = [
+            _prow("2026-07-06T10:00:00Z", open_now=999, loop_total=700, closed_now=0),
+            _prow("2026-07-06T20:00:00Z", open_now=730, loop_total=780, closed_now=8),
+            _prow("2026-07-07T00:00:00Z", open_now=764, loop_total=791, closed_now=4),
+        ]
+        wd = mod.watch_decision(rows, now_ts=self._now(mod, "2026-07-07T00:00:00Z"),
+                                window_hours=6.0)
+        self.assertEqual(wd["rows_in_window"], 2)  # the 14h-old row is dropped
+        self.assertEqual(wd["cited"]["open_now_start"], 730)
+
+    def test_audit_error_surfaces_in_status(self) -> None:
+        mod = load()
+        rows = [
+            _prow("2026-07-06T20:00:00Z", open_now=730, loop_total=780, closed_now=8),
+            _prow("2026-07-07T00:00:00Z", open_now=764, loop_total=791, closed_now=4,
+                  audit_error="gh 502"),
+        ]
+        wd = mod.watch_decision(rows, now_ts=self._now(mod, "2026-07-07T00:00:00Z"))
+        self.assertEqual(wd["audit_status"], "error: gh 502")
+
+    def test_sched_task_red_without_recovery_is_unresolved(self) -> None:
+        mod = load()
+        wd = mod.watch_decision(
+            [], now_ts=self._now(mod, "2026-07-07T00:00:00Z"),
+            sched_task={"installed": True, "status": "Ready", "last_result": 1})
+        self.assertEqual(wd["scheduled_task"]["classification"], "unresolved_unknown")
+
+    def test_sched_task_red_with_recovery_is_self_healing(self) -> None:
+        mod = load()
+        self.assertEqual(
+            mod._classify_sched_task(
+                {"installed": True, "last_result": 1, "recovered": True}),
+            "self_healing")
+        self.assertEqual(
+            mod._classify_sched_task({"installed": True, "status": "Ready"}), "clean")
+
+    def test_follow_ups_are_listed_and_deduped(self) -> None:
+        mod = load()
+        rows = [
+            _prow("2026-07-06T20:00:00Z", open_now=730, loop_total=780, closed_now=8),
+            _prow("2026-07-07T00:00:00Z", open_now=764, loop_total=791, closed_now=4),
+        ]
+        wd = mod.watch_decision(rows, now_ts=self._now(mod, "2026-07-07T00:00:00Z"),
+                                follow_ups=[2636, 2634, 2635, 2636])
+        self.assertEqual(wd["follow_ups"], [2634, 2635, 2636])
+
+    def test_payload_carries_watch_and_renders(self) -> None:
+        mod = load()
+        watch = mod.watch_decision(
+            [_prow("2026-07-06T20:00:00Z", open_now=730, loop_total=780, closed_now=8),
+             _prow("2026-07-07T00:00:00Z", open_now=764, loop_total=791, closed_now=4)],
+            now_ts=self._now(mod, "2026-07-07T00:00:00Z"), window_hours=6.0,
+            follow_ups=[2634])
+        p = build(mod, watch=watch)
+        self.assertEqual(p["watch_decision"]["verdict"], "OUTPACED")
+        rendered = mod.render(p)
+        self.assertIn("watch     :", rendered)
+        self.assertIn("OUTPACED", rendered)
+        self.assertIn("#2634", rendered)
+        md = mod.render_md(p, date="2026-07-07")
+        self.assertIn("## Watch decision (why no action)", md)
+        self.assertIn("intentionally no action", md)
+        self.assertIn("#2634", md)
+
+    def test_watch_defaults_to_empty_when_omitted(self) -> None:
+        mod = load()
+        p = build(mod)  # build() does not pass watch -> defaults to None -> {}
+        self.assertEqual(p["watch_decision"], {})
+        self.assertNotIn("watch     :", mod.render(p))
+
+
+class BacklogRateTest(unittest.TestCase):
+    """#2634: the numeric arrival-vs-service fold that tells 'outpaced' (healthy
+    but supply-bound) apart from 'stalled' (a malfunction), with a BACKLOG_OUTPACED
+    flag over K consecutive windows and a synthetic-progress.jsonl fixture."""
+
+    NOW = "2026-07-07T00:00:00Z"
+
+    def _now(self, mod) -> float:
+        return mod._iso_epoch(self.NOW)
+
+    def _outpaced_rows(self) -> list[dict]:
+        # Witness-shaped: closes climb continuously (717 -> 797) while the backlog
+        # also climbs (700 -> 772) across four consecutive 6h windows.
+        return [
+            _prow("2026-07-06T00:00:00Z", open_now=700, loop_total=717),
+            _prow("2026-07-06T06:00:00Z", open_now=740, loop_total=740),
+            _prow("2026-07-06T12:00:00Z", open_now=760, loop_total=774),
+            _prow("2026-07-06T18:00:00Z", open_now=770, loop_total=790),
+            _prow("2026-07-07T00:00:00Z", open_now=772, loop_total=797),
+        ]
+
+    def test_outpaced_sets_backlog_outpaced_over_k_windows(self) -> None:
+        mod = load()
+        br = mod.backlog_rates(self._outpaced_rows(), now_ts=self._now(mod),
+                               window_hours=6.0, windows=4, k_consecutive=2)
+        self.assertEqual(br["schema"], "fleet-backlog-rate/1")
+        self.assertEqual(br["verdict"], "OUTPACED")
+        self.assertTrue(br["backlog_outpaced"])
+        self.assertGreaterEqual(br["consecutive_outpaced_windows"], 2)
+        self.assertEqual(br["window_hours"], 6.0)
+        self.assertEqual(len(br["per_window"]), 4)
+        self.assertTrue(all(w["outpaced"] for w in br["per_window"]))
+        # arrival must exceed service — that is the whole point of the fold.
+        self.assertGreater(br["arrival_rate_per_hour"], br["service_rate_per_hour"])
+        self.assertGreater(br["service_rate_per_hour"], 0)  # working, not stalled
+        self.assertEqual(br["span_hours"], 24.0)
+        self.assertIn("BACKLOG_OUTPACED", br["why"])
+
+    def test_draining_backlog_is_not_outpaced(self) -> None:
+        mod = load()
+        rows = [
+            _prow("2026-07-06T12:00:00Z", open_now=800, loop_total=700),
+            _prow("2026-07-06T18:00:00Z", open_now=780, loop_total=720),
+            _prow("2026-07-07T00:00:00Z", open_now=760, loop_total=740),
+        ]
+        br = mod.backlog_rates(rows, now_ts=self._now(mod))
+        self.assertEqual(br["verdict"], "DRAINING")
+        self.assertFalse(br["backlog_outpaced"])
+        self.assertLess(br["arrival_rate_per_hour"], br["service_rate_per_hour"])
+
+    def test_stalled_backlog_is_not_outpaced(self) -> None:
+        # closes flat (790) while the backlog rises: STALLED, never BACKLOG_OUTPACED
+        # (service == 0 is what separates a malfunction from a supply/demand trend).
+        mod = load()
+        rows = [
+            _prow("2026-07-06T12:00:00Z", open_now=700, loop_total=790),
+            _prow("2026-07-06T18:00:00Z", open_now=730, loop_total=790),
+            _prow("2026-07-07T00:00:00Z", open_now=760, loop_total=790),
+        ]
+        br = mod.backlog_rates(rows, now_ts=self._now(mod))
+        self.assertEqual(br["verdict"], "STALLED")
+        self.assertFalse(br["backlog_outpaced"])
+        self.assertEqual(br["service_rate_per_hour"], 0.0)
+
+    def test_insufficient_data_with_one_row(self) -> None:
+        mod = load()
+        rows = [_prow(self.NOW, open_now=500, loop_total=772)]
+        br = mod.backlog_rates(rows, now_ts=self._now(mod))
+        self.assertEqual(br["verdict"], "INSUFFICIENT_DATA")
+        self.assertFalse(br["backlog_outpaced"])
+        self.assertIsNone(br["arrival_rate_per_hour"])
+
+    def test_fixture_on_synthetic_progress_jsonl(self) -> None:
+        # The Done-condition witness: pin the fold end-to-end on a synthetic
+        # .dispatch-runs/progress.jsonl read back through read_dispatch_progress.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / mod.RUNS_DIRNAME
+            runs.mkdir()
+            (runs / mod.PROGRESS_LOG).write_text(
+                "\n".join(json.dumps(r) for r in self._outpaced_rows()) + "\n",
+                encoding="utf-8")
+            records = mod.read_dispatch_progress(root)
+            self.assertEqual(len(records), 5)
+            br = mod.backlog_rates(records, now_ts=self._now(mod),
+                                   window_hours=6.0, windows=4, k_consecutive=2)
+        self.assertTrue(br["backlog_outpaced"])
+        self.assertEqual(br["verdict"], "OUTPACED")
+
+    def test_payload_carries_backlog_rate_and_renders(self) -> None:
+        mod = load()
+        br = mod.backlog_rates(self._outpaced_rows(), now_ts=self._now(mod),
+                               window_hours=6.0, windows=4, k_consecutive=2)
+        p = build(mod, backlog_rate=br)
+        self.assertEqual(p["backlog_rate"]["verdict"], "OUTPACED")
+        self.assertTrue(p["backlog_rate"]["backlog_outpaced"])
+        self.assertTrue(any("backlog OUTPACED" in r and "#2634" in r
+                            for r in p["reasons"]))
+        rendered = mod.render(p)
+        self.assertIn("supply    :", rendered)
+        self.assertIn("BACKLOG_OUTPACED", rendered)
+
+    def test_backlog_rate_defaults_to_empty_when_omitted(self) -> None:
+        mod = load()
+        p = build(mod)  # build() does not pass backlog_rate -> None -> {}
+        self.assertEqual(p["backlog_rate"], {})
+        self.assertNotIn("supply    :", mod.render(p))
+
+
 if __name__ == "__main__":
     unittest.main()
