@@ -262,6 +262,156 @@ func TestWalkWorstFirst(t *testing.T) {
 	}
 }
 
+// TestClassifyWork pins the gardening/throughput/neutral buckets (#3126): scorecard/
+// garden/surface tend quality (gardening), issue-drain loops move the backlog
+// (throughput), and non-drain loops + capacity signals are neutral.
+func TestClassifyWork(t *testing.T) {
+	cases := []struct {
+		m    Member
+		want WorkClass
+	}{
+		{Member{Kind: KindScorecard, Ref: "slop"}, WorkGardening},
+		{Member{Kind: KindGarden, Ref: "garden"}, WorkGardening},
+		{Member{Kind: KindSurface, Ref: "fak bench-loop status"}, WorkGardening},
+		{Member{Kind: KindLoop, Ref: "dispatch"}, WorkThroughput},
+		{Member{Kind: KindLoop, Ref: "loopmgr:issue-resolve-dispatch/claude/throughput"}, WorkThroughput},
+		{Member{Kind: KindSuperloop, Ref: "drain-issues"}, WorkThroughput},
+		{Member{Kind: KindLoop, Ref: "cadence"}, WorkNeutral}, // report loop, not drain
+		{Member{Kind: KindLoop, Ref: "loopmgr:recent-feature-dogfood"}, WorkNeutral},
+		{Member{Kind: KindSuperloop, Ref: "improve-quality"}, WorkNeutral}, // a container, not itself drain
+		{Member{Kind: KindUtilization, Ref: "account-limits"}, WorkNeutral},
+	}
+	for _, tc := range cases {
+		if got := classifyWork(tc.m); got != tc.want {
+			t.Errorf("classifyWork(%s:%s) = %q, want %q", tc.m.Kind, tc.m.Ref, got, tc.want)
+		}
+	}
+}
+
+// TestFavoredClass pins the soft-target decision: a tie-break leans toward the
+// under-represented class, stays silent when the mix is on target, and never leans at
+// all unless BOTH classes are present (with only one class there is no tie to trade).
+func TestFavoredClass(t *testing.T) {
+	cases := []struct {
+		name                          string
+		gardening, throughput, target int
+		want                          WorkClass
+	}{
+		{"throughput under target leans throughput", 3, 1, 50, WorkThroughput},
+		{"throughput over target leans gardening", 1, 3, 50, WorkGardening},
+		{"exactly on target does not lean", 1, 1, 50, ""},
+		{"no throughput present cannot lean", 4, 0, 50, ""},
+		{"no gardening present cannot lean", 0, 4, 50, ""},
+		{"a throughput-hungry target leans throughput on a balanced mix", 1, 1, 100, WorkThroughput},
+		{"a gardening-first target leans gardening on a balanced mix", 1, 1, 0, WorkGardening},
+	}
+	for _, tc := range cases {
+		if got := favoredClass(tc.gardening, tc.throughput, tc.target); got != tc.want {
+			t.Errorf("%s: favoredClass(%d,%d,%d) = %q, want %q", tc.name, tc.gardening, tc.throughput, tc.target, got, tc.want)
+		}
+	}
+}
+
+// TestWalkMixRollup: a walk with both classes on the worklist reports the split, echoes
+// the resolved (default) target, and — because the default 50% target is unmet by a
+// 2:1 gardening-heavy mix — leans throughput.
+func TestWalkMixRollup(t *testing.T) {
+	s := Super{Name: "mix", Title: "mix", Floor: 0, Members: []Member{
+		{Kind: KindScorecard, Ref: "garden-a"},
+		{Kind: KindLoop, Ref: "dispatch"}, // throughput
+		{Kind: KindScorecard, Ref: "garden-b"},
+		{Kind: KindUtilization, Ref: "account-limits"}, // neutral, still counted
+	}}
+	rep := Walk(s, []MemberStatus{
+		{Member: s.Members[0], Debt: 5, Measured: true},
+		{Member: s.Members[1], Debt: 5, Measured: true},
+		{Member: s.Members[2], Debt: 5, Measured: true},
+		{Member: s.Members[3], Debt: 5, Measured: true},
+	})
+	if rep.Mix.Gardening != 2 || rep.Mix.Throughput != 1 || rep.Mix.Neutral != 1 {
+		t.Errorf("mix counts: got g=%d t=%d n=%d, want 2/1/1", rep.Mix.Gardening, rep.Mix.Throughput, rep.Mix.Neutral)
+	}
+	if rep.Mix.TargetThroughputPct != DefaultThroughputTargetPct {
+		t.Errorf("target: got %d, want default %d", rep.Mix.TargetThroughputPct, DefaultThroughputTargetPct)
+	}
+	if rep.Mix.Favor != WorkThroughput {
+		t.Errorf("a gardening-heavy mix under the 50%% target must lean throughput, got %q", rep.Mix.Favor)
+	}
+}
+
+// TestWalkMixTieBreak is the load-bearing one: among members of EQUAL urgency and EQUAL
+// debt, the soft tie-break moves the favored class ahead of declared order — but only
+// there. It also proves the two guarantees: a higher-debt member of the non-favored
+// class still wins (the nudge never overrides debt), and with only one class present no
+// reordering happens at all.
+func TestWalkMixTieBreak(t *testing.T) {
+	// A hard throughput lean (target 100) with garden declared FIRST: the tied drain
+	// member must jump ahead of both gardening members it would otherwise trail.
+	s := Super{Name: "mix", Title: "mix", Floor: 0, ThroughputTargetPct: 100, Members: []Member{
+		{Kind: KindScorecard, Ref: "garden-a"},
+		{Kind: KindLoop, Ref: "dispatch"}, // throughput
+		{Kind: KindScorecard, Ref: "garden-b"},
+	}}
+	tied := []MemberStatus{
+		{Member: s.Members[0], Debt: 5, Measured: true},
+		{Member: s.Members[1], Debt: 5, Measured: true},
+		{Member: s.Members[2], Debt: 5, Measured: true},
+	}
+	rep := Walk(s, tied)
+	if got := worklistRefs(rep); !equalStrings(got, []string{"dispatch", "garden-a", "garden-b"}) {
+		t.Errorf("tie-break should float the favored throughput member first: got %v, want [dispatch garden-a garden-b]", got)
+	}
+
+	// The nudge must NOT override debt: give garden-a the heaviest debt and it stays
+	// first despite the throughput lean; the tie-break only reorders the remaining tie.
+	heavier := []MemberStatus{
+		{Member: s.Members[0], Debt: 9, Measured: true}, // heaviest -> first regardless of class
+		{Member: s.Members[1], Debt: 5, Measured: true},
+		{Member: s.Members[2], Debt: 5, Measured: true},
+	}
+	rep = Walk(s, heavier)
+	if got := worklistRefs(rep); !equalStrings(got, []string{"garden-a", "dispatch", "garden-b"}) {
+		t.Errorf("tie-break must never move a member past a heavier one: got %v, want [garden-a dispatch garden-b]", got)
+	}
+
+	// With only gardening present, favor is "" and declared order is preserved untouched.
+	solo := Super{Name: "solo", Title: "solo", Floor: 0, ThroughputTargetPct: 100, Members: []Member{
+		{Kind: KindScorecard, Ref: "garden-a"},
+		{Kind: KindScorecard, Ref: "garden-b"},
+	}}
+	rep = Walk(solo, []MemberStatus{
+		{Member: solo.Members[0], Debt: 5, Measured: true},
+		{Member: solo.Members[1], Debt: 5, Measured: true},
+	})
+	if rep.Mix.Favor != "" {
+		t.Errorf("a single-class worklist must not lean, got %q", rep.Mix.Favor)
+	}
+	if got := worklistRefs(rep); !equalStrings(got, []string{"garden-a", "garden-b"}) {
+		t.Errorf("single-class walk must keep declared order: got %v", got)
+	}
+}
+
+// worklistRefs pulls the worklist member refs in rank order for ordering assertions.
+func worklistRefs(rep WalkReport) []string {
+	out := make([]string, len(rep.Worklist))
+	for i, w := range rep.Worklist {
+		out[i] = w.Member.Ref
+	}
+	return out
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // TestWalkSatisfied: all leaves measured-clean and live, no container in the way ->
 // satisfied, verdict OK.
 func TestWalkSatisfied(t *testing.T) {

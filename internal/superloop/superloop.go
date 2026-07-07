@@ -75,6 +75,66 @@ const (
 	KindUtilization MemberKind = "utilization"
 )
 
+// WorkClass is the gardening-vs-throughput bucket a member's work falls into — the
+// axis a night has to keep in balance (#3126). A fleet that spends every tick tending
+// quality while open issues pile up is as out of balance as one that drains issues
+// while the gardens rot; the walk classifies each member so the mix is visible and a
+// soft tie-break can nudge a lopsided run back toward its declared target.
+type WorkClass string
+
+const (
+	// WorkGardening is tend-the-house work: scorecards, the garden bundle, and named
+	// control surfaces. It retires quality/hygiene debt rather than moving the backlog.
+	WorkGardening WorkClass = "gardening"
+	// WorkThroughput is issue-drain work: the dispatch loops and drain-* intents that
+	// move open issues toward done. It is the backlog-clearing output of a run.
+	WorkThroughput WorkClass = "throughput"
+	// WorkNeutral is everything the gardening/throughput axis does not name — capacity
+	// signals (utilization) and non-drain report loops (cadence, dojo, dogfood). It is
+	// surfaced for visibility but never weighed by the mix tie-break.
+	WorkNeutral WorkClass = "neutral"
+)
+
+// DefaultThroughputTargetPct is the soft mix target a Super uses when it declares none:
+// a balanced 50% throughput share. It only ever breaks a tie between two equally-urgent
+// members of opposite class, so the exact number is a gentle lean, not a quota.
+const DefaultThroughputTargetPct = 50
+
+// classifyWork buckets a member into the gardening/throughput/neutral axis. It reads
+// only the member's declared kind and ref — a pure classification, no status needed:
+//
+//   - scorecard / garden / surface → gardening (tend quality & hygiene);
+//   - a loop or sub-super-loop whose ref names issue-drain work → throughput;
+//   - every other loop (report/calibration cadences) and utilization → neutral.
+//
+// The throughput test is ref-based rather than kind-based because KindLoop and
+// KindSuperloop carry BOTH backlog-drain members (dispatch, drain-*) and non-drain ones
+// (cadence, dojo, the dogfood probe): only the issue-drain refs are throughput.
+func classifyWork(m Member) WorkClass {
+	switch m.Kind {
+	case KindScorecard, KindGarden, KindSurface:
+		return WorkGardening
+	case KindLoop, KindSuperloop:
+		if isIssueDrain(m.Ref) {
+			return WorkThroughput
+		}
+		return WorkNeutral
+	default:
+		return WorkNeutral
+	}
+}
+
+// isIssueDrain reports whether a loop/super-loop ref names backlog-draining work. The
+// three tokens cover every issue-drain surface in the registry — the legacy aggregate
+// "dispatch" ledger, the named "issue-resolve" dispatch goals, and the "drain-*"
+// intents — while leaving report/calibration loops (cadence, dojo, dogfood) neutral.
+func isIssueDrain(ref string) bool {
+	r := strings.ToLower(ref)
+	return strings.Contains(r, "dispatch") ||
+		strings.Contains(r, "drain") ||
+		strings.Contains(r, "issue-resolve")
+}
+
 // Member is one constituent a super loop walks. Ref names the surface (scorecard
 // key / loop id / garden name / super-loop name); Why is the one-line reason it
 // belongs under this intent. Enter, when set, is the CONCRETE command or skill an
@@ -123,6 +183,14 @@ type Super struct {
 	// — the same declared-vs-measured posture the budget rows keep. 0 = no headline
 	// issue target for this intent.
 	IssueTarget int `json:"issue_target,omitempty"`
+	// ThroughputTargetPct is the DECLARED soft mix target: the percentage of this
+	// intent's attention the operator wants spent on throughput (issue-drain) work
+	// versus gardening (quality/hygiene) work. Like Floor and IssueTarget it is a stated
+	// policy, but a far GENTLER one — it never overrides worst-first urgency or debt
+	// order; it only breaks a tie between two equally-urgent members of opposite class,
+	// nudging a lopsided run back toward the target (#3126). 0 = unset, which takes
+	// DefaultThroughputTargetPct (a balanced 50%). Values are clamped to [0,100].
+	ThroughputTargetPct int `json:"throughput_target_pct,omitempty"`
 }
 
 // The four budget-dimension tokens the generation-budget contract names
@@ -615,23 +683,74 @@ type WalkReport struct {
 	// target AND progress was measured: the issues still owed against the headline. A
 	// positive shortfall keeps Satisfied false — the declared target is a gate, not a
 	// decoration. 0 when there is no target, no measurement, or the target is met.
-	IssueShortfall int  `json:"issue_shortfall,omitempty"`
-	Satisfied      bool `json:"satisfied"`
-	Members     int            `json:"members"`
-	Walked      int            `json:"walked"`
-	Unmeasured  int            `json:"unmeasured"`
-	Dark        int            `json:"dark"`
-	Worklist    []WorkItem     `json:"worklist"`
-	Statuses    []MemberStatus `json:"statuses"`
+	IssueShortfall int            `json:"issue_shortfall,omitempty"`
+	Satisfied      bool           `json:"satisfied"`
+	Members        int            `json:"members"`
+	Walked         int            `json:"walked"`
+	Unmeasured     int            `json:"unmeasured"`
+	Dark           int            `json:"dark"`
+	Worklist       []WorkItem     `json:"worklist"`
+	Statuses       []MemberStatus `json:"statuses"`
 	// Budget is the intent's declared generation-budget envelope folded into one row
 	// per contract dimension (Time/Tokens/Workers/Review), each carrying the declared
 	// cap and the per-worklist-member share. Always four rows: an unbudgeted dimension
 	// renders as a HOLD row, which is itself the contract's operator warning.
-	Budget     []BudgetRow `json:"budget"`
-	Verdict    string      `json:"verdict"`
-	Finding    string      `json:"finding"`
-	Reason     string      `json:"reason"`
-	NextAction string      `json:"next_action"`
+	Budget []BudgetRow `json:"budget"`
+	// Mix is the gardening-vs-throughput split of the worklist — how much of what this
+	// walk says to enter is quality-tending versus backlog-draining, and which way the
+	// soft target-ratio tie-break leaned (#3126). Always present; a walk with no work
+	// (an empty worklist) reports all-zero counts and no favor.
+	Mix        WorkMix `json:"mix"`
+	Verdict    string  `json:"verdict"`
+	Finding    string  `json:"finding"`
+	Reason     string  `json:"reason"`
+	NextAction string  `json:"next_action"`
+}
+
+// WorkMix is the folded gardening-vs-throughput split of a walk's worklist. The three
+// counts tally the worklist members by [WorkClass]; TargetThroughputPct echoes the
+// resolved soft target (declared or default); Favor names the class the tie-break
+// nudged toward this walk, or "" when the mix is already on target or one side is
+// absent (a tie-break needs BOTH classes present to have anything to trade).
+type WorkMix struct {
+	Gardening           int       `json:"gardening"`
+	Throughput          int       `json:"throughput"`
+	Neutral             int       `json:"neutral"`
+	TargetThroughputPct int       `json:"target_throughput_pct"`
+	Favor               WorkClass `json:"favor,omitempty"`
+}
+
+// resolveThroughputTarget clamps a Super's declared soft mix target into [0,100],
+// substituting the balanced default when the intent declares none (0). Pure and total.
+func resolveThroughputTarget(pct int) int {
+	if pct <= 0 {
+		return DefaultThroughputTargetPct
+	}
+	if pct > 100 {
+		return 100
+	}
+	return pct
+}
+
+// favoredClass decides which class a soft tie-break should lean toward, given the
+// worklist's current gardening/throughput counts and the resolved target throughput
+// share. It returns "" (no lean) unless BOTH classes are present — with only one class
+// on the worklist there is no tie to trade — and unless the measured share actually
+// differs from the target. When throughput is under its target share the walk leans
+// throughput; when it is over, it leans gardening. Neutral members never tip it.
+func favoredClass(gardening, throughput, targetPct int) WorkClass {
+	if gardening == 0 || throughput == 0 {
+		return ""
+	}
+	sharePct := throughput * 100 / (gardening + throughput)
+	switch {
+	case sharePct < targetPct:
+		return WorkThroughput
+	case sharePct > targetPct:
+		return WorkGardening
+	default:
+		return ""
+	}
 }
 
 // WalkOpt configures a Walk beyond the declared registry data — the seam the impure
@@ -712,6 +831,34 @@ func Walk(s Super, statuses []MemberStatus, opts ...WalkOpt) WalkReport {
 		}
 	}
 
+	// Classify the worklist-bound members into the gardening/throughput/neutral mix and
+	// resolve the soft target. favor is computed ONCE over the whole candidate set, so
+	// the tie-break below is a stable global lean toward rebalancing the mix rather than
+	// a per-pair ratchet that could depend on comparison order.
+	targetPct := resolveThroughputTarget(s.ThroughputTargetPct)
+	var gardening, throughput, neutral int
+	for _, st := range statuses {
+		if !workEligible(st) {
+			continue
+		}
+		switch classifyWork(st.Member) {
+		case WorkGardening:
+			gardening++
+		case WorkThroughput:
+			throughput++
+		default:
+			neutral++
+		}
+	}
+	favor := favoredClass(gardening, throughput, targetPct)
+	rep.Mix = WorkMix{
+		Gardening:           gardening,
+		Throughput:          throughput,
+		Neutral:             neutral,
+		TargetThroughputPct: targetPct,
+		Favor:               favor,
+	}
+
 	sort.SliceStable(ranked, func(i, j int) bool {
 		// urgency tier (low number = earlier): a dark/unmeasured leaf is most urgent,
 		// then debt-bearing leaves, then descend-pointers, then clean.
@@ -722,13 +869,26 @@ func Walk(s Super, statuses []MemberStatus, opts ...WalkOpt) WalkReport {
 		if ranked[i].Debt != ranked[j].Debt {
 			return ranked[i].Debt > ranked[j].Debt
 		}
+		// Soft mix tie-break (#3126): only reached when two members share urgency AND
+		// debt — a genuine tie the code above leaves to declared order. When the walk is
+		// leaning toward a class to rebalance the mix, a member of the favored class
+		// sorts ahead of one that is not; otherwise declared order still decides. This
+		// can never move a member past one that is more urgent or carries more debt, so
+		// it is a nudge, not an override.
+		if favor != "" {
+			fi := classifyWork(ranked[i].Member) == favor
+			fj := classifyWork(ranked[j].Member) == favor
+			if fi != fj {
+				return fi
+			}
+		}
 		return order[memberKey(ranked[i].Member)] < order[memberKey(ranked[j].Member)]
 	})
 
 	for _, st := range ranked {
 		// A clean, measured leaf is nothing to enter. A container is ALWAYS surfaced
 		// (its status is only knowable by descending). Everything with work stays.
-		if !st.Container && st.Measured && !st.Dark && st.Debt <= 0 {
+		if !workEligible(st) {
 			continue
 		}
 		rep.Worklist = append(rep.Worklist, WorkItem{
@@ -843,6 +1003,16 @@ func SubwalkStatus(m Member, rep WalkReport) MemberStatus {
 //	1  a measured leaf carrying debt
 //	2  a container (garden / super loop) — descend to learn its status
 //	3  a measured, clean, live leaf — nothing to do
+//
+// workEligible reports whether a status belongs on the worklist — the exact inverse of
+// the clean-and-measured drop condition. A container (always surfaced for descent), an
+// unmeasured or dark member, or any debt-bearing leaf is work to enter; a measured,
+// clean, live leaf is not. Shared by the worklist filter and the mix pre-count so the
+// two can never disagree on what counts as "work to enter".
+func workEligible(st MemberStatus) bool {
+	return st.Container || !st.Measured || st.Dark || st.Debt > 0
+}
+
 func tier(st MemberStatus) int {
 	if st.Container {
 		return 2
