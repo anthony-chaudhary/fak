@@ -9,6 +9,7 @@ package main
 //	fak logvault plan      diff live sources against the vault (dry-run, default)
 //	fak logvault capture   copy new/appended/rewritten files + append chained manifest rows
 //	fak logvault verify    re-derive the manifest hash chain + re-hash mirrors
+//	fak logvault sync      scrub-gated replication to a second vault dir (-to), verified on arrival
 //	fak logvault sources   print the source registry resolved for this box
 //
 // The vault defaults to a sibling directory of the repo root (<parent>/fak-log-vault,
@@ -39,7 +40,8 @@ func runLogvault(w, ew io.Writer, argv []string) int {
 	fs.SetOutput(ew)
 	repo := fs.String("repo", "", "repo root holding the state dirs (default: current directory)")
 	vaultDir := fs.String("vault", "", "vault directory (default: $FAK_LOG_VAULT, else <repo-parent>/fak-log-vault)")
-	sample := fs.Int("sample", 250, "verify: mirrors to re-hash (0 = all)")
+	sample := fs.Int("sample", 250, "verify/sync: mirrors to re-hash (0 = all)")
+	syncTo := fs.String("to", "", "sync: destination vault directory (the second disk); every outbound byte passes the redaction scrub")
 	allProjects := fs.Bool("all-projects", false, "expand the harness store per project: capture every ~/.claude/projects/* store (not just this repo's) under by-source/harness-store-<slug>/")
 	scratchpad := fs.Bool("scratchpad", false, "opt in the %TEMP%/claude scratchpad tier (re-derivable working files, excluded by default; bounded by -scratchpad-cap-mb)")
 	scratchpadCapMB := fs.Int64("scratchpad-cap-mb", 256, "scratchpad tier size cap in MiB (opt-in bound; 0 = the 256 MiB default)")
@@ -126,6 +128,28 @@ func runLogvault(w, ew io.Writer, argv []string) int {
 			return 1
 		}
 		return 0
+	case "sync":
+		if *syncTo == "" {
+			fmt.Fprintln(ew, "logvault sync: -to <dir> is required (the second vault directory)")
+			return 2
+		}
+		stats, problems, err := v.SyncTo(*syncTo, *sample)
+		if err != nil {
+			fmt.Fprintf(ew, "logvault sync: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(w, "logvault sync  vault=%s -> %s\n", v.Dir, *syncTo)
+		fmt.Fprintf(w, "  files=%d copied=%d unchanged=%d errors=%d redacted-spans=%d copy=%s\n",
+			stats.Files, stats.Copied, stats.Unchanged, stats.Errors, stats.Redacted, fmtBytesLV(stats.CopyBytes))
+		fmt.Fprintf(w, "  receiving-side verify: chain rows=%d mirrors re-hashed=%d problems=%d%s\n",
+			stats.VerifyRows, stats.VerifyChecked, len(problems), logvaultAnchorSuffix(*syncTo))
+		for _, p := range problems {
+			fmt.Fprintf(w, "  PROBLEM %s/%s: %s\n", p.Source, p.RelPath, p.Reason)
+		}
+		if len(problems) > 0 || stats.Errors > 0 {
+			return 1
+		}
+		return 0
 	case "verify":
 		rows, checked, problems, err := v.Verify(*sample)
 		if err != nil {
@@ -146,7 +170,7 @@ func runLogvault(w, ew io.Writer, argv []string) int {
 		}
 		return 0
 	default:
-		fmt.Fprintf(ew, "logvault: unknown verb %q (plan|capture|verify|sources)\n", verb)
+		fmt.Fprintf(ew, "logvault: unknown verb %q (plan|capture|verify|sync|sources)\n", verb)
 		return 2
 	}
 }

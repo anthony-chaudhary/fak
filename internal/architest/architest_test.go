@@ -103,7 +103,7 @@ var tier = map[string]int{
 	"whatschanged":         1,                // read-only peer code-diff readout over git log/diff-tree; stdlib-only, off the hot path.
 	"modver":               1,                // per-module version derivation over git log/ls-files (the version-everything spine); imports appversion(1)+windowgate(1), off the hot path.
 	"livecodebench":        1,                // pure LiveCodeBench fixture/report smoke; no network/model, off the hot path.
-	"logvault":             1,                // central chain-aware log-vault capture engine (epic #2447): incremental mirrors of the durable log stores (guard-audit/dos/dispatch/harness) + a hash-chained vault manifest; imports flock(1), off the hot path.
+	"logvault":             2,                // central chain-aware log-vault capture engine (epic #2447): incremental mirrors of the durable log stores (guard-audit/dos/dispatch/harness) + a hash-chained vault manifest + the scrub-gated off-box sync rung (#2454); imports flock(1)+wirescreen(2), off the hot path.
 	"readmevisualaudit":    1,                // README visual-audit fold over git ls-files + text parsing; imports strmatch(1)+windowgate(1), off the hot path.
 	"toolcoverage":         1,                // read-only tools/*.py sibling-test coverage audit over skills/CI references; stdlib-only, off the hot path.
 	"modelladder":          2,                // model-ladder selector; imports benchcli(1)+model(1)+stdlib, off the hot path.
