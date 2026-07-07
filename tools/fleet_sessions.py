@@ -639,6 +639,23 @@ REHOME_CAP = int(os.environ.get("FAK_REHOME_CAP", "4"))
 # 0 disables escalation (always in-place). Override with FAK_RESUME_ESCALATE_AFTER.
 RESUME_ESCALATE_AFTER = int(os.environ.get("FAK_RESUME_ESCALATE_AFTER", "2"))
 
+# Owner-loaded spread kill-switch (mirrors internal/resume/rehome LoadSpreadEnv, the
+# Go source of truth): safe-by-default ON; FAK_LOAD_REHOME=0/false/off restores the
+# historical resume-in-place-whenever-the-owner-is-healthy behavior.
+LOAD_REHOME = os.environ.get("FAK_LOAD_REHOME", "").strip().lower() not in ("0", "false", "off", "no")
+
+
+def _owner_live_load(availability, account):
+    """The owner's live-session count in the availability snapshot, plus whether it
+    has reached REHOME_CAP. An owner absent from the snapshot reads as not loaded --
+    the spread fires only on positive load evidence, never on a missing row.
+    Mirrors internal/resume/rehome ownerLiveLoad."""
+    for a in (availability or []):
+        if a.get("account") == account:
+            live = int(a.get("live_sessions") or 0)
+            return live, REHOME_CAP > 0 and live >= REHOME_CAP
+    return 0, False
+
 
 def _has_positive_evidence(a) -> bool:
     """The launch-boundary admission predicate (#619): True iff an account's health
@@ -913,8 +930,28 @@ def _resume_inplace_or_escalate(r, availability, assigned, inplace_counts):
     seats excluding the owner; the watchdog copies the transcript across on rehomed=True),
     and folds the target into ``assigned`` so a burst spreads instead of stampeding one
     seat. Falls back to plain in-place resume when escalation is disabled, the attempt
-    threshold is not met, or no other healthy seat is admissible."""
+    threshold is not met, or no other healthy seat is admissible.
+
+    Owner-loaded spread (mirrors internal/resume/rehome loadSpreadDecision, the Go
+    source of truth): BEFORE the escalation ladder, an owner already carrying
+    REHOME_CAP live sessions is the seat most likely to limit-wall next (the july7
+    429 pile-up shape), so the resume re-homes to a strictly less-loaded admissible
+    seat when one exists. Fires only on positive load evidence; FAK_LOAD_REHOME=0
+    disables; with no freer seat the in-place resume stands."""
     r["action"] = "AUTO_RESUME"
+    if LOAD_REHOME:
+        live, overloaded = _owner_live_load(availability, r["account"])
+        if overloaded:
+            targets = _admissible_targets(availability, r["account"], assigned)
+            if targets:
+                tgt = targets[0]
+                tgt_load = int(tgt.get("live_sessions") or 0) + assigned.get(tgt.get("account", ""), 0)
+                if tgt_load < live:
+                    r["rehomed"] = True
+                    r["resume_account"] = tgt["account"]
+                    r["resume_config_dir"] = tgt.get("config_dir") or config_dir(tgt["account"])
+                    assigned[tgt["account"]] = assigned.get(tgt["account"], 0) + 1
+                    return
     if RESUME_ESCALATE_AFTER <= 0:
         return
     if inplace_counts.get(r["session"], 0) < RESUME_ESCALATE_AFTER:

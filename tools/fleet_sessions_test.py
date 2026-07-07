@@ -690,6 +690,69 @@ class ResumeEscalationTest(unittest.TestCase):
         self.assertFalse(rows[0]["rehomed"])
 
 
+class LoadSpreadDecisionTest(unittest.TestCase):
+    """Mirrors internal/resume/rehome's load-spread contract: an AVAILABLE owner
+    at/over REHOME_CAP live sessions spreads an in-place resume onto a strictly
+    less-loaded admissible seat (the july7 429 pile-up shape); anything short of
+    full proof keeps the in-place resume, and FAK_LOAD_REHOME=0 disables."""
+
+    def setUp(self):
+        # isolate the ledger read so _ledger_inplace_attempts sees an EMPTY ledger
+        self._tmp = __import__("tempfile").mkdtemp()
+        self._orig_reg = fleet_sessions.REG_DIR
+        fleet_sessions.REG_DIR = self._tmp
+
+    def tearDown(self):
+        fleet_sessions.REG_DIR = self._orig_reg
+        __import__("shutil").rmtree(self._tmp, ignore_errors=True)
+
+    def test_apierr_on_loaded_owner_spreads_to_freer_seat(self) -> None:
+        rows = [_row(".claude-loaded-acct", "STOPPED_APIERR")]
+        availability = [
+            _avail(".claude-loaded-acct", available=True, live=fleet_sessions.REHOME_CAP),
+            _avail(".claude-idle-acct", available=True, live=1),
+        ]
+        fleet_sessions.decide(rows, {}, availability)
+        r = rows[0]
+        self.assertEqual(r["action"], "AUTO_RESUME")
+        self.assertTrue(r["rehomed"])
+        self.assertEqual(r["resume_account"], ".claude-idle-acct")
+        self.assertIn("Copy-Item", r["resume_cmd"])
+
+    def test_loaded_owner_without_freer_seat_resumes_in_place(self) -> None:
+        rows = [_row(".claude-loaded-acct", "STOPPED_APIERR")]
+        availability = [
+            _avail(".claude-loaded-acct", available=True, live=fleet_sessions.REHOME_CAP + 2),
+            _avail(".claude-alsofull-acct", available=True, live=fleet_sessions.REHOME_CAP),
+        ]
+        fleet_sessions.decide(rows, {}, availability)
+        r = rows[0]
+        self.assertEqual(r["action"], "AUTO_RESUME")
+        self.assertFalse(r["rehomed"])
+        self.assertEqual(r["resume_account"], r["account"])
+
+    def test_under_cap_owner_resumes_in_place(self) -> None:
+        rows = [_row(".claude-owner-acct", "DEAD_MIDTOOL")]
+        availability = [
+            _avail(".claude-owner-acct", available=True, live=fleet_sessions.REHOME_CAP - 1),
+            _avail(".claude-idle-acct", available=True, live=0),
+        ]
+        fleet_sessions.decide(rows, {}, availability)
+        self.assertFalse(rows[0]["rehomed"])
+        self.assertEqual(rows[0]["resume_account"], rows[0]["account"])
+
+    def test_kill_switch_restores_in_place(self) -> None:
+        rows = [_row(".claude-loaded-acct", "STOPPED_APIERR")]
+        availability = [
+            _avail(".claude-loaded-acct", available=True, live=fleet_sessions.REHOME_CAP + 4),
+            _avail(".claude-idle-acct", available=True, live=0),
+        ]
+        with mock.patch.object(fleet_sessions, "LOAD_REHOME", False):
+            fleet_sessions.decide(rows, {}, availability)
+        self.assertFalse(rows[0]["rehomed"])
+        self.assertEqual(rows[0]["resume_account"], rows[0]["account"])
+
+
 class AuthAnomalyEscalationTest(unittest.TestCase):
     """An INFRA_AUTH tail whose OWNER seat reads admissible (#619 positive evidence)
     is session-local, not a seat logout: a frozen banner from before a re-login, or a
