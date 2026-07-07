@@ -40,8 +40,8 @@ func TestValuationBasisHonesty(t *testing.T) {
 		figures, withBasis int
 		want               float64
 	}{
-		{0, 0, 1},   // nothing claimed -> nothing unbasis'd
-		{4, 4, 1},   // all labelled
+		{0, 0, 1}, // nothing claimed -> nothing unbasis'd
+		{4, 4, 1}, // all labelled
 		{4, 1, 0.25},
 		{4, 0, 0},
 		{4, 9, 1}, // over-count clamps
@@ -316,7 +316,7 @@ func TestComposeD2PassesHonestNonRegressingNet(t *testing.T) {
 	candidate := CacheValueFacts{
 		FireWitnessCounts:      []int{len(AThemeWitnesses)},
 		DollarFigures:          4,
-		DollarFiguresWithBasis: 4,    // every figure labelled
+		DollarFiguresWithBasis: 4, // every figure labelled
 		AblationArmsWired:      len(CThemeArms),
 		FakShareGross:          0.05, // gross tracks net...
 		FakShareNet:            0.05, // ...and net genuinely improved over the 0.034 floor
