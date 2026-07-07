@@ -78,6 +78,48 @@ func TestSkillSpan_ToolOutsideFrontmatterRefused(t *testing.T) {
 	}
 }
 
+// TestSkillSpan_EmptyAllowedToolsFailsClosed pins the #2442 fail-closed invariant a
+// security envelope lives or dies on: a skill frontmatter that declares NO allowed
+// tools must compile to the EMPTY envelope — the skill may call nothing — never a
+// wide-open one that silently inherits the base floor, and a blank name must refuse
+// to compile a span at all. A regression that let an empty allow-set fall through to
+// admit-everything would turn the whole span boundary into a no-op.
+func TestSkillSpan_EmptyAllowedToolsFailsClosed(t *testing.T) {
+	ctx := context.Background()
+
+	// A name is required — a frontmatter with a blank name cannot compile a span.
+	if _, err := policy.CompileSkillSpan(policy.SkillFrontmatter{Name: "   "}); err == nil {
+		t.Fatalf("CompileSkillSpan with blank name: want error, got nil")
+	}
+
+	// The base session admits both tools.
+	base := adjudicator.Policy{
+		Posture: adjudicator.PostureFailClosed,
+		Allow:   map[string]bool{"read_file": true, "run_shell": true},
+	}
+
+	// No AllowedTools declared: the span must compile to the fail-closed EMPTY
+	// envelope, not silently inherit the base floor.
+	span, err := policy.CompileSkillSpan(policy.SkillFrontmatter{
+		Name:        "note",
+		Description: "declares no tools",
+	})
+	if err != nil {
+		t.Fatalf("CompileSkillSpan: %v", err)
+	}
+
+	// Mid-span EVERY tool the base would have admitted is refused with DEFAULT_DENY —
+	// an empty allow-set means the skill may call nothing.
+	midSpan := adjudicator.New(span.SpanFloor(base))
+	for _, tool := range []string{"read_file", "run_shell"} {
+		v := midSpan.Adjudicate(ctx, bareCall(tool))
+		if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonDefaultDeny {
+			t.Fatalf("%s mid-span with empty allow-set: want DEFAULT_DENY, got kind=%v reason=%s",
+				tool, v.Kind, abi.ReasonName(v.Reason))
+		}
+	}
+}
+
 // TestSkillSpan_CannotWidenBase proves a skill can only NARROW: a frontmatter tool
 // the base session never admits is dropped from the span floor, so a skill can never
 // grant itself authority the operator floor withholds.
