@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/superloop"
+	"github.com/anthony-chaudhary/fak/internal/trajctl"
 )
 
 // TestSuperloopDriveEntersOneMemberAndRefolds is DoD witness (#2224, 4a): a drive on a
@@ -115,6 +116,61 @@ func TestSuperloopDriveRefusalSurfacesTokenEntersNothing(t *testing.T) {
 	}
 	if strings.Contains(row, `"status":"admitted"`) {
 		t.Errorf("a refused drive must NOT write an admitted row (no bypass):\n%s", row)
+	}
+}
+
+// TestSuperloopDriveEntersTrajectoryMember is DoD witness (#2224, 4a) over the NEW
+// trajectory member kind (#2563): the drive rung enters a KindTrajectory member — an open
+// trajctl objective — through the SAME admission gate as any other member kind, with no
+// private path. A drifting objective (declining W3 progress) is the worst-first member; the
+// drive admits it (uncoordinated, no --lane), surfaces the objective's OWN front door as the
+// single action, and re-folds. The driven-but-unwitnessed objective still drifts, so the
+// re-fold is honestly unsatisfied — the interior-node property holds across member kinds.
+func TestSuperloopDriveEntersTrajectoryMember(t *testing.T) {
+	root := t.TempDir()
+	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
+
+	// Seed a drifting trajectory objective so improve-trajectory has a worst-first member.
+	traj := filepath.Join(root, filepath.FromSlash(trajctl.DefaultLedgerRel))
+	if err := trajctl.Append(traj, trajctl.ObjectiveRecord(trajctl.Objective{
+		ID: "drift-obj", Statement: "ship the widget", Status: trajctl.StatusActive,
+	})); err != nil {
+		t.Fatalf("seed objective: %v", err)
+	}
+	for i, v := range []float64{0.6, 0.2} { // declining → DRIFT
+		if err := trajctl.Append(traj, trajctl.ScoreRecord(trajctl.ScoreRow{
+			ObjectiveID: "drift-obj", Value: v, Method: trajctl.CommitScorerMethod,
+			Version: "1", Witness: trajctl.W3, UnixMillis: int64(i + 1),
+		})); err != nil {
+			t.Fatalf("seed score %d: %v", i, err)
+		}
+	}
+
+	var out, errb bytes.Buffer
+	code := runSuperloopDrive(&out, &errb, []string{"improve-trajectory", "--workspace", root, "--ledger", ledger, "--json"})
+	if code != 1 {
+		t.Fatalf("a driven-but-unwitnessed trajectory member must exit 1, got %d: stderr=%s", code, errb.String())
+	}
+
+	var rep superloopDriveReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("drive json: %v\n%s", err, out.String())
+	}
+	if rep.Outcome != "entered" {
+		t.Fatalf("outcome = %q, want %q", rep.Outcome, "entered")
+	}
+	if rep.Decision.Member.Kind != superloop.KindTrajectory || rep.Decision.Member.Ref != "drift-obj" {
+		t.Errorf("drive must enter the worst-first trajectory objective, got kind=%q ref=%q",
+			rep.Decision.Member.Kind, rep.Decision.Member.Ref)
+	}
+	if !strings.Contains(rep.Decision.Action, "trajctl curve --objective drift-obj") {
+		t.Errorf("drive action must surface the objective's own front door, got %q", rep.Decision.Action)
+	}
+	if rep.Admission == nil || !rep.Admission.Admitted || rep.Admission.Status != "UNCOORDINATED" {
+		t.Errorf("no-lane admission should be an uncoordinated admit, got %+v", rep.Admission)
+	}
+	if rep.Refold == nil || rep.Refold.Satisfied {
+		t.Error("an entered-but-still-drifting objective must re-fold unsatisfied (interior-node property)")
 	}
 }
 
