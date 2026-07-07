@@ -429,12 +429,12 @@ curl -s http://127.0.0.1:${LOCAL_TUNNEL_PORT}/metrics \\
 DEMO
 }
 
-# --- step 4 render: teardown so the demo is self-contained and leaves zero cost. ------
+# --- step 5 render: teardown so the demo is self-contained and leaves zero cost. ------
 print_teardown_steps() {
   if [ -n "$KEEP" ]; then
-    echo "# === DEMO step 4 — teardown SKIPPED (KEEP=1); delete it yourself when done: ==="
+    echo "# === DEMO step 5 — teardown SKIPPED (KEEP=1); delete it yourself when done: ==="
   else
-    echo "# === DEMO step 4 — teardown (always, so the demo leaves zero residual cost) ==="
+    echo "# === DEMO step 5 — teardown (always, so the demo leaves zero residual cost) ==="
   fi
   printf 'gcloud compute instances delete %q --zone %q' "$VM_NAME" "$GCP_ZONE"
   echo "${GCP_PROJECT:+ --project ${GCP_PROJECT}} --quiet"
