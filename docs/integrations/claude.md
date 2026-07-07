@@ -470,8 +470,11 @@ in-flight rungs on that seat:
   still paged out before the model reads it; the in-kernel evictor is the local-model
   (`--gguf`) path.
 - **The OpenAI-wire seat** (`fak guard --provider openai -- codex` / `opencode`) is
-  unit-tested for provider inference and the tool floor, but has no recorded live
-  gateway-transited proof yet. Running the four checks above against it is the open task.
+  unit-tested for provider inference and the tool floor, and now has a recorded live
+  gateway-transited witness of the four checks above:
+  `experiments/agent-live/openai-wire-seat-guard-live-witness-2026-06-29.json` (#1329,
+  run with `opencode` as the OpenAI Chat Completions child; details in
+  `docs/integrations/hermes.md` § "Recorded live witness").
 
 The rest of this guide covers the **local-model** dogfood path (point fak at
 ollama / a shim / a large local OpenAI-compatible server) and the manual two-terminal
