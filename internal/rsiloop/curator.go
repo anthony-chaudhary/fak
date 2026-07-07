@@ -61,6 +61,15 @@ const (
 	// "improvement" was being invoked. Distinct from ReasonSlopScored so an
 	// operator can tell a low-quality skill from a metric-artifact skill.
 	ReasonSelfFulfilling CuratorReasonKind = "self_fulfilling"
+	// ReasonUnwitnessed — a PROPOSED skill was refused promotion because it did not
+	// witness a strict gain over baseline on the held fixture corpus (#2872): a
+	// net-negative, flat, or unbenchmarked candidate, or one whose suite/truth
+	// witness was dirty. Distinct from the tokens above (which retire a skill ALREADY
+	// in the active set) so an operator can tell "never beat baseline, so never
+	// promoted" from "decayed / superseded / gamed after promotion." The absence of a
+	// witnessed improvement is itself the complete, answerable reason — it carries no
+	// numeric parameter (the metric gap travels on the SkillPromotion witness).
+	ReasonUnwitnessed CuratorReasonKind = "unwitnessed"
 )
 
 // CuratorReason is the structured reason attached to an archive/consolidate
@@ -97,6 +106,11 @@ func (r CuratorReason) Valid() bool {
 		// skill look valuable; its counterfactual value is <= 0 by construction
 		// (that is the flag), so use_count is the field that must be populated.
 		return r.UseCount > 0
+	case ReasonUnwitnessed:
+		// A skill refused promotion for showing no witnessed gain needs no numeric
+		// parameter — the absence of a strict, suite-green, truth-clean gain is the
+		// whole, answerable reason, so the kind alone is a valid record.
+		return true
 	default:
 		return false
 	}
@@ -114,6 +128,8 @@ func (r CuratorReason) String() string {
 	case ReasonSelfFulfilling:
 		return "self-fulfilling (use_count " + strconv.Itoa(r.UseCount) +
 			", counterfactual value " + strconv.FormatFloat(r.CounterfactualValue, 'g', -1, 64) + ")"
+	case ReasonUnwitnessed:
+		return "unwitnessed (no measured gain over baseline on the held fixture corpus)"
 	default:
 		return "unknown reason"
 	}
