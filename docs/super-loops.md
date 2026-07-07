@@ -179,8 +179,20 @@ runnable as printed. The registered set:
 - **`manage-benchmarks`** — the benchmark-DX scorecard + the `nightrun` collection
   loop + a descend pointer into `fak bench-loop status`, the benchmark-specific
   control surface.
+- **`run-the-night`** — the overnight productivity meta-loop. It walks the three
+  dimensions that must move together or a night wastes itself: **issue-drain**
+  (descends `drain-issues`, toward the ~200-issue target), **account-limit
+  utilization**, and **lab/node resource utilization** (Mac, A100s, dgx). The two
+  utilization members are a new **`KindUtilization`** member type: unlike a scorecard
+  (a committed baseline) or a loop (a ledger fold), their status is read **live** by
+  the shell at walk time, and their debt is **unused capacity** — offerable-but-idle
+  account seats (`rotationHeadroom`), and up-but-idle boxes (the `fak lab status`
+  fleet fold). Worst-first, the walk enters whichever dimension is most underused; a
+  night that leaves seats or boxes idle reds the fold until they are put to work.
 - **`tend`** — the root: every other registered intent, reachable directly as a
-  member or by descent (a no-escape test pins the reachability).
+  member or by descent (a no-escape test pins the reachability). It descends
+  `run-the-night`, so the root walk answers "is the night actually producing?"
+  alongside the quality/loop/benchmark intents.
 
 For benchmark work, use the generic intent to orient across loop health and debt:
 
@@ -201,12 +213,29 @@ fak bench-loop run --apply --loop  # delegate to the local nightrun collection l
 fak superloop list                  the named super loops + their members
 fak superloop explain <name>        the five-property differentiation, super vs normal
 fak superloop walk <name> [--json]  walk the members' status, fold the worst-first plan
+fak superloop drive <name> [--lane] walk, ENTER the one worst-first member through the
+                                    same admission gate any spawn passes, then re-fold
 ```
 
-## Honest scope
+## The drive rung
 
-The `walk` reads status and folds the plan; it **mutates nothing**. Actually
-*entering* (driving) the worst-first member loop — and *descending* into a container
-member's own walk — is the named next rung, built on the existing `fak loop drive`
-and the member surfaces. The walk is the orientation half the operator's intent needs
-first: *understand the status of everything under this intent, and what to do next.*
+`walk` is the orientation half — *understand the status of everything under this
+intent, and what to do next* — and it **mutates nothing**. `drive` (`fak superloop
+drive <intent>`, #2224) is the acting half: it walks, **selects the single worst-first
+member** (`internal/superloop.Drive` — one member per invocation), and **enters** it
+through the **same admission gate any spawn passes** — region admission over the live
+lease fabric (`COLLISION_RISK` on lease overlap), armed by `--lane`/`--tree`, reusing
+the loop-drive region hold. The super loop gets **no private spawn path** (the
+band-ladder discipline: B6 reaches the world only through B4's gates): a refused gate
+**surfaces the token and enters nothing**, never bypasses it. The admission decision is
+recorded on the loop ledger with the standing witness vocabulary
+(`admitted`/`refused`), and the drive **re-walks and folds** — the aggregate re-fold is
+the exit check, so a driven-but-unwitnessed member can never satisfy the intent.
+
+Honest fence: the drive keeps the **interior-node** property — it mutates nothing at
+its own altitude. The single action it takes is **surfacing the member's own front
+door** (a loop member via `fak loop drive` / the dispatch tick; a scorecard member via
+its enter hint). Live execution of the member's child *behind* that front door — under
+a real lease, landing the member's own `witnessed_done` — is the named follow-on;
+per-member budget allocation arrives via #2222. *Descending* into a container member's
+own walk (the recursion case) is already live in `walk`.

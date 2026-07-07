@@ -606,6 +606,86 @@ func TestWalkActionUsesEnterHint(t *testing.T) {
 	}
 }
 
+// TestRunTheNightWalksThreeDimensions pins the overnight meta-loop's shape: exactly the
+// three night-productivity dimensions, in worst-first-able form — the issue-drain intent
+// descended (a KindSuperloop, reachable and folded once per parent), and two live
+// capacity pools as KindUtilization members carrying a concrete Enter hint so their
+// worklist action is runnable. It also pins that tend descends it, so the root walk sees
+// the night's productivity alongside quality/loop/benchmark debt.
+func TestRunTheNightWalksThreeDimensions(t *testing.T) {
+	night, ok := Lookup("run-the-night")
+	if !ok {
+		t.Fatal("run-the-night not registered")
+	}
+	if len(night.Members) != 3 {
+		t.Fatalf("run-the-night must walk exactly 3 dimensions, got %d", len(night.Members))
+	}
+	byRef := map[string]Member{}
+	for _, m := range night.Members {
+		byRef[m.Ref] = m
+	}
+	if m, ok := byRef["drain-issues"]; !ok || m.Kind != KindSuperloop {
+		t.Errorf("run-the-night must descend drain-issues as a KindSuperloop member, got %+v", m)
+	}
+	for _, ref := range []string{"account-limits", "node-resources"} {
+		m, ok := byRef[ref]
+		if !ok {
+			t.Errorf("run-the-night is missing the %q utilization member", ref)
+			continue
+		}
+		if m.Kind != KindUtilization {
+			t.Errorf("night member %q must be KindUtilization, got %q", ref, m.Kind)
+		}
+		if strings.TrimSpace(m.Enter) == "" {
+			t.Errorf("utilization member %q has no Enter hint — its idle-capacity action must be runnable", ref)
+		}
+	}
+
+	tend, ok := Lookup("tend")
+	if !ok {
+		t.Fatal("tend not registered")
+	}
+	descends := false
+	for _, m := range tend.Members {
+		if m.Kind == KindSuperloop && m.Ref == "run-the-night" {
+			descends = true
+		}
+	}
+	if !descends {
+		t.Error("tend must descend run-the-night so the root walk sees the night's productivity")
+	}
+}
+
+// TestUtilizationActionUsesEnterHint pins the KindUtilization worklist action: a measured,
+// debt-bearing utilization member (idle capacity) gets its Enter hint as the concrete
+// spend-the-capacity command; an unmeasured one gets the read-utilization action (you
+// cannot spend headroom you have not read).
+func TestUtilizationActionUsesEnterHint(t *testing.T) {
+	s := Super{Name: "t", Title: "t", Floor: 0, Members: []Member{
+		{Kind: KindUtilization, Ref: "node-resources", Enter: "fak lab status --all"},
+		{Kind: KindUtilization, Ref: "account-limits", Enter: "fak accounts next"},
+	}}
+	rep := Walk(s, []MemberStatus{
+		{Member: s.Members[0], Measured: true, Debt: 3},
+		{Member: s.Members[1], Measured: false},
+	})
+	var nodeAction, acctAction string
+	for _, it := range rep.Worklist {
+		switch it.Member.Ref {
+		case "node-resources":
+			nodeAction = it.Action
+		case "account-limits":
+			acctAction = it.Action
+		}
+	}
+	if !strings.Contains(nodeAction, "fak lab status --all") {
+		t.Errorf("measured utilization action must carry its Enter hint, got %q", nodeAction)
+	}
+	if strings.Contains(acctAction, "fak accounts next") || !strings.Contains(acctAction, "utilization") {
+		t.Errorf("unmeasured utilization member must keep the read-utilization action, got %q", acctAction)
+	}
+}
+
 func TestWalkLoopActionUsesEnterHint(t *testing.T) {
 	s := Super{Name: "t", Title: "t", Floor: 0, Members: []Member{
 		{Kind: KindLoop, Ref: "loopmgr:issue-resolve-dispatch/claude/high-priority", Enter: "fak dispatch auto --goal high-priority"},

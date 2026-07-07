@@ -66,6 +66,13 @@ const (
 	// KindSurface is a named command/control surface whose own status fold is outside
 	// this generic registry. It is surfaced as a descend pointer, not weighed here.
 	KindSurface MemberKind = "surface"
+	// KindUtilization is a live CAPACITY-utilization signal: a resource pool whose
+	// UNUSED headroom is the debt. Unlike a scorecard (a committed baseline value) or a
+	// loop (a ledger liveness fold), its status is read LIVE by the shell at walk time
+	// — an account pool's offerable-but-unused seats, or a lab node pool's up-but-idle
+	// boxes. The debt is "capacity available but not being used": a resource sitting
+	// warm while work backs up. Ref names which pool ("account-limits", "node-resources").
+	KindUtilization MemberKind = "utilization"
 )
 
 // Member is one constituent a super loop walks. Ref names the surface (scorecard
@@ -284,6 +291,31 @@ var registry = []Super{
 		},
 	},
 	{
+		// run-the-night is the OVERNIGHT meta-loop: the intent that keeps a whole night
+		// of fleet work productive by walking the three dimensions that must move
+		// TOGETHER or the night wastes itself — issues drained, account limits used, and
+		// lab/node silicon used. It is deliberately NOT quality/loop hygiene (that is
+		// improve-quality/improve-loops): it is the "is the night actually producing?"
+		// fold. Two of its members are live CAPACITY signals (KindUtilization) whose
+		// debt is UNUSED headroom — an offerable-but-idle account seat or an up-but-idle
+		// box is capacity the night is paying for and not spending. The third descends
+		// the issue-drain intent (shared with improve-loops; a super loop may be reached
+		// by two parents — each parent folds its own descended status). Worst-first, the
+		// walk enters whichever dimension is most underused: if boxes sit idle it enters
+		// node-resources, if seats sit idle it enters account-limits, else it drives the
+		// issue backlog — the loop that carries a night toward the ~200-issue target.
+		Name:   "run-the-night",
+		Title:  "run a productive night: drain issues, use every account limit and every node",
+		About:  "walk the three night-productivity dimensions live — open-issue drain, account-limit utilization, and lab/node resource utilization — and enter the worst-first (most underused) dimension",
+		Floor:  0,
+		Budget: GenerationBudget{Stream: "gen/now", MaxMinutes: 60, TokenCeiling: 400000, MaxWorkers: 4, ReviewSlots: 1},
+		Members: []Member{
+			{Kind: KindSuperloop, Ref: "drain-issues", Why: "the night's headline output: open issues progressed toward the ~200-issue target, by throughput and high-priority goals"},
+			{Kind: KindUtilization, Ref: "account-limits", Why: "account-limit utilization: offerable seats sitting idle are limits the night is paying for and not spending", Enter: "go run ./cmd/fak accounts next && go run ./cmd/fak dispatch auto --goal throughput"},
+			{Kind: KindUtilization, Ref: "node-resources", Why: "lab/node resource utilization: boxes (Mac, A100s, dgx) up but idle are silicon the night is wasting", Enter: "go run ./cmd/fak lab status --all"},
+		},
+	},
+	{
 		// tend is the ROOT intent — the recursion case made real: a super loop whose
 		// every member is itself a super loop. Walking it descends each registered
 		// intent (the shell walks sub-super-loops inline and folds each sub-report via
@@ -301,6 +333,7 @@ var registry = []Super{
 			{Kind: KindSuperloop, Ref: "improve-quality", Why: "quality debt is the broadest drag on everything the fleet ships"},
 			{Kind: KindSuperloop, Ref: "improve-loops", Why: "the loops keep everything else tended; a dark loop below starves the rest"},
 			{Kind: KindSuperloop, Ref: "manage-benchmarks", Why: "benchmark collection feeds the outward-facing numbers"},
+			{Kind: KindSuperloop, Ref: "run-the-night", Why: "the overnight productivity meta-loop: are issues draining and is every account limit + node actually being used?"},
 		},
 	},
 }
@@ -770,6 +803,14 @@ func actionFor(st MemberStatus) string {
 		return fmt.Sprintf("descend: `fak superloop walk %s`", st.Member.Ref)
 	case KindSurface:
 		return fmt.Sprintf("enter `%s`", st.Member.Ref)
+	case KindUtilization:
+		if !st.Measured {
+			return fmt.Sprintf("read the %s pool's live utilization to measure its unused headroom", st.Member.Ref)
+		}
+		if e := strings.TrimSpace(st.Member.Enter); e != "" {
+			return fmt.Sprintf("enter `%s` to spend the idle %s capacity", e, st.Member.Ref)
+		}
+		return fmt.Sprintf("put the idle %s capacity to work", st.Member.Ref)
 	default:
 		return "enter the member's loop"
 	}
