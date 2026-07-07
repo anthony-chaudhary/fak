@@ -60,7 +60,7 @@ per-lane triage notes linked per row below.
 | **L5** | decode quant sweep (Q4_K fast path) | #3077 | server 3 | A single-stream | 1.1–1.5× (COMPUTED) | **M** | ready | **7** | [L5 quant](GLM52-L5-QUANT-SWEEP-TRIAGE-2026-07-06.md) |
 | **L6** | INT8 tensor-core expert GEMM | #3087 | server 3 | B aggregate | up to ~2× aggregate (ESTIMATED) | **L** | needs-wiring | **8** | this doc §5 |
 | **L10** | native fak resident-EP device-NCCL | #3089 / #1482 | server 3 | ceiling-truth | pure-fak kernel witness vs 23.2 baseline (ESTIMATED) | **M–L** | needs-wiring | **9** | [pure-fak gap](GLM52-PURE-FAK-BENCHMARK-GAP-2026-07-06.md) |
-| **L7** | true DSA sparsity (not full-MLA) | #3088 | server 3 | A/C long-ctx | ctx-dependent; ~1.0–1.1× @8k, material only 32k+ (ESTIMATED) | **M**(curve)/**L**(kernel) | needs-wiring | **10** | this doc §5 |
+| **L7** | true DSA sparsity (not full-MLA) | #3088 | server 3 | A/C long-ctx | ctx-dependent; ~1.0–1.1× @8k, material only 32k+ (ESTIMATED) | **M**(curve)/**L**(kernel) | needs-wiring | **10** | [Lane E L7](GLM52-DGX3-LANEE-L7-DSA-TRUE-SPARSE-TRIAGE-2026-07-06.md) · this doc §5 |
 
 ## 4. Prioritized dispatch order
 
