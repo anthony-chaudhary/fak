@@ -812,5 +812,35 @@ class SuccessLoopTest(unittest.TestCase):
         self.assertEqual(buckets["2026-06-20"]["beh"]["success_loop_files"], 1)
 
 
+class DeepErrorShapeTest(unittest.TestCase):
+    """#3070: `deep` on an unreadable transcript must fail honestly, not KeyError.
+
+    analyze() returns the {"path","error"} shape (not the success shape) when it
+    cannot open/parse the file — a missing path, a wrong --root, a transcript under
+    a non-default $CLAUDE_CONFIG_DIR. cmd_deep must detect that and exit non-zero
+    with a one-line message, instead of dereferencing the absent success keys and
+    handing the operator a KeyError traceback.
+    """
+
+    def test_deep_missing_path_exits_cleanly(self) -> None:
+        sa = load()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+            sa.cmd_deep(SimpleNamespace(session="/no/such/path/does-not-exist.jsonl"))
+        self.assertEqual(cm.exception.code, 2)          # non-zero, not a traceback
+        self.assertIn("cannot read transcript", err.getvalue())
+        self.assertNotIn("Traceback", err.getvalue())
+
+    def test_deep_valid_transcript_unchanged(self) -> None:
+        # A readable transcript still reaches the trajectory header — the guard
+        # must not swallow the success path (no false positive on "session" absent).
+        sa = load()
+        path = _write_transcript([_assistant("m1", out=10, cread=5, ccreate=0)])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            sa.cmd_deep(SimpleNamespace(session=path))
+        self.assertIn("# Trajectory:", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

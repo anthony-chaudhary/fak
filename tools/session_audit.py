@@ -1292,6 +1292,17 @@ def cmd_trend(a):
 
 def cmd_deep(a):
     s = analyze(a.session)
+    # analyze() returns {"path","error"} (not the success shape) when it cannot
+    # open/parse the transcript — a missing file, a wrong --root, or a path that
+    # lives under a non-default $CLAUDE_CONFIG_DIR. Guard here BEFORE dereferencing
+    # the success keys (s['session'], s['tokens'], s['behavior']); otherwise the
+    # operator gets a KeyError traceback instead of an honest "cannot read that".
+    if "error" in s or "session" not in s:
+        print(f"cannot read transcript {a.session!r}: {s.get('error', 'no session data')}",
+              file=sys.stderr)
+        print("(is the path right? transcripts live under $CLAUDE_CONFIG_DIR/projects, "
+              "not always ~/.claude)", file=sys.stderr)
+        raise SystemExit(2)
     print(f"# Trajectory: {s['session']}")
     print(f"records={s['n_records']} turns={s['assistant_turns']} tool_calls={s['n_tool_use']} "
           f"output_tok={fmt_int(s['tokens']['output'])} io={s['io_ratio'] and round(s['io_ratio'],1)} "
