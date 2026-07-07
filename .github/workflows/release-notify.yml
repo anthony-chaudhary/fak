@@ -24,13 +24,20 @@ name: Release notify
 #                       it held cleanly but the recent cadence has cut NOTHING across
 #                       several ticks while the trunk moved. Heads-up to #blockers.
 #
+# The same silent-failure logic applies one workflow downstream: release-artifacts
+# decorates the published release and its verify job can QUARANTINE a bad cut
+# (prerelease + not-latest) — but its announce job is skipped on failure, so a
+# failed decoration was invisible (witnessed 2026-07-07: both v0.37.0 runs failed
+# post-publish verification and nothing pinged, #1390/#3130). A fourth notify path
+# watches release-artifacts and alerts #blockers when it fails.
+#
 # FAIL-OPEN + SELF-DISABLING: set the repo variable FAK_RELEASE_NOTIFY = '0' to mute
 # all pings. Every post is `|| true` and the token/channel guards skip silently when
 # unset (a secret-less fork posts nothing), so a delivery hiccup or missing secret
 # never turns a green release into a red notify run.
 on:
   workflow_run:
-    workflows: ["Release cadence"]
+    workflows: ["Release cadence", "release-artifacts"]
     types: [completed]
 
 permissions:
@@ -47,7 +54,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # Mute switch: any value other than '0' (unset included) keeps notify armed.
-    if: ${{ vars.FAK_RELEASE_NOTIFY != '0' }}
+    # Cadence runs only — release-artifacts runs take the notify-artifacts job
+    # below (this job's classify reads cadence step names and would misread them).
+    if: ${{ vars.FAK_RELEASE_NOTIFY != '0' && github.event.workflow_run.name == 'Release cadence' }}
     env:
       GOTOOLCHAIN: auto
       # Same keys the other feeders read: token is a secret, channels are repo vars.
@@ -254,5 +263,83 @@ jobs:
             fi
             if [ -z "${FAK_BLOCKERS_CHANNEL}" ]; then
               echo "- FAK_BLOCKERS_CHANNEL repo variable not set (#blockers failure/stall target)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # 4. ARTIFACTS FAILED — the published release's decoration/verification failed.
+  # A failed release-artifacts run means the verify job may have QUARANTINED the
+  # release (prerelease + not-latest, so the front door lags HEAD) or the assets
+  # never fully landed — and its own announce job is skipped on failure, so the
+  # failure is otherwise silent (#1390; witnessed on v0.37.0, #3130). Alert the
+  # louder #blockers channel naming the failing job. Same fail-open posture as
+  # the cadence paths: `|| true` posts, silent skip without token/channel.
+  notify-artifacts:
+    name: notify on release-artifacts failure
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: ${{ vars.FAK_RELEASE_NOTIFY != '0' && github.event.workflow_run.name == 'release-artifacts' && github.event.workflow_run.conclusion == 'failure' }}
+    env:
+      GOTOOLCHAIN: auto
+      FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_BLOCKERS_CHANNEL: ${{ vars.FAK_BLOCKERS_CHANNEL }}
+      FAK_SCOREBOARD_SOURCE: ci
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # Name the first failed job (build leg / checksums / verify) so the alert says
+      # WHERE the chain broke, not just that it broke. Pure read; fail-open to "".
+      - name: find failing job
+        id: failing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}/jobs" \
+            --paginate > jobs.json || echo '{"jobs":[]}' > jobs.json
+          failing="$(python - <<'PY'
+          import json
+          try:
+              jobs = json.load(open("jobs.json")).get("jobs", [])
+          except Exception:
+              jobs = []
+          for job in jobs:
+              if job.get("conclusion") == "failure":
+                  print(job.get("name", "")); break
+          else:
+              print("")
+          PY
+          )"
+          echo "job=$failing" >> "$GITHUB_OUTPUT"
+          echo "release-artifacts run ${RUN_ID} failed at job: ${failing:-unknown}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: notify artifacts failure
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && env.FAK_BLOCKERS_CHANNEL != '' }}
+        run: |
+          set -euo pipefail
+          go run ./cmd/fak scoreboard post \
+            --channel "$FAK_BLOCKERS_CHANNEL" \
+            --kpi auto-release \
+            --value artifacts-failed \
+            --grade F \
+            --verdict ACTION \
+            --detail "release-artifacts failed at '${{ steps.failing.outputs.job }}' — published release may be quarantined (prerelease/not-latest) or missing verified assets, see $RUN_URL" \
+            --source ci || true
+
+      - name: note when notify was skipped
+        if: ${{ always() }}
+        run: |
+          {
+            if [ -z "${FAK_SCOREBOARD_TOKEN}" ]; then
+              echo "Artifacts-failure notify SKIPPED — FAK_SCOREBOARD_TOKEN not set; nothing posted."
+            fi
+            if [ -z "${FAK_BLOCKERS_CHANNEL}" ]; then
+              echo "- FAK_BLOCKERS_CHANNEL repo variable not set (#blockers failure target)."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
