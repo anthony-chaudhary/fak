@@ -27,6 +27,9 @@ func run(argv []string) int {
 	if len(argv) > 0 && argv[0] == "fetch" {
 		return runFetch(argv[1:])
 	}
+	if len(argv) > 0 && argv[0] == "contract" {
+		return runContract(argv[1:])
+	}
 
 	fs := flag.NewFlagSet("livecodebench", flag.ContinueOnError)
 	fixture := fs.String("fixture", "internal/livecodebench/testdata/fixture.json", "path to committed LiveCodeBench smoke fixture")
@@ -215,6 +218,86 @@ func runFetch(argv []string) int {
 	}
 	fmt.Fprintf(os.Stderr, "livecodebench fetch: %d problem(s), release %s, dataset %s\n",
 		len(suite.Problems), suite.ReleaseVersion, suite.Provenance.DatasetID)
+	return 0
+}
+
+// runContract implements `livecodebench contract`: it emits the machine-readable
+// official-run contract (#2110) that pins the raw lcb_runner and fak-native
+// generation commands, the constants both arms share, and the official grading
+// handoff. It performs NO run and claims no score — the emitted contract always
+// carries result_claim_allowed=false. An optional --suite pins the exact
+// question_ids so both arms provably score the same problems.
+func runContract(argv []string) int {
+	fs := flag.NewFlagSet("livecodebench contract", flag.ContinueOnError)
+	release := fs.String("release-version", "release_v6", "LCB dataset release to pin (release_v1..release_v6; release_latest is refused for a published result)")
+	scenario := fs.String("scenario", "codegeneration", "LCB scenario both arms run (codegeneration|selfrepair|testoutputprediction|codeexecution)")
+	startDate := fs.String("start-date", "", "contest-date window start (YYYY-MM-DD); the contamination boundary")
+	endDate := fs.String("end-date", "", "contest-date window end (YYYY-MM-DD)")
+	model := fs.String("model", "", "model identity shared by raw and fak arms")
+	servingBackend := fs.String("serving-backend", "", "serving engine + quantization the run is served through (e.g. SGLang W4AFP8)")
+	gateway := fs.String("gateway", "http://127.0.0.1:8080/v1", "local fak gateway base URL both arms target")
+	runDir := fs.String("run-dir", "experiments/livecodebench/<run-id>", "LCB_OUT run directory referenced by the arm and grading commands")
+	suitePath := fs.String("suite", "", "optional normalized suite JSON to pin the exact candidate question_ids")
+	issueRef := fs.String("issue", "#3060", "campaign issue reference recorded in the contract")
+	out := fs.String("out", "", "write the contract JSON to this path (default: stdout)")
+	mdPath := fs.String("md", "", "also write the contract markdown to this path")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "livecodebench contract: unexpected positional arguments")
+		return 2
+	}
+
+	in := livecodebench.OfficialRunContractInput{
+		GeneratedAt:     time.Now().UTC().Format(time.RFC3339),
+		Issue:           *issueRef,
+		SuitePath:       strings.TrimSpace(*suitePath),
+		ReleaseSelector: *release,
+		Scenario:        livecodebench.Scenario(*scenario),
+		StartDate:       *startDate,
+		EndDate:         *endDate,
+		Model:           *model,
+		ServingBackend:  *servingBackend,
+		Gateway:         *gateway,
+		RunDir:          *runDir,
+	}
+	if strings.TrimSpace(*suitePath) != "" {
+		suite, err := livecodebench.LoadSuiteFile(*suitePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "livecodebench contract: %v\n", err)
+			return 1
+		}
+		in.Suite = &suite
+	}
+
+	contract := livecodebench.BuildOfficialRunContract(in)
+
+	if strings.TrimSpace(*mdPath) != "" {
+		if err := os.WriteFile(*mdPath, []byte(livecodebench.RenderOfficialRunContractMarkdown(contract)), 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "livecodebench contract: %v\n", err)
+			return 1
+		}
+	}
+
+	w := io.Writer(os.Stdout)
+	if strings.TrimSpace(*out) != "" {
+		file, err := os.Create(*out)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "livecodebench contract: %v\n", err)
+			return 1
+		}
+		defer file.Close()
+		w = file
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(contract); err != nil {
+		fmt.Fprintf(os.Stderr, "livecodebench contract: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "livecodebench contract: status %s, release %s, scenario %s, result_claim_allowed=%t\n",
+		contract.Status, contract.Constants.ReleaseVersion, contract.Constants.Scenario, contract.ResultClaimAllowed)
 	return 0
 }
 

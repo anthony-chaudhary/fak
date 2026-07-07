@@ -17,7 +17,8 @@ Results page: [LIVECODEBENCH-RESULTS.md](LIVECODEBENCH-RESULTS.md).
 | LiveCodeBench native suite/report schema | pending | #2087 through #2095. |
 | All four LCB scenario adapters | pending | #2096 through #2099. |
 | Official custom-evaluator export | shipped | #2102; `go run ./cmd/livecodebench export --format custom-evaluator` (backed by `internal/livecodebench.WriteCustomEvaluatorInput`; not yet wired through the `fak` front door, tracked with the pending CLI wrapper below), pinned by `TestCustomEvaluatorItemsFixtureRoundTrip` and `TestRunExportCustomEvaluatorWritesGradeableInput`. |
-| fak-native CLI wrapper | pending | #2109 through #2111. |
+| fak-native official-run contract | shipped | #2110; `go run ./cmd/livecodebench contract` emits the result-claim-gated two-arm run contract (raw `lcb_runner` vs fak-native), pinning constants + the official grading handoff, `result_claim_allowed` always false. Backed by `internal/livecodebench.BuildOfficialRunContract`, pinned by `TestOfficialRunContract*` and `TestRunContractWritesGatedOfficialRunContract`. |
+| fak-native CLI wrapper (generate) | pending | #2109, #2111 (the `fak livecodebench generate` arm the contract references). |
 | Honesty gates and authority promotion | pending | #2113, #2114, #2115. |
 | Results scaffold | shipped | [LIVECODEBENCH-RESULTS.md](LIVECODEBENCH-RESULTS.md); all score cells remain `pending run`. |
 

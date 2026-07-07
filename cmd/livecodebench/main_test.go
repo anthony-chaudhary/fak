@@ -66,6 +66,56 @@ func TestRunExportCustomEvaluatorWritesGradeableInput(t *testing.T) {
 	}
 }
 
+// TestRunContractWritesGatedOfficialRunContract pins #2110: `livecodebench
+// contract` emits a JSON (+MD) official-run contract that performs no run and
+// asserts result_claim_allowed=false.
+func TestRunContractWritesGatedOfficialRunContract(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "contract.json")
+	md := filepath.Join(dir, "contract.md")
+
+	code := run([]string{"contract",
+		"--release-version", "release_v6",
+		"--scenario", "codegeneration",
+		"--start-date", "2025-01-01",
+		"--end-date", "2025-06-30",
+		"--model", "glm-5.2",
+		"--serving-backend", "SGLang W4AFP8",
+		"--out", out,
+		"--md", md,
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read contract output: %v", err)
+	}
+	var contract struct {
+		Schema             string `json:"schema"`
+		ResultClaimAllowed bool   `json:"result_claim_allowed"`
+		Grading            struct {
+			CustomEvaluatorCommand string `json:"custom_evaluator_command"`
+		} `json:"grading"`
+	}
+	if err := json.Unmarshal(raw, &contract); err != nil {
+		t.Fatalf("contract output not valid JSON: %v\n%s", err, raw)
+	}
+	if contract.Schema != "fak.livecodebench-official-run-contract.v1" {
+		t.Fatalf("schema = %q", contract.Schema)
+	}
+	if contract.ResultClaimAllowed {
+		t.Fatal("result_claim_allowed must be false")
+	}
+	if !strings.Contains(contract.Grading.CustomEvaluatorCommand, "lcb_runner.runner.custom_evaluator") {
+		t.Fatalf("grading command missing official evaluator: %q", contract.Grading.CustomEvaluatorCommand)
+	}
+	if _, err := os.Stat(md); err != nil {
+		t.Fatalf("markdown not written: %v", err)
+	}
+}
+
 // TestRunExportRejectsUnsupportedFormat guards the --format flag against a
 // silent no-op for a format the exporter cannot produce.
 func TestRunExportRejectsUnsupportedFormat(t *testing.T) {
