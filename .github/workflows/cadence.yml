@@ -19,7 +19,9 @@ name: cadence report
 # locally but do not push it. A manual dispatch with dry_run=false is the explicit
 # arm for committing the cadence ledger, matching the release-cadence convention.
 # The milestone ledger rides this same weekly tick and keeps the retired
-# milestone-tick kill switch: scheduled runs commit milestone history/status unless
+# milestone-tick.yml kill switch (that standalone recurring-post + durable-trend-accrual
+# tick was issue #1440; folded into this cadence run by #1443): scheduled runs commit
+# milestone history/status unless
 # FAK_MILESTONE_TICK=0; manual dispatches commit it only when dry_run=false. The pure
 # fold/trend logic is proven by internal/cadencereport's unit tests (run first below),
 # so a green report is a real signal, not a tool that always passes.
@@ -132,7 +134,8 @@ jobs:
             echo "The milestone ledger is DEFAULT-ON for scheduled cadence runs; set repo var FAK_MILESTONE_TICK=0 to fall back to dry-run."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # MILESTONES on the SAME loop cadence (issue #1443). This is the former
+      # MILESTONES on the SAME loop cadence (issue #1443, delivering the recurring
+      # milestone tick + durable trend accrual asked for in #1440). This is the former
       # milestone-tick append/status step, now a sibling of the cadence fold. It
       # appends exactly once per cadence run and preserves the advisory --check
       # surface so an unmeasured roadmap is visible on the operator's weekly read.
