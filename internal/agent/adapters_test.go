@@ -487,6 +487,14 @@ func TestProviderAdaptersParseEmptyResponses(t *testing.T) {
 	}
 }
 
+// TestProviderAdaptersParseCachedPromptTokens proves all five API modes —
+// OpenAI Chat, OpenAI Responses, Anthropic Messages, Gemini, and the
+// xAI-compatible chat wire — parse their cached-prompt counter into the SAME
+// Usage.CachedPromptTokens() fold the vcache scorecard consumes (#1539, epic
+// #1490). xAI rides openAIAdapter{provider: ProviderXAI}, so its counter lives
+// in prompt_tokens_details.cached_tokens like OpenAI chat; asserting it here is
+// the explicit witness that the fifth mode feeds the same scorecard when its
+// provider emits counters, rather than being covered only implicitly.
 func TestProviderAdaptersParseCachedPromptTokens(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -498,6 +506,8 @@ func TestProviderAdaptersParseCachedPromptTokens(t *testing.T) {
 		{"openai_responses_cached_tokens", ProviderOpenAIResponses, `{"status":"completed","output":[{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":13,"output_tokens":2,"total_tokens":15,"input_tokens_details":{"cached_tokens":6}}}`, 6},
 		{"anthropic_cache_read_tokens", ProviderAnthropic, `{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":13,"output_tokens":2,"cache_read_input_tokens":7}}`, 7},
 		{"gemini_cached_content_tokens", ProviderGemini, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":13,"candidatesTokenCount":2,"totalTokenCount":15,"cachedContentTokenCount":8}}`, 8},
+		// xAI-compatible chat wire: same prompt_tokens_details.cached_tokens shape as OpenAI chat.
+		{"xai_chat_cached_tokens", ProviderXAI, `{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":13,"completion_tokens":2,"total_tokens":15,"prompt_tokens_details":{"cached_tokens":9}}}`, 9},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -540,6 +550,8 @@ func TestProviderAdaptersUncachedPromptTokens(t *testing.T) {
 		{"anthropic", ProviderAnthropic, `{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":13,"output_tokens":2,"cache_read_input_tokens":7}}`, 13, 7, 20},
 		// Gemini: promptTokenCount=13 INCLUDES the 8 cached, so uncached=5.
 		{"gemini", ProviderGemini, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":13,"candidatesTokenCount":2,"totalTokenCount":15,"cachedContentTokenCount":8}}`, 5, 8, 13},
+		// xAI rides the OpenAI chat wire: prompt_tokens=13 INCLUDES the 9 cached, so uncached=4.
+		{"xai_chat", ProviderXAI, `{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":13,"completion_tokens":2,"total_tokens":15,"prompt_tokens_details":{"cached_tokens":9}}}`, 4, 9, 13},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
