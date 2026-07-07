@@ -333,7 +333,68 @@ func hasDryRunPreview(cmd string, args map[string]any) bool {
 		}
 	}
 	lower := strings.ToLower(cmd)
-	return strings.Contains(lower, "--dry-run") || strings.Contains(lower, "--preview")
+	if strings.Contains(lower, "--dry-run") || strings.Contains(lower, "--preview") {
+		return true
+	}
+	// PowerShell's -WhatIf is a universal no-op preview: a ShouldProcess cmdlet
+	// carrying it reports what WOULD happen and performs nothing. So the
+	// "Remove-Item -WhatIf" the fs-destroy redirect recommends is a preview, not
+	// a deletion — recognize it, or the guard gates its OWN sanctioned dry-run
+	// and the agent loops (the self-refuting-remedy class of the confirm-gate
+	// deadlock, docs/notes/CONFIRM-GATE-DEADLOCK-2026-07-04.md).
+	if hasWhatIfFlag(cmd) {
+		return true
+	}
+	// `git clean -n` (the short spelling of --dry-run) previews without deleting,
+	// even combined with -d/-f (e.g. "git clean -nd", the fs-destroy/git-destroy
+	// redirect). -n is recognized ONLY inside a `git clean` segment, never
+	// globally: a bare -n means unrelated things elsewhere (`kubectl delete -n
+	// <ns>` is a REAL delete that must stay gated).
+	if gitCleanDryRun(cmd) {
+		return true
+	}
+	return false
+}
+
+// whatIfFlagRE matches PowerShell's -WhatIf common parameter as a standalone
+// token (optionally -WhatIf:$true), anchored to a segment/word boundary so a
+// path like ./-whatiffoo or a substring never trips it.
+var whatIfFlagRE = regexp.MustCompile(`(?i)(^|[\s;&|(])-whatif($|[\s:;&|)])`)
+
+// hasWhatIfFlag reports whether the command carries PowerShell's -WhatIf. It
+// scans the RAW command (dashes intact): commandWords()/commandSegments() strip
+// leading dashes, so a flag-shaped recognizer must not go through them.
+func hasWhatIfFlag(cmd string) bool {
+	return whatIfFlagRE.MatchString(cmd)
+}
+
+// gitCleanDryRun reports whether a `git clean` invocation carries a dry-run
+// flag: --dry-run, or a single-dash short-flag cluster containing 'n' (-n, -nd,
+// -dn, -nf). A cluster WITHOUT 'n' (-fd, -f, -x) is a real removal and is NOT a
+// dry-run, so it stays gated. It parses the RAW command (dash-preserving),
+// splitting on the same sequencing operators and stripping the same env/wrapper
+// heads as commandSegments, but keeping flag dashes that commandWords drops.
+func gitCleanDryRun(cmd string) bool {
+	for _, raw := range commandSegmentRE.Split(cmd, -1) {
+		fields := strings.Fields(raw)
+		for len(fields) > 0 &&
+			(envAssignmentRE.MatchString(fields[0]) || commandWrapperHeads[strings.ToLower(fields[0])]) {
+			fields = fields[1:]
+		}
+		if len(fields) < 2 || strings.ToLower(fields[0]) != "git" || strings.ToLower(fields[1]) != "clean" {
+			continue
+		}
+		for _, tok := range fields[2:] {
+			lt := strings.ToLower(tok)
+			if lt == "--dry-run" {
+				return true
+			}
+			if strings.HasPrefix(lt, "-") && !strings.HasPrefix(lt, "--") && strings.ContainsRune(lt[1:], 'n') {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 var curlWriteFlagRE = regexp.MustCompile(`(?i)(^|[;&|()]|[[:space:]])curl(\.exe)?\b.*([[:space:]]-[Xx][[:space:]]*(POST|PUT|PATCH|DELETE)\b|[[:space:]]--request(=|[[:space:]]+)(POST|PUT|PATCH|DELETE)\b|[[:space:]](-d|--data|--data-raw|--data-binary|--form)(=|[[:space:]]|$))`)
