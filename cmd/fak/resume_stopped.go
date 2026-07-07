@@ -97,6 +97,10 @@ func runResumeStopped(stdout, stderr io.Writer, argv []string) int {
 				fi.ModTime().UTC().Format(time.RFC3339), stem, path)
 			r.Account = acct
 			r.Project = filepath.Base(filepath.Dir(path))
+			// Work-key for cross-session dedup: the authoritative /goal, /loop lane, or issue
+			// number from the transcript's FIRST user turn (read from the head — the classifier
+			// only saw the noisy tail). Empty when none is found; an empty key never dedups.
+			r.WorkKey = firstTurnWorkKey(path)
 			rows = append(rows, r)
 		}
 	}
@@ -195,6 +199,94 @@ func loadStoppedRecords(path string) []stopped.Record {
 	return recs
 }
 
+// workKeyGoalRE / workKeyLoopRE / workKeyIssueRE recognize the three authoritative work
+// identities a headless session is launched with, most specific first. A /goal names a
+// free-text objective (its args are the identity); a /loop or dos-dispatch-loop names a
+// lane; an issue-resolution names the issue number. These are the launch contracts, so two
+// sessions with the same one are doing the same work.
+var (
+	// A loop session's identity is its lane. It appears either as a slash-command arg block
+	// (<command-args>--lane X</command-args>, tags newline-separated) or as a bare "--lane X"
+	// in prose; both forms are covered. The lane is the last --lane token before the key is
+	// taken (a re-fired loop turn restates it), so a plain scan for the flag suffices.
+	workKeyLaneRE = regexp.MustCompile(`(?i)--lane[\s=]+([a-z0-9_-]+)`)
+	// A loop launch is marked by the dispatch-loop skill name or a /loop command; without it,
+	// a stray "--lane" mention in prose must NOT be read as a loop identity.
+	workKeyLoopMarkerRE = regexp.MustCompile(`(?i)dos-dispatch-loop|/loop\b|/dispatch\b`)
+	workKeyIssueRE      = regexp.MustCompile(`(?i)resolve\s+GitHub\s+issue\s+#?(\d+)|(?:^|\s)issue\s+#(\d+)|GH-(\d+)`)
+	workKeyGoalRE       = regexp.MustCompile(`(?is)<command-name>\s*/goal\s*</command-name>.*?<command-args>\s*(.*?)\s*</command-args>`)
+	workKeyWS           = regexp.MustCompile(`\s+`)
+)
+
+// deriveWorkKey folds one user-turn text into a canonical work identity, or "" when the
+// text carries none. Pure and total so it is unit-testable without a transcript. Order is
+// deliberate: an explicit /goal wins over a /loop lane wins over a bare issue mention, so
+// an issue-resolution session that happens to discuss a lane is keyed by its issue.
+func deriveWorkKey(text string) string {
+	if m := workKeyGoalRE.FindStringSubmatch(text); m != nil {
+		g := strings.ToLower(workKeyWS.ReplaceAllString(strings.TrimSpace(m[1]), " "))
+		if len(g) > 80 {
+			g = g[:80]
+		}
+		if g != "" {
+			return "goal:" + g
+		}
+	}
+	if m := workKeyIssueRE.FindStringSubmatch(text); m != nil {
+		for _, g := range m[1:] {
+			if g != "" {
+				return "issue:#" + g
+			}
+		}
+	}
+	if workKeyLoopMarkerRE.MatchString(text) {
+		if m := workKeyLaneRE.FindStringSubmatch(text); m != nil {
+			return "loop:--lane " + strings.ToLower(m[1])
+		}
+	}
+	return ""
+}
+
+// firstTurnWorkKey reads the HEAD of a transcript (the launch turns, where the /goal, /loop,
+// or issue assignment lives — the classifier only saw the tail) and returns the work-key of
+// the first user turn that carries one. Bounded read; a torn/oversized line is skipped, not
+// fatal; "" when nothing matches (which never dedups — fail-open).
+func firstTurnWorkKey(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(io.LimitReader(f, 512*1024))
+	sc.Buffer(make([]byte, 0, 1<<20), 8<<20)
+	scanned := 0
+	for sc.Scan() && scanned < 40 {
+		scanned++
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var jr struct {
+			Type    string `json:"type"`
+			Message *struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			} `json:"message"`
+		}
+		if json.Unmarshal(line, &jr) != nil {
+			continue
+		}
+		if jr.Type != "user" || jr.Message == nil {
+			continue
+		}
+		text, _, _ := stoppedContentFacts(jr.Message.Content)
+		if key := deriveWorkKey(text); key != "" {
+			return key
+		}
+	}
+	return ""
+}
+
 // stoppedContentFacts folds a message content field into the three facts the classifier
 // needs: the human text (text blocks + tool_result payloads, space-joined — the Python
 // text_of contract), the LAST tool_use block's name, and whether any tool_result block is
@@ -263,7 +355,7 @@ func renderResumeStopped(w io.Writer, d stopped.Decisions, now time.Time, window
 	}
 	section("RESUME (safe to resume headlessly now)", d.Resume)
 	section("DEFER (blocked; resume after the named wall clears)", d.Defer)
-	section("SKIP (live / parked / done — leave alone)", d.Skip)
+	section("SKIP (live / parked / done / duplicate-of-live — leave alone)", d.Skip)
 	if len(d.Rows) == 0 {
 		fmt.Fprintln(w, "  (no stopped sessions in window)")
 	}

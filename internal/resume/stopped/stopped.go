@@ -80,6 +80,11 @@ const (
 	DispDone = "DONE"
 	// DispStoppedQuiet: stopped with no recognizable terminal signal.
 	DispStoppedQuiet = "STOPPED_QUIET"
+	// DispDupLive: a stopped session whose work a LIVE session in the same project already
+	// owns — a crashed duplicate. Resuming it re-runs work in flight and collides on the
+	// shared trunk, so it is a SKIP (never relaunched). Assigned by Decide, not Classify:
+	// it is a cross-session verdict, not a property of one transcript.
+	DispDupLive = "DUP_LIVE"
 )
 
 // Row is the classified verdict for one session transcript — the same fields the Python
@@ -105,6 +110,13 @@ type Row struct {
 	Path            string `json:"path"`
 	Account         string `json:"account,omitempty"`
 	Project         string `json:"project,omitempty"`
+	// WorkKey is the caller-supplied identity of the work this session is doing — the
+	// authoritative /goal, /loop lane, or issue number, sourced from the transcript's FIRST
+	// user turn (and/or dispatch metadata) by the shell, NOT derived here (the tail the
+	// classifier reads is too noisy to cluster on). Empty when the caller could not resolve
+	// one; an empty WorkKey never dedups (a session with unknown work is never treated as a
+	// duplicate — fail-open, resume it). See DupLiveScan in the shell.
+	WorkKey string `json:"work_key,omitempty"`
 	// BlockedBy is filled by Decide on deferred rows: why this session cannot resume now.
 	BlockedBy string `json:"blocked_by,omitempty"`
 }
@@ -246,8 +258,30 @@ func Decide(rows []Row, throttleActive func(reset string) bool) Decisions {
 		}
 	}
 
+	// Cross-session dedup: a LIVE session's work-key is OWNED. A stopped session that shares
+	// that (project, work-key) is a crashed duplicate — resuming it re-runs work in flight and
+	// collides on the shared trunk. Build the owned set from the LIVE rows, keyed by project so
+	// the same /loop lane in two different repos never cross-dedups. An empty work-key never
+	// participates (fail-open: unknown work is resumed, never silently dropped).
+	liveOwned := map[string]bool{}
+	for _, r := range sorted {
+		if r.Disp == DispLive && r.WorkKey != "" {
+			liveOwned[r.Project+"\x00"+r.WorkKey] = true
+		}
+	}
+
 	d := Decisions{AccountThrottle: acctThrottle, Counts: map[string]int{}, Rows: sorted}
 	for _, r := range sorted {
+		// A crashed duplicate of a live session skips before any resume decision. LIVE/DONE/
+		// PARKED are left to their own buckets — only a would-be resume candidate is redirected.
+		if r.WorkKey != "" && r.Disp != DispLive && r.Disp != DispDone && r.Disp != DispParkedWait &&
+			liveOwned[r.Project+"\x00"+r.WorkKey] {
+			r.Disp = DispDupLive
+			r.BlockedBy = "duplicate of a live session owning the same work (" + r.WorkKey + ")"
+			d.Counts[DispDupLive]++
+			d.Skip = append(d.Skip, r)
+			continue
+		}
 		d.Counts[r.Disp]++
 		switch r.Disp {
 		case DispStoppedMidtool, DispStoppedInterrupt, DispStoppedQuiet:

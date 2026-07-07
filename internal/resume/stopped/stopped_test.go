@@ -161,3 +161,53 @@ func TestDecideExpiredThrottleFreesAccount(t *testing.T) {
 		t.Fatalf("resume = %+v, want m1", d.Resume)
 	}
 }
+
+func TestDecideDupLiveSkipsCrashedDuplicate(t *testing.T) {
+	never := func(string) bool { return false }
+	// A live dispatch-loop owns work-key "loop:--lane ci" in project P. A crashed session
+	// (midtool) in the SAME project with the SAME work-key is a duplicate -> SKIP DUP_LIVE,
+	// never resumed. A stopped session with a DIFFERENT key resumes normally. A stopped
+	// session with an EMPTY key resumes (fail-open). A same-key stopped session in a
+	// DIFFERENT project resumes (dedup is per-project).
+	rows := []Row{
+		{Disp: DispLive, Account: "a1", AgeMin: 1, Session: "live", Project: "P", WorkKey: "loop:--lane ci"},
+		{Disp: DispStoppedMidtool, Account: "a2", AgeMin: 10, Session: "dup", Project: "P", WorkKey: "loop:--lane ci"},
+		{Disp: DispStoppedMidtool, Account: "a2", AgeMin: 12, Session: "other", Project: "P", WorkKey: "issue:#1538"},
+		{Disp: DispStoppedMidtool, Account: "a2", AgeMin: 14, Session: "nokey", Project: "P", WorkKey: ""},
+		{Disp: DispStoppedMidtool, Account: "a2", AgeMin: 16, Session: "otherproj", Project: "Q", WorkKey: "loop:--lane ci"},
+	}
+	d := Decide(rows, never)
+
+	inBucket := func(b []Row, sid string) bool {
+		for _, r := range b {
+			if r.Session == sid {
+				return true
+			}
+		}
+		return false
+	}
+	if !inBucket(d.Skip, "dup") {
+		t.Fatalf("dup should be SKIP (DUP_LIVE); skip=%+v", d.Skip)
+	}
+	for _, r := range d.Skip {
+		if r.Session == "dup" {
+			if r.Disp != DispDupLive {
+				t.Fatalf("dup disp = %s, want %s", r.Disp, DispDupLive)
+			}
+			if r.BlockedBy == "" || !strings.Contains(r.BlockedBy, "loop:--lane ci") {
+				t.Fatalf("dup blocked_by = %q, want the work-key named", r.BlockedBy)
+			}
+		}
+	}
+	if inBucket(d.Skip, "dup") && inBucket(d.Resume, "dup") {
+		t.Fatalf("dup must not also resume")
+	}
+	for _, sid := range []string{"other", "nokey", "otherproj"} {
+		if !inBucket(d.Resume, sid) {
+			t.Fatalf("%s should resume (not a live-owned duplicate); resume=%+v", sid, d.Resume)
+		}
+	}
+	if d.Counts[DispDupLive] != 1 {
+		t.Fatalf("DUP_LIVE count = %d, want 1", d.Counts[DispDupLive])
+	}
+}
