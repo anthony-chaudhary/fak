@@ -122,10 +122,29 @@ func credExpiry(path string) (time.Time, bool) {
 // cfgDir and refreshEnvBlockers stripped, feeding empty stdin so the CLI does not stall on a
 // pipe. Its sole purpose is the token-rotation side effect; stdout/stderr are discarded. The
 // caller supplies the timeout via ctx (a short deadline is expected).
+//
+// Teardown is a TREE kill, not the exec.CommandContext default: ctx-cancel's built-in kill
+// reaps only the direct claude PID and orphans the node/tool subtree it spawns (#3105, the
+// #2989 defect class), and this probe runs periodically across every fleet account, so those
+// orphans accumulate and poison dispatch preflight. Cancel is routed through refreshKillTree
+// (taskkill /T /F on Windows, own-process-group SIGKILL on POSIX via setRefreshSysProcAttr),
+// and WaitDelay bounds the post-kill wait so a kill that fails to land cannot wedge the
+// periodic refresh loop.
 func DefaultRefreshSpawn(ctx context.Context, cfgDir string) error {
 	cmd := exec.CommandContext(ctx, ClaudeExe(), "-p", "ok", "--model", refreshModel)
 	cmd.Env = refreshEnv(os.Environ(), cfgDir)
 	cmd.Stdin = strings.NewReader("")
+	setRefreshSysProcAttr(cmd)
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		if err := refreshKillTree(cmd.Process.Pid); err != nil {
+			return cmd.Process.Kill()
+		}
+		return nil
+	}
+	cmd.WaitDelay = 10 * time.Second
 	return cmd.Run()
 }
 
