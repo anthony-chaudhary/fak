@@ -14,13 +14,20 @@
 // WHAT IT GUARANTEES. It mirrors the discipline of internal/journal (the decision
 // journal) — same hash-chain, same per-row flush, same Verify contract — applied
 // to a different, usage-shaped Row. The two are deliberately decoupled (this
-// package imports nothing internal) so a usage trail can be reasoned about and
-// verified on its own:
+// package imports nothing internal beyond the internal/flock lock primitive) so a
+// usage trail can be reasoned about and verified on its own:
 //
 //   - DURABLE: one JSONL row is appended and flushed per Append, written at process
 //     exit so the exit code is known. A crash loses only the in-flight invocation.
 //   - SEQUENCE/TIME ANCHORED: the logger stamps its own monotonic Seq (1-based) and
 //     a wall-clock timestamp on every row.
+//   - ONE CHAIN ACROSS PROCESSES: concurrent fak invocations extend the SAME chain.
+//     Append serializes head-recovery + write under a cross-process advisory lock
+//     (a <path>.lock sidecar over the internal/flock primitive, the same critical
+//     section loopmgr's ledger append uses) and re-reads the chain head from disk
+//     inside that critical section — so two racing processes can never both stamp
+//     the same seq off a stale head (the #2608 `sequence gap` CHAIN_BROKEN
+//     artifact `fak audit usage` surfaced).
 //   - TAMPER-EVIDENT: every row carries the hash of the previous row's hash chained
 //     with its own content fields (a hash chain / WORM ledger). Verify re-reads the
 //     file and recomputes the chain; a single flipped byte breaks the link at that
@@ -44,10 +51,12 @@ package usagelog
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -55,6 +64,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/flock"
 )
 
 // SchemaV1 is the on-disk schema tag stamped into every row's `schema` field, so a
@@ -92,8 +103,10 @@ type Row struct {
 }
 
 // Logger is a hash-chained, append-only usage journal. The zero value is not
-// usable; construct with Open. It is safe for concurrent Append calls (a single
-// process rarely needs that, but the lock keeps the chain head consistent).
+// usable; construct with Open. It is safe for concurrent Append calls both within
+// a process (l.mu) and ACROSS processes: Append re-syncs the chain head from disk
+// under a cross-process advisory lock, so concurrent fak invocations extend one
+// chain instead of forking it (#2608).
 type Logger struct {
 	mu       sync.Mutex
 	bw       *bufio.Writer
@@ -101,8 +114,21 @@ type Logger struct {
 	path     string
 	seq      uint64
 	lastHash string
+	end      int64            // journal byte offset the head was recovered at (stale-head check)
+	lockWait time.Duration    // how long Append polls for the cross-process lock
 	clock    func() time.Time // injectable for deterministic tests
 }
+
+// ErrJournalBusy is returned by Append when the cross-process journal lock could
+// not be acquired within the wait window. The caller (recordUsage) treats a usage
+// row as best-effort, so dropping the row is preferred over forking the chain by
+// appending off a stale head.
+var ErrJournalBusy = errors.New("usagelog: journal lock busy")
+
+// defaultLockWait bounds how long Append polls for the cross-process lock. The
+// critical section is one stat + (rarely) one file scan + one flushed write, so
+// even a heavily contended journal clears in well under this.
+const defaultLockWait = 2 * time.Second
 
 // Open opens (creating if absent) a file-backed usage journal in append mode. If
 // the file already holds rows, Open recovers the chain head (seq + last hash) so a
@@ -115,7 +141,7 @@ func Open(path string) (*Logger, error) {
 			return nil, fmt.Errorf("usagelog: create dir %s: %w", dir, err)
 		}
 	}
-	seq, last, err := recoverHead(path)
+	seq, last, end, err := recoverHead(path)
 	if err != nil {
 		return nil, err
 	}
@@ -129,6 +155,8 @@ func Open(path string) (*Logger, error) {
 		path:     path,
 		seq:      seq,
 		lastHash: last,
+		end:      end,
+		lockWait: defaultLockWait,
 		clock:    time.Now,
 	}, nil
 }
@@ -139,9 +167,24 @@ func Open(path string) (*Logger, error) {
 // PID, and optionally Args); Append owns Schema, Seq, TSUnixNano (if unset),
 // PrevHash, and Hash. It returns the committed row (with the stamped fields) so a
 // caller or test can inspect exactly what landed on disk.
+//
+// Head-recovery + write is ONE cross-process critical section: Append holds an
+// exclusive advisory lock on the <path>.lock sidecar and re-syncs seq/lastHash
+// from disk before stamping, because the head recovered at Open time is stale the
+// moment another fak invocation appends. Without this, two racing processes both
+// stamp the same seq off the same recovered head, and Verify later reports the
+// fork as `sequence gap: seq=N want N+1` (#2608).
 func (l *Logger) Append(r Row) (Row, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	unlock, err := lockJournal(l.path, l.lockWait)
+	if err != nil {
+		return r, err
+	}
+	defer unlock()
+	if err := l.refreshHeadLocked(); err != nil {
+		return r, err
+	}
 	r.Schema = SchemaV1
 	l.seq++
 	r.Seq = l.seq
@@ -150,11 +193,63 @@ func (l *Logger) Append(r Row) (Row, error) {
 	}
 	r.PrevHash = l.lastHash
 	r.Hash = chainHash(r.PrevHash, r)
-	l.lastHash = r.Hash
-	if err := writeRow(l.bw, r); err != nil {
+	n, err := writeRow(l.bw, r)
+	if err != nil {
 		return r, err
 	}
+	l.lastHash = r.Hash
+	l.end += int64(n)
 	return r, nil
+}
+
+// refreshHeadLocked re-syncs the chain head (seq + last hash) from disk when the
+// journal changed since the head was last recovered — i.e. another process
+// appended between our Open (or last Append) and now. The size==end fast path
+// keeps the uncontended case at one stat. Caller must hold BOTH l.mu and the
+// cross-process journal lock, so the head cannot move again before our write.
+func (l *Logger) refreshHeadLocked() error {
+	if st, err := os.Stat(l.path); err == nil && st.Size() == l.end {
+		return nil // nothing landed since recovery: the cached head is still the tail
+	}
+	seq, last, end, err := recoverHead(l.path)
+	if err != nil {
+		return err
+	}
+	l.seq, l.lastHash, l.end = seq, last, end
+	return nil
+}
+
+// lockJournal takes the cross-process exclusive advisory lock that guards the
+// journal's chain head: a <path>.lock sidecar over internal/flock (mirroring
+// loopmgr's ledger-append critical section). flock.TryLock is non-blocking, so it
+// polls until the lock is free or wait elapses (then ErrJournalBusy — the caller
+// drops the best-effort row rather than forking the chain). Closing the returned
+// fd releases the OS lock, including when the holder process dies mid-write.
+func lockJournal(path string, wait time.Duration) (unlock func(), err error) {
+	lf, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("usagelog: open journal lock: %w", err)
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		lerr := flock.TryLock(lf)
+		if lerr == nil {
+			break
+		}
+		if !errors.Is(lerr, flock.ErrLockBusy) {
+			_ = lf.Close()
+			return nil, fmt.Errorf("usagelog: lock journal: %w", lerr)
+		}
+		if time.Now().After(deadline) {
+			_ = lf.Close()
+			return nil, ErrJournalBusy
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return func() {
+		_ = flock.Unlock(lf)
+		_ = lf.Close()
+	}, nil
 }
 
 // Path returns the file the logger appends to — what to point `fak audit verify` at.
@@ -178,19 +273,21 @@ func (l *Logger) Close() error {
 	return nil
 }
 
-// writeRow appends one JSONL row and flushes it (per-row durability).
-func writeRow(bw *bufio.Writer, row Row) error {
+// writeRow appends one JSONL row and flushes it (per-row durability). It returns
+// the number of bytes committed (line + newline) so the logger can advance its
+// cached end-of-journal offset without an extra stat.
+func writeRow(bw *bufio.Writer, row Row) (int, error) {
 	b, err := json.Marshal(row)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if _, err := bw.Write(b); err != nil {
-		return err
+		return 0, err
 	}
 	if err := bw.WriteByte('\n'); err != nil {
-		return err
+		return 0, err
 	}
-	return bw.Flush()
+	return len(b) + 1, bw.Flush()
 }
 
 // chainHash is the tamper-evident link: sha256 over the previous row's hash chained
@@ -227,37 +324,44 @@ func Digest(salt []byte, args []string) string {
 }
 
 // recoverHead scans an existing journal to recover the chain head (last seq + last
-// hash) so an append continues the same chain. A missing file is the genesis case
-// (seq 0, empty hash). It does NOT validate the chain (that is Verify's job) so a
-// damaged log never blocks a CLI invocation; a torn final line (a crash mid-write)
-// is tolerated by stopping at the last well-formed row.
-func recoverHead(path string) (seq uint64, lastHash string, err error) {
+// hash) so an append continues the same chain, plus the byte offset the head was
+// recovered at (the stale-head check Append's critical section compares against
+// the live file size). A missing file is the genesis case (seq 0, empty hash,
+// offset 0). It does NOT validate the chain (that is Verify's job) so a damaged
+// log never blocks a CLI invocation; a torn final line (a crash mid-write) is
+// tolerated by stopping at the last well-formed row.
+func recoverHead(path string) (seq uint64, lastHash string, end int64, err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return 0, "", nil
+			return 0, "", 0, nil
 		}
-		return 0, "", fmt.Errorf("usagelog: stat %s: %w", path, err)
+		return 0, "", 0, fmt.Errorf("usagelog: stat %s: %w", path, err)
 	}
 	defer f.Close()
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		line := sc.Bytes()
-		if len(line) == 0 {
-			continue
+	br := bufio.NewReaderSize(f, 64*1024)
+	for {
+		chunk, rerr := br.ReadBytes('\n')
+		if len(chunk) > 0 {
+			if body := bytes.TrimSpace(chunk); len(body) > 0 {
+				var r Row
+				if err := json.Unmarshal(body, &r); err != nil {
+					// Torn/malformed line: stop at the last well-formed row (Verify
+					// catches real corruption). end stays at the offset BEFORE it.
+					return seq, lastHash, end, nil
+				}
+				seq = r.Seq
+				lastHash = r.Hash
+			}
+			end += int64(len(chunk)) // blank lines advance the offset without moving the head
 		}
-		var r Row
-		if err := json.Unmarshal(line, &r); err != nil {
-			break // torn final line: stop at the last well-formed row (Verify catches real corruption)
+		if rerr == io.EOF {
+			return seq, lastHash, end, nil
 		}
-		seq = r.Seq
-		lastHash = r.Hash
+		if rerr != nil {
+			return 0, "", 0, fmt.Errorf("usagelog: scan %s: %w", path, rerr)
+		}
 	}
-	if err := sc.Err(); err != nil {
-		return 0, "", fmt.Errorf("usagelog: scan %s: %w", path, err)
-	}
-	return seq, lastHash, nil
 }
 
 // ReadRows reads all committed rows from a usage journal, in order — the READ side
