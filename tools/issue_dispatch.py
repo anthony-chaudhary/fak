@@ -1334,6 +1334,101 @@ def render_wave(p: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def escape_plan(root: Path, safe_priority: dict[str, int] | None) -> dict[str, Any]:
+    """The read-only ACTION plan behind ``--escape-self-source``: turn the Arm-1 escape
+    SIGNAL into the exact operator command that drains the top held self-source P1 the
+    guarded pool cannot reach.
+
+    Composes the three checks an escape must pass, IN ORDER, stopping at the first that
+    fails so ``reason`` names the blocker:
+      1. a held self-source lane must OUT-SCORE the best dispatchable lane
+         (``escape_candidates`` marked it ``preferred``) — else draining a safe lane is
+         the better use of the seat;
+      2. the build-integrity gate must be CLEAR (no guarded peer's ``go build`` in
+         flight, via ``guarded_worker_in_flight``) — else an unguarded self-source commit
+         could land on a poisoned build;
+      3. the lane must be FREE (no worker already in flight on it, via
+         ``busy_lanes``/``lease_ref_busy_lanes``) — the one-worker-per-self-source-lane
+         cap the design requires.
+    When all three pass it emits ``recommend=True`` plus the unguarded operator command
+    (``FLEET_DOGFOOD_GUARD=0`` disables the guard so the worker may edit self-source ON
+    MAIN — the supported operator escape, NOT a worktree) and the exclusive lease the
+    worker materializes on start. PURE PLAN: never spawns, never mutates — the live
+    unguarded spawn is a separate opt-in step."""
+    ec = escape_candidates(root, safe_priority)
+    ranked = ec["escape_candidates"]
+    top = ranked[0] if ranked else None
+    gate_clear = not guarded_worker_in_flight(root / RUNS_DIRNAME)
+    busy = busy_lanes(root / RUNS_DIRNAME) | set(
+        lease_ref_busy_lanes(root).get("lanes") or [])
+    plan: dict[str, Any] = {
+        "target_lane": None,
+        "recommend": False,
+        "reason": "",
+        "gate": {"clear": gate_clear, "guarded_worker_in_flight": not gate_clear},
+        "plan_only": True,
+        **ec,
+    }
+    if not top:
+        plan["reason"] = "no held self-source lane with open issues"
+        return {"escape_plan": plan}
+    if not top.get("preferred"):
+        plan["reason"] = (
+            f"top held lane {top['lane']} (score {top['score']}) does not out-score the "
+            f"best safe lane (score {ec['best_safe_score']}); drain a safe lane instead")
+        return {"escape_plan": plan}
+    lane = top["lane"]
+    lane_free = lane not in busy
+    nums = top.get("issue_nums") or []
+    plan.update({
+        "target_lane": lane,
+        "issue_nums": nums,
+        "score": top.get("score"),
+        "lane_free": lane_free,
+        "lease": {"lane": lane, "mode": "exclusive", "tree": top.get("tree") or []},
+        "command": dispatch_worker.build_command(lane, "claude"),
+        "env_overrides": {"FLEET_DOGFOOD_GUARD": "0"},
+    })
+    if not gate_clear:
+        plan["reason"] = ("a guarded worker's build may be in flight; hold the unguarded "
+                          "escape until it clears")
+    elif not lane_free:
+        plan["reason"] = f"lane {lane} already has a worker in flight; nothing to escape"
+    else:
+        plan["recommend"] = True
+        issues = ", ".join(f"#{n}" for n in nums) or "-"
+        plan["reason"] = (
+            f"escape to {lane} ({issues}): held score {top['score']} > best safe "
+            f"{ec['best_safe_score']}, gate clear, lane free")
+    return {"escape_plan": plan}
+
+
+def render_escape(doc: dict[str, Any]) -> str:
+    plan = doc.get("escape_plan") or {}
+    lines = [f"escape-self-source: {'RECOMMEND' if plan.get('recommend') else 'HOLD'}"]
+    lane = plan.get("target_lane")
+    if lane:
+        nums = ", ".join(f"#{n}" for n in (plan.get("issue_nums") or [])) or "-"
+        gate = plan.get("gate") or {}
+        lease = plan.get("lease") or {}
+        lines += [
+            f"  lane    : {lane} {nums}  score={plan.get('score')} "
+            f"vs best safe {plan.get('best_safe_score')}",
+            f"  gate    : {'clear' if gate.get('clear') else 'HOLD (guarded build in flight)'}",
+            f"  free    : {'yes' if plan.get('lane_free') else 'NO (worker in flight)'}",
+            f"  lease   : {lease.get('lane')} [{lease.get('mode')}] "
+            f"tree={', '.join(lease.get('tree') or []) or '-'}",
+        ]
+        if plan.get("recommend"):
+            env = " ".join(f"{k}={v}" for k, v in (plan.get("env_overrides") or {}).items())
+            cmd = " ".join(plan.get("command") or [])
+            lines.append(f"  run     : {env} {cmd}".rstrip())
+    lines.append(f"  -> {plan.get('reason')}")
+    lines.append("  (plan only — the live unguarded spawn is a follow-on; run the above "
+                 "command by hand as the operator escape)")
+    return "\n".join(lines)
+
+
 def _default_max_workers() -> int:
     """The default worker ceiling, mirrored from dispatch_preflight.DEFAULT_MAX_WORKERS
     (mirrored, not imported — same rationale as _pid_is_alive): the built-in 20 with the
@@ -1368,6 +1463,11 @@ def main(argv: list[str] | None = None) -> int:
                          "each on its own seat; preflight re-checked per spawn")
     ap.add_argument("--live", action="store_true",
                     help="actually spawn the worker (default: dry-run / plan only)")
+    ap.add_argument("--escape-self-source", action="store_true",
+                    help="PLAN the unguarded escape for the top held self-source P1 the "
+                         "guarded pool cannot reach (read-only; emits the FLEET_DOGFOOD_"
+                         "GUARD=0 operator command to run by hand). The live spawn is a "
+                         "follow-on.")
     ap.add_argument("--no-refresh", action="store_true",
                     help="skip the per-tick account-registry refresh (route off the "
                          "cached snapshot; for inspection / when a fresh scan just ran)")
@@ -1375,6 +1475,11 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     root = Path(args.workspace).resolve() if args.workspace else repo_root()
+    if args.escape_self_source:
+        pick = pick_lane(root, None)
+        doc = escape_plan(root, pick.get("priority_by_lane"))
+        print(json.dumps(doc, indent=2) if args.json else render_escape(doc))
+        return 0 if doc["escape_plan"].get("recommend") else 1
     if args.wave:
         payload = evaluate_wave(root, max_workers=args.max_workers,
                                 work_kind=args.work_kind, live=args.live,

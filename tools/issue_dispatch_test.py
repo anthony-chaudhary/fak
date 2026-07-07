@@ -1348,6 +1348,95 @@ class EscapeRenderTest(unittest.TestCase):
         self.assertIn("guarded build in flight", out)
 
 
+class EscapePlanTest(unittest.TestCase):
+    """escape_plan turns the SIGNAL into the read-only operator ACTION: the top held
+    self-source P1 must (1) out-score the best safe lane, (2) clear the guarded
+    build-integrity gate, and (3) find its lane free — only then does it emit
+    recommend=True with the unguarded FLEET_DOGFOOD_GUARD=0 command. Pure plan: no spawn."""
+
+    ROUTER = {"lanes": {
+        "swebench": {"issues": [3106, 1012], "tree": ["internal/swebench/**"]},
+        "docs": {"issues": [10], "tree": ["docs/**"]},
+    }}
+
+    def _stub(self, mod, *, scores, gate=False, busy=None, lease=None, router=None):
+        mod.run_json = lambda cmd, cwd, timeout: (router or self.ROUTER)
+        mod.lane_priority_scores = lambda root, mapping: scores
+        mod.guarded_worker_in_flight = lambda runs_dir, **kw: gate
+        mod.busy_lanes = lambda runs_dir, **kw: set(busy or [])
+        mod.lease_ref_busy_lanes = lambda root: {"lanes": set(lease or [])}
+
+    def test_recommend_when_preferred_gate_clear_lane_free(self) -> None:
+        mod = load()
+        self._stub(mod, scores={"swebench": 740})
+        plan = mod.escape_plan(ROOT, {"docs": 100})["escape_plan"]
+        self.assertTrue(plan["recommend"])
+        self.assertEqual(plan["target_lane"], "swebench")
+        self.assertEqual(plan["issue_nums"], [3106, 1012])
+        self.assertEqual(plan["env_overrides"], {"FLEET_DOGFOOD_GUARD": "0"})
+        self.assertEqual(plan["lease"]["mode"], "exclusive")
+        self.assertEqual(plan["lease"]["tree"], ["internal/swebench/**"])
+        self.assertIn("swebench", " ".join(plan["command"]))
+        self.assertTrue(plan["gate"]["clear"])
+        self.assertTrue(plan["lane_free"])
+
+    def test_hold_when_guarded_build_in_flight(self) -> None:
+        mod = load()
+        self._stub(mod, scores={"swebench": 740}, gate=True)
+        plan = mod.escape_plan(ROOT, {"docs": 100})["escape_plan"]
+        self.assertFalse(plan["recommend"])
+        self.assertFalse(plan["gate"]["clear"])
+        self.assertIn("guarded", plan["reason"])
+
+    def test_hold_when_lane_already_in_flight(self) -> None:
+        mod = load()
+        self._stub(mod, scores={"swebench": 740}, busy=["swebench"])
+        plan = mod.escape_plan(ROOT, {"docs": 100})["escape_plan"]
+        self.assertFalse(plan["recommend"])
+        self.assertFalse(plan["lane_free"])
+        self.assertIn("in flight", plan["reason"])
+
+    def test_hold_when_lane_busy_via_lease_ref(self) -> None:
+        mod = load()
+        self._stub(mod, scores={"swebench": 740}, lease=["swebench"])
+        plan = mod.escape_plan(ROOT, {"docs": 100})["escape_plan"]
+        self.assertFalse(plan["recommend"])
+        self.assertFalse(plan["lane_free"])
+
+    def test_no_escape_when_best_safe_outscores(self) -> None:
+        mod = load()
+        self._stub(mod, scores={"swebench": 740})
+        plan = mod.escape_plan(ROOT, {"gateway": 900})["escape_plan"]
+        self.assertFalse(plan["recommend"])
+        self.assertIsNone(plan["target_lane"])
+        self.assertIn("out-score", plan["reason"])
+
+    def test_no_escape_when_no_self_source_held(self) -> None:
+        mod = load()
+        self._stub(mod, scores={},
+                   router={"lanes": {"docs": {"issues": [1], "tree": ["docs/**"]}}})
+        plan = mod.escape_plan(ROOT, {"docs": 5})["escape_plan"]
+        self.assertFalse(plan["recommend"])
+        self.assertIsNone(plan["target_lane"])
+        self.assertIn("no held self-source", plan["reason"])
+
+    def test_render_escape_shows_run_command_when_recommended(self) -> None:
+        mod = load()
+        self._stub(mod, scores={"swebench": 740})
+        out = mod.render_escape(mod.escape_plan(ROOT, {"docs": 100}))
+        self.assertIn("RECOMMEND", out)
+        self.assertIn("swebench", out)
+        self.assertIn("FLEET_DOGFOOD_GUARD=0", out)
+        self.assertIn("run     :", out)
+
+    def test_render_escape_hold_omits_run_line(self) -> None:
+        mod = load()
+        self._stub(mod, scores={"swebench": 740}, gate=True)
+        out = mod.render_escape(mod.escape_plan(ROOT, {"docs": 100}))
+        self.assertIn("HOLD", out)
+        self.assertNotIn("run     :", out)
+
+
 class EvaluateBusyWiringTest(unittest.TestCase):
     """The single tick computes busy_lanes, threads it into pick_lane, and surfaces
     it in the tick payload."""
