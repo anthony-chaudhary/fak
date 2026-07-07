@@ -131,6 +131,28 @@ func TestDisambiguationTermsFeedIncludesLocalizedAndFableHooks(t *testing.T) {
 	}
 }
 
+func TestDisambiguationTermsIncludeAgentSecurityAndCostHooks(t *testing.T) {
+	txt := LlmsTermsText(time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC))
+	for _, want := range []string{
+		"## agent-security",
+		"MCP tool poisoning defense",
+		"lethal trifecta data exfiltration",
+		"AI agent least-privilege tool access",
+		"tamper-evident agent tool-call audit",
+		"cheaper way to run AI agents",
+		"Claude Sonnet 5 agent cost routing",
+	} {
+		if !strings.Contains(txt, want) {
+			t.Errorf("llms terms missing trending hook %q:\n%s", want, txt)
+		}
+	}
+	// honesty fence: naming a vendor model or framework is a demand hook, not an
+	// adoption claim — the roster must never imply fak has market adoption.
+	if strings.Contains(strings.ToLower(txt), "market adoption") {
+		t.Errorf("terms should not imply market adoption:\n%s", txt)
+	}
+}
+
 func TestLlmsTermsTextHasFableAndLocalizedTerms(t *testing.T) {
 	txt := LlmsTermsText(time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC))
 	for _, want := range []string{

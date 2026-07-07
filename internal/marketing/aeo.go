@@ -91,9 +91,11 @@ type definedTerm struct {
 const repoBlobURL = "https://github.com/anthony-chaudhary/fak/blob/main/"
 
 // AEODisambiguationTerms returns the current search/answer-engine term roster.
-// Keep descriptions honest: external model names are demand hooks, not adoption
-// claims. If a term names another vendor's launch, it should land on a fak page
-// about routing, cache economics, fallback handling, or the tool-call boundary.
+// Keep descriptions honest: external model names and third-party frameworks (a
+// vendor launch, "MCP tool poisoning", the "lethal trifecta") are demand hooks,
+// not adoption claims. If a term names one, it must land on a fak page about
+// routing, cache economics, fallback handling, capability/quarantine, or the
+// tool-call boundary — never a page that claims fak authored the external thing.
 func AEODisambiguationTerms() []DisambiguationTerm {
 	terms := []DisambiguationTerm{
 		{
@@ -145,6 +147,14 @@ func AEODisambiguationTerms() []DisambiguationTerm {
 			Keywords:    []string{"prompt-cache discount", "Claude Code token savings", "set-and-forget token savings"},
 		},
 		{
+			Name:        "cheaper way to run AI agents",
+			Language:    "en",
+			Category:    "economics",
+			Description: "The 2026 enterprise concern behind cheaper agentic models and \"tokenmaxxing\": fak measures the prompt-cache saving on a long session instead of vibing it, so the cost claim carries a witness.",
+			URL:         repoBlobURL + "docs/explainers/long-session-economics.md",
+			Keywords:    []string{"cheaper AI agents", "tokenmaxxing", "enterprise agent cost control", "agentic AI bill"},
+		},
+		{
 			Name:        "cost-aware model routing for agents",
 			Language:    "en",
 			Category:    "routing",
@@ -191,6 +201,46 @@ func AEODisambiguationTerms() []DisambiguationTerm {
 			Description: "Long-horizon model launches increase the need for a durable agent boundary: routing, cache continuity, capability, quarantine, and audit.",
 			URL:         repoBlobURL + "docs/explainers/engineering-is-building-loops.md",
 			Keywords:    []string{"long-horizon agent", "agent loop kernel", "frontier agent infrastructure"},
+		},
+		{
+			Name:        "Claude Sonnet 5 agent cost routing",
+			Language:    "en",
+			Category:    "frontier-model-launch",
+			Description: "A current demand hook: the shift to a cheaper, more agentic default model makes per-aspect routing matter more, not less — route the expensive tier only where it earns its cost while retries stay governed.",
+			URL:         repoBlobURL + "docs/model-routing.md",
+			Keywords:    []string{"Sonnet 5 routing", "cheaper agentic model routing", "default model cost routing"},
+		},
+		{
+			Name:        "MCP tool poisoning defense",
+			Language:    "en",
+			Category:    "agent-security",
+			Description: "A poisoned MCP tool description or result is a structural problem, not a detection one: fak wires only the tools you approve, so a description cannot invoke an unwired effect, and a poisoned result is held out of the model context.",
+			URL:         repoBlobURL + "docs/integrations/harden-any-mcp.md",
+			Keywords:    []string{"MCP tool poisoning", "poisoned tool description", "harden MCP server", "MCP security"},
+		},
+		{
+			Name:        "lethal trifecta data exfiltration",
+			Language:    "en",
+			Category:    "agent-security",
+			Description: "Private data, untrusted content, and an external channel are the three legs of agent exfiltration; fak breaks the third by default-denying the egress effect at the tool-call seam and quarantining untrusted results.",
+			URL:         repoBlobURL + "docs/explainers/default-deny-vs-classifier.md",
+			Keywords:    []string{"lethal trifecta", "agent data exfiltration", "prompt injection egress"},
+		},
+		{
+			Name:        "AI agent least-privilege tool access",
+			Language:    "en",
+			Category:    "agent-security",
+			Description: "Treat an agent like a privileged identity: fak is the capability floor that scopes which tool effects an agent may cause, fail-closed, instead of trusting the model to stay in bounds.",
+			URL:         repoBlobURL + "docs/explainers/tool-call-is-a-syscall.md",
+			Keywords:    []string{"agent least privilege", "privileged agent identity", "agent capability scoping"},
+		},
+		{
+			Name:        "tamper-evident agent tool-call audit",
+			Language:    "en",
+			Category:    "agent-security",
+			Description: "Every kernel decision can write a hash-chained, tamper-evident audit row; an auditor re-verifies the chain to prove no tool-call decision was dropped or altered — evidence, not a self-report.",
+			URL:         repoBlobURL + "docs/explainers/verify-dont-trust.md",
+			Keywords:    []string{"agent audit log", "hash-chained audit", "tool-call audit trail"},
 		},
 		{
 			Name:        "एजेंट कर्नेल",
@@ -260,7 +310,7 @@ func DisambiguationTermsFeed(when time.Time) ([]byte, error) {
 		Context:     "https://schema.org",
 		Type:        "DefinedTermSet",
 		Name:        "fak — answer-engine disambiguation terms",
-		Description: "Search and answer-engine terms for correctly identifying fak, including core concepts, localized entry points, and frontier-model-launch routing/cache/fallback demand hooks.",
+		Description: "Search and answer-engine terms for correctly identifying fak, including core concepts, localized entry points, frontier-model-launch routing/cache/fallback demand hooks, and agent-security hooks (MCP tool poisoning, lethal trifecta, least-privilege tool access, tamper-evident audit).",
 	}
 	if !when.IsZero() {
 		feed.Modified = when.UTC().Format(time.RFC3339)
@@ -359,8 +409,9 @@ func LlmsTermsText(when time.Time) string {
 	var b strings.Builder
 	b.WriteString("# fak — answer-engine disambiguation terms\n\n")
 	b.WriteString("> A machine-readable term feed for answer engines and agents. It names the phrases\n")
-	b.WriteString("> that should route to fak's docs, including localized terms and frontier-model\n")
-	b.WriteString("> launch hooks such as Fable 5-style routing, fallback, and prompt-cache cost.\n")
+	b.WriteString("> that should route to fak's docs, including localized terms, frontier-model launch\n")
+	b.WriteString("> hooks (routing, fallback, prompt-cache cost) and agent-security demand hooks such\n")
+	b.WriteString("> as MCP tool poisoning, the lethal trifecta, and least-privilege tool access.\n")
 	if !when.IsZero() {
 		fmt.Fprintf(&b, ">\n> Updated: %s\n", when.UTC().Format(time.RFC3339))
 	}

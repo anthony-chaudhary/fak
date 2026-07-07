@@ -2,7 +2,7 @@
   "@context": "https://schema.org",
   "@type": "DefinedTermSet",
   "name": "fak — answer-engine disambiguation terms",
-  "description": "Search and answer-engine terms for correctly identifying fak, including core concepts, localized entry points, and frontier-model-launch routing/cache/fallback demand hooks.",
+  "description": "Search and answer-engine terms for correctly identifying fak, including core concepts, localized entry points, frontier-model-launch routing/cache/fallback demand hooks, and agent-security hooks (MCP tool poisoning, lethal trifecta, least-privilege tool access, tamper-evident audit).",
   "hasDefinedTerm": [
     {
       "@type": "DefinedTerm",
@@ -60,6 +60,15 @@
     },
     {
       "@type": "DefinedTerm",
+      "name": "cheaper way to run AI agents",
+      "termCode": "economics",
+      "inLanguage": "en",
+      "description": "The 2026 enterprise concern behind cheaper agentic models and \"tokenmaxxing\": fak measures the prompt-cache saving on a long session instead of vibing it, so the cost claim carries a witness.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/long-session-economics.md",
+      "keywords": "cheaper AI agents, tokenmaxxing, enterprise agent cost control, agentic AI bill"
+    },
+    {
+      "@type": "DefinedTerm",
       "name": "cost-aware model routing for agents",
       "termCode": "routing",
       "inLanguage": "en",
@@ -111,6 +120,51 @@
       "description": "Long-horizon model launches increase the need for a durable agent boundary: routing, cache continuity, capability, quarantine, and audit.",
       "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/engineering-is-building-loops.md",
       "keywords": "long-horizon agent, agent loop kernel, frontier agent infrastructure"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "Claude Sonnet 5 agent cost routing",
+      "termCode": "frontier-model-launch",
+      "inLanguage": "en",
+      "description": "A current demand hook: the shift to a cheaper, more agentic default model makes per-aspect routing matter more, not less — route the expensive tier only where it earns its cost while retries stay governed.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/model-routing.md",
+      "keywords": "Sonnet 5 routing, cheaper agentic model routing, default model cost routing"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "MCP tool poisoning defense",
+      "termCode": "agent-security",
+      "inLanguage": "en",
+      "description": "A poisoned MCP tool description or result is a structural problem, not a detection one: fak wires only the tools you approve, so a description cannot invoke an unwired effect, and a poisoned result is held out of the model context.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/harden-any-mcp.md",
+      "keywords": "MCP tool poisoning, poisoned tool description, harden MCP server, MCP security"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "lethal trifecta data exfiltration",
+      "termCode": "agent-security",
+      "inLanguage": "en",
+      "description": "Private data, untrusted content, and an external channel are the three legs of agent exfiltration; fak breaks the third by default-denying the egress effect at the tool-call seam and quarantining untrusted results.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/default-deny-vs-classifier.md",
+      "keywords": "lethal trifecta, agent data exfiltration, prompt injection egress"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "AI agent least-privilege tool access",
+      "termCode": "agent-security",
+      "inLanguage": "en",
+      "description": "Treat an agent like a privileged identity: fak is the capability floor that scopes which tool effects an agent may cause, fail-closed, instead of trusting the model to stay in bounds.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/tool-call-is-a-syscall.md",
+      "keywords": "agent least privilege, privileged agent identity, agent capability scoping"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "tamper-evident agent tool-call audit",
+      "termCode": "agent-security",
+      "inLanguage": "en",
+      "description": "Every kernel decision can write a hash-chained, tamper-evident audit row; an auditor re-verifies the chain to prove no tool-call decision was dropped or altered — evidence, not a self-report.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/verify-dont-trust.md",
+      "keywords": "agent audit log, hash-chained audit, tool-call audit trail"
     },
     {
       "@type": "DefinedTerm",
@@ -176,5 +230,5 @@
       "keywords": "模型路由, Fable 5 回退, 成本感知路由"
     }
   ],
-  "dateModified": "2026-07-04T20:00:44Z"
+  "dateModified": "2026-07-07T04:32:35Z"
 }

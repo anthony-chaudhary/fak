@@ -16,6 +16,24 @@ description: "Consolidated, evidence-backed next-steps record for fak's answer-e
 
 ## Refreshed / added (witnessed)
 
+- **2026-07-06 trending-terms pass.** `internal/marketing/aeo.go` gained a new
+  `agent-security` term class and two market-event/economics hooks, mapping the current
+  answer-engine demand to existing fak pages with the load-bearing honest fence (a vendor
+  launch or third-party framework is a demand hook, not an adoption claim):
+  - `MCP tool poisoning defense` → [`docs/integrations/harden-any-mcp.md`](../integrations/harden-any-mcp.md);
+    `lethal trifecta data exfiltration` and `safety classifier vs capability gate` →
+    [`default-deny-vs-classifier`](../explainers/default-deny-vs-classifier.md);
+    `AI agent least-privilege tool access` → [`tool-call-is-a-syscall`](../explainers/tool-call-is-a-syscall.md);
+    `tamper-evident agent tool-call audit` → [`verify-dont-trust`](../explainers/verify-dont-trust.md)
+    (the hash-chained `FAK_AUDIT_JOURNAL` this cites is the witnessed microagent audit-journal
+    work, #2011).
+  - `cheaper way to run AI agents` (the Q2-2026 `tokenmaxxing` / agentic-bill concern) and
+    `Claude Sonnet 5 agent cost routing` (the July default-model shift) →
+    [`long-session-economics`](../explainers/long-session-economics.md) and
+    [`model-routing`](../model-routing.md).
+  - The roster is now 25 terms; `docs/marketing/disambiguation-terms.json` +
+    `llms-terms.txt` regenerated to match; a new `aeo_test.go` case pins the class + hooks
+    and re-asserts the no-`market adoption` fence.
 - **AEO recency feeds regenerated** from the latest witnessed ships (`HEAD~50..HEAD`, the
   `fak marketing aeo --refresh` default range):
   - `docs/marketing/updates.json` — schema.org `ItemList` an answer engine ingests directly

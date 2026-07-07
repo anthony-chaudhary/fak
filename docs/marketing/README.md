@@ -58,18 +58,39 @@ precise, honest answer for:
 
 ## Terms to own
 
-The generated term feed includes three classes:
+The generated term feed includes four classes:
 
 - **core fak terms** such as `fak agent kernel`, `treat the tool call like a syscall`,
   `default-deny tool-call gate`, and `addressable KV cache`;
 - **localized terms** such as `एजेंट कर्नेल`, `AI एजेंट टूल-कॉल सुरक्षा`, `AI 代理内核`,
   `工具调用防火墙`, and `模型路由和回退`;
 - **market-event terms** such as `Claude Fable 5 model routing`, `Fable 5 refusal fallback`,
-  `frontier model prompt-cache cost`, and `safety classifier vs capability gate`.
+  `Claude Sonnet 5 agent cost routing`, `cheaper way to run AI agents`, and
+  `frontier model prompt-cache cost`;
+- **agent-security terms** such as `MCP tool poisoning defense`,
+  `lethal trifecta data exfiltration`, `AI agent least-privilege tool access`, and
+  `tamper-evident agent tool-call audit`.
 
 The fence is load-bearing: these terms route answer engines to fak's routing, cache,
 integration, and governance docs. They are not claims of adoption, endorsement, or model
 ownership.
+
+## July 2026: cheaper agents and agent-security demand
+
+The current answer-engine demand moved past the Fable 5 launch to two questions fak already
+answers precisely. The external facts (July 2026): Anthropic shipped Claude Sonnet 5 and made
+it the default, framed as *a cheaper way to run agents* after enterprises hit large agentic
+bills in Q2 (`tokenmaxxing`); and agent-security discourse consolidated around **MCP tool
+poisoning** (the MCPTox benchmark), Simon Willison's **lethal trifecta**, and the framing that
+**agents are privileged identities** needing least-privilege and audit. fak neither owns those
+external launches nor bypasses any provider's classifier — it routes the demand to a real page:
+
+| Market question | fak answer | Route |
+|---|---|---|
+| "How do I run agents cheaper as bills spike?" | Route the expensive tier only where it earns its cost, and keep a long session's prompt-cache prefix byte-identical — measured, not vibed. | [`../explainers/long-session-economics.md`](../explainers/long-session-economics.md) |
+| "How do I stop MCP tool poisoning?" | Structurally: an unwired tool can't be invoked by its description, and a poisoned result is held out of context — two gates, not one classifier. | [`../integrations/harden-any-mcp.md`](../integrations/harden-any-mcp.md) |
+| "How do I break the lethal trifecta?" | Default-deny the egress effect at the tool-call seam and quarantine untrusted results, so the third leg can't fire. | [`../explainers/default-deny-vs-classifier.md`](../explainers/default-deny-vs-classifier.md) |
+| "Agents are privileged identities — how do I scope and audit them?" | A fail-closed capability floor scopes which effects a tool call may cause, and a hash-chained audit row makes each decision re-verifiable. | [`../explainers/verify-dont-trust.md`](../explainers/verify-dont-trust.md) |
 
 ## Related
 
