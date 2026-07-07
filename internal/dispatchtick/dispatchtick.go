@@ -64,10 +64,27 @@ func envPosInt(name string, fallback int) int {
 	return n
 }
 
+// MicroBackend is the #2030 gen/second-next dispatch backend OPTION: instead of
+// exec-spawning one detached guarded CLI process per lane, it enrolls the routed
+// issue as a single microagent into a running in-process host (internal/microagent,
+// M2). It is opt-in only — selected by config (`--backend micro` or
+// FLEET_WORKER_BACKEND=micro) — and is NEVER the default: the detached-CLI path stays
+// the default until the M29 quality bar clears (#2030 scope 3, "never default
+// exposure" for the gen/second-next stream).
+const MicroBackend = "micro"
+
 var validBackends = map[string]bool{
-	"claude":   true,
-	"opencode": true,
-	"codex":    true,
+	"claude":     true,
+	"opencode":   true,
+	"codex":      true,
+	MicroBackend: true,
+}
+
+// IsMicroBackend reports whether the backend token selects the in-process microagent
+// host-enroll path (#2030) rather than a detached CLI spawn. It is case- and
+// whitespace-insensitive, matching NormalizeBackend's tolerance.
+func IsMicroBackend(backend string) bool {
+	return strings.TrimSpace(strings.ToLower(backend)) == MicroBackend
 }
 
 // Account is the switcher account stamped into a worker's sidecar.
@@ -93,7 +110,7 @@ func NormalizeBackend(raw string) (string, error) {
 		backend = "claude"
 	}
 	if !validBackends[backend] {
-		return "", fmt.Errorf("unknown backend %q; expected claude, opencode, or codex", raw)
+		return "", fmt.Errorf("unknown backend %q; expected claude, opencode, codex, or micro", raw)
 	}
 	return backend, nil
 }

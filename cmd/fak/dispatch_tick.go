@@ -135,6 +135,8 @@ func runDispatchTick(stdout, stderr io.Writer, argv []string) int {
 var dispatchTickBenignActions = map[string]bool{
 	"spawned":                 true,
 	"would_spawn":             true,
+	"would_enroll":            true,
+	"enrolled":                true,
 	"refused":                 true,
 	"no_lane":                 true,
 	"no_issue":                true,
@@ -168,7 +170,7 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	targetIssue := fs.Int("target-issue", 0, "explicit issue number for the selected lane")
 	leaseID := fs.String("lease-id", "", "explicit lane/issue lease id")
 	leaseTree := fs.String("lease-tree", "", "comma-separated lease tree globs for the explicit lease")
-	backend := fs.String("backend", "claude", "worker backend (claude|opencode|codex)")
+	backend := fs.String("backend", firstString(strings.TrimSpace(os.Getenv("FLEET_WORKER_BACKEND")), "claude"), "worker backend (claude|opencode|codex|micro); micro (#2030, opt-in) enrolls the routed lane into the in-process microagent host instead of a detached CLI — default follows $FLEET_WORKER_BACKEND, else claude")
 	goal := fs.String("goal", "", "durable dispatch loop goal id (for example throughput or high-priority); known goal ids also select the default --goal-profile")
 	goalProfile := fs.String("goal-profile", "", "dispatch picker profile: throughput|high-priority (default follows --goal, else throughput)")
 	excludeLane := fs.String("exclude-lane", "", "comma-separated lanes to drop from the busiest pick")
@@ -505,6 +507,15 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		payload["worker_preflight_warning"] = warning
 		promptChars = len(prompt)
 		payload["prompt_chars"] = promptChars
+	}
+	// #2030 gen/second-next: the micro backend enrolls this routed issue into the
+	// in-process microagent host (internal/microagent, M2) instead of exec-spawning a
+	// detached guarded CLI. It runs AFTER the shared duplicate/collision/lane-busy/
+	// no-issue gates (so tree-safety is decided identically) and BEFORE the CLI-only
+	// model/guard/command machinery below (BuildWorkerCommand refuses micro). Opt-in
+	// only — a default claude/opencode/codex tick never enters here.
+	if dispatchtick.IsMicroBackend(opts.Backend) {
+		return dispatchTickHostEnroll(root, runsDir, opts, pick, account, target, payload, finish), nil
 	}
 	modelPolicy := resolveWorkerModelPolicy(opts.Backend, pick.Lane, opts.WorkerModel, account, dispatchTickPolicy(root), opts.PinWorkerModel)
 	// Layer 2: if the target's last slot walled on a model-switchable reason this tick,
