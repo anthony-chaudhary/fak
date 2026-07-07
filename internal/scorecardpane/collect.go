@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -43,6 +44,13 @@ func RunScorecard(root string, card Card, python string, timeout time.Duration) 
 	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	windowgate.ConfigureBackgroundCommand(cmd)
+	// The scorecard member (python <tool> --json, or an arbitrary card command) fans
+	// out its own child subprocess pool. Bare CommandContext ctx-cancel is single-PID
+	// (windowgate only hides the window), so on the timeout that pool is orphaned
+	// (#3106 defect class). Tree-kill on cancel + bound the reap. procguard's Windows
+	// Cancel sets cmd.Cancel (not SysProcAttr), so it composes with windowgate above.
+	procguard.ConfigureProcessTreeCancel(cmd)
+	cmd.WaitDelay = 10 * time.Second
 	cmd.Dir = root
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
