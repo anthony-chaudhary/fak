@@ -49,8 +49,18 @@ var loginRequiredRE = regexp.MustCompile(`(?i)Login interrupted|please run /logi
 	`API Error:\s*401|HTTP\s*401|401\s+(?:authentication required|unauthorized)|` +
 	`OAuth token has expired|Not logged in`)
 
+// apiErrPattern also names the 429 THROTTLE reason-phrases a provider can emit WITHOUT the
+// numeric code: OpenAI/Codex wire an over-rate refusal as "Too Many Requests" / "Rate limit
+// reached for <model> ... per min" / a `rate_limit_exceeded` error code, none of which carry
+// a literal "429" in the log tail. These are the same transient-overload member as \b429\b (a
+// 429's own reason phrase), so a Codex worker throttled per-minute is graded rate_limit like a
+// coded 429 — the reason the concurrency-backoff term counts and Layer-2 downgrade re-dispatches.
+// A genuine session/weekly/usage CAP is still skimmed off first by IsLimitError / the LIMIT arm
+// of TerminalFailure (bareLimitRE names session|weekly|usage|fable, never "rate"), so widening
+// here never reclassifies a cap — it only rescues the residual throttle from UNKNOWN.
 const apiErrPattern = `(?i)isApiErrorMessage|API Error|overloaded_error|\boverloaded\b|` +
-	`\b429\b|\b529\b|\b503\b|fetch failed|ECONNRESET|ETIMEDOUT|` +
+	`\b429\b|\b529\b|\b503\b|too many requests|rate[ _-]?limit(?:ed|_exceeded|\s+reached)|` +
+	`fetch failed|ECONNRESET|ETIMEDOUT|` +
 	`socket hang up|Internal Server Error|service unavailable|` +
 	`connection error|network error`
 

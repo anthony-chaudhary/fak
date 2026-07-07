@@ -196,3 +196,45 @@ func TestTerminalFailurePrecedenceAndEmpty(t *testing.T) {
 		t.Fatalf("limit outranks transient, got %q", k)
 	}
 }
+
+// A Codex/OpenAI-wire per-minute throttle names the 429 family WITHOUT a literal "429" in
+// the log tail ("Too Many Requests", "Rate limit reached for <model> ... per min", a
+// `rate_limit_exceeded` code). Each must read as a transient API error so the witness
+// classifier grades it rate_limit (the reason the concurrency-backoff term counts and
+// Layer-2 downgrade re-dispatches), never UNKNOWN — matching resume.ClassifyLimitText, which
+// already treats the same phrasings as LimitRate.
+func TestCodexThrottleIsTransientAPIError(t *testing.T) {
+	for _, text := range []string{
+		"Rate limit reached for gpt-5-codex in organization org-abc on tokens per min (TPM): Limit 30000, Used 30000. Please try again in 2s.",
+		"stream error: Too Many Requests; retrying 1/5",
+		"stream error: unexpected status 429 Too Many Requests; retrying 2/5",
+		`{"error":{"message":"Rate limit reached","type":"requests","code":"rate_limit_exceeded"}}`,
+		"upstream rate-limited the request",
+	} {
+		if !IsAPIError(text) {
+			t.Errorf("IsAPIError(%q) = false, want true (a 429-family throttle is transient)", text)
+		}
+		if k, _ := TerminalFailure(text); k != FailureAPIErr {
+			t.Errorf("TerminalFailure(%q) = %q, want %q", text, k, FailureAPIErr)
+		}
+	}
+}
+
+// Precedence guard: widening the API-error set to catch a "rate limit" throttle must NOT
+// swallow a genuine Codex/subscription USAGE CAP. A cap names session/weekly/usage (a
+// different remediation: seat reset or model downgrade, not concurrency backoff), so the
+// LIMIT arm must still win over the new API_ERR arm.
+func TestUsageCapStillOutranksThrottleWidening(t *testing.T) {
+	for _, text := range []string{
+		"You've hit your usage limit. Visit https://chatgpt.com/codex to add more.",
+		"You've hit your session limit · resets 6am (America/Los_Angeles)",
+		"You've hit your weekly limit · resets Jul 3, 2026 at 9am (America/Los_Angeles)",
+	} {
+		if !IsLimitError(text) {
+			t.Errorf("IsLimitError(%q) = false, want true (a usage/session/weekly cap)", text)
+		}
+		if k, _ := TerminalFailure(text); k != FailureLimit {
+			t.Errorf("TerminalFailure(%q) = %q, want %q (cap outranks throttle)", text, k, FailureLimit)
+		}
+	}
+}
