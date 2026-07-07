@@ -35,6 +35,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/scorecardpane"
 	"github.com/anthony-chaudhary/fak/internal/superloop"
+	"github.com/anthony-chaudhary/fak/internal/trajctl"
 )
 
 func cmdSuperloop(argv []string) { os.Exit(runSuperloop(os.Stdout, os.Stderr, argv)) }
@@ -198,14 +199,24 @@ func runSuperloopModelfit(stdout, stderr io.Writer, argv []string) int {
 // pinned scorecard baseline, the cross-ledger loop-health fold), so a recursive
 // descent through sub-super-loops re-reads nothing.
 type superloopCollector struct {
+	root          string
 	baseline      scorecardpane.Baseline
 	baseErr       error
 	loopByKind    map[string]loopfleet.LoopHealth
 	skippedLedger map[string]string
+	// trajLoaded/trajCurve cache the folded open-objective curves so a recursive
+	// descent (and multiple KindTrajectory members) reads the trajctl ledger once.
+	// trajLedgerPresent records whether the ledger FILE existed at all, so an ABSENT
+	// ledger reads as UNMEASURED (never silently clean) while a real ledger with zero
+	// open objectives reads as measured-clean.
+	trajLoaded        bool
+	trajLedgerPresent bool
+	trajCurve         trajctl.CurveReport
 }
 
 func newSuperloopCollector(root string) *superloopCollector {
 	c := &superloopCollector{
+		root:          root,
 		loopByKind:    map[string]loopfleet.LoopHealth{},
 		skippedLedger: map[string]string{},
 	}
@@ -269,6 +280,12 @@ func (c *superloopCollector) collect(s superloop.Super, onPath map[string]bool) 
 			}
 		case superloop.KindSuperloop:
 			st = c.descend(m, onPath)
+		case superloop.KindTrajectory:
+			// A trajectory member ENUMERATES into one status per OPEN objective, so it
+			// appends its own (possibly several) statuses and skips the single-status
+			// append below.
+			out = append(out, c.trajectory(m)...)
+			continue
 		case superloop.KindUtilization:
 			st = c.utilization(m)
 		case superloop.KindGarden, superloop.KindSurface:
@@ -304,6 +321,76 @@ func (c *superloopCollector) descend(m superloop.Member, onPath map[string]bool)
 	rep := superloop.Walk(sub, c.collect(sub, onPath))
 	delete(onPath, sub.Name)
 	return superloop.SubwalkStatus(m, rep)
+}
+
+// trajCurves folds the trajectory-control ledger into its worst-first open-objective
+// curves, reading the ledger ONCE per collector (a recursive descent and multiple
+// trajectory members reuse the cache). A missing or unreadable ledger folds to an
+// empty report — the same conservative posture trajctl.ReadLedgerFile keeps — so an
+// absent ledger reads as "no open objectives", not a crash.
+func (c *superloopCollector) trajCurves() trajctl.CurveReport {
+	if !c.trajLoaded {
+		path := filepath.Join(c.root, filepath.FromSlash(trajctl.DefaultLedgerRel))
+		if _, err := os.Stat(path); err == nil {
+			c.trajLedgerPresent = true
+		}
+		c.trajCurve = trajctl.Fold(trajctl.ReadLedgerFile(path)).OpenCurves()
+		c.trajLoaded = true
+	}
+	return c.trajCurve
+}
+
+// trajectory is the trajectory-member adapter (issue #2563): it ENUMERATES a single
+// KindTrajectory registry member into one MemberStatus per OPEN objective, each weighed
+// worst-first by its curve signal (trajctl.SignalDebt). A member Ref of "open" (or
+// empty) takes every open objective; any other Ref selects one objective by id. When no
+// open objective matches — an empty ledger, every objective closed, or a named id with
+// no open curve — it folds to a SINGLE measured, zero-debt status so the intent reads
+// SATISFIED (an on-course fleet is nothing to enter) rather than unmeasured.
+func (c *superloopCollector) trajectory(m superloop.Member) []superloop.MemberStatus {
+	rep := c.trajCurves()
+	selectOne := strings.TrimSpace(m.Ref) != "" && m.Ref != "open"
+	out := make([]superloop.MemberStatus, 0, len(rep.Objectives))
+	for _, oc := range rep.Objectives {
+		if selectOne && oc.ObjectiveID != m.Ref {
+			continue
+		}
+		out = append(out, trajectoryStatus(m, oc))
+	}
+	if len(out) == 0 {
+		if !c.trajLedgerPresent {
+			// No ledger at all: trajectory health cannot be read, so it is UNMEASURED —
+			// surfaced, never silently treated as clean (the same honesty the scorecard
+			// and loop members keep for an unreadable surface).
+			return []superloop.MemberStatus{{Member: m, Measured: false,
+				Detail: "no trajctl ledger at " + trajctl.DefaultLedgerRel + " — trajectory health unmeasured (declare/score objectives via `fak trajctl`)"}}
+		}
+		detail := "no open trajectory objective — trajectory health reads clean"
+		if selectOne {
+			detail = fmt.Sprintf("objective %q has no open curve — nothing to steer", m.Ref)
+		}
+		return []superloop.MemberStatus{{Member: m, Measured: true, Debt: 0, Detail: detail}}
+	}
+	return out
+}
+
+// trajectoryStatus folds one open objective curve into the member status the walk
+// weighs: debt is the signal severity (HEALTHY 0 < STALL 1 < DRIFT 2 < DETOUR_OVERRUN
+// 3), so worst-first the walk enters the most off-course objective. Each enumerated
+// status carries the concrete objective id as its Ref and a directly-runnable curve
+// command as its Enter hint, inheriting the source member's Why for provenance.
+func trajectoryStatus(src superloop.Member, oc trajctl.ObjectiveCurve) superloop.MemberStatus {
+	return superloop.MemberStatus{
+		Member: superloop.Member{
+			Kind:  superloop.KindTrajectory,
+			Ref:   oc.ObjectiveID,
+			Why:   src.Why,
+			Enter: fmt.Sprintf("fak trajctl curve --objective %s", oc.ObjectiveID),
+		},
+		Measured: true,
+		Debt:     trajctl.SignalDebt(oc.Signal),
+		Detail:   fmt.Sprintf("%s — %s (latest %.2f, delta %+.2f)", oc.Signal, oc.Detail, oc.Latest, oc.Delta),
+	}
 }
 
 // loopDebt maps a loop-health row to a debt integer for the worst-first fold: a dark

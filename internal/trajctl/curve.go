@@ -261,6 +261,14 @@ func (s State) OpenCurves() CurveReport {
 	return rep
 }
 
+// SignalDebt maps a curve signal to a worst-first debt weight for EXTERNAL folds —
+// the superloop trajectory member (issue #2563) weighs an open objective by this so
+// its walk orders objectives the same way OpenCurves does: HEALTHY 0 < STALL 1 <
+// DRIFT 2 < DETOUR_OVERRUN 3. A HEALTHY objective carries zero debt (an on-course
+// objective is nothing to enter); it reuses the internal severity ranking so the two
+// orderings can never drift apart.
+func SignalDebt(sig Signal) int { return signalSeverity(sig) }
+
 // signalSeverity ranks the vocabulary so the worst-first listing orders the most
 // actionable signal first.
 func signalSeverity(sig Signal) int {

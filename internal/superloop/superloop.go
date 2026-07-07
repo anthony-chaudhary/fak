@@ -73,6 +73,17 @@ const (
 	// boxes. The debt is "capacity available but not being used": a resource sitting
 	// warm while work backs up. Ref names which pool ("account-limits", "node-resources").
 	KindUtilization MemberKind = "utilization"
+	// KindTrajectory is a trajectory-control OBJECTIVE (internal/trajctl): a steered
+	// goal whose worst-first status is its curve SIGNAL severity
+	// (HEALTHY < STALL < DRIFT < DETOUR_OVERRUN). Like KindUtilization its status is
+	// read LIVE by the shell — here from the trajctl ledger's folded curve, not a
+	// committed baseline — and a SINGLE registry member ENUMERATES into one status per
+	// OPEN objective, so "improve trajectory health" walks its objectives worst-first
+	// through the same fold. Ref names the objective set on the registry member ("open"
+	// = every active/paused objective; any other value selects one objective by id) and
+	// the concrete objective id on each enumerated status. This joins the existing
+	// controller-of-controllers walk rather than growing a rival walker (issue #2563).
+	KindTrajectory MemberKind = "trajectory"
 )
 
 // WorkClass is the gardening-vs-throughput bucket a member's work falls into — the
@@ -397,6 +408,24 @@ var registry = []Super{
 		},
 	},
 	{
+		// improve-trajectory joins the existing controller-of-controllers walk with a
+		// TRAJECTORY intent (issue #2563, epic #2533): its one KindTrajectory member
+		// enumerates every OPEN trajectory-control objective into a worst-first status
+		// by curve signal (DETOUR_OVERRUN/DRIFT/STALL ahead of HEALTHY), so "improve
+		// trajectory health" is an intent walked worst-first without growing a rival
+		// walker. It holds no scorecard, so it double-counts nothing at the root fold;
+		// the aggregate clears (Satisfied) exactly when every open objective reads
+		// HEALTHY — an on-course fleet.
+		Name:   "improve-trajectory",
+		Title:  "improve trajectory health — steer open objectives worst-first",
+		About:  "walk every OPEN trajectory-control objective by its curve signal (DETOUR_OVERRUN/DRIFT/STALL worst-first) and enter the objective whose trajectory is most off-course",
+		Floor:  0,
+		Budget: GenerationBudget{Stream: "gen/next", MaxMinutes: 20, TokenCeiling: 150000, MaxWorkers: 1},
+		Members: []Member{
+			{Kind: KindTrajectory, Ref: "open", Why: "every open (active|paused) trajectory objective, folded by curve signal — a DRIFT/STALL/DETOUR_OVERRUN objective is an agent going off its intended curve"},
+		},
+	},
+	{
 		// tend is the ROOT intent — the recursion case made real: a super loop whose
 		// every member is itself a super loop. Walking it descends each registered
 		// intent (the shell walks sub-super-loops inline and folds each sub-report via
@@ -413,6 +442,7 @@ var registry = []Super{
 		Members: []Member{
 			{Kind: KindSuperloop, Ref: "improve-quality", Why: "quality debt is the broadest drag on everything the fleet ships"},
 			{Kind: KindSuperloop, Ref: "improve-loops", Why: "the loops keep everything else tended; a dark loop below starves the rest"},
+			{Kind: KindSuperloop, Ref: "improve-trajectory", Why: "trajectory health: are the steered objectives on-course, or drifting/stalling off their intended curve?"},
 			{Kind: KindSuperloop, Ref: "manage-benchmarks", Why: "benchmark collection feeds the outward-facing numbers"},
 			{Kind: KindSuperloop, Ref: "run-the-night", Why: "the overnight productivity meta-loop: are issues draining and is every account limit + node actually being used?"},
 		},
@@ -1061,6 +1091,14 @@ func actionFor(st MemberStatus) string {
 			return fmt.Sprintf("enter `%s` to spend the idle %s capacity", e, st.Member.Ref)
 		}
 		return fmt.Sprintf("put the idle %s capacity to work", st.Member.Ref)
+	case KindTrajectory:
+		if !st.Measured {
+			return fmt.Sprintf("read the trajctl ledger to fold objective %q's curve", st.Member.Ref)
+		}
+		if e := strings.TrimSpace(st.Member.Enter); e != "" {
+			return fmt.Sprintf("enter `%s` to steer objective %s back on-course", e, st.Member.Ref)
+		}
+		return fmt.Sprintf("steer trajectory objective %q worst-first (`fak trajctl curve --objective %s`)", st.Member.Ref, st.Member.Ref)
 	default:
 		return "enter the member's loop"
 	}
