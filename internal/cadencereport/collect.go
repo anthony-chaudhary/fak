@@ -20,6 +20,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
 	"github.com/anthony-chaudhary/fak/internal/hooks"
 	maturityscore "github.com/anthony-chaudhary/fak/internal/maturity"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/releasestale"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -132,7 +133,8 @@ func RunPyEnvelope(root string, argv []string, python string, timeout time.Durat
 	go func() { done <- cmd.Wait() }()
 	select {
 	case <-time.After(timeout):
-		_ = cmd.Process.Kill()
+		// The folded scripts spawn `git` children; a single-PID kill orphans them (#3103).
+		_, _ = procguard.KillPID(cmd.Process.Pid)
 		<-done
 		return nil, fmt.Sprintf("timed out after %ds", int(timeout.Seconds()))
 	case <-done:

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
 
 type releaseShipCommandRunner func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string)
@@ -1461,7 +1462,9 @@ func runReleaseShipCommand(cwd, name string, args []string, env []string, timeou
 		}
 		return 0, combined.String()
 	case <-timer.C:
-		_ = cmd.Process.Kill()
+		// Tree-kill: the child may be a Python cut/publish orchestrator that spawned
+		// in-flight `git`/`npm` children; a single-PID kill orphans them (#3103).
+		_, _ = procguard.KillPID(cmd.Process.Pid)
 		err := <-done
 		if err != nil {
 			return 124, combined.String() + fmt.Sprintf("\n(timed out after %s)", timeout)

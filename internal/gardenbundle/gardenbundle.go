@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -516,7 +517,9 @@ func RunMember(root string, member Member, python string, timeout time.Duration)
 	go func() { done <- cmd.Wait() }()
 	select {
 	case <-time.After(timeout):
-		_ = cmd.Process.Kill()
+		// Members fan out into subprocess trees (repo Python scripts, the fak binary
+		// itself); ConfigureBackgroundCommand makes no process group, so reap the tree (#3103).
+		_, _ = procguard.KillPID(cmd.Process.Pid)
 		<-done
 		return nil, -1, fmt.Sprintf("timed out after %ds", int(timeout.Seconds()))
 	case err := <-done:
