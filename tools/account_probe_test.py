@@ -285,6 +285,21 @@ class SelectTargetsTest(unittest.TestCase):
             self._annotated(), selector="blocked", account="default")
         self.assertEqual([t["tag"] for t in targets], ["default"])
 
+    def test_selector_never_probes_nonclaude_products(self) -> None:
+        # The probe is a `claude -p pong`: under an opencode config dir it can only
+        # fail auth and stamp a bogus AUTH blocker that merge_known_auth carries
+        # forward (observed 2026-07-06, first live `stale` tick). No selector may
+        # pick a non-claude row -- stale/all included (the watchdog's auto mode is
+        # stale); the explicit single-`account` override stays operator-honored.
+        rows = self._annotated() + [
+            {"kind": "worker", "account": "opencode-nim-x", "tag": "nim-x",
+             "product": "opencode", "available": True,
+             "active_sessions": 0, "live_sessions": 0, "block_kind": None},
+        ]
+        for selector in ("blocked", "stale", "all"):
+            tags = {t["tag"] for t in account_probe.select_targets(rows, selector=selector)}
+            self.assertNotIn("nim-x", tags, f"selector={selector} must skip opencode rows")
+
 
 class ProbeAccountsBatchTest(unittest.TestCase):
     def test_batch_probes_all_targets(self) -> None:

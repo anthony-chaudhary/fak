@@ -376,6 +376,13 @@ def _should_probe(row: dict[str, Any], selector: str) -> bool:
     """Selector policy. ``row`` is an ANNOTATED worker row (has available/blocked/etc.)."""
     if row.get("kind") != "worker":
         return False
+    # The probe IS a `claude -p pong` under the row's config dir, so it can only
+    # assess Claude seats: under an opencode dir it fails auth and stamps a bogus
+    # AUTH blocker that merge_known_auth then carries forward (observed 2026-07-06,
+    # first live `stale` tick). Non-claude rows are never selector-probed; the
+    # explicit single-`account` override in select_targets stays operator-honored.
+    if str(row.get("product") or "claude").lower() != "claude":
+        return False
     if selector == "all":
         return True
     # A malformed row missing `available` is treated as blocked -> probed (fail toward
