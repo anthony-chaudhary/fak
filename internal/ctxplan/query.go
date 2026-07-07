@@ -66,8 +66,10 @@ type PlanQuery struct {
 	// free() dual of Pins (#2225): the agent-facing verb for "I have semantically judged
 	// this context dead; let it go". A released, un-pinned span is elided (recoverable —
 	// a wrong release costs one demand-page fault, never a lost fact) and its budget is
-	// freed. A pin outranks a release; the disposition of every released id comes back in
-	// PlanView.Releases, and a release the next turn refutes is RECANTED (release.go).
+	// freed. A pin outranks a release, and so does the minimum evidence floor (#2949 — a
+	// release cannot strip a resident decisive fact's cluster neighborhood); the
+	// disposition of every released id comes back in PlanView.Releases, and a release the
+	// next turn refutes is RECANTED (release.go).
 	Releases []string `json:"releases,omitempty"`
 
 	// Weights are the OPTIONAL cost constants the model may retune. The zero value uses
@@ -127,8 +129,8 @@ type PlanView struct {
 	// any item needs a user query or source refresh before an effectful action.
 	Assumptions *AssumptionReport `json:"assumptions,omitempty"`
 	// Releases is present when the query declared releases: the disposition of every
-	// released id (Honored / PinHeld / Gated / Unknown), so the declaring model sees what
-	// its "no longer useful" actually did in the same pass that shows it the plan.
+	// released id (Honored / PinHeld / FloorHeld / Gated / Unknown), so the declaring model
+	// sees what its "no longer useful" actually did in the same pass that shows it the plan.
 	Releases *ReleaseReport `json:"releases,omitempty"`
 }
 

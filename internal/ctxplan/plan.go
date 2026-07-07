@@ -223,11 +223,16 @@ func Optimize(cands []Candidate, b Budget, pins map[string]bool, objective strin
 }
 
 // OptimizeWithReleases is Optimize plus the agent-declared release lane (#2225): a
-// candidate in released that is NOT pinned is elided up front as ElideReleased — cold,
-// recoverable, its budget freed — before dedup and the knapsack run. Precedence is
-// sealed/tombstoned (the trust lanes always win), then pin over release (the over-retain
-// bias: a span both pinned and released stays resident), then release. released may be
-// nil; Optimize delegates here with nil, so the two entry points can never diverge.
+// candidate in released that is NOT pinned and NOT owed by a needed evidence cluster is
+// elided up front as ElideReleased — cold, recoverable, its budget freed — before dedup
+// and the knapsack run. Precedence is sealed/tombstoned (the trust lanes always win),
+// then pin over release, then the minimum evidence floor over release (#2949 — the same
+// over-retain bias as the pin fence: a false-retain costs tokens, a false-free costs
+// context), then release. A released span the floor holds stays RESIDENT and is reported
+// FloorHeld (release.go), so the release lane can never strip a resident decisive fact's
+// cluster neighborhood into an isolated needle — see minEvidenceFloorRows for the precise
+// invariant. released may be nil; Optimize delegates here with nil, so the two entry
+// points can never diverge.
 func OptimizeWithReleases(cands []Candidate, b Budget, pins, released map[string]bool, objective string) Plan {
 	// A negative budget is meaningless; clamp to 0 (nothing non-pinned fits) so the
 	// OverBudget branch below is reached ONLY when real pins overrun, never on a stray
@@ -238,18 +243,34 @@ func OptimizeWithReleases(cands []Candidate, b Budget, pins, released map[string
 	}
 	p := Plan{Budget: budgetTokens, Objective: objective, Candidates: len(cands)}
 
-	var live []Candidate
+	// Trust lanes first: sealed/tombstoned always win, whatever else claims the span.
+	var trusted []Candidate
 	for _, c := range cands {
 		switch {
 		case c.Cell.Sealed:
 			p.Elided = append(p.Elided, elisionOf(c, ElideSealed))
 		case c.Cell.Tombstoned:
 			p.Elided = append(p.Elided, elisionOf(c, ElideTombstoned))
-		case released[c.Cell.ID] && !pins[c.Cell.ID]:
-			p.Elided = append(p.Elided, elisionOf(c, ElideReleased))
 		default:
-			live = append(live, c)
+			trusted = append(trusted, c)
 		}
+	}
+
+	// The release lane, fenced by the minimum evidence floor (#2949): the needed-cluster
+	// set is computed BEFORE any release is honored, so releasing a decisive span's cluster
+	// neighbors cannot re-create the isolated needle the floor exists to prevent. A released
+	// un-pinned span in a needed cluster stays live (the floor outranks the release, exactly
+	// as a pin does) and is reported FloorHeld, never silently dropped. Releasing the
+	// decisive span ITSELF is still honored — with the fact cold there is no resident needle
+	// to support, so its cluster owes no floor on its account.
+	needed := neededEvidenceClusters(trusted, pins, released)
+	var live []Candidate
+	for _, c := range trusted {
+		if released[c.Cell.ID] && !pins[c.Cell.ID] && !needed[evidenceCluster(c.Cell)] {
+			p.Elided = append(p.Elided, elisionOf(c, ElideReleased))
+			continue
+		}
+		live = append(live, c)
 	}
 
 	// Content-dedup: collapse equal-Digest spans to one representative BEFORE the
@@ -259,7 +280,7 @@ func OptimizeWithReleases(cands []Candidate, b Budget, pins, released map[string
 	live, dupElided := dedup(live, pins)
 	p.Elided = append(p.Elided, dupElided...)
 
-	floorRows, floorClusters := minEvidenceFloorRows(live, pins)
+	floorRows, floorClusters := minEvidenceFloorRows(live, pins, released)
 	p.MinEvidenceClusters = floorClusters
 
 	var pinned, floor, free []Candidate
@@ -269,6 +290,12 @@ func OptimizeWithReleases(cands []Candidate, b Budget, pins, released map[string
 			pinned = append(pinned, c)
 		case floorRows[i]:
 			floor = append(floor, c)
+		case released[c.Cell.ID]:
+			// Retained past the release lane for a floor the plan no longer owes (its
+			// cluster's decisive trigger was collapsed by dedup): honor the release after
+			// all. A released span is never knapsack-selected — its disposition is a closed
+			// set: honored (cold), pin-held, or floor-held.
+			p.Elided = append(p.Elided, elisionOf(c, ElideReleased))
 		default:
 			free = append(free, c)
 		}
@@ -578,22 +605,20 @@ func betterRep(a, b Candidate, pins map[string]bool) bool {
 
 // minEvidenceFloorRows returns the live candidate rows that must be resident as a minimum
 // evidence floor. A cluster is floor-paid when it contains a decisive span with positive
-// benefit (or a decisive pin). Then every live span in that cluster rides together as the
-// semantic neighborhood for the fact.
-func minEvidenceFloorRows(live []Candidate, pins map[string]bool) (map[int]bool, []string) {
-	clusterNeeded := map[string]bool{}
-	for _, c := range live {
-		cluster := evidenceCluster(c.Cell)
-		if cluster == "" {
-			continue
-		}
-		if NormEvidenceKind(evidenceKind(c.Cell)) != EvidenceDecisive {
-			continue
-		}
-		if c.Benefit > 0 || pins[c.Cell.ID] {
-			clusterNeeded[cluster] = true
-		}
-	}
+// benefit (or a decisive pin) whose own release, if any, was not honored. Then every live
+// span in that cluster rides together as the semantic neighborhood for the fact.
+//
+// ISOLATION INVARIANT (#2949, the isolated-needle guarantee): if a decisive evidence span
+// is resident in the returned plan, then every candidate in its evidence cluster is
+// resident with it. A cluster member may be excluded from residency ONLY by a trust lane
+// (sealed/tombstoned — poison never rides in on a floor) or by content-dedup (its bytes
+// stay resident via the equal-digest representative). In particular a needed cluster's
+// member is never elided as over_budget (the floor is paid before the knapsack and fails
+// open when it overruns the budget) and never as released (the floor outranks the release
+// lane, the same over-retain bias as a pin) — so a decisive fact is never left resident as
+// an isolated tiny needle while its local semantic neighborhood is elided.
+func minEvidenceFloorRows(live []Candidate, pins, released map[string]bool) (map[int]bool, []string) {
+	clusterNeeded := neededEvidenceClusters(live, pins, released)
 	rows := map[int]bool{}
 	clusters := make([]string, 0, len(clusterNeeded))
 	for cluster := range clusterNeeded {
@@ -606,6 +631,32 @@ func minEvidenceFloorRows(live []Candidate, pins map[string]bool) (map[int]bool,
 		}
 	}
 	return rows, clusters
+}
+
+// neededEvidenceClusters returns the evidence clusters whose minimum floor the plan owes:
+// a cluster is needed when it contains a decisive span the plan would keep resident — one
+// that is pinned or carries positive forecast benefit — and whose own release (if any) was
+// not honored. A released un-pinned decisive span does NOT make its cluster needed:
+// honoring that release sends the fact itself cold (recoverable), so there is no resident
+// needle whose neighborhood the floor must protect. Spans with no cluster never trigger.
+func neededEvidenceClusters(cands []Candidate, pins, released map[string]bool) map[string]bool {
+	needed := map[string]bool{}
+	for _, c := range cands {
+		cluster := evidenceCluster(c.Cell)
+		if cluster == "" {
+			continue
+		}
+		if NormEvidenceKind(evidenceKind(c.Cell)) != EvidenceDecisive {
+			continue
+		}
+		if released[c.Cell.ID] && !pins[c.Cell.ID] {
+			continue
+		}
+		if c.Benefit > 0 || pins[c.Cell.ID] {
+			needed[cluster] = true
+		}
+	}
+	return needed
 }
 
 func evidenceCluster(s Span) string {

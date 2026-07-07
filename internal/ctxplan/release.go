@@ -12,7 +12,7 @@ package ctxplan
 // unchanged). A WRONG release therefore costs one page fault, never a lost fact — the
 // same property that makes a bad forecast safe (forecast.go) makes a bad release safe.
 //
-// Three fences keep the declaration honest:
+// Four fences keep the declaration honest:
 //
 //	pin outranks release — a span both pinned and released stays RESIDENT (the epic's
 //	                       over-retain bias: a false-retain costs tokens, a false-free
@@ -20,6 +20,15 @@ package ctxplan
 //	                       silently resolved either way. Structural roots (system, goal,
 //	                       last user turn) are pinned, so they are un-releasable by
 //	                       construction.
+//
+//	floor outranks release — a released span in a NEEDED evidence cluster (one whose
+//	                       decisive span stays resident) is kept RESIDENT by the minimum
+//	                       evidence floor and reported FloorHeld (#2949): the same
+//	                       over-retain bias as the pin fence, aimed at the isolated-needle
+//	                       failure — a release must not strip a decisive fact's local
+//	                       semantic neighborhood while the fact itself rides on. Releasing
+//	                       the decisive span ITSELF is still honored (the fact goes cold,
+//	                       so no floor is owed on its account).
 //
 //	release is not tombstone — a released span is NOT suppressed. Demand-paging it back
 //	                       in is legitimate (and is exactly the recant signal below);
@@ -38,7 +47,7 @@ package ctxplan
 
 // ReleaseReport is what the model's release declarations actually DID — carried on
 // PlanView so the declaring agent sees the disposition of every id it released, in the
-// same pass that shows it the plan. The four classes are closed and disjoint; every
+// same pass that shows it the plan. The five classes are closed and disjoint; every
 // distinct released id lands in exactly one.
 type ReleaseReport struct {
 	// Honored are released spans the planner elided as ElideReleased — cold, recoverable,
@@ -48,6 +57,13 @@ type ReleaseReport struct {
 	// release lost. Surfaced, not silently dropped: the model learns its declaration
 	// conflicts with a root (its own, or a structural one).
 	PinHeld []string `json:"pin_held,omitempty"`
+	// FloorHeld are released spans the minimum evidence floor kept RESIDENT — the floor
+	// outranks release exactly as a pin does (#2949): a decisive fact's cluster neighbors
+	// cannot be released out from under it while the fact itself stays resident, or the
+	// plan would re-create the isolated tiny needle the floor exists to prevent. Surfaced,
+	// not silently dropped: the model learns its declaration conflicts with an owed
+	// evidence floor.
+	FloorHeld []string `json:"floor_held,omitempty"`
 	// Gated are released spans a stronger lane had already excluded (sealed by the trust
 	// gate, tombstoned by context control). The release changed nothing.
 	Gated []string `json:"gated,omitempty"`
@@ -67,8 +83,12 @@ func buildReleaseReport(p Plan, releases []string) ReleaseReport {
 		}
 	}
 	resident := make(map[string]bool, len(p.Selected))
+	pinHeld := make(map[string]bool, len(p.Selected))
 	for _, s := range p.Selected {
 		resident[s.ID] = true
+		if s.Pinned {
+			pinHeld[s.ID] = true
+		}
 	}
 
 	var out ReleaseReport
@@ -77,9 +97,15 @@ func buildReleaseReport(p Plan, releases []string) ReleaseReport {
 		case elidedReason[id] == ElideReleased:
 			out.Honored = append(out.Honored, id)
 		case resident[id]:
-			// The release lane elides every released un-pinned candidate up front, so the
-			// only way a released id is resident is that a pin won the conflict.
-			out.PinHeld = append(out.PinHeld, id)
+			// A released id can be resident only because a stronger residency lane won the
+			// conflict: a pin (pin outranks release) or the minimum evidence floor (the
+			// floor outranks release the same way, #2949). Which one is read off the
+			// selection's own markers, never recomputed.
+			if pinHeld[id] {
+				out.PinHeld = append(out.PinHeld, id)
+			} else {
+				out.FloorHeld = append(out.FloorHeld, id)
+			}
 		case elidedReason[id] == ElideSealed || elidedReason[id] == ElideTombstoned:
 			out.Gated = append(out.Gated, id)
 		default:

@@ -78,6 +78,91 @@ func TestPinOutranksRelease(t *testing.T) {
 	}
 }
 
+// TestMinEvidenceFloorOutranksRelease is the isolated-needle fence on the release lane
+// (#2949): with the decisive span in cluster case-7 staying resident, releasing its
+// support neighbors must NOT strip its local semantic neighborhood — a naive release pass
+// would honor both releases and leave the needle as an isolated tiny fact, exactly the
+// "Lost in the Haystack" failure the minimum evidence floor exists to prevent. The floor
+// outranks the release (the same over-retain bias as the pin fence): the neighbors stay
+// RESIDENT, carry the MinEvidenceFloor marker, and the conflict is reported FloorHeld.
+func TestMinEvidenceFloorOutranksRelease(t *testing.T) {
+	cands := []Candidate{
+		evidenceCand("support-before", 0, 2, 0, "case-7", EvidenceSupport),
+		evidenceCand("needle", 1, 1, 10, "case-7", EvidenceDecisive),
+		evidenceCand("support-after", 2, 2, 0, "case-7", EvidenceSupport),
+	}
+	released := map[string]bool{"support-before": true, "support-after": true}
+	p := OptimizeWithReleases(cands, Budget{Tokens: 10}, nil, released, ObjGreedy)
+
+	got := selectedIDs(p)
+	for _, id := range []string{"support-before", "needle", "support-after"} {
+		if !got[id] {
+			t.Fatalf("the floor must keep %s resident despite its release; selected=%v", id, got)
+		}
+	}
+	for _, e := range p.Elided {
+		if e.Reason == ElideReleased {
+			t.Fatalf("no needed-cluster member may be release-elided while the needle rides, elided=%+v", p.Elided)
+		}
+	}
+	for _, s := range p.Selected {
+		if (s.ID == "support-before" || s.ID == "support-after") && !s.MinEvidenceFloor {
+			t.Errorf("floor-held span %s must carry the MinEvidenceFloor marker, got %+v", s.ID, s)
+		}
+	}
+	if p.BindingConstraint != BindMinEvidenceFloor {
+		t.Errorf("BindingConstraint = %q, want %q", p.BindingConstraint, BindMinEvidenceFloor)
+	}
+	if w := Audit(p); !w.Faithful {
+		t.Errorf("floor-over-release must stay faithful, witness=%+v", w)
+	}
+
+	report := buildReleaseReport(p, []string{"support-before", "support-after"})
+	if !reflect.DeepEqual(report.FloorHeld, []string{"support-after", "support-before"}) {
+		t.Errorf("the floor-vs-release conflict must be reported FloorHeld, report=%+v", report)
+	}
+	if len(report.Honored) != 0 || len(report.PinHeld) != 0 {
+		t.Errorf("no release was honored or pin-held here, report=%+v", report)
+	}
+}
+
+// TestReleaseOfDecisiveSpanItselfIsHonored: the floor fence guards the NEIGHBORHOOD of a
+// resident decisive fact, never the release verb itself — releasing the decisive span
+// sends the fact cold (recoverable, one demand-page away), its cluster owes no floor on
+// its account, and the zero-benefit support spans compete normally instead of being
+// floor-forced resident around a needle that is not there.
+func TestReleaseOfDecisiveSpanItselfIsHonored(t *testing.T) {
+	cands := []Candidate{
+		evidenceCand("support", 0, 2, 0, "case-8", EvidenceSupport),
+		evidenceCand("needle", 1, 1, 10, "case-8", EvidenceDecisive),
+	}
+	p := OptimizeWithReleases(cands, Budget{Tokens: 10}, nil, map[string]bool{"needle": true}, ObjGreedy)
+
+	got := selectedIDs(p)
+	if got["needle"] {
+		t.Fatalf("a released decisive span must go cold, selected=%v", got)
+	}
+	honored := false
+	for _, e := range p.Elided {
+		if e.ID == "needle" && e.Reason == ElideReleased {
+			honored = true
+			if e.Digest == "" {
+				t.Errorf("the released needle must keep its recovery handle")
+			}
+		}
+	}
+	if !honored {
+		t.Fatalf("the needle's release must be honored, elided=%+v", p.Elided)
+	}
+	if p.MinEvidenceTokens != 0 || len(p.MinEvidenceClusters) != 0 {
+		t.Errorf("no floor is owed once the decisive span went cold: tokens=%d clusters=%v",
+			p.MinEvidenceTokens, p.MinEvidenceClusters)
+	}
+	if got["support"] {
+		t.Errorf("a zero-benefit support span must not be floor-forced resident, selected=%v", got)
+	}
+}
+
 // TestReleaseTrustLanePrecedence: sealed/tombstoned always win — a released poison span is
 // elided as sealed (the trust verdict), not laundered into the softer "released" class,
 // and the report calls it Gated (the release changed nothing).
