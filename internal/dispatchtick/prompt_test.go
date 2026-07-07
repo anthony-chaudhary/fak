@@ -50,6 +50,28 @@ func TestIssuePromptEmbedsIssueFacts(t *testing.T) {
 	}
 }
 
+func TestIssuePromptDoesNotLeakUnrelatedIssueData(t *testing.T) {
+	// #1404 acceptance: the single-issue renderer is scoped to ONE issue+lane and
+	// must not leak another issue's number, title, or body. The renderer only ever
+	// receives one IssuePromptInput, so a rendered prompt for issue A may not carry
+	// a distinct issue B's identifying tokens — a regression guard against any future
+	// "related issues" enrichment that would splice a sibling's data onto the spawn path.
+	in := sampleIssuePrompt() // issue #465
+	p := RenderIssuePrompt(in)
+	if !strings.Contains(p, "#465") {
+		t.Fatalf("prompt lost its own issue number #465:\n%s", p)
+	}
+	for _, unrelated := range []string{
+		"#987654",                 // a different issue's number
+		"ZZUnrelatedTitleTokenZZ", // a different issue's title token
+		"ZZUnrelatedBodyTokenZZ",  // a different issue's body token
+	} {
+		if strings.Contains(p, unrelated) {
+			t.Fatalf("prompt leaked unrelated issue data %q:\n%s", unrelated, p)
+		}
+	}
+}
+
 func TestIssuePromptExtractsAgentIssueBrief(t *testing.T) {
 	in := sampleIssuePrompt()
 	in.Body = strings.Join([]string{
