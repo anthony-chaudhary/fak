@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -216,6 +217,94 @@ func TestDispatchProgressWeeklyModeReadsLedgerWithoutAppending(t *testing.T) {
 	}
 	if !bytes.Equal(before, after) {
 		t.Fatal("weekly report must not append or mutate the progress ledger")
+	}
+}
+
+// TestDispatchProgressClosuresTowardTargetSurvivesBacklogDrift is the #2639
+// witness: a synthetic ledger where the loop witnessed real closures
+// (closed_now>0) while the open backlog ROSE in the same window (new issues
+// filed/reopened). The net-open metric drifts to zero and pins target_remaining
+// at the full target, but the close-N counter counts the witnessed closures.
+func TestDispatchProgressClosuresTowardTargetSurvivesBacklogDrift(t *testing.T) {
+	root := t.TempDir()
+	runsDir := filepath.Join(root, dispatchProgressRunsDir)
+	writeDispatchProgressRows(t, runsDir, []map[string]any{
+		{"utc": "2026-07-01T10:00:00Z", "open_now": 480, "closed_now": 3, "closed_by_loop_total": 3},
+		{"utc": "2026-07-01T10:20:00Z", "open_now": 486, "closed_now": 4, "closed_by_loop_total": 7},
+		{"utc": "2026-07-01T10:40:00Z", "open_now": 490, "closed_now": 2, "closed_by_loop_total": 9},
+	})
+	if err := dispatchProgressSaveBaseline(runsDir, 480); err != nil {
+		t.Fatal(err)
+	}
+
+	restoreOpen, restoreAudit, restoreNow := dispatchProgressOpenCount, dispatchProgressAudit, dispatchProgressNow
+	t.Cleanup(func() {
+		dispatchProgressOpenCount, dispatchProgressAudit, dispatchProgressNow = restoreOpen, restoreAudit, restoreNow
+	})
+	dispatchProgressOpenCount = func(string) (int, error) { return 492, nil } // backlog rose above baseline
+	dispatchProgressAudit = func(string, io.Writer, int, string) (map[string]any, error) {
+		return map[string]any{"issues": []any{}}, nil
+	}
+	dispatchProgressNow = func() time.Time { return time.Date(2026, 7, 1, 11, 0, 0, 0, time.UTC) }
+
+	rec, err := evaluateDispatchProgress(dispatchProgressOptions{Workspace: root, Target: 50, MaxCommits: 10}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Net-open reduction drifted: baseline 480 - open 492 < 0 -> clamped 0, so the
+	// old target_remaining pins at the full target despite 9 real witnessed closures.
+	if got := dispatchMapInt(rec, "resolved_toward_target"); got != 0 {
+		t.Fatalf("resolved_toward_target = %d, want 0 (net-open reduction drifted away)", got)
+	}
+	if got := dispatchMapInt(rec, "target_remaining"); got != 50 {
+		t.Fatalf("target_remaining = %d, want 50 (net-open pins at full target)", got)
+	}
+	// The close-N counter reflects the 9 witnessed closures, backlog-independent.
+	if got := dispatchMapInt(rec, "closures_toward_target"); got != 9 {
+		t.Fatalf("closures_toward_target = %d, want 9 witnessed closures", got)
+	}
+	if got := dispatchMapInt(rec, "closures_target_remaining"); got != 41 {
+		t.Fatalf("closures_target_remaining = %d, want 41 (50-9), not backlog drift", got)
+	}
+}
+
+func TestDispatchProgressClosuresTowardTargetClamps(t *testing.T) {
+	cases := []struct {
+		closed, target, wantToward, wantRemaining int
+	}{
+		{0, 50, 0, 50},
+		{9, 50, 9, 41},
+		{50, 50, 50, 0},
+		{63, 50, 50, 0}, // over-target: bar caps at target, remaining floors at 0
+		{-1, 50, 0, 50}, // defensive: a negative fold is treated as 0
+	}
+	for _, tc := range cases {
+		toward, remaining := dispatchProgressClosuresTowardTarget(tc.closed, tc.target)
+		if toward != tc.wantToward || remaining != tc.wantRemaining {
+			t.Fatalf("closures(%d,%d) = (%d,%d), want (%d,%d)",
+				tc.closed, tc.target, toward, remaining, tc.wantToward, tc.wantRemaining)
+		}
+	}
+}
+
+func TestRenderDispatchProgressDisambiguatesClosuresFromBacklogDrift(t *testing.T) {
+	out := renderDispatchProgress(map[string]any{
+		"target": 50, "open_now": 492, "baseline_open": 480,
+		"resolved_toward_target": 0, "target_remaining": 50,
+		"closures_toward_target": 9, "closures_target_remaining": 41,
+		"witnessed_open": 2, "witnessed_numbers": []int{491, 493},
+		"closed_now": 0, "closed_by_loop_total": 9,
+	})
+	for _, want := range []string{
+		"witnessed closures toward 50:",
+		"] 9/50", // the bar tracks witnessed closures, not net-open reduction
+		"witnessed closures remaining to 50: 41",
+		"net-open reduction (baseline-open, drifts with backlog): 0  net-open remaining: 50",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("rendered progress missing %q:\n%s", want, out)
+		}
 	}
 }
 

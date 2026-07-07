@@ -171,6 +171,7 @@ func evaluateDispatchProgress(opts dispatchProgressOptions, stderr io.Writer) (m
 		_ = dispatchProgressSaveBaseline(runsDir, baselineOpen)
 	}
 	closedTotal := dispatchProgressFoldClosedHistory(runsDir)
+	closuresToward, closuresRemaining := dispatchProgressClosuresTowardTarget(closedTotal, opts.Target)
 	now := dispatchProgressNow().UTC()
 
 	var openAny any
@@ -206,13 +207,22 @@ func evaluateDispatchProgress(opts dispatchProgressOptions, stderr io.Writer) (m
 		"baseline_open":          baselineAny,
 		"resolved_toward_target": resolvedAny,
 		"target_remaining":       remainingAny,
-		"witnessed_open":         len(witnessed),
-		"witnessed_numbers":      dispatchProgressLimitInts(witnessed, 50),
-		"closed_now":             0,
-		"closed_by_loop_total":   closedTotal,
-		"close_live":             nil,
-		"close_result":           nil,
-		"audit_error":            nil,
+		// Backlog-independent close-N accounting (#2639): resolved_toward_target /
+		// target_remaining above are net-open reduction (baseline_open - open_now),
+		// which new-issue inflow can erase to 0 even while the loop witnesses real
+		// closures. closures_toward_target / closures_target_remaining fold gross
+		// witnessed loop closures toward the close-N target so the operator readout
+		// tracks closures, not backlog drift. Kept alongside the net-open fields for
+		// automation that already reads them.
+		"closures_toward_target":    closuresToward,
+		"closures_target_remaining": closuresRemaining,
+		"witnessed_open":            len(witnessed),
+		"witnessed_numbers":         dispatchProgressLimitInts(witnessed, 50),
+		"closed_now":                0,
+		"closed_by_loop_total":      closedTotal,
+		"close_live":                nil,
+		"close_result":              nil,
+		"audit_error":               nil,
 	}
 	for key, value := range dispatchProgressHourlyProjection(runsDir, now, rec) {
 		rec[key] = value
@@ -630,6 +640,28 @@ func dispatchProgressFoldClosedHistory(runsDir string) int {
 	return total
 }
 
+// dispatchProgressClosuresTowardTarget folds gross witnessed loop closures into a
+// close-N target counter that does NOT drift when new issues are filed. Unlike
+// resolved_toward_target (baseline_open - open_now — a net-open reduction that
+// backlog inflow can erase back to 0), this counts each witnessed closure toward
+// the target: `toward` is clamped to [0, target] for the progress bar, and
+// `remaining` is max(0, target - closedTotal). It depends only on the ledger fold
+// of closed_now, so it survives a gh open-count outage. #2639.
+func dispatchProgressClosuresTowardTarget(closedTotal, target int) (toward, remaining int) {
+	if closedTotal < 0 {
+		closedTotal = 0
+	}
+	toward = closedTotal
+	if target >= 0 && toward > target {
+		toward = target
+	}
+	remaining = target - closedTotal
+	if remaining < 0 {
+		remaining = 0
+	}
+	return toward, remaining
+}
+
 func dispatchProgressHourlyProjection(runsDir string, now time.Time, current map[string]any) map[string]any {
 	samples := dispatchProgressCloseSamples(runsDir, now.Add(-time.Hour), now)
 	if dispatchMapInt(current, "closed_now") > 0 {
@@ -816,7 +848,8 @@ func dispatchProgressRunID(payload map[string]any) string {
 func dispatchProgressMetrics(payload map[string]any) map[string]int64 {
 	keys := []string{
 		"target", "open_now", "baseline_open", "resolved_toward_target",
-		"target_remaining", "witnessed_open", "closed_now", "closed_by_loop_total",
+		"target_remaining", "closures_toward_target", "closures_target_remaining",
+		"witnessed_open", "closed_now", "closed_by_loop_total",
 	}
 	out := map[string]int64{}
 	for _, key := range keys {
@@ -862,14 +895,17 @@ func dispatchProgressIntSlice(v any) []int {
 
 func renderDispatchProgress(p map[string]any) string {
 	target := dispatchMapInt(p, "target")
-	resolved := dispatchMapInt(p, "resolved_toward_target")
-	bar := dispatchProgressBar(resolved, target)
+	// The progress bar tracks witnessed closures toward the close-N target, not
+	// net-open reduction — new-issue inflow must not erase closure progress (#2639).
+	bar := dispatchProgressBar(dispatchMapInt(p, "closures_toward_target"), target)
 	var b strings.Builder
-	fmt.Fprintf(&b, "issue-resolve-progress: open=%v (baseline %v)  toward %d: %s\n",
+	fmt.Fprintf(&b, "issue-resolve-progress: open=%v (baseline %v)  witnessed closures toward %d: %s\n",
 		p["open_now"], p["baseline_open"], target, bar)
 	fmt.Fprintf(&b, "  witnessed-open (closeable now): %d  %v\n", dispatchMapInt(p, "witnessed_open"), p["witnessed_numbers"])
-	fmt.Fprintf(&b, "  closed this tick: %d  closed-by-loop total: %d  remaining to %d: %v\n",
-		dispatchMapInt(p, "closed_now"), dispatchMapInt(p, "closed_by_loop_total"), target, p["target_remaining"])
+	fmt.Fprintf(&b, "  closed this tick: %d  closed-by-loop total: %d  witnessed closures remaining to %d: %v\n",
+		dispatchMapInt(p, "closed_now"), dispatchMapInt(p, "closed_by_loop_total"), target, p["closures_target_remaining"])
+	fmt.Fprintf(&b, "  net-open reduction (baseline-open, drifts with backlog): %v  net-open remaining: %v\n",
+		p["resolved_toward_target"], p["target_remaining"])
 	fmt.Fprintf(&b, "  hourly projection: current=%.1f/h target=%.1f/h gap=%.1f/h closes=%d window=%.2fh\n",
 		dispatchMapFloat(p, "current_issues_per_hour"),
 		dispatchMapFloat(p, "target_issues_per_hour"),
