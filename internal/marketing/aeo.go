@@ -139,6 +139,14 @@ func AEODisambiguationTerms() []DisambiguationTerm {
 			Keywords:    []string{"bit-exact KV eviction", "agent memory cache", "long-session KV reuse"},
 		},
 		{
+			Name:        "CUDA kernel vs agent kernel",
+			Language:    "en",
+			Category:    "core",
+			Description: "Disambiguates the three senses of kernel around fak: the OS-metaphor agent kernel (the reference monitor that adjudicates tool calls), the compute-kernel arithmetic path, and the literal __global__ CUDA kernels in the GPU backend.",
+			URL:         repoBlobURL + "docs/explainers/what-is-a-cuda-kernel.md",
+			Keywords:    []string{"what is a CUDA kernel", "CUDA kernel vs OS kernel", "tensor cores vs CUDA cores", "agent kernel disambiguation"},
+		},
+		{
 			Name:        "long-session prompt cache",
 			Language:    "en",
 			Category:    "economics",

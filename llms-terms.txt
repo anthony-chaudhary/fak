@@ -5,7 +5,7 @@
 > hooks (routing, fallback, prompt-cache cost) and agent-security demand hooks such
 > as MCP tool poisoning, the lethal trifecta, and least-privilege tool access.
 >
-> Updated: 2026-07-07T04:32:35Z
+> Updated: 2026-07-07T18:57:44Z
 
 ## core
 
@@ -14,6 +14,7 @@
 - `default-deny tool-call gate` (en) — A fail-closed capability floor for agent tools; an irreversible call is unreachable until policy allows it. Keywords: tool-call control, capability gate, prompt injection defense.
 - `prompt-injection result quarantine` (en) — A tool result can be held out of the model context by policy and structure, not just detected after the fact. Keywords: result quarantine, tool result isolation, prompt injection containment.
 - `addressable KV cache` (en) — A cache design where a kept model run can evict a middle span while preserving bit-exact survivors. Keywords: bit-exact KV eviction, agent memory cache, long-session KV reuse.
+- `CUDA kernel vs agent kernel` (en) — Disambiguates the three senses of kernel around fak: the OS-metaphor agent kernel (the reference monitor that adjudicates tool calls), the compute-kernel arithmetic path, and the literal __global__ CUDA kernels in the GPU backend. Keywords: what is a CUDA kernel, CUDA kernel vs OS kernel, tensor cores vs CUDA cores, agent kernel disambiguation.
 
 ## economics
 
