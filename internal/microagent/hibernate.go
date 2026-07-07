@@ -1,0 +1,265 @@
+package microagent
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+)
+
+// Idle-agent hibernation (epic #2000 M12, issue #2012).
+//
+// An enrolled microagent that is parked — waiting on a free admission slot (M19)
+// or a slow tool between steps — still costs a goroutine and its in-RAM context.
+// Hibernation parks that context to disk and lets the goroutine go, so a host can
+// enroll N agents while keeping only R of them resident (goroutine + RAM), the
+// rest frozen on disk at ~O(1) RAM each. On wake the context is restored
+// byte-identically, so no state is lost across the round-trip.
+//
+// The load-bearing constraint, stated honestly: an agent blocked INSIDE a
+// synchronous Step (a live syscall / tool call) cannot be hibernated — Go does
+// not serialize a goroutine stack. Hibernation happens at a STEP BOUNDARY: the
+// host freezes an agent that has RETURNED from Step (parked between units of
+// work), then releases its goroutine. That boundary is exactly the shape
+// internal/microagent already requires of Step (Step advances one unit and
+// returns), so a well-behaved step-resumable agent is hibernatable today.
+//
+// Generation intent: gen/future (#2012) — an OPTION behind an explicit seam,
+// mirroring the Host itself (doc.go): nothing in the default fak serve / guard /
+// dispatch path constructs a HibernationStore or a ResidentCap. Closing evidence
+// for the generation frame:
+//
+//   - Promotion evidence: hibernate_test.go witnesses (a) a hibernate->wake
+//     round-trip that is byte-identical (Wake refuses a lossy Thaw), and (b) N
+//     enrolled step-agents driven through an R-slot ResidentCap + a
+//     HibernationStore where the resident set never exceeds R yet all N complete
+//     — the two #2012 acceptance bullets. Promote once the live Host.run loop can
+//     target the store (auto-hibernate a step-parked agent) AND a density /
+//     RSS-vs-R measurement confirms the parked goroutine + context was the
+//     binding cost (the #2000 M8-M12 footprint thesis).
+//   - Demotion / retirement criteria: retire the seam if the footprint benchmark
+//     shows a parked microagent's goroutine + bounded context is cheap enough
+//     that O(N) residency is affordable (hibernation then buys no density), or if
+//     per-agent isolation forces an OS process per agent anyway (#2018), so there
+//     is no in-process goroutine to free.
+//   - Invalidating assumption: hibernation assumes the agent loop is
+//     step-resumable — that a Microagent's whole live state between steps is
+//     captured by Freeze and restored by Thaw, with no residue in the goroutine
+//     stack, an open file, a working directory, or a process-tree tool. If a real
+//     loop parks mid-Step on a slow tool (the exact case in the issue body) its
+//     goroutine cannot be freed without the still-open subprocess ToolExec /
+//     admission seams (#2003/#2014/M19); Freeze/Thaw covers the between-steps
+//     context only. Prior art for the wake-boundary re-validation discipline:
+//     docs/notes/RESEARCH-random-time-horizons-dormancy-rehydration-2026-06-28.md
+//     (the CRaC afterRestore analog — verify at the restore boundary, don't trust
+//     the thawed snapshot).
+
+// DefaultResidentCap is the resident-slot limit a NewResidentCap(0) selects. It
+// mirrors DefaultWorkers: by default at most this many agents hold a goroutine.
+const DefaultResidentCap = 8
+
+// Structured refusals for the hibernation seam.
+var (
+	// ErrUnsafeHibernateID refuses an id that is not a single safe path element,
+	// so a frozen file can never escape the store directory (no separators, no
+	// "." / ".." — an id is one file, <dir>/<id>.hib).
+	ErrUnsafeHibernateID = errors.New("microagent: hibernation id must be a single safe path element (no separators, not . or ..)")
+	// ErrNotHibernated is returned by Wake for an id with no frozen context on
+	// disk (never parked, or already woken).
+	ErrNotHibernated = errors.New("microagent: no hibernated context for id")
+	// ErrThawMismatch refuses a Thaw that is not the faithful inverse of Freeze:
+	// Wake re-Freezes the restored agent and requires the bytes to equal what it
+	// read from disk. This is the built-in no-state-loss check — a lossy round
+	// trip is refused at the wake boundary, never silently accepted.
+	ErrThawMismatch = errors.New("microagent: Thaw did not restore the frozen context byte-identically (lossy round-trip refused)")
+)
+
+// Hibernable is the OPTIONAL seam a step-resumable Microagent implements to be
+// parked to disk between steps and restored byte-identically on wake (#2012).
+//
+//   - Freeze serializes the agent's bounded context (epic #2000 M4 — the bounded
+//     linear-history context) to a self-describing byte slice. It MUST be
+//     deterministic: two Freeze calls on an unchanged context return equal bytes,
+//     so a hibernate->wake round-trip is byte-identical.
+//   - Thaw restores that context. Thaw(b) followed by Freeze() MUST return b
+//     (HibernationStore.Wake enforces this and refuses ErrThawMismatch otherwise).
+//
+// Freeze/Thaw cover the between-steps context only — never a goroutine blocked
+// inside a live Step (see the package-level note above).
+type Hibernable interface {
+	Microagent
+	Freeze() ([]byte, error)
+	Thaw([]byte) error
+}
+
+// HibernationStore parks a hibernated agent's frozen context on disk (one file
+// per agent, <dir>/<id>.hib) so it stops holding RAM + a goroutine while it
+// waits, and wakes it byte-identically. It is the M12 mechanism a resident cap
+// stands on: N enrolled agents, at most R resident, the rest frozen here.
+//
+// It is safe for concurrent use: each agent id is an independent file, and Park
+// writes atomically (temp file + rename) so a crash mid-write never leaves a
+// torn frozen context a later Wake would restore.
+type HibernationStore struct {
+	dir string
+	mu  sync.Mutex // serializes the temp-file dance per store; ids are independent
+}
+
+// NewHibernationStore roots a store at dir, creating it if needed.
+func NewHibernationStore(dir string) (*HibernationStore, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("microagent: hibernation store dir: %w", err)
+	}
+	return &HibernationStore{dir: dir}, nil
+}
+
+// path returns the on-disk file for id, refusing an id that is not a single safe
+// path element (so a frozen file can never escape dir).
+func (s *HibernationStore) path(id string) (string, error) {
+	if id == "" || id == "." || id == ".." || filepath.Base(id) != id {
+		return "", ErrUnsafeHibernateID
+	}
+	return filepath.Join(s.dir, id+".hib"), nil
+}
+
+// Park freezes h and writes its bytes to <dir>/<id>.hib, returning the number of
+// bytes parked. After Park the caller may drop its reference to h and release the
+// goroutine — Wake reconstructs a byte-identical context from disk.
+func (s *HibernationStore) Park(id string, h Hibernable) (int, error) {
+	dst, err := s.path(id)
+	if err != nil {
+		return 0, err
+	}
+	b, err := h.Freeze()
+	if err != nil {
+		return 0, fmt.Errorf("microagent: freeze %q: %w", id, err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tmp := dst + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return 0, fmt.Errorf("microagent: park %q: %w", id, err)
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return 0, fmt.Errorf("microagent: park %q: %w", id, err)
+	}
+	return len(b), nil
+}
+
+// Wake reads id's frozen context from disk, restores it into h via Thaw, and — as
+// the built-in no-state-loss check — re-Freezes h and refuses ErrThawMismatch
+// unless the re-frozen bytes equal the bytes read (the CRaC afterRestore analog:
+// the restore is verified at the boundary, not trusted). On success it removes
+// the file, so a woken id no longer counts against on-disk residency. Wake
+// returns ErrNotHibernated when id has no frozen context.
+func (s *HibernationStore) Wake(id string, h Hibernable) error {
+	src, err := s.path(id)
+	if err != nil {
+		return err
+	}
+	b, err := os.ReadFile(src)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("microagent: wake %q: %w", id, ErrNotHibernated)
+		}
+		return fmt.Errorf("microagent: wake %q: %w", id, err)
+	}
+	if err := h.Thaw(b); err != nil {
+		return fmt.Errorf("microagent: thaw %q: %w", id, err)
+	}
+	// No-state-loss check: the restored agent must re-freeze to the same bytes.
+	again, err := h.Freeze()
+	if err != nil {
+		return fmt.Errorf("microagent: wake re-freeze %q: %w", id, err)
+	}
+	if !bytes.Equal(again, b) {
+		return fmt.Errorf("microagent: wake %q: %w", id, ErrThawMismatch)
+	}
+	if err := os.Remove(src); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("microagent: wake %q: remove frozen file: %w", id, err)
+	}
+	return nil
+}
+
+// Parked reports whether id currently has a frozen context on disk. A malformed
+// id is reported as not parked (Park/Wake refuse it loudly).
+func (s *HibernationStore) Parked(id string) bool {
+	p, err := s.path(id)
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(p)
+	return err == nil
+}
+
+// ResidentCap bounds how many enrolled agents may be RESIDENT (holding a
+// goroutine + in-RAM context) at once, independent of how many are enrolled
+// (#2012 scope 3). N enrolled agents share Limit resident slots; the rest are
+// parked in a HibernationStore. It is a pure counter — no goroutines, no I/O — so
+// a host or scheduler composes it with a HibernationStore without this type
+// knowing either. It is safe for concurrent use.
+type ResidentCap struct {
+	mu       sync.Mutex
+	limit    int
+	resident int
+	peak     int // high-water resident count ever reached (the O(R) witness)
+}
+
+// NewResidentCap builds a resident cap with the given slot limit; limit <= 0
+// selects DefaultResidentCap.
+func NewResidentCap(limit int) *ResidentCap {
+	if limit <= 0 {
+		limit = DefaultResidentCap
+	}
+	return &ResidentCap{limit: limit}
+}
+
+// Admit reserves a resident slot, reporting false without reserving when all
+// slots are taken (the caller then hibernates the agent instead of making it
+// resident). Every true Admit must be paired with exactly one Release.
+func (c *ResidentCap) Admit() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.resident >= c.limit {
+		return false
+	}
+	c.resident++
+	if c.resident > c.peak {
+		c.peak = c.resident
+	}
+	return true
+}
+
+// Release frees a resident slot previously reserved by a true Admit. Releasing
+// with no slot held is a programming error and panics, matching the mismatched
+// unlock discipline of the standard library.
+func (c *ResidentCap) Release() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.resident == 0 {
+		panic("microagent: ResidentCap.Release with no resident slot held")
+	}
+	c.resident--
+}
+
+// Resident reports how many resident slots are currently held.
+func (c *ResidentCap) Resident() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.resident
+}
+
+// Limit reports the resident-slot cap.
+func (c *ResidentCap) Limit() int { return c.limit }
+
+// Peak reports the high-water resident count ever reached — the direct evidence
+// that residency stayed ~O(R) while N >> R agents were enrolled: Peak() never
+// exceeds Limit() by construction.
+func (c *ResidentCap) Peak() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.peak
+}
