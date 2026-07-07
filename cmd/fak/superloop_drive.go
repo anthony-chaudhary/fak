@@ -124,7 +124,9 @@ func runSuperloopDrive(stdout, stderr io.Writer, argv []string) int {
 
 	// WALK — read every member's status from the cheap committed surfaces, then SELECT
 	// the single worst-first member (one member per walk). The walk mutates nothing.
-	rep := superloop.Walk(s, collectSuperloopStatuses(root, s))
+	// A declared issue-target folds its live progress in here (surface-only until a
+	// dispatch ledger exists), so the headline gates the drive, not just decorates it.
+	rep := superloop.Walk(s, collectSuperloopStatuses(root, s), issueProgressWalkOpts(root, s)...)
 	decision := superloop.Drive(rep)
 	report := superloopDriveReport{Schema: superloop.DriveSchema, Intent: s.Name, Decision: decision}
 
@@ -161,7 +163,9 @@ func runSuperloopDrive(stdout, stderr io.Writer, argv []string) int {
 	// RE-FOLD — re-walk and fold; the aggregate re-fold after the member run is the exit
 	// check. A driven-but-unwitnessed member (unmeasured/dark) keeps the re-fold
 	// unsatisfied, so it can never satisfy the intent — the exit reflects that honestly.
-	refold := superloop.Walk(s, collectSuperloopStatuses(root, s))
+	// The issue-target gate re-folds too: a member run that progressed issues moves the
+	// live count, and an unmet headline keeps the re-fold unsatisfied.
+	refold := superloop.Walk(s, collectSuperloopStatuses(root, s), issueProgressWalkOpts(root, s)...)
 	report.Refold = &refold
 	code := 1
 	if refold.Satisfied {
