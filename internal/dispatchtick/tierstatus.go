@@ -102,13 +102,13 @@ func modelTierUnitCost(modelTier int) int {
 // issue's tier metadata, and an optional witnessed outcome (default pending). An
 // explicit Escalated witness marks a decision the chosen tier could not carry.
 type TierDecisionInput struct {
-	Issue     int         `json:"issue"`
-	Lane      string      `json:"lane"`
-	Product   string      `json:"product,omitempty"`
-	Tier      IssueTier   `json:"tier"`
+	Issue     int          `json:"issue"`
+	Lane      string       `json:"lane"`
+	Product   string       `json:"product,omitempty"`
+	Tier      IssueTier    `json:"tier"`
 	Rows      []AccountRow `json:"-"`
-	Outcome   TierOutcome `json:"outcome,omitempty"`
-	Escalated bool        `json:"escalated,omitempty"`
+	Outcome   TierOutcome  `json:"outcome,omitempty"`
+	Escalated bool         `json:"escalated,omitempty"`
 }
 
 // TierDecisionRow is one observable tier_decision: the routing verdict joined to

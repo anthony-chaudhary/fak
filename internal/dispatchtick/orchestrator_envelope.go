@@ -178,13 +178,13 @@ const (
 // orchestrator at a given tier, carrying every field the dispatch surface needs to
 // explain the decision without free text.
 type MetaDecision struct {
-	Action       MetaAction      `json:"action"`
+	Action       MetaAction       `json:"action"`
 	Tier         OrchestratorTier `json:"tier"`
-	Risk         ActionRisk      `json:"risk"`
+	Risk         ActionRisk       `json:"risk"`
 	RequiredTier OrchestratorTier `json:"required_tier"`
-	Outcome      ActionOutcome   `json:"outcome"`
-	Witnessed    bool            `json:"witnessed"`
-	Reason       string          `json:"reason"`
+	Outcome      ActionOutcome    `json:"outcome"`
+	Witnessed    bool             `json:"witnessed"`
+	Reason       string           `json:"reason"`
 }
 
 // Allowed reports whether the action may proceed (a small helper so callers read
