@@ -152,11 +152,14 @@ type BudgetBounds struct {
 }
 
 // DefaultBudgetBounds is a sane spectrum for a turn whose caller has not pinned the model's
-// real window: floor 512 tokens (enough for pins + a few hot spans), ceiling 8192 tokens (a
-// generous resident view). It is the seed envelope, the obvious lever a caller overrides with
-// the model's actual context window — not a tuned optimum.
+// real window: floor 512 tokens (enough for pins + a few hot spans), ceiling sourced from the
+// generic effective-context envelope's target (a bounded resident view, NOT the provider's raw
+// window). It is the seed envelope, the obvious lever a caller overrides with the model's actual
+// context window — not a tuned optimum. Deriving the ceiling from GenericTurnEnvelope keeps the
+// default path honest to the long-context doctrine (docs/long-context-defaults.md): the resident
+// budget is chosen from the effective envelope, never from the advertised hard cap.
 func DefaultBudgetBounds() BudgetBounds {
-	return BudgetBounds{Floor: 512, Ceil: 8192}
+	return BudgetBounds{Floor: 512, Ceil: GenericTurnEnvelope().Target()}
 }
 
 // normalized returns the bounds with Floor/Ceil forced sane: a non-positive floor clamps to 1

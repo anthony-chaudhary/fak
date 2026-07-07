@@ -176,6 +176,22 @@ func collectTokenDefaultsScorecard(root string) map[string]any {
 	require(strings.Contains(tui, `"--debug-stats"`), "tui.go must wire --debug-stats into the guard command for the console launcher overlay")
 	require(strings.Contains(tui, "gateway.DefaultCompactHistoryBudget") && strings.Contains(tui, "gateway.DefaultElideResultBytes"), "tui.go must pass the active token-saving guard defaults explicitly so they appear in dry-run output")
 
+	// ---- effective-context envelope provenance (#2947) ----
+	// Budget SIZE is governed by the long-context defaults doctrine (docs/long-context-defaults.md):
+	// the advertised hard cap is never the target resident budget. Report the ctxplan default
+	// envelopes' hard cap / min-evidence floor / target / effective ceiling / provenance, and raise
+	// one unit of token-defaults-debt for any default that treats the raw provider window as the
+	// resident target without a same-task WITNESS. The envelope rows are consumed from
+	// internal/ctxplan (the real default-budget seam), never a roster claim a doc could drift from.
+	envelopes := ctxplanEnvelopeRows()
+	rawWindowTargetDebt := 0
+	for _, e := range ctxplan.DefaultEnvelopes() {
+		if e.RawWindowTarget() {
+			rawWindowTargetDebt++
+		}
+	}
+	require(rawWindowTargetDebt == 0, fmt.Sprintf("%d default context envelope(s) derive the resident target from the raw provider window with no same-task witness (see docs/long-context-defaults.md)", rawWindowTargetDebt))
+
 	// ---- derive each lever's REAL default + state from the entrypoint source ----
 	elideWitnessed := exists("experiments/agent-live/elide-oversized-prevalence-2026-06-26.json")
 	levers := []lever{
@@ -293,17 +309,45 @@ func collectTokenDefaultsScorecard(root string) map[string]any {
 		"reason":      reason,
 		"next_action": next,
 		"corpus": map[string]any{
-			"token_defaults_debt": debt,
-			"score":               round1(composite),
-			"grade":               grade,
-			"levers_total":        leversTotal,
-			"stacked_on":          stackedOn,
-			"soft_signals":        off,
-			"defects":             defects,
-			"kpis":                kpis,
-			"lever_status":        leverStatus,
+			"token_defaults_debt":    debt,
+			"score":                  round1(composite),
+			"grade":                  grade,
+			"levers_total":           leversTotal,
+			"stacked_on":             stackedOn,
+			"soft_signals":           off,
+			"defects":                defects,
+			"kpis":                   kpis,
+			"lever_status":           leverStatus,
+			"context_envelope":       envelopes,
+			"raw_window_target_debt": rawWindowTargetDebt,
 		},
 	}
+}
+
+// ctxplanEnvelopeRows renders the internal/ctxplan default effective-context envelopes into the
+// scorecard JSON: each row exposes the four quantities the long-context doctrine keeps distinct
+// (hard cap, min viable evidence floor, target resident budget, effective ceiling) plus the derived
+// safe cap, the provenance label (WITNESSED / OBSERVED / MODELED / FALLBACK), and whether the row
+// is a raw-window-target defect. A cost-conscious operator reading `--json` can now see that the
+// no-flag default target is held below the provider's advertised window and honestly labeled.
+func ctxplanEnvelopeRows() []map[string]any {
+	rows := make([]map[string]any, 0)
+	for _, e := range ctxplan.DefaultEnvelopes() {
+		rows = append(rows, map[string]any{
+			"model_pattern":              e.ModelPattern,
+			"task_class":                 e.TaskClass,
+			"hard_context_cap":           e.HardContextCap,
+			"output_reserve":             e.OutputReserve,
+			"min_viable_evidence_tokens": e.MinViableEvidenceTokens,
+			"target_resident_tokens":     e.TargetResidentTokens,
+			"max_effective_tokens":       e.MaxEffectiveTokens,
+			"safe_cap":                   e.SafeCap(),
+			"provenance":                 e.Provenance,
+			"witness":                    e.Witness,
+			"raw_window_target":          e.RawWindowTarget(),
+		})
+	}
+	return rows
 }
 
 func blockerIf(cond bool, s string) string {
