@@ -485,6 +485,33 @@ func TestFakAuthoredTokenEquivRollupsAgree(t *testing.T) {
 	}
 }
 
+// TestInferValuationBasisDefersToShedValuation locks InferValuationBasis to the SAME
+// warm/cold decision compactionShedValuation makes, so the basis a legacy row infers can
+// never drift from the basis its shed was priced at (#2798). Re-introducing a second inline
+// CompactionCacheReadTokens>0 check in InferValuationBasis is exactly the drift this guards.
+func TestInferValuationBasisDefersToShedValuation(t *testing.T) {
+	for _, cacheRead := range []uint64{0, 1, 5000} {
+		_, want := compactionShedValuation(cacheRead)
+		row := SavingsRow{Mechanism: "compaction_shed", CompactionCacheReadTokens: cacheRead}
+		if got := row.InferValuationBasis(); got != want {
+			t.Fatalf("InferValuationBasis(cache_read=%d) = %q, compactionShedValuation basis = %q — must agree",
+				cacheRead, got, want)
+		}
+	}
+	// An explicit basis short-circuits inference.
+	explicit := SavingsRow{Mechanism: "compaction_shed", ValuationBasis: ValuationBasisFullInput, CompactionCacheReadTokens: 9000}
+	if got := explicit.InferValuationBasis(); got != ValuationBasisFullInput {
+		t.Fatalf("explicit ValuationBasis not honored: got %q", got)
+	}
+	// Provider prompt-cache rows are observed-net; unknown mechanisms have no fak $ to label.
+	if got := (SavingsRow{Mechanism: "provider_prompt_cache"}).InferValuationBasis(); got != ValuationBasisObservedNet {
+		t.Fatalf("provider row basis = %q, want OBSERVED_NET", got)
+	}
+	if got := (SavingsRow{Mechanism: "something_else"}).InferValuationBasis(); got != "" {
+		t.Fatalf("unknown mechanism basis = %q, want empty", got)
+	}
+}
+
 // TestRenderRefusesUnlabeledFakDollar is the #2796 render acceptance: the P&L table must
 // stamp the price basis onto every fak dollar figure, and must REFUSE (render a marker, not
 // a bare number) a nonzero fak $ that carries no inferable basis. A warm fak bucket renders

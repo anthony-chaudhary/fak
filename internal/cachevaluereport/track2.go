@@ -237,8 +237,9 @@ type SavingsRow struct {
 
 // InferValuationBasis derives the price basis for a row written before ValuationBasis
 // existed, so the fold and the render-refusal never trip on a legacy ledger. Provider
-// prompt-cache rows are OBSERVED_NET; a compaction row with a witnessed warm read is
-// CACHE_READ_MARGINAL; a compaction row without one is FULL_INPUT. Non-dollar rows and
+// prompt-cache rows are OBSERVED_NET; a compaction row's warm/cold basis is deferred to
+// compactionShedValuation — the ONE place that decision is made (#2798) — so an inferred
+// basis can never drift from the basis the row was actually priced at. Non-dollar rows and
 // unknown mechanisms return empty (no fak $ to label).
 func (r SavingsRow) InferValuationBasis() ValuationBasis {
 	if r.ValuationBasis != "" {
@@ -248,10 +249,8 @@ func (r SavingsRow) InferValuationBasis() ValuationBasis {
 	case r.Mechanism == "provider_prompt_cache":
 		return ValuationBasisObservedNet
 	case r.Mechanism == "compaction_shed":
-		if r.CompactionCacheReadTokens > 0 {
-			return ValuationBasisCacheReadMarginal
-		}
-		return ValuationBasisFullInput
+		_, basis := compactionShedValuation(r.CompactionCacheReadTokens)
+		return basis
 	default:
 		return ""
 	}
