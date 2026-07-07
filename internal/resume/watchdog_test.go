@@ -325,13 +325,13 @@ func TestResolveWatchdogProbeMode(t *testing.T) {
 	if got := ResolveWatchdogProbeMode("auto", false); got != "none" {
 		t.Fatalf("auto dry-run = %q, want none (a default tick must spend nothing)", got)
 	}
-	if got := ResolveWatchdogProbeMode("auto", true); got != "blocked" {
-		t.Fatalf("auto live = %q, want blocked", got)
+	if got := ResolveWatchdogProbeMode("auto", true); got != "stale" {
+		t.Fatalf("auto live = %q, want stale (idle seats need fresh evidence before taking rehomed load)", got)
 	}
 	if got := ResolveWatchdogProbeMode("ALL", false); got != "all" {
 		t.Fatalf("explicit setting must be honored (normalized), got %q", got)
 	}
-	if got := ResolveWatchdogProbeMode("", true); got != "blocked" {
+	if got := ResolveWatchdogProbeMode("", true); got != "stale" {
 		t.Fatalf("empty setting behaves as auto, got %q", got)
 	}
 }

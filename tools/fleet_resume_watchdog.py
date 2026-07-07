@@ -116,21 +116,26 @@ LOG_DIR = os.environ.get("FAK_WATCHDOG_LOG_DIR", os.path.join(HERE, "_watchdog")
 # write to $FLEET_REG_DIR while this watchdog reads HERE/_registry -> stale/empty plan
 # (silent no-op) and a split resume-once ledger (latent double-resume).
 REG_DIR = os.environ.get("FLEET_REG_DIR", os.path.join(HERE, "_registry"))
-# Active-probe parity with the .ps1 (-Probe auto): on a live tick, re-probe blocked
-# accounts so a silently-recovered one re-enters the pool instead of riding a stale
-# carried verdict. auto -> blocked on --live, none on dry-run (keeps dry-run
+# Active-probe parity with the .ps1 (-Probe auto): on a live tick, re-probe STALE
+# accounts (blocked OR idle with no live-session evidence) so a silently-recovered one
+# re-enters the pool — and an idle seat that quietly hit its limit leaves it — instead
+# of riding a stale verdict. auto -> stale on --live, none on dry-run (keeps dry-run
 # side-effect-free); override with FAK_PROBE=blocked|stale|all|none.
 PROBE_MODE = os.environ.get("FAK_PROBE", "auto").strip().lower()
 PROBE_MIN_INTERVAL_MIN = int(os.environ.get("FAK_PROBE_MIN_INTERVAL_MIN", "20"))
 
 
 def resolve_probe_mode(setting: str, live: bool) -> str:
-    """auto -> blocked on a live tick, none on dry-run; else the explicit setting.
+    """auto -> stale on a live tick, none on dry-run; else the explicit setting.
 
     Gating to the live tick keeps the default dry-run side-effect-free (no probe
-    spend), matching fleet_resume_watchdog.ps1's -Probe auto behavior."""
+    spend), matching fleet_resume_watchdog.ps1's -Probe auto behavior. 'stale'
+    (blocked OR idle with no live-session evidence) rather than 'blocked': a passive
+    available verdict only proves the seat was serving at its LAST activity, so an
+    idle seat that hit its session limit after going quiet still reads available and
+    the planner will re-home a crashed session onto its wall (observed 2026-07-06)."""
     if setting == "auto":
-        return "blocked" if live else "none"
+        return "stale" if live else "none"
     return setting
 
 

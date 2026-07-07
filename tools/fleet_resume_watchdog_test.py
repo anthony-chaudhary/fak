@@ -71,7 +71,9 @@ def test_probe_mode_dry_run_is_side_effect_free():
     wd = _reload({})
     # auto resolves to a real probe only on a live tick; dry-run probes nothing.
     assert wd.resolve_probe_mode("auto", live=False) == "none"
-    assert wd.resolve_probe_mode("auto", live=True) == "blocked"
+    # stale, not blocked: an idle available seat needs fresh evidence before it can
+    # take a rehomed session (a passive verdict can hide a limit hit after last activity).
+    assert wd.resolve_probe_mode("auto", live=True) == "stale"
 
 
 def test_probe_mode_explicit_setting_is_honored():

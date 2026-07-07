@@ -275,13 +275,21 @@ func ReviveOutcome(outcome Outcome, ev ReDeathEvidence) (Outcome, bool) {
 }
 
 // ResolveWatchdogProbeMode resolves the FAK_PROBE setting for a tick: "auto" probes
-// blocked accounts only on a LIVE tick (so the default dry-run stays side-effect-free —
+// STALE accounts only on a LIVE tick (so the default dry-run stays side-effect-free —
 // no probe spend), and an explicit setting is honored as-is. Mirrors
 // fleet_resume_watchdog.resolve_probe_mode, which the .ps1's -Probe auto behavior set.
+//
+// "stale" (blocked OR idle with no live-session evidence) rather than "blocked": a
+// passive available verdict only proves the seat was serving at its LAST activity. An
+// idle seat that burned its session budget after that activity still reads available,
+// so probing only blocked accounts let the planner re-home a crashed session onto a
+// limit-walled seat (observed 2026-07-06: july6 idle 90m past its wall, admitted as a
+// rehome target, the resume died on arrival). One paced pong per idle seat keeps the
+// positive evidence fresh enough to take load.
 func ResolveWatchdogProbeMode(setting string, live bool) string {
 	if strings.TrimSpace(strings.ToLower(setting)) == "auto" || strings.TrimSpace(setting) == "" {
 		if live {
-			return "blocked"
+			return "stale"
 		}
 		return "none"
 	}

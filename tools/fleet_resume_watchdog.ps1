@@ -57,12 +57,13 @@ param(
   [string]$FakExe     = '',
   [string]$LogDir     = '',
   [string]$RegistryDir = '',
-  # Active account probing on the registry refresh. 'auto' (default) probes blocked
-  # workers only on a -Live tick (off for dry-run, which must stay side-effect-free);
-  # 'blocked'/'stale'/'all' force it; 'none' disables. The probe spends one tiny haiku
-  # 'say pong' per blocked worker and skips accounts whose throttle reset is still future
-  # (account_probe's --skip-active-throttle), so a recovered account re-enters the pool
-  # without anyone running a real session on it.
+  # Active account probing on the registry refresh. 'auto' (default) probes STALE
+  # workers (blocked OR idle with no live-session evidence) only on a -Live tick (off
+  # for dry-run, which must stay side-effect-free); 'blocked'/'stale'/'all' force it;
+  # 'none' disables. The probe spends one tiny haiku 'say pong' per stale worker and
+  # skips accounts whose throttle reset is still future (account_probe's
+  # --skip-active-throttle), so a recovered account re-enters the pool — and an idle
+  # seat that quietly hit its limit leaves it — without anyone running a real session.
   [ValidateSet('auto','none','blocked','stale','all')]
   [string]$Probe      = 'auto',
   # Anti-spam floor: skip probing an account probed within the last N minutes (read from
@@ -368,7 +369,13 @@ function PruneClosedPlanRows($planPath, $closedSids) {
 # 1. refresh registry + plan (extract in advance). On a live tick, also ACTIVELY probe
 # blocked accounts so a silently-recovered account (re-login / access re-enabled / throttle
 # expired) re-enters the available pool instead of staying latched on a stale verdict.
-$probeMode = if ($Probe -eq 'auto') { if ($Live) { 'blocked' } else { 'none' } } else { $Probe }
+# auto -> 'stale' (blocked OR idle-with-no-live-session) on a live tick, not 'blocked':
+# a passive available verdict only proves the seat was serving at its LAST activity, so
+# an idle seat that hit its session limit after going quiet still reads available and
+# the planner will re-home a crashed session onto its wall (observed 2026-07-06). One
+# paced pong per idle seat keeps rehome-target evidence fresh; the min-interval floor
+# and skip-active-throttle keep the spend bounded.
+$probeMode = if ($Probe -eq 'auto') { if ($Live) { 'stale' } else { 'none' } } else { $Probe }
 $regArgs = @('registry', '--window', "$WindowH")
 if ($probeMode -ne 'none') {
   $regArgs += @('--probe', $probeMode, '--min-interval-min', "$ProbeMinIntervalMin")

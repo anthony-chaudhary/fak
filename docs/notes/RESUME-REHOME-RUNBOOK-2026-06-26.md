@@ -45,6 +45,19 @@ preference durable across sessions; the watchdog's per-tick `--probe` keeps the
 verdict fresh so it stays in the pool. (The live host policy and the specific account
 identity are gitignored / host-local — never commit a real account name to this repo.)
 
+### Positive evidence can be STALE-positive (the july6 lesson, 2026-07-06)
+
+The inverse failure: a seat with a genuine `passive` verdict (its newest transcript
+ended on a healthy completion) sat idle for ~90 minutes, quietly crossed its 5-hour
+session-limit window, and was then admitted as a rehome target — the rehomed resume
+died on arrival with "You've hit your session limit". Passive evidence proves the
+seat was serving at its LAST activity, not that it can take load NOW, and no
+transcript records the wall until a session tries and crashes on it. Fix: the
+watchdog's `-Probe auto` on a live tick now probes `stale` (blocked OR idle with no
+live-session evidence), not just `blocked`, so an idle seat gets one paced pong
+before the planner may hand it a rehomed session (bounded by the 20-minute
+per-account probe floor and `--skip-active-throttle`).
+
 ## The "organization has disabled Claude subscription access" message is MISLEADING
 
 It is **not** real org policy — it is the OAuth token-twin smear (a login under a
