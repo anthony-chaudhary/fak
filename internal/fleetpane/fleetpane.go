@@ -132,6 +132,7 @@ type Config struct {
 	MachineStaleMin  float64
 	Loops            map[string]LoopSpec
 	SupervisorStatus []string
+	MonitorStatus    []string
 	ControlTick      map[string]any
 	Watchdogs        map[string]map[string]any
 	Paths            map[string]string
@@ -270,6 +271,7 @@ type StatusDoc struct {
 	Watchdogs    map[string]any `json:"watchdogs"`
 	Loops        map[string]any `json:"loops"`
 	Supervisor   map[string]any `json:"supervisor"`
+	WorkerHealth WorkerHealth   `json:"worker_health"`
 	SetupPlan    map[string]any `json:"setup_plan"`
 	Actions      []string       `json:"actions"`
 	Verdict      string         `json:"verdict"`
@@ -395,6 +397,7 @@ func defaultConfigDoc(root string) map[string]any {
 		"git_remote":            "origin",
 		"loops":                 map[string]any{},
 		"supervisor_status_cmd": []any{python, "tools/dos_supervisor_status.py", "--json"},
+		"monitor_status_cmd":    []any{"fak", "fleet", "monitor", "--json"},
 		"control_tick": map[string]any{
 			"task_name":             "FleetControlPaneTick",
 			"register_script":       "tools/register_control_pane_tick.ps1",
@@ -497,6 +500,7 @@ func normalizeConfig(doc map[string]any, root string) Config {
 		MachineStaleMin:  floatValueDefault(doc["machine_stale_min"], 15),
 		Loops:            parseLoops(doc["loops"]),
 		SupervisorStatus: stringSlice(doc["supervisor_status_cmd"]),
+		MonitorStatus:    stringSlice(doc["monitor_status_cmd"]),
 		ControlTick:      mapValue(doc["control_tick"]),
 		Watchdogs:        nestedMap(doc["watchdogs"]),
 	}
@@ -976,14 +980,15 @@ func CollectStatus(ctx context.Context, cfg Config, opts Options) StatusDoc {
 			"target":              cfg.Target,
 			"session_window_h":    cfg.SessionWindowH,
 		},
-		Refresh:     nil,
-		Git:         collectGit(ctx, cfg, opts),
-		Registry:    SummarizeRegistry(registry, opts),
-		ControlTick: collectControlTick(cfg),
-		Watchdogs:   collectWatchdogs(cfg),
-		Loops:       loopsDoc,
-		Supervisor:  collectSupervisor(ctx, cfg, opts),
-		SetupPlan:   map[string]any{"ok": true, "steps": []any{}, "note": "native fleetpane read-only subset"},
+		Refresh:      nil,
+		Git:          collectGit(ctx, cfg, opts),
+		Registry:     SummarizeRegistry(registry, opts),
+		ControlTick:  collectControlTick(cfg),
+		Watchdogs:    collectWatchdogs(cfg),
+		Loops:        loopsDoc,
+		Supervisor:   collectSupervisor(ctx, cfg, opts),
+		WorkerHealth: collectWorkerHealth(ctx, cfg, opts),
+		SetupPlan:    map[string]any{"ok": true, "steps": []any{}, "note": "native fleetpane read-only subset"},
 	}
 	status.Actions = recommendedActions(status)
 	status.Verdict = "OK"
@@ -1246,6 +1251,36 @@ func collectSupervisor(ctx context.Context, cfg Config, opts Options) map[string
 	return map[string]any{"available": false, "reason": "supervisor status was not JSON", "cmd": cmd}
 }
 
+// collectWorkerHealth runs the configured `fak fleet monitor --json` command and
+// folds its class histogram into the pane's one health summary (#2035). It is the
+// monitor analog of collectSupervisor: a failed/unconfigured/timed-out monitor
+// yields an honest unavailable WorkerHealth (reason set, counts zero-filled) rather
+// than a misleading all-zero histogram.
+func collectWorkerHealth(ctx context.Context, cfg Config, opts Options) WorkerHealth {
+	cmd := ExpandCmd(cfg.MonitorStatus, cfg)
+	if len(cmd) == 0 {
+		return WorkerHealth{Counts: emptyHealthCounts(), Reason: "no monitor_status_cmd configured"}
+	}
+	runner := opts.runner()
+	if !commandExists(cmd[0], runner) {
+		return WorkerHealth{Counts: emptyHealthCounts(), Reason: "command not found: " + cmd[0]}
+	}
+	res := runner.Run(ctx, RunRequest{Args: cmd, Cwd: cfg.Root, Env: envForTools(cfg), Timeout: 20 * time.Second})
+	if res.TimedOut {
+		return WorkerHealth{Counts: emptyHealthCounts(), Reason: "monitor status timed out"}
+	}
+	if strings.TrimSpace(res.Stdout) == "" {
+		reason := strings.TrimSpace(res.Stderr)
+		if reason == "" {
+			reason = fmt.Sprintf("monitor exited %d with no output", res.ExitCode)
+		}
+		return WorkerHealth{Counts: emptyHealthCounts(), Reason: tail(reason, 1000)}
+	}
+	health := WorkerHealthFromMonitorJSON([]byte(res.Stdout))
+	health.Source = cmd
+	return health
+}
+
 func recommendedActions(status StatusDoc) []string {
 	var actions []string
 	if exists, _ := status.Config["local_config_exists"].(bool); !exists {
@@ -1487,6 +1522,7 @@ func PaneText(status StatusDoc) string {
 	if states, ok := status.Loops["states"]; ok {
 		lines = append(lines, "loops: "+CompactCounts(mapValue(states)))
 	}
+	lines = append(lines, WorkerHealthText(status.WorkerHealth))
 	if len(status.Actions) > 0 {
 		lines = append(lines, "recommended:")
 		for _, action := range status.Actions {
