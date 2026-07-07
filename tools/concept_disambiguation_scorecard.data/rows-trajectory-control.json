@@ -1,0 +1,114 @@
+{
+  "rows": [
+    {
+      "id": "trajctl-control-plane",
+      "canonical": "trajectory control (trajctl)",
+      "family": "trajectory-control",
+      "kind": "concept",
+      "definition": "The LIVE forward-progress control plane over declared objectives (internal/trajctl, epic #2533): anything you want to progress gets a named objective and a witnessed score curve, and steering reads curves, never points",
+      "distinction": "Live progress of a declared objective - NOT fak traj (internal/trajectory + internal/trajhook, the RETROSPECTIVE corpus toolkit: trajhook scores a past turn's notability), NOT the scorecard family (repo-surface debt, not runs), NOT score-signal (the CI-regression feeder), NOT fak signal steer (one actuator rung trajctl uses), and NOT loopdrive's GOAL.md witness (the binary done-bit trajctl stretches into a curve)",
+      "distinct_from": [
+        "trajctl-scorerow",
+        "trajctl-regime-gate"
+      ],
+      "aliases": [
+        "trajctl",
+        "trajectory-control plane"
+      ],
+      "grounding": "trajctl",
+      "grounding_kind": "path",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "trajctl-scorerow",
+      "canonical": "ScoreRow",
+      "family": "trajectory-control",
+      "kind": "symbol",
+      "definition": "One scored observation of one objective: normalized value, the scorer method+version that produced it, a witness rung, and an evidence pointer, appended to the fak-trajctl/1 JSONL ledger",
+      "distinction": "A live-objective progress observation - NOT a trajhook Finding (a worst-first notability flag on a PAST turn) and NOT a scorecard *_debt integer (a repo-surface fold with a CI ratchet)",
+      "distinct_from": [
+        "trajctl-witness-rung",
+        "trajctl-control-plane"
+      ],
+      "aliases": [
+        "score row",
+        "trajctl score row"
+      ],
+      "grounding": "ScoreRow",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "trajctl-control-plane",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "trajctl-witness-rung",
+      "canonical": "witness rung (W0-W3)",
+      "family": "trajectory-control",
+      "kind": "concept",
+      "definition": "The evidence-strength ladder every ScoreRow carries: W3 deterministic evidence (witnessed commit, green suite), W2 transcript-derived heuristic, W1 structured judge verdict, W0 self-report (recorded, never load-bearing); the read-time audit (witnessStrength) demotes a dangling W3 row to W0",
+      "distinction": "Grades a SCORE's evidence - NOT the witness/evidence family's world-state witness (refutes a cache entry) or measurement witness (proves an RSI gain), and NOT dispatchtick's WitnessOK (a resolution-corroboration constant)",
+      "distinct_from": [
+        "trajctl-scorerow"
+      ],
+      "aliases": [
+        "witness rung",
+        "W3",
+        "evidence rung"
+      ],
+      "grounding": "witnessStrength",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "trajctl-scorerow",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "trajctl-regime-gate",
+      "canonical": "regime gate",
+      "family": "trajectory-control",
+      "kind": "concept",
+      "definition": "The rule that HEALTHY means DO NOTHING: every steering rung above annotate fires only when the recent curve is unhealthy (STALL / DRIFT / DETOUR_OVERRUN), because intervening in a high-scoring session degrades it (arXiv:2602.03338); SignalHealthy is the gate's closed-vocabulary trigger",
+      "distinction": "Gates the CONTROLLER's own interventions on a live run - NOT an adjudication gate (no tool call is allowed or denied) and NOT a model gate (nothing neural); the dogfood run's HEALTHY -> withhold decision is this gate working",
+      "distinct_from": [
+        "trajctl-control-plane",
+        "trajctl-detour-objective"
+      ],
+      "aliases": [
+        "regime-gated steering",
+        "HEALTHY gate"
+      ],
+      "grounding": "SignalHealthy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "trajctl-control-plane",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "trajctl-detour-objective",
+      "canonical": "detour objective",
+      "family": "trajectory-control",
+      "kind": "concept",
+      "definition": "A side-quest promoted to a first-class CHILD objective with its own scorers and a budget, so an error repair or infra fix is scored on ITS goal while the parent sits visibly paused; SignalDetourOverrun fires when the detour outlives its budget",
+      "distinction": "A DECLARED child objective that must RETURN - NOT drift (declining alignment on the SAME objective: a detour is declared, drift is decay) and NOT a distraction to suppress (the detour's own score records whether the repair landed)",
+      "distinct_from": [
+        "trajctl-regime-gate",
+        "trajctl-control-plane"
+      ],
+      "aliases": [
+        "detour",
+        "child objective"
+      ],
+      "grounding": "SignalDetourOverrun",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "trajctl-control-plane",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

@@ -176,6 +176,14 @@
       "ignore": [],
       "min_files": 99,
       "note": "The six-tier agent-VFS ladder (T0-T5) from docs/explainers/agent-virtual-filesystem.md: the host/VM store the process rides into (T0) vs the mount view fak presents over it (T1) vs the adjudicated read/query surface (T2) vs the expire-by-default scratchpad (T3) vs promoted durable memory (T4) vs the physical KV-cache substrate (T5). roots is empty BY DESIGN: these tiers are a curated conceptual ladder, not a single overloaded token - each is grounded in a distinct fak package/symbol (toolsandbox, pathscope, readengine, scratchpad, memq, kvmmu), and no shared root word spans them, so discovery would find nothing to score. Each tier draws its line against the adjacent tier it is most confused with (truth-duration separates T3 from T4; having-access separates T1 from T2; address-vs-governance separates T5 from T4)."
+    },
+    {
+      "id": "trajectory-control",
+      "name": "Trajectory-control family",
+      "roots": [],
+      "ignore": [],
+      "min_files": 99,
+      "note": "The trajectory-control (trajctl) vocabulary from epic #2533 (docs/notes/TRAJECTORY-CONTROL-SCORE-ANYTHING-2026-07-03.md + docs/observability/trajectory-control.md): the LIVE forward-progress control plane over declared objectives, positioned against five near-siblings it is systematically confused with - fak traj (the RETROSPECTIVE corpus toolkit; trajhook scores a past turn's notability, trajctl scores a live objective's progress), the scorecard family (repo-surface debt, not runs), score-signal (the CI-regression feeder), fak signal steer (one actuator rung trajctl uses), and loopdrive's GOAL.md witness (the binary done-bit trajctl stretches into a curve). roots is empty BY DESIGN, same as vfs: a 'trajctl'/'trajectory' discovery root would swallow the internal/trajectory corpus toolkit's tokens (the very sibling this family disambiguates against) and flood coverage with non-confusable identifiers; each concept is instead grounded in a distinct shipped symbol (trajctl, ScoreRow, witnessStrength, SignalHealthy, SignalDetourOverrun)."
     }
   ]
 }

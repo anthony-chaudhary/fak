@@ -496,6 +496,56 @@ full operational map is [the loop-family map](../notes/CONCEPT-CONTINUAL-WORK-LO
 
 ---
 
+## The trajectory-control family
+
+The "trajectory" root now names two tenses and the "score" root three subsystems.
+The live control plane is **trajctl** (`internal/trajctl`, epic #2533); the full
+positioning is [the trajectory-control page](../observability/trajectory-control.md).
+
+- **trajectory control (trajctl)** - the LIVE forward-progress control plane over
+  declared objectives: anything you want to progress gets a named objective and a
+  witnessed score curve, and steering reads curves, never points. *Not* `fak traj`
+  (`internal/trajectory` + `internal/trajhook`, the RETROSPECTIVE corpus toolkit -
+  trajhook's `Score` is notability of a PAST turn, trajctl's score is progress of a
+  LIVE objective), *not* the scorecard family (deterministic measurement of a REPO
+  surface, not a run), *not* score-signal (the CI-regression issue feeder), *not*
+  `fak signal steer` (the operator input channel trajctl merely uses as one
+  actuator), and *not* loopdrive's GOAL.md witness (the binary done-bit trajctl
+  stretches into a curve).
+
+- **ScoreRow** - one scored observation of one objective: normalized value, the
+  scorer method+version that produced it, a witness rung, and an evidence pointer,
+  appended to the `fak-trajctl/1` JSONL ledger. *Not* a trajhook `Finding` (a
+  worst-first notability flag on a past turn) and *not* a scorecard `*_debt`
+  integer (a repo-surface fold with a CI ratchet).
+
+- **witness rung (W0-W3)** - the evidence-strength ladder every ScoreRow carries:
+  W3 deterministic evidence (witnessed commit, green suite), W2 transcript-derived
+  heuristic, W1 structured judge verdict, W0 self-report - recorded, never
+  load-bearing; the read-time audit (`witnessStrength`) DEMOTES a dangling W3 row
+  to W0 rather than keep it. *Not* the witness/evidence family's world-state or
+  measurement witness (those witness a CACHE entry or an RSI gain; a rung grades a
+  SCORE's evidence), and *not* dispatchtick's `WitnessOK` (a resolution
+  corroboration constant).
+
+- **regime gate** - the rule that HEALTHY means DO NOTHING: every steering rung
+  above "annotate" fires only when the recent curve is unhealthy (STALL / DRIFT /
+  DETOUR_OVERRUN), because intervening in a high-scoring session degrades it
+  (arXiv:2602.03338). The dogfood run's `HEALTHY -> withhold` decision is this
+  gate working. *Not* an adjudication gate (no tool call is allowed or denied -
+  it gates the CONTROLLER's own interventions) and *not* a model gate (nothing
+  neural).
+
+- **detour objective** - a side-quest promoted to a first-class CHILD objective
+  with its own scorers and a budget, so an error repair or infra fix is scored on
+  ITS goal while the parent sits visibly paused; `DETOUR_OVERRUN` fires when the
+  detour outlives its budget - trajectory control means the detour RETURNS. *Not*
+  drift (declining alignment on the SAME objective - a detour is declared, drift
+  is decay) and *not* a distraction to suppress (the score records whether the
+  repair landed).
+
+---
+
 ## Cross-cluster canonical-name collisions
 
 The worst confusability is one TOKEN that names two unrelated things in two unrelated
