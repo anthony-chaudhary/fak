@@ -883,7 +883,26 @@ func (s *Server) plannerErrorStatus(err error) (status int, code, msg string) {
 			}
 		}
 	}
-	return upstreamErrorStatus(err)
+	status, code, msg = upstreamErrorStatus(err)
+	// On the TRUSTED LOCAL path (fak guard, loopback-bound — s.exposeUpstreamErrorDetail),
+	// fold the upstream's OWN 400 detail into the message so the wrapped agent sees WHICH
+	// field it got wrong and can self-correct, instead of the generic "check the model name,
+	// roles, and parameter ranges". This is the one place the #82/#346 no-leak boundary is
+	// relaxed, and only here: the caller is the trusted child, not a possibly-unauthenticated
+	// remote. The detail is scrubbed (secret-shaped runs redacted) and bounded by the same
+	// scrubForbiddenDetail used for the operator-only 403 drilldown, so a credential an
+	// upstream echoed into its body can never ride out. Off (the default) — and every
+	// externally-exposed serve — keeps the generic string byte-for-byte. Scoped to 400 (the
+	// reported case); 401/403 stay generic (see follow-up note on ExposeUpstreamErrorDetail).
+	if s != nil && s.exposeUpstreamErrorDetail && status == http.StatusBadRequest {
+		var se *agent.UpstreamStatusError
+		if errors.As(err, &se) {
+			if detail := scrubForbiddenDetail(se.Body); detail != "" {
+				msg = msg + " — upstream said: " + detail
+			}
+		}
+	}
+	return status, code, msg
 }
 
 // writeUpstreamErr is the single buffered-error fold for the proxy/planner paths:

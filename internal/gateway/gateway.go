@@ -274,6 +274,20 @@ type Config struct {
 	// RequireKey, if non-empty, is the bearer token the gateway REQUIRES on every
 	// request (except /healthz). Empty => no auth (drop-in compatible, loopback).
 	RequireKey string
+	// ExposeUpstreamErrorDetail, when true, lets the proxy fold a SCRUBBED, bounded
+	// snapshot of the upstream provider's own 400 error body into the client-facing
+	// message (see upstreamErrorStatus / plannerErrorStatus). It exists ONLY for the
+	// trusted local path: `fak guard` binds an in-process gateway on a private
+	// loopback port and injects its URL into the WRAPPED CHILD alone, so the "caller"
+	// is that trusted agent and the upstream's real "which field was malformed"
+	// detail is exactly what it needs to self-correct — with no meaningful leak.
+	// Default FALSE preserves the #82/#346 no-leak invariant EXACTLY (the generic
+	// "HTTP 400 — check the model name, roles, and parameter ranges" message), so the
+	// externally-exposed `fak serve` path never forwards an upstream body. guard sets
+	// it true ONLY when its listener is actually loopback-bound (guardLoopbackOnly);
+	// a guard pushed off-host with --addr keeps it false. Scoped to 400 today (the
+	// reported case); 401/403 stay generic — see the field's use site.
+	ExposeUpstreamErrorDetail bool
 	// VDSO toggles the kernel's dedup fast path for fak_syscall.
 	VDSO bool
 	// Invalidation selects the process-global vDSO tier-2 invalidation granularity for
@@ -787,31 +801,36 @@ type BudgetExhaustedFunc func(ctx context.Context, st SessionState, messages []a
 // Server is a configured, ready-to-serve gateway. Construct with New; serve with
 // Handler()/ListenAndServe (HTTP) or ServeStdio (MCP over stdin/stdout).
 type Server struct {
-	k              *kernel.Kernel
-	engineID       string
-	model          string
-	requireKey     string
-	version        string
-	logf           func(format string, args ...any)
-	debugStatsf    func(format string, args ...any) // optional per-turn human debug sink (#793); nil = off
-	feed           *coherenceFeed                   // the cross-agent "what changed" feed (vdso coherence bus)
-	sessionFeed    *sessionFeed                     // the drive-state revision feed (#630; host-pushed via PublishSessionRevision)
-	metrics        *gatewayMetrics
-	servedFailure  servedFailure // recent served-turn panic behind /healthz honesty (#2336); see served_failure.go
-	traceSeq       uint64        // mints a non-empty TraceID when the wire omits one (atomic)
-	reloadPolicy   PolicyReloadFunc
-	resetTrace     TraceResetFunc
-	observeTrace   TraceObserveFunc
-	observeSession SessionObserveFunc
-	controlSession SessionControlFunc
-	steerSession   SteerSessionFunc
-	listSessions   SessionListFunc
-	decideSession  SessionDecideFunc
-	debitSession   SessionDebitFunc
-	resetOnBudget  ResetOnBudgetFunc
-	budgetDrained  BudgetExhaustedFunc
-	defaultTraceMu sync.RWMutex
-	defaultTraceID string
+	k          *kernel.Kernel
+	engineID   string
+	model      string
+	requireKey string
+	// exposeUpstreamErrorDetail folds a scrubbed, bounded snapshot of the upstream's
+	// own 400 body into the client-facing message. TRUE only on the trusted local
+	// path (fak guard, loopback-bound); FALSE (the default) keeps the no-leak
+	// #82/#346 boundary the externally-exposed serve path relies on. See Config.
+	exposeUpstreamErrorDetail bool
+	version                   string
+	logf                      func(format string, args ...any)
+	debugStatsf               func(format string, args ...any) // optional per-turn human debug sink (#793); nil = off
+	feed                      *coherenceFeed                   // the cross-agent "what changed" feed (vdso coherence bus)
+	sessionFeed               *sessionFeed                     // the drive-state revision feed (#630; host-pushed via PublishSessionRevision)
+	metrics                   *gatewayMetrics
+	servedFailure             servedFailure // recent served-turn panic behind /healthz honesty (#2336); see served_failure.go
+	traceSeq                  uint64        // mints a non-empty TraceID when the wire omits one (atomic)
+	reloadPolicy              PolicyReloadFunc
+	resetTrace                TraceResetFunc
+	observeTrace              TraceObserveFunc
+	observeSession            SessionObserveFunc
+	controlSession            SessionControlFunc
+	steerSession              SteerSessionFunc
+	listSessions              SessionListFunc
+	decideSession             SessionDecideFunc
+	debitSession              SessionDebitFunc
+	resetOnBudget             ResetOnBudgetFunc
+	budgetDrained             BudgetExhaustedFunc
+	defaultTraceMu            sync.RWMutex
+	defaultTraceID            string
 
 	// loops is the in-kernel background-loop supervisor (internal/bgloop): the
 	// runtime that keeps registered recurring loops progressing while the gateway is
@@ -1350,6 +1369,7 @@ func New(cfg Config) (*Server, error) {
 		engineID:                   engineID,
 		model:                      model,
 		requireKey:                 cfg.RequireKey,
+		exposeUpstreamErrorDetail:  cfg.ExposeUpstreamErrorDetail,
 		version:                    version,
 		logf:                       logf,
 		debugStatsf:                cfg.DebugStatsf,

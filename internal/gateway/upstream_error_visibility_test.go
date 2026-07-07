@@ -297,6 +297,84 @@ func TestUpstreamErrorsRenderDistinctKinds(t *testing.T) {
 	}
 }
 
+// TestUpstreamError400DetailOnlyOnTrustedLocalPath is the diagnosability guarantee: an upstream
+// 400 names the offending field, but that detail is withheld from a possibly-unauthenticated
+// caller (#82/#346). On the TRUSTED LOCAL path (fak guard, loopback-bound —
+// exposeUpstreamErrorDetail), the wrapped child needs it to self-correct, so it is folded into the
+// message; on the externally-exposed serve path (the default, flag OFF) the generic string is
+// returned byte-for-byte. This proves all three: (a) OFF ⇒ generic unchanged, (b) ON ⇒ the real
+// upstream 400 message is surfaced, (c) OFF never leaks a secret-shaped body.
+func TestUpstreamError400DetailOnlyOnTrustedLocalPath(t *testing.T) {
+	const upstreamBody = `{"type":"error","error":{"type":"invalid_request_error","message":"messages: roles must alternate between user and assistant"}}`
+	se := &agent.UpstreamStatusError{Status: http.StatusBadRequest, Body: upstreamBody}
+
+	// The generic string upstreamErrorStatus builds from fixed literals only — the no-leak default.
+	genericStatus, genericCode, genericMsg := upstreamErrorStatus(se)
+	if genericStatus != http.StatusBadRequest || genericCode != "upstream_invalid_request" {
+		t.Fatalf("baseline 400 = (%d,%q), want (400,upstream_invalid_request)", genericStatus, genericCode)
+	}
+
+	// (a) Flag OFF (the externally-exposed serve default): the client-facing message is the
+	// generic string EXACTLY — no upstream body folded in.
+	off := newTestServerWithConfig(t, Config{EngineID: "test", Model: "test-model", VDSO: true})
+	if off.exposeUpstreamErrorDetail {
+		t.Fatal("exposeUpstreamErrorDetail must default to false (the no-leak external path)")
+	}
+	status, code, msg := off.plannerErrorStatus(se)
+	if status != genericStatus || code != genericCode || msg != genericMsg {
+		t.Fatalf("flag OFF changed the 400 envelope: got (%d,%q,%q), want the generic (%d,%q,%q)",
+			status, code, msg, genericStatus, genericCode, genericMsg)
+	}
+	// (c) OFF must NOT carry any slice of the upstream body — no leak on the exposed path.
+	if strings.Contains(msg, "roles must alternate") || strings.Contains(msg, "upstream said") {
+		t.Fatalf("flag OFF leaked the upstream 400 body: %q", msg)
+	}
+
+	// (b) Flag ON (fak guard, loopback-bound): the real upstream 400 detail is surfaced so the
+	// wrapped agent sees WHICH field was malformed, while the status/code are unchanged.
+	on := newTestServerWithConfig(t, Config{EngineID: "test", Model: "test-model", VDSO: true, ExposeUpstreamErrorDetail: true})
+	if !on.exposeUpstreamErrorDetail {
+		t.Fatal("ExposeUpstreamErrorDetail=true must set the server flag")
+	}
+	onStatus, onCode, onMsg := on.plannerErrorStatus(se)
+	if onStatus != genericStatus || onCode != genericCode {
+		t.Fatalf("flag ON must not remap status/code: got (%d,%q), want (%d,%q)", onStatus, onCode, genericStatus, genericCode)
+	}
+	if !strings.HasPrefix(onMsg, genericMsg) {
+		t.Fatalf("flag ON must keep the generic message as a prefix, then append detail: %q", onMsg)
+	}
+	if !strings.Contains(onMsg, "roles must alternate") {
+		t.Fatalf("flag ON must surface the real upstream 400 detail: %q", onMsg)
+	}
+}
+
+// TestUpstreamError400DetailIsScrubbedAndBounded proves the trusted-path fold reuses the same
+// secret-shaped scrub the operator-only 403 drilldown uses: a credential an upstream carelessly
+// echoed into a 400 body is redacted before it reaches even the trusted child, and only a 400 is
+// widened — a 401/403 stays generic on this path (the scoped-to-400 follow-up boundary).
+func TestUpstreamError400DetailIsScrubbedAndBounded(t *testing.T) {
+	on := newTestServerWithConfig(t, Config{EngineID: "test", Model: "test-model", VDSO: true, ExposeUpstreamErrorDetail: true})
+
+	// A 400 body that echoes a token-shaped secret must have it redacted, not forwarded verbatim.
+	secretBody := `{"error":{"message":"bad key sk-ant-abcdef0123456789 supplied"}}`
+	_, _, msg := on.plannerErrorStatus(&agent.UpstreamStatusError{Status: http.StatusBadRequest, Body: secretBody})
+	if strings.Contains(msg, "sk-ant-abcdef0123456789") {
+		t.Fatalf("trusted-path 400 fold leaked a token-shaped secret: %q", msg)
+	}
+	if !strings.Contains(msg, "[redacted]") {
+		t.Fatalf("trusted-path 400 fold must redact the secret run: %q", msg)
+	}
+
+	// The fold is scoped to 400: a 401 keeps its generic message even with the flag ON.
+	_, _, msg401 := on.plannerErrorStatus(&agent.UpstreamStatusError{
+		Status: http.StatusUnauthorized,
+		Body:   `{"error":{"message":"x-api-key header is required"}}`,
+	})
+	if strings.Contains(msg401, "x-api-key header is required") || strings.Contains(msg401, "upstream said") {
+		t.Fatalf("401 must stay generic even on the trusted path (scoped to 400): %q", msg401)
+	}
+}
+
 // The counter family must render on the /metrics text scrape with the kind label, so a stall is
 // scrapeable as fak_gateway_upstream_errors_total{kind="stalled"}.
 func TestUpstreamErrorsRenderOnMetrics(t *testing.T) {
