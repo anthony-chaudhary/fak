@@ -1,0 +1,335 @@
+#!/usr/bin/env python3
+"""meta_superloop_night.py — the META super-loop ABOVE the night runs.
+
+One operator intent: **progress ~200 productive issues overnight**, keeping every
+capacity axis genuinely full — account session slots, the local host cap, and the
+lab/mac/gpu node resources — while never crossing the honesty boundary the
+`/super-loop` skill defines (a launch is not a ship; only a witnessed close counts).
+
+It is a META loop: it does not resolve issues itself and does not re-implement the
+launchers. Each TICK it WALKS the live capacity/closure surfaces first, then DRIVES
+the proven, self-sizing primitives that already own account/host/seat accounting:
+
+  orient   -> fak dispatch progress --json         (witnessed close-N odometer, #2639)
+              tools/dispatch_preflight.py --json    (SPAWN_OK / REFUSE_* — the no-DoS gate)
+  reclaim  -> tools/issue_dispatch.py --no-refresh  (rung-1: self-heal dead inflight markers)
+  refill   -> fak dispatch auto --live --goal G     (self-sizes to Target-live across seats)
+  nodes    -> fak nightrun run --apply --loop        (mac/gpu data-collection, feasible-only)
+  witness  -> fak dispatch progress --json          (closed_by_loop_total delta => toward 200)
+
+The target is measured on WITNESSED closes (`closed_by_loop_total`, which ignores
+backlog drift), not on launches. The loop stops on the honest signals from the
+super-loop marathon contract: target met, backlog drained, preflight refuses for a
+seat/host reason that waiting (not spawning) fixes, or a hard wall-clock deadline.
+
+DRY-RUN by default: it prints the plan for every tick and drives NOTHING. Only
+--apply issues real `--live` waves. This is the witnessable artifact the operator
+approves before the fleet grows.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+import time
+from dataclasses import dataclass, field, asdict
+from datetime import datetime, timezone
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+LEDGER = REPO / "docs" / "nightrun" / "meta-superloop-history.jsonl"
+
+# The two goal-scoped drain intents the account-wave already knows (see
+# `fak dispatch auto --goal`). Alternating keeps priority AND raw throughput fed.
+# The Python wave launcher is goal-AGNOSTIC: it spreads across the busiest pairwise
+# tree-disjoint lanes automatically (priced + arbitrated), so one wave call per tick
+# feeds both priority and raw-throughput work without our alternating goals. The
+# goal-scoped intents live on `fak dispatch auto` (agent-path; needs a green tree).
+WAVE_MAX = 8  # per-tick cap; the preflight re-check still binds the live population
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def run(cmd: list[str], timeout: int = 240) -> tuple[int, str, str]:
+    """Run a command in the repo; never raise — a failing fold must not kill the loop."""
+    try:
+        p = subprocess.run(
+            cmd, cwd=REPO, capture_output=True, text=True, timeout=timeout
+        )
+        return p.returncode, p.stdout, p.stderr
+    except subprocess.TimeoutExpired:
+        return 124, "", f"timeout after {timeout}s"
+    except Exception as e:  # noqa: BLE001 — orient must be crash-proof
+        return 1, "", str(e)
+
+
+def run_json(cmd: list[str], timeout: int = 240) -> dict | None:
+    rc, out, _ = run(cmd, timeout=timeout)
+    if rc != 0 or not out.strip():
+        return None
+    try:
+        return json.loads(out)
+    except json.JSONDecodeError:
+        return None
+
+
+# ---- orient folds (pure reads) -------------------------------------------------
+
+def preflight() -> dict:
+    j = run_json([sys.executable, "tools/dispatch_preflight.py", "--json"]) or {}
+    return {
+        "verdict": j.get("verdict", "UNKNOWN"),
+        "ok": bool(j.get("ok")),
+        "headroom": j.get("headroom"),
+        "live": j.get("live"),
+        "reason": j.get("reason", ""),
+    }
+
+
+def progress() -> dict:
+    """The witnessed close-N odometer (#2639) — the only honest progress signal."""
+    j = run_json(["go", "run", "./cmd/fak", "dispatch", "progress", "--json"], timeout=300) or {}
+    return {
+        "closed_by_loop_total": j.get("closed_by_loop_total"),
+        "baseline_open": j.get("baseline_open"),
+        "current_issues_per_hour": j.get("current_issues_per_hour"),
+    }
+
+
+def cron_state() -> dict:
+    """Is the standing FleetIssueDispatch cron live? If it is, the meta-loop must NOT
+    hand-launch waves beside it (double-dispatch on the same slots/lanes is the named
+    super-loop anti-pattern). The meta-loop's job then is to SUPERVISE the cron —
+    verify it fires and ships, self-heal residue, feed the nodes it doesn't cover —
+    and only take the wave itself when the cron has gone dark."""
+    rc, out, _ = run([
+        "powershell.exe", "-NoProfile", "-Command",
+        "Get-ScheduledTask -TaskName 'FleetIssueDispatch' -ErrorAction SilentlyContinue "
+        "| Select-Object -ExpandProperty State"
+    ], timeout=60)
+    state = (out or "").strip().splitlines()[-1].strip() if out.strip() else "ABSENT"
+    return {"name": "FleetIssueDispatch", "state": state, "live": state in ("Running", "Ready")}
+
+
+def nightrun_feasible() -> bool:
+    """True when THIS box has a feasible next() data-collection datum."""
+    j = run_json(["go", "run", "./cmd/fak", "nightrun", "next", "--json"], timeout=180)
+    return bool(j and j.get("has_next"))
+
+
+# ---- reclaim (rung-1: free, no kills) -----------------------------------------
+
+def reclaim_rung1(apply: bool) -> str:
+    """Any dry-run dispatch tick self-heals dead/expired inflight markers.
+
+    This is the ONLY reclaim the meta-loop does unattended — rungs 2/3 (reads that
+    inform kills, and the kills themselves) carry the same operator bar as -Launch
+    and are never automated (super-loop skill, Step 0.5)."""
+    if not apply:
+        return "reclaim: (dry-run) would self-heal inflight markers via issue_dispatch --no-refresh"
+    rc, _, err = run([sys.executable, "tools/issue_dispatch.py", "--no-refresh"], timeout=180)
+    return f"reclaim: rung-1 self-heal rc={rc}{(' ' + err.strip()) if err.strip() else ''}"
+
+
+# ---- build-tree health (a broken working tree caps the whole night) -----------
+
+def tree_builds() -> tuple[bool, str]:
+    """`go build ./cmd/fak` over the live working tree. A broken tree means every
+    worker in this checkout that recompiles the agent path fails to launch — the
+    single most important thing the meta-loop must surface before it drives anything.
+    Prefer the Python launcher path when this is red; it does not recompile the
+    agent package and so survives a mid-flight edit on the shared trunk."""
+    rc, _, err = run(["go", "build", "./cmd/fak/..."], timeout=300)
+    if rc == 0:
+        return True, "go build ./cmd/fak: OK"
+    first = (err.strip().splitlines() or ["build failed"])[0][:200]
+    return False, f"go build ./cmd/fak: BROKEN — {first}"
+
+
+# ---- refill (drive the priced tree-disjoint wave; build-break-immune) ----------
+
+def refill(apply: bool, tree_ok: bool) -> dict:
+    """Refill the fleet to headroom via the Python tree-disjoint wave
+    (`tools/issue_dispatch.py --wave`) — the super-loop skill's stated DEFAULT:
+    collision-priced by `dos arbitrate`, preflight re-checked per spawn, spread across
+    the busiest pairwise-disjoint lanes, and it does NOT recompile `internal/agent`,
+    so it survives a mid-flight edit that reddens the shared tree. Dry-run reads the
+    plan (verdict/size/free_seats); --apply adds --live to spawn the real wave."""
+    cmd = [sys.executable, "tools/issue_dispatch.py", "--wave",
+           "--max-workers", str(WAVE_MAX), "--work-kind", "engineering", "--json"]
+    if apply:
+        cmd.append("--live")
+    plan = run_json(cmd, timeout=420) or {}
+    return {
+        "path": "issue_dispatch --wave" + ("" if tree_ok else " (tree red → this path required)"),
+        "verdict": plan.get("verdict", "UNKNOWN"),
+        "size": plan.get("size"),
+        "free_seats": plan.get("free_seats"),
+        "lanes": [l.get("lane") for l in (plan.get("lanes") or []) if isinstance(l, dict)][:8],
+        "launched": bool(apply and plan.get("verdict") in ("WAVE", "SPAWNED", "WOULD_WAVE") and plan.get("live")),
+    }
+
+
+# ---- nodes (lab/mac/gpu data collection) --------------------------------------
+
+def drive_nodes(apply: bool) -> str:
+    """Kick the local box's nightrun collection loop when it has a feasible datum.
+
+    The mac/gpu NODES pull-and-run tools/fak_node_bench.sh on their OWN box (they
+    already have the repo); this meta-loop cannot ssh-drive them unattended without
+    the gitignored node registry, so here it drives the LOCAL box's feasible night
+    datum and REPORTS the node fan-out as an operator follow-on rather than faking it."""
+    if not nightrun_feasible():
+        return "nodes: local box has no feasible nightrun datum (skip); mac/gpu run tools/fak_node_bench.sh on-box"
+    if not apply:
+        return "nodes: (dry-run) would `fak nightrun run --apply` one local datum"
+    rc, _, _ = run(["go", "run", "./cmd/fak", "nightrun", "run", "--apply", "--max", "1"], timeout=420)
+    return f"nodes: local nightrun datum collected rc={rc}"
+
+
+# ---- the marathon loop --------------------------------------------------------
+
+@dataclass
+class TickReport:
+    ts: str
+    tick: int
+    verdict: str
+    closed_total: int | None
+    closed_delta: int
+    toward_target: int
+    target: int
+    per_hour: float | None
+    cron: str = ""
+    tree: str = ""
+    reclaim: str = ""
+    refills: list = field(default_factory=list)
+    nodes: str = ""
+    stop: str | None = None
+
+
+def append_ledger(rep: TickReport) -> None:
+    LEDGER.parent.mkdir(parents=True, exist_ok=True)
+    with LEDGER.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(asdict(rep)) + "\n")
+
+
+def main() -> int:
+    # Windows consoles default to cp1252; the plan uses box glyphs/em-dashes.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001 — best-effort; non-UTF terminals still get ASCII fallbacks below
+            pass
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--target", type=int, default=200, help="witnessed closes to progress tonight")
+    ap.add_argument("--cadence-min", type=float, default=75.0, help="minutes between ticks")
+    ap.add_argument("--deadline-hours", type=float, default=12.0, help="hard wall-clock stop")
+    ap.add_argument("--max-ticks", type=int, default=64, help="runaway backstop")
+    ap.add_argument("--apply", action="store_true", help="run the marathon for real (default: single dry-run tick)")
+    ap.add_argument("--force-wave", action="store_true",
+                    help="hand-launch waves even while the FleetIssueDispatch cron is live "
+                         "(default: SUPERVISE the cron, never double-dispatch beside it)")
+    args = ap.parse_args()
+
+    start = time.monotonic()
+    baseline = progress().get("closed_by_loop_total")
+    if baseline is None:
+        print("orient: cannot read witnessed close counter — refusing to run blind", file=sys.stderr)
+        return 2
+
+    mode = "APPLY (real --live waves)" if args.apply else "DRY-RUN (plans only, no spawns)"
+    print(f"═ META super-loop above the night runs — {mode}")
+    print(f"  intent: progress {args.target} WITNESSED closes | baseline closed_by_loop_total={baseline}")
+    print(f"  cadence={args.cadence_min}m deadline={args.deadline_hours}h target_total={baseline + args.target}")
+    print(f"  ledger: {LEDGER.relative_to(REPO)}\n")
+
+    tick = 0
+    while True:
+        tick += 1
+        elapsed_h = (time.monotonic() - start) / 3600.0
+
+        pf = preflight()
+        prog = progress()
+        closed = prog.get("closed_by_loop_total")
+        delta = (closed - baseline) if (closed is not None and baseline is not None) else 0
+
+        rep = TickReport(
+            ts=_now(), tick=tick, verdict=pf["verdict"],
+            closed_total=closed, closed_delta=delta,
+            toward_target=delta, target=args.target,
+            per_hour=prog.get("current_issues_per_hour"),
+        )
+
+        # --- stop conditions (honest marathon signals) ---
+        if delta >= args.target:
+            rep.stop = f"TARGET_MET: {delta}/{args.target} witnessed closes"
+        elif elapsed_h >= args.deadline_hours:
+            rep.stop = f"DEADLINE: {elapsed_h:.1f}h >= {args.deadline_hours}h ({delta}/{args.target} closed)"
+        elif tick > args.max_ticks:
+            rep.stop = f"MAX_TICKS backstop ({delta}/{args.target} closed)"
+        elif pf["verdict"] in ("REFUSE_NO_SEAT", "REFUSE_NO_ACCOUNT"):
+            # waiting fixes these (seat returns on a window, not a retry) — pause, don't spin
+            rep.stop = f"SEAT_EXHAUSTED: {pf['verdict']} — {pf['reason']}"
+
+        if rep.stop:
+            print(f"[tick {tick}] STOP — {rep.stop}")
+            append_ledger(rep)
+            break
+
+        # --- drive the fleet (cron-check -> build-check -> reclaim -> refill -> nodes) ---
+        cron = cron_state()
+        rep.cron = f"{cron['name']}={cron['state']}"
+        tree_ok, tree_msg = tree_builds()
+        rep.tree = tree_msg
+        rep.reclaim = reclaim_rung1(args.apply)
+
+        # SUPERVISE, don't double-dispatch: only take the wave ourselves when the cron
+        # is dark OR the operator forced it. A live cron already refills to headroom.
+        cron_owns_waves = cron["live"] and not args.force_wave
+        if cron_owns_waves:
+            rep.refills.append({"skipped": "CRON_OWNS_WAVES",
+                                "reason": f"{cron['name']} live ({cron['state']}) — supervising, not double-dispatching"})
+        elif pf["ok"]:
+            rep.refills.append(refill(args.apply, tree_ok))
+        else:
+            rep.refills.append({"skipped": pf["verdict"], "reason": pf["reason"]})
+        rep.nodes = drive_nodes(args.apply)
+
+        # --- report the tick ---
+        print(f"[tick {tick}] {pf['verdict']} | closed {closed} (Δ{delta:+d}/{args.target}) "
+              f"| {prog.get('current_issues_per_hour')}/h | {elapsed_h:.1f}h")
+        print(f"    cron: {rep.cron}  ({'supervising — cron owns the waves' if cron['live'] and not args.force_wave else 'meta-loop owns the waves'})")
+        tree_flag = "OK" if tree_ok else "!! BROKEN — caps every in-checkout worker"
+        print(f"    tree: {rep.tree}  [{tree_flag}]")
+        print(f"    {rep.reclaim}")
+        for r in rep.refills:
+            if "skipped" in r:
+                print(f"    refill: SKIPPED ({r['skipped']}) — {r['reason']}")
+            else:
+                print(f"    refill: {r['path']} | {r['verdict']} size={r['size']} "
+                      f"free_seats={r['free_seats']} launched={r['launched']}")
+                if r.get("lanes"):
+                    print(f"        lanes: {', '.join(str(x) for x in r['lanes'])}")
+        print(f"    {rep.nodes}")
+        append_ledger(rep)
+
+        if not args.apply:
+            print("\n(dry-run: single planning tick only — pass --apply to run the marathon)")
+            break
+
+        time.sleep(args.cadence_min * 60.0)
+
+    print("\n═ marathon done — the honest result is WITNESSED closes, not launches:")
+    fin = progress()
+    fclosed = fin.get("closed_by_loop_total")
+    fdelta = (fclosed - baseline) if (fclosed is not None) else 0
+    print(f"  closed_by_loop_total {baseline} -> {fclosed}  (Δ{fdelta:+d} toward {args.target})")
+    print(f"  verify: dos commit-audit --json ; fak dispatch progress --json ; ledger {LEDGER.name}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
