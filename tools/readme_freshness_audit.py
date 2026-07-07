@@ -12,10 +12,12 @@ sat outside all of them — correct only as long as a human happened to tend it.
 
 This is that missing layer. It folds read-back surfaces it does not author (the
 README text, the ``VERSION`` file, the authority doc, the filesystem) and reports
-one typed verdict per check, plus an ``ok`` bit AND an UNBOUNDED focus ``score``
-(100 = a clean, complete, lean page; it falls without floor as bloat and defects
-accumulate — see build_payload). Read-only by construction: it never edits the
-README; it only checks it.
+one typed verdict per check, plus an ``ok`` bit AND a TWO-SIDED UNBOUNDED focus
+``score`` (100 = a clean, complete page exactly at the size budget; it rises
+without ceiling as a complete page gets leaner and falls without floor as bloat
+and defects accumulate — see build_payload, so it never saturates at a "fake
+perfect" 100). Read-only by construction: it never edits the README; it only
+checks it.
 
 The checks split into two tiers.
 
@@ -57,12 +59,14 @@ front page, then let it regrow every pass" stops being the stable equilibrium.
 
 FAIL is a required edit; WARN/ADVISORY are judgment calls. ``ok`` is False iff a
 *hygiene* FAIL fires (or a substance affordance is wholly absent, or the audit
-itself errored). The ``score`` is the richer signal — an UNBOUNDED, magnitude-aware
-index where 100 is a clean, complete, lean page and every defect or line/section
-over budget subtracts real points with no floor, so "the page is fresh" and "the
-page is good" stay two different numbers even as the page grows (a bounded 0-100
-score frozen at "A" could not). ``readme_debt`` remains the lower-is-better defect
-count for the control pane.
+itself errored). The ``score`` is the richer signal — a TWO-SIDED UNBOUNDED,
+magnitude-aware index where 100 is the ZERO-POINT (a clean, complete page exactly
+at the size budget), a leaner complete page scores ABOVE it without ceiling, and
+every defect or line/section over budget subtracts real points BELOW it without
+floor. So "the page is fresh" and "the page is good" stay two different numbers,
+and a genuinely excellent page keeps climbing instead of parking at a fake-perfect
+100 (a bounded 0-100 score frozen at "A" could not). ``readme_debt`` remains the
+lower-is-better defect count for the control pane.
 
 **The keyword-gaming limit, and the one cross-check that closes it.** Every
 substance affordance above is a README-*text* heuristic — a keyword or regex
@@ -173,36 +177,50 @@ WEIGHTS: dict[str, float] = {
     "hero_above_fold": 2.0,
 }
 
-# The composite SCORE is an UNBOUNDED focus index, not a percentage. 100 is the
-# zero-defect reference — a correct, complete, LEAN page — and the score falls
-# WITHOUT FLOOR as defects and bloat accumulate: a badly over-budget or broken
-# page scores below zero. This is deliberate, matching the cadence report's
-# unbounded `standing_score`: a bounded 0-100 score saturated at "A" and, worse,
-# floored at 0, so a page 5 lines over budget and one 200 lines over looked the
-# same. The index is MAGNITUDE-AWARE — every line over budget, every extra
-# section, every repeated lead, every dead link subtracts real points — so "the
-# page keeps growing" registers as a steadily falling number instead of a frozen
-# 0. Hygiene still GATES `ok` (a FAIL flips it False); it no longer pads the
-# score. `readme_debt` stays the house-standard lower-is-better defect COUNT
-# (unchanged); the score is 100 minus the unbounded penalty below.
+# The composite SCORE is a TWO-SIDED UNBOUNDED focus index, not a percentage. 100
+# is the ZERO-POINT — a correct, complete page sitting EXACTLY at the size budget.
+# The score falls WITHOUT FLOOR as defects and bloat accumulate (a badly over-budget
+# or broken page scores below zero) AND rises WITHOUT CEILING as a complete page
+# gets leaner (every line under budget on a complete page adds a point). This is
+# deliberate, matching the cadence report's unbounded `standing_score`: a bounded
+# 0-100 score saturated at "A" and floored at 0 made a page 5 lines over budget and
+# one 200 over look identical, and — worse — made a complete page park at a fake
+# 100 with no gradient left to reward the next trim. The index is MAGNITUDE-AWARE
+# in BOTH directions — every line over budget, every extra section, every repeated
+# lead, every dead link subtracts real points; every line a complete page comes in
+# under budget adds one — so the number keeps moving instead of freezing. Hygiene
+# still GATES `ok` (a FAIL flips it False) and VOIDS the leanness credit; it no
+# longer pads the score. `readme_debt` stays the house-standard lower-is-better
+# defect COUNT (unchanged); the score is 100 minus the unbounded penalty plus the
+# unbounded leanness credit below.
 SUBSTANCE_CHECKS = {
     "guard_prominence", "lcd_onramp", "audience_footholds",
     "front_page_focus", "speed_claim", "hero_above_fold",
 }
 
-# Penalty weights for the unbounded score = round(100 - penalty). Zero penalty
-# (a clean, complete, lean page) = 100; the penalty has no upper bound, so the
-# score has no lower bound.
+# Score weights for the TWO-SIDED UNBOUNDED index: score = round(100 - penalty
+# + credit). 100 is NOT a ceiling — it is the ZERO-POINT: a clean, complete page
+# sitting EXACTLY at the line budget. Bloat and defects push BELOW it without
+# floor (penalty); a leaner complete page rises ABOVE it without ceiling (credit),
+# so the score never saturates at a "fake perfect" 100 — every line trimmed off a
+# complete page still moves it. The size axis is SIGNED and symmetric around the
+# budget: one line over costs LINE_OVER_PENALTY, one line under a *complete* page
+# earns LINE_UNDER_CREDIT (see _score_credit).
 #   HYGIENE_FAIL_PENALTY: one hygiene FAIL (dead link / stale pin / naive lead)
 #     lands the page exactly on the old FAIL_SCORE_CAP; a second FAIL takes it
 #     below, unbounded — a broken page can no longer hide near a passing grade.
-#   *_OVER_PENALTY: the UNBOUNDED, magnitude-aware terms — per line over the line
-#     budget, per section over the section budget, per excess preamble lead.
+#   *_OVER_PENALTY: the UNBOUNDED, magnitude-aware bloat terms — per line over the
+#     line budget, per section over the section budget, per excess preamble lead.
+#   LINE_UNDER_CREDIT: the mirror term — per line a COMPLETE page comes in UNDER
+#     the budget, scaled by affordance completeness and voided by any hygiene FAIL
+#     (a lean-but-empty or lean-but-broken page earns nothing). Bloat is always
+#     punished; leanness is rewarded only once the page is correct and complete.
 #   SUBSTANCE_SHORTFALL_SCALE: a fully-missing substance affordance costs its
 #     WEIGHT x this (so a missing hero, weight 2.0, costs 20 points).
 FAIL_SCORE_CAP = 55
 HYGIENE_FAIL_PENALTY = 100 - FAIL_SCORE_CAP  # 45: one FAIL == the old cap
 LINE_OVER_PENALTY = 1.0        # per README line beyond FRONT_PAGE_LINE_BUDGET
+LINE_UNDER_CREDIT = 1.0        # per line a COMPLETE page is UNDER budget (x completeness)
 SECTION_OVER_PENALTY = 8.0     # per `## ` section beyond FRONT_PAGE_SECTION_BUDGET
 LEAD_OVER_PENALTY = 10.0       # per preamble lead restatement beyond MAX_LEAD_RESTATEMENTS
 OVERFLOW_MISSING_PENALTY = 5.0  # the front page links no overflow / deep-dive sink
@@ -682,6 +700,10 @@ def check_front_page_focus(readme: str, *, line_budget: int,
     # a yes/no. A page 5 lines over and one 200 over both fail within_line_budget,
     # but they carry very different overage — carried out for the score penalty.
     lines_over = max(0, total - line_budget)
+    # The mirror of lines_over: HOW FAR UNDER budget a page is. A complete page
+    # earns leanness credit for this headroom (see _score_credit), so the score
+    # keeps rising as a good page gets tighter instead of parking at 100.
+    lines_under = max(0, line_budget - total)
     sections_over = max(0, n_sections - section_budget)
     lead_over = max(0, lead_hits - max_lead)
     overflow_linked = bool(re.search(
@@ -697,8 +719,11 @@ def check_front_page_focus(readme: str, *, line_budget: int,
         label=(f"front page stays focused ({total}/{line_budget} lines, "
                f"{n_sections}/{section_budget} sections, "
                f"{lead_hits} preamble lead restatement(s))"))
-    # Attach the raw overage so _score_penalty can weight it by magnitude.
-    out.update({"lines_over": lines_over, "sections_over": sections_over,
+    # Attach the raw overage (and the under-budget headroom) so the score can
+    # weight both directions by magnitude: _score_penalty reads the *_over fields,
+    # _score_credit reads lines_under.
+    out.update({"lines_over": lines_over, "lines_under": lines_under,
+                "sections_over": sections_over,
                 "lead_over": lead_over, "overflow_linked": overflow_linked})
     return out
 
@@ -842,6 +867,50 @@ def _score_penalty(checks: list[dict[str, Any]]) -> float:
     return penalty
 
 
+def _add_substance_completeness(checks: list[dict[str, Any]]) -> float:
+    """Mean 0..1 completeness over the five ADD substance checks.
+
+    ``front_page_focus`` is excluded: it IS the size axis the credit rewards, so
+    folding it in would be circular. A page with no add-substance checks at all
+    (a bare hand-built fixture) is treated as 0% complete — it earns no credit.
+    """
+    scores = [
+        _check_score(c) for c in checks
+        if c.get("check") in SUBSTANCE_CHECKS and c.get("check") != "front_page_focus"
+    ]
+    return (sum(scores) / len(scores)) if scores else 0.0
+
+
+def _score_credit(checks: list[dict[str, Any]]) -> float:
+    """The unbounded-ABOVE leanness credit behind ``score = 100 - penalty + credit``.
+
+    The mirror of the over-budget penalty: a COMPLETE page earns points for every
+    line it comes in UNDER the size budget, so the score keeps climbing as a good
+    page gets tighter instead of parking at a fake-perfect 100. Two guards keep a
+    small or broken page from farming it:
+
+      * any hygiene FAIL VOIDS the credit entirely — a page must be *correct*
+        before its leanness counts (bloat, by contrast, is always penalized);
+      * the credit scales by ADD-affordance completeness, so a lean-but-empty page
+        (few affordances) earns proportionally little — you cannot score high by
+        deleting content, only by saying the same complete thing in fewer lines.
+
+    A ``front_page_focus`` dict without ``lines_under`` (a hand-built fixture, or
+    an over-budget page) contributes zero — the page is at or over budget.
+    """
+    # A broken page earns no leanness reward: fix it first.
+    if any(c.get("status") == "FAIL" and c.get("check") not in SUBSTANCE_CHECKS
+           for c in checks):
+        return 0.0
+    focus = next((c for c in checks if c.get("check") == "front_page_focus"), None)
+    if focus is None:
+        return 0.0
+    lines_under = focus.get("lines_under", 0) or 0
+    if lines_under <= 0:
+        return 0.0
+    return LINE_UNDER_CREDIT * lines_under * _add_substance_completeness(checks)
+
+
 def _as_int(v: Any) -> int:
     """Coerce a payload field to int, tolerant of None / floats / strings."""
     try:
@@ -909,18 +978,27 @@ def build_payload(*, workspace: str, checks: list[dict[str, Any]],
     fails = [c for c in checks if c["status"] == "FAIL"]
     warns = [c for c in checks if c["status"] == "WARN"]
 
-    # Composite score = 100 - an UNBOUNDED, magnitude-aware penalty (see
-    # _score_penalty and the penalty constants). 100 is a clean, complete, lean
-    # page; the score falls without floor as bloat and defects accumulate, so it
-    # keeps discriminating instead of saturating at 100 or flooring at 0. It is
-    # NOT a percentage. `scored`/`has_substance` remain only for the work-list
-    # ranking below; the headline number no longer normalizes to a ceiling.
+    # Composite score = 100 - an UNBOUNDED penalty + an UNBOUNDED leanness credit
+    # (see _score_penalty / _score_credit). 100 is the ZERO-POINT — a clean,
+    # complete page at the size budget; bloat/defects push it below without floor,
+    # and a leaner complete page rises above without ceiling, so it keeps
+    # discriminating instead of saturating at a fake-perfect 100. It is NOT a
+    # percentage. `scored`/`has_substance` remain only for the work-list ranking.
     substance = [c for c in checks if c["check"] in SUBSTANCE_CHECKS]
     scored = substance if substance else checks
     has_substance = bool(substance)
-    score = round(100 - _score_penalty(checks))
+    score = round(100 - _score_penalty(checks) + _score_credit(checks))
     grade = _grade_letter(score)
     debt = _readme_debt_from_checks(checks)
+    # "Thin" is now decided by real INCOMPLETENESS (a missing add-affordance), not
+    # by score < 90: the leanness credit can lift an incomplete-but-lean page well
+    # above 90, so keying the verdict on the score would let it dodge the flag.
+    add_missing = sum(
+        (len(c.get("items") or []) if isinstance(c.get("items"), list) and c.get("items")
+         else (1 if _check_score(c) < 1.0 else 0))
+        for c in checks
+        if c.get("check") in SUBSTANCE_CHECKS and c.get("check") != "front_page_focus"
+    )
 
     # The work-list for next_action: lowest weighted contribution first (the
     # check where lifting the score buys the most), excluding already-perfect.
@@ -941,12 +1019,27 @@ def build_payload(*, workspace: str, checks: list[dict[str, Any]],
         reason = f"score {score} ({grade}); {len(fails)} required README fix(es): {names}"
         next_action = ("invoke /refresh-readme: each FAIL is a required edit (fix the dead link / "
                        "stale pin / naive-lead headline / missing onramp), then re-stamp and re-run")
-    elif has_substance and score < 90:
+    elif has_substance and add_missing > 0:
         ok, verdict, finding = True, "OK", "readme_fresh_thin"
-        reason = (f"score {score} ({grade}): front page is correct but thin — "
-                  f"raise the substance checks ({worst})")
-        next_action = (f"invoke /refresh-readme: lift the lowest-scoring checks ({worst}) toward 90+, "
+        reason = (f"score {score} ({grade}): front page is correct but THIN — "
+                  f"{add_missing} missing affordance(s); raise the substance checks ({worst})")
+        next_action = (f"invoke /refresh-readme: add the missing affordances (worst: {worst}), "
                        "then re-stamp readme-verified and re-run")
+    elif score < 100:
+        # Complete (every add-affordance present) but BELOW the 100 lean-complete
+        # reference: over the size budget and/or carrying judgment-call WARNs. The
+        # fix is to TRIM (and/or clear the WARNs), not to add — so this is notes,
+        # not thin.
+        ok, verdict, finding = True, "OK", "readme_fresh_with_notes"
+        names = ", ".join(c["check"] for c in warns)
+        bits = [f"trim toward the {FRONT_PAGE_LINE_BUDGET}-line budget"]
+        if warns:
+            bits.append(f"clear {len(warns)} WARN(s): {names}")
+        reason = (f"score {score} ({grade}): complete but below the 100 lean "
+                  f"reference — {'; '.join(bits)}")
+        next_action = ("invoke /refresh-readme: trim the front page toward budget"
+                       + (" and review the WARNs" if warns else "")
+                       + ", then re-stamp readme-verified and re-run")
     elif warns:
         ok, verdict, finding = True, "OK", "readme_fresh_with_notes"
         names = ", ".join(c["check"] for c in warns)
@@ -954,7 +1047,7 @@ def build_payload(*, workspace: str, checks: list[dict[str, Any]],
         next_action = "review each WARN at the next /refresh-readme pass; no blocking edit needed"
     else:
         ok, verdict, finding = True, "OK", "readme_fresh"
-        reason = (f"score {score} ({grade}): front page is correct AND complete — "
+        reason = (f"score {score} ({grade}): front page is correct, complete, AND lean — "
                   "links resolve, pins current, numbers traced, SOTA-led, guard/speed/hero above the fold")
         next_action = "no README action needed; re-run after the next front-page or VERSION change"
 
@@ -1030,7 +1123,7 @@ def compare(current: dict[str, Any], baseline: dict[str, Any]) -> str:
     lines = [
         "readme-freshness compare:",
         f"  readme_debt: {b_debt} -> {c_debt}  (retired {b_debt - c_debt})",
-        f"  score:       {b_score} -> {c_score}   grade {b_grade} -> {c_grade}  (100 = clean; unbounded below)",
+        f"  score:       {b_score} -> {c_score}   grade {b_grade} -> {c_grade}  (100 = complete at budget; unbounded above + below)",
     ]
     # When both payloads carry hygiene counts, surface the FAIL delta too: a
     # regression that adds a dead link / stale pin shows here even if the
@@ -1127,7 +1220,8 @@ def render(payload: dict[str, Any]) -> str:
     counts = payload.get("counts") or {}
     lines = [
         f"readme-freshness audit: {payload.get('verdict')} ({payload.get('finding')})  "
-        f"score {payload.get('score')} ({payload.get('grade')}, 100=clean, unbounded below)",
+        f"score {payload.get('score')} ({payload.get('grade')}, 100=at-budget; "
+        f"unbounded above=leaner, below=bloat/defects)",
         (f"checks: ok={counts.get('OK', 0)} warn={counts.get('WARN', 0)} "
          f"fail={counts.get('FAIL', 0)} advisory={counts.get('ADVISORY', 0)}"),
         f"next: {payload.get('next_action')}",

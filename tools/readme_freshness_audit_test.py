@@ -279,9 +279,13 @@ def test_front_page_focus_exposes_overage_magnitude() -> None:
 
 # --- the UNBOUNDED, magnitude-aware composite score ------------------------
 
-def _focus_check(*, lines_over=0, sections_over=0, lead_over=0,
+def _focus_check(*, lines_over=0, lines_under=0, sections_over=0, lead_over=0,
                  overflow_linked=True) -> dict:
-    """A front_page_focus check dict carrying explicit overage, for score tests."""
+    """A front_page_focus check dict carrying explicit overage, for score tests.
+
+    ``lines_under`` is the UNDER-budget headroom that feeds the leanness credit
+    (mutually exclusive with lines_over: a page is either over or under budget).
+    """
     missing = []
     if lines_over:
         missing.append("within_line_budget")
@@ -294,7 +298,8 @@ def _focus_check(*, lines_over=0, sections_over=0, lead_over=0,
     met = 4 - len(missing)
     return {"check": "front_page_focus", "status": "OK" if met >= 3 else "WARN",
             "score": round(met / 4, 3), "items": missing,
-            "lines_over": lines_over, "sections_over": sections_over,
+            "lines_over": lines_over, "lines_under": lines_under,
+            "sections_over": sections_over,
             "lead_over": lead_over, "overflow_linked": overflow_linked}
 
 
@@ -353,6 +358,80 @@ def test_excess_section_and_lead_outweigh_a_single_line() -> None:
         workspace=".", checks=_all_substance_ok()[:-1] + [_focus_check(lead_over=1)])
     assert section["score"] < line["score"], (section["score"], line["score"])
     assert lead["score"] < section["score"], (lead["score"], section["score"])
+
+
+# --- the UNBOUNDED-ABOVE leanness credit (no fake-perfect 100 ceiling) ------
+
+def test_score_is_unbounded_above_on_lean_complete_page() -> None:
+    # A COMPLETE page 180 lines under budget scores far ABOVE 100 — 100 is the
+    # at-budget zero-point, not a ceiling, so a leaner page is not "fake perfect".
+    checks = _all_substance_ok()[:-1] + [_focus_check(lines_under=180)]
+    p = rfa.build_payload(workspace=".", checks=checks)
+    assert p["score"] > 100, p
+    assert p["score"] == round(100 + 180 * rfa.LINE_UNDER_CREDIT), p
+    assert p["finding"] == "readme_fresh", p  # complete + lean = the top verdict
+
+
+def test_leaner_complete_page_scores_strictly_higher() -> None:
+    # The score keeps MOVING as a complete page gets tighter — no plateau. Every
+    # trimmed line is worth exactly LINE_UNDER_CREDIT.
+    lean = rfa.build_payload(
+        workspace=".", checks=_all_substance_ok()[:-1] + [_focus_check(lines_under=50)])
+    leaner = rfa.build_payload(
+        workspace=".", checks=_all_substance_ok()[:-1] + [_focus_check(lines_under=90)])
+    assert leaner["score"] > lean["score"], (leaner["score"], lean["score"])
+    assert leaner["score"] - lean["score"] == round(40 * rfa.LINE_UNDER_CREDIT)
+
+
+def test_leanness_credit_scales_with_completeness() -> None:
+    # Leanness only counts in proportion to completeness: the same headroom earns
+    # LESS on a page missing an affordance, so you cannot score high by deleting
+    # content — only by saying the same complete thing in fewer lines.
+    full = _all_substance_ok()[:-1] + [_focus_check(lines_under=100)]
+    partial = (
+        [{"check": c, "status": "OK", "score": 1.0}
+         for c in rfa.SUBSTANCE_CHECKS if c not in ("front_page_focus", "hero_above_fold")]
+        + [{"check": "hero_above_fold", "status": "WARN", "score": 0.5,
+            "items": ["sota_framed"]}]
+        + [_focus_check(lines_under=100)])
+    p_full = rfa.build_payload(workspace=".", checks=full)
+    p_partial = rfa.build_payload(workspace=".", checks=partial)
+    assert p_partial["score"] < p_full["score"], (p_partial["score"], p_full["score"])
+    assert p_full["score"] > 100 and p_partial["score"] > 100, (p_full, p_partial)
+
+
+def test_hygiene_fail_voids_the_leanness_credit() -> None:
+    # A lean but BROKEN page earns no concision reward — a dead link voids the
+    # credit, so it lands on the FAIL cap exactly like a bloated broken page.
+    checks = (_all_substance_ok()[:-1] + [_focus_check(lines_under=180)]
+              + [{"check": "links", "status": "FAIL", "detail": "dead link"}])
+    p = rfa.build_payload(workspace=".", checks=checks)
+    assert p["score"] == rfa.FAIL_SCORE_CAP, p  # 100 - one FAIL, credit voided
+    assert p["ok"] is False, p
+
+
+def test_lean_but_incomplete_page_is_still_flagged_thin() -> None:
+    # The credit can lift an incomplete page's score above 100, but the verdict is
+    # keyed to real completeness, not the score: a missing affordance is THIN even
+    # when the number looks great. (This is what the old score<90 test missed.)
+    checks = (
+        [{"check": c, "status": "OK", "score": 1.0}
+         for c in rfa.SUBSTANCE_CHECKS if c not in ("front_page_focus", "hero_above_fold")]
+        + [{"check": "hero_above_fold", "status": "WARN", "score": 0.5,
+            "items": ["sota_framed"]}]
+        + [_focus_check(lines_under=180)])
+    p = rfa.build_payload(workspace=".", checks=checks)
+    assert p["score"] > 100, p
+    assert p["finding"] == "readme_fresh_thin", p
+
+
+def test_complete_but_overbudget_is_notes_not_thin() -> None:
+    # A COMPLETE page that is merely over budget is not thin (nothing to add) — it
+    # is "with notes": trim, don't add. Bloat and incompleteness are different.
+    checks = _all_substance_ok()[:-1] + [_focus_check(lines_over=30)]
+    p = rfa.build_payload(workspace=".", checks=checks)
+    assert p["score"] == 70, p  # 100 - 30 lines over, no credit (over budget)
+    assert p["finding"] == "readme_fresh_with_notes", p
 
 
 # --- grader / payload tests ------------------------------------------------
