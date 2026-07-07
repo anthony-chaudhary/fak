@@ -30,6 +30,7 @@ flowchart TD
 | [`phased-plan`](phased-plan/SKILL.md) | Ceremony rules for shipping a phase of a phased plan — when to release, the hero-exit rule, the phase-split test. (Auto-loaded; not user-invocable.) |
 | [`clean-skill`](clean-skill/SKILL.md) | Audit a skill's per-invocation context use and propose a context-bundling helper + SKILL.md trim. Stops for approval before writing code. |
 | [`memory-compact`](memory-compact/SKILL.md) | Keep a Claude Code auto-memory store under the harness load cap (200 lines / 25 KB), tier into hot/cold, prove it with the bundled `check_memory.py` witness. |
+| [`skill-lifecycle`](skill-lifecycle/SKILL.md) | Witnessed lifecycle for this skill pack — usage-telemetry sidecar, value/idle-driven auto-archive (never delete, restorable), pin-exemption, journaled reversible transitions. Bundled `skill_lifecycle_test.py` witness. |
 
 ## DOS trust gates
 

@@ -1,0 +1,5 @@
+# skill-lifecycle runtime state (see skill-lifecycle/SKILL.md) — per-checkout
+# telemetry, journal, and archived skills; never committed, never deleted.
+.usage.json
+.lifecycle-journal.jsonl
+.archive/
