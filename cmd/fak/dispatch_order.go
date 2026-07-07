@@ -66,6 +66,8 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchSweep(stdout, stderr, argv[1:])
 	case "progress":
 		return runDispatchProgress(stdout, stderr, argv[1:])
+	case "status":
+		return runDispatchStatus(stdout, stderr, argv[1:])
 	case "audit":
 		return runDispatchAudit(stdout, stderr, argv[1:])
 	case "scorecard":
@@ -88,7 +90,7 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		dispatchUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, tier-status, tick, wave, sweep, progress, audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, or timeout-ledger)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, tier-status, tick, wave, sweep, progress, status, audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, or timeout-ledger)\n", argv[0])
 		dispatchUsage(stderr)
 		return 2
 	}
@@ -259,6 +261,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch wave  [--workspace DIR] [--count N] [--backend claude|opencode|codex] [--goal throughput|high-priority] [--live] [--json]
   fak dispatch sweep [--workspace DIR] [--max-agents N] [--backend claude|opencode|codex] [--live] [--json]
   fak dispatch progress [--workspace DIR] [--target N] [--audit-json FILE] [--json]
+  fak dispatch status [--runs-dir DIR] [--json | --markdown]
   fak dispatch audit [--runs-dir DIR] [--json] [--file-issues]
   fak dispatch scorecard [--workspace DIR] [--live-router] [--json]
   fak dispatch issue-smallness-lint (--body-file FILE | --issue N | --open) [--limit N] [--json] [--scorecard]
