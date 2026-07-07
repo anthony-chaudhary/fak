@@ -28,6 +28,11 @@ func fastPathLookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) {
 
 const ReasonLoopBodyUnwitnessed = "LOOP_DONE_UNWITNESSED"
 
+// ReasonLivelockFuse is the refusal reason stamped when the livelock hard fuse
+// converts a repeated admitted call into a denial. It is RETRYABLE per-tool feedback
+// (the model can make progress by changing approach), never a deny-all session stop.
+const ReasonLivelockFuse = "LIVELOCK_FUSE"
+
 // adjudicateProposedServed is the served-turn vDSO fast path (issue: vDSO live in
 // the hot path). It is adjudicateProposed plus a vDSO Lookup probe FIRST for every
 // read-only-shaped proposed call: on a fresh cache hit the answer is served LOCALLY
@@ -100,7 +105,21 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 	}
 	kept, adjs2, dropped := s.adjudicateProposed(ctx, pass, reqTrace)
 	adjs = append(adjs, adjs2...)
-	s.annotateToolLivelock(reqTrace, adjs)
+	fusedIDs := s.annotateToolLivelock(reqTrace, adjs)
+	// A fused call had its adjudication flipped to DENY above, but it is still sitting
+	// in `kept` (adjudicateProposed admitted it before the fuse ran). Drop it here so it
+	// never reaches the wire — the fuse is only real if the call actually stops.
+	if len(fusedIDs) > 0 {
+		filtered := kept[:0]
+		for _, tc := range kept {
+			if _, fused := fusedIDs[tc.ID]; fused {
+				dropped++
+				continue
+			}
+			filtered = append(filtered, tc)
+		}
+		kept = filtered
+	}
 	if len(served) > 0 {
 		servedText = strings.Join(served, "\n")
 	}
@@ -168,9 +187,13 @@ func callRequestsFresh(args string) bool {
 	return json.Unmarshal(raw, &b) == nil && b
 }
 
-func (s *Server) annotateToolLivelock(trace string, adjs []ToolAdjudication) {
+// annotateToolLivelock attaches the livelock envelope to each repeated adjudication
+// and, when an admitted call's envelope has armed the hard Fuse, converts that call
+// into a retryable DENY in place. It returns the set of tool-call IDs it fused so the
+// caller can drop them from the kept slice (they were admitted before the fuse ran).
+func (s *Server) annotateToolLivelock(trace string, adjs []ToolAdjudication) map[string]struct{} {
 	if s == nil || trace == "" {
-		return
+		return nil
 	}
 	s.livelockMu.Lock()
 	if s.livelock == nil {
@@ -220,10 +243,34 @@ func (s *Server) annotateToolLivelock(trace string, adjs []ToolAdjudication) {
 	}
 	s.livelockMu.Unlock()
 
+	var fused map[string]struct{}
 	for _, h := range hits {
 		env := h.env
 		adjs[h.idx].Livelock = &env
+		// Hard fuse: an ADMITTED call that has repeated identically past the fuse count
+		// has ignored every advisory note. Admitting it again just burns tokens on a loop
+		// the model won't leave on its own, so convert it into a real refusal here. The
+		// refusal is retryable per-tool feedback (not a deny-all session stop): the
+		// existing adjudicationNote machinery renders LIVELOCK_FUSE as "fak refused this
+		// repeated call", which is the structural break the advisory note alone never was.
+		if env.Fuse && adjs[h.idx].Admitted {
+			adjs[h.idx].Admitted = false
+			adjs[h.idx].RepairedArguments = nil
+			adjs[h.idx].Verdict = WireVerdict{
+				Kind:        "DENY",
+				Reason:      ReasonLivelockFuse,
+				By:          "livelock-fuse",
+				Disposition: "RETRYABLE",
+			}
+			if fused == nil {
+				fused = map[string]struct{}{}
+			}
+			if id := adjs[h.idx].ToolCallID; id != "" {
+				fused[id] = struct{}{}
+			}
+		}
 	}
+	return fused
 }
 
 func adjudicationOutcomeForTurn(adjs []ToolAdjudication, keptTools, servedTools int) adjudicationOutcomeSignal {

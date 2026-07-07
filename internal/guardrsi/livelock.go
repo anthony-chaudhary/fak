@@ -12,6 +12,14 @@ const (
 	LivelockSchema           = "guardrsi.livelock/1"
 	LivelockEvent            = "LIVELOCK_DETECTED"
 	DefaultLivelockThreshold = 3
+	// DefaultLivelockFuseFactor multiplies the advisory threshold to get the fuse
+	// count. The advisory note fires at `threshold` and repeats for the next few
+	// identical outcomes; if the run keeps going and reaches threshold*factor, the
+	// model has demonstrably ignored the nudge, so the envelope arms Fuse and the
+	// caller converts the still-admitted call into a hard refusal. A purely advisory
+	// note lets an unresponsive loop burn tokens forever (the gateway kept admitting
+	// the identical call); the fuse is the structural backstop that actually breaks it.
+	DefaultLivelockFuseFactor = 2
 )
 
 // LivelockObservation is one repeated tool-call outcome, identified without carrying
@@ -39,6 +47,11 @@ type LivelockEnvelope struct {
 	Disposition     string `json:"disposition,omitempty"`
 	RepeatCount     int    `json:"repeat_count"`
 	SuggestedChange string `json:"suggested_change"`
+	// Fuse is true once the consecutive run reaches the fuse count (>= advisory
+	// threshold). It tells the caller the loop must be broken now — an admitted call
+	// carrying Fuse should be converted into a hard refusal rather than admitted
+	// again. Fuse never fires before the advisory has already fired at least once.
+	Fuse bool `json:"fuse,omitempty"`
 }
 
 type livelockRun struct {
@@ -51,6 +64,7 @@ type livelockRun struct {
 // small and caller-synchronized; gateway guards it with its server mutex.
 type LivelockDetector struct {
 	threshold int
+	fuse      int
 	byTrace   map[string]livelockRun
 }
 
@@ -58,7 +72,24 @@ func NewLivelockDetector(threshold int) *LivelockDetector {
 	if threshold <= 0 {
 		threshold = DefaultLivelockThreshold
 	}
-	return &LivelockDetector{threshold: threshold, byTrace: map[string]livelockRun{}}
+	return &LivelockDetector{threshold: threshold, fuse: threshold * DefaultLivelockFuseFactor, byTrace: map[string]livelockRun{}}
+}
+
+// NewLivelockDetectorWithFuse builds a detector whose advisory fires at `threshold`
+// and whose fuse arms at `fuse`. A fuse <= threshold is clamped up to threshold so
+// the fuse can never precede the first advisory. A non-positive fuse disables the
+// fuse entirely (envelope.Fuse stays false — advisory-only, the pre-fuse behavior).
+func NewLivelockDetectorWithFuse(threshold, fuse int) *LivelockDetector {
+	d := NewLivelockDetector(threshold)
+	switch {
+	case fuse <= 0:
+		d.fuse = -1 // sentinel: fuse explicitly disabled, advisory-only
+	case fuse < d.threshold:
+		d.fuse = d.threshold
+	default:
+		d.fuse = fuse
+	}
+	return d
 }
 
 // ArgsDigest returns a content-free identity for tool arguments. Valid JSON is compacted
@@ -120,6 +151,13 @@ func (d *LivelockDetector) observe(obs LivelockObservation) (LivelockEnvelope, b
 	if d.threshold <= 0 {
 		d.threshold = DefaultLivelockThreshold
 	}
+	if d.fuse == 0 && d.threshold > 0 {
+		// Zero-valued detector (constructed as &LivelockDetector{} rather than via a
+		// constructor): default the fuse to the standard factor so the backstop is
+		// present. An explicit opt-out is stored as the -1 sentinel, not 0, so this only
+		// rescues the never-initialized case.
+		d.fuse = d.threshold * DefaultLivelockFuseFactor
+	}
 	if d.byTrace == nil {
 		d.byTrace = map[string]livelockRun{}
 	}
@@ -153,6 +191,7 @@ func (d *LivelockDetector) observe(obs LivelockObservation) (LivelockEnvelope, b
 		Disposition:     obs.Disposition,
 		RepeatCount:     run.count,
 		SuggestedChange: suggestedLivelockChange(obs),
+		Fuse:            d.fuse > 0 && run.count >= d.fuse,
 	}, true
 }
 

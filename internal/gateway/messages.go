@@ -1432,9 +1432,13 @@ func resultLivelockInBandNote(a ResultAdmission) string {
 	if a.Livelock == nil {
 		return ""
 	}
-	return "LIVELOCK_DETECTED repeat=" + strconv.Itoa(a.Livelock.RepeatCount) +
+	note := "LIVELOCK_DETECTED repeat=" + strconv.Itoa(a.Livelock.RepeatCount) +
 		" repeated_result=" + livelockCallLabel(*a.Livelock) +
 		" approach=" + a.Livelock.SuggestedChange
+	if a.Livelock.Fuse {
+		note += " fuse=armed"
+	}
+	return note
 }
 
 // resultNoteKey is the stable per-result dedup key. The tool_call_id is replayed

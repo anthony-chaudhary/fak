@@ -152,8 +152,15 @@ func livelockInBandNote(a ToolAdjudication) string {
 	if a.Livelock == nil {
 		return ""
 	}
-	return fmt.Sprintf("LIVELOCK_DETECTED repeat=%d repeated_call=%s approach=%s",
+	note := fmt.Sprintf("LIVELOCK_DETECTED repeat=%d repeated_call=%s approach=%s",
 		a.Livelock.RepeatCount,
 		livelockCallLabel(*a.Livelock),
 		a.Livelock.SuggestedChange)
+	if a.Livelock.Fuse {
+		// The advisory note repeated for several turns and the loop kept going, so the
+		// fuse converted this call into a refusal. Say so plainly: the model must change
+		// approach, not re-propose — re-proposing the identical call fuses again.
+		note += " fuse=armed (this repeated call was refused; changing approach is required, not optional)"
+	}
+	return note
 }

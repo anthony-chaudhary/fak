@@ -87,6 +87,84 @@ func TestLivelockDetectorFiresOnThirdIdenticalTransform(t *testing.T) {
 	}
 }
 
+func TestLivelockDetectorArmsFuseAfterAdvisory(t *testing.T) {
+	// Advisory fires at 3; the default fuse factor is 2, so the fuse arms at 6.
+	d := NewLivelockDetector(3)
+	obs := LivelockObservation{
+		TraceID:    "trace-fuse",
+		Tool:       "Bash",
+		ArgsDigest: "sha256:abc",
+		Verdict:    "ALLOW",
+	}
+	// Repeats 1..2: nothing fires.
+	for i := 1; i <= 2; i++ {
+		if env, ok := d.ObserveAdmitted(obs); ok {
+			t.Fatalf("repeat %d fired early: %+v", i, env)
+		}
+	}
+	// Repeats 3..5: advisory fires but the fuse is NOT yet armed.
+	for i := 3; i <= 5; i++ {
+		env, ok := d.ObserveAdmitted(obs)
+		if !ok {
+			t.Fatalf("repeat %d did not fire the advisory", i)
+		}
+		if env.RepeatCount != i {
+			t.Fatalf("repeat %d: envelope repeat=%d", i, env.RepeatCount)
+		}
+		if env.Fuse {
+			t.Fatalf("repeat %d armed the fuse before the fuse count (6): %+v", i, env)
+		}
+	}
+	// Repeat 6: the fuse arms.
+	env, ok := d.ObserveAdmitted(obs)
+	if !ok {
+		t.Fatal("repeat 6 did not fire")
+	}
+	if env.RepeatCount != 6 || !env.Fuse {
+		t.Fatalf("repeat 6 envelope = %+v, want repeat=6 fuse=true", env)
+	}
+	// Beyond the fuse count it stays armed.
+	env, ok = d.ObserveAdmitted(obs)
+	if !ok || !env.Fuse || env.RepeatCount != 7 {
+		t.Fatalf("repeat 7 envelope = %+v, want repeat=7 fuse=true", env)
+	}
+}
+
+func TestLivelockDetectorWithFuseHonorsExplicitFuseAndOptOut(t *testing.T) {
+	// Explicit fuse at 4 with advisory at 3.
+	d := NewLivelockDetectorWithFuse(3, 4)
+	obs := LivelockObservation{TraceID: "t", Tool: "Bash", ArgsDigest: "sha256:x", Verdict: "DENY", Reason: "POLICY_BLOCK"}
+	var last LivelockEnvelope
+	for i := 1; i <= 4; i++ {
+		last, _ = d.ObserveFailure(obs)
+	}
+	if !last.Fuse || last.RepeatCount != 4 {
+		t.Fatalf("explicit fuse=4 envelope = %+v, want repeat=4 fuse=true", last)
+	}
+
+	// A fuse below the advisory threshold clamps up to the threshold (can't precede
+	// the first advisory).
+	clamped := NewLivelockDetectorWithFuse(3, 1)
+	for i := 1; i <= 2; i++ {
+		if env, ok := clamped.ObserveFailure(obs); ok {
+			t.Fatalf("clamped fuse fired at repeat %d: %+v", i, env)
+		}
+	}
+	env, ok := clamped.ObserveFailure(obs)
+	if !ok || !env.Fuse {
+		t.Fatalf("clamped fuse envelope = %+v, want first advisory to also arm the fuse", env)
+	}
+
+	// Fuse opt-out: advisory still fires, fuse never arms.
+	off := NewLivelockDetectorWithFuse(3, 0)
+	for i := 1; i <= 10; i++ {
+		env, _ := off.ObserveFailure(obs)
+		if env.Fuse {
+			t.Fatalf("opt-out detector armed the fuse at repeat %d: %+v", i, env)
+		}
+	}
+}
+
 func TestLivelockDetectorResetsOnDifferentFailureAndClear(t *testing.T) {
 	d := NewLivelockDetector(3)
 	obs := LivelockObservation{TraceID: "trace-1", Tool: "Bash", ArgsDigest: "sha256:one", Verdict: "DENY", Reason: "POLICY_BLOCK"}
