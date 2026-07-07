@@ -1930,6 +1930,7 @@ func (s *Server) renderMetrics() string {
 	s.writeInKernelOOMRetryMetrics(&b)
 	s.writeInKernelPressureTrimMetrics(&b)
 	m.writeCompactionMetrics(&b)
+	s.writeToolPageMetrics(&b) // #2440: ctxmmu tool-schema page catalog residency + dedup witnesses
 	m.writeResetShadowMetrics(&b)
 	m.writeDenyAllMetrics(&b)
 	s.writeSessionMetrics(&b) // #1204: live session count by DRIVE run-state token
@@ -3077,6 +3078,31 @@ func (m *gatewayMetrics) snapshot() ([]httpMetricSnapshot, []operationMetricSnap
 		return a.by < b.by
 	})
 	return httpRows, opRows
+}
+
+// writeToolPageMetrics renders the ctxmmu tool-schema page catalog family (#2440): the outbound
+// tool-def counterpart of the inbound prompt-MMU. Both rows are WITNESSED (fak owns the catalog):
+//   - tool_schema_resident_bytes (gauge): bytes of tool schema currently RESIDENT in the page
+//     table. An evicted page contributes 0 — its bytes live re-faultably in the CAS, not the
+//     transcript — so this gauge falls as the resident set is paged down and never counts a
+//     schema twice, no matter how many turns re-advertise it.
+//   - tool_page_dedup_hits_total (counter): Register calls that deduped to an existing
+//     content-hashed page. It climbs every turn a tool schema is re-advertised unchanged (the
+//     catalog is the tool's home, so the identical bytes are stored once and shared), the direct
+//     witness that paging the tool catalog out of the transcript stopped the per-turn re-injection
+//     churn the inspiring harness suffered.
+//
+// A bare/toolPages-less Server renders both as 0 rather than omitting the family, so a scrape
+// target never sees the row vanish.
+func (s *Server) writeToolPageMetrics(b *strings.Builder) {
+	var residentBytes, dedupHits int64
+	if s != nil && s.toolPages != nil {
+		residentBytes = s.toolPages.ResidentBytes()
+		dedupHits = s.toolPages.DedupHits()
+	}
+	writeHelpType(b, "fak_gateway_tool_schema_resident_bytes", "WITNESSED (fak authored): tool-schema bytes currently RESIDENT in the ctxmmu tool-page catalog (#2440). An evicted schema contributes 0 — its bytes live re-faultably in the CAS, not the transcript — so this gauge is the live residency of the deterministic per-turn resident set, never the cumulative catalog size.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_tool_schema_resident_bytes %d\n", residentBytes)
+	writeCounter(b, "fak_gateway_tool_page_dedup_hits_total", "WITNESSED (fak authored): tool-schema Register calls that deduped to an existing content-hashed page (#2440). Keyed by content hash, never by name, so it climbs each turn a tool schema is re-advertised unchanged — the witness that the ctxmmu owning the tool catalog stopped the per-turn schema re-injection churn instead of re-inflating identical bytes.", dedupHits)
 }
 
 // writeCompactionMetrics renders the history-compaction family, split along what fak CONTROLS

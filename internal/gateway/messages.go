@@ -964,7 +964,48 @@ func (s *Server) maybePlanAnthropicRaw(ctx context.Context, trace string, req *a
 // the host supplied the floor predicate. promptmmu is fail-safe: any ambiguity returns
 // req.Raw unchanged with a named SkipReason, so this never breaks a turn.
 func (s *Server) maybeCompactInboundTools(req *agent.AnthropicMessagesRequest) (pruned []string) {
+	// #2440: admit each advertised tool schema into the ctxmmu-owned catalog BEFORE any
+	// prune decision. The page table — not this turn's transcript — is the tool catalog's
+	// home, so a schema pruned/evicted from the outbound body is still a re-faultable page,
+	// never a lost one. Registration is keyed by content hash, so identical schemas re-sent
+	// turn after turn dedupe (the tool_page_dedup_hits_total witness) instead of re-inflating.
+	s.registerToolSchemaPages(req)
 	return s.compactInboundToolsWithDecision(req).Removed
+}
+
+// registerToolSchemaPages admits every advertised tool's schema into the ctxmmu tool-page
+// catalog as a content-hashed read-only page. Dedup is by content hash (never by name), so a
+// schema re-advertised each turn registers once and every repeat is a counted dedup hit; two
+// versions of one tool name are two distinct pages that never collide. Pure side effect on the
+// catalog — it never mutates req — and nil-safe for a bare Server or an empty tools[].
+func (s *Server) registerToolSchemaPages(req *agent.AnthropicMessagesRequest) {
+	if s == nil || s.toolPages == nil || req == nil {
+		return
+	}
+	for _, t := range req.Tools {
+		if schema := canonicalToolSchemaBytes(t); len(schema) > 0 {
+			s.toolPages.Register(t.Function.Name, schema)
+		}
+	}
+}
+
+// canonicalToolSchemaBytes renders one tool definition to a stable byte blob for content
+// hashing: name, description, and the parameter JSON Schema joined by NUL separators. The same
+// advertised tool yields the same bytes turn after turn (so it dedupes), while any change to
+// name, description, or schema yields distinct bytes (a distinct page). An empty name AND empty
+// parameters yields no bytes (nothing to page). It is deliberately NOT a JSON re-marshal: the
+// raw Parameters bytes are used verbatim so re-marshal whitespace churn can never move the hash.
+func canonicalToolSchemaBytes(t agent.ToolDef) []byte {
+	if t.Function.Name == "" && len(t.Function.Parameters) == 0 {
+		return nil
+	}
+	var b []byte
+	b = append(b, t.Function.Name...)
+	b = append(b, 0)
+	b = append(b, t.Function.Description...)
+	b = append(b, 0)
+	b = append(b, t.Function.Parameters...)
+	return b
 }
 
 func (s *Server) compactInboundToolsWithDecision(req *agent.AnthropicMessagesRequest) promptmmu.ToolSchemaDecision {

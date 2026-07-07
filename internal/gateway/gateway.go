@@ -44,6 +44,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/bgloop"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/enginecache"
 	"github.com/anthony-chaudhary/fak/internal/fusedturn"
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
@@ -816,21 +817,29 @@ type Server struct {
 	feed                      *coherenceFeed                   // the cross-agent "what changed" feed (vdso coherence bus)
 	sessionFeed               *sessionFeed                     // the drive-state revision feed (#630; host-pushed via PublishSessionRevision)
 	metrics                   *gatewayMetrics
-	servedFailure             servedFailure // recent served-turn panic behind /healthz honesty (#2336); see served_failure.go
-	traceSeq                  uint64        // mints a non-empty TraceID when the wire omits one (atomic)
-	reloadPolicy              PolicyReloadFunc
-	resetTrace                TraceResetFunc
-	observeTrace              TraceObserveFunc
-	observeSession            SessionObserveFunc
-	controlSession            SessionControlFunc
-	steerSession              SteerSessionFunc
-	listSessions              SessionListFunc
-	decideSession             SessionDecideFunc
-	debitSession              SessionDebitFunc
-	resetOnBudget             ResetOnBudgetFunc
-	budgetDrained             BudgetExhaustedFunc
-	defaultTraceMu            sync.RWMutex
-	defaultTraceID            string
+	// toolPages is the tool catalog's home (#2440): each advertised tool schema is a
+	// content-hashed read-only page owned by the ctxmmu, registered at the
+	// maybeCompactInboundTools seam. The page table — not the transcript — is the
+	// source of truth, so compaction can only evict a schema re-faultably, never lose
+	// it; identical schemas dedupe across turns/sessions by content hash. Its
+	// ResidentBytes/DedupHits back the tool_schema_resident_bytes and
+	// tool_page_dedup_hits_total /metrics rows. Built in New; nil-safe for a bare Server.
+	toolPages      *ctxmmu.ToolPageTable
+	servedFailure  servedFailure // recent served-turn panic behind /healthz honesty (#2336); see served_failure.go
+	traceSeq       uint64        // mints a non-empty TraceID when the wire omits one (atomic)
+	reloadPolicy   PolicyReloadFunc
+	resetTrace     TraceResetFunc
+	observeTrace   TraceObserveFunc
+	observeSession SessionObserveFunc
+	controlSession SessionControlFunc
+	steerSession   SteerSessionFunc
+	listSessions   SessionListFunc
+	decideSession  SessionDecideFunc
+	debitSession   SessionDebitFunc
+	resetOnBudget  ResetOnBudgetFunc
+	budgetDrained  BudgetExhaustedFunc
+	defaultTraceMu sync.RWMutex
+	defaultTraceID string
 
 	// loops is the in-kernel background-loop supervisor (internal/bgloop): the
 	// runtime that keeps registered recurring loops progressing while the gateway is
@@ -1404,6 +1413,7 @@ func New(cfg Config) (*Server, error) {
 		feed:                       newCoherenceFeed(0),
 		sessionFeed:                newSessionFeed(0),
 		activity:                   newSessionActivity(),
+		toolPages:                  ctxmmu.NewToolPageTable(nil), // nil ⇒ the process-global MMU pager (#2440)
 		metrics:                    newGatewayMetrics(time.Now()),
 		route:                      newRouteLive(cfg.RouteManifest),
 		roster:                     cfg.RouteAccounts,
