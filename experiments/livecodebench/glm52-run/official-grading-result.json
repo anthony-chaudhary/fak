@@ -1,0 +1,38 @@
+{
+  "harness": "lcb_runner.evaluation.compute_code_generation_metrics.codegen_metrics",
+  "release": "release_v2",
+  "note": "OFFICIAL LiveCodeBench grader over REAL release_v2 problems. Generations hand-authored (no model endpoint reachable from this host); grading is unmodified official code. Two generations/problem (correct+wrong) so pass@1 discriminates.",
+  "metrics": {
+    "pass@1": 0.5,
+    "detail": {
+      "pass@1": {
+        "0": 1.0,
+        "1": 0.0,
+        "2": 1.0,
+        "3": 0.0
+      }
+    }
+  },
+  "per_generation": [
+    {
+      "gen": "1873_A:correct (n_tests=5)",
+      "solved": true,
+      "tests_passed": "5/5"
+    },
+    {
+      "gen": "1873_A:wrong (n_tests=5)",
+      "solved": false,
+      "tests_passed": "0/1"
+    },
+    {
+      "gen": "1899_A:correct (n_tests=13)",
+      "solved": true,
+      "tests_passed": "13/13"
+    },
+    {
+      "gen": "1899_A:wrong (n_tests=13)",
+      "solved": false,
+      "tests_passed": "0/1"
+    }
+  ]
+}

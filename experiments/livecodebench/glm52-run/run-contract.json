@@ -1,0 +1,170 @@
+{
+  "schema": "fak.livecodebench-official-run-contract.v1",
+  "generated_at": "2026-07-07T19:09:32Z",
+  "issue": "#3060",
+  "benchmark": "LiveCodeBench official-run contract (raw lcb_runner vs fak-native)",
+  "status": "READY_FOR_OFFICIAL_RUN",
+  "evidence_class": "OFFICIAL_RUN_CONTRACT",
+  "claim_boundary": "Official-run contract only: it pins the run constants, the raw and fak generation commands, the shared problem/prompt/model/release requirements, and the official grading handoff. It performs no run and claims no pass-rate; result_claim_allowed stays false until the official evaluator grades the exact saved generations (#2113).",
+  "constants": {
+    "release_selector": "release_v2",
+    "release_version": "release_v2",
+    "scenario": "codegeneration",
+    "start_date": "2024-09-01",
+    "end_date": "2024-11-20",
+    "model": "glm-5.2",
+    "serving_backend": "SGLang W4AFP8",
+    "gateway": "http://127.0.0.1:8080/v1",
+    "run_dir": "experiments/livecodebench/glm52-run"
+  },
+  "problem_selection": {
+    "candidate_suite": "experiments/livecodebench/glm52-run/suite-real.json",
+    "candidate_problem_ids": [
+      "1873_A",
+      "1873_B",
+      "1873_D",
+      "1883_B",
+      "1883_C",
+      "1899_A"
+    ],
+    "same_problem_ids_required": true,
+    "same_prompt_hash_required": true,
+    "same_release_required": true,
+    "same_model_required": true,
+    "same_scenario_required": true
+  },
+  "arms": [
+    {
+      "name": "raw-lcb_runner",
+      "harness": "official-lcb_runner-through-fak-gateway",
+      "commands": [
+        "python -m lcb_runner.runner.main --model glm-5.2 --scenario codegeneration --release_version release_v2"
+      ],
+      "output_dir": "experiments/livecodebench/glm52-run/raw/codegeneration",
+      "required_artifacts": [
+        "saved generations",
+        "generation artifact SHA256 digest"
+      ],
+      "notes": "requires an lcb_runner model registration pointing at the fak gateway; --evaluate produces the official pass@1 directly."
+    },
+    {
+      "name": "fak-native",
+      "harness": "fak-livecodebench-generate-through-fak-gateway",
+      "commands": [
+        "fak livecodebench generate --gateway http://127.0.0.1:8080/v1 --model glm-5.2 --release-version release_v2 --scenario codegeneration --start-date 2024-09-01 --end-date 2024-11-20 --out experiments/livecodebench/glm52-run/fak/codegeneration",
+        "go run ./cmd/livecodebench export --format custom-evaluator --fixture experiments/livecodebench/glm52-run/fak-codegeneration-fixture.json --out experiments/livecodebench/glm52-run/fak-codegeneration-custom.json"
+      ],
+      "output_dir": "experiments/livecodebench/glm52-run/fak/codegeneration",
+      "required_artifacts": [
+        "saved generations",
+        "generation artifact SHA256 digest",
+        "custom-evaluator export digest"
+      ],
+      "notes": "generates only; the SAME problem_ids/prompt_hash/model/release/scenario as the raw arm, exported to the official custom-evaluator shape."
+    }
+  ],
+  "grading": {
+    "authority": "official LiveCodeBench lcb_runner",
+    "raw_evaluate_command": "python -m lcb_runner.runner.main --model glm-5.2 --scenario codegeneration --evaluate --release_version release_v2",
+    "custom_evaluator_command": "python -m lcb_runner.runner.custom_evaluator --custom_output_file experiments/livecodebench/glm52-run/fak-codegeneration-custom.json --release_version release_v2",
+    "compute_scores_command": "python -m lcb_runner.evaluation.compute_scores --eval_all_file experiments/livecodebench/glm52-run/\u003cofficial-eval-all-file\u003e --start_date 2024-09-01 --end_date 2024-11-20",
+    "required_artifacts": [
+      "official eval_all artifact + SHA256 digest",
+      "pass@1 / pass@5 for the recorded contest-date window"
+    ],
+    "detail": "Grading is the sole result-bearing authority. The exact saved generations from each arm are graded by the official evaluator; only then may LIVECODEBENCH-RESULTS.md be filled and result_claim_allowed flip true (#2113)."
+  },
+  "upstream_refs": [
+    {
+      "name": "LiveCodeBench harness",
+      "url": "https://github.com/LiveCodeBench/LiveCodeBench",
+      "notes": "Official runner; the scoring authority."
+    },
+    {
+      "name": "lcb_runner custom_evaluator",
+      "url": "https://github.com/LiveCodeBench/LiveCodeBench/blob/main/lcb_runner/runner/custom_evaluator.py",
+      "notes": "Grades externally-generated code_list rows (the fak arm handoff)."
+    },
+    {
+      "name": "lcb_runner compute_scores",
+      "url": "https://github.com/LiveCodeBench/LiveCodeBench/blob/main/lcb_runner/evaluation/compute_scores.py",
+      "notes": "Computes the date-windowed score from a saved eval_all artifact."
+    }
+  ],
+  "gates": [
+    {
+      "name": "release_pinned_explicit",
+      "ok": true,
+      "detail": "resolved release_v2"
+    },
+    {
+      "name": "scenario_known",
+      "ok": true,
+      "detail": "codegeneration"
+    },
+    {
+      "name": "date_window_recorded",
+      "ok": true,
+      "detail": "2024-09-01 .. 2024-11-20"
+    },
+    {
+      "name": "model_recorded",
+      "ok": true,
+      "detail": "glm-5.2"
+    },
+    {
+      "name": "serving_backend_recorded",
+      "ok": true,
+      "detail": "SGLang W4AFP8"
+    },
+    {
+      "name": "fak_gateway_recorded",
+      "ok": true,
+      "detail": "http://127.0.0.1:8080/v1"
+    },
+    {
+      "name": "candidate_problem_ids",
+      "ok": true,
+      "detail": "6 candidate question ids from the pinned suite"
+    },
+    {
+      "name": "same_problem_ids_required",
+      "ok": true,
+      "detail": "raw and fak arms must score the identical question_ids"
+    },
+    {
+      "name": "same_prompt_hash_required",
+      "ok": true,
+      "detail": "raw and fak arms must send the identical rendered prompt per problem (SamePromptHash)"
+    },
+    {
+      "name": "same_release_required",
+      "ok": true,
+      "detail": "both arms must use the identical release_version"
+    },
+    {
+      "name": "official_grading_required",
+      "ok": true,
+      "detail": "the exact saved generations must be graded by the official lcb_runner evaluator before any claim"
+    }
+  ],
+  "compare_metrics": [
+    "pass_1",
+    "pass_5",
+    "window_pass_1",
+    "graded_count",
+    "same_problem_ids",
+    "same_prompt_hash",
+    "fak_gateway_model_http_success"
+  ],
+  "required_before_claim": [
+    "release_version, scenario, start_date, and end_date recorded",
+    "model identity, serving backend, and model training-cutoff statement or explicit residual",
+    "raw-arm saved generations + SHA256 digest",
+    "fak-arm saved generations + SHA256 digest",
+    "SameProblemIDs and SamePromptHash asserted between raw and fak arms over the same release",
+    "official grading command + eval_all artifact digest for each arm",
+    "result_claim_allowed flips true only after official grading (#2113); LIVECODEBENCH-RESULTS.md cells filled for both arms"
+  ],
+  "result_claim_allowed": false
+}

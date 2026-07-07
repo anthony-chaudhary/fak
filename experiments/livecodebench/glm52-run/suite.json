@@ -1,0 +1,54 @@
+{
+  "schema": "fak.livecodebench-suite.v1",
+  "benchmark": "livecodebench",
+  "release_version": "release_v2",
+  "provenance": {
+    "dataset_id": "livecodebench/code_generation_lite",
+    "revision": "release_v2",
+    "split": "test",
+    "problem_count": 3,
+    "contest_date_from": "2024-09-01",
+    "contest_date_to": "2024-11-20"
+  },
+  "problems": [
+    {
+      "question_id": "lcb-sample-001",
+      "scenario": "codegeneration",
+      "platform": "leetcode",
+      "difficulty": "easy",
+      "contest_date": "2024-09-01",
+      "prompt": "Return the indices of the two numbers in nums that add up to target.",
+      "starter_code": "class Solution:\n    def twoSum(self, nums, target):",
+      "public_test_cases": [
+        {
+          "input": "[2,7,11,15]\n9",
+          "output": "[0,1]",
+          "testtype": "functional"
+        }
+      ]
+    },
+    {
+      "question_id": "lcb-sample-002",
+      "scenario": "codegeneration",
+      "platform": "atcoder",
+      "difficulty": "medium",
+      "contest_date": "2024-10-15",
+      "prompt": "Read N from stdin and print the sum 1..N.",
+      "public_test_cases": [
+        {
+          "input": "5",
+          "output": "15",
+          "testtype": "stdin"
+        }
+      ]
+    },
+    {
+      "question_id": "lcb-sample-003",
+      "scenario": "codegeneration",
+      "platform": "codeforces",
+      "difficulty": "hard",
+      "contest_date": "2024-11-20",
+      "prompt": "Return the maximum subarray sum of the given array."
+    }
+  ]
+}

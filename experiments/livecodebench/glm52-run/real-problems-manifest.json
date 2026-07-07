@@ -1,0 +1,44 @@
+[
+  {
+    "question_id": "1873_A",
+    "platform": "Platform.CODEFORCES",
+    "difficulty": "Difficulty.EASY",
+    "n_tests": 5,
+    "fn_name": null
+  },
+  {
+    "question_id": "1873_B",
+    "platform": "Platform.CODEFORCES",
+    "difficulty": "Difficulty.EASY",
+    "n_tests": 13,
+    "fn_name": null
+  },
+  {
+    "question_id": "1873_D",
+    "platform": "Platform.CODEFORCES",
+    "difficulty": "Difficulty.EASY",
+    "n_tests": 13,
+    "fn_name": null
+  },
+  {
+    "question_id": "1883_B",
+    "platform": "Platform.CODEFORCES",
+    "difficulty": "Difficulty.MEDIUM",
+    "n_tests": 4,
+    "fn_name": null
+  },
+  {
+    "question_id": "1883_C",
+    "platform": "Platform.CODEFORCES",
+    "difficulty": "Difficulty.MEDIUM",
+    "n_tests": 13,
+    "fn_name": null
+  },
+  {
+    "question_id": "1899_A",
+    "platform": "Platform.CODEFORCES",
+    "difficulty": "Difficulty.EASY",
+    "n_tests": 13,
+    "fn_name": null
+  }
+]
