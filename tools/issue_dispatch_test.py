@@ -1279,6 +1279,79 @@ class EscapeSignalTest(unittest.TestCase):
         self.assertIsNone(out["top_held_score"])
 
 
+class HeldForeverSurfaceTest(unittest.TestCase):
+    """#3125: a self-source issue held by the picker is explicitly reported — per
+    issue, with a persisted consecutive-ticks-held counter — never silently dropped
+    from the tick surface."""
+
+    def test_fold_increments_across_ticks_and_resets_on_release(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            held = [{"lane": "cmd-fak", "issue_nums": [2514]}]
+            self.assertEqual(mod.fold_held_ticks(runs, held), {"cmd-fak": 1})
+            self.assertEqual(mod.fold_held_ticks(runs, held), {"cmd-fak": 2})
+            # a lane that leaves the held set resets — consecutive, not lifetime.
+            self.assertEqual(mod.fold_held_ticks(runs, []), {})
+            self.assertEqual(mod.fold_held_ticks(runs, held), {"cmd-fak": 1})
+
+    def test_clear_held_ticks_removes_the_counter(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            mod.fold_held_ticks(runs, [{"lane": "cmd-fak", "issue_nums": [2514]}])
+            self.assertTrue((runs / mod.HELD_TICKS_BASENAME).exists())
+            mod.clear_held_ticks(runs)
+            self.assertFalse((runs / mod.HELD_TICKS_BASENAME).exists())
+
+    def test_report_is_per_issue_and_never_invisible(self) -> None:
+        mod = load()
+        rows = mod.held_report(
+            [{"lane": "cmd-fak", "issue_nums": [2514, 3091]},
+             {"lane": "gateway", "issue_nums": []}],
+            {"cmd-fak": 3, "gateway": 1})
+        self.assertEqual([r["issue"] for r in rows], [2514, 3091, None])
+        self.assertTrue(all(r["status"] == "held, needs unguarded/worktree lane"
+                            for r in rows))
+        self.assertEqual(rows[0]["consecutive_ticks"], 3)
+        self.assertEqual(rows[2]["lane"], "gateway")
+
+    def test_evaluate_attaches_report_and_counter_increments_across_ticks(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            mod.refresh_registry = lambda root: {"ok": True}
+            mod.preflight = lambda root, **kw: EvaluateTest.SPAWN_OK
+            mod.busy_lanes = lambda runs_dir, **kw: set()
+            mod.lease_ref_busy_lanes = lambda root: {"lanes": set()}
+            mod.pick_lane = lambda root, explicit, busy=None: {
+                "lane": "docs", "issues": 2, "by_lane": {},
+                "self_modify_held": ["cmd-fak"], "priority_by_lane": {"docs": 10}}
+            mod.escape_candidates = lambda root, safe: {
+                "escape_candidates": [{"lane": "cmd-fak", "issue_nums": [2514],
+                                       "score": 700, "preferred": True}],
+                "top_held_score": 700, "best_safe_score": 10}
+            p1 = mod.evaluate(root, max_workers=2, work_kind="engineering",
+                              lane=None, live=False)
+            self.assertEqual([r["issue"] for r in p1["self_modify_held_report"]],
+                             [2514])
+            self.assertEqual(p1["self_modify_held_ticks"], {"cmd-fak": 1})
+            p2 = mod.evaluate(root, max_workers=2, work_kind="engineering",
+                              lane=None, live=False)
+            self.assertEqual(p2["self_modify_held_ticks"], {"cmd-fak": 2})
+            self.assertEqual(p2["self_modify_held_report"][0]["consecutive_ticks"], 2)
+            # the human render lists the held issue explicitly — visibly triaged.
+            self.assertIn("#2514", mod.render(p2))
+            self.assertIn("held, needs unguarded/worktree lane", mod.render(p2))
+            # an unheld tick resets the counter — consecutive, not lifetime.
+            mod.pick_lane = lambda root, explicit, busy=None: {
+                "lane": "docs", "issues": 2, "by_lane": {}}
+            mod.evaluate(root, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+            self.assertFalse(
+                (root / mod.RUNS_DIRNAME / mod.HELD_TICKS_BASENAME).exists())
+
+
 class EscapeRenderTest(unittest.TestCase):
     """render()/render_wave() surface the escape SIGNAL so the payload-only signal is
     visible to an operator — but ONLY when a self-source lane is held, so a normal tick's

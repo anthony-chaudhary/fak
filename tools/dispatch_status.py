@@ -457,6 +457,8 @@ def read_resolve_ticks(root: Path, *, now_ts: float | None = None,
             "contract_repair": doc.get("contract_repair") or {},
             "safe_lanes_busy": doc.get("safe_lanes_busy") or [],
             "self_modify_held": doc.get("self_modify_held") or [],
+            "self_modify_held_report": doc.get("self_modify_held_report") or [],
+            "self_modify_held_ticks": doc.get("self_modify_held_ticks") or {},
             "held_lanes": doc.get("held_lanes") or [],
             "launch_gate": {
                 "ready": gate.get("ready"),

@@ -332,6 +332,88 @@ def escape_candidates(root: Path,
             "best_safe_score": best_safe}
 
 
+HELD_TICKS_BASENAME = "self-modify-held-ticks.json"
+
+
+def fold_held_ticks(runs_dir: Path, held: list[dict[str, Any]]) -> dict[str, int]:
+    """Persist the consecutive-ticks-held counter for self-modify-held lanes (#3125).
+
+    ``held`` rows are ``{lane, issue_nums}``. A lane held THIS tick increments its
+    counter from the previous tick's file; a lane that left the held set is dropped
+    (consecutive means uninterrupted), so "held for N consecutive ticks" is a
+    checkable field, not a narration. Reads and writes FAIL-OPEN like ``_record`` —
+    a counter hiccup can only under-count a hold, never wedge a tick."""
+    path = runs_dir / HELD_TICKS_BASENAME
+    try:
+        prev = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        prev = {}
+    if not isinstance(prev, dict):
+        prev = {}
+    now: dict[str, Any] = {}
+    for h in held:
+        ln = h.get("lane")
+        if not ln:
+            continue
+        row = prev.get(ln)
+        n = row.get("consecutive_ticks", 0) if isinstance(row, dict) else 0
+        now[ln] = {"consecutive_ticks": int(n) + 1,
+                   "issue_nums": [x for x in (h.get("issue_nums") or [])
+                                  if isinstance(x, int)]}
+    try:
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(now, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+    return {ln: v["consecutive_ticks"] for ln, v in now.items()}
+
+
+def clear_held_ticks(runs_dir: Path) -> None:
+    """A tick with NO held lanes resets the #3125 counter — consecutive, not lifetime."""
+    try:
+        (runs_dir / HELD_TICKS_BASENAME).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def held_report(held: list[dict[str, Any]], ticks: dict[str, int]) -> list[dict[str, Any]]:
+    """Per-ISSUE "held, needs unguarded/worktree lane" rows for the tick surface (#3125).
+
+    One row per open issue in a held self-source lane — the explicit acceptance surface:
+    a held issue is either routed to the escape path or REPORTED here, never silently
+    dropped from the tick. A lane whose issue numbers are unknown (router hiccup) still
+    gets one lane-level row (``issue: None``) so the hold is never invisible."""
+    rows: list[dict[str, Any]] = []
+    for h in held:
+        ln = h.get("lane")
+        nums = [n for n in (h.get("issue_nums") or []) if isinstance(n, int)]
+        base = {"lane": ln, "status": "held, needs unguarded/worktree lane",
+                "consecutive_ticks": ticks.get(ln, 1),
+                "escape": "python tools/issue_dispatch.py --escape-self-source"}
+        if nums:
+            rows.extend({**base, "issue": n} for n in nums)
+        else:
+            rows.append({**base, "issue": None})
+    return rows
+
+
+def _attach_held_surface(payload: dict[str, Any], runs_dir: Path,
+                         held_lanes: list[str]) -> None:
+    """Fold the #3125 held-forever surface into a tick/wave payload IN PLACE.
+
+    Joins the lane names the picker held (the payload spine) with the issue numbers
+    ``escape_candidates`` already fetched (zero extra shell-outs), folds the persisted
+    consecutive-ticks counter, and attaches the per-issue report. Rides INSIDE the
+    existing ``self_modify_held`` gate, so the default (unheld/hermetic) tick payload
+    stays byte-for-byte unchanged."""
+    by_lane = {r.get("lane"): r.get("issue_nums") or []
+               for r in payload.get("escape_candidates") or []}
+    rows = [{"lane": ln, "issue_nums": by_lane.get(ln, [])} for ln in held_lanes]
+    ticks = fold_held_ticks(runs_dir, rows)
+    payload["self_modify_held_ticks"] = ticks
+    payload["self_modify_held_report"] = held_report(rows, ticks)
+
+
 def pick_lane(root: Path, explicit: str | None,
               busy: set[str] | None = None,
               guarded: bool | None = None) -> dict[str, Any]:
@@ -757,6 +839,13 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # empty, so this never fires there — the default path stays byte-for-byte unchanged.
     if lane_pick.get("self_modify_held"):
         payload.update(escape_candidates(root, lane_pick.get("priority_by_lane")))
+        # #3125: a held issue is either routed to the escape path or explicitly
+        # reported per-issue with its consecutive-ticks-held count — never silently
+        # dropped from the tick surface.
+        _attach_held_surface(payload, root / RUNS_DIRNAME,
+                             lane_pick.get("self_modify_held") or [])
+    else:
+        clear_held_ticks(root / RUNS_DIRNAME)
 
     if not pre_ok:
         hint = preflight_refusal_hint(pre)
@@ -829,6 +918,15 @@ def _escape_render_lines(p: dict[str, Any]) -> list[str]:
                 if p.get("guarded_worker_in_flight")
                 else "clear (no guarded build in flight)")
         lines.append(f"              gate: {gate}")
+    # #3125: list each held-forever issue explicitly (capped), so a held issue is
+    # visibly triaged on the operator surface, never silently skipped tick after tick.
+    report = p.get("self_modify_held_report") or []
+    for r in report[:6]:
+        iss = f"#{r['issue']}" if r.get("issue") is not None else "(issues unknown)"
+        lines.append(f"  held      : {iss} [{r.get('lane')}] {r.get('status')} "
+                     f"x{r.get('consecutive_ticks')} ticks")
+    if len(report) > 6:
+        lines.append(f"  held      : (+{len(report) - 6} more held issues)")
     return lines
 
 
@@ -1191,6 +1289,11 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
     if cand.get("self_modify_held"):
         payload.update(escape_candidates(
             root, {c["lane"]: c["issues"] for c in candidates}))
+        # #3125: same held-forever surface as evaluate — the wave is a tick too.
+        _attach_held_surface(payload, root / RUNS_DIRNAME,
+                             cand.get("self_modify_held") or [])
+    else:
+        clear_held_ticks(root / RUNS_DIRNAME)
 
     if not refusal:
         preflight_seed = first_preflight
