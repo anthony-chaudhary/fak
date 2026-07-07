@@ -102,10 +102,96 @@ func TestQwen35HybridViaMMProfilePrintsHybridSplit(t *testing.T) {
 		"[metalprof-hybrid P=3]",
 		"total=",
 		"gemm+roundtrip=",
-		"rest(recurrence/attn/norm)=",
+		"gdn-recurrence=",
+		"full-attn=",
+		"qk-norm=",
+		"norm+act=",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("profile output %q missing %q", got, want)
 		}
 	}
+}
+
+// TestQwen35HybridPrefillIsolationGatesZeroTheStage witnesses the #2725 isolation split: with
+// FAK_PREFILL_NO_GDN set, the Gated-DeltaNet recurrence layers are skipped, so the profile's
+// gdn-recurrence stage reads exactly 0.0 ms — the operator's on-device lever for measuring a
+// stage's share of the prefill wall (mirroring #67's FAK_DECODE_NO_ATTN). It also confirms the
+// gate genuinely changes the forward (skipping the recurrence perturbs the logits), so the gate is
+// wired to the real body, not a no-op. This runs host-independently; the wall-clock ladder the gate
+// feeds is the Mac-gated residual documented in docs/notes.
+func TestQwen35HybridPrefillIsolationGatesZeroTheStage(t *testing.T) {
+	m := NewSynthetic(qwen35HybridTestCfg())
+	m.Quantize()
+	prompt := []int{3, 7, 11, 5, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61}
+	P := len(prompt)
+	// The real Q8 CPU GEMM (as TestQwen35HybridViaMMMatchesCPUTemplate uses) so the recurrence has a
+	// non-trivial contribution to zero out — an all-zero mm would make every stage's output zero and
+	// hide whether the gate is wired.
+	cpuMM := func(name string, X []float32, out int) []float32 {
+		width := len(X) / P
+		var panel q8Panel
+		quantizeBatchPanelInto(&panel, X, P, width)
+		Y := make([]float32, P*out)
+		qGemm8Into(m.q8(name), &panel, Y)
+		return Y
+	}
+
+	// Baseline forward (no gate) — the recurrence contributes.
+	base := func() []float32 {
+		s := m.NewSession()
+		s.Quant = true
+		return s.prefillQwen35HybridViaMM(prompt, cpuMM)
+	}()
+
+	// With NO_GDN the recurrence layers are dropped: the profile's gdn-recurrence stage is 0.0, and
+	// the output must differ from the baseline (the gate reaches the real body).
+	t.Setenv("FAK_QPROFILE", "1")
+	t.Setenv("FAK_PREFILL_NO_GDN", "1")
+	out := captureStderr(t, func() {
+		gs := m.NewSession()
+		gs.Quant = true
+		gated := gs.prefillQwen35HybridViaMM(prompt, cpuMM)
+		if len(gated) != len(base) {
+			t.Fatalf("gated hidden len %d != baseline %d", len(gated), len(base))
+		}
+		same := true
+		for i := range base {
+			if base[i] != gated[i] {
+				same = false
+				break
+			}
+		}
+		if same {
+			t.Fatal("FAK_PREFILL_NO_GDN did not change the forward — the isolation gate is not wired to the GDN body")
+		}
+	})
+	if !strings.Contains(out, "gdn-recurrence=0.0") {
+		t.Fatalf("profile %q missing zeroed stage %q under FAK_PREFILL_NO_GDN", out, "gdn-recurrence=0.0")
+	}
+}
+
+// captureStderr runs fn with os.Stderr redirected to a pipe and returns everything it wrote.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	os.Stderr = w
+	out := make(chan string, 1)
+	go func() {
+		var b strings.Builder
+		_, _ = io.Copy(&b, r)
+		out <- b.String()
+	}()
+	fn()
+	if err := w.Close(); err != nil {
+		os.Stderr = oldStderr
+		t.Fatal(err)
+	}
+	os.Stderr = oldStderr
+	return <-out
 }

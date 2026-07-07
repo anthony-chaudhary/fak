@@ -41,11 +41,20 @@ func (s *Session) prefillQwen35HybridViaMM(ids []int, mm hybridGemmFn) []float32
 		return nil
 	}
 	profile := os.Getenv("FAK_QPROFILE") != ""
+	// Prefill isolation-split diagnostics (#2725, mirroring #67's decode FAK_DECODE_NO_ATTN /
+	// FAK_DECODE_MATMUL_ONLY): zeroing a per-layer stage's output measures its share of the prefill
+	// wall on-device, where an async GPU GEMM can overlap CPU work in a way a pure timer
+	// misattributes. FAK_PREFILL_NO_GDN drops the Gated-DeltaNet recurrence layers; FAK_PREFILL_NO_ATTN
+	// drops the full-attention layers; setting BOTH leaves only the GEMMs+norms (the matmul-only
+	// floor). Diagnostic ONLY: a skipped stage leaves its cache unfilled, so a skip run is for TIMING
+	// a bottleneck, never for a correct forward. The default path (neither var set) is untouched.
+	noGDN := os.Getenv("FAK_PREFILL_NO_GDN") != ""
+	noAttn := os.Getenv("FAK_PREFILL_NO_ATTN") != ""
 	var start time.Time
 	if profile {
 		start = time.Now()
 	}
-	var gemmTime time.Duration
+	var gemmTime, gdnCPU, attnCPU, qkNorm time.Duration
 	timedMM := mm
 	if profile {
 		timedMM = func(name string, X []float32, out int) []float32 {
@@ -79,11 +88,33 @@ func (s *Session) prefillQwen35HybridViaMM(ids []int, mm hybridGemmFn) []float32
 			}
 		})
 
+		// Attribute each hybrid stage its ex-GEMM CPU time so the split names the actual serialized
+		// bottleneck (GDN recurrence vs full-attention vs QK-norm) rather than lumping all three into
+		// one "rest" bucket (#2725). gemmTime is snapshotted around the body call, so the stage total
+		// is its wall time minus the GEMM roundtrip that ran inside it.
 		var o []float32
 		if cfg.isLinearAttnLayer(l) {
-			o = s.prefillQwen35LinearLayerMM(l, Xn, P, timedMM)
+			switch {
+			case noGDN:
+				o = make([]float32, P*H)
+			case profile:
+				g0, t0 := gemmTime, time.Now()
+				o = s.prefillQwen35LinearLayerMM(l, Xn, P, timedMM)
+				gdnCPU += time.Since(t0) - (gemmTime - g0)
+			default:
+				o = s.prefillQwen35LinearLayerMM(l, Xn, P, timedMM)
+			}
 		} else {
-			o = s.prefillQwen35FullAttnLayerMM(l, Xn, P, base, timedMM)
+			switch {
+			case noAttn:
+				o = make([]float32, P*H)
+			case profile:
+				g0, t0 := gemmTime, time.Now()
+				o = s.prefillQwen35FullAttnLayerMM(l, Xn, P, base, timedMM, &qkNorm)
+				attnCPU += time.Since(t0) - (gemmTime - g0)
+			default:
+				o = s.prefillQwen35FullAttnLayerMM(l, Xn, P, base, timedMM, nil)
+			}
 		}
 		parFor(len(X), numWorkers, func(lo, hi int) {
 			for i := lo; i < hi; i++ {
@@ -131,13 +162,18 @@ func (s *Session) prefillQwen35HybridViaMM(ids []int, mm hybridGemmFn) []float32
 	out := rmsnormCfg(X[(P-1)*H:P*H], m.tensor("model.norm.weight"), eps, cfg)
 	if profile {
 		total := time.Since(start)
-		rest := total - gemmTime
-		if rest < 0 {
-			rest = 0
+		// norm+act is the remainder — both RMSNorms plus the SwiGLU elementwise — i.e. total minus the
+		// three isolated stages (GEMM roundtrip, the GDN recurrence, the full-attention body). qk-norm
+		// is a sub-slice of full-attn, surfaced separately for #2725's named QK-norm suspect, so it is
+		// NOT subtracted a second time.
+		norm := total - gemmTime - gdnCPU - attnCPU
+		if norm < 0 {
+			norm = 0
 		}
 		ms := func(d time.Duration) float64 { return float64(d.Nanoseconds()) / 1e6 }
-		fmt.Fprintf(os.Stderr, "[metalprof-hybrid P=%d] total=%.1f  gemm+roundtrip=%.1f  rest(recurrence/attn/norm)=%.1f ms\n",
-			P, ms(total), ms(gemmTime), ms(rest))
+		fmt.Fprintf(os.Stderr,
+			"[metalprof-hybrid P=%d] total=%.1f  gemm+roundtrip=%.1f  gdn-recurrence=%.1f  full-attn=%.1f  qk-norm=%.1f  norm+act=%.1f ms\n",
+			P, ms(total), ms(gemmTime), ms(gdnCPU), ms(attnCPU), ms(qkNorm), ms(norm))
 	}
 	return out
 }
@@ -288,7 +324,7 @@ func (s *Session) prefillQwen35LinearLayerMM(l int, Xn []float32, P int, mm hybr
 // q⧺gate, k, v and o projection GEMMs run through mm; the q/gate split, the projection bias and
 // per-head QK-norm, RoPE, the causal GQA attention, the sigmoid output gate, and the Kraw/K/V
 // cache appends are the identical f32 CPU math, so the KV cache it builds matches the proven path.
-func (s *Session) prefillQwen35FullAttnLayerMM(l int, Xn []float32, P, base int, mm hybridGemmFn) []float32 {
+func (s *Session) prefillQwen35FullAttnLayerMM(l int, Xn []float32, P, base int, mm hybridGemmFn, qkNormNs *time.Duration) []float32 {
 	m, cfg := s.M, s.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
 	nH, nKV := cfg.NumHeads, cfg.NumKVHeads
@@ -316,9 +352,23 @@ func (s *Session) prefillQwen35FullAttnLayerMM(l int, Xn []float32, P, base int,
 	parFor(P, numWorkers, func(lo, hi int) {
 		for t := lo; t < hi; t++ {
 			m.applyProjBias(l, Q[t*qWidth:(t+1)*qWidth], K[t*w:(t+1)*w], V[t*w:(t+1)*w])
+		}
+	})
+	// QK-norm is timed as its own pass (#2725 names it a suspect). Splitting the bias and QK-norm
+	// passes is numerically identical: every token gets its bias applied before any QK-norm runs, the
+	// same order as the fused loop, and neither op reads another token's row.
+	var qk0 time.Time
+	if qkNormNs != nil {
+		qk0 = time.Now()
+	}
+	parFor(P, numWorkers, func(lo, hi int) {
+		for t := lo; t < hi; t++ {
 			m.applyLayerQKNorm(l, Q[t*qWidth:(t+1)*qWidth], K[t*w:(t+1)*w])
 		}
 	})
+	if qkNormNs != nil {
+		*qkNormNs += time.Since(qk0)
+	}
 	s.Cache.Kraw[l] = append(s.Cache.Kraw[l], K...)
 	parFor(P, numWorkers, func(lo, hi int) {
 		for t := lo; t < hi; t++ {
