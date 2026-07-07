@@ -570,6 +570,15 @@ plans_glob = "docs/**/*-plan.md"
 style         = "grep"
 subject_dirs  = []
 trailer_stamp = true
+# #3132: this repo splits its ship stamp across TWO parens -- a `(#<issue>)` GitHub-issue
+# cite and a `(fak <leaf>)` named trailer -- so the unit-of-work is (leaf, issue), verified
+# as `dos verify <leaf> <issue>`. No single-paren `(<plan> <phase>)` trailer rung could bind
+# that shape, so a witnessed ship reconciled QUIET_INCOMPLETE and dispatch loops stopped
+# `not-ratcheting` even while genuinely shipping. `issue_leaf_stamp` (opt-in kernel rung,
+# OFF by default everywhere else) binds an all-digits phase to a commit carrying BOTH the
+# `(fak <leaf>)` trailer (leaf == plan) AND a `(#<issue>)` cite -> `dos verify tools 2911`
+# SHIPPED, doctor verifiability `recognized > 0`. Purely additive; introduces no refusal.
+issue_leaf_stamp = true
 
 # Standing supervisor policy for the generic DOS population loop. Fleet has a
 # static, disjoint lane roster, so a target of three is reachable without the
