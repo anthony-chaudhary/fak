@@ -274,7 +274,7 @@ func Build(in Input) (Plan, error) {
 		return Plan{}, refusef("issuefanout: spine_ref is required — ship the minimal working spine first (or file the spine issue itself), then fan out from its witness")
 	}
 	if in.Max != 0 && in.Max < MinFanout {
-		return Plan{}, refusef("issuefanout: max %d is below the fan-out floor %d", in.Max, MinFanout)
+		return Plan{}, refusef("issuefanout: max %d is below the fan-out floor %d — raise max to at least %d, or leave it 0 for the full taxonomy", in.Max, MinFanout, MinFanout)
 	}
 	allowed := map[string]bool{}
 	known := map[string]bool{}
@@ -304,7 +304,7 @@ func Build(in Input) (Plan, error) {
 		plan.AreaCounts[t.area]++
 	}
 	if len(plan.Candidates) < MinFanout {
-		return Plan{}, refusef("issuefanout: area filter leaves %d candidates, below the fan-out floor %d", len(plan.Candidates), MinFanout)
+		return Plan{}, refusef("issuefanout: area filter leaves %d candidates, below the fan-out floor %d — widen the area filter (or drop it) to plan at least %d follow-ons", len(plan.Candidates), MinFanout, MinFanout)
 	}
 	// The leaf's one promise is that every follow-on is dispatchable the moment
 	// it is filed. A hostile or malformed input (a leaf outside the marker-key
