@@ -86,6 +86,24 @@ func TestDeepSeekUsageReasoningTokens(t *testing.T) {
 	}
 }
 
+// TestDeepSeekUsageContextWindowReconstruction pins the defensive edge in
+// ContextWindowTokens: a wire that reports ONLY the top-level hit/miss counters and
+// omits prompt_tokens still yields the full resident context (hit + miss), and the
+// cached/uncached split stays provider-exact — the reconstruction never runs when
+// prompt_tokens is present, so it can never double-count atop it.
+func TestDeepSeekUsageContextWindowReconstruction(t *testing.T) {
+	u := Usage{PromptCacheHitTokens: 800, PromptCacheMissTokens: 200}
+	if got := u.ContextWindowTokens(); got != 1000 {
+		t.Errorf("ContextWindowTokens() = %d, want hit+miss = 1000 when prompt_tokens is omitted", got)
+	}
+	if got := u.CachedPromptTokens(); got != 800 {
+		t.Errorf("CachedPromptTokens() = %d, want 800", got)
+	}
+	if got := u.UncachedPromptTokens(); got != 200 {
+		t.Errorf("UncachedPromptTokens() = %d, want 200", got)
+	}
+}
+
 // TestDeepSeekUsageDoesNotDisturbOtherProviders pins that adding the DeepSeek top-level
 // counters left the existing provider shapes byte-identical in meaning: a usage block
 // with ONLY the OpenAI nested details, the Anthropic separate cache_read field, or no
