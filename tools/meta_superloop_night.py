@@ -17,6 +17,12 @@ the proven, self-sizing primitives that already own account/host/seat accounting
   nodes    -> fak nightrun run --apply --loop        (mac/gpu data-collection, feasible-only)
   witness  -> fak dispatch progress --json          (closed_by_loop_total delta => toward 200)
 
+The cadence is tight (default 5m) so headroom is re-checked often, and a pure
+skip-if-inflight gate (`wave_decision`) makes that safe: a tick whose preflight
+shows no free slot — a prior wave still settling, or a REFUSE_AT_CAP — no-ops with a
+logged reason instead of piling a second wave onto full slots. Fast iteration without
+double-dispatch.
+
 The target is measured on WITNESSED closes (`closed_by_loop_total`, which ignores
 backlog drift), not on launches. The loop stops on the honest signals from the
 super-loop marathon contract: target met, backlog drained, preflight refuses for a
@@ -149,6 +155,42 @@ def tree_builds() -> tuple[bool, str]:
     return False, f"go build ./cmd/fak: BROKEN — {first}"
 
 
+# ---- wave decision (pure, observable, unit-testable) --------------------------
+
+# Decision codes the tick emits so the ledger reads WHY a wave did or didn't fire.
+WAVE_SPAWN = "SPAWN"            # headroom exists → drive a refill this tick
+WAVE_SKIP_INFLIGHT = "SKIP_INFLIGHT"   # prior wave still settling (no headroom) → no-op
+WAVE_SKIP_REFUSED = "SKIP_REFUSED"     # preflight refused for a capacity/host reason
+WAVE_SKIP_CRON = "SKIP_CRON"           # a live cron owns the waves → supervise, don't double-dispatch
+
+
+def wave_decision(pf: dict, cron_owns_waves: bool) -> dict:
+    """Decide whether THIS tick should drive a wave — the single skip-if-inflight gate.
+
+    Pure: it reads only the preflight fold and the cron-ownership flag and returns a
+    typed decision, so a 5-minute cadence cannot double-dispatch. At a tight cadence a
+    tick can re-fire before the previous wave's workers have settled; when they have
+    NOT (headroom<=0, or preflight is REFUSE_AT_CAP), we skip rather than pile a second
+    wave onto slots that are already full. The decision carries an observable `reason`
+    that lands in the ledger, so every skip is witnessable, not silent.
+
+    Kept side-effect-free on purpose: the loop owns the I/O (spawning the refill); this
+    only owns the yes/no and the why. That split is what makes it unit-testable.
+    """
+    if cron_owns_waves:
+        return {"code": WAVE_SKIP_CRON,
+                "reason": "FleetIssueDispatch cron live — supervising, not double-dispatching"}
+    if not pf.get("ok"):
+        return {"code": WAVE_SKIP_REFUSED,
+                "reason": f"preflight {pf.get('verdict')} — {pf.get('reason', '')}".strip(" —")}
+    headroom = pf.get("headroom")
+    if isinstance(headroom, int) and headroom <= 0:
+        return {"code": WAVE_SKIP_INFLIGHT,
+                "reason": f"prior wave still settling — live={pf.get('live')} headroom={headroom} (no free slot)"}
+    return {"code": WAVE_SPAWN,
+            "reason": f"headroom={headroom} free — driving a refill"}
+
+
 # ---- refill (drive the priced tree-disjoint wave; build-break-immune) ----------
 
 def refill(apply: bool, tree_ok: bool) -> dict:
@@ -225,7 +267,9 @@ def main() -> int:
             pass
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--target", type=int, default=200, help="witnessed closes to progress tonight")
-    ap.add_argument("--cadence-min", type=float, default=75.0, help="minutes between ticks")
+    ap.add_argument("--cadence-min", type=float, default=5.0,
+                    help="minutes between ticks (skip-if-inflight makes a tight cadence safe: "
+                         "a tick with no headroom no-ops instead of double-dispatching)")
     ap.add_argument("--deadline-hours", type=float, default=12.0, help="hard wall-clock stop")
     ap.add_argument("--max-ticks", type=int, default=64, help="runaway backstop")
     ap.add_argument("--apply", action="store_true", help="run the marathon for real (default: single dry-run tick)")
@@ -286,16 +330,15 @@ def main() -> int:
         rep.tree = tree_msg
         rep.reclaim = reclaim_rung1(args.apply)
 
-        # SUPERVISE, don't double-dispatch: only take the wave ourselves when the cron
-        # is dark OR the operator forced it. A live cron already refills to headroom.
+        # One gate decides whether this tick drives a wave — skip-if-inflight, so a
+        # tight cadence re-checks headroom sooner without ever double-dispatching onto
+        # slots a prior wave still holds. The decision is pure and its reason is logged.
         cron_owns_waves = cron["live"] and not args.force_wave
-        if cron_owns_waves:
-            rep.refills.append({"skipped": "CRON_OWNS_WAVES",
-                                "reason": f"{cron['name']} live ({cron['state']}) — supervising, not double-dispatching"})
-        elif pf["ok"]:
+        wd = wave_decision(pf, cron_owns_waves)
+        if wd["code"] == WAVE_SPAWN:
             rep.refills.append(refill(args.apply, tree_ok))
         else:
-            rep.refills.append({"skipped": pf["verdict"], "reason": pf["reason"]})
+            rep.refills.append({"skipped": wd["code"], "reason": wd["reason"]})
         rep.nodes = drive_nodes(args.apply)
 
         # --- report the tick ---

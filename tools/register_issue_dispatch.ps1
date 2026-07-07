@@ -38,7 +38,10 @@ param(
   # Default mirrors dispatchtick.DefaultMaxWorkers: built-in 20, retunable
   # via FAK_MAX_WORKERS (read once here at install; the value is baked into the task).
   [int]$MaxWorkers    = $(if ($env:FAK_MAX_WORKERS -match '^[1-9]\d*$') { [int]$env:FAK_MAX_WORKERS } else { 20 }),
-  [int]$EveryMinutes  = 10,
+  # 5 min tightens the felt wave cadence: the task carries -MultipleInstances
+  # IgnoreNew and a 30-min ExecutionTimeLimit, so a slow tick cannot stack — a
+  # shorter interval only re-evaluates headroom sooner, it never double-dispatches.
+  [int]$EveryMinutes  = 5,
   # Which tick the always-on task runs:
   #   auto (default) -> fak dispatch auto: sizes a refill from live account,
   #     host, and work headroom, then launches the priced safe set. This is the
