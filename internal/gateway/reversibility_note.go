@@ -27,10 +27,14 @@ import (
 // deliberate acknowledged pause over a bounded preview, not a capability wall.
 //
 // The recipe says "byte-identical" out loud because the token hashes the
-// call's canonical args minus confirm keys: a model that re-proposes with a
-// reworded description or a tweaked command gets a FRESH refusal with a FRESH
-// token, and chases tokens turn after turn instead of converging (witnessed
-// wedging a fleet session for 1h+).
+// call's canonical EFFECT-BEARING args: confirm keys AND incidental annotations
+// (the Bash "description") are excluded from the hash — see
+// ReversibilityConfirmToken. So a model that re-proposes with a TWEAKED COMMAND
+// gets a FRESH refusal with a FRESH token and chases tokens turn after turn,
+// but a merely reworded description now converges. Folding the description into
+// the token was itself the wedge that stalled a fleet session for 1h+
+// (docs/notes/CONFIRM-GATE-DEADLOCK-2026-07-04.md, session f0e7ac0f): Claude
+// Code regenerates that free-text field every turn, so the confirm never landed.
 func reversibilityGateNote(a ToolAdjudication) string {
 	if a.Verdict.Kind != "REQUIRE_WITNESS" || a.Verdict.By != "monitor/reversibility" {
 		return ""
@@ -50,7 +54,7 @@ func reversibilityGateNote(a ToolAdjudication) string {
 	} else {
 		b.WriteString(env.Class)
 	}
-	b.WriteString(`. If this call is deliberate, re-propose it byte-identical — same tool, every other argument unchanged, since any edit issues a different token — with "_fak_confirm":"`)
+	b.WriteString(`. If this call is deliberate, re-propose it byte-identical — same tool and same command text; the free-text description need not match, but any change to the command issues a different token — with "_fak_confirm":"`)
 	b.WriteString(env.ConfirmToken)
 	b.WriteString(`" added to the tool input (the kernel verifies and strips the key before dispatch, so the tool never sees it).`)
 	// The "to preview instead, <dry_run_hint>" sentence is NOT rendered here: the

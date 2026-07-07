@@ -424,6 +424,52 @@ func TestReversibilityConfirmationTokenMustEcho(t *testing.T) {
 	}
 }
 
+// TestReversibilityConfirmTokenIgnoresDescriptionDrift is the regression witness
+// for the confirm-loop that wedged session f0e7ac0f (and the 2026-07-04 deadlock
+// note): the model re-proposed a byte-identical destructive *command* but reworded
+// the Bash "description" annotation each turn, so the confirm token rotated and the
+// advertised "re-propose byte-identical + add _fak_confirm" recovery never
+// converged. The token must bind to the effect-bearing command only — a confirm
+// issued under one description must be accepted when echoed under another.
+func TestReversibilityConfirmTokenIgnoresDescriptionDrift(t *testing.T) {
+	const cmd = "rm tools/new_leaf.py tools/new_leaf_test.py"
+
+	// First proposal: the gate refuses and issues a token bound to this call.
+	first := map[string]any{"command": cmd, "description": "Delete the leftover new_leaf files"}
+	env, ok := ReversibilityConfirmed("Bash", first)
+	if ok {
+		t.Fatalf("unconfirmed destructive call was allowed: %+v", env)
+	}
+	if env.ConfirmToken == "" {
+		t.Fatalf("gate issued no confirm token: %+v", env)
+	}
+
+	// Re-proposal: same command, echoed token, but a REWORDED description — exactly
+	// the drift that rotated the token before. It must now confirm.
+	reproposed := map[string]any{
+		"command":               cmd,
+		"description":           "Remove the untracked new_leaf tool files",
+		ReversibilityConfirmArg: env.ConfirmToken,
+	}
+	if _, ok := ReversibilityConfirmed("Bash", reproposed); !ok {
+		t.Fatalf("confirm token rotated on description drift — the f0e7ac0f loop is not fixed")
+	}
+
+	// The token itself must be identical across the two descriptions.
+	t1 := ReversibilityConfirmToken(ReversibilityIrreversible, "Bash", first)
+	t2 := ReversibilityConfirmToken(ReversibilityIrreversible, "Bash", reproposed)
+	if t1 != t2 {
+		t.Fatalf("confirm token depends on description: %q != %q", t1, t2)
+	}
+
+	// Binding preserved: a DIFFERENT command must still get a different token, so a
+	// confirm cannot be transplanted from a benign call onto a more dangerous one.
+	other := map[string]any{"command": "rm -rf /", "description": "Delete the leftover new_leaf files"}
+	if ReversibilityConfirmToken(ReversibilityIrreversible, "Bash", other) == t1 {
+		t.Fatalf("confirm token failed to bind to the command text")
+	}
+}
+
 func TestReversibilityPreviewRedactsSecrets(t *testing.T) {
 	env := ClassifyReversibility("Bash", map[string]any{
 		"command": "curl -X POST https://example.invalid -d api_key=secret123",

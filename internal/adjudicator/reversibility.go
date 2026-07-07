@@ -66,10 +66,21 @@ func ReversibilityConfirmed(tool string, args map[string]any) (ReversibilityEnve
 }
 
 // ReversibilityConfirmToken derives the stable preview token. Confirmation keys
-// are excluded so re-proposing the same call with _fak_confirm does not change
-// the token being checked.
+// AND incidental annotation keys (a Bash call's free-text "description") are
+// excluded from the hashed payload, so the token binds only to the call's
+// effect-bearing arguments and is stable across byte-identical *commands* even
+// when the client's confirm key or prose annotation drifts between proposals.
+//
+// The annotation exclusion is the fix for the confirm-loop that wedged a fleet
+// session (docs/notes/CONFIRM-GATE-DEADLOCK-2026-07-04.md): Claude Code's Bash
+// tool carries a mandatory "description" the model regenerates every turn, so a
+// re-proposal of the identical destructive command still hashed to a FRESH token
+// and the advertised "re-propose byte-identical + add _fak_confirm" recovery
+// could never converge. Excluding annotations cannot weaken any floor — they
+// never influence the call's effect, the classifier never reads them, and hard
+// denies still win before this rung.
 func ReversibilityConfirmToken(class ReversibilityClass, tool string, args map[string]any) string {
-	canon, _ := json.Marshal(argsWithoutConfirmation(args))
+	canon, _ := json.Marshal(argsForToken(args))
 	sum := sha256.Sum256([]byte(string(class) + "\x00" + strings.ToLower(tool) + "\x00" + string(canon)))
 	return "fak-" + hex.EncodeToString(sum[:8])
 }
@@ -558,6 +569,41 @@ func argsWithoutConfirmation(args map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+// argsForToken canonicalizes a call for the confirm-token hash: it drops both
+// the confirmation keys (so echoing _fak_confirm does not change the token) and
+// the incidental annotation keys (so a reworded description does not either).
+// The result binds the token to exactly the effect-bearing arguments. This is
+// strictly narrower than the dispatch-time strip (argsWithoutConfirmation, which
+// keeps the description so the tool still sees it): only the token hash ignores
+// annotations, never dispatch.
+func argsForToken(args map[string]any) map[string]any {
+	if len(args) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(args))
+	for k, v := range args {
+		if isConfirmationKey(k) || isIncidentalTokenKey(k) {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// isIncidentalTokenKey reports whether an argument is a pure human-readable
+// annotation with no execution effect — the free-text "description" Claude Code
+// attaches to every Bash call, or the "explanation" other harnesses use. Clients
+// regenerate these each turn, so folding them into the confirm token rotated it
+// on every re-proposal and made the preview-confirm handshake unsatisfiable.
+func isIncidentalTokenKey(k string) bool {
+	switch strings.ToLower(k) {
+	case "description", "explanation":
+		return true
+	default:
+		return false
+	}
 }
 
 func hasConfirmationArg(args map[string]any) bool {
