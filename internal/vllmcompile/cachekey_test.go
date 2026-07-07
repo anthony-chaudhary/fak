@@ -8,17 +8,17 @@ import "testing"
 // us collapses to the same bare digit token, and unknown input fails safe.
 func TestNormalizeArch(t *testing.T) {
 	cases := map[string]string{
-		"9.0":            "90",
-		"sm_90":          "90",
-		"sm90":           "90",
-		"Hopper (sm_90)": "90",
-		"10.0":           "100",
-		"sm_100":         "100",
+		"9.0":                "90",
+		"sm_90":              "90",
+		"sm90":               "90",
+		"Hopper (sm_90)":     "90",
+		"10.0":               "100",
+		"sm_100":             "100",
 		"Blackwell (sm_100)": "100",
-		"8.0":            "80",
-		"90":             "90",
-		"":               "unknown",
-		"n/a":            "unknown",
+		"8.0":                "80",
+		"90":                 "90",
+		"":                   "unknown",
+		"n/a":                "unknown",
 	}
 	for in, want := range cases {
 		if got := NormalizeArch(in); got != want {
