@@ -151,6 +151,60 @@ because the first draft's `gen/next` argument was wrong on a load-bearing point.
   turn, or must the warmup **sweep** the buckets the operator will actually hit? If a
   sweep is required, L1 grows and the ceiling on the win shrinks.
 
+## Verification pass — 2026-07-06 (in-tree re-witness, no GPU host)
+
+A docs-lane pass re-witnessed the "current state in-tree" column against the live
+tree and **re-scoped L4**. The runtime leaves (L1/L3/L5) still need the GLM-5.2
+accelerator host and could not be advanced here; this pass only sharpens the
+contract so the accel-host implementer starts warm.
+
+**L4 correction — the direct-chat probe's `HttpClient.Timeout` is NOT in this
+repo.** The 180024ms cancel witness (`direct-chat.error.json`) carries the string
+*"The request was canceled due to the configured HttpClient.Timeout of 180 seconds
+elapsing."* — the standard **.NET/C# `HttpClient`** exception. The public tree
+contains **zero** `.cs`/`.csx`/`.fsx` files, no embedded C# in any `.ps1`/`.sh`,
+and no in-tree literal setting a 180s client cap (`rg 'HttpClient|FromSeconds\(180\)|180024'`
+finds only this note, the ablation note, and the committed witness JSON). Go's
+`net/http` and PowerShell's `Invoke-WebRequest` raise different messages, and the
+in-tree launcher (`scripts/dogfood-claude.ps1`) already floors `FAK_PLANNER_TIMEOUT_S`
+/ `API_TIMEOUT_MS` to 900s (`:696`–`:709`). So the probe that canceled the cold
+turn was a **remote/private or ad-hoc .NET client** — only its *output* is
+committed under `experiments/`. The L4 row's "locate it — it is the seam the
+180024ms cancel came from" is therefore satisfiable **only outside this repo**
+(the remote probe / `fak-private` / the operator's dotnet run); it supersedes the
+implication that the cap is findable in-tree. **In-tree L4 shrinks to one seam:**
+the `:598` local-shim `Wait-Url .../v1/models 180` (the transformers-shim dev path,
+not the GLM-5.2 proxy path) plus keeping every launcher `Invoke-WebRequest` cold
+wait ≥ the 900s planner floor. That makes L4's "cheap, near-witnessable" claim
+half-true: the shim seam is in-tree-cheap; the probe cap is out-of-tree.
+
+**Re-confirmed current state (unchanged, still accurate):**
+- `/healthz` (`internal/gateway/http.go` `handleHealth`) returns `ok:true` on
+  listener bind — it does not consult any warmup/readiness state (only a recent
+  served-panic can flip `ok:false`). Row 1's gap stands.
+- `MarkReady` (`internal/gateway/gateway.go`, `startup.go` `markReady`) only stamps
+  the `fak_gateway_time_to_ready_seconds` / `_ready_time_seconds` boot mark; it
+  gates nothing. Rows 1/4's gaps stand.
+- Launcher waits: `:598` shim = 180s, `:696` planner floor = 900s (kernel/openai),
+  `:752` `/healthz` wait = 600s (kernel) / 30s (proxy). The 30s proxy `/healthz`
+  wait is *not* the cold-cancel seam (a proxy `/healthz` binds fast); it would only
+  bite if the gate later makes `/healthz` block on warmup (L1) — flag it for the
+  L1 implementer to raise alongside.
+
+**Generation discipline for this increment (not a close of #3051):**
+- *Promotion evidence:* L4 decomposition corrected + current state re-witnessed, so
+  the runtime dispatch does not send an implementer hunting for an in-tree cap that
+  is not there. #3051 stays **open** — no acceptance bullet is witnessed by this pass.
+- *Demotion / retirement:* unchanged from the classification section (park if one
+  warmup shape cannot warm a differently-shaped first turn; retire if #3052's
+  persistent compile cache or an upstream native ready-after-warmup signal makes the
+  fak-side gate redundant).
+- *Invalidating assumption surfaced here:* this pass assumes the out-of-tree .NET
+  probe is the **only** cold-path client cap that canceled a legitimate warmup. If
+  the operator's harness (or `claude-glm-gcp`) holds *other* sub-900s caps, L4 is not
+  complete until each is raised — re-witness the full client chain on the accel host,
+  not just the one probe.
+
 ## Refs
 
 - Axis A/B ablation: [`GLM52-COLD-START-VS-CACHING-ABLATION-2026-07-06.md`](GLM52-COLD-START-VS-CACHING-ABLATION-2026-07-06.md)
