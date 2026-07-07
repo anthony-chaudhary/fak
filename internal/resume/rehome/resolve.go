@@ -100,7 +100,10 @@ type TargetProbe struct {
 }
 
 // Decision is the resume resolution record, mirroring the dict resume_resolver.resolve
-// returns. Action is one of NOT_FOUND | PIN | REHOME | PIN_BLOCKED | WAIT_RESET.
+// returns. Action is one of NOT_FOUND | PIN_FRESH | PIN | REHOME | PIN_BLOCKED |
+// WAIT_RESET. PIN_FRESH is the owner-less landing: no account holds the session, so
+// there is no transcript to copy, but a healthy seat with room is pinned so a fresh
+// resume lands on capacity instead of dead-ending.
 type Decision struct {
 	OK               bool          `json:"ok"`
 	Action           string        `json:"action"`
@@ -157,10 +160,11 @@ func Resolve(in ResolveInput) Decision {
 
 	owner := LocateOwner(in.SID, home)
 	if owner == nil {
-		return Decision{
-			OK: false, Action: "NOT_FOUND", Session: in.SID,
-			Reason: "no ~/.claude* account holds this session id",
-		}
+		// No ~/.claude* account holds this session -> there is no transcript to
+		// re-home, but a dead-end NOT_FOUND strands a resume that could still land
+		// on capacity. Pin a fresh resume onto the least-loaded healthy Claude seat
+		// with room; fall back to NOT_FOUND only when the fleet has no such seat.
+		return pinFreshToHealthy(in)
 	}
 
 	owner, reselect, forcedTarget := reselectDuplicateOwner(in, owner)
@@ -201,6 +205,63 @@ func Resolve(in ResolveInput) Decision {
 	}
 
 	return copyAndPinToTarget(in, owner, tgt, home, cwdSlug, blockReason, rec)
+}
+
+// pinFreshToHealthy handles the owner-less case: no ~/.claude* account holds this
+// session id, so there is nothing to copy. Rather than dead-end on NOT_FOUND, it ranks
+// the live roster with the SAME "account with room" ranking the re-home path uses
+// (least-loaded healthy Claude seat, burst-spread cap dropping any account at its
+// session ceiling) and pins a fresh resume onto the winner. A lone interactive resume
+// must not be stranded merely because every healthy seat is over the fleet burst cap,
+// so — mirroring selectRehomeTarget — an empty capped pool is retried uncapped before
+// giving up. Only a fleet with NO healthy Claude seat at all falls back to NOT_FOUND.
+func pinFreshToHealthy(in ResolveInput) Decision {
+	notFound := Decision{
+		OK: false, Action: "NOT_FOUND", Session: in.SID,
+		Reason: "no ~/.claude* account holds this session id",
+	}
+	availability := in.Availability
+	if availability == nil && in.AvailabilityFn != nil {
+		availability = in.AvailabilityFn()
+	}
+	if len(availability) == 0 {
+		return notFound
+	}
+
+	// No owner to exclude ("" matches no account), so the whole healthy roster competes.
+	targets := RehomeTargets(availability, "", nil, RehomeCap())
+	targets, screened := filterTargetsByStatus(targets, in.OwnerStatusFn)
+	var relief *CapRelief
+	if len(targets) == 0 {
+		relaxed := RehomeTargets(availability, "", nil, CapUnbounded)
+		relaxed, screened = filterTargetsByStatus(relaxed, in.OwnerStatusFn)
+		if len(relaxed) == 0 {
+			return notFound
+		}
+		relief = &CapRelief{
+			RehomeCap: RehomeCap(),
+			Note:      "all available accounts were over the fleet burst cap; a single interactive resume relaxes it onto the least-loaded healthy seat",
+		}
+		targets = relaxed
+	}
+
+	tgt := targets[0]
+	tgtTag := tgt.Tag
+	if tgtTag == "" {
+		tgtTag = tgt.Account
+	}
+	rec := Decision{
+		OK: true, Action: "PIN_FRESH", Session: in.SID,
+		PinAccount:   tgt.Account,
+		PinConfigDir: targetConfigDir(tgt, in.Home),
+		CapRelief:    relief,
+		Reason: "session not found in any account -- pinned to healthy seat " + tgtTag +
+			" with room (no transcript to copy; a fresh resume lands here)",
+	}
+	if len(screened) > 0 {
+		rec.TargetProbes = screened
+	}
+	return rec
 }
 
 // resolveCwdSlug turns the (possibly empty) requested cwd into its project slug,

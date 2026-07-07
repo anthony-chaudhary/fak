@@ -18,6 +18,69 @@ func TestResolveNotFound(t *testing.T) {
 	}
 }
 
+// TestResolvePinFreshWhenNotFoundWithRoom: no account holds the session, but the fleet
+// has healthy seats -> pin a fresh resume onto the least-loaded one with room instead of
+// dead-ending on NOT_FOUND.
+func TestResolvePinFreshWhenNotFoundWithRoom(t *testing.T) {
+	home := t.TempDir()
+	busy := filepath.Join(home, ".claude-busy")
+	idle := filepath.Join(home, ".claude-idle")
+	got := Resolve(ResolveInput{
+		SID: "ghost", Home: home, CWD: testCWD,
+		Availability: []Target{
+			{Account: ".claude-busy", Available: true, LiveSessions: 2, ConfigDir: busy},
+			{Account: ".claude-idle", Available: true, LiveSessions: 0, ConfigDir: idle},
+		},
+	})
+	if !got.OK || got.Action != "PIN_FRESH" {
+		t.Fatalf("Resolve = %+v, want PIN_FRESH", got)
+	}
+	if got.PinAccount != ".claude-idle" || got.PinConfigDir != idle {
+		t.Fatalf("pinned to %q (%q), want least-loaded .claude-idle", got.PinAccount, got.PinConfigDir)
+	}
+	if got.Rehomed || got.WouldRehome {
+		t.Fatalf("PIN_FRESH must not copy a transcript: %+v", got)
+	}
+}
+
+// TestResolvePinFreshRelaxesBurstCap: every healthy seat is over the fleet burst cap, so
+// the capped pool is empty -> a lone interactive resume relaxes the cap onto the
+// least-loaded healthy seat rather than falling back to NOT_FOUND.
+func TestResolvePinFreshRelaxesBurstCap(t *testing.T) {
+	home := t.TempDir()
+	got := Resolve(ResolveInput{
+		SID: "ghost", Home: home, CWD: testCWD,
+		Availability: []Target{
+			{Account: ".claude-a", Available: true, LiveSessions: DefaultRehomeCap + 3, ConfigDir: filepath.Join(home, ".claude-a")},
+			{Account: ".claude-b", Available: true, LiveSessions: DefaultRehomeCap, ConfigDir: filepath.Join(home, ".claude-b")},
+		},
+	})
+	if !got.OK || got.Action != "PIN_FRESH" {
+		t.Fatalf("Resolve = %+v, want PIN_FRESH via cap relief", got)
+	}
+	if got.PinAccount != ".claude-b" {
+		t.Fatalf("pinned to %q, want least-loaded over-cap seat .claude-b", got.PinAccount)
+	}
+	if got.CapRelief == nil {
+		t.Fatalf("expected cap relief to be recorded: %+v", got)
+	}
+}
+
+// TestResolveNotFoundWhenNoHealthySeat: the session is unknown AND no account is
+// serving, so there is no seat with room -> NOT_FOUND stands (exit 1 for the CLI).
+func TestResolveNotFoundWhenNoHealthySeat(t *testing.T) {
+	home := t.TempDir()
+	got := Resolve(ResolveInput{
+		SID: "ghost", Home: home, CWD: testCWD,
+		Availability: []Target{
+			{Account: ".claude-walled", Available: false, ConfigDir: filepath.Join(home, ".claude-walled")},
+		},
+	})
+	if got.OK || got.Action != "NOT_FOUND" {
+		t.Fatalf("Resolve = %+v, want NOT_FOUND (no healthy seat)", got)
+	}
+}
+
 func TestResolvePinsAvailableOwner(t *testing.T) {
 	home := t.TempDir()
 	sid := "s1"
