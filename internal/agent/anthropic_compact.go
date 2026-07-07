@@ -1161,7 +1161,7 @@ func spliceCompactedWithGoal(raw []byte, spans []elementSpan, pfxEnd, keepStart,
 	var b bytes.Buffer
 	b.Grow(len(raw))
 	b.Write(raw[:prefixEnd]) // verbatim protected prefix (includes `[` when pfxEnd<0)
-	lead := pfxEnd >= 0       // a comma precedes the first hoisted element only if a protected element did
+	lead := pfxEnd >= 0      // a comma precedes the first hoisted element only if a protected element did
 	writeMiddle := func(p []byte) {
 		if lead {
 			b.WriteByte(',')

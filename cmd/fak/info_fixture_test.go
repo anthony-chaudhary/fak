@@ -47,9 +47,9 @@ func demoOverlayVars() guardInfoVars {
 	// Owner split: ~46% provider / ~54% fak, matching the screenshot's "split default cache 46%
 	// (~65.1k tok) + fak 54% (~77.3k tok)".
 	v.CacheAttribution = &guardInfoCacheAttribution{
-		ProviderTokenEquiv: 65_100,
-		FakTokenEquiv:      77_300,
-		TotalTokenEquiv:    142_400,
+		ProviderTokenEquiv:  65_100,
+		FakTokenEquiv:       77_300,
+		TotalTokenEquiv:     142_400,
 		FakVDSOAvoidedCalls: 3,
 	}
 
@@ -84,8 +84,8 @@ func demoOverlayVars() guardInfoVars {
 		Deferred:    2,
 		Escalated:   1,
 		ByReason: map[string]uint64{
-			"DEFAULT_DENY":     2,
-			"SECRET_IN_ARGS":   1,
+			"DEFAULT_DENY":      2,
+			"SECRET_IN_ARGS":    1,
 			"UNVERIFIED_RESULT": 1,
 		},
 	}

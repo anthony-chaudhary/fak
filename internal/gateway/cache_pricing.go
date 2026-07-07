@@ -261,9 +261,9 @@ type MechanismSavings struct {
 	// least one fire landed on a WARM prefix (its shed tokens were already cache-reads, worth
 	// the 0.1x read marginal), so the shed is valued at that marginal, not full input. Same
 	// binary aggregate-warm rule the Track-2 report's compaction row uses (#2794/#2798).
-	FakCompactionCacheReadTokens uint64  `json:"fak_compaction_cache_read_tokens,omitempty"`
-	FakKVPrefixReusedTokens      uint64  `json:"fak_kv_prefix_reused_tokens"`
-	FakVDSOAvoidedCalls          uint64  `json:"fak_vdso_avoided_calls"`
+	FakCompactionCacheReadTokens uint64 `json:"fak_compaction_cache_read_tokens,omitempty"`
+	FakKVPrefixReusedTokens      uint64 `json:"fak_kv_prefix_reused_tokens"`
+	FakVDSOAvoidedCalls          uint64 `json:"fak_vdso_avoided_calls"`
 }
 
 // MechanismSavings folds the summary's existing counters into the owner/mechanism split.
