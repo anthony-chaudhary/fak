@@ -294,35 +294,66 @@ def reap_worker_worktree(root: Path, wt_path: str | Path, *,
 
 def land_worktree_diff(root: Path, wt_path: str | Path, *,
                        commit_msg_file: str | Path,
+                       base_sha: str | None = None,
                        paths: Sequence[str] | None = None,
+                       verify: "Callable[[Path], dict[str, Any]] | None" = None,
                        git: GitRunner | None = None) -> dict[str, Any]:
     """Land a worker's edits from its isolated worktree onto the TRUNK as one
     stamped, signed-off commit ON ``main`` — the serialized commit-to-trunk step
     that keeps ``OFF_TRUNK`` from ever tripping (#1334).
 
     The worker edited in ``wt_path`` (a detached worktree); this captures that
-    worktree's diff against its base and applies it to the trunk worktree, then
-    commits ``-s`` by explicit path with the worker's prepared message. Because
-    the commit happens IN the trunk worktree on ``main``, it is a normal guarded
-    commit — never an off-trunk one. The CALLER holds the lane lease, which
-    serialises this so two workers never apply to the same leaf tree at once.
+    worktree's FULL delta since its pinned base and applies it to the trunk
+    worktree, then commits ``-s`` by explicit path with the worker's prepared
+    message. Because the commit happens IN the trunk worktree on ``main``, it is a
+    normal guarded commit — never an off-trunk one. The CALLER holds the lane
+    lease, which serialises this so two workers never apply to the same leaf tree
+    at once.
 
-    Returns ``{"ok", "applied", "committed", ...}``. FAIL-OPEN: any git error is
-    reported, never raised. ``paths`` (when given) scopes the trunk commit to the
-    worker's declared file region — never an ``add -A`` of the shared tree."""
+    ``base_sha`` (the SHA :func:`prepare_worker_worktree` pinned the worktree to)
+    is the diff base. Diffing against the base — not ``HEAD`` — is load-bearing: a
+    guarded worker follows the repo's standing "commit when green" instruction and
+    will ``git commit`` INSIDE its detached worktree, which moves the worktree HEAD
+    forward, so ``git diff HEAD`` would be EMPTY and the worker's whole change would
+    silently evaporate. ``git diff <base_sha>`` captures the delta whether the worker
+    committed it, staged it, or left it unstaged. When ``base_sha`` is None it falls
+    back to ``HEAD`` (the pre-#1333 behavior, correct only for a worker that never
+    commits in-worktree).
+
+    ``verify`` is a build/adjudication WITNESS run IN THE ISOLATED WORKTREE before
+    anything is applied to the trunk (``land_worktree_diff`` itself performs a
+    mechanical apply+commit with no build, so without this an edit that breaks the
+    build would land on ``main``). It receives the worktree Path and returns
+    ``{"ok": bool, "detail": str}``; a non-ok result REFUSES the land (nothing is
+    applied or committed). It is injectable so the primitive stays testable; the
+    dispatcher supplies a real ``go build`` / ``make ci`` runner. When None the
+    witness is skipped (the caller's downstream ``dos commit-audit`` is the only arm).
+
+    Returns ``{"ok", "applied", "committed", ...}``. FAIL-OPEN on git errors: any
+    git error is reported, never raised. ``paths`` (when given) scopes the trunk
+    commit to the worker's declared file region — never an ``add -A`` of the tree."""
     run = git or _git
     wt = str(wt_path)
-    # Capture the worker's tracked diff from its worktree (against HEAD = its base).
-    rc, diff = run(Path(wt), ["diff", "HEAD"])
+    # Capture the worker's full delta since the pinned base (committed + staged +
+    # unstaged), not just uncommitted (git diff HEAD misses in-worktree commits).
+    diff_ref = base_sha or "HEAD"
+    rc, diff = run(Path(wt), ["diff", diff_ref])
     if rc != 0:
         return {"ok": False, "applied": False, "committed": False,
-                "reason": f"could not read worktree diff (rc {rc}) — fail open"}
+                "reason": f"could not read worktree diff vs {diff_ref} (rc {rc}) — fail open"}
     if not diff.strip():
-        # The worker committed in-worktree, or made no tracked change. Nothing to
-        # apply; the caller's commit-witness (dos commit-audit) is the arm that
-        # decides whether the slot was productive.
+        # No net change since the base: the worker landed nothing. The caller's
+        # commit-witness (dos commit-audit) decides whether the slot was productive.
         return {"ok": True, "applied": False, "committed": False,
-                "reason": "no tracked diff in worktree to land"}
+                "reason": f"no net diff in worktree vs {diff_ref} to land"}
+    # Build/adjudication witness IN THE WORKTREE before touching the trunk: an edit
+    # that reds the build must never land on main. Refuse the land on a failed witness.
+    if verify is not None:
+        vres = verify(Path(wt))
+        if not vres.get("ok"):
+            return {"ok": False, "applied": False, "committed": False,
+                    "reason": f"worktree verify failed, refusing to land: {vres.get('detail')}",
+                    "verify": vres}
     # Apply the captured diff to the trunk worktree's working tree.
     proc = _git_apply(root, diff, git_run=run)
     if not proc.get("ok"):
@@ -389,6 +420,29 @@ def count_worker_worktrees(root: Path, *, git: GitRunner | None = None) -> dict[
 # maps args -> primitive -> JSON, adding no new failure mode of its own.
 # --------------------------------------------------------------------------- #
 
+def _go_build_verify(wt: Path) -> dict[str, Any]:
+    """Build/adjudication witness for :func:`land_worktree_diff`: run ``go build
+    ./...`` IN the isolated worktree so a worker's edit that reds the build is
+    refused before it can land on the trunk. The worktree's :func:`worktree_env`
+    already redirects GOCACHE/GOTMPDIR inside it, so this build never poisons a
+    sibling. A build tool that is absent (no ``go`` on PATH) fails OPEN (ok=True):
+    the witness must not block landing on a host that cannot run it — the caller's
+    downstream ``dos commit-audit`` remains the backstop."""
+    try:
+        proc = subprocess.run(
+            ["go", "build", "./..."], cwd=str(wt),
+            env={**os.environ, **worktree_env({}, wt)},
+            capture_output=True, text=True,
+            creationflags=_no_window_creationflags())
+    except FileNotFoundError:
+        return {"ok": True, "detail": "go not found — witness skipped (fail open)"}
+    except OSError as exc:
+        return {"ok": True, "detail": f"could not run go build ({exc}) — fail open"}
+    if proc.returncode == 0:
+        return {"ok": True, "detail": "go build ./... clean"}
+    return {"ok": False, "detail": (proc.stderr or proc.stdout).strip()[-500:]}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     import argparse
     import json
@@ -420,6 +474,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="the prepared worktree path to land from")
     p_land.add_argument("--msg-file", required=True,
                         help="commit message file (git commit -s -F)")
+    p_land.add_argument("--base-sha", default="",
+                        help="the sha the worktree was pinned to (diff base). Required to "
+                             "capture a worker that committed IN-worktree; without it the "
+                             "diff is taken against HEAD and in-worktree commits are missed")
+    p_land.add_argument("--verify", choices=["off", "go-build"], default="off",
+                        help="build/adjudication witness run IN THE WORKTREE before landing; "
+                             "'go-build' refuses the land if `go build ./...` reds (default off)")
     p_land.add_argument("--path", action="append", default=[], dest="paths",
                         help="scope the trunk commit to this path (repeatable); "
                              "omit to commit the whole applied diff")
@@ -448,7 +509,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         res = land_worktree_diff(
             root, args.worktree,
             commit_msg_file=args.msg_file,
-            paths=args.paths or None)
+            base_sha=args.base_sha or None,
+            paths=args.paths or None,
+            verify=_go_build_verify if args.verify == "go-build" else None)
         ok = bool(res.get("ok"))
     elif args.cmd == "reap":
         res = reap_worker_worktree(root, args.worktree)

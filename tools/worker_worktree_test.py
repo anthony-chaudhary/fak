@@ -234,6 +234,55 @@ class LandTest(unittest.TestCase):
         self.assertFalse(res["committed"])
         self.assertFalse([c for c in git.calls if c and c[0] == "commit"])
 
+    def test_base_sha_is_the_diff_ref_not_head(self) -> None:
+        # A ship-when-green worker commits IN its worktree, so diff-vs-HEAD is empty
+        # and the work would evaporate; diffing against the pinned base captures it.
+        git = FakeGit(replies={
+            "diff": (0, "diff --git a/x b/x\n@@\n-old\n+new\n"),
+            "apply": (0, ""),
+            "commit": (0, "[main abc] msg"),
+        })
+        res = mod.land_worktree_diff(
+            Path("/trunk"), "/wt/fak-worker-wt-tools-abc",
+            commit_msg_file="/tmp/msg.txt", base_sha="feedface", paths=["x"], git=git)
+        self.assertTrue(res["committed"])
+        diff = [c for c in git.calls if c and c[0] == "diff"][0]
+        self.assertIn("feedface", diff)  # diff base is the pinned sha, not HEAD
+        self.assertNotIn("HEAD", diff)
+
+    def test_verify_failure_refuses_to_land(self) -> None:
+        git = FakeGit(replies={
+            "diff": (0, "diff --git a/x b/x\n@@\n-o\n+n\n"),
+            "apply": (0, ""),
+            "commit": (0, "[main abc] msg"),
+        })
+        called = {}
+
+        def verify(wt):
+            called["wt"] = str(wt)
+            return {"ok": False, "detail": "go build ./... : x.go:1: broke"}
+
+        res = mod.land_worktree_diff(
+            Path("/trunk"), "/wt/fak-worker-wt-tools-abc",
+            commit_msg_file="/tmp/msg.txt", base_sha="cafe", verify=verify, git=git)
+        self.assertFalse(res["ok"])
+        self.assertFalse(res["committed"])
+        # A failed witness runs BEFORE any apply/commit — nothing lands on the trunk.
+        self.assertFalse([c for c in git.calls if c and c[0] in ("apply", "commit")])
+        self.assertIn("wt", called)
+
+    def test_verify_pass_lands(self) -> None:
+        git = FakeGit(replies={
+            "diff": (0, "diff --git a/x b/x\n@@\n-o\n+n\n"),
+            "apply": (0, ""),
+            "commit": (0, "[main abc] msg"),
+        })
+        res = mod.land_worktree_diff(
+            Path("/trunk"), "/wt/fak-worker-wt-tools-abc",
+            commit_msg_file="/tmp/msg.txt", base_sha="cafe",
+            verify=lambda wt: {"ok": True, "detail": "clean"}, git=git)
+        self.assertTrue(res["committed"])
+
 
 class CLITest(unittest.TestCase):
     """The runnable entrypoint: assert `main(argv)` maps each subcommand onto the
@@ -291,25 +340,30 @@ class CLITest(unittest.TestCase):
     def test_land_passes_msg_file_and_scoped_paths(self) -> None:
         seen = {}
 
-        def fake_land(root, wt, *, commit_msg_file, paths=None):
-            seen.update(root=str(root), wt=wt, msg=str(commit_msg_file), paths=paths)
+        def fake_land(root, wt, *, commit_msg_file, base_sha=None, paths=None, verify=None):
+            seen.update(root=str(root), wt=wt, msg=str(commit_msg_file), paths=paths,
+                        base_sha=base_sha, verify=verify)
             return {"ok": True, "applied": True, "committed": True}
 
         code, res = self._run(
             ["--root", "/r", "land", "--worktree", "/wt/fak-worker-wt-cmd-abc",
-             "--msg-file", "/tmp/msg.txt", "--path", "cmd/fak/x.go",
-             "--path", "cmd/fak/y.go"],
+             "--msg-file", "/tmp/msg.txt", "--base-sha", "feedface", "--verify", "go-build",
+             "--path", "cmd/fak/x.go", "--path", "cmd/fak/y.go"],
             {"land_worktree_diff": fake_land})
         self.assertEqual(code, 0)
         self.assertEqual(seen["msg"], "/tmp/msg.txt")
         self.assertEqual(seen["paths"], ["cmd/fak/x.go", "cmd/fak/y.go"])
+        self.assertEqual(seen["base_sha"], "feedface")  # base sha threaded to the primitive
+        self.assertIs(seen["verify"], mod._go_build_verify)  # --verify go-build wires the witness
         self.assertTrue(res["committed"])
 
     def test_land_without_paths_sends_none(self) -> None:
         seen = {}
 
-        def fake_land(root, wt, *, commit_msg_file, paths=None):
+        def fake_land(root, wt, *, commit_msg_file, base_sha=None, paths=None, verify=None):
             seen["paths"] = paths
+            seen["base_sha"] = base_sha
+            seen["verify"] = verify
             return {"ok": True, "applied": True, "committed": True}
 
         code, _ = self._run(
@@ -318,6 +372,8 @@ class CLITest(unittest.TestCase):
             {"land_worktree_diff": fake_land})
         self.assertEqual(code, 0)
         self.assertIsNone(seen["paths"])  # no --path -> whole diff (None), not []
+        self.assertIsNone(seen["base_sha"])  # no --base-sha -> None (falls back to HEAD)
+        self.assertIsNone(seen["verify"])  # default --verify off -> no witness
 
     def test_reap_refusal_is_nonzero_exit(self) -> None:
         def fake_reap(root, wt):
