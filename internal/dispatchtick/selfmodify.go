@@ -14,8 +14,9 @@ import (
 // observed cost when it does is real (10- and 42-turn investigations that both
 // terminally blocked with 0 commit on #1338's cmd/fak work). cmd/** is the CLI and the
 // orchestrator verbs; internal/** is every kernel subsystem. A lane rooted in either is
-// operator-gated for a guarded worker -- it belongs on an unguarded/operator or
-// worktree-isolated path (#1334), not a self-guarded worker.
+// operator-gated for a guarded worker -- it belongs on an unguarded/operator path or the
+// now-runnable worktree-isolated path (tools/worker_worktree.py: prepare -> edit -> land
+// -> reap, #1334), not a self-guarded worker.
 //
 // This is a PRUDENTIAL pre-route over the whole Go module, deliberately broader than
 // the guard's literal self_modify_globs default (.git/, .env, id_rsa, ...): the
