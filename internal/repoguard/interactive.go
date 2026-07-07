@@ -132,7 +132,12 @@ func classifySegment(verb string, operands []string, invocation string) *Violati
 	case verb == "gh":
 		return classifyGh(operands, invocation)
 	case verb == "visudo":
-		if hasAnyToken(operands, "-c", "--check") {
+		// Recognize the CLUSTERED check form too (-cf, -cs): visudo -c is
+		// validate-only, and the fix below recommends `visudo -cf <file>`, so the
+		// recognizer must accept that exact clustered spelling or it re-refuses its
+		// own advice (self-refuting remedy). -c always means --check for visudo, so
+		// any short cluster containing 'c' is a validate.
+		if hasAnyToken(operands, "-c", "--check") || clusterHas(operands, 'c') {
 			return nil // validate-only mode
 		}
 		return interactiveViolation("visudo", invocation,
@@ -162,9 +167,17 @@ func classifyGit(operands []string, invocation string) *Violation {
 			"interactive staging prompts a human (a closed stdin EOFs it into a no-op)",
 			"stage whole paths: git add -- <paths>")
 	case patchModeSubs[sub] && (hasLongFlag(flags, "--patch") || clusterHas(flags, 'p')):
+		// `git <sub> -- <paths>` is the whole-paths fix for add/reset/restore/stash,
+		// but for commit it would itself open the message editor and re-refuse at the
+		// commit rung below (self-refuting remedy). Name the message-bearing form for
+		// commit so the recommended command actually clears the gate.
+		fix := "operate on whole paths: git " + sub + " -- <paths>"
+		if sub == "commit" {
+			fix = `git commit -s -m "<type>(<leaf>): <subject> (fak <leaf>)" -- <paths>`
+		}
 		return interactiveViolation("git "+sub+" -p", invocation,
 			"the interactive hunk picker prompts a human (a closed stdin EOFs it into a no-op)",
-			"operate on whole paths: git "+sub+" -- <paths>")
+			fix)
 	case sub == "commit":
 		if hasAnyToken(flags, "--help", "-h", "--dry-run") {
 			return nil // no editor opens; help/status output only

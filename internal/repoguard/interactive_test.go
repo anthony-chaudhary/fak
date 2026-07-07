@@ -57,6 +57,37 @@ func TestInteractiveHangDenied(t *testing.T) {
 	}
 }
 
+// TestInteractiveFixesAreNotSelfRefuting pins that the runnable command an
+// INTERACTIVE_HANG fix recommends is itself allowed — following the guard's own
+// advice must clear the rung, not re-trip it (the self-refuting-remedy class of
+// docs/notes/CONFIRM-GATE-DEADLOCK-2026-07-04.md). Two shipped instances this
+// locks: `visudo` recommended `visudo -cf <file>` while the recognizer only
+// accepted the un-clustered `-c`; `git commit -p` recommended `git commit --
+// <paths>`, which itself re-opens the commit editor and re-refuses.
+func TestInteractiveFixesAreNotSelfRefuting(t *testing.T) {
+	cases := []struct {
+		interactive     string // must be denied
+		fixContains     string // the recommended command shape
+		instantiatedFix string // that recommendation, placeholders filled — must be allowed
+	}{
+		{"visudo", "visudo -cf", "visudo -cf /etc/sudoers.d/mycfg"},
+		{"git commit -p", "git commit -s -m", `git commit -s -m "fix(x): y" -- cmd/fak/main.go`},
+	}
+	for _, tc := range cases {
+		v := classifyInteractive(tc.interactive)
+		if len(v) == 0 {
+			t.Errorf("%q: expected INTERACTIVE_HANG denial", tc.interactive)
+			continue
+		}
+		if !strings.Contains(v[0].Fix, tc.fixContains) {
+			t.Errorf("%q: fix %q does not recommend %q", tc.interactive, v[0].Fix, tc.fixContains)
+		}
+		if rv := classifyInteractive(tc.instantiatedFix); len(rv) != 0 {
+			t.Errorf("self-refuting remedy: %q recommends %q, but that instantiated command is itself denied: %v", tc.interactive, tc.instantiatedFix, rv)
+		}
+	}
+}
+
 func TestNonInteractiveFormsAllowed(t *testing.T) {
 	for _, c := range []string{
 		// message-carrying commits
@@ -90,8 +121,9 @@ func TestNonInteractiveFormsAllowed(t *testing.T) {
 		"gh pr list",
 		"gh auth login --with-token < token.txt",
 		"gh auth status",
-		// validate-only visudo, non-edit crontab
+		// validate-only visudo (incl. the CLUSTERED -cf the fix recommends), non-edit crontab
 		"visudo -c",
+		"visudo -cf /etc/sudoers.d/mycfg",
 		"crontab -l",
 		"crontab schedule.txt",
 		// pagers self-disable without a TTY — never refused
