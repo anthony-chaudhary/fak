@@ -13,26 +13,27 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
 
-// ToolExec is the subprocess tool-action backend (#2014, epic #2000 M14): the
-// first real isolation step above a goroutine. It runs each tool action as an
-// os/exec SUBPROCESS with stdin/stdout/stderr capture and a per-action timeout,
-// and — the reason it exists at all — it routes EVERY action through the
-// in-process kernel floor (M18) BEFORE the subprocess runs. A denied action
-// never reaches exec: adjudication is the gate, not a post-hoc audit.
+// ToolExec is the adjudicating tool-action SEAM (#2003 shape, #2018 floor
+// enforcement, epic #2000 M13/M18): the single point every microagent action
+// passes through. Run routes EVERY action through the in-process kernel floor
+// BEFORE dispatch, then hands an already-allowed action to the configured
+// Backend (goroutine, subprocess, … — the isolation dial). The floor is a
+// property of the seam, not of any backend: a denied action never reaches
+// Dispatch at ANY isolation level, so adjudication is the gate, not a post-hoc
+// audit — and not a convention a new backend could forget.
 //
-// The process-tree kill on timeout/cancel is not re-implemented here. It reuses
-// the ONE cross-platform reaper procguard already owns — Setpgid + kill(-pgid)
-// on POSIX, the native process-tree walk on Windows — wired to exec.Cmd's Cancel
-// hook via procguard.ConfigureProcessTreeCancel. A runaway action that forks
-// grandchildren is killed TREE-WIDE, not just at the direct child, on both
-// platforms.
+// Every construction path requires the floor: NewToolExec (subprocess
+// default), NewToolExecBackend (explicit backend), and the by-name registry's
+// NewToolExecFor all refuse a nil KernelFloor, and nothing in the package API
+// yields a bare, unadjudicated executor. The per-backend conformance suite
+// (toolexec_floor_conformance_test.go) is the #2018 acceptance witness.
 //
-// Generation intent: gen/second-next architectural exploration (#2014). This is
-// an OPTION behind an explicit import boundary — nothing in the default
-// serve/guard/dispatch path constructs a ToolExec; it is the seam microagent's
-// doc.go named as the prerequisite ("this host must grow a subprocess ToolExec
-// seam (#2003/#2014) before it can carry production agents"). Closing evidence
-// for the generation frame:
+// Generation intent: gen/second-next architectural exploration (#2014/#2018).
+// This is an OPTION behind an explicit import boundary — nothing in the
+// default serve/guard/dispatch path constructs a ToolExec; it is the seam
+// microagent's doc.go named as the prerequisite ("this host must grow a
+// subprocess ToolExec seam (#2003/#2014) before it can carry production
+// agents"). Closing evidence for the generation frame:
 //
 //   - Promotion evidence: toolexec_test.go witnesses (a) the real registered
 //     kernel floor DENYING an action so no subprocess is ever spawned, and
@@ -41,20 +42,21 @@ import (
 //     the microagent Host drives real agent loops whose tool actions are shell
 //     commands (the #2001 RunArm extraction) and a density measurement (#2033)
 //     confirms subprocess-per-action is the isolation level production needs.
-//   - Demotion / retirement criteria: retire this backend if the goroutine floor
-//     (or a cheaper in-process sandbox) proves sufficient isolation for the agent
-//     loops the host carries — i.e. no action needs an OS process boundary — so
-//     the per-action spawn cost buys nothing, OR if the isolation floor demands a
-//     stronger boundary than a process tree (a container/VM per action), which a
-//     bare os/exec backend cannot provide.
-//   - Invalidating assumption: this minimal backend proceeds ONLY on a kernel
-//     Allow — a Transform (redact-and-dispatch), RequireWitness, or Quarantine
-//     verdict is treated as a refusal, not honored. If real agent actions need the
-//     floor's arg-rewrite path (a secret redacted before exec), that assumption is
+//   - Demotion / retirement criteria: retire the subprocess backend if the
+//     goroutine floor (or a cheaper in-process sandbox) proves sufficient
+//     isolation for the agent loops the host carries — i.e. no action needs an
+//     OS process boundary — so the per-action spawn cost buys nothing, OR if the
+//     isolation floor demands a stronger boundary than a process tree (a
+//     container/VM per action), which a bare os/exec backend cannot provide.
+//   - Invalidating assumption: the seam proceeds ONLY on a kernel Allow — a
+//     Transform (redact-and-dispatch), RequireWitness, or Quarantine verdict is
+//     treated as a refusal, not honored. If real agent actions need the floor's
+//     arg-rewrite path (a secret redacted before exec), that assumption is
 //     invalid and Run must grow a Transform arm that re-derives argv from the
-//     rewritten args before spawning.
+//     rewritten args before dispatch.
 type ToolExec struct {
-	floor KernelFloor
+	floor   KernelFloor
+	backend Backend
 }
 
 // KernelFloor is the in-process kernel adjudication seam ToolExec routes every
@@ -109,21 +111,33 @@ type ToolResult struct {
 	Killed   bool        // the process tree was killed (timeout OR parent cancel)
 }
 
-// NewToolExec builds a subprocess backend over the in-process kernel floor.
+// NewToolExec builds a floor-adjudicated executor over the subprocess backend
+// (#2014) — the historical default, kept as the compatibility constructor.
 func NewToolExec(floor KernelFloor) (*ToolExec, error) {
+	return NewToolExecBackend(floor, subprocessBackend{})
+}
+
+// NewToolExecBackend builds the adjudicating seam over an explicit backend.
+// The floor is NOT optional at any isolation level: a nil floor or a nil
+// backend is refused loud (#2018 — there is no unadjudicated executor).
+func NewToolExecBackend(floor KernelFloor, b Backend) (*ToolExec, error) {
 	if floor == nil {
 		return nil, ErrNilFloor
 	}
-	return &ToolExec{floor: floor}, nil
+	if b == nil {
+		return nil, ErrNilBackend
+	}
+	return &ToolExec{floor: floor, backend: b}, nil
 }
 
 // Run adjudicates the action through the kernel floor and, ONLY on a kernel
-// Allow, runs it as a process-tree-killable subprocess. The return contract:
+// Allow, dispatches it to the backend. The return contract:
 //
 //   - denied by the floor            -> (result with Verdict, Ran=false), ErrActionDenied
-//   - no program to exec / bad args  -> (result with Verdict), a wrapped error
-//   - the subprocess ran (or timed   -> (result with the captured outcome), nil
-//     out and was killed tree-wide)     — inspect Result.TimedOut / ExitCode
+//   - backend refusal (no program /  -> (result with Verdict), a wrapped error
+//     unregistered tool / bad args)
+//   - the action ran (or timed out   -> (result with the captured outcome), nil
+//     and was reaped)                   — inspect Result.TimedOut / ExitCode
 //
 // A timeout is a SUCCESSFUL run that was reaped, not a Run error: the caller
 // reads it off Result.TimedOut, so a runaway action is a normal, observable
@@ -134,14 +148,39 @@ func (t *ToolExec) Run(ctx context.Context, act ToolAction) (ToolResult, error) 
 		return ToolResult{}, err
 	}
 
-	// (M18) Route through the in-process kernel floor BEFORE exec. This is the
-	// whole point of the backend: adjudication is the gate the subprocess is
-	// behind, so a refusal costs zero processes.
+	// (M18) Route through the in-process kernel floor BEFORE dispatch. This is
+	// the whole point of the seam: adjudication is the gate every backend sits
+	// behind — a refusal costs zero processes at every isolation level.
 	v := t.floor.Decide(ctx, call)
-	res := ToolResult{Verdict: v}
 	if v.Kind != abi.VerdictAllow {
-		return res, fmt.Errorf("%w: %s (by %s)", ErrActionDenied, verdictReason(v), v.By)
+		return ToolResult{Verdict: v}, fmt.Errorf("%w: %s (by %s)", ErrActionDenied, verdictReason(v), v.By)
 	}
+
+	res, err := t.backend.Dispatch(ctx, act)
+	res.Verdict = v
+	return res, err
+}
+
+// subprocessBackend is the os/exec isolation tier (#2014, M14): each action
+// runs as a SUBPROCESS with stdin/stdout/stderr capture and a per-action
+// timeout. The process-tree kill on timeout/cancel is not re-implemented here;
+// it reuses the ONE cross-platform reaper procguard already owns — Setpgid +
+// kill(-pgid) on POSIX, the native process-tree walk on Windows — wired to
+// exec.Cmd's Cancel hook via procguard.ConfigureProcessTreeCancel. A runaway
+// action that forks grandchildren is killed TREE-WIDE, not just at the direct
+// child, on both platforms.
+//
+// Like every Backend it is dispatch-only: it executes already-allowed actions
+// and carries no policy of its own (#2018).
+type subprocessBackend struct{}
+
+// Name reports the isolation-ladder name for the os/exec tier.
+func (subprocessBackend) Name() string { return BackendSubprocess }
+
+// Dispatch runs one already-allowed action as a process-tree-killable
+// subprocess.
+func (subprocessBackend) Dispatch(ctx context.Context, act ToolAction) (ToolResult, error) {
+	var res ToolResult
 	if act.Path == "" {
 		return res, ErrNoProgram
 	}

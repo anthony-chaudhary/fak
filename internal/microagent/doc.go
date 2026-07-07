@@ -44,4 +44,27 @@
 //     directory, credential files, process-tree tools), the goroutine-per-agent
 //     model under-isolates and this host must grow a subprocess ToolExec seam
 //     (#2003/#2014) before it can carry production agents.
+//
+// # Isolation-floor invariant (#2018, M18) — NON-NEGOTIABLE
+//
+// Every ToolExec backend — the trusted in-process goroutine func, the #2014
+// subprocess, and any container/gVisor/microVM/remote backend registered later
+// — executes ONLY behind the in-process kernel adjudication floor (the same
+// policy + quarantine boundary the `fak serve` gateway fronts and `fak guard`
+// wraps). This is what separates fak from minimal harnesses whose local
+// executors are explicitly "not a security boundary": isolation level is
+// ADDITIVE containment above the floor, never a substitute for it — a stronger
+// sandbox never buys a weaker policy, and a weaker sandbox never skips it.
+//
+// The invariant is structural, not conventional:
+//
+//   - ToolExec is the SEAM and adjudicates BEFORE dispatch; a Backend is
+//     dispatch-only and is never handed a non-Allowed action.
+//   - Every construction path (NewToolExec, NewToolExecBackend, the by-name
+//     registry's NewToolExecFor) REQUIRES the kernel floor; no package API
+//     yields a bare, unadjudicated executor.
+//   - The per-backend conformance suite (toolexec_floor_conformance_test.go)
+//     pins the registered-backend vocabulary and proves a policy-denied action
+//     is blocked in every registered backend; registering a new backend trips
+//     the suite until that backend's floor coverage is added.
 package microagent
