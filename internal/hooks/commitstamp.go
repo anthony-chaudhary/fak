@@ -92,6 +92,12 @@ func LintCommitMessageWithOptions(message string, paths []string, root string, r
 		r.Gradeable, r.GradeWhy = ok, why
 		if !ok {
 			r.Issues = append(r.Issues, "subject is not witness-gradeable: "+why)
+			// When the fix is deterministic (a near-miss type or an inflected verb), hand back the
+			// exact corrected, self-verified subject so an agent can adopt it verbatim rather than
+			// re-deriving the grammar. The stamp section below composes any needed trailer onto it.
+			if s := suggestGradeableSubject(r.Subject); s != "" {
+				r.SuggestedSubject = s
+			}
 		} else if h := abstainHazard(r.Subject); h != "" {
 			// Recognized-verb subjects the DOS referee has been observed to ABSTAIN on despite
 			// leading with a verb (cross-session finding: `gate X on Y` earns no diff-witness).
@@ -124,7 +130,19 @@ func LintCommitMessageWithOptions(message string, paths []string, root string, r
 			fix := "append a `(fak <leaf>)` trailer so `dos verify` can bind this commit to a unit of work"
 			if r.SuggestTrailer != "" {
 				fix = "append the trailer `" + r.SuggestTrailer + "` so `dos verify` can bind this commit to its leaf"
-				r.SuggestedSubject = appendTrailerToSubject(r.Subject, r.SuggestTrailer)
+				// Compose onto a gradeability rewrite if section 1 produced one, so a subject that is
+				// both non-gradeable AND unstamped gets a single suggestion that fixes both. Only
+				// surface a suggestion the author can adopt verbatim: if the base is still
+				// non-gradeable (a genuinely noun-led subject with no deterministic rewrite),
+				// appending a trailer would propose a subject that still fails the gate, so leave
+				// SuggestedSubject empty and let the prose fixes stand.
+				base := r.Subject
+				if r.SuggestedSubject != "" {
+					base = r.SuggestedSubject
+				}
+				if candidate := appendTrailerToSubject(base, r.SuggestTrailer); r.Gradeable || r.SuggestedSubject != "" {
+					r.SuggestedSubject = candidate
+				}
 			} else if len(r.PathLanes) > 1 {
 				fix = "paths span lanes `" + strings.Join(r.PathLanes, "`, `") + "`; choose the primary leaf and append its `(fak <leaf>)` trailer"
 			}

@@ -141,3 +141,145 @@ func setOf(xs ...string) map[string]bool {
 	}
 	return m
 }
+
+// nearMissTypes maps the conventional-commit type mistakes an author actually makes — a plural,
+// an inflected form, or a near-synonym — onto the canonical type. It is deliberately conservative:
+// only entries whose correction is unambiguous appear, so a genuinely unknown type earns no guess.
+var nearMissTypes = map[string]string{
+	"feature": "feat", "features": "feat",
+	"fixes": "fix", "fixed": "fix", "bugfix": "fix", "bugfixes": "fix", "hotfix": "fix",
+	"doc": "docs", "documentation": "docs",
+	"tests": "test", "testing": "test",
+	"chores":      "chore",
+	"refactoring": "refactor", "refactored": "refactor",
+	"performance": "perf",
+	"builds":      "build",
+	"styling":     "style", "styles": "style",
+	"reverts": "revert", "reverted": "revert",
+}
+
+// irregularVerbBases maps common irregular inflections onto the imperative base commitVerbs carries.
+// Only bases that are members of commitVerbs are listed, so membership still decides.
+var irregularVerbBases = map[string]string{
+	"built": "build", "made": "make", "ran": "run", "kept": "keep",
+	"drove": "drive", "driven": "drive", "fed": "feed", "showed": "show", "shown": "show",
+}
+
+// imperativeBase returns the recognized imperative verb an inflected word derives from, or "" when
+// the word is not an inflection of any commitVerbs member. It over-generates candidate base forms
+// (stripping -s/-es/-ies/-ed/-ied/-ing, with +e and de-doubled variants) and lets commitVerbs
+// membership decide — the same over-generative discipline the referee-parity harness uses.
+func imperativeBase(w string) string {
+	for _, cand := range imperativeBaseForms(w) {
+		if commitVerbs[cand] {
+			return cand
+		}
+	}
+	return ""
+}
+
+func imperativeBaseForms(w string) []string {
+	out := []string{w}
+	add := func(s string) {
+		if s != "" && s != w {
+			out = append(out, s)
+		}
+	}
+	switch {
+	case strings.HasSuffix(w, "ies"):
+		add(strings.TrimSuffix(w, "ies") + "y")
+	case strings.HasSuffix(w, "es"):
+		add(strings.TrimSuffix(w, "es"))
+		add(strings.TrimSuffix(w, "s"))
+	case strings.HasSuffix(w, "s"):
+		add(strings.TrimSuffix(w, "s"))
+	}
+	switch {
+	case strings.HasSuffix(w, "ied"):
+		add(strings.TrimSuffix(w, "ied") + "y")
+	case strings.HasSuffix(w, "ed"):
+		base := strings.TrimSuffix(w, "ed")
+		add(base)                       // added -> add
+		add(strings.TrimSuffix(w, "d")) // wired -> wire
+		add(deDoubleConsonant(base))    // wrapped -> wrap
+	}
+	if strings.HasSuffix(w, "ing") {
+		base := strings.TrimSuffix(w, "ing")
+		add(base)                    // adding -> add
+		add(base + "e")              // caching -> cache, wiring -> wire
+		add(deDoubleConsonant(base)) // wrapping -> wrap
+	}
+	if b, ok := irregularVerbBases[w]; ok {
+		add(b)
+	}
+	return out
+}
+
+// deDoubleConsonant collapses a trailing doubled consonant ("wrapp" -> "wrap") so a gerund/past of a
+// consonant-doubling verb resolves to its base. It leaves a non-doubled tail untouched.
+func deDoubleConsonant(s string) string {
+	n := len(s)
+	if n >= 2 && s[n-1] == s[n-2] {
+		return s[:n-1]
+	}
+	return s
+}
+
+// suggestGradeableSubject proposes a concrete rewrite of a subject that CommitMsgVerdict rejected,
+// for the two DETERMINISTIC failure modes where the author's intent is unambiguous:
+//
+//  1. a near-miss conventional type — `feature(x): add …` -> `feat(x): add …`, `fixes:` -> `fix:`;
+//  2. a non-imperative leading verb — the description IS verb-led but inflected
+//     (`added` -> `add`, `caching` -> `cache`, `wiring` -> `wire`), which the exact-match verb gate
+//     rejects even though a real verb was clearly meant.
+//
+// It returns "" whenever a mechanical fix would be a guess — an empty subject, a subject with no
+// `type(scope): …` shape at all, an unknown type with no known correction, or a genuinely noun-led
+// description — so a caller never surfaces a wrong suggestion. The rebuilt subject is only returned
+// after CommitMsgVerdict confirms it is now gradeable, so the suggestion is self-verified: an agent
+// can adopt it verbatim and clear the gate.
+func suggestGradeableSubject(subject string) string {
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return ""
+	}
+	for _, p := range exemptSubjectPrefixes {
+		if strings.HasPrefix(subject, p) {
+			return ""
+		}
+	}
+	m := subjectRE.FindStringSubmatch(subject)
+	if m == nil {
+		// No `type(scope): <what>` shape — reconstructing a type+scope would be a guess.
+		return ""
+	}
+	typ, scope, bang, rest := m[1], m[2], m[3], strings.TrimSpace(m[4])
+	if !commitTypes[typ] {
+		canon, ok := nearMissTypes[typ]
+		if !ok {
+			return ""
+		}
+		typ = canon
+	}
+	firstWord := splitFirstWordOrColon(rest)
+	if !commitVerbs[strings.ToLower(firstWord)] {
+		// Only rewrite a bare leading token (no surrounding backticks/quotes/emphasis) so the swap
+		// can never mangle formatting; a decorated lead is left for the human/agent to resolve.
+		if strings.Trim(firstWord, "`*\"'") != firstWord {
+			return ""
+		}
+		base := imperativeBase(strings.ToLower(firstWord))
+		if base == "" {
+			return ""
+		}
+		rest = base + rest[len(firstWord):]
+	}
+	rebuilt := typ + scope + bang + ": " + rest
+	if rebuilt == subject {
+		return ""
+	}
+	if ok, _ := CommitMsgVerdict(rebuilt); ok {
+		return rebuilt
+	}
+	return ""
+}
