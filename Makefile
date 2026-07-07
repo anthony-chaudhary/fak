@@ -329,6 +329,8 @@ demo-scorecards:
 	@python3 tools/bench_dx_scorecard_test.py
 	@python3 tools/bench_dx_scorecard.py >/dev/null
 	@python3 tools/bench_dx_scorecard.py --check-doc
+	@python3 tools/benchmark_authority_test.py
+	@python3 tools/benchmark_authority.py --check docs/benchmarks/AUTHORITY-GENERATED-SAMPLE.md
 	@python3 tools/intent_literal_scorecard_test.py
 	@python3 tools/intent_literal_scorecard.py >/dev/null
 	@python3 tools/stability_scorecard_test.py
