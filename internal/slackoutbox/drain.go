@@ -175,7 +175,7 @@ func (o *Outbox) Drain(ctx context.Context, w Wire, opts DrainOpts) (*DrainRepor
 	}
 	defer func() { _ = flock.Unlock(lock) }()
 
-	plan, _, err := o.Plan()
+	plan, snap, err := o.Plan()
 	if err != nil {
 		return nil, err
 	}
@@ -183,6 +183,15 @@ func (o *Outbox) Drain(ctx context.Context, w Wire, opts DrainOpts) (*DrainRepor
 	rep := &DrainReport{}
 	stopped := map[string]bool{} // channel -> stop sending this pass (transient failure at head)
 	sentInChannel := map[string]bool{}
+	// Deferred-threading resolution state: known is every nonce in the spool (a
+	// ParentNonce that names none of them can never post); postedThisPass carries a ts
+	// forward from a root posted earlier in THIS pass so its replies thread in one drain.
+	known := make(map[string]bool, len(snap.Rows))
+	for _, r := range snap.Rows {
+		known[r.Nonce] = true
+	}
+	postedThisPass := map[string]string{}
+	deadThisPass := map[string]bool{} // parents that went terminal-non-posted THIS pass (snap predates it)
 	for _, item := range plan {
 		ch := item.Row.Channel
 		if stopped[ch] {
@@ -192,6 +201,30 @@ func (o *Outbox) Drain(ctx context.Context, w Wire, opts DrainOpts) (*DrainRepor
 		if err := ctx.Err(); err != nil {
 			rep.Remaining++
 			continue
+		}
+
+		// Deferred threading: a reply keyed by its parent's nonce resolves to the
+		// parent's posted ts once the root lands (this pass or a prior one). FIFO order
+		// puts the root ahead of its replies in the same channel, so an unresolved parent
+		// is simply "not yet" — stop the channel and retry next pass. A parent that can
+		// never post (refused/dead/superseded, or absent from the spool) dead-letters the
+		// reply definitively.
+		if item.Action == "post" && item.Row.ParentNonce != "" {
+			ts, ok, dead := resolveParent(item.Row.ParentNonce, snap, postedThisPass, deadThisPass, known)
+			switch {
+			case ok:
+				item.Row.ThreadTS = ts
+			case dead:
+				if err := o.appendState(transition{Nonce: item.Row.Nonce, State: stateDead, Reason: "parent " + item.Row.ParentNonce + " did not post"}); err != nil {
+					return rep, err
+				}
+				rep.Dead++
+				continue
+			default:
+				rep.Remaining++
+				stopped[ch] = true
+				continue
+			}
 		}
 
 		// Coalesced-away updates are recorded first so a crash mid-pass never
@@ -211,6 +244,7 @@ func (o *Outbox) Drain(ctx context.Context, w Wire, opts DrainOpts) (*DrainRepor
 				return rep, err
 			}
 			rep.Refused++
+			deadThisPass[item.Row.Nonce] = true // a reply parented here can never thread — resolve it this pass
 			continue
 		}
 
@@ -271,6 +305,7 @@ func (o *Outbox) Drain(ctx context.Context, w Wire, opts DrainOpts) (*DrainRepor
 				rep.Updated++
 			} else {
 				rep.Posted++
+				postedThisPass[item.Row.Nonce] = postedTS // let this root's replies thread in the same pass
 			}
 			continue
 		}
@@ -293,6 +328,31 @@ func (o *Outbox) Drain(ctx context.Context, w Wire, opts DrainOpts) (*DrainRepor
 		return rep, err
 	}
 	return rep, nil
+}
+
+// resolveParent decides how a deferred reply (ParentNonce set) threads. ok returns the
+// parent's posted ts; dead means the parent can never post (a definitive dead-letter);
+// the zero return means the parent is still owed a delivery (retry next pass). posted
+// carries roots landed earlier in the current pass; snap carries roots landed in prior
+// passes; known is every nonce in the spool.
+func resolveParent(parent string, snap *Snapshot, posted map[string]string, deadThisPass, known map[string]bool) (ts string, ok, dead bool) {
+	if ts := posted[parent]; ts != "" {
+		return ts, true, false
+	}
+	if deadThisPass[parent] { // refused earlier in this same pass, before snap would show it
+		return "", false, true
+	}
+	st := snap.state(parent)
+	if st.State == statePosted && st.TS != "" {
+		return st.TS, true, false
+	}
+	if st.terminal() { // refused/dead/superseded (posted handled above) — will never post
+		return "", false, true
+	}
+	if !known[parent] { // a parent that is not in the spool at all can never post
+		return "", false, true
+	}
+	return "", false, false // parent still pending/sending/failed — retry next pass
 }
 
 // recordFailure appends failed-or-dead for one item, honoring MaxAttempts.

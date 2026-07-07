@@ -24,17 +24,20 @@ const (
 
 // Row is one enqueued message. UpdateTS empty means a new post (threaded when ThreadTS
 // is set); UpdateTS set means a chat.update of that card. CardKey groups update rows for
-// coalescing (defaulted to channel+update_ts at enqueue when empty).
+// coalescing (defaulted to channel+update_ts at enqueue when empty). ParentNonce threads
+// a reply to another row in THIS outbox: it is resolved to the parent's posted ts at
+// drain, so a root and its replies can be enqueued together before the root has a ts.
 type Row struct {
-	Nonce      string `json:"nonce"`
-	Channel    string `json:"channel"`
-	Text       string `json:"text"`
-	Blocks     []any  `json:"blocks,omitempty"`
-	ThreadTS   string `json:"thread_ts,omitempty"`
-	UpdateTS   string `json:"update_ts,omitempty"`
-	CardKey    string `json:"card_key,omitempty"`
-	Source     string `json:"source,omitempty"`      // producing surface, for status/dead reporting
-	EnqueuedAt string `json:"enqueued_at,omitempty"` // RFC3339 UTC
+	Nonce       string `json:"nonce"`
+	Channel     string `json:"channel"`
+	Text        string `json:"text"`
+	Blocks      []any  `json:"blocks,omitempty"`
+	ThreadTS    string `json:"thread_ts,omitempty"`
+	UpdateTS    string `json:"update_ts,omitempty"`
+	ParentNonce string `json:"parent_nonce,omitempty"` // deferred thread parent, resolved to its posted ts at drain
+	CardKey     string `json:"card_key,omitempty"`
+	Source      string `json:"source,omitempty"`      // producing surface, for status/dead reporting
+	EnqueuedAt  string `json:"enqueued_at,omitempty"` // RFC3339 UTC
 }
 
 // Row states. Absent = pending. sending is the pre-send intent marker that closes the
@@ -168,8 +171,17 @@ func (o *Outbox) Enqueue(r Row) (string, error) {
 	if r.UpdateTS != "" && r.ThreadTS != "" {
 		return "", fmt.Errorf("slackoutbox: enqueue: update_ts and thread_ts are mutually exclusive (an update edits an existing message)")
 	}
+	if r.ParentNonce != "" && r.UpdateTS != "" {
+		return "", fmt.Errorf("slackoutbox: enqueue: parent_nonce and update_ts are mutually exclusive (a reply is a new post, not an edit)")
+	}
+	if r.ParentNonce != "" && r.ThreadTS != "" {
+		return "", fmt.Errorf("slackoutbox: enqueue: parent_nonce and thread_ts are mutually exclusive (choose a deferred parent nonce or a literal thread_ts)")
+	}
 	if r.Nonce == "" {
 		r.Nonce = NewNonce()
+	}
+	if r.ParentNonce != "" && r.ParentNonce == r.Nonce {
+		return "", fmt.Errorf("slackoutbox: enqueue: parent_nonce cannot equal the row's own nonce")
 	}
 	if r.UpdateTS != "" && r.CardKey == "" {
 		r.CardKey = r.Channel + "\x00" + r.UpdateTS
@@ -226,6 +238,17 @@ type Snapshot struct {
 
 // state returns the folded state for a nonce (zero value = pending).
 func (s *Snapshot) state(nonce string) rowState { return s.States[nonce] }
+
+// PostedTS returns the Slack message ts a nonce posted at, or "" if it has not posted yet
+// (or reached a non-posted terminal state). It is the read a deferred producer uses to
+// thread or edit a row it enqueued earlier without holding the ts in memory.
+func (s *Snapshot) PostedTS(nonce string) string {
+	st := s.States[nonce]
+	if st.State != statePosted {
+		return ""
+	}
+	return st.TS
+}
 
 // Load replays spool + state from disk. A malformed line increments Corrupt and is
 // skipped — one corrupt row must not wedge the whole outbox.

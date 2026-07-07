@@ -54,6 +54,15 @@ func TestEnqueueValidates(t *testing.T) {
 	if _, err := o.Enqueue(Row{Channel: "C1", Text: "x", UpdateTS: "1.0", ThreadTS: "2.0"}); err == nil {
 		t.Fatal("update_ts+thread_ts accepted")
 	}
+	if _, err := o.Enqueue(Row{Channel: "C1", Text: "x", ParentNonce: "p", UpdateTS: "1.0"}); err == nil {
+		t.Fatal("parent_nonce+update_ts accepted")
+	}
+	if _, err := o.Enqueue(Row{Channel: "C1", Text: "x", ParentNonce: "p", ThreadTS: "2.0"}); err == nil {
+		t.Fatal("parent_nonce+thread_ts accepted")
+	}
+	if _, err := o.Enqueue(Row{Channel: "C1", Text: "x", Nonce: "self", ParentNonce: "self"}); err == nil {
+		t.Fatal("self-parenting accepted")
+	}
 }
 
 func TestEnqueueDefaultsCardKeyForUpdates(t *testing.T) {

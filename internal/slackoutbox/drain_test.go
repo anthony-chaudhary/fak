@@ -16,9 +16,10 @@ import (
 // controls whether a failing post still lands in history — the half-succeeded case the
 // nonce probe exists for.
 type fakeWire struct {
-	posts   []string // "channel/text" in send order, posts and updates alike
-	history map[string][]slackwire.Message
-	nextTS  int
+	posts    []string          // "channel/text" in send order, posts and updates alike
+	threadOf map[string]string // post text -> the threadTS it was sent with (deferred-threading witness)
+	history  map[string][]slackwire.Message
+	nextTS   int
 
 	postErrs     []error // scripted per-post errors, consumed in order (nil = success)
 	deliverOnErr bool    // a failing post STILL lands in history (ambiguous half-success)
@@ -27,7 +28,7 @@ type fakeWire struct {
 }
 
 func newFakeWire() *fakeWire {
-	return &fakeWire{history: map[string][]slackwire.Message{}}
+	return &fakeWire{history: map[string][]slackwire.Message{}, threadOf: map[string]string{}}
 }
 
 func (f *fakeWire) nextPostErr() error {
@@ -47,6 +48,7 @@ func (f *fakeWire) PostMessageIdem(ctx context.Context, channel, text string, bl
 	f.nextTS++
 	ts := fmt.Sprintf("%d.0", f.nextTS)
 	f.posts = append(f.posts, channel+"/"+text)
+	f.threadOf[text] = threadTS
 	f.history[channel] = append(f.history[channel], slackwire.Message{
 		Type: "message", TS: ts, Text: text,
 		Metadata: &slackwire.MessageMetadata{
@@ -372,6 +374,113 @@ func TestDrainFencesBlocksPayloadToo(t *testing.T) {
 	}
 	if rep.Refused != 1 || len(w.posts) != 0 {
 		t.Fatalf("needle inside blocks not fenced: %+v posts=%v", rep, w.posts)
+	}
+}
+
+// TestDrainDeferredThreadingSamePass is the deferred-threading witness: a root and a
+// reply keyed by the root's nonce, enqueued together before the root has a ts, thread
+// correctly in a SINGLE drain pass — the reply picks up the root's ts recorded moments
+// earlier in the same loop.
+func TestDrainDeferredThreadingSamePass(t *testing.T) {
+	o := testOutbox(t)
+	root, err := o.Enqueue(Row{Channel: "C1", Text: "root"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Enqueue(Row{Channel: "C1", Text: "reply", ParentNonce: root}); err != nil {
+		t.Fatal(err)
+	}
+	w := newFakeWire()
+	rep, err := o.Drain(context.Background(), w, drainOpts(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Posted != 2 || rep.Remaining != 0 || rep.Dead != 0 {
+		t.Fatalf("report wrong: %+v", rep)
+	}
+	if w.threadOf["root"] != "" {
+		t.Fatalf("root must not be threaded, got threadTS=%q", w.threadOf["root"])
+	}
+	if w.threadOf["reply"] != "1.0" { // the root is the first post, ts "1.0"
+		t.Fatalf("reply not threaded under the root ts: got %q", w.threadOf["reply"])
+	}
+}
+
+// TestDrainDeferredThreadingPriorPass covers the cross-pass path: the root posted in an
+// EARLIER drain, so the reply resolves the root ts from replayed state, not from the
+// current pass.
+func TestDrainDeferredThreadingPriorPass(t *testing.T) {
+	o := testOutbox(t)
+	root, err := o.Enqueue(Row{Channel: "C1", Text: "root"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := newFakeWire()
+	if _, err := o.Drain(context.Background(), w, drainOpts(nil)); err != nil {
+		t.Fatal(err)
+	}
+	// Reply arrives only after the root already landed (ts "1.0").
+	if _, err := o.Enqueue(Row{Channel: "C1", Text: "late reply", ParentNonce: root}); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := o.Drain(context.Background(), w, drainOpts(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Posted != 1 {
+		t.Fatalf("late reply not posted: %+v", rep)
+	}
+	if w.threadOf["late reply"] != "1.0" {
+		t.Fatalf("late reply not threaded under the root ts: got %q", w.threadOf["late reply"])
+	}
+}
+
+// TestDrainDeferredReplyDeadLettersWhenParentRefused: a reply whose parent the leak fence
+// refuses can never thread, so it is dead-lettered definitively (not retried forever).
+func TestDrainDeferredReplyDeadLettersWhenParentRefused(t *testing.T) {
+	o := testOutbox(t)
+	needle := "node-" + "windows-a" // base PUBLIC_LEAK needle, assembled at runtime
+	root, err := o.Enqueue(Row{Channel: "C1", Text: "leaky root on " + needle})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply, err := o.Enqueue(Row{Channel: "C1", Text: "reply to a doomed root", ParentNonce: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := newFakeWire()
+	rep, err := o.Drain(context.Background(), w, drainOpts(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Refused != 1 || rep.Dead != 1 || len(w.posts) != 0 {
+		t.Fatalf("report wrong: %+v posts=%v", rep, w.posts)
+	}
+	snap, _ := o.Load()
+	if got := snap.state(reply); got.State != stateDead || !strings.Contains(got.Reason, "did not post") {
+		t.Fatalf("reply not dead-lettered on refused parent: %+v", got)
+	}
+}
+
+// TestDrainDeferredReplyDeadLettersWhenParentAbsent: a reply naming a parent nonce that is
+// not in the spool at all can never resolve, so it dead-letters rather than wedging.
+func TestDrainDeferredReplyDeadLettersWhenParentAbsent(t *testing.T) {
+	o := testOutbox(t)
+	reply, err := o.Enqueue(Row{Channel: "C1", Text: "orphan", ParentNonce: "ghost-nonce"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := newFakeWire()
+	rep, err := o.Drain(context.Background(), w, drainOpts(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Dead != 1 || len(w.posts) != 0 {
+		t.Fatalf("orphan reply not dead-lettered: %+v posts=%v", rep, w.posts)
+	}
+	snap, _ := o.Load()
+	if got := snap.state(reply); got.State != stateDead {
+		t.Fatalf("orphan reply state = %q, want dead", got.State)
 	}
 }
 
