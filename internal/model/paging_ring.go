@@ -49,7 +49,7 @@ type pagedRing struct {
 
 	pageIn int // cold uploads (a miss that was admitted)
 	hit    int // resident reuses (a handle served without upload)
-	evict  int // page-outs (an LRU victim or an explicit evictWeight)
+	evict  int // page-outs (LRU victims dropped during admit to stay within budget)
 }
 
 // newPagedRing returns a ring over be with the given resident weight-byte budget. A nil backend
@@ -101,22 +101,6 @@ func (r *pagedRing) matMul(name string, shape []int, w []float32, x compute.Tens
 	}
 	r.resident[id] = wt
 	return append([]float32(nil), r.be.Read(r.be.MatMul(wt, x))...)
-}
-
-// evictWeight explicitly pages a named weight out (freeing its device handle), returning false if it
-// was not resident. The symmetric partner of a miss-driven eviction, for a caller that knows a weight
-// is done (e.g. a layer whose experts will not fire again this sequence).
-func (r *pagedRing) evictWeight(name string) bool {
-	id := polymodel.ModelID(name)
-	if !r.pool.Evict(id) {
-		return false
-	}
-	if wt, ok := r.resident[id]; ok {
-		r.be.Free(wt)
-		delete(r.resident, id)
-		r.evict++
-	}
-	return true
 }
 
 // isResident reports whether the named weight currently holds a device handle in the ring.
