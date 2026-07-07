@@ -462,14 +462,13 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 // StreamingSupported reports whether the planner's configured wire can stream. Only
 // the OpenAI-compatible chat wire (OpenAI and the xAI/vLLM/SGLang-compatible servers
 // that share its SSE delta format) is wired today; every other provider returns false
-// so the gateway keeps its buffered path for them.
+// so the gateway keeps its buffered path for them. The fact lives once, in the
+// WireProfile capability table (wireprofile.go), so this and the adapter dispatch read
+// the same descriptor instead of each carrying its own provider switch. An unregistered
+// wire is not streamable (fail-closed to the buffered path).
 func (p *HTTPPlanner) StreamingSupported() bool {
-	switch p.Provider {
-	case ProviderOpenAI, ProviderXAI, "":
-		return true
-	default:
-		return false
-	}
+	prof, ok := WireProfileFor(p.Provider)
+	return ok && prof.HonorsStreaming
 }
 
 // openAIStreamChunk is one OpenAI-compatible `chat.completion.chunk` SSE event. Each
