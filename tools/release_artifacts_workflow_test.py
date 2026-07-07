@@ -69,6 +69,30 @@ class ReleaseArtifactsWorkflowTest(unittest.TestCase):
         self.assertIn("gh release view", self.text)
         self.assertIn("not visible yet", self.text)
 
+    def test_verify_settles_asset_propagation_before_judging(self) -> None:
+        # Regression (v0.37.0): the verify job downloaded assets once, immediately
+        # after upload, and raced GitHub's non-read-your-writes asset store — a
+        # still-propagating arm64 archive read "FAILED open or read" and quarantined
+        # a release whose checksum matched on the next fetch. The verify step must
+        # re-download until every expected asset is present and non-empty before
+        # judging completeness, so a transient propagation gap cannot false-quarantine.
+        self.assertIn("not fully propagated yet", self.text)
+        self.assertIn("settle_ok", self.text)
+
+    def test_promotes_verified_release_to_latest(self) -> None:
+        # The front-door invariant: verification is symmetric. It quarantines a bad
+        # release (prerelease=true, make_latest=false) AND promotes a good one
+        # (prerelease=false, make_latest=true) so the latest verified stable cut is
+        # what github.com/.../releases shows by default — never left lagging as a
+        # prerelease behind an older tag.
+        self.assertIn("Promote verified release to Latest", self.text)
+        self.assertIn("-F prerelease=false", self.text)
+        self.assertIn("-f make_latest=true", self.text)
+        # And it still demotes a failed one.
+        self.assertIn("Quarantine failed release", self.text)
+        self.assertIn("-F prerelease=true", self.text)
+        self.assertIn("-f make_latest=false", self.text)
+
     def test_checksums_job_resolves_repo_without_checkout(self) -> None:
         # Regression #369: the aggregate-SHA256SUMS job has no checkout, so `gh`
         # cannot infer the repo from a git remote ("fatal: not a git repository").

@@ -226,8 +226,6 @@ jobs:
           assets="${tmp}/assets"
           unpacked="${tmp}/unpacked"
           mkdir -p "$assets" "$unpacked"
-          gh release download "$TAG" --dir "$assets" --clobber
-          cd "$assets"
 
           expected_archives=(
             "fak_${VERSION}_linux_amd64.tar.gz"
@@ -236,6 +234,41 @@ jobs:
             "fak_${VERSION}_darwin_arm64.tar.gz"
             "fak_${VERSION}_windows_amd64.zip"
           )
+
+          # Settle asset propagation before judging completeness. `needs: checksums`
+          # guarantees every upload CALL returned, but GitHub's release-asset store is
+          # not read-your-writes: a `gh release download` moments later can still fetch
+          # a truncated/absent asset while the CDN catches up. Verifying against that
+          # partial snapshot quarantines a perfectly good release — the false-positive
+          # that demoted a stable cut to prerelease and left @latest lagging HEAD
+          # (v0.37.0: arm64 read "FAILED open or read" though its sha256 matched on the
+          # very next fetch). Re-download until every expected archive + its sidecar +
+          # the aggregate SHA256SUMS is present and non-empty, up to ~2 min, THEN verify.
+          # A genuinely missing/corrupt asset still fails: the loop times out and the
+          # completeness check below flags it. This settles a race; it never masks a
+          # real defect.
+          settle_ok=0
+          for attempt in $(seq 1 24); do
+            rm -rf "$assets"; mkdir -p "$assets"
+            gh release download "$TAG" --dir "$assets" --clobber >/dev/null 2>&1 || true
+            missing=0
+            for archive in "${expected_archives[@]}"; do
+              [ -s "${assets}/${archive}" ] || { missing=1; break; }
+              [ -s "${assets}/${archive}.sha256" ] || { missing=1; break; }
+            done
+            [ -s "${assets}/SHA256SUMS" ] || missing=1
+            if [ "$missing" -eq 0 ]; then
+              settle_ok=1
+              echo "all release assets present and non-empty (attempt ${attempt})"
+              break
+            fi
+            echo "release assets not fully propagated yet (attempt ${attempt}/24); waiting 5s..."
+            sleep 5
+          done
+          if [ "$settle_ok" -ne 1 ]; then
+            echo "::warning::release assets did not fully settle within timeout; verifying the last snapshot so a real gap still fails loud"
+          fi
+          cd "$assets"
 
           fail=0
 
@@ -322,6 +355,30 @@ jobs:
           {
             echo "## verify go install — ${TAG}"
             echo "go install github.com/anthony-chaudhary/fak/cmd/fak@${TAG} resolved, built, and reported ${VERSION}."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Promote verified release to Latest
+        # Symmetric with the quarantine step below: verification demotes a bad
+        # release, so it must PROMOTE a good one. Without this the front door
+        # (github.com/.../releases) can lag HEAD — the release page created by
+        # release_publish.py, a prior verify pass that quarantined on a transient
+        # asset race, or GitHub's implicit highest-semver heuristic can each leave
+        # the newest stable cut sitting as a prerelease while an older tag keeps the
+        # "Latest" badge (v0.37.0 did exactly this). Once every published artifact is
+        # proven good, assert the invariant the user wants: the latest verified
+        # release IS the default the front door shows. Idempotent — a release already
+        # stable+Latest is re-PATCHed to the same state.
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          release_id="$(gh release view "$TAG" --json databaseId --jq .databaseId)"
+          gh api -X PATCH "repos/${GH_REPO}/releases/${release_id}" \
+            -F prerelease=false \
+            -f make_latest=true \
+            --silent
+          {
+            echo "## promoted verified release to Latest - ${TAG}"
+            echo "Post-publish verification passed; marked the GitHub release stable (prerelease=false) and make_latest=true so the front door defaults to it."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Quarantine failed release
