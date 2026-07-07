@@ -52,6 +52,46 @@ func TestCompareFreshnessRules(t *testing.T) {
 	}
 }
 
+func TestExplainDistinguishesUnknownCauses(t *testing.T) {
+	const head = "abcdef1234567890abcdef1234567890abcdef12"
+
+	cases := []struct {
+		name      string
+		running   Stamp
+		head      string
+		wantFresh Freshness
+		wantCause Cause
+	}{
+		{"fresh matches",
+			Stamp{Revision: head, HasVCS: true}, head, Fresh, CauseMatched},
+		{"clean different rev diverged",
+			Stamp{Revision: "ffffffffffffffff", HasVCS: true}, head, Stale, CauseDiverged},
+		{"no stamp is unstamped, not a silent unknown",
+			Stamp{HasVCS: false}, head, Unknown, CauseUnstamped},
+		{"unstamped dominates even with no head",
+			Stamp{HasVCS: false}, "", Unknown, CauseUnstamped},
+		{"stamped but no head",
+			Stamp{Revision: head, HasVCS: true}, "", Unknown, CauseNoHead},
+		{"dirty build is its own cause",
+			Stamp{Revision: "ffffffffffffffff", HasVCS: true, Dirty: true}, head, Unknown, CauseDirty},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			gotFresh, gotCause := Explain(c.running, c.head)
+			if gotFresh != c.wantFresh {
+				t.Fatalf("Explain freshness = %v, want %v", gotFresh, c.wantFresh)
+			}
+			if gotCause != c.wantCause {
+				t.Fatalf("Explain cause = %v, want %v", gotCause, c.wantCause)
+			}
+			// The invariant that lets Compare delegate: Explain's verdict must equal Compare's.
+			if got := Compare(c.running, c.head); got != gotFresh {
+				t.Fatalf("Compare = %v but Explain freshness = %v — they must never drift", got, gotFresh)
+			}
+		})
+	}
+}
+
 func TestRevisionsMatch(t *testing.T) {
 	if !revisionsMatch("ABCDEF1234567", "abcdef1234567890") {
 		t.Fatal("case-insensitive prefix should match")

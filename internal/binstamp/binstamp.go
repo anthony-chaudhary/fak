@@ -81,21 +81,80 @@ func stampFrom(bi *debug.BuildInfo) Stamp {
 //   - no embedded revision, no HEAD, or a DIRTY build => Unknown (never restart on doubt);
 //   - revisions equal (by prefix-safe match) => Fresh;
 //   - both present, clean, and different => Stale.
+//
+// It is the verdict-only face of Explain — callers that must decide "restart or not" want
+// exactly the three-state Freshness and nothing else. Explain carries the same verdict plus
+// the Cause, for human/diagnostic surfaces that need to say WHY.
 func Compare(running Stamp, headRev string) Freshness {
+	f, _ := Explain(running, headRev)
+	return f
+}
+
+// Cause explains WHY Explain reached its Freshness — most importantly, which of the three
+// distinct conditions that ALL collapse to Unknown in Compare actually applied. Compare's
+// three-state verdict is right for a restart decision but wrong for a human: "Unknown" reads
+// as a benign shrug, yet one of its causes (Unstamped) is a real defect — a binary that
+// cannot attest its own commit can NEVER be checked for staleness. A diagnostic uses this to
+// warn loudly on that case while staying quiet on the benign ones (a dev's Dirty build, or
+// running outside a repo with NoHead).
+type Cause int
+
+const (
+	// CauseMatched — Fresh: the running rev equals HEAD.
+	CauseMatched Cause = iota
+	// CauseDiverged — Stale: a clean, embedded rev that differs from HEAD.
+	CauseDiverged
+	// CauseUnstamped — Unknown: no VCS revision is embedded, so the binary cannot attest
+	// which commit it was built from. Staleness is UNVERIFIABLE, not "fine" — this is the
+	// load-bearing case a diagnostic must surface rather than swallow.
+	CauseUnstamped
+	// CauseDirty — Unknown: built from a tree with uncommitted changes, so the embedded rev
+	// is a base commit that does not describe the binary's actual contents (a dev build).
+	CauseDirty
+	// CauseNoHead — Unknown: no HEAD to compare against (not a git repo, or HEAD unreadable).
+	CauseNoHead
+)
+
+func (c Cause) String() string {
+	switch c {
+	case CauseMatched:
+		return "matched"
+	case CauseDiverged:
+		return "diverged"
+	case CauseUnstamped:
+		return "unstamped"
+	case CauseDirty:
+		return "dirty"
+	case CauseNoHead:
+		return "no-head"
+	default:
+		return "unknown"
+	}
+}
+
+// Explain returns the same Freshness as Compare, plus the Cause that produced it. The branch
+// order encodes a priority: an unstamped binary dominates (its Unknown is a defect worth
+// flagging even when there is also no HEAD to compare against), then a missing HEAD, then a
+// dirty build, then the fresh/stale comparison. Freshness is byte-for-byte what Compare
+// returns for every input — Compare is defined in terms of this function.
+func Explain(running Stamp, headRev string) (Freshness, Cause) {
 	headRev = strings.TrimSpace(headRev)
-	if !running.HasVCS || running.Revision == "" || headRev == "" {
-		return Unknown
+	if !running.HasVCS || running.Revision == "" {
+		return Unknown, CauseUnstamped
+	}
+	if headRev == "" {
+		return Unknown, CauseNoHead
 	}
 	if running.Dirty {
 		// A dirty binary's rev is its base commit, but its actual content is unknown — we
 		// cannot honestly call it stale-vs-HEAD, and must never restart it out from under
 		// a developer. Treat as Unknown.
-		return Unknown
+		return Unknown, CauseDirty
 	}
 	if revisionsMatch(running.Revision, headRev) {
-		return Fresh
+		return Fresh, CauseMatched
 	}
-	return Stale
+	return Stale, CauseDiverged
 }
 
 // revisionsMatch compares two VCS revisions tolerant of differing lengths (one may be a
