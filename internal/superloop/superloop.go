@@ -114,11 +114,14 @@ type Super struct {
 	// IssueTarget is a DECLARED operator headline number — the count of issues the
 	// intent wants a run to progress (e.g. run-the-night's ~200-issue overnight
 	// target). Like Floor and Budget it is a policy the operator states, NOT a
-	// measured consumption: the walk SURFACES it so the number is an explicit,
-	// testable part of the intent rather than buried prose, but binding it to a
-	// live count of issues progressed (and reddening the fold until it is met) is a
-	// named follow-on — the same declared-vs-measured posture the budget rows keep.
-	// 0 = no headline issue target for this intent.
+	// measured consumption: the walk always SURFACES it so the number is an explicit,
+	// testable part of the intent rather than buried prose. When the impure shell hands
+	// [Walk] a LIVE progress count (via [WithIssueProgress]) the walk also BINDS it: a
+	// shortfall (progressed < target) is folded as a gate that keeps the intent
+	// unsatisfied, so the headline stops being decorative and becomes a witnessed
+	// number. With no progress handed in it stays surface-only (declared, never gating)
+	// — the same declared-vs-measured posture the budget rows keep. 0 = no headline
+	// issue target for this intent.
 	IssueTarget int `json:"issue_target,omitempty"`
 }
 
@@ -595,11 +598,25 @@ type WalkReport struct {
 	TotalDebt int    `json:"total_debt"`
 	Floor     int    `json:"floor"`
 	// IssueTarget echoes the intent's DECLARED headline issue count (0 = none). It is
-	// surfaced for the operator, not folded into Satisfied — measuring progress
-	// against it is the named follow-on, so a walk never claims "200 progressed" it
-	// did not witness.
-	IssueTarget int            `json:"issue_target,omitempty"`
-	Satisfied   bool           `json:"satisfied"`
+	// always surfaced for the operator; when a live progress count is handed in (see
+	// IssueProgressed) it is also the target the shortfall gate measures against.
+	IssueTarget int `json:"issue_target,omitempty"`
+	// IssueProgressed is the LIVE count of issues the intent has progressed this run, as
+	// measured by the impure shell and handed to Walk via WithIssueProgress. It is only
+	// meaningful when IssueProgressMeasured is true; the pure package reads no ledger, so
+	// an unmeasured walk leaves this 0 and never fabricates progress it did not witness.
+	IssueProgressed int `json:"issue_progressed,omitempty"`
+	// IssueProgressMeasured records whether a live progress count was handed in at all.
+	// It disambiguates a real measured zero (nothing progressed yet — a shortfall) from
+	// "not measured" (surface-only, never gating), so an unread issue layer cannot make
+	// the night falsely read as having hit its headline.
+	IssueProgressMeasured bool `json:"issue_progress_measured,omitempty"`
+	// IssueShortfall is max(0, IssueTarget - IssueProgressed) when the intent declares a
+	// target AND progress was measured: the issues still owed against the headline. A
+	// positive shortfall keeps Satisfied false — the declared target is a gate, not a
+	// decoration. 0 when there is no target, no measurement, or the target is met.
+	IssueShortfall int  `json:"issue_shortfall,omitempty"`
+	Satisfied      bool `json:"satisfied"`
 	Members     int            `json:"members"`
 	Walked      int            `json:"walked"`
 	Unmeasured  int            `json:"unmeasured"`
@@ -617,21 +634,60 @@ type WalkReport struct {
 	NextAction string      `json:"next_action"`
 }
 
+// WalkOpt configures a Walk beyond the declared registry data — the seam the impure
+// shell uses to fold LIVE measurements (which the pure package cannot read: it reads no
+// ledger, disk, or clock) into the verdict. Options apply in order; a nil option is
+// ignored. It is the same shell-measures / core-folds split the member statuses use.
+type WalkOpt func(*walkConfig)
+
+// walkConfig accumulates the live measurements the WalkOpts hand in.
+type walkConfig struct {
+	issueProgressMeasured bool
+	issueProgressed       int
+}
+
+// WithIssueProgress hands Walk the LIVE count of issues the intent has progressed this
+// run, as measured by the shell. When the intent declares an IssueTarget (> 0) the walk
+// folds this against it: a shortfall (progressed < target) becomes a gate that keeps the
+// intent unsatisfied, turning the declared headline into a witnessed number instead of
+// decorative prose. A negative count is clamped to 0. Handing progress in for an intent
+// with no target is harmless (surfaced, never gating). Passing it at all marks the walk
+// as having MEASURED progress, so a real zero reads as a shortfall, not as "unmeasured".
+func WithIssueProgress(progressed int) WalkOpt {
+	return func(c *walkConfig) {
+		if progressed < 0 {
+			progressed = 0
+		}
+		c.issueProgressMeasured = true
+		c.issueProgressed = progressed
+	}
+}
+
 // Walk folds the member statuses the shell read into the intent-level verdict and a
 // worst-first worklist. Ordering (the SELECT step): dark/unmeasured members first
 // (a gone-dark loop or an unreadable member is the most urgent thing to enter), then
 // by debt descending, ties broken by the member's declared order (stable). The
 // intent is SATISFIED only when total debt is at-or-below Floor AND every member was
-// measured AND none is dark — an unread or dark member can never read as clean.
-func Walk(s Super, statuses []MemberStatus) WalkReport {
+// measured AND none is dark AND any declared issue-target with measured progress is met
+// — an unread or dark member, or an unmet headline, can never read as clean. Live
+// measurements the pure package cannot read (e.g. issue progress) arrive via WalkOpts.
+func Walk(s Super, statuses []MemberStatus, opts ...WalkOpt) WalkReport {
+	var cfg walkConfig
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
 	rep := WalkReport{
-		Schema:      WalkSchema,
-		Name:        s.Name,
-		Title:       s.Title,
-		Floor:       s.Floor,
-		IssueTarget: s.IssueTarget,
-		Members:     len(s.Members),
-		Statuses:    statuses,
+		Schema:                WalkSchema,
+		Name:                  s.Name,
+		Title:                 s.Title,
+		Floor:                 s.Floor,
+		IssueTarget:           s.IssueTarget,
+		IssueProgressMeasured: cfg.issueProgressMeasured,
+		IssueProgressed:       cfg.issueProgressed,
+		Members:               len(s.Members),
+		Statuses:              statuses,
 	}
 
 	// Preserve declared order as the stable tiebreaker.
@@ -700,7 +756,15 @@ func Walk(s Super, statuses []MemberStatus) WalkReport {
 		rep.Worklist[i].Allocation = alloc
 	}
 
-	rep.Satisfied = rep.Unmeasured == 0 && rep.Dark == 0 && rep.TotalDebt <= s.Floor
+	// Fold the declared issue-target headline against the measured live progress: an
+	// unmet target with progress in hand is a shortfall that gates satisfaction (the
+	// number is a promise, not a decoration). Only bites when the intent DECLARES a
+	// target and the shell actually MEASURED progress — a surface-only walk never gates.
+	if s.IssueTarget > 0 && cfg.issueProgressMeasured && cfg.issueProgressed < s.IssueTarget {
+		rep.IssueShortfall = s.IssueTarget - cfg.issueProgressed
+	}
+
+	rep.Satisfied = rep.Unmeasured == 0 && rep.Dark == 0 && rep.TotalDebt <= s.Floor && rep.IssueShortfall == 0
 	rep.Verdict, rep.Finding, rep.Reason, rep.NextAction = walkVerdict(s, rep)
 	return rep
 }
@@ -865,8 +929,18 @@ func walkVerdict(s Super, rep WalkReport) (verdict, finding, reason, next string
 			fmt.Sprintf("walking %q: aggregate debt %d > floor %d across %d member(s); enter the worst first", s.Name, rep.TotalDebt, s.Floor, rep.Members),
 			"worst-first: " + worklistHead(rep)
 	}
+	if rep.IssueShortfall > 0 {
+		return "ACTION", "superloop_issue_shortfall",
+			fmt.Sprintf("walking %q: debt at-or-below floor, but %d/%d headline issue(s) still owed (progressed %d) — the target is a gate, not a decoration",
+				s.Name, rep.IssueShortfall, rep.IssueTarget, rep.IssueProgressed),
+			"progress the remaining issues: " + worklistHead(rep)
+	}
+	target := ""
+	if rep.IssueProgressMeasured && rep.IssueTarget > 0 {
+		target = fmt.Sprintf("; headline %d/%d issue(s) progressed", rep.IssueProgressed, rep.IssueTarget)
+	}
 	return "OK", "superloop_satisfied",
-		fmt.Sprintf("walking %q: aggregate debt %d at-or-below floor %d; every member measured and live", s.Name, rep.TotalDebt, s.Floor),
+		fmt.Sprintf("walking %q: aggregate debt %d at-or-below floor %d; every member measured and live%s", s.Name, rep.TotalDebt, s.Floor, target),
 		"hold the line; the member loops keep it tended"
 }
 

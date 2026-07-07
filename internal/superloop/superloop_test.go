@@ -332,6 +332,120 @@ func TestWalkSatisfiedWithContainer(t *testing.T) {
 	}
 }
 
+// TestWalkIssueTargetGate pins the issue-target fold (WithIssueProgress): a declared
+// headline is a GATE only when the shell hands in a live progress count, and only then
+// does an unmet target keep an otherwise-clean walk unsatisfied. The whole point is that
+// the ~200-issue overnight headline stops being decorative prose and becomes a witnessed
+// number the walk reds on until it is met — while an UNMEASURED walk stays surface-only,
+// so an unread issue layer can never fabricate "target met".
+func TestWalkIssueTargetGate(t *testing.T) {
+	// A clean, all-measured, live intent that also declares a 200-issue headline.
+	clean := Super{Name: "run-the-night", Title: "t", Floor: 0, IssueTarget: 200, Members: []Member{
+		{Kind: KindScorecard, Ref: "a"},
+	}}
+	cleanStatuses := func() []MemberStatus {
+		return []MemberStatus{{Member: clean.Members[0], Debt: 0, Measured: true}}
+	}
+
+	t.Run("shortfall gates an otherwise-clean walk", func(t *testing.T) {
+		rep := Walk(clean, cleanStatuses(), WithIssueProgress(120))
+		if !rep.IssueProgressMeasured {
+			t.Fatal("progress was handed in; IssueProgressMeasured must be true")
+		}
+		if rep.IssueProgressed != 120 {
+			t.Errorf("IssueProgressed: want 120, got %d", rep.IssueProgressed)
+		}
+		if rep.IssueShortfall != 80 {
+			t.Errorf("IssueShortfall: want 80 (200-120), got %d", rep.IssueShortfall)
+		}
+		if rep.Satisfied {
+			t.Error("an unmet headline must keep a debt-clean walk unsatisfied")
+		}
+		if rep.Verdict != "ACTION" || rep.Finding != "superloop_issue_shortfall" {
+			t.Errorf("want ACTION/superloop_issue_shortfall, got %s/%s", rep.Verdict, rep.Finding)
+		}
+	})
+
+	t.Run("target met clears the gate", func(t *testing.T) {
+		rep := Walk(clean, cleanStatuses(), WithIssueProgress(200))
+		if rep.IssueShortfall != 0 {
+			t.Errorf("IssueShortfall: want 0 at target, got %d", rep.IssueShortfall)
+		}
+		if !rep.Satisfied {
+			t.Errorf("a debt-clean walk that met its headline must be satisfied; reason=%q", rep.Reason)
+		}
+		if rep.Verdict != "OK" || rep.Finding != "superloop_satisfied" {
+			t.Errorf("want OK/superloop_satisfied, got %s/%s", rep.Verdict, rep.Finding)
+		}
+	})
+
+	t.Run("overshoot is not a shortfall", func(t *testing.T) {
+		rep := Walk(clean, cleanStatuses(), WithIssueProgress(250))
+		if rep.IssueShortfall != 0 || !rep.Satisfied {
+			t.Errorf("progress beyond target must clear the gate, got shortfall=%d satisfied=%v", rep.IssueShortfall, rep.Satisfied)
+		}
+	})
+
+	t.Run("measured zero is a shortfall, not unmeasured", func(t *testing.T) {
+		rep := Walk(clean, cleanStatuses(), WithIssueProgress(0))
+		if !rep.IssueProgressMeasured {
+			t.Error("a measured zero must still count as MEASURED (distinct from surface-only)")
+		}
+		if rep.IssueShortfall != 200 {
+			t.Errorf("IssueShortfall: want 200 (a real zero owes the whole headline), got %d", rep.IssueShortfall)
+		}
+		if rep.Satisfied || rep.Finding != "superloop_issue_shortfall" {
+			t.Errorf("measured-zero progress must gate, got satisfied=%v finding=%q", rep.Satisfied, rep.Finding)
+		}
+	})
+
+	t.Run("unmeasured walk stays surface-only (no gate)", func(t *testing.T) {
+		rep := Walk(clean, cleanStatuses()) // no WithIssueProgress
+		if rep.IssueProgressMeasured {
+			t.Error("no progress handed in; IssueProgressMeasured must be false")
+		}
+		if rep.IssueShortfall != 0 {
+			t.Errorf("a surface-only walk must not compute a shortfall, got %d", rep.IssueShortfall)
+		}
+		if !rep.Satisfied {
+			t.Errorf("without a measured count the headline is surface-only and must not gate; reason=%q", rep.Reason)
+		}
+		if rep.IssueTarget != 200 {
+			t.Errorf("the declared target is still surfaced, want 200 got %d", rep.IssueTarget)
+		}
+	})
+
+	t.Run("negative progress clamps to zero", func(t *testing.T) {
+		rep := Walk(clean, cleanStatuses(), WithIssueProgress(-5))
+		if rep.IssueProgressed != 0 {
+			t.Errorf("negative progress must clamp to 0, got %d", rep.IssueProgressed)
+		}
+		if rep.IssueShortfall != 200 {
+			t.Errorf("IssueShortfall after clamp: want 200, got %d", rep.IssueShortfall)
+		}
+	})
+
+	t.Run("no declared target: progress never gates", func(t *testing.T) {
+		noTarget := Super{Name: "t", Title: "t", Floor: 0, Members: []Member{{Kind: KindScorecard, Ref: "a"}}}
+		rep := Walk(noTarget, []MemberStatus{{Member: noTarget.Members[0], Debt: 0, Measured: true}}, WithIssueProgress(3))
+		if rep.IssueShortfall != 0 || !rep.Satisfied {
+			t.Errorf("with no declared target, progress must not gate; shortfall=%d satisfied=%v", rep.IssueShortfall, rep.Satisfied)
+		}
+	})
+
+	t.Run("member debt still gates before the headline", func(t *testing.T) {
+		// A member carrying debt reds via superloop_debt even if the headline is met —
+		// the issue-target gate is folded AFTER member-level debt, not instead of it.
+		rep := Walk(clean, []MemberStatus{{Member: clean.Members[0], Debt: 5, Measured: true}}, WithIssueProgress(200))
+		if rep.Satisfied {
+			t.Error("member debt must keep the walk unsatisfied")
+		}
+		if rep.Finding != "superloop_debt" {
+			t.Errorf("member debt should surface before the headline gate, got %q", rep.Finding)
+		}
+	})
+}
+
 // TestWalkUnmeasuredBeatsDark pins walkVerdict's precedence: when a walk has BOTH an
 // unmeasured leaf and a dark leaf, the unmeasured finding wins (a status we could not
 // even read is more conservative than a known-dark loop). If the dark branch were
