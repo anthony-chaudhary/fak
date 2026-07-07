@@ -89,8 +89,26 @@ func NewNotesBackend(dir string) (*NotesBackend, error) {
 			resolver[strings.ToLower(name)] = fname
 		}
 	}
+	edges := map[string][]string{}
+	order := make([]string, 0, len(notes))
 	for _, n := range notes {
-		b.appendCell(n.step, n.title, n.fname, n.raw, resolver)
+		order = append(order, n.fname)
+		if targets := b.appendCell(n.step, n.title, n.fname, n.raw, resolver); len(targets) > 0 {
+			edges[n.fname] = targets
+		}
+	}
+	// W5 (#2624): a note reachable as the target of a live supersedes edge is
+	// withheld from the working set by default — the same negative-only posture
+	// as an OpTombstone suppression (bytes and row survive for audit; the default
+	// recall query's tombstoned=false filter is what withholds it). The
+	// deterministic resolution — chain collapse, the documented cycle tie-break —
+	// is internal/recall's ResolveSupersession.
+	withheldBy := recall.ResolveSupersession(edges, order)
+	for i := range b.cells {
+		if src, ok := withheldBy[b.cells[i].ID]; ok {
+			b.cells[i].Tombstoned = true
+			b.cells[i].Attrs["superseded_by"] = src
+		}
 	}
 	return b, nil
 }
@@ -113,7 +131,9 @@ func (b *NotesBackend) Dir() string { return b.dir }
 // gated Materialize. Step preserves MEMORY.md index order (the curation order).
 // resolver maps each indexed note's link keys to its cell ID, so the note's forward
 // [[wikilinks]] become Cell.Refs — the graph edge set the algebra can filter/rank on.
-func (b *NotesBackend) appendCell(step int, title, fname string, raw []byte, resolver map[string]string) {
+// The returned slice is the note's resolved `supersedes:` targets (W5, #2624) — the
+// typed retirement edges the caller folds into the supersession resolution.
+func (b *NotesBackend) appendCell(step int, title, fname string, raw []byte, resolver map[string]string) []string {
 	desc, mtype := parseNoteMeta(string(raw))
 	body := []byte(memoryread.StripFrontmatter(string(raw)))
 
@@ -142,6 +162,19 @@ func (b *NotesBackend) appendCell(step int, title, fname string, raw []byte, res
 	if len(unresolved) > 0 {
 		attrs["refs_unresolved"] = strings.Join(unresolved, ",")
 	}
+	// The frontmatter `supersedes: [[target]]` declarations (W5, #2624) resolve
+	// through the same wikilink grammar as body links: dedup, self excluded, and a
+	// dangling target — one that is not an indexed fact file — is flagged as rot on
+	// supersedes_unresolved, never a crash and never an edge. Resolved targets are
+	// surfaced on the superseder as the typed `supersedes` attr (the W4 graph reads
+	// it) and returned for the working-set withholding fold.
+	supersedes, supUnresolved := resolveWikiLinks([]byte(noteSupersedes(string(raw))), id, resolver)
+	if len(supersedes) > 0 {
+		attrs["supersedes"] = strings.Join(supersedes, ",")
+	}
+	if len(supUnresolved) > 0 {
+		attrs["supersedes_unresolved"] = strings.Join(supUnresolved, ",")
+	}
 	b.cells = append(b.cells, Cell{
 		ID:         id,
 		Step:       step,
@@ -157,6 +190,7 @@ func (b *NotesBackend) appendCell(step int, title, fname string, raw []byte, res
 		Attrs:      attrs,
 	})
 	b.bodies[id] = body
+	return supersedes
 }
 
 // wikiLinkRE matches a [[target]] wikilink, tolerating a [[target|display]] alias and
@@ -169,6 +203,29 @@ var wikiLinkRE = regexp.MustCompile(`\[\[([^\[\]|#]+?)(?:\|[^\[\]]*)?\]\]`)
 // noteNameRE reads the top-level frontmatter `name:` slug — the alternate link key an
 // authored [[name]] may use when it differs from the filename stem.
 var noteNameRE = regexp.MustCompile(`(?m)^name:\s*(\S+)`)
+
+// noteSupersedesRE reads a top-level frontmatter `supersedes:` declaration — one or
+// many [[wikilinks]] on the line, repeatable across lines (W5, #2624).
+var noteSupersedesRE = regexp.MustCompile(`(?m)^supersedes:\s*(.+?)\s*$`)
+
+// noteSupersedes returns the raw wikilink text of every frontmatter `supersedes:`
+// declaration, space-joined for the shared resolver, or "" when the block is absent
+// or malformed (lexical and tolerant, like parseNoteMeta). Body-text `supersedes:`
+// prose never counts — the edge is a frontmatter declaration, not a phrase.
+func noteSupersedes(raw string) string {
+	if !strings.HasPrefix(raw, "---") {
+		return ""
+	}
+	end := strings.Index(raw[3:], "\n---")
+	if end == -1 {
+		return ""
+	}
+	var tails []string
+	for _, m := range noteSupersedesRE.FindAllStringSubmatch(raw[:end+3], -1) {
+		tails = append(tails, m[1])
+	}
+	return strings.Join(tails, " ")
+}
 
 // noteName returns the frontmatter `name:` slug, or "" when the block is absent or
 // malformed (lexical and tolerant, like parseNoteMeta).

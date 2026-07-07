@@ -445,3 +445,144 @@ func TestInjectionBudget(t *testing.T) {
 		t.Fatalf("rendered bytes %d exceed the %d-byte budget", len(blockAlpha), budget)
 	}
 }
+
+// W5 (#2624): a note declaring `supersedes: [[old-note]]` structurally retires its
+// predecessor from the recall working set — B renders, A is withheld by the default
+// query's tombstoned=false filter — while A's bytes and row survive for audit
+// (negative-only, expire-by-default: file untouched on disk, cell still scanned,
+// direct page-in still answers).
+func TestNotesBackend_supersededNoteWithheldAtRecall(t *testing.T) {
+	index := "# Memory index\n\n" +
+		"- [Old fact](a.md) — the retired version\n" +
+		"- [Corrected fact](b.md) — supersedes the old one\n"
+	files := map[string]string{
+		"a.md": "---\nname: a\nmetadata:\n  type: reference\n---\n\nThe flag lives in config.yaml.\n",
+		"b.md": "---\nname: b\nsupersedes: [[a]]\nmetadata:\n  type: reference\n---\n\nCorrection: the flag moved to settings.toml.\n",
+	}
+	dir := fixtureNotesStore(t, index, files)
+	before, err := os.ReadFile(filepath.Join(dir, "a.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := NewNotesBackend(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	// The default-recall-shaped working set holds B and withholds A.
+	res, err := Run(ctx, b, Query{Ops: []Op{
+		{Kind: OpScan},
+		{Kind: OpFilter, Pred: &Pred{Op: PredAnd, Args: []Pred{
+			{Op: PredEq, Field: "sealed", Value: "false"},
+			{Op: PredEq, Field: "tombstoned", Value: "false"},
+		}}},
+	}}, Caps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	working := map[string]bool{}
+	for _, c := range res.Working {
+		working[c.ID] = true
+	}
+	if !working["b.md"] || working["a.md"] {
+		t.Fatalf("recall must return b.md and withhold a.md, got %v", working)
+	}
+
+	// The retirement is negative-only: A's row survives the scan, tombstoned and
+	// auditable (who retired it), and the typed edge is on the superseder.
+	cells, _ := b.Cells(ctx)
+	byID := map[string]Cell{}
+	for _, c := range cells {
+		byID[c.ID] = c
+	}
+	a, ok := byID["a.md"]
+	if !ok {
+		t.Fatal("superseded a.md must keep its row in the scanned page table")
+	}
+	if !a.Tombstoned || a.Attrs["superseded_by"] != "b.md" {
+		t.Fatalf("a.md must be tombstoned with superseded_by=b.md, got %+v", a)
+	}
+	if byID["b.md"].Tombstoned || byID["b.md"].Attrs["supersedes"] != "a.md" {
+		t.Fatalf("b.md must stay live and carry the typed supersedes edge, got %+v", byID["b.md"])
+	}
+
+	// Nothing hard-deletes: the file is byte-identical on disk and a direct,
+	// explicit page-in (the audit path) still answers.
+	after, err := os.ReadFile(filepath.Join(dir, "a.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("superseded note's file must be untouched on disk")
+	}
+	if _, err := b.Materialize(ctx, "a.md"); err != nil {
+		t.Fatalf("direct page-in of a superseded note (audit access) must answer, got %v", err)
+	}
+}
+
+// W5 (#2624): a supersedes edge pointing at a note that is not an indexed fact
+// file is reported as rot on supersedes_unresolved — never a crash, never an
+// edge, and it withholds nothing.
+func TestNotesBackend_danglingSupersedesIsRot(t *testing.T) {
+	dir := fixtureNotesStore(t,
+		"# Memory index\n\n- [Corrector](b.md) — points at a missing note\n",
+		map[string]string{
+			"b.md": "---\nname: b\nsupersedes: [[ghost-note]]\n---\n\nCorrects a note that was never written.\n",
+		})
+	b, err := NewNotesBackend(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cells, _ := b.Cells(context.Background())
+	if len(cells) != 1 {
+		t.Fatalf("want 1 cell, got %d", len(cells))
+	}
+	c := cells[0]
+	if c.Attrs["supersedes_unresolved"] != "ghost-note" {
+		t.Fatalf("dangling target must be flagged as rot, got attrs %v", c.Attrs)
+	}
+	if c.Attrs["supersedes"] != "" || c.Tombstoned {
+		t.Fatalf("a dangling supersedes must neither become an edge nor withhold anything, got %+v", c)
+	}
+}
+
+// W5 (#2624): mutual supersession resolves deterministically — the documented
+// tie-break keeps the cycle member latest in MEMORY.md index order — and a
+// rescan of the same store lands on the identical outcome, never a loop.
+func TestNotesBackend_cyclicSupersessionDeterministic(t *testing.T) {
+	index := "# Memory index\n\n" +
+		"- [First](a.md) — claims to supersede b\n" +
+		"- [Second](b.md) — claims to supersede a\n"
+	files := map[string]string{
+		"a.md": "---\nname: a\nsupersedes: [[b]]\n---\n\nVersion one.\n",
+		"b.md": "---\nname: b\nsupersedes: [[a]]\n---\n\nVersion two.\n",
+	}
+	dir := fixtureNotesStore(t, index, files)
+	verdict := func() (tombA, tombB bool) {
+		b, err := NewNotesBackend(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cells, _ := b.Cells(context.Background())
+		for _, c := range cells {
+			switch c.ID {
+			case "a.md":
+				tombA = c.Tombstoned
+			case "b.md":
+				tombB = c.Tombstoned
+			}
+		}
+		return tombA, tombB
+	}
+	tombA, tombB := verdict()
+	if !tombA || tombB {
+		t.Fatalf("cycle tie-break must withhold a.md and keep b.md (latest in index order), got a=%v b=%v", tombA, tombB)
+	}
+	for i := 0; i < 5; i++ {
+		againA, againB := verdict()
+		if againA != tombA || againB != tombB {
+			t.Fatalf("cyclic supersession not deterministic on rescan %d", i)
+		}
+	}
+}
