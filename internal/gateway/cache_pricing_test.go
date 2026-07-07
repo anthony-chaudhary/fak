@@ -227,6 +227,35 @@ func TestMechanismSavingsSumsOwnersAndMechanisms(t *testing.T) {
 	}
 }
 
+// TestFakTokenEquivWarmShedPricedAtMarginal locks the #2794/#2798 live-path fix: when a
+// session's compaction fires observed a provider cache_read (warm), FakTokenEquiv values the
+// shed at the 0.1x cache-read marginal (CacheReadMultiplier), not full input — the same
+// marginal the Track-2 report and the fire gate price a shed token at. Prefix reuse (local,
+// fak-realized) keeps its full 1.0x marginal. Booking warm shed at 1.0x was the ~10x
+// over-credit this fix removes.
+func TestFakTokenEquivWarmShedPricedAtMarginal(t *testing.T) {
+	warm := AdjudicationSummary{
+		CompactionShedTokens:      1000,
+		CompactionCacheReadTokens: 5000, // >0 => at least one warm fire this session
+		KVPrefixReusedTokens:      400,
+	}.MechanismSavings()
+	if want := 1000*CacheReadMultiplier + 400; !approx(warm.FakTokenEquiv(), want) {
+		t.Fatalf("warm fak token-equiv = %v, want shed*0.1 + kv = %v", warm.FakTokenEquiv(), want)
+	}
+	// The SAME shed with no observed cache_read (cold) keeps the full 1.0x input basis.
+	cold := AdjudicationSummary{
+		CompactionShedTokens: 1000,
+		KVPrefixReusedTokens: 400,
+	}.MechanismSavings()
+	if !approx(cold.FakTokenEquiv(), 1400) {
+		t.Fatalf("cold fak token-equiv = %v, want shed*1.0 + kv = 1400", cold.FakTokenEquiv())
+	}
+	// The warm discount only ever REMOVES phantom value — it can never make fak look larger.
+	if warm.FakTokenEquiv() >= cold.FakTokenEquiv() {
+		t.Fatalf("warm %v must be < cold %v", warm.FakTokenEquiv(), cold.FakTokenEquiv())
+	}
+}
+
 // TestMechanismSavingsWritePremiumAttributesUpgradedTokensAt1h is the #2179 repro: a
 // session whose cache-creation tokens were ALL written while the managed-cache 1h
 // TTL-upgrade rung was active must price that write at CacheWrite1hMultiplier

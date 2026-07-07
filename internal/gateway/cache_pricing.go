@@ -256,8 +256,14 @@ type MechanismSavings struct {
 	ProviderPromptCacheReadTokenEquiv         float64 `json:"provider_prompt_cache_read_token_equiv"`
 	ProviderPromptCacheWritePremiumTokenEquiv float64 `json:"provider_prompt_cache_write_premium_token_equiv"`
 	FakCompactionShedTokens                   uint64  `json:"fak_compaction_shed_tokens"`
-	FakKVPrefixReusedTokens                   uint64  `json:"fak_kv_prefix_reused_tokens"`
-	FakVDSOAvoidedCalls                       uint64  `json:"fak_vdso_avoided_calls"`
+	// FakCompactionCacheReadTokens is the OBSERVED provider cache_read at this session's
+	// compaction fires — the warm/cold witness FakTokenEquiv prices the shed on. >0 means at
+	// least one fire landed on a WARM prefix (its shed tokens were already cache-reads, worth
+	// the 0.1x read marginal), so the shed is valued at that marginal, not full input. Same
+	// binary aggregate-warm rule the Track-2 report's compaction row uses (#2794/#2798).
+	FakCompactionCacheReadTokens uint64  `json:"fak_compaction_cache_read_tokens,omitempty"`
+	FakKVPrefixReusedTokens      uint64  `json:"fak_kv_prefix_reused_tokens"`
+	FakVDSOAvoidedCalls          uint64  `json:"fak_vdso_avoided_calls"`
 }
 
 // MechanismSavings folds the summary's existing counters into the owner/mechanism split.
@@ -268,6 +274,7 @@ func (s AdjudicationSummary) MechanismSavings() MechanismSavings {
 		ProviderPromptCacheReadTokenEquiv:         float64(s.CachedPromptTokens) * (1 - CacheReadMultiplier),
 		ProviderPromptCacheWritePremiumTokenEquiv: splitCacheCreationPremiumTokenEquiv(s.CacheCreationTokens, s.CacheCreationTokensUpgraded),
 		FakCompactionShedTokens:                   s.CompactionShedTokens,
+		FakCompactionCacheReadTokens:              s.CompactionCacheReadTokens,
 		FakKVPrefixReusedTokens:                   s.KVPrefixReusedTokens,
 	}
 }
@@ -293,10 +300,21 @@ func (m MechanismSavings) ProviderTokenEquiv() float64 {
 	return m.ProviderPromptCacheReadTokenEquiv + m.ProviderPromptCacheWritePremiumTokenEquiv
 }
 
-// FakTokenEquiv is the WITNESSED fak-authored token-equivalent slice. VDSO is deliberately
-// excluded because its current witness is avoided calls, not prompt-token equivalents.
+// FakTokenEquiv is the WITNESSED fak-authored token-equivalent slice: prefix reuse valued at
+// its full local marginal (fak realized those tokens itself), plus compaction shed valued at
+// the HONEST cache-read marginal on a warm fire. A warm shed token
+// (FakCompactionCacheReadTokens>0) was already a provider cache_read, so dropping it saves the
+// 0.1x read marginal — not the 1.0x of fresh input; booking it at 1.0x over-credited fak's
+// compaction ~10x on warm traffic (#2794/#2798). Only an observed-cold session keeps 1.0x.
+// This is the same marginal (CacheReadMultiplier = cacheprice.ReadMultiplier) the fire gate
+// and the Track-2 report price a shed token at. VDSO is deliberately excluded because its
+// current witness is avoided calls, not prompt-token equivalents.
 func (m MechanismSavings) FakTokenEquiv() float64 {
-	return float64(m.FakCompactionShedTokens + m.FakKVPrefixReusedTokens)
+	shedMult := 1.0
+	if m.FakCompactionCacheReadTokens > 0 {
+		shedMult = CacheReadMultiplier
+	}
+	return float64(m.FakCompactionShedTokens)*shedMult + float64(m.FakKVPrefixReusedTokens)
 }
 
 // TotalTokenEquiv is the sum of the token-equivalent owner slices.
