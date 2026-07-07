@@ -986,6 +986,24 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 				}
 				continue
 			}
+			// The recursive/forced-delete rule is decided STRUCTURALLY for the same two
+			// reasons as the RCE pipe rule: the raw regex false-positives on quoted text
+			// (`echo 'rm -rf /'` -> a false POLICY_BLOCK that in `fak guard -- claude` reads
+			// as an agent-chosen end_turn stop), and it inspects only the FIRST flag cluster
+			// after `rm`, so `rm -i -rf`, `rm --recursive --force`, and `sh -c 'rm -rf /'`
+			// launder past it. commandHasRecursiveForcedDelete tokenizes the command, resolves
+			// the real `rm` command word (exempting quoted text and `git rm`), and scans all
+			// of rm's argv flags for a recursive OR force option.
+			if isRmRfArgRule(pr) {
+				if present && commandHasRecursiveForcedDelete(val) {
+					if pr.Advisory {
+						note(pr, "rm_rf recursive/forced delete")
+						continue
+					}
+					return argDeny(pr, "rm_rf recursive/forced delete"), true, notes
+				}
+				continue
+			}
 			// Every OTHER deny_regex rule matches the CANONICAL form (#2407): the raw
 			// arg string alone let a backslash, dot-segment, env-alias, or quote-style
 			// spelling of the same value slip a rule written against its canonical
