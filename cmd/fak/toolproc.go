@@ -35,6 +35,8 @@ func runToolproc(stdout, stderr io.Writer, argv []string) int {
 		return runToolprocPS(stdout, stderr, argv[1:])
 	case "leaks":
 		return runToolprocLeaks(stdout, stderr, argv[1:])
+	case "console-faults":
+		return runToolprocConsoleFaults(stdout, stderr, argv[1:])
 	case "sample":
 		return runToolprocSample(stdout, stderr, argv[1:])
 	case "hook":
@@ -43,7 +45,7 @@ func runToolproc(stdout, stderr io.Writer, argv []string) int {
 		toolprocUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak toolproc: unknown subcommand %q (ps | leaks | sample | hook)\n", argv[0])
+		fmt.Fprintf(stderr, "fak toolproc: unknown subcommand %q (ps | leaks | console-faults | sample | hook)\n", argv[0])
 		toolprocUsage(stderr)
 		return 2
 	}
@@ -271,6 +273,47 @@ func runToolprocLeaks(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
+// runToolprocConsoleFaults folds the console-fault journal (#2170 row 4, split
+// to #3139) into the operator report — the LeakEvent precedent applied to the
+// console-host crash class: the pwsh HostException / Win32 0xE9 FailFast (and
+// its pipe/handle/PTY/renderer siblings) becomes searchable from the fak
+// surface instead of Windows Event Viewer only. Parsing is fail-closed: an
+// unknown class or drifted row refuses the whole report.
+func runToolprocConsoleFaults(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("toolproc console-faults", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	eventsPath := fs.String("events", "", "JSONL journal of console-fault events (required; '-' reads stdin)")
+	asJSON := fs.Bool("json", false, "emit the report as JSON")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if strings.TrimSpace(*eventsPath) == "" || fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "fak toolproc console-faults: --events FILE is required ('-' reads stdin)")
+		return 2
+	}
+	var in io.Reader = os.Stdin
+	if *eventsPath != "-" {
+		f, err := os.Open(*eventsPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak toolproc console-faults: %v\n", err)
+			return 1
+		}
+		defer f.Close()
+		in = f
+	}
+	events, err := toolprocgate.ParseConsoleFaultEvents(in)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak toolproc console-faults: %v\n", err)
+		return 1
+	}
+	report := toolprocgate.ConsoleFaultReportFromEvents(events)
+	if *asJSON {
+		return encodeJSONOrFail(stdout, stderr, report, "fak toolproc console-faults")
+	}
+	toolprocgate.RenderConsoleFaultReport(stdout, report)
+	return 0
+}
+
 func encodeToolprocEventLine(stdout, stderr io.Writer, ev toolproc.Event) int {
 	b, err := json.Marshal(ev)
 	if err != nil {
@@ -314,6 +357,7 @@ func toolprocUsage(w io.Writer) {
   fak toolproc ps --events FILE|- [--now-unix-ms N] [--default-deadline-ms N]
                   [--stall-mult F] [--json]
   fak toolproc leaks --events FILE|- [--json]
+  fak toolproc console-faults --events FILE|- [--json]
   fak toolproc sample [--json | --journal]
   fak toolproc hook (pre | post | stop) [--journal FILE]
                     [--deadline-ms N] [--heartbeat-ms N] [--policy FILE]
@@ -360,6 +404,15 @@ identity rows carrying agent_run_id, parent_run_id, tool_call_id, trace_id,
 policy digest, backend, reason token, source channel, and a byte-free reference.
 It is an observability surface only; raw payload, secret, env, and canary values
 are not part of the accepted row schema.
+
+console-faults folds the console-host fault journal (#2170): the rows a
+supervisor embedder records via ExitConsoleFault when a child terminal, shell,
+PTY, or TUI render surface crashes — the pwsh HostException / Win32 0xE9
+FailFast class and its pipe/handle/PTY/renderer siblings. The report counts by
+class/surface/tool/session plus one bounded row per fault, so the crash class
+is searchable from the fak surface instead of Windows Event Viewer only.
+Parsing is fail-closed: an unknown class or drifted row refuses the whole
+report rather than folding a fabricated crash record.
 
 This is the decision spine only (pure fold, offline-provable). The enforcement
 wiring - the gateway/guard supervisor emitting spawn/pulse from the live wire,
