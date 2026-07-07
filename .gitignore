@@ -77,7 +77,8 @@ tools/_walltime.*
 *_scratch.json
 # Dispatch/routing scratch dumps the issue-dispatch tooling writes to the repo
 # root (leaves2.json, ready_tmp.json, router_ready.json, lanes_ready.json,
-# router_tmp.json, cp_out.json/cp_scratch*, after.json). Per-session throwaway,
+# router_tmp.json, cp_out.json/cp_scratch*, after.json, and the dispatch-loop
+# tick dumps _dloop_router.json/_dloop_tick*.json). Per-session throwaway,
 # never a build input — but tree-scan governance tests (branchrole ref-audit,
 # pythongate, the tier/classification suites) walk the whole tree and red on a
 # stray `origin/main` string or a stored issue title inside them. Scope to the
@@ -90,6 +91,7 @@ tools/_walltime.*
 /cp_out.json
 /cp_scratch*.json
 /after.json
+/_dloop_*.json
 **/rmverifytmp/
 **/*verifytmp/
 
