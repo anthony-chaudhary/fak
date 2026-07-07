@@ -92,6 +92,7 @@ const (
 	TierReasonUnderTierRefused     = "under-tier-refused-no-account-meets-floor"
 	TierReasonUntaggedConservative = "untagged-issue-conservative-frontier-floor"
 	TierReasonNoAccounts           = "no-routable-accounts"
+	TierReasonAllAtSessionCap      = "session-cap-exhausted-no-eligible-account-under-cap"
 )
 
 // TierRouteResult is the chooser's decision, carrying every field C5 must emit so
@@ -136,14 +137,30 @@ func RouteAccountForTier(rows []AccountRow, product string, issue IssueTier) Tie
 		return res
 	}
 
-	// Eligible = available accounts capable enough for the floor (ModelTier <= floor).
+	// Eligible = available accounts capable enough for the floor (ModelTier <= floor)
+	// with a free session slot. A capable seat at its session cap is set aside, not
+	// chosen — overfilling a frontier seat is how a whole account limit-walls.
 	eligible := []AccountRow{}
+	atCap := []AccountRow{}
 	for _, row := range workers {
-		if row.Available && row.ModelTier <= floor {
-			eligible = append(eligible, row)
+		if !row.Available || row.ModelTier > floor {
+			continue
 		}
+		if !underSessionCap(row) {
+			row.BlockReason = atCapBlockReason(row)
+			atCap = append(atCap, row)
+			continue
+		}
+		eligible = append(eligible, row)
 	}
 	if len(eligible) == 0 {
+		if len(atCap) > 0 {
+			// Capable seats exist but every one is full: refuse and say so, rather
+			// than report an under-tier problem the operator can't act on.
+			res.FallbackReason = TierReasonAllAtSessionCap
+			res.Blocked = atCap
+			return res
+		}
 		res.UnderTierRefused = true
 		res.FallbackReason = TierReasonUnderTierRefused
 		res.Blocked = belowFloorAccounts(workers, floor)

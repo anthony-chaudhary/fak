@@ -33,8 +33,8 @@ func TestAccountSessionCapEnvKnob(t *testing.T) {
 
 func accountRowsFixture() []AccountRow {
 	return []AccountRow{
-		{Account: ".claude-gem7", Tag: "gem7", Product: "claude", Dir: "C:/Users/u/.claude-gem7", Available: true, ModelTier: 1, Model: "opus", LiveSessions: 4, ActiveSessions: 8},
-		{Account: ".claude-day26", Tag: "day26", Product: "claude", Dir: "C:/Users/u/.claude-day26", Available: true, ModelTier: 1, Model: "opus", LiveSessions: 4, ActiveSessions: 8, RouteWeight: 10, LoginStatus: "ready", CanServe: boolPtr(true)},
+		{Account: ".claude-gem7", Tag: "gem7", Product: "claude", Dir: "C:/Users/u/.claude-gem7", Available: true, ModelTier: 1, Model: "opus", LiveSessions: 2, ActiveSessions: 8},
+		{Account: ".claude-day26", Tag: "day26", Product: "claude", Dir: "C:/Users/u/.claude-day26", Available: true, ModelTier: 1, Model: "opus", LiveSessions: 1, ActiveSessions: 8, RouteWeight: 10, LoginStatus: "ready", CanServe: boolPtr(true)},
 		{Account: ".claude-busy", Tag: "busy", Product: "claude", Dir: "C:/Users/u/.claude-busy", Available: true, ModelTier: 1, Model: "opus", LiveSessions: 12, ActiveSessions: 30},
 		{Account: ".claude-blocked", Tag: "blocked", Product: "claude", Dir: "C:/Users/u/.claude-blocked", Available: false, ModelTier: 1, BlockReason: "config directory exists but has no live credentials", LoginStatus: "needs_login", CanServe: boolPtr(false)},
 		{Account: "opencode-zai", Tag: "zai", Product: "opencode", Dir: "C:/Users/u/opencode-zai", Available: true, ModelTier: 2, Model: "zai-coding-plan/glm-5.2"},
@@ -43,6 +43,7 @@ func accountRowsFixture() []AccountRow {
 }
 
 func TestRouteAccountPicksTierOneByLoadAndWeight(t *testing.T) {
+	t.Setenv(SessionsPerAccountEnv, "")
 	got := RouteAccount(AccountRouteInput{Rows: accountRowsFixture(), Product: "claude", WorkKind: "engineering"})
 	if !got.OK {
 		t.Fatalf("RouteAccount returned not ok: %+v", got)
@@ -53,11 +54,56 @@ func TestRouteAccountPicksTierOneByLoadAndWeight(t *testing.T) {
 	if got.SelectedTier != 1 || got.FallbackUsed {
 		t.Fatalf("tier/fallback = %d/%v, want 1/false", got.SelectedTier, got.FallbackUsed)
 	}
-	if len(got.BlockedTargetAccounts) != 1 || got.BlockedTargetAccounts[0].Tag != "blocked" {
-		t.Fatalf("blocked target accounts = %+v, want blocked tier-one account", got.BlockedTargetAccounts)
+	if len(got.BlockedTargetAccounts) != 2 || got.BlockedTargetAccounts[0].Tag != "blocked" {
+		t.Fatalf("blocked target accounts = %+v, want login-blocked account plus at-cap busy", got.BlockedTargetAccounts)
 	}
 	if got.BlockedTargetAccounts[0].LoginStatus != "needs_login" || got.BlockedTargetAccounts[0].CanServe == nil || *got.BlockedTargetAccounts[0].CanServe {
 		t.Fatalf("blocked target readiness = %+v, want needs_login/can_serve=false", got.BlockedTargetAccounts[0])
+	}
+	if got.BlockedTargetAccounts[1].Tag != "busy" || !strings.Contains(got.BlockedTargetAccounts[1].BlockReason, "at session cap") {
+		t.Fatalf("blocked target accounts = %+v, want busy reported at session cap", got.BlockedTargetAccounts)
+	}
+}
+
+func TestRouteAccountSkipsSeatAtSessionCap(t *testing.T) {
+	t.Setenv(SessionsPerAccountEnv, "")
+	rows := accountRowsFixture()
+	for i := range rows {
+		if rows[i].Tag == "day26" {
+			rows[i].LiveSessions = DefaultClaudeSessionsPerAccount
+		}
+	}
+	got := RouteAccount(AccountRouteInput{Rows: rows, Product: "claude", WorkKind: "engineering"})
+	if !got.OK || got.Account.Tag != "gem7" {
+		t.Fatalf("route = %+v, want under-cap gem7 over route-weighted day26 at cap", got)
+	}
+	foundAtCap := false
+	for _, b := range got.BlockedTargetAccounts {
+		if b.Tag == "day26" && strings.Contains(b.BlockReason, "at session cap") {
+			foundAtCap = true
+		}
+	}
+	if !foundAtCap {
+		t.Fatalf("blocked = %+v, want day26 reported at session cap", got.BlockedTargetAccounts)
+	}
+}
+
+func TestRouteAccountRefusesWhenEverySeatAtCap(t *testing.T) {
+	t.Setenv(SessionsPerAccountEnv, "")
+	rows := accountRowsFixture()
+	for i := range rows {
+		if rows[i].Product == "claude" && rows[i].Available {
+			rows[i].LiveSessions += DefaultClaudeSessionsPerAccount
+		}
+	}
+	got := RouteAccount(AccountRouteInput{Rows: rows, Product: "claude", WorkKind: "engineering"})
+	if got.OK || !strings.Contains(got.Reason, "session cap") {
+		t.Fatalf("route = %+v, want refusal naming the session cap", got)
+	}
+	t.Setenv(SessionsPerAccountEnv, "40")
+	relaxed := RouteAccount(AccountRouteInput{Rows: rows, Product: "claude", WorkKind: "engineering"})
+	if !relaxed.OK {
+		t.Fatalf("route with raised cap = %+v, want admitted again", relaxed)
 	}
 }
 
@@ -93,23 +139,46 @@ func TestRouteAccountNoTierOneFallbackByDefault(t *testing.T) {
 }
 
 func TestAllocateWaveGrantsDistinctPoolsAndUnderfills(t *testing.T) {
+	t.Setenv(SessionsPerAccountEnv, "")
+	// Registry-live sessions floor each pool's load: day26 has 1, gem7 has 2, and
+	// busy sits over the cap entirely, so 8 requested slots underfill to 5.
 	got := AllocateWave(AccountWaveInput{Rows: accountRowsFixture(), Count: 8, Product: "claude", WorkKind: "engineering"})
-	if !got.OK || got.Granted != 8 || got.Shortfall != 0 || got.DistinctPools != 3 || got.TargetTier != 1 {
-		t.Fatalf("wave = %+v, want 8 granted session slots across 3 tier-1 pools", got)
+	if !got.OK || got.Granted != 5 || got.Shortfall != 3 || got.DistinctPools != 2 || got.TargetTier != 1 {
+		t.Fatalf("wave = %+v, want 5 granted session slots across 2 under-cap tier-1 pools", got)
 	}
-	if got.Lanes[0].Tag != "day26" || got.Lanes[0].Rank != 0 || got.Lanes[0].Size != 8 ||
-		got.Lanes[0].SessionSlot != 1 || got.Lanes[0].SessionCap != DefaultClaudeSessionsPerAccount {
-		t.Fatalf("first lane = %+v, want route-weighted day26 rank 0 size 8 slot 1/4", got.Lanes[0])
+	if got.Lanes[0].Tag != "day26" || got.Lanes[0].Rank != 0 || got.Lanes[0].Size != 5 ||
+		got.Lanes[0].SessionSlot != 2 || got.Lanes[0].SessionCap != DefaultClaudeSessionsPerAccount {
+		t.Fatalf("first lane = %+v, want least-loaded day26 rank 0 size 5 slot 2/4", got.Lanes[0])
 	}
 	if got.Lanes[0].LoginStatus != "ready" || got.Lanes[0].CanServe == nil || !*got.Lanes[0].CanServe {
 		t.Fatalf("first lane readiness = %+v, want ready/can_serve=true", got.Lanes[0])
 	}
 	m := got.Lanes[0].Map()
-	if m["login_status"] != "ready" || m["can_serve"] != true || m["session_slot"] != 1 || m["session_cap"] != DefaultClaudeSessionsPerAccount {
+	if m["login_status"] != "ready" || m["can_serve"] != true || m["session_slot"] != 2 || m["session_cap"] != DefaultClaudeSessionsPerAccount {
 		t.Fatalf("first lane map readiness = %+v, want login_status/can_serve", m)
 	}
 	if got.WaveID == "" || got.Lanes[0].WaveID != got.WaveID {
 		t.Fatalf("wave id not stamped consistently: %+v", got)
+	}
+}
+
+func TestAllocateWaveFloorsLoadAtRegistryLiveSessions(t *testing.T) {
+	t.Setenv(SessionsPerAccountEnv, "")
+	rows := []AccountRow{{
+		Account: ".claude-seat-a", Tag: "seat-a", Product: "claude",
+		Dir: "C:/seats/a", AccountUUID: "acct-a", Available: true, ModelTier: 1,
+		LiveSessions: 3,
+	}}
+	got := AllocateWave(AccountWaveInput{Rows: rows, Count: 4, Product: "claude", WorkKind: "engineering"})
+	if !got.OK || got.Granted != 1 || got.Shortfall != 3 || got.Lanes[0].SessionSlot != 4 {
+		t.Fatalf("wave = %+v, want registry-live sessions to consume 3 of 4 slots", got)
+	}
+	// A lease held by one of those live sessions must not double-count: the load
+	// is max(leases, live), never the sum.
+	leases := []SeatLease{{Worker: "resolve-1", Tag: "seat-a", Dir: "C:/seats/a"}}
+	again := AllocateWave(AccountWaveInput{Rows: rows, Leases: leases, Count: 4, Product: "claude", WorkKind: "engineering"})
+	if !again.OK || again.Granted != 1 || again.Lanes[0].SessionSlot != 4 {
+		t.Fatalf("wave with overlapping lease = %+v, want max(leases, live)=3 so one slot free", again)
 	}
 }
 

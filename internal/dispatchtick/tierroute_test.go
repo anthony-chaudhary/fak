@@ -1,6 +1,7 @@
 package dispatchtick
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
@@ -58,6 +59,26 @@ func TestTierRouteUpwardFallbackIsWaste(t *testing.T) {
 	}
 	if res.FallbackReason != TierReasonOverTierFallback {
 		t.Fatalf("reason = %q, want %q", res.FallbackReason, TierReasonOverTierFallback)
+	}
+}
+
+// A capable seat at its session cap is set aside; the chooser spills to the
+// next under-cap seat, and refuses with the cap reason when none remains.
+func TestTierRouteSkipsAndRefusesAtSessionCap(t *testing.T) {
+	t.Setenv(SessionsPerAccountEnv, "")
+	full := acct("frontier-full", 1, true)
+	full.LiveSessions = DefaultClaudeSessionsPerAccount
+	free := acct("frontier-free", 1, true)
+	res := RouteAccountForTier([]AccountRow{full, free}, "", tagged(modelroute.TierT0, modelroute.TierT0))
+	if !res.OK || res.Account.Account != "frontier-free" {
+		t.Fatalf("expected spill to the under-cap frontier seat, got %+v", res)
+	}
+	res = RouteAccountForTier([]AccountRow{full}, "", tagged(modelroute.TierT0, modelroute.TierT0))
+	if res.OK || res.UnderTierRefused || res.FallbackReason != TierReasonAllAtSessionCap {
+		t.Fatalf("expected session-cap refusal (not under-tier), got %+v", res)
+	}
+	if len(res.Blocked) != 1 || !strings.Contains(res.Blocked[0].BlockReason, "at session cap") {
+		t.Fatalf("blocked = %+v, want the at-cap seat named", res.Blocked)
 	}
 }
 

@@ -217,6 +217,35 @@ func claudeSessionsPerAccount() int {
 	return DefaultClaudeSessionsPerAccount
 }
 
+// underSessionCap reports whether row can take one MORE concurrent session:
+// its registry-live session count must sit strictly below the per-account
+// session budget. Every single-launch chooser admits through this gate so a
+// route-weighted seat that is already full spills to the next candidate
+// instead of accreting every new launch until it limit-walls.
+func underSessionCap(row AccountRow) bool {
+	limit := AccountSessionCap(row)
+	return limit <= 0 || row.LiveSessions < limit
+}
+
+// atCapBlockReason names the session-cap refusal for blocked-account reporting.
+func atCapBlockReason(row AccountRow) string {
+	return fmt.Sprintf("at session cap (%d live >= cap %d)", row.LiveSessions, AccountSessionCap(row))
+}
+
+// overCapTierAccounts lists the AVAILABLE accounts at tier that were turned away
+// only because they are at their session cap, stamped with the cap reason, so a
+// route decision can name the seats it refused to overfill.
+func overCapTierAccounts(workers []AccountRow, tier int) []AccountRow {
+	out := []AccountRow{}
+	for _, row := range workers {
+		if row.ModelTier == tier && row.Available && !underSessionCap(row) {
+			row.BlockReason = atCapBlockReason(row)
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
 func applyAccountLoginGate(row AccountRow) AccountRow {
 	if row.Product != "claude" {
 		return row
@@ -265,8 +294,16 @@ func RouteAccount(in AccountRouteInput) AccountRouteResult {
 	if target == 2 {
 		tierOrder = append(tierOrder, 1)
 	}
+	atCap := 0
 	for _, tier := range tierOrder {
-		candidates := availableTierCandidates(workers, tier)
+		candidates := []AccountRow{}
+		for _, row := range availableTierCandidates(workers, tier) {
+			if !underSessionCap(row) {
+				atCap++
+				continue
+			}
+			candidates = append(candidates, row)
+		}
 		if len(candidates) == 0 {
 			continue
 		}
@@ -278,10 +315,13 @@ func RouteAccount(in AccountRouteInput) AccountRouteResult {
 			SelectedTier:          tier,
 			FallbackUsed:          tier != target,
 			Account:               candidates[0],
-			BlockedTargetAccounts: blockedTierAccounts(workers, target),
+			BlockedTargetAccounts: append(blockedTierAccounts(workers, target), overCapTierAccounts(workers, target)...),
 		}
 	}
 	reason := fmt.Sprintf("no available tier %d account", target)
+	if atCap > 0 {
+		reason += fmt.Sprintf(" under the session cap (%d at cap)", atCap)
+	}
 	if target == 1 {
 		reason += " (tier-1 fallback disabled)"
 	}
@@ -289,7 +329,7 @@ func RouteAccount(in AccountRouteInput) AccountRouteResult {
 		OK:                    false,
 		Reason:                reason,
 		TargetTier:            target,
-		BlockedTargetAccounts: blockedTierAccounts(workers, target),
+		BlockedTargetAccounts: append(blockedTierAccounts(workers, target), overCapTierAccounts(workers, target)...),
 	}
 }
 
@@ -306,6 +346,17 @@ func AllocateWave(in AccountWaveInput) AccountWaveResult {
 	lanes := []AccountWaveLane{}
 	usedPools := map[string]bool{}
 	load := leaseLoadByPool(workers, in.Leases)
+	// Floor each pool's load at its registry-live session count: sessions launched
+	// outside this dispatcher (interactive resumes, the watchdog) hold no seat
+	// lease, and a wave that only counts its own leases would grant a full wave
+	// onto a seat already running at capacity. max() rather than sum, because a
+	// dispatch-launched session appears in both counts.
+	for _, row := range uniquePoolRows(workers) {
+		pool := PoolKey(row)
+		if row.LiveSessions > load[pool] {
+			load[pool] = row.LiveSessions
+		}
+	}
 	for _, tier := range tierOrder {
 		if len(lanes) >= n {
 			break
