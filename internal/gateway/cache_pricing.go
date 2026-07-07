@@ -1,5 +1,7 @@
 package gateway
 
+import "github.com/anthony-chaudhary/fak/internal/cacheprice"
+
 // cache_pricing.go — the prompt-cache PRICING MODEL for issue #218 (F-002,
 // "Prompt Caching Features"), the "Pricing model" acceptance item.
 //
@@ -45,11 +47,13 @@ import (
 // negative saving rather than hiding it.
 const (
 	// CacheReadMultiplier is the price of a cached-prefix READ relative to base input.
-	CacheReadMultiplier = 0.1
+	// Sourced from cacheprice.ReadMultiplier — the ONE canonical rate the fire gate,
+	// resume planner, net-true ledger and Track-2 report all price the same token at (#2798).
+	CacheReadMultiplier = cacheprice.ReadMultiplier
 	// CacheWrite5mMultiplier is the price of a 5-minute-TTL cache WRITE relative to base input.
-	CacheWrite5mMultiplier = 1.25
+	CacheWrite5mMultiplier = cacheprice.Write5mMultiplier
 	// CacheWrite1hMultiplier is the price of a 1-hour-TTL cache WRITE relative to base input.
-	CacheWrite1hMultiplier = 2.0
+	CacheWrite1hMultiplier = cacheprice.Write1hMultiplier
 
 	// ClaudeOpus48InputPerMTokUSD is the default guarded-Claude base input price.
 	ClaudeOpus48InputPerMTokUSD = 5.0

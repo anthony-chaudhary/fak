@@ -56,7 +56,11 @@
 // shell, exactly as session (the decision) and cmd/fak/session_cmd.go (the wire) split.
 package resume
 
-import "math"
+import (
+	"math"
+
+	"github.com/anthony-chaudhary/fak/internal/cacheprice"
+)
 
 // CacheTTL names the provider cache_control TTL the dormant session used, mirroring the
 // Anthropic grammar: a bare {"type":"ephemeral"} breakpoint is the 5-minute tier, and
@@ -106,17 +110,18 @@ func (t CacheTTL) coldWriteMultiplier() float64 {
 }
 
 // The published Anthropic prompt-cache price multipliers, RELATIVE to the model's base
-// input per-token price. These mirror gateway/cache_pricing.go's constants verbatim; they
-// are redeclared here (not imported) because gateway is a tier-4 integrator and this is a
-// tier-1 foundation leaf — the layered-DAG rule forbids the upward import. The values are
-// stable published economics, not a fak measurement.
+// input per-token price. Re-exported from cacheprice — the ONE canonical source gateway,
+// the compaction fire gate, and the net-true ledger also read — so the resume boundary and
+// every other cache-pricing surface value an identical token identically (#2798). cacheprice
+// is a tier-1 leaf this tier-1 package may import (unlike the tier-4 gateway that once forced
+// the copy). The values are stable published economics, not a fak measurement.
 const (
 	// CacheReadMultiplier is the price of a cached-prefix READ relative to base input.
-	CacheReadMultiplier = 0.1
+	CacheReadMultiplier = cacheprice.ReadMultiplier
 	// CacheWrite5mMultiplier is the price of a 5-minute-TTL cache WRITE relative to base input.
-	CacheWrite5mMultiplier = 1.25
+	CacheWrite5mMultiplier = cacheprice.Write5mMultiplier
 	// CacheWrite1hMultiplier is the price of a 1-hour-TTL cache WRITE relative to base input.
-	CacheWrite1hMultiplier = 2.0
+	CacheWrite1hMultiplier = cacheprice.Write1hMultiplier
 )
 
 // ColdWriteShare is the calibrated fraction of a cold resume re-prefill that actually pays the
