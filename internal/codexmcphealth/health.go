@@ -208,16 +208,37 @@ func RunServerSmoke(root, policy string, timeout time.Duration) SmokeResult {
 		timeout = 30 * time.Second
 	}
 	binary := FakBinary(root)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, binary, "serve", "--stdio", "--policy", policy)
+	// A `fak serve --stdio` MCP server is a process-tree ROOT: while it processes
+	// the smoke frames it executes tool calls that spawn descendant OS processes.
+	// exec.CommandContext's ctx-cancel teardown kills only the direct pid, leaving
+	// that subtree orphaned (no job object / process group — same root cause as
+	// #2989, and the exact stray this file's ReapChildren later has to sweep). So
+	// start the process and wait in a goroutine; on the deadline tree-kill via
+	// procguard.KillPID (taskkill /T /F on Windows, process-group / descendant-walk
+	// SIGKILL on POSIX) BEFORE returning the timeout result — capping the producer
+	// of the strays instead of orphaning them.
+	cmd := exec.Command(binary, "serve", "--stdio", "--policy", policy)
 	cmd.Dir = root
 	cmd.Stdin = bytes.NewReader(SmokeFrames())
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
-	if ctx.Err() == context.DeadlineExceeded {
+	if err := cmd.Start(); err != nil {
+		return SmokeResult{OK: false, Reason: fmt.Sprintf("failed to start smoke server: %v", err)}
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	var err error
+	select {
+	case err = <-done:
+		// The server exited on its own within the deadline.
+	case <-time.After(timeout):
+		if cmd.Process != nil {
+			// Tree-kill fires only on this timeout branch, never on a normal
+			// completion, so a healthy smoke is untouched.
+			procguard.KillPID(cmd.Process.Pid)
+		}
+		<-done // let the wait goroutine drain now that the tree is reaped.
 		return SmokeResult{OK: false, Reason: fmt.Sprintf("smoke timed out after %s", timeout)}
 	}
 	res := ParseSmokeOutput(stdout.String(), ExpectedVersion(root))
