@@ -68,7 +68,7 @@ jobs:
       - name: Add the issue to configured project
         id: add
         if: ${{ github.event_name == 'issues' && env.FAK_PROJECT_TOKEN != '' && env.FAK_PROJECT_URL != '' && vars.FAK_PROJECT_SYNC != '0' }}
-        uses: actions/add-to-project@v1
+        uses: actions/add-to-project@v1.0.2
         with:
           project-url: ${{ env.FAK_PROJECT_URL }}
           github-token: ${{ secrets.FAK_PROJECT_TOKEN }}

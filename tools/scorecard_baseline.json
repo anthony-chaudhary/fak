@@ -1,8 +1,8 @@
 {
   "schema": "fak-scorecard-control-pane.baseline/1",
   "commit": "e3addd21",
-  "total_debt": 1395,
-  "grade_debt": 46,
+  "total_debt": 1190,
+  "grade_debt": 38,
   "metrics": {
     "doc": 0,
     "readme": 0,
@@ -24,7 +24,6 @@
     "conflation": 1,
     "ui_quality": 3,
     "disambiguation": 17,
-    "implicit": 205,
     "intent_literal": 1,
     "tokendefaults": 0,
     "guard_rsi": 1,
@@ -69,7 +68,6 @@
     "conflation": 0,
     "ui_quality": 1,
     "disambiguation": 0,
-    "implicit": 8,
     "intent_literal": 0,
     "tokendefaults": 1,
     "guard_rsi": 1,
