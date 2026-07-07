@@ -102,10 +102,15 @@ func modelTierUnitCost(modelTier int) int {
 // issue's tier metadata, and an optional witnessed outcome (default pending). An
 // explicit Escalated witness marks a decision the chosen tier could not carry.
 type TierDecisionInput struct {
-	Issue     int          `json:"issue"`
-	Lane      string       `json:"lane"`
-	Product   string       `json:"product,omitempty"`
-	Tier      IssueTier    `json:"tier"`
+	Issue   int       `json:"issue"`
+	Lane    string    `json:"lane"`
+	Product string    `json:"product,omitempty"`
+	Tier    IssueTier `json:"tier"`
+	// Labels, when present, is the raw per-issue GitHub label set — the REAL tier
+	// source. BuildTierDecisionRow derives Tier and the tag flags from it via
+	// IssueTierFromLabels, so a live readout is fed the same tier signal the
+	// dispatcher parses. When empty, Tier is used as given (the fixture path).
+	Labels    []string     `json:"labels,omitempty"`
 	Rows      []AccountRow `json:"-"`
 	Outcome   TierOutcome  `json:"outcome,omitempty"`
 	Escalated bool         `json:"escalated,omitempty"`
@@ -134,6 +139,12 @@ type TierDecisionRow struct {
 	CostDeltaModeled int                 `json:"cost_delta_modeled"`
 	CostProvenance   string              `json:"cost_provenance"`
 	Blocked          []string            `json:"blocked_accounts,omitempty"`
+	// TagFlags names why an issue's tier tags were not cleanly usable
+	// (model_tier_*_missing|invalid|conflict, model_tier_contradiction), empty when
+	// the labels parsed to a clean tier. Surfaced so the readout shows tagging
+	// health, not just the routing verdict — a conservative frontier route driven
+	// by a missing/contradictory tag reads differently from a genuine T0 issue.
+	TagFlags []string `json:"tag_flags,omitempty"`
 }
 
 // BuildTierDecisionRow routes one input through the C5 chooser and folds the
@@ -143,7 +154,17 @@ type TierDecisionRow struct {
 // required floor). A refusal spends nothing, so its delta is 0 and it carries the
 // too-weak seats it turned away.
 func BuildTierDecisionRow(in TierDecisionInput) TierDecisionRow {
-	res := RouteAccountForTier(in.Rows, in.Product, in.Tier)
+	// Labels are the REAL tier source when present: derive the typed tier (and the
+	// closed-vocab tag flags) exactly as the dispatcher would. An issue whose labels
+	// are missing/invalid/conflicting/contradictory yields HasTier=false, so
+	// IssueTier.resolve applies the conservative frontier floor — the safe default,
+	// and the tag flags say why it stayed conservative.
+	tier := in.Tier
+	var tagFlags []string
+	if len(in.Labels) > 0 {
+		tier, tagFlags = IssueTierFromLabels(in.Labels)
+	}
+	res := RouteAccountForTier(in.Rows, in.Product, tier)
 
 	outcome := in.Outcome
 	if outcome == "" {
@@ -162,6 +183,7 @@ func BuildTierDecisionRow(in TierDecisionInput) TierDecisionRow {
 		Escalation:       escalation,
 		Outcome:          outcome,
 		CostProvenance:   CostProvenanceModeled,
+		TagFlags:         tagFlags,
 	}
 
 	if res.UnderTierRefused {
