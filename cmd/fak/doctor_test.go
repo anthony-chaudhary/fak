@@ -8,6 +8,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/answershape"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/binstamp"
 )
 
 func defLimits() answershape.Limits {
@@ -131,5 +132,40 @@ func TestWriteBinaryDoctorHumanShowsLiveDifferentProcess(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("binary doctor human output missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestStampFreshnessRecommendation(t *testing.T) {
+	const head = "abcdef1234567890"
+	cases := []struct {
+		name     string
+		verdict  binstamp.Freshness
+		cause    binstamp.Cause
+		wantSev  string
+		wantWord string // a distinctive word the finding must carry
+	}{
+		{"unstamped is the load-bearing warn", binstamp.Unknown, binstamp.CauseUnstamped, appversion.SeverityWarn, "UNVERIFIABLE"},
+		{"stale warns and points at self-update", binstamp.Stale, binstamp.CauseDiverged, appversion.SeverityWarn, "newer fak exists"},
+		{"fresh is ok", binstamp.Fresh, binstamp.CauseMatched, appversion.SeverityOK, "current"},
+		{"dirty dev build is informational, not a finding", binstamp.Unknown, binstamp.CauseDirty, appversion.SeverityOK, "dev build"},
+		{"no head is informational, not a finding", binstamp.Unknown, binstamp.CauseNoHead, appversion.SeverityOK, "no HEAD"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := stampFreshnessRecommendation(c.verdict, c.cause, "deadbeefcafe1234", head, "origin/main")
+			if rec.Check != "binary-vcs-stamp" {
+				t.Fatalf("check = %q, want binary-vcs-stamp", rec.Check)
+			}
+			if rec.Severity != c.wantSev {
+				t.Fatalf("severity = %q, want %q (finding: %q)", rec.Severity, c.wantSev, rec.Finding)
+			}
+			if !strings.Contains(rec.Finding, c.wantWord) {
+				t.Fatalf("finding %q missing distinctive word %q", rec.Finding, c.wantWord)
+			}
+			// The two warn causes must give the operator a next action.
+			if c.wantSev == appversion.SeverityWarn && strings.TrimSpace(rec.Recommend) == "" {
+				t.Fatalf("a WARN recommendation must carry an actionable Recommend (cause %v)", c.cause)
+			}
+		})
 	}
 }

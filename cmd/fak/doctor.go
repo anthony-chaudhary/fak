@@ -17,10 +17,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/answershape"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 )
 
@@ -77,6 +79,18 @@ func runDoctor(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 		candidates := appversion.DefaultBinaryDoctorCandidates(exe)
 		processes, processScanError := appversion.CollectBinaryProcesses(candidates)
 		rep := appversion.DiagnoseBinaryWithProcesses(exe, candidates, processes, processScanError)
+
+		// Layer the VCS-stamp freshness verdict onto the file/process-level report. The
+		// sibling checks above catch a newer fak.exe sitting on disk, but NOT a binary built
+		// from an old commit — or, worst of all, one carrying no VCS stamp at all, which can
+		// never be checked for staleness and so must be flagged loudly rather than silently
+		// passed (the exact hole that let a stale, unstamped guard run undetected).
+		stampRec := runningStampFreshness(discoverRepoRoot())
+		rep.Recommendations = append(rep.Recommendations, stampRec)
+		if stampRec.Severity == appversion.SeverityWarn {
+			rep.Findings++
+		}
+
 		if *asJSON {
 			b, _ := json.MarshalIndent(rep, "", "  ")
 			fmt.Fprintln(stdout, string(b))
@@ -170,6 +184,81 @@ func shortHash(h string) string {
 		return "-"
 	}
 	return h
+}
+
+// runningStampFreshness reads THIS binary's embedded VCS stamp and judges it against the
+// repo's converged line (origin/main, falling back to local HEAD when origin is not
+// fetched), returning the recommendation for `fak doctor --binary`. It is read-only and does
+// no network fetch — a diagnostic must not mutate repo state. When run outside a repo the
+// verdict is a benign "not checked" (CauseNoHead), never a false alarm.
+func runningStampFreshness(repoRoot string) appversion.BinaryRecommendation {
+	stamp := binstamp.Self()
+	headRev, headRef := "", ""
+	if repoRoot != "" {
+		if rev := repoRevOf(repoRoot, "origin/main"); rev != "" {
+			headRev, headRef = rev, "origin/main"
+		} else if rev := repoRevOf(repoRoot, "HEAD"); rev != "" {
+			headRev, headRef = rev, "HEAD"
+		}
+	}
+	verdict, cause := binstamp.Explain(stamp, headRev)
+	return stampFreshnessRecommendation(verdict, cause, stamp.Revision, headRev, headRef)
+}
+
+// stampFreshnessRecommendation is the pure mapping from a binstamp verdict to an operator
+// recommendation. The two WARN cases are the ones that mean "the fak you are running is not
+// the one you think": an old commit (CauseDiverged) and — the load-bearing one — a binary
+// with no VCS stamp at all (CauseUnstamped), which cannot be checked for staleness and so is
+// itself the defect. The remaining causes are informational (an OK line, not a finding): a
+// dev's dirty build and running outside a repo are both legitimately uncheckable.
+func stampFreshnessRecommendation(verdict binstamp.Freshness, cause binstamp.Cause, runningRev, headRev, headRef string) appversion.BinaryRecommendation {
+	const check = "binary-vcs-stamp"
+	short := func(s string) string {
+		s = strings.TrimSpace(s)
+		if len(s) > 12 {
+			return s[:12]
+		}
+		if s == "" {
+			return "(none)"
+		}
+		return s
+	}
+	switch cause {
+	case binstamp.CauseUnstamped:
+		return appversion.BinaryRecommendation{
+			Check:    check,
+			Severity: appversion.SeverityWarn,
+			Finding:  "this fak carries no embedded VCS stamp — it cannot attest which commit it was built from, so staleness is UNVERIFIABLE",
+			Recommend: "rebuild with VCS stamping so the running binary is checkable: a plain `go build ./cmd/fak` " +
+				"inside the repo stamps the commit, while `-buildvcs=false`, `go install …@version`, or a build " +
+				"where git is unavailable strip it. `fak self-update --force` installs a stamped origin/main build.",
+		}
+	case binstamp.CauseDiverged: // Stale — a clean commit that differs from HEAD.
+		return appversion.BinaryRecommendation{
+			Check:     check,
+			Severity:  appversion.SeverityWarn,
+			Finding:   fmt.Sprintf("running build %s is a different commit than %s (%s) — a newer fak exists", short(runningRev), short(headRev), headRef),
+			Recommend: "run `fak self-update` to build+gate+install the current " + headRef + " over this binary.",
+		}
+	case binstamp.CauseDirty:
+		return appversion.BinaryRecommendation{
+			Check:    check,
+			Severity: appversion.SeverityOK,
+			Finding:  fmt.Sprintf("built from a dirty tree (base commit %s) — a dev build; staleness not checked", short(runningRev)),
+		}
+	case binstamp.CauseNoHead:
+		return appversion.BinaryRecommendation{
+			Check:    check,
+			Severity: appversion.SeverityOK,
+			Finding:  fmt.Sprintf("build %s present, but no HEAD to compare against (not a repo / unreadable) — staleness not checked", short(runningRev)),
+		}
+	default: // CauseMatched — Fresh.
+		return appversion.BinaryRecommendation{
+			Check:    check,
+			Severity: appversion.SeverityOK,
+			Finding:  fmt.Sprintf("build %s matches %s (%s) — current", short(runningRev), short(headRev), headRef),
+		}
+	}
 }
 
 // diagnose runs both checks over input and assembles the recommendations. It is
