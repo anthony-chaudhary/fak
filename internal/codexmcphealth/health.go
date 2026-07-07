@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -304,28 +305,11 @@ func InventoryStaleChildren(root string) ([]ChildProc, string) {
 func ReapChildren(pids []int) []ReapResult {
 	results := make([]ReapResult, 0, len(pids))
 	for _, pid := range pids {
-		if runtime.GOOS == "windows" {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			cmd := exec.CommandContext(ctx, "taskkill", "/PID", strconv.Itoa(pid), "/F")
-			windowgate.ConfigureBackgroundCommand(cmd)
-			out, err := cmd.CombinedOutput()
-			cancel()
-			detail := strings.TrimSpace(string(out))
-			if err != nil && detail == "" {
-				detail = err.Error()
-			}
-			results = append(results, ReapResult{PID: pid, Reaped: err == nil, Detail: detail})
-			continue
-		}
-		proc, err := os.FindProcess(pid)
-		if err == nil {
-			err = proc.Kill()
-		}
-		detail := "terminated"
-		if err != nil {
-			detail = err.Error()
-		}
-		results = append(results, ReapResult{PID: pid, Reaped: err == nil, Detail: detail})
+		// A reaped `fak serve --stdio` is a tree root, not a leaf: tool calls
+		// spawn descendant processes, so the kill must reach the whole subtree
+		// (taskkill /T /F on Windows, process-group SIGKILL on POSIX).
+		ok, detail := procguard.KillPID(pid)
+		results = append(results, ReapResult{PID: pid, Reaped: ok, Detail: detail})
 	}
 	return results
 }
