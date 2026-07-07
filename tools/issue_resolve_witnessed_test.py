@@ -11,6 +11,7 @@ array (one row per audited sha), not a bare object.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -26,6 +27,20 @@ def load():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def gh_close_then_state(state="CLOSED", reason="COMPLETED", *, record=None):
+    """A ``run_capture`` replacement modelling the #2641 close→readback pair: a
+    ``gh issue close`` always succeeds (rc 0), and a ``gh issue view --json
+    state,stateReason`` reports one fixed authoritative state. ``record`` (a list)
+    captures every command so a test can assert which closes/readbacks ran."""
+    def run(cmd, cwd, timeout):
+        if record is not None:
+            record.append(cmd)
+        if cmd[:3] == ["gh", "issue", "view"]:
+            return 0, json.dumps({"state": state, "stateReason": reason}), ""
+        return 0, "", ""
+    return run
 
 
 class OpenWitnessedTest(unittest.TestCase):
@@ -399,7 +414,9 @@ class PushedGateTest(unittest.TestCase):
         mod = load()
         self._patch(mod, gate_active=True)
         closed: list = []
-        mod.run_capture = lambda cmd, cwd, timeout: (closed.append(cmd) or (0, "", ""))
+        # readback confirms CLOSED so the pushed issue counts; the held (#90) issue
+        # never reaches the close/readback at all.
+        mod.run_capture = gh_close_then_state(record=closed)
         p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
         actions = {r["number"]: r["action"] for r in p["results"]}
         self.assertEqual(actions[100], "closed")          # pushed -> closed
@@ -414,7 +431,7 @@ class PushedGateTest(unittest.TestCase):
     def test_gate_inactive_when_no_origin_closes_local_witness(self) -> None:
         mod = load()
         self._patch(mod, gate_active=False)  # origin/main unresolvable -> degrade
-        mod.run_capture = lambda cmd, cwd, timeout: (0, "", "")
+        mod.run_capture = gh_close_then_state()  # readback confirms CLOSED
         p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
         actions = {r["number"]: r["action"] for r in p["results"]}
         self.assertEqual(actions[100], "closed")
@@ -425,13 +442,151 @@ class PushedGateTest(unittest.TestCase):
     def test_require_pushed_false_disables_gate(self) -> None:
         mod = load()
         self._patch(mod, gate_active=True)  # origin resolvable...
-        mod.run_capture = lambda cmd, cwd, timeout: (0, "", "")
+        mod.run_capture = gh_close_then_state()  # readback confirms CLOSED
         # ...but the caller opted out: unpushed commits close anyway.
         p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None,
                          max_commits=600, require_pushed=False)
         actions = {r["number"]: r["action"] for r in p["results"]}
         self.assertEqual(actions[90], "closed")
         self.assertEqual(p["pushed_gate"], "disabled")
+
+
+class StateReadbackTest(unittest.TestCase):
+    """#2641: a close is counted only after a state readback confirms CLOSED. An
+    issue that reads back OPEN/REOPENED is a distinct ``close_not_persistent`` event
+    and is never tallied; a repeated close of an already-counted issue in one run is
+    counted once. This is the closure-loop fixture with a fake GitHub client that
+    returns CLOSED, then OPEN/REOPENED for the same issue, proving the progress
+    ledger cannot double-count a reopened issue as closed."""
+
+    RESOLVING_RV = {"witness_ok": True, "verdict": "OK", "witness": "diff-witnessed",
+                    "claim_kind": "code_effect", "touches_code": True, "reason": None}
+
+    def _audit(self, *rows):
+        # rows: (number, sha) — one OPEN_WITNESSED entry each (numbers may repeat).
+        return {"closure_rate": 0.5, "issues": [
+            {"number": n, "title": f"fix(x): thing {n}", "bucket": "OPEN_WITNESSED",
+             "witnessed_commits": [{"sha": sha, "subject": f"fix {sha}"}]}
+            for n, sha in rows]}
+
+    def _fake_gh(self, view_states):
+        """`issue close` always succeeds; `issue view <n>` pops the next programmed
+        authoritative state for that issue (a queue per number, so the SAME issue
+        can read back CLOSED then OPEN/REOPENED across attempts)."""
+        calls: list[list[str]] = []
+        pending = {n: list(seq) for n, seq in view_states.items()}
+
+        def run(cmd, cwd, timeout):
+            calls.append(cmd)
+            if cmd[:3] == ["gh", "issue", "view"]:
+                n = int(cmd[3])
+                seq = pending.get(n) or []
+                st = seq.pop(0) if seq else {"state": "CLOSED", "stateReason": "COMPLETED"}
+                return 0, json.dumps(st), ""
+            return 0, "", ""
+
+        return run, calls
+
+    def _patch(self, mod, audit, view_states):
+        mod.load_audit = lambda root, audit_json, max_commits: audit
+        mod.origin_main_resolvable = lambda root: False  # inert durability gate
+        mod.reverify = lambda root, sha: dict(self.RESOLVING_RV)
+        run, calls = self._fake_gh(view_states)
+        mod.run_capture = run
+        return calls
+
+    def test_closed_readback_is_counted_once(self) -> None:
+        mod = load()
+        self._patch(mod, self._audit((2605, "sha1")),
+                    {2605: [{"state": "CLOSED", "stateReason": "COMPLETED"}]})
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        r = p["results"][0]
+        self.assertEqual(r["action"], "closed")
+        self.assertEqual(r["state_after"], "CLOSED")
+        self.assertEqual(p["counts"]["closed"], 1)
+        self.assertEqual(p["counts"]["close_not_persistent"], 0)
+        self.assertEqual(p["closed_numbers"], [2605])
+
+    def test_reopened_readback_is_not_counted(self) -> None:
+        # gh issue close rc 0, but the authoritative state reads back OPEN/REOPENED:
+        # the close did not persist, so it is NOT tallied as a durable closure.
+        mod = load()
+        self._patch(mod, self._audit((2605, "sha1")),
+                    {2605: [{"state": "OPEN", "stateReason": "REOPENED"}]})
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        r = p["results"][0]
+        self.assertEqual(r["action"], mod.CLOSE_NOT_PERSISTENT)
+        self.assertEqual(r["state_after"], "OPEN")
+        self.assertEqual(r["state_reason"], "REOPENED")
+        self.assertEqual(p["counts"]["closed"], 0)
+        self.assertEqual(p["counts"]["close_not_persistent"], 1)
+        self.assertEqual(p["closed_numbers"], [])
+        self.assertEqual(mod.close_decision(mod.CLOSE_NOT_PERSISTENT), "reopened")
+
+    def test_closed_then_reopened_same_issue_no_double_count(self) -> None:
+        # The literal Witness: the SAME issue returns CLOSED, then OPEN/REOPENED.
+        # Net durable closes = 1 (no double-count); the reopen is a distinct event.
+        mod = load()
+        self._patch(mod, self._audit((2605, "sha1"), (2605, "sha2")),
+                    {2605: [{"state": "CLOSED", "stateReason": "COMPLETED"},
+                            {"state": "OPEN", "stateReason": "REOPENED"}]})
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        actions = [r["action"] for r in p["results"]]
+        self.assertEqual(actions, ["closed", mod.CLOSE_NOT_PERSISTENT])
+        self.assertEqual(p["counts"]["closed"], 1)
+        self.assertEqual(p["counts"]["close_not_persistent"], 1)
+        self.assertEqual(p["closed_numbers"], [2605])
+
+    def test_repeated_close_same_issue_counted_once(self) -> None:
+        # Both attempts read back CLOSED (no intervening reopen): the repeat is
+        # 'already_counted', so closed / closed_by_loop_total cannot inflate.
+        mod = load()
+        self._patch(mod, self._audit((2605, "sha1"), (2605, "sha2")),
+                    {2605: [{"state": "CLOSED", "stateReason": "COMPLETED"},
+                            {"state": "CLOSED", "stateReason": "COMPLETED"}]})
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        actions = [r["action"] for r in p["results"]]
+        self.assertEqual(actions, ["closed", mod.CLOSE_ALREADY_COUNTED])
+        self.assertEqual(p["counts"]["closed"], 1)
+        self.assertEqual(p["counts"]["already_counted"], 1)
+        self.assertEqual(p["closed_numbers"], [2605])
+
+    def test_unreadable_state_fails_open_to_not_persistent(self) -> None:
+        # A gh readback error (rc!=0 / no JSON) is UNCONFIRMED: fail-open in the
+        # conservative direction -> not counted, surfaced as close_not_persistent.
+        mod = load()
+        mod.load_audit = lambda root, audit_json, max_commits: self._audit((2605, "sha1"))
+        mod.origin_main_resolvable = lambda root: False
+        mod.reverify = lambda root, sha: dict(self.RESOLVING_RV)
+
+        def run(cmd, cwd, timeout):
+            if cmd[:3] == ["gh", "issue", "view"]:
+                return 1, "", "gh: could not resolve issue"
+            return 0, "", ""
+
+        mod.run_capture = run
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        r = p["results"][0]
+        self.assertEqual(r["action"], mod.CLOSE_NOT_PERSISTENT)
+        self.assertIsNone(r["state_after"])
+        self.assertEqual(p["counts"]["closed"], 0)
+        self.assertEqual(p["counts"]["close_not_persistent"], 1)
+
+    def test_readback_state_parses_gh_json(self) -> None:
+        mod = load()
+        mod.run_capture = lambda cmd, cwd, timeout: (
+            0, json.dumps({"state": "OPEN", "stateReason": "REOPENED"}), "")
+        st = mod.readback_state(ROOT, 2605)
+        self.assertEqual(st, {"state": "OPEN", "state_reason": "REOPENED"})
+
+    def test_readback_state_none_number_short_circuits(self) -> None:
+        mod = load()
+
+        def boom(cmd, cwd, timeout):
+            raise AssertionError("must not shell out for a None issue number")
+
+        mod.run_capture = boom
+        self.assertEqual(mod.readback_state(ROOT, None), {})
 
 
 if __name__ == "__main__":

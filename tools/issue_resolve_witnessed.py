@@ -17,6 +17,7 @@ loop can move real issues, because the keep-bit is a git fact:
         paths, or the issue itself is a docs rung — a docs/triage commit that
         merely references #N witnesses a note, never #N's feature witness):
        gh issue close <n> --comment "<sha> (<subject>) resolves this; ..."
+       gh issue view  <n> --json state   # readback: count iff state==CLOSED (#2641)
 
 The re-verification is the whole point (.claude/rsi-loop-dod.md: "no keep on a
 self-authored claim"): the closer does NOT trust the audit's bucket, it re-asks
@@ -53,6 +54,16 @@ WITNESS_OK = "diff-witnessed"
 # witnesses only that a note shipped — it never resolves a non-docs issue.
 RESOLVING_CLAIM_KINDS = {"code_effect", "test_cover"}
 NONRESOLVING_HOLD = "CLAIM_KIND_NONRESOLVING"
+# State-readback idempotency (#2641): `gh issue close` returning rc 0 proves the
+# COMMAND ran, not that the issue is durably closed — a concurrent/lagging reopen
+# leaves it OPEN/REOPENED. The closure loop reads the authoritative state back and
+# counts a close only when GitHub reports CLOSED; a still/again-open issue is a
+# distinct ``close_not_persistent`` event (never tallied), and a repeated close of
+# an issue already counted THIS run is ``already_counted`` once (unless the readback
+# shows a new reopen) so the progress ledger can never double-count a reopened issue.
+DURABLE_CLOSED_STATE = "CLOSED"
+CLOSE_NOT_PERSISTENT = "close_not_persistent"
+CLOSE_ALREADY_COUNTED = "already_counted"
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -199,6 +210,36 @@ def reachable_from_origin(root: Path, sha: str) -> bool:
     return rc == 0
 
 
+def readback_state(root: Path, number: Any) -> dict[str, Any]:
+    """The AUTHORITATIVE GitHub state of one issue after a close attempt (#2641).
+
+    ``gh issue close`` returning rc 0 means the *command* ran, not that the issue is
+    durably CLOSED: a close that raced a reopen (or silently no-ops on an
+    already-reopened issue) leaves it OPEN with ``stateReason`` REOPENED. The
+    closure loop must count a close only when the state GitHub reports back is
+    CLOSED, so a reopened issue is never tallied as the loop's durable work.
+
+    Returns ``{"state": <UPPER>, "state_reason": <str>}``. Fail-open in the
+    conservative direction: an unreadable state (gh error / non-JSON) returns ``{}``
+    and the caller treats it as UNCONFIRMED — surfaced as ``close_not_persistent``
+    and not counted — rather than trusting the bare exit code."""
+    if number is None:
+        return {}
+    rc, out, _ = run_capture(
+        ["gh", "issue", "view", str(number), "--json", "state,stateReason"],
+        root, timeout=30)
+    if rc != 0:
+        return {}
+    try:
+        doc = json.loads(out.strip() or "{}")
+    except ValueError:
+        return {}
+    if not isinstance(doc, dict):
+        return {}
+    return {"state": str(doc.get("state") or "").upper(),
+            "state_reason": str(doc.get("stateReason") or "")}
+
+
 def close_comment(row: dict[str, Any]) -> str:
     subj = row.get("subject") or "resolving commit"
     return (f"Resolved by `{row['sha'][:10]}` ({subj}). Closed by the DOS dispatch "
@@ -225,6 +266,10 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
     gate_active = require_pushed and origin_main_resolvable(root)
     planned, results = [], []
     closed = skipped = skipped_nonresolving = skipped_unpushed = failed = 0
+    close_not_persistent = already_counted = 0
+    # Unique issue IDs durably closed THIS run — a repeated close tick on an issue
+    # already counted here does not inflate the tally (#2641, done condition 3).
+    counted: set[int] = set()
     for row in candidates:
         rv = reverify(root, row["sha"])
         item = {**row, **rv, "command": close_cmd(row)}
@@ -251,14 +296,44 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
             item["action"] = "would_close"
             results.append(item)
             continue
+        number = row.get("number")
         rc, out, err = run_capture(close_cmd(row), root, timeout=60)
-        item["action"] = "closed" if rc == 0 else "close_failed"
         item["returncode"] = rc
-        if rc == 0:
-            closed += 1
-        else:
+        if rc != 0:
+            item["action"] = "close_failed"
             item["error"] = (err or out).strip()[-300:]
             failed += 1
+            results.append(item)
+            continue
+        # #2641: rc 0 is not proof of a durable close. Read the authoritative state
+        # back and count the close ONLY when GitHub reports CLOSED; an issue still or
+        # again OPEN (e.g. stateReason REOPENED) is a distinct, non-persistent event
+        # and is never tallied as the loop's durable work.
+        state = readback_state(root, number)
+        item["state_after"] = state.get("state") or None
+        item["state_reason"] = state.get("state_reason") or None
+        if state.get("state") != DURABLE_CLOSED_STATE:
+            item["action"] = CLOSE_NOT_PERSISTENT
+            item["reason"] = (
+                f"gh reports state={state.get('state') or '?'} "
+                f"reason={state.get('state_reason') or '?'} after close attempt; "
+                "not a durable closure")
+            close_not_persistent += 1
+            results.append(item)
+            continue
+        # Authoritative state is CLOSED. Count once per issue per run: a repeated
+        # close of an issue already counted this run (with no intervening reopen —
+        # that path is caught above) must not inflate closed / closed_by_loop_total.
+        if isinstance(number, int) and number in counted:
+            item["action"] = CLOSE_ALREADY_COUNTED
+            item["reason"] = f"#{number} already durably closed this run"
+            already_counted += 1
+            results.append(item)
+            continue
+        item["action"] = "closed"
+        if isinstance(number, int):
+            counted.add(number)
+        closed += 1
         results.append(item)
     ok = failed == 0 and (live or bool(candidates))
     return {
@@ -275,7 +350,12 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
             "skipped_unwitnessed": skipped,
             "skipped_nonresolving": skipped_nonresolving,
             "skipped_unpushed": skipped_unpushed,
+            "close_not_persistent": close_not_persistent,
+            "already_counted": already_counted,
             "failed": failed},
+        # The unique issue IDs this run drove to a readback-confirmed CLOSED state —
+        # the honest durable-closure set the progress ledger should tally (#2641).
+        "closed_numbers": sorted(counted),
         "closure_rate_before": audit.get("closure_rate"),
         "results": results,
     }
@@ -298,7 +378,10 @@ def render(p: dict[str, Any]) -> str:
     lines.append(f"  -> closed={c.get('closed')} would_close={c.get('would_close')} "
                  f"skipped={c.get('skipped_unwitnessed')} "
                  f"nonresolving={c.get('skipped_nonresolving')} "
-                 f"unpushed={c.get('skipped_unpushed')} failed={c.get('failed')}  "
+                 f"unpushed={c.get('skipped_unpushed')} "
+                 f"not_persistent={c.get('close_not_persistent')} "
+                 f"already_counted={c.get('already_counted')} "
+                 f"failed={c.get('failed')}  "
                  f"(gate={p.get('pushed_gate')}, closure_rate before={p.get('closure_rate_before')})")
     if not p.get("live"):
         lines.append("  DRY-RUN - re-run with --live to execute the gh closes")
@@ -308,8 +391,11 @@ def render(p: dict[str, Any]) -> str:
 def close_decision(action: str) -> str:
     if action in {"closed", "would_close"}:
         return "close"
-    if action in {"skip_unwitnessed", "skip_nonresolving", "skip_unpushed"}:
+    if action in {"skip_unwitnessed", "skip_nonresolving", "skip_unpushed",
+                  CLOSE_ALREADY_COUNTED}:
         return "hold"
+    if action == CLOSE_NOT_PERSISTENT:
+        return "reopened"
     if action == "close_failed":
         return "failed"
     return action or "unknown"
