@@ -55,6 +55,12 @@ const (
 	ReasonSuperseded CuratorReasonKind = "superseded"
 	// ReasonSlopScored — the slop scorecard flagged the skill (SlopScore).
 	ReasonSlopScored CuratorReasonKind = "slop_scored"
+	// ReasonSelfFulfilling — the self-fulfilling-skill detector flagged the skill
+	// (#2842): its use_count looked valuable, but its value net of its own
+	// invocations (CounterfactualValue) collapsed to zero or negative, so its only
+	// "improvement" was being invoked. Distinct from ReasonSlopScored so an
+	// operator can tell a low-quality skill from a metric-artifact skill.
+	ReasonSelfFulfilling CuratorReasonKind = "self_fulfilling"
 )
 
 // CuratorReason is the structured reason attached to an archive/consolidate
@@ -68,6 +74,12 @@ type CuratorReason struct {
 	SupersededBy string `json:"superseded_by,omitempty"`
 	// SlopScore is set iff Kind == ReasonSlopScored (the flagging slop score).
 	SlopScore float64 `json:"slop_score,omitempty"`
+	// UseCount is set iff Kind == ReasonSelfFulfilling (the gameable use_count that
+	// made the skill look valuable — the metric the loop can raise on its own).
+	UseCount int `json:"use_count,omitempty"`
+	// CounterfactualValue is set iff Kind == ReasonSelfFulfilling (the skill's value
+	// net of its own invocations — <= 0 for a flagged self-fulfilling skill).
+	CounterfactualValue float64 `json:"counterfactual_value,omitempty"`
 }
 
 // Valid reports whether the reason names a known Kind AND carries the field that
@@ -80,6 +92,11 @@ func (r CuratorReason) Valid() bool {
 		return r.SupersededBy != ""
 	case ReasonSlopScored:
 		return r.SlopScore > 0
+	case ReasonSelfFulfilling:
+		// A self-fulfilling reason must name the positive use_count that made the
+		// skill look valuable; its counterfactual value is <= 0 by construction
+		// (that is the flag), so use_count is the field that must be populated.
+		return r.UseCount > 0
 	default:
 		return false
 	}
@@ -94,6 +111,9 @@ func (r CuratorReason) String() string {
 		return "superseded by skill " + r.SupersededBy
 	case ReasonSlopScored:
 		return "slop-scored " + strconv.FormatFloat(r.SlopScore, 'g', -1, 64)
+	case ReasonSelfFulfilling:
+		return "self-fulfilling (use_count " + strconv.Itoa(r.UseCount) +
+			", counterfactual value " + strconv.FormatFloat(r.CounterfactualValue, 'g', -1, 64) + ")"
 	default:
 		return "unknown reason"
 	}
