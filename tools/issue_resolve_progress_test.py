@@ -298,6 +298,36 @@ class EvaluateTest(unittest.TestCase):
                              max_commits=100)
         self.assertFalse(p["ok"])
 
+    def test_forced_bypass_total_folds_into_progress_ledger(self) -> None:
+        # #2637 (progress-ledger leg of done-condition #3): operator-forced
+        # issue-contract gate bypasses recorded by the resolve tick must surface in
+        # the aggregate progress snapshot + render, so a bypassed readiness guard is
+        # visible in the curve the operator watches, not only in one tick's render.
+        mod = load()
+        self._stub(mod, open_now=483, witnessed=[])
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / mod.RUNS_DIRNAME
+            row = {"issue": 2633, "lane": "gateway", "score": 41,
+                   "reason": "operator: top real issue", "gate_reason": "score:41<floor:100"}
+            mod.loop_writer.record_contract_forced_bypass(runs, row, live=True)
+            mod.loop_writer.record_contract_forced_bypass(runs, row, live=True)
+            p = mod.evaluate(root, target=50, do_close=False, live=False,
+                             max_commits=100)
+        self.assertEqual(p["contract_forced_bypass_total"], 2)
+        self.assertIn("force-bypassed 2x", mod.render(p))
+
+    def test_no_forced_bypass_stays_quiet(self) -> None:
+        # A clean fleet (no override ledger) reports 0 and the render omits the
+        # bypass warning entirely — the signal only shows when the guard is bypassed.
+        mod = load()
+        self._stub(mod, open_now=483, witnessed=[])
+        with tempfile.TemporaryDirectory() as d:
+            p = mod.evaluate(Path(d), target=50, do_close=False, live=False,
+                             max_commits=100)
+        self.assertEqual(p["contract_forced_bypass_total"], 0)
+        self.assertNotIn("force-bypassed", mod.render(p))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -349,6 +349,11 @@ def evaluate(root: Path, *, target: int, do_close: bool, live: bool,
 
     # Durable proof metric: total closed by the loop across all ticks (+ this one).
     closed_total = fold_closed_history(runs_dir) + closed_now
+    # Operator visibility for the issue-contract spawn gate (#2637): fold the durable
+    # count of operator-forced gate bypasses into the progress ledger so a bypassed
+    # readiness guard shows up in the aggregate curve the operator watches, not only
+    # in a single resolve-tick's render. Fail-open — an absent ledger reports 0.
+    forced_bypass_total = loop_writer.contract_forced_bypass_count(runs_dir)
     resolved = None
     if baseline_open is not None and open_now is not None:
         resolved = max(0, baseline_open - open_now)
@@ -368,6 +373,7 @@ def evaluate(root: Path, *, target: int, do_close: bool, live: bool,
         "resolved_toward_target": resolved, "target_remaining": target_remaining,
         "witnessed_open": len(witnessed), "witnessed_numbers": witnessed[:50],
         "closed_now": closed_now, "closed_by_loop_total": closed_total,
+        "contract_forced_bypass_total": forced_bypass_total,
         "close_live": live if do_close else None,
         "close_result": close_result,
         "audit_error": audit.get("_error"),
@@ -397,6 +403,10 @@ def render(p: dict[str, Any]) -> str:
         f"closed-by-loop total: {p.get('closed_by_loop_total')}  "
         f"remaining to {tgt}: {rem}",
     ]
+    fb = p.get("contract_forced_bypass_total")
+    if isinstance(fb, int) and fb > 0:
+        lines.append(f"  ! issue-contract gate force-bypassed {fb}x — operator "
+                     f"overrides recorded in the audit ledger (#2637)")
     cr = p.get("close_result")
     if cr:
         lines.append(f"  close arm: verdict={cr.get('verdict')} closed={cr.get('closed')} "
