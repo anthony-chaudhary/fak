@@ -99,6 +99,24 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 	_ = os.MkdirAll(logDir, 0o755)
 	note := func(format string, a ...any) { rwNote(logDir, stdout, fmt.Sprintf(format, a...)) }
 
+	// Host-level tick lock (#3110): serialize overlapping ticks so a slow tick and a
+	// concurrent cron/--live/manual tick sharing this regDir cannot both read
+	// independent stale process-table snapshots and admit the SAME still-starting
+	// session (briefly running two `claude --resume` on one transcript). A --status
+	// read is side-effect-free and launches nothing, so it never contends for the lock.
+	if !*statusOnly {
+		release, acquired, lockErr := resume.TryTickLock(regDir)
+		if lockErr != nil {
+			// Fail open: a broken lock must never strand the whole watchdog.
+			note("  tick-lock: %v — proceeding unlocked (fail open)", lockErr)
+		} else if !acquired {
+			note("another resume-watchdog tick holds the lock; skipping this tick")
+			return 0
+		} else {
+			defer release()
+		}
+	}
+
 	home, _ := os.UserHomeDir()
 	claudeExe := rwClaudeExe(home)
 	selfSID := strings.TrimSpace(os.Getenv("CLAUDE_CODE_SESSION_ID"))
