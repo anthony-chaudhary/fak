@@ -1,0 +1,5 @@
+{"schema":"fak.issue-fanout-ledger.v1","at":"2026-06-29T09:14:02Z","leaf":"issuefanout","outcome":"success"}
+{"schema":"fak.issue-fanout-ledger.v1","at":"2026-06-30T17:41:55Z","leaf":"issuefanout","outcome":"refused"}
+{"schema":"fak.issue-fanout-ledger.v1","at":"2026-07-02T11:08:20Z","leaf":"issuefanout","outcome":"success"}
+{"schema":"fak.issue-fanout-ledger.v1","at":"2026-07-06T13:04:05Z","leaf":"issuefanout","outcome":"success"}
+{"schema":"fak.issue-fanout-ledger.v1","at":"2026-07-07T08:22:47Z","leaf":"issuefanout","outcome":"error"}
