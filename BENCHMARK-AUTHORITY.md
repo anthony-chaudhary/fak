@@ -10,7 +10,7 @@
 
 > **🧠 The *why*:** `WHY-REUSE-WINS-2026-06-21.md` (private companion — not published) (v1) argues — and stress-tests — *why* these reuse numbers matter more than the headline alone: reuse is a **different class** of optimization (work-elimination on the `N` axis, not work-acceleration on the `κ` axis), so it's **exact, training-free, and composes multiplicatively** on top of every per-token trick. Follows the v2 SOTA-only framing — leads with the absolute competitive number (**19.0 min vs 78 min = 4.1× less work**, conservative marginal 2.4–2.7×), shows **no naive-loop numbers**, and centers cross-agent reuse as the layer that is `fak`'s. No new numbers; fences where the "works across everything / no fine-tuning" framing is overstated (and where addressable reuse, [#228](https://github.com/anthony-chaudhary/fak/issues/228), widens it).
 
-**Last updated:** 2026-07-05
+**Last updated:** 2026-07-07
 **Status:** Living document — update when new model results ship
 
 > **🔁 Provenance vs. public reproducibility (read before you `git show` a commit below).**
@@ -78,6 +78,7 @@
 | **fak self-tax — own mediation overhead + net effect over time (LIVING, net-true-labeled)** ([#1169](https://github.com/anthony-chaudhary/fak/issues/1169), L5/T12 of epic [#1147](https://github.com/anthony-chaudhary/fak/issues/1147)) | **read-path floor ~0.55 ns/op (0 allocs, FLAT N=1→1000) · pure-kernel decide 362 ns · vDSO self-ablation −520 tok (net SAVING) · cross-agent tool-light +28,986 tok (1.56×, net COST) · reuse detector nets POSITIVE** — signed + workload-dependent, never an average | n/a — fak's own mediation overhead (NOT raw inference; that axis is #306) | fak-off / bare-agent on the same workload (per component artifact) | _this commit_ | `docs/benchmarks/SELF-TAX-TREND.md` — the living trend doc that folds the already-committed self-tax artifacts into one signed, net-true-labeled series: `internal/abi/registry_scaling_test.go` (read floor), `experiments/mac-m3pro-kernel-20260620/kernel-latency-mac-m3pro-20260620.json` (decide), `experiments/ablate/tau2-smoke-vdso-ablation.json` (vDSO net saving), `experiments/ablate/cross-agent-pong-opus.json` (cross-agent net cost), and design note §9 (the WITNESSED⊕OBSERVED−MODELED improvement detector). Reproduce (representative — full per-surface set in the trend doc): `go test ./internal/abi -bench BenchmarkRegistryReadScaling -benchmem`. **Honesty fence:** this is fak's *mediation* overhead, not #306 raw-inference parity; each row is an independently-committed point, and the always-on fak-on-vs-fak-off CI gate (T6/T7/T8) + single `fak perf` read-out (T11) are the named epic follow-on, so this is a curated fold today, not yet an auto-emitted JSON |
 | **fak support-maturity matrix — model × backend rung coverage (LIVING, generated-not-typed)** ([#1255](https://github.com/anthony-chaudhary/fak/issues/1255), E6 of epic [#1243](https://github.com/anthony-chaudhary/fak/issues/1243)) | **Grade F · score 33.9 · support_maturity_debt 37 · 19/56 cells SUPPORTED** (13 PROOF-PATH-ONLY, 24 FENCED, 0 UNDEFINED across 14 families × 4 backends) — a coverage instrument, not a vs-baseline win | n/a — the kernel's own model × backend support grid (`internal/covmatrix`), folded by `internal/supportmaturityscore`; deterministic from the committed tree, no model/GPU | n/a — this measures support maturity, not throughput; the per-cell parity work is #307/#305/#303/#301 | _this commit_ | `docs/HARDWARE-MATRIX.md` "Support-maturity matrix" block — GENERATED, not hand-typed: regenerate with `fak support-maturity-scorecard --write-doc`, and a stale cell reds `fak support-maturity-scorecard --check-doc` (CI gate `TestSupportMaturityMatrixDocFresh` in `cmd/fak/supportmaturityscore_doc_test.go`). Reproduce the numbers: `go run ./cmd/fak support-maturity-scorecard --json`. **Honesty fence:** a non-SUPPORTED cell is an honest rung (FENCED = the accelerated path refuses rather than diverges), not a failure; debt counts cells below SUPPORTED so the grade tracks the maturity gap, and the freshness gate keeps the doc a view of the live grid rather than a prose snapshot |
 | **FrontierSWE time-to-solution — fak-routed vs raw harness (C15 of epic [#1706](https://github.com/anthony-chaudhary/fak/issues/1706), [#1721](https://github.com/anthony-chaudhary/fak/issues/1721)) — GATED, no number until witnessed** | **GATED — no TTS number is claimed. Claim boundary: no wall-clock/turn-count TTS ratio until (a) the official FrontierSWE grader produced both arms' `reward.json` (C13 [#1719](https://github.com/anthony-chaudhary/fak/issues/1719)) and (b) score-parity holds — fak `correctness`/`speedup` >= raw (C11 [#1717](https://github.com/anthony-chaudhary/fak/issues/1717))** | harness-agnostic (claude-code shim first) | raw FrontierSWE harness (same task/model/budget/retry) | _gated_ | `docs/benchmarks/FRONTIERSWE-RESULTS.md` (authority) + `docs/benchmarks/FRONTIERSWE-TTS-RUNBOOK.md` (raw-vs-fak recipe). Offline projection only, NOT a measurement: `fak frontierswe describe --tts`; scoring runtime green (`go test ./internal/frontierswe`). Measured TTS is the C13/C14 residual — see [FRONTIERSWE-RESULTS.md](docs/benchmarks/FRONTIERSWE-RESULTS.md) |
+| **Full-span four-band trace + µs decide tail under same-process load (G5/R6 of epic [#2218](https://github.com/anthony-chaudhary/fak/issues/2218), [#2223](https://github.com/anthony-chaudhary/fak/issues/2223))** | **loaded p99 ≈ 30–34 µs vs quiet ≈ 13.5–14 µs (×2.1–2.5) · p50 nearly flat (×1.17–1.19) · >100 µs share ~3× (0.18–0.19% → 0.56–0.58%) · trace: all 4 bands walkable in ONE process, every DENY carrying a consequence class (retry_turn / forked_outcome / clean_stop)** — OBSERVED research-grade, no gate flipped | n/a — kernel `Decide` fold + real `superloop.Walk`/`EvaluatePreflight`, hermetic, no model | quiet arm of the SAME process/run (within-run only; per-band totals never cross-multiplied) | _this commit_ | `docs/benchmarks/fullspan/fullspan-trace-20260707.json` + `tailload-20260707-run{1,2}.json` (two full 200k-sample runs; loaded p99 agrees within 14.2%) + sheet `docs/benchmarks/FULLSPAN-TAILLOAD-RESULTS.md`. Hardware named in-artifact: AMD Ryzen 9 9950X (16C/32T), 256 GiB RAM, WSL2 Ubuntu 24.04 on a Windows 11 host. Reproduce: `FAK_BENCH_HW=… FAK_TAILLOAD_OUT=… go test ./internal/bench/ -run TestWriteTailLoadArtifact -count=1`. **Fences:** three-clocks (no end-to-end field — structurally enforced by test), trace B0 spans are one-shot cold costs (do NOT compare to the warmed 362 ns M3 Pro anchor), WSL2-virtualized tails, coarse-clock hosts refuse to write artifacts |
 
 > **The model-ladder thesis.** Live wall-clock ratio climbs toward the deterministic
 > 7.50× token-speedup ceiling as per-token compute grows (135M 4.58× → 360M 5.40× →
@@ -87,6 +88,63 @@
 > hardware-independent and reproduce the committed JSON exactly; only the live
 > wall-clocks are single-box (within-run ratios authoritative per
 > [BENCHMARK-GOVERNANCE.md "Within-Run Ratios"](BENCHMARK-GOVERNANCE.md#within-run-ratios--single-box-discipline)).
+
+---
+
+## Full-Span Four-Band Trace + Tail Under Load (2026-07-07) — the dynamic-range composition witness
+
+**Date:** 2026-07-07
+**Issue:** [#2223](https://github.com/anthony-chaudhary/fak/issues/2223) (gap G5 + risk R6 of epic [#2218](https://github.com/anthony-chaudhary/fak/issues/2218))
+**Files:** `docs/benchmarks/fullspan/fullspan-trace-20260707.json`, `docs/benchmarks/fullspan/tailload-20260707-run1.json` + `-run2.json` *(anchors)*, [`docs/benchmarks/FULLSPAN-TAILLOAD-RESULTS.md`](docs/benchmarks/FULLSPAN-TAILLOAD-RESULTS.md) *(narrative + full fences)*
+**Machine:** AMD Ryzen 9 9950X (16C/32T), 256 GiB RAM, WSL2 Ubuntu 24.04 (kernel 6.6.114.1-microsoft-standard-WSL2) on a Windows 11 host, go1.26.0 linux/amd64
+**Label:** OBSERVED, research-grade — one box; two full runs for the tail arm; **no gate asserted or flipped**
+
+### What this adds (and why)
+
+Every prior dynamic-range number lived in a separate artifact on a separate clock
+band. This pass commits (1) the first **single-process causal trace** spanning all
+four bands — a real B6 plan verdict (`superloop.Walk`) → real B4 admission
+(`dispatchtick.EvaluatePreflight`) → scripted B2 turn → 5 real B0 `kernel.Decide`
+calls — with a walkable parent chain and **every DENY span carrying an observed
+downstream-consequence class** (`retry_turn` / `forked_outcome` / `clean_stop`,
+with induced-work attribution per deny reason); and (2) the µs decide fold's
+**per-call latency distribution quiet vs under same-process B2/B3-shaped load**
+(4 streaming + 4 session-churn workers in the measuring process), 200,000 exact
+samples per arm.
+
+### Results
+
+Quiet vs loaded, `kernel.Decide` per-call, both runs (ns):
+
+| Arm | p50 | p99 | p99.9 | >100 µs share |
+|---|---:|---:|---:|---:|
+| quiet (run1 / run2) | 2,904 / 2,892 | 13,483 / 14,137 | 123,513 / 118,899 | 0.19% / 0.18% |
+| **loaded** (run1 / run2) | 3,452 / 3,388 | **33,714 / 29,533** | 450,726 / 456,049 | 0.58% / 0.56% |
+
+Same-process load leaves the median nearly flat (×1.17–1.19) and degrades the
+tail disproportionately: p99 ×2.1–2.5, p99.9 ×3.7–3.8, >100 µs share ~3×. The
+quiet-process B0 anchors understate the production tail — now quantified. Trace
+per-band totals: B6 30,319 ns (1 span) · B4 3,842 ns (1) · B2 301,192 ns (3) ·
+B0 57,004 ns (5); reported per band and never combined.
+
+### Honesty fences (full set in the results sheet)
+
+- Three clocks, never one number: the artifact schema has **no** end-to-end /
+  ratio / speedup field, enforced structurally by the test, not by prose.
+- Trace B0 spans are one-shot cold costs — not comparable to the warmed
+  `go test -bench` medians in the M3 Pro anchor rows; the only intended
+  comparison is within-run quiet-vs-loaded.
+- WSL2-virtualized host (hypervisor jitter inflates tails); per-call timer
+  overhead identical in both arms; coarse-clock hosts (Windows ~0.5 ms tick)
+  refuse to write artifacts rather than commit quantization noise.
+- Two runs agree on loaded p99 within 14.2% (same side of every threshold) —
+  consistent, but OBSERVED→gate promotion is deliberately not attempted.
+
+### Verification
+
+- `go test ./internal/bench/ -count=1` → PASS (structure asserted everywhere;
+  distribution/duration assertions gate on measured clock resolution).
+- Reproduce commands in the sheet; artifacts carry config + hardware in-band.
 
 ---
 

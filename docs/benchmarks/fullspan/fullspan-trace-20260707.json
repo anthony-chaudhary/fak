@@ -1,0 +1,191 @@
+{
+  "schema": "fak.fullspan-trace.v1",
+  "issue": "#2223 (epic #2218, gap G5)",
+  "generated_at": "2026-07-07T19:14:47Z",
+  "hardware": "AMD Ryzen 9 9950X (16C/32T), 256 GiB RAM, WSL2 Ubuntu 24.04 (kernel 6.6.114.1-microsoft-standard-WSL2) on a Windows 11 host",
+  "goos": "linux",
+  "goarch": "amd64",
+  "num_cpu": 16,
+  "go_version": "go1.26.0",
+  "scripted_turn": true,
+  "fence": "per-band attribution only; the four bands run on different clocks and are NEVER multiplied into one end-to-end ratio (three-clocks fence, EXPLAINER-gate-down-the-stack-2026-06-22.md); B2's model round-trip is scripted, so B2 spans witness fak-owned turn machinery, not model seconds",
+  "spans": [
+    {
+      "id": 0,
+      "parent": -1,
+      "band": "B6",
+      "clock": "days",
+      "name": "superloop.Walk (worst-first select)",
+      "start_ns": 486,
+      "dur_ns": 30319,
+      "note": "selected worst-first member: member-bench"
+    },
+    {
+      "id": 1,
+      "parent": 0,
+      "band": "B4",
+      "clock": "5-30 min",
+      "name": "dispatchtick.EvaluatePreflight",
+      "start_ns": 30934,
+      "dur_ns": 3842,
+      "verdict": "SPAWN_OK",
+      "note": "workspace=member-bench cap=2 live=0"
+    },
+    {
+      "id": 2,
+      "parent": 1,
+      "band": "B2",
+      "clock": "seconds",
+      "name": "agent turn (scripted call set)",
+      "start_ns": 36166,
+      "dur_ns": 182230
+    },
+    {
+      "id": 3,
+      "parent": 2,
+      "band": "B0",
+      "clock": "~0.4-2.4 µs",
+      "name": "kernel.Decide",
+      "start_ns": 38509,
+      "dur_ns": 29564,
+      "tool": "get_user_details",
+      "verdict": "ALLOW",
+      "reason": "NONE"
+    },
+    {
+      "id": 4,
+      "parent": 2,
+      "band": "B2",
+      "clock": "seconds",
+      "name": "dispatch (Submit+Reap)",
+      "start_ns": 69463,
+      "dur_ns": 68341,
+      "tool": "get_user_details"
+    },
+    {
+      "id": 5,
+      "parent": 2,
+      "band": "B0",
+      "clock": "~0.4-2.4 µs",
+      "name": "kernel.Decide",
+      "start_ns": 138102,
+      "dur_ns": 14167,
+      "tool": "write_ledger_entry",
+      "verdict": "DENY",
+      "reason": "DEFAULT_DENY",
+      "deny_consequence": "retry_turn"
+    },
+    {
+      "id": 6,
+      "parent": 2,
+      "band": "B0",
+      "clock": "~0.4-2.4 µs",
+      "name": "kernel.Decide",
+      "start_ns": 152586,
+      "dur_ns": 5540,
+      "tool": "write_ledger_entry",
+      "verdict": "DENY",
+      "reason": "DEFAULT_DENY",
+      "deny_consequence": "forked_outcome"
+    },
+    {
+      "id": 7,
+      "parent": 2,
+      "band": "B0",
+      "clock": "~0.4-2.4 µs",
+      "name": "kernel.Decide",
+      "start_ns": 158463,
+      "dur_ns": 5212,
+      "tool": "search_direct_flight",
+      "verdict": "ALLOW",
+      "reason": "NONE"
+    },
+    {
+      "id": 8,
+      "parent": 2,
+      "band": "B2",
+      "clock": "seconds",
+      "name": "dispatch (Submit+Reap)",
+      "start_ns": 163715,
+      "dur_ns": 50621,
+      "tool": "search_direct_flight"
+    },
+    {
+      "id": 9,
+      "parent": 2,
+      "band": "B0",
+      "clock": "~0.4-2.4 µs",
+      "name": "kernel.Decide",
+      "start_ns": 215825,
+      "dur_ns": 2521,
+      "tool": "shell_rm_rf",
+      "verdict": "DENY",
+      "reason": "POLICY_BLOCK",
+      "deny_consequence": "clean_stop"
+    }
+  ],
+  "per_band_attribution": [
+    {
+      "band": "B6",
+      "clock": "days",
+      "spans": 1,
+      "total_ns": 30319
+    },
+    {
+      "band": "B4",
+      "clock": "5-30 min",
+      "spans": 1,
+      "total_ns": 3842
+    },
+    {
+      "band": "B2",
+      "clock": "seconds",
+      "spans": 3,
+      "total_ns": 301192
+    },
+    {
+      "band": "B0",
+      "clock": "~0.4-2.4 µs",
+      "spans": 5,
+      "total_ns": 57004
+    }
+  ],
+  "deny_attribution": [
+    {
+      "span_id": 5,
+      "tool": "write_ledger_entry",
+      "reason": "DEFAULT_DENY",
+      "consequence": "retry_turn",
+      "deny_ns": 14167,
+      "induced_ns": 5540,
+      "induced_spans": 1
+    },
+    {
+      "span_id": 6,
+      "tool": "write_ledger_entry",
+      "reason": "DEFAULT_DENY",
+      "consequence": "forked_outcome",
+      "deny_ns": 5540,
+      "induced_ns": 55833,
+      "induced_spans": 2
+    },
+    {
+      "span_id": 9,
+      "tool": "shell_rm_rf",
+      "reason": "POLICY_BLOCK",
+      "consequence": "clean_stop",
+      "deny_ns": 2521,
+      "induced_ns": 0,
+      "induced_spans": 0
+    }
+  ],
+  "deny_rates": {
+    "DEFAULT_DENY": {
+      "forked_outcome": 1,
+      "retry_turn": 1
+    },
+    "POLICY_BLOCK": {
+      "clean_stop": 1
+    }
+  }
+}

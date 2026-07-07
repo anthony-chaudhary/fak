@@ -1,0 +1,42 @@
+{
+  "schema": "fak.tailload.v1",
+  "issue": "#2223 (epic #2218, gap G5, risk R6)",
+  "generated_at": "2026-07-07T19:14:53Z",
+  "hardware": "AMD Ryzen 9 9950X (16C/32T), 256 GiB RAM, WSL2 Ubuntu 24.04 (kernel 6.6.114.1-microsoft-standard-WSL2) on a Windows 11 host",
+  "goos": "linux",
+  "goarch": "amd64",
+  "num_cpu": 16,
+  "gomaxprocs": 16,
+  "go_version": "go1.26.0",
+  "tool": "get_user_details",
+  "config": {
+    "samples": 200000,
+    "warmup": 5000,
+    "stream_workers": 4,
+    "churn_workers": 4,
+    "session_ids": 512
+  },
+  "fence": "OBSERVED, research-grade (#2223): per-call kernel.Decide latency, single measuring flow, quiet vs same-process synthetic B2/B3 load; no gate asserted or flipped; timer overhead identical in both arms",
+  "quiet": {
+    "label": "quiet",
+    "samples": 200000,
+    "p50_ns": 2892,
+    "p90_ns": 3776,
+    "p99_ns": 14137,
+    "p999_ns": 118899,
+    "max_ns": 318129,
+    "mean_ns": 3725.71148,
+    "over_100us": 353
+  },
+  "loaded": {
+    "label": "loaded",
+    "samples": 200000,
+    "p50_ns": 3388,
+    "p90_ns": 5336,
+    "p99_ns": 29533,
+    "p999_ns": 456049,
+    "max_ns": 1346002,
+    "mean_ns": 5900.927515,
+    "over_100us": 1113
+  }
+}
