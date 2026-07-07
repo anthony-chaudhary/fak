@@ -38,45 +38,63 @@ type overviewEntry struct {
 	blurb string
 }
 
-// overviewGroups is the curated compact overview: the verbs an operator or an
-// agent reaches for in a normal working session, grouped by what they are doing.
-// Membership is a taste call, deliberately small — everything else is one
-// `fak help --all` away. help_test.go asserts every name here is a live verb.
+// overviewGroups is the compact overview: the FRONTDOOR tier and only the
+// frontdoor tier (epic #2228 C3, #2232), grouped by what an operator or adopter
+// of the kernel is doing. Membership is no longer taste — it is C1's tier
+// classification (internal/devindex): help_test.go's TestOverviewIsExactlyFrontdoor
+// asserts this set EQUALS the frontdoor tier, so the visible front door and the
+// classification can never drift. The dev/repo tooling (~170 verbs) lives one
+// level down under `fak dev`; the compact overview names the count and the door.
+//
+// The replay/top/pull/ls frontdoor companions fold into run/ps/model (see
+// frontdoorCompanions) and are named in their primary's blurb rather than given
+// their own line — the concept count stays ~20 without hiding a spelling.
 var overviewGroups = []struct {
 	title   string
 	entries []overviewEntry
 }{
-	{"the work loop", []overviewEntry{
-		{"orient", "conventions for the paths you are about to touch: lane, tier, tests, stamp"},
-		{"whats-changed", "what peers changed under your target paths since the session base"},
-		{"affected", "run only the go tests your working-tree change can affect"},
-		{"test", "host-aware test runner: fast | full | race | <pkg>"},
-		{"done", "pre-claim self-check: paths clean + tests + claims-lint + witness"},
-		{"commit", "safe shared-trunk commit by explicit pathspec (never git add -A)"},
-		{"sweep", "drive a dirty multi-session tree toward zero, one lane at a time"},
-		{"sync", "safe sync/push for a dirty shared worktree; never pull/stash/reset"},
-		{"merge", "predict a shared-trunk merge before starting it"},
-	}},
 	{"guard + serve (the front doors)", []overviewEntry{
 		{"guard", "wrap an agent harness: adjudicate every tool call in-process"},
 		{"serve", "the OpenAI-compatible gateway in front of a local or remote model"},
-		{"run", "run an agent turn (or a recorded trace) through the kernel"},
+		{"run", "run an agent turn (or a recorded trace / 'fak replay') through the kernel"},
+		{"codex", "launch OpenAI Codex routed through the kernel"},
 		{"preflight", "adjudicate one tool call against a policy, no model in the loop"},
 		{"policy", "dump / check the deployable capability floor"},
 	}},
+	{"prove the floor", []overviewEntry{
+		{"attest", "compliance attestation: prove the policy floor from preflight"},
+		{"audit", "verify / export a guard decision journal's hash chain"},
+		{"egress", "prove the network-egress floor (cloud-metadata / SSRF class)"},
+	}},
 	{"observe + operate", []overviewEntry{
+		{"info", "live gateway overlay: one plain-words line per /debug/vars tick"},
 		{"ps", "live served-session process table ('fak top' = --watch)"},
 		{"session", "read, cancel, or steer a served session in flight"},
+		{"signal", "job control for a running session: pause / resume / stop / steer"},
 		{"resume", "what happens to the prompt cache on resume, and what to do"},
 		{"doctor", "operator diagnostic: answer-shape witness + kernel admit verdict"},
-		{"scorecard", "the control pane: every metric's debt, grade, and trend"},
 		{"recover", "map a refusal reason token to concrete recovery commands"},
 	}},
-	{"self-index", []overviewEntry{
-		{"index", "queryable self-index: lane / leaf / docs / claims / verbs"},
-		{"feature", "the unified self-feature catalog"},
+	{"models + housekeeping", []overviewEntry{
+		{"model", "resolve / cache an hf:// model ('fak pull' / 'fak ls' aliases)"},
+		{"self-update", "converge a built-from-source fak binary on origin/main"},
 		{"version", "print the fak version"},
+		{"help", "this overview; 'help <verb>' for depth, 'help --all' for the catalog"},
 	}},
+}
+
+// frontdoorCompanions maps a frontdoor companion spelling to the concept it folds
+// into for the compact overview: `fak replay` is `fak run --trace`, `fak top` is
+// `fak ps --watch`, `fak pull`/`fak ls` are `fak model` sub-spellings. Each is a
+// frontdoor-tier verb in its own right (C1), but listing it separately would just
+// reproduce its primary; instead the primary's blurb names it. The set-equality
+// gate treats a companion as covered when its primary is in the overview AND the
+// companion's spelling appears in that primary's blurb — folding never hides a verb.
+var frontdoorCompanions = map[string]string{
+	"replay": "run",
+	"top":    "ps",
+	"pull":   "model",
+	"ls":     "model",
 }
 
 // usageCompact prints the curated overview — what `fak`, `fak -h`, and `fak help`
@@ -90,6 +108,9 @@ func usageCompact(w io.Writer) {
 		}
 	}
 	fmt.Fprintln(w)
+	if n := len(devTierVerbs()); n > 0 {
+		fmt.Fprintf(w, "%d dev/repo verbs live under 'fak dev' — 'fak dev' lists them.\n", n)
+	}
 	if cat := helpCatalog(); cat != nil {
 		fmt.Fprintf(w, "%d verbs in this build. ", len(cat.Verbs()))
 	}
@@ -132,16 +153,30 @@ func usageAllVerbs(w io.Writer) {
 		usageWall(w)
 		return
 	}
-	verbs := cat.Verbs()
+	// Hidden-tier verbs are internal re-exec/hook seams — never listed, here or
+	// anywhere (C1). Everything else carries its tier so the two-tier story is
+	// visible per line, not just in the compact front door.
+	var verbs []devindex.Verb
+	for _, v := range cat.Verbs() {
+		if v.Tier == devindex.TierHidden {
+			continue
+		}
+		verbs = append(verbs, v)
+	}
 	fmt.Fprintf(w, "fak - the Fused Agent Kernel (v%s) — %d verbs\n\n", appversion.Current(), len(verbs))
 	for _, v := range verbs {
 		name := v.Name
 		if len(v.Aliases) > 0 {
 			name += " (" + strings.Join(v.Aliases, ", ") + ")"
 		}
-		fmt.Fprintf(w, "  %-34s %s\n", name, v.Synopsis)
+		tier := string(v.Tier)
+		if tier == "" {
+			tier = "-"
+		}
+		fmt.Fprintf(w, "  %-34s %-11s %s\n", name, "["+tier+"]", v.Synopsis)
 	}
-	fmt.Fprintln(w, "\n'fak help <verb>' explains one in depth; 'fak <verb> -h' lists its flags.")
+	fmt.Fprintln(w, "\nverbs are tiered: [frontdoor] is the product; [dev] is 'fak dev <verb>' tooling.")
+	fmt.Fprintln(w, "'fak help <verb>' explains one in depth; 'fak <verb> -h' lists its flags.")
 }
 
 // printVerbHelp prints one verb's deep help: the catalog synopsis line (when
@@ -174,7 +209,14 @@ func verbDeepHelpBody(w io.Writer, tok string) bool {
 	}
 	if v, ok := cat.VerbByName(tok); ok {
 		spellings = v.Spellings()
-		header = fmt.Sprintf("fak %s — %s", v.Name, v.Synopsis)
+		// A dev-tier verb's canonical spelling is `fak dev <verb>` (C2/#2231);
+		// the header names it so `fak help <devverb>` teaches the real invocation
+		// even though help itself is never gated by tier. Frontdoor stays `fak <verb>`.
+		canonical := "fak " + v.Name
+		if t, _ := devindex.TierOf(v.Name); t == devindex.TierDev {
+			canonical = "fak dev " + v.Name
+		}
+		header = fmt.Sprintf("%s — %s", canonical, v.Synopsis)
 		if len(v.Aliases) > 0 {
 			header += "\naliases: " + strings.Join(v.Aliases, ", ")
 		}
@@ -322,6 +364,24 @@ func suggestVerb(tok string) string {
 		}
 	}
 	return ""
+}
+
+// suggestVerbSpelling is the TIER-AWARE did-you-mean for a mistyped token at the
+// TOP level (`fak <typo>`): it resolves the closest verb (suggestVerb) and returns
+// the CANONICAL spelling to suggest — `dev <verb>` for a dev-tier verb, the bare
+// `<verb>` for frontdoor. Empty when nothing is close. Keeping the tier fold in
+// ONE place is what makes the C5 enforcement flip a one-line change: today
+// `fak swep` already answers "did you mean 'fak dev sweep'?" (help stays ungated,
+// so `fak help <typo>` keeps suggesting the bare `fak help <verb>` spelling).
+func suggestVerbSpelling(tok string) string {
+	s := suggestVerb(tok)
+	if s == "" {
+		return ""
+	}
+	if t, ok := devindex.TierOf(s); ok && t == devindex.TierDev {
+		return "dev " + s
+	}
+	return s
 }
 
 // helpCatalog loads the devindex catalog when the repo is readable (dos.toml

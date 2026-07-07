@@ -287,6 +287,7 @@ func guardInfoFetchErrorLine(base string, err error) string {
 func runInfo(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("info", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "info") // #2232: overview verb -> deep help above the flag dump
 	gatewayURL := fs.String("gateway-url", envOrDefault("FAK_GATEWAY_URL", "http://127.0.0.1:8080"), "fak guard/serve gateway to poll (the loopback URL fak guard prints as 'gateway')")
 	keyEnv := fs.String("gateway-key-env", "FAK_GATEWAY_KEY", "env var holding the gateway bearer; loopback /debug/vars is auth-exempt so a local guard gateway needs none")
 	interval := fs.Duration("interval", 2*time.Second, "refresh interval")

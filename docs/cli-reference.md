@@ -135,7 +135,18 @@ as **soft UPSIDE secondaries**, never the gate. See `STATUS.md` §2 and `CLAIMS.
 
 ## Verbs
 
+The verb surface is **two-tier** (epic #2228). The **frontdoor** tier is the
+product — what an adopter or operator of the kernel touches (`guard`, `serve`,
+`run`, `preflight`, `policy`, `attest`, `audit`, `egress`, `info`, `session`,
+`ps`/`top`, `signal`, `resume`, `doctor`, `recover`, `model`, `codex`,
+`self-update`, `version`, `help`). `fak help` shows exactly these. Everything
+else — repo-workflow verbs, scorecards, benches, dispatch/loop plumbing — is the
+**dev** tier, spelled `fak dev <verb>` and listed by `fak dev`; `fak help --all`
+lists every verb with its tier. The bare dev spellings below still work today
+(the `fak dev` namespace is compatibility-first); `fak dev` is the canonical form.
+
 ```
+fak dev       [<verb> ...]                             # list the dev tier, or run a dev verb (canonical spelling)
 fak run       --trace testdata/tau2/tau2-smoke.json    # replay a trace through the kernel
 fak preflight --tool create_user --args '{"_positional":["alice"]}'   # rung-only check
 fak bench     --suite tau2-smoke --out report.json     # A/B vDSO ablation -> report.json (the ns gate)

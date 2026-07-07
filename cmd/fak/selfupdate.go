@@ -29,6 +29,7 @@ import (
 // runs the full gate — force bypasses the staleness check, never the green gate.
 func cmdSelfUpdate(argv []string) {
 	fs := flag.NewFlagSet("self-update", flag.ExitOnError)
+	verbFlagUsage(fs, "self-update") // #2232: overview verb -> deep help above the flag dump
 	check := fs.Bool("check", false, "report whether this binary is stale vs HEAD and exit (no build)")
 	force := fs.Bool("force", false, "build+gate+install even if not provably stale (still runs the green gate)")
 	root := fs.String("root", "", "repo root to build from (default: discover from cwd)")

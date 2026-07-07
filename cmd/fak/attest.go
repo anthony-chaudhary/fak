@@ -52,6 +52,7 @@ func cmdAttest(argv []string) {
 func runAttest(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("attest", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "attest") // #2232: overview verb -> deep help above the flag dump
 	policyPath := fs.String("policy", "", "the capability floor manifest to prove (required)")
 	probesPath := fs.String("probes", "", "optional JSON file of probes (default: derived from the policy)")
 	out := fs.String("out", "", "write the attestation JSON to FILE (default: stdout)")
