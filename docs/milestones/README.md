@@ -11,6 +11,36 @@ them across weeks.
 | `STATUS.md` | The generated climb-status snapshot (`fak milestone status-doc --write-doc`). |
 | `baseline.json` · `tracked-epics.json` | The seeded baseline and the tracked-epic set (`fak milestone report --epics-from …`). |
 
+## Editing the tracked-epic set as data (`--epics-from`, #1439)
+
+The set of epics the roadmap dimension tracks is an in-code default
+(`internal/milestonereport.TrackedEpics`), but it is *also* a committed, reviewable
+data file — so adding or removing a tracked epic is a diff of
+[`tracked-epics.json`](tracked-epics.json), not a code edit. Pass it (or any
+`[]EpicSpec` file) to override the default:
+
+```sh
+fak milestone report --epics-from docs/milestones/tracked-epics.json
+```
+
+Absent the flag the report uses the in-code default (zero-config); the committed
+seed mirrors that default exactly, a parity guarded by
+`TestSeedMirrorsTrackedEpics` so the two surfaces can never silently drift.
+
+The file takes one of two shapes:
+
+- **specs-only** — a `specs` array of `{Number, Title, Generation, Label}`. The
+  resolver reads each epic's children live via `gh` (the seed is this shape).
+- **specs + pre-resolved counts** — add a `counts` array
+  (`{Number, Closed, Total, Source}`) and the fold runs **fully offline**: no `gh`,
+  deterministic. This is the hermetic path a gh-free CI run and the milestone tests
+  take (`TestEpicsFilePreResolvedCountsFoldsOffline`).
+
+A named `--epics-from` file that is missing, malformed, or has an empty `specs`
+array is a **loud error**, never a silent fall-back to the default — a typo'd path
+must not quietly track the wrong set (`TestLoadEpicsFileErrors`). The same flag is
+accepted by `fak milestone scorecard` and threads through `fak operator --collect`.
+
 ## The scheduled milestone tick (#1440)
 
 `fak milestone post` only posts when invoked, so the "tracking" in a tracking report
