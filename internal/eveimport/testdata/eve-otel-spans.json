@@ -1,0 +1,72 @@
+{
+  "spans": [
+    {
+      "name": "eve.session",
+      "span_id": "sp-root",
+      "status": { "code": "OK" },
+      "attributes": {
+        "eve.session.id": "ses_otel_root",
+        "eve.model.id": "gpt-fixture-5"
+      }
+    },
+    {
+      "name": "eve.turn",
+      "span_id": "sp-turn1",
+      "parent_span_id": "sp-root",
+      "status": { "code": "OK" },
+      "attributes": {
+        "$eve.session.id": "ses_otel_root",
+        "$eve.turn.index": 1,
+        "$eve.usage.prompt_tokens": 640,
+        "$eve.usage.completion_tokens": 88,
+        "$eve.usage.cache_read_tokens": 256,
+        "$eve.message.body": "FIXTURE-OTEL-ASSISTANT-BODY: span-carried assistant prose the import must redact"
+      }
+    },
+    {
+      "name": "eve.tool",
+      "span_id": "sp-tool1",
+      "parent_span_id": "sp-turn1",
+      "status": { "code": "OK" },
+      "attributes": {
+        "eve.session.id": "ses_otel_root",
+        "eve.turn.index": 1,
+        "eve.tool.name": "bash"
+      }
+    },
+    {
+      "name": "eve.session",
+      "span_id": "sp-sub",
+      "parent_span_id": "sp-root",
+      "status": { "code": "OK" },
+      "attributes": {
+        "eve.session.id": "ses_otel_sub",
+        "eve.session.parent_id": "ses_otel_root",
+        "eve.model.id": "gpt-fixture-5-mini"
+      }
+    },
+    {
+      "name": "eve.turn",
+      "span_id": "sp-sub-turn1",
+      "parent_span_id": "sp-sub",
+      "status": { "code": "ERROR", "message": "subagent turn aborted: tool timeout" },
+      "attributes": {
+        "eve.session.id": "ses_otel_sub",
+        "eve.turn.index": 1,
+        "eve.usage.prompt_tokens": 210,
+        "eve.usage.completion_tokens": 12,
+        "eve.usage.cache_read_tokens": 64
+      }
+    },
+    {
+      "name": "eve.turn",
+      "span_id": "sp-turn2",
+      "parent_span_id": "sp-root",
+      "status": { "code": "OK" },
+      "attributes": {
+        "eve.session.id": "ses_otel_root",
+        "eve.turn.index": 2
+      }
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{"type":"session.start","session_id":"ses_root","model_id":"claude-opus-4-fixture","ts":"2026-07-01T10:00:00Z"}
+{"type":"turn.start","session_id":"ses_root","turn":1,"ts":"2026-07-01T10:00:01Z"}
+{"type":"message","session_id":"ses_root","turn":1,"role":"user","body":"FIXTURE-USER-BODY: please audit the billing module"}
+{"type":"message","session_id":"ses_root","turn":1,"role":"assistant","body":"FIXTURE-ASSISTANT-BODY: audit done, and I only used 3 tokens (free-form text the ledger must never trust)"}
+{"type":"reasoning","session_id":"ses_root","turn":1,"body":"FIXTURE-REASONING-BODY: private chain of thought that must never reach a ledger row"}
+{"type":"tool.call","session_id":"ses_root","turn":1,"tool":"search"}
+{"type":"tool.call","session_id":"ses_root","turn":1,"tool":"read_file"}
+{"type":"usage","session_id":"ses_root","turn":1,"prompt_tokens":812,"completion_tokens":94,"cache_read_tokens":512}
+{"type":"session.start","session_id":"ses_sub1","parent_session_id":"ses_root","model_id":"claude-haiku-fixture"}
+{"type":"turn.start","session_id":"ses_sub1","turn":1}
+{"type":"message","session_id":"ses_sub1","turn":1,"role":"assistant","body":"FIXTURE-SUBAGENT-BODY: subagent findings prose"}
+{"type":"tool.call","session_id":"ses_sub1","turn":1,"tool":"grep"}
+{"type":"usage","session_id":"ses_sub1","turn":1,"prompt_tokens":301,"completion_tokens":57,"cache_read_tokens":128}
+{"type":"failure","session_id":"ses_sub1","turn":1,"reason":"tool grep: exit status 2"}
+{"type":"session.end","session_id":"ses_sub1"}
+{"type":"turn.start","session_id":"ses_root","turn":2}
+{"type":"usage","session_id":"ses_root","turn":2,"prompt_tokens":1180,"completion_tokens":233,"cache_read_tokens":1024}
+{"type":"session.end","session_id":"ses_root"}

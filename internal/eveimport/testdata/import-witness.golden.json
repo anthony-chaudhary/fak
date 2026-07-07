@@ -1,0 +1,282 @@
+{
+  "ndjson": {
+    "run": {
+      "schema": "fak.eve-import.v1",
+      "issue": 2606,
+      "source": {
+        "kind": "eve-ndjson",
+        "path": "testdata/eve-session-stream.ndjson"
+      },
+      "root": {
+        "session_id": "ses_root",
+        "model_id": "claude-opus-4-fixture",
+        "turns": [
+          {
+            "index": 1,
+            "tool_calls": [
+              "search",
+              "read_file"
+            ],
+            "usage": {
+              "prompt_tokens": 812,
+              "completion_tokens": 94,
+              "cache_read_tokens": 512
+            },
+            "usage_observed": true,
+            "bodies": [
+              {
+                "kind": "message",
+                "role": "user",
+                "redacted": true,
+                "sha256": "5cbd5321dab64ad8e493d4c6c08a2d4f45495df787a6cd6b5b3e4a1b656baf8e",
+                "bytes": 50
+              },
+              {
+                "kind": "message",
+                "role": "assistant",
+                "redacted": true,
+                "sha256": "0f2eebd9b904969872e7e8d32ebb422e1564c5f909b9551043ea77eba6d6150c",
+                "bytes": 105
+              },
+              {
+                "kind": "reasoning",
+                "redacted": true,
+                "sha256": "9dbcb840cba97b659313a6c91045ff4b8a662b4085eabc3dcf09f6d5408f697a",
+                "bytes": 83
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "usage": {
+              "prompt_tokens": 1180,
+              "completion_tokens": 233,
+              "cache_read_tokens": 1024
+            },
+            "usage_observed": true
+          }
+        ],
+        "tool_calls": 2,
+        "usage": {
+          "prompt_tokens": 1992,
+          "completion_tokens": 327,
+          "cache_read_tokens": 1536
+        },
+        "children": [
+          {
+            "session_id": "ses_sub1",
+            "parent_session_id": "ses_root",
+            "model_id": "claude-haiku-fixture",
+            "turns": [
+              {
+                "index": 1,
+                "tool_calls": [
+                  "grep"
+                ],
+                "usage": {
+                  "prompt_tokens": 301,
+                  "completion_tokens": 57,
+                  "cache_read_tokens": 128
+                },
+                "usage_observed": true,
+                "bodies": [
+                  {
+                    "kind": "message",
+                    "role": "assistant",
+                    "redacted": true,
+                    "sha256": "6ffa199a366486772a4220ca8032e752dbfd18e98174e08c85ea98b999fc0bd5",
+                    "bytes": 46
+                  }
+                ]
+              }
+            ],
+            "tool_calls": 1,
+            "usage": {
+              "prompt_tokens": 301,
+              "completion_tokens": 57,
+              "cache_read_tokens": 128
+            },
+            "failures": [
+              {
+                "turn": 1,
+                "reason": "tool grep: exit status 2"
+              }
+            ]
+          }
+        ]
+      },
+      "sessions": 2,
+      "observation": "complete",
+      "bodies_included": false
+    },
+    "ledger_rows": [
+      {
+        "schema": "fak.eve-import.session-ledger-row.v1",
+        "session_id": "ses_root",
+        "root_session_id": "ses_root",
+        "depth": 0,
+        "model_id": "claude-opus-4-fixture",
+        "turns": 2,
+        "subagents": 1,
+        "tool_calls": 2,
+        "prompt_tokens": 1992,
+        "completion_tokens": 327,
+        "cache_read_tokens": 1536,
+        "failed_steps": 0,
+        "observation": "complete",
+        "evidence_kind": "eve-ndjson",
+        "evidence_path": "testdata/eve-session-stream.ndjson"
+      },
+      {
+        "schema": "fak.eve-import.session-ledger-row.v1",
+        "session_id": "ses_sub1",
+        "root_session_id": "ses_root",
+        "parent_session_id": "ses_root",
+        "depth": 1,
+        "model_id": "claude-haiku-fixture",
+        "turns": 1,
+        "subagents": 0,
+        "tool_calls": 1,
+        "prompt_tokens": 301,
+        "completion_tokens": 57,
+        "cache_read_tokens": 128,
+        "failed_steps": 1,
+        "observation": "complete",
+        "evidence_kind": "eve-ndjson",
+        "evidence_path": "testdata/eve-session-stream.ndjson"
+      }
+    ],
+    "summary": "eve-import eve-ndjson testdata/eve-session-stream.ndjson\n  root=ses_root model=claude-opus-4-fixture observation=complete\n  turns=3 subagents=1 tool_calls=3 failed_steps=1\n  tokens prompt=2293 completion=384 cache_read=1664"
+  },
+  "otel_spans": {
+    "run": {
+      "schema": "fak.eve-import.v1",
+      "issue": 2606,
+      "source": {
+        "kind": "eve-otel-spans",
+        "path": "testdata/eve-otel-spans.json"
+      },
+      "root": {
+        "session_id": "ses_otel_root",
+        "model_id": "gpt-fixture-5",
+        "turns": [
+          {
+            "index": 1,
+            "tool_calls": [
+              "bash"
+            ],
+            "usage": {
+              "prompt_tokens": 640,
+              "completion_tokens": 88,
+              "cache_read_tokens": 256
+            },
+            "usage_observed": true,
+            "bodies": [
+              {
+                "kind": "message",
+                "role": "assistant",
+                "redacted": true,
+                "sha256": "1f381fd6e7fa9209ea82bdd90dbd26e29338473283db7b3e452a56877f29f52a",
+                "bytes": 80
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "usage": {
+              "prompt_tokens": 0,
+              "completion_tokens": 0,
+              "cache_read_tokens": 0
+            },
+            "usage_observed": false
+          }
+        ],
+        "tool_calls": 1,
+        "usage": {
+          "prompt_tokens": 640,
+          "completion_tokens": 88,
+          "cache_read_tokens": 256
+        },
+        "children": [
+          {
+            "session_id": "ses_otel_sub",
+            "parent_session_id": "ses_otel_root",
+            "model_id": "gpt-fixture-5-mini",
+            "turns": [
+              {
+                "index": 1,
+                "usage": {
+                  "prompt_tokens": 210,
+                  "completion_tokens": 12,
+                  "cache_read_tokens": 64
+                },
+                "usage_observed": true
+              }
+            ],
+            "tool_calls": 0,
+            "usage": {
+              "prompt_tokens": 210,
+              "completion_tokens": 12,
+              "cache_read_tokens": 64
+            },
+            "failures": [
+              {
+                "turn": 1,
+                "reason": "subagent turn aborted: tool timeout"
+              }
+            ]
+          }
+        ]
+      },
+      "sessions": 2,
+      "observation": "partial",
+      "bodies_included": false,
+      "diagnostics": [
+        {
+          "code": "MISSING_TAG",
+          "session_id": "ses_otel_root",
+          "turn": 2,
+          "detail": "usage counters absent for turn 2 (token totals are partial)"
+        }
+      ]
+    },
+    "ledger_rows": [
+      {
+        "schema": "fak.eve-import.session-ledger-row.v1",
+        "session_id": "ses_otel_root",
+        "root_session_id": "ses_otel_root",
+        "depth": 0,
+        "model_id": "gpt-fixture-5",
+        "turns": 2,
+        "subagents": 1,
+        "tool_calls": 1,
+        "prompt_tokens": 640,
+        "completion_tokens": 88,
+        "cache_read_tokens": 256,
+        "failed_steps": 0,
+        "observation": "partial",
+        "evidence_kind": "eve-otel-spans",
+        "evidence_path": "testdata/eve-otel-spans.json"
+      },
+      {
+        "schema": "fak.eve-import.session-ledger-row.v1",
+        "session_id": "ses_otel_sub",
+        "root_session_id": "ses_otel_root",
+        "parent_session_id": "ses_otel_root",
+        "depth": 1,
+        "model_id": "gpt-fixture-5-mini",
+        "turns": 1,
+        "subagents": 0,
+        "tool_calls": 0,
+        "prompt_tokens": 210,
+        "completion_tokens": 12,
+        "cache_read_tokens": 64,
+        "failed_steps": 1,
+        "observation": "partial",
+        "evidence_kind": "eve-otel-spans",
+        "evidence_path": "testdata/eve-otel-spans.json"
+      }
+    ],
+    "summary": "eve-import eve-otel-spans testdata/eve-otel-spans.json\n  root=ses_otel_root model=gpt-fixture-5 observation=partial\n  turns=3 subagents=1 tool_calls=1 failed_steps=1\n  tokens prompt=850 completion=100 cache_read=320"
+  }
+}
