@@ -88,6 +88,10 @@ var tier = map[string]int{
 	"knownbad":             1,                // pure fold core of the fleet-wide known-bad signature ledger (#2713, epic #2712): sha256 signature derivation + stateless Match/liveness projection over records; the impure shell (ledger I/O, clock, flags) lives in cmd/fak/knownbad.go. Stdlib-only, imports nothing internal, off the hot path.
 	"blastradius":          1,                // pure JOIN for blast-radius containment (#2712 W3): broken package -> dependents (affectedtests.Select) -> the leases/issues whose tree intersects (knownbad.TreesIntersect); no I/O, no clock. Imports affectedtests(1)+knownbad(1), off the hot path.
 	"commitsubject":        1,                // commit-subject coverage fold over hooks.CommitMsgVerdict + recent git subjects; imports hooks(1)+windowgate(1), off the hot path.
+	"fleetspine":           1,                // LAN multicast heartbeat self-discovery spine for the fleet pane: passive concurrency-safe peer Registry + net.ListenMulticastUDP transport + advertiser/listener/expiry runners; stdlib-only, imports nothing internal, off the hot path.
+	"guardsessions":        1,                // append-only guard-session index with exact-then-prefix Resolve over an injected filesystem path; stdlib-only, imports nothing internal, off the hot path.
+	"balance":              1,                // night-balance readout folding resume-recovery + work-mix into a degradation verdict; imports resume(1)+superloop(1), off the hot path.
+	"focusscore":           1,                // fleet convergence/breadth focus scorecard over the trajctl objective tree; imports trajctl(1)+pkg/scorecard, off the hot path.
 	"memgate":              1,                // memory-pressure admission fold for heavy model loads; stdlib + windowgate shell helpers, off the hot path.
 	"memorycotravel":       1,                // stdlib-only project memory co-travel gate/ledger for shadow/live carryover between config roots; off the hot path.
 	"memorystability":      1,                // stdlib-only fleet-memory stability governor over drift trajectories; off the hot path.
