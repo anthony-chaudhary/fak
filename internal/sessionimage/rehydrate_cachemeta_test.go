@@ -75,6 +75,17 @@ func TestRehydrateCarriesCachemetaInvalidationState(t *testing.T) {
 	if witnessed.Validity == (cachemeta.Validity{}) {
 		t.Fatal("witnessed entry Validity is zero-value — rehydrate must carry explicit freshness/integrity bounds")
 	}
+	// The record is a lowered content page, provenance intact: the adapter ran over the
+	// rehydrated recall pages (Producer "recall", PlaneContextPage), not a fabricated entry.
+	if witnessed.Plane != cachemeta.PlaneContextPage {
+		t.Fatalf("witnessed entry Plane = %q, want context_page", witnessed.Plane)
+	}
+	if witnessed.Derivation.Producer != "recall" {
+		t.Fatalf("witnessed entry Producer = %q, want recall", witnessed.Derivation.Producer)
+	}
+	if witnessed.Labels["session_id"] != id {
+		t.Fatalf("witnessed entry session_id label = %q, want %q", witnessed.Labels["session_id"], id)
+	}
 
 	// Cold-path correctness stays explicit: a rehydrated record is on disk, never a resident
 	// hot tier, so it cannot be served as a live hit before the first post-wake re-prefill.
