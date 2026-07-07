@@ -130,6 +130,63 @@ func TestLivelockDetectorArmsFuseAfterAdvisory(t *testing.T) {
 	}
 }
 
+func TestLivelockDetectorArmsTerminalEscalateAboveFuse(t *testing.T) {
+	// Advisory at 3, fuse at 6 (factor 2), abort/Escalate at 9 (factor 3).
+	d := NewLivelockDetector(3)
+	obs := LivelockObservation{
+		TraceID:     "trace-escalate",
+		Tool:        "Bash",
+		ArgsDigest:  "sha256:abc",
+		Verdict:     "ALLOW",
+		Disposition: "RETRYABLE",
+	}
+	// Repeats 1..8: Escalate must stay false (fuse arms at 6, but the terminal rung
+	// must not fire until 9 so the retryable fuse always gets its turns first).
+	for i := 1; i <= 8; i++ {
+		env, _ := d.ObserveAdmitted(obs)
+		if env.Escalate {
+			t.Fatalf("repeat %d armed Escalate before the abort count (9): %+v", i, env)
+		}
+	}
+	// Repeat 9: Escalate arms, and it implies Fuse.
+	env, ok := d.ObserveAdmitted(obs)
+	if !ok || env.RepeatCount != 9 || !env.Escalate || !env.Fuse {
+		t.Fatalf("repeat 9 envelope = %+v, want repeat=9 escalate=true fuse=true", env)
+	}
+	// Beyond the abort count it stays escalated.
+	env, ok = d.ObserveAdmitted(obs)
+	if !ok || !env.Escalate || env.RepeatCount != 10 {
+		t.Fatalf("repeat 10 envelope = %+v, want repeat=10 escalate=true", env)
+	}
+}
+
+func TestLivelockDetectorFuseOptOutAlsoDisablesEscalate(t *testing.T) {
+	// A detector with the fuse opted out (fuse<=0) must also never arm the terminal
+	// Escalate rung — an advisory-only detector stays advisory-only.
+	off := NewLivelockDetectorWithFuse(3, 0)
+	obs := LivelockObservation{TraceID: "t", Tool: "Bash", ArgsDigest: "sha256:x", Verdict: "DENY", Reason: "POLICY_BLOCK"}
+	for i := 1; i <= 12; i++ {
+		env, _ := off.ObserveFailure(obs)
+		if env.Escalate || env.Fuse {
+			t.Fatalf("opt-out detector armed fuse/escalate at repeat %d: %+v", i, env)
+		}
+	}
+}
+
+func TestLivelockDetectorExplicitFuseKeepsEscalateAbove(t *testing.T) {
+	// An explicit fuse at 4 (advisory 3) must push the terminal rung strictly above 4
+	// so the retryable fuse fires before the terminal stop.
+	d := NewLivelockDetectorWithFuse(3, 4)
+	obs := LivelockObservation{TraceID: "t", Tool: "Bash", ArgsDigest: "sha256:x", Verdict: "DENY", Reason: "POLICY_BLOCK", Disposition: "RETRYABLE"}
+	var last LivelockEnvelope
+	for i := 1; i <= 4; i++ {
+		last, _ = d.ObserveFailure(obs)
+	}
+	if !last.Fuse || last.Escalate {
+		t.Fatalf("repeat 4 (explicit fuse) = %+v, want fuse=true escalate=false", last)
+	}
+}
+
 func TestLivelockDetectorWithFuseHonorsExplicitFuseAndOptOut(t *testing.T) {
 	// Explicit fuse at 4 with advisory at 3.
 	d := NewLivelockDetectorWithFuse(3, 4)

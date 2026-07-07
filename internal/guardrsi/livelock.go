@@ -20,6 +20,17 @@ const (
 	// note lets an unresponsive loop burn tokens forever (the gateway kept admitting
 	// the identical call); the fuse is the structural backstop that actually breaks it.
 	DefaultLivelockFuseFactor = 2
+	// DefaultLivelockAbortFactor multiplies the advisory threshold to get the ABORT
+	// count — the second, higher rung above the fuse. The fuse (threshold*2) converts
+	// the repeated call into a per-tool RETRYABLE refusal, but a model that ignores
+	// even the fuse keeps re-proposing the same call every turn and the loop never
+	// ends (worker #2704: an identical call fused at 6, then spun to ~125k tokens
+	// because a RETRYABLE refusal is auto-continued). At threshold*factor (=9 for the
+	// default 3) the envelope arms Escalate, and the caller stamps the refusal
+	// TERMINAL so the turn becomes a deny-all — the bounded give-up path that actually
+	// stops the session. It sits strictly ABOVE the fuse so the soft advisory and the
+	// retryable fuse always fire first; the terminal stop is a last resort.
+	DefaultLivelockAbortFactor = 3
 )
 
 // LivelockObservation is one repeated tool-call outcome, identified without carrying
@@ -52,6 +63,12 @@ type LivelockEnvelope struct {
 	// carrying Fuse should be converted into a hard refusal rather than admitted
 	// again. Fuse never fires before the advisory has already fired at least once.
 	Fuse bool `json:"fuse,omitempty"`
+	// Escalate is true once the run reaches the ABORT count (threshold*abortFactor),
+	// strictly above the fuse count. It tells the caller the fuse's per-tool refusal
+	// was itself ignored turn after turn, so the refusal must be stamped TERMINAL
+	// (non-retryable) and the turn allowed to become a deny-all — the bounded stop that
+	// ends a session a soft/retryable rung never could. Escalate implies Fuse.
+	Escalate bool `json:"escalate,omitempty"`
 }
 
 type livelockRun struct {
@@ -65,6 +82,7 @@ type livelockRun struct {
 type LivelockDetector struct {
 	threshold int
 	fuse      int
+	abort     int
 	byTrace   map[string]livelockRun
 }
 
@@ -72,7 +90,12 @@ func NewLivelockDetector(threshold int) *LivelockDetector {
 	if threshold <= 0 {
 		threshold = DefaultLivelockThreshold
 	}
-	return &LivelockDetector{threshold: threshold, fuse: threshold * DefaultLivelockFuseFactor, byTrace: map[string]livelockRun{}}
+	return &LivelockDetector{
+		threshold: threshold,
+		fuse:      threshold * DefaultLivelockFuseFactor,
+		abort:     threshold * DefaultLivelockAbortFactor,
+		byTrace:   map[string]livelockRun{},
+	}
 }
 
 // NewLivelockDetectorWithFuse builds a detector whose advisory fires at `threshold`
@@ -83,11 +106,18 @@ func NewLivelockDetectorWithFuse(threshold, fuse int) *LivelockDetector {
 	d := NewLivelockDetector(threshold)
 	switch {
 	case fuse <= 0:
-		d.fuse = -1 // sentinel: fuse explicitly disabled, advisory-only
+		d.fuse = -1  // sentinel: fuse explicitly disabled, advisory-only
+		d.abort = -1 // no fuse => no terminal rung either (advisory-only detector)
 	case fuse < d.threshold:
 		d.fuse = d.threshold
 	default:
 		d.fuse = fuse
+	}
+	// Keep the terminal (abort) rung strictly above the fuse so the retryable fuse
+	// always fires first. The default abort is threshold*abortFactor; if an explicit
+	// fuse was set at or above that, push abort one threshold beyond it.
+	if d.fuse > 0 && d.abort <= d.fuse {
+		d.abort = d.fuse + d.threshold
 	}
 	return d
 }
@@ -158,6 +188,11 @@ func (d *LivelockDetector) observe(obs LivelockObservation) (LivelockEnvelope, b
 		// rescues the never-initialized case.
 		d.fuse = d.threshold * DefaultLivelockFuseFactor
 	}
+	if d.abort == 0 && d.threshold > 0 {
+		// Same zero-value rescue for the terminal rung (see fuse above): an explicit
+		// opt-out is the -1 sentinel, so 0 only means never-initialized.
+		d.abort = d.threshold * DefaultLivelockAbortFactor
+	}
 	if d.byTrace == nil {
 		d.byTrace = map[string]livelockRun{}
 	}
@@ -192,6 +227,7 @@ func (d *LivelockDetector) observe(obs LivelockObservation) (LivelockEnvelope, b
 		RepeatCount:     run.count,
 		SuggestedChange: suggestedLivelockChange(obs),
 		Fuse:            d.fuse > 0 && run.count >= d.fuse,
+		Escalate:        d.abort > 0 && run.count >= d.abort,
 	}, true
 }
 
