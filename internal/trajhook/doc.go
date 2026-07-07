@@ -3,9 +3,10 @@
 // near-duplicate work, prune dead memory) WITHOUT a core edit to fak.
 //
 // Tier: composer (3) — see internal/architest. It scores internal/trajectory.Turn
-// rows and uses internal/simhash for the near-duplicate scorer; it imports only
-// those two leaves (both tier <= 3) and abi-free stdlib. It is entirely off the hot
-// path: nothing here runs during adjudication.
+// rows, uses internal/simhash for the near-duplicate scorer, and internal/trajctl
+// for the closed context-health signal vocabulary the verdict scorer emits; it
+// imports only those three leaves (all tier <= 3) and abi-free stdlib. It is
+// entirely off the hot path: nothing here runs during adjudication.
 //
 // THE SEAM. internal/trajectory gives the DATA (per-turn rows, optionally embedded).
 // trajhook gives the EXTENSION POINT over that data: a Scorer is a pure function
@@ -23,5 +24,7 @@
 // primitive, and this registry. The three reference scorers below (duplicate-query,
 // cost-outlier, deny-rate) are EXAMPLES, not policy — they prove the seam end to end
 // and give a gardening skill something to call on day one, and a real deployment
-// replaces or augments them with its own.
+// replaces or augments them with its own. The context-health scorer (ctxhealth.go)
+// is the one VERDICT fold on top: it reuses those deterministic signals to emit the
+// existing trajctl HEALTHY/STALL/DRIFT/DETOUR_OVERRUN vocabulary per trace.
 package trajhook
