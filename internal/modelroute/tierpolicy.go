@@ -1,7 +1,9 @@
 package modelroute
 
 import (
+	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/modelscore"
 )
@@ -65,6 +67,35 @@ func (t WorkTier) String() string {
 
 // Valid reports whether t is one of the three defined tiers.
 func (t WorkTier) Valid() bool { return t >= TierT0 && t <= TierT2 }
+
+// workTierTokenRE extracts a T<N> tier token from a value like "T1",
+// "`tier/T1-required`", or "tier/t2-optimal". The leading 't' is MANDATORY, so a
+// stray "P1" (a priority, not a tier) never parses as a tier — the same
+// disambiguation the issue-label grammar bakes in.
+var workTierTokenRE = regexp.MustCompile(`t([0-9]+)`)
+
+// ParseWorkTier parses a canonical tier token into a WorkTier, tolerating
+// surrounding whitespace/backticks and a "tier/T1-required"-style wrapper (the
+// T<N> token is extracted). It is the inverse of String() and the one home for the
+// string form of the tier vocabulary. ok=false for an absent or OUT-OF-RANGE token
+// (e.g. "T3", "P1", "") — the caller decides whether that is a missing or an
+// invalid tier.
+func ParseWorkTier(s string) (WorkTier, bool) {
+	m := workTierTokenRE.FindStringSubmatch(strings.ToLower(s))
+	if m == nil {
+		return 0, false
+	}
+	switch m[1] {
+	case "0":
+		return TierT0, true
+	case "1":
+		return TierT1, true
+	case "2":
+		return TierT2, true
+	default: // a real T<N> token, but not a defined work tier (T3+)
+		return 0, false
+	}
+}
 
 // MeetsRequirement reports whether a model whose capability tops out at tier
 // `capability` can serve work whose required floor is `required`. Capability must
