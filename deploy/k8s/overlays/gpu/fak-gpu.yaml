@@ -1,0 +1,188 @@
+# fak-gpu.yaml — copy-paste Kubernetes manifest for `fak serve` IN-KERNEL on a GPU (#2662).
+#
+# The GPU sibling of ../../fak.yaml (proxy mode): fak runs the model itself from a
+# mounted .gguf (`--engine inkernel --backend cuda`) on a neo-cloud cluster —
+# CoreWeave CKS, Lambda Cloud k8s, a GKE/EKS GPU pool. No upstream provider, so no
+# provider key and no --base-url.
+#
+# Apply (either form; see ../../README.md "GPU (in-kernel) overlay"):
+#   kubectl apply -k deploy/k8s/overlays/gpu
+#   kubectl apply -f deploy/k8s/overlays/gpu/fak-gpu.yaml
+#
+# Prerequisites (fak installs NEITHER):
+#   1. The NVIDIA device plugin (or the full GPU Operator) is already installed —
+#      `kubectl get nodes -o json | jq '.items[].status.allocatable'` must show
+#      `nvidia.com/gpu`.
+#   2. A .gguf on the fak-weights claim at /weights/model.gguf (load it once with
+#      `kubectl cp` via a helper pod, a Job, or your cloud's dataset tooling).
+#
+# Why this is a self-contained manifest and not a kustomize patch-overlay of the
+# base: kustomize refuses a base directory that contains its own overlay (root
+# containment rule), and moving ../../fak.yaml into a base/ subdirectory would
+# change the documented `kubectl apply -k deploy/k8s` path — the proxy base stays
+# untouched. Every resource here is named fak-gpu* so this stack applies cleanly
+# ALONGSIDE the proxy stack (nothing shared, no overwrite of a filled Secret).
+#
+# The same rule as the base bites first: a network-facing gateway MUST set
+# --require-key-env and a policy floor. /healthz is the only unauthenticated route
+# (it drives the probes). TLS terminates at your Ingress / LB — fak speaks plain HTTP.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: fak-gpu-secrets
+type: Opaque
+stringData:
+  # Generate with: openssl rand -hex 32
+  # In production prefer `kubectl create secret generic fak-gpu-secrets ...` or an
+  # external secret manager over committing a filled value. In-kernel mode needs
+  # NO upstream provider key — the gateway key is the only secret.
+  gateway-key: "REPLACE_WITH_A_STRONG_KEY"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fak-gpu-policy
+data:
+  policy.json: |
+    {
+      "version": "fak-policy/v1",
+      "posture": "fail_closed",
+      "allow_prefix": ["read_", "get_", "list_", "search_"],
+      "deny": { "bash": "POLICY_BLOCK", "write_file": "POLICY_BLOCK" },
+      "redact_fields": ["api_key", "token", "password"]
+    }
+---
+# The model-weights claim. Load the .gguf once; every pod restart reuses it.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fak-weights
+spec:
+  # One replica == one writer; RWO is the widest-supported mode on neo clouds.
+  # Switch to ReadOnlyMany if your storage class supports it and you scale replicas.
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 50Gi # size to the model: >= the .gguf file, with headroom to swap models
+  # storageClassName: <your-class>   # knob — neo clouds ship different default
+  #                                  # classes (CKS/Lambda/GKE/EKS); unset uses the
+  #                                  # cluster default.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fak-gpu
+  labels: { app: fak-gpu }
+spec:
+  # One GPU per replica: scaling this scales nvidia.com/gpu consumption 1:1, and
+  # the RWO weights claim admits one node. Start at 1.
+  replicas: 1
+  selector:
+    matchLabels: { app: fak-gpu }
+  template:
+    metadata:
+      labels: { app: fak-gpu }
+    spec:
+      # fak never calls the Kubernetes API, so it needs no service-account token.
+      automountServiceAccountToken: false
+      # Neo clouds differ on how pods reach the driver: some GPU Operator installs
+      # key on a RuntimeClass, GKE/EKS device-plugin pools usually need none.
+      # Uncomment if your cluster defines it:
+      # runtimeClassName: nvidia
+      securityContext:
+        runAsNonRoot: true
+        # The CUDA image declares its user BY NAME (`USER fak`, Dockerfile.cuda),
+        # and runAsNonRoot alone makes the kubelet refuse a container whose
+        # non-root-ness it cannot verify from a non-numeric user. Pinning the
+        # uid/gid keeps the pod non-root AND verifiable. Weights files must be
+        # world-readable (0644 is fine); set fsGroup instead if your storage
+        # class needs it.
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: fak
+          # The CUDA image variant (Dockerfile.cuda, #2661). `cuda-latest` tracks
+          # the newest release; pin `<version>-cuda` for reproducible deploys (see
+          # the kustomization.yaml `images:` example). NOTE: the first versioned
+          # -cuda tag publishes with the first release cut after Dockerfile.cuda
+          # landed (it is not in the v0.37.0 tree); until then build your own:
+          #   docker build -f Dockerfile.cuda --build-arg CUDA_ARCH=sm_90 -t REGISTRY/fak:cuda .
+          # The published image compiles kernels for ONE arch (default sm_89,
+          # Ada/L4) — match your rented card (sm_80 A100, sm_90 H100/H200,
+          # sm_100 B200) or build your own.
+          image: ghcr.io/anthony-chaudhary/fak:cuda-latest
+          args:
+            - serve
+            - --addr=0.0.0.0:8080
+            - --engine=inkernel
+            - --backend=cuda
+            - --gguf=/weights/model.gguf # rename to your model's file
+            - --policy=/etc/fak/policy.json
+            - --require-key-env=FAK_GATEWAY_KEY
+          ports:
+            - containerPort: 8080
+          env:
+            - name: FAK_GATEWAY_KEY
+              valueFrom: { secretKeyRef: { name: fak-gpu-secrets, key: gateway-key } }
+            # A local model decodes slower than a hosted API: raise both timeouts
+            # (write >= planner, per docs/fak/deployment-guide.md).
+            - name: FAK_HTTP_WRITE_TIMEOUT_S
+              value: "600"
+            - name: FAK_PLANNER_TIMEOUT_S
+              value: "600"
+          volumeMounts:
+            - name: policy
+              mountPath: /etc/fak
+              readOnly: true
+            - name: weights
+              mountPath: /weights
+              readOnly: true
+          # /healthz still drives both probes — it answers 200 only once the model
+          # is loaded, so it stays a valid liveness AND readiness signal. The long
+          # liveness delay is the model-load budget: a big .gguf takes minutes to
+          # load, and an early liveness kill would restart-loop the pod forever.
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 600
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          # Starting points — size memory to the model (rule of thumb: >= the .gguf
+          # size plus headroom for the KV cache and host staging).
+          resources:
+            requests:
+              cpu: "1"
+              memory: "8Gi"
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "4"
+              memory: "16Gi"
+              nvidia.com/gpu: "1"
+          # Same hardened container securityContext as the base. In particular
+          # readOnlyRootFilesystem STILL holds — the weights come from the mounted
+          # claim, not from a writable root.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: policy
+          configMap: { name: fak-gpu-policy }
+        - name: weights
+          persistentVolumeClaim:
+            claimName: fak-weights
+            readOnly: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fak-gpu
+spec:
+  selector: { app: fak-gpu }
+  ports:
+    - port: 80
+      targetPort: 8080

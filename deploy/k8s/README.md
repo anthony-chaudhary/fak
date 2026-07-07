@@ -1,13 +1,15 @@
 ---
 title: "fak on Kubernetes — copy-paste manifest"
-description: "A committed, apply-ready Kubernetes manifest for fak serve in proxy mode: Secret, policy ConfigMap, hardened Deployment, and Service, with the auth rule and a smoke test."
+description: "Committed, apply-ready Kubernetes manifests for fak serve: the proxy-mode stack (Secret, policy ConfigMap, hardened Deployment, Service) plus a GPU (in-kernel) overlay for neo-cloud clusters."
 ---
 
 # fak on Kubernetes
 
 A committed, apply-ready manifest for running `fak serve` — the kernel gateway that
 adjudicates every proposed tool call — on Kubernetes in **proxy mode** (fak
-adjudicates; an upstream OpenAI/Anthropic/local model generates).
+adjudicates; an upstream OpenAI/Anthropic/local model generates). To run the model
+**in-kernel on a rented GPU** instead, use the
+[GPU (in-kernel) overlay](#gpu-in-kernel-overlay) below.
 
 This is the artifact the deployment guide's
 [Kubernetes section](../../docs/fak/deployment-guide.md#3-kubernetes) describes,
@@ -33,6 +35,7 @@ flowchart LR
 |---|---|
 | [`fak.yaml`](fak.yaml) | The whole stack: a `Secret` (gateway + provider keys), a policy `ConfigMap`, a hardened `Deployment`, and a `Service`. |
 | [`kustomization.yaml`](kustomization.yaml) | Wraps `fak.yaml` so `kubectl apply -k deploy/k8s` works and you can patch image / namespace / replicas without editing the manifest. |
+| [`overlays/gpu/`](overlays/gpu/) | The **GPU (in-kernel)** stack: [`fak-gpu.yaml`](overlays/gpu/fak-gpu.yaml) (Secret, policy ConfigMap, weights PVC, one-GPU Deployment, Service) + its kustomization — `kubectl apply -k deploy/k8s/overlays/gpu`. |
 
 The committed `Deployment` adds two hardenings on top of the guide's example —
 `seccompProfile: RuntimeDefault` and `automountServiceAccountToken: false` (fak never
@@ -81,12 +84,72 @@ speaks plain HTTP.
    curl -s http://127.0.0.1:8080/healthz   # {"ok":true,...}  (no auth)
    ```
 
+## GPU (in-kernel) overlay
+
+[`overlays/gpu/`](overlays/gpu/) is the **in-kernel** sibling of the proxy stack for
+neo-cloud clusters (CoreWeave CKS, Lambda Cloud k8s, GKE/EKS GPU pools): fak runs the
+model itself from a mounted `.gguf` (`--engine inkernel --backend cuda`) instead of
+proxying an upstream. The Deployment requests `nvidia.com/gpu: 1` (request **and**
+limit), mounts weights read-only from a `fak-weights` PVC, and passes
+`--gguf /weights/model.gguf`. Every resource is named `fak-gpu*`, so it applies
+cleanly **alongside** the proxy stack — nothing is shared, and applying it never
+overwrites a proxy Secret you already filled.
+
+**Prerequisites** — fak installs neither:
+
+1. The **NVIDIA device plugin** (or the full GPU Operator) is already installed on
+   the cluster: `kubectl get nodes -o json | jq '.items[].status.allocatable'` must
+   show `nvidia.com/gpu`. Some clusters additionally key GPU pods on a RuntimeClass;
+   `runtimeClassName: nvidia` is a documented, commented-out knob in the manifest.
+2. **Weights on the claim.** Load the `.gguf` once onto the `fak-weights` PVC at
+   `/weights/model.gguf` (e.g. `kubectl cp` through a temporary pod that mounts the
+   claim, an rsync Job, or your cloud's dataset tooling); every restart reuses it.
+
+**Apply:**
+
+```bash
+kubectl apply -k deploy/k8s/overlays/gpu                    # via kustomize
+kubectl apply -f deploy/k8s/overlays/gpu/fak-gpu.yaml       # the raw manifest
+kubectl rollout status deploy/fak-gpu                       # waits for model load
+kubectl port-forward svc/fak-gpu 8080:80
+curl -s http://127.0.0.1:8080/healthz   # 200 only AFTER the model is loaded
+```
+
+**Image tag.** The manifest pulls `ghcr.io/anthony-chaudhary/fak:cuda-latest` — the
+CUDA variant built from [`Dockerfile.cuda`](../../Dockerfile.cuda) (#2661) that the
+release workflow publishes as `<version>-cuda` + `cuda-latest`. Pin the versioned tag
+(the `images:` example in the overlay's kustomization) for reproducible deploys. Two
+caveats: the first versioned `-cuda` tag ships with the first release cut **after**
+`Dockerfile.cuda` landed (it is not in the v0.37.0 tree) — until then build and push
+your own; and the published image compiles kernels for **one** compute capability
+(default `sm_89`, Ada/L4) — for A100 (`sm_80`), H100/H200 (`sm_90`), or B200
+(`sm_100`), build with `--build-arg CUDA_ARCH=...`.
+
+**Probes.** `/healthz` still drives liveness **and** readiness — it answers 200 only
+once the model is loaded. The overlay raises `initialDelaySeconds` (600 s liveness,
+30 s readiness) as the model-load budget: a large `.gguf` takes minutes to load, and
+an early liveness kill would restart-loop the pod. Tune to your model.
+
+**Hardening.** The container keeps the base's hardened `securityContext`, including
+`readOnlyRootFilesystem: true` — the weights come from the mounted PVC, not a
+writable root. One GPU-image-specific addition: the pod pins `runAsUser: 999`,
+because `Dockerfile.cuda` declares its user by **name** (`USER fak`) and the kubelet
+refuses `runAsNonRoot` containers whose non-root-ness it cannot verify from a
+non-numeric user.
+
+**Why self-contained, not a patch-overlay?** kustomize's root-containment rule
+refuses `deploy/k8s` as a base of its own subdirectory, and restructuring into
+`base/` + `overlays/` would break the documented `kubectl apply -k deploy/k8s` path.
+So `overlays/gpu/` carries its own full manifest and the proxy base stays untouched.
+
 ## Notes
 
-- **Proxy vs in-kernel.** This manifest is proxy mode. For **in-kernel** mode
-  (`--gguf`), mount the weights via a `PersistentVolume`, size memory (and GPU) to the
-  model, raise `FAK_HTTP_WRITE_TIMEOUT_S` / `FAK_PLANNER_TIMEOUT_S` (write ≥ planner),
-  and expect a longer `initialDelaySeconds`. See the guide.
+- **Proxy vs in-kernel.** `fak.yaml` is proxy mode. For **in-kernel** mode (`--gguf`)
+  on a GPU cluster, use the committed
+  [GPU (in-kernel) overlay](#gpu-in-kernel-overlay) above — it mounts the weights
+  from a PVC, sizes memory (and GPU) to the model, raises
+  `FAK_HTTP_WRITE_TIMEOUT_S` / `FAK_PLANNER_TIMEOUT_S` (write ≥ planner), and uses a
+  longer `initialDelaySeconds`. See the guide for the underlying knobs.
 - **Reload policy without a restart.** Edit the `fak-policy` ConfigMap, let the mount
   refresh, then `POST /v1/fak/policy/reload` (with the bearer token) to each pod.
 - **No Helm chart yet.** This raw manifest (+ kustomize) is the supported path; a Helm

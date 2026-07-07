@@ -1,0 +1,27 @@
+# kustomization.yaml — GPU (in-kernel) stack: `kubectl apply -k deploy/k8s/overlays/gpu`.
+#
+# Wraps fak-gpu.yaml — the in-kernel GPU sibling of the proxy-mode base (../..) —
+# so you can patch the image tag, namespace, or resources without editing the
+# manifest. The proxy base is NOT referenced and NOT modified (#2662): kustomize's
+# root-containment rule refuses `deploy/k8s` as a base of its own subdirectory, so
+# this directory is a self-contained variant, not a patch-overlay. Every resource
+# is named fak-gpu* and applies cleanly alongside the proxy stack.
+#
+# Prerequisite: the NVIDIA device plugin (or the GPU Operator) must already be
+# installed on the cluster — fak does not install it. See ../../README.md,
+# "GPU (in-kernel) overlay".
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - fak-gpu.yaml
+
+# fak-gpu.yaml defaults to the moving `cuda-latest` tag. Pin the versioned -cuda
+# tag (published by .github/workflows/release-cuda-container.yml on each release
+# cut after Dockerfile.cuda landed) for reproducible deploys:
+#   images:
+#     - name: ghcr.io/anthony-chaudhary/fak
+#       newTag: "<version>-cuda"
+
+# Deploy into a dedicated namespace (create it first: kubectl create ns fak):
+#   namespace: fak
