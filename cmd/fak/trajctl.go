@@ -56,6 +56,13 @@ const trajctlUsage = `fak trajctl - trajectory-control objective lifecycle (over
       one objective; without it, list every open objective worst-first.
       --json emits the pinned ` + trajctl.CurveSchema + ` report.
 
+  fak trajctl scorers [--ledger FILE] [--json]
+      Calibration leaderboard: per scorer method+version, how well its scores
+      correlate with the W3 witnessed outcome (` + trajctl.GroundTruthMethod + `),
+      ranked best-first so the worst-calibrated repair target sits at the foot.
+      Low-calibration scorers are annotated, never dropped. --json emits the
+      pinned ` + trajctl.CalibrationSchema + ` report.
+
 Ledger default: <root>/` + trajctl.DefaultLedgerRel + `
 Exit: 0 ok, 2 usage error, 1 ledger/parse failure.`
 
@@ -74,6 +81,8 @@ func runTrajctl(stdout, stderr io.Writer, argv []string) int {
 		return runTrajctlList(stdout, stderr, rest)
 	case "curve":
 		return runTrajctlCurve(stdout, stderr, rest)
+	case "scorers":
+		return runTrajctlScorers(stdout, stderr, rest)
 	case "-h", "--help", "help":
 		fmt.Fprintln(stdout, trajctlUsage)
 		return 0
@@ -332,6 +341,47 @@ func trajctlRenderCurve(stdout io.Writer, rep trajctl.CurveReport, path, objecti
 		}
 		fmt.Fprintf(stdout, "%-24s %-14s latest=%.2f delta=%+.2f%s  %s\n",
 			oc.ObjectiveID, oc.Signal, oc.Latest, oc.Delta, parent, oc.Detail)
+	}
+	return 0
+}
+
+// runTrajctlScorers renders the scorer calibration leaderboard (#2566): per scorer
+// method+version, how well its numbers correlate with the W3 witnessed outcome, ranked
+// best-first so the worst-calibrated (repair-target) scorer sits at the bottom.
+func runTrajctlScorers(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak trajctl scorers", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	ledger := fs.String("ledger", "", "ledger path override (default: <root>/"+trajctl.DefaultLedgerRel+")")
+	asJSON := fs.Bool("json", false, "emit the pinned "+trajctl.CalibrationSchema+" report as JSON")
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
+		return code
+	}
+	path := trajctlLedgerPath(*ledger)
+	rep := trajctl.Fold(trajctl.ReadLedgerFile(path)).Calibrate()
+	if *asJSON {
+		return trajctlEmitJSON(stdout, stderr, rep)
+	}
+	return trajctlRenderScorers(stdout, rep, path)
+}
+
+// trajctlRenderScorers prints one line per scorer, best-first, and names the worst-first
+// repair target at the foot when one is measured.
+func trajctlRenderScorers(stdout io.Writer, rep trajctl.CalibrationReport, path string) int {
+	if len(rep.Scorers) == 0 {
+		fmt.Fprintf(stdout, "no scorers to calibrate in %s (need score rows plus a %s outcome)\n", path, rep.GroundTruth)
+		return 0
+	}
+	fmt.Fprintf(stdout, "scorer calibration vs %s outcome (best-first):\n", rep.GroundTruth)
+	for i, sc := range rep.Scorers {
+		coeff := "  n/a"
+		if sc.Measured {
+			coeff = fmt.Sprintf("%+.2f", sc.Coefficient)
+		}
+		fmt.Fprintf(stdout, "  %2d. %-28s v%-4s r=%s  %-16s  %s\n",
+			i+1, sc.Method, sc.Version, coeff, sc.Verdict, sc.Detail)
+	}
+	if worst, ok := rep.WorstCalibrated(); ok {
+		fmt.Fprintf(stdout, "worst-first: repair %s (v%s, r=%+.2f) first\n", worst.Method, worst.Version, worst.Coefficient)
 	}
 	return 0
 }
