@@ -3188,7 +3188,7 @@ func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
 	// array is itself a 400. Nonzero means fak repaired a body a future client-internal block type
 	// (or a genuinely empty source result) would otherwise have gotten rejected upstream.
 	emptyTurns, emptyRepaired := m.emptyContentRepairSnapshot()
-	writeCounter(b, "fak_gateway_empty_tool_result_repaired_total", "WITNESSED (fak authored): cumulative empty tool_result.content arrays backfilled with a placeholder text block across the session. The general form of the tool_reference sanitizer — it catches any content array that ended up empty for ANY reason, since an empty array is itself a 400 upstream.", int64(emptyRepaired))
+	writeCounter(b, "fak_gateway_empty_tool_result_repaired_total", "WITNESSED (fak authored): cumulative empty tool_result.content arrays backfilled with a placeholder text block across the session. The general form of the tool_reference sanitizer — it catches any content array that ended up empty for ANY reason, since an empty array itself 400s as malformed.", int64(emptyRepaired))
 	writeCounter(b, "fak_gateway_empty_tool_result_repair_turns_total", "WITNESSED (fak authored): turns on which at least one empty tool_result.content array was repaired. Zero on the common turn; nonzero means fak repaired a body the provider would otherwise have 400'd as empty content.", int64(emptyTurns))
 }
 
