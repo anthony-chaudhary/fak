@@ -33,6 +33,34 @@ func RehomeCap() int {
 	return DefaultRehomeCap
 }
 
+// LoadSpreadEnv is the kill-switch for the owner-loaded spread (safe by default):
+// set FAK_LOAD_REHOME=0/false/off to restore the historical pin-home-whenever-
+// available behavior. Any other value, or unset, leaves the spread ON.
+const LoadSpreadEnv = "FAK_LOAD_REHOME"
+
+func loadSpreadEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(LoadSpreadEnv))) {
+	case "0", "false", "off", "no":
+		return false
+	}
+	return true
+}
+
+// ownerLiveLoad reports the owner's live-session count in the availability
+// snapshot, and whether that count has reached the fleet burst cap. An owner
+// absent from the snapshot reads as not overloaded: the spread fires only on
+// positive load evidence, never on a missing row.
+func ownerLiveLoad(avail []Target, owner string) (live int, overloaded bool) {
+	for _, a := range avail {
+		if a.Account != owner {
+			continue
+		}
+		c := RehomeCap()
+		return a.LiveSessions, c > 0 && a.LiveSessions >= c
+	}
+	return 0, false
+}
+
 // Target is one candidate account row for re-home ranking, mirroring the availability
 // dicts fleet_sessions.rehome_targets consumes.
 type Target struct {

@@ -92,6 +92,16 @@ type CapRelief struct {
 	Note      string `json:"note"`
 }
 
+// LoadSpread records that an AVAILABLE owner was re-homed away from purely for
+// load: it was carrying at least the fleet burst cap of live sessions while a
+// strictly less-loaded healthy seat had room — the safe-by-default spread that
+// keeps a busy seat from accreting every resume until the whole account
+// limit-walls (the july7 429 pile-up shape).
+type LoadSpread struct {
+	OwnerLive int `json:"owner_live"`
+	RehomeCap int `json:"rehome_cap"`
+}
+
 // TargetProbe records one probed re-home candidate.
 type TargetProbe struct {
 	Account     string `json:"account"`
@@ -119,6 +129,7 @@ type Decision struct {
 	OwnerProbe       *OwnerProbe   `json:"owner_probe,omitempty"`
 	Rehomed          bool          `json:"rehomed,omitempty"`
 	WouldRehome      bool          `json:"would_rehome,omitempty"`
+	LoadSpread       *LoadSpread   `json:"load_spread,omitempty"`
 	PinAccount       string        `json:"pin_account,omitempty"`
 	PinConfigDir     string        `json:"pin_config_dir"`
 	SourceConfigDir  string        `json:"source_config_dir,omitempty"`
@@ -186,8 +197,15 @@ func Resolve(in ResolveInput) Decision {
 
 	ownerAvailable, blockReason = probeCarriedThrottle(in, owner, status, ownerAvailable, blockReason, &rec)
 
-	// Owner reachable -> pin to it, no cross-account copy.
+	// Owner reachable -> normally pin to it, no cross-account copy. Safe-by-default
+	// exception: an owner already carrying the fleet burst cap of live sessions is
+	// the seat most likely to limit-wall next (the july7 429 pile-up shape), so when
+	// the roster proves it loaded AND a strictly less-loaded healthy seat has room,
+	// this resume spreads there instead of piling on. FAK_LOAD_REHOME=0 disables.
 	if ownerAvailable {
+		if dec, ok := loadSpreadDecision(in, home, owner, cwdSlug, rec); ok {
+			return dec
+		}
 		return pinToOwnerDecision(in, owner, cwdSlug, rec)
 	}
 
@@ -204,7 +222,38 @@ func Resolve(in ResolveInput) Decision {
 		return blocked
 	}
 
-	return copyAndPinToTarget(in, owner, tgt, home, cwdSlug, blockReason, rec)
+	return copyAndPinToTarget(in, owner, tgt, home, cwdSlug, "owner blocked ("+blockReason+")", rec)
+}
+
+// loadSpreadDecision re-homes a resume OFF an available-but-loaded owner. It fires
+// only when every part is proven: the spread is enabled, the availability snapshot
+// shows the owner at/over RehomeCap() live sessions, and an under-cap, status-clean
+// seat exists with strictly fewer live sessions than the owner. Anything short of
+// that keeps the normal pin-to-owner — a lone resume is never stranded by the spread.
+func loadSpreadDecision(in ResolveInput, home string, owner *Owner, cwdSlug string, rec Decision) (Decision, bool) {
+	if !loadSpreadEnabled() {
+		return Decision{}, false
+	}
+	availability := in.Availability
+	if availability == nil && in.AvailabilityFn != nil {
+		availability = in.AvailabilityFn()
+	}
+	live, overloaded := ownerLiveLoad(availability, owner.Account)
+	if !overloaded {
+		return Decision{}, false
+	}
+	targets := RehomeTargets(availability, owner.Account, nil, RehomeCap())
+	targets, screened := filterTargetsByStatus(targets, in.OwnerStatusFn)
+	if len(targets) == 0 || targets[0].LiveSessions >= live {
+		return Decision{}, false
+	}
+	if len(screened) > 0 {
+		rec.TargetProbes = screened
+	}
+	rec.LoadSpread = &LoadSpread{OwnerLive: live, RehomeCap: RehomeCap()}
+	reason := fmt.Sprintf("owner serving but at %d live >= burst cap %d (load spread; %s=0 disables)",
+		live, RehomeCap(), LoadSpreadEnv)
+	return copyAndPinToTarget(in, owner, targets[0], home, cwdSlug, reason, rec), true
 }
 
 // pinFreshToHealthy handles the owner-less case: no ~/.claude* account holds this
@@ -488,7 +537,7 @@ func selectRehomeTarget(in ResolveInput, home string, owner *Owner, forcedTarget
 // not a dry run), stamps the copy's mtime so it becomes the unambiguous newest-mtime
 // owner, and builds the REHOME decision (or a PIN_BLOCKED fallback if the source
 // transcript turned out missing).
-func copyAndPinToTarget(in ResolveInput, owner *Owner, tgt Target, home, cwdSlug, blockReason string, rec Decision) Decision {
+func copyAndPinToTarget(in ResolveInput, owner *Owner, tgt Target, home, cwdSlug, reason string, rec Decision) Decision {
 	tgtCfg := targetConfigDir(tgt, home)
 	var destSlugs []string
 	if cwdSlug != "" && cwdSlug != owner.Project {
@@ -531,7 +580,7 @@ func copyAndPinToTarget(in ResolveInput, owner *Owner, tgt Target, home, cwdSlug
 	rec.PinAccount = tgt.Account
 	rec.PinConfigDir = tgtCfg
 	rec.SourceConfigDir = owner.ConfigDir
-	rec.Reason = "owner blocked (" + blockReason + ") -- " + verb + " transcript onto " + tgtTag + confirmNote + " and pin there"
+	rec.Reason = reason + " -- " + verb + " transcript onto " + tgtTag + confirmNote + " and pin there"
 	return rec
 }
 
