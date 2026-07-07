@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/cadencereport"
+	"github.com/anthony-chaudhary/fak/internal/choicetriage"
 	"github.com/anthony-chaudhary/fak/internal/milestonereport"
 	"github.com/anthony-chaudhary/fak/internal/programreport"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
@@ -205,15 +206,42 @@ type Strength struct {
 	Use    string `json:"use"`
 }
 
-// Choice is a concrete operator decision point. The brief only creates choices
-// when the human can actually decide something; agent-work details stay in Agent.
+// Choice is a surfaced decision point — but "surfaced" does not mean "for a
+// human". Every choice is first folded through choicetriage, which decides
+// whether it is really one obvious action an agent takes, an evaluation for a
+// fresh context window, a ticket-sized piece of work, or the small irreducible
+// remainder that genuinely needs a person. Disposition/Resolve carry that fold
+// and are the load-bearing fields; Default/Options are the legacy "pick one"
+// framing kept for back-compat (retirement tracked in the decenter-the-human
+// epic) — read them as advisory, not as the answer.
 type Choice struct {
-	Source   string   `json:"source"`
-	Question string   `json:"question"`
-	Default  string   `json:"default"`
-	Options  []string `json:"options"`
-	Why      string   `json:"why,omitempty"`
-	Action   string   `json:"action,omitempty"`
+	Source      string                   `json:"source"`
+	Question    string                   `json:"question"`
+	Disposition choicetriage.Disposition `json:"disposition"`
+	Resolve     string                   `json:"resolve,omitempty"`
+	NeedsHuman  bool                     `json:"needs_human"`
+	Default     string                   `json:"default"`
+	Options     []string                 `json:"options"`
+	Why         string                   `json:"why,omitempty"`
+	Action      string                   `json:"action,omitempty"`
+}
+
+// triage folds one surfaced choice through choicetriage and stamps the verdict
+// onto it. optionCount is the number of legacy Options offered — 1 means the
+// choice is fake on its face.
+func (c Choice) triage(severity string, optionCount int) Choice {
+	v := choicetriage.Triage(choicetriage.Signal{
+		Severity:    severity,
+		Source:      c.Source,
+		Question:    c.Question,
+		Detail:      c.Why,
+		Action:      c.Action,
+		OptionCount: optionCount,
+	})
+	c.Disposition = v.Disposition
+	c.Resolve = v.Resolve
+	c.NeedsHuman = v.NeedsHuman
+	return c
 }
 
 // Challenge is measured friction the operator should understand even when it is
@@ -831,32 +859,32 @@ func choicesFor(r *Report) []Choice {
 			Options:  []string{"intervene now", "delegate after evidence lands", "hold this branch"},
 			Why:      it.Detail,
 			Action:   it.Action,
-		})
+		}.triage(it.Severity, 3))
 	}
 	if len(out) > 0 {
 		return out
 	}
 	if len(r.Agent) > 0 {
 		top := r.Agent[0]
-		return []Choice{{
+		return []Choice{Choice{
 			Source:   top.Source,
 			Question: "let agents continue with " + top.Title + "?",
 			Default:  "delegate",
 			Options:  []string{"delegate to agents", "pause for operator review"},
 			Why:      top.Detail,
 			Action:   top.Action,
-		}}
+		}.triage(top.Severity, 2)}
 	}
 	if len(r.Watch) > 0 {
 		top := r.Watch[0]
-		return []Choice{{
+		return []Choice{Choice{
 			Source:   top.Source,
 			Question: "keep fleet pace while watching " + top.Title + "?",
 			Default:  "review",
 			Options:  []string{"keep pace", "slow dispatch", "investigate now"},
 			Why:      top.Detail,
 			Action:   top.Action,
-		}}
+		}.triage(top.Severity, 3)}
 	}
 	return nil
 }
@@ -1184,8 +1212,12 @@ func appendChoices(lines []string, choices []Choice) []string {
 	}
 	lines = append(lines, "", "  choices:")
 	for _, ch := range choices {
-		line := fmt.Sprintf("    - %s: %s [default: %s]", ch.Source, ch.Question, ch.Default)
-		line = appendField(line, " - ", ch.Why)
+		disp := string(ch.Disposition)
+		if disp == "" {
+			disp = string(choicetriage.FreshContext)
+		}
+		line := fmt.Sprintf("    - %s: %s [%s]", ch.Source, ch.Question, disp)
+		line = appendField(line, " -> ", ch.Resolve)
 		line = appendField(line, " | ", ch.Action)
 		lines = append(lines, line)
 	}

@@ -237,6 +237,40 @@ func TestFoldReviewModeForRegressedProgramFrontier(t *testing.T) {
 	}
 }
 
+// TestChoicesAreTriagedNotAllPaged proves the decenter-the-human wiring: a
+// surfaced choice is folded through choicetriage, so a page whose fix is a
+// runnable command becomes TAKE_OBVIOUS (regenerate it — no human), while a
+// genuine release decision stays HUMAN_RESIDUAL. The old framing paged the
+// operator for both.
+func TestChoicesAreTriagedNotAllPaged(t *testing.T) {
+	r := &Report{Human: []Item{
+		{
+			Source: "cadence", Severity: "page", Title: "cadence report missing",
+			Detail: "scores are not in this brief",
+			Action: "generate `fak cadence --json` and pass it with --cadence",
+		},
+		{
+			Source: "release", Severity: "decision", Title: "release decision needed",
+			Detail: "a tagged publish is waiting on a go/no-go",
+			Action: "approve or hold the release",
+		},
+	}}
+	choices := choicesFor(r)
+	if len(choices) != 2 {
+		t.Fatalf("want 2 choices, got %d", len(choices))
+	}
+	if choices[0].Disposition != "TAKE_OBVIOUS" || choices[0].NeedsHuman {
+		t.Fatalf("a missing report with a runnable fix must be TAKE_OBVIOUS and page no one, got %+v", choices[0])
+	}
+	if choices[1].Disposition != "HUMAN_RESIDUAL" || !choices[1].NeedsHuman {
+		t.Fatalf("a release go/no-go is the irreducible human residual, got %+v", choices[1])
+	}
+	// The render leads with the disposition, not a fake "pick one" default.
+	if out := strings.Join(appendChoices(nil, choices), "\n"); !strings.Contains(out, "TAKE_OBVIOUS") || !strings.Contains(out, "HUMAN_RESIDUAL") {
+		t.Fatalf("render must surface the triage disposition, got:\n%s", out)
+	}
+}
+
 func TestFoldHeavinessPressureIsWatchOnly(t *testing.T) {
 	c := cleanCadence()
 	p := cleanProgram()

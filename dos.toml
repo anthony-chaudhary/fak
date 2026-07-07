@@ -135,6 +135,7 @@ concurrent = [
   "leaseref",
   "windowgate", # internal/windowgate leaf (the no-desktop-popup gate); declared so the referee binds a `(fak windowgate)` stamp and the arbiter protects internal/windowgate/** edits.
   "worktype",   # internal/worktype leaf (the work-class taxonomy: ongoing PROGRAM vs DISCRETE epic) the milestone roadmap + `fak program` report sort by; declared so the referee binds `(fak worktype)` and the arbiter protects internal/worktype/** edits.
+  "choicetriage", # internal/choicetriage leaf (the surfaced-choice disposition taxonomy that decenters the human: TAKE_OBVIOUS / FRESH_CONTEXT / FILE_TICKET / HUMAN_RESIDUAL, the decision-side dual of waiting) the operator brief folds each choice through; declared so the referee binds `(fak choicetriage)` and the arbiter protects internal/choicetriage/** edits.
   "programreport", # internal/programreport leaf (the ongoing-program report: kernel-opt + cache-opt frontier+trend, sibling of milestonereport/cadencereport); declared so the referee binds `(fak programreport)` and the arbiter protects internal/programreport/** edits.
   # reconciled 2026-06-27 (#1000): internal/scoreboard is a real committed leaf (the `fak
   # scoreboard` Slack scorecard publisher, shipped 52ed934b with the `(fak scoreboard)`
@@ -274,6 +275,7 @@ autopick = [
   "dojo", # #951: internal/dojo leaf (the prediction-vs-reality gym), see [lanes].concurrent note
   "windowgate", # internal/windowgate leaf (the no-desktop-popup gate), see [lanes].concurrent note
   "worktype", # internal/worktype leaf (the work-class taxonomy), see [lanes].concurrent note
+  "choicetriage", # internal/choicetriage leaf (the surfaced-choice disposition taxonomy), see [lanes].concurrent note
   "programreport", # internal/programreport leaf (the ongoing-program report), see [lanes].concurrent note
   "nightrun", # internal/nightrun leaf (the run-it-all-night data-collection door), see [lanes].concurrent note
   "scoreboard", # #1000: internal/scoreboard leaf (the fak scoreboard Slack publisher), see [lanes].concurrent note
@@ -344,6 +346,7 @@ agentdojo = ["internal/agentdojo/**"]
 architest = ["internal/architest/**"]
 windowgate = ["internal/windowgate/**"]
 worktype = ["internal/worktype/**"]
+choicetriage = ["internal/choicetriage/**"]
 programreport = ["internal/programreport/**"]
 nightrun = ["internal/nightrun/**"]
 bench = ["internal/bench/**"]
@@ -1026,6 +1029,44 @@ refusal  = false
 summary  = "The issue fanout planner (internal/issuefanout.Build) refused an input that violates its declared contract -- a missing title/leaf/spine_ref, a --max cap below the fan-out floor (MinFanout), an unknown --area filter, or an expanded candidate that fails the issue-contract review (issuecontract.ReviewCandidate: a leaf outside the marker-key alphabet, or a title/spine tripping the private-boundary screen)."
 fix      = "Fix the caller's input and retry: supply spine_ref (the shipped spine's witness), keep --max at or above MinFanout, pass a known --area (see AreaNames()), and keep every leaf inside the marker-key alphabet with no private-boundary text in the title/spine. ClassifyOutcome distinguishes this deliberate refusal from an unexpected internal error."
 see_also = ["internal/issuefanout/issuefanout.go", "internal/issuefanout/outcome_test.go", "internal/issuefanout/edge_adversarial_test.go", "fak issue fanout"]
+
+# Out-of-band operator control refusals (#2766, epic #2753): the closed tokens a
+# CONTROL op refuses with when it is illegal for the session's current state. Pure
+# DATA -- the refusals already exist (a terminal session rejects every drive-state
+# write; a stale --if-rev loses its CAS race; a redirect against a finished
+# objective is not applicable); these entries give each one a look-up-able closed
+# name so an operator/agent can dos_check_reason it instead of parsing free text
+# or an unexplained 409. Producers: internal/session ControlRefusalFor (the
+# drive-state verbs), internal/sessionctl EnqueueRedirect/ApplyPendingRedirect
+# (the redirect op). Witness: the table-driven applied/refused test across all
+# ops, internal/agent/loop_control_witness_test.go.
+[reasons.CONTROL_SESSION_TERMINAL]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "An out-of-band control op (cancel/pause/resume/throttle/budget/pace/priority) targeted a TERMINAL (Stopped) session -- a stopped session rejects every drive-state write: you cannot cancel a Stopped session, and you do not un-stop one."
+fix      = "Start a fresh continuation instead of reviving the terminal record (session.Table.Recontinue / a new session), or target the live trace you meant. Floor: internal/session ControlRefusalFor over every Table write verb's terminal guard."
+see_also = ["internal/session/ctlrefuse.go", "internal/session/table.go", "internal/agent/loop_control_witness_test.go"]
+
+[reasons.CONTROL_REV_STALE]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "An optimistic-concurrency (--if-rev) control write lost its CAS race: the session's drive record moved to a newer Rev between the caller's read and its write, so applying it would silently clobber a newer transition."
+fix      = "Re-read the session's current state (Rev included) and retry the control op against the live revision. Floor: internal/session Table.CompareAndSet + ControlRefusalFor."
+see_also = ["internal/session/ctlrefuse.go", "internal/session/table.go"]
+
+[reasons.REDIRECT_MALFORMED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "An out-of-band redirect / set-objective op had no applicable shape -- an empty goal (nothing to redirect TO) or an empty session trace -- and was refused synchronously at the enqueue edge, never entering the session's mailbox."
+fix      = "Send the redirect with a non-empty goal (and the target session's trace id); freeform prose belongs on the demoted steer escape hatch, not the structured redirect. Floor: internal/sessionctl Redirect.Validate at EnqueueRedirect."
+see_also = ["internal/sessionctl/redirect.go", "internal/agent/loop_redirect.go"]
+
+[reasons.REDIRECT_NO_REDIRECTABLE_STATE]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "An out-of-band redirect targeted a session whose current objective is TERMINAL (met/abandoned) -- there is no live objective to redirect; reopening a finished objective is a restart, not an out-of-band op."
+fix      = "Start a new session/objective for the new goal instead of redirecting the finished one; redirect only an active or paused objective. Floor: internal/sessionctl EnqueueRedirect + ApplyPendingRedirect against the live objective."
+see_also = ["internal/sessionctl/redirect.go", "internal/agent/loop_redirect_test.go"]
 
 # Bound the per-project `.dos/` scratch so a long-lived repo doesn't accrete audit
 # reports without limit (the "never reap a live lease" floor is the collector's,
