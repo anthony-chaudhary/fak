@@ -169,7 +169,7 @@ def refill(apply: bool, tree_ok: bool) -> dict:
         "size": plan.get("size"),
         "free_seats": plan.get("free_seats"),
         "lanes": [l.get("lane") for l in (plan.get("lanes") or []) if isinstance(l, dict)][:8],
-        "launched": bool(apply and plan.get("verdict") in ("WAVE", "SPAWNED", "WOULD_WAVE") and plan.get("live")),
+        "launched": bool(apply and plan.get("live") and plan.get("verdict") in ("WAVE", "WAVED", "SPAWNED")),
     }
 
 
