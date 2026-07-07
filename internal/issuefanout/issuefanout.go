@@ -268,7 +268,7 @@ func AreaNames() []string {
 // below the fan-out floor.
 func Build(in Input) (Plan, error) {
 	if strings.TrimSpace(in.Title) == "" || strings.TrimSpace(in.Leaf) == "" {
-		return Plan{}, refusef("issuefanout: title and leaf are required")
+		return Plan{}, refusef("issuefanout: title and leaf are required — set title to the spine's human name and leaf to its owning lane, then re-run")
 	}
 	if strings.TrimSpace(in.SpineRef) == "" {
 		return Plan{}, refusef("issuefanout: spine_ref is required — ship the minimal working spine first (or file the spine issue itself), then fan out from its witness")
@@ -287,7 +287,7 @@ func Build(in Input) (Plan, error) {
 			continue
 		}
 		if !known[a] {
-			return Plan{}, refusef("issuefanout: unknown area %q (known: %s)", a, strings.Join(AreaNames(), ", "))
+			return Plan{}, refusef("issuefanout: unknown area %q (known: %s) — set the area filter to one of those, or drop it for the full taxonomy", a, strings.Join(AreaNames(), ", "))
 		}
 		allowed[a] = true
 	}
