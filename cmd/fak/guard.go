@@ -323,6 +323,24 @@ func cmdGuard(argv []string) {
 		os.Exit(code)
 	}
 
+	// Cooldown-aware seat selection: a bare `fak guard -- claude` (no --rotate) resolves its
+	// account purely from the environment and, unlike `fak accounts launch --rotate`, never
+	// consults the fleet-shared cooldown store — so it would launch against an account the
+	// launcher just watched bounce off its own weekly/usage cap, burning a turn on a walled
+	// seat. Only meaningful on the subscription-OAuth Anthropic path: an explicit --api-key-env
+	// is API billing (one key, no rotation) and a non-Claude child has no Claude seat to rotate.
+	// When the currently-resolved seat is actively cooled and a live alternate exists, redirect
+	// $CLAUDE_CONFIG_DIR to it BEFORE resolveGuardUpstream and the child spawn, so every
+	// downstream consumer (fak's own OAuth read, the failover seed, the cap-recovery transcript
+	// path, and the child's inherited env — all of which re-read the env var) follows to the live
+	// seat. Fail-open: any doubt leaves the resolved dir untouched (see guardRotateOffCooldown).
+	if provResolved, _ := resolveGuardProvider(*provider, command[0]); provResolved == "anthropic" && strings.TrimSpace(*apiKeyEnv) == "" {
+		guardHomeDir, _ := os.UserHomeDir()
+		if newDir, rotated := guardRotateOffCooldown(guardHomeDir, guardDefaultAccountsRegistryPath(guardHomeDir), time.Now(), guardRotateWarnWriter(os.Stderr, *quiet)); rotated {
+			_ = os.Setenv("CLAUDE_CONFIG_DIR", newDir)
+		}
+	}
+
 	// Decide whether the per-turn `fak-turn …` economy line streams to the SHARED terminal
 	// stderr. On an attended interactive launch the wrapped agent (Claude Code) paints a
 	// full-screen alternate-screen TUI over THIS terminal, so a per-turn stderr write lands
