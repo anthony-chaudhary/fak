@@ -1,0 +1,159 @@
+---
+title: "DeepSeek V4 self-hosted (vLLM/SGLang) baseline runbook"
+description: "The exact OpenAI-compatible upstream shape, the keyless live-smoke command and its skip conditions, and the minimum-evidence witness ladder for fronting a tuned vLLM/SGLang DeepSeek-V4 server through `fak serve` — before any native in-kernel MoE loader work is scoped. Wire-readiness plan, not a performance headline."
+---
+
+# DeepSeek V4 self-hosted (vLLM/SGLang) baseline runbook
+
+> **Status: wire-readiness plan.** This document states the reproducible
+> upstream shape, the keyless live-smoke command, and the minimum evidence for a
+> "supported self-hosted route." It carries **no throughput/latency headline** —
+> any such number requires a real tuned baseline per
+> [Comparability boundary](#comparability-boundary-do-not-confound), and none is
+> claimed here.
+
+Resolves [#3013](https://github.com/anthony-chaudhary/fak/issues/3013). Parent
+program: [#3006](https://github.com/anthony-chaudhary/fak/issues/3006). Sibling
+DeepSeek-V4 leaves: #3009–#3012 / #3014 / #3015.
+
+## Why front a tuned engine first, not a native loader
+
+DeepSeek-V4-Pro is a published **1.6T-total / 49B-active MoE with 1M context**
+([model card](https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro)). The repo's
+prior-art / default-spine rule says the practical support path is to **front a
+tuned serving engine first** and only then decide whether native in-kernel
+loader/backend work is worth a separate scoped effort. That means: prove fak can
+sit in front of a vLLM/SGLang DeepSeek-V4 server exposing the OpenAI Chat
+Completions surface — the same surface the hosted DeepSeek API exposes
+([vendor docs](https://api-docs.deepseek.com/news/news260424)) — before a single
+line of native 1.6T-weight loading is filed.
+
+This runbook is the **baseline floor**. A native fak MoE follow-on (tokenizer /
+chat-template mapping, expert placement, FP4/FP8 weight loading, 1M-context
+cache pressure) may be filed **only** if this baseline surfaces a concrete
+fak-owned gap — not from model hype.
+
+## The self-hosted upstream shape
+
+fak fronts the engine as a generic **OpenAI-compatible upstream**. The gateway's
+proxy planner posts to `BaseURL + "/chat/completions"` and reads the roster at
+`BaseURL + "/models"`, so `BaseURL` is the engine's OpenAI root (conventionally
+ending in `/v1`).
+
+```bash
+# vLLM (BF16/FP8, day-0 V4 support per lmsys.org/blog/2026-04-25-deepseek-v4)
+vllm serve deepseek-ai/DeepSeek-V4-Pro \
+  --served-model-name deepseek-ai/DeepSeek-V4-Pro \
+  --port 8000
+# → OpenAI root: http://<host>:8000/v1
+
+# SGLang (equivalent OpenAI-compatible surface)
+python -m sglang.launch_server \
+  --model-path deepseek-ai/DeepSeek-V4-Pro \
+  --port 8000
+# → OpenAI root: http://<host>:8000/v1
+```
+
+Front it with `fak serve` (keyless from fak's perspective — auth, if any, is the
+engine's concern and passed through):
+
+```bash
+fak serve --provider openai-compatible \
+  --base-url "http://<host>:8000/v1" \
+  --model deepseek-ai/DeepSeek-V4-Pro
+```
+
+### Hardware assumptions (generic capacity language only)
+
+No private bridge/control details are committed. In generic terms:
+
+- **V4-Pro (1.6T total)** at FP8 is ≈1.6 TB of weights — a **multi-node
+  expert-parallel** deployment. Out of scope for a *first* baseline; size against
+  V4-Flash first (284B total / 13B active, ≈284 GB at FP8 → plausible on one
+  8×80 GB node, architecture floor permitting).
+- **Architecture floor to verify, not assume:** the V4 attention stack is
+  token-wise compression + **DSA (DeepSeek Sparse Attention)**
+  ([vendor announcement](https://api-docs.deepseek.com/news/news260424)). Stock
+  DSA kernel paths have historically required **sm_90+ (Hopper)**; an Ampere
+  sm_80 node may be unable to run the stock resident path. **Confirm the DSA arch
+  floor from the vLLM/SGLang V4 kernel requirements before reserving GPU time.**
+  If confirmed, the baseline needs a Hopper+ node or an engine-provided
+  non-DSA / dense-attention fallback.
+
+## Minimum evidence for a "supported self-hosted route"
+
+The optional live smoke collects, in order, exactly these rungs:
+
+| rung | check | witness |
+|---|---|---|
+| readiness | `GET {base}/models` → 200 with a model roster | `TestDeepSeekV4SelfHostReadiness` |
+| non-streaming | `POST {base}/chat/completions` (`stream:false`) → content + a usage block | `TestDeepSeekV4SelfHostNonStreaming` |
+| streaming | `POST {base}/chat/completions` (`stream:true`) → SSE deltas terminated by `[DONE]`, non-empty content | `TestDeepSeekV4SelfHostStreaming` |
+| tool-call | *(optional, engine-dependent)* one function-call fixture if the engine advertises tool support | documented here; not gated |
+| usage/counters | token counts reported honestly; an engine that omits them is a **recorded gap**, never a synthesized number | logged by the non-streaming rung |
+
+## Optional live smoke — command and skip conditions
+
+The smoke lives in
+[`internal/gateway/deepseek_selfhost_smoke_test.go`](../../internal/gateway/deepseek_selfhost_smoke_test.go)
+and is **keyless from fak's perspective**. It **skips cleanly (never fails)** when
+`DEEPSEEK_SELFHOST_BASE_URL` is unset, so the gateway test suite stays green on a
+box with no model server:
+
+```bash
+# Skips cleanly — no upstream configured:
+go test ./internal/gateway -run TestDeepSeekV4SelfHost -v
+#   --- SKIP: TestDeepSeekV4SelfHostReadiness (DEEPSEEK_SELFHOST_BASE_URL unset …)
+#   --- SKIP: TestDeepSeekV4SelfHostNonStreaming
+#   --- SKIP: TestDeepSeekV4SelfHostStreaming
+
+# Runs the readiness/completion/streaming rungs against a live engine:
+DEEPSEEK_SELFHOST_BASE_URL="http://<host>:8000/v1" \
+DEEPSEEK_SELFHOST_MODEL="deepseek-ai/DeepSeek-V4-Pro" \
+  go test ./internal/gateway -run TestDeepSeekV4SelfHost -v
+```
+
+Environment contract:
+
+| env var | required | default | meaning |
+|---|---|---|---|
+| `DEEPSEEK_SELFHOST_BASE_URL` | to run | *(unset ⇒ skip)* | OpenAI-compatible root, e.g. `http://host:8000/v1` |
+| `DEEPSEEK_SELFHOST_MODEL` | no | `deepseek-ai/DeepSeek-V4-Pro` | served model id to route |
+| `DEEPSEEK_SELFHOST_API_KEY` | no | *(none)* | passed as `Authorization: Bearer …` only if set |
+
+## Comparability boundary (do not confound)
+
+- This baseline is **wire readiness** for a self-hosted OpenAI-compatible route —
+  it proves fak can front the engine and relay readiness/completion/streaming. It
+  is **not** a performance measurement.
+- Any throughput/latency headline requires the tuned serving profile captured by
+  [`VLLM-EP-EPLB-MOE-BASELINE-RUNBOOK.md`](VLLM-EP-EPLB-MOE-BASELINE-RUNBOOK.md)
+  (EP/EPLB arms, `vllm bench serve` percentiles, warm CUDA-graph `tuned` gate) on
+  a real EP-capable node, and must name **hardware, engine, quantization/precision,
+  context length, and baseline** before any number is quoted.
+- A native fak MoE claim must serve the **same model family, hardware, precision,
+  context, and concurrency** as the tuned baseline before a delta is attributable
+  to fak; otherwise the row is `[NOT COMPARABLE]` and must say so.
+
+## Completion bar
+
+The self-host baseline is complete only when:
+
+- The smoke **skips cleanly** with `DEEPSEEK_SELFHOST_BASE_URL` unset (verified in
+  CI on every box), **and**
+- On a real V4/V4-Flash serving node it passes all three rungs
+  (readiness + non-streaming + streaming) with the usage/counter behavior logged
+  honestly, **and**
+- Any performance number is deferred to the tuned EP/EPLB baseline and linked from
+  [`../../BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md).
+
+Until a live node runs it, the honest claim is only: **the DeepSeek-V4 self-host
+route is wired and skips cleanly, ready to run on a V4-capable serving node.**
+
+## Cross-links
+
+- Tuned serving profile (the performance floor this readiness plan defers to):
+  [VLLM-EP-EPLB-MOE-BASELINE-RUNBOOK.md](VLLM-EP-EPLB-MOE-BASELINE-RUNBOOK.md).
+- Authority ledger (the only place a number becomes authoritative):
+  [`../../BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md).
+- Parent program: [#3006](https://github.com/anthony-chaudhary/fak/issues/3006).
