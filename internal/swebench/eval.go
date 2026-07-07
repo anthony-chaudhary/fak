@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strconv"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
 
 // evalHarnessTimeout bounds the OFFICIAL swebench harness subprocess so a hung child can never
@@ -152,7 +154,14 @@ func RunEval(cfg EvalConfig) (EvalResult, error) {
 
 	// Bound the harness subprocess: the scanner loop + cmd.Wait below have no per-read
 	// deadline, so a hung child would block forever without this overall timeout (#793 hang
-	// audit). CommandContext kills the process group when the deadline fires.
+	// audit). Bare CommandContext ctx-cancel is single-PID — it kills only the direct
+	// `python` process, NOT the worker pool and Docker containers the SWE-bench harness
+	// forks (#3106). configureProcGroup (= procguard.ConfigureProcessTreeCancel) wires a
+	// tree kill on cancel (Windows job/`taskkill /T`, POSIX Setpgid + Kill(-pid)); WaitDelay
+	// bounds the reap so a straggler can't hold the pipe past the deadline. Mirrors
+	// internal/nightrun/run.go. NOTE: killing the python tree does not stop already-detached
+	// Docker containers the harness may leave — that container-cleanup follow-on is tracked
+	// separately on #3106.
 	ctx, cancel := context.WithTimeout(context.Background(), evalHarnessTimeout())
 	defer cancel()
 	cmd := exec.CommandContext(ctx, python, "-m", "swebench.harness.run_evaluation",
@@ -160,6 +169,8 @@ func RunEval(cfg EvalConfig) (EvalResult, error) {
 		"--predictions_path", absPreds,
 		"--run_id", cfg.RunID,
 		"--max_workers", strconv.Itoa(cfg.MaxWorkers))
+	procguard.ConfigureProcessTreeCancel(cmd)
+	cmd.WaitDelay = 10 * time.Second
 	// Run in the predictions dir so the harness's per-model summary lands beside
 	// preds.json (mirrors bench's `cd preds_dir` in commands/_swebench_grade.py).
 	cmd.Dir = predsDir

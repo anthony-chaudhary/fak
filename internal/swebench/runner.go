@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/secretload"
 )
 
@@ -380,6 +381,12 @@ func (d *deepSWERunner) RunInstance(ctx context.Context, in Instance) (Predictio
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	// The DeepSWE adapter drives a multi-step agent that spawns its own descendant
+	// tree. Bare CommandContext ctx-cancel is single-PID (no Setpgid / job object), so
+	// on ctx deadline the adapter's children are orphaned (#3106). Tree-kill on cancel
+	// and bound the reap, mirroring internal/nightrun/run.go.
+	procguard.ConfigureProcessTreeCancel(cmd)
+	cmd.WaitDelay = 10 * time.Second
 
 	if err := cmd.Run(); err != nil {
 		msg := strings.TrimSpace(stderr.String())
