@@ -72,10 +72,20 @@ jobs:
 
       # The scorecard tool is the single source of the numbers; generate the payload
       # once so the post step (and the dry-run summary) read the SAME snapshot.
+      # The scorecard exits non-zero on an ACTION verdict (steerability-debt > 0) —
+      # that is a signal, not a payload failure. Mirror the dogfood step below: run
+      # under `set +e`, capture the exit, and hard-fail ONLY when no JSON landed.
+      # (A bare `python … > steer.json` under the step's `bash -e` shell aborts on the
+      # intentional exit-1 before `test -s` runs, which turned every ACTION verdict
+      # into a red workflow.)
       - name: generate steerability payload
         run: |
+          set +e
           python tools/steerability_scorecard.py --json > steer.json
+          code=$?
+          set -e
           test -s steer.json || { echo "steerability scorecard produced no JSON"; exit 1; }
+          echo "steerability scorecard exit ${code} (payload captured for steering guard)"
 
       # Dogfood is part of the guard card's actuals. The dogfood score exits non-zero
       # when it reports ACTION, so capture the JSON payload and keep going as long as
