@@ -21,8 +21,8 @@ func TestRelayVsCompactionBench(t *testing.T) {
 	if r.Provenance.Kind != ProvenanceSimulated {
 		t.Fatalf("provenance = %q; want %q (hermetic model)", r.Provenance.Kind, ProvenanceSimulated)
 	}
-	if len(r.Sweep) != 4 {
-		t.Fatalf("sweep points = %d; want 4", len(r.Sweep))
+	if len(r.Sweep) != 7 {
+		t.Fatalf("sweep points = %d; want 7 (40,80,100,160,200,300,320)", len(r.Sweep))
 	}
 
 	// Done condition (headline): the relay's peak context is FLAT — identical at
@@ -120,6 +120,77 @@ func TestRelayVsCompactionBench(t *testing.T) {
 	}
 	if !bytes.Equal(bytes.TrimRight(want, "\n"), bytes.TrimRight(got, "\n")) {
 		t.Errorf("report drifted from golden %s; re-run with UPDATE_GOLDEN=1 if intended", golden)
+	}
+}
+
+// TestRelayVsCompactionSavingsGate is the witness for issue #2707: the sweep
+// carries an EXPLICIT ≥50% billed-savings gate at each of the operator-requested
+// 100/200/300-turn horizons, computed as
+// (compaction.BilledTokens - relay.BilledTokens) / compaction.BilledTokens, with a
+// per-horizon `savings_meets_50pct_target` verdict that is honest either way — true,
+// or a false that names the shortfall. The test does NOT force a pass (the issue
+// explicitly permits an honest false-with-shortfall under the analytic model); it
+// pins that the gate exists, covers all three horizons, and is internally consistent.
+func TestRelayVsCompactionSavingsGate(t *testing.T) {
+	r := BuildRelayVsCompactionReport()
+
+	if r.SavingsTarget != RVCSavingsTarget || RVCSavingsTarget != 0.50 {
+		t.Fatalf("savings target = %.3f; want %.3f", r.SavingsTarget, 0.50)
+	}
+	want := RVCSavingsGateHorizons() // {100, 200, 300}
+	if len(r.SavingsGates) != len(want) {
+		t.Fatalf("savings gates = %d; want %d (100/200/300)", len(r.SavingsGates), len(want))
+	}
+
+	// Every requested horizon must be present in the underlying sweep (so the gate
+	// is over real arm data, not fabricated).
+	inSweep := map[int]RVCPoint{}
+	for _, p := range r.Sweep {
+		inSweep[p.GoalTurns] = p
+	}
+	allMeet := true
+	for i, g := range r.SavingsGates {
+		if g.GoalTurns != want[i] {
+			t.Fatalf("gate[%d] horizon = %d; want %d", i, g.GoalTurns, want[i])
+		}
+		p, ok := inSweep[g.GoalTurns]
+		if !ok {
+			t.Fatalf("gate horizon %d not present in the sweep", g.GoalTurns)
+		}
+		if g.CompactionBilledTokens != p.Compaction.BilledTokens || g.RelayBilledTokens != p.Relay.BilledTokens {
+			t.Fatalf("gate %d billed tokens desync: gate(c=%d,r=%d) sweep(c=%d,r=%d)",
+				g.GoalTurns, g.CompactionBilledTokens, g.RelayBilledTokens, p.Compaction.BilledTokens, p.Relay.BilledTokens)
+		}
+		// The gate value must equal the issue's exact formula.
+		wantFrac := round4(float64(p.Compaction.BilledTokens-p.Relay.BilledTokens) / float64(p.Compaction.BilledTokens))
+		if g.BilledSavingsFrac != wantFrac {
+			t.Errorf("gate %d savings frac = %.4f; want %.4f", g.GoalTurns, g.BilledSavingsFrac, wantFrac)
+		}
+		// Verdict must match the computed fraction, and the shortfall must be named
+		// exactly when (and only when) the gate is not met — the done condition's
+		// "true, or an honest false with the shortfall named".
+		if g.SavingsMeets50pctTarget != (g.BilledSavingsFrac >= RVCSavingsTarget) {
+			t.Errorf("gate %d verdict %v inconsistent with frac %.4f vs target %.2f",
+				g.GoalTurns, g.SavingsMeets50pctTarget, g.BilledSavingsFrac, RVCSavingsTarget)
+		}
+		if g.SavingsMeets50pctTarget {
+			if g.ShortfallFrac != 0 {
+				t.Errorf("gate %d met but shortfall = %.4f; want 0", g.GoalTurns, g.ShortfallFrac)
+			}
+		} else {
+			allMeet = false
+			if g.ShortfallFrac <= 0 {
+				t.Errorf("gate %d NOT met but shortfall = %.4f; want > 0 (name the shortfall)", g.GoalTurns, g.ShortfallFrac)
+			}
+			if got := round4(RVCSavingsTarget - g.BilledSavingsFrac); g.ShortfallFrac != got {
+				t.Errorf("gate %d shortfall = %.4f; want %.4f", g.GoalTurns, g.ShortfallFrac, got)
+			}
+		}
+		t.Logf("horizon %d: relay bills %d vs compaction %d -> %.1f%% savings, meets_50pct=%v (shortfall %.4f)",
+			g.GoalTurns, g.RelayBilledTokens, g.CompactionBilledTokens, g.BilledSavingsFrac*100, g.SavingsMeets50pctTarget, g.ShortfallFrac)
+	}
+	if r.AllHorizonsMeet50pct != allMeet {
+		t.Errorf("all_horizons_meet_50pct = %v; want %v (must agree with the per-horizon gates)", r.AllHorizonsMeet50pct, allMeet)
 	}
 }
 

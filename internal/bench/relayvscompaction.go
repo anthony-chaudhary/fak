@@ -123,9 +123,24 @@ func DefaultRVCModel() RVCModel {
 
 // DefaultRVCDurations is the sweep of total-work sizes. Each is long enough that
 // the goal does not fit in one window (so compaction fires at least once), and
-// the set grows so the relay's peak-context invariance is witnessed across a 8x
-// range rather than at a single point.
-func DefaultRVCDurations() []int { return []int{40, 80, 160, 320} }
+// the set grows so the relay's peak-context invariance is witnessed across an 8x
+// range rather than at a single point. The set includes the operator-requested
+// 100/200/300-turn horizons (issue #2707) alongside the original {40,80,160,320}
+// so the same sweep both replicates the #1906 sign and feeds the explicit ≥50%
+// billed-savings gate (RVCSavingsGateHorizons / computeSavingsGates).
+func DefaultRVCDurations() []int { return []int{40, 80, 100, 160, 200, 300, 320} }
+
+// RVCSavingsTarget is the operator-requested billed-token cost-reduction bar the
+// long-horizon gate checks (issue #2707): the relay must bill at least this
+// fraction fewer tokens than compaction, i.e.
+// (compaction.BilledTokens - relay.BilledTokens) / compaction.BilledTokens >= 0.50.
+const RVCSavingsTarget = 0.50
+
+// RVCSavingsGateHorizons is the exact set of goal-turn horizons the ≥50% savings
+// gate is evaluated at (issue #2707). They are a subset of DefaultRVCDurations so
+// the arms already exist in the sweep; a live leg-record run that supplies these
+// durations gets the same gate for free through the OBSERVED seam.
+func RVCSavingsGateHorizons() []int { return []int{100, 200, 300} }
 
 // RVCArm is one strategy's result on a goal of a given duration.
 type RVCArm struct {
@@ -183,6 +198,30 @@ type RVCDelta struct {
 	Finding              string  `json:"finding"`
 }
 
+// RVCSavingsGate is the explicit long-horizon acceptance gate at one goal-turn
+// horizon (issue #2707): does the relay bill at least RVCSavingsTarget (50%) fewer
+// tokens than compaction at this horizon? It is computed, not asserted — the
+// `savings_meets_50pct_target` bit is honest either way, and when it is false the
+// shortfall names exactly how far under the bar the model landed so a live run
+// (follow-on) can confirm or demote the number without a harness rewrite.
+type RVCSavingsGate struct {
+	GoalTurns              int `json:"goal_turns"`
+	CompactionBilledTokens int `json:"compaction_billed_tokens"`
+	RelayBilledTokens      int `json:"relay_billed_tokens"`
+	// BilledSavingsFrac is (compaction - relay) / compaction — the fraction of
+	// billed tokens the relay saves at this horizon.
+	BilledSavingsFrac float64 `json:"billed_savings_frac"`
+	// Target is the bar (RVCSavingsTarget) this horizon is graded against.
+	Target float64 `json:"target"`
+	// SavingsMeets50pctTarget is the done-condition verdict per horizon:
+	// BilledSavingsFrac >= Target.
+	SavingsMeets50pctTarget bool `json:"savings_meets_50pct_target"`
+	// ShortfallFrac is how far below the bar the horizon landed (Target -
+	// BilledSavingsFrac), 0 when the gate is met — the honest shortfall the done
+	// condition requires be named on a false verdict.
+	ShortfallFrac float64 `json:"shortfall_frac"`
+}
+
 // Verdicts the bench can reach.
 const (
 	// VerdictRelayWins: the relay is strictly lower-peak, cheaper, and at least as
@@ -203,14 +242,25 @@ type RelayVsCompactionReport struct {
 	// FlatPeakContext is the done-condition witness: the relay's peak context is
 	// IDENTICAL across every swept duration (bounded by the per-leg ceiling,
 	// independent of goal duration — the O(1) invariant).
-	FlatPeakContext     bool     `json:"flat_peak_context"`
-	RelayPeakContext    int      `json:"relay_peak_context_tokens"`
-	Delta               RVCDelta `json:"delta"`
-	Verdict             string   `json:"verdict"`
-	Assumptions         []string `json:"assumptions"`
-	Promotion           string   `json:"promotion"`
-	DemotionRetirement  string   `json:"demotion_or_retirement"`
-	InvalidatingUnknown string   `json:"invalidating_assumption"`
+	FlatPeakContext  bool `json:"flat_peak_context"`
+	RelayPeakContext int  `json:"relay_peak_context_tokens"`
+	// SavingsTarget is the ≥50% bar the long-horizon gate grades against (#2707).
+	SavingsTarget float64 `json:"savings_target"`
+	// SavingsGates is the explicit acceptance gate at each of the 100/200/300-turn
+	// horizons the operator asked for (#2707): the billed-savings fraction and a
+	// per-horizon `savings_meets_50pct_target` verdict (true, or an honest false
+	// with the shortfall named). Empty if the sweep supplied none of those horizons.
+	SavingsGates []RVCSavingsGate `json:"savings_gates"`
+	// AllHorizonsMeet50pct is true iff every evaluated horizon meets the target AND
+	// all three requested horizons are present — a false-closed rollup that does not
+	// claim the bar is cleared over a missing horizon.
+	AllHorizonsMeet50pct bool     `json:"all_horizons_meet_50pct"`
+	Delta                RVCDelta `json:"delta"`
+	Verdict              string   `json:"verdict"`
+	Assumptions          []string `json:"assumptions"`
+	Promotion            string   `json:"promotion"`
+	DemotionRetirement   string   `json:"demotion_or_retirement"`
+	InvalidatingUnknown  string   `json:"invalidating_assumption"`
 }
 
 // simulateCompaction replays the goal under reactive in-place compaction.
@@ -423,15 +473,29 @@ func assembleRVCReport(m RVCModel, sweep []RVCPoint, provenance Provenance) Rela
 		delta.Finding = rvcFinding(delta, d, relayPeak, flat)
 	}
 
+	gates := computeSavingsGates(sweep)
+	// AllHorizonsMeet50pct fails closed: it is true only when all three requested
+	// horizons are present AND each meets the bar. A partial sweep (a horizon
+	// missing) cannot witness the long-horizon claim.
+	allMeet := len(gates) == len(RVCSavingsGateHorizons())
+	for _, g := range gates {
+		if !g.SavingsMeets50pctTarget {
+			allMeet = false
+		}
+	}
+
 	return RelayVsCompactionReport{
-		Schema:           "relayvscompaction.v1",
-		Provenance:       provenance,
-		Model:            m,
-		Sweep:            sweep,
-		FlatPeakContext:  flat,
-		RelayPeakContext: relayPeak,
-		Delta:            delta,
-		Verdict:          verdict,
+		Schema:               "relayvscompaction.v1",
+		Provenance:           provenance,
+		Model:                m,
+		Sweep:                sweep,
+		FlatPeakContext:      flat,
+		RelayPeakContext:     relayPeak,
+		SavingsTarget:        RVCSavingsTarget,
+		SavingsGates:         gates,
+		AllHorizonsMeet50pct: allMeet,
+		Delta:                delta,
+		Verdict:              verdict,
 		Assumptions: []string{
 			"Compaction TRUSTS its in-place summary rather than re-querying the durable store; a compacting agent that also re-derived dropped facts from git on demand would narrow the accuracy gap toward the relay's. This is the load-bearing doctrinal assumption.",
 			"The relay's externalize gate is fail-closed: every load-bearing fact is committed/ledgered/filed before rotation and the baton is re-verified at read, so accuracy is 1.0. A leg that rotated with load-bearing state still transcript-only (a gate bypass) would drop below 1.0.",
@@ -442,6 +506,48 @@ func assembleRVCReport(m RVCModel, sweep []RVCPoint, provenance Provenance) Rela
 		DemotionRetirement:  "If a live run shows compaction matching the relay on BOTH cost and fidelity for a goal class (e.g. a compaction that re-queries git), the relay's complexity is not justified for that class and this bench demotes the claim rather than defending it.",
 		InvalidatingUnknown: "The single assumption most likely to flip the result is #1: that compaction does not re-derive dropped facts from the durable store. If it does, the fidelity advantage collapses and only the peak-context and cache advantages remain.",
 	}
+}
+
+// computeSavingsGates evaluates the explicit ≥50% billed-savings gate (issue
+// #2707) at each requested horizon (RVCSavingsGateHorizons) that the sweep
+// actually contains. It reads the SAME BilledTokens the arms already produce
+// (analytic OR observed), so the OBSERVED leg-record path gets the gate for free.
+// A horizon absent from the sweep is skipped rather than fabricated — the gate is
+// only reported where both arms exist.
+func computeSavingsGates(sweep []RVCPoint) []RVCSavingsGate {
+	byDur := make(map[int]RVCPoint, len(sweep))
+	for _, p := range sweep {
+		byDur[p.GoalTurns] = p
+	}
+	horizons := RVCSavingsGateHorizons()
+	gates := make([]RVCSavingsGate, 0, len(horizons))
+	for _, h := range horizons {
+		p, ok := byDur[h]
+		if !ok {
+			continue
+		}
+		comp := p.Compaction.BilledTokens
+		relay := p.Relay.BilledTokens
+		var frac float64
+		if comp > 0 {
+			frac = round4(float64(comp-relay) / float64(comp))
+		}
+		meets := frac >= RVCSavingsTarget
+		shortfall := 0.0
+		if !meets {
+			shortfall = round4(RVCSavingsTarget - frac)
+		}
+		gates = append(gates, RVCSavingsGate{
+			GoalTurns:               h,
+			CompactionBilledTokens:  comp,
+			RelayBilledTokens:       relay,
+			BilledSavingsFrac:       frac,
+			Target:                  RVCSavingsTarget,
+			SavingsMeets50pctTarget: meets,
+			ShortfallFrac:           shortfall,
+		})
+	}
+	return gates
 }
 
 func safeRatio(num, den int) float64 {

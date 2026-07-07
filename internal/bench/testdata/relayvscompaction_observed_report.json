@@ -77,6 +77,9 @@
   ],
   "flat_peak_context": true,
   "relay_peak_context_tokens": 26000,
+  "savings_target": 0.5,
+  "savings_gates": [],
+  "all_horizons_meet_50pct": false,
   "delta": {
     "at_goal_turns": 12,
     "peak_context_reduction_tokens": 74000,
