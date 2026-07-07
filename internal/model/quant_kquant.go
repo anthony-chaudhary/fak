@@ -166,7 +166,9 @@ func kQuantDequantSuperBlock(dst []float32, blk []byte, kind kQuantKind) {
 	case kindQ6K:
 		q6kDequantSuperBlock(dst, blk)
 	case kindIQ3XXS:
-		iq3xxsDequantSuperBlock(dst, blk)
+		if !iq3xxsDequantSuperBlockArch(dst, blk) {
+			iq3xxsDequantSuperBlock(dst, blk)
+		}
 	case kindIQ4XS:
 		iq4xsDequantSuperBlock(dst, blk)
 	case kindQ8_0:
