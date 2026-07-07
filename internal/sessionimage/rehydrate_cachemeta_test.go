@@ -87,6 +87,21 @@ func TestRehydrateCarriesCachemetaInvalidationState(t *testing.T) {
 		t.Fatalf("witnessed entry session_id label = %q, want %q", witnessed.Labels["session_id"], id)
 	}
 
+	// The un-witnessed page records InvalidationNone, not a spurious refutation mode — the
+	// state is honest to each page's own evidence, never inflated at rehydrate.
+	var plain *cachemeta.Entry
+	for i := range res.CacheEntries {
+		if res.CacheEntries[i].Validity.Witness == "" {
+			plain = &res.CacheEntries[i]
+		}
+	}
+	if plain == nil {
+		t.Fatalf("expected an un-witnessed rehydrated entry: %+v", res.CacheEntries)
+	}
+	if plain.Coherence.InvalidationMode != cachemeta.InvalidationNone {
+		t.Fatalf("un-witnessed entry InvalidationMode = %q, want none (state must not be inflated)", plain.Coherence.InvalidationMode)
+	}
+
 	// Cold-path correctness stays explicit: a rehydrated record is on disk, never a resident
 	// hot tier, so it cannot be served as a live hit before the first post-wake re-prefill.
 	for _, e := range res.CacheEntries {
