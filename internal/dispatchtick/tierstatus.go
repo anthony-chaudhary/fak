@@ -296,9 +296,9 @@ func (r TierStatusReport) Render() string {
 			seat = "-"
 		}
 		flags := tierRowFlags(row)
-		fmt.Fprintf(&b, "  #%-5d %-10s req=%s opt=%s chosen=%s seat=%-10s cost=%+d outcome=%-9s %s [%s]\n",
+		fmt.Fprintf(&b, "  #%-5d %-10s req=%s opt=%s chosen=%s seat=%-10s cost=%+d outcome=%-9s %s [%s]%s\n",
 			row.Issue, truncateLane(row.Lane), row.RequiredTier, row.OptimalTier, chosen,
-			seat, row.CostDeltaModeled, row.Outcome, flags, row.Reason)
+			seat, row.CostDeltaModeled, row.Outcome, flags, row.Reason, tierTagSuffix(row))
 	}
 	b.WriteString("  outcomes:")
 	for _, o := range tierOutcomeOrder {
@@ -309,6 +309,17 @@ func (r TierStatusReport) Render() string {
 	b.WriteByte('\n')
 	fmt.Fprintf(&b, "  note: %s\n", r.Note)
 	return b.String()
+}
+
+// tierTagSuffix renders the tagging-health flags for a row, so the human readout
+// distinguishes a genuinely untagged issue from one that was tagged but
+// missing/invalid/conflicting/contradictory — both route to the conservative
+// frontier floor, and only the flags say why. Empty for a cleanly-tagged row.
+func tierTagSuffix(row TierDecisionRow) string {
+	if len(row.TagFlags) == 0 {
+		return ""
+	}
+	return " tags=[" + strings.Join(row.TagFlags, ",") + "]"
 }
 
 // tierOutcomeOrder fixes the render iteration order over the outcome tally.

@@ -56,6 +56,8 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchRoute(stdout, stderr, argv[1:])
 	case "skipped":
 		return runDispatchSkipped(stdout, stderr, argv[1:])
+	case "tier-status":
+		return runDispatchTierStatus(stdout, stderr, argv[1:])
 	case "tick":
 		return runDispatchTick(stdout, stderr, argv[1:])
 	case "wave":
@@ -86,7 +88,7 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		dispatchUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, tick, wave, sweep, progress, audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, or timeout-ledger)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, tier-status, tick, wave, sweep, progress, audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, or timeout-ledger)\n", argv[0])
 		dispatchUsage(stderr)
 		return 2
 	}
@@ -251,6 +253,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch order [--in FILE] [--cooldown-min N] [--now UNIX] [--prefer-oldest] [--json]
   fak dispatch price [--workspace DIR] [--in FILE] [--json]
   fak dispatch route [--workspace DIR] [--json]
+  fak dispatch tier-status [--in FILE] [--demo] [--json]
   fak dispatch skipped [--workspace DIR] [--channel C] [--repo-url URL] [--token T] [--dry-run]
   fak dispatch tick  [--workspace DIR] [--backend claude|opencode|codex] [--goal throughput|high-priority] [--live] [--json]
   fak dispatch wave  [--workspace DIR] [--count N] [--backend claude|opencode|codex] [--goal throughput|high-priority] [--live] [--json]
@@ -344,5 +347,13 @@ evidence was observed), then persists one JSONL row per attempt to
 .dispatch-runs/timeout-ledger.jsonl under --workspace, so WHERE timeouts happen is auditable
 instead of every timeout looking like the same opaque event. It never inspects a live process
 or spawns a worker -- the only side effect is the local append.
+tier-status is the offline model-tier account readout: given issue rows (each with its
+tier/T<N>-required|optimal labels and an account pool), it folds them through the pure tier
+chooser and prints which seat each issue would route to, the over-tier waste and under-tier
+refusals side by side, and a MODELED cost delta -- launching nothing. The tier per issue is
+derived from its labels exactly as the dispatcher parses them, so a missing or contradictory
+tag shows up as a conservative frontier route with the tag flaw named (tag_flags) rather than a
+silent choice. --demo folds an embedded five-issue fixture; --in reads a JSON array (or
+{"issues":[...]}), each row {"issue":N,"lane":"L","labels":[...],"accounts":[{"account":"a","model_tier":1,"available":true}]}.
 `)
 }
