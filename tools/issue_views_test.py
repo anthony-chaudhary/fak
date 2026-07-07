@@ -31,6 +31,7 @@ DISPATCH_VIEW_SLUGS = {
     "substrate",
     "trust-floor",
     "gpu",
+    "score-process-gates",
     "current",
     "generation-now",
     "generation-next",

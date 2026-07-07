@@ -84,6 +84,12 @@
       "note": "Area cluster (OR over gpu/compute/multi-gpu/metal): the GPU-backend and kernel work. Often gated on a physical device witness."
     },
     {
+      "slug": "score-process-gates",
+      "title": "Score / process / gates (operator)",
+      "query": "is:open label:score-signal,model-score,observability,dev-ex,dispatch,operator -label:epic -label:idea-scout -label:needs-triage -label:triage-only -label:triage_only -label:guard-complaint no:assignee",
+      "note": "Operator cluster (OR over score-signal/model-score/observability/dev-ex/dispatch/operator): the scattered score/process/gate observability work the `current` view leaves empty — dogfoodscore, scorecard/control-pane, score-signal, fleet/headless, observability, gate, dev-ex, and scoreboard leaves under one selection. Backed by the real label taxonomy: score-signal + model-score (score family, may be empty when the score backlog is drained), observability + operator (the operator-view axis this issue's own labels sit on), dev-ex, and dispatch (fleet/headless/gate process). Several named areas (dogfoodscore, scorecard, gate, scoreboard, fleet/headless) have NO dedicated label and surface via the observability/dev-ex/dispatch/operator labels their issues carry — reconcile against the GitHub UI saved view by hand as the taxonomy grows."
+    },
+    {
       "slug": "current",
       "title": "Current focus (operator-marked)",
       "query": "is:open label:current -label:epic -label:idea-scout -label:needs-triage -label:triage-only -label:triage_only -label:guard-complaint no:assignee",
