@@ -56,6 +56,7 @@ const (
 // concept.
 var verbTiers = map[string]VerbTier{
 	// ---- frontdoor: the product (ceiling gated by TestFrontdoorTierStaysSmall) ----
+	"ablate":      TierFrontdoor,
 	"attest":      TierFrontdoor,
 	"audit":       TierFrontdoor,
 	"codex":       TierFrontdoor,
@@ -82,13 +83,13 @@ var verbTiers = map[string]VerbTier{
 	"version":     TierFrontdoor,
 
 	// ---- hidden: internal re-exec/hook seams, never listed ----
-	"ablate-arm":       TierHidden,
-	"guard-precompact": TierHidden,
-	"guard-stophook":   TierHidden,
-	"hook":             TierHidden,
+	"ablate-arm":         TierHidden,
+	"guard-precompact":   TierHidden,
+	"guard-sessionstart": TierHidden,
+	"guard-stophook":     TierHidden,
+	"hook":               TierHidden,
 
 	// ---- dev: everything else — spelled `fak dev <verb>` once C2 lands ----
-	"ablate":                        TierDev,
 	"accounts":                      TierDev,
 	"affected":                      TierDev,
 	"agent":                         TierDev,
@@ -241,6 +242,7 @@ var verbTiers = map[string]VerbTier{
 	"sync":                          TierDev,
 	"task":                          TierDev,
 	"test":                          TierDev,
+	"tier-calibrate":                TierDev,
 	"token-defaults-scorecard":      TierDev,
 	"tool-coverage-audit":           TierDev,
 	"toolproc":                      TierDev,

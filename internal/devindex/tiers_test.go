@@ -84,12 +84,16 @@ func TestVerbTiersNameOnlyLiveVerbs(t *testing.T) {
 }
 
 // TestFrontdoorTierStaysSmall is the product-surface ratchet: the ratified
-// frontdoor set is 24 named verbs (epic #2228 / #2230 — ~20 concepts once the
+// frontdoor set is 25 named verbs (epic #2228 / #2230 — ~20 concepts once the
 // replay/top/pull/ls companions fold into run/ps/model). Promoting a verb to
 // the front door means bumping this ceiling IN THE SAME COMMIT, with the
 // reasoning in the commit message — the review is the point of the gate.
+//
+// 25 (was 24): `ablate` promoted — it now renders the live savings dashboard by
+// default (one command, no `fak console ablate`) and earns its own front-door
+// category (help.go overviewGroups), so it is a product surface, not dev tooling.
 func TestFrontdoorTierStaysSmall(t *testing.T) {
-	const ceiling = 24
+	const ceiling = 25
 	var front []string
 	for key, tier := range verbTiers {
 		if tier == TierFrontdoor {

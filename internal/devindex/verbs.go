@@ -70,7 +70,7 @@ func (v Verb) Spellings() []string {
 // e.g. a peer's in-flight verb committed later — is simply not emitted until it goes
 // live, so this table and the binary never have to be reconciled in lockstep.
 var verbManifest = []Verb{
-	{Name: "ablate", Synopsis: "self-ablation: replay one frozen trace under N feature configs, one row per arm", Lane: "cmd"},
+	{Name: "ablate", Synopsis: "self-ablation: replay one trace under N cache-lever configs; live savings dashboard by default", Lane: "cmd"},
 	{Name: "ablate-arm", Synopsis: "internal: the re-exec child of fak ablate — reads one arm request on stdin, writes one AblationRun", Lane: "cmd"},
 	{Name: "accounts", Synopsis: "config-home registry: every CLAUDE_CONFIG_DIR seat with its disk-true identity + tombstone rehome", Lane: "cmd"},
 	{Name: "affected", Synopsis: "fast inner loop: run go test only for the packages your working-tree change can affect", Lane: "cmd"},
@@ -139,6 +139,7 @@ var verbManifest = []Verb{
 	{Name: "grafana", Synopsis: "export fak fleet metrics as a Grafana dashboard/datasource", Lane: "cmd"},
 	{Name: "guard", Synopsis: "wrap an agent harness: deny/repair/quarantine proposed tool calls (the one-command front door)", Lane: "gateway"},
 	{Name: "guard-precompact", Synopsis: "internal: Claude Code PreCompact hook actuator installed by fak guard", Lane: "cmd"},
+	{Name: "guard-sessionstart", Synopsis: "internal: Claude Code SessionStart hook actuator installed by fak guard", Lane: "cmd"},
 	{Name: "guard-rsi-scorecard", Synopsis: "native control-pane payload for guard RSI loop maturity and realized value", Lane: "cmd"},
 	{Name: "guard-stophook", Synopsis: "internal: Claude Code Stop hook actuator installed by fak guard", Lane: "cmd"},
 	{Name: "guard-verdict-rsi", Synopsis: "the guard verdict RSI loop: fold the decision journal, score verdict-quality, keep on gain", Lane: "cmd"},
@@ -249,6 +250,7 @@ var verbManifest = []Verb{
 	{Name: "sync", Synopsis: "safe sync/push for a dirty shared worktree; never pull/stash/reset", Lane: "cmd"},
 	{Name: "task", Synopsis: "the process-local task manager snapshot (hardware/runtime + task/step/concept progress + ETA)", Lane: "cmd"},
 	{Name: "test", Synopsis: "host-aware test runner: resolve the right go test invocation (Windows->WSL via test.ps1)", Lane: "cmd"},
+	{Name: "tier-calibrate", Synopsis: "outcome-calibration fold over recorded tier decisions: propose threshold moves from witnessed outcomes", Lane: "cmd"},
 	{Name: "token-defaults-scorecard", Synopsis: "native token-saving-defaults control-pane payload", Lane: "cmd"},
 	{Name: "tool-coverage-audit", Synopsis: "audit load-bearing tool coverage for a workspace against the advisory minimum floor", Lane: "cmd"},
 	{Name: "toolproc", Synopsis: "the kernel's process table for tool calls: fold a lifecycle journal into deadline/stall/orphan/kill verdicts", Lane: "cmd", Doc: "docs/notes/CONCEPT-TOOL-PROCESS-TABLE-2026-07-02.md"},
