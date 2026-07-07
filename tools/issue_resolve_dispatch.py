@@ -144,6 +144,13 @@ _CONTRACT_HOLD_LEDGER = "contract-holds.jsonl"
 # chosen lane lease needs a split/reroute, not another identical launch tick.
 DEFAULT_MULTI_LANE_HOLD_TTL_H = 24
 _MULTI_LANE_HOLD_LEDGER = "multi-lane-holds.jsonl"
+# Operator-forced contract-gate bypass ledger (#2637): every time --force downgrades
+# a FAILED issue-contract readiness gate to advisory and spawns anyway, one row is
+# appended here with the operator's structured --force-reason. This is the durable,
+# operator-visible audit trail — the count folds into each tick's run artifact so an
+# operator can see WHEN and HOW OFTEN the guard is being bypassed, not just that a
+# single spawn happened to carry `bypassed=true` as telemetry.
+_CONTRACT_FORCED_LEDGER = "contract-forced-bypasses.jsonl"
 # Contract-repair dispatch: when the WHOLE scan window fails the gate, the tick
 # spawns one worker to bring the held issues up to contract themselves (gh issue
 # edit) instead of idling until a human grooms the backlog. The batch bounds one
@@ -1243,6 +1250,51 @@ def record_contract_holds(runs_dir: Path, rows: list[dict[str, Any]], *,
                 }, ensure_ascii=False) + "\n")
     except OSError:
         pass  # fail-open: a missed skip re-reviews next tick, never blocks one
+
+
+def record_contract_forced_bypass(runs_dir: Path, row: dict[str, Any], *,
+                                  live: bool, now_ts: float | None = None) -> None:
+    """Append one operator-forced contract-gate bypass to the audit ledger (#2637).
+
+    Live ticks only: a dry-run stays side-effect-free (the payload still reports the
+    would-be bypass). Each row carries the operator's structured ``--force-reason``
+    alongside the gate's own hold reason, so the ledger answers *why* the readiness
+    guard was overridden, not just that a spawn carried ``bypassed=true``."""
+    if not live or not row:
+        return
+    import time
+    now = now_ts if now_ts is not None else time.time()
+    iso = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ledger = runs_dir / _CONTRACT_FORCED_LEDGER
+    try:
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        with ledger.open("a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "utc": iso, "ts": now,
+                "issue": int(row.get("issue") or 0),
+                "lane": str(row.get("lane") or "")[:80],
+                "score": int(row.get("score") or 0),
+                "reason": str(row.get("reason") or "")[:300],
+                "gate_reason": str(row.get("gate_reason") or "")[:300],
+                "title": str(row.get("title") or "")[:200],
+            }, ensure_ascii=False) + "\n")
+    except OSError:
+        pass  # fail-open: a missed audit row never blocks a live tick
+
+
+def contract_forced_bypass_count(runs_dir: Path) -> int:
+    """Total operator-forced contract-gate bypasses recorded so far (#2637) — the
+    operator-visible tally of how often the readiness guard has been overridden.
+    Fail-open: an absent or unreadable ledger reports 0."""
+    ledger = runs_dir / _CONTRACT_FORCED_LEDGER
+    if not ledger.is_file():
+        return 0
+    try:
+        return sum(1 for line in
+                   ledger.read_text(encoding="utf-8", errors="replace").splitlines()
+                   if line.strip())
+    except OSError:
+        return 0
 
 
 def multi_lane_held_records(
@@ -3725,6 +3777,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
               loop_ledger: Path | None = None,
               issue_override: int | None = None,
               force: bool = False,
+              force_reason: str = "",
               contract_scan: int = DEFAULT_CONTRACT_SCAN,
               contract_hold_ttl_h: int = DEFAULT_CONTRACT_HOLD_TTL_H,
               repair_batch: int = DEFAULT_REPAIR_BATCH,
@@ -4396,15 +4449,49 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     if contract_hold and force:
         # Operator force (--force): the readiness gate WOULD hold (typically the
         # issue lacks the full agent-context contract the always-on loop demands),
-        # but the operator has explicitly accepted a best-effort spawn. Record the
-        # bypass transparently. Every downstream SAFETY guard still applies -- the
-        # preflight cap, the lane lease (no two workers on one leaf tree), the
-        # spawn-probe liveness check, the worker-timeout reaper -- and the worker
-        # prompt is honest-block-first, so a force can only relax READINESS, never a
-        # safety invariant.
+        # but the operator has explicitly accepted a best-effort spawn. Every
+        # downstream SAFETY guard still applies -- the preflight cap, the lane lease
+        # (no two workers on one leaf tree), the spawn-probe liveness check, the
+        # worker-timeout reaper -- and the worker prompt is honest-block-first, so a
+        # force can only relax READINESS, never a safety invariant.
+        #
+        # A bare --force is NOT enough (#2637): silently downgrading a failed gate to
+        # `bypassed=true` telemetry is exactly the leak this issue closes. The
+        # override must carry a structured --force-reason, which is recorded in the
+        # run artifact AND appended to the durable forced-bypass audit ledger so an
+        # operator can see WHEN and HOW OFTEN the guard is being bypassed. Without a
+        # reason the tick REFUSES to spawn rather than quietly overriding the gate.
+        gate_reason = issue_contract_hold_reason(contract)
+        reason_text = str(force_reason or "").strip()
+        if not reason_text:
+            hold_reason = (
+                f"--force on a failed issue-contract gate (#{target}: {gate_reason}) "
+                f"requires a structured --force-reason so the override is recorded in "
+                f"the run ledger; refusing to spawn")
+            payload["launch_gate"] = launch_gate_blocked(
+                "FORCE_REASON_REQUIRED", hold_reason,
+                "re-run with --force --force-reason "
+                "\"<why this spawn is worth bypassing the contract gate>\"")
+            payload.update({
+                "ok": False,
+                "action": "force_reason_required",
+                "verdict": "FORCE_REASON_REQUIRED",
+                "reason": hold_reason,
+            })
+            _record(runs_dir, payload)
+            return finish(payload)
+        record_contract_forced_bypass(
+            runs_dir,
+            {"issue": target, "lane": chosen_lane,
+             "score": int(contract.get("score") or 0),
+             "reason": reason_text, "gate_reason": gate_reason,
+             "title": rec.get("title")},
+            live=live)
         payload["issue_contract_forced"] = {
             "bypassed": True,
-            "gate_reason": issue_contract_hold_reason(contract),
+            "gate_reason": gate_reason,
+            "reason": reason_text,
+            "bypass_count": contract_forced_bypass_count(runs_dir),
         }
 
     # Same-issue WIP guard (#2975): hold before command pricing if a previous
@@ -4565,15 +4652,22 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                 runs_dir, product=product, account_tag=acct.get("tag"),
                 hit=cap_hit, now_ts=time.time(), fallback_min=60,
                 source="early_exit")
+        # A transient <5s child crash is self-healing noise, not a tick malfunction:
+        # count it against THIS target and only redden the health bit once the same
+        # target keeps failing (failover not healing it) — see tick_exit_code (#2636).
         payload.update({"ok": False, "action": "spawn_failed",
                         "verdict": "SPAWN_FAILED",
                         "spawned": spawned,
+                        "spawn_failed_streak": bump_spawn_failure_streak(
+                            runs_dir, target, backend),
                         "reason": (f"{backend} worker pid {spawned['pid']} for "
                                    f"#{target} exited within {early.get('wait_s')}s "
                                    f"with code {early.get('returncode')}"
                                    + (" and produced an empty log" if early.get("silent") else ""))})
         _record(runs_dir, payload)
         return finish(payload)
+    # A worker that launched cleanly breaks any prior same-target SPAWN_FAILED streak.
+    clear_spawn_failure_streak(runs_dir, target, backend)
     payload.update({"ok": True, "action": "spawned", "verdict": "SPAWNED",
                     "spawned": spawned,
                     "reason": (f"spawned {backend} issue-resolution worker pid "
@@ -4636,6 +4730,11 @@ def render(p: dict[str, Any]) -> str:
         lanes = sorted({str(r.get("lane")) for r in ms if r.get("lane")})
         lines.append(f"  scan      : {len(ms)} multi-lane head(s) skipped"
                      + (f" across lanes [{','.join(lanes)}]" if len(lanes) > 1 else ""))
+    icf = p.get("issue_contract_forced") or {}
+    if icf.get("bypassed"):
+        lines.append(f"  forced    : contract gate bypassed — {icf.get('reason')} "
+                     f"(gate: {icf.get('gate_reason')}; total bypasses "
+                     f"{icf.get('bypass_count')})")
     cr = p.get("contract_repair") or {}
     if cr.get("batch"):
         lines.append(f"  repair    : issue(s) {cr['batch']} -> {p.get('verdict')}")
@@ -4705,20 +4804,100 @@ BENIGN_ACTIONS = frozenset({
     "active_compact_runaway",                            # live compact-control loop fuse
     "multi_lane_scope",                                  # issue spans lanes the lease can't cover (#2615)
     "issue_contract_hold",                               # issue needs scope before spawn
+    "force_reason_required",                             # --force lacked a structured --force-reason (#2637)
     "refused",                                           # preflight backpressure (host at cap / no account)
     "weekly_capped", "backend_unhealthy",                # pool unavailable; declined correctly
 })
 
 
+# A SPAWN_FAILED is NOT a dispatcher malfunction: at the ~1-in-25 baseline the tick
+# did its job (picked a target, passed the contract gate, took the lane lease, launched)
+# and the CHILD died in <5s — which the dispatcher's own backend/account failover
+# retries on a later tick. A SINGLE such crash must not redden the scheduled-task health
+# bit (LastTaskResult), which the control-pane watchdog reads as green/red. Only a spawn
+# that keeps failing on the SAME target this many times IN A ROW — failover not healing
+# it — is a real, non-self-healing fault the watchdog should see red (#2636).
+SPAWN_FAILED_RED_STREAK = 3
+
+
+def _spawn_failure_streak_path(runs_dir: Path, backend: str) -> Path:
+    # Per-backend so the opus FleetIssueDispatch and the glm FleetIssueDispatchGlm keep
+    # independent same-target run-lengths and never clobber each other's counter.
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(backend or "claude")) or "claude"
+    return runs_dir / f"spawn-failure-streak-{safe}.json"
+
+
+def _read_spawn_failure_streaks(runs_dir: Path, backend: str) -> dict[str, int]:
+    try:
+        doc = json.loads(
+            _spawn_failure_streak_path(runs_dir, backend).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(doc, dict):
+        return {}
+    out: dict[str, int] = {}
+    for k, v in doc.items():
+        try:
+            out[str(k)] = int(v)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _write_spawn_failure_streaks(runs_dir: Path, backend: str,
+                                 streaks: dict[str, int]) -> None:
+    try:
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        _spawn_failure_streak_path(runs_dir, backend).write_text(
+            json.dumps(streaks, sort_keys=True), encoding="utf-8")
+    except OSError:
+        pass  # fail-open: a streak we can't persist just resets to single-transient
+
+
+def bump_spawn_failure_streak(runs_dir: Path, target: int | str, backend: str) -> int:
+    """Record one more consecutive SPAWN_FAILED for ``target`` on ``backend`` and return
+    the new run-length. Reset by :func:`clear_spawn_failure_streak` on the next
+    successful spawn of the same target, so the returned count is the number of spawn
+    failures IN A ROW — the 'failover not healing it' signal :func:`tick_exit_code`
+    reddens on (#2636). Fail-open: an unreadable ledger just starts the count at 1."""
+    streaks = _read_spawn_failure_streaks(runs_dir, backend)
+    count = streaks.get(str(target), 0) + 1
+    streaks[str(target)] = count
+    _write_spawn_failure_streaks(runs_dir, backend, streaks)
+    return count
+
+
+def clear_spawn_failure_streak(runs_dir: Path, target: int | str, backend: str) -> None:
+    """A successful spawn of ``target`` broke the streak — failover healed it, so the
+    same-target SPAWN_FAILED run-length resets to zero (#2636)."""
+    streaks = _read_spawn_failure_streaks(runs_dir, backend)
+    if str(target) in streaks:
+        del streaks[str(target)]
+        _write_spawn_failure_streaks(runs_dir, backend, streaks)
+
+
 def tick_exit_code(payload: dict[str, Any]) -> int:
     """Process exit code for one dispatch tick: 0 when the tick ran correctly
-    (dispatched work, or benignly declined per BENIGN_ACTIONS), non-zero only on
-    a genuine malfunction such as SPAWN_FAILED or an unrecognised action. Keeps a
-    healthy idle/capped tick from reporting failure to Task Scheduler / the
-    control-pane watchdog."""
+    (dispatched work, or benignly declined per BENIGN_ACTIONS), non-zero only on a
+    genuine malfunction such as an unrecognised action or a non-dict payload. A
+    SPAWN_FAILED is the ~1-in-25 self-healing baseline (correct tick, child died on
+    launch, failover retries it): a SINGLE same-target crash stays 0 and only a run of
+    ``SPAWN_FAILED_RED_STREAK`` in a row on the same target (``spawn_failed_streak``,
+    stamped by :func:`bump_spawn_failure_streak`) goes 1. Keeps a healthy tick — idle,
+    capped, OR self-healing a transient child crash — from reporting failure to Task
+    Scheduler / the control-pane watchdog (#2636)."""
     if not isinstance(payload, dict):
         return 1
-    return 0 if str(payload.get("action") or "") in BENIGN_ACTIONS else 1
+    action = str(payload.get("action") or "")
+    if action in BENIGN_ACTIONS:
+        return 0
+    if action == "spawn_failed":
+        try:
+            streak = int(payload.get("spawn_failed_streak") or 1)
+        except (TypeError, ValueError):
+            streak = 1
+        return 1 if streak >= SPAWN_FAILED_RED_STREAK else 0
+    return 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -4751,11 +4930,19 @@ def main(argv: list[str] | None = None) -> int:
                     help="actually spawn the worker (default: dry-run / plan only)")
     ap.add_argument("--force", action="store_true",
                     help="operator best-effort: downgrade the issue-contract readiness "
-                         "HOLD to advisory and spawn anyway (records the bypass). Every "
-                         "SAFETY guard still applies (preflight cap, lane lease, spawn "
-                         "probe, worker-timeout). Use to dispatch the top real issues "
-                         "when the always-on gate demands a fuller agent-context contract "
-                         "than the backlog currently carries.")
+                         "HOLD to advisory and spawn anyway. REQUIRES --force-reason so "
+                         "the override is recorded in the run ledger (#2637); a bare "
+                         "--force on a failed gate is refused FORCE_REASON_REQUIRED. "
+                         "Every SAFETY guard still applies (preflight cap, lane lease, "
+                         "spawn probe, worker-timeout). Use to dispatch the top real "
+                         "issues when the always-on gate demands a fuller agent-context "
+                         "contract than the backlog currently carries.")
+    ap.add_argument("--force-reason", default="",
+                    help="structured operator reason recorded when --force bypasses a "
+                         "failed issue-contract gate (#2637). Written to the run "
+                         f"artifact (issue_contract_forced.reason) and appended to the "
+                         f"{RUNS_DIRNAME}/{_CONTRACT_FORCED_LEDGER} audit ledger whose "
+                         "count exposes how often the guard has been bypassed.")
     ap.add_argument("--no-refresh", action="store_true",
                     help="skip the per-tick account-registry refresh")
     ap.add_argument("--cooldown-min", type=int, default=120,
@@ -4823,6 +5010,7 @@ def main(argv: list[str] | None = None) -> int:
                                     if args.loop_ledger else None),
                        issue_override=args.issue,
                        force=args.force,
+                       force_reason=args.force_reason,
                        contract_scan=max(1, args.contract_scan),
                        contract_hold_ttl_h=max(0, args.contract_hold_ttl_h),
                        repair_batch=max(0, args.repair_batch),

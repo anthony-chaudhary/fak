@@ -1607,14 +1607,9 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["target_issue"], 401)
         self.assertNotIn("contract_skipped", p)
 
-    def test_force_downgrades_contract_hold_to_advisory(self) -> None:
-        """--force (operator best-effort): a contract that WOULD hold is downgraded
-        to advisory and the tick proceeds to WOULD_SPAWN, recording the bypass."""
-        mod = load()
-        self._patch(mod, pre=self.SPAWN_OK,
-                    pick={"lane": "gateway", "numbers": [467],
-                          "by_lane_count": {"gateway": 1}})
-        mod.issue_contract_review = lambda *a, **k: {
+    @staticmethod
+    def _thin_contract_review(*_a, **_k):
+        return {
             "ok": False,
             "unavailable": False,
             "score": 40,
@@ -1626,16 +1621,102 @@ class EvaluateTest(unittest.TestCase):
                 "score": {"total": 40},
             },
         }
+
+    def test_force_downgrades_contract_hold_to_advisory(self) -> None:
+        """--force + --force-reason (operator best-effort): a contract that WOULD hold
+        is downgraded to advisory and the tick proceeds to WOULD_SPAWN, recording the
+        structured reason and the running bypass count (#2637)."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467],
+                          "by_lane_count": {"gateway": 1}})
+        mod.issue_contract_review = self._thin_contract_review
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
-                         lane=None, live=False, force=True)
+                         lane=None, live=False, force=True,
+                         force_reason="operator: top real issue, worker prompt carries context")
         # Readiness is relaxed, but the tick is now spawnable (dry-run: WOULD_SPAWN).
         self.assertTrue(p["ok"])
         self.assertEqual(p["verdict"], "WOULD_SPAWN")
         self.assertTrue(p["issue_contract_forced"]["bypassed"])
         self.assertIn("ISSUE_SCOPE_INCOMPLETE",
                       p["issue_contract_forced"]["gate_reason"])
+        # The operator's structured reason is carried in the run artifact (#2637).
+        self.assertEqual(p["issue_contract_forced"]["reason"],
+                         "operator: top real issue, worker prompt carries context")
+        self.assertIn("bypass_count", p["issue_contract_forced"])
         # The gate result is still recorded transparently (not hidden by the force).
         self.assertFalse(p["issue_contract_gate"]["ok"])
+
+    def test_default_contract_hold_does_not_spawn(self) -> None:
+        """DONE-CONDITION #1 (#2637): a score<floor contract with NO --force does not
+        spawn a worker — it refuses ISSUE_CONTRACT_HOLD before any launch."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467],
+                          "by_lane_count": {"gateway": 1}})
+        mod.issue_contract_review = self._thin_contract_review
+        # spawn_issue_worker is `boom`; reaching it would fail the test.
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=True, repair_batch=0)
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "ISSUE_CONTRACT_HOLD")
+        self.assertNotIn("issue_contract_forced", p)
+
+    def test_force_without_reason_refuses_spawn(self) -> None:
+        """DONE-CONDITION #2 (#2637): a bare --force on a FAILED contract gate is not
+        enough — it refuses FORCE_REASON_REQUIRED and spawns nothing."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467],
+                          "by_lane_count": {"gateway": 1}})
+        mod.issue_contract_review = self._thin_contract_review
+        # live=True so spawn_issue_worker (boom) would fire if enforcement leaked.
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=True, force=True, force_reason="   ")
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["action"], "force_reason_required")
+        self.assertEqual(p["verdict"], "FORCE_REASON_REQUIRED")
+        self.assertEqual(p["launch_gate"]["blockers"][0]["code"],
+                         "FORCE_REASON_REQUIRED")
+        self.assertNotIn("issue_contract_forced", p)
+
+    def test_force_with_reason_records_bypass_in_ledger(self) -> None:
+        """DONE-CONDITION #2+#3 (#2637): a LIVE forced spawn appends the structured
+        reason to the audit ledger and the exposed bypass_count reflects it."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467],
+                          "by_lane_count": {"gateway": 1}})
+        mod.issue_contract_review = self._thin_contract_review
+        # A live tick reaches spawn; patch it so we can assert the pre-spawn ledger
+        # write without launching a real worker.
+        spawned = {}
+        mod.spawn_issue_worker = lambda *a, **k: {
+            "pid": 4321, "issue": 467, "log": "resolve-467.log",
+            "early_exit": {"checked": True, "alive": True}}
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=True, force=True,
+                         force_reason="operator: dispatch top backlog issue")
+        self.assertEqual(p["verdict"], "SPAWNED")
+        self.assertEqual(p["issue_contract_forced"]["reason"],
+                         "operator: dispatch top backlog issue")
+        self.assertGreaterEqual(p["issue_contract_forced"]["bypass_count"], 1)
+        runs_dir = ROOT / mod.RUNS_DIRNAME
+        self.assertEqual(mod.contract_forced_bypass_count(runs_dir),
+                         p["issue_contract_forced"]["bypass_count"])
+
+    def test_contract_forced_bypass_ledger_is_live_only(self) -> None:
+        """The forced-bypass ledger records LIVE ticks only; a dry-run stays
+        side-effect-free (#2637)."""
+        mod = load()
+        runs_dir = ROOT / mod.RUNS_DIRNAME
+        row = {"issue": 2633, "lane": "gateway", "score": 41,
+               "reason": "operator: because", "gate_reason": "score:41<floor:100"}
+        mod.record_contract_forced_bypass(runs_dir, row, live=False)
+        self.assertEqual(mod.contract_forced_bypass_count(runs_dir), 0)
+        mod.record_contract_forced_bypass(runs_dir, row, live=True)
+        mod.record_contract_forced_bypass(runs_dir, row, live=True)
+        self.assertEqual(mod.contract_forced_bypass_count(runs_dir), 2)
 
     def test_issue_override_pins_target(self) -> None:
         """--issue pins an explicit target, overriding the freshest-first auto-pick."""
@@ -4190,9 +4271,45 @@ class TickExitCodeTest(unittest.TestCase):
         self.assertEqual(mod.tick_exit_code({"action": "spawned", "ok": True}), 0)
         self.assertEqual(mod.tick_exit_code({"action": "would_spawn", "ok": True}), 0)
 
-    def test_spawn_failed_exits_nonzero(self) -> None:
+    def test_single_transient_spawn_failed_is_not_red(self) -> None:
+        # #2636: a lone SPAWN_FAILED (child died <5s on an otherwise-correct tick) is the
+        # ~1-in-25 self-healing baseline — failover retries it, so it must NOT redden
+        # LastTaskResult. An un-stamped payload (or streak 1) reads green.
         mod = load()
-        self.assertEqual(mod.tick_exit_code({"action": "spawn_failed", "ok": False}), 1)
+        self.assertEqual(mod.tick_exit_code({"action": "spawn_failed", "ok": False}), 0)
+        self.assertEqual(mod.tick_exit_code(
+            {"action": "spawn_failed", "ok": False, "spawn_failed_streak": 1}), 0)
+        # just below the threshold stays green (still plausibly transient noise)
+        self.assertEqual(mod.tick_exit_code(
+            {"action": "spawn_failed", "ok": False,
+             "spawn_failed_streak": mod.SPAWN_FAILED_RED_STREAK - 1}), 0)
+
+    def test_repeated_same_target_spawn_failed_is_red(self) -> None:
+        # #2636: a SPAWN_FAILED that keeps recurring on the SAME target (failover not
+        # healing it) reaches SPAWN_FAILED_RED_STREAK and DOES go red.
+        mod = load()
+        self.assertEqual(mod.tick_exit_code(
+            {"action": "spawn_failed", "ok": False,
+             "spawn_failed_streak": mod.SPAWN_FAILED_RED_STREAK}), 1)
+        self.assertEqual(mod.tick_exit_code(
+            {"action": "spawn_failed", "ok": False,
+             "spawn_failed_streak": mod.SPAWN_FAILED_RED_STREAK + 1}), 1)
+
+    def test_spawn_failure_streak_bumps_per_target_and_clears_on_success(self) -> None:
+        # The production wiring behind the done condition: the same-target run-length is
+        # per-target and per-backend, and a successful spawn resets it (#2636).
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self.assertEqual(mod.bump_spawn_failure_streak(runs, 1515, "claude"), 1)
+            self.assertEqual(mod.bump_spawn_failure_streak(runs, 1515, "claude"), 2)
+            # a different target keeps its own independent run-length
+            self.assertEqual(mod.bump_spawn_failure_streak(runs, 42, "claude"), 1)
+            # a different backend never shares the counter
+            self.assertEqual(mod.bump_spawn_failure_streak(runs, 1515, "opencode"), 1)
+            # a successful spawn of the same target resets it to zero
+            mod.clear_spawn_failure_streak(runs, 1515, "claude")
+            self.assertEqual(mod.bump_spawn_failure_streak(runs, 1515, "claude"), 1)
 
     def test_unknown_or_malformed_action_exits_nonzero(self) -> None:
         mod = load()
