@@ -90,7 +90,19 @@ func (m *MemStore) AddIfDurable(role, kind, durability string, body []byte, seal
 // durable memory.
 func (m *MemStore) AddPromotedIfDurable(role, kind, durability string, body []byte, sealed bool, meta PromotionMeta, reclass string) (Cell, error) {
 	target := NormDurability(durability)
-	if (target == DurabilityBounded || target == DurabilityDurable) && !sealed {
+	durableTarget := target == DurabilityBounded || target == DurabilityDurable
+	if durableTarget {
+		// Deny-by-structure (#2912): a durable write is a governed syscall. Refuse a
+		// document-sized verbatim blob or a transient/failed-tool narrative
+		// structurally, before it lands — regardless of any reclassification string.
+		// Unlike the ephemeral gate below, this refusal is NOT overridable by reclass:
+		// structure, not consent, decides. A sealed durable write is judged too — a
+		// sealed 74 KiB verbatim blob (the #3006 shape) is still junk memory.
+		if v := AdjudicateMemoryWrite(body); !v.Admit {
+			return Cell{}, fmt.Errorf("%w: %s: %s", ErrWriteRefused, v.Reason, v.Detail)
+		}
+	}
+	if durableTarget && !sealed {
 		outcome := GateEphemeralPromotion(string(body), reclass)
 		if !outcome.Allowed {
 			return Cell{}, fmt.Errorf("%w: %s (situational=%s)", ErrEphemeralRefused, outcome.Reason, outcome.Situational)
