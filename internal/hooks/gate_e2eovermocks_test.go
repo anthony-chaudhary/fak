@@ -19,9 +19,9 @@ func TestMatchSecurityPrefix(t *testing.T) {
 		{"internal/policy/policy.go", "internal/policy/", true},
 		{"internal/normgate/normgate.go", "internal/normgate/", true},
 		{`internal\adjudicator\secretposture.go`, "internal/adjudicator/", true}, // backslashes normalized
-		{"internal/gateway/gateway.go", "", false},                              // not in the guarded set
-		{"README.md", "", false},                                               // non-security
-		{"internal/adjudicatorx/x.go", "", false},                              // prefix must end at a dir boundary
+		{"internal/gateway/gateway.go", "", false},                               // not in the guarded set
+		{"README.md", "", false},                  // non-security
+		{"internal/adjudicatorx/x.go", "", false}, // prefix must end at a dir boundary
 	}
 	for _, c := range cases {
 		prefix, ok := matchSecurityPrefix(c.path)
