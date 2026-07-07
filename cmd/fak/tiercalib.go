@@ -135,9 +135,9 @@ func tierCalibrateDemo() ([]issuecost.TierDecision, []issuecost.WitnessedOutcome
 		return issuecost.WitnessedOutcome{Issue: issue, CommitWitnessed: true, TestsGreen: true, Closed: true, Turns: 3}
 	}
 	outcomes := []issuecost.WitnessedOutcome{
-		green(10), green(11),                       // T0 over-tier successes -> expand-cheaper
-		{Issue: 20, Escalated: true, Turns: 9},     // T1 escalation          -> raise-floor
-		green(30),                                  // T2 single success      -> hold
+		green(10), green(11), // T0 over-tier successes -> expand-cheaper
+		{Issue: 20, Escalated: true, Turns: 9}, // T1 escalation          -> raise-floor
+		green(30),                              // T2 single success      -> hold
 	}
 	return decisions, outcomes
 }

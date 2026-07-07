@@ -26,7 +26,7 @@ func TestFormatConfigLineEmitsActiveSetAxis(t *testing.T) {
 		"layers=79",
 		"hidden=6144",
 		"experts=256",
-		"experts_used=8",     // K — the highest-leverage unread scalar (Lane F)
+		"experts_used=8",      // K — the highest-leverage unread scalar (Lane F)
 		"expert_ffn_len=1536", // expert FFN length, read while the header is open
 	} {
 		if !strings.Contains(got, want) {
