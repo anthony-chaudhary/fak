@@ -620,6 +620,16 @@ func TestRunTheNightWalksThreeDimensions(t *testing.T) {
 	if len(night.Members) != 3 {
 		t.Fatalf("run-the-night must walk exactly 3 dimensions, got %d", len(night.Members))
 	}
+	// The operator's headline overnight number is a DECLARED field, not buried prose —
+	// so a walk can surface it and a test can pin it. (Measuring live progress against
+	// it is the named follow-on; here we only pin that the target is declared and
+	// echoed, never that the walk fabricates a progress count.)
+	if night.IssueTarget != 200 {
+		t.Errorf("run-the-night must declare the ~200-issue overnight target, got IssueTarget=%d", night.IssueTarget)
+	}
+	if rep := Walk(night, nil); rep.IssueTarget != 200 {
+		t.Errorf("Walk must echo the declared IssueTarget into the report, got %d", rep.IssueTarget)
+	}
 	byRef := map[string]Member{}
 	for _, m := range night.Members {
 		byRef[m.Ref] = m

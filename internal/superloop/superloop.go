@@ -111,6 +111,15 @@ type Super struct {
 	// as a HOLD, never as an implicit unlimited grant. Priority stays debt-ordered; a
 	// budget only reserves attention (the contract's Core Rule).
 	Budget GenerationBudget `json:"budget"`
+	// IssueTarget is a DECLARED operator headline number — the count of issues the
+	// intent wants a run to progress (e.g. run-the-night's ~200-issue overnight
+	// target). Like Floor and Budget it is a policy the operator states, NOT a
+	// measured consumption: the walk SURFACES it so the number is an explicit,
+	// testable part of the intent rather than buried prose, but binding it to a
+	// live count of issues progressed (and reddening the fold until it is met) is a
+	// named follow-on — the same declared-vs-measured posture the budget rows keep.
+	// 0 = no headline issue target for this intent.
+	IssueTarget int `json:"issue_target,omitempty"`
 }
 
 // The four budget-dimension tokens the generation-budget contract names
@@ -304,11 +313,12 @@ var registry = []Super{
 		// walk enters whichever dimension is most underused: if boxes sit idle it enters
 		// node-resources, if seats sit idle it enters account-limits, else it drives the
 		// issue backlog — the loop that carries a night toward the ~200-issue target.
-		Name:   "run-the-night",
-		Title:  "run a productive night: drain issues, use every account limit and every node",
-		About:  "walk the three night-productivity dimensions live — open-issue drain, account-limit utilization, and lab/node resource utilization — and enter the worst-first (most underused) dimension",
-		Floor:  0,
-		Budget: GenerationBudget{Stream: "gen/now", MaxMinutes: 60, TokenCeiling: 400000, MaxWorkers: 4, ReviewSlots: 1},
+		Name:        "run-the-night",
+		Title:       "run a productive night: drain issues, use every account limit and every node",
+		About:       "walk the three night-productivity dimensions live — open-issue drain, account-limit utilization, and lab/node resource utilization — and enter the worst-first (most underused) dimension",
+		Floor:       0,
+		IssueTarget: 200, // the operator's declared overnight headline: progress ~200 issues.
+		Budget:      GenerationBudget{Stream: "gen/now", MaxMinutes: 60, TokenCeiling: 400000, MaxWorkers: 4, ReviewSlots: 1},
 		Members: []Member{
 			{Kind: KindSuperloop, Ref: "drain-issues", Why: "the night's headline output: open issues progressed toward the ~200-issue target, by throughput and high-priority goals"},
 			{Kind: KindUtilization, Ref: "account-limits", Why: "account-limit utilization: offerable seats sitting idle are limits the night is paying for and not spending", Enter: "go run ./cmd/fak accounts next && go run ./cmd/fak dispatch auto --goal throughput"},
@@ -579,18 +589,23 @@ type BudgetRow struct {
 // answer to "I asked to <intent> — what is the status of everything under it, and
 // what should I enter first?"
 type WalkReport struct {
-	Schema     string         `json:"schema"`
-	Name       string         `json:"name"`
-	Title      string         `json:"title"`
-	TotalDebt  int            `json:"total_debt"`
-	Floor      int            `json:"floor"`
-	Satisfied  bool           `json:"satisfied"`
-	Members    int            `json:"members"`
-	Walked     int            `json:"walked"`
-	Unmeasured int            `json:"unmeasured"`
-	Dark       int            `json:"dark"`
-	Worklist   []WorkItem     `json:"worklist"`
-	Statuses   []MemberStatus `json:"statuses"`
+	Schema    string `json:"schema"`
+	Name      string `json:"name"`
+	Title     string `json:"title"`
+	TotalDebt int    `json:"total_debt"`
+	Floor     int    `json:"floor"`
+	// IssueTarget echoes the intent's DECLARED headline issue count (0 = none). It is
+	// surfaced for the operator, not folded into Satisfied — measuring progress
+	// against it is the named follow-on, so a walk never claims "200 progressed" it
+	// did not witness.
+	IssueTarget int            `json:"issue_target,omitempty"`
+	Satisfied   bool           `json:"satisfied"`
+	Members     int            `json:"members"`
+	Walked      int            `json:"walked"`
+	Unmeasured  int            `json:"unmeasured"`
+	Dark        int            `json:"dark"`
+	Worklist    []WorkItem     `json:"worklist"`
+	Statuses    []MemberStatus `json:"statuses"`
 	// Budget is the intent's declared generation-budget envelope folded into one row
 	// per contract dimension (Time/Tokens/Workers/Review), each carrying the declared
 	// cap and the per-worklist-member share. Always four rows: an unbudgeted dimension
@@ -610,12 +625,13 @@ type WalkReport struct {
 // measured AND none is dark — an unread or dark member can never read as clean.
 func Walk(s Super, statuses []MemberStatus) WalkReport {
 	rep := WalkReport{
-		Schema:   WalkSchema,
-		Name:     s.Name,
-		Title:    s.Title,
-		Floor:    s.Floor,
-		Members:  len(s.Members),
-		Statuses: statuses,
+		Schema:      WalkSchema,
+		Name:        s.Name,
+		Title:       s.Title,
+		Floor:       s.Floor,
+		IssueTarget: s.IssueTarget,
+		Members:     len(s.Members),
+		Statuses:    statuses,
 	}
 
 	// Preserve declared order as the stable tiebreaker.

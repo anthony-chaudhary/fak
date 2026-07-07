@@ -369,6 +369,13 @@ func renderSuperloopWalk(w io.Writer, rep superloop.WalkReport) {
 	fmt.Fprintf(w, "superloop walk: %s — %s (%s)\n", rep.Name, rep.Verdict, rep.Finding)
 	fmt.Fprintf(w, "  aggregate debt %d (floor %d)  members %d  walked %d  unmeasured %d  dark %d\n",
 		rep.TotalDebt, rep.Floor, rep.Members, rep.Walked, rep.Unmeasured, rep.Dark)
+	if rep.IssueTarget > 0 {
+		// The intent declares a headline issue target (run-the-night's ~200 overnight).
+		// It is surfaced, not folded into satisfaction — binding it to a live count of
+		// issues progressed is the named follow-on, so the operator sees the DECLARED
+		// number without the walk claiming a progress it did not witness.
+		fmt.Fprintf(w, "  issue target: %d (declared operator headline; live progress-vs-target is the named follow-on)\n", rep.IssueTarget)
+	}
 	fmt.Fprintf(w, "  %s\n\n", rep.Reason)
 
 	renderSuperloopBudget(w, rep)

@@ -181,14 +181,19 @@ runnable as printed. The registered set:
   control surface.
 - **`run-the-night`** — the overnight productivity meta-loop. It walks the three
   dimensions that must move together or a night wastes itself: **issue-drain**
-  (descends `drain-issues`, toward the ~200-issue target), **account-limit
-  utilization**, and **lab/node resource utilization** (Mac, A100s, dgx). The two
-  utilization members are a new **`KindUtilization`** member type: unlike a scorecard
-  (a committed baseline) or a loop (a ledger fold), their status is read **live** by
-  the shell at walk time, and their debt is **unused capacity** — offerable-but-idle
-  account seats (`rotationHeadroom`), and up-but-idle boxes (the `fak lab status`
-  fleet fold). Worst-first, the walk enters whichever dimension is most underused; a
-  night that leaves seats or boxes idle reds the fold until they are put to work.
+  (descends `drain-issues`), **account-limit utilization**, and **lab/node resource
+  utilization** (Mac, A100s, dgx). The two utilization members are a new
+  **`KindUtilization`** member type: unlike a scorecard (a committed baseline) or a
+  loop (a ledger fold), their status is read **live** by the shell at walk time, and
+  their debt is **unused capacity** — offerable-but-idle account seats
+  (`rotationHeadroom`), and up-but-idle boxes (the `fak lab status` fleet fold).
+  Worst-first, the walk enters whichever dimension is most underused; a night that
+  leaves seats or boxes idle reds the fold until they are put to work. The intent also
+  carries a **declared `IssueTarget`** (the operator's ~200-issue overnight headline) —
+  a stated policy like `Floor`/`Budget`, **surfaced** by the walk (`issue target: 200`)
+  so the number is explicit and testable rather than buried prose. Binding it to a
+  **live count of issues progressed** (and reddening the night until it is met) is the
+  named follow-on — the same declared-vs-measured posture the budget rows keep.
 - **`tend`** — the root: every other registered intent, reachable directly as a
   member or by descent (a no-escape test pins the reachability). It descends
   `run-the-night`, so the root walk answers "is the night actually producing?"
