@@ -807,6 +807,31 @@ def _record(runs_dir: Path, payload: dict[str, Any]) -> None:
         pass
 
 
+def _escape_render_lines(p: dict[str, Any]) -> list[str]:
+    """Operator lines for the Arm-1 escape SIGNAL, emitted ONLY when a self-source lane
+    is held (``escape_candidates`` present in the payload). Makes the otherwise
+    payload-only signal visible in the human render: the top held P1, whether it
+    out-scores the best dispatchable lane, and — when it does — the build-integrity gate
+    an unguarded escape must clear. On a normal tick the key is absent, so this returns
+    nothing and the render is byte-for-byte unchanged."""
+    cands = p.get("escape_candidates")
+    if not cands:
+        return []
+    top = cands[0]
+    nums = ", ".join(f"#{n}" for n in (top.get("issue_nums") or [])) or "-"
+    verb = ("PREFER --escape-self-source" if top.get("preferred")
+            else "held (best safe lane wins)")
+    more = f" (+{len(cands) - 1} more held)" if len(cands) > 1 else ""
+    lines = [f"  escape    : {top.get('lane')} {nums} score={top.get('score')} "
+             f"vs safe {p.get('best_safe_score')} -> {verb}{more}"]
+    if top.get("preferred"):
+        gate = ("guarded build in flight — hold the unguarded escape"
+                if p.get("guarded_worker_in_flight")
+                else "clear (no guarded build in flight)")
+        lines.append(f"              gate: {gate}")
+    return lines
+
+
 def render(p: dict[str, Any]) -> str:
     a = p.get("account") or {}
     pf = p.get("preflight") or {}
@@ -832,6 +857,7 @@ def render(p: dict[str, Any]) -> str:
     ]
     if isinstance(hint, dict) and hint.get("message"):
         lines.append(f"  hint      : {hint.get('message')}")
+    lines.extend(_escape_render_lines(p))
     lines.append(f"  -> {p.get('reason')}")
     if p.get("spawned"):
         lines.append(f"  spawned pid={p['spawned'].get('pid')} log={p['spawned'].get('log')}")
@@ -1303,6 +1329,7 @@ def render_wave(p: dict[str, Any]) -> str:
     hint = p.get("preflight_hint")
     if isinstance(hint, dict) and hint.get("message"):
         lines.append(f"  hint      : {hint.get('message')}")
+    lines.extend(_escape_render_lines(p))
     lines.append(f"  -> {p.get('reason')}")
     return "\n".join(lines)
 

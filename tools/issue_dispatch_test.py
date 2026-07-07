@@ -1279,6 +1279,75 @@ class EscapeSignalTest(unittest.TestCase):
         self.assertIsNone(out["top_held_score"])
 
 
+class EscapeRenderTest(unittest.TestCase):
+    """render()/render_wave() surface the escape SIGNAL so the payload-only signal is
+    visible to an operator — but ONLY when a self-source lane is held, so a normal tick's
+    render stays byte-for-byte unchanged."""
+
+    def _payload(self, **over):
+        p = {"verdict": "WOULD_SPAWN", "ok": True, "live": 0, "lane": "docs",
+             "lane_issue_count": 2, "reason": "picked docs",
+             "escape_candidates": [
+                 {"lane": "internal-accounts", "issue_nums": [3091], "score": 740,
+                  "preferred": True},
+                 {"lane": "cmd-fak", "issue_nums": [2036, 2037], "score": 300,
+                  "preferred": False}],
+             "top_held_score": 740, "best_safe_score": 100,
+             "guarded_worker_in_flight": False}
+        p.update(over)
+        return p
+
+    def test_render_surfaces_top_held_prefer_verb_and_more_count(self) -> None:
+        mod = load()
+        out = mod.render(self._payload())
+        self.assertIn("escape    :", out)
+        self.assertIn("internal-accounts", out)
+        self.assertIn("#3091", out)
+        self.assertIn("score=740", out)
+        self.assertIn("vs safe 100", out)
+        self.assertIn("PREFER --escape-self-source", out)
+        self.assertIn("(+1 more held)", out)
+
+    def test_render_gate_clear_when_no_guarded_build(self) -> None:
+        mod = load()
+        out = mod.render(self._payload(guarded_worker_in_flight=False))
+        self.assertIn("gate: clear (no guarded build in flight)", out)
+
+    def test_render_gate_holds_when_guarded_build_in_flight(self) -> None:
+        mod = load()
+        out = mod.render(self._payload(guarded_worker_in_flight=True))
+        self.assertIn("guarded build in flight — hold the unguarded escape", out)
+
+    def test_render_held_but_not_preferred_omits_gate(self) -> None:
+        mod = load()
+        cands = [{"lane": "internal-accounts", "issue_nums": [3091], "score": 740,
+                  "preferred": False}]
+        out = mod.render(self._payload(escape_candidates=cands, best_safe_score=900,
+                                       guarded_worker_in_flight=True))
+        self.assertIn("held (best safe lane wins)", out)
+        self.assertNotIn("gate:", out)     # gate only matters once escape is preferred
+
+    def test_normal_tick_render_has_no_escape_line(self) -> None:
+        mod = load()
+        p = {"verdict": "WOULD_SPAWN", "ok": True, "live": 0, "lane": "gateway",
+             "lane_issue_count": 4, "reason": "picked gateway",
+             "guarded_worker_in_flight": False}
+        self.assertNotIn("escape    :", mod.render(p))
+
+    def test_render_wave_surfaces_escape(self) -> None:
+        mod = load()
+        p = {"verdict": "WAVE_OK", "ok": True, "live": 0, "reason": "wave of 2",
+             "escape_candidates": [
+                 {"lane": "internal-accounts", "issue_nums": [3091], "score": 740,
+                  "preferred": True}],
+             "top_held_score": 740, "best_safe_score": 100,
+             "guarded_worker_in_flight": True}
+        out = mod.render_wave(p)
+        self.assertIn("escape    :", out)
+        self.assertIn("PREFER --escape-self-source", out)
+        self.assertIn("guarded build in flight", out)
+
+
 class EvaluateBusyWiringTest(unittest.TestCase):
     """The single tick computes busy_lanes, threads it into pick_lane, and surfaces
     it in the tick payload."""
