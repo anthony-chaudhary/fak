@@ -98,12 +98,18 @@ function of the command text today.
    `fak issue create` (compiled sidestep)" — the way a `git push` escalation
    should name `fak commit`. That single message change turns a dead end into a
    one-step recovery and would have saved this entire loop.
-2. **Fix or retire the preview-confirm token on this path.** If the confirm
-   handshake is offered at all, the token must be a pure, stable function of the
-   command text with the `_fak_confirm` key excluded from the hashed payload
-   (test: identical command text → identical token). As observed, four proposals
-   issued four distinct tokens, so it is not that today — and on the raw-`gh`
-   path it should not be offered at all (see fix 1).
+2. **Fix or retire the preview-confirm token on this path.** ✅ **LANDED**
+   (`fix(adjudicator): bind reversibility confirm token to the command, not the
+   description`). Root cause pinned: `ReversibilityConfirmToken` hashed over ALL
+   args minus the confirm keys, so a Bash call's mandatory free-text
+   `description` — which Claude Code regenerates every turn — rotated the token
+   even for a byte-identical command. Fix: `argsForToken` now also excludes
+   incidental annotation keys (`description`/`explanation`) from the hash, so the
+   token binds only to the effect-bearing args. Regression
+   `TestReversibilityConfirmTokenIgnoresDescriptionDrift` replays the shape (same
+   command, reworded description → confirm now lands) and enforces the stability
+   test named below. Re-witnessed by session f0e7ac0f (deleting
+   `tools/new_leaf.py` looped on this exact rotation).
 3. **Declare the refusal reason** in the closed vocabulary so `dos_check_reason`
    recognizes it (today `REQUIRE_WITNESS` → `known:false, UNCLASSIFIED`).
 
