@@ -114,6 +114,7 @@ const (
 	CompactReasonSpliceFailed   = "splice_failed"
 	CompactReasonRedecodeFail   = "redecode_failed" // the spliced body failed to re-decode
 	CompactReasonPrefixMismatch = "prefix_mismatch" // the splice changed the protected prefix bytes
+	CompactReasonMalformedBody  = "malformed_body"  // the spliced body decodes for fak but is Anthropic-invalid (empty text/content) → would 400
 	// CompactReasonBurstUnprofitable is the head-anchored bail (CompactAnchorHead only): the drop
 	// would fire, but bursting the recent breakpoint's cached suffix does not repay within the
 	// remaining session horizon (CacheBurstPaysBack == false), so the warm cache hit is kept over a
@@ -410,6 +411,15 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 	if messageHasToolResult(elems[keepStart]) {
 		return raw, CompactOutcome{Reason: CompactReasonWindowNoDrop} // would orphan a tool_result — fail safe
 	}
+	// The head guards above only inspect the window BOUNDARY. They miss the interior orphan that
+	// produced the live "400 upstream rejected as malformed" failures: a tool_result deeper in the
+	// kept window whose matching assistant tool_use is in the middle we are about to drop. Anthropic
+	// 400s any body with a tool_result that has no preceding tool_use. Checked here, AFTER the
+	// alternation snap has settled keepStart, because the snap can move the boundary and strand a
+	// pair the pre-snap window did not. Fail safe to identity — compaction re-fires next turn.
+	if keptWindowOrphansToolUse(elems, pfxEnd+1, keepStart) {
+		return raw, CompactOutcome{Reason: CompactReasonWindowNoDrop} // would orphan an interior tool_result — fail safe
+	}
 	if rangeHasCacheControl(elems, pfxEnd+1, keepStart) {
 		// A cache_control-bearing message is provider-warm history. Dropping it may shrink
 		// the prompt, but it also intentionally bursts the cached suffix after the first
@@ -520,9 +530,10 @@ type elementSpan struct{ start, end int }
 type spliceVerdict int
 
 const (
-	spliceVerdictOK             spliceVerdict = iota // re-decodes AND protected prefix is byte-identical
-	spliceVerdictRedecodeFail                        // spliced body no longer parses as a Messages request
-	spliceVerdictPrefixMismatch                      // protected cache prefix bytes changed (would burst the cache)
+	spliceVerdictOK              spliceVerdict = iota // re-decodes AND protected prefix is byte-identical
+	spliceVerdictRedecodeFail                         // spliced body no longer parses as a Messages request
+	spliceVerdictPrefixMismatch                       // protected cache prefix bytes changed (would burst the cache)
+	spliceVerdictMalformedResult                      // decodes for fak, but violates an Anthropic semantic rule (empty text/content) → the API 400s it
 )
 
 // verifySplicedBody is the shared post-splice proof both the compaction and elision rewrites
@@ -534,6 +545,17 @@ const (
 // there the marked stable head lives in the tail, not the prefix. Any failure is a splice bug,
 // not a reason to ship a broken / cache-busting body — the caller returns identity with its own
 // labeled reason.
+//
+// The re-decode alone is NOT enough: DecodeAnthropicMessagesRequest is fak's OWN permissive
+// decoder — it accumulates text with a strings.Builder and silently drops empty blocks, so an
+// `{"type":"text","text":""}`, an empty message `content` array, or a `tool_result` with empty
+// content all decode CLEANLY here yet are rejected by the real Anthropic Messages API with
+// `400 … request … malformed` (text must be non-empty; content must be non-empty). A splice that
+// lands the body in one of those shapes is JSON-valid but SEMANTICALLY malformed upstream, so we
+// scan the spliced result for that shape and return spliceVerdictMalformedResult rather than ship
+// a body the provider will 400 — the caller falls back to identity, which was well-formed by
+// construction (we never edit anything but a single string VALUE, so identity cannot introduce
+// the empty; only a bad splice can).
 func verifySplicedBody(raw, out []byte, spans []elementSpan, pfxEnd int) spliceVerdict {
 	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
 		return spliceVerdictRedecodeFail
@@ -550,7 +572,110 @@ func verifySplicedBody(raw, out []byte, spans []elementSpan, pfxEnd int) spliceV
 			return spliceVerdictPrefixMismatch // the tail carries the head on the CC shape — same burst class
 		}
 	}
+	if bodyHasEmptyBlockSemantics(out) {
+		return spliceVerdictMalformedResult
+	}
 	return spliceVerdictOK
+}
+
+// bodyHasEmptyBlockSemantics reports whether a /v1/messages body contains a message-content shape
+// the Anthropic Messages API rejects with 400 even though it is valid JSON that fak's permissive
+// decoder accepts: a `text` block whose value is the empty string, a message whose `content`
+// array is empty, or a `tool_result` whose `content` is empty (empty string or empty array). It
+// is deliberately CONSERVATIVE — it only flags shapes Anthropic is known to reject and treats
+// anything it cannot parse as "not empty" (unparseable is the re-decode guard's job, not this
+// one's), so it can never turn a well-formed splice into a false identity return. It reads only
+// the outbound bytes; it never touches the decoded req the kernel adjudicates.
+func bodyHasEmptyBlockSemantics(body []byte) bool {
+	var obj struct {
+		Messages []struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	if json.Unmarshal(body, &obj) != nil {
+		return false // unparseable → the re-decode guard owns it; do not flag here
+	}
+	for _, m := range obj.Messages {
+		c := skipSpace(m.Content)
+		if len(c) == 0 {
+			continue // a bare-string content that decoded to nothing is a separate (empty-message) concern
+		}
+		if c[0] == '"' {
+			continue // a bare-string message content is out of scope (only block arrays carry the empty-text hazard)
+		}
+		if c[0] != '[' {
+			continue
+		}
+		var blocks []json.RawMessage
+		if json.Unmarshal(c, &blocks) != nil {
+			continue
+		}
+		if len(blocks) == 0 {
+			return true // empty content array — the API rejects a message with no blocks
+		}
+		for _, blk := range blocks {
+			var b struct {
+				Type    string          `json:"type"`
+				Text    *string         `json:"text"`
+				Content json.RawMessage `json:"content"`
+			}
+			if json.Unmarshal(blk, &b) != nil {
+				continue
+			}
+			switch b.Type {
+			case "text":
+				// text must be present and non-empty; the marker guarantees a shrunk value is
+				// never "", so a "" here means the splice landed an empty value the API will 400.
+				if b.Text != nil && *b.Text == "" {
+					return true
+				}
+			case "tool_result":
+				if toolResultContentIsEmpty(b.Content) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// toolResultContentIsEmpty reports whether a tool_result's `content` value is one the Anthropic
+// API treats as empty: absent, an empty string, an empty array, or an array of blocks that are
+// themselves all empty-text. A tool_result with no usable content is a 400. Non-empty or
+// unparseable content is treated as "not empty" (conservative, same rationale as the caller).
+func toolResultContentIsEmpty(content json.RawMessage) bool {
+	c := skipSpace(content)
+	if len(c) == 0 {
+		return true // no content at all
+	}
+	if c[0] == '"' {
+		var s string
+		return json.Unmarshal(c, &s) == nil && s == ""
+	}
+	if c[0] != '[' {
+		return false // a non-string, non-array content we do not model → leave it
+	}
+	var blocks []json.RawMessage
+	if json.Unmarshal(c, &blocks) != nil {
+		return false
+	}
+	if len(blocks) == 0 {
+		return true // empty content array
+	}
+	for _, blk := range blocks {
+		var b struct {
+			Type string  `json:"type"`
+			Text *string `json:"text"`
+		}
+		if json.Unmarshal(blk, &b) != nil {
+			return false // an opaque block counts as content
+		}
+		if b.Type != "text" || b.Text == nil || *b.Text != "" {
+			return false // any non-empty (or non-text) block means there IS content
+		}
+	}
+	return true // every block was an empty-text block → effectively empty content
 }
 
 // compactSpliceVerdict maps a post-splice (out, ok) result onto the CompactOutcome reason
@@ -569,6 +694,8 @@ func compactSpliceVerdict(raw, out []byte, ok bool, spans []elementSpan, pfxEnd 
 		return CompactOutcome{Reason: CompactReasonRedecodeFail}, false
 	case spliceVerdictPrefixMismatch:
 		return CompactOutcome{Reason: CompactReasonPrefixMismatch}, false
+	case spliceVerdictMalformedResult:
+		return CompactOutcome{Reason: CompactReasonMalformedBody}, false
 	}
 	return CompactOutcome{}, true
 }
@@ -767,6 +894,139 @@ func chooseKeptWindow(elems []json.RawMessage, compactStart, budget int) int {
 		keep = compactStart
 	}
 	return keep
+}
+
+// keptWindowOrphansToolUse reports whether dropping [compactStart, keepStart) would orphan a
+// tool_result: i.e. some tool_result in the KEPT window [keepStart, len) references a tool_use_id
+// whose defining assistant tool_use sits in the dropped range and appears in NO kept message. The
+// head-only guards in chooseKeptWindow / the post-snap re-assert only rescue a tool_result at the
+// window boundary; this catches the INTERIOR case — a tool_result deeper in the kept window whose
+// tool_use is laundered by the drop — which produced the live "400 upstream rejected as malformed"
+// failures (Anthropic requires every tool_result reference a preceding tool_use). The caller treats
+// a true result as a reason to fall back to identity (skip this compaction) rather than ship an
+// orphaned body; compaction re-fires next turn, so skipping one drop is cheap and always safe.
+func keptWindowOrphansToolUse(elems []json.RawMessage, compactStart, keepStart int) bool {
+	if keepStart < 0 || keepStart >= len(elems) {
+		return false
+	}
+	want := keptResultToolUseIDs(elems, keepStart)
+	if len(want) == 0 {
+		return false
+	}
+	// Any kept message that itself supplies a wanted id means that id is NOT orphaned — remove it
+	// from the wanted set. (A tool_use and its result can both be inside the kept window.)
+	for i := keepStart; i < len(elems); i++ {
+		clearProvidedToolUseIDs(elems[i], want)
+	}
+	if len(want) == 0 {
+		return false
+	}
+	// A wanted id is orphaned unless some DROPPED message supplies it AND that message is kept —
+	// but dropped messages are, by definition, not kept. So any id still in `want` that is defined
+	// only within [compactStart, keepStart) is orphaned. Confirm at least one wanted id is actually
+	// defined in the dropped range (else it was never in this request at all — leave it to fak's
+	// existing decode, not our concern) before declaring an orphan.
+	for i := compactStart; i < keepStart && i < len(elems); i++ {
+		if messageProvidesToolUseID(elems[i], want) {
+			return true
+		}
+	}
+	return false
+}
+
+// keptResultToolUseIDs collects the set of tool_use_id values referenced by tool_result blocks in
+// the kept window elems[keepStart:]. These are the ids whose defining assistant tool_use must NOT
+// be dropped, or Anthropic rejects the compacted body. Returns nil when the window references none.
+func keptResultToolUseIDs(elems []json.RawMessage, keepStart int) map[string]bool {
+	var ids map[string]bool
+	for i := keepStart; i < len(elems); i++ {
+		var m struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		}
+		if json.Unmarshal(elems[i], &m) != nil || m.Role != "user" {
+			continue
+		}
+		var blocks []map[string]json.RawMessage
+		if json.Unmarshal(m.Content, &blocks) != nil {
+			continue
+		}
+		for _, b := range blocks {
+			if t, ok := b["type"]; ok {
+				var s string
+				if json.Unmarshal(t, &s) != nil || s != "tool_result" {
+					continue
+				}
+				var id string
+				if raw, ok := b["tool_use_id"]; ok && json.Unmarshal(raw, &id) == nil && id != "" {
+					if ids == nil {
+						ids = map[string]bool{}
+					}
+					ids[id] = true
+				}
+			}
+		}
+	}
+	return ids
+}
+
+// clearProvidedToolUseIDs deletes from want every id that an assistant tool_use block in el defines
+// (an id whose tool_use is itself in the kept window is not orphaned). It is the in-window
+// bookkeeping half of keptWindowOrphansToolUse.
+func clearProvidedToolUseIDs(el json.RawMessage, want map[string]bool) {
+	var m struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(el, &m) != nil || m.Role != "assistant" {
+		return
+	}
+	var blocks []map[string]json.RawMessage
+	if json.Unmarshal(m.Content, &blocks) != nil {
+		return
+	}
+	for _, b := range blocks {
+		if t, ok := b["type"]; ok {
+			var s string
+			if json.Unmarshal(t, &s) != nil || s != "tool_use" {
+				continue
+			}
+			var id string
+			if raw, ok := b["id"]; ok && json.Unmarshal(raw, &id) == nil {
+				delete(want, id)
+			}
+		}
+	}
+}
+
+// messageProvidesToolUseID reports whether an assistant messages[] element carries a tool_use block
+// whose id is in want — i.e. dropping this message would orphan a kept tool_result. It is the
+// tool_use-side mirror of messageHasToolResult.
+func messageProvidesToolUseID(el json.RawMessage, want map[string]bool) bool {
+	var m struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(el, &m) != nil || m.Role != "assistant" {
+		return false
+	}
+	var blocks []map[string]json.RawMessage
+	if json.Unmarshal(m.Content, &blocks) != nil {
+		return false
+	}
+	for _, b := range blocks {
+		if t, ok := b["type"]; ok {
+			var s string
+			if json.Unmarshal(t, &s) != nil || s != "tool_use" {
+				continue
+			}
+			var id string
+			if raw, ok := b["id"]; ok && json.Unmarshal(raw, &id) == nil && want[id] {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // messageHasToolResult reports whether a messages[] element is a user turn carrying at

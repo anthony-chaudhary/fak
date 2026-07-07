@@ -65,6 +65,14 @@ const (
 	ElideReasonSpliceFailed   = "splice_failed"   // the edits overlapped or fell out of range
 	ElideReasonRedecodeFail   = "redecode_failed" // the spliced body failed to re-decode
 	ElideReasonPrefixMismatch = "prefix_mismatch" // the splice changed the protected prefix bytes
+	// ElideReasonMalformedResult is the semantic-well-formedness bail: the spliced body is valid
+	// JSON and re-decodes through fak's OWN permissive decoder, but it lands a message-content
+	// shape the real Anthropic Messages API rejects with `400 … malformed` — an empty `text` value,
+	// an empty message `content` array, or a `tool_result` with empty content. fak's decoder drops
+	// those silently (it accumulates text with a strings.Builder), so the re-decode guard alone
+	// would ship a body the provider 400s. We return identity instead; the input was well-formed by
+	// construction, since elision only ever rewrites a single non-empty string VALUE.
+	ElideReasonMalformedResult = "malformed_result"
 )
 
 // ElideOutcome is the observable verdict of one elision attempt. Reason==ElideReasonNone means
@@ -148,14 +156,19 @@ func ElideAnthropicResultsWithOutcome(raw []byte, threshold int) ([]byte, ElideO
 	if !ok {
 		return raw, ElideOutcome{Reason: ElideReasonSpliceFailed}
 	}
-	// Prove it: re-decode + protected-prefix byte-equality (shared with compaction —
-	// verifySplicedBody). Either failing is a splice bug, not a reason to ship a broken /
-	// cache-busting body — fall back to identity.
+	// Prove it: re-decode + protected-prefix byte-equality + Anthropic semantic well-formedness
+	// (shared with compaction — verifySplicedBody). Any of these failing is a splice bug, not a
+	// reason to ship a broken / cache-busting / provider-400-ing body — fall back to identity. The
+	// semantic check (spliceVerdictMalformedResult) is the load-bearing addition: the re-decode
+	// through fak's OWN permissive decoder passes an empty-text/empty-content body the real
+	// Anthropic API rejects with 400, so without it a bad splice would ship and 400 the session.
 	switch verifySplicedBody(raw, out, spans, pfxEnd) {
 	case spliceVerdictRedecodeFail:
 		return raw, ElideOutcome{Reason: ElideReasonRedecodeFail}
 	case spliceVerdictPrefixMismatch:
 		return raw, ElideOutcome{Reason: ElideReasonPrefixMismatch}
+	case spliceVerdictMalformedResult:
+		return raw, ElideOutcome{Reason: ElideReasonMalformedResult}
 	}
 	return out, ElideOutcome{Reason: ElideReasonNone, Elided: len(edits), ShedBytes: shed}
 }
@@ -323,6 +336,14 @@ func elideStringEdit(valAbs int, valBytes []byte, threshold int) (spliceEdit, in
 		return spliceEdit{}, 0, false
 	}
 	shrunk := elideHeadTail(s, threshold)
+	// Source-side invariant guard (belt-and-suspenders for the post-splice semantic check): the
+	// shrunk value must never be the empty string, since an empty `text`/tool_result value is
+	// exactly the shape the Anthropic API 400s. elideHeadTail joins head+marker+tail and the marker
+	// is non-empty, so this is unreachable in practice — but keep it load-bearing so a future
+	// threshold/marker change cannot silently ship an empty value past this line.
+	if shrunk == "" {
+		return spliceEdit{}, 0, false
+	}
 	newVal, err := json.Marshal(shrunk)
 	if err != nil || len(newVal) >= len(valBytes) {
 		return spliceEdit{}, 0, false
