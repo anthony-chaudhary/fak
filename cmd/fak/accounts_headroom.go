@@ -52,7 +52,42 @@ func rotationHeadroom(homeDir string) accounts.RotationHeadroom {
 	pol := fleetaccounts.LoadPolicy(paths)
 	reg := fleetaccounts.LoadRegistry(paths.RegistryPath)
 	rows := fleetaccounts.AnnotatedRoster(home, paths.ConfigHome, pol, reg)
-	return headroomFromRoster(rows, time.Now().UTC())
+	now := time.Now().UTC()
+	hr := headroomFromRoster(rows, now)
+	// Durable usage-limit cooldown override: an account the launcher just watched
+	// bounce off its own cap is walled with certainty — a stronger, fresher signal
+	// than the live roster's offerability read, which can lag or miss a cap that
+	// fired seconds ago. Force every cooled bucket into the walled tier so rotation
+	// sorts it last (and NextRotationDecision skips it as non-servable) until the
+	// window elapses. Fail-open: an unreadable store leaves the roster signal as-is.
+	if cd, err := accounts.LoadCooldownStore(defaultCooldownStorePath()); err == nil {
+		hr = applyCooldownToHeadroom(hr, cd, now)
+	}
+	return hr
+}
+
+// applyCooldownToHeadroom forces every account within an active cooldown window to
+// the walled tier of the rotation headroom signal. The cooldown store is keyed by
+// the same "uuid:<AccountUUID>" bucket key AccountKey() produces, which is exactly
+// the key headroomFromRoster scores on, so the override lines up bucket-for-bucket.
+// A walled score is -1 (the tier floor), overriding any offerable/unknown roster
+// read. Pure and time-injected. A nil roster map is materialized so a cooled
+// account with no live row still registers as walled.
+func applyCooldownToHeadroom(hr accounts.RotationHeadroom, cd *accounts.CooldownStore, now time.Time) accounts.RotationHeadroom {
+	if cd == nil {
+		return hr
+	}
+	active := cd.Active(now)
+	if len(active) == 0 {
+		return hr
+	}
+	if hr == nil {
+		hr = accounts.RotationHeadroom{}
+	}
+	for _, e := range active {
+		hr[e.Account] = -1
+	}
+	return hr
 }
 
 // headroomFromRoster folds an annotated runtime roster into a per-bucket headroom score keyed

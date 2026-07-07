@@ -1,6 +1,10 @@
 package accounts
 
-import "sort"
+import (
+	"fmt"
+	"sort"
+	"time"
+)
 
 // login.go is the observable account-login layer for config-home seats. The
 // registry already knows lifecycle, policy, and disk-derived identity; this file
@@ -24,6 +28,12 @@ const (
 	// login identity does not match the named seat. Treat it like a login wall for launch
 	// purposes: serving would burn the wrong account's quota.
 	LoginIdentityMismatch LoginStatus = "identity_mismatch"
+	// LoginCooledDown means the seat is otherwise Ready — creds present, enabled — but its
+	// upstream account recently hit a usage/weekly cap or a transient 429, so serving it now
+	// would just bounce off the same wall. It is a time-boxed overlay, not a registry fact:
+	// LoginStatus() never returns it (that fold stays pure); only LoginReportAt applies it
+	// from the cooldown store, and it auto-clears when the window elapses. CanServe is false.
+	LoginCooledDown LoginStatus = "cooled_down"
 )
 
 // LoginWarning is an auxiliary condition that does not necessarily stop a
@@ -104,8 +114,18 @@ func (h Home) LoginStatus() LoginStatus {
 func (h Home) CanServe() bool { return h.LoginStatus() == LoginReady }
 
 // LoginReport folds every home into an observable status record plus a rollup.
-// Call Refresh first when current disk state matters.
+// Call Refresh first when current disk state matters. It applies no cooldown
+// overlay; use LoginReportAt to drop usage-limited seats from the servable pool.
 func (r Registry) LoginReport() LoginReport {
+	return r.LoginReportAt(nil, time.Time{})
+}
+
+// LoginReportAt is LoginReport with an optional usage-limit cooldown overlay. When
+// cd is non-nil, an otherwise-Ready seat whose upstream account has an active
+// cooldown at now is downgraded to LoginCooledDown (CanServe false), so the pool
+// stops dispatching into a wall the seat cannot pass until the window elapses. A
+// nil store or zero now means no overlay — behaviorally identical to LoginReport.
+func (r Registry) LoginReportAt(cd *CooldownStore, now time.Time) LoginReport {
 	rec := r.Reconcile()
 	report := LoginReport{
 		Schema: LoginReportSchema,
@@ -115,7 +135,7 @@ func (r Registry) LoginReport() LoginReport {
 	}
 	accounts := map[string]bool{}
 	for _, h := range r.Homes {
-		obs := r.loginObservation(h, rec[h.Name])
+		obs := r.loginObservation(h, rec[h.Name], cd, now)
 		report.Seats = append(report.Seats, obs)
 		report.Summary.Total++
 		report.Summary.ByStatus[string(obs.Status)]++
@@ -133,9 +153,18 @@ func (r Registry) LoginReport() LoginReport {
 	return report
 }
 
-func (r Registry) loginObservation(h Home, si SeatIdentity) LoginObservation {
+func (r Registry) loginObservation(h Home, si SeatIdentity, cd *CooldownStore, now time.Time) LoginObservation {
 	status := h.LoginStatus()
 	reason, action := LoginReasonAction(status, h)
+	// Cooldown overlay: only an otherwise-Ready seat can be cooled. A seat that
+	// already fails to serve for a static reason (needs-login, tombstoned, …)
+	// keeps that more actionable status.
+	if status == LoginReady && cd != nil && !now.IsZero() {
+		if e, ok := cd.CooledDown(h.Identity.AccountKey(), now); ok {
+			status = LoginCooledDown
+			reason, action = cooldownReasonAction(e)
+		}
+	}
 	obs := LoginObservation{
 		Name:         h.Name,
 		Dir:          h.Dir,
@@ -201,9 +230,26 @@ func LoginReasonAction(status LoginStatus, h Home) (string, string) {
 			action = "log out and re-login this CLAUDE_CONFIG_DIR with Chrome " + h.ChromeProfile
 		}
 		return "config directory has credentials for a different account than its seat name", action
+	case LoginCooledDown:
+		return "account recently hit a usage/rate limit", "wait for the cooldown window to elapse, or clear it once the account is free"
 	default:
 		return "", ""
 	}
+}
+
+// cooldownReasonAction renders the seat-facing reason and next action for an
+// active cooldown, naming the reset time so an operator knows when the seat
+// returns on its own.
+func cooldownReasonAction(e CooldownEntry) (string, string) {
+	kind := "usage limit"
+	if e.Kind == CooldownRateLimit {
+		kind = "rate limit"
+	}
+	reason := fmt.Sprintf("%s — resets at %s", kind, e.ResetAt.UTC().Format(time.RFC3339))
+	if e.Reason != "" {
+		reason = fmt.Sprintf("%s (%s) — resets at %s", kind, e.Reason, e.ResetAt.UTC().Format(time.RFC3339))
+	}
+	return reason, "leave it; it re-enters the pool at reset, or run `fak accounts cooldown --clear <account>` if the account is already free"
 }
 
 func lifecycleString(h Home) string {

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
@@ -72,7 +73,7 @@ func cmdAccounts(argv []string) { os.Exit(runAccounts(os.Stdout, os.Stderr, argv
 
 func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|restore|set-role|set-default|launch|next|rotation|rehome|list|status|doctor|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write> [flags]")
+		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|restore|set-role|set-default|launch|next|rotation|rehome|list|status|cooldown|doctor|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write> [flags]")
 		return 2
 	}
 	sub, rest := argv[0], argv[1:]
@@ -120,6 +121,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	rotateFlag := fs.Bool("rotate", false, "(launch) launch the NEXT account in the rotation instead of the active/named seat — the round-robin off a walled account")
 	afterSeat := fs.String("after", "", "(next/launch) rotate to the account bucket AFTER this seat (default: the named seat, else the active seat)")
 	noHeadroom := fs.Bool("no-headroom", false, "(next/launch --rotate) ignore the live runtime headroom signal and rotate stable-by-name; by default rotation prefers the account with room and sorts walled/capped accounts last")
+	cooldownClear := fs.String("clear", "", "(cooldown) clear the cooldown for this account key so its seats re-enter the servable pool immediately (use once the account is actually free)")
 	// Allow a leading positional (e.g. `resolve <name> --env`) BEFORE flags — Go's flag
 	// package otherwise stops parsing at the first non-flag token, silently dropping the
 	// flags. Collect leading non-flag tokens, parse the remainder, then rejoin.
@@ -165,6 +167,13 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 
 	case "status":
 		return accountsStatus(stdout, stderr, *registryPath, *homeDir, *asJSON)
+
+	case "cooldown":
+		// The usage-limit cooldown surface: list accounts currently walled off a
+		// cap (with reset time), or --clear one that is actually free again. The
+		// store is the fleet-shared one the launcher writes to, so this reflects
+		// what every checkout's login overlay is honoring.
+		return accountsCooldown(stdout, stderr, strings.TrimSpace(*cooldownClear), *asJSON)
 
 	case "doctor":
 		// The recover/clean fold: one closed action per seat (with the exact command),
@@ -682,7 +691,7 @@ func accountsStatus(stdout, stderr io.Writer, registryPath, homeDir string, asJS
 		return 1
 	}
 	reg = reg.Refresh()
-	report := reg.LoginReport()
+	report := loginReportWithCooldown(stderr, reg)
 	if asJSON {
 		stdout.Write(mustJSON(report))
 		fmt.Fprintln(stdout)
@@ -690,6 +699,20 @@ func accountsStatus(stdout, stderr io.Writer, registryPath, homeDir string, asJS
 	}
 	printAccountsStatus(stdout, report)
 	return 0
+}
+
+// loginReportWithCooldown folds the login report with the fleet-shared usage-limit
+// cooldown overlay applied: a Ready seat whose upstream account is within an active
+// cooldown window shows as cooled_down (can_serve=false), matching what the launcher
+// and dispatcher see. Fail-open: an unreadable store yields the plain report so a
+// bad state file never blocks a status read.
+func loginReportWithCooldown(stderr io.Writer, reg accounts.Registry) accounts.LoginReport {
+	store, err := accounts.LoadCooldownStore(defaultCooldownStorePath())
+	if err != nil {
+		fmt.Fprintf(stderr, "note: cooldown store unreadable (%v) — status shown without the usage-limit overlay\n", err)
+		return reg.LoginReport()
+	}
+	return reg.LoginReportAt(store, time.Now())
 }
 
 // accountsReportHome prints the rehoming-chain notes for a resolved serving home and

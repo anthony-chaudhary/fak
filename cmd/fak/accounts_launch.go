@@ -15,6 +15,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
+// (usage-limit cooldown write/resolve wiring lives in accounts_cooldown.go)
+
 // `fak accounts launch` — the account-switcher LAUNCHER. It resolves a seat (the active
 // role by default, or --name <seat>), rehoming a dead/unservable seat forward exactly as
 // `resolve` does, then starts the agent UNDER `fak guard` with that seat's
@@ -351,6 +353,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		return 0
 	}
 	res := accountsLaunchRun(stdout, stderr, launchArgv, launchEnv)
+	lastTried := p.model
 	if chain, ok := modelFallbackChain(command, p); ok {
 		// Walk the fallback chain: after each unavailable startup, try the next model until one
 		// starts (exit 0), the chain is exhausted, or a failure a model switch cannot fix appears
@@ -387,6 +390,17 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 				break
 			}
 		}
+		lastTried = tried
+	}
+	// Cooldown gate, applied to the FINAL outcome. If every model we could try —
+	// the primary and any fallbacks — still ended on this account's usage/rate cap,
+	// the account itself is walled (a model switch cannot fix it), so record a
+	// cooldown and drop every seat on the account from the servable pool until the
+	// window elapses. A launch that ultimately started (res.Code == 0) records
+	// nothing: the account served. Fail-open, best-effort.
+	if res.Code != 0 {
+		kind := classifyLaunchModelUnavailable(res.Stderr, lastTried)
+		recordLaunchCooldown(stderr, home.Identity.AccountKey(), res.Stderr, kind, time.Now())
 	}
 	return res.Code
 }
