@@ -163,6 +163,8 @@ func main() {
 		cmdSession(os.Args[2:])
 	case "session-audit":
 		cmdSessionAudit(os.Args[2:])
+	case "tier-calibrate":
+		cmdTierCalibrate(os.Args[2:])
 	case "resume":
 		cmdResume(os.Args[2:])
 	case "dispatch":
