@@ -22,6 +22,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/dormancy"
 	"github.com/anthony-chaudhary/fak/internal/recall"
@@ -62,6 +63,17 @@ type Resumed struct {
 	Index    *ctxplan.Index
 	Witness  []WitnessEntry
 	Migrated bool
+
+	// CacheEntries is the payload-free cache-invalidation state of the rehydrated content
+	// pages (#1536): one cachemeta.Entry per recall page, lowered through the shared
+	// cachemeta.FromContextPage adapter, so a resumed session carries EXPLICIT invalidation
+	// state (Coherence.InvalidationMode / Validity) alongside the queryable ctxplan Index —
+	// not just the history. Nil for a drive-only image (no content pages to record). These
+	// records are cold-path honest: FromContextPage places every entry at Residency.Tier
+	// TierDisk, never a resident hot tier, so a rehydrated record NEVER implies a live cache
+	// hit — the KV cache is not restored (Portability.KVIncluded is false) and the first
+	// post-wake turn must still re-prefill from the logical bytes.
+	CacheEntries []cachemeta.Entry
 
 	// Gated is true when a staged rehydration Gate ran (RehydrateOptions.Gate was set).
 	// When false, no staging was configured and the resume is admitted unconditionally
@@ -110,6 +122,23 @@ func (img *Image) Rehydrate(ctx context.Context, opt RehydrateOptions) (*Resumed
 			return nil, err
 		}
 		out.Index = ix
+
+		// (2c) Record the cache-invalidation state of the rehydrated content pages (#1536).
+		// The ctxplan Index above restores the QUERYABLE HISTORY; this restores the EXPLICIT
+		// CACHE state the history alone cannot express — each page lowered through the shared
+		// recall→cachemeta adapter into a cachemeta.Entry whose Coherence.InvalidationMode /
+		// Validity are set from the page's own witness/trust-epoch. A page admitted under an
+		// external witness records InvalidationExternalRefutation; the record stays cold-path
+		// honest (TierDisk residency — never a hot hit), so item 19's serve gate (#1537) can
+		// reason over fresh-vs-stale without this rehydrate ever implying a live hit.
+		sid := s.Manifest.SessionID
+		pages := s.Manifest.Pages
+		if len(pages) > 0 {
+			out.CacheEntries = make([]cachemeta.Entry, 0, len(pages))
+			for _, p := range pages {
+				out.CacheEntries = append(out.CacheEntries, p.CacheEntry(sid))
+			}
+		}
 	}
 
 	// (2b) Re-attach the persisted keep-bits. The bytes were integrity-verified at Load;
