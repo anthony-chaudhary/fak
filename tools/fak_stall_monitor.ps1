@@ -1,0 +1,128 @@
+<#
+.SYNOPSIS
+  Durable background self-monitor for the low-usage machine stalls (issue #3153).
+  Wraps `fak stallscan --watch` so recurrence is caught, logged, and — optionally
+  — auto-mitigated, without a human watching.
+
+.DESCRIPTION
+  The box intermittently locks up while CPU/RAM/disk read low; the cause is
+  kernel-path CHURN (soft-fault + spawn storms) that no usage meter shows. This
+  monitor samples the churn signals on an interval, appends every fingerprint to
+  a rolling JSONL, prints a line on each elevated/stall verdict, and (with
+  -AutoMitigate) fires a bounded, rate-limited remediation when stalls persist.
+
+  Wire it to run in the background by default via a Windows Scheduled Task (see
+  -Install), the same way the fleet resume watchdog is installed. It is cheap by
+  construction: `fak stallscan` does one counter batch + one process snapshot per
+  interval (default 20s).
+
+.PARAMETER Interval
+  Sample interval (default 20s). Do not go below ~5s — enumeration has a cost.
+
+.PARAMETER Log
+  Rolling JSONL path. Default: $env:LOCALAPPDATA\Fleet\stallscan.jsonl (matches
+  `fak stallscan`'s own default so one file is the shared source of truth).
+
+.PARAMETER AutoMitigate
+  On a run of consecutive stalls, run tools/host_stall_mitigations.ps1 -Apply to
+  tame the non-fak daemon floor. Rate-limited to once per -MitigateCooldownMin.
+
+.PARAMETER MitigateCooldownMin
+  Minimum minutes between auto-mitigations (default 60).
+
+.PARAMETER Install
+  Register a Scheduled Task 'FakStallMonitor' that runs this at logon and keeps
+  it alive. Prints the UNDO command. Requires elevation.
+
+.EXAMPLE
+  pwsh -File tools/fak_stall_monitor.ps1                 # watch in this console
+.EXAMPLE
+  pwsh -File tools/fak_stall_monitor.ps1 -AutoMitigate   # watch + auto-tame floor
+.EXAMPLE
+  pwsh -File tools/fak_stall_monitor.ps1 -Install        # run in background by default
+#>
+[CmdletBinding()]
+param(
+  [int]$Interval = 20,
+  [string]$Log = "$env:LOCALAPPDATA\Fleet\stallscan.jsonl",
+  [switch]$AutoMitigate,
+  [int]$MitigateCooldownMin = 60,
+  [switch]$Install,
+  [int]$StallRunToMitigate = 3
+)
+
+$ErrorActionPreference = 'Continue'
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot  = Split-Path -Parent $scriptDir
+
+function Resolve-Fak {
+  $c = Get-Command fak -ErrorAction SilentlyContinue
+  if ($c) { return $c.Source }
+  foreach ($p in @("$repoRoot\fak.exe", "$env:USERPROFILE\go\bin\fak.exe")) {
+    if (Test-Path $p) { return $p }
+  }
+  return 'fak'
+}
+
+if ($Install) {
+  $pwsh = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
+  if (-not $pwsh) { $pwsh = 'powershell.exe' }
+  $self = $MyInvocation.MyCommand.Path
+  $args = "-NoProfile -ExecutionPolicy Bypass -File `"$self`" -Interval $Interval"
+  if ($AutoMitigate) { $args += ' -AutoMitigate' }
+  $action  = New-ScheduledTaskAction -Execute $pwsh -Argument $args
+  $trigger = New-ScheduledTaskTrigger -AtLogOn
+  $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+  Register-ScheduledTask -TaskName 'FakStallMonitor' -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
+  Write-Host "[stall-mon] installed Scheduled Task 'FakStallMonitor' (runs at logon)."
+  Write-Host "[stall-mon] UNDO: Unregister-ScheduledTask -TaskName 'FakStallMonitor' -Confirm:`$false"
+  return
+}
+
+$fak = Resolve-Fak
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Log) -ErrorAction SilentlyContinue | Out-Null
+Write-Host "[stall-mon] fak=$fak interval=${Interval}s log=$Log autoMitigate=$AutoMitigate"
+
+$stallRun = 0
+$lastMitigate = [DateTime]::MinValue
+
+while ($true) {
+  # One snapshot via the shipped classifier; JSON so we can read the verdict.
+  $raw = & $fak stallscan --json 2>$null
+  $rc = $LASTEXITCODE
+  $level = 'unknown'; $cause = ''
+  try {
+    $obj = $raw | ConvertFrom-Json -ErrorAction Stop
+    $level = $obj.verdict.level; $cause = $obj.verdict.cause
+    # Mirror into the shared rolling log (fak stallscan --watch would do this too;
+    # here we drive the snapshot ourselves so we can react).
+    Add-Content -Path $Log -Value ($raw -replace "`r?`n",' ') -ErrorAction SilentlyContinue
+  } catch {
+    # rc==3 from snapshot mode also signals a stall even if JSON parse hiccups.
+    if ($rc -eq 3) { $level = 'stall' }
+  }
+
+  if ($level -eq 'stall') {
+    $stallRun++
+    Write-Host ("{0}  STALL (run {1})  cause={2}" -f (Get-Date -Format HH:mm:ss), $stallRun, $cause)
+  } elseif ($level -eq 'elevated') {
+    Write-Host ("{0}  elevated  cause={1}" -f (Get-Date -Format HH:mm:ss), $cause)
+    $stallRun = 0
+  } else {
+    $stallRun = 0
+  }
+
+  if ($AutoMitigate -and $stallRun -ge $StallRunToMitigate) {
+    $mins = ([DateTime]::Now - $lastMitigate).TotalMinutes
+    if ($mins -ge $MitigateCooldownMin) {
+      Write-Host "[stall-mon] persistent stalls -> running host_stall_mitigations.ps1 -Apply"
+      & pwsh -NoProfile -ExecutionPolicy Bypass -File "$scriptDir\host_stall_mitigations.ps1" -Apply
+      $lastMitigate = [DateTime]::Now
+      $stallRun = 0
+    } else {
+      Write-Host ("[stall-mon] would mitigate but in cooldown ({0:N0}/{1} min)" -f $mins, $MitigateCooldownMin)
+    }
+  }
+
+  Start-Sleep -Seconds $Interval
+}
