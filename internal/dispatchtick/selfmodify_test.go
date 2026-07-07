@@ -23,36 +23,77 @@ func TestIsSelfSourceTreeMatchesGoModuleRoots(t *testing.T) {
 	shippable := []string{"docs/**", "tools/**", "scripts/**", ".github/**", "examples/**", "visuals/**", ".claude/**", ""}
 	for _, g := range shippable {
 		if IsSelfSourceTree(g) {
-			t.Errorf("IsSelfSourceTree(%q) = true, want false (a guard-shippable lane)", g)
+			t.Errorf("IsSelfSourceTree(%q) = true, want false (not fak's Go module)", g)
 		}
 	}
 }
 
-func TestSelfModifyHoldOnlyHoldsGuardedSelfSourceLanes(t *testing.T) {
-	// Guarded worker + self-source lane tree -> held, naming the offending tree.
-	if held, tree := SelfModifyHold(true, []string{"cmd/**"}); !held || tree != "cmd/**" {
-		t.Fatalf("SelfModifyHold(true, [cmd/**]) = (%v, %q), want (true, cmd/**)", held, tree)
+func TestIsTrustCriticalTreeMatchesOnlyTheWitnessMachinery(t *testing.T) {
+	// The trust-critical set: the referee's own trees + the witness gates + the taxonomy
+	// files. These are what a guarded RSI worker must never SHIP an edit to.
+	trustCritical := []string{
+		"internal/abi/**",
+		"internal/kernel/**",
+		"internal/adjudicator/**",
+		"internal/policy/**",
+		"internal/registrations/**",
+		"internal/architest/**",
+		"internal/shipgate/**",
+		"./internal/policy/decide.go",
+		`fak\internal\adjudicator\**`,
+		"dos.toml",
+		".dos/state",
+		"VERSION",
+		"policy.json",
 	}
-	if held, tree := SelfModifyHold(true, []string{"internal/gateway/**"}); !held || tree != "internal/gateway/**" {
-		t.Fatalf("SelfModifyHold(true, [internal/gateway/**]) = (%v, %q), want held", held, tree)
+	for _, g := range trustCritical {
+		if !IsTrustCriticalTree(g) {
+			t.Errorf("IsTrustCriticalTree(%q) = false, want true (trust-critical witness machinery)", g)
+		}
+	}
+	// Merely-self-source trees the worker guard PERMITS shipping -- must NOT be trust-critical.
+	shippable := []string{
+		"cmd/**", "cmd/fak/**",
+		"internal/gateway/**", "internal/agent/**", "internal/compute/**", "internal/metrics/**",
+		"docs/**", "tools/**", "scripts/**", ".github/**", "examples/**", "",
+	}
+	for _, g := range shippable {
+		if IsTrustCriticalTree(g) {
+			t.Errorf("IsTrustCriticalTree(%q) = true, want false (guard-shippable, not the referee's own trees)", g)
+		}
+	}
+}
+
+func TestSelfModifyHoldOnlyHoldsGuardedTrustCriticalLanes(t *testing.T) {
+	// Guarded worker + trust-critical lane tree -> held, naming the offending tree.
+	if held, tree := SelfModifyHold(true, []string{"internal/adjudicator/**"}); !held || tree != "internal/adjudicator/**" {
+		t.Fatalf("SelfModifyHold(true, [internal/adjudicator/**]) = (%v, %q), want held", held, tree)
+	}
+	if held, tree := SelfModifyHold(true, []string{"internal/policy/**"}); !held || tree != "internal/policy/**" {
+		t.Fatalf("SelfModifyHold(true, [internal/policy/**]) = (%v, %q), want held", held, tree)
 	}
 
-	// Guarded worker + shippable lane -> NOT held (a guarded worker CAN ship docs/tools).
+	// Guarded worker + a merely-self-source lane the guard PERMITS -> NOT held. This is the
+	// correction: cmd/** and internal/gateway are shippable under the real worker floor.
+	for _, tree := range [][]string{{"cmd/**"}, {"internal/gateway/**"}, {"internal/agent/**"}} {
+		if held, _ := SelfModifyHold(true, tree); held {
+			t.Fatalf("SelfModifyHold(true, %v) held a guard-shippable self-source lane", tree)
+		}
+	}
+
+	// Guarded worker + shippable non-source lane -> NOT held.
 	if held, _ := SelfModifyHold(true, []string{"docs/**"}); held {
 		t.Fatalf("SelfModifyHold(true, [docs/**]) held a shippable lane")
 	}
-	if held, _ := SelfModifyHold(true, []string{"tools/**", "scripts/**"}); held {
-		t.Fatalf("SelfModifyHold(true, [tools/**, scripts/**]) held a shippable lane")
+
+	// Unguarded worker -> never held, even on trust-critical (the operator/worktree escape #1334).
+	if held, _ := SelfModifyHold(false, []string{"internal/adjudicator/**"}); held {
+		t.Fatalf("SelfModifyHold(false, [internal/adjudicator/**]) held an unguarded worker")
 	}
 
-	// Unguarded worker -> never held, even on self-source (the operator/worktree escape #1334).
-	if held, _ := SelfModifyHold(false, []string{"cmd/**"}); held {
-		t.Fatalf("SelfModifyHold(false, [cmd/**]) held an unguarded worker")
-	}
-
-	// A mixed tree holds on the first self-source member it finds.
-	if held, tree := SelfModifyHold(true, []string{"docs/**", "internal/agent/**"}); !held || tree != "internal/agent/**" {
-		t.Fatalf("SelfModifyHold(true, [docs/**, internal/agent/**]) = (%v, %q), want held on internal/agent/**", held, tree)
+	// A mixed tree holds on the first trust-critical member it finds.
+	if held, tree := SelfModifyHold(true, []string{"docs/**", "internal/kernel/**"}); !held || tree != "internal/kernel/**" {
+		t.Fatalf("SelfModifyHold(true, [docs/**, internal/kernel/**]) = (%v, %q), want held on internal/kernel/**", held, tree)
 	}
 
 	// No tree -> not held (nothing to protect).
@@ -61,98 +102,102 @@ func TestSelfModifyHoldOnlyHoldsGuardedSelfSourceLanes(t *testing.T) {
 	}
 }
 
-func TestIssueTextTargetsSelfSourceCatchesBareAndPrefixedRefs(t *testing.T) {
-	selfSource := map[string]string{
-		"most of the backlog lives in `cmd/**` + `internal/**`": "cmd/**",
-		"work in cmd/fak/ where the verb shell lives":           "cmd/fak/",
-		"see ./cmd/fak/dispatch_tick.go":                        "./cmd/fak/dispatch_tick.go",
-		"touches fak/internal/gateway/http.go":                  "fak/internal/gateway/http.go",
-		"the internal/agent stream needs a fix":                 "internal/agent",
+func TestIssueTextTargetsTrustCriticalCatchesBareAndPrefixedRefs(t *testing.T) {
+	trustCritical := map[string]string{
+		"the fix lives in `internal/adjudicator/**`":      "internal/adjudicator/**",
+		"work in internal/policy/ where the loader lives": "internal/policy/",
+		"see ./internal/kernel/decide.go":                 "./internal/kernel/decide.go",
+		"touches fak/internal/shipgate/gate.go":           "fak/internal/shipgate/gate.go",
+		"the internal/abi stream needs a fix":             "internal/abi",
 	}
-	for text, want := range selfSource {
-		held, tree := IssueTextTargetsSelfSource(text)
+	for text, want := range trustCritical {
+		held, tree := IssueTextTargetsTrustCritical(text)
 		if !held || tree != want {
-			t.Errorf("IssueTextTargetsSelfSource(%q) = (%v, %q), want (true, %q)", text, held, tree, want)
+			t.Errorf("IssueTextTargetsTrustCritical(%q) = (%v, %q), want (true, %q)", text, held, tree, want)
 		}
 	}
-	// A bare mention without a cmd/internal path, or a near-miss word, does NOT match --
-	// the dispatcher must not hold a genuinely shippable issue.
-	notSelfSource := []string{
-		"Resolve the issue and keep literal braces like {\"ok\":true} intact.",
+	// A merely-self-source ref (cmd/**, internal/gateway) is guard-shippable and does NOT
+	// match -- the dispatcher must not hold work the worker floor permits. Nor does a bare
+	// mention without a trust-critical path.
+	notHeld := []string{
+		"most of the backlog lives in `cmd/**` + `internal/gateway/**`",
+		"work in cmd/fak/ where the verb shell lives",
+		"the internal/agent stream needs a fix",
 		"first-class fak dispatch verb",
 		"the subcommand/foo helper and internals/x are unrelated",
 		"document the tools/ and docs/ lanes",
 		"",
 	}
-	for _, text := range notSelfSource {
-		if held, tree := IssueTextTargetsSelfSource(text); held {
-			t.Errorf("IssueTextTargetsSelfSource(%q) = (true, %q), want not held", text, tree)
+	for _, text := range notHeld {
+		if held, tree := IssueTextTargetsTrustCritical(text); held {
+			t.Errorf("IssueTextTargetsTrustCritical(%q) = (true, %q), want not held", text, tree)
 		}
 	}
 }
 
 func TestLaneDispatchableUnderGuard(t *testing.T) {
-	// Guarded: a self-source lane tree is NOT dispatchable; a shippable one is.
-	if LaneDispatchableUnderGuard(true, []string{"internal/gateway/**"}) {
-		t.Fatalf("guarded internal/gateway lane reported dispatchable")
+	// Guarded: a trust-critical lane tree is NOT dispatchable; a merely-self-source or
+	// shippable one IS.
+	if LaneDispatchableUnderGuard(true, []string{"internal/adjudicator/**"}) {
+		t.Fatalf("guarded internal/adjudicator lane reported dispatchable")
 	}
-	if LaneDispatchableUnderGuard(true, []string{"cmd/**"}) {
-		t.Fatalf("guarded cmd lane reported dispatchable")
+	if LaneDispatchableUnderGuard(true, []string{"internal/policy/**"}) {
+		t.Fatalf("guarded internal/policy lane reported dispatchable")
+	}
+	// The correction: gateway and cmd are guard-shippable, so they ARE dispatchable.
+	if !LaneDispatchableUnderGuard(true, []string{"internal/gateway/**"}) {
+		t.Fatalf("guarded internal/gateway lane reported NOT dispatchable (the guard permits it)")
+	}
+	if !LaneDispatchableUnderGuard(true, []string{"cmd/**"}) {
+		t.Fatalf("guarded cmd lane reported NOT dispatchable (the guard permits it)")
 	}
 	if !LaneDispatchableUnderGuard(true, []string{"docs/**", "README.md"}) {
 		t.Fatalf("guarded docs lane reported NOT dispatchable")
 	}
-	if !LaneDispatchableUnderGuard(true, []string{"tools/**", "scripts/**"}) {
-		t.Fatalf("guarded tools lane reported NOT dispatchable")
-	}
-	// A mixed tree with any self-source member is held.
-	if LaneDispatchableUnderGuard(true, []string{"docs/**", "internal/agent/**"}) {
-		t.Fatalf("guarded mixed self-source lane reported dispatchable")
+	// A mixed tree with any trust-critical member is held.
+	if LaneDispatchableUnderGuard(true, []string{"docs/**", "internal/kernel/**"}) {
+		t.Fatalf("guarded mixed trust-critical lane reported dispatchable")
 	}
 	// Unguarded: every lane is dispatchable (the operator/worktree escape #1334).
-	if !LaneDispatchableUnderGuard(false, []string{"internal/gateway/**"}) {
-		t.Fatalf("unguarded self-source lane reported NOT dispatchable")
+	if !LaneDispatchableUnderGuard(false, []string{"internal/adjudicator/**"}) {
+		t.Fatalf("unguarded trust-critical lane reported NOT dispatchable")
 	}
-	// No declared tree -> fail OPEN (no self-source witness to hold on).
+	// No declared tree -> fail OPEN (no trust-critical witness to hold on).
 	if !LaneDispatchableUnderGuard(true, nil) {
 		t.Fatalf("guarded lane with no tree reported NOT dispatchable")
 	}
 }
 
-func TestDispatchableLanesUnderGuardSurfacesShippableLanesWhenBacklogIsSelfSource(t *testing.T) {
-	// The #1397 stall: the backlog routes mostly to internal/** lanes (the busiest by
-	// step budget), so a picker that chooses the single busiest lane and only THEN runs
-	// the self-modify hold refuses every tick and reports an EMPTY plan surface -- even
-	// though docs/tools/ci/examples carry abundant guard-shippable work. The selection-
-	// time partition must keep the surface NON-EMPTY by handing the picker exactly the
-	// shippable lanes and naming the held self-source ones.
+func TestDispatchableLanesUnderGuardHoldsOnlyTheTrustCriticalReferee(t *testing.T) {
+	// The corrected #1397 surface: the backlog routes mostly to internal/** lanes, but only
+	// the REFEREE's own trees (adjudicator, policy, kernel, ...) are held -- gateway, compute,
+	// metrics, model, and cmd are all guard-shippable and must surface. Before the narrowing
+	// the whole module was held and the surface was starved of ~85% of the real work.
 	trees := map[string][]string{
-		"compute":   {"internal/compute/**"},
-		"gateway":   {"internal/gateway/**"},
-		"promptmmu": {"internal/promptmmu/**"},
-		"metrics":   {"internal/metrics/**"},
-		"model":     {"internal/model/**"},
-		"cmd":       {"cmd/**"},
-		"docs":      {"docs/**", "README.md"},
-		"tools":     {"tools/**", "scripts/**"},
-		"ci":        {".github/**"},
-		"examples":  {"examples/**"},
+		"adjudicator": {"internal/adjudicator/**"},
+		"policy":      {"internal/policy/**"},
+		"kernel":      {"internal/kernel/**"},
+		"compute":     {"internal/compute/**"},
+		"gateway":     {"internal/gateway/**"},
+		"metrics":     {"internal/metrics/**"},
+		"model":       {"internal/model/**"},
+		"cmd":         {"cmd/**"},
+		"docs":        {"docs/**", "README.md"},
+		"tools":       {"tools/**", "scripts/**"},
 	}
 
 	dispatchable, held := DispatchableLanesUnderGuard(true, trees)
-	wantDispatchable := []string{"ci", "docs", "examples", "tools"}
-	wantHeld := []string{"cmd", "compute", "gateway", "metrics", "model", "promptmmu"}
+	wantDispatchable := []string{"cmd", "compute", "docs", "gateway", "metrics", "model", "tools"}
+	wantHeld := []string{"adjudicator", "kernel", "policy"}
 	if !reflect.DeepEqual(dispatchable, wantDispatchable) {
 		t.Fatalf("guarded dispatchable lanes = %v, want %v", dispatchable, wantDispatchable)
 	}
 	if !reflect.DeepEqual(held, wantHeld) {
 		t.Fatalf("guarded held lanes = %v, want %v", held, wantHeld)
 	}
-	// The whole point: the guarded plan surface is NON-EMPTY even though every busiest
-	// (self-source) lane is held -- the stall is a refusal-to-surface, not an absence of
-	// work. A picker filtering on `dispatchable` lands on a shippable lane (#1397).
+	// The guarded plan surface is NON-EMPTY and carries the core backlog, not just docs/tools.
 	if len(dispatchable) == 0 {
-		t.Fatalf("guarded dispatch surface is EMPTY despite shippable docs/tools/ci/examples work")
+		t.Fatalf("guarded dispatch surface is EMPTY despite shippable core + docs/tools work")
 	}
 
 	// Unguarded: every lane is dispatchable and none is held (the operator escape #1334).
@@ -162,22 +207,26 @@ func TestDispatchableLanesUnderGuardSurfacesShippableLanesWhenBacklogIsSelfSourc
 	}
 }
 
-func TestSelfModifyHoldForPickCatchesMisroutedSelfSourceIssue(t *testing.T) {
-	// A guarded worker routed to a SAFE lane (tools) whose target issue's text targets
-	// fak's own source is held -- the #1338/#1397 mis-route the lane tree alone hides.
-	if held, tree := SelfModifyHoldForPick(true, []string{"tools/**", "scripts/**"}, "fix(dispatch): the work lives in `cmd/**`"); !held || tree != "cmd/**" {
-		t.Fatalf("SelfModifyHoldForPick(tools lane, cmd/** issue text) = (%v, %q), want held on cmd/**", held, tree)
+func TestSelfModifyHoldForPickCatchesMisroutedTrustCriticalIssue(t *testing.T) {
+	// A guarded worker routed to a SAFE lane (tools) whose target issue's text targets the
+	// trust-critical machinery is held -- the mis-route the lane tree alone hides.
+	if held, tree := SelfModifyHoldForPick(true, []string{"tools/**", "scripts/**"}, "fix(policy): the work lives in `internal/policy/`"); !held || tree != "internal/policy/" {
+		t.Fatalf("SelfModifyHoldForPick(tools lane, internal/policy issue text) = (%v, %q), want held on internal/policy/", held, tree)
 	}
-	// The lane-tree arm wins first and names the lane glob when the lane itself is self-source.
-	if held, tree := SelfModifyHoldForPick(true, []string{"internal/gateway/**"}, "no path here"); !held || tree != "internal/gateway/**" {
-		t.Fatalf("SelfModifyHoldForPick(self-source lane) = (%v, %q), want held on internal/gateway/**", held, tree)
+	// The lane-tree arm wins first and names the lane glob when the lane itself is trust-critical.
+	if held, tree := SelfModifyHoldForPick(true, []string{"internal/adjudicator/**"}, "no path here"); !held || tree != "internal/adjudicator/**" {
+		t.Fatalf("SelfModifyHoldForPick(trust-critical lane) = (%v, %q), want held on internal/adjudicator/**", held, tree)
 	}
-	// A safe lane + a shippable issue (no self-source ref) is NOT held -- guarded docs work ships.
+	// A safe lane + a merely-self-source issue (cmd/**) is NOT held -- the guard permits that ship.
+	if held, _ := SelfModifyHoldForPick(true, []string{"tools/**"}, "the work lives in cmd/fak/main.go"); held {
+		t.Fatalf("SelfModifyHoldForPick held a guard-shippable cmd pick")
+	}
+	// A safe lane + a shippable issue (no self-source ref) is NOT held.
 	if held, _ := SelfModifyHoldForPick(true, []string{"docs/**"}, "update the README front door"); held {
 		t.Fatalf("SelfModifyHoldForPick held a shippable docs pick")
 	}
-	// An UNGUARDED worker is never held, even when the issue text targets self-source.
-	if held, _ := SelfModifyHoldForPick(false, []string{"tools/**"}, "edit cmd/fak/main.go"); held {
+	// An UNGUARDED worker is never held, even when the issue text targets trust-critical trees.
+	if held, _ := SelfModifyHoldForPick(false, []string{"tools/**"}, "edit internal/adjudicator/decide.go"); held {
 		t.Fatalf("SelfModifyHoldForPick held an unguarded worker")
 	}
 }

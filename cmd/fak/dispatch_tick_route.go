@@ -247,14 +247,14 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 	chosen := strings.TrimSpace(explicit)
 	var selfSourceHeld []string
 	if chosen == "" {
-		// #1397: skip fak's own-source lanes (cmd/** + internal/**) BEFORE the
-		// busiest-by-step-budget pick when this tick is guarded. On a guarded trunk the
-		// backlog is dominated by self-source internal/** lanes, so a picker that chose
-		// the busiest lane and only THEN ran SelfModifyHoldForPick would HOLD every tick
-		// and surface nothing -- even though docs/tools/.github/examples carry shippable
-		// work. Skipping them here lets the auto-pick land on a shippable lane. The
-		// EXPLICIT-lane path (explicit != "") is deliberately untouched: an operator who
-		// names a self-source lane must still reach the post-pick SELF_MODIFY hold.
+		// #1397: skip fak's TRUST-CRITICAL lanes (the adjudicator/policy/kernel/shipgate
+		// the referee binds to) BEFORE the busiest-by-step-budget pick when this tick is
+		// guarded, so a picker that chose the busiest lane and only THEN ran
+		// SelfModifyHoldForPick can never HOLD a whole tick and surface nothing. Only that
+		// narrow referee set is skipped -- gateway/agent/compute/cmd and the rest of
+		// internal/** are guard-shippable and stay in the busiest-pick. The EXPLICIT-lane
+		// path (explicit != "") is deliberately untouched: an operator who names a
+		// trust-critical lane must still reach the post-pick SELF_MODIFY hold.
 		guarded := !guardDisabled()
 		bestStepBudget := -1
 		bestCount := -1

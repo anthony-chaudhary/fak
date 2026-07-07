@@ -25,6 +25,11 @@ func TestClassifyNoCommitReason(t *testing.T) {
 		{"credit wall is genuine auth", "Your credit balance is too low to run this request\n", 300, NoCommitAuthWall},
 		{"unknown/unentitled model is switchable", "error: model \"fable\" is not available for this account\n", 300, NoCommitModelUnknown},
 		{"transient overload is rate limit", "API Error: 529 overloaded_error\n", 300, NoCommitRateLimit},
+		// Codex/OpenAI-wire throttles name the 429 family WITHOUT a literal "429" in the tail;
+		// each must grade rate_limit (not unknown) so the concurrency-backoff term counts it.
+		{"codex per-minute throttle (no 429 code)", "Rate limit reached for gpt-5-codex on tokens per min (TPM). Please try again in 2s.\n", 300, NoCommitRateLimit},
+		{"codex too-many-requests (no 429 code)", "stream error: Too Many Requests; retrying 1/5\n", 300, NoCommitRateLimit},
+		{"codex rate_limit_exceeded code", "{\"error\":{\"code\":\"rate_limit_exceeded\"}}\n", 300, NoCommitRateLimit},
 		{"off-trunk guard refusal", "commit refused: OFF_TRUNK\n", 2000, NoCommitOffTrunk},
 		{"banner-only no-op under stub floor", banner, int64(len(banner)), NoCommitBannerNoop},
 		{"banner over stub floor is not a no-op", banner + strings.Repeat("x", StubLogMaxBytes), StubLogMaxBytes + 30, NoCommitUnknown},

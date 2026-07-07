@@ -421,18 +421,21 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	}
 	if pick.Lane == "" {
 		// All-self-source edge case (#1397): the auto-pick found candidate lanes but
-		// every one was held as fak's own running source (cmd/** + internal/**) under
+		// every one was held as the trust-critical witness machinery (the adjudicator,
+		// policy, kernel, shipgate/architest gates -- the referee's own trees) under
 		// guard, so `chosen` stayed "". This is NOT an empty/error router -- the backlog
-		// is real, it is just all structurally unshippable by a self-guarded worker. Say
-		// so honestly with the SELF_MODIFY_HOLD vocabulary (over the whole held set)
-		// instead of the misleading "router empty/error" NO_LANE, so the operator routes
-		// the work to an unguarded/operator or worktree-isolated path (#1334).
+		// is real, it is just all the one narrow set a self-guarded RSI worker must never
+		// SHIP an edit to (rewriting its own referee). Say so honestly with the
+		// SELF_MODIFY_HOLD vocabulary (over the whole held set) instead of the misleading
+		// "router empty/error" NO_LANE, so the operator routes the work to an unguarded/
+		// operator or worktree-isolated path (#1334). (Merely-self-source lanes -- gateway,
+		// agent, cmd, ... -- are NOT held: the worker guard permits shipping those.)
 		if len(pick.SelfSourceHeld) > 0 {
 			payload["ok"] = false
 			payload["action"] = "self_modify_hold"
 			payload["verdict"] = "SELF_MODIFY_HOLD"
 			payload["self_modify_held_lanes"] = append([]string(nil), pick.SelfSourceHeld...)
-			payload["reason"] = fmt.Sprintf("every candidate lane (%s) is rooted in fak's own running source (cmd/** or internal/**): a guarded %s worker can investigate but never SHIP such an edit (the guard refuses with reason=SELF_MODIFY), so the whole eligible backlog is operator-gated -- route it to an unguarded/operator or worktree-isolated path (#1334), not a self-guarded worker", strings.Join(pick.SelfSourceHeld, ", "), opts.Backend)
+			payload["reason"] = fmt.Sprintf("every candidate lane (%s) is rooted in fak's trust-critical witness machinery (the adjudicator/policy/kernel/shipgate the referee binds to): a guarded %s worker can investigate but must never SHIP an edit that rewrites its own referee (reason=SELF_MODIFY), so this narrow set is operator-gated -- route it to an unguarded/operator or worktree-isolated path (#1334), not a self-guarded worker", strings.Join(pick.SelfSourceHeld, ", "), opts.Backend)
 			return finish(payload), nil
 		}
 		payload["ok"] = false
@@ -533,27 +536,29 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	payload["launch_command"] = dispatchtick.LaunchCommandShape(launchPreview, root, account)
 	payload["guarded"] = guardedPreview
 
-	// Self-modify pre-route (#1397): a GUARDED worker aimed at fak's own running source
-	// (cmd/** or internal/**) can investigate but never SHIP -- the guard refuses an edit
-	// to the binary adjudicating it (reason=SELF_MODIFY), so the worker burns turns and
-	// lands 0 commits (#1338's evidence). The hold fires on TWO signals: the lane tree is
-	// self-source (a correctly-routed cmd/internal lane), OR the target issue's own text
-	// references cmd/** or internal/** even though it routed to a SAFE lane -- the
-	// MIS-ROUTE the router's path extractor hides, because it only sees fak/-prefixed
-	// paths, so a `fix(dispatch):` issue whose real work is in cmd/fak aliases to the
-	// tools lane carrying zero extracted paths (#1338/#1397 are themselves this case).
-	// Hold BEFORE both the dry-run plan and the live spawn so the loop honest-STOPs and
-	// the operator routes it to an unguarded/operator or worktree-isolated path (#1334)
-	// instead. The guard wrapper and account are already resolved above, so the witness
-	// names exactly why -- this is a pre-route, not a guard/account failure. An unguarded
-	// worker (FLEET_DOGFOOD_GUARD=0, or a worktree-isolated path) never trips this.
+	// Self-modify pre-route (#1397): a GUARDED worker aimed at the trust-critical witness
+	// machinery (the adjudicator/policy/kernel/shipgate -- the referee's own trees) can
+	// investigate but must never SHIP -- rewriting its own referee is the RSI hazard, so
+	// hold rather than let it burn turns. NOTE the correction to the original #1338 model:
+	// the hold is NOT the whole cmd/**+internal/** module. `fak guard` (no --policy) runs
+	// the embedded guard-default-policy.json, whose self_modify_globs are secrets/dotfiles
+	// only -- it names no cmd/ or internal/ code tree, so a guarded worker DOES ship
+	// gateway/agent/cmd/... normally. Only the trust-critical subset is held. The hold
+	// fires on TWO signals: the lane tree is trust-critical (a correctly-routed
+	// adjudicator/policy/... lane), OR the target issue's own text references that
+	// machinery even though it routed to a SAFE lane -- the MIS-ROUTE the router's path
+	// extractor hides (a `fix(policy):` issue whose real work is internal/policy aliases
+	// to the tools lane carrying zero extracted paths). Hold BEFORE both the dry-run plan
+	// and the live spawn so the loop honest-STOPs and the operator routes it to an
+	// unguarded/operator or worktree-isolated path (#1334). An unguarded worker
+	// (FLEET_DOGFOOD_GUARD=0, or a worktree-isolated path) never trips this.
 	issueText := dispatchMapString(promptRec, "title") + "\n" + dispatchMapString(promptRec, "body")
 	if held, tree := dispatchtick.SelfModifyHoldForPick(guardedPreview, pick.Tree, issueText); held {
 		payload["ok"] = false
 		payload["action"] = "self_modify_hold"
 		payload["verdict"] = "SELF_MODIFY_HOLD"
 		payload["self_modify_tree"] = tree
-		payload["reason"] = fmt.Sprintf("issue #%d targets fak's own running source (lane %q, tree %q): a guarded %s worker can investigate but never SHIP an edit to cmd/** or internal/** (the guard refuses with reason=SELF_MODIFY), so this work is operator-gated -- route it to an unguarded/operator or worktree-isolated path (#1334), not a self-guarded worker", target, pick.Lane, tree, opts.Backend)
+		payload["reason"] = fmt.Sprintf("issue #%d targets fak's trust-critical witness machinery (lane %q, tree %q -- the adjudicator/policy/kernel/shipgate the referee binds to): a guarded %s worker can investigate but must never SHIP an edit that rewrites its own referee (reason=SELF_MODIFY), so this work is operator-gated -- route it to an unguarded/operator or worktree-isolated path (#1334), not a self-guarded worker", target, pick.Lane, tree, opts.Backend)
 		return finish(payload), nil
 	}
 
