@@ -32,6 +32,12 @@ DEVICES="${DEVICES:-1,2,3,4,5,6,7}"        # GPU0 left for a peer serve by defau
 PORT="${PORT:-8002}"
 CTX="${CTX:-8192}"
 ALIAS="${ALIAS:-glm-5.2}"
+# L1 (#3075) — the dominant single-stream lever. llama.cpp's default split-mode=layer runs ONE
+# GPU per token (the other 7 idle); split-mode=row puts every GPU's bandwidth on every token.
+# Default stays 'layer' so the WITNESSED 23.2 tok/s baseline is unchanged; set SPLIT_MODE=row for
+# the A/B. MAIN_GPU picks the row-split reduction device (only meaningful for -sm row).
+SPLIT_MODE="${SPLIT_MODE:-layer}"
+MAIN_GPU="${MAIN_GPU:-0}"
 RUN="${RUN:-/tmp/glm52_mgpu}"
 PHASE="$RUN/PHASE"
 SRVLOG="$RUN/server.log"
@@ -57,11 +63,12 @@ ph "PREFLIGHT devices=$DEVICES free VRAM (MiB):"
 nvidia-smi --query-gpu=index,memory.free --format=csv,noheader -i "$DEVICES" 2>/dev/null || true
 
 # The one line that matters: NO --n-cpu-moe => experts stay on GPU. -ngl 999 offloads
-# every layer; default split-mode=layer spreads them across the visible devices.
-ph "LAUNCH ngl=999 (experts ON gpu) devices=$DEVICES port=$PORT ctx=$CTX model=$SHARD1"
+# every layer; split-mode spreads them (layer = 1 GPU/token baseline, row = all GPUs/token, L1).
+ph "LAUNCH ngl=999 (experts ON gpu) devices=$DEVICES split=$SPLIT_MODE main-gpu=$MAIN_GPU port=$PORT ctx=$CTX model=$SHARD1"
 CUDA_VISIBLE_DEVICES="$DEVICES" setsid "$SERVER" \
   --model "$SHARD1" --alias "$ALIAS" --jinja \
   --n-gpu-layers 999 \
+  --split-mode "$SPLIT_MODE" --main-gpu "$MAIN_GPU" \
   --host 127.0.0.1 --port "$PORT" --ctx-size "$CTX" \
   > "$SRVLOG" 2>&1 < /dev/null &
 SRV=$!
