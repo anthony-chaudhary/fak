@@ -476,6 +476,8 @@ var grandfathered = []string{
 	"tools/skill_context.py",
 	"tools/skill_frontmatter_lint_test.py",
 	"tools/skill_frontmatter_lint.py",
+	"tools/skill_slop_scorecard_test.py",
+	"tools/skill_slop_scorecard.py",
 	"tools/slack_post_test.py",
 	"tools/slack_post.py",
 	"tools/sota_coverage_scorecard_test.py",
