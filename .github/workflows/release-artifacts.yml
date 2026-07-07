@@ -39,7 +39,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-artifacts-${{ github.ref_name }}
+  # Key on the tag being operated on, not the git ref: a workflow_dispatch runs on a
+  # BRANCH ref (ref_name=main) while re-uploading assets for its `tag` input, so keying
+  # on ref_name alone let a manual re-run race the tag-push run on the same release's
+  # assets (#3130, witnessed v0.37.0). Mirrors the checkout step's inputs.tag || ref.
+  group: release-artifacts-${{ github.event.inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
