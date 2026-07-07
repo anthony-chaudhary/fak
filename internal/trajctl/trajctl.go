@@ -17,6 +17,7 @@ const (
 
 	KindObjective = "objective"
 	KindScore     = "score"
+	KindSteer     = "steer"
 )
 
 // DefaultLedgerRel is the trajectory-control ledger path, relative to the repo
@@ -97,17 +98,19 @@ type ScoreRow struct {
 // Row is the append-only ledger envelope. Exactly one payload is set according to
 // Kind.
 type Row struct {
-	Schema    string     `json:"schema"`
-	Kind      string     `json:"kind"`
-	Objective *Objective `json:"objective,omitempty"`
-	Score     *ScoreRow  `json:"score,omitempty"`
+	Schema    string         `json:"schema"`
+	Kind      string         `json:"kind"`
+	Objective *Objective     `json:"objective,omitempty"`
+	Score     *ScoreRow      `json:"score,omitempty"`
+	Steer     *SteerDecision `json:"steer,omitempty"`
 }
 
-// State is the folded ledger: latest objective record by id, plus score history in
-// append order.
+// State is the folded ledger: latest objective record by id, plus score and
+// steer-decision history in append order.
 type State struct {
 	Objectives map[string]Objective `json:"objectives"`
 	Scores     []ScoreRow           `json:"scores"`
+	Steers     []SteerDecision      `json:"steers,omitempty"`
 }
 
 // ObjectiveRecord builds a ledger row for an Objective.
@@ -171,6 +174,8 @@ func Fold(rows []Row) State {
 			st.Objectives[row.Objective.ID] = *row.Objective
 		case KindScore:
 			st.Scores = append(st.Scores, *row.Score)
+		case KindSteer:
+			st.Steers = append(st.Steers, *row.Steer)
 		}
 	}
 	return st
@@ -205,15 +210,20 @@ func Validate(row Row) error {
 	}
 	switch row.Kind {
 	case KindObjective:
-		if row.Objective == nil || row.Score != nil {
+		if row.Objective == nil || row.Score != nil || row.Steer != nil {
 			return errors.New("trajctl: objective row must carry exactly one objective")
 		}
 		return validateObjective(*row.Objective)
 	case KindScore:
-		if row.Score == nil || row.Objective != nil {
+		if row.Score == nil || row.Objective != nil || row.Steer != nil {
 			return errors.New("trajctl: score row must carry exactly one score")
 		}
 		return validateScore(*row.Score)
+	case KindSteer:
+		if row.Steer == nil || row.Objective != nil || row.Score != nil {
+			return errors.New("trajctl: steer row must carry exactly one steer decision")
+		}
+		return validateSteer(*row.Steer)
 	default:
 		return fmt.Errorf("trajctl: unknown row kind %q", row.Kind)
 	}
