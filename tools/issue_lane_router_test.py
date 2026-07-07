@@ -652,6 +652,165 @@ class WorkClassTest(unittest.TestCase):
         self.assertIn("dev=1", text)
 
 
+class BodyDeclaredLaneTest(unittest.TestCase):
+    """`body_declared_lane` extracts the issue body's OWN lane declaration: the
+    contract-overlay `## Lane` section and the inline `Lane: `x`` field row."""
+
+    def test_overlay_section_form(self):
+        self.assertEqual(m.body_declared_lane("## In scope\nstuff\n\n## Lane\nmodver\n\n## Likely files\n- x"),
+                         "modver")
+
+    def test_section_form_tolerates_blank_line_and_backticks(self):
+        self.assertEqual(m.body_declared_lane("## Lane\n\n`cmd`\n"), "cmd")
+
+    def test_inline_field_form(self):
+        self.assertEqual(
+            m.body_declared_lane("Lane: `modver` · Paths: `internal/modver/` · Priority: P3"),
+            "modver")
+
+    def test_prose_mention_is_not_a_declaration(self):
+        # Mid-sentence "lane:" prose and a bare heading with no value never match.
+        self.assertIsNone(m.body_declared_lane("route it to the right lane: whichever fits"))
+        self.assertIsNone(m.body_declared_lane("## Lane\n"))
+        self.assertIsNone(m.body_declared_lane(""))
+        self.assertIsNone(m.body_declared_lane(None))
+
+
+class WitnessOnlyGithubTest(unittest.TestCase):
+    """#2609: `.github/**` named as a WITNESS/mention surface must not path-confirm
+    the ci lane when the body carries a stronger binding elsewhere (an explicit
+    `## Lane`/`Lane:` declaration, an exact-scope lane token, or a concrete
+    non-.github path). The July-4 CI canary drained shipless on exactly this:
+    #2464 (body-bound to modver) and #2233 (a multi-surface caller migration)
+    were offered as standalone `.github/**` work. A workflow-only issue with NO
+    stronger binding still routes ci (the #978 gate-signal case)."""
+
+    LANES = ["gateway", "docs", "tools", "cmd", "ci", "claude", "modver", "abi"]
+    TREES = {
+        "gateway": ["internal/gateway/**"],
+        "docs": ["docs/**"],
+        "tools": ["tools/**"],
+        "cmd": ["cmd/**"],
+        "ci": [".github/**"],
+        "claude": [".claude/**"],
+        "modver": ["internal/modver/**"],
+        "abi": ["internal/abi/**"],
+    }
+
+    # Shaped from the REAL #2464 body: lane/path-bound to modver (internal/modver/),
+    # with `.github/workflows/*` named only as the key space being modeled.
+    BODY_2464 = (
+        "<!-- fak-issue-key: modver-workflows-keyspace -->\n\n"
+        "Part of #2458 (version-everything).\n\n"
+        "## Working spine\n"
+        "internal/modver/ (Snapshot/DeltaRows/JoinScores, Runner seam) and the fak\n"
+        "version modules shell (cmd/fak/version_modules.go) are the working base to\n"
+        "extend; docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md is the doctrine.\n\n"
+        "## In scope\n"
+        ".github/workflows/* key space; optionally tools/register_*.ps1 "
+        "scheduled-task installers.\n\n"
+        "Lane: `modver` · Paths: `internal/modver/` · Priority: P3\n\n"
+        "## Lane\nmodver\n\n"
+        "## Likely files\n"
+        "- `internal/modver/` — the Runner/Snapshot seam this unit extends\n"
+        "- `.github/workflows/` — the workflow keyspace being versioned\n"
+    )
+
+    # Shaped from the REAL #2233 body: a broad caller-migration whose surfaces are
+    # skills/tools/Makefile/docs/hooks; `.github/workflows/*` is one mentioned
+    # surface among many, not an independently dispatchable slice.
+    BODY_2233 = (
+        "Parent: #2228 (C4 — blocked by C2; C5 is blocked by this)\n\n"
+        "# What\n\n"
+        "Migrate every in-repo caller of a bare dev-tier spelling to the `fak dev "
+        "<verb>` form. Callers live in: `.claude/skills/*/SKILL.md`, `tools/*.py`, "
+        "`tools/*.ps1`, `Makefile`, `.github/workflows/*`, scheduled-task "
+        "registration scripts, `dos.toml` command strings, docs code blocks, and "
+        "the shell hooks under `hooks/`.\n\n"
+        "# Method\n\n"
+        "1. Build the audit sweep. The sweep must prune `.fak/` + `.claude/` "
+        "checkout copies and `docs/archive/`.\n"
+        "2. Rewrite callers in reviewable batches (by surface: skills, tools, CI, "
+        "Makefile, docs).\n"
+    )
+
+    def route(self, iss: dict) -> dict:
+        return m.route_issue(iss, self.LANES, self.TREES)
+
+    def test_2464_shape_routes_modver_not_ci(self):
+        iss = issue(2464, "modver: version CI/cron/workflow units "
+                          "(.github/workflows, scheduled tasks)",
+                    labels=["version-everything"], body=self.BODY_2464)
+        r = self.route(iss)
+        self.assertEqual(r["lane"], "modver")
+        self.assertNotEqual(r["lane"], "ci")
+        self.assertIn("witness-only .github demoted", r["signal"])
+
+    def test_2233_shape_not_offered_as_standalone_github_worker(self):
+        iss = issue(2233, "cli(C4): migrate in-repo callers to 'fak dev' "
+                          "spellings + bare-spelling ratchet",
+                    body=self.BODY_2233)
+        r = self.route(iss)
+        self.assertNotEqual(r["lane"], "ci",
+                            "witness-only .github mention must not feed the ci lane")
+        # Routed to a safe owning surface of the migration (or held) — never ci.
+        self.assertIn(r["lane"], ("claude", "docs", "tools", None))
+        if r["lane"] is not None:
+            self.assertIn("witness-only .github demoted", r["signal"])
+
+    def test_github_only_with_no_stronger_binding_still_routes_ci(self):
+        # The #978 gate-signal boundary: a workflow-only issue with no stronger
+        # binding keeps its authoritative .github path -> ci.
+        iss = issue(978, "gate-signal: scheduled security gate is RED",
+                    body="the failing gate lives in "
+                         "`.github/workflows/security-audit.yml`")
+        r = self.route(iss)
+        self.assertEqual(r["lane"], "ci")
+        self.assertEqual(r["confidence"], "path-confirmed")
+        self.assertNotIn("demoted", r["signal"])
+
+    def test_body_lane_declaration_beats_witness_only_github(self):
+        # Generic form (no scope, no non-.github path): the body's own `## Lane`
+        # declaration is the stronger binding.
+        iss = issue(4001, "harden the nightly gate keyspace",
+                    body="## Lane\ngateway\n\nthe key space being modeled is "
+                         "`.github/workflows/nightly.yml` (witness surface only)")
+        r = self.route(iss)
+        self.assertEqual(r["lane"], "gateway")
+        self.assertIn("body-lane:gateway", r["signal"])
+        self.assertIn("witness-only .github demoted", r["signal"])
+
+    def test_bare_internal_path_binding_beats_witness_only_github(self):
+        # A concrete bare-rooted `internal/...` path is a stronger binding than a
+        # witness-only workflow mention.
+        iss = issue(4002, "version the workflow keyspace",
+                    body="extends internal/modver/ (the Runner seam); "
+                         "`.github/workflows/*` is only the key space being modeled")
+        r = self.route(iss)
+        self.assertEqual(r["lane"], "modver")
+        self.assertEqual(r["confidence"], "path-confirmed")
+        self.assertIn("witness-only .github demoted", r["signal"])
+
+    def test_bare_internal_path_alone_gains_no_routing_power(self):
+        # The bare-rooted binding probe is scoped to the witness demotion: without
+        # a `.github/**` witness hit it must not become a new routing rung.
+        iss = issue(4003, "extend the runner seam",
+                    body="extends internal/modver/ (the Runner seam)")
+        r = self.route(iss)
+        self.assertIsNone(r["lane"])
+        self.assertEqual(r["confidence"], "none")
+
+    def test_exclusive_path_still_held_despite_github_witness(self):
+        # Exclusive holds are decided BEFORE the witness demotion and never weaken.
+        iss = issue(4004, "fix: ABI gate",
+                    body="touches fak/internal/abi/types.go; "
+                         "gate `.github/workflows/abi.yml`")
+        r = self.route(iss)
+        self.assertIsNone(r["lane"])
+        self.assertEqual(r["blocked_lane"], "abi")
+        self.assertEqual(r["blocked_policy"], "exclusive")
+
+
 class ClassLabelBackfillTest(unittest.TestCase):
     """The gated `--apply-labels` backfill diff is pure + idempotent."""
 

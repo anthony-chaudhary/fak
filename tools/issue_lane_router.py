@@ -61,6 +61,43 @@ _PATH_RE = re.compile(
     r"/[\w./-]+)"
 )
 
+# Concrete BARE-rooted repo paths (`internal/...`, `cmd/...`, `experiments/...`) —
+# the families _PATH_RE only extracts behind the `fak/` doc-link prefix. Deliberately
+# NOT part of the main path rung (prose names these constantly; giving them wholesale
+# routing power would re-route the backlog). They are consulted ONLY as the
+# stronger-binding probe when a `.github/**` path hit looks witness-only (#2609), so
+# e.g. #2464's `Paths: internal/modver/` binding outranks the workflow key space the
+# body merely models. The lookbehind rejects `fak/internal/...` (already extracted
+# above) and any `x/internal/...` subpath or `myinternal/` partial token.
+_BINDING_PATH_RE = re.compile(
+    r"((?<![\w./-])(?:internal|cmd|experiments)/[\w./-]+)"
+)
+
+# An issue body's own explicit lane declaration — the strongest witness-vs-binding
+# cue a body carries. Two forms in the wild: the contract-overlay `## Lane` section
+# (lane name on the next non-empty line) and the inline `Lane: `x`` field row
+# (#2464's `Lane: `modver` · Paths: …`). Anchored at line start so prose like
+# "route it to the right lane: whichever" never matches.
+_BODY_LANE_SECTION_RE = re.compile(
+    r"^#{2,}[ \t]*lane[ \t]*\r?\n\s*`?([A-Za-z][\w-]*)`?[ \t]*\r?$",
+    re.IGNORECASE | re.MULTILINE)
+_BODY_LANE_FIELD_RE = re.compile(
+    r"^[ \t]*lane[ \t]*:[ \t]*`?([A-Za-z][\w-]*)`?",
+    re.IGNORECASE | re.MULTILINE)
+
+
+def body_declared_lane(body: str | None) -> str | None:
+    """The lane the issue body itself DECLARES (`## Lane` section or a `Lane: x`
+    field line), lowercased, or None. This is the issue author's routing key;
+    route_issue consults it as a stronger-binding signal when a `.github/**`
+    path hit is witness-only (#2609). The caller validates it against the live
+    lane set — an unknown or exclusive declaration is ignored, never force-fit."""
+    for rx in (_BODY_LANE_SECTION_RE, _BODY_LANE_FIELD_RE):
+        m = rx.search(body or "")
+        if m:
+            return m.group(1).lower()
+    return None
+
 # Lanes that are exclusive in dos.toml — NEVER auto-route a worker onto these from
 # a heuristic; that is exactly the collision the arbiter exists to prevent.
 EXCLUSIVE_LANES = {"abi", "release", "global"}
@@ -513,17 +550,17 @@ def route_issue(
     lane_set = set(concurrent)
 
     # Rung 1: path-grep probe (strongest). Run first so it can override a wrong scope.
+    # Track WHICH named paths supported each lane — the witness-vs-binding demotion
+    # below needs to know when a lane's only evidence is `.github/**` prose.
     path_lanes: list[str] = []
+    lane_paths: dict[str, list[str]] = {}
     for p in _PATH_RE.findall(title + "\n" + body):
         for lane in path_matches_lane(p, trees):
-            if lane in lane_set and lane not in path_lanes:
+            if lane not in lane_set:
+                continue
+            if lane not in path_lanes:
                 path_lanes.append(lane)
-    path_lane: str | None = None
-    path_ambiguous = False
-    if len(path_lanes) == 1:
-        path_lane = path_lanes[0]
-    elif len(path_lanes) > 1:
-        path_ambiguous = True
+            lane_paths.setdefault(lane, []).append(p)
 
     scope = _scope_token(title)
     typ = _type_token(title)
@@ -573,26 +610,81 @@ def route_issue(
     if keyword_lane in EXCLUSIVE_LANES:
         return _blocked_route(issue, keyword_lane, f"keyword:{keyword}->{keyword_lane}", "exclusive")
 
+    # Witness-vs-binding demotion (#2609): `.github/**` is the fleet's most-cited
+    # WITNESS surface — bodies name workflow files as the key space being modeled,
+    # the gate that fired, the CI log that proved a bug — without the dispatchable
+    # work living there. A lane whose ONLY path evidence is `.github/**` prose is
+    # demoted to a mention whenever the body carries a STRONGER binding elsewhere:
+    # an explicit `## Lane`/`Lane:` body declaration, an exact-scope lane token, or
+    # a concrete non-.github path (including the bare-rooted `internal/...` /
+    # `cmd/...` forms the main path rung deliberately skips). With no stronger
+    # binding the `.github/**` path stays authoritative — a workflow-only gate
+    # issue (#978) still routes ci. Runs AFTER the exclusive holds above, which
+    # decide on the full original path set and never weaken.
+    body_lane = body_declared_lane(body)
+    if body_lane is not None and (body_lane not in lane_set or body_lane in EXCLUSIVE_LANES):
+        body_lane = None
+    witness_demoted: list[str] = []
+    demote_note = ""
+    witness_only = [l for l in path_lanes
+                    if all(p.startswith(".github/") for p in lane_paths.get(l, []))]
+    if witness_only:
+        others = [l for l in path_lanes if l not in witness_only]
+        binding_lanes: list[str] = []
+        for p in _BINDING_PATH_RE.findall(title + "\n" + body):
+            for lane in path_matches_lane(p, trees):
+                if (lane in lane_set and lane not in EXCLUSIVE_LANES
+                        and lane not in witness_only and lane not in others
+                        and lane not in binding_lanes):
+                    binding_lanes.append(lane)
+        strong_scope = scope_lane if scope_conf == "exact-scope" else None
+        stronger = bool(others or binding_lanes
+                        or (body_lane and body_lane not in witness_only)
+                        or (strong_scope and strong_scope not in witness_only))
+        if stronger:
+            witness_demoted = witness_only
+            path_lanes = others + binding_lanes
+            demote_note = (" (witness-only .github demoted: "
+                           + "|".join(sorted(witness_only)) + ")")
+
+    path_lane: str | None = None
+    path_ambiguous = False
+    if len(path_lanes) == 1:
+        path_lane = path_lanes[0]
+    elif len(path_lanes) > 1:
+        path_ambiguous = True
+
     # Resolve with override: path_lane wins outright (it's the non-forgeable signal).
     if path_lane is not None:
         weaker = scope_lane or label_lane
         conflict = weaker is not None and weaker != path_lane
-        signal = f"path:{path_lane}" + (f" (overrode {weaker})" if conflict else "")
+        signal = f"path:{path_lane}" + (f" (overrode {weaker})" if conflict else "") + demote_note
         return _route(issue, path_lane, "path-confirmed", signal, conflict)
 
     if path_ambiguous:
-        # Tie-break: prefer the lane also matching scope/label; else lexicographic.
+        # Tie-break: prefer the body-declared lane (only armed by a witness
+        # demotion), then the lane also matching scope/label; else lexicographic.
         routable_path_lanes = [l for l in path_lanes
                                if l not in EXCLUSIVE_LANES]
-        prefer = (scope_lane if scope_lane in routable_path_lanes
-                  else (label_lane if label_lane in routable_path_lanes else None))
+        prefer = (body_lane if (witness_demoted and body_lane in routable_path_lanes)
+                  else (scope_lane if scope_lane in routable_path_lanes
+                        else (label_lane if label_lane in routable_path_lanes else None)))
         pick = prefer or sorted(routable_path_lanes)[0]
-        return _route(issue, pick, "path-confirmed", f"path-ambiguous:{'|'.join(sorted(path_lanes))}",
+        return _route(issue, pick, "path-confirmed",
+                      f"path-ambiguous:{'|'.join(sorted(path_lanes))}" + demote_note,
                       True, unrouted_reason=None)
+
+    # A witness demotion armed by the body's own lane declaration and nothing
+    # else: route to the declared lane — an explicit lane-key binding, graded at
+    # exact-scope confidence (it IS an exact lane name, declared by the issue).
+    if witness_demoted and body_lane is not None:
+        return _route(issue, body_lane, "exact-scope",
+                      f"body-lane:{body_lane}" + demote_note, False)
 
     if scope_lane is not None:
         token = scope if scope in lane_set or scope in scope_alias else typ
-        return _route(issue, scope_lane, scope_conf, f"scope:{token}->{scope_lane}", False)
+        return _route(issue, scope_lane, scope_conf,
+                      f"scope:{token}->{scope_lane}" + demote_note, False)
     if label_lane is not None:
         return _route(issue, label_lane, "label", f"label->{label_lane}", False)
     if keyword_lane is not None:
