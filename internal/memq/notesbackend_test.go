@@ -2,12 +2,15 @@ package memq
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/memoryread"
 	"github.com/anthony-chaudhary/fak/internal/recall"
 )
 
@@ -305,5 +308,140 @@ func TestNotesBackend_missingStoreIsEmpty(t *testing.T) {
 	cells, err := b.Cells(context.Background())
 	if err != nil || len(cells) != 0 {
 		t.Fatalf("missing store: cells=%v err=%v, want empty and nil", cells, err)
+	}
+}
+
+// #2429 acceptance: the session-start injection render (RenderNotesDigest, the
+// path `fak memory-read` calls) runs the recall trust gates against a REAL
+// checkout. A note citing a reverted SHA is withheld with the failing claim
+// named; a sibling citing a still-reachable SHA renders whole; a prose note
+// with nothing checkable still renders (hedged is not withheld); and a
+// secret-shaped note appears only as its `[sealed memory note: N bytes]`
+// descriptor — its body never surfaces. Scratch-repo + chdir pattern mirrors
+// recall's TestDefaultArtifactVerifierClassifiesRevertedCommitStale.
+func TestSessionStartRecallWithholdsStale(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	repo := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=memq-test",
+			"GIT_AUTHOR_EMAIL=memq-test@example.com",
+			"GIT_COMMITTER_NAME=memq-test",
+			"GIT_COMMITTER_EMAIL=memq-test@example.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-q")
+	if err := os.WriteFile(filepath.Join(repo, "kept.txt"), []byte("kept\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "kept.txt")
+	git("commit", "-q", "-m", "keep")
+	keptSHA := git("rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(repo, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "feature.txt")
+	git("commit", "-q", "-m", "add feature")
+	revertedSHA := git("rev-parse", "HEAD")
+	git("revert", "--no-edit", revertedSHA)
+
+	dir := fixtureNotesStore(t,
+		"# Memory index\n\n"+
+			"- [Kept fix](kept.md) — verified sibling\n"+
+			"- [Reverted fix](reverted.md) — cites a reverted SHA\n"+
+			"- [Preference](prose.md) — nothing checkable\n"+
+			"- [Leaky](leaky.md) — secret-shaped\n",
+		map[string]string{
+			"kept.md":     "The fix landed in commit " + keptSHA + " and still holds.\n",
+			"reverted.md": "The fix landed in commit " + revertedSHA + " and still holds.\n",
+			"prose.md":    "The user prefers the outcome stated first.\n",
+			"leaky.md":    "the deploy key is AKIAIOSFODNN7EXAMPLE\n",
+		})
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(wd); err != nil {
+			t.Errorf("restore cwd: %v", err)
+		}
+	})
+
+	out := RenderNotesDigest(dir, false, 60000)
+	if !strings.Contains(out, "## Kept fix (kept.md)") || !strings.Contains(out, keptSHA) {
+		t.Fatalf("verified sibling must render whole:\n%s", out)
+	}
+	if !strings.Contains(out, "## Preference (prose.md)") {
+		t.Fatalf("a nothing-checkable prose note renders hedged, never withheld:\n%s", out)
+	}
+	if strings.Contains(out, "## Reverted fix (reverted.md)") {
+		t.Fatalf("reverted-SHA note body must never render:\n%s", out)
+	}
+	if !strings.Contains(out, "withheld (never injected as fact):") ||
+		!strings.Contains(out, "Reverted fix (reverted.md): stale") ||
+		!strings.Contains(out, "later reverted") {
+		t.Fatalf("withheld footer must name the reverted-SHA claim as evidence:\n%s", out)
+	}
+	if strings.Contains(out, "AKIAIOSFODNN7EXAMPLE") {
+		t.Fatalf("sealed note body must never surface:\n%s", out)
+	}
+	if !strings.Contains(out, "Leaky (leaky.md): [sealed memory note: ") {
+		t.Fatalf("sealed note must appear only as its sealed descriptor:\n%s", out)
+	}
+}
+
+// #2429 acceptance: the rendered session-start set never exceeds the configured
+// byte budget — over-budget notes are NAMED under the overflow verdict and
+// their bodies never render. (A budget smaller than the FIRST block exercises
+// the deliberate first-note escape hatch instead, pinned by #2430's
+// TestRenderNotesDigest_maxBytesOverflowNamed; this witness holds for any
+// budget that fits at least one block.)
+func TestInjectionBudget(t *testing.T) {
+	index := "# Memory index\n\n" +
+		"- [Alpha](alpha.md) — first\n" +
+		"- [Beta](beta.md) — second\n" +
+		"- [Gamma](gamma.md) — third\n"
+	files := map[string]string{
+		"alpha.md": "alpha body prose, nothing checkable.\n",
+		"beta.md":  strings.Repeat("beta body filler prose. ", 40),
+		"gamma.md": strings.Repeat("gamma body filler prose. ", 40),
+	}
+	dir := fixtureNotesStore(t, index, files)
+	blockAlpha := fmt.Sprintf("## %s (%s)\n\n%s\n", "Alpha", "alpha.md", strings.TrimRight(files["alpha.md"], "\n"))
+	budget := len(blockAlpha) + 16 // fits alpha whole; beta and gamma must overflow
+
+	out := RenderNotesDigest(dir, false, budget)
+
+	if !strings.Contains(out, blockAlpha) {
+		t.Fatalf("in-budget note must render whole:\n%s", out)
+	}
+	if strings.Contains(out, "beta body filler") || strings.Contains(out, "gamma body filler") {
+		t.Fatalf("over-budget note bodies must never render:\n%s", out)
+	}
+	if !strings.Contains(out, memoryread.OverflowReason) ||
+		!strings.Contains(out, "Beta (beta.md)") || !strings.Contains(out, "Gamma (gamma.md)") {
+		t.Fatalf("over-budget notes must be named under %s:\n%s", memoryread.OverflowReason, out)
+	}
+	// The rendered set is every "## " note block; with beta and gamma overflowed
+	// the only rendered bytes are alpha's block, provably within the budget.
+	if n := strings.Count(out, "\n## "); n != 1 {
+		t.Fatalf("rendered set must hold exactly the in-budget note, got %d blocks:\n%s", n, out)
+	}
+	if len(blockAlpha) > budget {
+		t.Fatalf("rendered bytes %d exceed the %d-byte budget", len(blockAlpha), budget)
 	}
 }

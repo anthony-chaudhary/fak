@@ -80,8 +80,11 @@ func RenderNotesDigest(storeDir string, indexOnly bool, maxBytes int) string {
 }
 
 // withholdReason names the refusal evidence for a fact the digest could not page
-// in — the failing claim for a stale note, or the seal reason — so the digest
-// footer never reads as an anonymous drop.
+// in — the failing claim for a stale note, or the sealed descriptor — so the
+// digest footer never reads as an anonymous drop. A sealed note surfaces only as
+// the same `[sealed memory note: N bytes]` descriptor the scan stamps on its
+// Cell (#2429): the byte count is the whole disclosure, never a reason string
+// that could grow to paraphrase the body.
 func withholdReason(ctx context.Context, b *NotesBackend, cell Cell, err error) string {
 	if errors.Is(err, ErrStale) {
 		if findings, verr := b.Verify(ctx, cell.ID); verr == nil {
@@ -94,7 +97,7 @@ func withholdReason(ctx context.Context, b *NotesBackend, cell Cell, err error) 
 		return "stale recall artifact"
 	}
 	if errors.Is(err, ErrSealed) {
-		return "sealed by the trust gate"
+		return fmt.Sprintf("[sealed memory note: %d bytes]", cell.Bytes)
 	}
 	return err.Error()
 }
