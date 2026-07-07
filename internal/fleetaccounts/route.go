@@ -165,6 +165,41 @@ func tierOf(r Account) int {
 	return *r.ModelTier
 }
 
+// atSessionCap reports whether r has no free session slot left: its registry-live
+// session count has reached the per-account session budget. RouteAccount admits
+// single launches through this gate so a route-weighted seat that is already full
+// spills to the next candidate instead of accreting every new launch until the
+// whole account limit-walls (AllocateWave enforces the same budget per pool).
+func atSessionCap(r Account) bool {
+	limit := AccountSessionCap(r)
+	return limit > 0 && derefInt(r.LiveSessions) >= limit
+}
+
+// atCapBlocked projects an available-but-full seat into the blocked-account list
+// so a route decision names the seats it refused to overfill.
+func atCapBlocked(r Account) BlockedAccount {
+	b := publicBlocked(r)
+	b.Reason = "at session cap (" + itoa(derefInt(r.LiveSessions)) + " live >= cap " + itoa(AccountSessionCap(r)) + ")"
+	return b
+}
+
+// blockedAtTiers lists the target-tier accounts a route turned away: login/availability
+// blocks first, then available seats set aside only for being at their session cap.
+func blockedAtTiers(workers []Account, tiers map[int]bool) []BlockedAccount {
+	blocked := []BlockedAccount{}
+	for _, r := range workers {
+		if !tiers[tierOf(r)] {
+			continue
+		}
+		if !accountCanBeOffered(r) {
+			blocked = append(blocked, publicBlocked(r))
+		} else if atSessionCap(r) {
+			blocked = append(blocked, atCapBlocked(r))
+		}
+	}
+	return blocked
+}
+
 // routableAndAvailable filters a roster to the routable worker accounts matching wantedProduct
 // (empty matches any product), then to the subset that can be offered right now. Shared by
 // RouteAccount and AllocateWave, which each derive wantedProduct before calling.
@@ -217,12 +252,18 @@ func RouteAccount(rows []Account, taskText, taskClass string, allowTierFallback,
 		tierOrder = append(tierOrder, TierLight)
 	}
 
+	atCap := 0
 	for _, tier := range tierOrder {
 		var candidates []Account
 		for _, r := range available {
-			if tierOf(r) == tier {
-				candidates = append(candidates, r)
+			if tierOf(r) != tier {
+				continue
 			}
+			if atSessionCap(r) {
+				atCap++
+				continue
+			}
+			candidates = append(candidates, r)
 		}
 		if len(candidates) > 0 {
 			sort.SliceStable(candidates, func(i, j int) bool {
@@ -233,19 +274,10 @@ func RouteAccount(rows []Account, taskText, taskClass string, allowTierFallback,
 			if tier != target {
 				reason = "selected fallback tier"
 			}
-			var blocked []BlockedAccount
-			for _, r := range workers {
-				if tierOf(r) == target && !accountCanBeOffered(r) {
-					blocked = append(blocked, publicBlocked(r))
-				}
-			}
-			if blocked == nil {
-				blocked = []BlockedAccount{}
-			}
 			st := tier
 			return RouteResult{OK: true, Reason: reason, Task: task, TargetTier: target,
 				SelectedTier: &st, FallbackUsed: tier != target, Account: &chosen,
-				BlockedTargetAccounts: blocked}
+				BlockedTargetAccounts: blockedAtTiers(workers, map[int]bool{target: true})}
 		}
 	}
 
@@ -253,15 +285,7 @@ func RouteAccount(rows []Account, taskText, taskClass string, allowTierFallback,
 	for _, t := range tierOrder {
 		tierSet[t] = true
 	}
-	var blocked []BlockedAccount
-	for _, r := range workers {
-		if tierSet[tierOf(r)] && !accountCanBeOffered(r) {
-			blocked = append(blocked, publicBlocked(r))
-		}
-	}
-	if blocked == nil {
-		blocked = []BlockedAccount{}
-	}
+	blocked := blockedAtTiers(workers, tierSet)
 	fallbackNote := ""
 	if target == 1 && !effectiveAllow {
 		fallbackNote = " (tier-1 fallback disabled)"
@@ -278,8 +302,12 @@ func RouteAccount(rows []Account, taskText, taskClass string, allowTierFallback,
 	if !anyTarget {
 		fallbackNote = " (no matching worker tier)"
 	}
+	reason := "no available tier " + itoa(target) + " account"
+	if atCap > 0 {
+		reason += " under the session cap (" + itoa(atCap) + " at cap)"
+	}
 	return RouteResult{OK: false,
-		Reason: "no available tier " + itoa(target) + " account" + fallbackNote,
+		Reason: reason + fallbackNote,
 		Task:   task, TargetTier: target, FallbackUsed: false, Account: nil,
 		BlockedTargetAccounts: blocked}
 }

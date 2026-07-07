@@ -95,6 +95,16 @@ func AllocateWave(rows []Account, req WaveRequest, pol Policy) WaveResult {
 	for pool, workers := range leaseWorkers {
 		load[pool] = len(workers)
 	}
+	// Floor each pool's load at its registry-live session count: sessions launched
+	// outside this dispatcher (interactive resumes, the watchdog) hold no seat
+	// lease, and a wave that only counts its own leases would grant a full wave
+	// onto a seat already running at capacity. max() rather than sum, because a
+	// dispatch-launched session appears in both counts.
+	for _, r := range uniquePoolAccounts(workers) {
+		if live := derefInt(r.LiveSessions); live > load[PoolKey(r)] {
+			load[PoolKey(r)] = live
+		}
+	}
 	for _, tier := range tierOrder {
 		if len(lanes) >= n {
 			break

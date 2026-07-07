@@ -640,10 +640,12 @@ func TestResolvePinAndRoute(t *testing.T) {
 		t.Errorf("route engineering target_tier = %v want 1", re.TargetTier)
 	}
 
-	// route gardening -> tier 2 target; opencode-glm (tier 2) is available.
+	// route gardening -> tier 2 target; opencode-glm (tier 2) is available but its
+	// one live session fills the opencode session cap, so the route falls back up
+	// to tier 1 instead of overfilling the glm seat.
 	rg := Resolve(rows, home, ResolveRequest{WorkKind: "gardening"}, pol)
-	if !rg.OK || rg.Account != "opencode-glm" {
-		t.Errorf("route gardening: ok=%v account=%q want opencode-glm", rg.OK, rg.Account)
+	if !rg.OK || rg.Account != ".claude" {
+		t.Errorf("route gardening: ok=%v account=%q want tier-1 fallback .claude (glm seat at session cap)", rg.OK, rg.Account)
 	}
 }
 
