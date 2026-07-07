@@ -1258,7 +1258,8 @@ func (c *cudaBackend) AWQBatchedMatMul(w, scales, X Tensor, P int) Tensor {
 //   - qzeros:  int32-packed zero-points [nGroups, out/pack]
 //   - scales:  f32 [nGroups, out]
 //   - gidx:    optional int32 [in] activation-order group index; pass the zero Tensor
-//              (Tensor{}) for the group = i/groupSize path (no g_idx / desc_act off).
+//     (Tensor{}) for the group = i/groupSize path (no g_idx / desc_act off).
+//
 // The quant tensors are staged resident as raw device bytes (their host dtype label is
 // cosmetic — the kernel reads only the device pointers + these explicit dims). Output is F32 [out].
 func (c *cudaBackend) GPTQMatMul(qweight, qzeros, scales, gidx, x Tensor, out, in, bits, groupSize, nGroups int) Tensor {
