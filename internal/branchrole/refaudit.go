@@ -197,6 +197,7 @@ var refClassByExactPath = map[string]string{
 	"tools/register_worktree_doctor.ps1":        RefClassDevelopmentSource,
 	"tools/worktree_doctor.py":                  RefClassDevelopmentSource,
 
+	"cmd/fak/help.go":                        RefClassPublicFrontDoor,
 	"cmd/fak/release.go":                     RefClassPublicFrontDoor,
 	"cmd/fak/release_status.go":              RefClassPublicFrontDoor,
 	"cmd/fak/releasestale.go":                RefClassPublicFrontDoor,
