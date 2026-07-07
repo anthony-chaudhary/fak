@@ -133,6 +133,14 @@ type Manifest struct {
 	// passed. Like ToolRuntime, this is manifest/runtime-only; launch adapters
 	// resolve it through Runtime.InheritedCapabilities before exec.
 	InheritedCapabilities []InheritedRule `json:"inherited_capabilities,omitempty"`
+	// SubagentDepth (issue #2603, epic #2000) caps how deep a subagent fan-out
+	// tree may recurse — the policy-bound form of the harness's depth bound so an
+	// unbounded child-spawns-child tree cannot run away. Absent does NOT mean
+	// "no cap": it falls back to DefaultMaxSubagentDepth (fail-closed). Like
+	// ToolRuntime, manifest/runtime-only; launch adapters resolve it through
+	// Runtime.SubagentDepth.AdmitDepth before brokering a child. See
+	// SubagentDepthRule.
+	SubagentDepth *SubagentDepthRule `json:"subagent_depth,omitempty"`
 }
 
 // EgressRule is the manifest's network-egress block.
@@ -227,6 +235,10 @@ type Runtime struct {
 	// InheritedCapabilities is the compiled child-launch inheritance table; nil
 	// when the manifest declares none, so Resolve returns an empty envelope.
 	InheritedCapabilities *InheritedTable
+	// SubagentDepth is the compiled subagent fan-out depth cap (#2603); nil when
+	// the manifest declares none, in which case AdmitDepth still enforces the
+	// fail-closed DefaultMaxSubagentDepth on the nil receiver.
+	SubagentDepth *SubagentDepthRule
 }
 
 // Load reads, parses, validates, and resolves a manifest file into a Policy.
@@ -410,6 +422,10 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 	if err != nil {
 		return Runtime{}, err
 	}
+	sd, err := compileSubagentDepth(m.SubagentDepth)
+	if err != nil {
+		return Runtime{}, err
+	}
 	return Runtime{
 		Adjudicator:           p,
 		Sources:               sources,
@@ -419,6 +435,7 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 		Isolation:             iso,
 		ToolRuntime:           tr,
 		InheritedCapabilities: ic,
+		SubagentDepth:         sd,
 	}, nil
 }
 
@@ -626,6 +643,11 @@ func SummaryRuntime(rt Runtime) string {
 		}
 	} else {
 		fmt.Fprintf(&b, "inherited launch   : (none — child inherits nothing)\n")
+	}
+	if rt.SubagentDepth != nil {
+		fmt.Fprintf(&b, "subagent depth     : max_depth=%d\n", rt.SubagentDepth.MaxDepth)
+	} else {
+		fmt.Fprintf(&b, "subagent depth     : max_depth=%d (default — fail-closed)\n", DefaultMaxSubagentDepth)
 	}
 	return b.String()
 }
