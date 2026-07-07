@@ -150,6 +150,7 @@ system prompt five times over. `fak` does the shared work once, two ways:
   prompt unchanged. Tune with `fak guard --compact-history-budget <tokens>` (`0` disables).
 
 How and why: [long sessions keep the cache hit](docs/explainers/long-sessions-keep-the-cache-hit.md) ·
+[the 100/200/300-turn savings story](docs/long-session-value.md) ·
 [the paying-off trend](docs/cache-value-rollup.md) · [four wins by example, a 29 s silent MP4](visuals/worked-examples-video.mp4).
 
 ## More ways to run it
