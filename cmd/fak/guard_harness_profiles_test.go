@@ -166,6 +166,11 @@ func firstClassHarnessFloorProfiles() []harnessFloorProfile {
 				{"mcp__fak__fak_feature_query", `{"query":"memory","detail":"name"}`},
 				{"mcp__fak__fak_capabilities", `{"intent":"inspect guard loop"}`},
 				{"mcp__fak__fak_context_value", `{}`},
+				// The context-recovery pair (#3061): read-only enumeration + trust-gated
+				// restore of compaction-dropped spans. Off the floor, a compaction-confused
+				// model's only recovery path DEFAULT_DENY-loops (the #2592 failure class).
+				{"mcp__fak__fak_context_spans", `{}`},
+				{"mcp__fak__fak_context_restore", `{"id":"deadbeef"}`},
 			},
 			// MCP clients expose no host shell of their own — mutating MCP verbs must stay
 			// off-floor, and there is no shell alias to carry danger rules for.

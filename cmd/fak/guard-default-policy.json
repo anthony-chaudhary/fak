@@ -101,6 +101,8 @@
     "mcp__fak__fak_feature_query",
     "mcp__fak__fak_capabilities",
     "mcp__fak__fak_context_value",
+    "mcp__fak__fak_context_spans",
+    "mcp__fak__fak_context_restore",
 
     "bash",
     "read",
