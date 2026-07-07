@@ -1,0 +1,338 @@
+package toolprocgate
+
+// Console-host fault boundary (#2170): a terminal, shell, PTY, or TUI render
+// surface is a FAULT BOUNDARY. When a child's console surface crashes — the
+// 2026-07-01 class was a pwsh.exe FailFast throwing
+// System.Management.Automation.Host.HostException with Win32 0xE9 "No process
+// is on the other end of the pipe." — the parent supervisor must fold it to a
+// STRUCTURED child failure and keep the kernel plus unrelated agents alive.
+// Before this leaf the crash class lived only in Windows Event Viewer: nothing
+// in-process could NAME it, so forensics meant manual registry correlation.
+//
+// This file gives the class a closed vocabulary, a signature classifier for
+// the drain/exit path, a Supervisor seam that records the fault as a normal
+// terminal exit (sibling procs untouched), and a fail-closed JSONL row +
+// report fold in the LeakEvent idiom, so the class is durably searchable.
+
+import (
+	"bufio"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"sort"
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/toolproc"
+)
+
+// ConsoleFaultEventSchema stamps one durable console-fault row.
+const ConsoleFaultEventSchema = "fak.toolprocgate.console-fault-event.v1"
+
+// ConsoleFaultReportSchema stamps the folded operator report.
+const ConsoleFaultReportSchema = "fak.toolprocgate.console-fault-report.v1"
+
+// consoleFaultDetailLimit bounds the recorded crash detail: enough to keep the
+// leading searchable signature, never enough to become the storage leak.
+const consoleFaultDetailLimit = 512
+
+// ConsoleFaultClass is the CLOSED vocabulary of child terminal/shell/PTY/
+// console-host crash classes. Parse and record fail closed: an unknown class
+// is refused, never folded into an operator report as legitimate.
+type ConsoleFaultClass string
+
+const (
+	// ConsoleHostFailFast: the child's managed console host crashed the
+	// process — the pwsh/.NET FailFast class from the 2026-07-01 audit
+	// (HostException through Microsoft.PowerShell.ConsoleHost).
+	ConsoleHostFailFast ConsoleFaultClass = "CONSOLE_HOST_FAILFAST"
+	// ConsolePipeLost: the console stdio pipe went away under the child —
+	// Win32 0xE9 "No process is on the other end of the pipe.", 109 "The pipe
+	// has been ended.", 232 "The pipe is being closed.", or POSIX EPIPE.
+	ConsolePipeLost ConsoleFaultClass = "CONSOLE_PIPE_LOST"
+	// ConsoleHandleLost: the console handle itself became invalid (the
+	// classic Windows lost-console error on a detached/killed conhost).
+	ConsoleHandleLost ConsoleFaultClass = "CONSOLE_HANDLE_LOST"
+	// ConsolePTYEOF: the PTY/pipe drain hit EOF while the call was still
+	// live — the surface vanished without a terminal exit observation.
+	ConsolePTYEOF ConsoleFaultClass = "CONSOLE_PTY_EOF"
+	// ConsoleRendererExit: a TUI render surface exited unexpectedly. No
+	// string signature — the embedder that owns the renderer asserts it
+	// directly (the #2170 render-pane witness's class).
+	ConsoleRendererExit ConsoleFaultClass = "CONSOLE_RENDERER_EXIT"
+)
+
+// ConsoleSurface names the child-owned surface the fault was observed on.
+// Bounded free text in the row (mirrors LeakEvent.SourceChannel); constants
+// pin the common cases.
+type ConsoleSurface string
+
+const (
+	ConsoleSurfaceStdout   ConsoleSurface = "stdout"
+	ConsoleSurfaceStderr   ConsoleSurface = "stderr"
+	ConsoleSurfacePTY      ConsoleSurface = "pty"
+	ConsoleSurfaceRenderer ConsoleSurface = "renderer"
+)
+
+// validConsoleFaultClass is the closed-set membership check.
+func validConsoleFaultClass(c ConsoleFaultClass) bool {
+	switch c {
+	case ConsoleHostFailFast, ConsolePipeLost, ConsoleHandleLost, ConsolePTYEOF, ConsoleRendererExit:
+		return true
+	}
+	return false
+}
+
+// consoleHostSignatures identify a managed console-host crash. Checked FIRST:
+// a FailFast banner usually also carries the pipe message that CAUSED it, and
+// the crash (not the cause) is the class an operator searches for.
+var consoleHostSignatures = []string{
+	"system.management.automation.host.hostexception",
+	"microsoft.powershell.consolehost",
+}
+
+// consolePipeSignatures identify the lost-stdio-pipe family.
+var consolePipeSignatures = []string{
+	"no process is on the other end of the pipe", // Win32 0xE9 / ERROR_PIPE_NOT_CONNECTED
+	"the pipe has been ended",                    // Win32 109 / ERROR_BROKEN_PIPE
+	"the pipe is being closed",                   // Win32 232 / ERROR_NO_DATA
+	"broken pipe",                                // POSIX EPIPE
+}
+
+// consoleHandleSignatures identify a lost console handle.
+var consoleHandleSignatures = []string{
+	"the handle is invalid", // Win32 6 / ERROR_INVALID_HANDLE on a dead conhost
+}
+
+// ClassifyConsoleFault maps observed child-failure text (a drain error, a
+// stderr tail, an Event-Viewer style banner) onto the closed class. ok=false
+// means "not a console fault" — a plain tool error stays a plain tool error;
+// the classifier never guesses.
+func ClassifyConsoleFault(detail string) (ConsoleFaultClass, bool) {
+	d := strings.ToLower(detail)
+	if d == "" {
+		return "", false
+	}
+	for _, sig := range consoleHostSignatures {
+		if strings.Contains(d, sig) {
+			return ConsoleHostFailFast, true
+		}
+	}
+	for _, sig := range consolePipeSignatures {
+		if strings.Contains(d, sig) {
+			return ConsolePipeLost, true
+		}
+	}
+	for _, sig := range consoleHandleSignatures {
+		if strings.Contains(d, sig) {
+			return ConsoleHandleLost, true
+		}
+	}
+	return "", false
+}
+
+// ClassifyDrainError classifies the error a child-output drain returned.
+// callLive reports whether the call was still live (no terminal exit observed)
+// when the drain ended: an EOF on a live call means the console/PTY surface
+// vanished (a fault); an EOF after a clean exit is just the end of output.
+func ClassifyDrainError(err error, callLive bool) (ConsoleFaultClass, bool) {
+	if err == nil {
+		return "", false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		if callLive {
+			return ConsolePTYEOF, true
+		}
+		return "", false
+	}
+	return ClassifyConsoleFault(err.Error())
+}
+
+// ConsoleFaultEvent is one append-only, byte-bounded crash record. It carries
+// identity and the typed class — never payload bytes — so the row is safe to
+// keep durable and cheap to search.
+type ConsoleFaultEvent struct {
+	Schema  string            `json:"schema,omitempty"`
+	Class   ConsoleFaultClass `json:"class"`
+	AtMS    int64             `json:"at_unix_ms"`
+	CallID  string            `json:"call_id,omitempty"`
+	Tool    string            `json:"tool,omitempty"`
+	Session string            `json:"session,omitempty"`
+	Surface string            `json:"surface,omitempty"`
+	// Detail keeps the leading crash signature (bounded to
+	// consoleFaultDetailLimit bytes) so the exact Event-Viewer string stays
+	// greppable in the fak surface.
+	Detail string `json:"detail,omitempty"`
+}
+
+// ValidateConsoleFaultEvent enforces the closed vocabulary and the required
+// fields on one row.
+func ValidateConsoleFaultEvent(ev ConsoleFaultEvent) error {
+	if !validConsoleFaultClass(ev.Class) {
+		return fmt.Errorf("toolprocgate console fault: unknown class %q", ev.Class)
+	}
+	if ev.AtMS <= 0 {
+		return fmt.Errorf("toolprocgate console fault: at_unix_ms must be positive")
+	}
+	if len(ev.Detail) > consoleFaultDetailLimit {
+		return fmt.Errorf("toolprocgate console fault: detail exceeds %d bytes", consoleFaultDetailLimit)
+	}
+	return nil
+}
+
+// boundConsoleFaultDetail truncates crash detail to the durable bound,
+// keeping the head — the crash banner leads with the searchable signature.
+func boundConsoleFaultDetail(s string) string {
+	if len(s) <= consoleFaultDetailLimit {
+		return s
+	}
+	return s[:consoleFaultDetailLimit]
+}
+
+// ExitConsoleFault records a child console/shell/PTY/renderer fault as a
+// STRUCTURED child failure: the journal gets a normal exit(status=error) — so
+// the parent's table stays consistent, enforcement stays scoped to the dead
+// call, and sibling procs are untouched — and the typed fault row is returned
+// for the embedder's durable sink. Fail-closed: an unknown class or an unknown
+// call is refused before anything is journaled.
+func (s *Supervisor) ExitConsoleFault(callID string, nowMS int64, class ConsoleFaultClass, surface ConsoleSurface, detail string) (ConsoleFaultEvent, error) {
+	if !validConsoleFaultClass(class) {
+		return ConsoleFaultEvent{}, fmt.Errorf("toolprocgate: unknown console fault class %q", class)
+	}
+	// Snapshot the child's identity from its spawn row before the exit.
+	var tool, session string
+	s.mu.Lock()
+	for _, ev := range s.events {
+		if ev.Kind == toolproc.EvSpawn && ev.CallID == callID {
+			tool, session = ev.Tool, ev.Session
+			break
+		}
+	}
+	s.mu.Unlock()
+	if err := s.Exit(callID, nowMS, "error"); err != nil {
+		return ConsoleFaultEvent{}, err
+	}
+	ev := ConsoleFaultEvent{
+		Schema:  ConsoleFaultEventSchema,
+		Class:   class,
+		AtMS:    nowMS,
+		CallID:  callID,
+		Tool:    tool,
+		Session: session,
+		Surface: string(surface),
+		Detail:  boundConsoleFaultDetail(detail),
+	}
+	return ev, nil
+}
+
+// AppendConsoleFaultEvent writes one validated row as a JSONL line.
+func AppendConsoleFaultEvent(w io.Writer, ev ConsoleFaultEvent) error {
+	if ev.Schema == "" {
+		ev.Schema = ConsoleFaultEventSchema
+	}
+	if err := ValidateConsoleFaultEvent(ev); err != nil {
+		return err
+	}
+	b, err := json.Marshal(ev)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(append(b, '\n'))
+	return err
+}
+
+// ParseConsoleFaultEvents reads console-fault JSONL fail-closed: unknown
+// fields and unknown classes are refused, so a drifted or fabricated row can
+// never enter an operator report as a legitimate crash record. Blank lines and
+// `#` comments are journal furniture, not rows.
+func ParseConsoleFaultEvents(r io.Reader) ([]ConsoleFaultEvent, error) {
+	var out []ConsoleFaultEvent
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	line := 0
+	for sc.Scan() {
+		line++
+		raw := strings.TrimSpace(sc.Text())
+		if raw == "" || strings.HasPrefix(raw, "#") {
+			continue
+		}
+		dec := json.NewDecoder(strings.NewReader(raw))
+		dec.DisallowUnknownFields()
+		var ev ConsoleFaultEvent
+		if err := dec.Decode(&ev); err != nil {
+			return nil, fmt.Errorf("toolprocgate console fault: line %d: %v", line, err)
+		}
+		if err := ValidateConsoleFaultEvent(ev); err != nil {
+			return nil, fmt.Errorf("line %d: %w", line, err)
+		}
+		out = append(out, ev)
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ConsoleFaultCounts is the searchable attention summary.
+type ConsoleFaultCounts struct {
+	ByClass   map[string]int `json:"by_class"`
+	BySurface map[string]int `json:"by_surface"`
+	ByTool    map[string]int `json:"by_tool"`
+	BySession map[string]int `json:"by_session"`
+}
+
+// ConsoleFaultReport is the folded operator view: how many child console
+// surfaces died, in which class, on which tools — the durable answer to the
+// question the 2026-07-01 audit had to reconstruct from Event Viewer.
+type ConsoleFaultReport struct {
+	Schema    string              `json:"schema"`
+	Rows      int                 `json:"rows"`
+	Counts    ConsoleFaultCounts  `json:"counts"`
+	EventRows []ConsoleFaultEvent `json:"event_rows"`
+}
+
+// ConsoleFaultReportFromEvents folds rows into the report.
+func ConsoleFaultReportFromEvents(events []ConsoleFaultEvent) ConsoleFaultReport {
+	rep := ConsoleFaultReport{
+		Schema: ConsoleFaultReportSchema,
+		Rows:   len(events),
+		Counts: ConsoleFaultCounts{
+			ByClass:   map[string]int{},
+			BySurface: map[string]int{},
+			ByTool:    map[string]int{},
+			BySession: map[string]int{},
+		},
+		EventRows: append([]ConsoleFaultEvent(nil), events...),
+	}
+	for _, ev := range events {
+		rep.Counts.ByClass[string(ev.Class)]++
+		if ev.Surface != "" {
+			rep.Counts.BySurface[ev.Surface]++
+		}
+		if ev.Tool != "" {
+			rep.Counts.ByTool[ev.Tool]++
+		}
+		if ev.Session != "" {
+			rep.Counts.BySession[ev.Session]++
+		}
+	}
+	return rep
+}
+
+// RenderConsoleFaultReport writes the operator text view: one summary line,
+// then class counts sorted for stable output, then one line per row.
+func RenderConsoleFaultReport(w io.Writer, rep ConsoleFaultReport) {
+	fmt.Fprintf(w, "console faults: %d row(s)\n", rep.Rows)
+	classes := make([]string, 0, len(rep.Counts.ByClass))
+	for c := range rep.Counts.ByClass {
+		classes = append(classes, c)
+	}
+	sort.Strings(classes)
+	for _, c := range classes {
+		fmt.Fprintf(w, "  %-24s %d\n", c, rep.Counts.ByClass[c])
+	}
+	for _, ev := range rep.EventRows {
+		fmt.Fprintf(w, "  %s call=%s tool=%s session=%s surface=%s\n",
+			ev.Class, ev.CallID, ev.Tool, ev.Session, ev.Surface)
+	}
+}
