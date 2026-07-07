@@ -37,6 +37,23 @@
 // reasons and the doc map ARE the data, read from the source, so it cannot be gamed by editing a
 // JSON file -- only by genuinely slimming the surface. The fold/grade/markdown machinery lives in
 // pkg/scorecard; this package holds only the operator-surface extraction and the KPIs.
+//
+// TIER SPLIT (epic #2228 C6, #2235). The verb surface is reported as two meters, not one flat
+// count: frontdoor_verbs (the product tier an operator FACES -- what `fak help` lists) and
+// dev_verbs (the `fak dev <verb>` tooling tier, everything else). The split is WITNESSED: the tier
+// of each verb is read from internal/devindex (tiers.go), whose classification is derived from and
+// coverage-gated against the cmd/fak dispatch switch, so a count here is a fact fak authored, not a
+// value relayed. The two meters PARTITION the flat surface by construction -- frontdoor_verbs +
+// dev_verbs == the old flat count -- so the split is a continuity-preserving decomposition, never a
+// silent shrink.
+//
+// HONESTY FENCE. dev_verbs stays MEASURED even after C5 gates the bare dev spellings behind
+// `fak dev`: a gated verb is hidden from the front door, not from the meter. Because both meters
+// are reported, reclassifying a verb frontdoor->dev is VISIBLE (frontdoor falls by one, dev rises
+// by one, the sum is conserved) -- so the ratchet cannot be gamed. The heaviness drop this epic
+// buys must come from the frontdoor meter ONLY, and a future "move verbs to dev to lower heaviness"
+// commit must NOT be read as a real reduction unless the verb is actually deleted or the product is
+// simplified (removed from BOTH meters).
 package heavinessscore
 
 import (
@@ -47,6 +64,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/devindex"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
@@ -110,11 +128,18 @@ var requiredDocMapSurfaces = []requiredDocMapSurface{
 type Surface struct {
 	Verbs          []string // distinct public top-level verbs (sorted)
 	MetaVerbs      []string // the subset that are meta-scorecards / RSI verbs (sorted)
+	FrontdoorVerbs int      // the subset classified frontdoor tier (devindex.TierFrontdoor) -- the product front door
 	FrontDoorFlags int      // flags defined on the front-door verb (`fak guard`)
 	RefusalReasons int      // [reasons.*] blocks declared in dos.toml
 	AppealWired    bool     // the dispatch table routes the in-product appeal verb (`complain`)
 	DocMap         string   // llms.txt, lowercased (the doc-map coverage oracle)
 }
+
+// DevVerbs is the dev-tier meter: the verb surface that is NOT the product front door. It is
+// len(Verbs) - FrontdoorVerbs BY CONSTRUCTION, so the two meters always partition the flat surface
+// (the continuity witness: frontdoor + dev == old flat count). It stays measured even after the
+// bare dev spellings are gated behind `fak dev` (the honesty fence -- see the package doc).
+func (s Surface) DevVerbs() int { return len(s.Verbs) - s.FrontdoorVerbs }
 
 var (
 	reCaseVerb = regexp.MustCompile(`case "([a-z][a-z0-9-]*)":`)
@@ -151,6 +176,21 @@ func dispatchBlock(s string) string {
 		return rest[:d]
 	}
 	return rest
+}
+
+// countFrontdoor returns how many of the given verbs are classified frontdoor tier (the product
+// front door). The tier is read from internal/devindex, whose table is coverage-gated against the
+// live dispatch switch -- so this count is WITNESSED, not authored per-card. An unclassified or
+// dev/hidden verb is not frontdoor, so it lands in the dev meter (DevVerbs = total - frontdoor),
+// which keeps the two meters a clean partition of the flat surface (the continuity witness).
+func countFrontdoor(verbs []string) int {
+	n := 0
+	for _, v := range verbs {
+		if t, ok := devindex.TierOf(v); ok && t == devindex.TierFrontdoor {
+			n++
+		}
+	}
+	return n
 }
 
 // isMetaVerb reports whether a dispatch verb is meta-tooling (a scorecard / RSI verb) rather than
@@ -219,6 +259,7 @@ func ParseSurface(root string) Surface {
 	return Surface{
 		Verbs:          verbs,
 		MetaVerbs:      meta,
+		FrontdoorVerbs: countFrontdoor(verbs),
 		FrontDoorFlags: len(reGuardFlag.FindAllString(guardGo, -1)),
 		RefusalReasons: len(reReasonsBlock.FindAllString(dosToml, -1)),
 		// scope the appeal check to the same dispatch block as the verbs, so a `case "complain":`
@@ -445,10 +486,19 @@ func Build(root string) scorecard.Payload {
 			"heaviness_pressure": pressure,
 			"pressure_by_term":   byTerm,
 			"verbs":              len(s.Verbs),
-			"meta_verbs":         len(s.MetaVerbs),
-			"front_door_flags":   s.FrontDoorFlags,
-			"refusal_reasons":    s.RefusalReasons,
-			"appeal_wired":       s.AppealWired,
+			// The tier split (#2235): frontdoor_verbs is the product front door an operator
+			// FACES (the headline heaviness input); dev_verbs is the `fak dev` tooling tier on
+			// its own line, still counted and still trended. They PARTITION the flat surface --
+			// frontdoor_verbs + dev_verbs == verbs -- so the sum is the old flat count (the
+			// continuity witness). The counts are WITNESSED: the per-verb tier is read from
+			// internal/devindex, coverage-gated against the dispatch switch.
+			"frontdoor_verbs":       s.FrontdoorVerbs,
+			"dev_verbs":             s.DevVerbs(),
+			"verb_split_provenance": "WITNESSED",
+			"meta_verbs":            len(s.MetaVerbs),
+			"front_door_flags":      s.FrontDoorFlags,
+			"refusal_reasons":       s.RefusalReasons,
+			"appeal_wired":          s.AppealWired,
 		},
 	})
 	p.Workspace = root

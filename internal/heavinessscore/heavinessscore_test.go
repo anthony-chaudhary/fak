@@ -166,6 +166,33 @@ func TestRefusalVocabSize_SoftOnly(t *testing.T) {
 	}
 }
 
+func TestVerbTierSplit_ContinuityWitness(t *testing.T) {
+	// The two meters must PARTITION the flat surface: frontdoor + dev == total, always. This is
+	// the continuity witness -- the sum equals the old flat count, so the split can never be a
+	// silent shrink (a gated verb moves from frontdoor to dev, it does not vanish).
+	s := Surface{Verbs: make([]string, 136), FrontdoorVerbs: 23}
+	if got := s.DevVerbs(); got != 113 {
+		t.Errorf("DevVerbs = %d, want 113 (136 total - 23 frontdoor)", got)
+	}
+	if s.FrontdoorVerbs+s.DevVerbs() != len(s.Verbs) {
+		t.Errorf("continuity broken: frontdoor %d + dev %d != %d total", s.FrontdoorVerbs, s.DevVerbs(), len(s.Verbs))
+	}
+	// A surface with no frontdoor classification is all dev, not negative or missing.
+	empty := Surface{Verbs: make([]string, 5)}
+	if empty.DevVerbs() != 5 {
+		t.Errorf("with 0 frontdoor, DevVerbs = %d, want 5 (the whole surface is dev)", empty.DevVerbs())
+	}
+}
+
+func TestCountFrontdoor_ReadsDevindexTier(t *testing.T) {
+	// The frontdoor count is WITNESSED from the devindex tier table (guard/serve/policy are
+	// frontdoor; commit/sweep/scorecard are dev). An unknown token is not frontdoor.
+	verbs := []string{"guard", "serve", "policy", "commit", "sweep", "scorecard", "not-a-real-verb"}
+	if got := countFrontdoor(verbs); got != 3 {
+		t.Errorf("countFrontdoor = %d, want 3 (guard/serve/policy are frontdoor; the rest are not)", got)
+	}
+}
+
 func TestPressure_NormalizedHeadroomSum(t *testing.T) {
 	// 136 verbs (headroom 42), 49 flags (48), 20 reasons (44), 15/136 meta = 11% (18) => 152.
 	s := Surface{
@@ -246,8 +273,22 @@ func TestBuild_LiveTree(t *testing.T) {
 	if pressure <= 0 {
 		t.Errorf("live-tree heaviness_pressure = %d, want > 0 (the operator surface is non-trivial); did the source files fail to read?", pressure)
 	}
-	t.Logf("live-tree operator-heaviness: debt=%d pressure=%d verbs=%v flags=%v reasons=%v",
-		debt, pressure, p.Corpus["verbs"], p.Corpus["front_door_flags"], p.Corpus["refusal_reasons"])
+	// Continuity witness (#2235): frontdoor + dev must equal the flat verb count on the real tree,
+	// both meters must be non-trivial, and the split must be labeled WITNESSED.
+	verbs, _ := p.Corpus["verbs"].(int)
+	fd, _ := p.Corpus["frontdoor_verbs"].(int)
+	dv, _ := p.Corpus["dev_verbs"].(int)
+	if fd+dv != verbs {
+		t.Errorf("live-tree tier split broke continuity: frontdoor %d + dev %d != %d verbs", fd, dv, verbs)
+	}
+	if fd <= 0 || dv <= 0 {
+		t.Errorf("live-tree meters must both be non-trivial, got frontdoor=%d dev=%d", fd, dv)
+	}
+	if prov := p.Corpus["verb_split_provenance"]; prov != "WITNESSED" {
+		t.Errorf("verb split provenance = %v, want WITNESSED", prov)
+	}
+	t.Logf("live-tree operator-heaviness: debt=%d pressure=%d verbs=%v (frontdoor=%v dev=%v) flags=%v reasons=%v",
+		debt, pressure, verbs, fd, dv, p.Corpus["front_door_flags"], p.Corpus["refusal_reasons"])
 }
 
 // repoRoot walks up from the test's working directory to the directory holding go.mod.
