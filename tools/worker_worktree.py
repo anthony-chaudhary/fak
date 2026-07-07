@@ -65,10 +65,24 @@ PURE planners (path/name/env composition) are unit-tested without touching git;
 the git-touching create/reap/land functions take an injectable ``git`` runner so
 the whole acquire→edit→land→reap path is exercised with a fake.
 
-This module is the reusable PRIMITIVE. Wiring it into the live spawn (passing the
-worktree dir as the worker's ``cwd`` and landing on exit) is the follow-on that
-builds on it; the primitive lands first, tested, so the wiring has a witnessed
-foundation. Pure stdlib; no deps.
+This module is the reusable PRIMITIVE, and its :func:`main` CLI (``prepare`` /
+``land`` / ``reap`` / ``list``) makes it RUNNABLE: a guarded fak instance, an
+operator, or a self-source dispatch ticket that hits ``SELF_MODIFY_HOLD`` can now
+drive the full acquire → edit → land → reap cycle from the shell instead of
+following a prose pointer at "#1334" that resolved to nothing invokable —
+
+    wt=$(python tools/worker_worktree.py --root . prepare --lane cmd --key 1338 | jq -r .path)
+    # ...edit the self-source files INSIDE $wt (its own isolated detached worktree)...
+    python tools/worker_worktree.py --root . land --worktree "$wt" \
+        --msg-file msg.txt --path cmd/fak/foo.go
+    python tools/worker_worktree.py --root . reap --worktree "$wt"
+
+AUTO-wiring the live dispatch spawn (passing the worktree dir as each worker's
+``cwd`` and landing on exit, so a self-source ticket flows through this WITHOUT
+an operator in the loop) remains the follow-on (#1333's worktree-isolation
+blocker) that builds on this runnable path. The primitive + CLI land first,
+tested and dog-fooded, so that wiring has a witnessed foundation. Pure stdlib;
+no deps.
 """
 from __future__ import annotations
 
@@ -351,3 +365,101 @@ def count_worker_worktrees(root: Path, *, git: GitRunner | None = None) -> dict[
         return {"count": 0, "paths": [], "error": out.strip()[-200:]}
     paths = [p for p in parse_worktree_paths(out) if is_worker_worktree(p)]
     return {"count": len(paths), "paths": sorted(paths)}
+
+
+# --------------------------------------------------------------------------- #
+# CLI — the RUNNABLE safe self-modify path (#1334 follow-on).
+#
+# Everything above is a library the dispatcher imports; nothing could RUN it, so
+# the worktree-isolated escape that the SELF_MODIFY_HOLD refusals point guarded
+# workers and self-source tickets at ("route it to a worktree-isolated path")
+# was named everywhere and invokable nowhere. This entrypoint closes that gap: a
+# guarded fak instance, an operator, or a ticket-runner can now drive the full
+# acquire -> edit -> land -> reap cycle from the shell —
+#
+#     wt=$(python tools/worker_worktree.py --root . prepare --lane cmd --key 1338 | jq -r .path)
+#     # ...edit the self-source files INSIDE $wt (its own detached worktree)...
+#     python tools/worker_worktree.py --root . land --worktree "$wt" \
+#         --msg-file msg.txt --path cmd/fak/foo.go
+#     python tools/worker_worktree.py --root . reap --worktree "$wt"
+#
+# Each subcommand prints exactly one JSON object to stdout and exits 0 when the
+# underlying primitive returned ok, non-zero otherwise, so a caller branches on
+# the exit code without parsing. The primitives stay fail-open; the CLI only
+# maps args -> primitive -> JSON, adding no new failure mode of its own.
+# --------------------------------------------------------------------------- #
+
+def main(argv: Sequence[str] | None = None) -> int:
+    import argparse
+    import json
+
+    parser = argparse.ArgumentParser(
+        prog="worker_worktree",
+        description="Runnable safe self-modify path (#1334): prepare an isolated "
+                    "detached worktree at trunk HEAD, edit in it, land the diff "
+                    "onto the trunk as one stamped signed-off commit, then reap.")
+    parser.add_argument("--root", default=".",
+                        help="repo root the worktree/commit operate on (default: cwd). "
+                             "Give it BEFORE the subcommand.")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_prep = sub.add_parser(
+        "prepare", help="create one isolated detached worktree pinned at trunk HEAD")
+    p_prep.add_argument("--lane", required=True,
+                        help="lane name (labels the worktree dir)")
+    p_prep.add_argument("--key", required=True,
+                        help="worker key (issue number, wave id, pid) — hashed into the dir name")
+    p_prep.add_argument("--base-sha", default="",
+                        help="pin to this sha instead of resolving trunk HEAD")
+    p_prep.add_argument("--wt-root", default="",
+                        help="parent dir for the worktree (default: the scratch root)")
+
+    p_land = sub.add_parser(
+        "land", help="apply the worktree's diff onto the trunk and commit -s by path")
+    p_land.add_argument("--worktree", required=True,
+                        help="the prepared worktree path to land from")
+    p_land.add_argument("--msg-file", required=True,
+                        help="commit message file (git commit -s -F)")
+    p_land.add_argument("--path", action="append", default=[], dest="paths",
+                        help="scope the trunk commit to this path (repeatable); "
+                             "omit to commit the whole applied diff")
+
+    p_reap = sub.add_parser(
+        "reap", help="force-remove a worker worktree after its change has landed")
+    p_reap.add_argument("--worktree", required=True,
+                        help="the worktree path to remove (must carry the worker marker)")
+
+    sub.add_parser("list", help="enumerate live per-worker worktrees from git")
+
+    args = parser.parse_args(list(argv) if argv is not None else None)
+    root = Path(args.root)
+
+    if args.cmd == "prepare":
+        res = prepare_worker_worktree(
+            root, args.lane, args.key,
+            base_sha=args.base_sha or None,
+            wt_root=Path(args.wt_root) if args.wt_root else None)
+        # Hand the caller the build-isolating env additions so it can export them
+        # for the edit step without re-deriving worktree_env itself.
+        if res.get("ok") and res.get("path"):
+            res["env"] = worktree_env({}, Path(res["path"]))
+        ok = bool(res.get("ok"))
+    elif args.cmd == "land":
+        res = land_worktree_diff(
+            root, args.worktree,
+            commit_msg_file=args.msg_file,
+            paths=args.paths or None)
+        ok = bool(res.get("ok"))
+    elif args.cmd == "reap":
+        res = reap_worker_worktree(root, args.worktree)
+        ok = bool(res.get("ok"))
+    else:  # list
+        res = count_worker_worktrees(root)
+        ok = "error" not in res
+
+    print(json.dumps(res, sort_keys=True))
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

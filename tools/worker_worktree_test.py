@@ -235,5 +235,115 @@ class LandTest(unittest.TestCase):
         self.assertFalse([c for c in git.calls if c and c[0] == "commit"])
 
 
+class CLITest(unittest.TestCase):
+    """The runnable entrypoint: assert `main(argv)` maps each subcommand onto the
+    right primitive with the right kwargs, prints ONE JSON object, and returns an
+    exit code that mirrors the primitive's ok — all without touching git (the
+    primitives are stubbed and record what they were handed)."""
+
+    def _run(self, argv, stubs):
+        import contextlib
+        import io
+        import json
+        saved = {name: getattr(mod, name) for name in stubs}
+        for name, fn in stubs.items():
+            setattr(mod, name, fn)
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                code = mod.main(argv)
+        finally:
+            for name, fn in saved.items():
+                setattr(mod, name, fn)
+        out = buf.getvalue().strip()
+        return code, (json.loads(out) if out else None)
+
+    def test_prepare_dispatches_and_attaches_env(self) -> None:
+        seen = {}
+
+        def fake_prepare(root, lane, key, *, base_sha=None, wt_root=None):
+            seen.update(root=str(root), lane=lane, key=key, base_sha=base_sha)
+            return {"ok": True, "path": "/wt/fak-worker-wt-cmd-abc", "base_sha": "feed"}
+
+        code, res = self._run(
+            ["--root", "/r", "prepare", "--lane", "cmd", "--key", "1338"],
+            {"prepare_worker_worktree": fake_prepare})
+        self.assertEqual(code, 0)
+        self.assertEqual(seen["lane"], "cmd")
+        self.assertEqual(seen["key"], "1338")
+        self.assertIsNone(seen["base_sha"])  # empty --base-sha becomes None
+        # prepare hands the caller the build-isolating env additions (compared via
+        # str(Path(...)) so the assertion is OS-separator-agnostic).
+        wt = str(Path("/wt/fak-worker-wt-cmd-abc"))
+        self.assertTrue(res["env"]["GOCACHE"].startswith(wt))
+        self.assertEqual(res["env"]["FLEET_WORKER_WORKTREE"], wt)
+
+    def test_prepare_failure_is_nonzero_exit(self) -> None:
+        def fake_prepare(root, lane, key, *, base_sha=None, wt_root=None):
+            return {"ok": False, "path": None, "reason": "git error — fail open"}
+
+        code, res = self._run(
+            ["--root", "/r", "prepare", "--lane", "cmd", "--key", "1"],
+            {"prepare_worker_worktree": fake_prepare})
+        self.assertEqual(code, 1)
+        self.assertNotIn("env", res)  # no env attached when prepare failed
+
+    def test_land_passes_msg_file_and_scoped_paths(self) -> None:
+        seen = {}
+
+        def fake_land(root, wt, *, commit_msg_file, paths=None):
+            seen.update(root=str(root), wt=wt, msg=str(commit_msg_file), paths=paths)
+            return {"ok": True, "applied": True, "committed": True}
+
+        code, res = self._run(
+            ["--root", "/r", "land", "--worktree", "/wt/fak-worker-wt-cmd-abc",
+             "--msg-file", "/tmp/msg.txt", "--path", "cmd/fak/x.go",
+             "--path", "cmd/fak/y.go"],
+            {"land_worktree_diff": fake_land})
+        self.assertEqual(code, 0)
+        self.assertEqual(seen["msg"], "/tmp/msg.txt")
+        self.assertEqual(seen["paths"], ["cmd/fak/x.go", "cmd/fak/y.go"])
+        self.assertTrue(res["committed"])
+
+    def test_land_without_paths_sends_none(self) -> None:
+        seen = {}
+
+        def fake_land(root, wt, *, commit_msg_file, paths=None):
+            seen["paths"] = paths
+            return {"ok": True, "applied": True, "committed": True}
+
+        code, _ = self._run(
+            ["--root", "/r", "land", "--worktree", "/wt/fak-worker-wt-cmd-abc",
+             "--msg-file", "/tmp/msg.txt"],
+            {"land_worktree_diff": fake_land})
+        self.assertEqual(code, 0)
+        self.assertIsNone(seen["paths"])  # no --path -> whole diff (None), not []
+
+    def test_reap_refusal_is_nonzero_exit(self) -> None:
+        def fake_reap(root, wt):
+            return {"ok": False, "removed": False,
+                    "reason": "refusing to reap a non-worker worktree"}
+
+        code, res = self._run(
+            ["--root", "/r", "reap", "--worktree", "/work/fak"],
+            {"reap_worker_worktree": fake_reap})
+        self.assertEqual(code, 1)
+        self.assertFalse(res["removed"])
+
+    def test_list_ok_when_no_error_key(self) -> None:
+        code, res = self._run(
+            ["--root", "/r", "list"],
+            {"count_worker_worktrees": lambda root: {"count": 2, "paths": ["a", "b"]}})
+        self.assertEqual(code, 0)
+        self.assertEqual(res["count"], 2)
+
+    def test_list_error_is_nonzero_exit(self) -> None:
+        code, _ = self._run(
+            ["--root", "/r", "list"],
+            {"count_worker_worktrees": lambda root: {"count": 0, "paths": [],
+                                                     "error": "not a git repo"}})
+        self.assertEqual(code, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

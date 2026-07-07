@@ -4105,20 +4105,33 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                     + ", ".join(safe_busy),
                     "next_action": "wait-for-safe-lane-lease",
                 })
+            # The concrete, RUNNABLE worktree-isolated escape the next_action names
+            # (#1334). Point at it explicitly so the hold is actionable — prepare an
+            # isolated detached worktree at trunk HEAD, edit the self-source files in
+            # it, land the diff back onto the trunk as one stamped signed-off commit,
+            # then reap. `land`/`reap` args elided to <...> for the operator to fill.
+            safe_lane = held[0] if held else "cmd"
+            worktree_command = (
+                f"python tools/worker_worktree.py --root . prepare "
+                f"--lane {safe_lane} --key <issue>  # edit in .path, then: "
+                f"python tools/worker_worktree.py --root . land --worktree <path> "
+                f"--msg-file <msg> --path <files>; ... reap --worktree <path>")
             blockers.append({
                 "code": "SELF_MODIFY_HOLD",
                 "reason": "every remaining open issue lane maps to the shared source tree"
                 if safe_busy else "every open issue lane maps to the shared source tree",
                 "next_action": "route-non-self-source-lane-or-enable-worktree-isolated-resolver",
+                "command": worktree_command,
             })
             if safe_busy:
                 reason = (f"safe non-self-source lanes are busy ({safe_busy}) and "
                           f"every remaining open issue lane is self-source ({held}); "
-                          f"waiting rather than risking build-poisoning the shared trunk")
+                          f"waiting rather than risking build-poisoning the shared trunk "
+                          f"(or land via the worktree-isolated path: {worktree_command})")
             else:
                 reason = (f"every lane with open issues is self-source ({held}); "
-                          f"refusing to risk build-poisoning the shared trunk — "
-                          f"see #1334 for worktree isolation")
+                          f"refusing to risk build-poisoning the shared trunk — land it "
+                          f"via the worktree-isolated path (#1334): {worktree_command}")
             payload.update({"ok": False, "action": "no_lane", "verdict": "SELF_MODIFY_HOLD",
                             "launch_gate": {"ready": False, "blockers": blockers},
                             "reason": reason})
