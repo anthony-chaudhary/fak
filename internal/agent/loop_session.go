@@ -10,6 +10,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/a2achan"
@@ -32,6 +33,7 @@ type runConfig struct {
 	gate                  *SessionGate
 	trace                 string
 	route                 *modelroute.Manifest
+	roster                *modelroute.Roster
 	spec                  *abi.Speculator
 	contextPlanner        *SessionPlanner
 	contextBaselineOutput int
@@ -106,6 +108,22 @@ func WithRouteManifest(m *modelroute.Manifest) RunOption {
 	return func(c *runConfig) { c.route = m }
 }
 
+// WithRouteAccounts wires an OPTIONAL model-ACCOUNT roster (the bring-your-own-account
+// switcher, #2528) into the in-process agent loop. When set alongside a routing
+// manifest, each single-model PICK the manifest chooses is RESOLVED through the roster
+// to the account-bound, residency-honest Target.EngineRoute() ("openai:acct/gpt-5.5",
+// "local:box/llama3.2") BEFORE it is bound to abi.ToolCall.Engine — the same seam the
+// served gateway uses (Server.resolveRoute), so the standalone loop and the gateway can
+// no longer diverge on WHOSE account a routed id dispatches to. A nil roster is accepted
+// and leaves the abstract routed id verbatim (byte-for-byte the pre-roster loop), so a
+// caller may pass the option unconditionally; a manifest is still required for the roster
+// to bind anything (the roster is only consulted for a resolved PICK). An id the roster
+// cannot resolve (no binding, no default account) is a FAIL-LOUD error at the call site,
+// never a silent fallback to the kernel default.
+func WithRouteAccounts(r *modelroute.Roster) RunOption {
+	return func(c *runConfig) { c.roster = r }
+}
+
 // WithSpeculator wires the SEAM-4 predicted-next-path engine (#809) into RunArm so the
 // loop SPECULATES the next tool call ahead of the model: after a turn's tool calls run,
 // the loop predicts the model's next call, runs it effect-free under a speculative epoch,
@@ -146,6 +164,28 @@ func (c runConfig) routeToolEngine(tool string) string {
 		return ""
 	}
 	return d.Plan.Primary()
+}
+
+// resolveToolEngine returns the FINAL engine route to bind to abi.ToolCall.Engine for
+// one tool call: the abstract routed id from routeToolEngine, then — when an account
+// roster is wired (WithRouteAccounts, #2528) — resolved through it to the account-bound,
+// residency-honest Target.EngineRoute(). It mirrors the gateway's resolveRoute exactly,
+// so the in-process loop and the served gateway can never diverge on WHOSE account a
+// routed id lands on. An id the roster cannot resolve (no binding and no default account)
+// is a FAIL-LOUD error carrying the recovery hint — never a silent fallback to the
+// default engine, so a misconfigured roster cannot dispatch a routed call to the wrong
+// account. A nil roster, or an empty/ensemble route (id ""), returns the abstract id
+// verbatim: byte-for-byte the pre-roster loop and the kernel default respectively.
+func (c runConfig) resolveToolEngine(tool string) (string, error) {
+	id := c.routeToolEngine(tool)
+	if c.roster == nil || id == "" {
+		return id, nil
+	}
+	t, err := c.roster.Resolve(id)
+	if err != nil {
+		return "", fmt.Errorf("route accounts: %w (fix the roster binding for %q or set a default account; no silent fallback)", err, id)
+	}
+	return t.EngineRoute(), nil
 }
 
 // resolveRunConfig folds the options into a runConfig.

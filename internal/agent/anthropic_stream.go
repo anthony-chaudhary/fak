@@ -74,6 +74,19 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	if apiKey != "" {
 		key = apiKey
 	}
+	// Carry the resolved credential + adapter in an upstreamCall so this flagship streaming
+	// path shares the SAME 429/403 cap-rehome seam (noteRetryableCapMaybeRehome) and 401
+	// self-heal the buffered/planner-stream paths use — instead of the bare backoff-only retry
+	// it had before, which left a live `fak guard -- claude` session sleeping on a capped seat
+	// toward an hours-away reset while a free sibling seat sat idle. failoverAccountCred mutates
+	// call.apiKey in place, so a rehome persists across attempts here exactly as it does there.
+	call := &upstreamCall{
+		adapter:         adapter,
+		apiKey:          key,
+		upstreamBeta:    beta,
+		extraHeaders:    p.effectiveExtraHeaders(),
+		authRefreshable: apiKey == "" && p.APIKeyFunc != nil,
+	}
 	// Retry a transient transport error OR a retryable status (429 rate-limit, 503/529
 	// overload, 408/5xx transient) with the SAME backoff+jitter+Retry-After policy as
 	// Complete/CompleteStream — but ONLY here, before the first SSE byte reaches the client,
@@ -88,9 +101,14 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	// re-read it fresh and re-send immediately (uncounted). Every other status is a request
 	// error a retry cannot fix and is returned as-is. Each non-200 body is drained+closed in
 	// the loop; only the successful 200 escapes to the SSE reader below.
-	authRefreshable := apiKey == "" && p.APIKeyFunc != nil
 	triedAuthRefresh := false
 	var fbState forbiddenRetryState // bounded transient-403 recovery arm (see retry.go), mirrors Complete
+	// 429/403-account-cap seat rehome, one swap max (see Complete/streamConnect). Safe on this
+	// pre-first-byte loop: a retryable status here has emitted nothing to the client yet, so
+	// swapping seats and re-sending is invisible; rehomePending defers the confirmed-rehome
+	// notify to the 200.
+	triedRehome := false
+	rehomePending := false
 	maxAttempts, deadline, budgetOn := retryBounds(time.Now())
 	var rs retryState // shared between-attempt truth (#1358, #1362) — see retry_state.go
 	var resp *http.Response
@@ -111,15 +129,10 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		if err != nil {
 			return err
 		}
-		h := adapter.Headers(key)
-		if beta != "" {
-			h["anthropic-beta"] = mergeBeta(h["anthropic-beta"], beta)
-		}
-		for k, v := range h {
-			if v != "" {
-				req.Header.Set(k, v)
-			}
-		}
+		// Send from call.headers() so a seat rehome (which mutates call.apiKey/extraHeaders in
+		// place) or a 401 self-heal takes effect on the very next re-send — the same credential
+		// source the buffered/planner-stream paths use, folding in the anthropic-beta union.
+		call.applyHeaders(req)
 		req.Header.Set("Accept", "text/event-stream")
 
 		r, derr := p.Client.Do(req)
@@ -135,24 +148,33 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		if r.StatusCode == http.StatusOK {
 			// A 200 after the 403 arm fired is a CONFIRMED transient-403 self-heal (see Complete).
 			fbState.noteRecovered(p, attempt)
+			// A 200 after a 429/403-account-cap seat rehome is a CONFIRMED rehome (see Complete).
+			notifyRehomeRecovered(p, &rehomePending, attempt)
 			resp = r
 			break
 		}
 		raw, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
 		r.Body.Close()
 		if retryableStatus(r.StatusCode) {
-			rs.noteRetryableStatus(r.StatusCode, raw, r.Header, 400)
+			// A 429 ACCOUNT CAP (session/weekly/usage, or a generic 429 whose relayed wait is
+			// hours-away) rehomes the live stream ONCE to a permitted sibling seat rather than
+			// sleep the guarded session on the capped one toward a reset no wrapped client can
+			// outlast; a transient throttle keeps its seat. The SAME seam the buffered and planner-
+			// stream loops call, so the flagship path no longer diverges (its prior bare backoff
+			// was the reason a capped `fak guard -- claude` session never rehomed).
+			if call.noteRetryableCapMaybeRehome(p, &rs, r.StatusCode, raw, r.Header, 400, false, &triedRehome, &rehomePending, attempt) == capRehomeResend {
+				attempt--
+			}
 			continue
 		}
 		// A 401 on the rotating-subscription path: re-resolve the credential fresh and retry
 		// ONCE (attempt-- so the refresh re-send is immediate and uncounted), mirroring
-		// Complete/CompleteStream. waitForFreshAPIKey polls the on-disk token across the
-		// re-login grace window so a user logging back in mid-stream is adopted and the live
-		// session self-heals; a no-op (func gone, or no fresher token within the window)
+		// Complete/CompleteStream. refreshAPIKeyWait polls the on-disk token across the re-login
+		// grace window so a user logging back in mid-stream is adopted (updating call.apiKey) and
+		// the live session self-heals; a no-op (func gone, or no fresher token within the window)
 		// falls through to the raw 401.
-		if r.StatusCode == http.StatusUnauthorized && !triedAuthRefresh && authRefreshable {
-			if fresh, ok := waitForFreshAPIKey(ctx, p, key); ok {
-				key = fresh
+		if r.StatusCode == http.StatusUnauthorized && !triedAuthRefresh && call.authRefreshable {
+			if call.refreshAPIKeyWait(ctx, p) {
 				triedAuthRefresh = true
 				notifyAuthRefresh(p, AuthRefreshRecovered, attempt)
 				attempt--
@@ -162,12 +184,14 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		}
 		// A 403/402 USAGE/OVERAGE cap (see Complete): a self-recovering rolling-window cap that
 		// Anthropic surfaces as a 403 with an org-flavored body — only the unified/overage headers
-		// reveal it. Record it as a retryable cap so the loop rides the cap-aware backoff toward the
-		// reset, not the seconds-scale forbidden arm and not a terminal wall. Precedes the transient
-		// arm below.
+		// reveal it. The overage headers already proved a recovering cap (mustRehome=true): swap to
+		// a free seat or ride the cap-aware backoff toward the reset — never the seconds-scale
+		// forbidden arm and not a terminal wall. Precedes the transient arm below.
 		if (r.StatusCode == http.StatusForbidden || r.StatusCode == http.StatusPaymentRequired) &&
 			usageOrOverageRejected(r.Header) {
-			rs.noteRetryableStatus(r.StatusCode, raw, r.Header, 400)
+			if call.noteRetryableCapMaybeRehome(p, &rs, r.StatusCode, raw, r.Header, 400, true, &triedRehome, &rehomePending, attempt) == capRehomeResend {
+				attempt--
+			}
 			continue
 		}
 		// A 403's bounded transient-recovery arm (self-contained short paced wait; see Complete).

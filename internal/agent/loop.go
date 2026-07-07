@@ -396,9 +396,24 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 				ev.Note = "BARRED by the before-consumption write barrier (dependent speculation squashed)"
 			case fak:
 				// Per-tool-call model routing (opt-in #598): classify this call and bind the
-				// chosen engine PRE-Syscall. No manifest => "" => the kernel default, so the
+				// chosen engine PRE-Syscall. With an account roster wired (--route-accounts,
+				// #2528) the routed id is resolved through it to a residency-honest
+				// EngineRoute() first. No manifest => "" => the kernel default, so the
 				// historical loop is unchanged.
-				content, ev = execViaKernel(ctx, k, tool, rawArgs, cfg.routeToolEngine(tool), ev)
+				engine, rerr := cfg.resolveToolEngine(tool)
+				if rerr != nil {
+					// Fail loud, exactly like the gateway's buildCall: a misconfigured roster
+					// must never silently dispatch a routed call to the wrong (or default)
+					// account. The call never reaches k.Syscall; the model sees a structured
+					// error and can adapt.
+					dj, _ := json.Marshal(map[string]string{"error": rerr.Error()})
+					content = string(dj)
+					ev.Verdict = "route-error"
+					ev.By = "route-accounts"
+					ev.Note = "ROUTE REFUSED (fail-loud): " + rerr.Error()
+				} else {
+					content, ev = execViaKernel(ctx, k, tool, rawArgs, engine, ev)
+				}
 			default:
 				content, ev = execNaive(tool, rawArgs, &m, ev)
 			}

@@ -1191,19 +1191,14 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			if retryableStatus(resp.StatusCode) {
-				rs.noteRetryableStatus(resp.StatusCode, raw, resp.Header, 200)
-				// A 429 that names an ACCOUNT CAP (session/weekly/usage) is not a seconds-long
-				// throttle — its named reset can be hours (or a multi-account/billing wall) away.
-				// Rather than sleep on the capped seat toward that reset, rehome the session ONCE to
-				// a permitted sibling seat that can serve the turn now (rehomeToSiblingSeat uses the
-				// SAME swap mechanism the 403 org-wall failover uses). On no free seat, fall through
-				// to the existing cap-aware backoff below, so behavior is unchanged when rehoming
-				// can't help or is not configured. A transient rate_limited throttle (not an account
-				// cap) skips this entirely and keeps its seat.
-				if isAccountCap429(resp.StatusCode, raw, resp.Header, time.Now()) &&
-					rehomeToSiblingSeat(p, call, &rs, &triedRehome, &rehomePending, attempt) {
+				// A 429 that names an ACCOUNT CAP (session/weekly/usage), or a generic 429 whose only
+				// cap signal is an hours-away relayed reset, is not a seconds-long throttle: its wait
+				// can be hours (or a multi-account/billing wall) away. Rather than sleep on the capped
+				// seat toward that reset, the shared seam rehomes the session ONCE to a permitted
+				// sibling seat that can serve the turn now, or — on no free seat / a real transient
+				// throttle — falls through to the existing cap-aware backoff below, unchanged.
+				if call.noteRetryableCapMaybeRehome(p, &rs, resp.StatusCode, raw, resp.Header, 200, false, &triedRehome, &rehomePending, attempt) == capRehomeResend {
 					attempt-- // the rehome probe is uncounted against the 429 backoff budget
-					continue
 				}
 				continue
 			}
@@ -1246,12 +1241,13 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			// cap is neither a flap nor a wall.
 			if (resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusPaymentRequired) &&
 				usageOrOverageRejected(resp.Header) {
-				rs.noteRetryableStatus(resp.StatusCode, raw, resp.Header, 200)
-				if rehomeToSiblingSeat(p, call, &rs, &triedRehome, &rehomePending, attempt) {
+				// The overage headers already proved a recovering cap (mustRehome=true): the seam
+				// swaps to a free seat or rides the cap-aware backoff toward the reset (retryBackoffWait
+				// uses lastCapWait) — never the seconds-scale forbidden arm, never the org-wall failover.
+				if call.noteRetryableCapMaybeRehome(p, &rs, resp.StatusCode, raw, resp.Header, 200, true, &triedRehome, &rehomePending, attempt) == capRehomeResend {
 					attempt-- // the rehome probe is uncounted against the backoff budget
-					continue
 				}
-				continue // ride the cap-aware backoff toward the reset (retryBackoffWait uses lastCapWait)
+				continue
 			}
 			// A 403's bounded recovery arm: retry a transient abuse/capacity denial a few times
 			// across a short window before surfacing it. The arm is SELF-CONTAINED — it sleeps its

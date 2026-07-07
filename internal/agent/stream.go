@@ -210,13 +210,53 @@ func rehomeToSiblingSeat(p *HTTPPlanner, call *upstreamCall, rs *retryState, tri
 
 // notifyRehomeRecovered reports, at most once, that a prior seat-rehome swap was CONFIRMED
 // by this 200: the capped session adopted a permitted sibling seat and completed the turn
-// in place instead of sleeping toward an hours-away reset. Shared by Complete and
-// CompleteStream, mirroring forbiddenRetryState.noteRecovered.
+// in place instead of sleeping toward an hours-away reset. Shared by Complete,
+// CompleteStream, and StreamAnthropicRaw, mirroring forbiddenRetryState.noteRecovered.
 func notifyRehomeRecovered(p *HTTPPlanner, rehomePending *bool, attempt int) {
 	if *rehomePending {
 		notifyAccountFailover(p, RehomedSeat, attempt)
 		*rehomePending = false
 	}
+}
+
+// capRehomeAction is what a retry loop must do after the shared cap-rehome seam has recorded a
+// retryable cap status and decided whether a seat swap is possible. It collapses the identical
+// "rewind attempt / plain continue" tail every loop previously hand-wrote into one verdict, so
+// the three loops (Complete, CompleteStream, StreamAnthropicRaw) share one decision instead of
+// three copies that can drift.
+type capRehomeAction int
+
+const (
+	// capRehomeResend — a sibling seat was adopted; re-send THIS attempt immediately on the new
+	// credential (the caller rewinds attempt-- and continues, uncounted against the backoff budget).
+	capRehomeResend capRehomeAction = iota
+	// capRehomeBackoff — no swap happened (not a cap, or no free seat); ride the cap-aware backoff
+	// the noted status set up (the caller plain-continues without rewinding).
+	capRehomeBackoff
+)
+
+// noteRetryableCapMaybeRehome is the ONE shared seam behind every 429/403/402 cap-retry arm.
+// It records the retryable status on rs (so the loop's cap-aware backoff toward the reset is
+// primed either way) and then, when the status is a rehome-worthy account cap, tries ONCE to
+// adopt a permitted sibling seat in place. mustRehome selects the gate:
+//
+//   - false (the retryable-status arm): rehome only if this is truly an ACCOUNT cap
+//     (isAccountCap429 — a session/weekly/usage limit, or a generic 429 whose relayed wait is
+//     longer than the client can survive). A plain transient throttle keeps its seat.
+//   - true (the 403/402 usage-overage arm): the unified/overage headers ALREADY proved it a
+//     recovering cap, so skip the re-test and go straight to the swap.
+//
+// It returns capRehomeResend when a seat was adopted (caller: attempt--; continue) or
+// capRehomeBackoff otherwise (caller: continue). bodyStatus is the classification-truncation
+// bound noteRetryableStatus records (200 for the OpenAI wire, 400 for the Anthropic wire),
+// preserved per-call so no site changes behavior. triedRehome caps this at one swap per call.
+func (c *upstreamCall) noteRetryableCapMaybeRehome(p *HTTPPlanner, rs *retryState, status int, body []byte, h http.Header, bodyStatus int, mustRehome bool, triedRehome, rehomePending *bool, attempt int) capRehomeAction {
+	rs.noteRetryableStatus(status, body, h, bodyStatus)
+	if (mustRehome || isAccountCap429(status, body, h, time.Now())) &&
+		rehomeToSiblingSeat(p, c, rs, triedRehome, rehomePending, attempt) {
+		return capRehomeResend
+	}
+	return capRehomeBackoff
 }
 
 // refreshAPIKeyWait is refreshAPIKey with a bounded grace window for the RE-LOGIN race.
@@ -522,15 +562,12 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 		raw, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
 		r.Body.Close()
 		if retryableStatus(r.StatusCode) {
-			rs.noteRetryableStatus(r.StatusCode, raw, r.Header, 400)
-			// A 429 ACCOUNT CAP (session/weekly/usage) can hold for a hours-away reset; rehome the
-			// session ONCE to a permitted sibling seat rather than sleep on the capped one
-			// (rehomeToSiblingSeat mirrors the 403 failover's swap mechanism). A transient
-			// rate_limited throttle keeps its seat (isAccountCap429 false).
-			if isAccountCap429(r.StatusCode, raw, r.Header, time.Now()) &&
-				rehomeToSiblingSeat(p, call, &rs, &triedRehome, &rehomePending, attempt) {
+			// A 429 ACCOUNT CAP (session/weekly/usage, or a generic 429 whose relayed wait is
+			// hours-away) rehomes the session ONCE to a permitted sibling seat rather than sleep on
+			// the capped one; a transient rate_limited throttle keeps its seat and rides the backoff.
+			// The seam records the status and makes that decision for all three loops identically.
+			if call.noteRetryableCapMaybeRehome(p, &rs, r.StatusCode, raw, r.Header, 400, false, &triedRehome, &rehomePending, attempt) == capRehomeResend {
 				attempt--
-				continue
 			}
 			continue
 		}
@@ -557,10 +594,10 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 		// seconds-scale forbidden arm and never the org-wall failover. Precedes both.
 		if (r.StatusCode == http.StatusForbidden || r.StatusCode == http.StatusPaymentRequired) &&
 			usageOrOverageRejected(r.Header) {
-			rs.noteRetryableStatus(r.StatusCode, raw, r.Header, 400)
-			if rehomeToSiblingSeat(p, call, &rs, &triedRehome, &rehomePending, attempt) {
+			// The overage headers already proved a recovering cap (mustRehome=true): swap to a free
+			// seat or ride the cap-aware backoff toward the reset — never the seconds-scale 403 arm.
+			if call.noteRetryableCapMaybeRehome(p, &rs, r.StatusCode, raw, r.Header, 400, true, &triedRehome, &rehomePending, attempt) == capRehomeResend {
 				attempt--
-				continue
 			}
 			continue
 		}

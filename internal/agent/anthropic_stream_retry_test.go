@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -178,6 +179,128 @@ func TestStreamAnthropicRaw_401SelfHealsOnReloginWithinWindow(t *testing.T) {
 			t.Errorf("request %d Authorization = %q, want %q", i, gotAuth[i], want[i])
 		}
 	}
+}
+
+// TestStreamAnthropicRaw_SessionCap429RehomesSeat is the FLAGSHIP-path witness for the goal: a
+// live `fak guard -- claude` stream that hits a 429 ACCOUNT CAP (session/weekly/usage) must rehome
+// ONCE to a permitted sibling seat and relay the recovered turn on it — the behavior the buffered
+// Complete already had (TestComplete429AccountCapRehomesSeat) but the streaming passthrough was
+// missing, which is why a capped guarded session never rehomed. It also fences the negative: a
+// generic transient throttle keeps its seat (no rehome), and no-free-seat surfaces the cap.
+func TestStreamAnthropicRaw_SessionCap429RehomesSeat(t *testing.T) {
+	const capped = "sk-ant-oat01-capped-stream"
+	const free = "sk-ant-oat01-free-stream"
+	sessionCap := anthropicLimitBody("You've hit your session limit · resets 8pm (America/Los_Angeles).")
+	capReset := strconv.FormatInt(time.Now().Add(90*time.Minute).Unix(), 10)
+
+	t.Run("session-cap 429 rehomes to a free sibling seat and streams on it", func(t *testing.T) {
+		var mu sync.Mutex
+		var gotAuth []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			auth := r.Header.Get("Authorization")
+			gotAuth = append(gotAuth, auth)
+			mu.Unlock()
+			// The capped seat keeps 429ing on its cap; only the free sibling seat streams a 200.
+			if auth != "Bearer "+free {
+				w.Header().Set("Anthropic-Ratelimit-Unified-5h-Reset", capReset)
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write(sessionCap)
+				return
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, anthropicStreamRetrySSE("ok"))
+		}))
+		t.Cleanup(srv.Close)
+
+		p, err := NewProviderHTTPPlanner("anthropic", srv.URL, "claude-test", capped)
+		if err != nil {
+			t.Fatalf("NewProviderHTTPPlanner: %v", err)
+		}
+		var reasons, outcomes []string
+		p.AccountFailoverFunc = func(reason string) (string, bool) { reasons = append(reasons, reason); return free, true }
+		p.AccountFailoverNotify = func(outcome string, _ int) { outcomes = append(outcomes, outcome) }
+
+		rawBody := []byte(`{"model":"claude-test","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+		var sawStop bool
+		// apiKey arg EMPTY: the pinned-subscription path, where effectiveAPIKey supplies the capped
+		// seat and the rehome mutates call.apiKey to the free seat in place.
+		err = p.StreamAnthropicRaw(context.Background(), rawBody, "", "", func(ev AnthropicSSEEvent) error {
+			if ev.Event == "message_stop" {
+				sawStop = true
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("StreamAnthropicRaw should rehome the 429 cap and stream on the free seat: %v", err)
+		}
+		if !sawStop {
+			t.Fatal("did not see message_stop — the rehomed stream did not complete")
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		want := []string{"Bearer " + capped, "Bearer " + free}
+		if len(gotAuth) != len(want) {
+			t.Fatalf("upstream auth = %q, want %q (one capped 429 then one free-seat stream)", gotAuth, want)
+		}
+		for i := range want {
+			if gotAuth[i] != want[i] {
+				t.Errorf("request %d Authorization = %q, want %q (the rehome must carry the sibling seat's token)", i, gotAuth[i], want[i])
+			}
+		}
+		if len(reasons) != 1 || reasons[0] != RehomedSeat {
+			t.Errorf("failover reason = %v, want exactly one %q", reasons, RehomedSeat)
+		}
+		if len(outcomes) != 1 || outcomes[0] != RehomedSeat {
+			t.Errorf("rehome outcomes = %v, want exactly one %q (confirmed rehome on the 200)", outcomes, RehomedSeat)
+		}
+	})
+
+	t.Run("transient throttle does NOT rehome the stream — keeps its seat", func(t *testing.T) {
+		t.Setenv("FAK_PLANNER_MAX_ATTEMPTS", "4")
+		var mu sync.Mutex
+		var gotAuth []string
+		var n int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			gotAuth = append(gotAuth, r.Header.Get("Authorization"))
+			n++
+			first := n == 1
+			mu.Unlock()
+			if first {
+				w.WriteHeader(http.StatusTooManyRequests) // no reset header => rate_limited throttle
+				_, _ = io.WriteString(w, "Too many requests")
+				return
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, anthropicStreamRetrySSE("ok"))
+		}))
+		t.Cleanup(srv.Close)
+
+		p, err := NewProviderHTTPPlanner("anthropic", srv.URL, "claude-test", capped)
+		if err != nil {
+			t.Fatalf("NewProviderHTTPPlanner: %v", err)
+		}
+		var failoverCalls int
+		p.AccountFailoverFunc = func(string) (string, bool) { failoverCalls++; return free, true }
+
+		rawBody := []byte(`{"model":"claude-test","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+		if err := p.StreamAnthropicRaw(context.Background(), rawBody, "", "", func(AnthropicSSEEvent) error { return nil }); err != nil {
+			t.Fatalf("StreamAnthropicRaw should ride the throttle backoff and stream: %v", err)
+		}
+		if failoverCalls != 0 {
+			t.Errorf("AccountFailoverFunc called %d times on a transient throttle, want 0 (the stream keeps its seat)", failoverCalls)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		for i, a := range gotAuth {
+			if a != "Bearer "+capped {
+				t.Errorf("request %d Authorization = %q, want the ORIGINAL seat (a throttle must not swap seats)", i, a)
+			}
+		}
+	})
 }
 
 // A persistently-overloaded upstream must fail AFTER exactly maxAttempts streamed tries
