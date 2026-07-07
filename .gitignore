@@ -550,3 +550,30 @@ memqdemo-report.json
 # anti-re-file rung (tools/learning_debt_dispatch.py). Peer of .idea-scout/.
 .learning-debt-dispatch/
 docs/dispatch-status.md
+
+# Stray CLI-probe stderr/stdout drops at the repo root — a bare `fak <verb> 2>x.err`
+# capture from a manual dry-run (route/tick/wave/dispatch probes, an `auto.err` loop
+# drop, a `tt.log`). Node-local, regenerable, never source: they accrete on a shared
+# trunk when an operator redirects a one-off command instead of using a temp dir.
+/auto.err
+/route.err
+/wave.err
+/tick.dryrun.err
+/dispatch_status.err
+/tt.log
+/boundary_out.json
+
+# `.go.scratch` probe files — a test file parked with a .scratch suffix so `go test`
+# skips it while a spike is in flight (e.g. anthropic_toolref_probe*_test.go.scratch).
+# The suffix already excludes it from the build; this keeps it out of `git status` too.
+*.go.scratch
+
+# `.txt.done` / `.commitmsg-*.done` completion markers a loop drops beside its input
+# to signal "consumed" — node-local bookkeeping, not source.
+*.txt.done
+
+# Scratch worktrees / relay-probe dirs an operator spins up beside the clone for a
+# one-off check, then forgets to remove (.dogfood-wt/ carries a throwaway msg.txt,
+# .scratch-relaycheck/ a throwaway main.go). Never source.
+/.dogfood-wt/
+/.scratch-relaycheck/
