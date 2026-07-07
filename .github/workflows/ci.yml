@@ -210,13 +210,13 @@ jobs:
           # keyword/topic/alternateName lists and the named video asset are allowed, so a
           # flag is worth a human look. Runs clean today (brand_debt: 0).
           python tools/check_brand_consistency.py --audit-tree
-          # Unit tests for two previously-untested load-bearing governance tools
+          # Unit test for a previously-untested load-bearing governance tool
           # (flagged by tools/tool_coverage_audit.py): the prose hardware-name leak
-          # gate's prose/identifier boundary, and the new-leaf scaffolder's dos.toml
-          # lane emitter (the real-layout-not-fak/-prefix invariant). HARD, then the
-          # leak gate's --check tree lint as before.
+          # gate's prose/identifier boundary. HARD, then the leak gate's --check tree
+          # lint as before. (The new-leaf scaffolder is now Go: its dos.toml lane
+          # emitter invariant is covered by TestAddLeafLaneRealLayoutNotFakPrefix in
+          # internal/newleaf under `go test`.)
           python tools/scrub_hardware_names_test.py
-          python tools/new_leaf_test.py
           python tools/scrub_hardware_names.py --check
           # Claude config-home guard (#606): a future tools/*.py must not re-introduce a
           # bare ~/.claude/<store> hardcode that ignores CLAUDE_CONFIG_DIR (the fleet
