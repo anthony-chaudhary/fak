@@ -106,12 +106,22 @@ func printHeaderMemoryPlans(path string, expertParallel int) error {
 
 	fmt.Fprintf(os.Stdout, "gguf tensors=%d\n", len(ws.File.Tensors))
 	if cfg, err := ws.File.Config(); err == nil {
-		fmt.Fprintf(os.Stdout, "config model_type=%s layers=%d hidden=%d experts=%d\n",
-			cfg.ModelType, cfg.NumLayers, cfg.HiddenSize, cfg.NumExperts)
+		fmt.Fprintln(os.Stdout, formatConfigLine(cfg))
 	}
 	printMemoryPlan("monolith", full)
 	printMemoryPlan(fmt.Sprintf("expert_parallel_per_rank ranks=%d", expertParallel), ep)
 	return nil
+}
+
+// formatConfigLine renders the one-line header-config summary q4kdiag -plan-only emits. It
+// carries the full MoE active-set axis, not just the total expert count: experts_used (K,
+// cfg.NumExpertsPerTok) and expert_ffn_len (cfg.MoEIntermediateSize) are the two header scalars
+// Lane F (#3074) needs to derive active-bytes/token off the roofline estimate. The loader already
+// reads all three into cfg (ggufload.applyMoEExpertCounts); surfacing them here means no future
+// ceiling re-derivation is blocked on a fresh operator header read.
+func formatConfigLine(cfg model.Config) string {
+	return fmt.Sprintf("config model_type=%s layers=%d hidden=%d experts=%d experts_used=%d expert_ffn_len=%d",
+		cfg.ModelType, cfg.NumLayers, cfg.HiddenSize, cfg.NumExperts, cfg.NumExpertsPerTok, cfg.MoEIntermediateSize)
 }
 
 func printMemoryPlan(name string, plan compute.MemoryPlan) {
