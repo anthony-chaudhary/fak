@@ -286,6 +286,30 @@ def test_duplication_subcategories_are_coverage_neutral():
     assert set(k["subcategories"]) == {"extractable", "local", "pair"}
 
 
+def test_duplication_weighted_debt_tracks_payoff_not_count():
+    # The note's keystone (#3140): the debt integer must track *extractable value*, not a
+    # flat group count. `extractable` carries full weight, `pair`/`local` half — so a
+    # payoff-weighted debt is strictly below the flat count whenever any pair/local exists,
+    # and is dominated by the real missing-helper number. Emitted additively: the flat
+    # `score` (100 - 2*groups) is unchanged, so no in-flight grade/ratchet disruption.
+    files = {
+        "a.go": "package a\n" + _dup_block("sum"),
+        "b.go": "package b\n" + _dup_block("sum"),
+        "c.go": "package c\n" + _dup_block("sum"),   # extractable: 3 sites, 3 files
+        "d.go": "package d\n" + _same_skeleton("f", "p", "q", "s", "r"),
+        "e.go": "package e\n" + _same_skeleton("f", "p", "q", "s", "r"),  # pair: 2 sites
+    }
+    k = cs.kpi_duplication(files)
+    sub = k["subcategories"]
+    expected = sub["extractable"] * 1.0 + 0.5 * (sub["pair"] + sub["local"])
+    assert k["weighted_debt"] == round(expected, 1), k
+    assert k["subcategory_weights"] == {"extractable": 1.0, "local": 0.5, "pair": 0.5}
+    # strictly below the flat count because a half-weighted pair is present, and the flat
+    # score is untouched by the re-projection
+    assert k["weighted_debt"] < len(k["defects"]), k
+    assert k["score"] == max(0, 100 - 2 * len(k["defects"]))
+
+
 # --- go_tokens (the #780 token-stream foundation) -------------------------
 
 def test_go_tokens_literal_is_one_token():

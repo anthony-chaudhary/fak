@@ -659,6 +659,16 @@ def _is_sort_scaffold_only(key: tuple[str, ...]) -> bool:
 # survivor lands in one of the three buckets below — no dead-kpi-field.
 _DUP_ORDER = {"extractable": 0, "local": 1, "pair": 2}
 
+# Payoff weights for the sub-category re-projection (the note's recommendation #1, the
+# "keystone": weight by payoff, not by count — #3140). A flat `groups` count treats a
+# 46-line x21 missing-helper (`extractable`) the same as a 6-line x2 idiom (`pair`);
+# weighting lets the debt integer track *extractable value*. `extractable` is the real
+# missing-helper debt (full weight); `pair`/`local` are real but lower-payoff (half). This
+# is emitted ADDITIVELY as `weighted_debt` alongside the flat count — the headline
+# `score`/`slop_debt` stay the flat count until a coordinated fleet baseline re-pin flips
+# them (out of scope for #3140's first increment, so no in-flight grade/ratchet disruption).
+_DUP_WEIGHTS = {"extractable": 1.0, "local": 0.5, "pair": 0.5}
+
 
 def _dup_subcategory(sites: list[tuple[str, int, int]]) -> str:
     """Classify a surviving clone group by its site geometry alone (no file content):
@@ -860,11 +870,18 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
             f"[{kind}] clone x{len(sites)} (~{span} lines): {shown}{more} — '{sample[:60]}…'")
     groups = len(survivors)
     score = _clamp(100 - 2 * groups)
+    # Payoff-weighted debt is a pure re-projection of the same survivors (coverage
+    # unchanged): extractable full, pair/local half. Emitted alongside — NOT replacing —
+    # the flat count, so the worst-first loop can read/drive `dup_extractable` (the real
+    # missing-helper number) without moving the headline score/slop_debt (#3140).
+    weighted_debt = round(sum(_DUP_WEIGHTS[k] * n for k, n in counts.items()), 1)
     detail = ("no copy-paste clones" if groups == 0 else
               f"{groups} duplicated block(s): {counts['extractable']} extractable · "
-              f"{counts['local']} local · {counts['pair']} pair")
+              f"{counts['local']} local · {counts['pair']} pair "
+              f"(payoff-weighted debt {weighted_debt})")
     return {"kpi": "duplication", "score": score, "detail": detail,
-            "defects": defects, "soft": soft, "subcategories": counts}
+            "defects": defects, "soft": soft, "subcategories": counts,
+            "subcategory_weights": dict(_DUP_WEIGHTS), "weighted_debt": weighted_debt}
 
 
 def _func_bodies(code: list[str]) -> list[tuple[str, int, list[str]]]:
@@ -1435,9 +1452,19 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
     # Surface the duplication payoff histogram as its own control-pane-reachable line
     # so the worst-first loop can target `dup_extractable` (the real missing-helpers)
     # directly rather than the flat count. Absent on fixtures without the split.
-    dup_sub = (by_name.get("duplication") or {}).get("subcategories")
+    dup_kpi = by_name.get("duplication") or {}
+    dup_sub = dup_kpi.get("subcategories")
     if dup_sub:
         corpus["dup_subcategories"] = dup_sub
+        # The payoff-weighted duplication debt (the note's keystone #1, #3140): the number
+        # a worst-first loop should drive down, distinct from the flat `slop_debt`. Additive
+        # — the headline slop_debt/score are unchanged. Also surface the per-subcategory
+        # weighted contribution so `dup_extractable` (the real missing-helpers) is readable
+        # without re-deriving it from the histogram.
+        weights = dup_kpi.get("subcategory_weights") or _DUP_WEIGHTS
+        corpus["dup_weighted_debt"] = dup_kpi.get("weighted_debt")
+        corpus["dup_weighted_by_subcategory"] = {
+            k: round(weights.get(k, 0.0) * n, 1) for k, n in dup_sub.items()}
 
     if slop_debt == 0:
         ok, verdict, finding = True, "OK", "code_slop_clean"
