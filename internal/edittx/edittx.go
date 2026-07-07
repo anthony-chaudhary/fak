@@ -16,6 +16,9 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
 
 const Schema = "fak-edit-tx/1"
@@ -349,6 +352,13 @@ func DefaultRunner(ctx context.Context, root, command string) CheckResult {
 		c = exec.CommandContext(ctx, "sh", "-c", command)
 	}
 	c.Dir = root
+	// The check command (cmd /C ... or sh -c ...) runs an arbitrary edit-transaction
+	// spec check — `go test`, a build, a linter — that forks its own descendant tree.
+	// Bare CommandContext ctx-cancel is single-PID, so a cancelled/timed-out check
+	// orphans that subtree (#3106 defect class). Tree-kill on cancel + bound the reap,
+	// mirroring internal/nightrun/run.go. Both the cmd and sh branches share `c`.
+	procguard.ConfigureProcessTreeCancel(c)
+	c.WaitDelay = 10 * time.Second
 	var buf bytes.Buffer
 	c.Stdout = &buf
 	c.Stderr = &buf
