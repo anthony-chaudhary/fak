@@ -151,6 +151,32 @@ type HealthRow struct {
 	// rate is distinct from a rate of zero.
 	KeepRate float64 `json:"keep_rate"`
 
+	// WitnessRefused is the count of ended runs whose independent witness was actively
+	// REFUSED (the referee said "not done") — a stronger, non-infra failure signal than a
+	// merely-unavailable witness. Lifted straight from the loop snapshot.
+	WitnessRefused uint64 `json:"witness_refused"`
+
+	// WitnessUnavailable is the count of ended runs whose witness could not be reached at
+	// all (an infra gap, not a refusal). Kept distinct from WitnessRefused so a reader can
+	// tell "the witness said no" apart from "no witness ever ran".
+	WitnessUnavailable uint64 `json:"witness_unavailable"`
+
+	// WitnessGap is Runs - Witnessed, floored at 0: ended runs that never reached an
+	// independent witnessed-done verdict — the "talking, not proven done" magnitude. A
+	// loop that keeps ending runs it cannot prove done reads a high gap while its
+	// Dark/State stay clean, so the worst-first walk that consumes this fold can finally
+	// prefer it over a loop with honest, witnessed failures. Derived from counters that
+	// already exist; the KeepRate is the same signal as a rate, the gap as a count.
+	WitnessGap uint64 `json:"witness_gap"`
+
+	// WitnessCollapse is true when a MAJORITY of ended runs went unwitnessed
+	// (Runs > 0 && Witnessed*2 < Runs). It is ADVISORY and DESCRIPTIVE: the tunable
+	// keep-below-floor gate lives in the governor (Policy.MinWitnessRate ->
+	// ReasonWitnessCollapse); this is a fixed "majority unwitnessed" descriptor for the
+	// health pane, carried explicitly like Dark so a --json consumer can gate on one
+	// field without re-deriving it from KeepRate.
+	WitnessCollapse bool `json:"witness_collapse"`
+
 	// LastState is the loop's last folded state string (the ledger's word on what it
 	// was doing), carried for context. Not the health verdict — that is State.
 	LastState string `json:"last_state,omitempty"`
@@ -172,6 +198,13 @@ type HealthRollup struct {
 	Unknown    int `json:"unknown"`
 	Registered int `json:"registered"`
 	Ledgered   int `json:"ledgered"`
+	// WitnessGap is the fleet-wide sum of per-loop WitnessGap: total ended-but-unwitnessed
+	// runs across all loops — the aggregate "talking, not proven done" magnitude.
+	WitnessGap int `json:"witness_gap"`
+	// WitnessCollapse is the count of loops whose ended runs are majority-unwitnessed
+	// (per-row WitnessCollapse). A scheduler can gate on WitnessCollapse > 0 the way it
+	// already gates on Dark > 0.
+	WitnessCollapse int `json:"witness_collapse"`
 }
 
 // HealthReport is the full read-only fold: the schema tag, the time it was folded,
@@ -264,6 +297,17 @@ func healthRow(id string, snap LoopSnapshot, ledgered bool, job Job, registered 
 		row.KeepRate = -1
 	}
 
+	// Surface the claimed-vs-witnessed gap alongside the keep rate: the counts a
+	// worst-first walk needs to tell a loop "talking, not proven done" apart from one
+	// with honest, witnessed failures. Additive — the source counters already exist on
+	// the snapshot, so this fold reads them, it does not track anything new.
+	row.WitnessRefused = snap.WitnessRefused
+	row.WitnessUnavailable = snap.WitnessUnavailable
+	if row.Runs > row.Witnessed {
+		row.WitnessGap = row.Runs - row.Witnessed
+	}
+	row.WitnessCollapse = row.Runs > 0 && row.Witnessed*2 < row.Runs
+
 	// Cadence: a registered job's interval is the truth; else the default horizon.
 	cadence := int64(0)
 	if registered && job.Schedule.IntervalSeconds > 0 {
@@ -348,6 +392,10 @@ func rollup(rows []HealthRow) HealthRollup {
 		}
 		if row.Ledgered {
 			r.Ledgered++
+		}
+		r.WitnessGap += int(row.WitnessGap)
+		if row.WitnessCollapse {
+			r.WitnessCollapse++
 		}
 	}
 	return r

@@ -98,6 +98,18 @@ func TestFoldHealth_PerLoopRowsAndRates(t *testing.T) {
 	if a.KeepRate != 0.5 {
 		t.Errorf("active.KeepRate = %v, want 0.5 (1 witnessed / 2 runs)", a.KeepRate)
 	}
+	// The claimed-vs-witnessed surfacing on the same loop: 2 ended, 1 witnessed-done, 1
+	// witness-refused -> gap 1, refused 1, unavailable 0. Exactly half witnessed
+	// (Witnessed*2 == Runs) is the boundary — NOT a majority-unwitnessed collapse.
+	if a.WitnessGap != 1 {
+		t.Errorf("active.WitnessGap = %d, want 1 (2 ended - 1 witnessed)", a.WitnessGap)
+	}
+	if a.WitnessRefused != 1 || a.WitnessUnavailable != 0 {
+		t.Errorf("active witness refused=%d unavailable=%d, want 1/0", a.WitnessRefused, a.WitnessUnavailable)
+	}
+	if a.WitnessCollapse {
+		t.Errorf("active.WitnessCollapse = true, want false (half-witnessed is the boundary, not a collapse)")
+	}
 	if a.CadenceSource != "registry" || a.CadenceSeconds != 60 {
 		t.Errorf("active cadence = %ds from %q, want 60s from registry", a.CadenceSeconds, a.CadenceSource)
 	}
@@ -142,9 +154,98 @@ func TestFoldHealth_PerLoopRowsAndRates(t *testing.T) {
 	}
 
 	// --- roll-up
-	want := HealthRollup{Loops: 3, Live: 1, Stale: 0, Dark: 2, Unknown: 0, Registered: 2, Ledgered: 2}
+	// WitnessGap: active 1 + dark-ledger 1 (ended, never witnessed) + dark-registered 0.
+	// WitnessCollapse: only dark-ledger (0 of 1 witnessed is majority-unwitnessed); active
+	// is exactly half (boundary, not collapse) and dark-registered has no ended runs.
+	want := HealthRollup{Loops: 3, Live: 1, Stale: 0, Dark: 2, Unknown: 0, Registered: 2, Ledgered: 2, WitnessGap: 2, WitnessCollapse: 1}
 	if rep.Rollup != want {
 		t.Errorf("rollup = %+v, want %+v", rep.Rollup, want)
+	}
+}
+
+// TestFoldHealth_WitnessGapAndCollapse pins the claimed-vs-witnessed surfacing: a LIVE
+// loop that keeps ending runs it cannot prove done (every witness refused/unavailable)
+// shows a full WitnessGap and WitnessCollapse, while an honestly-witnessed loop shows
+// neither — so the worst-first walk that reads this fold can tell "talking, not proven
+// done" apart from a loop with honest failures, which the keep rate alone conflated.
+func TestFoldHealth_WitnessGapAndCollapse(t *testing.T) {
+	now := time.Unix(5_000_000, 0).UTC()
+	secAgo := func(s int64) int64 { return now.Add(-time.Duration(s) * time.Second).UnixNano() }
+
+	// "talker": 3 ended runs, ZERO witnessed-done (2 refused, 1 unavailable), fired 5s
+	// ago so it is LIVE — the exact case the keep rate hid: not dark, not stale, yet not
+	// proven done. "honest": 2 ended runs, both witnessed-done — no gap, no collapse.
+	events := []Event{
+		tick("talker", EventEnd, StatusClaimedDone, secAgo(40)),
+		tick("talker", EventEnd, StatusClaimedDone, secAgo(38)),
+		tick("talker", EventEnd, StatusClaimedDone, secAgo(36)),
+		tick("talker", EventWitness, StatusWitnessRefused, secAgo(35)),
+		tick("talker", EventWitness, StatusWitnessRefused, secAgo(34)),
+		tick("talker", EventWitness, StatusWitnessUnavailable, secAgo(33)),
+		tick("talker", EventFire, "", secAgo(5)),
+		tick("honest", EventEnd, StatusClaimedDone, secAgo(20)),
+		tick("honest", EventEnd, StatusClaimedDone, secAgo(18)),
+		tick("honest", EventWitness, StatusWitnessedDone, secAgo(17)),
+		tick("honest", EventWitness, StatusWitnessedDone, secAgo(16)),
+		tick("honest", EventFire, "", secAgo(5)),
+	}
+	st := Summarize(events, now)
+
+	reg := Registry{Jobs: map[string]Job{}}
+	for _, id := range []string{"talker", "honest"} {
+		if err := reg.Put(Job{
+			Schedule: Schedule{JobID: id, IntervalSeconds: 60, MissedRun: MissedSkip},
+			State:    JobArmed,
+		}, now); err != nil {
+			t.Fatalf("Put(%s): %v", id, err)
+		}
+	}
+
+	rep := FoldHealth(st, reg, now, HealthThresholds{})
+	rows := map[string]HealthRow{}
+	for _, r := range rep.Rows {
+		rows[r.LoopID] = r
+	}
+
+	// talker: LIVE (fired 5s ago) yet majority-unwitnessed — the seam this fold closes.
+	tk := rows["talker"]
+	if tk.State != HealthLive {
+		t.Fatalf("talker.State = %q, want live — the point is a LIVE loop that is not proven done", tk.State)
+	}
+	if tk.Runs != 3 || tk.Witnessed != 0 {
+		t.Fatalf("talker runs=%d witnessed=%d, want 3/0", tk.Runs, tk.Witnessed)
+	}
+	if tk.WitnessGap != 3 {
+		t.Errorf("talker.WitnessGap = %d, want 3 (3 ended, 0 witnessed-done)", tk.WitnessGap)
+	}
+	if tk.WitnessRefused != 2 || tk.WitnessUnavailable != 1 {
+		t.Errorf("talker refused=%d unavailable=%d, want 2/1", tk.WitnessRefused, tk.WitnessUnavailable)
+	}
+	if !tk.WitnessCollapse {
+		t.Errorf("talker.WitnessCollapse = false, want true (0 of 3 witnessed is majority-unwitnessed)")
+	}
+	if tk.KeepRate != 0 {
+		t.Errorf("talker.KeepRate = %v, want 0 (no witnessed run) — a keep rate a naive pane could still read as 'just failing'", tk.KeepRate)
+	}
+
+	// honest: fully witnessed — neither field fires.
+	hn := rows["honest"]
+	if hn.WitnessGap != 0 {
+		t.Errorf("honest.WitnessGap = %d, want 0 (both runs witnessed)", hn.WitnessGap)
+	}
+	if hn.WitnessCollapse {
+		t.Errorf("honest.WitnessCollapse = true, want false (all witnessed)")
+	}
+	if hn.WitnessRefused != 0 || hn.WitnessUnavailable != 0 {
+		t.Errorf("honest refused=%d unavailable=%d, want 0/0", hn.WitnessRefused, hn.WitnessUnavailable)
+	}
+
+	// Roll-up: total gap 3 (talker) + 0 (honest); one collapsed loop.
+	if rep.Rollup.WitnessGap != 3 {
+		t.Errorf("rollup.WitnessGap = %d, want 3", rep.Rollup.WitnessGap)
+	}
+	if rep.Rollup.WitnessCollapse != 1 {
+		t.Errorf("rollup.WitnessCollapse = %d, want 1 (only talker collapsed)", rep.Rollup.WitnessCollapse)
 	}
 }
 
