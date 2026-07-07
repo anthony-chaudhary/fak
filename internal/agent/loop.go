@@ -332,6 +332,18 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 			messages = append(messages, Message{Role: RoleUser, Content: steer})
 		}
 
+		// Redirect apply (#2755): a running session drains any operator redirect /
+		// set-objective op enqueued on the sessionctl mailbox and folds it into the
+		// live per-session objective, carried into THIS turn as a first-class
+		// objective directive (a SYSTEM message, categorically distinct from the
+		// user-message steer splice above). This is the semantic op the epic names —
+		// the objective CHANGES; it is not another interpreted operator turn. A no-op
+		// without a wired trace or a set objective, so the historical loop is
+		// byte-for-byte unchanged.
+		if objective := cfg.applyRedirect(); objective != "" {
+			messages = append(messages, Message{Role: RoleSystem, Content: objective})
+		}
+
 		// Context-spike nudge (#2197): when the session's cost ring shows the context
 		// window grew suddenly and materially last turn, splice the advisory into THIS
 		// turn's input so the model corrects its own context use (windowed reads,
