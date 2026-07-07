@@ -331,7 +331,6 @@ func Build(in Input) (Plan, error) {
 // witnesses (and callers that only read Error()) keep matching.
 type Refusal struct{ msg string }
 
-// Error implements error.
 func (r *Refusal) Error() string { return r.msg }
 
 // refusef builds a Refusal with a formatted message — the one constructor Build
