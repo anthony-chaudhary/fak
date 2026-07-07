@@ -332,6 +332,7 @@ var tier = map[string]int{
 	"microagent":            4,
 	"sessionsearch":         2, // witnessed cross-session recall (#2913): pure TF-IDF inverted index over the guard tool-process journal + cache-safe suffix injection proven byte-stable via cachemeta + a recall-usefulness witness; imports toolproc(2)+cachemeta(1), off the hot path.
 	"taskgraph":             2, // #2437: shared task journal pure-folded to a typed table with lease-gated claims (created/claimed/blocked/completed/abandoned); refuses a dead-lease claim, a tree-colliding claim, and a complete-over-open-blockers as closed reasons. Pure fold, imports only abi(0), off the hot path.
+	"toolshape":             3, // #2823 (epic #2822 C1): pure SHAPE fingerprint of one tool call — trajectory.Turn folded to closed-vocabulary ArgClass/buckets + Avro-style key-set signature, names-not-values; imports trajectory(3)+stdlib, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
