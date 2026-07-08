@@ -42,6 +42,7 @@ var ablateArmRunner = ablate.ExecArmRunner
 func runAblate(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("ablate", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "ablate") // #2232: overview verb -> deep help above the flag dump
 	suite := fs.String("suite", "tau2-smoke", "trace suite under testdata/tau2")
 	tracePath := fs.String("trace", "", "explicit trace path (overrides --suite)")
 	fromSession := fs.String("from-session", "", "captured fak guard replay fixture to replay as a session-backed cassette")

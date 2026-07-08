@@ -74,7 +74,7 @@ var overviewGroups = []struct {
 		{"resume", "what happens to the prompt cache on resume, and what to do"},
 		{"doctor", "operator diagnostic: answer-shape witness + kernel admit verdict"},
 		{"recover", "map a refusal reason token to concrete recovery commands"},
-		{"ablate", "self-ablation: replay one trace under N cache-lever configs; live savings dashboard by default"},
+		{"ablate", "self-ablation: replay a trace under N cache-lever configs; live savings dashboard"},
 	}},
 	{"models + housekeeping", []overviewEntry{
 		{"model", "resolve / cache an hf:// model ('fak pull' / 'fak ls' aliases)"},
