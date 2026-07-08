@@ -176,7 +176,11 @@ dispatch lane, with a captured command output as witness.
 after one focused gate lands.
 
 `gen/second-next`: define cross-generation dependency edges or a compatibility
-policy that later code can enforce.
+policy that later code can enforce. The option-contract shape such a bet must
+carry — assumption set, reversible seam, cost to keep alive, promotion trigger,
+and kill trigger — is pinned in
+[`docs/generation-second-next-option-contracts.md`](generation-second-next-option-contracts.md),
+the `gen/second-next` companion to the `gen/future` real-options model.
 
 `gen/future`: research a standards analogue or market-facing narrative, with a
 memo that names the decision it could influence.
