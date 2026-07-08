@@ -72,6 +72,44 @@ func TestIssuePromptDoesNotLeakUnrelatedIssueData(t *testing.T) {
 	}
 }
 
+func TestIssuePromptRendersWindowsShellGuidance(t *testing.T) {
+	// #1404 parity: the Python renderer emits a PowerShell shell hint for a Windows
+	// worker (tools/issue_worker_prompt.py _windows_shell_guidance); the Go renderer must
+	// carry it so a Windows worker does not burn turns rediscovering that grep/wc/cat are
+	// not on PATH. Host is set explicitly so the assertion is deterministic on any host.
+	in := sampleIssuePrompt()
+	in.HostOS = "windows"
+	p := RenderIssuePrompt(in)
+	for _, want := range []string{
+		"host shell (Windows): this worker runs under PowerShell, not bash",
+		"`Select-String` for grep",
+		"`Get-Content` for cat",
+		"`Measure-Object` or `.Count` for wc -l",
+		"NOT on PATH here and will fail",
+	} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("windows prompt missing shell guidance %q:\n%s", want, p)
+		}
+	}
+	// Steering precedes data: the shell hint renders before the raw issue body.
+	if strings.Index(p, "host shell (Windows)") > strings.Index(p, "issue body (verbatim") {
+		t.Fatalf("windows shell guidance should render before the raw issue body:\n%s", p)
+	}
+}
+
+func TestIssuePromptOmitsWindowsShellGuidanceOffWindows(t *testing.T) {
+	// Off-Windows the block is empty, exactly like the Python's "" return, so a POSIX
+	// worker's prompt never carries the PowerShell hint.
+	in := sampleIssuePrompt()
+	in.HostOS = "linux"
+	p := RenderIssuePrompt(in)
+	for _, unwanted := range []string{"host shell (Windows)", "Select-String", "PowerShell"} {
+		if strings.Contains(p, unwanted) {
+			t.Fatalf("off-Windows prompt leaked the PowerShell shell hint %q:\n%s", unwanted, p)
+		}
+	}
+}
+
 func TestIssuePromptRendersGenerationGuidance(t *testing.T) {
 	// #1404 parity: the Go renderer must carry the same generation intent/frame
 	// worker-contract block that tools/issue_worker_prompt.py emits, so the Python

@@ -102,6 +102,27 @@ func IsTrustCriticalTree(glob string) bool {
 	return false
 }
 
+// IsCoreSourceLaneTree reports whether EVERY glob in a lane (or issue) tree is fak's own
+// GUARD-SHIPPABLE core engineering: self-source (cmd/** or internal/**) AND not the
+// trust-critical referee a guarded worker can never ship. It is the "default the wave
+// toward core forward progress" predicate: the operator wants the unattended loop to
+// prefer core lanes over the coarse docs/tools buckets, so the dispatch ordering ranks a
+// lane this returns true for ahead of a non-core lane of equal-or-greater step budget. An
+// empty tree, any non-self-source glob, or any trust-critical glob yields false -- so a
+// mixed lane never masquerades as core, and the held referee set is never PREFERRED (a
+// guarded worker aimed there only wastes a slot on a doomed SELF_MODIFY-held pick).
+func IsCoreSourceLaneTree(tree []string) bool {
+	if len(tree) == 0 {
+		return false
+	}
+	for _, g := range tree {
+		if strings.TrimSpace(g) == "" || !IsSelfSourceTree(g) || IsTrustCriticalTree(g) {
+			return false
+		}
+	}
+	return true
+}
+
 // SelfModifyHold is the pure pre-route verdict for one dispatch pick: a GUARDED worker
 // aimed at a lane whose tree is TRUST-CRITICAL (the ABI/kernel/adjudicator/policy/
 // witness machinery) can do real investigation but must never SHIP -- letting an

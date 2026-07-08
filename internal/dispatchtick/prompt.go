@@ -3,6 +3,7 @@ package dispatchtick
 import (
 	"fmt"
 	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -18,6 +19,11 @@ type IssuePromptInput struct {
 	DevelopmentBranch string
 	FetchError        string
 	ResumeWitness     ResumeWitnessState
+	// HostOS is the OS the spawned worker will run on; empty defaults to the dispatch
+	// host's own runtime.GOOS (the tick spawns a worker on the same host). "windows"
+	// renders the PowerShell shell-guidance block; anything else renders none. Mirrors
+	// tools/issue_worker_prompt.py's injectable host_os.
+	HostOS string
 }
 
 type ResumeWitnessState struct {
@@ -67,11 +73,15 @@ func RenderIssuePrompt(in IssuePromptInput) string {
 	}
 	labels := labelsLine(in.Labels)
 	generationBlock := renderGenerationGuidance(in.Labels)
+	winHintBlock := ""
+	if hint := windowsShellGuidance(in.HostOS); hint != "" {
+		winHintBlock = "\n\n" + hint
+	}
 	return fmt.Sprintf(`your goal: resolve GitHub issue #%[1]d (%[2]s) with the smallest correct change that genuinely closes it, then ship it on the configured development branch `+"`%[8]s`"+` citing `+"`#%[1]d`"+` in the commit subject - OR end with a final report naming the exact gate you could not reach and why. Do NOT fabricate a pass.
 
 read first: run `+"`gh issue view %[1]d`"+` for the live issue, then orient with `+"`AGENTS.md`"+` (build/test/run + the hard rules) and `+"`llms.txt`"+` (the doc map). Then run `+"`fak memory-read`"+` for the committed fleet memory (lane quirks, known blockers, host gotchas) - a Claude worker gets this auto-injected, an opencode worker does NOT, so this read is how both backends start warm (it is a harmless no-op if the mirror is absent). This issue routed to the `+"`%[3]s`"+` lane (its file-tree). Labels: %[4]s.
 
-%[10]s
+%[10]s%[11]s
 
 %[7]s
 
@@ -101,7 +111,32 @@ git laws (enforced below the agent - breaking them refuses your commit):
 acceptance (your stop condition): a committed change on the configured development branch `+"`%[8]s`"+` whose subject cites `+"`#%[1]d`"+` and whose gate you actually ran is green - OR a final report that names the specific missing artifact/host capability and the smallest next step. Honesty over a green-looking lie: the repo keeps a witness ledger and a self-authored "done" is re-checked against git. If you discovered a durable fact worth keeping (a lane quirk, a host gotcha, a blocker), surface it explicitly in your final message so an operator or Claude peer can record it to the memory mirror - an opencode worker has no auto-memory write path of its own.
 
 workspace: %[6]s. lane: %[3]s. issue: #%[1]d.
-`, in.Number, title, strings.TrimSpace(in.Lane), labels, body, strings.TrimSpace(in.Workspace), agentBrief, developmentBranch, resumeWitness, generationBlock)
+`, in.Number, title, strings.TrimSpace(in.Lane), labels, body, strings.TrimSpace(in.Workspace), agentBrief, developmentBranch, resumeWitness, generationBlock, winHintBlock)
+}
+
+// windowsShellGuidance renders the PowerShell-native shell hint for a worker on a Windows
+// host, and "" off-Windows. It mirrors tools/issue_worker_prompt.py's _windows_shell_guidance:
+// an opencode/glm worker on Windows runs under PowerShell, but this repo's prose leans on Unix
+// tools (grep/wc/cat). A worker that shells out to those burns turns on "unrecognized command"
+// before recovering via the built-in search/read tools; naming the PowerShell-native
+// equivalents up front stops that waste. hostOS is injectable for cross-platform tests; empty
+// defaults to the dispatch host's runtime.GOOS (the tick spawns its worker on the same host).
+func windowsShellGuidance(hostOS string) string {
+	host := strings.ToLower(strings.TrimSpace(hostOS))
+	if host == "" {
+		host = runtime.GOOS
+	}
+	// "windows" is Go's runtime.GOOS spelling; "nt" is Python's os.name, accepted so a
+	// caller threading either identifier lands on the same block.
+	if host != "windows" && host != "nt" {
+		return ""
+	}
+	return "host shell (Windows): this worker runs under PowerShell, not bash. Prefer the " +
+		"built-in read/search tools where you can; when you shell out, use PowerShell-native " +
+		"commands - `Select-String` for grep, `Get-Content` for cat, `Get-ChildItem` for " +
+		"ls/find, `Measure-Object` or `.Count` for wc -l, `Select-Object -First/-Last` for " +
+		"head/tail. Raw `grep`, `wc`, `cat`, and `find /` are NOT on PATH here and will fail " +
+		"- do not waste turns rediscovering that."
 }
 
 func promptDevelopmentBranch(branch string) string {
