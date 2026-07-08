@@ -90,6 +90,47 @@ func TestCachevalueShapesJSONReproducesFold(t *testing.T) {
 	}
 }
 
+// TestCachevalueShapesTrendRendersDrift is the witness at the CLI seam for the
+// longitudinal view: `--trend` swaps the static snapshot for the per-shape week-over-week
+// reuse-share drift table, and `--trend --json` re-folds into a ShapeTrendReport.
+func TestCachevalueShapesTrendRendersDrift(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cache-value.jsonl")
+	// Week 2026-W24 (Jun 15) then 2026-W26 (Jun 24): a long×warm shape that carries all of
+	// the first week's reuse but only a fraction of the second week's → a regressed drift.
+	content := `{"date":"2026-06-15","session_type":"guard","turns":8,"prompt_tokens":1000,"reused_tokens":900,"reuse_ratio":0.90}
+{"date":"2026-06-24","session_type":"guard","turns":8,"prompt_tokens":1000,"reused_tokens":600,"reuse_ratio":0.60}
+{"date":"2026-06-24","session_type":"serve","turns":3,"prompt_tokens":3000,"reused_tokens":2400,"reuse_ratio":0.80}
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := runCachevalueShapes(&out, &errb, []string{"--ledger", path, "--trend"}); code != 0 {
+		t.Fatalf("shapes --trend exit = %d, stderr=%s", code, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{"shape drift", "trend", "regressed", "long×warm", "marginal-over-tuned-warm-KV"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("shapes --trend table missing %q:\n%s", want, got)
+		}
+	}
+
+	out.Reset()
+	errb.Reset()
+	if code := runCachevalueShapes(&out, &errb, []string{"--ledger", path, "--trend", "--json"}); code != 0 {
+		t.Fatalf("shapes --trend --json exit = %d, stderr=%s", code, errb.String())
+	}
+	var rep cachevaluereport.ShapeTrendReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("shapes --trend --json is not a ShapeTrendReport: %v\n%s", err, out.String())
+	}
+	if rep.Verdict != "MEASURED" || len(rep.Weeks) != 2 {
+		t.Fatalf("trend report verdict/weeks = %q/%d, want MEASURED/2", rep.Verdict, len(rep.Weeks))
+	}
+}
+
 // TestCachevalueShapesBadSince rejects a malformed --since with exit 2.
 func TestCachevalueShapesBadSince(t *testing.T) {
 	var out, errb bytes.Buffer
