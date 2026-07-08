@@ -63,7 +63,7 @@ func TestRoundTripPreservesRawEvidence(t *testing.T) {
 	}
 	// Every field survives, and the native score is byte-for-byte unchanged — no
 	// normalization onto a shared 0..100 axis happened anywhere.
-	if tb.Version != "2.1" || tb.Score != 55.0 || tb.Unit != "pct-resolved" || tb.Harness != "example-agent" {
+	if tb.Version != "2.1" || tb.Score != 55.0 || tb.Unit != "pct-resolved" || tb.Harness != "example-agent" { //boundarylint:ignore CHANGE_DETECTOR_TEST fixture round-trip fidelity: every field preserved verbatim
 		t.Fatalf("terminal-bench row mangled: %+v", tb)
 	}
 	if tb.Provenance.Source != "https://www.tbench.ai/leaderboard/terminal-bench/2.1" ||
