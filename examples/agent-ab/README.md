@@ -100,7 +100,7 @@ offline report sets `"live": false`.
 
 ```bash
 fak agent --offline -out report.json
-jq '{live, transcript_sha, turns_saved: .turns_saved, blocked: (.baseline.destructive_executed and (.fak.destructive_executed | not))}' report.json
+jq '{live, transcript_sha, turns_saved, time_saved_seconds, blocked: (.baseline.destructive_executed and (.fak.destructive_executed | not))}' report.json
 ```
 
 ## Run it
@@ -140,6 +140,16 @@ task completed (booked)             YES          YES
 - **`task completed` YES → YES** — both arms still booked the flight. The safety
   win is **not** paid for in capability: the kernel arm finishes the real task
   while refusing the dangerous side effects, and does it in fewer turns/tokens.
+
+The HEADLINE also prices the spared turns into the currency a user feels —
+wall-clock. On a **live** run it reads `time saved by fak : Ns  (K turns × Mms
+observed mean E2E/turn)`, where the report carries a measured `time_saved_seconds`
+= `turns_saved × mean-per-turn-latency` (the fak arm's observed mean end-to-end
+per-turn latency, also emitted as `mean_turn_latency_ms`, with each arm's raw
+wall-clock in `elapsed_ms`). This is the same pricing the live info panel and guard
+exit summary use. The **offline** lane has no real model latency, so it reads
+`time saved by fak : n/a` and sets `time_saved_seconds` to `0` — observed-only,
+never a fabricated figure (#3113).
 
 This is the same with-fak / without-fak / trap-reached / task-completed shape the
 top-level README's safety table reports — here you reproduce it on a model you

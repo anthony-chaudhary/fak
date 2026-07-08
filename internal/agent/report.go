@@ -42,6 +42,14 @@ func PrintReport(w io.Writer, r *RunResult, trace []traceEvent, path string) {
 	if r.BothCompleted {
 		fmt.Fprintf(w, "  turns saved by fak        : %d  (%s)   [both arms completed -> comparable]\n", r.TurnsSaved, pct(r.TurnsSaved, r.Baseline.Turns))
 		fmt.Fprintf(w, "  tokens saved by fak       : %d  (%s)\n", r.TokensSaved, pct(r.TokensSaved, r.Baseline.PromptTokens+r.Baseline.CompletionTokens))
+		// Wall-clock: the spared round-trips priced at the fak arm's observed mean
+		// per-turn latency — measured on the live lane, explicitly untimed offline so
+		// no seconds are fabricated (#3113).
+		if r.Live {
+			fmt.Fprintf(w, "  time saved by fak         : %.1fs  (%d turns x %.0fms observed mean E2E/turn)\n", r.TimeSavedSeconds, r.TurnsSaved, r.MeanTurnLatencyMs)
+		} else {
+			fmt.Fprintf(w, "  time saved by fak         : n/a  (offline mock lane has no real model latency; seconds not priced)\n")
+		}
 	} else {
 		// Turn count is NOT comparable when the arms completed different work — a
 		// derailed baseline "saves" turns by failing the task. Report it honestly.

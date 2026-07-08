@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 // TestOfflineABTurnDelta is the deterministic witness that the kernel saves model
@@ -70,6 +71,60 @@ func TestOfflineABTurnDelta(t *testing.T) {
 	// Tokens: fewer turns => fewer tokens (soft secondary, must still be >= 0).
 	if res.TokensSaved < 0 {
 		t.Errorf("expected non-negative token savings; got %d", res.TokensSaved)
+	}
+
+	// Wall-clock (#3113): the offline mock lane has NO real model latency, so it must
+	// omit/zero the seconds rather than fabricate them — turns_saved only, the same
+	// observed-only, silent-when-untimed rule the guard exit line uses.
+	if res.TimeSavedSeconds != 0 {
+		t.Errorf("offline lane must not price seconds; got time_saved_seconds=%v", res.TimeSavedSeconds)
+	}
+	if res.MeanTurnLatencyMs != 0 {
+		t.Errorf("offline lane must not report a mean per-turn latency; got %v", res.MeanTurnLatencyMs)
+	}
+	if res.Fak.ElapsedMs != 0 || res.Baseline.ElapsedMs != 0 {
+		t.Errorf("offline lane must leave per-arm wall-clock unset; got fak=%d base=%d",
+			res.Fak.ElapsedMs, res.Baseline.ElapsedMs)
+	}
+	if res.Live {
+		t.Error("offline lane must report live=false")
+	}
+}
+
+// TestPriceTimeSaved is the deterministic witness for the wall-clock pricing (#3113):
+// the live lane converts spared round-trips into observed seconds at the fak arm's
+// observed mean per-turn latency, while the offline lane and non-comparable runs
+// return zero — no fabricated latency.
+func TestPriceTimeSaved(t *testing.T) {
+	// Live, both arms completed, 2 turns saved: 7 fak turns over 7s => 1000ms/turn,
+	// so 2 spared turns price to exactly 2.0 observed seconds.
+	mean, secs := priceTimeSaved(true, true, 2, 7, 7*time.Second)
+	if mean != 1000 {
+		t.Errorf("mean per-turn latency: got %v, want 1000ms", mean)
+	}
+	if secs != 2.0 {
+		t.Errorf("time saved: got %v, want 2.0s", secs)
+	}
+
+	// Offline lane (live=false): observed-only rule zeroes BOTH figures.
+	if mean, secs := priceTimeSaved(false, true, 2, 7, 7*time.Second); mean != 0 || secs != 0 {
+		t.Errorf("offline lane must not fabricate latency; got mean=%v secs=%v", mean, secs)
+	}
+
+	// Not comparable (a derailed baseline "saved" turns by failing): a mean latency is
+	// still observed, but no seconds are booked.
+	if mean, secs := priceTimeSaved(true, false, 3, 5, 5*time.Second); mean != 1000 || secs != 0 {
+		t.Errorf("non-comparable run must not book seconds; got mean=%v secs=%v", mean, secs)
+	}
+
+	// No turns saved => no seconds, even live.
+	if _, secs := priceTimeSaved(true, true, 0, 5, 5*time.Second); secs != 0 {
+		t.Errorf("zero spared turns must price to zero seconds; got %v", secs)
+	}
+
+	// Guard against divide-by-zero when a live arm somehow logged no turns.
+	if mean, secs := priceTimeSaved(true, true, 1, 0, time.Second); mean != 0 || secs != 0 {
+		t.Errorf("zero fak turns must return zero; got mean=%v secs=%v", mean, secs)
 	}
 }
 

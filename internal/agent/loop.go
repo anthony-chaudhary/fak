@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
@@ -38,6 +39,13 @@ type ArmMetrics struct {
 	TaskCompleted       bool   `json:"task_completed"`       // the booking actually succeeded (the goal)
 	HitTurnCap          bool   `json:"hit_turn_cap"`
 	FinalAnswer         string `json:"final_answer"`
+
+	// ElapsedMs is the arm's observed wall-clock in milliseconds. It is populated
+	// ONLY on the live lane (a real network model actually blocks on each turn); the
+	// offline/deterministic-mock lane leaves it zero (omitted) because a microsecond
+	// mock loop is not a real per-turn latency — the same observed-only, silent-when-
+	// untimed rule the guard exit line uses (#3113).
+	ElapsedMs int64 `json:"elapsed_ms,omitempty"`
 
 	// Speculation lifecycle (#1318, SEAM-4) — populated only on the fak arm when a
 	// speculator is wired (WithSpeculator); all zero on the historical loop. SpecIssued
@@ -79,7 +87,15 @@ type RunResult struct {
 	TokensSaved   int        `json:"tokens_saved"`   // baseline total - fak total
 	BothCompleted bool       `json:"both_completed"` // the turn delta is comparable iff this is true
 	Live          bool       `json:"live"`           // true if a real network model drove it
-	Transcript    string     `json:"transcript_sha"` // hash of the fak-arm message log (live witness)
+	// MeanTurnLatencyMs is the fak arm's observed mean end-to-end per-turn latency
+	// (ElapsedMs / Turns), and TimeSavedSeconds prices the spared round-trips at it:
+	// turns_saved x mean-per-turn-latency — the SAME pricing the live info panel and
+	// guard exit summary use. Both are observed-only: they are zero (omitted) on the
+	// offline/mock lane, which has no real model latency, so no seconds are fabricated
+	// (#3113). TimeSavedSeconds is meaningful only when BothCompleted (like TurnsSaved).
+	MeanTurnLatencyMs float64 `json:"mean_turn_latency_ms,omitempty"`
+	TimeSavedSeconds  float64 `json:"time_saved_seconds"`
+	Transcript        string  `json:"transcript_sha"` // hash of the fak-arm message log (live witness)
 	// Calls is the per-call decision trace for BOTH arms (fak arm first), embedded
 	// so a bad run is debuggable from the artifact alone — no separate --log file.
 	Calls []CallTrace `json:"calls,omitempty"`
@@ -222,14 +238,24 @@ func execNaive(tool, rawArgs string, m *ArmMetrics, ev traceEvent) (string, trac
 func Run(ctx context.Context, p Planner, task string, maxTurns int, opts ...RunOption) (*RunResult, []traceEvent, error) {
 	var fakLog, baseLog []traceEvent
 
+	// Per-arm wall-clock: the observed E2E time each arm took. On the live lane every
+	// turn blocks on a real network round-trip, so this is the honest per-turn latency;
+	// on the offline mock lane it is a microsecond loop we deliberately do NOT price
+	// into seconds (see priceTimeSaved / #3113).
+	fakStart := time.Now()
 	fakM, err := RunArm(ctx, p, task, true, maxTurns, &fakLog, opts...)
+	fakElapsed := time.Since(fakStart)
 	if err != nil {
 		return nil, nil, err
 	}
+	baseStart := time.Now()
 	baseM, err := RunArm(ctx, p, task, false, maxTurns, &baseLog)
+	baseElapsed := time.Since(baseStart)
 	if err != nil {
 		return nil, nil, err
 	}
+
+	_, isLive := p.(*HTTPPlanner)
 
 	res := &RunResult{
 		AppVersion: appversion.Current(),
@@ -238,10 +264,16 @@ func Run(ctx context.Context, p Planner, task string, maxTurns int, opts ...RunO
 		TurnsSaved:    baseM.Turns - fakM.Turns,
 		TokensSaved:   (baseM.PromptTokens + baseM.CompletionTokens) - (fakM.PromptTokens + fakM.CompletionTokens),
 		BothCompleted: fakM.TaskCompleted && baseM.TaskCompleted,
+		Live:          isLive,
 	}
-	if _, isLive := p.(*HTTPPlanner); isLive {
-		res.Live = true
+	// Observed-only wall-clock pricing: seconds are witnessed on the live lane and
+	// zeroed (untimed) on the offline lane — no fabricated latency (#3113).
+	if isLive {
+		res.Fak.ElapsedMs = fakElapsed.Milliseconds()
+		res.Baseline.ElapsedMs = baseElapsed.Milliseconds()
 	}
+	res.MeanTurnLatencyMs, res.TimeSavedSeconds = priceTimeSaved(
+		isLive, res.BothCompleted, res.TurnsSaved, fakM.Turns, fakElapsed)
 	if hp, ok := p.(*HTTPPlanner); ok {
 		res.Provider = string(hp.Provider)
 		res.BaseURL = hp.BaseURL
@@ -251,6 +283,31 @@ func Run(ctx context.Context, p Planner, task string, maxTurns int, opts ...RunO
 	full := append(fakLog, baseLog...)
 	res.Calls = toCallTraces(full)
 	return res, full, nil
+}
+
+// priceTimeSaved converts spared model round-trips into observed wall-clock seconds
+// using the SAME pricing the live info panel and guard exit summary use: turns_saved
+// times the session's observed mean end-to-end per-turn latency (the fak arm's
+// ElapsedMs / Turns). It is observed-only and silent-when-untimed:
+//
+//   - The offline / deterministic-mock lane passes live=false — a microsecond mock
+//     loop is not a real per-turn latency, so both figures return zero rather than
+//     fabricate seconds. The report then carries turns_saved only.
+//   - Seconds are priced only when both arms completed the SAME task (bothCompleted),
+//     the same comparability gate turns_saved rides — a derailed baseline that "saved"
+//     turns by failing must not book phantom seconds.
+//
+// meanTurnLatencyMs is the observed mean itself (surfaced for provenance);
+// timeSavedSeconds is turns_saved x that mean, in seconds.
+func priceTimeSaved(live, bothCompleted bool, turnsSaved, fakTurns int, fakElapsed time.Duration) (meanTurnLatencyMs, timeSavedSeconds float64) {
+	if !live || fakTurns <= 0 {
+		return 0, 0
+	}
+	meanTurnLatencyMs = float64(fakElapsed.Milliseconds()) / float64(fakTurns)
+	if bothCompleted && turnsSaved > 0 {
+		timeSavedSeconds = float64(turnsSaved) * meanTurnLatencyMs / 1000.0
+	}
+	return meanTurnLatencyMs, timeSavedSeconds
 }
 
 // RunArm drives ONE arm of the loop: the same planner + task, with the kernel
