@@ -73,25 +73,72 @@ Claude Code **PreToolUse** hook, matcher-scoped to the mutating tools
                              "args": ["-c", "import os,subprocess,sys; root=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(root,'tools','repo_guard.py'); subprocess.call([sys.executable,p,'--hook']); sys.exit(0)"] }] }]
 ```
 
-On a violation the hook returns `permissionDecision: deny`, so the tool call never
-runs. This matters most under `permissions.defaultMode = bypassPermissions` (the
-fleet default): there is **no human approval prompt**, so a structural PreToolUse
-deny is the only thing between the model and a sibling-repo `rm -rf`.
+Every classifier rung is a **best-effort heuristic** (it raises the floor, it is not
+a sandbox), so a *classified* violation does not imply a *denied* call. What the hook
+does about a finding is a **per-reason severity**, and the default posture is
+**permissive** — the hard blocks exist and are wired, but they are an opt-in the
+operator dials up, not a default everyone else must escape. This matters because
+cross-repo work in a fleet host's `work/` tree of sibling repos is **routine**, not
+anomalous, and even a *warning* injected into the agent's context can steer the model
+or waste a turn — so the routine rungs are *silent* by default.
 
 ```
- model proposes  ──▶  PreToolUse hook  ──▶  repo_guard resolves the target
-   rm -rf ../tools        (the floor)         outside the repo?  ──▶  DENY, call never runs
+ model proposes  ──▶  PreToolUse hook  ──▶  resolve the target's reason ──▶  per-reason severity
+   rm -rf ../tools        (the floor)        OUT_OF_TREE_WRITE               record (silent) by default
+                                                                            └▶ deny only if dialed up
 ```
 
 ### Knobs (mirror the trunk-guard convention)
 
-`repo_guard` is **fail-open** on any internal error — a guard bug must never wedge
-a live multi-session fleet; it is defense-in-depth behind the FAK policy and human
-review, not the sole gate.
+The guard is **fail-open** on any internal error — a guard bug must never wedge a live
+multi-session fleet; it is defense-in-depth behind the FAK policy and human review, not
+the sole gate. A journal-write failure for a *silent* (record-level) finding is
+swallowed **without** touching stderr, so silent stays silent.
 
-- `FAK_REPO_GUARD=warn` — advisory: log the violation to stderr, allow the call.
-- `FAK_REPO_GUARD=off` — disable the hook entirely.
-- default (unset) — **enforce** (deny out-of-tree destructive/write ops).
+**Severity levels** (least → most strict), what each does to a classified finding:
+
+| Level | stderr | journal | call | 
+|---|---|---|---|
+| `off` | — | — | allow |
+| `record` | — (silent) | ✓ row | allow |
+| `warn` | advisory + fix | ✓ row | allow |
+| `deny` | DENY line | ✓ row | **blocked** (`permissionDecision: deny`) |
+
+**Default posture (permissive; the blocks are an opt-in capability):**
+
+| Reason | Default | Why |
+|---|---|---|
+| `OUT_OF_TREE_WRITE` | `record` | routine cross-repo work trips it; a placement convention; silent so it never perturbs the model |
+| `LIVE_MONITOR_OUTPUT_READ` | `record` | niche, harmless-if-wrong anti-pattern |
+| `INTERACTIVE_HANG` | `warn` | the non-interactive-form hint genuinely helps the agent avoid a wasted turn |
+| `FOREGROUND_SLEEP` | `warn` | the background-wait hint helps |
+
+A reason with no default entry resolves to `deny` (fail-safe: any refusal-class reason
+added later denies until explicitly softened).
+
+**Master switch** — `FAK_REPO_GUARD` overrides everything below it:
+
+- `FAK_REPO_GUARD=off` — disable the hook entirely (skip every rung).
+- `FAK_REPO_GUARD=warn` — **cap** every rung at advisory (softens `deny`, never escalates).
+- default (unset / `enforce`) — apply the per-reason severity table above.
+
+**Per-reason dial** — `FAK_REPO_GUARD_SEVERITY=REASON=level,REASON=level` sets the
+severity for individual reasons (a comma list; malformed pairs are skipped). Precedence:
+the master switch wins, then this per-reason override, then the default table.
+
+```bash
+# security-minded operator wants the old hard blocks back:
+FAK_REPO_GUARD_SEVERITY=OUT_OF_TREE_WRITE=deny,LIVE_MONITOR_OUTPUT_READ=deny
+
+# silence a rung entirely:
+FAK_REPO_GUARD_SEVERITY=INTERACTIVE_HANG=off
+```
+
+Because `OUT_OF_TREE_WRITE` is silent-recorded (not denied) by default, a routine
+cross-repo flow — e.g. the Confluence publish path that writes to the sibling
+`confluence-helpers` repo — **no longer needs** the `FAK_REPO_GUARD=warn` escape it
+used to require; it just proceeds, and the guard records the crossing for the audit
+trail (`repoguard --summary`).
 
 ## Verify it
 
@@ -125,10 +172,12 @@ subprocess): `python tools/repo_guard_test.py`.
   redirections/build `-o`…). A sufficiently obfuscated command can evade it — it
   raises the floor, it is not a sandbox. The real containment for *capabilities*
   remains the FAK default-deny floor ([`POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md)).
-- The guard only ever refuses a target **outside** the workspace (and outside the
-  scratch allow-list). No in-repo work is ever blocked — consistent with the
-  `dos.toml` rule that a declared reason introduces no spontaneous refusal of
-  legitimate work.
+- The guard only ever *flags* a target **outside** the workspace (and outside the
+  scratch allow-list); no in-repo work is ever flagged. And under the default posture
+  even an out-of-tree write is **recorded, not refused** — a hard `deny` is an opt-in
+  the operator dials up per reason. This is consistent with the `dos.toml` rule that a
+  declared reason introduces no spontaneous refusal of legitimate work: the default
+  refuses nothing, it only records.
 
 ## See also
 
