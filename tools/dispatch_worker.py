@@ -196,6 +196,11 @@ def child_env(
     env["DISPATCH_WORKSPACE"] = str(workspace)
     env["DISPATCH_LANE"] = lane
     env["DISPATCH_BACKEND"] = backend
+    # Self-describing shared front door (#1501): when the wave routes this worker's fak
+    # self-query through one shared gateway, echo it so the worker knows its shared path
+    # regardless of prompt rendering (same contract as DISPATCH_LANE).
+    if shared := shared_gateway_url(env):
+        env["DISPATCH_SHARED_GATEWAY"] = shared
     return env
 
 
@@ -538,6 +543,69 @@ def guard_audit_path(workspace: Path, lane: str, backend: str) -> Path:
     return Path(workspace) / ".dispatch-runs" / "guard-audit" / f"{safe}-{token}.jsonl"
 
 
+# --- Shared-path leasing: one gateway front door for a fanned-out wave (#1501) -----
+# A fanned-out wave (`fak dispatch wave` / the ultracode Workflow tool) spawns N workers;
+# by default each is fronted by its OWN per-session `fak guard` gateway, so they share NO
+# L3 cache, NO cross-agent change feed (`fak_changes`, internal/gateway/coherence.go is
+# per-Server state) and NO self-index -- each re-discovers the same tree, the opposite of
+# fak's "do the shared work once" thesis. When the wave stands up ONE shared `fak serve`
+# front door and names it in FLEET_SHARED_GATEWAY_URL, every wave worker's fak self-query
+# + effects are repointed at that single gateway, so the shared work is done once and a
+# peer's write reaches the others over `fak_changes`. Disjoint lease regions per agent
+# are already arbitrated by `fak dispatch wave` (dispatchorder + dos_arbitrate, the
+# COLLISION_RISK floor). Opt-in and backward-compatible: unset -> each worker keeps its
+# private gateway, argv unchanged.
+SHARED_GATEWAY_URL_ENV = "FLEET_SHARED_GATEWAY_URL"
+
+
+def shared_gateway_url(env: dict[str, str] | None = None) -> str:
+    """The wave's one shared `fak serve` HTTP front door, or "" when a worker keeps its
+    own per-session gateway. Read from FLEET_SHARED_GATEWAY_URL; trailing slash trimmed."""
+    raw = (env if env is not None else os.environ).get(SHARED_GATEWAY_URL_ENV) or ""
+    return raw.strip().rstrip("/")
+
+
+def shared_fak_mcp_url(gateway_url: str) -> str:
+    """The gateway's MCP endpoint: the bare origin plus ``/mcp`` (mirrors
+    guardMCPURLFromGatewayBase in cmd/fak/guard_mcp.go)."""
+    return gateway_url.strip().rstrip("/") + "/mcp"
+
+
+def shared_fak_mcp_config(gateway_url: str) -> dict[str, Any]:
+    """One-server MCP client config naming "fak" as the shared remote HTTP MCP server --
+    the SAME ``{type:http,url}`` shape guard writes for its private gateway
+    (writeGuardMCPConfig), pointed instead at the wave's shared front door."""
+    return {"mcpServers": {"fak": {"type": "http", "url": shared_fak_mcp_url(gateway_url)}}}
+
+
+def shared_mcp_config_path(workspace: Path, lane: str, backend: str) -> Path:
+    """A per-session file under gitignored ``.dispatch-runs/`` for the shared-gateway MCP
+    config. Keyed per-process (pid + uuid) so two workers on one lane never clash on the
+    same file; mirrors guard_audit_path's discriminator."""
+    safe = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in f"{lane}-{backend}")
+    token = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    return Path(workspace) / ".dispatch-runs" / "shared-mcp" / f"{safe}-{token}.json"
+
+
+def write_shared_fak_mcp_config(path: Path, gateway_url: str) -> Path:
+    """Write the shared-gateway "fak" MCP client config to ``path`` and return it. The
+    dir is created lazily, matching the guard journal writer."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(shared_fak_mcp_config(gateway_url), indent=2) + "\n",
+                    encoding="utf-8")
+    return path
+
+
+def insert_claude_mcp_config(command: Sequence[str], config_path: str) -> list[str]:
+    """Insert ``--mcp-config <path>`` immediately after the claude executable (Claude
+    Code's global flags precede the subcommand/user args), mirroring
+    appendClaudeMCPConfigArg in cmd/fak/guard_mcp.go."""
+    cmd = list(command)
+    if not cmd:
+        return cmd
+    return [cmd[0], "--mcp-config", config_path, *cmd[1:]]
+
+
 def guard_wrap(
     command: Sequence[str],
     *,
@@ -571,6 +639,19 @@ def guard_wrap(
             "--session-id", audit.stem,
             *CLAUDE_GUARD_BUDGET_ARGS,
         ]
+        # Shared-path leasing for a fanned-out wave (#1501): when the wave names ONE
+        # shared fak gateway (FLEET_SHARED_GATEWAY_URL), route THIS worker's fak
+        # self-query + effects through it instead of guard's private per-session
+        # gateway. We disable guard's own per-session MCP registration
+        # (--mcp-register=false) and register "fak" at the shared serve's /mcp endpoint
+        # via Claude Code's --mcp-config -- so every wave agent shares one L3 cache, one
+        # cross-agent change feed (fak_changes) and one self-index. Unset -> unchanged.
+        shared = shared_gateway_url(env if env is not None else os.environ)
+        if shared:
+            cfg_path = write_shared_fak_mcp_config(
+                shared_mcp_config_path(workspace, lane, backend), shared)
+            extra = [*extra, "--mcp-register=false"]
+            cmd = insert_claude_mcp_config(cmd, str(cfg_path))
     if backend != "claude":
         e = env if env is not None else os.environ
         base = opencode_guard_base_url(cmd, e) if backend == "opencode" else (

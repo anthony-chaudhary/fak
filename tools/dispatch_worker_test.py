@@ -524,6 +524,70 @@ class DispatchWorkerTest(unittest.TestCase):
         self.assertTrue(payload["guarded"])
         self.assertEqual(payload["command"][0], "fak")
 
+    # --- Shared-path leasing: one gateway front door for a wave (#1501) -----------
+    def test_shared_gateway_url_reads_and_trims(self) -> None:
+        mod = load()
+        self.assertEqual(mod.shared_gateway_url({}), "")
+        self.assertEqual(
+            mod.shared_gateway_url({mod.SHARED_GATEWAY_URL_ENV: " http://127.0.0.1:8080/ "}),
+            "http://127.0.0.1:8080")
+
+    def test_shared_fak_mcp_config_is_guard_http_shape_at_mcp(self) -> None:
+        mod = load()
+        cfg = mod.shared_fak_mcp_config("http://10.0.0.5:8080")
+        # Mirrors guardMCPClientConfig: one server "fak", remote http, /mcp endpoint.
+        self.assertEqual(cfg, {"mcpServers": {"fak": {
+            "type": "http", "url": "http://10.0.0.5:8080/mcp"}}})
+        # Idempotent on a trailing slash.
+        self.assertEqual(mod.shared_fak_mcp_url("http://10.0.0.5:8080/"),
+                         "http://10.0.0.5:8080/mcp")
+
+    def test_child_env_stamps_shared_gateway_when_set(self) -> None:
+        mod = load()
+        base = {"PATH": "x", mod.SHARED_GATEWAY_URL_ENV: "http://127.0.0.1:8080/"}
+        env = mod.child_env("tools", "claude", Path("C:/work/fak"), base=base)
+        self.assertEqual(env["DISPATCH_SHARED_GATEWAY"], "http://127.0.0.1:8080")
+        # Absent when the wave names no shared front door -> worker keeps its own.
+        env2 = mod.child_env("tools", "claude", Path("C:/work/fak"), base={"PATH": "x"})
+        self.assertNotIn("DISPATCH_SHARED_GATEWAY", env2)
+
+    def test_guard_wrap_claude_no_shared_gateway_keeps_private_and_raw(self) -> None:
+        mod = load()
+        raw = mod.build_command("tools", "claude")
+        wrapped = mod.guard_wrap(raw, fak_bin="/usr/bin/fak", lane="tools",
+                                 backend="claude", workspace=Path("C:/work/fak"), env={})
+        # No shared front door -> guard's own per-session MCP registration is left ON
+        # (no --mcp-register=false) and the raw worker argv is untouched after `--`.
+        self.assertNotIn("--mcp-register=false", wrapped)
+        self.assertNotIn("--mcp-config", wrapped)
+        sep = wrapped.index("--")
+        self.assertEqual(wrapped[sep + 1:], raw)
+
+    def test_guard_wrap_claude_shared_gateway_repoints_fak_mcp(self) -> None:
+        mod = load()
+        raw = mod.build_command("tools", "claude")
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            wrapped = mod.guard_wrap(
+                raw, fak_bin="/usr/bin/fak", lane="tools", backend="claude",
+                workspace=ws, env={mod.SHARED_GATEWAY_URL_ENV: "http://127.0.0.1:8080"})
+            # Guard's private per-session MCP registration is disabled so it cannot
+            # override the shared front door with this worker's own gateway.
+            self.assertIn("--mcp-register=false", wrapped)
+            # "fak" is registered at the SHARED serve's /mcp via Claude Code's
+            # --mcp-config, inserted into the claude argv after the `--` separator.
+            self.assertIn("--mcp-config", wrapped)
+            cfg_path = Path(wrapped[wrapped.index("--mcp-config") + 1])
+            self.assertTrue(cfg_path.exists())
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+            self.assertEqual(cfg["mcpServers"]["fak"]["url"], "http://127.0.0.1:8080/mcp")
+            self.assertEqual(cfg["mcpServers"]["fak"]["type"], "http")
+            # The --mcp-config lands in the wrapped worker argv (after `--`), not the
+            # guard args (before `--`).
+            sep = wrapped.index("--")
+            self.assertIn("--mcp-config", wrapped[sep + 1:])
+            self.assertEqual(wrapped[sep + 1], "claude")
+
 
 if __name__ == "__main__":
     unittest.main()
