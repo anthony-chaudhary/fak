@@ -23,9 +23,30 @@ func runHookString(t *testing.T, payload string) (int, string, string) {
 	return rc, out.String(), errBuf.String()
 }
 
-func TestHookDeniesOutOfTree(t *testing.T) {
+const ootPayload = `{"tool_name":"Bash","cwd":"` + wsTest + `","tool_input":{"command":"rm -rf ../tools"}}`
+
+// Default posture: out-of-tree is SILENT-recorded — allow, no deny JSON on
+// stdout, and nothing on stderr (the model's context stays clean).
+func TestHookRecordsOutOfTreeSilentlyByDefault(t *testing.T) {
 	t.Setenv("FAK_REPO_GUARD", "")
-	rc, out, _ := runHookString(t, `{"tool_name":"Bash","cwd":"`+wsTest+`","tool_input":{"command":"rm -rf ../tools"}}`)
+	t.Setenv("FAK_REPO_GUARD_SEVERITY", "")
+	rc, out, errOut := runHookString(t, ootPayload)
+	if rc != 0 {
+		t.Fatalf("hook rc = %d, want 0 (allow)", rc)
+	}
+	if strings.TrimSpace(out) != "" {
+		t.Errorf("stdout = %q, want empty (no deny JSON by default)", out)
+	}
+	if strings.TrimSpace(errOut) != "" {
+		t.Errorf("stderr = %q, want empty (silent record must not perturb the model)", errOut)
+	}
+}
+
+// A security-minded operator dials the rung back up to deny per reason.
+func TestHookDeniesOutOfTreeWhenSeverityDeny(t *testing.T) {
+	t.Setenv("FAK_REPO_GUARD", "")
+	t.Setenv("FAK_REPO_GUARD_SEVERITY", "OUT_OF_TREE_WRITE=deny")
+	rc, out, _ := runHookString(t, ootPayload)
 	if rc != 0 {
 		t.Fatalf("hook rc = %d, want 0", rc)
 	}
@@ -35,6 +56,44 @@ func TestHookDeniesOutOfTree(t *testing.T) {
 	}
 	if decision.HookSpecificOutput.PermissionDecision != "deny" {
 		t.Errorf("permissionDecision = %q, want deny", decision.HookSpecificOutput.PermissionDecision)
+	}
+}
+
+// The global master switch caps a per-reason deny back to advisory: no deny JSON.
+func TestHookGlobalWarnCapsPerReasonDeny(t *testing.T) {
+	t.Setenv("FAK_REPO_GUARD", "warn")
+	t.Setenv("FAK_REPO_GUARD_SEVERITY", "OUT_OF_TREE_WRITE=deny")
+	rc, out, errOut := runHookString(t, ootPayload)
+	if rc != 0 || strings.TrimSpace(out) != "" {
+		t.Fatalf("global warn must cap the deny: rc=%d out=%q, want (0, \"\")", rc, out)
+	}
+	if !strings.Contains(errOut, "advisory") {
+		t.Errorf("stderr = %q, want an advisory line (warn cap)", errOut)
+	}
+}
+
+// Silencing a rung entirely: no deny, no stderr, allow.
+func TestHookSeverityOffSilencesRung(t *testing.T) {
+	t.Setenv("FAK_REPO_GUARD", "")
+	t.Setenv("FAK_REPO_GUARD_SEVERITY", "OUT_OF_TREE_WRITE=off")
+	rc, out, errOut := runHookString(t, ootPayload)
+	if rc != 0 || strings.TrimSpace(out) != "" || strings.TrimSpace(errOut) != "" {
+		t.Errorf("=off should fully silence: rc=%d out=%q err=%q", rc, out, errOut)
+	}
+}
+
+// The would-hang interactive rung stays advisory by default (its fix-hint helps
+// the agent): allow, no deny JSON, but a structured advisory on stderr.
+func TestHookInteractiveWarnsByDefault(t *testing.T) {
+	t.Setenv("FAK_REPO_GUARD", "")
+	t.Setenv("FAK_REPO_GUARD_SEVERITY", "")
+	rc, out, errOut := runHookString(t,
+		`{"tool_name":"Bash","cwd":"`+wsTest+`","tool_input":{"command":"git rebase -i HEAD~3"}}`)
+	if rc != 0 || strings.TrimSpace(out) != "" {
+		t.Fatalf("interactive default: rc=%d out=%q, want (0, \"\")", rc, out)
+	}
+	if !strings.Contains(errOut, "INTERACTIVE_HANG") {
+		t.Errorf("stderr = %q, want the INTERACTIVE_HANG advisory", errOut)
 	}
 }
 
@@ -48,6 +107,7 @@ func TestHookAllowsInRepo(t *testing.T) {
 
 func TestHookWarnModeAllows(t *testing.T) {
 	t.Setenv("FAK_REPO_GUARD", "warn")
+	t.Setenv("FAK_REPO_GUARD_SEVERITY", "")
 	rc, out, _ := runHookString(t, `{"tool_name":"Bash","cwd":"`+wsTest+`","tool_input":{"command":"rm -rf ../tools"}}`)
 	if rc != 0 || strings.TrimSpace(out) != "" {
 		t.Errorf("warn mode: rc=%d out=%q, want (0, \"\") - no deny JSON on stdout", rc, out)
@@ -56,6 +116,7 @@ func TestHookWarnModeAllows(t *testing.T) {
 
 func TestHookOffModeDisables(t *testing.T) {
 	t.Setenv("FAK_REPO_GUARD", "off")
+	t.Setenv("FAK_REPO_GUARD_SEVERITY", "")
 	rc, out, _ := runHookString(t, `{"tool_name":"Bash","cwd":"`+wsTest+`","tool_input":{"command":"rm -rf ../tools"}}`)
 	if rc != 0 || strings.TrimSpace(out) != "" {
 		t.Errorf("off mode: rc=%d out=%q, want (0, \"\")", rc, out)

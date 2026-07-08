@@ -41,8 +41,11 @@ func TestHookShortSleepStaysSilent(t *testing.T) {
 	}
 }
 
+// A deny-level finding wins over an advisory in the same call. Out-of-tree is
+// silent-record by default, so dial it up to deny to exercise the mixed path.
 func TestHookMixedViolationsStillDeny(t *testing.T) {
 	t.Setenv("FAK_REPO_GUARD", "")
+	t.Setenv("FAK_REPO_GUARD_SEVERITY", "OUT_OF_TREE_WRITE=deny")
 	rc, out, _ := runHookString(t, `{"tool_name":"Bash","cwd":"`+wsTest+`","tool_input":{"command":"sleep 300; rm -rf ../tools"}}`)
 	if rc != 0 {
 		t.Fatalf("hook rc = %d, want 0", rc)
