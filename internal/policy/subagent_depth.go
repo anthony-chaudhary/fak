@@ -74,7 +74,7 @@ func (r *SubagentDepthRule) Cap() int {
 // adapter routes a subagent spawn through:
 //
 //   - childDepth < 1        -> a caller bug (a subagent is nested below the
-//                              root; depth 0 is the root itself), refused;
+//     root; depth 0 is the root itself), refused;
 //   - childDepth > Cap()    -> ErrSubagentDepthExceeded (the runaway floor);
 //   - otherwise             -> nil (admit).
 //

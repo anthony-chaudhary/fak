@@ -47,14 +47,14 @@ const TailLoadSchema = "fak.tailload.v1"
 
 // TailArm is one measured arm's latency distribution, exact over raw samples.
 type TailArm struct {
-	Label     string  `json:"label"`
-	Samples   int     `json:"samples"`
-	P50NS     int64   `json:"p50_ns"`
-	P90NS     int64   `json:"p90_ns"`
-	P99NS     int64   `json:"p99_ns"`
-	P999NS    int64   `json:"p999_ns"`
-	MaxNS     int64   `json:"max_ns"`
-	MeanNS    float64 `json:"mean_ns"`
+	Label   string  `json:"label"`
+	Samples int     `json:"samples"`
+	P50NS   int64   `json:"p50_ns"`
+	P90NS   int64   `json:"p90_ns"`
+	P99NS   int64   `json:"p99_ns"`
+	P999NS  int64   `json:"p999_ns"`
+	MaxNS   int64   `json:"max_ns"`
+	MeanNS  float64 `json:"mean_ns"`
 	// Over100us counts samples over the existing gate's 100 µs bar — context
 	// against the standing single-flow gate, NOT a gate (no flip here).
 	Over100us int `json:"over_100us"`

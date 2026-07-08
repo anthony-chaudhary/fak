@@ -221,7 +221,7 @@ func TestReproElisionSemanticValidity(t *testing.T) {
 		{"plain-4k", func(int) string { return strings.Repeat("A", 4000) }},
 		{"threshold+1", func(th int) string { return strings.Repeat("A", th+1) }},
 		{"threshold+2", func(th int) string { return strings.Repeat("A", th+2) }},
-		{"emoji", func(th int) string { return strings.Repeat("😀", th+50) }},       // multi-byte runes, count > threshold
+		{"emoji", func(th int) string { return strings.Repeat("😀", th+50) }},         // multi-byte runes, count > threshold
 		{"mixed-emoji", func(th int) string { return strings.Repeat("a😀b", th+50) }}, // interleaved multi-byte
 		{"newlines", func(th int) string { return strings.Repeat("line of output\n", th) }},
 		{"whitespace-heavy", func(th int) string { return strings.Repeat("   \t  \n", th) }},

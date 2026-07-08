@@ -53,13 +53,13 @@ import (
 // call exercises the whole serve-path chain a request body passes through before it is
 // forwarded upstream. It mutates req.Raw in place, exactly as the serve path does.
 func runServeRequestChain(s *Server, req *agent.AnthropicMessagesRequest) {
-	s.sanitizeAnthropicToolReferences(req)            // correctness, every wire
-	s.maybeUpgradeAnthropicCacheTTL1H(req)            // managed-cache 1h TTL
+	s.sanitizeAnthropicToolReferences(req) // correctness, every wire
+	s.maybeUpgradeAnthropicCacheTTL1H(req) // managed-cache 1h TTL
 	s.maybePlanAnthropicRaw(context.Background(), "stable-prefix-witness", req)
 	s.compactAnthropicRawWithReason(req, 1000, "stable-prefix-witness") // #555 history compaction
-	s.maybeElideAnthropicRaw(req)                     // oversized tool_result elision
-	s.maybeCompactInboundTools(req)                   // #555 twin: prune floor-denied tool defs
-	s.maybeCompactInboundSystem(req)                  // system-block prune
+	s.maybeElideAnthropicRaw(req)                                       // oversized tool_result elision
+	s.maybeCompactInboundTools(req)                                     // #555 twin: prune floor-denied tool defs
+	s.maybeCompactInboundSystem(req)                                    // system-block prune
 }
 
 // TestServeRequestChainKeepsAnthropicCacheControlPrefix drives a real /v1/messages body

@@ -42,7 +42,7 @@ func compactSemErrors(raw []byte) []string {
 		return []string{"not JSON: " + err.Error()}
 	}
 	type ref struct{ mi int }
-	toolUse := map[string]ref{}    // id -> where the assistant tool_use is
+	toolUse := map[string]ref{}     // id -> where the assistant tool_use is
 	toolResult := map[string]bool{} // ids answered by a tool_result
 	prevRole := ""
 	for mi, m := range body.Messages {

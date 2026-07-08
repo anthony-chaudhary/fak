@@ -147,11 +147,11 @@ type scriptedCall struct {
 var readHints = map[string]string{"readOnlyHint": "true", "idempotentHint": "true"}
 
 var scriptedTurn = []scriptedCall{
-	{"get_user_details", `{"user_id":"mia_li_3668"}`, readHints},          // ALLOW
-	{"write_ledger_entry", `{"amount":1}`, nil},                           // DENY (DEFAULT_DENY) → same tool next = retry_turn
-	{"write_ledger_entry", `{"amount":1,"approved":true}`, nil},           // DENY (DEFAULT_DENY) → different tool next = forked_outcome
+	{"get_user_details", `{"user_id":"mia_li_3668"}`, readHints},                // ALLOW
+	{"write_ledger_entry", `{"amount":1}`, nil},                                 // DENY (DEFAULT_DENY) → same tool next = retry_turn
+	{"write_ledger_entry", `{"amount":1,"approved":true}`, nil},                 // DENY (DEFAULT_DENY) → different tool next = forked_outcome
 	{"search_direct_flight", `{"origin":"SFO","destination":"JFK"}`, readHints}, // ALLOW (the fork target)
-	{"shell_rm_rf", `{"path":"/day-of-work"}`, nil},                       // DENY (POLICY_BLOCK), last = clean_stop
+	{"shell_rm_rf", `{"path":"/day-of-work"}`, nil},                             // DENY (POLICY_BLOCK), last = clean_stop
 }
 
 // RunFullSpan executes and stamps the composed four-band run against the real

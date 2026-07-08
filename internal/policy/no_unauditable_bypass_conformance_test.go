@@ -71,11 +71,11 @@ func overrideFloor() adjudicator.Policy {
 		// heuristic set {SELF_MODIFY, MALFORMED, DEFAULT_DENY}; the genuine-danger
 		// reasons below are dropped, which is the whole point.
 		AdvisoryReasons: map[abi.ReasonCode]bool{
-			abi.ReasonSelfModify:  true,
-			abi.ReasonMalformed:   true,
-			abi.ReasonDefaultDeny: true,
-			abi.ReasonPolicyBlock: true,
-			abi.ReasonSecretExfil: true,
+			abi.ReasonSelfModify:          true,
+			abi.ReasonMalformed:           true,
+			abi.ReasonDefaultDeny:         true,
+			abi.ReasonPolicyBlock:         true,
+			abi.ReasonSecretExfil:         true,
 			egressfloor.ReasonEgressBlock: true,
 		},
 		Deny: map[string]abi.ReasonCode{
@@ -209,15 +209,15 @@ func TestNoUnauditableBypass(t *testing.T) {
 		p := overrideFloor()
 		a := adjudicator.New(p)
 		calls := []struct{ tool, args string }{
-			{"Read", `{"file_path":"README.md"}`},                                  // affirmative in-git grant
-			{"git_push", `{}`},                                                     // hard deny
-			{"exfiltrate", `{}`},                                                   // hard deny
-			{"Bash", `{"command":"rm -rf /tmp/x"}`},                                // hard deny (arg value)
-			{"WebFetch", `{"url":"http://169.254.169.254/latest/meta-data/"}`},     // hard deny (egress)
-			{"Edit", `{"file_path":"internal/kernel/x.go"}`},                       // witnessed override (advisory self-modify)
-			{"weird_tool", `{}`},                                                   // witnessed override (complain)
-			{"search_web", `{"query":"x"}`},                                        // witnessed override (admit-and-log)
-			{"delete_everything", `{}`},                                            // write-shaped, not granted → hard default deny
+			{"Read", `{"file_path":"README.md"}`},                              // affirmative in-git grant
+			{"git_push", `{}`},                                                 // hard deny
+			{"exfiltrate", `{}`},                                               // hard deny
+			{"Bash", `{"command":"rm -rf /tmp/x"}`},                            // hard deny (arg value)
+			{"WebFetch", `{"url":"http://169.254.169.254/latest/meta-data/"}`}, // hard deny (egress)
+			{"Edit", `{"file_path":"internal/kernel/x.go"}`},                   // witnessed override (advisory self-modify)
+			{"weird_tool", `{}`},                                               // witnessed override (complain)
+			{"search_web", `{"query":"x"}`},                                    // witnessed override (admit-and-log)
+			{"delete_everything", `{}`},                                        // write-shaped, not granted → hard default deny
 		}
 		for _, c := range calls {
 			v := a.Adjudicate(context.Background(), bypassCall(c.tool, c.args))
