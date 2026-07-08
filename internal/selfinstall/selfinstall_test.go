@@ -108,6 +108,51 @@ func (r *recordTmp) run(_ context.Context, _, name string, args ...string) (stri
 	return "ok", true
 }
 
+// recordBuild captures the args of the `go build` invocation so a test can assert what
+// ldflags (if any) the build stage passed.
+type recordBuild struct{ buildArgs []string }
+
+func (r *recordBuild) run(_ context.Context, _, name string, args ...string) (string, bool) {
+	if name == "go" && len(args) > 0 && args[0] == "build" {
+		r.buildArgs = append([]string{}, args...)
+	}
+	return "ok", true
+}
+
+func TestInstallBakesVersionLdflagsWhenVersionFilePresent(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "VERSION"), []byte("9.9.9\n"), 0o644); err != nil {
+		t.Fatalf("seed VERSION: %v", err)
+	}
+	r := &recordBuild{}
+	swap := func(src, dst string) error { return nil }
+
+	res := Install(context.Background(), r.run, swap, Options{RepoRoot: repo, Target: filepath.Join(repo, "fak")})
+	if !res.Installed {
+		t.Fatalf("got %+v, want Installed", res)
+	}
+	joined := strings.Join(r.buildArgs, " ")
+	const want = "-X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion=9.9.9"
+	if !strings.Contains(joined, "-ldflags") || !strings.Contains(joined, want) {
+		t.Fatalf("build args = %v, want -ldflags carrying %q (so the installed binary's version does not depend on a guard's cwd)", r.buildArgs, want)
+	}
+	// The package + output target must still be present after the ldflags.
+	if !strings.Contains(joined, "-o") || !strings.HasSuffix(joined, "./cmd/fak") {
+		t.Fatalf("build args = %v, want a well-formed `-o <tmp> ./cmd/fak` tail", r.buildArgs)
+	}
+}
+
+func TestInstallOmitsLdflagsWhenNoVersionFile(t *testing.T) {
+	repo := t.TempDir() // deliberately no VERSION file
+	r := &recordBuild{}
+	swap := func(src, dst string) error { return nil }
+
+	Install(context.Background(), r.run, swap, Options{RepoRoot: repo, Target: filepath.Join(repo, "fak")})
+	if strings.Contains(strings.Join(r.buildArgs, " "), "-ldflags") {
+		t.Fatalf("build args = %v, want NO -ldflags when the tree has no VERSION (behavior unchanged from before)", r.buildArgs)
+	}
+}
+
 func TestPrepareOriginAddsAndCleansWorktree(t *testing.T) {
 	r := &scriptRunner{}
 	dir, cleanup, err := PrepareOrigin(context.Background(), r.run, "/repo", "origin/main", "/repo/.wt")

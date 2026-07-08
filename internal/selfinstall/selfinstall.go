@@ -10,7 +10,9 @@
 // once; the gate is therefore not optional polish — it is the whole point.
 //
 // The flow (Install):
-//  1. build   `go build -o <tmp> ./cmd/fak`     — a tree that won't compile stops here.
+//  1. build   `go build [-ldflags -X …BuildVersion=<VERSION>] -o <tmp> ./cmd/fak` — a tree
+//     that won't compile stops here; the ldflags bake the tree's VERSION into the
+//     binary so its reported version does not depend on a guard's runtime cwd.
 //  2. vet     `go vet ./cmd/fak`                — a vet failure stops here.
 //  3. smoke   `<tmp> version`                   — the built binary must run + self-report.
 //  4. swap    atomic replace of target by <tmp> — only reached when 1–3 all pass.
@@ -23,6 +25,7 @@ package selfinstall
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -74,8 +77,14 @@ func Install(ctx context.Context, run Runner, swap Swapper, opts Options) Result
 		tmp = opts.Target + ".new"
 	}
 
-	// 1. build the candidate.
-	if out, ok := run(ctx, opts.RepoRoot, "go", "build", "-o", tmp, "./cmd/fak"); !ok {
+	// 1. build the candidate, baking the tree's VERSION into it as appversion.BuildVersion
+	//    (see versionLDFlags for why this is load-bearing, not cosmetic).
+	buildArgs := []string{"build"}
+	if ld := versionLDFlags(opts.RepoRoot); ld != "" {
+		buildArgs = append(buildArgs, "-ldflags", ld)
+	}
+	buildArgs = append(buildArgs, "-o", tmp, "./cmd/fak")
+	if out, ok := run(ctx, opts.RepoRoot, "go", buildArgs...); !ok {
 		return Result{Stage: StageBuild, Detail: trim(out)}
 	}
 	// 2. vet the package (catches a compiling-but-suspect tree).
@@ -121,6 +130,34 @@ func PrepareOrigin(ctx context.Context, run Runner, repoRoot, ref, dir string) (
 		_, _ = run(ctx, repoRoot, "git", "worktree", "prune")
 	}
 	return dir, cleanup, nil
+}
+
+// versionLDFlags returns the `-ldflags` value that bakes RepoRoot's VERSION marker into the
+// built binary as appversion.BuildVersion, or "" when the tree has no readable VERSION file
+// (in which case the build stays exactly as before — no ldflags).
+//
+// Why this is load-bearing, not polish: a bare `go build ./cmd/fak` produces a binary with
+// NO embedded version, so at RUN time appversion.Current() falls through to walking the
+// filesystem upward for a VERSION file — which makes a guard's reported version depend on
+// its working directory. A guard launched with a cwd under a PARENT checkout inherits that
+// parent's marker: on the fleet host, guards launched under C:\work reported the workspace's
+// stale C:\work\VERSION ("0.1.1") instead of the fleet binary's actual version, and the same
+// binary reported "dev" / the real version / the stale one purely by where it was launched.
+// BuildVersion wins over the VERSION walk in appversion.Current() precisely so a
+// shipped/installed binary "reports the version it was built with instead of inheriting a
+// parent checkout's marker" — self-update simply never set it. Baking it here (the same
+// -X the release-artifacts workflow uses) pins the installed binary's version to the commit
+// it was built from, independent of wherever a guard is later launched.
+func versionLDFlags(repoRoot string) string {
+	b, err := os.ReadFile(filepath.Join(repoRoot, "VERSION"))
+	if err != nil {
+		return ""
+	}
+	v := strings.TrimSpace(string(b))
+	if v == "" {
+		return ""
+	}
+	return "-X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion=" + v
 }
 
 func trim(s string) string {
