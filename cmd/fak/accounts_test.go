@@ -564,5 +564,79 @@ func TestRunAccountsRemoveMovesRolesOffTombstone(t *testing.T) {
 	}
 }
 
+// TestAccountsCheckQuantifiesDriftAndFlagsHandEdit covers #3214: `check` reports a +N/-M
+// magnitude for any drift, warns only when the on-disk view carries hand-authored content
+// `sync` would clobber, and prints an inline diff under --diff.
+func TestAccountsCheckQuantifiesDriftAndFlagsHandEdit(t *testing.T) {
+	home := t.TempDir()
+	seat := mkHome(t, home, ".claude-a-seat", "a@example.test", true)
+	reg := `{"version":"fak-config-homes/v1","homes":[` +
+		`{"name":"a-seat","dir":"` + jsonPath(seat) + `","default":true}` +
+		`]}`
+	regPath := filepath.Join(home, "registry.json")
+	if err := os.WriteFile(regPath, []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	jobView := filepath.Join(home, "claude_accounts.yaml")
+
+	// Generate the canonical projection first, so we can perturb it in known ways.
+	var out, errb bytes.Buffer
+	if rc := runAccounts(&out, &errb, []string{"sync", "--registry", regPath, "--home", home, "--dos-view", "", "--job-view", jobView}); rc != 0 {
+		t.Fatalf("sync rc=%d stderr=%s", rc, errb.String())
+	}
+	projection, err := os.ReadFile(jobView)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// (1) Stale-but-clean drift: drop the last two projection lines. `check` reports a
+	// magnitude and must NOT warn about a hand-edit (the on-disk file is a strict subset of
+	// what the generator emits — every line is generator-shaped).
+	lines := strings.Split(strings.TrimRight(string(projection), "\n"), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("projection unexpectedly short (%d lines):\n%s", len(lines), projection)
+	}
+	stale := strings.Join(lines[:len(lines)-2], "\n") + "\n"
+	if err := os.WriteFile(jobView, []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errb.Reset()
+	if rc := runAccounts(&out, &errb, []string{"check", "--registry", regPath, "--home", home, "--dos-view", "", "--job-view", jobView}); rc != 1 {
+		t.Fatalf("stale check rc=%d want drift exit 1; stdout=%s", rc, out.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "DRIFT job:") || !strings.Contains(got, "(+") || !strings.Contains(got, "-0)") {
+		t.Fatalf("stale check should carry a +N/-0 magnitude:\n%s", got)
+	}
+	if strings.Contains(got, "hand-edited") {
+		t.Fatalf("stale (generator-shaped) drift must NOT be flagged as hand-edited:\n%s", got)
+	}
+
+	// (2) Hand-edited drift: prepend a doc header of comment lines the generator never emits.
+	// `check` must additionally warn that `sync` will overwrite the edits, and --diff must
+	// show the removed header lines.
+	handEdited := "# ==== HAND-AUTHORED DOC HEADER ====\n# rationale line two\n# rationale line three\n" + string(projection)
+	if err := os.WriteFile(jobView, []byte(handEdited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errb.Reset()
+	if rc := runAccounts(&out, &errb, []string{"check", "--registry", regPath, "--home", home, "--dos-view", "", "--job-view", jobView, "--diff"}); rc != 1 {
+		t.Fatalf("hand-edited check rc=%d want drift exit 1; stdout=%s", rc, out.String())
+	}
+	got = out.String()
+	for _, want := range []string{
+		"DRIFT job:",
+		"appears hand-edited",
+		"`sync` will overwrite those edits",
+		"- # ==== HAND-AUTHORED DOC HEADER ====", // --diff shows the removed header line
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("hand-edited check missing %q:\n%s", want, got)
+		}
+	}
+}
+
 // jsonPath escapes a Windows path's backslashes for embedding in a JSON string literal.
 func jsonPath(p string) string { return strings.ReplaceAll(p, `\`, `\\`) }

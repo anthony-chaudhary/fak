@@ -90,6 +90,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit JSON instead of a table")
 	asEnv := fs.Bool("env", false, "(resolve) print CLAUDE_CONFIG_DIR=<dir> for eval/wrappers")
 	pin := fs.Bool("pin", false, "(resolve) PIN to the exact seat (strict); default rehomes to a live seat")
+	checkDiff := fs.Bool("diff", false, "(check) print the line diff (registry projection vs on-disk view) inline for any drifting view, instead of only the +N/-M magnitude")
 	dryRun := fs.Bool("dry-run", false, "(pull) print what would be pulled without copying; (launch) print the launch plan without starting the agent")
 	gateDir := fs.String("dir", "", "(gate-write) target config dir to gate a stdin setup-token write against")
 	write := fs.Bool("write", false, "(discover) MERGE the disk scan into the registry and write it back (preserving authored policy), instead of emitting to stdout; (doctor) APPLY the auto-fixable repairs instead of only reporting them")
@@ -355,7 +356,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		return 0
 
 	case "check":
-		return accountsCheck(stdout, stderr, *registryPath, *dosView, *jobView)
+		return accountsCheck(stdout, stderr, *registryPath, *dosView, *jobView, *checkDiff)
 
 	case "version":
 		return accountsVersion(stdout, *asJSON)
@@ -874,7 +875,7 @@ func accountsGateWrite(stdout, stderr io.Writer, gateDir, homeDir string, asJSON
 // accountsCheck is the drift detector: RED (exit 1) if any on-disk view differs from a
 // freshly-rendered projection of the registry. The ratchet that keeps the generated views from
 // silently diverging from the canonical source.
-func accountsCheck(stdout, stderr io.Writer, registryPath, dosView, jobView string) int {
+func accountsCheck(stdout, stderr io.Writer, registryPath, dosView, jobView string, showDiff bool) int {
 	reg, err := accounts.LoadRegistry(registryPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
@@ -896,8 +897,19 @@ func accountsCheck(stdout, stderr io.Writer, registryPath, dosView, jobView stri
 			continue
 		}
 		if string(got) != want {
-			fmt.Fprintf(stdout, "DRIFT %s: %s differs from registry projection%s — run `fak accounts sync`\n",
-				t.view, t.path, accountsViewConsumerHint(t.view))
+			// Quantify the drift so a 2-line staleness reads differently from a wholesale
+			// rewrite, and warn when the on-disk file carries hand-authored content `sync`
+			// would silently clobber (the load-bearing distinction: sync is safe for a stale
+			// projection, lossy for a hand-edit). Message-only — exit code is unchanged.
+			d := summarizeViewDrift(string(got), want)
+			fmt.Fprintf(stdout, "DRIFT %s: %s differs from registry projection%s (+%d/-%d) — run `fak accounts sync`\n",
+				t.view, t.path, accountsViewConsumerHint(t.view), d.added, d.removed)
+			if d.handEdited {
+				fmt.Fprintf(stdout, "      note: local file appears hand-edited (%d comment line(s) the generator never emits); `sync` will overwrite those edits\n", d.handEditLines)
+			}
+			if showDiff {
+				printViewDiff(stdout, d.ops)
+			}
 			drift++
 			continue
 		}
@@ -908,6 +920,117 @@ func accountsCheck(stdout, stderr io.Writer, registryPath, dosView, jobView stri
 		return 1
 	}
 	return 0
+}
+
+// viewDiffOp is one changed line in a view drift: '-' is on disk but not in the projection
+// (sync REMOVES it), '+' is in the projection but not on disk (sync ADDS it).
+type viewDiffOp struct {
+	sign byte
+	line string
+}
+
+// viewDrift is the quantified difference between an on-disk view and its registry projection:
+// the line-count delta `sync` would apply, whether the on-disk file carries comment lines the
+// generator never emits (a hand-edit sync will clobber), and the ordered changed-line ops for
+// an optional inline diff.
+type viewDrift struct {
+	added         int
+	removed       int
+	handEdited    bool
+	handEditLines int
+	ops           []viewDiffOp
+}
+
+// summarizeViewDrift diffs the on-disk view (got) against its freshly-rendered projection
+// (want). The generator's comment output is fixed (the generatedHeader banner), so any comment
+// line present on disk but absent from the projection is hand-authored — content `sync` will
+// overwrite. That is the signal that separates a benign, sync-fixable staleness from a lossy
+// hand-edit.
+func summarizeViewDrift(got, want string) viewDrift {
+	gotLines := splitViewLines(got)
+	wantLines := splitViewLines(want)
+	ops := diffViewLines(gotLines, wantLines)
+	d := viewDrift{ops: ops}
+	for _, op := range ops {
+		if op.sign == '+' {
+			d.added++
+		} else {
+			d.removed++
+		}
+	}
+	wantSet := make(map[string]bool, len(wantLines))
+	for _, ln := range wantLines {
+		wantSet[ln] = true
+	}
+	for _, ln := range gotLines {
+		if strings.HasPrefix(strings.TrimSpace(ln), "#") && !wantSet[ln] {
+			d.handEdited = true
+			d.handEditLines++
+		}
+	}
+	return d
+}
+
+// splitViewLines splits view text into lines, ignoring a single trailing newline so the counts
+// reflect content lines (both sides are split identically, so the comparison stays symmetric).
+func splitViewLines(s string) []string {
+	s = strings.TrimSuffix(s, "\n")
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
+}
+
+// diffViewLines returns the changed lines transforming got -> want, in order, via a standard
+// LCS walk (so a reordered row counts once, not as an unrelated add+remove). Rosters are small
+// (dozens of lines), so the O(n*m) table is inexpensive.
+func diffViewLines(got, want []string) []viewDiffOp {
+	n, m := len(got), len(want)
+	dp := make([][]int, n+1)
+	for i := range dp {
+		dp[i] = make([]int, m+1)
+	}
+	for i := n - 1; i >= 0; i-- {
+		for j := m - 1; j >= 0; j-- {
+			switch {
+			case got[i] == want[j]:
+				dp[i][j] = dp[i+1][j+1] + 1
+			case dp[i+1][j] >= dp[i][j+1]:
+				dp[i][j] = dp[i+1][j]
+			default:
+				dp[i][j] = dp[i][j+1]
+			}
+		}
+	}
+	var ops []viewDiffOp
+	i, j := 0, 0
+	for i < n && j < m {
+		switch {
+		case got[i] == want[j]:
+			i++
+			j++
+		case dp[i+1][j] >= dp[i][j+1]:
+			ops = append(ops, viewDiffOp{'-', got[i]})
+			i++
+		default:
+			ops = append(ops, viewDiffOp{'+', want[j]})
+			j++
+		}
+	}
+	for ; i < n; i++ {
+		ops = append(ops, viewDiffOp{'-', got[i]})
+	}
+	for ; j < m; j++ {
+		ops = append(ops, viewDiffOp{'+', want[j]})
+	}
+	return ops
+}
+
+// printViewDiff prints the changed-line ops as a `-`/`+` diff, indented under the DRIFT line.
+func printViewDiff(stdout io.Writer, ops []viewDiffOp) {
+	for _, op := range ops {
+		fmt.Fprintf(stdout, "      %c %s\n", op.sign, op.line)
+	}
 }
 
 func accountsViewConsumerHint(view accounts.ViewName) string {
