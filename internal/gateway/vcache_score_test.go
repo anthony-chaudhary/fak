@@ -12,7 +12,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/vcachescore"
 )
 
-func TestHandleFakVCacheScoreReturnsPlannedReportWhenIdle(t *testing.T) {
+func TestHandleFakVCacheScoreReturnsForecastReportWhenIdle(t *testing.T) {
 	restore := swapCacheObserver(cacheobs.New())
 	defer restore()
 
@@ -25,8 +25,10 @@ func TestHandleFakVCacheScoreReturnsPlannedReportWhenIdle(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &rep); err != nil {
 		t.Fatalf("decode: %v\n%s", err, rec.Body.String())
 	}
-	if rep.Schema != "fak.vcache.score.v1" || rep.ActiveSource != "planned" {
-		t.Fatalf("report schema/source=%q/%q, want planned vcache score", rep.Schema, rep.ActiveSource)
+	// Idle (no provider witness) headlines the modeled FORECAST, honestly labeled --
+	// never a modeled number dressed as observed (#1089 C_MODELED_NOT_OBSERVED).
+	if rep.Schema != "fak.vcache.score.v1" || rep.ActiveSource != vcachescore.ActiveSourceForecast {
+		t.Fatalf("report schema/source=%q/%q, want forecast vcache score", rep.Schema, rep.ActiveSource)
 	}
 	if rep.Planes.ProviderObserved.Available || rep.AgenticActivation.Active {
 		t.Fatalf("idle API must not invent provider or fak-owned activation evidence: planes=%+v activation=%+v", rep.Planes, rep.AgenticActivation)
