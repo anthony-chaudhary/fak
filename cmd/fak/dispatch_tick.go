@@ -66,8 +66,14 @@ type dispatchTickOptions struct {
 	CodexLoopGate           string
 	CodexLoopGateSinceHours float64
 	CodexLoopGateLimit      int
-	Account                 *dispatchtick.Account
-	Membership              *dispatchtick.Membership
+	// FocusHold flips the focus WIP-breadth term (#3223) from its default WARN posture to
+	// HOLD: when the fleet is at/over the focusscore WIP cap, a spawn that OPENS a new
+	// objective is refused (FOCUS_WIP_SATURATED) instead of merely advised. Continuation of
+	// an already-open objective is never held. Default off (warn), so the fleet is
+	// byte-identical until an operator opts in via --focus-hold / FLEET_DISPATCH_FOCUS_HOLD.
+	FocusHold  bool
+	Account    *dispatchtick.Account
+	Membership *dispatchtick.Membership
 }
 
 type dispatchLanePick struct {
@@ -147,6 +153,7 @@ var dispatchTickBenignActions = map[string]bool{
 	"lane_leased":             true,
 	"broker_denied":           true,
 	"codex_loop_gate_refused": true,
+	"focus_hold":              true,
 }
 
 func dispatchTickExitCode(payload map[string]any) int {
@@ -187,6 +194,7 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	workerModel := fs.String("worker-model", "", "pin the claude worker to this exact --model id (un-blanks the seat default; empty falls back to the lane_models pin/benchmark gate/seat default)")
 	pinWorkerModel := fs.Bool("pin-worker-model", false, "benchmark gate: pin the claude worker to the account/default model (model-accounting run) instead of the seat default + fallback chain")
 	modelDowngrade := fs.Bool("model-downgrade", false, "Layer-2 in-tick re-dispatch: when the target's last slot exited model-switchable (usage_cap/model_unknown/rate_limit), re-dispatch it on the next downgrade-chain model")
+	focusHold := fs.Bool("focus-hold", false, "focus WIP backpressure (#3223): HOLD (refuse) a spawn that OPENS a new objective while the fleet is at/over the focusscore WIP cap, instead of the default WARN (advise + still spawn); continuation of an already-open objective is never held ($FLEET_DISPATCH_FOCUS_HOLD also enables)")
 	codexLoopGate := fs.String("codex-loop-gate", dispatchCodexLoopGateDefaultThreshold(), "for live Codex workers, audit recent Codex sessions before spawn and refuse at threshold: loop|action|off (default: $FLEET_CODEX_LOOP_GATE or loop)")
 	codexLoopGateSinceHours := fs.Float64("codex-loop-gate-since-hours", dispatchCodexLoopGateDefaultSinceHoursValue(), "with --codex-loop-gate, only scan Codex sessions modified within N hours (0 = all)")
 	codexLoopGateLimit := fs.Int("codex-loop-gate-limit", dispatchCodexLoopGateDefaultLimitValue(), "with --codex-loop-gate, maximum newest Codex sessions to scan")
@@ -252,6 +260,7 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 		WorkerModel:             firstString(strings.TrimSpace(*workerModel), strings.TrimSpace(os.Getenv("FLEET_DISPATCH_WORKER_MODEL"))),
 		PinWorkerModel:          *pinWorkerModel || dispatchBoolValue(os.Getenv("FLEET_DISPATCH_PIN_MODEL")),
 		ModelDowngrade:          *modelDowngrade || dispatchBoolValue(os.Getenv("FLEET_DISPATCH_MODEL_DOWNGRADE")),
+		FocusHold:               *focusHold || dispatchBoolValue(os.Getenv("FLEET_DISPATCH_FOCUS_HOLD")),
 		CodexLoopGate:           strings.TrimSpace(*codexLoopGate),
 		CodexLoopGateSinceHours: maxFloat64(0, *codexLoopGateSinceHours),
 		CodexLoopGateLimit:      *codexLoopGateLimit,
@@ -419,6 +428,17 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		payload["action"] = "refused"
 		payload["verdict"] = firstString(dispatchMapString(pre, "verdict"), "REFUSE")
 		payload["reason"] = "preflight refused: " + dispatchMapString(pre, "reason")
+		// #3109 self-heal: if the refusal is (partly) driven by unattributed_live orphans,
+		// preflight surfaced their exact PIDs (dispatch marker + no live lease). Reap them
+		// here -- refuse THIS tick, but tree-kill the poison so the NEXT tick's count
+		// recovers instead of staying wedged until a separately-scheduled janitor runs.
+		// Live ticks only: a dry run stays observation-only (worklist surfaced, no kill).
+		if worklist, ok := pre["janitor_worklist"].([]int); ok && len(worklist) > 0 {
+			payload["janitor_worklist"] = worklist
+			if opts.Live {
+				payload["janitor_reaped"] = dispatchReapWorklist(worklist)
+			}
+		}
 		return finish(payload), nil
 	}
 	if pick.Lane == "" {
@@ -593,6 +613,25 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 			payload["verdict"] = "CODEX_LOOP_GATE_REFUSED"
 			payload["reason"] = fmt.Sprintf("Codex loop gate refused live dispatch: fail-on=%s verdict=%s reason=%s",
 				dispatchMapString(gate, "fail_on"), dispatchMapString(gate, "verdict"), dispatchMapString(gate, "reason"))
+			return finish(payload), nil
+		}
+	}
+
+	// Focus WIP-breadth backpressure (#3223): warn-first. When the fleet is at/over the
+	// focusscore WIP cap AND this spawn OPENS a new objective, attach the FOCUS_WIP_SATURATED
+	// advisory so `fak dispatch status` / the tick JSON surface it distinctly from the
+	// rate-limit and collision holds. Default posture WARN (advise + still spawn, so the
+	// live fleet is byte-identical below cap and on a continuation); the --focus-hold /
+	// FLEET_DISPATCH_FOCUS_HOLD posture instead REFUSES opening the new objective. It never
+	// blocks a continuation of an already-open objective and runs AFTER every higher-precedence
+	// gate, so it is the last, narrowest throttle before a genuinely new concurrent objective.
+	if focusAdm := dispatchEvaluateFocus(root, dispatchFocusHoldPosture(opts), target); focusAdm.Advise {
+		payload["focus"] = focusAdm.Map()
+		if focusAdm.Hold {
+			payload["ok"] = false
+			payload["action"] = "focus_hold"
+			payload["verdict"] = dispatchtick.FocusWIPSaturated
+			payload["reason"] = focusAdm.Reason
 			return finish(payload), nil
 		}
 	}

@@ -24,8 +24,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/focusscore"
 )
 
 const dispatchStatusSchema = "fleet-dispatch-status/1"
@@ -40,6 +44,20 @@ type dispatchStatusWorker struct {
 	Tree    []string `json:"tree"`
 }
 
+// dispatchStatusFocus is the fleet focus WIP-breadth posture (#3223), re-derived from the
+// focusscore fold over the trajctl ledger. It surfaces the same signal the tick throttles
+// new-objective spawns on, so an operator sees a focus hold/warn DISTINCTLY from the
+// rate-limit and collision holds. Present only when the trajctl ledger declared >= 1
+// objective (otherwise there is no focus signal to report and the snapshot stays byte-
+// identical to today).
+type dispatchStatusFocus struct {
+	Active    int    `json:"active"`     // active (concurrently live) objectives -- breadth
+	WIPCap    int    `json:"wip_cap"`    // the pinned WIP ceiling
+	ExcessWIP int    `json:"excess_wip"` // max(0, active-cap): objectives beyond the cap
+	Saturated bool   `json:"saturated"`  // active >= cap: a new-objective spawn is throttled
+	Posture   string `json:"posture"`    // "warn" | "hold": posture a tick WOULD apply now
+}
+
 // dispatchStatusSnapshot is the fleet-dispatch-status/1 payload.
 type dispatchStatusSnapshot struct {
 	Schema          string                 `json:"schema"`
@@ -48,12 +66,14 @@ type dispatchStatusSnapshot struct {
 	IssuesInFlight  []int                  `json:"issues_in_flight"`
 	LanesHeld       []string               `json:"lanes_held"`
 	Workers         []dispatchStatusWorker `json:"workers"`
+	Focus           *dispatchStatusFocus   `json:"focus,omitempty"`
 }
 
 func runDispatchStatus(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("dispatch status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	runsDir := fs.String("runs-dir", dispatchProgressRunsDir, "directory of dispatch worker logs")
+	workspace := fs.String("workspace", "", "workspace root for the focus WIP-breadth section (default: repo root)")
 	asJSON := fs.Bool("json", false, "emit the fleet-dispatch-status/1 JSON payload")
 	asMarkdown := fs.Bool("markdown", false, "render the operator status card as Markdown")
 	if !parseFlags(fs, argv) {
@@ -68,7 +88,11 @@ func runDispatchStatus(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	snap := dispatchStatusScan(*runsDir)
+	root := *workspace
+	if root == "" {
+		root = repoRoot()
+	}
+	snap := dispatchStatusScan(*runsDir, root)
 
 	if *asJSON {
 		if err := writeIndentedJSON(stdout, snap); err != nil {
@@ -85,10 +109,36 @@ func runDispatchStatus(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
+// dispatchStatusFold reads the focusscore fold over root's trajctl ledger and returns the
+// fleet focus WIP-breadth posture, or nil when there is no ledger signal (so the snapshot
+// stays byte-identical to today). Posture reflects what a tick WOULD apply now, resolved
+// from FLEET_DISPATCH_FOCUS_HOLD the same way the tick's --focus-hold default does.
+func dispatchStatusFold(root string) *dispatchStatusFocus {
+	if strings.TrimSpace(root) == "" {
+		return nil
+	}
+	ev := focusscore.Build(focusscore.Options{Root: root}).Evidence
+	if !ev.LedgerPresent {
+		return nil
+	}
+	posture := dispatchtick.FocusPostureWarn
+	if dispatchBoolValue(os.Getenv("FLEET_DISPATCH_FOCUS_HOLD")) {
+		posture = dispatchtick.FocusPostureHold
+	}
+	return &dispatchStatusFocus{
+		Active:    ev.Active,
+		WIPCap:    ev.WIPCap,
+		ExcessWIP: ev.ExcessWIP,
+		Saturated: ev.WIPCap > 0 && ev.Active >= ev.WIPCap,
+		Posture:   posture,
+	}
+}
+
 // dispatchStatusScan folds the runs directory into the live-worker snapshot. It is
 // pure over the filesystem: the same runs-dir yields the same snapshot, so a test
-// drives it hermetically by planting resolve-*.log/.pid sidecars for a live pid.
-func dispatchStatusScan(runsDir string) dispatchStatusSnapshot {
+// drives it hermetically by planting resolve-*.log/.pid sidecars for a live pid. root
+// scopes the focus WIP-breadth section (empty disables it).
+func dispatchStatusScan(runsDir, root string) dispatchStatusSnapshot {
 	scopes := liveResolutionScopes(runsDir)
 	workers := make([]dispatchStatusWorker, 0, len(scopes))
 	issueSet := map[int]bool{}
@@ -124,7 +174,26 @@ func dispatchStatusScan(runsDir string) dispatchStatusSnapshot {
 		IssuesInFlight:  issues,
 		LanesHeld:       lanes,
 		Workers:         workers,
+		Focus:           dispatchStatusFold(root),
 	}
+}
+
+// dispatchStatusFocusLine renders the focus WIP-breadth posture as one operator line,
+// labeled "focus:" so it reads DISTINCTLY from a rate-limit or collision hold. Returns ""
+// when there is no focus signal.
+func dispatchStatusFocusLine(f *dispatchStatusFocus) string {
+	if f == nil {
+		return ""
+	}
+	if !f.Saturated {
+		return fmt.Sprintf("focus: %d active objective(s) within WIP cap %d — new-objective spawns clear", f.Active, f.WIPCap)
+	}
+	stance := "WARNED (advisory, still dispatches)"
+	if f.Posture == dispatchtick.FocusPostureHold {
+		stance = "HELD (--focus-hold: new objectives refused)"
+	}
+	return fmt.Sprintf("focus: %d active objective(s) at/over WIP cap %d (%d over) — new-objective spawns %s [%s]",
+		f.Active, f.WIPCap, f.ExcessWIP, stance, dispatchtick.FocusWIPSaturated)
 }
 
 func dispatchStatusLaneField(lanes []string) string {
@@ -139,6 +208,9 @@ func renderDispatchStatus(snap dispatchStatusSnapshot) string {
 	fmt.Fprintf(&b, "dispatch status — %d live worker(s)\n", snap.LiveWorkerCount)
 	fmt.Fprintf(&b, "runs-dir: %s\n", snap.RunsDir)
 	fmt.Fprintf(&b, "lanes held: %s\n", dispatchStatusLaneField(snap.LanesHeld))
+	if line := dispatchStatusFocusLine(snap.Focus); line != "" {
+		fmt.Fprintf(&b, "%s\n", line)
+	}
 	if len(snap.Workers) == 0 {
 		fmt.Fprint(&b, "no live issue-resolution workers\n")
 		return b.String()
@@ -157,7 +229,11 @@ func renderDispatchStatusMarkdown(snap dispatchStatusSnapshot) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "### dispatch status — %d live worker(s)\n\n", snap.LiveWorkerCount)
 	fmt.Fprintf(&b, "- runs-dir: `%s`\n", snap.RunsDir)
-	fmt.Fprintf(&b, "- lanes held: %s\n\n", dispatchStatusLaneField(snap.LanesHeld))
+	fmt.Fprintf(&b, "- lanes held: %s\n", dispatchStatusLaneField(snap.LanesHeld))
+	if line := dispatchStatusFocusLine(snap.Focus); line != "" {
+		fmt.Fprintf(&b, "- %s\n", line)
+	}
+	b.WriteString("\n")
 	if len(snap.Workers) == 0 {
 		fmt.Fprint(&b, "_no live issue-resolution workers_\n")
 		return b.String()

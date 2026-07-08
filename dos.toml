@@ -1008,6 +1008,22 @@ summary  = "the spawn preflight refused because a burst of GENUINE concurrency r
 fix      = "let the throttled backend drain and route new work to a DIFFERENT provider/backend (GLM/opencode, codex, another Claude seat) while the 429 burst ages out of the window; the preflight re-admits this backend once recent rate_limit exits fall below the threshold. Tune with FAK_RATELIMIT_WINDOW / FAK_RATELIMIT_MIN_429 (0/off disables). The fold abstains below the threshold and never RAISES the cap. Floor: go test ./internal/dispatchtick -run TestApplyRateLimitBackpressure."
 see_also = ["internal/dispatchtick/preflight_ratelimit.go", "internal/dispatchtick/witness.go", "docs/safe-to-raise-cap-checklist.md", "GATE_PRESSURE"]
 
+# Focus WIP-breadth backpressure (#3223, focus & priorities track #281/#2443): the dispatch
+# tick folds the focusscore breadth signal (the count of ACTIVE trajectory-control objectives
+# vs the pinned WIP cap, re-derived from docs/nightrun/trajctl.jsonl -- no new source of truth)
+# into the spawn decision. When the fleet is at/over the WIP cap AND a spawn would OPEN a NEW
+# concurrent objective, the tick emits this token so a loop/operator sees a focus hold/warn
+# distinctly from a rate-limit (RATE_LIMIT_BACKOFF) or collision (COLLISION_RISK) hold. It is
+# WARN-FIRST (advisory, still dispatches) by default -- refusal=false -- and only becomes a hard
+# hold under the explicit --focus-hold / FLEET_DISPATCH_FOCUS_HOLD opt-in. It NEVER blocks work
+# that CONTINUES an already-open objective: it bounds fan-out, not convergence.
+[reasons.FOCUS_WIP_SATURATED]
+category = "OPERATOR_GATE"
+refusal  = false
+summary  = "A dispatch spawn would OPEN a new concurrent objective while fleet breadth is at/over the focusscore WIP cap (active objectives >= cap). Warn-first: advisory by default (still dispatches), upgraded to a hold that skips the new-objective spawn under --focus-hold / FLEET_DISPATCH_FOCUS_HOLD. Continuation of an already-open objective is never held -- this bounds fan-out, not convergence work."
+fix      = "Converge before broadening: pause or meet an active objective to get back under the WIP cap, or continue an already-open objective (never held) instead of opening a new one. The signal is re-derived from the trajctl ledger -- lower it by converging, not by editing a file. Tune posture with --focus-hold / FLEET_DISPATCH_FOCUS_HOLD. Floor: go test ./internal/dispatchtick -run TestEvaluateFocusAdmission."
+see_also = ["internal/dispatchtick/preflight_focus.go", "internal/focusscore/focusscore.go", "cmd/fak/dispatch_tick_focus.go", "RATE_LIMIT_BACKOFF", "COLLISION_RISK"]
+
 # Verification-ladder INDETERMINATE (#1210, C2/G2 of the agent-programming-grammar
 # epic #1208): the first-class verdict the declarable verification ladder
 # (docs/standards/verification-ladder-spec.md) folds to when a cheap rung could NOT
