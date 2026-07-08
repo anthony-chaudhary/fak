@@ -90,8 +90,10 @@ The same way you consume any log-based CDC feed — by **offset**:
    replayed event is safe to apply twice.
 4. **Visibility.** A tenant drains only its own mutations plus global broadcasts.
 
-The consumer contract and a reference consumer are being written up in
-[#3173](https://github.com/anthony-chaudhary/fak/issues/3173).
+The full consumer contract — all five habits — and a reference consumer that
+encodes them are in
+[Consuming the fak change feed](../integrations/consuming-the-fak-changes-feed.md)
+(reference code: [`pkg/fakclient/changes_consumer.go`](../../pkg/fakclient/changes_consumer.go)).
 
 ## Why does an agent kernel need CDC at all?
 
