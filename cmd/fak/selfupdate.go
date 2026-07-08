@@ -217,20 +217,6 @@ func reportAsideFootprint(target string) {
 		filepath.Base(target), fp.Count, humanBytes(fp.Bytes), fp.DeadCount, humanBytes(fp.DeadBytes))
 }
 
-// humanBytes renders a byte count as a compact human string (KB/MB/GB) for the footprint line.
-func humanBytes(n int64) string {
-	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
-	}
-	div, exp := int64(unit), 0
-	for m := n / unit; m >= unit; m /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
-}
-
 // sameBinary reports whether path refers to this running executable (so --target pointing
 // at ourselves falls back to the in-process binstamp.Self()).
 func sameBinary(path string) bool {
