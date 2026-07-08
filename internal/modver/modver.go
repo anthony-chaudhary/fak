@@ -34,10 +34,10 @@ import (
 const Schema = "fak-module-versions/1"
 
 // Module is one versioned unit: an internal/<leaf> package, a cmd/<dir> binary,
-// or a .github/workflows/<file> CI workflow.
+// a .github/workflows/<file> CI workflow, or a tools/<family> script.
 type Module struct {
-	Name       string   `json:"module"` // e.g. "internal/modver", "cmd/fak", ".github/workflows/ci.yml"
-	Kind       string   `json:"kind"`   // "internal" | "cmd" | "workflow"
+	Name       string   `json:"module"` // e.g. "internal/modver", "cmd/fak", ".github/workflows/ci.yml", "tools/account_probe"
+	Kind       string   `json:"kind"`   // "internal" | "cmd" | "workflow" | "tools"
 	Rev        int      `json:"rev"`    // distinct commits touching the module
 	LastCommit string   `json:"last_commit"`
 	LastDate   string   `json:"last_date"` // committer date (ISO) of the last touch
@@ -84,10 +84,11 @@ func RealRunner(ctx context.Context, dir string, args ...string) ([]byte, error)
 }
 
 // trackedRoots are the path prefixes that define the module key space today:
-// the internal/ leaves and cmd/ binaries, plus the .github/workflows/ CI
-// keyspace (each workflow file is its own module). (tools/, docs/, skills,
-// policies are follow-on key spaces — see the version-everything backlog.)
-var trackedRoots = []string{"internal", "cmd", ".github/workflows"}
+// the internal/ leaves and cmd/ binaries, the .github/workflows/ CI keyspace
+// (each workflow file is its own module), and the tools/ script keyspace (each
+// top-level script family is a module — see moduleOf). (docs/, skills, policies
+// are follow-on key spaces — see the version-everything backlog.)
+var trackedRoots = []string{"internal", "cmd", ".github/workflows", "tools"}
 
 // Snapshot computes the module-version report for the repo at dir: one
 // `git ls-files` to bound the LIVE module set, one `git log --name-only`
@@ -151,24 +152,67 @@ func liveModules(lsFilesOut []byte) map[string]bool {
 // file under a module directory into one module. The .github/workflows/ CI
 // keyspace is file-keyed instead: each workflow file (.github/workflows/<file>)
 // is its own module, since a workflow's unit of behavior is the file, not a
-// directory. Files sitting directly under a root (no module directory) belong
-// to no module, as do nested paths under .github/workflows/ (GitHub Actions
-// does not run workflows in subdirectories).
+// directory. The tools/ script keyspace is family-keyed: each top-level script
+// (tools/<name>.py|.sh|.ps1) is a module keyed by its family (tools/<name>),
+// with a _test sibling folded into the same family, since a de-Python unit is a
+// script plus its test (see toolsFamily). Files sitting directly under a
+// directory root (no module directory) belong to no module, as do nested paths
+// under .github/workflows/ (GitHub Actions does not run workflows in
+// subdirectories) or under tools/ (registries, caches, and fixtures — not the
+// flat frozen-script inventory the de-Python ratchet tracks).
 func moduleOf(path string) (name, kind string, ok bool) {
 	path = strings.TrimSpace(strings.ReplaceAll(path, "\\", "/"))
 	parts := strings.Split(path, "/")
-	if len(parts) < 3 {
+	if len(parts) < 2 {
 		return "", "", false
 	}
 	switch parts[0] {
 	case "internal", "cmd":
+		if len(parts) < 3 {
+			return "", "", false // a file directly under the root belongs to no module
+		}
 		return parts[0] + "/" + parts[1], parts[0], true
 	case ".github":
 		if parts[1] == "workflows" && len(parts) == 3 {
 			return path, "workflow", true
 		}
+	case "tools":
+		// Flat script keyspace: only top-level scripts count (len == 2); nested
+		// paths are registries/caches, not the frozen-script inventory.
+		if len(parts) == 2 {
+			if fam, famOK := toolsFamily(parts[1]); famOK {
+				return "tools/" + fam, "tools", true
+			}
+		}
 	}
 	return "", "", false
+}
+
+// toolsScriptExts are the extensions the tools/ keyspace versions: the frozen
+// Python scripts the de-Python ratchet tracks (internal/pythongate), plus their
+// shell / PowerShell siblings. Data and config files under tools/ (.json, .data,
+// .md, …) are fixtures, not modules, so they are excluded.
+var toolsScriptExts = map[string]bool{".py": true, ".sh": true, ".ps1": true}
+
+// toolsFamily maps a top-level tools/ filename to its module family: the stem
+// with the script extension dropped and a trailing _test folded away, so that
+// foo.py and foo_test.py collapse to the one module tools/foo — a script and its
+// test are one de-Python unit, mirroring how the internal/ and cmd/ directory
+// keyspaces fold a leaf's implementation and tests together. A non-script file
+// (unknown extension) or a bare dotfile returns ok=false.
+func toolsFamily(file string) (fam string, ok bool) {
+	dot := strings.LastIndex(file, ".")
+	if dot <= 0 { // no extension, or a leading-dot dotfile: not a tracked script
+		return "", false
+	}
+	if !toolsScriptExts[file[dot:]] {
+		return "", false
+	}
+	stem := strings.TrimSuffix(file[:dot], "_test")
+	if stem == "" {
+		return "", false
+	}
+	return stem, true
 }
 
 // parseLog folds `git log --pretty=format:%x1e%h%x09%cI --name-only` output
@@ -230,6 +274,61 @@ func (r *Report) JoinScores(scores map[string]float64) int {
 		}
 	}
 	return matched
+}
+
+// View returns a display-only projection of the report: the modules filtered to
+// those whose name has the `only` prefix (empty = every module), sorted by
+// `sortKey`, and truncated to the first `top` after sorting (top <= 0 = all).
+// The receiver is not mutated — the returned Report carries a fresh Modules
+// slice — so the --stamp path, which needs the full name-ordered report, is
+// unaffected by a filtered display view. An unknown sortKey is an error so a
+// typo fails loud rather than silently falling back to an arbitrary order.
+func (r Report) View(only, sortKey string, top int) (Report, error) {
+	less, ok := moduleLess(sortKey)
+	if !ok {
+		return Report{}, fmt.Errorf("modver: unknown sort key %q (want name|rev|date)", sortKey)
+	}
+	mods := make([]Module, 0, len(r.Modules))
+	for _, m := range r.Modules {
+		if only == "" || strings.HasPrefix(m.Name, only) {
+			mods = append(mods, m)
+		}
+	}
+	sort.SliceStable(mods, func(i, j int) bool { return less(mods[i], mods[j]) })
+	if top > 0 && top < len(mods) {
+		mods = mods[:top]
+	}
+	return Report{Head: r.Head, AppVersion: r.AppVersion, Modules: mods}, nil
+}
+
+// moduleLess maps a display sort key to a less-func and whether the key is known.
+// "name" is ascending (the stable snapshot default); "rev" and "date" are
+// DESCENDING so the most-revised / most-recently-touched modules lead — the rows
+// an operator scanning for movement wants first, and the ones a --top view should
+// keep. Ties fall back to name ascending so the order is total and deterministic.
+// LastDate is an ISO-8601 committer date, so a lexicographic compare is
+// chronological.
+func moduleLess(sortKey string) (func(a, b Module) bool, bool) {
+	switch sortKey {
+	case "", "name":
+		return func(a, b Module) bool { return a.Name < b.Name }, true
+	case "rev":
+		return func(a, b Module) bool {
+			if a.Rev != b.Rev {
+				return a.Rev > b.Rev
+			}
+			return a.Name < b.Name
+		}, true
+	case "date":
+		return func(a, b Module) bool {
+			if a.LastDate != b.LastDate {
+				return a.LastDate > b.LastDate
+			}
+			return a.Name < b.Name
+		}, true
+	default:
+		return nil, false
+	}
 }
 
 // LedgerRow is one appended line of the module-versions ledger.

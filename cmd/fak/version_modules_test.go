@@ -36,6 +36,33 @@ func TestRenderModuleReport(t *testing.T) {
 	}
 }
 
+// TestRenderModuleReportNFiltered is the #2490 witness at the CLI render seam:
+// a filtered/truncated view (fewer rows than the repo total) must announce
+// "showing N of M" so a --only/--top view is never mistaken for the whole repo,
+// while an unfiltered view keeps the plain "M modules" header.
+func TestRenderModuleReportNFiltered(t *testing.T) {
+	rep := modverFixtureReport() // 2 modules
+	var full strings.Builder
+	renderModuleReportN(&full, rep, len(rep.Modules))
+	if !strings.Contains(full.String(), "2 modules") || strings.Contains(full.String(), "showing") {
+		t.Errorf("unfiltered header wrong:\n%s", full.String())
+	}
+
+	view, err := rep.View("cmd/", "name", 0) // keep only cmd/fak
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sb strings.Builder
+	renderModuleReportN(&sb, view, len(rep.Modules))
+	out := sb.String()
+	if !strings.Contains(out, "showing 1 of 2 modules") {
+		t.Errorf("filtered header should say 'showing 1 of 2 modules':\n%s", out)
+	}
+	if !strings.Contains(out, "cmd/fak") || strings.Contains(out, "internal/gateway") {
+		t.Errorf("filtered view should contain only cmd/fak:\n%s", out)
+	}
+}
+
 func TestStampModverLedgerRoundtrip(t *testing.T) {
 	root := t.TempDir()
 	rep := modverFixtureReport()

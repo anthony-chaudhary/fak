@@ -36,6 +36,13 @@ func cmdVersion(w io.Writer) {
 		os.Exit(runVersionModules(os.Stdout, os.Stderr, os.Args[3:]))
 	}
 
+	// `fak version trend` — the historical companion to `modules`: fold the
+	// append-only module-versions ledger into a per-module movement summary
+	// (internal/modver.Trend). Reads only what was stamped; no git, no tree.
+	if len(os.Args) > 2 && os.Args[2] == "trend" {
+		os.Exit(runVersionTrend(os.Stdout, os.Stderr, os.Args[3:]))
+	}
+
 	// `fak version --json` — the machine-readable binary identity (commit + dirty
 	// bit + a "stamped" flag). Unlike the human line 1 (appversion.Current(), which
 	// reads the TREE's VERSION file and so cannot reveal a stale binary), this is

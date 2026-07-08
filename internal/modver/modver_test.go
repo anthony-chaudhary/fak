@@ -27,7 +27,19 @@ func TestModuleOf(t *testing.T) {
 		{".github/workflows/nested/x.yml", "", "", false},   // Actions ignores subdirs
 		{".github/actions/setup/action.yml", "", "", false}, // not the workflows keyspace
 		{"docs/notes/X.md", "", "", false},
-		{"cmd/orphan.go", "", "", false}, // directly under a root: no module
+		{"cmd/orphan.go", "", "", false},      // directly under a root: no module
+		{"internal/orphan.go", "", "", false}, // directly under a root: no module
+		// tools/ is a flat, family-keyed script keyspace.
+		{"tools/account_probe.py", "tools/account_probe", "tools", true},
+		{"tools/account_probe_test.py", "tools/account_probe", "tools", true}, // _test folds into the family
+		{"tools/auto_push_on_lag.sh", "tools/auto_push_on_lag", "tools", true},
+		{"tools\\account_probe.py", "tools/account_probe", "tools", true},          // backslash-normalized
+		{"tools/agent_test_harness.py", "tools/agent_test_harness", "tools", true}, // only a trailing _test folds
+		{"tools/bench_baseline.json", "", "", false},                               // data/fixture, not a script
+		{"tools/FLEET.md", "", "", false},                                          // doc, not a script
+		{"tools/_registry/state.py", "", "", false},                                // nested: registry, not the flat inventory
+		{"tools/__pycache__/x.pyc", "", "", false},                                 // nested cache
+		{"tools/.gitignore", "", "", false},                                        // bare dotfile
 		{"", "", "", false},
 	}
 	for _, c := range cases {
@@ -143,6 +155,64 @@ func TestWorkflowKeyspace(t *testing.T) {
 	rows := DeltaRows(rep, nil, "2026-07-04T12:00:00Z")
 	if len(rows) != 1 || rows[0].Module != ".github/workflows/ci.yml" || rows[0].Kind != "workflow" {
 		t.Fatalf("ledger rows = %+v, want one workflow row", rows)
+	}
+}
+
+// TestToolsKeyspace is the #2459 witness: a top-level tools/ script flows through
+// Snapshot as a family-keyed "tools" module — its _test sibling folds into the same
+// family (tools/<name>), non-script fixtures and nested registry paths are excluded,
+// and the module is emittable as a ledger row (the "live stamp showing tools rows").
+func TestToolsKeyspace(t *testing.T) {
+	const toolsLog = "\x1e" + "tl222222\t2026-07-06T12:00:00Z\n" +
+		"tools/account_probe.py\n" +
+		"tools/account_probe_test.py\n" + // _test folds into tools/account_probe: one module, counts once
+		"tools/bench_baseline.json\n" + // fixture: excluded from the keyspace
+		"tools/_registry/state.py\n" + // nested registry: excluded
+		"\x1e" + "tl111111\t2026-07-05T09:00:00Z\n" +
+		"tools/account_probe.py\n" +
+		"tools/auto_push_on_lag.sh\n"
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		switch args[0] {
+		case "rev-parse":
+			return []byte("tlhead01\n"), nil
+		case "ls-files":
+			return []byte("tools/account_probe.py\x00tools/account_probe_test.py\x00" +
+				"tools/auto_push_on_lag.sh\x00tools/bench_baseline.json\x00tools/_registry/state.py\x00"), nil
+		case "log":
+			return []byte(toolsLog), nil
+		}
+		t.Fatalf("unexpected git args: %v", args)
+		return nil, nil
+	}
+	rep, err := Snapshot(context.Background(), t.TempDir(), run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two families survive: tools/account_probe and tools/auto_push_on_lag.
+	// The fixture and the nested registry path are excluded.
+	if len(rep.Modules) != 2 {
+		t.Fatalf("got %d modules, want 2 (two script families): %+v", len(rep.Modules), rep.Modules)
+	}
+	probe := findModuleMV(t, rep, "tools/account_probe")
+	if probe.Kind != "tools" || probe.Rev != 2 || probe.LastCommit != "tl222222" {
+		t.Fatalf("tools/account_probe = %+v, want kind=tools rev=2 last=tl222222 (both commits touch the family; the _test sibling counts once)", probe)
+	}
+	if v := probe.Version(); v != "r2+gtl222222" {
+		t.Errorf("Version() = %q, want r2+gtl222222", v)
+	}
+	push := findModuleMV(t, rep, "tools/auto_push_on_lag")
+	if push.Kind != "tools" || push.Rev != 1 {
+		t.Fatalf("tools/auto_push_on_lag = %+v, want kind=tools rev=1", push)
+	}
+	// The tools modules must be emittable as ledger rows (empty prior ledger).
+	rows := DeltaRows(rep, nil, "2026-07-06T12:00:00Z")
+	if len(rows) != 2 {
+		t.Fatalf("ledger rows = %+v, want two tools rows", rows)
+	}
+	for _, r := range rows {
+		if r.Kind != "tools" || !strings.HasPrefix(r.Module, "tools/") {
+			t.Errorf("ledger row not a tools row: %+v", r)
+		}
 	}
 }
 
@@ -379,6 +449,61 @@ func TestJoinScores(t *testing.T) {
 	if _, err := LoadScores([]byte(`["not","a","map"]`)); err == nil {
 		t.Errorf("LoadScores should reject a non-map")
 	}
+}
+
+func TestView(t *testing.T) {
+	rep := Report{
+		Head:       "deadbee1",
+		AppVersion: "0.37.0",
+		Modules: []Module{
+			{Name: "cmd/fak", Kind: "cmd", Rev: 2, LastDate: "2026-07-02T10:00:00Z"},
+			{Name: "internal/alpha", Kind: "internal", Rev: 9, LastDate: "2026-07-01T10:00:00Z"},
+			{Name: "internal/beta", Kind: "internal", Rev: 5, LastDate: "2026-07-05T10:00:00Z"},
+		},
+	}
+
+	// --only filters by name prefix and leaves the receiver untouched.
+	got, err := rep.View("internal/", "name", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names := moduleNames(got); !reflect.DeepEqual(names, []string{"internal/alpha", "internal/beta"}) {
+		t.Errorf("only=internal/ names = %v, want [internal/alpha internal/beta]", names)
+	}
+	if len(rep.Modules) != 3 {
+		t.Errorf("View mutated the receiver: %d modules left", len(rep.Modules))
+	}
+
+	// --sort rev is most-revised-first.
+	got, err = rep.View("", "rev", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names := moduleNames(got); !reflect.DeepEqual(names, []string{"internal/alpha", "internal/beta", "cmd/fak"}) {
+		t.Errorf("sort=rev names = %v, want [internal/alpha internal/beta cmd/fak]", names)
+	}
+
+	// --sort date is most-recently-touched-first, --top truncates after sorting.
+	got, err = rep.View("", "date", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names := moduleNames(got); !reflect.DeepEqual(names, []string{"internal/beta", "cmd/fak"}) {
+		t.Errorf("sort=date top=2 names = %v, want [internal/beta cmd/fak]", names)
+	}
+
+	// An unknown sort key fails loud rather than defaulting silently.
+	if _, err := rep.View("", "bogus", 0); err == nil {
+		t.Errorf("View should reject an unknown sort key")
+	}
+}
+
+func moduleNames(rep Report) []string {
+	names := make([]string, len(rep.Modules))
+	for i, m := range rep.Modules {
+		names[i] = m.Name
+	}
+	return names
 }
 
 func TestDeltaRows(t *testing.T) {

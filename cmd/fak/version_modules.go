@@ -27,6 +27,9 @@ func runVersionModules(stdout, stderr io.Writer, argv []string) int {
 	stamp := fs.Bool("stamp", false, "append changed-module rows to the ledger")
 	ledger := fs.String("ledger", defaultModverLedger, "ledger path (repo-relative unless absolute)")
 	scoresPath := fs.String("scores", "", `flat {"module": number} JSON file to join as scores`)
+	only := fs.String("only", "", "show only modules whose name has this prefix (e.g. internal/, cmd/fak, or tools/)")
+	sortKey := fs.String("sort", "name", "sort order for display: name|rev|date")
+	top := fs.Int("top", 0, "show only the first N modules after sorting (0 = all)")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -59,16 +62,24 @@ func runVersionModules(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak version modules: joined %d/%d scores\n", matched, len(scores))
 	}
 	if *stamp {
+		// --stamp always operates on the full report: the --only/--sort/--top
+		// flags are a display view only, and stamping a filtered subset would
+		// make the omitted modules look permanently unchanged in the ledger.
 		return stampModverLedger(stdout, stderr, root, *ledger, rep)
 	}
+	view, verr := rep.View(*only, *sortKey, *top)
+	if verr != nil {
+		fmt.Fprintf(stderr, "fak version modules: %v\n", verr)
+		return 2
+	}
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, rep); err != nil {
+		if err := writeIndentedJSON(stdout, view); err != nil {
 			fmt.Fprintf(stderr, "fak version modules: %v\n", err)
 			return 1
 		}
 		return 0
 	}
-	renderModuleReport(stdout, rep)
+	renderModuleReportN(stdout, view, len(rep.Modules))
 	return 0
 }
 
@@ -113,11 +124,23 @@ func stampModverLedger(stdout, stderr io.Writer, root, ledger string, rep modver
 	return 0
 }
 
-// renderModuleReport prints the human table: version, last-touch date, module,
-// and score when joined.
+// renderModuleReport prints the human table for the full report.
 func renderModuleReport(w io.Writer, rep modver.Report) {
-	fmt.Fprintf(w, "fak version modules: head %s  app %s  %d modules\n",
-		rep.Head, rep.AppVersion, len(rep.Modules))
+	renderModuleReportN(w, rep, len(rep.Modules))
+}
+
+// renderModuleReportN prints the human table — version, last-touch date, module,
+// and score when joined — for a (possibly filtered) view of `total` modules.
+// When fewer than `total` rows are shown it says so, so a --only/--top view is
+// never mistaken for the whole repo.
+func renderModuleReportN(w io.Writer, rep modver.Report, total int) {
+	if len(rep.Modules) == total {
+		fmt.Fprintf(w, "fak version modules: head %s  app %s  %d modules\n",
+			rep.Head, rep.AppVersion, len(rep.Modules))
+	} else {
+		fmt.Fprintf(w, "fak version modules: head %s  app %s  showing %d of %d modules\n",
+			rep.Head, rep.AppVersion, len(rep.Modules), total)
+	}
 	for _, m := range rep.Modules {
 		date := m.LastDate
 		if len(date) > 10 {
