@@ -23,9 +23,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -126,6 +129,7 @@ func main() {
 	backendName := flag.String("backend", "cuda", "compute backend name (cuda); empty/legacy = host")
 	quant := flag.Bool("quant", true, "Q8_0 quantized weight path (required for the device Q8 kernels)")
 	emitJSON := flag.Bool("json", false, "emit one compact JSON record line (machine-readable) in addition to the human report")
+	outDir := flag.String("out", "", "if set, write the WITNESSED benchmark artifact into this directory: manifest.json (benchcli lineage + benchmark_artifact envelope wrapping the glm-throughput/1 body verbatim, so scope survives), result.json (the raw record), and RESULTS.md. This is what lands the pure-fak decode number in the ledger so it is discoverable by benchcli.BuildLineageIndex and bindable by `dos verify`. Canonical dir: experiments/benchmark/runs/by-machine/<node>/<UTC>-glm52-native-decode/")
 	bisectBaseline := flag.String("bisect-baseline", "", "known-GOOD config \"layers hidden heads inter topk\"; with it set, do NOT benchmark — emit the single-variable bisection plan (this run's -layers/-hidden/-heads/-inter/-index-topk are the failing config) to pin the P0 device-kernel illegal-memory-access one dim at a time. GPU-free.")
 	flag.Parse()
 
@@ -268,10 +272,12 @@ func main() {
 	fmt.Printf("DECODE        : %.3f ms/tok  (%.2f tok/s)  [median over %d reps x %d steps]\n",
 		decodeMS, 1.0/(decodeMS/1e3), *reps, *steps)
 
-	if *emitJSON {
-		// One compact, machine-readable record per run. The `scope` field is load-bearing:
-		// it travels with the number so no downstream reader can mistake this synthetic,
-		// reduced-layer, dense-FFN lower-bound for the full 753B MoE serving throughput.
+	// One compact, machine-readable record per run. The `scope` field is load-bearing:
+	// it travels with the number so no downstream reader can mistake this synthetic,
+	// reduced-layer, dense-FFN lower-bound for the full 753B MoE serving throughput.
+	// Built only when a consumer (-json or -out) asks for it — the pure human-print path
+	// allocates nothing.
+	if *emitJSON || *outDir != "" {
 		rec := map[string]any{
 			"schema":        "glm-throughput/1",
 			"backend":       backend,
@@ -289,9 +295,83 @@ func main() {
 			"model":         "glm_moe_dsa",
 			"scope":         "synthetic-weights;reduced-layers;dense-FFN(no-MoE);optimistic-lower-bound;NOT-the-753B",
 		}
-		b, _ := json.Marshal(rec)
-		fmt.Printf("GLMTPUT_JSON %s\n", b)
+
+		if *emitJSON {
+			b, _ := json.Marshal(rec)
+			fmt.Printf("GLMTPUT_JSON %s\n", b)
+		}
+
+		// Land the number in the witnessed benchmark ledger. Before this, glmdsatput only
+		// printed a bespoke `glm-throughput/1` line that no index recognized, so the pure-fak
+		// decode path was measured but never DISCOVERABLE — zero artifacts under
+		// experiments/benchmark/runs. Writing through benchcli gives it the same lineage +
+		// benchmark_artifact envelope every other bench emitter carries, so it folds into
+		// benchcli.BuildLineageIndex and can be bound by `dos verify`.
+		if *outDir != "" {
+			manifestPath, err := writeLedgerArtifact(*outDir, rec)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "write ledger artifact: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("LEDGER_ARTIFACT %s\n", filepath.ToSlash(manifestPath))
+		}
 	}
+}
+
+// writeLedgerArtifact lands the pure-fak decode record as a discoverable benchmark artifact
+// under dir: manifest.json carries the benchcli lineage + benchmark_artifact envelope
+// spliced AROUND the verbatim glm-throughput/1 body (so the load-bearing `scope` caveat and
+// every measured field survive at the top level), result.json is the raw record, and
+// RESULTS.md is the human page. manifest.json is what benchcli.BuildLineageIndex /
+// DecodeArtifact recognize, which is what makes "pure fak is performant" a bindable claim
+// rather than a stranded scratch line. Returns the manifest path.
+func writeLedgerArtifact(dir string, rec map[string]any) (string, error) {
+	inner, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	// Pass the already-rendered body as json.RawMessage so the envelope preserves it
+	// verbatim and only splices `lineage` + `benchmark_artifact` as new top-level members.
+	// WriteReport (not MarshalReport+WriteFile) additionally records this path as the
+	// artifact's lineage.source_artifact, so the manifest is self-referential provenance.
+	manifestPath := filepath.Join(dir, "manifest.json")
+	if err := benchcli.WriteReport(manifestPath, json.RawMessage(inner)); err != nil {
+		return "", err
+	}
+	if err := benchcli.WriteFile(filepath.Join(dir, "result.json"), inner); err != nil {
+		return "", err
+	}
+	if err := benchcli.WriteFile(filepath.Join(dir, "RESULTS.md"), []byte(resultsMarkdown(rec))); err != nil {
+		return "", err
+	}
+	return manifestPath, nil
+}
+
+// resultsMarkdown renders the human page. It leads with the load-bearing scope caveat so a
+// reader can never mistake this synthetic, reduced-layer, dense-FFN lower-bound for the full
+// 753B MoE serving throughput.
+func resultsMarkdown(rec map[string]any) string {
+	s := func(k string) string { v, _ := rec[k].(string); return v }
+	f := func(k string) float64 { v, _ := rec[k].(float64); return v }
+	cfg, _ := rec["config"].(map[string]int)
+	var b strings.Builder
+	fmt.Fprintf(&b, "# fak NATIVE glm_moe_dsa decode throughput (pure-fak)\n\n")
+	fmt.Fprintf(&b, "> **Scope (load-bearing):** `%s`\n>\n", s("scope"))
+	fmt.Fprintf(&b, "> Synthetic weights, reduced layer count, dense-FFN (no MoE expert GEMMs): an\n")
+	fmt.Fprintf(&b, "> optimistic lower-bound on fak's GLM-5.2-architecture per-token device cost on real\n")
+	fmt.Fprintf(&b, "> kernels — **not** the 753B checkpoint's serving rate.\n\n")
+	fmt.Fprintf(&b, "| field | value |\n|---|---|\n")
+	fmt.Fprintf(&b, "| backend | %s |\n", s("backend"))
+	fmt.Fprintf(&b, "| precision | %s |\n", s("precision"))
+	if cfg != nil {
+		fmt.Fprintf(&b, "| config | layers=%d hidden=%d heads=%d inter=%d vocab=%d |\n",
+			cfg["layers"], cfg["hidden"], cfg["heads"], cfg["inter"], cfg["vocab"])
+	}
+	fmt.Fprintf(&b, "| prefill | %.2f tok/s |\n", f("prefill_tok_s"))
+	fmt.Fprintf(&b, "| **DECODE** | **%.2f tok/s** (%.3f ms/tok) |\n", f("decode_tok_s"), f("decode_ms_tok"))
+	fmt.Fprintf(&b, "\nModel: `%s`. This artifact carries a benchcli lineage + benchmark_artifact\n", s("model"))
+	fmt.Fprintf(&b, "envelope, so it is discoverable by fak's lineage index and bindable by `dos verify`.\n")
+	return b.String()
 }
 
 func round2(f float64) float64 {

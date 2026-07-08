@@ -2,8 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 )
 
 // TestLCGIDs pins the deterministic id generator: every id lands in [0,vocab),
@@ -156,5 +161,112 @@ func TestBisectStepJSONShape(t *testing.T) {
 		if _, ok := back[0][k]; !ok {
 			t.Errorf("step JSON missing key %q: %v", k, back[0])
 		}
+	}
+}
+
+func sampleRecord() map[string]any {
+	return map[string]any{
+		"schema":        "glm-throughput/1",
+		"backend":       "cuda (tier=device class=gpu)",
+		"precision":     "Q8_0",
+		"config":        map[string]int{"layers": 8, "hidden": 2048, "heads": 16, "inter": 8192, "vocab": 8192},
+		"mla_dsa":       map[string]int{"q_lora": 1536, "kv_lora": 512, "qk_nope": 128, "qk_rope": 64, "v_head": 128, "index_heads": 16, "index_dim": 128, "index_topk": 256},
+		"prompt_len":    512,
+		"decode_steps":  64,
+		"reps":          5,
+		"build_ms":      12.3,
+		"prefill_ms":    45.6,
+		"prefill_tok_s": 111.2,
+		"decode_ms_tok": 3.14,
+		"decode_tok_s":  26.53,
+		"model":         "glm_moe_dsa",
+		"scope":         "synthetic-weights;reduced-layers;dense-FFN(no-MoE);optimistic-lower-bound;NOT-the-753B",
+	}
+}
+
+// TestWriteLedgerArtifactIsDiscoverable is the acceptance gate for the ledger wiring: the
+// pure-fak decode record, after -out, must be recognized by the same decoder the lineage
+// index uses (benchcli.DecodeArtifact), carry a non-empty run id, and preserve the verbatim
+// glm-throughput/1 body — including the load-bearing `scope` caveat — so it can never be
+// mistaken for the 753B serving number.
+func TestWriteLedgerArtifactIsDiscoverable(t *testing.T) {
+	dir := t.TempDir()
+	// Deterministic lineage so the run id is env-derived, not clock-derived.
+	t.Setenv("FAK_BENCH_UTC", "2026-07-07T00:00:00Z")
+	t.Setenv("FAK_BENCH_COMMIT", "deadbeefcafe1234")
+	t.Setenv("FAK_BENCH_NODE", "test-node")
+
+	manifestPath, err := writeLedgerArtifact(dir, sampleRecord())
+	if err != nil {
+		t.Fatalf("writeLedgerArtifact: %v", err)
+	}
+
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	art, ok := benchcli.DecodeArtifact(raw)
+	if !ok {
+		t.Fatalf("manifest.json is not discoverable as a benchmark artifact (BuildLineageIndex would skip it)")
+	}
+	if art.RunID == "" {
+		t.Fatalf("benchmark artifact has empty run id")
+	}
+
+	// The lineage index must fold in EXACTLY one artifact from the run dir — the manifest.
+	// result.json carries no envelope, so it must NOT be double-counted (it is correctly
+	// rejected by DecodeArtifact). This is the real discoverability contract.
+	idx, err := benchcli.BuildLineageIndex(dir)
+	if err != nil {
+		t.Fatalf("BuildLineageIndex: %v", err)
+	}
+	if len(idx.Artifacts) != 1 {
+		t.Fatalf("lineage index folded %d artifacts, want exactly 1 (manifest only): %+v", len(idx.Artifacts), idx.Artifacts)
+	}
+	if !strings.HasSuffix(idx.Artifacts[0].Path, "manifest.json") {
+		t.Fatalf("indexed artifact is %q, want the manifest", idx.Artifacts[0].Path)
+	}
+
+	// The verbatim glm-throughput/1 body must survive at the top level of the manifest.
+	var root map[string]any
+	if err := json.Unmarshal(raw, &root); err != nil {
+		t.Fatalf("manifest not valid JSON: %v", err)
+	}
+	if root["schema"] != "glm-throughput/1" {
+		t.Fatalf("inner glm-throughput/1 schema not preserved, got %v", root["schema"])
+	}
+	if s, _ := root["scope"].(string); !strings.Contains(s, "NOT-the-753B") {
+		t.Fatalf("load-bearing scope caveat dropped from manifest, got %q", s)
+	}
+	if _, ok := root["benchmark_artifact"]; !ok {
+		t.Fatalf("manifest missing benchmark_artifact envelope")
+	}
+	if _, ok := root["lineage"]; !ok {
+		t.Fatalf("manifest missing lineage block")
+	}
+
+	// result.json is the raw record; decode_tok_s must survive as a real number.
+	rj, err := os.ReadFile(filepath.Join(dir, "result.json"))
+	if err != nil {
+		t.Fatalf("read result.json: %v", err)
+	}
+	var inner map[string]any
+	if err := json.Unmarshal(rj, &inner); err != nil {
+		t.Fatalf("result.json not valid JSON: %v", err)
+	}
+	if v, ok := inner["decode_tok_s"].(float64); !ok || v == 0 {
+		t.Fatalf("decode_tok_s missing/zero in result.json, got %v", inner["decode_tok_s"])
+	}
+
+	// RESULTS.md must lead with the scope caveat and show the decode number.
+	md, err := os.ReadFile(filepath.Join(dir, "RESULTS.md"))
+	if err != nil {
+		t.Fatalf("read RESULTS.md: %v", err)
+	}
+	if !strings.Contains(string(md), "NOT-the-753B") {
+		t.Fatalf("RESULTS.md missing load-bearing scope caveat")
+	}
+	if !strings.Contains(string(md), "26.53") {
+		t.Fatalf("RESULTS.md missing decode tok/s value")
 	}
 }
