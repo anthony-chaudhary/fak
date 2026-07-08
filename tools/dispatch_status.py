@@ -54,6 +54,17 @@ def _win_creationflags() -> int:
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch_preflight  # noqa: E402  (pid-sidecar identity probe)
+# The low-yield lane fold (#2062) now lives in a neutral shared module so the picker
+# (issue_resolve_dispatch) can ACT on the same evidence this card REPORTS, without the
+# dispatch_status<->issue_resolve_dispatch import cycle. Re-imported here for back-compat.
+from lane_yield import (  # noqa: E402  (shared low-yield fold, #2062)
+    count_lane_ancestry_closes,
+    low_yield_lanes,
+    _log_turn_count,
+    _LOW_YIELD_SCHEMA,
+    _LOW_YIELD_TURNS_FLOOR,
+    _LOW_YIELD_LOOKBACK_MIN,
+)
 
 SCHEMA = "fleet-dispatch-status/1"
 LAB_READINESS_SCHEMA = "fak.lab_readiness/v1"
@@ -129,18 +140,9 @@ _UTILIZATION_SCHEMA = "fleet-utilization/1"
 # window and flags a lane that burned >= the turn floor yet closed nothing on its
 # own tree. The floor sits just below the observed 44-turn low end so a genuinely
 # stuck lane surfaces while a short productive session does not. Informational
-# only: it adds a reason/row but never flips the card's `ok`.
-_LOW_YIELD_SCHEMA = "fleet-low-yield-lanes/1"
-_LOW_YIELD_TURNS_FLOOR = 40
-_LOW_YIELD_LOOKBACK_MIN = 180
-# One kernel-adjudicated turn emits a `fak-turn ...` trace line (cmd/fak/guard.go),
-# so counting those lines recovers a resolve log's turn count post-hoc.
-_FAK_TURN_RE = re.compile(r"^fak-turn\b")
-# The resolving-commit grammar, mirrored from tools/issue_closure_audit._RESOLVE_RE
-# (itself a mirror of internal/hooks/commit_issuelink.go) so "what closes an issue"
-# agrees across the author gate, the closure audit, and this witness.
-_LOW_YIELD_RESOLVE_RE = re.compile(
-    r"\b(?:close|fixe?|resolve)[sd]?\s+#(\d+)\b", re.IGNORECASE)
+# only: it adds a reason/row but never flips the card's `ok`. The fold itself
+# (low_yield_lanes / count_lane_ancestry_closes) and its constants now live in
+# tools/lane_yield.py, re-imported above so the picker shares this exact evidence.
 
 # Ships-per-worker attribution (#2065). A dispatched agent can carry a best-effort
 # `(fak-worker <id>)` commit trailer (sourced from the FLEET_WORKER_ID env stamp
@@ -1385,135 +1387,6 @@ def silent_workers(
                     "pid": pid, "size": size, "kind": "empty" if size == 0 else "stub"})
     out.sort(key=lambda r: r["stamp"], reverse=True)
     return out
-
-
-def _log_turn_count(log: Path) -> int:
-    """Turns a ``resolve-*.log`` recorded: one per ``fak-turn ...`` trace line the
-    guard emits per kernel-adjudicated turn. Best-effort — an unreadable log is 0."""
-    try:
-        text = log.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return 0
-    return sum(1 for ln in text.splitlines() if _FAK_TURN_RE.match(ln))
-
-
-def count_lane_ancestry_closes(root: Path, tree: list[str], *,
-                               since_iso: str) -> int | None:
-    """Count in-window resolving commits touching ``tree`` — the ancestry-closes a
-    lane's recent worker sessions actually landed. A resolving commit is one whose
-    subject/body matches the repo's ``close|fix|resolve #N`` grammar AND whose diff
-    touched the lane's tree, committed at/after ``since_iso``. Returns ``None`` when
-    the tree is unknown or git can't answer, so the caller never flips a lane
-    LOW_YIELD on a join it could not make (fail-open, like ``silent_workers`` without
-    a liveness oracle)."""
-    pathspecs = _clean_tree(tree)
-    if not pathspecs:
-        return None
-    cmd = ["git", "log", f"--since={since_iso}", "--no-merges",
-           "--pretty=format:%x1e%s%n%b", "--", *pathspecs]
-    try:
-        proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", timeout=30,
-                              creationflags=_win_creationflags())
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if proc.returncode != 0:
-        return None
-    # \x1e (record separator) prefixes each commit's subject+body; count records
-    # whose message resolves an issue.
-    records = (proc.stdout or "").split("\x1e")
-    return sum(1 for rec in records
-               if rec.strip() and _LOW_YIELD_RESOLVE_RE.search(rec))
-
-
-def low_yield_lanes(
-    runs_dir: Path,
-    *,
-    closes_counter: Any,
-    turns_floor: int = _LOW_YIELD_TURNS_FLOOR,
-    lookback_min: int = _LOW_YIELD_LOOKBACK_MIN,
-    now_ts: float | None = None,
-    lane_trees: dict[str, list[str]] | None = None,
-    turns_of_log: Any | None = None,
-) -> dict[str, Any]:
-    """Bind turns-spent to ancestry-closes per lane over the recent window (#2062).
-
-    For each ``resolve-*.log`` whose mtime is within ``lookback_min``, derive its
-    lane (spawn-header ``lane=``) and turn count (``fak-turn`` trace lines) and roll
-    them up per lane. A lane is a LOW_YIELD candidate when its recent sessions spent
-    ``>= turns_floor`` turns; for a candidate whose tree is known, ``closes_counter``
-    returns the in-window ancestry-closes touching that tree, and the lane is flagged
-    ``LOW_YIELD`` when that count is exactly 0 — turns burned, nothing closed. Every
-    other lane (below floor, tree unknown, or with closes) is ``OK``. This never
-    flips the card's ``ok``; it is the per-session/per-lane feedback ``pick_lane``
-    lacked, so a re-seated low-yield lane is no longer invisible.
-
-    The tree is resolved from ``lane_trees`` (the router's lane→tree map, passed by
-    ``collect``) with the worker's ``.lease-tree.json`` sidecar as a fallback; a lane
-    with neither is reported with ``tree_known=False`` and never flagged, so the
-    witness never fabricates a low-yield verdict it cannot substantiate. Pure given
-    ``closes_counter``/``turns_of_log``; git lives only in the default counter.
-    """
-    empty = {
-        "schema": _LOW_YIELD_SCHEMA,
-        "turns_floor": turns_floor,
-        "lookback_min": lookback_min,
-        "lanes": [],
-        "low_yield_count": 0,
-    }
-    if not runs_dir.is_dir():
-        return empty
-    now_ts = time.time() if now_ts is None else now_ts
-    turns_of = turns_of_log or _log_turn_count
-    lane_trees = lane_trees or {}
-    horizon = now_ts - lookback_min * 60
-    by_lane: dict[str, dict[str, Any]] = {}
-    for log in runs_dir.glob("resolve-*.log"):
-        if not _RESOLVE_LOG_RE.search(log.name):
-            continue
-        try:
-            if log.stat().st_mtime < horizon:
-                continue
-        except OSError:
-            continue
-        lane = _spawn_lane(log)
-        if not lane:
-            continue
-        turns = turns_of(log)
-        row = by_lane.setdefault(lane, {
-            "lane": lane, "sessions": 0, "turns": 0, "max_session_turns": 0,
-            "tree": [], "evidence_logs": []})
-        row["sessions"] += 1
-        row["turns"] += turns
-        row["max_session_turns"] = max(row["max_session_turns"], turns)
-        for t in _clean_tree(_read_worker_tree(log.with_suffix(""))):
-            if t not in row["tree"]:
-                row["tree"].append(t)
-        if len(row["evidence_logs"]) < 5:
-            row["evidence_logs"].append(log.name)
-
-    lanes_out: list[dict[str, Any]] = []
-    for lane, row in by_lane.items():
-        tree = _clean_tree(lane_trees.get(lane)) or row["tree"]
-        row["tree"] = tree
-        row["tree_known"] = bool(tree)
-        candidate = row["turns"] >= turns_floor
-        # Only pay the git join for a candidate lane with a tree to join on — a
-        # below-floor lane is never LOW_YIELD regardless of closes.
-        closes = closes_counter(lane, tree) if (candidate and tree) else None
-        row["closes"] = closes
-        row["verdict"] = "LOW_YIELD" if (candidate and closes == 0) else "OK"
-        lanes_out.append(row)
-
-    lanes_out.sort(key=lambda r: (r["verdict"] != "LOW_YIELD",
-                                  -int(r["turns"]), str(r["lane"])))
-    return {
-        "schema": _LOW_YIELD_SCHEMA,
-        "turns_floor": turns_floor,
-        "lookback_min": lookback_min,
-        "lanes": lanes_out,
-        "low_yield_count": sum(1 for r in lanes_out if r["verdict"] == "LOW_YIELD"),
-    }
 
 
 def parse_ships_per_worker(records: list[str]) -> dict[str, Any]:
