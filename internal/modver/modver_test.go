@@ -2,6 +2,9 @@ package modver
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -230,6 +233,132 @@ func TestSnapshotHostPathParity(t *testing.T) {
 	if !reflect.DeepEqual(posix, windows) {
 		t.Errorf("host path parity broken:\n posix   = %+v\n windows = %+v", posix, windows)
 	}
+}
+
+// TestSnapshotPassesNoMerges is the #2475 witness at the invocation seam: the
+// rev semantics are "distinct NON-MERGE commits touching the module", pinned by
+// passing --no-merges to git log. Asserting the flag here makes the decision a
+// tested fact independent of git's (configurable, --diff-merges) default merge-
+// diff behavior, and guards against a well-meaning switch to --first-parent,
+// which would undercount work that reaches the trunk through a merge.
+func TestSnapshotPassesNoMerges(t *testing.T) {
+	var logArgs []string
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		switch args[0] {
+		case "rev-parse":
+			return []byte("deadbee1\n"), nil
+		case "ls-files":
+			return []byte("internal/gateway/wire.go\x00"), nil
+		case "log":
+			logArgs = append([]string{}, args...)
+			return []byte(logFixture), nil
+		}
+		t.Fatalf("unexpected git args: %v", args)
+		return nil, nil
+	}
+	if _, err := Snapshot(context.Background(), t.TempDir(), run); err != nil {
+		t.Fatal(err)
+	}
+	noMerges := false
+	for _, a := range logArgs {
+		switch a {
+		case "--no-merges":
+			noMerges = true
+		case "--first-parent":
+			t.Errorf("git log must NOT use --first-parent (it undercounts merged-in work): %v", logArgs)
+		}
+	}
+	if !noMerges {
+		t.Fatalf("git log missing --no-merges (rev must exclude merge commits): %v", logArgs)
+	}
+}
+
+// TestSnapshotExcludesMergeCommits is the #2475 end-to-end witness — a fixture
+// history WITH a real merge in it. rev counts distinct non-merge commits
+// touching a module; the merged-in non-merge commits DO count (they are real
+// authored work) but the merge commit that joins them does not, so the merge
+// commit is never a module's last_commit and does not inflate rev.
+func TestSnapshotExcludesMergeCommits(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	repo := modverGitRepo(t)
+	commitFileMV(t, repo, "internal/foo/a.go", "package foo\n// c1\n", "c1") // internal/foo #1
+	gitMV(t, repo, "checkout", "-q", "-b", "side")
+	commitFileMV(t, repo, "internal/foo/b.go", "package foo\n// s1\n", "s1") // internal/foo #2 (on side)
+	gitMV(t, repo, "checkout", "-q", "main")
+	commitFileMV(t, repo, "internal/foo/a.go", "package foo\n// c2\n", "c2") // internal/foo #3
+	// A real, no-fast-forward merge of the diverged side branch: creates a merge
+	// commit joining c2 and s1. It touches internal/foo transitively but must not
+	// count — it is the "in-place trunk merge" the rev must be stable across.
+	gitMV(t, repo, "merge", "--no-ff", "-q", "-m", "merge side", "side")
+
+	rep, err := Snapshot(context.Background(), repo, RealRunner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foo := findModuleMV(t, rep, "internal/foo")
+	if foo.Rev != 3 {
+		t.Fatalf("internal/foo rev = %d, want 3 (c1,s1,c2 — merge excluded): %+v", foo.Rev, foo)
+	}
+	mergeSHA := strings.TrimSpace(string(mustGitMV(t, repo, "rev-parse", "--short=8", "HEAD")))
+	if foo.LastCommit == mergeSHA {
+		t.Fatalf("merge commit %s leaked in as internal/foo last_commit — merge counted as a rev", mergeSHA)
+	}
+}
+
+func modverGitRepo(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	gitMV(t, repo, "init", "-q", "-b", "main")
+	gitMV(t, repo, "config", "core.autocrlf", "false")
+	gitMV(t, repo, "config", "user.name", "test")
+	gitMV(t, repo, "config", "user.email", "test@example.com")
+	writeMV(t, filepath.Join(repo, "README.md"), "base\n") // root file: belongs to no module
+	gitMV(t, repo, "add", "README.md")
+	gitMV(t, repo, "commit", "-q", "-m", "base")
+	return repo
+}
+
+func commitFileMV(t *testing.T, repo, rel, body, msg string) {
+	t.Helper()
+	writeMV(t, filepath.Join(repo, filepath.FromSlash(rel)), body)
+	gitMV(t, repo, "add", rel)
+	gitMV(t, repo, "commit", "-q", "-m", msg)
+}
+
+func writeMV(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func gitMV(t *testing.T, repo string, args ...string) { mustGitMV(t, repo, args...) }
+
+func mustGitMV(t *testing.T, repo string, args ...string) []byte {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = repo
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v in %s: %v\n%s", args, repo, err, out)
+	}
+	return out
+}
+
+func findModuleMV(t *testing.T, rep Report, name string) Module {
+	t.Helper()
+	for _, m := range rep.Modules {
+		if m.Name == name {
+			return m
+		}
+	}
+	t.Fatalf("module %q not in report: %+v", name, rep.Modules)
+	return Module{}
 }
 
 func TestJoinScores(t *testing.T) {

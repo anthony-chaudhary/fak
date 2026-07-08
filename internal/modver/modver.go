@@ -3,8 +3,11 @@
 // the root VERSION file) says which *release* you run; modver says how far each
 // *module* has moved. A module's version is DERIVED, never declared: on a
 // shared multi-session trunk a hand-maintained per-module version file would
-// rot within hours, but `rev` — the count of trunk commits that touched the
-// module — is monotonic, conflict-free, and computable from the history alone.
+// rot within hours, but `rev` — the count of trunk NON-MERGE commits that
+// touched the module — is monotonic, conflict-free, and computable from the
+// history alone. Merge commits are excluded on purpose (see Snapshot): a merge
+// carries no authored module work, so rev is stable across an in-place trunk
+// merge and reflects only real commits.
 //
 // A module version renders as "r<rev>+g<shortsha>" (e.g. r412+g2bc81478):
 // the monotonic revision plus the last-touch commit. Successive ledger stamps
@@ -103,7 +106,17 @@ func Snapshot(ctx context.Context, dir string, run Runner) (Report, error) {
 		return Report{}, err
 	}
 	live := liveModules(lsOut)
-	logArgs := append([]string{"log", "--pretty=format:%x1e%h%x09%cI", "--name-only", "--"}, trackedRoots...)
+	// --no-merges pins the rev semantics (#2475): rev counts distinct NON-MERGE
+	// commits touching the module. A merge commit carries no authored module
+	// work — the file changes live in the non-merge commits it joins, each of
+	// which git's DAG walk lists exactly once, so there is no double-counting.
+	// git suppresses merge diffs from --name-only by default, but that default is
+	// overridable (--diff-merges, log.diffMerges); --no-merges makes the exclusion
+	// explicit and independent of git config, so rev is stable across an in-place
+	// trunk merge. Deliberately NOT --first-parent: work that reaches the trunk
+	// through a merge lives off the first-parent line, and --first-parent would
+	// silently undercount it while the merge commit itself contributes no files.
+	logArgs := append([]string{"log", "--no-merges", "--pretty=format:%x1e%h%x09%cI", "--name-only", "--"}, trackedRoots...)
 	logOut, err := run(ctx, dir, logArgs...)
 	if err != nil {
 		return Report{}, err
