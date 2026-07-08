@@ -518,6 +518,17 @@ type Config struct {
 	// (#3200), so the default flip is gated on that validation. Also enabled by
 	// FAK_DEFER_MCP_TOOLS=1.
 	DeferMCPTools bool
+	// DeferColdTools, when true, defers the COLD tool tail on the OUTBOUND Anthropic
+	// Messages body (#3232, the 10x floor lever): every allowed-but-cold custom tool is
+	// marked `defer_loading:true` and one standard `tool_search_tool` is injected, so the
+	// provider loads only the hot core into context and faults a cold schema in on demand.
+	// This reaches the SYSTEMIC built-in slice (Read/Write/Edit/Bash/… — harness-owned, but
+	// just req.Tools to fak's gateway), not just fak's own MCP tools. Deterministic and
+	// cache-safe (byte-stable tools[] turn-over-turn), fail-safe identity on any ambiguity.
+	// Default false: this is the epic's highest-risk lever — the exact tool_search_tool wire
+	// type/beta and the A/B (token-delta × held-accuracy × poison) are the validation gates,
+	// and the fault-in leans on #3200's pin/quarantine. Ablate with FAK_ABLATE_DEFER_TOOLS=1.
+	DeferColdTools bool
 	// RouteManifest, when non-nil, makes the gateway classify each fak_syscall tool
 	// call into a modelroute.Subject and route it: for a single-model (PICK) plan the
 	// chosen model id is written to abi.ToolCall.Engine BEFORE Submit, so the kernel
@@ -1170,6 +1181,11 @@ type Server struct {
 	// the full registry regardless.
 	deferMCPTools bool
 
+	// deferColdTools mirrors Config.DeferColdTools: true means the outbound Anthropic
+	// body defers its cold tool tail via defer_loading + an injected tool_search_tool
+	// (#3232). Read only by maybeDeferColdTools; fail-safe identity when off.
+	deferColdTools bool
+
 	// systemBlockDrop is the same inbound-prune seam for typed Anthropic system[]
 	// blocks: true means this named block element may be removed after the cached
 	// system breakpoint. nil leaves system[] byte-for-byte unchanged.
@@ -1471,6 +1487,7 @@ func New(cfg Config) (*Server, error) {
 		toolFloorDenies:            cfg.ToolFloorDenies,
 		exposeAllow:                exposeAllow,
 		deferMCPTools:              cfg.DeferMCPTools || envEnabled("FAK_DEFER_MCP_TOOLS"),
+		deferColdTools:             cfg.DeferColdTools || envEnabled("FAK_DEFER_COLD_TOOLS"),
 		cacheStream:                cacheStream,
 		rungObs:                    rungObs,
 		feed:                       newCoherenceFeed(0),
@@ -1798,6 +1815,45 @@ func (s *Server) KernelCounters() kernel.Counters {
 		return kernel.Counters{}
 	}
 	return s.k.Counters()
+}
+
+// HarnessCoherenceSummary returns the operator-line roll-up of the harness-coherence
+// family (the same numbers the fak_harness_coherence_* scrape reports). It is exposed
+// next to AdjudicationSummary/KernelCounters so a host can persist the session's
+// ObservedTurns — the REAL count of served passthrough turns — at exit. That count is
+// the honest session-length signal the gateway-usage ledger records: Submits is 0 on the
+// guard proxy path (the kernel submit boundary is not on the pass-through wire), so the
+// durable turn-distribution corpus would otherwise have only CachedTurns as a proxy.
+// Safe on a nil Server (returns the zero summary with the default block posture).
+func (s *Server) HarnessCoherenceSummary() HarnessCoherenceSummary {
+	if s == nil {
+		return HarnessCoherenceSummary{Posture: string(compactcohere.PostureBlock)}
+	}
+	return s.metrics.harnessCoherenceSummary()
+}
+
+// AssumeSessionTurns returns the resolved session-length prior (Config.AssumeSessionTurns;
+// 0 = the head-anchored burst gate's prior is disabled) this Server booted with. Exposed
+// so a host can stamp it into a persisted row's Provenance — the corpus that CALIBRATES
+// DefaultAssumedSessionTurns must be able to exclude override sessions from the fit. Safe
+// on a nil Server (returns 0).
+func (s *Server) AssumeSessionTurns() int {
+	if s == nil {
+		return 0
+	}
+	return s.assumeSessionTurns
+}
+
+// CompactHistoryBudget returns the resident-token budget compaction fires against
+// (Config.CompactHistoryBudget; 0 = compaction OFF), the sibling provenance knob to
+// AssumeSessionTurns. Safe on a nil Server (returns 0). AdjudicationSummary also surfaces
+// this as CompactionBudget; this dedicated accessor lets a provenance stamp read it without
+// folding the whole counter roll-up.
+func (s *Server) CompactHistoryBudget() int {
+	if s == nil {
+		return 0
+	}
+	return s.compactHistoryBudget
 }
 
 // VCacheTurnsSnapshot returns a copy of the per-turn provider-cache window this session

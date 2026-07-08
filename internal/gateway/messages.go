@@ -291,6 +291,12 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// logged once as a floor-vs-observed drift witness.
 	s.recordInboundPrunedToolDefinitions(reqTrace, s.maybeCompactInboundTools(req))
 	s.maybeCompactInboundSystem(req)
+	// The 10x floor lever (#3232): defer the cold tool tail (defer_loading:true) and inject
+	// a tool_search_tool on the outbound body, so the provider loads only the hot core into
+	// context. OFF by default; deterministic + cache-safe + fail-safe identity. Runs AFTER
+	// the deny-prune (disjoint operations on tools[]) and before the passthrough consumers of
+	// req.Raw. deferredCold>0 means the body now carries defer_loading and needs the beta.
+	deferredCold := s.maybeDeferColdTools(req, reqTrace)
 	// In passthrough mode the upstream credential is the client's own (transparent
 	// hop) UNLESS the gateway pins its own (the subscription path). The inbound
 	// anthropic-beta is forwarded so the client's negotiated betas survive the hop.
@@ -298,6 +304,11 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// the request headers.
 	upstreamKey := s.anthropicUpstreamCredential(r)
 	upstreamBeta := r.Header.Get("anthropic-beta")
+	// Beta union (#3232): when this turn deferred the cold tail, the upstream must accept
+	// defer_loading / tool_search_tool, so union the tool-search beta into the forwarded set.
+	if deferredCold > 0 {
+		upstreamBeta = unionBeta(upstreamBeta, toolSearchBeta)
+	}
 
 	// Repetition-loop guard (runs on EVERY wire, before any planner round-trip). A small
 	// local model, after a tool refusal, often stops making progress and loops — echoing

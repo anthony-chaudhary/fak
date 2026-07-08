@@ -1,0 +1,239 @@
+package gateway
+
+// messages_tooldefer.go — the 10x floor lever (#3232, epic #3229): defer the COLD
+// tool tail at the outbound Anthropic Messages seam. On a fresh guarded session
+// /context shows ~41k resident before any work; the tool schemas alone are ~35.8k
+// (built-in system tools ~25.9k + MCP tools ~9.9k). To fak's gateway those are all
+// just req.Tools on the outbound request — the ONE seam where the systemic built-in
+// slice is reachable. This marks every ALLOWED-but-COLD custom tool
+// `defer_loading:true` and injects a standard `tool_search_tool`, so Anthropic loads
+// only the hot core into context and faults a cold schema in on demand when the
+// model searches for it.
+//
+// LOAD-BEARING NUANCE (from the issue): defer_loading does NOT shrink the request
+// BYTES — every def stays in tools[] so Anthropic can search them; the body GROWS by
+// the defer_loading keys + the search tool. The reduction is PROVIDER-SIDE (Anthropic
+// loads only non-deferred defs into context) and shows up in the OBSERVED usage relay,
+// never in the ESTIMATED byte footprint.
+//
+// CACHE SAFETY: the transform is DETERMINISTIC — identical input tools[] yield
+// byte-identical deferred tools[] every turn — so the cache_control prefix stays
+// stable turn-over-turn and the session cache survives (a turn-0-only rewrite would
+// mismatch the client's non-deferred turn-1 body and bust the cache every turn). The
+// non-tools body bytes (system, messages) are spliced through VERBATIM, and the result
+// is proven byte-identical outside the tools[] span AND re-decoded before it ships.
+// Fail-safe identity on ANY ambiguity.
+//
+// DEFAULT OFF (Config.DeferColdTools / --defer-cold-tools; ablation FAK_ABLATE_DEFER_TOOLS):
+// this is the epic's highest-risk lever. The exact Anthropic tool_search_tool wire type
+// + beta value (toolSearchToolType / toolSearchBeta below) and the A/B (token-delta ×
+// held-accuracy × poison-rate) are the validation gates before the default flips on;
+// #3200's pin/quarantine guards the fault-in. The mechanism, its determinism, and its
+// fail-safety are witnessed by messages_tooldefer_test.go.
+
+import (
+	"bytes"
+	"encoding/json"
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
+)
+
+// toolSearchToolType / toolSearchBeta are the standard Anthropic Tool Search Tool
+// wire constants. They are named (not inlined) precisely because they are the live
+// validation gate: a wrong dated type or beta value is a 400 upstream, which the
+// fail-open path below turns into a silent identity — never a broken session — but
+// also never a reduction until these match the account's enabled revision.
+const (
+	toolSearchToolType = "tool_search_tool_20250917"
+	toolSearchToolName = "tool_search_tool"
+	toolSearchBeta     = "tool-search-2025-09-17"
+)
+
+// defaultHotToolSet is the eager core kept resident: the guard floor's built-in
+// system tools (Read/Edit/Write/Bash/Grep/Glob/Task/TodoWrite + web) plus the search
+// tool itself. Everything else custom is cold and deferred. Anthropic-hosted TYPED
+// server tools (a non-custom "type") are also kept eager — they cannot be deferred.
+var defaultHotToolSet = map[string]bool{
+	"Bash": true, "Read": true, "Edit": true, "Write": true, "MultiEdit": true,
+	"Glob": true, "Grep": true, "TodoWrite": true, "Task": true,
+	"WebFetch": true, "WebSearch": true, "NotebookEdit": true,
+	"ToolSearch": true, toolSearchToolName: true,
+}
+
+// deferResult is the outcome of a defer transform: Changed with the spliced Body on a
+// fired turn, else a named Reason for the fail-safe identity.
+type deferResult struct {
+	Body      []byte
+	Changed   bool
+	Reason    string
+	ColdCount int
+}
+
+// maybeDeferColdTools is the req.Raw transform slotted next to maybeCompactInboundTools.
+// It fires only when the lever is on, the wire is the Anthropic passthrough, and the
+// ablation arm is off; it records a witnessed metric and mutates req.Raw only on a
+// proven change. Returns the number of cold defs deferred (0 = no-op).
+func (s *Server) maybeDeferColdTools(req *agent.AnthropicMessagesRequest, trace string) int {
+	if s == nil || !s.deferColdTools || req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) {
+		return 0
+	}
+	if envEnabled("FAK_ABLATE_DEFER_TOOLS") {
+		return 0
+	}
+	res := deferColdToolsInBody(req.Raw, defaultHotToolSet, func(b []byte) error {
+		_, err := agent.DecodeAnthropicMessagesRequest(b)
+		return err
+	})
+	s.metrics.observeToolDefer(res.ColdCount, res.Changed)
+	if !res.Changed {
+		return 0
+	}
+	req.Raw = res.Body
+	return res.ColdCount
+}
+
+// deferColdToolsInBody is the pure transform. It splices ONLY the tools[] array value,
+// keeping every other body byte verbatim, and proves the untouched regions are
+// byte-identical before returning Changed. Fail-safe identity (a named Reason, no Body)
+// on any ambiguity. decode (optional) re-validates the spliced body still parses.
+func deferColdToolsInBody(raw []byte, hot map[string]bool, decode func([]byte) error) deferResult {
+	if len(raw) == 0 {
+		return deferResult{Reason: "empty"}
+	}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(raw, &obj) != nil {
+		return deferResult{Reason: "not_json_object"}
+	}
+	toolsRaw, ok := obj["tools"]
+	if !ok {
+		return deferResult{Reason: "no_tools"}
+	}
+	// Locate the tools[] value span in raw. json.Unmarshal of an object preserves each
+	// value's bytes verbatim, so a sub-search is exact; a wrong guess can only fail the
+	// prefix/suffix byte-equality proof below → identity, never breakage.
+	start := bytes.Index(raw, toolsRaw)
+	if start < 0 {
+		return deferResult{Reason: "tools_not_located"}
+	}
+	end := start + len(toolsRaw)
+
+	var elems []json.RawMessage
+	if json.Unmarshal(toolsRaw, &elems) != nil {
+		return deferResult{Reason: "undecodable_tools"}
+	}
+	if len(elems) == 0 {
+		return deferResult{Reason: "no_tools"}
+	}
+
+	// Idempotent stand-down: if the body is ALREADY deferred (any def carries
+	// defer_loading, or a tool_search_tool is present — the Claude Code ENABLE_TOOL_SEARCH
+	// case), do not double-apply.
+	parsed := make([]map[string]json.RawMessage, len(elems))
+	for i, el := range elems {
+		var m map[string]json.RawMessage
+		if json.Unmarshal(el, &m) != nil {
+			return deferResult{Reason: "undecodable_elem"}
+		}
+		parsed[i] = m
+		if _, has := m["defer_loading"]; has {
+			return deferResult{Reason: "already_deferred"}
+		}
+		if strings.HasPrefix(rawStringField(m, "type"), "tool_search_tool") || rawStringField(m, "name") == toolSearchToolName {
+			return deferResult{Reason: "already_deferred"}
+		}
+	}
+
+	// Build the new element list: hot / typed-server tools verbatim; cold custom tools
+	// gain defer_loading:true. Track whether the block was cached to carry the anchor.
+	newElems := make([]json.RawMessage, 0, len(elems)+1)
+	cold := 0
+	lastHadCacheControl := false
+	for i, m := range parsed {
+		if i == len(parsed)-1 {
+			_, lastHadCacheControl = m["cache_control"]
+		}
+		name := rawStringField(m, "name")
+		typ := rawStringField(m, "type")
+		isCustom := typ == "" || typ == "custom" || typ == "function"
+		if hot[name] || !isCustom {
+			newElems = append(newElems, elems[i]) // verbatim
+			continue
+		}
+		m["defer_loading"] = json.RawMessage("true")
+		nb, err := json.Marshal(m)
+		if err != nil {
+			return deferResult{Reason: "remarshal_failed"}
+		}
+		newElems = append(newElems, nb)
+		cold++
+	}
+	if cold == 0 {
+		return deferResult{Reason: "no_cold_tools"}
+	}
+
+	// Inject one tool_search_tool as the new tail. Carry the cache_control anchor onto it
+	// (only if the client was caching tools) so the augmented block becomes the stable
+	// cached head — the re-anchor, done deterministically each turn.
+	newElems = append(newElems, toolSearchToolElement(lastHadCacheControl))
+
+	newArr, err := json.Marshal(newElems)
+	if err != nil {
+		return deferResult{Reason: "marshal_array_failed"}
+	}
+
+	out := make([]byte, 0, start+len(newArr)+(len(raw)-end))
+	out = append(out, raw[:start]...)
+	out = append(out, newArr...)
+	out = append(out, raw[end:]...)
+
+	// Prove it: everything OUTSIDE the tools[] value must be byte-identical to the input.
+	suffix := raw[end:]
+	if !bytes.Equal(raw[:start], out[:start]) || !bytes.Equal(suffix, out[len(out)-len(suffix):]) {
+		return deferResult{Reason: "splice_unproven"}
+	}
+	if decode != nil {
+		if err := decode(out); err != nil {
+			return deferResult{Reason: "decode_failed"}
+		}
+	}
+	return deferResult{Body: out, Changed: true, ColdCount: cold}
+}
+
+// toolSearchToolElement is the injected tool_search_tool descriptor, optionally
+// carrying the cache_control anchor.
+func toolSearchToolElement(cacheControl bool) json.RawMessage {
+	if cacheControl {
+		return json.RawMessage(`{"type":"` + toolSearchToolType + `","name":"` + toolSearchToolName + `","cache_control":{"type":"ephemeral"}}`)
+	}
+	return json.RawMessage(`{"type":"` + toolSearchToolType + `","name":"` + toolSearchToolName + `"}`)
+}
+
+// rawStringField reads a string field from a decoded object, "" if absent/non-string.
+func rawStringField(m map[string]json.RawMessage, key string) string {
+	v, ok := m[key]
+	if !ok {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(v, &s) != nil {
+		return ""
+	}
+	return s
+}
+
+// unionBeta adds add to the comma-separated anthropic-beta list if not already present.
+func unionBeta(existing, add string) string {
+	if strings.TrimSpace(add) == "" {
+		return existing
+	}
+	for _, p := range strings.Split(existing, ",") {
+		if strings.TrimSpace(p) == add {
+			return existing
+		}
+	}
+	if strings.TrimSpace(existing) == "" {
+		return add
+	}
+	return existing + "," + add
+}

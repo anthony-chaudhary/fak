@@ -311,6 +311,31 @@ func (m *gatewayMetrics) observeInboundToolPrune(n int) {
 	m.toolPruneMu.Unlock()
 }
 
+// observeToolDefer records a tool-deferral turn (#3232, the 10x floor lever): cold is
+// the number of cold defs marked defer_loading this turn, fired reports whether the
+// transform changed the body. A no-op turn (fired=false, or nothing cold) records
+// nothing — the same posture as observeInboundToolPrune, so an operator can tell a
+// turn that deferred the cold tail from one that stood down.
+func (m *gatewayMetrics) observeToolDefer(cold int, fired bool) {
+	if m == nil || !fired || cold <= 0 {
+		return
+	}
+	m.deferMu.Lock()
+	m.deferFiredTurns++
+	m.deferColdCount += uint64(cold)
+	m.deferMu.Unlock()
+}
+
+// toolDeferSnapshot reads the deferral accumulators (turns, cold-def count).
+func (m *gatewayMetrics) toolDeferSnapshot() (turns, cold uint64) {
+	if m == nil {
+		return 0, 0
+	}
+	m.deferMu.Lock()
+	defer m.deferMu.Unlock()
+	return m.deferFiredTurns, m.deferColdCount
+}
+
 // observeInboundPrunedToolProposal records that a model later proposed a tool name fak had
 // removed from that trace's advertised tools[]. The caller de-duplicates per trace/tool; this
 // counter is the process-wide witness count. It is names-only observability, not a verdict.

@@ -153,6 +153,15 @@ type gatewayMetrics struct {
 	toolPruneCount    uint64 // WITNESSED: total tool defs removed across all prune turns
 	toolPrunedPropose uint64 // WITNESSED: pruned tool names later proposed, deduped once per trace/tool
 
+	// deferMu guards the tool-DEFERRAL accumulators (#3232, the 10x floor lever): turns
+	// where the cold tool tail was marked defer_loading + a tool_search_tool injected, and
+	// the cumulative cold-def count. WITNESSED: the transform proved the non-tools body
+	// bytes stayed byte-identical and re-decoded before Changed, so a counted defer never
+	// bursts the upstream cache.
+	deferMu         sync.Mutex
+	deferFiredTurns uint64 // WITNESSED: turns where the cold tool tail was deferred
+	deferColdCount  uint64 // WITNESSED: total cold defs marked defer_loading across those turns
+
 	// toolRefMu guards the tool_reference SANITIZE accumulators (a correctness transform, not a
 	// cache saving): the client's INTERNAL `tool_reference` blocks — emitted inside a ToolSearch
 	// tool_result — are not a valid Anthropic tool_result.content type, so a body carrying one is
