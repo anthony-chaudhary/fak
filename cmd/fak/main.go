@@ -115,6 +115,8 @@ func main() {
 		cmdBuildCheck(os.Args[2:])
 	case "preflight":
 		cmdPreflight(os.Args[2:])
+	case "ci-preflight":
+		cmdCIPreflight(os.Args[2:])
 	case "attest":
 		cmdAttest(os.Args[2:])
 	case "backend":

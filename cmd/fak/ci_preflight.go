@@ -1,0 +1,223 @@
+package main
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
+)
+
+// cmd/fak/ci_preflight.go — `fak ci-preflight`: answer "is the COMMITTED trunk tip CI-buildable and
+// gofmt-clean, and if not, exactly which files / why" WITHOUT trusting the working tree.
+//
+// Why a dedicated verb: on this shared multi-session checkout the working tree is permanently
+// peer-dirty (hundreds of uncommitted files, half-wired untracked siblings). `go build ./...` /
+// `gofmt -l .` run in place therefore report the WORKING tree, which is neither what CI gates nor a
+// stable signal — a peer's uncommitted fix can MASK a real committed red, and a peer's broken WIP
+// can FABRICATE a red that is not on trunk. The two failure modes that actually red-trunk the `ci`
+// job (`build·vet·test·claims-lint`) this repo hits repeatedly are:
+//   - a partial commit: a caller lands but its callee file stays untracked → `undefined: X`, and
+//   - a committed gofmt violation: a struct/const block realigned after a field add/remove.
+// Both are invisible-to-guess from the dirty tree and were, before this verb, rediscovered by hand
+// each session via `git archive <tip> | tar -x | (cd tmp && go build ./... && gofmt -l .)`.
+//
+// This verb encodes exactly that: archive the committed tip to a throwaway checkout, run
+// `go build ./...` and `gofmt -l` THERE, and report the failing step + exact files as JSON. It is
+// read-only against the repo (the throwaway checkout is under os.TempDir) so it never touches the
+// shared tree. Exit 0 = trunk clean, 1 = a preflight check fired, 2 = could-not-run.
+//
+//   fak ci-preflight            # human summary of the committed origin/main-style tip
+//   fak ci-preflight --json     # machine result for dispatch loops / agents
+//   fak ci-preflight --ref R    # check an explicit ref/sha instead of HEAD
+//   fak ci-preflight --skip-build   # gofmt-only (fast; build dominates the runtime)
+
+func cmdCIPreflight(argv []string) { os.Exit(runCIPreflight(os.Stdout, os.Stderr, argv)) }
+
+// ciPreflightFailure is one failing CI-relevant check against the committed tip.
+type ciPreflightFailure struct {
+	Step   string   `json:"step"`             // "build" | "gofmt"
+	Detail string   `json:"detail,omitempty"` // compiler message for a build break
+	Files  []string `json:"files,omitempty"`  // unformatted files for a gofmt break
+}
+
+// ciPreflightResult is the whole verdict, JSON-stable for agents/loops.
+type ciPreflightResult struct {
+	Ref      string               `json:"ref"`      // the ref we resolved
+	Tip      string               `json:"tip"`      // its resolved sha
+	OK       bool                 `json:"ok"`       // true iff no failures
+	Failures []ciPreflightFailure `json:"failures"` // empty when OK
+	Skipped  []string             `json:"skipped,omitempty"`
+}
+
+func runCIPreflight(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("ci-preflight", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	root := fs.String("root", "", "repo root (default: git toplevel from cwd)")
+	ref := fs.String("ref", "HEAD", "ref or sha of the committed tip to check")
+	asJSON := fs.Bool("json", false, "emit the result as JSON")
+	skipBuild := fs.Bool("skip-build", false, "skip `go build ./...` (gofmt-only; much faster)")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+
+	r := resolveRoot(*root)
+	if r == "" {
+		fmt.Fprintln(stderr, "fak ci-preflight: not in a git repo (or git unavailable)")
+		return 2
+	}
+
+	tip, err := gitRevParse(r, *ref)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak ci-preflight: cannot resolve ref %q: %v\n", *ref, err)
+		return 2
+	}
+
+	// Extract the committed tip to a throwaway checkout so every content check reads the COMMITTED
+	// bytes, immune to the peer-dirty working tree. Cleaned up on return.
+	dir, err := extractCommittedTip(r, tip)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak ci-preflight: cannot materialize tip %s: %v\n", short(tip), err)
+		return 2
+	}
+	defer os.RemoveAll(dir)
+
+	res := ciPreflightResult{Ref: *ref, Tip: tip, OK: true}
+
+	// gofmt-check: the exact `gofmt -l .` CI runs, over the committed bytes.
+	if files, gerr := gofmtList(dir); gerr != nil {
+		res.Skipped = append(res.Skipped, "gofmt")
+	} else if len(files) > 0 {
+		res.OK = false
+		res.Failures = append(res.Failures, ciPreflightFailure{Step: "gofmt", Files: files})
+	}
+
+	// build: `go build ./...` — catches the partial-commit `undefined: X` red.
+	if *skipBuild {
+		res.Skipped = append(res.Skipped, "build")
+	} else if detail, ok := goBuildAll(dir); !ok {
+		res.OK = false
+		res.Failures = append(res.Failures, ciPreflightFailure{Step: "build", Detail: detail})
+	}
+
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(res)
+	} else {
+		renderCIPreflight(stdout, res)
+	}
+	if !res.OK {
+		return 1
+	}
+	return 0
+}
+
+// gitRevParse resolves ref to a full sha in repo r.
+func gitRevParse(r, ref string) (string, error) {
+	cmd := exec.Command("git", "-C", r, "rev-parse", ref)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// extractCommittedTip archives sha from repo r into a fresh temp dir and returns its path. Uses
+// `git archive` (committed bytes only — never the working tree or index) piped to `tar -x`.
+func extractCommittedTip(r, sha string) (string, error) {
+	dir, err := os.MkdirTemp("", "fak-ci-preflight-*")
+	if err != nil {
+		return "", err
+	}
+	ar := exec.Command("git", "-C", r, "archive", "--format=tar", sha)
+	windowgate.ConfigureBackgroundCommand(ar)
+	tar := exec.Command("tar", "-x", "-C", dir)
+	windowgate.ConfigureBackgroundCommand(tar)
+	pipe, err := ar.StdoutPipe()
+	if err != nil {
+		os.RemoveAll(dir)
+		return "", err
+	}
+	tar.Stdin = pipe
+	if err := tar.Start(); err != nil {
+		os.RemoveAll(dir)
+		return "", err
+	}
+	if err := ar.Run(); err != nil {
+		_ = tar.Wait()
+		os.RemoveAll(dir)
+		return "", fmt.Errorf("git archive: %w", err)
+	}
+	if err := tar.Wait(); err != nil {
+		os.RemoveAll(dir)
+		return "", fmt.Errorf("tar extract: %w", err)
+	}
+	return dir, nil
+}
+
+// gofmtList returns the unformatted .go files (relative to dir) that `gofmt -l .` reports, matching
+// the CI gofmt-check step exactly.
+func gofmtList(dir string) ([]string, error) {
+	cmd := exec.Command("gofmt", "-l", ".")
+	cmd.Dir = dir
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, ln := range strings.Split(string(out), "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" {
+			continue
+		}
+		files = append(files, filepath.ToSlash(ln))
+	}
+	return files, nil
+}
+
+// goBuildAll runs `go build ./...` in dir. Returns (detail, ok); on failure detail is the trimmed
+// compiler output so an agent sees the exact `undefined: X` without re-running anything.
+func goBuildAll(dir string) (string, bool) {
+	cmd := exec.Command("go", "build", "./...")
+	cmd.Dir = dir
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return strings.TrimSpace(string(out)), false
+	}
+	return "", true
+}
+
+func renderCIPreflight(w io.Writer, res ciPreflightResult) {
+	if res.OK {
+		fmt.Fprintf(w, "ci-preflight OK — committed tip %s builds and is gofmt-clean", short(res.Tip))
+		if len(res.Skipped) > 0 {
+			fmt.Fprintf(w, " (skipped: %s)", strings.Join(res.Skipped, ", "))
+		}
+		fmt.Fprintln(w)
+		return
+	}
+	fmt.Fprintf(w, "ci-preflight FAILED — committed tip %s is red:\n", short(res.Tip))
+	for _, f := range res.Failures {
+		switch f.Step {
+		case "gofmt":
+			fmt.Fprintf(w, "  [gofmt-check] %d file(s) not formatted (run `gofmt -w`):\n", len(f.Files))
+			for _, file := range f.Files {
+				fmt.Fprintf(w, "    %s\n", file)
+			}
+		case "build":
+			fmt.Fprintln(w, "  [build] `go build ./...` failed:")
+			for _, ln := range strings.Split(f.Detail, "\n") {
+				fmt.Fprintf(w, "    %s\n", ln)
+			}
+		}
+	}
+}

@@ -1,0 +1,158 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+)
+
+// ci_preflight_test.go — proves `fak ci-preflight` reads the COMMITTED tip (not the working
+// tree): it seeds a real temp git repo, commits a clean/dirty tip, and asserts the verdict.
+// The whole point of the verb is immunity to the peer-dirty tree, so every case commits the
+// bytes under test and then dirties the working tree to show the verdict does not move.
+
+// seedCIPreflightRepo returns a temp repo with an initial commit and a git() helper.
+func seedCIPreflightRepo(t *testing.T) (repo string, git func(args ...string) (string, error)) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	repo = t.TempDir()
+	emptyHooks := t.TempDir() // no hooks => the commit-gate hooks don't fire
+	git = func(args ...string) (string, error) {
+		c := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		c.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
+		)
+		out, err := c.CombinedOutput()
+		return string(out), err
+	}
+	if _, err := git("init", "-q", "-b", "main"); err != nil {
+		if _, e2 := git("init", "-q"); e2 != nil {
+			t.Skipf("git init failed: %v", e2)
+		}
+		_, _ = git("symbolic-ref", "HEAD", "refs/heads/main")
+	}
+	if _, err := git("config", "core.hooksPath", emptyHooks); err != nil {
+		t.Skipf("git config failed: %v", err)
+	}
+	return repo, git
+}
+
+// commitFiles writes files (path->content, relative to repo) and commits them by add-all.
+func commitFiles(t *testing.T, repo string, git func(args ...string) (string, error), msg string, files map[string]string) {
+	t.Helper()
+	for rel, content := range files {
+		full := filepath.Join(repo, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if out, err := git("add", "-A"); err != nil {
+		t.Fatalf("git add: %s", out)
+	}
+	if out, err := git("commit", "-qm", msg); err != nil {
+		t.Skipf("commit failed (likely no git identity): %s", out)
+	}
+}
+
+func runPreflightJSON(t *testing.T, argv []string) (ciPreflightResult, int) {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	code := runCIPreflight(&stdout, &stderr, argv)
+	var res ciPreflightResult
+	if stdout.Len() > 0 {
+		if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+			t.Fatalf("ci-preflight --json did not emit valid JSON: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+		}
+	}
+	return res, code
+}
+
+// A clean, gofmt-formatted, self-contained module — its committed tip must verify OK.
+const cleanGoMod = "module cipreflight.test\n\ngo 1.26\n"
+const cleanGoFile = "package p\n\n// Add returns a + b.\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"
+
+func TestCIPreflight_cleanCommittedTip_OK(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; skipped under -short")
+	}
+	repo, git := seedCIPreflightRepo(t)
+	commitFiles(t, repo, git, "clean", map[string]string{
+		"go.mod":   cleanGoMod,
+		"p/p.go":   cleanGoFile,
+		"seed.txt": "seed\n",
+	})
+	// Dirty the working tree with an UNCOMMITTED gofmt violation — the verdict must ignore it,
+	// because ci-preflight reads the committed tip only.
+	if err := os.WriteFile(filepath.Join(repo, "p", "dirty.go"), []byte("package p\nfunc  Bad(){}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, code := runPreflightJSON(t, []string{"--root", repo, "--json"})
+	if !res.OK || code != 0 {
+		t.Fatalf("clean committed tip should verify OK; got OK=%v code=%d failures=%+v", res.OK, code, res.Failures)
+	}
+}
+
+func TestCIPreflight_committedGofmtViolation_fails(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; skipped under -short")
+	}
+	if _, err := exec.LookPath("gofmt"); err != nil {
+		t.Skip("gofmt not on PATH")
+	}
+	repo, git := seedCIPreflightRepo(t)
+	// A committed, badly-formatted file: double space after func, no gofmt.
+	commitFiles(t, repo, git, "unformatted", map[string]string{
+		"go.mod": cleanGoMod,
+		"p/p.go": "package p\nfunc  Bad( ) int {return  1}\n",
+	})
+	res, code := runPreflightJSON(t, []string{"--root", repo, "--json", "--skip-build"})
+	if res.OK || code != 1 {
+		t.Fatalf("committed gofmt violation should fail; got OK=%v code=%d", res.OK, code)
+	}
+	var sawGofmt bool
+	for _, f := range res.Failures {
+		if f.Step == "gofmt" && len(f.Files) > 0 {
+			sawGofmt = true
+		}
+	}
+	if !sawGofmt {
+		t.Fatalf("expected a gofmt failure listing files; got %+v", res.Failures)
+	}
+}
+
+func TestCIPreflight_committedBuildBreak_fails(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; skipped under -short")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not on PATH")
+	}
+	repo, git := seedCIPreflightRepo(t)
+	// A committed file referencing an undefined symbol -> `go build ./...` fails.
+	commitFiles(t, repo, git, "buildbreak", map[string]string{
+		"go.mod": cleanGoMod,
+		"p/p.go": "package p\n\nfunc Use() int {\n\treturn undefinedSymbol()\n}\n",
+	})
+	res, code := runPreflightJSON(t, []string{"--root", repo, "--json"})
+	if res.OK || code != 1 {
+		t.Fatalf("committed build break should fail; got OK=%v code=%d", res.OK, code)
+	}
+	var sawBuild bool
+	for _, f := range res.Failures {
+		if f.Step == "build" && f.Detail != "" {
+			sawBuild = true
+		}
+	}
+	if !sawBuild {
+		t.Fatalf("expected a build failure with detail; got %+v", res.Failures)
+	}
+}
