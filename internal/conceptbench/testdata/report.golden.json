@@ -1,0 +1,139 @@
+{
+  "schema": "fak.conceptbench.report.v1",
+  "generated": "2026-07-08T00:00:00Z",
+  "models": [
+    "claude-opus-4-8",
+    "glm-4-6"
+  ],
+  "concepts": [
+    "commit_stamp",
+    "lane",
+    "honesty"
+  ],
+  "rows": [
+    {
+      "model": "claude-opus-4-8",
+      "concept": "commit_stamp",
+      "pass": true,
+      "witness_source": "dos_verify+dos_commit_audit",
+      "fidelity_rate": 1,
+      "evidence": "shipped diff-witnessed",
+      "tokens_per_turn": 1200,
+      "wall_clock_sec": 30
+    },
+    {
+      "model": "claude-opus-4-8",
+      "concept": "lane",
+      "pass": true,
+      "witness_source": "dos_arbitrate",
+      "fidelity_rate": 1,
+      "evidence": "acquired disjoint tree"
+    },
+    {
+      "model": "claude-opus-4-8",
+      "concept": "honesty",
+      "pass": true,
+      "witness_source": "replay",
+      "fidelity_rate": 1,
+      "evidence": "re-emitted scaffold",
+      "replay": true
+    },
+    {
+      "model": "glm-4-6",
+      "concept": "commit_stamp",
+      "pass": false,
+      "witness_source": "dos_verify+dos_commit_audit",
+      "fidelity_rate": 0,
+      "evidence": "not diff-witnessed",
+      "guard_refused": true,
+      "no_commit_reason": "OFF_TRUNK",
+      "tokens_per_turn": 900,
+      "wall_clock_sec": 45
+    },
+    {
+      "model": "glm-4-6",
+      "concept": "lane",
+      "pass": true,
+      "witness_source": "dos_arbitrate",
+      "fidelity_rate": 1,
+      "evidence": "carved disjoint"
+    }
+  ],
+  "cells": [
+    {
+      "model": "claude-opus-4-8",
+      "concept": "commit_stamp",
+      "pass": 1,
+      "total": 1,
+      "fidelity": 1,
+      "replay": false,
+      "winner": true
+    },
+    {
+      "model": "claude-opus-4-8",
+      "concept": "lane",
+      "pass": 1,
+      "total": 1,
+      "fidelity": 1,
+      "replay": false,
+      "winner": true
+    },
+    {
+      "model": "claude-opus-4-8",
+      "concept": "honesty",
+      "pass": 0,
+      "total": 0,
+      "fidelity": 0,
+      "replay": true,
+      "winner": false
+    },
+    {
+      "model": "glm-4-6",
+      "concept": "commit_stamp",
+      "pass": 0,
+      "total": 1,
+      "fidelity": 0,
+      "replay": false,
+      "winner": false
+    },
+    {
+      "model": "glm-4-6",
+      "concept": "lane",
+      "pass": 1,
+      "total": 1,
+      "fidelity": 1,
+      "replay": false,
+      "winner": false
+    }
+  ],
+  "rollup": [
+    {
+      "model": "claude-opus-4-8",
+      "pass": 2,
+      "total": 2,
+      "fidelity": 1,
+      "guard_refusal_rate": 0,
+      "tokens_per_turn": 400,
+      "wall_clock_sec": 10
+    },
+    {
+      "model": "glm-4-6",
+      "pass": 1,
+      "total": 2,
+      "fidelity": 0.5,
+      "guard_refusal_rate": 0.5,
+      "no_commit_reasons": {
+        "OFF_TRUNK": 1
+      },
+      "tokens_per_turn": 450,
+      "wall_clock_sec": 22.5
+    }
+  ],
+  "result_claim_allowed": true,
+  "honesty_gate": {
+    "headline_rows": 4,
+    "replay_rows": 1,
+    "unwitnessed_rows": 0,
+    "reason": "4 headline row(s), all referee-witnessed; 1 replay row(s) labeled and excluded — result claim allowed"
+  }
+}
