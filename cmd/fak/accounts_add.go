@@ -46,6 +46,17 @@ type addParams struct {
 	from  string
 	force bool
 
+	// probeIdentity (adopt only) reconciles the adopted seat's identity against the account its
+	// live credential ACTUALLY serves — a network probe of the OAuth profile endpoint — and
+	// prefers the credential over stale on-disk .claude.json metadata, overwriting the seeded
+	// oauthAccount when they disagree. This is the fix for a seat whose .claude.json names one
+	// account while its .credentials.json (a later /login into a shared dir) serves another.
+	// `enroll-current` always sets it; plain `add --adopt` opts in via --probe-identity.
+	probeIdentity bool
+	// probeURL overrides the OAuth profile endpoint (accounts.DefaultProfileURL when empty).
+	// It exists as a test/advanced seam, sourced from $FAK_OAUTH_PROFILE_URL at the CLI layer.
+	probeURL string
+
 	homeDir      string
 	registryPath string
 	dosView      string
@@ -175,15 +186,22 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 			}
 		}
 		fmt.Fprintf(stdout, "adopted login from %s (%s)\n", src, strings.Join(copied, ", "))
-		// Derive identity from the copied disk state — no network probe: the credential is a
-		// proven live login. Fall back to a token probe only when disk identity is empty AND a
-		// token was copied (a bundle that carried only a bare token, no .claude.json).
-		derived := accounts.DeriveIdentity(dir)
-		id = accounts.ProbedIdentity{Email: derived.Email, AccountUUID: derived.AccountUUID}
-		if id.Email == "" && id.AccountUUID == "" {
-			if tok, terr := os.ReadFile(filepath.Join(dir, ".oauth-token")); terr == nil {
-				if probed, perr := accounts.ProbeToken(nil, "", string(tok)); perr == nil {
-					id = probed
+		// Derive identity from the copied disk state. With --probe-identity (always on for
+		// enroll-current), reconcile that disk metadata against the account the copied live
+		// credential ACTUALLY serves and let the credential win — writing a corrected
+		// .claude.json so every later disk read is right. Without it, keep the historical
+		// disk-only derivation (no network on a plain adopt), falling back to a token probe only
+		// when disk identity is empty and a bare token was copied.
+		if p.probeIdentity {
+			id = adoptedIdentityWithProbe(stdout, stderr, dir, p.probeURL)
+		} else {
+			derived := accounts.DeriveIdentity(dir)
+			id = accounts.ProbedIdentity{Email: derived.Email, AccountUUID: derived.AccountUUID}
+			if id.Email == "" && id.AccountUUID == "" {
+				if tok, terr := os.ReadFile(filepath.Join(dir, ".oauth-token")); terr == nil {
+					if probed, perr := accounts.ProbeToken(nil, "", string(tok)); perr == nil {
+						id = probed
+					}
 				}
 			}
 		}
@@ -985,6 +1003,69 @@ func extractToken(out string) string {
 		}
 	}
 	return strings.TrimSpace(out)
+}
+
+// adoptedIdentityWithProbe resolves an adopted seat's identity by reconciling its on-disk
+// metadata against the account its live credential ACTUALLY serves (an OAuth profile probe), and
+// prefers the credential. When the two disagree it OVERWRITES the seat's .claude.json oauthAccount
+// with the credential identity — the durable fix for the mislabel, so `list`/`status`/`discover`
+// (all disk-only) report the true account forever after, not just this run. A probe failure is
+// non-fatal: it falls back to the copied disk identity. profileURL is "" for the real endpoint.
+func adoptedIdentityWithProbe(stdout, stderr io.Writer, dir, profileURL string) accounts.ProbedIdentity {
+	probe := func(tok string) (accounts.ProbedIdentity, error) {
+		return accounts.ProbeToken(nil, profileURL, tok)
+	}
+	res := accounts.ResolveCredentialIdentity(dir, probe)
+	switch {
+	case res.Stale:
+		fmt.Fprintf(stdout, "identity reconcile: on-disk .claude.json names %s but the live credential serves %s — using the credential identity\n",
+			identityLabel(res.Disk.Email, res.Disk.AccountUUID), identityLabel(res.Credential.Email, res.Credential.AccountUUID))
+		if err := writeClaudeJSONIdentity(dir, res.Credential); err != nil {
+			fmt.Fprintf(stderr, "fak accounts: warning: rewrite .claude.json to credential identity: %v\n", err)
+		}
+		return res.Credential
+	case res.ProbeErr != nil:
+		fmt.Fprintf(stderr, "fak accounts: warning: could not probe the credential identity (%v); trusting the copied on-disk identity\n", res.ProbeErr)
+	}
+	return accounts.ProbedIdentity{Email: res.Resolved.Email, AccountUUID: res.Resolved.AccountUUID}
+}
+
+// identityLabel renders an identity as "email (uuid)", "email", "(uuid)", or "unknown" for a
+// human-readable reconcile line.
+func identityLabel(email, uuid string) string {
+	switch {
+	case email != "" && uuid != "":
+		return fmt.Sprintf("%s (%s)", email, uuid)
+	case email != "":
+		return email
+	case uuid != "":
+		return "(" + uuid + ")"
+	default:
+		return "unknown"
+	}
+}
+
+// writeClaudeJSONIdentity writes (OVERWRITING) a dir's .claude.json oauthAccount block to the
+// given identity, preserving any other top-level keys the file already carries. Unlike
+// seedClaudeJSON it deliberately replaces a stale oauthAccount — the reconcile's whole point.
+func writeClaudeJSONIdentity(dir string, id accounts.ProbedIdentity) error {
+	if id.Email == "" && id.AccountUUID == "" {
+		return nil
+	}
+	path := filepath.Join(dir, ".claude.json")
+	doc := map[string]any{}
+	if b, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(b, &doc) // best-effort: a corrupt file is replaced wholesale
+	}
+	doc["oauthAccount"] = map[string]any{
+		"emailAddress": id.Email,
+		"accountUuid":  id.AccountUUID,
+	}
+	b, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(b, '\n'), 0o644)
 }
 
 // seedClaudeJSON writes a minimal .claude.json carrying the probed identity, so a fresh seat
