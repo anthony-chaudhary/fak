@@ -58,7 +58,7 @@ func TestBenchmarkIngestThreeSnapshotsEmitValidatedRows(t *testing.T) {
 	if tbRow.Harness == "" {
 		t.Fatal("terminal-bench row dropped its harness (it scores an agent PLUS a model)")
 	}
-	if tbRow.Version != "2.1" {
+	if tbRow.Version != "2.1" { //boundarylint:ignore CHANGE_DETECTOR_TEST fixture round-trip fidelity: ingest must preserve the version verbatim
 		t.Fatalf("terminal-bench version = %q, want 2.1", tbRow.Version)
 	}
 	if tbRow.Unit != "pct-resolved" {
