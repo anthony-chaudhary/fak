@@ -1,18 +1,18 @@
 {
-  "as_of": "2026-07-03T11:54:31Z",
+  "as_of": "2026-07-08T12:10:48Z",
   "concept_rungs": {
     "breakpoint_placement": "UNWIRED",
-    "compaction_shed": "SILENT_ZERO",
-    "guard_usage_plane": "CHANNEL_READY",
+    "compaction_shed": "EVIDENCED",
+    "guard_usage_plane": "EVIDENCED",
     "kv_prefix_reuse": "EVIDENCED",
     "provider_prompt_cache_passthrough": "EVIDENCED",
-    "ttl_upgrade_1h": "UNWIRED",
+    "ttl_upgrade_1h": "CHANNEL_READY",
     "uncached_remainder_shrink": "UNIMPLEMENTED"
   },
   "ledger_rows": {
-    "cache_savings": 59,
-    "cache_value": 9,
-    "gateway_usage": 400
+    "cache_savings": 892,
+    "cache_value": 11,
+    "gateway_usage": 1888
   },
   "ledger_schemas": {
     "cache_savings": "fak-cache-savings-ledger/1",
@@ -20,7 +20,8 @@
     "gateway_usage": "fak-gateway-usage-ledger/1"
   },
   "savings_mechanism_rows": {
-    "provider_prompt_cache": 59
+    "compaction_shed": 331,
+    "provider_prompt_cache": 561
   },
   "schema": "fak-managed-cache-proving-ground/1",
   "violation_count": 0
