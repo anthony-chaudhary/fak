@@ -186,6 +186,7 @@ var refClassByExactPath = map[string]string{
 	"tools/fleet_control_pane.py":               RefClassDevelopmentSource,
 	"tools/fleet_control_pane_test.py":          RefClassDevelopmentSource,
 	"cmd/fak/affected.go":                       RefClassDevelopmentSource,
+	"cmd/fak/doctor.go":                         RefClassDevelopmentSource,
 	"cmd/fak/treedoctor.go":                     RefClassDevelopmentSource,
 	"internal/corelockaudit/corelockaudit.go":   RefClassDevelopmentSource,
 	"internal/gitgate/gitgate.go":               RefClassDevelopmentSource,
@@ -194,6 +195,8 @@ var refClassByExactPath = map[string]string{
 	"internal/treedoctor/treedoctor.go":         RefClassDevelopmentSource,
 	"internal/workerenvelope/workerenvelope.go": RefClassDevelopmentSource,
 	"tools/issue_resolve_witnessed.py":          RefClassDevelopmentSource,
+	"tools/auto_push_on_lag.py":                 RefClassDevelopmentSource,
+	"tools/register_push_lag_pusher.ps1":        RefClassDevelopmentSource,
 	"tools/register_worktree_doctor.ps1":        RefClassDevelopmentSource,
 	"tools/worktree_doctor.py":                  RefClassDevelopmentSource,
 
