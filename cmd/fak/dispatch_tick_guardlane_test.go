@@ -9,13 +9,14 @@ import (
 )
 
 // TestDispatchTickGuardedAutoPickSkipsSelfSourceLane is the un-stall half of #1397: a
-// GUARDED auto-pick (no explicit lane) must SKIP fak's own-source lanes (cmd/**,
-// internal/**) and land on a shippable lane (docs) -- even when the self-source lane
-// carries a far larger step budget. Before the fix the picker chose the busiest lane
-// (cmd, internal-rooted), then refused with SELF_MODIFY_HOLD every tick and surfaced
+// GUARDED auto-pick (no explicit lane) must SKIP fak's TRUST-CRITICAL lanes (the
+// adjudicator/policy/kernel the referee binds to) and land on a shippable lane (docs) --
+// even when the held lane carries a far larger step budget. Before the fix the picker
+// chose the busiest lane, then refused with SELF_MODIFY_HOLD every tick and surfaced
 // NOTHING; now it skips the held lane BEFORE the busiest-pick so the tick surfaces real
-// shippable work. The default guard is left ON (no FLEET_DOGFOOD_GUARD override) so this
-// exercises the real guarded path.
+// shippable work. NOTE the busiest lane here is the ADJUDICATOR (trust-critical), not
+// gateway -- gateway is guard-shippable now and would NOT be skipped. The default guard
+// is left ON (no FLEET_DOGFOOD_GUARD override) so this exercises the real guarded path.
 func TestDispatchTickGuardedAutoPickSkipsSelfSourceLane(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
 	old := dispatchRouteIssues
@@ -24,25 +25,25 @@ func TestDispatchTickGuardedAutoPickSkipsSelfSourceLane(t *testing.T) {
 			Schema: dispatchtick.RouterSchema,
 			OK:     true,
 			Lanes: map[string]dispatchtick.RouterLaneGroup{
-				// The busiest lane by step budget IS self-source (internal/**) -- exactly
-				// the guarded-trunk backlog shape that stalled the surface (#1397).
-				"gateway": {Tree: []string{"internal/gateway/**"}, Issues: []int{20, 21}, Count: 2, StepBudget: 9},
-				"docs":    {Tree: []string{"docs/**"}, Issues: []int{12}, Count: 1, StepBudget: 3},
+				// The busiest lane by step budget is TRUST-CRITICAL (the referee's own
+				// adjudicator tree) -- the only backlog shape that still stalls the surface.
+				"adjudicator": {Tree: []string{"internal/adjudicator/**"}, Issues: []int{20, 21}, Count: 2, StepBudget: 9},
+				"docs":        {Tree: []string{"docs/**"}, Issues: []int{12}, Count: 1, StepBudget: 3},
 			},
 		}, nil
 	}
 	t.Cleanup(func() { dispatchRouteIssues = old })
 
-	// Pure picker: the self-source busiest lane is skipped, docs is chosen.
+	// Pure picker: the trust-critical busiest lane is skipped, docs is chosen.
 	pick, err := pickDispatchLane(t.TempDir(), io.Discard, "", nil, false, "", dispatchGoalProfileThroughput)
 	if err != nil {
 		t.Fatalf("pickDispatchLane: %v", err)
 	}
 	if pick.Lane != "docs" {
-		t.Fatalf("lane = %q, want docs (the busier gateway lane is self-source and skipped under guard)", pick.Lane)
+		t.Fatalf("lane = %q, want docs (the busier adjudicator lane is trust-critical and skipped under guard)", pick.Lane)
 	}
-	if len(pick.SelfSourceHeld) != 1 || pick.SelfSourceHeld[0] != "gateway" {
-		t.Fatalf("self-source held = %+v, want [gateway]", pick.SelfSourceHeld)
+	if len(pick.SelfSourceHeld) != 1 || pick.SelfSourceHeld[0] != "adjudicator" {
+		t.Fatalf("self-source held = %+v, want [adjudicator]", pick.SelfSourceHeld)
 	}
 
 	// End-to-end tick: the surface is the shippable docs lane, not an empty/held one.
@@ -61,11 +62,12 @@ func TestDispatchTickGuardedAutoPickSkipsSelfSourceLane(t *testing.T) {
 }
 
 // TestDispatchTickGuardedAllSelfSourceBacklogExplainsHold is the honest-empty half of
-// #1397: when the ENTIRE eligible backlog is self-source under guard, the auto-pick finds
-// no shippable lane -- but the tick must EXPLAIN why (SELF_MODIFY_HOLD over the held set)
-// rather than render a silent/empty NO_LANE that falsely reads as "router empty/error".
-// The backlog here is two internal/** lanes only; both are held, so the surface names them
-// and routes the operator to an unguarded/worktree-isolated path (#1334).
+// #1397: when the ENTIRE eligible backlog is TRUST-CRITICAL under guard, the auto-pick
+// finds no shippable lane -- but the tick must EXPLAIN why (SELF_MODIFY_HOLD over the held
+// set) rather than render a silent/empty NO_LANE that falsely reads as "router
+// empty/error". The backlog here is two referee-own lanes only (adjudicator + policy);
+// both are held, so the surface names them and routes the operator to an
+// unguarded/worktree-isolated path (#1334).
 func TestDispatchTickGuardedAllSelfSourceBacklogExplainsHold(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
 	old := dispatchRouteIssues
@@ -74,8 +76,8 @@ func TestDispatchTickGuardedAllSelfSourceBacklogExplainsHold(t *testing.T) {
 			Schema: dispatchtick.RouterSchema,
 			OK:     true,
 			Lanes: map[string]dispatchtick.RouterLaneGroup{
-				"gateway": {Tree: []string{"internal/gateway/**"}, Issues: []int{20}, Count: 1, StepBudget: 5},
-				"cmd":     {Tree: []string{"cmd/**"}, Issues: []int{30}, Count: 1, StepBudget: 3},
+				"adjudicator": {Tree: []string{"internal/adjudicator/**"}, Issues: []int{20}, Count: 1, StepBudget: 5},
+				"policy":      {Tree: []string{"internal/policy/**"}, Issues: []int{30}, Count: 1, StepBudget: 3},
 			},
 		}, nil
 	}
@@ -91,13 +93,13 @@ func TestDispatchTickGuardedAllSelfSourceBacklogExplainsHold(t *testing.T) {
 		t.Fatalf("bad json: %v\n%s", err, out)
 	}
 	if got["action"] != "self_modify_hold" || got["verdict"] != "SELF_MODIFY_HOLD" || got["ok"] != false {
-		t.Fatalf("all-self-source surface = action %v verdict %v ok %v, want self_modify_hold/SELF_MODIFY_HOLD/false", got["action"], got["verdict"], got["ok"])
+		t.Fatalf("all-trust-critical surface = action %v verdict %v ok %v, want self_modify_hold/SELF_MODIFY_HOLD/false", got["action"], got["verdict"], got["ok"])
 	}
 	if got["verdict"] == "NO_LANE" {
-		t.Fatalf("all-self-source backlog must not render as the misleading NO_LANE router-empty surface: %#v", got)
+		t.Fatalf("all-trust-critical backlog must not render as the misleading NO_LANE router-empty surface: %#v", got)
 	}
 	held := stringAnySlice(got["self_modify_held_lanes"])
-	if len(held) != 2 || held[0] != "cmd" || held[1] != "gateway" {
-		t.Fatalf("self_modify_held_lanes = %v, want sorted [cmd gateway] (every candidate lane held as self-source)", held)
+	if len(held) != 2 || held[0] != "adjudicator" || held[1] != "policy" {
+		t.Fatalf("self_modify_held_lanes = %v, want sorted [adjudicator policy] (every candidate lane held as trust-critical)", held)
 	}
 }
