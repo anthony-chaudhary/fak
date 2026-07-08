@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"strings"
 	"unicode/utf8"
 )
@@ -98,18 +97,4 @@ func guardColorizeSummary(s string, isTTY bool) string {
 		}
 	}
 	return strings.Join(lines, "\n")
-}
-
-// guardKV joins short "k=v" facets into the compact, bracketed detail tail some rows carry
-// (e.g. the cache-attribution breakdown). Rendered as `[a=1 · b=2 · c=3]` so the facets read
-// as a set of labelled values, not a comma-run of bare numbers.
-func guardKV(pairs ...[2]string) string {
-	if len(pairs) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(pairs))
-	for _, p := range pairs {
-		parts = append(parts, fmt.Sprintf("%s=%s", p[0], p[1]))
-	}
-	return "[" + strings.Join(parts, " · ") + "]"
 }

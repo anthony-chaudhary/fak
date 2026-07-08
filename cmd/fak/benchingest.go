@@ -26,9 +26,8 @@ import (
 //	fak bench-ingest snap1.json snap2.json ...   ingest and print the modelscore registry JSON
 //	fak bench-ingest --check snap...             validate only; print a per-model row count, exit nonzero on refusal
 //
-// To wire this as a top-level verb, add `case "bench-ingest": cmdBenchIngest(os.Args[2:])`
-// to the dispatch switch in main.go (kept out of this change so it does not widen
-// into the file another lane owns).
+// Wired as the top-level `bench-ingest` case in main.go, classified TierDev in
+// internal/devindex/tiers.go with its manifest synopsis alongside.
 func cmdBenchIngest(argv []string) { os.Exit(runBenchIngest(os.Stdout, os.Stderr, argv)) }
 
 func runBenchIngest(stdout, stderr io.Writer, argv []string) int {
