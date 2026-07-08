@@ -553,32 +553,21 @@ func toolTags(name string) []string {
 	return tags
 }
 
+// rankCards ranks a candidate card set against a query. As of #3235 (epic
+// #3229) it delegates to the hybrid BM25 + stemming-expansion retriever in
+// ranker.go, replacing the flat lexical token-overlap scorer (score, below).
+// The signature and the deterministic cardLess tiebreak are unchanged, so every
+// caller (Query, Capabilities, the freshness ordering check) is byte-compatible.
 func rankCards(cards []FeatureCard, q string) []FeatureCard {
-	toks := tokens(q)
-	type hit struct {
-		card  FeatureCard
-		score int
-	}
-	var hits []hit
-	for _, c := range cards {
-		s := score(c, toks)
-		if s > 0 {
-			hits = append(hits, hit{c, s})
-		}
-	}
-	sort.SliceStable(hits, func(i, j int) bool {
-		if hits[i].score != hits[j].score {
-			return hits[i].score > hits[j].score
-		}
-		return cardLess(hits[i].card, hits[j].card)
-	})
-	out := make([]FeatureCard, len(hits))
-	for i, h := range hits {
-		out[i] = h.card
-	}
-	return out
+	return rankHybrid(cards, q)
 }
 
+// score is the pre-#3235 flat lexical scorer: fixed per-field token-overlap
+// weights, no IDF, no stemming. A term common to every live card
+// (live/mcp/tool) scores here exactly like a discriminating one — the failure
+// mode ranker.go's IDF rung fixes. It is retained OFF the production path as the
+// A/B baseline the recall regression test (ranker_test.go) grades the hybrid
+// ranker against.
 func score(c FeatureCard, toks []string) int {
 	name := strings.ToLower(c.Name)
 	summary := strings.ToLower(c.Summary)

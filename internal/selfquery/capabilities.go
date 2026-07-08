@@ -25,10 +25,13 @@ import (
 //     for "a copy-pasteable fak_memory_run call".
 //   - the two "context hygiene" drivers (clean, compact) get synonym tags
 //     naming the family they belong to, so an intent like "compact my context"
-//     surfaces the driver whose NAME wasn't in the query at all. Without this,
-//     rankCards' plain token-overlap scoring only ever matches the driver whose
-//     literal name appears in the intent (see score() in selfquery.go); the
-//     proof asks for BOTH ranked to the top, not just the one named.
+//     surfaces the driver whose NAME wasn't in the query at all — BOTH ranked to
+//     the top, as the proof asks, not just the one named. As of #3235 rankCards
+//     is the hybrid BM25 + stemming ranker (ranker.go), which now handles the
+//     ubiquitous-tag and morphological cases corpus-wide; this seed is retained
+//     only for the cross-driver SEMANTIC cluster (compact <-> clean), which is
+//     not a morphological variant and so is beyond pure lexical stemming — the
+//     one case still needing a hand link, pending the follow-on embeddings rung.
 
 // CapabilitiesRequest is a capabilities query: Query is optional (an empty
 // query returns every card in stable source/kind/name order, mirroring
@@ -51,6 +54,14 @@ type CapabilitiesResponse struct {
 // existing tags — it does not change what `fak feature query` sees, since that
 // surface builds its own card set from c.memoryCards() independently of this
 // augmentation.
+//
+// Post-#3235 this is a DOCUMENTED SEED, not a growing per-driver list: the
+// hybrid ranker's IDF + stemming rungs generalize what a hand list used to do
+// for ubiquitous tags and morphological variants. What survives here is only
+// the compact <-> clean SEMANTIC link (different words, same intent family),
+// which lexical stemming cannot bridge. Do not extend this map to paper over a
+// ranking miss a corpus-wide rung should own; the embeddings follow-on is where
+// broader semantic proximity belongs.
 var memoryHygieneSynonyms = map[string][]string{
 	"clean":   {"context", "hygiene", "compact", "cleanup", "trim"},
 	"compact": {"context", "hygiene", "clean", "cleanup", "trim", "consolidate"},
