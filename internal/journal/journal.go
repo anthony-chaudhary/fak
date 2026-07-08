@@ -103,6 +103,16 @@ type Row struct {
 	// the frozen decision fields above; ExitCode is a debugging convenience layered
 	// on top.
 	ExitCode int `json:"exit_code,omitempty"` // the child's exit code (-1 when signaled); 0 omitted
+
+	// Restart-chain field (for RESTART_HOP: the budget-restart continuity
+	// witness, #3057). Like a crash, a restart is supervision — not a kernel
+	// decision — so AppendRestartHop writes it directly through the chain. NOT
+	// part of the hash-chain pre-image (chainHash lists the chained fields
+	// explicitly, so existing journals verify byte-for-byte); the chained
+	// forensic identity of a hop — Kind, agent (Tool), guard session (TraceID),
+	// continuity class (Reason) — rides the frozen decision fields above, and
+	// this carries the full correlated record layered on top.
+	Restart *RestartHop `json:"restart,omitempty"`
 }
 
 // Journal is a hash-chained append-only ledger with an in-process live stream.

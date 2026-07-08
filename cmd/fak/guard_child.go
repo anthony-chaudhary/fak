@@ -1095,12 +1095,14 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				return
 			}
 			restarts++
-			if restarter.stderr != nil {
-				fmt.Fprintf(restarter.stderr, "fak guard: context budget exhausted for %s; restarting child as %s\n", ev.FromTraceID, ev.ToTraceID)
-				if ev.SeedFile != "" {
-					fmt.Fprintf(restarter.stderr, "fak guard: carryover seed written to %s\n", ev.SeedFile)
-				}
-			}
+			// #3057: ONE correlated record per restart — a RESTART_HOP row in the
+			// guard audit journal plus a single stderr one-liner carrying the same
+			// fields (from/to trace, seed size + file, handback mode, child session,
+			// continuity status) — replacing the two uncorrelated lines that used to
+			// be the only evidence a hidden relaunch ever happened. Queryable later
+			// via `fak guard restart-audit` and `fak session status <id>`.
+			guardEmitRestartHop(auditJournal, restarter.stderr, agentName, guardTraceID,
+				guardRestartHopFromEvent(ev, restarts, agentName))
 			srv.SetDefaultTraceID(ev.ToTraceID)
 			extraEnv = guardRestartEnv(ev)
 			// #3055: reattach the existing transcript on relaunch. The FAK_RESET_* env vars

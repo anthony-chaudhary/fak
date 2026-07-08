@@ -117,6 +117,13 @@ func cmdGuard(argv []string) {
 		cmdGuardAllow(argv[1:])
 		return
 	}
+	// `fak guard restart-audit` is the read-only restart-chain scanner (#3057):
+	// joins RESTART_HOP journal rows against carryover seed files and backfills
+	// the orphans. Peeled like `allow` — a bare leading verb, never a program to
+	// wrap — and returns without binding a gateway.
+	if len(argv) > 0 && argv[0] == "restart-audit" {
+		os.Exit(runGuardRestartAudit(os.Stdout, os.Stderr, argv[1:]))
+	}
 	t0 := time.Now()
 	fs := flag.NewFlagSet("guard", flag.ExitOnError)
 	verbFlagUsage(fs, "guard")

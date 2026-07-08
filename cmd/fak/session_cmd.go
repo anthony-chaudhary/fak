@@ -141,9 +141,18 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	case "ls":
 		return c.renderList(stdout, stderr, *asJSON)
 	case "status":
-		return c.renderState(stdout, stderr, *asJSON, func() (gateway.SessionState, error) {
+		rc := c.renderState(stdout, stderr, *asJSON, func() (gateway.SessionState, error) {
 			return c.observe(pos[0])
 		})
+		// #3057: append the locally-evidenced restart chain (RESTART_HOP journal
+		// rows + carryover seeds on this host) so status answers "did my session
+		// restart, and did continuity survive?". Human mode only — --json stays
+		// the gateway's own SessionState document — and silent for any session
+		// with no restart history.
+		if rc == 0 && !*asJSON {
+			guardRestartChainStatusAddendum(stdout, pos[0])
+		}
+		return rc
 	case "stop":
 		return c.runVerb(stdout, stderr, *asJSON, pos[0], "stopped", *reason, *ifRev)
 	case "pause":
