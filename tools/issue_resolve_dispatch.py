@@ -77,6 +77,7 @@ import dispatch_worker  # noqa: E402  (child_env for the opencode backend)
 import dispatch_preflight  # noqa: E402  (pid-sidecar identity probe)
 import lane_yield  # noqa: E402  (shared low-yield lane fold, #2062)
 import issue_lane_router  # noqa: E402  (lane_taxonomy: dos.toml lane→tree map, #2062)
+import lane_core  # noqa: E402  (core-source / trust-critical lane predicates, mirror of internal/dispatchtick/selfmodify.go)
 
 # Re-export the shared console-window suppressor so the account-topup / glm-docs
 # entry scripts (which import THIS module as `ird`) route every helper subprocess
@@ -775,28 +776,35 @@ def lane_issue_numbers(root: Path, explicit_lane: str | None,
     an opus task excludes 'docs' so the glm task owns it) -- ignored when an
     explicit lane is named.
 
-    ``guarded`` (default: ``dispatch_worker.guard_enabled()``) additionally
-    EXCLUDES a self-source lane (``issue_dispatch.is_self_source_tree``,
-    cmd/**, internal/**) from the busiest-pick pool -- proactively, before any
-    worker is spawned. This mirrors issue_dispatch.pick_lane's fix (itself a
-    port of the native Go dispatch path's SELF_MODIFY_HOLD): of the 28 lanes
-    the router currently returns, 21 are self-source (metrics, bench, compute,
-    gateway, policy, promptmmu, model, cmd, engine, agent, ggufload, ...) and
-    only the top two lanes by count (docs, tools) are not -- so as soon as
-    those two are excluded (already held by a live worker, e.g. under
-    concurrent dispatch), the OLD busiest-pick would silently auto-select a
-    self-source lane most of the time, each pick individually risking the same
-    build-poisoning failure issue_dispatch.pick_lane's docstring names (#1397;
-    #1338 cost two runs, ~52 turns, 0 commits) -- and this is the module the
-    live Scheduled Tasks actually invoke, so this module previously had only
-    REACTIVE, post-hoc detection (``NO_COMMIT_SELF_MODIFY`` below, discovered
-    from a worker's session log tail AFTER it already burned turns) despite
-    driving production dispatch. Unlike the ``exclude``/busy-lane skip, a
-    self-source lane is a HARD exclude -- if every lane with open issues is
-    self-source-held, ``lane`` comes back ``None`` and the held lanes are
-    named in ``self_modify_held``. An explicit lane is still honored verbatim
-    regardless of guard state (operator intent overrides the guard, same as
-    the Go path and issue_dispatch.pick_lane).
+    ``guarded`` (default: ``dispatch_worker.guard_enabled()``) HARD-EXCLUDES
+    only the TRUST-CRITICAL lanes (``lane_core.lane_dispatchable_under_guard``,
+    the Python mirror of the native Go path's LaneDispatchableUnderGuard) from
+    the pick pool -- proactively, before any worker is spawned. The hold is the
+    referee's own trees only: internal/{abi,kernel,adjudicator,policy,
+    registrations,architest,shipgate} plus dos.toml/.dos/policy.json/VERSION,
+    the witness machinery a self-improving worker must never grade its own
+    homework by editing (#1397). Everything ELSE under cmd/**/internal/**
+    (gateway, agent, compute, engine, model, ...) is guard-shippable and now
+    DISPATCHABLE -- concurrent core work on the shared trunk is kept build-safe
+    by the push-seam TRUNK_WOULD_NOT_COMPILE gate (cmd/fak/prepush_build.go via
+    ``fak hooks pre-push``), not by holding the whole self-source tree. This
+    replaces the historical BROAD self-source hold that left only the coarse
+    docs/tools buckets pickable -- so the guarded loop ground docs while
+    fragmented per-leaf core work starved behind the big buckets; the narrowed
+    hold is the model the native Go dispatch path already validated. If every
+    lane with open issues is trust-critical-held, ``lane`` comes back ``None``
+    and the held lanes are named in ``self_modify_held``. An explicit lane is
+    still honored verbatim regardless of guard state (operator intent overrides
+    the guard, same as the Go path and issue_dispatch.pick_lane).
+
+    Within the eligible (non-held, non-excluded) pool the lane is chosen by a
+    VALUE weight, not raw open-issue count: a CORE self-source lane
+    (``lane_core.is_core_source_lane_tree``) outranks the coarse docs/tools
+    buckets, then the lane's strongest ``issue_triage`` priority score
+    (P0=1000/P1=400/P2=150/default=60 -- ceremony notes/follow-ups carry the
+    default), then open-issue count, then lane name -- a mirror of the Go
+    corebias throughput ladder. ``core_lanes`` and ``lane_priority`` in the
+    result expose the ranking inputs.
 
     ``soft_exclude`` (Part C, #2062) demotes lanes the low-yield detector
     flagged (>=40 turns / 0 closes) from the busiest-pick -- but SOFT, with a
@@ -842,6 +850,8 @@ def lane_issue_numbers(root: Path, explicit_lane: str | None,
     soft_exclude = soft_exclude or set()
     low_yield_excluded: list[str] = []
     low_yield_relief: list[str] = []
+    core_lanes_out: list[str] = []
+    lane_priority: dict[str, int] = {}
     by_lane_count = {k: len(v) for k, v in nums_by_lane.items()}
     if explicit_lane:
         chosen = explicit_lane
@@ -849,13 +859,21 @@ def lane_issue_numbers(root: Path, explicit_lane: str | None,
         # An explicit lane bounds the contract scan to that lane (operator intent).
         eligible_ranked = [[chosen, nums_by_lane.get(chosen, [])]]
     else:
-        self_source = ({ln for ln in nums_by_lane if issue_dispatch.is_self_source_tree(trees.get(ln))}
-                       if guarded else set())
-        held = sorted(ln for ln in nums_by_lane if ln in self_source and nums_by_lane[ln])
-        safe_open = {k: v for k, v in nums_by_lane.items() if k not in self_source and v}
+        # HELD set narrowed from the BROAD self-source hold (all cmd/**/internal/**)
+        # to the TRUST-CRITICAL referee only (mirror internal/dispatchtick/
+        # selfmodify.go LaneDispatchableUnderGuard, ported via tools/lane_core.py).
+        # A guarded worker may now ship the ~85% of self-source that is NOT the
+        # referee's own trees (gateway, agent, compute, ...), kept build-safe on the
+        # shared trunk by the push-seam TRUNK_WOULD_NOT_COMPILE gate; only the
+        # trust-critical set stays HARD-held. See the docstring above.
+        held_set = ({ln for ln in nums_by_lane
+                     if not lane_core.lane_dispatchable_under_guard(True, trees.get(ln))}
+                    if guarded else set())
+        held = sorted(ln for ln in nums_by_lane if ln in held_set and nums_by_lane[ln])
+        safe_open = {k: v for k, v in nums_by_lane.items() if k not in held_set and v}
         safe_lanes_busy = sorted(k for k in safe_open if k in exclude)
         eligible = {k: v for k, v in nums_by_lane.items()
-                    if k not in exclude and k not in self_source}
+                    if k not in exclude and k not in held_set}
         # Part C: apply the low-yield SOFT exclude with a STARVATION FLOOR --
         # demote flagged lanes only while >=1 eligible lane survives; otherwise
         # seat them back (relief) so the picker can never be starved to None by a
@@ -868,18 +886,43 @@ def lane_issue_numbers(root: Path, explicit_lane: str | None,
                 low_yield_excluded = soft_hits
             else:
                 low_yield_relief = soft_hits  # floor: keep the only lanes we have
-        chosen = max(eligible, key=lambda k: len(eligible[k])) if eligible else None
-        # Every eligible lane with open issues, busiest first (name-tiebroken so the
-        # order is deterministic) -- the lane rank the cross-lane contract scan walks.
+        # VALUE-WEIGHTED pick, replacing the old busiest-by-count max. Mirror the Go
+        # corebias throughput ladder (dispatch_tick_route.go dispatchLaneBetterForGoal):
+        # a CORE self-source lane outranks the coarse docs/tools buckets, then the
+        # lane's strongest issue_triage priority, then open-issue count, then lane
+        # name. This is the "real work over ceremony" order -- core forward progress
+        # leads volume. FAIL-OPEN: a gh/triage hiccup yields {} priorities and the key
+        # degrades to (core, 0, count, name), never worse than the old count pick;
+        # core-ness is a pure-local tree read that always holds.
+        core_lanes = {ln for ln in eligible
+                      if lane_core.is_core_source_lane_tree(trees.get(ln))}
+        lane_priority = issue_dispatch.lane_priority_scores(
+            root, {ln: list(v) for ln, v in eligible.items()})
+        core_lanes_out = sorted(core_lanes)
+
+        def _value_rank(kv: tuple[str, list[int]]) -> tuple[int, int, int, str]:
+            ln, v = kv
+            # DESCENDING on (core, priority, count) via negation; lane name ASCENDING
+            # as the final deterministic tiebreak (matches the historical name break).
+            return (-(1 if ln in core_lanes else 0),
+                    -int(lane_priority.get(ln, 0)),
+                    -len(v),
+                    ln)
+
         eligible_ranked = [[k, v] for k, v in
-                           sorted(eligible.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+                           sorted(eligible.items(), key=_value_rank)
                            if v]
+        # chosen is the head of the value-ranked list, so the single pick and the
+        # cross-lane contract-scan order agree (both name-deterministic on ties).
+        chosen = eligible_ranked[0][0] if eligible_ranked else None
     return {"lane": chosen, "numbers": nums_by_lane.get(chosen or "", []),
             "by_lane_count": by_lane_count,
             "eligible_by_lane": eligible_ranked,
             "excluded_lanes": sorted(exclude),
             "safe_lanes_busy": safe_lanes_busy if not explicit_lane else [],
             "self_modify_held": held,
+            "core_lanes": core_lanes_out,
+            "lane_priority": lane_priority,
             "caps_by_issue": caps_by_issue,
             "low_yield_excluded": low_yield_excluded,
             "low_yield_relief": low_yield_relief,
