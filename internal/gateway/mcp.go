@@ -181,7 +181,10 @@ func (s *Server) handleMethod(ctx context.Context, method string, params json.Ra
 	case "ping":
 		return map[string]any{}, nil
 	case "tools/list":
-		return mcpCacheHint(map[string]any{"tools": s.exposedToolDescriptors()}, mcpCatalogTTLMillis, mcpCacheScopePublic), nil
+		// toolsListDescriptors is the resident bootstrap view when deferral is on
+		// (#3231), else the full exposed registry (the default) — byte-for-byte
+		// the pre-#3231 surface.
+		return mcpCacheHint(map[string]any{"tools": s.toolsListDescriptors()}, mcpCatalogTTLMillis, mcpCacheScopePublic), nil
 	case "tools/call":
 		return s.callTool(ctx, params)
 	case "resources/list":
@@ -889,10 +892,15 @@ type ToolsSearchResponse struct {
 	Tools []map[string]any `json:"tools"` // filtered tool descriptors at requested detail level
 }
 
-// toolsSearch implements lazy/on-demand tool schema loading with progressive disclosure.
-// Returns tool descriptors filtered by query and at the requested detail level.
+// toolsSearch is the tool_search_tool: lazy/on-demand tool-schema loading with
+// progressive disclosure. As of #3231 it ranks the FULL exposed registry
+// (including the cold tools absent from a deferred tools/list) through the
+// selfquery hybrid catalog (#3235) rather than a flat substring scan, so a
+// deferred schema is re-findable by intent — recall is the documented failure
+// mode of deferral. Results are returned best-first at the requested detail
+// level. This is the "full retrieval view" half of the two-view split: tools/list
+// may be schema-light, but the search tool always sees every exposed tool.
 func (s *Server) toolsSearch(req ToolsSearchRequest) (ToolsSearchResponse, error) {
-	query := strings.ToLower(req.Query)
 	level := req.DetailLevel
 	if level == "" {
 		level = "description" // default to middle ground
@@ -901,21 +909,22 @@ func (s *Server) toolsSearch(req ToolsSearchRequest) (ToolsSearchResponse, error
 		return ToolsSearchResponse{}, fmt.Errorf("invalid detail_level: %s (must be name, description, or full)", level)
 	}
 
-	allTools := s.exposedToolDescriptors()
-	result := make([]map[string]any, 0, len(allTools))
-
-	for _, t := range allTools {
-		name, _ := t["name"].(string)
-		desc, _ := t["description"].(string)
-
-		if query != "" {
-			nameLower := strings.ToLower(name)
-			descLower := strings.ToLower(desc)
-			if !strings.Contains(nameLower, query) && !strings.Contains(descLower, query) {
-				continue
-			}
+	// Index the full registry by name so ranked names map back to descriptors.
+	byName := make(map[string]map[string]any)
+	for _, t := range s.exposedToolDescriptors() {
+		if n, _ := t["name"].(string); n != "" {
+			byName[n] = t
 		}
+	}
 
+	ranked := s.rankToolNamesByIntent(req.Query)
+	result := make([]map[string]any, 0, len(ranked))
+	for _, name := range ranked {
+		t, ok := byName[name]
+		if !ok {
+			continue
+		}
+		desc, _ := t["description"].(string)
 		tool := map[string]any{"name": name}
 		if level == "description" || level == "full" {
 			tool["description"] = desc
@@ -925,7 +934,6 @@ func (s *Server) toolsSearch(req ToolsSearchRequest) (ToolsSearchResponse, error
 				tool["inputSchema"] = schema
 			}
 		}
-
 		result = append(result, tool)
 	}
 

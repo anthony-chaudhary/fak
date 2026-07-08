@@ -507,6 +507,17 @@ type Config struct {
 	// or matches ZERO known tools, so a typo aborts startup rather than silently
 	// shrinking the surface to nothing. Set by `fak serve --expose`.
 	ExposeTools []string
+	// DeferMCPTools, when true, makes the fak MCP server's tools/list return only a
+	// small BOOTSTRAP set (the hot syscall/read/adjudicate core + the fak_tools_search
+	// entry) instead of the full ~24-tool registry, so the cold fak_* schemas are
+	// absent from the always-sent floor and faulted in on demand by fak_tools_search
+	// (epic #3229, #3231). tools/call still routes EVERY registered tool, deferred or
+	// not — deferral hides the schema, never the route or the guard. Composes UNDER
+	// ExposeTools (it filters the already-exposed set). Default false: the reduction
+	// depends on the client re-finding a searched tool and on the pin/quarantine guard
+	// (#3200), so the default flip is gated on that validation. Also enabled by
+	// FAK_DEFER_MCP_TOOLS=1.
+	DeferMCPTools bool
 	// RouteManifest, when non-nil, makes the gateway classify each fak_syscall tool
 	// call into a modelroute.Subject and route it: for a single-model (PICK) plan the
 	// chosen model id is written to abi.ToolCall.Engine BEFORE Submit, so the kernel
@@ -1153,6 +1164,12 @@ type Server struct {
 	// open to the full surface when it is nil.
 	exposeAllow func(toolName string) bool
 
+	// deferMCPTools mirrors Config.DeferMCPTools (|| FAK_DEFER_MCP_TOOLS): true means
+	// tools/list returns only the bootstrap view (#3231). Read only by
+	// toolsListDescriptors; every other surface (fak_tools_search, tools/call) sees
+	// the full registry regardless.
+	deferMCPTools bool
+
 	// systemBlockDrop is the same inbound-prune seam for typed Anthropic system[]
 	// blocks: true means this named block element may be removed after the cached
 	// system breakpoint. nil leaves system[] byte-for-byte unchanged.
@@ -1453,6 +1470,7 @@ func New(cfg Config) (*Server, error) {
 		cacheTTL1H:                 cfg.CacheTTL1H || envEnabled("FAK_ABLATE_TTL_1H"),
 		toolFloorDenies:            cfg.ToolFloorDenies,
 		exposeAllow:                exposeAllow,
+		deferMCPTools:              cfg.DeferMCPTools || envEnabled("FAK_DEFER_MCP_TOOLS"),
 		cacheStream:                cacheStream,
 		rungObs:                    rungObs,
 		feed:                       newCoherenceFeed(0),
