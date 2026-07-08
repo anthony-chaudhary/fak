@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
