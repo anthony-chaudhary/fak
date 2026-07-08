@@ -173,3 +173,95 @@ func TestFreshnessDoesNotChangeRanking(t *testing.T) {
 		}
 	}
 }
+
+// TestCitedRepoPathAdmitsOnlyRepoFileRefs pins the precision-first admission for
+// the STALE check: only a repo-relative FILE ref is a candidate. URLs, cap refs
+// (no slash), bare names, and parent-escaping refs are never treated as files.
+func TestCitedRepoPathAdmitsOnlyRepoFileRefs(t *testing.T) {
+	cases := []struct {
+		ref    string
+		want   string
+		wantOK bool
+	}{
+		{"docs/notes/2026-07-07-topic.md", "docs/notes/2026-07-07-topic.md", true},
+		{"internal/selfquery/freshness.go#L10", "internal/selfquery/freshness.go", true}, // anchor stripped
+		{"", "", false},
+		{"https://example.com/x.md", "", false}, // URL
+		{"http://example.com/x.md", "", false},  // URL
+		{"doc:some-cap", "", false},             // cap ref, no slash
+		{"driver:memq@v1", "", false},           // cap ref with version
+		{"README.md", "", false},                // bare name, no separator
+		{"../escape/x.md", "", false},           // parent-escaping
+	}
+	for _, tc := range cases {
+		got, ok := citedRepoPath(tc.ref)
+		if ok != tc.wantOK || got != tc.want {
+			t.Errorf("citedRepoPath(%q) = (%q,%v), want (%q,%v)", tc.ref, got, ok, tc.want, tc.wantOK)
+		}
+	}
+}
+
+// TestStalenessByKeyMarksDeletedCitedFile pins the four staleness boundaries:
+// a surviving file (fresh), a deleted file whose folder remains (STALE), refs
+// that are not files (skipped), and the parent-gone precision fence (skipped).
+func TestStalenessByKeyMarksDeletedCitedFile(t *testing.T) {
+	root := t.TempDir()
+	notes := filepath.Join(root, "docs", "notes")
+	if err := os.MkdirAll(notes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(notes, "present.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cards := []FeatureCard{
+		{Kind: "doc", Name: "present", DetailRef: "docs/notes/present.md"}, // exists -> fresh (no entry)
+		{Kind: "doc", Name: "gone", DetailRef: "docs/notes/gone.md"},       // parent exists, file gone -> STALE
+		{Kind: "doc", Name: "url", DetailRef: "https://example.com/x.md"},  // URL -> skip
+		{Kind: "cap", Name: "cap", DetailRef: "doc:some-cap"},              // cap ref -> skip
+		{Kind: "doc", Name: "nodir", DetailRef: "docs/never/here.md"},      // parent missing -> skip (precision)
+	}
+	got := stalenessByKey(cards, root)
+	if len(got) != 1 || got[cardKey(cards[1])] != FreshnessStale {
+		t.Fatalf("want exactly {gone:STALE}, got %v", got)
+	}
+	// Empty root disables the check entirely (nothing to resolve against).
+	if n := len(stalenessByKey(cards, "")); n != 0 {
+		t.Errorf("empty root should disable staleness, got %d entries", n)
+	}
+}
+
+// TestQueryStampsStaleRungAfterDeletion is the end-to-end, read-time proof of the
+// #3163 STALE follow-on and the user's "query, then re-check" axis: the index
+// still lists a note, but the note's bytes are deleted AFTER Load. The very next
+// Query() stamps it STALE (computed against the current tree, not calendar age),
+// and STALE outranks the SUPERSEDED_BY it would otherwise carry.
+func TestQueryStampsStaleRungAfterDeletion(t *testing.T) {
+	root := writeFreshnessRepo(t)
+	cat, err := Load(root, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Delete the older, superseded note's bytes; its INDEX.md card remains, and
+	// its folder (docs/notes) survives because the newer note is still there.
+	if err := os.Remove(filepath.Join(root, "docs", "notes", "2026-06-25-widget-rollout.md")); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := cat.Query(Request{Query: "widget rollout", Plane: PlaneDev})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]FeatureCard{}
+	for _, c := range resp.Cards {
+		byName[c.Name] = c
+	}
+	older, ok := byName["doc:Widget rollout June"]
+	if !ok {
+		t.Fatalf("deleted note dropped from results (staleness must annotate, not filter): %v", sortedNames(resp.Cards))
+	}
+	if older.Freshness != FreshnessStale {
+		t.Errorf("deleted note Freshness = %q, want STALE (should outrank SUPERSEDED_BY)", older.Freshness)
+	}
+	if newer, ok := byName["doc:Widget rollout July"]; ok && newer.Freshness != FreshnessFresh {
+		t.Errorf("surviving newer note Freshness = %q, want FRESH", newer.Freshness)
+	}
+}

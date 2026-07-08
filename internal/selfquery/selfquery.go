@@ -46,11 +46,12 @@ type FeatureCard struct {
 	Witness     string   `json:"witness"`
 	// Freshness is an advisory currency rung on a query-result card, distinct
 	// from Witness (which proves WHICH bytes). Empty means not applicable /
-	// unknown; otherwise FreshnessFresh, or FreshnessSupersededPrefix+<name of
-	// the superseding card>. It is ranking metadata, NOT a trust verdict: a
-	// superseded card still returns, hedged with its rung, and freshness never
-	// re-orders or drops a result. Computed only on the Query() path (see
-	// freshness.go); Cards() leaves it empty so SummaryDigest stays stable.
+	// unknown; otherwise FreshnessFresh, FreshnessSupersededPrefix+<name of the
+	// superseding card>, or FreshnessStale (the cited artifact no longer exists on
+	// disk). It is ranking metadata, NOT a trust verdict: a superseded or stale
+	// card still returns, hedged with its rung, and freshness never re-orders or
+	// drops a result. Computed only on the Query() path (see freshness.go);
+	// Cards() leaves it empty so SummaryDigest stays stable.
 	Freshness string       `json:"freshness,omitempty"`
 	Request   RequestShape `json:"request"`
 }
@@ -193,10 +194,16 @@ func (c *Catalog) Query(req Request) (Response, error) {
 	if req.Limit > 0 && len(cards) > req.Limit {
 		cards = cards[:req.Limit]
 	}
-	// Advisory supersession rung (#3163): computed over the full candidate set,
-	// stamped onto the ranked result and the faulted detail card. Advisory only
-	// — this never re-orders or drops a card.
+	// Advisory currency rungs (#3163): computed over the full candidate set,
+	// stamped onto the ranked result and the faulted detail card. Advisory only —
+	// this never re-orders or drops a card. Two independent axes are merged:
+	//   - supersession: a newer same-topic dated note supersedes an older one.
+	//   - staleness: a card whose cited artifact was deleted since authoring.
+	// STALE wins when both apply — a removed artifact's supersession is moot.
 	rungs := freshnessByKey(all)
+	for k, v := range stalenessByKey(all, c.root) {
+		rungs[k] = v
+	}
 	applyFreshness(cards, rungs)
 	resp := Response{Root: c.root, Query: q, Plane: plane, Cards: cards}
 	if len(req.MissingContext) > 0 {

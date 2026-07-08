@@ -1,7 +1,9 @@
 package selfquery
 
 import (
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -27,10 +29,18 @@ import (
 // Complements (does not replace) fak_index_freshness, which answers a different
 // axis: index-vs-tree drift, not semantic supersession.
 //
-// Not yet computed here (documented follow-ons under #3163): the STALE rung for
-// a card whose cited code token no longer exists (bind to dos_recall), and an
-// explicit `supersedes:` front-matter edge. noteInfo/freshnessByKey are shaped
-// so either can layer on without disturbing the dated-note path.
+// The STALE rung (added for #3163) is the read-time re-verification analogue for
+// the query surface — dos_recall's discipline aimed at a FeatureCard: a card
+// whose cited artifact (DetailRef) no longer exists on disk is marked
+// FreshnessStale. This is the "query, then re-check" half of query-or-invalidate,
+// computed against the CURRENT tree on every Query() call, so it tracks a
+// deletion at the granularity of when the agent asks — not calendar age. See
+// stalenessByKey / citedRepoPath below.
+//
+// Still a documented follow-on under #3163: an explicit `supersedes:`
+// front-matter edge (a hand-declared supersession the dated-note heuristic can't
+// see). noteInfo/freshnessByKey are shaped so it can layer on without disturbing
+// the dated-note path.
 
 // Freshness rung values carried by FeatureCard.Freshness.
 const (
@@ -41,6 +51,13 @@ const (
 	// (newer, same-topic) card, e.g. "SUPERSEDED_BY:doc:<title>". The suffix is
 	// a real card Name, resolvable via the same match findCard uses.
 	FreshnessSupersededPrefix = "SUPERSEDED_BY:"
+	// FreshnessStale marks a card whose cited artifact (DetailRef) resolves to a
+	// repo-relative path that no longer exists — the cited bytes were deleted or
+	// moved since the card was authored. Precision-first: set only when the path's
+	// parent directory still exists (a real single-file removal), never for URL
+	// refs, cap refs, or synthetic non-file DetailRefs. STALE outranks
+	// SUPERSEDED_BY when both apply — a removed artifact's supersession is moot.
+	FreshnessStale = "STALE"
 )
 
 // isoDateRE matches an ISO date token (YYYY-MM-DD) embedded anywhere in a note
@@ -169,6 +186,70 @@ func freshnessByKey(cards []FeatureCard) map[string]string {
 		}
 	}
 	return out
+}
+
+// stalenessByKey marks every card whose cited artifact no longer exists, keyed by
+// cardKey — the read-time existence re-check for the query surface (#3163), the
+// analogue of dos_recall re-verifying a memory aimed at a FeatureCard.DetailRef.
+// root is the repo root DetailRefs resolve against; an empty root disables the
+// check (nothing to resolve against). Identical refs are stat'd once via a small
+// cache so a large candidate set stays cheap on the hot path.
+func stalenessByKey(cards []FeatureCard, root string) map[string]string {
+	out := map[string]string{}
+	if strings.TrimSpace(root) == "" {
+		return out
+	}
+	cache := map[string]bool{} // clean ref -> missing
+	for i := range cards {
+		clean, ok := citedRepoPath(cards[i].DetailRef)
+		if !ok {
+			continue
+		}
+		missing, computed := cache[clean]
+		if !computed {
+			missing = pathMissingUnderRoot(root, clean)
+			cache[clean] = missing
+		}
+		if missing {
+			out[cardKey(cards[i])] = FreshnessStale
+		}
+	}
+	return out
+}
+
+// citedRepoPath admits a DetailRef that denotes a repo-relative FILE path and
+// returns its cleaned, anchor-stripped form. Precision-first: it rejects empty
+// refs, URLs, cap refs (kind:name[@ver], which carry no slash), parent-escaping
+// refs, and any ref without a path separator — the same admission docSnippet
+// relies on to treat a ref as a readable repo file.
+func citedRepoPath(ref string) (string, bool) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") {
+		return "", false
+	}
+	if i := strings.IndexAny(ref, "#?"); i >= 0 {
+		ref = strings.TrimSpace(ref[:i])
+	}
+	if ref == "" || !strings.Contains(ref, "/") || strings.Contains(ref, "..") {
+		return "", false
+	}
+	return ref, true
+}
+
+// pathMissingUnderRoot reports whether clean (a repo-relative file path) is absent
+// under root while its PARENT directory still exists. Requiring the parent to
+// exist is the precision fence that separates a genuine removal (the note's folder
+// is still there, the note is gone) from a synthetic ref whose path was never a
+// real repo location — only the former is a confident STALE signal.
+func pathMissingUnderRoot(root, clean string) bool {
+	full := filepath.Join(root, filepath.FromSlash(clean))
+	if _, err := os.Stat(full); err == nil {
+		return false // still present — fresh
+	}
+	if _, err := os.Stat(filepath.Dir(full)); err != nil {
+		return false // parent gone too — not a confident single-file removal
+	}
+	return true
 }
 
 // applyFreshness stamps the precomputed rungs onto the cards that carry them.
