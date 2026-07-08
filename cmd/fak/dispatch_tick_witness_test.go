@@ -177,6 +177,123 @@ func TestWitnessExitedWorkersScrapesModelSidecar(t *testing.T) {
 	}
 }
 
+// withWitnessLandReapStub swaps the #3168 land+reap seam for a recorder and returns
+// a pointer to the ordered log of land+reap calls (each "<wtPath>|<base>").
+func withWitnessLandReapStub(t *testing.T, fail bool) *[]string {
+	t.Helper()
+	old := dispatchWitnessLandReap
+	calls := &[]string{}
+	dispatchWitnessLandReap = func(root, wtPath, base string, tree []string) {
+		*calls = append(*calls, wtPath+"|"+base)
+		// fail=true models a land/reap that errored: the seam swallows it (returns
+		// normally), so the sweep must still proceed to audit.
+	}
+	t.Cleanup(func() { dispatchWitnessLandReap = old })
+	return calls
+}
+
+// TestWitnessLandsAndReapsWorkerWorktreeBeforeAudit is the #3168 witness: a dead-pid
+// worker WITH a .worktree sidecar has its worktree landed+reaped BEFORE the
+// resolving-SHA scan (so the just-landed commit is what gets witnessed), the sidecar
+// is consumed (a second sweep never re-lands), and a land/reap fault is swallowed —
+// the slot is still graded exactly as today.
+func TestWitnessLandsAndReapsWorkerWorktreeBeforeAudit(t *testing.T) {
+	root := t.TempDir()
+	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
+	stem := "resolve-3168-20260708-010101"
+
+	var landRanBeforeScan bool
+	landReap := withWitnessLandReapStub(t, true)
+	// The resolving-SHA scan asserts land already fired: on the FIRST worker the
+	// land+reap recorder must already hold an entry when the scan runs.
+	withWitnessStubs(t, func(_ string, _ int, base string) string {
+		if len(*landReap) > 0 {
+			landRanBeforeScan = true
+		}
+		if base != "base3168" {
+			t.Errorf("resolving-sha base = %q, want base3168 from the .basesha sidecar", base)
+		}
+		return "sha3168"
+	}, "OK", "diff-witnessed")
+
+	writeWitnessWorker(t, runsDir, stem, "# fak-spawn\nworked\n", deadDispatchPID)
+	wtPath := filepath.FromSlash("/wt/fak-worker-wt-tools-3168abc")
+	if err := os.WriteFile(filepath.Join(runsDir, stem+dispatchWorktreeSidecarSuffix), []byte(wtPath), 0o644); err != nil {
+		t.Fatalf("write worktree sidecar: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(runsDir, stem+dispatchtick.BaseSHASidecarSuffix), []byte("base3168\n"), 0o644); err != nil {
+		t.Fatalf("write basesha sidecar: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(runsDir, stem+dispatchLeaseTreeSidecarSuffix), []byte(`["tools/**"]`), 0o644); err != nil {
+		t.Fatalf("write lease-tree sidecar: %v", err)
+	}
+
+	_, records := witnessExitedWorkers(root, runsDir, true)
+
+	if len(*landReap) != 1 {
+		t.Fatalf("want exactly one land+reap call, got %v", *landReap)
+	}
+	if (*landReap)[0] != wtPath+"|base3168" {
+		t.Fatalf("land+reap got %q, want worktree+base %q", (*landReap)[0], wtPath+"|base3168")
+	}
+	if !landRanBeforeScan {
+		t.Fatal("land+reap must run BEFORE the resolving-SHA scan, so the landed commit is witnessed")
+	}
+	if len(records) != 1 || records[0].Claim != dispatchtick.ClaimWitnessed {
+		t.Fatalf("slot should still grade CLAIM_WITNESSED after land, got %+v", records)
+	}
+	// The .worktree sidecar is consumed so a second sweep never re-lands.
+	if _, err := os.Stat(filepath.Join(runsDir, stem+dispatchWorktreeSidecarSuffix)); !os.IsNotExist(err) {
+		t.Fatalf("worktree sidecar should be removed after landing, stat err=%v", err)
+	}
+}
+
+// TestWitnessLeavesSharedTrunkWorkerUntouched is the default-off regression guard:
+// a dead-pid worker with NO .worktree sidecar (isolation off / prepare failed) is
+// graded exactly as today, with the land+reap seam never invoked.
+func TestWitnessLeavesSharedTrunkWorkerUntouched(t *testing.T) {
+	root := t.TempDir()
+	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
+	landReap := withWitnessLandReapStub(t, false)
+	withWitnessStubs(t, func(string, int, string) string { return "shaXYZ" }, "OK", "diff-witnessed")
+
+	writeWitnessWorker(t, runsDir, "resolve-4242-20260708-020202", "# fak-spawn\nworked\n", deadDispatchPID)
+
+	_, records := witnessExitedWorkers(root, runsDir, true)
+
+	if len(*landReap) != 0 {
+		t.Fatalf("no .worktree sidecar -> land+reap must never fire, got %v", *landReap)
+	}
+	if len(records) != 1 || records[0].Claim != dispatchtick.ClaimWitnessed {
+		t.Fatalf("shared-trunk worker should grade unchanged, got %+v", records)
+	}
+}
+
+// TestWitnessDryRunNeverLands proves a dry-run sweep (live=false) never mutates the
+// trunk even when a .worktree sidecar is present.
+func TestWitnessDryRunNeverLands(t *testing.T) {
+	root := t.TempDir()
+	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
+	landReap := withWitnessLandReapStub(t, false)
+	withWitnessStubs(t, func(string, int, string) string { return "" }, "", "")
+
+	stem := "resolve-4343-20260708-030303"
+	writeWitnessWorker(t, runsDir, stem, "# fak-spawn\nworked\n", deadDispatchPID)
+	if err := os.WriteFile(filepath.Join(runsDir, stem+dispatchWorktreeSidecarSuffix),
+		[]byte(filepath.FromSlash("/wt/fak-worker-wt-tools-4343")), 0o644); err != nil {
+		t.Fatalf("write worktree sidecar: %v", err)
+	}
+
+	_, _ = witnessExitedWorkers(root, runsDir, false)
+
+	if len(*landReap) != 0 {
+		t.Fatalf("dry-run sweep must never land+reap, got %v", *landReap)
+	}
+	if _, err := os.Stat(filepath.Join(runsDir, stem+dispatchWorktreeSidecarSuffix)); err != nil {
+		t.Fatalf("dry-run must leave the worktree sidecar in place, stat err=%v", err)
+	}
+}
+
 // layer2DowngradeTick seeds #12's last slot as a model-switchable usage-cap wall, then runs
 // a live docs tick, stubbing the broker (allow) and spawner (capture). It returns the parsed
 // tick payload. modelDowngrade toggles the Layer-2 flag.

@@ -24,6 +24,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/regionadmit"
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 type dispatchTickOptions struct {
@@ -109,6 +110,12 @@ type dispatchSpawnResult struct {
 
 const dispatchLeaseTreeSidecarSuffix = ".lease-tree.json"
 const dispatchLeaseIDSidecarSuffix = ".lease-id"
+
+// dispatchWorktreeSidecarSuffix records the per-worker git worktree (#3168) a slot
+// ran in, so the async witness sweep can land its diff onto the trunk and reap the
+// worktree once the pid is provably dead — without trusting any live in-process map.
+// Absent for a worker that ran in the shared trunk (isolation off / prepare failed).
+const dispatchWorktreeSidecarSuffix = ".worktree"
 const dispatchStartupBundleSidecarSuffix = ".startup.json"
 const dispatchStartupBundleSchema = "fleet-worker-startup-bundle/1"
 const dispatchCodexLoopGateDefaultSinceHours = 24
@@ -704,6 +711,24 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	env = grant.Env
 	spawnCWD := firstString(grant.CWD, root)
 
+	// #3168: opt-in per-worker git worktree isolation. When FLEET_WORKER_WORKTREE
+	// is on, prepare a throwaway detached worktree pinned at baseSHA and run the
+	// worker in it with GOCACHE/GOTMPDIR redirected inside — so a broken build in
+	// one worker can't red another and two commits can't race the shared index.
+	// FAIL-OPEN: any worktree-layer fault leaves spawnCWD/env untouched (the worker
+	// runs in the shared trunk exactly as before). The .worktree sidecar the spawner
+	// writes lets the witness sweep land+reap it on exit. Default-off restores
+	// today's behavior byte-for-byte.
+	if workerWorktreeEnabled() {
+		if res := workerworktree.Prepare(root, pick.Lane, strconv.Itoa(target), baseSHA, "", nil); res.OK {
+			spawnCWD = res.Path
+			env = workerworktree.WorktreeEnv(env, res.Path)
+			payload["worker_worktree"] = res.Path
+		} else {
+			payload["worker_worktree_failopen"] = res.Reason
+		}
+	}
+
 	stdinPayload := dispatchtick.WorkerStdinPayload(opts.Backend, prompt)
 	spawned, err := dispatchIssueWorkerSpawner(launchCommand, env, spawnCWD, runsDir, target, pick.Lane, opts.Backend, leaseID, pick.Tree, account, opts.Membership, baseSHA, stdinPayload, opts.SpawnProbeS)
 	if err != nil {
@@ -966,6 +991,22 @@ func guardDisabled() bool {
 	return false
 }
 
+// workerWorktreeEnabled reports whether #3168 per-worker git worktree isolation is
+// switched on via FLEET_WORKER_WORKTREE. Default (unset / an off-ish value) is OFF,
+// which restores the shared-trunk spawn behavior byte-for-byte; any other value
+// turns isolation on. Mirrors guardDisabled's truthy/falsy grammar (inverted).
+func workerWorktreeEnabled() bool {
+	raw, ok := os.LookupEnv("FLEET_WORKER_WORKTREE")
+	if !ok {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "0", "off", "false", "no", "disable", "disabled":
+		return false
+	}
+	return true
+}
+
 func resolveDispatchFakBin(root string) string {
 	if v := strings.TrimSpace(os.Getenv("FAK_BIN")); v != "" {
 		if _, err := os.Stat(v); err == nil {
@@ -1059,6 +1100,11 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 	}
 	if baseSHA != "" {
 		_ = os.WriteFile(stem+dispatchtick.BaseSHASidecarSuffix, []byte(baseSHA), 0o644)
+	}
+	// #3168: when the worker ran in a per-worker git worktree (cwd carries the marker),
+	// record it so the witness sweep can land+reap it after the pid dies.
+	if workerworktree.IsWorkerWorktree(cwd) {
+		_ = os.WriteFile(stem+dispatchWorktreeSidecarSuffix, []byte(cwd), 0o644)
 	}
 	acct := dispatchtick.AccountSidecar(account)
 	if len(acct) > 0 {

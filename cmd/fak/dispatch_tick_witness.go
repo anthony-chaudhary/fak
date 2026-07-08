@@ -25,11 +25,49 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 // Injectable seams mirroring the Python sweep's git= / audit_runner= test params.
 var dispatchWitnessResolvingSHA = dispatchWitnessResolvingSHAGit
 var dispatchWitnessCommitAudit = dispatchWitnessCommitAuditDos
+
+// dispatchWitnessLandReap is the seam the #3168 land+reap fires through, injectable
+// so the sweep test can assert it runs (before the resolving-SHA scan) and that a
+// fault is swallowed. Default lands the worker's worktree diff onto the trunk and
+// reaps the worktree.
+var dispatchWitnessLandReap = landAndReapWorkerWorktreeDefault
+
+// landAndReapWorkerWorktree lands a dead worker's per-worker worktree (#3168) onto
+// the trunk and reaps it, when a .worktree sidecar records one. A no-op (and no
+// error surfaced) when the sidecar is absent — a worker that ran in the shared
+// trunk. FAIL-OPEN: every step's error is swallowed; the sweep proceeds to audit
+// the resolve log regardless.
+func landAndReapWorkerWorktree(root, stem, base string) {
+	wtPath := ""
+	if b, err := os.ReadFile(stem + dispatchWorktreeSidecarSuffix); err == nil {
+		wtPath = strings.TrimSpace(string(b))
+	}
+	if wtPath == "" {
+		return
+	}
+	tree := readResolveLeaseTree(stem + dispatchLeaseTreeSidecarSuffix)
+	dispatchWitnessLandReap(root, wtPath, base, tree)
+	// Landed once: drop the sidecar so a later sweep never re-lands (the diff is now
+	// on the trunk and the worktree is gone).
+	_ = os.Remove(stem + dispatchWorktreeSidecarSuffix)
+}
+
+// landAndReapWorkerWorktreeDefault is the production land+reap: apply the worktree's
+// diff-since-base onto the trunk as the worker's own stamped commit (scoped to its
+// declared lease tree), then force-remove the worktree. Both fail-open.
+func landAndReapWorkerWorktreeDefault(root, wtPath, base string, tree []string) {
+	// No commit-message file: Land derives the subject from the worktree tip so the
+	// landed commit keeps the worker's own #N-citing, (fak <leaf>)-stamped subject.
+	// verify=nil — the downstream dos commit-audit in this same sweep is the backstop.
+	_ = workerworktree.Land(root, wtPath, base, "", tree, nil, nil)
+	_ = workerworktree.Reap(root, wtPath, nil)
+}
 
 // dispatchWitnessScanLimit bounds the no-basesha fallback window, mirroring the
 // Python worker_resolving_sha scan_limit.
@@ -62,6 +100,16 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 		base := ""
 		if b, err := os.ReadFile(stem + dispatchtick.BaseSHASidecarSuffix); err == nil {
 			base = strings.TrimSpace(string(b))
+		}
+		// #3168: the pid is provably dead. If this worker ran in a per-worker git
+		// worktree, land its diff onto the trunk and reap the worktree BEFORE the
+		// resolving-SHA scan, so the just-landed commit is what gets witnessed. All
+		// steps fail-open: a land/reap fault is swallowed and the sweep proceeds to
+		// audit the resolve log exactly as today (a leaked worktree is reaped later
+		// by worktree_doctor.py --sweep-disposable, which knows the marker). Only in a
+		// live sweep — a dry-run must never mutate the trunk.
+		if live {
+			landAndReapWorkerWorktree(root, stem, base)
 		}
 		sha := dispatchWitnessResolvingSHA(root, issue, base)
 		var rec dispatchtick.WitnessRecord
