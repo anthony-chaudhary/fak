@@ -190,11 +190,26 @@ func TestDeadEndIsDistinctFromUnconstrained(t *testing.T) {
 }
 
 // TestNamesWithSpecialBytesDoNotPanic checks the slice-1 out-of-scope note: a
-// name containing a quote/backslash is handled literally and never panics.
+// name containing a quote/backslash is handled literally (each byte is just the
+// next byte of the name skeleton, never a JSON delimiter/escape) and never panics.
 func TestNamesWithSpecialBytesDoNotPanic(t *testing.T) {
 	schema := ToolSchema{Names: []string{`a"b`, `c\d`}}
-	// Just exercise several prefixes; the only contract here is "no panic".
+	// Exercise several prefixes: the contract is first that none of them panic.
 	for _, p := range []string{"", preLit, preLit + "a", preLit + `a"`, preLit + "c"} {
 		_ = AllowedNextBytes([]byte(p), schema)
+	}
+	// Beyond "no panic": the special bytes must be admitted LITERALLY. At the name
+	// start both names are enrolled by their first byte ('a' and 'c') — a regression
+	// that mishandled special-byte names would drop one from the constrained set.
+	if got := AllowedNextBytes([]byte(preLit), schema); !eqSet(got, set("ac")) {
+		t.Fatalf("enum first bytes: got %s, want %s", showSet(got), showSet(set("ac")))
+	}
+	// A quote INSIDE a name is the literal next name byte, not a string terminator.
+	if got := AllowedNextBytes([]byte(preLit+"a"), schema); !eqSet(got, set(`"`)) {
+		t.Fatalf(`after "a" (name a"b): got %s, want %s`, showSet(got), showSet(set(`"`)))
+	}
+	// A backslash INSIDE a name is likewise a literal name byte, not an escape lead-in.
+	if got := AllowedNextBytes([]byte(preLit+"c"), schema); !eqSet(got, set(`\`)) {
+		t.Fatalf(`after "c" (name c\d): got %s, want %s`, showSet(got), showSet(set(`\`)))
 	}
 }
