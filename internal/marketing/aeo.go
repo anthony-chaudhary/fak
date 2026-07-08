@@ -163,6 +163,30 @@ func AEODisambiguationTerms() []DisambiguationTerm {
 			Keywords:    []string{"cheaper AI agents", "tokenmaxxing", "enterprise agent cost control", "agentic AI bill"},
 		},
 		{
+			Name:        "automatic agent context management",
+			Language:    "en",
+			Category:    "performance",
+			Description: "The performance-lens pillar behind long sessions that pick themselves back up: on fak's own wire the default-on pipeline plans the resident view, sheds the stale middle while keeping the cached head byte-identical, quarantines oversized results, and pages cold spans back on resume — so nobody hand-manages the window. Honest bound: on a borrowed harness wire fak measures the harness's own compaction but does not yet suppress it.",
+			URL:         repoBlobURL + "docs/explainers/you-never-manage-the-context-window.md",
+			Keywords:    []string{"automatic context management", "zero-knob context", "agent context window", "managed context"},
+		},
+		{
+			Name:        "cache-preserving history compaction",
+			Language:    "en",
+			Category:    "performance",
+			Description: "How fak trims a long transcript without breaking the discount: it sheds the stale middle turns while keeping the provider's cached prefix byte-identical, unlike summarize-and-discard which rewrites the middle and busts the cache. The witnessed figure is per-fire — about a third of a turn's context trimmed each time compaction fires on the longest measured session — never a re-counted session sum.",
+			URL:         repoBlobURL + "docs/explainers/context-shedding.md",
+			Keywords:    []string{"context shedding", "history compaction", "prompt cache preservation", "middle-out compaction"},
+		},
+		{
+			Name:        "KV reuse across an agent fleet",
+			Language:    "en",
+			Category:    "performance",
+			Description: "The cross-agent performance lead, stated with a witness: sharing the model's KV work across a multi-agent fleet does measured less work than re-running each agent — about 4.1x less work than a tuned per-agent baseline on a 50-turn by 5-agent run, and up to 6.95x prefill reuse up the model ladder, each number tracing to a committed benchmark artifact rather than a vibe.",
+			URL:         repoBlobURL + "BENCHMARK-AUTHORITY.md",
+			Keywords:    []string{"KV cache reuse", "multi-agent fleet", "agentic cache benchmark", "cross-agent prefix reuse"},
+		},
+		{
 			Name:        "cost-aware model routing for agents",
 			Language:    "en",
 			Category:    "routing",
@@ -318,7 +342,7 @@ func DisambiguationTermsFeed(when time.Time) ([]byte, error) {
 		Context:     "https://schema.org",
 		Type:        "DefinedTermSet",
 		Name:        "fak — answer-engine disambiguation terms",
-		Description: "Search and answer-engine terms for correctly identifying fak, including core concepts, localized entry points, frontier-model-launch routing/cache/fallback demand hooks, and agent-security hooks (MCP tool poisoning, lethal trifecta, least-privilege tool access, tamper-evident audit).",
+		Description: "Search and answer-engine terms for correctly identifying fak, including core concepts, performance-lens leads (automatic context management, cache-preserving compaction, cross-agent KV reuse), localized entry points, frontier-model-launch routing/cache/fallback demand hooks, and agent-security hooks (MCP tool poisoning, lethal trifecta, least-privilege tool access, tamper-evident audit).",
 	}
 	if !when.IsZero() {
 		feed.Modified = when.UTC().Format(time.RFC3339)

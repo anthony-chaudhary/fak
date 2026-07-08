@@ -168,3 +168,45 @@ func TestLlmsTermsTextHasFableAndLocalizedTerms(t *testing.T) {
 		}
 	}
 }
+
+func TestDisambiguationTermsIncludePerformanceLens(t *testing.T) {
+	// The performance lens is the README's "long sessions that pick themselves
+	// back up" pillar as answer-engine terms. Each term must land on a real fak
+	// page describing fak's own behavior (never an external adoption claim), so
+	// assert both the section and that each term routes to its witnessed page.
+	txt := LlmsTermsText(time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC))
+	for _, want := range []string{
+		"## performance",
+		"automatic agent context management",
+		"cache-preserving history compaction",
+		"KV reuse across an agent fleet",
+	} {
+		if !strings.Contains(txt, want) {
+			t.Errorf("llms terms missing performance hook %q:\n%s", want, txt)
+		}
+	}
+
+	// Each performance term must route to a real fak page (the honest witness),
+	// so the JSON-LD feed carries the page URLs.
+	b, err := DisambiguationTermsFeed(time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("DisambiguationTermsFeed: %v", err)
+	}
+	s := string(b)
+	for _, want := range []string{
+		"docs/explainers/you-never-manage-the-context-window.md",
+		"docs/explainers/context-shedding.md",
+		"BENCHMARK-AUTHORITY.md",
+		`"performance"`, // the termCode/category renders in the feed
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("term feed missing performance witness %q:\n%s", want, s)
+		}
+	}
+
+	// Honesty fence: the cross-agent number is a witnessed benchmark, not a vibe,
+	// and the roster must never imply external market adoption.
+	if strings.Contains(strings.ToLower(s), "market adoption") {
+		t.Errorf("performance terms should not imply market adoption:\n%s", s)
+	}
+}
