@@ -1281,6 +1281,67 @@ def stream_correlation_diagnosis(
     return diagnosis
 
 
+def codex_gates(
+    hook_fast_path: dict[str, Any],
+    stream_correlation: dict[str, Any],
+    sessions_audited: int,
+) -> dict[str, Any]:
+    """Report "hooks installed" and "Codex calls witnessed" as two separate gates.
+
+    Issue #1446: the audit must never let a green *install* check masquerade as a
+    green *witness*. ``codex_hook_fast_path`` proves the hook manifest is present
+    and (PASS) routes Codex calls through the native launcher; a nonzero
+    ``dialect == "codex"`` observation count -- or a Codex thread bound to a
+    ``.dos/streams/<thread>.jsonl`` stream -- is what proves a Codex tool call was
+    actually witnessed. This surfaces both verdicts side by side, derived purely
+    from evidence already gathered (no fabricated match), so a reader can see at a
+    glance that the two gates are independent.
+
+    ``codex_calls_witnessed`` is:
+
+    - ``PASS``  -- at least one Codex session bound to a DOS stream, or the DOS
+      observation log carries at least one ``dialect == "codex"`` row.
+    - ``UNKNOWN`` -- no DOS observation log exists, so the witness is unmeasured
+      rather than failing.
+    - ``WARN`` -- the log exists and hooks are installed, yet zero Codex calls
+      were witnessed (the ``HOOKS_INSTALLED_NO_CODEX_WITNESS`` shape).
+    """
+    install_status = str(hook_fast_path.get("status") or "UNKNOWN")
+    obs_rows = int(stream_correlation.get("codex_observation_rows") or 0)
+    log_present = bool(stream_correlation.get("observation_log_present"))
+    matched = int(stream_correlation.get("matched_threads") or 0)
+    stream_bound = int(sessions_audited or 0) > 0 or matched > 0
+
+    if obs_rows > 0 or stream_bound:
+        witness_status = "PASS"
+    elif not log_present:
+        witness_status = "UNKNOWN"
+    else:
+        witness_status = "WARN"
+
+    return {
+        "scope": (
+            "'hooks installed' and 'Codex calls witnessed' are independent gates: a green "
+            "install verdict never implies a green witness verdict (issue #1446)."
+        ),
+        "hooks_installed": {
+            "status": install_status,
+            "codex_native_total_hooks": int(hook_fast_path.get("codex_native_total_hooks") or 0),
+            "codex_python_cli_hooks": int(hook_fast_path.get("codex_python_cli_hooks") or 0),
+            "reason": hook_fast_path.get("reason"),
+        },
+        "codex_calls_witnessed": {
+            "status": witness_status,
+            "codex_observation_rows": obs_rows,
+            "observation_log_present": log_present,
+            "matched_streams": matched,
+            "sessions_audited": int(sessions_audited or 0),
+            "stream_correlation_reason": stream_correlation.get("reason"),
+            "recovery": stream_correlation.get("recovery") if witness_status != "PASS" else None,
+        },
+    }
+
+
 def codex_observations_since(repo_root: Path, since_text: Any) -> dict[str, Any]:
     since = parse_ts(since_text)
     obs_path = repo_root / ".dos" / "metrics" / "observations.jsonl"
@@ -1906,6 +1967,8 @@ def build_report(
     if workspace_stop_stale_active_total:
         recommendations.append("stale workspace StopFailure markers still have nonzero consecutive counts; report them as settlement debt, not current live blockage")
 
+    gates = codex_gates(hook_fast_path, stream_correlation, len(sessions))
+
     status = "PASS"
     if not sessions:
         status = stream_correlation.get("status") or "UNKNOWN"
@@ -1947,6 +2010,7 @@ def build_report(
         "codex_threads_discovered": len(codex_threads),
         "sessions_audited": len(sessions),
         "stream_correlation": stream_correlation,
+        "gates": gates,
         "summary": {
             "steps": total_steps,
             "tool_counts": {k: tool_counts[k] for k in sorted(tool_counts)},
@@ -2225,6 +2289,15 @@ def render(report: dict[str, Any]) -> str:
         f"codex DOS recent audit: {report.get('status')}",
         f"  sessions audited: {report.get('sessions_audited')} of {report.get('codex_threads_discovered')} discovered Codex threads",
     ]
+    gates = report.get("gates") if isinstance(report.get("gates"), dict) else {}
+    if gates:
+        installed = gates.get("hooks_installed") if isinstance(gates.get("hooks_installed"), dict) else {}
+        witnessed = gates.get("codex_calls_witnessed") if isinstance(gates.get("codex_calls_witnessed"), dict) else {}
+        lines.append(
+            f"  gates: hooks_installed={installed.get('status')} "
+            f"codex_calls_witnessed={witnessed.get('status')} "
+            f"(codex_obs={witnessed.get('codex_observation_rows')}, matched_streams={witnessed.get('matched_streams')})"
+        )
     correlation = report.get("stream_correlation") if isinstance(report.get("stream_correlation"), dict) else {}
     if correlation and not report.get("sessions_audited"):
         lines.append(

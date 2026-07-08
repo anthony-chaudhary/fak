@@ -1070,6 +1070,80 @@ class RecentCodexDosAuditTest(unittest.TestCase):
             self.assertEqual(corr["status"], "MATCHED")
             self.assertEqual(corr["matched_threads"], 1)
             self.assertIsNone(corr["recovery"])
+            # Both gates are green on the healthy path.
+            gates = report["gates"]
+            self.assertEqual(gates["hooks_installed"]["status"], "PASS")
+            self.assertEqual(gates["codex_calls_witnessed"]["status"], "PASS")
+            self.assertEqual(gates["codex_calls_witnessed"]["matched_streams"], 1)
+            self.assertIsNone(gates["codex_calls_witnessed"]["recovery"])
+
+    def test_gates_split_hooks_installed_from_codex_calls_witnessed(self) -> None:
+        """Issue #1446 acceptance: the report must distinguish "hooks installed"
+        from "Codex calls witnessed" as separate gates. A repaired native
+        manifest (install PASS) with zero dialect==codex observations must leave
+        the witness gate WARN with a recovery step, never letting the green
+        install masquerade as a green witness."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            home = root / "codex-home"
+            thread = "019f156d-5600-7ef0-887c-fc5c6cd6dc61"
+            write_jsonl(home / "sessions" / "2026" / "06" / "29" / f"rollout-{thread}.jsonl", [{"type": "response_item"}])
+            # Hooks installed on the native launcher => install gate PASS.
+            write_hook_manifest(home, native_bash_hook_command())
+            claude_stream = "0a39c3d5-0702-452a-8eab-2b70882c2892"
+            write_jsonl(
+                root / ".dos" / "streams" / f"{claude_stream}.jsonl",
+                [{"op": "STEP", "tool_name": "Bash", "ts": "2026-06-29T12:00:00Z"}],
+            )
+            # Observation log present but carries no dialect==codex rows => witness WARN.
+            write_jsonl(
+                root / ".dos" / "metrics" / "observations.jsonl",
+                [{"verb": "pretool", "outcome": "passthrough", "rung": "provenance", "ts": "2026-06-29T12:00:10Z"}],
+            )
+
+            report = mod.build_report(root, home, limit=20, since_days=3650, target_shell="bash")
+
+            gates = report["gates"]
+            self.assertEqual(gates["hooks_installed"]["status"], "PASS")
+            self.assertEqual(gates["codex_calls_witnessed"]["status"], "WARN")
+            self.assertEqual(gates["codex_calls_witnessed"]["codex_observation_rows"], 0)
+            self.assertTrue(gates["codex_calls_witnessed"]["observation_log_present"])
+            self.assertEqual(gates["codex_calls_witnessed"]["sessions_audited"], 0)
+            self.assertEqual(
+                gates["codex_calls_witnessed"]["stream_correlation_reason"],
+                "HOOKS_INSTALLED_NO_CODEX_WITNESS",
+            )
+            self.assertTrue(gates["codex_calls_witnessed"]["recovery"])
+            self.assertIn("independent gates", gates["scope"])
+            rendered = mod.render(report)
+            self.assertIn("gates: hooks_installed=PASS codex_calls_witnessed=WARN", rendered)
+
+    def test_gates_witness_unknown_without_observation_log(self) -> None:
+        """With no DOS observation log at all, the witness gate is UNKNOWN
+        (unmeasured), not WARN (measured-and-empty) -- the audit must not fabricate
+        a failing witness when there is nothing to measure."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            home = root / "codex-home"
+            thread = "019f156d-5600-7ef0-887c-fc5c6cd6dc61"
+            write_jsonl(home / "sessions" / "2026" / "06" / "29" / f"rollout-{thread}.jsonl", [{"type": "response_item"}])
+            write_hook_manifest(home, native_bash_hook_command())
+            # A stream file exists (so correlation does not short-circuit on empty
+            # substrate) but no observations.jsonl => witness unmeasured.
+            claude_stream = "0a39c3d5-0702-452a-8eab-2b70882c2892"
+            write_jsonl(
+                root / ".dos" / "streams" / f"{claude_stream}.jsonl",
+                [{"op": "STEP", "tool_name": "Bash", "ts": "2026-06-29T12:00:00Z"}],
+            )
+
+            report = mod.build_report(root, home, limit=20, since_days=3650, target_shell="bash")
+
+            gates = report["gates"]
+            self.assertEqual(gates["hooks_installed"]["status"], "PASS")
+            self.assertEqual(gates["codex_calls_witnessed"]["status"], "UNKNOWN")
+            self.assertFalse(gates["codex_calls_witnessed"]["observation_log_present"])
 
     def test_fail_on_warn_returns_nonzero_for_strict_gate(self) -> None:
         mod = load()
