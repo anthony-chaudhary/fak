@@ -11,6 +11,8 @@ package main
 //	fak logvault verify    re-derive the manifest hash chain + re-hash mirrors
 //	fak logvault sync      scrub-gated replication to a second vault dir (-to), verified on arrival
 //	fak logvault sources   print the source registry resolved for this box
+//	fak logvault gc        propose (default) or -live apply bounded .history/ retention
+//	fak logvault adopt     bank a whole tree (-cold <dir>) as one deterministic archive
 //
 // The vault defaults to a sibling directory of the repo root (<parent>/fak-log-vault,
 // override with -vault or FAK_LOG_VAULT) so it never lives inside any git tree it
@@ -47,6 +49,9 @@ func runLogvault(w, ew io.Writer, argv []string) int {
 	scratchpadCapMB := fs.Int64("scratchpad-cap-mb", 256, "scratchpad tier size cap in MiB (opt-in bound; 0 = the 256 MiB default)")
 	notifySlack := fs.Bool("notify-slack", false, "capture/verify: enqueue a durable Slack digest (counts + the vault-head chain anchor) through the slack outbox")
 	slackChannel := fs.String("slack-channel", "", "channel for -notify-slack (default: $FAK_DISPATCH_CHANNEL, then $FAK_SCOREBOARD_CHANNEL)")
+	historyDepth := fs.Int("history-depth", 8, "gc: keep at most this many .history/ versions per file (0 = unlimited, prunes nothing)")
+	live := fs.Bool("live", false, "gc: APPLY the proposed prune (default: propose only — the tool deletes nothing without this grant)")
+	cold := fs.String("cold", "", "adopt: pack this directory as one deterministic content-addressed cold-park archive into the vault")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -169,8 +174,59 @@ func runLogvault(w, ew io.Writer, argv []string) int {
 			return 1
 		}
 		return 0
+	case "gc":
+		rep, err := v.GC(logvault.GCPolicy{HistoryDepth: *historyDepth}, *live)
+		if err != nil {
+			fmt.Fprintf(ew, "logvault gc: %v\n", err)
+			return 1
+		}
+		mode := "PROPOSE — nothing deleted; re-run with -live to apply"
+		if rep.Applied {
+			mode = "APPLIED (-live)"
+		}
+		fmt.Fprintf(w, "logvault gc  vault=%s  (%s)\n", v.Dir, mode)
+		fmt.Fprintf(w, "  policy: keep <=%d .history/ versions per file\n", rep.Policy.HistoryDepth)
+		verb2 := "prunable"
+		if rep.Applied {
+			verb2 = "pruned"
+		}
+		fmt.Fprintf(w, "  %s: %d versions, %s  (skip-error rows: %d — advisory noise, never deleted)\n",
+			verb2, len(rep.Candidates), fmtBytesLV(rep.ReclaimBytes), rep.SkipErrorRows)
+		for i, c := range rep.Candidates {
+			if i >= 20 {
+				fmt.Fprintf(w, "  … +%d more\n", len(rep.Candidates)-20)
+				break
+			}
+			fmt.Fprintf(w, "  %s %s/%s sha=%s %s\n", verb2, c.Source, c.RelPath, c.SHA16, fmtBytesLV(c.Bytes))
+		}
+		return 0
+	case "adopt":
+		if *cold == "" {
+			fmt.Fprintln(ew, "logvault adopt: -cold <dir> is required (the tree to pack as one deterministic archive)")
+			return 2
+		}
+		rep, err := v.AdoptCold(*cold)
+		if err != nil {
+			fmt.Fprintf(ew, "logvault adopt: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(w, "logvault adopt --cold %s  vault=%s\n", rep.SrcDir, v.Dir)
+		dedup := ""
+		if rep.Deduped {
+			dedup = "  [DEDUP: identical archive already banked]"
+		}
+		fmt.Fprintf(w, "  archive: %s sha=%s bytes=%s files=%d%s\n",
+			rep.ArchiveRel, rep.SHA256[:16], fmtBytesLV(rep.Bytes), rep.Files, dedup)
+		if rep.Deduped {
+			fmt.Fprintln(w, "  manifest: already witnessed by the prior adoption (content-addressed)")
+		} else {
+			fmt.Fprintln(w, "  manifest: recorded (Verify re-hashes the banked archive)")
+		}
+		fmt.Fprintln(w, "  the tool deleted NOTHING. To reclaim the original, YOU may run:")
+		fmt.Fprintf(w, "    %s\n", rep.DeleteCmd)
+		return 0
 	default:
-		fmt.Fprintf(ew, "logvault: unknown verb %q (plan|capture|verify|sync|sources)\n", verb)
+		fmt.Fprintf(ew, "logvault: unknown verb %q (plan|capture|verify|sync|sources|gc|adopt)\n", verb)
 		return 2
 	}
 }
