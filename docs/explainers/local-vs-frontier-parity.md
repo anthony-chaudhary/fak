@@ -1,6 +1,6 @@
 ---
 title: "fak explainer: local-vs-frontier parity on your hardware"
-description: "Explains how a small local model behind the fak kernel matches a hosted frontier model on safety and cost today, with capability ramping as model size grows."
+description: "Explains how a small local model behind the fak kernel matches a hosted frontier model on cost and safety today, with capability ramping as model size grows."
 ---
 
 # Local-vs-Frontier parity: a small model + the kernel, on your own hardware
@@ -11,20 +11,20 @@ ramp is the roadmap.*
 *Who this is for:* anyone deciding whether a small local model behind the fak kernel can
 stand in for a hosted frontier model. No setup needed to read it; to reproduce the table
 you'll want the HF cache and the `fak agent` A/B harness (see [Reproduce](#reproduce)). You'll
-leave knowing how the kernel splits a task into three axes — capability, safety, cost — why
-local + kernel already wins safety and cost, and how capability closes as you climb the model-size
+leave knowing how the kernel splits a task into three axes — capability, cost, safety — why
+local + kernel already wins cost and safety, and how capability closes as you climb the model-size
 ladder an 8 GB GPU can hold.
 
 ## The pitch
 
 Run a **small open model on basic hardware** (an 8 GB GPU, or even CPU) behind the
 fak kernel, and on a real agentic task it **matches or beats a hosted frontier model
-(Claude Haiku / Sonnet) on the two axes the kernel owns — safety and cost — today.**
+(Claude Haiku / Sonnet) on the two axes the kernel owns — cost and safety — today.**
 The third axis, raw task capability, is the *model's* job, and it closes as you ramp
 the model up the size ladder that still fits an 8 GB card. This document proves the
 workflow on the *smallest reasonable models* and lays out the ramp.
 
-The honest one-liner: **the kernel gives you frontier-grade safety and ~$0 cost on a
+The honest one-liner: **the kernel gives you ~$0 cost and frontier-grade safety on a
 1.5B local model now; the model size you can afford on an 8 GB GPU decides how much
 frontier-grade *capability* you also get.**
 
@@ -128,7 +128,7 @@ Published agentic-benchmark context (so the parity claim stays honest): on
 **BFCL-V4** (function calling) the *large* open models are competitive
 (Qwen3.5-397B-A17B ≈ 0.73), but a *small* local model trails the frontier on the
 general leaderboard. So we do **not** claim "1.5B beats Sonnet at being an agent."
-We claim: **on this task, local + kernel matches frontier on safety + cost now, and
+We claim: **on this task, local + kernel matches frontier on cost + safety now, and
 the capability gap closes as you climb to the 7-9B rung an 8 GB GPU can hold.**
 
 ### Serving the ramp: the SOTA-local baselines
@@ -175,7 +175,7 @@ go -C fak run ./cmd/paritybench \
 
 To ramp: serve a 7-9B model with `llama-server` on an 8 GB GPU and point the remote
 runner at it. Same harness, same oracle, same three axes — just a more capable model,
-and the capability column climbs toward the frontier while safety and cost stay where
+and the capability column climbs toward the frontier while cost and safety stay where
 they already are.
 
 When that GPU/non-CPU run exists, score it as a separate `local-gpu` input and make the

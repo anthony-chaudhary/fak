@@ -1,6 +1,6 @@
 ---
 title: "Engineering is building loops; fak is the kernel they run on"
-description: "Modern engineering is increasingly the act of building agentic loops. fak is the in-process kernel those loops run on, safe and fast for the same reason."
+description: "Modern engineering is increasingly the act of building agentic loops. fak is the in-process kernel those loops run on, fast and safe for the same reason."
 slug: engineering-is-building-loops
 keywords:
   - agentic loops
@@ -23,7 +23,7 @@ That unit is changing. More and more of the work now looks like a loop: observe,
 
 Here is the problem. Most people build each of those loops by hand on top of a raw model API. The model both proposes the next action and executes it. Context gets rebuilt blindly every turn. Nothing gates the act before it happens. Nothing remembers cheaply across turns. Nothing checks that a "kept" change is actually better. Every loop re-implements the dangerous, expensive parts, badly, in slightly different ways.
 
-A loop is only as trustworthy and as fast as the thing underneath it. That thing is what fak is.
+A loop is only as fast and as trustworthy as the thing underneath it. That thing is what fak is.
 
 ## The loop you already have, and the loop you wish you had
 
@@ -37,7 +37,7 @@ Strip an agent down and the inner cycle is the same five steps every time:
 
 When you hand-roll this, the model is in charge of all five. It decides what is allowed, so the only safety is "please don't." It picks what goes in context, so the window fills with junk. It grades its own work, so "done" means whatever it says it means.
 
-fak takes the structural steps away from the model and gives them to a kernel. The model still proposes. The kernel disposes. That single boundary is the whole idea, and it is why fak can be both safer and faster at the same time: the same gate that refuses a bad action also lets a known-good one reuse work it has already done.
+fak takes the structural steps away from the model and gives them to a kernel. The model still proposes. The kernel disposes. That single boundary is the whole idea, and it is why fak can be both faster and safer at the same time: the same gate that lets a known-good action reuse work it has already done also refuses a bad one.
 
 ## Model proposes, kernel disposes: the syscall seam
 
@@ -67,7 +67,7 @@ The caveat belongs in the same breath: the live-loop wiring is a guarded seam, o
 
 **Observe** is the result quarantine (`Admit` in `internal/ctxmmu/mmu.go`). Every tool result passes a write-time gate before it can enter context. Poison or secret-shaped bytes are held out and replaced in place with a stub pointer; oversize benign results page out to a sub-2KB pointer (CLAIMS.md). A held page can only be paged back in after an explicit witness `Clear()` and a fresh re-screen of the bytes, so a clearance alone cannot launder poison, even across a process restart (`TestQuarantineSurvivesTheSessionBoundary`).
 
-This is where safe and fast turn out to be the same mechanism. When the gate quarantines a result, a deeper bridge evicts that result's K/V span from the attention cache (`AdmitResult` in `internal/kvmmu/kvmmu.go`), and the cache ends up bit-identical to a run that never saw the span: max|Δ| = 0.0 against a non-vacuous poison control near 0.33 (`TestWriteTimeEvictEqualsNeverSaw`; CLAIMS.md). The trick is that RoPE is linear in position, so survivors after the evicted span are re-rotated by the position delta and land exactly where a fresh prefill would put them (`internal/model/kvcache.go`). The same boundary that contains the poison is the one that lets the cache reuse the clean prefix.
+This is where fast and safe turn out to be the same mechanism. When the gate quarantines a result, a deeper bridge evicts that result's K/V span from the attention cache (`AdmitResult` in `internal/kvmmu/kvmmu.go`), and the cache ends up bit-identical to a run that never saw the span: max|Δ| = 0.0 against a non-vacuous poison control near 0.33 (`TestWriteTimeEvictEqualsNeverSaw`; CLAIMS.md). The trick is that RoPE is linear in position, so survivors after the evicted span are re-rotated by the position delta and land exactly where a fresh prefill would put them (`internal/model/kvcache.go`). The same boundary that contains the poison is the one that lets the cache reuse the clean prefix.
 
 The big honest caveat lives here. The architecture is sound — zero leaks after quarantine — but the detector fak inherits is roughly 100% evadable and false-positive prone on real context: one real session sealed 2 of 59 pages, both benign base64 images (CLAIMS.md). The load-bearing guarantee is the capability floor plus the containment, not detection (CLAIMS.md). And recurrent-state hybrid caches such as Gated-DeltaNet cannot quarantine mid-span at all; there the boundary fails loud with a typed error rather than silently corrupting (`RecurrentEvictUnsupportedError` in `internal/model/kvcache.go`).
 
@@ -230,7 +230,7 @@ Observability and feedback thread through the typed per-turn `Turn` record carri
 
 The reframe is two sentences. The vertical axis is *how much of the stack is one address space*: fak owns from the KV and decode loop up through the fleet and RSI loops in a single in-process kernel, borrowing only the hardware scheduler below and leaving the ecosystem loop above as aspiration. The orthogonal axis is *the same rule, every ring*: the observe, decide, act, and verify shape repeats across the scales, and trust is only one of the threads doing it.
 
-This is also the cleanest statement of what makes fak distinctive, and it stays inside the prior-art honesty the repo leads with (0 of 29 primitives novel). Plenty of systems own a deep vertical slice — a serving engine owns decode and the KV cache. Plenty enforce one cross-cutting policy — a guardrail enforces trust. fak is the one substrate present at the most scales while carrying the same trust-and-reuse invariant through all of them. The contribution is the crossing point, not either axis alone.
+This is also the cleanest statement of what makes fak distinctive, and it stays inside the prior-art honesty the repo leads with (0 of 29 primitives novel). Plenty of systems own a deep vertical slice — a serving engine owns decode and the KV cache. Plenty enforce one cross-cutting policy — a guardrail enforces trust. fak is the one substrate present at the most scales while carrying the same reuse-and-trust invariant through all of them. The contribution is the crossing point, not either axis alone.
 
 ## The external map: loop engineering, and the one claim fak can own
 
@@ -271,7 +271,7 @@ You can build all of this yourself. People do. But every one of those loops re-i
 
 fak's bet is that this scaffolding is a kernel, not a library you copy into each project. You inherit the spine — the gate, the quarantine, the durable cache, the witness, the keep-bit — and you write the only part that is actually yours: what the loop is *for*.
 
-One last honest note, the one the repo leads with. A prior-art audit found 0 of 29 primitives here novel (CLAIMS.md). The contribution is not any single mechanism. It is the assembly: a fused, fail-closed, witness-gated kernel with the tool call promoted to an in-process syscall. The parts are old. Wiring them into one boundary that is safe and fast for the same reason is the thing.
+One last honest note, the one the repo leads with. A prior-art audit found 0 of 29 primitives here novel (CLAIMS.md). The contribution is not any single mechanism. It is the assembly: a fused, fail-closed, witness-gated kernel with the tool call promoted to an in-process syscall. The parts are old. Wiring them into one boundary that is fast and safe for the same reason is the thing.
 
 So build the loop. That part is yours, and it is the part that matters. Just don't build the floor under it a fifth time — the gate, the quarantine, the durable cache, the keep-bit — badly, the way every hand-rolled loop does. Inherit the floor and let it hold the line no narration can move.
 

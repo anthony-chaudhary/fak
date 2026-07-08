@@ -1,6 +1,6 @@
 ---
 title: "The Agent Virtual Filesystem"
-description: "The filesystem tier of fak's OS analogy, named. An agent says 'file' and 'memory' for six different things — the host block device, the file tree it is allowed to see, the read/query surface, its scratchpad, its durable memory, and the KV cache. This page separates them, draws the line each is confused with, and places fak: the reference monitor that mediates the virtual filesystem, not the box that provides it."
+description: "The filesystem tier of fak's OS analogy, named. An agent says 'file' and 'memory' for six different things — the host block device, the file tree it is allowed to see, the read/query surface, its scratchpad, its durable memory, and the KV cache. This page separates them, draws the line each is confused with, and places fak: the layer that manages an agent's context as addressable, cache-backed storage — cheap to reuse across long sessions — and, on the same seam, the reference monitor that mediates it, not the box that provides it."
 slug: agent-virtual-filesystem
 keywords:
   - agent virtual filesystem
@@ -36,8 +36,10 @@ the indirection between "a program asks to read a path" and "some backing store 
 disk, a network mount, `/proc`, a FUSE process), with the kernel deciding, per call,
 what the program is even allowed to see. The **agent virtual filesystem** is the same
 indirection for an AI agent: the layer between the file-shaped tool call the model emits
-and the bytes that answer it, where the kernel decides what tree exists, what may be
-read, what may be written, and whether a returned byte is trusted.
+and the bytes that answer it. Its first job is context management — keeping each span
+addressable and cache-backed so a long session reuses bytes cheaply instead of re-reading
+them — and, on the same seam, the kernel decides what tree exists, what may be read, what
+may be written, and whether a returned byte is trusted.
 
 ## Why it needs naming: six things wear the word "file" (or "memory")
 

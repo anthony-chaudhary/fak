@@ -1,6 +1,6 @@
 ---
 title: "One binary is the whole agent-serving surface"
-description: "fak delivers the entire governed agent-serving stack (API surface, capability gate, result containment, audit, and auth) as one Go binary, laptop to fleet."
+description: "fak collapses the multi-process agent-serving stack — API surface, audit, and auth, plus the capability gate and result containment that ride the same seam — into one static Go binary, laptop to fleet."
 ---
 
 # One binary is the whole surface — laptop to fleet
@@ -8,14 +8,16 @@ description: "fak delivers the entire governed agent-serving stack (API surface,
 > The other two explainers ([policy in the kernel](policy-in-the-kernel.md),
 > [addressable KV cache](addressable-kv-cache.md)) are about *what* `fak` does. This one
 > is about *what you deploy and operate*. It is the answer to a question the throughput
-> benchmarks never ask: **when you actually go to serve an agent safely, how many moving
-> parts is that, and who owns them?**
+> benchmarks never ask: **when you actually go to serve a tool-using agent, how many moving
+> parts is that, how much process overhead and operational latency do they add, and who owns
+> them?** Serving it *safely* rides along on the same collapsed surface.
 
 *For platform and infra engineers weighing what to deploy and operate to serve a
-tool-using agent safely. No prior `fak` knowledge needed — only a working sense of how a
-serving engine (vLLM/SGLang) and a reverse proxy fit together. By the end you'll be able to
-name the governance + gateway band a token engine leaves empty, and why `fak` ships that
-whole band as one static Go binary that runs unchanged from laptop to fleet.*
+tool-using agent — and how few moving parts that has to be. No prior `fak` knowledge needed
+— only a working sense of how a serving engine (vLLM/SGLang) and a reverse proxy fit
+together. By the end you'll be able to name the governance + gateway band a token engine
+leaves empty, and why `fak` collapses that whole band into one static Go binary that runs
+unchanged from laptop to fleet — with serving it *safely* riding along on the same surface.*
 
 ## Serving an agent safely is a stack, not a component
 
