@@ -396,8 +396,8 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 		// Harness-coherence (#1132): fold this streamed turn with the content-free inbound-prefix
 		// digest captured before transforms and the provider's relayed cache counters (known now at
 		// stream end). Same observation the buffered path makes; the family stays path-agnostic.
-		s.metrics.observeHarnessCoherence(reqTrace, time.Now(), hcoh.inboundPrefixDigest, compacted, hcoh.fakBail,
-			false /*fakWorldBreak*/, false /*sealed*/, int64(p.cacheRead), int64(p.cacheCreate))
+		s.observeHarnessCoherenceAndArm(reqTrace, time.Now(), hcoh.inboundPrefixDigest, compacted, hcoh.fakBail,
+			false /*fakWorldBreak*/, false /*sealed*/, int64(p.cacheRead), int64(p.cacheCreate), int64(p.promptTok))
 		s.logInferenceTurnWithContextEvent(reqTrace, "anthropic_messages", true, agent.Usage{
 			PromptTokens:             p.promptTok,
 			CompletionTokens:         p.complTok,

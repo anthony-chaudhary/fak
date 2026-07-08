@@ -784,13 +784,15 @@ type SessionUsage struct {
 // the token usage reported after a served request finishes.
 type SessionDebitFunc func(ctx context.Context, traceID string, usage SessionUsage) SessionState
 
-// ResetOnBudgetFunc is the host's budget-reset action (Config.ResetOnBudget). Given
-// the budget-drained session's trace and its canonical transcript, the host builds
-// the carryover seed (durable facts + task recap + warm-prefix + verbatim tail), calls
-// session.Table.Recontinue to re-arm a fresh session, and returns the fresh trace id
-// plus the seed messages the gateway prepends to the live request. ok=false means the
-// host declined to reset (not a budget-reset reason, or no carryover) — the gateway
-// then falls back to the historical refusal. The gateway stays session-internals-blind:
+// ResetOnBudgetFunc is the host's reset action (Config.ResetOnBudget). Given a session's
+// trace and its canonical transcript, the host builds the carryover seed (durable facts +
+// task recap + warm-prefix + verbatim tail), calls session.Table.Recontinue to re-arm a
+// fresh session, and returns the fresh trace id plus the seed messages the gateway prepends
+// to the live request. ok=false means the host declined to reset (no carryover) — the gateway
+// then falls back to the historical refusal (budget path) or proceeds unchanged (coherence
+// path). It is invoked from TWO triggers: a budget drain (maybeResetOnBudget, the refusal
+// path) and a #3159 compaction-coherence thrash (maybeResetOnCoherence, the admitted path) —
+// so the host should not assume a budget exhaustion. The gateway stays session-internals-blind:
 // it never imports internal/session or internal/sessionreset; the host owns both.
 type ResetOnBudgetFunc func(ctx context.Context, trace string, messages []agent.Message) (newTrace string, seed []agent.Message, ok bool)
 
@@ -950,6 +952,12 @@ type Server struct {
 	// resetHealthMu. SHADOW-only: nothing here ever resets a session.
 	resetHealthMu sync.Mutex
 	resetHealth   map[string]*sessionResetHealth
+	// coherenceResetArmed holds trace ids the #3159 non-holding-rewrite escalation has armed for
+	// a hard reset on their NEXT admitted turn (armCoherenceReset). Unlike resetHealth this is
+	// an ACTUATION latch, consumed once by maybeResetOnCoherence (which reuses the host's opt-in
+	// ResetOnBudget callback). Guarded by the same resetHealthMu; minted lazily and bounded
+	// generationally by maxResetHealthSessions.
+	coherenceResetArmed map[string]bool
 
 	// ctxValue holds ONE rolling managed-context record per session trace id, fed by
 	// logInferenceTurn on EVERY served turn (all wires) so the multi-level long-session

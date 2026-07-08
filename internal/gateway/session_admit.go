@@ -109,6 +109,75 @@ func (s *Server) maybeResetOnBudget(ctx context.Context, st SessionState, messag
 	return s.resetOnBudget(ctx, st.TraceID, messages)
 }
 
+// armCoherenceReset latches a hard reset for trace on its NEXT admitted turn — the actuation the
+// #3159 non-holding-rewrite escalation arms. Bounded generationally (like resetHealth) so a
+// long-running gateway minting a trace per session cannot grow the latch set without limit. Empty
+// trace is a no-op.
+func (s *Server) armCoherenceReset(trace string) {
+	if s == nil || trace == "" {
+		return
+	}
+	s.resetHealthMu.Lock()
+	if s.coherenceResetArmed == nil {
+		s.coherenceResetArmed = make(map[string]bool)
+	}
+	if len(s.coherenceResetArmed) >= maxResetHealthSessions {
+		s.coherenceResetArmed = make(map[string]bool) // generational reset, like resetHealth
+	}
+	s.coherenceResetArmed[trace] = true
+	s.resetHealthMu.Unlock()
+}
+
+// consumeCoherenceReset reports whether trace was armed for a coherence reset and clears the latch
+// in the same critical section, so a given escalation actuates at most once. Empty/unarmed → false.
+func (s *Server) consumeCoherenceReset(trace string) bool {
+	if s == nil || trace == "" {
+		return false
+	}
+	s.resetHealthMu.Lock()
+	armed := s.coherenceResetArmed[trace]
+	if armed {
+		delete(s.coherenceResetArmed, trace)
+	}
+	s.resetHealthMu.Unlock()
+	return armed
+}
+
+// maybeResetOnCoherence is the #3159 actuation twin of maybeResetOnBudget, but on the ADMITTED
+// path: when a prior turn's non-holding-rewrite escalation armed a hard reset for trace AND the
+// host wired the opt-in ResetOnBudget callback, it consumes the latch, asks the host to distill a
+// carryover seed + re-arm a fresh session, zeroes the reset-health cooldown, and counts the
+// actuated reset. ok=false means "nothing armed, or no resetter wired, or the host declined" — the
+// caller proceeds unchanged. Consuming the latch BEFORE invoking the host (and the fresh trace
+// getting a fresh per-trace coordinator) prevents a reset loop: the new trace starts with a zero
+// non-holding streak, so it cannot immediately re-escalate.
+func (s *Server) maybeResetOnCoherence(ctx context.Context, trace string, messages []agent.Message) (newTrace string, seed []agent.Message, ok bool) {
+	if s.resetOnBudget == nil || !s.consumeCoherenceReset(trace) {
+		return "", nil, false
+	}
+	newTrace, seed, ok = s.resetOnBudget(ctx, trace, messages)
+	if ok {
+		s.resetHealthReset(newTrace)
+		s.metrics.recordCoherenceResetFired()
+	}
+	return newTrace, seed, ok
+}
+
+// resetOnCoherenceIfArmed runs the coherence reset on the admitted path and re-admits on the fresh
+// trace, mirroring the budget-reset block. When nothing is armed it returns its inputs unchanged
+// with ok=true, canceled=false (a cheap no-op). Callers reassign trace/messages/sessionTurn/ok/
+// canceled from the returns: canceled=true ⇒ return immediately; ok=false ⇒ the fresh trace refused
+// (write the refusal, mirroring the budget path's never-loop guard).
+func (s *Server) resetOnCoherenceIfArmed(ctx context.Context, trace string, messages []agent.Message, sessionTurn servedSessionTurn) (string, []agent.Message, servedSessionTurn, bool, bool) {
+	newTrace, seed, reset := s.maybeResetOnCoherence(ctx, trace, messages)
+	if !reset {
+		return trace, messages, sessionTurn, true, false
+	}
+	messages = spliceSeed(seed, messages)
+	st, ok, canceled := s.beginServedSessionTurn(ctx, newTrace)
+	return newTrace, messages, st, ok, canceled
+}
+
 // spliceSeed prepends the carryover seed to a live transcript, keeping any leading
 // system message(s) at the very top (a provider expects the system prompt first). The
 // seed's continuation recap lands AFTER the system framing and BEFORE the historical

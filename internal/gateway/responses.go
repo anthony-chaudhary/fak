@@ -193,6 +193,15 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Coherence thrash (#3159): actuate an armed hard reset on this ADMITTED turn (mirrors the
+	// budget-reset block above; a no-op when nothing is armed or no resetter is wired).
+	if reqTrace, messages, sessionTurn, ok, canceled = s.resetOnCoherenceIfArmed(ctx, reqTrace, messages, sessionTurn); canceled {
+		return
+	}
+	if !ok { // the fresh reset trace somehow refuses — fall back, never loop
+		writeSessionRefusal(w, sessionTurn.state)
+		return
+	}
 	resultAdmissions, err := s.admitInboundResults(ctx, messages, tools, reqTrace)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "upstream cache invalidation failed")

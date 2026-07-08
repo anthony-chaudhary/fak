@@ -68,6 +68,15 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Coherence thrash (#3159): actuate an armed hard reset on this ADMITTED turn (mirrors the
+	// budget-reset block above; a no-op when nothing is armed or no resetter is wired).
+	if reqTrace, messages, sessionTurn, ok, canceled = s.resetOnCoherenceIfArmed(ctx, reqTrace, messages, sessionTurn); canceled {
+		return
+	}
+	if !ok { // the fresh reset trace somehow refuses — fall back, never loop
+		writeSessionRefusal(w, sessionTurn.state)
+		return
+	}
 	began := time.Now()
 	comp, err := s.completeServed(ctx, sessionTurn, messages, nil,
 		agent.WithModel(req.Model), // no-op when the client omitted model

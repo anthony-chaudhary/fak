@@ -505,6 +505,90 @@ func TestResetOnBudgetUnwiredStillRefuses(t *testing.T) {
 	}
 }
 
+// TestCoherenceResetArmConsumeOnce pins the #3159 armed-latch semantics: an unarmed trace is
+// false, arming makes the NEXT consume true, and the latch clears so a second consume is false
+// (a given escalation actuates at most once). Empty trace is inert.
+func TestCoherenceResetArmConsumeOnce(t *testing.T) {
+	srv := newTestServer(t)
+	if srv.consumeCoherenceReset("x") {
+		t.Fatal("unarmed trace must consume false")
+	}
+	srv.armCoherenceReset("x")
+	if !srv.consumeCoherenceReset("x") {
+		t.Fatal("armed trace must consume true")
+	}
+	if srv.consumeCoherenceReset("x") {
+		t.Fatal("second consume must be false — a latch fires once")
+	}
+	srv.armCoherenceReset("") // empty trace is a no-op
+	if srv.consumeCoherenceReset("") {
+		t.Fatal("empty trace must never be armed")
+	}
+}
+
+// TestResetOnCoherenceIfArmedActuates proves the #3159 full actuation: with a host ResetOnBudget
+// wired and a trace armed, the admitted-path helper the wire handlers call fires the reset, re-admits
+// on the fresh trace, splices the carryover seed, consumes the latch, and counts the actuated reset.
+func TestResetOnCoherenceIfArmedActuates(t *testing.T) {
+	srv := newTestServer(t)
+	var fired bool
+	var sawTrace string
+	srv.resetOnBudget = func(_ context.Context, trace string, msgs []agent.Message) (string, []agent.Message, bool) {
+		fired = true
+		sawTrace = trace
+		return "t-fresh", []agent.Message{{Role: agent.RoleSystem, Content: "[carryover] durable: x"}}, true
+	}
+	srv.armCoherenceReset("t")
+
+	msgs := []agent.Message{{Role: agent.RoleUser, Content: "hi"}}
+	newTrace, outMsgs, _, ok, canceled := srv.resetOnCoherenceIfArmed(context.Background(), "t", msgs, servedSessionTurn{})
+	if canceled {
+		t.Fatal("coherence actuation unexpectedly canceled")
+	}
+	if !fired || sawTrace != "t" {
+		t.Fatalf("resetOnBudget fired=%v sawTrace=%q, want true/\"t\"", fired, sawTrace)
+	}
+	if !ok {
+		t.Fatal("fresh trace must admit (default-admit) after the coherence reset")
+	}
+	if newTrace != "t-fresh" {
+		t.Fatalf("newTrace = %q, want t-fresh (rebound to the reset trace)", newTrace)
+	}
+	if len(outMsgs) != 2 { // seed spliced ahead of the live user turn
+		t.Fatalf("spliced messages = %d, want 2 (seed + live)", len(outMsgs))
+	}
+	if srv.consumeCoherenceReset("t") {
+		t.Fatal("actuation must have consumed the armed latch")
+	}
+	if got := srv.metrics.harnessCoherenceSummary().ResetsFired; got != 1 {
+		t.Fatalf("resets_fired = %d, want 1", got)
+	}
+}
+
+// TestResetOnCoherenceIfArmedNoop is the no-regression guard: an unarmed trace (and a wired-but-
+// unarmed trace) is a cheap passthrough — inputs unchanged, ok=true, the resetter never called.
+func TestResetOnCoherenceIfArmedNoop(t *testing.T) {
+	srv := newTestServer(t)
+	msgs := []agent.Message{{Role: agent.RoleUser, Content: "hi"}}
+
+	// No resetter wired, nothing armed: passthrough.
+	nt, out, _, ok, canceled := srv.resetOnCoherenceIfArmed(context.Background(), "t", msgs, servedSessionTurn{})
+	if canceled || !ok || nt != "t" || len(out) != 1 {
+		t.Fatalf("unwired/unarmed must pass through: nt=%q ok=%v canceled=%v n=%d", nt, ok, canceled, len(out))
+	}
+
+	// Resetter wired but the trace is NOT armed: still a passthrough, resetter untouched.
+	var fired bool
+	srv.resetOnBudget = func(_ context.Context, _ string, _ []agent.Message) (string, []agent.Message, bool) {
+		fired = true
+		return "", nil, true
+	}
+	nt, _, _, ok, _ = srv.resetOnCoherenceIfArmed(context.Background(), "t", msgs, servedSessionTurn{})
+	if fired || nt != "t" || !ok {
+		t.Fatalf("wired-but-unarmed must not fire the resetter: fired=%v nt=%q ok=%v", fired, nt, ok)
+	}
+}
+
 func wireSessionTableForTest(srv *Server, tbl *session.Table) {
 	srv.decideSession = func(_ context.Context, trace string) SessionVerdict {
 		return testSessionVerdict(tbl.Decide(trace))

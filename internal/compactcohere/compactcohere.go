@@ -17,6 +17,27 @@ const DefaultProviderCacheTTL = 5 * time.Minute
 // risk a hard context overflow, so the net is handed back. Conservative on purpose.
 const DefaultBailStreakToYield = 3
 
+// DefaultResidentCeiling is the resident-token high-water mark (input + cache_creation +
+// cache_read for the served turn) above which fak is judged to be NOT bounding the context
+// window, regardless of whether its own cut is "firing." ~160k leaves head-room under a 200k
+// model's context so the harness net can still act before a hard overflow. A clean fire that
+// leaves the window above this is not coping (#3158); a harness rewrite that lets the window
+// climb back above it did not durably hold (#3159). Overridable per deployment (the gateway
+// reads FAK_CTX_YIELD_CEILING); a non-positive ceiling disables every resident-token term.
+const DefaultResidentCeiling int64 = 160_000
+
+// DefaultCeilingStreakToYield is how many consecutive turns the resident window must exceed the
+// ceiling before the coordinator forces PostureAllow regardless of the bail streak (#3158). Small
+// and conservative: one spike is noise, a sustained streak is fak failing to bound the window.
+const DefaultCeilingStreakToYield = 3
+
+// DefaultNonHoldRewritesToReset is how many non-holding harness rewrites (a rewrite after which
+// the window climbs back over the ceiling before the next rewrite) accumulate before the
+// coordinator escalates from "let the harness keep rewriting" to ActionRecommendReset + a real
+// reset (#3159). Two thrash cycles is enough signal that repeating the cache-destroying rewrite
+// is not converging; a fresh RESET beats another one.
+const DefaultNonHoldRewritesToReset = 2
+
 // PrefixEvent attributes what happened to the cacheable prompt prefix between two
 // consecutive served turns on the fak<->harness boundary. Exactly one is returned per
 // turn; the order of attribution is fixed (see Classify).
@@ -74,9 +95,21 @@ type TurnObservation struct {
 	// unchanged prefix. Both zero means the provider reported no counters.
 	CacheCreationTokens int64
 	CacheReadTokens     int64
+	// InputTokens is the provider's OBSERVED non-cached prompt-token count for this turn
+	// (relayed verbatim). Together with the cache counters it gives the RESIDENT window size
+	// (see residentTokens); on a cold/reset turn the whole prompt bills as input with zero
+	// cache_read, so input is the term that keeps the resident estimate honest there.
+	InputTokens int64
 	// IdleSinceLastTurn is the wall-clock gap since the previous served turn — the
 	// prospective TTL signal (idle past TTL ⇒ the ephemeral cache expired).
 	IdleSinceLastTurn time.Duration
+}
+
+// residentTokens is the served turn's RESIDENT context size — the full prompt the provider
+// billed, whether cached or not: input + cache_creation + cache_read. It is the size the
+// resident-token ceiling (#3158) and the non-holding-rewrite watch (#3159) compare against.
+func (o TurnObservation) residentTokens() int64 {
+	return o.InputTokens + o.CacheCreationTokens + o.CacheReadTokens
 }
 
 // Classify attributes one served turn's prefix event from prev (the previous turn's
@@ -175,7 +208,8 @@ const (
 )
 
 // Decision is the coordinator's per-turn output: the attributed event, the recommended
-// action, the standing PreCompact posture, and two one-shot risk flags. It is content-free.
+// action, the standing PreCompact posture, the resident-window size signals (#3158/#3159),
+// and the one-shot risk/escalation flags. It is content-free (counts and enums only).
 type Decision struct {
 	// Event is the attributed prefix event this turn.
 	Event PrefixEvent
@@ -192,6 +226,22 @@ type Decision struct {
 	// BurstObserved is true when this turn (will) cost a provider cache_creation burst — a
 	// harness rewrite or a cold-TTL rebuild. Lets an operator line read the cost honestly.
 	BurstObserved bool
+	// ResidentTokens is this turn's OBSERVED resident window size (input + cache_creation +
+	// cache_read) — the content-free size signal both #3158 and #3159 turn on. A count, no content.
+	ResidentTokens int64
+	// OverCeiling is true when ResidentTokens exceeded the configured resident ceiling this
+	// turn — fak is not bounding the window (#3158). Feeds the ceiling-yield and the
+	// non-holding-rewrite watch.
+	OverCeiling bool
+	// RewriteNoDrop is true on the turn a previously-watched harness rewrite is judged to have
+	// NOT held: the window climbed back over the ceiling before the next rewrite (#3159). The
+	// previously-invisible "the summary didn't stick" event.
+	RewriteNoDrop bool
+	// EscalateReset is the DISTINCT actuation signal: true only when the non-holding-rewrite
+	// streak reached the escalation threshold this turn (#3159). The actuator arms a real reset
+	// on this flag alone — NOT on Action==ActionRecommendReset, which cold_ttl also emits
+	// (shadow-only), so cold_ttl never actuates a live reset through this path.
+	EscalateReset bool
 	// Reason is a short, content-free explanation of the verdict.
 	Reason string
 }
@@ -200,34 +250,85 @@ type Decision struct {
 // emits a Decision per turn plus the standing PreCompact Posture. It is NOT safe for
 // concurrent use; one session drives one Coordinator in turn order.
 type Coordinator struct {
-	ttl               time.Duration
-	bailStreakToYield int
+	ttl                    time.Duration
+	bailStreakToYield      int
+	residentCeiling        int64
+	ceilingStreakToYield   int
+	nonHoldRewritesToReset int
 
 	prev               TurnObservation
 	havePrev           bool
 	fakBailStreak      int
 	sealedSinceRewrite bool
 	posture            Posture
+
+	// ceilingStreak counts consecutive turns whose resident window exceeded the ceiling (#3158).
+	ceilingStreak int
+	// watchingRewrite is true after a harness rewrite until the coordinator learns whether it
+	// held: it is cleared when the window climbs back over the ceiling (non-holding, #3159) or
+	// when the next rewrite supersedes it.
+	watchingRewrite bool
+	// nonHoldStreak counts non-holding harness rewrites toward the reset escalation (#3159).
+	nonHoldStreak int
 }
 
-// New returns a Coordinator with the default block-by-default standing posture: when fak's
-// cache-preserving compaction is wired and coping, the harness's cache-destroying
-// auto-compaction should be suppressed. A non-positive ttl falls back to
-// DefaultProviderCacheTTL; the yield streak uses DefaultBailStreakToYield. Use NewWith to
-// override the streak.
+// Config is the coordinator's tunable policy. A zero value is valid: New/NewWith fill it with
+// the package defaults, and NewConfig applies a default for every non-positive field, so a
+// caller can set only the knobs it cares about.
+type Config struct {
+	// TTL is the assumed provider prompt-cache idle expiry (see DefaultProviderCacheTTL).
+	TTL time.Duration
+	// BailStreakToYield is the sustained fak-bail streak that yields the net (DefaultBailStreakToYield).
+	BailStreakToYield int
+	// ResidentCeiling is the resident-token high-water mark (DefaultResidentCeiling). A negative
+	// value falls back to the default; pass a very large value to make the resident terms inert.
+	ResidentCeiling int64
+	// CeilingStreakToYield is the consecutive over-ceiling turns that force a yield (DefaultCeilingStreakToYield).
+	CeilingStreakToYield int
+	// NonHoldRewritesToReset is the non-holding-rewrite count that escalates to a reset (DefaultNonHoldRewritesToReset).
+	NonHoldRewritesToReset int
+}
+
+// New returns a Coordinator with the default block-by-default standing posture and the default
+// resident-token terms: when fak's cache-preserving compaction is wired and coping, the harness's
+// cache-destroying auto-compaction should be suppressed. A non-positive ttl falls back to
+// DefaultProviderCacheTTL. Use NewWith to override the bail streak or NewConfig for the full policy.
 func New(ttl time.Duration) *Coordinator { return NewWith(ttl, DefaultBailStreakToYield) }
 
 // NewWith is New with an explicit bail-streak-to-yield threshold (turns of sustained fak
 // compaction bail before the net is handed back to the harness). A non-positive streak
-// falls back to DefaultBailStreakToYield.
+// falls back to DefaultBailStreakToYield; the resident-token terms use their defaults.
 func NewWith(ttl time.Duration, bailStreakToYield int) *Coordinator {
-	if ttl <= 0 {
-		ttl = DefaultProviderCacheTTL
+	return NewConfig(Config{TTL: ttl, BailStreakToYield: bailStreakToYield})
+}
+
+// NewConfig returns a Coordinator with an explicit policy. Every non-positive field falls back
+// to its package default, so a partial Config is safe. The standing posture starts at
+// PostureBlock (fak is the single manager until it demonstrably stops coping).
+func NewConfig(cfg Config) *Coordinator {
+	if cfg.TTL <= 0 {
+		cfg.TTL = DefaultProviderCacheTTL
 	}
-	if bailStreakToYield <= 0 {
-		bailStreakToYield = DefaultBailStreakToYield
+	if cfg.BailStreakToYield <= 0 {
+		cfg.BailStreakToYield = DefaultBailStreakToYield
 	}
-	return &Coordinator{ttl: ttl, bailStreakToYield: bailStreakToYield, posture: PostureBlock}
+	if cfg.ResidentCeiling <= 0 {
+		cfg.ResidentCeiling = DefaultResidentCeiling
+	}
+	if cfg.CeilingStreakToYield <= 0 {
+		cfg.CeilingStreakToYield = DefaultCeilingStreakToYield
+	}
+	if cfg.NonHoldRewritesToReset <= 0 {
+		cfg.NonHoldRewritesToReset = DefaultNonHoldRewritesToReset
+	}
+	return &Coordinator{
+		ttl:                    cfg.TTL,
+		bailStreakToYield:      cfg.BailStreakToYield,
+		residentCeiling:        cfg.ResidentCeiling,
+		ceilingStreakToYield:   cfg.CeilingStreakToYield,
+		nonHoldRewritesToReset: cfg.NonHoldRewritesToReset,
+		posture:                PostureBlock,
+	}
 }
 
 // Posture returns the current standing block/allow stance for the PreCompact hook to
@@ -245,14 +346,31 @@ func (c *Coordinator) Observe(cur TurnObservation) Decision {
 	}
 	ev := Classify(prev, cur, c.ttl)
 
-	// fak's ability to cope: a real bail increments the streak; a clean fire or a healthy
-	// under-budget no-op (FakBailReason == "") resets it.
+	// Resident-window size is the first-class signal (#3158/#3159): the ceiling term, the
+	// held-streak refinement, and the non-holding-rewrite watch all key off it.
+	resident := cur.residentTokens()
+	overCeiling := c.residentCeiling > 0 && resident > c.residentCeiling
+	if overCeiling {
+		c.ceilingStreak++
+	} else {
+		c.ceilingStreak = 0
+	}
+
+	// fak's ability to cope: a real bail increments the streak. A clean fire / healthy
+	// under-budget no-op (FakBailReason == "") resets it ONLY when the window is under the
+	// ceiling — a fire that leaves the window over budget is not coping, so hold the streak
+	// rather than crediting it with a reset (#3158).
 	if cur.FakBailReason != "" {
 		c.fakBailStreak++
-	} else {
+	} else if !overCeiling {
 		c.fakBailStreak = 0
 	}
-	if c.fakBailStreak >= c.bailStreakToYield {
+
+	// Standing posture: yield the net to the harness when fak has bailed for a streak OR when
+	// the resident window has sat over the ceiling for a streak (fak is not bounding it, #3158).
+	yieldOnBail := c.fakBailStreak >= c.bailStreakToYield
+	yieldOnCeiling := c.ceilingStreakToYield > 0 && c.ceilingStreak >= c.ceilingStreakToYield
+	if yieldOnBail || yieldOnCeiling {
 		c.posture = PostureAllow
 	} else {
 		c.posture = PostureBlock
@@ -264,15 +382,32 @@ func (c *Coordinator) Observe(cur TurnObservation) Decision {
 		c.sealedSinceRewrite = true
 	}
 
-	d := Decision{Event: ev, HarnessPosture: c.posture}
+	// Non-holding-rewrite watch (#3159): after a harness rewrite we watch whether the window
+	// stays bounded. If a later (non-rewrite) turn is back over the ceiling before the next
+	// rewrite, the summary did not durably hold — the previously-invisible "compaction bailed".
+	rewriteNoDrop := false
+	if c.watchingRewrite && ev != EventHarnessRewrite && overCeiling {
+		rewriteNoDrop = true
+		c.watchingRewrite = false
+		c.nonHoldStreak++
+	}
+
+	d := Decision{
+		Event:          ev,
+		HarnessPosture: c.posture,
+		ResidentTokens: resident,
+		OverCeiling:    overCeiling,
+		RewriteNoDrop:  rewriteNoDrop,
+	}
 	switch ev {
 	case EventHarnessRewrite:
 		d.BurstObserved = true
 		d.QuarantineAtRisk = c.sealedSinceRewrite
 		c.sealedSinceRewrite = false // the prior seals are now either in the summary or dropped
+		c.watchingRewrite = true     // watch whether THIS rewrite durably bounds the window (#3159)
 		if c.posture == PostureAllow {
 			d.Action = ActionAllowHarnessCompact
-			d.Reason = "harness rewrote the prefix; fak compaction is not coping (bail streak) — keep the harness as the context net"
+			d.Reason = "harness rewrote the prefix; fak is not coping (bail or over-ceiling streak) — keep the harness as the context net"
 		} else {
 			d.Action = ActionBlockHarnessCompact
 			d.Reason = "harness rewrote the prefix (cache-destroying); fak's cache-preserving compaction should be the single manager — block the next harness auto-compaction"
@@ -284,6 +419,17 @@ func (c *Coordinator) Observe(cur TurnObservation) Decision {
 	default: // EventStable, EventFakCut, EventFakWorldBreak
 		d.Action = ActionProceed
 		d.Reason = string(ev) + ": fak is managing the context window; no harness coordination needed this turn"
+	}
+
+	// Escalation (#3159): once non-holding rewrites accumulate to the threshold, repeating the
+	// cache-destroying rewrite is not converging — recommend a hard RESET and raise the DISTINCT
+	// EscalateReset flag the actuator arms on (never cold_ttl's ActionRecommendReset). Overrides
+	// the per-event Action for this turn; the streak resets so the next escalation must re-earn it.
+	if c.nonHoldRewritesToReset > 0 && c.nonHoldStreak >= c.nonHoldRewritesToReset {
+		d.Action = ActionRecommendReset
+		d.EscalateReset = true
+		d.Reason = "harness rewrites are not holding (window returned over the ceiling) — recommend a hard reset (#3159)"
+		c.nonHoldStreak = 0
 	}
 
 	c.prev = cur

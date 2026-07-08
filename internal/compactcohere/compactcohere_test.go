@@ -238,3 +238,114 @@ func TestObserveIsContentFree(t *testing.T) {
 }
 
 func digestN(i int) string { return "digest-" + time.Duration(i).String() }
+
+// TestNewConfigAppliesDefaults proves NewConfig fills every non-positive field with its package
+// default and that New/NewWith delegate (so existing callers get the resident-token terms for free).
+func TestNewConfigAppliesDefaults(t *testing.T) {
+	c := NewConfig(Config{})
+	if c.ttl != DefaultProviderCacheTTL || c.bailStreakToYield != DefaultBailStreakToYield {
+		t.Fatalf("ttl/bail defaults not applied: ttl=%v bail=%d", c.ttl, c.bailStreakToYield)
+	}
+	if c.residentCeiling != DefaultResidentCeiling || c.ceilingStreakToYield != DefaultCeilingStreakToYield || c.nonHoldRewritesToReset != DefaultNonHoldRewritesToReset {
+		t.Fatalf("resident-token defaults not applied: ceiling=%d ceilStreak=%d nonHold=%d",
+			c.residentCeiling, c.ceilingStreakToYield, c.nonHoldRewritesToReset)
+	}
+	if c.posture != PostureBlock {
+		t.Fatalf("default posture = %q, want block", c.posture)
+	}
+	// New and NewWith delegate through NewConfig with the resident-token defaults intact.
+	if New(0).residentCeiling != DefaultResidentCeiling {
+		t.Fatal("New must carry the default resident ceiling")
+	}
+	if nw := NewWith(0, 5); nw.bailStreakToYield != 5 || nw.residentCeiling != DefaultResidentCeiling {
+		t.Fatalf("NewWith must honor the bail streak and default the ceiling: bail=%d ceiling=%d", nw.bailStreakToYield, nw.residentCeiling)
+	}
+}
+
+// TestResidentCeilingForcesAllow proves the #3158 ceiling term: a resident window that sits over the
+// ceiling for a streak forces PostureAllow regardless of the bail streak, and the Decision carries
+// the content-free size signals.
+func TestResidentCeilingForcesAllow(t *testing.T) {
+	c := NewConfig(Config{ResidentCeiling: 1000, CeilingStreakToYield: 2})
+	// Under the ceiling: block, not over.
+	d := c.Observe(TurnObservation{InboundPrefixDigest: "A", CacheReadTokens: 500})
+	if d.OverCeiling || d.HarnessPosture != PostureBlock {
+		t.Fatalf("under ceiling: over=%v posture=%q, want false/block", d.OverCeiling, d.HarnessPosture)
+	}
+	// Two consecutive over-ceiling turns (no bail at all) -> yield.
+	c.Observe(TurnObservation{InboundPrefixDigest: "A", CacheReadTokens: 1500}) // over, streak 1
+	d = c.Observe(TurnObservation{InboundPrefixDigest: "A", CacheReadTokens: 1500})
+	if !d.OverCeiling || d.ResidentTokens != 1500 {
+		t.Fatalf("over-ceiling turn: over=%v resident=%d, want true/1500", d.OverCeiling, d.ResidentTokens)
+	}
+	if d.HarnessPosture != PostureAllow {
+		t.Fatalf("posture after an over-ceiling streak = %q, want allow (no bail involved)", d.HarnessPosture)
+	}
+}
+
+// TestCleanFireOverCeilingHoldsBailStreak proves the #3158 refinement: a clean fire (no bail reason)
+// that leaves the window OVER the ceiling does not reset the bail streak — fak is not coping, so the
+// streak is held rather than credited with a reset.
+func TestCleanFireOverCeilingHoldsBailStreak(t *testing.T) {
+	// Ceiling-yield effectively off (streak 100) so the allow below can only come from the bail streak.
+	c := NewConfig(Config{ResidentCeiling: 1000, BailStreakToYield: 2, CeilingStreakToYield: 100})
+	c.Observe(TurnObservation{InboundPrefixDigest: "A", FakBailReason: "window_no_drop", CacheReadTokens: 500}) // streak 1
+	// A clean fire, but the window is still over the ceiling: must NOT reset the streak.
+	c.Observe(TurnObservation{InboundPrefixDigest: "A", FakCompactFired: true, CacheReadTokens: 1500})
+	// Another real bail: if the clean fire had reset, this would be streak 1 (block); held ⇒ streak 2 (allow).
+	d := c.Observe(TurnObservation{InboundPrefixDigest: "A", FakBailReason: "window_no_drop", CacheReadTokens: 500})
+	if d.HarnessPosture != PostureAllow {
+		t.Fatalf("posture = %q, want allow — the over-ceiling clean fire must not have reset the bail streak", d.HarnessPosture)
+	}
+}
+
+// TestNonHoldingRewriteEscalatesToReset proves the #3159 detection + escalation: a harness rewrite
+// after which the window climbs back over the ceiling is flagged RewriteNoDrop, and once the
+// non-holding streak reaches the threshold the coordinator raises EscalateReset + ActionRecommendReset.
+func TestNonHoldingRewriteEscalatesToReset(t *testing.T) {
+	c := NewConfig(Config{ResidentCeiling: 1000, CeilingStreakToYield: 100, NonHoldRewritesToReset: 2})
+	feed := func(digest string, resident int64) Decision {
+		return c.Observe(TurnObservation{InboundPrefixDigest: digest, CacheReadTokens: resident})
+	}
+	feed("A", 500) // establish the prefix, under ceiling
+
+	// Rewrite 1 drops under the ceiling, then the window re-inflates over it -> non-holding #1.
+	if d := feed("B", 500); d.Event != EventHarnessRewrite {
+		t.Fatalf("digest change must be a harness rewrite, got %q", d.Event)
+	}
+	d := feed("B", 1500) // same prefix, over ceiling -> non-holding rewrite
+	if !d.RewriteNoDrop {
+		t.Fatal("window back over the ceiling after a rewrite must flag RewriteNoDrop")
+	}
+	if d.EscalateReset {
+		t.Fatal("one non-holding rewrite must not escalate yet (threshold 2)")
+	}
+
+	// Rewrite 2 drops under, re-inflates over -> non-holding #2 -> escalate.
+	if d := feed("C", 500); d.Event != EventHarnessRewrite {
+		t.Fatalf("second digest change must be a harness rewrite, got %q", d.Event)
+	}
+	d = feed("C", 1500)
+	if !d.RewriteNoDrop {
+		t.Fatal("second re-inflation must flag RewriteNoDrop")
+	}
+	if !d.EscalateReset || d.Action != ActionRecommendReset {
+		t.Fatalf("second non-holding rewrite must escalate: escalate=%v action=%q, want true/recommend_reset", d.EscalateReset, d.Action)
+	}
+}
+
+// TestHoldingRewriteDoesNotFlagNoDrop proves the converse: a rewrite after which the window stays
+// under the ceiling HELD — it must not be flagged non-holding and must never escalate.
+func TestHoldingRewriteDoesNotFlagNoDrop(t *testing.T) {
+	c := NewConfig(Config{ResidentCeiling: 1000, CeilingStreakToYield: 100, NonHoldRewritesToReset: 2})
+	c.Observe(TurnObservation{InboundPrefixDigest: "A", CacheReadTokens: 500})
+	if d := c.Observe(TurnObservation{InboundPrefixDigest: "B", CacheReadTokens: 500}); d.Event != EventHarnessRewrite {
+		t.Fatalf("digest change must be a harness rewrite, got %q", d.Event)
+	}
+	for i := 0; i < 3; i++ { // window stays well under the ceiling for several turns
+		d := c.Observe(TurnObservation{InboundPrefixDigest: "B", CacheReadTokens: 500})
+		if d.RewriteNoDrop || d.EscalateReset {
+			t.Fatalf("held rewrite (under ceiling) must not flag no-drop/escalate: %+v", d)
+		}
+	}
+}

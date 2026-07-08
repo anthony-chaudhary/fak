@@ -78,7 +78,7 @@ func TestObserveBuildsTurnObservationAndCountsStable(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
 
 	// First turn on a fresh prefix: stable (nothing to compare against), block-by-default posture.
-	d := h.observe("trace-A", now, "digestX", false, "", false, false, 100, 0)
+	d := h.observe("trace-A", now, "digestX", false, "", false, false, 100, 0, 0)
 	if d.Event != compactcohere.EventStable {
 		t.Fatalf("first turn event = %q, want stable", d.Event)
 	}
@@ -104,9 +104,9 @@ func TestHarnessRewriteCountedOnPrefixDigestDelta(t *testing.T) {
 	h := newHarnessCoherenceMetrics(compactcohere.DefaultProviderCacheTTL)
 	now := time.Unix(2_000_000, 0)
 
-	h.observe("trace-B", now, "digest-1", false, "", false, false, 500, 0)                // turn 1: establishes the prefix
-	now = now.Add(time.Second)                                                            // within TTL — not a cold-ttl
-	d := h.observe("trace-B", now, "digest-2-DIFFERENT", false, "", false, false, 0, 800) // turn 2: prefix changed
+	h.observe("trace-B", now, "digest-1", false, "", false, false, 500, 0, 0)                // turn 1: establishes the prefix
+	now = now.Add(time.Second)                                                               // within TTL — not a cold-ttl
+	d := h.observe("trace-B", now, "digest-2-DIFFERENT", false, "", false, false, 0, 800, 0) // turn 2: prefix changed
 
 	if d.Event != compactcohere.EventHarnessRewrite {
 		t.Fatalf("event = %q, want harness_rewrite (digest changed)", d.Event)
@@ -134,14 +134,14 @@ func TestQuarantineAtRiskCounted(t *testing.T) {
 	now := time.Unix(3_000_000, 0)
 
 	// Turn 1: fak seals a span (sealed=true) on a stable prefix — the exposure begins.
-	d1 := h.observe("trace-C", now, "digest-1", false, "", false, true /*sealed*/, 400, 0)
+	d1 := h.observe("trace-C", now, "digest-1", false, "", false, true /*sealed*/, 400, 0, 0)
 	if d1.QuarantineAtRisk {
 		t.Fatal("no rewrite yet — quarantine_at_risk must not fire on the seal turn alone")
 	}
 	// Turn 2: the harness rewrites its history (prefix digest changed). The earlier seal may now be
 	// inside the harness summary -> quarantine_at_risk.
 	now = now.Add(time.Second)
-	d2 := h.observe("trace-C", now, "digest-2-DIFFERENT", false, "", false, false, 0, 900)
+	d2 := h.observe("trace-C", now, "digest-2-DIFFERENT", false, "", false, false, 0, 900, 0)
 	if d2.Event != compactcohere.EventHarnessRewrite {
 		t.Fatalf("turn 2 event = %q, want harness_rewrite", d2.Event)
 	}
@@ -164,10 +164,10 @@ func TestRenderMetricsEmitsHarnessCoherenceFamily(t *testing.T) {
 	now := time.Unix(4_000_000, 0)
 
 	// Turn 1: seal a span on a stable prefix.
-	srv.metrics.observeHarnessCoherence("t", now, "dig-1", false, "", false, true, 300, 0)
+	srv.metrics.observeHarnessCoherence("t", now, "dig-1", false, "", false, true, 300, 0, 0)
 	// Turn 2: the harness rewrites the prefix -> harness_rewrite + quarantine_at_risk + burst.
 	now = now.Add(time.Second)
-	srv.metrics.observeHarnessCoherence("t", now, "dig-2", false, "", false, false, 0, 700)
+	srv.metrics.observeHarnessCoherence("t", now, "dig-2", false, "", false, false, 0, 700, 0)
 
 	text := srv.renderMetrics()
 	for _, want := range []string{
@@ -207,12 +207,82 @@ func TestPostureYieldsAfterFakBailStreak(t *testing.T) {
 	// DefaultBailStreakToYield (3) consecutive real bails -> allow.
 	for i := 0; i < compactcohere.DefaultBailStreakToYield; i++ {
 		now = now.Add(time.Second)
-		srv.metrics.observeHarnessCoherence("y", now, "dig", false, agent.CompactReasonPrefixMismatch, false, false, 0, 0)
+		srv.metrics.observeHarnessCoherence("y", now, "dig", false, agent.CompactReasonPrefixMismatch, false, false, 0, 0, 0)
 	}
 	if got := srv.metrics.harnessCoherenceSummary().Posture; got != string(compactcohere.PostureAllow) {
 		t.Fatalf("after a sustained fak-bail streak posture = %q, want allow", got)
 	}
 	if text := srv.renderMetrics(); !strings.Contains(text, "fak_harness_coherence_posture 0") {
 		t.Fatalf("posture gauge should read 0 (allow) after the bail streak\n%s", text)
+	}
+}
+
+// TestResolveCtxYieldCeiling pins the FAK_CTX_YIELD_CEILING parse: empty / non-numeric /
+// non-positive all fall back to the ~160k default (the terms are always on); a valid positive
+// value is honored verbatim.
+func TestResolveCtxYieldCeiling(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want int64
+	}{
+		{"", compactcohere.DefaultResidentCeiling},
+		{"   ", compactcohere.DefaultResidentCeiling},
+		{"not-a-number", compactcohere.DefaultResidentCeiling},
+		{"0", compactcohere.DefaultResidentCeiling},
+		{"-5", compactcohere.DefaultResidentCeiling},
+		{"120000", 120000},
+		{"  200000  ", 200000},
+	}
+	for _, tc := range cases {
+		if got := resolveCtxYieldCeiling(tc.raw); got != tc.want {
+			t.Fatalf("resolveCtxYieldCeiling(%q) = %d, want %d", tc.raw, got, tc.want)
+		}
+	}
+}
+
+// TestResidentCeilingYieldsAndRendersMetrics proves the #3158 resident-token ceiling drives the
+// standing posture and the new metric surface: a resident window that sits over the ceiling for a
+// streak flips the posture to allow (fak is not bounding the window), and the over_ceiling /
+// resident_tokens / reset_fired families reach /metrics with the witnessed values.
+func TestResidentCeilingYieldsAndRendersMetrics(t *testing.T) {
+	srv := newTestServer(t)
+	now := time.Unix(6_000_000, 0)
+
+	// Feed DefaultCeilingStreakToYield turns whose resident window (cache_read alone here) exceeds
+	// the ~160k ceiling on a stable, warm prefix (same digest, sub-TTL gap ⇒ neither a rewrite nor
+	// a cold-ttl). Each turn is over the ceiling; the streak forces the yield.
+	const over = 200_000
+	var d compactcohere.Decision
+	for i := 0; i < compactcohere.DefaultCeilingStreakToYield; i++ {
+		now = now.Add(time.Second)
+		d = srv.metrics.observeHarnessCoherence("ceil", now, "same-digest", false, "", false, false, over, 0, 0)
+	}
+	if !d.OverCeiling || d.ResidentTokens != over {
+		t.Fatalf("last turn overCeiling=%v resident=%d, want true/%d", d.OverCeiling, d.ResidentTokens, over)
+	}
+
+	sum := srv.metrics.harnessCoherenceSummary()
+	if sum.Posture != string(compactcohere.PostureAllow) {
+		t.Fatalf("posture after an over-ceiling streak = %q, want allow (fak not bounding the window)", sum.Posture)
+	}
+	if sum.OverCeiling != uint64(compactcohere.DefaultCeilingStreakToYield) {
+		t.Fatalf("summary over_ceiling = %d, want %d", sum.OverCeiling, compactcohere.DefaultCeilingStreakToYield)
+	}
+	if sum.ResidentTokens != over {
+		t.Fatalf("summary resident_tokens = %d, want %d", sum.ResidentTokens, over)
+	}
+
+	text := srv.renderMetrics()
+	for _, want := range []string{
+		"fak_harness_coherence_over_ceiling_total 3",
+		"fak_harness_coherence_resident_tokens 200000",
+		"fak_harness_coherence_rewrite_no_drop_total 0", // panel exists even at 0
+		"fak_harness_coherence_recommend_reset_total 0",
+		"fak_harness_coherence_reset_fired_total 0", // no host resetter wired -> never actuates
+		"fak_harness_coherence_posture 0",           // allow
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("metrics missing %q\n--- metrics ---\n%s", want, text)
+		}
 	}
 }

@@ -572,7 +572,7 @@ func TestFakCompactionShedNetSavingOnClaudeCodePath(t *testing.T) {
 	// expired, so the head-anchored burst carries zero marginal penalty and fires horizon-free —
 	// the un-budgeted plain-`fak guard -- claude` long-session case (#1407's cold path).
 	now := time.Now()
-	fireSrv.metrics.observeHarnessCoherence("long-session", now.Add(-2*compactcohere.DefaultProviderCacheTTL), "", false, "", false, false, 0, 0)
+	fireSrv.metrics.observeHarnessCoherence("long-session", now.Add(-2*compactcohere.DefaultProviderCacheTTL), "", false, "", false, false, 0, 0, 0)
 
 	reqFire, err := agent.DecodeAnthropicMessagesRequest(body)
 	if err != nil {
@@ -613,7 +613,7 @@ func TestFakCompactionShedNetSavingOnClaudeCodePath(t *testing.T) {
 	// --- Counterfactual: the SAME body on the firstBP default sheds nothing → $0 fak saving ---
 	baseSrv := anthropicPassthroughServer(1200) // compactAnchorHead stays false (the default)
 	baseSrv.metrics = newGatewayMetrics(time.Now())
-	baseSrv.metrics.observeHarnessCoherence("long-session", now.Add(-2*compactcohere.DefaultProviderCacheTTL), "", false, "", false, false, 0, 0)
+	baseSrv.metrics.observeHarnessCoherence("long-session", now.Add(-2*compactcohere.DefaultProviderCacheTTL), "", false, "", false, false, 0, 0, 0)
 	reqBase, err := agent.DecodeAnthropicMessagesRequest(body)
 	if err != nil {
 		t.Fatalf("decode base body: %v", err)
@@ -759,8 +759,8 @@ func TestMaybeCompactAnchorHeadFiresOnObservedColdTrace(t *testing.T) {
 	// Prime the per-trace wall clocks: trace-cold last served TWO TTLs ago (provably expired
 	// message spans); trace-warm just now (its cached suffix may still be warm).
 	now := time.Now()
-	s.metrics.observeHarnessCoherence("trace-cold", now.Add(-2*compactcohere.DefaultProviderCacheTTL), "", false, "", false, false, 0, 0)
-	s.metrics.observeHarnessCoherence("trace-warm", now, "", false, "", false, false, 0, 0)
+	s.metrics.observeHarnessCoherence("trace-cold", now.Add(-2*compactcohere.DefaultProviderCacheTTL), "", false, "", false, false, 0, 0, 0)
+	s.metrics.observeHarnessCoherence("trace-warm", now, "", false, "", false, false, 0, 0, 0)
 
 	// Warm trace, no horizon: the gate must stay conservative (identity, burst_unprofitable).
 	reqWarm, err := agent.DecodeAnthropicMessagesRequest(headOrderedWireBody(t, 120, 2))
@@ -843,7 +843,7 @@ func TestMaybeCompactAnchorHeadPriorRefusesLateInAssumedSession(t *testing.T) {
 	// "now" (warm — never idle-cold), so the refusal comes from the horizon, not the cold path.
 	now := time.Now()
 	for i := 0; i < 99; i++ {
-		s.metrics.observeHarnessCoherence("trace-deep", now, "", false, "", false, false, 0, 0)
+		s.metrics.observeHarnessCoherence("trace-deep", now, "", false, "", false, false, 0, 0, 0)
 	}
 	req, err := agent.DecodeAnthropicMessagesRequest(headOrderedWireBody(t, 120, 2))
 	if err != nil {
@@ -889,7 +889,7 @@ func TestMaybeCompactAnchorHeadBoundedTurnsLeftBeatsPrior(t *testing.T) {
 	s.metrics = newGatewayMetrics(time.Now())
 	now := time.Now()
 	for i := 0; i < 99; i++ { // deep enough that the prior alone would refuse
-		s.metrics.observeHarnessCoherence("trace-deep", now, "", false, "", false, false, 0, 0)
+		s.metrics.observeHarnessCoherence("trace-deep", now, "", false, "", false, false, 0, 0, 0)
 	}
 	req, err := agent.DecodeAnthropicMessagesRequest(headOrderedWireBody(t, 120, 2))
 	if err != nil {
@@ -913,7 +913,7 @@ func TestServedTurnCountIncrementsPerFold(t *testing.T) {
 	now := time.Now()
 	const k = 7
 	for i := 0; i < k; i++ {
-		m.observeHarnessCoherence("t", now, "", false, "", false, false, 0, 0)
+		m.observeHarnessCoherence("t", now, "", false, "", false, false, 0, 0, 0)
 	}
 	if got := m.servedTurnCount("t"); got != k {
 		t.Fatalf("servedTurnCount=%d, want %d", got, k)

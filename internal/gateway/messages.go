@@ -190,6 +190,17 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+	// Coherence thrash (#3159): if a prior turn's non-holding-rewrite escalation armed a hard
+	// reset for this trace and the host wired the opt-in reset, distill a carryover seed and
+	// continue transparently on a fresh trace — the same human-like reset the budget path uses,
+	// triggered by fak's own compaction-coherence signal on an ADMITTED turn instead of a drain.
+	if reqTrace, req.Messages, sessionTurn, ok, canceled = s.resetOnCoherenceIfArmed(ctx, reqTrace, req.Messages, sessionTurn); canceled {
+		return
+	}
+	if !ok { // the fresh reset trace somehow refuses — fall back, never loop
+		writeSessionRefusal(w, sessionTurn.state)
+		return
+	}
 	applySessionPaceToAnthropicRequest(req, sessionTurn)
 	s.injectGuardRecoveryPrompt(req)
 	// Harness-coherence seam (#1132): capture a CONTENT-FREE digest of the inbound protected
@@ -343,8 +354,8 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// counters. fakWorldBreak is false here — fak's deliberate cachemeta world-break does not run on
 	// this passthrough; a deliberate break, when wired, would set it so the coordinator attributes a
 	// changed prefix to fak rather than the harness.
-	s.metrics.observeHarnessCoherence(reqTrace, time.Now(), hcoh.inboundPrefixDigest, compacted, hcoh.fakBail,
-		false /*fakWorldBreak*/, false /*sealed*/, int64(turn.Usage.CacheReadInputTokens), int64(turn.Usage.CacheCreationInputTokens))
+	s.observeHarnessCoherenceAndArm(reqTrace, time.Now(), hcoh.inboundPrefixDigest, compacted, hcoh.fakBail,
+		false /*fakWorldBreak*/, false /*sealed*/, int64(turn.Usage.CacheReadInputTokens), int64(turn.Usage.CacheCreationInputTokens), int64(turn.Usage.InputTokens))
 	s.logInferenceTurnWithContextEvent(reqTrace, "anthropic_messages", false, agent.Usage{
 		PromptTokens:             turn.Usage.InputTokens,
 		CompletionTokens:         turn.Usage.OutputTokens,
@@ -1718,8 +1729,8 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 			s.metrics.recordCompactionCacheRead(turn.Usage.CacheReadInputTokens)
 			s.observeResetHealth(reqTrace, turn.Usage.InputTokens, turn.Usage.CacheReadInputTokens, turn.Usage.CacheCreationInputTokens)
 		}
-		s.metrics.observeHarnessCoherence(reqTrace, time.Now(), hcoh.inboundPrefixDigest, compacted, hcoh.fakBail,
-			false /*fakWorldBreak*/, false /*sealed*/, int64(turn.Usage.CacheReadInputTokens), int64(turn.Usage.CacheCreationInputTokens))
+		s.observeHarnessCoherenceAndArm(reqTrace, time.Now(), hcoh.inboundPrefixDigest, compacted, hcoh.fakBail,
+			false /*fakWorldBreak*/, false /*sealed*/, int64(turn.Usage.CacheReadInputTokens), int64(turn.Usage.CacheCreationInputTokens), int64(turn.Usage.InputTokens))
 		s.logInferenceTurnWithContextEvent(reqTrace, "anthropic_messages", true, agent.Usage{
 			PromptTokens:             turn.Usage.InputTokens,
 			CompletionTokens:         turn.Usage.OutputTokens,
@@ -1786,8 +1797,8 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 				s.metrics.recordCompactionCacheRead(res.turn.Usage.CacheReadInputTokens)
 				s.observeResetHealth(reqTrace, res.turn.Usage.InputTokens, res.turn.Usage.CacheReadInputTokens, res.turn.Usage.CacheCreationInputTokens)
 			}
-			s.metrics.observeHarnessCoherence(reqTrace, time.Now(), hcoh.inboundPrefixDigest, compacted, hcoh.fakBail,
-				false /*fakWorldBreak*/, false /*sealed*/, int64(res.turn.Usage.CacheReadInputTokens), int64(res.turn.Usage.CacheCreationInputTokens))
+			s.observeHarnessCoherenceAndArm(reqTrace, time.Now(), hcoh.inboundPrefixDigest, compacted, hcoh.fakBail,
+				false /*fakWorldBreak*/, false /*sealed*/, int64(res.turn.Usage.CacheReadInputTokens), int64(res.turn.Usage.CacheCreationInputTokens), int64(res.turn.Usage.InputTokens))
 			s.logInferenceTurnWithContextEvent(reqTrace, "anthropic_messages", true, agent.Usage{
 				PromptTokens:             res.turn.Usage.InputTokens,
 				CompletionTokens:         res.turn.Usage.OutputTokens,

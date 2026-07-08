@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -83,6 +85,12 @@ func fakBailReasonFor(reason string) string {
 // prefix-event state; the counters below are the session-wide roll-up across every trace.
 type harnessCoherenceMetrics struct {
 	ttl time.Duration
+	// residentCeiling / ceilingStreakToYield / nonHoldRewritesToReset are the resident-token
+	// policy every per-trace coordinator is built with (#3158/#3159). residentCeiling is resolved
+	// from FAK_CTX_YIELD_CEILING once at construction; the streaks use the package defaults.
+	residentCeiling        int64
+	ceilingStreakToYield   int
+	nonHoldRewritesToReset int
 
 	mu     sync.Mutex
 	coords map[string]*coordEntry // trace -> per-session coordinator + last-turn wall clock
@@ -99,6 +107,19 @@ type harnessCoherenceMetrics struct {
 	harnessRewrites  uint64
 	quarantineAtRisk uint64
 	burstsObserved   uint64
+	// overCeilingTurns / rewriteNoDrops / recommendResets are the resident-token risk counts
+	// (#3158/#3159): turns whose resident window exceeded the ceiling; harness rewrites judged
+	// non-holding (window climbed back over the ceiling); turns recommending a hard reset
+	// (cold_ttl OR the non-holding escalation). resetsFired counts coherence resets ACTUATED
+	// through the ResetOnBudget seam (Phase C); it stays 0 when no host resetter is wired.
+	overCeilingTurns uint64
+	rewriteNoDrops   uint64
+	recommendResets  uint64
+	resetsFired      uint64
+	// lastResident is the most recent turn's OBSERVED resident window size (input +
+	// cache_creation + cache_read), surfaced as a gauge so an operator can watch it approach
+	// the ceiling. Last-write-wins across traces (one session drives one trace).
+	lastResident int64
 	// posture is the CURRENT standing block/allow posture across all live traces (last-write-wins
 	// per fold; a single Claude Code session drives one trace, so this is that session's stance).
 	posture compactcohere.Posture
@@ -118,11 +139,27 @@ func newHarnessCoherenceMetrics(ttl time.Duration) *harnessCoherenceMetrics {
 		ttl = compactcohere.DefaultProviderCacheTTL
 	}
 	return &harnessCoherenceMetrics{
-		ttl:     ttl,
-		coords:  map[string]*coordEntry{},
-		events:  map[compactcohere.PrefixEvent]uint64{},
-		posture: compactcohere.PostureBlock,
+		ttl:                    ttl,
+		residentCeiling:        resolveCtxYieldCeiling(os.Getenv("FAK_CTX_YIELD_CEILING")),
+		ceilingStreakToYield:   compactcohere.DefaultCeilingStreakToYield,
+		nonHoldRewritesToReset: compactcohere.DefaultNonHoldRewritesToReset,
+		coords:                 map[string]*coordEntry{},
+		events:                 map[compactcohere.PrefixEvent]uint64{},
+		posture:                compactcohere.PostureBlock,
 	}
+}
+
+// resolveCtxYieldCeiling parses the FAK_CTX_YIELD_CEILING deployment knob (the resident-token
+// high-water mark, #3158) from its raw env string. An empty, non-numeric, or non-positive value
+// falls back to compactcohere.DefaultResidentCeiling (~160k) — the resident-token terms are always
+// on with a sane default. An operator disables them by setting a very large ceiling the window
+// never reaches. Pure (env read stays at the call site) so it is unit-tested without the env.
+func resolveCtxYieldCeiling(raw string) int64 {
+	v, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || v <= 0 {
+		return compactcohere.DefaultResidentCeiling
+	}
+	return v
 }
 
 // observe folds one served Anthropic passthrough turn into the trace's coordinator and updates the
@@ -132,7 +169,7 @@ func newHarnessCoherenceMetrics(ttl time.Duration) *harnessCoherenceMetrics {
 // mapped through fakBailReasonFor); sealed is whether fak sealed/quarantined a span in this turn's
 // context; cacheRead/cacheCreate are the provider's OBSERVED counters, relayed verbatim. It returns
 // the per-turn Decision so a caller (the debug line / a test) can read the verdict directly.
-func (h *harnessCoherenceMetrics) observe(trace string, now time.Time, digest string, fakFired bool, fakBail string, fakWorldBreak, sealed bool, cacheRead, cacheCreate int64) compactcohere.Decision {
+func (h *harnessCoherenceMetrics) observe(trace string, now time.Time, digest string, fakFired bool, fakBail string, fakWorldBreak, sealed bool, cacheRead, cacheCreate, inputTokens int64) compactcohere.Decision {
 	if h == nil {
 		return compactcohere.Decision{}
 	}
@@ -141,7 +178,12 @@ func (h *harnessCoherenceMetrics) observe(trace string, now time.Time, digest st
 
 	entry := h.coords[trace]
 	if entry == nil {
-		entry = &coordEntry{coord: compactcohere.New(h.ttl)}
+		entry = &coordEntry{coord: compactcohere.NewConfig(compactcohere.Config{
+			TTL:                    h.ttl,
+			ResidentCeiling:        h.residentCeiling,
+			CeilingStreakToYield:   h.ceilingStreakToYield,
+			NonHoldRewritesToReset: h.nonHoldRewritesToReset,
+		})}
 		h.coords[trace] = entry
 	}
 	var idle time.Duration
@@ -159,6 +201,7 @@ func (h *harnessCoherenceMetrics) observe(trace string, now time.Time, digest st
 		SealedSpanPresent:   sealed,
 		CacheReadTokens:     cacheRead,
 		CacheCreationTokens: cacheCreate,
+		InputTokens:         inputTokens,
 		IdleSinceLastTurn:   idle,
 	}
 	d := entry.coord.Observe(obs)
@@ -174,8 +217,30 @@ func (h *harnessCoherenceMetrics) observe(trace string, now time.Time, digest st
 	if d.BurstObserved {
 		h.burstsObserved++
 	}
+	if d.OverCeiling {
+		h.overCeilingTurns++
+	}
+	if d.RewriteNoDrop {
+		h.rewriteNoDrops++
+	}
+	if d.Action == compactcohere.ActionRecommendReset {
+		h.recommendResets++
+	}
+	h.lastResident = d.ResidentTokens
 	h.posture = d.HarnessPosture
 	return d
+}
+
+// recordCoherenceResetFired counts a coherence-triggered reset ACTUATED through the
+// ResetOnBudget seam (Phase C actuation). The passthrough calls it the moment a live reset
+// fires so fak_harness_coherence_reset_fired_total reflects real resets, not just recommendations.
+func (h *harnessCoherenceMetrics) recordCoherenceResetFired() {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	h.resetsFired++
+	h.mu.Unlock()
 }
 
 // idleExceeds reports whether trace's last served turn (the same per-trace wall clock the
@@ -260,11 +325,35 @@ type harnessCoherenceInputs struct {
 // passthrough) need not guard a Server built without metrics. It is the single entry point the
 // passthrough uses; the accumulators it updates are the shared source /metrics and the operator
 // line read.
-func (m *gatewayMetrics) observeHarnessCoherence(trace string, now time.Time, digest string, fakFired bool, fakBail string, fakWorldBreak, sealed bool, cacheRead, cacheCreate int64) compactcohere.Decision {
+func (m *gatewayMetrics) observeHarnessCoherence(trace string, now time.Time, digest string, fakFired bool, fakBail string, fakWorldBreak, sealed bool, cacheRead, cacheCreate, inputTokens int64) compactcohere.Decision {
 	if m == nil || m.harnessCoherence == nil {
 		return compactcohere.Decision{}
 	}
-	return m.harnessCoherence.observe(trace, now, digest, fakFired, fakBail, fakWorldBreak, sealed, cacheRead, cacheCreate)
+	return m.harnessCoherence.observe(trace, now, digest, fakFired, fakBail, fakWorldBreak, sealed, cacheRead, cacheCreate, inputTokens)
+}
+
+// recordCoherenceResetFired is the gatewayMetrics-level, nil-safe accessor the actuation
+// (maybeResetOnCoherence) calls when a coherence reset actually fires through the ResetOnBudget seam.
+func (m *gatewayMetrics) recordCoherenceResetFired() {
+	if m == nil || m.harnessCoherence == nil {
+		return
+	}
+	m.harnessCoherence.recordCoherenceResetFired()
+}
+
+// observeHarnessCoherenceAndArm folds one served turn into the harness-coherence coordinator (as
+// observeHarnessCoherence) and, when the returned Decision escalates a #3159 hard reset AND the host
+// wired the opt-in ResetOnBudget, ARMS a coherence reset for trace so the next admitted turn
+// actuates it (maybeResetOnCoherence). Arming here — at the call site, after the coordinator's own
+// lock has been released inside observe — keeps the armed-latch lock off the coordinator's critical
+// section. Gating on resetOnBudget != nil means an escalation on a gateway with no host resetter
+// arms nothing while the recommendation still surfaces on /metrics. It returns the Decision.
+func (s *Server) observeHarnessCoherenceAndArm(trace string, now time.Time, digest string, fakFired bool, fakBail string, fakWorldBreak, sealed bool, cacheRead, cacheCreate, inputTokens int64) compactcohere.Decision {
+	d := s.metrics.observeHarnessCoherence(trace, now, digest, fakFired, fakBail, fakWorldBreak, sealed, cacheRead, cacheCreate, inputTokens)
+	if d.EscalateReset && s.resetOnBudget != nil {
+		s.armCoherenceReset(trace)
+	}
+	return d
 }
 
 // harnessCoherenceSummary is the gatewayMetrics-level accessor for the operator-line roll-up,
@@ -284,6 +373,11 @@ type harnessCoherenceSnapshot struct {
 	harnessRewrites  uint64
 	quarantineAtRisk uint64
 	burstsObserved   uint64
+	overCeilingTurns uint64
+	rewriteNoDrops   uint64
+	recommendResets  uint64
+	resetsFired      uint64
+	lastResident     int64
 	posture          compactcohere.Posture
 }
 
@@ -304,6 +398,11 @@ func (h *harnessCoherenceMetrics) snapshot() harnessCoherenceSnapshot {
 	out.harnessRewrites = h.harnessRewrites
 	out.quarantineAtRisk = h.quarantineAtRisk
 	out.burstsObserved = h.burstsObserved
+	out.overCeilingTurns = h.overCeilingTurns
+	out.rewriteNoDrops = h.rewriteNoDrops
+	out.recommendResets = h.recommendResets
+	out.resetsFired = h.resetsFired
+	out.lastResident = h.lastResident
 	out.posture = h.posture
 	return out
 }
@@ -346,6 +445,22 @@ func (h *harnessCoherenceMetrics) writeHarnessCoherenceMetrics(b *strings.Builde
 	writeCounter(b, "fak_harness_coherence_bursts_total",
 		"WITNESSED (fak authored): turns that (will) cost a provider cache_creation burst — a harness rewrite or a cold-TTL rebuild. Lets an operator read the provider-cache cost of the two managers colliding.", int64(snap.burstsObserved))
 
+	writeCounter(b, "fak_harness_coherence_over_ceiling_total",
+		"WITNESSED (fak authored): served turns whose RESIDENT window (input + cache_creation + cache_read) exceeded the resident-token ceiling (FAK_CTX_YIELD_CEILING, default ~160k). A sustained streak yields the net back to the harness — fak is not bounding the window (#3158).", int64(snap.overCeilingTurns))
+
+	writeCounter(b, "fak_harness_coherence_rewrite_no_drop_total",
+		"WITNESSED (fak authored): harness rewrites judged NON-HOLDING — after the rewrite the resident window climbed back over the ceiling before the next rewrite, so the summary did not durably bound the window. The previously-invisible 'the compaction bailed' event (#3159).", int64(snap.rewriteNoDrops))
+
+	writeCounter(b, "fak_harness_coherence_recommend_reset_total",
+		"WITNESSED (fak authored): turns recommending a hard RESET — a cold-TTL rebuild (#774) or the non-holding-rewrite escalation (#3159). A recommendation surface; whether a reset is ACTUATED is reset_fired_total below.", int64(snap.recommendResets))
+
+	writeCounter(b, "fak_harness_coherence_reset_fired_total",
+		"WITNESSED (fak authored): coherence resets ACTUATED through the ResetOnBudget seam after the non-holding-rewrite escalation (#3159). Stays 0 when the host wired no resetter — actuation reuses the host's opt-in callback.", int64(snap.resetsFired))
+
+	writeHelpType(b, "fak_harness_coherence_resident_tokens",
+		"OBSERVED (relayed verbatim): the most recent served turn's RESIDENT window size (input + cache_creation + cache_read). A gauge an operator watches approach the ceiling; the size signal the yield and non-holding-rewrite policy (#3158/#3159) turn on.", "gauge")
+	fmt.Fprintf(b, "fak_harness_coherence_resident_tokens %d\n", snap.lastResident)
+
 	writeHelpType(b, "fak_harness_coherence_posture",
 		"The CURRENT standing PreCompact posture the actuator (#1133, rung C) enforces when `fak guard` installs the Claude Code hook: 1 = block (exit 2 — suppress the harness's auto-compaction while fak's cache-preserving compaction is coping; the default), 0 = allow (exit 0 — fak's compaction has bailed for a sustained streak, so the harness is the only context net left).", "gauge")
 	fmt.Fprintf(b, "fak_harness_coherence_posture %d\n", postureGauge(snap.posture))
@@ -366,6 +481,11 @@ type HarnessCoherenceSummary struct {
 	HarnessRewrites  uint64            `json:"harness_rewrites"`
 	QuarantineAtRisk uint64            `json:"quarantine_at_risk"`
 	BurstsObserved   uint64            `json:"bursts_observed"`
+	OverCeiling      uint64            `json:"over_ceiling"`
+	RewriteNoDrop    uint64            `json:"rewrite_no_drop"`
+	RecommendResets  uint64            `json:"recommend_resets"`
+	ResetsFired      uint64            `json:"resets_fired"`
+	ResidentTokens   int64             `json:"resident_tokens"`
 	Posture          string            `json:"posture"`
 }
 
@@ -379,6 +499,11 @@ func (h *harnessCoherenceMetrics) summary() HarnessCoherenceSummary {
 		HarnessRewrites:  snap.harnessRewrites,
 		QuarantineAtRisk: snap.quarantineAtRisk,
 		BurstsObserved:   snap.burstsObserved,
+		OverCeiling:      snap.overCeilingTurns,
+		RewriteNoDrop:    snap.rewriteNoDrops,
+		RecommendResets:  snap.recommendResets,
+		ResetsFired:      snap.resetsFired,
+		ResidentTokens:   snap.lastResident,
 		Posture:          string(snap.posture),
 	}
 	if snap.observedTurns > 0 {

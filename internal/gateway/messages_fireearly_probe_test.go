@@ -108,7 +108,7 @@ func TestProbeFakFiresEarlyPerStep(t *testing.T) {
 					step, bodyTokens, compFired, compReason, stepShed, sum.CompactionShedTokens)
 			}
 			// Advance served-turn depth and keep the trace warm (fires the assumed-length prior).
-			s.metrics.observeHarnessCoherence(trace, now, "", compFired, "", false, false, 0, 0)
+			s.metrics.observeHarnessCoherence(trace, now, "", compFired, "", false, false, 0, 0, 0)
 		}
 		t.Logf("budget=%d → FIRST fak value at step: %d (0 = never in 40 steps)", budget, firstFire)
 	}
