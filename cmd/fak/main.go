@@ -344,6 +344,8 @@ func main() {
 		cmdHooks(os.Args[2:])
 	case "hygiene":
 		cmdHygiene(os.Args[2:])
+	case "idempotency":
+		cmdIdempotency(os.Args[2:])
 	case "public-scrub":
 		cmdPublicScrub(os.Args[2:])
 	case "rungstats":
