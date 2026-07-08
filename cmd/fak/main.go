@@ -448,6 +448,10 @@ func main() {
 		cmdTokenDefaultsScorecard(os.Args[2:])
 	case "skill-effectiveness-scorecard":
 		cmdSkillEffectivenessScorecard(os.Args[2:])
+	case "footprint":
+		// The always-sent MCP tool-schema floor scorecard (epic #3229, #3230):
+		// price fak's registered tools/list floor offline via internal/mcpfootprint.
+		os.Exit(runMCPFootprint(os.Stdout, os.Stderr, os.Args[2:]))
 	case "skill":
 		// The queried skill loader operator surface (epic #1103, C7 / #1110):
 		// `fak skill query|residency|swap` over .claude/skills (+ MCP resolver).
