@@ -50,6 +50,8 @@ func runFrontierswe(stdout, stderr io.Writer, argv []string) int {
 	switch sub {
 	case "describe", "show":
 		return runFrontiersweDescribe(stdout, stderr, rest)
+	case "run":
+		return runFrontiersweRun(stdout, stderr, rest)
 	case "cache-witness":
 		return runFrontiersweCacheWitness(stdout, stderr, rest)
 	case "env-adapter", "environment":
@@ -86,6 +88,19 @@ usage:
         n_concurrent_trials prefix-sharing axis). --task NAME restricts it to one
         task. It is a deterministic floor (no model), NOT a measurement — the
         measured TTS is deferred to C14.
+
+  fak frontierswe run [--task NAME] [--tasks DIR] [--agent claude-code]
+                      [--gateway ADDR] [--model MODEL] [--output DIR]
+                      [--trials N] [--turns N] [--preds-only] [--json]
+        Drive one FrontierSWE task end-to-end through the fak-routed agent (the
+        analogue of `+"`fak swebench run`"+`) and write the submission artifact, the
+        fak.frontierswe.run.v1 meta (task, agent, model, budget, trials, elapsed),
+        and the per-turn TTS trace (turn count, cumulative wall-clock, the C8
+        reuse series). Enforces the 20h [agent] timeout_sec (turns are capped at
+        the budget-projected trajectory) and collects the job.yaml artifact list.
+        --preds-only stops before grading (grading is C13). Where Docker/Modal
+        can't stand the C7 environment up, the drive is a deterministic MOCK
+        against a mocked environment and the exact remote command is printed.
 
   fak frontierswe cache-witness [--metrics-dir DIR | --metrics-files A,B,...
                                 | --gateway URL --interval SEC --samples N]
