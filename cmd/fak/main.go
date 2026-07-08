@@ -394,6 +394,8 @@ func main() {
 		cmdProgram(os.Args[2:])
 	case "rollup":
 		cmdRollup(os.Args[2:])
+	case "spend":
+		cmdSpend(os.Args[2:])
 	case "sidecar":
 		cmdSidecar(os.Args[2:])
 	case "nightrun":
