@@ -96,6 +96,57 @@ func TestArmFireIdempotentAfterFire(t *testing.T) {
 	}
 }
 
+// TestArmFireTransitionTable pins every cell of the closed transition function so a G3
+// (trigger axes, #1890) or G4 (hysteresis, #1891) consumer can build against a fully
+// specified contract, not a prose description. It enumerates all three start states
+// crossed with both softMarkCrossed values and both SafePoint verdicts (12 cells) and
+// asserts the single next state each produces — locking in the load-bearing invariant
+// that FIRE is reachable only through a safe point from every reachable start.
+func TestArmFireTransitionTable(t *testing.T) {
+	// armed builds a controller sitting in RotationArmed; fired builds one already fired.
+	// Both go only through Step, so the table exercises real transitions, never a poked
+	// internal field.
+	armed := func() ArmFire { var a ArmFire; a.Step(true, unsafe); return a }
+	fired := func() ArmFire { var a ArmFire; a.Step(true, safe); return a }
+
+	cases := []struct {
+		name  string
+		start func() ArmFire
+		soft  bool
+		sp    SafePoint
+		want  RotationState
+	}{
+		// From Disarmed: only a crossed soft mark arms; a safe point alone does nothing.
+		{"disarmed/soft=false/unsafe", func() ArmFire { return ArmFire{} }, false, unsafe, RotationDisarmed},
+		{"disarmed/soft=false/safe", func() ArmFire { return ArmFire{} }, false, safe, RotationDisarmed},
+		{"disarmed/soft=true/unsafe", func() ArmFire { return ArmFire{} }, true, unsafe, RotationArmed},
+		{"disarmed/soft=true/safe", func() ArmFire { return ArmFire{} }, true, safe, RotationFired},
+		// From Armed: the safe point decides; the soft mark is ignored (arming is sticky).
+		{"armed/soft=false/unsafe", armed, false, unsafe, RotationArmed},
+		{"armed/soft=false/safe", armed, false, safe, RotationFired},
+		{"armed/soft=true/unsafe", armed, true, unsafe, RotationArmed},
+		{"armed/soft=true/safe", armed, true, safe, RotationFired},
+		// From Fired: terminal — no input moves it.
+		{"fired/soft=false/unsafe", fired, false, unsafe, RotationFired},
+		{"fired/soft=false/safe", fired, false, safe, RotationFired},
+		{"fired/soft=true/unsafe", fired, true, unsafe, RotationFired},
+		{"fired/soft=true/safe", fired, true, safe, RotationFired},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			af := tc.start()
+			startState := af.State()
+			if got := af.Step(tc.soft, tc.sp); got != tc.want {
+				t.Fatalf("Step(soft=%v, safe=%v) = %q, want %q", tc.soft, tc.sp.IsSafe(), got, tc.want)
+			}
+			// The invariant, restated per cell: a transition INTO Fired only from a safe point.
+			if af.State() == RotationFired && startState != RotationFired && !tc.sp.IsSafe() {
+				t.Fatalf("%s fired at an unsafe point — mid-action rotation must be unrepresentable", tc.name)
+			}
+		})
+	}
+}
+
 // TestArmFireReasonTokens ties each phase to its closed reason token so a future floor
 // reads RELAY_ARMED / RELAY_ROTATED, never prose.
 func TestArmFireReasonTokens(t *testing.T) {
