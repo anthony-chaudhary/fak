@@ -41,14 +41,14 @@ const Schema = "fak-default-value-scorecard/1"
 const DebtKey = "default_value_debt"
 
 // CleanFloor is the disciplined tree's expected debt; the live-tree smoke pins the
-// scorecard against silent regrowth. It is NOT zero today: epic #1089 left ONE real,
-// tracked default-value defect -- the vcache score surface still defaults its headline
-// source to "planned" (modeled), the C_MODELED_NOT_OBSERVED gap that maps onto an open
-// child of #1089 (#1090-#1095). The floor is the current honest count so the gate fails
-// the instant the debt RISES above the known backlog -- a regression -- while the open
-// child retires it to 0. Lower this constant to 0 once vcachescore defaults to an
-// observed headline.
-const CleanFloor = 1
+// scorecard against silent regrowth. It is ZERO: epic #1089's last tracked default-value
+// defect -- the vcache score surface defaulting its headline source to "planned"
+// (modeled), the C_MODELED_NOT_OBSERVED gap -- is retired. internal/vcachescore/score.go
+// now defaults its headline to the OBSERVED cache value (ActiveSourceObserved) and labels
+// the witness-free fallback honestly as a FORECAST (ActiveSourceForecast), never a
+// modeled number dressed as measured. The floor is 0 so the gate fails the instant ANY
+// default-value debt reappears.
+const CleanFloor = 0
 
 // FlagSources are the two surfaces whose value-flags this card classifies. guard.go is
 // the flagship `fak guard -- claude` proxy; serve.go is the in-kernel serve loop. Both
