@@ -82,6 +82,56 @@ if [ "$tier_mode" != "off" ] && [ "${ALLOW_TIER_DRIFT:-0}" != "1" ]; then
 	fi
 fi
 
+# Compile-integrity gate (#1338)  --  reason: TRUNK_WOULD_NOT_COMPILE
+#
+# Would the commits this push ADDS still build for every peer's shared `go build` graph?
+# `dos arbitrate` makes edits ownership-disjoint, not BUILD-disjoint: Go compiles at package
+# granularity over one module graph, so a caller landing ahead of its callee (`undefined: X`)
+# or a removed exported symbol an importer still calls reds `go build` for unrelated sessions.
+# Nothing else at the commit/push seam compiles anything (the other hooks + `fak commit` run
+# only content gates; `make ci`'s `go build ./...` is CI/manual), so this is the earliest place
+# such a break is caught before it reaches origin and poisons every peer that fetches. `fak
+# hooks pre-push` builds the pushed tip's changed packages + their importer closure in an
+# ISOLATED archive checkout (immune to the peer-dirty working tree).
+#
+# Mode (env FLEET_BUILD_GUARD):  warn (default) | block | off
+#   warn   allow the push, print the build error + how to fix it   (exit 0)  — the soak default
+#   block  refuse the push until the pushed tip compiles           (exit 1)
+#   off    do nothing
+# Escape:  FLEET_ALLOW_BUILD_BREAK=1 git push   always allows.
+# Default is WARN (not block) while the gate soaks for false positives; flip to block after.
+# Fail-open by design: if `fak`/`go` is unavailable or the gate could-not-run, the push is allowed.
+build_mode="${FLEET_BUILD_GUARD:-warn}"
+if [ "$build_mode" != "off" ] && [ "${FLEET_ALLOW_BUILD_BREAK:-0}" != "1" ]; then
+	if command -v fak >/dev/null 2>&1; then
+		build_out="$(fak hooks pre-push --root "$root" 2>&1)"
+		build_status=$?
+	elif command -v go >/dev/null 2>&1; then
+		build_out="$(cd "$root" && go run ./cmd/fak hooks pre-push --root "$root" 2>&1)"
+		build_status=$?
+	else
+		build_out="neither 'fak' nor 'go' is on PATH"
+		build_status=2
+	fi
+
+	if [ "$build_status" -eq 1 ]; then
+		if [ "$build_mode" = "block" ]; then
+			echo "TRUNK_WOULD_NOT_COMPILE (blocked): the pushed tip would not build for peers." >&2
+			echo "$build_out" >&2
+			echo "  fix: commit the missing definition (a caller ahead of its callee), or restore the removed symbol; then re-push." >&2
+			echo "  override once: FLEET_ALLOW_BUILD_BREAK=1 git push   (intentional only)" >&2
+			exit 1
+		else
+			echo "TRUNK_WOULD_NOT_COMPILE (advisory): the pushed tip would not build for peers." >&2
+			echo "$build_out" >&2
+			echo "  fix before others fetch, or hard-enforce with FLEET_BUILD_GUARD=block." >&2
+		fi
+	elif [ "$build_status" -ne 0 ]; then
+		echo "TRUNK_WOULD_NOT_COMPILE (warn): build gate could not run; push allowed." >&2
+		echo "$build_out" >&2
+	fi
+fi
+
 [ "$mode" = "off" ] && exit 0
 [ "${FLEET_ALLOW_RESIDUAL:-0}" = "1" ] && exit 0
 
