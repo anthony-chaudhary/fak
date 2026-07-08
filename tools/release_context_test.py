@@ -152,6 +152,50 @@ class ReleaseContextTest(unittest.TestCase):
         self.assertIsNone(latest)
         self.assertIn("gh unavailable", note)
 
+    def test_run_age_seconds_parses_and_fails_soft(self) -> None:
+        rc = load()
+        self.assertIsNone(rc._run_age_seconds(None))
+        self.assertIsNone(rc._run_age_seconds(""))
+        self.assertIsNone(rc._run_age_seconds("not-a-timestamp"))
+        # A long-past timestamp yields a large positive age; a future one clamps to 0.
+        self.assertGreater(rc._run_age_seconds("2020-01-01T00:00:00Z"), 0)
+        self.assertEqual(rc._run_age_seconds("2099-01-01T00:00:00Z"), 0)
+
+    def test_decisive_runs_with_ancestry_maps_history(self) -> None:
+        rc = load()
+        root = self._repo()  # seed commit + v0.1.0, branch master, cwd == root
+        shas = []
+        for i in range(3):
+            write(root / "x.txt", f"{i}\n")
+            git(root, "add", "x.txt")
+            git(root, "commit", "-m", f"c{i}")
+            shas.append(subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=root, text=True).strip())
+        head = shas[-1]
+        # A trunk run list, newest-first: an indecisive run on HEAD (skipped), a
+        # green run 2 commits back (ancestor), and a red run on a fabricated,
+        # unknown sha (non-ancestor).
+        trunk = [
+            {"conclusion": "cancelled", "headSha": head, "updatedAt": None},
+            {"conclusion": "success", "headSha": shas[0], "updatedAt": None},
+            {"conclusion": "failure", "headSha": "0" * 40, "updatedAt": None},
+        ]
+        rows = rc.decisive_runs_with_ancestry(trunk, head)
+        # The cancelled run is not decisive and is dropped.
+        self.assertEqual(len(rows), 2)
+        green, red = rows
+        self.assertEqual(green["result"], "green")
+        self.assertTrue(green["ancestor_of_head"])
+        self.assertEqual(green["commits_behind_head"], 2)
+        self.assertEqual(red["result"], "red")
+        self.assertFalse(red["ancestor_of_head"])
+        self.assertEqual(red["commits_behind_head"], -1)
+
+    def test_decisive_runs_with_ancestry_is_empty_without_inputs(self) -> None:
+        rc = load()
+        self.assertEqual(rc.decisive_runs_with_ancestry(None, "deadbeef"), [])
+        self.assertEqual(rc.decisive_runs_with_ancestry([{"conclusion": "success"}], ""), [])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

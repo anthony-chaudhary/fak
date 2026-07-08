@@ -29,7 +29,9 @@ Top-level JSON keys:
   tag_drift:          source/tag topology, including source-ahead recovery and
                       side-branch newer tags
   workflows_parse_ok: workflow YAML parse result when PyYAML is available
-  ci_on_head:         latest decisive ci.yml verdict on main, if gh can read it
+  ci_on_head:         latest decisive ci.yml verdict on main, if gh can read it;
+                      carries recent_decisive[] (recent completed runs enriched with
+                      HEAD-ancestry) for release_decide's green-ancestor tolerance (#2655)
   modified_diff_previews:  {path: "~30-line `git diff HEAD -- path` preview"}
   untracked_doc_previews:  {path: "docstring / first ~10 non-blank lines"}
   prior_release_style:     parsed front-matter + headings of the newest release note
@@ -37,6 +39,7 @@ Top-level JSON keys:
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import re
 import subprocess
@@ -443,6 +446,72 @@ def fold_latest_trunk_ci(latest_trunk: object) -> tuple[str, dict | None, str | 
     return "none", None, "no decisive completed ci.yml run on main in the last 30"
 
 
+def _run_age_seconds(updated_at: object) -> int | None:
+    """Whole seconds since a gh run's ``updatedAt`` timestamp, or None if unparseable.
+
+    Feeds the optional minute-window bound of the green-ancestor tolerance (#2655);
+    any parse failure yields None so the predicate simply skips the minute bound
+    rather than mis-dating a run.
+    """
+    s = str(updated_at or "").strip()
+    if not s:
+        return None
+    try:
+        iso = s[:-1] + "+00:00" if s.endswith("Z") else s
+        when = datetime.datetime.fromisoformat(iso)
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=datetime.timezone.utc)
+        age = (datetime.datetime.now(datetime.timezone.utc) - when).total_seconds()
+        return int(age) if age >= 0 else 0
+    except (ValueError, TypeError):
+        return None
+
+
+def decisive_runs_with_ancestry(latest_trunk: object, head: str,
+                                *, limit: int = 20) -> list[dict]:
+    """Normalize recent DECISIVE trunk runs into green-ancestor evidence (#2655).
+
+    Each element is ``{result, head_sha, ancestor_of_head, commits_behind_head,
+    age_seconds}``. ``result`` folds the gh conclusion to ``"green"``/``"red"``;
+    ``commits_behind_head`` is the git distance ``sha..HEAD`` (0 == the run is on
+    HEAD), or -1 when ``sha`` is not an ancestor of HEAD or the distance cannot be
+    read. This is what lets ``release_decide`` accept a green ANCESTOR when the
+    exact-HEAD run is unobservable on a churned trunk, while still refusing a cut
+    when a red decisive run sits between that green ancestor and HEAD.
+
+    Bounded to ``limit`` decisive runs so a hot trunk cannot make this unboundedly
+    chatty with git; the window the decider applies is far smaller than the bound.
+    """
+    if not isinstance(latest_trunk, list) or not head:
+        return []
+    out: list[dict] = []
+    for row in latest_trunk:
+        if not isinstance(row, dict):
+            continue
+        conclusion = str(row.get("conclusion") or "")
+        if conclusion not in _DECISIVE_CI_CONCLUSIONS:
+            continue
+        sha = str(row.get("headSha") or "").strip()
+        ancestor = bool(sha) and run_status(
+            ["git", "merge-base", "--is-ancestor", sha, head]) == 0
+        behind = -1
+        if ancestor:
+            try:
+                behind = int(run(["git", "rev-list", "--count", f"{sha}..{head}"]).strip())
+            except ValueError:
+                behind = -1
+        out.append({
+            "result": "green" if conclusion == "success" else "red",
+            "head_sha": sha[:7] or None,
+            "ancestor_of_head": ancestor,
+            "commits_behind_head": behind,
+            "age_seconds": _run_age_seconds(row.get("updatedAt")),
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
 def ci_on_head(default_branch: str = DEFAULT_BRANCH) -> dict:
     head = run(["git", "rev-parse", "HEAD"]).strip()
     runs_on_head: list[dict] = []
@@ -474,6 +543,10 @@ def ci_on_head(default_branch: str = DEFAULT_BRANCH) -> dict:
         "status": status,
         "runs_on_head": runs_on_head,
         "latest_trunk_ci": latest,
+        # Recent decisive trunk runs enriched with HEAD-ancestry, so release_decide
+        # can accept a green ancestor on a churned trunk when nothing red landed
+        # since (#2655). Empty when gh/git is unavailable -> no relaxation.
+        "recent_decisive": decisive_runs_with_ancestry(latest_trunk, head),
         "note": note,
     }
 

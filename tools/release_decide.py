@@ -41,6 +41,83 @@ BREAKING_RE = re.compile(r"\bBREAKING[ -]CHANGE\b")
 FAST_CI_WORKFLOW = (os.environ.get("FAK_RELEASE_FAST_CI_WORKFLOW") or "ci-fast.yml").strip()
 _DECISIVE_CI_STATES = {"green", "red"}
 
+# Green-ancestor CI tolerance (issue #2655). On a hot trunk where every ci.yml /
+# ci-fast.yml run is superseded by the next commit before it finishes, the single
+# most-recent DECISIVE completed run is frequently a STALE red from a since-fixed
+# commit — the fix's own run keeps getting cancelled — so "green at exact HEAD" is
+# effectively unobservable and the auto-cut starves for days (the observed
+# 1746-commit / 4.1d @latest lag). This tolerance accepts the most recent COMPLETED
+# GREEN run on a commit that is an ANCESTOR of HEAD, within a bounded window,
+# PROVIDED no completed red decisive run landed BETWEEN that commit and HEAD. It
+# keeps the safety property intact — a red decisive run anywhere after the last
+# green ancestor still holds — and is fail-safe: a payload with no `recent_decisive`
+# evidence is a no-op, so the pre-#2655 behavior is byte-identical.
+CI_GREEN_ANCESTOR_DEFAULT_MAX_COMMITS = 25
+CI_GREEN_ANCESTOR_DEFAULT_MAX_MINUTES = 90.0
+
+
+def green_ancestor_status(recent: object, *, max_commits: int,
+                          max_minutes: float) -> str:
+    """Decide CI-green purely from a run's recent-decisive ancestry evidence.
+
+    ``recent`` is the ``recent_decisive`` list the context builder attaches to a CI
+    signal: each entry is a completed DECISIVE run on the trunk, normalized to
+    ``{"result": "green"|"red", "ancestor_of_head": bool,
+       "commits_behind_head": int (>=0), "age_seconds": number|None}``.
+
+    Returns ``"green"`` when the newest green ANCESTOR within the window has no red
+    decisive run strictly between it and HEAD; ``""`` (no opinion — caller keeps its
+    existing verdict) when there is no usable green-ancestor evidence in the window.
+    It only ever RELAXES a hold, never manufactures one, so a caller treats a ``""``
+    exactly as "no change".
+
+    Fail-safe throughout: non-ancestor runs are ignored (they are not "between the
+    base and HEAD"); an entry missing/negative ``commits_behind_head`` is dropped;
+    the minute bound is applied only when an age is actually known.
+    """
+    if not isinstance(recent, list):
+        return ""
+    anc: list[tuple[int, str, object]] = []
+    for entry in recent:
+        if not isinstance(entry, dict) or not entry.get("ancestor_of_head"):
+            continue
+        result = str(entry.get("result") or "").strip().lower()
+        if result not in ("green", "red"):
+            continue
+        behind = entry.get("commits_behind_head")
+        if not isinstance(behind, int) or isinstance(behind, bool) or behind < 0:
+            continue
+        anc.append((behind, result, entry.get("age_seconds")))
+    if not anc:
+        return ""
+    anc.sort(key=lambda t: t[0])  # closest to HEAD (fewest commits behind) first
+
+    # The newest green ancestor that fits the window: within max_commits of HEAD and,
+    # when its age is known, within max_minutes.
+    green_behind: int | None = None
+    for behind, result, age in anc:
+        if result != "green" or behind > max_commits:
+            continue
+        if (
+            max_minutes > 0
+            and isinstance(age, (int, float))
+            and not isinstance(age, bool)
+            and age > max_minutes * 60.0
+        ):
+            continue
+        green_behind = behind
+        break
+    if green_behind is None:
+        return ""
+
+    # Safety: any red decisive run STRICTLY closer to HEAD than the chosen green
+    # (i.e. on a commit between the green ancestor and HEAD, exclusive) means
+    # something broke after the last green — do not treat CI as green.
+    for behind, result, _ in anc:
+        if result == "red" and behind < green_behind:
+            return ""
+    return "green"
+
 LEVELS = ("patch", "minor", "major")
 TYPE_LEVEL = {
     "feat": "minor",
@@ -233,7 +310,9 @@ def effective_ci(payload: dict) -> tuple[dict, str]:
 
 def decide(payload: dict, *, min_substantive: int = 1, force: bool = False,
            require_ci_green: bool = False, significance_floor: bool = True,
-           min_interval_hours: float = 0.0) -> dict:
+           min_interval_hours: float = 0.0, ci_green_ancestor: bool = True,
+           ci_green_ancestor_max_commits: int = CI_GREEN_ANCESTOR_DEFAULT_MAX_COMMITS,
+           ci_green_ancestor_max_minutes: float = CI_GREEN_ANCESTOR_DEFAULT_MAX_MINUTES) -> dict:
     commits = payload.get("commits_since_tag") or []
     level, themes = decide_level(commits)
     sig = significance(commits)
@@ -277,6 +356,25 @@ def decide(payload: dict, *, min_substantive: int = 1, force: bool = False,
     # fast subset has no per-run attempt contract.
     ci_signal, ci_source = effective_ci(payload)
     ci_status = ci_signal.get("status")
+    # Green-ancestor tolerance (#2655): when the effective head signal is not
+    # decisively green but a recent green ancestor within the churn window has
+    # nothing red since, treat CI as green. Only ever relaxes a hold; the safety
+    # check (no red decisive run between the green ancestor and HEAD) lives in
+    # green_ancestor_status. No-op when `recent_decisive` evidence is absent.
+    ci_ancestor_relaxed = False
+    if (
+        ci_green_ancestor
+        and ci_status in ("red", "none")
+        and green_ancestor_status(
+            ci_signal.get("recent_decisive"),
+            max_commits=ci_green_ancestor_max_commits,
+            max_minutes=ci_green_ancestor_max_minutes,
+        ) == "green"
+    ):
+        ci_status = "green"
+        ci_source = f"{ci_source}+ancestor"
+        ci_ancestor_relaxed = True
+
     if ci_status == "red":
         blockers.append("CI_BASE_RED")
     elif ci_status == "none":
@@ -287,6 +385,13 @@ def decide(payload: dict, *, min_substantive: int = 1, force: bool = False,
         attempt = _ci_attempt(ci_signal)
         if attempt is not None and attempt > 1:
             blockers.append("CI_RETRY_TO_GREEN")
+
+    if ci_ancestor_relaxed:
+        warnings.append(
+            "CI green inferred from a recent green ancestor within the churn "
+            "window (no red decisive run since); exact-HEAD CI was not decisively "
+            "green (#2655)"
+        )
 
     workflows = payload.get("workflows_parse_ok") or {}
     if workflows.get("ok") is False:
@@ -352,7 +457,11 @@ def decide(payload: dict, *, min_substantive: int = 1, force: bool = False,
         "recover": recover and not blockers,
         # Which CI signal answered the CI_BASE_* gate: "fast" (ci-fast.yml subset,
         # decisive) or "whole" (the -race-inclusive ci.yml, the fail-safe). #1374.
+        # A "+ancestor" suffix means the green-ancestor tolerance cleared it. #2655.
         "ci_source": ci_source,
+        # True when the CI gate was cleared by a green ANCESTOR within the churn
+        # window rather than a decisively-green exact-HEAD run (#2655).
+        "ci_ancestor_relaxed": ci_ancestor_relaxed,
         "reason": reason,
     }
 
@@ -466,6 +575,17 @@ def main(argv: list[str] | None = None) -> int:
                              "floor, and the min-interval debounce")
     parser.add_argument("--require-ci-green", action="store_true",
                         help="block when gh cannot confirm a green main ci.yml base")
+    # Green-ancestor CI tolerance (issue #2655): on a churned trunk, clear the CI
+    # gate on the newest green ANCESTOR within a bounded window when nothing red
+    # landed since, instead of starving on an unobservable exact-HEAD green. On by
+    # default; the window is env-tunable so an operator can widen/narrow it without
+    # editing this file.
+    parser.add_argument("--no-ci-green-ancestor", dest="ci_green_ancestor",
+                        action="store_false",
+                        default=_env_flag("FAK_RELEASE_CI_GREEN_ANCESTOR", True),
+                        help="disable the green-ancestor CI tolerance that clears a "
+                             "churned trunk when a recent green ancestor has nothing "
+                             "red since (env FAK_RELEASE_CI_GREEN_ANCESTOR=0)")
     args = parser.parse_args(argv)
 
     try:
@@ -476,6 +596,13 @@ def main(argv: list[str] | None = None) -> int:
             require_ci_green=args.require_ci_green,
             significance_floor=args.significance_floor,
             min_interval_hours=args.min_interval_hours,
+            ci_green_ancestor=args.ci_green_ancestor,
+            ci_green_ancestor_max_commits=_env_int(
+                "FAK_RELEASE_CI_GREEN_ANCESTOR_MAX_COMMITS",
+                CI_GREEN_ANCESTOR_DEFAULT_MAX_COMMITS),
+            ci_green_ancestor_max_minutes=_env_float(
+                "FAK_RELEASE_CI_GREEN_ANCESTOR_MAX_MINUTES",
+                CI_GREEN_ANCESTOR_DEFAULT_MAX_MINUTES),
         )
     except Exception as exc:
         print(f"release-decide: could not read context: {exc}", file=sys.stderr)

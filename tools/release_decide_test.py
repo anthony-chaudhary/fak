@@ -381,5 +381,152 @@ class ReleaseDecideTest(unittest.TestCase):
         self.assertEqual(proc.returncode == 0, verdict["decision"] == "release")
 
 
+def _run(result, *, ancestor=True, behind=0, age=None):
+    """A recent_decisive entry: a completed green/red trunk run with HEAD-ancestry."""
+    return {
+        "result": result,
+        "ancestor_of_head": ancestor,
+        "commits_behind_head": behind,
+        "age_seconds": age,
+    }
+
+
+class GreenAncestorPredicateTest(unittest.TestCase):
+    """Pure green_ancestor_status() unit coverage (#2655)."""
+
+    def test_no_evidence_is_no_opinion(self) -> None:
+        rd = load()
+        for recent in (None, [], "garbage", [{"result": "green"}]):
+            self.assertEqual(
+                rd.green_ancestor_status(recent, max_commits=25, max_minutes=90),
+                "", recent)
+
+    def test_green_ancestor_within_window_with_nothing_red_since(self) -> None:
+        rd = load()
+        # HEAD's exact run never completed; the newest completed decisive run is a
+        # green ancestor 3 commits back, and nothing red is closer to HEAD.
+        recent = [_run("green", behind=3), _run("green", behind=9)]
+        self.assertEqual(
+            rd.green_ancestor_status(recent, max_commits=25, max_minutes=0), "green")
+
+    def test_red_between_green_ancestor_and_head_blocks(self) -> None:
+        rd = load()
+        # A red decisive run 1 commit back sits between the green ancestor (5 back)
+        # and HEAD: something broke since the last green -> no relaxation.
+        recent = [_run("red", behind=1), _run("green", behind=5)]
+        self.assertEqual(
+            rd.green_ancestor_status(recent, max_commits=25, max_minutes=0), "")
+
+    def test_green_newer_than_an_older_red_is_still_green(self) -> None:
+        rd = load()
+        # The mirror of the churn bug: a stale red is OLDER (further behind) than the
+        # newest green ancestor, so it was fixed -> green.
+        recent = [_run("green", behind=2), _run("red", behind=8)]
+        self.assertEqual(
+            rd.green_ancestor_status(recent, max_commits=25, max_minutes=0), "green")
+
+    def test_green_ancestor_outside_commit_window_is_no_opinion(self) -> None:
+        rd = load()
+        recent = [_run("green", behind=40)]
+        self.assertEqual(
+            rd.green_ancestor_status(recent, max_commits=25, max_minutes=0), "")
+
+    def test_non_ancestor_runs_are_ignored(self) -> None:
+        rd = load()
+        # A green run on a commit NOT in HEAD's history is not "between the base and
+        # HEAD" and carries no weight; with no ancestor evidence -> no opinion.
+        recent = [_run("green", ancestor=False, behind=-1)]
+        self.assertEqual(
+            rd.green_ancestor_status(recent, max_commits=25, max_minutes=0), "")
+
+    def test_minute_window_excludes_a_stale_green(self) -> None:
+        rd = load()
+        # In the commit window but too OLD for the minute bound -> excluded.
+        recent = [_run("green", behind=2, age=3 * 3600)]
+        self.assertEqual(
+            rd.green_ancestor_status(recent, max_commits=25, max_minutes=90), "")
+        # Same run, minute bound disabled (0) -> accepted on the commit window alone.
+        self.assertEqual(
+            rd.green_ancestor_status(recent, max_commits=25, max_minutes=0), "green")
+
+
+class GreenAncestorDecideTest(unittest.TestCase):
+    """green_ancestor tolerance wired through decide() (#2655)."""
+
+    def test_churned_trunk_cuts_on_green_ancestor(self) -> None:
+        rd = load()
+        # Exact-HEAD ci.yml is undecided (status "none"), but a green ancestor 4
+        # commits back has nothing red since: the cut clears, flagged as relaxed.
+        verdict = rd.decide(payload(ci_on_head={
+            "status": "none",
+            "recent_decisive": [_run("green", behind=4)],
+        }))
+        self.assertEqual(verdict["decision"], "release")
+        self.assertEqual(verdict["blockers"], [])
+        self.assertTrue(verdict["ci_ancestor_relaxed"])
+        self.assertEqual(verdict["ci_source"], "whole+ancestor")
+        self.assertTrue(any("#2655" in w for w in verdict["warnings"]))
+
+    def test_stale_red_head_relaxes_when_newer_green_ancestor_exists(self) -> None:
+        rd = load()
+        # The most-recent DECISIVE completed run is a red that finished late but is
+        # OLDER in history (8 behind) than a green ancestor (2 behind): the classic
+        # supersede race. The green ancestor wins; the cut clears.
+        verdict = rd.decide(payload(ci_on_head={
+            "status": "red",
+            "recent_decisive": [_run("green", behind=2), _run("red", behind=8)],
+        }))
+        self.assertEqual(verdict["decision"], "release")
+        self.assertTrue(verdict["ci_ancestor_relaxed"])
+
+    def test_red_since_last_green_still_holds(self) -> None:
+        rd = load()
+        # Safety property: a red decisive run between the green ancestor and HEAD
+        # holds the cut exactly as before — no relaxation.
+        verdict = rd.decide(payload(ci_on_head={
+            "status": "red",
+            "recent_decisive": [_run("red", behind=1), _run("green", behind=6)],
+        }))
+        self.assertEqual(verdict["decision"], "hold")
+        self.assertIn("CI_BASE_RED", verdict["blockers"])
+        self.assertFalse(verdict["ci_ancestor_relaxed"])
+
+    def test_tolerance_can_be_disabled(self) -> None:
+        rd = load()
+        # With the tolerance off, a churned trunk holds on the raw head signal even
+        # when a green ancestor exists.
+        verdict = rd.decide(
+            payload(ci_on_head={
+                "status": "none",
+                "recent_decisive": [_run("green", behind=4)],
+            }),
+            ci_green_ancestor=False,
+        )
+        self.assertEqual(verdict["decision"], "hold")
+        self.assertIn("CI_BASE_NONE", verdict["blockers"])
+        self.assertFalse(verdict["ci_ancestor_relaxed"])
+
+    def test_no_recent_decisive_is_byte_compatible(self) -> None:
+        rd = load()
+        # A payload without recent_decisive behaves exactly as pre-#2655: a red head
+        # holds, and the new flag is False.
+        verdict = rd.decide(payload(ci_on_head={"status": "red"}))
+        self.assertEqual(verdict["decision"], "hold")
+        self.assertIn("CI_BASE_RED", verdict["blockers"])
+        self.assertFalse(verdict["ci_ancestor_relaxed"])
+        self.assertEqual(verdict["ci_source"], "whole")
+
+    def test_green_head_is_not_marked_relaxed(self) -> None:
+        rd = load()
+        # A genuinely green head never routes through the ancestor path.
+        verdict = rd.decide(payload(ci_on_head={
+            "status": "green",
+            "recent_decisive": [_run("green", behind=0)],
+        }))
+        self.assertEqual(verdict["decision"], "release")
+        self.assertFalse(verdict["ci_ancestor_relaxed"])
+        self.assertEqual(verdict["ci_source"], "whole")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
