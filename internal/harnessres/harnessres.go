@@ -76,6 +76,12 @@ type Snapshot struct {
 	GPUVRAMUsedBytes  uint64
 	GPUVRAMTotalBytes uint64
 	HaveGPU           bool
+	// GPUUtilPercent is the busiest device's utilization (0-100) while a model runs
+	// in-kernel; present independently of VRAM (its only source is the nvidia-smi
+	// fallback, whereas VRAM prefers the backend's device handle), so it carries its
+	// own presence bit.
+	GPUUtilPercent float64
+	HaveGPUUtil    bool
 }
 
 // procSample is a single raw reading of ONE process's OS-level resource use, as
@@ -115,16 +121,20 @@ type Sampler struct {
 
 	agent Half
 
-	// gpu is the latest accelerator reading (from gpuProvider), snapshot-scoped.
-	gpuUsed  uint64
-	gpuTotal uint64
-	haveGPU  bool
+	// gpu is the latest accelerator reading (from gpuProvider/gpuUtilProvider), snapshot-scoped.
+	gpuUsed     uint64
+	gpuTotal    uint64
+	haveGPU     bool
+	gpuUtil     float64
+	haveGPUUtil bool
 
 	// netProvider pulls the kernel half's cumulative (rx, tx) upstream network bytes
-	// each sample; gpuProvider pulls (used, total) accelerator VRAM. Both nil by default
-	// (the leaf reads no network/GPU itself — the host wires them). Set before Start.
-	netProvider func() (rx, tx uint64, ok bool)
-	gpuProvider func() (used, total uint64, ok bool)
+	// each sample; gpuProvider pulls (used, total) accelerator VRAM; gpuUtilProvider pulls
+	// the busiest device's utilization percent. All nil by default (the leaf reads no
+	// network/GPU itself — the host wires them). Set before Start.
+	netProvider     func() (rx, tx uint64, ok bool)
+	gpuProvider     func() (used, total uint64, ok bool)
+	gpuUtilProvider func() (pct float64, ok bool)
 
 	stopOnce sync.Once
 	stop     chan struct{}
@@ -150,6 +160,18 @@ func (s *Sampler) SetGPUProvider(fn func() (used, total uint64, ok bool)) {
 	}
 	s.mu.Lock()
 	s.gpuProvider = fn
+	s.mu.Unlock()
+}
+
+// SetGPUUtilProvider installs the pull source for the busiest device's utilization percent
+// (0-100). fak guard wires this to the compute nvidia-smi fallback when a model runs
+// in-kernel (the device-handle memory seam carries no utilization). Call before Start.
+func (s *Sampler) SetGPUUtilProvider(fn func() (pct float64, ok bool)) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.gpuUtilProvider = fn
 	s.mu.Unlock()
 }
 
@@ -262,6 +284,11 @@ func (s *Sampler) foldProc(ps procSample, now time.Time, goroutines int, heapSys
 			s.gpuUsed, s.gpuTotal, s.haveGPU = used, total, true
 		}
 	}
+	if s.gpuUtilProvider != nil {
+		if pct, ok := s.gpuUtilProvider(); ok {
+			s.gpuUtil, s.haveGPUUtil = pct, true
+		}
+	}
 }
 
 // FoldChildExit records the wrapped agent child's final resource use from its exit
@@ -299,6 +326,8 @@ func (s *Sampler) Snapshot() Snapshot {
 		GPUVRAMUsedBytes:     s.gpuUsed,
 		GPUVRAMTotalBytes:    s.gpuTotal,
 		HaveGPU:              s.haveGPU,
+		GPUUtilPercent:       s.gpuUtil,
+		HaveGPUUtil:          s.haveGPUUtil,
 	}
 }
 
@@ -314,10 +343,16 @@ func (s Snapshot) Report() string {
 	if s.GOMAXPROCS > 0 && s.GOMAXPROCS != s.NumCPU {
 		fmt.Fprintf(&b, " (GOMAXPROCS %d)", s.GOMAXPROCS)
 	}
-	if s.HaveGPU {
-		fmt.Fprintf(&b, "; gpu vram %s", humanBytes(s.GPUVRAMUsedBytes))
-		if s.GPUVRAMTotalBytes > 0 {
-			fmt.Fprintf(&b, "/%s", humanBytes(s.GPUVRAMTotalBytes))
+	if s.HaveGPU || s.HaveGPUUtil {
+		b.WriteString("; gpu")
+		if s.HaveGPU {
+			fmt.Fprintf(&b, " vram %s", humanBytes(s.GPUVRAMUsedBytes))
+			if s.GPUVRAMTotalBytes > 0 {
+				fmt.Fprintf(&b, "/%s", humanBytes(s.GPUVRAMTotalBytes))
+			}
+		}
+		if s.HaveGPUUtil {
+			fmt.Fprintf(&b, " util %.0f%%", s.GPUUtilPercent)
 		}
 	}
 	fmt.Fprintf(&b, "; sampled %dx over %s", s.Samples, humanDur(s.Elapsed))
@@ -401,6 +436,10 @@ func (s Snapshot) PrometheusText() string {
 			fmt.Fprintf(&b, "fak_harness_gpu_vram_bytes{kind=\"total\"} %s\n", promFloat(float64(s.GPUVRAMTotalBytes)))
 		}
 	}
+	if s.HaveGPUUtil {
+		writeHelp(&b, "fak_harness_gpu_utilization_percent", "Accelerator utilization percent (0-100) of the busiest device while a model runs in-kernel (--gguf/--backend). Absent on the default proxy path (no local GPU).", "gauge")
+		fmt.Fprintf(&b, "fak_harness_gpu_utilization_percent %s\n", promFloat(s.GPUUtilPercent))
+	}
 	writeHelp(&b, "fak_harness_goroutines", "Peak goroutine count observed in the fak guard kernel this session.", "gauge")
 	fmt.Fprintf(&b, "fak_harness_goroutines %d\n", s.GoroutinesPeak)
 	writeHelp(&b, "fak_harness_go_heap_sys_bytes", "Peak Go heap bytes obtained from the OS by the fak guard kernel this session.", "gauge")
@@ -445,6 +484,7 @@ type ledgerRow struct {
 	GOMAXPROCS       int      `json:"gomaxprocs"`
 	GPUVRAMUsed      *uint64  `json:"gpu_vram_used_bytes,omitempty"`
 	GPUVRAMTotal     *uint64  `json:"gpu_vram_total_bytes,omitempty"`
+	GPUUtilPct       *float64 `json:"gpu_utilization_percent,omitempty"`
 }
 
 type halfJSON struct {
@@ -510,6 +550,10 @@ func (s Snapshot) MarshalLedgerRow(mode, provider, agent string, now time.Time) 
 		if total > 0 {
 			row.GPUVRAMTotal = &total
 		}
+	}
+	if s.HaveGPUUtil {
+		u := s.GPUUtilPercent
+		row.GPUUtilPct = &u
 	}
 	return json.Marshal(row)
 }
