@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build vet architest-gate test test-fast test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent vcache-gate claims-lint salience dos-lint index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
+.PHONY: ci build vet architest-gate test test-fast test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent vcache-gate claims-lint cache-headline-lint salience dos-lint index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
 
 VERIFY_LOOP_BUDGET ?= 30s
 TEST_DURATION_LEDGER ?= .fak/test-duration-ledger.json
@@ -23,7 +23,7 @@ ARCHITEST_GATE_RE ?= ^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRoot
 # runs the model-free terminal witnesses from run-the-demos.md.
 # cuda-check is the GPU-free CUDA ABI/header preflight — deterministic, no CUDA toolkit,
 # so it joins the local gate the same way (the cuda-build.yml `static` job is its CI mirror).
-ci: build gofmt-check vet test claims-lint salience dos-lint index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet cache-proving demo-smoke demo-headless-smoke gated-tests cuda-check
+ci: build gofmt-check vet test claims-lint cache-headline-lint salience dos-lint index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet cache-proving demo-smoke demo-headless-smoke gated-tests cuda-check
 	@echo "CI OK"
 
 build:
@@ -174,6 +174,20 @@ model:
 # claims-lint: every "- [" line in CLAIMS.md carries exactly one tag.
 claims-lint:
 	@awk '/^- \[/{n=0; if(index($$0,"[SHIPPED]"))n++; if(index($$0,"[SIMULATED]"))n++; if(index($$0,"[STUB]"))n++; c++; if(n!=1){print "VIOLATION:",$$0; bad++}} END{printf "claims-lint: %d lines, %d violations\n",c,bad; if(bad>0||c==0)exit 1}' CLAIMS.md
+
+# cache-headline-lint (#1564, cache-frontier Next-50 item 46 "Remove legacy"): a cache
+# "win" headline -- "99% cache", "cache win" -- that omits which PLANE
+# (provider/kernel/context/forecast) and provenance the number belongs to fails review.
+# This is the standing guard behind epic #1490's honest per-mechanism attribution: once
+# the provider-vs-kernel-vs-context split lands, an un-linted blended "99% cache" re-
+# introduces exactly the legacy the epic removes. Narrow + false-positive-free by design
+# (a fixed set of known legacy-headline shapes, cleared by ANY co-located plane/provenance
+# label -- same discipline as check_provenance_labels). The unit test pins the pass/fail
+# contract (unlabeled headline FAILS, labeled headline PASSES); the tree audit proves the
+# committed corpus is clean. Pure Python, no dos/Go dependency, so it runs unconditionally.
+cache-headline-lint:
+	@python3 tools/check_cache_headlines_test.py
+	@python3 tools/check_cache_headlines.py --audit-tree
 
 # salience (dos-kernel docs/391): the first WIRED consumer of the `dos salience` verdict
 # (it was built-but-latent — nothing routed on it; see the usefulness audit in
