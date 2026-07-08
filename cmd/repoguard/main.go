@@ -111,29 +111,41 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(violations) == 0 {
 		return 0
 	}
-	if mode == "warn" {
-		fmt.Fprintf(stderr, "repo_guard (advisory): %s\n", repoguard.RenderReason(violations))
-		return 0
+	// Every classified violation resolves to a per-reason severity (default
+	// permissive; the hard blocks are an opt-in dial). The master switch FAK_REPO_GUARD
+	// still wins: "off" skips all, "warn" CAPS every rung at advisory. Bucket the
+	// findings by resolved severity — the decision is per reason, not per rung.
+	overrides := severityOverridesFromEnv()
+	severityOf := func(reason string) repoguard.Severity {
+		return repoguard.ResolveSeverity(reason, overrides, mode)
 	}
-	// Advisory-class findings (FOREGROUND_SLEEP, #2366) are warn-first even
-	// under enforce: print the structured pointer at the background-wait
-	// alternatives, allow the call, and deny only on refusal-class violations.
-	var denying, advisory []repoguard.Violation
+	var denying, advisory, recorded, acted []repoguard.Violation
 	for _, v := range violations {
-		if repoguard.IsAdvisoryReason(v.Reason) {
+		switch severityOf(v.Reason) {
+		case repoguard.SeverityOff:
+			// dropped entirely: no record, no stderr, no deny
+		case repoguard.SeverityRecord:
+			recorded = append(recorded, v)
+			acted = append(acted, v)
+		case repoguard.SeverityWarn:
 			advisory = append(advisory, v)
-		} else {
+			acted = append(acted, v)
+		case repoguard.SeverityDeny:
 			denying = append(denying, v)
+			acted = append(acted, v)
 		}
 	}
+	// Advisory findings surface on stderr (the fix-hint is the value); record-level
+	// findings are SILENT — journal only, nothing enters the model's context.
 	if len(advisory) > 0 {
 		fmt.Fprintf(stderr, "repo_guard (advisory): %s\n", repoguard.RenderReason(advisory))
 	}
-	// Durably record every finding we act on — deny AND advisory — so the value
-	// the guard delivered in a long session is a fact on disk, not an ephemeral
-	// stderr line the harness scrolls away. Fail-open: a journal error is logged
-	// and swallowed, never allowed to change the decision below.
-	recordDecisions(payload, workspaceRoot, mode, append(denying, advisory...), stderr)
+	// Durably record every finding we act on — deny, advisory, AND silent record —
+	// so the value the guard delivered in a long session is a fact on disk, not an
+	// ephemeral stderr line the harness scrolls away (and, for record-level, the
+	// only trace at all). Fail-open: a journal error is logged and swallowed, never
+	// allowed to change the decision below.
+	recordDecisions(payload, workspaceRoot, mode, acted, severityOf, stderr)
 	if len(denying) == 0 {
 		return 0
 	}
@@ -155,7 +167,7 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
 // Best-effort and fail-open: any error is logged to stderr and swallowed so the
 // hook's decision is never affected by a journal problem. The timestamp is taken
 // here (the command layer owns the clock; the pure core stays deterministic).
-func recordDecisions(payload hookPayload, workspaceRoot, mode string, violations []repoguard.Violation, stderr io.Writer) {
+func recordDecisions(payload hookPayload, workspaceRoot, mode string, violations []repoguard.Violation, severityOf func(reason string) repoguard.Severity, stderr io.Writer) {
 	if len(violations) == 0 {
 		return
 	}
@@ -163,11 +175,33 @@ func recordDecisions(payload hookPayload, workspaceRoot, mode string, violations
 		return
 	}
 	ts := time.Now().UTC().Format(time.RFC3339)
-	rows := repoguard.DecisionsFromViolations(violations, payload.ToolName, payload.SessionID, mode, ts)
+	rows := repoguard.DecisionsFromViolations(violations, payload.ToolName, payload.SessionID, mode, ts, severityOf)
 	path := repoguard.DecisionJournalPath(workspaceRoot)
 	if err := repoguard.AppendDecisions(path, rows); err != nil {
-		fmt.Fprintf(stderr, "repo_guard: decision journal write failed, continuing (%v)\n", err)
+		// Fail-open on a journal error — but stay quiet if EVERY finding in this
+		// batch is silent-record: a record-level finding contributes nothing to the
+		// model's context by design, and a leaked "write failed" notice on stderr
+		// would break exactly that contract. When some finding already surfaced
+		// (advisory/deny), the operator is seeing stderr anyway, so the notice helps.
+		nonSilent := false
+		for _, v := range violations {
+			if severityOf(v.Reason) > repoguard.SeverityRecord {
+				nonSilent = true
+				break
+			}
+		}
+		if nonSilent {
+			fmt.Fprintf(stderr, "repo_guard: decision journal write failed, continuing (%v)\n", err)
+		}
 	}
+}
+
+// severityOverridesFromEnv reads the per-reason severity dial
+// (FAK_REPO_GUARD_SEVERITY=REASON=level,REASON=level). Env reads live in the
+// command layer; the pure core parses the spec. A blank/absent var means no
+// overrides — the default posture applies.
+func severityOverridesFromEnv() map[string]repoguard.Severity {
+	return repoguard.ParseSeverityOverrides(os.Getenv("FAK_REPO_GUARD_SEVERITY"))
 }
 
 func liveMonitorIDsForRead(payload hookPayload, workspaceRoot string, stderr io.Writer) map[string]bool {
@@ -218,11 +252,17 @@ func runCheck(command, workspace string, asJSON bool, stdout io.Writer) int {
 	if violations == nil {
 		violations = []repoguard.Violation{} // marshal as [] (matches the Python --json shape), never null
 	}
-	// Advisory-class findings ride along in the JSON but never fail the check:
-	// ok and the exit code track refusal-class violations only (#2366).
+	// Resolve each finding's severity through the SAME dial the live hook uses, so
+	// --check mirrors production: ok and the exit code track deny-level findings
+	// only; record/warn ride along in the JSON but never fail the check.
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("FAK_REPO_GUARD")))
+	if mode == "" {
+		mode = "enforce"
+	}
+	overrides := severityOverridesFromEnv()
 	denying := 0
 	for _, v := range violations {
-		if !repoguard.IsAdvisoryReason(v.Reason) {
+		if repoguard.ResolveSeverity(v.Reason, overrides, mode) == repoguard.SeverityDeny {
 			denying++
 		}
 	}
@@ -240,6 +280,8 @@ func runCheck(command, workspace string, asJSON bool, stdout io.Writer) int {
 	} else if denying > 0 {
 		fmt.Fprintf(stdout, "DENY  %s\n", repoguard.RenderReason(violations))
 	} else if len(violations) > 0 {
+		// Non-deny findings (record or warn under the current dial) still classified —
+		// report them, but the check passes.
 		fmt.Fprintf(stdout, "WARN  %s\n", repoguard.RenderReason(violations))
 	} else {
 		fmt.Fprintf(stdout, "ALLOW  no out-of-tree write or would-hang interactive form in: %s\n", command)
