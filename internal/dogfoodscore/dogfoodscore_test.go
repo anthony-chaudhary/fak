@@ -1,6 +1,7 @@
 package dogfoodscore
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -371,6 +372,102 @@ python -c "import os,subprocess,sys; args=[sys.executable,os.path.join('tools','
 	if !settingsHasRepoGuard(settings) {
 		t.Fatal("repo_guard.py launcher should count as repo guard wiring")
 	}
+}
+
+// The repo ships the dos hooks through the tools/dos_hook.py fail-safe launcher (the
+// CLAUDE_PROJECT_DIR-anchored bootstrap), not the raw `-m dos.cli` module form. The
+// wiring detector must recognize that launcher shape, or guard_wired reds on the real
+// tree even though the guard is correctly wired. Guards against settingsHasDOSHook
+// drifting behind the shape settings.json actually uses.
+func TestSettingsHookDetectionAcceptsLauncher(t *testing.T) {
+	settings := `python -c "import os,subprocess,sys; root=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); subprocess.call([sys.executable,os.path.join(root,'tools','dos_hook.py'),'pretool','--workspace',root]); sys.exit(0)"
+python -c "import os,subprocess,sys; root=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); subprocess.call([sys.executable,os.path.join(root,'tools','dos_hook.py'),'stop','--workspace',root]); sys.exit(0)"`
+	for _, verb := range []string{"pretool", "stop"} {
+		if !settingsHasDOSHook(settings, verb) {
+			t.Fatalf("launcher-form %s hook should count as wired", verb)
+		}
+	}
+}
+
+// TestLiveSettingsHooksAreCWDRobust pins the fix for the dos_hook.py wedge on the
+// COMMITTED settings, so the class cannot silently return. The Claude Code harness
+// persists the working directory across tool calls, so a `cd` inside one call changes
+// the cwd every later hook inherits. A hook that runs `python tools/<script>.py` by a
+// RELATIVE path then fails to open the script ("can't open file") and exits non-zero —
+// on PreToolUse that is a BLOCK, and every subsequent tool call wedges before it runs.
+// The robust shapes: an absolute script path, or a `-c` bootstrap that resolves the
+// repo root from CLAUDE_PROJECT_DIR (getcwd fallback) before joining the script path.
+// A hook must also not pass a bare `--workspace .`, which is cwd-relative for the same
+// reason. Module launchers (`-m dos.cli`) resolve via sys.path, not cwd, so they are
+// exempt from the script-path rule but still checked for `--workspace .`.
+func TestLiveSettingsHooksAreCWDRobust(t *testing.T) {
+	root := repoRootFromTest(t)
+	for _, name := range []string{"settings.json", "settings.local.json"} {
+		path := filepath.Join(root, ".claude", name)
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) && name == "settings.local.json" {
+				continue // local overrides are optional
+			}
+			t.Fatalf("read %s: %v", path, err)
+		}
+		var parsed struct {
+			Hooks map[string][]struct {
+				Matcher string `json:"matcher"`
+				Hooks   []struct {
+					Type    string   `json:"type"`
+					Command string   `json:"command"`
+					Args    []string `json:"args"`
+				} `json:"hooks"`
+			} `json:"hooks"`
+		}
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		for event, groups := range parsed.Hooks {
+			for _, g := range groups {
+				for _, h := range g.Hooks {
+					for _, bad := range cwdFragileReasons(h.Command, h.Args) {
+						t.Errorf("%s %s hook is CWD-fragile: %s\n  command=%q args=%v",
+							name, event, bad, h.Command, h.Args)
+					}
+				}
+			}
+		}
+	}
+}
+
+// cwdFragileReasons returns the reasons a single hook command would break when the
+// process cwd is not the repo root. Empty slice == robust. Mirrors the failure modes
+// in the TestLiveSettingsHooksAreCWDRobust doc comment.
+func cwdFragileReasons(command string, args []string) []string {
+	var reasons []string
+	isPython := strings.Contains(command, "python") || strings.Contains(command, "py")
+	// Bare `--workspace .` — cwd-relative workspace, wrong once cwd drifts.
+	for i, a := range args {
+		if a == "--workspace" && i+1 < len(args) && args[i+1] == "." {
+			reasons = append(reasons, "passes cwd-relative `--workspace .` (anchor to CLAUDE_PROJECT_DIR)")
+		}
+	}
+	if !isPython {
+		return reasons
+	}
+	if len(args) >= 1 && args[0] == "-c" {
+		code := strings.Join(args, " ")
+		// A `-c` bootstrap that assembles a script path (os.path.join) must anchor it
+		// to CLAUDE_PROJECT_DIR; otherwise the join is cwd-relative.
+		if strings.Contains(code, "os.path.join(") && !strings.Contains(code, "CLAUDE_PROJECT_DIR") {
+			reasons = append(reasons, "`-c` bootstrap builds a script path without CLAUDE_PROJECT_DIR anchoring")
+		}
+		return reasons
+	}
+	// Direct interpreter invocation: any relative *.py script arg is the exact wedge.
+	for _, a := range args {
+		if strings.HasSuffix(a, ".py") && !filepath.IsAbs(a) {
+			reasons = append(reasons, "runs relative script "+a+" (resolve via CLAUDE_PROJECT_DIR or an absolute path)")
+		}
+	}
+	return reasons
 }
 
 func TestGradeLetter(t *testing.T) {

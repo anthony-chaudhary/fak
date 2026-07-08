@@ -514,11 +514,24 @@ func wiringResults(t treeFacts) []KPIResult {
 	}
 }
 
+// settingsHasDOSHook reports whether the dos hook for verb is wired, in any of its
+// supported launcher shapes. This is a whole-file substring probe (not a per-hook
+// JSON walk) — deliberately lenient so a wiring refactor does not red the KPI, but it
+// MUST track the shape the repo actually ships. The three accepted forms:
+//   - launcher (current): tools/dos_hook.py <verb>  — the fail-safe wrapper the
+//     pretool/posttool/stop entries route through since #2705/#2704.
+//   - module fallback:     python -m dos.cli hook <verb>
+//   - plain/native:        "dos hook <verb>"
+//
+// TestLiveSettingsHooksAreCWDRobust pins the stronger CWD-safety property per hook.
 func settingsHasDOSHook(settings, verb string) bool {
-	return strings.Contains(settings, "dos hook "+verb) ||
-		(strings.Contains(settings, "dos.cli") &&
-			strings.Contains(settings, "'hook'") &&
-			strings.Contains(settings, "'"+verb+"'"))
+	viaLauncher := strings.Contains(settings, "dos_hook.py") &&
+		(strings.Contains(settings, "'"+verb+"'") || strings.Contains(settings, `"`+verb+`"`))
+	viaModule := strings.Contains(settings, "dos.cli") &&
+		strings.Contains(settings, "'hook'") &&
+		strings.Contains(settings, "'"+verb+"'")
+	viaPlain := strings.Contains(settings, "dos hook "+verb)
+	return viaLauncher || viaModule || viaPlain
 }
 
 func settingsHasRepoGuard(settings string) bool {
