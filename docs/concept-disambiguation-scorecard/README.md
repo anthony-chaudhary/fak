@@ -13,10 +13,10 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 | Metric | Value |
 |---|---|
-| **Score** | **100.0/100** (grade A) = 10.0/10 |
-| **Coverage** | **100.0%** (1287/1287 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **0** (clarity 0 + coverage 0) |
-| Crystal-clear concepts | 132 of 1092 positioned |
+| **Score** | **90.6/100** (grade A) = 9.1/10 |
+| **Coverage** | **85.5%** (1380/1614 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **234** (clarity 0 + coverage 234) |
+| Crystal-clear concepts | 143 of 1149 positioned |
 | As of | 2026-06-29 (fak v0.34.0) |
 
 > **Read this right.** The score is deliberately LOW at birth: it grades the WHOLE confusable namespace discovered in the tree, not the few concepts already catalogued. A low coverage number is the honest statement that most similar-sounding names are not yet disambiguated - which is exactly the debt this scorecard exists to retire.
@@ -24,56 +24,60 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1092 concepts - score 100.0/100 (grade A) - disambiguation-debt 0
+concept-disambiguation chart - 1149 concepts - score 90.6/100 (grade A) - disambiguation-debt 234
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ####........................ 132
-  o defined       ############################ 960
+  * crystal       ####........................ 143
+  o defined       ############################ 1006
   ~ drifting      ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
   attention        oooooooooooooooooooooooooooooooooooooooooooooooooooo (52 concept(s); 0 crystal)
-  cache            **********************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (118 concept(s); 22 crystal)
-  context-ctx      *********oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 9 crystal)
+  cache            **********************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (122 concept(s); 22 crystal)
+  context-ctx      *********oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (103 concept(s); 9 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         ****oooooooooooooo (18 concept(s); 4 crystal)
   evict            ***oooooooooooooooooo (21 concept(s); 3 crystal)
-  gateway-engine   ******ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (95 concept(s); 6 crystal)
-  guard-gate       ***********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (110 concept(s); 23 crystal)
+  gateway-engine   ******oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (96 concept(s); 6 crystal)
+  guard-gate       ***********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (142 concept(s); 23 crystal)
   layout           ***ooooooo         (10 concept(s); 3 crystal)
   loop             **************ooo  (17 concept(s); 14 crystal)
   plan             ***oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (165 concept(s); 3 crystal)
   policy-capability ******oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (66 concept(s); 6 crystal)
   pool             **oooooooooooooooooooooo (24 concept(s); 2 crystal)
-  render-materialize ***oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (77 concept(s); 3 crystal)
-  score-debt       ***ooooooooooooooooooooooooooooooooo (36 concept(s); 3 crystal)
-  session-runtime  *******oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (89 concept(s); 7 crystal)
+  render-materialize ***oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (79 concept(s); 3 crystal)
+  score-debt       ***oooooooooooooooooooooooooooooooooo (37 concept(s); 3 crystal)
+  session-runtime  *******oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (91 concept(s); 7 crystal)
   support-maturity *****ooooooooooo   (16 concept(s); 5 crystal)
+  trajectory-control *****              (5 concept(s); 5 crystal)
+  vfs              ******             (6 concept(s); 6 crystal)
   witness-proof    *****oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (65 concept(s); 5 crystal)
 
 coverage by family (positioned / discovered):
-  attention        ############################ 59/59
-  cache            ############################ 141/141
-  context-ctx      ############################ 110/110
+  cache            ######################...... 147/188
+  session-runtime  ######################...... 109/141
+  plan             #########################... 217/246
+  render-materialize ######################...... 103/130
+  context-ctx      ########################.... 117/139
+  loop             ##################.......... 30/48
+  gateway-engine   #########################... 133/147
+  witness-proof    ########################.... 77/91
+  policy-capability ########################.... 77/90
+  score-debt       ######################...... 53/66
+  evict            #####################....... 26/35
+  pool             #######################..... 28/34
+  support-maturity #######################..... 23/28
+  decision         ########################.... 27/31
+  guard-gate       ############################ 221/223
+  attention        ############################ 59/60
+  layout           ##########################.. 11/12
   cross-cluster    ............................ 0/0
-  decision         ############################ 27/27
-  evict            ############################ 26/26
-  gateway-engine   ############################ 132/132
-  guard-gate       ############################ 141/141
-  layout           ############################ 11/11
-  loop             ############################ 21/21
-  plan             ############################ 217/217
-  policy-capability ############################ 77/77
-  pool             ############################ 29/29
-  render-materialize ############################ 100/100
-  score-debt       ############################ 51/51
-  session-runtime  ############################ 103/103
-  support-maturity ############################ 23/23
-  witness-proof    ############################ 76/76
+  trajectory-control ............................ 0/0
+  vfs              ............................ 0/0
 
-namespace coverage  [################################] 100.0%  (1287/1287 confusable tokens positioned)
+namespace coverage  [############################....] 85.5%  (1380/1614 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -219,6 +223,17 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | concept | support-maturity | **correctness** - Correctness is the property that the implementation's behavior matches its stated contract or oracle for the case being judged. |
 | * | crystal | concept | support-maturity | **parity** - Parity is a same-workload comparison against a named peer, baseline, or oracle, reporting match, lead, or trailing behavior under the stated conditions. |
 | * | crystal | concept | support-maturity | **maturity** - Maturity is the readiness level of a supported capability after considering implementation completeness, evidence breadth, correctness witnesses, parity results, guardrails, and operating posture. |
+| * | crystal | concept | trajectory-control | **trajectory control (trajctl)** - The LIVE forward-progress control plane over declared objectives (internal/trajctl, epic #2533): anything you want to progress gets a named objective and a witnessed score curve, and steering reads curves, never points |
+| * | crystal | symbol | trajectory-control | **ScoreRow** - One scored observation of one objective: normalized value, the scorer method+version that produced it, a witness rung, and an evidence pointer, appended to the fak-trajctl/1 JSONL ledger |
+| * | crystal | concept | trajectory-control | **witness rung (W0-W3)** - The evidence-strength ladder every ScoreRow carries: W3 deterministic evidence (witnessed commit, green suite), W2 transcript-derived heuristic, W1 structured judge verdict, W0 self-report (recorded, never load-bearing); the read-time audit (witnessStrength) demotes a dangling W3 row to W0 |
+| * | crystal | concept | trajectory-control | **regime gate** - The rule that HEALTHY means DO NOTHING: every steering rung above annotate fires only when the recent curve is unhealthy (STALL / DRIFT / DETOUR_OVERRUN), because intervening in a high-scoring session degrades it (arXiv:2602.03338); SignalHealthy is the gate's closed-vocabulary trigger |
+| * | crystal | concept | trajectory-control | **detour objective** - A side-quest promoted to a first-class CHILD objective with its own scorers and a budget, so an error repair or infra fix is scored on ITS goal while the parent sits visibly paused; SignalDetourOverrun fires when the detour outlives its budget |
+| * | crystal | concept | vfs | **T0 host/VM store** - The real block device / OS-sandbox filesystem the agent process actually runs on (E2B, Fly, Cloudflare, the host's own sandbox) |
+| * | crystal | concept | vfs | **T1 mount view** - The virtual tree of paths the agent is allowed to see and touch - the namespace/scope fak projects over the underlying store |
+| * | crystal | concept | vfs | **T2 read/query surface** - The adjudicated read/query over any backend (local tree or remote doc), with result-side admission quarantining poisoned reads and the tool vDSO answering repeated read-only calls |
+| * | crystal | concept | vfs | **T3 scratchpad** - The agent's expire-by-default working scratchpad / tmpfs - files that exist for this task and are meant to be thrown away |
+| * | crystal | concept | vfs | **T4 durable memory** - Promoted, verified, forgettable cross-session memory - facts that earned durability through the write/promotion gate and survive the task |
+| * | crystal | concept | vfs | **T5 KV-cache substrate** - The physical KV-cache substrate: where a span's key/value tensors actually sit and how they are addressed and evicted |
 | * | crystal | symbol | witness-proof | **World-state witness** - An external reference (commit hash, blob digest, etag, lease epoch) a cache entry is admitted under, so the entry can be refuted when that external state changes. |
 | * | crystal | symbol | witness-proof | **Claim** - A worker or agent's assertion that it completed an effect (shipped a phase, created a file, ran a test), awaiting corroboration against independent evidence. |
 | * | crystal | symbol | witness-proof | **WitnessResolver** - The component that corroborates claims against independent evidence sources (git history, filesystem, HTTP APIs) and returns Confirmed, Refuted, or Abstain. |
@@ -370,6 +385,10 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | subsystem | cache | **vcacheextract** - Package vcacheextract (internal/vcacheextract) sanitizes Codex session JSONL token telemetry for vCache accounting. |
 | o | defined | symbol | cache | **vcacheGovernorDecisionOrder** - vcacheGovernorDecisionOrder (internal/gateway/vcache_families.go) is the fixed render order of governor decisions on the vCache metrics surface. |
 | o | defined | symbol | cache | **vcacheWindowHasCacheActivity** - vcacheWindowHasCacheActivity (internal/gateway/vcache_families.go) is the predicate: does an observed turn window contain any cache read/write activity at all. |
+| o | defined | metric | cache | **CacheTTLUpgradeReasons (upgrade why-map)** - CacheTTLUpgradeReasons is the reason-keyed tally on a gateway usage summary (cmd/fak/serve.go, internal/gatewayusageledger) recording, per cause (volatile_head, no_stable_breakpoint), how many outbound turns skipped or took the 1-hour prompt-cache TTL upgrade. |
+| o | defined | metric | cache | **CacheTTLUpgradesUpgraded (applied count)** - CacheTTLUpgradesUpgraded is the scalar counter on the gateway usage summary of how many outbound turns actually had their stable-head cache_control breakpoint upgraded to the 1-hour TTL tier. |
+| o | defined | concept | cache | **provider_prompt_cache (mechanism id)** - provider_prompt_cache is the cache-value ledger Mechanism label (internal/cachevaluereport, cmd/fak/cachevalue_savings.go) tagging token-equivalent savings the PROVIDER's prompt cache delivered, as opposed to savings fak itself authored. |
+| o | defined | metric | cache | **ProviderPromptCacheTokenEquiv (savings figure)** - ProviderPromptCacheTokenEquiv is the aggregated token-equivalent value (internal/cachevaluereport/track2.go) attributed to the provider prompt cache in a Track-2 cache-value rollup period. |
 | o | defined | symbol | cache | **ColdCache (rehydrate/compact cold prompt-cache reason)** - ColdCache is the rehydrate reason and compact option indicating that the prompt/message-span cache is cold, so a prompt-cache preserving path no longer has warm-cache value to protect. |
 | o | defined | symbol | cache | **coldMessageSpanCache (gateway idle-gap witness)** - coldMessageSpanCache is the gateway metrics helper that witnesses whether a trace's message-span cache has aged past the provider TTL. |
 | o | defined | symbol | context-ctx | **context.Context plumbing helpers (stdlib)** - exec.CommandContext is the Go standard-library constructor that threads a cancellable context.Context into a spawned subprocess, one of the stdlib context-plumbing helpers fak uses to carry deadlines and cancellation through calls. |
@@ -449,6 +468,10 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | context-ctx | **MissingContextClarifications** - MissingContextClarifications (internal/selfquery/clarification.go) builds the ClarificationPlan for a set of missing context keys. |
 | o | defined | symbol | context-ctx | **runCtx** - runCtx (internal/bgloop, internal/fleetpane) is the derived cancellable context.Context a background run executes under - Go cancellation plumbing. |
 | o | defined | config | context-ctx | **STALE_RECALL** - STALE_RECALL (internal/recall/rehydrate.go) is the closed withhold token for a recalled fact whose concrete artifacts no longer verify on a Cold+ wake. |
+| o | defined | metric | context-ctx | **CompactionBailReasons (skip why-map)** - CompactionBailReasons is the reason-keyed tally on a guard/gateway usage summary (cmd/fak/guard_format.go, internal/gatewayusageledger) counting, per cause (under_budget, prefix_mismatch, too_few_msgs), how many turns DECLINED to compact context. |
+| o | defined | metric | context-ctx | **CompactionSavedUSD (shed-token value)** - CompactionSavedUSD is the dollar value (internal/cachevaluereport/track2.go) of the tokens a compaction event shed, priced at the input per-MTok rate; a positive term in NetUSD = RebateUSD + CompactionSavedUSD - WritePremiumUSD - SpendUSD. |
+| o | defined | metric | context-ctx | **ContextExtensionTokens (fleet-benefit extension)** - ContextExtensionTokens is the FleetBenefitReport field (internal/cachevaluereport/fleet_benefit.go) counting how many tokens of effective context window compaction shedding bought back, defaulting to CompactionShedTokens. |
+| o | defined | metric | context-ctx | **EquivalentContextWindow (extension as windows)** - EquivalentContextWindow is the optional FleetBenefitReport ratio (internal/cachevaluereport/fleet_benefit.go) expressing ContextExtensionTokens as a fraction of a full context window (ContextExtensionTokens / ContextBudgetTokens). |
 | o | defined | symbol | context-ctx | **contextEvent (gateway turn marker)** - contextEvent is the per-served-turn boolean that marks whether the gateway observed a context-management event, such as compaction or ctxview planning, while logging inference usage. |
 | o | defined | metric | context-ctx | **ContextBaselineTokens (context savings denominator)** - ContextBaselineTokens is the token count that would have been spent without the witnessed context-shedding event, used as the baseline side of vCache context savings reports. |
 | o | defined | metric | context-ctx | **ContextCostTokens (context savings realized cost)** - ContextCostTokens is the token count paid after context-control pruning or compaction has run, reported beside ContextBaselineTokens to compute realized context savings. |
@@ -582,6 +605,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | gateway-engine | **modkernel32** - modkernel32 (internal/dispatchaudit, internal/harnessres) is the lazily loaded kernel32.dll handle Windows sampling code calls procs through. |
 | o | defined | symbol | gateway-engine | **VLLMEngine** - VLLMEngine (internal/engine/vllm.go) is the vLLM-backed engine adapter, declaring its capability set. |
 | o | defined | config | gateway-engine | **VLLMEngineID** - VLLMEngineID (internal/engine/vllm.go) is the closed engine id 'vllm' naming the vLLM adapter. |
+| o | defined | symbol | gateway-engine | **persistGatewayUsageObservation (ledger exit-writer)** - persistGatewayUsageObservation (cmd/fak/serve.go) appends ONE 'exit' row to the gateway-usage ledger at session teardown, capturing the served session's final usage summary including the cache-TTL and compaction tallies. |
 | o | defined | symbol | gateway-engine | **inKernelTok (serve tokenizer handle)** - inKernelTok is the tokenizer handle resolved for an in-kernel GGUF model serve or guard run and stored on the serve runtime. |
 | o | defined | symbol | guard-gate | **acceptancegate (guard-gate identifier)** - acceptancegate is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
 | o | defined | symbol | guard-gate | **evaluateprocguard (guard-gate identifier)** - evaluateprocguard is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
@@ -596,6 +620,38 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | guard-gate | **precommitgates (guard-gate identifier)** - precommitgates is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
 | o | defined | symbol | guard-gate | **procguard (guard-gate identifier)** - procguard is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
 | o | defined | symbol | guard-gate | **procguardinput (guard-gate identifier)** - procguardinput is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
+| o | defined | config | guard-gate | **codexLoopGate (codex-loop launch gate)** - The pre-launch gate for Codex workers (on `fak codex`/`fak guard` and the dispatch tick): before spawning a Codex child it audits recent Codex session transcripts (the newest `limit` sessions modified within `since-hours`) plus the current thread, and refuses when a session is diagnosed a repetition LOOP (repeated tool outputs) or unproductive ACTION churn at or above the configured severity threshold (loop|action|off), or when the current thread bypassed fak guard (unguarded). Its limit / since-hours / threshold defaults and diagnosis reason-codes live under this name. |
+| o | defined | subsystem | guard-gate | **guardInfo panel (guard status overlay)** - The live `fak info` / `fak guard --split` status overlay: the panels enumerated by guardInfoPanels() (agents summary, endpoints, cache hit-frac/pct, incident text, legend, trend sparkline, turns-saved, hook-latency line), fitted to the pane height by composeGuardInfoPanels and drawn by renderGuardInfoInteractiveBlock / runGuardInfoOverlay from a /debug/vars snapshot. |
+| o | defined | config | guard-gate | **guard park budget (guardParkBudget)** - guardParkBudget() resolves the shared guard-park ceiling from FAK_GUARD_PARK_BUDGET (a Go duration, default 24h, clamped to [0,24h]; 0 restores the immediate fail-loud refusal) bounding how long ANY guard park may block - chiefly the STALE_CRED re-login park guardParkForRelogin, which waits for an expired credential to be refreshed at credPath before resuming, and which the separate spend-cap park reuses as its clamp. |
+| o | defined | concept | guard-gate | **guard auth-crash recovery (guardMaybeRecoverAuthCrash)** - Detects that the wrapped agent exited non-zero because its subscription token expired mid-session, polls the pinned credential file for a recovery window, and - if a fresh login lands - auto-relaunches the SAME command with the agent's resume flag (--continue) appended, so the guarded session self-heals instead of needing a manual re-run. |
+| o | defined | symbol | guard-gate | **guardRecoveryPrompt (refusal carry-forward prompt)** - Builds the one-shot prompt the gateway injects into a resumed guarded run to carry forward the PRIOR run's capability-floor refusals ('the previous guarded run recorded capability-floor refusal(s) ... do not re-propose the same refused call unchanged'), assembled from the []guardRefusalCarry items read out of the audit journal. |
+| o | defined | symbol | guard-gate | **guard child supervisor entry (runGuardChild*)** - The entry points that spawn the guarded child under supervision and report its outcome (runGuardChildAndReport and its supervised variant). |
+| o | defined | concept | guard-gate | **guard allow-overlay (guardApplyAllowOverlay)** - The operator-authored allow-list overlay behind `fak guard allow`: guardAllowOverlayPath resolves the file (env override, else the repo default), loadGuardAllowOverlay reads and validates it, and guardApplyAllowOverlay unions its allow / allow_prefix entries into the runtime capability floor at launch so a tool the base floor never enumerated stops hitting DEFAULT_DENY. |
+| o | defined | config | guard-gate | **guard API-key env (FAK_GUARD_API_KEY_ENV)** - FAK_GUARD_API_KEY_ENV (Go const fleetGuardAPIKeyEnvEnv) is the fleet-launcher env var whose VALUE names the env var (e.g. ANTHROPIC_API_KEY) that actually holds the upstream provider API key; the launchers read it and splice `--api-key-env <name>` into the guard child's argv, opting into API-key billing so guard's managed-cache AUTO resolves ACTIVE instead of the passive subscription-OAuth default. |
+| o | defined | config | guard-gate | **guard stop-hook config (installGuardStopHook)** - The install-and-tune surface for the guard's Claude Stop-hook that auto-continues past deny-all turns: installGuardStopHook wires the hook into the session --settings, guardStopHookDefaultWarn (=3) is the default warn rung of the warn/final/max ladder, and fak_guard_deny_all_consecutive is the gateway GAUGE the hook polls for the current consecutive-deny-all count. |
+| o | defined | config | guard-gate | **repo-guard env knobs (FAK_REPO_GUARD / _SEVERITY)** - The two env knobs that tune repo-guard: FAK_REPO_GUARD (master switch - `off` disables every rung, `warn` caps all rungs to advisory) and FAK_REPO_GUARD_SEVERITY (per-reason dial setting each reason to off/record/warn/deny). |
+| o | defined | symbol | guard-gate | **PreflightGate (rehearsal host-capability gate)** - One host capability a benchmark rehearsal needs, as a {Name, OK, Detail} row (internal/terminalbench, internal/livecodebench): the slice of these is RehearsalPreflight.Gates, and any not-OK row lands in BlockingReasons so the harness refuses to claim a result on an unready host. |
+| o | defined | subsystem | guard-gate | **gate backpressure (ApplyGateBackpressure / REFUSE_GATE)** - The fifth (backpressure) admission term of the fleet spawn preflight (internal/dispatchtick): a pure fold that reads MEASURED guard-hook gate-latency health and, when the rollup is breached, LOWERS the effective worker cap (never raises it) - holding a WARM fleet at its live count and refusing with the closed PreflightRefuseGate = "REFUSE_GATE" verdict carrying the GATE_PRESSURE token, while a COLD fleet is held to DefaultGateMinWorkers so a slow kernel cannot deadlock itself. |
+| o | defined | concept | guard-gate | **guard account rotation / failover (guardRotate)** - The two paths that move a guarded run onto a different on-box Claude account: guardRotateOffCooldown (internal/guardrotate) rotates off a rate-limited seat BEFORE launch by consulting the fleet-shared cooldown store, and the accountFailover type behind gateway.AccountFailoverFunc supplies a REPLACEMENT upstream credential MID-session when the active seat is walled. |
+| o | defined | symbol | guard-gate | **guardEndpoints (session endpoints provider)** - The session-endpoints provider `fak guard` hands the gateway (newGuardEndpointsProvider / guardEndpointNodes): it assembles a gateway.SessionEndpoints of the on-box Claude seat roster (active / walled marks, re-pulled each /debug/vars so a mid-session failover stays live) plus the kernel and serving nodes, purely as display metadata for the `fak info` status area - never a token. |
+| o | defined | symbol | guard-gate | **guardLoopbackOnly (loopback-bind predicate)** - The predicate guardLoopbackOnly(addr) reporting whether a listen address binds ONLY the loopback interface; it mirrors the gateway's own unexported loopbackOnly so guard can re-assert the no-auth warning the gateway skips when handed a pre-bound listener. A bare ":port" (all interfaces) and any routable IP are NOT loopback. |
+| o | defined | symbol | guard-gate | **guard report layout (guardRow / guardSection)** - The text-report building blocks of a guard decision summary: a titled section, its rows, and free-form notes. |
+| o | defined | subsystem | guard-gate | **guard sessions index (guardSessions)** - `fak guard sessions`, the operator query surface over the durable local guard-session INDEX (internal/guardsessions): every `fak guard` launch appends one JSONL row, and the verb lists recorded sessions newest-first or resolves a short prefix of the handle OR the guard trace id to the single session it names. |
+| o | defined | symbol | guard-gate | **guard replay / harness-profile tests** - The two guard test files that lock guard behavior against drift: cmd/fak/guard_replay_test.go (TestGuardReplay* drives runGuardReplay over recorded trace fixtures end-to-end) and cmd/fak/guard_harness_profiles_test.go (TestHarnessProfileFloorCoverage asserts the shipped floor admits every first-class harness profile's required tools). |
+| o | defined | config | guard-gate | **tuiGuardSchema (guard pane schema tag)** - The versioned schema-identifier constant tuiGuardSchema = "fak.tui.guard.v1" that tags the guard pane's data-model version: it is passed as the Pane.Schema in the TUI plugin registry and stamped on every emitted tuiGuardReport. |
+| o | defined | symbol | guard-gate | **ActionGated (provider-cache action state)** - ActionGated is one of the three ProviderActionState values ("gated") in internal/vcacheobserve: it marks a provider-cache action-plan row (heartbeat_pin, explicit_cache) that cannot be spent yet because it still lacks the required warm-transport or byte-identical-prefix witness, so apply refuses it as RefusedGated. |
+| o | defined | concept | guard-gate | **advisoryGate (advisory report gate)** - trendreport.AdvisoryGate (reused by cadencereport and milestonereport CheckGate) is the shared advisory CI gate over a folded report: it PASSES (exit 0, '<LABEL> OK') every quality finding, including score and climb-regression advisories, because a trend report is a mirror rather than a second quality gate - and it FAILS (exit 1, '<LABEL> INCOMPLETE') only when a dimension could not be measured. |
+| o | defined | symbol | guard-gate | **gateGodFile (god-file / god-function growth ratchet)** - gateGodFileGrowthTree (internal/hooks/gate_godfile.go) is the size ratchet run by `fak hygiene` (pre-push) and `make ci`: it refuses any tracked non-test .go file over the 1500-line ceiling and any function over the 200-line ceiling, except entries grandfathered at their frozen size in the god-file baseline, which may only shrink. |
+| o | defined | metric | guard-gate | **gateStats (headroom compression counters)** - The lifetime counters of the headroom result-compression gate (headroom.Stats): how many tool results were Considered, how many Compressed, the BytesIn / BytesOut of those compressions, and the per-reason breakdown of results left uncompressed (skipped empty / poison / no-saving / not-worth); snapshotted via Gate.Stats() and surfaced in `fak headroom status` and cachevalue status. |
+| o | defined | symbol | guard-gate | **gateTierDeclared (leaf tier-declaration gate)** - The gate that refuses a new leaf / package unless its architest tier is declared. |
+| o | defined | symbol | guard-gate | **gateVerdict (advisory-gate decision)** - trendreport.GateVerdict is one advisory-gate decision - a process exit code plus a human message produced by AdvisoryGate - that each report's CheckGate returns and Envelope.WithGate folds into the cadence and milestone report envelopes, reconciling to OK (exit 0) or ACTION / INCOMPLETE (exit 1). |
+| o | defined | cli-verb | guard-gate | **growthGate (append-only bloat ratchet)** - The `fak growthgate` unbounded-growth ratchet: it censuses append-only ledger/log files (.jsonl/.log/.err) across one or more repo roots, classifies each against fixed per-class BYTE budgets (internal/growthgate.Classify), reports an OK/ACTION verdict, and can --reap COLD, over-budget, disposable logs. |
+| o | defined | subsystem | guard-gate | **guardFleet (cross-machine fleet pane provider)** - The display-only, cross-MACHINE fleet-pane provider `fak guard` installs into the gateway (SetSessionFleetProvider): behind a 30s TTL cache it folds published per-machine snapshots (optionally unioned with live LAN spine peers) into a fleetpane.FleetDoc so `fak info` and /debug/vars can render fleet-of-machines health - machine ids, states, per-machine session counts and rolled-up totals. |
+| o | defined | concept | guard-gate | **hygiene gates (whole-tree audit gates)** - The whole-tree audit gates run in one process by `fak hygiene` (HygieneGates() in internal/hooks/tree.go): the family of `--audit-tree` checks - DOC_PLACEMENT, BROKEN_LINK, SECRET_SHAPE, INDEX_SYNC, GOD_FILE_GROWTH, BARE_DEV_SPELLING and others - that `make hygiene` / `make ci` enforce over `git ls-files` as a pre-push backstop. |
+| o | defined | cli-verb | guard-gate | **guard RSI CLI verbs (cmdGuardRsiScorecard)** - The `fak` CLI verbs that run the guard-RSI scorecard and the guard-verdict RSI fold. |
+| o | defined | config | guard-gate | **prefixGuard (cache-ablation prefix-stability feature)** - FeaturePrefixGuard = "prefix_guard" (internal/ablate) is a lossless provider-prompt-cache-control feature in the cache-ablation sweep vocabulary: it guards the STABILITY of the cacheable prompt prefix so provider prompt-cache economics can be relied upon, and when swept on it only bumps a simulated reused-token counter. |
+| o | defined | symbol | guard-gate | **guardSessionCardHandle (live Slack session card)** - The process-wide handle to a guard session's live-updating Slack root card: a guard process runs exactly one session, so a single package-level var is set right after the session root is queued (newGuardSessionCard) and its terminal outcome edit is written from finishGuardChildAndReport. It stays nil - every method a no-op - whenever Slack is unconfigured or the root did not queue, so neither launch nor teardown branches on Slack. |
+| o | defined | subsystem | guard-gate | **reviewGate (RSI review-fire value gate)** - The value-gate on the periodic self-improvement review fire (internal/rsiloop): it estimates the expected value of forking a 'review this session for extractable skill/memory' turn (session novelty, unseen tool sequences, error density) in token-equivalents, prices the fork's COST on the same compaction-economics basis (a re-read prefix billed at the cache-read marginal plus generated output), spawns ONLY when expected value exceeds cost, and self-tunes the threshold from the realized outcomes of prior fires. |
 | o | defined | symbol | guard-gate | **RetryGate** - RetryGate (internal/resume/outcome.go) decides from attempt history, the latest outcome, and a max-attempts cap whether another resume attempt is allowed. |
 | o | defined | symbol | guard-gate | **TokenRateGate** - TokenRateGate (internal/gateway/token_admission.go) is the admission gate that reserves estimated token usage against a token-rate policy before a turn runs. |
 | o | defined | subsystem | guard-gate | **memgate** - Package memgate (internal/memgate) checks whether a heavy model load should proceed under current memory pressure. |
@@ -737,13 +793,13 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | plan | **WatchdogPlanRow** - WatchdogPlanRow (internal/resume/watchdog.go) is one AUTO_RESUME entry of resume_plan.json as the watchdog parses it, with ResumeTarget/RehomeSource accessors. |
 | o | defined | symbol | plan | **RotationPlanWithHeadroom** - Registry.RotationPlanWithHeadroom (internal/accounts/rotation.go) computes the account-rotation plan honoring per-account rotation headroom. |
 | o | defined | symbol | plan | **unwrapHTTPPlanner** - unwrapHTTPPlanner (internal/gateway/messages.go) unwraps an agent.Planner to its underlying HTTPPlanner when one is present. |
+| o | defined | symbol | plan | **WorktreeCandidate (dojocal recalibration payload)** - WorktreeCandidate (internal/dojocal/worktree.go) is the single (lever, metric) recalibration the dojocal worktree arm measures: the cell to re-point plus the corpus-mean claim to swap in, built from the worst RECALIBRATE of `fak dojo-rsi propose` and carried as the Payload of a rsiloop.Candidate. |
+| o | defined | symbol | plan | **LeaseRefSyncPlanInput (lease-ref sync decision state)** - LeaseRefSyncPlanInput (internal/loopdrive/leaseref_sync.go) is the pure input struct that decides which ambient lease-ref convergence calls belong around a loop-drive tick: its Surface, Remote, and LeaseRefsWritten fields feed LeaseRefSyncPlan, where LeaseRefsWritten=true (the tick acquired, released, or reaped a refs/fak/locks/* record) is what adds the publish-after-write step. |
+| o | defined | symbol | plan | **LeaseRefSyncPlanForSurface (surface-profile lease-ref sync constructor)** - LeaseRefSyncPlanForSurface (internal/loopdrive/leaseref_sync.go) is the explicit profile constructor for the three #2302 wiring surfaces (dispatch preflight, loop-drive ticks, garden's stale-lease rung): it stamps the requested surface onto a LeaseRefSyncPlanInput and delegates to LeaseRefSyncPlan, so every surface reuses the same safe boundary rule - fetch before deciding, push after the tick writes lease refs. |
 | o | defined | symbol | plan | **CompactActionPlan (sessionaudit action list)** - CompactActionPlan is the sessionaudit action-plan object containing compact-session recommendations, counts, and optional gate output for recent session pressure. |
 | o | defined | symbol | plan | **BuildCompactActionPlan (sessionaudit planner)** - BuildCompactActionPlan lowers a compact-session report into the concrete CompactActionPlan actions a CLI or gateway surface can render or gate. |
 | o | defined | symbol | plan | **PlanAuto (dispatch wave sizing)** - dispatchauto.PlanAuto folds live worker ceilings into an automatic dispatch-wave plan, including target, refill, binding ceiling, and per-worker context slice. |
 | o | defined | symbol | plan | **ApplyProviderActionPlan (vCache manifest mutator)** - ApplyProviderActionPlan applies the local, no-provider-call effects of a vCache ProviderActionPlan to the fak-owned provider manifest and emits an apply report. |
-| o | defined | symbol | plan | **BlockingCandidates (dispatch lease blockers)** - BlockingCandidates is the dispatch-status list of candidate work items that an active lease blocks from being launched safely. |
-| o | defined | symbol | plan | **BlocksCandidate (dispatch lease blocker flag)** - BlocksCandidate is the dispatch-status tri-state flag indicating whether a live lease blocks any currently available candidate work. |
-| o | defined | symbol | plan | **CandidateSourceAvailable (dispatch status input)** - CandidateSourceAvailable records whether dispatch-status had a candidate source to compare live leases against when classifying blockers. |
 | o | defined | metric | plan | **PlannedCreates (dogfood issue receipt count)** - PlannedCreates is the dogfood issue sync receipt count of issue records the planner intended to create. |
 | o | defined | symbol | plan | **PlanPlacementForDisk (disk-tier cache placement)** - PlanPlacementForDisk evaluates a cachemeta placement request against the filesystem-backed disk tier and returns the placement decision for that tier. |
 | o | defined | symbol | plan | **PlanPlacementForLocalLadder (multi-tier local placement)** - PlanPlacementForLocalLadder evaluates a cachemeta placement request across the local HBM, DRAM, and disk tiers using live capacity probes. |
@@ -909,7 +965,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | pool | **lanepools (pool identifier)** - lanepools is the concrete pool identifier in dispatch: it the per-lane worker pools used by dispatch. |
 | o | defined | symbol | pool | **seatpool (pool identifier)** - seatpool is the concrete pool identifier in fleet: it the pool of account seats available to assign. |
 | o | defined | symbol | pool | **seatpoolschema (pool identifier)** - seatpoolschema is the concrete pool identifier in fleet: it the schema describing a seat pool, not the pool itself. |
-| o | defined | symbol | pool | **seenpools (pool identifier)** - seenpools is the concrete pool identifier in dispatch: it the bookkeeping set of already-seen pools. |
+| o | defined | symbol | pool | **uniquePoolRows (pool dedupe helper)** - uniquePoolRows is the dispatch helper that dedupes account rows to one representative row per pool key - the successor of the retired seenPools bookkeeping set. |
 | o | defined | symbol | pool | **waveidforpools (pool identifier)** - waveidforpools is the concrete pool identifier in dispatch: it the wave-id keyed by pool, not the pool collection. |
 | o | defined | symbol | pool | **poolkey (pool identifier)** - poolkey is the concrete pool identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring pool concepts. |
 | o | defined | symbol | pool | **quotaPagedPoolUsage** - quotaPagedPoolUsage (internal/harnessres/sample_windows.go) is the Windows PROCESS_MEMORY_COUNTERS field: current paged-pool bytes charged to the sampled process. |
@@ -974,6 +1030,8 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | render-materialize | **renderOrder** - renderOrder (internal/workflowaudit) is the fixed order ref classes are rendered in by the workflow audit. |
 | o | defined | symbol | render-materialize | **RenderRawFakContractMarkdown** - RenderRawFakContractMarkdown (internal/frontierswe/smoke_contract.go) renders the raw fak smoke contract as markdown. |
 | o | defined | symbol | render-materialize | **RenderRecovery** - RenderRecovery (internal/guardrsi/recovery.go) renders a guardrsi RecoveryReport for the CLI. |
+| o | defined | symbol | render-materialize | **RenderFleetBenefit (fleet-benefit renderer)** - RenderFleetBenefit (internal/cachevaluereport/fleet_benefit.go) renders the all-time/caller-window FleetBenefitReport aggregate into a compact text section for the cache-value rollup. |
+| o | defined | concept | render-materialize | **RenderSlack (sidecar Slack renderer)** - RenderSlack (internal/sidecar/render.go) materializes a sidecar Pane as a Slack Block Kit payload ([]any of blocks), walking the same Sections() sequence its sibling RenderText walks so terminal and Slack carry the identical core-field order by construction. |
 | o | defined | symbol | render-materialize | **RenderLeakReport (toolproc leak report renderer)** - RenderLeakReport formats a parsed toolproc leak report for the fak toolproc CLI surface. |
 | o | defined | symbol | render-materialize | **renderSleepReason (repo-guard sleep refusal text)** - renderSleepReason formats repo-guard foreground-sleep violations into a human-readable refusal block. |
 | o | defined | symbol | render-materialize | **Materialize (ctxplan view)** - ctxplan.Materialize re-derives a budgeted View of the lossless context store each turn: PlanCells picks which spans fit the budget, the selected ones are paged in through the trust gate, and a faithfulness Witness reconciles rendered-vs-refused so every elided span stays recoverable. |
@@ -1014,6 +1072,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | metric | score-debt | **token_defaults_debt** - token_defaults_debt is the debt key of the token-defaults scorecard on the control pane (cmd/fak token-defaults-scorecard). |
 | o | defined | symbol | score-debt | **tooling_quality_scorecard** - tools/tooling_quality_scorecard.py is the Python-tooling quality scorecard on the control pane (py_debt) - the meter for Python not yet ported to the Go-first hygiene path. |
 | o | defined | metric | score-debt | **ui_quality_debt** - ui_quality_debt (internal/uiquality DebtKey) is the debt key of the uiquality scorecard over fak's render surfaces. |
+| o | defined | concept | score-debt | **code_slop_scorecard (slop surface)** - code_slop_scorecard is the batch code-slop scorecard (tools/code_slop_scorecard.py; ported engine in internal/clonescan) that grades duplication and other slop KPIs into a slop_score / slop_debt over the Go corpus. |
 | o | defined | subsystem | score-debt | **agent-readiness scorecard** - The scorecard that measures how easy fak is for an AI agent (Claude Code, Codex, Cursor, an MCP client) to discover, adopt, and build on - missing entry points, harness configs, copy-pasteable first commands, per-agent recipes (tools/agent_readiness_scorecard.py). |
 | o | defined | subsystem | score-debt | **persona-readiness scorecard** - The scorecard that measures whether fak serves its top human personas - the free-tier dev, the infra engineer, the researcher - each with the entry path they need (prebuilt binary, deploy guide, determinism witness) (tools/persona_readiness_scorecard.py). |
 | o | defined | subsystem | score-debt | **doc-appeal scorecard** - The scorecard that measures whether a reader-facing doc reads like a person wrote it: em-dash flood, bold-emphasis flood, run-on sentences, walls of text, LLM-scaffolding phrases (tools/doc_appeal_scorecard.py). |
@@ -1062,6 +1121,8 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | session-runtime | **session_spend** - session_spend.go (cmd/fak) is the host spend meter: prices a session's turns from billed usage; unpriced pairs stay dollar-blind (no debit). |
 | o | defined | symbol | session-runtime | **SessionTime** - SessionTime (internal/gateway/gateway.go) is the per-session clock snapshot exposed in gateway session state, with an IsZero test. |
 | o | defined | symbol | session-runtime | **stopped_sessions** - stopped_sessions is the stopped-session classify/decide core: internal/resume/stopped, the Go port of tools/stopped_sessions.py. |
+| o | defined | metric | session-runtime | **Track1Sessions (contributing-session count)** - Track1Sessions is the FleetBenefitReport counter (internal/cachevaluereport/fleet_benefit.go) of how many Track-1 (provider-cache) sessions contributed to the aggregate cache-value benefit. |
+| o | defined | concept | session-runtime | **SessionRows (sidecar census input slice)** - SessionRows (internal/sidecar/sidecar.go) is the []SessionRow slice on the sidecar Inputs bundle carrying the collected fleet-session census rows into foldSessions, which folds them with the Sessions PlaneInput status into the rendered Sessions plane. |
 | o | defined | symbol | session-runtime | **SessionEnd (toolproc session boundary hook)** - SessionEnd is the Claude/toolproc hook event that marks the owning agent session ending, letting toolprocgate classify descendants as orphans. |
 | o | defined | symbol | session-runtime | **AggregateSessions (sessionaudit fold)** - AggregateSessions folds sessionaudit Session rows into aggregate totals, top-model summaries, and pressure inputs for reports. |
 | o | defined | symbol | session-runtime | **EvSessionEnd (toolproc journal event kind)** - EvSessionEnd is the internal/toolproc journal event kind for a session_end record emitted when the owning session ends. |
@@ -1189,9 +1250,9 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| honesty | `kind_grounding_soft` | 60 | 0 | 17 kind/grounding mismatch |
+| honesty | `kind_grounding_soft` | 60 | 0 | 20 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 8 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1092 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 1149 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -1203,22 +1264,24 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| attention | 59 | 59 | 0 |
-| cache | 141 | 141 | 0 |
-| context-ctx | 110 | 110 | 0 |
+| cache | 147 | 188 | 41 |
+| session-runtime | 109 | 141 | 32 |
+| plan | 217 | 246 | 29 |
+| render-materialize | 103 | 130 | 27 |
+| context-ctx | 117 | 139 | 22 |
+| loop | 30 | 48 | 18 |
+| gateway-engine | 133 | 147 | 14 |
+| witness-proof | 77 | 91 | 14 |
+| policy-capability | 77 | 90 | 13 |
+| score-debt | 53 | 66 | 13 |
+| evict | 26 | 35 | 9 |
+| pool | 28 | 34 | 6 |
+| support-maturity | 23 | 28 | 5 |
+| decision | 27 | 31 | 4 |
+| guard-gate | 221 | 223 | 2 |
+| attention | 59 | 60 | 1 |
+| layout | 11 | 12 | 1 |
 | cross-cluster | 0 | 0 | 0 |
-| decision | 27 | 27 | 0 |
-| evict | 26 | 26 | 0 |
-| gateway-engine | 132 | 132 | 0 |
-| guard-gate | 141 | 141 | 0 |
-| layout | 11 | 11 | 0 |
-| loop | 21 | 21 | 0 |
-| plan | 217 | 217 | 0 |
-| policy-capability | 77 | 77 | 0 |
-| pool | 29 | 29 | 0 |
-| render-materialize | 100 | 100 | 0 |
-| score-debt | 51 | 51 | 0 |
-| session-runtime | 103 | 103 | 0 |
-| support-maturity | 23 | 23 | 0 |
-| witness-proof | 76 | 76 | 0 |
+| trajectory-control | 0 | 0 | 0 |
+| vfs | 0 | 0 | 0 |
 

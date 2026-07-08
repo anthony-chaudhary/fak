@@ -1,0 +1,639 @@
+{
+  "rows": [
+    {
+      "id": "x-goal-guard-gate-codex-loop-gate",
+      "canonical": "codexLoopGate (codex-loop launch gate)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "The pre-launch gate for Codex workers (on `fak codex`/`fak guard` and the dispatch tick): before spawning a Codex child it audits recent Codex session transcripts (the newest `limit` sessions modified within `since-hours`) plus the current thread, and refuses when a session is diagnosed a repetition LOOP (repeated tool outputs) or unproductive ACTION churn at or above the configured severity threshold (loop|action|off), or when the current thread bypassed fak guard (unguarded). Its limit / since-hours / threshold defaults and diagnosis reason-codes live under this name.",
+      "distinction": "codexLoopGate refuses a Codex SPAWN when recent transcripts or the current thread show a repetition-loop, action-churn, or unguarded verdict; the loopgate sibling is instead the verified-loop STOP gate that adjudicates whether a goal is witnessed-done (VerdictNotYet / ReasonDoneUnwitnessed). Its limit and since-hours are the SCAN window, not launch-count thresholds.",
+      "distinct_from": [
+        "x2-guard-gate-loopgate"
+      ],
+      "aliases": [
+        "codexloopgatelimit",
+        "codexloopgatesincehours",
+        "dispatchcodexloopgatedefaultlimitvalue",
+        "dispatchcodexloopgatedefaultsincehoursvalue",
+        "dispatchcodexloopgatedefaultthreshold",
+        "codexloopdiagnosisgatereason",
+        "codexloopdiagnosisunguarded",
+        "gatecode"
+      ],
+      "grounding": "codexloopgate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-guard-info-panel",
+      "canonical": "guardInfo panel (guard status overlay)",
+      "family": "guard-gate",
+      "kind": "subsystem",
+      "definition": "The live `fak info` / `fak guard --split` status overlay: the panels enumerated by guardInfoPanels() (agents summary, endpoints, cache hit-frac/pct, incident text, legend, trend sparkline, turns-saved, hook-latency line), fitted to the pane height by composeGuardInfoPanels and drawn by renderGuardInfoInteractiveBlock / runGuardInfoOverlay from a /debug/vars snapshot.",
+      "distinction": "The guardInfo panel is the live on-screen status OVERLAY and its field rows, projected from a /debug/vars snapshot; tuiGuardReport is instead the TUI guard data/report struct (Schema/Counts/Rows/Sources, built by buildTUIGuardReport) rendered as a single guard overview card - a report struct, not the overlay's live fields.",
+      "distinct_from": [
+        "x2-guard-gate-tuiguardreport"
+      ],
+      "aliases": [
+        "composeguardinfopanels",
+        "guardinfoagentssummary",
+        "guardinfoendpointspanelrows",
+        "guardinfohitfrac",
+        "guardinfohitpct",
+        "guardinfoincidenttext",
+        "guardinfolegend",
+        "guardinfopanelctx",
+        "guardinfopanellevel",
+        "guardinforuletui",
+        "guardinfosaved",
+        "guardinfosavingword",
+        "guardinfotrend",
+        "guardinfotrendcap",
+        "guardinfoturnssaved",
+        "newguardinfotrend",
+        "renderguardinfointeractiveblock",
+        "runguardinfooverlay",
+        "guardpanelmini",
+        "guardsafetyword",
+        "guardhooklatencysummaryline"
+      ],
+      "grounding": "guardinfopanels",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-guard-cap-park",
+      "canonical": "guard park budget (guardParkBudget)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "guardParkBudget() resolves the shared guard-park ceiling from FAK_GUARD_PARK_BUDGET (a Go duration, default 24h, clamped to [0,24h]; 0 restores the immediate fail-loud refusal) bounding how long ANY guard park may block - chiefly the STALE_CRED re-login park guardParkForRelogin, which waits for an expired credential to be refreshed at credPath before resuming, and which the separate spend-cap park reuses as its clamp.",
+      "distinction": "guardParkBudget is only the duration CEILING knob and guardParkForRelogin is the park that BLOCKS waiting for a fresh credential; guard_child is the supervisor that spawns the child and folds its outcome into the guard report, invoking the park from its recovery path. The budget is not itself a parker.",
+      "distinct_from": [
+        "x-goal25b-guard-gate-guardchild"
+      ],
+      "aliases": [
+        "fakguardparkbudget",
+        "guardparkforrelogin"
+      ],
+      "grounding": "guardparkbudget",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-guard-auth-recovery",
+      "canonical": "guard auth-crash recovery (guardMaybeRecoverAuthCrash)",
+      "family": "guard-gate",
+      "kind": "concept",
+      "definition": "Detects that the wrapped agent exited non-zero because its subscription token expired mid-session, polls the pinned credential file for a recovery window, and - if a fresh login lands - auto-relaunches the SAME command with the agent's resume flag (--continue) appended, so the guarded session self-heals instead of needing a manual re-run.",
+      "distinction": "auth-crash recovery triggers on an expired subscription TOKEN and waits by polling for a fresh login; the guard park instead triggers on a usage/spend CAP (or stale credential) and waits out a known reset window under the guardParkBudget ceiling. Both relaunch --continue - the difference is the trigger and what they wait on, not prompt-vs-park.",
+      "distinct_from": [
+        "x-goal-guard-gate-guard-cap-park"
+      ],
+      "aliases": [],
+      "grounding": "guardmayberecoverauthcrash",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-guard-recovery-prompt",
+      "canonical": "guardRecoveryPrompt (refusal carry-forward prompt)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Builds the one-shot prompt the gateway injects into a resumed guarded run to carry forward the PRIOR run's capability-floor refusals ('the previous guarded run recorded capability-floor refusal(s) ... do not re-propose the same refused call unchanged'), assembled from the []guardRefusalCarry items read out of the audit journal.",
+      "distinction": "guardRecoveryPrompt is the rendered carry-forward PROMPT TEXT injected once by the gateway; guardRefusalCarry is the per-refusal record it is assembled from. Despite the name it has nothing to do with auth-crash recovery - it never touches authentication.",
+      "distinct_from": [
+        "x-goal25b-guard-gate-guardrefusalcarry"
+      ],
+      "aliases": [],
+      "grounding": "guardrecoveryprompt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-guard-child-supervisor",
+      "canonical": "guard child supervisor entry (runGuardChild*)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The entry points that spawn the guarded child under supervision and report its outcome (runGuardChildAndReport and its supervised variant).",
+      "distinction": "These runGuardChild* entry points START and supervise the child; finishGuardChildAndReport is the sibling that CLOSES the child and emits the final report.",
+      "distinct_from": [
+        "x-goal25b-guard-gate-finishguardchildandreport"
+      ],
+      "aliases": [
+        "runguardchildandreport"
+      ],
+      "grounding": "runguardchildsupervisedandreport",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-guard-allow-overlay",
+      "canonical": "guard allow-overlay (guardApplyAllowOverlay)",
+      "family": "guard-gate",
+      "kind": "concept",
+      "definition": "The operator-authored allow-list overlay behind `fak guard allow`: guardAllowOverlayPath resolves the file (env override, else the repo default), loadGuardAllowOverlay reads and validates it, and guardApplyAllowOverlay unions its allow / allow_prefix entries into the runtime capability floor at launch so a tool the base floor never enumerated stops hitting DEFAULT_DENY.",
+      "distinction": "The allow-overlay only WIDENS the allow-list - the danger arg-rules (rm -rf, sudo, RCE pipe) and any explicit deny are untouched - and it is authored out-of-band by the operator so a wrapped agent cannot grant itself a capability. repo-guard is a different surface: a PreToolUse hook whose rungs (out-of-tree write, interactive hang, foreground sleep) no allow-overlay widens.",
+      "distinct_from": [
+        "repo-guard"
+      ],
+      "aliases": [
+        "guardallowoverlaypath",
+        "loadguardallowoverlay"
+      ],
+      "grounding": "guardapplyallowoverlay",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-guard-apikey-env",
+      "canonical": "guard API-key env (FAK_GUARD_API_KEY_ENV)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "FAK_GUARD_API_KEY_ENV (Go const fleetGuardAPIKeyEnvEnv) is the fleet-launcher env var whose VALUE names the env var (e.g. ANTHROPIC_API_KEY) that actually holds the upstream provider API key; the launchers read it and splice `--api-key-env <name>` into the guard child's argv, opting into API-key billing so guard's managed-cache AUTO resolves ACTIVE instead of the passive subscription-OAuth default.",
+      "distinction": "FAK_GUARD_API_KEY_ENV names the env var supplying the guard's upstream API key - a credentials and billing lever, and an indirection (it holds a NAME, not the key); the FAK_GITGATE / FAK_NORMGATE sibling toggles instead flip adjudication-rung BEHAVIOR (the gitgate git-shape prefilter, the normgate ResultAdmitter), never credentials.",
+      "distinct_from": [
+        "x2-guard-gate-envtoggles"
+      ],
+      "aliases": [
+        "fleetguardapikeyenvenv"
+      ],
+      "grounding": "fakguardapikeyenv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-guard-stophook-config",
+      "canonical": "guard stop-hook config (installGuardStopHook)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "The install-and-tune surface for the guard's Claude Stop-hook that auto-continues past deny-all turns: installGuardStopHook wires the hook into the session --settings, guardStopHookDefaultWarn (=3) is the default warn rung of the warn/final/max ladder, and fak_guard_deny_all_consecutive is the gateway GAUGE the hook polls for the current consecutive-deny-all count.",
+      "distinction": "These are the INSTALL call, the default thresholds, and the polled deny-all gauge that feed the hook; guardStopHook itself is the runtime deny-all-continue hook that consumes them. Note fak_guard_deny_all_consecutive is an observed metric, not an env var or a limit - the limit envs are FAK_GUARD_DENYALL_WARN/FINAL/MAX.",
+      "distinct_from": [
+        "x2-guard-gate-stophook"
+      ],
+      "aliases": [
+        "installguardstophook",
+        "fakguarddenyallconsecutive"
+      ],
+      "grounding": "guardstophookdefaultwarn",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-repo-guard-env",
+      "canonical": "repo-guard env knobs (FAK_REPO_GUARD / _SEVERITY)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "The two env knobs that tune repo-guard: FAK_REPO_GUARD (master switch - `off` disables every rung, `warn` caps all rungs to advisory) and FAK_REPO_GUARD_SEVERITY (per-reason dial setting each reason to off/record/warn/deny).",
+      "distinction": "These env vars are the enable and severity CONFIGURATION; repo-guard itself is the PreToolUse hook they tune - a workspace-boundary guard whose rungs flag out-of-tree writes, interactive hangs, foreground sleeps and live-monitor reads (it is not git-trunk protection).",
+      "distinct_from": [
+        "repo-guard"
+      ],
+      "aliases": [
+        "fakrepoguard"
+      ],
+      "grounding": "fakrepoguardseverity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-preflight-gate",
+      "canonical": "PreflightGate (rehearsal host-capability gate)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "One host capability a benchmark rehearsal needs, as a {Name, OK, Detail} row (internal/terminalbench, internal/livecodebench): the slice of these is RehearsalPreflight.Gates, and any not-OK row lands in BlockingReasons so the harness refuses to claim a result on an unready host.",
+      "distinction": "PreflightGate is a per-capability host-readiness ROW in a benchmark rehearsal artifact; the dispatch-tick gate backpressure (ApplyGateBackpressure / REFUSE_GATE) is an unrelated fleet-spawn admission fold in internal/dispatchtick. They share the `preflight` + `gate` words and nothing else.",
+      "distinct_from": [
+        "x-goal-guard-gate-gate-backpressure"
+      ],
+      "aliases": [],
+      "grounding": "preflightgate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-gate-backpressure",
+      "canonical": "gate backpressure (ApplyGateBackpressure / REFUSE_GATE)",
+      "family": "guard-gate",
+      "kind": "subsystem",
+      "definition": "The fifth (backpressure) admission term of the fleet spawn preflight (internal/dispatchtick): a pure fold that reads MEASURED guard-hook gate-latency health and, when the rollup is breached, LOWERS the effective worker cap (never raises it) - holding a WARM fleet at its live count and refusing with the closed PreflightRefuseGate = \"REFUSE_GATE\" verdict carrying the GATE_PRESSURE token, while a COLD fleet is held to DefaultGateMinWorkers so a slow kernel cannot deadlock itself.",
+      "distinction": "Gate backpressure throttles how many WORKERS a fleet may spawn based on measured hook-latency health, refusing with REFUSE_GATE; PreflightGate is instead one host-capability row in a benchmark rehearsal's readiness artifact. Same two words, different subsystems.",
+      "distinct_from": [
+        "x-goal-guard-gate-preflight-gate"
+      ],
+      "aliases": [
+        "refusegate"
+      ],
+      "grounding": "applygatebackpressure",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-guard-failover",
+      "canonical": "guard account rotation / failover (guardRotate)",
+      "family": "guard-gate",
+      "kind": "concept",
+      "definition": "The two paths that move a guarded run onto a different on-box Claude account: guardRotateOffCooldown (internal/guardrotate) rotates off a rate-limited seat BEFORE launch by consulting the fleet-shared cooldown store, and the accountFailover type behind gateway.AccountFailoverFunc supplies a REPLACEMENT upstream credential MID-session when the active seat is walled.",
+      "distinction": "Account rotation / failover changes WHICH on-box account credential the guard runs under (pre-launch or mid-session); guardProvider instead resolves which upstream WIRE and base-URL a given account talks to. Note `guard_account_failover` is the file the accountFailover type lives in, not an identifier.",
+      "distinct_from": [
+        "x2-guard-gate-guardprovider"
+      ],
+      "aliases": [
+        "guardaccountfailover"
+      ],
+      "grounding": "guardrotate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-guard-endpoints",
+      "canonical": "guardEndpoints (session endpoints provider)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The session-endpoints provider `fak guard` hands the gateway (newGuardEndpointsProvider / guardEndpointNodes): it assembles a gateway.SessionEndpoints of the on-box Claude seat roster (active / walled marks, re-pulled each /debug/vars so a mid-session failover stays live) plus the kernel and serving nodes, purely as display metadata for the `fak info` status area - never a token.",
+      "distinction": "guardEndpoints is the per-session RESOLVED endpoints view (accounts plus kernel/serving nodes) rendered in the status area, and it only REFLECTS failover state; guardDefaultBaseURL is the static provider -> base-URL MAP whose output (resolvedBase) feeds a serving node's host. A dynamic display view vs a static wire->URL table.",
+      "distinct_from": [
+        "x2-guard-gate-baseurl"
+      ],
+      "aliases": [],
+      "grounding": "guardendpoints",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-guard-loopback",
+      "canonical": "guardLoopbackOnly (loopback-bind predicate)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The predicate guardLoopbackOnly(addr) reporting whether a listen address binds ONLY the loopback interface; it mirrors the gateway's own unexported loopbackOnly so guard can re-assert the no-auth warning the gateway skips when handed a pre-bound listener. A bare \":port\" (all interfaces) and any routable IP are NOT loopback.",
+      "distinction": "guardLoopbackOnly only INSPECTS the inbound listen address to decide whether to warn about an unauthenticated non-local bind - it binds nothing and refuses nothing; guardProvider resolves the OUTBOUND upstream wire the gateway forwards to. Inbound predicate vs outbound resolver.",
+      "distinct_from": [
+        "x2-guard-gate-guardprovider"
+      ],
+      "aliases": [],
+      "grounding": "guardloopbackonly",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-guard-report-layout",
+      "canonical": "guard report layout (guardRow / guardSection)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The text-report building blocks of a guard decision summary: a titled section, its rows, and free-form notes.",
+      "distinction": "guardRow / guardSection are the plain-TEXT decision-report layout primitives; the guardInfo panel is the live interactive OVERLAY, not the emitted report.",
+      "distinct_from": [
+        "x-goal-guard-gate-guard-info-panel"
+      ],
+      "aliases": [
+        "guardsection",
+        "guardnote"
+      ],
+      "grounding": "guardrow",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-guard-sessions",
+      "canonical": "guard sessions index (guardSessions)",
+      "family": "guard-gate",
+      "kind": "subsystem",
+      "definition": "`fak guard sessions`, the operator query surface over the durable local guard-session INDEX (internal/guardsessions): every `fak guard` launch appends one JSONL row, and the verb lists recorded sessions newest-first or resolves a short prefix of the handle OR the guard trace id to the single session it names.",
+      "distinction": "guardSessions queries the durable index of RECORDED guard sessions (it is a JSONL log, not a live process list) keyed by handle or trace id; cmdGuard is the top-level entry point whose every launch appends one row to that index.",
+      "distinct_from": [
+        "x2-guard-gate-cmdguard"
+      ],
+      "aliases": [
+        "guardtraceid"
+      ],
+      "grounding": "guardsessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-guard-test-harness",
+      "canonical": "guard replay / harness-profile tests",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The two guard test files that lock guard behavior against drift: cmd/fak/guard_replay_test.go (TestGuardReplay* drives runGuardReplay over recorded trace fixtures end-to-end) and cmd/fak/guard_harness_profiles_test.go (TestHarnessProfileFloorCoverage asserts the shipped floor admits every first-class harness profile's required tools).",
+      "distinction": "These are the guard TEST files - filename stems, not Go identifiers; runGuardReplay is the production entry point (behind `fak guard --replay-trace`) that the replay tests drive, not the tests themselves.",
+      "distinct_from": [
+        "x2-guard-gate-runguardreplay"
+      ],
+      "aliases": [
+        "guardharnessprofilestest"
+      ],
+      "grounding": "guardreplaytest",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-tui-guard-schema",
+      "canonical": "tuiGuardSchema (guard pane schema tag)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "The versioned schema-identifier constant tuiGuardSchema = \"fak.tui.guard.v1\" that tags the guard pane's data-model version: it is passed as the Pane.Schema in the TUI plugin registry and stamped on every emitted tuiGuardReport.",
+      "distinction": "tuiGuardSchema is a versioned schema-TAG string (a constant, not a field description); tuiGuardReport is the actual data-model struct (Schema/Counts/Rows/Sources) that carries that tag in its Schema field.",
+      "distinct_from": [
+        "x2-guard-gate-tuiguardreport"
+      ],
+      "aliases": [],
+      "grounding": "tuiguardschema",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-action-gated",
+      "canonical": "ActionGated (provider-cache action state)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "ActionGated is one of the three ProviderActionState values (\"gated\") in internal/vcacheobserve: it marks a provider-cache action-plan row (heartbeat_pin, explicit_cache) that cannot be spent yet because it still lacks the required warm-transport or byte-identical-prefix witness, so apply refuses it as RefusedGated.",
+      "distinction": "ActionGated is a provider-cache action STATE in internal/vcacheobserve, blocked on a missing transport witness; the session ActionGate (internal/sessionaudit CompactActionGate / the --session-action-gate threshold) is an unrelated compact-action severity gate in a different package. They share the substring 'action gate' and have no producer/consumer relationship.",
+      "distinct_from": [
+        "x-issue1420-guard-gate-actiongate"
+      ],
+      "aliases": [],
+      "grounding": "actiongated",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-advisory-gate",
+      "canonical": "advisoryGate (advisory report gate)",
+      "family": "guard-gate",
+      "kind": "concept",
+      "definition": "trendreport.AdvisoryGate (reused by cadencereport and milestonereport CheckGate) is the shared advisory CI gate over a folded report: it PASSES (exit 0, '<LABEL> OK') every quality finding, including score and climb-regression advisories, because a trend report is a mirror rather than a second quality gate - and it FAILS (exit 1, '<LABEL> INCOMPLETE') only when a dimension could not be measured.",
+      "distinction": "advisoryGate never blocks on a quality or threshold regression (those pass as advisory) and fails closed only when the report itself is INCOMPLETE; a gate (the general decision point - pre-call adjudicators, post-call result admitters, git-hook gates) can deny the underlying action outright.",
+      "distinct_from": [
+        "gate"
+      ],
+      "aliases": [],
+      "grounding": "advisorygate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-godfile-gate",
+      "canonical": "gateGodFile (god-file / god-function growth ratchet)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "gateGodFileGrowthTree (internal/hooks/gate_godfile.go) is the size ratchet run by `fak hygiene` (pre-push) and `make ci`: it refuses any tracked non-test .go file over the 1500-line ceiling and any function over the 200-line ceiling, except entries grandfathered at their frozen size in the god-file baseline, which may only shrink.",
+      "distinction": "gateGodFile is a whole-tree hygiene/CI ratchet capping BOTH god-files (1500 lines) and god-functions (200 lines), enforced over `git ls-files`; the git-hook gate sibling is the family of staged-diff checks (broken-link, secret-shape, provenance) that fire at git pre-commit/commit-msg. Enforcement point and scope differ - it is not a commit hook.",
+      "distinct_from": [
+        "git-hook-gate"
+      ],
+      "aliases": [],
+      "grounding": "gategodfile",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-gate-stats",
+      "canonical": "gateStats (headroom compression counters)",
+      "family": "guard-gate",
+      "kind": "metric",
+      "definition": "The lifetime counters of the headroom result-compression gate (headroom.Stats): how many tool results were Considered, how many Compressed, the BytesIn / BytesOut of those compressions, and the per-reason breakdown of results left uncompressed (skipped empty / poison / no-saving / not-worth); snapshotted via Gate.Stats() and surfaced in `fak headroom status` and cachevalue status.",
+      "distinction": "gateStats tallies the outcomes of ONE specific gate (the headroom compression admit-gate) across many firings, and its gate only ever Transforms or Allows; a gate is the single decision point being tallied. There is no 'refused' or 'backpressured' outcome here - backpressure belongs to the dispatch-tick gate.",
+      "distinct_from": [
+        "gate"
+      ],
+      "aliases": [],
+      "grounding": "gatestats",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-tierdeclared-gate",
+      "canonical": "gateTierDeclared (leaf tier-declaration gate)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The gate that refuses a new leaf / package unless its architest tier is declared.",
+      "distinction": "gateTierDeclared enforces TIER declaration on new leaves; pythongate is the sibling ratchet that refuses NEW python tools - different subject.",
+      "distinct_from": [
+        "x2-guard-gate-pythongate"
+      ],
+      "aliases": [],
+      "grounding": "gatetierdeclared",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-gate-verdict",
+      "canonical": "gateVerdict (advisory-gate decision)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "trendreport.GateVerdict is one advisory-gate decision - a process exit code plus a human message produced by AdvisoryGate - that each report's CheckGate returns and Envelope.WithGate folds into the cadence and milestone report envelopes, reconciling to OK (exit 0) or ACTION / INCOMPLETE (exit 1).",
+      "distinction": "gateVerdict (trendreport) is a report advisory-gate RESULT: an exit code plus message folded into cadence/milestone envelopes. GateDisposition (internal/ctxmmu) is an unrelated pure decision function that decides whether to MINT a user-preference disposition from an observation plus evidence. It does not wrap gateVerdict - they share only the 'Gate' prefix.",
+      "distinct_from": [
+        "x-goal25-guard-gate-gatedisposition"
+      ],
+      "aliases": [],
+      "grounding": "gateverdict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-growth-gate",
+      "canonical": "growthGate (append-only bloat ratchet)",
+      "family": "guard-gate",
+      "kind": "cli-verb",
+      "definition": "The `fak growthgate` unbounded-growth ratchet: it censuses append-only ledger/log files (.jsonl/.log/.err) across one or more repo roots, classifies each against fixed per-class BYTE budgets (internal/growthgate.Classify), reports an OK/ACTION verdict, and can --reap COLD, over-budget, disposable logs.",
+      "distinction": "growthGate gates on the BYTE SIZE of append-only ledger/log files versus per-class disk budgets - a standing-bloat audit; ScoreTrendGate instead grades a metric ledger's SCORE trend and gates on regression over a window. Disk-bloat check vs score-regression check: 'growth' here is file growth, not score growth.",
+      "distinct_from": [
+        "x-goal25-guard-gate-scoretrendgate"
+      ],
+      "aliases": [],
+      "grounding": "growthgate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-guard-fleet",
+      "canonical": "guardFleet (cross-machine fleet pane provider)",
+      "family": "guard-gate",
+      "kind": "subsystem",
+      "definition": "The display-only, cross-MACHINE fleet-pane provider `fak guard` installs into the gateway (SetSessionFleetProvider): behind a 30s TTL cache it folds published per-machine snapshots (optionally unioned with live LAN spine peers) into a fleetpane.FleetDoc so `fak info` and /debug/vars can render fleet-of-machines health - machine ids, states, per-machine session counts and rolled-up totals.",
+      "distinction": "guardFleet is a read-only snapshot fold that DISPLAYS health across MACHINES and enforces nothing; FleetProcResourceGuard is an actual watchdog that KILLS runaway fleet processes by resource budget. A display fold vs an enforcement kill - and guardFleet aggregates across hosts, not across sessions on one host.",
+      "distinct_from": [
+        "x2-guard-gate-procresourceguard"
+      ],
+      "aliases": [],
+      "grounding": "guardfleet",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-hygiene-gates",
+      "canonical": "hygiene gates (whole-tree audit gates)",
+      "family": "guard-gate",
+      "kind": "concept",
+      "definition": "The whole-tree audit gates run in one process by `fak hygiene` (HygieneGates() in internal/hooks/tree.go): the family of `--audit-tree` checks - DOC_PLACEMENT, BROKEN_LINK, SECRET_SHAPE, INDEX_SYNC, GOD_FILE_GROWTH, BARE_DEV_SPELLING and others - that `make hygiene` / `make ci` enforce over `git ls-files` as a pre-push backstop.",
+      "distinction": "Hygiene gates are the whole-tree (`--audit-tree`) audit twins run unconditionally over the tracked tree; the git-hook gate sibling is the staged (`--audit-staged`) commit-boundary variant fired at git pre-commit/commit-msg. They SHARE several checks (BROKEN_LINK, SECRET_SHAPE, GOD_FILE_GROWTH appear in both) - the boundary is scope and timing, not which checks.",
+      "distinct_from": [
+        "git-hook-gate"
+      ],
+      "aliases": [],
+      "grounding": "hygienegates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-guard-rsi-verbs",
+      "canonical": "guard RSI CLI verbs (cmdGuardRsiScorecard)",
+      "family": "guard-gate",
+      "kind": "cli-verb",
+      "definition": "The `fak` CLI verbs that run the guard-RSI scorecard and the guard-verdict RSI fold.",
+      "distinction": "These are the CLI VERB entry points; guardrsi is the underlying guard-verdict-RSI FOLD they invoke.",
+      "distinct_from": [
+        "x2-guard-gate-guardrsi"
+      ],
+      "aliases": [
+        "cmdguardverdictrsi"
+      ],
+      "grounding": "cmdguardrsiscorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-prefix-guard",
+      "canonical": "prefixGuard (cache-ablation prefix-stability feature)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "FeaturePrefixGuard = \"prefix_guard\" (internal/ablate) is a lossless provider-prompt-cache-control feature in the cache-ablation sweep vocabulary: it guards the STABILITY of the cacheable prompt prefix so provider prompt-cache economics can be relied upon, and when swept on it only bumps a simulated reused-token counter.",
+      "distinction": "prefixGuard is a sweepable cache-ablation FEATURE FLAG (FAK_ABLATE_PREFIX_GUARD) that blocks nothing; guardrail is the generic AI-safety-boundary concept. Despite the name it refuses no operation and protects no namespace - it guards prompt-prefix stability for prompt-caching.",
+      "distinct_from": [
+        "guardrail"
+      ],
+      "aliases": [],
+      "grounding": "prefixguard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-guard-session-card",
+      "canonical": "guardSessionCardHandle (live Slack session card)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The process-wide handle to a guard session's live-updating Slack root card: a guard process runs exactly one session, so a single package-level var is set right after the session root is queued (newGuardSessionCard) and its terminal outcome edit is written from finishGuardChildAndReport. It stays nil - every method a no-op - whenever Slack is unconfigured or the root did not queue, so neither launch nor teardown branches on Slack.",
+      "distinction": "guardSessionCardHandle is the handle to the remote SLACK card that a guard session live-updates and finally stamps with its outcome; the guardInfo panel is the LOCAL terminal status overlay drawn from a /debug/vars snapshot. Remote message card vs local pane, and the card holds no durable state.",
+      "distinct_from": [
+        "x-goal-guard-gate-guard-info-panel"
+      ],
+      "aliases": [],
+      "grounding": "guardsessioncardhandle",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal-guard-gate-review-gate",
+      "canonical": "reviewGate (RSI review-fire value gate)",
+      "family": "guard-gate",
+      "kind": "subsystem",
+      "definition": "The value-gate on the periodic self-improvement review fire (internal/rsiloop): it estimates the expected value of forking a 'review this session for extractable skill/memory' turn (session novelty, unseen tool sequences, error density) in token-equivalents, prices the fork's COST on the same compaction-economics basis (a re-read prefix billed at the cache-read marginal plus generated output), spawns ONLY when expected value exceeds cost, and self-tunes the threshold from the realized outcomes of prior fires.",
+      "distinction": "reviewGate decides whether a forked REVIEW turn is worth its tokens, gating on an expected-value-over-cost estimate it self-tunes from realized outcomes; codexLoopGate gates spawning a CODEX worker on transcript loop / churn / unguarded detection. Both refuse a spawn, but one prices value and the other detects pathology.",
+      "distinct_from": [
+        "x-goal-guard-gate-codex-loop-gate"
+      ],
+      "aliases": [],
+      "grounding": "reviewgate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
