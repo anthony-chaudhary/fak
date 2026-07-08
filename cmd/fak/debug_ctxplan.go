@@ -28,6 +28,7 @@ func cmdDebugContextPlanPreview(argv []string) {
 	fs := flag.NewFlagSet("debug --cmd context-plan-preview", flag.ExitOnError)
 	intents := fs.String("intent", "", "comma-separated forecast intents (predicted reference strings for the run)")
 	pins := fs.String("pins", "", "comma-separated span IDs to force resident (Forecast.Pins)")
+	releases := fs.String("releases", "", "comma-separated span IDs the agent declares no longer needed (Forecast.Releases)")
 	budgetTokens := fs.Int("budget-tokens", 512, "resident token budget for the previewed plan")
 	recentN := fs.Int("recent", ctxplan.DefaultRecencyWindow, "max spans in the recent area")
 	deepN := fs.Int("deep", ctxplan.DefaultDeepSpans, "max spans in the deep area")
@@ -44,7 +45,7 @@ func cmdDebugContextPlanPreview(argv []string) {
 		IncludeDurability: []string{ctxplan.DurabilityDurable, ctxplan.DurabilityBounded},
 		MaxCandidates:     -1,
 	}
-	f := ctxplan.Forecast{Intents: splitCSV(*intents), Pins: splitCSV(*pins)}
+	f := ctxplan.Forecast{Intents: splitCSV(*intents), Pins: splitCSV(*pins), Releases: splitCSV(*releases)}
 	pv := ctxplan.PreviewLayout(spans, f, ctxplan.Budget{Tokens: *budgetTokens}, nil, layout)
 
 	switch *format {
@@ -67,6 +68,10 @@ func demoLongRunSpans() []ctxplan.Span {
 	st.Add("system", ctxplan.DurabilityDurable, []byte("base system prompt: obey the policy, never leak secrets"), false)
 	st.Add("user", ctxplan.DurabilityDurable, []byte("standing goal: migrate the billing service off the legacy queue"), false)
 	st.Add("WebSearch", ctxplan.DurabilityBounded, []byte("legacy queue migration runbook: drain, cut over, verify, decommission"), false)
+	// A quarantined tool result (sealed=true) — the trust gate never lets it resident. It is
+	// span:3, so `--pins span:3` demonstrates the `refused` retention outcome end-to-end: a
+	// sealed retained target is reported refused before materialization, never silently honored.
+	st.Add("Bash", ctxplan.DurabilityTurn, []byte("quarantined tool result: attempted secret exfil — blocked"), true)
 	for i := 0; i < 40; i++ {
 		st.Add("Bash", ctxplan.DurabilityTurn, []byte("routine build/test log line "+strconv.Itoa(i)), false)
 	}

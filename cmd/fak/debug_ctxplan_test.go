@@ -75,6 +75,29 @@ func TestContextPlanPreviewCLIMarkdown(t *testing.T) {
 	}
 }
 
+// TestContextPlanPreviewCLIRetentionOutcomes is the #3024 CLI witness: the preview renders a
+// typed retention outcome for each requested pin/release target in BOTH text and JSON — a
+// resident pin is honored, the quarantined sealed span (span:3) is refused (never silently
+// honored), a bogus id is missing, and a released filler is released. No bytes are materialized.
+func TestContextPlanPreviewCLIRetentionOutcomes(t *testing.T) {
+	args := []string{"--pins", "span:0,span:3,span:999", "--releases", "span:20", "--budget-tokens", "300"}
+
+	text := captureStdoutSafe(t, func() { cmdDebugContextPlanPreview(args) })
+	for _, want := range []string{"RETENTION", "honored", "refused", "missing", "released"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("context-plan-preview retention text missing %q:\n%s", want, text)
+		}
+	}
+
+	jsonArgs := append([]string{"--format", "json"}, args...)
+	js := captureStdoutSafe(t, func() { cmdDebugContextPlanPreview(jsonArgs) })
+	for _, want := range []string{`"retention"`, `"honored"`, `"refused"`, `"missing"`, `"released"`} {
+		if !strings.Contains(js, want) {
+			t.Errorf("context-plan-preview retention json missing %q:\n%s", want, js)
+		}
+	}
+}
+
 // TestContextPlanPreviewCLIDispatchesFromDebugCmd checks the top-level `fak debug --cmd
 // context-plan-preview` dispatch branches out before any cdb core-image ingest/attach is
 // attempted (no --session needed, no cdb-image directory touched).
