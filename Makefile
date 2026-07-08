@@ -268,16 +268,16 @@ gofmt-check:
 
 # hygiene: the deterministic, no-network repo-hygiene gates ci.yml runs HARD — doc
 # placement, links, hosted-demo URLs, demo-command refs, browser-demo metadata, file admission, secret shapes —
-# mirrored into the local gate so a pre-push `make ci` catches them. The seven --audit-tree
+# mirrored into the local gate so a pre-push `make ci` catches them. The --audit-tree
 # checkers with a parity-proven Go twin (DOC_PLACEMENT, BROKEN_LINK, FILE_ADMISSION,
-# SECRET_SHAPE, BRAND_CONSISTENCY, PROVENANCE_LABEL, HARDWARE_TELL) now run in ONE process via
-# `fak hygiene` — no per-checker Python interpreter spawn (~15-20s of process-create + Defender
-# tax saved on Windows). Exit 2 = could-not-run, so we fall back to the Python checkers;
-# exit 1 = a gate fired (HARD fail). The remaining checkers (demo_* x3, guard_mcp_status_audit)
-# are not yet ported (#928) and stay on Python.
+# SECRET_SHAPE, BRAND_CONSISTENCY, PROVENANCE_LABEL, HARDWARE_TELL, DEMO_COMMAND, BROWSER_CONTRACT)
+# now run in ONE process via `fak hygiene` — no per-checker Python interpreter spawn (~15-20s of
+# process-create + Defender tax saved on Windows). Exit 2 = could-not-run, so we fall back to the
+# Python checkers; exit 1 = a gate fired (HARD fail). The remaining checkers (demo_live_links,
+# guard_mcp_status_audit) are not yet ported (#928) and stay on Python.
 hygiene:
 	@go build -o tools/.bin/fak ./cmd/fak
-	@tools/.bin/fak hygiene --gates DOC_PLACEMENT,BROKEN_LINK,FILE_ADMISSION,SECRET_SHAPE,BRAND_CONSISTENCY,PROVENANCE_LABEL,HARDWARE_TELL; \
+	@tools/.bin/fak hygiene --gates DOC_PLACEMENT,BROKEN_LINK,FILE_ADMISSION,SECRET_SHAPE,BRAND_CONSISTENCY,PROVENANCE_LABEL,HARDWARE_TELL,DEMO_COMMAND,BROWSER_CONTRACT; \
 	rc=$$?; \
 	if [ $$rc -eq 2 ]; then \
 		echo "fak hygiene could not run; falling back to Python gates"; \
@@ -287,13 +287,13 @@ hygiene:
 		python3 tools/check_secret_shapes.py --audit-tree && \
 		python3 tools/check_brand_consistency.py --audit-tree && \
 		python3 tools/check_provenance_labels.py --audit-tree && \
-		python3 tools/scrub_hardware_names.py --check; \
+		python3 tools/scrub_hardware_names.py --check && \
+		python3 tools/demo_command_audit.py && \
+		python3 tools/demo_browser_contract.py; \
 	elif [ $$rc -ne 0 ]; then \
 		exit $$rc; \
 	fi
 	@python3 tools/demo_live_links.py
-	@python3 tools/demo_command_audit.py
-	@python3 tools/demo_browser_contract.py
 	@python3 tools/guard_mcp_status_audit.py
 	@go test ./internal/pythongate -run TestNoNewPythonTools
 	@go test ./internal/windowgate -run TestTrackedTreeHasNoPopups

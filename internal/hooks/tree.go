@@ -100,8 +100,8 @@ type HygieneGate struct {
 
 // HygieneGates returns the tree-mode gates that have a parity-proven Go twin, in the order
 // `make hygiene` / `make index-sync` run them. The remaining `make hygiene` checkers
-// (demo_* x3, guard_mcp_status_audit) stay on the Python path until they are ported under
-// #928 A3/A4/A5; each port appends its gate here.
+// (demo_live_links, guard_mcp_status_audit) stay on the Python path until they are ported
+// under #928 A5; each port appends its gate here.
 func HygieneGates() []HygieneGate {
 	return []HygieneGate{
 		{"DOC_PLACEMENT", gateDocPlacementTree, false},
@@ -136,6 +136,15 @@ func HygieneGates() []HygieneGate {
 		// retirement, and flips DefaultOff:false — the enforcement gate that HOLDS the line at zero
 		// un-witnessed discards — once the tree is clean.
 		{"SWALLOWED_ERROR", gateSwallowedErrorTree, true},
+		// DEMO_COMMAND (issue #928 A4) ships default-ON: it is a faithful port of
+		// tools/demo_command_audit.py, which `make hygiene` already runs green over the real
+		// tree, so the gate lands clean and only a NEW stale demo-command reference can red it.
+		{"DEMO_COMMAND", gateDemoCommandTree, false},
+		// BROWSER_CONTRACT (issue #928 A5) ships default-ON: it is a faithful port of
+		// tools/demo_browser_contract.py, which `make hygiene` already runs green over the real
+		// tree, so the gate lands clean and only NEW browser-demo metadata drift (a moved default
+		// port, a dropped demoui helper, a stale run/public doc, a bad lifecycle decision) can red it.
+		{"BROWSER_CONTRACT", gateBrowserContractTree, false},
 	}
 }
 
