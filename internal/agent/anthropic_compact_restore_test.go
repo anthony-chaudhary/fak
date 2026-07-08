@@ -99,7 +99,7 @@ func TestOriginatingTaskDigestIDStable(t *testing.T) {
 	if id1 != id2 {
 		t.Fatalf("digest not stable: %q vs %q", id1, id2)
 	}
-	if len(id1) != 64 {
+	if len(id1) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex is a fixed 64-char width
 		t.Fatalf("digest length = %d, want 64 (sha256 hex)", len(id1))
 	}
 	if originatingTaskDigestID([]byte(`{"role":"user","content":"other"}`)) == id1 {
