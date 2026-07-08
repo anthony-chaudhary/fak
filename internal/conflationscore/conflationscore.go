@@ -161,6 +161,7 @@ var valuationBasisQualifiers = []string{
 	"valuation_basis", "valuation basis", "basis=",
 	"FULL_INPUT", "full-input", "full input",
 	"CACHE_READ_MARGINAL", "cache-read marginal", "cache read marginal", "cache-read-marginal",
+	"BLENDED_MARGINAL", "blended-marginal", "blended marginal",
 	"OBSERVED_NET", "observed-net", "observed net",
 	"1.0x", "0.1x", "0.9x", "CacheReadMultiplier", "cache-read multiplier", "cache read multiplier",
 }
