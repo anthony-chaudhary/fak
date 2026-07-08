@@ -73,6 +73,23 @@ const (
 	glmGGUFIndexerWeights = "indexer.proj.weight"     // indexer.weights_proj
 )
 
+// glmLayerHasIndexer reports whether GGUF decoder layer `layer` carries ANY of its DSA
+// learned-indexer weights (blk.<layer>.indexer.*). The llama.cpp glm-dsa converter emits the
+// whole indexer set for a "full" layer and NONE for a "shared" layer, so presence of any member
+// classifies the layer. Keying on any member (not a single sentinel like attn_q_b) means a
+// partially-stripped/corrupt full layer still classifies "full" and fails LOUD on the missing
+// tensor inside the index step, rather than being silently mis-scheduled as "shared" (which would
+// wrongly reuse a prior layer's top-k). The load-bearing indexer tensors the forward reads are
+// wq_b / wk / k_norm / weights_proj; k_norm.bias is excluded as an optional companion.
+func glmLayerHasIndexer(f *File, layer int) bool {
+	for _, suffix := range []string{glmGGUFIndexerWQB, glmGGUFIndexerWK, glmGGUFIndexerKNorm, glmGGUFIndexerWeights} {
+		if f.hasTensor(fmt.Sprintf("blk.%d.%s", layer, suffix)) {
+			return true
+		}
+	}
+	return false
+}
+
 // glmMoeDsaCanonicalSuffix maps a glm_moe_dsa per-layer GGUF tensor suffix (after "blk.<L>.")
 // to the canonical HF suffix (after "model.layers.<L>.") the native glm_dsa forward reads.
 // Returns ok=false for any suffix that is not GLM-specific so CanonicalTensorNameArch falls

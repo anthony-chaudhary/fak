@@ -3,6 +3,7 @@ package ggufload
 import (
 	"bytes"
 	"encoding/binary"
+	"strings"
 	"testing"
 )
 
@@ -212,6 +213,90 @@ func TestGLMMoeDsaIndexerTypesNoDeriveWithoutIndexer(t *testing.T) {
 	}
 	if len(cfg.IndexerTypes) != 0 {
 		t.Fatalf("IndexerTypes=%v, want empty (no indexer tensors -> no derivation)", cfg.IndexerTypes)
+	}
+}
+
+// TestGLMMoeDsaIndexerTypesFullOnAnyIndexerTensor hardens the derivation against a single-sentinel
+// blind spot: a "full" layer that carries its indexer weights but is MISSING the attn_q_b sentinel
+// (a partially-stripped checkpoint) must still classify "full" — so it fails loud on the missing
+// tensor in the index step rather than silently mis-scheduling as "shared" and reusing a prior
+// layer's top-k. Layer 1 here carries only attn_k (no attn_q_b) yet must still be "full".
+func TestGLMMoeDsaIndexerTypesFullOnAnyIndexerTensor(t *testing.T) {
+	meta := synthGLMMeta(4)
+	meta["glm-dsa.block_count"] = Value{Type: TypeUint64, Value: uint64(4)}
+	f := &File{
+		Metadata: meta,
+		Tensors: []TensorInfo{
+			{Name: "blk.0.indexer.attn_q_b.weight", Dims: []uint64{8, 8}, Type: TensorF32}, // gate: layer 0 full
+			{Name: "blk.1.indexer.attn_k.weight", Dims: []uint64{8, 8}, Type: TensorF32},   // full via a NON-sentinel member
+			// layers 2,3 carry no indexer tensors -> "shared".
+		},
+	}
+	cfg, err := f.Config()
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+	want := []string{"full", "full", "shared", "shared"}
+	if len(cfg.IndexerTypes) != len(want) {
+		t.Fatalf("IndexerTypes=%v, want %v", cfg.IndexerTypes, want)
+	}
+	for i, w := range want {
+		if cfg.IndexerTypes[i] != w {
+			t.Fatalf("IndexerTypes=%v, want %v (layer %d)", cfg.IndexerTypes, want, i)
+		}
+	}
+}
+
+// TestGLMMoeDsaIndexerScheduleUnresolvedFailsLoud is the native-753B hardening #2 gate: a file
+// that DECLARES a DSA indexer (attention.indexer.head_count > 0) AND ships a real tensor directory
+// (an actual load, not a header-only probe) but carries NEITHER an indexer_types key NOR any
+// blk.*.indexer.* tensors has an unresolvable per-layer schedule. Config() must refuse it HERE
+// rather than defer to a forward panic on the first shared layer at first completion. token_embd
+// is the sole tensor: it makes len(f.Tensors) > 0 (a genuine load) without providing any indexer.
+func TestGLMMoeDsaIndexerScheduleUnresolvedFailsLoud(t *testing.T) {
+	meta := synthGLMMeta(4)
+	meta["glm-dsa.block_count"] = Value{Type: TypeUint64, Value: uint64(4)}
+	// Declare the DSA indexer axis: this file CLAIMS to be a DSA-indexer model.
+	meta["glm-dsa.attention.indexer.head_count"] = Value{Type: TypeUint64, Value: uint64(4)}
+	f := &File{
+		Metadata: meta,
+		// A real tensor directory but NO indexer tensors and NO indexer_types key.
+		Tensors: []TensorInfo{
+			{Name: "token_embd.weight", Dims: []uint64{32, 32}, Type: TensorF32},
+		},
+	}
+	_, err := f.Config()
+	if err == nil {
+		t.Fatalf("Config() = nil error, want a fail-loud error for an unresolved DSA indexer schedule")
+	}
+	if !strings.Contains(err.Error(), "indexer") || !strings.Contains(err.Error(), "unresolved") {
+		t.Fatalf("Config() error = %q, want it to name the unresolved indexer schedule", err)
+	}
+}
+
+// TestGLMMoeDsaIndexerScheduleResolvedPassesGate is the positive companion to the fail-loud gate:
+// the SAME declared-indexer file, but now carrying indexer tensors on layers 0 and 1. The schedule
+// derives to exactly block_count entries ([full full shared shared]), so the gate is satisfied and
+// Config() returns no error. This proves the len(f.Tensors) > 0 gate does not false-positive on a
+// well-formed DSA checkpoint.
+func TestGLMMoeDsaIndexerScheduleResolvedPassesGate(t *testing.T) {
+	meta := synthGLMMeta(4)
+	meta["glm-dsa.block_count"] = Value{Type: TypeUint64, Value: uint64(4)}
+	meta["glm-dsa.attention.indexer.head_count"] = Value{Type: TypeUint64, Value: uint64(4)}
+	f := &File{
+		Metadata: meta,
+		Tensors: []TensorInfo{
+			{Name: "blk.0.indexer.attn_q_b.weight", Dims: []uint64{8, 8}, Type: TensorF32},
+			{Name: "blk.1.indexer.attn_q_b.weight", Dims: []uint64{8, 8}, Type: TensorF32},
+			// layers 2,3 carry no indexer tensors -> "shared"; schedule resolves to len 4.
+		},
+	}
+	cfg, err := f.Config()
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+	if len(cfg.IndexerTypes) != cfg.NumLayers {
+		t.Fatalf("IndexerTypes=%v, want %d entries (block_count)", cfg.IndexerTypes, cfg.NumLayers)
 	}
 }
 

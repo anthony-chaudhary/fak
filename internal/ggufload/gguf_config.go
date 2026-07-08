@@ -224,7 +224,9 @@ func (f *File) Config() (model.Config, error) {
 		}
 	}
 	if canonicalGGUFArch(arch) == "glm_moe_dsa" {
-		applyGLMMoeDsaConfig(f, p, &cfg, ropeDim)
+		if err := applyGLMMoeDsaConfig(f, p, &cfg, ropeDim); err != nil {
+			return model.Config{}, err
+		}
 	}
 	if arch == "qwen3moe" {
 		applyQwen3MoEConfig(f, p, &cfg)
@@ -429,11 +431,15 @@ const (
 // qk_rope_head_dim fallback under the deepseek2 convention (where the rotary
 // portion of each latent head equals the global rope dimension).
 //
+// It returns an error only for the one fail-loud case below: a checkpoint that
+// declares a DSA indexer AND ships a real tensor directory but leaves the
+// per-layer schedule unresolvable. Every other axis is read best-effort.
+//
 // Scope (deliberate, per the staged native-753B plan): this is config parsing
 // ONLY. The GGUF MoE/MLA/indexer TENSOR-name mapping (CanonicalTensorNameArch)
 // and the batched-expert splitter are the next two slices; HeadDim semantics for
 // MLA are reconciled when the forward wiring lands.
-func applyGLMMoeDsaConfig(f *File, p string, cfg *model.Config, ropeDim int) {
+func applyGLMMoeDsaConfig(f *File, p string, cfg *model.Config, ropeDim int) error {
 	// ---- MoE FFN axis -------------------------------------------------------
 	applyMoEExpertCounts(f, p, cfg)
 	if v := intValueOrZero(f, p+glmKeyExpertSharedCount); v > 0 {
@@ -509,17 +515,23 @@ func applyGLMMoeDsaConfig(f *File, p string, cfg *model.Config, ropeDim int) {
 	// tensors; a "shared" layer reuses the most recent full layer's selection and has NO
 	// indexer tensors in the file. The real GLM-5.2 GGUF ships no indexer_types metadata
 	// key, so when it is absent we DERIVE the per-layer schedule from tensor presence:
-	// a layer is "full" iff its indexer weights are in the file, else "shared". Without
+	// a layer is "full" iff it carries any of its indexer weights, else "shared". Without
 	// this cfg.IndexerTypes stays empty, glmDsaIndexerKind() treats every layer as "full"
 	// (its out-of-range default), and the forward panics demanding indexer tensors on the
 	// first shared layer (blk.3.indexer.* is absent) at the first completion.
+	//
+	// glmLayerHasIndexer keys on ANY indexer member (not just attn_q_b), so a partially
+	// stripped/corrupt full layer classifies "full" and fails LOUD on the missing tensor
+	// in the index step rather than silently mis-scheduling as "shared" (which would wrongly
+	// reuse a prior layer's top-k). This is identical to the single-sentinel result for a
+	// real GLM-5.2 file, where a full layer ships the whole indexer set atomically.
 	if types, ok := f.StringArray(p + glmKeyIndexerTypes); ok {
 		cfg.IndexerTypes = types
-	} else if cfg.NumLayers > 0 && f.hasTensor("blk.0."+glmGGUFIndexerWQB) {
+	} else if cfg.NumLayers > 0 && glmLayerHasIndexer(f, 0) {
 		// Only derive for a genuine DSA-indexer checkpoint (layer 0 is always full).
 		types := make([]string, cfg.NumLayers)
 		for l := 0; l < cfg.NumLayers; l++ {
-			if f.hasTensor(fmt.Sprintf("blk.%d.%s", l, glmGGUFIndexerWQB)) {
+			if glmLayerHasIndexer(f, l) {
 				types[l] = "full"
 			} else {
 				types[l] = "shared"
@@ -527,6 +539,25 @@ func applyGLMMoeDsaConfig(f *File, p string, cfg *model.Config, ropeDim int) {
 		}
 		cfg.IndexerTypes = types
 	}
+
+	// Fail-loud (native-753B hardening #2): a checkpoint that DECLARES a DSA indexer
+	// (indexer.head_count > 0) AND ships a real tensor directory — an actual load, not a
+	// header-only config probe — MUST resolve a per-layer full/shared schedule of exactly
+	// NumLayers entries, whether from the indexer_types key or the tensor-presence
+	// derivation above. If it does not, refuse HERE at config parse instead of letting
+	// glmDsaIndexerKind() silently default every layer to "full" (its out-of-range case)
+	// and the native DSA forward panic on the first shared layer at the first completion —
+	// a failure that would otherwise surface far from its cause, deep in decode.
+	//
+	// The len(f.Tensors) > 0 guard is load-bearing, not incidental: header-only fixtures
+	// (config estimation, the arch-normalization golden) legitimately declare the indexer
+	// axis with no tensor directory attached, and must NOT trip this. Only a file carrying
+	// real weights can be judged "missing its indexer schedule."
+	if len(f.Tensors) > 0 && cfg.IndexNHeads > 0 && len(cfg.IndexerTypes) != cfg.NumLayers {
+		return fmt.Errorf("gguf: glm_moe_dsa declares a DSA indexer (%s=%d) but its per-layer schedule is unresolved: len(indexer_types)=%d, want block_count=%d — the %q key is absent and no blk.*.indexer.* tensors were found (broken or incomplete DSA checkpoint)",
+			p+glmKeyIndexNHeads, cfg.IndexNHeads, len(cfg.IndexerTypes), cfg.NumLayers, p+glmKeyIndexerTypes)
+	}
+	return nil
 }
 
 func intValueOrZero(f *File, key string) int {
