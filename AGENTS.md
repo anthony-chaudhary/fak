@@ -53,10 +53,16 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 > **Build *verification* must never write the in-tree binary.** A bare `go build ./cmd/fak`
 > drops `fak.exe` into the repo root; while a fleet process holds the old binary open, Windows
 > throws `open fak.exe: The process cannot access the file because it is being used by another
-> process` (#2373). To just check that `./cmd/fak` compiles, send the output elsewhere or don't
-> emit one: `go build -o $env:TEMP\fak-verify.exe ./cmd/fak` (PowerShell) / `go build -o
-> /tmp/fak-verify.exe ./cmd/fak` (bash), or `go vet ./cmd/fak`. The in-tree `go build -o fak`
-> above is for *producing* the binary you run, not for a compile check.
+> process` (#2373). The fleet-safe way to compile-check on the shared trunk is **`fak
+> buildcheck [pkgs...]`**: it discards the output to the null device (never an in-tree binary,
+> universal across lib/main/multi-pkg) *and* generates a `go build -overlay` that hides peers'
+> untracked in-flight `.go` files, so a sibling's WIP can't red your compile — `--mine <file>`
+> keeps your own new untracked file, `--vet` runs `go vet`, `--json` reports. The raw fallback
+> (when the binary is unbuildable) is `go build -o $env:TEMP\fak-verify.exe ./cmd/fak`
+> (PowerShell) / `go build -o /tmp/fak-verify.exe ./cmd/fak` (bash), or `go vet ./cmd/fak` —
+> but note a *fixed* temp name still collides when two agents run it at once, which is exactly
+> what `fak buildcheck`'s per-process temp overlay avoids. The in-tree `go build -o fak` above
+> is for *producing* the binary you run, not for a compile check.
 
 ## The 60-second proof (no key, no model, no GPU — verified)
 
