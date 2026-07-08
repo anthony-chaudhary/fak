@@ -226,7 +226,29 @@ func (s *Server) renderTurnDebugStats(trace, wire string, stream bool, finish st
 	// this turn's provider cache_read is fak-unlocked, so the fak= slice credits it. Clearing keeps
 	// the credit per-turn — fak= appears only on the turns fak actually placed a breakpoint.
 	safety.placementUnlocked = s.takePlacement(trace)
-	s.debugStatsf("%s", formatTurnDebugStatsWithBudget(trace, wire, stream, finish, prompt, completion, cacheRead, cacheCreate, compacted, s.compactHistoryBudget, d, have, safety))
+	// #1135: append the harness-coherence collision fields (harness_rewrite / quarantine_at_risk)
+	// read from the SAME accumulator the fak_harness_coherence_* scrape folds, so the glanceable
+	// operator line and /metrics can never disagree. Absent until the two context managers actually
+	// collide, so the fields' presence is itself the signal (like safety=).
+	sum := s.metrics.harnessCoherenceSummary()
+	line := formatTurnDebugStatsWithBudget(trace, wire, stream, finish, prompt, completion, cacheRead, cacheCreate, compacted, s.compactHistoryBudget, d, have, safety)
+	s.debugStatsf("%s", line+formatHarnessCoherenceField(sum.HarnessRewrites, sum.QuarantineAtRisk))
+}
+
+// formatHarnessCoherenceField renders the harness-coherence collision fields for the per-turn
+// operator line (#1135). harness_rewrite=<n> counts turns where the HARNESS rewrote its own
+// history (auto-compaction / /compact) — bursting the prefix fak preserved, the opposite of what
+// fak's cache-preserving compaction just did; quarantine_at_risk=<n> is the subset where a
+// fak-sealed (quarantined) span coincided with the rewrite, so the poisoned span may have survived
+// into the harness summary. Both are cumulative session counts from HarnessCoherenceSummary (the
+// same numbers /metrics reports). It returns "" while both are zero — a clean session stays clean;
+// the fields appear only once the two managers collide, matching the glanceable posture of the
+// existing cache=/compact= fields without adding a flag.
+func formatHarnessCoherenceField(rewrites, atRisk uint64) string {
+	if rewrites == 0 && atRisk == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" harness_rewrite=%d quarantine_at_risk=%d", rewrites, atRisk)
 }
 
 // renderTurnDebugError emits one per-turn debug line on a FAILED turn — the missing half of the

@@ -12,6 +12,46 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
+// TestFormatHarnessCoherenceField_PresentOnlyOnCollision asserts the #1135 fields are absent on a
+// clean session (both counts zero) and name both counts once the two context managers collide — the
+// "presence is the signal" glanceable posture.
+func TestFormatHarnessCoherenceField_PresentOnlyOnCollision(t *testing.T) {
+	if got := formatHarnessCoherenceField(0, 0); got != "" {
+		t.Fatalf("clean session should render no harness-coherence field, got %q", got)
+	}
+	got := formatHarnessCoherenceField(3, 1)
+	if !strings.Contains(got, "harness_rewrite=3") || !strings.Contains(got, "quarantine_at_risk=1") {
+		t.Fatalf("harness-coherence field missing counts: %q", got)
+	}
+	if got := formatHarnessCoherenceField(0, 1); got == "" {
+		t.Fatal("a non-zero quarantine_at_risk must still render")
+	}
+}
+
+// TestRenderTurnDebugStats_AppendsHarnessCoherence drives the render path end to end: a Server whose
+// harness-coherence accumulator has observed a rewrite (with a sealed span at risk) must emit those
+// counts on the per-turn operator line, read from the SAME accumulator /metrics folds.
+func TestRenderTurnDebugStats_AppendsHarnessCoherence(t *testing.T) {
+	s := &Server{metrics: newGatewayMetrics(time.Now())}
+	s.metrics.harnessCoherence.harnessRewrites = 2
+	s.metrics.harnessCoherence.quarantineAtRisk = 1
+
+	var line string
+	s.debugStatsf = func(format string, a ...any) { line = fmt.Sprintf(format, a...) }
+	s.renderTurnDebugStats("t1", "anthropic_messages", false, "end_turn", 100, 5, 0, 0, false)
+	if !strings.Contains(line, "harness_rewrite=2 quarantine_at_risk=1") {
+		t.Fatalf("operator line missing harness-coherence collision fields:\n%s", line)
+	}
+
+	s2 := &Server{metrics: newGatewayMetrics(time.Now())}
+	var clean string
+	s2.debugStatsf = func(format string, a ...any) { clean = fmt.Sprintf(format, a...) }
+	s2.renderTurnDebugStats("t2", "anthropic_messages", false, "end_turn", 100, 5, 0, 0, false)
+	if strings.Contains(clean, "harness_rewrite") {
+		t.Fatalf("clean session should not render harness_rewrite:\n%s", clean)
+	}
+}
+
 func TestFormatTurnDebugStats_SurfacesHealthState(t *testing.T) {
 	// The cache column reports the rolling resetScore state verbatim; a healthy read-heavy
 	// turn (read 80, no write) clears the verdict to ok. stale_prefix/decay drive degraded.

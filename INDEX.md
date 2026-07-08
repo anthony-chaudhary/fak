@@ -178,6 +178,12 @@ front page.
 
 ### Latest working notes
 
+- [The savers stay on for our own automated sessions, not just a human at the keyboard](docs/notes/LAUNCHER-SAVER-PARITY-2026-07-08.md) -- auto-indexed dated note.
+- [Durable fix: guard out-of-tree-write arg-rules → positive containment](docs/notes/2026-07-07-guard-oot-write-positive-containment.md) -- auto-indexed dated note.
+- [Audit: the SECRET_EXFIL quarantine blinds a legitimate dev — five whys + warn-first fix](docs/notes/AUDIT-secret-quarantine-blinds-dev-five-whys-2026-07-07.md) -- auto-indexed dated note.
+- [Model-progress caching taxonomy — what state each family produces, and what of it is cacheable](docs/notes/CONCEPT-MODEL-PROGRESS-CACHING-TAXONOMY-2026-07-07.md) -- auto-indexed dated note.
+- [compress default-on witness (2026-07-06)](docs/notes/COMPRESS-DEFAULT-ON-WITNESS-2026-07-06.md) -- auto-indexed dated note.
+- [GLM-5.2 per-box baseline + next steps (GPU server 2 vs GPU server 3)](docs/notes/GLM52-DGX-PER-BOX-BASELINE-AND-NEXT-STEPS-2026-07-06.md) -- auto-indexed dated note.
 - [GLM-5.2 pure-fak performance: the true frontier, and what landed](docs/notes/GLM52-PURE-FAK-PERF-FRONTIER-AND-LANDED-2026-07-08.md) -- auto-indexed dated note.
 - [Related-repos & SOTA landscape (2026-07-07)](docs/notes/RESEARCH-related-repos-landscape-2026-07-07.md) -- auto-indexed dated note.
 - [field-borrow pass over the landscape (2026-07-08)](docs/notes/CONCEPT-FIELD-BORROW-LANDSCAPE-2026-07-08.md) — witnessed capability-import over the 2026-07-07 landscape: 20 borrows dogfooded against fak's own self-query (`fak capabilities`/`fak index` + grep), grounded in a `file:line` seam, deduped vs the 915 open issues, epic-anchored. 17 real PARTIAL gaps filed (#3190-#3206), 2 dropped PRESENT (SafeKV → `l3share.go`; CaMeL/FIDES IFC → `internal/ifc/ifc.go`), 1 present-with-narrow-extension (Landlock → comment on #3196).
