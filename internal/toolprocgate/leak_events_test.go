@@ -113,8 +113,8 @@ func TestLeakEventEmissionFromEnforcementAdaptersRedactsCanary(t *testing.T) {
 	if out.LeakEvent == nil {
 		t.Fatalf("quarantined child output did not emit a leak event: verdict=%v/%s", out.Verdict.Kind, abi.ReasonName(out.Verdict.Reason))
 	}
-	if out.LeakEvent.Action != LeakOutputQuarantined || out.LeakEvent.Reason != "SECRET_EXFIL" {
-		t.Fatalf("output leak event = %+v, want output_quarantined/SECRET_EXFIL", *out.LeakEvent)
+	if out.LeakEvent.Action != LeakOutputRedacted || out.LeakEvent.Reason != "SECRET_REDACTED" {
+		t.Fatalf("output leak event = %+v, want output_redacted/SECRET_REDACTED (warn-first default)", *out.LeakEvent)
 	}
 	events = append(events, *out.LeakEvent)
 	report := LeakReportFromEvents(events)
@@ -133,7 +133,8 @@ func TestLeakEventEmissionFromEnforcementAdaptersRedactsCanary(t *testing.T) {
 		"agent-child-2361",
 		"agent-parent-2361",
 		"toolu-output-2361",
-		"SECRET_EXFIL",
+		"SECRET_REDACTED",
+		"output_redacted",
 		"descendant=running",
 		"spawn_denied",
 	} {

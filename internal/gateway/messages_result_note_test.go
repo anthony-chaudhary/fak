@@ -14,6 +14,51 @@ func qadm(id, tool, reason string) ResultAdmission {
 	return ResultAdmission{ToolCallID: id, Tool: tool, Verdict: WireVerdict{Kind: "QUARANTINE", Reason: reason}}
 }
 
+// radm builds a SECRET_REDACTED TRANSFORM ResultAdmission (warn-first: masked in place).
+func radm(id, tool string) ResultAdmission {
+	return ResultAdmission{ToolCallID: id, Tool: tool, Verdict: WireVerdict{Kind: "TRANSFORM", Reason: reasonSecretRedacted}}
+}
+
+// A SECRET_REDACTED transform yields a one-line WARN, NOT the held-out banner: the note
+// says the credential was masked and the rest of the output is intact, and it must never
+// tell the model the result was "held out" or bait a re-read.
+func TestResultAdmissionNoteRedactionWarn(t *testing.T) {
+	got := resultAdmissionNote([]ResultAdmission{radm("tc1", "Bash")})
+	if got == "" {
+		t.Fatal("a redaction should yield a warn note")
+	}
+	if strings.Contains(got, "\n") {
+		t.Errorf("warn must be one line, got:\n%s", got)
+	}
+	for _, want := range []string{"[fak]", "masked", "SECRET_REDACTED", "in context", "fail_closed"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("redaction warn missing %q; got: %s", want, got)
+		}
+	}
+	// It must NOT read as a held-out / paged-out banner (that would mislead the model
+	// into re-reading a result that is actually right there).
+	for _, bad := range []string{"held out of context", "page-in gate", "NOT page back"} {
+		if strings.Contains(got, bad) {
+			t.Errorf("redaction warn must not read as a held-out banner, contains %q: %s", bad, got)
+		}
+	}
+}
+
+// A mixed turn (one held-out quarantine + one masked-in-place redaction) surfaces BOTH:
+// the held-out banner AND the redaction warn, in one note.
+func TestResultAdmissionNoteMixedQuarantineAndRedaction(t *testing.T) {
+	got := resultAdmissionNote([]ResultAdmission{
+		qadm("tc1", "WebFetch", "TRUST_VIOLATION"),
+		radm("tc2", "Bash"),
+	})
+	if !strings.Contains(got, "held out of context") {
+		t.Errorf("mixed note should carry the held-out banner: %s", got)
+	}
+	if !strings.Contains(got, "SECRET_REDACTED") || !strings.Contains(got, "masked") {
+		t.Errorf("mixed note should also carry the redaction warn: %s", got)
+	}
+}
+
 // TestResultAdmissionNoteShrink pins the B half: the banner is ONE line, names the count
 // and the closed-vocabulary reason codes (with per-reason multiplicity), keeps the
 // load-bearing "retrievable / not your fault" reassurance, and is far shorter than the old

@@ -24,8 +24,14 @@
 // runbook quoting the markers — see highConfidenceInjection) page out as
 // RETRIEVABLE transforms so the bytes stay out of context without raising the loud
 // quarantine banner.
-// Secrets quarantine regardless of source (a leaked credential is worth holding
-// even from a local read).
+// Secrets are WARN-FIRST by default (dev-permissive): a credential-shaped span is
+// MASKED IN PLACE (canon.RedactSecrets) and the rest of the legitimate output is kept
+// in context — the developer handling their own credential on their own box is not
+// blinded, and there is no paged-out stub to re-read (which is what livelocked a real
+// session). The hard SEAL (whole result held out, SECRET_EXFIL) is reserved for the
+// OPT-IN fail_closed posture and for obfuscated secrets the in-place redactor cannot
+// reach. This is the deliberate flip from the earlier "secrets quarantine regardless
+// of source" policy: strict is now a policy choice, permissive is the default.
 //
 // The de-obfuscating canonicalization + lexical detection lives in internal/canon
 // (one primitive, tested once, reused by the read-time recall re-screen too).
@@ -43,6 +49,7 @@ import (
 	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/canon"
 	"github.com/anthony-chaudhary/fak/internal/numfmt"
 	"github.com/anthony-chaudhary/fak/internal/provenance"
@@ -136,10 +143,16 @@ func (g *Gate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ve
 		return abi.Verdict{Kind: abi.VerdictDefer, By: "normgate"} // let ctxmmu handle oversize/verbatim
 	}
 
-	// Secret (any provenance) -> quarantine. Injection from UNTRUSTED egress ->
-	// quarantine. Injection from a TRUSTED LOCAL read -> retrievable Transform.
+	// Secret: warn-first by DEFAULT (issue: a dev handling their own credential on
+	// their own box was blinded when the whole result sealed). The default masks the
+	// credential span IN PLACE and keeps the rest of the legitimate output in context
+	// (canon.RedactSecrets), so there is no paged-out stub to re-read and no livelock.
+	// An explicit fail_closed posture (opt-in, for untrusted/unattended contexts) still
+	// SEALS the whole result. An obfuscated secret with no raw-locatable span also
+	// seals — the redactor cannot reach it, and that is the adversarial case the
+	// permissive path must not cover. Injection keeps its existing provenance policy.
 	if secret {
-		return g.quarantineOut(ctx, r, abi.ReasonSecretExfil, body)
+		return g.admitSecret(ctx, c, r, body)
 	}
 	if !trustedLocal(c, r) {
 		if !highConfidenceInjection(body) {
@@ -270,6 +283,77 @@ func reverseRunes(s string) string {
 		rs[i], rs[j] = rs[j], rs[i]
 	}
 	return string(rs)
+}
+
+// admitSecret is the warn-first secret policy (the dev-permissive default). It routes
+// a detected secret to one of three outcomes:
+//
+//   - fail_closed posture (OPT-IN, for untrusted/unattended contexts) -> SEAL the whole
+//     result (quarantineOut / SECRET_EXFIL), the pre-warn-first behavior;
+//   - an OBFUSCATED secret with no raw-locatable span (canon.RawSecretComplete false) ->
+//     SEAL too: the in-place redactor cannot reach a credential that only surfaces on a
+//     de-obfuscated view, and an obfuscated secret is the adversarial case the permissive
+//     path must not cover;
+//   - otherwise (the DEFAULT) -> REDACT the credential span(s) in place and keep the rest
+//     of the legitimate output in context (redactOut / SECRET_REDACTED). No paged-out stub,
+//     so nothing to re-read and no livelock.
+//
+// The posture is read from the active adjudicator policy the same way secretgate reads
+// it; with no manifest loaded the zero posture is the permissive default (redact), NOT a
+// seal — this is the deliberate warn-first flip. A policy author opts INTO the seal.
+func (g *Gate) admitSecret(ctx context.Context, c *abi.ToolCall, r *abi.Result, body []byte) abi.Verdict {
+	if secretPostureSeals() {
+		return g.quarantineOut(ctx, r, abi.ReasonSecretExfil, body)
+	}
+	if !canon.RawSecretComplete(body) {
+		// Obfuscated / not raw-locatable: the redactor cannot mask it, so fall back to
+		// the seal rather than admit a body whose credential the mask would miss.
+		return g.quarantineOut(ctx, r, abi.ReasonSecretExfil, body)
+	}
+	return g.redactOut(ctx, r, body)
+}
+
+// secretPostureSeals reports whether the active policy opts into the hard seal
+// (fail_closed) for discovered secrets. Any other posture — including the unset default
+// — takes the warn-first redact path. Read off the same adjudicator.Default policy
+// secretgate uses, so one manifest knob governs both rungs.
+func secretPostureSeals() bool {
+	posture, _ := adjudicator.Default.SecretPolicy()
+	return posture == adjudicator.SecretFailClosed
+}
+
+// redactOut masks the credential span(s) in body IN PLACE and admits the redacted
+// result as a Transform — the rest of the output stays in context. Unlike quarantineOut
+// it pages nothing out and mints no held handle: the redacted body carries no live
+// credential (canon.RedactSecrets is verified to re-screen clean), so there is nothing
+// to hold. The verdict is a Transform (retrievable is moot — the bytes are already in
+// context) carrying ReasonSecretRedacted so the banner reads as a WARN, not the loud
+// SECRET_EXFIL seal.
+func (g *Gate) redactOut(ctx context.Context, r *abi.Result, body []byte) abi.Verdict {
+	red, masked := canon.RedactSecrets(body)
+	if masked == 0 {
+		// Detector said secret but the redactor masked nothing (all placeholders, or a
+		// detection/redaction skew) — take the safe direction and seal rather than admit
+		// the unredacted body.
+		return g.quarantineOut(ctx, r, abi.ReasonSecretExfil, body)
+	}
+	atomic.AddInt64(&g.transform, 1)
+	// The Transform payload IS the redacted body (not a stub): the gateway swaps
+	// NewArgs in for the raw result, so the model sees the legitimate output with only
+	// the secret span masked. The redacted body re-screens clean (canon.RedactSecrets is
+	// verified), so no held handle and no page-in gate are needed.
+	redRef, ok := putBytes(ctx, red)
+	if !ok {
+		return abi.Verdict{Kind: abi.VerdictDefer, By: "normgate"}
+	}
+	r.Payload = redRef
+	if r.Meta == nil {
+		r.Meta = map[string]string{}
+	}
+	r.Meta["normgate"] = "secret-redacted"
+	r.Meta["masked_spans"] = fmt.Sprintf("%d", masked)
+	return abi.Verdict{Kind: abi.VerdictTransform, Reason: abi.ReasonSecretRedacted, By: "normgate",
+		Payload: abi.TransformPayload{NewArgs: redRef}}
 }
 
 func (g *Gate) quarantineOut(ctx context.Context, r *abi.Result, reason abi.ReasonCode, body []byte) abi.Verdict {
@@ -407,6 +491,14 @@ func putJSON(ctx context.Context, v any) (abi.Ref, bool) {
 	if err != nil {
 		return abi.Ref{}, false
 	}
+	return putBytes(ctx, b)
+}
+
+// putBytes stores raw bytes through the active resolver (or inlines them) and returns
+// a Ref. Unlike putJSON it does not marshal — the redacted-result path needs the exact
+// bytes back, not a JSON re-encoding, since the gateway resolves NewArgs to the literal
+// result the model sees.
+func putBytes(ctx context.Context, b []byte) (abi.Ref, bool) {
 	if res := abi.ActiveResolver(); res != nil {
 		if ref, err := res.Put(ctx, b); err == nil {
 			return ref, true

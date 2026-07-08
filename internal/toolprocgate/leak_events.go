@@ -28,6 +28,7 @@ const (
 	LeakEgressDenied                LeakAction = "egress_denied"
 	LeakFSDenied                    LeakAction = "fs_denied"
 	LeakOutputQuarantined           LeakAction = "output_quarantined"
+	LeakOutputRedacted              LeakAction = "output_redacted"
 	LeakDescendantReaped            LeakAction = "descendant_reaped"
 	LeakUnmanagedDescendantDetected LeakAction = "unmanaged_descendant_detected"
 )
@@ -204,8 +205,21 @@ func LeakEventFromSpawnAudit(a SpawnAudit, atMS int64) LeakEvent {
 // LeakEventFromOutputAdmission adapts a child-output admission refusal into the
 // same leak-prevention stream. Benign/admitted output is intentionally silent.
 func LeakEventFromOutputAdmission(out OutputAdmission, atMS int64) (LeakEvent, bool) {
+	action := LeakOutputQuarantined
 	switch out.Verdict.Kind {
 	case abi.VerdictQuarantine, abi.VerdictDeny, abi.VerdictRequireWitness:
+		// Whole child output sealed/refused — held out of every parent surface.
+	case abi.VerdictTransform:
+		// Warn-first in-place secret REDACTION (the dev-permissive default): the
+		// credential span was masked out of the admitted output. The surrounding
+		// output stayed in context, but a credential WAS detected leaving the child,
+		// so the forensic leak row still fires — the seal->redact flip must not blind
+		// the leak-prevention stream. Non-secret transforms (injection defang) are
+		// not leaks and stay silent.
+		if out.Verdict.Reason != abi.ReasonSecretRedacted {
+			return LeakEvent{}, false
+		}
+		action = LeakOutputRedacted
 	default:
 		return LeakEvent{}, false
 	}
@@ -222,7 +236,7 @@ func LeakEventFromOutputAdmission(out OutputAdmission, atMS int64) (LeakEvent, b
 	reason := safeLeakReason(abi.ReasonName(out.Verdict.Reason), "OUTPUT_QUARANTINED")
 	return LeakEvent{
 		Schema:          LeakEventSchema,
-		Action:          LeakOutputQuarantined,
+		Action:          action,
 		AtMS:            positiveLeakAtMS(atMS),
 		AgentRunID:      safeLeakToken(out.AgentRunID, 256, "unknown"),
 		ParentRunID:     safeLeakToken(out.ParentRunID, 256, "unknown"),
@@ -290,8 +304,8 @@ func RenderLeakReport(w io.Writer, rep LeakReport) {
 func validLeakAction(a LeakAction) bool {
 	switch a {
 	case LeakSpawnAllowed, LeakSpawnDenied, LeakEnvStripped, LeakSecretGranted,
-		LeakEgressDenied, LeakFSDenied, LeakOutputQuarantined, LeakDescendantReaped,
-		LeakUnmanagedDescendantDetected:
+		LeakEgressDenied, LeakFSDenied, LeakOutputQuarantined, LeakOutputRedacted,
+		LeakDescendantReaped, LeakUnmanagedDescendantDetected:
 		return true
 	default:
 		return false

@@ -8,13 +8,14 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	_ "github.com/anthony-chaudhary/fak/internal/normgate"
 	"github.com/anthony-chaudhary/fak/internal/toolproc"
 )
 
 const syntheticChildCanary = "sk-abcdef0123456789abcdef0123"
 
-func TestChildOutputAdmissionQuarantinesLeakBeforeContextLogTranscript(t *testing.T) {
+func TestChildOutputAdmissionRedactsLeakBeforeContextLogTranscript(t *testing.T) {
 	out := AdmitChildOutput(context.Background(), ChildOutput{
 		AgentRunID: "agent-run-2359",
 		CallID:     "child-stdout-1",
@@ -23,8 +24,12 @@ func TestChildOutputAdmissionQuarantinesLeakBeforeContextLogTranscript(t *testin
 		Bytes:      []byte("stdout chunk carried synthetic canary " + syntheticChildCanary),
 	})
 
-	if out.Verdict.Kind != abi.VerdictQuarantine || out.Verdict.Reason != abi.ReasonSecretExfil {
-		t.Fatalf("verdict = %v/%s, want Quarantine/SECRET_EXFIL", out.Verdict.Kind, abi.ReasonName(out.Verdict.Reason))
+	// Warn-first default: a credential in child stdout is MASKED IN PLACE (Transform /
+	// SECRET_REDACTED) — the surrounding output is admitted, but the canary must never
+	// reach any parent-visible surface. The strict whole-result SEAL is the opt-in
+	// fail_closed path, proven by TestChildOutputAdmissionSealsLeakUnderFailClosed.
+	if out.Verdict.Kind != abi.VerdictTransform || out.Verdict.Reason != abi.ReasonSecretRedacted {
+		t.Fatalf("verdict = %v/%s, want Transform/SECRET_REDACTED", out.Verdict.Kind, abi.ReasonName(out.Verdict.Reason))
 	}
 	if out.Meta["agent_run_id"] != "agent-run-2359" || out.Meta["source_channel"] != string(ChannelStdout) {
 		t.Fatalf("metadata = %v, want agent_run_id + stdout channel", out.Meta)
@@ -53,6 +58,34 @@ func TestChildOutputAdmissionQuarantinesLeakBeforeContextLogTranscript(t *testin
 		if strings.Contains(surface, syntheticChildCanary) {
 			t.Fatalf("%s leaked canary after admission: %s", name, surface)
 		}
+	}
+}
+
+// OPT-IN fail_closed: the SAME child stdout canary SEALS the whole result
+// (Quarantine / SECRET_EXFIL) and still emits an output_quarantined leak row — proof
+// the strict block stays reachable end-to-end through toolprocgate when a security-
+// conscious operator turns it on. Permissive is the default; strict is a policy choice.
+func TestChildOutputAdmissionSealsLeakUnderFailClosed(t *testing.T) {
+	adjudicator.Default.SetPolicy(adjudicator.Policy{SecretPosture: adjudicator.SecretFailClosed})
+	t.Cleanup(func() { adjudicator.Default.SetPolicy(adjudicator.DefaultPolicy()) })
+
+	out := AdmitChildOutput(context.Background(), ChildOutput{
+		AgentRunID:      "agent-run-2359",
+		CallID:          "child-stdout-sealed",
+		Tool:            "BashOutput",
+		Channel:         ChannelStdout,
+		DescendantState: DescendantRunning,
+		Bytes:           []byte("stdout chunk carried synthetic canary " + syntheticChildCanary),
+	})
+
+	if out.Verdict.Kind != abi.VerdictQuarantine || out.Verdict.Reason != abi.ReasonSecretExfil {
+		t.Fatalf("verdict = %v/%s, want Quarantine/SECRET_EXFIL under fail_closed", out.Verdict.Kind, abi.ReasonName(out.Verdict.Reason))
+	}
+	if strings.Contains(string(out.Bytes), syntheticChildCanary) {
+		t.Fatalf("sealed bytes still contain canary: %q", out.Bytes)
+	}
+	if out.LeakEvent == nil || out.LeakEvent.Action != LeakOutputQuarantined || out.LeakEvent.Reason != "SECRET_EXFIL" {
+		t.Fatalf("want output_quarantined/SECRET_EXFIL leak row under fail_closed, got %+v", out.LeakEvent)
 	}
 }
 

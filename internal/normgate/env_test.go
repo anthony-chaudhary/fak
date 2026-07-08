@@ -11,6 +11,7 @@ import (
 )
 
 func TestEnvOverridesLedgerCap(t *testing.T) {
+	sealPolicy(t) // held-ledger entries come from the SEAL path; opt in so the cap is exercised
 	t.Setenv("FAK_NORMGATE_MAX_HELD", "4")
 	ctx := context.Background()
 	g := normgate.New() // reads FAK_NORMGATE_MAX_HELD at construction

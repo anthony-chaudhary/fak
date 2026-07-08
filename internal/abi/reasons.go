@@ -24,7 +24,8 @@ const (
 	ReasonOversize                           // payload exceeded the context-admission budget
 	ReasonUnknownTool                        // tool not in the registry
 	ReasonSecretDiscovered                   // a tool RESULT bore a secret, caught on discovery (the on-discovery event; distinct from ReasonSecretExfil, the egress verdict) [#884]
-	// 15.. reserved for additive core reasons; register out-of-tree names via
+	ReasonSecretRedacted                     // a credential span in a tool RESULT was MASKED in place (warn-first default); the rest of the result stays in context, distinct from the SECRET_EXFIL seal
+	// 16.. reserved for additive core reasons; register out-of-tree names via
 	// RegisterReason.
 	ReasonCoreMax ReasonCode = 1023
 )
@@ -44,6 +45,7 @@ var coreReasonNames = map[ReasonCode]string{
 	ReasonOversize:         "OVERSIZE",
 	ReasonUnknownTool:      "UNKNOWN_TOOL",
 	ReasonSecretDiscovered: "RESULT_SECRET_DISCOVERED",
+	ReasonSecretRedacted:   "SECRET_REDACTED",
 }
 
 // ReasonName resolves a reason code to its stable name, consulting the closed
@@ -120,4 +122,4 @@ func sortStrings(s []string) {
 
 // CoreReasonCount is the size of the closed core vocabulary (excludes NONE) —
 // referenced by tests asserting the closed reason set.
-const CoreReasonCount = 13
+const CoreReasonCount = 14

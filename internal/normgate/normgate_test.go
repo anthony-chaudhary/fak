@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	_ "github.com/anthony-chaudhary/fak/internal/blob" // registers the blob PageOut/Resolver backend
 	"github.com/anthony-chaudhary/fak/internal/normgate"
 )
@@ -55,21 +56,63 @@ func TestQuarantinesObfuscatedInjection(t *testing.T) {
 	}
 }
 
-// Secret formats the ctxmmu regex never enumerated => Quarantine SecretExfil.
-func TestQuarantinesSecretFormatVariants(t *testing.T) {
+// sealPolicy opts the process into the OPT-IN fail_closed secret posture for one test,
+// restoring the permissive default afterward. Under fail_closed a discovered secret
+// SEALS the whole result (SECRET_EXFIL), the pre-warn-first behavior.
+func sealPolicy(t *testing.T) {
+	t.Helper()
+	adjudicator.Default.SetPolicy(adjudicator.Policy{SecretPosture: adjudicator.SecretFailClosed})
+	t.Cleanup(func() { adjudicator.Default.SetPolicy(adjudicator.DefaultPolicy()) })
+}
+
+// WARN-FIRST DEFAULT: a plaintext secret in a tool result is MASKED IN PLACE
+// (SECRET_REDACTED Transform) — the credential is removed but the surrounding output
+// stays in context. This is the dev-permissive default that keeps a developer from
+// being blinded by their own credential.
+func TestPlaintextSecretRedactedByDefault(t *testing.T) {
 	ctx := context.Background()
 	for name, body := range map[string]string{
 		"aws-sts":    `{"AccessKeyId":"ASIAZ4QF7K2NXP9LMQ8R"}`,
 		"google":     "key=AIzaSyD-9tT8d_xQ2mPaLk7vRz0nW4cYh3bUeKfG",
 		"github-pat": "token: github_pat_11ABCDEFG0aZbYcXdWeVuTs9R8q7P6o5N4m3L2k1J0",
-		"base64-sk":  "creds=" + base64.StdEncoding.EncodeToString([]byte("sk-abcdef0123456789abcdef0123")),
+	} {
+		g := normgate.New()
+		r := result(body)
+		v := g.Admit(ctx, untrusted("read_webpage"), r)
+		if v.Kind != abi.VerdictTransform || v.Reason != abi.ReasonSecretRedacted {
+			t.Errorf("%s: want Transform/SECRET_REDACTED (warn-first default), got %v/%s", name, v.Kind, abi.ReasonName(v.Reason))
+		}
+	}
+}
+
+// OPT-IN fail_closed posture: the SAME plaintext secrets SEAL the whole result
+// (SECRET_EXFIL) — the strict path a security-conscious operator turns on.
+func TestPlaintextSecretSealsUnderFailClosed(t *testing.T) {
+	sealPolicy(t)
+	ctx := context.Background()
+	for name, body := range map[string]string{
+		"aws-sts":    `{"AccessKeyId":"ASIAZ4QF7K2NXP9LMQ8R"}`,
+		"github-pat": "token: github_pat_11ABCDEFG0aZbYcXdWeVuTs9R8q7P6o5N4m3L2k1J0",
 	} {
 		g := normgate.New()
 		r := result(body)
 		v := g.Admit(ctx, untrusted("read_webpage"), r)
 		if v.Kind != abi.VerdictQuarantine || v.Reason != abi.ReasonSecretExfil {
-			t.Errorf("%s: want Quarantine/SECRET_EXFIL, got %v/%s", name, v.Kind, abi.ReasonName(v.Reason))
+			t.Errorf("%s: want Quarantine/SECRET_EXFIL under fail_closed, got %v/%s", name, v.Kind, abi.ReasonName(v.Reason))
 		}
+	}
+}
+
+// An OBFUSCATED secret (caught only on a de-obfuscated view — here base64) SEALS even
+// under the permissive default: the in-place redactor cannot reach a credential with no
+// raw span, and an obfuscated secret is the adversarial case the warn path must not cover.
+func TestObfuscatedSecretSealsEvenByDefault(t *testing.T) {
+	ctx := context.Background()
+	g := normgate.New()
+	r := result("creds=" + base64.StdEncoding.EncodeToString([]byte("sk-abcdef0123456789abcdef0123")))
+	v := g.Admit(ctx, untrusted("read_webpage"), r)
+	if v.Kind != abi.VerdictQuarantine || v.Reason != abi.ReasonSecretExfil {
+		t.Errorf("obfuscated secret: want Quarantine/SECRET_EXFIL, got %v/%s", v.Kind, abi.ReasonName(v.Reason))
 	}
 }
 
@@ -189,15 +232,19 @@ func TestUntrustedMetaProseObfuscatedStillQuarantines(t *testing.T) {
 	}
 }
 
-// A real secret from a trusted-local read still Quarantines (a leaked credential
-// is held even from a local read).
-func TestTrustedLocalSecretStillQuarantines(t *testing.T) {
+// A plaintext secret from a trusted-local read is REDACTED IN PLACE by default (the
+// developer sees their own output with only the credential masked), and the redacted
+// body carries no live credential.
+func TestTrustedLocalSecretRedactedByDefault(t *testing.T) {
 	ctx := context.Background()
 	g := normgate.New()
 	r := result(`secret := "sk-abcdef0123456789abcdef0123"`)
 	v := g.Admit(ctx, untrusted("Read"), r)
-	if v.Kind != abi.VerdictQuarantine {
-		t.Fatalf("trusted-local secret: want Quarantine, got %v", v.Kind)
+	if v.Kind != abi.VerdictTransform || v.Reason != abi.ReasonSecretRedacted {
+		t.Fatalf("trusted-local secret: want Transform/SECRET_REDACTED, got %v/%s", v.Kind, abi.ReasonName(v.Reason))
+	}
+	if r.Meta["masked_spans"] == "" || r.Meta["masked_spans"] == "0" {
+		t.Fatalf("expected at least one masked span, meta=%v", r.Meta)
 	}
 }
 
@@ -254,6 +301,7 @@ func TestPageInGatedOnWitnessClear(t *testing.T) {
 // A held SECRET stays sealed even after a witness Clear — the page-in re-screen refuses
 // to launder a leaked credential back into context ("clearance does not launder poison").
 func TestPageInSecretSealedDespiteClear(t *testing.T) {
+	sealPolicy(t) // page-in of a HELD secret only applies under the opt-in seal posture
 	ctx := context.Background()
 	g := normgate.New()
 	r := result(`creds: sk-abcdef0123456789abcdef0123`)

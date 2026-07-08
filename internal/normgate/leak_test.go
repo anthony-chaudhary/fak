@@ -23,6 +23,7 @@ func secretBody(i int) string {
 }
 
 func TestNormgateHeldLedgerIsBounded(t *testing.T) {
+	sealPolicy(t) // the held ledger is populated by the SEAL path; opt into it to test the bound
 	ctx := context.Background()
 	const cap = 16
 	const N = 5000

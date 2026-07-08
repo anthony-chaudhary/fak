@@ -1388,7 +1388,30 @@ func unwrapHTTPPlanner(p agent.Planner) *agent.HTTPPlanner {
 const (
 	reasonSecretExfil      = "SECRET_EXFIL"
 	reasonSecretDiscovered = "RESULT_SECRET_DISCOVERED"
+	// reasonSecretRedacted is the warn-first default: a credential span was MASKED IN
+	// PLACE and the rest of the tool result stays in context (internal/normgate). Unlike
+	// the seal classes it does NOT hold the result out, so it gets a one-line WARN, not
+	// the "held out of context" banner — and it never baits a re-read (there is nothing
+	// paged out to retrieve).
+	reasonSecretRedacted = "SECRET_REDACTED"
 )
+
+// secretRedactedWarn is the one-line warn for masked-in-place credentials. Empty when
+// nothing was redacted, so it composes with the held-out banner (which returns "" when
+// no result was held).
+func secretRedactedWarn(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	span := "span"
+	if n > 1 {
+		span = "spans"
+	}
+	return "[fak] masked " + strconv.Itoa(n) + " credential-shaped " + span +
+		" in a tool result (SECRET_REDACTED) — the rest of the output is intact and in context. " +
+		"Warn-first default: your own output is not withheld, only the credential itself is masked. " +
+		"To hold the whole result instead, set the fail_closed secret posture."
+}
 
 // resultAdmissionNote names any inbound tool result the kernel PAGED OUT so a quarantine
 // stub does not read as a broken tool — in ONE line. A quarantine is a routine safety
@@ -1407,10 +1430,15 @@ const (
 // turn.
 func resultAdmissionNote(adms []ResultAdmission) string {
 	n := 0
+	redacted := 0 // warn-first SECRET_REDACTED transforms: masked in place, NOT held out
 	counts := map[string]int{}
 	order := make([]string, 0, 4)
 	livelocks := make([]string, 0, 1)
 	for _, a := range adms {
+		if a.Verdict.Kind == "TRANSFORM" && a.Verdict.Reason == reasonSecretRedacted {
+			redacted++
+			continue
+		}
 		if a.Verdict.Kind != "QUARANTINE" {
 			continue
 		}
@@ -1428,7 +1456,10 @@ func resultAdmissionNote(adms []ResultAdmission) string {
 		}
 	}
 	if n == 0 {
-		return ""
+		// No held-out result. If a credential span was MASKED in place (the warn-first
+		// default), say so in one line — the rest of the result is in context, so this is
+		// a WARN, not a "held out" banner, and never baits a re-read.
+		return secretRedactedWarn(redacted)
 	}
 	noun, verb := "tool result", "was"
 	if n > 1 {
@@ -1474,6 +1505,9 @@ func resultAdmissionNote(adms []ResultAdmission) string {
 	if len(livelocks) > 0 {
 		note += " " + strings.Join(livelocks, " ")
 	}
+	if w := secretRedactedWarn(redacted); w != "" {
+		note += " " + w // a mixed turn: some held, some masked-in-place
+	}
 	return note
 }
 
@@ -1509,7 +1543,9 @@ func (s *Server) resultAdmissionNoteOnce(trace string, adms []ResultAdmission) s
 		s.notedResults[trace] = seen
 	}
 	for _, a := range adms {
-		if a.Verdict.Kind != "QUARANTINE" {
+		isQuarantine := a.Verdict.Kind == "QUARANTINE"
+		isRedact := a.Verdict.Kind == "TRANSFORM" && a.Verdict.Reason == reasonSecretRedacted
+		if !isQuarantine && !isRedact {
 			continue
 		}
 		key := resultNoteKey(a)
