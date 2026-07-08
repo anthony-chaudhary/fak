@@ -81,11 +81,19 @@ const DefaultCompactHistoryBudget = 48000
 // (near the assumed end). The trade is sound because the burst penalty is ONE-TIME and bounded
 // (a cold re-write of the invalidated suffix) while the shed saving is per-turn: an early burst
 // on a session that runs long is a clear win, and a large-suffix shed still refuses regardless.
-// This is a moving target — a future auto-tune seeds it from the observed session-length
-// distribution (docs/nightrun/cache-value.jsonl `turns`); the firing seam reads only the resolved
+// This value is CALIBRATED from the observed session-length distribution in
+// docs/nightrun/gateway-usage.jsonl (n=1893 real guard/serve exits, `cached_turns`): median 7
+// turns, p75 33, p90 52, p95 70 — 89% of sessions finish by 50 turns and only ~2% exceed 100. The
+// earlier prior of 100 presumed a repaying tail ~14x the median, so warm early bursts on SHORT
+// sessions (compaction fired on a median-6-turn session in that corpus) were justified by turns
+// that never arrived — the low-end over-shed. 50 (~p90) sizes the presumed payback to a genuinely
+// long real session: the common case still fires early (its whole length sits under the horizon)
+// while a burst that would need more than ~p90 repaying turns is now correctly refused. A session
+// that outruns the horizon still sheds via the penalty-free observed-cold path (idle past the
+// message-span TTL), so the long tail is never stranded. The firing seam reads only the resolved
 // int, so tuning changes the value, never the gate. An explicit --assume-session-turns wins;
 // 0 disables the prior and restores the conservative "no horizon ⇒ no fire" behavior exactly.
-const DefaultAssumedSessionTurns = 100
+const DefaultAssumedSessionTurns = 50
 
 // Early-firing budget ramp (the "fak fires by ~step 5-10" seam). The head-anchored compaction
 // against the FULL DefaultCompactHistoryBudget (~48k) only crosses its threshold once a session

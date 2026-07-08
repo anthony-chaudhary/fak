@@ -78,7 +78,7 @@ func TestProbeFakFiresEarlyPerStep(t *testing.T) {
 		trace := "probe-session"
 		s := anthropicPassthroughServer(budget)
 		s.compactAnchorHead = true                        // default-on
-		s.assumeSessionTurns = DefaultAssumedSessionTurns // 100, default-on
+		s.assumeSessionTurns = DefaultAssumedSessionTurns // default-on (calibrated to ~p90 session length)
 		s.elideResultBytes = DefaultElideResultBytes      // 16384, default-on
 		now := time.Now()
 		s.metrics = newGatewayMetrics(now)

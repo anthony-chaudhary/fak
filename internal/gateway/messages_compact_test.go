@@ -809,7 +809,10 @@ func TestMaybeCompactAnchorHeadFiresOnObservedColdTrace(t *testing.T) {
 func TestMaybeCompactAnchorHeadFiresOnAssumedSessionPrior(t *testing.T) {
 	s := anthropicPassthroughServer(1200)
 	s.compactAnchorHead = true
-	s.assumeSessionTurns = DefaultAssumedSessionTurns // 100
+	// Pin the presumed horizon at a fixed 100: this test exercises the MECHANISM (a fresh trace,
+	// maximally early, fires) at a known horizon, decoupled from the tuned DefaultAssumedSessionTurns
+	// so a later recalibration of that default cannot silently flip this fire/no-fire assertion.
+	s.assumeSessionTurns = 100
 	s.metrics = newGatewayMetrics(time.Now())
 	// A fresh trace (served-turn depth 0 ⇒ CurrentTurn 1): maximally early in a presumed-100-turn
 	// session, so the burst has ~99 repaying turns ahead.
@@ -836,7 +839,10 @@ func TestMaybeCompactAnchorHeadFiresOnAssumedSessionPrior(t *testing.T) {
 func TestMaybeCompactAnchorHeadPriorRefusesLateInAssumedSession(t *testing.T) {
 	s := anthropicPassthroughServer(1200)
 	s.compactAnchorHead = true
-	s.assumeSessionTurns = DefaultAssumedSessionTurns // 100
+	// Fixed 100-turn horizon (mechanism test, decoupled from the tuned DefaultAssumedSessionTurns):
+	// the 99-fold priming below targets CurrentTurn 100 == the presumed end, where the burst cannot
+	// repay. Pinning keeps the "refuses at the end" assertion meaningful under any default retune.
+	s.assumeSessionTurns = 100
 	s.metrics = newGatewayMetrics(time.Now())
 	// Drive the trace's served-turn depth close to the presumed end (99 folds ⇒ CurrentTurn 100),
 	// so remainingTurns is ~0 and a non-trivial invalidated suffix cannot repay. Prime each fold at
