@@ -66,6 +66,35 @@ func TestAdjudicateMemoryWrite_RefusesTransientAndNegativeTool(t *testing.T) {
 	}
 }
 
+// #2836: the fourth "Do NOT capture" class — a one-off session narrative bound to
+// THIS run by a temporal deictic — is refused structurally, with its own closed-
+// vocabulary reason, before it can land in durable memory. These are the shapes the
+// Hermes prose list names ("one-off narratives") but a review prompt cannot enforce.
+func TestAdjudicateMemoryWrite_RefusesOneOffNarrative(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"this session", "Spent this session refactoring the dispatch loop."},
+		{"this run", "Fixed three flaky tests this run."},
+		{"this turn", "The user asked me to summarize the PR this turn."},
+		{"just now", "Just now the operator restarted the fleet."},
+		{"a moment ago", "Rebased the branch a moment ago."},
+		{"earlier today", "Reviewed the gateway diff earlier today."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := memq.AdjudicateMemoryWrite([]byte(tc.body))
+			if v.Admit {
+				t.Fatalf("%q must be refused as a one-off narrative, got admit", tc.body)
+			}
+			if v.Reason != memq.RefuseOneOffNarrative {
+				t.Fatalf("reason = %q, want %q (detail %q)", v.Reason, memq.RefuseOneOffNarrative, v.Detail)
+			}
+		})
+	}
+}
+
 // The conservative half of the contract: a legitimate distilled fact is admitted
 // even when it MENTIONS a retry, a missing binary, or a rate-limit header. Over-
 // refusing an honest report is the issue's named risk — these must all pass.
@@ -77,6 +106,13 @@ func TestAdjudicateMemoryWrite_AdmitsLegitimateFacts(t *testing.T) {
 		"raw grep, wc, cat, and find / are NOT on PATH here — use the PowerShell equivalents.",
 		"The user prefers concise answers and no preamble.",
 		"Commit by explicit path on main; never git add -A in the shared tree.",
+		// #2836 near-misses: a durable fact that names a session/run/turn WITHOUT the
+		// deictic binding must NOT trip the one-off arm — over-refusing these is the
+		// issue's named risk.
+		"The session token must be refreshed every 30 minutes.",
+		"A dry run of the migration is safe to repeat.",
+		"Each turn should start with a memory recall of the task intent.",
+		"The runtime resolves the module from the repo root.",
 		// A rich, multi-line distilled fact that happens to discuss a failure mode
 		// without being a bare failure report — must not trip the thin-fact rules.
 		"When the gateway sees a 429 it treats it as retryable and backs off; this is\n" +
@@ -101,12 +137,14 @@ func TestAdjudicateMemoryWrite_ClosedVocabulary(t *testing.T) {
 		memq.RefuseOversizeVerbatim:  true,
 		memq.RefuseTransientError:    true,
 		memq.RefuseNegativeToolClaim: true,
+		memq.RefuseOneOffNarrative:   true,
 	}
 	bodies := [][]byte{
 		[]byte(""),
 		[]byte("a normal distilled fact"),
 		[]byte("connection refused right now"),
 		[]byte("failed to run the probe"),
+		[]byte("rebased the branch just now"),
 		[]byte(strings.Repeat("x", memq.MaxDurableFactBytes+1)),
 	}
 	for _, b := range bodies {

@@ -18,13 +18,14 @@ import (
 //
 // fak adjudicates a tool call deny-by-structure; a durable memory write is just
 // another governed syscall. This is that structural arm: a candidate durable write
-// is judged by SHAPE — its size, and the lexical signature of the two junk classes
+// is judged by SHAPE — its size, and the lexical signature of the three junk classes
 // the Hermes list names but cannot enforce (a transient environment error, a
-// negative tool-INVOCATION claim) — and refused with a reason from a closed
-// vocabulary BEFORE it reaches storage. No prompt, no model call, no override
-// string: structure decides, so an injected or distracted model cannot talk its way
-// past it (unlike the ephemeral gate in ephemeral_gate.go, whose situational
-// refusal a caller MAY override with an explicit reclassification).
+// negative tool-INVOCATION claim, a one-off session narrative bound to this run) —
+// and refused with a reason from a closed vocabulary BEFORE it reaches storage. No
+// prompt, no model call, no override string: structure decides, so an injected or
+// distracted model cannot talk its way past it (unlike the ephemeral gate in
+// ephemeral_gate.go, whose situational refusal a caller MAY override with an explicit
+// reclassification). The one-off-narrative arm is issue #2836's delta over #2912.
 //
 // The rules are deliberately conservative — a durable fact is a distilled
 // generalization, so the refusals target the shapes that are junk BY CONSTRUCTION
@@ -35,7 +36,10 @@ import (
 // toward under-refusing. In particular the negative-tool arm targets a failed
 // INVOCATION ("failed to run X", "the call exited nonzero") — a session-transient
 // narrative — NOT a durable CAPABILITY fact ("grep is not on PATH on this host"),
-// which is exactly the kind of environment fact worth keeping.
+// which is exactly the kind of environment fact worth keeping. Likewise the one-off
+// arm targets a fact BOUND to this run by a temporal deictic ("this session", "just
+// now") — the fourth "Do NOT capture" class — NOT a durable fact that merely names a
+// session/run/turn ("the session token expires in 30m").
 const (
 	// AdmitOK is the verdict for a candidate write that passes every structural rule.
 	AdmitOK = "ok"
@@ -51,6 +55,13 @@ const (
 	// tool-INVOCATION claim (a call that failed / exited nonzero / produced no
 	// output this run) — a session-transient narrative, not a durable fact.
 	RefuseNegativeToolClaim = "negative_tool_claim"
+	// RefuseOneOffNarrative refuses a durable write whose fact is a one-off session
+	// narrative — a thin event line anchored to THIS run/session/turn by a temporal
+	// deictic ("this session", "just now", "earlier today"). A durable fact is a
+	// timeless generalization and never needs to bind itself to the current run; the
+	// bound narrative is the fourth "Do NOT capture" class the Hermes prose list names
+	// but cannot enforce (#2836).
+	RefuseOneOffNarrative = "one_off_narrative"
 )
 
 // MaxDurableFactBytes is the single-fact size bound. A durable memory entry is one
@@ -121,6 +132,22 @@ var negativeToolClaimRE = regexp.MustCompile(`(?i)(` +
 	`unable to (run|invoke|execute|exec|spawn|start|launch|reach|connect)` +
 	`)`)
 
+// oneOffNarrativeRE matches the SESSION-DEICTIC anchor of a one-off narrative — a
+// bare event line bound to THIS run/session/turn ("this session", "this run", "this
+// turn", "just now", "earlier today", "a moment ago"). A durable fact is a timeless
+// generalization and never needs to say "this session", so the deictic binding is the
+// structural tell of a one-off event, not a durable invariant. It deliberately does
+// NOT match a durable fact that merely names a session/run/turn WITHOUT the deictic
+// binding ("the session token expires in 30m", "a dry run is safe to repeat") — over-
+// refusing those is the issue's named risk (#2836). The \b guards keep "this run"
+// from firing on "this runtime"/"this running".
+var oneOffNarrativeRE = regexp.MustCompile(`(?i)(` +
+	`this (session|run|turn)\b|` +
+	`\bjust now\b|` +
+	`\bearlier today\b|` +
+	`\bmoments? ago\b` +
+	`)`)
+
 // AdjudicateMemoryWrite is the deny-by-structure rule set (#2912). It judges a
 // candidate durable memory write by structure alone and returns a verdict whose
 // Reason is from the closed vocabulary above. It is pure and deterministic: the same
@@ -148,6 +175,9 @@ func AdjudicateMemoryWrite(body []byte) AdmissionVerdict {
 		}
 		if m := negativeToolClaimRE.FindString(fact); m != "" {
 			return AdmissionVerdict{Reason: RefuseNegativeToolClaim, Detail: "fact is a failed-tool-invocation narrative: " + strings.ToLower(m)}
+		}
+		if m := oneOffNarrativeRE.FindString(fact); m != "" {
+			return AdmissionVerdict{Reason: RefuseOneOffNarrative, Detail: "fact is a one-off session narrative: " + strings.ToLower(m)}
 		}
 	}
 	return AdmissionVerdict{Admit: true, Reason: AdmitOK}
