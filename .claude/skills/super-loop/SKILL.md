@@ -20,8 +20,8 @@ metadata:
 
 | Path | What it gives | When |
 |---|---|---|
-| `python tools/issue_dispatch.py --wave` | Fans out across pairwise **TREE-DISJOINT** lanes in ONE checkout, PRICED (`dos arbitrate`) so a colliding set is caught before launch, preflight re-checked per spawn. Collision-safe by construction. | **Default.** In-repo issue work on the shared trunk. |
-| `fak dispatch wave --count N` / `tools/launch_wave_detached.ps1 -Count N` | Fans out across N bounded **account session slots** (`fak fleet-accounts wave`); Claude worker accounts can carry several sessions while duplicate login identities still collapse to one pool. | High throughput, when you need more workers than one session per account gives. |
+| `fak dispatch wave` | The native Go wave: preflight cap + account/seat allocation + pairwise **TREE-DISJOINT** lanes priced in-process (`dispatchorder`, no per-lane `dos arbitrate` shell-out). Its hold is narrowed to the **trust-critical** set only (`internal/{abi,kernel,adjudicator,policy,registrations,architest,shipgate}` + `dos.toml`/`.dos`/`policy.json`/`VERSION`), so **core `internal/**` lanes (gateway/engine/agent/compute/…) dispatch by default** — not just docs/tools. Concurrent core work is kept build-safe by the push-seam `TRUNK_WOULD_NOT_COMPILE` gate (`fak hooks pre-push`). | **Default.** In-repo issue work on the shared trunk. |
+| `python tools/issue_dispatch.py --wave` | The **legacy** Python wave (a compat shim; `docs/dispatch-loop.md`). It blanket-holds ALL of `cmd/**`+`internal/**`, so it only ever offers docs/tools — the reason a wave "never had real work." Prefer the Go path above. | Legacy / fallback only. |
 
 The catch that makes this skill load-bearing: **the wave gives account session
 capacity, but its workers share ONE working tree** (a single `-Workspace`).
@@ -168,8 +168,9 @@ after the last rung's workers hold leases/markers or have exited.
 Never launch blind. Run the launcher in its default PLAN mode and read the plan:
 
 ```bash
-# Default path — tree-disjoint in-repo wave (priced by dos arbitrate):
-python tools/issue_dispatch.py --wave --max-workers <N> --work-kind engineering    # DRY-RUN
+# Default path — native Go tree-disjoint in-repo wave (dry-run by default; admits core
+# internal/** lanes via the trust-critical hold, not just docs/tools):
+fak dispatch wave --max-workers <N> --work-kind engineering    # DRY-RUN
 ```
 
 ```powershell
@@ -180,10 +181,10 @@ python tools/issue_dispatch.py --wave --max-workers <N> --work-kind engineering 
 
 Read the plan out loud for the operator:
 
-- **Tree-disjoint (`issue_dispatch --wave`):** confirm each lane's tree is pairwise
-  disjoint and none is a self-source lane the arbiter refused. This is
-  `dos-plan-price` folded into the launcher — a colliding set is serialized into a
-  later wave, not launched.
+- **Tree-disjoint (`fak dispatch wave`):** confirm each lane's tree is pairwise
+  disjoint and that the plan now includes core `internal/**` lanes (gateway/engine/
+  agent/…), not only docs/tools — the trust-critical hold still holds kernel/adjudicator/
+  policy/etc. A colliding set is priced out (serialized into a later wave), not launched.
 - **Multi-account (`launch_wave_detached` / `fak dispatch wave`):** confirm `granted`
   vs `requested` (honest under-fill when fewer account session slots are free) and
   that repeated account tags stay within their `session_cap`. If the
@@ -198,7 +199,7 @@ the partition or wait — do not `--force` / launch anyway.
 Only after the plan is clean AND the operator approves the real spawn:
 
 ```bash
-python tools/issue_dispatch.py --wave --max-workers <N> --work-kind engineering --live
+fak dispatch wave --max-workers <N> --work-kind engineering --live
 ```
 ```powershell
 .\tools\launch_wave_detached.ps1 -Count <N> -WorkKind engineering -Launch -Workspace C:\work\fak `
