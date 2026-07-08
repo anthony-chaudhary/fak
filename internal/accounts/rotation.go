@@ -374,10 +374,13 @@ func (r Registry) NextRotationDecision(after string, hr RotationHeadroom) Rotati
 }
 
 // rotationSeatRuntimeWalled reports whether the caller-supplied headroom signal says this
-// bucket is known blocked/capped right now. Negative scores are the closed "walled" band from
-// cmd/fak/accounts_headroom.go; nil/zero scores remain launchable (no signal / unknown).
+// bucket is known blocked/capped right now. It reads the shared tier contract (Classify): a
+// TierWalled score is the closed "walled" band; nil (no signal) or a TierUnknown/TierOfferable
+// score remains launchable. The nil-guard is load-bearing — a stable-by-name plan leaves
+// Headroom nil, and Classify takes a concrete value — so it stays here rather than folding into
+// Classify.
 func rotationSeatRuntimeWalled(s RotationSeat) bool {
-	return s.Headroom != nil && *s.Headroom < 0
+	return s.Headroom != nil && Classify(*s.Headroom) == TierWalled
 }
 
 // bucketKey returns the account-bucket key of the seat named `name`, or "" when the name is

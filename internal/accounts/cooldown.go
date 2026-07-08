@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -56,6 +57,33 @@ type CooldownEntry struct {
 
 // Active reports whether the entry still holds at now (i.e. now is before ResetAt).
 func (e CooldownEntry) Active(now time.Time) bool { return now.Before(e.ResetAt) }
+
+// resetAtRE pulls an explicit absolute reset time out of a limit message when the upstream
+// names one ("usage limit reached; resets at 2026-07-07T15:00:00Z"). Only the RFC3339
+// date+time form is trusted as absolute; a looser "resets in 42 minutes" or a bare
+// wall-clock without a date is deliberately NOT matched, so a reset is never mis-parsed
+// from an ambiguous local time. It is compiled once and shared by every reset writer.
+var resetAtRE = regexp.MustCompile(`(?i)resets?\s+at\s+(\d{4}-\d{2}-\d{2}[tT]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:z|[+-]\d{2}:?\d{2})?)`)
+
+// ParseReset returns the explicit absolute reset time named in a limit message, normalized
+// to UTC, or the zero time when none is confidently parseable (the caller then falls back to
+// the cooldown kind's default window). It is the SINGLE reset parser both cooldown writers
+// share — the launch-exit writer (cmd/fak recordLaunchCooldown) and the live-429 rehome
+// writer (guardrotate.PersistCooldownForRehome) — so the two can never hold one account to
+// two different reset times by drifting apart. An absolute timestamp stands on its own, so
+// no `now` anchor is needed.
+func ParseReset(message string) time.Time {
+	m := resetAtRE.FindStringSubmatch(message)
+	if m == nil {
+		return time.Time{}
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05"} {
+		if ts, err := time.Parse(layout, m[1]); err == nil {
+			return ts.UTC()
+		}
+	}
+	return time.Time{}
+}
 
 // CooldownStore is the fleet-shared, on-disk set of account cooldowns. It is a
 // plain JSON map keyed by account so concurrent checkouts and the durable

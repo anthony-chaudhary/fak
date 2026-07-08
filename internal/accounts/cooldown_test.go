@@ -131,3 +131,33 @@ func TestLoadMissingFileIsEmptyNotError(t *testing.T) {
 		t.Fatal("missing file should yield empty store")
 	}
 }
+
+// TestParseResetAbsolute: an explicit RFC3339 reset in the message is parsed to that instant
+// (UTC). ParseReset is the single source both cooldown writers share, so this pins its contract
+// in one place instead of once per writer.
+func TestParseResetAbsolute(t *testing.T) {
+	got := ParseReset("usage limit reached; resets at 2026-07-07T15:00:00Z, try later")
+	want := mustTime(t, "2026-07-07T15:00:00Z")
+	if !got.Equal(want) {
+		t.Fatalf("ParseReset absolute: got %s want %s", got, want)
+	}
+	if got.Location() != time.UTC {
+		t.Fatalf("ParseReset must normalize to UTC, got %s", got.Location())
+	}
+}
+
+// TestParseResetVagueOrAbsentIsZero: a date-less "in 42 minutes" phrasing and a message with no
+// reset language both yield the zero time — the caller then falls back to the kind's default
+// window rather than a mis-parsed wall-clock.
+func TestParseResetVagueOrAbsentIsZero(t *testing.T) {
+	if got := ParseReset("session limit; resets in 42 minutes"); !got.IsZero() {
+		t.Fatalf("vague reset should be zero, got %s", got)
+	}
+	if got := ParseReset("no limit language here"); !got.IsZero() {
+		t.Fatalf("absent reset should be zero, got %s", got)
+	}
+	// A bare wall-clock without a date must NOT be guessed as absolute.
+	if got := ParseReset("weekly limit reached; resets at 15:00"); !got.IsZero() {
+		t.Fatalf("date-less wall-clock should be zero, got %s", got)
+	}
+}

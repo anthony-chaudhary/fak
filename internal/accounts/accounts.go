@@ -100,12 +100,22 @@ type Identity struct {
 // home has neither a login nor a token (nothing to collapse on).
 func (id Identity) AccountKey() string {
 	if id.AccountUUID != "" {
-		return "uuid:" + id.AccountUUID
+		return UUIDBucketKey(id.AccountUUID)
 	}
 	if id.TokenFP != "" {
 		return "tok:" + id.TokenFP
 	}
 	return ""
+}
+
+// UUIDBucketKey builds the account-bucket key for an interactive-login AccountUUID — the
+// "uuid:"-prefixed form AccountKey() elects when a login UUID is present. It is exported so a
+// caller that already holds a UUID (e.g. the runtime headroom fold in
+// cmd/fak/accounts_headroom.go, which keys its scored map by the same bucket the cooldown
+// overlay walls) builds the SAME string AccountKey() would, instead of hand-restating the
+// prefix and risking a silent drift that would break bucket alignment across the seam.
+func UUIDBucketKey(uuid string) string {
+	return "uuid:" + uuid
 }
 
 // Home is one Claude config home (a CLAUDE_CONFIG_DIR seat). Name is the roster handle
