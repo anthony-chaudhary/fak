@@ -1,0 +1,149 @@
+{
+  "_comment": "Expanded --config for tools/idea_scout.py: the 6 baked-in DEFAULT_TOPICS PLUS 13 FRESH durable topics targeting fak/DOS surfaces the defaults under-cover (claim verification & provenance, agent coordination/locking, verified memory, KV eviction/disaggregation, capability/IFC/sandbox, deterministic inference, LLM-OS/agent-kernel framings, MCP tooling defense, context/tool-schema compression, agent-eval/reward-hacking benchmarks). Derived from the 2026-07-07 landscape sweep (15 clusters, ~200 finds, adversarially existence-verified). `area` on every topic is an EXISTING repo label (security | trust-floor | agentic-serving | prompt-caching | mcp | model-arch) so `gh issue create` never fails; add `coordination` + `memory` labels first if you want finer routing and re-point topics 8/10 and 11/13. Run dry-run first: `python tools/idea_scout.py --config tools/idea_scout_topics_fresh.json --json` (files nothing); add `--live --max-issues 3` to file. github queries are kept to 2-3 high-signal words because gh repo-search ANDs every term.",
+  "topics": [
+    {
+      "key": "prompt-injection-defense",
+      "arxiv": "abs:\"prompt injection\" AND (abs:agent OR abs:LLM OR abs:tool)",
+      "github": "prompt injection defense",
+      "terms": ["prompt injection", "indirect", "jailbreak", "guardrail", "defense", "tool", "agent", "untrusted", "quarantine"],
+      "area": "security"
+    },
+    {
+      "key": "tool-call-adjudication",
+      "arxiv": "(abs:\"tool use\" OR abs:\"function calling\") AND (abs:safety OR abs:permission OR abs:capability OR abs:policy)",
+      "github": "agent tool security",
+      "terms": ["tool call", "function calling", "capability", "permission", "policy", "adjudicat", "default-deny", "sandbox", "syscall"],
+      "area": "trust-floor"
+    },
+    {
+      "key": "agent-gateway-serving",
+      "arxiv": "(abs:LLM OR abs:agent) AND (abs:gateway OR abs:proxy OR abs:serving OR abs:router)",
+      "github": "llm gateway proxy",
+      "terms": ["gateway", "proxy", "serving", "router", "openai", "api", "multi-agent", "shared cache", "audit"],
+      "area": "agentic-serving"
+    },
+    {
+      "key": "kv-prefix-cache-reuse",
+      "arxiv": "(abs:\"KV cache\" OR abs:\"prefix cache\" OR abs:\"prompt cache\") AND (abs:reuse OR abs:sharing OR abs:inference)",
+      "github": "llm kv cache",
+      "terms": ["kv cache", "prefix cache", "prompt cache", "reuse", "radix", "paged", "sharing", "turn", "prefill", "speculative"],
+      "area": "prompt-caching"
+    },
+    {
+      "key": "mcp-security",
+      "arxiv": "abs:\"model context protocol\" OR (abs:agent AND abs:\"tool poisoning\")",
+      "github": "MCP security",
+      "terms": ["model context protocol", "mcp", "tool poisoning", "server", "manifest", "untrusted", "supply chain"],
+      "area": "mcp"
+    },
+    {
+      "key": "agent-model-arch",
+      "arxiv": "(abs:agent OR abs:\"tool use\") AND (abs:\"function calling\" OR abs:fine-tuning OR abs:training) AND ti:LLM",
+      "github": "function calling agent",
+      "terms": ["function calling", "tool use", "fine-tun", "training", "checkpoint", "qwen", "llama", "reasoning"],
+      "area": "model-arch"
+    },
+
+    {
+      "key": "agent-claim-verification",
+      "arxiv": "(abs:agent OR abs:LLM) AND (abs:verification OR abs:\"self-report\" OR abs:hallucinat) AND (abs:trajectory OR abs:evidence OR abs:audit OR abs:citation)",
+      "github": "agent output verification",
+      "terms": ["verification", "trajectory", "evidence", "audit", "self-report", "hallucination", "citation", "claim", "provenance", "witness", "commit"],
+      "area": "trust-floor"
+    },
+    {
+      "key": "software-provenance-attestation",
+      "arxiv": "(abs:provenance OR abs:attestation OR abs:\"transparency log\") AND (abs:\"supply chain\" OR abs:signing OR abs:verifiable OR abs:merkle)",
+      "github": "sigstore attestation provenance",
+      "terms": ["provenance", "attestation", "sigstore", "in-toto", "slsa", "transparency log", "signing", "merkle", "reproducible", "witness"],
+      "area": "trust-floor"
+    },
+    {
+      "key": "agent-coordination-locking",
+      "arxiv": "abs:\"multi-agent\" AND (abs:\"concurrency control\" OR abs:coordination OR abs:\"merge conflict\" OR abs:lock)",
+      "github": "agent worktree orchestration",
+      "terms": ["multi-agent", "coordination", "worktree", "lock", "lease", "concurrency", "merge conflict", "isolation", "swarm", "admission"],
+      "area": "agentic-serving"
+    },
+    {
+      "key": "agent-memory-verification",
+      "arxiv": "(abs:agent OR abs:LLM) AND abs:memory AND (abs:poisoning OR abs:temporal OR abs:consolidation OR abs:decay OR abs:retrieval)",
+      "github": "agent long-term memory",
+      "terms": ["memory", "poisoning", "temporal", "bitemporal", "consolidation", "decay", "recall", "retrieval", "provenance", "staleness"],
+      "area": "prompt-caching"
+    },
+    {
+      "key": "kv-cache-eviction-compression",
+      "arxiv": "abs:\"KV cache\" AND (abs:eviction OR abs:compression OR abs:offload OR abs:sparsity OR abs:reconstruction)",
+      "github": "kv cache compression",
+      "terms": ["kv cache", "eviction", "compression", "offload", "sparsity", "quantization", "budget", "reconstruction", "sink", "mid-run"],
+      "area": "prompt-caching"
+    },
+    {
+      "key": "capability-ifc-agent-security",
+      "arxiv": "(abs:agent OR abs:LLM) AND (abs:\"information flow\" OR abs:capability OR abs:provenance OR abs:taint) AND (abs:security OR abs:\"prompt injection\" OR abs:deterministic)",
+      "github": "agent capability policy",
+      "terms": ["information flow", "capability", "taint", "provenance", "least privilege", "policy", "sandbox", "deterministic", "lattice", "by design"],
+      "area": "trust-floor"
+    },
+    {
+      "key": "agent-tool-sandboxing",
+      "arxiv": "(abs:agent OR abs:LLM) AND (abs:sandbox OR abs:\"code execution\") AND (abs:isolation OR abs:security OR abs:microVM)",
+      "github": "agent code sandbox",
+      "terms": ["sandbox", "isolation", "microvm", "wasm", "landlock", "gvisor", "firecracker", "execution", "broker", "seccomp"],
+      "area": "trust-floor"
+    },
+    {
+      "key": "deterministic-inference-parity",
+      "arxiv": "(abs:LLM OR abs:inference) AND (abs:deterministic OR abs:reproducible OR abs:\"batch-invariant\" OR abs:numerical) AND (abs:kernel OR abs:parity OR abs:verifiable)",
+      "github": "deterministic llm inference",
+      "terms": ["deterministic", "reproducible", "batch-invariant", "numerical", "parity", "bit-exact", "verifiable", "kernel", "nondeterminism"],
+      "area": "model-arch"
+    },
+    {
+      "key": "llm-os-agent-kernel",
+      "arxiv": "(abs:\"operating system\" OR abs:kernel OR abs:syscall) AND (abs:agent OR abs:LLM) AND (abs:scheduler OR abs:memory OR abs:capability OR abs:admission)",
+      "github": "llm agent operating system",
+      "terms": ["operating system", "kernel", "syscall", "scheduler", "admission", "capability", "agent", "runtime", "POSIX", "mediation"],
+      "area": "model-arch"
+    },
+    {
+      "key": "mcp-tooling-defense",
+      "arxiv": "abs:\"model context protocol\" AND (abs:security OR abs:poisoning OR abs:gateway OR abs:scanner OR abs:\"tool selection\")",
+      "github": "mcp gateway security",
+      "terms": ["model context protocol", "mcp", "gateway", "scanner", "poisoning", "rug pull", "quarantine", "registry", "proxy", "shadowing"],
+      "area": "mcp"
+    },
+    {
+      "key": "context-tool-disclosure",
+      "arxiv": "(abs:agent OR abs:LLM) AND (abs:\"prompt compression\" OR abs:\"tool selection\" OR abs:\"tool retrieval\" OR abs:\"context compression\")",
+      "github": "tool retrieval agent",
+      "terms": ["prompt compression", "tool retrieval", "progressive disclosure", "context compression", "defer", "bloat", "top-k", "elision", "gist"],
+      "area": "prompt-caching"
+    },
+    {
+      "key": "agent-eval-benchmarks",
+      "arxiv": "(abs:agent OR abs:LLM) AND (abs:benchmark OR abs:evaluation) AND (abs:\"tool use\" OR abs:trajectory OR abs:\"reward hacking\" OR abs:contamination)",
+      "github": "agent evaluation benchmark",
+      "terms": ["benchmark", "evaluation", "trajectory", "reward hacking", "contamination", "tool use", "execution", "verifier", "leaderboard", "pass^k"],
+      "area": "trust-floor"
+    },
+    {
+      "key": "kv-disaggregation-serving",
+      "arxiv": "abs:\"KV cache\" AND (abs:disaggregat OR abs:\"prefill decode\" OR abs:distributed OR abs:\"cross-tenant\")",
+      "github": "kv cache disaggregation",
+      "terms": ["kv cache", "disaggregation", "prefill", "decode", "distributed", "sharing", "cross-tenant", "pool", "router", "transfer engine"],
+      "area": "prompt-caching"
+    }
+  ],
+  "thresholds": {
+    "recent_days": 180,
+    "min_score": 25,
+    "max_issues": 3,
+    "arxiv_per_topic": 8,
+    "github_per_topic": 6,
+    "min_stars": 25,
+    "dup_jaccard": 0.55,
+    "issue_scan_limit": 800
+  }
+}
