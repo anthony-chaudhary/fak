@@ -6,6 +6,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/cadencereport"
 	"github.com/anthony-chaudhary/fak/internal/choicetriage"
+	"github.com/anthony-chaudhary/fak/internal/loopfleet"
 	"github.com/anthony-chaudhary/fak/internal/milestonereport"
 	"github.com/anthony-chaudhary/fak/internal/programreport"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
@@ -26,6 +27,7 @@ type Inputs struct {
 	Program     *programreport.Report
 	Milestone   *milestonereport.Report
 	Heaviness   *scorecard.Payload
+	Fleet       *loopfleet.Report
 	Previous    *Report
 }
 
@@ -302,6 +304,9 @@ func Fold(in Inputs) Report {
 	if in.Heaviness != nil {
 		r.Sources = append(r.Sources, heavinessState(in.Heaviness))
 	}
+	if in.Fleet != nil {
+		r.Sources = append(r.Sources, fleetState(in.Fleet))
+	}
 
 	if in.Cadence == nil {
 		r.addHuman("cadence", "page", "cadence report missing", "scores, maturity, work, and releases are not in this brief", "generate `fak cadence --json` and pass it with --cadence")
@@ -320,6 +325,9 @@ func Fold(in Inputs) Report {
 	}
 	if in.Heaviness != nil {
 		addHeaviness(&r, *in.Heaviness)
+	}
+	if in.Fleet != nil {
+		addFleet(&r, *in.Fleet)
 	}
 	r.Coherence = sourceCoherence(r.Sources)
 	if r.Coherence.Status == "mixed" {

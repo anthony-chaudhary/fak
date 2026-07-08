@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/cadencereport"
+	"github.com/anthony-chaudhary/fak/internal/loopfleet"
 	"github.com/anthony-chaudhary/fak/internal/milestonereport"
 	"github.com/anthony-chaudhary/fak/internal/programreport"
 	"github.com/anthony-chaudhary/fak/internal/worktype"
@@ -309,6 +310,62 @@ func TestFoldHeavinessPressureIsWatchOnly(t *testing.T) {
 	}
 	if got.Coherence.Status != "coherent" || !sourcePresent(got.Sources, "heaviness") {
 		t.Fatalf("heaviness source should fold without breaking source coherence: coherence=%+v sources=%+v", got.Coherence, got.Sources)
+	}
+}
+
+func TestFoldFleetDarkLoopFoldsToWatch(t *testing.T) {
+	c := cleanCadence()
+	p := cleanProgram()
+	m := cleanMilestone()
+	f := loopfleet.Report{
+		Schema: loopfleet.Schema,
+		Loops: []loopfleet.LoopHealth{
+			{Kind: "nightrun", State: "dark", Dark: true},
+			{Kind: "dojo", State: "live"},
+		},
+		Rollup: loopfleet.Rollup{Loops: 2, Live: 1, Dark: 1},
+	}
+
+	got := Fold(Inputs{Cadence: &c, Program: &p, Milestone: &m, Fleet: &f})
+
+	// A dark loop is a review-worthy watch, never a human page or an agent task —
+	// the whole point of Fleet folding conservatively (see fleet.go).
+	if len(got.Human) != 0 || len(got.Agent) != 0 {
+		t.Fatalf("dark loop must not page or create agent work, human=%+v agent=%+v", got.Human, got.Agent)
+	}
+	found := false
+	for _, w := range got.Watch {
+		if w.Source == "fleet" && strings.Contains(w.Title, "dark") {
+			found = true
+			if !strings.Contains(w.Detail, "1 dark") || !strings.Contains(w.Detail, "dark: nightrun") {
+				t.Fatalf("fleet watch detail should name the dark count and loop, got %q", w.Detail)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("dark loop should fold to a fleet watch item, watch=%+v", got.Watch)
+	}
+	if !sourcePresent(got.Sources, "fleet") {
+		t.Fatalf("fleet should fold in as a source, sources=%+v", got.Sources)
+	}
+}
+
+func TestFoldFleetAbsentLeavesNoFleetSource(t *testing.T) {
+	c := cleanCadence()
+	p := cleanProgram()
+	m := cleanMilestone()
+
+	got := Fold(Inputs{Cadence: &c, Program: &p, Milestone: &m})
+
+	// Fleet is optional: with no fleet report it adds neither a source nor an item,
+	// so it can never manufacture attention from an absent ledger.
+	if sourcePresent(got.Sources, "fleet") {
+		t.Fatalf("absent fleet input must not fold a fleet source, sources=%+v", got.Sources)
+	}
+	for _, w := range got.Watch {
+		if w.Source == "fleet" {
+			t.Fatalf("absent fleet input must not add a fleet watch, got %+v", w)
+		}
 	}
 }
 
