@@ -9,13 +9,13 @@ import (
 	"testing"
 )
 
-// TestPluginManifestVersionMatchesVERSION guards against the plugin manifest silently
-// drifting behind the release. The release cut only ever writes the repo-level VERSION file;
-// plugins/fak/.claude-plugin/plugin.json carries an INDEPENDENT "version" that no automation
-// bumps, so it froze at 0.34.0 while the binary shipped 0.37.0 — anyone reading the plugin's
-// advertised version got a stale answer. This test fails the moment the two diverge, so a
-// future release must move both (or consciously exempt the manifest) instead of leaving the
-// plugin misreporting.
+// TestPluginManifestVersionMatchesVERSION guards against EVERY plugin-manifest version field
+// silently drifting behind the release. The release cut only ever writes the repo-level VERSION
+// file; the Claude-plugin manifests carry INDEPENDENT "version" fields that no automation bumps,
+// so they froze at 0.34.0 while the binary shipped 0.37.0 — anyone reading the plugin's or the
+// marketplace's advertised version got a stale answer, and the marketplace one is what Claude
+// Code actually reads to install. This test fails the moment ANY of them diverges from VERSION,
+// so a future release must move them all (or consciously exempt one) instead of misreporting.
 func TestPluginManifestVersionMatchesVERSION(t *testing.T) {
 	root := repoRootForTest(t)
 
@@ -28,19 +28,46 @@ func TestPluginManifestVersionMatchesVERSION(t *testing.T) {
 		t.Fatal("VERSION file is empty")
 	}
 
-	manifestBytes, err := os.ReadFile(filepath.Join(root, "plugins", "fak", ".claude-plugin", "plugin.json"))
-	if err != nil {
-		t.Fatalf("read plugin.json: %v", err)
-	}
-	var manifest struct {
+	// plugins/fak/.claude-plugin/plugin.json — the plugin's own manifest.
+	var plugin struct {
 		Version string `json:"version"`
 	}
-	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
-		t.Fatalf("parse plugin.json: %v", err)
-	}
+	readJSON(t, filepath.Join(root, "plugins", "fak", ".claude-plugin", "plugin.json"), &plugin)
+	assertVersion(t, "plugin.json version", plugin.Version, want)
 
-	if got := strings.TrimSpace(manifest.Version); got != want {
-		t.Fatalf("plugin.json version = %q, want %q (the VERSION file); bump the manifest in the same release cut so the plugin does not advertise a stale version", got, want)
+	// .claude-plugin/marketplace.json — what Claude Code reads to install; has TWO version
+	// fields (the marketplace metadata and the embedded plugin entry), both of which drift.
+	var market struct {
+		Metadata struct {
+			Version string `json:"version"`
+		} `json:"metadata"`
+		Plugins []struct {
+			Name    string `json:"name"`
+			Version string `json:"version"`
+		} `json:"plugins"`
+	}
+	readJSON(t, filepath.Join(root, ".claude-plugin", "marketplace.json"), &market)
+	assertVersion(t, "marketplace.json metadata.version", market.Metadata.Version, want)
+	for _, p := range market.Plugins {
+		assertVersion(t, "marketplace.json plugins["+p.Name+"].version", p.Version, want)
+	}
+}
+
+func readJSON(t *testing.T, path string, v any) {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", filepath.Base(path), err)
+	}
+	if err := json.Unmarshal(b, v); err != nil {
+		t.Fatalf("parse %s: %v", filepath.Base(path), err)
+	}
+}
+
+func assertVersion(t *testing.T, label, got, want string) {
+	t.Helper()
+	if g := strings.TrimSpace(got); g != want {
+		t.Fatalf("%s = %q, want %q (the VERSION file); bump it in the same release cut so the plugin does not advertise a stale version", label, g, want)
 	}
 }
 
