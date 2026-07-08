@@ -30,6 +30,13 @@ type OwnerStatus struct {
 // another (often already-loaded) seat and leaves a duplicate copy that every later owner
 // lookup must disambiguate — so when the owner frees up within this horizon, waiting is
 // strictly cheaper. Beyond it, waiting would idle the session longer than the copy costs.
+//
+// Its VALUE (15m) is the resume-side twin of guardrotate.WaitResetHorizon (the launch-time
+// rotation horizon), pinned equal by a cross-package test so the two planes agree on what
+// "about to elapse" means. Only the value is shared: this path applies WAIT_RESET BEFORE any
+// target is selected — so an imminent owner is waited out even when a proven-healthy seat is
+// free, because copying a transcript is costlier than a short wait — whereas guardrotate lets an
+// OFFERABLE alternate beat an imminent cool (a config-dir swap is free). See waitResetDecision.
 const WaitResetHorizonSeconds int64 = 15 * 60
 
 // ResolveInput carries the facts and injected dependencies for a resume resolution.
@@ -414,6 +421,13 @@ func pinToOwnerDecision(in ResolveInput, owner *Owner, cwdSlug string, rec Decis
 // now, so say so instead of silently copying the transcript onto another seat. The
 // second return is false when WAIT_RESET does not apply and Resolve should continue
 // down the re-home ladder.
+//
+// Boundary note — the imminence test here (resetUnix>0 && wait>=0 && wait<=Horizon) requires a
+// FUTURE reset: an expired-but-still-blocked reset is a stale estimate, so it falls through to
+// re-home rather than wait (pinned by TestResolveWaitHorizon "expired reset rehomes"). This
+// deliberately DIFFERS from guardrotate.resetImminent, which treats a past reset as imminent
+// (a never-taken safety default there). The two predicates must NOT be unified — they share
+// only the horizon value, not the past-reset rule.
 func waitResetDecision(in ResolveInput, owner *Owner, status OwnerStatus, blockReason string, rec Decision) (Decision, bool) {
 	if in.NoWait {
 		return Decision{}, false
