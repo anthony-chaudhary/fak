@@ -31,6 +31,7 @@ flowchart TD
 | [`clean-skill`](clean-skill/SKILL.md) | Audit a skill's per-invocation context use and propose a context-bundling helper + SKILL.md trim. Stops for approval before writing code. |
 | [`memory-compact`](memory-compact/SKILL.md) | Keep a Claude Code auto-memory store under the harness load cap (200 lines / 25 KB), tier into hot/cold, prove it with the bundled `check_memory.py` witness. |
 | [`skill-lifecycle`](skill-lifecycle/SKILL.md) | Witnessed lifecycle for this skill pack — usage-telemetry sidecar, value/idle-driven auto-archive (never delete, restorable), pin-exemption, journaled reversible transitions. Bundled `skill_lifecycle_test.py` witness. |
+| [`field-borrow`](field-borrow/SKILL.md) | Turn an outward field idea into grounded backlog *without guessing whether fak already has it*: **dogfood the self-query surface** (`fak_feature_query` / `fak index`) to witness PRESENT/PARTIAL/ABSENT, ground each real gap at a file:line seam, and file epic-anchored issues carrying the named source + the dogfood witness + a first checkable step. The witness-first, human-curated counterpart to the automated `idea-scout`; the product/agent-capability counterpart of the inward `sota-check` (kernels) and outward `industry-score` (the competitive map). Worked instance: [`CONCEPT-FIELD-BORROW-QUERY-QUALITY-2026-07-08`](../../docs/notes/CONCEPT-FIELD-BORROW-QUERY-QUALITY-2026-07-08.md). |
 
 ## DOS trust gates
 
