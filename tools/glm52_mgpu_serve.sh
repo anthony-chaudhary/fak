@@ -38,6 +38,19 @@ ALIAS="${ALIAS:-glm-5.2}"
 # the A/B. MAIN_GPU picks the row-split reduction device (only meaningful for -sm row).
 SPLIT_MODE="${SPLIT_MODE:-layer}"
 MAIN_GPU="${MAIN_GPU:-0}"
+# L4 (#3076) — flash-attention + CUDA-graph decode (~1.2-1.8x, the launch/attention-overhead lever).
+# Both default to the WITNESSED-baseline state (fa NOT passed; graphs at the build default) so an
+# unset invocation is byte-identical to the 23.2 tok/s serve; the L4 A/B (glm52_l4_fa_cudagraph_ab.sh)
+# toggles them per cell.
+#   FLASH_ATTN=on   -> add the flash-attn flag (FA_ON_FLAG; the exact spelling drifts across builds,
+#                      so it is overridable — '-fa' on older builds, '--flash-attn on' on recent ones).
+#   CUDA_GRAPHS=off -> GGML_CUDA_DISABLE_GRAPHS=1 ; =on -> UNSET it ; =default -> leave inherited env.
+#   (ggml presence-checks that env var: ANY value including "0" disables capture, so graphs-on = UNSET.)
+# NOTE: llama.cpp SKIPS CUDA-graph capture under -sm layer multi-device split, so graph-on may read
+# inert until L1 (SPLIT_MODE=row) removes the layer-split bubble — #3076 is ordered after #3075.
+FLASH_ATTN="${FLASH_ATTN:-off}"
+FA_ON_FLAG="${FA_ON_FLAG:---flash-attn on}"
+CUDA_GRAPHS="${CUDA_GRAPHS:-default}"
 RUN="${RUN:-/tmp/glm52_mgpu}"
 PHASE="$RUN/PHASE"
 SRVLOG="$RUN/server.log"
@@ -62,13 +75,24 @@ if ss -ltn 2>/dev/null | grep -q ":$PORT "; then ph "PORT_BUSY $PORT (already se
 ph "PREFLIGHT devices=$DEVICES free VRAM (MiB):"
 nvidia-smi --query-gpu=index,memory.free --format=csv,noheader -i "$DEVICES" 2>/dev/null || true
 
+# L4 (#3076): resolve the flash-attn launch flag and the CUDA-graph env from the knobs above.
+# FA_ARGS stays empty when FLASH_ATTN=off so the baseline launch line is byte-identical (no -fa);
+# the graph env is EXPORTED (inherited by setsid -> llama-server) only when explicitly toggled.
+FA_ARGS=()
+[ "$FLASH_ATTN" = "on" ] && read -r -a FA_ARGS <<< "$FA_ON_FLAG"
+case "$CUDA_GRAPHS" in
+  off) export GGML_CUDA_DISABLE_GRAPHS=1 ;;  # presence of the var (any value) disables graph capture
+  on)  unset GGML_CUDA_DISABLE_GRAPHS ;;     # graphs-on = var UNSET (build default); =0 would still DISABLE
+esac
+
 # The one line that matters: NO --n-cpu-moe => experts stay on GPU. -ngl 999 offloads
 # every layer; split-mode spreads them (layer = 1 GPU/token baseline, row = all GPUs/token, L1).
-ph "LAUNCH ngl=999 (experts ON gpu) devices=$DEVICES split=$SPLIT_MODE main-gpu=$MAIN_GPU port=$PORT ctx=$CTX model=$SHARD1"
+ph "LAUNCH ngl=999 (experts ON gpu) devices=$DEVICES split=$SPLIT_MODE main-gpu=$MAIN_GPU fa=$FLASH_ATTN graphs=$CUDA_GRAPHS port=$PORT ctx=$CTX model=$SHARD1"
 CUDA_VISIBLE_DEVICES="$DEVICES" setsid "$SERVER" \
   --model "$SHARD1" --alias "$ALIAS" --jinja \
   --n-gpu-layers 999 \
   --split-mode "$SPLIT_MODE" --main-gpu "$MAIN_GPU" \
+  "${FA_ARGS[@]}" \
   --host 127.0.0.1 --port "$PORT" --ctx-size "$CTX" \
   > "$SRVLOG" 2>&1 < /dev/null &
 SRV=$!
