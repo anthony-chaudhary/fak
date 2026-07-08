@@ -88,7 +88,7 @@ question presence can't reach — *does an agent who pastes the docs actually su
 | adopt | `honesty_ledger` | CLAIMS.md present, every `- [` claim carrying exactly one status tag (the `make claims-lint` rule). |
 | adopt | `integration_recipes` | A per-agent recipe under `docs/integrations/` for each family (Claude, Codex/OpenAI, Cursor, MCP). |
 | adopt | `codex_recipe_current` | The Codex recipe matches current Codex surfaces: MCP for the CLI/IDE path, `codex exec --json`, AGENTS.md discovery, and an honest Responses-vs-Chat-Completions fence. |
-| **build** | `extension_scaffold` | The additive path: `tools/new_leaf.py` + `EXTENDING.md` (add a leaf, don't edit core). |
+| **build** | `extension_scaffold` | The additive path: `fak new-leaf` + `EXTENDING.md` (add a leaf, don't edit core). |
 | build | `guardrails_surfaced` | Document each enforced rule in AGENTS.md: trunk-only, commit-by-path, DCO sign-off, tagged claims, leaf/ABI, the out-of-tree write guard. |
 | build | `contributor_contract` | `CONTRIBUTING.md` linked from the entry point + a one-command green gate (`make ci`). |
 | build | `platform_guidance_consistent` | **SUCCESS** — if AGENTS.md sells `make ci` as the gate, it names the native-Windows bridge (`scripts/ci.ps1` / `./test.ps1` under WSL) so a Windows agent isn't told to run a gate it can't. |
@@ -172,7 +172,7 @@ git commit -s -F <msgfile> -- tools/agent_readiness_scorecard.py \
 ## When to run this
 
 - After a change to any agent surface: AGENTS.md, llms.txt/llms-full.txt,
-  CLAIMS.md, the `docs/integrations/` recipes, the surfaced guardrails, `new_leaf.py`.
+  CLAIMS.md, the `docs/integrations/` recipes, the surfaced guardrails, `fak new-leaf`.
 - When onboarding a new agent harness (add its `agent_config` + a recipe).
 - On a `/loop` cadence to keep the front door agent-friendly as the repo grows.
 
