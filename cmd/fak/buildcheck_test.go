@@ -1,0 +1,225 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+)
+
+// argsHave reports whether flag and its value appear adjacently in args.
+func argsHave(args []string, flag, val string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == val {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSelectMaskedFiles(t *testing.T) {
+	untracked := []string{
+		"cmd/fak/peer_wip.go",
+		"cmd/fak/mine_new.go",
+		"docs/notes.md",
+		"cmd/fak/data.txt",
+		"internal/foo/peer2.go",
+	}
+	masked, stale := selectMaskedFiles(untracked, []string{"cmd/fak/mine_new.go"})
+	wantMasked := []string{"cmd/fak/peer_wip.go", "internal/foo/peer2.go"}
+	if !reflect.DeepEqual(masked, wantMasked) {
+		t.Errorf("masked = %v, want %v (only untracked .go not declared --mine)", masked, wantMasked)
+	}
+	if len(stale) != 0 {
+		t.Errorf("staleMine = %v, want none (mine_new.go IS untracked)", stale)
+	}
+}
+
+func TestSelectMaskedFilesStaleAndBackslashMine(t *testing.T) {
+	untracked := []string{"cmd/fak/peer.go", "cmd/fak/keep.go"}
+	// --mine given with a backslash separator (Windows paste) and a duplicate, plus one
+	// path that is not actually untracked -> normalized, deduped, and reported as stale.
+	masked, stale := selectMaskedFiles(untracked, []string{`cmd\fak\keep.go`, "cmd/fak/keep.go", "cmd/fak/tracked.go"})
+	if !reflect.DeepEqual(masked, []string{"cmd/fak/peer.go"}) {
+		t.Errorf("masked = %v, want [cmd/fak/peer.go] (keep.go protected via slash-normalized --mine)", masked)
+	}
+	if !reflect.DeepEqual(stale, []string{"cmd/fak/tracked.go"}) {
+		t.Errorf("staleMine = %v, want [cmd/fak/tracked.go] (declared --mine that is not untracked)", stale)
+	}
+}
+
+func TestSelectMaskedFilesEmpty(t *testing.T) {
+	masked, stale := selectMaskedFiles(nil, nil)
+	if len(masked) != 0 || len(stale) != 0 {
+		t.Errorf("empty inputs -> masked=%v stale=%v, want both empty", masked, stale)
+	}
+}
+
+func TestBuildOverlayHidesEachFile(t *testing.T) {
+	root := filepath.FromSlash("/repo/root")
+	ov := buildOverlay(root, []string{"cmd/fak/peer.go", "internal/foo/bar.go"})
+	if len(ov.Replace) != 2 {
+		t.Fatalf("Replace has %d entries, want 2", len(ov.Replace))
+	}
+	wantKey := filepath.Clean(filepath.Join(root, filepath.FromSlash("cmd/fak/peer.go")))
+	backing, ok := ov.Replace[wantKey]
+	if !ok {
+		t.Fatalf("overlay missing key %q; keys=%v", wantKey, ov.Replace)
+	}
+	if backing != "" {
+		t.Errorf("backing for masked file = %q, want \"\" (empty = treated as absent by go)", backing)
+	}
+}
+
+func TestBuildCheckArgs(t *testing.T) {
+	cases := []struct {
+		name                    string
+		mode, overlay, outTarget string
+		pkgs, want              []string
+	}{
+		{"build discards to null", "build", "", "NUL", []string{"./..."},
+			[]string{"build", "-o", "NUL", "./..."}},
+		{"build with overlay and out dir", "build", "ov.json", "out", []string{"./cmd/fak"},
+			[]string{"build", "-overlay", "ov.json", "-o", "out", "./cmd/fak"}},
+		{"vet never takes -o", "vet", "ov.json", "out", []string{"./..."},
+			[]string{"vet", "-overlay", "ov.json", "./..."}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildCheckArgs(tc.mode, tc.overlay, tc.outTarget, tc.pkgs)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("buildCheckArgs = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildCheckTail(t *testing.T) {
+	in := "a\n\nb\n  \nc\nd\n"
+	if got := buildCheckTail(in, 2); got != "c\nd" {
+		t.Errorf("buildCheckTail(_,2) = %q, want \"c\\nd\"", got)
+	}
+	if got := buildCheckTail("only\n", 5); got != "only" {
+		t.Errorf("buildCheckTail fewer-than-n = %q, want \"only\"", got)
+	}
+}
+
+func TestJoinReason(t *testing.T) {
+	if got := joinReason("", "b"); got != "b" {
+		t.Errorf("joinReason empty-a = %q", got)
+	}
+	if got := joinReason("a", ""); got != "a" {
+		t.Errorf("joinReason empty-b = %q", got)
+	}
+	if got := joinReason("a", "b"); got != "a: b" {
+		t.Errorf("joinReason both = %q, want \"a: b\"", got)
+	}
+}
+
+// withBuildCheckSeams swaps the impure seams (untracked lister, go runner, clock) for
+// the duration of fn, restoring them after -- so the shell is exercised hermetically
+// without touching git or spawning go.
+func withBuildCheckSeams(t *testing.T, untracked []string, runFn func(root string, args []string, stdout, stderr io.Writer) (int, error)) {
+	t.Helper()
+	origU, origR, origN := buildCheckUntracked, buildCheckRun, buildCheckNow
+	t.Cleanup(func() { buildCheckUntracked, buildCheckRun, buildCheckNow = origU, origR, origN })
+	buildCheckUntracked = func(string) ([]string, error) { return untracked, nil }
+	buildCheckRun = runFn
+	buildCheckNow = func() time.Time { return time.Unix(0, 0) }
+}
+
+func TestRunBuildCheckIsolatesSiblings(t *testing.T) {
+	var gotArgs []string
+	withBuildCheckSeams(t, []string{"cmd/fak/peer_wip.go"}, func(_ string, args []string, _, _ io.Writer) (int, error) {
+		gotArgs = args
+		return 0, nil
+	})
+	var out, errb bytes.Buffer
+	if rc := runBuildCheck(&out, &errb, []string{"./cmd/fak"}); rc != 0 {
+		t.Fatalf("rc = %d, want 0; stderr=%s", rc, errb.String())
+	}
+	joined := strings.Join(gotArgs, " ")
+	if !strings.Contains(joined, "-overlay") {
+		t.Errorf("args %v missing -overlay (sibling isolation not applied)", gotArgs)
+	}
+	if !argsHave(gotArgs, "-o", os.DevNull) {
+		t.Errorf("args %v missing `-o %s` (a compile check must discard, never drop a binary in the tree)", gotArgs, os.DevNull)
+	}
+	if gotArgs[len(gotArgs)-1] != "./cmd/fak" {
+		t.Errorf("last arg = %q, want ./cmd/fak", gotArgs[len(gotArgs)-1])
+	}
+	if !strings.Contains(errb.String(), "peer_wip.go") {
+		t.Errorf("stderr does not name the masked file; got %q", errb.String())
+	}
+}
+
+func TestRunBuildCheckNoIsolate(t *testing.T) {
+	called := false
+	withBuildCheckSeams(t, []string{"cmd/fak/peer_wip.go"}, func(_ string, args []string, _, _ io.Writer) (int, error) {
+		called = true
+		if strings.Contains(strings.Join(args, " "), "-overlay") {
+			t.Errorf("--isolate=false still passed -overlay: %v", args)
+		}
+		return 0, nil
+	})
+	var out, errb bytes.Buffer
+	if rc := runBuildCheck(&out, &errb, []string{"--isolate=false", "./..."}); rc != 0 {
+		t.Fatalf("rc = %d, want 0; stderr=%s", rc, errb.String())
+	}
+	if !called {
+		t.Fatal("go runner never invoked")
+	}
+}
+
+func TestRunBuildCheckJSONReport(t *testing.T) {
+	withBuildCheckSeams(t, []string{"cmd/fak/peer_wip.go"}, func(_ string, _ []string, _, _ io.Writer) (int, error) {
+		return 0, nil
+	})
+	var out, errb bytes.Buffer
+	if rc := runBuildCheck(&out, &errb, []string{"--json", "./..."}); rc != 0 {
+		t.Fatalf("rc = %d, want 0", rc)
+	}
+	var rep buildCheckReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("stdout is not valid JSON report: %v\n%s", err, out.String())
+	}
+	if rep.Schema != "fak.buildcheck.v1" || rep.Verdict != "OK" || rep.Mode != "build" {
+		t.Errorf("report = %+v, want schema/verdict OK/build", rep)
+	}
+	if rep.MaskedCount != 1 || !rep.Isolate {
+		t.Errorf("report masked/isolate = %d/%v, want 1/true", rep.MaskedCount, rep.Isolate)
+	}
+	if rep.Output != os.DevNull {
+		t.Errorf("report.Output = %q, want the null device %q (default discard)", rep.Output, os.DevNull)
+	}
+	if len(rep.Command) < 2 || rep.Command[0] != "go" || rep.Command[1] != "build" {
+		t.Errorf("report.Command = %v, want it to start with [go build ...]", rep.Command)
+	}
+}
+
+func TestRunBuildCheckBuildFailedExit(t *testing.T) {
+	withBuildCheckSeams(t, nil, func(_ string, _ []string, _, stderr io.Writer) (int, error) {
+		stderr.Write([]byte("cmd/fak/x.go:9:2: undefined: Foo\n"))
+		return 2, nil
+	})
+	var out, errb bytes.Buffer
+	rc := runBuildCheck(&out, &errb, []string{"--json", "./..."})
+	if rc != 2 {
+		t.Fatalf("rc = %d, want 2 (mirror go's exit code)", rc)
+	}
+	var rep buildCheckReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("bad JSON: %v", err)
+	}
+	if rep.Verdict != "BUILD_FAILED" {
+		t.Errorf("verdict = %q, want BUILD_FAILED", rep.Verdict)
+	}
+	if !strings.Contains(rep.Reason, "undefined: Foo") {
+		t.Errorf("reason %q should carry the captured go failure tail", rep.Reason)
+	}
+}

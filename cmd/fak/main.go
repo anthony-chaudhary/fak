@@ -111,6 +111,8 @@ func main() {
 		cmdAffected(os.Args[2:])
 	case "blast":
 		cmdBlast(os.Args[2:])
+	case "buildcheck":
+		cmdBuildCheck(os.Args[2:])
 	case "preflight":
 		cmdPreflight(os.Args[2:])
 	case "attest":
@@ -189,6 +191,8 @@ func main() {
 		cmdToolproc(os.Args[2:])
 	case "stallscan":
 		cmdStallscan(os.Args[2:])
+	case "growthgate":
+		cmdGrowthgate(os.Args[2:])
 	case "test":
 		cmdTest(os.Args[2:])
 	case "done":

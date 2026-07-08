@@ -107,6 +107,15 @@ const usageCoreText = `usage:
                  --budget reds on a latency regression after tests pass; --report writes the
                  measured verify-loop JSON; --file supplies a representative changed path.
                  make ci still runs the full suite as the authoritative gate.)
+  fak buildcheck [--isolate] [--mine P ...] [--vet] [--out DIR] [--json] [packages...]
+                (COLLISION-FREE COMPILE CHECK for a fleet sharing one trunk tree: discard the
+                 build output to the null device (never fak.exe in the tree, so no Windows
+                 file-lock war between agents - #2373), and generate a go build -overlay that
+                 HIDES untracked sibling .go files so a peer's in-flight WIP cannot red your
+                 compile. --mine P keeps your own new untracked file in the build; --out DIR
+                 isolates produced binaries in a dir instead of discarding; --isolate=false
+                 builds the live tree as-is; --vet runs go vet. The LIGHT path - no full-tree
+                 copy, unlike fak worktree witness. Default packages ./... ; make ci is the gate.)
   fak test      [fast|full|race|<pkg>] [--list] [-n] [-- go test args]
                 (HOST-AWARE TEST RUNNER: resolve the right go test invocation for a tier
                  (fast=-short ./..., full, race) or a package target, and on Windows route
