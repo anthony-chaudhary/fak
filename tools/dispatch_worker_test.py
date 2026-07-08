@@ -209,7 +209,19 @@ class DispatchWorkerTest(unittest.TestCase):
         self.assertEqual(wrapped[1], "guard")
         self.assertEqual(wrapped[wrapped.index("--provider") + 1], "anthropic")
         self.assertEqual(wrapped[wrapped.index("--precompact-hook") + 1], "enforce")
-        self.assertEqual(wrapped[wrapped.index("--context-budget-tokens") + 1], "48000")
+        # ADEQUACY guardrail, not mere presence. This seeds guard's per-session
+        # ContextTokensLeft, drawn down by each turn's FULL resident window. It MUST
+        # exceed the worker's irreducible ~62K baseline prompt (issue body + orientation
+        # + injected fleet memory + ~40K startup.json route blob) or every worker is born
+        # over-budget and crashes on turn 1 — the 2026-07-05 (#2972) regression that a
+        # `== "48000"` check here protected. Pin a floor so a future baseline-growth
+        # commit fails HERE, loudly, instead of silently crash-looping the fleet.
+        budget = int(wrapped[wrapped.index("--context-budget-tokens") + 1])
+        WORKER_BASELINE_FLOOR_TOKENS = 62400
+        self.assertGreaterEqual(
+            budget, WORKER_BASELINE_FLOOR_TOKENS,
+            f"context budget {budget} < baseline floor {WORKER_BASELINE_FLOOR_TOKENS}: "
+            "workers would be born over-budget on turn 1 (see #2972)")
         self.assertIn("--restart-on-budget", wrapped)
         self.assertEqual(wrapped[wrapped.index("--restart-limit") + 1], "2")
         self.assertIn("--audit", wrapped)
@@ -218,6 +230,45 @@ class DispatchWorkerTest(unittest.TestCase):
         # The raw worker argv is preserved verbatim AFTER the `--` separator.
         sep = wrapped.index("--")
         self.assertEqual(wrapped[sep + 1:], raw)
+
+    def test_claude_guard_context_budget_derivation_matches_go(self) -> None:
+        # Python half of the hand-maintained Go<->Python parity: mirror of
+        # cmd/dispatchworker/guard_test.go:TestClaudeGuardContextBudgetDerivation.
+        # Go derives from internal/ctxplan; Python cannot import it, so the four
+        # module constants are hand-mirrored and THIS golden is the drift tripwire
+        # (the exact-value lock the old `== "48000"` pin provided, restored at the
+        # derived value). Update this test and the Go one IN THE SAME COMMIT.
+        mod = load()
+        derived = mod.claude_guard_context_budget_tokens()
+        ceiling = (mod.CLAUDE_GUARD_MODEL_WINDOW_TOKENS
+                   - mod.CLAUDE_GUARD_OUTPUT_RESERVE_TOKENS)
+        # (a) Birth-safety: strictly above the baseline (a worker is never born
+        # over-budget; see #2972).
+        self.assertGreater(
+            derived, mod.CLAUDE_GUARD_BASELINE_TOKENS,
+            f"derived budget {derived} <= baseline: workers born over-budget")
+        # (b) Runaway backstop: at/under the effective window ceiling
+        # (window - output reserve).
+        self.assertLessEqual(
+            derived, ceiling,
+            f"derived budget {derived} > effective window ceiling {ceiling}")
+        # (c) Golden lock: min(62000*2, 200000-32000) = 124000, and the argv
+        # string constant wired into CLAUDE_GUARD_BUDGET_ARGS carries it. If this
+        # fails, a mirror constant diverged from Go (or Go moved) -- keep the two
+        # goldens identical in the same commit.
+        self.assertEqual(
+            derived, 124000,
+            "derived budget diverged from Go's TestClaudeGuardContextBudgetDerivation "
+            "golden; re-sync the mirrored constants")
+        self.assertEqual(mod.CLAUDE_GUARD_CONTEXT_BUDGET_TOKENS, "124000")
+        # (d) Monotone in the baseline below the ceiling: a baseline bump RAISES
+        # the budget (the flat-constant staleness the derivation kills). load()
+        # gives a fresh module per test, so patching its globals is hermetic.
+        mod.CLAUDE_GUARD_BASELINE_TOKENS += 1000
+        self.assertGreater(mod.claude_guard_context_budget_tokens(), derived)
+        # ...while a runaway baseline is still clamped to the window ceiling.
+        mod.CLAUDE_GUARD_BASELINE_TOKENS = ceiling
+        self.assertEqual(mod.claude_guard_context_budget_tokens(), ceiling)
 
     def test_guard_wrap_noop_without_fak_bin(self) -> None:
         mod = load()

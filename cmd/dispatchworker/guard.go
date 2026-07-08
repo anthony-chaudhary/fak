@@ -33,6 +33,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/randhex"
 )
 
@@ -51,16 +52,78 @@ const guardTimeoutFloorS = 600
 // Claude guard args mirror tools/dispatch_worker.py. Headless workers need the
 // PreCompact actuator in enforce mode, plus guard's hard budget restart path so
 // a compact-runaway session is relaunched instead of only nudged in stderr.
+//
+// claudeGuardContextBudgetTokens seeds the guard's per-session ContextTokensLeft.
+// SEMANTICS (internal/session/usage.go DebitUsage): every turn debits that turn's
+// ENTIRE resident context window (prompt + cache_read + cache_creation — the whole
+// window, not the newly-added delta) from this budget; when it reaches <=0 the
+// session drains with BUDGET_CONTEXT_EXHAUSTED. So for a single-issue `-p` worker
+// this behaves as a per-turn resident-window ceiling: if turn 1's window exceeds
+// the budget, the worker is born over-budget and never runs.
+//
+// The old 48000 was BELOW the workers' ~62K irreducible baseline prompt (issue body
+// + AGENTS/llms orientation + injected fleet memory + the ~40K startup.json 'route'
+// blob), so every dispatch claude worker exhausted on turn 1 → 2 restarts burned →
+// raw 409 → child exit 1 → CHILD_CRASH (fleet ship rate collapsed to 2-9%).
+//
+// DONE(dynamic-budget): the budget is no longer a flat constant (any flat value
+// would silently fall below the baseline the next time the baseline grew). It is
+// DERIVED: baseline × birth-headroom, clamped to the model window's effective
+// ceiling sourced from internal/ctxplan (HardContextCap − OutputReserve; doctrine:
+// docs/long-context-defaults.md — the advertised window is a hard CAP, never a raw
+// target). Grows with the baseline (never a birth wall again), shrinks with the
+// window (always a runaway backstop). Keep the arithmetic in sync with
+// tools/dispatch_worker.py:claude_guard_context_budget_tokens — the Python sibling
+// cannot import ctxplan, so it mirrors these constants by hand.
 const (
-	claudeGuardContextBudgetTokens = "48000"
+	// claudeGuardBaselineTokens is the workers' ~62K irreducible baseline prompt
+	// (issue body + AGENTS/llms orientation + injected fleet memory + the ~40K
+	// startup.json 'route' blob — the breakdown above). This is the ONE place a
+	// future baseline bump happens; the derived budget tracks it automatically.
+	claudeGuardBaselineTokens = 62000
+	// claudeGuardBirthHeadroomFactor: the derived budget is baseline × this factor,
+	// so a worker is born with the whole baseline again in headroom before the
+	// runaway backstop fires. (History: the committed value this derivation replaced
+	// was the crash-looping flat "48000"; a flat 131072 was only ever an uncommitted
+	// working-tree interim, never shipped.) For the
+	// 62000 baseline / 200000-32000 window this yields 124000 — comfortably above
+	// baseline, comfortably under the 168000 effective ceiling.
+	claudeGuardBirthHeadroomFactor = 2
 	claudeGuardRestartLimit        = "2"
 )
 
-var claudeGuardArgs = []string{
-	"--precompact-hook", "enforce",
-	"--context-budget-tokens", claudeGuardContextBudgetTokens,
-	"--restart-on-budget",
-	"--restart-limit", claudeGuardRestartLimit,
+// deriveClaudeGuardContextBudget is the pure arithmetic: baseline × headroom,
+// clamped to the effective window ceiling (hardCap − outputReserve). Monotone in
+// the baseline until the ceiling clamps; the ceiling keeps it under the real model
+// window even if the baseline balloons.
+func deriveClaudeGuardContextBudget(baselineTokens, hardContextCap, outputReserve int) int {
+	ceiling := hardContextCap - outputReserve
+	budget := baselineTokens * claudeGuardBirthHeadroomFactor
+	if budget > ceiling {
+		budget = ceiling
+	}
+	return budget
+}
+
+// claudeGuardContextBudgetTokens returns the derived per-session context budget as
+// the `--context-budget-tokens` argv string. The window and output reserve come
+// from the ctxplan envelope table (the routine-agent-turn row), NOT a fresh local
+// literal — so a model-window change lands here without touching this file.
+func claudeGuardContextBudgetTokens() string {
+	env := ctxplan.GenericTurnEnvelope()
+	return strconv.Itoa(deriveClaudeGuardContextBudget(
+		claudeGuardBaselineTokens, env.HardContextCap, env.OutputReserve))
+}
+
+// claudeGuardArgs builds the claude guard argv at call time so the budget arg
+// carries the derived value. Order is part of the CLI surface the parity tests pin.
+func claudeGuardArgs() []string {
+	return []string{
+		"--precompact-hook", "enforce",
+		"--context-budget-tokens", claudeGuardContextBudgetTokens(),
+		"--restart-on-budget",
+		"--restart-limit", claudeGuardRestartLimit,
+	}
 }
 
 // guardEnabled reports whether to front a worker with `fak guard`. Dogfood-by-default
@@ -211,7 +274,7 @@ func guardWrap(command []string, fakBin, lane, backend, workspace string, env ma
 	var extra []string
 	audit := guardAuditPath(workspace, lane, backend)
 	if backend == "claude" {
-		extra = append(extra, claudeGuardArgs...)
+		extra = append(extra, claudeGuardArgs()...)
 		extra = append(extra, "--session-id", strings.TrimSuffix(filepath.Base(audit), filepath.Ext(audit)))
 	}
 	if backend != "claude" {

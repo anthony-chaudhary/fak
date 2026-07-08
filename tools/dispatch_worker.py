@@ -268,10 +268,55 @@ OPENCODE_GUARD_UPSTREAM_KEY_ENV = "FAK_OPENCODE_GUARD_UPSTREAM_API_KEY"
 # `fak guard` can keep its shadow default, but unattended dispatch needs the
 # actuator enforced at launch.
 CLAUDE_GUARD_PRECOMPACT_ARGS = ["--precompact-hook", "enforce"]
-# Pair the posture actuator with guard's hard budget restart path. The 48k line
-# mirrors gateway.DefaultCompactHistoryBudget; the finite restart limit prevents a
-# bad issue prompt from creating an unbounded relaunch loop.
-CLAUDE_GUARD_CONTEXT_BUDGET_TOKENS = "48000"
+# Pair the posture actuator with guard's hard budget restart path. The finite
+# restart limit prevents a bad issue prompt from creating an unbounded relaunch loop.
+#
+# This seeds guard's per-session ContextTokensLeft, which DebitUsage draws down by
+# each turn's FULL resident window (prompt+cache_read+cache_creation); at <=0 the
+# session drains BUDGET_CONTEXT_EXHAUSTED. The old 48k was picked to mirror
+# gateway.DefaultCompactHistoryBudget — but that is a compaction TARGET (what history
+# is squeezed toward), not a max resident window. The workers' ~62K irreducible
+# baseline prompt can't compact below itself, so a 48k drain ceiling meant every
+# worker was born over-budget → 2 restarts burned → 409 → exit 1 → CHILD_CRASH.
+#
+# DONE(dynamic-budget): no longer a flat constant (a flat value silently falls below
+# the baseline the next time the baseline grows). The budget is DERIVED: baseline ×
+# birth-headroom, clamped to the model window's effective ceiling (window − output
+# reserve). Grows with the baseline (never a birth wall again), shrinks with the
+# window (always a runaway backstop under the real model window).
+#
+# The window/reserve constants MIRROR the Go source of truth in
+# internal/ctxplan/envelope.go (GenericTurnEnvelope: HardContextCap 200000,
+# OutputReserve 32000; doctrine: docs/long-context-defaults.md — the advertised
+# window is a hard CAP, never a raw target); the baseline and headroom factor mirror
+# cmd/dispatchworker/guard.go (claudeGuardBaselineTokens /
+# claudeGuardBirthHeadroomFactor). Python cannot import the Go package, so keep ALL
+# FOUR constants and the arithmetic in sync with Go by hand — the derived integer
+# must be identical on both paths.
+CLAUDE_GUARD_MODEL_WINDOW_TOKENS = 200000   # ctxplan HardContextCap
+CLAUDE_GUARD_OUTPUT_RESERVE_TOKENS = 32000  # ctxplan OutputReserve
+# The workers' ~62K irreducible baseline prompt (issue body + AGENTS/llms
+# orientation + injected fleet memory + the ~40K startup.json 'route' blob).
+CLAUDE_GUARD_BASELINE_TOKENS = 62000
+# Budget = baseline × this factor, so a worker is born with a whole baseline of
+# headroom before the backstop fires. (History: the committed value this derivation
+# replaced was the crash-looping flat "48000"; a flat 131072 was only ever an
+# uncommitted working-tree interim, never shipped.)
+CLAUDE_GUARD_BIRTH_HEADROOM_FACTOR = 2
+
+
+def claude_guard_context_budget_tokens() -> int:
+    """Derive the per-session context budget: baseline x headroom, window-clamped.
+
+    Mirrors cmd/dispatchworker/guard.go:deriveClaudeGuardContextBudget exactly.
+    For the shipped constants: min(62000*2, 200000-32000) = 124000 — strictly above
+    the baseline (birth-safe) and under the effective window ceiling (backstop).
+    """
+    ceiling = CLAUDE_GUARD_MODEL_WINDOW_TOKENS - CLAUDE_GUARD_OUTPUT_RESERVE_TOKENS
+    return min(CLAUDE_GUARD_BASELINE_TOKENS * CLAUDE_GUARD_BIRTH_HEADROOM_FACTOR, ceiling)
+
+
+CLAUDE_GUARD_CONTEXT_BUDGET_TOKENS = str(claude_guard_context_budget_tokens())
 CLAUDE_GUARD_RESTART_LIMIT = "2"
 CLAUDE_GUARD_BUDGET_ARGS = [
     "--context-budget-tokens", CLAUDE_GUARD_CONTEXT_BUDGET_TOKENS,

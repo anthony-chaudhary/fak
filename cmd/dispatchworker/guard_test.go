@@ -6,8 +6,12 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 )
 
 func TestGuardEnabledDefaultOnAndOptOut(t *testing.T) {
@@ -82,6 +86,57 @@ func TestGuardAuditPathUniquePerCall(t *testing.T) {
 	}
 }
 
+// TestClaudeGuardContextBudgetDerivation locks the DERIVED budget (the
+// TODO(dynamic-budget) resolution): baseline × birth-headroom, clamped to the
+// ctxplan effective window ceiling. Mirror: tools/dispatch_worker.py
+// claude_guard_context_budget_tokens must yield the SAME integer; its parity
+// partner test_claude_guard_context_budget_derivation_matches_go (in
+// tools/dispatch_worker_test.py) pins the same 124000 golden — update both
+// in the same commit.
+func TestClaudeGuardContextBudgetDerivation(t *testing.T) {
+	env := ctxplan.GenericTurnEnvelope()
+	ceiling := env.HardContextCap - env.OutputReserve
+	got, err := strconv.Atoi(claudeGuardContextBudgetTokens())
+	if err != nil {
+		t.Fatalf("derived budget must be a wired integer: %v", err)
+	}
+	// (a) Birth-safety: strictly above the baseline (a worker is never born
+	// over-budget), with real headroom, not merely +1.
+	if got <= claudeGuardBaselineTokens {
+		t.Errorf("derived budget %d <= baseline %d: workers would be born over-budget (see #2972)", got, claudeGuardBaselineTokens)
+	}
+	// (b) Runaway backstop: at/under the effective window ceiling (HardContextCap −
+	// OutputReserve), so the cap always bites below the real model window.
+	if got > ceiling {
+		t.Errorf("derived budget %d > effective window ceiling %d (HardContextCap %d − OutputReserve %d)", got, ceiling, env.HardContextCap, env.OutputReserve)
+	}
+	// (c) Golden lock for the shipped constants: min(62000×2, 200000−32000) = 124000.
+	// If this fails, someone changed the baseline, the headroom factor, or the
+	// ctxplan envelope — update tools/dispatch_worker.py IN THE SAME COMMIT.
+	if want := 124000; got != want {
+		t.Errorf("derived budget = %d, want %d; keep tools/dispatch_worker.py claude_guard_context_budget_tokens in sync", got, want)
+	}
+	// (d) Monotone in the baseline below the ceiling: a baseline bump RAISES the
+	// budget (the flat-constant staleness this derivation kills)...
+	if bumped := deriveClaudeGuardContextBudget(claudeGuardBaselineTokens+1000, env.HardContextCap, env.OutputReserve); bumped <= got {
+		t.Errorf("baseline bump must raise the derived budget: %d (baseline+1000) <= %d", bumped, got)
+	}
+	// ...while a runaway baseline is still clamped to the window ceiling.
+	if clamped := deriveClaudeGuardContextBudget(ceiling, env.HardContextCap, env.OutputReserve); clamped != ceiling {
+		t.Errorf("over-window baseline must clamp to ceiling %d, got %d", ceiling, clamped)
+	}
+	// The CLI surface: exact flags, exact order, derived value wired in.
+	want := []string{
+		"--precompact-hook", "enforce",
+		"--context-budget-tokens", strconv.Itoa(got),
+		"--restart-on-budget",
+		"--restart-limit", "2",
+	}
+	if !slices.Equal(claudeGuardArgs(), want) {
+		t.Errorf("claudeGuardArgs() = %v, want %v", claudeGuardArgs(), want)
+	}
+}
+
 func TestGuardWrapClaudeFrontsWithFakGuardAnthropic(t *testing.T) {
 	raw, _ := buildCommand("gateway", "claude")
 	wrapped := guardWrap(raw, "/usr/bin/fak", "gateway", "claude", "C:/work/fak", map[string]string{})
@@ -94,8 +149,22 @@ func TestGuardWrapClaudeFrontsWithFakGuardAnthropic(t *testing.T) {
 	if wrapped[indexOf(wrapped, "--precompact-hook")+1] != "enforce" {
 		t.Error("claude precompact hook must be enforced")
 	}
-	if wrapped[indexOf(wrapped, "--context-budget-tokens")+1] != "48000" {
-		t.Error("claude guard context budget must be wired")
+	// ADEQUACY guardrail, not mere presence. This value seeds guard's per-session
+	// ContextTokensLeft, which DebitUsage (internal/session/usage.go) draws down by
+	// each turn's FULL resident window. It MUST exceed the worker's irreducible ~62K
+	// baseline prompt (issue body + AGENTS/llms orientation + injected fleet memory +
+	// the ~40K startup.json route blob) or every claude worker is born over-budget and
+	// crashes on turn 1 — the 2026-07-05 (#2972) regression, which the previous
+	// `== "48000"` assertion here actively PROTECTED. Pin a floor so a future
+	// baseline-growth commit fails HERE, loudly, instead of silently crash-looping the fleet.
+	budgetStr := wrapped[indexOf(wrapped, "--context-budget-tokens")+1]
+	budget, err := strconv.Atoi(budgetStr)
+	if err != nil {
+		t.Fatalf("claude guard context budget must be a wired integer, got %q", budgetStr)
+	}
+	const workerBaselineFloorTokens = 62400
+	if budget < workerBaselineFloorTokens {
+		t.Errorf("claude guard context budget %d < worker baseline floor %d: workers would be born over-budget on turn 1 (see #2972)", budget, workerBaselineFloorTokens)
 	}
 	if !contains(wrapped, "--restart-on-budget") {
 		t.Error("claude guard must restart on budget exhaustion")
