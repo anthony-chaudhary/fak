@@ -7,7 +7,7 @@
 // Zero external dependencies (standard library only) — there is no go.sum.
 module github.com/anthony-chaudhary/fak
 
-go 1.26
+go 1.26.5
 
 require golang.org/x/term v0.44.0
 
