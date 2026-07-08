@@ -45,6 +45,25 @@ import (
 // without importing the engine package.
 const SensitiveLabel = "sensitive"
 
+// Retention-preference label keys — the caller-facing form of OpenRouter's data
+// residency knobs (`zdr`, `data_collection`), mapped onto fak's sensitive-remote
+// floor. A subject that asks for zero data retention must never resolve to a
+// remote, data-retaining provider, so it is treated exactly like a sensitive one.
+// These are STRICTLY-MORE-RESTRICTIVE: recognizing them can only ADD sensitivity
+// (more refusals), never remove it, so they cannot regress the default-deny floor.
+const (
+	// ZDRLabel ("zdr") requests zero data retention: a truthy value marks the
+	// subject sensitive. Mirrors OpenRouter's provider `zdr`.
+	ZDRLabel = "zdr"
+	// DataCollectionLabel ("data_collection") mirrors OpenRouter's provider
+	// `data_collection`: "deny" (also "none"/"off") marks the subject sensitive;
+	// "allow" does not.
+	DataCollectionLabel = "data_collection"
+	// RetentionLabel ("retention") is fak's plain-language alias: "none"/"zero"/
+	// "zdr"/"deny" marks the subject sensitive; "allow"/"any" does not.
+	RetentionLabel = "retention"
+)
+
 // ResolvedModel is what a logical model alias resolves to: a concrete engine id
 // the dispatcher hands to abi.ToolCall.Engine, the provider that serves it, and
 // whether reaching it leaves the box (Remote). The residency PDP (remoteRoute in
@@ -219,17 +238,50 @@ func (r *Registry) ResolvePlan(s Subject, p Plan) ([]ResolvedModel, error) {
 	return out, nil
 }
 
-// isSensitive reports whether a subject's labels mark it sensitive. Any non-empty
-// value at SensitiveLabel other than an explicit false ("0"/"false"/"no") trips
-// it — fail-toward-sensitive: an unrecognized value is treated as sensitive.
+// isSensitive reports whether a subject's labels mark it sensitive — either via the
+// explicit SensitiveLabel (fail-toward-sensitive: any non-empty value other than an
+// explicit false trips it) OR via one of the OpenRouter-style zero-data-retention
+// knobs (see wantsZeroRetention). A subject that asks for no data retention is
+// treated exactly like a sensitive one, so it can never resolve to a remote provider.
 func isSensitive(s Subject) bool {
-	v, ok := s.Labels[SensitiveLabel]
-	if !ok {
-		return false
+	if truthyLabel(s.Labels[SensitiveLabel]) {
+		return true
 	}
+	return wantsZeroRetention(s)
+}
+
+// truthyLabel reports whether a label value is affirmative. It is fail-toward-true:
+// any non-empty value other than an explicit false ("0"/"false"/"no"/"off") is true,
+// matching the sensitive-label discipline (an unrecognized value is treated as set).
+func truthyLabel(v string) bool {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "", "0", "false", "no", "off":
 		return false
 	}
 	return true
+}
+
+// wantsZeroRetention reports whether a subject asks for a zero-data-retention (no
+// remote provider) route via any of the OpenRouter-style knobs — ZDRLabel,
+// DataCollectionLabel, or RetentionLabel. It is the caller-facing half of the
+// sensitive-remote floor: a request that must not leave its data with a retaining
+// provider is treated exactly like a sensitive one.
+//
+// MIRROR: internal/engine.sensitiveRoute recognizes the SAME keys on ToolCall.Meta
+// (the adjudication-time floor); the two MUST stay in sync so a routing eligibility
+// decision here never disagrees with the floor that enforces it downstream. A shared
+// case table is pinned by TestRetentionKnobMirror across the two packages.
+func wantsZeroRetention(s Subject) bool {
+	if truthyLabel(s.Labels[ZDRLabel]) {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(s.Labels[DataCollectionLabel])) {
+	case "deny", "none", "off":
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(s.Labels[RetentionLabel])) {
+	case "none", "zero", "zdr", "deny":
+		return true
+	}
+	return false
 }
