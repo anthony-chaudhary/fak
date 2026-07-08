@@ -145,7 +145,7 @@ func TestRestoreOverMCP(t *testing.T) {
 // scheme, and both sha256-hex the same bytes.)
 func TestRestoreDigestSchemeMatchesCtxplan(t *testing.T) {
 	b := []byte(`{"role":"user","content":"x"}`)
-	if got := ctxplan.Digest(b); len(got) != 64 {
+	if got := ctxplan.Digest(b); len(got) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex is a fixed 64-char width
 		t.Fatalf("ctxplan.Digest length = %d, want 64-hex", len(got))
 	}
 }
