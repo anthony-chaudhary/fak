@@ -55,12 +55,14 @@ red, and a peer's uncommitted fix can mask a real one. Name the question, run th
 
 `fak ci-preflight` archives the tip to a throwaway checkout (immune to the dirty tree;
 `--skip-build` = gofmt-only fast path). `fak buildcheck` discards output to the null device
-and, by default, `-overlay`s away untracked siblings so a peer's WIP can't red your compile
-(`--mine <file>` keeps your own new file); `--isolate=false` builds the live tree as-is, which
-is the one that catches *your own* broken untracked `_test.go`. None of the three writes an
-in-tree binary. `make test-fast` / `make ci` remain the local full-suite gates. **Don't report
-"the build is clean" from a raw `go build`/`go vet` in this working tree without saying which of
-the four questions you mean** — they give different answers here.
+and, by default, `-overlay`s away untracked siblings so a peer's WIP can't red your compile —
+an untracked `.go` in a package *you're* already editing is auto-kept as the matched new file,
+`--mine <file>` force-keeps one wired in from elsewhere, and a red that's purely mask-induced is
+re-checked against the live tree and reported OK before it reaches you; `--isolate=false` builds
+the live tree as-is, which is the one that catches *your own* broken untracked `_test.go`. None
+of the three writes an in-tree binary. `make test-fast` / `make ci` remain the local full-suite
+gates. **Don't report "the build is clean" from a raw `go build`/`go vet` in this working tree
+without saying which of the four questions you mean** — they give different answers here.
 
 Or install the released binary directly — the module is at the repo root, so this resolves:
 
@@ -81,8 +83,10 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 > process` (#2373). The fleet-safe way to compile-check on the shared trunk is **`fak
 > buildcheck [pkgs...]`**: it discards the output to the null device (never an in-tree binary,
 > universal across lib/main/multi-pkg) *and* generates a `go build -overlay` that hides peers'
-> untracked in-flight `.go` files, so a sibling's WIP can't red your compile — `--mine <file>`
-> keeps your own new untracked file, `--vet` runs `go vet`, `--json` reports. The raw fallback
+> untracked in-flight `.go` files (keeping any that sit in a package you're already editing, since
+> those are almost always the matched new half of your edit) so a sibling's WIP can't red your
+> compile — `--mine <file>` force-keeps one wired in from elsewhere, `--vet` runs `go vet`,
+> `--json` reports. The raw fallback
 > (when the binary is unbuildable) is `go build -o $env:TEMP\fak-verify.exe ./cmd/fak`
 > (PowerShell) / `go build -o /tmp/fak-verify.exe ./cmd/fak` (bash), or `go vet ./cmd/fak` —
 > but note a *fixed* temp name still collides when two agents run it at once, which is exactly

@@ -30,10 +30,13 @@ func TestSelectMaskedFiles(t *testing.T) {
 		"cmd/fak/data.txt",
 		"internal/foo/peer2.go",
 	}
-	masked, stale := selectMaskedFiles(untracked, []string{"cmd/fak/mine_new.go"})
+	masked, kept, stale := selectMaskedFiles(untracked, []string{"cmd/fak/mine_new.go"}, nil)
 	wantMasked := []string{"cmd/fak/peer_wip.go", "internal/foo/peer2.go"}
 	if !reflect.DeepEqual(masked, wantMasked) {
 		t.Errorf("masked = %v, want %v (only untracked .go not declared --mine)", masked, wantMasked)
+	}
+	if len(kept) != 0 {
+		t.Errorf("kept = %v, want none (no modified dirs -> nothing kept)", kept)
 	}
 	if len(stale) != 0 {
 		t.Errorf("staleMine = %v, want none (mine_new.go IS untracked)", stale)
@@ -44,7 +47,7 @@ func TestSelectMaskedFilesStaleAndBackslashMine(t *testing.T) {
 	untracked := []string{"cmd/fak/peer.go", "cmd/fak/keep.go"}
 	// --mine given with a backslash separator (Windows paste) and a duplicate, plus one
 	// path that is not actually untracked -> normalized, deduped, and reported as stale.
-	masked, stale := selectMaskedFiles(untracked, []string{`cmd\fak\keep.go`, "cmd/fak/keep.go", "cmd/fak/tracked.go"})
+	masked, _, stale := selectMaskedFiles(untracked, []string{`cmd\fak\keep.go`, "cmd/fak/keep.go", "cmd/fak/tracked.go"}, nil)
 	if !reflect.DeepEqual(masked, []string{"cmd/fak/peer.go"}) {
 		t.Errorf("masked = %v, want [cmd/fak/peer.go] (keep.go protected via slash-normalized --mine)", masked)
 	}
@@ -54,9 +57,27 @@ func TestSelectMaskedFilesStaleAndBackslashMine(t *testing.T) {
 }
 
 func TestSelectMaskedFilesEmpty(t *testing.T) {
-	masked, stale := selectMaskedFiles(nil, nil)
-	if len(masked) != 0 || len(stale) != 0 {
-		t.Errorf("empty inputs -> masked=%v stale=%v, want both empty", masked, stale)
+	masked, kept, stale := selectMaskedFiles(nil, nil, nil)
+	if len(masked) != 0 || len(kept) != 0 || len(stale) != 0 {
+		t.Errorf("empty inputs -> masked=%v kept=%v stale=%v, want all empty", masked, kept, stale)
+	}
+}
+
+func TestSelectMaskedFilesKeepsInModifiedDir(t *testing.T) {
+	untracked := []string{
+		"internal/slackoutbox/compact.go", // matched new file for an edited drain.go
+		"internal/peer/newthing.go",       // independent peer WIP, its dir has no edits
+	}
+	modified := map[string]bool{"internal/slackoutbox": true}
+	masked, kept, stale := selectMaskedFiles(untracked, nil, modified)
+	if !reflect.DeepEqual(kept, []string{"internal/slackoutbox/compact.go"}) {
+		t.Errorf("kept = %v, want [internal/slackoutbox/compact.go] (untracked .go in an edited pkg is kept, not masked)", kept)
+	}
+	if !reflect.DeepEqual(masked, []string{"internal/peer/newthing.go"}) {
+		t.Errorf("masked = %v, want [internal/peer/newthing.go] (untracked .go in an un-edited pkg is still masked)", masked)
+	}
+	if len(stale) != 0 {
+		t.Errorf("staleMine = %v, want none", stale)
 	}
 }
 
@@ -121,21 +142,25 @@ func TestJoinReason(t *testing.T) {
 	}
 }
 
-// withBuildCheckSeams swaps the impure seams (untracked lister, go runner, clock) for
-// the duration of fn, restoring them after -- so the shell is exercised hermetically
-// without touching git or spawning go.
-func withBuildCheckSeams(t *testing.T, untracked []string, runFn func(root string, args []string, stdout, stderr io.Writer) (int, error)) {
+// withBuildCheckSeams swaps the impure seams (untracked lister, modified-dirs lister, go
+// runner, clock) for the duration of fn, restoring them after -- so the shell is exercised
+// hermetically without touching git or spawning go. modifiedDirs is the set of packages
+// with in-flight tracked edits (nil = none, i.e. mask every untracked sibling).
+func withBuildCheckSeams(t *testing.T, untracked []string, modifiedDirs map[string]bool, runFn func(root string, args []string, stdout, stderr io.Writer) (int, error)) {
 	t.Helper()
-	origU, origR, origN := buildCheckUntracked, buildCheckRun, buildCheckNow
-	t.Cleanup(func() { buildCheckUntracked, buildCheckRun, buildCheckNow = origU, origR, origN })
+	origU, origM, origR, origN := buildCheckUntracked, buildCheckModifiedDirs, buildCheckRun, buildCheckNow
+	t.Cleanup(func() {
+		buildCheckUntracked, buildCheckModifiedDirs, buildCheckRun, buildCheckNow = origU, origM, origR, origN
+	})
 	buildCheckUntracked = func(string) ([]string, error) { return untracked, nil }
+	buildCheckModifiedDirs = func(string) (map[string]bool, error) { return modifiedDirs, nil }
 	buildCheckRun = runFn
 	buildCheckNow = func() time.Time { return time.Unix(0, 0) }
 }
 
 func TestRunBuildCheckIsolatesSiblings(t *testing.T) {
 	var gotArgs []string
-	withBuildCheckSeams(t, []string{"cmd/fak/peer_wip.go"}, func(_ string, args []string, _, _ io.Writer) (int, error) {
+	withBuildCheckSeams(t, []string{"cmd/fak/peer_wip.go"}, nil, func(_ string, args []string, _, _ io.Writer) (int, error) {
 		gotArgs = args
 		return 0, nil
 	})
@@ -160,7 +185,7 @@ func TestRunBuildCheckIsolatesSiblings(t *testing.T) {
 
 func TestRunBuildCheckNoIsolate(t *testing.T) {
 	called := false
-	withBuildCheckSeams(t, []string{"cmd/fak/peer_wip.go"}, func(_ string, args []string, _, _ io.Writer) (int, error) {
+	withBuildCheckSeams(t, []string{"cmd/fak/peer_wip.go"}, nil, func(_ string, args []string, _, _ io.Writer) (int, error) {
 		called = true
 		if strings.Contains(strings.Join(args, " "), "-overlay") {
 			t.Errorf("--isolate=false still passed -overlay: %v", args)
@@ -177,7 +202,7 @@ func TestRunBuildCheckNoIsolate(t *testing.T) {
 }
 
 func TestRunBuildCheckJSONReport(t *testing.T) {
-	withBuildCheckSeams(t, []string{"cmd/fak/peer_wip.go"}, func(_ string, _ []string, _, _ io.Writer) (int, error) {
+	withBuildCheckSeams(t, []string{"cmd/fak/peer_wip.go"}, nil, func(_ string, _ []string, _, _ io.Writer) (int, error) {
 		return 0, nil
 	})
 	var out, errb bytes.Buffer
@@ -203,7 +228,7 @@ func TestRunBuildCheckJSONReport(t *testing.T) {
 }
 
 func TestRunBuildCheckBuildFailedExit(t *testing.T) {
-	withBuildCheckSeams(t, nil, func(_ string, _ []string, _, stderr io.Writer) (int, error) {
+	withBuildCheckSeams(t, nil, nil, func(_ string, _ []string, _, stderr io.Writer) (int, error) {
 		stderr.Write([]byte("cmd/fak/x.go:9:2: undefined: Foo\n"))
 		return 2, nil
 	})
@@ -221,5 +246,100 @@ func TestRunBuildCheckBuildFailedExit(t *testing.T) {
 	}
 	if !strings.Contains(rep.Reason, "undefined: Foo") {
 		t.Errorf("reason %q should carry the captured go failure tail", rep.Reason)
+	}
+}
+
+// TestRunBuildCheckKeepsMatchedSibling is the failing-before/passing-after proof of the
+// dir-scoped masking fix: an untracked .go whose package has an in-flight tracked edit is
+// KEPT (no overlay generated), so the edit that references it still compiles -- instead of
+// being masked into a false "undefined" red.
+func TestRunBuildCheckKeepsMatchedSibling(t *testing.T) {
+	var gotArgs []string
+	withBuildCheckSeams(t, []string{"cmd/fak/info_color.go"}, map[string]bool{"cmd/fak": true},
+		func(_ string, args []string, _, _ io.Writer) (int, error) {
+			gotArgs = args
+			return 0, nil
+		})
+	var out, errb bytes.Buffer
+	if rc := runBuildCheck(&out, &errb, []string{"--json", "./cmd/fak"}); rc != 0 {
+		t.Fatalf("rc = %d, want 0; stderr=%s", rc, errb.String())
+	}
+	if strings.Contains(strings.Join(gotArgs, " "), "-overlay") {
+		t.Errorf("args %v carry -overlay; the sole untracked .go was in an edited pkg and must be kept, not masked", gotArgs)
+	}
+	var rep buildCheckReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("bad JSON: %v\n%s", err, out.String())
+	}
+	if rep.KeptCount != 1 || !reflect.DeepEqual(rep.KeptFiles, []string{"cmd/fak/info_color.go"}) {
+		t.Errorf("kept = %d/%v, want 1/[cmd/fak/info_color.go]", rep.KeptCount, rep.KeptFiles)
+	}
+	if rep.MaskedCount != 0 {
+		t.Errorf("masked = %d/%v, want 0 (the only untracked .go was kept)", rep.MaskedCount, rep.MaskedFiles)
+	}
+	if rep.Verdict != "OK" {
+		t.Errorf("verdict = %q, want OK", rep.Verdict)
+	}
+}
+
+// TestRunBuildCheckLiveCrossCheckPasses covers the cross-package residual the dir heuristic
+// can't catch: a masked untracked file (a brand-new package in an un-edited dir) is imported
+// by kept/tracked code, so the isolate build reds -- but the LIVE tree compiles. The fallback
+// pass must reclassify that false red to OK and flag live_cross_checked.
+func TestRunBuildCheckLiveCrossCheckPasses(t *testing.T) {
+	withBuildCheckSeams(t, []string{"internal/conformance/conformance.go"}, nil,
+		func(_ string, args []string, _, stderr io.Writer) (int, error) {
+			if strings.Contains(strings.Join(args, " "), "-overlay") {
+				// masked build: the hidden new package cannot be resolved.
+				stderr.Write([]byte("cmd/fak/conformance.go:9:2: no required module provides package .../internal/conformance\n"))
+				return 1, nil
+			}
+			return 0, nil // live tree (no overlay) compiles
+		})
+	var out, errb bytes.Buffer
+	rc := runBuildCheck(&out, &errb, []string{"--json", "./..."})
+	if rc != 0 {
+		t.Fatalf("rc = %d, want 0 (live tree compiles -> mask-induced false red reclassified)", rc)
+	}
+	var rep buildCheckReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("bad JSON: %v\n%s", err, out.String())
+	}
+	if rep.Verdict != "OK" || rep.ExitCode != 0 {
+		t.Errorf("verdict/exit = %q/%d, want OK/0", rep.Verdict, rep.ExitCode)
+	}
+	if !rep.LiveCrossChecked {
+		t.Error("live_cross_checked = false, want true (OK came via the live fallback)")
+	}
+	if strings.Contains(rep.Reason, "conformance") {
+		t.Errorf("reason %q should not carry the false-red masked-build errors", rep.Reason)
+	}
+}
+
+// TestRunBuildCheckLiveCrossCheckAlsoFails: when the live tree ALSO reds, the breakage is in
+// tracked/kept code, not mask-induced -- the fallback must NOT rescue it.
+func TestRunBuildCheckLiveCrossCheckAlsoFails(t *testing.T) {
+	withBuildCheckSeams(t, []string{"internal/peer/wip.go"}, nil,
+		func(_ string, _ []string, _, stderr io.Writer) (int, error) {
+			stderr.Write([]byte("internal/x/y.go:1:1: undefined: Real\n"))
+			return 2, nil // both masked and live builds fail
+		})
+	var out, errb bytes.Buffer
+	rc := runBuildCheck(&out, &errb, []string{"--json", "./..."})
+	if rc != 2 {
+		t.Fatalf("rc = %d, want 2 (live tree also red -> real breakage, not rescued)", rc)
+	}
+	var rep buildCheckReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("bad JSON: %v\n%s", err, out.String())
+	}
+	if rep.Verdict != "BUILD_FAILED" {
+		t.Errorf("verdict = %q, want BUILD_FAILED", rep.Verdict)
+	}
+	if rep.LiveCrossChecked {
+		t.Error("live_cross_checked = true, want false (live pass also failed)")
+	}
+	if !strings.Contains(rep.Reason, "undefined: Real") {
+		t.Errorf("reason %q should carry the real go failure tail", rep.Reason)
 	}
 }

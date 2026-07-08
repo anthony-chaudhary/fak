@@ -16,11 +16,19 @@ package main
 //
 //  2. Masks untracked SIBLING breakage via `go build -overlay`. On a shared tree a
 //     peer's in-flight, not-yet-compiling `.go` file reds YOUR `go build ./...` even
-//     though your change is clean. buildcheck generates a -overlay that hides every
-//     untracked .go file (except the ones you declare with --mine), so the compile sees
-//     the committed tree plus your declared WIP -- immune to peers' untracked WIP. This
-//     is the LIGHT path: no full-tree copy, unlike the heavy git-archive / detached-
-//     worktree isolation (`fak worktree witness`). NOTE it does not REVERT peers'
+//     though your change is clean. buildcheck generates a -overlay that hides untracked
+//     .go files so the compile sees the committed tree plus your declared WIP -- immune to
+//     peers' untracked WIP. Masking is SCOPED to packages with no in-flight tracked edit:
+//     an untracked .go in a dir whose tracked .go you're already editing is KEPT, because
+//     it is almost always the matched new file that edit references (e.g. a new
+//     `compact.go` supplying symbols an edited `drain.go` calls) -- masking it would red
+//     the edit's own compile, a false red. --mine still force-keeps a specific file (the
+//     escape hatch for a brand-new untracked PACKAGE wired from an edit elsewhere). As a
+//     backstop for that cross-package case, if the masked build STILL reds, buildcheck
+//     re-runs once against the live tree (no overlay); if the live tree compiles, the red
+//     was purely mask-induced and it reports OK (`live_cross_checked`), so a false red never
+//     survives. This is the LIGHT path: no full-tree copy, unlike the heavy git-archive /
+//     detached-worktree isolation (`fak worktree witness`). NOTE it does not REVERT peers'
 //     modifications to TRACKED files; for a true committed-bytes view use the worktree.
 //
 //	fak buildcheck                     compile-check ./... , masking untracked siblings
@@ -43,6 +51,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -54,9 +63,10 @@ import (
 func cmdBuildCheck(argv []string) { os.Exit(runBuildCheck(os.Stdout, os.Stderr, argv)) }
 
 var (
-	buildCheckUntracked = untrackedFiles
-	buildCheckRun       = runGoBuildCheck
-	buildCheckNow       = time.Now
+	buildCheckUntracked    = untrackedFiles
+	buildCheckModifiedDirs = trackedModifiedDirs
+	buildCheckRun          = runGoBuildCheck
+	buildCheckNow          = time.Now
 )
 
 // goOverlay is the JSON shape `go build -overlay <file>` consumes: a single Replace
@@ -68,19 +78,22 @@ type goOverlay struct {
 }
 
 type buildCheckReport struct {
-	Schema      string   `json:"schema"`
-	Mode        string   `json:"mode"`
-	Packages    []string `json:"packages"`
-	Isolate     bool     `json:"isolate"`
-	MaskedFiles []string `json:"masked_files,omitempty"`
-	MaskedCount int      `json:"masked_count"`
-	OverlayPath string   `json:"overlay_path,omitempty"`
-	Output      string   `json:"output"`
-	Command     []string `json:"command"`
-	ElapsedMS   int64    `json:"elapsed_ms"`
-	Verdict     string   `json:"verdict"`
-	ExitCode    int      `json:"exit_code"`
-	Reason      string   `json:"reason,omitempty"`
+	Schema           string   `json:"schema"`
+	Mode             string   `json:"mode"`
+	Packages         []string `json:"packages"`
+	Isolate          bool     `json:"isolate"`
+	MaskedFiles      []string `json:"masked_files,omitempty"`
+	MaskedCount      int      `json:"masked_count"`
+	KeptFiles        []string `json:"kept_files,omitempty"`
+	KeptCount        int      `json:"kept_count"`
+	LiveCrossChecked bool     `json:"live_cross_checked,omitempty"`
+	OverlayPath      string   `json:"overlay_path,omitempty"`
+	Output           string   `json:"output"`
+	Command          []string `json:"command"`
+	ElapsedMS        int64    `json:"elapsed_ms"`
+	Verdict          string   `json:"verdict"`
+	ExitCode         int      `json:"exit_code"`
+	Reason           string   `json:"reason,omitempty"`
 }
 
 func runBuildCheck(stdout, stderr io.Writer, argv []string) int {
@@ -117,7 +130,7 @@ func runBuildCheck(stdout, stderr io.Writer, argv []string) int {
 	}
 	defer os.RemoveAll(scratch)
 
-	var masked, staleMine []string
+	var masked, kept, staleMine []string
 	overlayPath := ""
 	if *isolate {
 		untracked, uerr := buildCheckUntracked(root)
@@ -125,9 +138,26 @@ func runBuildCheck(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak buildcheck: listing untracked files: %v\n", uerr)
 			return 1
 		}
-		masked, staleMine = selectMaskedFiles(untracked, mine)
+		// A package with an in-flight tracked .go edit keeps its untracked .go siblings in the
+		// build: they are almost always the matched new file that edit references, and masking
+		// them would red the edit's own compile. Fail OPEN -- if git can't answer, mask all as
+		// before rather than block the check.
+		modifiedDirs, merr := buildCheckModifiedDirs(root)
+		if merr != nil {
+			if !*asJSON {
+				fmt.Fprintf(stderr, "fak buildcheck: cannot read in-flight edits (%v); masking all untracked siblings\n", merr)
+			}
+			modifiedDirs = nil
+		}
+		masked, kept, staleMine = selectMaskedFiles(untracked, mine, modifiedDirs)
 		for _, m := range staleMine {
 			fmt.Fprintf(stderr, "fak buildcheck: --mine %s is not an untracked file; ignoring (it is already in the build)\n", m)
+		}
+		if !*asJSON && len(kept) > 0 {
+			fmt.Fprintf(stderr, "fak buildcheck: keeping %d untracked .go file(s) whose package has in-flight tracked edits (matched new files, kept so the edit compiles):\n", len(kept))
+			for _, f := range kept {
+				fmt.Fprintf(stderr, "  - %s\n", f)
+			}
 		}
 		if len(masked) > 0 {
 			overlayPath = filepath.Join(scratch, "overlay.json")
@@ -136,7 +166,7 @@ func runBuildCheck(stdout, stderr io.Writer, argv []string) int {
 				return 1
 			}
 			if !*asJSON {
-				fmt.Fprintf(stderr, "fak buildcheck: masking %d untracked sibling .go file(s) so peers' WIP cannot red this compile:\n", len(masked))
+				fmt.Fprintf(stderr, "fak buildcheck: masking %d untracked sibling .go file(s) in packages with no in-flight edits so peers' WIP cannot red this compile:\n", len(masked))
 				for _, f := range masked {
 					fmt.Fprintf(stderr, "  - %s\n", f)
 				}
@@ -158,15 +188,18 @@ func runBuildCheck(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak buildcheck: go %s\n", strings.Join(args, " "))
 	}
 
-	// In JSON mode the go output is captured (a trimmed tail lands in the report's
-	// reason on failure) so stdout carries only the report; otherwise it streams live.
+	// The primary build's output is CAPTURED (not streamed live) whenever we masked files,
+	// so an isolate red can be adjudicated against the live tree BEFORE any scary "undefined"
+	// errors reach the user -- a mask-induced false red is then suppressed entirely. In JSON
+	// mode output is always captured (stdout carries only the report); otherwise it streams.
+	overlayMasked := *isolate && len(masked) > 0
+	capture := *asJSON || overlayMasked
 	runOut, runErr := stdout, stderr
 	var buf bytes.Buffer
-	if *asJSON {
+	if capture {
 		runOut, runErr = &buf, &buf
 	}
 	code, execErr := buildCheckRun(root, args, runOut, runErr)
-	elapsed := buildCheckNow().Sub(start)
 
 	verdict, reason := "OK", ""
 	if execErr != nil {
@@ -181,21 +214,52 @@ func runBuildCheck(stdout, stderr io.Writer, argv []string) int {
 		reason = fmt.Sprintf("go %s exited %d", mode, code)
 	}
 
+	// Live-tree cross-check: an isolate red can be a FALSE red -- the overlay hid an untracked
+	// file that kept/tracked code needs (a brand-new package imported from an edited file, a
+	// cross-package matched pair the dir-scoped keep cannot infer). Re-run once against the
+	// live tree (no overlay); if THAT compiles, the tree the fleet sees is green, so report OK.
+	// A live failure means the breakage is in tracked/kept code -> keep the failure verdict.
+	liveCrossChecked := false
+	if overlayMasked && execErr == nil && code != 0 {
+		var liveBuf bytes.Buffer
+		liveArgs := buildCheckArgs(mode, "", outTarget, pkgs)
+		if code2, execErr2 := buildCheckRun(root, liveArgs, &liveBuf, &liveBuf); execErr2 == nil && code2 == 0 {
+			liveCrossChecked = true
+			verdict, reason, code = "OK", "", 0
+			buf.Reset() // the captured masked-build errors were a false red; do not surface them
+		}
+	}
+	elapsed := buildCheckNow().Sub(start)
+
+	// Flush the captured primary-build output in non-JSON mode now that the verdict is settled:
+	// a real red shows its errors; a cross-checked false red shows only a one-line explanation.
+	if !*asJSON && capture {
+		if liveCrossChecked {
+			fmt.Fprintf(stderr, "fak buildcheck: isolate build red only because masked untracked deps were hidden; the live tree compiles -- reporting OK.\n")
+			fmt.Fprintf(stderr, "fak buildcheck: `git add` the new package(s) your tracked/kept files import before committing so a peer's build stays green.\n")
+		} else {
+			io.Copy(stderr, &buf)
+		}
+	}
+
 	if *asJSON {
 		rep := buildCheckReport{
-			Schema:      "fak.buildcheck.v1",
-			Mode:        mode,
-			Packages:    pkgs,
-			Isolate:     *isolate,
-			MaskedFiles: masked,
-			MaskedCount: len(masked),
-			OverlayPath: overlayPath,
-			Output:      outTarget,
-			Command:     append([]string{"go"}, args...),
-			ElapsedMS:   elapsed.Milliseconds(),
-			Verdict:     verdict,
-			ExitCode:    code,
-			Reason:      reason,
+			Schema:           "fak.buildcheck.v1",
+			Mode:             mode,
+			Packages:         pkgs,
+			Isolate:          *isolate,
+			MaskedFiles:      masked,
+			MaskedCount:      len(masked),
+			KeptFiles:        kept,
+			KeptCount:        len(kept),
+			LiveCrossChecked: liveCrossChecked,
+			OverlayPath:      overlayPath,
+			Output:           outTarget,
+			Command:          append([]string{"go"}, args...),
+			ElapsedMS:        elapsed.Milliseconds(),
+			Verdict:          verdict,
+			ExitCode:         code,
+			Reason:           reason,
 		}
 		if verdict != "OK" {
 			rep.Reason = joinReason(reason, buildCheckTail(buf.String(), 40))
@@ -213,13 +277,17 @@ func runBuildCheck(stdout, stderr io.Writer, argv []string) int {
 }
 
 // selectMaskedFiles is the pure selection behind --isolate: from the repo-relative
-// untracked paths, the .go files to HIDE are every untracked .go NOT declared as your
-// own via --mine. It also returns the --mine entries that are not actually untracked
-// (a stale/typo'd declaration) so the shell can narrate them; those fail OPEN -- a
-// tracked file named by --mine is in the build regardless, so ignoring it is safe (the
-// opposite of `fak affected --mine`, where a bad declaration must fail closed because it
-// could exonerate a real red). Inputs and outputs are slash-normalized; results sorted.
-func selectMaskedFiles(untracked []string, mine []string) (masked, staleMine []string) {
+// untracked paths, the .go files to HIDE are every untracked .go that is NOT declared as
+// your own via --mine AND does NOT live in a package with an in-flight tracked edit
+// (modifiedDirs). An untracked .go in an edited dir is KEPT (returned in `kept`) because it
+// is almost always the matched new half of that edit -- masking it would red the edit's own
+// compile, the exact false-red this scoping fixes. A nil/empty modifiedDirs masks every
+// non-mine untracked .go (the original behavior). It also returns the --mine entries that
+// are not actually untracked (a stale/typo'd declaration) so the shell can narrate them;
+// those fail OPEN -- a tracked file named by --mine is in the build regardless, so ignoring
+// it is safe (the opposite of `fak affected --mine`, where a bad declaration must fail
+// closed because it could exonerate a real red). Inputs/outputs slash-normalized; sorted.
+func selectMaskedFiles(untracked []string, mine []string, modifiedDirs map[string]bool) (masked, kept, staleMine []string) {
 	untrackedSet := make(map[string]bool, len(untracked))
 	for _, f := range untracked {
 		untrackedSet[repoSlash(f)] = true
@@ -237,13 +305,19 @@ func selectMaskedFiles(untracked []string, mine []string) (masked, staleMine []s
 	}
 	for _, f := range untracked {
 		f = repoSlash(f)
-		if strings.HasSuffix(f, ".go") && !mineSet[f] {
-			masked = append(masked, f)
+		if !strings.HasSuffix(f, ".go") || mineSet[f] {
+			continue
 		}
+		if modifiedDirs[path.Dir(f)] {
+			kept = append(kept, f)
+			continue
+		}
+		masked = append(masked, f)
 	}
 	sort.Strings(masked)
+	sort.Strings(kept)
 	sort.Strings(staleMine)
-	return masked, staleMine
+	return masked, kept, staleMine
 }
 
 // buildOverlay maps each masked repo-relative file to an EMPTY backing path (absolute,
@@ -289,6 +363,29 @@ func untrackedFiles(root string) ([]string, error) {
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+// trackedModifiedDirs returns the set of repo-relative, slash-separated directories that
+// hold a TRACKED .go file differing from HEAD (staged or unstaged) -- the packages with
+// in-flight edits. --isolate uses it to KEEP, not mask, an untracked .go sibling in such a
+// dir: on this shared trunk that sibling is almost always the matched other half of the
+// edit (a new file the edited file references), so masking it would red the edit's own
+// compile. Restricted to .go changes so a stray doc/config edit does not un-mask a
+// genuinely-independent untracked .go. Fails to the caller, which then masks all as before.
+func trackedModifiedDirs(root string) (map[string]bool, error) {
+	out, err := gitOut(root, "diff", "--name-only", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	dirs := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.HasSuffix(line, ".go") {
+			continue
+		}
+		dirs[path.Dir(filepath.ToSlash(line))] = true
+	}
+	return dirs, nil
 }
 
 func writeOverlayFile(path string, ov goOverlay) error {
