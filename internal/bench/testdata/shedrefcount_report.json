@@ -1,0 +1,57 @@
+{
+  "schema": "fak.shedrefcount.v1",
+  "provenance": {
+    "kind": "SIMULATED",
+    "command": "go test ./internal/bench -run ShedRefcount",
+    "generated_by": "fak/internal/bench.BuildShedRefcountReport",
+    "note": "Transcript is a labeled hermetic FIXTURE, not a live capture. It witnesses the deterministic MEASUREMENT — a known shed-then-reference lands refcount \u003e 0 and fires USE_AFTER_FREE per span, a clean session lands every shed span at refcount 0. A live gateway ctxspans/ctxrestore × turn-reference capture feeds the same shape via BuildShedRefcountReportFor to promote the signal."
+  },
+  "transcript": "shed-then-referenced (known use-after-free)",
+  "total_events": 6,
+  "shed_spans": 3,
+  "spans": [
+    {
+      "span_id": "sha-originating-task",
+      "shed_turn": 3,
+      "refcount": 2,
+      "refs_by_kind": {
+        "cite": 1,
+        "reread": 1
+      },
+      "ref_turns": [
+        5,
+        7
+      ],
+      "use_after_free": true
+    },
+    {
+      "span_id": "sha-scratch-note",
+      "shed_turn": 3,
+      "refcount": 0,
+      "use_after_free": false
+    },
+    {
+      "span_id": "sha-toolresult-schema",
+      "shed_turn": 3,
+      "refcount": 1,
+      "refs_by_kind": {
+        "pin": 1
+      },
+      "ref_turns": [
+        6
+      ],
+      "use_after_free": true
+    }
+  ],
+  "use_after_free_count": 2,
+  "signal": "USE_AFTER_FREE",
+  "clean": false,
+  "assumptions": [
+    "A span's shed turn is the FIRST turn that dropped it; a reference is counted only when it lands STRICTLY after that turn — a reference at or before the shed is normal live use, not a use-after-free. This is the over-count guard the issue's confusion-risk names.",
+    "The three reference kinds (reread, cite, pin) are treated as equal-weight increments; the detector counts a use-after-free, it does not rank by how the span was reached. A weighting policy is a later scorer's job (#3098), not this fold's.",
+    "Span ids are stable across shed and reference (the ctxspans/ctxrestore sha256 handle), so a later turn's re-read/cite/pin names the SAME id the trim dropped. A capture that re-mints ids per turn would under-count and must resolve ids to the shed handle before folding."
+  ],
+  "promotion": "Replace the hermetic transcript with an OBSERVED capture from a live guard session — the gateway ctxspans/ctxrestore shed ids joined against the turn log's re-read (fak_context_restore / file re-open), cite (id echoed in a later turn), and pin events — fed through BuildShedRefcountReportFor. When a live session with a known shed-then-reference reproduces refcount \u003e 0 and the signal fires, the detector promotes toward gen/now.",
+  "demotion_or_retirement": "If a live capture shows the three reference kinds cannot be enumerated deterministically from the turn log without a model in the loop (e.g. a cite that only a semantic match would catch), the deterministic claim is demoted and the signal is reframed as a lower-bound rather than defended as exact.",
+  "invalidating_assumption": "The assumption most likely to flip the result is id stability: if a re-read pages content back under a NEW id (a fresh content-address after an edit) rather than the shed handle, the reference does not match the shed span and the use-after-free is missed — a false-clean, the dangerous direction."
+}
