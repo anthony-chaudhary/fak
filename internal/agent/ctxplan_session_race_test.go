@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -25,6 +26,7 @@ func TestSessionPlannerConcurrentRenderTurnIsRaceFree(t *testing.T) {
 	const goroutines = 16
 	const turns = 40
 	var wg sync.WaitGroup
+	var empty int64 // RenderTurn calls that returned no messages — a torn view; must stay 0.
 	wg.Add(goroutines)
 	for g := 0; g < goroutines; g++ {
 		go func(g int) {
@@ -34,9 +36,20 @@ func TestSessionPlannerConcurrentRenderTurnIsRaceFree(t *testing.T) {
 					{Role: RoleSystem, Content: "system"},
 					{Role: RoleUser, Content: "conversation-" + strconv.Itoa(g) + "-turn-" + strconv.Itoa(i)},
 				}
-				sp.RenderTurn(ctx, history)
+				if out := sp.RenderTurn(ctx, history); len(out) == 0 {
+					atomic.AddInt64(&empty, 1)
+				}
 			}
 		}(g)
 	}
 	wg.Wait()
+
+	// Beyond "did not panic / no -race report": every concurrent RenderTurn must
+	// still return a non-empty view for its 2-message history. A torn store/index
+	// could silently materialize an empty turn instead of crashing, and that
+	// corruption is exactly what this reproducer must also catch.
+	if empty != 0 {
+		t.Fatalf("RenderTurn returned an empty view on %d/%d concurrent calls (torn state)",
+			empty, int64(goroutines*turns))
+	}
 }
