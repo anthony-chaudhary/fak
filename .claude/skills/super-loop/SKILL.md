@@ -1,6 +1,6 @@
 ---
 name: super-loop
-description: The durable front door to a "super loop" — launching HEADLESS work sessions in BULK, one detached `/goal` worker per bounded account session slot, each resolving a top-ranked ready leaf and closing it by witnessed ancestry. Wraps the proven launchers (`tools/issue_dispatch.py --wave`, `fak dispatch wave`, `tools/launch_wave_detached.ps1`) with the discipline the raw scripts assume: PLAN by default, price the fan-out for tree-collisions AND account capacity before a single worker spawns, re-check the no-DoS preflight cap per spawn, and never confuse a launch with a ship. Regime-aware, not a fixed script: it reads the host first and adapts — RECLAIM stale workers/residue before growing, RAMP a cold host canary-first (promote on witnessed commits), and run 12h+ MARATHONS as a cadence of waves with budget and stop signals. Use when the operator says "launch a wave", "run a super loop", "spin up N workers on the top issues", "fan out headless sessions", "drain the backlog in parallel", "start the overnight fleet", "clean up the old workers first", "ramp up slowly", or "keep it running for 12 hours".
+description: The durable front door to a "super loop" — launching HEADLESS work sessions in BULK, one detached `/goal` worker per bounded account session slot, each resolving a top-ranked ready leaf and closing it by witnessed ancestry. Wraps the proven launchers (`tools/issue_dispatch.py --wave`, `fak dispatch wave`, `tools/launch_wave_detached.ps1`) with the discipline the raw scripts assume: PLAN by default, price the fan-out for tree-collisions AND account capacity before a single worker spawns, re-check the no-DoS preflight cap per spawn, and never confuse a launch with a ship. Regime-aware, not a fixed script: it reads the host first and adapts. Its FIRST move is a one-read gate that short-circuits when a standing dispatcher (`FleetIssueDispatch`) is already gardening — so it never marches the whole launch procedure only to discover the loop was already running. Otherwise it adapts — RECLAIM stale workers/residue before growing, RAMP a cold host canary-first (promote on witnessed commits), and run 12h+ MARATHONS as a cadence of waves with budget and stop signals. Use when the operator says "launch a wave", "run a super loop", "spin up N workers on the top issues", "fan out headless sessions", "drain the backlog in parallel", "start the overnight fleet", "clean up the old workers first", "ramp up slowly", or "keep it running for 12 hours".
 allowed-tools: Read, Bash, Write
 metadata:
   opencode: claude-only   # the commit-by-explicit-path, honesty-boundary, and collision discipline are load-bearing and not portable per-skill
@@ -57,16 +57,55 @@ failure — two runs, ~52 turns, 0 commits).
   child-stderr tell: "claude.ai connectors are disabled because ANTHROPIC_API_KEY …
   is set").
 
-## Step 0 — Orient: is it safe to spawn, and what is the fuel?
+## Step 0 — Is the loop already running? (decide BEFORE you orient)
+
+The single most common way this skill wastes a turn: it marches orient → reclaim →
+rank → price → launch, and only at the *end* notices a **standing dispatcher was
+already doing the work.** So the first fact to settle is not "is it safe to spawn" —
+it is **"is anything already spawning?"** One cheap, pure-local read answers it:
+
+```bash
+python tools/dispatch_status.py --fast   # watchdog fold: is FleetIssueDispatch installed + firing? + live-worker/throughput count
+```
+
+Read the watchdog fold and the live-worker count, then branch. This is a **gate**,
+not a step you pass through on the way to a launch:
+
+| What the card shows | Regime | Do |
+|---|---|---|
+| `FleetIssueDispatch` installed + enabled, workers live, commits landing | **ALREADY GARDENING** — the standing loop owns the fleet | **STOP — do not launch.** A hand-launched wave beside a live cron is double-dispatch on the same slots and lanes. Jump to *When the loop is already running* below and act there. |
+| `FleetIssueDispatch` installed but **stalled** — enabled yet `live=0`, no recent commits, or a throttle fold | **CRON DOWN** — the loop exists but isn't firing | Don't stack a parallel wave on top. **Fixing why the cron is blocked IS the work** (Step 0.5 reclaim rungs, or recover a `REFUSE_*`); then let the cron dispatch. |
+| No `FleetIssueDispatch` task at all, **or** the operator explicitly asked for an attended one-shot wave | **HAND-LAUNCH** — nothing standing to collide with | Proceed to Step 0.1 and the launch procedure below. |
+
+Only the third row leads into the rest of this skill. The first two are the whole
+answer for their turn — the job there is to *witness and adjust the loop that
+already runs*, never to start a second one beside it.
+
+### When the loop is already running
+
+You are not in a launch turn. Do not fall through to Steps 1–3 — those start a
+*second* dispatcher. The high-value moves, cheapest first:
+
+- **Report it.** The `dispatch_status.py` card already IS the status — live workers,
+  throughput windows, closure honesty. Relay it; don't re-derive it.
+- **Harvest it.** `/wave-harvest` reconciles what the standing workers actually
+  shipped from git (a launch is not a ship) and re-queues the claimed-but-unshipped.
+- **Unblock it.** If the card names a blocker (silent workers, orphan leases, a
+  `WEEKLY_CAPPED` seat), fix that one thing — a firing cron then refills itself.
+
+Report what the loop is doing and what you changed, and stop.
+
+## Step 0.1 — Orient the hand-launch (only if the gate sent you here)
+
+Now the launch-safety question — is it safe to spawn, and what is the fuel?
 
 ```bash
 python tools/dispatch_preflight.py --json     # SPAWN_OK  or  REFUSE_{INSPECT,HOST,NO_SEAT,AT_CAP,NO_ACCOUNT}
-python tools/dispatch_status.py --fast        # quick pure-local card: workers live vs cap, account availability
 ```
 
-(`--md` is not a display flag — `--md <path>` WRITES the committed markdown status
-doc; the human-readable card is the default stdout output, `--fast` skips the two
-gh-backed folds for a quick look.)
+(`--md` on `dispatch_status.py` is not a display flag — `--md <path>` WRITES the
+committed markdown status doc; the human-readable card is the default stdout
+output, and `--fast` skips the two gh-backed folds for a quick look.)
 
 **Pick the regime from what you observed — never hard-code "launch a wave":**
 
@@ -238,15 +277,15 @@ the account.
 A worker is one-leaf-then-stop by fuel design, so a long run is a **cadence of
 waves**, never a long-lived worker or one bigger burst. Two honest shapes:
 
-- **Standing cron (preferred unattended).** The `FleetIssueDispatch` scheduled
-  task already auto-refills the dispatcher to live account/cap/work headroom; the
-  status card's watchdog fold says whether it is installed and firing. If it is
-  live, an "overnight run" means leave it on and fix what the card says blocks it
-  — do NOT also hand-launch waves beside it (double-dispatch on the same slots
-  and lanes).
+- **Standing cron (preferred unattended).** If the Step-0 gate found
+  `FleetIssueDispatch` live, the overnight run is *already running* — leave it on,
+  fix what the card says blocks it, and harvest on a cadence (`/wave-harvest`).
+  Don't hand-launch waves beside it; that is the double-dispatch the gate exists
+  to prevent.
 - **Attended cadence (wave-sized ticks).** Repeat orient → rung-1 reclaim →
-  price → wave every 60–90 minutes. Every tick starts at Step 0: a preflight
-  verdict from the previous tick is stale evidence, and the queue re-ranks live.
+  price → wave every 60–90 minutes. Every tick re-runs the Step-0 gate first: a
+  cron may have come up (or a preflight verdict gone stale) since the last tick,
+  and the queue re-ranks live.
 
 Budget and stop signals — read them each tick, they are the marathon's honesty:
 
@@ -327,6 +366,9 @@ super-loop commit.
 - ❌ `--enact` / `Stop-Process` from automation, or without reading the rung-2
   report — a reclaim kill carries the same operator bar as `-Launch`, and killing
   whatever looks big to clear `REFUSE_HOST` is `-SkipPreflight` by other means.
+- ❌ Marching orient → reclaim → rank → price → launch WITHOUT first running the
+  Step-0 gate — the whole reason the skill felt repetitive. Settle "is a loop
+  already running?" in one read before doing anything else.
 - ❌ Running "12 hours" as one bigger burst, or hand-launching waves while the
   `FleetIssueDispatch` cron is live — double-dispatch on the same slots and lanes.
 - ❌ Re-waving into flat throughput — launches rising while ships stay flat is a

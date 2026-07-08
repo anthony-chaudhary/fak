@@ -1,6 +1,6 @@
 ---
 name: issue-triage
-description: One repeatable pass over the open GitHub issue backlog — classify every open issue (needs-priority / needs-kind / needs-area, orphaned P0-P1, stale, dormant question, likely-duplicate), rank them into a deterministic "do next" order, propose the mechanical gardening moves (mark stale, close dormant questions), and apply them only on operator approval. The helper is read-only; writing labels, comments, or closes is gated. Use when the operator says "triage the issues", "what should I work on next", "garden the backlog", "the issue labels are a mess", "close stale issues", or on a /loop cadence to keep the backlog honest.
+description: One repeatable pass over the open GitHub issue backlog — classify every open issue (needs-priority / needs-kind / needs-area, orphaned P0-P1, stale, dormant question), rank them into a deterministic "do next" order, propose the mechanical gardening moves (mark stale, close dormant questions), and apply them only on operator approval. The helper is read-only; writing labels, comments, or closes is gated. Use when the operator says "triage the issues", "what should I work on next", "garden the backlog", "the issue labels are a mess", "close stale issues", or on a /loop cadence to keep the backlog honest.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Grep, Glob
@@ -82,7 +82,8 @@ The report's counts line is the headline. Lead the operator summary with the
 3. **stale / dormant-question** — these carry **mechanical** proposed actions
    (mark stale, close). They are the gardening moves the operator can approve
    in one batch.
-4. **likely-duplicate** clusters — confirm-and-close candidates.
+4. **duplicate clusters** — run `fak issue dedup` (the body-aware census; the
+   triage helper no longer detects dups). Confirm-and-close candidates.
 
 Do **not** paste the whole report into chat — link the file. Surface only the
 0–3 findings that matter and the one batch the operator can act on now.
@@ -95,9 +96,9 @@ The `--actions` JSON carries two kinds of entries:
   These are defensible from the issue's own signals (a `question` idle ≥ 30 d,
   or any non-P0/P1 idle ≥ 60 d). The operator can approve these as a batch.
 - **review-only** (`cmd: null`, `kind: "review"`) — `needs-priority`,
-  `needs-kind`, `needs-area`, `orphan`, `likely-dup`. The helper **cannot**
-  decide these algorithmically (what priority is the work? is this really a
-  dup?). They are surfaced for the operator to decide per-issue.
+  `needs-kind`, `needs-area`, `orphan`. The helper **cannot** decide these
+  algorithmically (what priority is the work?). They are surfaced for the
+  operator to decide per-issue.
 
 Never fabricate a `cmd` for a review-only action. If the operator sets a
 priority by hand, you build that single `gh issue edit <n> --add-label
@@ -161,10 +162,12 @@ manifest, and a pass with nothing to propose commits nothing and exits.
   issue that is actively blocked (waiting on a dependency) is not stale — the
   operator must read the close candidates before approving. The manifest's
   comment text says "reply to keep open" for exactly this reason.
-- **Duplicate detection is title-token Jaccard.** It catches "same words, same
-  scope" pairs but misses semantic dups with different wording, and can
-  false-positive on a prolific scope. Always confirm before closing as dup;
-  never auto-close on the `likely-dup` tag alone.
+- **Duplicate detection lives in `fak issue dedup`, not this helper.** The
+  body-aware census (title + title+body simhash) catches semantic dups the old
+  title-token Jaccard pass missed. It is advisory: it ranks merge proposals with
+  per-pair evidence and suppresses oversized shared-template families (epic
+  siblings are not duplicates of each other). Always confirm before closing as
+  dup; it never writes to GitHub.
 - **It only sees labels + timestamps.** It cannot read the issue body for
   severity, dependencies, or whether the reporter still cares. The operator's
   judgment is the last rung; this skill gets the queue into shape so that
