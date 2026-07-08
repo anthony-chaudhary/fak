@@ -731,6 +731,28 @@ jobs:
             || echo "::warning title=change-detector-debt::change-detector test debt present (advisory) — a test freezes a literal count/version/enumeration and asserts no invariant; retire worst-first (assert a relation between two computed values), see tools/behavior_contract_scorecard.py and #2900"
           echo "::endgroup::"
 
+      # Anti-change-detector structural gate (#2942, Hermes rule "Behavior contracts
+      # over snapshots"): Hermes rejects "change-detector tests" by human review — a test
+      # that freezes a current value (a magic enumeration count, a wholly-literal list
+      # equality, a pinned version string) instead of asserting how two pieces of data must
+      # relate. That review rule was enforced only by a human noticing; the
+      # CHANGE_DETECTOR_TEST boundarylint rule (internal/boundarylint/rules_changedetector.go)
+      # turns it into a mechanism. It ran ONLY transitively inside `go test ./...` (via
+      # TestTestSuitePolicy) and the purpose-built `fak boundary` binary gate ran in NO CI
+      # step at all — so this wires BOTH as an explicit, named, HARD gate on the governed
+      # _test.go paths (the peer the advisory behavior-contract scorecard above defers to):
+      #   * the golden pair (TestChangeDetectorRule) proves the rule CATCHES a real
+      #     change-detector (want=1: len frozen to a magic count, a wholly-literal deep
+      #     equality, a pinned semver) and ALLOWS a real invariant/relation test (want=0);
+      #   * the shrink-only ratchet (TestTestSuitePolicy) fails on any NEW change-detector
+      #     in a non-grandfathered file, uncached (-count=1) so a stale cache can't mask it;
+      #   * `fak boundary` is the same ratchet on the running binary — the dogfood the verb
+      #     was built for (cmd/fak/boundary.go: "wireable into make ci as a binary gate").
+      - name: anti-change-detector gate (CHANGE_DETECTOR_TEST — golden catch/allow · ratchet · fak boundary)
+        run: |
+          go test -count=1 ./internal/boundarylint -run '^(TestChangeDetectorRule|TestTestSuitePolicy)$'
+          go run ./cmd/fak boundary
+
       # Public-copy leak gate: the machine backstop for the redact-needle floor.
       # The local pre-commit hook (tools/githooks/pre-commit) only fires on a clone
       # that ran `install_trunk_guard.py`; an un-armed clone — or any path that
