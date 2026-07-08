@@ -13,7 +13,7 @@ Results page: [LIVECODEBENCH-RESULTS.md](LIVECODEBENCH-RESULTS.md).
 | Piece | State | Evidence / residual |
 |---|---|---|
 | OpenAI-compatible fak gateway | shipped | `fak serve` exposes `/v1/chat/completions`; LCB can target an OpenAI-compatible endpoint once model-style plumbing is configured. |
-| In-kernel serving path | shipped for serving; LCB run residual | `fak serve --gguf --engine inkernel --backend <backend>` is the fak-owned model path; a full LCB run on it is still pending. |
+| In-kernel serving path | shipped for serving; LCB run residual | `fak serve --gguf --engine inkernel --backend <backend>` is the fak-owned model path; the pure-kernel codegen arm (§3a) drives LCB codegen through it with no external engine, but a graded pass rate stays `pending GPU run`. |
 | LiveCodeBench native suite/report schema | pending | #2087 through #2095. |
 | All four LCB scenario adapters | pending | #2096 through #2099. |
 | Official custom-evaluator export | shipped | #2102; `go run ./cmd/livecodebench export --format custom-evaluator` (backed by `internal/livecodebench.WriteCustomEvaluatorInput`; not yet wired through the `fak` front door, tracked with the pending CLI wrapper below), pinned by `TestCustomEvaluatorItemsFixtureRoundTrip` and `TestRunExportCustomEvaluatorWritesGradeableInput`. |
@@ -137,6 +137,44 @@ fak livecodebench generate \
 That command is the target CLI contract for #2109 through #2112. Until it exists, any
 manual OpenAI-wire run must record the exact adapter/model-style patch used to aim
 LiveCodeBench at `http://127.0.0.1:8080/v1`.
+
+## 3a. Pure-Kernel Codegen Arm (No External Engine In The Path)
+
+The pure-kernel story — the LCB analogue of the
+[SWE-bench pure-kernel runbook](SWEBENCH-PURE-KERNEL-RUNBOOK.md): the `codegeneration`
+scenario is served by fak's **own** decode, with **no** SGLang / vLLM / hosted proxy in
+the path. What makes it pure-kernel is the **absence of `--base-url`** on `fak serve` —
+the model streams from fak's native forward pass, not a relayed upstream endpoint.
+
+```bash
+# Serve codegen from fak's own decode (pure-kernel: no --base-url, no external engine).
+FAK_Q4K=1 fak serve \
+  --gguf /srv/models/<coder-model>-q4_k_m.gguf \
+  --engine inkernel \
+  --backend cuda \
+  --addr 127.0.0.1:8080
+
+# Generate the codegeneration scenario against the in-kernel gateway (fak arm).
+fak livecodebench generate \
+  --gateway http://127.0.0.1:8080/v1 \
+  --model "$LCB_MODEL" \
+  --release-version "$LCB_RELEASE" \
+  --scenario codegeneration \
+  --start-date "$LCB_START_DATE" \
+  --end-date "$LCB_END_DATE" \
+  --out "$LCB_OUT/fak-inkernel/codegeneration"
+```
+
+The saved generations then flow through the same official grading handoff (§4–§5). Record
+`engine=inkernel` and the serving `backend` on the [results page](LIVECODEBENCH-RESULTS.md)
+alongside the generation-artifact digest.
+
+The honest fence, identical to the SWE-bench pure-kernel arm: the device kernels are
+argmax-exact against the CPU reference and `fak serve --engine inkernel` is a landed,
+tested serving path, but **no LCB codegen pass rate has been produced through it.** The
+`pass@1` / `pass@5` cells stay `pending GPU run` until a real GPU run over the in-kernel
+arm returns a number from the official evaluator. Do not claim a pure-kernel LCB codegen
+pass rate before that number exists.
 
 ## 4. Export Custom-Evaluator Input
 

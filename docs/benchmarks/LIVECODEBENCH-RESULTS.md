@@ -16,6 +16,7 @@ Submission gate: [LIVECODEBENCH-SUBMISSION-PACKET.md](LIVECODEBENCH-SUBMISSION-P
 | Contest date window | pending run |
 | Scenario | pending run |
 | Model / serving backend | pending run |
+| Engine (pure-kernel arm) | `pending GPU run` — records `engine=inkernel` + backend once served; see [runbook §3a](LIVECODEBENCH-RUNBOOK.md#3a-pure-kernel-codegen-arm-no-external-engine-in-the-path) |
 | Raw arm generation artifact | pending run |
 | fak arm generation artifact | pending run |
 | Official grading artifact | pending run |
@@ -45,6 +46,13 @@ The minimum reportable identity for a fak LCB run is:
 No score is promoted from this scaffold until the same saved generations have been graded
 by the official LiveCodeBench evaluator. A fak-only dry run, a local smoke, or a harness
 preflight remains `pending run` here.
+
+For the pure-kernel arm (codegen served by `fak serve --gguf --engine inkernel`, no
+external engine — [runbook §3a](LIVECODEBENCH-RUNBOOK.md#3a-pure-kernel-codegen-arm-no-external-engine-in-the-path)),
+the `Engine (pure-kernel arm)` row records `engine=inkernel` and the serving backend once
+the model is served, but the `pass@1` / `pass@5` cells stay `pending GPU run`: a pure-kernel
+LCB codegen pass rate is only reportable after a real GPU run through the in-kernel path
+produces one from the official evaluator.
 
 ## Fill Procedure
 
