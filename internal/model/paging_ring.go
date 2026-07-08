@@ -36,9 +36,11 @@ import (
 //     lost, distinguishing a ring (bounded residency) from splitKernel (unbounded host residency).
 //
 // Scope (honest, matching pagedKernel + residency.Manager): a STANDALONE primitive, OFF the live
-// serve path, f32-only, no async/pinned H2D yet. Wiring it into the session weight HAL as the paged
-// twin of weightHALQ4K/weightHALQ8 (so a memory-lean model streams experts per-layer under a real
-// device budget) is the follow-on rung of #2726; this lands the bounded-residency lifecycle + the
+// serve path, no async/pinned H2D yet. It stages f32, Q8_0, or Q4_K weights (matMul / matMulQ8 /
+// matMulQ4K), so the ring accounts the QUANTIZED residency a memory-lean MoE host actually streams
+// (#3174 R1) rather than an f32 expansion of it — but wiring it into the session weight HAL as the
+// paged twin of weightHALQ4K/weightHALQ8 (so a real model streams experts per-layer under a device
+// budget) is still the follow-on rung of #2726. This lands the bounded-residency lifecycle + the
 // witness that rung builds on. It moves no bytes and links nothing new into the default binary.
 type pagedRing struct {
 	be   compute.Backend
@@ -66,26 +68,42 @@ func newPagedRing(be compute.Backend, budgetBytes int64) *pagedRing {
 	}
 }
 
-// matMul runs y = w·x for the named weight [out,in], keeping the weight device-resident under the
-// ring budget. On a HIT (name already resident) the handle is reused and Touched (no upload); on a
-// MISS the weight is uploaded (page-in), admitted to the pool — evicting the coldest UNPINNED
-// residents to stay within budget, whose handles are Freed — and retained. Bit-equal to a resident
-// MatMul either way (same Upload + MatMul; only the residency lifetime differs). weightBytes is the
-// resident footprint the budget accounts (caller-supplied, exactly as polymodel.Model.WeightBytes).
-// Returns nil — paging nothing and leaving the resident set unchanged — when the weight alone
-// exceeds the budget (polymodel.ErrTooLarge) or fits only by dropping a pinned resident
-// (ErrPinnedNoRoom); the caller then falls back to a per-op paged (pagedKernel) or host GEMM,
-// exactly as an over-budget weight would.
-func (r *pagedRing) matMul(name string, shape []int, w []float32, x compute.Tensor, weightBytes int64, pinned bool) []float32 {
+// uploadStaged stages a host source tensor onto be as dtype under the MemoryOffload class — the same
+// routing uploadHostF32Class uses (UploadClass when the backend honors placement, plain Upload
+// otherwise), but dtype-general so the ring can stage a RESIDENT quantized weight (Q8_0 / Q4_K)
+// exactly as the Session weightHALQ8/weightHALQ4K staged builders do. On the cpu-ref backend (no
+// UploadClass) it falls through to be.Upload(src, dtype) — the path the quantized HAL and its
+// witnesses already pin.
+func uploadStaged(be compute.Backend, src compute.Tensor, dtype compute.Dtype, site string) compute.Tensor {
+	if b, ok := be.(classedUploadBackend); ok {
+		return b.UploadClass(src, dtype, compute.MemoryOffload, site)
+	}
+	return be.Upload(src, dtype)
+}
+
+// matMulStaged is the dtype-general ring core shared by the f32 matMul and the quantized matMulQ8 /
+// matMulQ4K twins. It runs y = w·x for the named weight, keeping the uploaded device handle resident
+// under the ring budget. On a HIT (name already resident) the handle is reused and Touched (no
+// upload); on a MISS mk builds the host source (f32 / Q8_0 / Q4_K, exactly as the weightHAL staged
+// builders do), it is uploaded as dtype (page-in) and admitted to the pool — evicting the coldest
+// UNPINNED residents to stay within budget, whose handles are Freed — and retained. Bit-equal to a
+// resident Upload(mk(), dtype)+MatMul either way; only the residency lifetime differs. weightBytes is
+// the RESIDENT footprint the budget accounts (caller-supplied, exactly as polymodel.Model.WeightBytes)
+// — the QUANTIZED size for a quantized weight (Q8_0 ~1.125 B/weight, Q4_K ~0.56), so a ring sized for
+// N f32 experts holds several times as many quantized ones. Returns nil — paging nothing and leaving
+// the resident set unchanged — when the weight alone exceeds the budget (polymodel.ErrTooLarge) or
+// fits only by dropping a pinned resident (ErrPinnedNoRoom); the caller then falls back to a per-op
+// paged (pagedKernel) or host GEMM, exactly as an over-budget weight would.
+func (r *pagedRing) matMulStaged(name string, mk func() compute.Tensor, dtype compute.Dtype, x compute.Tensor, weightBytes int64, pinned bool) []float32 {
 	id := polymodel.ModelID(name)
 	if wt, ok := r.resident[id]; ok {
 		r.pool.Touch(id)
 		r.hit++
 		return append([]float32(nil), r.be.Read(r.be.MatMul(wt, x))...)
 	}
-	// Miss: upload the weight, then admit it under the budget. Admit is all-or-nothing: on error the
-	// pool is unchanged, so page the just-uploaded handle straight back out and defer to the caller.
-	wt := uploadHostF32Class(r.be, shape, w, compute.MemoryOffload, "paged-ring-weight")
+	// Miss: build + upload the weight, then admit it under the budget. Admit is all-or-nothing: on
+	// error the pool is unchanged, so page the just-uploaded handle straight back out and defer.
+	wt := uploadStaged(r.be, mk(), dtype, "paged-ring-weight")
 	evicted, err := r.pool.Admit(polymodel.Model{ID: id, WeightBytes: weightBytes, Pinned: pinned})
 	if err != nil {
 		r.be.Free(wt)
@@ -101,6 +119,38 @@ func (r *pagedRing) matMul(name string, shape []int, w []float32, x compute.Tens
 	}
 	r.resident[id] = wt
 	return append([]float32(nil), r.be.Read(r.be.MatMul(wt, x))...)
+}
+
+// matMul runs y = w·x for the named f32 weight [out,in] under the ring budget — the original ring
+// path, now a thin f32 specialization of matMulStaged. See matMulStaged for the hit/miss/evict
+// lifecycle and the nil-on-unadmittable contract.
+func (r *pagedRing) matMul(name string, shape []int, w []float32, x compute.Tensor, weightBytes int64, pinned bool) []float32 {
+	return r.matMulStaged(name, func() compute.Tensor {
+		return compute.NewF32(compute.Default(), append([]int(nil), shape...), w)
+	}, compute.F32, x, weightBytes, pinned)
+}
+
+// matMulQ8 is the Q8_0 twin of matMul: it stages qt as a RESIDENT Q8_0 weight under the ring budget
+// and runs the quantized GEMM the cpu-ref / cuda Q8 kernel serves — the path past the ring's former
+// f32-only scope (#3174 R1: a MoE expert-weight cache holds the QUANTIZED experts a memory-lean host
+// actually streams, ~1.125 B/weight, not their f32 expansion). qt is the same prequantized source
+// the Session weightHALQ8 stages; weightBytes is its resident Q8 footprint. Bit-equal to a resident
+// Q8 GEMM on a hit or a miss.
+func (r *pagedRing) matMulQ8(name string, qt *q8Tensor, x compute.Tensor, weightBytes int64, pinned bool) []float32 {
+	return r.matMulStaged(name, func() compute.Tensor {
+		return compute.NewQ8(compute.Default(), []int{qt.out, qt.in}, qt.q, qt.d, qBlk)
+	}, compute.Q8_0, x, weightBytes, pinned)
+}
+
+// matMulQ4K is the Q4_K twin of matMul: it stages qt (raw GGUF super-blocks) as a RESIDENT Q4_K
+// weight under the ring budget and runs the dequant-fused Q4_K GEMM (k_q4k_gemm on cuda, the Q4_K
+// MatMul on cpu-ref) — the ~0.56 B/weight residency that lets a 753B GLM-5.2's expert majority ride
+// a bounded device ring. qt is the same source the Session weightHALQ4K stages; weightBytes is its
+// resident Q4_K footprint. Bit-equal to a resident Q4_K GEMM on a hit or a miss.
+func (r *pagedRing) matMulQ4K(name string, qt *q4kTensor, x compute.Tensor, weightBytes int64, pinned bool) []float32 {
+	return r.matMulStaged(name, func() compute.Tensor {
+		return compute.NewQ4K(compute.Default(), []int{qt.out, qt.in}, qt.raw)
+	}, compute.Q4_K, x, weightBytes, pinned)
 }
 
 // isResident reports whether the named weight currently holds a device handle in the ring.
