@@ -21,15 +21,20 @@ type a2aTaskStore struct {
 }
 
 type a2aTask struct {
-	TaskID       string                 `json:"task_id"`
-	Title        string                 `json:"title,omitempty"`
-	State        string                 `json:"state"`
-	CreatedAt    time.Time              `json:"created_at"`
-	UpdatedAt    time.Time              `json:"updated_at"`
-	Method       string                 `json:"method,omitempty"`
-	Params       map[string]interface{} `json:"params,omitempty"`
-	Result       interface{}            `json:"result,omitempty"`
-	Error        string                 `json:"error,omitempty"`
+	TaskID    string                 `json:"task_id"`
+	Title     string                 `json:"title,omitempty"`
+	State     string                 `json:"state"`
+	CreatedAt time.Time              `json:"created_at"`
+	UpdatedAt time.Time              `json:"updated_at"`
+	Method    string                 `json:"method,omitempty"`
+	Params    map[string]interface{} `json:"params,omitempty"`
+	Result    interface{}            `json:"result,omitempty"`
+	Error     string                 `json:"error,omitempty"`
+	// LedgerRef optionally anchors this task to an intent/run-ledger row so the
+	// GetTask read can project RE-VERIFIABLE progress (internal/relay/progress.go)
+	// instead of only the self-reported State/Result. Empty until a run is bound —
+	// a2aVerifiedProgress then fails closed to verdict "unknown" (a2a_progress.go).
+	LedgerRef    string                 `json:"ledger_ref,omitempty"`
 	CallerID     string                 `json:"caller_id,omitempty"`
 	TenantID     string                 `json:"tenant_id,omitempty"`
 	AgentCardURL string                 `json:"agent_card_url,omitempty"`
@@ -475,7 +480,12 @@ func (s *Server) handleA2AGetTaskByID(w http.ResponseWriter, r *http.Request, ta
 		return
 	}
 
-	// Return task snapshot
+	// Return task snapshot. `state`/`result` are the task's own imperative record;
+	// `progress` is the RE-VERIFIABLE cursor a foreign peer can trust — the
+	// no-`claimed`-field VerifiedProgress shape projected across the edge. It fails
+	// closed to verdict "unknown" until a run's intent-ledger anchor is bound, so a
+	// peer is never handed a self-report as progress (see a2a_progress.go). No live
+	// LedgerReader is wired onto the task store yet (the named next rung), so pass nil.
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"task_id":        task.TaskID,
 		"title":          task.Title,
@@ -488,6 +498,7 @@ func (s *Server) handleA2AGetTaskByID(w http.ResponseWriter, r *http.Request, ta
 		"caller_id":      task.CallerID,
 		"tenant_id":      task.TenantID,
 		"agent_card_url": task.AgentCardURL,
+		"progress":       a2aVerifiedProgress(task, nil),
 	})
 }
 
