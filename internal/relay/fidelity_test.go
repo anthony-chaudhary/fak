@@ -127,10 +127,10 @@ func TestFidelityMultiResolverDispatchesByKind(t *testing.T) {
 	m := NewMultiResolver(commits, issueKindOnly{issues})
 
 	b := Baton{Schema: Schema, RelayID: "r5", Artifacts: []Artifact{
-		{Kind: string(ArtifactCommit), Ref: "live-sha"},  // -> commits: verified
-		{Kind: string(ArtifactCommit), Ref: "dead-sha"},  // -> commits: dangling
-		{Kind: string(ArtifactIssue), Ref: "#1868"},      // -> issues: verified
-		{Kind: string(ArtifactMemory), Ref: "no-store"},  // -> unknown (no resolver owns memory)
+		{Kind: string(ArtifactCommit), Ref: "live-sha"}, // -> commits: verified
+		{Kind: string(ArtifactCommit), Ref: "dead-sha"}, // -> commits: dangling
+		{Kind: string(ArtifactIssue), Ref: "#1868"},     // -> issues: verified
+		{Kind: string(ArtifactMemory), Ref: "no-store"}, // -> unknown (no resolver owns memory)
 	}}
 
 	f := ScoreBatonFidelity(b, m)
