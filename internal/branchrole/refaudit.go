@@ -187,6 +187,7 @@ var refClassByExactPath = map[string]string{
 	"tools/fleet_control_pane_test.py":          RefClassDevelopmentSource,
 	"cmd/fak/affected.go":                       RefClassDevelopmentSource,
 	"cmd/fak/doctor.go":                         RefClassDevelopmentSource,
+	"cmd/fak/prepush_build.go":                  RefClassDevelopmentSource,
 	"cmd/fak/treedoctor.go":                     RefClassDevelopmentSource,
 	"internal/corelockaudit/corelockaudit.go":   RefClassDevelopmentSource,
 	"internal/gitgate/gitgate.go":               RefClassDevelopmentSource,
