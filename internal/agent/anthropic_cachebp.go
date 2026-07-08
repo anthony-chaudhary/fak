@@ -497,3 +497,9 @@ func headValueIsVolatile(v json.RawMessage) bool {
 	}
 	return volUUID.Match(v) || volDateTime.Match(v)
 }
+
+// HeadValueIsVolatile is headValueIsVolatile exported for the TOON wire (#3067): the
+// gateway sources toon.Decide's Volatile signal from THIS check — the same per-request-
+// token evidence (UUID/nonce, sub-day timestamp) the breakpoint planner above uses —
+// so the VOLATILE_SPAN skip is wired to the real volatility state, not a re-implementation.
+func HeadValueIsVolatile(v json.RawMessage) bool { return headValueIsVolatile(v) }

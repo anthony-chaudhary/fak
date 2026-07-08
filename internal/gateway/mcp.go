@@ -547,9 +547,22 @@ func (s *Server) fakRead(ctx context.Context, path, traceID, witness string) (Wi
 // content block carrying the JSON. isError stays false — a deny is a successful
 // adjudication, surfaced in the verdict, not a tool failure.
 func mcpToolResult(v any) map[string]any {
+	return mcpToolResultSpan(v, toonCacheResident(v))
+}
+
+// mcpToolResultSpan is mcpToolResult with the span's cache-residency made explicit —
+// the single wrap point every tool result leaves through. Behind FAK_TOON_WIRE
+// (default off) the text block may carry the payload TOON-encoded instead of JSON,
+// but ONLY when every toon.Decide gate proves a net win (#3067); on any skip the
+// text is the canonical JSON, byte-identical to what shipped before the wire existed.
+func mcpToolResultSpan(v any, cacheResident bool) map[string]any {
 	b, _ := json.Marshal(v)
+	text := string(b)
+	if enc, ok := toonWireText(b, cacheResident); ok {
+		text = enc
+	}
 	return map[string]any{
-		"content": []map[string]any{{"type": "text", "text": string(b)}},
+		"content": []map[string]any{{"type": "text", "text": text}},
 		"isError": false,
 	}
 }

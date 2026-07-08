@@ -65,6 +65,10 @@ const (
 	FeatureCtxplanSeam = "ctxplan_seam"
 	FeatureWireScreen  = "wire_screen"
 	FeatureWireRedact  = "wire_redact"
+	// FeatureToonWire arms the governed TOON auto-encoding of MCP tool results at the
+	// gateway's mcpToolResult seam (#3067). Default off; the gateway reads FAK_TOON_WIRE
+	// per call, so a sweep arm's child env controls it the same as a process-start gate.
+	FeatureToonWire = "toon_wire"
 
 	// Wire-side cache levers are the Anthropic proxy cache-value gates that must earn
 	// default-on status through an ablation row before their gateway implementation flips.
@@ -89,6 +93,7 @@ var envFeatureVars = map[string]string{
 	FeatureCtxplanSeam: "FAK_CTXPLAN_SEAM",
 	FeatureWireScreen:  "FAK_WIRE_SCREEN",
 	FeatureWireRedact:  "FAK_WIRE_REDACT",
+	FeatureToonWire:    "FAK_TOON_WIRE",
 
 	FeatureBreakpointPlan: "FAK_ABLATE_BP_PLAN",
 	FeatureTTL1H:          "FAK_ABLATE_TTL_1H",

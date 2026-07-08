@@ -1,0 +1,1806 @@
+[
+  {
+    "name": "a2achan",
+    "tree": "internal/a2achan/**",
+    "dir": "internal/a2achan",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "abi",
+    "tree": "internal/abi/**",
+    "dir": "internal/abi",
+    "exists": true,
+    "status": {
+      "shipped": 5,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "adjudicator",
+    "tree": "internal/adjudicator/**",
+    "dir": "internal/adjudicator",
+    "exists": true,
+    "status": {
+      "shipped": 2,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "advmodel",
+    "tree": "internal/advmodel/**",
+    "dir": "internal/advmodel",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 1
+    }
+  },
+  {
+    "name": "agent",
+    "tree": "internal/agent/**",
+    "dir": "internal/agent",
+    "exists": true,
+    "status": {
+      "shipped": 14,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "agentdojo",
+    "tree": "internal/agentdojo/**",
+    "dir": "internal/agentdojo",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "agenttopo",
+    "tree": "internal/agenttopo/**",
+    "dir": "internal/agenttopo",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "ailuminate",
+    "tree": "internal/ailuminate/**",
+    "dir": "internal/ailuminate",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "answershape",
+    "tree": "internal/answershape/**",
+    "dir": "internal/answershape",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "apihostprobe",
+    "tree": "internal/apihostprobe/**",
+    "dir": "internal/apihostprobe",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "appversion",
+    "tree": "internal/appversion/**",
+    "dir": "internal/appversion",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "architest",
+    "tree": "internal/architest/**",
+    "dir": "internal/architest",
+    "exists": true,
+    "status": {
+      "shipped": 4,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "bench",
+    "tree": "internal/bench/**",
+    "dir": "internal/bench",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "benchloop",
+    "tree": "internal/benchloop/**",
+    "dir": "internal/benchloop",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "benchruns",
+    "tree": "internal/benchruns/**",
+    "dir": "internal/benchruns",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "blob",
+    "tree": "internal/blob/**",
+    "dir": "internal/blob",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "blobfs",
+    "tree": "internal/blobfs/**",
+    "dir": "internal/blobfs",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "blobhttp",
+    "tree": "internal/blobhttp/**",
+    "dir": "internal/blobhttp",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "boundarylint",
+    "tree": "internal/boundarylint/**",
+    "dir": "internal/boundarylint",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "branchrole",
+    "tree": "internal/branchrole/**",
+    "dir": "internal/branchrole",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "cachemeta",
+    "tree": "internal/cachemeta/**",
+    "dir": "internal/cachemeta",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "canon",
+    "tree": "internal/canon/**",
+    "dir": "internal/canon",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "capindex",
+    "tree": "internal/capindex/**",
+    "dir": "internal/capindex",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "capindexgw",
+    "tree": "internal/capindexgw/**",
+    "dir": "internal/capindexgw",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "cdb",
+    "tree": "internal/cdb/**",
+    "dir": "internal/cdb",
+    "exists": true,
+    "status": {
+      "shipped": 2,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "chatopsdetach",
+    "tree": "internal/chatopsdetach/**",
+    "dir": "internal/chatopsdetach",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "choicetriage",
+    "tree": "internal/choicetriage/**",
+    "dir": "internal/choicetriage",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "ci",
+    "tree": ".github/**",
+    "dir": ".github",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "claude",
+    "tree": ".claude/**",
+    "dir": ".claude",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "cmd",
+    "tree": "cmd/**",
+    "dir": "cmd",
+    "exists": true,
+    "status": {
+      "shipped": 43,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "codelint",
+    "tree": "internal/codelint/**",
+    "dir": "internal/codelint",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "codexmcphealth",
+    "tree": "internal/codexmcphealth/**",
+    "dir": "internal/codexmcphealth",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "cohort",
+    "tree": "internal/cohort/**",
+    "dir": "internal/cohort",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "comm",
+    "tree": "internal/comm/**",
+    "dir": "internal/comm",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "commitintent",
+    "tree": "internal/commitintent/**",
+    "dir": "internal/commitintent",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "commitlane",
+    "tree": "internal/commitlane/**",
+    "dir": "internal/commitlane",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "commitrollup",
+    "tree": "internal/commitrollup/**",
+    "dir": "internal/commitrollup",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "compute",
+    "tree": "internal/compute/**",
+    "dir": "internal/compute",
+    "exists": true,
+    "status": {
+      "shipped": 8,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "contextq",
+    "tree": "internal/contextq/**",
+    "dir": "internal/contextq",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "ctxmmu",
+    "tree": "internal/ctxmmu/**",
+    "dir": "internal/ctxmmu",
+    "exists": true,
+    "status": {
+      "shipped": 4,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "ctxplan",
+    "tree": "internal/ctxplan/**",
+    "dir": "internal/ctxplan",
+    "exists": true,
+    "status": {
+      "shipped": 3,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "ctxresidency",
+    "tree": "internal/ctxresidency/**",
+    "dir": "internal/ctxresidency",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "deletioncert",
+    "tree": "internal/deletioncert/**",
+    "dir": "internal/deletioncert",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "demoui",
+    "tree": "internal/demoui/**",
+    "dir": "internal/demoui",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "devexmeter",
+    "tree": "internal/devexmeter/**",
+    "dir": "internal/devexmeter",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "devindex",
+    "tree": "internal/devindex/**",
+    "dir": "internal/devindex",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "dgxbridge",
+    "tree": "internal/dgxbridge/**",
+    "dir": "internal/dgxbridge",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "dispatchauto",
+    "tree": "internal/dispatchauto/**",
+    "dir": "internal/dispatchauto",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "dispatchorder",
+    "tree": "internal/dispatchorder/**",
+    "dir": "internal/dispatchorder",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "docs",
+    "tree": "docs/**, README.md, INDEX.md, llms.txt, llms-full.txt, llms-updates.txt",
+    "dir": "docs",
+    "exists": true,
+    "status": {
+      "shipped": 29,
+      "simulated": 1,
+      "stub": 1
+    }
+  },
+  {
+    "name": "dojo",
+    "tree": "internal/dojo/**",
+    "dir": "internal/dojo",
+    "exists": true,
+    "desc": "#951: prediction-vs-reality gym (predict -\u003e run -\u003e measure -\u003e eval -\u003e calibrate)",
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "dos",
+    "tree": "dos.toml, .gitignore",
+    "exists": false,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "dropin",
+    "tree": "internal/dropin/**",
+    "dir": "internal/dropin",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "engine",
+    "tree": "internal/engine/**",
+    "dir": "internal/engine",
+    "exists": true,
+    "status": {
+      "shipped": 6,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "enginecache",
+    "tree": "internal/enginecache/**",
+    "dir": "internal/enginecache",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "examples",
+    "tree": "examples/**",
+    "dir": "examples",
+    "exists": true,
+    "status": {
+      "shipped": 7,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "experiments",
+    "tree": "experiments/**",
+    "dir": "experiments",
+    "exists": true,
+    "status": {
+      "shipped": 14,
+      "simulated": 2,
+      "stub": 0
+    }
+  },
+  {
+    "name": "fakrpc",
+    "tree": "internal/fakrpc/**",
+    "dir": "internal/fakrpc",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "gateway",
+    "tree": "internal/gateway/**",
+    "dir": "internal/gateway",
+    "exists": true,
+    "status": {
+      "shipped": 24,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "ggufload",
+    "tree": "internal/ggufload/**",
+    "dir": "internal/ggufload",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "gitgate",
+    "tree": "internal/gitgate/**",
+    "dir": "internal/gitgate",
+    "exists": true,
+    "status": {
+      "shipped": 2,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "global",
+    "tree": "**/*",
+    "exists": false,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "godfileceiling",
+    "tree": "internal/godfileceiling/**",
+    "dir": "internal/godfileceiling",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "gpulease",
+    "tree": "internal/gpulease/**",
+    "dir": "internal/gpulease",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "grammar",
+    "tree": "internal/grammar/**",
+    "dir": "internal/grammar",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 1
+    }
+  },
+  {
+    "name": "guardcomplaint",
+    "tree": "internal/guardcomplaint/**",
+    "dir": "internal/guardcomplaint",
+    "exists": true,
+    "desc": "agent APPEAL channel (`fak complain`); cmd/fak/complain.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint",
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "harnessprofile",
+    "tree": "internal/harnessprofile/**",
+    "dir": "internal/harnessprofile",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "harvest",
+    "tree": "internal/harvest/**",
+    "dir": "internal/harvest",
+    "exists": true,
+    "status": {
+      "shipped": 2,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "headroom",
+    "tree": "internal/headroom/**",
+    "dir": "internal/headroom",
+    "exists": true,
+    "status": {
+      "shipped": 3,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "hfhub",
+    "tree": "internal/hfhub/**",
+    "dir": "internal/hfhub",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "ifc",
+    "tree": "internal/ifc/**",
+    "dir": "internal/ifc",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "issuefanout",
+    "tree": "internal/issuefanout/**",
+    "dir": "internal/issuefanout",
+    "exists": true,
+    "desc": "#2522: internal/issuefanout leaf (the spine-first + fan-out follow-on planner); cmd/fak/issue_fanout.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint",
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "journal",
+    "tree": "internal/journal/**",
+    "dir": "internal/journal",
+    "exists": true,
+    "status": {
+      "shipped": 2,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "kernel",
+    "tree": "internal/kernel/**",
+    "dir": "internal/kernel",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "kvmmu",
+    "tree": "internal/kvmmu/**",
+    "dir": "internal/kvmmu",
+    "exists": true,
+    "status": {
+      "shipped": 2,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "l3kv",
+    "tree": "internal/l3kv/**",
+    "dir": "internal/l3kv",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "laneadmit",
+    "tree": "internal/laneadmit/**",
+    "dir": "internal/laneadmit",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "leakcheck",
+    "tree": "internal/leakcheck/**",
+    "dir": "internal/leakcheck",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "learningdebt",
+    "tree": "internal/learningdebt/**",
+    "dir": "internal/learningdebt",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "leaseref",
+    "tree": "internal/leaseref/**",
+    "dir": "internal/leaseref",
+    "exists": true,
+    "desc": "#825: cross-machine lease VISIBILITY substrate (refs/fak/locks/*)",
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "livecodebench",
+    "tree": "internal/livecodebench/**",
+    "dir": "internal/livecodebench",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "logvault",
+    "tree": "internal/logvault/**",
+    "dir": "internal/logvault",
+    "exists": true,
+    "desc": "#2449: internal/logvault leaf (central log-vault capture/verify); cmd/fak/logvault.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint",
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "loopdrive",
+    "tree": "internal/loopdrive/**",
+    "dir": "internal/loopdrive",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "loopgate",
+    "tree": "internal/loopgate/**",
+    "dir": "internal/loopgate",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "loopindex",
+    "tree": "internal/loopindex/**",
+    "dir": "internal/loopindex",
+    "exists": true,
+    "desc": "#1152: agentic-coding loop-index spine (cmd/fak/loopindex.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint)",
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "loopmgr",
+    "tree": "internal/loopmgr/**",
+    "dir": "internal/loopmgr",
+    "exists": true,
+    "desc": "#763 (#749 `fak cron` / #748): loop ledger + governor + recurring-job schedule",
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "marketing",
+    "tree": "internal/marketing/**",
+    "dir": "internal/marketing",
+    "exists": true,
+    "desc": "completion-driven marketing subsystem (any cmd/fak shim lives in the `cmd` lane to keep leaf trees pairwise-disjoint)",
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "maturity",
+    "tree": "internal/maturity/**",
+    "dir": "internal/maturity",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "memq",
+    "tree": "internal/memq/**",
+    "dir": "internal/memq",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "metalgemm",
+    "tree": "internal/metalgemm/**",
+    "dir": "internal/metalgemm",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "metrics",
+    "tree": "internal/metrics/**",
+    "dir": "internal/metrics",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "microagent",
+    "tree": "internal/microagent/**",
+    "dir": "internal/microagent",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "model",
+    "tree": "internal/model/**",
+    "dir": "internal/model",
+    "exists": true,
+    "status": {
+      "shipped": 11,
+      "simulated": 0,
+      "stub": 1
+    }
+  },
+  {
+    "name": "modelengine",
+    "tree": "internal/modelengine/**",
+    "dir": "internal/modelengine",
+    "exists": true,
+    "status": {
+      "shipped": 2,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "modelreg",
+    "tree": "internal/modelreg/**",
+    "dir": "internal/modelreg",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "modelroute",
+    "tree": "internal/modelroute/**",
+    "dir": "internal/modelroute",
+    "exists": true,
+    "status": {
+      "shipped": 5,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "newleaf",
+    "tree": "internal/newleaf/**",
+    "dir": "internal/newleaf",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "nightrun",
+    "tree": "internal/nightrun/**",
+    "dir": "internal/nightrun",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "normgate",
+    "tree": "internal/normgate/**",
+    "dir": "internal/normgate",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "operatorbrief",
+    "tree": "internal/operatorbrief/**",
+    "dir": "internal/operatorbrief",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "opttarget",
+    "tree": "internal/opttarget/**",
+    "dir": "internal/opttarget",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "pathlint",
+    "tree": "internal/pathlint/**",
+    "dir": "internal/pathlint",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "pathutil",
+    "tree": "internal/pathutil/**",
+    "dir": "internal/pathutil",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "plancfi",
+    "tree": "internal/plancfi/**",
+    "dir": "internal/plancfi",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "policy",
+    "tree": "internal/policy/**",
+    "dir": "internal/policy",
+    "exists": true,
+    "status": {
+      "shipped": 3,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "polymodel",
+    "tree": "internal/polymodel/**",
+    "dir": "internal/polymodel",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "preflight",
+    "tree": "internal/preflight/**",
+    "dir": "internal/preflight",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 1
+    }
+  },
+  {
+    "name": "productscorecard",
+    "tree": "internal/productscorecard/**",
+    "dir": "internal/productscorecard",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "programreport",
+    "tree": "internal/programreport/**",
+    "dir": "internal/programreport",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "promptmmu",
+    "tree": "internal/promptmmu/**",
+    "dir": "internal/promptmmu",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "provenance",
+    "tree": "internal/provenance/**",
+    "dir": "internal/provenance",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "radixkv",
+    "tree": "internal/radixkv/**",
+    "dir": "internal/radixkv",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "ratelimit",
+    "tree": "internal/ratelimit/**",
+    "dir": "internal/ratelimit",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "recall",
+    "tree": "internal/recall/**",
+    "dir": "internal/recall",
+    "exists": true,
+    "status": {
+      "shipped": 2,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "regionadmit",
+    "tree": "internal/regionadmit/**",
+    "dir": "internal/regionadmit",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "registrations",
+    "tree": "internal/registrations/**",
+    "dir": "internal/registrations",
+    "exists": true,
+    "status": {
+      "shipped": 4,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "release",
+    "tree": "VERSION, docs/releases/**",
+    "dir": "docs/releases",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "renameconcept",
+    "tree": "internal/renameconcept/**",
+    "dir": "internal/renameconcept",
+    "exists": true,
+    "desc": "tree-wide concept-rename planner/applier (cmd/fak/renameconcept.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint)",
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "residency",
+    "tree": "internal/residency/**",
+    "dir": "internal/residency",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "resume",
+    "tree": "internal/resume/**",
+    "dir": "internal/resume",
+    "exists": true,
+    "desc": "crash-resume decision kernel; cmd/fak resume_*.go shims stay in the `cmd` lane",
+    "status": {
+      "shipped": 3,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "rsiloop",
+    "tree": "internal/rsiloop/**",
+    "dir": "internal/rsiloop",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "rulesynth",
+    "tree": "internal/rulesynth/**",
+    "dir": "internal/rulesynth",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "rungobs",
+    "tree": "internal/rungobs/**",
+    "dir": "internal/rungobs",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "safesync",
+    "tree": "internal/safesync/**",
+    "dir": "internal/safesync",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "scoreboard",
+    "tree": "internal/scoreboard/**",
+    "dir": "internal/scoreboard",
+    "exists": true,
+    "desc": "#1000: fak scoreboard Slack scorecard publisher (cmd/fak/scoreboard.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint)",
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "scorecard",
+    "tree": "pkg/scorecard/**",
+    "dir": "pkg/scorecard",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "selfquery",
+    "tree": "internal/selfquery/**",
+    "dir": "internal/selfquery",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "session",
+    "tree": "internal/session/**",
+    "dir": "internal/session",
+    "exists": true,
+    "desc": "#756 (Pillar 2 / #748): per-session DRIVE state + cost ring",
+    "status": {
+      "shipped": 2,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "sessionaudit",
+    "tree": "internal/sessionaudit/**",
+    "dir": "internal/sessionaudit",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "sessionimage",
+    "tree": "internal/sessionimage/**",
+    "dir": "internal/sessionimage",
+    "exists": true,
+    "status": {
+      "shipped": 2,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "sharedtask",
+    "tree": "internal/sharedtask/**",
+    "dir": "internal/sharedtask",
+    "exists": false,
+    "status": {
+      "shipped": 5,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "shipgate",
+    "tree": "internal/shipgate/**",
+    "dir": "internal/shipgate",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "slackoutbox",
+    "tree": "internal/slackoutbox/**",
+    "dir": "internal/slackoutbox",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "slackwire",
+    "tree": "internal/slackwire/**",
+    "dir": "internal/slackwire",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "snapshot",
+    "tree": "internal/snapshot/**",
+    "dir": "internal/snapshot",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "spec",
+    "tree": "internal/spec/**",
+    "dir": "internal/spec",
+    "exists": false,
+    "status": {
+      "shipped": 2,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "steward",
+    "tree": "internal/steward/**",
+    "dir": "internal/steward",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "storedrv",
+    "tree": "internal/storedrv/**",
+    "dir": "internal/storedrv",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "superloop",
+    "tree": "internal/superloop/**",
+    "dir": "internal/superloop",
+    "exists": true,
+    "desc": "operator-intent meta-loop (cmd/fak/superloop.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint)",
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "swebench",
+    "tree": "internal/swebench/**",
+    "dir": "internal/swebench",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "taskmgr",
+    "tree": "internal/taskmgr/**",
+    "dir": "internal/taskmgr",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "tokenizer",
+    "tree": "internal/tokenizer/**",
+    "dir": "internal/tokenizer",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "toollint",
+    "tree": "internal/toollint/**",
+    "dir": "internal/toollint",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "toolproc",
+    "tree": "internal/toolproc/**",
+    "dir": "internal/toolproc",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "toolprocgate",
+    "tree": "internal/toolprocgate/**",
+    "dir": "internal/toolprocgate",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "tools",
+    "tree": "tools/**, scripts/**",
+    "dir": "tools",
+    "exists": true,
+    "status": {
+      "shipped": 8,
+      "simulated": 2,
+      "stub": 1
+    }
+  },
+  {
+    "name": "tracesink",
+    "tree": "internal/tracesink/**",
+    "dir": "internal/tracesink",
+    "exists": true,
+    "status": {
+      "shipped": 2,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "trajctl",
+    "tree": "internal/trajctl/**",
+    "dir": "internal/trajctl",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "tuiplugin",
+    "tree": "internal/tuiplugin/**",
+    "dir": "internal/tuiplugin",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "turnbench",
+    "tree": "internal/turnbench/**",
+    "dir": "internal/turnbench",
+    "exists": true,
+    "status": {
+      "shipped": 10,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "urllint",
+    "tree": "internal/urllint/**",
+    "dir": "internal/urllint",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "vcachechain",
+    "tree": "internal/vcachechain/**",
+    "dir": "internal/vcachechain",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "vcachegov",
+    "tree": "internal/vcachegov/**",
+    "dir": "internal/vcachegov",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "vcacheobserve",
+    "tree": "internal/vcacheobserve/**",
+    "dir": "internal/vcacheobserve",
+    "exists": true,
+    "status": {
+      "shipped": 2,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "vcachewarm",
+    "tree": "internal/vcachewarm/**",
+    "dir": "internal/vcachewarm",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "vdso",
+    "tree": "internal/vdso/**",
+    "dir": "internal/vdso",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "visuals",
+    "tree": "visuals/**",
+    "dir": "visuals",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "waiting",
+    "tree": "internal/waiting/**",
+    "dir": "internal/waiting",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "webbench",
+    "tree": "internal/webbench/**",
+    "dir": "internal/webbench",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "windowgate",
+    "tree": "internal/windowgate/**",
+    "dir": "internal/windowgate",
+    "exists": true,
+    "status": {
+      "shipped": 0,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "wirescreen",
+    "tree": "internal/wirescreen/**",
+    "dir": "internal/wirescreen",
+    "exists": true,
+    "status": {
+      "shipped": 4,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "witness",
+    "tree": "internal/witness/**",
+    "dir": "internal/witness",
+    "exists": true,
+    "status": {
+      "shipped": 2,
+      "simulated": 0,
+      "stub": 0
+    }
+  },
+  {
+    "name": "worktype",
+    "tree": "internal/worktype/**",
+    "dir": "internal/worktype",
+    "exists": true,
+    "status": {
+      "shipped": 1,
+      "simulated": 0,
+      "stub": 0
+    }
+  }
+]
