@@ -844,5 +844,102 @@ class ClassLabelBackfillTest(unittest.TestCase):
         self.assertIn("+class:infra", text)
 
 
+class ScriptsPathRootTest(unittest.TestCase):
+    """#2062 Part A: `scripts/` is now a recognized path root, so a `scripts/…`
+    deliverable path-confirms the tools lane (dos.toml gives the tools lane ownership
+    of `scripts/**`) instead of falling through to an incidental scope/label signal.
+    #1477's deliverable IS `scripts/gcp-glm-demo.sh`."""
+
+    # tools owns scripts/** per dos.toml — mirror that ownership in the fixture.
+    ST_TREES = {"tools": ["tools/**", "scripts/**"],
+                "gateway": ["internal/gateway/**"], "compute": ["internal/compute/**"]}
+    ST_LANES = ["tools", "gateway", "compute"]
+
+    def test_scripts_path_extracted(self):
+        self.assertEqual(
+            m._PATH_RE.findall("ship `scripts/gcp-glm-demo.sh` (plan-by-default)"),
+            ["scripts/gcp-glm-demo.sh"])
+
+    def test_scripts_path_confirms_tools_lane(self):
+        iss = issue(1477, "feat(serving): one-command GLM-5.2 demo",
+                    body="Ship scripts/gcp-glm-demo.sh (plan-by-default, --apply to run).")
+        r = m.route_issue(iss, self.ST_LANES, self.ST_TREES)
+        self.assertEqual(r["lane"], "tools")
+        self.assertEqual(r["confidence"], "path-confirmed")
+
+    def test_embedded_scripts_token_not_falsely_matched(self):
+        # `myscripts/` is preceded by a word char -> the `\\b` half rejects it, so a
+        # mid-token `scripts` never becomes a false path signal.
+        self.assertEqual(m._PATH_RE.findall("the myscripts/x dir"), [])
+
+
+class GpuServingRoutingTest(unittest.TestCase):
+    """#2062 Part A: multi-gpu/moe/model-support aliases route GPU/serving work to a
+    real serving lane (compute/model) instead of rotting unrouted or landing in tools
+    incidentally — the #1476 GPU-epic cohort's routing bug."""
+
+    def test_multi_gpu_label_routes_compute(self):
+        r = route(issue(1478, "serving throughput regression", labels=["multi-gpu"]))
+        self.assertEqual(r["lane"], "compute")
+        self.assertEqual(r["confidence"], "label")
+
+    def test_moe_scope_routes_compute(self):
+        r = route(issue(1479, "feat(moe): expert-parallel router"))
+        self.assertEqual(r["lane"], "compute")
+        self.assertEqual(r["confidence"], "alias")
+        self.assertIn("moe->compute", r["signal"])
+
+    def test_model_support_label_routes_model(self):
+        r = route(issue(1482, "add GLM-5.2 architecture", labels=["model-support"]))
+        self.assertEqual(r["lane"], "model")
+        self.assertEqual(r["confidence"], "label")
+
+
+class RequiredCapsTest(unittest.TestCase):
+    """#2062 Part A: issue_required_caps annotates the hardware a host must declare
+    (FLEET_NODE_CAPS) to run an issue — the signal the dispatcher's Part-B capability
+    gate consumes to skip-but-not-stop GPU work on a GPU-less host."""
+
+    def test_gpu_labels_require_gpu(self):
+        for lab in ("gpu", "cuda", "multi-gpu"):
+            with self.subTest(label=lab):
+                self.assertEqual(
+                    m.issue_required_caps(issue(1, "x", labels=[lab])), ["gpu"])
+
+    def test_gpu_scope_requires_gpu(self):
+        self.assertEqual(
+            m.issue_required_caps(issue(1, "feat(multi-gpu): shard experts")), ["gpu"])
+
+    def test_accelerator_keyword_requires_gpu(self):
+        self.assertEqual(
+            m.issue_required_caps(
+                issue(1, "provision an h100 serving node", body="needs 8x h100")),
+            ["gpu"])
+        self.assertEqual(
+            m.issue_required_caps(issue(1, "stand up an a100 pool")), ["gpu"])
+
+    def test_plain_cpu_work_requires_nothing(self):
+        self.assertEqual(
+            m.issue_required_caps(
+                issue(1, "fix(compute): tighten a residency fold",
+                      body="edit internal/compute/admit.go")), [])
+
+    def test_moe_and_serving_route_but_are_not_hardware_gated(self):
+        # moe/agentic-serving ROUTE (to compute/gateway) but are deliberately NOT
+        # accelerator-gated — that code is often unit-testable on a GPU-less host, so
+        # gating it would falsely strand legitimate local work.
+        self.assertEqual(m.issue_required_caps(issue(1, "feat(moe): router")), [])
+        self.assertEqual(
+            m.issue_required_caps(issue(1, "serve loop", labels=["agentic-serving"])), [])
+
+    def test_route_record_carries_required_caps(self):
+        # The annotation rides every routed record (the flat --json issues list the
+        # dispatcher's capability gate reads), keyed off the same labels routing used.
+        r = route(issue(1478, "serving regression", labels=["multi-gpu"]))
+        self.assertEqual(r["required_caps"], ["gpu"])
+        r2 = route(issue(1, "fix(gateway): admit", body="see fak/internal/gateway/x.go"))
+        self.assertEqual(r2["required_caps"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

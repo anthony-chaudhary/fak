@@ -56,7 +56,7 @@ _BARE_PREFIX_RE = re.compile(r"^([A-Za-z][\w-]*):\s")
 # and still rejects an embedded `x.github`. Without this a workflow-only finding (e.g. a
 # scheduled `.github/workflows/security-audit.yml` gate) path-confirmed NO lane.
 _PATH_RE = re.compile(
-    r"((?:\b(?:fak/(?:internal|cmd|experiments)|tools|docs|visuals)"
+    r"((?:\b(?:fak/(?:internal|cmd|experiments)|tools|scripts|docs|visuals)"
     r"|(?<![\w.])\.(?:github|claude))"
     r"/[\w./-]+)"
 )
@@ -110,6 +110,7 @@ EXCLUSIVE_UNBLOCK_ACTION = (
 # derived from real issue scopes vs the real lane roster. Override via --config.
 SCOPE_ALIAS: dict[str, str] = {
     "cuda": "compute", "gpu": "compute", "vulkan": "compute", "metal": "compute",
+    "multi-gpu": "compute", "moe": "compute",
     "serve": "gateway", "anthropic": "gateway",
     "inkernel": "engine",
     "qwen35": "model", "qwen36": "model",
@@ -136,8 +137,9 @@ SCOPE_ALIAS: dict[str, str] = {
 # Label name -> lane (rung 4, weakest). Labels are coarse, so confidence is low.
 LABEL_ALIAS: dict[str, str] = {
     "gpu": "compute", "compute": "compute", "performance": "compute",
+    "cuda": "compute", "multi-gpu": "compute", "moe": "compute",
     "documentation": "docs",
-    "model": "model", "model-arch": "model",
+    "model": "model", "model-arch": "model", "model-support": "model",
     "loader": "ggufload",
     "security": "policy", "trust-floor": "policy",
     "build": "ci",
@@ -153,6 +155,7 @@ KEYWORD_ALIAS: dict[str, str] = {
     "cuda": "compute",
     "a100": "compute",
     "gpu": "compute",
+    "multi-gpu": "compute",
     "benchmark": "bench",
     "dashboard": "metrics",
     "observability": "metrics",
@@ -170,6 +173,17 @@ CONFIDENCE_RANK = {
     "keyword": 1,
     "none": 0,
 }
+
+# Hardware-capability signals. An issue carrying one of these needs a host that
+# declares the capability (FLEET_NODE_CAPS) to run; a GPU-less worker skips it and
+# leaves it OPEN + visible for a GPU node (see issue_required_caps + the dispatcher's
+# capability gate). Deliberately keyed on UNAMBIGUOUS accelerator signals only: a bare
+# `moe`/`agentic-serving` label ROUTES to compute/gateway (it's real lane work) but is
+# NOT itself hardware-gated — that code is often unit-testable on a GPU-less host, so
+# gating it would falsely strand legitimate local work. Keyword literals are lowercase
+# so they never trip the uppercase-bounded hardware-name scrubber (scrub_hardware_names).
+GPU_CAP_LABELS = {"cuda", "gpu", "multi-gpu"}
+GPU_CAP_KEYWORDS = ("h100", "a100", "dgx", "nvidia")
 
 # ---------------------------------------------------------------------------
 # Work-CLASS axis (infra / frontdoor / dev) — orthogonal to the lane an issue
@@ -385,8 +399,8 @@ def named_repo_paths(text: str) -> list[str]:
     exposed so a caller (the dispatcher's multi-lane scope guard, #2615) reads the
     issue's file families through the SAME lens the router routes by, rather than
     re-deriving a second, drifting path regex. Only rooted paths under a recognized
-    family (`internal/**`, `tools/`, `docs/`, `.github/`, `.claude/`, `cmd/`,
-    `visuals/`) match; a bare `Makefile` / `dos.toml` / glob like `tools/*.py` does
+    family (`internal/**`, `tools/`, `scripts/`, `docs/`, `.github/`, `.claude/`,
+    `cmd/`, `visuals/`) match; a bare `Makefile` / `dos.toml` / glob like `tools/*.py` does
     not, so the set is deliberately the confidently-rooted families, not prose."""
     seen: list[str] = []
     for p in _PATH_RE.findall(text or ""):
@@ -450,6 +464,25 @@ def _has_keyword(text: str, keyword: str) -> bool:
     """Whole-token keyword match, treating '-' and '_' as part of a token."""
     return bool(re.search(r"(?<![\w-])" + re.escape(keyword.lower()) + r"(?![\w-])",
                           text.lower()))
+
+
+def issue_required_caps(issue: dict[str, Any]) -> list[str]:
+    """The hardware capabilities a host must declare (FLEET_NODE_CAPS) to run this
+    issue. Returns ["gpu"] when the issue carries an unambiguous accelerator signal —
+    a cuda/gpu/multi-gpu label or scope, or a named-accelerator keyword (h100/a100/
+    dgx/nvidia) in the title/body — else []. The dispatcher's capability gate skips an
+    issue whose required_caps a node lacks, leaving it OPEN + visible for a GPU-capable
+    node's dispatcher to claim; it does NOT stop or cool the issue. Pure + deterministic."""
+    labels = {l.lower() for l in _label_names(issue)}
+    if labels & GPU_CAP_LABELS:
+        return ["gpu"]
+    scope = _scope_token(str(issue.get("title") or ""))
+    if scope in GPU_CAP_LABELS:
+        return ["gpu"]
+    text = str(issue.get("title") or "") + "\n" + str(issue.get("body") or "")
+    if any(_has_keyword(text, kw) for kw in GPU_CAP_KEYWORDS):
+        return ["gpu"]
+    return []
 
 
 def is_blocked_by_human(issue: dict[str, Any], *, label: str = BLOCKED_BY_HUMAN_LABEL) -> bool:
@@ -708,6 +741,7 @@ def _route(issue, lane, confidence, signal, conflict, *, unrouted_reason=None,
         "signal_conflict": bool(conflict),
         "unrouted_reason": unrouted_reason,
         "class": derive_class(issue, lane if lane is not None else class_lane),
+        "required_caps": issue_required_caps(issue),
     }
 
 
