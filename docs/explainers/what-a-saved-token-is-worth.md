@@ -76,9 +76,15 @@ once, in public, and both fixes are now baked into the code:
 - **The price axis.** For a while, a compaction-shed token was valued at the full
   `1.0x` input rate even when the fire landed on a warm prefix — where the honest
   price is `0.1x`. That over-credited fak's compaction **tenfold** on every warm
-  fire and was the single source of an inflated "fak share." The fix (#2794 /
-  #2798 / #2796): a warm shed is priced at the `0.1x` cache-read marginal; only an
-  *observed-cold* shed keeps `1.0x`.
+  fire. The first correction over-shot in the other direction: it discounted a
+  session's *entire* shed to `0.1x` the moment a single warm cache-read appeared,
+  which **under**-credited a cold-dominant session just as badly. Both were step
+  functions on a continuous quantity. The durable fix (#2794 / #2798 / #2796):
+  price the shed as a **proportional blend** — the warm portion
+  `min(shed, cache_read)` at the `0.1x` cache-read marginal, the cold remainder at
+  `1.0x` — so the number no longer swings with a session's warm/cold fire mix
+  (`cacheprice.ShedTokenEquiv`, the one source the report, the live guard split, and
+  the sessionobs net-true ledger all price on).
 
 - **The count axis.** fak doesn't keep a compacted copy of your transcript — the
   client re-sends its full history every turn, so fak re-trims from scratch each
@@ -95,12 +101,14 @@ report has to get both right independently.
 
 Because "at what price?" is the question that let the `1.0x`-on-warm error slip
 through, the report refuses to let a number travel without its basis. Each saved-$
-row carries a **valuation basis** label — one of:
+row carries a **valuation basis** label (`shedValuationBasis` picks the first three
+by the shed's warm/cold mix):
 
 | Basis | Price | When it's honest |
 |---|---|---|
-| `FULL_INPUT` | `1.0x` | an observed-**cold** shed — no cache behind the dropped token |
-| `CACHE_READ_MARGINAL` | `0.1x` | a **warm** shed — the token would have been a cache read |
+| `FULL_INPUT` | `1.0x` | a wholly-**cold** shed (`cache_read == 0`) — no cache behind the dropped tokens |
+| `CACHE_READ_MARGINAL` | `0.1x` | a wholly-**warm** shed (`cache_read ≥ shed`) — every dropped token would have been a cache read |
+| `BLENDED_MARGINAL` | `min(shed, cache_read)·0.1x + remainder·1.0x` | a **mixed** shed (`0 < cache_read < shed`) — warm portion at the marginal, cold remainder at full input |
 | `OBSERVED_NET` | read rebate − write premium | the provider prompt-cache row |
 
 The renderer will **refuse to print an unlabeled fak dollar** rather than emit a

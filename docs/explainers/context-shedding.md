@@ -116,14 +116,17 @@ regrowing and getting re-trimmed.
   total tokens saved (`fak cachevalue report`), and its job on top of that is to
   keep the provider's much larger discount *alive* as the session grows.
 - Value a shed token at what the provider would actually have billed it, not at
-  full input. On a **warm** fire the dropped tokens were already a provider
-  cache-read (billed at ~0.1× base input), so shedding them saves that 0.1× read
-  marginal — not the 1.0× of fresh input. Only an observed-**cold** fire, where
-  the prefix's cache had expired, avoids a full-input billing and is worth 1.0×.
-  Booking every warm shed at 1.0× is the same ~10× over-count the retraction below
-  came from; the report now stamps each figure with its price basis
-  (`CACHE_READ_MARGINAL` vs `FULL_INPUT`), so a shed number is never read without
-  knowing how it was priced.
+  full input. Within a fire the **warm** portion of the shed — the tokens the
+  provider was already serving from cache (`min(shed, cache_read)`, billed at ~0.1×
+  base input) — saves only that 0.1× read marginal, while the **cold** remainder
+  (shed beyond the witnessed warm prefix) avoids a full-input billing and is worth
+  1.0×. Booking every warm shed at 1.0× was a ~10× over-count (the retraction
+  below); the correction that followed then discounted a whole cold-dominant
+  session to 0.1× on a single warm token — a ~10× under-count. The report now
+  prices the shed as a proportional blend (`cacheprice.ShedTokenEquiv`) and stamps
+  each figure with its basis — `CACHE_READ_MARGINAL` (wholly warm), `FULL_INPUT`
+  (wholly cold), or `BLENDED_MARGINAL` (mixed) — so a shed number is never read
+  without knowing how it was priced.
 
 > **A retraction, on the record.** An earlier version of the README and benchmark
 > authority claimed fak's own share "climbs from ~15% to ~75% as the session gets
