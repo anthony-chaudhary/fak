@@ -1,0 +1,272 @@
+package gateway
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+	"sync/atomic"
+	"time"
+)
+
+func (m *gatewayMetrics) observeHTTP(route, method string, status int, dur time.Duration) {
+	if m == nil {
+		return
+	}
+	key := httpMetricKey{route: route, method: method, status: itoa(uint64(status))}
+	m.mu.Lock()
+	counter := m.http[key]
+	if counter == nil {
+		counter = newLatencyCounter()
+		m.http[key] = counter
+	}
+	counter.observe(dur.Seconds())
+	m.mu.Unlock()
+}
+
+func (m *gatewayMetrics) observeOperation(operation string, v WireVerdict, err error, dur time.Duration) {
+	if m == nil {
+		return
+	}
+	key := operationMetricKey{
+		operation: operation,
+		verdict:   v.Kind,
+		reason:    v.Reason,
+	}
+	if err != nil || key.verdict == "" {
+		key.verdict = "ERROR"
+	}
+	key.disposition = v.Disposition
+	key.by = v.By
+	m.mu.Lock()
+	counter := m.operations[key]
+	if counter == nil {
+		counter = newLatencyCounter()
+		m.operations[key] = counter
+	}
+	counter.observe(dur.Seconds())
+	m.mu.Unlock()
+}
+
+type httpMetricSnapshot struct {
+	key httpMetricKey
+	val latencySnapshot
+}
+
+type operationMetricSnapshot struct {
+	key operationMetricKey
+	val latencySnapshot
+}
+
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	_, _ = w.Write([]byte(s.renderMetrics()))
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+	bytes  int64
+}
+
+// WriteHeader records the FIRST status code written (later calls are ignored) and
+// forwards it to the wrapped ResponseWriter, so the metrics middleware can label the
+// request by the status actually sent.
+func (r *statusRecorder) WriteHeader(status int) {
+	if r.status != 0 {
+		return
+	}
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+// Write forwards the body to the wrapped ResponseWriter (defaulting the status to 200
+// on the first write) and accumulates the byte count for the request log.
+func (r *statusRecorder) Write(p []byte) (int, error) {
+	if r.status == 0 {
+		r.WriteHeader(http.StatusOK)
+	}
+	n, err := r.ResponseWriter.Write(p)
+	r.bytes += int64(n)
+	return n, err
+}
+
+// Flush defaults the status to 200 if unset and flushes the wrapped ResponseWriter
+// when it implements http.Flusher, preserving streaming (SSE) behavior through the
+// recorder.
+func (r *statusRecorder) Flush() {
+	if r.status == 0 {
+		r.WriteHeader(http.StatusOK)
+	}
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (s *Server) withMetrics(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		atomic.AddInt64(&s.metrics.inflight, 1)
+		defer atomic.AddInt64(&s.metrics.inflight, -1)
+		route := routeForMetrics(r.URL.Path)
+		// Register the request as live so scrapes can see it WHILE it runs, not
+		// only after it completes into the latency histogram. route is derived from
+		// the path up front (routeForMetrics is pure), matching the completion-time
+		// label below.
+		if route != "/metrics" {
+			liveID := s.metrics.beginInflight(route, start)
+			defer s.metrics.endInflight(liveID)
+		}
+		traceID := ensureHTTPTrace(s, w, r)
+		rec := &statusRecorder{ResponseWriter: w}
+		// Record metrics + the request log for EVERY outcome, panic included, and contain a
+		// downstream handler panic HERE — the outermost fak-owned wrapper — instead of letting
+		// it unwind into net/http. net/http's own recovery writes a full goroutine stack to the
+		// server ErrorLog, which under `fak guard` is the wrapped agent's controlling TTY (#2772);
+		// worse, the unwind would skip the accounting below, so the failed turn would never reach
+		// observeHTTP or the request log and the panic would be invisible at /metrics (#2773/#2775).
+		// We convert it to a structured 500 envelope + one line + a counted turn; a served-turn panic
+		// also marks /healthz (#2336, served_failure.go). http.ErrAbortHandler is re-raised untouched.
+		defer func() {
+			if current := requestTraceID(r); current != "" {
+				traceID = current
+			}
+			if p := recover(); p != nil {
+				if p == http.ErrAbortHandler {
+					panic(p)
+				}
+				s.noteServedPanic(r.URL.Path, p)
+				if rec.status == 0 {
+					writeRecoveredPanicErr(rec, p)
+				}
+				s.logf("gateway: recovered handler panic route=%s method=%s trace_id=%s: %v", route, r.Method, traceID, p)
+			}
+			status := rec.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			dur := time.Since(start)
+			s.metrics.observeHTTP(route, r.Method, status, dur)
+			s.logHTTPRequest(r, route, status, dur, rec.bytes, traceID)
+		}()
+		next.ServeHTTP(rec, r)
+	})
+}
+
+func (s *Server) logHTTPRequest(r *http.Request, route string, status int, dur time.Duration, bytes int64, traceID string) {
+	if s == nil || s.logf == nil {
+		return
+	}
+	ev := map[string]any{
+		"event":       "gateway_http_request",
+		"method":      r.Method,
+		"route":       route,
+		"path":        r.URL.Path,
+		"status":      status,
+		"duration_ms": float64(dur.Microseconds()) / 1000.0,
+		"bytes":       bytes,
+	}
+	if traceID != "" {
+		ev["trace_id"] = traceID
+	}
+	if ua := r.Header.Get("User-Agent"); ua != "" {
+		ev["user_agent"] = ua
+	}
+	b, err := json.Marshal(ev)
+	if err != nil {
+		return
+	}
+	s.logf("%s", b)
+}
+
+func (s *Server) logGatewayOperation(operation, traceID, tool string, v WireVerdict, opErr error, dur time.Duration) {
+	if s == nil || s.logf == nil {
+		return
+	}
+	verdict := v.Kind
+	if opErr != nil && verdict == "" {
+		verdict = "ERROR"
+	}
+	ev := map[string]any{
+		"event":       "gateway_operation",
+		"operation":   operation,
+		"tool":        tool,
+		"trace_id":    strings.TrimSpace(traceID),
+		"verdict":     verdict,
+		"duration_ms": float64(dur.Microseconds()) / 1000.0,
+	}
+	if v.Reason != "" {
+		ev["reason"] = v.Reason
+	}
+	if v.By != "" {
+		ev["by"] = v.By
+	}
+	if v.Disposition != "" {
+		ev["disposition"] = v.Disposition
+	}
+	if opErr != nil {
+		ev["error"] = opErr.Error()
+	}
+	b, err := json.Marshal(ev)
+	if err != nil {
+		return
+	}
+	s.logf("%s", b)
+}
+
+const traceHeader = "X-Trace-Id"
+
+func ensureHTTPTrace(s *Server, w http.ResponseWriter, r *http.Request) string {
+	traceID := requestTraceID(r)
+	if traceID == "" && s != nil {
+		traceID = s.traceFor("")
+		r.Header.Set(traceHeader, traceID)
+	}
+	if traceID != "" {
+		w.Header().Set(traceHeader, traceID)
+	}
+	return traceID
+}
+
+func requestTraceID(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	return strings.TrimSpace(r.Header.Get(traceHeader))
+}
+
+func (s *Server) useHTTPTrace(w http.ResponseWriter, r *http.Request, preferred string) string {
+	traceID := strings.TrimSpace(preferred)
+	if traceID == "" {
+		traceID = requestTraceID(r)
+	}
+	if traceID == "" && s != nil {
+		traceID = s.traceFor("")
+	}
+	if traceID != "" {
+		r.Header.Set(traceHeader, traceID)
+		w.Header().Set(traceHeader, traceID)
+	}
+	return traceID
+}
+
+func routeForMetrics(path string) string {
+	switch path {
+	case "/v1/chat/completions", "/v1/responses", "/v1/messages", "/v1/messages/count_tokens",
+		"/v1/fak/syscall", "/v1/fak/adjudicate", "/v1/fak/admit",
+		"/v1/fak/changes", "/v1/fak/session/changes", "/v1/fak/revoke", "/v1/fak/policy/reload",
+		"/v1/fak/trace/reset", "/v1/models", "/mcp", "/healthz", "/metrics",
+		"/debug/vars":
+		return path
+	default:
+		if strings.HasPrefix(path, "/v1/fak/") {
+			return "/v1/fak/*"
+		}
+		if strings.HasPrefix(path, "/v1beta/") {
+			return "/v1beta/*"
+		}
+		return "other"
+	}
+}

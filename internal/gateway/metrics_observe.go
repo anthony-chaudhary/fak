@@ -1,0 +1,687 @@
+package gateway
+
+import (
+	"sync/atomic"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
+)
+
+// observeUpstreamError increments the upstream-error counter for the error's KIND. It is the
+// single fold point for every proxy/planner error path (called from plannerErrorStatus), so a
+// turn failure is counted exactly once. A nil or unclassifiable error is a no-op.
+func (m *gatewayMetrics) observeUpstreamError(err error) {
+	if m == nil {
+		return
+	}
+	kind := upstreamErrorKind(err)
+	if kind == "" {
+		return
+	}
+	m.upstreamErrMu.Lock()
+	if m.upstreamErrors == nil {
+		m.upstreamErrors = map[string]uint64{}
+	}
+	m.upstreamErrors[kind]++
+	m.upstreamErrMu.Unlock()
+}
+
+// observeUpstreamRetry counts one upstream retry attempt (the planner's 429/5xx backoff) and
+// accumulates the wait it slept before re-hitting upstream. Atomic and off the request path,
+// called from the RetryNotify hook. A non-positive wait still counts the attempt.
+func (m *gatewayMetrics) observeUpstreamRetry(wait time.Duration) {
+	if m == nil {
+		return
+	}
+	atomic.AddUint64(&m.upstreamRetries, 1)
+	if wait > 0 {
+		atomic.AddUint64(&m.upstreamRetryWaitNS, uint64(wait))
+	}
+}
+
+// observeFakVerbCall records one admitted MCP fak-verb (tools/call) invocation. Called
+// from the single tools/call choke point after the --expose allow gate, so it counts only
+// verbs the operator actually exposed and the client actually called. Atomic and off the
+// request-critical path; a nil metrics receiver is a no-op.
+func (m *gatewayMetrics) observeFakVerbCall() {
+	if m == nil {
+		return
+	}
+	atomic.AddUint64(&m.fakVerbCalls, 1)
+}
+
+// fakVerbCallsSnapshot reads the cumulative fak-verb call counter. Used by the metrics
+// renderer and available to any read-time fold.
+func (m *gatewayMetrics) fakVerbCallsSnapshot() uint64 {
+	if m == nil {
+		return 0
+	}
+	return atomic.LoadUint64(&m.fakVerbCalls)
+}
+
+// observeUpstreamAuthRefresh counts one 401 token-rotation self-heal by outcome ("recovered" /
+// "exhausted"), called from the AuthRefreshNotify hook. Off the request path, guarded by the
+// shared upstreamErrMu. An unknown outcome is ignored so a future caller typo cannot create a
+// junk series.
+func (m *gatewayMetrics) observeUpstreamAuthRefresh(outcome string) {
+	if m == nil {
+		return
+	}
+	if outcome != "recovered" && outcome != "exhausted" {
+		return
+	}
+	m.upstreamErrMu.Lock()
+	if m.upstreamAuthRefreshes == nil {
+		m.upstreamAuthRefreshes = map[string]uint64{}
+	}
+	m.upstreamAuthRefreshes[outcome]++
+	m.upstreamErrMu.Unlock()
+}
+
+// observeUpstreamForbiddenRetry counts one 403 transient-recovery outcome ("recovered" /
+// "exhausted"), called from the ForbiddenRetryNotify hook. Off the request path, guarded by the
+// shared upstreamErrMu. An unknown outcome is ignored so a future caller typo cannot create a
+// junk series. Mirrors observeUpstreamAuthRefresh — the two stay parallel so an operator reads
+// the 401 and 403 self-heals the same way.
+func (m *gatewayMetrics) observeUpstreamForbiddenRetry(outcome string) {
+	if m == nil {
+		return
+	}
+	if outcome != "recovered" && outcome != "exhausted" {
+		return
+	}
+	m.upstreamErrMu.Lock()
+	if m.upstreamForbiddenRetries == nil {
+		m.upstreamForbiddenRetries = map[string]uint64{}
+	}
+	m.upstreamForbiddenRetries[outcome]++
+	m.upstreamErrMu.Unlock()
+}
+
+// observeUpstreamAccountFailover counts one account-failover-arm outcome, called from the
+// AccountFailoverNotify hook. The arm fires for two causes over the SAME swap mechanism, and the
+// outcome label keeps them apart: a 403 ORG WALL reports "recovered" / "exhausted", and a 429
+// ACCOUNT CAP (session/weekly/usage) seat rehome reports "rehomed_seat" / "rehome_seat_unavailable"
+// — the cap can hold for a hours-away reset, so the session swaps to a free sibling seat instead of
+// sleeping on the capped one. Off the request path, guarded by the shared upstreamErrMu. An unknown
+// outcome is ignored so a future caller typo cannot create a junk series. Mirrors
+// observeUpstreamForbiddenRetry — the four upstream self-heal signals (retry, auth-refresh,
+// forbidden-retry, account-failover) stay parallel so an operator reads them alike.
+func (m *gatewayMetrics) observeUpstreamAccountFailover(outcome string) {
+	if m == nil {
+		return
+	}
+	switch outcome {
+	case "recovered", "exhausted", "rehomed_seat", "rehome_seat_unavailable":
+	default:
+		return
+	}
+	m.upstreamErrMu.Lock()
+	if m.upstreamAccountFailovers == nil {
+		m.upstreamAccountFailovers = map[string]uint64{}
+	}
+	m.upstreamAccountFailovers[outcome]++
+	m.upstreamErrMu.Unlock()
+}
+
+// recordForbiddenDetail stores a scrubbed, bounded snapshot of a PERSISTENT 403's upstream body
+// for the operator-only /debug/vars drilldown. Called from the proxy/planner error path with the
+// raw truncated body; scrubForbiddenDetail strips secrets and bounds it before it is stored. A
+// body that scrubs to empty leaves the previous detail intact (a blank 403 body should not erase a
+// useful earlier one). Off the request path, guarded by the shared upstreamErrMu.
+func (m *gatewayMetrics) recordForbiddenDetail(body string) {
+	if m == nil {
+		return
+	}
+	scrubbed := scrubForbiddenDetail(body)
+	if scrubbed == "" {
+		return
+	}
+	m.upstreamErrMu.Lock()
+	m.lastForbiddenDetail = scrubbed
+	m.upstreamErrMu.Unlock()
+}
+
+// observeInKernelOOM folds a planner error into the local device-OOM visibility family when
+// it is either an in-kernel allocation fault or the request-time capacity precheck refusal.
+// It returns true only for that local OOM class, so callers can record without re-doing
+// errors.As.
+func (m *gatewayMetrics) observeInKernelOOM(err error) bool {
+	if m == nil || err == nil {
+		return false
+	}
+	class, bytes, site, ok := inKernelOOMObservation(err)
+	if !ok {
+		return false
+	}
+	m.oomMu.Lock()
+	if m.inKernelOOM == nil {
+		m.inKernelOOM = map[string]*inKernelOOMClassStats{}
+	}
+	st := m.inKernelOOM[class]
+	if st == nil {
+		st = &inKernelOOMClassStats{}
+		m.inKernelOOM[class] = st
+	}
+	st.count++
+	st.failedBytes += bytes
+	st.lastFailedBytes = bytes
+	st.lastSite = site
+	m.oomMu.Unlock()
+	return true
+}
+
+// observeCompaction records the outcome of one history-compaction attempt. off=true means the
+// budget was unset (the lever is configured off); otherwise the outcome's Reason decides fired
+// vs bailed and which bail-reason bucket increments.
+func (m *gatewayMetrics) observeCompaction(out agent.CompactOutcome, off bool) {
+	if m == nil {
+		return
+	}
+	m.compactMu.Lock()
+	defer m.compactMu.Unlock()
+	switch {
+	case off:
+		m.compactAttempts["off"]++
+	case out.Reason == agent.CompactReasonNone:
+		m.compactAttempts["fired"]++
+		m.compactDropped += uint64(out.Dropped)
+		m.compactShed += uint64(out.ShedTokens)
+	default:
+		m.compactAttempts["bailed"]++
+		m.compactBailReasons[out.Reason]++
+		if out.AnchorStarved {
+			// A subset of under_budget: the anchor protected a prefix larger than the budget, so
+			// the lever could not fire. Counted apart so "idle" can be proven NOT a short session.
+			m.compactAnchorStarved++
+		}
+	}
+}
+
+// observeCtxViewRewrite records one successful ctxplan planned-view rewrite. It is
+// intentionally separate from observeCompaction: both transforms can shed request-body
+// residency, but only compact-history should increment compaction attempts, reset-score
+// health, or debug compaction banners.
+func (m *gatewayMetrics) observeCtxViewRewrite(out agent.CompactOutcome) {
+	if m == nil || out.Reason != agent.CompactReasonNone {
+		return
+	}
+	m.ctxViewMu.Lock()
+	m.ctxViewEvents++
+	m.ctxViewDropped += uint64(clampNonNeg(out.Dropped))
+	m.ctxViewShed += uint64(clampNonNeg(out.ShedTokens))
+	m.ctxViewMu.Unlock()
+}
+
+// observeCacheTTLUpgrade records one managed-cache 1h TTL upgrade attempt on the outbound
+// Anthropic wire, bucketed by the closed agent.TTLUpgradeReason* outcome ("" — an actual
+// upgrade — counts as "upgraded"). WITNESSED: fak authored the splice, and the upgrader
+// re-proves the body redecodes before returning changed bytes. Called only while the lever
+// (--managed-cache / Config.CacheTTL1H) is on, so the family doubles as the lever's
+// default-state witness: absent rows mean OFF, a zero "upgraded" row with nonzero reason
+// rows means ON-but-ineligible.
+func (m *gatewayMetrics) observeCacheTTLUpgrade(reason string) {
+	if m == nil {
+		return
+	}
+	outcome := reason
+	if outcome == "" {
+		outcome = "upgraded"
+	}
+	m.compactMu.Lock()
+	if m.ttlUpgrades == nil {
+		m.ttlUpgrades = map[string]uint64{}
+	}
+	m.ttlUpgrades[outcome]++
+	m.compactMu.Unlock()
+}
+
+// observePlacement records one offensive cache-breakpoint placement attempt on the outbound
+// Anthropic wire, bucketed by the closed agent.BreakpointReason* outcome ("" — an actual placement
+// — counts as "placed"). WITNESSED: fak authored the splice, and the placer re-proves the body
+// redecodes and the cached prefix stays byte-identical before returning changed bytes. Called on
+// every Anthropic passthrough turn while compaction is configured on, so the "placed" bucket is the
+// always-on witness of fak-authored cache unlocking even with --debug-stats off — while "already_set"
+// counts the Claude-Code shape fak deliberately leaves to the client's own cache.
+func (m *gatewayMetrics) observePlacement(out agent.BreakpointOutcome) {
+	if m == nil {
+		return
+	}
+	outcome := out.Reason
+	if outcome == "" {
+		outcome = "placed"
+	}
+	m.compactMu.Lock()
+	if m.placementAttempts == nil {
+		m.placementAttempts = map[string]uint64{}
+	}
+	m.placementAttempts[outcome]++
+	m.compactMu.Unlock()
+}
+
+// observeUncachedTrim records oversized-result elision as a fak-authored uncached-token saving.
+// It does not increment the history-compaction attempt counters: the transform is a sibling
+// shrinker, not a whole-turn compaction fire. Its shed tokens are still folded into compactShed so
+// the existing owner/mechanism attribution reports them under owner="fak"/compaction_shed.
+func (m *gatewayMetrics) observeUncachedTrim(out agent.ElideOutcome) {
+	if m == nil || out.Reason != agent.ElideReasonNone || out.ShedBytes <= 0 {
+		return
+	}
+	tokens := estimatedTokensFromBytes(out.ShedBytes)
+	if tokens == 0 {
+		return
+	}
+	m.compactMu.Lock()
+	m.uncachedTrimResults += uint64(out.Elided)
+	m.uncachedTrimShed += tokens
+	m.compactShed += tokens
+	m.compactMu.Unlock()
+}
+
+// recordCompactionCacheRead records the provider's cache_read_input_tokens on a turn whose body
+// WAS compacted. This is an OBSERVED value relayed verbatim from the upstream, NOT a fak claim:
+// fak's own guarantee (the protected prefix it shipped was byte-identical) is already witnessed
+// by the turn counting `fired` with no `prefix_mismatch` bail. A low cache_read here therefore
+// does not mean fak broke anything — pair it with shed_tokens to see the net effect, and read a
+// crater as a provider-side miss (TTL expiry / eviction / the client moving its breakpoint)
+// unless bail_reason{prefix_mismatch} is nonzero.
+func (m *gatewayMetrics) recordCompactionCacheRead(cacheRead int) {
+	if m == nil {
+		return
+	}
+	m.compactMu.Lock()
+	m.compactCacheReads += uint64(cacheRead)
+	m.compactLastCacheRd = float64(cacheRead)
+	m.compactMu.Unlock()
+}
+
+// observeInboundToolPrune records that a turn pruned n unreachable tool definitions from the
+// outbound tools[] (the INBOUND tool-floor prune lever). n<=0 is a no-op, so the common turn —
+// where no advertised tool is floor-denied past the cache_control breakpoint — records nothing,
+// exactly as a clean compaction turn does. WITNESSED: fak chose what to drop, and the pruner
+// proved the cached prefix stayed byte-identical before returning Changed=true, so a counted
+// prune never bursts the upstream cache.
+func (m *gatewayMetrics) observeInboundToolPrune(n int) {
+	if m == nil || n <= 0 {
+		return
+	}
+	m.toolPruneMu.Lock()
+	m.toolPruneTurns++
+	m.toolPruneCount += uint64(n)
+	m.toolPruneMu.Unlock()
+}
+
+// observeInboundPrunedToolProposal records that a model later proposed a tool name fak had
+// removed from that trace's advertised tools[]. The caller de-duplicates per trace/tool; this
+// counter is the process-wide witness count. It is names-only observability, not a verdict.
+func (m *gatewayMetrics) observeInboundPrunedToolProposal(n int) {
+	if m == nil || n <= 0 {
+		return
+	}
+	m.toolPruneMu.Lock()
+	m.toolPrunedPropose += uint64(n)
+	m.toolPruneMu.Unlock()
+}
+
+// inboundToolPruneSnapshot reads the WITNESSED tool-prune accumulators under their lock. Pure
+// read — the exit summary and the Prometheus surface both fold the same two numbers, so the line
+// can never disagree with the scrape.
+func (m *gatewayMetrics) inboundToolPruneSnapshot() (turns, count uint64) {
+	if m == nil {
+		return 0, 0
+	}
+	m.toolPruneMu.Lock()
+	defer m.toolPruneMu.Unlock()
+	return m.toolPruneTurns, m.toolPruneCount
+}
+
+func (m *gatewayMetrics) inboundPrunedToolProposalSnapshot() uint64 {
+	if m == nil {
+		return 0
+	}
+	m.toolPruneMu.Lock()
+	defer m.toolPruneMu.Unlock()
+	return m.toolPrunedPropose
+}
+
+// observeToolRefSanitize records that a turn converted one or more Claude-Code-internal
+// tool_reference blocks into wire-valid text blocks. A body with no tool_reference records nothing
+// (out.Reason != ToolRefReasonNone), so the common turn is silent — exactly as a clean prune is.
+// WITNESSED: fak authored the rewrite that kept the body from being 400'd upstream.
+func (m *gatewayMetrics) observeToolRefSanitize(out agent.ToolRefOutcome) {
+	if m == nil || out.Reason != agent.ToolRefReasonNone || out.Converted <= 0 {
+		return
+	}
+	m.toolRefMu.Lock()
+	m.toolRefTurns++
+	m.toolRefConverted += uint64(out.Converted)
+	m.toolRefMu.Unlock()
+}
+
+// toolRefSanitizeSnapshot reads the WITNESSED tool_reference-sanitize accumulators under their
+// lock. Pure read — the exit summary and the Prometheus surface fold the same two numbers.
+func (m *gatewayMetrics) toolRefSanitizeSnapshot() (turns, converted uint64) {
+	if m == nil {
+		return 0, 0
+	}
+	m.toolRefMu.Lock()
+	defer m.toolRefMu.Unlock()
+	return m.toolRefTurns, m.toolRefConverted
+}
+
+// observeEmptyContentRepair records that a turn backfilled one or more empty tool_result.content
+// arrays with a placeholder text block (#3118). A body with no empty content array records nothing
+// (out.Reason != EmptyContentReasonNone), so the common turn is silent. WITNESSED: fak authored the
+// repair that kept the body from being 400'd upstream as "empty content".
+func (m *gatewayMetrics) observeEmptyContentRepair(out agent.EmptyContentOutcome) {
+	if m == nil || out.Reason != agent.EmptyContentReasonNone || out.Repaired <= 0 {
+		return
+	}
+	m.emptyContentMu.Lock()
+	m.emptyContentTurns++
+	m.emptyContentRepaired += uint64(out.Repaired)
+	m.emptyContentMu.Unlock()
+}
+
+// emptyContentRepairSnapshot reads the WITNESSED empty-content-gate accumulators under their lock.
+func (m *gatewayMetrics) emptyContentRepairSnapshot() (turns, repaired uint64) {
+	if m == nil {
+		return 0, 0
+	}
+	m.emptyContentMu.Lock()
+	defer m.emptyContentMu.Unlock()
+	return m.emptyContentTurns, m.emptyContentRepaired
+}
+
+// recordResetShadow folds one compacted turn's resetScore SHADOW verdict into the recommend-only
+// accumulators. The reset policy NEVER acts in shadow mode (reset_shadow.go); this only counts what
+// it WOULD recommend, bucketed by the closed ResetReason, so an operator can watch the cut-vs-reset
+// pressure build before reset is ever enabled. The verdict is WITNESSED (fak's own policy); the
+// inputs it scored are OBSERVED (provider cache counters). Lazily inits the reason map like
+// observeInference, so a Server built without this family present still records correctly.
+func (m *gatewayMetrics) recordResetShadow(d ResetDecision) {
+	if m == nil {
+		return
+	}
+	m.resetShadowMu.Lock()
+	if m.resetShadowReasons == nil {
+		m.resetShadowReasons = map[string]uint64{}
+	}
+	m.resetShadowReasons[string(d.Reason)]++
+	if d.ShouldReset {
+		m.resetShadowRecommend++
+	}
+	m.resetShadowLastScore = d.Score
+	m.resetShadowMu.Unlock()
+}
+
+// recordAdjudicationOutcome folds one served turn's adjudication SHAPE into two
+// separate turn-control signals:
+//   - deny-all: every proposed tool call was hard-refused by the floor. This is the
+//     bounded stop-policy signal; the guard Stop hook may eventually give up.
+//   - tool-feedback: every proposed tool call was rejected as retryable/model-fixable
+//     feedback (for example MALFORMED JSON). This should continue the turn but must not
+//     be counted as a session-stop/give-up policy.
+//
+// A reset turn (at least one survivor/served call, or pure text) clears both consecutive
+// runs. Called once per served Anthropic turn on both wire paths. A no-op for nil metrics.
+func (m *gatewayMetrics) recordAdjudicationOutcome(signal adjudicationOutcomeSignal) {
+	if m == nil {
+		return
+	}
+	m.denyAllMu.Lock()
+	switch signal {
+	case adjudicationOutcomeDenyAll:
+		m.denyAllStops++
+		m.denyAllConsecutive++
+		m.toolFeedbackConsecutive = 0
+	case adjudicationOutcomeToolFeedback:
+		m.toolFeedbackTurns++
+		m.toolFeedbackConsecutive++
+		m.denyAllConsecutive = 0
+	default:
+		m.denyAllConsecutive = 0
+		m.toolFeedbackConsecutive = 0
+	}
+	m.denyAllMu.Unlock()
+}
+
+// recordServedInline attributes n vDSO served-inline hits (a read-only call answered
+// locally on a served turn, folded to assistant text, dropped before the client could
+// re-run it) to the gateway seam. Atomic, off any lock — bumped once per served turn
+// from every wire's adjudication handler. A no-op for a nil metrics.
+func (m *gatewayMetrics) recordServedInline(n int) {
+	if m == nil || n <= 0 {
+		return
+	}
+	atomic.AddUint64(&m.servedInline, uint64(n))
+}
+
+// servedInlineSnapshot reads the cumulative served-inline count. Pure read.
+func (m *gatewayMetrics) servedInlineSnapshot() uint64 {
+	if m == nil {
+		return 0
+	}
+	return atomic.LoadUint64(&m.servedInline)
+}
+
+// denyAllSnapshot reads the deny-all accumulators under their lock. Pure read — the exit
+// summary, the Prometheus surface, and the guard Stop-hook gauge all fold the same two
+// numbers, so the views can never disagree.
+func (m *gatewayMetrics) denyAllSnapshot() (stops, consecutive uint64) {
+	if m == nil {
+		return 0, 0
+	}
+	m.denyAllMu.Lock()
+	defer m.denyAllMu.Unlock()
+	return m.denyAllStops, m.denyAllConsecutive
+}
+
+// toolFeedbackSnapshot reads the retryable tool-feedback accumulators under the same
+// lock as deny-all. The two families are mutually exclusive on a given turn but rendered
+// side by side so operators can tell "the model needs to fix JSON/args" apart from "the
+// floor hard-refused every action."
+func (m *gatewayMetrics) toolFeedbackSnapshot() (turns, consecutive uint64) {
+	if m == nil {
+		return 0, 0
+	}
+	m.denyAllMu.Lock()
+	defer m.denyAllMu.Unlock()
+	return m.toolFeedbackTurns, m.toolFeedbackConsecutive
+}
+
+// observeInference records one served model-generation turn: its token accounting,
+// why decode stopped, and the wall-clock the planner spent producing it. promptTok /
+// complTok / cachedTok come straight from the planner's reported Usage; dur is the
+// time spent inside planner.Complete. Negative/zero values are ignored so a planner
+// that omits a count never corrupts the running totals. This is the signal that makes
+// a busy gateway look busy: fak_kernel_*/fak_vdso_* stay 0 on a pure chat workload
+// (no syscall, no fast-path lookup), so without this family every panel reads 0 while
+// the box is in fact decoding tokens.
+func (m *gatewayMetrics) observeInference(promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur time.Duration) {
+	// A buffered turn cannot observe the first-token boundary, so prefill is "not
+	// measured": ttft<=0 routes the whole duration into the decode-total accumulator
+	// and leaves the prefill split untouched (it stays an honest 0, never a phantom).
+	m.observeInferenceTimed(promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, 0)
+}
+
+// observeInferenceTimed is observeInference with an explicit time-to-first-token
+// split. ttft is the wall-clock from the planner call starting to the FIRST content
+// delta arriving (the prefill phase: prompt ingest + first token); dur is the whole
+// turn. When ttft is in (0, dur] the turn's time is split — prefill = ttft, decode =
+// dur-ttft — and the turn is counted toward the TTFT denominator so the prefill rate
+// divides streamed prefill tokens by only the turns that measured them. When ttft<=0
+// (a buffered turn, or a stream that produced no delta), the whole duration counts as
+// decode total and the prefill split is left untouched. inferDecodeSecs stays the
+// FULL inference wall-clock in both cases so the existing output_tokens_per_second and
+// the fleet-value agent-seconds denominator are byte-identical to before.
+func (m *gatewayMetrics) observeInferenceTimed(promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur, ttft time.Duration) {
+	if m == nil {
+		return
+	}
+	if finishReason == "" {
+		finishReason = "unknown"
+	}
+	m.inferenceMu.Lock()
+	if m.inferReqs == nil {
+		m.inferReqs = map[string]uint64{}
+	}
+	if m.inferE2EHist == nil { // a directly-constructed metrics (no newGatewayMetrics)
+		m.inferTTFTHist = newLatencyCounter()
+		m.inferTPOTHist = newLatencyCounter()
+		m.inferE2EHist = newLatencyCounter()
+	}
+	m.inferReqs[finishReason]++
+	if promptTok > 0 {
+		m.inferPromptTokens += uint64(promptTok)
+	}
+	if complTok > 0 {
+		m.inferComplTokens += uint64(complTok)
+	}
+	if cachedTok > 0 {
+		m.inferCachedTokens += uint64(cachedTok)
+		m.inferCachedHits++ // this turn got a provider prompt-cache READ
+	}
+	if cacheCreateTok > 0 {
+		m.inferCacheCreationTokens += uint64(cacheCreateTok) // this turn WROTE the provider cache
+	}
+	if dur > 0 {
+		m.inferDecodeSecs += dur.Seconds()
+		// e2e distribution: every served turn (buffered or streamed) lands here.
+		m.inferE2EHist.observe(dur.Seconds())
+	}
+	// Split prefill from decode only when TTFT was actually observed and is sane
+	// (positive and within the total). A clamp guards against a clock skew producing
+	// ttft>dur, which would otherwise make decode-seconds negative.
+	if ttft > 0 && dur > 0 {
+		pre := ttft
+		if pre > dur {
+			pre = dur
+		}
+		m.inferPrefillSecs += pre.Seconds()
+		m.inferTTFTTurns++
+		// ttft distribution: only the streamed turns whose prefill boundary is observable.
+		m.inferTTFTHist.observe(pre.Seconds())
+		if promptTok > 0 {
+			m.inferPrefillPromptTokens += uint64(promptTok)
+		}
+		decodeSecs := (dur - pre).Seconds()
+		m.inferMeasuredDecodeSecs += decodeSecs
+		if complTok > 0 {
+			m.inferMeasuredComplTokens += uint64(complTok)
+			// tpot (inter-token) distribution: mean per-output-token latency for this
+			// turn = decode wall-clock / generated tokens.
+			m.inferTPOTHist.observe(decodeSecs / float64(complTok))
+		}
+	}
+	m.inferenceMu.Unlock()
+}
+
+// recordCacheCreationTierSplit attributes `cacheCreateTok` cache-creation tokens to
+// the managed-cache 1h tier when `upgraded` is true (the session's TTL-upgrade rung
+// was already active for this turn), else leaves them counted only in the unsplit
+// inferCacheCreationTokens total — the same conservative "priced at 5m" convention
+// MechanismSavings/ProviderCacheNetSavings apply to any unattributed write (#2179).
+func (m *gatewayMetrics) recordCacheCreationTierSplit(cacheCreateTok int, upgraded bool) {
+	if m == nil || cacheCreateTok <= 0 || !upgraded {
+		return
+	}
+	m.inferenceMu.Lock()
+	m.inferCacheCreationTokensUpgraded += uint64(cacheCreateTok)
+	m.inferenceMu.Unlock()
+}
+
+func (s *Server) observePlannerRequestMemory() {
+	if s == nil || s.metrics == nil || s.planner == nil {
+		return
+	}
+	reporter, ok := s.planner.(agent.RequestMemoryReporter)
+	if !ok {
+		return
+	}
+	s.metrics.observeRequestMemory(reporter.RequestMemoryStats())
+}
+
+func (m *gatewayMetrics) observeRequestMemory(st agent.RequestMemoryStats) {
+	if m == nil || !st.Observed {
+		return
+	}
+	backend := defaultBackendLabel(st.Backend)
+	planRows := requestMemoryPlanByClassScopeDType(st.MemoryPlan)
+	fitRows := requestMemoryFitRows(st.MemoryPlan, st.Capacities, st.HeadroomRatio)
+
+	m.reqMemoryMu.Lock()
+	if m.reqMemoryObserved == nil {
+		m.reqMemoryObserved = map[string]uint64{}
+	}
+	if m.reqMemoryPlan == nil {
+		m.reqMemoryPlan = map[requestMemoryMetricKey]*requestMemoryMetricStats{}
+	}
+	if m.reqMemoryTokens == nil {
+		m.reqMemoryTokens = map[requestMemoryTokenKey]*requestMemoryTokenStats{}
+	}
+	if m.reqMemoryFit == nil {
+		m.reqMemoryFit = map[requestMemoryFitKey]*requestMemoryFitStats{}
+	}
+	m.reqMemoryObserved[backend]++
+	for _, row := range planRows {
+		k := requestMemoryMetricKey{backend: backend, class: row.Class, scope: row.Scope, dtype: row.DType}
+		st := m.reqMemoryPlan[k]
+		if st == nil {
+			st = &requestMemoryMetricStats{}
+			m.reqMemoryPlan[k] = st
+		}
+		st.observations++
+		st.totalBytes = addPositiveInt64ToUint64(st.totalBytes, row.Bytes)
+		if row.Bytes > st.highWaterBytes {
+			st.highWaterBytes = row.Bytes
+		}
+	}
+	m.observeRequestMemoryTokenLocked(backend, "prompt", st.PromptTokens)
+	m.observeRequestMemoryTokenLocked(backend, "max_new", st.MaxNewTokens)
+	m.observeRequestMemoryTokenLocked(backend, "planned", st.PlannedTokens)
+	for _, row := range fitRows {
+		k := requestMemoryFitKey{backend: backend, scope: row.Scope}
+		st := m.reqMemoryFit[k]
+		if st == nil {
+			st = &requestMemoryFitStats{}
+			m.reqMemoryFit[k] = st
+		}
+		st.observations++
+		if row.WantBytes > st.wantHighWater {
+			st.wantHighWater = row.WantBytes
+		}
+		if row.CapacityKnown && (!st.marginKnown || row.MarginBytes < st.marginLowWater) {
+			st.marginKnown = true
+			st.marginLowWater = row.MarginBytes
+		}
+	}
+	m.reqMemoryMu.Unlock()
+}
+
+func (m *gatewayMetrics) observeRequestMemoryTokenLocked(backend, kind string, value int) {
+	if value < 0 {
+		return
+	}
+	k := requestMemoryTokenKey{backend: backend, kind: kind}
+	st := m.reqMemoryTokens[k]
+	if st == nil {
+		st = &requestMemoryTokenStats{}
+		m.reqMemoryTokens[k] = st
+	}
+	st.observations++
+	st.total = addPositiveIntToUint64(st.total, value)
+	if value > st.highWater {
+		st.highWater = value
+	}
+}
+
+func (c *latencyCounter) observe(seconds float64) {
+	c.count++
+	c.sum += seconds
+	for i, le := range gatewayLatencyBuckets {
+		if seconds <= le {
+			c.buckets[i]++
+		}
+	}
+}
