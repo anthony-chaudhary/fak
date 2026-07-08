@@ -8,10 +8,12 @@
 ## What this project is
 
 **fak** is an *agent kernel*: one Go binary that sits between an AI agent and the tools
-it calls, and adjudicates every tool call before it runs — deny by structure, repair
-malformed calls, quarantine poisoned results. It is both a **security gate** (a
-default-deny capability floor the model can't talk past) and a **performance gate** (do
-the shared setup work once, not every turn).
+it calls, and handles every tool call before it runs — reuse the shared setup, route each
+call to the right model, serve repeats locally, and shed old turns while the provider's
+cache survives. It is first a **performance gate** (do the shared setup work once, not
+every turn — cheaper, faster, longer-running sessions) and, on the very same checkpoint, a
+**security gate** (a default-deny capability floor the model can't talk past). Performance
+is the current focus; the security floor rides along for free on the same seam.
 
 ## Repo layout (where things live)
 
@@ -213,6 +215,20 @@ the *committed* tip (not the peer-dirty tree) with `fak ci-preflight`.
   catches a noun-led subject, a missing/typo'd trailer, or a stamp/lane mismatch up front,
   the only place you can fix them: on the shared trunk a peer can push your local commit
   before you amend, so the FIRST subject has to be right (exit 0 clean / 1 issues / 2 usage).
+- **Leave the shared tree buildable — gate not-yet-compiling WIP behind a build tag.**
+  `go build ./cmd/fak` must stay green on the shared trunk regardless of your uncommitted
+  work. A tracked **or untracked** `.go` file that references a symbol you have not committed
+  yet reds the whole package for every *other* session (they cannot rebuild `fak` to pick up
+  a new flag — e.g. `accounts --adopt`) and for CI, because `go build` compiles every
+  non-test `.go` file in the package, committed or not. If a cross-file feature needs
+  multi-file WIP that does not yet compile against committed symbols, fence each
+  not-yet-buildable file behind a build tag — first line `//go:build wip_<feature>`, a blank
+  line, then `package …` — so the default build (and every peer) stays green while the work
+  lives on disk; drop the tag once the defining symbol lands, and build the WIP meanwhile
+  with `go build -tags wip_<feature> ./cmd/fak`. The `internal/buildwitness` test enforces
+  this: it runs `go build ./cmd/fak` under default tags and fails with the exact undefined
+  symbol when it is red — the durable guard for a recurring class (#3217 #3127 #2251 #1325),
+  not another one-off instance patch.
 - **Every claim carries a tag.** Each `- [` line in [`fak/CLAIMS.md`](CLAIMS.md) must
   carry exactly one of `[SHIPPED]` / `[SIMULATED]` / `[STUB]` (lint-enforced by
   `make claims-lint`). Don't overclaim; the repo keeps an honesty ledger.
