@@ -58,6 +58,8 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchSkipped(stdout, stderr, argv[1:])
 	case "tier-status":
 		return runDispatchTierStatus(stdout, stderr, argv[1:])
+	case "rollout-status":
+		return runDispatchRolloutStatus(stdout, stderr, argv[1:])
 	case "tick":
 		return runDispatchTick(stdout, stderr, argv[1:])
 	case "wave":
@@ -90,7 +92,7 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		dispatchUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, tier-status, tick, wave, sweep, progress, status, audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, or timeout-ledger)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, tier-status, rollout-status, tick, wave, sweep, progress, status, audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, or timeout-ledger)\n", argv[0])
 		dispatchUsage(stderr)
 		return 2
 	}
@@ -256,6 +258,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch price [--workspace DIR] [--in FILE] [--json]
   fak dispatch route [--workspace DIR] [--json]
   fak dispatch tier-status [--in FILE] [--demo] [--json]
+  fak dispatch rollout-status [--in FILE] [--demo] [--json]
   fak dispatch skipped [--workspace DIR] [--channel C] [--repo-url URL] [--token T] [--dry-run]
   fak dispatch tick  [--workspace DIR] [--backend claude|opencode|codex] [--goal throughput|high-priority] [--live] [--json]
   fak dispatch wave  [--workspace DIR] [--count N] [--backend claude|opencode|codex] [--goal throughput|high-priority] [--live] [--json]
@@ -358,5 +361,14 @@ derived from its labels exactly as the dispatcher parses them, so a missing or c
 tag shows up as a conservative frontier route with the tag flaw named (tag_flags) rather than a
 silent choice. --demo folds an embedded five-issue fixture; --in reads a JSON array (or
 {"issues":[...]}), each row {"issue":N,"lane":"L","labels":[...],"accounts":[{"account":"a","model_tier":1,"available":true}]}.
+rollout-status is the model-tier SHADOW readout (#3047, C10): for each unit of work it shows the
+CURRENT live-selected model tier beside the tier the tier-aware route WOULD choose and the delta,
+folding every item through the pure shadow guard (internal/dispatchtick.FoldShadowReport) -- so it
+APPLIES NOTHING. The report carries an any_applied field that stays false precisely so a reader can
+SEE the dry-run launched no worker; that is the acceptance proof. The CANARY column is advisory: it
+flags the routine (low-risk T2 watchdog/meta) items a cheaper tier would serve -- candidate savings
+PENDING PARITY, never a claim they succeeded, and never a promise to route. --demo folds an embedded
+five-item fixture; --in reads a JSON array (or {"items":[...]}), each row
+{"id":"x","class":"routine","current_model_tier":1,"labels":[...],"accounts":[{"account":"a","model_tier":1,"available":true}]}.
 `)
 }
