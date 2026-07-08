@@ -123,6 +123,7 @@ var tier = map[string]int{
 	"guardcomplaint":       4,                // agent APPEAL channel (the subjective complement of guardroute): files a witnessed, deduping `fak complain` gh issue when the agent judges a guard DENY wrong; imports dogfoodissues(3)+guardrsi(1)+stdlib, off the hot path.
 	"propagationscore":     4,                // convention-propagation scorecard + fan-out: measures how far a proven scorecard convention (shared kernel/--compare/--markdown) has fanned across the family, files one deduped issue per laggard via dogfoodissues(3); imports dogfoodissues(3)+pkg/scorecard+stdlib, off the hot path.
 	"unwiredscore":         4,                // unwired-code scorecard + fan-out: detects code-complete internal packages imported by no .go file in the module (wired into no default path -- the invariant architest does NOT catch) and files one deduped wire-or-retire issue per orphan via dogfoodissues(3); imports dogfoodissues(3)+pkg/scorecard+go/parser+stdlib, off the hot path.
+	"mcpfootprint":         4,                // prices the always-sent MCP tool-schema floor: the fixed per-turn token tax every registered tool adds to every API call; imports agent(4)+gateway(4), off the hot path.
 	"conflationscore":      1,                // pure Go port of tools/conflation_scorecard.py (provenance-honesty stick); stdlib-only, off the hot path.
 	"heavinessscore":       1,                // operator-heaviness scorecard over the cmd/fak dispatch table + guard flag set + dos.toml reasons + llms.txt doc map; imports pkg/scorecard, off the hot path.
 	"choicetriage":         1,                // closed disposition vocabulary that decenters the human from a surfaced choice (TAKE_OBVIOUS / FRESH_CONTEXT / FILE_TICKET / HUMAN_RESIDUAL): the decision-side dual of waiting(1). Pure, stdlib-only, imports nothing internal, off the hot path.
@@ -149,6 +150,14 @@ var tier = map[string]int{
 	"windowgate":    1, // no-desktop-popup ratchet: scans tracked .ps1 task installers + window-suppressing .py for console-window flashes; stdlib-only, off the hot path.
 	"worktype":      1, // closed work-class taxonomy (ongoing optimization PROGRAM vs DISCRETE deliverable epic) the milestone roadmap + `fak program` report sort by; stdlib-only, imports nothing internal, off the hot path.
 	"programreport": 1, // ongoing-program report (kernel-opt + cache-opt frontier+trend; the sibling of milestonereport that measures never-'done' programs); imports worktype(1)+cachevalueledger(1)+hooks(1), off the hot path.
+	"benchauthority":   1, // typed in-binary source of truth for the PRIMARY benchmark numbers fak claims (the "what" half of the benchmark discipline); stdlib-only, imports nothing internal, off the hot path.
+	"closureaudit":     1, // pure stdlib-only port of the issue_closure_audit grader (#1406): binds commits to issue numbers and grades each issue's closure; imports nothing internal, off the hot path.
+	"ctxplans":         1, // CONTEXT-PLAN-REQUIRED advisory lint (R4, #2202, epic #2198): the code form of doctrine law L7 — every surface declares its context plan; stdlib-only, off the hot path.
+	"fleetverify":      1, // throwaway compile-witness isolating the operator.go fleet helpers' loopfleet/loopmgr API usage from the churning cmd/fak; imports loopfleet(1)+loopmgr(1), off the hot path.
+	"promptlint":       1, // durable freshness monitor for the dispatch worker-issue prompts (#3218): flags a rendered prompt whose `fak <verb>` / UPPER_SNAKE claims drift from the surface; stdlib-only, off the hot path.
+	"sensecheck":       1, // "does this actually make sense?" common-sense smell battery side-car; stdlib-only, imports nothing internal, off the hot path.
+	"spendrollup":      1, // cross-account `fak spend` rollup with a WITNESSED/OBSERVED provenance gate that fails any figure missing its valuation basis or provenance label; imports fleetaccounts(1), off the hot path.
+	"worktreewitness":  1, // runs a command inside a transient detached worktree pinned at origin/main so the verdict reflects the trunk tip, not the caller's dirty tree; stdlib-only, off the hot path.
 
 	"adjudicator": 2, "ctxmmu": 2, "engine": 2, "enginecache": 2, "grammar": 2, "kernel": 2,
 	"preflight": 2, "vdso": 2, "plancfi": 2, "steward": 2, "witness": 2,
