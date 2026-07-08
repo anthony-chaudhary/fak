@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // PhaseCommitScanDefault is the number of most-recent commits GitPhaseCommits
@@ -86,7 +87,9 @@ func gitTrailerCommits(root string, limit int) []trajctl.TrailerCommit {
 		args = append(args, "-C", root)
 	}
 	args = append(args, "log", "--format=%H%x00%B%x00", "-n", strconv.Itoa(limit), "HEAD")
-	out, err := exec.Command("git", args...).Output()
+	cmd := exec.Command("git", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return nil
 	}

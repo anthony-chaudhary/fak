@@ -31,6 +31,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/sessionaudit"
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // CheapScorers is the turn-cadence scorer set: the W3 witnessed-commit progress
@@ -75,7 +76,9 @@ func GitEvidenceResolver(root string) trajctl.EvidenceResolver {
 			args = append(args, "-C", root)
 		}
 		args = append(args, "cat-file", "-e", sha+"^{commit}")
-		if err := exec.Command("git", args...).Run(); err != nil {
+		cmd := exec.Command("git", args...)
+		windowgate.ConfigureBackgroundCommand(cmd)
+		if err := cmd.Run(); err != nil {
 			return trajctl.EvidenceDangling
 		}
 		return trajctl.EvidenceVerified
