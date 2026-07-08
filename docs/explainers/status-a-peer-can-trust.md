@@ -13,7 +13,7 @@ keywords:
   - agent status
   - dos_status
   - Agent2Agent
-date: 2026-07-07
+date: 2026-07-08
 ---
 
 # The Status a Peer Can Trust: Verified Progress for In-Flight Agents
@@ -173,15 +173,21 @@ the repo's oldest rule: **the model proposes, the kernel disposes** — extended
 - **The message bus is in-process today.** `a2achan`'s `InKernel` locale is real
   and shipped; the `Session` and `Window` locales share the identical code path
   keyed differently but lack durable cross-process backing. A crashed peer's
-  mailbox does not yet survive the process — the durable-delivery work
-  (outbox/ACK/redelivery) is tracked, not done
-  ([#939](https://github.com/anthony-chaudhary/fak/issues/939),
-  [#704](https://github.com/anthony-chaudhary/fak/issues/704)).
-- **Some peer-state signals are still missing.** A peer cannot yet cleanly detect
-  that another session is *mid-compaction* from the manifest
-  ([#25](https://github.com/anthony-chaudhary/fak/issues/25)), and the dashboard's
-  A2A awaiting list is not yet scoped per focused agent
-  ([#2365](https://github.com/anthony-chaudhary/fak/issues/2365)).
+  mailbox does not yet survive the process — the durable cross-process delivery
+  work is tracked, not done: the "outbox" feed that would carry an agent's
+  material work-changes to a tailing peer
+  ([#3172](https://github.com/anthony-chaudhary/fak/issues/3172)) and the
+  relay-connector back-channel that would move those messages across a gateway
+  seam ([#2884](https://github.com/anthony-chaudhary/fak/issues/2884)).
+- **Some peer-state signals are still missing.** A peer cannot yet read a durable,
+  per-session *compaction-health* witness to tell that another session is
+  mid-compaction rather than simply stalled
+  ([#3152](https://github.com/anthony-chaudhary/fak/issues/3152),
+  [#3159](https://github.com/anthony-chaudhary/fak/issues/3159)); and cleanly
+  *cancelling or draining* an in-flight peer is still simulated on the loop
+  (`internal/gateway/a2a.go`'s `tasks/cancel` flips state but its act-path is a
+  stub) rather than adjudicated
+  ([#2758](https://github.com/anthony-chaudhary/fak/issues/2758)).
 - **No adoption claim.** This page explains a mechanism that ships in the repo; it
   does not assert who uses it. Against SOTA the distinctive move is the *negative
   space* — the absent `claimed` field — not a novel transport.
