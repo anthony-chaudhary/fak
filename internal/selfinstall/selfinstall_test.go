@@ -276,6 +276,52 @@ func TestReapStaleAsidesNoopWhenDirMissing(t *testing.T) {
 	}
 }
 
+func TestMeasureAsidesCountsOnlyAsidesAndTagsDeadOwners(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "fak.exe")
+	const selfPID = 1000
+	alive := func(pid int) bool { return pid == 2000 } // only 2000 still live
+
+	// Sizes chosen so the byte tallies are unambiguous.
+	seed := map[string]int{
+		"fak.exe":              50, // live binary — not an aside
+		"fak.exe.old":          40, // plain aside — not the .old.<pid>.<i> shape
+		"fak.exe.old-20260703": 30, // manual backup — not counted
+		"fak.exe.old.3000.0":   10, // dead owner -> counted + reclaimable
+		"fak.exe.old.4000.0":   10, // dead owner -> counted + reclaimable
+		"fak.exe.old.2000.0":   10, // live owner -> counted, NOT reclaimable
+		"fak.exe.old.1000.0":   10, // our own pid -> counted, NOT reclaimable
+	}
+	for name, n := range seed {
+		if err := os.WriteFile(filepath.Join(dir, name), make([]byte, n), 0o644); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+
+	fp := MeasureAsides(target, selfPID, alive)
+
+	if fp.Count != 4 {
+		t.Fatalf("Count = %d, want 4 (the four .old.<pid>.<i> files)", fp.Count)
+	}
+	if fp.Bytes != 40 {
+		t.Fatalf("Bytes = %d, want 40 (4x10, only the asides)", fp.Bytes)
+	}
+	if fp.DeadCount != 2 {
+		t.Fatalf("DeadCount = %d, want 2 (pids 3000 and 4000)", fp.DeadCount)
+	}
+	if fp.DeadBytes != 20 {
+		t.Fatalf("DeadBytes = %d, want 20 (2x10 dead-owner asides)", fp.DeadBytes)
+	}
+}
+
+func TestMeasureAsidesEmptyWhenDirMissing(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "gone", "fak.exe")
+	fp := MeasureAsides(target, 1, func(int) bool { return false })
+	if fp.Count != 0 || fp.Bytes != 0 || fp.DeadCount != 0 {
+		t.Fatalf("footprint = %+v, want zero when install dir is unreadable", fp)
+	}
+}
+
 var errSwap = swapErr("swap-fail")
 
 type swapErr string

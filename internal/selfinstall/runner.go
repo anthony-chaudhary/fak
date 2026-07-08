@@ -165,3 +165,54 @@ func pathExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
+
+// AsideFootprint reports the swap-aside binaries currently sitting next to target. It is the
+// OBSERVABILITY half of the leak fix: the reason 211 asides (~9 GB) could pile up unnoticed is
+// that nothing ever looked at the install dir, so accumulation was invisible until someone ran
+// `ls`. Surfacing Count/Bytes/DeadCount in `self-update --check` turns a silent 9 GB leak into
+// a one-line signal a human or the fleet notices at 5 files, not 500.
+//
+// It counts only "<target-base>.old.<pid>.<i>" names (the exact shape ReapStaleAsides reaps),
+// so manual .bak-*/.old-<sha> backups and the live binary never inflate the number. DeadCount
+// is how many of them the NEXT self-update would reclaim (owning PID dead and not selfPID) —
+// the actionable subset. It reads only metadata (os.ReadDir + entry Size) and never deletes.
+type AsideFootprint struct {
+	Count     int   // total swap-aside files next to target
+	Bytes     int64 // their combined size
+	DeadCount int   // subset whose owning PID is dead (reclaimable on the next self-update)
+	DeadBytes int64 // combined size of the reclaimable subset
+}
+
+// MeasureAsides walks target's directory and tallies the swap-aside footprint. alive reports
+// whether a PID is still running (dead-owner asides are the reclaimable ones); selfPID is
+// excluded from the dead subset so an aside this very process made is never counted as
+// reclaimable. A missing/unreadable dir is a valid empty footprint, not an error.
+func MeasureAsides(target string, selfPID int, alive func(int) bool) AsideFootprint {
+	var fp AsideFootprint
+	dir := filepath.Dir(target)
+	dstBase := filepath.Base(target)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fp
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		pid, ok := pidFromAside(dstBase, e.Name())
+		if !ok {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		fp.Count++
+		fp.Bytes += info.Size()
+		if pid != selfPID && !alive(pid) {
+			fp.DeadCount++
+			fp.DeadBytes += info.Size()
+		}
+	}
+	return fp
+}

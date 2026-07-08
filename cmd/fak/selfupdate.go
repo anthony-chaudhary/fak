@@ -83,6 +83,10 @@ func cmdSelfUpdate(argv []string) {
 		subject, stampRev, dirtyMark(stamp.Dirty), head, verdict)
 
 	if *check {
+		// Observability: also report the swap-aside footprint next to the target binary, so a
+		// leak of "<binary>.old.<pid>.<i>" files (the 9 GB class this reaper exists to prevent)
+		// is a one-line signal here instead of an invisible pile only `ls` would reveal.
+		reportAsideFootprint(installTargetOr(*target))
 		return
 	}
 	// Decide whether to build. The asymmetry is deliberate:
@@ -154,6 +158,13 @@ func cmdSelfUpdate(argv []string) {
 	if reaped := selfinstall.ReapStaleAsides(installTarget, os.Getpid(), safecommit.ProcessAlive); len(reaped) > 0 {
 		fmt.Printf("self-update: reaped %d stale swap-aside binary file(s) leaked by prior swaps\n", len(reaped))
 	}
+	// After reaping, report any REMAINING footprint: asides pinned by still-live owners that we
+	// could not reclaim. A large surviving count is the early signal that swaps are outrunning
+	// exits (the leak's leading edge) — visible now instead of after it reaches gigabytes.
+	if fp := selfinstall.MeasureAsides(installTarget, os.Getpid(), safecommit.ProcessAlive); fp.Count >= 8 {
+		fmt.Printf("self-update: NOTE — %d swap-aside file(s) still next to the binary (%s); %d reclaimable once their owners exit\n",
+			fp.Count, humanBytes(fp.Bytes), fp.DeadCount)
+	}
 
 	// The build worktree must live OUTSIDE .git (git refuses `worktree add` to a path
 	// inside the git dir) and outside the live tree (so it never shows up as peer churn).
@@ -176,6 +187,48 @@ func cmdSelfUpdate(argv []string) {
 	if !res.Installed {
 		os.Exit(1)
 	}
+}
+
+// installTargetOr resolves the binary path --check should inspect: the explicit --target, or
+// this binary's own path. Mirrors the resolution in the main flow so --check reports the same
+// target a real self-update would swap (and thus the same install dir the reaper cleans).
+func installTargetOr(target string) string {
+	if t := strings.TrimSpace(target); t != "" {
+		return t
+	}
+	if exe, err := os.Executable(); err == nil {
+		return exe
+	}
+	return ""
+}
+
+// reportAsideFootprint prints a one-line summary of the swap-aside files sitting next to the
+// target binary, so `self-update --check` surfaces a leak while it is 5 files instead of 500.
+// A clean install dir prints nothing (no noise on the healthy path).
+func reportAsideFootprint(target string) {
+	if strings.TrimSpace(target) == "" {
+		return
+	}
+	fp := selfinstall.MeasureAsides(target, os.Getpid(), safecommit.ProcessAlive)
+	if fp.Count == 0 {
+		return
+	}
+	fmt.Printf("self-update: swap-aside footprint next to %s — %d file(s), %s (%d reclaimable, %s); the next self-update reaps the reclaimable ones\n",
+		filepath.Base(target), fp.Count, humanBytes(fp.Bytes), fp.DeadCount, humanBytes(fp.DeadBytes))
+}
+
+// humanBytes renders a byte count as a compact human string (KB/MB/GB) for the footprint line.
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
 // sameBinary reports whether path refers to this running executable (so --target pointing
