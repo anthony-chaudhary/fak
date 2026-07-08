@@ -5,11 +5,14 @@ description: "Integration index for fak — the agent kernel. Any agent or frame
 
 # Run your agent through fak
 
-You don't rewrite your agent to adopt `fak`. You point it at `fak serve` — a
-kernel-adjudicated gateway — and **every tool call your agent proposes passes through
-a default-deny capability floor before it runs**. Dangerous calls are denied by
-structure, malformed calls are repaired, and poisoned tool results are quarantined out
-of the model's context. Your agent, your model, your prompts — unchanged.
+You don't rewrite your agent to adopt `fak`. You point it at `fak serve` — one kernel in
+front of the agent you already run — and the same loop comes out **cheaper and
+longer-running**: the shared setup (system prompt, tools, KV cache) is computed once and
+reused, the provider's prompt-cache discount survives as the session grows, each call can
+route to the right model, and repeated reads are served locally. On that same seam, every
+tool call also passes through a default-deny capability floor before it runs — dangerous
+calls denied by structure, malformed calls repaired, poisoned results quarantined — so the
+loop stays controlled at no extra cost. Your agent, your model, your prompts — unchanged.
 
 ```text
   Your agent / client          fak serve              Upstream engine

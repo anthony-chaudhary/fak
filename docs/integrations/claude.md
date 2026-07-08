@@ -5,7 +5,7 @@ description: "Wire Claude Code or the Anthropic API to fak serve, a kernel-adjud
 
 # fak + Claude Code Integration Guide
 
-This guide explains how to use **fak** as a kernel-adjudicated gateway for Claude Code and the Anthropic API. Every tool call a Claude agent proposes is evaluated by the kernel before it executes — dangerous calls are dropped, malformed calls are repaired, and policy violations are refused.
+This guide explains how to put **fak** in front of the Claude Code you already run: one kernel that makes long sessions cheaper (the provider prompt-cache discount survives, old turns are shed, repeated reads can be served locally) and can run a local model in-kernel with no key and no network. On the same seam, every tool call a Claude agent proposes is also evaluated before it executes — dangerous calls dropped, malformed calls repaired, policy violations refused — so the loop stays controlled at no extra cost.
 
 ## What this integration does
 
@@ -30,7 +30,7 @@ This guide explains how to use **fak** as a kernel-adjudicated gateway for Claud
 - **fak → model:** Sends only the admitted (or repaired) calls to the model
 - **fak → Claude:** Returns results, with a `fak` extension describing each decision
 
-**Result:** Claude can work on your codebase, but the kernel blocks destructive commands, prevents self-modification, and contains untrusted tool results.
+**Result:** Claude works on your codebase through one kernel that makes the session cheaper and longer-running (prompt-cache passthrough, context shedding, an optional in-kernel local model) and, on the same seam, blocks destructive commands, prevents self-modification, and contains untrusted tool results.
 
 ---
 
