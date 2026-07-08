@@ -21,7 +21,7 @@ func TestRelayVsCompactionBench(t *testing.T) {
 	if r.Provenance.Kind != ProvenanceSimulated {
 		t.Fatalf("provenance = %q; want %q (hermetic model)", r.Provenance.Kind, ProvenanceSimulated)
 	}
-	if len(r.Sweep) != 7 {
+	if len(r.Sweep) != 7 { //boundarylint:ignore CHANGE_DETECTOR_TEST the sweep is a fixed 7-point design set {40,80,100,160,200,300,320}
 		t.Fatalf("sweep points = %d; want 7 (40,80,100,160,200,300,320)", len(r.Sweep))
 	}
 
