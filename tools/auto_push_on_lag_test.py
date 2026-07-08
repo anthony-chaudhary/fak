@@ -119,6 +119,26 @@ def test_run_live_push_failure_is_not_ok() -> None:
     assert res["ok"] is False  # exit code will be non-zero -> LastTaskResult surfaces it
 
 
+def test_run_live_push_failure_surfaces_real_reason() -> None:
+    # Regression: a failed push must record its REAL cause (push-rejected / push-timeout /
+    # push-oserror), NOT the stale decide reason ("push-lag-NNm"). Else a stalled push reads
+    # as a generic lag in auto-push.jsonl and the step that actually died — a rejected
+    # pre-push gate vs a timed-out tip-materialize vs a credential hang — stays hidden.
+    import json
+
+    def fake_push(r, fak):
+        return {"ok": False, "pushed": False, "returncode": 124, "reason": "push-timeout"}
+
+    root = Path(tempfile.mkdtemp())
+    with _Patch(git_pane=lambda r, **k: _pane(), push_main=fake_push,
+                resolve_fak=lambda r: ["fak"]):
+        res = apl.run(root, live=True, push_lag_mins=45, now=NOW)
+    assert res["verdict"] == "PUSH_FAILED"
+    assert res["reason"] == "push-timeout"  # not "push-lag-60m"
+    rec = json.loads((root / apl.LOG_REL).read_text(encoding="utf-8").splitlines()[-1])
+    assert rec["reason"] == "push-timeout"  # the breadcrumb carries the real cause
+
+
 def test_run_live_without_fak_skips_never_bypasses() -> None:
     root = Path(tempfile.mkdtemp())
     with _Patch(git_pane=lambda r, **k: _pane(), push_main=_boom,

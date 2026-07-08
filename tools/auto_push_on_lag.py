@@ -43,7 +43,13 @@ install_no_window_subprocess_defaults(subprocess)
 
 SCHEMA = "fak-auto-push-on-lag/1"
 LOG_REL = ".dispatch-runs/auto-push.jsonl"
-PUSH_TIMEOUT_SECONDS = 300
+# 600, not 300: the pre-push build gate (`fak hooks pre-push`) materializes the full
+# committed tip via `git archive HEAD | tar -x` (~130MB in this repo) BEFORE it builds,
+# and under shared-trunk I/O contention that materialize alone was observed to exceed
+# 300s — timing out an otherwise-clean fast-forward as a false PUSH_FAILED (push-timeout,
+# rc124). 600s clears the contended-materialize window while staying well under the
+# 15-min cron period, so a slow tick still never overlaps the next.
+PUSH_TIMEOUT_SECONDS = 600
 
 # Verdicts that mean "the backstop needs a human's eye" (lag persists). Everything
 # else is a healthy no-op or a completed push. Exit code is 0 iff ok.
@@ -173,6 +179,13 @@ def run(root: Path, *, live: bool, push_lag_mins: int,
             pr = push_main(root, fak)
             result["push_result"] = pr
             result["verdict"] = "PUSHED" if pr.get("pushed") else "PUSH_FAILED"
+            if not pr.get("pushed") and pr.get("reason"):
+                # Surface the REAL push-failure cause (push-rejected / push-timeout /
+                # push-oserror) as the reason, NOT the stale decide reason ("push-lag-NNm"):
+                # the JSONL breadcrumb below logs result["reason"], so without this a
+                # multi-hour stall reads as a generic lag and hides WHICH step died — a
+                # rejected pre-push gate vs a timed-out tip-materialize vs a credential hang.
+                result["reason"] = pr["reason"]
 
     result["ok"] = result["verdict"] not in _NOT_OK_VERDICTS
     _append_log(root, {
