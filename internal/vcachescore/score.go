@@ -20,6 +20,22 @@ const (
 	AnchorSourceMeasured     = "measured"
 	defaultConcentrationZipf = 1.74
 	defaultAnchorUniverse    = 1000
+
+	// ActiveSource* name the two provenances the headline can be drawn from. The
+	// headline defaults to the TRUE, OBSERVED cache value whenever a provider
+	// witness exists, and only a witness-free score falls back to the modeled
+	// star-savings projection -- labeled honestly as a FORECAST, never dressed as a
+	// measured result. This is the #1089 C_MODELED_NOT_OBSERVED fix: a score surface
+	// must not default its headline SOURCE to a modeled number. "even for api
+	// sessions": an API-billed run relays real cache_read counters, so its headline
+	// is the observed rebate the moment telemetry lands, not the planned projection.
+	//
+	// ActiveSourceObserved is the measured headline (provider cache_read telemetry).
+	ActiveSourceObserved = "telemetry"
+	// ActiveSourceForecast is the witness-free fallback: the modeled star-savings
+	// projection (the FORECAST plane), named so the default headline can never
+	// masquerade as an observed number.
+	ActiveSourceForecast = "forecast"
 )
 
 // Input is the complete deterministic input to the vCache scorecard.
@@ -292,7 +308,10 @@ func Score(in Input) Report {
 		FalseColdRate: in.Prediction.FalseColdRate(),
 	}
 
-	activeSource := "planned"
+	// Default the headline to the modeled FORECAST only until a provider witness
+	// arrives; the observed telemetry below upgrades it to the true cache value the
+	// instant real cache_read counters are present (#1089 C_MODELED_NOT_OBSERVED).
+	activeSource := ActiveSourceForecast
 	activeProven := planned.Status == vcachegov.ProofProven
 	activeMultiplier := mathx.Ratio(planned.BaselineTokenEquiv, planned.VCacheTokenEquiv)
 	var observed *vcachegov.TelemetrySavingsProof
@@ -304,7 +323,7 @@ func Score(in Input) Report {
 			Write1hMult: in.TelemetryWrite1h,
 		})
 		observed = &p
-		activeSource = "telemetry"
+		activeSource = ActiveSourceObserved
 		activeProven = p.Status == vcachegov.ProofProven
 		activeMultiplier = mathx.Ratio(p.BaselineTokenEquiv, p.ActualTokenEquiv)
 	}
@@ -817,7 +836,7 @@ func actionsAndRisks(rep Report, maxFalseWarm float64) ([]string, []string) {
 	if rep.TwoXBetter {
 		actions = append(actions, "ship the star-anchor path behind telemetry; keep uncached-first budgeting and prove realized savings per run")
 	}
-	if rep.ActiveSource == "planned" {
+	if rep.ActiveSource == ActiveSourceForecast {
 		actions = append(actions, "collect provider telemetry with fak vcache prove-telemetry, then re-score on observed cache_read counters")
 	}
 	if !rep.Planes.KernelWitnessed.Available {
