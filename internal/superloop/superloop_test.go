@@ -651,6 +651,42 @@ func TestSubwalkStatusHonest(t *testing.T) {
 	}
 }
 
+// TestSubwalkStatus_IssueShortfallOutranksTrivialDebt pins the shortfall fold (#3151):
+// a descended sub-walk unsatisfied ONLY by an unmet ~200-issue headline (zero member
+// debt) must out-rank a sibling carrying trivial member debt at the root fold. Before
+// the fold it contributed a single floored unit and sank below any debt-2 sibling; now
+// it carries the shortfall magnitude, so the night's biggest gap sorts worst-first.
+func TestSubwalkStatus_IssueShortfallOutranksTrivialDebt(t *testing.T) {
+	root, ok := Lookup("tend")
+	if !ok {
+		t.Fatal("tend not registered")
+	}
+	// The descended run-the-night sub-walk: unsatisfied by a 200-issue headline miss with
+	// zero member debt. Its folded debt must carry the shortfall, not a floored 1.
+	sub := SubwalkStatus(
+		Member{Kind: KindSuperloop, Ref: "run-the-night"},
+		WalkReport{Satisfied: false, IssueShortfall: 200, TotalDebt: 0, Members: 3,
+			Verdict: "ACTION", Finding: "superloop_issue_shortfall"},
+	)
+	if sub.Debt < 200 {
+		t.Fatalf("a descended shortfall of 200 must fold into the member debt, got %d", sub.Debt)
+	}
+	// A sibling carrying only trivial member debt (kind is immaterial to a same-tier
+	// debt ranking; a measured leaf with debt 2 stands in for any trivial-debt member).
+	sibling := MemberStatus{Member: Member{Kind: KindScorecard, Ref: "slop"}, Measured: true, Debt: 2}
+
+	// Root-fold both — the sibling is passed FIRST so declared/insertion order cannot be
+	// what puts the sub-walk ahead; only its folded debt can.
+	rep := Walk(root, []MemberStatus{sibling, sub})
+	if len(rep.Worklist) < 2 {
+		t.Fatalf("both members carry work; worklist should hold 2, got %d", len(rep.Worklist))
+	}
+	if rep.Worklist[0].Member.Ref != "run-the-night" {
+		t.Errorf("the headline miss (shortfall 200) must sort ahead of trivial debt 2; worklist head = %q (debt %d)",
+			rep.Worklist[0].Member.Ref, rep.Worklist[0].Debt)
+	}
+}
+
 // TestSuperloopMembersResolveAcyclic is the recursion no-drift witness: every
 // KindSuperloop member ref must resolve in the registry (the shell reds an unknown
 // ref as UNMEASURED, so drift would permanently red its parent), and the

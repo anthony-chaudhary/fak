@@ -1,6 +1,9 @@
 package superloop
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // walkOf is a tiny helper: walk an intent over hand-built member statuses so a drive
 // test controls exactly which member is worst-first without touching a live surface.
@@ -54,6 +57,39 @@ func TestDriveSatisfiedEntersNothing(t *testing.T) {
 	dec := Drive(rep)
 	if dec.Enter {
 		t.Fatalf("a satisfied intent enters nothing, got member %q", dec.Member.Ref)
+	}
+}
+
+// TestDriveEmptyWorklistUnsatisfiedNotClean pins the drive honesty contract (#3147): an
+// empty MEMBER worklist that is UNSATISFIED by an unmet headline (issue shortfall) must
+// never read as clean. Every member is measured and at floor, so there is no member to
+// enter — but the declared ~200-issue headline is unmet. Drive enters nothing (Enter is
+// false), yet its Reason carries the shortfall magnitude, does NOT claim "reads clean",
+// and the structural Satisfied/IssueShortfall fields let a consumer gate on the miss.
+func TestDriveEmptyWorklistUnsatisfiedNotClean(t *testing.T) {
+	// Drive is a pure fold over WalkReport, so build the report directly: an empty
+	// worklist (no member is worst-first) coexisting with a 200-issue shortfall.
+	rep := WalkReport{
+		Name:           "run-the-night",
+		IssueTarget:    200,
+		IssueShortfall: 200,
+		Satisfied:      false,
+	}
+	dec := Drive(rep)
+	if dec.Enter {
+		t.Fatalf("no member is worst-first on an empty worklist; the drive must enter nothing, got member %q", dec.Member.Ref)
+	}
+	if dec.Satisfied {
+		t.Error("an unmet headline leaves the drive UNSATISFIED; Satisfied must be false")
+	}
+	if dec.IssueShortfall != 200 {
+		t.Errorf("the drive must carry the structural shortfall; IssueShortfall = %d, want 200", dec.IssueShortfall)
+	}
+	if strings.Contains(dec.Reason, "reads clean") {
+		t.Errorf("an unsatisfied drive must not claim clean; reason = %q", dec.Reason)
+	}
+	if !strings.Contains(dec.Reason, "200") {
+		t.Errorf("the drive reason must carry the shortfall magnitude 200; reason = %q", dec.Reason)
 	}
 }
 

@@ -1007,13 +1007,21 @@ func divideBudget(b GenerationBudget, n int) ([]BudgetRow, Allocation) {
 // SubwalkStatus folds a completed sub-walk into the member status the parent walk
 // weighs — the DESCEND move made real for a sub-super-loop member. The mapping is
 // conservative-honest: the member is Measured (the walk actually read it, so it is
-// no longer a container), it carries the sub-walk's aggregate debt, and an
-// UNSATISFIED sub-intent can never read as clean — when its own measured debt is
-// zero (unmeasured or dark members inside), it still carries one unit of debt at
-// the parent's altitude. Dark propagates when any member loop below has gone dark,
-// so the parent's SELECT ranks a dark subtree with leaf-dark urgency.
+// no longer a container), it carries the sub-walk's aggregate debt PLUS any unmet
+// headline shortfall, and an UNSATISFIED sub-intent can never read as clean — when its
+// own measured debt is zero (unmeasured or dark members inside), it still carries one
+// unit of debt at the parent's altitude. Dark propagates when any member loop below has
+// gone dark, so the parent's SELECT ranks a dark subtree with leaf-dark urgency.
+//
+// Folding IssueShortfall into the descended debt (#3151) is what lets a large headline
+// miss out-rank trivial member debt at the root: a run-the-night that missed its
+// ~200-issue headline with zero member debt contributes debt 200 (not a single floored
+// unit), so the root worst-first ranks the night's biggest gap ahead of a sibling
+// carrying debt 2. The shortfall is 0 whenever the sub-walk declares no target or met
+// it, so this is a no-op for shortfall-free subs and the 1-unit floor still guards the
+// zero-shortfall unsatisfied case (dark/unmeasured members with no headline).
 func SubwalkStatus(m Member, rep WalkReport) MemberStatus {
-	debt := rep.TotalDebt
+	debt := rep.TotalDebt + rep.IssueShortfall
 	if !rep.Satisfied && debt <= 0 {
 		debt = 1
 	}
@@ -1022,8 +1030,8 @@ func SubwalkStatus(m Member, rep WalkReport) MemberStatus {
 		Measured: true,
 		Debt:     debt,
 		Dark:     rep.Dark > 0,
-		Detail: fmt.Sprintf("descended: %s (%s) — debt %d, unmeasured %d, dark %d across %d member(s)",
-			rep.Verdict, rep.Finding, rep.TotalDebt, rep.Unmeasured, rep.Dark, rep.Members),
+		Detail: fmt.Sprintf("descended: %s (%s) — debt %d, shortfall %d, unmeasured %d, dark %d across %d member(s)",
+			rep.Verdict, rep.Finding, rep.TotalDebt, rep.IssueShortfall, rep.Unmeasured, rep.Dark, rep.Members),
 	}
 }
 

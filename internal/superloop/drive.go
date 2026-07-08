@@ -33,7 +33,16 @@ type DriveDecision struct {
 	Debt      int    `json:"debt,omitempty"`
 	Dark      bool   `json:"dark,omitempty"`
 	Container bool   `json:"container,omitempty"`
-	Reason    string `json:"reason"`
+	// Satisfied echoes the walk's satisfaction at drive time. A drive that enters
+	// nothing (Enter=false) reads clean ONLY when Satisfied is true; an unsatisfied
+	// empty-worklist drive is an unmet gate — a declared headline the members did not
+	// carry — not a clean read (#3147). Consumers gate their exit on THIS, not on Enter.
+	Satisfied bool `json:"satisfied"`
+	// IssueShortfall carries the walk's unmet headline issue count (0 = none). It is the
+	// magnitude behind an unsatisfied empty-worklist drive: there is no member to enter,
+	// yet the declared ~headline is not met — the number the drive must not hide.
+	IssueShortfall int    `json:"issue_shortfall,omitempty"`
+	Reason         string `json:"reason"`
 }
 
 // Drive reduces a completed walk's worst-first worklist to the SINGLE member to enter
@@ -44,23 +53,42 @@ type DriveDecision struct {
 // and runs the returned member.
 func Drive(rep WalkReport) DriveDecision {
 	if len(rep.Worklist) == 0 {
+		// An empty MEMBER worklist means no member is worst-first to enter — but that is
+		// only a CLEAN read when the walk is satisfied. A declared headline gate (an
+		// issue shortfall) can leave the intent UNSATISFIED with zero member debt: every
+		// utilization pool used, every member measured and live, yet the ~200-issue
+		// headline unmet. A drive that entered nothing must never assert "reads clean"
+		// over that gate; it reports the shortfall and stays unsatisfied (#3147).
+		if !rep.Satisfied {
+			return DriveDecision{
+				Intent:         rep.Name,
+				Enter:          false,
+				Satisfied:      false,
+				IssueShortfall: rep.IssueShortfall,
+				Reason: fmt.Sprintf("nothing to enter member-first, but %q is UNSATISFIED: issue shortfall %d against headline %d — the declared gate is unmet, not clean",
+					rep.Name, rep.IssueShortfall, rep.IssueTarget),
+			}
+		}
 		return DriveDecision{
-			Intent: rep.Name,
-			Enter:  false,
+			Intent:    rep.Name,
+			Enter:     false,
+			Satisfied: true,
 			Reason: fmt.Sprintf("nothing to enter — %q reads clean (debt %d at-or-below floor %d, every member measured and live)",
 				rep.Name, rep.TotalDebt, rep.Floor),
 		}
 	}
 	it := rep.Worklist[0]
 	return DriveDecision{
-		Intent:    rep.Name,
-		Enter:     true,
-		Member:    it.Member,
-		Rank:      it.Rank,
-		Action:    it.Action,
-		Debt:      it.Debt,
-		Dark:      it.Dark,
-		Container: it.Container,
-		Reason:    fmt.Sprintf("worst-first: enter %s %s", it.Member.Kind, it.Member.Ref),
+		Intent:         rep.Name,
+		Enter:          true,
+		Satisfied:      rep.Satisfied,
+		IssueShortfall: rep.IssueShortfall,
+		Member:         it.Member,
+		Rank:           it.Rank,
+		Action:         it.Action,
+		Debt:           it.Debt,
+		Dark:           it.Dark,
+		Container:      it.Container,
+		Reason:         fmt.Sprintf("worst-first: enter %s %s", it.Member.Kind, it.Member.Ref),
 	}
 }
