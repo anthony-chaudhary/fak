@@ -302,19 +302,18 @@ func (m MechanismSavings) ProviderTokenEquiv() float64 {
 
 // FakTokenEquiv is the WITNESSED fak-authored token-equivalent slice: prefix reuse valued at
 // its full local marginal (fak realized those tokens itself), plus compaction shed valued at
-// the HONEST cache-read marginal on a warm fire. A warm shed token
-// (FakCompactionCacheReadTokens>0) was already a provider cache_read, so dropping it saves the
-// 0.1x read marginal — not the 1.0x of fresh input; booking it at 1.0x over-credited fak's
-// compaction ~10x on warm traffic (#2794/#2798). Only an observed-cold session keeps 1.0x.
-// This is the same marginal (CacheReadMultiplier = cacheprice.ReadMultiplier) the fire gate
-// and the Track-2 report price a shed token at. VDSO is deliberately excluded because its
-// current witness is avoided calls, not prompt-token equivalents.
+// its honest PROPORTIONAL warm/cold blend. The warm portion of the shed —
+// min(shed, FakCompactionCacheReadTokens), tokens the provider evidenced as cache_reads — is
+// worth only the 0.1x read marginal (dropping an already-cached token saves the read cost, not
+// fresh input); the remainder is worth full input. Booking all shed at 1.0x over-credited fak's
+// compaction ~10x on warm traffic, and the aggregate-warm binary fix that followed then
+// UNDER-credited a cold-dominant session ~10x the instant one warm cache_read appeared — the
+// blend (cacheprice.ShedTokenEquiv, the same source the Track-2 report prices on) removes both
+// cliffs (#2794/#2798). VDSO is deliberately excluded because its current witness is avoided
+// calls, not prompt-token equivalents.
 func (m MechanismSavings) FakTokenEquiv() float64 {
-	shedMult := 1.0
-	if m.FakCompactionCacheReadTokens > 0 {
-		shedMult = CacheReadMultiplier
-	}
-	return float64(m.FakCompactionShedTokens)*shedMult + float64(m.FakKVPrefixReusedTokens)
+	return cacheprice.ShedTokenEquiv(m.FakCompactionShedTokens, m.FakCompactionCacheReadTokens) +
+		float64(m.FakKVPrefixReusedTokens)
 }
 
 // TotalTokenEquiv is the sum of the token-equivalent owner slices.

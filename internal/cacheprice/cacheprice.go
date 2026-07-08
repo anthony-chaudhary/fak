@@ -37,3 +37,34 @@ const (
 	// Write1hMultiplier is the price of a 1-hour-TTL cache WRITE relative to base input (2.0×).
 	Write1hMultiplier = 2.0
 )
+
+// ShedTokenEquiv is the honest token-equivalent value of `shed` compaction-shed tokens,
+// given `warmWitness` — the OBSERVED provider cache_read that witnesses how many of those
+// tokens the provider was already serving cheaply from cache when they were dropped. It is
+// the ONE source both the live gateway split (MechanismSavings.FakTokenEquiv) and the
+// durable Track-2 report price a shed token at, so the two surfaces value fak's compaction
+// identically by CONSTRUCTION rather than by two copies of the same rule kept in sync by
+// comment (#2794/#2798).
+//
+// The value is a PROPORTIONAL blend, not a binary flip. The warm portion — min(shed,
+// warmWitness) tokens the provider evidenced as cache_reads — is worth only ReadMultiplier
+// (0.1×): dropping an already-cached token saves the read marginal, not fresh input.
+// The remainder — shed BEYOND any witnessed warm prefix — is worth full input (1.0×),
+// because with no cache_read witness those tokens would have been billed fresh.
+//
+// This replaces the aggregate-warm binary rule that discounted an ENTIRE session's shed to
+// 0.1× the instant a single warm cache_read appeared (and, before that, booked every shed
+// token at 1.0×). Both were the same defect — a step function on a continuous quantity —
+// and produced the over-count (all-1.0×) then the under-count (a warm sliver collapsing a
+// cold-dominant session ~10×). The blend has no cliff: it collapses to the pure cache-read
+// marginal when warmWitness ≥ shed (fully warm) and to full input when warmWitness == 0
+// (fully cold), and interpolates monotonically between, so the fak cache-value share stops
+// swinging with the warm/cold mix of a session's fires.
+func ShedTokenEquiv(shed, warmWitness uint64) float64 {
+	warm := shed
+	if warmWitness < warm {
+		warm = warmWitness
+	}
+	cold := shed - warm
+	return float64(warm)*ReadMultiplier + float64(cold)
+}

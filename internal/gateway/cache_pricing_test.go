@@ -256,6 +256,49 @@ func TestFakTokenEquivWarmShedPricedAtMarginal(t *testing.T) {
 	}
 }
 
+// TestFakTokenEquivBlendsWarmCold pins the durable fix for the SECOND defect the #2794 binary
+// warm rule introduced: a cold-dominant session with a warm SLIVER (one warm cache_read among
+// mostly-cold fires) had its ENTIRE shed discounted 10x, under-crediting fak as badly as the
+// original all-1.0x rule over-credited it. The proportional blend (cacheprice.ShedTokenEquiv)
+// values only the witnessed-warm portion — min(shed, cache_read) — at 0.1x and the cold
+// remainder at 1.0x, so the valuation is continuous in cache_read with no cliff at 1.
+func TestFakTokenEquivBlendsWarmCold(t *testing.T) {
+	// Cold-dominant: 30_000 shed, a single warm cache_read token witnessed. Only that 1 token
+	// prices at 0.1x; the other 29_999 keep full input. The binary rule booked all 30_000 at
+	// 0.1x (=3_000), a ~10x under-credit this asserts against.
+	sliver := AdjudicationSummary{
+		CompactionShedTokens:      30_000,
+		CompactionCacheReadTokens: 1,
+	}.MechanismSavings()
+	if want := 1*CacheReadMultiplier + 29_999.0; !approx(sliver.FakTokenEquiv(), want) {
+		t.Fatalf("cold-sliver fak token-equiv = %v, want warm1*0.1 + cold29999 = %v", sliver.FakTokenEquiv(), want)
+	}
+	if sliver.FakTokenEquiv() < 29_000 {
+		t.Fatalf("cold-sliver value %v collapsed toward the binary 0.1x floor (~3000) — the undercount is back", sliver.FakTokenEquiv())
+	}
+
+	// Blended midpoint: half the shed witnessed warm. warm 400*0.1 + cold 600*1.0 = 640.
+	mid := AdjudicationSummary{
+		CompactionShedTokens:      1000,
+		CompactionCacheReadTokens: 400,
+		KVPrefixReusedTokens:      100,
+	}.MechanismSavings()
+	if want := 400*CacheReadMultiplier + 600.0 + 100.0; !approx(mid.FakTokenEquiv(), want) {
+		t.Fatalf("blended fak token-equiv = %v, want warm400*0.1 + cold600 + kv100 = %v", mid.FakTokenEquiv(), want)
+	}
+
+	// Monotone: as more of the shed is witnessed warm, fak's value only ever falls — never a
+	// step. This is the property the binary cliff violated.
+	var prev float64 = 1e18
+	for _, cr := range []uint64{0, 250, 500, 750, 1000, 5000} {
+		v := AdjudicationSummary{CompactionShedTokens: 1000, CompactionCacheReadTokens: cr}.MechanismSavings().FakTokenEquiv()
+		if v > prev {
+			t.Fatalf("FakTokenEquiv rose from %v to %v as cache_read grew to %d — must be monotone non-increasing", prev, v, cr)
+		}
+		prev = v
+	}
+}
+
 // TestFakShareCollapsesUnderWarmShedDiscount is the #2794 headline acceptance: on warm
 // traffic, booking compaction shed at full input (1.0x) over-credits fak's SHARE of the
 // period's cache value — the adversarial audit found ~7.7x-10x overstatement. Pricing the
@@ -269,9 +312,13 @@ func TestFakShareCollapsesUnderWarmShedDiscount(t *testing.T) {
 		shed       = 30_000  // compaction shed on WARM fires
 	)
 	warm := AdjudicationSummary{
-		CachedPromptTokens:        cachedRead,
-		CompactionShedTokens:      shed,
-		CompactionCacheReadTokens: 1, // >0 => warm: the shed tokens were already provider cache_reads
+		CachedPromptTokens:   cachedRead,
+		CompactionShedTokens: shed,
+		// Fully warm: the fires served a prefix at least as large as the shed from cache, so the
+		// whole shed was already provider cache_reads and prices at the 0.1x read marginal. (A
+		// bare cache_read=1 would NOT witness that — it would be a cold-dominant fire, which the
+		// proportional blend correctly values near full input; see TestFakTokenEquivBlendsWarmCold.)
+		CompactionCacheReadTokens: shed,
 	}.MechanismSavings()
 
 	// Corrected: warm shed priced at the 0.1x cache-read marginal.

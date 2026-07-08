@@ -407,15 +407,16 @@ func TestShedValueAgreesWithFireGate(t *testing.T) {
 		Provider:                  "anthropic",
 		Context:                   "claude",
 		CompactionShedTokens:      shed,
-		CompactionCacheReadTokens: 1, // any positive read => warm
+		CompactionCacheReadTokens: shed * 5, // fully warm: the fire served the whole shed prefix from cache
 		CompactionFired:           1,
 		Pricing:                   SavingsPricing{InputPerMTokUSD: 5},
 	}, twoTrackNow)
 	if len(rows) != 1 {
 		t.Fatalf("want one compaction row, got %d", len(rows))
 	}
-	// The fire gate values the shed token at shed*marginal per turn; the report's pricing path
-	// must book the same shed*cacheprice.ReadMultiplier token-equivalent, not shed*1.0x.
+	// The fire gate values the shed token at shed*marginal per turn; on a fully-warm fire the
+	// report's pricing path must book the same shed*cacheprice.ReadMultiplier token-equivalent,
+	// not shed*1.0x.
 	wantTokenEquiv := float64(shed) * cacheprice.ReadMultiplier
 	if !approxTrack2(rows[0].SavedTokenEquiv, wantTokenEquiv) {
 		t.Fatalf("reported shed value = %.1f, fire-gate value = %.1f — they must agree (#2798)",
@@ -438,7 +439,8 @@ func TestFakAuthoredTokenEquivRollupsAgree(t *testing.T) {
 		want            float64
 	}{
 		{"priced row uses its net token-equiv", 250, 3000, 1500, 250},
-		{"legacy warm re-priced at 0.1x marginal", 0, 3000, 1500, 300},
+		{"legacy fully-warm re-priced at 0.1x marginal", 0, 3000, 5000, 300},
+		{"legacy blended: warm min at 0.1x + cold remainder at 1.0x", 0, 3000, 1200, 1200*0.1 + 1800},
 		{"legacy cold keeps full input 1.0x", 0, 3000, 0, 3000},
 		{"nothing shed credits nothing", 0, 0, 0, 0},
 	}
@@ -474,17 +476,24 @@ func TestFakAuthoredTokenEquivRollupsAgree(t *testing.T) {
 }
 
 // TestInferValuationBasisDefersToShedValuation locks InferValuationBasis to the SAME
-// warm/cold decision compactionShedValuation makes, so the basis a legacy row infers can
+// warm/cold/blended decision shedValuationBasis makes, so the basis a legacy row infers can
 // never drift from the basis its shed was priced at (#2798). Re-introducing a second inline
 // CompactionCacheReadTokens>0 check in InferValuationBasis is exactly the drift this guards.
+// The cases span all three bands: cold (cache_read 0), blended (0 < cache_read < shed), and
+// fully warm (cache_read >= shed).
 func TestInferValuationBasisDefersToShedValuation(t *testing.T) {
+	const shed = 3000
 	for _, cacheRead := range []uint64{0, 1, 5000} {
-		_, want := compactionShedValuation(cacheRead)
-		row := SavingsRow{Mechanism: "compaction_shed", CompactionCacheReadTokens: cacheRead}
+		want := shedValuationBasis(shed, cacheRead)
+		row := SavingsRow{Mechanism: "compaction_shed", CompactionShedTokens: shed, CompactionCacheReadTokens: cacheRead}
 		if got := row.InferValuationBasis(); got != want {
-			t.Fatalf("InferValuationBasis(cache_read=%d) = %q, compactionShedValuation basis = %q — must agree",
-				cacheRead, got, want)
+			t.Fatalf("InferValuationBasis(shed=%d, cache_read=%d) = %q, shedValuationBasis = %q — must agree",
+				shed, cacheRead, got, want)
 		}
+	}
+	// The blended band is reachable and distinct (the binary rule could not express it).
+	if got := shedValuationBasis(shed, 1); got != ValuationBasisBlendedMarginal {
+		t.Fatalf("shedValuationBasis(shed=%d, cache_read=1) = %q, want %s", shed, got, ValuationBasisBlendedMarginal)
 	}
 	// An explicit basis short-circuits inference.
 	explicit := SavingsRow{Mechanism: "compaction_shed", ValuationBasis: ValuationBasisFullInput, CompactionCacheReadTokens: 9000}
