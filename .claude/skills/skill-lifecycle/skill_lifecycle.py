@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -66,6 +67,17 @@ import sys
 import tarfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+# CREATE_NO_WINDOW keeps a synchronously-spawned console child (the git probes
+# below) from flashing a visible window when this script runs from background
+# automation on Windows; 0 on POSIX. Mirrors dispatch_worker.no_window_creationflags
+# so the popup gate (internal/windowgate) sees the opt-in without a cross-dir import.
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def no_window_creationflags() -> int:
+    """``creationflags`` that suppress a console-window popup on Windows; 0 on POSIX."""
+    return _CREATE_NO_WINDOW if os.name == "nt" else 0
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -189,12 +201,14 @@ def git_origin(store: Store, name: str) -> str:
         probe = subprocess.run(
             ["git", "-C", str(store.root), "rev-parse", "--is-inside-work-tree"],
             capture_output=True, text=True, timeout=30,
+            creationflags=no_window_creationflags(),
         )
         if probe.returncode != 0 or probe.stdout.strip() != "true":
             return "bundled"
         tracked = subprocess.run(
             ["git", "-C", str(store.root), "ls-files", "--error-unmatch", str(skill_md)],
             capture_output=True, text=True, timeout=30,
+            creationflags=no_window_creationflags(),
         )
         return "bundled" if tracked.returncode == 0 else "agent"
     except (OSError, subprocess.SubprocessError):
