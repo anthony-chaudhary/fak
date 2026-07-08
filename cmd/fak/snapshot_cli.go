@@ -8,8 +8,15 @@ package main
 //	fak snapshot kinds                       # the loops ladder this build can dump
 //	fak snapshot demo  [--dir D] [--out F]   # the offline witness (no key, no model, no GPU)
 //	fak snapshot info  --file F              # load + integrity-verify a .snap envelope or a session image
+//	fak snapshot query --file F --query Q    # run the O(1) recall working-set query against a REAL image
 //	fak snapshot dump-fleet    --addr URL --out F   # offload a LIVE fleet's drive state from a gateway
 //	fak snapshot restore-fleet --addr URL --file F  # re-establish that fleet on another gateway
+//
+// `snapshot query` is the first-class surface for the O(1) session-query path (#1529):
+// it loads a REAL, integrity-verified session image (a bundle dir or a .faksession) and
+// answers a content query against its recall working set — no demo binary in the loop.
+// Quarantined/sealed pages are never candidates, so the working set is cold-path correct,
+// and the evidence it reports is WITNESSED kernel/context recall, never a provider rebate.
 //
 // The demo proves the load-bearing properties end to end: a SESSION image dumped on
 // "laptop/model-A", packed to one .faksession, restored on a fresh dir under "model-B"
@@ -54,12 +61,14 @@ func cmdSnapshot(argv []string) {
 		snapshotKinds(argv[1:])
 	case "info":
 		snapshotInfo(argv[1:])
+	case "query":
+		snapshotQuery(argv[1:])
 	case "dump-fleet":
 		snapshotDumpFleet(argv[1:])
 	case "restore-fleet":
 		snapshotRestoreFleet(argv[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "fak snapshot: unknown subcommand %q (want demo|kinds|info|dump-fleet|restore-fleet)\n", argv[0])
+		fmt.Fprintf(os.Stderr, "fak snapshot: unknown subcommand %q (want demo|kinds|info|query|dump-fleet|restore-fleet)\n", argv[0])
 		os.Exit(2)
 	}
 }
@@ -138,6 +147,110 @@ func printSessionImageInfo(img *sessionimage.Image) {
 		"drive": map[string]any{"run": img.Drive.Run.String(), "budget": img.Drive.Budget, "rev": img.Drive.Rev},
 		"parts": parts, "migrations": img.Meta.Migrations, "integrity": "verified",
 	})))
+}
+
+// openSessionImage loads + integrity-verifies a REAL session image the same way
+// `snapshot info` does: a .faksession archive is unpacked to a temp dir and loaded via
+// LoadArchive, a bundle directory is loaded via LoadDir. Anything else is refused (a
+// single .snap envelope is not a session image and carries no queryable core image).
+func openSessionImage(path string) (*sessionimage.Image, error) {
+	if strings.HasSuffix(path, ".faksession") {
+		tmp, err := os.MkdirTemp("", "fak-snap-query-*")
+		if err != nil {
+			return nil, err
+		}
+		return sessionimage.LoadArchive(path, tmp)
+	}
+	if fi, err := os.Stat(path); err == nil && fi.IsDir() {
+		return sessionimage.LoadDir(path)
+	}
+	return nil, fmt.Errorf("fak snapshot query: %s is not a session image (want a bundle directory or a .faksession archive)", path)
+}
+
+// sessionQueryHit is one benign slice of the recall working set — the safe metadata only
+// (step/role/descriptor/digest/length), never the raw bytes.
+type sessionQueryHit struct {
+	Step       int    `json:"step"`
+	Role       string `json:"role"`
+	Descriptor string `json:"descriptor"`
+	Digest     string `json:"digest"`
+	Bytes      int    `json:"bytes"`
+}
+
+// querySessionImage runs the O(1) recall working-set query against a loaded real session
+// image and returns the top-k benign slices. It re-arms the recall trust gate through
+// img.Recall(), so a quarantined/sealed page is NEVER a candidate — the working set is
+// cold-path correct (a poisoned page can never enter it) and a forecast miss is a
+// recoverable demand-page fault, not a lost fact. hasContent is false for a drive-only
+// image (a freshly minted session with no recall core image). The evidence is WITNESSED
+// kernel/context recall, never a provider rebate.
+func querySessionImage(img *sessionimage.Image, query string, k int) (hits []sessionQueryHit, stats recall.Stats, hasContent bool, err error) {
+	sess, err := img.Recall()
+	if err != nil {
+		return nil, recall.Stats{}, false, err
+	}
+	if sess == nil {
+		return nil, recall.Stats{}, false, nil
+	}
+	set := sess.Recall(context.Background(), query, k)
+	hits = make([]sessionQueryHit, 0, len(set))
+	for _, sl := range set {
+		hits = append(hits, sessionQueryHit{
+			Step: sl.Step, Role: sl.Role, Descriptor: sl.Descriptor,
+			Digest: recall.Digest(sl.Bytes)[:12], Bytes: len(sl.Bytes),
+		})
+	}
+	return hits, sess.Stats(), true, nil
+}
+
+// snapshotQuery is the CLI wrapper for the first-class O(1) session-query surface (#1529):
+// load a REAL session image, run a content query against its recall working set, print
+// the result. No demo binary, no synthetic session — whatever real image sits at --file.
+func snapshotQuery(argv []string) {
+	fs := flag.NewFlagSet("snapshot query", flag.ExitOnError)
+	file := fs.String("file", "", "a .faksession archive or a bundle directory (a REAL session image)")
+	query := fs.String("query", "", "the follow-up question to demand-page a working set for (required)")
+	k := fs.Int("k", 3, "max benign pages in the working set")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	_ = fs.Parse(argv)
+	requireSnapshotFile("query", *file)
+	if strings.TrimSpace(*query) == "" {
+		fmt.Fprintln(os.Stderr, "fak snapshot query: --query is required")
+		os.Exit(2)
+	}
+	img, err := openSessionImage(pathutil.ExpandTilde(*file))
+	must(err)
+	hits, stats, hasContent, err := querySessionImage(img, *query, *k)
+	must(err)
+
+	const provenance = "kernel/context WITNESSED (recall working set); no provider rebate"
+	if *asJSON {
+		fmt.Println(string(jsonIndent(map[string]any{
+			"kind": "session_query", "session_id": img.Meta.SessionID,
+			"query": *query, "k": *k, "has_core_image": hasContent,
+			"provenance": provenance, "stats": stats, "working_set": hits,
+		})))
+		return
+	}
+	fmt.Printf("== fak snapshot query: %s ==\n", img.Meta.SessionID)
+	if !hasContent {
+		fmt.Println("drive-only image (no recall core image) — nothing to query")
+		return
+	}
+	fmt.Printf("image            : %s  (%d benign, %d sealed page(s))\n", *file, stats.Benign, stats.Quarantined)
+	fmt.Printf("query            : %q  (top %d)\n", *query, *k)
+	if len(hits) == 0 {
+		fmt.Println("working set      : (empty — no benign page overlapped the query)")
+		return
+	}
+	for _, h := range hits {
+		role := h.Role
+		if role == "" {
+			role = "-"
+		}
+		fmt.Printf("  step %-2d %-6s %s  [%s, %d B]\n", h.Step, role, h.Descriptor, h.Digest, h.Bytes)
+	}
+	fmt.Printf("provenance       : %s\n", provenance)
 }
 
 // snapshotDemo is the offline round-trip witness over the whole seam.
