@@ -26,6 +26,7 @@ package dispatchorder
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -100,6 +101,14 @@ type Candidate struct {
 	// the dispatch lease default. shared/shared may overlap; any exclusive participant must be
 	// tree-disjoint.
 	Mode string `json:"mode,omitempty"`
+	// Compute is the OPTIONAL compute-region claim this candidate makes alongside (or instead of)
+	// its file-tree claim — the disaggregation axis of the claim-space (#3268): a device, a
+	// prefill/decode phase-pool, an expert-rank interval, a KV-tier span. It is priced through the
+	// SAME collision machinery as the file tree — a compute-region overlap is a COLLISION_RISK and
+	// emits RepartitionAdvice exactly as a tree overlap does — but on its own resource axis, so a
+	// file claim and a compute claim never contend with each other. Nil for every file-only caller,
+	// which keeps their pricing byte-identical (the additive-no-regression guarantee).
+	Compute *ComputeClaim `json:"compute,omitempty"`
 	// CreatedUnix is when the unit was created (0 = unknown); the recency fallback.
 	CreatedUnix int64 `json:"created_unix"`
 	// UpdatedUnix is when the unit was last updated (0 = unknown); the PRIMARY recency signal.
@@ -122,6 +131,26 @@ type Candidate struct {
 	// ORDER among survivors: supersede-collapse, live, cooldown, generation-hold, and collision
 	// pricing are untouched.
 	Priority int `json:"priority,omitempty"`
+}
+
+// ComputeClaim is a candidate's claim over a compute region — the finer-grained twin of the
+// file-tree claim (see #3268, the disaggregation axis of the claim-space). It carries exactly
+// three fields, mirroring the file claim's Lane/Tree/Mode:
+//
+//   - Class is the resource class being claimed: "device", "phase-pool", "expert-set", "kv-tier",
+//     or any caller-defined label. It is the compute-plane analogue of a dos.toml Lane — two
+//     claims in DIFFERENT classes address disjoint resource spaces and NEVER contend.
+//   - Range is the address range within that class, a compact integer form. Accepted shapes,
+//     comma-joined for a union: a single rank/device "0"; an inclusive interval "4-7" or "4..7";
+//     a start+len span "4+4"; the KV half-open "[start,len)". An empty or unparseable Range is an
+//     unknown blast radius that conservatively collides with any same-class claim — the compute
+//     twin of an empty file tree.
+//   - Mode reuses the file claim's lock discipline verbatim: "" or "exclusive" runs alone on its
+//     region; "shared" may overlap another shared claim on the same region.
+type ComputeClaim struct {
+	Class string `json:"class"`
+	Range string `json:"range,omitempty"`
+	Mode  string `json:"mode,omitempty"`
 }
 
 // recency is the unit's freshness: its last update, falling back to its creation time.
@@ -216,6 +245,10 @@ type Collision struct {
 	Reason string   `json:"reason"`
 	Lane   []string `json:"lane,omitempty"`
 	Tree   []string `json:"tree,omitempty"`
+	// Region is the pair of overlapping compute regions ("class:range") when the edge is a
+	// compute-plane collision rather than a file-tree one. Omitted for a file-only edge, so a
+	// file-only collision graph serializes byte-identically to before the compute axis existed.
+	Region []string `json:"region,omitempty"`
 }
 
 // RepartitionAdvice is the price's operator-facing "how to clear this collision next" row.
@@ -227,9 +260,14 @@ type RepartitionAdvice struct {
 	CollidesWith []string `json:"collides_with,omitempty"`
 	CurrentTree  []string `json:"current_tree,omitempty"`
 	OverlapTree  []string `json:"overlap_tree,omitempty"`
-	Action       string   `json:"action"`
-	Reason       string   `json:"reason"`
-	Detail       string   `json:"detail"`
+	// CurrentRegion/OverlapRegion carry the compute-plane scope ("class:range") when the advice is
+	// for a compute-region collision rather than a file-tree one. Omitted for file-only advice, so
+	// a file-only repartition row is byte-identical to before the compute axis existed.
+	CurrentRegion []string `json:"current_region,omitempty"`
+	OverlapRegion []string `json:"overlap_region,omitempty"`
+	Action        string   `json:"action"`
+	Reason        string   `json:"reason"`
+	Detail        string   `json:"detail"`
 }
 
 // Pick is the single unit a worker should take this tick — Keep[0], or "" when nothing is
@@ -520,6 +558,7 @@ func repartitionAdvice(order []Ranked, collisions []Collision) []RepartitionAdvi
 	}
 	peers := map[string][]string{}
 	trees := map[string][]string{}
+	regions := map[string][]string{}
 	candidateTrees := map[string][]string{}
 	for _, r := range order {
 		candidateTrees[r.ID] = cleanTree(r.Tree)
@@ -531,10 +570,22 @@ func repartitionAdvice(order []Ranked, collisions []Collision) []RepartitionAdvi
 			trees[c.A] = appendUniqueString(trees[c.A], t)
 			trees[c.B] = appendUniqueString(trees[c.B], t)
 		}
+		for _, rg := range c.Region {
+			regions[c.A] = appendUniqueString(regions[c.A], rg)
+			regions[c.B] = appendUniqueString(regions[c.B], rg)
+		}
 	}
 	var out []RepartitionAdvice
 	for _, r := range order {
 		if r.Disposition != DispCollisionRisk {
+			continue
+		}
+		// A candidate whose collision was priced on the compute plane gets compute-region advice;
+		// a file-tree collision keeps the original tree advice. A candidate that somehow collided on
+		// both axes is advised on the compute axis first (its file advice re-surfaces once the
+		// compute region is disjoint and the pair is re-priced).
+		if len(regions[r.ID]) > 0 {
+			out = append(out, computeRepartition(r, peers[r.ID], regions[r.ID]))
 			continue
 		}
 		cur := cleanTree(r.Tree)
@@ -569,6 +620,31 @@ func anyPeerUnknown(peers []string, trees map[string][]string) bool {
 		}
 	}
 	return false
+}
+
+// computeRepartition builds the compute-plane repartition row: narrow the claimed rank/device
+// range to a disjoint sub-region of its class, or declare a region at all when the claim left it
+// unknown. It is the compute twin of the file-tree advice above.
+func computeRepartition(r Ranked, peers, overlap []string) RepartitionAdvice {
+	var cur []string
+	action := "narrow_compute_range"
+	detail := "narrow the claimed compute range to a disjoint sub-region of its class, then re-price"
+	if r.Compute != nil && strings.TrimSpace(r.Compute.Range) != "" {
+		cur = []string{regionLabel(r.Compute)}
+	} else {
+		action = "declare_compute_range"
+		detail = "declare this worker's compute region (class:range) before launch; an unknown range collides conservatively"
+	}
+	return RepartitionAdvice{
+		Candidate:     r.ID,
+		Lane:          strings.TrimSpace(r.Lane),
+		CollidesWith:  sortedStrings(peers),
+		CurrentRegion: cur,
+		OverlapRegion: sortedStrings(overlap),
+		Action:        action,
+		Reason:        ReasonCollisionRisk,
+		Detail:        detail,
+	}
 }
 
 // maxSafeSet returns the largest collision-free subset for normal fan-out widths, preferring
@@ -644,7 +720,24 @@ func greedySafeSet(cands []Ranked, graph map[string]map[string]bool) map[string]
 }
 
 func candidatePriced(c Candidate) bool {
-	return strings.TrimSpace(c.Lane) != "" || len(cleanTree(c.Tree)) > 0 || strings.TrimSpace(c.Mode) != ""
+	return strings.TrimSpace(c.Lane) != "" || len(cleanTree(c.Tree)) > 0 || strings.TrimSpace(c.Mode) != "" || c.Compute != nil
+}
+
+// hasFileClaim reports whether a candidate addresses the file plane (a lane or a non-empty tree).
+// A bare Mode is a modifier, not a claim, so it does not by itself make a file claim.
+func hasFileClaim(c Candidate) bool {
+	return strings.TrimSpace(c.Lane) != "" || len(cleanTree(c.Tree)) > 0
+}
+
+// fileParticipant reports whether a candidate is priced on the file axis. Every legacy candidate
+// (no compute claim) participates — preserving the pre-#3268 behavior where a bare exclusive
+// candidate collides conservatively — while a compute-ONLY candidate stays off the file axis, so
+// it never collides with a file worker via the empty-tree conservative rule.
+func fileParticipant(c Candidate) bool {
+	if c.Compute == nil {
+		return true
+	}
+	return hasFileClaim(c)
 }
 
 // TreesOverlap reports whether any tree in a and b overlaps under the same prefix geometry the
@@ -664,7 +757,28 @@ func TreesOverlap(a, b []string) bool {
 	return false
 }
 
+// collisionOf prices one pre-launch collision edge across BOTH claim axes: the file tree and the
+// compute region. A pair collides if it contends on EITHER — the natural "resource request"
+// semantics, where two workers serialize if they share any resource. The two axes are independent:
+// a file claim and a compute claim address disjoint resource spaces and never contend with each
+// other. Each axis keeps its own lock mode, so a file-shared/file-shared pair can still collide on
+// an exclusive compute region and vice versa.
 func collisionOf(a, b Candidate) (Collision, bool) {
+	if fileParticipant(a) && fileParticipant(b) {
+		if c, ok := fileCollision(a, b); ok {
+			return c, true
+		}
+	}
+	if a.Compute != nil && b.Compute != nil {
+		if c, ok := computeCollision(a, b); ok {
+			return c, true
+		}
+	}
+	return Collision{}, false
+}
+
+// fileCollision is the file-tree axis: the original lane/tree/mode geometry, unchanged.
+func fileCollision(a, b Candidate) (Collision, bool) {
 	ma, mb := lockMode(a), lockMode(b)
 	if ma == "shared" && mb == "shared" {
 		return Collision{}, false
@@ -688,6 +802,174 @@ func collisionOf(a, b Candidate) (Collision, bool) {
 		return c, true
 	}
 	return Collision{}, false
+}
+
+// computeCollision is the compute-region axis, the exact structural twin of fileCollision: a
+// shared/shared pair may overlap; different resource CLASSES never contend (the compute-plane
+// analogue of "different lanes decide on tree geometry"); and within one class the integer RANGES
+// decide, with an empty/unparseable range colliding conservatively as unknown blast radius.
+func computeCollision(a, b Candidate) (Collision, bool) {
+	ca, cb := a.Compute, b.Compute
+	if ca == nil || cb == nil {
+		return Collision{}, false
+	}
+	if computeMode(ca) == "shared" && computeMode(cb) == "shared" {
+		return Collision{}, false
+	}
+	if normClass(ca.Class) != normClass(cb.Class) {
+		return Collision{}, false
+	}
+	if !rangesOverlap(ca.Range, cb.Range) {
+		return Collision{}, false
+	}
+	return Collision{
+		A:      a.ID,
+		B:      b.ID,
+		Reason: ReasonCollisionRisk,
+		Region: []string{regionLabel(ca), regionLabel(cb)},
+	}, true
+}
+
+// computeMode reuses the file lock discipline verbatim: empty defaults to exclusive.
+func computeMode(cc *ComputeClaim) string {
+	switch strings.ToLower(strings.TrimSpace(cc.Mode)) {
+	case "shared":
+		return "shared"
+	default:
+		return "exclusive"
+	}
+}
+
+// normClass folds a resource class to its comparison key (trimmed, lowercased).
+func normClass(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+
+// regionLabel renders a compute claim as "class:range" for the collision graph and advice, with a
+// "*" range standing in for an unknown (empty) range.
+func regionLabel(cc *ComputeClaim) string {
+	class := strings.TrimSpace(cc.Class)
+	rng := strings.TrimSpace(cc.Range)
+	if rng == "" {
+		rng = "*"
+	}
+	if class == "" {
+		return rng
+	}
+	return class + ":" + rng
+}
+
+// interval is one inclusive integer range [lo,hi] within a compute class's address space.
+type interval struct{ lo, hi int64 }
+
+// rangesOverlap reports whether two compute Range strings address any common integer. An empty or
+// unparseable range on either side is unknown blast radius and collides conservatively — the exact
+// discipline TreesOverlap holds for an empty file tree.
+func rangesOverlap(a, b string) bool {
+	ia, oka := parseRange(a)
+	ib, okb := parseRange(b)
+	if !oka || !okb {
+		return true
+	}
+	for _, x := range ia {
+		for _, y := range ib {
+			if x.lo <= y.hi && y.lo <= x.hi {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// parseRange parses a compute Range into a union of inclusive integer intervals. It accepts a
+// bracketed KV half-open span "[start,len)" and a comma-joined union of tokens, each a single int
+// "n", an inclusive interval "a-b"/"a..b", or a start+len span "a+len". It returns known=false for
+// an empty or unparseable string so the caller can collide conservatively; it never panics.
+func parseRange(s string) ([]interval, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, false
+	}
+	if strings.HasPrefix(s, "[") || strings.HasPrefix(s, "(") {
+		inner := strings.Trim(s, "[](){} \t")
+		parts := strings.Split(inner, ",")
+		if len(parts) != 2 {
+			return nil, false
+		}
+		start, ok1 := parseInt(parts[0])
+		length, ok2 := parseInt(parts[1])
+		if !ok1 || !ok2 {
+			return nil, false
+		}
+		return []interval{spanInterval(start, length)}, true
+	}
+	var out []interval
+	for _, tok := range strings.Split(s, ",") {
+		tok = strings.TrimSpace(tok)
+		if tok == "" {
+			continue
+		}
+		iv, ok := parseRangeToken(tok)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, iv)
+	}
+	if len(out) == 0 {
+		return nil, false
+	}
+	return out, true
+}
+
+// parseRangeToken parses one non-empty Range token into an inclusive interval.
+func parseRangeToken(tok string) (interval, bool) {
+	if i := strings.Index(tok, ".."); i >= 0 {
+		return parseRangePair(tok[:i], tok[i+2:], false)
+	}
+	if i := strings.Index(tok, "+"); i > 0 {
+		return parseRangePair(tok[:i], tok[i+1:], true)
+	}
+	if i := strings.Index(tok, "-"); i > 0 { // i>0 so a leading '-' stays part of a negative int
+		return parseRangePair(tok[:i], tok[i+1:], false)
+	}
+	n, ok := parseInt(tok)
+	if !ok {
+		return interval{}, false
+	}
+	return interval{n, n}, true
+}
+
+// parseRangePair builds an interval from two parsed halves: an inclusive [a,b] pair (ordered) or,
+// when span is set, a start+length span.
+func parseRangePair(a, b string, span bool) (interval, bool) {
+	lo, ok1 := parseInt(a)
+	x, ok2 := parseInt(b)
+	if !ok1 || !ok2 {
+		return interval{}, false
+	}
+	if span {
+		return spanInterval(lo, x), true
+	}
+	if lo > x {
+		lo, x = x, lo
+	}
+	return interval{lo, x}, true
+}
+
+// spanInterval turns a start+length span into an inclusive interval; a non-positive length claims
+// just the start index.
+func spanInterval(start, length int64) interval {
+	if length <= 0 {
+		return interval{start, start}
+	}
+	return interval{start, start + length - 1}
+}
+
+// parseInt parses a base-10 integer half of a Range token; whitespace-tolerant, no panic.
+func parseInt(s string) (int64, bool) {
+	n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 func lockMode(c Candidate) string {

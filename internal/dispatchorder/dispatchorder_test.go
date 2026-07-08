@@ -527,3 +527,173 @@ func TestNegativeCooldownDisables(t *testing.T) {
 		t.Errorf("pick = %q, want fresh (cooldown disabled)", r.Pick())
 	}
 }
+
+// strSet is a tiny order-independent membership helper for asserting Region/OverlapRegion contents.
+func strSet(xs []string) map[string]bool {
+	m := make(map[string]bool, len(xs))
+	for _, x := range xs {
+		m[x] = true
+	}
+	return m
+}
+
+// TestComputeExclusiveOverlapSerializes is the compute-plane twin of the file-tree collision test
+// (#3268): two exclusive claims on overlapping ranges of the SAME class serialize before launch —
+// the fresher is kept, the older is priced collision_risk — while a claim in a DIFFERENT class
+// never contends. The collision edge carries the compute Region, and the advice is compute-flavored.
+func TestComputeExclusiveOverlapSerializes(t *testing.T) {
+	r := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "dev-fresh", Key: "A", Compute: &ComputeClaim{Class: "device", Range: "0-3"}, UpdatedUnix: base - 100},
+		{ID: "dev-old", Key: "B", Compute: &ComputeClaim{Class: "device", Range: "2-5"}, UpdatedUnix: base - 300},
+		{ID: "pool", Key: "C", Compute: &ComputeClaim{Class: "phase-pool", Range: "0-3"}, UpdatedUnix: base - 200},
+	}})
+
+	if r.KeepCount != 2 || r.CollisionCount != 1 {
+		t.Fatalf("counts = keep %d collision %d, want 2/1", r.KeepCount, r.CollisionCount)
+	}
+	if dispoOf(r, "dev-fresh") != DispKeep || dispoOf(r, "pool") != DispKeep {
+		t.Fatalf("safe set: dev-fresh=%q pool=%q, want keep/keep (different class never contends)",
+			dispoOf(r, "dev-fresh"), dispoOf(r, "pool"))
+	}
+	if dispoOf(r, "dev-old") != DispCollisionRisk {
+		t.Fatalf("dev-old disposition = %q, want collision_risk", dispoOf(r, "dev-old"))
+	}
+	if len(r.Collisions) != 1 || r.Collisions[0].Reason != ReasonCollisionRisk {
+		t.Fatalf("collisions = %+v, want one %s edge", r.Collisions, ReasonCollisionRisk)
+	}
+	region := strSet(r.Collisions[0].Region)
+	if len(r.Collisions[0].Region) != 2 || !region["device:0-3"] || !region["device:2-5"] {
+		t.Fatalf("collision Region = %#v, want {device:0-3, device:2-5}", r.Collisions[0].Region)
+	}
+	if len(r.Collisions[0].Tree) != 0 {
+		t.Fatalf("compute collision leaked a file Tree = %#v, want none", r.Collisions[0].Tree)
+	}
+	if len(r.Repartition) != 1 {
+		t.Fatalf("repartition = %+v, want one row", r.Repartition)
+	}
+	adv := r.Repartition[0]
+	if adv.Candidate != "dev-old" || adv.Action != "narrow_compute_range" || adv.Reason != ReasonCollisionRisk {
+		t.Fatalf("advice = %+v, want dev-old narrow_compute_range %s", adv, ReasonCollisionRisk)
+	}
+	if len(adv.CurrentRegion) != 1 || adv.CurrentRegion[0] != "device:2-5" {
+		t.Fatalf("advice CurrentRegion = %#v, want [device:2-5]", adv.CurrentRegion)
+	}
+	if ov := strSet(adv.OverlapRegion); !ov["device:0-3"] || !ov["device:2-5"] {
+		t.Fatalf("advice OverlapRegion = %#v, want to include device:0-3 and device:2-5", adv.OverlapRegion)
+	}
+	if len(adv.CurrentTree) != 0 || len(adv.OverlapTree) != 0 {
+		t.Fatalf("compute advice leaked file scope: CurrentTree=%#v OverlapTree=%#v", adv.CurrentTree, adv.OverlapTree)
+	}
+}
+
+// TestComputeDisjointAndCrossClassAllConcurrent: within one class, disjoint ranges run together;
+// across classes, even identical ranges never contend. No collisions, all kept.
+func TestComputeDisjointAndCrossClassAllConcurrent(t *testing.T) {
+	r := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "dev-lo", Key: "A", Compute: &ComputeClaim{Class: "device", Range: "0-3"}, UpdatedUnix: base - 10},
+		{ID: "dev-hi", Key: "B", Compute: &ComputeClaim{Class: "device", Range: "4-7"}, UpdatedUnix: base - 20},
+		{ID: "gpu-lo", Key: "C", Compute: &ComputeClaim{Class: "gpu", Range: "0-3"}, UpdatedUnix: base - 30},
+	}})
+	if r.KeepCount != 3 || r.CollisionCount != 0 || len(r.Collisions) != 0 {
+		t.Fatalf("disjoint+cross-class = keep %d collision %d edges %d, want 3/0/0",
+			r.KeepCount, r.CollisionCount, len(r.Collisions))
+	}
+}
+
+// TestComputeSharedSharedOverlapAllowed: the compute lock discipline mirrors the file one — two
+// shared claims on the SAME overlapping region may run concurrently.
+func TestComputeSharedSharedOverlapAllowed(t *testing.T) {
+	r := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "reader-a", Key: "A", Compute: &ComputeClaim{Class: "device", Range: "0-3", Mode: "shared"}, UpdatedUnix: base - 10},
+		{ID: "reader-b", Key: "B", Compute: &ComputeClaim{Class: "device", Range: "0-3", Mode: "shared"}, UpdatedUnix: base - 20},
+	}})
+	if r.KeepCount != 2 || r.CollisionCount != 0 || len(r.Collisions) != 0 {
+		t.Fatalf("shared/shared compute = keep %d collision %d edges %d, want 2/0/0",
+			r.KeepCount, r.CollisionCount, len(r.Collisions))
+	}
+}
+
+// TestComputeUnknownRangeCollidesConservatively: an empty Range is unknown blast radius that
+// collides with any same-class claim — the compute twin of an empty file tree — and the serialized
+// unknown-range candidate is advised to declare a region before launch.
+func TestComputeUnknownRangeCollidesConservatively(t *testing.T) {
+	r := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "known-fresh", Key: "A", Compute: &ComputeClaim{Class: "device", Range: "0"}, UpdatedUnix: base - 10},
+		{ID: "unknown-old", Key: "B", Compute: &ComputeClaim{Class: "device"}, UpdatedUnix: base - 30},
+	}})
+	if r.KeepCount != 1 || r.CollisionCount != 1 {
+		t.Fatalf("unknown-range = keep %d collision %d, want 1/1", r.KeepCount, r.CollisionCount)
+	}
+	if dispoOf(r, "known-fresh") != DispKeep || dispoOf(r, "unknown-old") != DispCollisionRisk {
+		t.Fatalf("dispositions known-fresh=%q unknown-old=%q, want keep/collision_risk",
+			dispoOf(r, "known-fresh"), dispoOf(r, "unknown-old"))
+	}
+	if len(r.Repartition) != 1 || r.Repartition[0].Action != "declare_compute_range" {
+		t.Fatalf("advice = %+v, want one declare_compute_range row", r.Repartition)
+	}
+	if len(r.Repartition[0].CurrentRegion) != 0 {
+		t.Fatalf("unknown-range advice CurrentRegion = %#v, want empty", r.Repartition[0].CurrentRegion)
+	}
+}
+
+// TestComputeAndFileAxesAreIndependent is the load-bearing #3268 guarantee: a file-only worker and
+// a compute-only worker never contend, because neither participates on the other's axis. A file
+// claim and a compute claim address disjoint resource spaces.
+func TestComputeAndFileAxesAreIndependent(t *testing.T) {
+	r := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "filer", Key: "A", Lane: "gateway", Tree: []string{"internal/gateway/**"}, UpdatedUnix: base - 10},
+		{ID: "computer", Key: "B", Compute: &ComputeClaim{Class: "device", Range: "0-3"}, UpdatedUnix: base - 20},
+	}})
+	if r.KeepCount != 2 || r.CollisionCount != 0 || len(r.Collisions) != 0 {
+		t.Fatalf("file vs compute = keep %d collision %d edges %d, want 2/0/0 (independent axes)",
+			r.KeepCount, r.CollisionCount, len(r.Collisions))
+	}
+}
+
+// TestComputeBothAxesSerializeIndependently: a candidate may carry BOTH a file tree and a compute
+// region. Two such candidates that overlap on EITHER axis serialize — here they are file-disjoint
+// but compute-overlapping, so the collision is priced on the compute plane.
+func TestComputeBothAxesSerializeIndependently(t *testing.T) {
+	r := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "w-fresh", Key: "A", Tree: []string{"internal/a/**"}, Compute: &ComputeClaim{Class: "device", Range: "0-3"}, UpdatedUnix: base - 10},
+		{ID: "w-old", Key: "B", Tree: []string{"internal/b/**"}, Compute: &ComputeClaim{Class: "device", Range: "1-2"}, UpdatedUnix: base - 20},
+	}})
+	if r.KeepCount != 1 || r.CollisionCount != 1 {
+		t.Fatalf("both-axes = keep %d collision %d, want 1/1", r.KeepCount, r.CollisionCount)
+	}
+	if dispoOf(r, "w-fresh") != DispKeep || dispoOf(r, "w-old") != DispCollisionRisk {
+		t.Fatalf("dispositions w-fresh=%q w-old=%q, want keep/collision_risk",
+			dispoOf(r, "w-fresh"), dispoOf(r, "w-old"))
+	}
+	if len(r.Collisions) != 1 || len(r.Collisions[0].Region) != 2 {
+		t.Fatalf("collision = %+v, want one compute-region edge", r.Collisions)
+	}
+}
+
+// TestRangesOverlapGrammar pins the accepted Range shapes and the conservative fallback.
+func TestRangesOverlapGrammar(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want bool
+	}{
+		{"0-3", "2-5", true},     // inclusive intervals overlap
+		{"0-3", "4-7", false},    // adjacent, disjoint
+		{"4..7", "5", true},      // dotted interval contains a point
+		{"4+4", "7", true},       // start+len span [4,7] contains 7
+		{"4+4", "8", false},      // [4,7] excludes 8
+		{"[4,4)", "4", true},     // KV half-open span [4,7] contains 4
+		{"0,2,4", "4-9", true},   // union member 4 hits [4,9]
+		{"0,2,4", "5-9", false},  // union misses [5,9]
+		{"0-3", "0-3", true},     // identical
+		{"", "0-3", true},        // empty is unknown blast radius: conservative collide
+		{"garbage", "0-3", true}, // unparseable is conservative collide
+	}
+	for _, tt := range tests {
+		if got := rangesOverlap(tt.a, tt.b); got != tt.want {
+			t.Errorf("rangesOverlap(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
+		}
+		if got := rangesOverlap(tt.b, tt.a); got != tt.want {
+			t.Errorf("rangesOverlap(%q, %q) [swapped] = %v, want %v", tt.b, tt.a, got, tt.want)
+		}
+	}
+}
