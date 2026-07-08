@@ -127,11 +127,13 @@ type SavingsObservation struct {
 
 	// CompactionCacheReadTokens is the OBSERVED provider cache_read_input_tokens seen
 	// at compaction fires (gateway AdjudicationSummary.CompactionCacheReadTokens). It is
-	// the warm/cold signal #2794 prices on: a fire with cache_read>0 landed on a WARM
-	// prefix, so its shed tokens are worth only the 0.1x cache-read marginal, not 1.0x
-	// fresh input. Zero means observed-cold (or no witness), and the shed keeps the
-	// full-input basis. Not a claim fak preserved the cache (byte-identity is) — just the
-	// provider's relayed read count, used to pick the honest price basis.
+	// the warm witness cacheprice.ShedTokenEquiv prices the shed on: the warm PORTION,
+	// min(shed, this), was already provider cache_reads and prices at the 0.1x cache-read
+	// marginal, while the cold remainder keeps 1.0x fresh input. Zero means observed-cold
+	// (or no witness) and the whole shed keeps the full-input basis; a value >= shed makes
+	// it wholly warm; anything between is a BLENDED lump. Not a claim fak preserved the
+	// cache (byte-identity is) — just the provider's relayed read count, used to price and
+	// label (see shedValuationBasis) the shed honestly.
 	CompactionCacheReadTokens uint64
 
 	// CacheCreationTokensUpgraded is the subset of CacheCreationTokens written while
@@ -196,9 +198,11 @@ type SavingsRow struct {
 	CompactionShedTokens uint64 `json:"compaction_shed_tokens,omitempty"`
 
 	// CompactionCacheReadTokens is the OBSERVED provider cache_read_input_tokens at the
-	// compaction fires this row rolls up — the warm/cold witness #2794 prices on. It is
-	// persisted so a reader (and InferValuationBasis on a legacy row) can tell a warm fire
-	// (>0, shed valued at the 0.1x marginal) from an observed-cold one (0, shed at 1.0x).
+	// compaction fires this row rolls up — the warm witness #2794/#2798 prices on. It is
+	// persisted so a reader (and InferValuationBasis on a legacy row) can re-derive the
+	// three-way basis via shedValuationBasis: fully warm (>= shed → CACHE_READ_MARGINAL),
+	// observed-cold (0 → FULL_INPUT), or a mixed lump (0 < it < shed → BLENDED_MARGINAL,
+	// warm portion at 0.1x + cold remainder at 1.0x).
 	CompactionCacheReadTokens uint64 `json:"compaction_cache_read_tokens,omitempty"`
 
 	// CompactionFired / CompactionBailed / CompactionAnchorStarved are the WITNESSED health
