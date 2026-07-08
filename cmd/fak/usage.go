@@ -269,6 +269,14 @@ const usageCoreText = `usage:
                   end to end  -  no key, no GPU, no network. Default: the built-in
                   8-case demo corpus + DefaultManifest vs a one-frontier-model
                   baseline. Every figure is a ROUGH lens, never a bill or SLA)
+  fak deepseekbench [--live --spend] [--base-url URL] [--model M] [--out FILE]
+                 (the DeepSeek V4 Pro/Flash TTFT/TPOT/context-scaling SCORECARD:
+                  emit JSONL rows (TTFT, TPOT, E2E, tok/s, prompt/completion/
+                  reasoning tokens, prompt-cache hit/miss) across the model ×
+                  context-bucket × output × reasoning × stream matrix. DEFAULT is a
+                  no-key DRY-RUN FIXTURE (labelled placeholders, CI-safe); --live
+                  --spend runs a real measurement behind DEEPSEEK_API_KEY. OBSERVED
+                  provider speed, never a fak-authored saving)
   fak accounts  <list|resolve|discover|validate> [--registry FILE] [--home DIR] [--json]
                 (the CONFIG-HOME REGISTRY: every CLAUDE_CONFIG_DIR seat with its
                  DISK-TRUE identity (a dir named for one account but logged into
