@@ -389,6 +389,56 @@ class ProbeLedgerTest(unittest.TestCase):
         self.assertEqual(len(targets), 1)
 
 
+class ProbeLedgerCooldownTest(unittest.TestCase):
+    """#1801: a throttle cooldown ledger record carries cooldown start, reason, and the
+    next-eligible windows, so a roster fold renders the throttled seat unavailable using
+    the RECORDED reason -- not a reconstructed guess."""
+
+    # A live banner carrying BOTH a session (daily) window and a weekly one, so the
+    # ledger record exercises reset AND weekly. fleet_session_signals.limit_resets keys
+    # "weekly" off the ~24 chars before each "limit ... resets", so the second occurrence
+    # ("Weekly limit resets ...") lands in the weekly slot.
+    BANNER = ("You've hit your session limit · resets 7:50am (America/Los_Angeles). "
+              "Weekly limit resets Jul 10, 9am (America/Los_Angeles).")
+
+    def _limit_verdict(self, account=".claude-gem8-acct", tag="gem8"):
+        return account_probe.probe_account(
+            worker_row(account, tag), runner=runner_returning(1, "", self.BANNER))
+
+    def test_limit_ledger_records_cooldown_start_reason_and_windows(self) -> None:
+        with tempfile.TemporaryDirectory() as rd:
+            recs = account_probe.append_probe_ledger([self._limit_verdict()], rd)
+            self.assertEqual(len(recs), 1)
+            rec = recs[0]
+            self.assertEqual(rec["status"], "LIMIT")
+            self.assertEqual(rec["block_kind"], "usage")
+            self.assertTrue(rec["ts"], "cooldown start (probe-observation ts) must be stamped")
+            self.assertIn("usage limit", rec["block_reason"], "the human reason, not just a kind")
+            self.assertIn("7:50am", rec["reset"], "daily next-eligible window recorded")
+            self.assertIn("Jul 10", rec["weekly"], "weekly next-eligible window recorded")
+            # Re-read from disk: the fields persist for the roster fold, not just in-memory.
+            latest = account_probe.last_probe_by_account(rd)[".claude-gem8-acct"]
+            self.assertIn("usage limit", latest["block_reason"])
+            self.assertIn("Jul 10", latest["weekly"])
+
+    def test_throttled_seat_excluded_from_capacity_without_guessing(self) -> None:
+        # The witness: the recorded cooldown renders the seat NOT available, and the
+        # roster fold surfaces the RECORDED reason/windows instead of reconstructing them.
+        import fleet_accounts  # noqa: PLC0415
+        account = ".claude-gem8-acct"
+        with tempfile.TemporaryDirectory() as rd:
+            with mock.patch.dict(os.environ, {"FLEET_REG_DIR": rd}, clear=False):
+                account_probe.append_probe_ledger([self._limit_verdict(account, "gem8")])
+                fleet_accounts._PROBE_LEDGER_CACHE["key"] = None  # bust the mtime+size memo
+                verdict = fleet_accounts._fresh_probe_from_ledger(account)
+        self.assertIsNotNone(verdict, "a fresh LIMIT probe must be visible to the roster fold")
+        self.assertFalse(verdict["available"], "a throttled seat is not available capacity")
+        self.assertEqual(verdict["block_kind"], "usage")
+        self.assertIn("usage limit", verdict["block_reason"])
+        self.assertIn("7:50am", verdict["reset"])
+        self.assertIn("Jul 10", verdict["weekly"], "the recorded weekly window, not None")
+
+
 class StdinNoiseTest(unittest.TestCase):
     def test_stdin_warning_only_is_not_success(self) -> None:
         warn = "Warning: no stdin data received in 3s, proceeding without it."

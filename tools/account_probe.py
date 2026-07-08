@@ -116,6 +116,14 @@ def append_probe_ledger(verdicts: list[dict[str, Any]], rd: str | None = None,
                         ) -> list[dict[str, Any]]:
     """Append one line per verdict; stamp prev_status from the prior ledger entry.
 
+    Each record captures the throttle COOLDOWN a downstream roster fold needs to explain
+    lost capacity without guessing (#1801): ``ts`` (when the block was observed -- the
+    cooldown start), ``block_reason`` (the human reason), and ``reset``/``weekly`` (the
+    next-eligible windows). Both readers -- fleet_accounts._fresh_probe_from_ledger and
+    internal/accountprobe.LedgerEntry -- already look for ``block_reason``/``weekly`` and
+    otherwise fall back to a reconstructed "usage limit; resets ..." string, so recording
+    them here is what removes the guess (a bare reason and a lost weekly window before).
+
     Returns the list of ledger records written (each carries ``flip`` = prev != status),
     so a caller can surface flips without re-reading the file.
     """
@@ -134,7 +142,9 @@ def append_probe_ledger(verdicts: list[dict[str, Any]], rd: str | None = None,
             "prev_status": prev_status,
             "flip": bool(prev_status and prev_status != v.get("status")),
             "block_kind": v.get("block_kind"),
+            "block_reason": v.get("block_reason"),
             "reset": v.get("reset"),
+            "weekly": v.get("weekly"),
             "latency_ms": v.get("latency_ms"),
         }
         records.append(rec)
