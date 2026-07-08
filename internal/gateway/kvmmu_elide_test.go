@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -111,6 +112,78 @@ func TestLiveKVResidencyNoOpWhenNothingElided(t *testing.T) {
 	plan := agent.SegElisionPlan(messages, []bool{false, false}) // nothing elided
 	if freed, exact := ev.ElideKVSpans(messages, plan); freed != 0 || exact {
 		t.Fatalf("all-resident plan must elide nothing: got freed=%d exact=%v, want 0/false", freed, exact)
+	}
+}
+
+// TestServeLoopElidesKVResidencyThroughGate is the #1531 deliverable: the LIVE serve-loop GLUE —
+// Server.maybeElideKVResidency, the exact call site complete() drives on every served
+// /v1/chat/completions and /v1/messages turn (gateway.go, right after maybePlanMessages shrinks the
+// view), NOT the KVSpanElider interface in isolation — turns a planner elision into a real
+// model-side KV-residency eviction when FAK_INKERNEL_KVMMU is on. The planned view is a clean
+// trailing SUFFIX of the full history (an older prefix elided), so residency shrinks (freed>0)
+// though honestly NOT bit-exact in this direction — witnessed via the glue's own "KV residency
+// shrank" log line, which the glue emits only when freed>0. This closes the #1531 gap the prior
+// witnesses left open: they drove ElideKVSpans directly, never through the Server serve-loop call.
+func TestServeLoopElidesKVResidencyThroughGate(t *testing.T) {
+	planner := liveInKernelPlanner(t) // FAK_INKERNEL_KVMMU=on, a real in-kernel planner
+	var lines []string
+	srv := &Server{planner: planner, logf: func(format string, args ...any) {
+		lines = append(lines, formatLog(format, args...))
+	}}
+
+	fullHistory := []agent.Message{
+		{Role: agent.RoleSystem, Content: "you are a helper"},
+		{Role: agent.RoleUser, Content: "an old cold turn the planner drops"},
+		{Role: agent.RoleAssistant, Content: "an old cold answer the planner drops"},
+		{Role: agent.RoleUser, Content: "the recent resident question"},
+	}
+	// The shape complete() hands the glue after planning: the resident view is the trailing two
+	// messages (the leading prefix was elided as over-budget cold history).
+	planned := fullHistory[2:]
+
+	srv.maybeElideKVResidency(fullHistory, planned)
+
+	var residencyLine string
+	for _, ln := range lines {
+		if strings.Contains(ln, "KV residency shrank to planned view") {
+			residencyLine = ln
+		}
+	}
+	if residencyLine == "" {
+		t.Fatalf("serve-loop glue drove NO KV-residency eviction on an elision with the gate on; logs=%v", lines)
+	}
+	if strings.Contains(residencyLine, "freed=0pos") {
+		t.Fatalf("serve-loop glue logged an elision but freed 0 positions: %q", residencyLine)
+	}
+	t.Logf("LIVE #1531: serve-loop glue drove KV-residency eviction on the gated path: %q", residencyLine)
+}
+
+// TestServeLoopKVResidencyDefaultOff is the posture guard for #1531: with FAK_INKERNEL_KVMMU OFF
+// (the default), the SAME serve-loop glue drives NO residency eviction on the SAME elision — the
+// planned view shrinks the text only, byte-for-byte the pre-bridge behavior, until an operator opts
+// the gate in. Proves the live-loop bridge is genuinely gated, not always-on.
+func TestServeLoopKVResidencyDefaultOff(t *testing.T) {
+	t.Setenv("FAK_INKERNEL_KVMMU", "") // explicitly OFF (the default)
+	t.Setenv("FAK_INKERNEL_RADIX", "off")
+	m := model.NewSynthetic(kvmmuSynthCfg())
+	planner := agent.NewInKernelPlanner(m, newByteLevelTokenizer(t), "synthetic-serveloop-off", false, nil, false)
+	var lines []string
+	srv := &Server{planner: planner, logf: func(format string, args ...any) {
+		lines = append(lines, formatLog(format, args...))
+	}}
+
+	fullHistory := []agent.Message{
+		{Role: agent.RoleSystem, Content: "you are a helper"},
+		{Role: agent.RoleUser, Content: "an old cold turn the planner drops"},
+		{Role: agent.RoleAssistant, Content: "an old cold answer the planner drops"},
+		{Role: agent.RoleUser, Content: "the recent resident question"},
+	}
+	srv.maybeElideKVResidency(fullHistory, fullHistory[2:])
+
+	for _, ln := range lines {
+		if strings.Contains(ln, "KV residency shrank to planned view") {
+			t.Fatalf("bridge OFF must be inert on the serve-loop path, but residency was evicted: %q", ln)
+		}
 	}
 }
 
