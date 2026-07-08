@@ -17,10 +17,11 @@ import (
 // yields a zero Registry. Only the fields the passive runtime-status fold consults are
 // modeled; unknown keys are ignored.
 type Registry struct {
-	GeneratedUTC string         `json:"generated_utc"`
-	Throttle     map[string]any `json:"throttle"`
-	Auth         map[string]any `json:"auth"`
-	Sessions     []Session      `json:"sessions"`
+	GeneratedUTC string           `json:"generated_utc"`
+	Throttle     map[string]any   `json:"throttle"`
+	Auth         map[string]any   `json:"auth"`
+	Accounts     []map[string]any `json:"accounts"`
+	Sessions     []Session        `json:"sessions"`
 }
 
 // Session is one registry session row.
@@ -37,6 +38,10 @@ type Session struct {
 	ThrottleReset  string  `json:"throttle_reset"`
 	ThrottleWeekly string  `json:"throttle_weekly"`
 	hasAge         bool
+	// raw is the row's unmodeled JSON, kept by LoadRegistry so the identity fold can read
+	// any account_uuid/login_email the watchdog stamps on a session row (see
+	// sessionIdentity). A Session built directly (tests) leaves this nil — no identity.
+	raw map[string]any
 }
 
 // LoadRegistry reads sessions.json best-effort: missing/malformed yields an empty Registry.
@@ -58,6 +63,7 @@ func LoadRegistry(path string) Registry {
 			if i < len(raw.Sessions) {
 				_, has := raw.Sessions[i]["age_min"]
 				reg.Sessions[i].hasAge = has
+				reg.Sessions[i].raw = raw.Sessions[i]
 			}
 		}
 	}
@@ -250,7 +256,11 @@ type RuntimeStatus struct {
 // sessions.json) overrides a carried block — consulted exactly when FLEET_REG_DIR names
 // the prober's registry dir (see shouldConsultProbeLedger), so callers without a prober
 // keep the pure passive fold.
-func computeRuntimeStatus(account string, reg Registry) RuntimeStatus {
+// dir is the account's config home (the Account.Dir the caller already holds). It feeds the
+// identity fold that decides whether a carried weekly cap still belongs to the seat's
+// CURRENT login before a fresh OK is allowed to reopen it (see
+// throttleMatchesCurrentIdentity); "" simply skips the current-config identity candidate.
+func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
 	throttleMap := normalizeThrottle(reg.Throttle)
 	authMap := reg.Auth
 	generatedUTC := reg.GeneratedUTC
@@ -381,12 +391,18 @@ func computeRuntimeStatus(account string, reg Registry) RuntimeStatus {
 		if led := FreshProbeFromLedger(account, "", time.Now().UTC(), 0); led != nil {
 			if led.Available {
 				// A fresh OK must not reopen a seat whose WEEKLY cap is still
-				// active: the weekly window outlives any single probe. (Python also
-				// clears this hold when the throttle's stamped identity provably
-				// differs from the seat's current identity; this port assumes the
-				// identity matches — the fail-closed reading — leaving the
-				// identity-match refinement as the named follow-on.)
-				if hasThr && weeklyThrottleIsActive(thr) {
+				// active: the weekly window outlives any single probe. But the hold
+				// only stands while the cap still belongs to the seat's CURRENT
+				// login — a usage limit stamped for a DIFFERENT account the dir was
+				// logged into before a re-login must NOT keep the reborn seat closed.
+				// throttleMatchesCurrentIdentity clears the hold on a proven identity
+				// mismatch and, fail-closed, holds when identity is unknown (today's
+				// recorders stamp none, so this preserves the conservative hold). The
+				// probe-identity candidate is nil here: the account-probe ledger
+				// stamps no identity, so — as in the Python on today's ledgers — it
+				// contributes nothing and current-config identity decides.
+				if hasThr && weeklyThrottleIsActive(thr) &&
+					throttleMatchesCurrentIdentity(account, dir, thr, reg, acct, nil) {
 					return applyThrottleStatus(st, thr)
 				}
 				st.StatusSource = "probe-ledger"
@@ -473,7 +489,7 @@ func Annotate(rows []Account, reg Registry) []Account {
 	for i := range out {
 		r := &out[i]
 		if r.Kind == KindWorker {
-			st := computeRuntimeStatus(r.Account, reg)
+			st := computeRuntimeStatus(r.Account, r.Dir, reg)
 			applyStatus(r, st)
 			applyFreshProbeLoginOverride(r)
 			applyLoginGate(r)

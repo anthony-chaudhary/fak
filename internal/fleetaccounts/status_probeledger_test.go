@@ -1,9 +1,24 @@
 package fleetaccounts
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+// writeAccountConfig writes a minimal .claude.json into a fresh account dir whose
+// oauthAccount.accountUuid stamps WHO the dir is currently logged in as — the ground truth
+// currentConfigIdentity reads — and returns the dir.
+func writeAccountConfig(t *testing.T, accountUUID string) string {
+	t.Helper()
+	dir := t.TempDir()
+	doc := `{"oauthAccount":{"accountUuid":"` + accountUUID + `"}}`
+	if err := os.WriteFile(filepath.Join(dir, ".claude.json"), []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
 
 // futureResetStr renders a reset string resetTime parses ("Jan 2, 3:04pm") for an
 // instant d from now. The dated form's 180-day rollover keeps a year-boundary +48h
@@ -19,7 +34,7 @@ func TestLedgerOKClearsCarriedThrottle(t *testing.T) {
 	reg := Registry{Throttle: map[string]any{
 		".claude-a": map[string]any{"reset": futureResetStr(48 * time.Hour)},
 	}}
-	st := computeRuntimeStatus(".claude-a", reg)
+	st := computeRuntimeStatus(".claude-a", "", reg)
 	if !st.Available || st.Blocked || st.Throttled {
 		t.Fatalf("fresh ledger OK should clear the carried throttle, got %+v", st)
 	}
@@ -38,9 +53,59 @@ func TestLedgerOKHoldsActiveWeeklyCap(t *testing.T) {
 			"weekly": futureResetStr(72 * time.Hour),
 		},
 	}}
-	st := computeRuntimeStatus(".claude-a", reg)
+	st := computeRuntimeStatus(".claude-a", "", reg)
 	if st.Available || !st.Blocked || !st.Throttled {
 		t.Fatalf("fresh OK must not reopen an active weekly cap, got %+v", st)
+	}
+	if st.BlockKind != "usage" || st.Weekly == "" {
+		t.Fatalf("weekly hold shape: kind=%q weekly=%q", st.BlockKind, st.Weekly)
+	}
+}
+
+// TestLedgerOKClearsThrottleOnIdentityMismatch is the #2253 refinement: a fresh OK reopens
+// a weekly-capped seat when the cap provably belonged to a DIFFERENT account (the dir was
+// re-logged since the cap was stamped). This is the case TestLedgerOKHoldsActiveWeeklyCap
+// deliberately does NOT flip — there the throttle carries no identity, so the hold stands.
+func TestLedgerOKClearsThrottleOnIdentityMismatch(t *testing.T) {
+	rd := t.TempDir()
+	t.Setenv("FLEET_REG_DIR", rd)
+	writeProbeLedger(t, rd, probeLine(t, ".claude-a", "OK", time.Now(), ""))
+	// The dir is logged in as BBBB now; the carried weekly cap was stamped for AAAA.
+	dir := writeAccountConfig(t, "BBBB")
+	reg := Registry{Throttle: map[string]any{
+		".claude-a": map[string]any{
+			"reset":        futureResetStr(4 * time.Hour),
+			"weekly":       futureResetStr(72 * time.Hour),
+			"account_uuid": "AAAA",
+		},
+	}}
+	st := computeRuntimeStatus(".claude-a", dir, reg)
+	if !st.Available || st.Blocked || st.Throttled {
+		t.Fatalf("proven identity mismatch must clear the weekly hold, got %+v", st)
+	}
+	if st.StatusSource != "probe-ledger" {
+		t.Fatalf("status_source = %q, want probe-ledger", st.StatusSource)
+	}
+}
+
+// TestLedgerOKHoldsThrottleOnIdentityMatch is the other verdict direction: when the cap's
+// stamped identity matches the seat's CURRENT login, the weekly window still binds it and a
+// fresh OK does not reopen the seat.
+func TestLedgerOKHoldsThrottleOnIdentityMatch(t *testing.T) {
+	rd := t.TempDir()
+	t.Setenv("FLEET_REG_DIR", rd)
+	writeProbeLedger(t, rd, probeLine(t, ".claude-a", "OK", time.Now(), ""))
+	dir := writeAccountConfig(t, "AAAA")
+	reg := Registry{Throttle: map[string]any{
+		".claude-a": map[string]any{
+			"reset":        futureResetStr(4 * time.Hour),
+			"weekly":       futureResetStr(72 * time.Hour),
+			"account_uuid": "AAAA",
+		},
+	}}
+	st := computeRuntimeStatus(".claude-a", dir, reg)
+	if st.Available || !st.Blocked || !st.Throttled {
+		t.Fatalf("matching identity must keep the active weekly cap, got %+v", st)
 	}
 	if st.BlockKind != "usage" || st.Weekly == "" {
 		t.Fatalf("weekly hold shape: kind=%q weekly=%q", st.BlockKind, st.Weekly)
@@ -51,7 +116,7 @@ func TestLedgerBlockOverridesRegistry(t *testing.T) {
 	rd := t.TempDir()
 	t.Setenv("FLEET_REG_DIR", rd)
 	writeProbeLedger(t, rd, probeLine(t, ".claude-a", "LIMIT", time.Now(), `"reset":"3pm"`))
-	st := computeRuntimeStatus(".claude-a", Registry{})
+	st := computeRuntimeStatus(".claude-a", "", Registry{})
 	if st.Available || !st.Blocked || st.BlockKind != "usage" || !st.Throttled {
 		t.Fatalf("fresh ledger LIMIT should block, got %+v", st)
 	}
@@ -67,7 +132,7 @@ func TestLedgerIgnoredWithoutRegDir(t *testing.T) {
 	reg := Registry{Throttle: map[string]any{
 		".claude-a": map[string]any{"reset": futureResetStr(48 * time.Hour)},
 	}}
-	st := computeRuntimeStatus(".claude-a", reg)
+	st := computeRuntimeStatus(".claude-a", "", reg)
 	if st.Available || !st.Throttled {
 		t.Fatalf("without FLEET_REG_DIR the passive fold should keep the throttle, got %+v", st)
 	}
@@ -86,7 +151,7 @@ func TestSyntheticProbeRowWinsOverLedger(t *testing.T) {
 		ProbeStatus: "LIMIT",
 		Reason:      "usage limit",
 	}}}
-	st := computeRuntimeStatus(".claude-a", reg)
+	st := computeRuntimeStatus(".claude-a", "", reg)
 	if st.Available || st.BlockKind != "usage" || st.StatusSource != "probe" {
 		t.Fatalf("synthetic _probe row should win over the ledger, got %+v", st)
 	}
