@@ -342,6 +342,7 @@ func defaultSyncAheadAudit(ctx context.Context, repo, targetRef string) (safesyn
 	rangeSpec := targetRef + "..HEAD"
 	cmd := exec.CommandContext(ctx, "dos", "commit-audit", "--json", rangeSpec)
 	cmd.Dir = repo
+	configureDispatchHelperCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		if exit, ok := err.(*exec.ExitError); ok && len(out) == 0 {
@@ -392,6 +393,7 @@ func syncCommitSubject(ctx context.Context, repo, sha string) string {
 	}
 	cmd := exec.CommandContext(ctx, "git", "log", "-1", "--format=%s", sha)
 	cmd.Dir = repo
+	configureDispatchHelperCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
