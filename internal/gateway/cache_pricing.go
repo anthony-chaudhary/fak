@@ -257,10 +257,12 @@ type MechanismSavings struct {
 	ProviderPromptCacheWritePremiumTokenEquiv float64 `json:"provider_prompt_cache_write_premium_token_equiv"`
 	FakCompactionShedTokens                   uint64  `json:"fak_compaction_shed_tokens"`
 	// FakCompactionCacheReadTokens is the OBSERVED provider cache_read at this session's
-	// compaction fires — the warm/cold witness FakTokenEquiv prices the shed on. >0 means at
-	// least one fire landed on a WARM prefix (its shed tokens were already cache-reads, worth
-	// the 0.1x read marginal), so the shed is valued at that marginal, not full input. Same
-	// binary aggregate-warm rule the Track-2 report's compaction row uses (#2794/#2798).
+	// compaction fires — the warm witness FakTokenEquiv prices the shed on. It is the
+	// warmWitness argument to cacheprice.ShedTokenEquiv: the warm PORTION of the shed,
+	// min(shed, this), prices at the 0.1x read marginal (those tokens were already
+	// cache-reads); the cold remainder keeps full input. It is NOT a binary flip — a
+	// nonzero value discounts only the witnessed-warm slice, not the whole shed (the same
+	// proportional blend the Track-2 report's compaction row uses, #2794/#2798).
 	FakCompactionCacheReadTokens uint64 `json:"fak_compaction_cache_read_tokens,omitempty"`
 	FakKVPrefixReusedTokens      uint64 `json:"fak_kv_prefix_reused_tokens"`
 	FakVDSOAvoidedCalls          uint64 `json:"fak_vdso_avoided_calls"`
