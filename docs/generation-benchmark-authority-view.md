@@ -326,11 +326,12 @@ A future agent picking this up should, in order:
 3. **If assumption 2 survives**, build the read-only `fak bench authority-view
    --json` verb before wiring any gate. Derive first, refuse later; a gate on an
    underived column would hard-code the very human judgment the design claims to
-   have eliminated. Read it from `registry.jsonl` (or the typed seed at
-   [`internal/benchauthority/registry.go`](../internal/benchauthority/registry.go),
-   whose `Claim` type already has `Status` and `Provenance` fields and whose
-   `registry` slice is a deliberately empty seed awaiting exactly this
-   transcription).
+   have eliminated. Read it from `registry.jsonl`, or from the typed seam already
+   in the tree: [`internal/benchauthority/benchauthority.go`](../internal/benchauthority/benchauthority.go)
+   defines a `Claim` with both `Status` and `Provenance` fields, and
+   [`internal/benchauthority/registry.go`](../internal/benchauthority/registry.go)
+   holds `var registry = []Claim{}` — a deliberately empty seed awaiting exactly
+   this transcription.
 
 The hub ([`docs/generation.md`](generation.md)) stays the front door. The witness
 rungs ([`docs/generation-witness-ladders.md`](generation-witness-ladders.md)) stay
