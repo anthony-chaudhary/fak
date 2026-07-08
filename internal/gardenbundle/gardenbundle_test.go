@@ -184,6 +184,28 @@ func TestWindowgateIsGatingGardenMember(t *testing.T) {
 	}
 }
 
+func TestGrowthgateIsAdvisoryGardenMember(t *testing.T) {
+	var m *Member
+	for i := range Members {
+		if Members[i].Key == "growthgate" {
+			m = &Members[i]
+			break
+		}
+	}
+	if m == nil {
+		t.Fatal("growthgate member missing from the default garden bundle")
+	}
+	if m.Exec != "command" {
+		t.Fatalf("growthgate must run as a command member, got Exec=%q", m.Exec)
+	}
+	if got := strings.Join(m.Argv, " "); got != "fak growthgate --json" {
+		t.Fatalf("growthgate argv = %q", got)
+	}
+	if m.Gates {
+		t.Fatal("growthgate must be advisory (Gates:false): ledger bloat means 'run reap', not a hard red")
+	}
+}
+
 func TestRunMemberCommandExecRunsDirectly(t *testing.T) {
 	// A command member runs Argv[0] as a direct executable and parses its JSON
 	// stdout -- the Go-native member path, distinct from the python-script path.

@@ -158,6 +158,21 @@ var Members = []Member{
 		Kind:  "envelope",
 		Exec:  "command",
 	},
+	{
+		// Unbounded-growth rung: the recurring control-pane surface over
+		// internal/growthgate's census of append-only ledger/log bloat (the standing-
+		// bloat twin of the stallscan churn probe). Advisory like stale_leases — an
+		// ACTION verdict means "cap the write sites and run `fak growthgate --reap
+		// --apply`," a maintenance signal, not a hard red. It only bites on the
+		// scheduled fleet-host tick where the gitignored runtime ledgers live; a
+		// hermetic CI checkout has none, so it reads OK there.
+		Key:   "growthgate",
+		Label: "unbounded ledger growth",
+		Argv:  []string{"fak", "growthgate", "--json"},
+		Gates: false,
+		Kind:  "envelope",
+		Exec:  "command",
+	},
 }
 
 // DeepMember is the opt-in deep member (added by --deep). Non-gating advisory.
