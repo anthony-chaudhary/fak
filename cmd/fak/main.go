@@ -277,6 +277,8 @@ func main() {
 		cmdTreeDoctor(os.Args[2:])
 	case "git-maint":
 		cmdGitMaint(os.Args[2:])
+	case "clean-bins":
+		cmdCleanBins(os.Args[2:])
 	case "self-update":
 		cmdSelfUpdate(os.Args[2:])
 	case "slack":

@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build vet architest-gate test test-fast test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent vcache-gate claims-lint cache-headline-lint salience dos-lint index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
+.PHONY: ci build clean vet architest-gate test test-fast test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent vcache-gate claims-lint cache-headline-lint salience dos-lint index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
 
 VERIFY_LOOP_BUDGET ?= 30s
 TEST_DURATION_LEDGER ?= .fak/test-duration-ledger.json
@@ -36,6 +36,15 @@ build:
 	# Likewise the Go DOS dispatch-worker launcher — the interpreter-free cutover
 	# target for tools/dispatch_worker.py (parity-tested; see dos.toml [supervise]).
 	go build -o tools/.bin/dispatchworker ./cmd/dispatchworker
+
+# clean: prune the stray go-build binaries that pile up at the module root across
+# bench/demo builds (hundreds of MB of gitignored *.exe / bare cmd/<name> outputs).
+# The build-artifact twin of `git-maint`, safe by construction: it only ever removes
+# files git ignores and keeps the live `fak` binary. Run it from a loop/CI (or by hand)
+# to keep the tree from bloating; `make clean -- --dry-run`-style previews are available
+# via `go run ./cmd/fak clean-bins --dry-run`.
+clean:
+	go run ./cmd/fak clean-bins
 
 vet:
 	go vet ./...
