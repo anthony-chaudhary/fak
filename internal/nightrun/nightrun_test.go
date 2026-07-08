@@ -134,6 +134,65 @@ func TestSatisfies(t *testing.T) {
 	}
 }
 
+// TestSatisfiesLoopbackGateway pins the false-feasible fix: an auto-runnable serving
+// benchmark whose Run targets a loopback `fak serve` gateway is only feasible when a
+// serve is actually up on this box, so it is never picked and failed nightly on a
+// weights box with no gateway (the macbench case). A remote gateway and a Manual
+// recipe are NOT gated.
+func TestSatisfiesLoopbackGateway(t *testing.T) {
+	weightsBox := Capabilities{Box: "b", GPU: "none", Weights: true, Net: true, Creds: map[string]bool{}}
+	macbench := Task{ID: "bench-macbench", Requires: []Requirement{ReqWeights},
+		Run: "fak macbench health --gateway http://127.0.0.1:8080 --json"}
+
+	// serve DOWN → blocked with an actionable reason, not a silent false-feasible.
+	restore := gatewayReachable
+	t.Cleanup(func() { gatewayReachable = restore })
+	gatewayReachable = func(string) bool { return false }
+	if ok, why := weightsBox.Satisfies(macbench); ok {
+		t.Error("a loopback-gateway task must be blocked when no serve is up")
+	} else if !strings.Contains(why, "127.0.0.1:8080") || !strings.Contains(why, "fak serve") {
+		t.Errorf("blocked reason should name the addr and the fix; got %q", why)
+	}
+
+	// serve UP → feasible (the datum is genuinely collectable).
+	gatewayReachable = func(addr string) bool { return addr == "127.0.0.1:8080" }
+	if ok, why := weightsBox.Satisfies(macbench); !ok {
+		t.Errorf("a loopback-gateway task must be feasible when the serve is up; why=%q", why)
+	}
+
+	// A REMOTE gateway is never gated (it may well be up; gating would spuriously block).
+	gatewayReachable = func(string) bool { return false }
+	remote := Task{ID: "r", Requires: []Requirement{ReqWeights},
+		Run: "fak macbench health --gateway https://gw.example.com --json"}
+	if ok, why := weightsBox.Satisfies(remote); !ok {
+		t.Errorf("a remote-gateway task must not be gated on a local dial; why=%q", why)
+	}
+
+	// A Manual recipe is not gated (the operator brings the serve up as part of it).
+	manual := Task{ID: "m", Requires: []Requirement{ReqWeights}, Manual: true,
+		Run: "fak macbench all --gateway http://127.0.0.1:8080 --model qwen3.6-27b --json"}
+	if ok, why := weightsBox.Satisfies(manual); !ok {
+		t.Errorf("a Manual gateway recipe must stay surfaced, not dial-gated; why=%q", why)
+	}
+}
+
+func TestLocalLoopbackGateway(t *testing.T) {
+	cases := []struct{ run, want string }{
+		{"fak macbench health --gateway http://127.0.0.1:8080 --json", "127.0.0.1:8080"},
+		{"x --gateway=http://localhost:9000/v1", "localhost:9000"},
+		{"fak macbench --gateway http://127.0.0.1 --json", "127.0.0.1:80"},
+		{"fak macbench --gateway https://127.0.0.1 --json", "127.0.0.1:443"},
+		{"fak macbench --gateway https://gw.example.com --json", ""}, // remote → no gate
+		{"fak macbench --gateway <fak-gateway-base-url> --json", ""}, // placeholder → no gate
+		{"go test ./internal/compute", ""},                           // no gateway at all
+	}
+	for _, c := range cases {
+		if got := localLoopbackGateway(c.run); got != c.want {
+			t.Errorf("localLoopbackGateway(%q) = %q, want %q", c.run, got, c.want)
+		}
+	}
+}
+
 // --- selector determinism + ordering ---------------------------------------
 
 func TestRankFeasibleFirstAndDeterministic(t *testing.T) {

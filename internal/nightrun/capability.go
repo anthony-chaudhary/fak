@@ -4,12 +4,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Capabilities is the probed fact-sheet of THIS box — everything next() needs to
@@ -172,7 +175,38 @@ func (c Capabilities) Satisfies(t Task) (bool, string) {
 			}
 		}
 	}
+	// An auto-runnable Task whose Run targets a LOOPBACK gateway (a `fak serve` on
+	// this box) has an unmodeled runtime dependency the Requires set can't express:
+	// weights=true says "some weights exist", not "a serve is up on :8080". Without
+	// this gate a serving benchmark like `fak macbench --gateway http://127.0.0.1:8080`
+	// is picked as feasible on any weights box and fails EVERY night when no serve is
+	// running (connection refused), banking a useless failure row each sweep — the very
+	// "never select work the box can't do" contract this selector exists to keep. Dial
+	// the loopback address (a liveness READ, not running the task) and, when nothing is
+	// listening, report it as blocked with an actionable reason instead. A Manual recipe
+	// is skipped (the operator brings the serve up as part of the recipe), and a remote
+	// or placeholder gateway is not gated (see localLoopbackGateway) — so this can only
+	// ADD honesty, never spuriously block.
+	if !t.Manual {
+		if addr := localLoopbackGateway(t.Run); addr != "" && !gatewayReachable(addr) {
+			return false, "needs a live local gateway at " + addr + " (no serve reachable; start `fak serve`)"
+		}
+	}
 	return true, ""
+}
+
+// gatewayReachable reports whether something is accepting TCP connections at addr
+// (a "host:port"). It is a package var so a test can pin feasibility without a real
+// serve; the default dials with a short timeout — a loopback refusal returns
+// immediately, so a down gateway costs nothing, and this stays a liveness READ that
+// never runs the collection task (the plan/next/caps honesty boundary).
+var gatewayReachable = func(addr string) bool {
+	conn, err := net.DialTimeout("tcp", addr, 750*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 func (c Capabilities) meets(r Requirement) (bool, string) {
@@ -272,6 +306,56 @@ func localCheckpointPath(run string) string {
 		}
 	}
 	return ""
+}
+
+// localLoopbackGateway returns the "host:port" of a LOOPBACK --gateway URL a Task's
+// Run targets (127.0.0.1 / localhost / [::1]), or "" if the Run names no gateway, a
+// placeholder (<...>), or a REMOTE gateway. Only a loopback serve is a local runtime
+// dependency nightrun can gate: a task pointed at a remote gateway may well be up, and
+// gating on it would spuriously block, so a non-loopback host returns "" (no gate).
+// Deliberately conservative — an unrecognized shape returns "" — so this can only ADD
+// honesty, mirroring localCheckpointPath.
+func localLoopbackGateway(run string) string {
+	fields := strings.Fields(run)
+	for i, f := range fields {
+		if (f == "--gateway" || f == "-gateway") && i+1 < len(fields) {
+			return loopbackHostPort(fields[i+1])
+		}
+		if v, ok := strings.CutPrefix(f, "--gateway="); ok {
+			return loopbackHostPort(v)
+		}
+		if v, ok := strings.CutPrefix(f, "-gateway="); ok {
+			return loopbackHostPort(v)
+		}
+	}
+	return ""
+}
+
+// loopbackHostPort parses a gateway URL and returns "host:port" only when the host is
+// loopback (the one runtime dependency this box can actually gate), else "". A missing
+// port is filled from the scheme so the result is always dialable.
+func loopbackHostPort(raw string) string {
+	if raw == "" || strings.HasPrefix(raw, "<") {
+		return "" // placeholder — not a concrete gateway to probe
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	switch u.Hostname() {
+	case "127.0.0.1", "localhost", "::1":
+	default:
+		return "" // remote gateway — not a local dependency to gate
+	}
+	port := u.Port()
+	if port == "" {
+		if u.Scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	return net.JoinHostPort(u.Hostname(), port)
 }
 
 // hashedBoxID turns a hostname into a stable, non-leaking per-box id "box-<8hex>"
