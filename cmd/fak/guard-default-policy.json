@@ -121,7 +121,11 @@
     "todoread",
     "task",
     "skill",
-    "lsp"
+    "lsp",
+
+    "execute_code",
+    "write_file",
+    "edit_file"
   ],
 
   "allow_prefix": [
@@ -130,10 +134,19 @@
     "search_",
     "list_",
     "lookup_",
-    "find_"
+    "find_",
+    "web_",
+    "file_"
   ],
 
+  "deny": {
+    "delete_file": "POLICY_BLOCK"
+  },
+
   "arg_rules": [
+    { "tool": "execute_code", "arg": "code", "deny_regex": "rm\\s+-rf|sudo|os\\.system\\(|subprocess\\.|:(){:|:&};:", "reason": "POLICY_BLOCK",
+      "fix": "run the programmatic step without a shell escape: no rm -rf / sudo / os.system / subprocess / fork bomb — use the file/edit tools for writes and keep execute_code to pure computation" },
+
     { "tool": "Bash", "arg": "command", "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]", "reason": "POLICY_BLOCK",
       "fix": "delete exact files without -r/-f (rm <file>), or move them aside (mv <path> <trash-dir>); recursive/forced deletes are operator-only" },
     { "tool": "Bash", "arg": "command", "deny_regex": "\\bsudo\\b", "reason": "POLICY_BLOCK",
@@ -223,6 +236,7 @@
 
   "self_modify_globs": [
     ".git/",
+    ".hermes/",
     ".env",
     ".aws/",
     ".npmrc",

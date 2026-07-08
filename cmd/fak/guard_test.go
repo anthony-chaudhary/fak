@@ -184,11 +184,79 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"opencode write into .ssh allowed (issue #1086: remote dev-node SSH)", "write", `{"filePath":".ssh/authorized_keys","content":"x"}`, abi.VerdictAllow},
 		{"opencode edit into .git refused", "edit", `{"filePath":".git/config","oldString":"a","newString":"b"}`, abi.VerdictDeny},
 		{"opencode unlisted tool fails closed", "exfiltrate", `{}`, abi.VerdictDeny},
+
+		// Hermes Agent (#1327: signature tool names — snake_case tools, `path` arg,
+		// `execute_code` collapse-a-pipeline call). The doc headlines a bare
+		// `fak guard -- hermes` loading "a secure default capability floor", so the
+		// SHIPPED floor — not just a hand-authored one — must recognize these.
+		{"hermes read_file allowed (read_ prefix)", "read_file", `{"path":"README.md"}`, abi.VerdictAllow},
+		{"hermes web_search allowed (web_ prefix)", "web_search", `{"query":"fak kernel"}`, abi.VerdictAllow},
+		{"hermes web_fetch allowed (web_ prefix)", "web_fetch", `{"url":"https://example.com"}`, abi.VerdictAllow},
+		{"hermes write_file benign allowed", "write_file", `{"path":"notes.txt","content":"x"}`, abi.VerdictAllow},
+		{"hermes edit_file benign allowed", "edit_file", `{"path":"notes.txt","old":"a","new":"b"}`, abi.VerdictAllow},
+		{"hermes execute_code benign allowed", "execute_code", `{"code":"print(1 + 2)"}`, abi.VerdictAllow},
+		{"hermes execute_code os.system escape denied", "execute_code", `{"code":"import os; os.system(\"rm -rf /\")"}`, abi.VerdictDeny},
+		{"hermes execute_code subprocess escape denied", "execute_code", `{"code":"import subprocess; subprocess.run([\"rm\"])"}`, abi.VerdictDeny},
+		{"hermes write_file into .hermes/ refused (self-modify via path arg)", "write_file", `{"path":".hermes/config.yaml","content":"x"}`, abi.VerdictDeny},
+		{"hermes edit_file into .hermes/ refused (self-modify)", "edit_file", `{"path":".hermes/skills/x.md","old":"a","new":"b"}`, abi.VerdictDeny},
+		{"hermes delete_file denied by name (destructive class)", "delete_file", `{"path":"notes.txt"}`, abi.VerdictDeny},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := decide(tc.tool, tc.args).Kind; got != tc.want {
 				t.Errorf("%s: got verdict %v, want %v", tc.name, verdictName(got), verdictName(tc.want))
+			}
+		})
+	}
+}
+
+// #1327: the SHIPPED default floor must deny Hermes's primary capabilities for the
+// RIGHT reason, not merely fail closed. A Kind-only assertion cannot tell an
+// arg-gate POLICY_BLOCK apart from a self-modify SELF_MODIFY (both are DENY), yet
+// the doc's "capability floor" section promises exactly those two reason labels
+// (`fak preflight … --tool execute_code → reason=POLICY_BLOCK`, `--tool write_file
+// --args '{"path":".hermes/…"}' → reason=SELF_MODIFY`). Pin the reason so the
+// witness matches the documented out-of-box behavior.
+func TestGuardDefaultPolicyHermesReasons(t *testing.T) {
+	rt, err := policy.ParseRuntime(guardDefaultPolicyJSON)
+	if err != nil {
+		t.Fatalf("embedded guard floor is not a valid manifest: %v", err)
+	}
+	adj := adjudicator.New(rt.Adjudicator)
+	res := abi.ActiveResolver()
+	if res == nil {
+		t.Fatal("no Ref resolver registered (internal/registrations blank import missing)")
+	}
+	decide := func(tool, args string) abi.Verdict {
+		ref, err := res.Put(context.Background(), []byte(args))
+		if err != nil {
+			t.Fatalf("put args: %v", err)
+		}
+		return adj.Adjudicate(context.Background(), &abi.ToolCall{Tool: tool, Args: ref})
+	}
+
+	cases := []struct {
+		name       string
+		tool       string
+		args       string
+		wantKind   abi.VerdictKind
+		wantReason abi.ReasonCode
+	}{
+		{"execute_code shell-escape is POLICY_BLOCK (arg-gated, not default-deny)",
+			"execute_code", `{"code":"import os; os.system(\"rm -rf /\")"}`, abi.VerdictDeny, abi.ReasonPolicyBlock},
+		{"write_file into .hermes/ is SELF_MODIFY (reads Hermes path arg)",
+			"write_file", `{"path":".hermes/config.yaml","content":"x"}`, abi.VerdictDeny, abi.ReasonSelfModify},
+		{"delete_file is POLICY_BLOCK (explicit deny, not silent default-deny)",
+			"delete_file", `{"path":"notes.txt"}`, abi.VerdictDeny, abi.ReasonPolicyBlock},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := decide(tc.tool, tc.args)
+			if v.Kind != tc.wantKind {
+				t.Fatalf("%s: got verdict %v, want %v", tc.name, verdictName(v.Kind), verdictName(tc.wantKind))
+			}
+			if v.Reason != tc.wantReason {
+				t.Errorf("%s: got reason %q, want %q", tc.name, abi.ReasonName(v.Reason), abi.ReasonName(tc.wantReason))
 			}
 		})
 	}
