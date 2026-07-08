@@ -257,21 +257,80 @@ State them so a later agent can check them cheaply:
    governance bans — and the fix is to make the view refuse to render two rows
    side by side unless regime **and** horizon match.
 
+## First classification pass (sourced, mechanical)
+
+Step 1 of the handoff below assumed hand-classification. It does not need one: a
+**structured record already exists** — [`docs/benchmarks/registry.jsonl`](benchmarks/registry.jsonl),
+52 claims, one JSON object each, carrying two independent enums that are exactly
+the witness axis this memo reads:
+
+- `provenance` ∈ `measured` | `functional` | `modeled` | `unknown`
+- `status` ∈ `canonical` | `live` | `gated` | `pending` | `stale` | `retracted`
+
+Crossing them (reproduce below) gives the first pass:
+
+| Finding | Count |
+|---|---:|
+| `provenance: modeled` in a **citable** status (`canonical` 1 + `live` 5) | 6 |
+| `canonical × modeled` — top "quote this" tier, witness is a geometry model | **1** |
+| `unknown` provenance (`gated` 1, `pending` 1, `retracted` 4) | 6 |
+| `stale` / `retracted` — `RETIRED`, zero promotion relevance | 5 |
+
+```bash
+python -c "
+import json,collections
+R=[json.loads(l) for l in open('docs/benchmarks/registry.jsonl',encoding='utf-8') if l.strip()]
+print(dict(collections.Counter((r['status'],r['provenance']) for r in R)))
+"
+```
+
+**Result: one structural candidate, zero confirmed prose hits.** The single
+`canonical × modeled` row (`webbench-webvoyager-hero`) is entitled to `gen/future`
+by the ladder above (`MODELED` → projected), yet the record files it at
+`canonical`, `tier: 1` — the record's own words for *the number to quote*. Its
+prose, however, fences itself correctly ("MODELED geometry, no model … not
+measured"), and so do the other five modeled rows.
+
+So the hit is **structural, not editorial**: the prose fences hold, but the
+`status` field — which a citing agent reads *first*, and which outranks a fence it
+can skim past — encodes an authority the witness does not entitle. That is a
+weaker result than "prose laundering found," and a stronger one than the null
+result that would demote this memo: it relocates the laundering risk from the
+prose (already guarded by
+[`tools/check_provenance_labels.py`](../tools/check_provenance_labels.py)) to the
+**status/provenance pair, which no view reconciles.** A row's citability and its
+witness are set independently, and nothing renders them together.
+
+This sharpens, rather than replaces, the promotion path: the derived column is
+computable *today* from the committed record, with no new metadata — which is
+assumption 1 surviving its first contact with real data on 46 of 52 rows. The 6
+`unknown`-provenance rows are where it has not yet been tested, and the
+mixed-witness cache-savings row (assumption 1's named hard case) does not appear
+in the structured record as a separable claim at all — which is itself the
+evidence that per-*claim* rather than per-*row* granularity is the real
+requirement.
+
 ## Handoff (continue from here without the epic)
 
 A future agent picking this up should, in order:
 
-1. **Hand-classify the authority rows** into `(witness, entitled, relevance)`.
-   This is a single sitting, needs no code, and is the promotion witness for
-   `future → second-next`. Start with the fleet cache-savings row — it is the
-   deliberate stress test of assumption 1 (mixed witness in one row).
-2. **Look specifically for a `claimed > entitled` hit.** One real hit promotes;
-   zero hits demotes the memo to the promotion-relevance axis alone. Record which
-   happened either way — a null result here is a real finding, not a stall.
+1. ~~**Hand-classify the authority rows**~~ — **done mechanically above** against
+   `registry.jsonl`. Do not redo it by hand. The residual is the 6
+   `unknown`-provenance rows and the mixed-witness cache-savings row, which the
+   structured record does not decompose.
+2. **Reconcile `status` against `provenance`.** The one `canonical × modeled` cell
+   is the concrete target: either demote its status, or render every row as
+   `status (entitled: <horizon>)` so the pair cannot be read apart. A CI check
+   that merely *reports* the `canonical × modeled` count is the cheapest first
+   gate and would have caught this cell without a human.
 3. **If assumption 2 survives**, build the read-only `fak bench authority-view
    --json` verb before wiring any gate. Derive first, refuse later; a gate on an
    underived column would hard-code the very human judgment the design claims to
-   have eliminated.
+   have eliminated. Read it from `registry.jsonl` (or the typed seed at
+   [`internal/benchauthority/registry.go`](../internal/benchauthority/registry.go),
+   whose `Claim` type already has `Status` and `Provenance` fields and whose
+   `registry` slice is a deliberately empty seed awaiting exactly this
+   transcription).
 
 The hub ([`docs/generation.md`](generation.md)) stays the front door. The witness
 rungs ([`docs/generation-witness-ladders.md`](generation-witness-ladders.md)) stay
