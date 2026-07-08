@@ -39,13 +39,24 @@ type Candidate struct {
 	Body   string `json:"body,omitempty"`
 }
 
+// Label is one gh label name on a backlog issue. It is bonus evidence for the
+// retrospective census (a shared label strengthens a proposed cluster) and is
+// never read by the write-time gate, whose backlog read omits labels.
+type Label struct {
+	Name string `json:"name"`
+}
+
 // BacklogIssue is one row of read-only `gh issue list --json number,title,body`
-// output — the only shape the index is built from, so the whole path stays
-// offline-safe (cached reads in, verdicts out, no gh write anywhere).
+// output (the write-time gate) or `...,labels` (the census) — the only shape the
+// index is built from, so the whole path stays offline-safe (cached reads in,
+// verdicts out, no gh write anywhere). Labels is optional: the write-time gate
+// leaves it nil, the census fills it from the labels field for shared-label
+// evidence.
 type BacklogIssue struct {
-	Number int    `json:"number"`
-	Title  string `json:"title"`
-	Body   string `json:"body,omitempty"`
+	Number int     `json:"number"`
+	Title  string  `json:"title"`
+	Body   string  `json:"body,omitempty"`
+	Labels []Label `json:"labels,omitempty"`
 }
 
 // Verdict is one dup-risk match. It always carries the matched issue's number
