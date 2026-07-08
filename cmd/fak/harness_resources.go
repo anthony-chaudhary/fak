@@ -15,7 +15,7 @@ import (
 // and an empty snapshot (resource-stats off) is never reached because the caller gates
 // on the sampler being present. Epic #2044 / #2046.
 func appendHarnessResources(mode, provider, agent string, snap harnessres.Snapshot) {
-	_ = appendHarnessResourcesTo(harnessres.DefaultLedgerRel, mode, provider, agent, snap, time.Now())
+	_ = appendHarnessResourcesTo(nightrunLedgerPath(harnessres.DefaultLedgerRel), mode, provider, agent, snap, time.Now())
 }
 
 // appendHarnessResourcesTo is the testable core: it renders the row and appends it to

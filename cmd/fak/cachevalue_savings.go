@@ -17,7 +17,7 @@ const (
 )
 
 func appendObservedCacheSavings(sessionType, provider, context string, sum gateway.AdjudicationSummary) {
-	_ = appendObservedCacheSavingsTo(cachevaluereport.DefaultSavingsLedgerRel, sessionType, provider, context, sum, time.Now())
+	_ = appendObservedCacheSavingsTo(nightrunLedgerPath(cachevaluereport.DefaultSavingsLedgerRel), sessionType, provider, context, sum, time.Now())
 }
 
 type cacheValueAppendResult struct {

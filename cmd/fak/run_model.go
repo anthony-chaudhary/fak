@@ -76,7 +76,7 @@ func runChatModel(argv []string) {
 	// Append cache-value observation to ledger (epic #1072, issue #1075).
 	stats := cacheobs.Default.Snapshot()
 	if stats.Turns > 0 {
-		_ = cachevalueledger.Append("run", modelRef, cachevalueledger.DefaultLedgerRel, stats)
+		_ = cachevalueledger.Append("run", modelRef, nightrunLedgerPath(cachevalueledger.DefaultLedgerRel), stats)
 	}
 	// #1303 names this exit point alongside guard_child.go/serve.go for the Track-2
 	// appendObservedCacheSavings(sessionType, provider, context, gateway.AdjudicationSummary)

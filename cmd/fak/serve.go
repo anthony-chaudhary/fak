@@ -381,7 +381,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 func persistCacheValueObservations(srv *gateway.Server, kind, name, provider string) {
 	stats := cacheobs.Default.Snapshot()
 	if stats.Turns > 0 {
-		_ = cachevalueledger.Append(kind, name, cachevalueledger.DefaultLedgerRel, stats)
+		_ = cachevalueledger.Append(kind, name, nightrunLedgerPath(cachevalueledger.DefaultLedgerRel), stats)
 	}
 	appendObservedCacheSavings(kind, provider, name, srv.AdjudicationSummary())
 	if turns, _ := srv.VCacheTurnsSnapshot(); len(turns) > 0 {
@@ -453,7 +453,7 @@ func gatewayUsageCounters(srv *gateway.Server) gatewayusageledger.Counters {
 // session. context is a free-form label (e.g. "http"/"stdio").
 func persistGatewayUsageObservation(srv *gateway.Server, sessionType, context string, uptime time.Duration) {
 	row := gatewayusageledger.NewRow("exit", sessionType, context, "", uptime, gatewayUsageCounters(srv), time.Now())
-	if err := gatewayusageledger.Append(gatewayusageledger.DefaultLedgerRel, row); err != nil {
+	if err := gatewayusageledger.Append(nightrunLedgerPath(gatewayusageledger.DefaultLedgerRel), row); err != nil {
 		fmt.Fprintf(os.Stderr, "fak: gateway-usage ledger append failed (non-fatal): %v\n", err)
 	}
 }
@@ -470,6 +470,9 @@ func startGatewayUsageSnapshotLoop(ctx context.Context, srv *gateway.Server, int
 		return func() {}
 	}
 	loopCtx, cancel := context.WithCancel(ctx)
+	// Anchor to the repo root ONCE (not per tick) so the periodic append lands in the
+	// real docs/nightrun regardless of cwd, without re-walking the tree every interval.
+	ledgerPath := nightrunLedgerPath(gatewayusageledger.DefaultLedgerRel)
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
@@ -480,7 +483,7 @@ func startGatewayUsageSnapshotLoop(ctx context.Context, srv *gateway.Server, int
 			case <-t.C:
 				now := time.Now()
 				row := gatewayusageledger.NewRow("periodic", sessionType, "snapshot", "", now.Sub(startedAt), gatewayUsageCounters(srv), now)
-				if err := gatewayusageledger.Append(gatewayusageledger.DefaultLedgerRel, row); err != nil {
+				if err := gatewayusageledger.Append(ledgerPath, row); err != nil {
 					fmt.Fprintf(os.Stderr, "fak: gateway-usage periodic snapshot failed (non-fatal): %v\n", err)
 				}
 			}

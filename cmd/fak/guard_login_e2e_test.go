@@ -66,6 +66,14 @@ func runGuardE2E(t *testing.T, args string, env map[string]string) (exitCode int
 	defer devNull.Close()
 
 	cmd := exec.CommandContext(ctx, os.Args[0])
+	// Run the wrapped guard from a throwaway cwd, NOT the cmd/fak package dir. The
+	// guard exit path appends telemetry to repo-root-relative ledgers (harness-resources,
+	// gateway-usage); with cwd=cmd/fak those writes forked a tracked shadow tree at
+	// cmd/fak/docs/nightrun/*.jsonl that re-dirtied on every test run. A temp cwd has no
+	// go.mod ancestor, so nightrunLedgerPath()'s repoRoot() walk falls back to it and the
+	// rows land under the temp dir instead of the repo. The tests assert only on exit code,
+	// stdout, and the fake-git call log (an absolute temp path), so cwd is otherwise inert.
+	cmd.Dir = t.TempDir()
 	cmd.Env = append(os.Environ(), guardE2EHelperEnv+"="+args)
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+v)
