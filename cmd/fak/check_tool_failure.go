@@ -21,11 +21,16 @@ func runCheckToolFailure(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit JSON")
 	list := fs.Bool("list", false, "list the closed non-guard tool-failure vocabulary")
 	message := fs.String("message", "", "classify a raw tool-failure message into the closed vocabulary")
+	resume := fs.Bool("resume", false, "report the partial state + safe resume of a mutating op killed on timeout (see --op), instead of a bare exit-143")
+	op := fs.String("op", "commit-push", "the killed mutating op to diagnose for --resume (currently: commit-push)")
+	dir := fs.String("dir", ".", "repository directory to inspect for --resume")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
 
 	switch {
+	case *resume:
+		return runToolResumePlan(stdout, stderr, *op, *dir, *asJSON)
 	case *list:
 		return renderToolFailureList(stdout, stderr, *asJSON)
 	case strings.TrimSpace(*message) != "":
@@ -43,7 +48,7 @@ func runCheckToolFailure(stdout, stderr io.Writer, argv []string) int {
 		}
 		return renderToolFailureSpec(stdout, stderr, spec, *asJSON)
 	default:
-		fmt.Fprintln(stderr, "usage: fak check-tool-failure [--json] [--list | --message TEXT | TOKEN]")
+		fmt.Fprintln(stderr, "usage: fak check-tool-failure [--json] [--list | --message TEXT | --resume [--op OP] [--dir DIR] | TOKEN]")
 		return 2
 	}
 }
