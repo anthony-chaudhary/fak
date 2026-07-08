@@ -237,6 +237,16 @@ unavailable, and say so.
   (`rg --files | rg <pat>`) or anchor **and** bound: `find /c/work/fak -xdev -maxdepth 8 …`,
   `timeout`-wrapped. Backstop: `tools/runaway_process_reaper.ps1` reaps stragglers; audit
   anytime with `tools/runaway_process_scan.ps1`.
+- **Random whole-machine stalls at "low usage" are kernel-path CHURN, not disk/RAM.** When
+  the box locks up for a beat while CPU/RAM/disk read fine, the cause is soft-fault + process-
+  spawn storms saturating the scheduler/page-fault locks — invisible to every usage meter
+  (diagnosed 2026-07-07, issue #3153). Fingerprint it with **`fak stallscan`** (one-shot) or
+  **`fak stallscan --watch`** (rolling JSONL self-monitor): it reads the churn axes (soft vs
+  hard faults, ctx-switch/syscall rate, spawn bursts) and names the cause, ruling out disk/RAM.
+  Run it in the background by default with `tools/fak_stall_monitor.ps1 -Install` (logon task,
+  `-AutoMitigate` to auto-tame the floor). The non-fak daemon floor (AMD AUEPMaster telemetry,
+  Defender, CCleaner) is tamed reversibly by `tools/host_stall_mitigations.ps1` (preview by
+  default, `-Apply` to act). Fak's own churn sources track under #3153 (#3154-#3157).
 - **On this Windows host, run git (and anything you can't afford to hang) through the
   PowerShell tool, not the Bash tool.** MSYS Bash stalls intermittently: `git diff`,
   `git log`, `git status`, even `git remote -v` sit until the 120s tool timeout and die
