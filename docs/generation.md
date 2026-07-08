@@ -180,7 +180,11 @@ policy that later code can enforce. The option-contract shape such a bet must
 carry — assumption set, reversible seam, cost to keep alive, promotion trigger,
 and kill trigger — is pinned in
 [`docs/generation-second-next-option-contracts.md`](generation-second-next-option-contracts.md),
-the `gen/second-next` companion to the `gen/future` real-options model.
+the `gen/second-next` companion to the `gen/future` real-options model. The
+metadata and reporting for a dependency that crosses a generation boundary — how
+the edge is recorded and how a stalled forward bet surfaces in the debt metric —
+is pinned in
+[`docs/generation-cross-generation-dependency-edges.md`](generation-cross-generation-dependency-edges.md).
 
 `gen/future`: research a standards analogue or market-facing narrative, with a
 memo that names the decision it could influence.
