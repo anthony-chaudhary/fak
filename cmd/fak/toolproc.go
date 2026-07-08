@@ -115,13 +115,13 @@ func toolprocHookRun(stdin io.Reader, kind, journalPath string, envFor func(tool
 			return fmt.Errorf("parse hook payload: %w", err)
 		}
 	}
-	var existing []toolproc.Event
-	if f, err := os.Open(journalPath); err == nil {
-		existing, err = toolproc.ParseEvents(f)
-		f.Close()
-		if err != nil {
-			return fmt.Errorf("existing journal unreadable: %w", err)
-		}
+	// Only the tail is parsed: the journal is shared and append-only across all
+	// guarded sessions and grows without bound, so a full parse here is the
+	// O(journal) soft-fault storm behind #3154. HookEvents only correlates the
+	// current call's own recent events, which live near the tail.
+	existing, err := toolproc.ParseTailFile(journalPath)
+	if err != nil {
+		return fmt.Errorf("existing journal unreadable: %w", err)
 	}
 	evs, err := toolproc.HookEvents(kind, payload, envFor, nowMS, existing)
 	if err != nil || len(evs) == 0 {
