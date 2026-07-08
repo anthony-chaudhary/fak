@@ -135,6 +135,94 @@ func TestRouter_Cost_PicksCheapestThatFits(t *testing.T) {
 	}
 }
 
+func TestRouter_MaxCost_PicksCheapestWithinBudget(t *testing.T) {
+	// small(1) overflows at 8000 tokens; medium(5) fits and is under a $10 ceiling;
+	// large(20) is over the ceiling -> medium wins and large is excluded entirely.
+	r := threeTier(StrategyHybrid)
+	rc := Classify(8000, LatencyUnknown, ComplexityLow)
+	rc.MaxCostPerMTok = 10
+	d, err := r.Route(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if d.Tier.Name != "medium" {
+		t.Fatalf("an $10 ceiling should admit medium(5) but not large(20), got %q (%s)", d.Tier.Name, d.Reason)
+	}
+	// large(20) is over the ceiling, so it must not appear in the fallback chain either.
+	for _, f := range d.Fallbacks {
+		if f.Name == "large" {
+			t.Fatalf("large(20) is over the $10 ceiling and must be excluded from fallbacks, got %+v", d.Fallbacks)
+		}
+	}
+}
+
+func TestRouter_MaxCost_AllOverCeilingIsErrNoTier(t *testing.T) {
+	// A ceiling below the cheapest tier's cost refuses fail-closed rather than
+	// silently serving from a pricier tier — fak's max_price analogue.
+	r := threeTier(StrategyHybrid)
+	rc := Classify(100, LatencyUnknown, ComplexityLow)
+	rc.MaxCostPerMTok = 0.5 // below small(1)
+	if _, err := r.Route(rc); !errors.Is(err, ErrNoTier) {
+		t.Fatalf("a ceiling under every tier's cost should be ErrNoTier, got %v", err)
+	}
+}
+
+func TestRouter_MaxCost_CapacityAndCeilingCompound(t *testing.T) {
+	// 8000 tokens overflows small(4k); a $4 ceiling excludes medium(5) and large(20).
+	// Capacity and ceiling compound to leave no candidate -> ErrNoTier.
+	r := threeTier(StrategyHybrid)
+	rc := Classify(8000, LatencyUnknown, ComplexityLow)
+	rc.MaxCostPerMTok = 4
+	if _, err := r.Route(rc); !errors.Is(err, ErrNoTier) {
+		t.Fatalf("small over-capacity + medium/large over-ceiling should be ErrNoTier, got %v", err)
+	}
+}
+
+func TestRouter_MaxCost_ZeroIsUnbounded(t *testing.T) {
+	// The default (0) imposes no ceiling: routing is identical to no max_price.
+	r := threeTier(StrategyHybrid)
+	rc := Classify(100, LatencyUnknown, ComplexityLow)
+	rc.MaxCostPerMTok = 0
+	d, err := r.Route(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if d.Tier.Name != "small" {
+		t.Fatalf("a 0 ceiling should be unbounded and route to small, got %q", d.Tier.Name)
+	}
+}
+
+func TestRouter_MaxCost_CostStrategyRespectsCeiling(t *testing.T) {
+	// Cost strategy would pick the cheapest tier (b=3); a $4 ceiling that still admits
+	// b confirms the ceiling and the strategy agree, and a $2 ceiling that excludes ALL
+	// refuses rather than picking the next-cheapest above budget.
+	cfg := RouterConfig{
+		Strategy: StrategyCostBased,
+		Tiers: []Tier{
+			{Name: "a", Model: "a", MaxPromptTokens: 10000, CostPerMTok: 8, Interactive: true},
+			{Name: "b", Model: "b", MaxPromptTokens: 10000, CostPerMTok: 3, Interactive: true},
+			{Name: "c", Model: "c", MaxPromptTokens: 10000, CostPerMTok: 5, Interactive: true},
+		},
+	}
+	r, err := NewRouter(cfg)
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+	rc := Classify(100, LatencyUnknown, ComplexityLow)
+	rc.MaxCostPerMTok = 4
+	d, err := r.Route(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if d.Tier.Name != "b" {
+		t.Fatalf("a $4 ceiling should still pick the cheapest fitting tier b(3), got %q", d.Tier.Name)
+	}
+	rc.MaxCostPerMTok = 2 // below every tier
+	if _, err := r.Route(rc); !errors.Is(err, ErrNoTier) {
+		t.Fatalf("a $2 ceiling below every tier should be ErrNoTier, got %v", err)
+	}
+}
+
 func TestRouter_Health_FallsBackToNextTier(t *testing.T) {
 	r := threeTier(StrategySizeBased)
 	if !r.Healthy("small") {

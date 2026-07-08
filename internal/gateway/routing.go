@@ -127,6 +127,12 @@ type RequestClass struct {
 	Latency LatencyClass
 	// Complexity is the request's coarse difficulty.
 	Complexity Complexity
+	// MaxCostPerMTok is an optional price ceiling in the same relative unit as
+	// Tier.CostPerMTok: Route keeps only tiers at or under it, and returns ErrNoTier
+	// when none qualify. 0 (the default) imposes no ceiling. It is fak's deterministic,
+	// FAIL-CLOSED analogue of OpenRouter's provider `max_price` — a request that cannot
+	// be served within budget is refused, never silently served by a pricier tier.
+	MaxCostPerMTok float64
 }
 
 // RouterConfig is the configurable routing policy: the strategy and the ordered tiers.
@@ -177,9 +183,10 @@ func (c RouterConfig) Validate() error {
 }
 
 // ErrNoTier is returned by Route when no healthy tier can satisfy the request (the
-// prompt exceeds every capacity, every adequate tier is unhealthy, or an interactive
-// request finds no interactive-capable tier). It is a structured refusal: the caller
-// maps it to a 503 / replan, never a silent mis-route.
+// prompt exceeds every capacity, every adequate tier is unhealthy, an interactive
+// request finds no interactive-capable tier, or every adequate tier is priced above the
+// request's MaxCostPerMTok ceiling). It is a structured refusal: the caller maps it to a
+// 503 / replan, never a silent mis-route.
 var ErrNoTier = errors.New("routing: no healthy tier satisfies the request")
 
 // Decision is the outcome of Route: the selected tier, the ordered health fallback
@@ -312,6 +319,9 @@ func (r *Router) Route(req RequestClass) (Decision, error) {
 		if req.Latency == LatencyInteractive && !t.Interactive {
 			continue // interactive turn cannot use a batch-only tier
 		}
+		if req.MaxCostPerMTok > 0 && t.CostPerMTok > req.MaxCostPerMTok {
+			continue // priced above the request's max_price ceiling (fail-closed to ErrNoTier)
+		}
 		cands = append(cands, cand{idx: i, tier: t})
 	}
 	if len(cands) == 0 {
@@ -349,12 +359,18 @@ func (r *Router) Route(req RequestClass) (Decision, error) {
 		return tierCapacityLess(fallbacks[a], fallbacks[b])
 	})
 
+	reason := fmt.Sprintf("strategy=%s prompt_tokens=%d latency=%s complexity=%d",
+		r.strategy, req.PromptTokens, req.Latency, req.Complexity)
+	if req.MaxCostPerMTok > 0 {
+		reason += fmt.Sprintf(" max_cost_per_mtok=%g", req.MaxCostPerMTok)
+	}
+	reason += fmt.Sprintf(" -> tier=%s", cands[winner].tier.Name)
+
 	return Decision{
 		Tier:      cands[winner].tier,
 		Fallbacks: fallbacks,
 		Strategy:  r.strategy,
-		Reason: fmt.Sprintf("strategy=%s prompt_tokens=%d latency=%s complexity=%d -> tier=%s",
-			r.strategy, req.PromptTokens, req.Latency, req.Complexity, cands[winner].tier.Name),
+		Reason:    reason,
 	}, nil
 }
 
