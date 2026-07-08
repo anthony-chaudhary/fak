@@ -70,10 +70,16 @@ if ($Install) {
   $self = $MyInvocation.MyCommand.Path
   $args = "-NoProfile -ExecutionPolicy Bypass -File `"$self`" -Interval $Interval"
   if ($AutoMitigate) { $args += ' -AutoMitigate' }
-  $action  = New-ScheduledTaskAction -Execute $pwsh -Argument $args
+  # Route the pwsh child through `conhost.exe --headless` so the logon task never
+  # flashes a console window on the desktop, and pin the task to an off-desktop
+  # S4U principal (session 0) as a second guard — both are the windowless recipes
+  # the popup gate (internal/windowgate) accepts.
+  $conhost = "$env:SystemRoot\System32\conhost.exe"
+  $action  = New-ScheduledTaskAction -Execute $conhost -Argument "--headless `"$pwsh`" $args"
+  $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
   $trigger = New-ScheduledTaskTrigger -AtLogOn
   $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-  Register-ScheduledTask -TaskName 'FakStallMonitor' -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
+  Register-ScheduledTask -TaskName 'FakStallMonitor' -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Force | Out-Null
   Write-Host "[stall-mon] installed Scheduled Task 'FakStallMonitor' (runs at logon)."
   Write-Host "[stall-mon] UNDO: Unregister-ScheduledTask -TaskName 'FakStallMonitor' -Confirm:`$false"
   return
