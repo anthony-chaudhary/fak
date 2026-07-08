@@ -167,6 +167,54 @@ func TestGLMMoeDsaConfig(t *testing.T) {
 	}
 }
 
+// TestGLMMoeDsaIndexerTypesDerivedFromTensors covers the DSA-indexer schedule DERIVATION: the
+// real GLM-5.2 GGUF ships no indexer_types metadata key, so (*File).Config() must reconstruct the
+// per-layer full/shared schedule from indexer-tensor presence. Here layers 0 and 1 carry the
+// indexer weights and layers 2 and 3 do not, so the derived schedule is [full full shared shared].
+// Without the derivation cfg.IndexerTypes is empty, glmDsaIndexerKind treats every layer as "full",
+// and the native DSA forward panics demanding blk.2/3.indexer.* tensors that a shared layer omits.
+func TestGLMMoeDsaIndexerTypesDerivedFromTensors(t *testing.T) {
+	meta := synthGLMMeta(4) // arch "glm-dsa" (normalizes to glm_moe_dsa); carries NO indexer_types key
+	meta["glm-dsa.block_count"] = Value{Type: TypeUint64, Value: uint64(4)}
+	f := &File{
+		Metadata: meta,
+		Tensors: []TensorInfo{
+			// Only the "full" layers carry indexer weights; a shared layer omits them.
+			{Name: "blk.0.indexer.attn_q_b.weight", Dims: []uint64{8, 8}, Type: TensorF32},
+			{Name: "blk.1.indexer.attn_q_b.weight", Dims: []uint64{8, 8}, Type: TensorF32},
+		},
+	}
+	cfg, err := f.Config()
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+	want := []string{"full", "full", "shared", "shared"}
+	if len(cfg.IndexerTypes) != len(want) {
+		t.Fatalf("IndexerTypes=%v, want %v", cfg.IndexerTypes, want)
+	}
+	for i, w := range want {
+		if cfg.IndexerTypes[i] != w {
+			t.Fatalf("IndexerTypes=%v, want %v", cfg.IndexerTypes, want)
+		}
+	}
+}
+
+// TestGLMMoeDsaIndexerTypesNoDeriveWithoutIndexer proves the derivation is gated on a genuine DSA
+// checkpoint: a glm_moe_dsa file with NO indexer tensors at all (e.g. the synthetic/pipelinegen
+// dense variant) leaves cfg.IndexerTypes empty rather than fabricating an all-"shared" schedule.
+func TestGLMMoeDsaIndexerTypesNoDeriveWithoutIndexer(t *testing.T) {
+	meta := synthGLMMeta(4)
+	meta["glm-dsa.block_count"] = Value{Type: TypeUint64, Value: uint64(4)}
+	f := &File{Metadata: meta} // no tensors -> blk.0 indexer absent -> skip derivation
+	cfg, err := f.Config()
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+	if len(cfg.IndexerTypes) != 0 {
+		t.Fatalf("IndexerTypes=%v, want empty (no indexer tensors -> no derivation)", cfg.IndexerTypes)
+	}
+}
+
 // TestGLMDsaArchNormalizes proves fak loads the REAL GLM-5.2 GGUF arch — general.architecture
 // = "glm-dsa" (llama.cpp LLM_ARCH_GLM_DSA), validated against the on-disk community Q4_K_M on
 // the lab GPU server 2026-06-24 — not just fak's internal "glm_moe_dsa" spelling: Config()

@@ -504,7 +504,27 @@ func applyGLMMoeDsaConfig(f *File, p string, cfg *model.Config, ropeDim int) {
 	if v := intValueOrZero(f, p+glmKeyIndexTopK); v > 0 {
 		cfg.IndexTopK = v
 	}
+	// indexer_types: GLM-5.2's DSA "lightning indexer" runs on only a strided subset of
+	// layers. A "full" layer computes its own sparse top-k index and carries the indexer.*
+	// tensors; a "shared" layer reuses the most recent full layer's selection and has NO
+	// indexer tensors in the file. The real GLM-5.2 GGUF ships no indexer_types metadata
+	// key, so when it is absent we DERIVE the per-layer schedule from tensor presence:
+	// a layer is "full" iff its indexer weights are in the file, else "shared". Without
+	// this cfg.IndexerTypes stays empty, glmDsaIndexerKind() treats every layer as "full"
+	// (its out-of-range default), and the forward panics demanding indexer tensors on the
+	// first shared layer (blk.3.indexer.* is absent) at the first completion.
 	if types, ok := f.StringArray(p + glmKeyIndexerTypes); ok {
+		cfg.IndexerTypes = types
+	} else if cfg.NumLayers > 0 && f.hasTensor("blk.0."+glmGGUFIndexerWQB) {
+		// Only derive for a genuine DSA-indexer checkpoint (layer 0 is always full).
+		types := make([]string, cfg.NumLayers)
+		for l := 0; l < cfg.NumLayers; l++ {
+			if f.hasTensor(fmt.Sprintf("blk.%d.%s", l, glmGGUFIndexerWQB)) {
+				types[l] = "full"
+			} else {
+				types[l] = "shared"
+			}
+		}
 		cfg.IndexerTypes = types
 	}
 }
