@@ -101,6 +101,7 @@ var tier = map[string]int{
 	"memorycotravel":       1,                // stdlib-only project memory co-travel gate/ledger for shadow/live carryover between config roots; off the hot path.
 	"memorystability":      1,                // stdlib-only fleet-memory stability governor over drift trajectories; off the hot path.
 	"memoryread":           1,                // read-only committed fleet-memory digest renderer; stdlib-only, off the hot path.
+	"fleetmemory":          1,                // cross-agent lessons ledger (#2141) + its write-time dedup guard (#2142): New/Match/Inject fold publishable lessons into a key-indexed Ledger and select by trigger for peer injection (freshness re-verify is the caller's job — the dos_recall discipline); stdlib-only, imports nothing internal, off the hot path.
 	"nodecompare":          1,                // stdlib-only cross-node benchmark result fold; off the hot path.
 	"planaudit":            1,                // stdlib-only plan-doc drift audit; off the hot path.
 	"sotacoverage":         1,                // SOTA prior-art coverage scorecard over sotamatrix + git tree scans; imports sotamatrix(1)+windowgate(1), off the hot path.
