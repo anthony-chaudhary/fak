@@ -1,0 +1,313 @@
+package main
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/affectedtests"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
+)
+
+// cmd/fak/prepush_build.go — `fak hooks pre-push`: the push-seam compile gate
+// TRUNK_WOULD_NOT_COMPILE. Answer "would the commits this push ADDS to the trunk still
+// compile for every OTHER worker's build graph?" WITHOUT trusting the peer-dirty working
+// tree.
+//
+// Why this exists (the gap it closes). `dos arbitrate` gives workers DISJOINT FILE leases,
+// but Go compiles at PACKAGE granularity and the whole module shares one build graph. So two
+// workers on the shared trunk holding disjoint file leases — even in different packages — can
+// still red each other's `go build`: a caller lands referencing a symbol whose callee edit
+// is not yet committed (`undefined: X`), or a callee removes an exported symbol an importer
+// still calls. Nothing at the commit or push seam builds anything today (the git hooks and
+// `fak commit` run only content/structural gates; `make ci`'s `go build ./...` is CI/manual),
+// so such a break lands on origin and poisons every peer that fetches — the witnessed #1338
+// class (docs/notes/SHARED-TRUNK-COMPILE-INTEGRITY-GAP-2026-07-06.md). This verb is that
+// note's "Rung B": at the push boundary, build the pushed state in ISOLATION and refuse if
+// it would not compile.
+//
+// How (reuses the ci-preflight / affected machinery, nothing new invented):
+//   - resolve the range this push adds (origin/<branch> → origin/main → origin/master), take
+//     its committed changed .go files via `git diff --name-only <base>...HEAD` (three-dot:
+//     the merge-base range = "commits this push adds", NEVER the dirty working tree);
+//   - materialize the committed tip in a throwaway checkout (extractCommittedTip → `git
+//     archive HEAD | tar -x`), immune to peer WIP;
+//   - build the import graph THERE (goListGraph in the archive dir) and select the changed
+//     packages PLUS their importer closure (affectedtests.Select) — the importer build is what
+//     surfaces the cross-package symbol break;
+//   - `go build <selected>` natively in the archive dir (native go build works on win32;
+//     only `go test` exec is OS-blocked).
+//
+// This verb is a DETECTOR, mode-agnostic like `fak hygiene` behind the TIER_DECLARED rung:
+// exit 0 = clean/NOOP, 1 = TRUNK_WOULD_NOT_COMPILE, 2 = could-not-run (fail-open). The
+// tools/githooks/pre-push shell owns the FLEET_BUILD_GUARD block|warn|off mode and the
+// FLEET_ALLOW_BUILD_BREAK one-shot escape — one place, mirroring the other push-seam gates.
+// A slow-but-GREEN build is never a block: a build over FLEET_BUILD_BUDGET reports
+// GATE_LATENCY_REGRESSION but still exits 0 (penalizing a push for touching a popular leaf
+// would be worse than the latency).
+//
+// Honest limit: this gates a single clone's push and covers mutation/addition breaks (the
+// #1338 shape). A change that ONLY deletes a file with no other edit in its package, or two
+// clones racing the same trunk, is narrowed but not fully closed — `make ci` on the merged
+// tree stays the authoritative oracle.
+//
+//	fak hooks pre-push               # human summary; exit 1 iff the pushed tip would not build
+//	fak hooks pre-push --json        # machine result (schema fak.trunk_build.v1)
+//	fak hooks pre-push --base R      # override the base ref the range is computed against
+//	fak hooks pre-push --budget 60s  # GATE_LATENCY_REGRESSION advisory over this build time
+
+// Seams (overridable in tests) over the impure git/go steps. Helpers are defined LOCAL to this
+// file (prepushGitRevParse / prepushArchiveTip) rather than borrowed from ci_preflight.go so the
+// gate stays self-contained on the shared trunk — it must not depend on a sibling file that may
+// be a peer's uncommitted WIP (the very build-integrity hazard this gate exists to catch).
+var (
+	prepushRevParse     = prepushGitRevParse
+	prepushResolveBase  = resolvePrepushBase
+	prepushChangedFiles = gitChangedGoFilesRange
+	prepushExtractTip   = prepushArchiveTip
+	prepushListGraph    = goListGraph
+	prepushBuild        = goBuildPackages
+	prepushNow          = time.Now
+)
+
+// trunkBuildResult is the JSON-stable verdict for agents / the shell rung.
+type trunkBuildResult struct {
+	Schema           string   `json:"schema"`           // fak.trunk_build.v1
+	Reason           string   `json:"reason,omitempty"` // "TRUNK_WOULD_NOT_COMPILE" | "" (empty when it builds/NOOP)
+	OK               bool     `json:"ok"`               // true iff the push may proceed on build grounds
+	Ref              string   `json:"ref"`              // resolved HEAD sha (the pushed tip)
+	Base             string   `json:"base"`             // the base ref the range was computed against
+	ChangedPackages  []string `json:"changed_packages"`
+	SelectedPackages []string `json:"selected_packages"` // changed + importer closure — what was built
+	Detail           string   `json:"detail,omitempty"`  // trimmed `go build` output on a break
+	ElapsedMS        int64    `json:"elapsed_ms"`
+	Verdict          string   `json:"verdict"` // OK | NOOP | TRUNK_WOULD_NOT_COMPILE | GATE_LATENCY_REGRESSION | COULD_NOT_RUN
+}
+
+func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("hooks pre-push", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	root := fs.String("root", "", "repo root (default: git toplevel from cwd)")
+	asJSON := fs.Bool("json", false, "emit the result as JSON (schema fak.trunk_build.v1)")
+	base := fs.String("base", "", "override the base ref the push range is computed against (default: origin/<branch>→origin/main→origin/master)")
+	budget := fs.Duration("budget", 60*time.Second, "report GATE_LATENCY_REGRESSION if the build exceeds this (still exits 0 when green)")
+	report := fs.String("report", "", "write the JSON result to this path in addition to stdout")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+
+	r := resolveRoot(*root)
+	if r == "" {
+		// could-not-run: not in a repo (or git unavailable) → fail open so the shell allows.
+		fmt.Fprintln(stderr, "fak hooks pre-push: not in a git repo (or git unavailable); build gate skipped")
+		return 2
+	}
+
+	res, code := evaluatePrePushBuild(r, *base, *budget)
+
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(res)
+	} else {
+		renderPrePushBuild(stdout, res)
+	}
+	if *report != "" {
+		if err := writeIndentedJSONFile(*report, res); err != nil {
+			fmt.Fprintf(stderr, "fak hooks pre-push: write report: %v\n", err)
+		}
+	}
+	return code
+}
+
+// evaluatePrePushBuild runs the gate over repo r and returns the verdict plus the DETECTOR
+// exit code: 0 clean/NOOP/latency-advisory, 1 TRUNK_WOULD_NOT_COMPILE, 2 could-not-run
+// (fail-open). Mode (block/warn/off) is the shell's job, not this function's.
+func evaluatePrePushBuild(r, baseOverride string, budget time.Duration) (trunkBuildResult, int) {
+	res := trunkBuildResult{Schema: "fak.trunk_build.v1"}
+
+	tip, err := prepushRevParse(r, "HEAD")
+	if err != nil {
+		res.Verdict, res.Detail = "COULD_NOT_RUN", fmt.Sprintf("cannot resolve HEAD: %v", err)
+		return res, 2
+	}
+	res.Ref = tip
+
+	base := baseOverride
+	if strings.TrimSpace(base) == "" {
+		base = prepushResolveBase(r)
+	}
+	res.Base = base
+
+	changed, err := prepushChangedFiles(r, base)
+	if err != nil {
+		res.Verdict, res.Detail = "COULD_NOT_RUN", fmt.Sprintf("cannot diff %s...HEAD: %v", base, err)
+		return res, 2
+	}
+	if len(changed) == 0 {
+		// No committed .go delta in the range → nothing this push can break at build time.
+		res.OK, res.Verdict = true, "NOOP"
+		return res, 0
+	}
+
+	dir, err := prepushExtractTip(r, tip)
+	if err != nil {
+		res.Verdict, res.Detail = "COULD_NOT_RUN", fmt.Sprintf("cannot materialize tip %s: %v", short(tip), err)
+		return res, 2
+	}
+	defer os.RemoveAll(dir)
+
+	fileToPkg, edges, _, err := prepushListGraph(dir)
+	if err != nil {
+		res.Verdict, res.Detail = "COULD_NOT_RUN", fmt.Sprintf("go list in archive tip: %v", err)
+		return res, 2
+	}
+
+	res.ChangedPackages = affectedtests.ChangedPackages(fileToPkg, changed)
+	res.SelectedPackages = affectedtests.Select(edges, res.ChangedPackages)
+	if len(res.SelectedPackages) == 0 {
+		// Changed .go files map to no package in the pushed tip (e.g. an only-deletion or a
+		// non-package file) → nothing to build. See the honest-limit note in the file header.
+		res.OK, res.Verdict = true, "NOOP"
+		return res, 0
+	}
+
+	start := prepushNow()
+	detail, ok := prepushBuild(dir, res.SelectedPackages)
+	res.ElapsedMS = prepushNow().Sub(start).Milliseconds()
+	if !ok {
+		res.OK, res.Reason, res.Detail, res.Verdict = false, "TRUNK_WOULD_NOT_COMPILE", detail, "TRUNK_WOULD_NOT_COMPILE"
+		return res, 1
+	}
+
+	res.OK = true
+	if budget > 0 && time.Duration(res.ElapsedMS)*time.Millisecond > budget {
+		// Green but slow: advise, never block. A popular leaf's importer cone is large by
+		// nature; refusing the push for a slow-but-correct build would be worse than the wait.
+		res.Verdict = "GATE_LATENCY_REGRESSION"
+		return res, 0
+	}
+	res.Verdict = "OK"
+	return res, 0
+}
+
+// resolvePrepushBase resolves the base ref the push range is measured from, mirroring the
+// tools/githooks/pre-push ladder: this branch's own upstream, then origin/main, then the
+// legacy origin/master, then a bounded HEAD~20 fallback for a fresh/detached clone.
+func resolvePrepushBase(r string) string {
+	branch, err := gitOut(r, "rev-parse", "--abbrev-ref", "HEAD")
+	branch = strings.TrimSpace(branch)
+	candidates := []string{}
+	if err == nil && branch != "" && branch != "HEAD" {
+		candidates = append(candidates, "origin/"+branch)
+	}
+	candidates = append(candidates, "origin/main", "origin/master")
+	for _, ref := range candidates {
+		if _, verr := gitOut(r, "rev-parse", "--verify", "--quiet", ref); verr == nil {
+			return ref
+		}
+	}
+	return "HEAD~20"
+}
+
+// gitChangedGoFilesRange returns the repo-relative, slash-separated .go files the commits in
+// base..HEAD add or change, via three-dot `git diff` (merge-base range = exactly what the
+// push adds), reading COMMITTED bytes only — never the peer-dirty working tree.
+func gitChangedGoFilesRange(r, base string) ([]string, error) {
+	out, err := gitOut(r, "diff", "--name-only", base+"...HEAD")
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, ln := range strings.Split(out, "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" || !strings.HasSuffix(ln, ".go") {
+			continue
+		}
+		files = append(files, filepath.ToSlash(ln))
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+// prepushGitRevParse resolves ref to a full sha in repo r via the committed `gitOut` helper.
+func prepushGitRevParse(r, ref string) (string, error) {
+	out, err := gitOut(r, "rev-parse", ref)
+	return strings.TrimSpace(out), err
+}
+
+// prepushArchiveTip archives sha from repo r into a fresh temp dir (committed bytes only — `git
+// archive` never reads the working tree or index) and returns its path. A local twin of
+// ci_preflight's extractCommittedTip, kept here so the gate carries no cross-file dependency.
+func prepushArchiveTip(r, sha string) (string, error) {
+	dir, err := os.MkdirTemp("", "fak-prepush-build-*")
+	if err != nil {
+		return "", err
+	}
+	ar := exec.Command("git", "-C", r, "archive", "--format=tar", sha)
+	windowgate.ConfigureBackgroundCommand(ar)
+	tar := exec.Command("tar", "-x", "-C", dir)
+	windowgate.ConfigureBackgroundCommand(tar)
+	pipe, err := ar.StdoutPipe()
+	if err != nil {
+		os.RemoveAll(dir)
+		return "", err
+	}
+	tar.Stdin = pipe
+	if err := tar.Start(); err != nil {
+		os.RemoveAll(dir)
+		return "", err
+	}
+	if err := ar.Run(); err != nil {
+		_ = tar.Wait()
+		os.RemoveAll(dir)
+		return "", fmt.Errorf("git archive: %w", err)
+	}
+	if err := tar.Wait(); err != nil {
+		os.RemoveAll(dir)
+		return "", fmt.Errorf("tar extract: %w", err)
+	}
+	return dir, nil
+}
+
+// goBuildPackages runs `go build <pkgs>` in dir (the archive tip). Returns (detail, ok); on
+// failure detail is the trimmed compiler output so the exact `undefined: X` is visible without
+// re-running anything. The package-list generalization of ci_preflight's goBuildAll("./...").
+func goBuildPackages(dir string, pkgs []string) (string, bool) {
+	cmd := exec.Command("go", append([]string{"build"}, pkgs...)...)
+	cmd.Dir = dir
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return strings.TrimSpace(string(out)), false
+	}
+	return "", true
+}
+
+func renderPrePushBuild(w io.Writer, res trunkBuildResult) {
+	switch res.Verdict {
+	case "NOOP":
+		fmt.Fprintln(w, "trunk-build-gate: NOOP — the push adds no Go package changes to build")
+	case "OK":
+		fmt.Fprintf(w, "trunk-build-gate OK — pushed tip %s builds (%d package(s) checked, %dms)\n",
+			short(res.Ref), len(res.SelectedPackages), res.ElapsedMS)
+	case "GATE_LATENCY_REGRESSION":
+		fmt.Fprintf(w, "trunk-build-gate OK (slow) — pushed tip %s builds but took %dms over budget (%d package(s))\n",
+			short(res.Ref), res.ElapsedMS, len(res.SelectedPackages))
+	case "COULD_NOT_RUN":
+		fmt.Fprintf(w, "trunk-build-gate could-not-run (push allowed): %s\n", res.Detail)
+	case "TRUNK_WOULD_NOT_COMPILE":
+		fmt.Fprintf(w, "TRUNK_WOULD_NOT_COMPILE — pushed tip %s would not build for peers:\n", short(res.Ref))
+		for _, ln := range strings.Split(res.Detail, "\n") {
+			fmt.Fprintf(w, "    %s\n", ln)
+		}
+		fmt.Fprintf(w, "  built: %s\n", strings.Join(res.SelectedPackages, " "))
+	}
+}
