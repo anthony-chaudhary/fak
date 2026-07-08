@@ -87,6 +87,100 @@ func TestPreviewCleanMergeListsChangedFiles(t *testing.T) {
 	}
 }
 
+func TestApplyResolvesSupersetTextlessly(t *testing.T) {
+	repo := mergePreviewRepo(t)
+	// Both agents add the SAME block on top of the base — the trivial two-agents-same-block case.
+	gitMP(t, repo, "checkout", "-q", "-b", "left")
+	writeMP(t, filepath.Join(repo, "f.txt"), "base\nsame block\n")
+	gitMP(t, repo, "commit", "-am", "same-left", "-q")
+	gitMP(t, repo, "checkout", "-q", "main")
+	gitMP(t, repo, "checkout", "-q", "-b", "right")
+	writeMP(t, filepath.Join(repo, "f.txt"), "base\nsame block\n")
+	gitMP(t, repo, "commit", "-am", "same-right", "-q")
+	gitMP(t, repo, "checkout", "-q", "left")
+
+	treeBefore := revParseMP(t, repo, "HEAD^{tree}")
+	got, err := Apply(context.Background(), repo, "right", "", RealRunner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ApplyOutcome != ApplyResolvedSuperset {
+		t.Fatalf("apply outcome = %q, want resolved_superset (%+v)", got.ApplyOutcome, got)
+	}
+	// Textless: the merged tree must equal the pre-merge HEAD tree (git diff --cached empty).
+	if treeAfter := revParseMP(t, repo, "HEAD^{tree}"); treeAfter != treeBefore {
+		t.Fatalf("merged tree %s != prior HEAD tree %s — resolve was not textless", treeAfter, treeBefore)
+	}
+	// A real merge commit: `right` recorded as the second parent.
+	if second := revParseMP(t, repo, "HEAD^2"); second == "" {
+		t.Fatalf("HEAD has no second parent — target was not recorded")
+	}
+	if got.MergeCommit == "" || got.MergeCommit != revParseMP(t, repo, "HEAD") {
+		t.Fatalf("merge commit = %q, want current HEAD", got.MergeCommit)
+	}
+}
+
+func TestApplyDefersGenuineConflict(t *testing.T) {
+	repo := mergePreviewRepo(t)
+	gitMP(t, repo, "checkout", "-q", "-b", "left")
+	writeMP(t, filepath.Join(repo, "f.txt"), "left\n")
+	gitMP(t, repo, "commit", "-am", "left", "-q")
+	gitMP(t, repo, "checkout", "-q", "main")
+	gitMP(t, repo, "checkout", "-q", "-b", "right")
+	writeMP(t, filepath.Join(repo, "f.txt"), "right\n")
+	gitMP(t, repo, "commit", "-am", "right", "-q")
+	gitMP(t, repo, "checkout", "-q", "left")
+
+	headBefore := revParseMP(t, repo, "HEAD")
+	got, err := Apply(context.Background(), repo, "right", "", RealRunner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ApplyOutcome != ApplyDeferredConflict {
+		t.Fatalf("apply outcome = %q, want deferred_conflict (%+v)", got.ApplyOutcome, got)
+	}
+	if headAfter := revParseMP(t, repo, "HEAD"); headAfter != headBefore {
+		t.Fatalf("apply mutated HEAD on a genuine conflict: before %s after %s", headBefore, headAfter)
+	}
+	if status := statusMP(t, repo); status != "" {
+		t.Fatalf("apply left dirty status on a deferred conflict: %q", status)
+	}
+}
+
+func TestApplyDefersCleanTreeChange(t *testing.T) {
+	repo := mergePreviewRepo(t)
+	gitMP(t, repo, "checkout", "-q", "-b", "left")
+	writeMP(t, filepath.Join(repo, "left.txt"), "left\n")
+	gitMP(t, repo, "add", "left.txt")
+	gitMP(t, repo, "commit", "-m", "left", "-q")
+	gitMP(t, repo, "checkout", "-q", "main")
+	gitMP(t, repo, "checkout", "-q", "-b", "right")
+	writeMP(t, filepath.Join(repo, "right.txt"), "right\n")
+	gitMP(t, repo, "add", "right.txt")
+	gitMP(t, repo, "commit", "-m", "right", "-q")
+	gitMP(t, repo, "checkout", "-q", "left")
+
+	headBefore := revParseMP(t, repo, "HEAD")
+	got, err := Apply(context.Background(), repo, "right", "", RealRunner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ApplyOutcome != ApplyDeferredClean {
+		t.Fatalf("apply outcome = %q, want deferred_clean (%+v)", got.ApplyOutcome, got)
+	}
+	if headAfter := revParseMP(t, repo, "HEAD"); headAfter != headBefore {
+		t.Fatalf("apply mutated HEAD on a clean tree-changing merge: before %s after %s", headBefore, headAfter)
+	}
+}
+
+func revParseMP(t *testing.T, repo, ref string) string {
+	t.Helper()
+	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", ref)
+	cmd.Dir = repo
+	out, _ := cmd.Output() // empty (with non-zero exit) means the ref does not resolve
+	return strings.TrimSpace(string(out))
+}
+
 func mergePreviewRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()

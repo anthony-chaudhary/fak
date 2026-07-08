@@ -19,10 +19,12 @@ func runMerge(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	verbFlagUsage(fs, "merge")
 	dryRun := fs.Bool("dry-run", false, "preview a merge without touching the index/worktree")
+	apply := fs.Bool("apply", false, "auto-resolve the trivial superset case (merged tree == HEAD) with a textless `-s ours` merge; defer any real conflict to hand-merge")
 	dir := fs.String("dir", "", "repo directory (default: discover from cwd)")
 	target := fs.String("target", "", "ref to preview merging into HEAD (default: origin/<trunk>)")
 	trunk := fs.String("trunk", "main", "trunk branch name used for the default target")
-	asJSON := fs.Bool("json", false, "emit the preview as JSON")
+	message := fs.String("message", "", "commit message for an --apply textless merge (default: derived from target)")
+	asJSON := fs.Bool("json", false, "emit the result as JSON")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -38,8 +40,12 @@ func runMerge(stdout, stderr io.Writer, argv []string) int {
 		}
 		*target = args[0]
 	}
-	if !*dryRun {
-		fmt.Fprintln(stderr, "fak merge: only --dry-run is supported; refusing to run a mutating merge")
+	if *dryRun && *apply {
+		fmt.Fprintln(stderr, "fak merge: --dry-run and --apply are mutually exclusive")
+		return 2
+	}
+	if !*dryRun && !*apply {
+		fmt.Fprintln(stderr, "fak merge: pass --dry-run to preview or --apply to auto-resolve the trivial superset case; refusing a bare mutating merge")
 		return 2
 	}
 	if strings.TrimSpace(*target) == "" {
@@ -49,6 +55,9 @@ func runMerge(stdout, stderr io.Writer, argv []string) int {
 	if root == "" {
 		fmt.Fprintln(stderr, "fak merge: could not resolve git repo root")
 		return 2
+	}
+	if *apply {
+		return runMergeApply(stdout, stderr, root, *target, *message, *asJSON)
 	}
 	res, err := mergepreview.Preview(context.Background(), root, *target, mergepreview.RealRunner)
 	if err != nil {
@@ -67,6 +76,44 @@ func runMerge(stdout, stderr io.Writer, argv []string) int {
 		return 3
 	}
 	return 0
+}
+
+// runMergeApply auto-resolves the trivial superset case (#2154): when the 3-way merge tree
+// already equals HEAD it commits a textless `-s ours` merge and asserts tree == HEAD; a genuine
+// conflict (or a clean merge that changes the tree) mutates nothing and defers to the agent.
+func runMergeApply(stdout, stderr io.Writer, root, target, message string, asJSON bool) int {
+	res, err := mergepreview.Apply(context.Background(), root, target, message, mergepreview.RealRunner)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak merge --apply: %v\n", err)
+		return 1
+	}
+	if asJSON {
+		if encErr := writeIndentedJSON(stdout, res); encErr != nil {
+			fmt.Fprintf(stderr, "fak merge --apply: %v\n", encErr)
+			return 1
+		}
+	} else {
+		renderMergeApply(stdout, res)
+	}
+	switch res.ApplyOutcome {
+	case mergepreview.ApplyResolvedSuperset:
+		return 0
+	case mergepreview.ApplyDeferredConflict:
+		return 3 // genuine conflict — agent must hand-merge (mirrors dry-run's conflict exit)
+	default:
+		return 0 // deferred_clean: informational, agent runs a plain git merge
+	}
+}
+
+func renderMergeApply(w io.Writer, res mergepreview.ApplyResult) {
+	fmt.Fprintf(w, "fak merge --apply: %s\n", res.ApplyOutcome)
+	switch res.ApplyOutcome {
+	case mergepreview.ApplyResolvedSuperset:
+		fmt.Fprintf(w, "  %s\n", res.Detail)
+		fmt.Fprintf(w, "  merge commit %s\n", res.MergeCommit)
+	default:
+		fmt.Fprintf(w, "  %s\n", res.Detail)
+	}
 }
 
 func renderMergePreview(w io.Writer, res mergepreview.Result) {

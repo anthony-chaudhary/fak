@@ -117,6 +117,105 @@ func Preview(ctx context.Context, dir, target string, run Runner) (Result, error
 	return res, nil
 }
 
+// ApplyOutcome classifies what Apply did (or declined to do) with a diverged merge.
+type ApplyOutcome string
+
+const (
+	// ApplyResolvedSuperset: the trivial two-agents-same-block case. The real 3-way merge
+	// tree already equals HEAD (both sides added equivalent blocks; HEAD is the superset), so
+	// Apply committed a textless `-s ours` merge and ASSERTED the resulting tree == HEAD.
+	ApplyResolvedSuperset ApplyOutcome = "resolved_superset"
+	// ApplyDeferredClean: the merge resolves without conflict but WOULD change the tree
+	// relative to HEAD (target carries net-new content). Not the diff-empty superset case, so
+	// Apply mutates nothing and leaves the plain `git merge` to the agent.
+	ApplyDeferredClean ApplyOutcome = "deferred_clean"
+	// ApplyDeferredConflict: a genuine divergent conflict. Apply mutates nothing and hands the
+	// text resolution back to the agent — exactly the "a real semantic conflict still stops
+	// for the agent" half of the witness.
+	ApplyDeferredConflict ApplyOutcome = "deferred_conflict"
+)
+
+// ApplyResult is the outcome of Apply.
+type ApplyResult struct {
+	Preview      Result       `json:"preview"`
+	ApplyOutcome ApplyOutcome `json:"apply_outcome"`
+	MergeCommit  string       `json:"merge_commit,omitempty"`
+	Detail       string       `json:"detail"`
+}
+
+// Apply auto-resolves the trivial superset case named in #2154. It previews the merge of
+// target into HEAD with the same conflict-free 3-way merge-tree the dry-run uses, and ONLY when
+// that merge tree already equals HEAD (OutcomeEmptyNetDiff — both sides added equivalent blocks,
+// so HEAD is already the union) does it resolve textlessly: a `git merge -s ours` commit that
+// records target as a second parent while keeping HEAD's tree byte-for-byte. Before returning it
+// ASSERTS the committed tree equals the previewed superset tree (== HEAD); a mismatch is a hard
+// error, never a silent commit. Every other outcome — a clean merge that changes the tree, or a
+// genuine conflict — mutates nothing and defers to the agent's hand-merge. Apply must be given a
+// message so the merge commit is attributable; an empty message is filled with a default.
+func Apply(ctx context.Context, dir, target, message string, run Runner) (ApplyResult, error) {
+	if run == nil {
+		run = RealRunner
+	}
+	pre, err := Preview(ctx, dir, target, run)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	res := ApplyResult{Preview: pre}
+	switch pre.Outcome {
+	case OutcomeConflicts:
+		res.ApplyOutcome = ApplyDeferredConflict
+		res.Detail = fmt.Sprintf("%d genuine conflict(s) — hand-merge required; no auto-resolve", len(pre.Conflicts))
+		return res, nil
+	case OutcomeCleanMerge:
+		res.ApplyOutcome = ApplyDeferredClean
+		res.Detail = fmt.Sprintf("merge is clean but changes %d file(s) vs HEAD — not the diff-empty superset case; run a plain `git merge`", len(pre.ChangedFiles))
+		return res, nil
+	case OutcomeEmptyNetDiff:
+		// The superset already equals HEAD. Resolve textlessly and assert.
+	default:
+		return ApplyResult{}, fmt.Errorf("merge apply: unexpected preview outcome %q", pre.Outcome)
+	}
+
+	// Record the expected superset tree (== HEAD tree, proven by the empty net diff) before we
+	// touch anything, so the post-merge assertion compares against a value captured pre-mutation.
+	expectedTree, err := revParseTree(ctx, dir, "HEAD", run)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	if message == "" {
+		message = "Merge " + target + " (superset already in HEAD)"
+	}
+	// `-s ours` keeps HEAD's tree exactly and records target as a second parent. It is safe here
+	// ONLY because Preview proved the real 3-way merge tree equals HEAD — so nothing target added
+	// is being dropped. --no-ff/--no-edit make the commit deterministic; --signoff satisfies DCO.
+	merge, err := run(ctx, dir, "merge", "-s", "ours", "--no-ff", "--no-edit", "--signoff", "-m", message, target)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	if merge.Code != 0 {
+		return ApplyResult{}, gitError("merge -s ours", merge)
+	}
+
+	// ASSERT the merged tree equals the expected superset before trusting the commit. `-s ours`
+	// cannot itself change the tree, but the assertion is the contract the issue names: a witness
+	// that the textless resolve dropped nothing. A mismatch is reported, never swallowed.
+	gotTree, err := revParseTree(ctx, dir, "HEAD", run)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	if gotTree != expectedTree {
+		return ApplyResult{}, fmt.Errorf("merge apply: superset assertion failed — merged tree %s != expected HEAD tree %s", gotTree, expectedTree)
+	}
+	commit, err := revParse(ctx, dir, "HEAD", run)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	res.ApplyOutcome = ApplyResolvedSuperset
+	res.MergeCommit = commit
+	res.Detail = "resolved textlessly: merged tree == HEAD (git diff --cached empty vs HEAD); target recorded as a second parent"
+	return res, nil
+}
+
 func revParse(ctx context.Context, dir, ref string, run Runner) (string, error) {
 	out, err := run(ctx, dir, "rev-parse", "--verify", ref+"^{commit}")
 	if err != nil {
@@ -124,6 +223,20 @@ func revParse(ctx context.Context, dir, ref string, run Runner) (string, error) 
 	}
 	if out.Code != 0 {
 		return "", gitError("rev-parse "+ref, out)
+	}
+	return strings.TrimSpace(string(out.Stdout)), nil
+}
+
+// revParseTree resolves the tree OID a commit-ish points at (ref^{tree}). It is kept distinct
+// from revParse, which forces ^{commit}; appending ^{tree} to a value already suffixed ^{commit}
+// would fail with "expected commit type".
+func revParseTree(ctx context.Context, dir, ref string, run Runner) (string, error) {
+	out, err := run(ctx, dir, "rev-parse", "--verify", ref+"^{tree}")
+	if err != nil {
+		return "", err
+	}
+	if out.Code != 0 {
+		return "", gitError("rev-parse "+ref+"^{tree}", out)
 	}
 	return strings.TrimSpace(string(out.Stdout)), nil
 }
