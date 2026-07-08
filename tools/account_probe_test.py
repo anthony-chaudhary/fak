@@ -431,12 +431,18 @@ class ProbeLedgerCooldownTest(unittest.TestCase):
                 account_probe.append_probe_ledger([self._limit_verdict(account, "gem8")])
                 fleet_accounts._PROBE_LEDGER_CACHE["key"] = None  # bust the mtime+size memo
                 verdict = fleet_accounts._fresh_probe_from_ledger(account)
+                recorded_start = account_probe.last_probe_by_account(rd)[account]["ts"]
         self.assertIsNotNone(verdict, "a fresh LIMIT probe must be visible to the roster fold")
         self.assertFalse(verdict["available"], "a throttled seat is not available capacity")
         self.assertEqual(verdict["block_kind"], "usage")
         self.assertIn("usage limit", verdict["block_reason"])
         self.assertIn("7:50am", verdict["reset"])
         self.assertIn("Jul 10", verdict["weekly"], "the recorded weekly window, not None")
+        # #1801: the recorded cooldown START rides through to the roster verdict too, so
+        # dispatch status can say WHY / WHEN-eligible AND since-when -- not just the first two.
+        self.assertTrue(recorded_start, "append_probe_ledger stamps a cooldown start (ts)")
+        self.assertEqual(verdict["since"], recorded_start,
+                         "the roster verdict carries the recorded cooldown start, not None")
 
 
 class StdinNoiseTest(unittest.TestCase):

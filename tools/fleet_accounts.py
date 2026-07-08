@@ -803,8 +803,14 @@ def _fresh_probe_from_ledger(account: str, fresh_min: float = PROBE_LEDGER_FRESH
         if not reason:
             reason = (f"usage limit; resets {reset}" if reset else "usage limit") \
                 if kind == "usage" else f"{kind} block"
+        # Carry the recorded cooldown START (`since`) alongside the reason and the
+        # next-eligible windows (#1801): append_probe_ledger stamps `ts` when the block
+        # was first observed, but the fresh-probe verdict used to drop it -- so a roster
+        # consumer could say WHY a seat is cooling and WHEN it reopens, but not since when.
+        # Surfacing it completes the recorded triad (start/reason/next-eligible) end-to-end.
         return {"available": False, "block_kind": kind, "block_reason": reason,
-                "reset": reset, "weekly": entry.get("weekly"), "age_min": age,
+                "reset": reset, "weekly": entry.get("weekly"),
+                "since": entry.get("ts"), "age_min": age,
                 **identity}
     # Any other status (APIERR/TRANSPORT/unknown) is not a clean availability signal --
     # fall through to the registry's own status rather than inventing a verdict.
