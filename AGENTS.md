@@ -256,16 +256,21 @@ unavailable, and say so.
   `index.lock`, which is recoverable; a silent two-minute hang is not. Relatedly, never
   foreground-`sleep` to poll for slow work — the harness blocks `sleep N; <cmd>` chains;
   run the wait as a background task or monitor and let it notify you.
-- **Writes that resolve *outside* the repo are refused (`OUT_OF_TREE_WRITE`).** The
-  `repo-guard` PreToolUse hook (`tools/repo_guard.py`, on by default on a fleet host) denies
-  a Bash/Write/Edit op whose target escapes the workspace — a `../sibling` path or an absolute
-  `/c/.../work/other-repo`. `work/` holds many sibling repos, so a one-level escape lands in
-  *another* project. Write scratch to a temp dir or an in-repo path, not `..`. Allowed
-  out-of-tree: the null/std-stream sinks (`> /dev/null`, `> /dev/stderr`) and the paired
-  `fak-private` companion repo. This is the **write-time** half of the public/private split;
-  the **commit-time** half — `FILE_ADMISSION` (`check_committed_files.py`) and `PUBLIC_LEAK`
-  (`scrub_public_copy.py`) — keeps private *content* out of the public history. Soften with
-  `FAK_REPO_GUARD=warn` (advisory) or `off`. Full doc: [`docs/repo-guard.md`](docs/repo-guard.md).
+- **Writes that resolve *outside* the repo are *flagged* (`OUT_OF_TREE_WRITE`) — recorded,
+  not refused, by default.** The `repo-guard` PreToolUse hook (Go binary `cmd/repoguard`, on by
+  default on a fleet host) resolves a Bash/Write/Edit op whose target escapes the workspace — a
+  `../sibling` path or an absolute `/c/.../work/other-repo`. `work/` holds many sibling repos, so
+  a one-level escape lands in *another* project. Prefer a temp dir or an in-repo path, not `..`.
+  But because cross-repo work is routine on a fleet host, the **default severity for
+  `OUT_OF_TREE_WRITE` is `record`**: the crossing is written to the decision journal (countable
+  via `repoguard --summary`) and the call **proceeds silently** — nothing lands in your context.
+  A security-minded operator dials it back up with `FAK_REPO_GUARD_SEVERITY=OUT_OF_TREE_WRITE=deny`
+  (then it hard-blocks); the master switch `FAK_REPO_GUARD=warn|off` still overrides. Allowed
+  without even a record: the null/std-stream sinks (`> /dev/null`, `> /dev/stderr`) and the paired
+  `fak-private` companion repo. This is the **write-time** half of the public/private split; the
+  **commit-time** half — `FILE_ADMISSION` (`check_committed_files.py`) and `PUBLIC_LEAK`
+  (`scrub_public_copy.py`) — keeps private *content* out of the public history, and those stay
+  hard gates. Full doc: [`docs/repo-guard.md`](docs/repo-guard.md).
 
 ### If the kernel refuses you (recover, don't fight it)
 
@@ -286,7 +291,7 @@ route around the guard (that just trips the next one).
 | `OUT_OF_DIRECTION` | request-path logic in an untyped language, or a non-Go package blank-imported into the kernel | keep the request path Go-only; a non-Go seam stays off-path behind a typed, re-validated boundary. Floor: architest `TestHotPathHasNoExec` |
 | `FILE_ADMISSION` | a staged path is private-only content, a **noisy one-off operational artifact** (GPU reserve/availability status, dispatch telemetry, scratch dump — by the `fak:operator-private` marker or the loose-ops-doc name backstop), regenerable junk, or an oversized blob | move private-only code + operator-only status to `fak-private`; mark a one-off ops doc `fak:operator-private` (or gitignore it); a genuine curated note goes under `docs/notes/` in scrubbed language; drop or gitignore junk; put real data under `experiments/` or `testdata/`. See [`docs/gpu-server-private-boundary.md`](docs/gpu-server-private-boundary.md) |
 | `PUBLIC_LEAK` | staged content matches a redact-needle | remove or redact the needle before committing; `FLEET_ALLOW_LEAK=1` overrides once, only for an intentional adversarial fixture |
-| `OUT_OF_TREE_WRITE` | a write op escaped the repo into a sibling tree | operate inside the workspace; send scratch to a temp dir, never `..`. Soften with `FAK_REPO_GUARD=warn`. See [`docs/repo-guard.md`](docs/repo-guard.md) |
+| `OUT_OF_TREE_WRITE` | a write op escaped the repo into a sibling tree, **and** the operator dialed this reason up to `deny` (default is silent-`record`, which does not refuse) | operate inside the workspace; send scratch to a temp dir, never `..`. The default already allows it; a `deny` here is a deliberate operator policy — respect it. See [`docs/repo-guard.md`](docs/repo-guard.md) |
 | `INTERACTIVE_HANG` | the command waits for a human prompt/editor/login while the session has no TTY | re-run the non-interactive equivalent: pass `-m` for commits, use path-explicit staging instead of interactive add, provide tokens non-interactively, and use harness Edit/Write tools instead of terminal editors. |
 | `FOREGROUND_SLEEP` | a single foreground sleep timer at or over 120s holds the tool turn open doing nothing | wait in the background instead: use a background monitor/poll loop, the Monitor tool, or ScheduleWakeup rather than a foreground `sleep`/`Start-Sleep`. |
 | `LIVE_MONITOR_OUTPUT_READ` | a Read targets a live Monitor's `tasks/<id>.output` before the harness has materialized it — Monitor writes that file only when the stream ends, unlike a background Bash task, so polling it early yields a bare `ENOENT`, not a "not ready yet" hint | do not Read-poll the path while the Monitor is live; consume the pushed Monitor events and wait for its completion notification. Floor: `internal/repoguard/monitor_read.go` (PreToolUse hook via `cmd/repoguard`). |
