@@ -478,6 +478,21 @@ def guard_enabled(env: dict[str, str] | None = None) -> bool:
     return raw.strip().lower() not in GUARD_OFF_VALUES
 
 
+def node_caps(env: dict[str, str] | None = None) -> frozenset[str]:
+    """The hardware capabilities THIS node advertises for issue dispatch.
+
+    Read from ``FLEET_NODE_CAPS`` (comma/space separated, case-folded), e.g.
+    ``FLEET_NODE_CAPS=gpu``. **Default empty ⇒ GPU-less**: an unconfigured host
+    advertises no special capability, so the dispatcher's issue-level capability
+    gate (see ``issue_resolve_dispatch.evaluate``) leaves GPU-tagged issues open
+    and visible for a node that opts in with ``gpu``. Mirrors the established
+    per-node env knob pattern (``FLEET_WORKER_BACKEND``/``FLEET_DOGFOOD_GUARD``).
+    """
+    raw = (env if env is not None else os.environ).get("FLEET_NODE_CAPS") or ""
+    caps = {tok.lower() for tok in re.split(r"[,\s]+", raw) if tok.strip()}
+    return frozenset(caps)
+
+
 def resolve_fak_bin(workspace: Path, env: dict[str, str] | None = None) -> str | None:
     """Locate a ``fak`` binary to front the worker with, or ``None``.
 

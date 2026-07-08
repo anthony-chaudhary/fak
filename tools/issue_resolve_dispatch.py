@@ -75,6 +75,8 @@ import issue_dispatch  # noqa: E402  (refresh_registry/preflight/worker_env/spaw
 import issue_worker_prompt  # noqa: E402  (render the per-issue resolution prompt)
 import dispatch_worker  # noqa: E402  (child_env for the opencode backend)
 import dispatch_preflight  # noqa: E402  (pid-sidecar identity probe)
+import lane_yield  # noqa: E402  (shared low-yield lane fold, #2062)
+import issue_lane_router  # noqa: E402  (lane_taxonomy: dos.toml lane→tree map, #2062)
 
 # Re-export the shared console-window suppressor so the account-topup / glm-docs
 # entry scripts (which import THIS module as `ird`) route every helper subprocess
@@ -160,6 +162,17 @@ _MULTI_LANE_HOLD_LEDGER = "multi-lane-holds.jsonl"
 # contract/multi-lane TTL<=0 short-circuit).
 DEFAULT_COLLISION_HOLD_TTL_H = 3
 _COLLISION_HOLD_LEDGER = "collision-holds.jsonl"
+# Low-yield lane soft-exclude (#2062): a lane whose recent resolve sessions burned
+# turns yet closed nothing is a poison-pill sink (e.g. a GPU-less host re-grabbing a
+# P1 GPU epic it structurally cannot run). The shared lane_yield fold flags it; the
+# picker SOFT-excludes it from the busiest-pick so a healthier lane runs instead.
+# Guards keep this from ever freezing the fleet: at most LOW_YIELD_MAX_EXCLUDES lanes
+# are demoted (worst-by-turns first), a lane needs LOW_YIELD_MIN_SESSIONS finished
+# sessions before it is trusted as a signal, and lane_issue_numbers re-seats a
+# demoted lane (reporting it under low_yield_relief) if it is the last eligible one.
+# The fold's 180-min sliding lookback IS the self-healing TTL — no sticky state.
+LOW_YIELD_MAX_EXCLUDES = 2
+LOW_YIELD_MIN_SESSIONS = 2
 # Operator-forced contract-gate bypass ledger (#2637): every time --force downgrades
 # a FAILED issue-contract readiness gate to advisory and spawns anyway, one row is
 # appended here with the operator's structured --force-reason. This is the durable,
@@ -673,9 +686,82 @@ def _git_capture(root: Path, args: list[str], *, timeout: int = 30) -> tuple[int
     return proc.returncode, proc.stdout or ""
 
 
+def low_yield_soft_excludes(
+    root: Path,
+    runs_dir: Path,
+    *,
+    lane_trees: dict[str, list[str]] | None = None,
+    now_ts: float | None = None,
+    max_excludes: int = LOW_YIELD_MAX_EXCLUDES,
+    min_sessions: int = LOW_YIELD_MIN_SESSIONS,
+) -> dict[str, Any]:
+    """Fold the recent resolve corpus into the set of lanes to SOFT-exclude (#2062).
+
+    A lane is a soft-exclude candidate when the shared ``lane_yield`` fold flags it
+    ``LOW_YIELD`` — its recent FINISHED sessions burned ``>= turns_floor`` turns yet
+    landed 0 ancestry-closes on its tree — AND it has ``>= min_sessions`` finished
+    sessions (a trust floor, so a single unlucky session never demotes a lane). At
+    most ``max_excludes`` lanes are returned, worst-by-turns first, so even a fully
+    poisoned window cannot starve the picker (``lane_issue_numbers`` additionally
+    re-seats the last eligible lane under ``low_yield_relief``).
+
+    Only FINISHED sessions count: a still-live worker's mid-flight turns are dropped
+    (its ``.pid`` sidecar reads live) so a lane is never demoted before its own
+    worker has had the chance to close something. Fail-open throughout — any error
+    (or a missing runs dir) yields an empty exclude set, and the ``git log`` join
+    lives entirely inside the shared fold's default counter, run only for candidate
+    lanes (``>= turns_floor`` turns). Returns
+    ``{"exclude": set[str], "lanes": [evidence rows], "flagged": [lane names]}``.
+    """
+    import time
+    result: dict[str, Any] = {"exclude": set(), "lanes": [], "flagged": []}
+    try:
+        if not runs_dir.is_dir():
+            return result
+        now = time.time() if now_ts is None else now_ts
+        since_iso = time.strftime(
+            "%Y-%m-%dT%H:%M:%S +0000",
+            time.gmtime(now - lane_yield._LOW_YIELD_LOOKBACK_MIN * 60))
+
+        def _closes(_lane: str, tree: list[str]) -> int | None:
+            return lane_yield.count_lane_ancestry_closes(
+                root, tree, since_iso=since_iso)
+
+        def _finished(log: Path) -> bool:
+            # Drop still-LIVE sessions: a live worker's mid-flight turns must not
+            # flag its own lane before it has had the chance to close anything.
+            return not dispatch_preflight.resolve_sidecar_pid_is_live(
+                log.with_suffix(".pid"))
+
+        fold = lane_yield.low_yield_lanes(
+            runs_dir, closes_counter=_closes, lane_trees=lane_trees or {},
+            now_ts=now, include_log=_finished)
+        flagged = [
+            r for r in fold.get("lanes", [])
+            if r.get("verdict") == "LOW_YIELD"
+            and int(r.get("sessions", 0)) >= min_sessions
+            and r.get("tree_known")
+        ]
+        # Worst-by-turns first, then capped — never demote more than max_excludes.
+        flagged.sort(key=lambda r: (-int(r.get("turns", 0)), str(r.get("lane"))))
+        chosen = flagged[: max(0, max_excludes)]
+        result["exclude"] = {str(r["lane"]) for r in chosen}
+        result["lanes"] = [
+            {"lane": str(r["lane"]), "turns": int(r.get("turns", 0)),
+             "sessions": int(r.get("sessions", 0)), "closes": r.get("closes"),
+             "evidence_logs": list(r.get("evidence_logs", []))}
+            for r in chosen
+        ]
+        result["flagged"] = [str(r["lane"]) for r in flagged]
+    except Exception:
+        return {"exclude": set(), "lanes": [], "flagged": []}
+    return result
+
+
 def lane_issue_numbers(root: Path, explicit_lane: str | None,
                        exclude: set[str] | None = None,
-                       guarded: bool | None = None) -> dict[str, Any]:
+                       guarded: bool | None = None,
+                       soft_exclude: set[str] | None = None) -> dict[str, Any]:
     """Pick the lane (busiest, or explicit) and return its OPEN issue numbers,
     OLDEST first (ascending issue number -- GitHub issue numbers are assigned
     monotonically at creation, so the lowest number is the oldest open issue).
@@ -710,7 +796,19 @@ def lane_issue_numbers(root: Path, explicit_lane: str | None,
     self-source-held, ``lane`` comes back ``None`` and the held lanes are
     named in ``self_modify_held``. An explicit lane is still honored verbatim
     regardless of guard state (operator intent overrides the guard, same as
-    the Go path and issue_dispatch.pick_lane)."""
+    the Go path and issue_dispatch.pick_lane).
+
+    ``soft_exclude`` (Part C, #2062) demotes lanes the low-yield detector
+    flagged (>=40 turns / 0 closes) from the busiest-pick -- but SOFT, with a
+    STARVATION FLOOR: if excluding them would leave zero eligible lanes they
+    are seated back and reported in ``low_yield_relief`` instead, so a
+    low-yield fold can never freeze the fleet. Orthogonal to the HARD
+    ``exclude``/self-source skips and, like ``exclude``, ignored when an
+    explicit lane is named (a deliberate operator override).
+
+    The returned ``caps_by_issue`` maps each open issue number to the hardware
+    capabilities it declares (from the router's flat per-issue ``required_caps``);
+    ``evaluate`` uses it for the per-node capability gate (Part B)."""
     router = issue_dispatch.run_json(
         [_py(), str(root / "tools" / "issue_lane_router.py"), "--json"],
         root, timeout=130)
@@ -729,7 +827,21 @@ def lane_issue_numbers(root: Path, explicit_lane: str | None,
             except (TypeError, ValueError):
                 continue
         nums_by_lane[ln] = sorted(nums)  # oldest (lowest issue #) first
+    # Part B: per-issue hardware capability, from the router's FLAT issue list
+    # (the per-lane "issues" carry only numbers; required_caps rides the flat one).
+    caps_by_issue: dict[int, list[str]] = {}
+    for it in (router.get("issues") or []):
+        if not isinstance(it, dict):
+            continue
+        try:
+            num = int(it.get("number"))
+        except (TypeError, ValueError):
+            continue
+        caps_by_issue[num] = [str(c).lower() for c in (it.get("required_caps") or []) if c]
     exclude = exclude or set()
+    soft_exclude = soft_exclude or set()
+    low_yield_excluded: list[str] = []
+    low_yield_relief: list[str] = []
     by_lane_count = {k: len(v) for k, v in nums_by_lane.items()}
     if explicit_lane:
         chosen = explicit_lane
@@ -744,6 +856,18 @@ def lane_issue_numbers(root: Path, explicit_lane: str | None,
         safe_lanes_busy = sorted(k for k in safe_open if k in exclude)
         eligible = {k: v for k, v in nums_by_lane.items()
                     if k not in exclude and k not in self_source}
+        # Part C: apply the low-yield SOFT exclude with a STARVATION FLOOR --
+        # demote flagged lanes only while >=1 eligible lane survives; otherwise
+        # seat them back (relief) so the picker can never be starved to None by a
+        # low-yield fold.
+        soft_hits = sorted(k for k in soft_exclude if k in eligible)
+        if soft_hits:
+            survivors = {k: v for k, v in eligible.items() if k not in soft_exclude}
+            if survivors:
+                eligible = survivors
+                low_yield_excluded = soft_hits
+            else:
+                low_yield_relief = soft_hits  # floor: keep the only lanes we have
         chosen = max(eligible, key=lambda k: len(eligible[k])) if eligible else None
         # Every eligible lane with open issues, busiest first (name-tiebroken so the
         # order is deterministic) -- the lane rank the cross-lane contract scan walks.
@@ -756,6 +880,9 @@ def lane_issue_numbers(root: Path, explicit_lane: str | None,
             "excluded_lanes": sorted(exclude),
             "safe_lanes_busy": safe_lanes_busy if not explicit_lane else [],
             "self_modify_held": held,
+            "caps_by_issue": caps_by_issue,
+            "low_yield_excluded": low_yield_excluded,
+            "low_yield_relief": low_yield_relief,
             "router_error": router.get("_error")}
 
 
@@ -2054,6 +2181,21 @@ _CAP_WEEKLY_RE = re.compile(r"weekly[\w/\s]*limit", re.IGNORECASE)
 _CAP_SESSION_RE = re.compile(r"session\s+limit", re.IGNORECASE)
 _CAP_RESET_RE = re.compile(r"resets\s+(.+?)\s*\(America/Los_Angeles\)", re.IGNORECASE)
 _CAP_RESET_FALLBACK_RE = re.compile(r"resets\s+([^\r\n]+)", re.IGNORECASE)
+# The guard/gateway names a cap wall as a RELATIVE Go-duration wait, not an absolute
+# "resets <when>" clause — e.g.
+#   fak-turn trace=guard FAILED reason=rate_limited wire=anthropic_messages \
+#     kind=weekly_limit announced_wait=1h7m0s
+# (internal/gateway/debug_stats.go emits `announced_wait=<dur>`; #2610). Without this
+# the parser discarded the window and the hold fell back to a blind 60-min cooldown —
+# so a weekly-capped seat whose real reset is hours out was re-offered after an hour,
+# re-spawning straight into the same cap. Capture the duration so the hold runs to the
+# ANNOUNCED window and the status surface can name the retry window. The `[=:≈~]` class
+# also accepts the prose "≈" form a human transcript / issue body may carry.
+_ANNOUNCED_WAIT_RE = re.compile(
+    r"announced_wait\s*[=:≈~]?\s*(\d+h(?:\d+m)?(?:\d+s)?|\d+m(?:\d+s)?|\d+s)",
+    re.IGNORECASE)
+_ANNOUNCED_WAIT_DUR_RE = re.compile(
+    r"^\s*(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?\s*$", re.IGNORECASE)
 # A session-limit hold never exceeds this even if its reset clause parses to a far
 # future moment (a stale, already-passed bare time-of-day must not become a ~24h
 # wall). Weekly limits keep the full parsed reset.
@@ -2143,7 +2285,7 @@ def _cap_hit_from_text(text: str, *, evidence_log: str = "") -> dict[str, Any] |
     if not _CAP_BANNER_RE.search(text or ""):
         return None
     m = (_CODEX_RESET_RE.search(text) or _RESET_AT_RE.search(text) or _CAP_RESET_RE.search(text)
-         or _CAP_RESET_FALLBACK_RE.search(text))
+         or _ANNOUNCED_WAIT_RE.search(text) or _CAP_RESET_FALLBACK_RE.search(text))
     reset_text = m.group(1).strip() if m else ""
     if _CAP_WEEKLY_RE.search(text):
         kind = "weekly"
@@ -2159,7 +2301,8 @@ def _write_cap_hold(runs_dir: Path, *, product: str, account_tag: str | None,
                     source: str) -> dict[str, Any]:
     now_utc = dt.datetime(1970, 1, 1) + dt.timedelta(seconds=now_ts)  # naive UTC
     kind = hit.get("kind") or "session"
-    until = (_parse_reset_to_utc(str(hit.get("reset_text") or ""), now_utc)
+    until = (_parse_relative_wait(str(hit.get("reset_text") or ""), now_utc)
+             or _parse_reset_to_utc(str(hit.get("reset_text") or ""), now_utc)
              or now_utc + dt.timedelta(minutes=fallback_min))
     if kind == "session":
         session_cap = now_utc + dt.timedelta(minutes=_SESSION_HOLD_MAX_MIN)
@@ -2288,6 +2431,25 @@ def _parse_reset_to_utc(reset_text: str, now_utc: dt.datetime) -> dt.datetime | 
         cand = cand_pt + _PT_TO_UTC
     if cand <= now_utc:
         return None
+    return min(cand, now_utc + dt.timedelta(days=8))
+
+
+def _parse_relative_wait(reset_text: str, now_utc: dt.datetime) -> dt.datetime | None:
+    """A RELATIVE cap wait ('1h7m0s', '90m', '6h50m0s') -> now+dur as a naive-UTC
+    reset instant, clamped to (now, now+8d]. None when ``reset_text`` is not a bare
+    Go-duration -- an absolute 'resets <when>' clause then falls through to
+    :func:`_parse_reset_to_utc`. This is how a guard/gateway cap crash names its wall
+    (``announced_wait=<dur>``, #2610) vs Claude's absolute 'resets <when>' banner, so
+    a weekly cap cools to its ANNOUNCED window instead of a blind fallback."""
+    m = _ANNOUNCED_WAIT_DUR_RE.match(reset_text or "")
+    if not m or not any(m.groups()):
+        return None
+    hours = int(m.group(1) or 0)
+    minutes = int(m.group(2) or 0)
+    seconds = int(m.group(3) or 0)
+    if hours == 0 and minutes == 0 and seconds == 0:
+        return None
+    cand = now_utc + dt.timedelta(hours=hours, minutes=minutes, seconds=seconds)
     return min(cand, now_utc + dt.timedelta(days=8))
 
 
@@ -4147,7 +4309,34 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     live_leases = live_lane_lease_lanes(root)
     lease_held_lanes = set(live_leases.get("lanes") or [])
     held_lanes = local_held_lanes | lease_held_lanes
-    pick = lane_issue_numbers(root, lane, exclude=effective_exclude | held_lanes)
+    # Part C (#2062): SOFT-exclude any lane whose recent finished sessions burned
+    # turns yet closed nothing (a poison-pill sink like a GPU-less host re-grabbing a
+    # P1 GPU epic). The lane→tree map comes from the cheap dos.toml taxonomy (dos
+    # doctor, no gh); the git ancestry-close join inside the fold runs only for
+    # candidate lanes. An explicitly-pinned --lane deliberately BYPASSES the soft
+    # exclude (operator override), matching the operator-exclude semantics. Fully
+    # fail-open: any error yields no soft exclude. lane_issue_numbers applies the
+    # starvation floor (re-seats the last eligible lane under low_yield_relief).
+    try:
+        _concurrent, low_yield_trees = issue_lane_router.lane_taxonomy(root)
+    except Exception:
+        low_yield_trees = {}
+    low_yield = low_yield_soft_excludes(root, runs_dir, lane_trees=low_yield_trees)
+    soft_exclude = set(low_yield.get("exclude") or set())
+    if lane:
+        soft_exclude.discard(lane)  # explicit pin bypasses the soft demote
+    # Pass soft_exclude only when the loop actually flagged a lane: an empty set is
+    # identical to the default, so the common (no-low-yield) case keeps the picker
+    # call byte-identical rather than threading a no-op kwarg every tick.
+    _soft = {"soft_exclude": soft_exclude} if soft_exclude else {}
+    pick = lane_issue_numbers(root, lane, exclude=effective_exclude | held_lanes,
+                              **_soft)
+    low_yield_excluded_lanes = pick.get("low_yield_excluded") or []
+    low_yield_relief = pick.get("low_yield_relief") or []
+    # Evidence rows only for the lanes actually demoted this tick (never-silent-drop).
+    _excluded_set = set(low_yield_excluded_lanes)
+    low_yield_evidence = [r for r in (low_yield.get("lanes") or [])
+                          if r.get("lane") in _excluded_set]
     chosen_lane = pick.get("lane")
     live_issues = live_resolution_issues(runs_dir)
     cooled = recently_attempted_issues(runs_dir, cooldown_min=cooldown_min)
@@ -4193,13 +4382,27 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     eligible_lanes = pick.get("eligible_by_lane")
     if not eligible_lanes and chosen_lane:
         eligible_lanes = [[chosen_lane, pick.get("numbers") or []]]
-    audit_abstain_holds = commit_audit_abstain_holds(
-        root, _candidate_issue_numbers(eligible_lanes, pick.get("numbers") or []))
+    candidates = _candidate_issue_numbers(eligible_lanes, pick.get("numbers") or [])
+    audit_abstain_holds = commit_audit_abstain_holds(root, candidates)
     audit_abstain_held = {int(r["issue"]) for r in audit_abstain_holds
                           if r.get("issue") is not None}
+    # Part B (per-node hardware-capability gate): drop candidate issues whose
+    # declared required_caps this node does NOT advertise (FLEET_NODE_CAPS, default
+    # empty => GPU-less). A capability-skipped issue is NOT cooled/leased/labeled —
+    # it stays OPEN and visible so a node that opts in (e.g. FLEET_NODE_CAPS=gpu)
+    # picks it. This is the honest "leave it for the compute node" behavior: a
+    # GPU-less host stops re-grabbing an 8xH100 serving epic it structurally cannot
+    # run (the #2062 tools-lane burn), instead of falsely stopping it.
+    node_caps_set = dispatch_worker.node_caps()
+    caps_by_issue = {int(k): v for k, v in (pick.get("caps_by_issue") or {}).items()}
+    capability_skipped = {n for n in candidates
+                          if not (set(caps_by_issue.get(n, [])) <= node_caps_set)}
+    capability_skipped_issues = [
+        {"issue": n, "required_caps": sorted(caps_by_issue.get(n, []))}
+        for n in sorted(capability_skipped)]
     skip = (live_issues | cooled | held_no_commit | contract_held_prior
             | multi_lane_held_prior | collision_held_prior
-            | local_witnessed | audit_abstain_held)
+            | local_witnessed | audit_abstain_held | capability_skipped)
     scan_stream = contract_scan_stream(eligible_lanes, skip)
     if scan_stream:
         chosen_lane, target = scan_stream[0]
@@ -4247,6 +4450,20 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         # something is actually held, for the same byte-identical-common-case reason.
         **({"self_modify_held": pick.get("self_modify_held")} if pick.get("self_modify_held") else {}),
         **({"safe_lanes_busy": pick.get("safe_lanes_busy")} if pick.get("safe_lanes_busy") else {}),
+        # Never a silent drop: name every issue this node structurally skipped for
+        # want of a hardware capability, so the visible-skip is auditable (mirrors the
+        # router's skipped_human_blocked contract). Empty => key omitted (byte-identical).
+        **({"capability_skipped_issues": capability_skipped_issues}
+           if capability_skipped_issues else {}),
+        **({"node_caps": sorted(node_caps_set)} if node_caps_set else {}),
+        # Never a silent drop: name every lane the low-yield loop demoted this tick
+        # (#2062), with its turn/close evidence, and surface low_yield_relief when the
+        # starvation floor re-seated a flagged lane because it was the last eligible
+        # one. Empty => keys omitted (byte-identical no-low-yield common case).
+        **({"low_yield_excluded_lanes": sorted(low_yield_excluded_lanes)}
+           if low_yield_excluded_lanes else {}),
+        **({"low_yield_lanes": low_yield_evidence} if low_yield_evidence else {}),
+        **({"low_yield_relief": sorted(low_yield_relief)} if low_yield_relief else {}),
         **({"lease_held_lanes": sorted(lease_held_lanes)} if lease_held_lanes else {}),
         **({"lane_leases": live_leases} if live_leases.get("fail_open") else {}),
         "already_live": sorted(live_issues), "held_lanes": sorted(held_lanes),
@@ -4349,6 +4566,23 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                                    f"launching, it does not race a second worker "
                                    f"onto the same leaf tree")})
         return finish(payload)
+    if target is not None:
+        missing_caps = sorted(set(caps_by_issue.get(int(target), [])) - node_caps_set)
+        if missing_caps:
+            # Only reachable when an operator PINNED an incapable issue/lane
+            # (--issue/--lane) past the capability skip. Structural capability is not
+            # an operator preference, so we refuse with a reason rather than silently
+            # route around it — the honest counterpart to the visible auto-pick skip.
+            payload.update({"ok": False, "action": "node_incapable",
+                            "verdict": "NODE_INCAPABLE", "target_issue": int(target),
+                            "required_caps": sorted(caps_by_issue.get(int(target), [])),
+                            "node_caps": sorted(node_caps_set),
+                            "reason": (f"issue #{int(target)} requires hardware "
+                                       f"capabilities {missing_caps} this node does not "
+                                       f"advertise (FLEET_NODE_CAPS={sorted(node_caps_set)}); "
+                                       f"leaving it OPEN for a capable node rather than "
+                                       f"running it here — set FLEET_NODE_CAPS to opt in")})
+            return finish(payload)
     if target is None:
         held_candidate_numbers: set[int] = set()
         for entry in eligible_lanes or []:
