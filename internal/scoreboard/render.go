@@ -13,17 +13,18 @@ import (
 // Payload folds into this (FromPayload), and an ad-hoc `--kpi/--value` post builds
 // one directly, so the renderer has a single input shape.
 type Update struct {
-	Title   string   // headline, e.g. "conflation scorecard" or "code-debt"
-	Grade   string   // A-F (optional)
-	Score   string   // composite, pre-formatted (optional)
-	DebtKey string   // name of the debt integer, e.g. "conflation_debt"
-	Debt    string   // the debt value, pre-formatted (optional)
-	Verdict string   // OK | ACTION (optional)
-	Detail  string   // one-line finding/reason
-	Notes   string   // free-form multi-paragraph body (e.g. a product-direction note); rendered as-is
-	Lines   []string // optional extra lines (e.g. per-KPI scores)
-	Source  string   // who posted: "ci" | "agent" | hostname (optional)
-	Actions []Action // "do this next" affordances (e.g. an alert -> owning skill)
+	Title    string   // headline, e.g. "conflation scorecard" or "code-debt"
+	Grade    string   // A-F (optional)
+	Score    string   // composite, pre-formatted (optional)
+	DebtKey  string   // name of the debt integer, e.g. "conflation_debt"
+	Debt     string   // the debt value, pre-formatted (optional)
+	Verdict  string   // OK | ACTION (optional)
+	Detail   string   // one-line finding/reason
+	NextStep string   // one-line "do this next" guidance with no URL; rendered as its own prominent line/section, NOT jammed into the Lines stat chip
+	Notes    string   // free-form multi-paragraph body (e.g. a product-direction note); rendered as-is
+	Lines    []string // optional extra lines (e.g. per-KPI scores)
+	Source   string   // who posted: "ci" | "agent" | hostname (optional)
+	Actions  []Action // "do this next" affordances (e.g. an alert -> owning skill)
 }
 
 // ChangeKey is the stable dedupe key for a scoreboard metric. The title names
@@ -126,6 +127,11 @@ func (u Update) Text() string {
 	if u.Notes != "" {
 		fmt.Fprintf(&b, "\n%s", u.Notes)
 	}
+	// The next-step guidance is a full sentence, so it gets its own readable line — never
+	// folded into the Lines run below, which is a monospace chip meant for short stat tokens.
+	if u.NextStep != "" {
+		fmt.Fprintf(&b, "\n%s", u.NextStep)
+	}
 	if len(u.Lines) > 0 {
 		fmt.Fprintf(&b, "\n`%s`", strings.Join(u.Lines, "`  `"))
 	}
@@ -183,6 +189,14 @@ func (u Update) Blocks() []any {
 			"text": map[string]any{"type": "mrkdwn", "text": u.Notes},
 		})
 	}
+	// Next-step guidance renders as its own section — a readable "do this next" line — rather
+	// than the demoted gray context chip the stat Lines share below.
+	if u.NextStep != "" {
+		blocks = append(blocks, map[string]any{
+			"type": "section",
+			"text": map[string]any{"type": "mrkdwn", "text": u.NextStep},
+		})
+	}
 	if elems := u.actionElements(); len(elems) > 0 {
 		blocks = append(blocks, map[string]any{"type": "actions", "elements": elems})
 	}
@@ -200,7 +214,7 @@ func (u Update) Blocks() []any {
 }
 
 func (u Update) signalNoise() slackmeta.Score {
-	signal := 1 + slackmeta.NonEmpty(u.Grade, u.Score, u.Debt, u.Verdict, u.Detail, u.Notes) + len(u.Lines) + len(u.Actions)
+	signal := 1 + slackmeta.NonEmpty(u.Grade, u.Score, u.Debt, u.Verdict, u.Detail, u.Notes, u.NextStep) + len(u.Lines) + len(u.Actions)
 	noise := 1 + slackmeta.NonEmpty(u.Source)
 	return slackmeta.New(signal, noise, "headline fields, evidence rows, and actions vs source/context")
 }

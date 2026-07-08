@@ -318,6 +318,46 @@ func TestNotesRenderInTextAndBlocks(t *testing.T) {
 	}
 }
 
+// TestNextStepRendersAsOwnLineNotStatChip pins the fix for the fleet "next steps" surface:
+// a full-sentence guidance must land on its own readable line (Text) / section (Blocks),
+// never folded into the monospace/·-joined stat run the short Lines tokens share.
+func TestNextStepRendersAsOwnLineNotStatChip(t *testing.T) {
+	next := "next: repack work onto busy GPUs or stop idle-GPU leases"
+	u := Update{
+		Title:    "node usage",
+		Detail:   "1 box wasting >=4 GPUs",
+		NextStep: next,
+		Lines:    []string{"usable capacity: 2/2 boxes", "readiness: 40"},
+	}
+
+	txt := u.Text()
+	if !strings.Contains(txt, "\n"+next) {
+		t.Fatalf("NextStep not on its own line in Text():\n%s", txt)
+	}
+	if strings.Contains(txt, "`"+next) || strings.Contains(txt, next+"`") {
+		t.Fatalf("NextStep leaked into the monospace Lines run in Text():\n%s", txt)
+	}
+	if !strings.Contains(txt, "`usable capacity: 2/2 boxes") {
+		t.Fatalf("stat Lines missing from the monospace run in Text():\n%s", txt)
+	}
+
+	blocks := u.Blocks()
+	raw, _ := json.Marshal(blocks)
+	if !strings.Contains(string(raw), next) {
+		t.Fatalf("NextStep missing from Blocks():\n%s", raw)
+	}
+	// It must not be concatenated into the "  ·  "-joined stat context chip.
+	if strings.Contains(string(raw), "·  "+next) || strings.Contains(string(raw), next+"  ·") {
+		t.Fatalf("NextStep leaked into the stat context chip in Blocks():\n%s", raw)
+	}
+
+	// An empty NextStep changes nothing (no stray section/line).
+	plain := Update{Title: "node usage", Lines: []string{"readiness: 100"}}
+	if strings.Contains(plain.Text(), "\n\n") {
+		t.Fatalf("empty NextStep introduced a blank line:\n%q", plain.Text())
+	}
+}
+
 // chdir switches to dir for the test and restores the prior cwd after.
 func chdir(t *testing.T, dir string) {
 	t.Helper()
