@@ -647,6 +647,20 @@ summary  = "A dispatch or worker launch would overlap a live lease/region and ri
 fix      = "Run the arbiter and wait, repartition, or pick a disjoint lane/region before launching. Floor: `dos arbitrate` / lane lease checks."
 see_also = ["dos arbitrate", "dos top", "tools/dos_fleet_lease.py"]
 
+# The reversibility preview-confirm gate (#3306, #2776): an irreversible or
+# outward-facing tool call is HELD (REQUIRE_WITNESS/ESCALATE) pending an echoed
+# confirm token or a switch to a compiled sidestep. The gate surfaces the token
+# `REQUIRE_WITNESS` in-band; declaring it here makes `dos_check_reason REQUIRE_WITNESS`
+# classify it as a known OPERATOR_GATE pause instead of UNCLASSIFIED drift. It is a
+# pause, not a terminal denial: a compiled sidestep (e.g. `fak sync push`) clears it
+# outright, and the confirm-token re-propose is the fallback for the raw gated call.
+[reasons.REQUIRE_WITNESS]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A reversibility preview-confirm gate paused an irreversible or outward-facing call, pending an echoed confirm token or a switch to a compiled sidestep. A pause, not a terminal denial."
+fix      = "Prefer the sanctioned compiled sidestep the refusal names (e.g. `fak sync push` for a gated `git push`) -- it avoids the gate entirely and needs no token. Otherwise re-propose the same call byte-identical with only the `_fak_confirm` key added (the command text binds the token; the free-text description does not)."
+see_also = ["internal/adjudicator/reversibility.go", "internal/gateway/reversibility_note.go", "docs/notes/CONFIRM-GATE-DEADLOCK-2026-07-04.md"]
+
 # Blast-radius containment W4 (#2716, epic #2712): the dispatch router scope-holds an
 # issue whose declared paths intersect a LIVE known-bad signature (the internal/knownbad
 # ledger, #2713), so a worker is not sent to walk straight into a shared bug. This is the
@@ -1096,6 +1110,71 @@ refusal  = true
 summary  = "An out-of-band redirect targeted a session whose current objective is TERMINAL (met/abandoned) -- there is no live objective to redirect; reopening a finished objective is a restart, not an out-of-band op."
 fix      = "Start a new session/objective for the new goal instead of redirecting the finished one; redirect only an active or paused objective. Floor: internal/sessionctl EnqueueRedirect + ApplyPendingRedirect against the live objective."
 see_also = ["internal/sessionctl/redirect.go", "internal/agent/loop_redirect_test.go"]
+
+# #3066 (child [GATE] of the TOON epic #3064): the closed skip-reason vocabulary
+# the pure `toon.Decide(...)` governor returns instead of `Encode:true`. Each token
+# names one checkable condition under which TOON auto-fire must NOT fire (keep JSON);
+# the decision is expressed the way this repo expresses every decision — a single
+# reason from a closed set, the dos_* / internal/ablate fail-loud posture. Registering
+# them here is what makes `dos_check_reason` resolve each token (known, refusable) and
+# `dos_refuse_reasons` list them, so a wiring/scorecard surface (#3067) can route on the
+# token instead of parsing free text. Producer + closed set of record:
+# internal/toon/decide.go (KnownSkipReasons).
+[reasons.TABULAR_ELIGIBILITY_LOW]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "TOON auto-fire declined: TabularEligibility(payload) < τ. Nested / non-uniform data collapses TOON accuracy (independent nested-data benches rank TOON last) because the transform removes the repeated field-name anchors the model leans on -- an accuracy loss, not a saving."
+fix      = "Keep JSON for this span -- it is not uniformly tabular. Only auto-fire TOON on flat, row-uniform payloads whose eligibility clears τ. Floor: go test ./internal/toon -run TestDecide."
+see_also = ["internal/toon/decide.go", "internal/toon/score.go", "issue #3066"]
+
+[reasons.PAYLOAD_TOO_SMALL]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "TOON auto-fire declined: rows < R_min or bytes < B_min. The fixed header (plus any primer) overhead is not amortized on a small payload, so the net token delta is <= 0."
+fix      = "Keep JSON -- the payload is below the amortization floor. Auto-fire only once rows/bytes clear R_min/B_min so the fixed header cost is repaid. Floor: go test ./internal/toon -run TestDecide."
+see_also = ["internal/toon/decide.go", "issue #3066"]
+
+[reasons.NET_TOKENS_NONPOSITIVE]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "TOON auto-fire declined: TOONTokens >= JSONTokens - margin, measured by the caller's real tokenizer (primer cost included). THE witness -- if the real tokenizer shows no win, there is no win; this gate makes 'never fire at a loss' a proof, not a hope."
+fix      = "Keep JSON -- the measured token delta is non-positive. This is the safety invariant (never fire at a loss); do not override it with an estimate. Floor: go test ./internal/toon -run TestDecideNeverFiresAtALoss."
+see_also = ["internal/toon/decide.go", "issue #3066"]
+
+[reasons.CACHE_PREFIX_RESIDENT]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "TOON auto-fire declined: the span is already inside a cached prefix. Re-encoding turns a 0.1x cache read into a full-price recompute -- a cost-multiplier loss dressed up as a token saving. The cache-first kernel's dominant TOON hazard, distinct from an accuracy skip."
+fix      = "Keep JSON -- the span is cache-resident, so re-encoding busts the prefix and costs more than it saves. Auto-fire TOON only on spans OUTSIDE the resident prefix. Signal wired by #3067. Floor: go test ./internal/toon -run TestDecide."
+see_also = ["internal/toon/decide.go", "internal/agent/anthropic_cachebp.go", "issue #3066"]
+
+[reasons.VOLATILE_SPAN]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "TOON auto-fire declined: the span head is volatile (the anthropic_cachebp.go headValueIsVolatile notion -- a per-turn-rewritten head). Encoding it thrashes the stable cache prefix."
+fix      = "Keep JSON -- a per-turn-rewritten head must not enter the stable prefix as TOON. Auto-fire only on stable spans. Signal wired by #3067. Floor: go test ./internal/toon -run TestDecide."
+see_also = ["internal/toon/decide.go", "internal/agent/anthropic_cachebp.go", "issue #3066"]
+
+[reasons.MODEL_TOON_UNFIT]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "TOON auto-fire declined: the target model's TOON fitness is below phi and a primer will not close the gap within budget. Small/untrained models degrade on the format; the primer cost is counted against the saving."
+fix      = "Keep JSON for this model -- its measured TOON fitness is below phi. Route TOON only to models whose fitness clears the bar (or where an in-budget primer closes it). Signal wired by #3067. Floor: go test ./internal/toon -run TestDecide."
+see_also = ["internal/toon/decide.go", "internal/toon/score.go", "issue #3066"]
+
+[reasons.ROUNDTRIP_LOSSY]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "TOON auto-fire declined: Decode(Encode(payload)) != payload. The correctness spine -- an encoding that cannot be proven reversible is never emitted."
+fix      = "Keep JSON -- the round-trip is lossy, so the TOON encoding is not provably reversible. Fix the codec or leave the payload as JSON; never emit an unverifiable encoding. Floor: go test ./internal/toon -run TestDecide."
+see_also = ["internal/toon/decide.go", "internal/toon/decode.go", "issue #3066"]
+
+[reasons.OUTPUT_DIRECTION]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "TOON auto-fire declined: the payload is a response schema the model must PRODUCE. Model TOON *output* support is weak, so keep JSON -- TOON here is input-only."
+fix      = "Keep JSON -- TOON auto-fire is input-only; a payload the model must emit stays JSON. Only encode inbound (model-consumed) spans. Floor: go test ./internal/toon -run TestDecide."
+see_also = ["internal/toon/decide.go", "issue #3066"]
 
 # Bound the per-project `.dos/` scratch so a long-lived repo doesn't accrete audit
 # reports without limit (the "never reap a live lease" floor is the collector's,
