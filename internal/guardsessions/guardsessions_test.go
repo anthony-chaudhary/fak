@@ -21,7 +21,7 @@ func TestHandleIsDeterministicAndDistinct(t *testing.T) {
 	}
 	// The handle has the git-short-sha feel: a "g" prefix + 8 hex.
 	h := Handle("some-trace", t0)
-	if len(h) != 9 || h[0] != 'g' {
+	if len(h) != 9 || h[0] != 'g' { //boundarylint:ignore CHANGE_DETECTOR_TEST the handle is a fixed g+8hex (9-char) format
 		t.Fatalf("handle %q is not the g+8hex form", h)
 	}
 }
