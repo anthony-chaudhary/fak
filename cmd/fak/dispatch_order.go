@@ -76,6 +76,8 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchWorkerEvidence(stdout, stderr, argv[1:])
 	case "audit":
 		return runDispatchAudit(stdout, stderr, argv[1:])
+	case "closure-audit":
+		return runDispatchClosureAudit(stdout, stderr, argv[1:])
 	case "scorecard":
 		return runDispatchScorecard(stdout, stderr, argv[1:])
 	case "issue-smallness-lint", "smallness":
@@ -96,7 +98,7 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		dispatchUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, route-health, tier-status, rollout-status, tick, wave, sweep, progress, status, evidence, audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, or timeout-ledger)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, route-health, tier-status, rollout-status, tick, wave, sweep, progress, status, evidence, audit, closure-audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, or timeout-ledger)\n", argv[0])
 		dispatchUsage(stderr)
 		return 2
 	}
@@ -274,6 +276,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch status [--runs-dir DIR] [--json | --markdown]
   fak dispatch evidence [--runs-dir DIR] [--materialize] [--now UNIX] [--json]
   fak dispatch audit [--runs-dir DIR] [--json] [--file-issues]
+  fak dispatch closure-audit [--workspace DIR] [--max-commits N] [--issue-limit N] [--json | --markdown]
   fak dispatch scorecard [--workspace DIR] [--live-router] [--json]
   fak dispatch issue-smallness-lint (--body-file FILE | --issue N | --open) [--limit N] [--json] [--scorecard]
   fak dispatch commit-links [--range REV..REV] [--json]
