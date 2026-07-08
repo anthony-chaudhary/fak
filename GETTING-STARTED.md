@@ -11,9 +11,9 @@ written down.
 > the tutorial is the hand-held walkthrough.
 
 `fak` is **one Go binary**: a single static artifact with zero external dependencies (no
-Python, no CUDA toolchain, no `go.sum`). That one binary *is* the whole governed-serving
-surface: the gateway, the policy gate, the result quarantine, and the audit/metrics
-surface in a single process. There are four things you can do with it, in rising order of
+Python, no CUDA toolchain, no `go.sum`). That one binary *is* the whole serving surface:
+the gateway, the KV-cache and routing engine, and the token-savers — plus, on the same
+seam, the policy gate, result quarantine, and audit/metrics — in a single process. There are four things you can do with it, in rising order of
 setup cost, and **nothing new gets installed between them**:
 
 | Tier | What you get | Setup | Downloads |
@@ -131,6 +131,13 @@ summary: submits=12 vdso_hits=6 engine_calls=6 denies=0 transforms=0 quarantines
 `by=vdso` is a call served from the local tool fast-path (no engine call); `by=monitor`
 went through to the engine.
 
+**The headline cost gate and the injection A/B:**
+
+```bash
+./fak bench  --suite tau2-smoke      # in-process adjudication p50 vs spawned-hook p50
+./fak agent  --offline               # the prompt-injection A/B on the deterministic planner
+```
+
 **See the capability floor refuse a call (structural, model-independent):**
 
 ```bash
@@ -145,13 +152,6 @@ went through to the engine.
 > **not** cmd.exe, which passes the quotes through literally. On cmd.exe, drop the single quotes
 > and escape the inner double quotes (`--args "{""_positional"":[""alice""]}"`). Or just run
 > these examples from git-bash / PowerShell, where the shown syntax works unchanged.
-
-**The headline cost gate and the injection A/B:**
-
-```bash
-./fak bench  --suite tau2-smoke      # in-process adjudication p50 vs spawned-hook p50
-./fak agent  --offline               # the prompt-injection A/B on the deterministic planner
-```
 
 **Inspect / author the deployable capability floor:**
 

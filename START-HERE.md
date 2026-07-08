@@ -12,18 +12,19 @@ and runs on CPU — no GPU needed for small models.
 
 | I want to... | Follow this |
 |---------------|-------------|
+| **Run a local model behind my existing coding agent** (no key, no network, one command) | `fak guard --gguf qwen2.5:7b -- claude` |
+| **Chat with a local AI** (most fun — needs a ~1.6 GB model download) | [Simple Demo](cmd/simpledemo/README.md) — 5 minutes |
+| **Cut the token bill on the agent you already run** (cheaper long sessions, one command) | [Main README](README.md#get-started-with-fak-guard) — `fak guard -- claude` |
+| **See the performance benchmarks** | [Benchmark Authority](BENCHMARK-AUTHORITY.md) |
+| **Follow a guided first session** (real output at every step) | [Tutorial](docs/fak/tutorial.md) — 15 minutes ⭐ |
+| **Learn every concept in order** (a prerequisite-based course you can join at any level) | [Learning path](LEARNING-PATH.md) — 98 courses, six levels ⭐ |
+| **I'm a coding agent** (build/test/run + the rules) | [AGENTS.md](AGENTS.md) |
+| **I already run an agent** (Claude Code, Cursor, an SDK, or MCP) | [Integration index](docs/integrations/README.md) — repoint one base URL, no agent-side code change |
+| **Understand what fak actually does** | [Main README](README.md) |
+| **Put a tool-call control plane in front of my AI** | [Getting Started](GETTING-STARTED.md) — 10 minutes |
 | **Prove the tool-call boundary in 60 seconds** (no model, no download, no key) | [The boundary proof](README.md#tool-call-controls) — one structural DENY |
 | **Watch the 60-second proof without running anything** (recorded terminal cast) | [Install to first DENY verdict](docs/adoption/casts/README.md) — annotated cast + still frame |
 | **See the boundary handle a live attack fixture** (Go only, ~1 min, no downloads) | [AgentDojo red-team demo](examples/agentdojo-redteam/README.md) |
-| **I'm a coding agent** (build/test/run + the rules) | [AGENTS.md](AGENTS.md) |
-| **Run a local model behind my existing coding agent** (no key, no network, one command) | `fak guard --gguf qwen2.5:7b -- claude` |
-| **Chat with a local AI** (most fun — needs a ~1.6 GB model download) | [Simple Demo](cmd/simpledemo/README.md) — 5 minutes |
-| **Follow a guided first session** (real output at every step) | [Tutorial](docs/fak/tutorial.md) — 15 minutes ⭐ |
-| **Learn every concept in order** (a prerequisite-based course you can join at any level) | [Learning path](LEARNING-PATH.md) — 98 courses, six levels ⭐ |
-| **Put a tool-call control plane in front of my AI** | [Getting Started](GETTING-STARTED.md) — 10 minutes |
-| **I already run an agent** (Claude Code, Cursor, an SDK, or MCP) | [Integration index](docs/integrations/README.md) — repoint one base URL, no agent-side code change |
-| **Understand what fak actually does** | [Main README](README.md) |
-| **See the performance benchmarks** | [Benchmark Authority](BENCHMARK-AUTHORITY.md) |
 
 ## Quick: Try the chat demo (5 minutes)
 

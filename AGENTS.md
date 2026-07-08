@@ -39,6 +39,29 @@ make test                 # full suite incl. the weight-backed model witnesses
 make ci                   # the full gate: build + vet + test + claims-lint  (Windows: scripts/ci.ps1)
 ```
 
+### Which build am I asking about? (shared trunk — name the question first)
+
+This checkout is permanently *peer-dirty*: hundreds of uncommitted files and half-wired
+untracked `.go` siblings from other live sessions. A bare `go build ./...` / `go vet ./...`
+**run in place therefore answers no clean question** — a peer's broken WIP can fabricate a
+red, and a peer's uncommitted fix can mask a real one. Name the question, run the one verb:
+
+| Your question | Run |
+|---|---|
+| Is the **committed trunk** buildable + gofmt-clean? *(what CI gates — what "clean **git** build" means)* | `fak ci-preflight` |
+| Does **my change** compile, ignoring peers' broken untracked WIP? | `fak buildcheck [--vet]` |
+| Does the **literal working tree** compile — *my own* untracked WIP included? | `fak buildcheck --isolate=false --vet` |
+| Will my **push** red another worker's build graph? | `fak hooks pre-push` |
+
+`fak ci-preflight` archives the tip to a throwaway checkout (immune to the dirty tree;
+`--skip-build` = gofmt-only fast path). `fak buildcheck` discards output to the null device
+and, by default, `-overlay`s away untracked siblings so a peer's WIP can't red your compile
+(`--mine <file>` keeps your own new file); `--isolate=false` builds the live tree as-is, which
+is the one that catches *your own* broken untracked `_test.go`. None of the three writes an
+in-tree binary. `make test-fast` / `make ci` remain the local full-suite gates. **Don't report
+"the build is clean" from a raw `go build`/`go vet` in this working tree without saying which of
+the four questions you mean** — they give different answers here.
+
 Or install the released binary directly — the module is at the repo root, so this resolves:
 
 ```bash

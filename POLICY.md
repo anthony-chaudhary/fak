@@ -4,6 +4,11 @@
 > that floor: the set of tools your agent may call is a **declarative manifest you
 > edit and a reviewer can diff** — not a Go literal you fork the kernel to change.
 
+Security is the secondary benefit here, not the headline: this floor rides along
+on the *same* checkpoint that delivers the token-savings, KV-cache reuse, and
+right-model-per-call wins — so this page just documents the safety you get for
+free on that seam.
+
 In v0.1 the floor was `adjudicator.DefaultPolicy()`, a compiled-in Go table.
 Adopting `fak` meant editing Go and recompiling. The policy manifest closes that
 gap: `fak` loads the floor from a JSON file at startup, so a coding agent, an

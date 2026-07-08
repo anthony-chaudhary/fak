@@ -5,10 +5,12 @@ description: "A linear, prerequisite-based curriculum across every fak concept: 
 
 # The fak learning path
 
-fak is a lot of ideas stacked into one binary: a default-deny capability floor, a
-write-time result quarantine, an addressable KV cache, a pure-Go in-kernel model, and
-the honesty discipline that keeps every claim checkable. This page turns all of it into
-one **linear, prerequisite-ordered curriculum** — a course catalog, not a doc dump.
+fak is a lot of ideas stacked into one binary: an addressable KV cache that keeps long
+sessions cheap to hold warm, right-model-per-call routing, and a pure-Go in-kernel model —
+and, riding along on the same write-time checkpoint, a default-deny capability floor, a
+write-time result quarantine, and the honesty discipline that keeps every claim checkable.
+This page turns all of it into one **linear, prerequisite-ordered curriculum** — a course
+catalog, not a doc dump.
 Each course points at the doc that already teaches it; the value added here is the
 **order** and the **prerequisites**, so you always have the background a page assumes
 *before* you open it.
@@ -23,11 +25,13 @@ lands you on a concept whose prerequisite you have not met yet.
 the kernel. The readings are the docs you would read anyway; the path is what stops you
 reading them in the wrong order.
 
-> New to the project entirely? The fastest taste is the 2-minute boundary proof in
-> [`README.md`](README.md#tool-call-controls), then come back here
-> and start at **FAK 101**. Just want to install and run? [`START-HERE.md`](START-HERE.md)
-> and [`GETTING-STARTED.md`](GETTING-STARTED.md) are the install front doors; this page is
-> the *concept* front door.
+> New to the project entirely? The fastest taste of the payoff is one offline pass that
+> prints the token/turn savings from the shared prefix — `go run ./cmd/fak agent --offline`
+> (see **FAK 104**); the same run also prints the safety A/B, and the 2-minute boundary
+> proof in [`README.md`](README.md#tool-call-controls) is the secondary, security-side view.
+> Either way, come back here and start at **FAK 101**. Just want to install and run?
+> [`START-HERE.md`](START-HERE.md) and [`GETTING-STARTED.md`](GETTING-STARTED.md) are the
+> install front doors; this page is the *concept* front door.
 
 ## How to read a course
 
@@ -71,6 +75,10 @@ so you can join mid-catalog without hitting a wall. Anyone can also just start a
 > noted on each course later (or never) without breaking a lab.
 
 ## The level ladder
+
+Read the ladder performance-first: L400's cache reuse and the in-kernel model are the
+headline payoff, and the L300 security floor rides the same write-time checkpoint rather
+than sitting on a separate path.
 
 ```
 L100  Orientation .................. what fak is, the one idea, the two gates      (start cold)
