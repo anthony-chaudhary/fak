@@ -137,6 +137,8 @@ func main() {
 		cmdBenchRuns(os.Args[2:])
 	case "bench-loop", "benchloop":
 		cmdBenchLoop(os.Args[2:])
+	case "bench-ingest":
+		cmdBenchIngest(os.Args[2:])
 	case "amd-gpu-facts":
 		cmdAMDGPUFacts(os.Args[2:])
 	case "commit-subject-coverage":
@@ -189,6 +191,8 @@ func main() {
 		cmdSignal(os.Args[2:])
 	case "task":
 		cmdTask(os.Args[2:])
+	case "tasks":
+		cmdTasks(os.Args[2:])
 	case "toolproc":
 		cmdToolproc(os.Args[2:])
 	case "stallscan":
@@ -416,6 +420,8 @@ func main() {
 		cmdExperiments(os.Args[2:])
 	case "coverage-matrix":
 		cmdCoverageMatrix(os.Args[2:])
+	case "conformance":
+		cmdConformance(os.Args[2:])
 	case "support-maturity-scorecard":
 		cmdSupportMaturityScorecard(os.Args[2:])
 	case "support":
