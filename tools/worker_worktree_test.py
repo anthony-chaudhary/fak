@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -399,6 +401,140 @@ class CLITest(unittest.TestCase):
             {"count_worker_worktrees": lambda root: {"count": 0, "paths": [],
                                                      "error": "not a git repo"}})
         self.assertEqual(code, 1)
+
+
+def _tool_on_path(name: str) -> bool:
+    return shutil.which(name) is not None
+
+
+def _run(cmd: list[str], cwd: Path, env: dict | None = None) -> "tuple[int, str]":
+    """Run one subprocess hermetically; return (rc, stdout+stderr). Used only by the
+    LIVE build-poison witness (skipped when git/go are absent)."""
+    proc = subprocess.run(cmd, cwd=str(cwd), env=env, capture_output=True,
+                          text=True, encoding="utf-8", errors="replace")
+    return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+
+
+class WorktreeBuildPoisonTest(unittest.TestCase):
+    """LIVE build-poison isolation witness (#3177).
+
+    The #1334 primitive asserts in a DOCSTRING that "a broken build in one
+    worker's worktree cannot red another's". This class turns that assertion into
+    a witness, using ONLY the shipped ``prepare_worker_worktree`` + ``worktree_env``:
+    two real detached worktrees off a throwaway Go module, a deliberately broken
+    ``.go`` file written into worktree A only, and ``go build ./...`` run in BOTH —
+    A reds while B stays green.
+
+    Two distinct isolation properties are witnessed:
+
+      * SOURCE isolation — the broken file lives only in A's worktree, so B's
+        ``go build`` never compiles it. This is the property that actually keeps B
+        green, and the dominant "a half-built package reds a peer" killer in a
+        shared trunk (both workers sharing ONE source tree).
+      * BUILD-CACHE isolation — ``worktree_env`` points ``GOCACHE`` / ``GOTMPDIR``
+        INSIDE each worktree, so A's compiler output can never land in B's cache.
+
+    Honest note on the mechanism (durable finding): Go's build cache is
+    content-addressed, so a FAILED compile of A's broken package is never cached
+    and could not, by itself, red a sibling that shared the same GOCACHE. The
+    load-bearing isolation for "B stays green" is therefore the SEPARATE SOURCE
+    worktree; the per-worktree GOCACHE/GOTMPDIR is what keeps artifacts from
+    crossing. Both are asserted below.
+
+    Fail-open like ``_go_build_verify``: when git or go is unavailable the live
+    half skips. The pure GOCACHE/GOTMPDIR-per-tree invariant
+    (:meth:`test_worktree_env_gives_each_tree_its_own_gocache_gotmpdir`) always
+    runs and is the guard that REDS the moment ``worktree_env`` stops isolating.
+    """
+
+    def test_worktree_env_gives_each_tree_its_own_gocache_gotmpdir(self) -> None:
+        # The mutation guard, host-independent (no git/go needed): distinct,
+        # per-worktree GOCACHE/GOTMPDIR IS the isolation claim. If worktree_env
+        # regressed to a shared/global cache, these assertions red — which is
+        # exactly the issue's "the test fails if worktree_env stops isolating".
+        wt_a = Path(tempfile.gettempdir()) / "fak-worker-wt-tools-poisonA"
+        wt_b = Path(tempfile.gettempdir()) / "fak-worker-wt-tools-poisonB"
+        env_a = mod.worktree_env({}, wt_a)
+        env_b = mod.worktree_env({}, wt_b)
+        for env, wt in ((env_a, wt_a), (env_b, wt_b)):
+            self.assertTrue(env["GOCACHE"].startswith(str(wt)))
+            self.assertTrue(env["GOTMPDIR"].startswith(str(wt)))
+        # A's caches are a different directory from B's — artifacts cannot cross.
+        self.assertNotEqual(env_a["GOCACHE"], env_b["GOCACHE"])
+        self.assertNotEqual(env_a["GOTMPDIR"], env_b["GOTMPDIR"])
+
+    def test_build_poison_in_a_does_not_red_b(self) -> None:
+        if not _tool_on_path("git"):
+            self.skipTest("git not on PATH — live worktree witness skipped (fail open)")
+        if not _tool_on_path("go"):
+            self.skipTest("go not on PATH — live build witness skipped (fail open)")
+        with tempfile.TemporaryDirectory() as d:
+            repo = Path(d) / "repo"
+            repo.mkdir()
+            # A throwaway Go module committed at HEAD; both worktrees detach here.
+            # `go 1.16` + GOTOOLCHAIN=local/GOPROXY=off keep the build fully offline
+            # on any newer toolchain (no dep => no go.sum needed).
+            (repo / "go.mod").write_text("module poisonmod\n\ngo 1.16\n",
+                                         encoding="utf-8")
+            (repo / "poison.go").write_text(
+                "package poisonmod\n\nfunc Sum(a, b int) int { return a + b }\n",
+                encoding="utf-8")
+            for a_ in (["init", "-q"],
+                       ["config", "user.email", "poison@test"],
+                       ["config", "user.name", "poison"],
+                       ["config", "commit.gpgsign", "false"],
+                       ["add", "go.mod", "poison.go"],
+                       ["commit", "-q", "-m", "base"]):
+                rc, out = _run(["git", *a_], repo)
+                self.assertEqual(rc, 0, f"git {a_[0]} failed: {out}")
+
+            wt_root = Path(d) / "wt"
+            a = mod.prepare_worker_worktree(repo, "tools", "poisonA", wt_root=wt_root)
+            b = mod.prepare_worker_worktree(repo, "tools", "poisonB", wt_root=wt_root)
+            self.assertTrue(a["ok"], a)
+            self.assertTrue(b["ok"], b)
+            try:
+                # count_worker_worktrees sees BOTH isolated trees (read from git,
+                # not any worker's self-report).
+                cnt = mod.count_worker_worktrees(repo)
+                self.assertEqual(cnt["count"], 2, cnt)
+
+                wt_a, wt_b = Path(a["path"]), Path(b["path"])
+                # Poison ONLY A's source with a deliberately broken .go file.
+                (wt_a / "broken.go").write_text(
+                    "package poisonmod\n\nfunc Broken() { this is not valid go }\n",
+                    encoding="utf-8")
+
+                offline = {"GOTOOLCHAIN": "local", "GOPROXY": "off"}
+                env_a = {**os.environ, **offline, **mod.worktree_env({}, wt_a)}
+                env_b = {**os.environ, **offline, **mod.worktree_env({}, wt_b)}
+                # GOTMPDIR must pre-exist for `go build`; make both caches upfront so
+                # neither build reds for a missing-dir reason.
+                for env in (env_a, env_b):
+                    Path(env["GOTMPDIR"]).mkdir(parents=True, exist_ok=True)
+                    Path(env["GOCACHE"]).mkdir(parents=True, exist_ok=True)
+
+                rc_a, out_a = _run(["go", "build", "./..."], wt_a, env=env_a)
+                rc_b, out_b = _run(["go", "build", "./..."], wt_b, env=env_b)
+
+                # A reds — its own worktree holds the broken file...
+                self.assertNotEqual(rc_a, 0, f"expected A to red, got clean: {out_a}")
+                # ...while B — a separate worktree with its own GOCACHE — stays green,
+                # proving A's broken build did not poison B.
+                self.assertEqual(rc_b, 0, f"expected B green, got red: {out_b}")
+
+                # A's build artifacts never appear in B's GOCACHE: the caches are
+                # distinct directories, each inside its own worktree.
+                self.assertNotEqual(env_a["GOCACHE"], env_b["GOCACHE"])
+                self.assertTrue(env_a["GOCACHE"].startswith(str(wt_a)))
+                self.assertTrue(env_b["GOCACHE"].startswith(str(wt_b)))
+                # B actually compiled into B's OWN cache (proof worktree_env took
+                # effect — an empty cache would mean GOCACHE was ignored).
+                self.assertTrue(any(Path(env_b["GOCACHE"]).rglob("*")),
+                                "B's GOCACHE stayed empty — worktree_env GOCACHE not honored")
+            finally:
+                mod.reap_worker_worktree(repo, a["path"])
+                mod.reap_worker_worktree(repo, b["path"])
 
 
 if __name__ == "__main__":
