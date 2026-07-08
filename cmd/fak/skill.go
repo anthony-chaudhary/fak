@@ -45,6 +45,8 @@ func cmdSkill(args []string) {
 		code = runSkillQuery(os.Stdout, os.Stderr, args[1:])
 	case "residency":
 		code = runSkillResidency(os.Stdout, os.Stderr, args[1:])
+	case "footprint":
+		code = runSkillFootprint(os.Stdout, os.Stderr, args[1:])
 	case "swap":
 		code = runSkillSwap(os.Stdout, os.Stderr, args[1:])
 	case "-h", "--help", "help":
@@ -79,6 +81,11 @@ The queried skill loader — 0 cost for ∞ skills, paged on demand (epic #1103,
       hot-swap a skill's active version and print the pre-flip blast radius.
       --from guards the remap (refuses if the pinned version differs); the flip
       is persisted to .claude/skill-page-table.json so residency reads it back.
+
+  fak skill footprint [--top N] [--mcp] [--json]
+      the userland resident-floor scorecard: per-skill resident description
+      bytes + at-rest card bytes, the floor total (the /context Skills slice),
+      and the top-N heaviest. Deterministic and offline (epic #3229 / #3234).
 
 Without a live kernel the faulted/evicted residency states and the eviction
 blast radius are zero (a one-shot CLI holds no resident pages); the verbs still

@@ -179,6 +179,63 @@ func TestSkillResidencyListsCardsAndPins(t *testing.T) {
 	}
 }
 
+// --- footprint (resident-floor scorecard, #3234) ---------------------------
+
+func TestSkillFootprintSumsResidentBytes(t *testing.T) {
+	root := chdirRepo(t)
+	writeSkill(t, root, "heavy", skillFrontmatter("heavy", "1.0.0", "Use when you need a very very very long description that dominates the resident floor"))
+	writeSkill(t, root, "light", skillFrontmatter("light", "1.0.0", "Use when light"))
+
+	var out bytes.Buffer
+	if code := runSkillFootprint(&out, io.Discard, []string{"--json"}); code != 0 {
+		t.Fatalf("runSkillFootprint exit=%d", code)
+	}
+	m := decodeJSON(t, out.Bytes())
+	if m["skill_count"].(float64) != 2 {
+		t.Fatalf("skill_count=%v, want 2", m["skill_count"])
+	}
+	floor := m["description_floor_bytes"].(float64)
+	if floor <= 0 {
+		t.Fatalf("description_floor_bytes=%v, want >0", floor)
+	}
+	entries := m["entries"].([]any)
+	if len(entries) != 2 {
+		t.Fatalf("entries=%d, want 2", len(entries))
+	}
+	// Heaviest resident description first: 'heavy' has the longer description.
+	if first := entries[0].(map[string]any); first["name"] != "heavy" {
+		t.Fatalf("heaviest entry=%v, want heavy", first["name"])
+	}
+	// The floor total equals the sum of the per-entry description bytes — the
+	// resident tax is exactly the sum of the frontmatter description fields.
+	sum := 0.0
+	for _, e := range entries {
+		sum += e.(map[string]any)["description_bytes"].(float64)
+	}
+	if sum != floor {
+		t.Fatalf("description_floor_bytes %v != sum of entry desc bytes %v", floor, sum)
+	}
+}
+
+func TestSkillFootprintTopLimits(t *testing.T) {
+	root := chdirRepo(t)
+	writeSkill(t, root, "a", skillFrontmatter("a", "1.0.0", "Use when you need aaaa long enough to rank"))
+	writeSkill(t, root, "b", skillFrontmatter("b", "1.0.0", "Use when you need bbbb an even longer description here to outrank"))
+	writeSkill(t, root, "c", skillFrontmatter("c", "1.0.0", "Use when c"))
+
+	var out bytes.Buffer
+	if code := runSkillFootprint(&out, io.Discard, []string{"--top", "2", "--json"}); code != 0 {
+		t.Fatalf("runSkillFootprint exit=%d", code)
+	}
+	m := decodeJSON(t, out.Bytes())
+	if h := m["heaviest"].([]any); len(h) != 2 {
+		t.Fatalf("heaviest=%d, want 2 (--top 2)", len(h))
+	}
+	if e := m["entries"].([]any); len(e) != 3 {
+		t.Fatalf("entries=%d, want 3 (--top bounds the heaviest list, not entries)", len(e))
+	}
+}
+
 // --- swap ------------------------------------------------------------------
 
 func TestSkillSwapPersistsAndResidencyReadsBack(t *testing.T) {
