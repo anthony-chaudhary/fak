@@ -116,6 +116,7 @@ func snapshotInfo(argv []string) {
 	if strings.HasSuffix(path, ".faksession") {
 		tmp, err := os.MkdirTemp("", "fak-snap-info-*")
 		must(err)
+		defer os.RemoveAll(tmp)
 		img, err := sessionimage.LoadArchive(path, tmp)
 		must(err)
 		printSessionImageInfo(img)
@@ -170,18 +171,32 @@ func sessionImageInfo(img *sessionimage.Image) map[string]any {
 // `snapshot info` does: a .faksession archive is unpacked to a temp dir and loaded via
 // LoadArchive, a bundle directory is loaded via LoadDir. Anything else is refused (a
 // single .snap envelope is not a session image and carries no queryable core image).
-func openSessionImage(path string) (*sessionimage.Image, error) {
+//
+// The returned *Image demand-pages its recall core lazily from the unpack dir, so the
+// caller MUST defer the returned cleanup func until it is done with the image — that is
+// what reaps the `fak-snap-query-*` temp dir the archive path unpacks into (#3298). The
+// cleanup is always non-nil on success (a no-op for the already-on-disk bundle-dir case).
+func openSessionImage(path string) (*sessionimage.Image, func(), error) {
 	if strings.HasSuffix(path, ".faksession") {
 		tmp, err := os.MkdirTemp("", "fak-snap-query-*")
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return sessionimage.LoadArchive(path, tmp)
+		img, err := sessionimage.LoadArchive(path, tmp)
+		if err != nil {
+			os.RemoveAll(tmp)
+			return nil, nil, err
+		}
+		return img, func() { os.RemoveAll(tmp) }, nil
 	}
 	if fi, err := os.Stat(path); err == nil && fi.IsDir() {
-		return sessionimage.LoadDir(path)
+		img, err := sessionimage.LoadDir(path)
+		if err != nil {
+			return nil, nil, err
+		}
+		return img, func() {}, nil
 	}
-	return nil, fmt.Errorf("fak snapshot query: %s is not a session image (want a bundle directory or a .faksession archive)", path)
+	return nil, nil, fmt.Errorf("fak snapshot query: %s is not a session image (want a bundle directory or a .faksession archive)", path)
 }
 
 // sessionQueryHit is one benign slice of the recall working set — the safe metadata only
@@ -235,8 +250,9 @@ func snapshotQuery(argv []string) {
 		fmt.Fprintln(os.Stderr, "fak snapshot query: --query is required")
 		os.Exit(2)
 	}
-	img, err := openSessionImage(pathutil.ExpandTilde(*file))
+	img, cleanup, err := openSessionImage(pathutil.ExpandTilde(*file))
 	must(err)
+	defer cleanup()
 	hits, stats, hasContent, err := querySessionImage(img, *query, *k)
 	must(err)
 

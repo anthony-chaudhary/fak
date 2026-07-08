@@ -41,10 +41,11 @@ func TestSnapshotQueryAnswersRealSessionImage(t *testing.T) {
 	}
 
 	// Reload through the verb's own loader (NOT a demo binary), then query.
-	img, err := openSessionImage(imgDir)
+	img, cleanup, err := openSessionImage(imgDir)
 	if err != nil {
 		t.Fatalf("openSessionImage: %v", err)
 	}
+	defer cleanup()
 	hits, stats, hasContent, err := querySessionImage(img, "what refund fee did the account show?", 3)
 	if err != nil {
 		t.Fatalf("querySessionImage: %v", err)
@@ -87,10 +88,11 @@ func TestSnapshotQueryDriveOnlyImageHasNoCoreImage(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("DumpDir drive-only image: %v", err)
 	}
-	img, err := openSessionImage(imgDir)
+	img, cleanup, err := openSessionImage(imgDir)
 	if err != nil {
 		t.Fatalf("openSessionImage: %v", err)
 	}
+	defer cleanup()
 	hits, _, hasContent, err := querySessionImage(img, "anything", 3)
 	if err != nil {
 		t.Fatalf("querySessionImage: %v", err)
@@ -101,4 +103,57 @@ func TestSnapshotQueryDriveOnlyImageHasNoCoreImage(t *testing.T) {
 	if len(hits) != 0 {
 		t.Fatalf("drive-only image returned %d hit(s), want 0", len(hits))
 	}
+}
+
+// TestOpenSessionImageArchiveReapsTempDir witnesses the #3298 fix on the .faksession
+// archive path: openSessionImage unpacks the archive into a `fak-snap-query-*` temp dir
+// and returns a cleanup func; the dir exists while the (lazily demand-paged) image is
+// live and is reaped when the caller runs cleanup — no orphan on the success path. An
+// isolated TMP root keeps the assertion immune to the live fleet's temp-dir churn.
+func TestOpenSessionImageArchiveReapsTempDir(t *testing.T) {
+	tmpRoot := t.TempDir()
+	t.Setenv("TMPDIR", tmpRoot) // openSessionImage's os.MkdirTemp("", ...) resolves here
+	t.Setenv("TMP", tmpRoot)
+	t.Setenv("TEMP", tmpRoot)
+
+	const id = "reap-witness"
+	imgDir := filepath.Join(tmpRoot, "image")
+	if _, err := sessionimage.DumpDir(imgDir, sessionimage.Input{
+		SessionID: id,
+		Drive:     session.State{TraceID: id, Run: session.Running},
+	}); err != nil {
+		t.Fatalf("DumpDir: %v", err)
+	}
+	archive := filepath.Join(tmpRoot, id+".faksession")
+	if err := sessionimage.PackFile(imgDir, archive); err != nil {
+		t.Fatalf("PackFile: %v", err)
+	}
+
+	unpackGlob := filepath.Join(tmpRoot, "fak-snap-query-*")
+	if n := globCount(t, unpackGlob); n != 0 {
+		t.Fatalf("precondition: %d unpack dir(s) already present", n)
+	}
+	img, cleanup, err := openSessionImage(archive)
+	if err != nil {
+		t.Fatalf("openSessionImage(archive): %v", err)
+	}
+	if img == nil || cleanup == nil {
+		t.Fatal("archive path returned a nil image or nil cleanup")
+	}
+	if n := globCount(t, unpackGlob); n != 1 {
+		t.Fatalf("while image live: want 1 unpack dir, got %d", n)
+	}
+	cleanup()
+	if n := globCount(t, unpackGlob); n != 0 {
+		t.Fatalf("leak: %d unpack dir(s) survived cleanup", n)
+	}
+}
+
+func globCount(t *testing.T, pattern string) int {
+	t.Helper()
+	m, err := filepath.Glob(pattern)
+	if err != nil {
+		t.Fatalf("glob %s: %v", pattern, err)
+	}
+	return len(m)
 }
