@@ -49,6 +49,8 @@ package sessionobs
 import (
 	"fmt"
 	"io"
+
+	"github.com/anthony-chaudhary/fak/internal/cacheprice"
 )
 
 // netTrueSchema tags the per-session ledger row so a reader can validate the line,
@@ -66,16 +68,14 @@ const minNetBand = 256
 // as a real HELPED/HURT rather than noise. 20 -> 5% of throughput.
 const netBandDivisor = 20
 
-// compactionCacheReadMarginal is the fraction of full input a compaction-shed token is
-// worth on a WARM fire -- the B1 basis (epic #2783, #2794/#2798). On a warm fire the
-// shed tokens were already provider cache-reads (billed at the read marginal), so
-// dropping them saves the read marginal per turn, NOT full input; booking the shed at
-// 1.0x over-values the saving ~7.7x-10x on warm traffic. This mirrors
-// internal/cachevaluereport/track2.go's `providerCacheReadMultiplier = 0.1` so the
-// per-session net-true ledger and the Track-2 report agree on the compaction net
-// (#2804). sessionobs is tier-1 (imports nothing internal), so the constant is copied,
-// not imported -- the test pins both to the same 0.1 so the mirror cannot silently drift.
-const compactionCacheReadMarginal = 0.1
+// The compaction-shed marginal (the fraction of full input a shed token is worth on a WARM
+// fire — the B1 basis, epic #2783, #2794/#2798) is NOT copied here: effectiveSaved reads the
+// canonical cacheprice.ReadMultiplier (0.1x) through cacheprice.ShedTokenEquiv, the ONE source
+// the Track-2 report and the gateway split also price on. sessionobs is architest tier-1 and
+// cacheprice is a tier-1 foundation leaf (imports nothing internal), so the import is allowed —
+// the same one internal/resume takes — and the per-session net-true ledger, the Track-2 report,
+// and the live gateway split now agree on the compaction net by CONSTRUCTION (#2804/#2798),
+// not by a copied 0.1 literal a drift-pin test has to chase.
 
 // Provenance labels how a reported number was obtained, the net-true vocabulary
 // (docs/standards/net-true-value.md Question #4). The zero value is MODELED -- an
@@ -153,12 +153,21 @@ type Mediation struct {
 	// shed here, and the basis lives in one place.
 	TokensSaved int64 `json:"tokens_saved"`
 	// CompactionShedTokens is the portion of TokensSaved that came from compaction shed
-	// (as opposed to vDSO/radix LOCAL reuse, which is worth its full marginal). On a warm
-	// fire those shed tokens were provider cache-reads, so this portion is re-valued from
-	// 1.0x down to compactionCacheReadMarginal before it counts toward the net -- the B1
-	// basis (#2804). 0 (the default) means "no compaction shed in this saving", so a pure
-	// local-reuse session is unchanged. Must be <= TokensSaved.
+	// (as opposed to vDSO/radix LOCAL reuse, which is worth its full marginal). Its warm
+	// slice is re-valued from 1.0x down to the cache-read marginal before it counts toward
+	// the net -- the B1 basis (#2804), applied by effectiveSaved via cacheprice.ShedTokenEquiv.
+	// 0 (the default) means "no compaction shed in this saving", so a pure local-reuse
+	// session is unchanged. Must be <= TokensSaved.
 	CompactionShedTokens int64 `json:"compaction_shed_tokens,omitempty"`
+	// CompactionCacheReadTokens is the OBSERVED provider cache_read at the compaction fires
+	// -- the warm WITNESS effectiveSaved prices the shed against via cacheprice.ShedTokenEquiv:
+	// only the warm slice min(shed, this) prices at the 0.1x cache-read marginal, the cold
+	// remainder keeps 1.0x. 0 means "no explicit witness": on a non-cold fire the shed then
+	// defaults to WHOLLY warm (the conservative, over-valued-if-unfixed stance this ledger has
+	// always taken), byte-identical to the pre-blend behavior; supply the real count to get the
+	// proportional blend instead. Ignored when ColdFire is set. Not a claim fak preserved the
+	// cache (byte-identity is) — the provider's relayed read count, used only to price honestly.
+	CompactionCacheReadTokens int64 `json:"compaction_cache_read_tokens,omitempty"`
 	// ColdFire records that the compaction fire was OBSERVED-cold: the shed tokens were
 	// NOT live provider cache-reads, so they keep the full 1.0x input basis. The default
 	// (false = warm) is the honest, over-valued-if-unfixed common case -- a caller must
@@ -179,12 +188,15 @@ func (m Mediation) any() bool {
 	return m.TokensAdded != 0 || m.TokensSaved != 0 || m.MediationNanos != 0
 }
 
-// effectiveSaved is TokensSaved with the warm-fire compaction-shed portion re-valued
-// from full input (1.0x) down to the cache-read marginal (compactionCacheReadMarginal),
-// the B1 basis (#2804). Pure local reuse (CompactionShedTokens == 0) and observed-cold
-// fires (ColdFire) are returned untouched, so this only ever REMOVES phantom value --
-// it can never inflate a saving. The discount is floor-rounded, so it never credits a
-// fractional token the provider would not have billed.
+// effectiveSaved is TokensSaved with the compaction-shed portion re-valued through the
+// canonical cacheprice.ShedTokenEquiv blend: the warm slice min(shed, CompactionCacheReadTokens)
+// at the 0.1x cache-read marginal, the cold remainder at full input (the B1 basis, #2804/#2798).
+// Pure local reuse (CompactionShedTokens == 0) and observed-cold fires (ColdFire) are returned
+// untouched. With no explicit warm witness on a non-cold fire the shed defaults to WHOLLY warm,
+// byte-identical to the pre-blend all-0.1x behavior; a caller that supplies the real cache_read
+// count gets the proportional blend, which no longer collapses a cold-dominant session's whole
+// shed to 0.1x on a single warm token (the ~10x under-count the binary rule introduced). The
+// result is floor-rounded (int64 truncation), so it never credits a fractional token.
 func (m Mediation) effectiveSaved() int64 {
 	shed := m.CompactionShedTokens
 	if shed <= 0 || m.ColdFire {
@@ -193,10 +205,15 @@ func (m Mediation) effectiveSaved() int64 {
 	if shed > m.TokensSaved {
 		shed = m.TokensSaved // clamp: the shed portion cannot exceed the saving it is part of
 	}
-	// The shed was booked at 1.0x; on a warm fire it is worth only the read marginal.
-	// Remove the over-count = shed - floor(shed * marginal).
-	marginal := int64(float64(shed) * compactionCacheReadMarginal)
-	return m.TokensSaved - (shed - marginal)
+	// Default (no explicit witness on a non-cold fire): treat the whole shed as warm, the
+	// conservative pre-blend stance. A supplied CompactionCacheReadTokens > 0 blends instead:
+	// ShedTokenEquiv caps the warm slice at min(shed, witness) and prices the rest at full input.
+	warmWitness := uint64(shed)
+	if m.CompactionCacheReadTokens > 0 {
+		warmWitness = uint64(m.CompactionCacheReadTokens)
+	}
+	localReuse := m.TokensSaved - shed
+	return localReuse + int64(cacheprice.ShedTokenEquiv(uint64(shed), warmWitness))
 }
 
 // NetTrueRow is one session's net-true ledger row -- the per-SESSION analog of
@@ -307,12 +324,13 @@ func netDetail(rec Record, med Mediation, verdict NetTrueVerdict, net, band int6
 		side = "waste"
 	}
 	saved := med.effectiveSaved()
-	// When the warm-fire B1 discount actually removed value, say so -- an operator reading
-	// the ledger sees the gross shed was re-valued, not silently shrunk.
+	// When the warm/cold B1 blend actually removed value, say so -- an operator reading the
+	// ledger sees the gross shed was re-valued, not silently shrunk. The gross→effective pair
+	// is honest for both a wholly-warm shed and a blended one (no single multiplier is asserted).
 	basis := ""
 	if saved < med.TokensSaved {
-		basis = fmt.Sprintf(" [warm compaction shed %d re-valued at %.1fx: gross %d]",
-			med.CompactionShedTokens, compactionCacheReadMarginal, med.TokensSaved)
+		basis = fmt.Sprintf(" [compaction shed %d re-valued warm/cold: gross saved %d → %d]",
+			med.CompactionShedTokens, med.TokensSaved, saved)
 	}
 	return fmt.Sprintf(
 		"%s: mediation saved %d, added %d tokens (net %+d vs band %d) over %dns on a %s (%s) session%s",

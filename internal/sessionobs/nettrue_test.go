@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/cacheprice"
 )
 
 // TestNetTrueGoldenSessions is the issue #1159 acceptance: two golden sessions --
@@ -200,16 +202,16 @@ func TestNetTrueWarmCompactionShedIsDiscounted(t *testing.T) {
 	}
 }
 
-// TestNetTrueCompactionBasisAgreesWithReport pins sessionobs' warm-fire basis to the
-// SAME 0.1x the Track-2 report uses (internal/cachevaluereport/track2.go
-// `providerCacheReadMultiplier`). sessionobs is tier-1 and imports nothing internal, so
-// the two constants are copies; this test is the guard that they cannot silently drift
-// -- the #2804 "sessionobs and cachevaluereport agree on the compaction net" acceptance.
+// TestNetTrueCompactionBasisAgreesWithReport pins sessionobs' warm-shed basis to the SAME
+// canonical cacheprice.ShedTokenEquiv the Track-2 report and the gateway split price on, so
+// the three agree on the compaction net by CONSTRUCTION -- the #2804 "sessionobs and
+// cachevaluereport agree" acceptance, now guaranteed by a shared symbol rather than a copied
+// 0.1 literal a drift-pin has to chase.
 func TestNetTrueCompactionBasisAgreesWithReport(t *testing.T) {
-	const reportProviderCacheReadMultiplier = 0.1 // cachevaluereport/track2.go:46
-	if compactionCacheReadMarginal != reportProviderCacheReadMultiplier {
-		t.Fatalf("sessionobs compaction basis %.3f must match the report's cache-read marginal %.3f",
-			compactionCacheReadMarginal, reportProviderCacheReadMultiplier)
+	// A fully-warm shed values at the canonical read marginal, straight off cacheprice.
+	warm := Mediation{TokensSaved: 1000, CompactionShedTokens: 1000}
+	if got, want := warm.effectiveSaved(), int64(cacheprice.ShedTokenEquiv(1000, 1000)); got != want {
+		t.Errorf("fully-warm shed = %d, want %d (cacheprice.ShedTokenEquiv marginal)", got, want)
 	}
 	// A pure local-reuse saving (no compaction shed) must be untouched by the basis -- the
 	// discount only ever removes phantom warm-shed value, never real vDSO/radix reuse.
@@ -219,8 +221,39 @@ func TestNetTrueCompactionBasisAgreesWithReport(t *testing.T) {
 	}
 	// A mislabeled shed larger than the saving it belongs to clamps, never goes negative.
 	over := Mediation{TokensSaved: 1000, CompactionShedTokens: 5000}
-	if got := over.effectiveSaved(); got != 100 { // clamp shed->1000, 0.1x -> 100
+	if got := over.effectiveSaved(); got != 100 { // clamp shed->1000, warm default -> 0.1x -> 100
 		t.Errorf("an over-large shed should clamp to the saving, got %d (want 100)", got)
+	}
+}
+
+// TestNetTrueCompactionShedBlendsWarmCold is the durable fix the audit surfaced: a MIXED
+// fire — a real warm witness smaller than the shed — must blend, not collapse the whole shed
+// to 0.1x. Only the witnessed-warm slice min(shed, cache_read) prices at the read marginal;
+// the cold remainder keeps full input. The pre-blend ColdFire binary could not express this
+// and under-counted a cold-dominant session ~10x on a single warm token.
+func TestNetTrueCompactionShedBlendsWarmCold(t *testing.T) {
+	// 6000 shed, only 1000 tokens witnessed warm: 1000*0.1 + 5000*1.0 = 5100 (localReuse 0).
+	mixed := Mediation{TokensSaved: 6000, CompactionShedTokens: 6000, CompactionCacheReadTokens: 1000}
+	if got := mixed.effectiveSaved(); got != 5100 {
+		t.Fatalf("mixed warm/cold shed = %d, want 5100 (1000*0.1 + 5000*1.0)", got)
+	}
+	if mixed.effectiveSaved() <= 3000 {
+		t.Fatalf("mixed value %d collapsed toward the binary all-0.1x floor (600) — the undercount is back", mixed.effectiveSaved())
+	}
+	// The no-explicit-witness default on a non-cold fire stays WHOLLY warm — byte-identical to
+	// the pre-blend behavior, so existing callers are unaffected.
+	warmDefault := Mediation{TokensSaved: 6000, CompactionShedTokens: 6000}
+	if got := warmDefault.effectiveSaved(); got != 600 {
+		t.Errorf("warm-default (no witness) shed = %d, want 600 (whole shed at 0.1x, back-compat)", got)
+	}
+	// A witness at or above the shed is wholly warm; a zero witness with ColdFire is wholly cold.
+	full := Mediation{TokensSaved: 6000, CompactionShedTokens: 6000, CompactionCacheReadTokens: 9000}
+	if got := full.effectiveSaved(); got != 600 {
+		t.Errorf("witness >= shed = %d, want 600 (wholly warm)", got)
+	}
+	cold := Mediation{TokensSaved: 6000, CompactionShedTokens: 6000, CompactionCacheReadTokens: 1000, ColdFire: true}
+	if got := cold.effectiveSaved(); got != 6000 {
+		t.Errorf("ColdFire overrides the witness = %d, want 6000 (wholly cold)", got)
 	}
 }
 
