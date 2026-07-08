@@ -1,8 +1,11 @@
 package gateway
 
 import (
+	"bytes"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
 // messages_volume_horizon_test.go — the volume-aware head-anchored horizon (headSessionPrior /
@@ -107,5 +110,63 @@ func TestHeadSessionPriorVolumeAwareHorizon(t *testing.T) {
 	prime(sOff, "heavy", 40, 70000)
 	if total, cur := sOff.headSessionPrior(0, "heavy"); total != 0 || cur != 0 {
 		t.Fatalf("prior disabled must return (0,0), got (%d,%d)", total, cur)
+	}
+}
+
+// TestVolumeAwareHorizonChangesFiringDifferential is the BEHAVIOR-level witness (not just the horizon
+// number): the SAME head-anchored body at the SAME deep served depth FIRES for a heavy trace but
+// REFUSES burst_unprofitable for a token-light one — the outcome is decided solely by the trace's
+// observed held volume. The depth is driven past the base horizon (served 60 ⇒ CurrentTurn 61 > the
+// base 50), so a token-light trace has NEGATIVE remaining and always refuses, while a heavy trace's
+// volume-aware floor keeps ~headroom repaying turns and lets the profitable burst through. This is the
+// end-to-end lock the pure-policy and wiring tests above cannot give on their own.
+func TestVolumeAwareHorizonChangesFiringDifferential(t *testing.T) {
+	now := time.Now()
+	// A large middle relative to the small kept window ⇒ a small break-even the ~headroom floor clears.
+	body := func() *agent.AnthropicMessagesRequest {
+		req, err := agent.DecodeAnthropicMessagesRequest(headOrderedWireBody(t, 300, 2))
+		if err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return req
+	}
+	drive := func(s *Server, trace string, cacheRead int64) {
+		for i := 0; i < 60; i++ { // served depth 60 ⇒ CurrentTurn 61, past the base-50 horizon
+			s.metrics.observeHarnessCoherence(trace, now, "", false, "", false, false, cacheRead, 0, 1000)
+		}
+	}
+	newS := func() *Server {
+		s := anthropicPassthroughServer(1200)
+		s.compactAnchorHead = true
+		s.assumeSessionTurns = DefaultAssumedSessionTurns // 50, default-on
+		s.metrics = newGatewayMetrics(now)
+		return s
+	}
+
+	// Token-light trace, deep: base horizon → negative remaining → refuse (byte-identical).
+	sThin := newS()
+	drive(sThin, "thin-deep", 3000) // resident ~4k, below the heavy floor
+	reqThin := body()
+	orig := append([]byte(nil), reqThin.Raw...)
+	if fired, reason := sThin.compactAnthropicRawWithReason(reqThin, 0, "thin-deep"); fired || reason != agent.CompactReasonBurstUnprofitable {
+		t.Fatalf("token-light deep trace must refuse burst_unprofitable, got fired=%v reason=%q", fired, reason)
+	}
+	if !bytes.Equal(reqThin.Raw, orig) {
+		t.Fatal("a refusal must leave the body byte-identical")
+	}
+
+	// Heavy trace, SAME body and SAME depth: the volume-aware floor keeps repaying room → FIRES.
+	sHeavy := newS()
+	drive(sHeavy, "heavy-deep", 70000) // resident ~71k, at/above the heavy floor
+	reqHeavy := body()
+	before := len(reqHeavy.Raw)
+	if fired, reason := sHeavy.compactAnthropicRawWithReason(reqHeavy, 0, "heavy-deep"); !fired || reason != "" {
+		t.Fatalf("heavy deep trace must FIRE via the volume-aware horizon, got fired=%v reason=%q", fired, reason)
+	}
+	if len(reqHeavy.Raw) >= before {
+		t.Fatalf("a fire must shrink the body, got %d (in %d)", len(reqHeavy.Raw), before)
+	}
+	if _, err := agent.DecodeAnthropicMessagesRequest(reqHeavy.Raw); err != nil {
+		t.Fatalf("volume-aware fired body failed to decode: %v", err)
 	}
 }
