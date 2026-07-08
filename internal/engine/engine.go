@@ -292,19 +292,54 @@ func sensitiveRoute(c *abi.ToolCall) bool {
 	if c.Args.Scope == abi.ScopeTenant {
 		return true
 	}
-	tag := ""
-	if c.Meta != nil {
-		tag = c.Meta["sensitivity"]
-		if tag == "" {
-			tag = c.Meta["data_sensitivity"]
-		}
+	if c.Meta == nil {
+		return false
+	}
+	tag := c.Meta["sensitivity"]
+	if tag == "" {
+		tag = c.Meta["data_sensitivity"]
 	}
 	switch strings.ToLower(strings.TrimSpace(tag)) {
 	case "sensitive", "tenant", "confidential", "secret", "pii":
 		return true
-	default:
+	}
+	// OpenRouter-style zero-data-retention knobs: a caller asking for no data
+	// retention is treated exactly like a sensitive payload, so it can never be
+	// adjudicated onto a remote (data-retaining) engine. Recognizing these can only
+	// ADD a deny (a sensitive route to a remote engine), never remove one — strictly
+	// fail-closed-er.
+	return metaWantsZeroRetention(c.Meta)
+}
+
+// metaWantsZeroRetention reports whether a call's Meta carries a zero-data-retention
+// request via the OpenRouter-style knobs (`zdr`, `data_collection`, `retention`). It
+// is the adjudication-time MIRROR of internal/modelroute.wantsZeroRetention (the
+// resolution-time half); the two MUST stay in sync — a shared case table is pinned by
+// TestRetentionKnobMirror. Recognizing these can only add denials, never remove one.
+func metaWantsZeroRetention(meta map[string]string) bool {
+	if truthyMeta(meta["zdr"]) {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(meta["data_collection"])) {
+	case "deny", "none", "off":
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(meta["retention"])) {
+	case "none", "zero", "zdr", "deny":
+		return true
+	}
+	return false
+}
+
+// truthyMeta reports whether a Meta value is affirmative — fail-toward-true (any
+// non-empty value other than an explicit false), matching modelroute.truthyLabel so
+// the two mirrored floors agree on the ZDR knob.
+func truthyMeta(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "0", "false", "no", "off":
 		return false
 	}
+	return true
 }
 
 // remoteRoute reports whether an engine route leaves this box — the residency
