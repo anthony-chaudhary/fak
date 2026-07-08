@@ -152,6 +152,16 @@ sweep` do for git, so it does not trip the reversibility/ESCALATE preview-confir
 gate on every call. Use raw `gh issue create` only as a fallback when the binary is
 unavailable, and say so.
 
+**Changing a CI/CD spec is never a local edit.** A workflow input contract, a tool's
+`--json` schema that a workflow `jq`-reads, a required-check/job name, a secret/env, a
+runner label, or an artifact/cache name each has a consumer in *another* file that breaks
+*later* (a scheduled job, a peer's PR, a silently-wrong Slack card) — not at edit time.
+Before you touch one: grep the whole live tree for every consumer, migrate them in
+lockstep, and put a three-line impact statement (what changed · consumers migrated ·
+impact/cutover/rollback) in the commit body. The full checklist and a worked example are
+in **[docs/ci/ci-spec-change-migration.md](docs/ci/ci-spec-change-migration.md)**. Prove
+the *committed* tip (not the peer-dirty tree) with `fak ci-preflight`.
+
 - **Work directly on the trunk (`main`). Never open a feature branch or new worktree.**
   The trunk guard *refuses* off-trunk commits (the `OFF_TRUNK` law). A dirty/diverged
   tree means reconcile **in place** or STOP — never escape into a side branch.
