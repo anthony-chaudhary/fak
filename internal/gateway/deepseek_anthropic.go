@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
@@ -365,7 +366,7 @@ func (p DeepSeekAnthropicProfile) PostMessages(ctx context.Context, client *http
 		req.Header.Set(k, v)
 	}
 	if client == nil {
-		client = http.DefaultClient
+		client = &http.Client{Timeout: durEnv("FAK_DEEPSEEK_ANTHROPIC_TIMEOUT_S", 120*time.Second)}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
