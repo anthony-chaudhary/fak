@@ -706,6 +706,7 @@ var chatEndpointRole = map[string]string{
 	"frontierswe": "the off-path FrontierSWE co-resident env adapter/smoke witness against fak serve (not a live planner)",
 	"macbench":    "the off-path Mac gateway serving-parity benchmark client against fak serve (not a live planner)",
 	"eveparity":   "the off-path Eve-eval parity witness (#2605): a self-contained fixture server + client that both replays the route to prove fak-routed == raw (not a live planner)",
+	"trajctl":     "the off-path GatewayJudgeClient (#2543): an LLM-as-judge W1 progress scorer that POSTs a forced-tool verdict call to fak's own gateway (not a live planner)",
 }
 
 // TestSingleOpenAIChatClient pins the T4 fix as an architecture invariant: the
