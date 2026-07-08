@@ -75,7 +75,7 @@ func TestDrainCursorAndSince(t *testing.T) {
 // changes, never a peer's; an empty drainer sees everything.
 func TestPrincipalVisibility(t *testing.T) {
 	f := NewFeed(0)
-	f.Append(WorkChange{Kind: KindCommit, SHA: "global"})               // principal-less broadcast
+	f.Append(WorkChange{Kind: KindCommit, SHA: "global"}) // principal-less broadcast
 	f.Append(WorkChange{Kind: KindCommit, SHA: "a-only", Principal: "tenant-a"})
 	f.Append(WorkChange{Kind: KindCommit, SHA: "b-only", Principal: "tenant-b"})
 
