@@ -13,8 +13,8 @@
 package guardrotate
 
 import (
+	"fmt"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -30,12 +30,40 @@ type Note struct {
 	Headroom *float64  // the target seat's headroom score (nil in stable-by-name mode)
 }
 
+// Explain renders the one-line operator message for a resolved rotation — the exact line the
+// guard prints when it rotates off a cooling seat: the base "cooling down — rotating to" fact,
+// then an optional reset instant (when ResetAt is known) and an optional headroom word (when the
+// target carried a score, via the shared accounts.HeadroomLabel so the sign→word mapping is not
+// re-implemented here). It lives beside Note so the message contract is unit-testable without a
+// live registry / cooldown store / env — the I/O wrapper (cmd/fak guardRotateOffCooldown) only
+// prints what this returns.
+func (n Note) Explain() string {
+	msg := fmt.Sprintf("fak guard: account %q is cooling down — rotating to %q", n.From, n.To)
+	if !n.ResetAt.IsZero() {
+		msg += fmt.Sprintf(" (resets %s)", n.ResetAt.UTC().Format(time.RFC3339))
+	}
+	if n.Headroom != nil {
+		msg += fmt.Sprintf(" (headroom=%s)", accounts.HeadroomLabel(*n.Headroom))
+	}
+	return msg
+}
+
 // Plan is the pure core: given a refreshed registry, a loaded cooldown store, the injected
 // headroom signal, the currently-resolved config dir, and now, it decides whether to rotate
 // and onto which seat's dir. No I/O — every input is passed in — so it is unit-tested
-// directly. It returns (newDir, note, true) only when the current dir maps to an enrolled
-// account that is actively cooled AND a live non-walled alternate bucket exists; otherwise
-// (cur, zero, false) so the caller keeps the original dir.
+// directly. It returns (newDir, note, true) when the current dir maps to an enrolled account
+// that is actively cooled AND a live non-walled alternate bucket exists — with ONE additional
+// suppression: if the only alternate has UNKNOWN headroom (nil/0 per hasRoom) AND the cooled
+// seat's own reset is imminent (within WaitResetHorizon; see resetImminent), it keeps the
+// current seat, because an unmeasured hop buys nothing when the cool is about to elapse. An
+// OFFERABLE (strictly-positive-headroom) alternate always wins regardless of imminence. Every
+// other case returns (cur, zero, false) and the caller keeps the original dir.
+//
+// This imminence tie-break is the ONE thing this launch-time path shares in SPIRIT with
+// rehome.Resolve's WAIT_RESET — but NOT in rule (see resetImminent's note on the deliberate
+// boundary divergence). They share only the 15m horizon VALUE (WaitResetHorizon), pinned equal
+// by a test; the imminence-vs-alternate-quality decision is intentionally different because
+// launch rotation only swaps a config dir (free) while a re-home copies a transcript.
 //
 // FAIL-OPEN is the invariant: every no-decision branch returns the original cur unchanged,
 // so cooldown bookkeeping can never block or error a launch.
@@ -65,16 +93,19 @@ func Plan(reg accounts.Registry, store *accounts.CooldownStore, hr accounts.Rota
 	if !dec.OK {
 		return cur, Note{}, false
 	}
-	// NextRotationDecision only guarantees the chosen seat is NOT known-walled — it will still
-	// return a seat whose headroom is UNKNOWN (nil/0: no runtime telemetry). Rotating a live seat
-	// onto a bucket we have no evidence has room would just move the problem: we'd swap a
-	// provably-cooled account for one that might ALSO be at its cap, we just can't see it. So
-	// require the target to be provably OFFERABLE (strictly positive headroom, the (1,2] band from
-	// accounts_headroom.go) before rotating. If the best non-walled candidate is only UNKNOWN,
-	// fail open and keep the current seat — a known-cooled seat whose window is about to elapse is
-	// no worse than an unmeasured gamble, and the launch still proceeds. This is the "rotate only
-	// to a seat that actually has room" guarantee.
-	if !hasRoom(dec.Seat.Headroom) {
+	// NextRotationDecision only guarantees the chosen seat is NOT known-walled — it can still
+	// return a seat whose headroom is UNKNOWN (nil/0: no runtime telemetry, the 0 band from
+	// accounts_headroom.go). An OFFERABLE alternate (strictly positive headroom) is always worth
+	// rotating onto. For an UNKNOWN alternate the call is a gamble: it MIGHT also be at its cap,
+	// we just can't see it. But that gamble is still strictly better than staying on a PROVABLY
+	// cooled seat — the current seat is a guaranteed wasted turn, while the unmeasured one is at
+	// worst no worse and at best live. The ONE case where staying is not worse is when the current
+	// seat's cool is about to elapse anyway: within WaitResetHorizon an unmeasured hop buys
+	// nothing (the seat is nearly usable again). So reject an UNKNOWN alternate ONLY when the
+	// current seat's reset is imminent; otherwise rotate off the walled seat. (This corrects the
+	// earlier unconditional gate, which kept a long-capped seat — the july/day26 pile-up shape —
+	// over a healthy-but-unmeasured alternate.)
+	if !hasRoom(dec.Seat.Headroom) && resetImminent(entry.ResetAt, now) {
 		return cur, Note{}, false
 	}
 	home, _, err := reg.Serve(dec.Seat.Name)
@@ -108,29 +139,12 @@ func PersistCooldownForRehome(store *accounts.CooldownStore, account, reason, re
 	if store == nil || !isAccountCap || strings.TrimSpace(account) == "" {
 		return accounts.CooldownEntry{}, false
 	}
-	entry := store.Cool(account, accounts.CooldownUsageLimit, cooldownReasonLine(reason), now, parseRehomeReset(resetSource))
+	// The reset is parsed by the shared accounts.ParseReset so this live-429 writer and the
+	// launch-exit writer (cmd/fak recordLaunchCooldown) can never hold one account to two
+	// different reset times — an explicit RFC3339 reset wins over the kind's default window.
+	entry := store.Cool(account, accounts.CooldownUsageLimit, cooldownReasonLine(reason), now, accounts.ParseReset(resetSource))
 	return entry, true
 }
-
-// parseRehomeReset pulls an explicit absolute reset time (RFC3339) out of a limit reason, so a
-// long weekly cap is held to its real reset rather than the 1h default. Only the unambiguous
-// RFC3339 forms are trusted; a looser phrasing yields the zero time and the caller's default
-// window stands. Mirrors accounts_cooldown.go's parseCooldownReset so the live-429 and
-// launch-exit writers parse a reset identically.
-func parseRehomeReset(reason string) time.Time {
-	m := rehomeResetRE.FindStringSubmatch(reason)
-	if m == nil {
-		return time.Time{}
-	}
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05"} {
-		if ts, err := time.Parse(layout, m[1]); err == nil {
-			return ts.UTC()
-		}
-	}
-	return time.Time{}
-}
-
-var rehomeResetRE = regexp.MustCompile(`(?i)resets?\s+at\s+(\d{4}-\d{2}-\d{2}[tT]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:z|[+-]\d{2}:?\d{2})?)`)
 
 // cooldownReasonLine renders a short, credential-safe reason line for a persisted cooldown from
 // an arbitrary reason string (a remedy label like "rehomed_seat", or a limit message). It never
@@ -148,14 +162,45 @@ func cooldownReasonLine(reason string) string {
 	return r
 }
 
-// hasRoom reports whether a seat's headroom score proves it is OFFERABLE right now — the
-// (1,2] positive band accounts_headroom.go assigns an available, non-throttled bucket. A nil
-// score (no runtime signal / stable-by-name mode) or a 0 (the UNKNOWN band) is NOT proof of
-// room, so it returns false: we only rotate onto a seat we can positively see has capacity,
-// never onto an unmeasured one. A negative score (WALLED) is likewise false, though
-// NextRotationDecision already excludes those.
+// hasRoom reports whether a seat's headroom score proves it is OFFERABLE right now, reading the
+// shared tier contract (accounts.Classify): a TierOfferable score is the (1,2] positive band
+// accounts_headroom.go assigns an available, non-throttled bucket. A nil score (no runtime
+// signal / stable-by-name mode) is NOT proof of room, so the nil-guard stays HERE — Classify
+// takes a concrete value and a nil pointer means "no signal", a distinct state from any tier. A
+// TierUnknown (0) or TierWalled (<0) score likewise returns false, though NextRotationDecision
+// already excludes walled ones. An OFFERABLE seat is rotated onto unconditionally; an UNKNOWN one
+// only when the current seat's cool is not imminent (see resetImminent) — a provably-walled seat
+// is worse than an unmeasured one unless it is about to free up anyway.
 func hasRoom(headroom *float64) bool {
-	return headroom != nil && *headroom > 0
+	return headroom != nil && accounts.Classify(*headroom) == accounts.TierOfferable
+}
+
+// WaitResetHorizon is how close a cooled seat's reset must be for Plan to keep it rather than
+// rotate onto an UNKNOWN-headroom alternate. Its VALUE mirrors rehome.WaitResetHorizonSeconds
+// (both 15m), pinned equal by a cross-package test, so launch-time rotation and resume-time
+// re-home agree on what "about to elapse" MEANS. Only the horizon value is shared: the two
+// paths deliberately apply it differently (launch lets an OFFERABLE alternate beat an imminent
+// cool; rehome's WAIT_RESET fires before any target is even selected) — see Plan's doc and
+// resetImminent below.
+const WaitResetHorizon = 15 * time.Minute
+
+// resetImminent reports whether a cooled seat's reset is known AND within WaitResetHorizon of
+// now. A zero (unknown) reset is NOT imminent — we cannot prove the wall is about to lift, so we
+// prefer rotating off it. A reset already at/behind now counts as imminent (the window is
+// elapsing now, so the seat is about to be usable again).
+//
+// Boundary note — this deliberately DIFFERS from rehome.waitResetDecision at the past/zero-reset
+// edge, and the two predicates must NOT be unified: rehome requires wait>=0, so an expired reset
+// re-homes (pinned by rehome's TestResolveWaitHorizon "expired reset rehomes") because an
+// expired-but-still-blocked estimate is stale and copying is safer than waiting on a guess. Here
+// the "past = imminent" arm is a never-taken safety default: Plan only calls resetImminent after
+// store.CooledDown has already gated on now < ResetAt, and Cool always writes a concrete
+// ResetAt, so in production resetAt is always a real future instant. Pure and time-injected.
+func resetImminent(resetAt, now time.Time) bool {
+	if resetAt.IsZero() {
+		return false
+	}
+	return !resetAt.After(now.Add(WaitResetHorizon))
 }
 
 // HomeForDir finds the registry Home whose config dir is the same on-disk path as dir. The

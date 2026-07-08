@@ -78,28 +78,85 @@ func TestPlanRotatesOffCooledSeat(t *testing.T) {
 	}
 }
 
-// TestPlanCooledButAlternateOnlyUnknownFailsOpen is the room guarantee: the ambient seat is
-// cooled, and an alternate exists that is NOT known-walled but has UNKNOWN headroom (0 — no
-// runtime telemetry). We must NOT rotate onto it: swapping a provably-cooled seat for an
-// unmeasured one that might also be capped is no improvement. Fail open, keep the current seat.
-func TestPlanCooledButAlternateOnlyUnknownFailsOpen(t *testing.T) {
+// TestPlanCooledDistantResetRotatesToUnknown is the corrected room guarantee — the walled/day26
+// pile-up shape from the report. The ambient seat is cooled with a DISTANT reset (well beyond
+// WaitResetHorizon), and the only alternate has UNKNOWN headroom (0 — no runtime telemetry, e.g.
+// a healthy-but-idle seat with no fresh probe row). Staying put is a guaranteed wasted turn on a
+// provably-walled seat, while the unmeasured alternate is at worst no worse and at best live — so
+// Plan MUST rotate onto it. (Before the imminence gate this failed open: the exact bug where guard
+// kept a long-capped account over an available one.)
+func TestPlanCooledDistantResetRotatesToUnknown(t *testing.T) {
 	now := grMustTime(t, "2026-07-07T12:00:00Z")
+	reset := now.Add(time.Hour) // far beyond the 15m imminence horizon
 	reg := accounts.Registry{Homes: []accounts.Home{
 		grHome("alice", "/home/.claude", "u-alice"),
 		grHome("bob", "/home/.claude-bob", "u-bob"),
 	}}
-	store := grStore(t, now, now.Add(time.Hour), "uuid:u-alice")
+	store := grStore(t, now, reset, "uuid:u-alice")
 	// alice walled by cooldown; bob is UNKNOWN (0) — present so headroom mode is on, but no
-	// positive room signal. NextRotationDecision would return bob (not walled), but Plan must
-	// reject it for lack of proven room.
+	// positive room signal. NextRotationDecision returns bob (not walled); Plan now rotates onto
+	// it because alice's cool is not imminent.
+	hr := accounts.RotationHeadroom{"uuid:u-alice": -1, "uuid:u-bob": 0}
+
+	dir, note, ok := Plan(reg, store, hr, "/home/.claude", now)
+	if !ok {
+		t.Fatal("a distant-reset cool must rotate onto the unmeasured alternate, got ok=false")
+	}
+	if note.From != "alice" || note.To != "bob" {
+		t.Fatalf("note = %+v, want From=alice To=bob", note)
+	}
+	if guardWantDir(dir) != guardWantDir("/home/.claude-bob") {
+		t.Fatalf("rotated dir = %q, want bob's dir", dir)
+	}
+}
+
+// TestPlanCooledImminentResetKeepsCurrentSeat is the other side of the imminence gate: the ambient
+// seat is cooled but its reset is minutes away (within WaitResetHorizon), and the only alternate is
+// UNKNOWN (0). Here an unmeasured hop buys nothing — the current seat is about to be usable again —
+// so Plan fails open and keeps it. (An OFFERABLE alternate would still win; this gate is only the
+// UNKNOWN tie-break.)
+func TestPlanCooledImminentResetKeepsCurrentSeat(t *testing.T) {
+	now := grMustTime(t, "2026-07-07T12:00:00Z")
+	reset := now.Add(5 * time.Minute) // within the 15m imminence horizon
+	reg := accounts.Registry{Homes: []accounts.Home{
+		grHome("alice", "/home/.claude", "u-alice"),
+		grHome("bob", "/home/.claude-bob", "u-bob"),
+	}}
+	store := grStore(t, now, reset, "uuid:u-alice")
 	hr := accounts.RotationHeadroom{"uuid:u-alice": -1, "uuid:u-bob": 0}
 
 	dir, _, ok := Plan(reg, store, hr, "/home/.claude", now)
 	if ok {
-		t.Fatalf("must NOT rotate onto an UNKNOWN-headroom seat, got ok=true dir=%q", dir)
+		t.Fatalf("an imminent-reset cool must keep the current seat over an UNKNOWN alternate, got ok=true dir=%q", dir)
 	}
 	if dir != "/home/.claude" {
 		t.Fatalf("fail-open must keep the original dir, got %q", dir)
+	}
+}
+
+// TestPlanCooledImminentButAlternateOfferableRotates proves the imminence gate is scoped to the
+// UNKNOWN tie-break only: even with the current cool about to elapse, a provably OFFERABLE
+// alternate (positive headroom) still wins — we never sit on a walled seat when real room is
+// visible.
+func TestPlanCooledImminentButAlternateOfferableRotates(t *testing.T) {
+	now := grMustTime(t, "2026-07-07T12:00:00Z")
+	reset := now.Add(5 * time.Minute) // imminent
+	reg := accounts.Registry{Homes: []accounts.Home{
+		grHome("alice", "/home/.claude", "u-alice"),
+		grHome("bob", "/home/.claude-bob", "u-bob"),
+	}}
+	store := grStore(t, now, reset, "uuid:u-alice")
+	hr := accounts.RotationHeadroom{"uuid:u-alice": -1, "uuid:u-bob": 1.5} // bob offerable
+
+	dir, note, ok := Plan(reg, store, hr, "/home/.claude", now)
+	if !ok {
+		t.Fatal("an OFFERABLE alternate must win even when the cool is imminent, got ok=false")
+	}
+	if note.To != "bob" {
+		t.Fatalf("note.To = %q, want bob", note.To)
+	}
+	if guardWantDir(dir) != guardWantDir("/home/.claude-bob") {
+		t.Fatalf("rotated dir = %q, want bob's dir", dir)
 	}
 }
 
@@ -364,3 +421,97 @@ func TestLive429RehomePersistThenNextLaunchRotatesOff(t *testing.T) {
 // is robust to the absolute/clean/case-fold canonicalization Serve's returned Dir carries on
 // each platform (the test's /home/... literals resolve differently on Windows vs POSIX).
 func guardWantDir(dir string) string { return NormalizeDir(dir) }
+
+// TestResetImminentBoundary pins the exact imminence horizon and the past/zero-reset arms that
+// Plan itself cannot reach (CooledDown gates them out). Without this, a boundary-flip refactor of
+// resetImminent (e.g. !After -> Before) that changes behavior only at reset==now+WaitResetHorizon
+// would pass every Plan-level test. This is the actual off-by-the-boundary guard, mirroring
+// rehome's TestResolveWaitHorizon.
+func TestResetImminentBoundary(t *testing.T) {
+	now := grMustTime(t, "2026-07-07T12:00:00Z")
+	cases := []struct {
+		name  string
+		reset time.Time
+		want  bool
+	}{
+		{"exact horizon is imminent (keep)", now.Add(WaitResetHorizon), true},
+		{"one ns past horizon is not imminent (rotate)", now.Add(WaitResetHorizon + time.Nanosecond), false},
+		{"well within horizon is imminent", now.Add(time.Minute), true},
+		{"reset at now is imminent", now, true},
+		{"past reset is imminent (defensive never-taken-via-Plan arm)", now.Add(-time.Hour), true},
+		{"zero reset is never imminent", time.Time{}, false},
+	}
+	for _, c := range cases {
+		if got := resetImminent(c.reset, now); got != c.want {
+			t.Fatalf("resetImminent(%s) [%s] = %v, want %v", c.reset, c.name, got, c.want)
+		}
+	}
+}
+
+// TestPlanCooledExactHorizonUnknownKeeps is the ONE reachable Plan-level boundary case: a cooled
+// seat whose reset is EXACTLY now+WaitResetHorizon with an UNKNOWN (0) alternate keeps the current
+// seat (imminent). Cases with reset<=now or a zero ResetAt are deliberately NOT tested at the Plan
+// level — CooledDown gates them out (they read as not-cooled), so they never exercise resetImminent
+// and would give false coverage; those arms are pinned directly in TestResetImminentBoundary.
+func TestPlanCooledExactHorizonUnknownKeeps(t *testing.T) {
+	now := grMustTime(t, "2026-07-07T12:00:00Z")
+	reset := now.Add(WaitResetHorizon) // exactly at the horizon -> imminent -> keep
+	reg := accounts.Registry{Homes: []accounts.Home{
+		grHome("alice", "/home/.claude", "u-alice"),
+		grHome("bob", "/home/.claude-bob", "u-bob"),
+	}}
+	store := grStore(t, now, reset, "uuid:u-alice")
+	hr := accounts.RotationHeadroom{"uuid:u-alice": -1, "uuid:u-bob": 0}
+
+	dir, _, ok := Plan(reg, store, hr, "/home/.claude", now)
+	if ok {
+		t.Fatalf("reset exactly at the horizon is imminent -> must keep the current seat, got ok=true dir=%q", dir)
+	}
+	if dir != "/home/.claude" {
+		t.Fatalf("fail-open must keep the original dir, got %q", dir)
+	}
+}
+
+// TestNoteExplain pins the operator-facing rotation line the guard prints, in one place, so the
+// message contract (base + optional reset + optional headroom word, in that order) has unit
+// coverage instead of only running against live I/O in guardRotateOffCooldown.
+func TestNoteExplain(t *testing.T) {
+	reset := grMustTime(t, "2026-07-07T17:00:00Z")
+	room, unknown, walled := 1.5, 0.0, -1.0
+	cases := []struct {
+		name string
+		note Note
+		want string
+	}{
+		{
+			"no reset, no headroom",
+			Note{From: "alice", To: "bob"},
+			`fak guard: account "alice" is cooling down — rotating to "bob"`,
+		},
+		{
+			"reset only",
+			Note{From: "alice", To: "bob", ResetAt: reset},
+			`fak guard: account "alice" is cooling down — rotating to "bob" (resets 2026-07-07T17:00:00Z)`,
+		},
+		{
+			"reset + offerable headroom",
+			Note{From: "alice", To: "bob", ResetAt: reset, Headroom: &room},
+			`fak guard: account "alice" is cooling down — rotating to "bob" (resets 2026-07-07T17:00:00Z) (headroom=room)`,
+		},
+		{
+			"unknown headroom, no reset",
+			Note{From: "alice", To: "bob", Headroom: &unknown},
+			`fak guard: account "alice" is cooling down — rotating to "bob" (headroom=unknown)`,
+		},
+		{
+			"walled headroom",
+			Note{From: "alice", To: "bob", Headroom: &walled},
+			`fak guard: account "alice" is cooling down — rotating to "bob" (headroom=walled)`,
+		},
+	}
+	for _, c := range cases {
+		if got := c.note.Explain(); got != c.want {
+			t.Fatalf("%s: Explain() = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
