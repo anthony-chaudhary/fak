@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -122,4 +123,64 @@ func TestBatonHasNoClaimedField(t *testing.T) {
 		}
 	}
 	walk(reflect.TypeOf(Baton{}), "Baton")
+}
+
+// TestBatonJSONTagsMatchSchema witnesses the wire contract at the tag level. The Go-struct
+// tests above prove the shape a caller constructs; this proves the JSON PROJECTION the
+// successor actually reads. A constructed baton must marshal to the fak.relay.baton.v1
+// top-level field names, with `schema` emitted first (schema doc, "Top-level Fields" — a
+// reader rejects any other value before looking at anything else). And the no-`claimed`
+// invariant is restated on the wire: the encoded bytes carry no `claimed` key at ANY nesting
+// depth, so a future field addition cannot reopen the self-report door in the serialized form
+// even if it somehow slipped the reflective struct walk.
+func TestBatonJSONTagsMatchSchema(t *testing.T) {
+	obj := ctxplan.NewObjectivePin("pin-relay-schema", "Ship the relay baton schema and close #1863.", 3)
+	b := Baton{
+		Schema:      Schema,
+		RelayID:     "RLY-20260701-0001",
+		Leg:         7,
+		ParentTrace: "trace-relay-leg-7",
+		Objective:   obj,
+		DoneWhen:    "A pushed commit resolves issue #1863 and dos commit-audit passes.",
+		ProgressCursor: ProgressCursor{
+			StartSHA:   "0123456789abcdef0123456789abcdef01234567",
+			HeldRegion: []string{"internal/relay/**"},
+		},
+		NextAction: "Run the schema doc witnesses and close #1863.",
+		Artifacts:  []Artifact{{Kind: string(ArtifactIssue), Ref: "#1863"}},
+		Tombstone:  Tombstone{Reason: "RELAY_ROTATED", AtSHA: "0123456789abcdef0123456789abcdef01234567"},
+	}
+
+	raw, err := json.Marshal(b)
+	if err != nil {
+		t.Fatalf("marshal baton: %v", err)
+	}
+	got := string(raw)
+
+	// Every top-level schema field name must be present in the encoded object.
+	for _, key := range []string{
+		`"schema"`, `"relay_id"`, `"leg"`, `"parent_trace"`, `"objective"`, `"done_when"`,
+		`"progress_cursor"`, `"next_action"`, `"open_questions"`, `"artifacts"`,
+		`"do_not_rederive"`, `"tombstone"`,
+	} {
+		if !strings.Contains(got, key) {
+			t.Errorf("encoded baton is missing top-level key %s; json=%s", key, got)
+		}
+	}
+
+	// `schema` is emitted first: its key precedes every other top-level key in the bytes.
+	schemaAt := strings.Index(got, `"schema"`)
+	if schemaAt < 0 {
+		t.Fatalf("no schema key in encoded baton: %s", got)
+	}
+	for _, key := range []string{`"relay_id"`, `"leg"`, `"objective"`, `"tombstone"`} {
+		if at := strings.Index(got, key); at >= 0 && at < schemaAt {
+			t.Errorf("key %s precedes schema in the wire form; schema must be emitted first; json=%s", key, got)
+		}
+	}
+
+	// The no-`claimed` invariant, restated on the wire: not one `claimed` key anywhere.
+	if strings.Contains(strings.ToLower(got), `"claimed"`) {
+		t.Errorf("encoded baton carries a forbidden `claimed` key — progress must stay a re-verifiable cursor; json=%s", got)
+	}
 }
