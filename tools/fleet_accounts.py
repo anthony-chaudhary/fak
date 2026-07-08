@@ -1,6 +1,20 @@
 #!/usr/bin/env python3
-r"""fleet_accounts -- the single source of truth for "what is an account,
-and is it offered?", across BOTH product families: Claude Code and opencode.
+r"""fleet_accounts -- COMPATIBILITY SHIM over the canonical Go account contract.
+
+The source of truth for "what is an account, and is it offered?" is now the Go
+package ``internal/fleetaccounts`` behind ``fak fleet-accounts``
+(``roster|list|json|available|resolve|wave|seats|status``), byte-parity-proven
+against this module by ``internal/fleetaccounts/testdata/parity_check.sh``
+(#1415). The dispatch tick/wave path and the launch scripts
+(``launch_goal_detached.ps1`` / ``launch_wave_detached.ps1``) already consume
+the Go surface. This file stays behind, semantics frozen, for the consumers not
+yet migrated -- the resume watchdog, ``fleet_status.ps1``, the control pane,
+``dispatch_preflight`` / account top-up -- and for the folds the Go port does
+not cover yet (the ACTIVE network ``probe`` and the relogin/top-up mutations).
+Fix behavior in Go first; only mirror here if a Python consumer needs it.
+pythongate tracking: this file remains in the grandfathered baseline until the
+remaining consumers move and it is ported-and-deleted (the baseline only
+shrinks on delete -- see ``internal/pythongate/doc.go``).
 
 The fleet resume layer discovers accounts by globbing config dirs. Historically
 every ``.claude*`` match with a ``projects/`` subdir was treated as an equal,

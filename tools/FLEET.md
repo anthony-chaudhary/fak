@@ -34,7 +34,7 @@ Everything after the verb is passed straight through to the underlying tool.
 | `json` | machine snapshot | `fleet_top.py --json` |
 | `sessions` | per-session disposition table | `fleet_sessions.py summary` |
 | `resume` | account-correct resume commands | `fleet_sessions.py resume` |
-| `accounts` | worker-account availability | `fleet_accounts.py` |
+| `accounts` | worker-account availability | `fleet_accounts.py` (compat shim — canonical contract is `fak fleet-accounts`, #1415) |
 | `pane` | the full control pane | `fleet_control_pane.py status` |
 | `install` / `uninstall` | manage the `fleet` command on PATH | `install_agent_command.py` |
 | `help` | the verb list | — |
