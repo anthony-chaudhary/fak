@@ -355,12 +355,13 @@ func hasDryRunPreview(cmd string, args map[string]any) bool {
 	if hasWhatIfFlag(cmd) {
 		return true
 	}
-	// `git clean -n` (the short spelling of --dry-run) previews without deleting,
-	// even combined with -d/-f (e.g. "git clean -nd", the fs-destroy/git-destroy
-	// redirect). -n is recognized ONLY inside a `git clean` segment, never
-	// globally: a bare -n means unrelated things elsewhere (`kubectl delete -n
-	// <ns>` is a REAL delete that must stay gated).
-	if gitCleanDryRun(cmd) {
+	// `git clean -n` / `git push -n` (the short spelling of --dry-run) preview
+	// without mutating, even combined with -d/-f (e.g. "git clean -nd", the
+	// fs-destroy/git-destroy redirect; or "git push -nf"). -n is recognized ONLY
+	// inside a `git clean`/`git push` segment, never globally: a bare -n means
+	// unrelated things elsewhere (`kubectl delete -n <ns>` is a REAL delete that
+	// must stay gated).
+	if gitDryRunPreview(cmd) {
 		return true
 	}
 	return false
@@ -378,20 +379,37 @@ func hasWhatIfFlag(cmd string) bool {
 	return whatIfFlagRE.MatchString(cmd)
 }
 
-// gitCleanDryRun reports whether a `git clean` invocation carries a dry-run
-// flag: --dry-run, or a single-dash short-flag cluster containing 'n' (-n, -nd,
-// -dn, -nf). A cluster WITHOUT 'n' (-fd, -f, -x) is a real removal and is NOT a
-// dry-run, so it stays gated. It parses the RAW command (dash-preserving),
-// splitting on the same sequencing operators and stripping the same env/wrapper
-// heads as commandSegments, but keeping flag dashes that commandWords drops.
-func gitCleanDryRun(cmd string) bool {
+// gitDryRunPreview reports whether a `git clean` or `git push` invocation carries
+// a dry-run flag: --dry-run, or a single-dash short-flag cluster containing 'n'
+// (-n, -nd, -dn, -nf). Both subcommands spell dry-run identically, and for BOTH,
+// 'n' is the only short flag that means dry-run — so any cluster containing 'n'
+// is a genuine preview. A cluster WITHOUT 'n' is a real mutation and stays gated:
+// `git clean -fd`/`-f`/`-x` (a real removal), and `git push -f` (force) or the
+// destructive `git push -d`/`--delete <branch>` (a remote-branch delete) all lack
+// 'n' and are untouched. The short `git push -n` is the documented equivalent of
+// the `git push --dry-run` the git-push redirect itself recommends — recognizing
+// it closes the same self-refuting-remedy gap the -WhatIf / git-clean-`-n` cases
+// did (docs/notes/CONFIRM-GATE-DEADLOCK-2026-07-04.md): the long form was already
+// reversible via the --dry-run substring, but the short form was gated as a live
+// push. The flag is recognized ONLY inside these two git subcommands, never
+// globally: a bare -n means unrelated things elsewhere (`kubectl delete -n <ns>`
+// is a REAL delete that must stay gated). It parses the RAW command (dash-
+// preserving), splitting on the same sequencing operators and stripping the same
+// env/wrapper heads as commandSegments, but keeping flag dashes that commandWords
+// drops.
+func gitDryRunPreview(cmd string) bool {
 	for _, raw := range commandSegmentRE.Split(cmd, -1) {
 		fields := strings.Fields(raw)
 		for len(fields) > 0 &&
 			(envAssignmentRE.MatchString(fields[0]) || commandWrapperHeads[strings.ToLower(fields[0])]) {
 			fields = fields[1:]
 		}
-		if len(fields) < 2 || strings.ToLower(fields[0]) != "git" || strings.ToLower(fields[1]) != "clean" {
+		if len(fields) < 2 || strings.ToLower(fields[0]) != "git" {
+			continue
+		}
+		switch strings.ToLower(fields[1]) {
+		case "clean", "push":
+		default:
 			continue
 		}
 		for _, tok := range fields[2:] {

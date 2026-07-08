@@ -130,6 +130,14 @@ func TestReversibilityClassifiesCommands(t *testing.T) {
 			want: ReversibilityReversible,
 		},
 		{
+			// The short -n is the documented equivalent of --dry-run above; the
+			// long form was already reversible, the short form must be too.
+			name: "git push short dry-run is reversible",
+			tool: "Bash",
+			args: map[string]any{"command": "git push -n origin main"},
+			want: ReversibilityReversible,
+		},
+		{
 			name: "tool name can mark destructive calls",
 			tool: "delete_file",
 			args: map[string]any{"file_path": "tmp/cache.bin"},
@@ -467,6 +475,46 @@ func TestReversibilityConfirmTokenIgnoresDescriptionDrift(t *testing.T) {
 	other := map[string]any{"command": "rm -rf /", "description": "Delete the leftover new_leaf files"}
 	if ReversibilityConfirmToken(ReversibilityIrreversible, "Bash", other) == t1 {
 		t.Fatalf("confirm token failed to bind to the command text")
+	}
+}
+
+// TestAdjudicateReversibilityTokenStableAcrossDescriptionDrift drives the FULL
+// adjudicate path (rung ordering -> wouldAdmit -> ClassifyReversibility ->
+// reversibilityGateVerdict -> Meta["confirm_token"]) for an outward-facing git push
+// whose Bash "description" is reworded between the refusal and the re-proposal. It is
+// the RUNTIME guard #3306 asked for: the pure-function TestReversibility...Drift test
+// above cannot catch a regression where a future rung reorder or envelope change
+// folds the per-turn description back into the gated arg map. The token surfaced in
+// the gate verdict must be identical across the drift, and echoing the first token
+// under the reworded call must CONFIRM (Transform), not re-refuse — the exact loop
+// that wedged session f0e7ac0f. A plain command (no shell metacharacters) sidesteps
+// the json.Marshal HTML-escaping the issue flagged for `2>&1`.
+func TestAdjudicateReversibilityTokenStableAcrossDescriptionDrift(t *testing.T) {
+	a := New(Policy{Allow: map[string]bool{"Bash": true}})
+	ctx := context.Background()
+
+	v1 := a.Adjudicate(ctx, inlineCall("Bash", `{"command":"git push origin main","description":"push the auth fix"}`))
+	if v1.Kind != abi.VerdictRequireWitness {
+		t.Fatalf("git push not gated: got %v/%s, want REQUIRE_WITNESS", v1.Kind, abi.ReasonName(v1.Reason))
+	}
+	tok1 := v1.Meta["confirm_token"]
+	if tok1 == "" {
+		t.Fatalf("gate verdict carried no confirm_token: %+v", v1.Meta)
+	}
+
+	v2 := a.Adjudicate(ctx, inlineCall("Bash", `{"command":"git push origin main","description":"ship the corrected auth handler"}`))
+	if v2.Kind != abi.VerdictRequireWitness {
+		t.Fatalf("re-proposal not gated: got %v/%s", v2.Kind, abi.ReasonName(v2.Reason))
+	}
+	if tok1 != v2.Meta["confirm_token"] {
+		t.Fatalf("confirm token rotated on description drift through the live adjudicate path: %q != %q", tok1, v2.Meta["confirm_token"])
+	}
+
+	// Echo the FIRST token under the REWORDED call — the advertised recovery must
+	// converge to a confirmed dispatch, not a fresh refusal.
+	confirmed := a.Adjudicate(ctx, inlineCall("Bash", `{"command":"git push origin main","description":"ship the corrected auth handler","`+ReversibilityConfirmArg+`":"`+tok1+`"}`))
+	if confirmed.Kind == abi.VerdictRequireWitness {
+		t.Fatalf("echoed token under a reworded description did not confirm — the live loop is not fixed: %+v", confirmed)
 	}
 }
 

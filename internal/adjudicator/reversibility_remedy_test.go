@@ -71,11 +71,38 @@ func TestDryRunFlagsDoNotWeakenDestructiveFloor(t *testing.T) {
 		"Remove-Item -Recurse -Force ./x", // no -WhatIf: real delete
 		"rm -rf build",                    // no preview at all
 		"kubectl delete -n prod pod/x",    // -n is a NAMESPACE here, a real delete
+		"git push -f origin main",         // force push: real mutation, no 'n'
+		"git push --force origin main",    // force push, long form: no 'n'
+		"git push -d origin feature",      // remote-branch DELETE: -d has no 'n'
+		"git push --delete origin feat",   // remote-branch delete, long form
 	}
 	for _, c := range gated {
 		env := ClassifyReversibility("Bash", map[string]any{"command": c})
 		if env.Class == ReversibilityReversible {
 			t.Errorf("destructive floor weakened: %q classified reversible", c)
+		}
+	}
+}
+
+// TestGitPushShortDryRunIsPreview pins the positive half of extending the
+// git-clean-`-n` recognition to `git push`: `git push -n` is the documented short
+// spelling of `git push --dry-run` (already reversible via the --dry-run
+// substring), so the short form — including 'n'-bearing clusters like -nf, and
+// behind an env/wrapper head — must be reversible too. Without this the guard
+// gates the short form of the very preview its own git-push redirect recommends.
+func TestGitPushShortDryRunIsPreview(t *testing.T) {
+	previews := []string{
+		"git push -n origin main",                       // the bare short dry-run
+		"git push -n",                                   // no explicit remote/branch
+		"git push -nf origin main",                      // dry-run + force cluster: still sends nothing
+		"git push -fn origin main",                      // cluster order does not matter
+		"env GIT_SSH=x git push -n",                     // env-prefixed head is stripped like commandSegments
+		"git commit -m done && git push -n origin main", // dry-run in the second segment
+	}
+	for _, c := range previews {
+		env := ClassifyReversibility("Bash", map[string]any{"command": c})
+		if env.Class != ReversibilityReversible {
+			t.Errorf("git push short dry-run gated: %q classified %q, want reversible", c, env.Class)
 		}
 	}
 }
