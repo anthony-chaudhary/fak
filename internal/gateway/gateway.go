@@ -95,6 +95,35 @@ const DefaultCompactHistoryBudget = 48000
 // 0 disables the prior and restores the conservative "no horizon ⇒ no fire" behavior exactly.
 const DefaultAssumedSessionTurns = 50
 
+// Volume-aware horizon (the head-anchored burst gate's held-volume signal). DefaultAssumedSessionTurns
+// alone is a TURN count, but the break-even it feeds is a TOKEN ratio — breakEven ≈ 11.5 ×
+// (invalidatedSuffix / droppedMiddle) (agent.CacheBurstBreakEvenTurns). A MEDIAN real session (~65k
+// resident, ~17k droppable middle) needs break-even ~6–33 cleared, so a flat turn horizon fires it
+// only while it is YOUNG and starves it once served depth eats the remaining turns — the exact seam
+// the 100→50 recalibration tightened. The fix keys the horizon on the trace's OBSERVED peak resident
+// window (the coordinator's ResidentTokens, input+cached): a trace that has demonstrably held a large
+// context is an empirically long/heavy session, so it keeps a repaying-turn FLOOR regardless of how
+// deep it already is, instead of winding down to zero against a short-session constant.
+//
+// headHorizonHeavyResidentFloor is the peak resident-token watermark above which a trace is treated as
+// heavy for the horizon prior. Sized just under the observed real-traffic floor (cached_prompt_tokens
+// per turn is ≥~51k at p10 in docs/nightrun/gateway-usage.jsonl, resident adds this turn's input on
+// top), so a genuine working session qualifies while a SHORT chat (the token-light majority — median 7
+// turns) stays on the conservative base horizon. headHorizonHeavyHeadroom is the number of repaying
+// turns a heavy trace is guaranteed to retain: the effective TotalTurns becomes
+// max(DefaultAssumedSessionTurns, servedTurns+headroom), so a heavy trace deep in its life still has
+// ~headroom turns of break-even room. Both are INERT for the short/thin majority — the max() keeps the
+// base horizon while servedTurns < base-headroom, and the whole branch is skipped below the resident
+// floor — so this only lengthens the horizon for the demonstrably heavy-and-deep long tail, exactly
+// where a flat turn count refused a burst that would in fact repay. The economics still gate every
+// fire: a break-even that exceeds the granted headroom still refuses (a thin-middle / huge-suffix shed
+// never fires no matter how heavy the session). A wired Budget.TurnsLeft horizon still wins over the
+// whole prior, and the prior-disabled (assumeSessionTurns<=0) path is byte-for-byte unchanged.
+const (
+	headHorizonHeavyResidentFloor int64 = 60000
+	headHorizonHeavyHeadroom            = 30
+)
+
 // Early-firing budget ramp (the "fak fires by ~step 5-10" seam). The head-anchored compaction
 // against the FULL DefaultCompactHistoryBudget (~48k) only crosses its threshold once a session
 // has sprawled past ~48k resident tokens — step ~35+ on a heavy coding session, and never on a

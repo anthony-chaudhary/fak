@@ -732,6 +732,10 @@ func (s *Server) maybeCompactAnthropicRaw(req *agent.AnthropicMessagesRequest) (
 //     left) and refuses near the presumed end — the same break-even economics, just given a
 //     history-based length instead of refusing outright. A large invalidated suffix still refuses
 //     regardless (break-even exceeds the headroom), so the economics remain the real guard.
+//     The presumed length is VOLUME-AWARE (volumeAwareHorizon): a trace whose observed peak resident
+//     window marks it heavy keeps a repaying-turn floor deep into its life, because the break-even it
+//     must clear is a TOKEN ratio, not a turn count — a flat turn horizon starves exactly the heavy
+//     median session that would in fact repay. Inert for the token-light majority.
 //  3. With the prior disabled (assumeSessionTurns<=0) it returns (0,0) — the conservative
 //     "unknown horizon ⇒ no fire unless zero-penalty (ColdCache)" behavior, byte-for-byte.
 //
@@ -745,7 +749,31 @@ func (s *Server) headSessionPrior(turnsLeft int, trace string) (totalTurns, curr
 	if s.assumeSessionTurns <= 0 {
 		return 0, 0
 	}
-	return s.assumeSessionTurns, int(s.metrics.servedTurnCount(trace)) + 1
+	served := int(s.metrics.servedTurnCount(trace))
+	heldPeak := s.metrics.heldResidentPeakTokens(trace)
+	return volumeAwareHorizon(s.assumeSessionTurns, served, heldPeak), served + 1
+}
+
+// volumeAwareHorizon resolves the presumed session length the head-anchored burst gate assumes,
+// keyed on the trace's observed heaviness. base is the configured assumeSessionTurns; served is the
+// trace's real served-turn depth; heldPeak is its largest observed resident window (input+cached).
+//
+// A TOKEN-LIGHT trace (heldPeak below headHorizonHeavyResidentFloor) keeps base verbatim — the
+// conservative short-session horizon, so the token-light majority (median 7 turns) is unchanged. A
+// HEAVY trace instead retains a repaying-turn floor: TotalTurns = max(base, served+headroom), so it
+// still has ~headroom turns of break-even room no matter how deep it already is, instead of winding
+// down to zero against a short-session constant. The max() makes the boost INERT while served is
+// shallow (served+headroom ≤ base ⇒ base wins), so this only ever LENGTHENS the horizon for a
+// demonstrably heavy-AND-deep trace — never shortens it, and never touches an early or thin session.
+// The economics downstream still gate the fire (a break-even exceeding the granted headroom refuses).
+func volumeAwareHorizon(base, served int, heldPeak int64) int {
+	if heldPeak < headHorizonHeavyResidentFloor {
+		return base
+	}
+	if floor := served + headHorizonHeavyHeadroom; floor > base {
+		return floor
+	}
+	return base
 }
 
 // earlyFiringBudget ramps the head-anchored compaction's effective budget from a floor fraction

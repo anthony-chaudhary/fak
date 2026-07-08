@@ -132,6 +132,12 @@ type coordEntry struct {
 	coord    *compactcohere.Coordinator
 	lastTurn time.Time
 	turns    uint64 // served passthrough turns folded into this trace so far
+	// heldPeak is the largest OBSERVED resident window (input+cached, the coordinator's
+	// ResidentTokens) this trace has ever reached — its demonstrated heaviness, the
+	// held-volume signal the volume-aware head-anchored horizon reads (see headSessionPrior /
+	// headHorizonHeavyResidentFloor). Peak (not last) so a single small turn cannot demote a
+	// session that has proven it holds a large context; monotone within a trace's life.
+	heldPeak int64
 }
 
 func newHarnessCoherenceMetrics(ttl time.Duration) *harnessCoherenceMetrics {
@@ -227,6 +233,9 @@ func (h *harnessCoherenceMetrics) observe(trace string, now time.Time, digest st
 		h.recommendResets++
 	}
 	h.lastResident = d.ResidentTokens
+	if d.ResidentTokens > entry.heldPeak {
+		entry.heldPeak = d.ResidentTokens
+	}
 	h.posture = d.HarnessPosture
 	return d
 }
@@ -305,6 +314,33 @@ func (m *gatewayMetrics) servedTurnCount(trace string) uint64 {
 		return 0
 	}
 	return m.harnessCoherence.servedTurns(trace)
+}
+
+// heldResidentPeak reports the largest OBSERVED resident window (input+cached tokens) this trace has
+// reached so far — the demonstrated held-volume the volume-aware head-anchored horizon reads to decide
+// whether a trace is a heavy/long session (headSessionPrior / headHorizonHeavyResidentFloor). Folded in
+// observe AFTER the turn, so a turn N compaction sees the peak through turn N-1 — the same one-turn lag
+// as servedTurns, and the conservative direction (a not-yet-observed heavy turn keeps the base horizon).
+// An unknown trace (first turn, or a metrics-less server) reports 0 ⇒ the conservative base horizon.
+func (h *harnessCoherenceMetrics) heldResidentPeak(trace string) int64 {
+	if h == nil || trace == "" {
+		return 0
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	entry := h.coords[trace]
+	if entry == nil {
+		return 0
+	}
+	return entry.heldPeak
+}
+
+// heldResidentPeakTokens is the gatewayMetrics-level, nil-safe accessor for heldResidentPeak.
+func (m *gatewayMetrics) heldResidentPeakTokens(trace string) int64 {
+	if m == nil || m.harnessCoherence == nil {
+		return 0
+	}
+	return m.harnessCoherence.heldResidentPeak(trace)
 }
 
 // harnessCoherenceInputs carries the per-turn facts the harness-coherence observation needs that
