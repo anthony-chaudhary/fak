@@ -108,6 +108,20 @@ def test_row_validators():
     assert any("MISSING_COUNTERS" in v for v in
                pg.validate_usage_row({"schema": pg.USAGE_SCHEMA, "kind": "exit",
                                       "session_type": "serve"}, "x:1"))
+    # Nested {label: count} breakdown maps (by_reason, compaction_bail_reasons,
+    # cache_ttl_upgrade_reasons — the map[string]uint64 fields of the Go Counters
+    # struct) are valid counters, not a bad scalar: real guard sessions have been
+    # writing compaction_bail_reasons since #1407/#1408. A clean map folds clean.
+    assert pg.validate_usage_row(_usage_row(counters={
+        "compaction_bail_reasons": {"too_few_msgs": 2, "under_budget": 5},
+        "cache_ttl_upgrade_reasons": {"head_not_cacheable": 3},
+        "by_reason": {"policy_x": 1},
+    }), "x:1") == []
+    # ...but a negative leaf inside a breakdown map is still a named violation,
+    # reported with the key[subkey] path so the offending label is legible.
+    bad_leaf = pg.validate_usage_row(_usage_row(counters={
+        "compaction_bail_reasons": {"too_few_msgs": -1}}), "x:1")
+    assert any("BAD_COUNTER compaction_bail_reasons[too_few_msgs]" in v for v in bad_leaf), bad_leaf
 
     assert pg.validate_value_row(_value_row(), "x:1") == []
     assert any("REUSE_EXCEEDS_PROMPT" in v for v in
@@ -270,6 +284,13 @@ def test_live_repo_smoke():
     # The real guard population has been writing provider rows since 2026-07-01;
     # that floor never goes back below EVIDENCED.
     assert _rung(report, "provider_prompt_cache_passthrough") == "EVIDENCED"
+    # The committed durable evidence must fold clean: every real counter row (including
+    # the nested compaction_bail_reasons / cache_ttl_upgrade_reasons breakdown maps) is
+    # schema-legal. A nonzero count here means either genuinely malformed evidence landed
+    # or the validator drifted behind the row shape — both are worth a red test, not a
+    # silently-banked violation the ratchet would then freeze into the baseline floor.
+    first = next((viol[0] for viol in report["violations"].values() if viol), "-")
+    assert report["violation_count"] == 0, f"committed ledgers carry {report['violation_count']} violation(s); first: {first}"
     print(f"test_live_repo_smoke OK ({report['ledgers']['cache_savings']['rows']} savings rows, "
           f"{report['violation_count']} violations)")
 

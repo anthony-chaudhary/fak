@@ -3,7 +3,7 @@
 
 READ-ONLY. Fetches OPEN issues via `gh`, classifies each into triage buckets
 (missing priority/kind/area/class/milestone, orphaned high-prio, stale, dormant question,
-likely-duplicate, bare), ranks them into a deterministic attention order, and emits:
+bare), ranks them into a deterministic attention order, and emits:
 
   --json            the full triage model (stdout)
   --md OUT          a dated human report
@@ -14,6 +14,12 @@ actions is the skill's job, gated on operator approval. This mirrors plan-audit'
 read-only discipline (docs/_audits) and the release skill's dry-run-first rule:
 the helper decides what is *true* and what *could* be done; the operator decides
 what *is* done.
+
+Duplicate detection is NOT here. The title-only Jaccard dup-cluster pass that used
+to live in this file was ported to Go and now lives in `fak issue dedup` (the
+body-aware backlog duplicate census, internal/issuededup) — it clusters
+title-divergent/body-similar twins this title-token pass was blind to, and emits
+ranked merge proposals with per-pair evidence. Run `fak issue dedup [--json]`.
 
 Label taxonomy is fleet's, baked in as defaults:
   priority  priority/P0 | priority/P1 | priority/P2
@@ -44,7 +50,7 @@ Usage:
   python tools/issue_triage.py --actions docs/_audits/issue-actions-YYYY-MM-DD.json
   python tools/issue_triage.py --since-days 30      # only issues updated in last 30d
   python tools/issue_triage.py --scope priority     # filter: priority|kind|area|
-                                                    #         orphans|stale|dup|question
+                                                    #         orphans|stale|question
 
 Exit codes: 0 = ran clean · 2 = infra error (gh missing / not authed / not a repo).
 """
@@ -53,7 +59,6 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
-import re
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
 import sys
@@ -88,17 +93,16 @@ WORKFLOW = {"in-progress", "duplicate", "wontfix", "invalid", "help wanted",
 # ---- Thresholds (override via flags) ----------------------------------------
 STALE_DAYS = 60        # open + idle this long + not in-progress => stale
 Q_IDLE_DAYS = 30       # question idle this long => dormant close candidate
-DUP_JACCARD = 0.60     # title-token overlap to suggest likely-duplicate
 LIST_LIMIT = 500       # gh issue list cap
 
 
 def _load_config(path: str | None) -> None:
     """Override label sets from a JSON file. Schema (all optional):
        {"priority": {"label": weight}, "kind": [...], "area": [...],
-        "workflow": [...], "stale_days": N, "q_idle_days": N, "dup_jaccard": F}"""
+        "workflow": [...], "stale_days": N, "q_idle_days": N}"""
     if not path:
         return
-    global PRIORITY, KIND, AREA, CLASS, WORKFLOW, STALE_DAYS, Q_IDLE_DAYS, DUP_JACCARD
+    global PRIORITY, KIND, AREA, CLASS, WORKFLOW, STALE_DAYS, Q_IDLE_DAYS
     cfg = json.loads(Path(path).read_text(encoding="utf-8"))
     if "priority" in cfg:
         PRIORITY = {k: int(v) for k, v in cfg["priority"].items()}
@@ -112,7 +116,6 @@ def _load_config(path: str | None) -> None:
         WORKFLOW = set(cfg["workflow"])
     STALE_DAYS = int(cfg.get("stale_days", STALE_DAYS))
     Q_IDLE_DAYS = int(cfg.get("q_idle_days", Q_IDLE_DAYS))
-    DUP_JACCARD = float(cfg.get("dup_jaccard", DUP_JACCARD))
 
 
 def fetch_issues() -> list[dict]:
@@ -167,7 +170,7 @@ def _days(iso: str, now: dt.datetime) -> int:
     return max(0, int((now - then).total_seconds() // 86400))
 
 
-def classify(issue: dict, now: dt.datetime, dup_groups: dict[int, int]) -> dict:
+def classify(issue: dict, now: dt.datetime) -> dict:
     """Attach triage tags + a rank score to one issue. Pure + deterministic."""
     labels = _label_names(issue)
     age_days = _days(issue.get("createdAt", ""), now)
@@ -197,8 +200,6 @@ def classify(issue: dict, now: dt.datetime, dup_groups: dict[int, int]) -> dict:
         tags.append("stale")
     if "question" in labels and idle_days >= Q_IDLE_DAYS:
         tags.append("dormant-question")
-    if issue["number"] in dup_groups:
-        tags.append("likely-dup")
 
     score = prio_weight
     if is_p0p1 and not in_prog and not assigned:
@@ -229,64 +230,6 @@ def classify(issue: dict, now: dt.datetime, dup_groups: dict[int, int]) -> dict:
     }
 
 
-# ---- Duplicate detection (advisory, cheap) ----------------------------------
-_STOP = set("the a an of for and to in on with is not no via be by from that this "
-            "it as at or vs using use add new fix feat bug issue impl implement "
-            "support run broken missing error fail failure needs work".split())
-_SCOPE_RE = re.compile(r"\b(\w+)\(([^)]+)\)")  # feat(scope), fix(scope), ...
-
-
-def _title_tokens(title: str) -> set[str]:
-    scopes = {f"{pre}({inner})".lower()
-              for pre, inner in _SCOPE_RE.findall(title)
-              for inner in (inner,)
-              for pre in (pre,)}
-    scopes.update(s.lower() for _, s in _SCOPE_RE.findall(title))  # bare scope words
-    words = {w.lower() for w in re.findall(r"[A-Za-z0-9_-]{3,}", title)
-             if w.lower() not in _STOP}
-    return scopes | words
-
-
-def _jaccard(a: set[str], b: set[str]) -> float:
-    if not a or not b:
-        return 0.0
-    inter = len(a & b)
-    return inter / len(a | b)
-
-
-def dup_clusters(issues: list[dict]) -> dict[int, int]:
-    """Map issue number -> cluster id for title-similarity groups (size >= 2).
-    Advisory only — surfaces candidates, never auto-closes."""
-    toks = {i["number"]: _title_tokens(i["title"]) for i in issues}
-    nums = list(toks)
-    parent = {n: n for n in nums}
-
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def union(a, b):
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[ra] = rb
-
-    for i in range(len(nums)):
-        for j in range(i + 1, len(nums)):
-            if _jaccard(toks[nums[i]], toks[nums[j]]) >= DUP_JACCARD:
-                union(nums[i], nums[j])
-
-    groups: dict[int, list[int]] = {}
-    for n in nums:
-        groups.setdefault(find(n), []).append(n)
-    out: dict[int, int] = {}
-    for gid, members in enumerate(g for g in groups.values() if len(g) > 1):
-        for m in members:
-            out[m] = gid
-    return out
-
-
 # ---- Proposed actions (mechanical + defensible only) ------------------------
 STALE_MSG = ("Marking stale: no activity for {idle} days and not in-progress. "
              "Reply to keep open, else this will be closed in the next triage pass.")
@@ -296,7 +239,7 @@ Q_CLOSE_MSG = ("Closing as dormant: this is a `question` with no activity for "
 
 def build_actions(rows: list[dict]) -> list[dict]:
     """Only MECHANICAL, defensible actions get a `cmd`. Judgment calls
-    (needs-priority, dup confirmation) are surfaced as REVIEW with no cmd —
+    (needs-priority, needs-area, …) are surfaced as REVIEW with no cmd —
     the operator decides per-issue. The helper never executes these."""
     actions = []
     for r in rows:
@@ -335,11 +278,12 @@ def render_md(report: dict, as_of: str) -> str:
         f"needs-class {c['needs_class']}  ·  "
         f"needs-milestone {c['needs_milestone']}  ·  orphan {c['orphan']}  ·  "
         f"stale {c['stale']}  ·  dormant-Q {c['dormant_question']}  "
-        f"·  likely-dup {c['likely_dup']}  ·  bare {c['bare']}",
+        f"·  bare {c['bare']}",
         "",
         "> Read-only pass. The `--actions` manifest proposes only mechanical moves "
-        "(mark stale, close dormant questions); priority assignment and dup "
-        "confirmation are judgment calls surfaced as REVIEW — operator decides.",
+        "(mark stale, close dormant questions); priority assignment is a judgment "
+        "call surfaced as REVIEW — operator decides. Duplicate clusters live in "
+        "`fak issue dedup` (body-aware census), not here.",
         "",
         "## Triage queue (top 25 by score)",
         "",
@@ -381,18 +325,6 @@ def render_md(report: dict, as_of: str) -> str:
     bucket("Needs an area label", "needs-area",
            "One of the domain labels (agentic-serving, gpu, model, …).")
 
-    dups = report.get("duplicate_clusters", [])
-    if dups:
-        n_issues = sum(len(c["members"]) for c in dups)
-        L.append(f"## Likely-duplicate candidates ({n_issues} issues in {len(dups)} clusters)")
-        L.append("")
-        L.append("*Advisory title-similarity only — confirm before closing as dup.*")
-        L.append("")
-        for cl in dups:
-            nums = " ".join(f"[#{n}]({u})" for n, u in cl["members"])
-            L.append(f"- cluster {cl['id']}: {nums}")
-        L.append("")
-
     acts = report.get("actions", [])
     if acts:
         mechanical = [a for a in acts if a["cmd"]]
@@ -410,25 +342,14 @@ def render_md(report: dict, as_of: str) -> str:
 
 
 def build_report(issues: list[dict], now: dt.datetime) -> dict:
-    dups = dup_clusters(issues)
     rows = sorted(
-        (classify(i, now, dups) for i in issues),
+        (classify(i, now) for i in issues),
         key=lambda r: (-r["score"], -r["number"]),
     )
     actions = build_actions(rows)
 
     def count(tag: str) -> int:
         return sum(1 for r in rows if tag in r["tags"])
-
-    dup_members = {}
-    for n, gid in dups.items():
-        dup_members.setdefault(gid, []).append(n)
-    dup_clusters_out = [
-        {"id": gid,
-         "members": [(n, next(r["url"] for r in rows if r["number"] == n))
-                     for n in sorted(members)]}
-        for gid, members in sorted(dup_members.items())
-    ]
 
     return {
         "as_of": now.date().isoformat(),
@@ -442,11 +363,9 @@ def build_report(issues: list[dict], now: dt.datetime) -> dict:
             "orphan": count("orphan"),
             "stale": count("stale"),
             "dormant_question": count("dormant-question"),
-            "likely_dup": count("likely-dup"),
             "bare": count("bare"),
         },
         "rows": rows,
-        "duplicate_clusters": dup_clusters_out,
         "actions": actions,
     }
 
@@ -460,7 +379,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--since-days", type=int, default=None,
                     help="only issues updated in the last N days")
     ap.add_argument("--scope", default=None,
-                    help="filter rows by a tag: priority|kind|area|orphans|stale|dup|question")
+                    help="filter rows by a tag: priority|kind|area|orphans|stale|question")
     ap.add_argument("--config", default=None, help="JSON file overriding label sets/thresholds")
     ap.add_argument("--as-of", default=None, help="date stamp (default: today UTC)")
     ap.add_argument("--issues", default=None, metavar="PATH|-",
@@ -491,7 +410,7 @@ def main(argv: list[str] | None = None) -> int:
 
     scope_map = {
         "priority": "needs-priority", "kind": "needs-kind", "area": "needs-area",
-        "orphans": "orphan", "stale": "stale", "dup": "likely-dup",
+        "orphans": "orphan", "stale": "stale",
         "question": "dormant-question",
     }
     if a.scope:

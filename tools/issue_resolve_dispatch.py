@@ -1316,6 +1316,38 @@ def candidate_priority(labels: Any) -> int:
     return best
 
 
+# A "depends-on:/blocked-by: #N" prerequisite marker in an issue body, followed by one or more
+# "#N" references (comma/and/&-separated). The dispatchorder leaf (internal/dispatchorder) holds a
+# keep-eligible unit while any prerequisite it names is still an OPEN candidate this tick.
+_PREREQ_MARKER = re.compile(
+    r"(?im)\b(?:depends[ -]?on|blocked[ -]?by)\b[:\s]*"
+    r"((?:#\d+(?:\s*(?:,|and|&)\s*)?)+)")
+_ISSUE_REF = re.compile(r"#(\d+)")
+
+
+def candidate_blocked_by(body: Any) -> list[str]:
+    """The dispatchorder Candidate.blocked_by list an issue earns from its body: the issue numbers
+    it declares as prerequisites via a "depends-on:/blocked-by: #N" marker (one or many, comma/
+    and/&-separated), as string IDs in the leaf's ID space. Prose that merely contains the words
+    ("it depends on the weather") never matches -- the marker must be immediately followed by a
+    ``#N`` reference.
+
+    An issue with no such marker maps to an empty list -- dispatchorder's "unique/never blocked"
+    -- so a body-free or marker-free candidate set carries no prerequisite edges and dispatches
+    exactly as it did before the field existed (the additive-no-regression posture #3224 requires).
+    The leaf fails open on a prerequisite that is already closed, so a stale ``#N`` never wedges
+    the dependent. Order-preserving and de-duplicated, so the result is deterministic per body."""
+    text = body if isinstance(body, str) else ""
+    out: list[str] = []
+    seen: set[str] = set()
+    for marker in _PREREQ_MARKER.finditer(text):
+        for num in _ISSUE_REF.findall(marker.group(1)):
+            if num not in seen:
+                seen.add(num)
+                out.append(num)
+    return out
+
+
 def contract_scan_stream(eligible_by_lane: list[Any] | None,
                          skip: set[int]) -> list[tuple[str, int]]:
     """The cross-lane candidate stream the bounded contract scan walks: round-robin
@@ -4834,6 +4866,14 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # dispatch-order leaf ranks on is derived here rather than thrown away (#3222).
     payload["target_priority"] = candidate_priority(
         ((rec.get("issue_record") or {}).get("labels")) or [])
+    # The picked unit's dispatchorder prerequisite edges, parsed from the issue body's
+    # "depends-on:/blocked-by: #N" markers. Derived here, at the point candidates are built, so the
+    # dispatch-order leaf can hold a dependent until its prerequisite closes (#3224). Empty for an
+    # issue that names no prerequisite -- the additive no-regression case.
+    target_blocked_by = candidate_blocked_by(
+        (rec.get("issue_record") or {}).get("body"))
+    if target_blocked_by:
+        payload["target_blocked_by"] = target_blocked_by
     if contract_skipped:
         payload["contract_skipped"] = contract_skipped
     if same_issue_wip_skipped:

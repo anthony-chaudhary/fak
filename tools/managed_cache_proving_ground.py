@@ -190,7 +190,17 @@ def validate_usage_row(row: dict, where: str) -> list[str]:
         v.append(f"{where}: MISSING_COUNTERS")
         return v
     for key, val in counters.items():
-        if key == "by_reason":
+        # A counter value is either a scalar total or a nested {label: count}
+        # breakdown map — the map[string]uint64 fields of gatewayusageledger.Counters:
+        # by_reason (deny/quarantine reasons), compaction_bail_reasons (the closed
+        # agent.CompactReason* vocabulary, #1407/#1408), and cache_ttl_upgrade_reasons
+        # (the agent.TTLUpgradeReason* vocabulary, #1844 C6). Validate a map's leaves are
+        # non-negative counts rather than flagging the map itself as a bad scalar — a
+        # negative leaf is still a named violation, but the breakdown shape is not.
+        if isinstance(val, dict):
+            for subkey, subval in val.items():
+                if not isinstance(subval, (int, float)) or isinstance(subval, bool) or subval < 0:
+                    v.append(f"{where}: BAD_COUNTER {key}[{subkey}]={subval!r}")
             continue
         if not isinstance(val, (int, float)) or isinstance(val, bool) or val < 0:
             v.append(f"{where}: BAD_COUNTER {key}={val!r}")

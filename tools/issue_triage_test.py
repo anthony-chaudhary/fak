@@ -54,7 +54,7 @@ def _issue(number: int, *, title: str = "t", labels=None, assignees=None,
 class ClassifyScoreTest(unittest.TestCase):
     def test_orphan_p0_bug_score_and_tags(self):
         # P0 bug, no in-progress, no assignee, fresh: 1000 + 300(orphan) + 40(bug) + 0(idle).
-        g = m.classify(_issue(1, labels=["priority/P0", "bug"], idle_days_ago=0), NOW, {})
+        g = m.classify(_issue(1, labels=["priority/P0", "bug"], idle_days_ago=0), NOW)
         self.assertEqual(g["score"], 1340)
         self.assertIn("orphan", g["tags"])
         self.assertIn("needs-area", g["tags"])        # no area label
@@ -63,18 +63,18 @@ class ClassifyScoreTest(unittest.TestCase):
 
     def test_fresh_question_penalty(self):
         # No priority (base 60), question, idle 0 -> -200 fresh-question penalty.
-        g = m.classify(_issue(2, labels=["question"], idle_days_ago=0), NOW, {})
+        g = m.classify(_issue(2, labels=["question"], idle_days_ago=0), NOW)
         self.assertEqual(g["score"], 60 - 200)
         self.assertNotIn("dormant-question", g["tags"])
 
     def test_dormant_question_tag_and_no_penalty(self):
         # question idle >= Q_IDLE_DAYS (30) -> dormant-question tag, no -200.
-        g = m.classify(_issue(3, labels=["question"], idle_days_ago=40), NOW, {})
+        g = m.classify(_issue(3, labels=["question"], idle_days_ago=40), NOW)
         self.assertIn("dormant-question", g["tags"])
         self.assertEqual(g["score"], 60 + 40)  # base + min(idle,90); no fresh penalty
 
     def test_bare_issue_gets_all_missing_tags(self):
-        g = m.classify(_issue(4, labels=[], idle_days_ago=0), NOW, {})
+        g = m.classify(_issue(4, labels=[], idle_days_ago=0), NOW)
         for tag in ("needs-priority", "needs-kind", "needs-area", "needs-class",
                     "needs-milestone", "bare"):
             self.assertIn(tag, g["tags"])
@@ -83,13 +83,13 @@ class ClassifyScoreTest(unittest.TestCase):
         # A fully-area-labeled issue with no class:* label still needs the work-class
         # axis (infra vs dev vs front-door) — a SEPARATE gap from needs-area.
         g = m.classify(_issue(9, labels=["priority/P2", "bug", "gpu"], idle_days_ago=0),
-                       NOW, {})
+                       NOW)
         self.assertIn("needs-class", g["tags"])
         self.assertNotIn("needs-area", g["tags"])  # gpu is an area
 
     def test_no_needs_class_when_class_label_present(self):
         g = m.classify(_issue(10, labels=["priority/P2", "bug", "gpu", "class:infra"],
-                              idle_days_ago=0), NOW, {})
+                              idle_days_ago=0), NOW)
         self.assertNotIn("needs-class", g["tags"])
 
     def test_needs_milestone_when_absent(self):
@@ -97,63 +97,43 @@ class ClassifyScoreTest(unittest.TestCase):
         # rolls up onto the roadmap. needs-milestone fires; score is unchanged
         # (the tag surfaces attention, it does not reweight the ranking).
         i = _issue(7, labels=["priority/P2", "bug", "gpu"], idle_days_ago=0)
-        g = m.classify(i, NOW, {})
+        g = m.classify(i, NOW)
         self.assertIn("needs-milestone", g["tags"])
         self.assertEqual(g["score"], 150 + 40)  # P2 base + bug; no milestone penalty
 
     def test_no_needs_milestone_when_present(self):
         i = _issue(8, labels=["priority/P1", "bug", "gpu"], idle_days_ago=0)
         i["milestone"] = {"title": "Generation G0 - Now / Immediate"}
-        g = m.classify(i, NOW, {})
+        g = m.classify(i, NOW)
         self.assertNotIn("needs-milestone", g["tags"])
         self.assertEqual(g["milestone"], "Generation G0 - Now / Immediate")
 
     def test_stale_tag_for_idle_non_inprogress(self):
-        g = m.classify(_issue(5, labels=["priority/P2"], idle_days_ago=70), NOW, {})
+        g = m.classify(_issue(5, labels=["priority/P2"], idle_days_ago=70), NOW)
         self.assertIn("stale", g["tags"])
 
     def test_in_progress_suppresses_orphan_and_stale(self):
-        g = m.classify(_issue(6, labels=["priority/P0", "in-progress"], idle_days_ago=70), NOW, {})
+        g = m.classify(_issue(6, labels=["priority/P0", "in-progress"], idle_days_ago=70), NOW)
         self.assertNotIn("orphan", g["tags"])
         self.assertNotIn("stale", g["tags"])
 
 
-class DupClusterTest(unittest.TestCase):
-    def test_similar_titles_cluster_unrelated_excluded(self):
-        issues = [
-            _issue(1, title="tokenizer cache invalidation resize regression"),
-            _issue(2, title="tokenizer cache invalidation resize crash"),
-            _issue(3, title="documentation gpu benchmark gallery layout"),
-        ]
-        clusters = m.dup_clusters(issues)
-        self.assertIn(1, clusters)
-        self.assertIn(2, clusters)
-        self.assertEqual(clusters[1], clusters[2])  # same cluster id
-        self.assertNotIn(3, clusters)               # unrelated -> not clustered
-
-    def test_jaccard_and_tokens(self):
-        self.assertEqual(m._jaccard(set(), {"a"}), 0.0)
-        toks = m._title_tokens("fix(gateway): tool call timeout")
-        self.assertIn("gateway", toks)        # scope captured
-        self.assertNotIn("fix", toks)         # stopword stripped
-
-
 class ActionsTest(unittest.TestCase):
     def test_dormant_question_yields_close_cmd(self):
-        rows = [m.classify(_issue(3, labels=["question"], idle_days_ago=40), NOW, {})]
+        rows = [m.classify(_issue(3, labels=["question"], idle_days_ago=40), NOW)]
         acts = m.build_actions(rows)
         self.assertEqual(acts[0]["kind"], "close-dormant-question")
         self.assertIn("gh issue close 3", acts[0]["cmd"])
 
     def test_stale_p2_yields_mark_stale(self):
-        rows = [m.classify(_issue(5, labels=["priority/P2"], idle_days_ago=70), NOW, {})]
+        rows = [m.classify(_issue(5, labels=["priority/P2"], idle_days_ago=70), NOW)]
         acts = m.build_actions(rows)
         self.assertEqual(acts[0]["kind"], "mark-stale")
         self.assertIsNotNone(acts[0]["cmd"])
 
     def test_p0_with_tags_is_review_only(self):
         # An orphan P0 has tags but no mechanical cmd -> review, cmd None.
-        rows = [m.classify(_issue(1, labels=["priority/P0", "bug"], idle_days_ago=0), NOW, {})]
+        rows = [m.classify(_issue(1, labels=["priority/P0", "bug"], idle_days_ago=0), NOW)]
         acts = m.build_actions(rows)
         self.assertEqual(acts[0]["kind"], "review")
         self.assertIsNone(acts[0]["cmd"])

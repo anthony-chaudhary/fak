@@ -4672,5 +4672,37 @@ class CandidatePriorityTest(unittest.TestCase):
         self.assertEqual(mod.candidate_priority(None), 0)
 
 
+class CandidateBlockedByTest(unittest.TestCase):
+    """candidate_blocked_by parses "depends-on:/blocked-by: #N" markers from an issue body into the
+    dispatchorder Candidate.blocked_by list (empty when the body names no prerequisite) -- #3224."""
+
+    def test_marker_forms(self) -> None:
+        mod = load()
+        # Both marker verbs, hyphenated or spaced, colon optional.
+        self.assertEqual(mod.candidate_blocked_by("depends-on: #120"), ["120"])
+        self.assertEqual(mod.candidate_blocked_by("Depends on #120"), ["120"])
+        self.assertEqual(mod.candidate_blocked_by("blocked-by: #120"), ["120"])
+        self.assertEqual(mod.candidate_blocked_by("Blocked by #120"), ["120"])
+
+    def test_multiple_refs_and_dedup(self) -> None:
+        mod = load()
+        # Comma/and/&-separated refs on one marker, and across markers, deduped in first-seen order.
+        self.assertEqual(
+            mod.candidate_blocked_by("blocked-by: #120, #121 and #122"),
+            ["120", "121", "122"])
+        self.assertEqual(
+            mod.candidate_blocked_by("Depends on #7.\nAlso blocked by #7 & #9."),
+            ["7", "9"])
+
+    def test_no_marker_is_empty(self) -> None:
+        mod = load()
+        # Prose that merely contains the words never matches (the marker must be followed by #N);
+        # a body-free / marker-free issue carries no prerequisite edge (additive-no-regression).
+        self.assertEqual(mod.candidate_blocked_by("it depends on the weather"), [])
+        self.assertEqual(mod.candidate_blocked_by("no markers here #notanumber"), [])
+        self.assertEqual(mod.candidate_blocked_by(""), [])
+        self.assertEqual(mod.candidate_blocked_by(None), [])
+
+
 if __name__ == "__main__":
     unittest.main()

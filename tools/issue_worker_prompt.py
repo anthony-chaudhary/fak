@@ -388,33 +388,30 @@ job is to reshape that evidence into the named sections, not to invent scope.
 the issues (work each one, oldest first):
 {issue_lines}
 
-how to work each issue:
-- `gh issue view <N>` (read-only) and read the full thread first; then orient \
-once with `AGENTS.md` and `llms.txt` if you have not already.
-- Write ONLY the missing contract sections into \
-`.dispatch-runs/contract-overlays/issue-<N>.md` (create the directory if \
-needed). The overlay is APPENDED to the body at review time — never restate or \
-rewrite the existing body, only add the absent sections.
-- Derive every field honestly from the issue's own content and the repo. If a \
-field's true answer is not derivable from that evidence, write the honest short \
-form (`unknown — needs operator input: <the one question>`) rather than a \
-fabricated specific.
-- An issue that cannot honestly satisfy the contract as ONE dispatchable leaf \
-(an epic that needs splitting, or work that belongs elsewhere) gets NO overlay; \
-name it and the reason in your final report and move on to the next issue.
-- Verify each repair before claiming it: \
-`python tools/issue_contract_repair.py --verify <N> --json` (from the repo \
-root) re-reviews the issue WITH your overlay merged. The repair is done ONLY \
-when that reports ok with score >= {min_score}. Do not claim a pass you did \
-not run.
+how to work each issue (each step names its command / artifact / refusal):
+- READ — `gh issue view <N>` (read-only) + the full thread; orient once with \
+`AGENTS.md` and `llms.txt` if you have not already.
+- WRITE — only the missing contract sections into \
+`.dispatch-runs/contract-overlays/issue-<N>.md` (create the dir if needed). It is \
+APPENDED at review — add absent sections only; never restate or rewrite the body.
+- DERIVE — every field from the issue's own content and the repo. Not derivable? \
+Write `unknown — needs operator input: <the one question>`, never a fabricated \
+specific.
+- SPLIT — an issue that cannot be ONE dispatchable leaf (an epic to split, or \
+work that belongs elsewhere) gets NO overlay; name it and the reason in your \
+final report and move on.
+- VERIFY — `python tools/issue_contract_repair.py --verify <N> --json` (from the \
+repo root) re-reviews the issue WITH your overlay merged. Repair is done ONLY \
+when that reports ok with score >= {min_score}. Do not claim a pass you did not \
+run.
 
-hard rules:
-- Your ONLY writes are overlay files under `.dispatch-runs/contract-overlays/` \
-(plus scratch under `.dispatch-runs/`). The repo tree is READ-ONLY: no commits, \
-no tracked-file edits, no branches, no staging.
-- NO GitHub writes of any kind — no issue edit, no comment, no label, no close. \
+hard rules (the boundary the host enforces below you):
+- WRITES — only overlay files under `.dispatch-runs/contract-overlays/` (plus \
+scratch under `.dispatch-runs/`). The repo tree is READ-ONLY: no commits, no \
+tracked-file edits, no branches, no staging.
+- GITHUB — NO GitHub writes of any kind (no issue edit, comment, label, close). \
 Reads (`gh issue view`) are fine.
-- Work only the issues listed above; never any other issue.
+- SCOPE — work only the issues listed above; never any other issue.
 
 acceptance (your stop condition): every listed issue either passes the \
 overlay-merged contract review you actually ran, or is named in your final \
