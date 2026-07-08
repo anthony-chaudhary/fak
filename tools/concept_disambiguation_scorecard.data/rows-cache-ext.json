@@ -87,7 +87,7 @@
         "vcache",
         "vcachestar (M2 star anchors)"
       ],
-      "aliases": [],
+      "aliases": ["vcachestatusreport"],
       "grounding": "vcacheobserve",
       "grounding_kind": "path",
       "glossary_anchor": "",
@@ -639,7 +639,7 @@
       "distinct_from": [
         "hardware-aware-cache"
       ],
-      "aliases": [],
+      "aliases": ["cachedemo"],
       "grounding": "hwcachedemo",
       "grounding_kind": "path",
       "glossary_anchor": "",

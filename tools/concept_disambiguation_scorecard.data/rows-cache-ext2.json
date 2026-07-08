@@ -139,7 +139,8 @@
         "mlcache3",
         "mlcache4",
         "mlcache5",
-        "mlcache6"
+        "mlcache6",
+        "cachegen"
       ],
       "grounding": "lmcache",
       "grounding_kind": "doc",
