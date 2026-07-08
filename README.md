@@ -1,12 +1,12 @@
 # fak: the Fused Agent Kernel
 
-**One binary in front of the agent you already run: safer tool calls, a smaller token bill, and long sessions that pick themselves back up.**
+**One binary in front of the agent you already run: a smaller token bill, the right model per call, and long sessions that pick themselves back up — with safe-by-default tool calls riding along on the same checkpoint.**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Go Reference](https://pkg.go.dev/badge/github.com/anthony-chaudhary/fak.svg)](https://pkg.go.dev/github.com/anthony-chaudhary/fak) [![Release](https://img.shields.io/github/v/release/anthony-chaudhary/fak?color=blue&label=release&sort=semver)](https://github.com/anthony-chaudhary/fak/releases/latest) [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8.svg)](go.mod)
 
 <!-- readme-verified: 2026-07-07 vs VERSION 0.37.0 + BENCHMARK-AUTHORITY -->
 
-fak treats every tool call like a syscall: the model proposes, the kernel disposes — each call gets a verdict against a default-deny capability floor (a reviewable allow-list), and the stable setup is reused, so the same loop comes out more controlled, cheaper, and faster. It works with Claude Code, Codex, Cursor, and OpenAI / Anthropic / MCP clients; your model, IDE, and keys stay exactly as they are.
+fak treats every tool call like a syscall: the model proposes, the kernel disposes — the stable setup (system prompt, tools, KV cache) is computed once and reused, repeated reads are served locally, and old turns are shed while the provider's cache stays alive, so the same loop comes out cheaper, faster, and longer-running. Each call also gets a verdict against a default-deny capability floor (a reviewable allow-list) on that same seam, so it stays controlled without a second component. It works with Claude Code, Codex, Cursor, and OpenAI / Anthropic / MCP clients; your model, IDE, and keys stay exactly as they are.
 
 **Pick your path:** [wrap your agent now](#get-started-with-fak-guard) ·
 [guided tutorial — 15 min, no key, no GPU](docs/fak/tutorial.md) ·
@@ -46,10 +46,6 @@ fak routebench                                   # -> COST / LATENCY / QUALITY d
 fak preflight --tool refund_payment --args "{}"  # -> DENY (DEFAULT_DENY): not on the allow-list, fail-closed
 ```
 
-## Tool-call controls
-
-A tool call crosses the kernel before it runs, receives a verdict — ALLOW, DENY, TRANSFORM, or REQUIRE_WITNESS — and is recorded with a closed reason code you can assert on (`POLICY_BLOCK`, `SECRET_EXFIL`, …); distrusted result bytes are quarantined before they become the model's next instructions, and the model cannot widen its own authority by text alone. The floor is a deployable JSON manifest you copy, trim, and test — no model in the loop; starter floors cover coding, customer support, DevOps, trading, and clinical/PHI. Point an agent at one with `fak guard --policy examples/<file>`. More: [POLICY.md](POLICY.md) · [examples/README.md](examples/README.md) · [the tool call is a syscall](docs/explainers/tool-call-is-a-syscall.md).
-
 ## More ways to run it
 
 | You want | Run | See |
@@ -62,6 +58,10 @@ A tool call crosses the kernel before it runs, receives a verdict — ALLOW, DEN
 | Slack | a durable run-card per guard session; `fak chatrelay` bridges a served model into a channel | [docs/fak/slack-sessions.md](docs/fak/slack-sessions.md) |
 
 Witnessed live in front of Claude Code, opencode, and Codex; 41 of 47 surveyed harnesses repoint with one base URL ([the catalogue](docs/supported/README.md)).
+
+## Tool-call controls
+
+The performance seam doubles as a safety floor at no extra cost: a tool call crosses the kernel before it runs, receives a verdict — ALLOW, DENY, TRANSFORM, or REQUIRE_WITNESS — and is recorded with a closed reason code you can assert on (`POLICY_BLOCK`, `SECRET_EXFIL`, …); distrusted result bytes are quarantined before they become the model's next instructions, and the model cannot widen its own authority by text alone. The floor is a deployable JSON manifest you copy, trim, and test — no model in the loop; starter floors cover coding, customer support, DevOps, trading, and clinical/PHI. Point an agent at one with `fak guard --policy examples/<file>`. More: [POLICY.md](POLICY.md) · [examples/README.md](examples/README.md) · [the tool call is a syscall](docs/explainers/tool-call-is-a-syscall.md).
 
 ## Install
 
@@ -83,7 +83,7 @@ Going deeper starts at the [front-page overflow](docs/README-legacy.md): why now
 |---|---|
 | Guided first session (15 min) · absolute-beginner start | [docs/fak/tutorial.md](docs/fak/tutorial.md) · [START-HERE.md](START-HERE.md) |
 | Install + the four usage tiers | [GETTING-STARTED.md](GETTING-STARTED.md) · [LEARNING-PATH.md](LEARNING-PATH.md) |
-| Long sessions / cache | [docs/explainers/long-sessions-keep-the-cache-hit.md](docs/explainers/long-sessions-keep-the-cache-hit.md) |
+| Long sessions / cache · you never manage context | [docs/explainers/long-sessions-keep-the-cache-hit.md](docs/explainers/long-sessions-keep-the-cache-hit.md) · [docs/explainers/you-never-manage-the-context-window.md](docs/explainers/you-never-manage-the-context-window.md) |
 | Capability floor (policy) · security model | [POLICY.md](POLICY.md) · [docs/fak/security.md](docs/fak/security.md) |
 | CLI verbs · supported models / engines / harnesses | [docs/cli-reference.md](docs/cli-reference.md) · [docs/supported/README.md](docs/supported/README.md) |
 | Benchmark authority · gallery · honesty ledger | [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md) · [BENCHMARK-GALLERY.md](BENCHMARK-GALLERY.md) · [CLAIMS.md](CLAIMS.md) |
