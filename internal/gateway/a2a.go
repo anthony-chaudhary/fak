@@ -14,10 +14,66 @@ import (
 // A2A protocol version
 const a2aVersion = "1.0"
 
-// a2aTaskStore holds A2A tasks with stable IDs and audit logging
+// a2aMaxTasks bounds the in-memory task store. handleA2ASendMessage inserts one task per
+// POST /a2a/v1/messages and nothing ever deleted them, so a long-lived `fak serve` grew the
+// map without bound — monotonic heap growth over a multi-day process (the same unbounded-
+// accumulation class as the self-update swap-aside leak, in memory instead of on disk). The
+// cap is far above any realistic in-flight working set, so a busy but healthy gateway never
+// evicts a task a caller is still polling; it only reclaims the long tail of completed tasks
+// that no one will read again.
+const a2aMaxTasks = 4096
+
+// a2aTaskStore holds A2A tasks with stable IDs and audit logging. It is size-bounded: see
+// insertLocked, which evicts the least-useful entry once the map exceeds a2aMaxTasks.
 type a2aTaskStore struct {
 	mu    sync.RWMutex
 	tasks map[string]*a2aTask
+}
+
+// insertLocked adds task under taskID, evicting one entry first if the store is at capacity.
+// The caller must hold s.mu. Eviction prefers the oldest TERMINAL task (completed/canceled/
+// failed — no one is waiting on its result), and only falls back to the oldest task overall
+// when every entry is still in-flight (a pathological all-pending state). This keeps the
+// common case — a flood of immediately-completed send-message tasks — from ever displacing a
+// task a caller is actively polling.
+func (s *a2aTaskStore) insertLocked(taskID string, task *a2aTask) {
+	if len(s.tasks) >= a2aMaxTasks {
+		if victim := s.evictionVictimLocked(); victim != "" {
+			delete(s.tasks, victim)
+		}
+	}
+	s.tasks[taskID] = task
+}
+
+// evictionVictimLocked picks the task ID to drop when at capacity, or "" if the map is empty.
+// The caller must hold s.mu (read or write). It scans once, tracking the oldest terminal task
+// and the oldest task overall, and returns the terminal one when present.
+func (s *a2aTaskStore) evictionVictimLocked() string {
+	var oldestTerminal, oldestAny string
+	var terminalAt, anyAt time.Time
+	for id, t := range s.tasks {
+		if oldestAny == "" || t.CreatedAt.Before(anyAt) {
+			oldestAny, anyAt = id, t.CreatedAt
+		}
+		if a2aTerminalState(t.State) && (oldestTerminal == "" || t.CreatedAt.Before(terminalAt)) {
+			oldestTerminal, terminalAt = id, t.CreatedAt
+		}
+	}
+	if oldestTerminal != "" {
+		return oldestTerminal
+	}
+	return oldestAny
+}
+
+// a2aTerminalState reports whether an A2A task state is final (no further updates expected),
+// so its entry is safe to evict under memory pressure without dropping live work.
+func a2aTerminalState(state string) bool {
+	switch state {
+	case "completed", "canceled", "cancelled", "failed", "error":
+		return true
+	default:
+		return false
+	}
 }
 
 type a2aTask struct {
@@ -303,10 +359,10 @@ func (s *Server) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
 		Message:      msg.Content,
 	}
 
-	// Store task
+	// Store task (bounded: insertLocked evicts the oldest terminal task at capacity).
 	store := getA2AStore()
 	store.mu.Lock()
-	store.tasks[taskID] = task
+	store.insertLocked(taskID, task)
 	store.mu.Unlock()
 
 	// Log audit entry for task creation
