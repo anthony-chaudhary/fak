@@ -17,6 +17,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/turntaxmeter"
 )
 
@@ -56,7 +57,24 @@ func dispatchPreflight(root string, stderr io.Writer, maxWorkers int, workKind, 
 	// walls -- are excluded by the reason=rate_limit taxonomy filter; it only lowers the
 	// effective cap, so a zero-signal fold is byte-identical to before.
 	res = dispatchtick.ApplyRateLimitBackpressure(res, dispatchPreflightRateLimit(root, product))
-	return res.Map(), nil
+	out := res.Map()
+	// #3109 self-heal: preflight is otherwise refuse-only on unattributed_live -- it
+	// counts orphaned worker PIDs (a botched teardown's `claude` descendant still
+	// carrying the dispatch marker but holding NO seat lease) as pool depletion and
+	// wedges dispatch until a separately-scheduled janitor clears them. When the pool
+	// shows unattributed_live > 0, surface those exact PIDs as a janitor worklist
+	// (mirroring how `fak garden tick` surfaces orphan-run worklists) so the tick can
+	// tree-reap them via procguard.KillPID and the pool recovers on its own next tick.
+	// The predicate is the SAME one preflight already uses to COUNT them -- dispatch
+	// marker AND no live lease -- so a leased or unrelated process can never be swept.
+	// Observation only here (no side effect); the reap is next-tick / live-gated in the
+	// dispatch tick, never in this hot admission path (mis-attributed-kill TOCTOU).
+	if res.Seat.UnattributedLive > 0 {
+		if worklist := dispatchUnattributedWorklist(dispatchProductWorkerPIDs(root, product), dispatchLeasedWorkerPIDs(root)); len(worklist) > 0 {
+			out["janitor_worklist"] = worklist
+		}
+	}
+	return out, nil
 }
 
 // dispatchPreflightGate folds the workspace's MEASURED guard-hook latency rollup into
@@ -810,6 +828,15 @@ func dispatchRAMAndThreadsPOSIX() (*int, *int) {
 }
 
 func dispatchProductWorkerCount(root, product string) int {
+	return len(dispatchProductWorkerPIDs(root, product))
+}
+
+// dispatchProductWorkerPIDs is the identity behind dispatchProductWorkerCount: the set of
+// live worker PIDs for a product -- lease-tracked resolve/repair pidfiles, goal-run
+// breadcrumbs, cmdline-marked workers (`resolve GitHub issue #` / `dos-dispatch-loop`),
+// plus codex ambient sessions. The count is len() of this set; exposing the set lets the
+// #3109 self-heal name the exact orphan PIDs preflight counts as unattributed_live.
+func dispatchProductWorkerPIDs(root, product string) map[int]bool {
 	pids := dispatchLiveResolveWorkerPIDs(filepath.Join(root, dispatchtick.RunsDirName), product)
 	for pid := range dispatchLiveGoalWorkerPIDs(filepath.Join(root, dispatchGoalRunsDirName), product) {
 		pids[pid] = true
@@ -822,7 +849,70 @@ func dispatchProductWorkerCount(root, product string) int {
 			pids[pid] = true
 		}
 	}
-	return len(pids)
+	return pids
+}
+
+// dispatchLeasedWorkerPIDs is the set of worker PIDs that hold a LIVE seat lease -- the
+// resolve/repair pidfiles under the runs dir whose PID is still alive. It is the "carries
+// a live lease" half of the unattributed_live predicate: a PID in the worker set but NOT
+// in this set is an orphan with no seat attribution, the exact thing preflight depletes
+// the pool on (#3109). Reads the same leases dispatchPreflightSeat feeds to BuildSeatPool.
+func dispatchLeasedWorkerPIDs(root string) map[int]bool {
+	out := map[int]bool{}
+	for _, lease := range dispatchLiveSeatLeases(filepath.Join(root, dispatchtick.RunsDirName)) {
+		if lease.PID > 0 {
+			out[lease.PID] = true
+		}
+	}
+	return out
+}
+
+// dispatchUnattributedWorklist is the conservative reap worklist for #3109: the sorted
+// PIDs that carry the dispatch-worker marker (they are in workerPIDs) AND hold no live
+// seat lease (they are absent from leasedPIDs) -- exactly the set preflight counts as
+// unattributed_live. A leased worker or an unrelated (non-marker) process can never
+// appear here, so the janitor can never sweep something it should not. Pure; no I/O.
+func dispatchUnattributedWorklist(workerPIDs, leasedPIDs map[int]bool) []int {
+	out := make([]int, 0, len(workerPIDs))
+	for pid := range workerPIDs {
+		if pid > 0 && !leasedPIDs[pid] {
+			out = append(out, pid)
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
+// dispatchReapPID is the destructive TREE reaper the #3109 self-heal routes each orphan
+// PID through. It defaults to procguard.KillPID -- a process-tree kill (native job
+// termination / taskkill /T on Windows, process-group/descendant SIGKILL on POSIX) -- so
+// an orphan's own descendants (the node runtime + MCP/tool subprocesses a `claude`
+// spawns) are reaped too; a bare kill would leave that subtree behind and re-poison the
+// count. Injectable for tests. Mirrors fleetKillPID (fleet.go) / guardChildTreeKill.
+var dispatchReapPID = procguard.KillPID
+
+// dispatchReapOutcome records the result of tree-reaping one orphan PID from the janitor
+// worklist -- surfaced on the refused dispatch-tick payload as an audit trail.
+type dispatchReapOutcome struct {
+	PID    int    `json:"pid"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// dispatchReapWorklist tree-reaps every PID in a #3109 janitor worklist through
+// dispatchReapPID and returns the per-PID outcome. The dispatch tick calls this only on a
+// LIVE tick after preflight has already refused (next-tick recovery), never inside the
+// hot admission path -- so a mis-attributed kill under lease TOCTOU is impossible.
+func dispatchReapWorklist(worklist []int) []dispatchReapOutcome {
+	out := make([]dispatchReapOutcome, 0, len(worklist))
+	for _, pid := range worklist {
+		if pid <= 0 {
+			continue
+		}
+		ok, detail := dispatchReapPID(pid)
+		out = append(out, dispatchReapOutcome{PID: pid, OK: ok, Detail: detail})
+	}
+	return out
 }
 
 const dispatchGoalRunsDirName = ".goal-runs"
