@@ -607,3 +607,46 @@ func TestInKernelReuseConcurrentNoRace(t *testing.T) {
 	}
 	t.Logf("RACE: planner functional post-contention, matched %d/%d, generated %d tokens", matched, len(post), len(gen))
 }
+
+// TestInKernelPlannerRadixReuseIsDefaultOnForInkernelEngine is the #14 DEFAULT witness:
+// a plain in-kernel planner — the exact object `fak serve --engine inkernel` (the default
+// engine, cmd/fak/serve.go `-engine`) boots via the gateway's in-kernel planner path
+// (internal/gateway/gateway.go newInKernelPlanner → agent.NewInKernelPlanner) — turns on
+// local radix/prefix KV reuse with NO env opt-in and NO benchmark harness, and actually
+// clones/reuses a shared stable prefix across turns. The other reuse witnesses in this file
+// either set FAK_INKERNEL_RADIX=on explicitly (TestInKernelRadixCostAwareVictimRuleFromEnv,
+// TestInKernelBackendGLMDsaEnablesHostPrefixReuse) or bypass the constructor entirely
+// (reusePlanner hand-builds p.tree); NONE pins that reuse is the DEFAULT, which is the whole
+// of item 14. This proves both directions: default (no env) is ON, and FAK_INKERNEL_RADIX=off
+// is the documented — and only — A/B disable (cold-path correctness: off falls back to a full
+// prefill every turn, never a stale serve).
+func TestInKernelPlannerRadixReuseIsDefaultOnForInkernelEngine(t *testing.T) {
+	// Force a clean env so an ambient FAK_INKERNEL_RADIX from the shell cannot decide the
+	// default: "" is not "off", so NewInKernelPlanner takes the default-on constructor path.
+	t.Setenv("FAK_INKERNEL_RADIX", "")
+	cfg := tinyCfg()
+
+	// backend == nil is precisely the CPU in-kernel session path --engine inkernel serves.
+	p := NewInKernelPlanner(model.NewSynthetic(cfg), nil, "synthetic", false, nil, false)
+	if p.tree == nil {
+		t.Fatal("radix/prefix reuse must be ON by default for an --engine inkernel session (no FAK_INKERNEL_RADIX set)")
+	}
+	p.quant = false
+
+	// It genuinely clones/reuses a shared stable prefix across turns — no fanbench/ablate.
+	sys := synthIDs(cfg.VocabSize, 40, 1)
+	turn1 := append(append([]int{}, sys...), synthIDs(cfg.VocabSize, 8, 2)...)
+	turn2 := append(append([]int{}, sys...), synthIDs(cfg.VocabSize, 10, 3)...)
+	decode(p, turn1, 4) // prime the shared prefix
+	if _, matched := decode(p, turn2, 4); matched != len(sys) {
+		t.Fatalf("default in-kernel session did not reuse the shared prefix: matched %d, want %d", matched, len(sys))
+	}
+
+	// FAK_INKERNEL_RADIX=off is the documented disable — verify it is the ONLY off switch.
+	t.Setenv("FAK_INKERNEL_RADIX", "off")
+	off := NewInKernelPlanner(model.NewSynthetic(cfg), nil, "synthetic", false, nil, false)
+	if off.tree != nil {
+		t.Fatal("FAK_INKERNEL_RADIX=off must disable reuse (the A/B tree-OFF arm)")
+	}
+	t.Logf("DEFAULT[#14]: --engine inkernel enables radix/prefix reuse with no env opt-in and no harness; reused %d-token shared prefix, off-arm disables it", len(sys))
+}
