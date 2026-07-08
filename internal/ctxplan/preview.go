@@ -83,6 +83,11 @@ type Preview struct {
 	Elided      []PreviewRow `json:"elided"`
 	QueryNeeded []PreviewRow `json:"query_needed"`
 	Faithful    bool         `json:"faithful"` // Audit(plan).Faithful, carried so a preview never has to be paired with a second call to trust
+	// Retention is the plan-time outcome of each requested pin/release target (#3024):
+	// honored | missing | released | refused. It is populated only when the Preview is built
+	// with a Forecast (PreviewOfWithForecast / PreviewLayout); PreviewOf(Plan) alone leaves it
+	// nil, because a target that named no span (missing) leaves no trace in the Plan.
+	Retention []RetentionOutcome `json:"retention,omitempty"`
 }
 
 // PreviewOf renders p into the five-region Preview. It is pure and total: every row of
@@ -132,6 +137,16 @@ func PreviewOf(p Plan) Preview {
 	return pv
 }
 
+// PreviewOfWithForecast is PreviewOf plus the plan-time retention/pin outcome surface (#3024):
+// it classifies each requested Forecast pin/release target against the plan's disposition. Like
+// PreviewOf it is pure and pages no bytes — a sealed retained target is reported `refused` from
+// the plan's own elision reason, never by touching the trust gate.
+func PreviewOfWithForecast(p Plan, f Forecast) Preview {
+	pv := PreviewOf(p)
+	pv.Retention = RetentionOutcomes(p, f)
+	return pv
+}
+
 func sortPreviewRows(rows []PreviewRow) {
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].Step != rows[j].Step {
@@ -172,6 +187,7 @@ func (pv Preview) Explain() string {
 	writeRegion(&b, "DEEP         (planned, relevance/durability reach)", pv.Deep)
 	writeRegion(&b, "ELIDED       (cold, recoverable — lost the knapsack / sealed / tombstoned / duplicate)", pv.Elided)
 	writeRegion(&b, "QUERY-NEEDED (cold, recoverable — needs an explicit follow-up query to page in)", pv.QueryNeeded)
+	writeRetentionExplain(&b, pv.Retention)
 	fmt.Fprintf(&b, "  totals: resident=%d tokens used of %d budget, benefit=%.3f, faithful=%v\n",
 		pv.CostUsed, pv.Budget, pv.Benefit, pv.Faithful)
 	return b.String()
@@ -235,6 +251,7 @@ func (pv Preview) Markdown() string {
 		}
 		b.WriteByte('\n')
 	}
+	b.WriteString(retentionMarkdown(pv.Retention))
 	return b.String()
 }
 
@@ -250,5 +267,5 @@ func mdEscape(s string) string {
 // anything, exactly the "render, don't execute" contract the issue asks for.
 func PreviewLayout(spans []Span, f Forecast, b Budget, cost CostModel, layout Layout) Preview {
 	p := BuildIndex(spans).PlanLayout(f, b, cost, layout)
-	return PreviewOf(p)
+	return PreviewOfWithForecast(p, f)
 }
