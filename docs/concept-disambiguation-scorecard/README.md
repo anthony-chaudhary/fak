@@ -13,10 +13,10 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 | Metric | Value |
 |---|---|
-| **Score** | **90.6/100** (grade A) = 9.1/10 |
-| **Coverage** | **85.5%** (1380/1614 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **234** (clarity 0 + coverage 234) |
-| Crystal-clear concepts | 143 of 1149 positioned |
+| **Score** | **91.2/100** (grade A) = 9.1/10 |
+| **Coverage** | **86.5%** (1407/1627 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **220** (clarity 0 + coverage 220) |
+| Crystal-clear concepts | 143 of 1158 positioned |
 | As of | 2026-06-29 (fak v0.34.0) |
 
 > **Read this right.** The score is deliberately LOW at birth: it grades the WHOLE confusable namespace discovered in the tree, not the few concepts already catalogued. A low coverage number is the honest statement that most similar-sounding names are not yet disambiguated - which is exactly the debt this scorecard exists to retire.
@@ -24,18 +24,18 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1149 concepts - score 90.6/100 (grade A) - disambiguation-debt 234
+concept-disambiguation chart - 1158 concepts - score 91.2/100 (grade A) - disambiguation-debt 220
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ####........................ 143
-  o defined       ############################ 1006
+  o defined       ############################ 1015
   ~ drifting      ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
   attention        oooooooooooooooooooooooooooooooooooooooooooooooooooo (52 concept(s); 0 crystal)
-  cache            **********************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (122 concept(s); 22 crystal)
+  cache            **********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (131 concept(s); 22 crystal)
   context-ctx      *********oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (103 concept(s); 9 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         ****oooooooooooooo (18 concept(s); 4 crystal)
@@ -56,28 +56,28 @@ clarity mix by family (each cell = one concept):
   witness-proof    *****oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (65 concept(s); 5 crystal)
 
 coverage by family (positioned / discovered):
-  cache            ######################...... 147/188
-  session-runtime  ######################...... 109/141
-  plan             #########################... 217/246
-  render-materialize ######################...... 103/130
-  context-ctx      ########################.... 117/139
+  plan             ########################.... 217/251
+  session-runtime  #####################....... 109/143
+  render-materialize ######################...... 103/132
+  context-ctx      #######################..... 117/143
   loop             ##################.......... 30/48
-  gateway-engine   #########################... 133/147
-  witness-proof    ########################.... 77/91
-  policy-capability ########################.... 77/90
+  witness-proof    #######################..... 77/92
+  gateway-engine   #########################... 135/149
+  policy-capability ########################.... 80/93
   score-debt       ######################...... 53/66
   evict            #####################....... 26/35
+  guard-gate       ###########################. 223/231
   pool             #######################..... 28/34
   support-maturity #######################..... 23/28
   decision         ########################.... 27/31
-  guard-gate       ############################ 221/223
   attention        ############################ 59/60
   layout           ##########################.. 11/12
+  cache            ############################ 174/174
   cross-cluster    ............................ 0/0
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [############################....] 85.5%  (1380/1614 confusable tokens positioned)
+namespace coverage  [############################....] 86.5%  (1407/1627 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -346,6 +346,15 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | cache | **PlaceAnthropicCacheBreakpoint (breakpoint placer)** - agent.PlaceAnthropicCacheBreakpoint rewrites a raw Anthropic request to place the cache_control breakpoint marker on the prompt prefix so the provider caches that span, returning a BreakpointOutcome describing what it did. |
 | o | defined | symbol | cache | **no_cache / explicit_cache (vCache provider policy actions)** - DecisionNoCache and DecisionExplicitCache are vcachegov provider-cache policy decisions: no_cache refuses warming secret prefixes, while explicit_cache requires a regulated explicit-cache path instead of ambient warming. |
 | o | defined | symbol | cache | **provider-cache transport capability fields** - ExplicitCacheTransport and HeartbeatTransport are ProviderTransportWitness booleans proving that the host has a provider-cache transport surface for regulated explicit-cache entries or harmless heartbeat refreshes before a vCache action row can move from gated to ready. |
+| o | defined | symbol | cache | **CacheCapability (wire-neutral engine cache contract)** - engine.CacheCapability is the wire-neutral value contract for what an upstream inference engine can expose about its cache: an opaque Engine label plus a Verdict (closed CacheVerdict class), a Provenance plane, an Evidence anchor, and a ColdPathCorrect bit. The gateway consumes it through the CacheCapabilityProducer seam so core never imports an engine-specific adapter package (cache-frontier item 32, epic #1490); gateway.ReportEngineCacheCapability is the reporter that fail-closes an unset verdict to CacheUnknown rather than reading a fabricated positive. |
+| o | defined | symbol | cache | **engine.CacheVerdict (engine cache-capability vocabulary)** - engine.CacheVerdict is the CLOSED vocabulary of wire-neutral engine cache-capability labels — unknown, passive-observe, active-warm, exact-evict, prefix-clone, paged-kv — the only classes a CacheCapability report may use. CacheUnknown is the zero value ('capability not established'), never inferred as a positive; CachePassiveObserve marks an engine that exposes cache symptoms (usage counters) but no control surface to act on. A new engine cannot smuggle in a bespoke class. |
+| o | defined | symbol | cache | **ablate.CacheEffect (per-feature ablation attribution card)** - ablate.CacheEffect is the per-feature attribution card the ablation report carries: for one cache feature it records the Owner (fak vs external) and the Plane (kernel_tool_cache | local_kv | provider_prompt_cache | context_compression | context_view) so a reader can tell 'fak's own KV/tool-cache effect' apart from 'a provider/external component was merely observed'. The report's CacheEffects slice holds one card per witnessed feature. |
+| o | defined | concept | cache | **cache attribution (owner/plane per-mechanism line)** - Cache attribution is the owner/plane labeling that tags every reuse saving with WHO authored it (Owner: fak vs provider/external) and WHICH plane produced it (kernel_tool_cache, local_kv, provider_prompt_cache, provider_prompt_cache_control, context_compression, context_view). It surfaces as the guard-info cache-attribution line (guardInfoCacheAttributionText) and the cachevalue-status plane rows, so a provider's observed cache_read is never read as fak's own witnessed reuse (epic #1490 honest per-mechanism attribution). |
+| o | defined | subsystem | cache | **uncached_trim (compaction shed of uncached spans)** - uncached_trim (ablate.FeatureUncachedTrim, env FAK_ABLATE_UNCACHED_TRIM) is the compaction mechanism that sheds history spans NOT protected by a provider cache_control breakpoint — it trims only uncached tokens so the cached prefix the provider is keyed on survives intact. The ablation harness toggles it to measure its isolated savings (the UncachedTrimResults / UncachedTrimShed accounting). |
+| o | defined | config | cache | **GOCACHE (Go build cache)** - GOCACHE is the Go toolchain's on-disk build-artifact cache. internal/nightrun's preflightGoCache provisions a per-run GOCACHE under the build temp dir so a night run's compiles don't fail with 'build cache is required, but could not be located' on a HOME-less runner; export HOME or GOCACHE to keep a persistent cache across runs. |
+| o | defined | config | cache | **managed-cache posture flag (auto|on|off)** - The managed-cache posture is the operator knob (--managed-cache / $FAK_MANAGED_CACHE, named by the fleetManagedCacheEnv const) that normalizeManagedCacheMode resolves to auto|on|off: auto stays PASSIVE on a subscription-OAuth seat and resolves ACTIVE on an API-key-billed seat, on forces the stable-prefix 1h-TTL cache upgrade, off disables it. The accounts and codex launchers splice the resolved flag into `fak guard`. |
+| o | defined | subsystem | cache | **internal/cacheprice (canonical price-constant pin)** - internal/cacheprice is the single source of the canonical cache price multipliers and constants that the gateway pricing model, the resume planner, and the compaction fire-gate all pin to (the #2798 acceptance), so no consumer hard-codes a divergent cache_read/cache_write coefficient and drifts the value accounting. |
+| o | defined | symbol | cache | **ReplayKVCache (KV-admission replay policy)** - ReplayKVCache is the victim-ranking KV eviction policy that internal/compute's KV-admission cost model simulates on every miss (issue #2672, epic #2236 matrix row M5) to score whether re-admitting an evicted span pays off, feeding the KVEvictPolicy victim ranking. |
 | o | defined | symbol | cache | **vBlock** - The unit of cacheable work in vCache: a cachemeta entry whose identity carries every axis that must match for provider reuse (content digest, model, tokenizer, endpoints, position in prefix DAG). |
 | o | defined | symbol | cache | **KVLayout** - The interface abstracting the per-position bytes a given attention variant caches and how to reconstruct per-head K/V from those bytes (standard vs MLA). |
 | o | defined | symbol | cache | **MLAConfig** - The low-rank MLA projection geometry (DeepSeek V2/V3): latent width, RoPE dim, and down/up projection matrices for compressing the K/V cache. |
@@ -1252,7 +1261,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 20 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 8 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1149 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 1158 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -1264,23 +1273,23 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| cache | 147 | 188 | 41 |
-| session-runtime | 109 | 141 | 32 |
-| plan | 217 | 246 | 29 |
-| render-materialize | 103 | 130 | 27 |
-| context-ctx | 117 | 139 | 22 |
+| plan | 217 | 251 | 34 |
+| session-runtime | 109 | 143 | 34 |
+| render-materialize | 103 | 132 | 29 |
+| context-ctx | 117 | 143 | 26 |
 | loop | 30 | 48 | 18 |
-| gateway-engine | 133 | 147 | 14 |
-| witness-proof | 77 | 91 | 14 |
-| policy-capability | 77 | 90 | 13 |
+| witness-proof | 77 | 92 | 15 |
+| gateway-engine | 135 | 149 | 14 |
+| policy-capability | 80 | 93 | 13 |
 | score-debt | 53 | 66 | 13 |
 | evict | 26 | 35 | 9 |
+| guard-gate | 223 | 231 | 8 |
 | pool | 28 | 34 | 6 |
 | support-maturity | 23 | 28 | 5 |
 | decision | 27 | 31 | 4 |
-| guard-gate | 221 | 223 | 2 |
 | attention | 59 | 60 | 1 |
 | layout | 11 | 12 | 1 |
+| cache | 174 | 174 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
