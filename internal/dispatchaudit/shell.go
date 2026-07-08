@@ -2,9 +2,11 @@ package dispatchaudit
 
 import (
 	"bufio"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -108,6 +110,68 @@ func ScanDir(runsDir string) ([]Worker, error) {
 		workers = append(workers, w)
 	}
 	return workers, nil
+}
+
+// sigMaxReadBytes bounds the per-log text read for the signature fold (worker
+// logs can be MB). Mirrors dispatch_log_audit.DEFAULTS["max_read_bytes"].
+const sigMaxReadBytes = 2_000_000
+
+// ScanDirSignatures reads runsDir, runs the log-signature detectors over every
+// resolve-*.log's text (pairing its .backend sidecar, defaulting to claude for a
+// legacy log with none — the Python tool's parity behavior), and returns the
+// fileable candidate list. THIN I/O boundary: the classification is FoldSignatures.
+func ScanDirSignatures(runsDir string, th SignatureThresholds) ([]SignatureFinding, error) {
+	entries, err := os.ReadDir(runsDir)
+	if err != nil {
+		return nil, err
+	}
+	sidecar := map[string]Backend{}
+	hasSidecar := map[string]bool{}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasSuffix(name, ".backend") {
+			base := strings.TrimSuffix(name, ".backend")
+			b, _ := os.ReadFile(filepath.Join(runsDir, name))
+			sidecar[base] = NormalizeBackend(string(b))
+			hasSidecar[base] = true
+		}
+	}
+
+	var logs []SigLog
+	for _, e := range entries {
+		if e.IsDir() || !resolveLogRE.MatchString(e.Name()) {
+			continue
+		}
+		base := strings.TrimSuffix(e.Name(), ".log")
+		text, err := readCappedLog(filepath.Join(runsDir, e.Name()))
+		if err != nil {
+			continue // a failing read is skipped, never fatal
+		}
+		backend := BackendClaude
+		if hasSidecar[base] && sidecar[base] != BackendUnknown && sidecar[base] != "" {
+			backend = sidecar[base]
+		}
+		logs = append(logs, SigLog{Name: e.Name(), Backend: backend, Text: text})
+	}
+	sort.Slice(logs, func(i, j int) bool { return logs[i].Name < logs[j].Name })
+	return FoldSignatures(logs, th), nil
+}
+
+// readCappedLog reads at most sigMaxReadBytes of a log as text.
+func readCappedLog(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, sigMaxReadBytes))
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // parseLog folds one resolve-*.log into a Worker. PURE-adjacent: it only reads

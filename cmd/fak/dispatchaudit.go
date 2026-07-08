@@ -36,8 +36,10 @@ func runDispatchAudit(stdout, stderr io.Writer, argv []string) int {
 	runsDir := fs.String("runs-dir", ".dispatch-runs", "directory of dispatch worker logs")
 	asJSON := fs.Bool("json", false, "emit the raw Report JSON instead of the human table")
 	fileIssues := fs.Bool("file-issues", false, "file a gh issue for each NEW finding fingerprint (default: read-only)")
+	maxIssues := fs.Int("max-issues", 0, "with --file-issues: hard cap on issues filed per run, worst-first (0 = no cap). The anti-storm bound for the scheduled feeder's first run over a large backlog")
 	stormErrs := fs.Int("storm-errors", 0, "RETRY_STORM threshold: min provider-error lines (0 = default)")
 	stormMins := fs.Float64("storm-mins", 0, "RETRY_STORM threshold: min wall-clock minutes (0 = default)")
+	hookMin := fs.Int("hook-min", 0, "hook-failure-storm signature floor: min `hook: … Failed` lines per session (0 = default 3)")
 	heartbeat := fs.Bool("heartbeat", false, "append a STARTED/NEVER_STARTED heartbeat event per worker to the loop ledger (default: off — a routine read-only audit never writes)")
 	ledger := fs.String("ledger", "", "loop JSONL ledger path for --heartbeat (default: the loop ledger)")
 	if !parseFlags(fs, argv) {
@@ -58,6 +60,23 @@ func runDispatchAudit(stdout, stderr io.Writer, argv []string) int {
 		th.StormMinMins = *stormMins
 	}
 	rep := dispatchaudit.Fold(workers, th)
+
+	// Log-signature failure classifiers (issue #3337): scan the raw log text for
+	// panic/traceback, hook-failure storms, OFF_TRUNK refusal storms, auth walls,
+	// and banner-only no-ops, then merge them into the fileable findings so
+	// --file-issues covers BOTH waste and log-signature failures. Best-effort: a
+	// scan error is reported, never fatal to the waste rollup above.
+	sigTh := dispatchaudit.DefaultSignatureThresholds()
+	if *hookMin > 0 {
+		sigTh.HookMin = *hookMin
+	}
+	if sigs, sigErr := dispatchaudit.ScanDirSignatures(*runsDir, sigTh); sigErr != nil {
+		fmt.Fprintf(stderr, "fak dispatch audit: signature scan %s: %v\n", *runsDir, sigErr)
+	} else {
+		for _, sf := range sigs {
+			rep.Findings = append(rep.Findings, sf.AsFinding())
+		}
+	}
 
 	if *heartbeat {
 		ledgerPath := firstNonEmpty(*ledger, defaultLoopLedger())
@@ -84,7 +103,7 @@ func runDispatchAudit(stdout, stderr io.Writer, argv []string) int {
 	renderAuditTable(stdout, rep)
 
 	if *fileIssues {
-		return fileAuditFindings(stdout, stderr, *runsDir, rep)
+		return fileAuditFindings(stdout, stderr, *runsDir, rep, *maxIssues)
 	}
 	return 0
 }
@@ -109,7 +128,10 @@ func renderAuditTable(w io.Writer, rep dispatchaudit.Report) {
 // fileAuditFindings is the detect->fingerprint->dedup->file half: it files a gh
 // issue for each finding whose fingerprint is neither already-marked nor an
 // existing open-issue title, then writes the marker so it is never re-filed.
-func fileAuditFindings(stdout, stderr io.Writer, runsDir string, rep dispatchaudit.Report) int {
+// maxIssues (>0) caps the run worst-first — the anti-storm bound the scheduled
+// feeder passes on its first pass over a large historical backlog; the withheld
+// remainder is reported, never silently dropped.
+func fileAuditFindings(stdout, stderr io.Writer, runsDir string, rep dispatchaudit.Report, maxIssues int) int {
 	filed := map[string]bool{}
 	for _, f := range rep.Findings {
 		if dispatchaudit.AlreadyFiled(runsDir, f.Fingerprint) {
@@ -118,16 +140,25 @@ func fileAuditFindings(stdout, stderr io.Writer, runsDir string, rep dispatchaud
 	}
 	openTitles := openIssueTitles(stderr)
 
-	fresh := dispatchaudit.NewFindings(rep.Findings, filed, openTitles)
+	fresh, withheld := dispatchaudit.SelectFindingsToFile(rep.Findings, filed, openTitles, maxIssues)
 	if len(fresh) == 0 {
 		fmt.Fprintln(stdout, "\nfile-issues: nothing new to file (all findings deduped).")
 		return 0
 	}
+	if withheld > 0 {
+		fmt.Fprintf(stdout, "\nfile-issues: filing %d worst-first; %d more withheld by --max-issues=%d (re-runs next cadence).\n", len(fresh), withheld, maxIssues)
+	}
 
 	rc := 0
 	for _, f := range fresh {
-		body := fmt.Sprintf("Auto-filed by `fak dispatch audit`.\n\n- dispatchability: `triage_only`\n- outcome: `%s`\n- backend: `%s`\n- code-site: `%s`\n- fingerprint: `%s`\n- first log: `%s`\n\n%s",
-			f.Outcome, f.Backend, f.CodeSite, f.Fingerprint, f.Log, f.Detail)
+		kind := string(f.Outcome)
+		kindLabel := "outcome"
+		if f.SignatureClass != "" {
+			kind = string(f.SignatureClass)
+			kindLabel = "signature"
+		}
+		body := fmt.Sprintf("Auto-filed by `fak dispatch audit`.\n\n- dispatchability: `triage_only`\n- %s: `%s`\n- backend: `%s`\n- code-site: `%s`\n- fingerprint: `%s`\n- first log: `%s`\n\n%s",
+			kindLabel, kind, f.Backend, f.CodeSite, f.Fingerprint, f.Log, f.Detail)
 		args := []string{"issue", "create",
 			"--title", f.Title,
 			"--body", body}

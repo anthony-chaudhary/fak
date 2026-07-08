@@ -237,6 +237,76 @@ func TestNewFindingsDedup(t *testing.T) {
 	}
 }
 
+// TestSelectFindingsToFileCapAndOrder proves the storm-safe selection the
+// scheduled feeder depends on: survivors are ordered worst-first and the cap
+// keeps exactly that many, reporting the rest as withheld (never silently).
+func TestSelectFindingsToFileCapAndOrder(t *testing.T) {
+	noop := Finding{Fingerprint: "aaaa", Outcome: OutcomeNoOp, Title: "dispatch audit: NO_OP on claude (lane docs)"}
+	walled := Finding{Fingerprint: "bbbb", Outcome: OutcomeQuotaWalled, Title: "dispatch audit: QUOTA_WALLED on opencode (lane docs)"}
+	wasted := Finding{Fingerprint: "cccc", Outcome: OutcomeWastedSpawn, Title: "dispatch audit: WASTED_SPAWN on codex (lane cmd)"}
+
+	// Input order is deliberately NOT severity order; selection must reorder.
+	all := []Finding{noop, walled, wasted}
+
+	sel, withheld := SelectFindingsToFile(all, nil, nil, 2)
+	if withheld != 1 {
+		t.Fatalf("cap=2 over 3 fresh findings must withhold 1, got %d", withheld)
+	}
+	if len(sel) != 2 {
+		t.Fatalf("cap=2 must keep 2, got %d", len(sel))
+	}
+	// Worst-first: QUOTA_WALLED then WASTED_SPAWN; the NO_OP is the one dropped.
+	if sel[0].Outcome != OutcomeQuotaWalled || sel[1].Outcome != OutcomeWastedSpawn {
+		t.Fatalf("want [QUOTA_WALLED, WASTED_SPAWN], got [%s, %s]", sel[0].Outcome, sel[1].Outcome)
+	}
+
+	// max<=0 => no cap, but still worst-first ordered and deduped.
+	full, withheld := SelectFindingsToFile(all, map[string]bool{"cccc": true}, nil, 0)
+	if withheld != 0 {
+		t.Fatalf("no cap must withhold 0, got %d", withheld)
+	}
+	if len(full) != 2 { // wasted was already-filed -> deduped out
+		t.Fatalf("marked fingerprint must be deduped, want 2 got %d", len(full))
+	}
+	if full[0].Outcome != OutcomeQuotaWalled {
+		t.Fatalf("worst-first must survive dedup: want QUOTA_WALLED first, got %s", full[0].Outcome)
+	}
+}
+
+// TestSelectFindingsToFileRanksSignaturesAboveNoOp is the regression guard for
+// the merged-taxonomy bug: `fak dispatch audit` files BOTH outcome findings and
+// log-signature findings (AsFinding, Outcome==""). A worker panic / auth-wall /
+// hook-storm signature must NOT be withheld below a banner-only NO_OP when the
+// cap bites — the exact first-large-run scenario the cap exists for.
+func TestSelectFindingsToFileRanksSignaturesAboveNoOp(t *testing.T) {
+	// Two low-value outcome findings...
+	noopA := Finding{Fingerprint: "1111", Outcome: OutcomeNoOp, Title: "dispatch audit: NO_OP on claude (lane docs)"}
+	noopB := Finding{Fingerprint: "2222", Outcome: OutcomeNoOp, Title: "dispatch audit: NO_OP on codex (lane cmd)"}
+	// ...and a high-severity SIGNATURE finding produced via the real bridge
+	// (Outcome=="" by construction), so this exercises the exact production shape.
+	panicSig := SignatureFinding{Class: SigPanicTraceback, Backend: BackendClaude, Count: 3, Logs: []string{"resolve-9.log"}}.AsFinding()
+	if panicSig.Outcome != "" {
+		t.Fatalf("guard: signature finding must carry empty Outcome, got %q", panicSig.Outcome)
+	}
+
+	// Input order deliberately puts the noise first; the panic must still win.
+	sel, withheld := SelectFindingsToFile([]Finding{noopA, noopB, panicSig}, nil, nil, 1)
+	if withheld != 2 {
+		t.Fatalf("cap=1 over 3 must withhold 2, got %d", withheld)
+	}
+	if len(sel) != 1 || sel[0].SignatureClass != SigPanicTraceback {
+		t.Fatalf("cap must KEEP the panic signature, not a NO_OP; got %+v", sel)
+	}
+
+	// And the canonical signature order is respected among signatures: a
+	// banner-only-noop signature is the one dropped, a panic the one kept.
+	bannerSig := SignatureFinding{Class: SigBannerOnlyNoOp, Backend: BackendClaude, Count: 1, Logs: []string{"resolve-8.log"}}.AsFinding()
+	sel, _ = SelectFindingsToFile([]Finding{bannerSig, panicSig}, nil, nil, 1)
+	if len(sel) != 1 || sel[0].SignatureClass != SigPanicTraceback {
+		t.Fatalf("panic-traceback must outrank banner-only-noop, got %+v", sel)
+	}
+}
+
 // TestScanDirFixture proves the I/O shell parses a real on-disk .dispatch-runs/
 // fixture: a real ship, a quota-walled opencode log with a MISSING .backend
 // sidecar, and a banner-only no-op log.

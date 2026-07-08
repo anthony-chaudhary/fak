@@ -3,6 +3,7 @@ package dispatchaudit
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -53,4 +54,74 @@ func NewFindings(findings []Finding, filedFingerprints, openTitles map[string]bo
 		out = append(out, f)
 	}
 	return out
+}
+
+// severityRank orders the fileable OUTCOME findings worst-first (lower = higher
+// priority) so a per-run cap keeps the highest-signal waste and drops the noise.
+// A provider hard-wall and a spawn burned into a capped backend are the most
+// actionable (gate/rotate the account); a banner-only NO_OP is the least. An
+// unranked outcome sorts last.
+func severityRank(o Outcome) int {
+	switch o {
+	case OutcomeQuotaWalled:
+		return 0
+	case OutcomeWastedSpawn:
+		return 1
+	case OutcomeRetryStorm:
+		return 2
+	case OutcomeErrored:
+		return 3
+	case OutcomeNoOp:
+		return 4
+	default:
+		return 5
+	}
+}
+
+// rankFinding is the unified worst-first key (lower = higher priority) that the
+// --max-issues cap sorts by. It MUST bridge the TWO finding taxonomies that
+// share the fileable set — `fak dispatch audit` merges Fold() outcome findings
+// AND ScanDirSignatures() log-signature findings (see cmd/fak/dispatchaudit.go).
+// A signature finding carries Outcome=="" and a SignatureClass, so it would fall
+// through severityRank's default arm and sort BELOW a banner-only NO_OP — the
+// exact inversion that would make the cap withhold a worker panic / auth-wall /
+// hook storm first. Ranking signatures by their position in the canonical
+// worst-first SignatureClasses() order keeps this consistent with the detector
+// table (no drift) and guarantees a crash/storm/auth signal ranks 0..4, never
+// below NO_OP's 4.
+func rankFinding(f Finding) int {
+	if f.Outcome != "" {
+		return severityRank(f.Outcome)
+	}
+	if f.SignatureClass != "" {
+		for i, c := range SignatureClasses() {
+			if c == f.SignatureClass {
+				return i
+			}
+		}
+	}
+	return 5
+}
+
+// SelectFindingsToFile is the PURE "what to file this run" decision that the
+// scheduled feeder (register_dispatch_session_audit.ps1 → `fak dispatch audit
+// --file-issues --max-issues N`) relies on to stay storm-safe on its FIRST live
+// run over a large historical backlog. It dedups (NewFindings), orders the
+// survivors worst-first (severityRank, then fingerprint for determinism), and
+// caps to max. It returns the selected findings plus the count withheld by the
+// cap, so the caller can report the truncation rather than hide it. max <= 0
+// means no cap. Deterministic: same inputs → same selection and same withheld.
+func SelectFindingsToFile(findings []Finding, filedFingerprints, openTitles map[string]bool, max int) (selected []Finding, withheld int) {
+	fresh := NewFindings(findings, filedFingerprints, openTitles)
+	sort.SliceStable(fresh, func(i, j int) bool {
+		ri, rj := rankFinding(fresh[i]), rankFinding(fresh[j])
+		if ri != rj {
+			return ri < rj
+		}
+		return fresh[i].Fingerprint < fresh[j].Fingerprint
+	})
+	if max > 0 && len(fresh) > max {
+		return fresh[:max], len(fresh) - max
+	}
+	return fresh, 0
 }

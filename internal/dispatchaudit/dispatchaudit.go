@@ -363,6 +363,9 @@ type Finding struct {
 	Title       string  `json:"title"`
 	Detail      string  `json:"detail"`
 	Evidence    string  `json:"evidence,omitempty"`
+	// SignatureClass is set only for findings minted from a log-signature
+	// classifier (signatures.go); empty for the Worker/Classify outcome findings.
+	SignatureClass SignatureClass `json:"signature_class,omitempty"`
 }
 
 // codeSite is the stable, log-name-independent anchor for a fingerprint: the
