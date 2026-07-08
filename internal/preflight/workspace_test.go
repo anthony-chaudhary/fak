@@ -103,6 +103,56 @@ func TestPlanWorkspacePreflightBlocksCollidingDeclarationBeforePrewarm(t *testin
 	}
 }
 
+func TestPlanWorkspacePreflightIgnoresOwnLeaseOnReentry(t *testing.T) {
+	// A resumed or retried preflight (after compaction, a re-run) already holds
+	// its own write lease. Seeing that lease live must NOT self-block: the live
+	// lease id matches the id this plan would acquire under (derived from TaskID
+	// here, no explicit LeaseID), so it is the caller's own. Mirrors the own-lease
+	// skip in internal/laneadmit.Decide.
+	got := PlanWorkspacePreflight(WorkspacePreflightInput{
+		TaskID:       "2137",
+		Actor:        "worker-b",
+		WriteGlobs:   []string{"internal/preflight/**"},
+		PackageGraph: workspaceGraph(),
+		TestProbe:    testroute.Probe{GOOS: "linux", NativeTestAllowed: true},
+		LiveLeases: []LeaseObservation{
+			{ID: "preflight-2137", Holder: "worker-b", Tree: []string{"internal/preflight/**"}},
+		},
+	})
+
+	if got.Verdict != WorkspaceVerdictReady {
+		t.Fatalf("verdict = %s reason=%s detail=%s, want READY (own live lease must not self-block)", got.Verdict, got.Reason, got.Detail)
+	}
+	if got.Conflict != nil {
+		t.Fatalf("conflict = %+v, want nil for the caller's own lease", got.Conflict)
+	}
+	if got.LeaseRequest == nil || got.LeaseRequest.ID != "preflight-2137" {
+		t.Fatalf("lease request = %+v, want the own lease re-declared for reacquire", got.LeaseRequest)
+	}
+}
+
+func TestPlanWorkspacePreflightSkipsOwnLeaseButStillBlocksPeerOnSameTree(t *testing.T) {
+	// The own-lease skip must not swallow a real peer collision: with both the
+	// caller's own lease and a distinct peer lease over the same tree live, the
+	// verdict stays BLOCKED_BY_LEASE and names the peer, never the caller.
+	got := PlanWorkspacePreflight(WorkspacePreflightInput{
+		TaskID:       "2137",
+		WriteGlobs:   []string{"internal/preflight/**"},
+		PackageGraph: workspaceGraph(),
+		LiveLeases: []LeaseObservation{
+			{ID: "preflight-2137", Holder: "worker-b", Tree: []string{"internal/preflight/**"}},
+			{ID: "a-peer", Holder: "peer-a", Tree: []string{"internal/preflight/**"}},
+		},
+	})
+
+	if got.Verdict != WorkspaceVerdictBlockedByLease {
+		t.Fatalf("verdict = %s, want BLOCKED_BY_LEASE (a real peer on the same tree still collides)", got.Verdict)
+	}
+	if got.Conflict == nil || got.Conflict.ID != "a-peer" || got.Conflict.Holder != "peer-a" {
+		t.Fatalf("conflict = %+v, want the peer lease, not the caller's own", got.Conflict)
+	}
+}
+
 func TestPlanWorkspacePreflightWouldBeRedWhenTestRouteUnavailable(t *testing.T) {
 	got := PlanWorkspacePreflight(WorkspacePreflightInput{
 		WriteGlobs:   []string{"internal/preflight/**"},

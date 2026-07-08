@@ -135,7 +135,10 @@ type WorkspacePreflight struct {
 
 // PlanWorkspacePreflight folds declared read/write globs, package graph
 // evidence, live lease observations, and host test-route facts into one stable
-// preparation plan. It never shells out or reads the filesystem.
+// preparation plan. It never shells out or reads the filesystem. A live lease
+// carrying this task's own lease id (in.LeaseID, or the id derived for the write
+// set) is not a conflict: the preflight is re-runnable, so an agent that already
+// holds its write lease never blocks itself on a resume or retry.
 func PlanWorkspacePreflight(in WorkspacePreflightInput) WorkspacePreflight {
 	readGlobs := normalizeList(in.ReadGlobs)
 	writeGlobs := normalizeList(in.WriteGlobs)
@@ -163,7 +166,7 @@ func PlanWorkspacePreflight(in WorkspacePreflightInput) WorkspacePreflight {
 		TotalPackages:    in.PackageGraph.TotalPackages,
 	}
 
-	if conflict := firstLeaseConflict(writeGlobs, in.LiveLeases); conflict != nil {
+	if conflict := firstLeaseConflict(writeGlobs, in.LiveLeases, leaseID); conflict != nil {
 		out.Verdict = WorkspaceVerdictBlockedByLease
 		out.Reason = ReasonCollisionRisk
 		out.Detail = fmt.Sprintf("declared write set %v overlaps live lease %s held by %s", writeGlobs, conflict.ID, conflict.Holder)
@@ -430,10 +433,21 @@ func taskPackagesForGlobs(graph PackageGraph, explicit, globs []string) []string
 	return sortedKeys(set)
 }
 
-func firstLeaseConflict(writeGlobs []string, live []LeaseObservation) *LeaseObservation {
+// firstLeaseConflict returns the lexically-first live lease whose tree overlaps
+// the declared write set, or nil when the write set is clear. A live lease whose
+// ID equals ownLeaseID is the caller's own — the lease this plan would acquire
+// under, or one it already holds when the preflight is re-run (a resume after
+// compaction, a retry) — and never conflicts, mirroring internal/laneadmit's
+// admission contract ("a live lease with this id is the caller's own"). Without
+// this skip, re-running the preflight while already holding the write lease would
+// self-block with BLOCKED_BY_LEASE. The authoritative serialization against real
+// peers stays the atomic acquire step (PrepareWorkspace's AcquireWriteLease); this
+// plan-time check only refuses declarations that visibly collide with a peer.
+func firstLeaseConflict(writeGlobs []string, live []LeaseObservation, ownLeaseID string) *LeaseObservation {
 	if len(writeGlobs) == 0 {
 		return nil
 	}
+	ownLeaseID = strings.TrimSpace(ownLeaseID)
 	leases := append([]LeaseObservation(nil), live...)
 	sort.SliceStable(leases, func(i, j int) bool {
 		if leases[i].ID != leases[j].ID {
@@ -442,6 +456,9 @@ func firstLeaseConflict(writeGlobs []string, live []LeaseObservation) *LeaseObse
 		return leases[i].Holder < leases[j].Holder
 	})
 	for _, lease := range leases {
+		if ownLeaseID != "" && strings.TrimSpace(lease.ID) == ownLeaseID {
+			continue
+		}
 		tree := normalizeList(lease.Tree)
 		if dispatchorder.TreesOverlap(writeGlobs, tree) {
 			l := lease
