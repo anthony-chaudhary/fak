@@ -36,11 +36,11 @@ type ShapeWeekPoint struct {
 	PromptTokens uint64 `json:"prompt_tokens"`
 	ReusedTokens uint64 `json:"reused_tokens"`
 
-	RealizedReuseRatio  float64 `json:"realized_reuse_ratio"`  // reused/prompt within the shape's week rows
-	ShareOfSessions     float64 `json:"share_of_sessions"`     // this shape's sessions / all sessions that week
+	RealizedReuseRatio  float64 `json:"realized_reuse_ratio"`   // reused/prompt within the shape's week rows
+	ShareOfSessions     float64 `json:"share_of_sessions"`      // this shape's sessions / all sessions that week
 	ShareOfReusedTokens float64 `json:"share_of_reused_tokens"` // this shape's reused tokens / all reused tokens that week
 
-	Trend                    Trend   `json:"trend"`                       // vs the same shape's prior week
+	Trend                    Trend   `json:"trend"`                        // vs the same shape's prior week
 	DeltaShareOfReusedTokens float64 `json:"delta_share_of_reused_tokens"` // this week's share minus prior week's
 }
 
@@ -119,8 +119,8 @@ func FoldShapeTrend(rows []cachevalueledger.Row, now time.Time) ShapeTrendReport
 	}
 
 	type cell struct {
-		length  LengthBand
-		outcome OutcomeBand
+		length                          LengthBand
+		outcome                         OutcomeBand
 		sessions, turns, prompt, reused uint64
 	}
 	type weekAgg struct {
