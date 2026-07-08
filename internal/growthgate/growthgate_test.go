@@ -56,7 +56,7 @@ func TestClassifyRealOffenders(t *testing.T) {
 		t.Errorf("scanned = %d, want %d", r.Scanned, len(arts))
 	}
 	// 5 offenders cross a budget; the two tiny files do not.
-	if len(r.Findings) != 5 {
+	if len(r.Findings) != 5 { //boundarylint:ignore CHANGE_DETECTOR_TEST the fixture is constructed with exactly 5 over-budget artifacts
 		t.Fatalf("findings = %d, want 5: %+v", len(r.Findings), r.Findings)
 	}
 	// Worst-first, largest-first: the 119 MB observations.jsonl leads.
