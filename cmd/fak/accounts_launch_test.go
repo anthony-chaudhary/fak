@@ -598,6 +598,57 @@ func TestRunAccountsLaunchWarnsOnStaleBinary(t *testing.T) {
 	}
 }
 
+// TestRunAccountsLaunchWarnsOnUnstampedBinary: a launcher that carries no VCS stamp cannot be
+// called Stale (binstamp yields Unknown/CauseUnstamped), so the old Stale-only guard passed it
+// silently. It must now warn — an unstamped guard is the #3306 blind spot and the default path
+// re-execs this same file.
+func TestRunAccountsLaunchWarnsOnUnstampedBinary(t *testing.T) {
+	home := t.TempDir()
+	regPath, _ := launchRegistry(t, home)
+
+	origRun := accountsLaunchRun
+	origStamp := accountsLaunchStamp
+	origHead := accountsLaunchHeadRev
+	t.Cleanup(func() {
+		accountsLaunchRun = origRun
+		accountsLaunchStamp = origStamp
+		accountsLaunchHeadRev = origHead
+	})
+
+	launched := false
+	accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) launchRunResult {
+		launched = true
+		if len(argv) < 3 || argv[1] != "guard" {
+			t.Fatalf("unstamped warning should not disable the default guard launch: %#v", argv)
+		}
+		return launchRunResult{Code: 0}
+	}
+	// An unstamped binary: no VCS revision at all.
+	accountsLaunchStamp = func() binstamp.Stamp { return binstamp.Stamp{} }
+	accountsLaunchHeadRev = func() string { return "2222222222222222222222222222222222222222" }
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{"launch", "--name", "gem8-seat", "--registry", regPath, "--home", home})
+	if rc != 0 {
+		t.Fatalf("launch rc=%d stderr=%s", rc, errb.String())
+	}
+	if !launched {
+		t.Fatal("launch exec seam was not called")
+	}
+	got := errb.String()
+	for _, want := range []string{
+		"WARNING: running fak binary",
+		"NO VCS stamp",
+		"UNVERIFIABLE",
+		"fak self-update --force",
+		"guard will re-exec the same stale file",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("unstamped launch warning missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestRunAccountsLaunchDirectNoGuard(t *testing.T) {
 	home := t.TempDir()
 	regPath, _ := launchRegistry(t, home)

@@ -73,6 +73,12 @@ func printGuardCompactBanner(w io.Writer, version, shortBuild, gwURL string, com
 	identity := version
 	if strings.TrimSpace(shortBuild) != "" {
 		identity += " (" + shortBuild + ")"
+	} else {
+		// No short build id means the running binary carries no VCS stamp — it cannot attest
+		// its commit, so it is indistinguishable from a stale one (#3306). The compact banner
+		// is fixed at three lines, so surface the defect in the identity itself rather than a
+		// new row: "(no stamp)" tells an attended operator to `fak self-update --force`.
+		identity += " (no stamp)"
 	}
 	fmt.Fprintf(w, "fak guard %s — kernel-adjudicated: %s\n", identity, strings.Join(command, " "))
 	fmt.Fprintf(w, "  gateway %s — every tool call crosses the capability floor; audit journal + /metrics live there\n", gwURL)

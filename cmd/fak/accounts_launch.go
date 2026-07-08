@@ -596,15 +596,25 @@ func launchModelUnavailable(stderr, tried string) bool {
 func warnIfAccountsLaunchStaleBinary(stderr io.Writer, fakBin string, useGuard bool) {
 	stamp := accountsLaunchStamp()
 	headRev := accountsLaunchHeadRev()
-	if binstamp.Compare(stamp, headRev) != binstamp.Stale {
-		return
-	}
+	verdict, cause := binstamp.Explain(stamp, headRev)
 	reexecNote := "before launching"
 	if useGuard {
 		reexecNote = "before launching; otherwise fak guard will re-exec the same stale file"
 	}
-	fmt.Fprintf(stderr, "fak accounts launch: WARNING: running fak binary %q was built from %s, but this checkout is at %s; run `fak self-update` or rebuild/install fak %s.\n",
-		fakBin, shortLaunchRev(stamp.Revision), shortLaunchRev(headRev), reexecNote)
+	switch {
+	case verdict == binstamp.Stale:
+		fmt.Fprintf(stderr, "fak accounts launch: WARNING: running fak binary %q was built from %s, but this checkout is at %s; run `fak self-update` or rebuild/install fak %s.\n",
+			fakBin, shortLaunchRev(stamp.Revision), shortLaunchRev(headRev), reexecNote)
+	case cause == binstamp.CauseUnstamped:
+		// An UNSTAMPED launcher is its own footgun: it cannot attest which commit it is, so
+		// binstamp can never call it Stale, so the Stale branch above would silently pass a
+		// possibly-old binary straight through — and the default guard path re-execs THIS same
+		// file (#3306). Unstamped is distinct from a dev's dirty build (CauseDirty) or running
+		// outside a repo (CauseNoHead), both of which stay quiet; only the no-provenance case
+		// warns.
+		fmt.Fprintf(stderr, "fak accounts launch: WARNING: running fak binary %q carries NO VCS stamp — it cannot confirm which commit it is, so staleness is UNVERIFIABLE; rebuild in-repo with `go build ./cmd/fak` or run `fak self-update --force` %s.\n",
+			fakBin, reexecNote)
+	}
 }
 
 func accountsLaunchGitHeadRev() string {

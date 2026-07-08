@@ -347,6 +347,12 @@ func printGuardBanner(w io.Writer, version, buildStamp, gwURL, provider, baseURL
 	// (the screenshot confusion). A +uncommitted marker means the running guard was built from a
 	// dirty tree. See guardBannerBuildStamp.
 	fmt.Fprintf(w, "  build      : %s\n", buildStamp)
+	// If that build row shows no attestable commit, the passive line is not enough — an
+	// unstamped guard is indistinguishable from a stale one (#3306). Say so loudly, right
+	// here, with the fix, so "is an old fak guard still running?" is answerable at startup.
+	if warn := guardUnattestedBuildWarning(buildStamp); warn != "" {
+		fmt.Fprint(w, warn)
+	}
 	fmt.Fprintf(w, "  gateway    : %s   (in-process; torn down when the command exits)\n", gwURL)
 	switch {
 	case local:
