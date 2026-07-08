@@ -5,10 +5,14 @@
 // repeatedly failing issue stops burning workers once it crosses the budget,
 // instead of being re-offered forever (#1777), and so different kinds of
 // failure cool down at different rates instead of all sharing one window
-// (#1778). It never decides WHY an attempt failed; it only counts, classifies,
-// and thresholds facts the caller already gathered. Pure: same Input in, same
-// Decision out; zero I/O, zero clock reads -- the caller supplies "now" as
-// data (Input.NowUnix), the same discipline internal/dispatchorder and
+// (#1778). A held issue additionally carries a structured, queryable
+// BlockReason -- same-error-repeated / distinct-errors / precondition-unmet --
+// and the Route that reason drives (retry, escalate, known-bad), so an operator
+// can tell a genuinely stuck issue from a flaky one instead of reading a bare
+// count (#2860). It never decides WHY an attempt failed; it only counts,
+// classifies, and thresholds facts the caller already gathered. Pure: same Input
+// in, same Decision out; zero I/O, zero clock reads -- the caller supplies "now"
+// as data (Input.NowUnix), the same discipline internal/dispatchorder and
 // internal/skipledger already use for clock-dependent folds.
 package attemptbudget
 
@@ -119,6 +123,109 @@ var DefaultBackoffSeconds = map[FailureClass]int64{
 	FailureClassOther:          60 * 60,  // 1h: moderate default
 }
 
+// BlockReason is the closed, structured vocabulary explaining WHY an issue was
+// auto-blocked (StatusHeld) once its failed attempts crossed the budget. A bare
+// count says an issue spun; it does not say whether it is genuinely stuck or
+// merely flaky, so an operator cannot tell the two apart (#2860). The reason is
+// derived from the whole attempt history, not just the last attempt, and it is
+// what Route dispatches on.
+type BlockReason string
+
+const (
+	// BlockReasonSameErrorRepeated: every recorded attempt failed in the SAME
+	// classified FailureClass, at least twice -- a stable failure signature. The
+	// issue is genuinely stuck: another worker will hit the same wall, so the
+	// signature belongs in the known-bad ledger (internal/knownbad) rather than
+	// back in the dispatch queue.
+	BlockReasonSameErrorRepeated BlockReason = "SAME_ERROR_REPEATED"
+	// BlockReasonDistinctErrors: the attempts do NOT share one stable classified
+	// FailureClass -- including a history too short to establish repetition at
+	// all (a single attempt under a Budget of 1). There is no signature to
+	// record, so the issue reads as flaky rather than stuck. This is the
+	// deliberate fail-safe complement of BlockReasonSameErrorRepeated: promoting
+	// a fleet-wide known-bad signature off a history that never repeated is the
+	// exact misclassification a noisy signature would cause, so anything short
+	// of proven repetition lands here and routes to a plain retry.
+	BlockReasonDistinctErrors BlockReason = "DISTINCT_ERRORS"
+	// BlockReasonPreconditionUnmet: the LAST attempt failed on a class that
+	// retrying the issue cannot clear -- auth (rotate a credential) or
+	// ambiguous scope (a human resolves the collision). The wall is outside the
+	// issue, so neither a retry nor a known-bad signature is the right move:
+	// escalate. Checked FIRST, before repetition, because three identical auth
+	// failures are a precondition problem, not a known-bad code signature.
+	BlockReasonPreconditionUnmet BlockReason = "PRECONDITION_UNMET"
+)
+
+// Route is the closed routing verdict a BlockReason drives -- the point of the
+// structured reason. It is what turns "blocked, count=2" into an action.
+type Route string
+
+const (
+	// RouteRetry: no stable signature, no unmet precondition -- re-offer the
+	// issue after its cooldown.
+	RouteRetry Route = "retry"
+	// RouteEscalate: a human must clear the precondition before any retry can
+	// succeed.
+	RouteEscalate Route = "escalate"
+	// RouteKnownBad: a stable, repeated failure signature -- record it so peers
+	// read it instead of rediscovering it (internal/knownbad).
+	RouteKnownBad Route = "known_bad"
+)
+
+// preconditionClass reports whether a classified FailureClass is one a retry of
+// the issue itself can never clear -- the two classes DefaultBackoffSeconds
+// already documents as "needs a human" (rotate a credential, resolve a scope
+// collision).
+func preconditionClass(c FailureClass) bool {
+	return c == FailureClassAuth || c == FailureClassAmbiguousScope
+}
+
+// ClassifyBlock is the failure-signature classifier over one issue's attempt
+// history: it folds the recorded failures into the structured BlockReason the
+// auto-block carries and the Route that reason drives. It is exported so a
+// dispatcher (or the known-bad ledger wiring) can ask for the verdict directly
+// rather than re-deriving it from a Decision.
+//
+// Signature stability is why this classifies onto the closed FailureClass
+// vocabulary rather than comparing the caller's raw strings: "test_failure" and
+// "assertion failed" are the same wall, and a signature that split them would
+// read a genuinely stuck issue as flaky. An empty history yields empty values --
+// there is nothing to explain.
+//
+// Order matters. Precondition is checked before repetition (an unmet
+// precondition repeated N times is still a precondition), and repetition
+// requires at least two attempts, so a known-bad signature is never promoted off
+// a single sample.
+func ClassifyBlock(attempts []Attempt) (BlockReason, Route) {
+	if len(attempts) == 0 {
+		return "", ""
+	}
+	last := classify(attempts[len(attempts)-1].FailureClass)
+	if preconditionClass(last) {
+		return BlockReasonPreconditionUnmet, RouteEscalate
+	}
+	if len(attempts) >= 2 && sameClass(attempts) {
+		return BlockReasonSameErrorRepeated, RouteKnownBad
+	}
+	return BlockReasonDistinctErrors, RouteRetry
+}
+
+// sameClass reports whether every attempt classifies onto one FailureClass --
+// the stable failure signature BlockReasonSameErrorRepeated stands for. The
+// class itself is already carried on Decision.BackoffClass (the last attempt's
+// class, which for a same-class history IS the repeated class), so a caller
+// building a known-bad signature reads it from there rather than a duplicate
+// field.
+func sameClass(attempts []Attempt) bool {
+	first := classify(attempts[0].FailureClass)
+	for _, a := range attempts[1:] {
+		if classify(a.FailureClass) != first {
+			return false
+		}
+	}
+	return true
+}
+
 // Attempt is one recorded try at an issue: the failure class it ended in (the
 // caller's vocabulary -- e.g. "test_failure", "timeout", "merge_conflict") and
 // when it happened. An attempt that SUCCEEDED should simply not be recorded
@@ -166,6 +273,16 @@ type Decision struct {
 	// the earliest time this issue should be re-offered. Zero when there is
 	// no recorded attempt.
 	CooldownUntilUnix int64 `json:"cooldown_until_unix,omitempty"`
+	// BlockReason is the structured, queryable reason this issue was
+	// auto-blocked, distinguishing a genuinely-stuck issue (a repeated failure
+	// signature) from a flaky one (distinct errors) from one walled off by an
+	// unmet precondition (#2860). Set ONLY when Status is StatusHeld -- it
+	// explains a block, and an issue that is not blocked has none. Empty
+	// otherwise.
+	BlockReason BlockReason `json:"block_reason,omitempty"`
+	// Route is the action BlockReason drives -- retry, escalate, or record a
+	// known-bad signature. Set exactly when BlockReason is.
+	Route Route `json:"route,omitempty"`
 }
 
 // Decide folds one issue's Input into a Decision, in this order: HELD once
@@ -195,6 +312,10 @@ func Decide(in Input) Decision {
 	}
 	if in.Budget > 0 && d.AttemptCount >= in.Budget {
 		d.Status = StatusHeld
+		// The block is the only thing that needs explaining, so the structured
+		// reason (and the route it drives) is stamped here rather than on every
+		// dispatchable issue.
+		d.BlockReason, d.Route = ClassifyBlock(in.Attempts)
 	}
 	return d
 }

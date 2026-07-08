@@ -1,6 +1,9 @@
 package attemptbudget
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestDecide_RepeatedAttemptsMoveDispatchableToHeld(t *testing.T) {
 	// The #1777 witness: "a fixture with repeated attempts moves from
@@ -298,5 +301,192 @@ func TestDecideAll_CountsCoolingDownSeparatelyFromHeldAndDispatchable(t *testing
 	}
 	if rep.HeldCount != 1 {
 		t.Fatalf("want 1 held, got %d (%+v)", rep.HeldCount, rep.Decisions)
+	}
+}
+
+// --- #2860: structured block reason + routing over the attempt history ---
+
+func TestClassifyBlock_SameErrorRepeatedRoutesKnownBad(t *testing.T) {
+	// A stable failure signature: every attempt hit the same wall. The issue is
+	// genuinely stuck, so it belongs in the known-bad ledger, not the queue.
+	reason, route := ClassifyBlock([]Attempt{
+		{FailureClass: "merge_conflict", AtUnix: 100},
+		{FailureClass: "merge_conflict", AtUnix: 200},
+	})
+	if reason != BlockReasonSameErrorRepeated {
+		t.Fatalf("want %q, got %q", BlockReasonSameErrorRepeated, reason)
+	}
+	if route != RouteKnownBad {
+		t.Fatalf("want route %q, got %q", RouteKnownBad, route)
+	}
+}
+
+func TestClassifyBlock_NoisyRawStringsStillOneSignature(t *testing.T) {
+	// The confusion risk the issue names: a signature that split "test_failure"
+	// from "assertion failed" would read a genuinely stuck issue as flaky.
+	// Classifying onto the closed FailureClass vocabulary is what keeps the
+	// signature stable across the caller's descriptive strings.
+	reason, route := ClassifyBlock([]Attempt{
+		{FailureClass: "test_failure", AtUnix: 100},
+		{FailureClass: "assertion failed in TestFoo", AtUnix: 200},
+		{FailureClass: "TEST timeout: assert", AtUnix: 300},
+	})
+	if reason != BlockReasonSameErrorRepeated {
+		t.Fatalf("noisy-but-same-class history: want %q, got %q", BlockReasonSameErrorRepeated, reason)
+	}
+	if route != RouteKnownBad {
+		t.Fatalf("want route %q, got %q", RouteKnownBad, route)
+	}
+}
+
+func TestClassifyBlock_DistinctErrorsRouteRetry(t *testing.T) {
+	// Different walls each time -> no signature to record -> flaky, so retry.
+	reason, route := ClassifyBlock([]Attempt{
+		{FailureClass: "test_failure", AtUnix: 100},
+		{FailureClass: "merge_conflict", AtUnix: 200},
+	})
+	if reason != BlockReasonDistinctErrors {
+		t.Fatalf("want %q, got %q", BlockReasonDistinctErrors, reason)
+	}
+	if route != RouteRetry {
+		t.Fatalf("want route %q, got %q", RouteRetry, route)
+	}
+}
+
+func TestClassifyBlock_PreconditionUnmetRoutesEscalate(t *testing.T) {
+	// Auth and ambiguous-scope are walls a retry of the issue can never clear.
+	for _, raw := range []string{"auth_error", "permission denied", "ambiguous scope"} {
+		reason, route := ClassifyBlock([]Attempt{
+			{FailureClass: "test_failure", AtUnix: 100},
+			{FailureClass: raw, AtUnix: 200},
+		})
+		if reason != BlockReasonPreconditionUnmet {
+			t.Fatalf("%q: want %q, got %q", raw, BlockReasonPreconditionUnmet, reason)
+		}
+		if route != RouteEscalate {
+			t.Fatalf("%q: want route %q, got %q", raw, RouteEscalate, route)
+		}
+	}
+}
+
+func TestClassifyBlock_PreconditionBeatsRepetition(t *testing.T) {
+	// Three identical auth failures are a precondition problem, not a known-bad
+	// code signature: escalate to a human, do not poison the fleet ledger.
+	reason, route := ClassifyBlock([]Attempt{
+		{FailureClass: "auth_error", AtUnix: 100},
+		{FailureClass: "auth_error", AtUnix: 200},
+		{FailureClass: "auth_error", AtUnix: 300},
+	})
+	if reason != BlockReasonPreconditionUnmet {
+		t.Fatalf("want %q (precondition first), got %q", BlockReasonPreconditionUnmet, reason)
+	}
+	if route != RouteEscalate {
+		t.Fatalf("want route %q, got %q", RouteEscalate, route)
+	}
+}
+
+func TestClassifyBlock_SingleAttemptNeverPromotesKnownBad(t *testing.T) {
+	// Budget=1 blocks on the first failure. One sample is not repetition, so the
+	// classifier must fail safe: retry, never a fleet-wide known-bad signature.
+	reason, route := ClassifyBlock([]Attempt{{FailureClass: "test_failure", AtUnix: 100}})
+	if reason != BlockReasonDistinctErrors {
+		t.Fatalf("single attempt: want %q, got %q", BlockReasonDistinctErrors, reason)
+	}
+	if route == RouteKnownBad {
+		t.Fatalf("single attempt must never route to %q", RouteKnownBad)
+	}
+}
+
+func TestClassifyBlock_EmptyHistoryExplainsNothing(t *testing.T) {
+	reason, route := ClassifyBlock(nil)
+	if reason != "" || route != "" {
+		t.Fatalf("empty history: want empty reason/route, got %q/%q", reason, route)
+	}
+}
+
+func TestDecide_BlockReasonStampedOnlyOnHeld(t *testing.T) {
+	// Dispatchable and cooling-down issues carry no block reason: there is no
+	// block to explain. The held one carries both reason and route.
+	under := Decide(Input{IssueID: "1", Budget: 5, Attempts: []Attempt{
+		{FailureClass: "test_failure", AtUnix: 100},
+		{FailureClass: "test_failure", AtUnix: 200},
+	}})
+	if under.Status != StatusDispatchable {
+		t.Fatalf("setup: want dispatchable, got %q", under.Status)
+	}
+	if under.BlockReason != "" || under.Route != "" {
+		t.Fatalf("dispatchable must carry no block reason, got %q/%q", under.BlockReason, under.Route)
+	}
+
+	cooling := Decide(Input{IssueID: "2", Budget: 5, NowUnix: 201, Attempts: []Attempt{
+		{FailureClass: "test_failure", AtUnix: 200},
+	}})
+	if cooling.Status != StatusCoolingDown {
+		t.Fatalf("setup: want cooling_down, got %q", cooling.Status)
+	}
+	if cooling.BlockReason != "" || cooling.Route != "" {
+		t.Fatalf("cooling_down must carry no block reason, got %q/%q", cooling.BlockReason, cooling.Route)
+	}
+
+	held := Decide(Input{IssueID: "3", Budget: 2, Attempts: []Attempt{
+		{FailureClass: "test_failure", AtUnix: 100},
+		{FailureClass: "test_failure", AtUnix: 200},
+	}})
+	if held.Status != StatusHeld {
+		t.Fatalf("setup: want held, got %q", held.Status)
+	}
+	if held.BlockReason != BlockReasonSameErrorRepeated {
+		t.Fatalf("held: want %q, got %q", BlockReasonSameErrorRepeated, held.BlockReason)
+	}
+	if held.Route != RouteKnownBad {
+		t.Fatalf("held: want route %q, got %q", RouteKnownBad, held.Route)
+	}
+	// The repeated class a known-bad signature keys on is already on the
+	// Decision -- no duplicate field.
+	if held.BackoffClass != FailureClassTest {
+		t.Fatalf("held: want backoff class %q, got %q", FailureClassTest, held.BackoffClass)
+	}
+}
+
+func TestDecide_BlockReasonIsQueryableJSON(t *testing.T) {
+	// "First-class, queryable" means it survives the wire the CLI already emits
+	// (`fak dispatch attempt-budget --json`), not just the Go struct.
+	held := Decide(Input{IssueID: "9", Budget: 2, Attempts: []Attempt{
+		{FailureClass: "auth_error", AtUnix: 100},
+		{FailureClass: "auth_error", AtUnix: 200},
+	}})
+	b, err := json.Marshal(held)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var round map[string]any
+	if err := json.Unmarshal(b, &round); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if round["block_reason"] != string(BlockReasonPreconditionUnmet) {
+		t.Fatalf("want block_reason %q on the wire, got %v", BlockReasonPreconditionUnmet, round["block_reason"])
+	}
+	if round["route"] != string(RouteEscalate) {
+		t.Fatalf("want route %q on the wire, got %v", RouteEscalate, round["route"])
+	}
+
+	// A dispatchable decision omits both keys entirely (omitempty), so a reader
+	// cannot mistake "not blocked" for "blocked for no reason". Decode into a
+	// FRESH map: json.Unmarshal merges into a non-nil map rather than clearing
+	// it, so reusing `round` here would still show the held decision's keys.
+	ok := Decide(Input{IssueID: "10", Budget: 5})
+	b, err = json.Marshal(ok)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	clear := map[string]any{}
+	if err := json.Unmarshal(b, &clear); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, present := clear["block_reason"]; present {
+		t.Fatalf("dispatchable decision must omit block_reason, got %s", b)
+	}
+	if _, present := clear["route"]; present {
+		t.Fatalf("dispatchable decision must omit route, got %s", b)
 	}
 }
