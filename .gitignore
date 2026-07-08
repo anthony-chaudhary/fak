@@ -223,6 +223,13 @@ experiments/benchmark/runs/by-machine/dgx*/
 fak/experiments/nightrun/*/
 experiments/nightrun/*/
 docs/nightrun/cache-value.jsonl
+# Shadow nightrun tree: telemetry writers were CWD-relative, so a guard/serve run — most
+# visibly `go test ./cmd/fak` (cwd=cmd/fak) — forked docs/nightrun UNDER cmd/fak and left
+# it tracked-but-perpetually-dirty. The writers now anchor to the repo root
+# (cmd/fak/nightrun_ledger_path.go) so this is no longer created; ignore it as
+# defense-in-depth so a future stray CWD-relative write can never be re-added. `docs/`
+# under cmd/fak is never a legit tracked artifact (docs/ is a repo-root concept).
+cmd/fak/docs/
 # DGX Slack control-bridge source is PRIVATE-ONLY. Its home is the private repo
 # fak-private (tools/dgxbridge/); fleet is the sunset archive. tools/check_committed_files.py
 # already REFUSES any cmd|internal/*dgx*/ path at commit (this is exactly how cmd/dgxbridge +
@@ -537,6 +544,29 @@ memqdemo-report.json
 /.tmp_overlay/
 /*_msg_*.txt
 /err.txt
+
+# --- scratch NAMESPACE (denylist -> allowlist inversion) --------------------------
+# Everything above this point NAMES each scratch file reactively, so a session that
+# invents a new scratch name always escapes the list until a new rule is chased in. The
+# fleet has converged on a '_'-prefix-at-root convention for throwaway drops (_route.err,
+# _build.err, _issues.json, _devleaves.json, _censuswitness/, _scratch3057/, ...), so
+# ignore that NAMESPACE by default and stop playing whack-a-mole. Redirect deliberate
+# scratch into /_scratch/ (already covered by /_* below).
+#
+# ROOT-ANCHORED ONLY — this is the load-bearing safety property. Tracked '_' paths all
+# live NESTED (blog/_*.md, docs/_config.yml, docs/_includes/, tools/**/_*.json,
+# visuals/_meta.json), so a bare `**/_*` would silently un-track them. `git ls-files |
+# grep '^_'` is empty, which is exactly what makes `/_*` safe at the repo root. To TRACK
+# a new root path that starts with '_', re-include it explicitly, e.g. `!/_wanted`.
+#
+# A no-prefix leak (a bare `err` stderr redirect) can't be caught by a namespace and
+# still needs an explicit name; the FILE_ADMISSION commit gate
+# (tools/check_committed_files.py) stays the fail-closed backstop for anything a glob misses.
+/_*
+/err
+# Scratch probe programs parked under cmd/ (cmd/_shortfallcheck/, cmd/_stallverify/). Go
+# already skips '_'-prefixed dirs from ./... builds; this keeps them out of git too.
+cmd/_*
 
 # Trajectory-audit drops written by tools/session_audit.py (the /trajectory-audit skill,
 # `audit --json OUT`). These carry PRIVATE operator telemetry — per-session dollar costs,
