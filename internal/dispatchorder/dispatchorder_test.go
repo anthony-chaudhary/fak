@@ -1,12 +1,113 @@
 package dispatchorder
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 )
 
 // base is a fixed "now" the tests reason against; recency/cooldown are offsets from it.
 const base = 1_000_000
+
+// allZeroGolden is the pinned JSON of Plan over the TestAllZeroPriorityByteIdenticalResult input
+// with every Priority zero — the additive-no-regression witness (#3222). The absence of any
+// "priority" key (omitempty on the zero value) is itself the proof that a zero-priority candidate
+// serializes exactly as it did before the field existed. Regenerate ONLY when an intentional
+// ordering change lands (never to paper over a priority regression).
+const allZeroGolden = `
+{
+  "order": [
+    {
+      "id": "solo-new",
+      "key": "S",
+      "created_unix": 0,
+      "updated_unix": 999950,
+      "last_attempt_unix": 0,
+      "live": false,
+      "disposition": "keep",
+      "reason": "freshest",
+      "recency": 999950,
+      "rank": 0
+    },
+    {
+      "id": "a",
+      "key": "K",
+      "created_unix": 0,
+      "updated_unix": 999900,
+      "last_attempt_unix": 0,
+      "live": false,
+      "disposition": "keep",
+      "reason": "freshest",
+      "recency": 999900,
+      "rank": 1
+    },
+    {
+      "id": "solo-old",
+      "key": "T",
+      "created_unix": 0,
+      "updated_unix": 999600,
+      "last_attempt_unix": 0,
+      "live": false,
+      "disposition": "keep",
+      "reason": "freshest",
+      "recency": 999600,
+      "rank": 2
+    },
+    {
+      "id": "running",
+      "key": "R",
+      "created_unix": 0,
+      "updated_unix": 999990,
+      "last_attempt_unix": 0,
+      "live": true,
+      "disposition": "live",
+      "reason": "worker_live",
+      "recency": 999990,
+      "rank": -1
+    },
+    {
+      "id": "cooling",
+      "key": "C",
+      "created_unix": 0,
+      "updated_unix": 999970,
+      "last_attempt_unix": 999940,
+      "live": false,
+      "disposition": "cooling",
+      "reason": "cooldown",
+      "recency": 999970,
+      "rank": -1
+    },
+    {
+      "id": "b",
+      "key": "K",
+      "created_unix": 0,
+      "updated_unix": 999800,
+      "last_attempt_unix": 0,
+      "live": false,
+      "disposition": "superseded",
+      "reason": "superseded_by_fresher",
+      "superseded_by": "a",
+      "recency": 999800,
+      "rank": -1
+    }
+  ],
+  "keep": [
+    "solo-new",
+    "a",
+    "solo-old"
+  ],
+  "keep_count": 3,
+  "superseded_count": 1,
+  "live_count": 1,
+  "cooling_count": 1,
+  "collision_count": 0,
+  "generation_held_count": 0,
+  "collisions_avoided": 0,
+  "lanes_utilized": 3,
+  "serialization_wasted": 0,
+  "safe_concurrency": 3
+}`
 
 // dispoOf returns the disposition the planner gave the unit with id, or "" if absent.
 func dispoOf(r Result, id string) Disposition {
@@ -326,6 +427,93 @@ func TestDeterministicAndTotal(t *testing.T) {
 	empty := Plan(Input{NowUnix: base})
 	if len(empty.Order) != 0 || empty.Pick() != "" {
 		t.Errorf("empty input = %+v, want empty/no-pick", empty)
+	}
+}
+
+// TestPriorityLeadsRecencyOlderP0First is the headline priority proof (#3222): a priority/P0
+// unit that is OLDER (staler update) than a no-priority unit ranks FIRST in Keep — declared
+// priority leads recency. Distinct keys so neither supersedes the other; the older P0 wins the
+// pick purely on Priority.
+func TestPriorityLeadsRecencyOlderP0First(t *testing.T) {
+	r := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "fresh-noprio", Key: "A", UpdatedUnix: base - 10},              // freshest, no priority
+		{ID: "old-p0", Key: "B", Priority: 1000, UpdatedUnix: base - 5_000}, // much older, but P0
+	}})
+	if r.KeepCount != 2 {
+		t.Fatalf("keep = %d, want 2 (distinct keys never supersede)", r.KeepCount)
+	}
+	if r.Pick() != "old-p0" {
+		t.Fatalf("pick = %q, want old-p0 (P0 leads recency even though it is older)", r.Pick())
+	}
+	want := []string{"old-p0", "fresh-noprio"}
+	for i, id := range want {
+		if r.Keep[i] != id {
+			t.Errorf("keep[%d] = %q, want %q (priority-desc first)", i, r.Keep[i], id)
+		}
+	}
+	if got := dispoOf(r, "old-p0"); got != DispKeep {
+		t.Errorf("old-p0 disposition = %q, want keep", got)
+	}
+}
+
+// TestPriorityTierOrderThenRecency: P0 > P1 > P2 > unlabeled, and within a tier the freshest
+// leads — the full ordering table. All distinct keys so every unit is kept.
+func TestPriorityTierOrderThenRecency(t *testing.T) {
+	r := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "p2", Key: "A", Priority: 150, UpdatedUnix: base - 10},
+		{ID: "none-fresh", Key: "B", UpdatedUnix: base - 1},
+		{ID: "p0", Key: "C", Priority: 1000, UpdatedUnix: base - 9_000},
+		{ID: "p1", Key: "D", Priority: 400, UpdatedUnix: base - 20},
+		{ID: "none-stale", Key: "E", UpdatedUnix: base - 500},
+	}})
+	want := []string{"p0", "p1", "p2", "none-fresh", "none-stale"}
+	if len(r.Keep) != len(want) {
+		t.Fatalf("keep = %v, want %v", r.Keep, want)
+	}
+	for i, id := range want {
+		if r.Keep[i] != id {
+			t.Errorf("keep[%d] = %q, want %q", i, r.Keep[i], id)
+		}
+	}
+}
+
+// TestPriorityBeatsPreferOldest: Priority still leads even under PreferOldest — the oldest-first
+// fallback only applies once priority ties. A P0 unit is picked ahead of an older unlabeled one.
+func TestPriorityBeatsPreferOldest(t *testing.T) {
+	r := Plan(Input{NowUnix: base, PreferOldest: true, Candidates: []Candidate{
+		{ID: "old-noprio", Key: "A", CreatedUnix: base - 9_000, UpdatedUnix: base - 9_000},
+		{ID: "new-p0", Key: "B", Priority: 1000, CreatedUnix: base - 10, UpdatedUnix: base - 10},
+	}})
+	if r.Pick() != "new-p0" {
+		t.Fatalf("pick = %q, want new-p0 (P0 leads even under prefer-oldest)", r.Pick())
+	}
+}
+
+// TestAllZeroPriorityByteIdenticalResult is the additive-no-regression proof (#3222): a
+// representative candidate set with EVERY Priority left at zero produces a Result whose JSON is
+// byte-identical to the pinned pre-priority golden. If the priority tiebreak ever perturbs an
+// all-zero input, the golden breaks. Covers supersede, live, cooling, and distinct-key ordering
+// in one fold.
+func TestAllZeroPriorityByteIdenticalResult(t *testing.T) {
+	in := Input{NowUnix: base, CooldownSeconds: 600, Candidates: []Candidate{
+		{ID: "b", Key: "K", UpdatedUnix: base - 200},
+		{ID: "a", Key: "K", UpdatedUnix: base - 100}, // freshest of key K
+		{ID: "solo-new", Key: "S", UpdatedUnix: base - 50},
+		{ID: "solo-old", Key: "T", UpdatedUnix: base - 400},
+		{ID: "running", Key: "R", UpdatedUnix: base - 10, Live: true},
+		{ID: "cooling", Key: "C", UpdatedUnix: base - 30, LastAttemptUnix: base - 60},
+	}}
+	got, err := json.MarshalIndent(Plan(in), "", "  ")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	// Normalize surrounding whitespace and any CRLF the raw literal may carry on a
+	// Windows checkout so the comparison is purely about JSON content/ordering.
+	gotStr := strings.TrimSpace(string(got))
+	want := strings.TrimSpace(strings.ReplaceAll(allZeroGolden, "\r\n", "\n"))
+	if gotStr != want {
+		t.Fatalf("all-zero-priority Result drifted from the pinned golden.\n--- got ---\n%s\n--- want ---\n%s",
+			gotStr, want)
 	}
 }
 

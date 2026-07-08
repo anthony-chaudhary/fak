@@ -2510,6 +2510,14 @@ class WeeklyCapGateTest(unittest.TestCase):
         "announced_wait=1h12m16s\n"
         "API Error: Request rejected (429) · upstream rate-limited the request (HTTP 429)\n"
     )
+    # #2610: the WEEKLY-cap variant of the guard 429 — a `kind=weekly_limit` token
+    # plus the relative `announced_wait` window (6h50m here, deliberately past both the
+    # 60-min blind fallback and the 90-min session clamp so honoring it is unambiguous).
+    GUARDED_WEEKLY_429 = (
+        "fak-turn trace=guard FAILED reason=rate_limited wire=anthropic_messages "
+        "kind=weekly_limit announced_wait=6h50m0s\n"
+        "API Error: Request rejected (429) · upstream rate-limited the request (HTTP 429)\n"
+    )
 
     def _write_worker(self, runs: Path, name: str, body: str, *, mtime: float,
                       backend: str = "claude", account_tag: str | None = None) -> None:
@@ -2549,8 +2557,58 @@ class WeeklyCapGateTest(unittest.TestCase):
                                               lookback_min=45, now_ts=now)
         self.assertIsNotNone(hit)
         self.assertEqual(hit["kind"], "session")
-        self.assertEqual(hit["reset_text"], "")
+        # #2610: the guard names its wall as a relative `announced_wait=<dur>`; the
+        # parser now captures that window instead of discarding it (was "").
+        self.assertEqual(hit["reset_text"], "1h12m16s")
         self.assertEqual(hit["evidence_log"], "resolve-1475-guard.log")
+
+    def test_weekly_limit_guard_form_cools_to_announced_window(self) -> None:
+        """#2610: a guard cap crash names the wall as ``kind=weekly_limit`` + a
+        relative ``announced_wait`` (not Claude's absolute 'resets <when>' banner).
+        The hold must cool to that ANNOUNCED window — here 6h50m, past both the
+        60-min blind fallback and the 90-min session clamp — proving the window is
+        honored AND classified weekly (not session). This is the weekly-limit case
+        the acceptance asks for, distinct from the stale-credential/auth path
+        (#2059/#2075), which routes through the AUTH classifier, not the cap hold."""
+        import datetime as dt
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        now_utc = dt.datetime(1970, 1, 1) + dt.timedelta(seconds=now)
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._write_worker(runs, "resolve-2610-weekly.log", self.GUARDED_WEEKLY_429,
+                               mtime=now - 60, account_tag="july2-netra")
+            hit = mod._scan_recent_cap_banner(runs, product="claude",
+                                              lookback_min=45, now_ts=now)
+            self.assertIsNotNone(hit)
+            self.assertEqual(hit["kind"], "weekly")
+            self.assertEqual(hit["reset_text"], "6h50m0s")
+            # The account-cap sidecar (the shared availability contract both
+            # dispatch_preflight/issue_dispatch honor via runtime_status) now cools
+            # this seat to the announced window and names the reason.
+            out = mod.check_weekly_cap(runs, product="claude",
+                                       account_tag="july2-netra", now_ts=now)
+            self.assertTrue(out["capped"])
+            self.assertEqual(out["kind"], "weekly")
+            self.assertEqual(out["reset_text"], "6h50m0s")
+            until = mod._iso_to_utc(out["until"])
+            self.assertEqual(until, now_utc + dt.timedelta(hours=6, minutes=50))
+            # Not the 60-min blind fallback, and not clamped to the 90-min session cap.
+            self.assertGreater(until, now_utc + dt.timedelta(minutes=90))
+
+    def test_parse_relative_wait_ignores_absolute_clause(self) -> None:
+        """The relative-wait parser fires ONLY on a bare Go-duration; an absolute
+        banner reset clause falls through to _parse_reset_to_utc unchanged (#2610)."""
+        import datetime as dt
+        mod = load()
+        now = dt.datetime(2026, 7, 4, 12, 0, 0)
+        self.assertEqual(mod._parse_relative_wait("1h7m0s", now),
+                         now + dt.timedelta(hours=1, minutes=7))
+        self.assertEqual(mod._parse_relative_wait("90m", now),
+                         now + dt.timedelta(minutes=90))
+        for absolute in ("Jun 25, 1pm", "6:10am", "2026-07-04 00:56:38", "", "soon"):
+            self.assertIsNone(mod._parse_relative_wait(absolute, now))
 
     def test_scan_scoped_to_backend(self) -> None:
         import tempfile
@@ -4587,6 +4645,31 @@ class SameIssueWipCollisionTest(unittest.TestCase):
         self.assertTrue(scan["collides"])
         self.assertEqual(scan["evidence"][0]["witness_claim"], "CLAIM_NO_COMMIT")
         self.assertIn("CLAIM_NO_COMMIT", reason)
+
+
+class CandidatePriorityTest(unittest.TestCase):
+    """candidate_priority maps priority/P* labels to the dispatchorder Candidate.priority
+    integer (P0>P1>P2, 0 when unlabeled) -- #3222 DoD item 5."""
+
+    def test_label_to_weight(self) -> None:
+        mod = load()
+        # gh's {"name": ...} dict shape, heaviest label wins.
+        self.assertEqual(mod.candidate_priority([{"name": "priority/P0"}]), 1000)
+        self.assertEqual(mod.candidate_priority([{"name": "priority/P1"}]), 400)
+        self.assertEqual(mod.candidate_priority([{"name": "priority/P2"}]), 150)
+        self.assertEqual(
+            mod.candidate_priority([{"name": "priority/P2"}, {"name": "priority/P0"}]),
+            1000)
+        # Plain-string labels are accepted too.
+        self.assertEqual(mod.candidate_priority(["priority/P1"]), 400)
+
+    def test_unlabeled_is_zero(self) -> None:
+        mod = load()
+        # No priority label, an unrelated label, and empty/None all map to 0 (the
+        # additive-no-regression floor: an unlabeled candidate orders by recency).
+        self.assertEqual(mod.candidate_priority([{"name": "enhancement"}]), 0)
+        self.assertEqual(mod.candidate_priority([]), 0)
+        self.assertEqual(mod.candidate_priority(None), 0)
 
 
 if __name__ == "__main__":

@@ -202,6 +202,62 @@ func TestDispatchOrderPreferOldest(t *testing.T) {
 	}
 }
 
+// TestDispatchOrderPriorityLeadsRecency: the priority field round-trips through candidate JSON
+// (in) and Result JSON (out), and an OLDER priority/P0 unit outranks a newer no-priority unit —
+// the #3222 wire proof. Distinct keys so neither supersedes the other.
+func TestDispatchOrderPriorityLeadsRecency(t *testing.T) {
+	path := writeCandidates(t, `[
+	  {"id":"fresh-noprio","key":"A","updated_unix":1999900},
+	  {"id":"old-p0","key":"B","updated_unix":1990000,"priority":1000}
+	]`)
+	out, errb, code := runDispatchAt("order", "--in", path, "--now", "2000000", "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
+	}
+	var res struct {
+		dispatchorder.Result
+		Pick string `json:"pick"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out)
+	}
+	if res.Pick != "old-p0" {
+		t.Errorf("pick = %q, want old-p0 (P0 leads recency)", res.Pick)
+	}
+	if len(res.Keep) != 2 || res.Keep[0] != "old-p0" || res.Keep[1] != "fresh-noprio" {
+		t.Errorf("keep = %v, want [old-p0 fresh-noprio]", res.Keep)
+	}
+	// The priority field round-trips out on the kept P0 unit.
+	var gotPrio int
+	for _, row := range res.Order {
+		if row.ID == "old-p0" {
+			gotPrio = row.Priority
+		}
+	}
+	if gotPrio != 1000 {
+		t.Errorf("old-p0 priority round-trip = %d, want 1000", gotPrio)
+	}
+	if !strings.Contains(out, `"priority": 1000`) {
+		t.Errorf("JSON output missing round-tripped priority:\n%s", out)
+	}
+}
+
+// TestDispatchOrderTableRendersPriorityColumn: the human table has a prio column and shows the
+// kept unit's priority weight.
+func TestDispatchOrderTableRendersPriorityColumn(t *testing.T) {
+	path := writeCandidates(t, `[{"id":"p0","key":"A","updated_unix":100,"priority":1000}]`)
+	out, _, code := runDispatchAt("order", "--in", path, "--now", "200")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if !strings.Contains(out, "prio") {
+		t.Errorf("table missing prio column header:\n%s", out)
+	}
+	if !strings.Contains(out, "1000") {
+		t.Errorf("table missing the priority weight:\n%s", out)
+	}
+}
+
 // TestDispatchUsageErrors covers the exit-2 / exit-1 paths.
 func TestDispatchUsageErrors(t *testing.T) {
 	if _, _, code := runDispatchAt(); code != 2 {

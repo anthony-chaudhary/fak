@@ -113,6 +113,15 @@ type Candidate struct {
 	// now/next work; second-next, future, and unclassified candidates are held unless Input
 	// requests that horizon explicitly.
 	Generation string `json:"generation,omitempty"`
+	// Priority is the declared do-first weight the caller maps from the unit's priority/P*
+	// label (0 = unknown/lowest, higher = do-first; the candidate builder maps
+	// priority/P0>P1>P2 to descending integers). It LEADS the dispatch order: DispKeep units
+	// sort by Priority descending first, then fall back to the existing recency/PreferOldest/ID
+	// tiebreak. Purely additive — an all-zero-priority candidate set orders exactly as it did
+	// before this field existed (the no-regression guarantee), and Priority changes only the
+	// ORDER among survivors: supersede-collapse, live, cooldown, generation-hold, and collision
+	// pricing are untouched.
+	Priority int `json:"priority,omitempty"`
 }
 
 // recency is the unit's freshness: its last update, falling back to its creation time.
@@ -245,8 +254,8 @@ func (r Result) Pick() string {
 //  3. Disposition per unit, by precedence: a live unit is DispLive; a non-winner (with a Key)
 //     is DispSuperseded by the winner; the winner is DispCooling if it was attempted within the
 //     cooldown window, else DispKeep.
-//  4. DispKeep units are ordered freshest-first (oldest-first when Input.PreferOldest) and
-//     assigned a rank; Keep lists their IDs.
+//  4. DispKeep units are ordered by declared Priority (descending) first, then freshest-first
+//     (oldest-first when Input.PreferOldest), and assigned a rank; Keep lists their IDs.
 //
 // A group whose winner is live or cooling yields NO keep this tick (the dispatcher waits for the
 // freshest rather than running a stale duplicate) — the deliberate v1 posture; a max-backoff
@@ -298,6 +307,9 @@ func Plan(in Input) Result {
 		ki, kj := ranked[i].Disposition == DispKeep, ranked[j].Disposition == DispKeep
 		if ki != kj {
 			return ki // kept units sort ahead of skipped ones
+		}
+		if ranked[i].Priority != ranked[j].Priority {
+			return ranked[i].Priority > ranked[j].Priority // declared priority leads recency; higher = do-first
 		}
 		if in.PreferOldest {
 			return olderFirst(ranked[i], ranked[j]) // drain the longest-waiting backlog first

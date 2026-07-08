@@ -1248,6 +1248,31 @@ def pick_target_issue(numbers: list[int], skip: set[int]) -> int | None:
     return None
 
 
+# Priority-label weights for the dispatchorder Candidate.priority field (internal/dispatchorder
+# dispatchorder.go). These mirror tools/issue_triage.py's PRIORITY map and internal/dispatchtick's
+# PriorityWeight* so the picker, the triage scorer, and the dispatch-order leaf never disagree
+# about how heavy a priority/P* label is. Higher == do-first; the leaf sorts kept units
+# priority-desc first, then by recency.
+DISPATCH_PRIORITY_WEIGHT = {"priority/P0": 1000, "priority/P1": 400, "priority/P2": 150}
+
+
+def candidate_priority(labels: Any) -> int:
+    """The dispatchorder Candidate.priority integer an issue earns from its labels: the HEAVIEST
+    priority/P* label it carries (P0 > P1 > P2), or 0 when it carries none. Accepts labels as
+    ``gh``'s list of ``{"name": ...}`` dicts or plain strings; unknown entries are ignored.
+
+    An unlabeled unit maps to 0 -- dispatchorder's documented "unknown/lowest" -- so an
+    all-unlabeled candidate set carries priority 0 and orders by recency exactly as it did before
+    the field existed (the additive-no-regression posture #3222 requires)."""
+    best = 0
+    for lab in labels or []:
+        name = lab.get("name") if isinstance(lab, dict) else lab
+        weight = DISPATCH_PRIORITY_WEIGHT.get(str(name or "").strip(), 0)
+        if weight > best:
+            best = weight
+    return best
+
+
 def contract_scan_stream(eligible_by_lane: list[Any] | None,
                          skip: set[int]) -> list[tuple[str, int]]:
     """The cross-lane candidate stream the bounded contract scan walks: round-robin
@@ -4761,6 +4786,11 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         chosen_lane, payload.get("lane_issue_count"))
     payload["prompt_chars"] = rec.get("prompt_chars")
     payload["issue_title"] = rec.get("title")
+    # The picked unit's dispatchorder priority, mapped from its priority/P* label (P0>P1>P2, 0
+    # when unlabeled). This is the point candidates are built, so the do-first weight the
+    # dispatch-order leaf ranks on is derived here rather than thrown away (#3222).
+    payload["target_priority"] = candidate_priority(
+        ((rec.get("issue_record") or {}).get("labels")) or [])
     if contract_skipped:
         payload["contract_skipped"] = contract_skipped
     if same_issue_wip_skipped:

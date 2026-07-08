@@ -54,6 +54,8 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchPrice(stdout, stderr, argv[1:])
 	case "route":
 		return runDispatchRoute(stdout, stderr, argv[1:])
+	case "route-health":
+		return runDispatchRouteHealth(stdout, stderr, argv[1:])
 	case "skipped":
 		return runDispatchSkipped(stdout, stderr, argv[1:])
 	case "tier-status":
@@ -70,6 +72,8 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchProgress(stdout, stderr, argv[1:])
 	case "status":
 		return runDispatchStatus(stdout, stderr, argv[1:])
+	case "evidence":
+		return runDispatchWorkerEvidence(stdout, stderr, argv[1:])
 	case "audit":
 		return runDispatchAudit(stdout, stderr, argv[1:])
 	case "scorecard":
@@ -92,7 +96,7 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		dispatchUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, tier-status, rollout-status, tick, wave, sweep, progress, status, audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, or timeout-ledger)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, route-health, tier-status, rollout-status, tick, wave, sweep, progress, status, evidence, audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, or timeout-ledger)\n", argv[0])
 		dispatchUsage(stderr)
 		return 2
 	}
@@ -194,10 +198,10 @@ func renderDispatchOrder(w io.Writer, r dispatchorder.Result, now int64) {
 		len(r.Order), r.KeepCount, r.SupersededCount, r.LiveCount, r.CoolingCount, r.CollisionCount, r.GenerationHeldCount)
 
 	if r.KeepCount > 0 {
-		fmt.Fprintf(w, "%-4s %-16s %-14s %10s\n", "rank", "unit", "key", "age")
+		fmt.Fprintf(w, "%-4s %-16s %-14s %5s %10s\n", "rank", "unit", "key", "prio", "age")
 		for _, x := range r.Order {
 			if x.Disposition == dispatchorder.DispKeep {
-				fmt.Fprintf(w, "%-4d %-16s %-14s %10s\n", x.Rank, x.ID, x.Key, dispAge(now, x.Recency))
+				fmt.Fprintf(w, "%-4d %-16s %-14s %5d %10s\n", x.Rank, x.ID, x.Key, x.Priority, dispAge(now, x.Recency))
 			}
 		}
 	}
@@ -257,6 +261,9 @@ func dispatchUsage(w io.Writer) {
   fak dispatch order [--in FILE] [--cooldown-min N] [--now UNIX] [--prefer-oldest] [--json]
   fak dispatch price [--workspace DIR] [--in FILE] [--json]
   fak dispatch route [--workspace DIR] [--json]
+  fak dispatch route-health probe --base-url URL --model M [--provider P] [--account A] [--api-key-env ENV] [--timeout DUR] [--workspace DIR] [--json]
+  fak dispatch route-health status [--workspace DIR] [--now UNIX] [--json]
+  fak dispatch route-health gate (--route KEY | --provider P --model M [--account A]) [--workspace DIR] [--now UNIX] [--json]
   fak dispatch tier-status [--in FILE] [--demo] [--json]
   fak dispatch rollout-status [--in FILE] [--demo] [--json]
   fak dispatch skipped [--workspace DIR] [--channel C] [--repo-url URL] [--token T] [--dry-run]
@@ -265,6 +272,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch sweep [--workspace DIR] [--max-agents N] [--backend claude|opencode|codex] [--live] [--json]
   fak dispatch progress [--workspace DIR] [--target N] [--audit-json FILE] [--json]
   fak dispatch status [--runs-dir DIR] [--json | --markdown]
+  fak dispatch evidence [--runs-dir DIR] [--materialize] [--now UNIX] [--json]
   fak dispatch audit [--runs-dir DIR] [--json] [--file-issues]
   fak dispatch scorecard [--workspace DIR] [--live-router] [--json]
   fak dispatch issue-smallness-lint (--body-file FILE | --issue N | --open) [--limit N] [--json] [--scorecard]
@@ -292,7 +300,12 @@ and cooldown skips, and returns the survivors freshest-first (or oldest-first wi
 candidates + clock in, same order out.
 
 Candidates are a JSON array (or {"candidates":[...]}), each:
-  {"id":"123","key":"<shared-target>","created_unix":N,"updated_unix":N,"last_attempt_unix":N,"live":false,"generation":"gen/now"}
+  {"id":"123","key":"<shared-target>","created_unix":N,"updated_unix":N,"last_attempt_unix":N,"live":false,"generation":"gen/now","priority":1000}
+
+priority (higher = do-first, from the unit's priority/P0>P1>P2 label; 0 = unlabeled) LEADS the
+dispatch order: kept units sort priority-desc first, then the freshest/oldest/ID tiebreak, so an
+OLDER P0 unit outranks a newer unlabeled one. An all-zero-priority set orders by recency exactly
+as before (additive, no regression).
 
 For multi-agent fan-out, add the pre-launch lane/tree facts. Once any candidate carries
 lane/tree/mode, the planner prices the whole fan-out before launch; shared/shared may overlap,
