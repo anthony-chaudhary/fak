@@ -116,12 +116,12 @@ type Subject struct {
 // Smell is one raised common-sense question. Every Smell carries CouldBeOK:
 // a heuristic that cannot say "actually, fine" is a false-positive machine.
 type Smell struct {
-	Detector  string   `json:"detector"`     // stable id, e.g. "success-over-error"
-	Severity  string   `json:"severity"`     // note | smell | reek
-	Segment   string   `json:"segment"`      // the Segment.Label it fired in
-	Evidence  string   `json:"evidence"`     // the bounded excerpt that tripped it
-	Why       string   `json:"why"`          // the one-line common-sense objection
-	CouldBeOK string   `json:"could_be_ok_if"` // the escape hatch
+	Detector  string `json:"detector"`       // stable id, e.g. "success-over-error"
+	Severity  string `json:"severity"`       // note | smell | reek
+	Segment   string `json:"segment"`        // the Segment.Label it fired in
+	Evidence  string `json:"evidence"`       // the bounded excerpt that tripped it
+	Why       string `json:"why"`            // the one-line common-sense objection
+	CouldBeOK string `json:"could_be_ok_if"` // the escape hatch
 }
 
 // SubjectRef is the provenance echo in a Report (kind+ref, never the text).
@@ -437,8 +437,8 @@ func detectScopeInflation(seg Segment) []Smell {
 // (TODO/FIXME/lorem ipsum/example.com/REPLACE_ME). A placeholder alone is
 // normal in-progress code; the smell is claiming it DONE.
 var (
-	reDoneClaim    = regexp.MustCompile(`(?i)\b(done|complete[d]?|shipped|finished|ready to (merge|ship)|all set|fully implemented)\b`)
-	rePlaceholder  = regexp.MustCompile(`(?i)\b(TODO|FIXME|XXX|HACK|changeme|replace[_ ]?me|placeholder|lorem ipsum|TBD)\b|example\.com|<your[- ]?\w+>`)
+	reDoneClaim   = regexp.MustCompile(`(?i)\b(done|complete[d]?|shipped|finished|ready to (merge|ship)|all set|fully implemented)\b`)
+	rePlaceholder = regexp.MustCompile(`(?i)\b(TODO|FIXME|XXX|HACK|changeme|replace[_ ]?me|placeholder|lorem ipsum|TBD)\b|example\.com|<your[- ]?\w+>`)
 )
 
 func detectPlaceholderShipped(seg Segment) []Smell {

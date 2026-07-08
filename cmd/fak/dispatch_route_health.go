@@ -48,10 +48,10 @@ import (
 )
 
 const (
-	routeHealthSchema       = "fak-route-health/1"
-	routeHealthStatusSchema = "fak-route-health-status/1"
-	routeHealthGateSchema   = "fak-route-health-gate/1"
-	routeHealthLogName      = "route-health.jsonl"
+	routeHealthSchema         = "fak-route-health/1"
+	routeHealthStatusSchema   = "fak-route-health-status/1"
+	routeHealthGateSchema     = "fak-route-health-gate/1"
+	routeHealthLogName        = "route-health.jsonl"
 	routeHealthDefaultPrompt  = "Return exactly OK"
 	routeHealthDefaultTimeout = 20 * time.Second
 )

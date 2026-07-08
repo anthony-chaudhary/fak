@@ -308,7 +308,7 @@ func TestRouteHealthStatusCard(t *testing.T) {
 		routeHealthRecord{
 			Schema: routeHealthSchema, Route: "nim/seat1/deepseek-chat",
 			Provider: "nim", Account: "seat1", Model: "deepseek-chat",
-			Class: string(routeClassTimeout),
+			Class:        string(routeClassTimeout),
 			ProbedAtUnix: now - 120, CooldownUntilUnix: now + 480,
 			Recheck: "fak dispatch route-health probe --base-url https://nim.example/v1 --model deepseek-chat --provider nim",
 		},

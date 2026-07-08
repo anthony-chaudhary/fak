@@ -12,9 +12,9 @@ import (
 // sealed retained target is reported refused, never silently honored.
 func TestContextPlanPreviewRetentionOutcomes(t *testing.T) {
 	st := NewMemStore()
-	st.Add("system", DurabilityDurable, []byte("base system prompt"), false)  // span:0
+	st.Add("system", DurabilityDurable, []byte("base system prompt"), false)      // span:0
 	st.Add("user", DurabilityDurable, []byte("a fact the agent releases"), false) // span:1
-	st.Add("tool", DurabilityDurable, []byte("quarantined secret"), true)     // span:2 (sealed)
+	st.Add("tool", DurabilityDurable, []byte("quarantined secret"), true)         // span:2 (sealed)
 	spans, _ := st.Spans(context.Background())
 
 	f := Forecast{
@@ -53,8 +53,8 @@ func TestContextPlanPreviewRetentionOutcomes(t *testing.T) {
 // forecast (and are rendered in text + markdown), while PreviewOf(plan) alone leaves them nil.
 func TestContextPlanPreviewRetentionOnPreview(t *testing.T) {
 	st := NewMemStore()
-	st.Add("system", DurabilityDurable, []byte("base"), false)  // span:0
-	st.Add("tool", DurabilityDurable, []byte("sealed"), true)   // span:1 (sealed)
+	st.Add("system", DurabilityDurable, []byte("base"), false) // span:0
+	st.Add("tool", DurabilityDurable, []byte("sealed"), true)  // span:1 (sealed)
 	spans, _ := st.Spans(context.Background())
 	f := Forecast{Pins: []string{"span:0", "span:1"}}
 	layout := Layout{
