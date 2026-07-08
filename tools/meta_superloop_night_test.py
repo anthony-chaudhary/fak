@@ -10,6 +10,7 @@ that each skip carries an observable, non-empty reason. No subprocess runs.
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -85,6 +86,49 @@ class WaveDecisionTest(unittest.TestCase):
         pf = {"ok": True, "verdict": "SPAWN_OK", "live": None, "headroom": None}
         d = M.wave_decision(pf, cron_owns_waves=False)
         self.assertEqual(d["code"], M.WAVE_SPAWN)
+
+
+class TreeBuildsTest(unittest.TestCase):
+    """`tree_builds` must compile to os.devnull, never into the checkout. A plain
+    `go build ./cmd/fak` writes `fak.exe` into the cwd; on Windows a LIVE fak
+    process holds that file locked, so the build fails with a file-lock error that
+    is NOT a compile error — a false BROKEN that mis-routes the refill even on a
+    green tree. These tests pin the discard so that regression can't return."""
+
+    def _patch_run(self, rc, err=""):
+        seen = {}
+
+        def fake_run(cmd, timeout=240):
+            seen["cmd"] = cmd
+            seen["timeout"] = timeout
+            return rc, "", err
+
+        self._orig_run = M.run
+        M.run = fake_run
+        self.addCleanup(lambda: setattr(M, "run", self._orig_run))
+        return seen
+
+    def test_builds_to_devnull_not_into_checkout(self):
+        seen = self._patch_run(0)
+        ok, msg = M.tree_builds()
+        self.assertTrue(ok)
+        self.assertIn("OK", msg)
+        cmd = seen["cmd"]
+        # The load-bearing regression guard: output is discarded to os.devnull, so
+        # the check never contends with a running fak.exe.
+        self.assertIn("-o", cmd)
+        self.assertIn(os.devnull, cmd)
+        self.assertEqual(cmd[cmd.index("-o") + 1], os.devnull)
+
+    def test_broken_tree_surfaces_first_error_line(self):
+        seen = self._patch_run(1, err="# some/pkg\nbad.go:1: undefined: X\n")
+        ok, msg = M.tree_builds()
+        self.assertFalse(ok)
+        self.assertIn("BROKEN", msg)
+        self.assertIn("# some/pkg", msg)
+        # Even the failing path must discard output — a file-lock error must never
+        # be mistaken for a compile break.
+        self.assertIn(os.devnull, seen["cmd"])
 
 
 if __name__ == "__main__":

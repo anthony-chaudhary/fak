@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -147,8 +148,15 @@ def tree_builds() -> tuple[bool, str]:
     worker in this checkout that recompiles the agent path fails to launch — the
     single most important thing the meta-loop must surface before it drives anything.
     Prefer the Python launcher path when this is red; it does not recompile the
-    agent package and so survives a mid-flight edit on the shared trunk."""
-    rc, _, err = run(["go", "build", "./cmd/fak/..."], timeout=300)
+    agent package and so survives a mid-flight edit on the shared trunk.
+
+    Compile to os.devnull, never into the checkout: a plain `go build ./cmd/fak`
+    writes `fak.exe` into the cwd, and on Windows a LIVE fak process (i.e. any time
+    the fleet is up) holds that file locked, so the build fails with a file-lock
+    error that is NOT a compile error — a false BROKEN that mis-routes the refill
+    onto the legacy path even on a green tree. Discarding the output tests
+    compilation only."""
+    rc, _, err = run(["go", "build", "-o", os.devnull, "./cmd/fak"], timeout=300)
     if rc == 0:
         return True, "go build ./cmd/fak: OK"
     first = (err.strip().splitlines() or ["build failed"])[0][:200]
