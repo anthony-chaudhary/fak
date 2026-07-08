@@ -229,10 +229,14 @@ func foldTwoShards(repA, repB dojo.Report) shardFolds {
 // own worktree — they differ only in what edit (if any) preceded it, never in
 // how the shards are produced or folded.
 func measureShardFolds(cfg WorktreeConfig, moduleDir string) (shardFolds, error) {
-	shardA, shardB, serr := splitCorpus(cfg.Corpus, cfg.ScratchDir)
+	shardRoot, shardA, shardB, serr := splitCorpus(cfg.Corpus, cfg.ScratchDir)
 	if serr != nil {
 		return shardFolds{}, serr
 	}
+	// The shard root is a sibling of withWorktree's parent, so no worktree defer
+	// reaps it; measureShardFolds runs >=2x/improve run, so own the cleanup here or
+	// leak a corpus-sized dir every call (#3295).
+	defer os.RemoveAll(shardRoot)
 	repA, rerr := runDojo(cfg, moduleDir, shardA)
 	if rerr != nil {
 		return shardFolds{}, rerr
@@ -550,13 +554,13 @@ func parseDojoReport(b []byte) (dojo.Report, error) {
 // shards are disjoint by construction (each transcript lands in exactly one) and
 // stable across runs (sorted paths), so the baseline and candidate measure the
 // SAME two shards. Returns the two shard dir paths.
-func splitCorpus(corpusDir, scratchParent string) (shardA, shardB string, err error) {
+func splitCorpus(corpusDir, scratchParent string) (shardRoot, shardA, shardB string, err error) {
 	files, err := listCorpusFiles(corpusDir)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if len(files) == 0 {
-		return "", "", fmt.Errorf("dojocal: corpus %s has no .jsonl transcripts to shard", corpusDir)
+		return "", "", "", fmt.Errorf("dojocal: corpus %s has no .jsonl transcripts to shard", corpusDir)
 	}
 	parent := scratchParent
 	if parent == "" {
@@ -564,15 +568,23 @@ func splitCorpus(corpusDir, scratchParent string) (shardA, shardB string, err er
 	}
 	root, err := os.MkdirTemp(parent, "dojocal-shards-")
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
+	// The root is caller-owned (measureShardFolds defers os.RemoveAll). Reap it here on
+	// any failure before we hand it back, so an error path never orphans the dir either.
+	ok := false
+	defer func() {
+		if !ok {
+			os.RemoveAll(root)
+		}
+	}()
 	shardA = filepath.Join(root, "a")
 	shardB = filepath.Join(root, "b")
 	if err := os.MkdirAll(shardA, 0o755); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if err := os.MkdirAll(shardB, 0o755); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	// Even-index files -> shard A, odd-index -> shard B. Both shards non-empty as
 	// long as there are >=2 files; a single-file corpus yields one empty shard,
@@ -588,10 +600,11 @@ func splitCorpus(corpusDir, scratchParent string) (shardA, shardB string, err er
 			dst = shardA
 		}
 		if err := copyFile(f, filepath.Join(dst, strconv.Itoa(i)+"_"+filepath.Base(f))); err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
 	}
-	return shardA, shardB, nil
+	ok = true
+	return root, shardA, shardB, nil
 }
 
 // listCorpusFiles recursively collects every *.jsonl path under dir, sorted for

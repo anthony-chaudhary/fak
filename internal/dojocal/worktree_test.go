@@ -8,6 +8,8 @@ package dojocal
 // needing a worktree or a corpus.
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/dojo"
@@ -212,4 +214,51 @@ func TestMeasureCandidateScorecardCarriesShardDeltas(t *testing.T) {
 			t.Errorf("scorecard %s = %v, want %v", name, got[name], v)
 		}
 	}
+}
+
+// TestSplitCorpusRootIsCallerReapable witnesses the #3295 fix: splitCorpus now returns
+// the shard ROOT (previously unreachable — only shardA/shardB were returned), both
+// shards live under it, and a single os.RemoveAll(shardRoot) reaps everything. This is
+// what lets measureShardFolds defer the cleanup instead of orphaning a corpus-sized
+// dojocal-shards-* dir every (>=2x/run) call. An isolated scratch parent keeps the
+// count assertion immune to any concurrent dojo run on the shared machine.
+func TestSplitCorpusRootIsCallerReapable(t *testing.T) {
+	scratch := t.TempDir()
+	corpus := filepath.Join(t.TempDir(), "corpus")
+	if err := os.MkdirAll(corpus, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"a.jsonl", "b.jsonl", "c.jsonl", "d.jsonl"} {
+		if err := os.WriteFile(filepath.Join(corpus, n), []byte(`{"x":1}`+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	shardRoot, shardA, shardB, err := splitCorpus(corpus, scratch)
+	if err != nil {
+		t.Fatalf("splitCorpus: %v", err)
+	}
+	if shardRoot == "" {
+		t.Fatal("splitCorpus returned an empty shard root — caller cannot reap it")
+	}
+	if filepath.Dir(shardA) != shardRoot || filepath.Dir(shardB) != shardRoot {
+		t.Fatalf("shards not under root: root=%s a=%s b=%s", shardRoot, shardA, shardB)
+	}
+	if got := shardRootCount(t, scratch); got != 1 {
+		t.Fatalf("want 1 dojocal-shards-* dir under scratch, got %d", got)
+	}
+
+	os.RemoveAll(shardRoot)
+	if got := shardRootCount(t, scratch); got != 0 {
+		t.Fatalf("shard root survived caller cleanup: %d dir(s) remain", got)
+	}
+}
+
+func shardRootCount(t *testing.T, parent string) int {
+	t.Helper()
+	m, err := filepath.Glob(filepath.Join(parent, "dojocal-shards-*"))
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	return len(m)
 }
