@@ -64,6 +64,36 @@ while every gauge reads idle — death by a thousand 30 ms spawns.
 > see `docs/perf-runaway-guard.md`). This proposal is the *latency* side, which
 > only the kernel can fix.
 
+## Seeing the cost continuously — `fak hooklat` (#1993)
+
+The microbench below is a one-shot before/after probe. The standing question —
+*what fraction of fleet wall-clock is this hook tax, right now?* — is answered by
+`fak hooklat`, which folds the same `.dos/metrics/observations.jsonl` `latency_ms`
+stream every guarded session already writes into a p50/p90/p99 rollup and judges
+its tail against a declared budget:
+
+```
+fak hooklat [STREAM...] [--budget-p99-ms 250] [--since 2h] [--json]
+```
+
+With no path it discovers the workspace's own stream plus every
+`.dispatch-runs/*/.dos/metrics/observations.jsonl`, splits the rollup by
+`pretool`/`posttool` verb, and prints a per-verb + total percentile table. The
+`fak guard` exit summary carries the same fold as a one-line `hook-latency` row,
+so the tax is visible at the surface every guarded session already prints — not
+only to operators who know to look.
+
+The alarm is a closed-vocabulary token, not prose: when the accumulated p99
+exceeds `--budget-p99-ms` (default 250 ms — a generous "gross regression only"
+envelope over the ~175 ms p99 the 2026-07-01 guard-audit run measured) the
+verdict names `GATE_LATENCY_REGRESSION` (declared in `dos.toml`) and exits
+non-zero, so it is CI-gateable and refusable like any other structured refusal.
+Below eight observations the verdict reports `THIN` and abstains — the
+percentiles still print, but a handful of rows is a spike detector, not a
+trustworthy tail (the issue's own "n=13 is small" caveat). Tightening the budget
+from this declared v0.1 envelope toward a measured fleet p99 is the #2073
+follow-on; this rollup is what makes that measurement accumulate.
+
 ## Three fixes, lowest-risk first
 
 ### 1. `matcher`-scope the hooks (config-only, no kernel change)
