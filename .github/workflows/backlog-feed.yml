@@ -3,7 +3,7 @@ name: backlog-feed
 # Publish fak's BACKLOG-TRIAGE surface to Slack #backlog (the scoreboard
 # workspace T0BDEJF1HGB). Backlog STATE is produced by the issue-triage
 # classifier (tools/issue_triage.py) — orphaned P0/P1, stale, dormant questions,
-# likely-duplicates, and the deterministic "do next" order — but today only the
+# and the deterministic "do next" order — but today only the
 # coarsest signal, the raw open-issue COUNT, reaches a channel (capacity-feed.yml
 # -> #capacity). This job posts the triage DETAIL: a weekly digest folded from
 # `tools/issue_triage.py --json`. (#1005)
@@ -85,7 +85,6 @@ jobs:
           orphan=$(jq -r '.counts.orphan' triage.json)
           stale=$(jq -r '.counts.stale' triage.json)
           dormantq=$(jq -r '.counts.dormant_question' triage.json)
-          likelydup=$(jq -r '.counts.likely_dup' triage.json)
           needspri=$(jq -r '.counts.needs_priority' triage.json)
           open=$(jq -r '.counts.open' triage.json)
           # The ranked "do next" order: rows are pre-sorted by score desc, so the
@@ -93,7 +92,7 @@ jobs:
           donext=$(jq -r '[.rows[:3][] | "#\(.number)"] | join(" ")' triage.json)
           # Guard each integer so the grade step's `-lt` test is safe even if a
           # field is missing (older classifier, empty backlog).
-          for v in orphan stale dormantq likelydup needspri open; do
+          for v in orphan stale dormantq needspri open; do
             eval "n=\$$v"
             case "$n" in ''|*[!0-9]*) eval "$v=0" ;; esac
           done
@@ -101,12 +100,11 @@ jobs:
             echo "orphan=$orphan"
             echo "stale=$stale"
             echo "dormantq=$dormantq"
-            echo "likelydup=$likelydup"
             echo "needspri=$needspri"
             echo "open=$open"
             echo "donext=${donext:-none}"
           } >> "$GITHUB_OUTPUT"
-          echo "orphan=$orphan stale=$stale dormant-Q=$dormantq likely-dup=$likelydup needs-priority=$needspri open=$open do-next=$donext"
+          echo "orphan=$orphan stale=$stale dormant-Q=$dormantq needs-priority=$needspri open=$open do-next=$donext"
 
       # Orphaned P0/P1 (high-priority work with no claimant) is the most expensive
       # backlog rot, per the triage skill — make it the headline KPI value and
@@ -135,7 +133,7 @@ jobs:
             --value "${{ steps.digest.outputs.orphan }}" \
             --grade "${{ steps.grade.outputs.grade }}" \
             --verdict "${{ steps.grade.outputs.verdict }}" \
-            --detail "orphan P0/P1 ${{ steps.digest.outputs.orphan }} · stale ${{ steps.digest.outputs.stale }} · dormant-Q ${{ steps.digest.outputs.dormantq }} · likely-dup ${{ steps.digest.outputs.likelydup }} · needs-priority ${{ steps.digest.outputs.needspri }} · do-next ${{ steps.digest.outputs.donext }} (of ${{ steps.digest.outputs.open }} open)" \
+            --detail "orphan P0/P1 ${{ steps.digest.outputs.orphan }} · stale ${{ steps.digest.outputs.stale }} · dormant-Q ${{ steps.digest.outputs.dormantq }} · needs-priority ${{ steps.digest.outputs.needspri }} · do-next ${{ steps.digest.outputs.donext }} (of ${{ steps.digest.outputs.open }} open)" \
             --source ci \
             --dry-run | tee backlog-card.txt
           {
@@ -158,7 +156,7 @@ jobs:
             --value "${{ steps.digest.outputs.orphan }}" \
             --grade "${{ steps.grade.outputs.grade }}" \
             --verdict "${{ steps.grade.outputs.verdict }}" \
-            --detail "orphan P0/P1 ${{ steps.digest.outputs.orphan }} · stale ${{ steps.digest.outputs.stale }} · dormant-Q ${{ steps.digest.outputs.dormantq }} · likely-dup ${{ steps.digest.outputs.likelydup }} · needs-priority ${{ steps.digest.outputs.needspri }} · do-next ${{ steps.digest.outputs.donext }} (of ${{ steps.digest.outputs.open }} open)" \
+            --detail "orphan P0/P1 ${{ steps.digest.outputs.orphan }} · stale ${{ steps.digest.outputs.stale }} · dormant-Q ${{ steps.digest.outputs.dormantq }} · needs-priority ${{ steps.digest.outputs.needspri }} · do-next ${{ steps.digest.outputs.donext }} (of ${{ steps.digest.outputs.open }} open)" \
             --source ci
 
       - name: note when posting was skipped
