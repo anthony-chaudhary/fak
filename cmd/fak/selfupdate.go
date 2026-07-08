@@ -147,6 +147,14 @@ func cmdSelfUpdate(argv []string) {
 		fmt.Printf("self-update: reaped %d stale build worktree(s) leaked by killed prior runs\n", len(reaped))
 	}
 
+	// Also reap the "<binary>.old.<pid>.<i>" swap-aside files OSSwap leaks on Windows when the
+	// old binary was still handle-locked at swap time. Nothing else reclaims them, so one leaks
+	// per tick (a real host accumulated 211 of them, ~9 GB). We delete only asides whose owning
+	// PID is provably dead — so the old .exe is no longer mapped and the file is safe to remove.
+	if reaped := selfinstall.ReapStaleAsides(installTarget, os.Getpid(), safecommit.ProcessAlive); len(reaped) > 0 {
+		fmt.Printf("self-update: reaped %d stale swap-aside binary file(s) leaked by prior swaps\n", len(reaped))
+	}
+
 	// The build worktree must live OUTSIDE .git (git refuses `worktree add` to a path
 	// inside the git dir) and outside the live tree (so it never shows up as peer churn).
 	// A per-invocation temp dir under the OS temp root satisfies both. BuildDirName encodes

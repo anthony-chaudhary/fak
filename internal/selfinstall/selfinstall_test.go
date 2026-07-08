@@ -2,6 +2,8 @@ package selfinstall
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -190,6 +192,87 @@ func TestWindowsSwapAsidePathSkipsHeldOldName(t *testing.T) {
 	})
 	if got != `C:\work\fak\fak.exe.old.42.1` {
 		t.Fatalf("aside path = %q, want first free unique old name", got)
+	}
+}
+
+func TestPidFromAsideParsesOnlyProducerNames(t *testing.T) {
+	const dstBase = "fak.exe"
+	// A name windowsSwapAsidePath produces round-trips to its pid.
+	if pid, ok := pidFromAside(dstBase, "fak.exe.old.15472.0"); !ok || pid != 15472 {
+		t.Fatalf("pidFromAside(.old.15472.0) = (%d,%v), want (15472,true)", pid, ok)
+	}
+	// Everything that is NOT a "<base>.old.<pid>.<i>" name must be rejected, so the reaper
+	// never touches the live binary, its plain .old, or a hand-made backup.
+	for _, bad := range []string{
+		"fak.exe",                 // the live binary
+		"fak.exe.old",             // the plain aside (may still be mapped / conventional)
+		"fak.exe.old-20260703",    // manual dated backup
+		"fak.exe.old-499587c9",    // manual sha backup
+		"fak.exe.old.42.overflow", // the overflow sentinel is not a numeric index
+		"fak.exe.old.-1.0",        // non-positive pid
+		"fak.exe.old.abc.0",       // non-numeric pid
+		"fak.exe.old.42",          // missing index segment
+		"other.exe.old.42.0",      // a different binary's aside
+		"fak.exe.new",             // the in-flight build candidate
+	} {
+		if pid, ok := pidFromAside(dstBase, bad); ok {
+			t.Fatalf("pidFromAside(%q) = (%d,true), want not-ok", bad, pid)
+		}
+	}
+}
+
+func TestReapStaleAsidesRemovesOnlyDeadOwnerAsides(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "fak.exe")
+	const selfPID = 1000
+	alive := func(pid int) bool { return pid == 2000 } // only pid 2000 still building
+
+	// Lay down: the live binary, its plain aside, two hand-made backups, and asides owned by
+	// a dead pid (reap), a live pid (keep), and our own pid (keep).
+	files := []string{
+		"fak.exe",
+		"fak.exe.old",
+		"fak.exe.old-20260703",
+		"fak.exe.old.3000.0", // dead owner -> REAP
+		"fak.exe.old.3000.1", // dead owner -> REAP
+		"fak.exe.old.2000.0", // live owner -> keep
+		"fak.exe.old.1000.0", // our own pid -> keep
+	}
+	for _, name := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+
+	reaped := ReapStaleAsides(target, selfPID, alive)
+
+	want := map[string]bool{
+		filepath.Join(dir, "fak.exe.old.3000.0"): true,
+		filepath.Join(dir, "fak.exe.old.3000.1"): true,
+	}
+	if len(reaped) != len(want) {
+		t.Fatalf("reaped %v, want exactly the two dead-owner asides", reaped)
+	}
+	for _, p := range reaped {
+		if !want[p] {
+			t.Fatalf("reaped unexpected path %q", p)
+		}
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("reaped path %q still on disk (stat err %v)", p, err)
+		}
+	}
+	// Everything not owned by a dead pid must survive.
+	for _, keep := range []string{"fak.exe", "fak.exe.old", "fak.exe.old-20260703", "fak.exe.old.2000.0", "fak.exe.old.1000.0"} {
+		if _, err := os.Stat(filepath.Join(dir, keep)); err != nil {
+			t.Fatalf("expected %s to survive, stat err %v", keep, err)
+		}
+	}
+}
+
+func TestReapStaleAsidesNoopWhenDirMissing(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "gone", "fak.exe")
+	if got := ReapStaleAsides(target, 1, func(int) bool { return false }); got != nil {
+		t.Fatalf("reaped %v, want nil when install dir is unreadable", got)
 	}
 }
 
