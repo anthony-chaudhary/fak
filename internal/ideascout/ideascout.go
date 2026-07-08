@@ -30,6 +30,7 @@ const (
 	TriageLabel     = "needs-triage"
 	TriageOnlyLabel = "triage-only"
 	ArxivAPI        = "http://export.arxiv.org/api/query"
+	HNAlgoliaAPI    = "https://hn.algolia.com/api/v1/search_by_date"
 
 	WTitleHit    = 10
 	WBodyHit     = 3
@@ -37,6 +38,8 @@ const (
 	WRecent30    = 22
 	StarDivisor  = 100
 	StarCap      = 30
+	HNPointDiv   = 20
+	HNPointCap   = 25
 	WRecentPush  = 10
 	DefaultToday = "1970-01-01"
 )
@@ -45,6 +48,7 @@ type Topic struct {
 	Key    string   `json:"key"`
 	Arxiv  string   `json:"arxiv,omitempty"`
 	GitHub string   `json:"github,omitempty"`
+	HN     string   `json:"hn,omitempty"`
 	Terms  []string `json:"terms"`
 	Area   string   `json:"area,omitempty"`
 }
@@ -55,7 +59,9 @@ type Config struct {
 	MaxIssues      int     `json:"max_issues"`
 	ArxivPerTopic  int     `json:"arxiv_per_topic"`
 	GitHubPerTopic int     `json:"github_per_topic"`
+	HNPerTopic     int     `json:"hn_per_topic"`
 	MinStars       int     `json:"min_stars"`
+	MinPoints      int     `json:"min_points"`
 	DupJaccard     float64 `json:"dup_jaccard"`
 	IssueScanLimit int     `json:"issue_scan_limit"`
 	Milestone      string  `json:"milestone,omitempty"`
@@ -131,6 +137,7 @@ type GitHubRepo struct {
 type Fetcher interface {
 	FetchArxiv(query string, maxResults int) (string, error)
 	FetchGitHub(query string, limit int) ([]GitHubRepo, error)
+	FetchHackerNews(query string, limit int) (string, error)
 	FetchExistingIssues(limit int) ([]ExistingIssue, error)
 	EnsureLabels() error
 	CreateIssue(issue IssuePlan, milestone string) (string, error)
@@ -163,7 +170,9 @@ func DefaultConfig() Config {
 		MaxIssues:      3,
 		ArxivPerTopic:  8,
 		GitHubPerTopic: 6,
+		HNPerTopic:     8,
 		MinStars:       25,
+		MinPoints:      10,
 		DupJaccard:     0.55,
 		IssueScanLimit: 800,
 	}
@@ -171,12 +180,12 @@ func DefaultConfig() Config {
 
 func DefaultTopics() []Topic {
 	return []Topic{
-		{Key: "prompt-injection-defense", Arxiv: `abs:"prompt injection" AND (abs:agent OR abs:LLM OR abs:tool)`, GitHub: "prompt injection defense", Terms: []string{"prompt injection", "indirect", "jailbreak", "guardrail", "defense", "tool", "agent", "untrusted", "quarantine"}, Area: "security"},
-		{Key: "tool-call-adjudication", Arxiv: `(abs:"tool use" OR abs:"function calling") AND (abs:safety OR abs:permission OR abs:capability OR abs:policy)`, GitHub: "agent tool security", Terms: []string{"tool call", "function calling", "capability", "permission", "policy", "adjudicat", "default-deny", "sandbox", "syscall"}, Area: "trust-floor"},
-		{Key: "agent-gateway-serving", Arxiv: `(abs:LLM OR abs:agent) AND (abs:gateway OR abs:proxy OR abs:serving OR abs:router)`, GitHub: "llm gateway proxy", Terms: []string{"gateway", "proxy", "serving", "router", "openai", "api", "multi-agent", "shared cache", "audit"}, Area: "agentic-serving"},
-		{Key: "kv-prefix-cache-reuse", Arxiv: `(abs:"KV cache" OR abs:"prefix cache" OR abs:"prompt cache") AND (abs:reuse OR abs:sharing OR abs:inference)`, GitHub: "llm kv cache", Terms: []string{"kv cache", "prefix cache", "prompt cache", "reuse", "radix", "paged", "sharing", "turn", "prefill", "speculative"}, Area: "prompt-caching"},
-		{Key: "mcp-security", Arxiv: `abs:"model context protocol" OR (abs:agent AND abs:"tool poisoning")`, GitHub: "MCP security", Terms: []string{"model context protocol", "mcp", "tool poisoning", "server", "manifest", "untrusted", "supply chain"}, Area: "mcp"},
-		{Key: "agent-model-arch", Arxiv: `(abs:agent OR abs:"tool use") AND (abs:"function calling" OR abs:fine-tuning OR abs:training) AND ti:LLM`, GitHub: "function calling agent", Terms: []string{"function calling", "tool use", "fine-tun", "training", "checkpoint", "qwen", "llama", "reasoning"}, Area: "model-arch"},
+		{Key: "prompt-injection-defense", Arxiv: `abs:"prompt injection" AND (abs:agent OR abs:LLM OR abs:tool)`, GitHub: "prompt injection defense", HN: "prompt injection", Terms: []string{"prompt injection", "indirect", "jailbreak", "guardrail", "defense", "tool", "agent", "untrusted", "quarantine"}, Area: "security"},
+		{Key: "tool-call-adjudication", Arxiv: `(abs:"tool use" OR abs:"function calling") AND (abs:safety OR abs:permission OR abs:capability OR abs:policy)`, GitHub: "agent tool security", HN: "agent tool permissions", Terms: []string{"tool call", "function calling", "capability", "permission", "policy", "adjudicat", "default-deny", "sandbox", "syscall"}, Area: "trust-floor"},
+		{Key: "agent-gateway-serving", Arxiv: `(abs:LLM OR abs:agent) AND (abs:gateway OR abs:proxy OR abs:serving OR abs:router)`, GitHub: "llm gateway proxy", HN: "llm gateway", Terms: []string{"gateway", "proxy", "serving", "router", "openai", "api", "multi-agent", "shared cache", "audit"}, Area: "agentic-serving"},
+		{Key: "kv-prefix-cache-reuse", Arxiv: `(abs:"KV cache" OR abs:"prefix cache" OR abs:"prompt cache") AND (abs:reuse OR abs:sharing OR abs:inference)`, GitHub: "llm kv cache", HN: "prompt caching", Terms: []string{"kv cache", "prefix cache", "prompt cache", "reuse", "radix", "paged", "sharing", "turn", "prefill", "speculative"}, Area: "prompt-caching"},
+		{Key: "mcp-security", Arxiv: `abs:"model context protocol" OR (abs:agent AND abs:"tool poisoning")`, GitHub: "MCP security", HN: "model context protocol", Terms: []string{"model context protocol", "mcp", "tool poisoning", "server", "manifest", "untrusted", "supply chain"}, Area: "mcp"},
+		{Key: "agent-model-arch", Arxiv: `(abs:agent OR abs:"tool use") AND (abs:"function calling" OR abs:fine-tuning OR abs:training) AND ti:LLM`, GitHub: "function calling agent", HN: "open source llm agent", Terms: []string{"function calling", "tool use", "fine-tun", "training", "checkpoint", "qwen", "llama", "reasoning"}, Area: "model-arch"},
 	}
 }
 
@@ -251,6 +260,17 @@ func ScoreCandidate(c Candidate, topic Topic, cfg Config, now time.Time) (int, [
 			reasons = append(reasons, fmt.Sprintf("%d stars (+%d)", stars, bonus))
 		}
 	}
+	points := intFromExtra(c.Extra, "points")
+	if points > 0 {
+		bonus := points / HNPointDiv
+		if bonus > HNPointCap {
+			bonus = HNPointCap
+		}
+		if bonus > 0 {
+			score += bonus
+			reasons = append(reasons, fmt.Sprintf("%d points (+%d)", points, bonus))
+		}
+	}
 	if pushed, ok := parseISO(stringFromExtra(c.Extra, "pushed_at")); ok {
 		if int(now.Sub(pushed).Hours()/24) <= 90 {
 			score += WRecentPush
@@ -303,14 +323,28 @@ func RenderIssue(c Candidate, score int, reasons []string, topic Topic, today st
 	title := "idea-scout: " + rawTitle
 	summary := trimRunes(strings.TrimSpace(c.Summary), 700)
 	var facts []string
-	if c.Source == "arxiv" {
+	switch c.Source {
+	case "arxiv":
 		if authors := stringSliceFromExtra(c.Extra, "authors"); len(authors) > 0 {
 			facts = append(facts, "**Authors:** "+strings.Join(authors, ", "))
 		}
 		if c.Published != "" {
 			facts = append(facts, "**Submitted:** "+firstN(c.Published, 10))
 		}
-	} else {
+	case "hackernews":
+		if points := intFromExtra(c.Extra, "points"); points > 0 {
+			facts = append(facts, fmt.Sprintf("**Points:** %d", points))
+		}
+		if comments := intFromExtra(c.Extra, "num_comments"); comments > 0 {
+			facts = append(facts, fmt.Sprintf("**Comments:** %d", comments))
+		}
+		if disc := stringFromExtra(c.Extra, "discussion"); disc != "" {
+			facts = append(facts, "**Discussion:** "+disc)
+		}
+		if c.Published != "" {
+			facts = append(facts, "**Posted:** "+firstN(c.Published, 10))
+		}
+	default:
 		if stars := intFromExtra(c.Extra, "stars"); stars > 0 {
 			facts = append(facts, fmt.Sprintf("**Stars:** %d", stars))
 		}
@@ -325,7 +359,7 @@ func RenderIssue(c Candidate, score int, reasons []string, topic Topic, today st
 	if why == "" {
 		why = "matched topic query"
 	}
-	body := "> Auto-filed by the daily **idea-scout** (`fak idea-scout`, " + today + "). A candidate RELATED idea found on " + c.Source + "; **needs human triage** - close as `wontfix`/`duplicate` if it is not worth pursuing.\n\n" +
+	body := "> Auto-filed by the daily **idea-scout** (`fak idea-scout`, " + today + "). A candidate RELATED idea found on " + sourceLabel(c.Source) + "; **needs human triage** - close as `wontfix`/`duplicate` if it is not worth pursuing.\n\n" +
 		"**Source:** " + c.URL + "\n\n"
 	if len(facts) > 0 {
 		body += strings.Join(facts, "\n") + "\n\n"
@@ -466,6 +500,59 @@ func ParseGitHubRepos(items []GitHubRepo, topicKey string) []Candidate {
 	return out
 }
 
+// ParseHackerNewsJSON turns an Algolia HN search response into candidates.
+// It is a pure fold over the wire JSON: no network, no clock. Link stories keep
+// their outbound URL; text/self posts fall back to the HN item permalink so the
+// candidate always resolves to something a triager can open.
+func ParseHackerNewsJSON(jsonText, topicKey string) []Candidate {
+	var doc struct {
+		Hits []struct {
+			ObjectID    string `json:"objectID"`
+			Title       string `json:"title"`
+			StoryTitle  string `json:"story_title"`
+			URL         string `json:"url"`
+			StoryURL    string `json:"story_url"`
+			Author      string `json:"author"`
+			Points      int    `json:"points"`
+			NumComments int    `json:"num_comments"`
+			CreatedAt   string `json:"created_at"`
+			StoryText   string `json:"story_text"`
+		} `json:"hits"`
+	}
+	if err := json.Unmarshal([]byte(jsonText), &doc); err != nil {
+		return nil
+	}
+	var out []Candidate
+	for _, h := range doc.Hits {
+		id := strings.TrimSpace(h.ObjectID)
+		if id == "" {
+			continue
+		}
+		title := squashSpace(firstNonEmpty(h.Title, h.StoryTitle))
+		if title == "" {
+			continue
+		}
+		permalink := "https://news.ycombinator.com/item?id=" + id
+		u := firstNonEmpty(h.URL, h.StoryURL, permalink)
+		out = append(out, Candidate{
+			Source:    "hackernews",
+			SourceID:  "hn:" + id,
+			URL:       u,
+			Title:     title,
+			Summary:   squashSpace(stripTags(h.StoryText)),
+			Published: strings.TrimSpace(h.CreatedAt),
+			Topic:     topicKey,
+			Extra: map[string]any{
+				"points":       h.Points,
+				"num_comments": h.NumComments,
+				"discussion":   permalink,
+				"author":       h.Author,
+			},
+		})
+	}
+	return out
+}
+
 func LoadConfig(path string) ([]Topic, Config, error) {
 	topics := DefaultTopics()
 	cfg := DefaultConfig()
@@ -493,8 +580,8 @@ func LoadConfig(path string) ([]Topic, Config, error) {
 		if len(t.Terms) == 0 {
 			return nil, Config{}, fmt.Errorf("topic %q missing non-empty 'terms' list", t.Key)
 		}
-		if strings.TrimSpace(t.Arxiv) == "" && strings.TrimSpace(t.GitHub) == "" {
-			return nil, Config{}, fmt.Errorf("topic %q must set 'arxiv' and/or 'github'", t.Key)
+		if strings.TrimSpace(t.Arxiv) == "" && strings.TrimSpace(t.GitHub) == "" && strings.TrimSpace(t.HN) == "" {
+			return nil, Config{}, fmt.Errorf("topic %q must set 'arxiv', 'github', and/or 'hn'", t.Key)
 		}
 	}
 	return topics, cfg, nil
@@ -704,6 +791,18 @@ func GatherCandidates(fetcher Fetcher, topics []Topic, cfg Config, errorsOut *[]
 				cands = append(cands, ParseGitHubRepos(filtered, topic.Key)...)
 			}
 		}
+		if topic.HN != "" {
+			jsonText, err := fetcher.FetchHackerNews(topic.HN, cfg.HNPerTopic)
+			if err != nil {
+				*errorsOut = append(*errorsOut, "hn["+topic.Key+"]: "+err.Error())
+			} else {
+				for _, c := range ParseHackerNewsJSON(jsonText, topic.Key) {
+					if intFromExtra(c.Extra, "points") >= cfg.MinPoints {
+						cands = append(cands, c)
+					}
+				}
+			}
+		}
 	}
 	return cands
 }
@@ -746,6 +845,35 @@ func (f LiveFetcher) FetchGitHub(query string, limit int) ([]GitHubRepo, error) 
 	var out []GitHubRepo
 	err := ghJSON([]string{"search", "repos", query, "--limit", strconv.Itoa(limit), "--sort", "stars", "--json", "fullName,description,url,stargazersCount,pushedAt,updatedAt,createdAt,language"}, &out)
 	return out, err
+}
+
+func (f LiveFetcher) FetchHackerNews(query string, limit int) (string, error) {
+	client := f.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	q := url.Values{}
+	q.Set("query", query)
+	q.Set("tags", "story")
+	q.Set("hitsPerPage", strconv.Itoa(limit))
+	req, err := http.NewRequest("GET", HNAlgoliaAPI+"?"+q.Encode(), nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "fak-idea-scout/1.0")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("hn status %s", resp.Status)
+	}
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 func (f LiveFetcher) FetchExistingIssues(limit int) ([]ExistingIssue, error) {
@@ -872,7 +1000,7 @@ func readJSONFile(path string, out any) error {
 
 func RenderHuman(w io.Writer, result RunResult, cfg Config) {
 	fmt.Fprintf(w, "idea-scout %s - %s\n", result.Date, result.Mode)
-	fmt.Fprintf(w, "  gathered %d candidates from %d topics x (arXiv + GitHub)\n", result.CandidatesGathered, result.Topics)
+	fmt.Fprintf(w, "  gathered %d candidates from %d topics x (arXiv + GitHub + Hacker News)\n", result.CandidatesGathered, result.Topics)
 	var parts []string
 	keys := make([]string, 0, len(result.Skipped))
 	for k := range result.Skipped {
@@ -1046,6 +1174,27 @@ func squashSpace(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
+var htmlTagRE = regexp.MustCompile(`<[^>]*>`)
+
+// stripTags removes the light HTML (<p>, <a>, <i>) the HN API leaves in
+// story_text so the summary is plain prose.
+func stripTags(s string) string {
+	return htmlTagRE.ReplaceAllString(s, " ")
+}
+
+func sourceLabel(source string) string {
+	switch source {
+	case "arxiv":
+		return "arXiv"
+	case "github":
+		return "GitHub"
+	case "hackernews":
+		return "Hacker News"
+	default:
+		return source
+	}
+}
+
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {
 		if strings.TrimSpace(v) != "" {
@@ -1068,8 +1217,12 @@ func applyThresholds(cfg *Config, values map[string]any) {
 			cfg.ArxivPerTopic = anyInt(v, cfg.ArxivPerTopic)
 		case "github_per_topic":
 			cfg.GitHubPerTopic = anyInt(v, cfg.GitHubPerTopic)
+		case "hn_per_topic":
+			cfg.HNPerTopic = anyInt(v, cfg.HNPerTopic)
 		case "min_stars":
 			cfg.MinStars = anyInt(v, cfg.MinStars)
+		case "min_points":
+			cfg.MinPoints = anyInt(v, cfg.MinPoints)
 		case "dup_jaccard":
 			cfg.DupJaccard = anyFloat(v, cfg.DupJaccard)
 		case "issue_scan_limit":

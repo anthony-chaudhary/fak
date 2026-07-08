@@ -183,6 +183,83 @@ func TestRunDryRunDoesNotWriteCache(t *testing.T) {
 	}
 }
 
+func TestParseHackerNewsJSON(t *testing.T) {
+	body := `{"hits":[
+		{"objectID":"111","title":"Show HN: a prompt injection scanner","url":"https://example.test/scanner","points":240,"num_comments":57,"created_at":"2026-07-01T10:00:00Z","story_text":""},
+		{"objectID":"222","title":"Ask HN: how do you sandbox tool calls?","url":"","points":85,"num_comments":30,"created_at":"2026-07-01T09:00:00Z","story_text":"<p>We run untrusted <a href=\"x\">tools</a>.</p>"},
+		{"objectID":"","title":"dropped: no id","url":"https://example.test/x","points":10,"created_at":"2026-07-01T08:00:00Z"}
+	]}`
+	cands := ParseHackerNewsJSON(body, "trust-floor")
+	if len(cands) != 2 {
+		t.Fatalf("parsed %d candidates, want 2 (the id-less hit is dropped): %#v", len(cands), cands)
+	}
+	first := cands[0]
+	if first.Source != "hackernews" || first.SourceID != "hn:111" || first.Topic != "trust-floor" {
+		t.Fatalf("first candidate shape = %#v", first)
+	}
+	if first.URL != "https://example.test/scanner" {
+		t.Fatalf("link post should keep its outbound URL, got %q", first.URL)
+	}
+	if intFromExtra(first.Extra, "points") != 240 || intFromExtra(first.Extra, "num_comments") != 57 {
+		t.Fatalf("first candidate extra = %#v", first.Extra)
+	}
+	if disc := stringFromExtra(first.Extra, "discussion"); disc != "https://news.ycombinator.com/item?id=111" {
+		t.Fatalf("discussion permalink = %q", disc)
+	}
+	second := cands[1]
+	if second.URL != "https://news.ycombinator.com/item?id=222" {
+		t.Fatalf("self post with no url should fall back to the HN permalink, got %q", second.URL)
+	}
+	if strings.Contains(second.Summary, "<") || !strings.Contains(second.Summary, "We run untrusted tools") {
+		t.Fatalf("summary should be tag-stripped prose, got %q", second.Summary)
+	}
+}
+
+func TestScoreCandidateHackerNewsPoints(t *testing.T) {
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	topic := Topic{Key: "trust-floor", Terms: []string{"sandbox", "tool"}}
+	cand := Candidate{
+		Title:     "Sandbox for tool calls",
+		Published: "2026-06-30T00:00:00Z",
+		Extra:     map[string]any{"points": 240, "num_comments": 57},
+	}
+	score, reasons := ScoreCandidate(cand, topic, DefaultConfig(), now)
+	// title hits sandbox+tool 20 + freshness 34 (recent+very fresh) + points 240/20=12.
+	if score != 66 {
+		t.Fatalf("score = %d, want 66, reasons=%v", score, reasons)
+	}
+	if joined := strings.Join(reasons, "; "); !strings.Contains(joined, "240 points (+12)") {
+		t.Fatalf("reasons missing points signal: %q", joined)
+	}
+}
+
+type stubFetcher struct{ hnJSON string }
+
+func (s stubFetcher) FetchArxiv(string, int) (string, error)           { return "", nil }
+func (s stubFetcher) FetchGitHub(string, int) ([]GitHubRepo, error)    { return nil, nil }
+func (s stubFetcher) FetchHackerNews(string, int) (string, error)      { return s.hnJSON, nil }
+func (s stubFetcher) FetchExistingIssues(int) ([]ExistingIssue, error) { return nil, nil }
+func (s stubFetcher) EnsureLabels() error                              { return nil }
+func (s stubFetcher) CreateIssue(IssuePlan, string) (string, error)    { return "", nil }
+func (s stubFetcher) AddToProject(string, string, string) error        { return nil }
+
+func TestGatherCandidatesHackerNewsFiltersByPoints(t *testing.T) {
+	hn := `{"hits":[
+		{"objectID":"1","title":"hot trending agent tool","url":"https://example.test/1","points":300,"created_at":"2026-07-01T00:00:00Z"},
+		{"objectID":"2","title":"barely-voted post","url":"https://example.test/2","points":3,"created_at":"2026-07-01T00:00:00Z"}
+	]}`
+	topics := []Topic{{Key: "t", HN: "agent tool", Terms: []string{"agent", "tool"}}}
+	cfg := DefaultConfig() // MinPoints=10
+	var errs []string
+	cands := GatherCandidates(stubFetcher{hnJSON: hn}, topics, cfg, &errs)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected gather errors: %v", errs)
+	}
+	if len(cands) != 1 || cands[0].SourceID != "hn:1" {
+		t.Fatalf("want only the 300-point story above MinPoints, got %#v", cands)
+	}
+}
+
 func hasLabel(labels []string, want string) bool {
 	for _, got := range labels {
 		if got == want {
