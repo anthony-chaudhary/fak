@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import types
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -56,6 +57,63 @@ def test_decide_nothing_ahead_skips() -> None:
     should, reason = apl.decide(_pane(ahead=0, push_lag_seconds=None))
     assert should is False
     assert reason == "nothing-ahead"
+
+
+# --- push_child_env(): the warn-only build-gate skip (#3300) ----------------
+
+def test_push_child_env_forces_off_when_unset() -> None:
+    # Default (unset) is the shell's `warn`: a pure-cost materialize that never
+    # blocks. The backstop forces it off so it can't time out delivery.
+    child = apl.push_child_env({})
+    assert child["FLEET_BUILD_GUARD"] == "off"
+
+
+def test_push_child_env_forces_off_when_warn() -> None:
+    child = apl.push_child_env({"FLEET_BUILD_GUARD": "warn"})
+    assert child["FLEET_BUILD_GUARD"] == "off"
+
+
+def test_push_child_env_case_and_whitespace_insensitive() -> None:
+    # The shell lowercases nothing, but an operator may; treat "warn"/"WARN"/" warn "
+    # the same so a stray case never leaves the slow materialize armed.
+    for raw in ("WARN", " warn ", "Warn"):
+        assert apl.push_child_env({"FLEET_BUILD_GUARD": raw})["FLEET_BUILD_GUARD"] == "off"
+
+
+def test_push_child_env_preserves_block() -> None:
+    # block = an operator has made the gate ENFORCING; a real TRUNK_WOULD_NOT_COMPILE
+    # must still refuse the push, so we must NOT override it.
+    child = apl.push_child_env({"FLEET_BUILD_GUARD": "block"})
+    assert child["FLEET_BUILD_GUARD"] == "block"
+
+
+def test_push_child_env_keeps_other_vars() -> None:
+    child = apl.push_child_env({"FLEET_BUILD_GUARD": "warn", "PATH": "/x", "FAK_BIN": "/b"})
+    assert child["PATH"] == "/x" and child["FAK_BIN"] == "/b"
+
+
+def test_push_main_passes_child_env_to_subprocess() -> None:
+    # Witness the wiring: push_main must hand the build-gate-off env to the child so
+    # the override actually reaches git's pre-push hook (not just compute it and drop it).
+    seen: dict = {}
+
+    class _CP:
+        returncode = 0
+        stdout = "{}"
+        stderr = ""
+
+    def fake_run(cmd, **kw):
+        seen["env"] = kw.get("env")
+        seen["timeout"] = kw.get("timeout")
+        return _CP()
+
+    fake_sp = types.SimpleNamespace(run=fake_run,
+                                    TimeoutExpired=apl.subprocess.TimeoutExpired)
+    with _Patch(subprocess=fake_sp):
+        apl.push_main(Path(tempfile.mkdtemp()), ["fak"])
+    assert seen["env"] is not None
+    assert seen["env"]["FLEET_BUILD_GUARD"] == "off"
+    assert seen["timeout"] == apl.PUSH_TIMEOUT_SECONDS
 
 
 # --- run(): report vs. push, with the seams stubbed -------------------------

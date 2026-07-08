@@ -95,6 +95,32 @@ def decide(pane: dict[str, Any]) -> tuple[bool, str]:
     return (True, f"push-lag-{mins}m")
 
 
+def push_child_env(env: dict[str, str] | None = None) -> dict[str, str]:
+    """The child environment for `fak sync push` — with the WARN-ONLY build gate
+    forced OFF so its tip-materialize can never time out delivery (#3300).
+
+    The pre-push build gate (`fak hooks pre-push`, env `FLEET_BUILD_GUARD`)
+    materializes the full committed tip (~130MB in this repo) via
+    `git archive HEAD | tar -x` BEFORE it builds. In its DEFAULT `warn` mode that
+    materialize is pure cost: it burns the whole push budget (observed >300s under
+    shared-trunk I/O contention → rc124 push-timeout) only to emit an ADVISORY that
+    never blocks the push anyway. During this unattended backstop we therefore force
+    `FLEET_BUILD_GUARD=off` whenever the gate is NOT hard-enforcing, dropping the
+    materialize entirely; warn already lets a compile break reach origin, so nothing
+    the gate was catching is lost, and `make ci` stays the authoritative build oracle.
+
+    The one mode we DON'T touch is `block`: there an operator has made the gate
+    enforcing, so a real `TRUNK_WOULD_NOT_COMPILE` must still refuse the push. We
+    respect that and pay the materialize (the 600s timeout covers it).
+    """
+    src = os.environ if env is None else env
+    child = dict(src)
+    mode = child.get("FLEET_BUILD_GUARD", "warn").strip().lower()
+    if mode != "block":
+        child["FLEET_BUILD_GUARD"] = "off"
+    return child
+
+
 def push_main(root: Path, fak: list[str]) -> dict[str, Any]:
     """Delegate to the repo's safe-push primitive. Never a raw `git push`.
 
@@ -103,12 +129,16 @@ def push_main(root: Path, fak: list[str]) -> dict[str, Any]:
     surfaces a pre-push hook rejection as PUSH_ERROR — all of which correctly
     LEAVE the lag in place for a human. We treat the process exit code as the
     authoritative success signal and attach the parsed JSON verbatim.
+
+    Runs with `push_child_env()` so a warn-only build gate is skipped (#3300): its
+    slow tip-materialize would otherwise burn the push timeout to produce an
+    advisory that can't block delivery anyway.
     """
     cmd = [*fak, "sync", "push", "--remote", "origin", "--branch", "main",
            "--repo", str(root), "--json"]
     try:
         p = subprocess.run(cmd, cwd=str(root), capture_output=True, text=True,
-                           timeout=PUSH_TIMEOUT_SECONDS)
+                           timeout=PUSH_TIMEOUT_SECONDS, env=push_child_env())
     except subprocess.TimeoutExpired:
         return {"ok": False, "pushed": False, "reason": "push-timeout",
                 "returncode": 124}
