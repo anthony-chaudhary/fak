@@ -152,6 +152,20 @@ else
   fi
   echo "[cuda] OK glmdsatput binary" >> "$LOG"
 
+  # Land each config as a DISCOVERABLE benchmark artifact (benchcli lineage +
+  # benchmark_artifact manifest) under the repo runs tree, IN ADDITION to the compact
+  # /tmp fetch record below. Before this, the sweep printed only GLMTPUT_JSON (schema
+  # glm-throughput/1) that benchcli.BuildLineageIndex does NOT admit, so every on-box
+  # sweep stranded its numbers outside experiments/benchmark/runs even though
+  # cmd/glmdsatput now knows how to land them. Opt out with GLM_LAND_DIR="".
+  NODE="${FAK_BENCH_NODE:-$(hostname 2>/dev/null || echo node)}"
+  STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+  LAND_DIR="${GLM_LAND_DIR-experiments/benchmark/runs/by-machine/$NODE/$STAMP-glm52-native-decode}"
+  # Give the landed manifests real lineage (commit + node) so `dos verify` binds them.
+  export FAK_BENCH_COMMIT="${FAK_BENCH_COMMIT:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}"
+  export FAK_BENCH_NODE="$NODE"
+  [ -n "$LAND_DIR" ] && echo "=== landing discoverable artifacts under $LAND_DIR (commit under an add(experiments) trailer) ===" >> "$LOG"
+
   # The SWEEP ("all of it"): vary the dimensions that move the native per-token cost curve —
   # depth (layers), width (hidden/inter), and DSA selection size (index-topk). Each row is one
   # -json run; glmdsatput prints a GLMTPUT_JSON line the recorder folds together.
@@ -167,7 +181,11 @@ else
   for row in "${SWEEP[@]}"; do
     read -r L H HE I TK <<< "$row"
     echo "=== glmdsatput -json layers=$L hidden=$H heads=$HE inter=$I topk=$TK ===" >> "$LOG"
-    /tmp/fakgpu/glmdsatput -backend cuda -json \
+    # -out lands a discoverable manifest per config (one subdir each); the -json line the
+    # recorder folds is unchanged, so the fetch pipeline is untouched.
+    OUTARG=()
+    [ -n "$LAND_DIR" ] && OUTARG=(-out "$LAND_DIR/L${L}-H${H}-tk${TK}")
+    /tmp/fakgpu/glmdsatput -backend cuda -json "${OUTARG[@]}" \
       -layers "$L" -hidden "$H" -heads "$HE" -inter "$I" -index-topk "$TK" \
       -decode-prompt 512 -decode-steps 64 -decode-reps 5 >> "$LOG" 2>&1 \
       || echo "=== run FAILED layers=$L hidden=$H rc=$? (continuing) ===" >> "$LOG"
