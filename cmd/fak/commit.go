@@ -37,6 +37,8 @@ func runCommitCommand(stdout, stderr io.Writer, argv []string) int {
 		return runCommitSubmit(stdout, stderr, argv[1:])
 	case "drain":
 		return runCommitDrain(stdout, stderr, argv[1:])
+	case "preflight":
+		return runCommitPreflight(stdout, stderr, argv[1:])
 	}
 	return runCommit(stdout, stderr, argv)
 }

@@ -42,6 +42,12 @@ const usageCoreText = `usage:
   fak run       --trace FILE [--engine inkernel] [--vdso=true] [--policy FILE]
   fak commit    --path P [--path P ...] (-m STR | -F FILE/-) [--push] [--trunk B] [--no-signoff] [--review-model M] [--json]
   fak commit status [--dir DIR] [--json]
+  fak commit preflight --path P [--path P ...] [--dir DIR] [--json]
+                (classify each commit-by-path pathspec against the index+worktree
+                 BEFORE 'git commit -- <path>', so the raw "pathspec did not match
+                 any file(s) known to git" becomes a NAMED refusal: PATH_UNTRACKED
+                 (present but unstaged -> git add) or PATH_UNMATCHED (typo/rename/
+                 stale plan). Exit 0 all tracked, 3 a refusal, 2 usage.)
                 (the SAFE SHARED-TRUNK COMMIT: commit by EXPLICIT pathspec on a
                  multi-session trunk and refuse to report success unless ONLY those
                  paths landed. Lock-guards the commit, writes the message to a file
