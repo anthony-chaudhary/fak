@@ -78,9 +78,9 @@ func TestBuildOverlayHidesEachFile(t *testing.T) {
 
 func TestBuildCheckArgs(t *testing.T) {
 	cases := []struct {
-		name                    string
+		name                     string
 		mode, overlay, outTarget string
-		pkgs, want              []string
+		pkgs, want               []string
 	}{
 		{"build discards to null", "build", "", "NUL", []string{"./..."},
 			[]string{"build", "-o", "NUL", "./..."}},
