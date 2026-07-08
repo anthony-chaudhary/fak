@@ -100,7 +100,7 @@ func optionalString(set bool, v string) *string {
 	return &v
 }
 
-const ideaScoutUsage = `fak idea-scout - surface related arXiv/GitHub/Hacker News ideas as deduped issue plans.
+const ideaScoutUsage = `fak idea-scout - surface related arXiv/GitHub/Hacker News/Reddit ideas as deduped issue plans.
 
 usage:
   fak idea-scout [--json] [--workspace DIR] [--config FILE]
@@ -110,8 +110,9 @@ usage:
 
 Dry-run is the default and mutates nothing. --live creates issues through gh issue
 create and records filed source IDs in .idea-scout/seen.json. --candidates supplies
-fixture candidates and skips live arXiv/GitHub/Hacker News fetching for tests or replay.
+fixture candidates and skips live arXiv/GitHub/Hacker News/Reddit fetching for tests or replay.
 
 Sources per topic (any subset): arxiv query, github search, hn (Hacker News Algolia
-query, newest-first — catches trending front-page items within moments of release).
+query) and reddit (Reddit search, sort=new) — the community feeds are newest-first,
+catching trending items within moments of release.
 `

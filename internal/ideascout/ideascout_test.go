@@ -233,11 +233,15 @@ func TestScoreCandidateHackerNewsPoints(t *testing.T) {
 	}
 }
 
-type stubFetcher struct{ hnJSON string }
+type stubFetcher struct {
+	hnJSON     string
+	redditJSON string
+}
 
 func (s stubFetcher) FetchArxiv(string, int) (string, error)           { return "", nil }
 func (s stubFetcher) FetchGitHub(string, int) ([]GitHubRepo, error)    { return nil, nil }
 func (s stubFetcher) FetchHackerNews(string, int) (string, error)      { return s.hnJSON, nil }
+func (s stubFetcher) FetchReddit(string, int) (string, error)          { return s.redditJSON, nil }
 func (s stubFetcher) FetchExistingIssues(int) ([]ExistingIssue, error) { return nil, nil }
 func (s stubFetcher) EnsureLabels() error                              { return nil }
 func (s stubFetcher) CreateIssue(IssuePlan, string) (string, error)    { return "", nil }
@@ -257,6 +261,58 @@ func TestGatherCandidatesHackerNewsFiltersByPoints(t *testing.T) {
 	}
 	if len(cands) != 1 || cands[0].SourceID != "hn:1" {
 		t.Fatalf("want only the 300-point story above MinPoints, got %#v", cands)
+	}
+}
+
+func TestParseRedditJSON(t *testing.T) {
+	body := `{"data":{"children":[
+		{"kind":"t3","data":{"id":"abc","title":"Show: a new agent sandbox","url":"https://example.test/repo","permalink":"/r/rust/comments/abc/x/","score":320,"num_comments":44,"created_utc":1704067200,"selftext":"","subreddit":"rust"}},
+		{"kind":"t3","data":{"id":"def","title":"How do you sandbox tool calls?","url":"https://www.reddit.com/r/LocalLLaMA/comments/def/y/","permalink":"/r/LocalLLaMA/comments/def/y/","score":90,"num_comments":12,"created_utc":1704067200,"selftext":"<p>We run <a href=\"x\">untrusted</a> tools.</p>","subreddit":"LocalLLaMA"}},
+		{"kind":"t3","data":{"id":"","title":"dropped: no id","score":10}}
+	]}}`
+	cands := ParseRedditJSON(body, "trust-floor")
+	if len(cands) != 2 {
+		t.Fatalf("parsed %d candidates, want 2 (id-less hit dropped): %#v", len(cands), cands)
+	}
+	first := cands[0]
+	if first.Source != "reddit" || first.SourceID != "reddit:abc" || first.Topic != "trust-floor" {
+		t.Fatalf("first candidate shape = %#v", first)
+	}
+	if first.URL != "https://example.test/repo" {
+		t.Fatalf("link post should keep its outbound URL, got %q", first.URL)
+	}
+	if intFromExtra(first.Extra, "points") != 320 {
+		t.Fatalf("score should map to points, extra=%#v", first.Extra)
+	}
+	if disc := stringFromExtra(first.Extra, "discussion"); disc != "https://www.reddit.com/r/rust/comments/abc/x/" {
+		t.Fatalf("discussion permalink = %q", disc)
+	}
+	if sub := stringFromExtra(first.Extra, "subreddit"); sub != "rust" {
+		t.Fatalf("subreddit = %q", sub)
+	}
+	if !strings.HasPrefix(first.Published, "2024-01-01") {
+		t.Fatalf("created_utc epoch should render RFC3339, got %q", first.Published)
+	}
+	second := cands[1]
+	if strings.Contains(second.Summary, "<") || !strings.Contains(second.Summary, "We run untrusted tools") {
+		t.Fatalf("selftext should be tag-stripped prose, got %q", second.Summary)
+	}
+}
+
+func TestGatherCandidatesRedditFiltersByPoints(t *testing.T) {
+	rj := `{"data":{"children":[
+		{"kind":"t3","data":{"id":"1","title":"hot trending agent tool","url":"https://example.test/1","permalink":"/r/x/comments/1/a/","score":300,"created_utc":1704067200,"subreddit":"x"}},
+		{"kind":"t3","data":{"id":"2","title":"barely-voted post","url":"https://example.test/2","permalink":"/r/x/comments/2/b/","score":2,"created_utc":1704067200,"subreddit":"x"}}
+	]}}`
+	topics := []Topic{{Key: "t", Reddit: "agent tool", Terms: []string{"agent", "tool"}}}
+	cfg := DefaultConfig()
+	var errs []string
+	cands := GatherCandidates(stubFetcher{redditJSON: rj}, topics, cfg, &errs)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected gather errors: %v", errs)
+	}
+	if len(cands) != 1 || cands[0].SourceID != "reddit:1" {
+		t.Fatalf("want only the 300-point post above MinPoints, got %#v", cands)
 	}
 }
 

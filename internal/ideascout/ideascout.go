@@ -31,6 +31,7 @@ const (
 	TriageOnlyLabel = "triage-only"
 	ArxivAPI        = "http://export.arxiv.org/api/query"
 	HNAlgoliaAPI    = "https://hn.algolia.com/api/v1/search_by_date"
+	RedditSearchAPI = "https://www.reddit.com/search.json"
 
 	WTitleHit    = 10
 	WBodyHit     = 3
@@ -49,6 +50,7 @@ type Topic struct {
 	Arxiv  string   `json:"arxiv,omitempty"`
 	GitHub string   `json:"github,omitempty"`
 	HN     string   `json:"hn,omitempty"`
+	Reddit string   `json:"reddit,omitempty"`
 	Terms  []string `json:"terms"`
 	Area   string   `json:"area,omitempty"`
 }
@@ -60,6 +62,7 @@ type Config struct {
 	ArxivPerTopic  int     `json:"arxiv_per_topic"`
 	GitHubPerTopic int     `json:"github_per_topic"`
 	HNPerTopic     int     `json:"hn_per_topic"`
+	RedditPerTopic int     `json:"reddit_per_topic"`
 	MinStars       int     `json:"min_stars"`
 	MinPoints      int     `json:"min_points"`
 	DupJaccard     float64 `json:"dup_jaccard"`
@@ -138,6 +141,7 @@ type Fetcher interface {
 	FetchArxiv(query string, maxResults int) (string, error)
 	FetchGitHub(query string, limit int) ([]GitHubRepo, error)
 	FetchHackerNews(query string, limit int) (string, error)
+	FetchReddit(query string, limit int) (string, error)
 	FetchExistingIssues(limit int) ([]ExistingIssue, error)
 	EnsureLabels() error
 	CreateIssue(issue IssuePlan, milestone string) (string, error)
@@ -171,6 +175,7 @@ func DefaultConfig() Config {
 		ArxivPerTopic:  8,
 		GitHubPerTopic: 6,
 		HNPerTopic:     8,
+		RedditPerTopic: 8,
 		MinStars:       25,
 		MinPoints:      10,
 		DupJaccard:     0.55,
@@ -180,12 +185,12 @@ func DefaultConfig() Config {
 
 func DefaultTopics() []Topic {
 	return []Topic{
-		{Key: "prompt-injection-defense", Arxiv: `abs:"prompt injection" AND (abs:agent OR abs:LLM OR abs:tool)`, GitHub: "prompt injection defense", HN: "prompt injection", Terms: []string{"prompt injection", "indirect", "jailbreak", "guardrail", "defense", "tool", "agent", "untrusted", "quarantine"}, Area: "security"},
-		{Key: "tool-call-adjudication", Arxiv: `(abs:"tool use" OR abs:"function calling") AND (abs:safety OR abs:permission OR abs:capability OR abs:policy)`, GitHub: "agent tool security", HN: "agent tool permissions", Terms: []string{"tool call", "function calling", "capability", "permission", "policy", "adjudicat", "default-deny", "sandbox", "syscall"}, Area: "trust-floor"},
-		{Key: "agent-gateway-serving", Arxiv: `(abs:LLM OR abs:agent) AND (abs:gateway OR abs:proxy OR abs:serving OR abs:router)`, GitHub: "llm gateway proxy", HN: "llm gateway", Terms: []string{"gateway", "proxy", "serving", "router", "openai", "api", "multi-agent", "shared cache", "audit"}, Area: "agentic-serving"},
-		{Key: "kv-prefix-cache-reuse", Arxiv: `(abs:"KV cache" OR abs:"prefix cache" OR abs:"prompt cache") AND (abs:reuse OR abs:sharing OR abs:inference)`, GitHub: "llm kv cache", HN: "prompt caching", Terms: []string{"kv cache", "prefix cache", "prompt cache", "reuse", "radix", "paged", "sharing", "turn", "prefill", "speculative"}, Area: "prompt-caching"},
-		{Key: "mcp-security", Arxiv: `abs:"model context protocol" OR (abs:agent AND abs:"tool poisoning")`, GitHub: "MCP security", HN: "model context protocol", Terms: []string{"model context protocol", "mcp", "tool poisoning", "server", "manifest", "untrusted", "supply chain"}, Area: "mcp"},
-		{Key: "agent-model-arch", Arxiv: `(abs:agent OR abs:"tool use") AND (abs:"function calling" OR abs:fine-tuning OR abs:training) AND ti:LLM`, GitHub: "function calling agent", HN: "open source llm agent", Terms: []string{"function calling", "tool use", "fine-tun", "training", "checkpoint", "qwen", "llama", "reasoning"}, Area: "model-arch"},
+		{Key: "prompt-injection-defense", Arxiv: `abs:"prompt injection" AND (abs:agent OR abs:LLM OR abs:tool)`, GitHub: "prompt injection defense", HN: "prompt injection", Reddit: "prompt injection agent", Terms: []string{"prompt injection", "indirect", "jailbreak", "guardrail", "defense", "tool", "agent", "untrusted", "quarantine"}, Area: "security"},
+		{Key: "tool-call-adjudication", Arxiv: `(abs:"tool use" OR abs:"function calling") AND (abs:safety OR abs:permission OR abs:capability OR abs:policy)`, GitHub: "agent tool security", HN: "agent tool permissions", Reddit: "agent tool sandbox permission", Terms: []string{"tool call", "function calling", "capability", "permission", "policy", "adjudicat", "default-deny", "sandbox", "syscall"}, Area: "trust-floor"},
+		{Key: "agent-gateway-serving", Arxiv: `(abs:LLM OR abs:agent) AND (abs:gateway OR abs:proxy OR abs:serving OR abs:router)`, GitHub: "llm gateway proxy", HN: "llm gateway", Reddit: "llm gateway proxy router", Terms: []string{"gateway", "proxy", "serving", "router", "openai", "api", "multi-agent", "shared cache", "audit"}, Area: "agentic-serving"},
+		{Key: "kv-prefix-cache-reuse", Arxiv: `(abs:"KV cache" OR abs:"prefix cache" OR abs:"prompt cache") AND (abs:reuse OR abs:sharing OR abs:inference)`, GitHub: "llm kv cache", HN: "prompt caching", Reddit: "kv cache prompt caching inference", Terms: []string{"kv cache", "prefix cache", "prompt cache", "reuse", "radix", "paged", "sharing", "turn", "prefill", "speculative"}, Area: "prompt-caching"},
+		{Key: "mcp-security", Arxiv: `abs:"model context protocol" OR (abs:agent AND abs:"tool poisoning")`, GitHub: "MCP security", HN: "model context protocol", Reddit: "model context protocol mcp", Terms: []string{"model context protocol", "mcp", "tool poisoning", "server", "manifest", "untrusted", "supply chain"}, Area: "mcp"},
+		{Key: "agent-model-arch", Arxiv: `(abs:agent OR abs:"tool use") AND (abs:"function calling" OR abs:fine-tuning OR abs:training) AND ti:LLM`, GitHub: "function calling agent", HN: "open source llm agent", Reddit: "local llm function calling agent", Terms: []string{"function calling", "tool use", "fine-tun", "training", "checkpoint", "qwen", "llama", "reasoning"}, Area: "model-arch"},
 	}
 }
 
@@ -331,7 +336,10 @@ func RenderIssue(c Candidate, score int, reasons []string, topic Topic, today st
 		if c.Published != "" {
 			facts = append(facts, "**Submitted:** "+firstN(c.Published, 10))
 		}
-	case "hackernews":
+	case "hackernews", "reddit":
+		if sub := stringFromExtra(c.Extra, "subreddit"); sub != "" {
+			facts = append(facts, "**Subreddit:** r/"+sub)
+		}
 		if points := intFromExtra(c.Extra, "points"); points > 0 {
 			facts = append(facts, fmt.Sprintf("**Points:** %d", points))
 		}
@@ -553,6 +561,75 @@ func ParseHackerNewsJSON(jsonText, topicKey string) []Candidate {
 	return out
 }
 
+// ParseRedditJSON turns a Reddit listing/search response into candidates. Like
+// the other sources it is a pure fold over the wire JSON. Reddit stamps posts
+// with a Unix `created_utc` float rather than an ISO string, so it is converted
+// to RFC3339 here (a deterministic transform, no wall clock) to match the shared
+// freshness path. Self/text posts carry the permalink in `url`; link posts carry
+// the outbound target, and the permalink is always kept as the discussion link.
+func ParseRedditJSON(jsonText, topicKey string) []Candidate {
+	var doc struct {
+		Data struct {
+			Children []struct {
+				Data struct {
+					ID          string  `json:"id"`
+					Title       string  `json:"title"`
+					URL         string  `json:"url"`
+					Permalink   string  `json:"permalink"`
+					Score       int     `json:"score"`
+					NumComments int     `json:"num_comments"`
+					CreatedUTC  float64 `json:"created_utc"`
+					Selftext    string  `json:"selftext"`
+					Subreddit   string  `json:"subreddit"`
+				} `json:"data"`
+			} `json:"children"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(jsonText), &doc); err != nil {
+		return nil
+	}
+	var out []Candidate
+	for _, ch := range doc.Data.Children {
+		h := ch.Data
+		id := strings.TrimSpace(h.ID)
+		if id == "" {
+			continue
+		}
+		title := squashSpace(h.Title)
+		if title == "" {
+			continue
+		}
+		permalink := ""
+		if h.Permalink != "" {
+			permalink = "https://www.reddit.com" + h.Permalink
+		}
+		u := firstNonEmpty(h.URL, permalink)
+		if u == "" {
+			u = "https://www.reddit.com/comments/" + id
+		}
+		published := ""
+		if h.CreatedUTC > 0 {
+			published = time.Unix(int64(h.CreatedUTC), 0).UTC().Format(time.RFC3339)
+		}
+		out = append(out, Candidate{
+			Source:    "reddit",
+			SourceID:  "reddit:" + id,
+			URL:       u,
+			Title:     title,
+			Summary:   squashSpace(stripTags(h.Selftext)),
+			Published: published,
+			Topic:     topicKey,
+			Extra: map[string]any{
+				"points":       h.Score,
+				"num_comments": h.NumComments,
+				"discussion":   firstNonEmpty(permalink, u),
+				"subreddit":    h.Subreddit,
+			},
+		})
+	}
+	return out
+}
+
 func LoadConfig(path string) ([]Topic, Config, error) {
 	topics := DefaultTopics()
 	cfg := DefaultConfig()
@@ -580,8 +657,8 @@ func LoadConfig(path string) ([]Topic, Config, error) {
 		if len(t.Terms) == 0 {
 			return nil, Config{}, fmt.Errorf("topic %q missing non-empty 'terms' list", t.Key)
 		}
-		if strings.TrimSpace(t.Arxiv) == "" && strings.TrimSpace(t.GitHub) == "" && strings.TrimSpace(t.HN) == "" {
-			return nil, Config{}, fmt.Errorf("topic %q must set 'arxiv', 'github', and/or 'hn'", t.Key)
+		if strings.TrimSpace(t.Arxiv) == "" && strings.TrimSpace(t.GitHub) == "" && strings.TrimSpace(t.HN) == "" && strings.TrimSpace(t.Reddit) == "" {
+			return nil, Config{}, fmt.Errorf("topic %q must set at least one of 'arxiv', 'github', 'hn', 'reddit'", t.Key)
 		}
 	}
 	return topics, cfg, nil
@@ -803,6 +880,18 @@ func GatherCandidates(fetcher Fetcher, topics []Topic, cfg Config, errorsOut *[]
 				}
 			}
 		}
+		if topic.Reddit != "" {
+			jsonText, err := fetcher.FetchReddit(topic.Reddit, cfg.RedditPerTopic)
+			if err != nil {
+				*errorsOut = append(*errorsOut, "reddit["+topic.Key+"]: "+err.Error())
+			} else {
+				for _, c := range ParseRedditJSON(jsonText, topic.Key) {
+					if intFromExtra(c.Extra, "points") >= cfg.MinPoints {
+						cands = append(cands, c)
+					}
+				}
+			}
+		}
 	}
 	return cands
 }
@@ -868,6 +957,37 @@ func (f LiveFetcher) FetchHackerNews(query string, limit int) (string, error) {
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("hn status %s", resp.Status)
+	}
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (f LiveFetcher) FetchReddit(query string, limit int) (string, error) {
+	client := f.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	q := url.Values{}
+	q.Set("q", query)
+	q.Set("sort", "new")
+	q.Set("t", "week")
+	q.Set("limit", strconv.Itoa(limit))
+	req, err := http.NewRequest("GET", RedditSearchAPI+"?"+q.Encode(), nil)
+	if err != nil {
+		return "", err
+	}
+	// Reddit rejects requests without a descriptive, non-default User-Agent.
+	req.Header.Set("User-Agent", "fak-idea-scout/1.0 (+https://github.com/anthony-chaudhary/fak)")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("reddit status %s", resp.Status)
 	}
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -1000,7 +1120,7 @@ func readJSONFile(path string, out any) error {
 
 func RenderHuman(w io.Writer, result RunResult, cfg Config) {
 	fmt.Fprintf(w, "idea-scout %s - %s\n", result.Date, result.Mode)
-	fmt.Fprintf(w, "  gathered %d candidates from %d topics x (arXiv + GitHub + Hacker News)\n", result.CandidatesGathered, result.Topics)
+	fmt.Fprintf(w, "  gathered %d candidates from %d topics x (arXiv + GitHub + Hacker News + Reddit)\n", result.CandidatesGathered, result.Topics)
 	var parts []string
 	keys := make([]string, 0, len(result.Skipped))
 	for k := range result.Skipped {
@@ -1190,6 +1310,8 @@ func sourceLabel(source string) string {
 		return "GitHub"
 	case "hackernews":
 		return "Hacker News"
+	case "reddit":
+		return "Reddit"
 	default:
 		return source
 	}
@@ -1219,6 +1341,8 @@ func applyThresholds(cfg *Config, values map[string]any) {
 			cfg.GitHubPerTopic = anyInt(v, cfg.GitHubPerTopic)
 		case "hn_per_topic":
 			cfg.HNPerTopic = anyInt(v, cfg.HNPerTopic)
+		case "reddit_per_topic":
+			cfg.RedditPerTopic = anyInt(v, cfg.RedditPerTopic)
 		case "min_stars":
 			cfg.MinStars = anyInt(v, cfg.MinStars)
 		case "min_points":
