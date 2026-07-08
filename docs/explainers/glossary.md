@@ -1,6 +1,6 @@
 ---
-title: "The fak/DOS Glossary: 12 Terms in One Line Each"
-description: "Plain one-line definitions of the vocabulary a newcomer trips on — verdict, capability floor, quarantine, addressable KV cache, bit-exact eviction, witness, lease, refusal reason, recall re-verification, syscall boundary, prefix-cache discount, fail-closed — each linked to its full explainer."
+title: "The fak/DOS Glossary: 13 Terms in One Line Each"
+description: "Plain one-line definitions of the vocabulary a newcomer trips on — addressable KV cache, bit-exact eviction, prefix-cache discount, verdict, capability floor, quarantine, syscall boundary, fail-closed, witness, lease, refusal reason, recall re-verification, change data capture — each linked to its full explainer."
 slug: glossary
 keywords:
   - fak glossary
@@ -18,11 +18,17 @@ keywords:
 date: 2026-07-03
 ---
 
-# The fak/DOS glossary — 12 terms, one line each
+# The fak/DOS glossary — 13 terms, one line each
 
 The vocabulary a newcomer trips on, defined plainly. Each term links to the
 explainer that earns the definition. People can only repeat what they can
 name — this page is the naming.
+
+## The cache
+
+- **[Addressable KV cache](addressable-kv-cache-in-5-min.md)** — a context cache you can reach into the middle of, not just append to: one span can be removed after the fact instead of rebuilding everything behind it.
+- **[Bit-exact eviction](addressable-kv-cache.md)** — removing a span leaves the cache bit-for-bit identical to one that never contained it (`max|Δ| = 0`): provable forgetting, not best-effort deletion.
+- **[Prefix-cache discount](long-session-economics.md)** — the provider's cheaper rate for a prompt prefix that is byte-identical to what it has already processed; it survives only while those bytes do not change.
 
 ## The boundary
 
@@ -39,11 +45,9 @@ name — this page is the naming.
 - **[Lease / arbitration](verify-dont-trust.md)** — how parallel agents avoid collisions: each declares the file region it will touch and is admitted only if that region is disjoint from every live lease.
 - **[Recall re-verification](memory-engineering.md)** — a saved memory is re-checked against git and the working tree at the moment it is read; a stale claim is withheld or hedged, never injected as fact.
 
-## The cache
+## The change feeds
 
-- **[Addressable KV cache](addressable-kv-cache-in-5-min.md)** — a context cache you can reach into the middle of, not just append to: one span can be removed after the fact instead of rebuilding everything behind it.
-- **[Bit-exact eviction](addressable-kv-cache.md)** — removing a span leaves the cache bit-for-bit identical to one that never contained it (`max|Δ| = 0`): provable forgetting, not best-effort deletion.
-- **[Prefix-cache discount](long-session-economics.md)** — the provider's cheaper rate for a prompt prefix that is byte-identical to what it has already processed; it survives only while those bytes do not change.
+- **[Change Data Capture (CDC), fak's sense](change-data-capture-for-agents.md)** — fak's wire feeds (the coherence bus, the hash-chained journal, the drive-state stream) are CDC changelogs for the agent loop: bounded, cursor-ordered, tombstone-carrying logs a data engineer already knows how to consume.
 
 ## Related glossaries
 

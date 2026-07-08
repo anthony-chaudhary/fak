@@ -1,6 +1,6 @@
 ---
 title: "What fak Is Not — the Honest Boundary"
-description: "fak does not replace vLLM, SGLang, or llama.cpp for raw tokens/sec — it fronts them for the agent boundary. The limits, volunteered plainly, are the point."
+description: "fak fronts vLLM, SGLang, or llama.cpp to make the agent loop cheaper and longer-running — governing the tool call on the same seam. It does not replace them for raw tokens/sec; the limits, volunteered plainly, are the point."
 slug: what-fak-is-not
 keywords:
   - fak is not a serving engine
@@ -19,8 +19,9 @@ date: 2026-07-03
 # What fak Is Not — the Honest Boundary
 
 > **TL;DR:** `fak` is **not** a serving engine. It does not compete with
-> vLLM / SGLang / llama.cpp on raw tokens per second — it **fronts** them for the
-> agent boundary: the tool call. None of its primitives is novel (a 0/29 prior-art
+> vLLM / SGLang / llama.cpp on raw tokens per second — it **fronts** them to make the
+> agent loop cheaper and longer-running, governing the tool call — the agent
+> boundary — on the same seam. None of its primitives is novel (a 0/29 prior-art
 > audit says so); the contribution is the **assembly**. This page volunteers the
 > limits first, because the limits are the honest part of the pitch.
 
@@ -40,13 +41,15 @@ gateway fronting SGLang, it *trails* raw SGLang **0.75× at peak** — 1085.6 vs
 decision on the call path. That gateway/adjudication tax converges toward **~3% at
 saturation**. [WITNESSED]
 
-That is not a bug to hide; it is the shape of the product. `fak`'s field is
-**governance and containment at the agent boundary**, not throughput. It sits in
-front of vLLM, SGLang, or llama.cpp and adjudicates every tool call — deny by
-structure, repair a malformed call, quarantine a poisoned result — while the engine
-behind it does what engines are good at: emit tokens. If you need raw tokens/sec,
-the engine is the answer. If you need the *tool call* to pass through a boundary the
-model cannot talk past, that is the part `fak` adds.
+That is not a bug to hide; it is the shape of the product. `fak`'s field is the
+**economics of the agent loop** — a session that runs cheaper and longer because
+`fak` owns the KV cache and fronts the engine — not raw throughput. It sits in
+front of vLLM, SGLang, or llama.cpp and, on the same seam, adjudicates every tool
+call — deny by structure, repair a malformed call, quarantine a poisoned result —
+while the engine behind it does what engines are good at: emit tokens. If you need
+raw tokens/sec, the engine is the answer. If you need the agent loop to run cheaper
+and longer — with the *tool call* passing through a boundary the model cannot talk
+past on the same checkpoint — that is the part `fak` adds.
 
 The in-kernel model path exists, but it is a **bit-exact correctness reference**,
 not a tuned server: no continuous batching, no paged attention, no multi-tenant
@@ -94,6 +97,23 @@ detector is a bonus on top of a floor that holds without it. Detectors are evada
 the floor is the cap lock. (Longer treatment:
 [Why default-deny beats a classifier](default-deny-vs-classifier.md).)
 
+## 4. It is not a Debezium-style database-replication CDC
+
+fak's change feeds are change-data-capture *for the agent loop* — the coherence
+bus, the hash-chained journal, and the drive-state stream are bounded,
+cursor-ordered changelogs a data engineer can consume with familiar tooling (the
+full dictionary is [change data capture for agents](change-data-capture-for-agents.md)).
+That framing is a lens, not a claim to be Debezium.
+
+fak does **not** replicate a database. There is no relational schema, no
+primary-key row image, no before/after tuple — a mutation carries its
+invalidation `Tags` (which entities to evict), not a full row snapshot. It will
+not stream your Postgres WAL into Kafka; it streams *what an agent changed,
+refuted, or committed* so other agents can re-plan. The events map cleanly onto a
+Debezium envelope (so an export is a thin mapper, not a rewrite), but the source
+is agent-loop state, and the honest `before` is `null`. If you need database
+replication, Debezium is the answer; fak captures a different changelog.
+
 ## The numbers, fenced
 
 When `fak` *does* quote a win, it quotes the witnessed one against the real
@@ -112,8 +132,9 @@ alternative, never the strawman:
 
 ## The one line to keep
 
-**`fak` is not an engine — it is the boundary in front of one.** It does not make
-your tokens faster; it makes the tool call *governed*. The parts are old, the
+**`fak` fronts an engine to make the agent loop cheaper and longer-running — and, on
+the same seam, governs the tool call.** It does not make your tokens faster; it makes
+the *loop* cheaper and the tool call *governed*. The parts are old, the
 detector is evadable, and the throughput tax is real — and saying so is the feature.
 
 ## See also
