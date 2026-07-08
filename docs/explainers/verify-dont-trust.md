@@ -140,6 +140,9 @@ does not accumulate the expensive one.
 
 ## Where to go next
 
+- [The status a peer can trust](status-a-peer-can-trust.md) — the in-flight
+  sibling: how a *running* agent reads a *running* peer's status without
+  believing it, via a digest with no `claimed` field.
 - [The tool call is a syscall](tool-call-is-a-syscall.md) — the keystone model
   this sits under: the model proposes, the kernel disposes.
 - [Why default-deny beats a classifier](default-deny-vs-classifier.md) — the
