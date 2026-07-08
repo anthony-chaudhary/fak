@@ -182,7 +182,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		return accountsDoctor(stdout, stderr, *registryPath, *dosView, *jobView, *asJSON, *write)
 
 	case "resolve":
-		return accountsResolve(stdout, stderr, positional, *registryPath, *homeDir, *pin, *asEnv)
+		return accountsResolve(stdout, stderr, positional, *addName, *registryPath, *homeDir, *pin, *asEnv)
 
 	case "next":
 		// The live ROTATION READ: print the next eligible account in the round-robin — the
@@ -208,7 +208,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		return runAccountsRehome(stdout, stderr, *rehomeAddr, *rehomeKey, *rmReason, *asJSON)
 
 	case "pull":
-		return accountsPull(stdout, stderr, positional, *registryPath, *homeDir, *dryRun)
+		return accountsPull(stdout, stderr, positional, *addName, *registryPath, *homeDir, *dryRun)
 
 	case "discover":
 		return accountsDiscover(stdout, stderr, *registryPath, *homeDir, *write)
@@ -394,13 +394,22 @@ func accountsVersion(stdout io.Writer, asJSON bool) int {
 // accountsResolve prints the config dir that serves <name>: rehoming to a live seat by default
 // (Serve), or pinning to the exact seat with --pin (Resolve). With --env it prints
 // CLAUDE_CONFIG_DIR=<dir> for eval/wrappers, else the bare dir.
-// accountsLoadFor resolves the shared `fak accounts <verb> <name>` prologue: it requires a
-// positional name (usage on absence), loads-or-discovers the registry, and refreshes it from
-// disk (Serve/Resolve/Pull all need disk-derived identity). It returns (name, refreshed
-// registry, code, ok): ok=false means the caller should return code (2 on a missing name, 1
-// on a registry load error).
-func accountsLoadFor(stderr io.Writer, positional []string, usage, registryPath, homeDir string) (string, accounts.Registry, int, bool) {
-	if len(positional) == 0 {
+// accountsLoadFor resolves the shared `fak accounts <verb> <name>` prologue: it resolves the
+// target seat, loads-or-discovers the registry, and refreshes it from disk (Serve/Resolve/Pull
+// all need disk-derived identity). The positional is the primary form for back-compat; nameFlag
+// (the `--name` value) is the fallback when no positional is given, so `resolve/pull --name X`
+// matches the mutating verbs (remove/set-role) that REQUIRE --name — the launch pattern. It
+// returns (name, refreshed registry, code, ok): ok=false means the caller should return code
+// (2 on a missing name, 1 on a registry load error).
+func accountsLoadFor(stderr io.Writer, positional []string, nameFlag, usage, registryPath, homeDir string) (string, accounts.Registry, int, bool) {
+	name := ""
+	if len(positional) > 0 {
+		name = positional[0]
+	}
+	if name == "" {
+		name = strings.TrimSpace(nameFlag)
+	}
+	if name == "" {
 		fmt.Fprintln(stderr, usage)
 		return "", accounts.Registry{}, 2, false
 	}
@@ -409,13 +418,13 @@ func accountsLoadFor(stderr io.Writer, positional []string, usage, registryPath,
 		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
 		return "", accounts.Registry{}, 1, false
 	}
-	return positional[0], reg.Refresh(), 0, true
+	return name, reg.Refresh(), 0, true
 }
 
-func accountsResolve(stdout, stderr io.Writer, positional []string, registryPath, homeDir string, pin, asEnv bool) int {
+func accountsResolve(stdout, stderr io.Writer, positional []string, nameFlag, registryPath, homeDir string, pin, asEnv bool) int {
 	// Rehome is the DEFAULT (a seat that can't serve falls forward to a live one); --pin is the
 	// strict opt-in. The shared prologue refreshes the registry from disk for that identity.
-	name, reg, code, ok := accountsLoadFor(stderr, positional, "usage: fak accounts resolve <name> [--env]", registryPath, homeDir)
+	name, reg, code, ok := accountsLoadFor(stderr, positional, nameFlag, "usage: fak accounts resolve <name>|--name <name> [--env]", registryPath, homeDir)
 	if !ok {
 		return code
 	}
@@ -740,8 +749,8 @@ func accountsReportHome(stderr io.Writer, home accounts.Home, chain []string) ac
 
 // accountsPull copies the credential bundles a name's seat depends on INTO its serving dir,
 // following the registry's pull plan. With dryRun it prints the plan without copying.
-func accountsPull(stdout, stderr io.Writer, positional []string, registryPath, homeDir string, dryRun bool) int {
-	name, reg, code, ok := accountsLoadFor(stderr, positional, "usage: fak accounts pull <name> [--dry-run]", registryPath, homeDir)
+func accountsPull(stdout, stderr io.Writer, positional []string, nameFlag, registryPath, homeDir string, dryRun bool) int {
+	name, reg, code, ok := accountsLoadFor(stderr, positional, nameFlag, "usage: fak accounts pull <name>|--name <name> [--dry-run]", registryPath, homeDir)
 	if !ok {
 		return code
 	}

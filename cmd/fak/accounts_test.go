@@ -133,6 +133,17 @@ func TestRunAccountsResolveRehome(t *testing.T) {
 	if !strings.Contains(out.String(), "CLAUDE_CONFIG_DIR="+gem8) {
 		t.Fatalf("resolve --env = %q", out.String())
 	}
+
+	// #3213: `resolve --name q` resolves identically to the positional `resolve q`,
+	// so an operator who just ran `remove --name q` can reach for the same flag here.
+	out.Reset()
+	errb.Reset()
+	if rc := runAccounts(&out, &errb, []string{"resolve", "--name", "q", "--registry", regPath, "--home", home}); rc != 0 {
+		t.Fatalf("resolve --name rc=%d stderr=%s", rc, errb.String())
+	}
+	if strings.TrimSpace(out.String()) != gem8 {
+		t.Fatalf("resolve --name q = %q, want rehomed dir %q (must match positional form)", strings.TrimSpace(out.String()), gem8)
+	}
 }
 
 func TestRunAccountsPull(t *testing.T) {
@@ -189,6 +200,17 @@ func TestRunAccountsPull(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "nothing to pull") {
 		t.Fatalf("active pull should be a no-op: %s", out.String())
+	}
+
+	// #3213: `pull --name gem8-seat` routes through the same shared helper as the
+	// positional form, so the --name fallback works for pull too.
+	out.Reset()
+	errb.Reset()
+	if rc := runAccounts(&out, &errb, []string{"pull", "--name", "gem8-seat", "--registry", regPath, "--home", home}); rc != 0 {
+		t.Fatalf("pull --name rc=%d stderr=%s", rc, errb.String())
+	}
+	if !strings.Contains(out.String(), "nothing to pull") {
+		t.Fatalf("pull --name should match positional (no-op on active seat): %s", out.String())
 	}
 }
 
