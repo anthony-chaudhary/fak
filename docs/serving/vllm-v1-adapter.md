@@ -21,7 +21,12 @@ governance.
 ## The three public surfaces, and what fak does with each
 
 The adapter touches **only** vLLM's documented public surfaces. No vLLM source is
-vendored, forked, or patched.
+vendored, forked, or patched. This is not merely a review promise: the
+`TestVLLMAdapterConstructsOnlyPublicVLLMEndpoints` guard drives the adapter's real
+path constructors and fails closed if any HTTP path it emits leaves the public
+allowlist (`/v1/chat/completions`, `/v1/completions`, `/metrics`) or dips below the
+public boundary (`/internal`, `/debug`, path traversal) — so an edit that reaches a
+forked or internal vLLM endpoint breaks a witness instead of passing silent review.
 
 1. **OpenAI-compatible HTTP** (`/v1/chat/completions` and `/v1/completions`,
    `stream=true`). `Admit` lowers a fak tool call onto the chat or completions
@@ -112,6 +117,9 @@ go test ./internal/engine -run VLLM
   BlockRemoved / AllBlocksCleared fold into the residency index and recorder.
 - `TestVLLMPrometheusNormalization` — vLLM counters normalize into the
   `fak_serving_*` L2 schema, per-worker labelled.
+- `TestVLLMAdapterConstructsOnlyPublicVLLMEndpoints` — the no-fork / public-surface
+  contract is executable: every HTTP path the adapter constructs stays inside the
+  documented public vLLM V1 allowlist, with no internal/debug/traversal path.
 - `TestVLLMGovernanceResolvesToEngineVLLM` — the cache-control plane resolves a
   directive to the vLLM engine.
 - `TestVLLMLiveWorkerSmoke` (`vllm_live_smoke_test.go`) — an env-gated live
