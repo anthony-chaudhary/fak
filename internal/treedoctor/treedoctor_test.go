@@ -95,6 +95,79 @@ func TestDiagnoseClassifiesWorktrees(t *testing.T) {
 	}
 }
 
+// TestSweepWorkerWorktree is the #3179 witness: an orphaned fak-worker-wt-* worktree
+// (worker crashed / host died mid-wave, so its in-worktree commit left HEAD OFF the trunk)
+// is reaped by the sweep even though it is NOT merged, while a live marker worktree and a
+// non-marker worktree are both left untouched. The marker check is the load-bearing
+// guardrail: only OUR disposable worker trees get the relaxed (merge-status-agnostic) reap.
+func TestSweepWorkerWorktree(t *testing.T) {
+	main := t.TempDir()
+	orphan := filepath.Join(main, "fak-worker-wt-cmd-deadbeef00")     // marker, crashed, unmerged => reap
+	liveWorker := filepath.Join(main, "fak-worker-wt-cmd-abc1234567") // marker, freshly touched => keep
+	scratch := filepath.Join(main, "wt-scratch")                      // non-marker, unmerged => keep
+	for _, d := range []string{orphan, liveWorker, scratch} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().Add(-time.Hour)
+	writeAt(t, filepath.Join(orphan, "f"), old)
+	writeAt(t, filepath.Join(scratch, "f"), old)
+	writeAt(t, filepath.Join(liveWorker, "f"), time.Now())
+
+	// ancestor is empty => NONE of the three is an ancestor of the trunk (all "unmerged").
+	// So the merged-only rule alone would keep all three; only the marker rule reaps the orphan.
+	f := &fakeGit{
+		listOut: listPorcelain(
+			[2]string{main, "aaaa"},
+			[2]string{orphan, "bbbb"},
+			[2]string{liveWorker, "cccc"},
+			[2]string{scratch, "dddd"},
+		),
+		ancestor: map[string]bool{},
+	}
+
+	rep := Diagnose(context.Background(), f.run, Options{RepoRoot: main, Now: time.Now()})
+	byPath := map[string]WorktreeState{}
+	for _, w := range rep.Worktrees {
+		byPath[w.Path] = w
+	}
+	if !byPath[orphan].IsWorker || !byPath[orphan].Prunable {
+		t.Fatalf("orphan marker worktree must be prunable even when unmerged: %+v", byPath[orphan])
+	}
+	if byPath[liveWorker].Prunable || !byPath[liveWorker].Live {
+		t.Fatalf("live worker worktree must be KEPT: %+v", byPath[liveWorker])
+	}
+	if byPath[scratch].Prunable || byPath[scratch].IsWorker {
+		t.Fatalf("non-marker worktree must be KEPT: %+v", byPath[scratch])
+	}
+	if n := len(rep.PrunableWorktrees()); n != 1 {
+		t.Fatalf("prunable count = %d, want exactly 1 (the orphan)", n)
+	}
+
+	// Apply the sweep: ONLY the orphan is force-removed, and `git worktree prune` follows.
+	_, actions := Sweep(context.Background(), f.run, Options{RepoRoot: main, Now: time.Now()}, true)
+	var removed []string
+	prunedAfter := false
+	for _, c := range f.calls {
+		if len(c) >= 5 && c[1] == "worktree" && c[2] == "remove" && c[3] == "--force" {
+			removed = append(removed, c[4])
+		}
+		if len(c) >= 3 && c[1] == "worktree" && c[2] == "prune" {
+			prunedAfter = true
+		}
+	}
+	if len(removed) != 1 || removed[0] != orphan {
+		t.Fatalf("sweep force-removed %v, want exactly [%s]", removed, orphan)
+	}
+	if !prunedAfter {
+		t.Fatalf("sweep did not run `git worktree prune` after reaping the orphan")
+	}
+	if joined := strings.Join(actions, "\n"); !strings.Contains(joined, orphan) {
+		t.Fatalf("sweep actions %v do not name the reaped orphan", actions)
+	}
+}
+
 func TestDiagnoseDetectsStaleLock(t *testing.T) {
 	main := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(main, ".git"), 0o755); err != nil {

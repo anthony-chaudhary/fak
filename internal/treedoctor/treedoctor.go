@@ -12,9 +12,12 @@
 //
 // The doctrine treedoctor enforces is the one that session learned the hard way: in an
 // always-on tree you must NEVER delete a peer's live work. So treedoctor only ever reclaims
-// the two things that are provably safe — a lockfile whose holder PID is dead, and a
-// worktree whose HEAD is an ancestor of the trunk (already merged) AND has not been touched
-// recently AND carries no unmerged commits. Everything else is reported, never removed.
+// the things that are provably safe — a lockfile whose holder PID is dead; a worktree whose
+// HEAD is an ancestor of the trunk (already merged) AND has not been touched recently; and an
+// orphaned per-worker isolation worktree (its dir carries WorkerWorktreeMarker,
+// `fak-worker-wt-*`) that is not live — disposable editing space whose only durable output
+// already landed on the trunk, so a crashed worker's leaked tree is reclaimed even when its
+// in-worktree commit left HEAD off the trunk. Everything else is reported, never removed.
 //
 // Like safecommit, every git effect goes through an injected Runner so the whole decision
 // tree is testable with no git and no repo. Diagnose is read-only; Sweep performs the
@@ -59,6 +62,25 @@ const DefaultLiveWindow = 10 * time.Minute
 // DefaultTrunk is the merge target a worktree must be folded into to be prunable.
 const DefaultTrunk = "origin/main"
 
+// WorkerWorktreeMarker is the leading path segment fak's per-worker isolation
+// stamps onto a throwaway worktree dir (`fak-worker-wt-<lane>-<key>`), mirrored
+// from tools/worker_worktree.py's WORKTREE_MARKER. A worktree carrying this marker
+// is disposable editing space whose only durable output already LANDED on the trunk
+// via land_worktree_diff — so an orphan (worker crashed, or the host died mid-wave)
+// is safe to reap regardless of merge status. The marker is the load-bearing
+// guardrail: only a marker worktree is ever reaped on this relaxed rule, never the
+// primary or a peer's non-marker scratch tree.
+const WorkerWorktreeMarker = "fak-worker-wt"
+
+// isWorkerWorktree reports whether path is one of fak's per-worker isolation
+// worktrees (its basename carries WorkerWorktreeMarker). Mirrors
+// worker_worktree.is_worker_worktree so the sweep reuses the SAME authoritative
+// match rather than re-deriving it.
+func isWorkerWorktree(path string) bool {
+	name := filepath.Base(filepath.Clean(path))
+	return name == WorkerWorktreeMarker || strings.HasPrefix(name, WorkerWorktreeMarker+"-")
+}
+
 // LockState is the diagnosis of the commit lock.
 type LockState struct {
 	Path      string `json:"path"`
@@ -71,11 +93,12 @@ type LockState struct {
 type WorktreeState struct {
 	Path     string `json:"path"`
 	Head     string `json:"head,omitempty"`
-	IsMain   bool   `json:"is_main"`  // the RepoRoot itself — never a prune candidate
-	Merged   bool   `json:"merged"`   // HEAD is an ancestor of Trunk (commits already on the trunk)
-	Live     bool   `json:"live"`     // touched within LiveWindow — an active session, keep
-	DirtyN   int    `json:"dirty_n"`  // count of uncommitted entries (informational)
-	Prunable bool   `json:"prunable"` // Merged && !Live && !IsMain — safe to remove
+	IsMain   bool   `json:"is_main"`             // the RepoRoot itself — never a prune candidate
+	IsWorker bool   `json:"is_worker,omitempty"` // carries WorkerWorktreeMarker — disposable, reap when not live
+	Merged   bool   `json:"merged"`              // HEAD is an ancestor of Trunk (commits already on the trunk)
+	Live     bool   `json:"live"`                // touched within LiveWindow — an active session, keep
+	DirtyN   int    `json:"dirty_n"`             // count of uncommitted entries (informational)
+	Prunable bool   `json:"prunable"`            // safe to remove: (Merged || IsWorker) && !Live && !IsMain
 	Keep     string `json:"keep,omitempty"`
 }
 
@@ -141,12 +164,16 @@ func Sweep(ctx context.Context, run Runner, opts Options, apply bool) (Report, [
 		if !w.Prunable {
 			continue
 		}
+		kind := "merged worktree"
+		if w.IsWorker {
+			kind = "orphan worker worktree"
+		}
 		if apply {
 			if _, _, err := run(ctx, opts.RepoRoot, "worktree", "remove", "--force", w.Path); err == nil {
-				actions = append(actions, "pruned merged worktree "+w.Path)
+				actions = append(actions, "pruned "+kind+" "+w.Path)
 			}
 		} else {
-			actions = append(actions, "would prune merged worktree "+w.Path)
+			actions = append(actions, "would prune "+kind+" "+w.Path)
 		}
 	}
 	if apply && len(actions) > 0 {
@@ -180,6 +207,7 @@ func diagnoseWorktrees(ctx context.Context, run Runner, repoRoot, trunk string, 
 			states = append(states, s)
 			continue
 		}
+		s.IsWorker = isWorkerWorktree(wt.path)
 		// Merged? HEAD an ancestor of trunk => its commits are already on the trunk.
 		if _, code, aerr := run(ctx, wt.path, "merge-base", "--is-ancestor", "HEAD", trunk); aerr == nil && code == 0 {
 			s.Merged = true
@@ -194,10 +222,22 @@ func diagnoseWorktrees(ctx context.Context, run Runner, repoRoot, trunk string, 
 			s.Live = true
 		}
 		switch {
+		case s.Live:
+			// Touched within the window => an active session (or a live worker),
+			// never pruned even if merged/marker. Checked first so a live worker
+			// worktree is kept exactly like any other live tree.
+			s.Keep = "live (touched within window)"
+		case s.IsWorker:
+			// A fak-worker-wt-* worktree is throwaway editing space: its only durable
+			// output already landed on the trunk via land_worktree_diff. An orphan
+			// (worker crashed, or the host died mid-wave) leaks its tree + in-worktree
+			// GOCACHE with no scheduled reclaimer — and if the worker committed
+			// in-worktree before dying its HEAD is NOT an ancestor of the trunk, so the
+			// merged-only rule below would keep it forever. Reap it regardless of merge
+			// status; isWorkerWorktree is the load-bearing guardrail.
+			s.Prunable = true
 		case !s.Merged:
 			s.Keep = "not merged into " + trunk
-		case s.Live:
-			s.Keep = "live (touched within window)"
 		default:
 			s.Prunable = true
 		}
