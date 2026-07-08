@@ -1,0 +1,253 @@
+---
+name: study-repo
+description: One repeatable pass that turns "look at <repo>" into scoped, witnessed, license-clean, FILED backlog. When someone drops anything that names a body of code — a GitHub URL, a local checkout, a monorepo subtree, a single file, an npm/pypi/crates package, a paper-with-code / arXiv link, a tarball, a PR/diff, or a bare "study this repo" / "what can we learn from X" / "borrow from <repo>" with no URL at all — this drives the whole flow end to end. Acquire the source into scratch (never the tree) and PIN the commit SHA; read the CODE not the pitch, DEEP by default (fan parallel readers across load-bearing modules + tests + recent commits, then a completeness-critic pass — not a README skim); extract MANY candidate borrows, each grounded at a real source `path:line@sha`; decide borrow-vs-integrate with a license + attribution check; DECOMPOSE into many small independently-shippable tickets (or an epic + child leaves for a track), NEVER one "adopt everything from repo X" monolith; witness each borrow against fak (`fak_feature_query`/`fak index` → PRESENT/PARTIAL/ABSENT), and — the default terminal action — FILE the surviving PARTIAL/ABSENT borrows as gh issues under the right epic. The acquisition/exploration/scoping front-half that FEEDS `field-borrow` (which witnesses+files a single named capability). Distinct from the automated outward `idea-scout` and the kernel-only `sota-check`. Use when handed a specific external repo/codebase/paper to learn from, before filing any "we should adopt X from repo Y" issue, after a competitor open-sources something worth reading, or on a `/loop` cadence over a watch-list.
+disable-model-invocation: false
+user-invocable: true
+allowed-tools: Read, Bash, Grep, Glob, Write, Edit, WebFetch, WebSearch, Agent, mcp__fak__fak_feature_query, mcp__fak__fak_capabilities, mcp__fak__fak_index_docs, mcp__fak__fak_index_leaves, mcp__fak__fak_index_verbs, mcp__fak__fak_index_claims
+argument-hint: "<repo-url | local-path | pkg | paper-url | 'look at X'>  [--deep(default)|--quick]  [--file(default)|--draft]  [--subtree <path>]"
+metadata:
+  opencode: claude-only
+---
+
+# study-repo — turn "look at <repo>" into scoped, witnessed, FILED borrows
+
+## Why this skill exists
+
+Someone drops a repo — "look at this" — and the silent failure mode fires: an agent
+skims the README, believes the marketing, and either files one giant "adopt everything
+from repo X" ticket no one can ship, or writes a tidy candidate table into a note and
+**files nothing at all**. Four things go wrong. It borrowed from the *pitch* instead of
+the *code that implements it* (a fabricated "repo X does Y" is the exact citation failure
+`dos_citation_resolve` exists to catch). It read **shallowly** — one skim, a couple of
+obvious borrows, and stopped, leaving the real value unmined. It never asked whether
+**fak already has it**. And it produced a **monolith** or a **transcript-only** result —
+research that never became dispatchable work.
+
+The law, in one line: **the default answer to "look at this repo" is _acquire it, read
+the code DEEP, decompose, and FILE_ — pin the source, ground every borrow at a real
+`path:line@sha`, read broadly enough that a completeness critic finds nothing left
+unopened, witness each against fak, decide borrow-vs-integrate on the license, and file
+many small independently-shippable gh issues (never one monolith, never zero).** Deep and
+filed are the *defaults*; `--quick` and `--draft` are the opt-outs, not the reverse.
+
+This skill owns the **acquisition + exploration + scoping + filing** front-half. For a
+single already-named capability it reuses [`field-borrow`](../field-borrow/SKILL.md)'s
+witness discipline rather than re-implementing it.
+
+### How this differs from its siblings (do not duplicate them)
+
+| Skill / tool | Starts from | Mechanism | License-aware? | Files issues? |
+|---|---|---|---|---|
+| `idea-scout` (`tools/idea_scout.py`) | an outward **feed** | automated arXiv/GitHub scan, dedup vs existing issues | no | yes (triage queue) |
+| `field-borrow` | a **named capability** | dogfood `fak_feature_query`/`fak index` → witness the gap, file epic-anchored | no | yes (grounded) |
+| `sota-check` | a **kernel op** you're about to write | `fak sota` prior-art matrix, route borrow/bind/stay-minimal | per-row route | no |
+| `industry-score` | the **field taxonomy** | coverage + parity-debt scorecard | no | no |
+| **study-repo** (this) | **anything that names code** | acquire → read DEEP (fan-out) → extract → scope small → witness → **FILE** | **yes — borrow vs integrate** | **yes — by default** |
+
+study-repo **feeds** field-borrow: it produces the many candidates a capability-witness
+then grades. Use study-repo when the input is a *body of code*; field-borrow when the
+input is already one *named capability*. If a borrow is a **compute kernel**, route it
+through `sota-check` (that matrix tracks the production reference).
+
+## What counts as "a repo" — be flexible about the input
+
+Do not refuse because the input isn't a clean `github.com/...` URL. Map the input to an
+acquisition, then run the same pass:
+
+| Input | Acquire by |
+|---|---|
+| GitHub/GitLab URL | shallow clone (below) |
+| Local path / existing checkout | read in place — **do not re-clone**; pin `git -C <path> rev-parse HEAD` (or note "uncommitted" + `git describe`) |
+| Monorepo, only one subtree matters | clone + `git sparse-checkout set <subtree>`, or `--subtree <path>` |
+| One file worth a peek | `WebFetch` the raw file — no clone (this is what `--quick` is for) |
+| npm / pypi / crates package | resolve to its source repo (registry page → repository URL), then clone; else fetch the published tarball |
+| Paper-with-code / arXiv | find the linked implementation repo (`paperswithcode`, the paper's "Code" link, a `WebSearch`) and study **that**; the PDF is the map, the repo is the ground truth |
+| Tarball / release asset | download into scratch, unpack, treat as a checkout (no SHA → pin the release tag + URL) |
+| PR / diff / a single commit | clone, `git checkout <sha>`; study the change *and* the surrounding module |
+| Bare "look at X" / no URL | resolve the name (`WebSearch` for the canonical repo), confirm it's the one meant, then clone. If genuinely ambiguous, state your pick and proceed — don't stall |
+
+The output shape flexes too: a single borrow → one leaf; a coherent track → an epic +
+child leaves; a whole subsystem worth adopting → an epic. Pick the shape the work demands.
+
+## The pass
+
+### 1 — Acquire into scratch, and PIN the source (never the tree)
+
+Shallow-clone into the session scratchpad, never into `C:\work\fak` (the `*scratchpad*`
+gitignore is a backstop, not the plan — the clone must never be committable):
+
+```bash
+git clone --depth 1 --filter=blob:none <url> "$SCRATCH/study-<repo>"
+git -C "$SCRATCH/study-<repo>" rev-parse HEAD   # PIN this SHA — the borrow's dated anchor
+```
+
+`--filter=blob:none` keeps a big repo light (blobs fault in on read); `sparse-checkout`
+for a huge tree; `WebFetch` for a one-file peek. **The pinned SHA (or release tag / local
+HEAD) is the falsifiable anchor** — the way `sota-check` pins a `PrimaryLink`. A borrow
+with no `@sha` is a rumor. If *why they changed it* will matter, deepen the clone now
+(`--depth` drops the log).
+
+### 2 — Read the CODE, not the pitch — DEEP by default
+
+Read in this order, because it goes from claims to ground truth:
+
+1. **README / docs** — for the *map* only (where the interesting modules live). Never
+   borrow from a README bullet; it is marketing until the code confirms it.
+2. **The load-bearing modules** — the actual implementation of the thing you'd borrow.
+3. **The tests** — they encode intent and the edge cases the authors actually hit; a
+   technique's real shape is in its test, not its docstring.
+4. **Recent commits / CHANGELOG** — what they are *actively* improving is where the live,
+   worth-borrowing ideas are (and what they just ripped out is a warning).
+
+**Deep is the default, and for anything past a single-file peek that means FAN OUT.**
+Dispatch parallel `Explore`/`Agent` readers — one per subsystem the README map exposes
+(e.g. the scheduler, the storage layer, the eval harness, the wire protocol) — each
+returning its load-bearing `path:line@sha` findings. A single serial skim of a
+multi-module repo is the shallow read this skill exists to kill. Then run a
+**completeness-critic pass**: name the subsystems/directories you did *not* open and
+justify each skip, or open it. The depth floor: you are not done reading until the critic
+finds nothing material left unopened — not when you've found "a couple of borrows".
+
+`--quick` is the deliberate escape hatch (one file, one obvious technique, a time box):
+one reader, skip the fan-out. Everything else is deep.
+
+**A borrow must be grounded in code you read**, at `path:line@sha` in the clone — never a
+paraphrase of the pitch.
+
+### 3 — Extract candidate borrows, one technique each — and don't under-mine
+
+For each thing worth taking, write one candidate: **the technique in one line · the source
+`path:line@sha` · why it beats what fak likely does today**. One technique per candidate —
+if a candidate says "and also", split it now. A rich repo yields *many* candidates; a
+list of two or three from a large tree is usually a shallow-read tell, not a sparse repo.
+Steps 4–6 shrink and scope; step 2's job was to give them enough raw material.
+
+### 4 — Decide borrow-vs-integrate (the license gate)
+
+This is the decision `field-borrow` never has to make, because study-repo touches real
+foreign code:
+
+- **INSPIRE (the default).** Learn the technique, reimplement it clean-room in fak's Go
+  idiom — same discipline as `sota-check` ("learn the technique, not copy the bytes"). No
+  license entanglement, but **still cite the source** (`path:line@sha`).
+- **INTEGRATE (the exception — copy/vendor bytes).** Allowed only when **all** hold: (a)
+  the source `LICENSE` is compatible with fak's license — *read the LICENSE file, do not
+  assume from the language*; (b) attribution is preserved; (c) the vendored path and its
+  provenance are recorded. Incompatible (copyleft into a permissive tree, or no license →
+  all-rights-reserved) → you **may not integrate**; fall back to INSPIRE. When in doubt,
+  INSPIRE.
+
+Mark each candidate `inspire` or `integrate`, and drop any `integrate` that fails the gate
+down to `inspire` (or out).
+
+### 5 — Scope: many small tickets, NEVER a monolith
+
+This is the heart of the skill, and the user's explicit worry — the failure it exists to
+kill is the single "adopt repo X" mega-issue. Enforce:
+
+- **Each borrow fak genuinely lacks becomes its own smallest independently-shippable
+  ticket**, sized to a first checkable step.
+- **The ship-alone test:** "can this borrow ship and prove value on its own?" If no, it is
+  too big — split. If a title needs an "and also", split.
+- **A coherent track → an epic + child leaves**, matching this repo's epic/leaf convention
+  (`.github/issue-views.json`: `epics` decompose, they are never dispatched as a leaf).
+  Never a monolith leaf standing in for a track.
+
+Prefer **more tickets with tight scope** over fewer fat ones — a reviewer, a dispatcher,
+and a fleet worker can only act on a leaf.
+
+### 6 — Witness each borrow against fak, then FILE (the default terminal action)
+
+For **each** surviving candidate, run [`field-borrow`](../field-borrow/SKILL.md)'s witness
+step — do not restate it, use it:
+
+- Dogfood `fak_feature_query` / `fak capabilities` / `fak index docs|leaves|verbs|claims`
+  → classify **PRESENT / PARTIAL / ABSENT**. Guard the lexical ranker's false-ABSENT by
+  varying the phrasing **and** a raw `Grep` for the obvious symbol; for a high-value borrow,
+  witness twice before trusting an ABSENT.
+- **PRESENT** → fak already has it: drop the candidate, record the card. A witnessed "we
+  already had this" is a real, good result — not a failure.
+- **PARTIAL / ABSENT** → ground it in the **fak seam** (`path:line` in *fak*, where the
+  borrow lands), then **FILE it** — carrying **both** anchors (source `path:line@sha` +
+  fak seam), the dogfood witness, the inspire/integrate verdict, and a first checkable step.
+
+**Filing is the default, not an optional epilogue.** A run that surfaced PARTIAL/ABSENT
+borrows and filed *nothing* is an incomplete pass — the research died in the transcript.
+File deduped (`gh issue list --search`), under the right epic, milestone + labels set at
+creation; on this host run `gh` via PowerShell or Bash with `--body-file` (never an inline
+heredoc). Backfill the derived work-class label with
+`python tools/issue_lane_router.py --apply-labels`. **Leak-check every body**: no absolute
+path, host, secret, or PII from the foreign clone leaks into a fak ticket.
+
+Report each filed issue number back. The only sanctioned no-file outcomes: every candidate
+witnessed PRESENT, or the operator passed `--draft` (write the note + candidate table, file
+nothing, and say so explicitly so a human can file later).
+
+### 7 — Register the trail (or it lived only in a transcript)
+
+Record the pass in a dated `docs/notes/CONCEPT-STUDY-<REPO>-<date>.md`: the URL + pinned
+`@sha`, what you read (including the fan-out coverage + the completeness-critic result),
+and a candidate table — **borrow · source `path:line@sha` · witness (PRESENT/PARTIAL/
+ABSENT) · inspire|integrate · filed #** — with a `Companions:` block linking `field-borrow`
+and any epic. Add its **`INDEX.md`** line in the *Notes & research* section (an unindexed
+dated note is an orphan `fak index freshness` flags). Link the children from the parent
+epic. Commit the note lane by explicit path (`fak commit --path
+docs/notes/CONCEPT-STUDY-<REPO>-<date>.md -m "docs(notes): study <repo> (fak docs)"`; never
+`git add -A`, no `Co-Authored-By`). **This registration — with the issues — is what makes
+the research durable.**
+
+## What "done" proves
+
+- The source was **acquired and read at a pinned `@sha`** — every borrow cites real code,
+  not a README claim — and read **deep**: the fan-out covered every load-bearing subsystem
+  and the completeness critic found nothing material unopened.
+- **Issues were filed** for the PARTIAL/ABSENT borrows (their `#`s reported), each carrying
+  a **source `path:line@sha`**, a **fak seam `path:line`**, a **dogfood witness**, an
+  **inspire/integrate + license verdict**, and a **first checkable step** — unless every
+  candidate was PRESENT or `--draft` was set (stated explicitly).
+- **No monolith was filed** — the work is decomposed into small independently-shippable
+  leaves (an epic + children if it is a real track).
+- Nothing fak already ships was re-filed (step 6 caught the PRESENT cases).
+- The instance is registered: a dated `docs/notes` entry, its `INDEX.md` line, the epic
+  linking its children; `fak index freshness` reads clean for the new note.
+
+## The anti-gaming rule (specific to this surface)
+
+**Never file a borrow you did not locate at a real `path:line@sha` in the actually-acquired
+source; never file the monolith; and never let "done" mean "wrote a table and filed
+nothing".** Four failure modes this kills:
+
+- **Borrowed the pitch.** Filing "repo X does Y" from the README when the code does not, or
+  citing a repo you did not acquire. The fix is the pinned `path:line@sha` you read.
+- **Read shallow.** Two borrows off a skim of a large repo, no fan-out, no completeness
+  critic. The fix is step 2's depth floor — deep is the default.
+- **The mega-ticket.** "Adopt everything from repo X" as one leaf. The fix is the ship-alone
+  test in step 5 — decompose or file an epic + leaves.
+- **License laundering.** Copying incompatible-licensed bytes in as "inspiration". If you
+  copied, it is `integrate` and the license gate applies; if you truly reimplemented
+  clean-room, it is `inspire` and you still cite the source.
+
+A witnessed PRESENT ("fak already has this") is a complete, honest pass — not a failure.
+
+## Honest limits
+
+- **The witness is lexical + a snapshot.** field-borrow's `fak_feature_query` ranker is
+  substring matching (false-ABSENT risk — hence the twice-witness + raw `Grep` guard) and
+  its verdict is true only as of today — re-witness before acting on an old pass.
+- **A shallow/blobless clone can hide history.** `--depth 1` drops the log; if *why they
+  changed it* matters, deepen the clone before trusting a "they removed this" read.
+- **License reading is not legal advice.** The gate is a good-faith compatibility check
+  against the source `LICENSE`; a genuinely load-bearing vendor decision wants a human.
+- **Composes with, does not replace:** `field-borrow` (the per-capability witness+file —
+  this skill's hand-off target), `idea-scout` (automated outward feed), `sota-check` (route
+  a kernel borrow through the matrix), `industry-score` (a witnessed PRESENT/PARTIAL/ABSENT
+  is a coverage row it can absorb).
+
+## When to run this
+
+- Someone hands you **any body of external code** — "look at X", a GitHub URL, a local
+  checkout, a package, a paper-with-code — and wants it turned into action.
+- **Before** filing any "we should adopt X from repo Y" issue.
+- After a competitor or a paper **open-sources** something worth reading.
+- On a `/loop` cadence over a watch-list of repos, to convert "we should look at that
+  someday" into witnessed, scoped, license-clean, **filed** backlog.
