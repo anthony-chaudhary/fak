@@ -20,17 +20,29 @@ Run from the repo root:
     python tools/demo_live_links.py --live --require-https
     python tools/demo_live_links.py --published
     python tools/demo_live_links.py --json --live
+    python tools/demo_live_links.py --hub
+    python tools/demo_live_links.py --hub --live
 
 In --published mode, ACTION (published_deployment_drift) means the repository's
 docs/demos.html is already clean but GitHub Pages is still serving stale HTML.
 Use --live --require-https when a launch gate needs hosted demos to be embeddable
 from HTTPS pages instead of merely reachable through top-level HTTP navigation.
+
+Use --hub to audit the hosted hub route inventory that lives beyond the demo
+cards: the landing pages (/, /adjudicate.html, /chat.html, /compare.html,
+/gallery.html), the OpenAI-compatible /v1/models list, /healthz, and /metrics,
+plus the root /api/* routes that are intentionally excluded and the retired
+demo mounts that must stay tombstoned. --hub alone reports the intended route
+set statically; --hub --live probes each route and reports whether it is
+healthy, intentionally excluded, tombstoned, or an actionable placeholder/stale
+hub link. It is separate from the card audit so --live --status stays unchanged.
 """
 from __future__ import annotations
 
 import argparse
 import copy
 import json
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -1190,11 +1202,330 @@ def render_status(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# --- Hosted hub route inventory (#1745) ------------------------------------
+#
+# The card audit above watches the demo cards linked from docs/demos.html. The
+# hosted hub root also serves routes that are not demo cards: the landing pages,
+# the OpenAI-compatible model list, health, and Prometheus metrics. A manual
+# probe (2026-06-30, #1745) found these live while the card audit only witnessed
+# the root page marker. This inventory declares the intended hub route set and,
+# under --live, reports whether each route is healthy, intentionally excluded,
+# tombstoned (a proven-stale path that must stay gone), archived, or local-only.
+#
+# It is deliberately conservative so it does not turn transient content into
+# flaky assertions: HTML routes assert a <title> marker (substring), JSON APIs
+# assert object SHAPE (never volatile values), and /metrics asserts Prometheus
+# HELP/TYPE structure plus metric NAMES only. Non-goals for v1 (per #1745): no
+# volatile counter values, no latency/perf numbers, and root /api/* stays an
+# intentionally-excluded 404 because the per-demo APIs live under their mounts.
+
+HUB_SCHEMA = "fak-demo-hub-routes/1"
+
+HUB_CLASS_PUBLIC = "public"
+HUB_CLASS_EXCLUDED = "excluded"
+HUB_CLASS_TOMBSTONED = "tombstoned"
+HUB_CLASS_ARCHIVED = "archived"
+HUB_CLASS_LOCAL_ONLY = "local_only"
+
+
+@dataclass(frozen=True)
+class HubRoute:
+    path: str
+    kind: str  # "html" | "json" | "prometheus"
+    classification: str
+    markers: tuple[str, ...] = ()  # HTML <title> substrings
+    json_keys: tuple[str, ...] = ()  # top-level keys that must be present
+    json_equals: tuple[tuple[str, Any], ...] = ()  # top-level key must equal value
+    json_id_list: str = ""  # a list-valued key whose items must each carry a non-blank id
+    metric_names: tuple[str, ...] = ()  # Prometheus metric names that must appear
+    note: str = ""
+
+
+# Page markers and API shapes are evidence-backed: HTML titles come from the
+# #1745 maintainer probe; /v1/models, /healthz, and /metrics shapes match the
+# gateway (cmd/fak api_host_test.go, claude_mac_fak_test.go, and
+# internal/gateway/metrics_render.go's fak_gateway_up gauge). Tombstoned mounts
+# mirror KNOWN_STALE_PREFIXES so a retired demo that reappears is actionable.
+HUB_ROUTES: tuple[HubRoute, ...] = (
+    HubRoute("/", "html", HUB_CLASS_PUBLIC,
+             markers=("<title>fak — the agent kernel · live demos</title>",)),
+    HubRoute("/adjudicate.html", "html", HUB_CLASS_PUBLIC, markers=("<title>fak · Adjudication",)),
+    HubRoute("/chat.html", "html", HUB_CLASS_PUBLIC, markers=("<title>fak · Live Chat",)),
+    HubRoute("/compare.html", "html", HUB_CLASS_PUBLIC, markers=("<title>fak · in-kernel",)),
+    HubRoute("/gallery.html", "html", HUB_CLASS_PUBLIC, markers=("<title>fak · How it works",)),
+    HubRoute("/v1/models", "json", HUB_CLASS_PUBLIC,
+             json_equals=(("object", "list"),), json_id_list="data"),
+    HubRoute("/healthz", "json", HUB_CLASS_PUBLIC,
+             json_keys=("engine", "model"), json_equals=(("ok", True),)),
+    HubRoute("/metrics", "prometheus", HUB_CLASS_PUBLIC, metric_names=("fak_gateway_up",)),
+    HubRoute("/api/ladder", "json", HUB_CLASS_EXCLUDED,
+             note="per-demo APIs live under their demo mount, not the hub root"),
+    HubRoute("/api/scenarios", "json", HUB_CLASS_EXCLUDED,
+             note="per-demo APIs live under their demo mount, not the hub root"),
+    HubRoute("/api/suites", "json", HUB_CLASS_EXCLUDED,
+             note="per-demo APIs live under their demo mount, not the hub root"),
+    HubRoute("/guarddemo/", "html", HUB_CLASS_TOMBSTONED, note="retired guard demo; must stay 404"),
+    HubRoute("/turntax/", "html", HUB_CLASS_TOMBSTONED, note="retired turntax mount; must stay gone"),
+    HubRoute("/ctxdemo/", "html", HUB_CLASS_TOMBSTONED, note="retired ctxdemo mount; must stay gone"),
+    HubRoute("/unsee/", "html", HUB_CLASS_TOMBSTONED, note="retired unsee mount; must stay gone"),
+)
+
+
+def hub_route_url(route: HubRoute, host: str = HOSTED_HOST) -> str:
+    return f"http://{host}{route.path}"
+
+
+def hub_witness_defects(route: HubRoute, text: str) -> list[str]:
+    """Shape-only witness for a reachable public hub route. Never asserts
+    volatile values: HTML by <title> marker, JSON by object shape, /metrics by
+    Prometheus HELP/TYPE structure plus metric NAMES."""
+    defects: list[str] = []
+    if route.kind == "html":
+        for marker in missing_markers(text, list(route.markers)):
+            defects.append(f"missing page marker: {marker}")
+    elif route.kind == "json":
+        try:
+            data = json.loads(text)
+        except (ValueError, TypeError):
+            return ["<invalid-json>"]
+        if not isinstance(data, dict):
+            return ["<non-object-json>"]
+        for key in route.json_keys:
+            if key not in data:
+                defects.append(f"missing api key: {key}")
+        for key, expected in route.json_equals:
+            if data.get(key) != expected:
+                defects.append(f"api key {key}={data.get(key)!r} expected {expected!r}")
+        if route.json_id_list:
+            items = data.get(route.json_id_list)
+            if not isinstance(items, list) or not items:
+                defects.append(f"api {route.json_id_list} is not a non-empty list")
+            elif not all(isinstance(it, dict) and str(it.get("id", "")).strip() for it in items):
+                defects.append(f"api {route.json_id_list}[].id missing or blank")
+    elif route.kind == "prometheus":
+        if "# HELP" not in text and "# TYPE" not in text:
+            defects.append("metrics missing Prometheus HELP/TYPE lines")
+        for name in route.metric_names:
+            if name not in text:
+                defects.append(f"metrics missing metric name: {name}")
+    return defects
+
+
+def _snippet(text: str, limit: int = 80) -> str:
+    collapsed = " ".join(text.split())
+    return collapsed if len(collapsed) <= limit else collapsed[:limit].rstrip() + "..."
+
+
+def hub_placeholder_defects(text: str, host: str = HOSTED_HOST) -> list[str]:
+    """Actionable hub-page problems independent of route health: placeholder
+    card anchors (href '#' or empty) and links to proven-stale hub paths. The
+    card label is truncated to a short snippet — the '#' href is the finding."""
+    defects: list[str] = []
+    for link in extract_links(text):
+        target = link.href.strip()
+        if link.is_card and target in {"", "#"}:
+            defects.append(f"placeholder card: text={_snippet(link.text)!r} href={link.href!r}")
+        abs_href = target if "://" in target else (f"http://{host}{target}" if target.startswith("/") else target)
+        stale = known_stale_match(abs_href)
+        if stale:
+            defects.append(f"stale hub link to {stale['demo']}: {link.href}")
+    return defects
+
+
+def probe_hub_route(route: HubRoute, host: str = HOSTED_HOST, timeout_s: float = 8.0, *,
+                    fetcher: Any = fetch_url_text, prober: Any = probe_url) -> dict[str, Any]:
+    url = hub_route_url(route, host)
+    row: dict[str, Any] = {
+        "path": route.path,
+        "url": url,
+        "kind": route.kind,
+        "classification": route.classification,
+        "note": route.note,
+        "checked": True,
+        "http_status": 0,
+        "state": "",
+        "defects": [],
+    }
+    if route.classification == HUB_CLASS_PUBLIC:
+        fetched = fetcher(url, timeout_s)
+        row["http_status"] = int(fetched.get("status", 0))
+        defects: list[str] = []
+        if not fetched.get("ok"):
+            defects.append(f"route unreachable ({fetched.get('status', 0)} {fetched.get('error', '')})")
+            row["state"] = "hub-route-action"
+        else:
+            text = str(fetched.get("text", ""))
+            defects.extend(hub_witness_defects(route, text))
+            placeholder = hub_placeholder_defects(text, host) if route.path == "/" else []
+            if placeholder:
+                row["state"] = "hub-placeholder-action"
+            elif defects:
+                row["state"] = "hub-route-action"
+            else:
+                row["state"] = "hub-route-ok"
+            defects.extend(placeholder)
+        row["defects"] = defects
+        return row
+
+    # Excluded / tombstoned / archived: witness ABSENCE. We only need the status
+    # code, so a HEAD/GET probe is enough. A route that starts serving again is
+    # the actionable case.
+    probe = prober(url, timeout_s)
+    row["http_status"] = int(probe.get("status", 0))
+    served = bool(probe.get("ok"))
+    if route.classification == HUB_CLASS_EXCLUDED:
+        if served:
+            row["state"] = "hub-route-action"
+            row["defects"] = [f"excluded root route unexpectedly serves ({row['http_status']}); per-demo APIs belong under their mount"]
+        else:
+            row["state"] = "hub-route-excluded"
+    else:  # tombstoned / archived
+        label = "hub-route-tombstoned" if route.classification == HUB_CLASS_TOMBSTONED else "hub-route-archived"
+        if served:
+            row["state"] = "hub-route-action"
+            row["defects"] = [f"{route.classification} route is reachable again ({row['http_status']}) — the hub still exposes a retired path"]
+        else:
+            row["state"] = label
+    return row
+
+
+def hub_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "total": len(rows),
+        "public": 0, "excluded": 0, "tombstoned": 0, "archived": 0, "local_only": 0,
+        "ok": 0, "action": 0, "placeholder_action": 0,
+    }
+    for row in rows:
+        cls = row.get("classification", "")
+        if cls in summary:
+            summary[cls] += 1
+        state = row.get("state", "")
+        if state == "hub-route-ok":
+            summary["ok"] += 1
+        elif state == "hub-placeholder-action":
+            summary["placeholder_action"] += 1
+            summary["action"] += 1
+        elif state == "hub-route-action":
+            summary["action"] += 1
+    return summary
+
+
+def collect_hub(host: str = HOSTED_HOST, *, live: bool = False, timeout_s: float = 8.0,
+                fetcher: Any = fetch_url_text, prober: Any = probe_url) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    defects: list[str] = []
+    for route in HUB_ROUTES:
+        if not live or route.classification == HUB_CLASS_LOCAL_ONLY:
+            declared = ("hub-route-local-only" if route.classification == HUB_CLASS_LOCAL_ONLY
+                        else f"hub-route-{route.classification.replace('_', '-')}")
+            rows.append({
+                "path": route.path,
+                "url": hub_route_url(route, host),
+                "kind": route.kind,
+                "classification": route.classification,
+                "note": route.note,
+                "checked": False,
+                "http_status": 0,
+                "state": declared,
+                "defects": [],
+            })
+            continue
+        row = probe_hub_route(route, host, min(timeout_s, 8.0), fetcher=fetcher, prober=prober)
+        rows.append(row)
+        for d in row.get("defects", []):
+            defects.append(f"{route.path}: {d}")
+    summary = hub_summary(rows)
+    return build_hub_payload(host, rows, summary, defects, live=live)
+
+
+def build_hub_payload(host: str, rows: list[dict[str, Any]], summary: dict[str, Any],
+                      defects: list[str], *, live: bool) -> dict[str, Any]:
+    ok = not defects
+    if not live:
+        verdict, finding = "INVENTORY", "hub_route_inventory"
+        reason = f"{summary['total']} intended hub route(s) declared for {host}; rerun with --live to witness health"
+        next_action = "run tools/demo_live_links.py --hub --live to probe the hosted hub"
+    elif ok:
+        verdict, finding = "OK", "hub_routes_clean"
+        reason = (f"{summary['public']} public route(s) healthy, {summary['excluded']} excluded, "
+                  f"{summary['tombstoned']} tombstoned; no placeholder or stale hub links")
+        next_action = "rerun after a hub route or deployment change"
+    else:
+        verdict, finding = "ACTION", "hub_route_debt"
+        reason = f"{len(defects)} hub route defect(s) on {host}"
+        next_action = "fix the unhealthy route, remove the placeholder/stale hub link, or update the intended hub route set"
+    return {
+        "schema": HUB_SCHEMA,
+        "ok": ok,
+        "verdict": verdict,
+        "finding": finding,
+        "reason": reason,
+        "next_action": next_action,
+        "host": host,
+        "live": live,
+        "hub": {"routes": rows, "summary": summary, "defects": defects},
+    }
+
+
+def render_hub(payload: dict[str, Any]) -> str:
+    """Compact hub-route inventory: one row per intended hub route, its
+    classification, and (under --live) its witnessed state."""
+    hub = payload.get("hub") or {}
+    rows = hub.get("routes") or []
+    summary = hub.get("summary") or {}
+    title = "demo-hub-live-status" if payload.get("live") else "demo-hub-inventory"
+    lines = [
+        f"{title}: {payload['verdict']} ({payload['finding']})",
+        f"  {payload['reason']}",
+        (
+            "summary: "
+            f"public={summary.get('public', 0)} "
+            f"excluded={summary.get('excluded', 0)} "
+            f"tombstoned={summary.get('tombstoned', 0)} "
+            f"archived={summary.get('archived', 0)} "
+            f"local-only={summary.get('local_only', 0)} "
+            f"ok={summary.get('ok', 0)} "
+            f"action={summary.get('action', 0)} "
+            f"placeholder={summary.get('placeholder_action', 0)}"
+        ),
+        "route                 kind        class        state                 http",
+        "--------------------- ----------- ------------ --------------------- ------",
+    ]
+    for row in rows:
+        http_cell = str(row.get("http_status", 0)) if row.get("checked") else "-"
+        lines.append(
+            f"{row['path']:<21} {row['kind']:<11} {row['classification']:<12} "
+            f"{row['state']:<21} {http_cell}"
+        )
+        for defect in row.get("defects", [])[:2]:
+            lines.append(f"  - {row['path']}: {defect}")
+    if hub.get("defects"):
+        lines.append("defects:")
+        for defect in hub["defects"]:
+            lines.append(f"  - {defect}")
+    return "\n".join(lines)
+
+
 def repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _use_utf8_stdout() -> None:
+    """Live hub pages carry emoji/arrows a Windows cp1252 console cannot encode;
+    the audit must never crash while REPORTING a finding. StringIO (tests) has no
+    reconfigure, so guard for it and fall back to a lossy-but-safe replace."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _use_utf8_stdout()
     ap = argparse.ArgumentParser(description="Audit hosted links on docs/demos.html.")
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
     ap.add_argument("--doc", default=DEFAULT_DOC, help=f"demo page to audit (default: {DEFAULT_DOC})")
@@ -1213,11 +1544,26 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--json", action="store_true", help="emit JSON payload")
     ap.add_argument("--status", action="store_true", help="emit only the compact hosted/local-only status matrix")
+    ap.add_argument(
+        "--hub",
+        action="store_true",
+        help="audit the hosted hub route inventory (landing pages, /v1/models, /healthz, /metrics) beyond the demo cards; add --live to probe",
+    )
     args = ap.parse_args(argv)
     if args.readiness and (args.live or args.published or args.require_https):
         ap.error("--readiness runs all modes; do not combine it with --live, --published, or --require-https")
     if args.require_https and not args.live:
         ap.error("--require-https needs --live so HTTPS alternatives are actually probed")
+    if args.hub and (args.published or args.readiness or args.require_https):
+        ap.error("--hub audits the hosted hub route set; do not combine it with --published, --readiness, or --require-https")
+
+    if args.hub:
+        payload = collect_hub(HOSTED_HOST, live=args.live, timeout_s=args.timeout)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(render_hub(payload))
+        return 0 if payload.get("ok") else 1
 
     workspace = Path(args.workspace).resolve() if args.workspace else repo_root()
     if args.readiness:

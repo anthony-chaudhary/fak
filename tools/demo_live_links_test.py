@@ -748,6 +748,191 @@ def test_collect_published_reports_fetch_failure() -> None:
     assert "fetch published demos page: 404 not found" in payload["reason"], payload
 
 
+# --- Hosted hub route inventory (#1745) ------------------------------------
+
+HUB_HOST = dl.HOSTED_HOST
+
+
+def _hub_route(**match: object) -> dl.HubRoute:
+    for route in dl.HUB_ROUTES:
+        if all(getattr(route, key) == value for key, value in match.items()):
+            return route
+    raise AssertionError(f"no HUB_ROUTES entry matches {match}")
+
+
+def _healthy_hub_bodies() -> dict[str, str]:
+    return {
+        "/": "<title>fak — the agent kernel · live demos</title>",
+        "/adjudicate.html": "<title>fak · Adjudication</title>",
+        "/chat.html": "<title>fak · Live Chat</title>",
+        "/compare.html": "<title>fak · in-kernel</title>",
+        "/gallery.html": "<title>fak · How it works</title>",
+        "/v1/models": '{"object":"list","data":[{"id":"qwen-local"}]}',
+        "/healthz": '{"ok":true,"engine":"fak","model":"qwen-local"}',
+        "/metrics": "# HELP fak_gateway_up up\n# TYPE fak_gateway_up gauge\nfak_gateway_up 1\n",
+    }
+
+
+def test_hub_route_inventory_declares_intended_set_statically() -> None:
+    payload = dl.collect_hub(HUB_HOST, live=False)
+    assert payload["ok"], payload
+    assert payload["verdict"] == "INVENTORY", payload
+    routes = payload["hub"]["routes"]
+    assert len(routes) == len(dl.HUB_ROUTES), routes
+    paths = {row["path"] for row in routes}
+    assert {"/", "/v1/models", "/healthz", "/metrics", "/api/ladder", "/guarddemo/"} <= paths, paths
+    assert all(not row["checked"] for row in routes), routes
+    assert {row["classification"] for row in routes} == {"public", "excluded", "tombstoned"}, routes
+
+
+def test_hub_witness_defects_accepts_real_shapes() -> None:
+    assert dl.hub_witness_defects(_hub_route(path="/"), "<title>fak — the agent kernel · live demos</title>") == []
+    assert dl.hub_witness_defects(_hub_route(path="/v1/models"), '{"object":"list","data":[{"id":"m1"}]}') == []
+    assert dl.hub_witness_defects(_hub_route(path="/healthz"), '{"ok":true,"engine":"fak","model":"q"}') == []
+    assert dl.hub_witness_defects(_hub_route(path="/metrics"), "# HELP fak_gateway_up up\nfak_gateway_up 1\n") == []
+
+
+def test_hub_witness_defects_flags_wrong_shapes() -> None:
+    root = _hub_route(path="/")
+    models = _hub_route(path="/v1/models")
+    healthz = _hub_route(path="/healthz")
+    metrics = _hub_route(path="/metrics")
+    assert any("missing page marker" in d for d in dl.hub_witness_defects(root, "<title>nope</title>"))
+    assert any("expected 'list'" in d for d in dl.hub_witness_defects(models, '{"object":"other","data":[{"id":"m"}]}'))
+    assert any("not a non-empty list" in d for d in dl.hub_witness_defects(models, '{"object":"list","data":[]}'))
+    assert any("id missing or blank" in d for d in dl.hub_witness_defects(models, '{"object":"list","data":[{"x":1}]}'))
+    assert dl.hub_witness_defects(healthz, '{"ok":false,"engine":"fak","model":"q"}') != []
+    assert any("metric name" in d for d in dl.hub_witness_defects(metrics, "nothing prometheus here"))
+    assert dl.hub_witness_defects(models, "not-json") == ["<invalid-json>"]
+
+
+def test_probe_hub_route_public_ok_and_action() -> None:
+    body = _healthy_hub_bodies()["/adjudicate.html"]
+
+    def ok_fetch(url: str, timeout_s: float) -> dict[str, object]:
+        return {"ok": True, "status": 200, "text": body, "error": ""}
+
+    def down_fetch(url: str, timeout_s: float) -> dict[str, object]:
+        return {"ok": False, "status": 502, "text": "", "error": "bad gateway"}
+
+    route = _hub_route(path="/adjudicate.html")
+    ok_row = dl.probe_hub_route(route, HUB_HOST, 1.0, fetcher=ok_fetch)
+    assert ok_row["state"] == "hub-route-ok", ok_row
+    assert ok_row["defects"] == [], ok_row
+    down_row = dl.probe_hub_route(route, HUB_HOST, 1.0, fetcher=down_fetch)
+    assert down_row["state"] == "hub-route-action", down_row
+    assert any("unreachable" in d for d in down_row["defects"]), down_row
+
+
+def test_probe_hub_route_flags_placeholder_and_stale_hub_links() -> None:
+    bad_root = (
+        "<title>fak — the agent kernel · live demos</title>"
+        '<a class="card" href="#">coming soon</a>'
+        '<a class="card" href="http://136.111.250.205/guarddemo/">guard</a>'
+    )
+
+    def fetch(url: str, timeout_s: float) -> dict[str, object]:
+        return {"ok": True, "status": 200, "text": bad_root, "error": ""}
+
+    row = dl.probe_hub_route(_hub_route(path="/"), HUB_HOST, 1.0, fetcher=fetch)
+    assert row["state"] == "hub-placeholder-action", row
+    assert any("placeholder card" in d for d in row["defects"]), row
+    assert any("stale hub link to guarddemo" in d for d in row["defects"]), row
+
+
+def test_probe_hub_route_excluded_and_tombstoned_states() -> None:
+    def absent(url: str, timeout_s: float) -> dict[str, object]:
+        return {"ok": False, "status": 404, "method": "GET", "error": "not found"}
+
+    def served(url: str, timeout_s: float) -> dict[str, object]:
+        return {"ok": True, "status": 200, "method": "GET", "error": ""}
+
+    excluded = _hub_route(classification=dl.HUB_CLASS_EXCLUDED)
+    tomb = _hub_route(classification=dl.HUB_CLASS_TOMBSTONED)
+
+    row = dl.probe_hub_route(excluded, HUB_HOST, 1.0, prober=absent)
+    assert row["state"] == "hub-route-excluded" and row["defects"] == [], row
+    row = dl.probe_hub_route(excluded, HUB_HOST, 1.0, prober=served)
+    assert row["state"] == "hub-route-action" and row["defects"], row
+
+    row = dl.probe_hub_route(tomb, HUB_HOST, 1.0, prober=absent)
+    assert row["state"] == "hub-route-tombstoned" and row["defects"] == [], row
+    row = dl.probe_hub_route(tomb, HUB_HOST, 1.0, prober=served)
+    assert row["state"] == "hub-route-action" and row["defects"], row
+
+
+def test_collect_hub_live_ok_with_full_fake_deployment() -> None:
+    bodies = _healthy_hub_bodies()
+
+    def fetch(url: str, timeout_s: float) -> dict[str, object]:
+        for path, text in bodies.items():
+            if url == f"http://{HUB_HOST}{path}":
+                return {"ok": True, "status": 200, "text": text, "error": ""}
+        return {"ok": False, "status": 404, "text": "", "error": "not found"}
+
+    def absent(url: str, timeout_s: float) -> dict[str, object]:
+        return {"ok": False, "status": 404, "method": "GET", "error": "not found"}
+
+    payload = dl.collect_hub(HUB_HOST, live=True, timeout_s=1.0, fetcher=fetch, prober=absent)
+    assert payload["ok"], payload
+    assert payload["verdict"] == "OK", payload
+    summary = payload["hub"]["summary"]
+    assert summary["public"] == 8, summary
+    assert summary["ok"] == 8, summary
+    assert summary["excluded"] == 3, summary
+    assert summary["tombstoned"] == 4, summary
+    assert summary["action"] == 0, summary
+
+
+def test_collect_hub_live_flags_unhealthy_route() -> None:
+    bodies = _healthy_hub_bodies()
+    bodies["/metrics"] = "not prometheus at all"
+
+    def fetch(url: str, timeout_s: float) -> dict[str, object]:
+        for path, text in bodies.items():
+            if url == f"http://{HUB_HOST}{path}":
+                return {"ok": True, "status": 200, "text": text, "error": ""}
+        return {"ok": False, "status": 404, "text": "", "error": "not found"}
+
+    def absent(url: str, timeout_s: float) -> dict[str, object]:
+        return {"ok": False, "status": 404, "method": "GET", "error": "not found"}
+
+    payload = dl.collect_hub(HUB_HOST, live=True, timeout_s=1.0, fetcher=fetch, prober=absent)
+    assert not payload["ok"], payload
+    assert payload["verdict"] == "ACTION", payload
+    assert any("/metrics" in d for d in payload["hub"]["defects"]), payload
+
+
+def test_render_hub_reports_all_five_classification_buckets() -> None:
+    out = dl.render_hub(dl.collect_hub(HUB_HOST, live=False))
+    assert "demo-hub-inventory:" in out, out
+    for token in ("public=", "excluded=", "tombstoned=", "archived=", "local-only="):
+        assert token in out, out
+    assert "/v1/models" in out and "/metrics" in out and "/guarddemo/" in out, out
+
+
+def test_hub_cli_reports_inventory() -> None:
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = dl.main(["--hub"])
+    out = buf.getvalue()
+    assert rc == 0, out
+    assert "demo-hub-inventory:" in out, out
+    assert "/healthz" in out and "/metrics" in out, out
+
+
+def test_hub_cli_rejects_incompatible_modes() -> None:
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        try:
+            dl.main(["--hub", "--published"])
+        except SystemExit as exc:
+            assert exc.code == 2, exc
+        else:
+            raise AssertionError("--hub with --published should exit through argparse")
+    assert "--hub audits the hosted hub route set" in stderr.getvalue()
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):
