@@ -141,8 +141,12 @@ func TestFromSnapshotHealthyFleetIsOKAndGraded(t *testing.T) {
 	if !strings.Contains(lines, "usable capacity: 2/2 boxes") {
 		t.Fatalf("expected usable-capacity line, got: %s", lines)
 	}
-	if !strings.Contains(lines, "next: no operator action") {
-		t.Fatalf("expected no-action guidance, got: %s", lines)
+	// The next-step guidance rides the dedicated NextStep field now, not the stat Lines.
+	if !strings.Contains(up.NextStep, "next: no operator action") {
+		t.Fatalf("expected no-action guidance in NextStep, got: %q", up.NextStep)
+	}
+	if strings.Contains(lines, "next:") {
+		t.Fatalf("next-step guidance leaked into the stat Lines: %s", lines)
 	}
 }
 
@@ -173,11 +177,17 @@ func TestFromSnapshotGPUWasteIsActionableCapacitySignal(t *testing.T) {
 		"gpu capacity: busy 9/16, idle 7",
 		"attention[crit]: 1 box(es) wasting >=4 GPUs",
 		"attention[crit]: 1 box(es) wasting >=4 GPUs - a1(1/8)",
-		"next: repack work onto busy GPUs or stop idle-GPU leases",
 	} {
 		if !strings.Contains(lines, want) {
 			t.Fatalf("expected %q in lines, got: %s", want, lines)
 		}
+	}
+	// The repack guidance is a full sentence, so it rides NextStep — not the stat Lines chip.
+	if !strings.Contains(up.NextStep, "next: repack work onto busy GPUs or stop idle-GPU leases") {
+		t.Fatalf("expected repack guidance in NextStep, got: %q", up.NextStep)
+	}
+	if strings.Contains(lines, "next:") {
+		t.Fatalf("next-step guidance leaked into the stat Lines: %s", lines)
 	}
 }
 

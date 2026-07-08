@@ -106,13 +106,14 @@ func FromSnapshot(snap fleet.Snapshot, source string) scoreboard.Update {
 	sig := readSignals(snap)
 	b := classify(snap, sig)
 	return scoreboard.Update{
-		Title:   "node usage",
-		Grade:   gradeFor(b, snap, sig),
-		Score:   fmt.Sprintf("%d/%d reachable", snap.Reachable, snap.Total),
-		Verdict: verdictFor(b),
-		Detail:  detailFor(b, snap, sig),
-		Lines:   linesFor(b, snap, sig),
-		Source:  source,
+		Title:    "node usage",
+		Grade:    gradeFor(b, snap, sig),
+		Score:    fmt.Sprintf("%d/%d reachable", snap.Reachable, snap.Total),
+		Verdict:  verdictFor(b),
+		Detail:   detailFor(b, snap, sig),
+		NextStep: nextStepFor(b, snap, sig),
+		Lines:    linesFor(b, snap, sig),
+		Source:   source,
 	}
 }
 
@@ -240,12 +241,21 @@ func linesFor(b bucket, snap fleet.Snapshot, sig signals) []string {
 	lines = append(lines, fmt.Sprintf("readiness: %d", snap.Score))
 	lines = append(lines, attentionLines(snap)...)
 
-	if b == bucketNoVisibility {
-		lines = append(lines, "next: populate liveness with the private Slack bridge, or `fak lab report --id <box> --state live` from a box that can self-report")
-	} else if next := nextLine(b, snap, sig); next != "" {
-		lines = append(lines, next)
-	}
+	// The "next: …" guidance sentence is deliberately NOT appended here: a full sentence in
+	// the Lines stat run renders as a jammed monospace/context chip. It rides the Update's
+	// dedicated NextStep field (nextStepFor) so it lands on its own readable line instead.
 	return lines
+}
+
+// nextStepFor is the single "do this next" guidance sentence for the card. It routes to the
+// Update's NextStep field so the renderer gives it a prominent line, rather than burying it
+// among the short stat tokens in Lines. A no-visibility fleet gets its own populate-liveness
+// instruction; every other bucket defers to nextLine.
+func nextStepFor(b bucket, snap fleet.Snapshot, sig signals) string {
+	if b == bucketNoVisibility {
+		return "next: populate liveness with the private Slack bridge, or `fak lab report --id <box> --state live` from a box that can self-report"
+	}
+	return nextLine(b, snap, sig)
 }
 
 // capacityLine names usable and unavailable boxes in one line, so the card answers
