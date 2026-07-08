@@ -64,8 +64,8 @@ func profileServer(t *testing.T, byToken map[string]ProbedIdentity) *httptest.Se
 // the disagreement is flagged Stale.
 func TestResolveCredentialIdentity_CredentialWinsOverStaleDisk(t *testing.T) {
 	dir := t.TempDir()
-	writeClaudeJSONAccount(t, dir, "july9@example.test", "4d04b4b1-aaaa")   // stale metadata (A)
-	writeCredsJSON(t, dir, "at-july11")                                         // live credential (B)
+	writeClaudeJSONAccount(t, dir, "july9@example.test", "4d04b4b1-aaaa") // stale metadata (A)
+	writeCredsJSON(t, dir, "at-july11")                                   // live credential (B)
 	srv := profileServer(t, map[string]ProbedIdentity{
 		"at-july11": {Email: "july11@example.test", AccountUUID: "967c23c1-bbbb"},
 	})
