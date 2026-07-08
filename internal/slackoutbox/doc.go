@@ -27,7 +27,16 @@
 //     surfaces in `fak slack health` — never silently dropped;
 //   - a leak fence before every send (hooks.ScanOutboundText): a PUBLIC_LEAK needle or
 //     SECRET_SHAPE hit refuses the row with the finding as its structured reason,
-//     terminally — a refused body must be re-authored, never retried into posting.
+//     terminally — a refused body must be re-authored, never retried into posting;
+//   - assertive compaction (compact.go): the append-only spool and state files are folded
+//     down by default — the drainer runs one seal-quiesce-rewrite pass when it is due, and
+//     `fak slack outbox compact` forces one. A row still owed a delivery, and a DEAD row an
+//     operator may retry, is NEVER dropped ("never silently dropped" still holds for
+//     everything owed or actionable); only a SETTLED row past its retention window is
+//     forgotten — a posted row after it is old enough that no deferred producer will probe
+//     its ts again, a superseded/refused row shortly after — and the per-drain heartbeat
+//     storm collapses to one line. This is the deliberate retention exception to the
+//     "terminal states are terminal forever" reading above.
 //
 // Tier: foundation (1) — imports slackwire(1), hooks(1), flock(1) and stdlib; off the
 // hot path. The `fak slack outbox` verbs and the health rung live in cmd/fak.

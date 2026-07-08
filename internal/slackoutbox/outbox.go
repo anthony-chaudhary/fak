@@ -16,10 +16,28 @@ import (
 // spool holds message rows (what to send), the state file holds transitions (what
 // happened to each nonce). Replaying state over spool yields the effective queue, so a
 // restart resumes exactly where the last process stopped.
+//
+// Each stream is a two-segment log: a live HEAD that lock-free producers append to
+// (spool.jsonl / state.jsonl) and a compacted ARCHIVE that only Compact rewrites
+// (spool.arch.jsonl / state.arch.jsonl). Compaction seals the head to a transient SEAL
+// segment (spool.seal.jsonl / state.seal.jsonl) so it can be read without racing an
+// appender; a crash may leave a seal behind, which Load simply folds as an older segment.
+// Load replays archive → seal → head (oldest → newest) so the transition fold's
+// "last line wins" and the spool's "first write per nonce wins" both still hold.
 const (
-	spoolFile = "spool.jsonl"
-	stateFile = "state.jsonl"
-	lockFile  = "drain.lock"
+	spoolFile     = "spool.jsonl"
+	spoolSealFile = "spool.seal.jsonl"
+	spoolArchFile = "spool.arch.jsonl"
+	stateFile     = "state.jsonl"
+	stateSealFile = "state.seal.jsonl"
+	stateArchFile = "state.arch.jsonl"
+	lockFile      = "drain.lock"
+)
+
+// spoolLayers / stateLayers are the segments Load folds, oldest → newest.
+var (
+	spoolLayers = []string{spoolArchFile, spoolSealFile, spoolFile}
+	stateLayers = []string{stateArchFile, stateSealFile, stateFile}
 )
 
 // Row is one enqueued message. UpdateTS empty means a new post (threaded when ThreadTS
@@ -45,15 +63,16 @@ type Row struct {
 // refused, and superseded are terminal forever; dead is terminal until an operator
 // Retry re-arms it.
 const (
-	statePending    = ""
-	stateSending    = "sending"
-	stateFailed     = "failed"
-	statePosted     = "posted"
-	stateDead       = "dead"
-	stateRefused    = "refused"
-	stateSuperseded = "superseded"
-	stateRetry      = "retry"      // operator re-arm transition (dead -> pending)
-	stateDrainPass  = "drain_pass" // heartbeat transition (Nonce == "")
+	statePending     = ""
+	stateSending     = "sending"
+	stateFailed      = "failed"
+	statePosted      = "posted"
+	stateDead        = "dead"
+	stateRefused     = "refused"
+	stateSuperseded  = "superseded"
+	stateRetry       = "retry"        // operator re-arm transition (dead -> pending)
+	stateDrainPass   = "drain_pass"   // heartbeat transition (Nonce == "")
+	stateCompactPass = "compact_pass" // heartbeat transition marking the last Compact (Nonce == "")
 )
 
 // transition is one state-file row: nonce N moved to State at At. Attempts and
@@ -69,12 +88,15 @@ type transition struct {
 }
 
 // rowState is the folded effective state of one nonce after replaying its transitions.
+// At is the timestamp of the winning (latest) transition — zero when unset or unparseable;
+// compaction reads it to judge how long a row has been terminal.
 type rowState struct {
 	State     string
 	TS        string
 	Reason    string
 	Attempts  int
 	Ambiguous bool
+	At        time.Time
 }
 
 // terminal reports whether the state accepts no further sends. dead counts as terminal
@@ -90,6 +112,8 @@ func (s rowState) terminal() bool {
 // apply folds one transition into the state, later rows winning — the replay order IS
 // the file order, so the newest line decides.
 func (s rowState) apply(t transition) rowState {
+	// The transition's own timestamp; zero on empty/malformed (only compaction reads it).
+	at, _ := time.Parse(time.RFC3339, t.At)
 	switch t.State {
 	case stateRetry:
 		// Re-arm a dead row; a terminal-forever state (posted/refused/superseded) stays.
@@ -102,6 +126,7 @@ func (s rowState) apply(t transition) rowState {
 		s.Reason = t.Reason
 		s.Attempts = t.Attempts
 		s.Ambiguous = t.Ambiguous
+		s.At = at
 		return s
 	case statePosted, stateDead, stateRefused, stateSuperseded:
 		s.State = t.State
@@ -110,6 +135,7 @@ func (s rowState) apply(t transition) rowState {
 		if t.Attempts > 0 {
 			s.Attempts = t.Attempts
 		}
+		s.At = at
 		return s
 	}
 	return s // unknown transition kinds are ignored (forward compatibility)
@@ -126,6 +152,10 @@ type Outbox struct {
 	// simulates dying between a successful post and its record (the crash window the
 	// nonce probe exists to close).
 	appendStateSeam func(transition) error
+
+	// compactSleep, when non-nil, replaces the compaction seal-quiesce wait so tests
+	// witness compaction without real sleeps.
+	compactSleep func(time.Duration)
 }
 
 // Open ensures dir exists and returns an Outbox over it.
@@ -233,7 +263,10 @@ type Snapshot struct {
 	States  map[string]rowState // by nonce; missing key = pending with zero attempts
 	Corrupt int                 // unparseable lines across both files (counted, never fatal)
 
-	LastDrainAt time.Time // zero when no drain_pass heartbeat exists yet
+	LastDrainAt   time.Time // zero when no drain_pass heartbeat exists yet
+	LastCompactAt time.Time // zero when Compact has never run (no compact_pass heartbeat)
+
+	drainPasses int // drain_pass heartbeat lines folded (Compact reports how many it collapsed)
 }
 
 // state returns the folded state for a nonce (zero value = pending).
@@ -253,48 +286,74 @@ func (s *Snapshot) PostedTS(nonce string) string {
 // Load replays spool + state from disk. A malformed line increments Corrupt and is
 // skipped — one corrupt row must not wedge the whole outbox.
 func (o *Outbox) Load() (*Snapshot, error) {
-	snap := &Snapshot{States: map[string]rowState{}}
-	seen := map[string]bool{}
+	return o.foldFiles(spoolLayers, stateLayers)
+}
 
-	err := readJSONL(filepath.Join(o.dir, spoolFile), func(line []byte) {
-		var r Row
-		if json.Unmarshal(line, &r) != nil || r.Nonce == "" || r.Channel == "" {
-			snap.Corrupt++
-			return
+// foldFiles replays the given spool segments then the given state segments, oldest →
+// newest, into one snapshot. Load folds all three layers; Compact folds archive+seal only
+// (the segments it is about to rewrite), leaving the live head to keep accumulating.
+func (o *Outbox) foldFiles(spoolNames, stateNames []string) (*Snapshot, error) {
+	snap := &Snapshot{States: map[string]rowState{}}
+
+	// Spool: fold archive → seal → head. A repeated nonce WITHIN a segment is the
+	// double-send signal (counted corrupt, first write wins); the same nonce ACROSS
+	// segments is the benign overlap a leftover seal leaves after a crashed compaction,
+	// so it is skipped without inflating Corrupt.
+	seen := map[string]bool{}
+	for _, name := range spoolNames {
+		seenThis := map[string]bool{}
+		err := readJSONL(filepath.Join(o.dir, name), func(line []byte) {
+			var r Row
+			if json.Unmarshal(line, &r) != nil || r.Nonce == "" || r.Channel == "" {
+				snap.Corrupt++
+				return
+			}
+			if seenThis[r.Nonce] {
+				snap.Corrupt++
+				return
+			}
+			seenThis[r.Nonce] = true
+			if seen[r.Nonce] {
+				return // cross-segment overlap (leftover seal) — already have this row
+			}
+			seen[r.Nonce] = true
+			snap.Rows = append(snap.Rows, r)
+		})
+		if err != nil {
+			return nil, err
 		}
-		if seen[r.Nonce] {
-			// A duplicate nonce in the spool would double-send under one identity;
-			// first write wins, the duplicate is counted as corrupt.
-			snap.Corrupt++
-			return
-		}
-		seen[r.Nonce] = true
-		snap.Rows = append(snap.Rows, r)
-	})
-	if err != nil {
-		return nil, err
 	}
 
-	err = readJSONL(filepath.Join(o.dir, stateFile), func(line []byte) {
-		var t transition
-		if json.Unmarshal(line, &t) != nil || t.State == "" {
-			snap.Corrupt++
-			return
-		}
-		if t.State == stateDrainPass {
-			if at, err := time.Parse(time.RFC3339, t.At); err == nil && at.After(snap.LastDrainAt) {
-				snap.LastDrainAt = at
+	// State: replay archive → seal → head so the latest transition per nonce wins.
+	for _, name := range stateNames {
+		err := readJSONL(filepath.Join(o.dir, name), func(line []byte) {
+			var t transition
+			if json.Unmarshal(line, &t) != nil || t.State == "" {
+				snap.Corrupt++
+				return
 			}
-			return
+			switch t.State {
+			case stateDrainPass:
+				snap.drainPasses++
+				if at, err := time.Parse(time.RFC3339, t.At); err == nil && at.After(snap.LastDrainAt) {
+					snap.LastDrainAt = at
+				}
+				return
+			case stateCompactPass:
+				if at, err := time.Parse(time.RFC3339, t.At); err == nil && at.After(snap.LastCompactAt) {
+					snap.LastCompactAt = at
+				}
+				return
+			}
+			if t.Nonce == "" {
+				snap.Corrupt++
+				return
+			}
+			snap.States[t.Nonce] = snap.States[t.Nonce].apply(t)
+		})
+		if err != nil {
+			return nil, err
 		}
-		if t.Nonce == "" {
-			snap.Corrupt++
-			return
-		}
-		snap.States[t.Nonce] = snap.States[t.Nonce].apply(t)
-	})
-	if err != nil {
-		return nil, err
 	}
 	return snap, nil
 }

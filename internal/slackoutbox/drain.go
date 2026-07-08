@@ -327,6 +327,13 @@ func (o *Outbox) Drain(ctx context.Context, w Wire, opts DrainOpts) (*DrainRepor
 	if err := o.appendState(transition{State: stateDrainPass}); err != nil {
 		return rep, err
 	}
+	// Fold the accumulated segments while we still hold the lock, when it is due. The
+	// drain's messages are already durable; a compaction error surfaces the filesystem
+	// fault but never un-delivers them (re-running Drain is idempotent). snap predates this
+	// pass's transitions, which is fine — this pass's rows are too fresh to drop anyway.
+	if _, err := o.maybeCompact(snap, CompactOpts{}); err != nil {
+		return rep, err
+	}
 	return rep, nil
 }
 
