@@ -605,15 +605,27 @@ func TestLiveResolutionLanesKeepsLiveStreamingWorker(t *testing.T) {
 // account are still resolved (the hold is a pre-route, not a guard/account failure), so
 // the operator sees exactly why the doomed worker was not launched.
 //
-// The lane is named EXPLICITLY (--lane cmd): the #1397 fix skips self-source lanes from the
-// guarded AUTO-pick (so a default tick on this fixture lands on the shippable docs lane), but
-// an operator who explicitly names a self-source lane must still reach the post-pick
-// SELF_MODIFY hold -- that is exactly the safety-net this test pins.
+// The lane is named EXPLICITLY (--lane adjudicator): the #1397 fix skips trust-critical
+// lanes from the guarded AUTO-pick (so a default tick lands on a shippable lane), but an
+// operator who explicitly names a trust-critical lane -- the referee's own trees -- must
+// still reach the post-pick SELF_MODIFY hold -- that is exactly the safety-net this test
+// pins. (A merely-self-source lane like cmd is NOT held: the worker guard permits it.)
 func TestDispatchTickDryRunHoldsGuardedSelfModifyLane(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	oldRoute := dispatchRouteIssues
+	dispatchRouteIssues = func(root string, _ io.Writer) (dispatchtick.RouterPayload, error) {
+		return dispatchtick.RouterPayload{
+			Schema: dispatchtick.RouterSchema,
+			OK:     true,
+			Lanes: map[string]dispatchtick.RouterLaneGroup{
+				"adjudicator": {Tree: []string{"internal/adjudicator/**"}, Issues: []int{1338}, Count: 1},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { dispatchRouteIssues = oldRoute })
 	root := t.TempDir()
 
-	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "cmd", "--no-refresh", "--no-loop-ledger", "--json")
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "adjudicator", "--no-refresh", "--no-loop-ledger", "--json")
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (a self-modify hold is a benign scheduler hold) (stderr: %s)", code, errb)
 	}
@@ -625,8 +637,8 @@ func TestDispatchTickDryRunHoldsGuardedSelfModifyLane(t *testing.T) {
 	if got["action"] != "self_modify_hold" || got["verdict"] != "SELF_MODIFY_HOLD" || got["ok"] != false {
 		t.Fatalf("dispatch tick result = action %v verdict %v ok %v, want self_modify_hold/SELF_MODIFY_HOLD/false", got["action"], got["verdict"], got["ok"])
 	}
-	if got["lane"] != "cmd" || got["self_modify_tree"] != "cmd/**" || got["target_issue"] != float64(1338) {
-		t.Fatalf("lane/tree/target = %v/%v/%v, want cmd/cmd-tree/1338", got["lane"], got["self_modify_tree"], got["target_issue"])
+	if got["lane"] != "adjudicator" || got["self_modify_tree"] != "internal/adjudicator/**" || got["target_issue"] != float64(1338) {
+		t.Fatalf("lane/tree/target = %v/%v/%v, want adjudicator/internal/adjudicator/**/1338", got["lane"], got["self_modify_tree"], got["target_issue"])
 	}
 	if guarded, _ := got["guarded"].(bool); !guarded {
 		t.Fatalf("the hold must still resolve the guard wrapper (that is WHY it holds): %#v", got)
@@ -659,8 +671,8 @@ func TestDispatchTickDryRunHoldsGuardedMisroutedSelfSourceIssue(t *testing.T) {
 	dispatchFetchIssue = func(root string, issue int) dispatchIssueInfo {
 		return dispatchIssueInfo{
 			Number: issue,
-			Title:  "fix(dispatch): pre-route fak-own-code issues away from self-guarded workers",
-			Body:   "most of the backlog lives in `cmd/**` + `internal/**` -- structurally unshippable by a self-guarded worker.",
+			Title:  "fix(dispatch): pre-route referee-own-code issues away from self-guarded workers",
+			Body:   "the real work lives in `internal/policy/` -- a self-guarded worker must not rewrite its own policy loader.",
 			Labels: nil,
 		}
 	}
@@ -678,8 +690,8 @@ func TestDispatchTickDryRunHoldsGuardedMisroutedSelfSourceIssue(t *testing.T) {
 	if got["action"] != "self_modify_hold" || got["verdict"] != "SELF_MODIFY_HOLD" || got["ok"] != false {
 		t.Fatalf("mis-routed tools issue = action %v verdict %v ok %v, want self_modify_hold/SELF_MODIFY_HOLD/false", got["action"], got["verdict"], got["ok"])
 	}
-	if got["lane"] != "tools" || got["self_modify_tree"] != "cmd/**" || got["target_issue"] != float64(1397) {
-		t.Fatalf("lane/tree/target = %v/%v/%v, want tools/cmd-glob/1397", got["lane"], got["self_modify_tree"], got["target_issue"])
+	if got["lane"] != "tools" || got["self_modify_tree"] != "internal/policy/" || got["target_issue"] != float64(1397) {
+		t.Fatalf("lane/tree/target = %v/%v/%v, want tools/internal/policy//1397", got["lane"], got["self_modify_tree"], got["target_issue"])
 	}
 	if guarded, _ := got["guarded"].(bool); !guarded {
 		t.Fatalf("the hold must still resolve the guard wrapper (that is WHY it holds): %#v", got)
@@ -1565,6 +1577,21 @@ func TestDispatchWaveDryRunAllocatesAccountsAndPlansFirstTick(t *testing.T) {
 func TestDispatchWaveDryRunHoldStopReasonDoesNotInviteLive(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
 	t.Setenv("FLEET_DOGFOOD_GUARD", "1")
+	// The whole eligible backlog is a TRUST-CRITICAL lane (the referee's own
+	// adjudicator tree) -- the only shape a guarded --count 1 wave still holds
+	// after 1116dd1d narrowed the ship-hold. A merely-self-source lane (cmd/**,
+	// internal/gateway/**) is guard-shippable now and would NOT hold.
+	oldRoute := dispatchRouteIssues
+	dispatchRouteIssues = func(root string, _ io.Writer) (dispatchtick.RouterPayload, error) {
+		return dispatchtick.RouterPayload{
+			Schema: dispatchtick.RouterSchema,
+			OK:     true,
+			Lanes: map[string]dispatchtick.RouterLaneGroup{
+				"adjudicator": {Tree: []string{"internal/adjudicator/**"}, Issues: []int{20}, Count: 1},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { dispatchRouteIssues = oldRoute })
 	root := t.TempDir()
 
 	out, errb, code := runDispatchAt("wave", "--workspace", root, "--count", "1", "--no-loop-ledger", "--json")
@@ -1589,6 +1616,22 @@ func TestDispatchWaveDryRunHoldStopReasonDoesNotInviteLive(t *testing.T) {
 func TestDispatchWaveDryRunUsesReadySubsetAfterMixedPrelaunchAudit(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
 	t.Setenv("FLEET_DOGFOOD_GUARD", "1")
+	// A MIXED backlog: one TRUST-CRITICAL lane (adjudicator, held) and one
+	// shippable lane (docs, ready). After 1116dd1d only the trust-critical tree
+	// holds, so the ready subset is exactly the docs lane -- the mixed-hold shape
+	// this test pins.
+	oldRoute := dispatchRouteIssues
+	dispatchRouteIssues = func(root string, _ io.Writer) (dispatchtick.RouterPayload, error) {
+		return dispatchtick.RouterPayload{
+			Schema: dispatchtick.RouterSchema,
+			OK:     true,
+			Lanes: map[string]dispatchtick.RouterLaneGroup{
+				"adjudicator": {Tree: []string{"internal/adjudicator/**"}, Issues: []int{20}, Count: 1},
+				"docs":        {Tree: []string{"docs/**"}, Issues: []int{12}, Count: 1},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { dispatchRouteIssues = oldRoute })
 	root := t.TempDir()
 
 	out, errb, code := runDispatchAt("wave", "--workspace", root, "--count", "2", "--no-loop-ledger", "--json")
