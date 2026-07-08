@@ -345,6 +345,7 @@ var tier = map[string]int{
 	"taskgraph":             2, // #2437: shared task journal pure-folded to a typed table with lease-gated claims (created/claimed/blocked/completed/abandoned); refuses a dead-lease claim, a tree-colliding claim, and a complete-over-open-blockers as closed reasons. Pure fold, imports only abi(0), off the hot path.
 	"toolshape":             3, // #2823 (epic #2822 C1): pure SHAPE fingerprint of one tool call — trajectory.Turn folded to closed-vocabulary ArgClass/buckets + Avro-style key-set signature, names-not-values; imports trajectory(3)+stdlib, off the hot path.
 	"l3kv": 1,
+	"worklog": 1, // unified agent-work change feed primitive (#3172): the outbox-insight applied to agent work — one append-only, Seq-ordered, principal-scoped CDC feed (commit / verdict-flip / lease events) drained by cursor with an idempotency+retention contract + a fold read-model; pure primitive, imports nothing internal (`import "sync"` only), off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
