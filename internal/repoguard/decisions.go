@@ -39,7 +39,7 @@ type DecisionRecord struct {
 	Ts       string `json:"ts,omitempty"`
 	Session  string `json:"session,omitempty"`
 	Tool     string `json:"tool"`
-	Decision string `json:"decision"` // "deny" | "advisory"
+	Decision string `json:"decision"` // "deny" | "advisory" | "record"
 	Mode     string `json:"mode"`     // "enforce" | "warn"
 	Reason   string `json:"reason"`
 	Op       string `json:"op,omitempty"`
@@ -49,24 +49,27 @@ type DecisionRecord struct {
 }
 
 // DecisionsFromViolations projects the guard's findings into durable rows. One
-// row per violation so a multi-target command is fully accounted; decision is
-// "advisory" for advisory-class reasons and "deny" otherwise.
-func DecisionsFromViolations(violations []Violation, tool, session, mode, ts string) []DecisionRecord {
+// row per violation so a multi-target command is fully accounted. severityOf maps
+// each violation's reason to the severity the hook ACTUALLY applied (including any
+// per-reason override), so the row's decision label — "record" | "advisory" |
+// "deny" — reflects the real decision, not a recomputed default. A SeverityOff
+// finding carries no row (the caller drops it before recording).
+func DecisionsFromViolations(violations []Violation, tool, session, mode, ts string, severityOf func(reason string) Severity) []DecisionRecord {
 	if len(violations) == 0 {
 		return nil
 	}
 	rows := make([]DecisionRecord, 0, len(violations))
 	for _, v := range violations {
-		decision := "deny"
-		if IsAdvisoryReason(v.Reason) {
-			decision = "advisory"
+		label := severityOf(v.Reason).DecisionLabel()
+		if label == "" {
+			continue // SeverityOff — nothing to record
 		}
 		rows = append(rows, DecisionRecord{
 			Schema:   DecisionRecordSchema,
 			Ts:       ts,
 			Session:  session,
 			Tool:     tool,
-			Decision: decision,
+			Decision: label,
 			Mode:     mode,
 			Reason:   v.Reason,
 			Op:       v.Op,
@@ -119,6 +122,7 @@ type DecisionSummary struct {
 	Total      int              `json:"total"`
 	Denies     int              `json:"denies"`
 	Advisories int              `json:"advisories"`
+	Recorded   int              `json:"recorded"`
 	ByReason   map[string]int   `json:"by_reason"`
 	FirstTs    string           `json:"first_ts,omitempty"`
 	LastTs     string           `json:"last_ts,omitempty"`
@@ -143,9 +147,12 @@ func SummarizeDecisions(r io.Reader, recentN int) (DecisionSummary, error) {
 			continue // tolerate a torn/foreign line
 		}
 		sum.Total++
-		if rec.Decision == "advisory" {
+		switch rec.Decision {
+		case "advisory":
 			sum.Advisories++
-		} else {
+		case "record":
+			sum.Recorded++
+		default:
 			sum.Denies++
 		}
 		if rec.Reason != "" {
@@ -195,8 +202,8 @@ func RenderSummary(sum DecisionSummary) string {
 	if sum.Total == 0 {
 		return "repo_guard: no recorded decisions yet (the guard has denied nothing this journal covers)."
 	}
-	fmt.Fprintf(&b, "repo_guard value: %d finding(s) recorded — %d denied, %d advisory",
-		sum.Total, sum.Denies, sum.Advisories)
+	fmt.Fprintf(&b, "repo_guard value: %d finding(s) recorded — %d denied, %d advisory, %d silent-record",
+		sum.Total, sum.Denies, sum.Advisories, sum.Recorded)
 	if sum.FirstTs != "" {
 		fmt.Fprintf(&b, " (%s .. %s)", sum.FirstTs, sum.LastTs)
 	}

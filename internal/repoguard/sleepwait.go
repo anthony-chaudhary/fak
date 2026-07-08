@@ -40,12 +40,6 @@ const foregroundSleepFix = "wait in the background instead: Bash run_in_backgrou
 // the sleep underneath is still seen.
 var shellFlowKeywords = setOf("do", "then", "else", "elif", "while", "until", "time")
 
-// IsAdvisoryReason reports whether a violation reason is advisory-only: the
-// hook surfaces it on stderr but never denies the tool call for it.
-func IsAdvisoryReason(reason string) bool {
-	return reason == ReasonForegroundSleep
-}
-
 // ClassifySleepWait returns FOREGROUND_SLEEP advisories for long foreground
 // sleep timers in a shell command. Pure string work.
 func ClassifySleepWait(command string) []Violation {

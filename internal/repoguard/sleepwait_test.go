@@ -70,17 +70,6 @@ func TestEvaluateWiresSleepWaitForBashAndPowerShell(t *testing.T) {
 	}
 }
 
-func TestIsAdvisoryReason(t *testing.T) {
-	if !IsAdvisoryReason(ReasonForegroundSleep) {
-		t.Fatal("FOREGROUND_SLEEP must be advisory")
-	}
-	for _, denying := range []string{ReasonInteractiveHang, "OUT_OF_TREE_WRITE"} {
-		if IsAdvisoryReason(denying) {
-			t.Fatalf("%s must NOT be advisory", denying)
-		}
-	}
-}
-
 func TestRenderReasonIncludesSleepBlock(t *testing.T) {
 	vs := ClassifySleepWait("sleep 300")
 	reason := RenderReason(vs)

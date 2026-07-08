@@ -812,7 +812,8 @@ func renderOutOfTreeReason(violations []Violation) string {
 	return guardReason + ": a destructive/write op targets a path OUTSIDE this repo. " +
 		strings.Join(parts, "; ") +
 		". Operate inside the workspace, or write scratch to a temp dir. " +
-		"If this is intentional, re-run with FAK_REPO_GUARD=warn (advisory) or off."
+		"To silence this per reason set FAK_REPO_GUARD_SEVERITY=" + guardReason + "=record (silent) or =off; " +
+		"the master switch FAK_REPO_GUARD=warn|off still overrides."
 }
 
 func renderInteractiveReason(violations []Violation) string {
@@ -823,7 +824,8 @@ func renderInteractiveReason(violations []Violation) string {
 	return ReasonInteractiveHang + ": this command waits for a human and this session has no TTY — a silent hang or EOF'd no-op, either way a wasted turn. " +
 		strings.Join(parts, "; ") +
 		". Re-run the suggested non-interactive form. " +
-		"If a human IS attached, re-run with FAK_REPO_GUARD=warn (advisory) or off."
+		"To silence this per reason set FAK_REPO_GUARD_SEVERITY=" + ReasonInteractiveHang + "=record or =off; " +
+		"the master switch FAK_REPO_GUARD=warn|off still overrides."
 }
 
 // RenderReason formats the human-readable denial message for violations.
