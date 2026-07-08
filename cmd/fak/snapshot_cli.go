@@ -137,16 +137,33 @@ func snapshotInfo(argv []string) {
 }
 
 func printSessionImageInfo(img *sessionimage.Image) {
+	fmt.Println(string(jsonIndent(sessionImageInfo(img))))
+}
+
+// sessionImageInfo builds the header `snapshot info` renders for a session image. It is
+// factored out of printSessionImageInfo so the render is unit-testable. The quality-delta
+// part (issue #1979) is surfaced here: when the image carries the latest per-card score
+// movement (quality.json), inspect renders it back — a restored/inspected session answers
+// "did quality move, against what evidence?" from the integrity-checked part, not a
+// re-run scorecard. A decode error is reported inline rather than dropped, since the
+// bytes were already digest-verified at Load and a mismatch is a real corruption signal.
+func sessionImageInfo(img *sessionimage.Image) map[string]any {
 	parts := make([]string, 0, len(img.Meta.Parts))
 	for _, p := range img.Meta.Parts {
 		parts = append(parts, p.Name)
 	}
-	fmt.Println(string(jsonIndent(map[string]any{
+	info := map[string]any{
 		"kind": "session", "session_id": img.Meta.SessionID, "version": img.Meta.Version,
 		"model": img.Meta.Model, "host": img.Meta.Host, "portability": img.Meta.Portability,
 		"drive": map[string]any{"run": img.Drive.Run.String(), "budget": img.Drive.Budget, "rev": img.Drive.Rev},
 		"parts": parts, "migrations": img.Meta.Migrations, "integrity": "verified",
-	})))
+	}
+	if deltas, err := img.QualityDeltas(); err != nil {
+		info["quality_deltas_error"] = err.Error()
+	} else if len(deltas) > 0 {
+		info["quality_deltas"] = deltas
+	}
+	return info
 }
 
 // openSessionImage loads + integrity-verifies a REAL session image the same way
