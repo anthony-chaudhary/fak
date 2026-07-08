@@ -107,6 +107,12 @@ type sessionCtxValue struct {
 
 	totalOutput        int64 // cumulative completion tokens (the session's reply volume)
 	totalResidentTurns int64 // cumulative resident tokens across turns (prefill volume)
+
+	// footprint is the latest inbound ESTIMATED structural split of the as-sent
+	// floor (#3233), captured at the pre-transform anchor. nil until the first
+	// Anthropic-passthrough turn. ESTIMATED, never conflated with the OBSERVED
+	// token counters above.
+	footprint *ctxFootprintBytes
 }
 
 // push records one turn's resident-token count into the growth ring.
@@ -262,6 +268,11 @@ type CtxValueReport struct {
 	Session    CtxValueSession `json:"session"`
 	StepAdvice CtxStepAdvice   `json:"step_advice"`
 	Wakeup     CtxValueWakeup  `json:"wakeup"`
+	// Footprint is the ESTIMATED where-did-they-go split of the as-sent floor
+	// (#3233): system + built-in tools + MCP tools, taken at the pre-transform
+	// anchor. nil until the first Anthropic-passthrough turn. Composed with, never
+	// substituted for, the OBSERVED Tokens above (Law A2).
+	Footprint *CtxValueFootprint `json:"footprint,omitempty"`
 }
 
 // CtxValueSnapshot is the multi-session HTTP body: every tracked session's report.
@@ -499,6 +510,8 @@ func (s *Server) ctxValueReportLocked(trace string, v *sessionCtxValue) CtxValue
 		r.Turns.EstTurnsToContextEvent = est
 		r.Turns.EstProvenance = "FORECAST"
 	}
+	// The ESTIMATED as-sent footprint (#3233), surfaced beside the OBSERVED tokens.
+	r.Footprint = v.footprint.report()
 	return r
 }
 

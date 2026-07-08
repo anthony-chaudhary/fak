@@ -210,6 +210,12 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// history (auto-compaction), never fak. The observation is folded after the served turn, once
 	// the provider's cache counters are known.
 	inboundPrefixDigest := inboundProtectedPrefixDigest(req.Raw)
+	// Live footprint (#3233): price the as-sent structural floor (system + built-in
+	// tools + MCP tools + history/tail) at the SAME pre-transform anchor as the
+	// prefix digest — before maybeCompactInboundTools prunes any tool def — and fold
+	// it per-trace for fak_context_value. ESTIMATED, audit-only, off the byte-faithful
+	// passthrough (it reads a de-folded COPY, never mutating req).
+	s.observeCtxFootprint(reqTrace, req)
 	// Tool-reference sanitization (correctness, runs on EVERY wire, before any shrinker or the
 	// prefix-digest matters for cache accounting): the Claude Code client emits its INTERNAL
 	// `tool_reference` blocks inside a ToolSearch tool_result, which is not a valid Anthropic

@@ -89,12 +89,18 @@ that is actually largest for a given workload.
   proves it is a faithful partition of `EstimateAnthropicTokens` and that per-tool costs
   reconstruct the tools bucket. This is a library primitive; computing a footprint is
   audit-only and changes nothing on the wire.
-- **Next (not yet):** wiring the footprint into an observable surface so the split is
-  queryable at runtime — the natural home is the managed-context report
-  (`fak_context_value`), which today reports resident tokens as one OBSERVED number and
-  would gain the ESTIMATED where-did-they-go breakdown beside it. That wiring touches the
-  gateway request path and is tracked separately rather than folded in here, to keep this
-  a clean, non-colliding measurement primitive.
+- **Offline scorecard (shipped, #3230):** `fak footprint` prices fak's own MCP tool
+  registry floor deterministically through the same estimator (see
+  `docs/context-budget/mcp-tool-floor.md`).
+- **Live gateway footprint (shipped, #3233):** the footprint is now wired into the
+  managed-context report (`fak_context_value`) as an ESTIMATED `footprint` block beside
+  the OBSERVED resident-token number. It is captured on every inbound Anthropic
+  passthrough at the pre-transform anchor (`internal/gateway/ctxfootprint.go`
+  `observeCtxFootprint`, called from `handleAnthropicMessages` before
+  `maybeCompactInboundTools`), so it reports the harness's AS-SENT floor. It reconstructs
+  the built-in (no `mcp__` prefix) vs MCP (`mcp__<server>__*`) split and corrects the
+  folded-system double-count (`deFoldSystemReq`). Provenance stays ESTIMATED, never
+  conflated with the OBSERVED counters (Law A2).
 
 See also: [awesome-token-efficiency](../awesome-token-efficiency.md) (the full field of
 methods), [token-defaults-scorecard](token-defaults-scorecard.md) (what is on by
