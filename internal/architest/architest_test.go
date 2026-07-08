@@ -192,6 +192,7 @@ var tier = map[string]int{
 	"modelscore":       1, // durable raw model-capability evidence registry (#3038): unbounded native-unit benchmark/cost/context rows with provenance; a Profile keeps raw evidence separate from any tier policy. Pure, stdlib-only, imports nothing internal, off the hot path.
 	"toon":             1, // general JSON<->TOON codec (#3065): lossless, type-preserving Encode/Decode + TabularEligibility, the round-trip generalization of memview's flat-subset encoder. Pure, stdlib-only, imports nothing internal, off the hot path.
 	"simhash":          1, // reference vector-similarity primitive (embed/cosine/top-k); the observability layer's near-duplicate / outlier-query substrate. Deterministic, stdlib-only, imports nothing internal.
+	"guideddecode":     1, // slice-1 constrained tool-JSON decode (#26): sound byte-level AllowedNextBytes FSM over the {"name":<enum>,"arguments":…} tool-call envelope; the model.LogitMask adapter is a later slice. Pure, stdlib-only (bytes), imports nothing internal, off the hot path.
 	"issuededup":       1, // write-time near-duplicate gate for issue producers (#2504): simhash embed + TopK over title / title+body axes into advisory dup-risk verdicts. Imports simhash(1) only, off the hot path.
 	"idempotency":      1, // keyed, time-windowed dedup for retryable mutating tool ops (#2093): op+token -> key, JSONL ledger so a post-hang retry replays the original result instead of double-applying. Imports jsonlledger(1) only, off the hot path.
 	"trajectory":       3, // trajectory data plane: folds the abi event stream into per-trace Turn rows + JSONL export; an abi.Emitter that optionally stamps a simhash query embedding. Imports abi+simhash.
@@ -346,8 +347,8 @@ var tier = map[string]int{
 	"sessionsearch":         2, // witnessed cross-session recall (#2913): pure TF-IDF inverted index over the guard tool-process journal + cache-safe suffix injection proven byte-stable via cachemeta + a recall-usefulness witness; imports toolproc(2)+cachemeta(1), off the hot path.
 	"taskgraph":             2, // #2437: shared task journal pure-folded to a typed table with lease-gated claims (created/claimed/blocked/completed/abandoned); refuses a dead-lease claim, a tree-colliding claim, and a complete-over-open-blockers as closed reasons. Pure fold, imports only abi(0), off the hot path.
 	"toolshape":             3, // #2823 (epic #2822 C1): pure SHAPE fingerprint of one tool call — trajectory.Turn folded to closed-vocabulary ArgClass/buckets + Avro-style key-set signature, names-not-values; imports trajectory(3)+stdlib, off the hot path.
-	"l3kv": 1,
-	"worklog": 1, // unified agent-work change feed primitive (#3172): the outbox-insight applied to agent work — one append-only, Seq-ordered, principal-scoped CDC feed (commit / verdict-flip / lease events) drained by cursor with an idempotency+retention contract + a fold read-model; pure primitive, imports nothing internal (`import "sync"` only), off the hot path.
+	"l3kv":                  1,
+	"worklog":               1, // unified agent-work change feed primitive (#3172): the outbox-insight applied to agent work — one append-only, Seq-ordered, principal-scoped CDC feed (commit / verdict-flip / lease events) drained by cursor with an idempotency+retention contract + a fold read-model; pure primitive, imports nothing internal (`import "sync"` only), off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
