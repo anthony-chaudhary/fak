@@ -306,11 +306,11 @@ func renderGHSpamCommentsReport(w io.Writer, rep ghspam.Report, applied bool) {
 	}
 	fmt.Fprintln(w)
 	if len(rep.Findings) == 0 {
-		fmt.Fprintln(w, "no suspicious GitHub release archive-link comments found")
+		fmt.Fprintln(w, "no matching GitHub comment-spam findings across the scanned abuse families")
 		return
 	}
 	for _, f := range rep.Findings {
-		fmt.Fprintf(w, "\n@%s %s %s\n  %s\n  %s\n", f.User, f.AuthorAssociation, f.CreatedAt, f.HTMLURL, f.ArchiveURL)
+		fmt.Fprintf(w, "\n@%s %s %s [%s]\n  %s\n  %s\n", f.User, f.AuthorAssociation, f.CreatedAt, f.Reason, f.HTMLURL, f.Match)
 	}
 	if !applied {
 		fmt.Fprintln(w, "\ndry-run only; rerun with --apply to minimize matched comments as SPAM")

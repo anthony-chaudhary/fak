@@ -10,6 +10,52 @@ const Schema = "fak.gh_spam_comments/v1"
 
 var releaseArchiveRE = regexp.MustCompile(`(?i)https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download/[^\s)]+?\.(zip|rar|7z|exe|msi|bat|cmd|ps1|scr|dll)(?:[?#][^\s)]*)?`)
 
+// patchLureNounRE and patchLureActionRE together recognize the "fake patch/fix"
+// lure family: an untrusted comment naming a patch/fix/crack payload AND an
+// imperative download/extract action or a throwaway file host. Both signals must
+// fire so a genuine outsider bug report that merely says "fix" does not match.
+var (
+	patchLureNounRE   = regexp.MustCompile(`(?i)\b(patch|fix|crack|keygen|activator|loader|nulled|cracked)\b`)
+	patchLureActionRE = regexp.MustCompile(`(?i)(\bdownload\b|\binstall\b|\bgrab\b|password\s+is|\bunzip\b|\bextract\b|mega\.nz|mediafire|anonfiles|gofile\.io|drive\.google\.com|bit\.ly)`)
+)
+
+// Family is a reusable GitHub-comment abuse match family. Each inspects one
+// untrusted comment body and, on a match, returns the detail (archive URL, lure
+// phrase, ...) the Finding carries for an operator or scheduled report. Families
+// are ordered; the first to fire on a comment owns it, so a comment is reported
+// once under its most specific family. New abuse patterns are added here rather
+// than by hardcoding a single incident.
+type Family struct {
+	Reason string
+	match  func(body string) (detail string, ok bool)
+}
+
+// Families returns the ordered abuse match families the sweeper scans for. Order
+// is significant: the most specific/high-confidence family comes first.
+func Families() []Family {
+	return []Family{
+		{Reason: "untrusted_github_release_archive_link", match: matchReleaseArchive},
+		{Reason: "fake_patch_fix_lure_phrasing", match: matchFakePatchLure},
+	}
+}
+
+func matchReleaseArchive(body string) (string, bool) {
+	url := releaseArchiveRE.FindString(body)
+	if url == "" {
+		return "", false
+	}
+	return strings.TrimRight(url, ".,;:"), true
+}
+
+func matchFakePatchLure(body string) (string, bool) {
+	noun := patchLureNounRE.FindString(body)
+	action := patchLureActionRE.FindString(body)
+	if noun == "" || action == "" {
+		return "", false
+	}
+	return strings.ToLower(strings.TrimSpace(noun)) + "/" + strings.ToLower(strings.TrimSpace(action)), true
+}
+
 type User struct {
 	Login string `json:"login"`
 }
@@ -37,7 +83,8 @@ type Finding struct {
 	User              string `json:"user"`
 	AuthorAssociation string `json:"author_association"`
 	CreatedAt         string `json:"created_at"`
-	ArchiveURL        string `json:"archive_url"`
+	ArchiveURL        string `json:"archive_url,omitempty"`
+	Match             string `json:"match"`
 	Reason            string `json:"reason"`
 	Body              string `json:"body"`
 }
@@ -87,26 +134,34 @@ func Analyze(comments []Comment, opt Options) Report {
 		Findings: []Finding{},
 	}
 	rep.Counts.Scanned = len(comments)
+	families := Families()
 	for _, c := range comments {
 		if trustedComment(c, trustedAssociations, trustedUsers) {
 			rep.Counts.TrustedSkipped++
 			continue
 		}
-		url := releaseArchiveRE.FindString(c.Body)
-		if url == "" {
-			continue
+		for _, fam := range families {
+			detail, ok := fam.match(c.Body)
+			if !ok {
+				continue
+			}
+			finding := Finding{
+				ID:                c.ID,
+				NodeID:            c.NodeID,
+				HTMLURL:           c.HTMLURL,
+				User:              c.User.Login,
+				AuthorAssociation: c.AuthorAssociation,
+				CreatedAt:         c.CreatedAt,
+				Match:             detail,
+				Reason:            fam.Reason,
+				Body:              oneLine(c.Body),
+			}
+			if fam.Reason == "untrusted_github_release_archive_link" {
+				finding.ArchiveURL = detail
+			}
+			rep.Findings = append(rep.Findings, finding)
+			break
 		}
-		rep.Findings = append(rep.Findings, Finding{
-			ID:                c.ID,
-			NodeID:            c.NodeID,
-			HTMLURL:           c.HTMLURL,
-			User:              c.User.Login,
-			AuthorAssociation: c.AuthorAssociation,
-			CreatedAt:         c.CreatedAt,
-			ArchiveURL:        strings.TrimRight(url, ".,;:"),
-			Reason:            "untrusted_github_release_archive_link",
-			Body:              oneLine(c.Body),
-		})
 	}
 	rep.Counts.Matched = len(rep.Findings)
 	sort.Slice(rep.Findings, func(i, j int) bool {

@@ -141,7 +141,7 @@ func devOnlyVerbs() []devindex.Verb {
 	return []devindex.Verb{
 		{
 			Name:     "gh-spam-comments",
-			Synopsis: "scan GitHub issue/PR comments for untrusted release-archive spam and optionally hide it as SPAM",
+			Synopsis: "scan GitHub issue/PR comments for untrusted spam across reusable abuse families (release archives, fake patch/fix lures) and optionally hide it as SPAM",
 			Lane:     "cmd",
 			Tier:     devindex.TierDev,
 		},
