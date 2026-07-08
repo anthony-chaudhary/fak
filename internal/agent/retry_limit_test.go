@@ -137,22 +137,34 @@ func TestClassifyLimit429_ThrottleAndNon429Unchanged(t *testing.T) {
 
 // The acceptance fence of #1362: the LIVE classification and the POST-MORTEM one
 // (resume.ClassifyLimitText, what `fak resume scan` runs on a dead transcript) must agree
-// on the same refusal text — one vocabulary, two call sites, no divergence.
+// on the same refusal text — one vocabulary, two call sites, no divergence. The table walks
+// EVERY member of the closed vocabulary (session/weekly/usage/rate), including the bare
+// "Fable 5 limit"/usage-credits phrasing an earlier fix (#2369) had to teach the shared
+// classifier, so a future edit to either call site that drops a member reds this fence.
 func TestClassifyLimit429_AgreesWithPostMortemClassifier(t *testing.T) {
-	msgs := []string{
-		"You've hit your session limit · resets 8pm",
-		"You've hit your weekly limit · resets Oct 14",
-		"usage limit reached",
-		"Rate limited",
+	cases := []struct {
+		msg  string
+		want string
+	}{
+		{"You've hit your session limit · resets 8pm", resume.LimitSession},
+		{"You've hit your weekly limit · resets Oct 14", resume.LimitWeekly},
+		{"usage limit reached", resume.LimitUsage},
+		{"You've reached your Fable 5 limit. Run /usage-credits to continue.", resume.LimitUsage},
+		{"Rate limited", resume.LimitRate},
 	}
-	for _, msg := range msgs {
-		want, ok := resume.ClassifyLimitText(msg)
+	for _, tc := range cases {
+		// Post-mortem: the exact classifier `fak resume scan` runs on a dead transcript.
+		post, ok := resume.ClassifyLimitText(tc.msg)
 		if !ok {
-			t.Fatalf("post-mortem classifier rejected %q", msg)
+			t.Fatalf("post-mortem classifier rejected %q", tc.msg)
 		}
-		cls, _ := classifyLimit429(429, anthropicLimitBody(msg), nil, time.Now())
-		if cls.Reason != want {
-			t.Fatalf("live=%q post-mortem=%q for %q — the two call sites diverged", cls.Reason, want, msg)
+		if post != tc.want {
+			t.Fatalf("post-mortem=%q for %q, want %q", post, tc.msg, tc.want)
+		}
+		// Live: the same refusal wrapped in the wire shape the 429 path receives.
+		cls, _ := classifyLimit429(429, anthropicLimitBody(tc.msg), nil, time.Now())
+		if cls.Reason != post {
+			t.Fatalf("live=%q post-mortem=%q for %q — the two call sites diverged", cls.Reason, post, tc.msg)
 		}
 	}
 }
