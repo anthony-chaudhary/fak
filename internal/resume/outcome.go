@@ -43,6 +43,11 @@ const (
 	// OutcomeUnrecoverable: the terminal turn is an auth/login/credit/access wall — a
 	// re-resume cannot fix it; it needs a human.
 	OutcomeUnrecoverable Outcome = "unrecoverable"
+	// OutcomeCancelled: the terminal turn is a deliberate interrupt/stop — the operator
+	// (or the harness on their behalf) chose to end the session. Relaunching would undo
+	// an intentional decision, so the gate refuses it outright (#3354); the deny twin of
+	// OutcomeRecoverable's transport-death relaunch arm.
+	OutcomeCancelled Outcome = "cancelled"
 	// OutcomeUnknown: no transcript / no readable terminal turn. Treated as progressed by
 	// the retry gate (conservative burn-once: never loop blindly on a session we cannot read).
 	OutcomeUnknown Outcome = "unknown"
@@ -61,16 +66,22 @@ type TerminalSignal struct {
 	LimitWall bool `json:"limit_wall,omitempty"`
 	// TransientAPIError: the text matched the overloaded/529/rate transient vocabulary.
 	TransientAPIError bool `json:"transient_api_error,omitempty"`
+	// Cancelled: the text matched the deliberate interrupt/stop vocabulary (an operator
+	// interrupt, an explicit stop verb) — intent, not an environmental wall.
+	Cancelled bool `json:"cancelled,omitempty"`
 }
 
 // ClassifyOutcome folds a terminal signal into the closed Outcome. Precedence follows
-// remediation cost, mirroring the terminal_failure discipline: an auth wall (needs a
+// remediation cost, mirroring the terminal_failure discipline: a deliberate cancel
+// (intent — relaunch is forbidden, not merely useless) outranks an auth wall (needs a
 // human) outranks a limit/transient wall (wait and retry), which outranks a clean turn —
-// so the most expensive-to-recover wall is never masked by a cheaper reading.
+// so the most expensive-to-recover reading is never masked by a cheaper one.
 func ClassifyOutcome(sig TerminalSignal) Outcome {
 	switch {
 	case !sig.Found:
 		return OutcomeUnknown
+	case sig.Cancelled:
+		return OutcomeCancelled
 	case sig.AuthWall:
 		return OutcomeUnrecoverable
 	case sig.LimitWall, sig.TransientAPIError:
@@ -330,6 +341,12 @@ func RetryGate(history []Attempt, outcome Outcome, maxAttempts int) RetryDecisio
 	case OutcomeRecoverable:
 		return RetryDecision{Blocked: false,
 			Reason: fmt.Sprintf("last resume failed recoverably; attempt %d/%d", attempts+1, maxAttempts)}
+	case OutcomeCancelled:
+		// The deny axis (#3354): a deliberate stop is intent, not a failure — relaunching
+		// would override the operator's decision. Distinct from the operator-settled ledger
+		// override above (a hand-written consolidate row) and from the auth wall below (an
+		// environmental wall no retry can fix): this one the session's own terminal turn proves.
+		return RetryDecision{Blocked: true, Reason: "intentionally cancelled — do not relaunch"}
 	case OutcomeUnrecoverable:
 		return RetryDecision{Blocked: true, Reason: "last resume hit an auth/access wall — a re-resume cannot fix it"}
 	default:
@@ -393,7 +410,9 @@ func FoldResumeState(f ResumeFacts) ResumeState {
 		return ResumeSettled
 	case f.NewTurns > 0 && f.Outcome == OutcomeProgressed:
 		return ResumeTook
-	case f.Outcome == OutcomeUnrecoverable:
+	case f.Outcome == OutcomeUnrecoverable, f.Outcome == OutcomeCancelled:
+		// Cancelled folds to gave-up for the same operator-facing meaning: no automatic
+		// resume will fire again; a human owns whatever happens next (#3354).
 		return ResumeGaveUp
 	case f.Attempts >= max:
 		return ResumeGaveUp

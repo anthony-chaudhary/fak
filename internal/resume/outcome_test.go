@@ -1,6 +1,9 @@
 package resume
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // The outcome classification is the remediation-cost precedence: auth outranks
 // limit/transient outranks clean; no terminal turn is unknown.
@@ -308,5 +311,73 @@ func TestFoldResumeState(t *testing.T) {
 		if got := FoldResumeState(tc.f); got != tc.want {
 			t.Errorf("%s: FoldResumeState = %q, want %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+// #3354: the deny axis of the migratable/non-migratable split. Every terminal error
+// class maps to exactly one relaunch disposition — relaunch now (transport/transient
+// death), back off then relaunch (limit wall, recoverable after its reset), or never
+// relaunch (intentional cancel, auth wall) — so a deliberate stop or a capacity refusal
+// is never blindly relaunched the way a transport death is.
+func TestCancelledRelaunchClassification(t *testing.T) {
+	launched := []Attempt{{UnixSeconds: 100, Phase: "launched"}}
+
+	// Classification: an intentional cancel is its own closed outcome, and it outranks
+	// every environmental wall reading on the same turn — the operator's intent is never
+	// masked by a cheaper (retryable) reading of the same terminal text.
+	classify := []struct {
+		name string
+		sig  TerminalSignal
+		want Outcome
+	}{
+		{"cancelled turn", TerminalSignal{Found: true, Cancelled: true}, OutcomeCancelled},
+		{"cancel outranks limit wall", TerminalSignal{Found: true, Cancelled: true, LimitWall: true}, OutcomeCancelled},
+		{"cancel outranks auth wall", TerminalSignal{Found: true, Cancelled: true, AuthWall: true}, OutcomeCancelled},
+		{"cancel outranks transient", TerminalSignal{Found: true, Cancelled: true, TransientAPIError: true}, OutcomeCancelled},
+	}
+	for _, tc := range classify {
+		if got := ClassifyOutcome(tc.sig); got != tc.want {
+			t.Errorf("%s: ClassifyOutcome = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+
+	// The gate: each error class → relaunch / back-off-relaunch / block.
+	gate := []struct {
+		name    string
+		outcome Outcome
+		blocked bool
+	}{
+		{"transport/transient death relaunches", OutcomeRecoverable, false}, // MIGRATABLE
+		{"limit wall backs off then relaunches", OutcomeRecoverable, false}, // back-off arm: same closed outcome, retried past its reset
+		{"intentional cancel never relaunches", OutcomeCancelled, true},     // NON_MIGRATABLE: deliberate stop
+		{"auth wall never relaunches", OutcomeUnrecoverable, true},          // NON_MIGRATABLE: needs a human
+	}
+	for _, tc := range gate {
+		d := RetryGate(launched, tc.outcome, 8)
+		if d.Blocked != tc.blocked {
+			t.Errorf("%s: Blocked = %v (reason %q), want %v", tc.name, d.Blocked, d.Reason, tc.blocked)
+		}
+	}
+
+	// The cancel refusal is its own closed reason — distinct from the operator-settled
+	// override and from the auth-wall block, so a monitor can tell "the operator stopped
+	// this on purpose" from "a wall no retry can fix".
+	cancelled := RetryGate(launched, OutcomeCancelled, 8)
+	if !cancelled.Blocked || !strings.Contains(cancelled.Reason, "intentionally cancelled") {
+		t.Errorf("cancel block = %v %q, want blocked with an 'intentionally cancelled' reason", cancelled.Blocked, cancelled.Reason)
+	}
+	settled := RetryGate([]Attempt{{Action: "consolidate-manual"}}, OutcomeCancelled, 8)
+	if cancelled.Reason == settled.Reason {
+		t.Errorf("cancel reason %q must stay distinct from the operator-settled reason %q", cancelled.Reason, settled.Reason)
+	}
+	auth := RetryGate(launched, OutcomeUnrecoverable, 8)
+	if cancelled.Reason == auth.Reason {
+		t.Errorf("cancel reason %q must stay distinct from the auth-wall reason %q", cancelled.Reason, auth.Reason)
+	}
+
+	// The per-session label: a cancelled session is gave-up (no automatic resume will
+	// fire again; a human owns it), never re-stranded or launched-unproven.
+	if got := FoldResumeState(ResumeFacts{Attempts: 1, Outcome: OutcomeCancelled}); got != ResumeGaveUp {
+		t.Errorf("FoldResumeState(cancelled) = %q, want %q", got, ResumeGaveUp)
 	}
 }
