@@ -70,6 +70,10 @@ type CapResidency struct {
 	mu   sync.Mutex
 	caps map[CapKey]*capState
 	seq  int64 // monotonic access clock; bumped on every Fault/Touch.
+	// maxHeld bounds the retained HELD (evicted) tombstones — see
+	// defaultMaxHeldCaps and pruneHeldLocked. 0 = the default cap; <0 = unbounded
+	// (the original behavior); >0 = a custom cap.
+	maxHeld int
 }
 
 // NewCapResidency builds a tracker over the shared ctxmmu gate.
@@ -248,7 +252,83 @@ func (cr *CapResidency) EvictColdest(ctx context.Context) (evicted CapKey, radiu
 	st.pageID = pageID
 	st.tokens = 0 // body no longer resident.
 	st.state = StateHeld
+	cr.pruneHeldLocked() // bound the accumulated held tombstones (the "delete on evict" axis).
 	return key, radius, true
+}
+
+// defaultMaxHeldCaps bounds how many HELD (evicted) tombstones the tracker
+// retains. A held entry survives eviction ONLY so Snapshot can report it (the
+// Held count and the paged-out row) — its body is already gone, and a re-Fault
+// re-resolves the body from source whether or not the tombstone is still present
+// (Fault recreates a missing entry). Without a bound the tombstones accumulate
+// one per distinct eviction for the life of the tracker: a long guard/serve loop
+// that faults and evicts thousands of distinct capabilities leaks a map row for
+// each. The bound keeps caps O(live working set + cap) — the live
+// resident/evictable set is the caller's to bound (via eviction), and only the
+// disposable held tombstones are pruned here.
+const defaultMaxHeldCaps = 1024
+
+// SetMaxHeld overrides the retained-held-tombstone cap: n>0 sets a custom cap,
+// n<0 disables the bound (unbounded — the original behavior), n==0 restores the
+// default. It re-applies the bound immediately, so lowering the cap trims the
+// existing tombstones. Concurrency-safe.
+func (cr *CapResidency) SetMaxHeld(n int) {
+	cr.mu.Lock()
+	defer cr.mu.Unlock()
+	cr.maxHeld = n
+	cr.pruneHeldLocked()
+}
+
+// heldCap resolves the effective held-tombstone cap: (cap, true) when bounded,
+// (_, false) when the caller disabled the bound (maxHeld<0).
+func (cr *CapResidency) heldCap() (max int, bounded bool) {
+	switch {
+	case cr.maxHeld < 0:
+		return 0, false
+	case cr.maxHeld == 0:
+		return defaultMaxHeldCaps, true
+	default:
+		return cr.maxHeld, true
+	}
+}
+
+// pruneHeldLocked bounds the retained HELD tombstones. The caller holds the lock;
+// it runs after an eviction transitions an entry to StateHeld (and after a cap
+// change). When the held set exceeds the cap, the COLDEST held tombstones
+// (smallest lastUse, then key — the same determinism the eviction pick uses) are
+// deleted until the held set is back at the cap. Below the cap it is a no-op, so
+// residency reporting is unchanged for any realistic working set. Live
+// (resident/evictable) entries are never touched: dropping one would silently
+// evict a still-usable capability.
+func (cr *CapResidency) pruneHeldLocked() {
+	max, bounded := cr.heldCap()
+	if !bounded {
+		return
+	}
+	held := 0
+	for _, st := range cr.caps {
+		if st.state == StateHeld {
+			held++
+		}
+	}
+	if held <= max {
+		return
+	}
+	victims := make([]*capState, 0, held)
+	for _, st := range cr.caps {
+		if st.state == StateHeld {
+			victims = append(victims, st)
+		}
+	}
+	sort.Slice(victims, func(i, j int) bool {
+		if victims[i].lastUse != victims[j].lastUse {
+			return victims[i].lastUse < victims[j].lastUse
+		}
+		return keyLess(victims[i].key, victims[j].key)
+	})
+	for _, st := range victims[:held-max] {
+		delete(cr.caps, st.key)
+	}
 }
 
 // coldestEvictableLocked returns the coldest evictable capability, or nil if

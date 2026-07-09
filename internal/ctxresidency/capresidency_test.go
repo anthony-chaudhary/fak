@@ -2,6 +2,7 @@ package ctxresidency_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	_ "github.com/anthony-chaudhary/fak/internal/blob" // registers the "blob" PageOut backend the gate pages bodies through.
@@ -203,5 +204,55 @@ func TestTouchKeepsWarmCapabilityResident(t *testing.T) {
 	}
 	if evicted != second {
 		t.Errorf("evicted %+v, want %+v — the touched capability must outlive the genuinely coldest", evicted, second)
+	}
+}
+
+// TestEvictedTombstonesAreBounded proves the caps map does not leak one HELD
+// tombstone per eviction: with a small held cap, faulting-then-evicting many
+// distinct capabilities holds the retained HELD set at the cap (the COLDEST
+// tombstones drop), while the most-recently evicted tombstone — the warmest —
+// always survives so the freshest page-out is still reportable. This is the
+// "delete on evict" bound: the live working set is unaffected; only the
+// disposable evicted tombstones are pruned.
+func TestEvictedTombstonesAreBounded(t *testing.T) {
+	ctx := context.Background()
+	cr := ctxresidency.NewCapResidency(ctxmmu.New())
+	cr.SetMaxHeld(3)
+
+	// Fault-then-evict 50 distinct clean capabilities. Each fault makes exactly one
+	// evictable candidate (all prior ones are already HELD), so each EvictColdest
+	// pages that one out to a fresh tombstone.
+	const n = 50
+	for i := 0; i < n; i++ {
+		k := skillKey(fmt.Sprintf("cap-%02d", i), "v1")
+		cr.Fault(k, "sha256:d", []byte("body"), nil)
+		evicted, _, ok := cr.EvictColdest(ctx)
+		if !ok || evicted != k {
+			t.Fatalf("iter %d: evicted %+v ok=%v, want %+v", i, evicted, ok, k)
+		}
+	}
+
+	snap := cr.Snapshot()
+	if snap.Held > 3 {
+		t.Errorf("held tombstones = %d, want <= cap 3 (the caps map leaked one per eviction)", snap.Held)
+	}
+	// Snapshot's Held count and the actual HELD rows must agree and both be capped.
+	heldRows := 0
+	var lastHeld bool
+	last := skillKey(fmt.Sprintf("cap-%02d", n-1), "v1")
+	for _, row := range snap.Caps {
+		if row.State == ctxresidency.StateHeld {
+			heldRows++
+			if row.Key == last {
+				lastHeld = true
+			}
+		}
+	}
+	if heldRows != snap.Held {
+		t.Errorf("HELD rows = %d but snap.Held = %d — inconsistent", heldRows, snap.Held)
+	}
+	// The most-recent eviction is the warmest tombstone, so it must survive the prune.
+	if !lastHeld {
+		t.Errorf("most-recent eviction %+v should still be a retained HELD tombstone", last)
 	}
 }
