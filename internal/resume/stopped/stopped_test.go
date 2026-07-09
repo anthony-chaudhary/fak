@@ -162,6 +162,75 @@ func TestDecideExpiredThrottleFreesAccount(t *testing.T) {
 	}
 }
 
+func TestDecideRefusesOverContextWindowResume(t *testing.T) {
+	never := func(string) bool { return false }
+	// A midtool session whose transcript is far larger than any model context window would
+	// OVERFLOW on replay — a blind resume silently truncates/corrupts. The replay-safety
+	// precondition must DEFER it (fail-closed) with a witnessed reason, never route it to
+	// Resume. A normally-sized sibling on the same untrottled account still resumes: the
+	// gate refuses only the over-window row, not the whole account.
+	overKB := DefaultResumeContextWindowTokens/EstimatedTokensPerKB + 100 // estimates just over the window
+	rows := []Row{
+		{Disp: DispStoppedMidtool, Account: "a1", AgeMin: 10, Session: "over", SizeKB: overKB},
+		{Disp: DispStoppedMidtool, Account: "a1", AgeMin: 12, Session: "ok", SizeKB: 10},
+	}
+	d := Decide(rows, never)
+
+	find := func(b []Row, sid string) *Row {
+		for i := range b {
+			if b[i].Session == sid {
+				return &b[i]
+			}
+		}
+		return nil
+	}
+	over := find(d.Defer, "over")
+	if over == nil {
+		t.Fatalf("over-window session must be DEFERRED, not resumed; defer=%+v resume=%+v", d.Defer, d.Resume)
+	}
+	if find(d.Resume, "over") != nil {
+		t.Fatal("over-window session must not also resume")
+	}
+	if !strings.Contains(over.BlockedBy, "context window") || !strings.Contains(over.BlockedBy, "overflow") {
+		t.Fatalf("over-window blocked_by = %q, want it to name the context-window overflow", over.BlockedBy)
+	}
+	if find(d.Resume, "ok") == nil {
+		t.Fatalf("normally-sized session should still resume; resume=%+v", d.Resume)
+	}
+}
+
+func TestReplaySafetyHonorsPerRowWindowAndFitting(t *testing.T) {
+	never := func(string) bool { return false }
+	// A small transcript that fits the default window still overflows a TINY per-row target
+	// window — the MaxContextTokens override is honored. A transcript that fits the tiny
+	// window resumes. This pins the override path and the no-false-positive path.
+	rows := []Row{
+		{Disp: DispStoppedQuiet, Account: "a1", AgeMin: 10, Session: "tiny-window", SizeKB: 100, MaxContextTokens: 1000},
+		{Disp: DispStoppedQuiet, Account: "a1", AgeMin: 12, Session: "fits", SizeKB: 1, MaxContextTokens: 1000},
+	}
+	d := Decide(rows, never)
+
+	find := func(b []Row, sid string) bool {
+		for _, r := range b {
+			if r.Session == sid {
+				return true
+			}
+		}
+		return false
+	}
+	// 100 KB * 256 = 25600 est tokens > 1000 window -> deferred.
+	if !find(d.Defer, "tiny-window") {
+		t.Fatalf("per-row window override not honored; defer=%+v resume=%+v", d.Defer, d.Resume)
+	}
+	if find(d.Resume, "tiny-window") {
+		t.Fatal("over-window row must not resume")
+	}
+	// 1 KB * 256 = 256 est tokens < 1000 window -> resumes.
+	if !find(d.Resume, "fits") {
+		t.Fatalf("fitting row should resume; resume=%+v", d.Resume)
+	}
+}
+
 func TestDecideDupLiveSkipsCrashedDuplicate(t *testing.T) {
 	never := func(string) bool { return false }
 	// A live dispatch-loop owns work-key "loop:--lane ci" in project P. A crashed session

@@ -23,6 +23,7 @@
 package stopped
 
 import (
+	"fmt"
 	"math"
 	"regexp"
 	"sort"
@@ -119,6 +120,12 @@ type Row struct {
 	WorkKey string `json:"work_key,omitempty"`
 	// BlockedBy is filled by Decide on deferred rows: why this session cannot resume now.
 	BlockedBy string `json:"blocked_by,omitempty"`
+	// MaxContextTokens is the target model's context window for the session this row would
+	// resume ONTO — the ceiling the replay-safety fit check measures the estimated replayed
+	// transcript against. The shell supplies it per session (from the target model's
+	// advertised window); zero means "unknown," and Decide falls back to
+	// DefaultResumeContextWindowTokens rather than skipping the fit check.
+	MaxContextTokens int64 `json:"max_context_tokens,omitempty"`
 }
 
 var (
@@ -238,6 +245,53 @@ type Decisions struct {
 	Rows []Row `json:"rows"`
 }
 
+// Replay-safety fit-check constants (#3355). A resume replays the stopped session's
+// transcript back into the target model; if that replay would exceed the model's context
+// window, a blind relaunch silently truncates or corrupts the session. These pin the
+// conservative, fail-closed estimate the fit check refuses on.
+const (
+	// EstimatedTokensPerKB converts a transcript's on-disk size to an estimated replayed
+	// token count. It is deliberately an OVER-estimate of the replayed tokens (it treats
+	// every on-disk KB as ~4-byte tokens of replayed text, though a JSONL transcript's
+	// structural/tool-metadata bytes do not all replay into the prompt) — so the fit check
+	// errs toward refusing a borderline session rather than resuming one that would
+	// overflow. The asymmetry is deliberate: a falsely-refused session is DEFERRED to a
+	// human (recoverable), a falsely-resumed over-window session is truncated (data loss).
+	EstimatedTokensPerKB int64 = 256
+	// DefaultResumeContextWindowTokens is the target-window fallback used when a Row carries
+	// no MaxContextTokens — a modern large-context window, so the fit check trips only on a
+	// genuinely oversized transcript (over ~780 KB) rather than false-refusing ordinary
+	// sessions. A caller that knows the exact target model supplies Row.MaxContextTokens.
+	DefaultResumeContextWindowTokens int64 = 200000
+)
+
+// estimatedReplayTokens is the conservative replayed-token estimate for a transcript of
+// sizeKB kilobytes. Non-positive size yields zero (nothing to replay).
+func estimatedReplayTokens(sizeKB int64) int64 {
+	if sizeKB <= 0 {
+		return 0
+	}
+	return sizeKB * EstimatedTokensPerKB
+}
+
+// replaySafetyBlock returns a non-empty, witnessed BlockedBy reason when a row must NOT be
+// resumed on a replay-safety precondition — today the single rule: the estimated replayed
+// transcript would overflow the target model's context window. It is fail-closed by
+// construction: an over-window resume silently truncates/corrupts, so the row is deferred
+// (a human or a clean-continuation reset owns it) instead of blindly relaunched. An empty
+// return means the row cleared the fit check. The verdict is derived mechanically from the
+// row's own SizeKB and target window, never from any self-report.
+func replaySafetyBlock(r Row) string {
+	window := r.MaxContextTokens
+	if window <= 0 {
+		window = DefaultResumeContextWindowTokens
+	}
+	if est := estimatedReplayTokens(r.SizeKB); est > window {
+		return fmt.Sprintf("replayed transcript ~%d tokens exceeds target context window %d — resume would overflow", est, window)
+	}
+	return ""
+}
+
 // Decide sorts rows youngest-first, folds the per-account active throttles, and buckets
 // every row into resume/defer/skip. throttleActive reports whether a reset window is
 // still blocking (unparseable resets are conservatively active); it is injected so the
@@ -285,7 +339,14 @@ func Decide(rows []Row, throttleActive func(reset string) bool) Decisions {
 		d.Counts[r.Disp]++
 		switch r.Disp {
 		case DispStoppedMidtool, DispStoppedInterrupt, DispStoppedQuiet:
-			if thr, ok := acctThrottle[r.Account]; ok {
+			// Replay-safety precondition first: a resume whose replayed transcript would
+			// overflow the target context window is a STRUCTURAL block that no reset clears,
+			// so it is reported ahead of a transient account throttle. Fail-closed — an
+			// over-window row is deferred, never blindly relaunched into a truncated context.
+			if reason := replaySafetyBlock(r); reason != "" {
+				r.BlockedBy = reason
+				d.Defer = append(d.Defer, r)
+			} else if thr, ok := acctThrottle[r.Account]; ok {
 				r.BlockedBy = "account throttled, resets " + thr.Reset
 				d.Defer = append(d.Defer, r)
 			} else {
