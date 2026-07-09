@@ -255,6 +255,10 @@ func main() {
 		cmdPolicy(os.Args[2:])
 	case "egress":
 		cmdEgress(os.Args[2:])
+	case "eve":
+		// The Eve integration bridge (#2600): mechanical security preflight over
+		// eve's MCP/OpenAPI connections (#2602). See cmd/fak/eve.go.
+		cmdEve(os.Args[2:])
 	case "lint":
 		cmdLint(os.Args[2:])
 	case "codelint":
