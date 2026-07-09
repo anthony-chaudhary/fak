@@ -946,6 +946,12 @@ _REEXEC_EXIT_RE = re.compile(r"\bos\.Exit\(")
 # RAW source — code_only blanks the quotes, so this matches the original lines.
 _REEXEC_ENVGUARD_RE = re.compile(
     r'if\s+os\.Getenv\([^)]*\)\s*(==|!=)\s*"[^"]*"\s*\{')
+# A MULTI-MODE helper dispatches on the env var with a `switch os.Getenv(...) {`
+# instead of a single `if`; its inert not-the-child branch is a `case`/`default`
+# whose body is a bare `return` (the same "not invoked as a child → do nothing"
+# early-out as the if-form's guarded return). RAW source, like the if-guard above.
+_REEXEC_SWITCHGUARD_RE = re.compile(r'switch\s+os\.Getenv\([^)]*\)\s*\{')
+_REEXEC_CASE_RE = re.compile(r'^\s*(case\b|default\s*:)')
 _NOPANIC_NAME_RE = re.compile(r"(?i)does_?not_?panic|no_?panic")
 # a single bare call statement (a composite-literal arg with `{}` is allowed).
 _SINGLE_CALL_RE = re.compile(r"^[\w.]+\([^;]*\)$")
@@ -966,10 +972,22 @@ def _is_reexec_helper_test(body_blob: str, raw_lines: list[str], lineno: int) ->
         return False
     span = raw_lines[lineno - 1:lineno - 1 + 12]
     for i, rl in enumerate(span):
+        # if-form: `if os.Getenv(...) == "..." {` whose next non-blank line is `return`.
         if _REEXEC_ENVGUARD_RE.search(rl):
             nxt = next((s.strip() for s in span[i + 1:] if s.strip()), "")
             if nxt.startswith("return"):
                 return True
+        # switch-form: `switch os.Getenv(...) {` with a `case`/`default` whose next
+        # non-blank line is a bare `return` (the multi-mode helper's inert early-out).
+        # os.Exit is still required (checked above), so this cannot admit a genuinely
+        # vacuous test — a real test does not switch on an undocumented env var, return
+        # in one arm, and os.Exit in another.
+        if _REEXEC_SWITCHGUARD_RE.search(rl):
+            for j in range(i + 1, len(span)):
+                if _REEXEC_CASE_RE.match(span[j]):
+                    nxt = next((s.strip() for s in span[j + 1:] if s.strip()), "")
+                    if nxt.startswith("return"):
+                        return True
     return False
 
 

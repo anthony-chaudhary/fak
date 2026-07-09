@@ -825,6 +825,34 @@ def test_fix2_reexec_helper_reporting_via_println_not_vacuous():
     assert cs.kpi_vacuous_tests(tf)["defects"] == []
 
 
+def test_fix2_reexec_switch_helper_not_vacuous():
+    # FP: a MULTI-MODE re-exec helper dispatches on the env var with a `switch
+    # os.Getenv(...)` (the `TestHelperProcess` shape in internal/microagent) instead of a
+    # single `if`. Its inert branch is `case "": return`, and other cases os.Exit. The
+    # env-guard->return->os.Exit tell holds in switch form too, so it is NOT vacuous.
+    tf = {"x_test.go": ("package x\n"
+                        "func TestHelperProcess(t *testing.T) {\n"
+                        "\tswitch os.Getenv(\"MICROAGENT_HELPER\") {\n"
+                        "\tcase \"\":\n\t\treturn\n"
+                        "\tcase \"echo\":\n"
+                        "\t\tos.Stdout.WriteString(\"out-marker\")\n\t\tos.Exit(0)\n"
+                        "\t}\n}\n")}
+    assert cs.kpi_vacuous_tests(tf)["defects"] == []
+
+
+def test_fix2_reexec_switch_without_exit_still_vacuous():
+    # RECALL guard: the switch-form exemption still REQUIRES the os.Exit tell. A test that
+    # switches on an env var but never os.Exit (nor asserts) is not a re-exec child helper
+    # and must stay graded — the switch alone is not a free pass.
+    tf = {"x_test.go": ("package x\n"
+                        "func TestModeSwitchNoExit(t *testing.T) {\n"
+                        "\tswitch os.Getenv(\"MODE\") {\n"
+                        "\tcase \"\":\n\t\treturn\n"
+                        "\tcase \"a\":\n\t\tdoWork()\n"
+                        "\t}\n}\n")}
+    assert len(cs.kpi_vacuous_tests(tf)["defects"]) >= 1
+
+
 def test_fix2_does_not_panic_test_not_vacuous():
     # FP: running a production call without panicking IS the assertion (name marker +
     # single bare call body, composite-literal arg allowed).
