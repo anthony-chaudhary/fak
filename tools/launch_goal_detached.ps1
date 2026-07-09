@@ -313,10 +313,20 @@ if ($Model) { $claudeArgs = @("-p", "--model", $Model, "--permission-mode", "byp
 # (guard.go requires --context-budget-tokens > 0 for it).
 if ($Guarded) {
   $spawnFile = $fak
+  # #3296: hand guard an explicit per-worker seed dir so budget-restart hops REUSE one
+  # directory instead of minting a fresh %TEMP%\fak-guard-reset-* per hop (unbounded and
+  # unreaped -- 2260 orphans witnessed live in the fleet). It lands under .goal-runs so it
+  # is reaped alongside this worker's logs. --restart-limit 3 bounds a wedged worker: after
+  # 3 budget-exhaustion relaunches it is thrashing, not producing, so let it die and free the
+  # seat for fresh churn rather than restart-loop a seat forever (guard default is 0=unlimited).
+  $seedDir = Join-Path $LogDir "seed-$tag-$stamp"
+  New-Item -ItemType Directory -Force -Path $seedDir | Out-Null
   $spawnArgs = @(
     "guard",
     "--context-budget-tokens", "$ContextBudgetTokens",
     "--restart-on-budget",
+    "--restart-limit", "3",
+    "--restart-seed-dir", $seedDir,
     "--max-duration", "$MaxDuration",
     "--",
     $claude
