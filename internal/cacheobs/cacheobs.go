@@ -16,6 +16,11 @@
 //   - reuse ratio = reusedTokens / promptTokens — the realized cache-hit. A single,
 //     linear, append-only agent climbs toward ~1 (the frozen ceiling); flexibility, cold
 //     fan-out, or a divergent prefix drives it down.
+//   - cacheability ratio = cacheableTokens / promptTokens — the lookup-side could-be-served
+//     rate (#3390, LMCache's lookup vs retrieve split): tokens that matched the prefix
+//     index at lookup time, BEFORE eviction/admission decided what was actually servable.
+//     Cacheability >= realized always; the gap between the two rates is the token weight
+//     lost to eviction/admission, which a single realized rate silently folds into "miss".
 //   - the per-regime turn buckets — frozen (reuse >= FrozenFloor), partial, cold
 //     (reuse < ColdCeil) — show WHEN turns leave the frozen regime, which a single
 //     cumulative ratio hides.
@@ -55,9 +60,13 @@ type Observer struct {
 	turns        uint64
 	promptTokens uint64
 	reusedTokens uint64
-	frozen       uint64 // turns with reuse ratio >= FrozenFloor (the append-only ceiling)
-	partial      uint64 // turns between ColdCeil and FrozenFloor
-	cold         uint64 // turns with reuse ratio < ColdCeil (cold / head-mutated / fanned-out)
+	// cacheableTokens is the lookup-side half of the #3390 split: tokens that matched
+	// the prefix index at lookup time, whether or not eviction/admission then let them
+	// be served. Always >= reusedTokens (a served token was necessarily matched).
+	cacheableTokens uint64
+	frozen          uint64 // turns with reuse ratio >= FrozenFloor (the append-only ceiling)
+	partial         uint64 // turns between ColdCeil and FrozenFloor
+	cold            uint64 // turns with reuse ratio < ColdCeil (cold / head-mutated / fanned-out)
 	// reuseHist[i] counts turns whose ratio fell in (ReuseRatioBuckets[i-1],
 	// ReuseRatioBuckets[i]] — per-bucket (non-cumulative) so each increment touches
 	// one slot; a renderer accumulates left-to-right to emit `le` lines.
@@ -71,8 +80,24 @@ func New() *Observer { return &Observer{} }
 // reusedPrefixTokens were served from the cached KV prefix (the planner's `matched`).
 // A non-positive promptTokens is ignored (no turn to attribute); reusedPrefixTokens is
 // clamped into [0, promptTokens] so a miscount can never push the ratio outside [0,1] or
-// the reused total above the prompt total.
+// the reused total above the prompt total. With no lookup-side information the cacheable
+// count defaults to the realized count — the tightest honest lower bound (never a
+// fabricated lookup hit) — so CacheabilityRatio degrades to ReuseRatio for legacy taps.
 func (o *Observer) Observe(promptTokens, reusedPrefixTokens int) {
+	o.ObserveSplit(promptTokens, reusedPrefixTokens, reusedPrefixTokens)
+}
+
+// ObserveSplit records one served in-kernel turn with BOTH halves of the #3390 token
+// hit-rate split (LMCache's lookup vs retrieve rates): promptTokens prefilled, of which
+// cacheablePrefixTokens matched the prefix index at lookup time — before eviction/
+// admission decided servability — and reusedPrefixTokens were actually served from the
+// cached KV prefix. reusedPrefixTokens is clamped into [0, promptTokens] as in Observe;
+// cacheablePrefixTokens is then clamped into [reusedPrefixTokens, promptTokens], because
+// a token cannot be served without having matched, so the CacheabilityRatio >= ReuseRatio
+// invariant holds by construction and the gap between them is exactly the eviction/
+// admission loss. Regime buckets and the histogram stay keyed on the REALIZED ratio —
+// the split adds the lookup rate beside them, it does not redefine them.
+func (o *Observer) ObserveSplit(promptTokens, cacheablePrefixTokens, reusedPrefixTokens int) {
 	if o == nil || promptTokens <= 0 {
 		return
 	}
@@ -82,11 +107,18 @@ func (o *Observer) Observe(promptTokens, reusedPrefixTokens int) {
 	if reusedPrefixTokens > promptTokens {
 		reusedPrefixTokens = promptTokens
 	}
+	if cacheablePrefixTokens < reusedPrefixTokens {
+		cacheablePrefixTokens = reusedPrefixTokens
+	}
+	if cacheablePrefixTokens > promptTokens {
+		cacheablePrefixTokens = promptTokens
+	}
 	ratio := float64(reusedPrefixTokens) / float64(promptTokens)
 	o.mu.Lock()
 	o.turns = saturatingAddU64(o.turns, 1)
 	o.promptTokens = saturatingAddU64(o.promptTokens, uint64(promptTokens))
 	o.reusedTokens = saturatingAddU64(o.reusedTokens, uint64(reusedPrefixTokens))
+	o.cacheableTokens = saturatingAddU64(o.cacheableTokens, uint64(cacheablePrefixTokens))
 	switch {
 	case ratio >= FrozenFloor:
 		o.frozen = saturatingAddU64(o.frozen, 1)
@@ -123,13 +155,21 @@ type Stats struct {
 	Turns        uint64
 	PromptTokens uint64
 	ReusedTokens uint64
-	FrozenTurns  uint64
-	PartialTurns uint64
-	ColdTurns    uint64
+	// CacheableTokens is the lookup-side half of the #3390 split: prompt tokens that
+	// matched the prefix index at lookup time, before eviction/admission decided what
+	// was servable. Always >= ReusedTokens; equal when every tap lacked lookup info.
+	CacheableTokens uint64
+	FrozenTurns     uint64
+	PartialTurns    uint64
+	ColdTurns       uint64
 	// ReuseRatio is reusedTokens/promptTokens — the realized cache-hit across all observed
 	// turns. 0 when no turns have prompt tokens yet (an idle process never reports a
 	// phantom ratio).
 	ReuseRatio float64
+	// CacheabilityRatio is cacheableTokens/promptTokens — the lookup-side could-be-served
+	// rate. CacheabilityRatio - ReuseRatio is the token-weighted rate lost to eviction/
+	// admission. 0 when no turns have prompt tokens yet, like ReuseRatio.
+	CacheabilityRatio float64
 	// ReuseHistTurns[i] counts turns whose per-turn ratio fell in
 	// (ReuseRatioBuckets[i-1], ReuseRatioBuckets[i]] (per-bucket, non-cumulative).
 	// Every observed turn is counted, so the values sum to Turns.
@@ -145,16 +185,18 @@ func (o *Observer) Snapshot() Stats {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	s := Stats{
-		Turns:          o.turns,
-		PromptTokens:   o.promptTokens,
-		ReusedTokens:   o.reusedTokens,
-		FrozenTurns:    o.frozen,
-		PartialTurns:   o.partial,
-		ColdTurns:      o.cold,
-		ReuseHistTurns: o.reuseHist,
+		Turns:           o.turns,
+		PromptTokens:    o.promptTokens,
+		ReusedTokens:    o.reusedTokens,
+		CacheableTokens: o.cacheableTokens,
+		FrozenTurns:     o.frozen,
+		PartialTurns:    o.partial,
+		ColdTurns:       o.cold,
+		ReuseHistTurns:  o.reuseHist,
 	}
 	if o.promptTokens > 0 {
 		s.ReuseRatio = float64(o.reusedTokens) / float64(o.promptTokens)
+		s.CacheabilityRatio = float64(o.cacheableTokens) / float64(o.promptTokens)
 	}
 	return s
 }

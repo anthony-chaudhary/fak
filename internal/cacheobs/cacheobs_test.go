@@ -203,6 +203,83 @@ func TestReuseHistogramSaturates(t *testing.T) {
 	}
 }
 
+// #3390: the lookup (cacheability) vs retrieve (realized) split — a turn whose prefix
+// matched the index but was not fully servable must widen the gap between the two
+// token-weighted rates, with the regime buckets still keyed on the REALIZED ratio.
+func TestObserveSplitSeparatesCacheabilityFromRealized(t *testing.T) {
+	o := New()
+	// turn 1: 900 tokens matched at lookup, but only 300 served (evicted before retrieve)
+	o.ObserveSplit(1000, 900, 300)
+	// turn 2: fully realized — lookup and retrieve agree
+	o.ObserveSplit(1000, 800, 800)
+	s := o.Snapshot()
+	if s.CacheableTokens != 1700 || s.ReusedTokens != 1100 {
+		t.Fatalf("tokens = cacheable %d reused %d, want 1700/1100", s.CacheableTokens, s.ReusedTokens)
+	}
+	wantCacheability, wantReuse := 1700.0/2000.0, 1100.0/2000.0
+	if d := s.CacheabilityRatio - wantCacheability; d > 1e-9 || d < -1e-9 {
+		t.Fatalf("cacheability ratio = %v, want %v", s.CacheabilityRatio, wantCacheability)
+	}
+	if d := s.ReuseRatio - wantReuse; d > 1e-9 || d < -1e-9 {
+		t.Fatalf("reuse ratio = %v, want %v", s.ReuseRatio, wantReuse)
+	}
+	// regime buckets follow the realized ratio (0.30 partial, 0.80 partial), not lookup
+	if s.PartialTurns != 2 || s.FrozenTurns != 0 || s.ColdTurns != 0 {
+		t.Fatalf("buckets frozen=%d partial=%d cold=%d, want 0/2/0 (keyed on realized)",
+			s.FrozenTurns, s.PartialTurns, s.ColdTurns)
+	}
+}
+
+// #3390: cacheable is clamped into [reused, prompt] — a miscount can never report a
+// lookup rate below the realized rate (impossible: served implies matched) or above 1.
+func TestObserveSplitClamps(t *testing.T) {
+	o := New()
+	o.ObserveSplit(100, 20, 50)   // cacheable < reused: raised to reused (50)
+	o.ObserveSplit(100, 250, 60)  // cacheable > prompt: clamped to prompt (100)
+	o.ObserveSplit(100, -10, -10) // both negative: reused 0, cacheable 0
+	s := o.Snapshot()
+	if s.CacheableTokens != 150 {
+		t.Fatalf("cacheable = %d, want 150 (50 raised + 100 clamped + 0)", s.CacheableTokens)
+	}
+	if s.ReusedTokens != 110 {
+		t.Fatalf("reused = %d, want 110", s.ReusedTokens)
+	}
+	if s.CacheabilityRatio < s.ReuseRatio {
+		t.Fatalf("cacheability %v < realized %v — invariant broken", s.CacheabilityRatio, s.ReuseRatio)
+	}
+}
+
+// #3390: a legacy Observe tap (no lookup info) reports cacheability == realized — the
+// honest lower bound — never a phantom gap in either direction.
+func TestObserveDefaultsCacheableToRealized(t *testing.T) {
+	o := New()
+	o.Observe(200, 150)
+	s := o.Snapshot()
+	if s.CacheableTokens != s.ReusedTokens {
+		t.Fatalf("cacheable = %d, want == reused %d for a lookup-blind tap", s.CacheableTokens, s.ReusedTokens)
+	}
+	if s.CacheabilityRatio != s.ReuseRatio {
+		t.Fatalf("cacheability ratio = %v, want == reuse ratio %v", s.CacheabilityRatio, s.ReuseRatio)
+	}
+}
+
+// #3390: idle process — no phantom cacheability ratio, matching ReuseRatio's contract.
+func TestIdleCacheabilityRatioIsZero(t *testing.T) {
+	if s := New().Snapshot(); s.CacheabilityRatio != 0 {
+		t.Fatalf("idle cacheability ratio = %v, want 0", s.CacheabilityRatio)
+	}
+}
+
+// #3390: the cacheable accumulator saturates like every other counter.
+func TestObserveSplitSaturates(t *testing.T) {
+	o := New()
+	o.cacheableTokens = math.MaxUint64
+	o.ObserveSplit(100, 90, 40)
+	if got := o.Snapshot().CacheableTokens; got != math.MaxUint64 {
+		t.Fatalf("cacheable = %d, want saturated at MaxUint64", got)
+	}
+}
+
 func TestConcurrentObserveIsRace_free(t *testing.T) {
 	o := New()
 	var wg sync.WaitGroup

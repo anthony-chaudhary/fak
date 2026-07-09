@@ -465,8 +465,12 @@ func recoverDevicePanic(r any) (err error, handled bool) {
 
 type inKernelGenerateResult struct {
 	gen, promptTok, matched int
-	prefillS, decodeS       float64
-	stopped                 bool
+	// cacheable is the lookup-side prefix match (#3390): tokens the radix index matched
+	// BEFORE servability (nil KV, exact-hit refeed, unsupported truncate) could trim the
+	// realized `matched` below it. cacheable >= matched always; 0 when reuse is off.
+	cacheable         int
+	prefillS, decodeS float64
+	stopped           bool
 }
 
 func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool) (res inKernelGenerateResult, err error) {
@@ -479,13 +483,14 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 			panic(r)
 		}
 	}()
-	gen, promptTok, matched, prefillS, decodeS, stopped, err := p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit)
+	gen, promptTok, cacheable, matched, prefillS, decodeS, stopped, err := p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit)
 	if err != nil {
 		return inKernelGenerateResult{}, err
 	}
 	return inKernelGenerateResult{
 		gen:       gen,
 		promptTok: promptTok,
+		cacheable: cacheable,
 		matched:   matched,
 		prefillS:  prefillS,
 		decodeS:   decodeS,
@@ -703,12 +708,14 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	if decodeS > 0 {
 		decTPS = float64(gen) / decodeS
 	}
-	log.Printf("inkernel_chat model=%s q4k=%v prompt=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s",
-		p.modelID, p.q4k, promptTok, matched, computed, prefillS, prefTPS, gen, decodeS, decTPS)
-	// Feed the process-global KV-prefix reuse tap so this turn's realized cache-hit
-	// (matched/prompt) reaches /metrics, not just this log line — the live measurement of
-	// the frozen-trajectory cache cliff (docs/explainers/frozen-trajectory-cache-cliff.md).
-	cacheobs.Default.Observe(promptTok, matched)
+	log.Printf("inkernel_chat model=%s q4k=%v prompt=%dtok cacheable=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s",
+		p.modelID, p.q4k, promptTok, genRes.cacheable, matched, computed, prefillS, prefTPS, gen, decodeS, decTPS)
+	// Feed the process-global KV-prefix reuse tap so this turn's split hit-rate reaches
+	// /metrics, not just this log line — the live measurement of the frozen-trajectory
+	// cache cliff (docs/explainers/frozen-trajectory-cache-cliff.md). #3390: BOTH halves —
+	// the lookup-side index match (cacheability) and the realized serve (matched/prompt) —
+	// so the gap lost to eviction/admission is observable, not folded into "miss".
+	cacheobs.Default.ObserveSplit(promptTok, genRes.cacheable, matched)
 
 	// Split a Qwen3.5 reasoning block off the decoded text BEFORE it becomes Content
 	// (and before the tool-call lift below reads it). A reasoning model (Ornith) opens
@@ -1071,7 +1078,8 @@ func (p *InKernelPlanner) generateReused(ids []int, maxNew int, temp, topP float
 }
 
 func (p *InKernelPlanner) generateReusedContext(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, stops map[int]bool, emit func(int) bool) (gen, promptTok, matched int, prefillS, decodeS float64, stopped bool, err error) {
-	return p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, nil, 0, 0, stops, emit)
+	gen, promptTok, _, matched, prefillS, decodeS, stopped, err = p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, nil, 0, 0, stops, emit)
+	return
 }
 
 // generateReusedContextWithBias runs the decode loop, sampling each next token with
@@ -1080,7 +1088,7 @@ func (p *InKernelPlanner) generateReusedContext(ctx context.Context, ids []int, 
 // path, so every existing caller (which passes 0, 0) is unaffected. The per-token
 // generation-count histogram (counts) is built from THIS turn's decode loop only —
 // it is sized to the logits vocab on first use and never persists across turns.
-func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool) (gen, promptTok, matched int, prefillS, decodeS float64, stopped bool, err error) {
+func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool) (gen, promptTok, cacheable, matched int, prefillS, decodeS float64, stopped bool, err error) {
 	promptTok = len(ids)
 	if len(ids) == 0 {
 		return
@@ -1099,6 +1107,11 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	if reuse {
 		p.mu.Lock()
 		b, m := p.tree.Lookup(ids)
+		// The lookup-side (cacheability) half of the #3390 split: m tokens matched the
+		// radix index at this instant, whether or not the servability checks below (nil
+		// KV, exact-hit refeed, unsupported truncate) let all of them be served. The
+		// realized `matched` can only stay at or fall below this.
+		cacheable = m
 		if k := b.KV(); k != nil {
 			s = p.sessionFromPrefixClone(k.Clone()) // an independent clone; cache.Len() == m
 			closeSession = p.backend != nil
