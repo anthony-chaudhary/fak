@@ -28,6 +28,13 @@ If you just want to **serve a useful model with fak in front of it**, you want *
 Tier 2's in-kernel model is a *reference forward pass* proven bit-for-bit against
 HuggingFace, not a chat-quality serving engine (see the honest caveat in §4).
 
+Every tier above runs the **gateway runtime** (`fak serve`) in front of a model, with your
+agent as its client. If it isn't yet clear whether you're standing up a *runtime* or wiring
+up a *client* — or how `fak serve` relates to `fak guard` — read [Which do I run — gateway,
+agent runtime, or client?](docs/explainers/runtime-vs-client.md): it names `fak serve` (the
+gateway runtime), `fak serve --native` (the agent application runtime that owns the loop),
+and `fak guard` (which makes a harness you already run a governed client).
+
 > **Prefer not to install anything?** Run these tiers in a hosted cloud notebook: a free
 > Colab/Kaggle T4 for Tiers 0–1, a neocloud GPU for Tier 2. See
 > [`notebooks/`](notebooks/README.md).
