@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/linkstate"
 )
 
 // ---- roster -----------------------------------------------------------------
@@ -257,25 +259,25 @@ func TestWriteReportRoundTrip(t *testing.T) {
 
 func TestLabReadinessContract(t *testing.T) {
 	checkedAt := time.Date(2026, 7, 4, 14, 0, 0, 0, time.UTC)
-	ready := NewLabReadiness("gpu-server", LabReadyForDevWork, "", "", checkedAt)
-	if ready.Schema != LabReadinessSchema {
-		t.Fatalf("schema = %q, want %q", ready.Schema, LabReadinessSchema)
+	ready := NewLabReadiness("gpu-server", linkstate.Clear, "", "", "", checkedAt)
+	if ready.Schema != linkstate.Schema {
+		t.Fatalf("schema = %q, want %q", ready.Schema, linkstate.Schema)
 	}
 	if ready.CheckedAt != "2026-07-04T14:00:00Z" {
 		t.Fatalf("checked_at = %q", ready.CheckedAt)
 	}
-	if !ready.AdmitLabDispatch {
-		t.Fatal("READY_FOR_DEV_WORK must admit lab dispatch")
+	if !ready.AdmitDispatch {
+		t.Fatal("CLEAR must admit lab dispatch")
 	}
 	if probs := ready.Validate(); len(probs) != 0 {
 		t.Fatalf("ready record should validate: %v", probs)
 	}
 
-	hold := NewLabReadiness("gpu-server", LabWaitPrivateRecover, "", "", checkedAt)
-	if hold.AdmitLabDispatch {
-		t.Fatal("WAIT_PRIVATE_RECOVERY must fail closed")
+	hold := NewLabReadiness("gpu-server", linkstate.Waiting, linkstate.DetailPrivateRecovery, "", "", checkedAt)
+	if hold.AdmitDispatch {
+		t.Fatal("WAITING must fail closed")
 	}
-	if hold.NextAction != "confirm-private-control-session" {
+	if hold.NextAction != "confirm-control-session" {
 		t.Fatalf("next_action = %q", hold.NextAction)
 	}
 	cmds := DefaultLabReadinessCommands()
@@ -286,18 +288,21 @@ func TestLabReadinessContract(t *testing.T) {
 	}
 
 	bad := LabReadiness{
-		Schema:       LabReadinessSchema,
-		MachineClass: "gpu.server",
-		CheckedAt:    "2026-07-04T14:00:00Z",
-		Status:       "PRIVATE_OK",
-		NextAction:   "see:C123",
-		Evidence:     "scrubbed-private-readback",
+		State: linkstate.State{
+			Schema:     linkstate.Schema,
+			Subject:    "gpu.server",
+			CheckedAt:  "2026-07-04T14:00:00Z",
+			Phase:      "PRIVATE_OK",
+			Detail:     linkstate.DetailReady,
+			NextAction: "see:C123",
+			Evidence:   "scrubbed-private-readback",
+		},
 		Commands: &LabReadinessCommands{
-			MarkReady: "private bridge command with token",
+			MarkClear: "private bridge command with token",
 		},
 	}
 	probs := strings.Join(bad.Validate(), " | ")
-	for _, want := range []string{"closed lab readiness vocabulary", "machine_class", "next_action", "commands.mark_ready"} {
+	for _, want := range []string{"closed link-state vocabulary", "subject", "next_action", "commands.mark_clear"} {
 		if !strings.Contains(probs, want) {
 			t.Fatalf("expected %q in validation problems, got %q", want, probs)
 		}
@@ -305,7 +310,10 @@ func TestLabReadinessContract(t *testing.T) {
 }
 
 func TestLoadLabReadinessForcesAdmissionBit(t *testing.T) {
-	doc := `{
+	// A legacy fak.lab_readiness/v1 record still loads: its old status coarsens to a
+	// phase, admit is re-derived, the new schema is adopted, and its stale command
+	// hints (old keys) are dropped rather than tripping the reader.
+	legacy := `{
 		"schema":"fak.lab_readiness/v1",
 		"machine_class":"gpu-server",
 		"checked_at":"2026-07-04T14:00:00Z",
@@ -317,20 +325,46 @@ func TestLoadLabReadinessForcesAdmissionBit(t *testing.T) {
 			"mark_ready":"fak lab readiness --status READY_FOR_DEV_WORK --write-default --json"
 		}
 	}`
-	got, err := LoadLabReadiness(strings.NewReader(doc))
+	got, err := LoadLabReadiness(strings.NewReader(legacy))
 	if err != nil {
-		t.Fatalf("LoadLabReadiness: %v", err)
+		t.Fatalf("LoadLabReadiness(legacy): %v", err)
 	}
-	if !got.AdmitLabDispatch {
-		t.Fatal("loader must derive admit_lab_dispatch from status, not trust the file")
+	if got.Phase != linkstate.Clear || !got.AdmitDispatch {
+		t.Fatalf("legacy READY must coarsen to CLEAR and admit, got phase=%s admit=%v", got.Phase, got.AdmitDispatch)
 	}
-	if got.Commands == nil || got.Commands.MarkReady == "" {
+	if got.Schema != linkstate.Schema {
+		t.Fatalf("loaded record must adopt the new schema, got %q", got.Schema)
+	}
+
+	// A native fak.link_state/v1 record: admit is derived from the phase (the file's
+	// false is ignored), and the default public command hints validate.
+	native := `{
+		"schema":"fak.link_state/v1",
+		"subject":"gpu-server",
+		"checked_at":"2026-07-04T14:00:00Z",
+		"phase":"CLEAR",
+		"detail":"ready",
+		"next_action":"admit-dispatch",
+		"evidence":"scrubbed-readback",
+		"admit_dispatch":false,
+		"commands":{
+			"mark_clear":"fak lab readiness --phase CLEAR --write-default --json"
+		}
+	}`
+	got, err = LoadLabReadiness(strings.NewReader(native))
+	if err != nil {
+		t.Fatalf("LoadLabReadiness(native): %v", err)
+	}
+	if !got.AdmitDispatch {
+		t.Fatal("loader must derive admit_dispatch from phase, not trust the file")
+	}
+	if got.Commands == nil || got.Commands.MarkClear == "" {
 		t.Fatalf("loader should accept default public command hints, got %+v", got.Commands)
 	}
-	if _, err := LoadLabReadiness(strings.NewReader(`{"schema":"fak.lab_readiness/v1","status":"READY_FOR_DEV_WORK","machine_class":"gpu-server","next_action":"admit-lab-backed-dispatch","evidence":"scrubbed-private-readback","raw_thread":"secret"}`)); err == nil {
+	if _, err := LoadLabReadiness(strings.NewReader(`{"schema":"fak.link_state/v1","phase":"CLEAR","detail":"ready","subject":"gpu-server","next_action":"admit-dispatch","evidence":"scrubbed-readback","raw_thread":"secret"}`)); err == nil {
 		t.Fatal("unknown raw/private fields must be refused")
 	}
-	if _, err := LoadLabReadiness(strings.NewReader(`{"schema":"fak.lab_readiness/v1","status":"READY_FOR_DEV_WORK","machine_class":"gpu-server","next_action":"admit-lab-backed-dispatch","evidence":"scrubbed-private-readback","commands":{"mark_ready":"private command"}}`)); err == nil {
+	if _, err := LoadLabReadiness(strings.NewReader(`{"schema":"fak.link_state/v1","phase":"CLEAR","detail":"ready","subject":"gpu-server","next_action":"admit-dispatch","evidence":"scrubbed-readback","commands":{"mark_clear":"private command"}}`)); err == nil {
 		t.Fatal("non-default command hints must be refused")
 	}
 }
