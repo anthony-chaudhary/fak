@@ -239,7 +239,15 @@ func linesFor(b bucket, snap fleet.Snapshot, sig signals) []string {
 		lines = append(lines, line)
 	}
 	lines = append(lines, fmt.Sprintf("readiness: %d", snap.Score))
-	lines = append(lines, attentionLines(snap)...)
+	if b == bucketNoVisibility {
+		// The only crit a no-visibility fleet carries is the fold's conflated "N box(es)
+		// down or unreachable" title, which mislabels silent boxes as down. Emit the honest
+		// populate-liveness chip the human `fak lab status` footer prints instead of
+		// parroting that crit as an outage.
+		lines = append(lines, "populate liveness: private Slack bridge, or `fak lab report --id <box> --state live`")
+	} else {
+		lines = append(lines, attentionLines(snap)...)
+	}
 
 	// The "next: …" guidance sentence is deliberately NOT appended here: a full sentence in
 	// the Lines stat run renders as a jammed monospace/context chip. It rides the Update's
