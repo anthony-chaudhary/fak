@@ -109,6 +109,54 @@ func TestCurveForUnknownObjective(t *testing.T) {
 	}
 }
 
+// TestClassify_WindowedSubEpsilonDrift pins the windowed-drift honesty contract
+// (#3148): a progress decline too gentle to trip the single-step epsilon still
+// loses real alignment if it persists, so a sustained sub-epsilon slide over the
+// drift window must classify DRIFT — not HEALTHY as the last-step-only fold did.
+// The complements guard the regime: a flat window stays out of DRIFT and a rising
+// window stays HEALTHY, so the window only ADDS the slow-slide case.
+func TestClassify_WindowedSubEpsilonDrift(t *testing.T) {
+	st := Fold(nil)
+	obj := Objective{ID: "traj-slowfail", Status: StatusActive}
+
+	// pts builds curveDriftWindow points starting at start and stepping by step
+	// each turn — a full window so the windowed fold engages.
+	pts := func(start, step float64) []CurvePoint {
+		out := make([]CurvePoint, curveDriftWindow)
+		v := start
+		for i := range out {
+			out[i] = CurvePoint{Value: v, UnixMillis: int64(1000 * (i + 1))}
+			v += step
+		}
+		return out
+	}
+
+	// A sustained sub-epsilon decline: each step falls by 0.9*epsilon, below the
+	// single-step band, but the window accumulates past a whole band.
+	declining := pts(0.9, -curveFlatEpsilon*0.9)
+	latest, delta := latestDelta(declining)
+	if delta <= -curveFlatEpsilon {
+		t.Fatalf("precondition: the last step (%.4f) must be WITHIN the single-step epsilon so only the window can catch it", delta)
+	}
+	if sig, detail := st.classify(obj, nil, declining, latest, delta); sig != SignalDrift {
+		t.Fatalf("a sustained sub-epsilon decline over %d turns must be DRIFT, got %q (%s)", curveDriftWindow, sig, detail)
+	}
+
+	// A flat window loses no progress: it must NOT read as DRIFT.
+	flat := pts(0.5, 0)
+	latest, delta = latestDelta(flat)
+	if sig, _ := st.classify(obj, nil, flat, latest, delta); sig == SignalDrift {
+		t.Fatalf("a flat curve must not be DRIFT")
+	}
+
+	// A rising window is on course: it stays HEALTHY.
+	rising := pts(0.1, curveFlatEpsilon*0.9)
+	latest, delta = latestDelta(rising)
+	if sig, _ := st.classify(obj, nil, rising, latest, delta); sig != SignalHealthy {
+		t.Fatalf("a rising curve must stay HEALTHY, got %q", sig)
+	}
+}
+
 // assertGolden compares v's indented JSON to the golden file at path, or rewrites
 // the golden when -update is set. The encoding matches the CLI's writeIndentedJSON
 // (two-space indent + trailing newline) so a golden doubles as the CLI --json

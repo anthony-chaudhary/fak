@@ -50,6 +50,21 @@ const (
 // the STALL fold and the scorer that feeds it agree on "flat".
 const curveFlatEpsilon = activityDivergenceProgressEpsilon
 
+// curveDriftWindow is the number of most-recent progress points the windowed drift
+// fold inspects. A per-turn decline too gentle to trip the single-step epsilon
+// still loses real alignment if it persists; summing the window makes a sustained
+// sub-epsilon slide visible where the last-step-only check is blind (#3148). It is
+// wider than any pinned golden's curve so the four golden shapes are untouched.
+const curveDriftWindow = 5
+
+// curveDriftWindowDecline is the cumulative progress loss across curveDriftWindow
+// points that counts as windowed DRIFT. One flat-epsilon band of NET decline over
+// the window is the floor: a slide below the single-step epsilon still trips this
+// once it has accumulated past a whole band, so a 0.009/turn drift over the window
+// (below the 0.01 single-step epsilon) is caught while genuine noise around flat is
+// not.
+const curveDriftWindowDecline = curveFlatEpsilon
+
 // CurvePoint is one value in a method's time-ordered curve.
 type CurvePoint struct {
 	Value      float64     `json:"value"`
@@ -156,6 +171,19 @@ func latestDelta(progress []CurvePoint) (latest, delta float64) {
 	return latest, delta
 }
 
+// windowedDecline returns the NET progress change across the last curveDriftWindow
+// points (last value minus the value curveDriftWindow-1 steps back). ok is false
+// when the curve is shorter than the window, so the single-step fold decides on its
+// own and no golden shorter than the window is ever reclassified.
+func windowedDecline(progress []CurvePoint) (net float64, ok bool) {
+	if len(progress) < curveDriftWindow {
+		return 0, false
+	}
+	last := progress[len(progress)-1].Value
+	first := progress[len(progress)-curveDriftWindow].Value
+	return last - first, true
+}
+
 // objectiveOpen reports whether a status is a live/steerable one (active|paused).
 func objectiveOpen(st ObjectiveStatus) bool {
 	return st == StatusActive || st == StatusPaused
@@ -201,9 +229,19 @@ func (s State) classify(obj Objective, methods []MethodCurve, progress []CurvePo
 				turns-obj.Budget.Turns, obj.Budget.Turns, obj.ParentID)
 		}
 	}
-	// DRIFT: the witnessed progress curve is declining.
+	// DRIFT (single-step, fast path): the witnessed progress curve declined past
+	// the epsilon band in one step. Kept first so the four pinned golden shapes
+	// classify identically to the last-step-only fold.
 	if len(progress) >= 2 && delta < -curveFlatEpsilon {
 		return SignalDrift, fmt.Sprintf("progress declined %.2f -> %.2f (delta %+.2f)", latest-delta, latest, delta)
+	}
+	// DRIFT (windowed): a per-turn slide too gentle to trip the single-step epsilon
+	// still loses real alignment if it persists. Sum the last curveDriftWindow
+	// steps; a NET loss past one flat-epsilon band is a sustained decline the fast
+	// path cannot see — the silent slow-failure mode trajectory-control exists to
+	// catch (#3148). Ranked above STALL so a declining curve reads DRIFT, not flat.
+	if net, ok := windowedDecline(progress); ok && net < -curveDriftWindowDecline {
+		return SignalDrift, fmt.Sprintf("windowed drift: progress fell %+.2f over %d turns while each step held within epsilon", net, curveDriftWindow)
 	}
 	// STALL: a flat (or not-yet-moving) progress curve while the W2
 	// activity-divergence scorer fired — high activity, no witnessed movement.
