@@ -41,8 +41,13 @@ GLM_MODEL = "zai-coding-plan/glm-4.5-air"
 
 
 def _alive(pid: int) -> bool:
-    o = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True,
-                       creationflags=ird.no_window_creationflags())
+    try:
+        o = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True,
+                           text=True, timeout=10, creationflags=ird.no_window_creationflags())
+    except subprocess.TimeoutExpired:
+        # A wedged tasklist must not hang the glm-docs tick. Assume alive so we do
+        # NOT over-spawn onto a live worker's pool; the next tick re-probes.
+        return True
     return str(pid) in (o.stdout or "")
 
 

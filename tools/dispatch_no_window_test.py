@@ -159,6 +159,35 @@ class ForwardsSuppressorTest(unittest.TestCase):
         self._assert_forwards(ird, lambda: ird.terminate_issue_worker_tree(999999))
 
 
+class AliveProbeTimeoutTest(unittest.TestCase):
+    """#3494: a wedged ``tasklist`` liveness probe must not hang the topup / glm-docs
+    tick. On ``subprocess.TimeoutExpired`` the probe bounds the call and returns True
+    (assume the worker is alive) so the deficit fold does NOT spawn a duplicate onto a
+    live worker's account — under-counting would collide; over-counting self-heals."""
+
+    def _assert_bounded_and_assumes_alive(self, mod):
+        captured = {}
+
+        def timing_out(cmd, *a, **kw):
+            captured["kw"] = kw
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=kw.get("timeout"))
+
+        with mock.patch.object(mod.subprocess, "run", side_effect=timing_out):
+            alive = mod._alive(999999)
+        self.assertIn("timeout", captured.get("kw", {}),
+                      f"{mod.__name__}._alive ran tasklist with no timeout (can hang the tick)")
+        self.assertTrue(captured["kw"]["timeout"],
+                        f"{mod.__name__}._alive passed a falsy timeout")
+        self.assertTrue(alive,
+                        f"{mod.__name__}._alive must assume alive on timeout (avoid duplicate spawn)")
+
+    def test_account_topup_alive_bounded(self):
+        self._assert_bounded_and_assumes_alive(dispatch_account_topup)
+
+    def test_glm_docs_alive_bounded(self):
+        self._assert_bounded_and_assumes_alive(dispatch_glm_docs)
+
+
 class DirectSpawnerIssueContractTest(unittest.TestCase):
     """Ad hoc direct spawners must not bypass the worker-ready issue contract."""
 

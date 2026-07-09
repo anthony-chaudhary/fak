@@ -36,9 +36,15 @@ RUNS = REPO / ".dispatch-runs"
 
 
 def _alive(pid: int) -> bool:
-    out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                         capture_output=True, text=True,
-                         creationflags=ird.no_window_creationflags())
+    try:
+        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                             capture_output=True, text=True, timeout=10,
+                             creationflags=ird.no_window_creationflags())
+    except subprocess.TimeoutExpired:
+        # A wedged tasklist must not hang the topup tick. Assume the worker is
+        # alive so we do NOT spawn a duplicate onto its account; the next tick
+        # re-probes (under-counting here would collide, over-counting self-heals).
+        return True
     return str(pid) in (out.stdout or "")
 
 
@@ -101,10 +107,16 @@ def main(argv=None) -> int:
               f"{p['lane']} -> {p['targets']} (--live to spawn)")
         return 0
 
-    rec = json.loads(subprocess.run(
-        [sys.executable, str(REPO / "tools" / "fleet_accounts.py"), "resolve",
-         "--account", args.account], capture_output=True, text=True,
-        creationflags=ird.no_window_creationflags()).stdout or "{}")
+    try:
+        resolve = subprocess.run(
+            [sys.executable, str(REPO / "tools" / "fleet_accounts.py"), "resolve",
+             "--account", args.account], capture_output=True, text=True, timeout=30,
+            creationflags=ird.no_window_creationflags())
+    except subprocess.TimeoutExpired:
+        print(json.dumps({"account": args.account, "spawned": 0,
+                          "reason": "unavailable: fleet_accounts resolve timed out after 30s"}))
+        return 0
+    rec = json.loads(resolve.stdout or "{}")
     if not rec.get("ok"):
         print(json.dumps({"account": args.account, "spawned": 0,
                           "reason": f"unavailable: {rec.get('block_reason') or rec.get('reason')}"}))
