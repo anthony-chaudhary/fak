@@ -174,3 +174,55 @@ func TestPlan_DeterministicOrder(t *testing.T) {
 		}
 	}
 }
+
+// TestPlan_AttachedIdleInLiveLaneKept locks the HIGH-severity fix: an idle
+// supervisor that shares a (fallback) lane with a live keeper must NOT be reaped
+// when its own parent is alive - the lane key can collide across unrelated loops,
+// so an attached idle loop is kept, and only a confirmed orphan idle is reaped.
+func TestPlan_AttachedIdleInLiveLaneKept(t *testing.T) {
+	census := []Supervisor{
+		// the live keeper for lane "auth"
+		{PID: 100, Start: "a", Lane: "auth", Parent: ParentAlive, LiveWorkers: 1},
+		// idle, same lane, but its OWN parent is alive -> attached, must be KEPT
+		{PID: 200, Start: "b", Lane: "auth", Parent: ParentAlive, LiveWorkers: 0},
+		// idle, same lane, parent gone -> confirmed orphan duplicate, REAP
+		{PID: 300, Start: "c", Lane: "auth", Parent: ParentDead, LiveWorkers: 0},
+		// idle, same lane, parent unknown -> fail closed, UNKNOWN (never reap)
+		{PID: 400, Start: "d", Lane: "auth", Parent: ParentUnknown, LiveWorkers: 0},
+	}
+	r := Plan(census, DefaultConfig())
+	if v := findPID(r, 100); v.Action != KEEP || v.Reason != ReasonKeepLiveWork {
+		t.Errorf("pid100 (live keeper): want KEEP/%s, got %s/%s", ReasonKeepLiveWork, v.Action, v.Reason)
+	}
+	if v := findPID(r, 200); v.Action != KEEP || v.Reason != ReasonKeepAttached {
+		t.Errorf("pid200 (attached idle): want KEEP/%s, got %s/%s - would have been wrongly reaped", ReasonKeepAttached, v.Action, v.Reason)
+	}
+	if v := findPID(r, 300); v.Action != REAP || v.Reason != ReasonDupIdle {
+		t.Errorf("pid300 (orphan idle dup): want REAP/%s, got %s/%s", ReasonDupIdle, v.Action, v.Reason)
+	}
+	if v := findPID(r, 400); v.Action != UNKNOWN {
+		t.Errorf("pid400 (unknown-parent idle): want UNKNOWN (fail closed), got %s", v.Action)
+	}
+}
+
+// TestPlan_TwoLiveOneAttachedIdle covers the len(live)>=2 (COLLISION) branch: the
+// two live supervisors collide (operator decision), a same-lane attached idle is
+// still kept, and an orphan idle is reaped.
+func TestPlan_TwoLiveOneAttachedIdle(t *testing.T) {
+	census := []Supervisor{
+		{PID: 10, Start: "a", Lane: "web", Parent: ParentAlive, LiveWorkers: 1},
+		{PID: 20, Start: "b", Lane: "web", Parent: ParentAlive, LiveWorkers: 1},
+		{PID: 30, Start: "c", Lane: "web", Parent: ParentAlive, LiveWorkers: 0}, // attached idle -> KEEP
+		{PID: 40, Start: "d", Lane: "web", Parent: ParentDead, LiveWorkers: 0},  // orphan idle -> REAP
+	}
+	r := Plan(census, DefaultConfig())
+	if v := findPID(r, 10); v.Action != COLLISION {
+		t.Errorf("pid10: want COLLISION, got %s", v.Action)
+	}
+	if v := findPID(r, 30); v.Action != KEEP || v.Reason != ReasonKeepAttached {
+		t.Errorf("pid30 (attached idle): want KEEP/%s, got %s/%s", ReasonKeepAttached, v.Action, v.Reason)
+	}
+	if v := findPID(r, 40); v.Action != REAP {
+		t.Errorf("pid40 (orphan idle): want REAP, got %s", v.Action)
+	}
+}

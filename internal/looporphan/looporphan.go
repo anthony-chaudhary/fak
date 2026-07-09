@@ -117,6 +117,34 @@ func reapOr(s Supervisor, key string, size int, reason, detail string, cfg Confi
 	}
 }
 
+// idleDupVerdict decides one idle (no-live-worker) member of a lane group that
+// already has a live keeper. Crucially it consults Parent rather than reaping on
+// the group membership alone: a parsed lane is a fallback identity and CAN collide
+// (two different loops both launched --region billing, or empty-lane cmdline
+// twins), so an idle member whose own owning parent is still alive is an attached
+// idle loop - NOT dead weight - and is KEPT. Only a confirmed orphan (parent dead)
+// is a reapable duplicate; an unknown parent fails closed. Without this, a
+// live-but-idle loop that merely shares a lane string with an unrelated live loop
+// would be wrongly reaped.
+func idleDupVerdict(s Supervisor, key string, size int, dupDetail string, cfg Config) Verdict {
+	switch s.Parent {
+	case ParentAlive:
+		return Verdict{
+			PID: s.PID, Lane: s.Lane, Group: key, GroupSize: size,
+			Action: KEEP, Reason: ReasonKeepAttached,
+			Detail: "attached idle loop (owning parent alive) sharing a lane with live work - keeping; not dead weight",
+		}
+	case ParentDead:
+		return reapOr(s, key, size, ReasonDupIdle, dupDetail, cfg)
+	default:
+		return Verdict{
+			PID: s.PID, Lane: s.Lane, Group: key, GroupSize: size,
+			Action: UNKNOWN, Reason: ReasonEvidenceThin,
+			Detail: "idle duplicate of a kept lane, but parent liveness is unknown - cannot confirm orphan, so not reaping",
+		}
+	}
+}
+
 // Plan folds a supervisor census into a keep/reap Report. It is pure and
 // deterministic: verdicts are ordered by group key, then PID.
 func Plan(census []Supervisor, cfg Config) Report {
@@ -167,7 +195,7 @@ func Plan(census []Supervisor, cfg Config) Report {
 				})
 			}
 			for _, s := range idle {
-				verdicts = append(verdicts, reapOr(s, key, size, ReasonDupIdle,
+				verdicts = append(verdicts, idleDupVerdict(s, key, size,
 					"idle duplicate of a lane with live supervisors", cfg))
 			}
 		case len(live) == 1:
@@ -178,7 +206,7 @@ func Plan(census []Supervisor, cfg Config) Report {
 				Detail: "parents the live worker for this lane - the canonical keeper",
 			})
 			for _, s := range idle {
-				verdicts = append(verdicts, reapOr(s, key, size, ReasonDupIdle,
+				verdicts = append(verdicts, idleDupVerdict(s, key, size,
 					"idle duplicate of a lane whose live supervisor is kept", cfg))
 			}
 		default:
