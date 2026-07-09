@@ -228,8 +228,14 @@ func TestAccountsNextAndLaunchRotateRefuseWeeklyCappedAlternative(t *testing.T) 
 	if err := os.MkdirAll(regDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// The throttle strings carry an explicit year, which the reset parser's yearless
+	// grammar ("Jan 2, 3:04pm" / "Jan 2, 3pm" / "3:04pm" / "3pm") can never parse — an
+	// unparseable weekly is nil, and the weekly rung treats a not-provably-past throttle
+	// as active (the documented fail-closed default). That keeps bob-seat weekly-capped on
+	// every wall-clock date, so the fixture never expires the way a bare "Jul 9, 6am" did
+	// once July 9 passed (the #3444 wall-clock time-bomb class).
 	runtime := `{"generated_utc":"2026-07-06T12:00:00Z",` +
-		`"throttle":{".claude-bob-seat":{"reset":"Jul 9, 6am (America/Los_Angeles)","weekly":"Jul 9, 6am (America/Los_Angeles)"}},` +
+		`"throttle":{".claude-bob-seat":{"reset":"Dec 31, 2099, 6am (America/Los_Angeles)","weekly":"Dec 31, 2099, 6am (America/Los_Angeles)"}},` +
 		`"auth":{},"sessions":[]}`
 	if err := os.WriteFile(filepath.Join(regDir, "sessions.json"), []byte(runtime), 0o644); err != nil {
 		t.Fatal(err)
