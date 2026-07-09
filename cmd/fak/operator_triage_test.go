@@ -50,6 +50,11 @@ func TestOperatorTriageGateRoutesAndPages(t *testing.T) {
 	if len(view.Reassignments) != 1 || view.Reassignments[0].Source != "cadence" {
 		t.Fatalf("want the cadence page routed to the fleet, got %+v", view.Reassignments)
 	}
+	// The reassignment must carry the deciding choicetriage rung, not just its
+	// destination — an operator reading the lens needs the "why" (item 5).
+	if strings.TrimSpace(view.Reassignments[0].Reason) == "" {
+		t.Fatalf("reassignment dropped the deciding rung/reason, got %+v", view.Reassignments[0])
+	}
 	if view.GateExit == nil || *view.GateExit != 1 {
 		t.Fatalf("JSON view should carry the gate decision, got %+v", view.GateExit)
 	}

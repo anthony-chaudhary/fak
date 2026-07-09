@@ -976,11 +976,16 @@ func itemSignal(it Item) choicetriage.Signal {
 }
 
 // Reassignment records one human-bucket item that choicetriage judged does not
-// truly need a person, and where the fold routed it instead.
+// truly need a person, and where the fold routed it instead. Reason carries the
+// deciding rung of the choicetriage verdict — the one-line "why this is not a
+// person's call" (obvious action / knowable evaluation / oversized scope) — so
+// an operator reading the lens sees the ground for each reassignment, not just
+// its destination.
 type Reassignment struct {
 	Source      string                   `json:"source"`
 	Title       string                   `json:"title"`
 	Disposition choicetriage.Disposition `json:"disposition"`
+	Reason      string                   `json:"reason,omitempty"`
 	Resolve     string                   `json:"resolve"`
 }
 
@@ -1012,6 +1017,7 @@ func TriageHumanBucket(r Report) (Report, []Reassignment) {
 			Source:      it.Source,
 			Title:       it.Title,
 			Disposition: v.Disposition,
+			Reason:      v.Reason,
 			Resolve:     v.Resolve,
 		})
 	}
@@ -1061,6 +1067,9 @@ func TriageSelfcheck() error {
 	}
 	if moved[0].Disposition != choicetriage.FreshContext {
 		return fmt.Errorf("want the evaluation to route as FRESH_CONTEXT, got %s", moved[0].Disposition)
+	}
+	if strings.TrimSpace(moved[0].Reason) == "" {
+		return fmt.Errorf("a reassignment must carry the deciding choicetriage rung, got empty Reason")
 	}
 	if code, _ := CheckGate(triaged); code != 1 {
 		return fmt.Errorf("post-triage gate should still page on the residual authority decision, got exit %d", code)

@@ -238,7 +238,11 @@ func runOperatorTriage(stdout, stderr io.Writer, argv []string) int {
 			if strings.TrimSpace(resolve) == "" {
 				resolve = "(no action)"
 			}
-			fmt.Fprintf(stdout, "routed to fleet: %s/%s -> %s: %s\n", m.Source, m.Title, m.Disposition, resolve)
+			why := ""
+			if strings.TrimSpace(m.Reason) != "" {
+				why = " (" + m.Reason + ")"
+			}
+			fmt.Fprintf(stdout, "routed to fleet: %s/%s -> %s%s: %s\n", m.Source, m.Title, m.Disposition, why, resolve)
 		}
 	}
 
