@@ -43,6 +43,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/bgloop"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
+	"github.com/anthony-chaudhary/fak/internal/compactcohere"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/enginecache"

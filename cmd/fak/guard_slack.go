@@ -178,6 +178,14 @@ type guardSessionControlContext struct {
 	GatewayURL string
 }
 
+// guardSessionCardHandle is the process-wide live session card. A guard process runs
+// exactly one session, so a single package-level handle suffices: it is set once in the
+// guard main flow right after the session root is queued (newGuardSessionCard) and its
+// terminal outcome edit is written from finishGuardChildAndReport (finalizeOutcome). It
+// stays nil — and every method a no-op — whenever Slack is unconfigured or the root did not
+// queue, so neither the launch path nor the teardown has to branch on Slack being available.
+var guardSessionCardHandle *guardSessionCard
+
 // guardSessionCard is the in-memory handle to a guard session's live-updating root card.
 // It is nil whenever a root did not queue (Slack unconfigured), and every method is a
 // no-op on a nil receiver, so callers never have to branch on Slack being available.
@@ -317,6 +325,19 @@ func (c *guardSessionCard) finalize(text string) {
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
+}
+
+// finalizeOutcome stops the live updater and writes the terminal outcome edit for the
+// session's exit — the single call guard's teardown (finishGuardChildAndReport) makes so it
+// never has to know the card's internals or branch on Slack. Nil-safe: a session that never
+// queued a root is a no-op. Elapsed is measured from the card's own start so the final line
+// shares the live line's clock.
+func (c *guardSessionCard) finalizeOutcome(exitCode int, sum gateway.AdjudicationSummary) {
+	if c == nil {
+		return
+	}
+	c.stopUpdater()
+	c.finalize(guardSessionFinalLine(exitCode, sum, time.Since(c.startedAt)))
 }
 
 // enqueueGuardSessionControlPoints queues the launch replies (banner + context) under the
