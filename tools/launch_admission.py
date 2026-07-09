@@ -337,6 +337,55 @@ def record_launch(ledger_path: str, account: str, now: datetime, **extra) -> dic
     return rec
 
 
+def admit_or_defer(
+    account: str,
+    *,
+    ledger_path: str = DEFAULT_LEDGER,
+    now: datetime | None = None,
+    throttled: bool = False,
+    throttle_reset=None,
+    record: bool = False,
+    max_per_account: int | None = None,
+    window_min: int | None = None,
+    global_cap: int | None = None,
+    **extra,
+) -> dict:
+    """The one-call launcher seam: read the durable ledger, run the gate, decide.
+
+    A launcher that fires N spawns in a fan-out calls THIS once per spawn instead of
+    re-deriving the count/decision itself. It loads the prior launches onto `account`
+    (and across the fleet) from the same ledger the watchdog appends to, runs the pure
+    ``admit`` decision, and -- on ADMIT + ``record`` -- appends the launch so the i-th
+    spawn in a burst sees the i-1 already recorded (the gate is stateful across a wave).
+    Ceiling overrides default to the env-tunable fleet ceilings when left None.
+
+    Returns the same verdict dict ``admit`` returns; the caller self-gates on
+    ``verdict`` (DEFER carries a structured ``reason`` + ``retry_after``).
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    ceilings = default_ceilings()
+    if max_per_account is not None:
+        ceilings["max_per_account"] = max_per_account
+    if window_min is not None:
+        ceilings["window_min"] = window_min
+    if global_cap is not None:
+        ceilings["global_cap"] = global_cap
+    acct, glob = load_launches(ledger_path, account)
+    v = admit(
+        account,
+        now=now,
+        account_launches=acct,
+        global_launches=glob,
+        throttled=bool(throttled or throttle_reset),
+        throttle_reset=throttle_reset,
+        **ceilings,
+    )
+    if v["verdict"] == VERDICT_ADMIT and record:
+        record_launch(ledger_path, account, now, cause=extra.get("cause") or "admit_or_defer")
+    return v
+
+
 def _cmd_admit(args) -> int:
     ceilings = default_ceilings()
     if args.max_per_account is not None:

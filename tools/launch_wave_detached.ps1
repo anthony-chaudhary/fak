@@ -141,6 +141,80 @@ function Resolve-PythonExe {
   throw "wave preflight needs python on PATH and none was found (fail-safe: REFUSE_INSPECT) -- fix python, or pass -SkipPreflight to explicitly accept an ungated wave"
 }
 
+function Invoke-AdmissionGate {
+  # The single launch-admission gate (#617/#3552): self-gate BEFORE a spawn so a wave
+  # cannot fire N launches onto one throttled/over-ceiling account with no rate check
+  # (the 2026-06-24 q-netra storm class). It does NOT launch -- it returns a verdict:
+  # exit 0 = ADMIT, exit 3 = a structured DEFER (LAUNCH_RATE_EXCEEDED / GLOBAL_LAUNCH_CAP
+  # / ACCOUNT_THROTTLED) with a retry_after. Fail-OPEN by doctrine: if the gate itself
+  # cannot run (no python, crash, usage error) we LOG and PROCEED -- the gate exists to
+  # stop a self-inflicted storm, never to wedge the whole wave on its own malfunction.
+  param([string]$RepoRoot, [string]$Account)
+  $result = [ordered]@{ verdict = 'ADMIT'; reason = ''; retry_after = ''; failopen = $false }
+  $py = $null
+  try { $py = Resolve-PythonExe } catch { $py = $null }
+  if (-not $py) {
+    $result.failopen = $true; $result.reason = 'no python for admission gate'; return $result
+  }
+  $gate = Join-Path $RepoRoot 'tools\launch_admission.py'
+  if (-not (Test-Path $gate)) {
+    $result.failopen = $true; $result.reason = "admission gate missing: $gate"; return $result
+  }
+  # --record appends the admitted launch to the durable ledger so the i-th spawn in the
+  # fan-out sees the i-1 already recorded (the gate is stateful across the wave).
+  $gArgs = @($py.Prefix) + @($gate, 'admit', '--account', $Account, '--record')
+  $raw = ''
+  $rc = $null
+  $oldErrorAction = $ErrorActionPreference
+  $hadNativeError = Test-Path variable:PSNativeCommandUseErrorActionPreference
+  $oldNativeError = $null
+  try {
+    # A DEFER is a non-zero (3) exit; without pinning these off, Stop + native error
+    # action would THROW on the DEFER and misroute it into the fail-open path.
+    $ErrorActionPreference = 'Continue'
+    if ($hadNativeError) {
+      $oldNativeError = $PSNativeCommandUseErrorActionPreference
+      $PSNativeCommandUseErrorActionPreference = $false
+    }
+    $raw = & $py.Exe @gArgs 2>$null | Out-String
+    $rc = $LASTEXITCODE
+  } catch {
+    $result.failopen = $true
+    $result.reason = "admission gate error: $_"
+    return $result
+  } finally {
+    if ($hadNativeError) { $PSNativeCommandUseErrorActionPreference = $oldNativeError }
+    $ErrorActionPreference = $oldErrorAction
+  }
+  if ($rc -eq 3) {
+    $result.verdict = 'DEFER'
+    try {
+      $v = $raw | ConvertFrom-Json
+      if ($v.PSObject.Properties['reason'] -and $v.reason) { $result.reason = [string]$v.reason }
+      if ($v.PSObject.Properties['retry_after'] -and $v.retry_after) { $result.retry_after = [string]$v.retry_after }
+    } catch { }
+    return $result
+  }
+  if ($rc -ne 0) {
+    # Any other non-zero exit (usage error, crash) is a gate malfunction, not a DEFER.
+    $result.failopen = $true
+    $result.reason = "admission gate exit $rc"
+  }
+  return $result
+}
+
+function Invoke-SpawnPacing {
+  # Inter-spawn pacing: spread the fan-out so a wave cannot hammer one account in a
+  # sub-second burst. Base delay is env-overridable (FAK_LAUNCH_SPAWN_PACING_MS,
+  # default 300ms); a Get-Random jitter of up to +50% de-synchronizes the spawns.
+  # A base of 0 disables pacing (operator override for a hermetic dry-run cadence).
+  $baseMs = 300
+  if ($env:FAK_LAUNCH_SPAWN_PACING_MS -match '^\d+$') { $baseMs = [int]$env:FAK_LAUNCH_SPAWN_PACING_MS }
+  if ($baseMs -le 0) { return }
+  $jitterMs = Get-Random -Minimum 0 -Maximum ([Math]::Max(1, [int]($baseMs / 2)))
+  Start-Sleep -Milliseconds ($baseMs + $jitterMs)
+}
+
 function Invoke-WavePreflight {
   param(
     [string]$RepoRoot,
@@ -414,6 +488,22 @@ $results = @()
 $lane = 0
 foreach ($l in $w.lanes) {
   $lane++
+  # Inter-spawn pacing BETWEEN spawns (never before the first) so the wave fires as a
+  # spread cadence, not a sub-second burst onto whichever pools it drew.
+  if ($lane -gt 1) { Invoke-SpawnPacing }
+  # Launch-admission gate: self-gate BEFORE the spawn. A structured DEFER (exit 3)
+  # SKIPS this lane and logs the reason rather than firing; a gate malfunction fails
+  # OPEN (logs + proceeds) so a broken gate never wedges the whole wave.
+  $adm = Invoke-AdmissionGate -RepoRoot $repoRoot -Account $l.tag
+  if ($adm.verdict -eq 'DEFER') {
+    $ra = if ($adm.retry_after) { " retry_after=$($adm.retry_after)" } else { "" }
+    Write-Output "`n--- lane $lane/$($w.granted): account '$($l.tag)' DEFERRED by admission gate [$($adm.reason)]$ra -- skipping spawn ---"
+    $results += [pscustomobject]@{ lane = $lane; account = $l.tag; pool = $l.pool; dispatched = $false; deferred = $true; reason = $adm.reason }
+    continue
+  }
+  if ($adm.failopen) {
+    Write-Warning "lane $lane ($($l.tag)): admission gate unavailable ($($adm.reason)) -- failing OPEN, proceeding with spawn"
+  }
   Write-Output "`n--- dispatching lane $lane/$($w.granted): account '$($l.tag)' (pool $($l.pool)) ---"
   try {
     # Forward by HASHTABLE SPLAT, not an inline @(if...) array: an inline array binds as a
@@ -433,10 +523,10 @@ foreach ($l in $w.lanes) {
     if ($AllowTierFallback) { $fwd.AllowTierFallback = $true }
     if ($SkipPreflight)     { $fwd.SkipPreflight = $true }
     & $launcher @fwd
-    $results += [pscustomobject]@{ lane = $lane; account = $l.tag; pool = $l.pool; dispatched = $true }
+    $results += [pscustomobject]@{ lane = $lane; account = $l.tag; pool = $l.pool; dispatched = $true; deferred = $false; reason = '' }
   } catch {
     Write-Warning "lane $lane ($($l.tag)) failed to dispatch: $_"
-    $results += [pscustomobject]@{ lane = $lane; account = $l.tag; pool = $l.pool; dispatched = $false }
+    $results += [pscustomobject]@{ lane = $lane; account = $l.tag; pool = $l.pool; dispatched = $false; deferred = $false; reason = '' }
   }
 }
 

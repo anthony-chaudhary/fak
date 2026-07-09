@@ -87,6 +87,13 @@ row reports `missing_sections` for these five body sections and `missing_fields`
 stricter issue-contract fields. A row with missing required sections is triage debt, not
 a worker launch candidate.
 
+These five sections are the *structure* axis of ticket scope. The full scope
+contract — structure, size (the S0–S4 ladder), atomicity, write-scope, cohort
+placement, and work-class, each with the verb that measures it and the fix when
+it fails — is [The scope of a GitHub ticket](ticket-scope.md); the repeatable
+per-ticket pass is the [`/ticket-scope`](../.claude/skills/ticket-scope/SKILL.md)
+skill.
+
 ### Dependency markers
 
 When an issue has an explicit dependency edge, put a `Dependencies` section in the issue

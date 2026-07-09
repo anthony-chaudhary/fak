@@ -168,5 +168,74 @@ class VocabularyTest(unittest.TestCase):
         )
 
 
+class AdmitOrDeferSeamTest(unittest.TestCase):
+    """The one-call launcher seam (#3552): load the ledger, decide, optionally record.
+
+    This is what a launcher's per-spawn gate call exercises -- so a burst that hits
+    the per-account ceiling gets a structured DEFER instead of firing.
+    """
+
+    def test_defers_when_over_per_account_ceiling(self):
+        with tempfile.TemporaryDirectory() as d:
+            led = os.path.join(d, "resume_ledger.jsonl")
+            # Seed the ledger AT the per-account ceiling, all inside the window.
+            for i in range(3):
+                LA.record_launch(led, ".claude-q-netra", START + timedelta(seconds=i))
+            v = LA.admit_or_defer(
+                ".claude-q-netra", ledger_path=led,
+                now=START + timedelta(seconds=10),
+                max_per_account=3, window_min=5, global_cap=50,
+            )
+            self.assertEqual(v["verdict"], LA.VERDICT_DEFER)
+            self.assertEqual(v["reason"], LA.REASON_RATE)
+            self.assertIsNotNone(v["retry_after"])
+
+    def test_admits_and_records_when_clear(self):
+        with tempfile.TemporaryDirectory() as d:
+            led = os.path.join(d, "resume_ledger.jsonl")
+            v = LA.admit_or_defer(
+                ".claude-day24-netra", ledger_path=led, now=START, record=True,
+                max_per_account=3, window_min=5, global_cap=10,
+            )
+            self.assertEqual(v["verdict"], LA.VERDICT_ADMIT)
+            # the ADMIT was appended -> a reload sees exactly one launch onto it.
+            acct, _ = LA.load_launches(led, ".claude-day24-netra")
+            self.assertEqual(len(acct), 1)
+
+    def test_admit_does_not_record_without_the_flag(self):
+        with tempfile.TemporaryDirectory() as d:
+            led = os.path.join(d, "resume_ledger.jsonl")
+            LA.admit_or_defer(".claude-day24-netra", ledger_path=led, now=START,
+                              max_per_account=3, window_min=5, global_cap=10)
+            acct, _ = LA.load_launches(led, ".claude-day24-netra")
+            self.assertEqual(len(acct), 0)   # decide-only: no side effect on the ledger
+
+    def test_throttle_reset_implies_throttled_defer(self):
+        with tempfile.TemporaryDirectory() as d:
+            led = os.path.join(d, "resume_ledger.jsonl")
+            v = LA.admit_or_defer(".claude-q-netra", ledger_path=led, now=START,
+                                  throttle_reset="Jun 25, 1pm")
+            self.assertEqual(v["verdict"], LA.VERDICT_DEFER)
+            self.assertEqual(v["reason"], LA.REASON_THROTTLED)
+
+
+class LauncherWiringTest(unittest.TestCase):
+    """The gate is only useful once a launcher routes THROUGH it (#3552, the #617
+    unwired-gate class). Content checks that the wave launcher invokes the gate and
+    paces its spawns -- the LIVE-wave ablation is a separate manual follow-up."""
+
+    WAVE = Path(__file__).resolve().parent / "launch_wave_detached.ps1"
+
+    def test_wave_launcher_invokes_the_admission_gate(self):
+        text = self.WAVE.read_text(encoding="utf-8")
+        self.assertIn("launch_admission.py", text)
+
+    def test_wave_launcher_paces_spawns_with_a_jittered_delay(self):
+        text = self.WAVE.read_text(encoding="utf-8")
+        self.assertIn("FAK_LAUNCH_SPAWN_PACING_MS", text)   # env-overridable pacing knob
+        self.assertIn("Start-Sleep", text)                  # the paced delay
+        self.assertIn("Get-Random", text)                   # + jitter to de-sync spawns
+
+
 if __name__ == "__main__":
     unittest.main()
