@@ -187,6 +187,75 @@ func TestRunContractWritesGatedOfficialRunContract(t *testing.T) {
 	}
 }
 
+// TestRunReportWritesJSONAndMarkdown pins #2112: `livecodebench report` renders
+// a normalized suite as machine JSON (--out) and human markdown (--md); the
+// markdown carries the evidence-class / claim-boundary banner and per-problem
+// rows linking each question_id to its verdict and evidence id.
+func TestRunReportWritesJSONAndMarkdown(t *testing.T) {
+	suite := filepath.Join("..", "..", "internal", "livecodebench", "testdata", "suite_release_v2_sample.json")
+	dir := t.TempDir()
+	out := filepath.Join(dir, "report.json")
+	md := filepath.Join(dir, "report.md")
+
+	code := run([]string{"report",
+		"--suite", suite,
+		"--generated-at", "2026-07-09T00:00:00Z",
+		"--out", out,
+		"--md", md,
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read report output: %v", err)
+	}
+	var report struct {
+		Schema             string `json:"schema"`
+		EvidenceClass      string `json:"evidence_class"`
+		ResultClaimAllowed bool   `json:"result_claim_allowed"`
+		Problems           []struct {
+			QuestionID string `json:"question_id"`
+			Verdict    string `json:"verdict"`
+			EvidenceID string `json:"evidence_id"`
+		} `json:"problems"`
+	}
+	if err := json.Unmarshal(raw, &report); err != nil {
+		t.Fatalf("report output not valid JSON: %v\n%s", err, raw)
+	}
+	if report.Schema != "fak.livecodebench-report.v1" {
+		t.Fatalf("schema = %q", report.Schema)
+	}
+	if report.ResultClaimAllowed {
+		t.Fatal("result_claim_allowed must be false for an ungraded report")
+	}
+	if len(report.Problems) == 0 {
+		t.Fatal("report carries no per-problem verdict rows")
+	}
+	for _, p := range report.Problems {
+		if p.EvidenceID == "" {
+			t.Fatalf("problem %q verdict %q has no evidence_id", p.QuestionID, p.Verdict)
+		}
+	}
+
+	rawMD, err := os.ReadFile(md)
+	if err != nil {
+		t.Fatalf("read markdown output: %v", err)
+	}
+	for _, want := range []string{
+		"- Evidence class: `local-ungraded`",
+		"- Result claim allowed: `false`",
+		"- Claim boundary:",
+		"| question_id | scenario | arm | verdict | evidence_id |",
+		"| `lcb-sample-001` | codegeneration | - | ungraded | `local-ungraded:lcb-sample-001` |",
+	} {
+		if !strings.Contains(string(rawMD), want) {
+			t.Fatalf("markdown missing %q\n---\n%s", want, rawMD)
+		}
+	}
+}
+
 // TestRunExportRejectsUnsupportedFormat guards the --format flag against a
 // silent no-op for a format the exporter cannot produce.
 func TestRunExportRejectsUnsupportedFormat(t *testing.T) {
