@@ -191,3 +191,139 @@ func TestCompareLine(t *testing.T) {
 		t.Errorf("compare line wrong: %q", out)
 	}
 }
+
+// TestDeficitSurplusUnbounded is the load-bearing property: unlike a 0-100 grade, the
+// deficit/surplus around a baseline never clamps, so a score twice past a bound reports twice
+// the magnitude instead of saturating.
+func TestDeficitSurplusUnbounded(t *testing.T) {
+	// A score of -50 against the 100 pass-line is 150 below it -- past the -100 floor a raw
+	// 0-100 score would hit; the deficit must expose the full 150, not clamp at 100.
+	if got := Deficit(-50, 100); got != 150 {
+		t.Errorf("Deficit(-50,100)=%g want 150 (unbounded past the floor)", got)
+	}
+	if got := Surplus(-50, 100); got != 0 {
+		t.Errorf("Surplus(-50,100)=%g want 0 (below baseline is not credit)", got)
+	}
+	// A score of 130 against 100 clears the ceiling by 30 -- headroom a capped score hides.
+	if got := Surplus(130, 100); got != 30 {
+		t.Errorf("Surplus(130,100)=%g want 30 (unbounded above the ceiling)", got)
+	}
+	if got := Deficit(130, 100); got != 0 {
+		t.Errorf("Deficit(130,100)=%g want 0 (above baseline is not debt)", got)
+	}
+	// On the baseline: neither debt nor credit.
+	if Deficit(100, 100) != 0 || Slack([]KPI{{Score: 100}}, nil) != 0 {
+		t.Error("a KPI exactly on its pass-line must contribute zero pressure and zero slack")
+	}
+}
+
+// TestFoldStampsUnboundedPressure confirms Fold emits a continuous pressure that grows past the
+// point a 0-100 grade would saturate, and that a KPI carrying an out-of-band Score drives it.
+func TestFoldStampsUnboundedPressure(t *testing.T) {
+	// Two KPIs: one perfect (no pressure), one at -100 (200 below the 100 pass-line). Mean
+	// weighting -> pressure = 200/... no, pressure SUMS deficits (weighted), not means: 0+200.
+	kpis := []KPI{{Key: "a", Score: 100}, {Key: "b", Score: -100, Defects: []string{"d"}}}
+	p := Fold("fak-x/1", kpis, "x_debt", nil, Messages{})
+	if got, _ := anyFloat(p.Corpus["pressure"]); got != 200 {
+		t.Errorf("pressure=%v want 200 (Σ weighted deficit, unbounded past the -100 floor)", p.Corpus["pressure"])
+	}
+	if p.Corpus["pressure_unit"] != "weighted_score_deficit" {
+		t.Errorf("pressure_unit=%v want weighted_score_deficit", p.Corpus["pressure_unit"])
+	}
+	if got, _ := anyFloat(p.Corpus["slack"]); got != 0 {
+		t.Errorf("slack=%v want 0 (no KPI clears the baseline)", p.Corpus["slack"])
+	}
+	// Legacy score/grade stay intact and Python-readable alongside the new gauge.
+	for _, k := range []string{"score", "grade", "value", "x_debt"} {
+		if _, ok := p.Corpus[k]; !ok {
+			t.Errorf("legacy/continuity key %q dropped from corpus", k)
+		}
+	}
+}
+
+// TestFoldDynamicBaseline confirms PassLine moves the baseline a KPI is measured against, so a
+// card can trend against a target other than fixed perfection.
+func TestFoldDynamicBaseline(t *testing.T) {
+	// Score 80 is 20 below the default 100 pass-line -> pressure 20. Move the baseline to 80
+	// and the same score sits exactly on it -> pressure 0, slack 0.
+	def := Fold("fak-x/1", []KPI{{Key: "a", Score: 80}}, "x_debt", nil, Messages{})
+	if got, _ := anyFloat(def.Corpus["pressure"]); got != 20 {
+		t.Errorf("default-baseline pressure=%v want 20", def.Corpus["pressure"])
+	}
+	moved := Fold("fak-x/1", []KPI{{Key: "a", Score: 80, PassLine: 80}}, "x_debt", nil, Messages{})
+	if got, _ := anyFloat(moved.Corpus["pressure"]); got != 0 {
+		t.Errorf("moved-baseline pressure=%v want 0 (score on the moved pass-line)", moved.Corpus["pressure"])
+	}
+	// Above a moved-down baseline the surplus shows up as slack.
+	ahead := Fold("fak-x/1", []KPI{{Key: "a", Score: 95, PassLine: 80}}, "x_debt", nil, Messages{})
+	if got, _ := anyFloat(ahead.Corpus["slack"]); got != 15 {
+		t.Errorf("slack=%v want 15 (95 clears the 80 baseline by 15)", ahead.Corpus["slack"])
+	}
+}
+
+// TestPressureWeighted confirms pressure uses the SAME Group/Key weights as the composite mean
+// -- the "continuous weighting" the gauge is built on.
+func TestPressureWeighted(t *testing.T) {
+	// group "heavy" weighs 3: its 40-point deficit counts triple; "light" weighs 1.
+	kpis := []KPI{{Key: "a", Group: "heavy", Score: 60}, {Key: "b", Group: "light", Score: 90}}
+	w := map[string]float64{"heavy": 3, "light": 1}
+	// pressure = 3*(100-60) + 1*(100-90) = 120 + 10 = 130
+	if got := Pressure(kpis, w); got != 130 {
+		t.Errorf("weighted Pressure=%g want 130", got)
+	}
+	p := Fold("fak-x/1", kpis, "x_debt", w, Messages{})
+	if got, _ := anyFloat(p.Corpus["pressure"]); got != 130 {
+		t.Errorf("folded weighted pressure=%v want 130", p.Corpus["pressure"])
+	}
+}
+
+// TestKPIMarginComputed confirms Fold fills each KPI's signed, unbounded Margin (Score-PassLine)
+// and marshals it.
+func TestKPIMarginComputed(t *testing.T) {
+	p := Fold("fak-x/1", []KPI{
+		{Key: "below", Score: 70},
+		{Key: "above", Score: 120},
+		{Key: "moved", Score: 50, PassLine: 40},
+	}, "x_debt", nil, Messages{})
+	byKey := map[string]float64{}
+	for _, k := range p.KPIs {
+		byKey[k.Key] = k.Margin
+	}
+	if byKey["below"] != -30 {
+		t.Errorf("below margin=%v want -30", byKey["below"])
+	}
+	if byKey["above"] != 20 {
+		t.Errorf("above margin=%v want 20 (unbounded above 100)", byKey["above"])
+	}
+	if byKey["moved"] != 10 {
+		t.Errorf("moved margin=%v want 10 (against the moved 40 baseline)", byKey["moved"])
+	}
+	b, err := json.Marshal(p.KPIs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"margin":`) {
+		t.Errorf("KPI must marshal a margin field: %s", string(b))
+	}
+}
+
+// TestComparePressureTrend confirms Compare surfaces the unbounded pressure trend as a separate
+// line without disturbing the debt line, and reads "eased" when pressure drops.
+func TestComparePressureTrend(t *testing.T) {
+	p := Fold("fak-x/1", []KPI{{Key: "a", Score: 90, Defects: []string{"d"}}}, "x_debt", nil, Messages{})
+	// prior: worse pressure (30) and more debt (3).
+	base := map[string]any{"corpus": map[string]any{"x_debt": float64(3), "pressure": float64(30)}}
+	out := Compare(p, base, "x_debt")
+	if !strings.Contains(out, "x_debt 3 -> 1 (improved by 2)") {
+		t.Errorf("debt line disturbed: %q", out)
+	}
+	// current pressure = 100-90 = 10; eased from 30 by 20.
+	if !strings.Contains(out, "pressure 30 -> 10 (eased by 20)") {
+		t.Errorf("pressure trend line wrong: %q", out)
+	}
+	// A baseline predating the pressure layer must degrade to no pressure line, not a crash.
+	old := Compare(p, map[string]any{"corpus": map[string]any{"x_debt": float64(3)}}, "x_debt")
+	if strings.Contains(old, "pressure ") {
+		t.Errorf("no pressure line expected for a pre-pressure baseline: %q", old)
+	}
+}

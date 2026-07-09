@@ -18,6 +18,15 @@
 // 100/100) as the primary numeric signal. The legacy corpus.score remains during the
 // migration so Python-era consumers can still read the old control-pane contract.
 //
+// On top of value the kernel emits an UNBOUNDED, dynamic-baseline layer (pressure.go):
+// corpus.pressure is the weighted sum of how far each KPI falls below a baseline it may
+// move over time, and corpus.slack the weighted surplus above it. Neither clamps, so the
+// headline keeps discriminating past the point a 0-100 grade saturates -- a surface twice
+// past its ceiling reads twice as heavy, not the same "F". This generalizes the
+// heaviness_pressure that internal/heavinessscore proved on one card to every card that
+// folds through Fold. The A-F grade and 0-100 score stay for continuity; pressure is the
+// number a continuous-improvement loop actually trends.
+//
 // Import this package under pkg/ (like pkg/abi) so an out-of-tree tool can build a
 // scorecard against the same fold; the per-card KPI logic stays in internal/<name>score.
 package scorecard
@@ -32,10 +41,19 @@ package scorecard
 // that NEVER count as debt and never gate ok (the deliberate anti-gaming rule: the cheap
 // way to move a soft signal is prose spam, so a soft signal must not be able to red a gate).
 type KPI struct {
-	Key     string   `json:"kpi"`
-	Group   string   `json:"group"`
-	Score   float64  `json:"score"`
-	Value   float64  `json:"value"`
+	Key   string  `json:"kpi"`
+	Group string  `json:"group"`
+	Score float64 `json:"score"`
+	Value float64 `json:"value"`
+	// PassLine is this KPI's dynamic baseline for the unbounded pressure/slack layer: the
+	// score at which it is neither in debt nor ahead. Zero means "unset" -> DefaultPassLine
+	// (100). A card moves it per-KPI, or over time (e.g. to a tracking target), to measure
+	// against a baseline other than fixed perfection. It does NOT affect the legacy score/grade.
+	PassLine float64 `json:"pass_line,omitempty"`
+	// Margin is the kernel-computed signed distance Score-PassLine (positive == clearing the
+	// baseline, negative == below it), unbounded in both directions. Fold fills it in; callers
+	// leave it zero.
+	Margin  float64  `json:"margin"`
 	Detail  string   `json:"detail"`
 	Defects []string `json:"defects"`
 	Soft    []string `json:"soft"`
@@ -103,6 +121,12 @@ func Fold(schema string, kpis []KPI, debtKey string, weights map[string]float64,
 	grade := gradeFn(composite)
 	ok := debt == 0
 
+	// The unbounded, dynamic-baseline layer (pressure.go): a continuous quality-debt gauge
+	// that keeps discriminating past the point the 0-100 grade saturates. pressure is the
+	// weighted deficit below each KPI's baseline, slack the weighted surplus above it.
+	pressure := Round3(Pressure(kpis, weights))
+	slack := Round3(Slack(kpis, weights))
+
 	verdict := "ACTION"
 	finding := msgs.Finding
 	next := msgs.NextAction
@@ -124,6 +148,9 @@ func Fold(schema string, kpis []KPI, debtKey string, weights map[string]float64,
 		"legacy_score":       Round1(composite),
 		"legacy_score_scale": 100,
 		"grade":              grade,
+		"pressure":           pressure,
+		"pressure_unit":      "weighted_score_deficit",
+		"slack":              slack,
 		debtKey:              debt,
 	}
 	for k, v := range msgs.ExtraCorpus {
@@ -154,14 +181,7 @@ func weightedMean(kpis []KPI, weights map[string]float64) float64 {
 	}
 	var sum, total float64
 	for _, k := range kpis {
-		w := 1.0
-		if len(weights) > 0 {
-			if wv, ok := weights[k.Group]; ok {
-				w = wv
-			} else if wv, ok := weights[k.Key]; ok {
-				w = wv
-			}
-		}
+		w := weightOf(k, weights)
 		sum += w * k.Score
 		total += w
 	}
@@ -189,6 +209,7 @@ func normalizeKPIs(kpis []KPI) []KPI {
 	out := make([]KPI, len(kpis))
 	for i, k := range kpis {
 		k.Value = Round3(ValueFromScore(k.Score))
+		k.Margin = Round3(k.Score - passLineOf(k))
 		if k.Defects == nil {
 			k.Defects = []string{}
 		}

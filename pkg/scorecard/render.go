@@ -123,7 +123,35 @@ func Compare(p Payload, baseline map[string]any, debtKey string) string {
 	if abs < 0 {
 		abs = -abs
 	}
-	return body + fmt.Sprintf("\n\n  compare: %s %d -> %d (%s by %d)", debtKey, pd, cur, verdict, abs)
+	out := body + fmt.Sprintf("\n\n  compare: %s %d -> %d (%s by %d)", debtKey, pd, cur, verdict, abs)
+	return out + comparePressureLine(p, bc)
+}
+
+// comparePressureLine appends the unbounded pressure trend vs a prior payload, or "" when the
+// baseline predates the pressure layer. It is a SEPARATE line so it never disturbs the debt
+// line callers grep for; pressure easing (dropping) is the improvement, matching "lower is
+// lighter".
+func comparePressureLine(p Payload, priorCorpus map[string]any) string {
+	prior, have := anyFloat(priorCorpus["pressure"])
+	if !have {
+		return ""
+	}
+	cur, ok := anyFloat(p.Corpus["pressure"])
+	if !ok {
+		return ""
+	}
+	delta := cur - prior
+	verdict := "flat"
+	if delta < 0 {
+		verdict = "eased"
+	} else if delta > 0 {
+		verdict = "worsened"
+	}
+	abs := delta
+	if abs < 0 {
+		abs = -abs
+	}
+	return fmt.Sprintf("\n  compare: pressure %v -> %v (%s by %v)", Round3(prior), Round3(cur), verdict, Round3(abs))
 }
 
 // scorecardName turns a schema like "fak-conflation-scorecard/1" into "conflation scorecard"
