@@ -192,6 +192,24 @@ type Config struct {
 	IndexTopK     int      `json:"index_topk,omitempty"`
 	IndexerTypes  []string `json:"indexer_types,omitempty"`
 
+	// DeepSeek-V4 CSA/HCA two-tier compression rates. V4 runs a hybrid attention:
+	// a lightly compressed "CSA" (Compressed Sparse Attention) latent KV plane that
+	// the lightning indexer selects a sparse top-k over, plus a heavily compressed
+	// "HCA" (Heavily Compressed Attention) block plane attended densely. The two
+	// documented rates are CSA=4 (light) and HCA=128 (aggressive) — see the V4
+	// technical report (arxiv 2606.19348) as mapped in docs/deepseek/
+	// v4-attention-seam-map.md (Missing seam #7).
+	//
+	// METADATA ONLY: these are exported and audited so a real V4 artifact is not
+	// mistaken for the single-plane glm_moe_dsa MLA path, but the co-resident
+	// two-plane kvLayout + dense-over-compressed attend do NOT exist yet (Missing
+	// seams #1-#3), so setting them does not make V4 executable. Zero = not a V4
+	// checkpoint (every existing export leaves both unset, so the load path is
+	// byte-identical). Field names follow the tech report / seam map; the exact HF
+	// config.json key is reconciled against the released checkpoint when it lands.
+	CSACompressionRate int `json:"csa_compression_rate,omitempty"`
+	HCACompressionRate int `json:"hca_compression_rate,omitempty"`
+
 	// MiniMax-M3 "MiniMax Sparse Attention" (MSA) metadata. MSA keeps a GQA backbone
 	// on the real uncompressed K/V (NOT MLA latent compression), but a lightning
 	// indexer scores every key, max-pools those scores into blocks of IndexBlockSize
@@ -815,6 +833,22 @@ func (c Config) isLongrope() bool { return c.LongRope != nil && c.LongRope.kind(
 // per-expert SwiGLU + weighted sum) rather than a single dense SwiGLU FFN.
 // Dense (NumExperts==0) is the Llama default and stays bit-identical.
 func (c Config) IsMoE() bool { return c.NumExperts > 0 }
+
+// V4CompressionRates returns the DeepSeek-V4 CSA (light) and HCA (heavy) KV
+// compression rates and whether this config carries a well-formed V4 two-tier
+// declaration. It is well-formed only when BOTH rates are set and the "heavily
+// compressed" plane is strictly more compressed than the "compressed" plane
+// (hca > csa > 1) — the invariant the two-plane layout rests on. It reports
+// metadata presence ONLY; it does not imply an executable V4 forward exists
+// (the two-plane kvLayout is Missing seams #1-#3 in the V4 attention seam map).
+// Every non-V4 config leaves both rates zero, so ok is false and callers keep
+// the single-plane path.
+func (c Config) V4CompressionRates() (csa, hca int, ok bool) {
+	if c.CSACompressionRate <= 1 || c.HCACompressionRate <= c.CSACompressionRate {
+		return c.CSACompressionRate, c.HCACompressionRate, false
+	}
+	return c.CSACompressionRate, c.HCACompressionRate, true
+}
 
 // GroupSize is how many query heads share one KV head (GQA). For SmolLM2-135M:
 // 9 query heads / 3 kv heads = 3.
