@@ -61,7 +61,6 @@ var tier = map[string]int{
 	"stallscan":            1, // pure churn-signal stall classifier (Classify(Sample,Thresholds)->Verdict) for low-usage machine lockups read by fak stallscan; stdlib-only, imports nothing internal, off the hot path.
 	"growthgate":           1, // pure unbounded-growth classifier (Classify([]Artifact,Budget)->Report) for append-only ledger/log bloat read by fak growthgate; the standing-bloat twin of stallscan; stdlib-only, imports nothing internal, off the hot path.
 	"branchrole":           1, // branch-role contract reader over dos.toml; stdlib-only, off the hot path.
-	"doomloop":             1, // two-axis doom-loop classifier (#doomloop): folds a live worker's effort-vs-verified-progress sample window into a closed verdict + a graduated, reversible-first correction (observe->nudge->escalate, never an auto-teardown); the missing enforcement half of fleetmon/trajctl/relay/loopmgr detection. Pure, stdlib-only, off the hot path.
 	"benchloop":            1, // benchmark super-loop manager: folds benchcatalog/benchruns/nightrun status into one command-facing control surface; off the hot path.
 	"macbench":             1, // Mac gateway benchmark probes for nightrun: stdlib HTTP client + JSON artifact fold, off the hot path.
 	"benchruns":            1, // pure benchmark-run catalog reader/renderer over experiments/benchmark artifacts; stdlib-only, off the hot path.
@@ -144,6 +143,7 @@ var tier = map[string]int{
 	"dispatchpost":         1,                // outbound Slack publisher for background code-dispatch run RESULTS; reuses scoreboard(1) transport, off the hot path.
 	"dojopost":             1,                // outbound Slack publisher for dojo rollups/trends; folds dojo(1) reports, reuses scoreboard(1) transport, off the hot path.
 	"grafanapost":          1,                // outbound Slack publisher for the #grafana channel: exported Grafana snapshots + long-lived dashboard/debug links; folds a committed links registry, reuses scoreboard(1) transport, off the hot path.
+	"promalert":            1,                // pure Alertmanager v4 webhook parser + Slack-card renderer for the Prometheus-alerts->Slack receiver (fak slack alert); stdlib-only, imports nothing internal, off the hot path.
 	"marketing":            1,                // completion-driven marketing subsystem: witnessed-ship(hooks) -> claim/artifact, CLAIMS.md honesty gate, AEO/AgentEO refresh; imports hooks(1)+scoreboard(1)+stdlib, off the hot path.
 	"fleet":                1,                // fleet-roster snapshot fold for the #node-usage feeder; stdlib-only, imports nothing internal, off the hot path.
 	"nodeusagepost":        1,                // outbound Slack publisher for the #node-usage feeder; folds fleet(1), reuses scoreboard(1) transport, off the hot path.
@@ -365,6 +365,8 @@ var tier = map[string]int{
 	"l3kv":                  1,
 	"worklog":               1, // unified agent-work change feed primitive (#3172): the outbox-insight applied to agent work — one append-only, Seq-ordered, principal-scoped CDC feed (commit / verdict-flip / lease events) drained by cursor with an idempotency+retention contract + a fold read-model; pure primitive, imports nothing internal (`import "sync"` only), off the hot path.
 	"conformance":           2, // standalone third-party-runnable fak safety-conformance suite (#453): pins the guarantees a fork/auditor must verify independently of the kernel's own tests; composes abi(0)+adjudicator(2)+policy(2), so it declares at the lowest layer its imports allow (tier 2, alongside shipgate), off the hot path.
+	"doomloop":              1, // two-axis doom-loop classifier (#doomloop): folds a live worker's effort-vs-verified-progress sample window into a closed verdict + a graduated, reversible-first correction (observe->nudge->escalate, never an auto-teardown); the missing enforcement half of fleetmon/trajctl/relay/loopmgr detection. Pure, stdlib-only, off the hot path.
+	"cvregress":             2,
 	"antipattern":           4,
 	"astquery":              1,
 	"atif":                  3,
@@ -728,16 +730,17 @@ func TestRequestPathLeavesRegistered(t *testing.T) {
 // witnesses may replay or benchmark the same wire. cmd/fak's help text also names it
 // but lives outside internal/, so it is not scanned.
 var chatEndpointRole = map[string]string{
-	"agent":       "the single outbound chat-completions client (HTTPPlanner)",
-	"engine":      "the narrow vLLM EngineDriver adapter speaking vLLM's OpenAI-compatible generation surface",
-	"gateway":     "the inbound /v1/chat/completions server route (adjudication proxy)",
-	"chatrelay":   "the off-path Slack bridge client to a served in-kernel model (not a live planner)",
-	"webbench":    "the off-path serving-parity benchmark client (not a live planner)",
-	"guardtrace":  "the off-path trace-replay upstream fake (OpenAI/Anthropic provider replay, not a live planner)",
-	"frontierswe": "the off-path FrontierSWE co-resident env adapter/smoke witness against fak serve (not a live planner)",
-	"macbench":    "the off-path Mac gateway serving-parity benchmark client against fak serve (not a live planner)",
-	"eveparity":   "the off-path Eve-eval parity witness (#2605): a self-contained fixture server + client that both replays the route to prove fak-routed == raw (not a live planner)",
-	"trajctl":     "the off-path GatewayJudgeClient (#2543): an LLM-as-judge W1 progress scorer that POSTs a forced-tool verdict call to fak's own gateway (not a live planner)",
+	"agent":         "the single outbound chat-completions client (HTTPPlanner)",
+	"engine":        "the narrow vLLM EngineDriver adapter speaking vLLM's OpenAI-compatible generation surface",
+	"gateway":       "the inbound /v1/chat/completions server route (adjudication proxy)",
+	"chatrelay":     "the off-path Slack bridge client to a served in-kernel model (not a live planner)",
+	"webbench":      "the off-path serving-parity benchmark client (not a live planner)",
+	"guardtrace":    "the off-path trace-replay upstream fake (OpenAI/Anthropic provider replay, not a live planner)",
+	"frontierswe":   "the off-path FrontierSWE co-resident env adapter/smoke witness against fak serve (not a live planner)",
+	"macbench":      "the off-path Mac gateway serving-parity benchmark client against fak serve (not a live planner)",
+	"eveparity":     "the off-path Eve-eval parity witness (#2605): a self-contained fixture server + client that both replays the route to prove fak-routed == raw (not a live planner)",
+	"trajctl":       "the off-path GatewayJudgeClient (#2543): an LLM-as-judge W1 progress scorer that POSTs a forced-tool verdict call to fak's own gateway (not a live planner)",
+	"deepseekbench": "the off-path DeepSeek V4 TTFT/TPOT/context-scaling benchmark client (#3014): a streaming latency/throughput measurement against an OpenAI-compatible endpoint (hosted DeepSeek or self-hosted vLLM/SGLang) reporting OBSERVED provider speed (not a live planner)",
 }
 
 // TestSingleOpenAIChatClient pins the T4 fix as an architecture invariant: the
