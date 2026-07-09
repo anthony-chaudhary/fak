@@ -1,0 +1,190 @@
+name: issue-lane-router
+
+# Reconcile every open issue's class:* work-class label (class:dev / class:infra /
+# class:frontdoor) with the dos.toml lane its file-tree routes to — so backlog
+# class-label routing "happens by default" instead of only being TESTED in CI
+# (ci.yml runs issue_lane_router_test.py; nothing RUNS the router). Net-new automation.
+#
+# WHY PYTHON, NOT `fak`: the router (tools/issue_lane_router.py) is pure-stdlib and shells
+# out only to `gh`, `git`, and the separate `dos` CLI — it never builds or invokes cmd/fak.
+# That makes this job freeze-independent: it ships and runs while cmd/fak is frozen/red.
+#
+# HARD REQUIREMENTS baked in below:
+#   1. dos-kernel MUST be pip-installed — lane taxonomy comes SOLELY from
+#      `dos doctor --workspace <root> --json` (there is NO dos.toml fallback in the tool).
+#      If `dos` is absent the write path does NOT fail loudly, it routes every issue to
+#      class:dev and mislabels the whole backlog. The "verify dos lane taxonomy" step
+#      HARD-FAILS before any write when the lane set is empty.
+#   2. The write needs BOTH flags: `--apply-labels --apply-labels-write`.
+#      `--apply-labels-write` ALONE is a silent no-op (the write branch is gated on
+#      `if args.apply_labels:`).
+#   3. permissions issues:write (label create + add/remove) + contents:read (checkout).
+#
+# V1 SCOPE: schedule + manual dispatch only. issues:[opened,reopened] events were
+# considered but deferred — each event currently triggers a FULL backlog reconcile, not a
+# single-issue scope. The 6h cron is the completeness guarantee; near-real-time
+# event-scoped reconciliation is a documented follow-up (feed the triggering issue via the
+# router's `--issues -` path).
+#
+# BLAST-RADIUS GUARD: a max-delta cap fails the run when a single reconcile would rewrite
+# more than $DELTA_CAP labels (e.g. a first bulk backfill or a lane-taxonomy flip), unless
+# it is a manual dispatch with allow_bulk=true. Steady-state cron runs write only the small
+# add/remove delta and pass the cap untouched.
+
+on:
+  schedule:
+    # Every 6h at :17 — deliberately off the top-of-hour stampede GitHub throttles.
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Plan only — render the class:* label delta but do NOT write"
+        type: boolean
+        default: false
+      allow_bulk:
+        description: "Permit a reconcile larger than the delta cap (first backfill / taxonomy shift)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  # Single-flight: a scheduled run and a manual dispatch never write labels at the same
+  # time. cancel-in-progress:false so an in-flight backfill is never truncated mid-write.
+  group: issue-lane-router
+  cancel-in-progress: false
+
+defaults:
+  run:
+    # Run at the checkout root so `dos doctor --workspace .` reads the repo's dos.toml.
+    working-directory: .
+
+jobs:
+  route:
+    name: reconcile class:* labels via issue_lane_router.py
+    # Canonical-repo + trunk guard: never run on a fork (no secrets; must not write to a
+    # fork owner's issues) and only from the default branch.
+    if: ${{ github.repository == 'anthony-chaudhary/fak' && (github.ref_name == 'main' || github.ref_name == 'master') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Cover the FULL open backlog (>1000 today) so the tail is never silently unlabeled.
+      ISSUE_LIMIT: "3000"
+      # Max class:* label writes a single reconcile may apply without allow_bulk.
+      DELTA_CAP: "200"
+      ALLOW_BULK: ${{ github.event.inputs.allow_bulk || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # dos is the SOLE lane-taxonomy source for the router. Same PyPI package + pin-free
+      # invocation ci.yml uses.
+      - name: install dos (lane taxonomy source)
+        run: python -m pip install --quiet --disable-pip-version-check dos-kernel
+
+      # FAIL-CLOSED guard: the router silently mislabels the whole backlog to class:dev if
+      # `dos doctor` yields no lanes (dos has NO fallback and the write path never checks
+      # payload.ok). Prove a non-empty lane taxonomy BEFORE any write. (No `dos --version`
+      # — that flag does not exist in dos-kernel and would abort the step; `dos doctor`
+      # itself fails loudly if dos is missing or broken.)
+      - name: verify dos lane taxonomy (guard against silent mislabel)
+        run: |
+          set -euo pipefail
+          command -v dos
+          dos doctor --workspace "$GITHUB_WORKSPACE" --json > dos-doctor.json
+          lanes=$(jq '(.lanes.concurrent // []) | length' dos-doctor.json)
+          echo "dos lane taxonomy: ${lanes} concurrent lanes"
+          if [ "${lanes:-0}" -eq 0 ]; then
+            echo "::error::dos doctor returned no lanes — refusing to write class:* labels (would mislabel the entire backlog to class:dev). Aborting."
+            exit 1
+          fi
+
+      # Read-only audit: capture routing counts + coverage for the run summary. The plain
+      # --json path exits non-zero on a high-unrouted ACTION verdict (payload.ok=false) — a
+      # REPORT signal, not a write failure, so tolerate it.
+      - name: route backlog + capture counts (read-only)
+        run: |
+          set +e
+          python tools/issue_lane_router.py --json --issue-limit "$ISSUE_LIMIT" > route.json
+          rc=$?
+          set -e
+          test -s route.json || { echo "router produced no JSON"; exit 1; }
+          echo "router audit exit=${rc} (non-zero = high-unrouted ACTION verdict, not a write failure)"
+          complete=$(jq -r '.coverage.complete // "unknown"' route.json)
+          echo "backlog coverage complete: ${complete}"
+          if [ "${complete}" = "false" ]; then
+            echo "::warning::router coverage is INCOMPLETE at --issue-limit ${ISSUE_LIMIT}; the tail of the backlog will not be reconciled this run. Raise ISSUE_LIMIT."
+          fi
+
+      # PRECEDING DRY-RUN: compute the exact class:* add/remove delta the write will apply
+      # (--apply-labels WITHOUT --apply-labels-write = plan only), and ENFORCE the blast-
+      # radius cap before any write happens.
+      - name: plan class:* label backfill + enforce delta cap (dry-run)
+        run: |
+          set -euo pipefail
+          python tools/issue_lane_router.py --apply-labels --json --issue-limit "$ISSUE_LIMIT" > label-plan.json
+          delta=$(jq '(.changes // []) | length' label-plan.json)
+          echo "planned class:* label delta: ${delta} (cap ${DELTA_CAP}, allow_bulk=${ALLOW_BULK})"
+          if [ "${delta}" -gt "${DELTA_CAP}" ] && [ "${ALLOW_BULK}" != "true" ]; then
+            echo "::error::planned delta ${delta} exceeds cap ${DELTA_CAP}. This is a bulk reclassification (first backfill or lane-taxonomy shift). Re-run via workflow_dispatch with allow_bulk=true after eyeballing label-plan.json."
+            exit 1
+          fi
+
+      # THE WRITE. BOTH flags are mandatory: --apply-labels arms the write branch,
+      # --apply-labels-write commits. Re-assert non-empty lanes here (TOCTOU: the router
+      # re-invokes `dos doctor` itself and never re-checks it) so the check and the write
+      # are not separated by other steps. Skipped only on a manual dispatch with
+      # dry_run=true; schedule always reconciles ("by default").
+      - name: apply class:* labels (write)
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        run: |
+          set -euo pipefail
+          dos doctor --workspace "$GITHUB_WORKSPACE" --json \
+            | jq -e '((.lanes.concurrent // []) | length) > 0' >/dev/null \
+            || { echo "::error::dos lane taxonomy emptied between guard and write — aborting."; exit 1; }
+          python tools/issue_lane_router.py --apply-labels --apply-labels-write --json --issue-limit "$ISSUE_LIMIT" > backfill.json
+          cat backfill.json
+
+      # Emit counts + the UNROUTED disposition to the run summary (always — even if a
+      # per-issue gh edit failed and reddened the write step).
+      - name: routing summary
+        if: always()
+        run: |
+          {
+            echo "## issue-lane-router"
+            if [ -f route.json ]; then
+              open=$(jq -r '.counts.open // "?"' route.json)
+              routed=$(jq -r '.counts.routed // "?"' route.json)
+              unrouted=$(jq -r '.counts.unrouted // "?"' route.json)
+              frac=$(jq -r '.counts.unrouted_frac // "?"' route.json)
+              byconf=$(jq -rc '.counts.by_confidence // {}' route.json)
+              echo "- open **${open}**, routed **${routed}**, UNROUTED **${unrouted}** (frac ${frac})"
+              echo "- by confidence: \`${byconf}\`"
+            fi
+            if [ -f backfill.json ]; then
+              planned=$(jq -r '(.changes // []) | length' backfill.json)
+              errs=$(jq -r '(.label_backfill.errors // []) | length' backfill.json)
+              echo "- class:* label writes (delta applied): **${planned}**, errors: **${errs}**"
+            else
+              echo "- write step skipped (manual dry-run)."
+            fi
+            echo "- UNROUTED issues (confidence \`none\`) are dispatchable but carry no lane signal, so the router assigns them the catch-all **class:dev** (its default work-class). They are NOT left unlabeled. Non-dispatchable/human-blocked issues are excluded entirely (they land in \`skipped\`, never routed)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload audit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-lane-router
+          path: |
+            route.json
+            label-plan.json
+            backfill.json
+            dos-doctor.json
+          if-no-files-found: ignore
