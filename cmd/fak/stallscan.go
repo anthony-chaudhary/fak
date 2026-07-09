@@ -104,13 +104,22 @@ func runStallscanWatch(stdout, stderr io.Writer, interval time.Duration, logPath
 	}
 	fmt.Fprintf(stderr, "fak stallscan --watch: interval=%s log=%s (Ctrl-C to stop)\n", interval, logPath)
 
+	// Per-PID first-seen census for the GROWTH (trajectory) axis: a leak is a
+	// slope, not a level, so we compare each sample against the count a process
+	// had when this monitor first observed it. This lets ClassifyWithBaseline warn
+	// on a process that is CLIMBING while still under the absolute leak line —
+	// robust to per-interval noise (the baseline is first-seen, not last-tick).
+	baseHandles := map[int]stallscan.ProcHandles{}
+	baseThreads := map[int]stallscan.ProcThreads{}
+
 	tick := func() int {
 		sample, gerr := gatherStallSample(topN)
 		if gerr != "" {
 			fmt.Fprintf(stderr, "fak stallscan: sample error: %s\n", gerr)
 			return 1
 		}
-		v := stallscan.Classify(sample, stallscan.DefaultThresholds())
+		baseline := updateGrowthBaseline(baseHandles, baseThreads, sample)
+		v := stallscan.ClassifyWithBaseline(baseline, sample, stallscan.DefaultThresholds())
 		appendStallJSONL(logPath, stallFingerprint(sample, v))
 		if v.Level != stallscan.LevelCalm {
 			fmt.Fprintf(stdout, "%s  %-8s %-18s %s\n",
@@ -136,6 +145,48 @@ func runStallscanWatch(stdout, stderr io.Writer, interval time.Duration, logPath
 		}
 	}
 	return 0
+}
+
+// updateGrowthBaseline maintains the per-PID first-seen census across --watch
+// ticks and returns a baseline Sample for stallscan.ClassifyWithBaseline. A PID
+// seen for the first time — or reused by a differently-named process — is
+// recorded at its current count (so its climb is 0 this tick); a PID absent from
+// the current sample is dropped so a later reuse of that number starts fresh. The
+// returned Sample carries, for each process in cur, the count it had when first
+// observed, aligned by PID so the classifier can diff them.
+func updateGrowthBaseline(baseH map[int]stallscan.ProcHandles, baseT map[int]stallscan.ProcThreads, cur stallscan.Sample) stallscan.Sample {
+	curH := make(map[int]bool, len(cur.TopHandles))
+	for _, p := range cur.TopHandles {
+		curH[p.PID] = true
+		if b, ok := baseH[p.PID]; !ok || b.Name != p.Name {
+			baseH[p.PID] = p // first sight (or PID reuse): baseline is now
+		}
+	}
+	for pid := range baseH {
+		if !curH[pid] {
+			delete(baseH, pid)
+		}
+	}
+	curT := make(map[int]bool, len(cur.TopThreads))
+	for _, p := range cur.TopThreads {
+		curT[p.PID] = true
+		if b, ok := baseT[p.PID]; !ok || b.Name != p.Name {
+			baseT[p.PID] = p
+		}
+	}
+	for pid := range baseT {
+		if !curT[pid] {
+			delete(baseT, pid)
+		}
+	}
+	out := stallscan.Sample{}
+	for _, p := range cur.TopHandles {
+		out.TopHandles = append(out.TopHandles, baseH[p.PID])
+	}
+	for _, p := range cur.TopThreads {
+		out.TopThreads = append(out.TopThreads, baseT[p.PID])
+	}
+	return out
 }
 
 func stallJoinReasons(rs []string) string {
@@ -194,6 +245,12 @@ func renderStallFingerprint(w io.Writer, s stallscan.Sample, v stallscan.Verdict
 	}
 	if v.ThreadLeakProcess != "" {
 		fmt.Fprintf(w, "threads     : THREAD-LEAK SUSPECT (terminal lag): %s pid %d holds %d threads\n", v.ThreadLeakProcess, v.ThreadLeakPID, v.ThreadLeakCount)
+	}
+	if v.HandleGrowthProcess != "" {
+		fmt.Fprintf(w, "handle-grow : LEAK TRAJECTORY: %s pid %d climbed +%d to %d handles since first seen\n", v.HandleGrowthProcess, v.HandleGrowthPID, v.HandleGrowthDelta, v.HandleGrowthCount)
+	}
+	if v.ThreadGrowthProcess != "" {
+		fmt.Fprintf(w, "thread-grow : THREAD-LEAK TRAJECTORY: %s pid %d climbed +%d to %d threads since first seen\n", v.ThreadGrowthProcess, v.ThreadGrowthPID, v.ThreadGrowthDelta, v.ThreadGrowthCount)
 	}
 	fmt.Fprintf(w, "not-the-cause: %d MB RAM free, disk queue %.1f\n", s.AvailableMB, s.DiskQueueLen)
 	if len(v.Reasons) > 0 {

@@ -337,3 +337,190 @@ func TestClassify_isPure_noMutation(t *testing.T) {
 		t.Fatalf("Classify mutated caller slice: %+v", in)
 	}
 }
+
+// --- Growth (trajectory) axis: ClassifyWithBaseline ---
+
+func TestClassifyWithBaseline_HandleGrowth_flagsClimbBelowAbsoluteLine(t *testing.T) {
+	// The whole point of the growth axis: a process CLIMBING while still under the
+	// 10k absolute line. WindowsTerminal first seen at 3200 handles, now 5000 —
+	// climbed +1800 (>= 1500 growth, current >= 3000 floor). The absolute axis
+	// (10k) does NOT fire, but growth flags an otherwise-calm box as elevated with
+	// cause handle_leak and names the culprit and its climb.
+	base := Sample{TopHandles: []ProcHandles{{PID: 17836, Name: "WindowsTerminal.exe", Handles: 3200}}}
+	cur := Sample{
+		TotalFaultsPerSec: 22000,
+		HardFaultsPerSec:  10,
+		AvailableMB:       135000,
+		TopHandles:        []ProcHandles{{PID: 17836, Name: "WindowsTerminal.exe", Handles: 5000}},
+	}
+	v := ClassifyWithBaseline(base, cur, DefaultThresholds())
+	if v.Level != LevelElevated {
+		t.Fatalf("level = %q, want elevated (reasons: %v)", v.Level, v.Reasons)
+	}
+	if v.Cause != CauseHandleLeak {
+		t.Fatalf("cause = %q, want %q", v.Cause, CauseHandleLeak)
+	}
+	if v.HandleLeakProcess != "" {
+		t.Fatalf("absolute leak axis must NOT fire at 5000 handles, got %q", v.HandleLeakProcess)
+	}
+	if v.HandleGrowthProcess != "WindowsTerminal.exe" || v.HandleGrowthPID != 17836 ||
+		v.HandleGrowthCount != 5000 || v.HandleGrowthDelta != 1800 {
+		t.Fatalf("growth attribution = %q/%d/%d/+%d, want WindowsTerminal.exe/17836/5000/+1800",
+			v.HandleGrowthProcess, v.HandleGrowthPID, v.HandleGrowthCount, v.HandleGrowthDelta)
+	}
+}
+
+func TestClassifyWithBaseline_HighButStable_noGrowthFlag(t *testing.T) {
+	// A process high AND flat (17000 both samples): the absolute axis fires (>10k),
+	// but the growth axis must stay silent — "high" and "climbing" are distinct,
+	// and a stable-high process is not on a leak trajectory.
+	proc := []ProcHandles{{PID: 17836, Name: "WindowsTerminal.exe", Handles: 17000}}
+	base := Sample{TopHandles: proc}
+	cur := Sample{TotalFaultsPerSec: 22000, AvailableMB: 135000, TopHandles: proc}
+	v := ClassifyWithBaseline(base, cur, DefaultThresholds())
+	if v.HandleLeakProcess != "WindowsTerminal.exe" {
+		t.Fatalf("absolute axis should fire at 17000 handles, got %q", v.HandleLeakProcess)
+	}
+	if v.HandleGrowthProcess != "" {
+		t.Fatalf("stable-high process must not be a growth suspect, got %q (+%d)", v.HandleGrowthProcess, v.HandleGrowthDelta)
+	}
+}
+
+func TestClassifyWithBaseline_ThreadGrowth_flagsClimb(t *testing.T) {
+	// A terminal accreting threads: 210 -> 400 (+190 >= 100 growth, current >= 200
+	// floor), still under the 500 absolute line. Growth raises calm to elevated
+	// with cause thread_leak.
+	base := Sample{TopThreads: []ProcThreads{{PID: 17836, Name: "WindowsTerminal.exe", Threads: 210}}}
+	cur := Sample{
+		TotalFaultsPerSec: 22000,
+		AvailableMB:       126000,
+		TopThreads:        []ProcThreads{{PID: 17836, Name: "WindowsTerminal.exe", Threads: 400}},
+	}
+	v := ClassifyWithBaseline(base, cur, DefaultThresholds())
+	if v.Level != LevelElevated || v.Cause != CauseThreadLeak {
+		t.Fatalf("got level=%q cause=%q, want elevated/thread_leak (reasons: %v)", v.Level, v.Cause, v.Reasons)
+	}
+	if v.ThreadLeakProcess != "" {
+		t.Fatalf("absolute thread axis must NOT fire at 400 threads, got %q", v.ThreadLeakProcess)
+	}
+	if v.ThreadGrowthProcess != "WindowsTerminal.exe" || v.ThreadGrowthCount != 400 || v.ThreadGrowthDelta != 190 {
+		t.Fatalf("thread-growth attribution = %q/%d/+%d, want WindowsTerminal.exe/400/+190",
+			v.ThreadGrowthProcess, v.ThreadGrowthCount, v.ThreadGrowthDelta)
+	}
+}
+
+func TestClassifyWithBaseline_belowFloorOrDelta_noFlag(t *testing.T) {
+	// Below floor: a small process climbing hard (100 -> 900, +800) but current 900
+	// is under the 3000 floor -> not a leak, just normal churn. Below delta: a big
+	// process barely moving (5000 -> 5100, +100 < 1500) -> stable, not a trajectory.
+	base := Sample{TopHandles: []ProcHandles{
+		{PID: 1, Name: "small.exe", Handles: 100},
+		{PID: 2, Name: "big.exe", Handles: 5000},
+	}}
+	cur := Sample{TotalFaultsPerSec: 22000, AvailableMB: 135000, TopHandles: []ProcHandles{
+		{PID: 1, Name: "small.exe", Handles: 900},
+		{PID: 2, Name: "big.exe", Handles: 5100},
+	}}
+	v := ClassifyWithBaseline(base, cur, DefaultThresholds())
+	if v.Level != LevelCalm {
+		t.Fatalf("level = %q, want calm (reasons: %v)", v.Level, v.Reasons)
+	}
+	if v.HandleGrowthProcess != "" {
+		t.Fatalf("no growth suspect expected, got %q (+%d)", v.HandleGrowthProcess, v.HandleGrowthDelta)
+	}
+}
+
+func TestClassifyWithBaseline_firstSightAndPIDReuse_noFlag(t *testing.T) {
+	// A PID absent from the baseline (first sight this session) has no trajectory to
+	// measure. A reused PID whose NAME changed is a different process — its climb is
+	// meaningless. Neither may be flagged.
+	base := Sample{TopHandles: []ProcHandles{{PID: 100, Name: "old.exe", Handles: 3200}}}
+	cur := Sample{
+		TotalFaultsPerSec: 22000,
+		AvailableMB:       135000,
+		TopHandles: []ProcHandles{
+			{PID: 100, Name: "new.exe", Handles: 9000},   // PID reused by a different process
+			{PID: 200, Name: "fresh.exe", Handles: 8000}, // never seen before
+		},
+	}
+	v := ClassifyWithBaseline(base, cur, DefaultThresholds())
+	if v.HandleGrowthProcess != "" {
+		t.Fatalf("first-sight/PID-reuse must not flag growth, got %q (+%d)", v.HandleGrowthProcess, v.HandleGrowthDelta)
+	}
+	if v.Level != LevelCalm {
+		t.Fatalf("level = %q, want calm", v.Level)
+	}
+}
+
+func TestClassifyWithBaseline_growthNeverFabricatesOrDowngradesStall(t *testing.T) {
+	// A genuine soft-fault churn STALL that also has a climbing handle count. Growth
+	// is a WARNING: the freeze must still win Level/Cause, but the growth trajectory
+	// must be attributed alongside it (so the operator sees both).
+	base := Sample{TopHandles: []ProcHandles{{PID: 17836, Name: "WindowsTerminal.exe", Handles: 3200}}}
+	cur := Sample{
+		TotalFaultsPerSec:      1241214,
+		HardFaultsPerSec:       39,
+		DemandZeroFaultsPerSec: 554729,
+		AvailableMB:            135000,
+		DiskQueueLen:           0,
+		TopHandles:             []ProcHandles{{PID: 17836, Name: "WindowsTerminal.exe", Handles: 5000}},
+	}
+	v := ClassifyWithBaseline(base, cur, DefaultThresholds())
+	if v.Level != LevelStall || v.Cause != CauseSoftFault {
+		t.Fatalf("got level=%q cause=%q, want stall/soft_fault_churn (freeze wins)", v.Level, v.Cause)
+	}
+	if v.HandleGrowthProcess != "WindowsTerminal.exe" || v.HandleGrowthDelta != 1800 {
+		t.Fatalf("growth not attributed under stall: %q/+%d", v.HandleGrowthProcess, v.HandleGrowthDelta)
+	}
+}
+
+func TestClassifyWithBaseline_emptyBaseline_matchesClassify(t *testing.T) {
+	// With no baseline (empty), ClassifyWithBaseline must reduce to Classify: no
+	// growth attribution, identical level/cause. Guards backward-compatibility.
+	cur := Sample{
+		TotalFaultsPerSec: 22000,
+		AvailableMB:       135000,
+		TopHandles:        []ProcHandles{{PID: 17836, Name: "WindowsTerminal.exe", Handles: 33418}},
+	}
+	base := ClassifyWithBaseline(Sample{}, cur, DefaultThresholds())
+	plain := Classify(cur, DefaultThresholds())
+	if base.Level != plain.Level || base.Cause != plain.Cause {
+		t.Fatalf("with empty baseline: got %q/%q, want %q/%q", base.Level, base.Cause, plain.Level, plain.Cause)
+	}
+	if base.HandleGrowthProcess != "" {
+		t.Fatalf("empty baseline must yield no growth attribution, got %q", base.HandleGrowthProcess)
+	}
+}
+
+func TestClassifyWithBaseline_isPure_noMutation(t *testing.T) {
+	baseH := []ProcHandles{{PID: 1, Name: "a", Handles: 3000}, {PID: 2, Name: "b", Handles: 4000}}
+	curH := []ProcHandles{{PID: 1, Name: "a", Handles: 3100}, {PID: 2, Name: "b", Handles: 9000}}
+	_ = ClassifyWithBaseline(Sample{TopHandles: baseH}, Sample{TopHandles: curH, AvailableMB: 229000}, DefaultThresholds())
+	if baseH[0].PID != 1 || baseH[1].PID != 2 || curH[0].PID != 1 || curH[1].PID != 2 {
+		t.Fatalf("ClassifyWithBaseline mutated caller slices: base=%+v cur=%+v", baseH, curH)
+	}
+}
+
+func TestWorstHandleGrowth_picksMaxClimbAboveDeltaAndFloor(t *testing.T) {
+	base := []ProcHandles{
+		{PID: 1, Name: "a", Handles: 3000},
+		{PID: 2, Name: "b", Handles: 3200}, // climbs +1800 -> qualifies
+		{PID: 3, Name: "c", Handles: 3000}, // climbs +5000 -> biggest climb
+	}
+	cur := []ProcHandles{
+		{PID: 1, Name: "a", Handles: 3100}, // +100 < 1500 delta
+		{PID: 2, Name: "b", Handles: 5000}, // +1800
+		{PID: 3, Name: "c", Handles: 8000}, // +5000 (worst)
+	}
+	got, climb, ok := worstHandleGrowth(base, cur, 1500, 3000)
+	if !ok || got.PID != 3 || climb != 5000 {
+		t.Fatalf("got %+v climb=%d ok=%v, want c/+5000", got, climb, ok)
+	}
+	if _, _, ok := worstHandleGrowth(base, cur, 0, 3000); ok {
+		t.Fatalf("delta 0 must disable the growth rule")
+	}
+	// Raise the floor above every current count -> nothing qualifies.
+	if _, _, ok := worstHandleGrowth(base, cur, 1500, 100000); ok {
+		t.Fatalf("floor above all current counts must return ok=false")
+	}
+}

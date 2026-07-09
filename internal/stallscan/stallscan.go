@@ -151,6 +151,23 @@ type Thresholds struct {
 	// handle axis: raises a calm box to elevated and names the culprit, but never
 	// fabricates a stall. Zero disables it.
 	ThreadLeakProc int // per-process thread count that flags a thread-leak suspect (default 500)
+
+	// Growth (trajectory) detection — the axis the absolute HandleLeakProc/
+	// ThreadLeakProc lines miss. Absolute thresholds fire only once a process is
+	// already huge (>=10k handles / >=500 threads) and cannot tell a process that
+	// is high-and-STABLE from one that is CLIMBING. A leak is fundamentally a
+	// trajectory: the signal worth alerting on is a process whose count is rising
+	// sample-over-sample, even while still under the absolute line. ClassifyWithBaseline
+	// compares a baseline sample against the current one and flags a process (matched
+	// by PID+name) whose count climbed by at/above *GrowthDelta while its current
+	// count is at/above *GrowthFloor. The floor keeps normal small-process churn
+	// out; it sits below the absolute line so growth is an EARLIER warning. Same
+	// WARNING semantics as the absolute axes: raises calm -> elevated, never a stall.
+	// Zero for a Delta disables that growth axis.
+	HandleGrowthDelta int // per-process handle CLIMB (cur-baseline) that flags a growth suspect (default 1500)
+	HandleGrowthFloor int // only consider processes whose current handle count is at/above this (default 3000)
+	ThreadGrowthDelta int // per-process thread CLIMB that flags a growth suspect (default 100)
+	ThreadGrowthFloor int // only consider processes whose current thread count is at/above this (default 200)
 }
 
 // DefaultThresholds returns the calibrated defaults.
@@ -167,6 +184,10 @@ func DefaultThresholds() Thresholds {
 		HandleLeakProc:     10000,
 		SystemHandleHigh:   1000000,
 		ThreadLeakProc:     500,
+		HandleGrowthDelta:  1500,
+		HandleGrowthFloor:  3000,
+		ThreadGrowthDelta:  100,
+		ThreadGrowthFloor:  200,
 	}
 }
 
@@ -192,6 +213,19 @@ type Verdict struct {
 	ThreadLeakProcess string `json:"thread_leak_process,omitempty"`
 	ThreadLeakPID     int    `json:"thread_leak_pid,omitempty"`
 	ThreadLeakCount   int    `json:"thread_leak_count,omitempty"`
+
+	// Growth (trajectory) attribution — populated only by ClassifyWithBaseline,
+	// which has a baseline to diff against. The process whose handle/thread count
+	// CLIMBED the most since the baseline (and crossed the growth delta+floor).
+	// Count is the current value; Delta is the climb. Populated regardless of Level.
+	HandleGrowthProcess string `json:"handle_growth_process,omitempty"`
+	HandleGrowthPID     int    `json:"handle_growth_pid,omitempty"`
+	HandleGrowthCount   int    `json:"handle_growth_count,omitempty"` // current handle count
+	HandleGrowthDelta   int    `json:"handle_growth_delta,omitempty"` // climb since baseline
+	ThreadGrowthProcess string `json:"thread_growth_process,omitempty"`
+	ThreadGrowthPID     int    `json:"thread_growth_pid,omitempty"`
+	ThreadGrowthCount   int    `json:"thread_growth_count,omitempty"` // current thread count
+	ThreadGrowthDelta   int    `json:"thread_growth_delta,omitempty"` // climb since baseline
 }
 
 // hardFraction is the share of total faults that actually hit disk. A tiny
