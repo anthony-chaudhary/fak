@@ -317,11 +317,22 @@ def claude_guard_context_budget_tokens() -> int:
 
 
 CLAUDE_GUARD_CONTEXT_BUDGET_TOKENS = str(claude_guard_context_budget_tokens())
-CLAUDE_GUARD_RESTART_LIMIT = "2"
+# The budget drains in ~2 turns per epoch, so a relaunch happens every ~2 min. The old
+# "2" killed a healthy worker after ~4-5 min (reset_limit limit=2 -> 409 -> CHILD_CRASH)
+# at ~15% of its runway. 16 lets a healthy-but-slow worker reach its 30-min wall-clock
+# backstop (DEFAULT_TIMEOUT_S hard-kill + dispatcher reap) while a degenerate sub-2-min
+# reset storm still trips here. Mirrors cmd/dispatchworker/guard.go:claudeGuardRestartLimit.
+CLAUDE_GUARD_RESTART_LIMIT = "16"
+# In-guard wall-clock budget, backed off DEFAULT_TIMEOUT_S so the guard drains GRACEFULLY
+# (TIME_BUDGET_EXHAUSTED + audit flush) a minute before launch()'s hard-kill at exit 124.
+# --max-duration is CUMULATIVE across --restart-on-budget relaunches, so it bounds TOTAL
+# lifespan regardless of restart count. Mirrors cmd/dispatchworker/guard.go:claudeGuardMaxDuration.
+CLAUDE_GUARD_MAX_DURATION = f"{DEFAULT_TIMEOUT_S - 60}s"
 CLAUDE_GUARD_BUDGET_ARGS = [
     "--context-budget-tokens", CLAUDE_GUARD_CONTEXT_BUDGET_TOKENS,
     "--restart-on-budget",
     "--restart-limit", CLAUDE_GUARD_RESTART_LIMIT,
+    "--max-duration", CLAUDE_GUARD_MAX_DURATION,
 ]
 
 

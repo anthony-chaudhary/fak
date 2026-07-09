@@ -89,8 +89,32 @@ const (
 	// 62000 baseline / 200000-32000 window this yields 124000 — comfortably above
 	// baseline, comfortably under the 168000 effective ceiling.
 	claudeGuardBirthHeadroomFactor = 2
-	claudeGuardRestartLimit        = "2"
+	// claudeGuardRestartLimit caps --restart-on-budget relaunches. The budget above
+	// drains in ~2 turns per epoch (each turn debits its FULL ~62K+ resident window),
+	// so a relaunch happens every ~2 min. The old "2" killed a healthy worker after
+	// ~4-5 min / ~2 epochs (reset_limit limit=2 → 409 → CHILD_CRASH → CLAIM_NO_COMMIT)
+	// at ~15% of its runway — the dominant fleet crash. This is NOT the runaway
+	// backstop (that is the wall-clock defaultTimeoutS hard-kill + dispatcher reap, and
+	// claudeGuardMaxDuration below); it only trips a degenerate sub-2-min reset storm.
+	// 16 × ~2 min > the 30-min wall-clock, so wall-clock is the real bound for a
+	// healthy-but-slow worker while a storm still trips here.
+	claudeGuardRestartLimit = "16"
+	// claudeGuardMaxDurationMarginS backs the in-guard wall-clock budget off the
+	// worker's own defaultTimeoutS hard-kill (worker.go) so the guard drains GRACEFULLY
+	// (TIME_BUDGET_EXHAUSTED, final summary + audit flush) a minute before launch()'s
+	// context cancel would SIGKILL the tree at exit 124. --max-duration is CUMULATIVE
+	// across --restart-on-budget relaunches (see `fak guard` help), so it bounds TOTAL
+	// worker lifespan regardless of how many restarts the raised limit above permits.
+	claudeGuardMaxDurationMarginS = 60
 )
+
+// claudeGuardMaxDuration is the guard's in-process wall-clock budget as the
+// `--max-duration` argv string: defaultTimeoutS minus a drain margin, so a stuck
+// worker stops itself gracefully just before the worker's hard-kill. Mirrors
+// tools/dispatch_worker.py:CLAUDE_GUARD_MAX_DURATION.
+func claudeGuardMaxDuration() string {
+	return strconv.Itoa(defaultTimeoutS-claudeGuardMaxDurationMarginS) + "s"
+}
 
 // deriveClaudeGuardContextBudget is the pure arithmetic: baseline × headroom,
 // clamped to the effective window ceiling (hardCap − outputReserve). Monotone in
@@ -123,6 +147,7 @@ func claudeGuardArgs() []string {
 		"--context-budget-tokens", claudeGuardContextBudgetTokens(),
 		"--restart-on-budget",
 		"--restart-limit", claudeGuardRestartLimit,
+		"--max-duration", claudeGuardMaxDuration(),
 	}
 }
 

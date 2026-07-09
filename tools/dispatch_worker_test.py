@@ -223,7 +223,13 @@ class DispatchWorkerTest(unittest.TestCase):
             f"context budget {budget} < baseline floor {WORKER_BASELINE_FLOOR_TOKENS}: "
             "workers would be born over-budget on turn 1 (see #2972)")
         self.assertIn("--restart-on-budget", wrapped)
-        self.assertEqual(wrapped[wrapped.index("--restart-limit") + 1], "2")
+        # 16 (not 2): the old finite-but-tiny limit killed healthy workers after ~2
+        # compaction epochs (~4-5 min), far short of their 30-min wall-clock backstop.
+        self.assertEqual(wrapped[wrapped.index("--restart-limit") + 1], "16")
+        # Graceful in-guard wall-clock backstop fronting the raised restart limit:
+        # drains at DEFAULT_TIMEOUT_S - 60 before launch()'s hard-kill at 1800s.
+        self.assertIn("--max-duration", wrapped)
+        self.assertEqual(wrapped[wrapped.index("--max-duration") + 1], "1740s")
         self.assertIn("--audit", wrapped)
         audit = Path(wrapped[wrapped.index("--audit") + 1])
         self.assertEqual(wrapped[wrapped.index("--session-id") + 1], audit.stem)

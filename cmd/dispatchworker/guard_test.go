@@ -130,7 +130,8 @@ func TestClaudeGuardContextBudgetDerivation(t *testing.T) {
 		"--precompact-hook", "enforce",
 		"--context-budget-tokens", strconv.Itoa(got),
 		"--restart-on-budget",
-		"--restart-limit", "2",
+		"--restart-limit", "16",
+		"--max-duration", "1740s",
 	}
 	if !slices.Equal(claudeGuardArgs(), want) {
 		t.Errorf("claudeGuardArgs() = %v, want %v", claudeGuardArgs(), want)
@@ -169,8 +170,17 @@ func TestGuardWrapClaudeFrontsWithFakGuardAnthropic(t *testing.T) {
 	if !contains(wrapped, "--restart-on-budget") {
 		t.Error("claude guard must restart on budget exhaustion")
 	}
-	if wrapped[indexOf(wrapped, "--restart-limit")+1] != "2" {
-		t.Error("claude guard restart limit must be finite")
+	if wrapped[indexOf(wrapped, "--restart-limit")+1] != "16" {
+		t.Error("claude guard restart limit must let a healthy worker reach its wall-clock backstop (16), not die at 2 epochs")
+	}
+	// A graceful in-guard wall-clock backstop must front the raised restart limit so a
+	// stuck worker drains cleanly (TIME_BUDGET_EXHAUSTED) before the 1800s hard-kill —
+	// the belt to the raised-restart-limit suspenders (see claudeGuardMaxDuration).
+	if !contains(wrapped, "--max-duration") {
+		t.Error("claude guard must bound total wall-clock with --max-duration")
+	}
+	if md := wrapped[indexOf(wrapped, "--max-duration")+1]; md != "1740s" {
+		t.Errorf("claude guard --max-duration = %q, want 1740s (defaultTimeoutS %d - %ds drain margin)", md, defaultTimeoutS, claudeGuardMaxDurationMarginS)
 	}
 	if !contains(wrapped, "--audit") {
 		t.Error("must pass --audit")
