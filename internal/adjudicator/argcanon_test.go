@@ -132,7 +132,7 @@ func TestCanonicalArgQuotedFirstTokenCommandNotMalformed(t *testing.T) {
 	// the exact shape the old classifier failed closed on. None names a blocked
 	// construct, so each must be ADMITTED, never MALFORMED.
 	benign := []string{
-		`"$HOME/go/bin/fak" build ./... 2>&1 | tee log`, // quoted program path + redirect + pipe
+		`"$HOME/go/bin/fak" build ./... 2>&1 | tee log`,    // quoted program path + redirect + pipe
 		`'/usr/local/bin/go' test ./internal/... -count=1`, // single-quoted first token, compound go
 		`"$HOME/bin/tool" --flag && git status`,            // quoted token + compound git
 		`'my program' run`,                                 // quoted token with a space inside
