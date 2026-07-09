@@ -146,8 +146,15 @@ func printFrontiersweRunSummary(w io.Writer, r frontierswe.RunResult, outDir str
 		fmt.Fprintf(w, "  (%s)", r.Gate.Reason)
 	}
 	fmt.Fprintln(w)
-	if !r.Gate.Runnable {
-		fmt.Fprintf(w, "\nGATED: the real C7 environment can't be stood up here; run it live with:\n  %s\n", r.Gate.RemoteCommand)
+	if r.Gate.RemoteCommand != "" {
+		if r.Gate.Runnable {
+			// Docker is present, but this run is still a deterministic mock — the live
+			// driver is the C7-gated path. Keep the live command visible so a capable
+			// host is not left to infer from `mocked: true` alone that no win was measured.
+			fmt.Fprintf(w, "\nNOTE: this run is a deterministic MOCK — no live win was measured. This host looks capable; run it live with:\n  %s\n", r.Gate.RemoteCommand)
+		} else {
+			fmt.Fprintf(w, "\nGATED: the real C7 environment can't be stood up here; run it live with:\n  %s\n", r.Gate.RemoteCommand)
+		}
 	}
 	fmt.Fprintf(w, "\noutputs written: %s\n", outDir)
 	fmt.Fprintf(w, "  meta.json       — the fak.frontierswe.run.v1 meta\n")

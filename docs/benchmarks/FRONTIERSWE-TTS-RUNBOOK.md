@@ -39,12 +39,12 @@ The offline spine (discover, score, TTS-model) is landed and green. The live wir
 | Witness reuse | Fold `fak serve` `/metrics` scrapes into the per-turn reused-prefill-token series | RUNNABLE NOW (offline fold of captured bodies) | `fak frontierswe cache-witness` (C8, [#1714](https://github.com/anthony-chaudhary/fak/issues/1714)) |
 | Route | `harbor_ext`-compatible shim routing the harness's model traffic through `fak serve` | pending | C6 ([#1712](https://github.com/anthony-chaudhary/fak/issues/1712)) |
 | Environment | Build/run a task's Docker/Modal image with `fak serve` co-resident | pending | C7 ([#1713](https://github.com/anthony-chaudhary/fak/issues/1713)) |
-| Run one task | Drive one task end-to-end, capturing the submission and the per-turn TTS trace | pending | `fak frontierswe run` (C9, [#1715](https://github.com/anthony-chaudhary/fak/issues/1715)) |
-| Grade | Official FrontierSWE verifier/grader (needs Docker/Modal) | pending | `fak frontierswe eval` (C13, [#1719](https://github.com/anthony-chaudhary/fak/issues/1719)) |
-| Compare | Raw-vs-fak TTS and score table in FrontierSWE's own vocabulary | pending | `fak frontierswe compare` (C12, [#1718](https://github.com/anthony-chaudhary/fak/issues/1718)) |
-| TTS metric | Wall-clock-to-`correctness`-1.0 and turn-count-to-first-correct, per trial | pending | C14 ([#1720](https://github.com/anthony-chaudhary/fak/issues/1720)) |
+| Run one task | Drive one task end-to-end, capturing the submission and the per-turn TTS trace | RUNNABLE NOW (deterministic mock; the live run is C7-gated) | `fak frontierswe run` (C9, [#1715](https://github.com/anthony-chaudhary/fak/issues/1715)) |
+| Grade | Official FrontierSWE verifier/grader (needs Docker/Modal) | RUNNABLE NOW (offline score of a handed-in `reward.json`; producing one live is C7-gated) | `fak frontierswe eval` (C13, [#1719](https://github.com/anthony-chaudhary/fak/issues/1719)) |
+| Compare | Raw-vs-fak TTS and score table in FrontierSWE's own vocabulary | RUNNABLE NOW (offline over committed arm fixtures; a measured compare needs the live legs) | `fak frontierswe compare` (C12, [#1718](https://github.com/anthony-chaudhary/fak/issues/1718)) |
+| TTS metric | Wall-clock-to-`correctness`-1.0 and turn-count-to-first-correct, per trial | RUNNABLE NOW (per-trial reduction; projected on a mocked run, measured only under a live run) | C14 ([#1720](https://github.com/anthony-chaudhary/fak/issues/1720)) |
 
-The `fak frontierswe` binary today exposes exactly two subcommands, `describe` and `cache-witness`. The `run` / `compare` / `eval` steps are named above as the gated pipeline they will become. They are not invocable yet.
+The `fak frontierswe` binary today exposes seven subcommands — `describe`, `cache-witness`, `run`, `eval`, `compare`, `env-adapter`, and `smoke-contract` — all invocable now. `run`, `eval`, and `compare` run in their offline/mocked forms (a deterministic mock run, an offline score of a handed-in `reward.json`, a compare over committed arm fixtures). What stays gated is the *live* pipeline — the C6 route through a running gateway (row "Route") and the C7 Docker/Modal grader (rows "Environment"/"Grade") — which is what turns a projected floor into a measured win. Until then, every wall-clock number these verbs emit is a labelled projection, never a measurement.
 
 ## 2. Discover the tasks (offline, no assets)
 
