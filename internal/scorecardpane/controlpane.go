@@ -104,6 +104,7 @@ var Cards = []Card{
 	{Key: "heaviness", Debt: "heaviness_debt", Cmd: "go run ./cmd/fak operator heaviness --json", Label: "operator-heaviness"},
 	{Key: "propagation", Debt: "propagation_debt", Cmd: "go run ./cmd/fak propagation-scorecard --json", Label: "propagation"},
 	{Key: "antipattern", Debt: "antipattern_debt", Cmd: "go run ./cmd/fak antipattern-scorecard --json", Label: "antipattern"},
+	{Key: "negframe", Debt: "negframe_debt", Cmd: "go run ./cmd/fak score negframe --json", Label: "negframe"},
 	{Key: "claim_repro", Debt: "claim_repro_debt", Script: "claim_repro_scorecard.py", Label: "claim-repro"},
 	{Key: "release", Debt: "release_debt", Script: "release_readiness_scorecard.py", Label: "release-readiness"},
 	{Key: "sota_coverage", Debt: "sota_debt", Cmd: "go run ./cmd/fak sota-coverage-scorecard --json", Label: "sota-coverage"},
