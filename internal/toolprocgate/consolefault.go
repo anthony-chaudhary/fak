@@ -53,6 +53,21 @@ const (
 	// ConsoleHandleLost: the console handle itself became invalid (the
 	// classic Windows lost-console error on a detached/killed conhost).
 	ConsoleHandleLost ConsoleFaultClass = "CONSOLE_HANDLE_LOST"
+	// ConsoleInputLost: the child's console INPUT surface vanished under an
+	// interactive console host — it tried to read a key from a console that
+	// was detached or whose stdin was redirected. Witnessed on this host as a
+	// recurring class (same pwsh.exe v7.6.3.500 / .NET 10 faulting module
+	// Microsoft.PowerShell.ConsoleHost.dll): the full managed stack was
+	// captured 2026-06-29 (.NET Event 1026) and the same crash recurred through
+	// 2026-07-08 (WER Event 1000). PSReadLine's key-reader thread
+	// (ReadKeyThreadProc -> Console.ReadKey) throws System.InvalidOperationException
+	// "Cannot read keys when either application does not have a console or when
+	// console input has been redirected." — the console *input*-path sibling of
+	// the #2170 ConsoleHostFailFast (which crashes on the *output* buffer via
+	// GetConsoleScreenBufferInfo). Distinct remediation: never drive an
+	// interactive REPL with a redirected/absent stdin (-NonInteractive) or
+	// sever the console (see RESEARCH-windows-handles-terminal-limits note).
+	ConsoleInputLost ConsoleFaultClass = "CONSOLE_INPUT_LOST"
 	// ConsolePTYEOF: the PTY/pipe drain hit EOF while the call was still
 	// live — the surface vanished without a terminal exit observation.
 	ConsolePTYEOF ConsoleFaultClass = "CONSOLE_PTY_EOF"
@@ -77,7 +92,7 @@ const (
 // validConsoleFaultClass is the closed-set membership check.
 func validConsoleFaultClass(c ConsoleFaultClass) bool {
 	switch c {
-	case ConsoleHostFailFast, ConsolePipeLost, ConsoleHandleLost, ConsolePTYEOF, ConsoleRendererExit:
+	case ConsoleHostFailFast, ConsolePipeLost, ConsoleHandleLost, ConsoleInputLost, ConsolePTYEOF, ConsoleRendererExit:
 		return true
 	}
 	return false
@@ -85,10 +100,24 @@ func validConsoleFaultClass(c ConsoleFaultClass) bool {
 
 // consoleHostSignatures identify a managed console-host crash. Checked FIRST:
 // a FailFast banner usually also carries the pipe message that CAUSED it, and
-// the crash (not the cause) is the class an operator searches for.
+// the crash (not the cause) is the class an operator searches for. The console
+// OUTPUT-buffer mechanism tokens (GetConsoleScreenBufferInfo / get_CursorPosition,
+// the #2170 output path) live here too — ahead of the pipe signatures — so the
+// flagship output FailFast is not mis-routed to CONSOLE_PIPE_LOST by the "No
+// process is on the other end of the pipe" message it carries when its detail
+// is scraped without the HostException type token.
+//
+// Deliberately NOT included: the generic "0xc0000409" (__fastfail /
+// STATUS_STACK_BUFFER_OVERRUN), "environment.failfast", and "unknown hard error"
+// tokens. They are real for #2170 but NOT console-specific — any non-console
+// __fastfail carries them, so a bare substring here would over-match a plain
+// tool crash. They need co-occurrence context this single-substring classifier
+// cannot express; leave them to a future WER ingester with structured fields.
 var consoleHostSignatures = []string{
 	"system.management.automation.host.hostexception",
 	"microsoft.powershell.consolehost",
+	"getconsolescreenbufferinfo", // #2170 output-buffer API: GetConsoleScreenBufferInfo -> 0xE9 -> HostException -> FailFast
+	"get_cursorposition",         // ConsoleHostRawUserInterface.get_CursorPosition — the caller that triggers the 0xE9 read
 }
 
 // consolePipeSignatures identify the lost-stdio-pipe family.
@@ -104,10 +133,33 @@ var consoleHandleSignatures = []string{
 	"the handle is invalid", // Win32 6 / ERROR_INVALID_HANDLE on a dead conhost
 }
 
-// ClassifyConsoleFault maps observed child-failure text (a drain error, a
-// stderr tail, an Event-Viewer style banner) onto the closed class. ok=false
-// means "not a console fault" — a plain tool error stays a plain tool error;
-// the classifier never guesses.
+// consoleInputSignatures identify the lost console-INPUT crash: an interactive
+// host's key reader tried to read from a console that is gone or whose stdin is
+// redirected. Two rungs, by design: the message string is the precise .NET
+// ConsolePal text but is ENGLISH-LOCALE-dependent (a localized runtime
+// translates it); the non-localized, durable rung is the crashing-THREAD token
+// "readkeythreadproc". That thread token is deliberately narrower than the bare
+// module name "psconsolereadline" — PSReadLine frames appear on the stack of
+// nearly every interactive pwsh crash (including the #2170 *output*-buffer
+// FailFast), so a bare module token, checked ahead of the pipe/handle causes,
+// would swallow a pipe/handle crash that merely has a PSReadLine frame. Like the
+// host FailFast, this IS the crash (not its cause), so it is checked ahead of
+// the pipe/handle *cause* signatures.
+var consoleInputSignatures = []string{
+	"cannot read keys when either application does not have a console", // .NET InvalidOperationException message (English-locale-dependent rung)
+	"readkeythreadproc", // Microsoft.PowerShell.PSConsoleReadLine.ReadKeyThreadProc — the crashing reader thread (durable, non-localized rung)
+}
+
+// ClassifyConsoleFault maps observed child-failure text onto the closed class.
+// Feed it the child's DRAINED STDERR or .NET-runtime unhandled-exception text
+// (the managed stack) — NOT a Windows WER "Event 1000 / Faulting module name:"
+// banner: that banner names Microsoft.PowerShell.ConsoleHost.dll as the module
+// even for an INPUT crash, so the bare host token would then mis-route it to
+// CONSOLE_HOST_FAILFAST. (The stderr / .NET-runtime form of the input crash
+// traverses PSReadLine's ReadKeyThreadProc, which does not carry the ConsoleHost
+// namespace token, so it classifies correctly.) ok=false means "not a console
+// fault" — a plain tool error stays a plain tool error; the classifier never
+// guesses.
 func ClassifyConsoleFault(detail string) (ConsoleFaultClass, bool) {
 	d := strings.ToLower(detail)
 	if d == "" {
@@ -116,6 +168,11 @@ func ClassifyConsoleFault(detail string) (ConsoleFaultClass, bool) {
 	for _, sig := range consoleHostSignatures {
 		if strings.Contains(d, sig) {
 			return ConsoleHostFailFast, true
+		}
+	}
+	for _, sig := range consoleInputSignatures {
+		if strings.Contains(d, sig) {
+			return ConsoleInputLost, true
 		}
 	}
 	for _, sig := range consolePipeSignatures {

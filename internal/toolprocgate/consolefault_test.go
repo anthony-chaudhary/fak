@@ -156,8 +156,9 @@ func TestConsolePipeFailureParentSurvivesAndRecordsChildFailure(t *testing.T) {
 
 // TestClassifyConsoleFault pins the closed signature vocabulary to the crash
 // classes #2170 names: the pwsh HostException FailFast, the 0xE9 / broken /
-// closing pipe family, and the lost console handle. A plain tool error must
-// NOT classify — fail-closed, no guessing.
+// closing pipe family, the lost console handle, and the 2026-07-08 PSReadLine
+// lost-input (ReadKey on a redirected/absent console) sibling. A plain tool
+// error must NOT classify — fail-closed, no guessing.
 func TestClassifyConsoleFault(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -173,6 +174,19 @@ func TestClassifyConsoleFault(t *testing.T) {
 		{"posix EPIPE", "write |1: broken pipe", ConsolePipeLost, true},
 		{"lost console handle", "read console: The handle is invalid.", ConsoleHandleLost, true},
 		{"failfast+pipe classifies as host crash", "Process terminated. System.Management.Automation.Host.HostException: No process is on the other end of the pipe.", ConsoleHostFailFast, true},
+		// 2026-06-29 (recurring through 2026-07-08) signature: PSReadLine's
+		// key-reader thread throws InvalidOperationException on a
+		// redirected/absent console. Message rung and thread rung, each alone.
+		{"psreadline readkey message", "Unhandled exception. System.InvalidOperationException: Cannot read keys when either application does not have a console or when console input has been redirected. Try Console.Read.", ConsoleInputLost, true},
+		{"psreadline readkey stack", "   at Microsoft.PowerShell.PSConsoleReadLine.ReadKeyThreadProc()", ConsoleInputLost, true},
+		// Mixed-signal ordering — the precedence contract is the whole point of
+		// the check placement (host -> input -> pipe -> handle), so pin it.
+		{"host token pre-empts readkey message", "System.Management.Automation.Host.HostException while unwinding; Cannot read keys when either application does not have a console.", ConsoleHostFailFast, true},
+		{"readkey thread pre-empts pipe cause", "at Microsoft.PowerShell.PSConsoleReadLine.ReadKeyThreadProc(); No process is on the other end of the pipe.", ConsoleInputLost, true},
+		// #2170 mis-route regression: the output-buffer FailFast scraped WITHOUT
+		// the HostException type token must still route to host, not pipe, on the
+		// strength of the console-output-API mechanism token.
+		{"output API pre-empts pipe message", "get_CursorPosition -> GetConsoleScreenBufferInfo failed; No process is on the other end of the pipe.", ConsoleHostFailFast, true},
 		{"plain tool error", "exit status 1: compilation failed", "", false},
 		{"empty", "", "", false},
 	}
