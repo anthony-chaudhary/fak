@@ -61,8 +61,8 @@ an untracked `.go` in a package *you're* already editing is auto-kept as the mat
 re-checked against the live tree and reported OK before it reaches you; `--isolate=false` builds
 the live tree as-is, which is the one that catches *your own* broken untracked `_test.go`. None
 of the three writes an in-tree binary. `make test-fast` / `make ci` remain the local full-suite
-gates. **Don't report "the build is clean" from a raw `go build`/`go vet` in this working tree
-without saying which of the four questions you mean** — they give different answers here.
+gates. **When you report "the build is clean" from a raw `go build`/`go vet` in this working
+tree, say which of the four questions you mean** — they give different answers here.
 
 Or install the released binary directly — the module is at the repo root, so this resolves:
 
@@ -73,8 +73,8 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 > **Windows:** `go build` / `go vet` / `go run` work natively, but native `go test` is
 > blocked by an OS Application-Control policy on the freshly-compiled test binaries — run
 > the suite under WSL: `./test.ps1` from the repo root. This is an OS quirk, not a code failure.
-> For now, **avoid running tests or long-lived local `fak serve` directly on the dev box** —
-> use WSL/CI for tests and the GPU/cloud nodes for a real serve. See
+> For now, **use WSL/CI for tests and the GPU/cloud nodes for a real serve** — keep tests
+> and long-lived local `fak serve` off the dev box. See
 > [`docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md`](docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md).
 
 > **Build *verification* must never write the in-tree binary.** A bare `go build ./cmd/fak`
@@ -128,7 +128,7 @@ just a code change and a "looks fixed". Pick the witness the bug actually has:
 
 The rule of thumb: reproduce the defect as a captured artifact *first*, then make that artifact
 clean. If you cannot capture it, you cannot prove you fixed it — say `not yet` with the missing
-witness, don't claim a fix.
+witness instead of claiming a fix.
 
 ## New work defaults: spine first, then fan out
 
@@ -152,7 +152,7 @@ checklist in the `/spine-fanout` skill:
 
 ## Hard rules (these WILL bite an agent — they are enforced below the agent layer)
 
-**Default: ship.** Once the tree is green, **commit AND push** — don't wait to be asked.
+**Default: ship.** Once the tree is green, **commit AND push** unprompted.
 Green = `make ci` (build + vet + test + claims-lint; on a native-Windows host run the test
 suite under WSL with `./test.ps1`, since native `go test` is blocked). The commit-message,
 file-admission, public-leak, and trunk guards then run automatically as git hooks at
@@ -167,7 +167,7 @@ The HOW below is unchanged and gates the WHEN: stay on the trunk, `git commit -s
 mid-flight, or a blocker stands — reconcile in place or STOP; the default does not fire
 until it clears.
 
-Dirty shared trees are normal; finished, green work should not sit there. Before reporting
+Dirty shared trees are normal; land finished, green work promptly. Before reporting
 done, use the repo's index-safe commit tools: `fak sweep [--json]` to group the dirty tree
 by lane, then `fak sweep --apply --lane <lane> -m "<subject>" [--push]` for a whole lane
 group or `fak commit --preview ...` followed by `fak commit --path <p> ... -m "<subject>"`
@@ -424,9 +424,9 @@ encoded in [`internal/worktype`](internal/worktype/worktype.go):
   [`docs/perf-parity-rsi-loop.md`](docs/perf-parity-rsi-loop.md) and
   [`docs/cache-value-rollup.md`](docs/cache-value-rollup.md).
 
-  **Before you optimize a kernel, check the prior art — don't re-derive known art.** Almost
-  every contraction fak performs (a quantized GEMM, a fused attention, a KV-cache reuse, a
-  MoE dispatch) has a production reference (llama.cpp / Marlin / CUTLASS / FlashInfer / vLLM /
+  **Before you optimize a kernel, check the prior art — build on known art rather than
+  re-deriving it.** Almost every contraction fak performs (a quantized GEMM, a fused
+  attention, a KV-cache reuse, a MoE dispatch) has a production reference (llama.cpp / Marlin / CUTLASS / FlashInfer / vLLM /
   SGLang / a named paper). Run `fak sota <operation|file>` to surface the reference, route,
   and oracle *before* writing from scratch; read [`docs/sota/README.md`](docs/sota/README.md)
   for the map and the process; stamp the kernel commit with a `Prior-art:` trailer naming what
@@ -460,6 +460,7 @@ routes to (`tools/issue_lane_router.py`) and surfaced as three issue-views —
 | The deployable capability floor (policy manifests) | [`fak/POLICY.md`](POLICY.md) · [`fak/examples/README.md`](examples/README.md) |
 | Extend the kernel (plug in → prove correct → prove faster) | [`fak/EXTENDING.md`](EXTENDING.md) · [`fak/ARCHITECTURE.md`](ARCHITECTURE.md) |
 | Optimize a kernel without re-inventing known art (check prior art first) | [`docs/sota/README.md`](docs/sota/README.md) · `fak sota <op>` |
+| Score agent-steer prose for negative framing (suggests positive reframes) | `fak score negframe --suggest` |
 | What's real vs simulated vs stub | [`fak/CLAIMS.md`](CLAIMS.md) · [`fak/STATUS.md`](STATUS.md) |
 | Every benchmark number (single source of truth) | [`fak/BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) |
 | Roll back to a stable version (revert / downgrade / pin) | [`docs/ROLLBACK.md`](docs/ROLLBACK.md) |
