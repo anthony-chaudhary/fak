@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/rsiloop"
 )
@@ -75,5 +77,34 @@ func TestDosImproveArgs_OmitsFalseWitnessesAndEmptyWorkspace(t *testing.T) {
 	}
 	if strings.Contains(joined, "--workspace") {
 		t.Errorf("an empty workspace must omit --workspace; got: %s", joined)
+	}
+}
+
+
+func TestDosObserveReceipt_BoundsWedgedSpawnWithDeadline(t *testing.T) {
+	// A wedged dos (one that blocks until its context is cancelled) must NOT freeze the
+	// synchronous per-cycle Observer: the CommandContext deadline (#3486) kills it so the
+	// loop degrades to a missed receipt instead of hanging forever. We swap the exec seam
+	// for a blocking stub and shrink the timeout, so the bound is witnessed deterministically
+	// without spawning a real dos.
+	origExec, origTO := dosObserveExec, dosObserveTimeout
+	t.Cleanup(func() { dosObserveExec, dosObserveTimeout = origExec, origTO })
+
+	dosObserveTimeout = 40 * time.Millisecond
+	dosObserveExec = func(ctx context.Context, name string, args ...string) error {
+		<-ctx.Done() // a hung dos that only returns once its deadline fires
+		return ctx.Err()
+	}
+
+	obs := newDosObserveReceipt("dos", "", 3)
+	if obs == nil {
+		t.Fatal("newDosObserveReceipt returned nil")
+	}
+	done := make(chan struct{})
+	go func() { obs(rsiloop.Row{Cycle: 1}); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Observer did not return: the per-cycle dos improve spawn is not bounded by a deadline")
 	}
 }
