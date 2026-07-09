@@ -199,6 +199,15 @@ the *committed* tip (not the peer-dirty tree) with `fak ci-preflight`.
     trunk, safely prunes loss-free strays, and `--sweep-disposable` archives-then-reaps
     dead scratch worktrees (temp / scratchpad / pr-work) while sparing live sessions via a
     freshness guard. A scheduled task runs it (`tools/register_worktree_doctor.ps1`).
+  - *The one sanctioned worktree — detached, lands on `main`:* per-worker build
+    isolation (#1334 / epic #3165) uses a **detached** worktree pinned at trunk HEAD
+    whose diff lands on `main` through the serialized `land_worktree_diff` under the
+    worker's held lane lease. Because it is detached (never a branch) and reaches the
+    trunk only via that lane-serialized land, it is **not** off-trunk and never trips
+    `OFF_TRUNK` — it is the *only* permitted worktree use. Drive it through the durable
+    verbs `fak worktree worker prepare|land|reap|list` (or the `tools/worker_worktree.py`
+    reference CLI), never a hand-rolled `git worktree add` on a branch. Everything else —
+    a feature branch, or any worktree that commits off-trunk — stays forbidden.
   - *Diverged trunk (`git status` says "have diverged"):* `git fetch origin main`, then
     `git merge origin/main` **in place** and resolve. This is a shared trunk — peers
     routinely build the SAME feature under a different SHA, so most conflicts resolve to

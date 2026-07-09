@@ -6,7 +6,12 @@ read it first for build/test/run, the repo map, and the rules.
 The three that will bite you if you skip them:
 
 - **Work directly on the trunk (`main`). Never open a feature branch or new worktree** —
-  the trunk guard *refuses* off-trunk commits (`OFF_TRUNK`).
+  the trunk guard *refuses* off-trunk commits (`OFF_TRUNK`). The *one* sanctioned
+  exception is a **detached** per-worker worktree that lands its diff back on `main` via
+  `fak worktree worker prepare|land|reap` (build isolation, #1334 / epic #3165): because
+  it is detached (never a branch) and commits only through the serialized land under the
+  worker's lane lease, it is not off-trunk and never trips `OFF_TRUNK`. Feature branches
+  and any other off-trunk commit stay forbidden. (Details in [`AGENTS.md`](AGENTS.md).)
 - **Commit by explicit path** — `git commit -- <paths>`, never `git add -A` (shared
   multi-session tree). Sign off with `git commit -s` (DCO). Use a Conventional-Commits
   subject and end every ship commit with a `(fak <leaf>)` trailer so the `dos verify`

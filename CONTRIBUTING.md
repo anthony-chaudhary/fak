@@ -99,7 +99,11 @@ kernel), in addition to the CLA grant to Netra.
   need a clean tree, so a dirty tree is never a reason to branch: pull/merge in place,
   wait for it to settle, or STOP and surface the blocker. Install the guards once per
   clone with `python tools/install_trunk_guard.py` (arms the trunk guard + the
-  public-leak scan).
+  public-leak scan). The *one* sanctioned worktree is the detached per-worker
+  build-isolation tree (#1334 / epic #3165): pinned at trunk HEAD, it lands on `main` via
+  the serialized `land_worktree_diff` under the worker's lane lease through `fak worktree
+  worker prepare|land|reap|list`, so it is not a branch and never trips `OFF_TRUNK`. That
+  is the only worktree exception; feature branches and off-trunk commits remain refused.
 - **Commit small and by explicit path**. Prefer the repo verbs: `fak sweep [--json]`
   indexes a dirty shared tree by lane, `fak sweep --apply --lane <lane> -m "<subject>"`
   lands a whole lane group, and `fak commit --path <p> -m "<subject>"` lands a narrower
