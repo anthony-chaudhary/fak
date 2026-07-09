@@ -82,6 +82,12 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	if verb == "reset-diff" {
 		return runSessionResetDiff(os.Stdin, stdout, stderr, args)
 	}
+	// branch (#1200) is an offline fork of a checkpoint into a new durable id — a pure
+	// image-in, image-out move over internal/sessionimage.BranchDir that never dials a live
+	// gateway, so it is dispatched here alongside the other offline verbs.
+	if verb == "branch" {
+		return runSessionBranch(stdout, stderr, args)
+	}
 	if verb == "audit" {
 		return runSessionAuditAlias(stdout, stderr, args)
 	}
@@ -124,6 +130,11 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	maxTokens := fs.Int("max-tokens", sessionFlagUnset, "pace: max output tokens this turn (0 = planner default)")
 	gapMs := fs.Int("gap-ms", sessionFlagUnset, "pace: minimum inter-turn gap in ms (0 = none)")
 	inspectOnly := fs.Bool("inspect-only", false, "envelope: parse and print the deterministic budget envelope without applying it")
+	durable := fs.Bool("durable", false, "ls: read the durable session registry (C1, survives restart/eviction) instead of the live gateway snapshot")
+	fleet := fs.Bool("fleet", false, "ls: fold in every node's sessions from refs/fak/locks/session-* (C2) after a git fetch (implies --durable)")
+	registryPath := fs.String("registry", "", "ls --durable/--fleet: session registry path (default $FAK_SESSION_REGISTRY or the user config dir)")
+	remote := fs.String("remote", "origin", "ls --fleet: git remote to fetch the fleet session refs from")
+	staleWindow := fs.Duration("stale", defaultSessionStaleWindow, "ls --durable/--fleet: liveness window — a RUNNING session with no heartbeat within it reads STALLED")
 	if rc, ok := parseFlagsOrHelp(fs, flagArgs); !ok {
 		return rc
 	}
@@ -139,6 +150,18 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 
 	switch verb {
 	case "ls":
+		// #1203: --durable / --fleet read the durable C1 registry (and fold in the C2
+		// fleet session refs) offline, deterministically — no gateway required. The bare
+		// `fak session ls` stays the backward-compatible live gateway snapshot.
+		if *durable || *fleet {
+			return runSessionInventory(stdout, stderr, sessionInventoryOpts{
+				asJSON:       *asJSON,
+				fleet:        *fleet,
+				registryPath: *registryPath,
+				remote:       *remote,
+				staleWindow:  *staleWindow,
+			})
+		}
 		return c.renderList(stdout, stderr, *asJSON)
 	case "status":
 		rc := c.renderState(stdout, stderr, *asJSON, func() (gateway.SessionState, error) {
@@ -702,7 +725,9 @@ func defaultSessionAddr() string {
 func sessionUsage(w io.Writer) {
 	fmt.Fprint(w, `fak session — read and control a served session's live DRIVE state
 
-  fak session ls                              every live session (the snapshot)
+  fak session ls                              every live session (the live gateway snapshot)
+  fak session ls --durable [--registry PATH]  the durable C1 registry (survives restart/eviction)
+  fak session ls --fleet   [--remote R]       every node's sessions (C1 + C2 refs after a git fetch)
   fak session status   <id>                   one session's drive state
   fak session stop     <id> [--reason R]      request a clean stop (drain at the next boundary)
   fak session pause    <id>                   hold at the next turn boundary
@@ -720,9 +745,14 @@ func sessionUsage(w io.Writer) {
   fak session reset-diff [--in FILE] [--json] [--md]
                                                offline before/after diff for one reset
                                                (survived/summarized/expired/must-requery)
+  fak session branch   <parent-image-dir> --out <branch-dir> [--id ID] [--reason R]
+                       [--to-model M] [--to-host H] [--registry PATH] [--json]
+                                               offline fork of a checkpoint into a new durable
+                                               id (copy-on-write share of the parent's pages)
 
 flags: --addr (default $FAK_ADDR or http://127.0.0.1:8080)  --key ($FAK_KEY)
        --if-rev N (optimistic-concurrency guard)  --json
        envelope: --inspect-only
+       ls: --durable  --fleet  --registry PATH  --remote R (default origin)
 `)
 }
