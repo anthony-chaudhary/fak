@@ -46,6 +46,23 @@ go run ./cmd/fak operator brief --collect \
   --epics-from epics-with-counts.json
 ```
 
+## Compact by default, `--full` to expand
+
+The default human render is deliberately small: a header, a one-line load +
+attention summary, and one terse line per `human`/`agent`/`watch` item (just the
+source and title — no per-item detail or action, and none of the interpretation
+blocks). An operator scanning many briefs a day should not read a wall of text
+per item. When you want the whole explanation — per-item detail and action plus
+the `human_use`, `coherence`, `strengths`, `learning`, and generation-lane
+blocks — pass `--full`. Agents that consume the brief should keep using `--json`,
+which always carries the complete model.
+
+```bash
+go run ./cmd/fak operator brief --collect            # compact operator view
+go run ./cmd/fak operator brief --collect --full     # expanded explanation
+go run ./cmd/fak operator brief --collect --json     # full model for agents
+```
+
 The brief has four buckets:
 
 | Bucket | Meaning |
