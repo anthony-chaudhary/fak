@@ -176,9 +176,9 @@ func AggregateBand(r Report) (RecoveryBand, error) {
 	}
 	if n < MinAggregateSessions {
 		return RecoveryBand{}, fmt.Errorf(
-			"aggregate recovery band refused: %d sessions < floor %d "+
-				"(one transcript's gap is not a population claim; run ctxplanbench --heaviest %d)",
-			n, MinAggregateSessions, MinAggregateSessions)
+			"run ctxplanbench --heaviest %d to reach the %d-session floor "+
+				"(aggregate recovery band refused: %d sessions is not a population claim)",
+			MinAggregateSessions, MinAggregateSessions, n)
 	}
 	t := r.Total
 	return RecoveryBand{
