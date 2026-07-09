@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/cadencereport"
 	"github.com/anthony-chaudhary/fak/internal/heavinessscore"
 )
 
@@ -37,9 +39,39 @@ func TestOperatorHeavinessGroupRunsHeavinessJSON(t *testing.T) {
 
 func TestOperatorHeavinessGroupRejectsUnknownSubcommand(t *testing.T) {
 	var out, errb bytes.Buffer
-	code := runOperatorHeavinessGroup(&out, &errb, []string{"brief"})
+	code := runOperatorHeavinessGroup(&out, &errb, []string{"bogus"})
 	if code != 2 {
 		t.Fatalf("unknown subcommand exit = %d, want 2; stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+}
+
+// TestOperatorGroupWiresBrief proves `fak operator brief` is reachable from the
+// dispatcher (it was defined and tested but never routed) and that the default
+// human render is the compact one-line-per-item view, not the --full wall.
+func TestOperatorGroupWiresBrief(t *testing.T) {
+	c := cadencereport.FoldWithMaturity(
+		cadencereport.Scores{Debt: 1, GradeDebt: 1, Measured: 3, TrendDirection: "flat", OK: true},
+		cadencereport.Maturity{OK: true},
+		cadencereport.Work{WindowDays: 7},
+		cadencereport.Releases{Version: "v1.0.0", ActionKind: "wait", OK: true},
+		cadencereport.FoldOpts{Workspace: t.TempDir(), Commit: "abc1234", Date: "2026-06-30"},
+	)
+	path := writeOperatorBriefJSON(t, "cadence.json", c)
+
+	var out, errb bytes.Buffer
+	code := runOperatorHeavinessGroup(&out, &errb, []string{"brief", "--workspace", t.TempDir(), "--cadence", path})
+	if code == 2 {
+		t.Fatalf("brief should be a wired subcommand, got usage-error exit 2; stderr=%s", errb.String())
+	}
+	compact := out.String()
+	if !strings.Contains(compact, "operator brief") || !strings.Contains(compact, "--full for the full explanation") {
+		t.Fatalf("default brief render should be the compact view with a --full pointer, got:\n%s", compact)
+	}
+
+	var full bytes.Buffer
+	runOperatorHeavinessGroup(&full, &errb, []string{"brief", "--workspace", t.TempDir(), "--cadence", path, "--full"})
+	if strings.Count(full.String(), "\n") <= strings.Count(compact, "\n") {
+		t.Fatalf("--full should expand beyond compact:\ncompact:\n%s\nfull:\n%s", compact, full.String())
 	}
 }
 
