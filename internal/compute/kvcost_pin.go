@@ -140,24 +140,6 @@ const maxPinBoost = 1e6
 // modelengine.pickPreemptVictim behind the FAK_NATIVE_KV_* flags, with real lease TTLs mapped
 // through PinBoostFromTTL, is the R2/R3 cross-lane follow-on #2673 tracks.
 func PickEvictionVictimPinned(spans []KVSpanStats) int {
-	bestIdx := -1
-	var bestCost float64
-	for i := range spans {
-		s := spans[i]
-		if s.Pinned || s.Leased {
-			continue
-		}
-		c := KVEvictionCostPinned(s)
-		switch {
-		case bestIdx == -1:
-			bestIdx, bestCost = i, c
-		case c < bestCost:
-			bestIdx, bestCost = i, c
-		case c == bestCost && s.LastUsed < spans[bestIdx].LastUsed:
-			// Equal cost-of-losing → break the tie by recency (oldest first), matching
-			// PickEvictionVictim so a uniform-cost resident set reduces to pure LRU.
-			bestIdx = i
-		}
-	}
-	return bestIdx
+	idx, _ := pickLowestCost(spans, KVEvictionCostPinned)
+	return idx
 }

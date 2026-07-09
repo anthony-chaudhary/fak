@@ -160,14 +160,28 @@ func KVEvictionCost(s KVSpanStats) float64 {
 // choice; wiring it into radixkv.EvictToBudget and modelengine.pickPreemptVictim behind
 // FAK_NATIVE_KV_* flags is the cross-lane follow-on.
 func PickEvictionVictim(spans []KVSpanStats) int {
-	bestIdx := -1
-	var bestCost float64
+	idx, _ := pickLowestCost(spans, KVEvictionCost)
+	return idx
+}
+
+// pickLowestCost is the shared victim-ranking loop every PickEvictionVictim* variant runs:
+// it scans spans for the cheapest-to-lose EVICTABLE candidate under the supplied per-span
+// cost function, skipping any Pinned or Leased span (the hard exclusions), and breaks a cost
+// tie toward the OLDEST LastUsed (LRU) so a uniform-cost resident set degenerates to pure LRU
+// victim choice. It returns the winning index (or -1 when nothing is evictable) and that
+// winner's cost. The variants differ ONLY in which cost function scores a span — KVEvictionCost
+// (base), KVEvictionCostFanout, KVEvictionCostPinned, KVEvictionCostAged — so the ranking,
+// exclusions, tie-break, and -1 no-candidate contract live here once. bestCost is the float64
+// zero value when bestIdx is -1; callers that surface the cost (PickEvictionVictimAged) gate on
+// the -1 index rather than the cost.
+func pickLowestCost(spans []KVSpanStats, cost func(KVSpanStats) float64) (bestIdx int, bestCost float64) {
+	bestIdx = -1
 	for i := range spans {
 		s := spans[i]
 		if s.Pinned || s.Leased {
 			continue
 		}
-		c := KVEvictionCost(s)
+		c := cost(s)
 		switch {
 		case bestIdx == -1:
 			bestIdx, bestCost = i, c
@@ -179,7 +193,7 @@ func PickEvictionVictim(spans []KVSpanStats) int {
 			bestIdx = i
 		}
 	}
-	return bestIdx
+	return bestIdx, bestCost
 }
 
 // KVEvictPolicy selects the victim-ranking policy ReplayKVCache simulates.

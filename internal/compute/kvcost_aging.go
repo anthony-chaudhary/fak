@@ -50,26 +50,10 @@ func KVEvictionCostAged(s KVSpanStats) float64 {
 // discipline) is the R2 wiring into radixkv/the native preemptor; this function is the
 // pure R1 decision primitive that wiring drives.
 func PickEvictionVictimAged(spans []KVSpanStats) (idx int, newClock float64) {
-	bestIdx := -1
-	var bestCost float64
-	for i := range spans {
-		s := spans[i]
-		if s.Pinned || s.Leased {
-			continue
-		}
-		c := KVEvictionCostAged(s)
-		switch {
-		case bestIdx == -1:
-			bestIdx, bestCost = i, c
-		case c < bestCost:
-			bestIdx, bestCost = i, c
-		case c == bestCost && s.LastUsed < spans[bestIdx].LastUsed:
-			// Equal aged cost → break the tie by recency (oldest first), matching
-			// PickEvictionVictim's tie-break so a uniform-stamp resident set reduces
-			// to the same ranking as the de-aged picker.
-			bestIdx = i
-		}
-	}
+	// The chosen victim's OWN aged cost is the AgingClock (L) to carry forward (GDSF raises L
+	// to the evicted item's priority), so PickEvictionVictimAged surfaces the winner's cost the
+	// shared loop already computes; -1 means nothing evictable, so newClock is 0.
+	bestIdx, bestCost := pickLowestCost(spans, KVEvictionCostAged)
 	if bestIdx == -1 {
 		return -1, 0
 	}

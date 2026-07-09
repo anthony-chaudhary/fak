@@ -58,24 +58,6 @@ func KVEvictionCostFanout(s KVSpanStats) float64 {
 // populate Sharers from real ref-count/child fan-out (and the replay hit-rate witness that
 // proves the aggregate win) is the R2 cross-lane follow-on.
 func PickEvictionVictimFanout(spans []KVSpanStats) int {
-	bestIdx := -1
-	var bestCost float64
-	for i := range spans {
-		s := spans[i]
-		if s.Pinned || s.Leased {
-			continue
-		}
-		c := KVEvictionCostFanout(s)
-		switch {
-		case bestIdx == -1:
-			bestIdx, bestCost = i, c
-		case c < bestCost:
-			bestIdx, bestCost = i, c
-		case c == bestCost && s.LastUsed < spans[bestIdx].LastUsed:
-			// Equal cost-of-losing → break the tie by recency (oldest first), matching
-			// PickEvictionVictim so a uniform-cost resident set reduces to pure LRU.
-			bestIdx = i
-		}
-	}
-	return bestIdx
+	idx, _ := pickLowestCost(spans, KVEvictionCostFanout)
+	return idx
 }
