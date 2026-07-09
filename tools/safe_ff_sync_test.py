@@ -160,5 +160,86 @@ class SafeFfSyncTest(unittest.TestCase):
         self.assertFalse(info["ok"])
 
 
+class GitCallBoundsTest(unittest.TestCase):
+    """Witness the #3496 fix: no git call can hang silently.
+
+    Two guards on every git subprocess — GIT_TERMINAL_PROMPT=0 (fail fast instead
+    of prompting) and a hard timeout that surfaces as GitError, not a silent stall.
+    """
+
+    class _FakeProc:
+        def __init__(self, returncode=0, stdout=b"", stderr=b""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def test_every_git_call_is_prompt_free_and_bounded(self):
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            captured["kwargs"] = kwargs
+            return self._FakeProc(returncode=0, stdout=b"deadbeef\n")
+
+        orig = sfs.subprocess.run
+        sfs.subprocess.run = fake_run
+        try:
+            out = sfs.git(["rev-parse", "HEAD"], repo=".", timeout=7)
+        finally:
+            sfs.subprocess.run = orig
+
+        self.assertEqual(out, "deadbeef\n")
+        self.assertEqual(captured["kwargs"].get("timeout"), 7,
+                         "git() must pass its timeout through to subprocess.run")
+        env = captured["kwargs"].get("env") or {}
+        self.assertEqual(env.get("GIT_TERMINAL_PROMPT"), "0",
+                         "git() must disable interactive credential prompts")
+
+    def test_timeout_expired_surfaces_as_giterror(self):
+        def fake_run(cmd, **kwargs):
+            raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 1))
+
+        orig = sfs.subprocess.run
+        sfs.subprocess.run = fake_run
+        try:
+            with self.assertRaises(sfs.GitError) as ctx:
+                sfs.git(["fetch", "origin", "work"], repo=".", timeout=1)
+        finally:
+            sfs.subprocess.run = orig
+        self.assertIn("timed out", str(ctx.exception),
+                      "a hung git call must become a legible GitError, not TimeoutExpired")
+
+    def test_fetch_path_uses_the_network_timeout(self):
+        # Self-contained hermetic origin + clone (module-level git()/write() helpers).
+        tmp = Path(tempfile.mkdtemp(prefix="ffsync_ct_"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        origin = tmp / "origin"
+        origin.mkdir()
+        git(["init", "-b", "work"], origin)
+        write(origin / "a.txt", "v1\n")
+        git(["add", "."], origin)
+        git(["commit", "-m", "c1"], origin)
+        clone = tmp / "clone"
+        git(["clone", str(origin), str(clone)], tmp)
+
+        calls = []
+        real_git = sfs.git
+
+        def recording_git(args, repo=".", check=True, binary=False,
+                          timeout=sfs._DEFAULT_GIT_TIMEOUT):
+            calls.append((tuple(args), timeout))
+            return real_git(args, repo, check, binary, timeout)
+
+        sfs.git = recording_git
+        try:
+            sfs.assess(str(clone), "origin", "work", do_fetch=True)  # real local fetch
+        finally:
+            sfs.git = real_git
+
+        fetch_timeouts = [t for (a, t) in calls if a and a[0] == "fetch"]
+        self.assertTrue(fetch_timeouts, "assess(do_fetch=True) must run a git fetch")
+        self.assertEqual(fetch_timeouts[0], sfs._FETCH_GIT_TIMEOUT,
+                         "the network fetch must use the longer network ceiling")
+        self.assertGreater(sfs._FETCH_GIT_TIMEOUT, sfs._DEFAULT_GIT_TIMEOUT)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

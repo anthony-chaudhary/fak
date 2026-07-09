@@ -64,14 +64,48 @@ class GitError(RuntimeError):
     pass
 
 
-def git(args, repo=".", check=True, binary=False):
+# Git call bounds (issue #3496): under capture_output=True a git call that hits an
+# interactive credential prompt or a dead remote hangs forever, silently — the
+# prompt is captured, never shown. Two guards, applied to every git subprocess in
+# this module: GIT_TERMINAL_PROMPT=0 makes git fail fast instead of prompting, and a
+# hard timeout ceilings even a non-prompt network stall.
+_DEFAULT_GIT_TIMEOUT = 120   # local ops are near-instant; this is only a safety ceiling
+_FETCH_GIT_TIMEOUT = 300     # the one network path (git fetch) may legitimately run longer
+
+
+def _git_env():
+    """Env for every git call: never block on an interactive credential prompt."""
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
+def _run_git(args, repo, timeout=_DEFAULT_GIT_TIMEOUT):
+    """Low-level git runner: windowless, prompt-free, and hard-bounded.
+
+    Every git subprocess in this module funnels through here so none can hang: a
+    dead remote or a credential prompt raises GitError after `timeout`s instead of
+    stalling silently under capture_output=True.
+    """
+    try:
+        return subprocess.run(
+            ["git", "-C", str(repo), *args],
+            capture_output=True,
+            check=False,
+            creationflags=_win_creationflags(),
+            env=_git_env(),
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        raise GitError(
+            f"git {' '.join(args)} timed out after {timeout}s "
+            f"(dead remote or credential prompt — GIT_TERMINAL_PROMPT=0 is set)"
+        )
+
+
+def git(args, repo=".", check=True, binary=False, timeout=_DEFAULT_GIT_TIMEOUT):
     """Run a git command; return stdout (str, or bytes if binary)."""
-    proc = subprocess.run(
-        ["git", "-C", str(repo), *args],
-        capture_output=True,
-        check=False,
-        creationflags=_win_creationflags(),
-    )
+    proc = _run_git(args, repo, timeout)
     if check and proc.returncode != 0:
         raise GitError(
             f"git {' '.join(args)} -> {proc.returncode}: "
@@ -93,11 +127,7 @@ def rev(repo, ref):
 
 def is_ancestor(repo, a, b):
     """True iff commit `a` is an ancestor of `b` (so a->b is a fast-forward)."""
-    proc = subprocess.run(
-        ["git", "-C", str(repo), "merge-base", "--is-ancestor", a, b],
-        capture_output=True,
-        creationflags=_win_creationflags(),
-    )
+    proc = _run_git(["merge-base", "--is-ancestor", a, b], repo)
     if proc.returncode not in (0, 1):
         raise GitError(
             f"merge-base --is-ancestor failed: "
@@ -108,11 +138,7 @@ def is_ancestor(repo, a, b):
 
 def blob_at(repo, ref, path):
     """Bytes of `path` at `ref`, or None if it does not exist there."""
-    proc = subprocess.run(
-        ["git", "-C", str(repo), "show", f"{ref}:{path}"],
-        capture_output=True,
-        creationflags=_win_creationflags(),
-    )
+    proc = _run_git(["show", f"{ref}:{path}"], repo)
     return proc.stdout if proc.returncode == 0 else None
 
 
@@ -182,7 +208,7 @@ def classify(repo, head, target, entries):
 def assess(repo, remote, branch, do_fetch):
     """Read-only assessment of whether a safe ff is possible."""
     if do_fetch:
-        git(["fetch", remote, branch], repo)
+        git(["fetch", remote, branch], repo, timeout=_FETCH_GIT_TIMEOUT)
     target_ref = f"{remote}/{branch}"
     head = rev(repo, "HEAD")
     try:
