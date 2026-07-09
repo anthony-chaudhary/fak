@@ -1,6 +1,6 @@
 ---
 title: "The god-file growth gate: a ratchet, not a sweep"
-description: "A monolith is never written in one commit — it accretes one line at a time, faster than anyone pays it down, because nothing refuses the next line. Hermes' gateway/run.py reached 20,320 lines that way. fak already names the ceiling (1500 lines/file, 200/function) and owns the paydown loop (/modularize); GOD_FILE_GROWTH turns the doctrine preventive — a CI ratchet that grandfathers today's offenders at-size and refuses only new growth, so the god-code surface is monotonically non-increasing."
+description: "A monolith is never written in one commit — it accretes one line at a time, faster than anyone pays it down, because nothing refuses the next line. Hermes' gateway/run.py reached 20,320 lines that way. fak's scorecard names the debt line (1500/file, 200/function); GOD_FILE_GROWTH turns the doctrine preventive — a CI ratchet that grandfathers today's offenders at-size and refuses new growth. Files stay firm at 1500 (aligned with the file-only sibling gate); functions block loose at 400, and a bounded slack band lets a grandfathered offender absorb an ordinary edit — so the surface stays bounded without false-blocking a plausible change to already-large code."
 slug: god-file-growth-gate
 keywords:
   - god file
@@ -39,7 +39,7 @@ that only describes the good state does nothing to defend it.** The monolith acc
 faster than it's paid down precisely because, at the moment someone adds the line that
 tips a 1,499-line file to 1,501, nothing refuses.
 
-## fak already names the ceiling
+## fak already names the debt line
 
 fak's code-quality scorecard (`tools/code_quality_scorecard.py`) has counted this as
 hard architecture debt from the start:
@@ -55,14 +55,50 @@ top-level declaration into another file *in the same package* is a semantic no-o
 Go, because package (not file) is the scope, so `go build` + `go vet` + `go test` is a
 near-complete gate. `tools/godsplit_plan.py` plans the boundaries (the doc-comment-aware
 cut lines) and flags the four things that make a move *not* a no-op (per-file build
-tags, `init()` order, aliased imports, raw strings). In one run that loop took fak from
-architecture-debt 12 → 0.
+tags, `init()` order, aliased imports, raw strings). The one gap in that "near-complete"
+gate — a decl silently *dropped* by an incomplete cut, unreferenced in-module so `go build`
+never says `undefined:` — is closed by `tools/refactor_verify.py`, which diffs the package's
+top-level declaration set before/after and fails on any definition that left without landing
+somewhere. In one run that loop took fak from architecture-debt 12 → 0.
 
-So the ceiling is named and the cleanup is a repeatable recipe. What was missing is the
+So the debt line is named and the cleanup is a repeatable recipe. What was missing is the
 thing that keeps a clean tree clean: a rule that runs on *every* change and refuses new
 growth. A scorecard *measures* debt; it doesn't *stop* it accruing. Left to a periodic
 sweep, the tree oscillates — clean after a `/modularize` run, creeping back up until the
 next one, because between sweeps nothing holds the line.
+
+## Measure strict, block loose
+
+Here's the subtlety that keeps the gate from becoming the thing everyone disables — and it
+lands differently on files than on functions.
+
+**Files stay firm at 1500.** A brand-new file monolith is the single thing you most want to
+refuse, so the *file* line is not loosened: this gate and its file-only sibling
+`internal/godfileceiling` (the hard "NO NEW GOD-FILE" ratchet, issue #2898) both hold new files
+at 1500, matching the scorecard's `FILE_HARD_MAX`. That's deliberate — the two gates are kept
+aligned on the file line, and raising it in only one would be dead code, since the stricter
+sibling still refuses.
+
+**Functions block loose.** The scorecard's `FUNC_HARD_MAX=200` is a *measurement* threshold —
+it answers "how much function debt is on the tree?", and a 250-line function genuinely is a
+notch of debt worth seeing on the dashboard. But a *build gate* that reds on that same
+250-line function isn't surfacing debt, it's blocking work: the function is large, not runaway,
+and refusing it just teaches the fleet to reach for the escape hatch on every push. So the
+*function* ceiling is split from the scorecard: the gate blocks only *egregious* new functions,
+its ceiling defaulting to 400 (operator-tunable via `FAK_GODFUNC_MAX_LINES`). The file ceiling
+is tunable too (`FAK_GODFILE_MAX_LINES`), but the sibling gate bounds files regardless.
+
+**Grandfathered offenders get slack.** On top of the ceilings, an already-frozen offender may
+drift within a bounded **slack band** (`FAK_GODFILE_GROWTH_SLACK_PCT`, default 20%) before the
+gate re-engages — the fix for the single commonest false block, an ordinary edit to a function
+that was already large. Measure strict so you can see the debt; block loose so the gate only
+ever fires on a monolith actually forming. And for the genuine one-off the ceilings still
+refuse, `ALLOW_GOD_FILE=1` admits a single run rather than forcing the author onto a feature
+branch.
+
+(The sibling `internal/godfileceiling` gate, issue #2898, is the LOC-ceiling half — file-only,
+non-tunable const 1500. This gate, #2868, adds the *function* dimension and the growth ratchet
+on top.)
 
 ## The ratchet: grandfather the stock, refuse the flow
 
@@ -72,21 +108,28 @@ cleanups. The gate that *holds* has to be a **ratchet**: it fixes the current le
 only ever moves one way.
 
 `GOD_FILE_GROWTH` (`internal/hooks/gate_godfile.go`) does exactly that. When it shipped,
-every tracked non-test `.go` file already over 1500 lines, and every function already
-over 200, was **grandfathered** at its then-size into a frozen baseline
+every tracked non-test `.go` file already over the file ceiling, and every function already
+over the function ceiling, was **grandfathered** at its then-size into a frozen baseline
 (`internal/hooks/godfile_baseline.go`). The gate then refuses exactly two things:
 
-1. a **new** file crossing 1500 lines, or a **new** function crossing 200 — anything
-   not in the baseline at all;
-2. **growth** of a grandfathered offender past its frozen size — `gateway.go` was
-   3066 lines when frozen, so 3067 reds; 3065 is clean.
+1. a **new** file crossing the file ceiling (1500 lines, matching the sibling gate), or a
+   **new** function crossing the function ceiling (default 400) — anything not in the baseline
+   at all;
+2. **growth** of a grandfathered offender past its frozen size *plus its slack band* —
+   a function frozen at 1000 lines with the default 20% slack reds at 1201, and 1200 is
+   clean.
 
-Everything else passes. Shrinking is always clean. And the baseline itself may only ever
+Everything else passes. Shrinking is always clean. And the frozen anchor itself may only ever
 *shrink or lose entries* — the regen test (`FAK_GODFILE_BASELINE_REGEN=1`) refuses a
-baseline that adds an entry or raises a ceiling. So the god-code surface is
-**monotonically non-increasing**: it can only go down, one genuine split at a time.
+baseline that adds an entry or raises a ceiling, so drift within the slack band never gets
+baked into the anchor. The result is a surface that's **bounded, not strictly monotonic**:
+a grandfathered offender may drift within its band, but a runaway still reds and the anchor
+only ratchets *down*. The band is the deliberate trade — the last increment of strictness
+for far fewer false blocks on a busy shared trunk, where an ordinary edit to an already-large
+function is the single commonest way a well-behaved change hits the gate. Want the strict
+ratchet back? `FAK_GODFILE_GROWTH_SLACK_PCT=0`.
 
-This is deliberately the same shape as the Python-tool ratchet (`NEW_PYTHON_TOOL`) that
+This is deliberately close to the shape of the Python-tool ratchet (`NEW_PYTHON_TOOL`) that
 already ships in the same gate set — grandfather the stock, refuse the flow — so there's
 one mental model for "hold this line at its current level" across the hygiene surface.
 
@@ -121,25 +164,36 @@ Every finding carries the same recover-by hint: don't grow the monolith, split i
 `/modularize` owns the recipe — and regenerate the baseline (tighter, never looser)
 only *after* a genuine split lands. The gate points at the cure it's already got.
 
-## A worked example: the line that reds the build
+## A worked example: what reds the build, and what doesn't
 
-Say an agent is editing `internal/gateway/gateway.go` — frozen at 3066 lines — and adds
-a 40-line handler, pushing it to 3106. Nothing about that diff looks wrong in isolation;
-it's a plausible, well-formed change. But it grows a grandfathered god-file, so the gate
-refuses it by name:
+Take the real case the slack band was built for: `cmd/fak/guard.go:cmdGuard`, a grandfathered
+god-function frozen at 1181 lines. A peer adds a handful of lines to it — the kind of ordinary
+edit that lands on a shared trunk every hour — pushing it to, say, 1245. Under a strict ratchet
+that reds the build the instant it crosses 1181, forcing whoever touched it into a mid-flight
+split of a function nobody set out to refactor. Under the slack band (1181 + 20% = 1417) it's
+clean, and the fleet keeps moving. Measuring the function as a notch of debt is the scorecard's
+job; *blocking* a five-line edit to it was only ever noise.
+
+Now say a change balloons the same function to 1500 lines — past the band. *That* reds, by
+name, on the turn it happened:
 
 ```
-GOD_FILE_GROWTH  internal/gateway/gateway.go
-grandfathered god-file GREW: internal/gateway/gateway.go is 3106 lines, frozen ceiling 3066.
-Split along concern seams instead of growing the monolith — /modularize owns the recipe …
+GOD_FILE_GROWTH  cmd/fak/guard.go
+grandfathered god-function GREW: cmd/fak/guard.go:cmdGuard spans 1500 lines, past its frozen
+ceiling 1181 (+20% growth slack = 1417). Split along concern seams instead of growing the
+monolith — /modularize owns the recipe … If the size is legitimate, widen the growth slack
+or raise the ceiling for the run (FAK_GODFILE_GROWTH_SLACK_PCT / FAK_GODFILE_MAX_LINES /
+FAK_GODFUNC_MAX_LINES) or admit it with ALLOW_GOD_FILE=1.
 ```
 
-The agent (or the human reviewing the PR) reads that on the turn it made the change,
-while the file is still in front of it, and either lands the handler in a new
-concern-scoped file in the same package — a no-op move — or runs `/modularize` on
-`gateway.go` first to earn the headroom (which *lowers* the frozen ceiling, so the split
-pays for itself). The monolith never gets the extra 40 lines. Multiply that across a
-fleet of agents on a shared trunk, every turn, and the file simply cannot drift upward.
+The agent (or the human reviewing the PR) reads that while the code is still in front of it,
+and either lifts the new logic into a helper, runs `/modularize` on `guard.go` first to earn
+the headroom (which *lowers* the frozen ceiling, so the split pays for itself), or — if the
+size is genuinely justified — widens the slack or admits the one run. The gate fires on the
+runaway and stays quiet on the ordinary edit. Multiply that across a fleet of agents on a
+shared trunk, every turn, and the function cannot *run away* upward — while a normal day's
+work never trips it. (New *files* over 1500 are refused too, by the sibling
+`godfileceiling` gate; this gate's own slack band is what governs the *function* case above.)
 
 You can watch the gate judge the live tree with no model in the loop:
 
