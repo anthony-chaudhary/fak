@@ -87,8 +87,79 @@ func TestFoldHookLatencyThinTailIsMax(t *testing.T) {
 
 func TestFoldHookLatencyEmpty(t *testing.T) {
 	r := FoldHookLatency(nil)
-	if r.Total.Count != 0 || len(r.ByVerb) != 0 {
+	if r.Total.Count != 0 || len(r.ByVerb) != 0 || len(r.ByRung) != 0 {
 		t.Fatalf("empty fold = %+v, want zero rollup", r)
+	}
+}
+
+// TestFoldHookLatencyByRung proves the rung split the verb bucket hides: the
+// pretool admission rung (a slow tail) and provenance rung (a fast one) fold
+// into ONE "pretool" ByVerb row but SEPARATE ByRung rows, and a rung-less
+// posttool row never manufactures an empty-rung bucket.
+func TestFoldHookLatencyByRung(t *testing.T) {
+	var obs []HookObservation
+	for i := 0; i < 10; i++ {
+		obs = append(obs, HookObservation{Verb: "pretool", Rung: "admission", LatencyMS: 900 + float64(i)})
+	}
+	for i := 0; i < 10; i++ {
+		obs = append(obs, HookObservation{Verb: "pretool", Rung: "provenance", LatencyMS: 10 + float64(i)})
+	}
+	obs = append(obs, HookObservation{Verb: "posttool", LatencyMS: 5}) // no rung — must stay out of ByRung
+	r := FoldHookLatency(obs)
+
+	if len(r.ByVerb) != 2 {
+		t.Fatalf("byVerb = %+v, want two verb rows", r.ByVerb)
+	}
+	if len(r.ByRung) != 2 {
+		t.Fatalf("byRung = %+v, want two rung rows (posttool has no rung)", r.ByRung)
+	}
+	// Sorted verb-then-rung: admission before provenance.
+	if r.ByRung[0].Verb != "pretool" || r.ByRung[0].Rung != "admission" {
+		t.Fatalf("byRung[0] = %+v, want pretool/admission first", r.ByRung[0])
+	}
+	if r.ByRung[1].Rung != "provenance" {
+		t.Fatalf("byRung[1] = %+v, want provenance second", r.ByRung[1])
+	}
+	// The whole point: the admission tail is an order of magnitude over provenance,
+	// invisible in the pooled pretool row.
+	if !(r.ByRung[0].P99MS > 5*r.ByRung[1].P99MS) {
+		t.Fatalf("admission p99 %.1f should dwarf provenance p99 %.1f", r.ByRung[0].P99MS, r.ByRung[1].P99MS)
+	}
+}
+
+// TestTailRung pins the attribution the exit summary names: the rung with the
+// highest p99, and the honest "nothing to attribute" answer when no row carried
+// a rung.
+func TestTailRung(t *testing.T) {
+	if _, ok := FoldHookLatency([]HookObservation{{Verb: "posttool", LatencyMS: 5}}).TailRung(); ok {
+		t.Fatalf("a rung-less fold must report no tail rung")
+	}
+	obs := []HookObservation{
+		{Verb: "pretool", Rung: "provenance", LatencyMS: 50},
+		{Verb: "pretool", Rung: "admission", LatencyMS: 1600},
+		{Verb: "pretool", Rung: "none", LatencyMS: 30},
+	}
+	tail, ok := FoldHookLatency(obs).TailRung()
+	if !ok || tail.Rung != "admission" || tail.P99MS != 1600 {
+		t.Fatalf("tail rung = %+v (ok=%v), want admission at p99 1600", tail, ok)
+	}
+}
+
+// TestParseHookObservationsRung proves the rung field is lifted off the wire so
+// the by-rung fold has an axis to group on (the provenance row in sampleStream).
+func TestParseHookObservationsRung(t *testing.T) {
+	obs, _, err := ParseHookObservations(strings.NewReader(sampleStream))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	var provenance bool
+	for _, o := range obs {
+		if o.Verb == "pretool" && o.Rung == "provenance" {
+			provenance = true
+		}
+	}
+	if !provenance {
+		t.Fatalf("parsed observations %+v carry no pretool/provenance rung", obs)
 	}
 }
 

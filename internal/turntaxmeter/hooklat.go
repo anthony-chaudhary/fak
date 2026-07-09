@@ -66,6 +66,14 @@ const MinHookAlarmSamples = 8
 type HookObservation struct {
 	// Verb is the hook that fired — "pretool" | "posttool" in the v1 stream.
 	Verb string
+	// Rung is the pretool adjudication rung the row was measured on
+	// ("admission" | "provenance" | "none" in the v1 stream), or "" when the
+	// row carried none (posttool/session-start rows do not run a rung). The
+	// rung is where the pretool tail actually lives — admission and provenance
+	// have order-of-magnitude-different p99s — so it is the attribution axis the
+	// by-rung fold groups on. Carried but never judged: the budget still reads
+	// the folded total tail, not a per-rung ceiling.
+	Rung string
 	// Outcome is the hook's decision label (e.g. "passthrough"). Carried for
 	// per-outcome splits by callers; the latency fold does not branch on it.
 	Outcome string
@@ -87,6 +95,7 @@ type hookObservationRow struct {
 		Version int    `json:"version"`
 	} `json:"schema"`
 	Verb      string   `json:"verb"`
+	Rung      string   `json:"rung"`
 	Outcome   string   `json:"outcome"`
 	LatencyMS *float64 `json:"latency_ms"`
 	TS        string   `json:"ts"`
@@ -113,6 +122,7 @@ func ParseHookObservations(r io.Reader) (obs []HookObservation, skipped int, err
 		at, _ := time.Parse(time.RFC3339, row.TS) // zero time on absent/bad ts, by contract
 		obs = append(obs, HookObservation{
 			Verb:      row.Verb,
+			Rung:      row.Rung,
 			Outcome:   row.Outcome,
 			LatencyMS: *row.LatencyMS,
 			At:        at,
@@ -142,7 +152,11 @@ func FilterHookObservationsSince(obs []HookObservation, cutoff time.Time) []Hook
 // Verb == ""). Percentiles are nearest-rank over the observed samples — with small
 // n the p99 IS the max, which is the honest reading of a thin tail.
 type HookLatencyStats struct {
-	Verb   string
+	Verb string
+	// Rung is set only on ByRung rows — the pretool adjudication rung this stat
+	// folds ("admission" | "provenance" | "none"). Empty on Total and ByVerb
+	// rows, which do not split on the rung.
+	Rung   string `json:"Rung,omitempty"`
 	Count  int
 	MeanMS float64
 	P50MS  float64
@@ -152,11 +166,17 @@ type HookLatencyStats struct {
 }
 
 // HookLatencyRollup is the full fold: the all-verbs total (the tail the budget
-// judges — pretool and posttool BOTH tax the same tool call) plus a per-verb split
-// sorted by verb name so a slow posttool journal write is attributable.
+// judges — pretool and posttool BOTH tax the same tool call), a per-verb split
+// sorted by verb name so a slow posttool journal write is attributable, and a
+// per-(verb,rung) split so the pretool tail is attributable to its rung. The
+// verb bucket hides that: the pretool ADMISSION rung runs an order of magnitude
+// slower at the p99 than the fast-path pretool, so "pretool p99" alone names the
+// cost without naming the cause. ByRung carries only rows that declared a rung
+// (the pretool ladder); rung-less rows (posttool, session-start) stay out of it.
 type HookLatencyRollup struct {
 	Total  HookLatencyStats
 	ByVerb []HookLatencyStats
+	ByRung []HookLatencyStats
 }
 
 // FoldHookLatency computes the percentile rollup over the observations. Zero
@@ -164,17 +184,63 @@ type HookLatencyRollup struct {
 // stream is a valid "nothing observed" fact.
 func FoldHookLatency(obs []HookObservation) HookLatencyRollup {
 	byVerb := map[string][]float64{}
+	byRung := map[verbRung][]float64{}
 	all := make([]float64, 0, len(obs))
 	for _, o := range obs {
 		all = append(all, o.LatencyMS)
 		byVerb[o.Verb] = append(byVerb[o.Verb], o.LatencyMS)
+		// Only rows that declared a rung enter the by-rung split — grouping a
+		// rung-less posttool row under an empty rung would manufacture a
+		// meaningless "" bucket that shadows its own ByVerb row.
+		if o.Rung != "" {
+			byRung[verbRung{o.Verb, o.Rung}] = append(byRung[verbRung{o.Verb, o.Rung}], o.LatencyMS)
+		}
 	}
 	r := HookLatencyRollup{Total: foldLatencySamples("", all)}
-	verbs := maputil.SortedKeys(byVerb)
-	for _, v := range verbs {
+	for _, v := range maputil.SortedKeys(byVerb) {
 		r.ByVerb = append(r.ByVerb, foldLatencySamples(v, byVerb[v]))
 	}
+	for _, vr := range sortedVerbRungs(byRung) {
+		s := foldLatencySamples(vr.verb, byRung[vr])
+		s.Rung = vr.rung
+		r.ByRung = append(r.ByRung, s)
+	}
 	return r
+}
+
+// verbRung is the composite by-rung group key: the same rung name can appear
+// under more than one verb, so the pair is the identity, not the rung alone.
+type verbRung struct{ verb, rung string }
+
+// sortedVerbRungs orders the by-rung groups deterministically — verb first, then
+// rung — so the rendered table and JSON are stable across folds of the same stream.
+func sortedVerbRungs(m map[verbRung][]float64) []verbRung {
+	keys := make([]verbRung, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].verb != keys[j].verb {
+			return keys[i].verb < keys[j].verb
+		}
+		return keys[i].rung < keys[j].rung
+	})
+	return keys
+}
+
+// TailRung returns the by-rung stat with the highest p99 — the rung that drives
+// the folded tail — plus whether any rung was folded at all. It is the attribution
+// the guard exit summary names: "pretool p99 is high" is the symptom, "because the
+// admission rung is" is the cause. Ties break toward the higher max, then the
+// lexically-earlier verb/rung, so the pick is deterministic. ok is false when no
+// row carried a rung (nothing to attribute).
+func (r HookLatencyRollup) TailRung() (stat HookLatencyStats, ok bool) {
+	for _, s := range r.ByRung {
+		if !ok || s.P99MS > stat.P99MS || (s.P99MS == stat.P99MS && s.MaxMS > stat.MaxMS) {
+			stat, ok = s, true
+		}
+	}
+	return stat, ok
 }
 
 // foldLatencySamples reduces one sample set to its stats row.
