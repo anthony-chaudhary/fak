@@ -10,6 +10,8 @@ keywords:
   - agent token cost
   - context re-send
   - cache discount
+  - agent cost reduction measured
+  - prompt cache savings
 date: 2026-07-03
 ---
 
@@ -136,6 +138,36 @@ the naive multiplier alone. The naive arm's ~19 hours is modeled from the prefil
 curve (validated within ~0.4%), not run live; the artifact and its fences are in
 [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md).
 
+## What it actually saved: the production ledger
+
+The worked example above is illustrative arithmetic, and the fleet result beneath it is a
+lab benchmark. Here is the third kind of evidence — what the mechanism did in
+**production**, folded from the real per-session cache-value ledger
+(`docs/nightrun/cache-savings.jsonl`) and printed by `fak cachevalue report`.
+
+Over **2026-07-01 to 2026-07-09** (8.33 days, **2,004** finished sessions), the ledger
+records **$8,558 of API cost avoided** against a no-cache counterfactual of $10,926 — a
+**78.3% net reduction** — while shedding **97.1M** context tokens. That number is *not*
+one blended cache claim. It is two labelled tracks kept side by side, exactly as the
+[honest boundary](#the-honest-boundary-fak-relays-the-providers-number) above requires:
+
+| Track | Owner | Evidence | Cost avoided (8.33d) | What it is |
+|---|---|---|---|---|
+| Provider prompt cache | provider (Anthropic / OpenAI) | **OBSERVED** — provider-relayed | **$7,706** | the provider's own `cache_read` discount; `fak` keeps the prefix byte-identical so it stays warm, but the discount is the provider's to give |
+| fak compaction shed | `fak` | **WITNESSED** — fak-authored | **$852** | the 97.1M context tokens `fak` dropped while holding the prefix intact, priced at the base input rate |
+
+`fak`'s own authored slice is the *smaller* one: **9.4%** of the token-equivalent saved is
+fak-authored, and the rest is provider prompt-cache economics that `fak` *preserves*
+rather than *creates*. That split is the honesty, not a footnote to it — `fak` reports the
+provider's number as the provider's, and claims only the tokens it actually shed.
+
+Two fences travel with the figure. It is a **dated snapshot** of a growing ledger, so run
+`fak cachevalue report --since 2026-07-01` for the current fold rather than trusting a
+number frozen in a doc. And **23 rows are dollar-blind** — a provider with no base price
+configured — so their tokens are counted in the token-equivalent total but contribute
+**$0** to the dollar figure. The dollar number is therefore a floor: understated by the
+unpriced rows, never inflated by a rate `fak` does not have.
+
 ## The one line to keep
 
 A long session is expensive because it re-sends everything, and the prompt cache is the
@@ -151,4 +183,4 @@ rather than claiming a saving it cannot force.
 - [The frozen-trajectory cache cliff](frozen-trajectory-cache-cliff.md) — why a long trajectory's cache-hit rate rises by construction, and why that is not the same as getting cheaper.
 - [O(1) context-window economics](o1-context-window-economics.md) — the accounting model underneath the per-turn cost.
 
-*Last updated: 2026-07-03*
+*Last updated: 2026-07-09*

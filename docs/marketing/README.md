@@ -87,7 +87,7 @@ external launches nor bypasses any provider's classifier — it routes the deman
 
 | Market question | fak answer | Route |
 |---|---|---|
-| "How do I run agents cheaper as bills spike?" | Route the expensive tier only where it earns its cost, and keep a long session's prompt-cache prefix byte-identical — measured, not vibed. | [`../explainers/long-session-economics.md`](../explainers/long-session-economics.md) |
+| "How do I run agents cheaper as bills spike?" | Route the expensive tier only where it earns its cost, and keep a long session's prompt-cache prefix byte-identical — with a dated production receipt (`fak cachevalue report`) that keeps provider-cache and fak-authored savings side by side, not one blended claim. | [`../explainers/long-session-economics.md#what-it-actually-saved-the-production-ledger`](../explainers/long-session-economics.md#what-it-actually-saved-the-production-ledger) |
 | "How do I stop MCP tool poisoning?" | Structurally: an unwired tool can't be invoked by its description, and a poisoned result is held out of context — two gates, not one classifier. | [`../integrations/harden-any-mcp.md`](../integrations/harden-any-mcp.md) |
 | "How do I break the lethal trifecta?" | Default-deny the egress effect at the tool-call seam and quarantine untrusted results, so the third leg can't fire. | [`../explainers/default-deny-vs-classifier.md`](../explainers/default-deny-vs-classifier.md) |
 | "Agents are privileged identities — how do I scope and audit them?" | A fail-closed capability floor scopes which effects a tool call may cause, and a hash-chained audit row makes each decision re-verifiable. | [`../explainers/verify-dont-trust.md`](../explainers/verify-dont-trust.md) |
