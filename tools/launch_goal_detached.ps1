@@ -83,6 +83,24 @@ param(
   # cap: a Fable-limited seat still serves on opus/sonnet, which the switcher-picked
   # account authenticates for the same way. Additive — empty keeps prior behavior.
   [string]$Model       = '',
+  # GATEWAY BUDGET (the token-saver + budget guard for detached workers). When -Guarded,
+  # the worker runs under its OWN `fak guard` gateway, so it inherits fak's default-on
+  # token savers AND a hard context/wall budget that self-terminates a runaway worker.
+  #   -ContextBudgetTokens : prompt/context-token budget handed to `fak guard
+  #     --context-budget-tokens`. MUST stay well above the ~62K turn-1 prompt floor: a
+  #     worker's first turn is ~62K tokens, so a budget below that makes the worker born
+  #     over-budget and it dies on turn 1 (the known dispatch-worker-context-budget-trap,
+  #     #2972). 200000 leaves ~3x headroom over that floor while still bounding a wedged
+  #     worker. Also satisfies guard's rule that --restart-on-budget needs a positive
+  #     budget (guard.go), so --restart-on-budget below is always valid.
+  [int]$ContextBudgetTokens = 200000,
+  #   -MaxDuration : wall-clock budget handed to `fak guard --max-duration`. An INDEPENDENT
+  #     axis from the token budget — a stuck worker that isn't burning tokens still self-
+  #     terminates gracefully at this deadline instead of occupying a seat forever.
+  [string]$MaxDuration = "45m",
+  #   -Guarded : wrap the worker in `fak guard` (default). Set $false to fall back to the
+  #     exact legacy raw `claude -p` spawn (no gateway, no budget) — a trivial revert lever.
+  [bool]$Guarded = $true,
   # Optional fak binary. Empty probes this repo's tools\.bin/fak.exe, repo-root fak.exe,
   # then PATH fak.
   [string]$FakExe      = '',
@@ -278,8 +296,38 @@ else { Remove-Item Env:CLAUDE_CODE_OAUTH_TOKEN -ErrorAction SilentlyContinue }
 # Fable-usage-capped seat still serves on opus/sonnet under the same OAuth (#Fable-cap).
 $claudeArgs = @("-p", "--permission-mode", "bypassPermissions")
 if ($Model) { $claudeArgs = @("-p", "--model", $Model, "--permission-mode", "bypassPermissions") }
-$p = Start-Process -FilePath $claude `
-  -ArgumentList $claudeArgs `
+
+# GATEWAY WRAP (seat-hygiene-safe): run the worker under its OWN `fak guard` gateway so it
+# gets fak's default-on token savers PLUS a context/wall budget guard. This does NOT leak
+# the parent's seat: the "OWN THE SEAT" block above already STRIPPED the parent's
+# ANTHROPIC_BASE_URL/KEY, and CLAUDE_CONFIG_DIR + CLAUDE_CODE_OAUTH_TOKEN are pinned to the
+# switcher-chosen account BEFORE this spawn. So the NEW `fak guard` establishes a fresh
+# session-local loopback gateway authenticated by THAT account's OAuth (guard.go: the
+# --provider anthropic default is the subscription OAuth path, needs no API key) and injects
+# its OWN ANTHROPIC_BASE_URL/KEY for its child claude (guard_provider.go / guard_child.go) —
+# exactly how `fak guard -- claude` works normally. Guard forwards its stdin to the child
+# (guard_child.go: child.Stdin = os.Stdin), so the stdin-fed goal prompt still reaches
+# `claude -p`. Reuse $fak (already resolved, repo-local .bin first, respects -FakExe) as the
+# gateway binary rather than a second PATH probe.
+# --restart-on-budget is valid because -ContextBudgetTokens is always a positive budget
+# (guard.go requires --context-budget-tokens > 0 for it).
+if ($Guarded) {
+  $spawnFile = $fak
+  $spawnArgs = @(
+    "guard",
+    "--context-budget-tokens", "$ContextBudgetTokens",
+    "--restart-on-budget",
+    "--max-duration", "$MaxDuration",
+    "--",
+    $claude
+  ) + $claudeArgs
+} else {
+  # Legacy raw `claude -p` spawn (no gateway / no budget) — kept as a one-flag revert lever.
+  $spawnFile = $claude
+  $spawnArgs = $claudeArgs
+}
+$p = Start-Process -FilePath $spawnFile `
+  -ArgumentList $spawnArgs `
   -WorkingDirectory $Workspace `
   -RedirectStandardInput  $inF `
   -RedirectStandardOutput $logOut `
