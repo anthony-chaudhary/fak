@@ -43,6 +43,30 @@ Heaviest contributors (the cold-schema deferral targets for #3231/#3232):
 The full 24-tool breakdown is what `fak footprint` prints; only the head is
 pinned here so a drift is legible in review.
 
+## The gate (#2924)
+
+Measuring the floor does not keep the core narrow — a number that cannot refuse a
+change is still just taste. `internal/mcpfootprint.CheckFloor` gates the measured
+floor against a committed ceiling, `FloorBudgetTokens` (currently **5460**), as a
+one-way ratchet:
+
+| Direction | Reason | What it means |
+|---|---|---|
+| measured **>** budget | `FLOOR_BUDGET_EXCEEDED` | a new tool, or a fattened description/JSON-Schema, grew the per-call tax |
+| measured **<** budget − 250 | `FLOOR_BUDGET_STALE` | a deferral won headroom that was never banked into the constant |
+
+**How to justify growth.** Raise `FloorBudgetTokens` in the *same commit* as the tool
+that grew it, and re-pin the baseline table above. That is the whole mechanism: the
+new per-turn tax becomes a diff line a reviewer sees, bound to its cause, instead of
+being discovered a quarter later. Prefer deferring a cold schema (#3231/#3232) over
+paying the floor.
+
+The 250-token slack absorbs incidental churn (a reworded description) while still
+forcing a real reduction to be banked — the same discipline `internal/pythongate`
+applies to the `tools/*.py` baseline: the ratchet only ever tightens. The gate fails
+closed: an empty registry prices as 0 tokens and refuses as `FLOOR_BUDGET_STALE`
+rather than greening on a measurement of nothing.
+
 ## Witness
 
 - `internal/mcpfootprint.TestRealFakMCPFloor` prices the **real** registry and
@@ -51,6 +75,11 @@ pinned here so a drift is legible in review.
 - `internal/mcpfootprint.TestPricePartitionsExactly` /
   `TestPerToolSortedDescending` lock the estimator invariants.
 - `cmd/fak.TestMCPFootprintVerbJSON` witnesses the `fak footprint --json` shape.
+- `internal/mcpfootprint.TestCommittedBudgetMatchesMeasuredFloor` proves the ceiling
+  above is a measurement, not a hand-typed number that drifted from the registry;
+  `TestFloorGateRefusesGrowth` witnesses the refusal firing on a registry grown by one
+  tool, and `TestFloorGateDemandsBankedWin` witnesses the ratchet refusing an unbanked
+  reduction. `TestFloorGateBandBoundaries` pins the exact admit/refuse edges.
 
 ## Cross-links
 

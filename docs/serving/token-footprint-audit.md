@@ -44,7 +44,7 @@ Two derived roll-ups:
 - **`total` = system + tools + history + tail**, equal to `EstimateAnthropicTokens`.
 
 Per-tool cost is broken out (`PerTool`), which is the exact primitive
-[#2924](https://github.com/anthony-chaudhary/fak/issues/2924) needs to gate growth of
+[#2924](https://github.com/anthony-chaudhary/fak/issues/2924) uses to gate growth of
 the tool floor.
 
 ## The floor is the thing to watch
@@ -73,7 +73,7 @@ and stay behind a flag with a witness.
 | Slice | Lever | Loss | fak status | Tracking |
 |---|---|---|---|---|
 | `system` | byte-faithful passthrough keeps the cached prefix alive; author-side distillation is the only way to shrink it without a cache break | lossless (cache) / author-side (distill) | ✅ passthrough; ➖ distillation is Claude Code's to do | [#1258](https://github.com/anthony-chaudhary/fak/issues/1258) syspromptmmu (fak's own future spine, not the Claude route) |
-| `tools` | tool-floor pruning drops provably-unreachable defs; `fak_tools_search` lazy-loads schemas | lossless | ✅ both shipped | [#2924](https://github.com/anthony-chaudhary/fak/issues/2924) per-tool footprint budget + floor-growth gate |
+| `tools` | tool-floor pruning drops provably-unreachable defs; `fak_tools_search` lazy-loads schemas | lossless | ✅ both shipped; ✅ floor gated | [#2924](https://github.com/anthony-chaudhary/fak/issues/2924) per-tool footprint budget + floor-growth gate (shipped) |
 | `history` | compact-history sheds the un-cacheable middle past the 48k budget by splicing original bytes; ctxplan O(1) view re-materializes under a budget | bounded | ✅ both on by default | [#3028](https://github.com/anthony-chaudhary/fak/issues/3028) measure compaction cache-hit impact |
 | `history` (tool results) | oversized-result elision shrinks a scrolled-past `tool_result` to head+tail at 16 KB | bounded | ✅ on by default | — |
 | `tail` | inbound content exact-dedup (same file/output sent twice in one request) | lossless | ✅ shipped | [#1101](https://github.com/anthony-chaudhary/fak/issues/1101) (closed) |
@@ -92,6 +92,13 @@ that is actually largest for a given workload.
 - **Offline scorecard (shipped, #3230):** `fak footprint` prices fak's own MCP tool
   registry floor deterministically through the same estimator (see
   `docs/context-budget/mcp-tool-floor.md`).
+- **Floor-growth gate (shipped, #2924):** `internal/mcpfootprint.CheckFloor` sums the
+  per-tool costs into a `tool_schema_footprint` (`ToolSchemaFootprint`) and refuses a
+  change that grows the always-sent floor past the committed `FloorBudgetTokens`
+  ceiling (`FLOOR_BUDGET_EXCEEDED`) — the justification for growth is raising that
+  constant in the same commit, where a reviewer sees it. It is a one-way ratchet: an
+  unbanked reduction also refuses (`FLOOR_BUDGET_STALE`), so a deferral win cannot
+  silently become headroom for future bloat.
 - **Live gateway footprint (shipped, #3233):** the footprint is now wired into the
   managed-context report (`fak_context_value`) as an ESTIMATED `footprint` block beside
   the OBSERVED resident-token number. It is captured on every inbound Anthropic
