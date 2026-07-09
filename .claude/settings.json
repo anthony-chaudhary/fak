@@ -21,7 +21,7 @@
             "command": "python",
             "args": [
               "-c",
-              "import os,subprocess,sys; root=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); bins=[os.path.join(root,'tools','.bin','repoguard.exe'),os.path.join(root,'tools','.bin','repoguard')]; p=next((x for x in bins if os.path.exists(x)),None); args=[p,'--hook'] if p else [sys.executable,os.path.join(root,'tools','repo_guard.py'),'--hook']; subprocess.call(args); sys.exit(0)"
+              "import os,subprocess,sys; root=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); d=os.path.join(root,'tools','.bin'); bins=[os.path.join(d,'repoguard.exe')]+([] if os.name=='nt' else [os.path.join(d,'repoguard')]); ex=[x for x in bins if os.path.exists(x)]; p=max(ex,key=os.path.getmtime) if ex else None; args=[p,'--hook'] if p else [sys.executable,os.path.join(root,'tools','repo_guard.py'),'--hook']; subprocess.call(args); sys.exit(0)"
             ],
             "type": "command"
           }
