@@ -101,8 +101,12 @@ func TestExpandPresetsMixedDedups(t *testing.T) {
 	if seen[FeatureBreakpointPlan] != 1 {
 		t.Fatalf("bp_plan appeared %d times, want 1 (dedup failed): %v", seen[FeatureBreakpointPlan], got)
 	}
-	if len(got) != 5 { // vdso + 4 wire levers
-		t.Fatalf("expanded to %d tokens, want 5: %v", len(got), got)
+	// vdso (a bare lead token, off the wire plane) + the wire-cache levers, each once;
+	// the trailing bp_plan is already a wire lever, so the deduped total is the preset's
+	// lever count plus the one bare lead token — assert that relation, not a frozen count.
+	wantLen := len(PresetExpansion("wire-cache")) + 1
+	if len(got) != wantLen {
+		t.Fatalf("expanded to %d tokens, want %d (vdso + wire levers, bp_plan deduped): %v", len(got), wantLen, got)
 	}
 }
 
@@ -121,9 +125,12 @@ func TestBuildSweepExpandsPresets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSweep: %v", err)
 	}
-	// all-off + one arm per lever + all-on = 4 levers -> 6 arms.
-	if len(configs) != 6 {
-		t.Fatalf("@wire-cache built %d arms, want 6: %v", len(configs), armNames(configs))
+	// The matrix is a fail-closed all-off baseline, one arm isolating each preset lever,
+	// and (since the preset carries >1 lever) an all-on arm — so the arm count tracks the
+	// preset's expansion (levers + 2), not a frozen total.
+	wantArms := len(PresetExpansion("wire-cache")) + 2
+	if len(configs) != wantArms {
+		t.Fatalf("@wire-cache built %d arms, want %d (all-off + one per lever + all-on): %v", len(configs), wantArms, armNames(configs))
 	}
 }
 

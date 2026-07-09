@@ -333,6 +333,14 @@ func (r *Report) JSON() []byte {
 // feature is swept, an "all-on" arm. An unknown feature fails loud (it is not a
 // runtime knob this rung can flip). Duplicate feature names collapse to one arm.
 func BuildSweep(features []string) ([]FeatureConfig, error) {
+	// Expand any "@preset" entry to its flattened token list first, so one
+	// `--sweep @wire-cache` feeds the whole cache dimension into the arm matrix below.
+	// A mistyped preset fails loud here, the same way an unknown bare token does further
+	// down — never a silent zero-arm sweep.
+	features, err := ExpandPresets(features)
+	if err != nil {
+		return nil, err
+	}
 	seen := map[string]bool{}
 	var feats []string
 	for _, f := range features {
