@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/cacheobs"
+	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/cachevaluereport"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
@@ -145,6 +147,52 @@ type cacheValueTrack2Result struct {
 	TotalTokenEquiv         float64
 	CacheReadTokens         uint64
 	CompactionShedTokens    uint64
+}
+
+// buildCacheValuePersistenceReport persists BOTH cache-value tracks for a finished
+// session and returns a report naming what landed, so a live exit path can SURFACE the
+// savings the operator just earned instead of writing it silently to the ledger and
+// throwing the result away. Track 1 is the WITNESSED KV-prefix-reuse kernel row
+// (cachevalueledger); Track 2 is the OBSERVED-$ provider-cache + compaction rows
+// (appendObservedCacheSavingsTo). Before this wire, guard and serve exits computed both
+// results and discarded them (`_ = ...`), leaving the dollar-aware summary formatter
+// below orphaned — referenced only by its own test, never by a running session (the
+// classic fak detection-without-enforcement gap). Best-effort: a ledger write failure
+// never fails the session — the report still names the planned rows, and a
+// RowsWritten<RowsPlanned gap tells the reader the write did not land.
+//
+// track1Rel is passed in because guard and serve resolve the Track-1 ledger path
+// differently today (guard writes the bare relative rel; serve wraps it in
+// nightrunLedgerPath) — this helper preserves each caller's existing target rather than
+// silently relocating either ledger.
+func buildCacheValuePersistenceReport(srv *gateway.Server, kind, name, provider, track1Rel string, now time.Time) cacheValuePersistenceReport {
+	rep := cacheValuePersistenceReport{Since: now.UTC().Format("2006-01-02")}
+
+	stats := cacheobs.Default.Snapshot()
+	rep.Track1 = cacheValueTrack1Result{Path: track1Rel}
+	if stats.Turns > 0 {
+		rep.Track1.RowsPlanned = 1
+		rep.Track1.Turns = stats.Turns
+		rep.Track1.PromptTokens = stats.PromptTokens
+		rep.Track1.ReusedTokens = stats.ReusedTokens
+		if err := cachevalueledger.Append(kind, name, track1Rel, stats); err == nil {
+			rep.Track1.RowsWritten = 1
+		}
+	}
+
+	track2Path := nightrunLedgerPath(cachevaluereport.DefaultSavingsLedgerRel)
+	t2 := appendObservedCacheSavingsTo(track2Path, kind, provider, name, srv.AdjudicationSummary(), now)
+	rep.Track2 = cacheValueTrack2Result{
+		Path:                    track2Path,
+		RowsPlanned:             t2.RowsPlanned,
+		RowsWritten:             t2.RowsWritten,
+		ProviderTokenEquiv:      t2.ProviderTokenEquiv,
+		FakCompactionTokenEquiv: t2.FakCompactionTokenEquiv,
+		TotalTokenEquiv:         t2.TotalTokenEquiv,
+		CacheReadTokens:         t2.CacheReadTokens,
+		CompactionShedTokens:    t2.CompactionShedTokens,
+	}
+	return rep
 }
 
 func formatCacheValuePersistenceSummary(label string, rep cacheValuePersistenceReport) string {

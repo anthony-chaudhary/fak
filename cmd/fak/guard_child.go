@@ -17,7 +17,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/agent"
-	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/dormancy"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
@@ -1382,12 +1381,17 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 		// nothing is outstanding.
 		emit(guardToolprocSummary(time.Now()))
 	}
-	// Append cache-value observation to ledger (epic #1072, issue #1075).
-	stats := cacheobs.Default.Snapshot()
-	if stats.Turns > 0 {
-		_ = cachevalueledger.Append("guard", agentName, cachevalueledger.DefaultLedgerRel, stats)
+	// Append cache-value observation to ledger (epic #1072, issue #1075) AND surface it.
+	// Persist both tracks, then — for a non-quiet (interactive) session — print the
+	// dollar-aware evidence summary so the operator SEES the savings this session earned
+	// instead of it landing silently in the ledger. The summary formatter had been built
+	// and tested but wired to nothing (detection-without-enforcement); this is the felt
+	// "usage savings moment" for a `fak c` / `fak guard` session. A headless --quiet
+	// worker still persists silently, exactly as before.
+	cvReport := buildCacheValuePersistenceReport(srv, "guard", agentName, provider, cachevalueledger.DefaultLedgerRel, time.Now())
+	if !quiet {
+		fmt.Fprint(os.Stderr, guardColorizeSummary(formatCacheValuePersistenceSummary("fak guard", cvReport), guardFdIsTerminal(int(os.Stderr.Fd()))))
 	}
-	appendObservedCacheSavings("guard", provider, agentName, srv.AdjudicationSummary())
 	// Append the gateway-usage exit row (#1610), same writer as the serve exits, so a
 	// guard session's full served-turn counter family — compaction fired/bailed/shed
 	// among them — survives the process instead of dying with the console summary.

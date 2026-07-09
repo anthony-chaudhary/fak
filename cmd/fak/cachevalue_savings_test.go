@@ -2,6 +2,7 @@ package main
 
 import (
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -184,6 +185,31 @@ func TestFormatCacheValuePersistenceSummaryNamesEvidenceAndNextCommand(t *testin
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("summary missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestCacheValueSummaryWiredIntoGuardExit is the anti-regression witness for the
+// detection-without-enforcement gap this wire closed. formatCacheValuePersistenceSummary
+// was built and unit-tested but referenced by nothing on a live path, so a finished
+// guard session persisted its savings silently and never showed the operator the "usage
+// savings moment". This asserts the guard exit both BUILDS the report and FORMATS it —
+// and fails the moment either reference is removed, re-orphaning the formatter. Matches
+// the source-assertion idiom of servewiring_test.go (which guards the same class of
+// dead-wiring regression on the serve path).
+func TestCacheValueSummaryWiredIntoGuardExit(t *testing.T) {
+	root := repoRootFromTest(t)
+	body, err := os.ReadFile(filepath.Join(root, "cmd", "fak", "guard_child.go"))
+	if err != nil {
+		t.Fatalf("read guard_child.go: %v", err)
+	}
+	src := string(body)
+	for _, want := range []string{
+		"buildCacheValuePersistenceReport(",
+		`formatCacheValuePersistenceSummary("fak guard"`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("guard_child.go no longer surfaces the cache-value savings summary at session exit (missing %q); the dollar-aware formatter is orphaned again", want)
 		}
 	}
 }
