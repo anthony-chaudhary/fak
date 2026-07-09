@@ -390,6 +390,9 @@ var tier = map[string]int{
 	"trajquery":             1,
 	"trigram":               1,
 	"chatops":               1, // inbound chatops DOOR (#2264, epic #2259 C4): the pure parse+authorize fold that turns one raw Slack message into a closed-grammar verb + operand or a structured refusal (BOT_LOOP/WRONG_CHANNEL/NOT_ADDRESSED/EMPTY/NOT_ADMIN/UNKNOWN_VERB/MISSING_OPERAND); fail-closed admin allowlist on immutable user ids, channel text never executes as free-form. State in, decision out; imports nothing internal, off the hot path — produces the Command chatopsdetach(1) consumes.
+	"negframe":              1, // negation-lexicon + reframe-classification card (#3539): classifies negatively-framed steer prose (prohibition/absence/refusal/hedge) and returns the mechanical positive reframe; imports pkg/scorecard only, off the hot path.
+	"stepbaton":             1, // pure step-baton stamp core; stdlib-only, imports nothing internal, off the hot path.
+	"stepbatoncapture":      1, // step-baton capture over stepbaton(1); imports only stepbaton, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
