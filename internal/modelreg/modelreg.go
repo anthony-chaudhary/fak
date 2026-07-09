@@ -50,6 +50,18 @@ var Catalog = map[string]string{
 	// (single file, ~4.7 GB) for a more capable laptop/GPU run.
 	"qwen2.5:1.5b": "hf://mradermacher/Qwen2.5-1.5B-GGUF/Qwen2.5-1.5B.Q8_0.gguf",
 	"qwen2.5:7b":   "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+	// Qwen3.6-27B — a dense hybrid REASONING model, the "stronger model" the
+	// weekly-report narrator uses on the CPU-only da33 lane (~1 TB RAM). A single
+	// Q4_K_M GGUF (~18 GB) that `fak run` auto-pulls on first use and serves through
+	// the in-kernel CPU path — far more coherent executive prose than the qwen2.5:3b/7b
+	// it replaces. bartowski is the canonical public GGUF re-publisher already used
+	// above; the repo uses the "Qwen_Qwen3.6-27B-GGUF" underscore naming and the file
+	// carries the same "Qwen_" prefix (confirmed present in the repo tree before
+	// seeding — re-verify with a HEAD on the resolve URL if you edit). NOTE: this is a
+	// REASONING model (emits <think>…</think> before the answer); any consumer that
+	// injects/posts its output must strip the think-trace first (see the confluence
+	// weekly-report summarizer's run_fak_summary).
+	"qwen3.6-27b": "hf://bartowski/Qwen_Qwen3.6-27B-GGUF/Qwen_Qwen3.6-27B-Q4_K_M.gguf",
 	// Qwen2.5-Coder instruct GGUFs — the CODING-tuned, TOOL-CALL-capable tier the
 	// `fak guard --local`/`--gguf` coding loop wants (#1058, epic #1056). They emit the
 	// Qwen2.5 == Hermes `<tool_call>` dialect the in-kernel planner already lifts into

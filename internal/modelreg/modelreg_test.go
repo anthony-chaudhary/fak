@@ -163,6 +163,26 @@ func TestCodingAliasesResolveAndAreFlagged(t *testing.T) {
 	}
 }
 
+// TestNarratorAliasResolvesAndIsNotCoding pins the qwen3.6-27b narrator alias: the
+// weekly-report narrator's "stronger model" on the CPU-only lane must resolve by its short
+// name to a concrete single-file hf:// GGUF, and must NOT be flagged coding — it is a dense
+// hybrid reasoning/chat model, not a Coder-tuned tool-call model, so the `fak ls` coding
+// column stays discriminating.
+func TestNarratorAliasResolvesAndIsNotCoding(t *testing.T) {
+	withCacheRoot(t)
+	const alias = "qwen3.6-27b"
+	got, expanded := Resolve(alias)
+	if !expanded {
+		t.Fatalf("Resolve(%q) did not expand; got %q", alias, got)
+	}
+	if want := Catalog[alias]; got != want || want == "" {
+		t.Fatalf("Resolve(%q) = %q; want embedded target %q", alias, got, want)
+	}
+	if IsCoding(alias) {
+		t.Errorf("IsCoding(%q) = true; the narrator reasoning model must not be flagged coding", alias)
+	}
+}
+
 // TestDefaultLocalCodingAliasIsACuratedCoder pins the no-name default: it must be one of
 // the curated coding aliases and resolve to a concrete embedded target, so the
 // one-command `fak guard --local`/`--gguf` path (epic #1056) has a known-good model with
