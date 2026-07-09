@@ -22,6 +22,13 @@ const (
 
 	// guardSessionCardUpdateInterval paces the live root-card edits while a session runs.
 	guardSessionCardUpdateInterval = 20 * time.Second
+	// guardSessionCardKeepaliveInterval bounds how long an IDLE session's card goes without
+	// a refresh. The live line embeds an elapsed clock, so before this gate every 20s tick
+	// produced a byte-different chat.update forever — a real API call per tick even when
+	// turns/tokens never moved, multiplied across every guarded session on one shared bot
+	// token. The tick now spends a chat.update only when the SUBSTANTIVE fold moved, or when
+	// this keepalive window has elapsed so an idle card's clock still advances for a reader.
+	guardSessionCardKeepaliveInterval = 5 * time.Minute
 	// guardSessionFinalDrainTimeout bounds the synchronous flush of the final outcome edit
 	// before guard exits (finishGuardChildAndReport calls os.Exit right after).
 	guardSessionFinalDrainTimeout = 8 * time.Second
@@ -202,6 +209,12 @@ type guardSessionCard struct {
 	srv  guardSessionMetricsSource
 	stop chan struct{}
 	done chan struct{}
+
+	// Change-gate state, owned solely by the updater goroutine (finalize runs only after
+	// stopUpdater joins it), so no lock is needed. lastKey is the substantive fold of the
+	// last edit actually enqueued; lastSentAt is when it went out — the keepalive clock.
+	lastKey    string
+	lastSentAt time.Time
 }
 
 // newGuardSessionCard returns a card for a queued root, or nil if the root did not queue.
@@ -232,9 +245,7 @@ func (c *guardSessionCard) startUpdater(srv guardSessionMetricsSource) {
 			case <-c.stop:
 				return
 			case <-t.C:
-				if err := c.enqueueUpdate(c.liveLine()); err == nil {
-					startGuardSessionThreadDrain()
-				}
+				c.tick(time.Now())
 			}
 		}
 	}()
@@ -251,41 +262,86 @@ func (c *guardSessionCard) stopUpdater() {
 	c.stop = nil
 }
 
-// liveLine renders the running-session status line from the current gateway fold.
-func (c *guardSessionCard) liveLine() string {
-	return guardSessionLiveLine(c.srv.AdjudicationSummary(), time.Since(c.startedAt))
+// tick is one periodic-update decision. It enqueues an edit (and kicks a drain) ONLY when
+// the edit carries new information: the substantive fold (turns/tokens/denied) moved since
+// the last edit that actually went out, OR the keepalive window elapsed so an idle card's
+// elapsed clock still advances for a reader. An unchanged, not-yet-keepalive tick spends no
+// chat.update at all — the fix for the guard-session card being the fleet's dominant Slack
+// rate-limit drain. Gate state advances only when an edit was truly spooled, so a tick that
+// no-ops because the root has not posted yet (enqueueUpdateSent -> false) is retried, not
+// silently swallowed. Returns whether an edit was enqueued (for tests). now is injected so
+// the keepalive arithmetic is deterministic under test.
+func (c *guardSessionCard) tick(now time.Time) bool {
+	if c == nil || c.srv == nil {
+		return false
+	}
+	sum := c.srv.AdjudicationSummary()
+	key := guardSessionCardKey(sum)
+	changed := key != c.lastKey
+	keepaliveDue := !c.lastSentAt.IsZero() && now.Sub(c.lastSentAt) >= guardSessionCardKeepaliveInterval
+	if !changed && !keepaliveDue {
+		return false // unchanged and keepalive not due — spend no API call
+	}
+	sent, err := c.enqueueUpdateSent(guardSessionLiveLine(sum, now.Sub(c.startedAt)))
+	if err != nil || !sent {
+		return false // root not posted yet, or enqueue failed — retry next tick, keep gate state
+	}
+	c.lastKey = key
+	c.lastSentAt = now
+	startGuardSessionThreadDrain()
+	return true
+}
+
+// guardSessionCardKey folds the SUBSTANTIVE fields of the adjudication summary — the ones a
+// reader acts on — into the change-gate key. It deliberately excludes the elapsed clock:
+// the clock advancing is not new information worth a chat.update, and embedding it is what
+// made every idle tick a distinct, non-idempotent edit.
+func guardSessionCardKey(sum gateway.AdjudicationSummary) string {
+	return fmt.Sprintf("%d|%d|%d|%d|%d",
+		sum.Total, sum.InputTokens, sum.OutputTokens, sum.CachedPromptTokens, sum.Denied)
 }
 
 // enqueueUpdate queues an edit of the root card, resolving the root's posted ts from the
 // outbox. It SKIPS (no error) while the root has not posted yet, so an early tick or a
 // token-less run never spams update rows against a nonexistent card.
 func (c *guardSessionCard) enqueueUpdate(text string) error {
+	_, err := c.enqueueUpdateSent(text)
+	return err
+}
+
+// enqueueUpdateSent is enqueueUpdate that also reports whether a row was actually spooled.
+// It returns false (no error) while the root has not posted yet — there is no card ts to
+// edit — so the change-gate can distinguish "skipped, retry me" from "sent, advance my
+// state" and never strands the first real update behind the keepalive.
+func (c *guardSessionCard) enqueueUpdateSent(text string) (bool, error) {
 	if c == nil {
-		return nil
+		return false, nil
 	}
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return nil
+		return false, nil
 	}
 	ob, err := openOutbox()
 	if err != nil {
-		return err
+		return false, err
 	}
 	snap, err := ob.Load()
 	if err != nil {
-		return err
+		return false, err
 	}
 	ts := snap.PostedTS(c.rootNonce)
 	if ts == "" {
-		return nil // root not posted yet — nothing to edit
+		return false, nil // root not posted yet — nothing to edit
 	}
-	_, err = ob.Enqueue(slackoutbox.Row{
+	if _, err := ob.Enqueue(slackoutbox.Row{
 		Channel:  c.channel,
 		Text:     text,
 		UpdateTS: ts,
 		Source:   guardSessionThreadSource + ":status",
-	})
-	return err
+	}); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // finalize writes the final outcome edit and flushes it SYNCHRONOUSLY: guard calls

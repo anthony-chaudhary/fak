@@ -267,6 +267,116 @@ func TestGuardSessionLiveAndFinalLines(t *testing.T) {
 	}
 }
 
+// countCardUpdateRows returns how many chat.update rows the card has spooled (rows with an
+// UpdateTS set) — i.e. how many real chat.update API calls the drainer will make for it.
+func countCardUpdateRows(t *testing.T, ob *slackoutbox.Outbox) int {
+	t.Helper()
+	snap, err := ob.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, r := range snap.Rows {
+		if r.UpdateTS != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// postedRootCard sets up an outbox with a guard-session root drained to posted (ts "1.23"),
+// and returns the outbox plus a card bound to it, ready for tick() exercises.
+func postedRootCard(t *testing.T, startedAt time.Time) (*slackoutbox.Outbox, *guardSessionCard) {
+	t.Helper()
+	clearSlackEnv(t)
+	outboxTestDir(t)
+	posts := 0
+	srv := okSlackServer(t, &posts)
+	t.Cleanup(srv.Close)
+	ob, err := openOutbox()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ob.Enqueue(slackoutbox.Row{Channel: "C1", Text: "root", Nonce: "root-1"}); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if rc := runSlackOutbox(&out, &errb, []string{"drain", "--token", "xoxb-test", "--api-base", srv.URL + "/"}); rc != 0 {
+		t.Fatalf("drain rc=%d stderr=%s", rc, errb.String())
+	}
+	return ob, newGuardSessionCard("C1", "root-1", startedAt)
+}
+
+// TestGuardSessionCardTickGatesIdleUpdates is the before/after proof: an IDLE session (its
+// adjudication fold frozen) used to enqueue a byte-different chat.update on every 20s tick
+// forever, because the live line embeds an elapsed clock. The change-gate collapses that to
+// one edit per keepalive window. Over 30 minutes of 20s ticks (90 ticks) an idle card now
+// spends 6 chat.update calls (the keepalives) instead of 90 — a 15x cut against the fleet's
+// dominant Slack rate-limit drain.
+func TestGuardSessionCardTickGatesIdleUpdates(t *testing.T) {
+	t0 := time.Unix(1_000_000, 0)
+	ob, card := postedRootCard(t, t0)
+	idle := gateway.AdjudicationSummary{Total: 3, InputTokens: 120, OutputTokens: 40, CachedPromptTokens: 90, Denied: 0}
+	card.srv = fakeGuardMetrics{sum: idle}
+
+	sends := 0
+	const ticks = 90 // 30 minutes at the 20s cadence
+	for i := 0; i < ticks; i++ {
+		if card.tick(t0.Add(time.Duration(i) * guardSessionCardUpdateInterval)) {
+			sends++
+		}
+	}
+	// First tick (new info) + one keepalive per 5m window over 30m = 1 + 5 more = 6.
+	wantKeepalives := 1 + int((time.Duration(ticks-1)*guardSessionCardUpdateInterval)/guardSessionCardKeepaliveInterval)
+	if sends != wantKeepalives {
+		t.Fatalf("idle session enqueued %d edits over %d ticks; want %d (first + keepalives)", sends, ticks, wantKeepalives)
+	}
+	if got := countCardUpdateRows(t, ob); got != sends {
+		t.Fatalf("spooled %d update rows, want %d (one per gated send)", got, sends)
+	}
+	if sends >= ticks {
+		t.Fatalf("gate did not reduce calls: %d sends over %d ticks", sends, ticks)
+	}
+}
+
+// TestGuardSessionCardTickShipsEveryRealChange proves the gate never costs liveness: when
+// the substantive fold moves on every tick, every tick still ships its edit.
+func TestGuardSessionCardTickShipsEveryRealChange(t *testing.T) {
+	t0 := time.Unix(2_000_000, 0)
+	ob, card := postedRootCard(t, t0)
+
+	sends := 0
+	const ticks = 10
+	for i := 0; i < ticks; i++ {
+		// Each tick advances turns/tokens — real progress the reader must see.
+		card.srv = fakeGuardMetrics{sum: gateway.AdjudicationSummary{Total: uint64(i + 1), InputTokens: uint64(100 * (i + 1))}}
+		if card.tick(t0.Add(time.Duration(i) * guardSessionCardUpdateInterval)) {
+			sends++
+		}
+	}
+	if sends != ticks {
+		t.Fatalf("changing session shipped %d/%d edits; a real change must never be gated", sends, ticks)
+	}
+	if got := countCardUpdateRows(t, ob); got != ticks {
+		t.Fatalf("spooled %d update rows, want %d", got, ticks)
+	}
+}
+
+// TestGuardSessionCardKeyIgnoresElapsed pins the gate's contract: the key folds the
+// substantive fields and is INDEPENDENT of the elapsed clock, so a clock-only difference
+// never counts as new information worth a chat.update.
+func TestGuardSessionCardKeyIgnoresElapsed(t *testing.T) {
+	sum := gateway.AdjudicationSummary{Total: 5, InputTokens: 10, OutputTokens: 20, CachedPromptTokens: 15, Denied: 1}
+	if guardSessionCardKey(sum) != guardSessionCardKey(sum) {
+		t.Fatal("key is not stable for an unchanged summary")
+	}
+	moved := sum
+	moved.Total++
+	if guardSessionCardKey(sum) == guardSessionCardKey(moved) {
+		t.Fatal("key did not change when turns advanced")
+	}
+}
+
 func TestGuardSessionCardEnqueueUpdateSkipsUnpostedRoot(t *testing.T) {
 	clearSlackEnv(t)
 	outboxTestDir(t)
