@@ -337,7 +337,7 @@ func CanonicalTensorNameArch(name, arch string) (string, bool) {
 	if archUsesGGUFBatchedMoEExperts(arch) && suffix == glmGGUFRouter {
 		return "model.layers." + layer + ".mlp.gate.weight", true
 	}
-	if arch == "glm_moe_dsa" {
+	if archUsesMLAMoELayout(arch) {
 		if mapped, ok := glmMoeDsaCanonicalSuffix(suffix); ok {
 			return "model.layers." + layer + "." + mapped, true
 		}

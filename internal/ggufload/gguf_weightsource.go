@@ -174,7 +174,7 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 	p.SetTotal(len(s.File.Tensors)) // arm the progress reporter (no-op on nil / unset Progress)
 	for _, info := range s.File.Tensors {
 		p.Tick(tensorOnDiskBytes(info)) // one GGUF tensor consumed -> advance the % status
-		if cfg.ModelType == "glm_moe_dsa" {
+		if archUsesMLAMoELayout(cfg.ModelType) {
 			// Drop the MTP ("nextn") speculative head + any vision tower the text forward never
 			// reads (llama.cpp ignores them too), before canonical mapping would reject them. The
 			// materializing loader keys on the UNGATED union: even with model.RetainMTP set the GGUF
@@ -349,7 +349,7 @@ func (s *WeightSource) F32Tensors() (model.Config, []model.NamedTensorF32, error
 				continue
 			}
 			// MLA KV-b: buffer attn_k_b/attn_v_b and emit the combined kv_b_proj when both arrive.
-			if cfg.ModelType == "glm_moe_dsa" {
+			if archUsesMLAMoELayout(cfg.ModelType) {
 				if layer, half, ok := glmMoeDsaSplitKVB(info.Name); ok {
 					shape, data, err := s.shapeAndTensorF32(info)
 					if err != nil {

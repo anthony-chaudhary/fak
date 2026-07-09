@@ -76,8 +76,8 @@ func clampRanks(r, dim int) int {
 func (m *Model) forwardTPSupported() error {
 	cfg := m.Cfg
 	switch {
-	case cfg.isGLMMoeDsa():
-		return fmt.Errorf("model: ForwardTP does not yet shard glm_moe_dsa (MLA+DSA shares a latent KV across heads — head-parallel TP is a separate sub-lever)")
+	case cfg.usesMLAMoELayout():
+		return fmt.Errorf("model: ForwardTP does not yet shard the MLA+MoE layout (glm_moe_dsa / deepseek2 share a latent KV across heads — head-parallel TP is a separate sub-lever)")
 	case cfg.IsMoE():
 		return fmt.Errorf("model: ForwardTP does not yet shard MoE FFN (expert-parallel is a separate sub-lever)")
 	case cfg.DenseMLP:

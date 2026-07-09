@@ -120,7 +120,7 @@ func (c *KVCache) evictSupported(from, n int) int {
 	if end > len(c.pos) {
 		end = len(c.pos)
 	}
-	if c.cfg.isGLMMoeDsa() {
+	if c.cfg.usesMLAMoELayout() {
 		return c.evictGLMDsa(from, end)
 	}
 	w := c.kvStride()

@@ -77,7 +77,7 @@ func (m *Model) forwardHiddenRows(x [][]float32) *Activations {
 			// Gemma 4 builds its own per-layer RoPE inside the heterogeneous-geometry
 			// path, so the shared per-layer rope table is not used here.
 			m.layerGemma4(l, x, gemma4RopeFreqs)
-		case cfg.isGLMMoeDsa():
+		case cfg.usesMLAMoELayout():
 			m.layerGLMDsa(l, x, newRopeForLayer(cfg, l, seq), &glmDsaSharedTopK)
 		case cfg.isMiniMaxSparseAttn():
 			m.layerMiniMax(l, x, newRopeForLayer(cfg, l, seq))
@@ -188,7 +188,7 @@ func (m *Model) layerGLMDsa(l int, x [][]float32, rp rope, sharedTopK *[][]int) 
 func (m *Model) attnSeq(l int, xn [][]float32, rp rope) [][]float32 {
 	cfg := m.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
-	if cfg.isGLMMoeDsa() {
+	if cfg.usesMLAMoELayout() {
 		return m.glmDsaAttnSeqShared(l, xn, nil)
 	}
 	nH, nKV := cfg.NumHeads, cfg.NumKVHeads
@@ -295,7 +295,18 @@ func (m *Model) glmDsaAttnSeqShared(l int, xn [][]float32, sharedTopK *[][]int) 
 	seq := len(xn)
 	xnFlat := flatten(xn)
 	var topK [][]int
-	if glmDsaIndexerIsShared(cfg, l) {
+	if cfg.IndexNHeads == 0 {
+		// DeepSeek dense-MLA seam: no DSA lightning indexer (deepseek2), so every query
+		// attends its full causal prefix. topK[t] = all positions [0..seq); the shared kernel's
+		// glmDsaSelectedCausalKeys filters each row to [0..t], yielding exactly the dense causal
+		// set. The one full slice is shared read-only (the kernel never mutates a topK row). This
+		// is byte-identical attention math to GLM-DSA run over an un-pruned selection.
+		full := glmDsaPositions(seq)
+		topK = make([][]int, seq)
+		for t := range topK {
+			topK[t] = full
+		}
+	} else if glmDsaIndexerIsShared(cfg, l) {
 		if sharedTopK == nil || *sharedTopK == nil {
 			panic("model: glm_moe_dsa shared indexer without previous full indexer")
 		}

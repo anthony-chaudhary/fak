@@ -135,7 +135,23 @@ const (
 
 func archUsesGGUFBatchedMoEExperts(arch string) bool {
 	switch arch {
-	case "glm_moe_dsa", "qwen3moe":
+	case "glm_moe_dsa", "qwen3moe", "deepseek2":
+		return true
+	}
+	return false
+}
+
+// archUsesMLAMoELayout reports whether a canonical arch uses the MLA-latent-attention +
+// MoE tensor layout that fak's glm_moe_dsa loader implements — glm_moe_dsa (GLM-5.2) OR
+// deepseek2 (real DeepSeek-V2/V3/R1). DeepSeek is that layout minus the DSA indexer, so
+// the shared MLA/MoE loader gates (config apply, kv_b merge/split, canonical tensor names,
+// k-quant MLA path, MTP/vision skip) key on THIS predicate, while indexer-specific loader
+// code stays glm-only / IndexNHeads>0. The model-side sibling is Config.usesMLAMoELayout.
+// (archUsesGGUFBatchedMoEExperts is a distinct, broader set — it also includes qwen3moe,
+// which batches experts but is not an MLA model.)
+func archUsesMLAMoELayout(arch string) bool {
+	switch arch {
+	case "glm_moe_dsa", "deepseek2":
 		return true
 	}
 	return false
@@ -166,10 +182,13 @@ func glmMoeDsaMTPOrVisionTensor(name string) bool {
 	return isGLMMoeDsaMTPTensor(name) || isGLMMoeDsaVisionTensor(name)
 }
 
-// glmMoeDsaMTPOrVisionTensorForType is glmMoeDsaMTPOrVisionTensor gated to the glm_moe_dsa family,
-// so the "glm_moe_dsa" check stays in one place at the callsites that already know the model type.
+// glmMoeDsaMTPOrVisionTensorForType is glmMoeDsaMTPOrVisionTensor gated to the MLA+MoE family
+// (glm_moe_dsa OR deepseek2), so the model-type check stays in one place at the callsites that
+// already know the model type. DeepSeek-V3 ships the same "blk.<L>.nextn.*" MTP head (llama.cpp's
+// nextn tensors) with no canonical HF slot, so it must be skipped for a real DeepSeek load exactly
+// as for GLM-5.2 — the underlying .nextn./vision predicate is arch-agnostic.
 func glmMoeDsaMTPOrVisionTensorForType(modelType, name string) bool {
-	return modelType == "glm_moe_dsa" && glmMoeDsaMTPOrVisionTensor(name)
+	return archUsesMLAMoELayout(modelType) && glmMoeDsaMTPOrVisionTensor(name)
 }
 
 // glmMoeDsaSkipGGUFTensor reports whether a glm_moe_dsa GGUF tensor should be DROPPED from load
@@ -195,7 +214,7 @@ func glmMoeDsaSkipGGUFTensor(name string) bool {
 // glmMoeDsaSkipGGUFTensor. It is the shared guard the byte-accounting estimators use so the
 // "glm_moe_dsa" family check stays in one place.
 func glmMoeDsaSkipGGUFTensorForType(modelType, name string) bool {
-	return modelType == "glm_moe_dsa" && glmMoeDsaSkipGGUFTensor(name)
+	return archUsesMLAMoELayout(modelType) && glmMoeDsaSkipGGUFTensor(name)
 }
 
 // glmMoeDsaBatchedExpert reports whether a glm_moe_dsa GGUF tensor name is a batched routed-expert

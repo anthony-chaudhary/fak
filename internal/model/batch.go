@@ -109,7 +109,7 @@ func batchDecodeFastPathOK(cfg Config, quant bool) bool {
 func batchPreNormFastPathOK(cfg Config, quant bool) bool {
 	if cfg.BlockTopology != PreNorm ||
 		cfg.IsMoE() ||
-		cfg.isGLMMoeDsa() ||
+		cfg.usesMLAMoELayout() ||
 		cfg.DenseMLP ||
 		cfg.Alibi ||
 		cfg.IsQwen35Hybrid() ||

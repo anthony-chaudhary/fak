@@ -183,7 +183,7 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 	// read-only Config), so it is safe to run from many workers at once.
 	computeFn := func(info TensorInfo) tensorWork {
 		tw := tensorWork{tickBytes: tensorOnDiskBytes(info)}
-		if cfg.ModelType == "glm_moe_dsa" {
+		if archUsesMLAMoELayout(cfg.ModelType) {
 			// Drop the MTP ("nextn") head + any vision tower the text forward never reads. Ungated
 			// union: the MTP head has no canonical slot to materialize into yet even under
 			// model.RetainMTP, so drop it from materialization while the estimators count its bytes.
@@ -297,7 +297,7 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 		// dequant→Q8 route (the 2026-06-27-witnessed layout); only the routed experts, which run
 		// on the host under --cpu-offload-experts, stay raw-resident in kqw.
 		if _, _, residentable := residentExpertBlockGeometry(info.Type); residentable &&
-			info.Type != TensorQ4_K && cfg.ModelType != "glm_moe_dsa" &&
+			info.Type != TensorQ4_K && !archUsesMLAMoELayout(cfg.ModelType) &&
 			model.ResidentKQuantEligible(cfg, canon) {
 			tw.pending = []pendingTensor{{resident: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
 			tw.acctResident = true

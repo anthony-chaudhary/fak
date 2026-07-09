@@ -17,7 +17,7 @@ type glmDsaKVCache struct {
 }
 
 func newGLMDsaKVCache(cfg Config) *glmDsaKVCache {
-	if !cfg.isGLMMoeDsa() {
+	if !cfg.usesMLAMoELayout() {
 		return nil
 	}
 	return &glmDsaKVCache{
@@ -264,13 +264,18 @@ func glmDsaDumpResidual(layer, pos int, x []float32) {
 // either case (the genuinely sparse glue), so only the projections move to the device.
 func (m *Model) glmDsaAttentionStep(cache *glmDsaKVCache, layer, pos int, xn []float32, sharedTopK []int, mat matKernel) ([]float32, []int, bool) {
 	cfg := m.Cfg
-	if cache == nil || !cfg.isGLMMoeDsa() || len(xn) != cfg.HiddenSize {
-		glmDsaStepFail(layer, "preconditions", "cache_nil=%v isGLMMoeDsa=%v len(xn)=%d HiddenSize=%d",
-			cache == nil, cfg.isGLMMoeDsa(), len(xn), cfg.HiddenSize)
+	if cache == nil || !cfg.usesMLAMoELayout() || len(xn) != cfg.HiddenSize {
+		glmDsaStepFail(layer, "preconditions", "cache_nil=%v usesMLAMoELayout=%v len(xn)=%d HiddenSize=%d",
+			cache == nil, cfg.usesMLAMoELayout(), len(xn), cfg.HiddenSize)
 		return nil, nil, false
 	}
 	var topK []int
-	if glmDsaIndexerIsShared(cfg, layer) {
+	if cfg.IndexNHeads == 0 {
+		// DeepSeek dense-MLA decode seam: no DSA indexer, so attend the full causal prefix
+		// [0..pos]. Skips glmDsaIndexStep entirely (the IndexK cache stays empty and unread);
+		// glmDsaAppendAttentionKV + glmDsaAttendCached run unchanged over the dense selection.
+		topK = glmDsaPositions(pos + 1)
+	} else if glmDsaIndexerIsShared(cfg, layer) {
 		if len(sharedTopK) == 0 {
 			glmDsaStepFail(layer, "shared-indexer-empty-topk", "this layer reuses a shared indexer but sharedTopK is empty (IndexerTypes pattern?)")
 			return nil, nil, false

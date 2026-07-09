@@ -500,7 +500,7 @@ func (s *Session) Prefill(ids []int) []float32 {
 	if len(ids) == 0 {
 		return nil
 	}
-	if s.M.Cfg.isGLMMoeDsa() {
+	if s.M.Cfg.usesMLAMoELayout() {
 		s.requireGLMDsaSession()
 		var last []float32
 		for _, id := range ids {
@@ -620,7 +620,7 @@ func (s *Session) PrefillNoLogits(ids []int) {
 	if len(ids) == 0 {
 		return
 	}
-	if s.M.Cfg.isGLMMoeDsa() {
+	if s.M.Cfg.usesMLAMoELayout() {
 		s.requireGLMDsaSession()
 		for _, id := range ids {
 			s.tokenHiddenGLMDsa(id, s.Cache.Len())
@@ -721,7 +721,7 @@ func (s *Session) prefillTokenLoop(ids []int) []float32 {
 // sessions reuse their logits buffer; consume or copy the returned slice before the next
 // quantized Prefill/Step call on the same session.
 func (s *Session) Step(id int) []float32 {
-	if s.M.Cfg.isGLMMoeDsa() {
+	if s.M.Cfg.usesMLAMoELayout() {
 		s.requireGLMDsaSession()
 		return s.glmDsaHead(s.tokenHiddenGLMDsa(id, s.Cache.Len()))
 	}

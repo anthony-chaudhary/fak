@@ -39,7 +39,7 @@ func KVCacheToPaged(pool *PagedKVPool, c *KVCache) (*PagedKV, error) {
 	if !pool.SupportsRaw() {
 		return nil, fmt.Errorf("model: KVCacheToPaged requires a Kraw-capable PagedKVPool")
 	}
-	if c.cfg.isGLMMoeDsa() || c.cfg.isMiniMaxSparseAttn() || c.cfg.IsQwen35Hybrid() {
+	if c.cfg.usesMLAMoELayout() || c.cfg.isMiniMaxSparseAttn() || c.cfg.IsQwen35Hybrid() {
 		return nil, fmt.Errorf("model: KVCacheToPaged supports dense softmax KV only")
 	}
 	if pool.nLayers != c.cfg.NumLayers || pool.stride != c.kvStride() {

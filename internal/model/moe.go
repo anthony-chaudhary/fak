@@ -63,7 +63,7 @@ func (m *Model) ffnForLayer(layer int) ffnKind {
 	// q8w/q4kw, not the f32 manifest, so keying dispatch on m.has would mis-route every layer
 	// — a dense first-k GLM layer would fall through to moeFFN whose router mul panics in
 	// glmDsaWeightHAL ("missing resident weight …mlp.gate.weight" — the dense layer has none).
-	if m.Cfg.isGLMMoeDsa() && layer >= m.Cfg.FirstKDenseReplace && m.hasWeight(routerName(layer)) {
+	if m.Cfg.usesMLAMoELayout() && layer >= m.Cfg.FirstKDenseReplace && m.hasWeight(routerName(layer)) {
 		// Expert-parallel dispatch (#971): when a serve requested EP (epRanks > 1) and the
 		// expert tiling is valid for this config, route the routed-expert delta through the
 		// EP twin instead of the monolith. ExpertParallelPlan fails closed (ranks must be in

@@ -40,7 +40,7 @@ func (c Config) invFreqDenom() int {
 	if c.IsQwen35Hybrid() || c.isMiniMax() {
 		return c.rotaryDim()
 	}
-	if c.isGLMMoeDsa() && c.QKRopeHeadDim > 0 {
+	if c.usesMLAMoELayout() && c.QKRopeHeadDim > 0 {
 		return c.QKRopeHeadDim
 	}
 	return c.HeadDim

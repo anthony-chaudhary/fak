@@ -31,7 +31,7 @@ func (c *KVCache) MaxRepositionResidual() float64 {
 	if c == nil || c.cfg.NumLayers == 0 || len(c.pos) == 0 {
 		return 0
 	}
-	if c.cfg.isGLMMoeDsa() {
+	if c.cfg.usesMLAMoELayout() {
 		return 0
 	}
 	w := c.kvStride()

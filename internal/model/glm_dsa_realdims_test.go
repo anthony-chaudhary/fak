@@ -123,7 +123,7 @@ func buildGLMDsaTensorsFromCfg(t *testing.T, dtype string, cfg Config) map[strin
 		addOnes(ap+"kv_a_layernorm.weight", cfg.KVLoraRank)
 		addSeq(ap+"kv_b_proj.weight", []int{nH * (cfg.QKNopeHeadDim + cfg.VHeadDim), cfg.KVLoraRank})
 		addSeq(ap+"o_proj.weight", []int{H, nH * cfg.VHeadDim})
-		if !glmDsaIndexerIsShared(cfg, l) {
+		if cfg.IndexNHeads > 0 && !glmDsaIndexerIsShared(cfg, l) {
 			addSeq(ap+"indexer.wq_b.weight", []int{cfg.IndexNHeads * cfg.IndexHeadDim, cfg.QLoraRank})
 			addSeq(ap+"indexer.wk.weight", []int{cfg.IndexHeadDim, H})
 			addOnes(ap+"indexer.k_norm.weight", cfg.IndexHeadDim)

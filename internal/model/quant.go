@@ -286,20 +286,24 @@ func (m *Model) Quantize() {
 	}
 	for l := 0; l < m.Cfg.NumLayers; l++ {
 		p := func(s string) string { return layerName(l, s) }
-		if m.Cfg.isGLMMoeDsa() {
+		if m.Cfg.usesMLAMoELayout() {
 			add(p("self_attn.q_a_proj.weight"))
 			add(p("self_attn.q_b_proj.weight"))
 			add(p("self_attn.kv_a_proj_with_mqa.weight"))
 			add(p("self_attn.kv_b_proj.weight"))
 			add(p("self_attn.o_proj.weight"))
-			if glmDsaIndexerIsShared(m.Cfg, l) {
-				addIfPresent(p("self_attn.indexer.wq_b.weight"))
-				addIfPresent(p("self_attn.indexer.wk.weight"))
-				addIfPresent(p("self_attn.indexer.weights_proj.weight"))
-			} else {
-				add(p("self_attn.indexer.wq_b.weight"))
-				add(p("self_attn.indexer.wk.weight"))
-				add(p("self_attn.indexer.weights_proj.weight"))
+			// DSA lightning-indexer tensors are GLM-5.2-only (IndexNHeads>0); a real deepseek2
+			// checkpoint ships none, so enumerating them there would demand non-existent weights.
+			if m.Cfg.IndexNHeads > 0 {
+				if glmDsaIndexerIsShared(m.Cfg, l) {
+					addIfPresent(p("self_attn.indexer.wq_b.weight"))
+					addIfPresent(p("self_attn.indexer.wk.weight"))
+					addIfPresent(p("self_attn.indexer.weights_proj.weight"))
+				} else {
+					add(p("self_attn.indexer.wq_b.weight"))
+					add(p("self_attn.indexer.wk.weight"))
+					add(p("self_attn.indexer.weights_proj.weight"))
+				}
 			}
 		} else if m.Cfg.isLinearAttnLayer(l) {
 			add(p("linear_attn.in_proj_qkv.weight"))
@@ -320,7 +324,7 @@ func (m *Model) Quantize() {
 				add(expertName(l, e, "up_proj.weight"))
 				add(expertName(l, e, "down_proj.weight"))
 			}
-			if m.Cfg.isGLMMoeDsa() {
+			if m.Cfg.usesMLAMoELayout() {
 				addIfPresent(p("mlp.shared_experts.gate_proj.weight"))
 				addIfPresent(p("mlp.shared_experts.up_proj.weight"))
 				addIfPresent(p("mlp.shared_experts.down_proj.weight"))

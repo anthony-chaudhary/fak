@@ -224,10 +224,12 @@ func NewSyntheticMoE(cfg Config) *Model {
 // indexer k_norm.weight, model.norm.weight) init to 1.0; k_norm.bias to 0.0; all
 // matmul weights to a deterministic LCG in [-scale, scale].
 func NewSyntheticGLMDsa(cfg Config) *Model {
-	if !cfg.isGLMMoeDsa() {
-		panic("model: NewSyntheticGLMDsa needs a glm_moe_dsa cfg (ModelType/Architectures)")
+	if !cfg.usesMLAMoELayout() {
+		panic("model: NewSyntheticGLMDsa needs a glm_moe_dsa or deepseek2 cfg (ModelType/Architectures)")
 	}
-	if len(cfg.IndexerTypes) != cfg.NumLayers {
+	// The per-layer full/shared schedule is a DSA-indexer concept (GLM-5.2, IndexNHeads>0). A
+	// deepseek2 dense-MLA cfg carries no indexer, so it needs no IndexerTypes; every layer is dense.
+	if cfg.IndexNHeads > 0 && len(cfg.IndexerTypes) != cfg.NumLayers {
 		panic("model: NewSyntheticGLMDsa needs len(IndexerTypes) == NumLayers")
 	}
 	if cfg.NumLayers > 0 && glmDsaIndexerIsShared(cfg, 0) {
@@ -253,8 +255,9 @@ func NewSyntheticGLMDsa(cfg Config) *Model {
 		add(ap+"kv_a_layernorm.weight", cfg.KVLoraRank)
 		add(ap+"kv_b_proj.weight", nH*(cfg.QKNopeHeadDim+cfg.VHeadDim), cfg.KVLoraRank)
 		add(ap+"o_proj.weight", H, nH*cfg.VHeadDim)
-		// Indexer weights live only on full layers (shared layers reuse the index).
-		if glmDsaIndexerIsFull(cfg, l) {
+		// Indexer weights live only on full layers of a DSA-indexer model (IndexNHeads>0);
+		// a deepseek2 dense-MLA synthetic emits none (shared layers reuse the index).
+		if cfg.IndexNHeads > 0 && glmDsaIndexerIsFull(cfg, l) {
 			add(ap+"indexer.wq_b.weight", cfg.IndexNHeads*cfg.IndexHeadDim, cfg.QLoraRank)
 			add(ap+"indexer.wk.weight", cfg.IndexHeadDim, H)
 			add(ap+"indexer.k_norm.weight", cfg.IndexHeadDim)

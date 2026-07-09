@@ -66,7 +66,7 @@ func verifyForwardBatchedOK(s *Session) bool {
 		return false
 	}
 	cfg := s.M.Cfg
-	if cfg.isGLMMoeDsa() || q8PrefillNeedsTokenLoop(cfg) {
+	if cfg.usesMLAMoELayout() || q8PrefillNeedsTokenLoop(cfg) {
 		return false
 	}
 	return true

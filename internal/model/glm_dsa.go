@@ -25,7 +25,7 @@ func glmDsaAttentionOutputFromTopK(m *Model, layer int, hidden []float32, seq in
 
 func glmDsaAttentionOutputFromTopKNormed(m *Model, layer int, xnFlat []float32, seq int, topK [][]int) ([]float32, bool) {
 	cfg := m.Cfg
-	if !cfg.isGLMMoeDsa() || seq <= 0 || len(xnFlat) != seq*cfg.HiddenSize || len(topK) != seq {
+	if !cfg.usesMLAMoELayout() || seq <= 0 || len(xnFlat) != seq*cfg.HiddenSize || len(topK) != seq {
 		return nil, false
 	}
 	H, nH := cfg.HiddenSize, cfg.NumHeads
@@ -273,7 +273,7 @@ func glmDsaIndexerKind(cfg Config, layer int) string {
 
 func glmDsaNormalizeLayerInput(m *Model, layer int, hidden []float32, seq int) ([]float32, bool) {
 	cfg := m.Cfg
-	if !cfg.isGLMMoeDsa() || seq <= 0 || len(hidden) != seq*cfg.HiddenSize {
+	if !cfg.usesMLAMoELayout() || seq <= 0 || len(hidden) != seq*cfg.HiddenSize {
 		return nil, false
 	}
 	H := cfg.HiddenSize

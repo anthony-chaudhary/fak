@@ -233,7 +233,7 @@ func (f *File) Config() (model.Config, error) {
 			return model.Config{}, err
 		}
 	}
-	if canonicalGGUFArch(arch) == "glm_moe_dsa" {
+	if archUsesMLAMoELayout(canonicalGGUFArch(arch)) {
 		if err := applyGLMMoeDsaConfig(f, p, &cfg, ropeDim); err != nil {
 			return model.Config{}, err
 		}
@@ -251,9 +251,18 @@ func (f *File) Config() (model.Config, error) {
 // cfg.ModelType check key on "glm_moe_dsa". Map the GGUF spelling to the internal one so
 // family detection (isGLMMoeDsa / IsMoE) and the canonical tensor-name branch resolve.
 // The metadata-key PREFIX (p) stays the file's own "glm-dsa." — only ModelType normalizes.
+//
+// DeepSeek-V2/V3/R1 is passed through as "deepseek2" (llama.cpp's LLM_ARCH_DEEPSEEK2,
+// which both V2 and V3 declare): it is first-class and honestly labeled — NOT collapsed to
+// glm_moe_dsa — while its MLA+MoE layout reuses the glm forward via archUsesMLAMoELayout /
+// Config.usesMLAMoELayout. Sibling community spellings (deepseek-v2/-v3, deepseek3) normalize
+// to "deepseek2"; the dense DeepSeek-V1 "deepseek" (no MLA) is deliberately NOT normalized.
 func canonicalGGUFArch(arch string) string {
-	if arch == "glm-dsa" {
+	switch arch {
+	case "glm-dsa":
 		return "glm_moe_dsa"
+	case "deepseek-v2", "deepseek-v3", "deepseek3", "deepseekv2", "deepseekv3":
+		return "deepseek2"
 	}
 	return arch
 }

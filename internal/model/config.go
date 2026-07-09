@@ -743,6 +743,20 @@ func (c Config) isGLMMoeDsa() bool {
 	return c.isGLM() && strings.Contains(c.archFamilyKey(), "dsa")
 }
 
+// usesMLAMoELayout reports whether this model shares the MLA-latent-attention +
+// MoE tensor/forward layout that fak's glm_moe_dsa path implements — i.e. GLM-5.2
+// (glm_moe_dsa) OR a real DeepSeek-V2/V3/R1 checkpoint (model_type "deepseek2").
+// DeepSeek is exactly this layout MINUS the DSA "lightning indexer" (IndexNHeads==0),
+// so the shared MLA+MoE machinery (latent KV projection, kv_b split, batched routed
+// experts, shared experts, grouped/sigmoid routing) is reused verbatim; the
+// indexer-specific code stays gated on isGLMMoeDsa()/IndexNHeads>0. This is the
+// layout-family predicate: broaden a check to this when it concerns the MLA/MoE
+// structure both families share, and KEEP isGLMMoeDsa() when it concerns the DSA
+// indexer specifically. See dense-MLA seam in glmDsaAttnSeqShared/glmDsaAttentionStep.
+func (c Config) usesMLAMoELayout() bool {
+	return c.isGLMMoeDsa() || c.ModelType == "deepseek2"
+}
+
 // InKernelBackendPrefixReuseSupported reports whether an in-kernel planner using a
 // compute.Backend may still reuse the host KV radix tree for this architecture.
 //
