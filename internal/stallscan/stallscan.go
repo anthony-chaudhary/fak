@@ -59,6 +59,14 @@ type Sample struct {
 	SystemHandleTotal int           `json:"system_handle_total,omitempty"` // sum of all processes' open handles
 	TopHandles        []ProcHandles `json:"top_handles,omitempty"`         // top handle holders at sample time
 
+	// Thread census. A single process whose thread count climbs into the many
+	// hundreds/thousands is a thread leak — the "terminal thread lag" failure
+	// mode: a terminal emulator accreting a thread per PTY/render across a
+	// spawn-heavy fleet until its own UI/scheduling lags (observed at 1500+
+	// threads on the reference box). Distinct from handles; a fault or handle
+	// axis misses it entirely. Zero = not observed.
+	TopThreads []ProcThreads `json:"top_threads,omitempty"` // top thread holders at sample time
+
 	// Top offenders by I/O operations/sec at this instant (already sorted or not).
 	TopIO []ProcIO `json:"top_io,omitempty"`
 }
@@ -75,6 +83,13 @@ type ProcHandles struct {
 	PID     int    `json:"pid"`
 	Name    string `json:"name"`
 	Handles int    `json:"handles"`
+}
+
+// ProcThreads is one process's thread count at sample time.
+type ProcThreads struct {
+	PID     int    `json:"pid"`
+	Name    string `json:"name"`
+	Threads int    `json:"threads"`
 }
 
 // Level is the coarse severity band.
@@ -97,6 +112,7 @@ const (
 	CauseDiskIO      Cause = "disk_io"          // genuine disk-backed pressure (hard faults / disk queue)
 	CauseMemPressure Cause = "memory_pressure"  // low available RAM (the classic case, here to distinguish it)
 	CauseHandleLeak  Cause = "handle_leak"      // a process's open-handle count climbing unbounded (slow-burn)
+	CauseThreadLeak  Cause = "thread_leak"      // a process's thread count climbing into the hundreds/thousands (terminal thread lag)
 )
 
 // Thresholds are the decision boundaries. They are exported and defaulted so a
@@ -128,6 +144,13 @@ type Thresholds struct {
 	// system-wide informational ceiling (default 1_000_000). Zero disables either.
 	HandleLeakProc   int // per-process handle count that flags a leak suspect (default 10000)
 	SystemHandleHigh int // system-wide handle total worth flagging as elevated (default 1_000_000)
+
+	// Thread-leak detection. A single process at/above ThreadLeakProc threads is a
+	// leak suspect (default 500 — well above a normal process's dozens, below the
+	// 1500+ seen on a leaking terminal emulator). Same WARNING semantics as the
+	// handle axis: raises a calm box to elevated and names the culprit, but never
+	// fabricates a stall. Zero disables it.
+	ThreadLeakProc int // per-process thread count that flags a thread-leak suspect (default 500)
 }
 
 // DefaultThresholds returns the calibrated defaults.
@@ -143,6 +166,7 @@ func DefaultThresholds() Thresholds {
 		DiskQueueBusy:      4,
 		HandleLeakProc:     10000,
 		SystemHandleHigh:   1000000,
+		ThreadLeakProc:     500,
 	}
 }
 
@@ -162,6 +186,12 @@ type Verdict struct {
 	HandleLeakProcess string `json:"handle_leak_process,omitempty"`
 	HandleLeakPID     int    `json:"handle_leak_pid,omitempty"`
 	HandleLeakCount   int    `json:"handle_leak_count,omitempty"`
+
+	// Thread-leak attribution: the worst per-process thread hog, if any crossed
+	// ThreadLeakProc. Populated regardless of Level (same rationale as handles).
+	ThreadLeakProcess string `json:"thread_leak_process,omitempty"`
+	ThreadLeakPID     int    `json:"thread_leak_pid,omitempty"`
+	ThreadLeakCount   int    `json:"thread_leak_count,omitempty"`
 }
 
 // hardFraction is the share of total faults that actually hit disk. A tiny
@@ -197,6 +227,14 @@ func Classify(s Sample, t Thresholds) Verdict {
 	leak, hasLeak := worstHandleHog(s.TopHandles, t.HandleLeakProc)
 	if hasLeak {
 		v.HandleLeakProcess, v.HandleLeakPID, v.HandleLeakCount = leak.Name, leak.PID, leak.Handles
+	}
+
+	// Same for the worst thread hog — the "terminal thread lag" axis. Also a
+	// slow-burn WARNING that rides alongside the Cause and only raises calm ->
+	// elevated below, never fabricates a stall.
+	threadLeak, hasThreadLeak := worstThreadHog(s.TopThreads, t.ThreadLeakProc)
+	if hasThreadLeak {
+		v.ThreadLeakProcess, v.ThreadLeakPID, v.ThreadLeakCount = threadLeak.Name, threadLeak.PID, threadLeak.Threads
 	}
 
 	// --- Genuine-resource explanations first (highest priority) ---
@@ -266,6 +304,9 @@ func Classify(s Sample, t Thresholds) Verdict {
 	if hasLeak {
 		v.Reasons = append(v.Reasons, fmt.Sprintf("%s (pid %d) holds %d handles (>= %d — leak suspect)", leak.Name, leak.PID, leak.Handles, t.HandleLeakProc))
 	}
+	if hasThreadLeak {
+		v.Reasons = append(v.Reasons, fmt.Sprintf("%s (pid %d) holds %d threads (>= %d — thread-leak suspect / terminal lag)", threadLeak.Name, threadLeak.PID, threadLeak.Threads, t.ThreadLeakProc))
+	}
 	systemHandleHigh := t.SystemHandleHigh > 0 && s.SystemHandleTotal >= t.SystemHandleHigh
 	if systemHandleHigh {
 		v.Reasons = append(v.Reasons, fmt.Sprintf("%d handles system-wide (>= %d)", s.SystemHandleTotal, t.SystemHandleHigh))
@@ -284,12 +325,18 @@ func Classify(s Sample, t Thresholds) Verdict {
 		}
 		v.Reasons = append(v.Reasons, fmt.Sprintf("%0.f faults/sec (elevated >= %0.f)", s.TotalFaultsPerSec, t.SoftFaultElevated))
 	}
-	// A handle-leak suspect (or a system-wide handle ceiling) raises a calm box
-	// to elevated and owns the cause if nothing else claimed it.
-	if v.Level == LevelCalm && (hasLeak || systemHandleHigh) {
+	// A handle-leak or thread-leak suspect (or a system-wide handle ceiling)
+	// raises a calm box to elevated and owns the cause if nothing else claimed it.
+	// Handle pressure wins the cause label when both a handle and a thread leak
+	// are present (it is the closer-to-exhaustion resource on the reference box).
+	if v.Level == LevelCalm && (hasLeak || systemHandleHigh || hasThreadLeak) {
 		v.Level = LevelElevated
 		if v.Cause == CauseNone {
-			v.Cause = CauseHandleLeak
+			if hasLeak || systemHandleHigh {
+				v.Cause = CauseHandleLeak
+			} else {
+				v.Cause = CauseThreadLeak
+			}
 		}
 	}
 	return v
@@ -309,6 +356,26 @@ func worstHandleHog(in []ProcHandles, threshold int) (ProcHandles, bool) {
 			continue
 		}
 		if !found || p.Handles > worst.Handles || (p.Handles == worst.Handles && p.PID < worst.PID) {
+			worst, found = p, true
+		}
+	}
+	return worst, found
+}
+
+// worstThreadHog returns the single process with the most threads among those
+// at/above threshold, and ok=false if none qualify (or threshold<=0). Pure and
+// non-mutating, mirroring worstHandleHog.
+func worstThreadHog(in []ProcThreads, threshold int) (ProcThreads, bool) {
+	if threshold <= 0 {
+		return ProcThreads{}, false
+	}
+	worst := ProcThreads{}
+	found := false
+	for _, p := range in {
+		if p.Threads < threshold {
+			continue
+		}
+		if !found || p.Threads > worst.Threads || (p.Threads == worst.Threads && p.PID < worst.PID) {
 			worst, found = p, true
 		}
 	}

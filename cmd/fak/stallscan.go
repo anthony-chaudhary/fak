@@ -192,6 +192,9 @@ func renderStallFingerprint(w io.Writer, s stallscan.Sample, v stallscan.Verdict
 		}
 		fmt.Fprintf(w, "\n")
 	}
+	if v.ThreadLeakProcess != "" {
+		fmt.Fprintf(w, "threads     : THREAD-LEAK SUSPECT (terminal lag): %s pid %d holds %d threads\n", v.ThreadLeakProcess, v.ThreadLeakPID, v.ThreadLeakCount)
+	}
 	fmt.Fprintf(w, "not-the-cause: %d MB RAM free, disk queue %.1f\n", s.AvailableMB, s.DiskQueueLen)
 	if len(v.Reasons) > 0 {
 		fmt.Fprintf(w, "reasons     : %s\n", stallJoinReasons(v.Reasons))

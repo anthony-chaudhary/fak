@@ -57,19 +57,29 @@ foreach ($s in $c.CounterSamples) { $h[$s.Path.Split([char]92)[-1]] = [math]::Ro
 # carries HandleCount, so the handle census (total + top holders) is computed
 # from the SAME enumeration — no extra Get-Process/Get-CimInstance walk.
 $snap = { Get-CimInstance Win32_Process | ForEach-Object {
-  [pscustomobject]@{ pid=$_.ProcessId; name=$_.Name; handles=[int]$_.HandleCount;
+  [pscustomobject]@{ pid=$_.ProcessId; name=$_.Name; handles=[int]$_.HandleCount; threads=[int]$_.ThreadCount;
     ops=[int64]$_.ReadOperationCount + [int64]$_.WriteOperationCount + [int64]$_.OtherOperationCount } } }
-$a=@{}; & $snap | ForEach-Object { $a[$_.pid]=$_ }
+# Under the very churn stall this tool diagnoses, Get-CimInstance Win32_Process
+# intermittently returns an empty/degraded set — which would blank the handle,
+# thread, and IO census exactly when it matters most. Retry until the snapshot
+# looks plausible (>50 processes) before trusting it, so the diagnostic does not
+# go blind during a stall. Fault/scheduler counters come from Get-Counter and are
+# unaffected. Get-Snap yields [] on a transient failure, never throws.
+function Get-Snap { $r=@(& $snap); return ,$r }
+$first=@(); foreach($try in 1..4){ $first=Get-Snap; if($first.Count -gt 50){break}; Start-Sleep -Milliseconds 250 }
+$a=@{}; foreach($p in $first){ $a[$p.pid]=$p }
 Start-Sleep -Seconds 1
+$second=@(); foreach($try in 1..4){ $second=Get-Snap; if($second.Count -gt 50){break}; Start-Sleep -Milliseconds 250 }
 $top=@(); $hlist=@(); $handleTotal=0
-& $snap | ForEach-Object {
-  $handleTotal += $_.handles
-  $hlist += [pscustomobject]@{ pid=$_.pid; name=$_.name; handles=$_.handles }
-  $prev = $a[$_.pid]
-  if ($prev) { $d = $_.ops - $prev.ops; if ($d -gt 0) { $top += [pscustomobject]@{ pid=$_.pid; name=$_.name; ops=$d } } }
+foreach($p in $second){
+  $handleTotal += $p.handles
+  $hlist += [pscustomobject]@{ pid=$p.pid; name=$p.name; handles=$p.handles; threads=$p.threads }
+  $prev = $a[$p.pid]
+  if ($prev) { $d = $p.ops - $prev.ops; if ($d -gt 0) { $top += [pscustomobject]@{ pid=$p.pid; name=$p.name; ops=$d } } }
 }
 $top   = $top   | Sort-Object ops     -Descending | Select-Object -First 12
 $topH  = $hlist | Sort-Object handles -Descending | Select-Object -First 12
+$topT  = $hlist | Sort-Object threads -Descending | Select-Object -First 12
 [pscustomobject]@{
   faults      = $h['Page Faults/sec']
   hard        = $h['Page Reads/sec']
@@ -84,6 +94,7 @@ $topH  = $hlist | Sort-Object handles -Descending | Select-Object -First 12
   handleTotal = [int64]$handleTotal
   top         = $top
   topHandles  = $topH
+  topThreads  = $topT
 } | ConvertTo-Json -Compress -Depth 4
 `
 
@@ -97,6 +108,12 @@ type stallTopHandle struct {
 	PID     int    `json:"pid"`
 	Name    string `json:"name"`
 	Handles int    `json:"handles"`
+}
+
+type stallTopThread struct {
+	PID     int    `json:"pid"`
+	Name    string `json:"name"`
+	Threads int    `json:"threads"`
 }
 
 type stallRaw struct {
@@ -117,6 +134,7 @@ type stallRaw struct {
 	// psList decodes either shape, so the monitor never crashes when the box calms.
 	Top        json.RawMessage `json:"top"`
 	TopHandles json.RawMessage `json:"topHandles"`
+	TopThreads json.RawMessage `json:"topThreads"`
 }
 
 // psList unmarshals a PowerShell ConvertTo-Json value that may be a single object
@@ -179,6 +197,12 @@ func gatherStallSample(topN int) (stallscan.Sample, string) {
 	if err := psList(raw.TopHandles, &topH); err == nil {
 		for _, p := range topH {
 			s.TopHandles = append(s.TopHandles, stallscan.ProcHandles{PID: p.PID, Name: p.Name, Handles: p.Handles})
+		}
+	}
+	var topT []stallTopThread
+	if err := psList(raw.TopThreads, &topT); err == nil {
+		for _, p := range topT {
+			s.TopThreads = append(s.TopThreads, stallscan.ProcThreads{PID: p.PID, Name: p.Name, Threads: p.Threads})
 		}
 	}
 	return s, ""

@@ -233,6 +233,89 @@ func TestWorstHandleHog_picksMaxAtOrAboveThreshold(t *testing.T) {
 	}
 }
 
+func TestClassify_ThreadLeak_raisesCalmToElevated(t *testing.T) {
+	// Live capture (2026-07-11): an otherwise CALM box, but WindowsTerminal has
+	// accreted 1,577 threads (a thread per PTY/render across a spawn-heavy fleet) —
+	// the "terminal thread lag" the operator kept reporting. A thread leak is a
+	// slow-burn warning: verdict ELEVATED (not a stall), cause thread_leak, named.
+	s := Sample{
+		TotalFaultsPerSec: 22000,
+		HardFaultsPerSec:  10,
+		AvailableMB:       126000,
+		DiskQueueLen:      0,
+		TopThreads: []ProcThreads{
+			{PID: 17836, Name: "WindowsTerminal.exe", Threads: 1577},
+			{PID: 4, Name: "System", Threads: 220},
+		},
+	}
+	v := Classify(s, DefaultThresholds())
+	if v.Level != LevelElevated {
+		t.Fatalf("level = %q, want elevated (reasons: %v)", v.Level, v.Reasons)
+	}
+	if v.Cause != CauseThreadLeak {
+		t.Fatalf("cause = %q, want %q", v.Cause, CauseThreadLeak)
+	}
+	if v.ThreadLeakProcess != "WindowsTerminal.exe" || v.ThreadLeakPID != 17836 || v.ThreadLeakCount != 1577 {
+		t.Fatalf("thread-leak attribution = %q/%d/%d, want WindowsTerminal.exe/17836/1577",
+			v.ThreadLeakProcess, v.ThreadLeakPID, v.ThreadLeakCount)
+	}
+}
+
+func TestClassify_ThreadLeak_attributedUnderChurnStall(t *testing.T) {
+	// A churn stall AND a thread leak at once. The freeze cause wins Level/Cause,
+	// but the thread leak must still be attributed so the operator sees both.
+	s := Sample{
+		TotalFaultsPerSec:     911901,
+		HardFaultsPerSec:      2,
+		ContextSwitchesPerSec: 302996,
+		SystemCallsPerSec:     1309273,
+		AvailableMB:           126840,
+		DiskQueueLen:          0,
+		TopThreads:            []ProcThreads{{PID: 17836, Name: "WindowsTerminal.exe", Threads: 1577}},
+	}
+	v := Classify(s, DefaultThresholds())
+	if v.Level != LevelStall || v.Cause != CauseSoftFault {
+		t.Fatalf("got level=%q cause=%q, want stall/soft_fault_churn (freeze wins)", v.Level, v.Cause)
+	}
+	if v.ThreadLeakProcess != "WindowsTerminal.exe" || v.ThreadLeakCount != 1577 {
+		t.Fatalf("thread leak not attributed under stall: %q/%d", v.ThreadLeakProcess, v.ThreadLeakCount)
+	}
+}
+
+func TestClassify_ThreadsBelowThreshold_noLeak(t *testing.T) {
+	// A normal multi-threaded process (below the 500 line) is not a leak suspect.
+	s := Sample{
+		TotalFaultsPerSec: 22000,
+		AvailableMB:       126000,
+		TopThreads:        []ProcThreads{{PID: 100, Name: "fak.exe", Threads: 48}},
+	}
+	v := Classify(s, DefaultThresholds())
+	if v.Level != LevelCalm {
+		t.Fatalf("level = %q, want calm", v.Level)
+	}
+	if v.ThreadLeakProcess != "" {
+		t.Fatalf("unexpected thread-leak attribution %q for a 48-thread process", v.ThreadLeakProcess)
+	}
+}
+
+func TestWorstThreadHog_picksMaxAtOrAboveThreshold(t *testing.T) {
+	in := []ProcThreads{
+		{PID: 1, Name: "a", Threads: 200},  // below
+		{PID: 2, Name: "b", Threads: 1577}, // worst
+		{PID: 3, Name: "c", Threads: 600},
+	}
+	got, ok := worstThreadHog(in, 500)
+	if !ok || got.PID != 2 || got.Threads != 1577 {
+		t.Fatalf("got %+v ok=%v, want b/1577", got, ok)
+	}
+	if _, ok := worstThreadHog(in, 0); ok {
+		t.Fatalf("threshold 0 must disable the rule")
+	}
+	if _, ok := worstThreadHog([]ProcThreads{{PID: 1, Threads: 48}}, 500); ok {
+		t.Fatalf("no process above threshold must return ok=false")
+	}
+}
+
 func TestSortTopIO_capsAndOrders(t *testing.T) {
 	in := []ProcIO{
 		{PID: 1, Name: "a", Ops: 10},
