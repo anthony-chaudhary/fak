@@ -20,13 +20,17 @@ import (
 // single provider's field) BEFORE returning, so this package stays a foundation
 // leaf with no upward import of the integrator-tier agent client.
 
-// RawArmConfig pins the raw arm's run identity and its fan-out width.
+// RawArmConfig pins the raw arm's run identity and its fan-out width. The
+// sampling fields mirror SamplingConfig (#2106) — build it via
+// SamplingConfig.ArmConfig so both arms share one sampling identity.
 type RawArmConfig struct {
 	Model       string  // model id recorded in the report and sent on each request
 	Endpoint    string  // gateway base URL (…/v1) the completions are POSTed to
 	N           int     // samples per problem (mirrors lcb_runner -n)
 	Temperature float64 // sampling temperature recorded and sent
+	Seed        int64   // sampling seed sent when nonzero and recorded; 0 = provider default
 	Concurrency int     // max in-flight requests (mirrors closed-API --multiprocess)
+	MaxRetries  int     // per-sample retry budget (#2106); a failed sample is retried and counted, never silently dropped
 }
 
 // RawSampleUsage is the token accounting for ONE sample, already normalized by
@@ -53,7 +57,9 @@ type RawArmReport struct {
 	Endpoint    string          `json:"endpoint"`
 	N           int             `json:"n"`
 	Temperature float64         `json:"temperature"`
+	Seed        int64           `json:"seed,omitempty"` // 0 = provider default, omitted
 	Concurrency int             `json:"concurrency"`
+	MaxRetries  int             `json:"max_retries"`       // per-sample retry budget the run honored (#2106)
 	Release     string          `json:"release,omitempty"` // dataset release the suite pinned (stamped by RunRawArmCached)
 	Problems    []RawArmProblem `json:"problems"`
 	Usage       RawArmUsage     `json:"usage"`
@@ -83,13 +89,17 @@ type RawArmUsage struct {
 	PromptTokens       int `json:"prompt_tokens"`
 	CompletionTokens   int `json:"completion_tokens"`
 	CachedPromptTokens int `json:"cached_prompt_tokens"`
+	Retries            int `json:"retries"` // failed sample attempts that were retried (#2106) — counted, never silently dropped
 }
 
 // RunRawArm fans the sampler out over every (problem, sample) pair with at most
-// cfg.Concurrency requests in flight, then assembles a deterministic report. The
-// first sampler error aborts the run (the context is cancelled so in-flight
-// siblings stop) and is returned. Completions are ordered by problem then sample
-// index regardless of completion order, so the report is reproducible.
+// cfg.Concurrency requests in flight, then assembles a deterministic report. A
+// failed sample is retried up to cfg.MaxRetries times, each retry counted in
+// Usage.Retries (#2106); a sample that exhausts its budget aborts the run (the
+// context is cancelled so in-flight siblings stop) and is returned as an error
+// naming the problem and attempt count — a failure is never silently dropped.
+// Completions are ordered by problem then sample index regardless of completion
+// order, so the report is reproducible.
 func RunRawArm(ctx context.Context, cfg RawArmConfig, problems []Problem, sample RawArmSampler) (RawArmReport, error) {
 	if sample == nil {
 		return RawArmReport{}, fmt.Errorf("livecodebench raw arm: sampler is required")
@@ -101,6 +111,10 @@ func RunRawArm(ctx context.Context, cfg RawArmConfig, problems []Problem, sample
 	if conc < 1 {
 		conc = 1
 	}
+	maxRetries := cfg.MaxRetries
+	if maxRetries < 0 {
+		maxRetries = 0
+	}
 
 	report := RawArmReport{
 		Arm:         "raw",
@@ -108,7 +122,9 @@ func RunRawArm(ctx context.Context, cfg RawArmConfig, problems []Problem, sample
 		Endpoint:    cfg.Endpoint,
 		N:           cfg.N,
 		Temperature: cfg.Temperature,
+		Seed:        cfg.Seed,
 		Concurrency: conc,
+		MaxRetries:  maxRetries,
 		Problems:    make([]RawArmProblem, len(problems)),
 	}
 
@@ -128,6 +144,7 @@ func RunRawArm(ctx context.Context, cfg RawArmConfig, problems []Problem, sample
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var firstErr error
+	var retried int
 
 	for pi := range problems {
 		for si := 0; si < cfg.N; si++ {
@@ -142,11 +159,26 @@ func RunRawArm(ctx context.Context, cfg RawArmConfig, problems []Problem, sample
 			go func(pi, si int) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				content, u, err := sample(ctx, problems[pi], si)
+				var content string
+				var u RawSampleUsage
+				var err error
+				attempts := 0
+				for {
+					attempts++
+					content, u, err = sample(ctx, problems[pi], si)
+					// A cancelled run doesn't burn retries: the abort cause is
+					// the sibling's error, not this sample's.
+					if err == nil || attempts > maxRetries || ctx.Err() != nil {
+						break
+					}
+					mu.Lock()
+					retried++
+					mu.Unlock()
+				}
 				if err != nil {
 					mu.Lock()
 					if firstErr == nil {
-						firstErr = fmt.Errorf("livecodebench raw arm: problem %q sample %d: %w", problems[pi].QuestionID, si, err)
+						firstErr = fmt.Errorf("livecodebench raw arm: problem %q sample %d failed after %d attempt(s): %w", problems[pi].QuestionID, si, attempts, err)
 					}
 					mu.Unlock()
 					cancel()
@@ -161,6 +193,7 @@ func RunRawArm(ctx context.Context, cfg RawArmConfig, problems []Problem, sample
 	if firstErr != nil {
 		return RawArmReport{}, firstErr
 	}
+	report.Usage.Retries = retried
 
 	for pi := range problems {
 		comps := make([]string, cfg.N)

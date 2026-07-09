@@ -29,9 +29,10 @@ func runRaw(argv []string) int {
 	suitePath := fs.String("suite", "", "normalized suite JSON whose problems are sent to the gateway (required)")
 	model := fs.String("model", "", "model id sent on each request and recorded in the report (required)")
 	endpoint := fs.String("endpoint", "http://127.0.0.1:8080/v1", "gateway base URL (…/v1) the completions are POSTed to")
-	n := fs.Int("n", 1, "samples to generate per problem (mirrors lcb_runner -n)")
-	temperature := fs.Float64("temperature", 0.2, "sampling temperature sent and recorded")
-	concurrency := fs.Int("concurrency", 8, "max in-flight gateway requests (mirrors closed-API --multiprocess)")
+	// Shared sampling surface (#2106): flags default to upstream lcb_runner
+	// (n=10, temperature=0.2) and register identically on both arms.
+	sampling := livecodebench.DefaultSampling()
+	sampling.RegisterFlags(fs)
 	maxTokens := fs.Int("max-tokens", 2048, "max_tokens sent on each completion request")
 	timeout := fs.Duration("timeout", 120*time.Second, "per-request HTTP timeout")
 	out := fs.String("out", "", "write the raw-arm report JSON to this path (default: stdout)")
@@ -53,6 +54,10 @@ func runRaw(argv []string) int {
 	}
 	if strings.TrimSpace(*model) == "" {
 		fmt.Fprintln(os.Stderr, "livecodebench raw: --model is required")
+		return 2
+	}
+	if err := sampling.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "livecodebench raw: %v\n", err)
 		return 2
 	}
 
@@ -97,15 +102,9 @@ func runRaw(argv []string) int {
 		cache = livecodebench.DirGenCache{Dir: *cacheDir}
 	}
 
-	cfg := livecodebench.RawArmConfig{
-		Model:       *model,
-		Endpoint:    *endpoint,
-		N:           *n,
-		Temperature: *temperature,
-		Concurrency: *concurrency,
-	}
+	cfg := sampling.ArmConfig(*model, *endpoint)
 	client := &http.Client{Timeout: *timeout}
-	sampler := gatewaySampler(client, *endpoint, *model, *temperature, *maxTokens)
+	sampler := gatewaySampler(client, cfg, *maxTokens)
 
 	res, err := livecodebench.RunRawArmCached(context.Background(), cfg, suite.ReleaseVersion, suite.Problems, sampler, cache, prior)
 	if err != nil {
@@ -148,12 +147,13 @@ func runRaw(argv []string) int {
 // provider-relayed usage, normalized here through agent.Usage.CachedPromptTokens()
 // into livecodebench.RawSampleUsage (the agent import stays on this cmd side so
 // internal/livecodebench keeps its foundation tier).
-func gatewaySampler(client *http.Client, endpoint, model string, temperature float64, maxTokens int) livecodebench.RawArmSampler {
-	url := strings.TrimRight(endpoint, "/") + "/chat/completions"
+func gatewaySampler(client *http.Client, cfg livecodebench.RawArmConfig, maxTokens int) livecodebench.RawArmSampler {
+	url := strings.TrimRight(cfg.Endpoint, "/") + "/chat/completions"
 	return func(ctx context.Context, p livecodebench.Problem, _ int) (string, livecodebench.RawSampleUsage, error) {
 		reqBody := chatCompletionsRequest{
-			Model:       model,
-			Temperature: temperature,
+			Model:       cfg.Model,
+			Temperature: cfg.Temperature,
+			Seed:        seedParam(cfg.Seed),
 			MaxTokens:   maxTokens,
 			Messages:    []agent.Message{{Role: agent.RoleUser, Content: p.Prompt}},
 		}
@@ -196,8 +196,18 @@ func gatewaySampler(client *http.Client, endpoint, model string, temperature flo
 type chatCompletionsRequest struct {
 	Model       string          `json:"model"`
 	Temperature float64         `json:"temperature"`
+	Seed        *int64          `json:"seed,omitempty"` // sent only when pinned (#2106)
 	MaxTokens   int             `json:"max_tokens,omitempty"`
 	Messages    []agent.Message `json:"messages"`
+}
+
+// seedParam maps the shared sampling seed onto the wire: 0 means "provider
+// default", so the request field is omitted rather than sent as a literal 0.
+func seedParam(seed int64) *int64 {
+	if seed == 0 {
+		return nil
+	}
+	return &seed
 }
 
 type chatCompletionsResponse struct {

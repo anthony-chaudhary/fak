@@ -63,7 +63,9 @@ type FakArmReport struct {
 	Endpoint     string             `json:"endpoint"`
 	N            int                `json:"n"`
 	Temperature  float64            `json:"temperature"`
+	Seed         int64              `json:"seed,omitempty"` // 0 = provider default, omitted
 	Concurrency  int                `json:"concurrency"`
+	MaxRetries   int                `json:"max_retries"` // per-sample retry budget the run honored (#2106)
 	Release      string             `json:"release,omitempty"`
 	Problems     []RawArmProblem    `json:"problems"`
 	Usage        RawArmUsage        `json:"usage"`
@@ -107,7 +109,9 @@ func RunFakArm(ctx context.Context, cfg RawArmConfig, release string, problems [
 		Endpoint:     raw.Endpoint,
 		N:            raw.N,
 		Temperature:  raw.Temperature,
+		Seed:         raw.Seed,
 		Concurrency:  raw.Concurrency,
+		MaxRetries:   raw.MaxRetries,
 		Release:      strings.TrimSpace(release),
 		Problems:     raw.Problems,
 		Usage:        raw.Usage,

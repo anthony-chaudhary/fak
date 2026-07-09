@@ -28,9 +28,10 @@ func runFak(argv []string) int {
 	suitePath := fs.String("suite", "", "normalized suite JSON whose problems are sent to the gateway (required; the SAME suite as the raw arm)")
 	model := fs.String("model", "", "model id sent on each request and recorded in the report (required; must match the raw arm)")
 	endpoint := fs.String("endpoint", "http://127.0.0.1:18080/v1", "fak gateway base URL (…/v1) the adjudicated completions are POSTed to")
-	n := fs.Int("n", 1, "samples to generate per problem (must match the raw arm)")
-	temperature := fs.Float64("temperature", 0.2, "sampling temperature sent and recorded (must match the raw arm)")
-	concurrency := fs.Int("concurrency", 8, "max in-flight gateway requests")
+	// Shared sampling surface (#2106): the SAME flags, defaults, and validation
+	// as the raw arm, registered from one place so the arms cannot drift.
+	sampling := livecodebench.DefaultSampling()
+	sampling.RegisterFlags(fs)
 	maxTokens := fs.Int("max-tokens", 2048, "max_tokens sent on each completion request")
 	timeout := fs.Duration("timeout", 120*time.Second, "per-request HTTP timeout")
 	out := fs.String("out", "", "write the fak-arm report JSON to this path (default: stdout)")
@@ -49,6 +50,10 @@ func runFak(argv []string) int {
 		fmt.Fprintln(os.Stderr, "livecodebench fak: --model is required")
 		return 2
 	}
+	if err := sampling.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "livecodebench fak: %v\n", err)
+		return 2
+	}
 
 	suite, err := livecodebench.LoadSuiteFile(*suitePath)
 	if err != nil {
@@ -56,15 +61,9 @@ func runFak(argv []string) int {
 		return 1
 	}
 
-	cfg := livecodebench.RawArmConfig{
-		Model:       *model,
-		Endpoint:    *endpoint,
-		N:           *n,
-		Temperature: *temperature,
-		Concurrency: *concurrency,
-	}
+	cfg := sampling.ArmConfig(*model, *endpoint)
 	client := &http.Client{Timeout: *timeout}
-	sampler := fakGatewaySampler(client, *endpoint, *model, *temperature, *maxTokens)
+	sampler := fakGatewaySampler(client, cfg, *maxTokens)
 
 	report, err := livecodebench.RunFakArm(context.Background(), cfg, suite.ReleaseVersion, suite.Problems, sampler)
 	if err != nil {
@@ -137,13 +136,14 @@ func runAB(argv []string) int {
 // gateway's non-standard `fak` response extension into FakSampleEvidence, so
 // the fak arm's report carries adjudication evidence per sample. A response
 // without the extension yields zero evidence — the arm never invents it.
-func fakGatewaySampler(client *http.Client, endpoint, model string, temperature float64, maxTokens int) livecodebench.FakArmSampler {
-	url := strings.TrimRight(endpoint, "/") + "/chat/completions"
+func fakGatewaySampler(client *http.Client, cfg livecodebench.RawArmConfig, maxTokens int) livecodebench.FakArmSampler {
+	url := strings.TrimRight(cfg.Endpoint, "/") + "/chat/completions"
 	return func(ctx context.Context, p livecodebench.Problem, _ int) (string, livecodebench.RawSampleUsage, livecodebench.FakSampleEvidence, error) {
 		var ev livecodebench.FakSampleEvidence
 		reqBody := chatCompletionsRequest{
-			Model:       model,
-			Temperature: temperature,
+			Model:       cfg.Model,
+			Temperature: cfg.Temperature,
+			Seed:        seedParam(cfg.Seed),
 			MaxTokens:   maxTokens,
 			Messages:    []agent.Message{{Role: agent.RoleUser, Content: p.Prompt}},
 		}

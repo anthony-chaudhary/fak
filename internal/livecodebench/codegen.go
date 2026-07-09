@@ -18,8 +18,8 @@ import "fmt"
 // mirrors them so a fak run and a raw `python -m lcb_runner.runner.main` run
 // sample the same way unless explicitly overridden.
 const (
-	CodegenDefaultN           = 10
-	CodegenDefaultTemperature = 0.2
+	CodegenDefaultN           = UpstreamDefaultN
+	CodegenDefaultTemperature = UpstreamDefaultTemperature
 )
 
 // CodegenConfig pins the codegen scenario's recorded sampling parameters. N and

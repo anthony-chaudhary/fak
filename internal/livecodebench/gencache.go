@@ -87,8 +87,8 @@ func cacheKeyFor(cfg RawArmConfig, release string, p Problem) string {
 //   - prior (from --continue-existing) carries every problem the existing
 //     report already completed with exactly n completions; those problems are
 //     never regenerated (PendingWork guarantees no duplicates). The prior run's
-//     identity must match cfg — resuming under a different model, n, or
-//     temperature is refused rather than silently mixed.
+//     identity must match cfg — resuming under a different model, n,
+//     temperature, or seed is refused rather than silently mixed.
 //   - cache (from --use-cache) is consulted once per still-pending problem; a
 //     hit with exactly n completions is reused, anything else is a miss and the
 //     problem is regenerated. Freshly generated completions are Put back so the
@@ -108,9 +108,9 @@ func RunRawArmCached(ctx context.Context, cfg RawArmConfig, release string, prob
 	done := make(map[string][]string)
 	var priorUsage RawArmUsage
 	if prior != nil {
-		if prior.Model != cfg.Model || prior.N != cfg.N || prior.Temperature != cfg.Temperature {
-			return res, fmt.Errorf("livecodebench raw arm: --continue-existing identity mismatch: prior run was model=%q n=%d temperature=%v, this run is model=%q n=%d temperature=%v",
-				prior.Model, prior.N, prior.Temperature, cfg.Model, cfg.N, cfg.Temperature)
+		if prior.Model != cfg.Model || prior.N != cfg.N || prior.Temperature != cfg.Temperature || prior.Seed != cfg.Seed {
+			return res, fmt.Errorf("livecodebench raw arm: --continue-existing identity mismatch: prior run was model=%q n=%d temperature=%v seed=%d, this run is model=%q n=%d temperature=%v seed=%d",
+				prior.Model, prior.N, prior.Temperature, prior.Seed, cfg.Model, cfg.N, cfg.Temperature, cfg.Seed)
 		}
 		for _, pp := range prior.Problems {
 			if len(pp.Completions) == cfg.N {
@@ -150,6 +150,10 @@ func RunRawArmCached(ctx context.Context, cfg RawArmConfig, release string, prob
 	conc := cfg.Concurrency
 	if conc < 1 {
 		conc = 1
+	}
+	maxRetries := cfg.MaxRetries
+	if maxRetries < 0 {
+		maxRetries = 0
 	}
 	var genUsage RawArmUsage
 	genByID := make(map[string][]string)
@@ -193,7 +197,9 @@ func RunRawArmCached(ctx context.Context, cfg RawArmConfig, release string, prob
 		Endpoint:    cfg.Endpoint,
 		N:           cfg.N,
 		Temperature: cfg.Temperature,
+		Seed:        cfg.Seed,
 		Concurrency: conc,
+		MaxRetries:  maxRetries,
 		Release:     release,
 		Problems:    merged,
 		Usage: RawArmUsage{
@@ -201,6 +207,7 @@ func RunRawArmCached(ctx context.Context, cfg RawArmConfig, release string, prob
 			PromptTokens:       priorUsage.PromptTokens + genUsage.PromptTokens,
 			CompletionTokens:   priorUsage.CompletionTokens + genUsage.CompletionTokens,
 			CachedPromptTokens: priorUsage.CachedPromptTokens + genUsage.CachedPromptTokens,
+			Retries:            priorUsage.Retries + genUsage.Retries,
 		},
 	}
 	return res, nil

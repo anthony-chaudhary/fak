@@ -96,8 +96,8 @@ func run(argv []string) int {
 	scenario := fs.String("scenario", "", parityUsage("scenario"))
 	evaluate := fs.Bool("evaluate", false, parityUsage("evaluate"))
 	releaseVersion := fs.String("release-version", "", parityUsage("release-version"))
-	nSamples := fs.Int("n", 1, parityUsage("n"))
-	temperature := fs.Float64("temperature", 0.2, parityUsage("temperature"))
+	nSamples := fs.Int("n", livecodebench.UpstreamDefaultN, parityUsage("n"))
+	temperature := fs.Float64("temperature", livecodebench.UpstreamDefaultTemperature, parityUsage("temperature"))
 	useCache := fs.Bool("use-cache", false, parityUsage("use-cache"))
 	out := fs.String("out", "", "write the run report JSON to this path (default: stdout as text/JSON)")
 	if err := fs.Parse(argv); err != nil {
