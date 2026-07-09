@@ -86,6 +86,19 @@ func RenderTwoTrackMarkdown(r TwoTrackReport) string {
 	}
 	fmt.Fprintf(&sb, "> fence: %s\n\n", r.ProjectionFence)
 
+	// Feed freshness/drain-lag banner (#3394): the savings_feed ComponentHealth row
+	// ages the last ledger row against now; surface it here so a stale savings
+	// dashboard flags its own staleness instead of being read as current. The row is
+	// already folded in foldComponentHealth — this only renders it, never recomputes.
+	if fresh, ok := feedFreshnessRow(r.ComponentHealth); ok {
+		switch fresh.Status {
+		case "stale":
+			fmt.Fprintf(&sb, "> ⚠️ **savings feed STALE** — %s. %s\n\n", fresh.Reason, fresh.NextAction)
+		case "measured":
+			fmt.Fprintf(&sb, "> savings feed fresh — %s\n\n", fresh.Reason)
+		}
+	}
+
 	// Track 1 — WITNESSED realized reuse.
 	t1Periods, t1Vals := bucketSeries(r.Track1.Buckets)
 	fmt.Fprintf(&sb, "### Track 1 — realized cache reuse (WITNESSED kernel)\n\n")
@@ -194,6 +207,17 @@ func RenderTwoTrackMarkdown(r TwoTrackReport) string {
 		}
 	}
 	return sb.String()
+}
+
+// feedFreshnessRow returns the savings_feed freshness/drain-lag ComponentHealth row
+// (#3394) if it is present, so the markdown P&L can surface its own staleness.
+func feedFreshnessRow(health []ComponentHealth) (ComponentHealth, bool) {
+	for _, h := range health {
+		if h.Plane == "savings_feed" && h.Component == "feed_freshness" {
+			return h, true
+		}
+	}
+	return ComponentHealth{}, false
 }
 
 // bucketSeries extracts the (period, realized-reuse) series from Track-1 buckets, in order.

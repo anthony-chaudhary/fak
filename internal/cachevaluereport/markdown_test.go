@@ -114,3 +114,39 @@ func TestRenderTwoTrackMarkdown_omitsCompactionHealthWhenIdle(t *testing.T) {
 		t.Fatalf("a report with no compaction buckets must not emit the section:\n%s", md)
 	}
 }
+
+// #3394: the markdown P&L surfaces the savings_feed freshness/drain-lag row so a stale
+// savings dashboard flags its own staleness in the --markdown render path, not only in
+// the JSON ComponentHealth. A stale row renders a prominent banner carrying its
+// hours-behind reason and next action; a measured row renders the quiet fresh line;
+// and a report with no freshness row renders no banner at all (no fabricated freshness).
+func TestRenderTwoTrackMarkdown_surfacesFeedFreshness(t *testing.T) {
+	base := sampleTwoTrack()
+
+	stale := base
+	stale.ComponentHealth = []ComponentHealth{{
+		Plane: "savings_feed", Component: "feed_freshness", Status: "stale",
+		Reason: "last savings row is 180.0h behind now (threshold 48h)", NextAction: "re-run the savings feed",
+	}}
+	md := RenderTwoTrackMarkdown(stale)
+	if !strings.Contains(md, "savings feed STALE") || !strings.Contains(md, "180.0h behind") || !strings.Contains(md, "re-run the savings feed") {
+		t.Fatalf("a stale feed must render a banner with its reason and next action:\n%s", md)
+	}
+
+	measured := base
+	measured.ComponentHealth = []ComponentHealth{{
+		Plane: "savings_feed", Component: "feed_freshness", Status: "measured",
+		Reason: "last savings row is 2.0h behind now (threshold 48h)",
+	}}
+	md = RenderTwoTrackMarkdown(measured)
+	if strings.Contains(md, "savings feed STALE") {
+		t.Fatalf("a measured feed must not raise the stale banner:\n%s", md)
+	}
+	if !strings.Contains(md, "savings feed fresh") || !strings.Contains(md, "2.0h behind") {
+		t.Fatalf("a measured feed must render the quiet fresh line:\n%s", md)
+	}
+
+	if md := RenderTwoTrackMarkdown(base); strings.Contains(md, "savings feed STALE") || strings.Contains(md, "savings feed fresh") {
+		t.Fatalf("a report with no freshness row must render no feed banner:\n%s", md)
+	}
+}
