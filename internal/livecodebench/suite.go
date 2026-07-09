@@ -148,12 +148,16 @@ type Report struct {
 	// WindowScore carries the contamination-free date-windowed rate alongside the
 	// full-set rate when a run scopes results to a contest-date window (see
 	// WindowedPassAtK); nil when the run was not date-windowed.
-	WindowScore           *WindowScores `json:"window_score,omitempty"`
-	Arms                  []ArmResult   `json:"arms,omitempty"`
-	Summary               Summary       `json:"summary"`
-	PromotionRequirements []string      `json:"promotion_requirements,omitempty"`
-	ResultClaimAllowed    bool          `json:"result_claim_allowed"`
-	ClaimBoundary         string        `json:"claim_boundary,omitempty"`
+	WindowScore *WindowScores `json:"window_score,omitempty"`
+	Arms        []ArmResult   `json:"arms,omitempty"`
+	// Problems are the per-problem verdict rows: each links a question_id to its
+	// verdict and the evidence id that backs it, so every row in a rendered
+	// report traces to gradeable evidence. Empty for a summary-only report.
+	Problems              []ProblemVerdict `json:"problems,omitempty"`
+	Summary               Summary          `json:"summary"`
+	PromotionRequirements []string         `json:"promotion_requirements,omitempty"`
+	ResultClaimAllowed    bool             `json:"result_claim_allowed"`
+	ClaimBoundary         string           `json:"claim_boundary,omitempty"`
 }
 
 // ArmResult is one (arm, scenario) result cell: raw vs fak, per scenario.
@@ -318,6 +322,23 @@ func (r Report) Validate() error {
 	}
 	if r.ResultClaimAllowed && !results {
 		return fmt.Errorf("livecodebench report: result_claim_allowed requires graded results")
+	}
+	for i, pv := range r.Problems {
+		if strings.TrimSpace(pv.QuestionID) == "" {
+			return fmt.Errorf("livecodebench report: problem row %d question_id is required", i)
+		}
+		if pv.Scenario != "" && !KnownScenario(pv.Scenario) {
+			return fmt.Errorf("livecodebench report: problem row %q scenario %q is not supported", pv.QuestionID, pv.Scenario)
+		}
+		if pv.Arm != "" && !knownArms[pv.Arm] {
+			return fmt.Errorf("livecodebench report: problem row %q arm %q is not raw|fak", pv.QuestionID, pv.Arm)
+		}
+		if !knownVerdicts[pv.Verdict] {
+			return fmt.Errorf("livecodebench report: problem row %q verdict %q is not %s|%s|%s", pv.QuestionID, pv.Verdict, VerdictUngraded, VerdictPass, VerdictFail)
+		}
+		if strings.TrimSpace(pv.EvidenceID) == "" {
+			return fmt.Errorf("livecodebench report: problem row %q evidence_id is required (every verdict must trace to evidence)", pv.QuestionID)
+		}
 	}
 	return nil
 }
