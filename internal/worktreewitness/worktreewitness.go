@@ -116,7 +116,13 @@ func ShortSHA(sha string) string {
 // git is driven through gitRun; the witnessed command through cmdRun. Separating
 // the two runners lets a test inject a fake git while running the real command, or
 // vice versa, without either polluting the other's call log.
-func Run(cfg Config, gitRun Runner, cmdRun Runner) (Result, error) {
+//
+// The return values are NAMED (res, err) on purpose: the reap runs in a deferred
+// closure that records the archive path + reap note, and a deferred write is only
+// observed by the caller when it lands on the NAMED return value. With an unnamed
+// return, `return res, nil` copies res before the defer fires and the reap's
+// Archived/ReapNote writes are silently lost.
+func Run(cfg Config, gitRun Runner, cmdRun Runner) (res Result, err error) {
 	if len(cfg.Command) == 0 {
 		return Result{}, fmt.Errorf("worktreewitness: no command to witness")
 	}
@@ -124,7 +130,7 @@ func Run(cfg Config, gitRun Runner, cmdRun Runner) (Result, error) {
 	if ref == "" {
 		ref = DefaultRef
 	}
-	res := Result{Ref: ref, Command: strings.Join(cfg.Command, " ")}
+	res = Result{Ref: ref, Command: strings.Join(cfg.Command, " ")}
 
 	if cfg.Fetch {
 		// Best-effort refresh; a fetch failure (offline) is non-fatal — we witness
