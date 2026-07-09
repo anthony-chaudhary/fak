@@ -216,6 +216,8 @@ func main() {
 		cmdShadowGit(os.Args[2:])
 	case "signals":
 		cmdSignals(os.Args[2:])
+	case "trajquery":
+		cmdTrajQuery(os.Args[2:])
 	case "dup":
 		cmdDup(os.Args[2:])
 	case "dream":
