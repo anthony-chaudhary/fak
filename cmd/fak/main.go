@@ -130,6 +130,8 @@ func main() {
 		cmdQuestionLedger(os.Args[2:])
 	case "trunk-build-probe":
 		cmdTrunkBuildProbe(os.Args[2:])
+	case "godsplit-plan":
+		cmdGodsplitPlan(os.Args[2:])
 	case "recall":
 		cmdRecall(os.Args[2:])
 	case "recover":
