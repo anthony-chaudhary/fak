@@ -163,6 +163,7 @@ var verbTiers = map[string]VerbTier{
 	"grafana":                       TierDev,
 	"growthgate":                    TierDev,
 	"guard-rsi-scorecard":           TierDev,
+	"guard-stops":                   TierDev,
 	"guard-verdict-rsi":             TierDev,
 	"headroom":                      TierDev,
 	"hooklat":                       TierDev,
