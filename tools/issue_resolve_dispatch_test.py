@@ -4880,5 +4880,223 @@ class CandidateBlockedByTest(unittest.TestCase):
         self.assertEqual(mod.candidate_blocked_by(None), [])
 
 
+class SeatAdaptiveTargetTest(unittest.TestCase):
+    """seat_adaptive_target (#3246): the pure fold that sizes one tick's effective
+    cap from the preflight's seat/host signal. All terms are TOTAL populations."""
+
+    def _pre(self, *, live=1, seat_free=11, host_cap=32, seat_total=18):
+        return {"verdict": "SPAWN_OK", "live": live, "host_cap": host_cap,
+                "seat": {"total": seat_total, "free": seat_free,
+                         "leased": seat_total - seat_free}}
+
+    def test_free_seats_bind_when_ramp_disabled(self) -> None:
+        mod = load()
+        target, info = mod.seat_adaptive_target(
+            self._pre(live=1, seat_free=11, host_cap=32),
+            fallback=3, ceiling=20, ramp_delta=0)
+        self.assertEqual(target, 12)  # live 1 + 11 free seats < host 32 < ceiling 20? no: 12 < 20
+        self.assertEqual(info["binding"], "seat_free")
+        self.assertTrue(info["signal_available"])
+
+    def test_ramp_delta_bounds_per_tick_growth(self) -> None:
+        # The issue's canary-safety knob: 11 free seats never jump the cap in one
+        # tick; it lifts at most ramp_delta above the live count.
+        mod = load()
+        target, info = mod.seat_adaptive_target(
+            self._pre(live=1, seat_free=11, host_cap=32),
+            fallback=3, ceiling=20, ramp_delta=2)
+        self.assertEqual(target, 3)
+        self.assertEqual(info["binding"], "ramp_delta")
+
+    def test_host_cap_binds_below_seats(self) -> None:
+        mod = load()
+        target, info = mod.seat_adaptive_target(
+            self._pre(live=10, seat_free=30, host_cap=12),
+            fallback=3, ceiling=20, ramp_delta=0)
+        self.assertEqual(target, 12)
+        self.assertEqual(info["binding"], "host_cap")
+
+    def test_hard_ceiling_binds_last(self) -> None:
+        mod = load()
+        target, info = mod.seat_adaptive_target(
+            self._pre(live=10, seat_free=30, host_cap=64),
+            fallback=3, ceiling=20, ramp_delta=0)
+        self.assertEqual(target, 20)
+        self.assertEqual(info["binding"], "hard_ceiling")
+
+    def test_explicit_max_workers_above_ceiling_raises_it(self) -> None:
+        # Seat sizing never SHRINKS an operator's explicit cap: --max-workers 50
+        # lifts the effective hard ceiling to 50.
+        mod = load()
+        target, info = mod.seat_adaptive_target(
+            self._pre(live=10, seat_free=30, host_cap=64),
+            fallback=50, ceiling=20, ramp_delta=0)
+        self.assertEqual(info["hard_ceiling"], 50)
+        self.assertEqual(target, 40)  # live 10 + 30 free seats
+        self.assertEqual(info["binding"], "seat_free")
+
+    def test_depleted_seats_pin_cap_at_live(self) -> None:
+        # 0 free seats => target == live => the reprobe refuses AT_CAP: honest
+        # backpressure even when the configured fallback would have admitted more.
+        mod = load()
+        target, info = mod.seat_adaptive_target(
+            self._pre(live=3, seat_free=0, host_cap=32),
+            fallback=5, ceiling=20, ramp_delta=2)
+        self.assertEqual(target, 3)
+        self.assertEqual(info["binding"], "seat_free")
+
+    def test_no_seat_signal_falls_back_to_configured_cap(self) -> None:
+        # FAIL-OPEN: a preflight doc predating the seat pool (or a hermetic stub)
+        # sizes exactly as before -- the fixed --max-workers stays the cap.
+        mod = load()
+        target, info = mod.seat_adaptive_target(
+            {"verdict": "SPAWN_OK", "cap": 2, "live": 0},  # no seat block
+            fallback=3, ceiling=20, ramp_delta=2)
+        self.assertEqual(target, 3)
+        self.assertFalse(info["signal_available"])
+        self.assertEqual(info["binding"], "fallback_max_workers")
+
+    def test_signal_read_from_capacity_limiter_raw(self) -> None:
+        # The signal also folds out of capacity_limiter.raw when the top-level
+        # seat/live keys are absent (older doc shapes).
+        mod = load()
+        pre = {"verdict": "SPAWN_OK",
+               "capacity_limiter": {"raw": {"live": 2, "seat_free": 4,
+                                            "host_cap": 16}}}
+        target, info = mod.seat_adaptive_target(pre, fallback=3, ceiling=20,
+                                                ramp_delta=0)
+        self.assertEqual(target, 6)
+        self.assertEqual(info["binding"], "seat_free")
+
+
+class SeatAdaptiveEvaluateTest(unittest.TestCase):
+    """evaluate()-level wiring of seat-adaptive tick sizing (#3246): the tick
+    re-runs the preflight at the seat-sized cap, the preflight stays the
+    authoritative floor, and no-signal / opt-out paths size exactly as before."""
+
+    SEAT_OK = {
+        "verdict": "SPAWN_OK", "reason": "ok", "cap": 3, "live": 1, "host_cap": 32,
+        "seat": {"total": 18, "free": 11, "leased": 7},
+        "account": {"tag": "worker-a", "tier": 1, "model": "opus", "dir": "/acct/a"},
+    }
+    PICK = {"lane": "gateway", "numbers": [467, 466], "by_lane_count": {"gateway": 2}}
+
+    def _stub(self, mod, *, preflight):
+        EvaluateTest._patch(self, mod, pre={}, pick=dict(self.PICK))
+        mod.issue_dispatch.preflight = preflight
+
+    def _recording_preflight(self, docs_by_cap: dict[int, dict], calls: list[int]):
+        def preflight(root, **kw):
+            cap = int(kw.get("max_workers"))
+            calls.append(cap)
+            return docs_by_cap[cap]
+        return preflight
+
+    def test_at_cap_probe_reprobes_and_unblocks_at_seat_target(self) -> None:
+        # The exact #3246 scenario: fixed cap 3 is saturated (REFUSE_AT_CAP with
+        # configured_max binding) while 8 seats sit free. The tick re-sizes to
+        # live+ramp (3+2=5), re-runs the preflight at 5, and proceeds to plan.
+        mod = load()
+        calls: list[int] = []
+        at_cap = {"verdict": "REFUSE_AT_CAP", "reason": "live 3 >= cap 3",
+                  "cap": 3, "live": 3, "host_cap": 32,
+                  "seat": {"total": 18, "free": 8, "leased": 10},
+                  "account": {"tag": "worker-a", "tier": 1, "model": "opus",
+                              "dir": "/acct/a"}}
+        ok_at_5 = {"verdict": "SPAWN_OK", "reason": "ok", "cap": 5, "live": 3,
+                   "host_cap": 32, "seat": {"total": 18, "free": 8, "leased": 10},
+                   "account": {"tag": "worker-a", "tier": 1, "model": "opus",
+                               "dir": "/acct/a"}}
+        self._stub(mod, preflight=self._recording_preflight(
+            {3: at_cap, 5: ok_at_5}, calls))
+        p = mod.evaluate(ROOT, max_workers=3, work_kind="engineering",
+                         lane=None, live=False)
+        self.assertEqual(calls, [3, 5])
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "WOULD_SPAWN")
+        sa = p["seat_adaptive"]
+        self.assertEqual(sa["effective_target"], 5)
+        self.assertEqual(sa["binding"], "ramp_delta")
+        self.assertTrue(sa["reprobed"])
+        self.assertEqual(p["preflight"]["cap"], 5)
+
+    def test_preflight_refusal_at_seat_target_still_stops_growth(self) -> None:
+        # The preflight stays AUTHORITATIVE: a hot host refusing at the resized
+        # cap refuses the tick -- seat sizing can widen the configured term only,
+        # never overrule the DoS gate.
+        mod = load()
+        calls: list[int] = []
+        at_cap = dict(self.SEAT_OK, verdict="REFUSE_AT_CAP",
+                      reason="live 3 >= cap 3", cap=3, live=3)
+        host_hot = dict(self.SEAT_OK, verdict="REFUSE_HOST_HOT",
+                        reason="host guard hot", cap=5, live=3)
+        self._stub(mod, preflight=self._recording_preflight(
+            {3: at_cap, 5: host_hot}, calls))
+        p = mod.evaluate(ROOT, max_workers=3, work_kind="engineering",
+                         lane=None, live=False)
+        self.assertEqual(calls, [3, 5])
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["action"], "refused")
+        self.assertEqual(p["verdict"], "REFUSE_HOST_HOT")
+
+    def test_no_seat_signal_probes_once_at_configured_cap(self) -> None:
+        # FAIL-OPEN: no seat block in the doc => one probe at the configured cap,
+        # no reprobe, and the audit block says why the tick fell back.
+        mod = load()
+        calls: list[int] = []
+        bare = {"verdict": "SPAWN_OK", "reason": "ok", "cap": 2, "live": 0,
+                "account": {"tag": "worker-a", "tier": 1, "model": "opus",
+                            "dir": "/acct/a"}}
+        self._stub(mod, preflight=self._recording_preflight({2: bare}, calls))
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+        self.assertEqual(calls, [2])
+        self.assertEqual(p["verdict"], "WOULD_SPAWN")
+        sa = p["seat_adaptive"]
+        self.assertFalse(sa["signal_available"])
+        self.assertEqual(sa["binding"], "fallback_max_workers")
+        self.assertNotIn("reprobed", sa)
+
+    def test_seat_target_equal_to_configured_cap_skips_reprobe(self) -> None:
+        # live 1 + ramp 2 == configured 3: nothing to re-size, one probe only.
+        mod = load()
+        calls: list[int] = []
+        self._stub(mod, preflight=self._recording_preflight(
+            {3: dict(self.SEAT_OK)}, calls))
+        p = mod.evaluate(ROOT, max_workers=3, work_kind="engineering",
+                         lane=None, live=False)
+        self.assertEqual(calls, [3])
+        self.assertEqual(p["verdict"], "WOULD_SPAWN")
+        self.assertEqual(p["seat_adaptive"]["effective_target"], 3)
+        self.assertNotIn("reprobed", p["seat_adaptive"])
+
+    def test_opt_out_keeps_fixed_cap_and_payload_shape(self) -> None:
+        # --no-seat-adaptive: one probe at the configured cap and NO seat_adaptive
+        # payload block (byte-identical to the pre-#3246 tick).
+        mod = load()
+        calls: list[int] = []
+        self._stub(mod, preflight=self._recording_preflight(
+            {3: dict(self.SEAT_OK)}, calls))
+        p = mod.evaluate(ROOT, max_workers=3, work_kind="engineering",
+                         lane=None, live=False, seat_adaptive=False)
+        self.assertEqual(calls, [3])
+        self.assertEqual(p["verdict"], "WOULD_SPAWN")
+        self.assertNotIn("seat_adaptive", p)
+
+    def test_render_names_the_adaptive_cap_and_binding(self) -> None:
+        mod = load()
+        calls: list[int] = []
+        at_cap = dict(self.SEAT_OK, verdict="REFUSE_AT_CAP",
+                      reason="live 3 >= cap 3", cap=3, live=3)
+        ok_at_5 = dict(self.SEAT_OK, verdict="SPAWN_OK", cap=5, live=3)
+        self._stub(mod, preflight=self._recording_preflight(
+            {3: at_cap, 5: ok_at_5}, calls))
+        p = mod.evaluate(ROOT, max_workers=3, work_kind="engineering",
+                         lane=None, live=False)
+        rendered = mod.render(p)
+        self.assertIn("seats     : adaptive cap 5", rendered)
+        self.assertIn("binding ramp_delta", rendered)
+
+
 if __name__ == "__main__":
     unittest.main()

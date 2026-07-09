@@ -130,6 +130,22 @@ DEFAULT_SPAWN_PROBE_S = 5.0
 # siblings in one tick — bounds the blast radius so a transient mass-death can't blow
 # the healthy backend's cap past what its account can actually serve.
 DEFAULT_REALLOC_CEILING = 2
+# Seat-adaptive tick sizing (#3246). The standing crons' fixed --max-workers (3/4/2)
+# was a throttle BELOW the preflight's real DoS cap (min(host_cap, seats)): adding an
+# account raised seat_free but never the live worker count, so new capacity idled.
+# When the preflight probe carries a seat signal, the tick re-sizes its effective cap
+# to  min(live + seat_free, host_cap, hard ceiling, live + ramp delta)  and re-runs
+# the preflight at that cap. The preflight stays the AUTHORITATIVE floor — a REFUSE_*
+# at the resized cap still stops growth; only the redundant configured_max term moves.
+# The configured --max-workers remains the fail-safe cap whenever no seat signal is
+# available (fail-open to exactly the pre-#3246 behavior), and it RAISES the hard
+# ceiling when set above it (seat sizing never shrinks an explicit operator cap).
+# The ramp delta keeps growth canary-safe: one tick may lift the cap at most this far
+# above the live count, so new seats convert to workers over several 5-min ticks
+# rather than in one burst (0 disables the ramp bound).
+DEFAULT_SEAT_ADAPTIVE = True
+DEFAULT_SEAT_CEILING = 20
+DEFAULT_SEAT_RAMP_DELTA = 2
 LOOP_ID_PREFIX = "issue-resolve-dispatch"
 DEFAULT_ISSUE_CONTRACT_MIN_SCORE = 100
 # Contract-ready pick: how many lane issues (oldest first) one tick may contract-
@@ -4241,6 +4257,70 @@ def _maybe_dispatch_contract_repair(
     return payload
 
 
+def seat_adaptive_target(pre: dict[str, Any], *, fallback: int, ceiling: int,
+                         ramp_delta: int) -> tuple[int, dict[str, Any]]:
+    """Seat-adaptive effective worker cap for one tick (#3246) — a pure fold.
+
+    Reads the seat/host signal the preflight probe already returned and sizes the
+    tick's effective cap as ``min(live + seat_free, host_cap, ceiling,
+    live + ramp_delta)`` so a newly added account (more free seats) converts to
+    live workers on the next tick with no cron edit. Every term is a TOTAL live
+    worker population, not a delta: free seats admit ``seat_free`` workers ABOVE
+    the current live count, ``host_cap`` and the hard ceiling are already totals,
+    and the ramp admits at most ``ramp_delta`` NEW workers per tick (0 disables).
+    The hard ceiling never shrinks an explicit operator cap: a configured
+    ``fallback`` (--max-workers, plus any realloc bonus) above it raises it.
+
+    FAIL-OPEN: when the doc carries no usable seat signal (no ``seat.free`` /
+    ``live``, e.g. a preflight predating the seat pool or a hermetic stub), the
+    configured ``fallback`` is returned unchanged so the tick sizes exactly as
+    before. No I/O — the second preflight run at the resized cap (the caller's
+    job) keeps the DoS gate authoritative. Returns ``(target, info)`` where
+    ``info`` is the payload's ``seat_adaptive`` audit block.
+    """
+    def _num(value: Any) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    limiter = (pre.get("capacity_limiter")
+               if isinstance(pre.get("capacity_limiter"), dict) else {}) or {}
+    raw = limiter.get("raw") if isinstance(limiter.get("raw"), dict) else {}
+    seat = pre.get("seat") if isinstance(pre.get("seat"), dict) else {}
+    seat_free = _num(seat.get("free"))
+    if seat_free is None:
+        seat_free = _num(raw.get("seat_free"))
+    live = _num(pre.get("live"))
+    if live is None:
+        live = _num(raw.get("live"))
+    host_cap = _num(pre.get("host_cap"))
+    if host_cap is None:
+        host_cap = _num(raw.get("host_cap"))
+    hard_ceiling = max(int(ceiling), int(fallback))
+    info: dict[str, Any] = {
+        "enabled": True, "fallback_max_workers": int(fallback),
+        "hard_ceiling": hard_ceiling, "ramp_delta": int(ramp_delta),
+    }
+    if seat_free is None or live is None:
+        info.update({"signal_available": False, "effective_target": int(fallback),
+                     "binding": "fallback_max_workers"})
+        return int(fallback), info
+    terms: list[tuple[str, int]] = [("seat_free", live + seat_free),
+                                    ("hard_ceiling", hard_ceiling)]
+    if host_cap is not None:
+        terms.append(("host_cap", host_cap))
+    if ramp_delta > 0:
+        terms.append(("ramp_delta", live + ramp_delta))
+    binding, target = min(terms, key=lambda t: t[1])
+    target = max(target, 0)
+    info.update({"signal_available": True, "seat_free": seat_free, "live": live,
+                 **({"host_cap": host_cap} if host_cap is not None else {}),
+                 "terms": dict(terms), "effective_target": target,
+                 "binding": binding})
+    return target, info
+
+
 def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
               live: bool, refresh: bool = True, cooldown_min: int = 120,
               backend: str = "claude",
@@ -4248,6 +4328,9 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
               worker_timeout_s: int | None = DEFAULT_WORKER_TIMEOUT_S,
               spawn_probe_s: float = DEFAULT_SPAWN_PROBE_S,
               realloc_ceiling: int = DEFAULT_REALLOC_CEILING,
+              seat_adaptive: bool = DEFAULT_SEAT_ADAPTIVE,
+              seat_ceiling: int = DEFAULT_SEAT_CEILING,
+              seat_ramp_delta: int = DEFAULT_SEAT_RAMP_DELTA,
               record_loop: bool = False,
               loop_ledger: Path | None = None,
               issue_override: int | None = None,
@@ -4315,6 +4398,22 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
 
     pre = issue_dispatch.preflight(root, max_workers=eff_max_workers, work_kind=work_kind,
                                    product=product)
+    # Seat-adaptive tick sizing (#3246): the configured --max-workers is a fail-safe,
+    # not the throttle. When the probe above carries a seat signal, re-size the
+    # effective cap to min(live + seat_free, host_cap, ceiling, live + ramp) and
+    # re-run the preflight AT that cap — the preflight stays the authoritative DoS
+    # floor (a REFUSE_* at the resized cap still stops growth); only the redundant
+    # configured_max term moves. No signal -> no re-run, exactly the old sizing.
+    seat_sizing: dict[str, Any] | None = None
+    if seat_adaptive:
+        seat_target, seat_sizing = seat_adaptive_target(
+            pre, fallback=eff_max_workers, ceiling=seat_ceiling,
+            ramp_delta=seat_ramp_delta)
+        if seat_sizing.get("signal_available") and seat_target != eff_max_workers:
+            eff_max_workers = seat_target
+            seat_sizing["reprobed"] = True
+            pre = issue_dispatch.preflight(root, max_workers=eff_max_workers,
+                                           work_kind=work_kind, product=product)
     pre_ok = pre.get("verdict") == "SPAWN_OK"
     acct = pre.get("account") or {}
     account_cap_reroute: dict[str, Any] | None = None
@@ -4631,6 +4730,12 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         **({"witnessed_slots": witnessed} if live else {}),
         **({"account_cap_reroute": account_cap_reroute} if account_cap_reroute else {}),
         "preflight": _preflight_public(pre),
+        # Seat-adaptive sizing audit (#3246): which term bound the effective cap this
+        # tick (seat_free / host_cap / hard_ceiling / ramp_delta), or that the tick
+        # fell back to the configured --max-workers for want of a seat signal. Only
+        # present when the feature is enabled, so --no-seat-adaptive payloads stay
+        # byte-identical to before.
+        **({"seat_adaptive": seat_sizing} if seat_sizing else {}),
         "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},
         "lane": chosen_lane, "lane_issue_count": len(pick.get("numbers") or []),
         "cooled_recently": sorted(cooled), "target_issue": target,
@@ -5312,6 +5417,12 @@ def render(p: dict[str, Any]) -> str:
         f"  target    : #{p.get('target_issue')}  {(p.get('issue_title') or '')[:54]}",
         f"  -> {p.get('reason')}",
     ]
+    sa = p.get("seat_adaptive") or {}
+    if sa.get("signal_available"):
+        lines.insert(2, f"  seats     : adaptive cap {sa.get('effective_target')} "
+                        f"(binding {sa.get('binding')}; live {sa.get('live')} + "
+                        f"free {sa.get('seat_free')}, ceiling {sa.get('hard_ceiling')}, "
+                        f"ramp +{sa.get('ramp_delta')}/tick)")
     hint = p.get("preflight_hint") or {}
     if hint.get("message"):
         lines.append(f"  hint      : {hint.get('message')}")
@@ -5513,7 +5624,26 @@ def main(argv: list[str] | None = None) -> int:
         description="One guarded tick that spawns an issue-RESOLUTION worker (dry-run by default).")
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
     ap.add_argument("--max-workers", type=int, default=20,
-                    help="hard cap on live workers, enforced by the preflight (default: 20)")
+                    help="fail-safe cap on live workers, enforced by the preflight "
+                         "(default: 20). With seat-adaptive sizing (the default, "
+                         "#3246) this binds only when the preflight returns no seat "
+                         "signal; with --no-seat-adaptive it is the hard cap.")
+    ap.add_argument("--no-seat-adaptive", action="store_true",
+                    help="disable seat-adaptive tick sizing (#3246): keep the "
+                         "configured --max-workers as the binding cap instead of "
+                         "growing to min(live+seat_free, host_cap, --seat-ceiling, "
+                         "live+--seat-ramp-delta) when the preflight carries a "
+                         "seat signal")
+    ap.add_argument("--seat-ceiling", type=int, default=DEFAULT_SEAT_CEILING,
+                    help=f"hard fail-safe ceiling on the seat-adaptive cap (default "
+                         f"{DEFAULT_SEAT_CEILING}). An explicit --max-workers above "
+                         f"it raises it — seat sizing never shrinks an operator's "
+                         f"configured cap.")
+    ap.add_argument("--seat-ramp-delta", type=int, default=DEFAULT_SEAT_RAMP_DELTA,
+                    help=f"max NEW workers one tick may plan above the live count "
+                         f"(canary-safe ramp, #3246; default "
+                         f"{DEFAULT_SEAT_RAMP_DELTA}; 0 disables the ramp bound so "
+                         f"the cap jumps straight to the seat/host minimum)")
     ap.add_argument("--work-kind", default=None,
                     help="switcher work kind (engineering->t1, gardening->t2). Default "
                          "follows --backend: engineering for claude (t1 opus pool), "
@@ -5613,6 +5743,9 @@ def main(argv: list[str] | None = None) -> int:
                        worker_timeout_s=dispatch_worker.normalize_timeout(args.worker_timeout_s),
                        spawn_probe_s=max(0.0, args.spawn_probe_s),
                        realloc_ceiling=max(0, args.max_realloc_workers),
+                       seat_adaptive=not args.no_seat_adaptive,
+                       seat_ceiling=max(1, args.seat_ceiling),
+                       seat_ramp_delta=max(0, args.seat_ramp_delta),
                        record_loop=not args.no_loop_ledger,
                        loop_ledger=(Path(args.loop_ledger).resolve()
                                     if args.loop_ledger else None),
