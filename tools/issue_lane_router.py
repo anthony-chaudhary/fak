@@ -219,8 +219,10 @@ CLASS_LABEL = {
 }
 # color + one-line description for `gh label create` (branch-regime vocabulary).
 CLASS_LABEL_SPEC = {
+    # NB: GitHub caps label descriptions at 100 chars — keep this string <=100 or
+    # `gh label create` 422s and the class:frontdoor label is silently never made.
     CLASS_FRONTDOOR: ("B60205", "Work class: public release / front-door path "
-                                "(install, README, release promotion, version-everything)"),
+                                "(install, README, release promotion)"),
     CLASS_INFRA: ("5319E7", "Work class: fleet infrastructure "
                             "(CI/CD, dispatch loops, observability, slack, build, testing)"),
     CLASS_DEV: ("0E8A16", "Work class: product/kernel dev leaf (the default day-to-day work)"),
@@ -774,6 +776,16 @@ def fetch_issues(workspace: Path, *, limit: int = 1000) -> list[dict[str, Any]]:
          "--json", "number,title,labels,body"],
         workspace,
     )
+    # A FAILED fetch (gh rate-limit, network, auth) exits non-zero; an empty repo
+    # exits 0 with a "[]" body. These must NOT collapse to the same silent []: a
+    # failed fetch read as "0 open issues" makes compute_coverage() report
+    # complete-and-empty, so the router (and the by-default backfill) no-ops while
+    # LOOKING successful. Fail loud instead — a red CI job beats a silent miss.
+    if res.get("returncode"):
+        raise RuntimeError(
+            "gh issue list failed (rc="
+            f"{res.get('returncode')}): {(res.get('stderr') or '').strip()[:300]}"
+        )
     text = (res.get("stdout") or "").strip()
     if not text:
         return []
@@ -1194,8 +1206,14 @@ def ensure_class_labels(workspace: Path, *, apply: bool) -> list[str]:
         if apply:
             # --force upserts: create-or-update color/description, never errors on
             # an existing label. Matches the repo's ad-hoc `gh label create` pattern.
-            run_text(["gh", "label", "create", name, "--color", color,
-                      "--description", desc, "--force"], workspace)
+            res = run_text(["gh", "label", "create", name, "--color", color,
+                            "--description", desc, "--force"], workspace)
+            # A failed create (e.g. a >100-char description 422) must NOT be silent:
+            # the per-issue `--add-label` writes would then fail en masse with a
+            # confusing "'<label>' not found". Surface it so the run is diagnosable.
+            if res.get("returncode"):
+                print(f"WARNING: could not ensure label {name!r}: "
+                      f"{(res.get('stderr') or '').strip()}", file=sys.stderr)
     return created
 
 
