@@ -47,6 +47,7 @@ func runOperatorBrief(stdout, stderr io.Writer, argv []string) int {
 	cacheLedger := fs.String("cache-ledger", "", "with --collect: pass a cache-value ledger path to program report")
 	repo := fs.String("repo", "", "with --collect: owner/name for milestone gh roadmap queries")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
+	full := fs.Bool("full", false, "expand every item with its detail and action (default is a compact one-line-per-item view)")
 	check := fs.Bool("check", false, "paging gate: exit non-zero only when a human operator item exists")
 	date := fs.String("date", "", "snapshot date YYYY-MM-DD (default: today UTC)")
 	if !parseFlags(fs, argv) {
@@ -75,6 +76,10 @@ func runOperatorBrief(stdout, stderr io.Writer, argv []string) int {
 	in := operatorbrief.Inputs{
 		Workspace: root,
 		Date:      snapDate,
+		// Decenter-the-human paging gate, soakable via env: "enforce" pages only
+		// on genuine authority decisions; "warn"/unset (default) leaves paging
+		// unchanged. `fak operator triage` is the always-on lens for the same fold.
+		TriageGate: os.Getenv("FAK_OPERATOR_TRIAGE_GATE"),
 	}
 
 	if *cadencePath != "" {
@@ -162,13 +167,85 @@ func runOperatorBrief(stdout, stderr io.Writer, argv []string) int {
 	}
 	if *asJSON {
 		_ = writeIndentedJSONNoEscape(stdout, report)
-	} else {
+	} else if *full {
 		fmt.Fprintln(stdout, operatorbrief.Render(report))
+	} else {
+		fmt.Fprintln(stdout, operatorbrief.RenderCompact(report))
 	}
 	if report.OK {
 		return 0
 	}
 	return 1
+}
+
+// operatorTriageView is the JSON envelope for `fak operator triage --json`: the
+// triaged brief with the list of items choicetriage routed off the human bucket.
+type operatorTriageView struct {
+	operatorbrief.Report
+	Reassignments []operatorbrief.Reassignment `json:"reassignments,omitempty"`
+}
+
+// runOperatorTriage is the decenter-the-human lens: it loads a `fak operator brief
+// --json` artifact and re-partitions its human bucket through choicetriage so the
+// gate pages only on genuine authority decisions. Everything else is routed back
+// to the fleet (act directly, spawn a fresh-context judge, or file a ticket). It
+// always enforces — the env soak switch governs only the brief's own gate.
+func runOperatorTriage(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && argv[0] == "selfcheck" {
+		return runReportSelfcheck(stdout, stderr, argv[1:], "operator triage", operatorbrief.TriageSelfcheck,
+			"SELFCHECK OK -- decenter-the-human gate: a genuine authority decision keeps "+
+				"paging; a knowable evaluation routes to the fleet and stops paging.")
+	}
+	fs := flag.NewFlagSet("operator triage", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	briefPath := fs.String("brief", "", "path to `fak operator brief --json` output to triage ('-' for stdin)")
+	asJSON := fs.Bool("json", false, "emit the triaged brief plus reassignments as JSON")
+	check := fs.Bool("check", false, "paging gate: exit non-zero only when a genuine human-residual item remains after triage")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "fak operator triage: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+	if *briefPath == "" {
+		fmt.Fprintln(stderr, "fak operator triage: --brief PATH (or '-') is required; produce it with `fak operator brief --json`")
+		return 2
+	}
+
+	loaded, err := loadPreviousOperatorBrief(*briefPath, os.Stdin)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak operator triage: --brief: %v\n", err)
+		return 2
+	}
+
+	triaged, moved := operatorbrief.TriageHumanBucket(loaded)
+	triaged = triaged.Reconcile()
+	code, message := operatorbrief.CheckGate(triaged)
+
+	if *asJSON {
+		_ = writeIndentedJSONNoEscape(stdout, operatorTriageView{
+			Report:        triaged.WithGate(code, message),
+			Reassignments: moved,
+		})
+	} else {
+		fmt.Fprintln(stdout, message)
+		if len(moved) == 0 {
+			fmt.Fprintln(stdout, "routed to fleet: none (every human item is a genuine authority decision)")
+		}
+		for _, m := range moved {
+			resolve := m.Resolve
+			if strings.TrimSpace(resolve) == "" {
+				resolve = "(no action)"
+			}
+			fmt.Fprintf(stdout, "routed to fleet: %s/%s -> %s: %s\n", m.Source, m.Title, m.Disposition, resolve)
+		}
+	}
+
+	if *check {
+		return code
+	}
+	return 0
 }
 
 func stdinUses(paths ...string) int {

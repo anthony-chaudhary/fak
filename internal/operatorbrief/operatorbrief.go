@@ -29,6 +29,13 @@ type Inputs struct {
 	Heaviness   *scorecard.Payload
 	Fleet       *loopfleet.Report
 	Previous    *Report
+
+	// TriageGate selects the decenter-the-human paging policy applied during
+	// Fold: "enforce" re-partitions the human bucket through choicetriage so the
+	// gate pages only on genuine human-residual items; "warn" or "" (default)
+	// leaves paging unchanged so the change can soak. The standalone
+	// `fak operator triage` lens always enforces, independent of this field.
+	TriageGate string
 }
 
 // Report is one operator-facing control-pane envelope. It deliberately separates
@@ -344,7 +351,14 @@ func Fold(in Inputs) Report {
 		Watch:      len(r.Watch),
 		Background: len(r.Background),
 	}
-	r.finalize()
+	if triageEnforced(in.TriageGate) {
+		// Decenter the human: fold the human bucket through choicetriage so the
+		// gate pages only on genuine authority decisions. TriageHumanBucket
+		// recomputes Counts and runs finalize() itself.
+		r, _ = TriageHumanBucket(r)
+	} else {
+		r.finalize()
+	}
 	if in.Previous != nil {
 		r.Delta = deltaFrom(*in.Previous, r)
 	}
@@ -940,6 +954,125 @@ func CheckGate(r Report) (int, string) {
 		return 1, "OPERATOR ACTION: " + r.Reason + " - " + r.NextAction
 	}
 	return 0, "OPERATOR OK: " + r.Reason
+}
+
+// triageEnforced reports whether the decenter-the-human gate should re-partition
+// the human bucket during Fold. Only "enforce" flips paging; "warn"/"" soak.
+func triageEnforced(mode string) bool {
+	return strings.EqualFold(strings.TrimSpace(mode), "enforce")
+}
+
+// itemSignal maps an operator Item onto the choicetriage Signal, using the same
+// field correspondence as Choice.triage (Title->Question, Detail, Action) so the
+// gate and the surfaced Choice agree on every item's disposition.
+func itemSignal(it Item) choicetriage.Signal {
+	return choicetriage.Signal{
+		Severity: it.Severity,
+		Source:   it.Source,
+		Question: it.Title,
+		Detail:   it.Detail,
+		Action:   it.Action,
+	}
+}
+
+// Reassignment records one human-bucket item that choicetriage judged does not
+// truly need a person, and where the fold routed it instead.
+type Reassignment struct {
+	Source      string                   `json:"source"`
+	Title       string                   `json:"title"`
+	Disposition choicetriage.Disposition `json:"disposition"`
+	Resolve     string                   `json:"resolve"`
+}
+
+// TriageHumanBucket re-partitions r.Human through choicetriage so the paging gate
+// pages only on genuine human-residual decisions. Every human item whose
+// disposition is not HumanResidual is moved to the agent bucket, carrying its
+// triage Resolve as the next action; Counts and the finalize() verdict are
+// recomputed so CheckGate follows. Pure: state in, state out. This is the
+// mechanism behind both the enforce-mode Fold and the `fak operator triage` lens.
+func TriageHumanBucket(r Report) (Report, []Reassignment) {
+	kept := make([]Item, 0, len(r.Human))
+	var moved []Reassignment
+	for _, it := range r.Human {
+		v := choicetriage.Triage(itemSignal(it))
+		if v.NeedsHuman {
+			kept = append(kept, it)
+			continue
+		}
+		// Not a person's call: route it back to the fleet. FRESH_CONTEXT items
+		// carry "open a fresh context window..." as the action; TAKE_OBVIOUS and
+		// FILE_TICKET carry their concrete next move.
+		it.Bucket = "agent"
+		it.Severity = "action"
+		if strings.TrimSpace(v.Resolve) != "" {
+			it.Action = v.Resolve
+		}
+		r.Agent = append(r.Agent, it)
+		moved = append(moved, Reassignment{
+			Source:      it.Source,
+			Title:       it.Title,
+			Disposition: v.Disposition,
+			Resolve:     v.Resolve,
+		})
+	}
+	r.Human = kept
+	r.Counts = Counts{Human: len(r.Human), Agent: len(r.Agent), Watch: len(r.Watch), Background: len(r.Background)}
+	r.finalize()
+	return r, moved
+}
+
+// Reconcile recomputes the human-readout projections (State, Attention, Choices,
+// Challenges, Agenda, Learning) from the current buckets. Callers that mutate the
+// buckets after Fold — e.g. the triage lens applying TriageHumanBucket to a loaded
+// brief — call this so the derived views match the reconciled buckets.
+func (r Report) Reconcile() Report {
+	r.deriveHumanReadout()
+	return r
+}
+
+// TriageSelfcheck proves the decenter-the-human gate with no I/O, no clock, and no
+// network. It folds a synthetic brief carrying two human-bucket items — a genuine
+// authority decision (a release approval) and a knowable evaluation (an unclear
+// score dimension) — through TriageHumanBucket and asserts the load-bearing
+// invariants: the authority item still pages and stays in Human; the evaluation is
+// routed to the agent bucket as FRESH_CONTEXT and stops paging. A brief whose only
+// human item is that evaluation must gate clean after triage.
+func TriageSelfcheck() error {
+	r := Report{Schema: Schema}
+	r.addHuman("release", "decision", "release decision needed", "operator must approve the tagged build before publish", "approve the release")
+	r.addHuman("cadence", "page", "score dimension unclear", "one dimension moved but the cause is not obvious", "")
+
+	if code, _ := CheckGate(r); code == 0 {
+		return fmt.Errorf("pre-triage gate should page on 2 human items, got exit 0")
+	}
+
+	triaged, moved := TriageHumanBucket(r)
+	if len(triaged.Human) != 1 {
+		return fmt.Errorf("want 1 residual human item after triage, got %d", len(triaged.Human))
+	}
+	if triaged.Human[0].Source != "release" {
+		return fmt.Errorf("want the release authority decision to remain human, got source %q", triaged.Human[0].Source)
+	}
+	if len(moved) != 1 {
+		return fmt.Errorf("want exactly 1 item routed to the fleet, got %d", len(moved))
+	}
+	if moved[0].Source != "cadence" {
+		return fmt.Errorf("want the unclear score dimension routed to the fleet, got source %q", moved[0].Source)
+	}
+	if moved[0].Disposition != choicetriage.FreshContext {
+		return fmt.Errorf("want the evaluation to route as FRESH_CONTEXT, got %s", moved[0].Disposition)
+	}
+	if code, _ := CheckGate(triaged); code != 1 {
+		return fmt.Errorf("post-triage gate should still page on the residual authority decision, got exit %d", code)
+	}
+
+	only := Report{Schema: Schema}
+	only.addHuman("cadence", "page", "score dimension unclear", "one dimension moved but the cause is not obvious", "")
+	onlyTriaged, _ := TriageHumanBucket(only)
+	if code, _ := CheckGate(onlyTriaged); code != 0 {
+		return fmt.Errorf("a brief whose only human item is a knowable evaluation should gate clean after triage, got exit %d", code)
+	}
+	return nil
 }
 
 // WithGate returns a copy reconciled to a CheckGate decision.
