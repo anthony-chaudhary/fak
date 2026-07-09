@@ -642,6 +642,59 @@ class NeverStartedTest(unittest.TestCase):
             _row("a", "NEVER_STARTED", autonomous=False)))
 
 
+class NeverStartBurstReportTest(unittest.TestCase):
+    """#3553: the operator summary must make a LAUNCH-STORM (many seats launched, none
+    produced an assistant turn) legible on its own recency-bucketed line, distinct from the
+    apierr `storm:` line; and the per-session table must badge a repeat-crasher with its
+    prior in-place relaunch count. Both surfaces are witnessed here through the pure seams
+    the summary block renders from (session_storm_summary / _ledger_inplace_attempts +
+    _relaunch_badge), so no live scan is needed."""
+
+    def setUp(self):
+        # isolate the ledger read so _ledger_inplace_attempts sees ONLY what we write
+        self._tmp = __import__("tempfile").mkdtemp()
+        self._orig_reg = fleet_sessions.REG_DIR
+        fleet_sessions.REG_DIR = self._tmp
+
+    def tearDown(self):
+        fleet_sessions.REG_DIR = self._orig_reg
+        __import__("shutil").rmtree(self._tmp, ignore_errors=True)
+
+    def test_burst_counts_never_started_by_recency_window(self) -> None:
+        # three NEVER_STARTED seats all fresh (age 5m -> inside every window) plus one
+        # apierr and one live: the burst count is 3 in each window, the apierr line is 1.
+        rows = ([_row(".claude-a", "NEVER_STARTED", session=f"{i:08d}-x") for i in range(3)]
+                + [_row(".claude-a", "STOPPED_APIERR", session="apierr-1"),
+                   _row(".claude-a", "LIVE", session="live-1")])
+        st = fleet_sessions.session_storm_summary(rows, {})["storm"]
+        self.assertEqual((st["neverstart_15m"], st["neverstart_30m"], st["neverstart_60m"]),
+                         (3, 3, 3))
+        # the never-start count does NOT leak into the apierr storm count and vice-versa
+        self.assertEqual(st["apierr_15m"], 1)
+        self.assertGreater(st["neverstart_per_min_30m"], 0.0)
+
+    def test_burst_respects_the_recency_window(self) -> None:
+        # a NEVER_STARTED seat older than 60m falls out of every bucket
+        rows = [dict(_row(".claude-a", "NEVER_STARTED", session="old-1"), age_min=90.0)]
+        st = fleet_sessions.session_storm_summary(rows, {})["storm"]
+        self.assertEqual((st["neverstart_15m"], st["neverstart_30m"], st["neverstart_60m"]),
+                         (0, 0, 0))
+
+    def test_relaunch_badge_renders_only_when_attempts_positive(self) -> None:
+        self.assertEqual(fleet_sessions._relaunch_badge(0), "")
+        self.assertEqual(fleet_sessions._relaunch_badge(3), "  relaunch×3")
+
+    def test_per_session_relaunch_count_comes_from_the_ledger(self) -> None:
+        # the exact path the per-session render uses: ledger in-place count -> badge string
+        sid = "abcd1111-2222-3333-4444-555555555555"
+        with open(os.path.join(self._tmp, "resume_ledger.jsonl"), "w", encoding="utf-8") as fh:
+            for _ in range(2):
+                fh.write(json.dumps({"session": sid, "phase": "launched", "rehomed": False}) + "\n")
+        counts = fleet_sessions._ledger_inplace_attempts()
+        self.assertEqual(counts.get(sid), 2)
+        self.assertEqual(fleet_sessions._relaunch_badge(counts.get(sid, 0)), "  relaunch×2")
+
+
 class DedupTaskTest(unittest.TestCase):
     """Identical repeating autonomous tasks (same task_sig across sids) resume ONE
     primary; the rest defer so they never stampede a healthy seat."""

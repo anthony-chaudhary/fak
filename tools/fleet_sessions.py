@@ -884,6 +884,14 @@ def _ledger_inplace_attempts(reg_dir=None):
     return counts
 
 
+def _relaunch_badge(n):
+    """Compact per-session suffix for the operator table (#3553): a row auto-resumed N>0
+    times IN PLACE on its own seat carries ``relaunch×N`` so a repeat-crasher is visible
+    without cross-referencing the ledger. 0 attempts renders nothing -- no badge spam on
+    the common (never-relaunched) case."""
+    return f"  relaunch×{n}" if n > 0 else ""
+
+
 def _resumable_disp(r):
     """Whether a row's disposition is one the resume path might auto-resume (so it is a
     candidate to be a dedup primary or a deferred duplicate). LIVE/DONE are NOT resumable
@@ -1233,6 +1241,7 @@ def session_storm_summary(session_rows, throttle):
     throttle = throttle or {}
     counts_by_disp = {}
     apierr = {w: 0 for w in STORM_BUCKETS_MIN}
+    neverstart = {w: 0 for w in STORM_BUCKETS_MIN}   # #3553: launch-storm (many seats, no turn)
     total = {w: 0 for w in STORM_BUCKETS_MIN}
     accts = {}
     for r in session_rows:
@@ -1240,12 +1249,15 @@ def session_storm_summary(session_rows, throttle):
         counts_by_disp[d] = counts_by_disp.get(d, 0) + 1
         a = _recent_age(r.get("age_min"))
         is_err = d == "STOPPED_APIERR"
+        is_neverstart = d == "NEVER_STARTED"
         if a is not None:
             for w in STORM_BUCKETS_MIN:
                 if a <= w:
                     total[w] += 1
                     if is_err:
                         apierr[w] += 1
+                    if is_neverstart:
+                        neverstart[w] += 1
         acc = r.get("account")
         if acc:
             h = accts.setdefault(acc, {"newest_disp": None, "newest_age_min": None,
@@ -1258,8 +1270,10 @@ def session_storm_summary(session_rows, throttle):
                 h["live"] += 1
     storm = {f"apierr_{w}m": apierr[w] for w in STORM_BUCKETS_MIN}
     storm.update({f"total_{w}m": total[w] for w in STORM_BUCKETS_MIN})
+    storm.update({f"neverstart_{w}m": neverstart[w] for w in STORM_BUCKETS_MIN})
     storm["apierr_per_min_30m"] = round(apierr[30] / 30.0, 3)
     storm["apierr_frac_30m"] = round(apierr[30] / total[30], 3) if total[30] else 0.0
+    storm["neverstart_per_min_30m"] = round(neverstart[30] / 30.0, 3)
     for acc, h in accts.items():
         t = throttle.get(acc)
         h["throttled"] = bool(t)
@@ -1445,7 +1459,14 @@ def main():
     flag = "  <-- STORM" if st["apierr_per_min_30m"] >= 1.0 else ""
     print(f"storm:     apierr 15m={st['apierr_15m']} 30m={st['apierr_30m']} 60m={st['apierr_60m']}  "
           f"rate={st['apierr_per_min_30m']}/min  frac30m={st['apierr_frac_30m']}{flag}")
+    # never-start burst line (#3553): a launch-storm -- many seats launched, none produced an
+    # assistant turn -- is invisible on the apierr storm line; bucket NEVER_STARTED by the same
+    # recency windows so it is legible at a glance, on its own line.
+    nsflag = "  <-- NEVER-START BURST" if st["neverstart_per_min_30m"] >= 1.0 else ""
+    print(f"neverstart:      15m={st['neverstart_15m']} 30m={st['neverstart_30m']} 60m={st['neverstart_60m']}  "
+          f"rate={st['neverstart_per_min_30m']}/min{nsflag}")
     print()
+    inplace_counts = _ledger_inplace_attempts()   # per-sid prior in-place relaunch count (#3553)
     CAP = 40
     for disp in order:
         grp = [r for r in rows if r["disp"] == disp]
@@ -1466,7 +1487,8 @@ def main():
             tag = r["account"].replace(".claude-", "").replace(".claude", "default")
             who = "A" if r.get("initiated_by") == "agent" else "u"   # agent- vs user-initiated
             code = f" [{r['http_status']}]" if r.get("http_status") else ""
-            print(f"  {r['age_min']:>6}m {who} {tag:<18} {r['project']:<26} {r['session'][:8]}{mark}{thr}{code}")
+            relaunch = _relaunch_badge(inplace_counts.get(r["session"], 0))   # #3553 relaunch×N
+            print(f"  {r['age_min']:>6}m {who} {tag:<18} {r['project']:<26} {r['session'][:8]}{mark}{thr}{code}{relaunch}")
         if len(grp) > CAP:
             print(f"  ... +{len(grp)-CAP} more")
         print()
