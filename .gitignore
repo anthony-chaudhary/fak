@@ -113,6 +113,51 @@ dos.runs/
 *.run.out
 *.run.log
 
+# --- Artifact-shaped leaks a tool/process drops into the working tree. Private-by-default so
+# they can never be `git add`-ed and never dirty `git status`. Root-scoped where the name is
+# generic; family-shaped so a NEW generator's raw output is contained by default. The
+# FILE_ADMISSION commit gate stays the backstop for anything that slips past these globs. ---
+
+# Build-verification extraction dirs: a build-probe that untars `git archive HEAD` into a
+# repo-root dir instead of an os.MkdirTemp scratch — the same throwaway-source-copy family as
+# .isoprobe-*/ above. The canonical .head_build_check/ is ignored explicitly further below (with
+# its windowgate double-count rationale); this family glob contains any variant that does not.
+/*_build_check/
+
+# Per-session verify/probe scratch dirs (extends .scratch/ .cscratch/): .scratch-q4k-verify/,
+# .scratch_q4k_70/ and friends. Root-scoped so a tracked .scratch* fixture is never hidden.
+/.scratch*/
+
+# Spam/evidence report dir a tool drops beside the repo. Its *.local.json payloads are already
+# ignored by the `.local` convention above; the dir rule also contains any non-.local artifact.
+/.spam-report/
+
+# Ad-hoc redirect spills at the repo root (`fak ... > out.json 2> err.log`). Root-scoped so a
+# tracked out*.json / err*.log fixture in a package is never hidden (extends /*.err.txt above).
+/out*.json
+/err*.log
+
+# Throwaway temp generator / run dirs at the repo root: tmpgenfeeds/ (a one-off `package main`
+# feed generator), fleet-runs/ (nightrun poll/watch logs), workfak/ (a nested dispatch scratch
+# copy). Distinctive-prefix globs — no tracked dir matches (a bare /tmp*/ could catch a future
+# /tmpl/, so the tmp family is scoped to the tmpgen* generator prefix).
+/tmpgen*/
+/fleet-runs/
+/workfak/
+
+# Demo/report defaults that slipped past the anchored demo-report set further below: `fak
+# memory` writes memory-report.json, `fak snapshot demo` writes snapshot-demo-report.json plus a
+# snapshot-demo/ round-trip tree, and `fak ... fleet-dump` defaults to fleet.snap — all
+# regenerable throwaway, the same class as the already-ignored recall-report.json/cdb-report.json.
+/memory-report.json
+/snapshot-demo-report.json
+/snapshot-demo/
+/fleet.snap
+
+# Content-addressed witness-cache trees the witness tests write into a CWD-rooted scratch subtree
+# (internal/witness/**/witness-cache/<sha>.json). Non-anchored so it catches every nesting depth.
+witness-cache/
+
 # Mermaid render toolchain for the visuals deck (regenerate via visuals/render.sh)
 visuals/node_modules/
 visuals/.render-scratch/
@@ -347,6 +392,14 @@ fak.exe
 # Windows leaves a `<name>.exe~` when `go build -o` can't atomically replace a
 # binary that is still mapped (e.g. a running `fak serve`). Regenerable scratch.
 *.exe~
+# Self-update / hot-swap binary asides beside the repo-root fak.exe. `*.exe` above hides
+# fak.exe itself but NOT the rename-aside files the Windows atomic swap must leave next to it
+# (a mapped .exe can't be overwritten in place): fak.exe.old / fak.exe.old.<pid>.<i> swap-asides
+# (internal/selfinstall/runner.go — a real host accumulated 211 of these, ~9 GB), the fak.exe.new
+# build-temp left on a vet/smoke gate-failure return (selfinstall.go), and manual
+# fak.exe.bak-<ts> / fak.exe.old-<sha> backups. These MUST sit next to the binary, so containment
+# (not relocation) is the fix; root-scoped /fak.exe.* catches every suffix without hiding fak.exe.
+/fak.exe.*
 
 # transient stderr captured by the dogfood launchers (committed evidence is the
 # probe JSON next to it, not the log)
@@ -624,3 +677,10 @@ docs/dispatch-status.md
 # .scratch-relaycheck/ a throwaway main.go). Never source.
 /.dogfood-wt/
 /.scratch-relaycheck/
+
+# HEAD build-check scratch tree — a full git-archive checkout of HEAD dropped beside the
+# clone by the prepush/blind-base build probe so it can `go build` committed-only source.
+# Regenerable, 100+MB, and (crucially) tree-walking governance gates like windowgate's
+# TestTrackedTreeHasNoPopups would otherwise scan the mirrored copy and double-count every
+# finding. Node-local; never source.
+/.head_build_check/
