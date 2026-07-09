@@ -2,6 +2,7 @@ package ctxplan
 
 import (
 	"context"
+	"fmt"
 	"testing"
 )
 
@@ -329,5 +330,40 @@ func TestPageFaultNoFaultCaseIsNotInThisVocabulary(t *testing.T) {
 	}
 	if len(out.Rendered) != len(v.Rendered) {
 		t.Errorf("a resident span must not change the view")
+	}
+}
+
+// TestPageFaultLogRetentionBounded proves the page-fault ledger is bounded the same
+// way ObjectiveLog is: with a small entry cap, appending many decisions holds
+// Entries() at the cap (oldest dropped) and the retained window still replays clean.
+func TestPageFaultLogRetentionBounded(t *testing.T) {
+	log := PageFaultLog{maxEntries: 4}
+	policy := DefaultPageFaultPolicy()
+
+	for i := 0; i < 100; i++ {
+		ev := PageFaultEvent{
+			SpanID:                  fmt.Sprintf("span:%d", i),
+			Step:                    i,
+			State:                   PageFaultSpanLive,
+			Durability:              DurabilityTurn,
+			Required:                true,
+			SilentlyReconstructable: true,
+		}
+		log.Append(ev, policy)
+	}
+
+	entries := log.Entries()
+	if len(entries) != 4 {
+		t.Fatalf("Entries() = %d, want capped at 4 (the ledger grew unbounded)", len(entries))
+	}
+	if _, allMatch := log.Replay(); !allMatch {
+		t.Error("retained window must replay clean")
+	}
+	// The retained entries are the most recent ones.
+	if got := entries[len(entries)-1].Event.Step; got != 99 {
+		t.Errorf("newest retained entry step = %d, want 99", got)
+	}
+	if got := entries[0].Event.Step; got != 96 {
+		t.Errorf("oldest retained entry step = %d, want 96 (older decisions trimmed)", got)
 	}
 }

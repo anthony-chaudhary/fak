@@ -1,6 +1,9 @@
 package ctxplan
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 // issue #1583: the OBJECTIVE PIN must survive a ctxplan replan or a session reset without
 // being silently dropped or rewritten. Each test isolates one ReconcileObjective outcome
@@ -305,5 +308,57 @@ func TestObjectivePinIsZero(t *testing.T) {
 	}
 	if NewObjectivePin("obj-1", "text", 0).IsZero() {
 		t.Error("a well-formed pin must not report IsZero")
+	}
+}
+
+// TestObjectiveLogRetentionBounded proves the reconciliation ledger does not grow
+// without limit: with a small entry cap, appending far more reconciliations than
+// the cap holds Entries() at the cap (the OLDEST are dropped), while Latest() still
+// tracks the most recent after-pin (so cross-reset chaining is unaffected) and the
+// retained window still replays clean.
+func TestObjectiveLogRetentionBounded(t *testing.T) {
+	log := ObjectiveLog{maxEntries: 4}
+
+	prev := ObjectivePin{}
+	var last ObjectivePin
+	for i := 0; i < 100; i++ {
+		p := NewObjectivePin("obj", fmt.Sprintf("objective revision %d", i), i)
+		log.Append(prev, p)
+		prev, last = p, p
+	}
+
+	entries := log.Entries()
+	if len(entries) != 4 {
+		t.Fatalf("Entries() = %d, want capped at 4 (the ledger grew unbounded)", len(entries))
+	}
+	// Latest reads the tail, so the trim never disturbs the chained-forward pin.
+	latest, ok := log.Latest()
+	if !ok || latest.Digest != last.Digest {
+		t.Fatalf("Latest() = %+v ok=%v, want the most recent after-pin", latest, ok)
+	}
+	// The retained window replays with zero divergence and is the MOST RECENT slice.
+	if _, allMatch := log.Replay(); !allMatch {
+		t.Error("retained window must replay clean")
+	}
+	if got := entries[len(entries)-1].After.Step; got != 99 {
+		t.Errorf("newest retained entry step = %d, want 99", got)
+	}
+	if got := entries[0].After.Step; got != 96 {
+		t.Errorf("oldest retained entry step = %d, want 96 (older reconciliations trimmed)", got)
+	}
+}
+
+// TestObjectiveLogUnboundedOptOut proves maxEntries<0 disables the bound: every
+// appended reconciliation is retained (for a caller that wants the whole history).
+func TestObjectiveLogUnboundedOptOut(t *testing.T) {
+	log := ObjectiveLog{maxEntries: -1}
+	prev := ObjectivePin{}
+	for i := 0; i < defaultMaxLedgerEntries+50; i++ {
+		p := NewObjectivePin("obj", fmt.Sprintf("rev %d", i), i)
+		log.Append(prev, p)
+		prev = p
+	}
+	if got := len(log.Entries()); got != defaultMaxLedgerEntries+50 {
+		t.Fatalf("unbounded log retained %d, want all %d", got, defaultMaxLedgerEntries+50)
 	}
 }

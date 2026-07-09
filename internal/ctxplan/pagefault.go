@@ -270,8 +270,15 @@ func DecidePageFault(ev PageFaultEvent, policy PageFaultPolicy) PageFaultDecisio
 // reports any DIVERGED entry (the policy changed since the entry was logged), so a
 // caller can tell "was this decision reproduced" from real evidence instead of trusting
 // the stored Decision field blindly. The zero value is a usable empty log.
+//
+// The entries slice is bounded to a recent window (defaultMaxLedgerEntries, shared
+// with ObjectiveLog) so a long-lived session cannot grow it without limit;
+// Replay/Summary/Explain then report over the retained window.
 type PageFaultLog struct {
 	entries []PageFaultLogEntry
+	// maxEntries bounds the retained window: 0 = the default cap; <0 = unbounded;
+	// >0 = a custom cap. See effectiveLedgerCap.
+	maxEntries int
 }
 
 // PageFaultLogEntry pairs one logged event with the decision computed for it, so the
@@ -290,6 +297,10 @@ type PageFaultLogEntry struct {
 func (l *PageFaultLog) Append(ev PageFaultEvent, policy PageFaultPolicy) PageFaultDecision {
 	d := DecidePageFault(ev, policy)
 	l.entries = append(l.entries, PageFaultLogEntry{Event: ev, Decision: d, Policy: policy})
+	if max, bounded := effectiveLedgerCap(l.maxEntries); bounded && len(l.entries) > max {
+		// Drop the oldest decisions beyond the window (see ObjectiveLog.Append).
+		l.entries = l.entries[len(l.entries)-max:]
+	}
 	return d
 }
 

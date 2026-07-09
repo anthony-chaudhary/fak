@@ -275,14 +275,47 @@ func ReconcileObjective(before, after ObjectivePin) ObjectiveDecision {
 	return out
 }
 
+// defaultMaxLedgerEntries bounds how many entries a ctxplan reconciliation ledger
+// (ObjectiveLog, PageFaultLog) retains. Both are append-only audit logs a host
+// grows across every replan/reset for the life of a long session; without a bound
+// their entries slice grows without limit. The bound keeps a ledger to its most
+// recent window — Entries/Replay/Summary/Explain then report over that window, so
+// a Summary over a bounded ledger reflects the retained reconciliations, not all
+// of history. The default is high enough (1024) that a realistic session (each
+// replan/reset is one entry) never trims, so the audit view is effectively whole;
+// the bound is a backstop against pathological growth, not a routine window.
+const defaultMaxLedgerEntries = 1024
+
+// effectiveLedgerCap resolves a ctxplan ledger's entry cap from its maxEntries
+// field: the default when the field is 0 (so the zero-value log is bounded),
+// unbounded when negative, else the custom value. Shared by ObjectiveLog and
+// PageFaultLog, whose growth axes are bounded identically.
+func effectiveLedgerCap(maxEntries int) (max int, bounded bool) {
+	switch {
+	case maxEntries < 0:
+		return 0, false
+	case maxEntries == 0:
+		return defaultMaxLedgerEntries, true
+	default:
+		return maxEntries, true
+	}
+}
+
 // ObjectiveLog is the append-only, replayable ledger of objective reconciliations — the
 // PERSISTED-STATE half of the runtime continuity contract. Entries are kept in occurrence
 // order; Replay recomputes every entry's decision from its stored (before, after) pair and
 // reports any DIVERGED entry, so a caller can tell "was this decision reproduced" from real
 // evidence instead of trusting the stored Decision field blindly. The zero value is a usable
 // empty log. Mirrors PageFaultLog one-for-one.
+//
+// The entries slice is bounded to a recent window (defaultMaxLedgerEntries) so a
+// long-lived session cannot grow it without limit; Latest still tracks the most
+// recent reconciliation, so chaining across resets is unaffected by trimming.
 type ObjectiveLog struct {
 	entries []ObjectiveLogEntry
+	// maxEntries bounds the retained window: 0 = the default cap; <0 = unbounded;
+	// >0 = a custom cap. See effectiveLedgerCap.
+	maxEntries int
 }
 
 // ObjectiveLogEntry pairs one logged (before, after) reconciliation with the decision
@@ -301,6 +334,11 @@ type ObjectiveLogEntry struct {
 func (l *ObjectiveLog) Append(before, after ObjectivePin) ObjectiveDecision {
 	d := ReconcileObjective(before, after)
 	l.entries = append(l.entries, ObjectiveLogEntry{Before: before, After: after, Decision: d})
+	if max, bounded := effectiveLedgerCap(l.maxEntries); bounded && len(l.entries) > max {
+		// Drop the oldest reconciliations beyond the window. Latest reads the tail,
+		// so cross-reset chaining is unaffected; only the audit history is trimmed.
+		l.entries = l.entries[len(l.entries)-max:]
+	}
 	return d
 }
 
