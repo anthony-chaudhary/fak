@@ -87,11 +87,6 @@ type Descriptor struct {
 	// from ID (a re-homed session keeps its ID but takes a new trace), which is why both
 	// are carried — the restart re-attaches the persisted State under this Trace.
 	Trace string `json:"trace"`
-	// ParentID is the id of the session this one was FORKED from (issue #1200). It is set
-	// only on a branch descriptor and links the fork to its parent in the registry, so the
-	// lineage a `fak session branch` minted is an addressable fact here as well as in the
-	// branch image's migration log. Empty for a normal (non-branched) session.
-	ParentID string `json:"parent_id,omitempty"`
 	// Run is the persisted PCB position. A restart re-attaches at THIS state, not the
 	// Running default — a Stopped descriptor restores Stopped, never silently resurrected.
 	Run RunState `json:"run"`
@@ -157,7 +152,6 @@ type DescriptorMeta struct {
 	Argv     []string
 	StartSHA string
 	CacheKey string
-	ParentID string // set on a branch (#1200): links the forked descriptor to its parent
 }
 
 // effectiveTTL resolves the staleness window: the per-descriptor TTL when positive,
@@ -537,9 +531,6 @@ func applyDescriptorMeta(d *Descriptor, meta DescriptorMeta) {
 	if meta.CacheKey != "" {
 		d.CacheKey = meta.CacheKey
 	}
-	if meta.ParentID != "" {
-		d.ParentID = meta.ParentID
-	}
 }
 
 func preserveDescriptorMeta(d *Descriptor, prev Descriptor) {
@@ -550,5 +541,4 @@ func preserveDescriptorMeta(d *Descriptor, prev Descriptor) {
 	d.Argv = append([]string(nil), prev.Argv...)
 	d.StartSHA = prev.StartSHA
 	d.CacheKey = prev.CacheKey
-	d.ParentID = prev.ParentID
 }

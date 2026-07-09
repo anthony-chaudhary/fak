@@ -490,28 +490,3 @@ func TestRegistryNilReceiverIsInert(t *testing.T) {
 		t.Fatalf("nil GC should reap nothing: n=%d err=%v", n, err)
 	}
 }
-
-// TestDescriptorBranchParentLink covers the #1200 fork link: a branch registered with a
-// ParentID carries that link into the persisted descriptor, and a later drive Update does
-// not erase it (the meta-preserve rule), so the fork lineage stays addressable in the C1
-// registry across transitions.
-func TestDescriptorBranchParentLink(t *testing.T) {
-	now := fixedClock()
-	r := NewRegistry(NewMemStore())
-	d, err := r.RegisterWithMeta("sess-branch", "host", State{TraceID: "sess-branch", Run: Running},
-		time.Minute, now, DescriptorMeta{ParentID: "sess-parent"})
-	if err != nil {
-		t.Fatalf("RegisterWithMeta: %v", err)
-	}
-	if d.ParentID != "sess-parent" {
-		t.Fatalf("registered parent_id = %q, want sess-parent", d.ParentID)
-	}
-	// A plain transition (no meta) must preserve the link, not drop it.
-	d2, err := r.Update("sess-branch", State{TraceID: "sess-branch", Run: Paused}, now.Add(time.Second))
-	if err != nil {
-		t.Fatalf("Update: %v", err)
-	}
-	if d2.ParentID != "sess-parent" {
-		t.Fatalf("parent_id dropped on update: %q", d2.ParentID)
-	}
-}
