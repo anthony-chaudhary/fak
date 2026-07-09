@@ -1,7 +1,9 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -162,5 +164,60 @@ func TestMicroTraceSeparableInHost(t *testing.T) {
 	got, ok := reloaded.Render("micro-000")
 	if !ok || got != want {
 		t.Fatalf("reload render mismatch:\n got %q\nwant %q", got, want)
+	}
+}
+
+// TestMicroTraceArgOrdering locks the flag/positional permutation: `fak micro trace`
+// must accept <id> before OR after its flags. Go's flag package stops at the first
+// non-flag token, so the id-first form the run summary prints
+// (`fak micro trace <id> --trace-in <file>`) would otherwise die with a usage dump.
+func TestMicroTraceArgOrdering(t *testing.T) {
+	newFS := func() (*flag.FlagSet, *string, *bool) {
+		fs := flag.NewFlagSet("micro trace", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		traceIn := fs.String("trace-in", "", "")
+		jsonOut := fs.Bool("json", false, "")
+		return fs, traceIn, jsonOut
+	}
+
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"id first", []string{"micro-001", "--trace-in", "t.jsonl", "--json"}},
+		{"flags first", []string{"--trace-in", "t.jsonl", "--json", "micro-001"}},
+		{"id in the middle", []string{"--trace-in", "t.jsonl", "micro-001", "--json"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fs, traceIn, jsonOut := newFS()
+			id, err := parseMicroTraceArgs(fs, tc.args)
+			if err != nil {
+				t.Fatalf("parseMicroTraceArgs(%v): %v", tc.args, err)
+			}
+			if id != "micro-001" {
+				t.Errorf("id = %q, want micro-001", id)
+			}
+			if *traceIn != "t.jsonl" {
+				t.Errorf("--trace-in = %q, want t.jsonl", *traceIn)
+			}
+			if !*jsonOut {
+				t.Errorf("--json = false, want true")
+			}
+		})
+	}
+
+	// A bare id (the acceptance form) resolves with no flags set.
+	fs, traceIn, _ := newFS()
+	id, err := parseMicroTraceArgs(fs, []string{"micro-002"})
+	if err != nil || id != "micro-002" || *traceIn != "" {
+		t.Fatalf("bare id: got (%q, %v, traceIn=%q), want (micro-002, nil, \"\")", id, err, *traceIn)
+	}
+
+	// Zero or two positionals are a usage error, not a silently-picked id.
+	for _, args := range [][]string{{}, {"micro-000", "micro-001"}} {
+		fs, _, _ := newFS()
+		if _, err := parseMicroTraceArgs(fs, args); err == nil {
+			t.Errorf("parseMicroTraceArgs(%v) = nil error, want a usage error", args)
+		}
 	}
 }
