@@ -262,19 +262,15 @@ func NewReport(s Suite, generatedAt time.Time) Report {
 		scenarios = append(scenarios, ScenarioReport{Scenario: name, Questions: counts[name]})
 	}
 	return Report{
-		Schema:         ReportSchema,
-		GeneratedAt:    generatedAt.UTC().Format(time.RFC3339),
-		Benchmark:      s.Benchmark,
-		Model:          s.Model,
-		ReleaseVersion: s.ReleaseVersion,
-		EvidenceClass:  EvidenceLocalUngraded,
-		Summary:        Summary{Problems: len(s.Problems), Scenarios: scenarios},
-		PromotionRequirements: []string{
-			"official-lcb-runner-grading",
-			"release-version-and-date-window-recorded",
-			"generation-artifact-digest-recorded",
-		},
-		ResultClaimAllowed: false,
+		Schema:                ReportSchema,
+		GeneratedAt:           generatedAt.UTC().Format(time.RFC3339),
+		Benchmark:             s.Benchmark,
+		Model:                 s.Model,
+		ReleaseVersion:        s.ReleaseVersion,
+		EvidenceClass:         EvidenceLocalUngraded,
+		Summary:               Summary{Problems: len(s.Problems), Scenarios: scenarios},
+		PromotionRequirements: PromotionRequirements(),
+		ResultClaimAllowed:    false,
 		ClaimBoundary: "Local generations only: the same saved generations must be graded by the " +
 			"official lcb_runner checker before any pass-rate is claimable.",
 	}

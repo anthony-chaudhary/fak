@@ -30,6 +30,8 @@
 
 ## Promotion Requirements
 
-- official-lcb-runner-grading
+- problem-ids-pinned-and-identical-across-arms
 - release-version-and-date-window-recorded
-- generation-artifact-digest-recorded
+- both-arms-generations-saved-with-digest
+- official-lcb-runner-grader-output-recorded
+- same-config-across-arms

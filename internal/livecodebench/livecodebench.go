@@ -143,11 +143,7 @@ func SmokeReport(f Fixture) FixtureReport {
 		Scenarios:          scenarios,
 		ResultClaimAllowed: false,
 		EvidenceClass:      EvidenceFixtureSmoke,
-		PromotionRequired: []string{
-			"official-lcb-runner-grading",
-			"release-version-and-date-window-recorded",
-			"generation-artifact-digest-recorded",
-		},
+		PromotionRequired:  PromotionRequirements(),
 	}
 }
 

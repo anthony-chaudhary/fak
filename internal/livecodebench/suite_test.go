@@ -131,6 +131,50 @@ func TestNewReportIsHonestByDefault(t *testing.T) {
 	}
 }
 
+// TestNewReportEnumeratesPromotionRequirements pins #2114's enumerated list:
+// every scaffolded report carries the full promotion-requirements checklist
+// next to its evidence class — problem ids, release + window, both arms'
+// generations, official grader output, and same-config-across-arms.
+func TestNewReportEnumeratesPromotionRequirements(t *testing.T) {
+	rep := NewReport(validSuite(), time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC))
+	got := strings.Join(rep.PromotionRequirements, "\n")
+	for _, want := range []string{
+		"problem-ids-pinned-and-identical-across-arms",
+		"release-version-and-date-window-recorded",
+		"both-arms-generations-saved-with-digest",
+		"official-lcb-runner-grader-output-recorded",
+		"same-config-across-arms",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("promotion requirements missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestMarkOfficiallyGraded pins #2114's stamping rule: only a report backed by
+// graded arm results may be promoted to the official evidence class; an
+// ungraded report is refused rather than stamped.
+func TestMarkOfficiallyGraded(t *testing.T) {
+	rep := NewReport(validSuite(), time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC))
+	if err := rep.MarkOfficiallyGraded(); err == nil {
+		t.Fatal("stamping an ungraded report must be refused")
+	}
+	if rep.ResultClaimAllowed || rep.EvidenceClass == EvidenceOfficialLCBRunner {
+		t.Fatalf("refused stamp must not promote: class=%q allowed=%v", rep.EvidenceClass, rep.ResultClaimAllowed)
+	}
+
+	rep.Arms = []ArmResult{
+		{Arm: "raw", Scenario: ScenarioCodeGeneration, Problems: 1, Generations: 5, Graded: 5, Pass1: 0.4},
+		{Arm: "fak", Scenario: ScenarioCodeGeneration, Problems: 1, Generations: 5, Graded: 5, Pass1: 0.6},
+	}
+	if err := rep.MarkOfficiallyGraded(); err != nil {
+		t.Fatalf("graded report must stamp official: %v", err)
+	}
+	if rep.EvidenceClass != EvidenceOfficialLCBRunner || !rep.ResultClaimAllowed {
+		t.Fatalf("stamp = %q allowed=%v, want official class + claim allowed", rep.EvidenceClass, rep.ResultClaimAllowed)
+	}
+}
+
 func TestReportPassRatesRequireEvidenceClass(t *testing.T) {
 	rep := NewReport(validSuite(), time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC))
 	rep.EvidenceClass = ""

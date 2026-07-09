@@ -19,7 +19,8 @@ Results page: [LIVECODEBENCH-RESULTS.md](LIVECODEBENCH-RESULTS.md).
 | Official custom-evaluator export | shipped | #2102; `go run ./cmd/livecodebench export --format custom-evaluator` (backed by `internal/livecodebench.WriteCustomEvaluatorInput`; not yet wired through the `fak` front door, tracked with the pending CLI wrapper below), pinned by `TestCustomEvaluatorItemsFixtureRoundTrip` and `TestRunExportCustomEvaluatorWritesGradeableInput`. |
 | fak-native official-run contract | shipped | #2110; `go run ./cmd/livecodebench contract` emits the result-claim-gated two-arm run contract (raw `lcb_runner` vs fak-native), pinning constants + the official grading handoff, `result_claim_allowed` always false. Backed by `internal/livecodebench.BuildOfficialRunContract`, pinned by `TestOfficialRunContract*` and `TestRunContractWritesGatedOfficialRunContract`. |
 | fak-native CLI wrapper (generate) | pending | #2109, #2111 (the `fak livecodebench generate` arm the contract references). |
-| Honesty gates and authority promotion | pending | #2113, #2114, #2115. |
+| Evidence class + promotion requirements | shipped | #2114; every report artifact stamps `evidence_class` plus the `promotion_requirements` checklist (`internal/livecodebench/promotion.go`), pinned by `TestNewReportEnumeratesPromotionRequirements` and `TestMarkOfficiallyGraded`. See "Evidence Classes And Promotion Requirements" below. |
+| Honesty gates and authority promotion | pending | #2113, #2115. |
 | Results scaffold | shipped | [LIVECODEBENCH-RESULTS.md](LIVECODEBENCH-RESULTS.md); all score cells remain `pending run`. |
 
 The honest residual: until #2102 and #2113 land, a local LCB smoke can prove wiring but
@@ -264,6 +265,32 @@ Update [LIVECODEBENCH-RESULTS.md](LIVECODEBENCH-RESULTS.md) with:
 
 Do not copy a score into another doc until #2113's `result_claim_allowed` gate agrees
 that official grading happened over the recorded generations.
+
+## Evidence Classes And Promotion Requirements (#2114)
+
+Every LiveCodeBench report artifact stamps an `evidence_class` and the
+`promotion_requirements` checklist, copying the terminalbench honesty pattern
+(`internal/livecodebench/promotion.go`):
+
+- `fixture-smoke` — a committed-fixture run; LCB's spelling of terminalbench's
+  `SIMULATED_LOCAL_FIXTURE`. Stamped by the fixture smoke and `run` reports.
+- `local-ungraded` — real generations, no official grading; pass-like numbers are
+  local signals only. Stamped by `NewReport` and the scenario scorers.
+- `official-lcb-runner-graded` — the only class that can carry
+  `result_claim_allowed: true`. Stamped exclusively by `MarkOfficiallyGraded`,
+  which refuses a report with no graded arm results and re-validates on promotion.
+
+The promotion requirements enumerate what must be recorded before a local number
+may be promoted to a claimable score, and ride on every report verbatim:
+
+- `problem-ids-pinned-and-identical-across-arms`
+- `release-version-and-date-window-recorded`
+- `both-arms-generations-saved-with-digest`
+- `official-lcb-runner-grader-output-recorded`
+- `same-config-across-arms`
+
+`Report.Validate` enforces the fence: pass-rate fields require a named evidence
+class, and `result_claim_allowed` requires `official-lcb-runner-graded`.
 
 ## Honesty Links
 
