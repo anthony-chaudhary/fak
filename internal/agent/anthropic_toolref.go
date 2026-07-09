@@ -38,6 +38,7 @@ package agent
 // or a body that fails to re-decode, it returns its input UNCHANGED (identity).
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -77,6 +78,18 @@ func SanitizeAnthropicToolReferences(raw []byte) ([]byte, ToolRefOutcome) {
 	msgsRaw, ok := obj["messages"]
 	if !ok {
 		return raw, ToolRefOutcome{Reason: ToolRefReasonNoMsgsKey}
+	}
+	// Fast path: a tool_reference block is emitted as {"type":"tool_reference",...}, so its type
+	// discriminator is the literal ASCII bytes "tool_reference" in the body (the Claude Code client
+	// serializes type tags as plain ASCII, never \u-escaped). A body without that substring cannot
+	// carry one, so the full messages decode + per-element scan below would find nothing — skip
+	// straight to the same identity outcome the edit loop returns (ToolRefReasonNoToolRef). A false
+	// positive (the literal buried inside a text value) only costs the normal full parse, the
+	// fail-safe direction. Mirrors the cache_control pre-scan in anthropic_cachebp.go and keeps this
+	// every-wire correctness sanitizer off the decode path for the vast majority of wires, which
+	// carry no tool_reference at all.
+	if !bytes.Contains(raw, []byte("tool_reference")) {
+		return raw, ToolRefOutcome{Reason: ToolRefReasonNoToolRef}
 	}
 	elems, spans, ok := decodeArrayElements(raw, msgsRaw)
 	if !ok || len(elems) == 0 {
@@ -207,6 +220,17 @@ func RepairEmptyToolResultContent(raw []byte) ([]byte, EmptyContentOutcome) {
 	if !ok {
 		return raw, EmptyContentOutcome{Reason: EmptyContentReasonNoMsgsKey}
 	}
+	// Fast path: this gate only ever backfills a tool_result whose content is an EMPTY array
+	// (`[` + JSON whitespace + `]`). That exact run appears verbatim in the body when present, so if
+	// the body holds no empty JSON array anywhere there is nothing to repair — skip the full messages
+	// decode + per-element scan and return the same identity outcome the edit loop returns
+	// (EmptyContentReasonNoEmpty). containsEmptyJSONArray recognizes the identical whitespace set as
+	// isEmptyJSONArray/skipSpace, so it can never miss an array the loop would repair (a true superset
+	// guard); a false positive (an unrelated empty array, e.g. an empty tool-schema field) only costs
+	// the normal full parse, the fail-safe direction.
+	if !containsEmptyJSONArray(raw) {
+		return raw, EmptyContentOutcome{Reason: EmptyContentReasonNoEmpty}
+	}
 	elems, spans, ok := decodeArrayElements(raw, msgsRaw)
 	if !ok || len(elems) == 0 {
 		return raw, EmptyContentOutcome{Reason: EmptyContentReasonNoMsgs}
@@ -267,4 +291,28 @@ func isEmptyJSONArray(v json.RawMessage) bool {
 	}
 	inner := skipSpace(t[1:])
 	return len(inner) > 0 && inner[0] == ']'
+}
+
+// containsEmptyJSONArray reports whether raw contains a JSON empty array anywhere — a '[' followed
+// by only JSON whitespace and then ']'. It is the cheap single-pass SUPERSET guard for the empty
+// tool_result.content shape RepairEmptyToolResultContent repairs: an empty content array is itself a
+// '[' + whitespace + ']' run in the body, so a false return proves no tool_result content can be
+// empty and the full json decode can be skipped. The whitespace set (isJSONSpace) is identical to
+// the one skipSpace/isEmptyJSONArray recognize, so any array they would call empty is detected here
+// too — the guard can never skip a body the repair loop would edit. The scan is O(len(raw)) with no
+// allocation, far cheaper than the decode it guards.
+func containsEmptyJSONArray(raw []byte) bool {
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '[' {
+			continue
+		}
+		j := i + 1
+		for j < len(raw) && isJSONSpace(raw[j]) {
+			j++
+		}
+		if j < len(raw) && raw[j] == ']' {
+			return true
+		}
+	}
+	return false
 }
