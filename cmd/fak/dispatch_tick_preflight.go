@@ -58,6 +58,15 @@ func dispatchPreflight(root string, stderr io.Writer, maxWorkers int, workKind, 
 	// walls -- are excluded by the reason=rate_limit taxonomy filter; it only lowers the
 	// effective cap, so a zero-signal fold is byte-identical to before.
 	res = dispatchtick.ApplyRateLimitBackpressure(res, dispatchPreflightRateLimit(root, product))
+	// The host_churn cap term: fold the MEASURED whole-host process-spawn burst DOWN into
+	// admission so a new dispatcher backs off when the box is ALREADY in a spawn storm --
+	// typically several independent dispatchers co-launching waves in the same window, the
+	// cross-dispatcher case the per-loop cadence floor cannot see. The signal is read from
+	// the cheap stallscan self-monitor ledger (sampled by a background loop, so reading its
+	// tail spawns nothing on this hot path); a missing/stale reading yields a zero-pressure
+	// ChurnCheck (the fold abstains), so a box without the self-monitor is byte-identical to
+	// before. It only lowers the effective cap, never raises it.
+	res = dispatchtick.ApplyChurnBackpressure(res, dispatchPreflightChurn())
 	out := res.Map()
 	// #3109 self-heal: preflight is otherwise refuse-only on unattributed_live -- it
 	// counts orphaned worker PIDs (a botched teardown's `claude` descendant still
@@ -276,6 +285,157 @@ func dispatchPreflightRateLimit(root, product string) dispatchtick.RateLimitChec
 		Threshold:  dispatchRateLimitThreshold(),
 		MinWorkers: dispatchRateLimitMinWorkers(),
 	}
+}
+
+// dispatchChurnDefaultFreshness bounds how old the stallscan self-monitor reading may be
+// and still gate admission. The burst signal is a point-in-time host census; a reading
+// older than a couple sample intervals no longer describes the CURRENT scheduler load, and
+// gating on a stale storm would wrongly freeze a fleet whose burst has long since drained.
+// A reading older than this yields a zero-value ChurnCheck (the fold abstains). The impure
+// shell overlays FAK_CHURN_FRESHNESS.
+const dispatchChurnDefaultFreshness = 90 * time.Second
+
+// dispatchChurnFreshness resolves the max age of a usable stallscan reading from
+// FAK_CHURN_FRESHNESS (a Go duration; "0"/"off" disables the freshness gate and trusts the
+// last reading regardless of age), falling back to the default on empty/unparseable input.
+func dispatchChurnFreshness() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("FAK_CHURN_FRESHNESS"))
+	switch {
+	case raw == "":
+		return dispatchChurnDefaultFreshness
+	case raw == "0" || strings.EqualFold(raw, "off"):
+		return 0
+	}
+	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+		return d
+	}
+	return dispatchChurnDefaultFreshness
+}
+
+// dispatchChurnThreshold resolves the spawn-burst arming threshold from
+// FAK_CHURN_BURST_THRESHOLD, falling back to dispatchtick.DefaultChurnBurstThreshold. A zero
+// or negative override is ignored so the term cannot be armed on ordinary process turnover.
+// A value of "off" disables the term entirely (returns 0 -> the shell yields a zero-value
+// check that never gates).
+func dispatchChurnThreshold() int {
+	raw := strings.TrimSpace(os.Getenv("FAK_CHURN_BURST_THRESHOLD"))
+	if raw == "" {
+		return dispatchtick.DefaultChurnBurstThreshold
+	}
+	if strings.EqualFold(raw, "off") {
+		return 0
+	}
+	if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+		return n
+	}
+	return dispatchtick.DefaultChurnBurstThreshold
+}
+
+// dispatchChurnMinWorkers resolves the cold-start floor from FAK_CHURN_MIN_WORKERS, falling
+// back to dispatchtick.DefaultChurnMinWorkers. A negative override is ignored; the pure
+// fold's floor() re-clamps a zero back to the default, so the one-probe liveness carve-out
+// cannot be removed through the env.
+func dispatchChurnMinWorkers() int {
+	raw := strings.TrimSpace(os.Getenv("FAK_CHURN_MIN_WORKERS"))
+	if raw == "" {
+		return dispatchtick.DefaultChurnMinWorkers
+	}
+	if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+		return n
+	}
+	return dispatchtick.DefaultChurnMinWorkers
+}
+
+// dispatchStallLedgerPath resolves the stallscan self-monitor ledger the churn fold reads.
+// It mirrors cmd/fak/stallscan.go's defaultStallLogPath EXACTLY (FAK_STALL_DIR, else the
+// Windows LOCALAPPDATA\Fleet location, else ~/.fak) so the reader and the writer agree on
+// one path without importing the writer.
+func dispatchStallLedgerPath() string {
+	if d := os.Getenv("FAK_STALL_DIR"); d != "" {
+		return filepath.Join(d, "stallscan.jsonl")
+	}
+	if la := os.Getenv("LOCALAPPDATA"); la != "" {
+		return filepath.Join(la, "Fleet", "stallscan.jsonl")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".fak", "stallscan.jsonl")
+}
+
+// dispatchPreflightChurn folds the MEASURED whole-host spawn burst into the host_churn
+// admission term (dispatchtick.ApplyChurnBackpressure). It reads the LAST line of the
+// stallscan self-monitor ledger -- a background loop samples the host and appends one
+// fak.stallscan.v1 record per interval, so reading its tail costs one small file read and
+// spawns NOTHING on this hot admission path (the discipline that keeps the anti-churn term
+// from adding to the churn it measures).
+//
+// Fail-open and byte-identical when idle: no ledger (the self-monitor is not running), an
+// unreadable/garbled tail, a reading older than the freshness bound (a drained burst must
+// not keep gating), or a disabled threshold (FAK_CHURN_BURST_THRESHOLD=off) each yields the
+// zero-value check -- a no-op fold that leaves the preflight untouched. A box that never
+// runs `fak stallscan --watch` therefore behaves exactly as before this term existed.
+func dispatchPreflightChurn() dispatchtick.ChurnCheck {
+	threshold := dispatchChurnThreshold()
+	if threshold <= 0 {
+		return dispatchtick.ChurnCheck{} // term disabled via env
+	}
+	line := dispatchLastLine(dispatchStallLedgerPath())
+	if line == "" {
+		return dispatchtick.ChurnCheck{} // no self-monitor ledger -> abstain
+	}
+	var rec struct {
+		TS     string `json:"ts"`
+		Sample struct {
+			SpawnBurst int `json:"spawn_burst"`
+		} `json:"sample"`
+	}
+	if err := json.Unmarshal([]byte(line), &rec); err != nil {
+		return dispatchtick.ChurnCheck{} // garbled tail -> abstain
+	}
+	if fresh := dispatchChurnFreshness(); fresh > 0 {
+		ts, err := time.Parse(time.RFC3339Nano, rec.TS)
+		if err != nil || time.Since(ts) > fresh {
+			return dispatchtick.ChurnCheck{} // stale reading -> the burst it saw may have drained
+		}
+	}
+	return dispatchtick.ChurnCheck{
+		Recent:     rec.Sample.SpawnBurst,
+		Threshold:  threshold,
+		MinWorkers: dispatchChurnMinWorkers(),
+	}
+}
+
+// dispatchLastLine returns the last non-empty line of a file, or "" if the file is missing,
+// empty, or unreadable. It reads only a bounded tail window so a large rolling ledger costs
+// a small fixed read rather than an O(file) slurp on the admission path.
+func dispatchLastLine(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || info.Size() == 0 {
+		return ""
+	}
+	const tailCap = 64 << 10 // 64 KiB: far more than one fak.stallscan.v1 record
+	start := int64(0)
+	if info.Size() > tailCap {
+		start = info.Size() - tailCap
+	}
+	if _, err := f.Seek(start, io.SeekStart); err != nil {
+		return ""
+	}
+	buf, err := io.ReadAll(f)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimRight(string(buf), "\r\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if s := strings.TrimSpace(lines[i]); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 func dispatchPreflightHost(_ string, _ io.Writer) dispatchtick.HostCheck {

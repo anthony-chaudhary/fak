@@ -730,6 +730,13 @@ summary  = "A guard or DOS gate grew slow enough to threaten the loop's dev-ex l
 fix      = "Measure the gate with the relevant hook/status benchmark, fix or budget the added latency, and rerun before claiming the loop is healthy."
 see_also = ["tools/dos_hook_bench.py", "docs/perf-dos-hook-cost.md", "dos status"]
 
+[reasons.HOST_CHURN_BACKOFF]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "the spawn preflight refused because a whole-host process-spawn STORM is the sole binding admission term -- several independent dispatchers (e.g. FleetIssueDispatchCodex + FleetIssueDispatchGlm + `accounts launch`) co-launched waves in the same window, so the fleet froze at its live count and admits no new concurrent load onto a saturated scheduler until the burst subsides. This is the CROSS-dispatcher gate the per-loop cadence floor (loopmgr MinIntervalSeconds) cannot see: each loop passes its own floor yet they still co-arrive and storm the kernel scheduler/memory-manager path while CPU/RAM read low (the soft-fault/spawn-churn lockup)."
+fix      = "let the co-launched burst drain and stagger the dispatchers so they do not fire waves at the same instant; the preflight re-admits once host spawns in the last sample interval fall below the threshold. Tune with FAK_CHURN_BURST_THRESHOLD / FAK_CHURN_MIN_WORKERS (0/off disables). The fold abstains below the threshold, holds a cold-start probe, and never RAISES the cap. Floor: go test ./internal/dispatchtick -run TestApplyChurnBackpressure."
+see_also = ["internal/dispatchtick/preflight_churn.go", "internal/stallscan/stallscan.go", "cmd/fak/stallscan.go", "RATE_LIMIT_BACKOFF", "GATE_PRESSURE"]
+
 [reasons.RUN_STATUS_CLAIMED_FIELD]
 category = "STALE_CLAIM"
 refusal  = true
