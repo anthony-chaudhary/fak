@@ -112,38 +112,19 @@ func SanitizeAnthropicToolReferences(raw []byte) ([]byte, ToolRefOutcome) {
 // sibling field holding identical bytes can never mis-locate an edit. A message with no array
 // content, or a content array with no tool_result carrying a tool_reference, yields no edits.
 func collectToolReferenceEdits(msgBase int, el json.RawMessage) []spliceEdit {
-	mcStart, mcEnd, ok := objectValueSpan(el, "content")
-	if !ok {
-		return nil
-	}
-	mContent := el[mcStart:mcEnd]
-	if len(mContent) == 0 || mContent[0] != '[' {
-		return nil // bare-string content carries no blocks
-	}
-	blocks, blockSpans, ok := arrayElementSpans(mContent)
-	if !ok {
-		return nil
-	}
 	var edits []spliceEdit
-	for j, blk := range blocks {
-		var b struct {
-			Type string `json:"type"`
-		}
-		if json.Unmarshal(blk, &b) != nil || b.Type != "tool_result" {
-			continue
-		}
-		blkBase := msgBase + mcStart + blockSpans[j].start
+	forEachToolResultBlock(msgBase, el, func(blk json.RawMessage, blkBase int) {
 		cStart, cEnd, ok := objectValueSpan(blk, "content")
 		if !ok {
-			continue
+			return
 		}
 		cVal := blk[cStart:cEnd]
 		if len(cVal) == 0 || cVal[0] != '[' {
-			continue // string content (or none) has no tool_reference blocks
+			return // string content (or none) has no tool_reference blocks
 		}
 		inner, innerSpans, ok := arrayElementSpans(cVal)
 		if !ok {
-			continue
+			return
 		}
 		for k, ib := range inner {
 			var tb struct {
@@ -165,7 +146,7 @@ func collectToolReferenceEdits(msgBase int, el json.RawMessage) []spliceEdit {
 			abs := blkBase + cStart + innerSpans[k].start
 			edits = append(edits, spliceEdit{start: abs, end: abs + len(ib), repl: repl})
 		}
-	}
+	})
 	return edits
 }
 
@@ -255,45 +236,26 @@ func RepairEmptyToolResultContent(raw []byte) ([]byte, EmptyContentOutcome) {
 // msgBase is the element's absolute start byte; every returned edit span is absolute. It mirrors
 // collectToolReferenceEdits' key-located spans so a sibling field can never mis-locate an edit.
 func collectEmptyContentEdits(msgBase int, el json.RawMessage) []spliceEdit {
-	mcStart, mcEnd, ok := objectValueSpan(el, "content")
-	if !ok {
-		return nil
-	}
-	mContent := el[mcStart:mcEnd]
-	if len(mContent) == 0 || mContent[0] != '[' {
-		return nil
-	}
-	blocks, blockSpans, ok := arrayElementSpans(mContent)
-	if !ok {
-		return nil
-	}
 	var edits []spliceEdit
-	for j, blk := range blocks {
-		var b struct {
-			Type string `json:"type"`
-		}
-		if json.Unmarshal(blk, &b) != nil || b.Type != "tool_result" {
-			continue
-		}
+	forEachToolResultBlock(msgBase, el, func(blk json.RawMessage, blkBase int) {
 		cStart, cEnd, ok := objectValueSpan(blk, "content")
 		if !ok {
-			continue
+			return
 		}
 		cVal := blk[cStart:cEnd]
 		if !isEmptyJSONArray(cVal) {
-			continue // string content, or a non-empty array — nothing to repair
+			return // string content, or a non-empty array — nothing to repair
 		}
 		repl, err := json.Marshal([]map[string]string{{"type": "text", "text": emptyToolResultText}})
 		if err != nil {
-			continue
+			return
 		}
 		// Replace the whole `[]` value with a one-element array. The value's absolute span is
 		// [blkBase+cStart, blkBase+cEnd); blkBase is the block's absolute start.
-		blkBase := msgBase + mcStart + blockSpans[j].start
 		absStart := blkBase + cStart
 		absEnd := blkBase + cEnd
 		edits = append(edits, spliceEdit{start: absStart, end: absEnd, repl: repl})
-	}
+	})
 	return edits
 }
 

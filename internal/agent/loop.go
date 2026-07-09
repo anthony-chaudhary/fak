@@ -193,9 +193,12 @@ func execViaKernel(ctx context.Context, k *kernel.Kernel, tool, rawArgs, engine 
 		ev.Reason = r.Meta["reason"]
 		ev.Disposition = r.Meta["disposition"]
 		ev.Note = "DENIED (deny-as-value): " + r.Meta["reason"] + "/" + r.Meta["disposition"]
-		// hand the model the structured deny so it can adapt without guessing.
-		dj, _ := json.Marshal(r.Meta)
-		return string(dj), ev
+		// Owned-loop transcript: hand the model a REAL typed tool_result error on the
+		// originating call ID carrying {reason, disposition, fix} from the closed
+		// vocabulary (#2414) — not a prose adjudicationNote, which is the proxy-only
+		// shim the wire forces there. The model reads a structured verdict it can adapt
+		// to, not a narrated one it can ignore.
+		return denyToolReceipt(r, v).JSON(), ev
 	case v.By == "vdso":
 		ev.Note = "vDSO hit (served locally, no dispatch)"
 	case v.Kind == abi.VerdictTransform && v.By == "grammar":
@@ -457,9 +460,17 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 			case sp.barWrite(tool, &m):
 				// Before-consumption write barrier (#1319): this write follows a squashed
 				// speculation (a write behind an unconfirmed speculative read), so it is
-				// BLOCKED from the engine — never dispatched, no durable effect. The model
-				// sees a structured barred result and can re-issue once the read is real.
-				content = `{"error":"write barred: held behind an unconfirmed speculative read (squashed); re-issue after the authoritative read"}`
+				// BLOCKED from the engine — never dispatched, no durable effect. This is a
+				// legitimate NOT-SENT no-op, so the model sees a typed status=skipped
+				// receipt (#2414) — never a feigned success — and can re-issue once the
+				// read is real.
+				content = ToolReceipt{
+					Status:      ToolResultSkipped,
+					Reason:      "WRITE_BARRED",
+					Disposition: "RETRYABLE",
+					Fix:         "re-issue this write after the authoritative read it depends on has actually run",
+					Detail:      "held behind an unconfirmed speculative read (squashed); never dispatched",
+				}.JSON()
 				ev.Verdict = "BARRED"
 				ev.By = "write-barrier"
 				ev.Note = "BARRED by the before-consumption write barrier (dependent speculation squashed)"

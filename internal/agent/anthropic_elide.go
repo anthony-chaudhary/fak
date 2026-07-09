@@ -237,38 +237,16 @@ func collectResultElisionEdits(msgBase int, el json.RawMessage, threshold int) (
 	if json.Unmarshal(el, &m) != nil || m.Role != "user" {
 		return nil, 0
 	}
-	// Locate the message's content array by KEY (exact), then decode it with spans RELATIVE to the
-	// located value — never re-searching its bytes with bytes.Index, which a sibling field holding
-	// identical bytes would mis-locate.
-	mcStart, mcEnd, ok := objectValueSpan(el, "content")
-	if !ok {
-		return nil, 0
-	}
-	mContent := el[mcStart:mcEnd]
-	if len(mContent) == 0 || mContent[0] != '[' {
-		return nil, 0
-	}
-	blocks, blockSpans, ok := arrayElementSpans(mContent) // spans relative to mContent (base 0)
-	if !ok {
-		return nil, 0
-	}
-	for j, blk := range blocks {
-		var b struct {
-			Type string `json:"type"`
-		}
-		if json.Unmarshal(blk, &b) != nil || b.Type != "tool_result" {
-			continue
-		}
+	forEachToolResultBlock(msgBase, el, func(blk json.RawMessage, blkBase int) {
 		// Defense in depth: never shrink a tool_result that carries cache_control on the block
 		// itself or on any block nested in its content (the per-message skip already excludes such
 		// a message, but keep this self-contained too).
 		if rawHasCacheControl(blk) || toolResultContentHasCacheControl(blk) {
-			continue
+			return
 		}
-		blkBase := msgBase + mcStart + blockSpans[j].start // absolute start of blk in the body
 		cStart, cEnd, ok := objectValueSpan(blk, "content")
 		if !ok {
-			continue
+			return
 		}
 		cVal := blk[cStart:cEnd]
 		switch {
@@ -280,7 +258,7 @@ func collectResultElisionEdits(msgBase int, el json.RawMessage, threshold int) (
 		case len(cVal) > 0 && cVal[0] == '[': // content is an array of blocks — shrink each oversized text block
 			inner, innerSpans, ok := arrayElementSpans(cVal) // spans relative to cVal (base 0)
 			if !ok {
-				continue
+				return
 			}
 			for k, ib := range inner {
 				var tb struct {
@@ -299,7 +277,7 @@ func collectResultElisionEdits(msgBase int, el json.RawMessage, threshold int) (
 				}
 			}
 		}
-	}
+	})
 	return edits, shed
 }
 
@@ -309,6 +287,36 @@ func collectResultElisionEdits(msgBase int, el json.RawMessage, threshold int) (
 // sibling) is both unnecessary and unsafe. This keeps every value location key-exact.
 func arrayElementSpans(arr []byte) ([]json.RawMessage, []elementSpan, bool) {
 	return decodeArrayElements(arr, arr) // bytes.Index(arr, arr) == 0, so spans are arr-relative
+}
+
+// forEachToolResultBlock locates el's content ARRAY by KEY (exact, never a bytes.Index a
+// byte-identical sibling field could mis-locate) and invokes fn once per tool_result block in it,
+// passing the raw block and blkBase — the block's absolute start byte in the body (msgBase-relative).
+// It is the shared scanning prologue of collectResultElisionEdits, collectToolReferenceEdits, and
+// collectEmptyContentEdits; a missing content key, bare-string content, or an unparseable array
+// yields no calls.
+func forEachToolResultBlock(msgBase int, el json.RawMessage, fn func(blk json.RawMessage, blkBase int)) {
+	mcStart, mcEnd, ok := objectValueSpan(el, "content")
+	if !ok {
+		return
+	}
+	mContent := el[mcStart:mcEnd]
+	if len(mContent) == 0 || mContent[0] != '[' {
+		return
+	}
+	blocks, blockSpans, ok := arrayElementSpans(mContent) // spans relative to mContent (base 0)
+	if !ok {
+		return
+	}
+	for j, blk := range blocks {
+		var b struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(blk, &b) != nil || b.Type != "tool_result" {
+			continue
+		}
+		fn(blk, msgBase+mcStart+blockSpans[j].start) // absolute start of blk in the body
+	}
 }
 
 // toolResultContentHasCacheControl reports whether a tool_result block's content array carries a
