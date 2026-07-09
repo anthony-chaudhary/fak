@@ -78,6 +78,32 @@ live GitHub state:
   probes) trace to **closed** epics — they need a per-item shipped-vs-open check before
   re-filing, so they were **not** filed here (surfaced only).
 
+## Round 2 — shelf shipped-vs-open audit (2026-07-08)
+
+Witnessed the 31 deferred shelf candidates (design items whose docs cited **closed**
+epics #79/#706/#905/#493/#134) against the live tree + GitHub. Result: **13 genuine
+gaps filed (#3407–#3419)**; **18 dropped** — 15 already **SHIPPED**, 3 **open
+duplicates**. The shipped-check is the point: it stopped 15 tickets that would have
+duplicated landed code.
+
+- **Filed #3407–#3419:** enginecache re-witness (→#1490), generation map
+  machine-readable (→#1625) + ungroomed-issue report (#3409), DSA/recurrent KV-quant
+  follow-on (→#2236), unify Hits+1 reuse seam (→#2236), fit KVReuseEstimate decay
+  (→#2669), xenginekv co-residence transport (→#53), demote-before-drop PlanKVDemotion
+  (→#2236), fix phantom `internal/kvbm` tag (#3415), 3× Metal decode/prefill levers
+  (→#59), rank external KV-offload stores incl. MemKV (→#3199).
+- **Dropped SHIPPED (grounded):** L3RegionBackend `internal/l3region/l3region.go:166`;
+  referee sidecar `internal/gateway/l3referee.go:113`; durability promotion
+  `internal/l3region/promotion.go:164`; cross-tenant share `internal/gateway/l3share.go:117`;
+  deletion-cert `internal/gateway/l3deletioncert.go:125`; AWQ witness
+  `internal/compute/cuda_awq_test.go:114`; SafeKV / mcpproxy / provenance / label-lattice
+  already witnessed in `CONCEPT-FIELD-BORROW-LANDSCAPE-2026-07-08.md`.
+- **Dropped OPEN_DUP:** AgenticFlict→#3202, agent-OS prior-art→#3203, EAGLE-3
+  draft-head→#3197.
+- **Re-home map (closed→live):** #79→#53, #706→#985, #905→#2236, #493/#134→#3199.
+
+**Total for the MemKV study: 25 issues filed (#3309–#3320, #3407–#3419).**
+
 ## Companions
 
 - [`study-repo`](../../.claude/skills/study-repo/SKILL.md) · [`field-borrow`](../../.claude/skills/field-borrow/SKILL.md)
