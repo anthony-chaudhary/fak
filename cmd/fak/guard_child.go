@@ -490,10 +490,10 @@ func guardAuthCrashRecoverWindowDuration() time.Duration {
 // never auto-relaunches for it — the crash falls through to today's manual guidance instead of
 // risking a silent, context-dropping relaunch.
 func guardContinueFlagForAgent(agentName string) (flag string, ok bool) {
-	base := strings.ToLower(filepath.Base(agentName))
-	base = strings.TrimSuffix(base, ".exe")
-	base = strings.TrimSuffix(base, ".cmd")
-	if base == "claude" {
+	// guardAgentBaseName (not filepath.Base) so a Windows launcher path like
+	// `C:\tools\claude.exe` is recognized on every host OS — filepath.Base is
+	// host-specific and does not split backslash paths on the Linux CI runner.
+	if guardAgentBaseName(agentName) == "claude" {
 		return "--continue", true
 	}
 	return "", false
