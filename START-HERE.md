@@ -17,7 +17,7 @@ and runs on CPU — no GPU needed for small models.
 | **Cut the token bill on the agent you already run** (cheaper long sessions, one command) | [Main README](README.md#get-started-with-fak-guard) — `fak guard -- claude` |
 | **See the performance benchmarks** | [Benchmark Authority](BENCHMARK-AUTHORITY.md) |
 | **Follow a guided first session** (real output at every step) | [Tutorial](docs/fak/tutorial.md) — 15 minutes ⭐ |
-| **Learn every concept in order** (a prerequisite-based course you can join at any level) | [Learning path](LEARNING-PATH.md) — 98 courses, six levels ⭐ |
+| **Learn every concept in order** (a prerequisite-based course you can join at any level) | [Learning path](LEARNING-PATH.md) — 99 courses, six levels ⭐ |
 | **I'm a coding agent** (build/test/run + the rules) | [AGENTS.md](AGENTS.md) |
 | **I already run an agent** (Claude Code, Cursor, an SDK, or MCP) | [Integration index](docs/integrations/README.md) — repoint one base URL, no agent-side code change |
 | **Understand what fak actually does** | [Main README](README.md) |
@@ -85,11 +85,11 @@ compound: the first agent pays for the shared work, everyone after reads it for 
 
 ## How fast is it?
 
-On a measured 50-turn × 5-agent session, `fak` did in ~19 minutes what a **naive
-re-send-everything loop** does in ~19 hours — a **60× gain against that naive baseline**.
-Against a *tuned* warm-cache stack the honest gain is a few-fold (~4×); the eye-catching
-60× is only versus the naive pattern, whose cost balloons because it reprocesses the whole
-growing conversation every turn. The reuse win is **self-host only** and applies to
+On a measured 50-turn × 5-agent session, the honest gain over a *tuned* warm-cache
+stack is a few-fold (**~4×**). Versus a **naive re-send-everything loop** — whose cost
+balloons because it reprocesses the whole growing conversation every turn — the same
+session drops from ~19 hours to ~19 minutes (~60×), but that eye-catching number holds
+only against the naive pattern. The reuse win is **self-host only** and applies to
 read-heavy fleets.
 
 See [`fak/BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) for every number traced to

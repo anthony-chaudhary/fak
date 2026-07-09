@@ -76,7 +76,7 @@ HuggingFace, not a chat-quality serving engine (see the honest caveat in §4).
 
 The installer honors `FAK_VERSION` (pin a version) and `FAK_INSTALL_DIR` (default
 `/usr/local/bin`, else `~/.local/bin`). Published targets: `linux_amd64`,
-`darwin_amd64`, `darwin_arm64`, `windows_amd64`.
+`linux_arm64`, `darwin_amd64`, `darwin_arm64`, `windows_amd64`.
 
 **Install with Go.** The module path `github.com/anthony-chaudhary/fak` is the repository
 root, so it installs directly:
@@ -225,8 +225,9 @@ Routes the gateway exposes:
 | `GET /metrics` | Prometheus exposition for gateway HTTP latency/status, verdict counters, kernel counters, inflight requests, build labels, and vDSO hit ratio |
 | `GET /debug/vars` | authenticated expvar-style JSON snapshot of gateway config/uptime, runtime memory/goroutines, kernel counters, and completed HTTP/operation metric rows |
 
-> The `/v1/fak/*` routes dispatch to the bound `--engine` (default `mock`, or the
-> in-kernel model in Tier 2), a **separate axis** from `--base-url`. Your upstream
+> The `/v1/fak/*` routes dispatch to the bound `--engine` (default `inkernel` — the
+> Tier-2 fused model, on its synthetic checkpoint until you load real weights, §4),
+> a **separate axis** from `--base-url`. Your upstream
 > model is reached only through `/v1/chat/completions`.
 
 > `fak serve` also writes one JSON access-log event per HTTP request to its log sink.
@@ -353,8 +354,9 @@ On the witnessed M3 Pro run this loaded the model in about 75 s, peaked at about
 25.8 GB RSS, prefilling 22 tokens at about 0.5 tok/s and decoding one cached token at
 about 0.1 tok/s. The first greedy token is `<think>`, matching llama.cpp for the same
 ChatML prompt. Treat this as a runnability/debug smoke; the current speed bar and the
-remaining broader logit-oracle work are tracked in `QWEN36-PARITY-RESULTS.md` and
-`FAK-NATIVE-QWEN35-RESULTS.md`.
+remaining broader logit-oracle work are tracked in
+[`docs/benchmarks/QWEN36-PARITY-RESULTS.md`](docs/benchmarks/QWEN36-PARITY-RESULTS.md) and
+[`docs/benchmarks/FAK-NATIVE-QWEN35-RESULTS.md`](docs/benchmarks/FAK-NATIVE-QWEN35-RESULTS.md).
 
 ### 4d. In-kernel CHAT through `fak serve` (both OpenAI + Anthropic wires)
 
