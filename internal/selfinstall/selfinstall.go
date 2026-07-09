@@ -78,8 +78,12 @@ func Install(ctx context.Context, run Runner, swap Swapper, opts Options) Result
 	}
 
 	// 1. build the candidate, baking the tree's VERSION into it as appversion.BuildVersion
-	//    (see versionLDFlags for why this is load-bearing, not cosmetic).
-	buildArgs := []string{"build"}
+	//    (see versionLDFlags for why this is load-bearing, not cosmetic). -buildvcs=true
+	//    FORCES the VCS stamp: under Go's default -buildvcs=auto the detached-worktree build
+	//    (PrepareOrigin) can silently drop the stamp when VCS detection can't resolve the
+	//    repo, shipping a binary that cannot attest which commit it is (#3350, epic #2218 gap
+	//    G2). With =true the build FAILS instead of emitting an unstamped binary.
+	buildArgs := []string{"build", "-buildvcs=true"}
 	if ld := versionLDFlags(opts.RepoRoot); ld != "" {
 		buildArgs = append(buildArgs, "-ldflags", ld)
 	}
@@ -91,11 +95,20 @@ func Install(ctx context.Context, run Runner, swap Swapper, opts Options) Result
 	if out, ok := run(ctx, opts.RepoRoot, "go", "vet", "./cmd/fak"); !ok {
 		return Result{Stage: StageVet, Detail: trim(out)}
 	}
-	// 3. smoke: the freshly-built binary must run and self-report its version. This catches
-	//    a binary that builds but cannot start (bad cgo link, missing data file, panic on
-	//    init) BEFORE it ever replaces the one guarding live sessions.
-	if out, ok := run(ctx, opts.RepoRoot, tmp, "version"); !ok {
+	// 3. smoke: the freshly-built binary must run, self-report its version, AND carry a real
+	//    VCS stamp. Running catches a binary that builds but cannot start (bad cgo link,
+	//    missing data file, panic on init). The stamp check is fail-CLOSED on provenance
+	//    (#3350, epic #2218 gap G2): an unstamped binary still exits 0 on `version`, so
+	//    without it a stampless candidate would swap in indistinguishable from a good one and
+	//    blind every downstream "which commit is this guard?" / version-skew check.
+	//    -buildvcs=true already makes the build FAIL when it cannot stamp; this second gate
+	//    refuses to swap a binary that somehow still reports no stamp.
+	out, ok := run(ctx, opts.RepoRoot, tmp, "version")
+	if !ok {
 		return Result{Stage: StageSmoke, Detail: trim(out)}
+	}
+	if !versionOutputStamped(out) {
+		return Result{Stage: StageSmoke, Detail: "candidate binary is UNSTAMPED — `version` reports no VCS provenance; refusing to swap an unattestable binary over the fleet: " + trim(out)}
 	}
 	// 4. swap: only now is the candidate trusted over the running fleet.
 	if err := swap(tmp, opts.Target); err != nil {
@@ -158,6 +171,32 @@ func versionLDFlags(repoRoot string) string {
 		return ""
 	}
 	return "-X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion=" + v
+}
+
+// versionOutputStamped reports whether `fak version` output carries a REAL VCS stamp: a
+// `build: <rev>` line whose revision is an actual commit, not the "(no VCS stamp …)" or
+// "module vX" sentinels an unstamped / `go install …@vX` build prints. It mirrors the parse
+// cmd/fak's stampOfBinary uses, so the self-update smoke gate reads the exact same provenance
+// signal a fleet version-skew witness does (#3350). An unstamped candidate yields false and
+// the gate refuses the swap.
+func versionOutputStamped(out string) bool {
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "build:") {
+			continue
+		}
+		fields := strings.Fields(strings.TrimSpace(strings.TrimPrefix(line, "build:")))
+		if len(fields) == 0 {
+			return false // a bare "build:" line — no revision to attest.
+		}
+		switch fields[0] {
+		case "module", "(no": // "module vX" (go install …@vX) or "(no VCS stamp …)".
+			return false
+		default:
+			return true
+		}
+	}
+	return false // no build line at all — treat as unstamped, not as a pass.
 }
 
 func trim(s string) string {

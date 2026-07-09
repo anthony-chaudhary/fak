@@ -21,6 +21,11 @@ func (s *scriptRunner) run(_ context.Context, _, name string, args ...string) (s
 	if s.failOn != "" && strings.Contains(joined, s.failOn) {
 		return "boom: " + s.failOn, false
 	}
+	// The smoke stage runs `<tmp> version`; a real freshly-built candidate reports a VCS
+	// stamp, which the fail-closed provenance gate (#3350) now requires before the swap.
+	if len(args) > 0 && args[0] == "version" {
+		return "fak version 9.9.9\nbuild: 1a2b3c4d5e6f a stamped candidate", true
+	}
 	return "ok", true
 }
 
@@ -102,8 +107,18 @@ func TestBuildTmpDefaultsToTargetSibling(t *testing.T) {
 type recordTmp struct{ buildOut string }
 
 func (r *recordTmp) run(_ context.Context, _, name string, args ...string) (string, bool) {
-	if name == "go" && len(args) >= 3 && args[0] == "build" && args[1] == "-o" {
-		r.buildOut = args[2]
+	// Find the `-o <path>` pair wherever it sits — the build now leads with -buildvcs=true
+	// (and may carry -ldflags), so -o is no longer at a fixed index.
+	if name == "go" && len(args) > 0 && args[0] == "build" {
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] == "-o" {
+				r.buildOut = args[i+1]
+				break
+			}
+		}
+	}
+	if len(args) > 0 && args[0] == "version" {
+		return "fak version 9.9.9\nbuild: 1a2b3c4d5e6f", true
 	}
 	return "ok", true
 }
@@ -115,6 +130,9 @@ type recordBuild struct{ buildArgs []string }
 func (r *recordBuild) run(_ context.Context, _, name string, args ...string) (string, bool) {
 	if name == "go" && len(args) > 0 && args[0] == "build" {
 		r.buildArgs = append([]string{}, args...)
+	}
+	if len(args) > 0 && args[0] == "version" {
+		return "fak version 9.9.9\nbuild: 1a2b3c4d5e6f", true
 	}
 	return "ok", true
 }
@@ -372,3 +390,100 @@ var errSwap = swapErr("swap-fail")
 type swapErr string
 
 func (e swapErr) Error() string { return string(e) }
+
+// stampRunner models a build ladder whose freshly-built candidate reports versionOut when
+// run as `<tmp> version`; every other command (build/vet) succeeds with "ok". It lets a test
+// drive the smoke gate against a stamped vs unstamped candidate deterministically.
+type stampRunner struct {
+	versionOut string
+	ran        [][]string
+}
+
+func (s *stampRunner) run(_ context.Context, _, name string, args ...string) (string, bool) {
+	s.ran = append(s.ran, append([]string{name}, args...))
+	if len(args) > 0 && args[0] == "version" {
+		return s.versionOut, true
+	}
+	return "ok", true
+}
+
+// TestInstallBuildForcesVCSStamp pins that the build stage forces -buildvcs=true (#3350): a
+// self-update build must FAIL rather than silently emit an unstamped binary. Under Go's
+// default -buildvcs=auto the detached-worktree build can drop the VCS stamp entirely, so the
+// installed guard cannot attest which commit it is — the exact provenance blind spot G2 of
+// epic #2218. Red before the fix (no -buildvcs), green after.
+func TestInstallBuildForcesVCSStamp(t *testing.T) {
+	r := &recordBuild{}
+	swap := func(src, dst string) error { return nil }
+	Install(context.Background(), r.run, swap, Options{RepoRoot: "/repo", Target: "/bin/fak"})
+	joined := strings.Join(r.buildArgs, " ")
+	if !strings.Contains(joined, "-buildvcs=true") {
+		t.Fatalf("build args = %v, want -buildvcs=true so the build FAILS instead of shipping an unstamped binary (#3350)", r.buildArgs)
+	}
+	// -buildvcs=true must not displace the well-formed `-o <tmp> ./cmd/fak` tail.
+	if !strings.Contains(joined, "-o") || !strings.HasSuffix(joined, "./cmd/fak") {
+		t.Fatalf("build args = %v, want a well-formed `-o <tmp> ./cmd/fak` tail", r.buildArgs)
+	}
+}
+
+// TestInstallSmokeRejectsUnstampedCandidate pins the fail-CLOSED provenance gate (#3350): a
+// candidate that builds, vets, and runs but reports NO VCS stamp must NOT be swapped over the
+// running fleet. Before the fix the smoke stage checked only the exit status, so an unstamped
+// binary (still exits 0 on `version`) passed and swapped in — indistinguishable from a good
+// one, blinding every downstream freshness/skew check. Red before, green after.
+func TestInstallSmokeRejectsUnstampedCandidate(t *testing.T) {
+	r := &stampRunner{versionOut: "fak version 9.9.9\nbuild: (no VCS stamp — built without module/VCS provenance; cannot confirm the commit)"}
+	swapCalled := false
+	swap := func(src, dst string) error { swapCalled = true; return nil }
+
+	res := Install(context.Background(), r.run, swap, Options{RepoRoot: "/repo", Target: "/bin/fak"})
+	if res.Installed {
+		t.Fatalf("an UNSTAMPED candidate must NOT be installed; got %+v", res)
+	}
+	if res.Stage != StageSmoke {
+		t.Fatalf("stage = %v, want StageSmoke — the gate must fail closed on a missing VCS stamp", res.Stage)
+	}
+	if swapCalled {
+		t.Fatal("swap was called for an unstamped candidate — the provenance gate is fail-OPEN")
+	}
+}
+
+// TestInstallSmokeAcceptsStampedCandidate is the positive twin of the reject test: a
+// candidate that builds, vets, runs, AND reports a real VCS stamp passes the smoke gate and
+// swaps in. It guards the fail-closed gate against over-rejecting a genuinely-stamped binary.
+func TestInstallSmokeAcceptsStampedCandidate(t *testing.T) {
+	r := &stampRunner{versionOut: "fak version 9.9.9\nbuild: 499587c9deadbeef0011 (committed)"}
+	swapped := ""
+	swap := func(src, dst string) error { swapped = dst; return nil }
+
+	res := Install(context.Background(), r.run, swap, Options{RepoRoot: "/repo", Target: "/bin/fak"})
+	if !res.Installed || res.Stage != StageSwap {
+		t.Fatalf("a STAMPED candidate that passes every gate must install; got %+v", res)
+	}
+	if swapped != "/bin/fak" {
+		t.Fatalf("swap target = %q, want /bin/fak", swapped)
+	}
+}
+
+// TestVersionOutputStamped pins the provenance parse the smoke gate reads: a real revision is
+// stamped; the "(no VCS stamp …)" and "module vX" sentinels, a bare build line, and output
+// with no build line at all are NOT — the gate must fail closed on each.
+func TestVersionOutputStamped(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		out  string
+		want bool
+	}{
+		{"real rev", "fak version 9.9.9\nbuild: 499587c9deadbeef", true},
+		{"real rev dirty", "build: 499587c9deadbeef +uncommitted", true},
+		{"no vcs stamp", "build: (no VCS stamp — built without module/VCS provenance; cannot confirm the commit)", false},
+		{"module version", "build: module v0.1.1", false},
+		{"bare build line", "build:", false},
+		{"no build line", "fak version 9.9.9\ngo: go1.26", false},
+		{"empty", "", false},
+	} {
+		if got := versionOutputStamped(c.out); got != c.want {
+			t.Errorf("%s: versionOutputStamped(%q) = %v, want %v", c.name, c.out, got, c.want)
+		}
+	}
+}
