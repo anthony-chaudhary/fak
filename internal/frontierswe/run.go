@@ -44,15 +44,15 @@ type RunConfig struct {
 type RunMeta struct {
 	Schema      string  `json:"schema"`
 	Task        string  `json:"task"`
-	Agent       string  `json:"agent"`             // harness short name actually routed
-	Model       string  `json:"model"`             // model id forwarded to the upstream
-	BudgetSec   int64   `json:"agent_budget_sec"`  // the [agent] timeout_sec enforced (the 20h headline)
+	Agent       string  `json:"agent"`              // harness short name actually routed
+	Model       string  `json:"model"`              // model id forwarded to the upstream
+	BudgetSec   int64   `json:"agent_budget_sec"`   // the [agent] timeout_sec enforced (the 20h headline)
 	BudgetHours float64 `json:"agent_budget_hours"` // the same budget in hours, for the headline
-	Trials      int     `json:"trials"`            // n_concurrent_trials recorded
-	Turns       int     `json:"turns"`             // turns actually driven (after the budget cap)
-	ElapsedSec  float64 `json:"elapsed_sec"`       // cumulative projected wall-clock of the driven turns
-	Mocked      bool    `json:"mocked"`            // true when driven against a mocked env (no Docker/Modal)
-	PredsOnly   bool    `json:"preds_only"`        // stopped before grading (grading is C13)
+	Trials      int     `json:"trials"`             // n_concurrent_trials recorded
+	Turns       int     `json:"turns"`              // turns actually driven (after the budget cap)
+	ElapsedSec  float64 `json:"elapsed_sec"`        // cumulative projected wall-clock of the driven turns
+	Mocked      bool    `json:"mocked"`             // true when driven against a mocked env (no Docker/Modal)
+	PredsOnly   bool    `json:"preds_only"`         // stopped before grading (grading is C13)
 }
 
 // TTSTracePoint is one per-turn point of the run's time-to-solution trace: the
@@ -102,13 +102,13 @@ type RunGate struct {
 // per-turn TTS trace, the collected job.yaml artifact list, the fak-routed C6
 // job.yaml, the submission contract, and the capability gate.
 type RunResult struct {
-	Meta          RunMeta       `json:"meta"`
-	Trace         TTSTrace      `json:"tts_trace"`
-	Artifacts     []RunArtifact `json:"artifacts"`
-	JobYAML       string        `json:"job_yaml"`
-	Submission    RunSubmission `json:"submission"`
-	Gate          RunGate       `json:"gate"`
-	WrappedAgent  string        `json:"wrapped_agent"`
+	Meta         RunMeta       `json:"meta"`
+	Trace        TTSTrace      `json:"tts_trace"`
+	Artifacts    []RunArtifact `json:"artifacts"`
+	JobYAML      string        `json:"job_yaml"`
+	Submission   RunSubmission `json:"submission"`
+	Gate         RunGate       `json:"gate"`
+	WrappedAgent string        `json:"wrapped_agent"`
 }
 
 // RunSubmission is the per-task submission contract (#1715): the explicit target
