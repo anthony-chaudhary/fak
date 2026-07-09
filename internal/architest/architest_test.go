@@ -61,6 +61,7 @@ var tier = map[string]int{
 	"stallscan":            1, // pure churn-signal stall classifier (Classify(Sample,Thresholds)->Verdict) for low-usage machine lockups read by fak stallscan; stdlib-only, imports nothing internal, off the hot path.
 	"growthgate":           1, // pure unbounded-growth classifier (Classify([]Artifact,Budget)->Report) for append-only ledger/log bloat read by fak growthgate; the standing-bloat twin of stallscan; stdlib-only, imports nothing internal, off the hot path.
 	"branchrole":           1, // branch-role contract reader over dos.toml; stdlib-only, off the hot path.
+	"doomloop":             1, // two-axis doom-loop classifier (#doomloop): folds a live worker's effort-vs-verified-progress sample window into a closed verdict + a graduated, reversible-first correction (observe->nudge->escalate, never an auto-teardown); the missing enforcement half of fleetmon/trajctl/relay/loopmgr detection. Pure, stdlib-only, off the hot path.
 	"benchloop":            1, // benchmark super-loop manager: folds benchcatalog/benchruns/nightrun status into one command-facing control surface; off the hot path.
 	"macbench":             1, // Mac gateway benchmark probes for nightrun: stdlib HTTP client + JSON artifact fold, off the hot path.
 	"benchruns":            1, // pure benchmark-run catalog reader/renderer over experiments/benchmark artifacts; stdlib-only, off the hot path.

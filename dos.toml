@@ -328,6 +328,7 @@ autopick = [
   "godfileceiling",
   "microagent",
   "l3kv",
+  "doomloop",
   # new-leaf:lane
 ]
 
@@ -512,6 +513,7 @@ chatopsdetach = ["internal/chatopsdetach/**"]
 godfileceiling = ["internal/godfileceiling/**"]
 microagent = ["internal/microagent/**"]
 l3kv = ["internal/l3kv/**"]
+doomloop = ["internal/doomloop/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
@@ -626,6 +628,13 @@ worker_launch_template = 'tools/.bin/dispatchworker --lane {lane}'
 # typed-core direction is refusable with a structured, citable reason from a closed
 # set, not free-text -- the same discipline fak imposes on tool results. The floor
 # under each is the architest gate (`go test ./internal/architest`).
+[reasons.DOOM_LOOP]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A live worker is spending effort (burning transcript/turns/tokens) while verified forward progress stays flat for K consecutive windows -- a confirmed doom loop, distinct from a mere stall. Continued unproductive spend is gated pending a reversible-first correction."
+fix      = "Deliver the graduated correction the classifier recommends: a soft re-anchor NUDGE to the session steer channel first (reversible), then an operator ESCALATE if the doom persists. Never auto-teardown. Floor: `fak doomloop scan` / `internal/doomloop`."
+see_also = ["fak doomloop", "internal/doomloop", "dos status", "docs/goal-spec.md"]
+
 [reasons.LOOP_DONE_UNWITNESSED]
 category = "STALE_CLAIM"
 refusal  = true

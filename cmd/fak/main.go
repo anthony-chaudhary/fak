@@ -259,6 +259,11 @@ func main() {
 		// The Eve integration bridge (#2600): mechanical security preflight over
 		// eve's MCP/OpenAPI connections (#2602). See cmd/fak/eve.go.
 		cmdEve(os.Args[2:])
+	case "doomloop":
+		// The two-axis doom-loop guard (#doomloop): classifies a live worker on effort
+		// spent vs verified forward progress and delivers a graduated, reversible-first
+		// correction. See cmd/fak/doomloop.go + internal/doomloop.
+		cmdDoomloop(os.Args[2:])
 	case "lint":
 		cmdLint(os.Args[2:])
 	case "codelint":
