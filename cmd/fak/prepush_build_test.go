@@ -3,6 +3,7 @@ package main
 import (
 	"archive/tar"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -245,12 +246,15 @@ func TestPrePushBuildFixtureCatchesImporterBreak(t *testing.T) {
 	}
 }
 
-// TestExtractArchiveHonorsDeadline is the direct end-to-end witness for the #3432 fix: with a live
-// context `git archive` is untarred in-process to disk (a nested dir proves recursion); with an
-// ALREADY-EXPIRED deadline the extract must RETURN an error (the producer killed) rather than
-// hang — the exact property whose absence wedged every agent's trunk push for 14+ hours. Needs
-// only git now (extraction is in-process, no external tar), so it no longer depends on which
-// tar flavor is first on PATH — itself part of the #3432 fix.
+// TestExtractArchiveHonorsDeadline witnesses two #3432 properties end-to-end with a real `git
+// archive`: (1) a live context untars the committed tip in-process to disk (a nested dir proves
+// recursion); (2) an ALREADY-EXPIRED deadline makes extract RETURN promptly rather than hang — in
+// this half exec.CommandContext's Start() refuses to launch git at all, so NO producer is spawned
+// (that Start-refusal is exactly what this half asserts, not a kill). The complementary and
+// load-bearing case — the deadline killing a producer that is already RUNNING and stalled mid-stream
+// — is witnessed deterministically by TestExtractArchiveDeadlineKillsRunningProducer. Needs only git
+// now (extraction is in-process, no external tar), so it no longer depends on which tar flavor is
+// first on PATH — itself part of the #3432 fix.
 func TestExtractArchiveHonorsDeadline(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: needs git")
@@ -279,8 +283,10 @@ func TestExtractArchiveHonorsDeadline(t *testing.T) {
 		}
 	}
 
-	// No-wedge: an already-expired deadline must make the extract RETURN (producer killed), not
-	// hang. A generous watchdog fails loudly if the #3432 wedge ever regresses.
+	// No-wedge (Start-refusal half): an already-expired deadline makes exec.CommandContext.Start()
+	// refuse to launch git, so extract RETURNS promptly without ever spawning a producer. A generous
+	// watchdog fails loudly if it ever hangs. The running-producer kill is covered separately by
+	// TestExtractArchiveDeadlineKillsRunningProducer.
 	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(1, 0))
 	defer cancel()
 	done := make(chan error, 1)
@@ -337,6 +343,127 @@ func TestUntarIntoRoundTripAndTraversal(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "escape.txt")); err == nil {
 		t.Fatal("traversal entry escaped the extraction root")
+	}
+}
+
+// TestHelperProcess is the controllable producer stand-in for `git archive`, injected via the
+// prepushArchiveCommand seam. Mode selects the stream shape, then it BLOCKS (never closes stdout,
+// never exits) so the consumer is left with a LIVE producer — the exact #3432 condition the shipped
+// TestExtractArchiveHonorsDeadline could not reach. It is a no-op unless run as a helper subprocess.
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	switch os.Getenv("GO_HELPER_MODE") {
+	case "garbage":
+		// A block of non-zero bytes: tar.Reader.Next() reads it as a header and fails its checksum
+		// → untarInto returns an error while THIS producer is still alive (exercises the kill branch).
+		junk := make([]byte, 4096)
+		for i := range junk {
+			junk[i] = 'A'
+		}
+		_, _ = os.Stdout.Write(junk)
+	case "valid-partial":
+		// A valid dir + file entry, then NO end-of-archive marker: untarInto consumes both and then
+		// blocks on the next header read, with this producer still alive (exercises the ctx branch).
+		tw := tar.NewWriter(os.Stdout)
+		_ = tw.WriteHeader(&tar.Header{Name: "pkg/", Typeflag: tar.TypeDir, Mode: 0o755})
+		body := []byte("package pkg\n")
+		_ = tw.WriteHeader(&tar.Header{Name: "pkg/a.go", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body))})
+		_, _ = tw.Write(body)
+		_ = tw.Flush()
+	}
+	_ = os.Stdout.Sync()
+	time.Sleep(10 * time.Minute) // block until the parent kills us
+	os.Exit(0)
+}
+
+// withHelperProducer swaps the git-archive seam for a helper-process producer of the given mode.
+func withHelperProducer(t *testing.T, mode string) {
+	t.Helper()
+	old := prepushArchiveCommand
+	prepushArchiveCommand = func(ctx context.Context, r, sha string) *exec.Cmd {
+		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestHelperProcess$")
+		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1", "GO_HELPER_MODE="+mode)
+		return cmd
+	}
+	t.Cleanup(func() { prepushArchiveCommand = old })
+}
+
+// TestExtractArchiveKillsProducerOnUntarError witnesses the kill-on-untar-error branch
+// (ar.Process.Kill() at prepush_build.go): a LIVE producer emits an unparseable stream, so untarInto
+// errors while the producer is still running; extractArchive must KILL it and return bounded, never
+// block in ar.Wait() on a producer that will never exit. Long deadline, so ctx.Err()==nil isolates
+// the untar-error branch. The watchdog fails loudly if the kill regresses (Wait would hang on the
+// helper's 10-minute sleep).
+func TestExtractArchiveKillsProducerOnUntarError(t *testing.T) {
+	withHelperProducer(t, "garbage")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- extractArchive(ctx, "x", "y", t.TempDir()) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a garbage stream must yield an error, got nil")
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("expected an untar error, not a timeout: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("extractArchive hung — a live producer was NOT killed after an untar error (#3432 regression)")
+	}
+}
+
+// TestExtractArchiveDeadlineKillsRunningProducer witnesses the ctx.Err() timeout branch with a
+// genuinely RUNNING producer — the property TestExtractArchiveHonorsDeadline cannot reach (an
+// already-expired ctx makes Start refuse before launch). The producer streams a valid partial
+// archive then stalls; the deadline fires while untarInto is blocked on the next header;
+// CommandContext kills the producer and extractArchive returns a bounded timeout error.
+func TestExtractArchiveDeadlineKillsRunningProducer(t *testing.T) {
+	withHelperProducer(t, "valid-partial")
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() { done <- extractArchive(ctx, "x", "y", t.TempDir()) }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("expected a deadline error from a stalled running producer, got: %v", err)
+		}
+		if el := time.Since(start); el > 20*time.Second {
+			t.Fatalf("returned but took %s — too slow to have been the deadline", el)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("extractArchive hung past its deadline with a running producer — the #3432 wedge is NOT fixed")
+	}
+}
+
+// TestSafeArchiveJoinRefusesEscapes pins the traversal guard: absolute, bare `..`, `..`-climbing,
+// and (on Windows) volume-relative names are refused, while clean repo-relative names resolve under
+// root. Covers the IsAbs, VolumeName, and `..` arms that the round-trip test's single `../` case did
+// not.
+func TestSafeArchiveJoinRefusesEscapes(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "root")
+	refuse := []string{"../escape.txt", "..", "a/../../b", "pkg/../../../etc/passwd"}
+	if os.PathSeparator == '\\' { // Windows volume-relative names only exist on Windows
+		refuse = append(refuse, `C:..\..\Windows\System32\evil.go`, `C:foo`, `\\server\share\x`)
+	}
+	for _, name := range refuse {
+		if _, err := safeArchiveJoin(root, name); err == nil {
+			t.Errorf("safeArchiveJoin must refuse %q, but it was accepted", name)
+		}
+	}
+	for _, name := range []string{"pkg/a.go", "go.mod", "a/b/c.go", "pkg/./a.go"} {
+		got, err := safeArchiveJoin(root, name)
+		if err != nil {
+			t.Errorf("safeArchiveJoin must accept clean name %q: %v", name, err)
+			continue
+		}
+		if rel, rerr := filepath.Rel(root, got); rerr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			t.Errorf("accepted name %q resolved outside root: %q", name, got)
+		}
 	}
 }
 

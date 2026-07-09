@@ -95,8 +95,8 @@ var prepushArchiveTimeout = 2 * time.Minute
 
 // Host-wide advisory single-flight for the expensive trunk-build gate.
 //
-// The gate's whole-repo `git archive | tar -x` + `go list` + importer-cone `go build` is the
-// heaviest push-seam step, and in the default FLEET_BUILD_GUARD=warn mode its verdict is
+// The gate's whole-repo `git archive` + in-process untar + `go list` + importer-cone `go build` is
+// the heaviest push-seam step, and in the default FLEET_BUILD_GUARD=warn mode its verdict is
 // ADVISORY — it never blocks the push (warn = allow). When many peers push at once, running
 // that full build concurrently in every clone reproduces the SAME advisory N times while piling
 // onto the CPU/disk/git contention that is what actually slows the fleet. So under advisory mode
@@ -371,8 +371,17 @@ func prepushArchiveTip(r, sha string) (string, error) {
 //
 // The producer's stdout is always read to EOF (or it is killed) before Wait, so Wait never races a
 // live read. git-only: no `tar` binary is required to push anymore.
+// prepushArchiveCommand builds the `git archive` producer. It is a seam so a test can substitute a
+// controllable producer (one that streams valid data then stalls, or emits garbage) and thereby
+// witness the load-bearing #3432 property deterministically: a LIVE producer that stalls is killed
+// — by the deadline (the ctx.Err() branch) or by an untar error (the Process.Kill() branch) — so
+// extractArchive always returns bounded and the gate fails open, never wedging the push.
+var prepushArchiveCommand = func(ctx context.Context, r, sha string) *exec.Cmd {
+	return exec.CommandContext(ctx, "git", "-C", r, "archive", "--format=tar", sha)
+}
+
 func extractArchive(ctx context.Context, r, sha, dir string) error {
-	ar := exec.CommandContext(ctx, "git", "-C", r, "archive", "--format=tar", sha)
+	ar := prepushArchiveCommand(ctx, r, sha)
 	windowgate.ConfigureBackgroundCommand(ar)
 	stdout, err := ar.StdoutPipe()
 	if err != nil {
@@ -456,12 +465,18 @@ func untarInto(r io.Reader, dir string) error {
 }
 
 // safeArchiveJoin joins a tar entry name under root and REFUSES any name that would escape it —
-// an absolute path or one whose cleaned form climbs past root via `..`. A defensive guard: `git
-// archive` emits clean repo-relative names, so a `..`/absolute entry is anomalous and a build gate
-// must reject it loudly rather than write outside its throwaway dir.
+// an absolute path, a Windows volume-relative name (`C:..\..\x`), or one whose cleaned form climbs
+// past root via `..`. A defensive guard: `git archive` emits clean repo-relative names, so any such
+// entry is anomalous and a build gate must reject it loudly rather than write outside its throwaway
+// dir.
 func safeArchiveJoin(root, name string) (string, error) {
 	rel := filepath.Clean(filepath.FromSlash(name))
-	if filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+	// Refuse an absolute path, a `..` climb past root, OR a Windows volume-relative name such as
+	// `C:..\..\x`: filepath.IsAbs reports false for the drive-relative form (it has a volume but no
+	// leading separator), yet filepath.Join(root, `C:..`) honors the drive and escapes root. A bare
+	// VolumeName check closes that gap — git archive never emits a volume-prefixed name, so this
+	// only ever fires on an anomalous entry the gate must reject loudly.
+	if filepath.IsAbs(rel) || filepath.VolumeName(rel) != "" || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf("archive entry %q escapes extraction root", name)
 	}
 	return filepath.Join(root, rel), nil
