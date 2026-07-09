@@ -64,7 +64,7 @@ func TestScratchpadLeaseLifecycle(t *testing.T) {
 
 	// Write a known number of bytes across two files so the GC event's reclaim
 	// figures are exact, not approximate.
-	payloadA := []byte("hello scratch")           // 13 bytes
+	payloadA := []byte("hello scratch")            // 13 bytes
 	payloadB := []byte("second file, more bytes!") // 24 bytes
 	if err := os.WriteFile(filepath.Join(lease.Dir, "a.txt"), payloadA, 0o644); err != nil {
 		t.Fatal(err)
