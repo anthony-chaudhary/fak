@@ -1,3 +1,8 @@
+---
+title: "EU AI Act Article 12 — fak audit-logging conformance"
+description: "How fak's tamper-evident, hash-chained decision journal satisfies every EU AI Act Article 12 high-risk audit-log obligation, and stays verifiable offline."
+---
+
 # EU AI Act Article-12 (high-risk systems): audit logging conformance
 
 **TL;DR.** fak's decision journal (`internal/journal`) satisfies every Article-12 high-risk audit-log obligation with a shipped, tamper-evident mechanism: append-only, SHA-256 hash-chained (`sha256(PrevHash ‖ content)`), per-row durable flush, and offline verifiability via `fak audit verify`. The operator owns retention via filesystem policy (no built-in TTL — a feature, not a gap).

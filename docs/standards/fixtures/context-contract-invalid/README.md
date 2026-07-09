@@ -1,3 +1,8 @@
+---
+title: "Negative fixtures — context-contract schema (must-reject)"
+description: "The must-reject witnesses for fak's portable context-contract schema, proving the validator rejects malformed inputs alongside the positive round-trip."
+---
+
 # Negative fixtures for the context-contract schema
 
 These are the **must-reject** witnesses for

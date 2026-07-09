@@ -1,3 +1,8 @@
+---
+title: "Negative fixtures — taint-check schema (must-reject)"
+description: "The must-reject witnesses for fak's portable taint-check schema, proving the validator rejects disallowed crossings alongside the positive round-trip."
+---
+
 # Negative fixtures for the taint-check schema
 
 These are the **must-reject** witnesses for

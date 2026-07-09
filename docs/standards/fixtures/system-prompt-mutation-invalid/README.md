@@ -1,3 +1,8 @@
+---
+title: "Negative fixtures: system-prompt-mutation schema"
+description: "The must-reject witness fixtures for the system-prompt-mutation schema - inputs the validator is required to refuse, pinned as regression tests."
+---
+
 # Negative fixtures for the system-prompt-mutation schema
 
 These are the **must-reject** witnesses for

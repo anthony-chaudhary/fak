@@ -1,3 +1,8 @@
+---
+title: "Negative fixtures — agent-routing schema (must-reject)"
+description: "The must-reject witnesses for fak's portable agent-routing schema, proving the validator rejects malformed routes alongside the positive round-trip."
+---
+
 # Negative fixtures for the agent-routing schema
 
 These are the **must-reject** witnesses for

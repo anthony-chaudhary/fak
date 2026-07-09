@@ -1,3 +1,8 @@
+---
+title: "Negative fixtures — verification-ladder spec (must-reject)"
+description: "The must-reject witnesses for fak's declarable verification-ladder schema, proving the validator rejects malformed ladders alongside the positive round-trip."
+---
+
 # Negative fixtures for the verification-ladder spec
 
 These are the **must-reject** witnesses for

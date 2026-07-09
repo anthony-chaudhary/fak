@@ -1,3 +1,8 @@
+---
+title: "Negative fixtures: queried-harness-overlay schema"
+description: "The must-reject witness fixtures for the queried-harness-overlay schema - inputs the validator is required to refuse, pinned as regression tests."
+---
+
 # Negative fixtures for the queried-harness-overlay schema
 
 These are the **must-reject** witnesses for
