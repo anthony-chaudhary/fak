@@ -194,7 +194,7 @@ python tools/glm52_serving_witness.py --base-url http://127.0.0.1:8000/v1 \
 fak guard --provider openai --base-url http://127.0.0.1:8000/v1 -- claude
 ```
 
-[`tools/private GLM-5.2 stage runner`](../../tools/private GLM-5.2 stage runner) self-stages
+`tools/private GLM-5.2 stage runner` self-stages
 unsloth/GLM-5.2-GGUF UD-Q4_K_M (the published 11-shard ~466 GB dynamic-Q4 quant), builds
 llama.cpp (CUDA sm_80), launches `llama-server` with all MoE experts on host RAM, and writes
 a `PHASE` file so progress is pollable. At `GLM52_SERVE_READY` the witness + guard commands

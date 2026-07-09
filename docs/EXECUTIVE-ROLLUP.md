@@ -8,7 +8,7 @@ description: "An aggregated executive snapshot of fak: the flagship wins, the li
 _The aggregation of the most important items across fak's reports and concept docs:
 [PRODUCT-STATUS](PRODUCT-STATUS.md), [BENCHMARK-AUTHORITY](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md),
 the [AgentDojo red-team](https://github.com/anthony-chaudhary/fak/blob/main/experiments/agent-live/agentdojo-fak-fullstack-20260627.md),
-[dispatch-status](dispatch-status.md), the [GLM-5.2 cache-value packet](benchmarks/GLM52-FAK-KERNEL-CACHE-VALUE-RESULTS.md),
+[dispatch-status](https://github.com/anthony-chaudhary/fak/blob/main/docs/dispatch-status.md), the [GLM-5.2 cache-value packet](benchmarks/GLM52-FAK-KERNEL-CACHE-VALUE-RESULTS.md),
 and the industry scorecard. Synthesized by a 7-agent aggregation+critic workflow; every
 number cross-checked against the tree and carries a provenance label._
 

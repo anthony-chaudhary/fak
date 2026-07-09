@@ -19,7 +19,7 @@ date: 2026-07-02
 > The maintained answer to "where should fak be listed?" — one page so outreach is
 > tracked, deduplicated, and honest instead of scattered. This is the **map**; the
 > copy-paste submission payloads for the form/account-gated venues live in
-> [`docs/launch/directory-submissions.md`](../launch/directory-submissions.md), and the
+> [`docs/launch/directory-submissions.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/launch/directory-submissions.md), and the
 > Indian-language channel research is in
 > [`docs/notes/INDIA-I18N-DISTRIBUTION-CHANNELS-2026-07-01.md`](../notes/INDIA-I18N-DISTRIBUTION-CHANNELS-2026-07-01.md).
 > Dimension J of the [concept-popularization epic](../notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md);
@@ -108,7 +108,7 @@ tracked here so we submit the day the gate is met, not before.
 
 Programmatic ones auto-index from a committed manifest (no PR). The form/account ones
 have copy-paste payloads in
-[`docs/launch/directory-submissions.md`](../launch/directory-submissions.md) — this
+[`docs/launch/directory-submissions.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/launch/directory-submissions.md) — this
 table is the status roll-up, not a duplicate of the payloads.
 
 | Venue | Why it fits | Submission note | Status |

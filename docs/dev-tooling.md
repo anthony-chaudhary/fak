@@ -75,7 +75,7 @@ elapsed time instead of hand-ordered package lists.
 | `make test-fast` | `build` + `vet` + `go test -short ./...` (~2s smoke tier; skips the weight-backed model witnesses) | the pre-commit / pre-push floor — ~95% of logic regressions in seconds |
 | `make test` | `go test ./...` (full suite incl. the ~538 MB f32/safetensors model oracle) | the authoritative gate before you trust a model-touching change |
 | `make test-affected` | `fak affected` → `go test` for only the packages your working-tree change can reach (changed + transitive importers, test imports included) | the fast inner loop on the REAL oracle (no `-short`) for a one-leaf edit |
-| `make test-race` | `CGO_ENABLED=1 go test -short -race ./...`, cgo-preflighted (refuses on a compiler-less box rather than building a race-blind false green) | catch a data race locally instead of minutes later in CI — see [testing/race-detector.md](testing/race-detector.md) |
+| `make test-race` | `CGO_ENABLED=1 go test -short -race ./...`, cgo-preflighted (refuses on a compiler-less box rather than building a race-blind false green) | catch a data race locally instead of minutes later in CI — see [testing/race-detector.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/testing/race-detector.md) |
 | `make ci` | the full gate: `build` + `gofmt-check` + `vet` + `test` + `claims-lint` + the doc/scorecard gates | the green-bar definition the guards expect before you ship |
 
 For a single package, `go test ./internal/<pkg>/... -count=1` is the direct form

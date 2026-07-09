@@ -141,7 +141,7 @@ go test ./internal/model/ -run 'TestBatchedDecodeMatchesSerial|TestBatchFromPref
 
 **Related:** [`SESSION-VALUE-STACK-RESULTS.md`](../../benchmarks/SESSION-VALUE-STACK-RESULTS.md)
 (the full benchmark, arms, and witnesses) ·
-[`the cache cliff`](cache-cliff.md) (why the prefix-reuse win exists at all) ·
+[`the cache cliff`](../../explainers/frozen-trajectory-cache-cliff.md) (why the prefix-reuse win exists at all) ·
 [`BENCHMARK-AUTHORITY.md`](../../../BENCHMARK-AUTHORITY.md) (the central claim ledger).
 
 _Dimension H (Benchmark-as-story) of the

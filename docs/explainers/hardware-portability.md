@@ -29,7 +29,7 @@ NPU, dataflow, WASM) for fak's in-kernel forward pass. Prerequisites: familiarit
 host-CPU assumptions the `internal/compute` HAL neutralizes, how its type contract lets a
 new backend be a *registration* rather than a fork, and where each hardware class plugs in.
 Vendor-facing onboarding lives in
-[`docs/vendor/neo-silicon-onboarding.md`](../vendor/neo-silicon-onboarding.md), including the
+[`docs/vendor/neo-silicon-onboarding.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/vendor/neo-silicon-onboarding.md), including the
 minimum compiling backend example.
 
 ## 1. Why a *seam*, not a *port*

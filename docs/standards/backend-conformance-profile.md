@@ -232,7 +232,7 @@ assumption that could invalidate it.
 
 ## Related
 
-- [Neo-silicon onboarding](../vendor/neo-silicon-onboarding.md) — the vendor path
+- [Neo-silicon onboarding](https://github.com/anthony-chaudhary/fak/blob/main/docs/vendor/neo-silicon-onboarding.md) — the vendor path
   this profile is the certification step of.
 - [Hardware portability](../explainers/hardware-portability.md) — the
   `-require-non-reference` gate and the reference floor.

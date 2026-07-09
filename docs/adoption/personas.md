@@ -23,7 +23,7 @@ date: 2026-07-03
 This is dimension **E — Social proof & community** of the
 [concept-popularization epic](../notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 The roster below is the same one the
-[persona-readiness scorecard](../persona-scorecard/README.md) grades, so the
+[persona-readiness scorecard](https://github.com/anthony-chaudhary/fak/blob/main/docs/persona-scorecard/README.md) grades, so the
 personas here are the ones fak commits to serving, not an invented list. Each
 pitch is a per-audience cut of the canonical
 [pitch ladder](pitch-ladder.md); if a claim here and a claim there ever disagree,
@@ -140,7 +140,7 @@ one drop-in binary is the point.
 
 - [The pitch ladder](pitch-ladder.md) — the canonical pitch at three zoom levels,
   the source these per-persona lines are cut from.
-- [The persona-readiness scorecard](../persona-scorecard/README.md) — the inward
+- [The persona-readiness scorecard](https://github.com/anthony-chaudhary/fak/blob/main/docs/persona-scorecard/README.md) — the inward
   measure of whether each persona above can actually do their first job today.
 - [Objections and one-line answers](objections.md) — what to say after a pitch
   lands and the pushback starts.
