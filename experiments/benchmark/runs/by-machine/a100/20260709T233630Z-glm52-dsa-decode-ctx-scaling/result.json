@@ -1,0 +1,119 @@
+{
+  "$schema": "benchmark/run-result.v1",
+  "run_id": "a100-glm52-dsa-decode-ctx-scaling-20260709T233630Z",
+  "machine_id": "a100",
+  "timestamp": "2026-07-09T23:36:30Z",
+  "summary": "Synthetic GLM-5.2-shaped (glm_moe_dsa) native CUDA decode/prefill throughput vs context length on one A100 (40 GB), index-topk=256. Two collected points measure how the DSA decode/prefill paths scale with prompt length; this is NOT the real 753B GLM-5.2 model.",
+  "scope": "synthetic-weights;reduced-layers;dense-FFN(no-MoE);optimistic-lower-bound;NOT-the-753B",
+  "scope_note": "'optimistic-lower-bound' is the glm-throughput/1 tool's own token, preserved verbatim: this synthetic 8-layer dense wiring is a lower bound on the WORK the real 753B MoE must do, so the tok/s here are an optimistic UPPER bound on real-model speed (a lower bound on its latency). Do not read them as real-model throughput.",
+  "axis": "context-length (decode-prompt tokens)",
+  "box": {
+    "gpu": "1x NVIDIA A100 (40 GB, sm_80), one card of an 8-GPU datacenter server",
+    "gpu_free_gb_at_run": 5,
+    "peer_resident_gb_per_card": 35,
+    "microbench_footprint_gb": "2-3",
+    "note": "A peer job held ~35 GB resident-but-idle (0% util) on every card at run time; the ~2-3 GB microbench runs on the ~5 GB free. Mirrors manifest.json box{}."
+  },
+  "fixed_config": {
+    "layers": 8,
+    "hidden": 2048,
+    "heads": 16,
+    "inter": 8192,
+    "vocab": 8192,
+    "precision": "Q8_0",
+    "index_topk": 256,
+    "decode_steps": 64,
+    "reps": 5,
+    "backend": "cuda (tier=sm_80 class=approx)",
+    "mla_dsa": {
+      "index_dim": 128,
+      "index_heads": 16,
+      "index_topk": 256,
+      "kv_lora": 512,
+      "q_lora": 1536,
+      "qk_nope": 128,
+      "qk_rope": 64,
+      "v_head": 128
+    }
+  },
+  "curve": [
+    {
+      "prompt_len": 128,
+      "status": "collected",
+      "decode_ms_tok": 37.583,
+      "decode_tok_s": 26.61,
+      "prefill_ms": 3568.46,
+      "prefill_tok_s": 35.87,
+      "build_ms": 24295.42,
+      "real_decode_witness": true,
+      "raw": {
+        "backend": "cuda (tier=sm_80 class=approx)",
+        "build_ms": 24295.42,
+        "config": { "heads": 16, "hidden": 2048, "inter": 8192, "layers": 8, "vocab": 8192 },
+        "decode_ms_tok": 37.583,
+        "decode_steps": 64,
+        "decode_tok_s": 26.61,
+        "mla_dsa": { "index_dim": 128, "index_heads": 16, "index_topk": 256, "kv_lora": 512, "q_lora": 1536, "qk_nope": 128, "qk_rope": 64, "v_head": 128 },
+        "model": "glm_moe_dsa",
+        "precision": "Q8_0",
+        "prefill_ms": 3568.46,
+        "prefill_tok_s": 35.87,
+        "prompt_len": 128,
+        "reps": 5,
+        "schema": "glm-throughput/1",
+        "scope": "synthetic-weights;reduced-layers;dense-FFN(no-MoE);optimistic-lower-bound;NOT-the-753B"
+      }
+    },
+    {
+      "prompt_len": 512,
+      "status": "collected",
+      "decode_ms_tok": 47.839,
+      "decode_tok_s": 20.9,
+      "prefill_ms": 20691.61,
+      "prefill_tok_s": 24.74,
+      "build_ms": 23520.74,
+      "real_decode_witness": true,
+      "raw": {
+        "backend": "cuda (tier=sm_80 class=approx)",
+        "build_ms": 23520.74,
+        "config": { "heads": 16, "hidden": 2048, "inter": 8192, "layers": 8, "vocab": 8192 },
+        "decode_ms_tok": 47.839,
+        "decode_steps": 64,
+        "decode_tok_s": 20.9,
+        "mla_dsa": { "index_dim": 128, "index_heads": 16, "index_topk": 256, "kv_lora": 512, "q_lora": 1536, "qk_nope": 128, "qk_rope": 64, "v_head": 128 },
+        "model": "glm_moe_dsa",
+        "precision": "Q8_0",
+        "prefill_ms": 20691.61,
+        "prefill_tok_s": 24.74,
+        "prompt_len": 512,
+        "reps": 5,
+        "schema": "glm-throughput/1",
+        "scope": "synthetic-weights;reduced-layers;dense-FFN(no-MoE);optimistic-lower-bound;NOT-the-753B"
+      }
+    },
+    {
+      "prompt_len": 2048,
+      "status": "aborted",
+      "reason": "O(n^2) prefill x 5 reps ~= 15-20 min/point under the un-optimized synthetic kernel; aborted to free the shared GPU. No numbers collected."
+    }
+  ],
+  "derived": {
+    "note": "Derived purely from the two collected points above.",
+    "context_multiple": 4,
+    "decode_ms_tok_from": 37.583,
+    "decode_ms_tok_to": 47.839,
+    "decode_ms_tok_delta_pct": 27.3,
+    "decode_tok_s_from": 26.61,
+    "decode_tok_s_to": 20.9,
+    "prefill_wall_ms_from": 3568.46,
+    "prefill_wall_ms_to": 20691.61,
+    "prefill_wall_multiple": 5.8,
+    "prefill_tok_s_from": 35.87,
+    "prefill_tok_s_to": 24.74
+  },
+  "limitations": [
+    "Only two context points (128, 512) were collected; the 2048 point was aborted for cost. A two-point curve shows direction, not a fitted scaling law.",
+    "An earlier same-node size sweep (varying layers/hidden) produced additional points, but its raw records lived only on the box and were deleted during cleanup, so they are deliberately NOT transcribed here (no reconstruction from memory).",
+    "Synthetic weights, 8 layers, dense FFN (no MoE), NOT the 753B GLM-5.2. Numbers characterize the CUDA decode/prefill wiring and its context scaling, not model quality or real-model throughput."
+  ]
+}

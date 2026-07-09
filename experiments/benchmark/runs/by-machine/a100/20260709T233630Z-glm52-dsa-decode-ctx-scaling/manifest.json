@@ -1,0 +1,80 @@
+{
+  "$schema": "benchmark/run-manifest.v1",
+  "run_id": "a100-glm52-dsa-decode-ctx-scaling-20260709T233630Z",
+  "machine_id": "a100",
+  "timestamp": "2026-07-09T23:36:30Z",
+  "git": {
+    "rev": "605a37590",
+    "branch": "main",
+    "dirty": true,
+    "note": "rev is the authoring tree HEAD. The benchmark itself ran on the box from a fresh `git clone --depth 1` of origin/main at run time; the exact box commit was not captured."
+  },
+  "harness": {
+    "name": "fak-dgx-glm-throughput",
+    "version": "1"
+  },
+  "model": {
+    "name": "glm_moe_dsa (synthetic)",
+    "family": "glm_moe_dsa",
+    "precision": "Q8_0",
+    "scope": "synthetic-weights;reduced-layers;dense-FFN(no-MoE);optimistic-lower-bound;NOT-the-753B",
+    "note": "cmd/glmdsatput builds synthetic GLM-5.2-shaped weights (8 layers, dense FFN, no MoE routing) and benchmarks the native CUDA decode/prefill path. This is a kernel-wiring + shape-scaling witness, NOT a measurement of the real 753B GLM-5.2 checkpoint. Treat every tok/s as an optimistic lower bound for the wiring, not a model result."
+  },
+  "config": {
+    "backend": "cuda (tier=sm_80 class=approx)",
+    "gpu": "1x NVIDIA A100 (40 GB, sm_80)",
+    "layers": 8,
+    "hidden": 2048,
+    "heads": 16,
+    "inter": 8192,
+    "vocab": 8192,
+    "precision": "Q8_0",
+    "index_topk": 256,
+    "mla_dsa": {
+      "index_dim": 128,
+      "index_heads": 16,
+      "index_topk": 256,
+      "kv_lora": 512,
+      "q_lora": 1536,
+      "qk_nope": 128,
+      "qk_rope": 64,
+      "v_head": 128
+    },
+    "decode_steps": 64,
+    "decode_reps": 5,
+    "prefill_reps": 5,
+    "decode_prompt_sweep_collected": [128, 512],
+    "decode_prompt_attempted": [128, 512, 2048],
+    "glmdsatput_cmd": "cmd/glmdsatput -backend cuda -json -layers 8 -hidden 2048 -heads 16 -inter 8192 -index-topk 256 -decode-prompt <P> -decode-steps 64 -decode-reps 5"
+  },
+  "method": "One A100 (40 GB) card of an 8-GPU datacenter server. cmd/glmdsatput was built once (sm_80 libfakcuda.a) and invoked per context length, varying only -decode-prompt. Each point reports the median over 5 reps for decode (64 steps) and prefill. The axis under test is context length (prompt tokens fed before decode); everything else is held fixed. Measures how the DSA (MLA + sparse top-k index) decode and prefill paths scale with prompt length.",
+  "box": {
+    "gpu": "1x NVIDIA A100 (40 GB, sm_80), one card of an 8-GPU datacenter server",
+    "gpu_free_gb_at_run": 5,
+    "note": "A peer job held ~35 GB resident-but-idle (0% util) on every card at run time, leaving ~5 GB free per card. The single-GPU synthetic microbench (~2-3 GB) runs cleanly on top; this is also why the 32-layer size configs OOM on this node."
+  },
+  "findings": [
+    "DSA decode is NOT context-flat: per-token decode rose 37.583 -> 47.839 ms/tok (+27.3%) as decode-prompt went 128 -> 512 (4x), even with index-topk=256 sparse selection. Measured fact is the +27.3% rise; a plausible (not proven by this 2-point run) mechanism is that the top-k indexer still scans the full KV each decode step, so decode cost grows with context even though sparsity caps the attention math.",
+    "Prefill degrades super-linearly: prefill wall rose 3568 -> 20692 ms (5.8x) for a 4x longer prompt; prefill throughput fell 35.87 -> 24.74 tok/s, consistent with O(n^2) attention over the prompt.",
+    "decode-prompt 2048 (and beyond) was not collected: O(n^2) prefill x 5 reps makes each long-context point ~15-40 min under this un-optimized synthetic kernel, so the sweep was capped at 512 to free the shared GPU."
+  ],
+  "tags": [
+    "gpu",
+    "a100",
+    "ampere",
+    "sm_80",
+    "glm52",
+    "dsa",
+    "sparse-attention",
+    "context-scaling",
+    "synthetic",
+    "optimistic-lower-bound",
+    "not-753b",
+    "decode",
+    "prefill"
+  ],
+  "artifacts": {
+    "result": "result.json",
+    "notes": "RESULTS.md"
+  }
+}
