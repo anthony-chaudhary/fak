@@ -278,6 +278,17 @@ func classifyRow(acctDir, product, account string, pol Policy, acctIdx accountsR
 		base.Reason = "tombstoned (.DELETED marker)"
 		return base
 	}
+	// Intrinsic dogfood exclusion: the `.claude-faklocal*` homes are the fak-kernel
+	// dogfood dirs — synthesized on demand by Resolve(--faklocal-ok), never an enrolled
+	// account. They carry no login and only exist to point Claude Code at a locally
+	// served model, so a credential-less `needs_login` row for one just clutters the
+	// switcher roster. Keep them off it the way a .DELETED marker does; the dogfood
+	// resolve path bypasses discovery entirely, so nothing that depends on it regresses.
+	if strings.HasPrefix(strings.ToLower(account), ".claude-faklocal") {
+		base.Kind = KindExcluded
+		base.Reason = "fak-kernel dogfood home (synthesized on demand; not a roster account)"
+		return base
+	}
 	id := Identity{}
 	if product == "claude" {
 		id = ReadAccountIdentity(acctDir)

@@ -1417,6 +1417,17 @@ def _classify_row(acct_dir: str, product: str, account: str, pol: dict,
     if ".deleted" in account.lower():
         return {"dir": acct_dir, "product": product, "account": account, "tag": tag,
                 "kind": "excluded", "reason": "tombstoned (.DELETED marker)", "notes": note}
+    # Intrinsic dogfood exclusion: the `.claude-faklocal*` homes are the fak-kernel
+    # dogfood dirs -- synthesized on demand by `resolve --faklocal-ok`, never an enrolled
+    # account. They hold no login and only point Claude Code at a locally served model, so
+    # a credential-less `needs_login` row for one only clutters the switcher roster. Keep
+    # them off it the way a .DELETED marker does; the dogfood resolve path bypasses
+    # discovery entirely, so nothing that depends on it regresses.
+    if account.lower().startswith(".claude-faklocal"):
+        return {"dir": acct_dir, "product": product, "account": account, "tag": tag,
+                "kind": "excluded",
+                "reason": "fak-kernel dogfood home (synthesized on demand; not a roster account)",
+                "notes": note}
     identity = read_account_identity(acct_dir) if product == "claude" else {}
     registry_reason = _accounts_registry_exclusion(
         {"dir": acct_dir, "product": product, "account": account, "tag": tag,

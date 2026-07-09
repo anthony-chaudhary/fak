@@ -101,6 +101,23 @@ class FleetAccountsTest(unittest.TestCase):
         self.assertEqual(by_account[".claude-monitor"]["kind"], "non-account")
         self.assertEqual(by_account[".claude.json"]["kind"], "non-account")
 
+    def test_discover_accounts_excludes_faklocal_dogfood_homes(self) -> None:
+        # The fak-kernel dogfood homes are synthesized on demand by
+        # `resolve --faklocal-ok`, never enrolled accounts, so discovery keeps them
+        # off the switcher roster even with a projects/ subdir — while a normal seat
+        # beside them stays a worker (the exclusion is not over-broad).
+        account_dir(self.home, ".claude-faklocal")
+        account_dir(self.home, ".claude-faklocal-netra")
+        account_dir(self.home, ".claude-gem8-acct")
+
+        rows = fleet_accounts.discover_accounts(str(self.home),
+                                                config_home=str(self.config_home))
+        by_account = {r["account"]: r for r in rows}
+
+        self.assertEqual(by_account[".claude-faklocal"]["kind"], "excluded")
+        self.assertEqual(by_account[".claude-faklocal-netra"]["kind"], "excluded")
+        self.assertEqual(by_account[".claude-gem8-acct"]["kind"], "worker")
+
     def test_policy_exclude_matches_claude_login_email(self) -> None:
         login_dir(self.home, ".claude", uuid="uuid-day28",
                   email="day28@example.com")
