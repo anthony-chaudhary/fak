@@ -32,6 +32,7 @@ type BinaryReport struct {
 	Images           []BinaryImage          `json:"images"`
 	Processes        []BinaryProcess        `json:"processes,omitempty"`
 	ProcessScanError string                 `json:"process_scan_error,omitempty"`
+	PathBinaries     []PathBinary           `json:"path_binaries,omitempty"`
 	Recommendations  []BinaryRecommendation `json:"recommendations"`
 	Findings         int                    `json:"findings"`
 }

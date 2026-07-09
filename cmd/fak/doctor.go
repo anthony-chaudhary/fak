@@ -12,12 +12,18 @@ package main
 // also composes as a CI gate over a captured answer.
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/answershape"
@@ -91,6 +97,19 @@ func runDoctor(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 			rep.Findings++
 		}
 
+		// The sibling checks above only see fak/fak.exe next to the running exe. They are
+		// blind to the most common "my fak is old / a different folder shows a different
+		// version" failure: a stale, often UNSTAMPED fak early on PATH (e.g. ~/bin)
+		// shadowing a fresh build later on PATH (~/go/bin or a checkout). Scan the whole
+		// PATH in resolution order, read each binary's OWN embedded stamp, and judge the
+		// one that actually wins when you type `fak`.
+		rep.PathBinaries = scanPathBinaries(exe)
+		pathRec := appversion.PathShadowRecommendation(rep.PathBinaries)
+		rep.Recommendations = append(rep.Recommendations, pathRec)
+		if pathRec.Severity == appversion.SeverityWarn {
+			rep.Findings++
+		}
+
 		if *asJSON {
 			b, _ := json.MarshalIndent(rep, "", "  ")
 			fmt.Fprintln(stdout, string(b))
@@ -159,12 +178,25 @@ func writeBinaryDoctorHuman(w io.Writer, rep appversion.BinaryReport) {
 			fmt.Fprintf(w, "  [%s] pid=%d %s sha=%s%s\n", tag, p.PID, p.Path, shortHash(p.SHA256), suffix)
 		}
 	}
+	if len(rep.PathBinaries) > 0 {
+		fmt.Fprintln(w, "fak on PATH (resolution order — rank 0 is what `fak` runs):")
+		for _, b := range rep.PathBinaries {
+			tag := "shadowed"
+			if b.Winner {
+				tag = "WINNER  "
+			}
+			fmt.Fprintf(w, "  [%s] #%d %s  %s\n", tag, b.Rank, b.Path, appversionPathAge(b))
+		}
+		fmt.Fprintln(w, "  note: `fak version` line 1 is read from the working directory's VERSION file, not the binary —")
+		fmt.Fprintln(w, "        so the SAME binary prints different versions from different folders. The commit/date above is")
+		fmt.Fprintln(w, "        the binary's own build stamp; that is the reliable identity.")
+	}
 	for _, r := range rep.Recommendations {
 		tag := "OK  "
 		if r.Severity == appversion.SeverityWarn {
 			tag = "WARN"
 		}
-		fmt.Fprintf(w, "[%s] %-14s %s\n", tag, r.Check, r.Finding)
+		fmt.Fprintf(w, "[%s] %-18s %s\n", tag, r.Check, r.Finding)
 		if r.Recommend != "" {
 			fmt.Fprintf(w, "       recommend: %s\n", r.Recommend)
 		}
@@ -174,6 +206,174 @@ func writeBinaryDoctorHuman(w io.Writer, rep appversion.BinaryReport) {
 	} else {
 		fmt.Fprintf(w, "doctor: %d finding(s)\n", rep.Findings)
 	}
+}
+
+// appversionPathAge renders a PATH binary's identity for the human doctor line:
+// its commit+date when stamped (with a +uncommitted marker), or an explicit
+// "UNSTAMPED" tag plus the file mtime when it carries no VCS provenance — so an
+// unstamped binary never reads as if it had a known commit. A read failure is
+// surfaced rather than hidden.
+func appversionPathAge(b appversion.PathBinary) string {
+	if b.StampError != "" {
+		return fmt.Sprintf("size=%d (stamp unreadable: %s)", b.Size, b.StampError)
+	}
+	if b.Stamped {
+		short := b.Commit
+		if len(short) > 12 {
+			short = short[:12]
+		}
+		s := "commit=" + short
+		if b.CommitTime != "" {
+			s += " built=" + b.CommitTime
+		}
+		if b.Dirty {
+			s += " +uncommitted"
+		}
+		return s
+	}
+	s := "UNSTAMPED (cannot attest commit)"
+	if b.ModTime != "" {
+		s += " file-mtime=" + b.ModTime
+	}
+	return s
+}
+
+// scanPathBinaries enumerates every fak/fak.exe resolvable on PATH, in resolution
+// order, reading each one's OWN embedded build stamp. The stamp is what tells a
+// stale binary from a current one: `fak version` line 1 is resolved from the
+// working directory's VERSION file (appversion.Current), so it looks current even
+// on an ancient binary — only the VCS stamp travels with the binary. The current
+// exe is read in-process (no exec); every other candidate self-reports via
+// `<path> version --json`, timed so a wedged binary cannot hang the doctor.
+func scanPathBinaries(exe string) []appversion.PathBinary {
+	names := []string{"fak"}
+	if runtime.GOOS == "windows" {
+		// PowerShell resolves `fak` to fak.exe, so the .exe is what actually runs; list it first.
+		names = []string{"fak.exe", "fak"}
+	}
+	dirs := filepath.SplitList(os.Getenv("PATH"))
+	probe := func(path string) (appversion.PathBinary, bool) {
+		st, err := os.Stat(path)
+		if err != nil || st.IsDir() {
+			return appversion.PathBinary{}, false
+		}
+		e := appversion.PathBinary{
+			Size:    st.Size(),
+			ModTime: st.ModTime().UTC().Format(time.RFC3339),
+		}
+		id, ok := readBinaryIdentityStamp(path, exe)
+		if !ok {
+			e.StampError = "could not read `version --json`"
+			return e, true
+		}
+		e.Commit = id.Commit
+		e.CommitTime = id.CommitTime
+		e.Dirty = id.Dirty
+		e.Stamped = id.Stamped
+		e.AppVersion = id.AppVersion
+		return e, true
+	}
+	return appversion.ScanPathForFak(dirs, names, probe)
+}
+
+// pathIdentity is the subset of `fak version --json` scanPathBinaries needs.
+type pathIdentity struct {
+	AppVersion string `json:"app_version"`
+	Commit     string `json:"commit"`
+	CommitTime string `json:"commit_time"`
+	Dirty      bool   `json:"dirty"`
+	Stamped    bool   `json:"stamped"`
+}
+
+// readBinaryIdentityStamp returns the build identity of the fak binary at path.
+// For the running exe it reads the in-process VCS stamp (reliable, no exec); for
+// any other path it execs `<path> version --json` with a short timeout and parses
+// the identity. A binary too old to emit `version --json`, or one that errors,
+// yields ok=false so the caller records a read error instead of a false stamp.
+func readBinaryIdentityStamp(path, exe string) (pathIdentity, bool) {
+	absPath, _ := filepath.Abs(filepath.Clean(path))
+	absExe, _ := filepath.Abs(filepath.Clean(exe))
+	if strings.EqualFold(absPath, absExe) {
+		s := binstamp.Self()
+		id := pathIdentity{AppVersion: appversion.Current(), Commit: s.Revision, Dirty: s.Dirty, Stamped: s.HasVCS && s.Revision != ""}
+		if bi, ok := debug.ReadBuildInfo(); ok {
+			for _, kv := range bi.Settings {
+				if kv.Key == "vcs.time" {
+					id.CommitTime = kv.Value
+				}
+			}
+		}
+		return id, true
+	}
+	if out, ok := runBinaryVersion(path, "version", "--json"); ok {
+		var id pathIdentity
+		if json.Unmarshal([]byte(out), &id) == nil && (id.Stamped || strings.TrimSpace(id.AppVersion) != "") {
+			return id, true
+		}
+	}
+	// Fallback for binaries too old to support `version --json`: they print the human
+	// `version` output regardless of the flag, so parse the "build:" line. This keeps a
+	// stamped-but-ancient fak reporting its real commit + date instead of "unreadable".
+	if out, ok := runBinaryVersion(path, "version"); ok {
+		if id, ok := parseHumanVersion(out); ok {
+			return id, true
+		}
+	}
+	return pathIdentity{}, false
+}
+
+// runBinaryVersion execs `<path> <args…>` with a short timeout and returns stdout.
+// A nonzero exit or timeout yields ok=false so the caller can fall back or record
+// a read error rather than trust partial output.
+func runBinaryVersion(path string, args ...string) (string, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, path, args...).Output()
+	if err != nil {
+		return "", false
+	}
+	return string(out), true
+}
+
+// parseHumanVersion extracts identity from the 3-line human `fak version` output
+// ("<app-version>" / "build: <rev>[ +uncommitted]  (committed <time>)" / "go: …").
+// It is the fallback path for binaries predating `version --json`. A "build:" line
+// with no comparable revision ("module vX" / "(no VCS stamp …)") yields an
+// unstamped-but-read identity so the app version is still reported.
+func parseHumanVersion(out string) (pathIdentity, bool) {
+	lines := strings.Split(out, "\n")
+	if len(lines) == 0 {
+		return pathIdentity{}, false
+	}
+	id := pathIdentity{AppVersion: strings.TrimSpace(lines[0])}
+	sawBuild := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "build:") {
+			continue
+		}
+		sawBuild = true
+		rest := strings.TrimSpace(strings.TrimPrefix(line, "build:"))
+		id.Dirty = strings.Contains(rest, "+uncommitted")
+		if i := strings.Index(rest, "(committed "); i >= 0 {
+			if j := strings.Index(rest[i:], ")"); j >= 0 {
+				id.CommitTime = strings.TrimSpace(rest[i+len("(committed ") : i+j])
+			}
+		}
+		fields := strings.Fields(rest)
+		if len(fields) > 0 {
+			rev := fields[0]
+			if rev != "" && rev != "module" && rev != "(no" {
+				id.Commit = rev
+				id.Stamped = true
+			}
+		}
+		break
+	}
+	if !sawBuild && strings.TrimSpace(id.AppVersion) == "" {
+		return pathIdentity{}, false
+	}
+	return id, true
 }
 
 func shortHash(h string) string {
