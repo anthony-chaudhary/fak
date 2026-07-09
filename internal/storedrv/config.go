@@ -129,6 +129,21 @@ func buildDriver(tok string) (Driver, bool, error) {
 		if dir == "" {
 			return nil, false, fmt.Errorf("storedrv: disk tier needs a path (disk:/path) or FAK_BLOB_DIR")
 		}
+		// A comma-separated root list opts into the validated multi-root spill sharder:
+		// worker_id (FAK_STORE_WORKER) % len(roots) picks THIS worker's mount and every
+		// root is eagerly created at construction, so KV spill fans across mounts instead
+		// of piling onto one disk. A single path stays the single-root store, byte-identical.
+		if strings.Contains(dir, ",") {
+			sh, err := NewSpillSharder(strings.Split(dir, ","))
+			if err != nil {
+				return nil, false, fmt.Errorf("storedrv: disk tier: %w", err)
+			}
+			d, err := sh.DiskDriver(storeWorkerID())
+			if err != nil {
+				return nil, false, fmt.Errorf("storedrv: disk tier: %w", err)
+			}
+			return d, true, nil
+		}
 		s, err := blobfs.New(dir)
 		if err != nil {
 			return nil, false, fmt.Errorf("storedrv: disk tier: %w", err)
@@ -159,6 +174,18 @@ func storedrvSecretLoader() *secretload.Loader {
 func blobHTTPBearerToken() string {
 	v, _ := storedrvSecretLoader().Lookup(blobHTTPTokenEnv)
 	return v
+}
+
+// storeWorkerID reads this process's worker index for the multi-root spill sharder
+// from FAK_STORE_WORKER (default 0 when unset or non-numeric). It selects which shard
+// root a disk tier configured with a comma-separated root list assigns to this worker.
+func storeWorkerID() int {
+	if v := strings.TrimSpace(os.Getenv("FAK_STORE_WORKER")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return 0
 }
 
 func boolEnv(key string) bool {
