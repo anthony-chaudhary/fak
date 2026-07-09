@@ -160,6 +160,25 @@ func TestVCacheGovernorKeepBit(t *testing.T) {
 	}
 }
 
+// TestVCacheGovernorKeepBitCoversEveryVerdict reserves the fail-closed default for genuinely
+// UNKNOWN verdicts. Every decision the governor can emit must be scored on purpose: teach
+// vcachegov a new verdict without teaching the keep-bit switch about it and that verdict
+// would score 0 on every row, dragging the metric toward zero with no build error and no
+// failing test. This turns that silent collapse into a red test.
+func TestVCacheGovernorKeepBitCoversEveryVerdict(t *testing.T) {
+	for _, d := range vcacheGovernorDecisionOrder {
+		rec := vcacheGovernorDecisionRecord{Decision: string(d)}
+		if _, recognized := vcacheGovernorKeepBitOK(rec); !recognized {
+			t.Fatalf("verdict %q is not scored by the keep-bit switch — it would silently fail closed", d)
+		}
+	}
+	for _, unknown := range []string{"teleport", ""} {
+		if _, recognized := vcacheGovernorKeepBitOK(vcacheGovernorDecisionRecord{Decision: unknown}); recognized {
+			t.Fatalf("verdict %q must NOT be recognized", unknown)
+		}
+	}
+}
+
 // TestVCacheGovernorQualityDeterministic — the metric is a pure function of the rows, so
 // scoring the same window twice cannot drift. Without this the score is unfalsifiable.
 func TestVCacheGovernorQualityDeterministic(t *testing.T) {

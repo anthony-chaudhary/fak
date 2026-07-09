@@ -1,5 +1,7 @@
 package gateway
 
+import "github.com/anthony-chaudhary/fak/internal/vcachegov"
+
 // vcache_governor_quality.go -- the verdict-quality metric over the live M5 governor
 // journal (#1492).
 //
@@ -92,21 +94,36 @@ func verifyVCacheGovernorChain(records []vcacheGovernorDecisionRecord) (breakSeq
 // decision implies agrees with the cache activity the row actually witnessed. It reads
 // only hashed fields, so it cannot be re-derived more favourably after the fact.
 func vcacheGovernorKeepBit(r vcacheGovernorDecisionRecord) bool {
+	keep, _ := vcacheGovernorKeepBitOK(r)
+	return keep
+}
+
+// vcacheGovernorKeepBitOK is vcacheGovernorKeepBit plus the recognized bit, so a test can
+// assert that every verdict vcachegov can emit is scored on purpose rather than silently
+// swept into the fail-closed default.
+//
+// The switch matches vcachegov's own GovernorDecision constants, never the raw strings the
+// journal happens to hold today. The journal stores the decision as a string, so a literal
+// switch would keep compiling if a constant's value were ever changed or a verdict renamed —
+// every row would then fall to the default and the score would collapse to 0.0 with no
+// build error. Binding to the constants makes that a compile-time concern, and the
+// companion coverage test turns a NEW verdict into a red test rather than a silent zero.
+func vcacheGovernorKeepBitOK(r vcacheGovernorDecisionRecord) (keep, recognized bool) {
 	warm := r.CacheReadTokens > 0
-	switch r.Decision {
-	case "ride_natural", "heartbeat_pin":
+	switch vcachegov.GovernorDecision(r.Decision) {
+	case vcachegov.DecisionRideNatural, vcachegov.DecisionHeartbeatPin:
 		// Meant to be held warm — a read is the vindication.
-		return warm
-	case "lazy_rebuild", "evict":
+		return warm, true
+	case vcachegov.DecisionLazyRebuild, vcachegov.DecisionEvict:
 		// Meant to lapse — a read means the governor gave up a prefix that was still hot.
-		return !warm
-	case "no_cache", "explicit_cache":
+		return !warm, true
+	case vcachegov.DecisionNoCache, vcachegov.DecisionExplicitCache:
 		// Law D4: never implicitly warmed. Any read OR create on this family is a breach
 		// of the posture, not merely a missed saving.
-		return !warm && r.CacheCreationTokens == 0
+		return !warm && r.CacheCreationTokens == 0, true
 	default:
 		// Fail-closed: an unrecognized verdict is never credited.
-		return false
+		return false, false
 	}
 }
 
