@@ -73,13 +73,14 @@ Filed **epic #3352** *fault-tolerant in-flight session migration* (milestone M1)
 | #3355 | replay-safety precondition guard (fail-closed) | `lib/llm/src/migration.rs:214@be36b52396` | `internal/resume/stopped/stopped.go:245` |
 | #3356 | silence-is-failure hung-worker detection | `lib/runtime/src/health_check.rs:99` + `.../egress/push_router.rs:1547@be36b52396` | `cmd/fak/watchdog_autoheal.go:464` + `internal/gateway/messages_stream_passthrough.go:341` |
 
-## Deferred (available for a Broad follow-on pass, not filed)
+## Filed — Broad follow-on pass (epic #3365)
 
-Real PARTIAL borrows held back to keep this pass focused; each is a small ship-alone leaf if wanted:
+The remaining PARTIAL borrows, filed as small ship-alone leaves under **epic #3365** (M9),
+cross-linked to #1333 (scaling) and #750 (liveness):
 
-- **Autoscaler control laws (→ M9):** two-timescale predictive-floor + reactive-clamp (#11), consolidation-aware scale-down veto (#12), settle-before-redecide gate (#13), dual-cadence lazy pull (#14).
-- **Registry / lease liveness:** lease-keyed registration cascade-delete on disconnect (#20), soft-evict + reconciler re-admission (#21), coalesced single-watch discovery (#23), register-verify-rollback TOCTOU guard (#24).
-- **Telemetry hygiene:** change-gated + debounced load publish (#25), hysteretic anti-flap overload latch (#29).
+- **Track A — autoscaler control laws:** two-timescale predictive-floor + reactive-clamp (**#3368**), consolidation-aware scale-down veto (**#3369**), settle-before-redecide gate (**#3370**), dual-cadence lazy pull (**#3371**).
+- **Track B — worker liveness & registration:** lease-keyed registration cascade-delete on disconnect (**#3372**), soft-evict + reconciler re-admission (**#3373**), coalesced single-watch discovery (**#3374**), register-verify-rollback TOCTOU guard (**#3375**).
+- **Track C — load-signal hygiene:** change-gated + debounced load publish (**#3376**), hysteretic anti-flap overload latch (**#3377**).
 
 ## Full candidate table
 
@@ -95,25 +96,25 @@ Real PARTIAL borrows held back to keep this pass focused; each is a small ship-a
 | 8 | session-affinity | Opportunistic affinity (record the LB choice) | `lib/llm/src/session_affinity/push_router.rs:326-333@be36b52396` | PARTIAL | inspire | enriched #2037 |
 | 9 | session-affinity | Availability re-check + one-shot invalidate-and-rebind | `lib/llm/src/session_affinity/push_router.rs:112-124@be36b52396` | PARTIAL | inspire | enriched #2037 |
 | 10 | session-affinity | Idle-reaper GC of pin table + bounded reservation cap | `lib/llm/src/session_affinity/coordinator.rs:137-149@be36b52396` | PARTIAL | inspire | enriched #2037 |
-| 11 | planner-autoscaler | Two-timescale control: slow loop sets FLOOR, fast clamps up | `components/src/dynamo/planner/core/throughput_scaling.py:52@be36b52396` | PARTIAL | inspire | deferred (M9 autoscaler) |
-| 12 | planner-autoscaler | Consolidation-aware scale-down veto (re-predict survivors) | `components/src/dynamo/planner/core/load_scaling.py:549@be36b52396` | PARTIAL | inspire | deferred (M9 autoscaler) |
-| 13 | planner-autoscaler | Settle-before-redecide gate (expected≠ready ⇒ hold) | `components/src/dynamo/planner/core/state_machine.py:334@be36b52396` | PARTIAL | inspire | deferred (M9 autoscaler) |
-| 14 | planner-autoscaler | Dual-cadence pipeline with lazy expensive-observation pull | `components/src/dynamo/planner/plugins/orchestrator/engine_adapter.py:822@be36b52396` | PARTIAL | inspire | deferred (M9 autoscaler) |
+| 11 | planner-autoscaler | Two-timescale control: slow loop sets FLOOR, fast clamps up | `components/src/dynamo/planner/core/throughput_scaling.py:52@be36b52396` | PARTIAL | inspire | filed #3368 |
+| 12 | planner-autoscaler | Consolidation-aware scale-down veto (re-predict survivors) | `components/src/dynamo/planner/core/load_scaling.py:549@be36b52396` | PARTIAL | inspire | filed #3369 |
+| 13 | planner-autoscaler | Settle-before-redecide gate (expected≠ready ⇒ hold) | `components/src/dynamo/planner/core/state_machine.py:334@be36b52396` | PARTIAL | inspire | filed #3370 |
+| 14 | planner-autoscaler | Dual-cadence pipeline with lazy expensive-observation pull | `components/src/dynamo/planner/plugins/orchestrator/engine_adapter.py:822@be36b52396` | PARTIAL | inspire | filed #3371 |
 | 15 | fault-tolerance-migration | Transparent in-flight migration (replay delivered output) | `lib/llm/src/migration.rs:342@be36b52396` | PARTIAL | inspire | filed #3353 |
 | 16 | fault-tolerance-migration | Closed migratable/non-migratable error classification | `lib/llm/src/migration.rs:59@be36b52396` | PARTIAL | inspire | filed #3354 |
 | 17 | fault-tolerance-migration | Resume-safety precondition guard (fail-closed) | `lib/llm/src/migration.rs:214@be36b52396` | PARTIAL | inspire | filed #3355 |
 | 18 | fault-tolerance-migration | Passive-first liveness with activity-reset canary | `lib/runtime/src/health_check.rs:99@be36b52396` | PARTIAL | inspire | filed #3356 |
 | 19 | fault-tolerance-migration | Silence-is-failure inactivity timeout ⇒ quarantine + retry | `lib/runtime/src/pipeline/network/egress/push_router.rs:1547@be36b52396` | PARTIAL | inspire | filed #3356 |
-| 20 | runtime-discovery-registry | Lease-keyed registration, cascade-delete on disconnect | `lib/runtime/src/storage/kv/etcd.rs:51-52@be36b52396` | PARTIAL | inspire | deferred (registry liveness) |
-| 21 | runtime-discovery-registry | Soft-eviction + periodic reconciler re-admission | `lib/runtime/src/component/client.rs:611-659@be36b52396` | PARTIAL | inspire | deferred (registry liveness) |
+| 20 | runtime-discovery-registry | Lease-keyed registration, cascade-delete on disconnect | `lib/runtime/src/storage/kv/etcd.rs:51-52@be36b52396` | PARTIAL | inspire | filed #3372 |
+| 21 | runtime-discovery-registry | Soft-eviction + periodic reconciler re-admission | `lib/runtime/src/component/client.rs:611-659@be36b52396` | PARTIAL | inspire | filed #3373 |
 | 22 | runtime-discovery-registry | Three-tier worker state (fault vs backpressure separate) | `lib/runtime/src/component/client.rs:193-331@be36b52396` | PRESENT | inspire | DROP (PRESENT) |
-| 23 | runtime-discovery-registry | Coalesced single-watch discovery source (ref-counted) | `lib/runtime/src/component/client.rs:672-752@be36b52396` | PARTIAL | inspire | deferred (registry liveness) |
-| 24 | runtime-discovery-registry | Register-verify-rollback optimistic conflict detection | `lib/runtime/src/discovery/mod.rs:789-844@be36b52396` | PARTIAL | inspire | deferred (registry liveness) |
-| 25 | load-telemetry | Change-gated + debounced per-worker load publish | `lib/llm/src/kv_router/publisher/worker_metrics.rs:92@be36b52396` | PARTIAL | inspire | deferred (telemetry hygiene) |
+| 23 | runtime-discovery-registry | Coalesced single-watch discovery source (ref-counted) | `lib/runtime/src/component/client.rs:672-752@be36b52396` | PARTIAL | inspire | filed #3374 |
+| 24 | runtime-discovery-registry | Register-verify-rollback optimistic conflict detection | `lib/runtime/src/discovery/mod.rs:789-844@be36b52396` | PARTIAL | inspire | filed #3375 |
+| 25 | load-telemetry | Change-gated + debounced per-worker load publish | `lib/llm/src/kv_router/publisher/worker_metrics.rs:92@be36b52396` | PARTIAL | inspire | filed #3376 |
 | 26 | load-telemetry | Blend reported load + own in-flight dispatched count | `lib/kv-router/src/sequences/prompt_registry.rs:41@be36b52396` | PRESENT | inspire | DROP (PRESENT) |
 | 27 | load-telemetry | Routing cost = load·(queued − warm_credit) + in_flight (=#1+#2) | `lib/kv-router/src/scheduling/selector.rs:196@be36b52396` | PARTIAL | inspire | enriched #2238 |
 | 28 | load-telemetry | Softmax-temperature spread across near-equal workers | `lib/kv-router/src/scheduling/selector.rs:65@be36b52396` | PARTIAL | inspire | enriched #2238 |
-| 29 | load-telemetry | Hysteretic, change-gated anti-flap overload latch | `lib/llm/src/discovery/worker_monitor.rs:264@be36b52396` | PARTIAL | inspire | deferred (telemetry hygiene) |
+| 29 | load-telemetry | Hysteretic, change-gated anti-flap overload latch | `lib/llm/src/discovery/worker_monitor.rs:264@be36b52396` | PARTIAL | inspire | filed #3377 |
 
 ## Honest limits
 
@@ -126,7 +127,7 @@ Real PARTIAL borrows held back to keep this pass focused; each is a small ship-a
 
 ## Companions
 
-- Filed: epic **#3352** → leaves **#3353–#3356** (M1 durable sessions).
+- Filed: epic **#3352** → leaves **#3353–#3356** (M1 durable sessions); epic **#3365** → leaves **#3368–#3377** (M9 dispatch fleet control/liveness/telemetry).
 - Enriched: **#2238** (KV-aware routing), **#1913** (agentic-first scheduling, epic #1911), **#2037**
   (prompt-cache-affinity routing).
 - Skills: [`study-repo`](../../.claude/skills/study-repo/SKILL.md) (this pass),
