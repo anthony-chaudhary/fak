@@ -31,6 +31,12 @@ import (
 //	   non-test sources and asserts os/exec is imported ONLY by the seam file
 //	   (toolexec.go). A future direct exec.Command added to the host/loop trips
 //	   this guard.
+//	3. Scope item 3, "register backends by name so the isolation dial (M13) can
+//	   SELECT per trust level."  -> TestSeamRegistryRoundTripsBackendNameByName
+//	   drives the by-name registry for EVERY registered backend and asserts the
+//	   built executor's BackendName() round-trips the requested name — the dial
+//	   gets (and can record) the tier it asked for, never a silently-substituted
+//	   weaker one.
 //
 // Generation frame (gen/second-next) closing evidence — see toolexec.go for the
 // full memo; this test is the compatibility/acceptance artifact that binds the
@@ -136,6 +142,30 @@ func TestSeamIsSingleExecRoutingPoint(t *testing.T) {
 
 	if len(importers) != 1 || importers[0] != seamFile {
 		t.Fatalf("os/exec is imported by %v, want ONLY %q — every microagent action must route through the ToolExec seam; a direct exec elsewhere breaks #2003 acceptance 2", importers, seamFile)
+	}
+}
+
+// TestSeamRegistryRoundTripsBackendNameByName is the #2003 scope-item-3 witness:
+// the by-name backend registry lets the isolation dial (M13) select a tier per
+// trust level, and the selection is FAITHFUL — for every registered backend,
+// building the executor BY NAME and reading BackendName() back round-trips. The
+// dial can therefore confirm and record which isolation tier it got; a registry
+// that silently handed back a different (e.g. weaker) backend than the requested
+// name would trip this guard. This is the positive complement to the floor
+// suite's vocabulary pin, exercised through the SAME public seam a real dial uses.
+func TestSeamRegistryRoundTripsBackendNameByName(t *testing.T) {
+	names := microagent.RegisteredBackends()
+	if len(names) < 2 {
+		t.Fatalf("registered backends = %v, want >=2 for the by-name selection dial", names)
+	}
+	for _, name := range names {
+		te, err := microagent.NewToolExecFor(name, allowKernel("run_shell"))
+		if err != nil {
+			t.Fatalf("NewToolExecFor(%q): %v", name, err)
+		}
+		if got := te.BackendName(); got != name {
+			t.Fatalf("NewToolExecFor(%q).BackendName() = %q — the by-name registry must round-trip so the isolation dial gets the tier it asked for, not a silently-substituted %q backend", name, got, got)
+		}
 	}
 }
 

@@ -161,6 +161,18 @@ func (t *ToolExec) Run(ctx context.Context, act ToolAction) (ToolResult, error) 
 	return res, err
 }
 
+// BackendName reports the isolation-ladder name of the backend this executor
+// dispatches to — the M13 selection made real. Scope item 3 of #2003 is
+// "register backends by name so the isolation dial can select per trust level";
+// the by-name registry (NewToolExecFor) is the selection, and this accessor is
+// its witness: after NewToolExecFor(name, floor) the round-trip
+// BackendName() == name holds, so the dial (cmd/fak/micro.go) and the audit sink
+// can CONFIRM and RECORD which tier actually ran an action instead of trusting
+// the lookup blind. That confirmation is the safety property of "select per
+// trust level": asking for a stronger isolation tier must never silently resolve
+// to a weaker one, and an opaque executor cannot prove it didn't.
+func (t *ToolExec) BackendName() string { return t.backend.Name() }
+
 // subprocessBackend is the os/exec isolation tier (#2014, M14): each action
 // runs as a SUBPROCESS with stdin/stdout/stderr capture and a per-action
 // timeout. The process-tree kill on timeout/cancel is not re-implemented here;
