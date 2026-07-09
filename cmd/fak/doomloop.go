@@ -4,11 +4,13 @@ package main
 //
 // This is the impure half of the doom-loop guard: it gathers the two axes the
 // pure classifier folds (effort spent vs verified forward progress), maintains a
-// durable per-worker sample history, classifies each worker, and - the part no
-// existing fak detector does - WIRES the correction: it records every decision to
-// an accountability ledger and, when asked, queues a soft, reversible re-anchor
-// nudge to the worker's steer outbox. The destructive rung (kill/replace) is not
-// here by design; the ladder tops out at an operator escalation record.
+// durable per-worker sample history, classifies each worker, records every
+// decision to an accountability ledger, and - when asked - QUEUES a soft,
+// reversible re-anchor nudge to the worker's steer outbox. Queuing, NOT
+// delivering: no transport drains that outbox yet, so a correction here is
+// recorded-and-queued, not applied, until a drainer is wired (see below). The
+// destructive rung (kill/replace) is not here by design; the ladder tops out at
+// an operator escalation record.
 //
 // The SAMPLING seam is deliberately explicit. `tick` takes the effort/progress
 // counters from its caller rather than reading transcripts or git itself, so the
@@ -114,9 +116,11 @@ type dlDecision struct {
 }
 
 // nudgePacket is the soft, reversible correction: a re-anchor message queued to
-// the worker's steer outbox. A separate transport (the trajctl GatewaySteer POST
-// / the guard steer channel) drains the outbox; queuing here is reversible - the
-// packet can be dropped before delivery and delivery only injects text.
+// the worker's steer outbox. No transport drains this outbox yet - the packet is
+// a queued artifact awaiting a drainer (the intended one is a GatewaySteer-style
+// POST to /v1/fak/session/{id}/steer, itself not yet wired into a live loop).
+// Queuing here is reversible - the packet can be dropped before any delivery, and
+// delivery only injects text.
 type nudgePacket struct {
 	UnixMillis int64  `json:"unix_millis"`
 	Session    string `json:"session"`

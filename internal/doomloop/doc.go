@@ -23,9 +23,14 @@
 //   - loopmgr.WitnessGap measures real progress (witnessed-done), but only on
 //     ENDED runs, retrospectively.
 //
-// The gap every one of them leaves open: no component reads BOTH axes - effort
-// AND verified forward progress - on a LIVE worker over time, and takes a
-// graduated corrective action. This leaf is that missing decision core.
+// The gap every one of them leaves open is NOT the two-axis reading itself:
+// trajctl's ActivityDivergenceScorer already folds effort against the
+// witnessed-commit curve, live at every Stop-hook turn end. It is the
+// conjunction none of them ship - a two-axis read that needs NO declared
+// Objective (a bare fleet worker has none), paired with a graduated,
+// reversible-first correction RECOMMENDATION off that read. This leaf is that
+// missing decision core. (Delivering the correction is a separate seam - owned
+// by the shell - and is NOT yet wired to a live transport; see cmd/fak/doomloop.)
 //
 // # The two axes
 //
@@ -50,8 +55,9 @@
 //
 // The recommendation ladder is graduated and tops out below anything
 // destructive: OBSERVE (watching a sub-threshold streak) -> NUDGE (a soft,
-// reversible re-anchor packet delivered to the session steer channel) ->
-// ESCALATE (a structured operator hand-off once the doom persists). The core
+// reversible re-anchor packet queued for the session steer channel - delivery
+// is a separate, not-yet-wired transport) -> ESCALATE (a structured operator
+// hand-off once the doom persists). The core
 // NEVER recommends a hard kill/replace on its own - that rung is an operator
 // decision the caller must opt into explicitly, so an automatic run can never
 // tear down a worker without a human in the loop.
