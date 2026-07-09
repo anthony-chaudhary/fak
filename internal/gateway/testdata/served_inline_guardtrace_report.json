@@ -1,0 +1,45 @@
+{
+  "schema": "served_inline_guardtrace.v1",
+  "issue": "#1350",
+  "provenance": {
+    "command": "go test ./internal/gateway -run TestServedInlineGuardTrace -count=1",
+    "serve": "WITNESSED — replayed through fak's real adjudicateProposedServed + admitInboundResults seam in-process",
+    "trace": "guard-trace-e2e — the repo's canonical end-to-end guard trace fixture (AUTHORED/synthetic, real Claude Code native tool names Read/Bash/Write); NOT a captured live /v1/messages session"
+  },
+  "trace_name": "guard-trace-e2e",
+  "trace_turns": 3,
+  "saves": "EXECUTIONS (the client tool round-trip of a duplicate/repeat read), NOT the surviving call's tokens",
+  "read_only_proposed": 2,
+  "name_eligible": 0,
+  "cross_turn_reread": 0,
+  "served_inline": 0,
+  "vdso_fills": 0,
+  "dedup_rate": 0,
+  "per_turn": [
+    {
+      "turn": 0,
+      "read_only_proposed": 1,
+      "name_eligible": 0,
+      "served_inline": 0,
+      "vdso_fills_after": 0
+    },
+    {
+      "turn": 1,
+      "read_only_proposed": 0,
+      "name_eligible": 0,
+      "served_inline": 0,
+      "vdso_fills_after": 0
+    },
+    {
+      "turn": 2,
+      "read_only_proposed": 1,
+      "name_eligible": 0,
+      "served_inline": 0,
+      "vdso_fills_after": 0
+    }
+  ],
+  "fallback_reason": "NAME_NOT_ELIGIBLE — readOnlyPrefix (get_/read_/search_/list_/lookup_/find_/calc) matches none of the native names Read/Bash/Write/Grep/Glob, so no native read is ever probed or filled",
+  "recommendation": "Keep --vdso-proxy-fill OPT-IN. On the canonical Claude Code-shaped trace the proxy-fill loop is fully inert (0 fills, 0 served_inline), consistent with the modeled native-name arm in served_inline_dedup_test.go. A miss is byte-identical to today, so it is safe to leave ON where reads are already read-only-shaped (MCP/snake_case), but it delivers ZERO on native Read/Grep/Glob until the name gate is widened.",
+  "promotion": "Feed the SAME seam a CAPTURED live /v1/messages session (fak guard -- claude, or a tau2/SWE run) instead of this authored fixture; if that real session is redundant AND its reads are name-eligible, the WITNESSED rate promotes the lever toward default-on.",
+  "invalidating_assumption": "The single assumption most likely to flip the result is the tool-NAMING regime: on real Claude Code traffic the read tool is Read (not read_*), so served_inline is 0 regardless of redundancy until readOnlyPrefix recognizes the native read tools."
+}
