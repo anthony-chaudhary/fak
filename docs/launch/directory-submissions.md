@@ -10,7 +10,7 @@ are copy-paste ready. The programmatic ones are already handled in the repo and 
 form:
 
 - **Glama** — auto-indexes from [`glama.json`](https://github.com/anthony-chaudhary/fak/blob/main/glama.json) (committed; approves in minutes).
-- **Official MCP Registry** — wired via [`server.json`](https://github.com/anthony-chaudhary/fak/blob/main/server.json) + the ghcr image, now at **0.34.0** and matching the published image. As of 2026-06-27 `ghcr.io/anthony-chaudhary/fak:0.34.0` + `:latest` are built and **anonymously pullable** (the prereq is satisfied), so only the one interactive publish step in [`docs/fak/mcp-registry.md`](../fak/mcp-registry.md) remains — see Fresh leads #6 below.
+- **Official MCP Registry** — wired via [`server.json`](https://github.com/anthony-chaudhary/fak/blob/main/server.json) + the ghcr image, now at **0.37.0** (the `server.json` `version` and its `oci` `identifier` both pin `ghcr.io/anthony-chaudhary/fak:0.37.0`; `release-container.yml` pushes `:{version,latest}` on each `v*` tag). The remaining steps are owner-only and interactive — see Fresh leads #6 below.
 - **Awesome-list PRs** — already submitted across ~12 lists (don't duplicate).
 
 Reusable description (≈140 chars): *Agent kernel for AI agents: one Go binary that fronts OpenAI/Anthropic/MCP wires, keeps long sessions cache-efficient, routes per call, and audits every tool-call verdict.*
@@ -97,7 +97,7 @@ project `DOS` was already submitted ([cline/mcp-marketplace#1794](https://github
 
 ### 6. Official MCP Registry — the final publish is now unblocked
 
-The blocker the old notes flagged (no OCI artifact) is **gone**: `release-container.yml` ran green for the v0.34.0 tag and `ghcr.io/anthony-chaudhary/fak:0.34.0` + `:latest` are publicly pullable (verified via an anonymous ghcr token). `server.json` is now bumped to 0.34.0 to match. Remaining steps (owner-only, can't be automated):
+The blocker the old notes flagged (no OCI artifact) is **gone**: `release-container.yml` builds + pushes `ghcr.io/anthony-chaudhary/fak:{version,latest}` on each `v*` tag (the v0.34.0 image was confirmed anonymously pullable via an anonymous ghcr token when this was first wired on 2026-06-27). `server.json` now tracks the current release — **0.37.0** — with its `oci` `identifier` pinned to `ghcr.io/anthony-chaudhary/fak:0.37.0`. Remaining steps (owner-only, can't be automated; re-confirm the `:0.37.0` image is anonymously pullable before publishing):
 
 1. **Make the ghcr `fak` package public** (first publish only) — repo *Packages* tab → set visibility to public.
 2. `brew install mcp-publisher` (or the release tarball — see [`docs/fak/mcp-registry.md`](../fak/mcp-registry.md)).
