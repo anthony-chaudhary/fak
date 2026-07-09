@@ -128,6 +128,8 @@ func main() {
 		cmdAPIHost(os.Args[2:])
 	case "question-ledger":
 		cmdQuestionLedger(os.Args[2:])
+	case "trunk-build-probe":
+		cmdTrunkBuildProbe(os.Args[2:])
 	case "recall":
 		cmdRecall(os.Args[2:])
 	case "recover":
