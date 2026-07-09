@@ -20,6 +20,10 @@ package main
 //	fak index freshness        the self-index drift report: undeclared leaves, dead doc
 //	                         links, unknown verbs, and orphaned dated notes — is the
 //	                         index still honest against the tree?
+//	fak index agents [<query>] the sectioned AGENTS.md view (#3535): a compact resident
+//	                         TOC by default, ranked sections for a query, --section <slug>
+//	                         / --full for byte-exact bodies, --write-resident to (re)write
+//	                         the resident TOC block into CLAUDE.md
 //
 // It is a thin shell over internal/devindex, which reads the facts live from the
 // files that already own them (dos.toml's [lanes.trees], the curated INDEX.md, the
@@ -59,6 +63,11 @@ func runIndex(stdout, stderr io.Writer, argv []string) int {
 	root := fs.String("root", "", "repo root (default: search upward for dos.toml)")
 	asJSON := fs.Bool("json", false, "emit the answer as JSON")
 	limit := fs.Int("limit", 0, "cap the number of results (0 = all)")
+	// `fak index agents` selectors (unused by the other subverbs, like --limit is unused
+	// by lane): a section slug, the whole-doc escape hatch, and the resident-TOC writer.
+	agentsSection := fs.String("section", "", "fak index agents: emit one AGENTS.md section by slug")
+	agentsFull := fs.Bool("full", false, "fak index agents: emit the whole AGENTS.md verbatim")
+	agentsWriteResident := fs.Bool("write-resident", false, "fak index agents: (re)write the resident TOC block into CLAUDE.md")
 	// Parse flags that may appear ANYWHERE around the positional query (the natural
 	// `fak index leaf cache --limit 6` order), not just before it. Go's flag package
 	// stops at the first non-flag arg, so interleave Parse with positional collection.
@@ -111,6 +120,8 @@ func runIndex(stdout, stderr io.Writer, argv []string) int {
 		return indexKnobs(stdout, stderr, rootDir, *asJSON)
 	case "freshness", "fresh":
 		return indexFreshness(stdout, stderr, cat, *asJSON, *limit)
+	case "agents", "agentsmd", "agent":
+		return indexAgents(stdout, stderr, rootDir, args, *asJSON, *agentsSection, *agentsFull, *agentsWriteResident)
 	default:
 		fmt.Fprintf(stderr, "fak index: unknown subcommand %q\n", sub)
 		writeIndexUsage(stderr)
@@ -339,7 +350,8 @@ func writeIndexUsage(w io.Writer) {
   fak index ctxknobs          the manual-overlay counter: context flags/env/skills classified operator-debug vs user-required (#2199)
   fak index knobs             the knob census: every user-facing behavior knob classified INTENT (promote) vs HOUSEKEEPING (automate) (#2210)
   fak index freshness         the self-index drift report: undeclared leaves, dead doc links, unknown verbs, orphaned dated notes
-  flags: --json  --limit N  --root DIR
+  fak index agents [<query>]  the sectioned AGENTS.md view: TOC by default, rank by query, --section <slug>, --full, --write-resident
+  flags: --json  --limit N  --root DIR  |  agents: --section <slug>  --full  --write-resident
 `)
 }
 
