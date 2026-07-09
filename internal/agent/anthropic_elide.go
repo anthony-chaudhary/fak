@@ -148,6 +148,26 @@ func ElideAnthropicResultsWithOutcome(raw []byte, threshold int) ([]byte, ElideO
 		edits = append(edits, es...)
 		shed += sh
 	}
+
+	// Cross-turn dedup (anthropic_elide_crossturn.go) is a distinct dedup LEVEL layered on the same
+	// splice transform: fold a later tool_result line-span that appeared verbatim in a strictly-
+	// earlier one to a one-line pointer. It rebuilds the whole value, so where it and head+tail
+	// elision target the SAME value their byte spans coincide; prefer the dedup fold (a lossless
+	// relocation to the run's earliest home) and drop the superseded head+tail edit. Its edits, like
+	// the head+tail ones, all lie strictly after the protected prefix, so the cached head is safe.
+	if ctEdits, ctShed := collectCrossTurnDedupEdits(raw, elems, spans, pfxEnd, lastEligible); len(ctEdits) > 0 {
+		merged := make([]spliceEdit, 0, len(edits)+len(ctEdits))
+		for _, e := range edits {
+			if spliceEditOverlapsAny(e, ctEdits) {
+				shed -= (e.end - e.start) - len(e.repl) // superseded by a dedup fold on the same value
+				continue
+			}
+			merged = append(merged, e)
+		}
+		edits = append(merged, ctEdits...)
+		shed += ctShed
+	}
+
 	if len(edits) == 0 {
 		return raw, ElideOutcome{Reason: ElideReasonUnderThreshold}
 	}
