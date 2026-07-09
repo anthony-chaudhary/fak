@@ -61,6 +61,14 @@ const (
 	// is byte-for-byte unchanged (the #3165 opt-in, fail-open, A/B-able doctrine);
 	// the epic owner flips it on to measure the false-refuse rate under real load.
 	LandReadbackEnv = "FAK_LAND_READBACK_VERIFY"
+	// IsolatedLandEnv, when truthy, makes Land stage+commit through a THROWAWAY index
+	// (GIT_INDEX_FILE) and move the branch with a compare-and-swap ref update, so a
+	// worker's change is never in the SHARED index for a concurrent commit to sweep —
+	// the race-free layer-2 fix for #3547 (layer 1 is LandReadbackEnv's honest refusal).
+	// DEFAULT OFF; on ANY hiccup (detached HEAD, apply conflict, lost CAS, unresolved
+	// identity, git error) it FALLS BACK to the baseline shared path, so enabling it can
+	// only ever REDUCE race exposure on the happy path, never do worse than today.
+	IsolatedLandEnv = "FAK_LAND_ISOLATED_INDEX"
 	keyHashLen      = 12
 )
 
@@ -112,6 +120,44 @@ func run(git GitRunner, root string, args []string) (int, string) {
 	}
 	return git(root, args)
 }
+
+// GitEnvRunner is a GitRunner that also overlays environment variables. Only the
+// opt-in isolated-index land path needs it — to set GIT_INDEX_FILE so staging lands
+// in a throwaway index instead of the shared one. Kept as a separate type so every
+// existing caller and the entire default land path stay byte-for-byte untouched.
+type GitEnvRunner func(root string, env map[string]string, args []string) (int, string)
+
+// defaultGitEnv is defaultGit plus KEY=VALUE overlays on the inherited environment.
+func defaultGitEnv(root string, env map[string]string, args []string) (int, string) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	base := os.Environ()
+	for k, v := range env {
+		base = append(base, k+"="+v)
+	}
+	cmd.Env = base
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return ee.ExitCode(), string(out)
+		}
+		return 127, string(out)
+	}
+	return 0, string(out)
+}
+
+func runEnv(genv GitEnvRunner, root string, env map[string]string, args []string) (int, string) {
+	if genv == nil {
+		genv = defaultGitEnv
+	}
+	return genv(root, env, args)
+}
+
+// isolatedGitEnv is the env-aware runner Land's opt-in layer-2 path uses. A package
+// seam (not a Land parameter) so the exported Land signature and all its dispatch
+// callers stay unchanged; tests swap it to drive the isolated path against a fake.
+var isolatedGitEnv GitEnvRunner = defaultGitEnv
 
 // --------------------------------------------------------------------------- //
 // PURE planners — path / name / env composition. Unit-tested without git.
@@ -343,6 +389,18 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	}
 	defer cleanup()
 
+	// Opt-in race-free layer-2 land (default OFF): stage+commit through a THROWAWAY
+	// index so the shared index is never a sweep target. handled=false means it could
+	// not isolate safely (detached HEAD, apply conflict, lost CAS, …) and falls through
+	// to the baseline shared path below — so enabling it only ever reduces the #3547
+	// race window, never regresses it. Path-scoped lands only (a whole-tree land has no
+	// safe isolated form here).
+	if isolatedLandEnabled() && len(paths) > 0 {
+		if res, handled := landIsolated(root, diff, msgFile, paths, git, isolatedGitEnv); handled {
+			return res
+		}
+	}
+
 	applied := gitApply(root, diff, git)
 	if !applied.OK {
 		return Result{OK: false, Applied: false, Committed: false,
@@ -402,29 +460,172 @@ func resolveMsgFile(wtPath, commitMsgFile string, git GitRunner) (string, func()
 // the patch from a temp file (a long diff exceeds argv limits) and removing it
 // after. Kept separate so the apply step is isolated and testable.
 func gitApply(root, diff string, git GitRunner) Result {
+	patch, cleanup, err := writePatch(diff)
+	if err != nil {
+		return Result{OK: false, Detail: "could not stage patch temp: " + err.Error()}
+	}
+	defer cleanup()
+	rc, out := run(git, root, []string{"apply", "--whitespace=nowarn", patch})
+	return Result{OK: rc == 0, Detail: tail(out, 300)}
+}
+
+// writePatch writes a captured diff (newline-terminated) to a temp file and returns
+// its path plus a cleanup func. Shared by the baseline working-tree apply and the
+// isolated-index `apply --cached`, so both stage byte-identical patch content.
+func writePatch(diff string) (string, func(), error) {
 	f, err := os.CreateTemp("", "fak-wt-land-*.patch")
 	if err != nil {
-		return Result{OK: false, Detail: "could not create patch temp: " + err.Error()}
+		return "", func() {}, err
 	}
-	patch := f.Name()
-	defer os.Remove(patch)
 	body := diff
 	if !strings.HasSuffix(body, "\n") {
 		body += "\n"
 	}
 	if _, err := f.WriteString(body); err != nil {
 		f.Close()
-		return Result{OK: false, Detail: "could not write patch temp: " + err.Error()}
+		os.Remove(f.Name())
+		return "", func() {}, err
 	}
 	f.Close()
-	rc, out := run(git, root, []string{"apply", "--whitespace=nowarn", patch})
-	return Result{OK: rc == 0, Detail: tail(out, 300)}
+	return f.Name(), func() { os.Remove(f.Name()) }, nil
+}
+
+// landIsolated is the race-free layer-2 land (#3547). It stages the worker diff into a
+// THROWAWAY index seeded from the current trunk HEAD, commits it as a child of that
+// exact HEAD via commit-tree, then advances the branch with a compare-and-swap
+// update-ref. Two properties fall out:
+//   - Staging never touches the SHARED index, so no concurrent `commit -- paths` can
+//     sweep our change into its own commit (the false-success layer 1 only detects).
+//   - The ref moves ONLY if HEAD has not advanced since we seeded, so a commit built on
+//     a stale base can never silently revert a peer's concurrent work — a lost CAS
+//     falls back instead.
+//
+// Returns (result, handled). handled=false means "could not isolate safely — use the
+// baseline shared path": detached HEAD, unresolved identity, apply conflict, a lost
+// CAS, or any git error. Thus enabling this can only REDUCE the race window on the
+// happy path, never regress the baseline. On success the shared working tree is synced
+// for `paths` (git checkout <new> -- paths) so trunk builders see the landed change,
+// matching the baseline post-state; a sync hiccup is reported but does NOT unland.
+func landIsolated(root, diff, msgFile string, paths []string, git GitRunner, genv GitEnvRunner) (Result, bool) {
+	// The branch to move. Detached HEAD → no branch ref to CAS safely; fall back.
+	rc, ref := run(git, root, []string{"symbolic-ref", "--quiet", "HEAD"})
+	branch := strings.TrimSpace(ref)
+	if rc != 0 || branch == "" {
+		return Result{}, false
+	}
+	// The exact base our commit parents AND the compare-and-swap old-value.
+	rc, head := run(git, root, []string{"rev-parse", "HEAD"})
+	oldHEAD := strings.TrimSpace(head)
+	if rc != 0 || oldHEAD == "" {
+		return Result{}, false
+	}
+	// commit-tree runs no hook and adds no signoff; compose Signed-off-by ourselves to
+	// preserve the baseline `commit -s`. Unresolved identity → fall back (can't honor -s).
+	_, name := run(git, root, []string{"config", "user.name"})
+	_, email := run(git, root, []string{"config", "user.email"})
+	nm, em := strings.TrimSpace(name), strings.TrimSpace(email)
+	if nm == "" || em == "" {
+		return Result{}, false
+	}
+
+	// Throwaway index at a fresh path git creates via read-tree; removed on return.
+	idxF, err := os.CreateTemp("", "fak-land-*.index")
+	if err != nil {
+		return Result{}, false
+	}
+	idx := idxF.Name()
+	idxF.Close()
+	os.Remove(idx) // read-tree writes it fresh; a pre-existing empty file would also do
+	defer os.Remove(idx)
+	env := map[string]string{"GIT_INDEX_FILE": idx}
+
+	// Seed the throwaway index with trunk HEAD's tree.
+	if rc, _ := runEnv(genv, root, env, []string{"read-tree", oldHEAD}); rc != 0 {
+		return Result{}, false
+	}
+	// Stage the worker diff into the throwaway index ONLY (--cached never touches the
+	// working tree). A conflict here means a concurrent change to the SAME paths — let
+	// the baseline path adjudicate it exactly as today rather than force it.
+	patch, cleanupPatch, err := writePatch(diff)
+	if err != nil {
+		return Result{}, false
+	}
+	defer cleanupPatch()
+	if rc, _ := runEnv(genv, root, env, []string{"apply", "--cached", "--whitespace=nowarn", patch}); rc != 0 {
+		return Result{}, false
+	}
+	rc, tree := runEnv(genv, root, env, []string{"write-tree"})
+	treeSHA := strings.TrimSpace(tree)
+	if rc != 0 || treeSHA == "" {
+		return Result{}, false
+	}
+	ctMsg, cleanupMsg, err := composeSignedMsg(msgFile, nm, em)
+	if err != nil {
+		return Result{}, false
+	}
+	defer cleanupMsg()
+	rc, commit := runEnv(genv, root, env, []string{"commit-tree", treeSHA, "-p", oldHEAD, "-F", ctMsg})
+	newCommit := strings.TrimSpace(commit)
+	if rc != 0 || newCommit == "" {
+		return Result{}, false
+	}
+	// Compare-and-swap: move the branch ONLY if HEAD is still oldHEAD. A peer commit in
+	// the gap fails this → fall back so the diff re-applies onto the peer's new HEAD.
+	if rc, _ := run(git, root, []string{"update-ref", branch, newCommit, oldHEAD}); rc != 0 {
+		return Result{}, false
+	}
+	// The ref moved but the shared working tree still holds OLD content for `paths` (we
+	// never touched it). Sync just those paths so trunk builders see the landed change,
+	// matching the baseline post-state. A sync failure does NOT unland the commit.
+	detail := ""
+	coArgs := append([]string{"checkout", newCommit, "--"}, paths...)
+	if rc, out := run(git, root, coArgs); rc != 0 {
+		detail = "landed " + shortSHA(newCommit) + " but working-tree sync failed: " + tail(out, 200)
+	}
+	return Result{OK: true, Applied: true, Committed: true,
+		Reason: "isolated-index land " + shortSHA(newCommit) + " (race-free, #3547)",
+		Detail: detail}, true
+}
+
+// composeSignedMsg writes msgFile's content to a new temp file with a Signed-off-by
+// trailer appended when absent, so a commit-tree land keeps the baseline `-s` signoff.
+// Returns the temp path and a cleanup func.
+func composeSignedMsg(msgFile, name, email string) (string, func(), error) {
+	raw, err := os.ReadFile(msgFile)
+	if err != nil {
+		return "", func() {}, err
+	}
+	body := string(raw)
+	signoff := "Signed-off-by: " + name + " <" + email + ">"
+	if !strings.Contains(body, signoff) {
+		if !strings.HasSuffix(body, "\n") {
+			body += "\n"
+		}
+		body += "\n" + signoff + "\n"
+	}
+	f, err := os.CreateTemp("", "fak-land-msg-*.txt")
+	if err != nil {
+		return "", func() {}, err
+	}
+	if _, err := f.WriteString(body); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", func() {}, err
+	}
+	f.Close()
+	return f.Name(), func() { os.Remove(f.Name()) }, nil
 }
 
 // landReadbackEnabled reports whether the opt-in post-commit readback (LandReadbackEnv)
 // is on. Truthy = any value other than "", "0", "false", "off" (case-insensitive).
-func landReadbackEnabled() bool {
-	v := strings.TrimSpace(os.Getenv(LandReadbackEnv))
+func landReadbackEnabled() bool { return envTruthy(LandReadbackEnv) }
+
+func isolatedLandEnabled() bool { return envTruthy(IsolatedLandEnv) }
+
+// envTruthy reads a boolean opt-in env gate: set and not one of 0/false/off (any
+// case) counts as on. Empty/unset is off, keeping every gated path default-OFF.
+func envTruthy(name string) bool {
+	v := strings.TrimSpace(os.Getenv(name))
 	return v != "" && v != "0" && !strings.EqualFold(v, "false") && !strings.EqualFold(v, "off")
 }
 

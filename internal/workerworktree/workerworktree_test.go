@@ -1,6 +1,7 @@
 package workerworktree
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,6 +24,8 @@ type fakeGit struct {
 		rc  int
 		out string
 	}
+	envCalls [][]string          // args of calls made through the env-aware runner
+	lastEnv  map[string]string   // env overlay of the most recent env-aware call
 }
 
 func newFakeGit() *fakeGit {
@@ -50,6 +53,30 @@ func (f *fakeGit) run(root string, args []string) (int, string) {
 		return r.rc, r.out
 	}
 	return f.def.rc, f.def.out
+}
+
+// runEnv is the GitEnvRunner face of the same fake: it records the overlay env and
+// the args, and replies from the same per-verb table so an isolated-land sequence
+// (read-tree/apply/write-tree/commit-tree) is stubbed exactly like a plain call.
+func (f *fakeGit) runEnv(root string, env map[string]string, args []string) (int, string) {
+	f.envCalls = append(f.envCalls, append([]string{}, args...))
+	f.lastEnv = env
+	verb := ""
+	if len(args) > 0 {
+		verb = args[0]
+	}
+	if r, ok := f.byVerb[verb]; ok {
+		return r.rc, r.out
+	}
+	return f.def.rc, f.def.out
+}
+
+func (f *fakeGit) envCallsWithPrefix(prefix ...string) [][]string {
+	saved := f.calls
+	f.calls = f.envCalls
+	out := f.callsWithPrefix(prefix...)
+	f.calls = saved
+	return out
 }
 
 func (f *fakeGit) callsWithPrefix(prefix ...string) [][]string {
@@ -444,6 +471,152 @@ func TestLandReadbackFailsOpenOnGitError(t *testing.T) {
 	res := Land("/trunk", "/wt/fak-worker-wt-tools-abc", "feedface", "/tmp/msg.txt", []string{"x"}, nil, g.run)
 	if !res.OK || !res.Committed {
 		t.Fatalf("readback must FAIL OPEN on a git error, never refuse: %+v", res)
+	}
+}
+
+// ---- Land layer 2: isolated-index (#3547) --------------------------------- //
+
+// writeMsg materializes a real commit-message file; the isolated path reads it for
+// real (composeSignedMsg), unlike the baseline which lets the fake stub `commit -F`.
+func writeMsg(t *testing.T, subject string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "msg.txt")
+	if err := os.WriteFile(p, []byte(subject+"\n"), 0o644); err != nil {
+		t.Fatalf("write msg: %v", err)
+	}
+	return p
+}
+
+// fakeGit stubbing every step of the isolated-land happy path.
+func isolatedHappyFake() *fakeGit {
+	return newFakeGit().
+		reply("symbolic-ref", 0, "refs/heads/main\n").
+		reply("rev-parse", 0, "oldhead000\n").
+		reply("config", 0, "fak test\n").
+		reply("read-tree", 0, "").
+		reply("apply", 0, "").
+		reply("write-tree", 0, "treeSHA111\n").
+		reply("commit-tree", 0, "newc2223334445556667778889990001112223334\n").
+		reply("update-ref", 0, "").
+		reply("checkout", 0, "")
+}
+
+func TestLandIsolatedHappyPathUsesTempIndexAndCASRefUpdate(t *testing.T) {
+	g := isolatedHappyFake()
+	msg := writeMsg(t, "feat(x): do the thing (fak x)")
+	res, handled := landIsolated("/trunk", "diff --git a/x b/x\n@@\n-o\n+n\n", msg, []string{"x"}, g.run, g.runEnv)
+	if !handled || !res.OK || !res.Committed || !res.Applied {
+		t.Fatalf("isolated land should succeed and be handled: handled=%v res=%+v", handled, res)
+	}
+	if !strings.Contains(res.Reason, "isolated-index") || !strings.Contains(res.Reason, "#3547") {
+		t.Fatalf("reason should name the isolated fix: %q", res.Reason)
+	}
+	// Staging went to a THROWAWAY index, not the shared one.
+	if v := g.lastEnv["GIT_INDEX_FILE"]; v == "" {
+		t.Fatalf("isolated path must set GIT_INDEX_FILE, env=%v", g.lastEnv)
+	}
+	// Index seeded from the captured HEAD; the diff staged with --cached (never the worktree).
+	if rt := g.envCallsWithPrefix("read-tree", "oldhead000"); len(rt) != 1 {
+		t.Fatalf("want one read-tree of captured HEAD, env=%v", g.envCalls)
+	}
+	if ap := g.envCallsWithPrefix("apply", "--cached"); len(ap) != 1 {
+		t.Fatalf("diff must stage with --cached into the temp index, env=%v", g.envCalls)
+	}
+	// Commit parents the EXACT captured HEAD (stale-base guard).
+	ct := g.envCallsWithPrefix("commit-tree")
+	if len(ct) != 1 || !contains(ct[0], "-p") || !contains(ct[0], "oldhead000") {
+		t.Fatalf("commit-tree must parent captured HEAD: %v", g.envCalls)
+	}
+	// Branch advanced by a compare-and-swap: new AND old value both pinned.
+	ur := g.callsWithPrefix("update-ref", "refs/heads/main")
+	if len(ur) != 1 || len(ur[0]) != 4 || !strings.HasPrefix(ur[0][2], "newc222") || ur[0][3] != "oldhead000" {
+		t.Fatalf("update-ref must CAS new-over-old-HEAD: %v", g.calls)
+	}
+	// Shared working tree synced for the landed paths so trunk builders see the change.
+	co := g.callsWithPrefix("checkout")
+	if len(co) != 1 || !contains(co[0], "x") || !contains(co[0], "--") {
+		t.Fatalf("want a path-scoped working-tree sync checkout: %v", g.calls)
+	}
+}
+
+func TestLandIsolatedApplyConflictFallsBackNotCommits(t *testing.T) {
+	g := isolatedHappyFake().reply("apply", 1, "error: patch does not apply")
+	res, handled := landIsolated("/trunk", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
+	if handled {
+		t.Fatalf("an apply conflict must fall back (handled=false), got %+v", res)
+	}
+	if len(g.envCallsWithPrefix("commit-tree")) != 0 || len(g.callsWithPrefix("update-ref")) != 0 {
+		t.Fatalf("conflict must not build/move a commit: env=%v calls=%v", g.envCalls, g.calls)
+	}
+}
+
+func TestLandIsolatedLostCASFallsBackWithoutSyncingWorktree(t *testing.T) {
+	// A peer commit lands in the gap → update-ref old-value mismatch.
+	g := isolatedHappyFake().reply("update-ref", 1, "fatal: update_ref failed: ref moved")
+	res, handled := landIsolated("/trunk", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
+	if handled {
+		t.Fatalf("a lost CAS must fall back to baseline, got %+v", res)
+	}
+	if len(g.callsWithPrefix("checkout")) != 0 {
+		t.Fatalf("a lost CAS must not touch the shared working tree: %v", g.calls)
+	}
+}
+
+func TestLandIsolatedDetachedHeadFallsBackImmediately(t *testing.T) {
+	g := isolatedHappyFake().reply("symbolic-ref", 1, "") // detached HEAD
+	_, handled := landIsolated("/trunk", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
+	if handled {
+		t.Fatalf("detached HEAD has no branch ref to CAS — must fall back")
+	}
+	if len(g.envCalls) != 0 {
+		t.Fatalf("must bail before any throwaway-index work: env=%v", g.envCalls)
+	}
+}
+
+func TestLandIsolatedMissingIdentityFallsBack(t *testing.T) {
+	g := isolatedHappyFake().reply("config", 0, "") // no user.name/email → can't honor -s
+	_, handled := landIsolated("/trunk", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
+	if handled {
+		t.Fatalf("unresolved signoff identity must fall back to baseline")
+	}
+	if len(g.envCalls) != 0 {
+		t.Fatalf("must bail before touching the throwaway index: env=%v", g.envCalls)
+	}
+}
+
+func TestLandIsolatedDefaultOffLeavesBaselineUnchanged(t *testing.T) {
+	t.Setenv(IsolatedLandEnv, "0")
+	g := newFakeGit().
+		reply("diff", 0, "diff --git a/x b/x\n@@\n-old\n+new\n").
+		reply("apply", 0, "").
+		reply("commit", 0, "[main abc] msg")
+	res := Land("/trunk", "/wt/fak-worker-wt-tools-abc", "feedface", "/tmp/msg.txt", []string{"x"}, nil, g.run)
+	if !res.OK || !res.Committed {
+		t.Fatalf("baseline land must still work with the gate off: %+v", res)
+	}
+	if len(g.callsWithPrefix("symbolic-ref")) != 0 || len(g.callsWithPrefix("commit-tree")) != 0 {
+		t.Fatalf("gate OFF must never enter the isolated path: %v", g.calls)
+	}
+	if len(g.callsWithPrefix("commit")) != 1 {
+		t.Fatalf("baseline path-scoped commit expected: %v", g.calls)
+	}
+}
+
+func TestLandIsolatedGateOnRoutesLandThroughIsolatedPath(t *testing.T) {
+	t.Setenv(IsolatedLandEnv, "1")
+	g := isolatedHappyFake().reply("diff", 0, "diff --git a/x b/x\n@@\n-o\n+n\n")
+	// Inject the fake env-runner into the package seam Land's isolated path uses.
+	saved := isolatedGitEnv
+	isolatedGitEnv = g.runEnv
+	defer func() { isolatedGitEnv = saved }()
+
+	res := Land("/trunk", "/wt/fak-worker-wt-tools-abc", "base", writeMsg(t, "feat(x): thing (fak x)"), []string{"x"}, nil, g.run)
+	if !res.OK || !strings.Contains(res.Reason, "isolated-index") {
+		t.Fatalf("gate ON must land via the isolated path: %+v", res)
+	}
+	// The baseline shared-index commit must NOT have run.
+	if len(g.callsWithPrefix("commit")) != 0 || len(g.callsWithPrefix("apply")) != 0 {
+		t.Fatalf("isolated success must skip the baseline apply+commit: %v", g.calls)
 	}
 }
 

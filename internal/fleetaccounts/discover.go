@@ -284,6 +284,7 @@ func classifyRow(acctDir, product, account string, pol Policy, acctIdx accountsR
 	// served model, so a credential-less `needs_login` row for one just clutters the
 	// switcher roster. Keep them off it the way a .DELETED marker does; the dogfood
 	// resolve path bypasses discovery entirely, so nothing that depends on it regresses.
+	// Re-offer as a first-class servable seat once native `fak serve` is stable (see #3558).
 	if strings.HasPrefix(strings.ToLower(account), ".claude-faklocal") {
 		base.Kind = KindExcluded
 		base.Reason = "fak-kernel dogfood home (synthesized on demand; not a roster account)"
