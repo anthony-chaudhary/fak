@@ -123,6 +123,18 @@ func cmdGuard(argv []string) {
 	if len(argv) > 0 && argv[0] == "restart-audit" {
 		os.Exit(runGuardRestartAudit(os.Stdout, os.Stderr, argv[1:]))
 	}
+	// `fak guard resume <id>` (and the issue's `fak guard --resume <id>` spelling) is the
+	// cache-safe resume PLANNER (#1206, epic #1193 C10): resolve the id against the C1 durable
+	// session registry, consult the C9 cache-resume posture rung, and emit the WARM-SPLICE/
+	// WARM/CUT/RESET path + the reconstructed cache-safe `fak guard ... -- <agent> --continue`
+	// relaunch. Peeled like `allow`/`restart-audit`/`sessions` — a bare leading verb, never a
+	// program to wrap — and returns without binding a gateway. `--resume` as argv[0] is
+	// unambiguous: a real wrap names the agent after `--`, so its own `--resume` sits after the
+	// `--`, never in the leading position.
+	if len(argv) > 0 && (argv[0] == "resume" || argv[0] == "--resume") {
+		cmdGuardResume(argv[1:])
+		return
+	}
 	t0 := time.Now()
 	fs := flag.NewFlagSet("guard", flag.ExitOnError)
 	verbFlagUsage(fs, "guard")
@@ -551,6 +563,13 @@ func cmdGuard(argv []string) {
 		us := resolveGuardUpstream(*provider, command[0], *baseURL, remoteBase, *apiKeyEnv, *anthropicOAuth, *oauthTokenEnv)
 		up, providerAutodetected, resolvedBase = us.provider, us.autodetected, us.baseURL
 		apiKey, pinUpstream, oauthSource = us.apiKey, us.pinUpstream, us.oauthSource
+		// resolveGuardUpstream armed the spend meter with the agent name (Opus
+		// default). Re-arm with the statically-known upstream model so a non-default
+		// tier prices at its own rate — e.g. a claude-fable-5 session bills 2x Opus
+		// instead of being under-booked as claude. Falls back to the agent name for
+		// an unknown model, so this only corrects a known misprice (see
+		// guardSpendPricingContext).
+		armServedSpendPricing(up, guardSpendPricingContext(up, *model, command))
 		if pinUpstream && up == "anthropic" {
 			credPath = filepath.Join(us.claudeConfigDir, ".credentials.json")
 		}
