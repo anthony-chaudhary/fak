@@ -1,6 +1,9 @@
 package livecodebench
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 // TestBuildTestOutputPromptGolden pins the exact predict-the-output prompt shape for
 // a problem carrying starter code — a golden test so a drift in the request the CLI
@@ -136,6 +139,33 @@ func TestBuildTestOutputSummary(t *testing.T) {
 	}
 	if _, err := BuildTestOutputSummary("m", []TestOutputProblem{{QuestionID: "  "}}); err == nil {
 		t.Fatal("expected refusal for blank question_id")
+	}
+}
+
+// TestTestOutputSummaryJSONGolden pins the v1 wire shape of the summary artifact:
+// the schema tag fak.livecodebench.testoutput.v1 freezes the field names and order,
+// so a rename or type change is caught here rather than by a downstream artifact
+// reader parsing an already-written summary.
+func TestTestOutputSummaryJSONGolden(t *testing.T) {
+	s, err := BuildTestOutputSummary("m1", []TestOutputProblem{
+		{
+			QuestionID: "q1",
+			Cases:      []TestOutputCase{{Input: "1", Expected: "2", Predicted: "2", Correct: true}},
+			Correct:    true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildTestOutputSummary: %v", err)
+	}
+	got, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	want := `{"schema":"fak.livecodebench.testoutput.v1","scenario":"testoutputprediction","model":"m1",` +
+		`"problems":[{"question_id":"q1","cases":[{"input":"1","expected":"2","predicted":"2","correct":true}],` +
+		`"correct":true}],"correct":1,"accuracy":1,"evidence_class":"local-ungraded","result_claim_allowed":false}`
+	if string(got) != want {
+		t.Fatalf("summary v1 JSON drift:\n got=%s\nwant=%s", got, want)
 	}
 }
 
