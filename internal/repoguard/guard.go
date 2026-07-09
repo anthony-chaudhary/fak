@@ -728,6 +728,7 @@ func evaluateWithLiveMonitorIDs(toolName string, toolInput map[string]any, works
 		command := stringField(toolInput, "command")
 		violations := classifyCommand(command, workspaceRoot, safeRoots)
 		violations = append(violations, classifyInteractive(command)...)
+		violations = append(violations, classifyWorkspaceCd(command, workspaceRoot)...)
 		return append(violations, classifySleepWait(command)...)
 	case "PowerShell":
 		// The PowerShell tool gets ONLY the advisory sleep rung: the
@@ -775,7 +776,7 @@ func readPath(m map[string]any) string {
 }
 
 func renderReason(violations []Violation) string {
-	var outOfTree, interactive, sleeps, liveMonitorReads []Violation
+	var outOfTree, interactive, sleeps, liveMonitorReads, workspaceCd []Violation
 	for _, v := range violations {
 		switch v.Reason {
 		case ReasonInteractiveHang:
@@ -784,6 +785,8 @@ func renderReason(violations []Violation) string {
 			sleeps = append(sleeps, v)
 		case ReasonLiveMonitorOutputRead:
 			liveMonitorReads = append(liveMonitorReads, v)
+		case ReasonWorkspacePathUnmapped:
+			workspaceCd = append(workspaceCd, v)
 		default:
 			outOfTree = append(outOfTree, v)
 		}
@@ -800,6 +803,9 @@ func renderReason(violations []Violation) string {
 	}
 	if len(liveMonitorReads) > 0 {
 		blocks = append(blocks, renderLiveMonitorOutputReason(liveMonitorReads))
+	}
+	if len(workspaceCd) > 0 {
+		blocks = append(blocks, renderWorkspaceCdReason(workspaceCd))
 	}
 	return strings.Join(blocks, " | ")
 }

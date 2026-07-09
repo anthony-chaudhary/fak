@@ -78,6 +78,7 @@ var defaultSeverity = map[string]Severity{
 	ReasonLiveMonitorOutputRead: SeverityRecord, // niche, harmless-if-wrong anti-pattern
 	ReasonInteractiveHang:       SeverityWarn,   // the non-interactive-form hint avoids a wasted turn
 	ReasonForegroundSleep:       SeverityWarn,   // the background-wait hint avoids a wasted turn
+	ReasonWorkspacePathUnmapped: SeverityWarn,   // the correct-path hint avoids a wasted turn
 }
 
 // DefaultSeverity returns the default severity for a reason. An UNKNOWN reason

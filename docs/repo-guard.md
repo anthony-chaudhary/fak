@@ -112,6 +112,7 @@ swallowed **without** touching stderr, so silent stays silent.
 | `LIVE_MONITOR_OUTPUT_READ` | `record` | niche, harmless-if-wrong anti-pattern |
 | `INTERACTIVE_HANG` | `warn` | the non-interactive-form hint genuinely helps the agent avoid a wasted turn |
 | `FOREGROUND_SLEEP` | `warn` | the background-wait hint helps |
+| `WORKSPACE_PATH_UNMAPPED` | `warn` | a `cd` into the drive-stripped workspace root (`cd /work/fak` for a `C:/work/fak` checkout) resolves nowhere on the host; the correct-path hint avoids a wasted turn |
 
 A reason with no default entry resolves to `deny` (fail-safe: any refusal-class reason
 added later denies until explicitly softened).

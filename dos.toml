@@ -93,6 +93,7 @@ concurrent = [
   "godfileceiling",
   "microagent",
   "l3kv",
+  "cvregress",
   # They landed by hand / during the new_leaf.py path-bug window, so the `# new-leaf:lane`
   # auto-insert never fired. All are real, architest-tiered packages.
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
@@ -226,6 +227,7 @@ concurrent = [
   "godfileceiling",
   "microagent",
   "l3kv",
+  "cvregress",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -329,6 +331,7 @@ autopick = [
   "microagent",
   "l3kv",
   "doomloop",
+  "cvregress",
   # new-leaf:lane
 ]
 
@@ -514,6 +517,7 @@ godfileceiling = ["internal/godfileceiling/**"]
 microagent = ["internal/microagent/**"]
 l3kv = ["internal/l3kv/**"]
 doomloop = ["internal/doomloop/**"]
+cvregress = ["internal/cvregress/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
@@ -937,6 +941,24 @@ refusal  = true
 summary  = "a Read targets tasks/<id>.output for a Monitor that is still live; Monitor output files are not materialized until the stream ends, so polling the path produces bare ENOENT loops"
 fix      = "do not Read-poll the output file while the Monitor is live. Consume the pushed Monitor events and wait for the completion notification; tasks/<id>.output appears only after the stream ends. Floor: cmd/repoguard (PreToolUse hook) plus the live toolproc journal."
 see_also = ["internal/repoguard/monitor_read.go", "cmd/repoguard/main.go", "internal/toolproc", ".claude/settings.json"]
+
+# Drive-stripped workspace `cd` (worker path-mapping): a headless worker's shell
+# already starts IN the workspace, but a model reconstructing the absolute path
+# sometimes drops the Windows drive letter and emits `cd /work/fak` for a
+# C:/work/fak checkout. On the git-bash/MSYS host that produced it the tree lives
+# at /c/work/fak, so the drive-less /work/fak resolves nowhere: the cd fails with
+# "No such file or directory" and, chained under &&, aborts the whole turn (a top
+# recurring failure class in the 2026-07-09 trajectory audit, session d5b3ed57).
+# The rung fires ONLY on the workspace root with its drive stripped -- a form that
+# provably cannot resolve on a drive-lettered host and always means the same
+# mistake; drive-ful (C:/work/fak), MSYS (/c/work/fak), relative, and every cd on
+# a drive-less real-POSIX host pass untouched.
+[reasons.WORKSPACE_PATH_UNMAPPED]
+category = "OPERATOR_GATE"
+refusal  = false
+summary  = "a Bash `cd` targets the workspace root with its Windows drive letter dropped (cd /work/fak for a C:/work/fak checkout) -- it resolves nowhere on this host, so the command and any && chain after it fail as a wasted turn"
+fix      = "the shell already starts in the workspace, so drop the redundant cd; or use the host path the finding pre-fills: cd 'C:/work/fak'. Floor: cmd/repoguard (PreToolUse hook, advisory even under enforce); soften with FAK_REPO_GUARD=warn or off."
+see_also = ["internal/repoguard/cdmap.go", "cmd/repoguard/main.go", ".claude/settings.json"]
 
 # L3 cross-tenant prefix-share gate (#57): the two typed REFUSE reasons the read-path
 # admission gate (internal/gateway/l3share.go -> AdmitL3SharedPage) cites when it refuses
