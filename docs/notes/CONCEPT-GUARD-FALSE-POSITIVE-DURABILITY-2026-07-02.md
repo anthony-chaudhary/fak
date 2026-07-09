@@ -6,10 +6,13 @@ date: 2026-07-02
 
 # Durable handling of guard false positives
 
-Status: concept note + one shipped fix + one dispatched fix. The immediate bug is
+Status: concept note + two shipped fixes + one dispatched fix. The immediate bug is
 [#2376](https://github.com/anthony-chaudhary/fak/issues/2376) (the reversibility
-classifier); the companion in-band-confirm fix shipped as `29b98f26`; this note is
-the durable design so the *class* of failure stops recurring, not just the instance.
+classifier); the companion in-band-confirm fix shipped as `29b98f26`; the **layer-2
+accuracy scorecard is now shipped** (`internal/guardaccuracy` + `fak score
+guard-accuracy`, folded into the control pane as `guard_accuracy_debt` — see the
+Honest scope update below); this note is the durable design so the *class* of failure
+stops recurring, not just the instance.
 
 ## The episode (witnessed this session)
 
@@ -157,8 +160,26 @@ worst-first. Wiring `guard-accuracy` in as a scorecard member closes the gap bet
 - Dispatched: the #2376 head-anchoring fix, to a fresh headless session via the
   maintenance-witness path (hard-self; operator-authorized). A launch is not a ship
   — #2376 resolves only on a witnessed trunk commit.
-- Proposed (cheapest next step named inline): the corpus-as-test → shared-testdata
-  → `guard-accuracy` scorecard, and the logged false-positive escape hatch. None of
-  these is shipped by this note.
+- Shipped (layer 2, after this note): the `guard-accuracy` scorecard. The shared
+  corpus lives at `internal/guardaccuracy/testdata/corpus.json` (seeded with the five
+  #2376 mentions, the two live self-collisions, and the true-positives named in
+  §2 — `git push origin main`, `rm -rf build`, `git commit && git push`,
+  `echo hi | mail bob`, `psql -c "drop database x"`). `internal/guardaccuracy` folds
+  it through the REAL `internal/adjudicator` reversibility classifier (imported
+  read-only — the hard-self lane is never edited) and scores the false-positive rate
+  (benign calls escalated) + false-negative rate (dangerous calls let through) into
+  one `guard_accuracy_debt`. It ships behind `fak score guard-accuracy [--json]`
+  (routed under the #2247 `fak score <name>` namespace, not a top-level verb) and is
+  folded into `tools/scorecard_control_pane.py` as the `guard_accuracy` member, so a
+  classifier-tuning regression reds the control-pane ratchet worst-first. A test
+  injects a known FP and FN and confirms both surface as debt (the fold is proven
+  non-vacuous), and a vacuous corpus refuses to certify. This is the accuracy dual of
+  `guard-verdict-rsi` (that loop scores whether verdicts are EXPLAINED; this scores
+  whether the escalate/don't boundary is CORRECT). Every wild misfire is *added* as a
+  new labeled row — a fix is a ratchet, not a local patch.
+- Still proposed (not shipped by this note): the logged false-positive escape hatch
+  (a `fak guard false-positive` verb / guard-audit journal slot) that auto-feeds the
+  corpus, so a routed-around escalation always leaves a trace. Until it lands, corpus
+  rows are added by hand from witnessed misfires.
 - The two live self-collisions are first-person session evidence, not a captured
   transcript artifact; the five #2376 rows are library-witnessed at `29b98f26`.

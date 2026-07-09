@@ -31,6 +31,7 @@ var scoreRoutes = map[string]func(argv []string){
 	"concept-usage":       cmdConceptUsageScore,
 	"dogfood":             cmdDogfoodScore,
 	"dojo-rsi":            cmdDojoRSI,
+	"guard-accuracy":      cmdGuardAccuracy,
 	"guard-rsi":           cmdGuardRSIScorecard,
 	"guard-verdict-rsi":   cmdGuardVerdictRSI,
 	"loop":                cmdLoopScore,

@@ -256,6 +256,13 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "intent_literal", "debt": "intent_literal_debt", "script": "intent_literal_scorecard.py", "label": "intent-literal"},
     {"key": "tokendefaults", "debt": "token_defaults_debt", "script": "", "cmd": "go run ./cmd/fak score token-defaults --json", "label": "token-defaults"},
     {"key": "guard_rsi", "debt": "guard_rsi_debt", "script": "", "cmd": "go run ./cmd/fak score guard-rsi --json", "label": "guard-rsi"},
+    # Guard-accuracy (the accuracy dual of guard_rsi/guard-verdict-rsi): folds a
+    # labeled command corpus through the REAL reversibility classifier and scores
+    # the false-positive rate (benign calls escalated) + false-negative rate
+    # (dangerous calls let through). guard_rsi asks "are verdicts explained",
+    # this asks "is the escalate/don't boundary correct" -- so a classifier
+    # tuning regression that leaves verdicts fully explained still reds here.
+    {"key": "guard_accuracy", "debt": "guard_accuracy_debt", "script": "", "cmd": "go run ./cmd/fak score guard-accuracy --json", "label": "guard-accuracy"},
     {"key": "dogfood", "debt": "dogfood_debt", "script": "", "cmd": "go run ./cmd/fak score dogfood --json", "label": "dogfood-loop"},
     {"key": "conceptusage", "debt": "conceptusage_debt", "script": "", "cmd": "go run ./cmd/fak score concept-usage --json", "label": "concept-usage"},
     {"key": "maturity", "debt": "maturity_debt", "script": "", "cmd": "go run ./cmd/fak maturity --json", "label": "maturity"},

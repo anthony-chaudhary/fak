@@ -14,6 +14,7 @@ func TestScoreRoutesCoverTheMetaVerbs(t *testing.T) {
 		"concept-usage",
 		"dogfood",
 		"dojo-rsi",
+		"guard-accuracy",
 		"guard-rsi",
 		"guard-verdict-rsi",
 		"loop",
