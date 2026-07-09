@@ -317,6 +317,7 @@ in `internal/modelroute` guards every preset against rot.
 | [`guard-writes.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/routing-presets/guard-writes.json) | never ship a write unchecked | every `write_*` / `delete_*` tool call → a two-model `vote` ensemble; else a single default |
 | [`best-of-quality.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/routing-presets/best-of-quality.json) | best answer on hard work | hard aspects → a drafters + judge `best_of` ensemble; medium → medium; cheap → small |
 | [`scout-then-route.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/routing-presets/scout-then-route.json) | classify before you route | a cheap `scout` labels complexity first, then high → large / low → small |
+| [`dev-models.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/routing-presets/dev-models.json) | auto-decide the dev model | a `fable` scout classifies, then the tier ladder routes: destructive / `risk:high` / `min_complexity:high` → `opus-ultracode`; read/search/low/short-interactive → `fable`; medium and the default → `opus-4.8`. The security-release floor is ordered first, so a destructive call never drops to the cheap tier |
 
 ```bash
 go run ./cmd/fak route --check examples/routing-presets/cost-saver.json

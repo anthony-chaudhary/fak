@@ -1,0 +1,135 @@
+{
+  "version": "fak-route/v1",
+  "default": {
+    "members": [
+      {
+        "model": "opus-4.8",
+        "role": "primary"
+      }
+    ],
+    "scout": "fable",
+    "reason": "dev-models: a cheap fable scout classifies the aspect first, then rules route by tier -\u003e fable (fast/cheap), opus-4.8 (the balanced strong coder), opus-ultracode (Opus 4.8 in exhaustive multi-agent orchestration). Unmatched normal-implementation dev work -\u003e opus-4.8, the T1 floor."
+  },
+  "rules": [
+    {
+      "name": "dev-destructive-ultracode",
+      "match": {
+        "aspect": "tool_call",
+        "tool": "delete_*"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "opus-ultracode"
+          }
+        ],
+        "reason": "destructive/irreversible tool call (delete): the security-release floor never drops to the cheap tier however small the call looks -\u003e the most careful ultracode route (tierpolicy T0 floor beats latency/complexity)"
+      }
+    },
+    {
+      "name": "dev-high-risk-ultracode",
+      "match": {
+        "labels": {
+          "risk": "high"
+        }
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "opus-ultracode"
+          }
+        ],
+        "reason": "caller tagged the aspect high-risk (push / release / migration / a security or policy surface): irreversible, outward-facing work takes the T0 ultracode route -\u003e exhaustive orchestration with adversarial verification, never the cheap tier"
+      }
+    },
+    {
+      "name": "dev-ultrahard-ultracode",
+      "match": {
+        "min_complexity": "high"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "opus-ultracode"
+          }
+        ],
+        "reason": "ultra-hard / long-horizon / wide dev work (large refactor, migration, cross-cutting design, deep debugging) -\u003e Opus 4.8 in ultracode mode: the cost of exhaustive multi-agent orchestration is bought back by correctness on the hardest work (T0). Placed before the read/search rules so a high-flagged aspect escalates even when it is read-shaped"
+      }
+    },
+    {
+      "name": "dev-read-fable",
+      "match": {
+        "aspect": "tool_call",
+        "tool": "read_*"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "fable"
+          }
+        ],
+        "reason": "read-shaped tool call (read/inspect): cheap, low-stakes, not destructive and not flagged hard -\u003e fable (fast); a wrong read costs a re-run, not a bad write"
+      }
+    },
+    {
+      "name": "dev-search-fable",
+      "match": {
+        "aspect": "tool_call",
+        "tool": "search_*"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "fable"
+          }
+        ],
+        "reason": "search / lookup tool call: cheap read-shaped work -\u003e fable, the T2 routine tier"
+      }
+    },
+    {
+      "name": "dev-normal-opus",
+      "match": {
+        "min_complexity": "medium"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "opus-4.8",
+            "role": "primary"
+          }
+        ],
+        "reason": "moderate dev work (ordinary feature / bugfix / focused edit) -\u003e opus-4.8, the balanced strong coder. Named explicitly (a floor \u003e= medium) so medium work lands on the T1 model instead of falling through to the low-\u003efable rule below"
+      }
+    },
+    {
+      "name": "dev-cheap-fable",
+      "match": {
+        "min_complexity": "low"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "fable"
+          }
+        ],
+        "reason": "low-complexity dev aspect (small mechanical edit, quick lookup) -\u003e fable, the T2 routine tier; reached only after the medium rule, so it bands to genuinely-low work"
+      }
+    },
+    {
+      "name": "dev-short-interactive-fable",
+      "match": {
+        "aspect": "request",
+        "max_prompt_tokens": 4096,
+        "latency": "interactive"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "fable"
+          }
+        ],
+        "reason": "short interactive dev turn (quick question / tiny edit, no complexity flag) -\u003e fable for low latency"
+      }
+    }
+  ]
+}
