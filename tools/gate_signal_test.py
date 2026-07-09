@@ -219,6 +219,34 @@ def test_workflow_only_finding_routes_to_ci_lane():
         f"ci is the SOLE path signal (no tools pollution), got {routed['signal']!r}"
 
 
+def test_create_issue_bounds_gh_network_call():
+    # #3493: `gh issue create` is a network round-trip; without a timeout a stalled
+    # TLS/proxy connection hangs the caller forever. create_issue must pass timeout=60
+    # and translate subprocess.TimeoutExpired into the same RuntimeError as its rc!=0
+    # path — never propagate the raw timeout or block a scout/dispatch loop.
+    import subprocess
+    orig_run = gs.subprocess.run
+
+    def _timeout_run(*a, **k):
+        assert k.get("timeout") == 60, \
+            f"create_issue must bound the gh call with timeout=60, got {k.get('timeout')!r}"
+        raise subprocess.TimeoutExpired(cmd=(a[0] if a else "gh"), timeout=60)
+
+    gs.subprocess.run = _timeout_run
+    try:
+        raised = None
+        try:
+            gs.create_issue({"title": "t", "body": "b", "labels": []})
+        except RuntimeError as e:
+            raised = e
+        assert raised is not None, \
+            "a timed-out gh issue create must raise RuntimeError, not hang or leak TimeoutExpired"
+        assert "timed out" in str(raised), \
+            f"the RuntimeError should name the timeout, got {raised!r}"
+    finally:
+        gs.subprocess.run = orig_run
+
+
 def _run() -> int:
     fns = [v for k, v in sorted(globals().items())
            if k.startswith("test_") and callable(v)]

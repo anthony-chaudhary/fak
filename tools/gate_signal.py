@@ -444,8 +444,12 @@ def create_issue(issue: dict[str, Any]) -> str:
     args = ["issue", "create", "--title", issue["title"], "--body", issue["body"]]
     for lab in issue["labels"]:
         args += ["--label", lab]
-    proc = subprocess.run(["gh", *args], capture_output=True, text=True,
-                          encoding="utf-8", creationflags=_win_creationflags())
+    try:
+        proc = subprocess.run(["gh", *args], capture_output=True, text=True,
+                              encoding="utf-8", timeout=60,
+                              creationflags=_win_creationflags())
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("gh issue create timed out after 60s") from e
     if proc.returncode != 0:
         raise RuntimeError(f"gh issue create -> {proc.returncode}: "
                            f"{proc.stderr.strip()[:300]}")
