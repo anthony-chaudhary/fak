@@ -377,8 +377,15 @@ func quantSourceTensorName(cfg Config, name string) (string, bool) {
 	// encoder and an MTP head the quantized text forward never reads; drop them at the
 	// source-name gate exactly as skipLoadTensor does for the f32 path. The Qwen3.5
 	// block below additionally remaps linear-attention tensors, which does not apply here.
-	if (cfg.isGLM() || cfg.isMiniMax()) && (strings.HasPrefix(name, "model.visual.") || strings.HasPrefix(name, "mtp.")) {
-		return "", false
+	// The vision tower is always dropped; the mtp head is retained when RetainMTP is set
+	// (the #3078/#3197 spec-decode scaffold), matching the skipLoadTensor gate.
+	if cfg.isGLM() || cfg.isMiniMax() {
+		if strings.HasPrefix(name, "model.visual.") {
+			return "", false
+		}
+		if strings.HasPrefix(name, "mtp.") && !RetainMTP {
+			return "", false
+		}
 	}
 	if !cfg.IsQwen35Hybrid() {
 		return name, true
@@ -387,7 +394,9 @@ func quantSourceTensorName(cfg Config, name string) (string, bool) {
 	switch {
 	case strings.HasPrefix(name, lm):
 		name = "model." + name[len(lm):]
-	case strings.HasPrefix(name, "model.visual."), strings.HasPrefix(name, "mtp."):
+	case strings.HasPrefix(name, "model.visual."):
+		return "", false
+	case strings.HasPrefix(name, "mtp.") && !RetainMTP:
 		return "", false
 	}
 	layer, suffix, ok := parseLayerTensorSuffix(name)

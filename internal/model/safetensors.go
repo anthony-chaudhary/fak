@@ -346,6 +346,16 @@ func loadSafetensorsFile(sf *safetensorsFile, cfg Config) (*Model, error) {
 	return newModel(cfg, man, raw)
 }
 
+// RetainMTP is the GLM-5.2 self-speculation substrate scaffold flag (#3078/#3197). When false
+// (the default) the load path DROPS the multi-token-prediction ("mtp.") head exactly as before,
+// so every non-scaffold load is byte-identical. When set, the mtp head is RETAINED at load — its
+// tensors survive skipLoadTensor / quantSourceTensorName so the spec-decode verify pass can reach
+// them — while the vision tower is always still dropped. It is a package-level opt-in toggle
+// (deliberately global, so both the safetensors and GGUF loaders read a single source of truth
+// without a config.go struct change); tests set it and reset it with defer. Promote it to a
+// per-load model.Config field once the forward wiring lands and config.go is in scope.
+var RetainMTP bool
+
 // skipLoadTensor drops tensors the text forward never reads BEFORE they are decoded into
 // the f32 buffer. For Qwen3.5/Qwen3-Next that is the vision tower ("model.visual.") and the
 // multi-token-prediction head ("mtp."), which together would otherwise expand to several
@@ -353,11 +363,18 @@ func loadSafetensorsFile(sf *safetensorsFile, cfg Config) (*Model, error) {
 // GLM-5.2 (glm_moe_dsa): a multimodal vision encoder and an MTP head for speculative
 // decoding, neither read by the text causal-LM forward pass, so the skip is generalized to
 // any model whose config marks it mtp-bearing. No-op for a plain Llama/Qwen dense checkpoint.
+// The vision tower is always dropped; the mtp head is dropped unless RetainMTP retains it.
 func skipLoadTensor(cfg Config, name string) bool {
 	if !cfg.dropsMtpAndVisualAtLoad() {
 		return false
 	}
-	return strings.HasPrefix(name, "model.visual.") || strings.HasPrefix(name, "mtp.")
+	if strings.HasPrefix(name, "model.visual.") {
+		return true
+	}
+	if strings.HasPrefix(name, "mtp.") {
+		return !RetainMTP
+	}
+	return false
 }
 
 // dropsMtpAndVisualAtLoad reports whether the load path should drop the vision tower and

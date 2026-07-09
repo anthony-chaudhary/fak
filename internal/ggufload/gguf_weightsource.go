@@ -176,8 +176,11 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 		p.Tick(tensorOnDiskBytes(info)) // one GGUF tensor consumed -> advance the % status
 		if cfg.ModelType == "glm_moe_dsa" {
 			// Drop the MTP ("nextn") speculative head + any vision tower the text forward never
-			// reads (llama.cpp ignores them too), before canonical mapping would reject them.
-			if glmMoeDsaSkipGGUFTensor(info.Name) {
+			// reads (llama.cpp ignores them too), before canonical mapping would reject them. The
+			// materializing loader keys on the UNGATED union: even with model.RetainMTP set the GGUF
+			// MTP head has no canonical slot to materialize into yet (wiring is a later slice), so it
+			// is dropped from materialization here while the fit estimators still count its bytes.
+			if glmMoeDsaMTPOrVisionTensor(info.Name) {
 				continue
 			}
 			if layer, half, ok := glmMoeDsaSplitKVB(info.Name); ok {
@@ -327,8 +330,10 @@ func (s *WeightSource) F32Tensors() (model.Config, []model.NamedTensorF32, error
 		// GGUF batched routed experts: one [E,out,in] blob splits 1->E into per-expert
 		// canonical tensors. Handled before CanonicalTensorNameArch (which leaves them unmapped).
 		if archUsesGGUFBatchedMoEExperts(cfg.ModelType) {
-			// Drop the MTP ("nextn") head + any vision tower the text forward never reads.
-			if glmMoeDsaSkipGGUFTensorForType(cfg.ModelType, info.Name) {
+			// Drop the MTP ("nextn") head + any vision tower the text forward never reads. Ungated
+			// union: the MTP head has no canonical slot to materialize into yet even under
+			// model.RetainMTP, so drop it from materialization while the estimators count its bytes.
+			if glmMoeDsaMTPOrVisionTensorForType(cfg.ModelType, info.Name) {
 				continue
 			}
 			if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {

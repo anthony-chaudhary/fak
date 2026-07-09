@@ -300,12 +300,12 @@ func ggufMemoryPlanByDType(class compute.MemoryClass, scope compute.MemoryScope,
 
 func tensorCPUOffloadExpert(name, modelType string) (bool, error) {
 	if modelType == "glm_moe_dsa" {
-		// The MTP ("nextn") head + vision tower are skipped at load (the text forward never
-		// reads them). Byte-accounting callers drop them before calling this helper; direct
-		// callers still get a non-expert classification instead of a mapping error. This must
-		// match the loader skip (glmMoeDsaSkipGGUFTensor) or the estimate would reject a real
-		// GLM-5.2 checkpoint the loader happily loads.
-		if glmMoeDsaSkipGGUFTensor(name) {
+		// The MTP ("nextn") head + vision tower carry no canonical HF mapping. Classify them as
+		// non-expert (never a mapping error) via the UNGATED union: when model.RetainMTP retains
+		// the MTP head, the offload estimator no longer skips it before this helper, so it must
+		// still classify (as a device weight) rather than fall through to CanonicalTensorNameArch
+		// and reject a real GLM-5.2 checkpoint.
+		if glmMoeDsaMTPOrVisionTensor(name) {
 			return false, nil
 		}
 		if _, _, ok := glmMoeDsaSplitKVB(name); ok {

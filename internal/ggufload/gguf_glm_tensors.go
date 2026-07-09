@@ -141,27 +141,59 @@ func archUsesGGUFBatchedMoEExperts(arch string) bool {
 	return false
 }
 
-// glmMoeDsaSkipGGUFTensor reports whether a glm_moe_dsa GGUF tensor is part of the Multi-Token-
-// Prediction (MTP / "nextn") speculative-decoding head or a multimodal vision tower — neither read
-// by the text causal-LM forward. llama.cpp likewise ignores these ("model has unused tensor
-// blk.<L>.nextn.*"); fak skips them at load so a real GLM-5.2 checkpoint does not fail on a tensor
-// the forward never consumes (mirrors the safetensors path's skipLoadTensor mtp/visual drop).
+// isGLMMoeDsaMTPTensor reports whether a glm_moe_dsa GGUF tensor is part of the Multi-Token-
+// Prediction (MTP / "nextn") speculative-decoding head. The GGUF spells it "blk.<L>.nextn.*"
+// (eh_proj/enorm/hnorm/shared_head_norm/...).
+func isGLMMoeDsaMTPTensor(name string) bool {
+	return strings.Contains(name, ".nextn.")
+}
+
+// isGLMMoeDsaVisionTensor reports whether a glm_moe_dsa GGUF tensor is part of the multimodal
+// vision tower — llama.cpp's "v.*" / "mm." conversion namespace.
+func isGLMMoeDsaVisionTensor(name string) bool {
+	return strings.HasPrefix(name, "v.") || strings.HasPrefix(name, "mm.")
+}
+
+// glmMoeDsaMTPOrVisionTensor is the UNGATED union of the two tensor families the text causal-LM
+// forward never reads AND that carry no canonical HF mapping: the MTP ("nextn") head and the
+// vision tower. The materializing loaders and the CPU-offload classifier key on THIS predicate so
+// they never try to canonical-map (and thus error on) an MTP/vision tensor — regardless of the
+// model.RetainMTP retention flag, since GGUF has no canonical slot for the MTP head yet
+// (materializing it into the forward is the later, checkpoint-gated spec-decode wiring slice,
+// #3078/#3197). The DROP-from-byte-accounting decision is glmMoeDsaSkipGGUFTensor, which honors
+// the flag.
+func glmMoeDsaMTPOrVisionTensor(name string) bool {
+	return isGLMMoeDsaMTPTensor(name) || isGLMMoeDsaVisionTensor(name)
+}
+
+// glmMoeDsaMTPOrVisionTensorForType is glmMoeDsaMTPOrVisionTensor gated to the glm_moe_dsa family,
+// so the "glm_moe_dsa" check stays in one place at the callsites that already know the model type.
+func glmMoeDsaMTPOrVisionTensorForType(modelType, name string) bool {
+	return modelType == "glm_moe_dsa" && glmMoeDsaMTPOrVisionTensor(name)
+}
+
+// glmMoeDsaSkipGGUFTensor reports whether a glm_moe_dsa GGUF tensor should be DROPPED from load
+// byte-accounting. The vision tower is always dropped (never wired). The MTP ("nextn") head is
+// dropped by DEFAULT — llama.cpp likewise ignores it ("model has unused tensor blk.<L>.nextn.*")
+// — but is RETAINED (counted) when model.RetainMTP is set: the GLM-5.2 self-speculation substrate
+// scaffold (#3078/#3197). Retention makes the head's bytes accountable to the fit estimators;
+// materializing it into the forward is a separate, later slice. Default (flag OFF) is byte-
+// identical to the historical drop-everything behavior. Mirrors the safetensors path's
+// skipLoadTensor mtp/visual drop.
 func glmMoeDsaSkipGGUFTensor(name string) bool {
-	// MTP head: the GGUF spells it "blk.<L>.nextn.*" (eh_proj/enorm/hnorm/shared_head_norm/...).
-	if strings.Contains(name, ".nextn.") {
+	if isGLMMoeDsaVisionTensor(name) {
 		return true
 	}
-	// Multimodal vision tower (when present): llama.cpp's "v.*" / "mm." conversion namespace.
-	if strings.HasPrefix(name, "v.") || strings.HasPrefix(name, "mm.") {
-		return true
+	if isGLMMoeDsaMTPTensor(name) {
+		return !model.RetainMTP
 	}
 	return false
 }
 
-// glmMoeDsaSkipGGUFTensorForType reports whether a tensor should be dropped at load for the
-// given model type: true only for a glm_moe_dsa file whose tensor is an MTP/vision tensor the
-// text forward never reads (glmMoeDsaSkipGGUFTensor). It is the shared guard the loader and the
-// byte-accounting estimators use so the "glm_moe_dsa" family check stays in one place.
+// glmMoeDsaSkipGGUFTensorForType reports whether a tensor should be dropped from byte-accounting
+// for the given model type: true only for a glm_moe_dsa file whose tensor is dropped by
+// glmMoeDsaSkipGGUFTensor. It is the shared guard the byte-accounting estimators use so the
+// "glm_moe_dsa" family check stays in one place.
 func glmMoeDsaSkipGGUFTensorForType(modelType, name string) bool {
 	return modelType == "glm_moe_dsa" && glmMoeDsaSkipGGUFTensor(name)
 }

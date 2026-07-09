@@ -184,8 +184,10 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 	computeFn := func(info TensorInfo) tensorWork {
 		tw := tensorWork{tickBytes: tensorOnDiskBytes(info)}
 		if cfg.ModelType == "glm_moe_dsa" {
-			// Drop the MTP ("nextn") head + any vision tower the text forward never reads.
-			if glmMoeDsaSkipGGUFTensor(info.Name) {
+			// Drop the MTP ("nextn") head + any vision tower the text forward never reads. Ungated
+			// union: the MTP head has no canonical slot to materialize into yet even under
+			// model.RetainMTP, so drop it from materialization while the estimators count its bytes.
+			if glmMoeDsaMTPOrVisionTensor(info.Name) {
 				return tw
 			}
 			// MLA KV-b half: dequant it; the collector buffers + merges the pair in order.
