@@ -24,6 +24,7 @@ type debugVarsResponse struct {
 	ManagedCache     *debugManagedCacheVars         `json:"managed_cache,omitempty"`
 	VCacheFamilies   *debugVCacheFamiliesVars       `json:"vcache_families,omitempty"`
 	VCacheGovernor   []vcacheGovernorDecisionRecord `json:"vcache_governor_journal,omitempty"`
+	VCacheGovQuality *vcacheGovernorQualityVars     `json:"vcache_governor_quality,omitempty"`
 	VCacheWarmth     []vcacheWarmthDemotionRecord   `json:"vcache_warmth_demotions,omitempty"`
 	ModelLoad        *debugModelLoadVars            `json:"model_load,omitempty"`
 	KVMemory         *debugKVMemoryVars             `json:"kv_memory,omitempty"`
@@ -445,6 +446,7 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		ManagedCache:     managedCacheVars(s.cacheTTL1H, m.adjudicationSummary()),
 		VCacheFamilies:   vcacheFamiliesVars(vcacheTurns, vcacheCapped),
 		VCacheGovernor:   m.vcacheGovernorDecisionRecords(),
+		VCacheGovQuality: m.vcacheGovernorQualityVars(),
 		VCacheWarmth:     m.vcacheWarmthDemotionRecords(),
 		ModelLoad:        debugModelLoadProfile(s.modelLoadProfile()),
 		KVMemory:         debugKVMemory(s.planner),
