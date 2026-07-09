@@ -186,6 +186,16 @@ func (f *File) Config() (model.Config, error) {
 		cfg.PartialRotaryFactor = float64(ropeDim) / float64(headDim)
 	}
 	if arch == "qwen35" || arch == "qwen35moe" {
+		// The qwen35 family (Qwen3.5/3.6) can ship trailing NextN/MTP draft blocks that
+		// block_count INCLUDES (witnessed: Qwen3.6-27B Q4_K_M declares block_count=65 +
+		// nextn_predict_layers=1, with only blk.64.nextn.* glue tensors at the tail). The
+		// text forward never runs them and the loader drops their tensors, so exclude
+		// them from NumLayers here — BEFORE the LayerTypes schedule derives — or the
+		// built model demands weights that don't exist (q8 tensor not built:
+		// model.layers.64.linear_attn.in_proj_qkv.weight).
+		if n, ok := f.Uint64(p + "nextn_predict_layers"); ok && int(n) < cfg.NumLayers {
+			cfg.NumLayers -= int(n)
+		}
 		if interval, ok := f.Uint64(p + "full_attention_interval"); ok {
 			cfg.FullAttentionInterval = int(interval)
 		}
