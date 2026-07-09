@@ -54,6 +54,13 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+try:  # windowgate: CREATE_NO_WINDOW on git/helper subprocesses so background runs never flash a console
+    from dispatch_worker import install_no_window_subprocess_defaults
+
+    install_no_window_subprocess_defaults(subprocess)
+except Exception:  # sibling module absent (imported off the tools/ path) — best-effort suppressor only
+    pass
+
 SCHEMA = "fak.glm52-prefill-sweep.v1"
 # The per-length record schema. Deliberately distinct from the decode sweep's
 # "glm-throughput/1" so a reader never mistakes a prefill row for a decode row.
