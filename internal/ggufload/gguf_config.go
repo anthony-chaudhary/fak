@@ -426,6 +426,14 @@ const (
 	glmKeyIndexHeadDim = "attention.indexer.key_length"
 	glmKeyIndexTopK    = "attention.indexer.top_k"
 	glmKeyIndexerTypes = "indexer_types"
+
+	// DeepSeek-V4 CSA/HCA two-tier compression rates (metadata only; see
+	// model.Config.CSACompressionRate / V4 attention seam map, Missing seam #7).
+	// No upstream V4 GGUF conversion exists yet, so these key spellings are fak's
+	// own under the existing attention.* namespace, to reconcile if/when an
+	// upstream converter defines them. GLM-5.2 ships neither key.
+	glmKeyCSACompRate = "attention.csa_compression_rate"
+	glmKeyHCACompRate = "attention.hca_compression_rate"
 )
 
 // applyGLMMoeDsaConfig derives GLM-5.2's MoE + MLA + DSA-indexer axes from GGUF
@@ -519,6 +527,19 @@ func applyGLMMoeDsaConfig(f *File, p string, cfg *model.Config, ropeDim int) err
 	}
 	if v := intValueOrZero(f, p+glmKeyIndexTopK); v > 0 {
 		cfg.IndexTopK = v
+	}
+
+	// ---- DeepSeek-V4 CSA/HCA compression-rate axis (metadata only) ----------
+	// V4's two compression tiers. Read best-effort under the existing attention.*
+	// namespace; GLM-5.2 ships neither key, so both stay 0 and nothing changes.
+	// This parses config only: the co-resident two-plane forward is unbuilt (V4
+	// seam map, Missing seams #1-#3) and a distinct deepseek_v4 arch route +
+	// tensor family is Missing seam #8. Zero stays a single-plane load.
+	if v := intValueOrZero(f, p+glmKeyCSACompRate); v > 0 {
+		cfg.CSACompressionRate = v
+	}
+	if v := intValueOrZero(f, p+glmKeyHCACompRate); v > 0 {
+		cfg.HCACompressionRate = v
 	}
 	// indexer_types: GLM-5.2's DSA "lightning indexer" runs on only a strided subset of
 	// layers. A "full" layer computes its own sparse top-k index and carries the indexer.*
