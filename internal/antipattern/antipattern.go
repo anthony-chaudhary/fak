@@ -126,6 +126,12 @@ type Spec struct {
 	Title      string
 	Mitigation string
 	Cure       string
+	// AutoCure reports whether Cure routes to a fak verb a mitigation loop may dispatch
+	// UNATTENDED -- one that files an issue or a work order without rewriting code. A cure
+	// that edits code (rename-concept) or needs human judgment (delete dead code) is false,
+	// so the loop emits it as a work order instead of running it. This is the one bit that
+	// separates "detect and auto-mitigate" from "detect and hand off".
+	AutoCure bool
 }
 
 // registry is the canonical, ordered class table. The order is the render/KPI order:
@@ -150,6 +156,8 @@ var registry = []Spec{
 		Title:      "code-complete internal package imported by nothing",
 		Mitigation: "wire it into a default path (a verb, the request path, a benchmark) or retire it",
 		Cure:       "`fak unwired-debt-dispatch` files one deduped issue to wire the package into a runnable surface or retire it",
+		// Files a deduped issue -- reversible, no code rewrite -- so a loop may dispatch it unattended.
+		AutoCure: true,
 	},
 	{
 		Class:      ClassOrphanFunc,
@@ -221,6 +229,51 @@ func SortFindings(fs []Finding) {
 		}
 		return a.Ref < b.Ref
 	})
+}
+
+// CureAction is one routed remediation step: a detected finding paired with the exact cure
+// that mitigates its class and whether a loop may run it unattended. It is the EXECUTABLE unit
+// a mitigation loop consumes -- detection (Collect) answers "what work was lost?", the plan
+// answers "run THIS to recover it", worst-first.
+type CureAction struct {
+	Class  Class  `json:"class"`
+	Ref    string `json:"ref"`
+	Detail string `json:"detail"`
+	Weight int    `json:"weight"`
+	Cure   string `json:"cure"`
+	// Auto mirrors the class spec's AutoCure: true means a loop may dispatch Cure unattended
+	// (it files an issue, no code rewrite); false means emit it as a work order for a human.
+	Auto bool `json:"auto"`
+}
+
+// MitigationPlan turns detected findings into an ordered, worst-first list of routed cure
+// actions -- the mitigation half of the loop made executable. A `fak loop`/cron tick calls
+// Collect (detect) then MitigationPlan (mitigate): each action carries the exact cure command
+// and whether it is auto-dispatchable, so the tick can run the safe ones and hand the rest off
+// rather than re-deriving the remedy. It is PURE (findings in, plan out; no disk, no git, no
+// clock) and re-sorts worst-first so a loop that affords one action per tick spends it on the
+// heaviest loss. An unregistered class yields an empty Cure and Auto=false (fail-safe: never
+// auto-run a cure we cannot name).
+func MitigationPlan(findings []Finding) []CureAction {
+	sorted := append([]Finding(nil), findings...)
+	SortFindings(sorted)
+	plan := make([]CureAction, 0, len(sorted))
+	for _, f := range sorted {
+		var cure string
+		var auto bool
+		if s, ok := SpecOf(f.Class); ok {
+			cure, auto = s.Cure, s.AutoCure
+		}
+		plan = append(plan, CureAction{
+			Class:  f.Class,
+			Ref:    f.Ref,
+			Detail: f.Detail,
+			Weight: f.Weight,
+			Cure:   cure,
+			Auto:   auto,
+		})
+	}
+	return plan
 }
 
 // Fold turns detected findings into the control-pane Payload via the shared scorecard

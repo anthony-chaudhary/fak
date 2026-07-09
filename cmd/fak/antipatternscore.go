@@ -16,6 +16,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -38,6 +39,7 @@ func runAntipatternScorecard(stdout, stderr io.Writer, argv []string) int {
 	commitsN := fs.Int("commits", 200, "size of the recent-commit window scanned for redundant rework (0 disables)")
 	asJSON := fs.Bool("json", false, "emit control-pane JSON")
 	asMarkdown := fs.Bool("markdown", false, "emit the committed snapshot body")
+	asPlan := fs.Bool("plan", false, "emit the worst-first routed mitigation plan (the loop body: detect -> cure) instead of the scorecard")
 	comparePath := fs.String("compare", "", "compare against a prior --json payload")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -60,6 +62,14 @@ func runAntipatternScorecard(stdout, stderr io.Writer, argv []string) int {
 	// still reports the tree-derived lost-work classes.
 	commits := readRecentCommits(root, *commitsN)
 
+	// --plan is the mitigation half made runnable: detect (Collect) then route each finding to
+	// its cure, worst-first. This is what a `fak loop`/cron tick consumes -- it runs the
+	// auto-dispatch actions and hands the work-orders off -- rather than a human reading the
+	// scorecard prose. Kept separate from the scorecard emit so the KPI card stays unchanged.
+	if *asPlan {
+		return emitMitigationPlan(stdout, root, commits, *asJSON)
+	}
+
 	payload := antipattern.Build(root, commits)
 
 	return emitScorecard(stdout, stderr, "fak antipattern-scorecard", antipattern.DebtKey, payload,
@@ -78,6 +88,47 @@ func runAntipatternScorecard(stdout, stderr io.Writer, argv []string) int {
 				payload.Corpus["commits_scanned"], payload.Corpus["redundant_rework"],
 				payload.Corpus["unwired_pkg"], payload.Corpus["orphan_func"]),
 		})
+}
+
+// emitMitigationPlan runs the detect->mitigate loop body once: it collects findings at root
+// (over the same commit window) and prints the worst-first routed cure plan. --json emits the
+// machine plan a runner consumes; the text form tags each action auto-dispatch vs work-order so
+// a human sees at a glance which the loop would run unattended. Detection with zero findings is
+// a clean pass, not an error.
+func emitMitigationPlan(stdout io.Writer, root string, commits []antipattern.Commit, asJSON bool) int {
+	findings, _ := antipattern.Collect(root, commits)
+	plan := antipattern.MitigationPlan(findings)
+
+	if asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(plan); err != nil {
+			return 1
+		}
+		return 0
+	}
+
+	if len(plan) == 0 {
+		fmt.Fprintln(stdout, "mitigation plan: no anti-pattern findings -- no work to recover")
+		return 0
+	}
+	auto := 0
+	for _, a := range plan {
+		if a.Auto {
+			auto++
+		}
+	}
+	fmt.Fprintf(stdout, "mitigation plan -- %d action(s) worst-first (%d auto-dispatch, %d work-order):\n",
+		len(plan), auto, len(plan)-auto)
+	for i, a := range plan {
+		tag := "work-order"
+		if a.Auto {
+			tag = "auto-dispatch"
+		}
+		fmt.Fprintf(stdout, "%d. [%s] %s %s (weight %d)\n     detail: %s\n     cure:   %s\n",
+			i+1, tag, a.Class, a.Ref, a.Weight, a.Detail, a.Cure)
+	}
+	return 0
 }
 
 // readRecentCommits shells out to `git log` for the last n non-merge commits at root and

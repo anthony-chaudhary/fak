@@ -107,6 +107,47 @@ func TestSortFindingsWorstFirst(t *testing.T) {
 	}
 }
 
+// TestMitigationPlanRoutesWorstFirstAndFlagsAuto is the executable-loop invariant: the plan a
+// `fak loop` tick runs must (1) order actions worst-first, (2) route each finding to its class
+// cure, and (3) mark exactly the safe cures auto-dispatchable so the loop runs those unattended
+// and hands the code-changing ones off as work orders.
+func TestMitigationPlanRoutesWorstFirstAndFlagsAuto(t *testing.T) {
+	findings := []Finding{
+		{Class: ClassOrphanFunc, Ref: "internal/a/a.go:10", Detail: "func lo", Weight: 1},
+		{Class: ClassUnwiredPkg, Ref: "internal/big", Detail: "big pkg", Weight: 900},
+		{Class: ClassRedundantRework, Ref: "abc123", Detail: "redone", Weight: 3},
+	}
+	plan := MitigationPlan(findings)
+	if len(plan) != 3 {
+		t.Fatalf("plan has %d actions, want 3", len(plan))
+	}
+	// (1) worst-first: the 900-weight unwired package leads.
+	if plan[0].Class != ClassUnwiredPkg || plan[0].Weight != 900 {
+		t.Fatalf("heaviest action should lead, got %s weight %d", plan[0].Class, plan[0].Weight)
+	}
+	// (2) each action carries its class's routed cure.
+	for _, a := range plan {
+		s, ok := SpecOf(a.Class)
+		if !ok {
+			t.Fatalf("plan carries unregistered class %s", a.Class)
+		}
+		if a.Cure != s.Cure {
+			t.Errorf("%s cure mismatch: plan %q vs spec %q", a.Class, a.Cure, s.Cure)
+		}
+	}
+	// (3) only the issue-filing unwired cure is auto-dispatchable; code-changing cures are not.
+	for _, a := range plan {
+		wantAuto := a.Class == ClassUnwiredPkg
+		if a.Auto != wantAuto {
+			t.Errorf("%s Auto = %v, want %v (only the deduped-issue cure runs unattended)", a.Class, a.Auto, wantAuto)
+		}
+	}
+	// MitigationPlan must not mutate the caller's slice order (it sorts a copy).
+	if findings[0].Class != ClassOrphanFunc {
+		t.Error("MitigationPlan mutated the caller's findings slice; it must sort a copy")
+	}
+}
+
 // --- DetectRedundantRework: the post-hoc repetition detector -------------------------------
 
 func TestRedundantReworkFlagsSameClaimOverlappingFiles(t *testing.T) {
