@@ -197,11 +197,97 @@ func TestPresetTiersAdmitTheirOwnWork(t *testing.T) {
 	}
 }
 
-// TestPresetLadderStrictlyWidens proves the ladder is monotone where the issue
-// says it is: a write the bounded-write tier confines to its region is refused
-// outright by the two tiers below it. This is what "dial agency up as trust
-// grows" means operationally.
-func TestPresetLadderStrictlyWidens(t *testing.T) {
+// TestEmbeddedPresetsAreExactlyTheLadder closes the "gain a rung" hole. The
+// embed directive globs presets/*.json, but every other test in this file
+// iterates PresetNames() — the hand-written ladder. Without this check a new
+// file dropped into presets/ would ship inside the binary, be loadable by name,
+// and never be round-tripped or tier-witnessed by anything. Set equality in BOTH
+// directions is the assertion: no orphan manifest, and no rung without a file.
+func TestEmbeddedPresetsAreExactlyTheLadder(t *testing.T) {
+	entries, err := presetFS.ReadDir("presets")
+	if err != nil {
+		t.Fatalf("ReadDir(presets): %v", err)
+	}
+	onDisk := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		onDisk[strings.TrimSuffix(e.Name(), ".json")] = true
+	}
+	inLadder := make(map[string]bool, len(presetLadder))
+	for _, name := range PresetNames() {
+		inLadder[name] = true
+		if !onDisk[name] {
+			t.Errorf("ladder rung %q has no embedded manifest presets/%s.json", name, name)
+		}
+	}
+	for name := range onDisk {
+		if !inLadder[name] {
+			t.Errorf("presets/%s.json ships in the binary but is not a ladder rung: "+
+				"it is never round-tripped or tier-witnessed, yet would be enforced as a floor", name)
+		}
+	}
+}
+
+// TestPresetManifestRefusesNonRungBeforeReading pins the ORDER inside
+// PresetManifest: membership is checked before the embedded read. A name that is
+// not a rung must be refused for being off-ladder, never merely for missing a
+// file — otherwise an unreviewed manifest dropped into presets/ would load.
+func TestPresetManifestRefusesNonRungBeforeReading(t *testing.T) {
+	for _, name := range []string{"wide-open", "../../etc/passwd", "coding-agent-safe", ""} {
+		if _, err := PresetManifest(name); err == nil {
+			t.Fatalf("PresetManifest(%q) must refuse: it is not a ladder rung", name)
+		} else if !strings.Contains(err.Error(), "unknown preset") {
+			t.Fatalf("PresetManifest(%q) must refuse as off-ladder, got: %v", name, err)
+		}
+	}
+}
+
+// TestProposeOnlyAdmitsItsDraftingWork is the positive control that the generic
+// one above cannot give. TestPresetTiersAdmitTheirOwnWork admits propose-only via
+// Read — an affordance read-only already has — so it never witnesses the rung's
+// actual reason to exist. These are the drafting tools that distinguish it.
+func TestProposeOnlyAdmitsItsDraftingWork(t *testing.T) {
+	ctx := context.Background()
+	adj := presetAdjudicator(t, PresetProposeOnly)
+	for _, tool := range []string{"ExitPlanMode", "diff_infra", "plan_deploy", "validate_terraform"} {
+		t.Run(tool, func(t *testing.T) {
+			if v := adj.Adjudicate(ctx, presetCall(tool, `{}`)); v.Kind != abi.VerdictAllow {
+				t.Fatalf("propose-only must admit its drafting tool %s: %v (%s)",
+					tool, v.Kind, abi.ReasonName(v.Reason))
+			}
+		})
+	}
+}
+
+// TestPresetLadderIsNotASupersetChain pins the honest shape of the ladder, so the
+// doc comment on presetLadder cannot quietly drift back into claiming a total
+// order over permitted tool NAMES. propose-only admits a planning family that
+// BOTH rungs above it refuse. This is a lattice, not a chain; the write axis
+// (below) is the part that is totally ordered. Pinning it means a future change
+// that makes the ladder a real superset chain must delete this test on purpose.
+func TestPresetLadderIsNotASupersetChain(t *testing.T) {
+	ctx := context.Background()
+	for _, tool := range []string{"ExitPlanMode", "diff_infra", "plan_deploy", "validate_terraform"} {
+		if v := presetAdjudicator(t, PresetProposeOnly).Adjudicate(ctx, presetCall(tool, `{}`)); v.Kind != abi.VerdictAllow {
+			t.Fatalf("precondition: propose-only must allow %s, got %v", tool, v.Kind)
+		}
+		for _, upper := range []string{PresetBoundedWrite, PresetAutonomous} {
+			v := presetAdjudicator(t, upper).Adjudicate(ctx, presetCall(tool, `{}`))
+			if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonDefaultDeny {
+				t.Fatalf("ladder shape changed: %s now admits propose-only's %s (%v/%s).\n"+
+					"If that is intended, the ladder became a superset chain — update the doc "+
+					"comment on presetLadder and delete this test deliberately.",
+					upper, tool, v.Kind, abi.ReasonName(v.Reason))
+			}
+		}
+	}
+}
+
+// TestPresetLadderWidensTheWriteAxis proves the ladder is monotone on the ONE
+// axis it claims to order: a write the bounded-write tier confines to its region
+// is refused outright by the two tiers below it. This is what "dial agency up as
+// trust grows" means operationally. It does NOT prove the permitted-name set
+// widens — see TestPresetLadderIsNotASupersetChain, which pins that it does not.
+func TestPresetLadderWidensTheWriteAxis(t *testing.T) {
 	ctx := context.Background()
 	inRegion := presetCall("Write", `{"file_path":"workspace/ok.txt","content":"x"}`)
 	for _, lower := range []string{PresetReadOnly, PresetProposeOnly} {
