@@ -13,6 +13,12 @@
 // dos-refereed grader (#2732) this command is built to plug in behind the same
 // --models/--concepts/--out contract.
 //
+// --spine <fixture.json> drives the #2729 spine (epic #2721): ONE concept
+// (commit_stamp + trunk fidelity) x TWO model arms x a REAL `dos commit-audit`
+// grade x one fak.conceptbench.v1 row per model. Unlike the replay grader, each
+// arm's recorded transcript is replayed into a fresh scratch git repo and its
+// PRODUCED commit is graded by the live dos kernel referee — see spine.go.
+//
 // --contract emits a fak.conceptbench.contract.v1 (models, concepts, task ids, core
 // budget) BEFORE a live run, carrying result_claim_allowed:false and NO scores,
 // matching the #868 official-run contract discipline.
@@ -167,6 +173,7 @@ type contract struct {
 
 type flags struct {
 	replay   string
+	spine    string
 	tasks    string
 	models   string
 	concepts string
@@ -180,6 +187,7 @@ func run(argv []string) int {
 	fs := flag.NewFlagSet("conceptbench", flag.ContinueOnError)
 	var f flags
 	fs.StringVar(&f.replay, "replay", "", "replay directory holding tasks.json + attempts.json; grades recorded attempts offline")
+	fs.StringVar(&f.spine, "spine", "", "spine fixture JSON (#2729): grade two model arms' produced commits with a real dos commit-audit call, one fak.conceptbench.v1 row per model")
 	fs.StringVar(&f.tasks, "tasks", "", "explicit task corpus JSON (overrides <replay>/tasks.json); required for --contract without --replay")
 	fs.StringVar(&f.models, "models", "", "comma-separated models to include (default: every model in the recorded attempts); REQUIRED for --contract")
 	fs.StringVar(&f.concepts, "concepts", "", "comma-separated concepts to include (default: every concept in the corpus)")
@@ -211,6 +219,9 @@ func run(argv []string) int {
 		FakBudget:  os.Getenv("FAK_BUDGET"),
 	}
 
+	if f.spine != "" {
+		return runSpine(f, budget)
+	}
 	if f.contract {
 		return runContract(f, budget)
 	}

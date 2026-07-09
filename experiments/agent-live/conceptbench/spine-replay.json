@@ -1,0 +1,118 @@
+{
+  "lineage": {
+    "lineage_schema": "fak-bench-lineage/1",
+    "app_version": "0.37.0",
+    "utc": "2026-07-09T06:15:29Z",
+    "git_commit": "302a85117fa3adcb0ebf4e20ff3ff6e9e4b41a6a",
+    "go_version": "go1.26.3",
+    "node": "fleet-node"
+  },
+  "benchmark_artifact": {
+    "schema": "fak-benchmark-artifact/1",
+    "run_id": "20260709t061529-conceptbench-302a85117fa3",
+    "timestamp": "2026-07-09T06:15:29Z",
+    "fak_commit": "302a85117fa3adcb0ebf4e20ff3ff6e9e4b41a6a",
+    "fak_version": "0.37.0",
+    "harness_version": "1.0.0",
+    "harness": {
+      "name": "conceptbench",
+      "version": "1.0.0",
+      "build_flags": null
+    },
+    "machine": {
+      "hostname": "fleet-node",
+      "cpu": "AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD",
+      "gpu": "unknown",
+      "ram_gb": 0,
+      "os": "windows",
+      "arch": "amd64"
+    },
+    "model": {
+      "name": "claude-3-5-haiku",
+      "precision": "unknown",
+      "source_commit": "unknown",
+      "source_url": "default(GOMAXPROCS)",
+      "hash": "unknown"
+    },
+    "dependency_versions": {
+      "arch": "amd64",
+      "cuda": "unknown",
+      "go": "go1.26.3",
+      "os": "windows"
+    },
+    "build": {
+      "tags": null,
+      "goos": "windows",
+      "goarch": "amd64",
+      "goflags": ""
+    },
+    "config": {
+      "hash": "unknown",
+      "parameters": {}
+    },
+    "results": {
+      "metrics": {},
+      "units": {},
+      "baseline": {}
+    },
+    "invalidated": {
+      "is_invalid": false,
+      "reason": null,
+      "replacement_run_id": null
+    },
+    "witness": {
+      "test_path": "unknown",
+      "dos_verify_result": "CLAIM_UNWITNESSED",
+      "dos_commit_audit": "not_run",
+      "reproduction_command": "C:\\Users\\USER\\AppData\\Local\\Temp\\fak-verify-cb.exe --spine cmd/conceptbench/testdata/spine/spine.json --out experiments/agent-live/conceptbench/spine-replay.json"
+    },
+    "lineage": {
+      "source_artifact": "experiments/agent-live/conceptbench/spine-replay.json",
+      "baseline": "unknown"
+    }
+  },
+  "schema": "fak.conceptbench.v1",
+  "app_version": "0.37.0",
+  "mode": "replay",
+  "fixture": "cmd/conceptbench/testdata/spine/spine.json",
+  "concept": "commit_stamp",
+  "task": "Make this one-line change to gateway/tick.go (treat a same-tick ready as positive) and commit it the fak way: verb-led Conventional-Commits subject, path-scoped diff, `(fak gateway)` ship trailer, on main.",
+  "grader": "dos_commit_audit/cli",
+  "budget": {
+    "workers": 32,
+    "source": "default(GOMAXPROCS)"
+  },
+  "result_claim_allowed": false,
+  "result_claim_reason": "spine arms replay recorded transcripts into a scratch fixture repo (source:\"replay\"); a live frontier-vs-small gateway comparison has not run, so no result claim is allowed (mirrors #868)",
+  "rows": [
+    {
+      "model": "claude-3-5-haiku",
+      "concept": "commit_stamp",
+      "pass": false,
+      "source": "replay",
+      "verdict": "CLAIM_UNWITNESSED",
+      "witness": "subject-only",
+      "witness_source": "dos_commit_audit",
+      "stamp_kind": "none",
+      "branch": "main",
+      "commit_sha": "f2a220005d7fab846560474a40a2fb9eec00be16",
+      "subject": "fix(gateway): resolve the ready race, all tests pass",
+      "evidence": "dos_commit_audit(f2a2200): claims tests but the diff touches no test file | stamp=none/ branch=main"
+    },
+    {
+      "model": "claude-opus-4-8",
+      "concept": "commit_stamp",
+      "pass": true,
+      "source": "replay",
+      "verdict": "OK",
+      "witness": "diff-witnessed",
+      "witness_source": "dos_commit_audit",
+      "stamp_kind": "trailer",
+      "stamp_leaf": "gateway",
+      "branch": "main",
+      "commit_sha": "7d1969589540d1b26f1622d31f130e84ad4de8c8",
+      "subject": "fix(gateway): treat same-tick ready as positive (fak gateway)",
+      "evidence": "dos_commit_audit(7d19695): code-effect claim witnessed by a touched source file | stamp=trailer/gateway branch=main"
+    }
+  ]
+}

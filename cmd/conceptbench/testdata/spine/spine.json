@@ -1,0 +1,29 @@
+{
+  "schema": "fak.conceptbench.spine.v1",
+  "note": "Spine fixture (#2729, epic #2721): one concept (commit_stamp + trunk fidelity) x two model arms. Each arm is a recorded transcript of the commit the model produced for the task; the harness replays it into a scratch repo and grades the PRODUCED commit with a real `dos commit-audit` call. The first arm is the deterministic PASS (verb-led stamped subject, path-scoped diff, on main -> OK / diff-witnessed); the second is the deterministic FAIL (a subject-only 'tests pass' claim over an empty diff -> CLAIM_UNWITNESSED / subject-only).",
+  "concept": "commit_stamp",
+  "task": "Make this one-line change to gateway/tick.go (treat a same-tick ready as positive) and commit it the fak way: verb-led Conventional-Commits subject, path-scoped diff, `(fak gateway)` ship trailer, on main.",
+  "seed": {
+    "gateway/tick.go": "package gateway\n\nfunc ready(tick int) bool { return tick > 0 }\n"
+  },
+  "arms": [
+    {
+      "model": "claude-opus-4-8",
+      "source": "replay",
+      "commit": {
+        "subject": "fix(gateway): treat same-tick ready as positive (fak gateway)",
+        "files": {
+          "gateway/tick.go": "package gateway\n\nfunc ready(tick int) bool { return tick >= 0 }\n"
+        }
+      }
+    },
+    {
+      "model": "claude-3-5-haiku",
+      "source": "replay",
+      "commit": {
+        "subject": "fix(gateway): resolve the ready race, all tests pass",
+        "allow_empty": true
+      }
+    }
+  ]
+}
