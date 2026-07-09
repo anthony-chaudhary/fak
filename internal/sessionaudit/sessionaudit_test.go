@@ -405,6 +405,108 @@ func TestScopeHeaderSubagentWarningAndModelMix(t *testing.T) {
 	}
 }
 
+func behaviorSession(name, ns string, b Behavior) Session {
+	return Session{
+		Session:  name,
+		Path:     filepath.Join("root", ns, name+".jsonl"),
+		Behavior: b,
+	}
+}
+
+func TestAggregateCompactBehaviorJoinsRecurringFailuresAcrossSessions(t *testing.T) {
+	sig := "go: cannot find module providing package"
+	sessions := []Session{
+		behaviorSession("s1", "C--work-fak", Behavior{
+			FailureMass:  []RepeatFailureRow{{Tool: "Bash", Sig: sig, Count: 3}},
+			TimeoutKills: 4,
+			EditChurn:    map[string]int64{"a.go": 2},
+		}),
+		behaviorSession("s2", "C--work-fak", Behavior{
+			FailureMass: []RepeatFailureRow{{Tool: "Bash", Sig: sig, Count: 5}},
+		}),
+		behaviorSession("s3", "-home-u-other", Behavior{
+			FailureMass: []RepeatFailureRow{{Tool: "Bash", Sig: sig, Count: 3}},
+			SleepPolls:  2,
+		}),
+		behaviorSession("s4", "C--work-fak", Behavior{}), // clean session must not join
+	}
+	cb := aggregateCompactBehavior(sessions)
+	if cb == nil {
+		t.Fatal("expected non-nil behavior aggregate")
+	}
+	if len(cb.RecurringFailures) != 1 {
+		t.Fatalf("recurring = %+v, want 1 joined class", cb.RecurringFailures)
+	}
+	row := cb.RecurringFailures[0]
+	if row.Tool != "Bash" || row.Sessions != 3 || row.Occurrences != 11 || len(row.Namespaces) != 2 {
+		t.Fatalf("joined row = %+v, want Bash/3 sessions/11 occ/2 namespaces", row)
+	}
+	if row.ExampleSession != "s1" {
+		t.Fatalf("example session = %q, want first-seen s1", row.ExampleSession)
+	}
+	if cb.TimeoutKills != 4 || cb.SleepPolls != 2 || cb.StuckSessions != 3 || cb.WastedMutationCalls != 2 {
+		t.Fatalf("window aggregates = %+v", cb)
+	}
+}
+
+func TestAggregateCompactBehaviorIgnoresSingleSessionClass(t *testing.T) {
+	sessions := []Session{
+		behaviorSession("s1", "C--work-fak", Behavior{FailureMass: []RepeatFailureRow{{Tool: "Bash", Sig: "x", Count: 9}}}),
+		behaviorSession("s2", "C--work-fak", Behavior{}),
+	}
+	cb := aggregateCompactBehavior(sessions)
+	if cb == nil {
+		t.Fatal("expected non-nil aggregate (one stuck session present)")
+	}
+	if len(cb.RecurringFailures) != 0 {
+		t.Fatalf("single-session class must not join across sessions: %+v", cb.RecurringFailures)
+	}
+	if _, ok := compactProcessIssuePressure(cb); ok {
+		t.Fatal("a single-session loop must not raise a cross-session process recommendation")
+	}
+}
+
+func TestAggregateCompactBehaviorNilWhenBenign(t *testing.T) {
+	sessions := []Session{
+		behaviorSession("s1", "ns", Behavior{}),
+		behaviorSession("s2", "ns", Behavior{}),
+	}
+	if cb := aggregateCompactBehavior(sessions); cb != nil {
+		t.Fatalf("benign window should yield nil behavior: %+v", cb)
+	}
+}
+
+func TestBuildCompactReportRecommendsProcessIssue(t *testing.T) {
+	sig := "exit status 143: command timed out"
+	mk := func(name, ns string, count int64) Session {
+		return behaviorSession(name, ns, Behavior{FailureMass: []RepeatFailureRow{{Tool: "Bash", Sig: sig, Count: count}}})
+	}
+	sessions := []Session{
+		mk("s1", "C--work-fak", 3),
+		mk("s2", "C--work-fak", 3),
+		mk("s3", "C--work-fak", 4),
+	}
+	rep := BuildCompactReport(sessions, AggregateSessions(sessions), "C--work-fak", nil, false, 0, 3, nil, time.Now())
+	var rec *CompactRecommendation
+	for i := range rep.Recommendations {
+		if rep.Recommendations[i].Kind == "process_issue_pressure" {
+			rec = &rep.Recommendations[i]
+		}
+	}
+	if rec == nil {
+		t.Fatalf("expected process_issue_pressure recommendation, got %+v", rep.Recommendations)
+	}
+	if rec.Severity != "high" { // recurs across 3 sessions -> systemic -> high
+		t.Fatalf("severity = %q, want high", rec.Severity)
+	}
+	if !strings.Contains(rec.Evidence, "sessions=3") || !strings.Contains(rec.Evidence, "tool=Bash") {
+		t.Fatalf("evidence = %q", rec.Evidence)
+	}
+	if rep.Behavior == nil || len(rep.Behavior.RecurringFailures) != 1 {
+		t.Fatalf("report behavior = %+v", rep.Behavior)
+	}
+}
+
 func TestProviderBucketAndCostBehavior(t *testing.T) {
 	if _, ok := PriceFor("gemini-2.5-pro"); ok {
 		t.Fatal("Gemini should not get a Claude rate card")

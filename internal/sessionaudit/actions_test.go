@@ -41,6 +41,47 @@ func TestBuildCompactActionPlanNamesCostAndLongContextActions(t *testing.T) {
 	}
 }
 
+func TestBuildCompactActionPlanNamesProcessIssueAction(t *testing.T) {
+	rep := CompactReport{
+		Schema: "fak.session_audit.summary.v1",
+		Behavior: &CompactBehavior{
+			TimeoutKills: 12,
+			RecurringFailures: []RecurringFailureRow{{
+				Tool:           "Bash",
+				Sig:            "exit status 143: command timed out",
+				Sessions:       4,
+				Occurrences:    15,
+				Namespaces:     []string{"C--work-fak"},
+				ExampleSession: "s1",
+			}},
+		},
+		Recommendations: []CompactRecommendation{{
+			Kind:     "process_issue_pressure",
+			Severity: "high",
+			Action:   "triage the recurring failure/churn signature",
+			Reason:   "the same stuck failure-loop recurred across multiple sessions",
+			Evidence: "tool=Bash sessions=4",
+		}},
+	}
+
+	plan := BuildCompactActionPlan(rep)
+	if plan.Counts.Total != 1 || plan.Counts.High != 1 {
+		t.Fatalf("counts = %+v, want one high action", plan.Counts)
+	}
+	a := plan.Actions[0]
+	if a.ID != "address_recurring_process_issue" ||
+		a.Target != "process:Bash@s1" ||
+		a.Session != "s1" ||
+		a.Namespace != "C--work-fak" ||
+		len(a.WitnessCommands) == 0 {
+		t.Fatalf("process action = %+v", a)
+	}
+	gated, ok := ApplyCompactActionGate(plan, "high")
+	if !ok || gated.Gate.Verdict != "refuse" || gated.Gate.Refused != 1 {
+		t.Fatalf("gate = %+v, want one refused high action", gated.Gate)
+	}
+}
+
 func TestApplyCompactActionGateRefusesAtThreshold(t *testing.T) {
 	plan := CompactActionPlan{Actions: []CompactAction{
 		{ID: "a", Severity: "high"},

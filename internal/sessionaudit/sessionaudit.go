@@ -186,6 +186,7 @@ type CompactReport struct {
 	Tiers             []CompactTier           `json:"tiers"`
 	TopLongContext    []CompactLongContext    `json:"top_long_context,omitempty"`
 	Recommendations   []CompactRecommendation `json:"recommendations,omitempty"`
+	Behavior          *CompactBehavior        `json:"behavior,omitempty"`
 	ExcludedSubagents *Summary                `json:"excluded_subagents,omitempty"`
 }
 
@@ -240,6 +241,38 @@ type CompactRecommendation struct {
 	Action   string `json:"action"`
 	Reason   string `json:"reason"`
 	Evidence string `json:"evidence"`
+}
+
+// CompactBehavior folds the per-session stuck/churn Behavior lens (behavior.go)
+// across the audited window. The per-session Behavior is computed for every
+// transcript but was otherwise stranded: the compact recommendations read only the
+// cost/context tiers, so a PROCESS issue that recurs across sessions — the same
+// stuck failure-loop showing up session after session, a window dominated by shell
+// timeout-kills, or read-discipline churn — was detected and then dropped before it
+// could become a gate-able action. This aggregate is the cross-session signature
+// JOIN the per-transcript audit never did, so those process issues can reach the
+// actions gate alongside cost and long-context pressure.
+type CompactBehavior struct {
+	Sessions            int64                 `json:"sessions"`
+	StuckSessions       int64                 `json:"stuck_sessions"`
+	TimeoutKills        int64                 `json:"timeout_kills"`
+	SleepPolls          int64                 `json:"sleep_polls"`
+	WastedMutationCalls int64                 `json:"wasted_mutation_calls"`
+	RecurringFailures   []RecurringFailureRow `json:"recurring_failures,omitempty"`
+}
+
+// RecurringFailureRow is one failure CLASS (tool + normalized error signature) that
+// tripped the within-session repeat-loop threshold in more than one session. It is
+// keyed on the classes the behavior lens already deems significant (FailureMass rows
+// are each >= the within-session threshold), so a row here means the SAME stuck loop
+// recurred across distinct sessions — a systemic process issue, not a one-off.
+type RecurringFailureRow struct {
+	Tool           string   `json:"tool"`
+	Sig            string   `json:"sig"`
+	Sessions       int64    `json:"sessions"`
+	Occurrences    int64    `json:"occurrences"`
+	Namespaces     []string `json:"namespaces"`
+	ExampleSession string   `json:"example_session"`
 }
 
 func DefaultRoots() []string {
@@ -522,6 +555,7 @@ func BuildCompactReport(sessions []Session, agg Aggregate, nsPrefix string, sinc
 		TopLongContext:    compactLongContext(ok, 10),
 		ExcludedSubagents: excludedSubagents,
 	}
+	rep.Behavior = aggregateCompactBehavior(ok)
 	rep.Recommendations = compactRecommendations(rep)
 	return rep
 }
@@ -1020,6 +1054,9 @@ func compactRecommendations(rep CompactReport) []CompactRecommendation {
 	if rec, ok := compactLongContextPressure(rep.TopLongContext); ok {
 		out = append(out, rec)
 	}
+	if rec, ok := compactProcessIssuePressure(rep.Behavior); ok {
+		out = append(out, rec)
+	}
 	return out
 }
 
@@ -1067,6 +1104,147 @@ func compactLongContextPressure(rows []CompactLongContext) (CompactRecommendatio
 		Reason:   "the largest recent session is dominated by repeated context ingestion",
 		Evidence: fmt.Sprintf("session=%s context_tokens=%d io_ratio=%.1f model=%s",
 			top.Session, top.TotalContextTokens, top.IORatio, top.TopModel),
+	}, true
+}
+
+const (
+	// processIssueMinSessions: a stuck failure-loop recurring across this many
+	// distinct sessions is systemic, not a one-off (1 is already the per-session signal).
+	processIssueMinSessions = 2
+	// processIssueMinTimeouts: this many shell timeout-kills across the window points
+	// at a process/environment issue (a slow command, a wedged tool) rather than a route choice.
+	processIssueMinTimeouts = 6
+	// processIssueMinChurn: this much read-discipline churn (edit-before-read / stale-read
+	// retries) across the window is worth surfacing as a work-hygiene issue.
+	processIssueMinChurn = 12
+)
+
+// aggregateCompactBehavior folds the per-session Behavior lens across the audited
+// window: window totals (timeout-kills, sleep-polls, wasted read-discipline mutations,
+// stuck sessions) plus the cross-session recurring-failure join. It returns nil when
+// the window carries no behavioral signal at all, so a clean window omits the field.
+func aggregateCompactBehavior(sessions []Session) *CompactBehavior {
+	cb := &CompactBehavior{}
+	type fkey struct{ tool, sig string }
+	type facc struct {
+		sessions    map[string]bool
+		namespaces  map[string]bool
+		occurrences int64
+		example     string
+	}
+	classes := map[fkey]*facc{}
+	var order []fkey
+	for _, s := range sessions {
+		if s.Error != "" {
+			continue
+		}
+		cb.Sessions++
+		b := s.Behavior
+		cb.TimeoutKills += b.TimeoutKills
+		cb.SleepPolls += b.SleepPolls
+		for _, v := range b.EditChurn {
+			cb.WastedMutationCalls += v
+		}
+		if behaviorSessionStuck(b) {
+			cb.StuckSessions++
+		}
+		ns := namespaceName(s.Path)
+		for _, row := range b.FailureMass {
+			k := fkey{row.Tool, row.Sig}
+			acc := classes[k]
+			if acc == nil {
+				acc = &facc{sessions: map[string]bool{}, namespaces: map[string]bool{}, example: s.Session}
+				classes[k] = acc
+				order = append(order, k)
+			}
+			acc.sessions[s.Session] = true
+			if ns != "" {
+				acc.namespaces[ns] = true
+			}
+			acc.occurrences += row.Count
+		}
+	}
+	for _, k := range order {
+		acc := classes[k]
+		if len(acc.sessions) < processIssueMinSessions {
+			continue
+		}
+		names := make([]string, 0, len(acc.namespaces))
+		for n := range acc.namespaces {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		cb.RecurringFailures = append(cb.RecurringFailures, RecurringFailureRow{
+			Tool:           k.tool,
+			Sig:            k.sig,
+			Sessions:       int64(len(acc.sessions)),
+			Occurrences:    acc.occurrences,
+			Namespaces:     names,
+			ExampleSession: acc.example,
+		})
+	}
+	sort.SliceStable(cb.RecurringFailures, func(i, j int) bool {
+		if cb.RecurringFailures[i].Sessions != cb.RecurringFailures[j].Sessions {
+			return cb.RecurringFailures[i].Sessions > cb.RecurringFailures[j].Sessions
+		}
+		return cb.RecurringFailures[i].Occurrences > cb.RecurringFailures[j].Occurrences
+	})
+	if len(cb.RecurringFailures) > 10 {
+		cb.RecurringFailures = cb.RecurringFailures[:10]
+	}
+	if cb.StuckSessions == 0 && cb.TimeoutKills == 0 && cb.SleepPolls == 0 &&
+		cb.WastedMutationCalls == 0 && len(cb.RecurringFailures) == 0 {
+		return nil
+	}
+	return cb
+}
+
+func behaviorSessionStuck(b Behavior) bool {
+	return len(b.RepeatFailures) > 0 || len(b.FailureMass) > 0 || len(b.FileChurn) > 0 || len(b.SuccessLoops) > 0
+}
+
+// compactProcessIssuePressure raises a recommendation when the audited window shows a
+// recurring process issue: the same stuck failure-loop across >= processIssueMinSessions
+// distinct sessions, a shell timeout-kill storm, or heavy read-discipline churn. This is
+// the behavioral counterpart to the cost/context pressure recommendations, and flows
+// through the same actions gate.
+func compactProcessIssuePressure(beh *CompactBehavior) (CompactRecommendation, bool) {
+	if beh == nil {
+		return CompactRecommendation{}, false
+	}
+	var top *RecurringFailureRow
+	if len(beh.RecurringFailures) > 0 {
+		top = &beh.RecurringFailures[0]
+	}
+	recurring := top != nil && top.Sessions >= processIssueMinSessions
+	timeouts := beh.TimeoutKills >= processIssueMinTimeouts
+	churn := beh.WastedMutationCalls >= processIssueMinChurn
+	if !recurring && !timeouts && !churn {
+		return CompactRecommendation{}, false
+	}
+	severity := "medium"
+	if (top != nil && (top.Sessions >= 3 || len(top.Namespaces) >= 2)) || beh.TimeoutKills >= 2*processIssueMinTimeouts {
+		severity = "high"
+	}
+	var reason, evidence string
+	switch {
+	case recurring:
+		reason = "the same stuck failure-loop recurred across multiple sessions in the audited window"
+		evidence = fmt.Sprintf("tool=%s sessions=%d occurrences=%d namespaces=%d timeout_kills=%d churn=%d sig=%q",
+			top.Tool, top.Sessions, top.Occurrences, len(top.Namespaces), beh.TimeoutKills, beh.WastedMutationCalls, normHead(top.Sig, 80))
+	case timeouts:
+		reason = "the audited window is dominated by shell timeout-kills, a process/environment issue rather than a model-route choice"
+		evidence = fmt.Sprintf("timeout_kills=%d stuck_sessions=%d churn=%d", beh.TimeoutKills, beh.StuckSessions, beh.WastedMutationCalls)
+	default:
+		reason = "read-discipline churn (edit-before-read / stale-read retries) is high across the audited window"
+		evidence = fmt.Sprintf("churn=%d stuck_sessions=%d timeout_kills=%d", beh.WastedMutationCalls, beh.StuckSessions, beh.TimeoutKills)
+	}
+	return CompactRecommendation{
+		Kind:     "process_issue_pressure",
+		Severity: severity,
+		Action:   "triage the recurring failure/churn signature and fix its root cause (env, tool, or prompt) before launching more sessions; deep-audit an example session to confirm the loop",
+		Reason:   reason,
+		Evidence: evidence,
 	}, true
 }
 

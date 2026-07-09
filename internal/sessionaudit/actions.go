@@ -176,6 +176,33 @@ func compactActionFromRecommendation(rep CompactReport, rec CompactRecommendatio
 			action.Target = fmt.Sprintf("session:%s/%s", top.Namespace, top.Session)
 		}
 		return action, true
+	case "process_issue_pressure":
+		action := CompactAction{
+			ID:       "address_recurring_process_issue",
+			Kind:     rec.Kind,
+			Severity: rec.Severity,
+			Target:   "process:session_hygiene",
+			Command:  rec.Action,
+			WitnessCommands: []string{
+				"fak session-audit summary --here --json",
+				"fak session audit --days 7 --json",
+			},
+			Reason:   rec.Reason,
+			Evidence: rec.Evidence,
+		}
+		if beh := rep.Behavior; beh != nil && len(beh.RecurringFailures) > 0 {
+			top := beh.RecurringFailures[0]
+			action.Session = top.ExampleSession
+			if len(top.Namespaces) > 0 {
+				action.Namespace = top.Namespaces[0]
+			}
+			if top.ExampleSession != "" {
+				action.Target = fmt.Sprintf("process:%s@%s", top.Tool, top.ExampleSession)
+			} else {
+				action.Target = "process:" + top.Tool
+			}
+		}
+		return action, true
 	default:
 		return CompactAction{}, false
 	}
