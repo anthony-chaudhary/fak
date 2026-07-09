@@ -24,6 +24,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/relay"
 )
 
+//fak:ctxplan verb=relay enters="nothing live — an offline read of one fak.relay.baton.v1 file (or stdin), schema-gated before any field is trusted" pages="the baton a successor relay leg would receive — objective pin, done_when, the re-verifiable progress cursor, next action, and pointer-only artifact and dead-end lists — as a human summary or canonical --json wire bytes" warms="nothing — pure display-only read/print; no reload re-verification, no resolver, no network, no prompt cache or KV"
 func cmdRelay(argv []string) { os.Exit(runRelay(os.Stdin, os.Stdout, os.Stderr, argv)) }
 
 // runRelay is the testable `fak relay` dispatcher: it returns the process exit code
@@ -35,13 +36,15 @@ func runRelay(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	switch argv[0] {
+	case "handoff":
+		return runRelayHandoff(stdout, stderr, argv[1:])
 	case "resume":
 		return runRelayResume(stdin, stdout, stderr, argv[1:])
 	case "help", "-h", "--help":
 		relayUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak relay: unknown subcommand %q (want resume)\n", argv[0])
+		fmt.Fprintf(stderr, "fak relay: unknown subcommand %q (want handoff or resume)\n", argv[0])
 		relayUsage(stderr)
 		return 2
 	}
@@ -171,10 +174,16 @@ func noteSuffix(note string) string {
 }
 
 func relayUsage(w io.Writer) {
-	fmt.Fprint(w, `fak relay — perpetual-session relay: inspect the baton a leg hands its successor
+	fmt.Fprint(w, `fak relay — perpetual-session relay: write and inspect the baton a leg hands its successor
 
+  fak relay handoff --relay-id <RID> --start-sha <sha> [flags] [--out <path>]
   fak relay resume --baton <path>|- [--json]
   fak relay resume <path>
+
+handoff (offline, no gateway) projects a closing leg's stated flags into a canonical
+fak.relay.baton.v1 and writes the byte-stable wire bytes to --out (or stdout), so the
+same flags always produce byte-identical baton bytes. --relay-id and --start-sha are
+required; run fak relay handoff -h for the full flag set.
 
 resume loads one fak.relay.baton.v1 file (or stdin with --baton -) and prints what a
 fresh relay leg would receive: the objective pin, the done_when predicate, the

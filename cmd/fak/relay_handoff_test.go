@@ -8,6 +8,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -182,5 +183,52 @@ func TestRelayHandoffRejectsMissingRequired(t *testing.T) {
 				t.Fatalf("stderr = %q, want it to contain %q", stderr.String(), tc.want)
 			}
 		})
+	}
+}
+
+// TestRelayHandoffDispatchViaRunRelay is the registration witness for rung C6 (#1875):
+// `fak relay handoff` must be reachable through the `fak relay` dispatcher, not only via
+// the runRelayHandoff shell. It drives runRelay with the "handoff" verb and asserts the
+// emitted bytes are the same valid baton the direct shell writes, and that the verb is
+// named in both the unknown-subcommand hint and the usage text.
+func TestRelayHandoffDispatchViaRunRelay(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	argv := append([]string{"handoff"}, baseHandoffArgs()...)
+	if code := runRelay(strings.NewReader(""), &stdout, &stderr, argv); code != 0 {
+		t.Fatalf("runRelay handoff exit = %d, want 0 (stderr: %s)", code, stderr.String())
+	}
+	b, err := relay.Parse(stdout.Bytes())
+	if err != nil {
+		t.Fatalf("dispatched handoff did not emit a parseable baton: %v\n%s", err, stdout.String())
+	}
+	if b.Schema != relay.Schema || b.RelayID != "RID-2026-07-06-handoff-witness" {
+		t.Fatalf("dispatched baton = schema %q relay_id %q", b.Schema, b.RelayID)
+	}
+
+	// The dispatched bytes must be byte-identical to the direct shell's — dispatch adds
+	// no wrapping, so the determinism contract holds through the verb too.
+	var direct bytes.Buffer
+	if code := runRelayHandoff(&direct, io.Discard, baseHandoffArgs()); code != 0 {
+		t.Fatalf("direct runRelayHandoff exit = %d, want 0", code)
+	}
+	if !bytes.Equal(stdout.Bytes(), direct.Bytes()) {
+		t.Fatalf("dispatched bytes differ from direct shell bytes:\n dispatch: %s\n direct:   %s", stdout.Bytes(), direct.Bytes())
+	}
+
+	// The verb is a first-class citizen of the dispatcher's surface: the unknown-verb
+	// hint and the usage text both name it.
+	var uStdout, uStderr bytes.Buffer
+	if code := runRelay(strings.NewReader(""), &uStdout, &uStderr, []string{"nonesuch"}); code != 2 {
+		t.Fatalf("unknown verb exit = %d, want 2", code)
+	}
+	if !strings.Contains(uStderr.String(), "handoff") {
+		t.Fatalf("unknown-verb hint does not name handoff: %q", uStderr.String())
+	}
+	var hStdout, hStderr bytes.Buffer
+	if code := runRelay(strings.NewReader(""), &hStdout, &hStderr, []string{"help"}); code != 0 {
+		t.Fatalf("help exit = %d, want 0 (stderr: %s)", code, hStderr.String())
+	}
+	if !strings.Contains(hStdout.String(), "fak relay handoff") {
+		t.Fatalf("usage does not document the handoff verb:\n%s", hStdout.String())
 	}
 }
