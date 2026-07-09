@@ -49,6 +49,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/godsplitplan"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // DeclID is the (kind, name) identity of a top-level declaration, with const/var
@@ -304,6 +305,7 @@ func Render(rep Report, expectMotion bool) string {
 
 func gitOutput(root string, args ...string) (string, int) {
 	cmd := exec.Command("git", args...)
+	windowgate.ConfigureBackgroundCommand(cmd) // windowless git child on Windows: no console flash
 	cmd.Dir = root
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
