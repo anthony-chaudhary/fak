@@ -197,6 +197,55 @@ func TestProviderCacheSavingsUSDNearUint64MaxStaysFinite(t *testing.T) {
 	}
 }
 
+// TestDefaultCachePricingResolvesKnownModels pins the built-in price table: the
+// guarded-Claude Opus 4.8 default ($5/$25), the Fable 5 frontier tier ($10/$50,
+// Anthropic's published rate — the entry that makes a fable worker's Track-2 row
+// dollar-real instead of dollar-blind, task #3), and the fail-closed miss for a
+// provider/context the table does not know (which the caller stamps dollar-blind).
+// Context normalization (last path segment, lowercased) is exercised so the model
+// id resolves whether it arrives bare or as a session-path tail.
+func TestDefaultCachePricingResolvesKnownModels(t *testing.T) {
+	cases := []struct {
+		name            string
+		provider, ctx   string
+		wantOK          bool
+		wantIn, wantOut float64
+		wantSource      string
+	}{
+		{"opus bare", "anthropic", "claude-opus-4-8", true, ClaudeOpus48InputPerMTokUSD, ClaudeOpus48OutputPerMTokUSD, CachePricingSourceAnthropicClaudeOpus48},
+		{"opus via claude binary", "anthropic", "claude", true, ClaudeOpus48InputPerMTokUSD, ClaudeOpus48OutputPerMTokUSD, CachePricingSourceAnthropicClaudeOpus48},
+		{"fable bare", "anthropic", "claude-fable-5", true, ClaudeFable5InputPerMTokUSD, ClaudeFable5OutputPerMTokUSD, CachePricingSourceAnthropicClaudeFable5},
+		{"fable via session path tail", "anthropic", "/home/run/sessions/claude-fable-5", true, ClaudeFable5InputPerMTokUSD, ClaudeFable5OutputPerMTokUSD, CachePricingSourceAnthropicClaudeFable5},
+		{"fable via claude provider alias", "claude", "claude-fable-5", true, ClaudeFable5InputPerMTokUSD, ClaudeFable5OutputPerMTokUSD, CachePricingSourceAnthropicClaudeFable5},
+		{"unknown model is a fail-closed miss", "anthropic", "some-unlisted-model", false, 0, 0, ""},
+		{"unknown provider is a fail-closed miss", "openai", "codex", false, 0, 0, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p, source, ok := DefaultCachePricing(c.provider, c.ctx)
+			if ok != c.wantOK {
+				t.Fatalf("DefaultCachePricing(%q,%q) ok = %v, want %v", c.provider, c.ctx, ok, c.wantOK)
+			}
+			if !c.wantOK {
+				return
+			}
+			if !approx(p.InputPerMTokUSD, c.wantIn) || !approx(p.OutputPerMTokUSD, c.wantOut) {
+				t.Errorf("DefaultCachePricing(%q,%q) = {in:%v out:%v}, want {in:%v out:%v}",
+					c.provider, c.ctx, p.InputPerMTokUSD, p.OutputPerMTokUSD, c.wantIn, c.wantOut)
+			}
+			if source != c.wantSource {
+				t.Errorf("DefaultCachePricing(%q,%q) source = %q, want %q", c.provider, c.ctx, source, c.wantSource)
+			}
+		})
+	}
+	// Fable is a frontier tier: pricing it must exceed the Opus default on both axes,
+	// so a fable worker's savings are never silently understated as Opus-priced.
+	if ClaudeFable5InputPerMTokUSD <= ClaudeOpus48InputPerMTokUSD || ClaudeFable5OutputPerMTokUSD <= ClaudeOpus48OutputPerMTokUSD {
+		t.Fatalf("fable pricing (%v/%v) must exceed opus (%v/%v)",
+			ClaudeFable5InputPerMTokUSD, ClaudeFable5OutputPerMTokUSD, ClaudeOpus48InputPerMTokUSD, ClaudeOpus48OutputPerMTokUSD)
+	}
+}
+
 func TestMechanismSavingsSumsOwnersAndMechanisms(t *testing.T) {
 	s := AdjudicationSummary{
 		CachedPromptTokens:   1000, // provider read rebate = 900 token-equiv

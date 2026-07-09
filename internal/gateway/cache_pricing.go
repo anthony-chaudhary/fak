@@ -61,6 +61,18 @@ const (
 	ClaudeOpus48OutputPerMTokUSD = 25.0
 	// CachePricingSourceAnthropicClaudeOpus48 names the default price source in ledgers.
 	CachePricingSourceAnthropicClaudeOpus48 = "default:anthropic/claude-opus-4-8"
+
+	// ClaudeFable5InputPerMTokUSD is the Fable 5 base input price: $10/MTok, Anthropic's
+	// published rate (2× Opus 4.8). Cache reads get the same 90% discount every tier does
+	// via CacheReadMultiplier, so this base is all the fable row needs to price. Fable is a
+	// frontier tier — pricing a fable worker's row as Opus would UNDERstate its savings, so
+	// this entry makes that row dollar-real instead of dollar-blind (task #3).
+	ClaudeFable5InputPerMTokUSD = 10.0
+	// ClaudeFable5OutputPerMTokUSD is the Fable 5 base output price: $50/MTok (5× its input,
+	// the standard frontier-Anthropic ratio).
+	ClaudeFable5OutputPerMTokUSD = 50.0
+	// CachePricingSourceAnthropicClaudeFable5 names the fable price source in ledgers.
+	CachePricingSourceAnthropicClaudeFable5 = "default:anthropic/claude-fable-5"
 )
 
 // CacheTTL names the cache_control TTL a write was placed under. It mirrors the
@@ -125,12 +137,23 @@ func DefaultCachePricing(provider, context string) (CachePricing, string, bool) 
 				InputPerMTokUSD:  ClaudeOpus48InputPerMTokUSD,
 				OutputPerMTokUSD: ClaudeOpus48OutputPerMTokUSD,
 			}, CachePricingSourceAnthropicClaudeOpus48, true
+		case "claude-fable-5":
+			return CachePricing{
+				InputPerMTokUSD:  ClaudeFable5InputPerMTokUSD,
+				OutputPerMTokUSD: ClaudeFable5OutputPerMTokUSD,
+			}, CachePricingSourceAnthropicClaudeFable5, true
 		}
 		if strings.Contains(c, "claude-opus-4-8") || strings.Contains(c, "opus-4-8") {
 			return CachePricing{
 				InputPerMTokUSD:  ClaudeOpus48InputPerMTokUSD,
 				OutputPerMTokUSD: ClaudeOpus48OutputPerMTokUSD,
 			}, CachePricingSourceAnthropicClaudeOpus48, true
+		}
+		if strings.Contains(c, "claude-fable-5") || strings.Contains(c, "fable-5") {
+			return CachePricing{
+				InputPerMTokUSD:  ClaudeFable5InputPerMTokUSD,
+				OutputPerMTokUSD: ClaudeFable5OutputPerMTokUSD,
+			}, CachePricingSourceAnthropicClaudeFable5, true
 		}
 	}
 	return CachePricing{}, "", false
