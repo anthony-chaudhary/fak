@@ -56,10 +56,17 @@ var ExclusiveRouterLanes = map[string]bool{
 }
 
 var ScopeAlias = map[string]string{
-	"cuda":             "compute",
-	"gpu":              "compute",
-	"vulkan":           "compute",
-	"metal":            "compute",
+	"cuda":   "compute",
+	"gpu":    "compute",
+	"vulkan": "compute",
+	"metal":  "compute",
+	// "kvbm" is the Dynamo-KVBM milestone metaphor, not a lane: no internal/kvbm/
+	// directory exists, and the KV eviction/tiering primitives live in
+	// internal/compute (kvcost.go, kvresidency.go, kvprecision.go). Aliasing keeps
+	// a feat(kvbm) title from falling through to a phantom subsystem tag; R2
+	// wiring issues that name internal/radixkv or internal/modelengine files still
+	// route there via the stronger path rung (#3415).
+	"kvbm":             "compute",
 	"serve":            "gateway",
 	"anthropic":        "gateway",
 	"inkernel":         "engine",

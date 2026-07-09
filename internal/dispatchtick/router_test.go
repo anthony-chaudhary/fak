@@ -108,6 +108,27 @@ func TestRouterLaneHintRung(t *testing.T) {
 	}
 }
 
+func TestRouterPhantomKvbmScopeAlias(t *testing.T) {
+	// #3415: "kvbm" is the Dynamo-KVBM milestone metaphor, not a lane — no
+	// internal/kvbm/ directory exists. Before the alias, a feat(kvbm) title (and
+	// its "## Lane\nkvbm" handoff hint) fell through every rung, leaving the
+	// dispatcher to carry a phantom internal/kvbm subsystem tag (#2671/#2669/#2674).
+	// The KV eviction primitives live in internal/compute, so the scope aliases there.
+	got := routeTestIssue(routerIssue(2671,
+		"feat(kvbm): generalize evict to a min-cost tier ACTION", nil, "## Lane\n\nkvbm\n"))
+	if got.Lane != "compute" || got.Confidence != "alias" {
+		t.Fatalf("kvbm route = lane %q confidence %q, want compute/alias (%+v)", got.Lane, got.Confidence, got)
+	}
+
+	// An issue whose body names files in a real tree still outranks the alias
+	// (path-confirmed beats alias), so R2 wiring issues route to their own lane.
+	r2 := routerIssue(2669, "feat(kvbm): wire hazard-rate reuse into the consumer", nil,
+		"consumer seam is internal/model/decode.go")
+	if got := routeTestIssue(r2); got.Lane != "model" || got.Confidence != "path-confirmed" {
+		t.Fatalf("path must override kvbm alias: %+v", got)
+	}
+}
+
 func TestRouterLabelFallbackDeterminism(t *testing.T) {
 	tests := []struct {
 		name           string
