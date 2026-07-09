@@ -29,11 +29,16 @@ func runMCPFootprint(out, errw io.Writer, argv []string) int {
 	fs.SetOutput(io.Discard)
 	top := fs.Int("top", 0, "show only the N heaviest tools (0 = all)")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
+	ab := fs.Bool("ab", false, "run the #3532 cold-tool-deferral A/B token-delta scorecard")
 	flagArgs, _ := partitionArgs(argv, map[string]bool{"top": true})
 	if err := fs.Parse(flagArgs); err != nil {
 		fmt.Fprintln(errw, err)
 		footprintUsage(errw)
 		return 2
+	}
+
+	if *ab {
+		return runFootprintAB(out, errw, *asJSON)
 	}
 
 	fp := mcpfootprint.Price(gateway.MCPFloorToolDefs())
@@ -90,8 +95,15 @@ agent request footprint uses, so it never drifts from EstimateAnthropicTokens.
 
   --top N   show only the N heaviest tools (0 = all)
   --json    emit machine-readable JSON (schema fak-mcp-footprint/1)
+  --ab      cold-tool-deferral A/B scorecard (#3532, schema fak-footprint-ab/1)
 
 The measurement foundation of epic #3229: run before/after a deferral change
 (#3231, #3232) to witness the reduction. Baseline: docs/context-budget/mcp-tool-floor.md.
+
+--ab prices the #3232 deferral lever: the PROVIDER-resident tool-slice tokens ARMED
+(cold defs deferred) vs ABLATED (all defs resident). The delta is ESTIMATED (house
+tokenizer on the resident slice) — defer_loading GROWS request bytes, it does not
+shrink them; the OBSERVED provider-side reduction is a live run (usage relay +
+fak_gateway_tool_defer_* /metrics, #3233/#3536).
 `)
 }
