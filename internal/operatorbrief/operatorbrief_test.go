@@ -238,6 +238,37 @@ func TestFoldReviewModeForRegressedProgramFrontier(t *testing.T) {
 	}
 }
 
+// TestRenderCompactIsSmall proves the default operator render is one terse line
+// per item with no interpretation blocks or per-item detail/action prose — the
+// operator scans it, then drills into --full only when they want the wall.
+func TestRenderCompactIsSmall(t *testing.T) {
+	c := cleanCadence()
+	m := cleanMilestone()
+	p := programreport.Fold(programreport.InterpretPrograms([]programreport.Signal{
+		{Class: worktype.CacheOptimization, Label: "cache-optimization", Frontier: "realized reuse fell", Metric: 0.4, Direction: "regressed", OK: true},
+	}), programreport.FoldOpts{Workspace: "/repo", Commit: "abc1234", Date: "2026-06-30"})
+	got := Fold(Inputs{Cadence: &c, Program: &p, Milestone: &m})
+
+	compact := RenderCompact(got)
+	full := Render(got)
+
+	if lc, lf := strings.Count(compact, "\n"), strings.Count(full, "\n"); lc >= lf {
+		t.Fatalf("compact (%d lines) must be smaller than full (%d lines)\ncompact:\n%s", lc, lf, compact)
+	}
+	// The header, the load line, the one watch item, and the --full pointer survive.
+	for _, want := range []string{"operator brief", "watch:", "cache-optimization frontier regressed", "--full"} {
+		if !strings.Contains(compact, want) {
+			t.Fatalf("compact missing %q:\n%s", want, compact)
+		}
+	}
+	// Interpretation blocks and per-item action prose are --full territory only.
+	for _, gone := range []string{"human use", "learning agenda:", "strengths:", "investigate the program's frontier witness"} {
+		if strings.Contains(compact, gone) {
+			t.Fatalf("compact should not carry %q:\n%s", gone, compact)
+		}
+	}
+}
+
 // TestChoicesAreTriagedNotAllPaged proves the decenter-the-human wiring: a
 // surfaced choice is folded through choicetriage, so a page whose fix is a
 // runnable command becomes TAKE_OBVIOUS (regenerate it — no human), while a
