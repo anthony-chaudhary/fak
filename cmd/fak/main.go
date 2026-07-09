@@ -113,6 +113,8 @@ func main() {
 		cmdBlast(os.Args[2:])
 	case "buildcheck":
 		cmdBuildCheck(os.Args[2:])
+	case "worktree":
+		cmdWorktreeVerb(os.Args[2:])
 	case "preflight":
 		cmdPreflight(os.Args[2:])
 	case "ci-preflight":
@@ -295,6 +297,11 @@ func main() {
 		cmdReleaseStaleness(os.Args[2:])
 	case "watchdog":
 		cmdWatchdog(os.Args[2:])
+	case "micro":
+		// The native in-process Go microagent runtime front door (#2029, epic #2000
+		// M30): `fak micro` runs one hosted agent on Mock, `fak micro host` boots the
+		// in-process host (M2), and `--dry-run` prints the resolved plan without spend.
+		cmdMicro(os.Args[2:])
 	case "serve":
 		cmdServe(os.Args[2:])
 	case "serve-wiring":

@@ -6,9 +6,11 @@ import (
 )
 
 // TestGuardBannerModeDecision pins the --banner precedence: --quiet silences everything;
-// an explicit mode wins over auto; AUTO compacts ONLY the attended interactive launch
-// (interactive stdin AND interactive child) and keeps the full report byte-for-byte for
-// every headless/piped shape — the fleet-log contract; unknown values fail loud.
+// an explicit mode wins over auto; AUTO plays the icon ANIMATION for the attended interactive
+// launch (interactive stdin AND interactive child) and keeps the full report byte-for-byte for
+// every headless/piped shape — the fleet-log contract; unknown values fail loud. (The animate
+// mode degrades to the compact banner at the RENDER site off a color TTY / on opt-out; that
+// fallback is guardLaunchAnimEnabled's job, tested separately.)
 func TestGuardBannerModeDecision(t *testing.T) {
 	for _, tc := range []struct {
 		name                     string
@@ -17,14 +19,16 @@ func TestGuardBannerModeDecision(t *testing.T) {
 		want                     string
 		wantErr                  bool
 	}{
-		{name: "auto attended interactive compacts", banner: "auto", stdinTTY: true, childUI: true, want: guardBannerCompact},
+		{name: "auto attended interactive animates", banner: "auto", stdinTTY: true, childUI: true, want: guardBannerAnimate},
 		{name: "auto piped stdin keeps full", banner: "auto", stdinTTY: false, childUI: true, want: guardBannerFull},
 		{name: "auto headless -p child keeps full", banner: "auto", stdinTTY: true, childUI: false, want: guardBannerFull},
-		{name: "empty means auto", banner: "", stdinTTY: true, childUI: true, want: guardBannerCompact},
-		{name: "explicit full wins over attended auto-compact", banner: "full", stdinTTY: true, childUI: true, want: guardBannerFull},
+		{name: "empty means auto", banner: "", stdinTTY: true, childUI: true, want: guardBannerAnimate},
+		{name: "explicit full wins over attended auto-animate", banner: "full", stdinTTY: true, childUI: true, want: guardBannerFull},
 		{name: "explicit compact wins over headless auto-full", banner: "compact", stdinTTY: false, childUI: false, want: guardBannerCompact},
+		{name: "explicit animate honored headless", banner: "animate", stdinTTY: false, childUI: false, want: guardBannerAnimate},
 		{name: "explicit off", banner: "off", stdinTTY: true, childUI: true, want: guardBannerOff},
 		{name: "quiet wins over explicit full", banner: "full", quiet: true, stdinTTY: true, childUI: true, want: guardBannerOff},
+		{name: "quiet wins over attended auto-animate", banner: "auto", quiet: true, stdinTTY: true, childUI: true, want: guardBannerOff},
 		{name: "case and space tolerated", banner: "  Full ", stdinTTY: true, childUI: true, want: guardBannerFull},
 		{name: "unknown value fails loud", banner: "verbose", wantErr: true},
 	} {

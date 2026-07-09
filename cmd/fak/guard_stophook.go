@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/taskmgr"
+	"github.com/anthony-chaudhary/fak/internal/trajctl"
 )
 
 // guard_stophook.go — the harness half of the deny-all false-stop fix.
@@ -119,7 +120,7 @@ func (s guardStopHookStage) String() string {
 // refusal detail is already in the transcript (the in-band `[fak] refused …` note on the ended
 // turn); this is the gentle nudge to act on it rather than stop. Later rungs of the ladder
 // (guardStopHookStageMessage) escalate the firmness and name the sanctioned clean exit.
-const guardStopHookContinueReason = "fak guard: heads-up — your previous turn proposed only tool call(s) the capability floor set aside, so it wrapped up without an action (reported upstream as end_turn). You can keep going: pick an ALLOWED alternative and continue the task. Most of these are MODEL-FIXABLE by RESHAPING the call, not a dead end — e.g. a SELF_MODIFY note means the floor saw a guarded write target (VERSION, .dos/, internal/…), so continue by aiming the write at an unguarded path, splitting a compound command to isolate the intended write, or dropping the guarded write. If there is genuinely no allowed way to make progress, just say so and wrap up."
+const guardStopHookContinueReason = "fak guard: heads-up — your previous turn ended before acting because its tool call(s) are waiting on a shape the capability floor can admit (reported upstream as end_turn). You can continue right now. The in-band `[fak]` note on that turn labels each call as `Tool (REASON/DISPOSITION)` — let that reason point the way. Most reasons just invite a small RESHAPING the floor will welcome: for MISROUTE, reach for the tool or argument shape it expects; for SELF_MODIFY, the floor is protecting a guarded write target (VERSION, .dos/, internal/…), so aim the write at an unguarded path, split a compound command to isolate it, or leave the guarded part out; for LEASE_HELD, another agent holds that tree, so narrow your paths or pick up other work; for a preview-confirm pause, re-send the same call with the confirm key it asked for. A few reasons are protected on purpose — a TERMINAL disposition (e.g. SECRET_EXFIL, TRUST_VIOLATION) is a deliberate boundary, so the clean win there is a different task. Choose an ALLOWED alternative and keep the work moving; and if a protected boundary is all that stands between you and the last step, that is a fine, complete place to stop — note it in one line (`no allowed path: <reason>`) and finish cleanly."
 
 func guardStopHookToolFeedbackMessage(consecutive int) string {
 	return fmt.Sprintf("fak guard: the previous %d turn(s) ended after retryable tool-call feedback, not a session stop. The proposed tool call(s) were just malformed or otherwise model-fixable, so fak returned per-call feedback and kept the task alive. Fix the JSON/arguments/tool shape and continue — this is a routine retry, so keep going.", consecutive)
@@ -174,9 +175,9 @@ func guardStopHookStageFor(consecutive, warnAt, finalAt, maxN int) guardStopHook
 func guardStopHookStageMessage(stage guardStopHookStage, consecutive, maxN int) string {
 	switch stage {
 	case guardStopHookWarn:
-		return fmt.Sprintf("fak guard: the last %d turns each ended with the capability floor setting aside every proposed tool call, so it looks like the same approach keeps coming back. Good moment to change tack: if the remaining work is reachable under this floor, take a different allowed action now — a different tool, a narrower command, or a path the floor permits. If it genuinely is not reachable, note the blocker on one line (`no allowed path: <reason>`) and wrap up — that is a clean, expected outcome. (Auto-continue %d of %d before fak lets the turn end.)", consecutive, consecutive, maxN)
+		return fmt.Sprintf("fak guard: the last %d turns each closed while the capability floor was still waiting for a shape it can admit, so the same approach keeps returning. Good moment to try a fresh angle: if the remaining work is reachable under this floor, take a different allowed action now — a different tool, a narrower command, or a path the floor welcomes. If a protected boundary is all that's left, note it on one line (`no allowed path: <reason>`) and finish cleanly — that is a good, complete outcome. (Auto-continue %d of %d before fak lets the turn end.)", consecutive, consecutive, maxN)
 	case guardStopHookFinal:
-		return fmt.Sprintf("fak guard: last auto-continue (%d of %d). After %d turns where the floor set aside every proposed call, fak will let the session wrap up with work possibly unfinished. If there is any allowed way to make progress, take it on this turn; otherwise note the blocker on one line (`no allowed path: <reason>`) and wrap up now, so the stop is your call.", consecutive, maxN, maxN)
+		return fmt.Sprintf("fak guard: last auto-continue (%d of %d). After %d turns still waiting on a shape the floor can admit, fak will let the session wrap up. If there is an allowed way forward, take it on this turn; otherwise note what's protecting the last step on one line (`no allowed path: <reason>`) and finish cleanly now, so the stop is your own call — a complete, expected ending.", consecutive, maxN, maxN)
 	default:
 		return guardStopHookContinueReason
 	}
@@ -232,6 +233,16 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) int {
 		fmt.Fprintf(stderr, "fak guard Stop: allowing stop; bad hook args: %v\n", err)
 		return 0
 	}
+	// Read the hook's stdin payload ONCE (it is not rewindable): stop_hook_active is the
+	// defensive shadow-log signal below, session_id stamps the trajctl rows. A parse miss
+	// never changes any decision.
+	payload := readHookStdin(stdin)
+	active := parseStopHookActive(payload)
+	// #2539: score-at-turn-end — the curve gains a point every turn. Runs the cheap scorer
+	// set for the session's open objectives, bounded and fail-open, gated on the guard-wired
+	// ledger env. Deliberately BEFORE the deny-all mode gate: sampling cadence is independent
+	// of whether auto-continue is off, and it can never change this hook's exit code.
+	scoreTurnEndFailOpen(stderr, trajctl.Stamp{SessionID: parseHookSessionID(payload)}, time.Now().UnixMilli())
 	mode, err := normalizeGuardStopHookMode(*modeFlag)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak guard Stop: allowing stop; %v\n", err)
@@ -240,10 +251,6 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) int {
 	if mode == guardPreCompactModeOff {
 		return 0
 	}
-	// Best-effort read of Claude's Stop-hook stdin payload for stop_hook_active — used for the
-	// shadow log and as a defensive signal; the gateway consecutive bound is the authoritative
-	// loop guard, so a parse miss never changes the decision.
-	active := readStopHookActive(stdin)
 	metricsURL := strings.TrimSpace(*metricsURLFlag)
 	if metricsURL == "" {
 		metricsURL = guardPreCompactMetricsURLFromBase(os.Getenv("ANTHROPIC_BASE_URL"))
@@ -436,20 +443,22 @@ func guardStopHookDecision(consecutive, warnAt, finalAt, maxN int, mode string) 
 // readStopHookActive parses the stop_hook_active flag from Claude's Stop-hook stdin JSON. A nil
 // reader, an empty body, or a parse miss returns false — it is advisory only.
 func readStopHookActive(stdin io.Reader) bool {
-	if stdin == nil {
+	return parseStopHookActive(readHookStdin(stdin))
+}
+
+// parseStopHookActive is the bytes form of readStopHookActive, for callers that already
+// drained the one-shot hook stdin.
+func parseStopHookActive(payload []byte) bool {
+	if len(payload) == 0 {
 		return false
 	}
-	b, err := io.ReadAll(io.LimitReader(stdin, 1<<20))
-	if err != nil || len(b) == 0 {
-		return false
-	}
-	var payload struct {
+	var p struct {
 		StopHookActive bool `json:"stop_hook_active"`
 	}
-	if json.Unmarshal(b, &payload) != nil {
+	if json.Unmarshal(payload, &p) != nil {
 		return false
 	}
-	return payload.StopHookActive
+	return p.StopHookActive
 }
 
 func normalizeGuardStopHookMode(mode string) (string, error) {
@@ -623,6 +632,12 @@ func installGuardStopHookAt(command []string, mode, gwURL, fakBin, dir, existing
 		{guardStopHookEnvWarn, strconv.Itoa(warnAt)},
 		{guardStopHookEnvFinal, strconv.Itoa(finalAt)},
 		{guardStopHookEnvMax, strconv.Itoa(maxN)},
+	}
+	// #2539: wire the trajctl ledger into the hook children so the Stop hook's turn-end
+	// scorers and the PreCompact boundary twin have a curve to append to. Unresolvable repo
+	// root injects nothing and the sampling stays a total no-op.
+	if ledger := guardTrajctlLedgerDefault(); ledger != "" {
+		env = append(env, [2]string{guardTrajctlEnvLedger, ledger})
 	}
 	env = append(env, guardTaskHandoffEnv(guardTaskHandoffConfigOrZero(handoffConfig))...)
 	return command, env, install, nil

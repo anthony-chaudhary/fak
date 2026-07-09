@@ -138,6 +138,22 @@ func TestRunGuardStopHookEnforceBlocksOnDenyAll(t *testing.T) {
 			t.Fatalf("nudge missing reshape guidance %q: %s", want, stderr.String())
 		}
 	}
+	// Clarity: the nudge must point the model at the ACTUAL refusal reason in the
+	// in-band note (`Tool (REASON/DISPOSITION)`) rather than asserting one hard-coded
+	// reason — a deny-all can cite any code, and SELF_MODIFY guidance is wrong for a
+	// TRUST_VIOLATION or SECRET_EXFIL refusal.
+	if !strings.Contains(stderr.String(), "REASON/DISPOSITION") {
+		t.Fatalf("nudge should tell the model to read the reason code from the in-band note: %s", stderr.String())
+	}
+	// Permissive: reshaping is not the only sanctioned outcome. A genuine (TERMINAL)
+	// block must not send the model looping on reworded retries, and the honest
+	// wrap-up (`no allowed path: <reason>`) must be named as a clean outcome, not a
+	// failure — co-equal with taking an allowed alternative.
+	for _, want := range []string{"TERMINAL", "no allowed path"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("nudge missing the sanctioned clean-stop path %q: %s", want, stderr.String())
+		}
+	}
 }
 
 func TestRunGuardStopHookContinuesRetryableToolFeedbackPastDenyAllBound(t *testing.T) {

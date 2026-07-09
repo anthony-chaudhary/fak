@@ -12,6 +12,8 @@ package main
 //	fak slack outbox drain --dry-run # print the send plan, touch nothing
 //	fak slack outbox retry --all     # re-arm every dead row (or --nonce <n>)
 //	fak slack outbox dead            # list dead rows with their structured reasons
+//	fak slack outbox compact         # fold old settled rows + heartbeats out of the spool
+//	fak slack outbox compact --dry-run --json  # preview what a pass would drop
 //
 // The spool lives at $FAK_SLACK_OUTBOX_DIR (env or .env.slack.local), defaulting to
 // .dispatch-runs/slack-outbox under the working directory — the same local-runs root
@@ -72,7 +74,7 @@ func outboxWire(token, apiBase string) (*slackwire.Client, error) {
 	return slackwire.New(token, opts...), nil
 }
 
-// runSlackOutbox routes `fak slack outbox <status|drain|retry|dead>`.
+// runSlackOutbox routes `fak slack outbox <status|drain|retry|dead|compact>`.
 func runSlackOutbox(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
 		return runSlackOutboxStatus(stdout, stderr, nil)
@@ -87,8 +89,10 @@ func runSlackOutbox(stdout, stderr io.Writer, argv []string) int {
 		return runSlackOutboxRetry(stdout, stderr, rest)
 	case "dead":
 		return runSlackOutboxDead(stdout, stderr, rest)
+	case "compact":
+		return runSlackOutboxCompact(stdout, stderr, rest)
 	default:
-		fmt.Fprintf(stderr, "fak slack outbox: unknown subcommand %q (want status | drain | retry | dead)\n", sub)
+		fmt.Fprintf(stderr, "fak slack outbox: unknown subcommand %q (want status | drain | retry | dead | compact)\n", sub)
 		return 2
 	}
 }
@@ -268,6 +272,46 @@ func runSlackOutboxDead(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stdout, "● %s ch=%s src=%s attempts=%d enqueued=%s\n    %s\n",
 			d.Nonce, d.Channel, d.Source, d.Attempts, d.EnqueuedAt, d.Reason)
 	}
+	return 0
+}
+
+// runSlackOutboxCompact folds old settled rows and the drain_pass heartbeat storm out of
+// the spool. The retention windows default to the assertive package defaults; --retain
+// overrides the SETTLED (superseded/refused) window only (posted rows keep their safe
+// 48h so a deferred producer's PostedTS probe still resolves).
+func runSlackOutboxCompact(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak slack outbox compact", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dryRun := fs.Bool("dry-run", false, "report what a pass would drop without touching a file")
+	asJSON := fs.Bool("json", false, "emit the compaction report as JSON")
+	retain := fs.Duration("retain", 0, "settled-row (superseded/refused) retention window (default 1h)")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	ob, err := openOutbox()
+	if err != nil {
+		fmt.Fprintf(stderr, "fak slack outbox compact: %v\n", err)
+		return 1
+	}
+	rep, err := ob.Compact(slackoutbox.CompactOpts{RetainSettled: *retain, DryRun: *dryRun})
+	if err == slackoutbox.ErrDrainBusy {
+		fmt.Fprintln(stdout, "another drainer holds the lock — nothing to do")
+		return 0
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "fak slack outbox compact: %v\n", err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(rep); err != nil {
+			fmt.Fprintf(stderr, "fak slack outbox compact: encode json: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprintf(stdout, "fak slack outbox — spool %s\n  %s\n", ob.Dir(), slackoutbox.CompactReportLine(rep))
 	return 0
 }
 

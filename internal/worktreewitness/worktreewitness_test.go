@@ -51,8 +51,8 @@ func (g *fakeGit) run(dir, name string, args ...string) (string, int, error) {
 // fakeCmd is a scripted command Runner returning a fixed exit code + output, and
 // recording the module dir it was asked to run in.
 type fakeCmd struct {
-	code     int
-	out      string
+	code    int
+	out     string
 	startErr error
 	ranInDir string
 }

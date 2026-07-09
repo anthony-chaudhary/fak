@@ -436,6 +436,82 @@ func TestSessionStopDurableWriteThroughReleasesSideRef(t *testing.T) {
 	}
 }
 
+// TestSessionThrottleDurableWriteThrough witnesses the throttle arm of #1199's
+// acceptance criterion #1 (pause/resume/stop/throttle all gain a durable
+// write-through): a `run→throttled` transition persists the new PCB state through
+// C1 (the registry descriptor) and republishes through C2 (the lease side-ref),
+// preserving the drive axes; a fresh process table over the same registry observes
+// the persisted THROTTLED row via ls/status; and resume clears it back to RUNNING.
+// The pause/resume and stop arms are covered above; throttle had no durable witness.
+func TestSessionThrottleDurableWriteThrough(t *testing.T) {
+	const trace = "durable-throttle"
+	ctx := context.Background()
+	now := time.Date(2026, 6, 29, 14, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "registry.json")
+	leases := &fakeSessionLeasePublisher{}
+	installDurableSessionTest(t, path, &now, leases)
+
+	serveSessions.Restore(trace, session.State{
+		TraceID:  trace,
+		Run:      session.Running,
+		Budget:   session.Budget{TurnsLeft: 5, TokensLeft: 42, ContextTokensLeft: 300, ContextTokensCap: 300},
+		Priority: 2,
+		Pace:     session.Pace{MaxTokensPerTurn: 128, MinTurnGapMs: 10},
+		Rev:      3,
+	})
+	if err := registerServeSessionDurability(ctx, trace); err != nil {
+		t.Fatalf("register durable session: %v", err)
+	}
+
+	now = now.Add(time.Second)
+	throttled, ok, err := controlSession(ctx, trace, "run", gateway.SessionControlRequest{
+		Run: "throttled", Reason: "operator-slowdown",
+	})
+	if err != nil || !ok {
+		t.Fatalf("throttle control: state=%+v ok=%v err=%v", throttled, ok, err)
+	}
+	if throttled.Run != "throttled" || throttled.Reason != "operator-slowdown" {
+		t.Fatalf("throttled state = %+v, want throttled with reason", throttled)
+	}
+	desc := readSessionDescriptor(t, path, trace)
+	if desc.Run != session.Throttled || desc.Reason != "operator-slowdown" {
+		t.Fatalf("descriptor after throttle = %+v, want throttled with reason", desc)
+	}
+	if desc.Budget.TurnsLeft != 5 || desc.Budget.TokensLeft != 42 || desc.Priority != 2 || desc.Pace.MaxTokensPerTurn != 128 {
+		t.Fatalf("descriptor lost drive axes after throttle: %+v", desc)
+	}
+	if last := leases.lastPublished(t); last.PCBState != "THROTTLED" {
+		t.Fatalf("side-ref publish after throttle = %+v, want THROTTLED", last)
+	}
+
+	// A fresh process table over the same registry reflects the persisted throttle
+	// through both ls and status — the transition outlived the process.
+	serveSessions = session.NewTable()
+	row, ok := findGatewaySession(listSessions(ctx), trace)
+	if !ok || row.Run != "throttled" {
+		t.Fatalf("list after restart = %+v ok=%v, want persisted throttled row", row, ok)
+	}
+	if got := observeSession(ctx, trace); got.Run != "throttled" {
+		t.Fatalf("status after restart = %+v, want persisted throttled", got)
+	}
+
+	// Resume clears the throttle back to RUNNING with axes intact and republishes.
+	now = now.Add(time.Second)
+	resumed, ok, err := controlSession(ctx, trace, "run", gateway.SessionControlRequest{Run: "running"})
+	if err != nil || !ok {
+		t.Fatalf("resume control: state=%+v ok=%v err=%v", resumed, ok, err)
+	}
+	if resumed.Run != "running" || resumed.Reason != "" {
+		t.Fatalf("resumed state = %+v, want running with cleared reason", resumed)
+	}
+	if resumed.Budget.TurnsLeft != 5 || resumed.Priority != 2 || resumed.Pace.MaxTokensPerTurn != 128 {
+		t.Fatalf("resume lost drive axes: %+v", resumed)
+	}
+	if last := leases.lastPublished(t); last.PCBState != "RUNNING" {
+		t.Fatalf("side-ref publish after resume = %+v, want RUNNING", last)
+	}
+}
+
 func TestSessionStopUnknownIDTypedError(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)

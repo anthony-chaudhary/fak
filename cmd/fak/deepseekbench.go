@@ -424,9 +424,9 @@ func liveRows(stderr io.Writer, baseURL, model string, spend bool) ([]DeepSeekBe
 // key+spend gate, mirroring the #3013 self-host smoke that skips cleanly without a node.
 func measureStreamed(baseURL, key, model string) (DeepSeekBenchRow, error) {
 	body, _ := json.Marshal(map[string]any{
-		"model":          model,
-		"stream":         true,
-		"messages":       []map[string]string{{"role": "user", "content": "Reply with a short sentence."}},
+		"model":    model,
+		"stream":   true,
+		"messages": []map[string]string{{"role": "user", "content": "Reply with a short sentence."}},
 		"stream_options": map[string]any{"include_usage": true},
 	})
 	url := strings.TrimRight(baseURL, "/") + "/chat/completions"

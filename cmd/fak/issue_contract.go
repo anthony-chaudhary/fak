@@ -31,6 +31,8 @@ func runIssue(stdout, stderr io.Writer, argv []string) int {
 		return runIssueFanout(stdout, stderr, argv[1:])
 	case "create":
 		return runIssueCreate(stdout, stderr, argv[1:])
+	case "dedup":
+		return runIssueDedup(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		issueUsage(stdout)
 		return 0
@@ -1121,6 +1123,18 @@ func issueUsage(w io.Writer) {
                      [--paths p1,p2] [--areas a1,a2] [--max N] [--json]
   fak issue create   --title T (--body B | --body-file F) [--labels l1,l2]
                      [--repo owner/name] [--dry-run] [--json]
+  fak issue dedup    [--json] [--limit N] [--threshold F] [--topk N]
+  fak issue dedup    --from-issues ISSUES.json|- [--json]
+
+The dedup command is the retrospective backlog duplicate census — the read-only
+complement of the write-time near-duplicate gate. It builds a body-aware simhash
+index over the open backlog (title and title+body axes), clusters near-twins the
+title-only Jaccard census was blind to, and emits a ranked merge/close proposal
+report where every proposal names its evidence (per-pair similarity on both axes,
+shared labels/paths, matched excerpts). It never writes to GitHub — the
+confirm-before-closing-as-dup discipline stands. Default reads the live backlog
+via gh; --from-issues reads a cached array (offline-safe). Exit 0 report; exit 2
+bad flags/input; exit 1 gh/encode failure.
 
 The create command files one GitHub issue directly, shelling to gh issue
 create from the trusted fak binary instead of the agent proposing raw gh

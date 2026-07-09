@@ -48,9 +48,22 @@ func canonicalizeArgValue(value string) (string, bool) {
 // the "quote styles" bypass variant, e.g. an arg carrying `'/a/b'` or `"/a/b"`
 // instead of the bare path. Only a value that STARTS with a quote is treated
 // as a whole-value wrap candidate (a command string that merely ENDS in a
-// quote, e.g. a shell fragment closing an inner quoted segment, is not one);
-// a leading quote with no matching close is an unterminated quote —
-// non-canonicalizable, so the caller fails closed.
+// quote, e.g. a shell fragment closing an inner quoted segment, is not one).
+//
+// A leading quote that never closes ANYWHERE is a genuinely unterminated quote:
+// non-canonicalizable, so the caller fails closed (MALFORMED) — the documented
+// fail-closed half that keeps a rule written against the canonical form from
+// being silently skipped when the raw string cannot be decoded.
+//
+// But a leading quote that DOES close in the interior — before the end of the
+// value — is not a whole-value wrap at all: it is a command line whose FIRST
+// TOKEN is a closed quoted word (a quoted program path, a `"$HOME/bin/x" build
+// ... 2>&1 | tee log` invocation). That is well-formed, not undecodable, so it
+// is returned as-is with ok=true rather than failed closed (#2771). Reading
+// every quote-prefixed command as an unterminated wrap refused benign
+// build/test/commit commands as MALFORMED — the guard false positive the
+// complaint reported. Whatever rule targets the value still matches its
+// canonical form; canonicalization was widened here, not disabled.
 func unwrapQuotes(v string) (string, bool) {
 	if len(v) == 0 {
 		return v, true
@@ -61,6 +74,12 @@ func unwrapQuotes(v string) (string, bool) {
 	}
 	if len(v) >= 2 && v[len(v)-1] == first {
 		return v[1 : len(v)-1], true
+	}
+	// Leading quote, not closed at the very end. A matching quote in the interior
+	// means "quoted first token, more tokens follow" (a command line) — decodable,
+	// admit as-is. No matching quote at all means truly unterminated — fail closed.
+	if strings.IndexByte(v[1:], first) >= 0 {
+		return v, true
 	}
 	return "", false
 }

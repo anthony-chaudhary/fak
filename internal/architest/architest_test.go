@@ -242,6 +242,7 @@ var tier = map[string]int{
 	"codexmcphealth":   2, // Codex MCP transport health diagnostic (#1445): fresh stdio smoke + stale-child inventory/reap fold over subprocess evidence. Tool-shaped mechanism leaf, off the hot path, imports only stdlib.
 	"pythongate":       2, // NEW-PYTHON-TOOL de-Python ratchet: scans tracked tools/*.py (git ls-files) against a frozen grandfathered baseline and refuses any new .py (NEW_PYTHON_TOOL). A tool-shaped witness leaf (reads tree, folds, emits offenses); shells to git off the hot path, imports nothing internal.
 	"ctxknobs":         1, // MANUAL-OVERLAY COUNTER ratchet (#2199): walks cmd/fak flags/env + .claude/skills for context knobs, classifies operator-debug vs user-required, refuses a NEW user-required overlay against a frozen baseline (NEW_USER_REQUIRED_KNOB). Pure filesystem walk + fold, stdlib-only, imports nothing internal, off the hot path.
+	"knobcensus":       2, // knob census (#2210): classifies every cmd/fak flag/env + skill knob as INTENT vs HOUSEKEEPING over a tree walk. Tool-shaped mechanism leaf; imports ctxknobs(1)+stdlib, off the hot path.
 	"treedoctor":       2, // tree-hygiene doctor over safecommit's lock seam plus git worktree reads; mechanism/tool leaf, off the hot path.
 	"commitintent":     1, // durable commit-intent queue record and drain ordering contract; pure stdlib, off the hot path.
 	"commitrollup":     1, // pure compatible-intent rollup planner and pathset assertion helper; stdlib-only, off the hot path.

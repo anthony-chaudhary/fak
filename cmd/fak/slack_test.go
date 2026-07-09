@@ -221,8 +221,9 @@ func TestSlackSendLive(t *testing.T) {
 	defer srv.Close()
 
 	var out, errb bytes.Buffer
+	// --direct exercises the fire-and-forget post path (durable is now the default).
 	code := runSlackSend(&out, &errb, []string{
-		"--channel", "C0LIVE", "--text", "shipped", "--token", "bottok-live", "--api-base", srv.URL + "/",
+		"--direct", "--channel", "C0LIVE", "--text", "shipped", "--token", "bottok-live", "--api-base", srv.URL + "/",
 	})
 	if code != 0 {
 		t.Fatalf("live send exit = %d, stderr=%s", code, errb.String())

@@ -56,6 +56,8 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchRoute(stdout, stderr, argv[1:])
 	case "route-health":
 		return runDispatchRouteHealth(stdout, stderr, argv[1:])
+	case "canary":
+		return runDispatchCanary(stdout, stderr, argv[1:])
 	case "skipped":
 		return runDispatchSkipped(stdout, stderr, argv[1:])
 	case "tier-status":
@@ -72,6 +74,8 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchProgress(stdout, stderr, argv[1:])
 	case "status":
 		return runDispatchStatus(stdout, stderr, argv[1:])
+	case "sessions":
+		return runDispatchSessions(stdout, stderr, argv[1:])
 	case "evidence":
 		return runDispatchWorkerEvidence(stdout, stderr, argv[1:])
 	case "audit":
@@ -98,7 +102,7 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		dispatchUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, route-health, tier-status, rollout-status, tick, wave, sweep, progress, status, evidence, audit, closure-audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, or timeout-ledger)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, route-health, canary, tier-status, rollout-status, tick, wave, sweep, progress, status, sessions, evidence, audit, closure-audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, or timeout-ledger)\n", argv[0])
 		dispatchUsage(stderr)
 		return 2
 	}
@@ -266,6 +270,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch route-health probe --base-url URL --model M [--provider P] [--account A] [--api-key-env ENV] [--timeout DUR] [--workspace DIR] [--json]
   fak dispatch route-health status [--workspace DIR] [--now UNIX] [--json]
   fak dispatch route-health gate (--route KEY | --provider P --model M [--account A]) [--workspace DIR] [--now UNIX] [--json]
+  fak dispatch canary --base-url URL --model M [--provider P] [--account A] [--api-key-env ENV] [--issue N | --proof-only] [--lane L] [--workspace DIR] [--dry-run] [--now UNIX] [--json]
   fak dispatch tier-status [--in FILE] [--demo] [--json]
   fak dispatch rollout-status [--in FILE] [--demo] [--json]
   fak dispatch skipped [--workspace DIR] [--channel C] [--repo-url URL] [--token T] [--dry-run]
@@ -274,6 +279,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch sweep [--workspace DIR] [--max-agents N] [--backend claude|opencode|codex] [--live] [--json]
   fak dispatch progress [--workspace DIR] [--target N] [--audit-json FILE] [--json]
   fak dispatch status [--runs-dir DIR] [--json | --markdown]
+  fak dispatch sessions [--runs-dir DIR] [--reg-dir DIR] [--now UNIX] [--json | --markdown]
   fak dispatch evidence [--runs-dir DIR] [--materialize] [--now UNIX] [--json]
   fak dispatch audit [--runs-dir DIR] [--json] [--file-issues]
   fak dispatch closure-audit [--workspace DIR] [--max-commits N] [--issue-limit N] [--json | --markdown]

@@ -108,6 +108,54 @@ func TestSlackSendDurableSurvivesDeadWireThenDrains(t *testing.T) {
 	}
 }
 
+func TestSlackSendDurableByDefault(t *testing.T) {
+	outboxTestDir(t)
+	posts := 0
+	srv := okSlackServer(t, &posts)
+	defer srv.Close()
+
+	// No --durable flag: durability is the default now (#2262), so a bare send must
+	// spool to disk first and then drain — not fire-and-forget.
+	var out, errb bytes.Buffer
+	rc := runSlackSend(&out, &errb, []string{
+		"--channel", "C1", "--text", "default durable",
+		"--token", "xoxb-test", "--api-base", srv.URL + "/",
+	})
+	if rc != 0 {
+		t.Fatalf("rc=%d stderr=%s", rc, errb.String())
+	}
+	if posts != 1 {
+		t.Fatalf("posts=%d, want 1", posts)
+	}
+	if !strings.Contains(out.String(), "enqueued durably") || !strings.Contains(out.String(), "posted 1") {
+		t.Fatalf("bare send did not take the durable path:\n%s", out.String())
+	}
+}
+
+func TestSlackSendDirectEscapeHatch(t *testing.T) {
+	clearSlackEnv(t)
+	outboxTestDir(t)
+
+	// --direct with no resolvable token is a hard config error (exit 2) and, being the
+	// fire-and-forget path, must NOT spool anything.
+	var out, errb bytes.Buffer
+	rc := runSlackSend(&out, &errb, []string{"--direct", "--channel", "C1", "--text", "hi"})
+	if rc != 2 {
+		t.Fatalf("--direct with no token: rc=%d, want 2; stderr=%s", rc, errb.String())
+	}
+	ob, err := openOutbox()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := ob.Status(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Pending != 0 {
+		t.Fatalf("--direct must not spool, got pending=%d", st.Pending)
+	}
+}
+
 func TestSlackOutboxDrainDryRunTouchesNothing(t *testing.T) {
 	outboxTestDir(t)
 	ob, err := openOutbox()

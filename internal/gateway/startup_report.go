@@ -22,6 +22,14 @@ func (s *Server) SetStartupReport(text string) {
 	s.startup.mu.Unlock()
 }
 
+// StartupReport is the exported reader for callers OUTSIDE the package: the guard's
+// launch-FAILURE path (guard_child.go) spills the full report to the terminal when the child
+// never started — the one case the compact/animate banner deliberately withholds the wall of
+// text for. "" when the host recorded none; safe on a nil Server.
+func (s *Server) StartupReport() string {
+	return s.startupReportText()
+}
+
 // startupReportText returns the recorded startup report, or "" when the host never set
 // one (a fak serve gateway, or a build predating the report wiring) — /debug/vars omits
 // the field then, so "not recorded" stays distinguishable from an empty report.

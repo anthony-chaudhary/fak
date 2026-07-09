@@ -331,11 +331,17 @@ func runSlackSend(stdout, stderr io.Writer, argv []string) int {
 	text := fs.String("text", "", "message text (REQUIRED); pass - to read the message from stdin")
 	token := fs.String("token", "", "bot token (default: $FAK_SCOREBOARD_TOKEN, then .env.slack.local)")
 	apiBase := fs.String("api-base", "", "override the Slack API base URL (for testing/proxying)")
-	durable := fs.Bool("durable", false, "enqueue through the durable outbox: the message survives crashes/429s/token drift and is delivered by this call's drain or a later one")
+	durable := fs.Bool("durable", true, "enqueue through the durable outbox: the message survives crashes/429s/token drift and is delivered by this call's drain or a later one (default; pass --direct to bypass)")
+	direct := fs.Bool("direct", false, "bypass the durable outbox: one fire-and-forget post (old behavior — a failed send is lost)")
 	dryRun := fs.Bool("dry-run", false, "print what would be sent and exit without posting")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
+
+	// Durable is the default (#2262): an ad-hoc send survives a crash/429/token drift
+	// instead of being dropped. --direct restores the old fire-and-forget post for the
+	// rare case a caller explicitly wants a single in-process attempt and a hard failure.
+	useDurable := *durable && !*direct
 
 	msg := *text
 	if msg == "-" {
@@ -368,8 +374,10 @@ func runSlackSend(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stdout, "  channel : %s\n", *channel)
 		fmt.Fprintf(stdout, "  token   : %s  [%s]\n", redactToken(tok), tokSource)
 		fmt.Fprintf(stdout, "  text    : %s\n", msg)
-		if *durable {
+		if useDurable {
 			fmt.Fprintf(stdout, "  durable : would enqueue into %s then drain\n", resolveOutboxDir())
+		} else {
+			fmt.Fprintf(stdout, "  direct  : would post once, fire-and-forget (a failed send is lost)\n")
 		}
 		if tok == "" {
 			fmt.Fprintln(stderr, "  (token is UNSET — set --token or "+scoreboardTokenKey+" before a live send)")
@@ -377,7 +385,7 @@ func runSlackSend(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 
-	if *durable {
+	if useDurable {
 		// Durability first: the row is on disk before any network is attempted, so a
 		// crash, 429, or missing token delays the message instead of losing it. The
 		// in-process drain is best-effort — a failure leaves the row for the next

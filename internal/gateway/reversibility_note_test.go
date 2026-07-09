@@ -118,6 +118,57 @@ func TestAdjudicationNoteCarriesReversibilityConfirmRecipe(t *testing.T) {
 	}
 }
 
+// The emphasis fix (#3306): when the gated call has a compiled sidestep (a `fak`
+// verb that avoids the gate entirely), the in-band trailer must LEAD the agent to
+// that verb and DEMOTE the _fak_confirm recipe to the raw-call fallback. Leading
+// with the token dance is what wedged the f0e7ac0f fleet session for over an hour:
+// the agent chased a (correctly) command-bound confirm token it misread as rotating
+// while `fak sync push` — which worked first try — sat one demoted sentence away.
+func TestReversibilityRefusalLeadsWithCompiledSidestep(t *testing.T) {
+	note := adjudicationNote([]ToolAdjudication{reversibilityRefusal()})
+
+	// The compiled sidestep survives and the trailer frames it as the primary path.
+	if !strings.Contains(note, "fak sync push") {
+		t.Fatalf("note dropped the compiled sidestep:\n%s", note)
+	}
+	if !strings.Contains(note, "sidesteps the gate entirely") {
+		t.Fatalf("trailer does not lead with the sidestep as the resolution:\n%s", note)
+	}
+
+	// The confirm-token recipe is demoted to the raw-call fallback — present, but
+	// gated behind "only if you specifically need the raw gated call" and AFTER the
+	// sidestep lead, not before it.
+	fallback := "Only if you specifically need the raw gated call"
+	sidestepAt := strings.Index(note, "sidesteps the gate entirely")
+	fallbackAt := strings.Index(note, fallback)
+	if fallbackAt < 0 {
+		t.Fatalf("confirm recipe not demoted to a fallback clause:\n%s", note)
+	}
+	if fallbackAt < sidestepAt {
+		t.Fatalf("confirm recipe (idx %d) precedes the sidestep lead (idx %d) — emphasis not fixed:\n%s", fallbackAt, sidestepAt, note)
+	}
+	// The recipe token is still reachable for the raw-call path.
+	if !strings.Contains(note, `"_fak_confirm":"fak-0011223344556677"`) {
+		t.Fatalf("demoted recipe dropped its confirm token:\n%s", note)
+	}
+}
+
+// A preview-confirm refusal with NO compiled sidestep (a preview-only affordance,
+// e.g. `npm publish --dry-run`) keeps the recipe-first trailer: there is no verb to
+// lead with, so the _fak_confirm re-propose remains the sanctioned next step.
+func TestReversibilityRefusalWithoutSidestepKeepsRecipeLead(t *testing.T) {
+	adj := reversibilityRefusal()
+	// A dry-run-only remedy: no `fak ` compiled verb.
+	adj.Verdict.Detail["remedy"] = "preview first with npm publish --dry-run"
+	note := adjudicationNote([]ToolAdjudication{adj})
+	if !strings.Contains(note, "the sanctioned next step is to re-propose that same call with only the _fak_confirm key added") {
+		t.Fatalf("preview-only refusal lost the recipe-first trailer:\n%s", note)
+	}
+	if strings.Contains(note, "sidesteps the gate entirely") {
+		t.Fatalf("preview-only refusal wrongly claimed a compiled sidestep:\n%s", note)
+	}
+}
+
 // A turn mixing a preview-confirm refusal with a plain deny gets the
 // confirm-aware trailer: the re-propose sanction for the tokened call, the
 // prohibition scoped to every OTHER refused call.

@@ -1059,16 +1059,25 @@ func argDeny(pr *ArgPredicate, detail string) abi.Verdict {
 }
 
 // argMalformed builds the fail-closed Deny for an arg value the canonicalizer
-// (#2407) could not decode (e.g. an unterminated quote). Always MALFORMED,
+// (#2407) could not decode (the one remaining case after #2771: an unterminated
+// quote — a value that opens ' or " and never closes it). Always MALFORMED,
 // never pr.Reason: the failure is that the rung could not tell what the value
 // canonically IS, not that a specific rule matched it, so it must not be
 // softened by that rule's own Advisory declaration.
+//
+// The Claim NAMES the concrete decode failure (not a bare "undecodable arg
+// value") and the verdict carries a bounded Meta["fix"], so the refusal reaches
+// the agent as a specific, actionable note through the unified remedy seam
+// (#2749) rather than a silent MALFORMED that reads as a broken tool (#2771).
+// Both stay within the deny channel's disclosure budget: static text naming the
+// arg and the fix, never the arg value itself.
 func argMalformed(pr *ArgPredicate) abi.Verdict {
 	return abi.Verdict{
 		Kind:    abi.VerdictDeny,
 		Reason:  abi.ReasonMalformed,
 		By:      "monitor",
-		Payload: abi.WitnessPayload{Claim: pr.Tool + "." + pr.Arg + " undecodable arg value"},
+		Payload: abi.WitnessPayload{Claim: pr.Tool + "." + pr.Arg + " has an unterminated quote (a value that opens ' or \" must close it)"},
+		Meta:    map[string]string{"fix": "close the quote in " + pr.Arg + ", or drop the leading quote if the value is not meant to be quote-wrapped, then retry"},
 	}
 }
 

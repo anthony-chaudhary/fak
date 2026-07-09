@@ -50,6 +50,18 @@ func renderRefusalNotes(a ToolAdjudication) (notes string, confirmRecipe bool) {
 	return strings.Join(parts, " "), confirmRecipe
 }
 
+// compiledSidestepRemedy reports whether a refusal's sanctioned alternative names
+// a compiled `fak` verb that sidesteps the gate entirely (e.g. `fak sync push` for
+// a gated `git push`), as opposed to a mere preview affordance (`--dry-run`). The
+// reversibility family hints that carry a compiled verb are the only remedies that
+// contain a `fak ` token; the preview-only hints (npm publish --dry-run, a webhook
+// preview) never do. When one is present the trailer leads with it — running the
+// verb needs no confirm token at all — instead of the _fak_confirm recipe, whose
+// (correctly command-bound) token an agent misread as rotating and looped on (#3306).
+func compiledSidestepRemedy(a ToolAdjudication) bool {
+	return strings.Contains(a.Verdict.Detail["remedy"], "fak ")
+}
+
 // denySummary renders a short human-readable note when every proposed tool_call
 // was refused, so a client that ignores the `fak` extension still adapts.
 func denySummary(adjs []ToolAdjudication) string {
@@ -76,6 +88,7 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 	repaired := make([]string, 0, len(adjs))
 	allowedLoops := make([]string, 0, len(adjs))
 	hasConfirmRecipe := false
+	hasCompiledSidestep := false
 	for _, a := range adjs {
 		switch {
 		case !a.Admitted:
@@ -84,6 +97,12 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 				entry += " " + notes
 				if recipe {
 					hasConfirmRecipe = true
+					// A compiled sidestep (a `fak` verb that avoids the gate
+					// entirely) is the resolution to LEAD with; the confirm-token
+					// dance is the fallback for when only the raw call will do.
+					if compiledSidestepRemedy(a) {
+						hasCompiledSidestep = true
+					}
 				}
 			}
 			denied = append(denied, entry)
@@ -112,9 +131,19 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 		// confirm key). Witnessed wedging a fleet session for 1h+: the agent obeyed
 		// the trailer, never echoed the token, and the push never happened. When any
 		// denied call carries a confirm recipe, the trailer must except it.
-		if hasConfirmRecipe {
+		//
+		// Emphasis (#3306): when a compiled sidestep exists (a `fak` verb that
+		// avoids the gate outright, e.g. `fak sync push` for `git push`), the
+		// trailer LEADS with it and DEMOTES the _fak_confirm recipe to a fallback.
+		// Leading with the token dance instead re-wedged an obedient agent that
+		// chased a (correctly) command-bound token it wrongly believed was rotating
+		// while the sidestep that worked first try sat one demoted sentence away.
+		switch {
+		case hasConfirmRecipe && hasCompiledSidestep:
+			b.WriteString(" A preview-confirm refusal is a pause, not a denial — and the simplest resolution is the sanctioned compiled alternative named above, which sidesteps the gate entirely and needs no token. Prefer it. Only if you specifically need the raw gated call, re-propose that same call byte-identical with only the _fak_confirm key added. This is per-tool feedback, not a session stop. Do not re-propose any other refused call unchanged; choose an allowed alternative. A session stop only comes from a declared stop policy.")
+		case hasConfirmRecipe:
 			b.WriteString(" A preview-confirm refusal is a pause, not a denial: the sanctioned next step is to re-propose that same call with only the _fak_confirm key added. This is per-tool feedback, not a session stop. Do not re-propose any other refused call unchanged; choose an allowed alternative. A session stop only comes from a declared stop policy.")
-		} else {
+		default:
 			b.WriteString(" This is per-tool feedback, not a session stop. Do not re-propose a refused call unchanged; fix the arguments/tool choice or choose an allowed alternative. A session stop only comes from a declared stop policy.")
 		}
 	}

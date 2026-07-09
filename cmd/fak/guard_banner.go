@@ -31,6 +31,12 @@ const (
 	guardBannerFull    = "full"
 	guardBannerCompact = "compact"
 	guardBannerOff     = "off"
+	// guardBannerAnimate is the attended-interactive default: instead of the compact banner's
+	// three static lines flashing before the agent's TUI paints over them, play a short in-place
+	// icon animation that lands on one iconic identity line (see guard_launch_anim.go). It
+	// degrades to the compact banner off a color TTY or under FAK_GUARD_LAUNCH_ANIM=off, so the
+	// byte-clean / no-motion paths are preserved; the render site (guard.go) owns that fallback.
+	guardBannerAnimate = "animate"
 )
 
 // guardBannerModeDecision resolves the --banner flag to a concrete mode. Precedence,
@@ -46,9 +52,9 @@ func guardBannerModeDecision(banner string, quiet, stdinInteractive, childIntera
 		mode = guardBannerAuto
 	}
 	switch mode {
-	case guardBannerAuto, guardBannerFull, guardBannerCompact, guardBannerOff:
+	case guardBannerAuto, guardBannerFull, guardBannerCompact, guardBannerOff, guardBannerAnimate:
 	default:
-		return "", fmt.Errorf("--banner must be auto, full, compact, or off; got %q", banner)
+		return "", fmt.Errorf("--banner must be auto, full, compact, animate, or off; got %q", banner)
 	}
 	if quiet {
 		return guardBannerOff, nil
@@ -57,7 +63,10 @@ func guardBannerModeDecision(banner string, quiet, stdinInteractive, childIntera
 		return mode, nil
 	}
 	if stdinInteractive && childInteractive {
-		return guardBannerCompact, nil
+		// Attended interactive: a human is about to hand the terminal to a full-screen agent UI,
+		// so the wall of text buys nothing. Play the icon animation instead of flashing the
+		// compact banner. The render site degrades this to compact off a color TTY / on opt-out.
+		return guardBannerAnimate, nil
 	}
 	return guardBannerFull, nil
 }

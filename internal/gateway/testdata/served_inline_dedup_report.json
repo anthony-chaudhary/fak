@@ -1,0 +1,74 @@
+{
+  "schema": "served_inline_dedup.v1",
+  "provenance": {
+    "command": "go test ./internal/gateway -run TestServedInlineDedup -count=1",
+    "generated_by": "fak/internal/gateway.buildServedInlineDedupReport",
+    "serve": "WITNESSED — fak's real adjudicateProposedServed seam served these calls in-process",
+    "trace": "MODELED — a named, reproducible representative coding transcript"
+  },
+  "trace_name": "representative-coding-session-v1",
+  "trace_turns": 6,
+  "saves": "EXECUTIONS (the client tool round-trip of a duplicate/repeat read), NOT the surviving call's tokens",
+  "eligible_name_regime": {
+    "tool_name_shape": "read-only-prefixed (get_/read_/search_/list_/lookup_/find_/calc)",
+    "read_only_proposed": 14,
+    "served_inline": 5,
+    "dedup_rate": 0.3571,
+    "by_win_class": {
+      "cross_turn_reread": {
+        "proposed": 5,
+        "served": 5
+      },
+      "first_occurrence": {
+        "proposed": 7,
+        "served": 0
+      },
+      "force_fresh_declined": {
+        "proposed": 1,
+        "served": 0
+      },
+      "within_turn_parallel": {
+        "proposed": 1,
+        "served": 0
+      }
+    }
+  },
+  "claude_native_name_regime": {
+    "tool_name_shape": "Claude Code native (Read/Grep/Glob/...) — unmatched by readOnlyPrefix",
+    "read_only_proposed": 14,
+    "served_inline": 0,
+    "dedup_rate": 0,
+    "by_win_class": {
+      "cross_turn_reread": {
+        "proposed": 5,
+        "served": 0
+      },
+      "first_occurrence": {
+        "proposed": 7,
+        "served": 0
+      },
+      "force_fresh_declined": {
+        "proposed": 1,
+        "served": 0
+      },
+      "within_turn_parallel": {
+        "proposed": 1,
+        "served": 0
+      }
+    }
+  },
+  "recommendation": {
+    "default_on": false,
+    "rationale": "On a redundant read pattern with read-only-SHAPED tool names the mechanism serves every cross-turn re-read (a real, fail-safe execution saving), but it fires ZERO times on the dominant Claude Code path: the read-only NAME gate (get_/read_/search_/...) does not recognize Read/Grep/Glob, so no native read is ever eligible. A miss is byte-identical to today (TestServedInline_Miss), so the lever is safe to leave ON where it pays.",
+    "gate": "Default --vdso-proxy-fill ON only after the serve eligibility classifier recognizes the harness's real read-tool names (extend readOnlyPrefix / add a shape classifier for Read/Grep/Glob), OR for MCP/snake_case tool deployments where reads are already get_/read_/search_ shaped. Until then keep it opt-in."
+  },
+  "assumptions": [
+    "The trace's redundancy (files/searches re-read across turns) is representative of a real coding session; a session that never repeats a read measures near-zero (a valid result that down-ranks the lever).",
+    "Tool NAMING regime drives eligibility: only get_/read_/search_/list_/lookup_/find_/calc-prefixed reads are served. Claude Code's native Read/Grep/Glob are not, so the native-name arm measures 0.",
+    "Within-turn parallel/same-call-twice duplicates (W1/W2) are cold (no prior fill), so THIS mechanism does not dedup them — only cross-turn re-reads (W3) after the client returned a result are served.",
+    "A force-fresh (_fak_fresh) re-read declines the serve by design (escape hatch), so it counts as read-only-proposed but never served."
+  ],
+  "promotion": "Feed the SAME harness a captured real /v1/messages session (fak guard -- claude, or a tau2/SWE run) as the trace; if the real read pattern is redundant AND uses eligible tool names, the WITNESSED rate promotes the lever toward default-on.",
+  "demotion_or_retirement": "If a captured real session shows near-zero cross-turn re-read (agents rarely re-read), or if the dominant harness keeps native Read/Grep names unrecognized, the lever is demoted to opt-in and the value claim is retired for that path.",
+  "invalidating_assumption": "The single assumption most likely to flip the result is the tool-NAMING regime: on real Claude Code traffic the read tool is Read (not read_*), so served_inline is 0 regardless of redundancy until the name gate is widened."
+}

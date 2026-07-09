@@ -13,6 +13,8 @@ package main
 //	                         direct + transitive dependents of a Go symbol before editing
 //	fak index ctxknobs         the manual-overlay counter: context flags/env/skills,
 //	                         each operator-debug (fine) or user-required (defect) (#2199)
+//	fak index knobs            the knob census: every user-facing behavior knob,
+//	                         each INTENT (promote) or HOUSEKEEPING (automate) (#2210)
 //	fak index generation [<query>]
 //	                         the generation taxonomy: labels, milestones, evidence rules
 //	fak index freshness        the self-index drift report: undeclared leaves, dead doc
@@ -105,6 +107,8 @@ func runIndex(stdout, stderr io.Writer, argv []string) int {
 		return indexRefs(stdout, stderr, rootDir, args, *asJSON, *limit)
 	case "ctxknobs", "ctxknob":
 		return indexCtxKnobs(stdout, stderr, rootDir, *asJSON)
+	case "knobs", "knob":
+		return indexKnobs(stdout, stderr, rootDir, *asJSON)
 	case "freshness", "fresh":
 		return indexFreshness(stdout, stderr, cat, *asJSON, *limit)
 	default:
@@ -333,6 +337,7 @@ func writeIndexUsage(w io.Writer) {
   fak index work [<query>]    the selection surface ("what should I work on"): named issue views + the default's gh query
   fak index refs <pkg>.<Sym>  direct + transitive dependents of a Go symbol before editing
   fak index ctxknobs          the manual-overlay counter: context flags/env/skills classified operator-debug vs user-required (#2199)
+  fak index knobs             the knob census: every user-facing behavior knob classified INTENT (promote) vs HOUSEKEEPING (automate) (#2210)
   fak index freshness         the self-index drift report: undeclared leaves, dead doc links, unknown verbs, orphaned dated notes
   flags: --json  --limit N  --root DIR
 `)

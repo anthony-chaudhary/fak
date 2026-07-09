@@ -996,6 +996,46 @@ func guardRestartLimitStatus(limit int, ev guardBudgetRestartEvent) string {
 		limit, reason, continuity, next)
 }
 
+// guardChildIsLaunchFailure reports whether runErr is a FAILURE TO LAUNCH (a spawn/exec error
+// — the binary is missing, not executable, a bad path) rather than a normal run that exited
+// non-zero. An *exec.ExitError means the child DID start and then exited, so it is never a
+// launch failure; a nil error is a clean run. Everything else (exec.Error, a PathError from
+// exec.Command().Run()) is the child never starting — the one case the compact/animate launch
+// spills the full startup report for. Pure, so the classification is unit-tested.
+func guardChildIsLaunchFailure(runErr error) bool {
+	if runErr == nil {
+		return false
+	}
+	_, isExit := runErr.(*exec.ExitError)
+	return !isExit
+}
+
+// guardDumpStartupReportOnLaunchFail spills the full recorded startup report to w when the
+// child failed to launch. This is the one case the compact/animate banner deliberately
+// withholds the wall of text for: on a launch failure no agent TUI ever took the terminal, so
+// the full floor/hook/auth detail is exactly what the operator needs, co-located with the
+// error. enabled is false when the full report already streamed at boot (--banner=full) so the
+// text is never printed twice; a nil Server or an unrecorded report is a silent no-op. It reads
+// the report off the gateway and hands the formatting to the pure guardWriteLaunchFailReport.
+func guardDumpStartupReportOnLaunchFail(w io.Writer, srv *gateway.Server, enabled bool) {
+	if srv == nil {
+		return
+	}
+	guardWriteLaunchFailReport(w, srv.StartupReport(), enabled)
+}
+
+// guardWriteLaunchFailReport writes the report under a "launch failed" header when enabled and
+// the report is non-empty, and is a no-op otherwise. Split from the Server read so the exact
+// header + body format is unit-tested without standing up a gateway.
+func guardWriteLaunchFailReport(w io.Writer, report string, enabled bool) {
+	if !enabled || strings.TrimSpace(report) == "" {
+		return
+	}
+	report = strings.TrimRight(report, "\n")
+	fmt.Fprintln(w, "fak guard: launch failed — full startup report (the detail an attended launch keeps in `fak info --startup`):")
+	fmt.Fprintln(w, report)
+}
+
 // runGuardChildAndReport runs the wrapped agent to completion, tears the gateway down,
 // prints the session's adjudication + journal summary (unless quiet), flushes the durable
 // trail, and exits with the child's own code — surfacing a gateway-mid-session failure as
@@ -1007,11 +1047,16 @@ func guardRestartLimitStatus(limit int, ev guardBudgetRestartEvent) string {
 // command with a resume flag appended — so a crash caused by auth expiry self-heals within this
 // guarded session instead of always needing a manual re-run. credPath is empty when guard is not
 // pinning the Claude subscription upstream, which makes the check an unconditional no-op there.
-func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, spawnMeta guardChildSpawnMetadata, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler) {
+//
+// dumpStartupOnLaunchFail spills the full startup report to stderr if the child never starts
+// (guardChildIsLaunchFailure) — set by the caller for every banner mode except --banner=full,
+// which already streamed it at boot.
+func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, spawnMeta guardChildSpawnMetadata, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool) {
 	spawnBroker := toolprocgate.NewSpawnBroker()
 	for {
 		_, child, err := launchGuardChildWithBroker(command, injected, pinUpstream, spawnMeta, spawnBroker, nil)
 		if err != nil {
+			guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
 			finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
@@ -1020,6 +1065,9 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
 			command = next
 			continue
+		}
+		if guardChildIsLaunchFailure(runErr) {
+			guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
 		}
 		finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 		return
@@ -1053,7 +1101,7 @@ func guardTimeBudgetExhausted(sessions *session.Table, traceID string, now time.
 	return false, ""
 }
 
-func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, spawnMeta guardChildSpawnMetadata, restarter *guardBudgetRestarter, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler) {
+func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, spawnMeta guardChildSpawnMetadata, restarter *guardBudgetRestarter, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool) {
 	spawnBroker := toolprocgate.NewSpawnBroker()
 	var extraEnv [][2]string
 	restarts := 0
@@ -1068,11 +1116,14 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		_, child, err := launchGuardChildWithBroker(command, injected, pinUpstream, spawnMeta, spawnBroker, nil, extraEnv...)
 		wait := make(chan error, 1)
 		if err != nil {
+			guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
 			finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
 		maybeStartGuardChildTerminalRestorePulse(command)
 		if err := child.Start(); err != nil {
+			// child.Start() failing IS a launch failure (the child never ran); spill the detail.
+			guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
 			finishGuardChildAndReport(err, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
@@ -1379,6 +1430,21 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 		}
 		_ = auditJournal.Close()
 	}
+	// Terminal edit for the live session card (#2259): classify the exit exactly as the
+	// surfacing logic below does, then stop the updater and write the final outcome line. The
+	// card handle is nil unless this session queued a Slack root, so finalizeOutcome is a no-op
+	// otherwise; it flushes synchronously because an os.Exit follows immediately below.
+	guardExitCode := 0
+	if runErr != nil {
+		if ee, isExit := runErr.(*exec.ExitError); isExit {
+			guardExitCode = ee.ExitCode()
+		} else {
+			guardExitCode = 1
+		}
+	} else if serr != nil && !errors.Is(serr, http.ErrServerClosed) && !errors.Is(serr, context.Canceled) {
+		guardExitCode = 1
+	}
+	guardSessionCardHandle.finalizeOutcome(guardExitCode, srv.AdjudicationSummary())
 	// Faithfully surface the child's exit code first (so `fak guard -- claude -p …`
 	// scripts see what the agent returned).
 	if runErr != nil {

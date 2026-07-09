@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/benchpost"
-	"github.com/anthony-chaudhary/fak/internal/scoreboard"
+	"github.com/anthony-chaudhary/fak/internal/slackoutbox"
 )
 
 // cmdBenchPost / cmdBenchRequest post fak BENCH-CHANNEL rollups. They are reached as
@@ -155,11 +155,27 @@ type slackPostSpec struct {
 	resolveTokenField    func() resolvedField
 	showResolutionDryRun bool
 	warnTokenFallback    bool
+
+	// apiBase overrides the Slack API base URL for the durable drain's transport. It is
+	// empty for every real command (they hit slack.com); a test sets it to point the
+	// in-process drain at a fake server.
+	apiBase string
 }
 
 // slackPostTail renders the card on --dry-run, else resolves the channel + token and
-// posts via the shared scoreboard chat.postMessage transport. It is the tail that the
-// bench, blockers, and dojo post subcommands all share.
+// delivers through the durable Slack outbox (#2262). It is the tail that the bench,
+// blockers, cachevalue, dojo, grafana, marketing, and milestone post subcommands all
+// share, so migrating it here makes every one of those unattended feeders
+// durable-by-default in one place.
+//
+// The card is ENQUEUED to the local JSONL spool before any network is attempted, so a
+// crash, 429, or missing token now delays the post instead of dropping it (the
+// fire-and-forget hole this leaf exists to close). A best-effort in-process drain then
+// tries to send it now: on a clean post the historical `posted to CHANNEL ts=TS` line is
+// preserved (read back from the spooled row's posted ts) so humans and scripts that parse
+// it are unaffected; a deferred/refused delivery reports the durable trail and still exits
+// 0 — the message is safe on disk and `fak slack outbox` / `fak slack health` surface its
+// fate. Only losing the spool itself (enqueue error) is a hard failure.
 func slackPostTail(stdout, stderr io.Writer, s slackPostSpec) int {
 	if s.dryRun {
 		fmt.Fprintln(stdout, s.card.Text())
@@ -176,22 +192,61 @@ func slackPostTail(stdout, stderr io.Writer, s slackPostSpec) int {
 		return 2
 	}
 	warnSlackTokenFallback(stderr, s, tokSource)
-	client, err := scoreboard.NewClient(tok)
+
+	// Durability first: the row is on disk before any send, so nothing below can lose it.
+	ob, err := openOutbox()
 	if err != nil {
-		fmt.Fprintf(stderr, "%s: channel %s [%s], token [%s]: %v\n", s.label, ch, sourceOrDash(chSource), sourceOrDash(tokSource), err)
-		return 2
-	}
-	ts, err := client.Post(ctx(), ch, s.card.Text(), s.card.Blocks())
-	if err != nil {
-		fmt.Fprintf(stderr, "%s: channel %s [%s], token [%s]: %v\n", s.label, ch, sourceOrDash(chSource), sourceOrDash(tokSource), err)
+		fmt.Fprintf(stderr, "%s: outbox: %v\n", s.label, err)
 		return 1
 	}
-	if chSource != "" || tokSource != "" {
-		fmt.Fprintf(stdout, "posted to %s [%s] ts=%s token=[%s]\n", ch, sourceOrDash(chSource), ts, sourceOrDash(tokSource))
+	nonce, err := ob.Enqueue(slackoutbox.Row{
+		Channel: ch,
+		Text:    s.card.Text(),
+		Blocks:  s.card.Blocks(),
+		Source:  s.label,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: enqueue: %v\n", s.label, err)
+		return 1
+	}
+
+	// Best-effort in-process drain. A missing token, a busy lock, or a transport error all
+	// leave the row durably spooled for the next drain rather than failing the command.
+	wire, werr := outboxWire(tok, s.apiBase)
+	if werr != nil {
+		fmt.Fprintf(stdout, "%s: enqueued durably to %s (nonce=%s); delivery deferred: %v — run `fak slack outbox drain`\n", s.label, ch, nonce, werr)
 		return 0
 	}
-	fmt.Fprintf(stdout, "posted to %s ts=%s\n", ch, ts)
+	if _, err := ob.Drain(ctx(), wire, slackoutbox.DrainOpts{Root: "."}); err != nil && err != slackoutbox.ErrDrainBusy {
+		fmt.Fprintf(stdout, "%s: enqueued durably to %s (nonce=%s); delivery deferred: %v — run `fak slack outbox drain`\n", s.label, ch, nonce, err)
+		return 0
+	}
+
+	// Drain ran (or another drainer holds the lock): read the row's settled state back so
+	// the post confirmation reflects what actually happened, not what we hoped.
+	if ts := outboxPostedTS(ob, nonce); ts != "" {
+		if chSource != "" || tokSource != "" {
+			fmt.Fprintf(stdout, "posted to %s [%s] ts=%s token=[%s]\n", ch, sourceOrDash(chSource), ts, sourceOrDash(tokSource))
+			return 0
+		}
+		fmt.Fprintf(stdout, "posted to %s ts=%s\n", ch, ts)
+		return 0
+	}
+	// Enqueued but not posted this pass: refused by the leak fence, dead-lettered, still
+	// owed, or another channel drained first. Durable regardless — point at the outbox.
+	fmt.Fprintf(stdout, "%s: enqueued durably to %s (nonce=%s); not delivered this pass — `fak slack outbox status` / `fak slack health` show its fate\n", s.label, ch, nonce)
 	return 0
+}
+
+// outboxPostedTS reads back the Slack ts a just-enqueued row posted at, or "" if it has
+// not posted (deferred, refused, dead, or still owed). It is the read that lets the
+// durable tail keep the historical `posted to … ts=…` confirmation for the common case.
+func outboxPostedTS(ob *slackoutbox.Outbox, nonce string) string {
+	snap, err := ob.Load()
+	if err != nil {
+		return ""
+	}
+	return snap.PostedTS(nonce)
 }
 
 func resolveSlackPostFields(s slackPostSpec) (channel, channelSource, token, tokenSource string) {
