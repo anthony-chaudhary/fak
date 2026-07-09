@@ -878,7 +878,7 @@ func TestRunVCacheScoreKernelLedgerSuppliesWitness(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
 		t.Fatalf("stdout is invalid json: %v\n%s", err, out.String())
 	}
-	if rep.ActiveSource != "planned" || rep.Planes.ProviderObserved.Available {
+	if rep.ActiveSource != vcachescore.ActiveSourceForecast || rep.Planes.ProviderObserved.Available {
 		t.Fatalf("kernel ledger must not invent provider telemetry: source=%q provider=%+v", rep.ActiveSource, rep.Planes.ProviderObserved)
 	}
 	kernel := rep.Planes.KernelWitnessed
@@ -927,7 +927,7 @@ func TestRunVCacheScoreTelemetryHumanReportsEconomics(t *testing.T) {
 // TestRunVCacheScoreObservedByDefaultFromSnapshot pins #1090: with no --telemetry, the
 // score reads the persisted observed cache window (the per-turn snapshot a finished
 // guard/serve session leaves) and reports the REALIZED multiplier — active source
-// "telemetry", not the synthetic-Zipf "planned" forecast.
+// "telemetry", not the synthetic-Zipf "forecast".
 func TestRunVCacheScoreObservedByDefaultFromSnapshot(t *testing.T) {
 	snap := filepath.Join(t.TempDir(), "vcache-turns.jsonl")
 	// Two turns with heavy cache_read reuse — the observed window vcacheobserve.Rows folds.
@@ -961,7 +961,7 @@ func TestRunVCacheScoreObservedByDefaultFromSnapshot(t *testing.T) {
 		t.Fatalf("snapshot provider decisions = %+v, want one fak-authored provider action-plan decision", rep.AgenticActivation)
 	}
 
-	// --snapshot off forces the planned FORECAST even when a snapshot exists.
+	// --snapshot off forces the modeled FORECAST even when a snapshot exists.
 	var out2, errb2 bytes.Buffer
 	if code := runVCache(&out2, &errb2, []string{"score", "--json", "--snapshot", "off"}); code != 0 && code != 1 {
 		t.Fatalf("score --snapshot off exit=%d stderr=%s", code, errb2.String())
@@ -970,8 +970,8 @@ func TestRunVCacheScoreObservedByDefaultFromSnapshot(t *testing.T) {
 	if err := json.Unmarshal(out2.Bytes(), &rep2); err != nil {
 		t.Fatalf("stdout invalid json: %v\n%s", err, out2.String())
 	}
-	if rep2.ActiveSource != "planned" {
-		t.Fatalf("--snapshot off must fall back to the planned forecast, got active_source=%q", rep2.ActiveSource)
+	if rep2.ActiveSource != vcachescore.ActiveSourceForecast {
+		t.Fatalf("--snapshot off must fall back to the modeled forecast, got active_source=%q", rep2.ActiveSource)
 	}
 	if rep2.AnchorSource != vcachescore.AnchorSourceSynthetic || rep2.TurnsObserved != 0 {
 		t.Fatalf("--snapshot off anchor source/turns = %q/%d, want synthetic/0", rep2.AnchorSource, rep2.TurnsObserved)
@@ -1101,7 +1101,7 @@ func TestRunVCacheScoreContextOnlySnapshotDoesNotInventProviderTelemetry(t *test
 	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
 		t.Fatalf("stdout is invalid json: %v\n%s", err, out.String())
 	}
-	if rep.ActiveSource != "planned" || rep.Observed != nil || rep.TurnsObserved != 0 {
+	if rep.ActiveSource != vcachescore.ActiveSourceForecast || rep.Observed != nil || rep.TurnsObserved != 0 {
 		t.Fatalf("context-only snapshot must not become provider telemetry: source=%q observed=%+v turns=%d",
 			rep.ActiveSource, rep.Observed, rep.TurnsObserved)
 	}
