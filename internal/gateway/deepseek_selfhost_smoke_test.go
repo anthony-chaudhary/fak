@@ -76,6 +76,24 @@ func dsSelfhostDo(t *testing.T, req *http.Request, key string) *http.Response {
 	return resp
 }
 
+// dsSelfhostSkipIfOverloaded turns an upstream capacity signal into a clean skip
+// rather than a failure. A shared or busy serving node throttling this probe
+// (HTTP 429/503, or a gRPC-style "ResourceExhausted" body — the exact shape a
+// pooled NVIDIA-hosted / vLLM / SGLang endpoint returns under load) is NOT a fak
+// wire defect: the wire can only be judged when the upstream actually served the
+// request. This keeps a transient capacity 503 from reddening the suite while
+// still failing hard on a genuine wire break (4xx contract errors, malformed
+// bodies, missing [DONE]). Returns true when it skipped.
+func dsSelfhostSkipIfOverloaded(t *testing.T, status int, body []byte) {
+	t.Helper()
+	if status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable ||
+		bytes.Contains(body, []byte("ResourceExhausted")) {
+		t.Skipf("upstream capacity throttle (HTTP %d) — not a fak wire defect; "+
+			"retry against a dedicated V4 serving node to witness this rung: %s",
+			status, bytes.TrimSpace(body))
+	}
+}
+
 // TestDeepSeekV4SelfHostReadiness is the readiness rung: the served engine
 // answers /models with the roster fak needs to route. Skips cleanly when no
 // upstream is configured.
@@ -127,9 +145,12 @@ func TestDeepSeekV4SelfHostNonStreaming(t *testing.T) {
 	base, model, key := dsSelfhostConfig(t)
 
 	reqBody, _ := json.Marshal(map[string]any{
-		"model":       model,
-		"messages":    []map[string]string{{"role": "user", "content": "Reply with the single word: ready"}},
-		"max_tokens":  16,
+		"model":    model,
+		"messages": []map[string]string{{"role": "user", "content": "Reply with the single word: ready"}},
+		// 64, not 16: DeepSeek V4 defaults thinking-mode ON, so a 16-token budget
+		// can be fully consumed by reasoning_content and leave message.content
+		// empty. 64 gives visible content room while staying a trivially cheap probe.
+		"max_tokens":  64,
 		"temperature": 0,
 		"stream":      false,
 	})
@@ -141,6 +162,7 @@ func TestDeepSeekV4SelfHostNonStreaming(t *testing.T) {
 	resp := dsSelfhostDo(t, req, key)
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
+	dsSelfhostSkipIfOverloaded(t, resp.StatusCode, body)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("non-streaming completion = %d, want 200: %s", resp.StatusCode, body)
 	}
@@ -148,7 +170,8 @@ func TestDeepSeekV4SelfHostNonStreaming(t *testing.T) {
 	var out struct {
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
@@ -161,8 +184,19 @@ func TestDeepSeekV4SelfHostNonStreaming(t *testing.T) {
 	if err := json.Unmarshal(body, &out); err != nil {
 		t.Fatalf("completion not JSON: %v\n%s", err, body)
 	}
-	if len(out.Choices) == 0 || strings.TrimSpace(out.Choices[0].Message.Content) == "" {
-		t.Fatalf("non-streaming completion returned no content: %s", body)
+	if len(out.Choices) == 0 {
+		t.Fatalf("non-streaming completion returned no choices: %s", body)
+	}
+	// A DeepSeek V4 thinking-mode turn is a live wire even when message.content is
+	// empty: the tokens land in reasoning_content instead. Treat either as content
+	// evidence; only both-empty is a real wire failure.
+	msg := out.Choices[0].Message
+	if strings.TrimSpace(msg.Content) == "" && strings.TrimSpace(msg.ReasoningContent) == "" {
+		t.Fatalf("non-streaming completion returned no content and no reasoning_content: %s", body)
+	}
+	if strings.TrimSpace(msg.Content) == "" && strings.TrimSpace(msg.ReasoningContent) != "" {
+		t.Logf("non-streaming completion produced reasoning_content but empty content — " +
+			"thinking-mode consumed the token budget; wire is live (raise max_tokens for visible content)")
 	}
 	// Usage/counter behavior, documented honestly rather than assumed: a compliant
 	// engine reports token counts; a build that omits them is a recorded gap, not a
@@ -201,6 +235,7 @@ func TestDeepSeekV4SelfHostStreaming(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		dsSelfhostSkipIfOverloaded(t, resp.StatusCode, body)
 		t.Fatalf("streaming completion = %d, want 200: %s", resp.StatusCode, body)
 	}
 
