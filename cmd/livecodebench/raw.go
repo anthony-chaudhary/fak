@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -34,6 +35,11 @@ func runRaw(argv []string) int {
 	maxTokens := fs.Int("max-tokens", 2048, "max_tokens sent on each completion request")
 	timeout := fs.Duration("timeout", 120*time.Second, "per-request HTTP timeout")
 	out := fs.String("out", "", "write the raw-arm report JSON to this path (default: stdout)")
+	// lcb_runner cache/resume parity (#2108).
+	useCache := fs.Bool("use-cache", false, "reuse cached completions from --cache-dir instead of regenerating (mirrors lcb_runner --use_cache; cache key = model+prompt+n+temperature+release)")
+	cacheDir := fs.String("cache-dir", filepath.Join(".fak", "lcb-gencache"), "generation-cache directory consulted and populated with --use-cache")
+	continueExisting := fs.Bool("continue-existing", false, "resume from the report already at --out: problems it completed are not regenerated (mirrors lcb_runner --continue_existing; requires --out)")
+	continueWithEval := fs.Bool("continue-existing-with-eval", false, "like --continue-existing (mirrors lcb_runner --continue_existing_with_eval); grading still defers to the official evaluator, so no local eval is re-run")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -50,10 +56,45 @@ func runRaw(argv []string) int {
 		return 2
 	}
 
+	if *continueWithEval {
+		*continueExisting = true
+		fmt.Fprintln(os.Stderr, "livecodebench raw: --continue-existing-with-eval resumes generation; grading defers to the official lcb_runner evaluator, so no local eval is re-run")
+	}
+	if *continueExisting && strings.TrimSpace(*out) == "" {
+		fmt.Fprintln(os.Stderr, "livecodebench raw: --continue-existing requires --out (the existing report is resumed in place)")
+		return 2
+	}
+
 	suite, err := livecodebench.LoadSuiteFile(*suitePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "livecodebench raw: %v\n", err)
 		return 1
+	}
+
+	// #2108 resume: an existing --out report is the prior run to continue from.
+	// A missing file is a fresh run; an unreadable one is an error, so a corrupt
+	// artifact is never silently regenerated over.
+	var prior *livecodebench.RawArmReport
+	if *continueExisting {
+		raw, rerr := os.ReadFile(*out)
+		switch {
+		case rerr == nil:
+			var p livecodebench.RawArmReport
+			if uerr := json.Unmarshal(raw, &p); uerr != nil {
+				fmt.Fprintf(os.Stderr, "livecodebench raw: --continue-existing: %s is not a raw-arm report: %v\n", *out, uerr)
+				return 1
+			}
+			prior = &p
+		case os.IsNotExist(rerr):
+			fmt.Fprintf(os.Stderr, "livecodebench raw: --continue-existing: no report at %s yet, running fresh\n", *out)
+		default:
+			fmt.Fprintf(os.Stderr, "livecodebench raw: --continue-existing: %v\n", rerr)
+			return 1
+		}
+	}
+	var cache livecodebench.GenCache
+	if *useCache {
+		cache = livecodebench.DirGenCache{Dir: *cacheDir}
 	}
 
 	cfg := livecodebench.RawArmConfig{
@@ -66,11 +107,12 @@ func runRaw(argv []string) int {
 	client := &http.Client{Timeout: *timeout}
 	sampler := gatewaySampler(client, *endpoint, *model, *temperature, *maxTokens)
 
-	report, err := livecodebench.RunRawArm(context.Background(), cfg, suite.Problems, sampler)
+	res, err := livecodebench.RunRawArmCached(context.Background(), cfg, suite.ReleaseVersion, suite.Problems, sampler, cache, prior)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "livecodebench raw: %v\n", err)
 		return 1
 	}
+	report := res.Report
 
 	w := io.Writer(os.Stdout)
 	if strings.TrimSpace(*out) != "" {
@@ -90,15 +132,25 @@ func runRaw(argv []string) int {
 	}
 	fmt.Fprintf(os.Stderr, "livecodebench raw: %d problem(s) × n=%d via %s (model %s), %d cached prompt tokens\n",
 		len(report.Problems), report.N, report.Endpoint, report.Model, report.Usage.CachedPromptTokens)
+	// #2108 honest accounting: the rate is stated against genuine lookups only;
+	// problems resumed from a prior report are reported separately, never as hits.
+	if *useCache {
+		fmt.Fprintf(os.Stderr, "livecodebench raw: %s\n", res.Stats.Summary())
+	}
+	if *continueExisting {
+		fmt.Fprintf(os.Stderr, "livecodebench raw: resumed %d problem(s) from the existing report\n", res.Resumed)
+	}
 	return 0
 }
 
 // gatewaySampler returns a RawArmSampler that POSTs one OpenAI-compatible
 // chat-completions request per call and returns the completion text plus the
-// provider-relayed usage. RunRawArm folds usage through Usage.CachedPromptTokens().
+// provider-relayed usage, normalized here through agent.Usage.CachedPromptTokens()
+// into livecodebench.RawSampleUsage (the agent import stays on this cmd side so
+// internal/livecodebench keeps its foundation tier).
 func gatewaySampler(client *http.Client, endpoint, model string, temperature float64, maxTokens int) livecodebench.RawArmSampler {
 	url := strings.TrimRight(endpoint, "/") + "/chat/completions"
-	return func(ctx context.Context, p livecodebench.Problem, _ int) (string, agent.Usage, error) {
+	return func(ctx context.Context, p livecodebench.Problem, _ int) (string, livecodebench.RawSampleUsage, error) {
 		reqBody := chatCompletionsRequest{
 			Model:       model,
 			Temperature: temperature,
@@ -107,33 +159,37 @@ func gatewaySampler(client *http.Client, endpoint, model string, temperature flo
 		}
 		buf, err := json.Marshal(reqBody)
 		if err != nil {
-			return "", agent.Usage{}, err
+			return "", livecodebench.RawSampleUsage{}, err
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(buf))
 		if err != nil {
-			return "", agent.Usage{}, err
+			return "", livecodebench.RawSampleUsage{}, err
 		}
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := client.Do(req)
 		if err != nil {
-			return "", agent.Usage{}, err
+			return "", livecodebench.RawSampleUsage{}, err
 		}
 		defer resp.Body.Close()
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return "", agent.Usage{}, err
+			return "", livecodebench.RawSampleUsage{}, err
 		}
 		if resp.StatusCode != http.StatusOK {
-			return "", agent.Usage{}, fmt.Errorf("gateway HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+			return "", livecodebench.RawSampleUsage{}, fmt.Errorf("gateway HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 		}
 		var out chatCompletionsResponse
 		if err := json.Unmarshal(body, &out); err != nil {
-			return "", agent.Usage{}, err
+			return "", livecodebench.RawSampleUsage{}, err
 		}
 		if len(out.Choices) == 0 {
-			return "", agent.Usage{}, fmt.Errorf("gateway returned no choices")
+			return "", livecodebench.RawSampleUsage{}, fmt.Errorf("gateway returned no choices")
 		}
-		return out.Choices[0].Message.Content, out.Usage, nil
+		return out.Choices[0].Message.Content, livecodebench.RawSampleUsage{
+			PromptTokens:       out.Usage.PromptTokens,
+			CompletionTokens:   out.Usage.CompletionTokens,
+			CachedPromptTokens: out.Usage.CachedPromptTokens(),
+		}, nil
 	}
 }
 
