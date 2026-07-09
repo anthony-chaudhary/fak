@@ -295,25 +295,110 @@ CLAUDE_GUARD_PRECOMPACT_ARGS = ["--precompact-hook", "enforce"]
 # must be identical on both paths.
 CLAUDE_GUARD_MODEL_WINDOW_TOKENS = 200000   # ctxplan HardContextCap
 CLAUDE_GUARD_OUTPUT_RESERVE_TOKENS = 32000  # ctxplan OutputReserve
-# The workers' ~62K irreducible baseline prompt (issue body + AGENTS/llms
-# orientation + injected fleet memory + the ~40K startup.json 'route' blob).
+# The FLOOR under the measured launch-prompt baseline — the workers' ~62K irreducible
+# prompt (issue body + AGENTS/llms orientation + injected fleet memory + the ~40K
+# startup.json 'route' blob), hand-measured once. No longer the SOLE baseline:
+# measured_claude_guard_baseline sizes the constituents readable at launch and floors
+# them here, so a degenerate/partial measurement can never lower the budget below the
+# shipped value while an organically grown prompt raises it automatically. Mirrors
+# cmd/dispatchworker/guard.go:claudeGuardBaselineTokens.
 CLAUDE_GUARD_BASELINE_TOKENS = 62000
 # Budget = baseline × this factor, so a worker is born with a whole baseline of
 # headroom before the backstop fires. (History: the committed value this derivation
 # replaced was the crash-looping flat "48000"; a flat 131072 was only ever an
 # uncommitted working-tree interim, never shipped.)
 CLAUDE_GUARD_BIRTH_HEADROOM_FACTOR = 2
+# Launch-prompt constituents a self-claiming lane worker can SIZE at launch: the
+# orientation files every worker loads (AGENTS.md, llms.txt, CLAUDE.md), plus a
+# workspace-root MEMORY.md when a repo keeps one. NOTE the real injected fleet memory
+# does NOT live at the workspace root — it is in the per-project claude memory dir
+# (.../projects/<ws>/memory/MEMORY.md), off the root and not portably derivable here,
+# so in the common fleet layout MEMORY.md is absent and the floor covers it; it is
+# listed so a repo that DOES keep a root MEMORY.md gets it measured. Likewise the
+# per-issue body and the ~40K startup.json 'route' blob are not visible here (the floor
+# covers that remainder); the startup blob is measured when the launcher names it via
+# DISPATCH_STARTUP_BUNDLE. Mirrors
+# cmd/dispatchworker/guard.go:launchConstituentFiles / launchStartupBundleEnv.
+LAUNCH_CONSTITUENT_FILES = ["AGENTS.md", "llms.txt", "CLAUDE.md", "MEMORY.md"]
+LAUNCH_STARTUP_BUNDLE_ENV = "DISPATCH_STARTUP_BUNDLE"
 
 
-def claude_guard_context_budget_tokens() -> int:
-    """Derive the per-session context budget: baseline x headroom, window-clamped.
+def approx_tokens_from_bytes(n: int) -> int:
+    """Estimate tokens from a byte count via the codebase (n+3)//4 ruler — the SAME
+    scale the ctxplan planner sizes context with. Mirrors
+    cmd/dispatchworker/guard.go:approxTokensFromBytes."""
+    return (n + 3) // 4 if n > 0 else 0
 
-    Mirrors cmd/dispatchworker/guard.go:deriveClaudeGuardContextBudget exactly.
-    For the shipped constants: min(62000*2, 200000-32000) = 124000 — strictly above
-    the baseline (birth-safe) and under the effective window ceiling (backstop).
+
+def measure_launch_baseline_tokens(constituent_bytes: dict[str, int]) -> int:
+    """Sum the approximate token footprint of the launch constituents from their real
+    byte sizes — the measurement seam that replaces the frozen 62000 guess. An empty
+    map measures 0 (degenerate); the caller floors it. Mirrors
+    cmd/dispatchworker/guard.go:measureLaunchBaselineTokens."""
+    return sum(approx_tokens_from_bytes(b) for b in constituent_bytes.values())
+
+
+def resolve_claude_guard_baseline(measured_tokens: int) -> int:
+    """max(measured, floor): a degenerate/partial measurement can never lower the
+    budget below the shipped value (the #2972 born-over-budget invariant); a prompt
+    grown past the floor raises the baseline automatically. Mirrors
+    cmd/dispatchworker/guard.go:resolveClaudeGuardBaseline."""
+    return measured_tokens if measured_tokens > CLAUDE_GUARD_BASELINE_TOKENS \
+        else CLAUDE_GUARD_BASELINE_TOKENS
+
+
+def gather_launch_constituent_bytes(
+    workspace, env: dict[str, str] | None = None,
+) -> dict[str, int]:
+    """Read the byte sizes of the launch constituents readable at launch from
+    ``workspace`` (an unreadable/absent file contributes nothing — the degenerate
+    guard). An empty workspace measures nothing (the hermetic default → the floor).
+    Mirrors cmd/dispatchworker/guard.go:gatherLaunchConstituentBytes."""
+    out: dict[str, int] = {}
+    ws = str(workspace) if workspace else ""
+    if not ws:
+        return out
+    e = env if env is not None else os.environ
+    for name in LAUNCH_CONSTITUENT_FILES:
+        try:
+            p = Path(ws) / name
+            if p.is_file():
+                out[name] = p.stat().st_size
+        except OSError:
+            pass
+    bundle = (e.get(LAUNCH_STARTUP_BUNDLE_ENV) or "").strip()
+    if bundle:
+        try:
+            bp = Path(bundle)
+            if bp.is_file():
+                out["startup_bundle"] = bp.stat().st_size
+        except OSError:
+            pass
+    return out
+
+
+def measured_claude_guard_baseline(
+    workspace=None, env: dict[str, str] | None = None,
+) -> tuple[int, dict[str, int]]:
+    """Size the readable launch constituents, floor the measurement, and return both
+    the floored baseline and the raw constituent sizes (for the observable). Mirrors
+    cmd/dispatchworker/guard.go:measuredClaudeGuardBaseline."""
+    constituents = gather_launch_constituent_bytes(workspace, env)
+    return resolve_claude_guard_baseline(
+        measure_launch_baseline_tokens(constituents)), constituents
+
+
+def claude_guard_context_budget_tokens(
+    workspace=None, env: dict[str, str] | None = None,
+) -> int:
+    """Derive the per-session context budget: MEASURED baseline (floored) x headroom,
+    window-clamped. An empty workspace measures nothing and falls to the floor, so the
+    hermetic default is min(62000*2, 200000-32000) = 124000. Mirrors
+    cmd/dispatchworker/guard.go:claudeGuardContextBudgetTokens.
     """
     ceiling = CLAUDE_GUARD_MODEL_WINDOW_TOKENS - CLAUDE_GUARD_OUTPUT_RESERVE_TOKENS
-    return min(CLAUDE_GUARD_BASELINE_TOKENS * CLAUDE_GUARD_BIRTH_HEADROOM_FACTOR, ceiling)
+    baseline, _ = measured_claude_guard_baseline(workspace, env)
+    return min(baseline * CLAUDE_GUARD_BIRTH_HEADROOM_FACTOR, ceiling)
 
 
 CLAUDE_GUARD_CONTEXT_BUDGET_TOKENS = str(claude_guard_context_budget_tokens())
@@ -328,12 +413,26 @@ CLAUDE_GUARD_RESTART_LIMIT = "16"
 # --max-duration is CUMULATIVE across --restart-on-budget relaunches, so it bounds TOTAL
 # lifespan regardless of restart count. Mirrors cmd/dispatchworker/guard.go:claudeGuardMaxDuration.
 CLAUDE_GUARD_MAX_DURATION = f"{DEFAULT_TIMEOUT_S - 60}s"
-CLAUDE_GUARD_BUDGET_ARGS = [
-    "--context-budget-tokens", CLAUDE_GUARD_CONTEXT_BUDGET_TOKENS,
-    "--restart-on-budget",
-    "--restart-limit", CLAUDE_GUARD_RESTART_LIMIT,
-    "--max-duration", CLAUDE_GUARD_MAX_DURATION,
-]
+
+
+def claude_guard_budget_args(
+    workspace=None, env: dict[str, str] | None = None,
+) -> list[str]:
+    """The claude guard budget argv, carrying the MEASURED context budget for this
+    workspace (floored). Order is part of the CLI surface the parity tests pin.
+    Mirrors cmd/dispatchworker/guard.go:claudeGuardArgs (the budget portion)."""
+    return [
+        "--context-budget-tokens",
+        str(claude_guard_context_budget_tokens(workspace, env)),
+        "--restart-on-budget",
+        "--restart-limit", CLAUDE_GUARD_RESTART_LIMIT,
+        "--max-duration", CLAUDE_GUARD_MAX_DURATION,
+    ]
+
+
+# Floor-default budget argv (workspace-independent): the shipped 124000 wiring, kept
+# as a stable reference. The live path calls claude_guard_budget_args(workspace, env).
+CLAUDE_GUARD_BUDGET_ARGS = claude_guard_budget_args()
 
 
 def _opencode_model_provider(command: Sequence[str]) -> str:
@@ -693,7 +792,7 @@ def guard_wrap(
             *extra,
             *CLAUDE_GUARD_PRECOMPACT_ARGS,
             "--session-id", audit.stem,
-            *CLAUDE_GUARD_BUDGET_ARGS,
+            *claude_guard_budget_args(workspace, env),
         ]
         # Shared-path leasing for a fanned-out wave (#1501): when the wave names ONE
         # shared fak gateway (FLEET_SHARED_GATEWAY_URL), route THIS worker's fak
@@ -853,7 +952,7 @@ def build_payload(
         command = build_command(lane, backend) if not error else []
     command = list(command)
     ok = error is None and (result is None or result.get("returncode") == 0)
-    return {
+    payload = {
         "schema": SCHEMA,
         "ok": ok,
         "lane": lane,
@@ -866,6 +965,16 @@ def build_payload(
         "result": result,
         "error": error,
     }
+    # OBSERVABLE for the measured launch-prompt baseline / seeded context budget (claude
+    # only), so fleet drift in the launch prompt is a visible number in the record.
+    if backend == "claude":
+        baseline, _ = measured_claude_guard_baseline(workspace)
+        envelope_ceiling = (CLAUDE_GUARD_MODEL_WINDOW_TOKENS
+                            - CLAUDE_GUARD_OUTPUT_RESERVE_TOKENS)
+        payload["guard_baseline_tokens"] = baseline
+        payload["guard_context_budget_tokens"] = min(
+            baseline * CLAUDE_GUARD_BIRTH_HEADROOM_FACTOR, envelope_ceiling)
+    return payload
 
 
 def render(payload: dict[str, Any]) -> str:
@@ -877,6 +986,11 @@ def render(payload: dict[str, Any]) -> str:
     ]
     if payload.get("error"):
         lines.append(f"error: {payload['error']}")
+    budget = payload.get("guard_context_budget_tokens")
+    if budget:
+        lines.append(
+            f"guard: measured_baseline={payload.get('guard_baseline_tokens')} "
+            f"context_budget={budget} tokens")
     result = payload.get("result")
     if isinstance(result, dict):
         lines.append(f"returncode: {result.get('returncode')}")

@@ -1,6 +1,6 @@
 ---
 title: "Dispatch-worker context-budget trap: the derived-budget fix and its measured-baseline residual (2026-07-08)"
-description: "The #2972 crash-loop where the claude dispatch worker's guard budget (48000) sat below the workers' ~62K irreducible baseline prompt, so every worker was born over-budget and drained BUDGET_CONTEXT_EXHAUSTED on turn 1. Records the shipped derived-budget fix (min(baseline*2, HardContextCap-OutputReserve) = 124000), why a flat constant goes stale, and the open residual: the 62000 baseline is still a frozen hand-measured constant that nothing witnesses against the real launch prompt."
+description: "The #2972 crash-loop where the claude dispatch worker's guard budget (48000) sat below the workers' ~62K irreducible baseline prompt, so every worker was born over-budget and drained BUDGET_CONTEXT_EXHAUSTED on turn 1. Records the shipped derived-budget fix (min(baseline*2, HardContextCap-OutputReserve) = 124000), why a flat constant goes stale, and the #3522 follow-up that turned the frozen 62000 baseline into a MEASURED (floored, raising-only) one that sizes the launch constituents readable at launch — closing the organic-orientation-growth hole while the runtime-attribution witness for the full dynamic prompt remains the last checkable step."
 slug: dispatch-worker-context-budget-trap
 date: 2026-07-08
 ---
@@ -71,33 +71,72 @@ Wiring:
   monotone-in-baseline, and the exact CLI flag surface. The adequacy floor in
   `TestGuardWrapClaudeFrontsWithFakGuardAnthropic` is `>= 62400`.
 
-## The residual — NOT closed by the fix
+## The measured-baseline seam (shipped — #3522)
 
-`claudeGuardBaselineTokens = 62000` is still a **frozen, hand-measured constant**.
-Nothing measures the *real* launch prompt and reconciles it against this assumption.
-Organic growth of any baseline contributor (a longer AGENTS.md, a fatter `route`
-blob, more injected memory, a bigger Claude Code system prompt) past the derived
-`124000` budget silently re-introduces the exact turn-1 birth trap — and it would
-again surface only as a generic `CHILD_CRASH`, not as "born over budget."
+The follow-up replaces the *sole* frozen baseline with a **measurement** that is
+**floored** at the old constant and can only ever **raise** the baseline — never lower
+it. `claudeGuardBaselineTokens = 62000` is retained as a FLOOR, not the answer:
 
-The golden tests do **not** catch this: they witness the *arithmetic* (budget vs the
-*assumed* baseline), not the *assumed baseline vs the real prompt*. The one input
-that matters most is the one input nothing checks.
+```
+measured  = Σ approxTokensFromBytes(bytes(constituent))   # (bytes+3)/4, the ctxplan ruler
+baseline  = max(measured, claudeGuardBaselineTokens)       # floor: never below the shipped value
+budget    = min(baseline * 2, HardContextCap - OutputReserve)
+```
 
-## Why a naive static guard is NOT the fix (rejected approach)
+- **Constituents sized at launch:** the orientation files a self-claiming lane worker
+  actually loads from the workspace root (`AGENTS.md`, `llms.txt`, `CLAUDE.md`), a
+  workspace-root `MEMORY.md` when a repo keeps one, and the `route` blob when the
+  launcher names its path via `DISPATCH_STARTUP_BUNDLE`. An absent/unreadable file
+  contributes nothing (the degenerate guard). Caveat: the *real* injected fleet memory
+  lives in the per-project claude memory dir (`…/projects/<ws>/memory/MEMORY.md`), off
+  the workspace root and not portably derivable at launch, so in the common fleet
+  layout `MEMORY.md` is absent and floor-covered — it is measured only for a repo that
+  actually keeps a root `MEMORY.md`.
+- **Raising-only, floored:** a degenerate or partial measurement (empty inputs,
+  unreadable files, an empty workspace) sums below the floor, so `max(…, 62000)` keeps
+  today's exact 124000 — the #2972 born-over-budget invariant holds by construction.
+  But if the *orientation/memory* constituents organically grow PAST the floor, the
+  baseline (and budget) track them automatically instead of silently outgrowing a
+  frozen constant. That is the specific hole this closes.
+- **Observable:** a claude launch record now carries `guard_baseline_tokens` and
+  `guard_context_budget_tokens` (payload + `render`), so drift is a visible number in
+  `.dispatch-runs/` rather than an argv int nobody reads.
+- **Wiring:** Go `cmd/dispatchworker/guard.go` — `approxTokensFromBytes`,
+  `measureLaunchBaselineTokens`, `resolveClaudeGuardBaseline`,
+  `gatherLaunchConstituentBytes`, `measuredClaudeGuardBaseline`,
+  `claudeGuardContextBudgetTokens(workspace, env)`. Python mirror
+  `tools/dispatch_worker.py` (same names, snake_case). Parity golden:
+  `TestMeasureLaunchBaselineFloorsAndTracks` (Go) and
+  `test_measure_launch_baseline_floors_and_tracks` (Python) — same fixtures, same
+  integers; the derivation goldens still pin the hermetic 124000 default.
 
-Tempting: a CI test that sums the on-disk repo-file contributors (CLAUDE.md +
-AGENTS.md + llms.txt) as tokens (≈4 chars/tok) and asserts the sum stays under
-`claudeGuardBaselineTokens`. **Do not ship this as a closure.** Those static files
-are only ~15–20K of the ~62K baseline; the dominant contributors — the ~40K dynamic
-`route` blob, the per-issue body, and Claude Code's own system prompt — are *not*
-repo files and are invisible to a static sum. A guard that witnesses a fraction of
-the baseline while reading as "the baseline is guarded" is worse than no guard: it
-manufactures false confidence over exactly the terms that actually move.
+### Why this is NOT the rejected static guard
+
+An earlier draft of this note rejected "a CI test that sums the on-disk repo files and
+**asserts the sum stays under** `claudeGuardBaselineTokens`" — because those files are
+only ~15–20K of the ~62K baseline, so a guard that reads as "the baseline is guarded"
+while witnessing a fraction manufactures false confidence. The shipped seam is the
+inverse of that failure mode and does **not** reintroduce it:
+
+- It **never asserts** the measured sum bounds the real prompt. It floors AT 62000 and
+  only raises — the floor remains fully authoritative for every dynamic term the sum
+  cannot see, so no false "fully guarded" claim is made.
+- Its job is not "prove the baseline is safe" (impossible from repo files alone) but
+  "stop the *stable* constituents from silently outgrowing the budget while the floor
+  covers the rest." A fraction measured additively-upward is strictly safer than the
+  frozen constant; a fraction measured as an *upper bound* was the trap.
+
+## The residual — still open
+
+The seam sizes only the constituents *readable at launch*. The dominant DYNAMIC terms —
+the per-issue body, Claude Code's own system prompt, and the `route` blob unless a
+launcher plumbs `DISPATCH_STARTUP_BUNDLE` — are still covered only by the floor. So the
+full-prompt witness is not yet in place: organic growth of a *dynamic* term past 124000
+would still re-introduce the turn-1 trap and still surface as a generic `CHILD_CRASH`.
 
 ## Next checkable steps (in preference order)
 
-1. **Runtime attribution (the real "measure the launch prompt" fix).** The guard
+1. **Runtime attribution (the real "measure the FULL launch prompt" fix).** The guard
    ALREADY measures the real launch prompt — `DebitUsage` sees turn 1's full resident
    window every run. What's missing is *attribution*: make a turn-1 drain
    (`ContextTokensLeft` exhausted before any productive turn) emit a DISTINCT,
@@ -106,11 +145,17 @@ manufactures false confidence over exactly the terms that actually move.
    loud and self-explaining in the guard decision journal
    (`.dispatch-runs/guard-audit/`) instead of a silent ship-rate collapse. Witness:
    a hermetic session whose turn-1 window exceeds the budget produces the new reason.
-2. **Offline baseline refresh.** Sample real guarded workers' turn-1 resident windows
-   from the guard decision journal (or `tools/ctxwin.py` over worker sessions) and
-   refresh `claudeGuardBaselineTokens` from the p95 on a cadence — converting the
-   hand-measured constant into a measured one. Witness: a regeneration script + a note
-   like `CTXWIN-CONTEXT-WINDOW-BASELINE-*` that sources the number.
+2. **Plumb `DISPATCH_STARTUP_BUNDLE` from the dispatch tick.** The seam already folds
+   the `route` blob when its path is named in the environment; wiring the dispatch tick
+   (which writes the sidecar) to export that path moves the ~40K dominant static-ish
+   term from floor-covered to measured. Witness: a launch whose bundle exceeds the
+   floor raises `guard_baseline_tokens` above 62000.
+3. **Offline baseline-floor refresh.** Sample real guarded workers' turn-1 resident
+   windows from the guard decision journal (or `tools/ctxwin.py` over worker sessions)
+   and refresh the `claudeGuardBaselineTokens` FLOOR from the p95 on a cadence. Witness:
+   a regeneration script + a note like `CTXWIN-CONTEXT-WINDOW-BASELINE-*`.
 
-Status: **not yet** for the residual — the derived-budget fix is shipped and green;
-the measured-baseline witness above is the remaining, checkable work.
+Status: the frozen baseline is now a **floored, raising-only measurement** (#3522,
+shipped and green) — the organic-orientation-growth hole is closed. Three checkable
+steps remain (above); the full-dynamic-prompt runtime-attribution witness (step 1) is
+the highest-preference of them.

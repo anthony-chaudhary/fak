@@ -96,7 +96,10 @@ func TestGuardAuditPathUniquePerCall(t *testing.T) {
 func TestClaudeGuardContextBudgetDerivation(t *testing.T) {
 	env := ctxplan.GenericTurnEnvelope()
 	ceiling := env.HardContextCap - env.OutputReserve
-	got, err := strconv.Atoi(claudeGuardContextBudgetTokens())
+	// Empty workspace measures nothing → the baseline floors to claudeGuardBaselineTokens,
+	// so this golden pins the hermetic shipped default (124000) independent of any
+	// on-disk orientation size.
+	got, err := strconv.Atoi(claudeGuardContextBudgetTokens("", nil))
 	if err != nil {
 		t.Fatalf("derived budget must be a wired integer: %v", err)
 	}
@@ -133,8 +136,84 @@ func TestClaudeGuardContextBudgetDerivation(t *testing.T) {
 		"--restart-limit", "16",
 		"--max-duration", "1740s",
 	}
-	if !slices.Equal(claudeGuardArgs(), want) {
-		t.Errorf("claudeGuardArgs() = %v, want %v", claudeGuardArgs(), want)
+	if !slices.Equal(claudeGuardArgs("", nil), want) {
+		t.Errorf("claudeGuardArgs() = %v, want %v", claudeGuardArgs("", nil), want)
+	}
+}
+
+// TestMeasureLaunchBaselineFloorsAndTracks pins the measurement seam (#3522): the
+// baseline is measured from the real launch constituents but can never fall below the
+// hand-measured floor, and it RISES when the measured prompt outgrows the floor —
+// closing the "nothing measures the real prompt" gap without ever reintroducing the
+// born-over-budget trap. Parity partner: tools/dispatch_worker_test.py
+// test_measure_launch_baseline_floors_and_tracks (same fixtures, same integers).
+func TestMeasureLaunchBaselineFloorsAndTracks(t *testing.T) {
+	// (a) approx ruler matches the codebase (bytes+3)/4.
+	if got := approxTokensFromBytes(41657); got != (41657+3)/4 {
+		t.Errorf("approxTokensFromBytes(41657) = %d, want %d", got, (41657+3)/4)
+	}
+	if got := approxTokensFromBytes(0); got != 0 {
+		t.Errorf("approxTokensFromBytes(0) = %d, want 0", got)
+	}
+	// (b) A degenerate (empty) measurement floors to the shipped baseline — never below.
+	if got := resolveClaudeGuardBaseline(measureLaunchBaselineTokens(nil)); got != claudeGuardBaselineTokens {
+		t.Errorf("empty measurement must floor to %d, got %d", claudeGuardBaselineTokens, got)
+	}
+	// (c) A small measured prompt (below the floor) still floors — no regression.
+	small := map[string]int{"AGENTS.md": 41657, "llms.txt": 57230} // ~24722 tokens < floor
+	if got := resolveClaudeGuardBaseline(measureLaunchBaselineTokens(small)); got != claudeGuardBaselineTokens {
+		t.Errorf("sub-floor measurement (%d tokens) must floor to %d, got %d",
+			measureLaunchBaselineTokens(small), claudeGuardBaselineTokens, got)
+	}
+	// (d) A measured prompt that OUTGROWS the floor raises the baseline (the trap the
+	// frozen constant left open): a startup blob big enough to cross 62000 tokens.
+	grown := map[string]int{"AGENTS.md": 41657, "llms.txt": 57230, "startup_bundle": 200000}
+	measured := measureLaunchBaselineTokens(grown)
+	if measured <= claudeGuardBaselineTokens {
+		t.Fatalf("fixture must exceed the floor: measured %d <= %d", measured, claudeGuardBaselineTokens)
+	}
+	if got := resolveClaudeGuardBaseline(measured); got != measured {
+		t.Errorf("supra-floor measurement must pass through, got %d want %d", got, measured)
+	}
+	// (e) The derived budget stays birth-safe and window-clamped on the measured path.
+	env := ctxplan.GenericTurnEnvelope()
+	ceiling := env.HardContextCap - env.OutputReserve
+	budget := deriveClaudeGuardContextBudget(resolveClaudeGuardBaseline(measured), env.HardContextCap, env.OutputReserve)
+	if budget <= measured && budget != ceiling {
+		t.Errorf("measured budget %d must exceed measured baseline %d (or clamp to ceiling %d)", budget, measured, ceiling)
+	}
+	if budget > ceiling {
+		t.Errorf("measured budget %d must stay under the window ceiling %d", budget, ceiling)
+	}
+}
+
+// TestGatherLaunchConstituentBytesReadsWorkspaceAndFloors witnesses the live gather:
+// it sizes real files under a temp workspace and folds a startup bundle named via env,
+// and an empty workspace measures nothing (the hermetic default → floor).
+func TestGatherLaunchConstituentBytesReadsWorkspaceAndFloors(t *testing.T) {
+	ws := t.TempDir()
+	writeFile(t, filepath.Join(ws, "AGENTS.md"), strings.Repeat("a", 400))
+	writeFile(t, filepath.Join(ws, "llms.txt"), strings.Repeat("b", 800))
+	bundle := filepath.Join(ws, "run.startup.json")
+	writeFile(t, bundle, strings.Repeat("c", 1200))
+
+	got := gatherLaunchConstituentBytes(ws, map[string]string{launchStartupBundleEnv: bundle})
+	if got["AGENTS.md"] != 400 || got["llms.txt"] != 800 {
+		t.Errorf("orientation sizes wrong: %v", got)
+	}
+	if got["startup_bundle"] != 1200 {
+		t.Errorf("startup bundle size = %d, want 1200", got["startup_bundle"])
+	}
+	if _, ok := got["MEMORY.md"]; ok {
+		t.Errorf("absent MEMORY.md must not appear: %v", got)
+	}
+	// Empty workspace is the hermetic default: nothing measured, budget floors.
+	if len(gatherLaunchConstituentBytes("", nil)) != 0 {
+		t.Error("empty workspace must gather nothing")
+	}
+	base, _ := measuredClaudeGuardBaseline("", nil)
+	if base != claudeGuardBaselineTokens {
+		t.Errorf("empty-workspace baseline = %d, want floor %d", base, claudeGuardBaselineTokens)
 	}
 }
 

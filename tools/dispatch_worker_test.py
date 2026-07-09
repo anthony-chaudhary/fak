@@ -276,6 +276,47 @@ class DispatchWorkerTest(unittest.TestCase):
         mod.CLAUDE_GUARD_BASELINE_TOKENS = ceiling
         self.assertEqual(mod.claude_guard_context_budget_tokens(), ceiling)
 
+    def test_measure_launch_baseline_floors_and_tracks(self) -> None:
+        # Python half of the measurement-seam parity (#3522). Mirror of
+        # cmd/dispatchworker/guard_test.go:TestMeasureLaunchBaselineFloorsAndTracks —
+        # same fixtures, same integers. Update both in the same commit.
+        mod = load()
+        # (a) approx ruler matches the codebase (bytes+3)//4.
+        self.assertEqual(mod.approx_tokens_from_bytes(41657), (41657 + 3) // 4)
+        self.assertEqual(mod.approx_tokens_from_bytes(0), 0)
+        # (b) A degenerate (empty) measurement floors to the shipped baseline.
+        self.assertEqual(
+            mod.resolve_claude_guard_baseline(mod.measure_launch_baseline_tokens({})),
+            mod.CLAUDE_GUARD_BASELINE_TOKENS)
+        # (c) A sub-floor measured prompt still floors — no regression.
+        small = {"AGENTS.md": 41657, "llms.txt": 57230}
+        self.assertEqual(
+            mod.resolve_claude_guard_baseline(mod.measure_launch_baseline_tokens(small)),
+            mod.CLAUDE_GUARD_BASELINE_TOKENS)
+        # (d) A prompt that OUTGROWS the floor raises the baseline (the trap the frozen
+        # constant left open).
+        grown = {"AGENTS.md": 41657, "llms.txt": 57230, "startup_bundle": 200000}
+        measured = mod.measure_launch_baseline_tokens(grown)
+        self.assertGreater(measured, mod.CLAUDE_GUARD_BASELINE_TOKENS)
+        self.assertEqual(mod.resolve_claude_guard_baseline(measured), measured)
+        # (e) Live gather reads a temp workspace and folds a startup bundle named via env;
+        # an empty workspace measures nothing (the hermetic default → the floor).
+        with tempfile.TemporaryDirectory() as d:
+            ws = Path(d)
+            (ws / "AGENTS.md").write_text("a" * 400, encoding="utf-8")
+            (ws / "llms.txt").write_text("b" * 800, encoding="utf-8")
+            bundle = ws / "run.startup.json"
+            bundle.write_text("c" * 1200, encoding="utf-8")
+            got = mod.gather_launch_constituent_bytes(
+                ws, {mod.LAUNCH_STARTUP_BUNDLE_ENV: str(bundle)})
+            self.assertEqual(got.get("AGENTS.md"), 400)
+            self.assertEqual(got.get("llms.txt"), 800)
+            self.assertEqual(got.get("startup_bundle"), 1200)
+            self.assertNotIn("MEMORY.md", got)
+        self.assertEqual(mod.gather_launch_constituent_bytes("", None), {})
+        base, _ = mod.measured_claude_guard_baseline("", None)
+        self.assertEqual(base, mod.CLAUDE_GUARD_BASELINE_TOKENS)
+
     def test_guard_wrap_noop_without_fak_bin(self) -> None:
         mod = load()
         raw = mod.build_command("docs", "claude")

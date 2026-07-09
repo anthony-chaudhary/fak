@@ -240,6 +240,12 @@ type payload struct {
 	Env       map[string]string `json:"env"`
 	Result    *launchResult     `json:"result"`
 	Error     string            `json:"error,omitempty"`
+	// GuardBaselineTokens/GuardContextBudgetTokens are the OBSERVABLE for the measured
+	// launch-prompt baseline and the context budget the claude guard was seeded with
+	// (guard.go). Emitted only for the claude backend, so fleet drift in the launch
+	// prompt is a visible number in the launch record rather than an argv int.
+	GuardBaselineTokens      int `json:"guard_baseline_tokens,omitempty"`
+	GuardContextBudgetTokens int `json:"guard_context_budget_tokens,omitempty"`
 }
 
 // buildPayload mirrors dispatch_worker.build_payload. command defaults to the raw
@@ -251,6 +257,10 @@ func buildPayload(lane, backend, workspace string, dryRun bool, result *launchRe
 		command, _ = buildCommand(lane, backend)
 	}
 	ok := errMsg == "" && (result == nil || result.ReturnCode == 0)
+	baselineTokens, budgetTokens := 0, 0
+	if backend == "claude" {
+		baselineTokens, budgetTokens = claudeGuardBudgetObservable(workspace, nil)
+	}
 	return payload{
 		Schema:    workerSchema,
 		OK:        ok,
@@ -265,8 +275,10 @@ func buildPayload(lane, backend, workspace string, dryRun bool, result *launchRe
 			"DISPATCH_LANE":      lane,
 			"DISPATCH_BACKEND":   backend,
 		},
-		Result: result,
-		Error:  errMsg,
+		Result:                   result,
+		Error:                    errMsg,
+		GuardBaselineTokens:      baselineTokens,
+		GuardContextBudgetTokens: budgetTokens,
 	}
 }
 
@@ -281,6 +293,9 @@ func render(p payload) string {
 	}
 	if p.Error != "" {
 		lines = append(lines, "error: "+p.Error)
+	}
+	if p.GuardContextBudgetTokens > 0 {
+		lines = append(lines, fmt.Sprintf("guard: measured_baseline=%d context_budget=%d tokens", p.GuardBaselineTokens, p.GuardContextBudgetTokens))
 	}
 	if p.Result != nil {
 		lines = append(lines, fmt.Sprintf("returncode: %d", p.Result.ReturnCode))

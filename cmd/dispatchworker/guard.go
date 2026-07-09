@@ -76,10 +76,20 @@ const guardTimeoutFloorS = 600
 // tools/dispatch_worker.py:claude_guard_context_budget_tokens — the Python sibling
 // cannot import ctxplan, so it mirrors these constants by hand.
 const (
-	// claudeGuardBaselineTokens is the workers' ~62K irreducible baseline prompt
-	// (issue body + AGENTS/llms orientation + injected fleet memory + the ~40K
-	// startup.json 'route' blob — the breakdown above). This is the ONE place a
-	// future baseline bump happens; the derived budget tracks it automatically.
+	// claudeGuardBaselineTokens is the FLOOR under the measured launch-prompt
+	// baseline — the workers' ~62K irreducible prompt (issue body + AGENTS/llms
+	// orientation + injected fleet memory + the ~40K startup.json 'route' blob —
+	// the breakdown above), hand-measured once. It is no longer the SOLE baseline:
+	// measuredClaudeGuardBaseline now SIZES the constituents readable at launch and
+	// floors the result here. The measurement feeds ONLY the baseline, and
+	// max(measured, floor) ≥ floor, so no measurement (degenerate, partial, empty
+	// inputs, unreadable files) can re-open the #2972 born-over-budget trap by
+	// construction — while a launch prompt whose orientation/memory constituents have
+	// organically grown PAST this floor raises the baseline (and the budget)
+	// automatically, instead of silently outgrowing a frozen constant the way the old
+	// flat baseline could. (The 124000 shipped default additionally assumes the
+	// ctxplan window ceiling stays ≥ baseline×claudeGuardBirthHeadroomFactor; that
+	// ceiling side is pinned by the derivation goldens, not by this floor.)
 	claudeGuardBaselineTokens = 62000
 	// claudeGuardBirthHeadroomFactor: the derived budget is baseline × this factor,
 	// so a worker is born with the whole baseline again in headroom before the
@@ -129,22 +139,137 @@ func deriveClaudeGuardContextBudget(baselineTokens, hardContextCap, outputReserv
 	return budget
 }
 
+// launchConstituentFiles are the workspace-ROOT launch-prompt constituents a
+// self-claiming lane worker can actually SIZE at launch: the orientation files every
+// worker loads (AGENTS.md, llms.txt, CLAUDE.md), plus a workspace-root MEMORY.md when a
+// repo keeps one. NOTE the real injected fleet memory does NOT live at the workspace
+// root — it is in the per-project claude memory dir (…/projects/<ws>/memory/MEMORY.md),
+// off the root and not portably derivable here, so in the common fleet layout MEMORY.md
+// is absent and the FLOOR covers it; it is listed so a repo that DOES keep a root
+// MEMORY.md gets it measured. Likewise the per-issue body and the ~40K startup.json
+// 'route' blob are NOT visible here (the worker claims its issue after launch, and the
+// startup sidecar is keyed to a log path the worker never learns) — the
+// claudeGuardBaselineTokens FLOOR covers that remainder. The startup blob is measured
+// too when the launcher names it via DISPATCH_STARTUP_BUNDLE (launchStartupBundleEnv).
+// Mirrors dispatch_worker.LAUNCH_CONSTITUENT_FILES.
+var launchConstituentFiles = []string{"AGENTS.md", "llms.txt", "CLAUDE.md", "MEMORY.md"}
+
+// launchStartupBundleEnv, when set to a readable path, folds that file's byte size
+// (the startup.json 'route' blob) into the measured baseline — the one launch
+// constituent that lives off the workspace root. Absent/unreadable ⇒ the floor covers
+// it. Mirrors dispatch_worker.LAUNCH_STARTUP_BUNDLE_ENV.
+const launchStartupBundleEnv = "DISPATCH_STARTUP_BUNDLE"
+
+// approxTokensFromBytes estimates tokens from a byte count with the codebase's
+// standard (bytes+3)/4 heuristic (internal/ctxplan/plan.go, materialize.go) — the
+// SAME ruler the ctxplan planner sizes context with, so a measured launch prompt is
+// weighed against the window on one scale. Pure; no tokenizer dependency. Mirrors
+// dispatch_worker.approx_tokens_from_bytes.
+func approxTokensFromBytes(bytes int) int {
+	if bytes <= 0 {
+		return 0
+	}
+	return (bytes + 3) / 4
+}
+
+// measureLaunchBaselineTokens sums the approximate token footprint of a worker's
+// launch-prompt constituents from their real byte sizes — the measurement seam that
+// replaces the frozen 62000 guess with what the loop actually carries. constituentBytes
+// maps a constituent name -> its byte size (the names are for the observable audit
+// only). An empty/nil map measures 0 (degenerate); the caller floors it, so a missing
+// measurement can never lower the budget. Mirrors dispatch_worker.measure_launch_baseline_tokens.
+func measureLaunchBaselineTokens(constituentBytes map[string]int) int {
+	total := 0
+	for _, b := range constituentBytes {
+		total += approxTokensFromBytes(b)
+	}
+	return total
+}
+
+// resolveClaudeGuardBaseline folds a measured launch-prompt footprint against the
+// hand-measured floor: the baseline that drives the budget is max(measured, floor).
+// The floor guarantees #2972's invariant (a degenerate/partial measurement can NEVER
+// emit a budget below the shipped 62000-derived value, so the born-over-budget trap
+// cannot return); a prompt grown past the floor raises the baseline automatically,
+// closing the "nothing measures the real prompt" gap. Mirrors
+// dispatch_worker.resolve_claude_guard_baseline.
+func resolveClaudeGuardBaseline(measuredTokens int) int {
+	if measuredTokens > claudeGuardBaselineTokens {
+		return measuredTokens
+	}
+	return claudeGuardBaselineTokens
+}
+
+// gatherLaunchConstituentBytes reads the byte sizes of the launch constituents
+// readable at launch from workspace (I/O; an unreadable/absent file contributes
+// nothing — the degenerate guard). Returns a name->bytes map for measurement AND for
+// the observable. An empty workspace measures nothing (hermetic default → the floor).
+// Mirrors dispatch_worker.gather_launch_constituent_bytes.
+func gatherLaunchConstituentBytes(workspace string, env map[string]string) map[string]int {
+	out := map[string]int{}
+	if workspace == "" {
+		return out
+	}
+	for _, name := range launchConstituentFiles {
+		if info, err := os.Stat(filepath.Join(workspace, name)); err == nil && !info.IsDir() {
+			out[name] = int(info.Size())
+		}
+	}
+	if p := strings.TrimSpace(env[launchStartupBundleEnv]); p != "" {
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			out["startup_bundle"] = int(info.Size())
+		}
+	}
+	return out
+}
+
+// measuredClaudeGuardBaseline sizes the readable launch constituents, floors the
+// measurement, and returns both the floored baseline and the raw constituent sizes
+// (for the observable). Mirrors dispatch_worker.measured_claude_guard_baseline.
+func measuredClaudeGuardBaseline(workspace string, env map[string]string) (int, map[string]int) {
+	constituents := gatherLaunchConstituentBytes(workspace, env)
+	return resolveClaudeGuardBaseline(measureLaunchBaselineTokens(constituents)), constituents
+}
+
 // claudeGuardContextBudgetTokens returns the derived per-session context budget as
-// the `--context-budget-tokens` argv string. The window and output reserve come
-// from the ctxplan envelope table (the routine-agent-turn row), NOT a fresh local
-// literal — so a model-window change lands here without touching this file.
-func claudeGuardContextBudgetTokens() string {
-	env := ctxplan.GenericTurnEnvelope()
+// the `--context-budget-tokens` argv string, seeded by the MEASURED launch-prompt
+// baseline (floored) rather than a frozen constant. The window and output reserve
+// come from the ctxplan envelope table (the routine-agent-turn row), NOT a fresh
+// local literal — so a model-window change lands here without touching this file.
+// An empty workspace measures nothing and falls to the floor (the hermetic default
+// preserves the shipped 124000). Mirrors dispatch_worker.claude_guard_context_budget_tokens.
+func claudeGuardContextBudgetTokens(workspace string, env map[string]string) string {
+	envelope := ctxplan.GenericTurnEnvelope()
+	baseline, _ := measuredClaudeGuardBaseline(workspace, env)
 	return strconv.Itoa(deriveClaudeGuardContextBudget(
-		claudeGuardBaselineTokens, env.HardContextCap, env.OutputReserve))
+		baseline, envelope.HardContextCap, envelope.OutputReserve))
+}
+
+// claudeGuardBudgetObservable returns the measured launch-prompt baseline and the
+// derived context budget for the claude backend, so a launch record exposes what the
+// guard was actually seeded with — drift is a visible number in the payload, not an
+// argv int nobody reads. env defaults to the process environment when nil.
+func claudeGuardBudgetObservable(workspace string, env map[string]string) (baseline, budget int) {
+	if env == nil {
+		env = processEnvMap()
+	}
+	envelope := ctxplan.GenericTurnEnvelope()
+	baseline, _ = measuredClaudeGuardBaseline(workspace, env)
+	budget = deriveClaudeGuardContextBudget(baseline, envelope.HardContextCap, envelope.OutputReserve)
+	return baseline, budget
 }
 
 // claudeGuardArgs builds the claude guard argv at call time so the budget arg
-// carries the derived value. Order is part of the CLI surface the parity tests pin.
-func claudeGuardArgs() []string {
+// carries the MEASURED value for this workspace. This Go helper bundles the precompact
+// hook AND the budget block; on the Python side those live in two pieces
+// (CLAUDE_GUARD_PRECOMPACT_ARGS + claude_guard_budget_args), so only the budget portion
+// here mirrors dispatch_worker.claude_guard_budget_args 1:1 (the integers are identical;
+// --session-id placement between the two blocks is a guard-parsed, order-independent
+// flag and is not pinned across languages).
+func claudeGuardArgs(workspace string, env map[string]string) []string {
 	return []string{
 		"--precompact-hook", "enforce",
-		"--context-budget-tokens", claudeGuardContextBudgetTokens(),
+		"--context-budget-tokens", claudeGuardContextBudgetTokens(workspace, env),
 		"--restart-on-budget",
 		"--restart-limit", claudeGuardRestartLimit,
 		"--max-duration", claudeGuardMaxDuration(),
@@ -299,7 +424,7 @@ func guardWrap(command []string, fakBin, lane, backend, workspace string, env ma
 	var extra []string
 	audit := guardAuditPath(workspace, lane, backend)
 	if backend == "claude" {
-		extra = append(extra, claudeGuardArgs()...)
+		extra = append(extra, claudeGuardArgs(workspace, env)...)
 		extra = append(extra, "--session-id", strings.TrimSuffix(filepath.Base(audit), filepath.Ext(audit)))
 	}
 	if backend != "claude" {
