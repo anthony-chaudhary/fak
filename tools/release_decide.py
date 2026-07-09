@@ -506,7 +506,11 @@ def _blocker_reason(blocker: str, last_tag: str | None, sig: dict,
         ),
         "VERSION_DRIFT": "version markers disagree",
         "VERSION_BEHIND_REACHABLE_TAG": tag_drift.get("reason") or "VERSION is behind the reachable release tag",
-        "CI_BASE_RED": f"latest decisive main {ci_label} run is red",
+        "CI_BASE_RED": (
+            f"latest decisive main {ci_label} run is red; if it broke at the build "
+            f"step, run `python tools/trunk_build_probe.py` to check whether committed "
+            f"HEAD is missing a forgotten `git add` (and which file to stage to green it)"
+        ),
         "CI_BASE_NONE": f"no decisive completed main {ci_label} run is available",
         "CI_STATE_UNKNOWN": "CI state is unknown and --require-ci-green was set",
         "CI_RETRY_TO_GREEN": (
