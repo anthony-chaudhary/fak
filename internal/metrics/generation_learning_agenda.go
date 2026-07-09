@@ -53,7 +53,11 @@ import (
 //   - Demotion/retirement evidence: retire this rule if measurement shows the reserve is
 //     never binding (optionality items always fit anyway, so the reserve is ceremony),
 //     or if operators observably ignore reserved items — a reserved-but-unread item is
-//     worse than an honest deferral, and the reserve should then drop to zero.
+//     worse than an honest deferral, and the reserve should then drop to zero. The
+//     "reserve never binding" half of that criterion is checkable in code, not only in
+//     prose: ReserveWasBinding reports whether the reserve changed the outcome for a
+//     given brief, so an operator can count binding vs ceremonial briefs before tuning
+//     DefaultOptionalityReserve or dropping it to zero.
 //   - Invalidating assumption: that attention is a SINGLE fungible budget measured in
 //     minutes, and that a learning item's cost is separable from the others'. If
 //     learning is actually context-switch-dominated (three 5-minute items cost far more
@@ -306,6 +310,26 @@ func (p LearningAgendaPlan) OptionalityMinutes() int {
 		}
 	}
 	return n
+}
+
+// ReserveWasBinding reports whether the optionality reserve actually changed the outcome
+// for these candidates and this budget — the measurable half of the demotion criterion in
+// the file header. The reserve is BINDING when removing it (reserve = 0, the naive
+// urgency-greedy control) would fund fewer optionality minutes than keeping it. When the
+// reserve is never binding across real briefs — optionality items always fit in the open
+// pool anyway — it is ceremony, and the kill-criterion says drop DefaultOptionalityReserve
+// to zero.
+//
+// This is the measurement, not the policy: it re-runs selection with the reserve off and
+// compares, staying pure and deterministic, so an operator (or a later brief-integration)
+// can count binding vs ceremonial briefs before tuning or retiring the reserve. A zero
+// reserve is never binding by construction.
+func ReserveWasBinding(items []LearningItem, b AgendaBudget) bool {
+	withReserve := SelectLearningAgenda(items, b)
+	control := b
+	control.OptionalityReserve = 0
+	withoutReserve := SelectLearningAgenda(items, control)
+	return withReserve.OptionalityMinutes() > withoutReserve.OptionalityMinutes()
 }
 
 // Render produces a deterministic text agenda: the orthogonality header, the selected

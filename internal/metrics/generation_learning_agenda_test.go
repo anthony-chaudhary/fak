@@ -240,6 +240,31 @@ func TestLearningAgendaRenderCarriesOrthogonalityAndMix(t *testing.T) {
 	}
 }
 
+// TestReserveWasBindingIsTheKillCriterion makes the demotion evidence checkable, not just
+// prose: the reserve is "binding" when it changes the outcome, and "ceremony" (the retire
+// signal) when it does not. This is the measurement an operator counts before dropping
+// DefaultOptionalityReserve to zero.
+func TestReserveWasBindingIsTheKillCriterion(t *testing.T) {
+	// Binding: the urgent-now flood is exactly the case the reserve exists for — without
+	// it the future item is starved, so keeping the reserve funds more optionality.
+	if !ReserveWasBinding(urgentNowFlood(), AgendaBudget{TotalMinutes: 60, OptionalityReserve: DefaultOptionalityReserve}) {
+		t.Fatal("reserve should be binding on the urgent-now flood")
+	}
+	// Ceremony: when optionality fits in the open pool anyway, the reserve changes
+	// nothing — the exact "reserve never binding" demotion evidence the memo names.
+	roomy := []LearningItem{
+		{Topic: "future-standard", Horizon: "future", Minutes: 15, Urgency: 0.10},
+		{Topic: "now-thing", Horizon: "now", Minutes: 15, Urgency: 0.99},
+	}
+	if ReserveWasBinding(roomy, AgendaBudget{TotalMinutes: 100, OptionalityReserve: DefaultOptionalityReserve}) {
+		t.Fatal("reserve should NOT be binding when optionality fits without it")
+	}
+	// A zero reserve can never change the outcome, so it is never binding.
+	if ReserveWasBinding(urgentNowFlood(), AgendaBudget{TotalMinutes: 60, OptionalityReserve: 0}) {
+		t.Fatal("a zero reserve is never binding")
+	}
+}
+
 // TestAgendaDeferralsClosed binds the deferral vocabulary; a drift here is a spec change.
 func TestAgendaDeferralsClosed(t *testing.T) {
 	want := []AgendaDeferral{DeferBudgetExhausted, DeferUnknownHorizon, DeferInvalidCost}
