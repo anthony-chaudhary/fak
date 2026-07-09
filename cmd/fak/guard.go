@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -26,7 +25,6 @@ import (
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
-	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
@@ -144,7 +142,7 @@ func cmdGuard(argv []string) {
 	dumpPolicy := fs.Bool("dump-policy", false, "print the built-in guard capability floor (an editable manifest) and exit")
 	probeMode := fs.Bool("probe", false, "local one-shot smoke mode: keep the normal guarded gateway but default the task-handoff Stop gate OFF, so `fak guard --probe -- claude -p \"say pong\"` proves the wire without demanding a fleet handoff. Explicit --task-handoff still wins.")
 	quiet := fs.Bool("quiet", false, "suppress the startup banner and the exit audit summary")
-	bannerFlag := fs.String("banner", guardBannerAuto, "how much of the startup report to print before handing the terminal to the agent: auto|full|compact|off. AUTO (default): the compact 3-line banner for an attended interactive launch (the full report is a wall of text the agent's full-screen UI paints over seconds later), and the FULL report for headless/piped/scripted launches (a captured log wants the detail; byte-for-byte the pre-flag output). The full report is always recorded on the in-process gateway regardless — read it any time during the session with `fak info --startup` (it is the startup_report field of /debug/vars). --quiet still silences everything.")
+	bannerFlag := fs.String("banner", guardBannerAuto, "how much of the startup report to print before handing the terminal to the agent: auto|full|compact|animate|off. AUTO (default): a short in-place icon ANIMATION for an attended interactive launch (a loading motif that lands on one iconic identity line, instead of a wall of text the agent's full-screen UI paints over seconds later; falls back to the compact 3-line banner off a color TTY or under FAK_GUARD_LAUNCH_ANIM=off), and the FULL report for headless/piped/scripted launches (a captured log wants the detail; byte-for-byte the pre-flag output). The full report is always recorded on the in-process gateway regardless — read it any time during the session with `fak info --startup` (it is the startup_report field of /debug/vars), and it is spilled to the terminal in full only when the launch itself fails. --quiet still silences everything.")
 	resourceStats := fs.Bool("resource-stats", true, "ON by default — track the HARNESS's own hardware-resource use this session (CPU, memory/RSS, disk-I/O) for BOTH halves: the kernel (this guard process + the in-process gateway, sampled continuously) and the agent (the wrapped child, folded from its exit state). Reported as one line in the exit summary and appended as a durable row to docs/nightrun/harness-resources.jsonl. Pass --resource-stats=false to disable (epic #2044).")
 	debugStats := fs.Bool("debug-stats", true, "ON by default — the observable debug layer: print ONE compact, payload-free line per served turn to stderr with the turn's cache + token-value economy (request_tokens/cache_read/cache_creation, cache_hit, cache_rebate_tokens), the SAFETY half (blocked:/repaired:/quarantined: with the dominant reason whenever the kernel refused, rewrote, or paged out a call THIS turn — so a refused rm -rf or a quarantined secret is visible the moment it happens, not only in the exit summary), the compaction action, and the resetScore SHADOW health (healthy_cache|cache_decay|stale_prefix|cooldown|unknown_provider). These counts are the provider's own usage numbers, so it works natively over your Claude subscription OAuth. Independent of --log; pass --debug-stats=false or --quiet to silence it (#793).")
 	preCompactHook := fs.String("precompact-hook", guardPreCompactModeShadow, "Claude Code PreCompact hook actuator for auto-compaction: off|shadow|enforce. shadow logs would-block/would-allow while exiting 0; enforce returns the compactcohere posture exit code.")
@@ -379,52 +377,11 @@ func cmdGuard(argv []string) {
 		defer func() { _ = logCloser.Close() }()
 	}
 
-	// 1. Install the capability floor. An explicit --policy file wins; otherwise the
-	//    embedded guard floor. With NO floor the kernel default-denies every tool and
-	//    the wrapped agent can do nothing — so guard ALWAYS loads one, fail-loud.
-	var (
-		rt           policy.Runtime
-		err          error
-		floorSource  string
-		policyBytes  []byte
-		policyDigest string
-	)
-	tPolicy := time.Now()
-	if *policyPath != "" {
-		policyBytes, err = os.ReadFile(*policyPath)
-		if err == nil {
-			rt, err = policy.ParseRuntime(policyBytes)
-			if err != nil {
-				err = fmt.Errorf("policy %s: %w", *policyPath, err)
-			}
-		} else {
-			err = fmt.Errorf("policy: %w", err)
-		}
-		floorSource = *policyPath
-	} else {
-		policyBytes = guardDefaultPolicyJSON
-		rt, err = policy.ParseRuntime(guardDefaultPolicyJSON)
-		floorSource = "built-in guard floor (--dump-policy to see it)"
-	}
-	must(err)
-	// Union the OPERATOR allow overlay (`fak guard allow`) on top of whichever floor
-	// loaded. It only widens Allow / AllowPrefix — the danger arg-rules and explicit
-	// denies below stay intact — so an operator can re-admit a DEFAULT_DENY'd tool
-	// out-of-band from the agent without ever loosening the genuine-danger floor. A
-	// missing overlay is the common no-op; a malformed one fails loud (see guard_allow.go).
-	overlayPath := guardAllowOverlayPath()
-	allowOverlay, overlayErr := loadGuardAllowOverlay(overlayPath)
-	if overlayErr != nil {
-		fmt.Fprintf(os.Stderr, "fak guard: %v\n", overlayErr)
-		os.Exit(2)
-	}
-	if n := guardApplyAllowOverlay(&rt, allowOverlay); n > 0 {
-		floorSource += fmt.Sprintf(" + operator allow overlay (%d extra tool(s); fak guard allow --list)", n)
-	}
-	policyDigest = guardPolicyDigest(policyBytes)
-	adjudicator.Default.SetPolicy(rt.Adjudicator)
-	applyRuntime(rt)
-	policyDur := time.Since(tPolicy)
+	// 1. Install the capability floor: an explicit --policy file wins; otherwise the embedded
+	//    guard floor, unioned with the operator allow overlay. With NO floor the kernel
+	//    default-denies every tool, so guard ALWAYS loads one, fail-loud. See guard_startup.go.
+	rt, floorSource, policyDigest, policyDur := loadGuardCapabilityFloor(*policyPath)
+	var err error
 
 	// 1b. Default the durable DECISION JOURNAL on. fak guard is the disinterested
 	//     referee; a tamper-evident, hash-chained record of every verdict is what
@@ -1242,100 +1199,60 @@ func cmdGuard(argv []string) {
 		os.Exit(1)
 	}
 
-	// Render the FULL startup report to a buffer — always, even under --quiet or the
-	// compact banner — and register it on the gateway, so the session serves it back
-	// on demand for its whole life (`fak info --startup` / startup_report on
-	// /debug/vars). What reaches the terminal RIGHT NOW is bannerMode's call below.
-	var startupReport strings.Builder
-	{
-		if providerAutodetected {
-			fmt.Fprintf(&startupReport, "fak guard: detected agent %q -> --provider %s (pass --provider to override)\n", strings.ToLower(filepath.Base(command[0])), up)
-		}
-		localLabel := ""
-		if localModel {
-			localLabel = filepath.Base(*ggufPath)
-		}
-		printGuardBanner(&startupReport, guardBannerVersion(), guardBannerBuildStamp(), gwURL, up, resolvedBase, floorSource, formatGuardInjectedEnvForBanner(injected), logLabel, auditLabel, refusalCarryForward, remoteBase != "", localModel, localLabel, command)
-		if preCompactInstall.Applied {
-			fmt.Fprintf(&startupReport, "fak guard: Claude PreCompact hook: %s (settings %s)\n", preCompactInstall.Mode, preCompactInstall.SettingsPath)
-		}
-		if stopHookInstall.Applied {
-			fmt.Fprintf(&startupReport, "fak guard: Claude Stop hook (deny-all auto-continue): %s — graduated nudge→warn(%d)→final(%d)→give-up(>%d consecutive); a floor-refused-everything turn is reported as end_turn and this resumes the agent past it with escalating guidance, the give-up logged (--deny-all-continue off to disable)\n", stopHookInstall.Mode, stopHookInstall.WarnAt, stopHookInstall.FinalAt, stopHookInstall.Max)
-		}
-		if len(guardTaskHandoffEnv(handoffCfg)) > 0 {
-			live := "validate-only"
-			if handoffCfg.Live {
-				live = "live-issue-sync"
-			}
-			fmt.Fprintf(&startupReport, "fak guard: task handoff Stop gate: %s (%s) — clean stops require %s; child sees $%s\n", handoffCfg.Mode, live, handoffCfg.File, guardTaskHandoffFileEnv)
-		}
-		printGuardCodexNote(&startupReport, codexInstall)
-		printGuardMCPNote(&startupReport, mcpInstall)
-		printGuardCapabilitiesNote(&startupReport, mcpInstall)
-		switch {
-		case debugStatsStderr:
-			fmt.Fprintln(&startupReport, "  debug      : observable layer ON — one cache/token-value line per turn to stderr (request_tokens/cache_read/cache_creation/cache_hit/cache_rebate_tokens/compact/health); --debug-stats=false or --quiet to silence")
-		case *debugStats && !*quiet:
-			fmt.Fprintln(&startupReport, "  debug      : observable layer ON — the per-turn cache/token-value economy is kept OUT of the agent's full-screen UI to avoid corrupting it; read it live in the `fak info` pane and in the exit summary. Pass --debug-stats to also stream it here, --debug-stats=false to disable")
-		}
-		// A LOCAL in-kernel model has no upstream credential to report; the proxy-path auth
-		// note (subscription OAuth vs passthrough) only applies when fak proxies an API.
-		if !localModel {
-			switch {
-			case pinUpstream && up == "anthropic":
-				fmt.Fprintf(&startupReport, "fak guard: upstream auth — Claude Pro/Max subscription (provider-reported identity; OAuth token from %s, sent as a bearer token)\n", oauthSource)
-			case up == "anthropic" && apiKey != "":
-				fmt.Fprintf(&startupReport, "fak guard: upstream auth — API key (from --api-key-env %s; provider-side API billing, not a fak claim)\n", *apiKeyEnv)
-			case up == "anthropic":
-				fmt.Fprintln(&startupReport, "fak guard: upstream auth — passthrough (Claude Code forwards its own credential through the gateway)")
-			}
-		}
-		// The session's prompt-cache posture, made explicit at boot: whether fak actively
-		// manages the outbound cache_control (1h TTL upgrade) or stays passive and why.
-		// Printed for the local branch too — "no provider prompt-cache wire" is itself the
-		// answer an operator scanning for cache posture needs.
-		fmt.Fprintln(&startupReport, mcache.bannerLine())
-		if contextBudgetLimit > 0 {
-			fmt.Fprintf(&startupReport, "fak guard: session budget — trace_id=%s context_tokens=%d\n", guardTraceID, contextBudgetLimit)
-			if *resetOnBudget {
-				fmt.Fprintln(&startupReport, "fak guard: session reset — transparent carryover enabled")
-			}
-			if *restartOnBudget {
-				fmt.Fprintln(&startupReport, "fak guard: session restart — child relaunch on budget exhaustion enabled")
-			}
-		}
-		if maxDurationLimit > 0 {
-			fmt.Fprintf(&startupReport, "fak guard: session time budget — trace_id=%s max_duration=%s\n", guardTraceID, maxDurationLimit.String())
-		}
+	// Render the FULL startup report and register it on the gateway so the session serves it
+	// back on demand for its whole life (`fak info --startup` / startup_report on /debug/vars),
+	// then spill to the terminal RIGHT NOW only what bannerMode asks for. See guard_startup.go.
+	view := guardStartupView{
+		providerAutodetected: providerAutodetected,
+		up:                   up,
+		command:              command,
+		gwURL:                gwURL,
+		resolvedBase:         resolvedBase,
+		remoteBase:           remoteBase,
+		floorSource:          floorSource,
+		injected:             injected,
+		logLabel:             logLabel,
+		auditLabel:           auditLabel,
+		refusalCarryForward:  refusalCarryForward,
+		localModel:           localModel,
+		ggufPath:             *ggufPath,
+		preCompactInstall:    preCompactInstall,
+		stopHookInstall:      stopHookInstall,
+		handoffCfg:           handoffCfg,
+		codexInstall:         codexInstall,
+		mcpInstall:           mcpInstall,
+		debugStatsStderr:     debugStatsStderr,
+		debugStats:           *debugStats,
+		quiet:                *quiet,
+		pinUpstream:          pinUpstream,
+		apiKey:               apiKey,
+		apiKeyEnv:            *apiKeyEnv,
+		oauthSource:          oauthSource,
+		mcache:               mcache,
+		contextBudgetLimit:   contextBudgetLimit,
+		guardTraceID:         guardTraceID,
+		resetOnBudget:        *resetOnBudget,
+		restartOnBudget:      *restartOnBudget,
+		maxDurationLimit:     maxDurationLimit,
+		auditJournal:         auditJournal,
+		bannerMode:           bannerMode,
 	}
-	auditThreadPath := auditLabel
-	if auditJournal != nil {
-		auditThreadPath = auditJournal.Path()
-	}
-	if row, err := enqueueGuardSessionThread(guardTraceID, up, command, auditThreadPath, time.Now()); err == nil {
-		fmt.Fprintf(&startupReport, "fak guard: slack thread — queued root in %s (nonce=%s)\n", row.Channel, row.Nonce)
-		startGuardSessionThreadDrain()
-	} else {
-		fmt.Fprintf(&startupReport, "fak guard: slack thread — unavailable: %v\n", err)
-	}
-
-	srv.SetStartupReport(startupReport.String())
-	switch bannerMode {
-	case guardBannerFull:
-		fmt.Fprint(os.Stderr, startupReport.String())
-	case guardBannerCompact:
-		printGuardCompactBanner(os.Stderr, guardBannerVersion(), guardShortBuildID(), gwURL, command, refusalCarryForward)
-	}
+	startupReport := renderGuardStartupReport(view)
+	srv.SetStartupReport(startupReport)
+	emitGuardStartupBanner(view, startupReport)
 
 	// 6. Run the wrapped agent, then tear the gateway down and report the session.
 	spawnMeta := newGuardChildSpawnMetadata(guardTraceID, policyDigest, up, rt, command)
+	// On a genuine launch FAILURE, spill the full startup report to stderr — except under
+	// --banner=full, which already streamed it at boot (avoid printing it twice).
+	dumpStartupOnLaunchFail := bannerMode != guardBannerFull
 	// The supervised loop is required whenever the child must be interrupted mid-run:
 	// a --restart-on-budget context restart OR a --max-duration wall-clock envelope that
 	// must be ENFORCED (#2229). A --max-duration-only run routes here with a disabled
 	// restarter (its events channel never fires), gaining only the time-budget ticker.
 	if restarter.Enabled() || maxDurationLimit > 0 {
-		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, spawnMeta, restarter, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler)
+		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, spawnMeta, restarter, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler, dumpStartupOnLaunchFail)
 		return
 	}
-	runGuardChildAndReport(command, injected, pinUpstream, credPath, spawnMeta, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler)
+	runGuardChildAndReport(command, injected, pinUpstream, credPath, spawnMeta, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler, dumpStartupOnLaunchFail)
 }

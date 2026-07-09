@@ -88,7 +88,9 @@ func TestManagedCacheWiredIntoGuard(t *testing.T) {
 	if !regexp.MustCompile(`CacheTTL1H:\s+mcache\.active`).MatchString(src) {
 		t.Errorf("guard.go must wire the resolved posture into gateway Config CacheTTL1H")
 	}
-	if !strings.Contains(src, "mcache.bannerLine()") {
-		t.Errorf("guard.go must print the posture bannerLine into the startup report")
+	// The startup-report render (incl. the posture bannerLine) was peeled into guard_startup.go
+	// to keep cmdGuard under the god-function ceiling; the wiring must still be present there.
+	if !strings.Contains(readEntrypoint(t, "guard_startup.go"), "v.mcache.bannerLine()") {
+		t.Errorf("guard_startup.go must print the posture bannerLine into the startup report")
 	}
 }
