@@ -234,3 +234,50 @@ func TestComplete_ExhaustedCap429_ErrorNamesClassification(t *testing.T) {
 		t.Fatal("LimitResetHint empty, want the banner's reset hint carried on the surfaced error")
 	}
 }
+
+// The AC2 acceptance fence of #1362 — the end-to-end mirror of
+// TestComplete_SessionCap429_WaitsTowardReset. Where that test proves a 5-hour cap PARKS
+// toward its named reset, this proves the OTHER half of the live vocabulary: a transient
+// rate_limited 429 (no session/weekly/usage cap, no unified-reset header) that carries a
+// Retry-After is HONORED as a short retry and the turn succeeds on the retry — it is NOT
+// promoted to a cap park toward a far-off reset. So the live classification leaves the
+// throttle path "retries as today", closing the acceptance on both sides of the taxonomy.
+func TestComplete_Throttle429_HonorsRetryAfterAndRetries(t *testing.T) {
+	var n int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&n, 1) == 1 {
+			w.Header().Set("Retry-After", "1") // a short server-side throttle, honored as ~1s
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write(anthropicLimitBody("Rate limited"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	p := NewHTTPPlanner(srv.URL, "m", "")
+	var waits []time.Duration
+	p.RetryNotify = func(_, _ int, wait time.Duration) { waits = append(waits, wait) }
+	comp, err := p.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	if err != nil {
+		t.Fatalf("Complete after transient 429: %v", err)
+	}
+	if comp.Message.Content != "ok" {
+		t.Fatalf("content = %q, want ok (the turn must succeed on the post-throttle retry)", comp.Message.Content)
+	}
+	if len(waits) != 1 {
+		t.Fatalf("RetryNotify fired %d times, want 1", len(waits))
+	}
+	// Honored: the wait is at least the server's 1s Retry-After (jitterUp bounds it to
+	// [1s, 1.25s]) — the provider's own instruction, not the bare exponential base.
+	if waits[0] < time.Second {
+		t.Fatalf("retry wait = %s, want >= 1s (the server's Retry-After honored)", waits[0])
+	}
+	// Transient, not capped: a session/weekly/usage cap WITHOUT a machine-readable reset waits
+	// the slow cap-probe floor (defaultCapProbeInterval); a real throttle must stay nowhere near
+	// it — reaching it would mean a transient 429 was wrongly parked as an account cap.
+	if waits[0] >= defaultCapProbeInterval {
+		t.Fatalf("retry wait = %s reached the cap-probe floor (%s) — a transient throttle was wrongly parked as a cap", waits[0], defaultCapProbeInterval)
+	}
+}
