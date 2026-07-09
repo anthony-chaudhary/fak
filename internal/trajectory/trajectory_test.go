@@ -175,6 +175,31 @@ func TestMaxPerTrace(t *testing.T) {
 	}
 }
 
+// TestMaxTraces — the trace-axis cap evicts the oldest first-seen traces so a
+// long-lived recorder that sees a new TraceID per session stays bounded.
+func TestMaxTraces(t *testing.T) {
+	r := New().MaxTraces(2)
+	for _, id := range []string{"a", "b", "c"} {
+		r.Emit(abi.Event{Kind: abi.EvDecide, Call: mkCall(id, "x", "q"), Verdict: allowVerdict()})
+	}
+	got := r.Traces()
+	if len(got) != 2 || got[0] != "b" || got[1] != "c" {
+		t.Fatalf("trace cap not enforced: %v, want [b c]", got)
+	}
+	if a := r.Trace("a"); a != nil {
+		t.Fatalf("evicted trace a still present: %+v", a)
+	}
+}
+
+// TestDefaultBoundsAreSet — a fresh Recorder carries the default two-axis bounds, so
+// the live FAK_TRAJECTORY front door is never unbounded even if no caller tunes it.
+func TestDefaultBoundsAreSet(t *testing.T) {
+	r := New()
+	if r.maxTraces != DefaultMaxTraces || r.maxLen != DefaultMaxPerTrace {
+		t.Fatalf("default bounds not set: maxTraces=%d maxLen=%d", r.maxTraces, r.maxLen)
+	}
+}
+
 // TestExportImportRoundTrip — the corpus survives JSONL export+import: same turns,
 // same per-trace grouping, in order. This is the contract a `fak traj` verb relies on.
 func TestExportImportRoundTrip(t *testing.T) {

@@ -46,19 +46,34 @@ type Turn struct {
 // contract is fire-and-forget. Safe for concurrent Emit; queries (Trace/Traces/
 // Export) take a snapshot.
 type Recorder struct {
-	mu     sync.Mutex
-	byID   map[string][]Turn // trace id -> ordered turns
-	order  []string          // trace ids in first-seen order (stable export)
-	embed  bool              // stamp QueryEmbedding from simhash
-	clock  func() int64      // injectable wall clock (UnixNano); nil => Fields-only
-	maxLen int               // cap on retained turns per trace (0 = unbounded)
+	mu        sync.Mutex
+	byID      map[string][]Turn // trace id -> ordered turns
+	order     []string          // trace ids in first-seen order (stable export)
+	embed     bool              // stamp QueryEmbedding from simhash
+	clock     func() int64      // injectable wall clock (UnixNano); nil => Fields-only
+	maxLen    int               // cap on retained turns per trace (0 = unbounded)
+	maxTraces int               // cap on retained distinct traces, oldest evicted (0 = unbounded)
 }
 
-// New returns an empty Recorder. By default it does NOT stamp query embeddings (a
-// large corpus stays lean) and reads timestamps only from Fields. Configure with the
-// option setters before registering.
+// DefaultMaxTraces / DefaultMaxPerTrace are the in-memory bounds a fresh Recorder
+// carries, mirroring journal's bounded recent tail (journal.defaultMaxRecent = 1024):
+// the durable corpus is the file written by ExportTo, while the process retains only a
+// bounded window. Without them a long-lived guard/gateway with FAK_TRAJECTORY on leaks
+// one map entry + slice element per distinct TraceID forever (the trace axis) and grows
+// a single long session's turn slice without end (the turn axis) — the exact leak the
+// journal this package mirrors already avoids. Override per-recorder with MaxTraces /
+// MaxPerTrace; passing 0 on either axis restores unbounded growth (e.g. a bulk import).
+const (
+	DefaultMaxTraces   = 1024
+	DefaultMaxPerTrace = 1024
+)
+
+// New returns an empty Recorder bounded on both axes by DefaultMaxTraces /
+// DefaultMaxPerTrace so a long-lived recorder cannot grow without bound. By default it
+// does NOT stamp query embeddings (a large corpus stays lean) and reads timestamps only
+// from Fields. Configure with the option setters before registering.
 func New() *Recorder {
-	return &Recorder{byID: map[string][]Turn{}}
+	return &Recorder{byID: map[string][]Turn{}, maxLen: DefaultMaxPerTrace, maxTraces: DefaultMaxTraces}
 }
 
 // EmbedQueries turns on per-turn simhash embedding of Query. A gardening skill that
@@ -80,6 +95,17 @@ func (r *Recorder) MaxPerTrace(n int) *Recorder {
 	return r
 }
 
+// MaxTraces caps the number of retained distinct traces (oldest first-seen evicted).
+// 0 = unbounded. This bounds the primary leak axis: a long-lived recorder sees a fresh
+// TraceID per session, and without a cap every session's map entry + order slot is
+// retained for the life of the process.
+func (r *Recorder) MaxTraces(n int) *Recorder {
+	r.mu.Lock()
+	r.maxTraces = n
+	r.mu.Unlock()
+	return r
+}
+
 // Emit implements abi.Emitter. It records every decision-bearing lifecycle event
 // (DECIDE/DENY/RESULT_DENY/QUARANTINE/VDSO_HIT) as a Turn appended to its trace. Operational-only
 // kinds (Submit/Dispatch/Complete without a verdict) are skipped — Complete is folded
@@ -96,6 +122,14 @@ func (r *Recorder) Emit(ev abi.Event) {
 	}
 	if _, seen := r.byID[t.TraceID]; !seen {
 		r.order = append(r.order, t.TraceID)
+		// Bound the trace axis: a long-lived recorder sees a fresh TraceID per session,
+		// so evict the oldest first-seen traces beyond the cap to stay O(maxTraces). The
+		// id just appended is at the tail of order, so it is never the one evicted.
+		for r.maxTraces > 0 && len(r.order) > r.maxTraces {
+			evict := r.order[0]
+			r.order = r.order[1:]
+			delete(r.byID, evict)
+		}
 	}
 	turns := append(r.byID[t.TraceID], t)
 	if r.maxLen > 0 && len(turns) > r.maxLen {
