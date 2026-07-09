@@ -222,18 +222,7 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 	}
 	s.phaseEnd("embed", t)
 
-	if s.MetalQ4K {
-		// Bulk-upload every Q4_K projection to the GPU before the layer loop, exactly as the
-		// full-attention batched path does (prefill_q4k.go). Without it the lazy per-weight
-		// upload in metalQ4KWeight interleaves an H2D round-trip with the first use of each
-		// projection, which caps warm hybrid prefill at ~7x under llama.cpp-Metal (#1113);
-		// amortizing all the copies up front restores full prefill speed on the Metal hybrid
-		// path the 27B Qwen3.6 takes (#71). No-op on the pure-Go build (stub returns nil).
-		m.metalQ4KWeights()
-		// Upload the Q8-minority projections too (full-attn q/k and linear_attn.*). Otherwise
-		// #1087's Metal Q8 GEMM path would pay one upload inside the first timed projection call.
-		m.metalQ8Weights()
-	}
+	s.prefillQwen35HybridQ4KMetalUpload()
 
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(str string) string { return layerName(l, str) }
@@ -319,38 +308,68 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 	xf := rmsnormCfg(X[(P-1)*H:P*H], m.tensor("model.norm.weight"), eps, cfg)
 	s.phaseEnd("final_norm", t)
 	if profile {
-		total := time.Since(start)
-		rest := total - gemmTime
-		if rest < 0 {
-			rest = 0
-		}
-		ms := func(d time.Duration) float64 { return float64(d.Nanoseconds()) / 1e6 }
-		fmt.Fprintf(os.Stderr, "[metalprof-hybrid P=%d] total=%.1f  gemm+roundtrip=%.1f  rest(recurrence/attn/norm)=%.1f ms path=q4k\n",
-			P, ms(total), ms(gemmTime), ms(rest))
-		// Split the gemm+roundtrip bucket by which resident kernel served each projection. The
-		// three buckets sum to gemm+roundtrip; the point is to tell the next session whether the
-		// durable prefill lever is the Q8 CPU path (q8_cpu dominates → the OOM-gated qGemm8
-		// minority is the wall) or the q4_k Metal kernel (q4k_metal dominates → kernel cleverness
-		// like FAK_Q4K_MM is the lever). The mix on the 27B Mac is the whole question (#71, #977).
-		fmt.Fprintf(os.Stderr, "[metalprof-split P=%d] q4k_metal=%.1f  q8_cpu=%.1f  q6k=%.1f ms  (sum=gemm+roundtrip=%.1f) path=q4k\n",
-			P, ms(q4kTime), ms(q8Time), ms(q6kTime), ms(gemmTime))
-		// Split q4k_metal itself into GPU-compute vs roundtrip. q4kGPUCompute is the summed
-		// cb.GPUEndTime-cb.GPUStartTime of every q4_k Metal dispatch (grouped + per-weight);
-		// q4kRoundtrip is the wall-time remainder (CPU encode/commit/sync + H2D upload). This is
-		// the lever question this session answers: if roundtrip dominates, the next lever is
-		// upload-caching / command-buffer batching (fewer submit/sync); if gpu_compute dominates,
-		// it is fp16-staging / a GPU counter trace / kernel cleverness. Sum-check: gpu_compute +
-		// roundtrip == q4k_metal by construction (roundtrip is defined as the remainder), though
-		// gpu_compute may carry small slop vs the wall window since the GPU-execute window and the
-		// wall window are not perfectly nested (the wall clock also brackets the cgo call boundary).
-		q4kRoundtrip := q4kTime - q4kGPUCompute
-		if q4kRoundtrip < 0 {
-			q4kRoundtrip = 0
-		}
-		fmt.Fprintf(os.Stderr, "[metalprof-q4ksplit P=%d] q4k_gpu_compute=%.1f  q4k_roundtrip=%.1f ms  (sum=q4k_metal=%.1f) path=q4k\n",
-			P, ms(q4kGPUCompute), ms(q4kRoundtrip), ms(q4kTime))
+		s.profileQwen35HybridQ4KPrefill(P, start, gemmTime, q4kTime, q8Time, q6kTime, q4kGPUCompute)
 	}
 	return xf
+}
+
+// prefillQwen35HybridQ4KMetalUpload bulk-uploads the resident projection weights to the GPU
+// before the layer loop when Metal Q4_K is enabled. It is pure non-numeric setup — it moves no
+// computation and touches no float value on the prefill's return path — extracted verbatim so
+// the hot method stays under its line ceiling. No-op unless s.MetalQ4K is set.
+func (s *Session) prefillQwen35HybridQ4KMetalUpload() {
+	if !s.MetalQ4K {
+		return
+	}
+	m := s.M
+	// Bulk-upload every Q4_K projection to the GPU before the layer loop, exactly as the
+	// full-attention batched path does (prefill_q4k.go). Without it the lazy per-weight
+	// upload in metalQ4KWeight interleaves an H2D round-trip with the first use of each
+	// projection, which caps warm hybrid prefill at ~7x under llama.cpp-Metal (#1113);
+	// amortizing all the copies up front restores full prefill speed on the Metal hybrid
+	// path the 27B Qwen3.6 takes (#71). No-op on the pure-Go build (stub returns nil).
+	m.metalQ4KWeights()
+	// Upload the Q8-minority projections too (full-attn q/k and linear_attn.*). Otherwise
+	// #1087's Metal Q8 GEMM path would pay one upload inside the first timed projection call.
+	m.metalQ8Weights()
+}
+
+// profileQwen35HybridQ4KPrefill emits the FAK_QPROFILE prefill telemetry (the three
+// [metalprof-*] stderr lines) for prefillQwen35HybridQ4KHidden. It is a pure reporting
+// helper: it reads the already-measured per-bucket durations and writes to stderr, touching
+// no model state and no value on the prefill's return path — extracted verbatim so the hot
+// method stays under its ceiling without moving any computation.
+func (s *Session) profileQwen35HybridQ4KPrefill(P int, start time.Time, gemmTime, q4kTime, q8Time, q6kTime, q4kGPUCompute time.Duration) {
+	total := time.Since(start)
+	rest := total - gemmTime
+	if rest < 0 {
+		rest = 0
+	}
+	ms := func(d time.Duration) float64 { return float64(d.Nanoseconds()) / 1e6 }
+	fmt.Fprintf(os.Stderr, "[metalprof-hybrid P=%d] total=%.1f  gemm+roundtrip=%.1f  rest(recurrence/attn/norm)=%.1f ms path=q4k\n",
+		P, ms(total), ms(gemmTime), ms(rest))
+	// Split the gemm+roundtrip bucket by which resident kernel served each projection. The
+	// three buckets sum to gemm+roundtrip; the point is to tell the next session whether the
+	// durable prefill lever is the Q8 CPU path (q8_cpu dominates → the OOM-gated qGemm8
+	// minority is the wall) or the q4_k Metal kernel (q4k_metal dominates → kernel cleverness
+	// like FAK_Q4K_MM is the lever). The mix on the 27B Mac is the whole question (#71, #977).
+	fmt.Fprintf(os.Stderr, "[metalprof-split P=%d] q4k_metal=%.1f  q8_cpu=%.1f  q6k=%.1f ms  (sum=gemm+roundtrip=%.1f) path=q4k\n",
+		P, ms(q4kTime), ms(q8Time), ms(q6kTime), ms(gemmTime))
+	// Split q4k_metal itself into GPU-compute vs roundtrip. q4kGPUCompute is the summed
+	// cb.GPUEndTime-cb.GPUStartTime of every q4_k Metal dispatch (grouped + per-weight);
+	// q4kRoundtrip is the wall-time remainder (CPU encode/commit/sync + H2D upload). This is
+	// the lever question this session answers: if roundtrip dominates, the next lever is
+	// upload-caching / command-buffer batching (fewer submit/sync); if gpu_compute dominates,
+	// it is fp16-staging / a GPU counter trace / kernel cleverness. Sum-check: gpu_compute +
+	// roundtrip == q4k_metal by construction (roundtrip is defined as the remainder), though
+	// gpu_compute may carry small slop vs the wall window since the GPU-execute window and the
+	// wall window are not perfectly nested (the wall clock also brackets the cgo call boundary).
+	q4kRoundtrip := q4kTime - q4kGPUCompute
+	if q4kRoundtrip < 0 {
+		q4kRoundtrip = 0
+	}
+	fmt.Fprintf(os.Stderr, "[metalprof-q4ksplit P=%d] q4k_gpu_compute=%.1f  q4k_roundtrip=%.1f ms  (sum=q4k_metal=%.1f) path=q4k\n",
+		P, ms(q4kGPUCompute), ms(q4kRoundtrip), ms(q4kTime))
 }
 
 func (s *Session) prefillQwen35LinearLayerQ4K(l int, Xn []float32, P int, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz func([]float32, int, int) *q8Panel) []float32 {

@@ -238,6 +238,16 @@ func qGemm8Into(qt *q8Tensor, qp *q8Panel, Y []float32) {
 		parFor(nTiles, numWorkers, tile)
 	}
 
+	qGemm8avx512Remainder(qt, qp, Y, out, in, nblk, Pmain, nTiles)
+}
+
+// qGemm8avx512Remainder writes the AVX-512 Q8 GEMM tail shared by qGemm8Into and
+// qGemm8IntoMany: the out%qgemmMR row remainder (NR=4 token bulk via qgemm8tile512x1, then
+// the P%4 token tail via the lanes=16 scalar cell reference) and the P%4 token remainder for
+// the already-tiled rows [0, nTiles*qgemmMR). nTiles is the count of full qgemmMR-row tiles
+// the tile kernel already wrote. Bit-identical to the inline tail it replaces.
+func qGemm8avx512Remainder(qt *q8Tensor, qp *q8Panel, Y []float32, out, in, nblk, Pmain, nTiles int) {
+	P := qp.P
 	// Remainder rows (out % MR): every token, via the matching scalar reference.
 	for o := nTiles * qgemmMR; o < out; o++ {
 		qw := qt.q[o*in : o*in+in]
@@ -373,22 +383,6 @@ func qGemm8IntoMany(qp *q8Panel, targets ...qgemm8Target) {
 		qt, Y := tg.qt, tg.Y
 		out := qt.out
 		nTiles := out / qgemmMR
-		for o := nTiles * qgemmMR; o < out; o++ {
-			qw := qt.q[o*in : o*in+in]
-			dw := qt.d[o*nblk : o*nblk+nblk]
-			for t := 0; t < Pmain; t += 4 {
-				qgemm8tile512x1(&qw[0], &qp.q[t*in], &dw[0], &qp.d[t*nblk], in, nblk, out, &Y[t*out+o])
-			}
-			for t := Pmain; t < P; t++ {
-				Y[t*out+o] = qgemm8cell(qw, dw, qp.q[t*in:t*in+in], qp.d[t*nblk:t*nblk+nblk], nblk, 16)
-			}
-		}
-		for t := Pmain; t < P; t++ {
-			qx := qp.q[t*in : t*in+in]
-			dx := qp.d[t*nblk : t*nblk+nblk]
-			for o := 0; o < nTiles*qgemmMR; o++ {
-				Y[t*out+o] = qgemm8cell(qt.q[o*in:o*in+in], qt.d[o*nblk:o*nblk+nblk], qx, dx, nblk, 16)
-			}
-		}
+		qGemm8avx512Remainder(qt, qp, Y, out, in, nblk, Pmain, nTiles)
 	}
 }

@@ -34,6 +34,8 @@ package model
 import (
 	"math"
 	"os"
+
+	"github.com/anthony-chaudhary/fak/internal/guideddecode"
 )
 
 // LogitBias is the OpenAI per-token logit-bias map: token id -> an additive bias
@@ -213,4 +215,116 @@ func (m *StepMask) MaskLogits(history []int, logits []float32) {
 			logits[i] = neg
 		}
 	}
+}
+
+// GuidedByteMask is the LogitMask adapter that composes the byte-level guideddecode
+// FSM into a per-step TOKEN mask over a tokenizer's vocabulary — the model-facing
+// half of #26 that guideddecode's package doc names as "the next slice".
+// guideddecode.AllowedNextBytes decides which BYTES may legally extend a valid
+// tool-call envelope; this adapter lifts that byte-admission set onto token ids by
+// decoding the tokens emitted so far this turn into a byte prefix and admitting a
+// candidate token iff its decoded bytes keep that prefix on an FSM-legal path.
+//
+// Dependency inversion (the same discipline as the LogitMask seam itself):
+// internal/model must not import internal/tokenizer, so the id->bytes decode is
+// INJECTED as TokenBytes — pass the tokenizer.(*Tokenizer).TokenBytes method as a
+// func. guideddecode is a stdlib-only leaf (it imports neither model nor tokenizer)
+// and so is imported directly with no cycle.
+//
+// NOT WIRED LIVE — this is a tested adapter only. Two things gate it out of every
+// default decode: (1) no default path constructs a DecodeConstraint with a Mask,
+// and (2) even a compiled-in mask is dormant until FAK_NATIVE_GUIDED_DECODE=1
+// (GuidedDecodeEnabled). The eventual live wiring must apply the mask inside the
+// agent's stochastic sampler (sampleLogitsWithPenalty) to preserve temperature /
+// top-p; routing tool-call decoding through the greedy GenerateConstrained would
+// silently drop sampling. That wiring is a later slice.
+type GuidedByteMask struct {
+	// Schema is the declared tool-name set the envelope FSM constrains to.
+	Schema guideddecode.ToolSchema
+	// TokenBytes maps a token id to the exact bytes it decodes to, or nil for an id
+	// that is not a decodable token. Inject tokenizer.(*Tokenizer).TokenBytes.
+	TokenBytes func(id int) []byte
+}
+
+// MaskLogits sets to -inf every token whose decoded bytes cannot legally extend the
+// current tool-call-envelope prefix, given the tokens emitted so far this turn
+// (history, the generated ids — not the prompt). The prefix is reconstructed by
+// decoding history through TokenBytes; the candidate set is every id in
+// [0,len(logits)).
+//
+// Admission rule (sound by construction): a candidate is ADMITTED iff, replaying
+// its decoded bytes one at a time from the current prefix, every byte is in
+// guideddecode.AllowedNextBytes at the point it is consumed — OR the FSM turns
+// UNCONSTRAINED (nil) partway through, after which the remaining bytes are free. A
+// token that diverges at any byte is MASKED. This never forbids a byte sequence the
+// FSM allows, so — lifting guideddecode's soundness contract to tokens — it can only
+// prevent an invalid tool name or a broken envelope skeleton, never steer the decode
+// off every valid envelope.
+//
+// Two degenerate prefixes are deliberate no-ops (logits left unchanged): an
+// UNCONSTRAINED prefix (fixed skeleton fully consumed — AllowedNextBytes returns
+// nil), and a DEAD-END prefix (empty non-nil — the prefix already left every
+// envelope, which a correctly-masked decode never reaches). Masking every token on a
+// dead end would zero the whole distribution (an all -inf logit vector), so the
+// adapter declines and leaves recovery policy to the live-wiring slice. A nil
+// receiver or nil TokenBytes is likewise the identity.
+func (m *GuidedByteMask) MaskLogits(history []int, logits []float32) {
+	if m == nil || m.TokenBytes == nil {
+		return
+	}
+	prefix := m.decodePrefix(history)
+	allowed := guideddecode.AllowedNextBytes(prefix, m.Schema)
+	if allowed == nil {
+		return // UNCONSTRAINED: skeleton consumed, no token constraint this step
+	}
+	if len(allowed) == 0 {
+		return // DEAD END: decline rather than emit an all -inf vector (unreachable under correct masking)
+	}
+	neg := float32(math.Inf(-1))
+	for id := range logits {
+		if !m.tokenAdmissible(prefix, allowed, m.TokenBytes(id)) {
+			logits[id] = neg
+		}
+	}
+}
+
+// decodePrefix reconstructs the byte prefix emitted so far this turn by decoding each
+// history token through TokenBytes and concatenating. An undecodable history id
+// contributes no bytes (TokenBytes returns nil); under correct masking history only
+// ever holds admitted tokens, so the reconstruction is exact.
+func (m *GuidedByteMask) decodePrefix(history []int) []byte {
+	var prefix []byte
+	for _, id := range history {
+		prefix = append(prefix, m.TokenBytes(id)...)
+	}
+	return prefix
+}
+
+// tokenAdmissible reports whether appending tb to prefix keeps the decode on an
+// FSM-legal path. first == AllowedNextBytes(prefix) and the caller guarantees it is
+// non-nil and non-empty. Each byte must be admitted at its point of consumption; if
+// the FSM turns UNCONSTRAINED (nil) partway, the remaining bytes are free and the
+// token is admitted. An empty (dead-end) allowed set mid-token rejects, since no byte
+// is in it. A zero-byte candidate makes no progress and is not an emittable token, so
+// it is rejected. prefix is never mutated (a fresh scratch buffer is grown per call).
+func (m *GuidedByteMask) tokenAdmissible(prefix []byte, first map[byte]bool, tb []byte) bool {
+	if len(tb) == 0 {
+		return false
+	}
+	buf := make([]byte, 0, len(prefix)+len(tb))
+	buf = append(buf, prefix...)
+	allowed := first
+	for i, b := range tb {
+		if allowed == nil {
+			return true // unconstrained from here: remaining bytes are free
+		}
+		if !allowed[b] {
+			return false // diverges (also covers a dead-end empty set: no byte matches)
+		}
+		buf = append(buf, b)
+		if i < len(tb)-1 {
+			allowed = guideddecode.AllowedNextBytes(buf, m.Schema)
+		}
+	}
+	return true
 }
