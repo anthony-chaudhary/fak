@@ -11,9 +11,10 @@ import (
 // here as Go constants and enumerated by KnownSkipReasons, mirroring the dos_* / internal
 // ablate fail-loud posture (a refusal names a checkable condition, never free text).
 //
-// NOTE (#3066): full dos_refuse_reasons registration (so `dos check-reason <TOKEN>` and
-// `dos refuse-reasons` list these) is a declared follow-on; this file defines the closed
-// constant set the registration will bind to.
+// NOTE (#3066): each token here is registered in the repo-root dos.toml [reasons] table, so
+// `dos check-reason <TOKEN>` resolves it (known, refusable) and `dos refuse-reasons` lists it.
+// This file is the producer of record; the Go set and the dos.toml registration are bound by
+// TestKnownSkipReasonsRegisteredInDosToml so neither can drift from the other.
 type SkipReason string
 
 const (
