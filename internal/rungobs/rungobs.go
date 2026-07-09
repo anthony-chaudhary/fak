@@ -27,6 +27,19 @@ var subs = []abi.EventKind{abi.EvDecide, abi.EvDeny, abi.EvVDSOHit}
 // microsecond window while keeping membership O(1) and memory bounded.
 const dedupCap = 256
 
+// fusedTurnCap bounds the per-turn latch map (`turns`). Unlike `seen` (a within-turn
+// SeqNo re-emit window, hence tiny), a turn key is a TraceID — one live Claude Code
+// session — so the working set is the count of recent/concurrent sessions, not a
+// microsecond re-emit window. Before this cap, `turns` grew one *turnClassCounts per
+// distinct session forever in this process-global emitter (#3451); 8192 (matching the
+// gateway's per-session maps) is far past any realistic concurrent-session count, so a
+// healthy process never evicts. The fused-turn KPI reads the knownTurns/fusedTurns
+// COUNTERS, not len(turns), so bounding the map is metric-neutral except under
+// pathological churn (>8192 distinct sessions), where an evicted-then-returning trace
+// could re-enter the denominator once — a bounded, acceptable skew for an observability
+// rate versus unbounded heap growth.
+const fusedTurnCap = 8192
+
 // decKey is one histogram bucket.
 type decKey struct {
 	rung   string
@@ -67,6 +80,8 @@ type Observer struct {
 
 	turnOps    map[fusedturn.OpClass]int64
 	turns      map[string]*turnClassCounts
+	turnRing   []string // FIFO eviction order for `turns` (mirrors seen/ring)
+	turnHead   int      // next slot to overwrite in `turnRing`
 	knownTurns int64
 	fusedTurns int64
 }
@@ -74,12 +89,13 @@ type Observer struct {
 // New returns an empty, ready-to-register Observer.
 func New() *Observer {
 	return &Observer{
-		counts:  map[decKey]int64{},
-		cost:    map[decKey]bucketCost{},
-		seen:    map[uint64]struct{}{},
-		ring:    make([]uint64, dedupCap),
-		turnOps: map[fusedturn.OpClass]int64{},
-		turns:   map[string]*turnClassCounts{},
+		counts:   map[decKey]int64{},
+		cost:     map[decKey]bucketCost{},
+		seen:     map[uint64]struct{}{},
+		ring:     make([]uint64, dedupCap),
+		turnOps:  map[fusedturn.OpClass]int64{},
+		turns:    map[string]*turnClassCounts{},
+		turnRing: make([]string, fusedTurnCap),
 	}
 }
 
@@ -233,8 +249,16 @@ func (o *Observer) observeFusedOp(call *abi.ToolCall) {
 	}
 	t := o.turns[key]
 	if t == nil {
+		// Bound the latch map with the same FIFO ring `seen` uses: at capacity, evict
+		// the oldest-inserted turn key before minting the new one. knownTurns/fusedTurns
+		// are counters and are never rolled back, so the KPI is unaffected below the cap.
+		if len(o.turns) >= fusedTurnCap {
+			delete(o.turns, o.turnRing[o.turnHead])
+		}
 		t = &turnClassCounts{}
 		o.turns[key] = t
+		o.turnRing[o.turnHead] = key
+		o.turnHead = (o.turnHead + 1) % fusedTurnCap
 	}
 	if !t.observed {
 		t.observed = true
