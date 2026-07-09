@@ -37,6 +37,41 @@ func TestProcGuardProtectedOnlyIsNotAction(t *testing.T) {
 	}
 }
 
+func TestProcGuardTerminalHostIsNotActionable(t *testing.T) {
+	// The terminal emulator that hosts the fleet's panes accumulates threads in
+	// proportion to the panes it hosts; a breach must be reported but must never
+	// flip Safe=false, or a busy terminal REFUSE_HOSTs the very fleet it hosts.
+	res := EvaluateProcGuard(ProcGuardInput{
+		Processes: []ProcInfo{procInfo(35544, "WindowsTerminal", 2284)},
+	})
+	if !res.OK || res.ActionableFlaggedCount != 0 || len(res.Flagged) != 1 {
+		t.Fatalf("terminal-host result = %+v, want ok with one non-actionable flag", res)
+	}
+	if !res.Flagged[0].Protected {
+		t.Fatalf("terminal host should be protected (reported, non-actionable): %+v", res.Flagged[0])
+	}
+	if got := res.ActionableNames(); len(got) != 0 {
+		t.Fatalf("actionable names = %#v, want none for a terminal host", got)
+	}
+}
+
+func TestProcGuardTerminalHostDoesNotMaskRealRunaway(t *testing.T) {
+	// A thread-heavy terminal host sitting next to a genuine runaway must not
+	// hide the runaway: the terminal is spared, the inference binary still flags.
+	res := EvaluateProcGuard(ProcGuardInput{
+		Processes: []ProcInfo{
+			procInfo(35544, "WindowsTerminal", 4000),
+			procInfo(38264, "llama-cli", 129427),
+		},
+	})
+	if res.OK || res.ActionableFlaggedCount != 1 || len(res.Flagged) != 2 {
+		t.Fatalf("mixed result = %+v, want one actionable flag among two", res)
+	}
+	if got := res.ActionableNames(); len(got) != 1 || got[0] != "llama-cli(pid 38264)" {
+		t.Fatalf("actionable names = %#v, want only the runaway", got)
+	}
+}
+
 func TestProcGuardMissingDimensionsAreSkipped(t *testing.T) {
 	res := EvaluateProcGuard(ProcGuardInput{
 		Processes: []ProcInfo{{PID: 7, Name: "unknown"}},

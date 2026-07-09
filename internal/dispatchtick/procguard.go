@@ -35,6 +35,24 @@ var ProtectedProcessNames = map[string]bool{
 	"kthreadd":           true,
 }
 
+// TerminalHostNames are attended terminal-emulator hosts (the multiplexer that
+// hosts the fleet's panes, not a per-console conhost/openconsole). Their thread
+// and handle footprint scales with the number of panes/sessions they host, so a
+// fleet running many workers inside one terminal legitimately drives the host's
+// thread count past the runaway ceiling. Counting that as an ACTIONABLE runaway
+// lets a busy terminal REFUSE_HOST the very fleet it is hosting -- a feedback
+// trap where the more work is in flight, the more certain the preflight is to
+// pin the wave target to 0. Such a host also can never be safely reaped (killing
+// the attended terminal kills every worker under it), so it belongs in the
+// never-reap / never-block class alongside ProtectedProcessNames: a match is
+// still REPORTED in Flagged (visible and logged, with its breach reasons) but is
+// never counted as actionable and never flips Safe=false. Scoped to the terminal
+// multiplexer -- conhost/openconsole keep their own orphan-reap semantics.
+var TerminalHostNames = map[string]bool{
+	"windowsterminal": true, // Windows Terminal (hosts every fak pane on Windows)
+	"terminal":        true, // macOS Terminal.app / generic terminal host
+}
+
 type ProcInfo struct {
 	PID          int
 	Name         string
@@ -125,7 +143,9 @@ func EvaluateProcGuard(in ProcGuardInput) ProcGuardResult {
 		if len(reasons) == 0 {
 			continue
 		}
-		protected := protectedPIDs[proc.PID] || ProtectedProcessNames[strings.ToLower(name)]
+		protected := protectedPIDs[proc.PID] ||
+			ProtectedProcessNames[strings.ToLower(name)] ||
+			TerminalHostNames[strings.ToLower(name)]
 		flagged = append(flagged, ProcGuardFinding{
 			PID:          proc.PID,
 			Name:         name,
