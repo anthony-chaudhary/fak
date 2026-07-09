@@ -184,7 +184,7 @@ func RunRawArmCached(ctx context.Context, cfg RawArmConfig, release string, prob
 		default:
 			comps = genByID[id]
 		}
-		merged = append(merged, RawArmProblem{QuestionID: id, Completions: comps})
+		merged = append(merged, RawArmProblem{QuestionID: id, PromptSHA256: promptSHA256(byID[id].Prompt), Completions: comps})
 	}
 
 	res.Report = RawArmReport{
@@ -194,6 +194,7 @@ func RunRawArmCached(ctx context.Context, cfg RawArmConfig, release string, prob
 		N:           cfg.N,
 		Temperature: cfg.Temperature,
 		Concurrency: conc,
+		Release:     release,
 		Problems:    merged,
 		Usage: RawArmUsage{
 			Samples:            priorUsage.Samples + genUsage.Samples,

@@ -2,10 +2,10 @@ package livecodebench
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sync"
-
-	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
 // rawarm.go is the "raw" A/B arm (#2104, epic #2085): LCB prompts sent to the
@@ -15,8 +15,10 @@ import (
 // they are unit-tested without a network; the CLI (cmd/livecodebench raw) injects
 // the real gateway sampler. The report records the run identity the acceptance
 // criteria demand — model id, endpoint, n, temperature — and folds provider-cache
-// accounting through the NORMALIZED agent.Usage.CachedPromptTokens() accessor, not
-// the Anthropic-specific cache_read_input_tokens field.
+// accounting from the per-sample RawSampleUsage the sampler returns. The sampler
+// normalizes its provider's usage shape (agent.Usage.CachedPromptTokens(), not any
+// single provider's field) BEFORE returning, so this package stays a foundation
+// leaf with no upward import of the integrator-tier agent client.
 
 // RawArmConfig pins the raw arm's run identity and its fan-out width.
 type RawArmConfig struct {
@@ -27,12 +29,20 @@ type RawArmConfig struct {
 	Concurrency int     // max in-flight requests (mirrors closed-API --multiprocess)
 }
 
+// RawSampleUsage is the token accounting for ONE sample, already normalized by
+// the sampler: CachedPromptTokens must be folded from the provider's own shape
+// (the gateway sampler uses agent.Usage.CachedPromptTokens()) so a provider-cache
+// hit counts the same on OpenAI-compatible, DeepSeek, and Anthropic-shaped usage.
+type RawSampleUsage struct {
+	PromptTokens       int
+	CompletionTokens   int
+	CachedPromptTokens int
+}
+
 // RawArmSampler produces ONE completion for problem p at sample index i. The real
-// implementation POSTs to the gateway's /v1/chat/completions; tests inject a
-// deterministic stub. Returning the raw agent.Usage lets RunRawArm fold provider
-// cache accounting through Usage.CachedPromptTokens() rather than any single
-// provider's field.
-type RawArmSampler func(ctx context.Context, p Problem, i int) (content string, u agent.Usage, err error)
+// implementation POSTs to the gateway's /v1/chat/completions and normalizes the
+// provider-relayed usage into RawSampleUsage; tests inject a deterministic stub.
+type RawArmSampler func(ctx context.Context, p Problem, i int) (content string, u RawSampleUsage, err error)
 
 // RawArmReport is the machine-readable result of the raw arm: the run identity
 // (model / endpoint / n / temperature) plus per-problem completions and the folded
@@ -44,19 +54,30 @@ type RawArmReport struct {
 	N           int             `json:"n"`
 	Temperature float64         `json:"temperature"`
 	Concurrency int             `json:"concurrency"`
+	Release     string          `json:"release,omitempty"` // dataset release the suite pinned (stamped by RunRawArmCached)
 	Problems    []RawArmProblem `json:"problems"`
 	Usage       RawArmUsage     `json:"usage"`
 }
 
 // RawArmProblem holds the n completions collected for one problem, in sample order.
+// PromptSHA256 is the hash of the exact rendered prompt this arm sent, so a
+// cross-arm comparison can assert SamePromptHash from the artifacts alone (#2105).
 type RawArmProblem struct {
-	QuestionID  string   `json:"question_id"`
-	Completions []string `json:"completions"`
+	QuestionID   string   `json:"question_id"`
+	PromptSHA256 string   `json:"prompt_sha256,omitempty"`
+	Completions  []string `json:"completions"`
+}
+
+// promptSHA256 is the per-problem prompt identity both arms stamp on their
+// reports; equality per question_id is the SamePromptHash assertion (#2105).
+func promptSHA256(prompt string) string {
+	h := sha256.Sum256([]byte(prompt))
+	return hex.EncodeToString(h[:])
 }
 
 // RawArmUsage is the run's token accounting folded across every sample. CachedPromptTokens
-// is summed from the normalized agent.Usage.CachedPromptTokens() so a provider-cache hit
-// is counted the same way on OpenAI-compatible, DeepSeek, and Anthropic-shaped usage.
+// is summed from the sampler-normalized RawSampleUsage.CachedPromptTokens so a provider-cache
+// hit is counted the same way on OpenAI-compatible, DeepSeek, and Anthropic-shaped usage.
 type RawArmUsage struct {
 	Samples            int `json:"samples"`
 	PromptTokens       int `json:"prompt_tokens"`
@@ -93,7 +114,7 @@ func RunRawArm(ctx context.Context, cfg RawArmConfig, problems []Problem, sample
 
 	type slot struct {
 		content string
-		usage   agent.Usage
+		usage   RawSampleUsage
 	}
 	slots := make([][]slot, len(problems))
 	for pi := range problems {
@@ -149,9 +170,9 @@ func RunRawArm(ctx context.Context, cfg RawArmConfig, problems []Problem, sample
 			report.Usage.Samples++
 			report.Usage.PromptTokens += u.PromptTokens
 			report.Usage.CompletionTokens += u.CompletionTokens
-			report.Usage.CachedPromptTokens += u.CachedPromptTokens()
+			report.Usage.CachedPromptTokens += u.CachedPromptTokens
 		}
-		report.Problems[pi] = RawArmProblem{QuestionID: problems[pi].QuestionID, Completions: comps}
+		report.Problems[pi] = RawArmProblem{QuestionID: problems[pi].QuestionID, PromptSHA256: promptSHA256(problems[pi].Prompt), Completions: comps}
 	}
 
 	return report, nil

@@ -7,8 +7,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-
-	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
 func rawArmProblems(n int) []Problem {
@@ -23,8 +21,8 @@ func TestRunRawArmCollectsNSamplesPerProblemInOrder(t *testing.T) {
 	probs := rawArmProblems(3)
 	cfg := RawArmConfig{Model: "glm-4.6", Endpoint: "http://127.0.0.1:8080/v1", N: 2, Temperature: 0.8, Concurrency: 4}
 
-	sample := func(_ context.Context, p Problem, i int) (string, agent.Usage, error) {
-		return fmt.Sprintf("%s#%d", p.QuestionID, i), agent.Usage{}, nil
+	sample := func(_ context.Context, p Problem, i int) (string, RawSampleUsage, error) {
+		return fmt.Sprintf("%s#%d", p.QuestionID, i), RawSampleUsage{}, nil
 	}
 	rep, err := RunRawArm(context.Background(), cfg, probs, sample)
 	if err != nil {
@@ -57,13 +55,16 @@ func TestRunRawArmFoldsCachedPromptTokensNormalized(t *testing.T) {
 	probs := rawArmProblems(1)
 	cfg := RawArmConfig{Model: "m", Endpoint: "e", N: 3, Concurrency: 2}
 
-	usages := []agent.Usage{
-		{PromptTokens: 100, CompletionTokens: 10, PromptTokensDetails: &agent.UsageTokenDetails{CachedTokens: 40}},
-		{PromptTokens: 100, CompletionTokens: 10, CacheReadInputTokens: 30},
-		{PromptTokens: 100, CompletionTokens: 10, PromptCacheHitTokens: 25},
+	// Per-sample usage arrives already normalized by the sampler (the gateway
+	// sampler folds each provider shape through agent.Usage.CachedPromptTokens()
+	// before returning — witnessed end-to-end in cmd/livecodebench raw_test.go).
+	usages := []RawSampleUsage{
+		{PromptTokens: 100, CompletionTokens: 10, CachedPromptTokens: 40},
+		{PromptTokens: 100, CompletionTokens: 10, CachedPromptTokens: 30},
+		{PromptTokens: 100, CompletionTokens: 10, CachedPromptTokens: 25},
 	}
 	var idx int32 = -1
-	sample := func(_ context.Context, _ Problem, _ int) (string, agent.Usage, error) {
+	sample := func(_ context.Context, _ Problem, _ int) (string, RawSampleUsage, error) {
 		u := usages[atomic.AddInt32(&idx, 1)]
 		return "code", u, nil
 	}
@@ -85,7 +86,7 @@ func TestRunRawArmRespectsConcurrencyCap(t *testing.T) {
 
 	var mu sync.Mutex
 	var inFlight, maxSeen int
-	sample := func(_ context.Context, p Problem, i int) (string, agent.Usage, error) {
+	sample := func(_ context.Context, p Problem, i int) (string, RawSampleUsage, error) {
 		mu.Lock()
 		inFlight++
 		if inFlight > maxSeen {
@@ -98,7 +99,7 @@ func TestRunRawArmRespectsConcurrencyCap(t *testing.T) {
 		mu.Lock()
 		inFlight--
 		mu.Unlock()
-		return "x", agent.Usage{}, nil
+		return "x", RawSampleUsage{}, nil
 	}
 	if _, err := RunRawArm(context.Background(), cfg, probs, sample); err != nil {
 		t.Fatalf("RunRawArm: %v", err)
@@ -112,11 +113,11 @@ func TestRunRawArmSamplerErrorAborts(t *testing.T) {
 	probs := rawArmProblems(4)
 	cfg := RawArmConfig{Model: "m", Endpoint: "e", N: 2, Concurrency: 2}
 	boom := errors.New("gateway 500")
-	sample := func(_ context.Context, p Problem, i int) (string, agent.Usage, error) {
+	sample := func(_ context.Context, p Problem, i int) (string, RawSampleUsage, error) {
 		if p.QuestionID == "q1" {
-			return "", agent.Usage{}, boom
+			return "", RawSampleUsage{}, boom
 		}
-		return "ok", agent.Usage{}, nil
+		return "ok", RawSampleUsage{}, nil
 	}
 	_, err := RunRawArm(context.Background(), cfg, probs, sample)
 	if err == nil || !errors.Is(err, boom) {
@@ -125,7 +126,7 @@ func TestRunRawArmSamplerErrorAborts(t *testing.T) {
 }
 
 func TestRunRawArmRejectsBadConfig(t *testing.T) {
-	if _, err := RunRawArm(context.Background(), RawArmConfig{N: 0}, nil, func(context.Context, Problem, int) (string, agent.Usage, error) { return "", agent.Usage{}, nil }); err == nil {
+	if _, err := RunRawArm(context.Background(), RawArmConfig{N: 0}, nil, func(context.Context, Problem, int) (string, RawSampleUsage, error) { return "", RawSampleUsage{}, nil }); err == nil {
 		t.Fatalf("want error for n<1")
 	}
 	if _, err := RunRawArm(context.Background(), RawArmConfig{N: 1}, nil, nil); err == nil {
