@@ -226,7 +226,7 @@ func TestFoldTwoTrackComponentHealthNamesPlanesAndFidelity(t *testing.T) {
 	for _, h := range rep.ComponentHealth {
 		byPlane[h.Plane] = h
 	}
-	for _, plane := range []string{"local_kv", "provider_prompt_cache", "context_compression", "gateway_usage"} {
+	for _, plane := range []string{"local_kv", "provider_prompt_cache", "context_compression", "gateway_usage", "savings_feed"} {
 		if _, ok := byPlane[plane]; !ok {
 			t.Fatalf("component_health missing plane %q: %+v", plane, rep.ComponentHealth)
 		}
@@ -248,6 +248,42 @@ func TestFoldTwoTrackComponentHealthNamesPlanesAndFidelity(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("render missing component-health field %q:\n%s", want, out)
 		}
+	}
+}
+
+// TestFoldTwoTrackComponentHealthSavingsFeedFreshness pins the drain-lag self-meter
+// (#3394): the savings_feed row ages SavingsLastUTC against now with an hours-behind
+// figure and flips measured→stale past the threshold, so a stale savings dashboard
+// flags its own staleness instead of silently reading as current.
+func TestFoldTwoTrackComponentHealthSavingsFeedFreshness(t *testing.T) {
+	feedHealth := func(rep TwoTrackReport) ComponentHealth {
+		for _, h := range rep.ComponentHealth {
+			if h.Plane == "savings_feed" {
+				return h
+			}
+		}
+		t.Fatalf("component_health missing savings_feed plane: %+v", rep.ComponentHealth)
+		return ComponentHealth{}
+	}
+
+	fresh := []SavingsRow{{
+		Date: "2026-06-29", GeneratedAt: "2026-06-29T10:00:00Z", Provider: "anthropic",
+		Mechanism: "provider_prompt_cache", CacheReadTokens: 1000, SavedTokenEquiv: 900, NetSavedTokenEquiv: 900,
+	}}
+	if h := feedHealth(FoldTwoTrack(nil, fresh, twoTrackNow)); h.Status != "measured" || !strings.Contains(h.Reason, "2.0h behind") {
+		t.Fatalf("fresh feed health = %+v, want measured with 2.0h-behind reason", h)
+	}
+
+	stale := []SavingsRow{{
+		Date: "2026-06-22", Provider: "anthropic", Mechanism: "provider_prompt_cache",
+		CacheReadTokens: 1000, SavedTokenEquiv: 900, NetSavedTokenEquiv: 900,
+	}}
+	if h := feedHealth(FoldTwoTrack(nil, stale, twoTrackNow)); h.Status != "stale" || !strings.Contains(h.Reason, "180.0h behind") || h.NextAction == "" {
+		t.Fatalf("stale feed health = %+v, want stale with 180.0h-behind reason and a next action", h)
+	}
+
+	if h := feedHealth(FoldTwoTrack(nil, nil, twoTrackNow)); h.Status != "missing" {
+		t.Fatalf("empty feed health = %+v, want missing without timestamped rows", h)
 	}
 }
 

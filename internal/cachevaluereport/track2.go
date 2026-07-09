@@ -354,7 +354,7 @@ type ComponentHealth struct {
 	Owner      string `json:"owner"`
 	Fidelity   string `json:"fidelity"` // lossless | lossy | recoverable | passive
 	Evidence   string `json:"evidence"` // WITNESSED | OBSERVED
-	Status     string `json:"status"`   // measured | insufficient | missing | dollar_blind
+	Status     string `json:"status"`   // measured | stale | insufficient | missing | dollar_blind
 	Reason     string `json:"reason"`
 	NextAction string `json:"next_action,omitempty"`
 }
@@ -772,7 +772,7 @@ func FoldTwoTrackWithUsage(track1 []cachevalueledger.Row, track2 []SavingsRow, u
 		Track2:           t2,
 		OwnerAttribution: foldOwnerAttribution(t1.Buckets, t2),
 		FleetBenefit:     fleet,
-		ComponentHealth:  foldComponentHealth(t1, t2, fleet),
+		ComponentHealth:  foldComponentHealth(t1, t2, fleet, now),
 		ProjectionFence:  projectionFence,
 		OK:               true,
 		Verdict:          "INSUFFICIENT",
@@ -822,7 +822,12 @@ func FoldTwoTrackWithUsage(track1 []cachevalueledger.Row, track2 []SavingsRow, u
 	return rep
 }
 
-func foldComponentHealth(t1 Report, t2 []SavingsBucket, fleet FleetBenefitReport) []ComponentHealth {
+// savingsFeedStaleAfterHours is the drain-lag threshold for the savings-feed
+// freshness row: the feed lands daily (cachevalue-feed.yml), so two missed
+// cadences reads as stale rather than one slow run.
+const savingsFeedStaleAfterHours = 48.0
+
+func foldComponentHealth(t1 Report, t2 []SavingsBucket, fleet FleetBenefitReport, now time.Time) []ComponentHealth {
 	out := []ComponentHealth{{
 		Plane:     "local_kv",
 		Component: "kernel_prefix_reuse",
@@ -903,6 +908,37 @@ func foldComponentHealth(t1 Report, t2 []SavingsBucket, fleet FleetBenefitReport
 		usage.NextAction = ""
 	}
 	out = append(out, usage)
+
+	// Freshness/drain-lag self-meter (#3394): the completeness rows above say which
+	// plane has evidence; this row says how OLD that evidence is, so a stale savings
+	// dashboard flags its own staleness instead of silently reading current.
+	freshness := ComponentHealth{
+		Plane:      "savings_feed",
+		Component:  "feed_freshness",
+		Owner:      "fak",
+		Fidelity:   "passive",
+		Evidence:   "WITNESSED",
+		Status:     "missing",
+		Reason:     "no timestamped ledger rows to age the feed against",
+		NextAction: "append savings rows carrying generated_at so drain-lag is measurable",
+	}
+	last := fleet.SavingsLastUTC
+	if last.IsZero() {
+		last = fleet.LastRowUTC
+	}
+	if !last.IsZero() {
+		hoursBehind := now.UTC().Sub(last).Hours()
+		if hoursBehind > savingsFeedStaleAfterHours {
+			freshness.Status = "stale"
+			freshness.Reason = fmt.Sprintf("last savings row is %.1fh behind now (threshold %.0fh)", hoursBehind, savingsFeedStaleAfterHours)
+			freshness.NextAction = "re-run the savings feed or append fresh session rows before reading the dashboard as current"
+		} else {
+			freshness.Status = "measured"
+			freshness.Reason = fmt.Sprintf("last savings row is %.1fh behind now (threshold %.0fh)", hoursBehind, savingsFeedStaleAfterHours)
+			freshness.NextAction = ""
+		}
+	}
+	out = append(out, freshness)
 	return out
 }
 
