@@ -94,6 +94,7 @@ You do not rewrite your agent to adopt fak — you repoint one base URL at `fak 
 - [Interoperability stance](docs/integrations/interoperability.md): why fak adopts whatever agent/model/framework you already run (the one opinion it keeps is the capability floor), plus the honest per-wire grade (Drop-in / Per-wire / Partial / Needs-adapter / Different-boundary / No-first-party-path) for the flagship harnesses and every interop protocol (MCP native, A2A projection, Responses, AG-UI, ACP, ANP). Defers the full sourced table to the compatibility matrix.
 - [Adoption visuals](docs/adoption-visuals.md): five figures for how to think about using fak — where the binary sits (re-point a base URL, nothing else changes), the rung-by-rung adoption on-ramp (each rung adds a witness, not a rewrite), the honest fak-authored vs provider-observed value split, which of the four integration shapes fits what you already run, and the two gates that decide when the performance win is real.
 - [Claude Code / Anthropic API](docs/integrations/claude.md): wire Claude Code or any Anthropic SDK to the kernel-adjudicated gateway.
+- [More Fable 5 (and every model) out of your Claude seat](docs/integrations/fable5-more-usage-for-free.md): the reader-facing "more usage for free" case for `fak guard -- claude`, reporting ONLY fak's own authored slice (Anthropic's native prompt cache excluded on purpose) from a live fak-guarded fleet — 69.7% WITNESSED KV-prefix reuse, ~37k tokens shed PER FIRE (never the re-counting session sum — the on-record double-count fence), fak's ~7% authored share, plus the one genuinely Fable-5-specific lever (capped-Opus → Fable 5 fallover in the launcher) and the honest fences on what "for free" and "Fable-specific" mean.
 - [Cursor](docs/integrations/cursor.md): governance for the Cursor IDE over MCP or the OpenAI-compatible proxy.
 - [OpenAI Codex / OpenAI API](docs/integrations/openai-codex.md): adjudicate every tool call from an OpenAI-compatible coding agent.
 - [Hermes Agent (NousResearch)](docs/integrations/hermes.md): front the self-hosted, OpenAI-compatible Hermes Agent — every tool call, including execute_code, crosses the capability floor; `fak guard -- hermes` autodetects the OpenAI wire.
@@ -127,7 +128,8 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 - [Engineering is building loops (fak is the kernel)](docs/explainers/engineering-is-building-loops.md): the synthesis — modern engineering is increasingly the act of building agentic loops (observe → orient → decide → act → verify), and fak is the in-process kernel they run on, controlled and fast for the same reason. The loops-all-the-way-down map from the inner tool-call syscall up through the turn, session, and fleet loops to the loop that improves the loop.
 - [Super loops](docs/super-loops.md): the operator-intent meta-loop above normal loops — walk member scorecards/loops/surfaces first, select worst-first what to enter, and use `manage-benchmarks` plus `fak bench-loop status|next|walk|run` for benchmark collection/publishing control.
 - [The tool call is a syscall](docs/explainers/tool-call-is-a-syscall.md): the keystone from-scratch explainer — an OS kernel never trusts a program's word; every dangerous action crosses a boundary the program does not control, and fak applies the same boundary to the LLM's tool calls. The model proposes, the kernel disposes.
-- [The fak/DOS glossary](docs/explainers/glossary.md): 13 one-line definitions of the newcomer vocabulary — syscall boundary, verdict, capability floor, quarantine, fail-closed, witness, refusal reason, lease/arbitration, recall re-verification, addressable KV cache, bit-exact eviction, prefix-cache discount, change data capture — each linked to its full explainer.
+- [Two runtimes, one binary: gateway vs agent runtime vs client](docs/explainers/runtime-vs-client.md): the naming spine for "what do I even run?" — `fak serve` is the gateway (inference) runtime that governs model traffic (routing, cost caps, capability floor, quarantine, audit); `fak serve --native` is the agent application runtime that hosts and runs the loop itself (`agent.RunArm` — sessions, tools, subagents, resume); and a harness wrapped by `fak guard` (or your own SDK backend) is a client of a runtime. serve and guard are a runtime and a client, not two versions or two layers of one thing. The gateway path is the mature default; the native agent runtime is the emerging workstream-B surface.
+- [The fak/DOS glossary](docs/explainers/glossary.md): 17 one-line definitions of the newcomer vocabulary — syscall boundary, verdict, capability floor, quarantine, fail-closed, witness, refusal reason, lease/arbitration, recall re-verification, addressable KV cache, bit-exact eviction, prefix-cache discount, change data capture, gateway runtime, agent application runtime, client, embed — each linked to its full explainer.
 - [Change data capture for agents](docs/explainers/change-data-capture-for-agents.md): fak's change model in CDC terms for the infra reader who searches "change data capture" or "Debezium" — the hash-chained change log (`internal/journal`), the cursor-drained change feeds (`GET /v1/fak/changes`, `GET /v1/fak/events`), the transactional outbox (`internal/slackoutbox`), and the fold-to-read-model projections, mapped one-to-one onto CDC concepts (LSN/offset cursor, tombstone/delete, source metadata, CQRS read model). The honest fence: fak is a change *source* for agent/cache/session state, not a database-replication sink — it never ingests your Postgres WAL, and there is no Kafka/Flink runtime.
 - [Policy in the kernel](docs/explainers/policy-in-the-kernel.md): why a default-deny check on the call path beats an external recognizer that fails open.
 - [Why default-deny beats a classifier](docs/explainers/default-deny-vs-classifier.md): one poisoned README walked through two designs — a classifier stack that must recognize the attack and can fail open, and fak's quarantine plus capability floor that refuses the effect without recognizing the prompt.
@@ -1432,6 +1434,7 @@ product works today, and which one proves it could."
 | **fak support-maturity matrix — model × backend rung coverage (LIVING, generated-not-typed)** ([#1255](https://github.com/anthony-chaudhary/fak/issues/1255), E6 of epic [#1243](https://github.com/anthony-chaudhary/fak/issues/1243)) | **Grade F · score 33.9 · support_maturity_debt 37 · 19/56 cells SUPPORTED** (13 PROOF-PATH-ONLY, 24 FENCED, 0 UNDEFINED across 14 families × 4 backends) — a coverage instrument, not a vs-baseline win | n/a — the kernel's own model × backend support grid (`internal/covmatrix`), folded by `internal/supportmaturityscore`; deterministic from the committed tree, no model/GPU | n/a — this measures support maturity, not throughput; the per-cell parity work is #307/#305/#303/#301 | _this commit_ | `docs/HARDWARE-MATRIX.md` "Support-maturity matrix" block — GENERATED, not hand-typed: regenerate with `fak support-maturity-scorecard --write-doc`, and a stale cell reds `fak support-maturity-scorecard --check-doc` (CI gate `TestSupportMaturityMatrixDocFresh` in `cmd/fak/supportmaturityscore_doc_test.go`). Reproduce the numbers: `go run ./cmd/fak support-maturity-scorecard --json`. **Honesty fence:** a non-SUPPORTED cell is an honest rung (FENCED = the accelerated path refuses rather than diverges), not a failure; debt counts cells below SUPPORTED so the grade tracks the maturity gap, and the freshness gate keeps the doc a view of the live grid rather than a prose snapshot |
 | **FrontierSWE time-to-solution — fak-routed vs raw harness (C15 of epic [#1706](https://github.com/anthony-chaudhary/fak/issues/1706), [#1721](https://github.com/anthony-chaudhary/fak/issues/1721)) — GATED, no number until witnessed** | **GATED — no TTS number is claimed. Claim boundary: no wall-clock/turn-count TTS ratio until (a) the official FrontierSWE grader produced both arms' `reward.json` (C13 [#1719](https://github.com/anthony-chaudhary/fak/issues/1719)) and (b) score-parity holds — fak `correctness`/`speedup` >= raw (C11 [#1717](https://github.com/anthony-chaudhary/fak/issues/1717))** | harness-agnostic (claude-code shim first) | raw FrontierSWE harness (same task/model/budget/retry) | _gated_ | `docs/benchmarks/FRONTIERSWE-RESULTS.md` (authority) + `docs/benchmarks/FRONTIERSWE-TTS-RUNBOOK.md` (raw-vs-fak recipe). Offline projection only, NOT a measurement: `fak frontierswe describe --tts`; scoring runtime green (`go test ./internal/frontierswe`). Measured TTS is the C13/C14 residual — see [FRONTIERSWE-RESULTS.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/FRONTIERSWE-RESULTS.md) |
 | **Full-span four-band trace + µs decide tail under same-process load (G5/R6 of epic [#2218](https://github.com/anthony-chaudhary/fak/issues/2218), [#2223](https://github.com/anthony-chaudhary/fak/issues/2223))** | **loaded p99 ≈ 30–34 µs vs quiet ≈ 13.5–14 µs (×2.1–2.5) · p50 nearly flat (×1.17–1.19) · >100 µs share ~3× (0.18–0.19% → 0.56–0.58%) · trace: all 4 bands walkable in ONE process, every DENY carrying a consequence class (retry_turn / forked_outcome / clean_stop)** — OBSERVED research-grade, no gate flipped | n/a — kernel `Decide` fold + real `superloop.Walk`/`EvaluatePreflight`, hermetic, no model | quiet arm of the SAME process/run (within-run only; per-band totals never cross-multiplied) | _this commit_ | `docs/benchmarks/fullspan/fullspan-trace-20260707.json` + `tailload-20260707-run{1,2}.json` (two full 200k-sample runs; loaded p99 agrees within 14.2%) + sheet `docs/benchmarks/FULLSPAN-TAILLOAD-RESULTS.md`. Hardware named in-artifact: AMD Ryzen 9 9950X (16C/32T), 256 GiB RAM, WSL2 Ubuntu 24.04 on a Windows 11 host. Reproduce: `FAK_BENCH_HW=… FAK_TAILLOAD_OUT=… go test ./internal/bench/ -run TestWriteTailLoadArtifact -count=1`. **Fences:** three-clocks (no end-to-end field — structurally enforced by test), trace B0 spans are one-shot cold costs (do NOT compare to the warmed 362 ns M3 Pro anchor), WSL2-virtualized tails, coarse-clock hosts refuse to write artifacts |
+| **Served-inline proxy-dedup hit-rate — how often `--vdso-proxy-fill` actually fires on an agent read pattern ([#1350](https://github.com/anthony-chaudhary/fak/issues/1350), epic [#1351](https://github.com/anthony-chaudhary/fak/issues/1351))** | **WITNESSED: read-only-*shaped* names (`get_`/`read_`/`search_`/…) serve 5/14 read-only proposals = 35.7%, and every served hit is a cross-turn re-read (W3 5/5; within-turn W1/W2 1/0 and force-fresh 1/0 serve nothing); Claude-native `Read`/`Grep`/`Glob` names serve 0/14 = 0% (the read-only NAME gate does not recognize them); the canonical guard-trace-e2e dominant path serves 0/2 = 0% for the same structural reason. Saves the EXECUTION of a duplicate/repeat read (the client round-trip), NOT the surviving call's tokens. Recommendation: keep `--vdso-proxy-fill` OPT-IN until the name gate recognizes native read tools (or scope default-on to MCP/snake_case reads)** | n/a — kernel served-inline seam (`adjudicateProposedServed` + `admitInboundResults`), no model/GPU | a miss is byte-identical to today (`TestServedInline_Miss`); denominator = read-only-proposed calls per turn | `7b07af0ca` (dominant-path arm) / `953bff575` (dedup sheet) | `internal/gateway/testdata/served_inline_dedup_report.json` (modeled `representative-coding-session-v1`, 6 turns, per-win-class decomposition) + `internal/gateway/testdata/served_inline_guardtrace_report.json` (canonical `guard-trace-e2e` fixture, per-turn counts + `fallback_reason`) + sheet `docs/benchmarks/SERVED-INLINE-DEDUP-RESULTS.md`. **Provenance:** the SERVE is WITNESSED (fak's real in-process seam served these calls, not a model of what it would do); the dedup trace redundancy is MODELED (a named, reproducible transcript) and the guard-trace arm is an AUTHORED shared fixture with real Claude Code native names — **neither is a captured live `/v1/messages` session** (that promotion path stays open). Reproduce: `go test ./internal/gateway -run TestServedInlineDedup -count=1` + `go test ./internal/gateway -run TestServedInlineGuardTrace -count=1`. **Fence:** a near-zero rate on the dominant path is a valid, publishable result that down-ranks the lever, not a defect — the 0% is the name gate, independent of how redundant the reads are |
 
 > **The model-ladder thesis.** Live wall-clock ratio climbs toward the deterministic
 > 7.50× token-speedup ceiling as per-token compute grows (135M 4.58× → 360M 5.40× →
@@ -3349,70 +3352,68 @@ pick one up with `fak issue contract --issue <n>`.
 
 > Source: `README.md`
 
-# fak: the Fused Agent Kernel
+# fak — the Fused Agent Kernel
 
-**One binary in front of the agent you already run: a smaller token bill, the right model per call, and long sessions that pick themselves back up — with safe-by-default tool calls riding along on the same checkpoint.**
+**Same agent, smaller bill. Wrap Claude Code, Codex, or Cursor in one command — cheaper, self-resuming, and checked on every tool call.**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Go Reference](https://pkg.go.dev/badge/github.com/anthony-chaudhary/fak.svg)](https://pkg.go.dev/github.com/anthony-chaudhary/fak) [![Release](https://img.shields.io/github/v/release/anthony-chaudhary/fak?color=blue&label=release&sort=semver)](https://github.com/anthony-chaudhary/fak/releases/latest) [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8.svg)](go.mod)
 
-<!-- readme-verified: 2026-07-07 vs VERSION 0.37.0 + BENCHMARK-AUTHORITY -->
+<!-- readme-verified: 2026-07-09 vs VERSION 0.37.0 + BENCHMARK-AUTHORITY -->
 
-fak treats every tool call like a syscall: the model proposes, the kernel disposes — the stable setup (system prompt, tools, KV cache) is computed once and reused, repeated reads are served locally, and old turns are shed while the provider's cache stays alive, so the same loop comes out cheaper, faster, and longer-running. Each call also gets a verdict against a default-deny capability floor (a reviewable allow-list) on that same seam, so it stays controlled without a second component. It works with Claude Code, Codex, Cursor, and OpenAI / Anthropic / MCP clients; your model, IDE, and keys stay exactly as they are.
-
-**Pick your path:** [wrap your agent now](#get-started-with-fak-guard) ·
-[guided tutorial — 15 min, no key, no GPU](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/tutorial.md) ·
-[fak in 41 seconds, on video](https://github.com/anthony-chaudhary/fak/blob/main/visuals/hero-video.mp4) ·
-[Colab quickstart](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb) ·
-[tool-call controls](#tool-call-controls) · [install](#install).
-
-## What you get, in numbers
-
-Every figure traces to [BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md); the honesty ledger is [CLAIMS.md](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md), where every claim carries exactly one tag: `[SHIPPED]`, `[SIMULATED]`, or `[STUB]`.
-
-| Number | What it means | The fence |
-|---|---|---|
-| **~4.1× less work than a tuned warm-cache stack** | 50-turn × 5-agent run: the shared setup — system prompt, tools, the model's KV cache — is computed once and reused by every agent | reuse climbs to **6.95×** up the model ladder |
-| **~107K tokens per trim** | history compaction on our longest measured session, firing repeatedly as the session grows | each trim saves on top of the provider's prompt-cache discount, not instead of it |
-| **~120 tok/s** | in-kernel CUDA decode on a single RTX 4070 | inside llama.cpp's measured band; the 4-platform sweep: [docs/HARDWARE-MATRIX.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/HARDWARE-MATRIX.md) |
-| **~362 ns** per call | the guard tax: the allow/deny decision runs in-process (measured, Apple M3 Pro) | per-call overhead, no network hop |
-
-The honest split most cost pitches skip: on the Claude Code route the provider's prompt-cache discount is the bigger number — fak keeps it alive (cache markers pass through byte-for-byte), and fak's own authored slice on top is the smaller one: fleet-wide ~0.3–16% of the total saved (`fak cachevalue report`), climbing on long sessions. Six token-savers are on by default, the first three lossless: [the scorecard + split](https://github.com/anthony-chaudhary/fak/blob/main/docs/serving/token-defaults-scorecard.md) · [full attribution](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/SESSION-CACHE-SAVINGS-ABLATION-2026-06-29.md).
-
-## Get started with `fak guard`
-
-Wrap the agent you already run in one command — no rewrite, no config edit, no second terminal:
+fak is one small program you run in front of the agent you already use. Your model, IDE, and keys don't change.
 
 ```bash
-fak guard -- claude                                   # your Claude Code, on your Pro/Max subscription; no API key needed
-fak guard --api-key-env ANTHROPIC_API_KEY -- claude   # Anthropic API billing instead
-fak guard --provider openai --api-key-env OPENAI_API_KEY -- opencode   # an OpenAI-compatible agent
+fak guard -- claude   # run it in front of your agent: your Pro/Max plan, no API key, every tool call gets a verdict
 ```
 
-The gateway starts in-process on loopback and your credential passes through untouched. Every tool call on that boundary receives a verdict, and on exit you get a decision summary. Walkthrough + proof a real `/v1/messages` turn crossed the gateway: [docs/integrations/claude.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/claude.md).
+**Pick your path:** [wrap your agent](#start-in-one-command) · [15-min tutorial — no key, no GPU](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/tutorial.md) · [see it on video](https://github.com/anthony-chaudhary/fak/blob/main/visuals/hero-video.mp4) · [install](#install)
 
-**Try it first — no clone, no key, no model, no GPU** (install is one `go install`, [below](#install)):
+## Why people run it
+
+- 💸 **Pay less for the same run** — **~4.1× less work than a tuned warm-cache stack** (up to **6.95×** on bigger models). Every agent shares one cached setup instead of rebuilding it each turn, on top of your provider's cache discount.
+- 🛟 **Sessions that don't die.** Long runs trim their own history (**~107K tokens** per trim at the high end) and restart themselves after a crash — you never babysit the context window.
+- 🔒 **You stay in control.** Every tool call gets an ALLOW / DENY verdict against a reviewable allow-list before it runs: **362 ns**, in-process, no model in the loop, no network hop.
+- 🔌 **Nothing to rewrite.** Drop it in front of Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client. Your model, IDE, and keys stay exactly as they are.
+
+Every number here traces to [BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md), and every claim in [CLAIMS.md](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) carries exactly one tag — `[SHIPPED]`, `[SIMULATED]`, or `[STUB]`.
+
+## Start in one command
+
+Wrap the agent you already run — no rewrite, no config file, no second terminal:
 
 ```bash
-fak routebench                                   # -> COST / LATENCY / QUALITY delta vs a one-model baseline
-fak preflight --tool refund_payment --args "{}"  # -> DENY (DEFAULT_DENY): not on the allow-list, fail-closed
+fak guard -- claude                                   # your Claude Code on your Pro/Max plan — no API key needed
+fak guard --api-key-env ANTHROPIC_API_KEY -- claude   # bill the Anthropic API instead
+fak guard --provider openai --api-key-env OPENAI_API_KEY -- opencode   # any OpenAI-compatible agent
+```
+
+The gateway runs in-process on loopback and your credential passes through untouched. Every tool call on that boundary gets a verdict, and on exit you get a savings-and-decisions summary. Walkthrough + proof a real `/v1/messages` turn crossed the gateway: [docs/integrations/claude.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/claude.md).
+
+## Try it now — no key, no GPU
+
+No clone, no model, no card. (Install is one line, [below](#install).)
+
+```bash
+fak routebench                                    # -> COST / LATENCY / QUALITY vs a one-model baseline
+fak preflight --tool refund_payment --args "{}"   # -> DENY (DEFAULT_DENY): not on the allow-list, fail-closed
 ```
 
 ## More ways to run it
 
 | You want | Run | See |
 |---|---|---|
-| A local model in the kernel | `fak guard --gguf qwen2.5:7b -- claude` — no key, no network, data stays on the box | honest fence: a small local model is a quality ramp, not a frontier coder — [head-to-head vs llama.cpp](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/LLAMACPP-HEADTOHEAD-RESULTS.md) |
+| A local model in the kernel | `fak guard --gguf qwen2.5:7b -- claude` — **~120 tok/s** on a single RTX 4070, no key, no network | a small local model is a quality ramp, not a frontier coder — [head-to-head](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/LLAMACPP-HEADTOHEAD-RESULTS.md) · [hardware matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/HARDWARE-MATRIX.md) |
 | An always-on gateway | `fak node` installs `fak serve` as a real system service | [docs/fak/node-setup.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/node-setup.md) |
-| Crash recovery | `fak resume watchdog` relaunches dead sessions (dry-run by default); `fak resume plan` prices a warm vs cold resume | — |
+| Crash recovery | `fak resume watchdog` relaunches dead sessions (dry-run by default); `fak resume plan` prices a warm vs cold restart | — |
 | Codex / Cursor / MCP hosts | keep the normal model wire; ask the kernel for verdicts over MCP | [Codex](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/openai-codex.md) · [Cursor](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/cursor.md) · [examples/mcp](https://github.com/anthony-chaudhary/fak/tree/main/examples/mcp) |
-| Any OpenAI/Anthropic-compatible client | `fak serve` in front of a model endpoint | [GETTING-STARTED.md](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md) · [docs/fak/api-reference.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/api-reference.md) |
-| Slack | a durable run-card per guard session; `fak chatrelay` bridges a served model into a channel | [docs/fak/slack-sessions.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/slack-sessions.md) |
+| Any OpenAI/Anthropic client | `fak serve` in front of a model endpoint | [GETTING-STARTED.md](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md) · [docs/fak/api-reference.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/api-reference.md) |
+| Slack | a durable run-card per session; `fak chatrelay` bridges a served model into a channel | [docs/fak/slack-sessions.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/slack-sessions.md) |
 
-Witnessed live in front of Claude Code, opencode, and Codex; 41 of 47 surveyed harnesses repoint with one base URL ([the catalogue](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/README.md)).
+Tested live with Claude Code, opencode, and Codex; 41 of 47 surveyed harnesses connect with a single base-URL change ([the catalogue](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/README.md)).
 
-## Tool-call controls
+## Every tool call gets a verdict
 
-The performance seam doubles as a safety floor at no extra cost: a tool call crosses the kernel before it runs, receives a verdict — ALLOW, DENY, TRANSFORM, or REQUIRE_WITNESS — and is recorded with a closed reason code you can assert on (`POLICY_BLOCK`, `SECRET_EXFIL`, …); distrusted result bytes are quarantined before they become the model's next instructions, and the model cannot widen its own authority by text alone. The floor is a deployable JSON manifest you copy, trim, and test — no model in the loop; starter floors cover coding, customer support, DevOps, trading, and clinical/PHI. Point an agent at one with `fak guard --policy examples/<file>`. More: [POLICY.md](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) · [examples/README.md](https://github.com/anthony-chaudhary/fak/blob/main/examples/README.md) · [the tool call is a syscall](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/tool-call-is-a-syscall.md).
+The speed seam doubles as a safety floor at no extra cost. A tool call crosses the kernel before it runs and comes back ALLOW, DENY, TRANSFORM, or REQUIRE_WITNESS — logged with a fixed reason code you can test against (`POLICY_BLOCK`, `SECRET_EXFIL`, …). Untrusted result bytes are quarantined before they can become the model's next instruction, and the model can't widen its own authority with text alone. The floor is a JSON file you copy, trim, and test — no model in the loop; starter floors ship for coding, customer support, DevOps, trading, and clinical/PHI. Point at one with `fak guard --policy examples/<file>`. More: [POLICY.md](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) · [examples/README.md](https://github.com/anthony-chaudhary/fak/blob/main/examples/README.md) · [the tool call is a syscall](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/tool-call-is-a-syscall.md).
 
 ## Install
 
@@ -3422,17 +3423,18 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 
 Go 1.26+ is required; no external Go dependencies, no `go.sum`. From a clone: `go build -o fak ./cmd/fak`. Prebuilt archives and containers: [INSTALL.md](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md). Build/test/ship: [CONTRIBUTING.md](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md).
 
-## Boundaries
+## The honest fence
 
-For raw token throughput use vLLM or SGLang — fak is the agent kernel around them. Injection classifiers help, but tool authority comes from policy. Provider cache hits are rebates, telemetry until you control the memory. Keep irreversible, exfil-shaped tools off the allow-list. The full fence line: [what fak is not](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/what-fak-is-not.md).
+For raw token throughput, reach for vLLM or SGLang — fak is the agent kernel around them, not a replacement. Prompt-injection classifiers help, but tool authority comes from your policy file, not the model. Keep irreversible or data-exfiltrating tools off the allow-list. Full list: [what fak is not](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/what-fak-is-not.md).
 
-## Docs map
+## Docs
 
-Going deeper starts at the [front-page overflow](https://github.com/anthony-chaudhary/fak/blob/main/docs/README-legacy.md): why now, the per-domain use-case catalogue, vCache, model routing, and everything moved off this page.
+Going deeper starts at the [front-page overflow](https://github.com/anthony-chaudhary/fak/blob/main/docs/README-legacy.md) — why now, the per-domain use-case catalogue, model routing, vCache, and everything moved off this page.
 
 | If you want... | Read |
 |---|---|
 | Guided first session (15 min) · absolute-beginner start | [docs/fak/tutorial.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/tutorial.md) · [START-HERE.md](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md) |
+| Which do I run — gateway, agent runtime, or client? | [docs/explainers/runtime-vs-client.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md) |
 | Install + the four usage tiers | [GETTING-STARTED.md](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md) · [LEARNING-PATH.md](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md) |
 | Long sessions / cache · you never manage context | [docs/explainers/long-sessions-keep-the-cache-hit.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/long-sessions-keep-the-cache-hit.md) · [docs/explainers/you-never-manage-the-context-window.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/you-never-manage-the-context-window.md) |
 | Capability floor (policy) · security model | [POLICY.md](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) · [docs/fak/security.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/security.md) |
@@ -3467,7 +3469,7 @@ and runs on CPU — no GPU needed for small models.
 | **Cut the token bill on the agent you already run** (cheaper long sessions, one command) | [Main README](https://github.com/anthony-chaudhary/fak/blob/main/README.md#get-started-with-fak-guard) — `fak guard -- claude` |
 | **See the performance benchmarks** | [Benchmark Authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) |
 | **Follow a guided first session** (real output at every step) | [Tutorial](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/tutorial.md) — 15 minutes ⭐ |
-| **Learn every concept in order** (a prerequisite-based course you can join at any level) | [Learning path](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md) — 98 courses, six levels ⭐ |
+| **Learn every concept in order** (a prerequisite-based course you can join at any level) | [Learning path](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md) — 99 courses, six levels ⭐ |
 | **I'm a coding agent** (build/test/run + the rules) | [AGENTS.md](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) |
 | **I already run an agent** (Claude Code, Cursor, an SDK, or MCP) | [Integration index](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/README.md) — repoint one base URL, no agent-side code change |
 | **Understand what fak actually does** | [Main README](https://github.com/anthony-chaudhary/fak/blob/main/README.md) |
@@ -3535,11 +3537,11 @@ compound: the first agent pays for the shared work, everyone after reads it for 
 
 ## How fast is it?
 
-On a measured 50-turn × 5-agent session, `fak` did in ~19 minutes what a **naive
-re-send-everything loop** does in ~19 hours — a **60× gain against that naive baseline**.
-Against a *tuned* warm-cache stack the honest gain is a few-fold (~4×); the eye-catching
-60× is only versus the naive pattern, whose cost balloons because it reprocesses the whole
-growing conversation every turn. The reuse win is **self-host only** and applies to
+On a measured 50-turn × 5-agent session, the honest gain over a *tuned* warm-cache
+stack is a few-fold (**~4×**). Versus a **naive re-send-everything loop** — whose cost
+balloons because it reprocesses the whole growing conversation every turn — the same
+session drops from ~19 hours to ~19 minutes (~60×), but that eye-catching number holds
+only against the naive pattern. The reuse win is **self-host only** and applies to
 read-heavy fleets.
 
 See [`fak/BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) for every number traced to
@@ -3599,6 +3601,13 @@ If you just want to **serve a useful model with fak in front of it**, you want *
 Tier 2's in-kernel model is a *reference forward pass* proven bit-for-bit against
 HuggingFace, not a chat-quality serving engine (see the honest caveat in §4).
 
+Every tier above runs the **gateway runtime** (`fak serve`) in front of a model, with your
+agent as its client. If it isn't yet clear whether you're standing up a *runtime* or wiring
+up a *client* — or how `fak serve` relates to `fak guard` — read [Which do I run — gateway,
+agent runtime, or client?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md): it names `fak serve` (the
+gateway runtime), `fak serve --native` (the agent application runtime that owns the loop),
+and `fak guard` (which makes a harness you already run a governed client).
+
 > **Prefer not to install anything?** Run these tiers in a hosted cloud notebook: a free
 > Colab/Kaggle T4 for Tiers 0–1, a neocloud GPU for Tier 2. See
 > [`notebooks/`](https://github.com/anthony-chaudhary/fak/blob/main/notebooks/README.md).
@@ -3647,7 +3656,7 @@ HuggingFace, not a chat-quality serving engine (see the honest caveat in §4).
 
 The installer honors `FAK_VERSION` (pin a version) and `FAK_INSTALL_DIR` (default
 `/usr/local/bin`, else `~/.local/bin`). Published targets: `linux_amd64`,
-`darwin_amd64`, `darwin_arm64`, `windows_amd64`.
+`linux_arm64`, `darwin_amd64`, `darwin_arm64`, `windows_amd64`.
 
 **Install with Go.** The module path `github.com/anthony-chaudhary/fak` is the repository
 root, so it installs directly:
@@ -3796,8 +3805,9 @@ Routes the gateway exposes:
 | `GET /metrics` | Prometheus exposition for gateway HTTP latency/status, verdict counters, kernel counters, inflight requests, build labels, and vDSO hit ratio |
 | `GET /debug/vars` | authenticated expvar-style JSON snapshot of gateway config/uptime, runtime memory/goroutines, kernel counters, and completed HTTP/operation metric rows |
 
-> The `/v1/fak/*` routes dispatch to the bound `--engine` (default `mock`, or the
-> in-kernel model in Tier 2), a **separate axis** from `--base-url`. Your upstream
+> The `/v1/fak/*` routes dispatch to the bound `--engine` (default `inkernel` — the
+> Tier-2 fused model, on its synthetic checkpoint until you load real weights, §4),
+> a **separate axis** from `--base-url`. Your upstream
 > model is reached only through `/v1/chat/completions`.
 
 > `fak serve` also writes one JSON access-log event per HTTP request to its log sink.
@@ -3924,8 +3934,9 @@ On the witnessed M3 Pro run this loaded the model in about 75 s, peaked at about
 25.8 GB RSS, prefilling 22 tokens at about 0.5 tok/s and decoding one cached token at
 about 0.1 tok/s. The first greedy token is `<think>`, matching llama.cpp for the same
 ChatML prompt. Treat this as a runnability/debug smoke; the current speed bar and the
-remaining broader logit-oracle work are tracked in `QWEN36-PARITY-RESULTS.md` and
-`FAK-NATIVE-QWEN35-RESULTS.md`.
+remaining broader logit-oracle work are tracked in
+[`docs/benchmarks/QWEN36-PARITY-RESULTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/QWEN36-PARITY-RESULTS.md) and
+[`docs/benchmarks/FAK-NATIVE-QWEN35-RESULTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/FAK-NATIVE-QWEN35-RESULTS.md).
 
 ### 4d. In-kernel CHAT through `fak serve` (both OpenAI + Anthropic wires)
 
@@ -7017,6 +7028,14 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
     },
     {
       "@type": "Question",
+      "name": "Is fak a CDC or Debezium tool? Does it replicate my database?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. fak is not a database-replication CDC tool, and it is not Debezium. It does not tail your Postgres or MySQL WAL, it does not replicate your tables into Kafka, and there is no Flink or streaming-SQL layer. What fak does ship is the change-data-capture pattern applied to the agent loop: its wire feeds — the coherence bus, the hash-chained journal, and the drive-state stream — are bounded, cursor-ordered, tombstone-carrying changelogs of agent, cache, and session state, which a data engineer already knows how to consume (/v1/fak/changes + /v1/fak/events, drained by cursor). The load-bearing fence is source, not sink: fak is a change source for agent work, never a replica of your database, and it captures agent state, not your tables. If you need to replicate a relational database, Debezium is the answer; fak captures a different changelog. The full mapping (CDC↔fak, the source-not-sink fence, how to consume the feed) is in change data capture for agents."
+      }
+    },
+    {
+      "@type": "Question",
       "name": "Is fak novel? What did the prior-art audit find?",
       "acceptedAnswer": {
         "@type": "Answer",
@@ -8721,6 +8740,21 @@ The win is in **reread-rate**, not raw GPU speed. On a 50-turn × 5-agent run it
 (~60× only against the naive re-send-everything baseline, not the headline). Over the real WebVoyager set (643 tasks) a deterministic geometry model puts the prefill work-elimination at 8.8–9.7× vs the naive floor (only **1.0–1.1× vs a tuned per-agent-KV stack**) — modeled, not a wall-clock. The reuse win is **self-host only**. An app that merely *calls* a
 frontier API gets the safety floor but not the savings. Every number is traced to a
 commit and artifact in the [benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md).
+
+## Is fak a CDC or Debezium tool? Does it replicate my database?
+
+No. `fak` is **not** a database-replication CDC tool, and it is not Debezium. It does
+not tail your Postgres or MySQL WAL, it does not replicate your tables into Kafka, and
+there is no Flink or streaming-SQL layer. What `fak` *does* ship is the change-data-capture
+*pattern* applied to the agent loop: its wire feeds — the coherence bus, the hash-chained
+journal, and the drive-state stream — are bounded, cursor-ordered, tombstone-carrying
+changelogs of **agent, cache, and session state**, which a data engineer already knows how
+to consume (`/v1/fak/changes` + `/v1/fak/events`, drained by cursor). The load-bearing fence
+is **source, not sink**: `fak` is a change *source* for agent work, never a replica of your
+database, and it captures agent state, not your tables. If you need to replicate a relational
+database, Debezium is the answer; `fak` captures a different changelog. The full mapping
+(CDC↔fak, the source-not-sink fence, how to consume the feed) is in
+[change data capture for agents](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/change-data-capture-for-agents.md).
 
 ## Is fak novel? What did the prior-art audit find?
 
@@ -11422,6 +11456,12 @@ front of the engine. → [One binary is the whole surface](https://github.com/an
 | **Windsurf** (Cascade agent — OpenAI-compatible proxy) | [`windsurf.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/windsurf.md) |
 | **Any MCP client** (one-paste `.mcp.json`) | [`../../examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md) |
 
+**On a Claude Pro/Max subscription?** [`fable5-more-usage-for-free.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/fable5-more-usage-for-free.md)
+is the honest, dogfood-witnessed case for how `fak guard -- claude` stretches the seat you
+already pay for — the pure-fak, native-cache-excluded slice (context shedding + KV-prefix
+reuse), plus the one genuinely Fable-5-specific lever (the capped-Opus → Fable 5 fallover),
+with every number labeled by provenance and the shed-per-fire double-count fence carried in full.
+
 **All guides requested in #87 (Claude Code, VS Code, Continue, Aider, Cline, Zed, JetBrains) are now complete and available above.**
 
 **Adopting from outside the repo?** The [adopter playbook](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/adopter-playbook.md) is the
@@ -11608,6 +11648,8 @@ governance surface, not tokens per second. Full scope, claim by claim:
 ## Cross-references
 
 - [What fak supports](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/README.md) — the dedicated capability pages: [models](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/models.md), [clouds & hosted providers](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/clouds.md), [APIs, wires & MCP](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/apis-and-protocols.md), [agent harnesses & frameworks](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/agent-harnesses.md), and [serving engines](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/engines.md).
+- [Two runtimes, one binary: gateway vs agent runtime vs client](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md) — the first-decision naming behind "put fak in front of your agent": `fak serve` (the gateway runtime that governs model traffic) vs `fak serve --native` (the agent application runtime that owns the loop) vs a harness wrapped by `fak guard` (a governed client). `serve` and `guard` are a runtime and a client, not two versions of one thing.
+- [More Fable 5 (and every model) out of your Claude seat](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/fable5-more-usage-for-free.md) — the reader-facing "more usage for free" case for `fak guard -- claude`, reporting only fak's own authored slice (native prompt cache excluded on purpose): 69.7% WITNESSED KV-prefix reuse, ~37k tokens shed per compaction fire, the capped-Opus → Fable 5 fallover, and the honest fences on what "for free" and "Fable-specific" actually mean.
 - [Harness integration acceptance checklist](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/harness-acceptance-checklist.md) — the model-wire, host-tool dialect, argument-field, deny-behavior, and replay fixture contract for first-class launchers.
 - [Reusable harness-loop playbook](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/harness-loop-playbook.md) — apply the selector/executor/witness/stop pattern to customer workflows such as support queues, data QA, and eval runs.
 - [Agent memory (mem0 / OpenMemory / MCP)](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/agent-memory.md) — put the gate in front of a memory store: oversized and secret-shaped writes refused, a prompt-injected `delete_all` refused, every recalled memory trust-gated before it re-enters context.
@@ -12382,23 +12424,33 @@ going.
 1. **It's counted separately.** Hard deny-all turns increment
    `fak_guard_deny_all_stops_total` and the live `fak_guard_deny_all_consecutive` gauge on
    `/metrics`; retryable tool-feedback turns increment
-   `fak_guard_tool_feedback_turns_total` and `fak_guard_tool_feedback_consecutive`. The exit
-   summary prints separate lines, so "the floor refused a tool" does not read as "the
+   `fak_guard_tool_feedback_turns_total` and `fak_guard_tool_feedback_consecutive`. A third
+   gauge, `fak_guard_deny_all_same_consecutive`, counts consecutive deny-all turns proposing
+   the **identical** refused action (same tool + same reason) — it climbs only when the model
+   re-proposes the *same* blocked call and re-seeds to 1 the moment the refusal changes. The
+   exit summary prints separate lines, so "the floor refused a tool" does not read as "the
    session stopped."
-2. **It's auto-resumed.** guard installs a Claude Code **`Stop` hook** that reads that gauge
+2. **It's auto-resumed.** guard installs a Claude Code **`Stop` hook** that reads those gauges
    and, when the last turn was a hard deny-all, **blocks the stop and re-prompts the agent**
    with *"pick an allowed alternative and continue"* — so the loop keeps going instead of
    halting.
-   It is **on by default** (`--deny-all-continue=enforce`) and **bounded**
-   (`--deny-all-max`, default 3 consecutive continues) so a model that keeps re-proposing a
-   refused call cannot loop forever; once the model does something allowed, the counter
-   resets and the next real completion stops normally.
+   It is **on by default** (`--deny-all-continue=enforce`). The give-up is keyed on the
+   **same-issue** gauge, not the raw deny-all count: the hook only stands down after
+   `--same-stop` (default 6) consecutive turns proposing the *identical* refused action, so a
+   session that hits a **different** block each turn (exploring for an allowed path) is never
+   given up, while one genuinely spinning on one refusal still stops. Its guidance also firms
+   up over the last few identical repeats — naming the repeat and telling the model to change
+   tack rather than retry. Once the model does something allowed, the counter resets and the
+   next real completion stops normally. (Against an older gateway that does not emit the
+   same-issue gauge, the hook falls back to the legacy blind bound `--deny-all-max`, default
+   3 consecutive continues.)
 
 ```bash
-fak guard -- claude                          # auto-continue ON (enforce), max 3
+fak guard -- claude                          # auto-continue ON (enforce); give up after 6 identical repeats
 fak guard --deny-all-continue=shadow -- claude   # log the would-continue, still stop (observe first)
 fak guard --deny-all-continue=off -- claude      # restore the bare end_turn stop
-fak guard --deny-all-max 5 -- claude             # allow up to 5 consecutive auto-continues
+fak guard --same-stop 10 -- claude               # tolerate up to 10 identical repeats before standing down
+fak guard --deny-all-max 5 -- claude             # legacy blind bound (older gateways without the same-issue gauge)
 ```
 
 The Stop hook is merged into the **same** `--settings` file as the PreCompact hook (a single
@@ -13052,6 +13104,248 @@ tail -f <tmp>/fak-serve.log
 - `docs/qwen36-claude-dogfood-playbook.md` — Qwen3.6 local model specifics
 - `fak/POLICY.md` — Policy manifest schema
 - `fak/ARCHITECTURE.md` — fak internal architecture
+
+---
+
+# More Fable 5 (and every model) out of your Claude seat
+
+> Source: `docs/integrations/fable5-more-usage-for-free.md`
+
+---
+title: "More Fable 5 (and every model) out of your Claude seat — with fak guard"
+description: "How one command — fak guard -- claude — stretches your existing Claude seat: the pure-fak, native-cache-excluded slice (context shedding + KV-prefix reuse), plus the one genuinely Fable-5-specific lever (the capped-Opus → Fable fallover). Every number is from a live fak-guarded fleet and labeled by provenance, with the double-count fence carried in full."
+date: 2026-07-09
+---
+
+# More Fable 5 (and every model) out of your Claude seat — with `fak guard`
+
+*This page reports **only fak's own authored slice** of the savings, on purpose:
+Anthropic's native prompt-cache discount — the larger number `fak` preserves
+byte-for-byte but does **not** author — is deliberately **excluded** here. Every
+figure is labeled `WITNESSED` (fak measured it directly), `OBSERVED`
+(provider-relayed), or `ESTIMATED`, and cites where it comes from. The number
+authority is [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md); the
+mechanism deep-dive and its honesty fences are
+[`context-shedding.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/context-shedding.md).*
+
+## The claim, stated honestly
+
+`fak guard -- claude` is the **easiest way to get more work out of the Claude
+seat you already pay for** — one command, on by default, nothing to configure,
+nothing to clean up. It does that two ways, and it's worth being precise about
+which is which:
+
+1. **It keeps your session small and alive (model-agnostic).** Guard's gateway
+   sheds the stale middle of your transcript each turn and keeps the cached head
+   byte-identical, so the session runs longer under whatever usage window your
+   seat has. This works the same for Opus, Sonnet, Haiku, **and Fable 5** — so
+   "more Fable 5" from this lever is really "more of *whatever model you're
+   running*."
+2. **It reaches Fable 5's separate allocation when Opus caps out (Fable-specific).**
+   When your default Opus 4.8 window hits a weekly / 5-hour / usage cap, guard's
+   launcher fails the session over to **Fable 5's separate allocation bucket**
+   automatically — genuinely "more Fable 5 usage" you could not otherwise reach.
+
+Read "**for free**" precisely: it means *your existing subscription seat, one
+command, default-on, no native prompt cache, and no manual model-switching* — it
+does **not** mean the tokens are unbilled. On API billing Fable 5 is a paid tier
+(and, under this repo's own apex cost model, [a pricey one](#the-honest-fences)).
+"Free" is about effort and your existing seat, not about zero cost.
+
+---
+
+## The one command
+
+```bash
+fak guard -- claude    # your normal Claude Code, on your subscription, kernel-adjudicated
+```
+
+That's the whole setup. Specifically:
+
+- **On your subscription by default** — no API key. Guard sources your logged-in
+  Pro/Max OAuth token and authenticates upstream; the wrapped `claude` never sees
+  a real credential. (Details and the end-to-end proof are in
+  [`claude.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/claude.md).)
+- **Context shedding is on by default** at a 48,000-token resident budget
+  (`gateway.DefaultCompactHistoryBudget`, `internal/gateway/gateway.go`; `0`
+  disables). A short session never trips it; a long one starts shedding once it
+  sprawls past the budget.
+- **Nothing persistent is installed.** Guard writes *ephemeral, session-scoped*
+  temp files (`--settings`, `--mcp-config`) and injects them into the child's
+  argv only — your `~/.claude/settings.json`, your shell, and any other `claude`
+  in another terminal are untouched (`cmd/fak/guard_precompact.go:246-253`,
+  atomic temp+rename at `:264-283`). When Claude exits, there's nothing to undo.
+
+If you want to see the lever move, run a long session and watch the per-turn
+`fak-turn …` line and the exit summary; both print what compaction shed.
+
+---
+
+## Lever 1 — keep the session small and alive (the pure-fak slice)
+
+A coding agent's transcript is append-only: every turn re-sends the whole
+history. The provider discounts the byte-identical *front* via its prompt cache,
+but the growing *middle* keeps missing cache and re-billing at full price. The
+industry fix — summarize-and-recompact — rewrites the prompt body near the
+context wall, which busts the cached prefix and forces a large cold re-prefill.
+
+`fak guard`'s lever is different: past the budget it **drops whole stale middle
+turns and splices the original bytes back together**, proves the protected
+`cache_control` prefix is byte-for-byte identical, and forwards the body
+unchanged on any doubt (`internal/gateway/messages.go:697` onward). The cached
+head survives — so the provider's discount keeps paying — while the un-cacheable
+middle is shed and a small restore handle is left where it was (recoverable later
+via `fak_context_restore`). Full mechanism:
+[`context-shedding.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/context-shedding.md).
+
+### What we measured (live fak-guarded fleet, pure-fak slice only)
+
+Source: `fak cachevalue report --json`, run against the live dogfood fleet.
+Native prompt-cache dollars are **excluded** — these are fak's authored slice.
+
+| Metric | Value | Provenance | Field |
+|---|---|---|---|
+| Realized KV-prefix reuse (latest multi-turn week; 0.69 all-time) | **69.7%** | WITNESSED | `track1_witnessed_kernel.latest_reuse_ratio` |
+| Compaction fires across the fleet | 2,964 fires over 2,046 sessions | WITNESSED | `fleet_benefit.compaction_fired` / `exit_sessions` |
+| Shed **per fire** (the honest unit — see fence below) | **≈37,000 tokens/fire** | WITNESSED | `compaction_shed_tokens ÷ compaction_fired` |
+| fak's authored share of total token-equivalent value | **≈7.0%** | WITNESSED | `fleet_benefit.fak_share_pct` |
+| fak-authored API cost attributed over the sampled window | ≈$541 (≈$63/day) | OBSERVED | `fleet_benefit.fak_api_cost_avoided_usd` |
+
+Read these the honest way:
+
+- **KV-prefix reuse (69.7% latest week, 0.69 all-time)** is a lossless, WITNESSED
+  reuse of already-computed prefix — no output token changed. Two fences, both
+  stated plainly: (i) the WITNESSED KV track is a **small sample** (11 sessions,
+  6 multi-turn) — a direct measurement, not a fleet-wide average; and (ii) the
+  all-time 0.69 currently sits **below the repo's 0.751 CI floor** (`fak nightrun
+  score` exits non-zero on it right now), so cite it as a witnessed measurement
+  *under active improvement*, **not** as a passing benchmark. Also note the
+  vs-naive re-prefill multiple `1/(1-reuse)` is deliberately **excluded** — the
+  honest single-session cache value is ~1.0× marginal over a tuned warm-KV server
+  (the #1066 fence; `internal/cachevalueledger/ledger.go`).
+- **Shed is cited per fire (~37k tokens), never as a sum.** The cumulative
+  `compaction_shed_tokens` (≈110M fleet-wide) **re-counts the same aged middle
+  every fire** as the client re-sends full history and fak re-trims from scratch.
+  Turning that sum into "N context windows saved" or a "share of cache reads"
+  is exactly the double-count this repo has an **on-record retraction** for (a
+  since-corrected "75% share" claim; see
+  [`context-shedding.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/context-shedding.md) and
+  [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)). Per fire it's "about a
+  third of a turn's worth of context, trimmed each time compaction fires."
+- **fak's authored slice is ~7% here, and that's the honest shape** — fleet-wide
+  it runs roughly 0.3–16% of total tokens saved on the Claude route. fak's *bigger*
+  job is keeping the provider's much larger discount **alive** as the session
+  grows; that larger discount is the part we're excluding on this page by design.
+
+### Dogfood witness: this very page
+
+This guide was written **inside a `fak guard -- claude` session** (gateway trace
+`guard`). At the time of writing, `fak_context_value` reported the session had
+stayed alive across **54 context events over 80 turns** while its resident window
+was held near the 48,000-token budget (`resident_tokens` 117,441, `peak` 153,273)
+— against a raw transcript weight of **7,302,545 resident-token-turns**
+(`total_resident_token_turns`, WITNESSED). Without the lever, that session would
+long since have hit the context wall and forced a lossy native recompact. The
+session extension isn't a projection here; it's the thing running this document.
+
+---
+
+## Lever 2 — reach Fable 5's separate allocation when Opus caps (Fable-specific)
+
+This is the one lever that is *specifically* about getting **more Fable 5**.
+
+Every seat starts on Opus 4.8 (`defaultLaunchModel = "claude-opus-4-8"`,
+`cmd/fak/accounts_launch.go:65`). When that Opus start is refused **before the
+session begins** by a usage/weekly/5-hour cap — matched by
+`launchModelUsageLimitSignals` (`accounts_launch.go:511-522`) — guard's launcher
+retries on the cheaper **Fable 5** alias (`defaultLaunchFallbackModel = "fable"`,
+`:72`), which draws on a **separate allocation bucket**. The Opus 4.8 → Fable 5
+chain is built at `:416-457` and fires via `shouldRetryLaunchWithFallback`
+(`:471-481`):
+
+```bash
+# The launcher path (fak accounts launch / the dispatch fleet): capped Opus
+# automatically fails the seat over to Fable 5's separate bucket.
+fak accounts launch --fallback-model fable          # Opus weekly cap → Fable (accounts.go:143)
+```
+
+There's also a cost-pressure gate that lets you *choose* Fable 5 to satisfy a
+high-pressure session cleanly, where an Opus route would be refused without an
+explicit justification:
+
+```bash
+fak guard --session-pressure-gate high --model claude-fable-5 -- claude
+# an explicit Fable route SATISFIES current high cost/context-pressure actions
+# (cmd/fak/guard_session_pressure.go:86-136; docs/cli-reference.md:550-554)
+```
+
+**Honest scope of this lever:** (i) the automatic fallover lives in the
+**launcher** (`fak accounts launch` / dispatch worker), adjacent to `fak guard`,
+not inside plain `fak guard -- claude`; (ii) it fires only on a **fast startup
+refusal**, not mid-session; (iii) it engages only when Opus is walled and
+`--model` is left implicit. It genuinely gets you onto Fable 5 when Opus is
+capped — it does not continuously "top up" Fable usage.
+
+---
+
+## The honest fences
+
+Keep these in view — they are why the framing above is worded the way it is:
+
+1. **The budget-stretch (Lever 1) is model-agnostic.** Context shedding and
+   KV reuse behave identically for Opus, Sonnet, Haiku, and Fable 5. "More Fable
+   5" from Lever 1 is really "more of whatever model you're on." Only Lever 2 is
+   Fable-specific.
+2. **"For free" = effort and your existing seat, not zero cost.** Fable 5 tokens
+   are billed on API billing. Under this repo's own apex cost model Fable 5 is the
+   **priciest** tier (`internal/modelroute/cost.go:62` prices it 2× frontier;
+   `internal/fleetaccounts/apextier.go` calls it the restricted, explicit-only
+   apex) — so "more Fable 5" can mean "more of the most expensive model." The
+   subscription seat is where "free" is true: no extra spend beyond what you
+   already pay.
+3. **The repo disagrees with itself on Fable's price.** The session-audit
+   subsystem prices Fable at $3/$15 (same as Sonnet — `internal/sessionaudit/
+   sessionaudit.go:21`), while `modelroute`/`apextier` price it at $6/$30. Any
+   concrete per-token savings math would be wrong under one of the two — this
+   page reports token-equivalents and the report's own attributed dollars, and
+   cites the field, rather than doing fresh Fable price math.
+4. **Native prompt cache is excluded here on purpose.** The single largest
+   "free savings" lever on the Claude route is Anthropic's own prompt-cache
+   discount (and the 1h-TTL `--managed-cache` upgrade of it). fak *preserves* it
+   byte-for-byte but does not author it, and it's passive on subscription seats —
+   so this page leaves it out and reports only fak's authored slice, as asked.
+5. **Shed per fire, never the sum.** Repeated because it's the easiest number to
+   get wrong: never present cumulative shed as distinct savings or as a
+   share-of-cache ratio.
+
+---
+
+## Prove it yourself
+
+```bash
+# 1. Your own fak-authored slice, native cache excluded (the numbers above):
+fak cachevalue report --json        # track1_witnessed_kernel + fleet_benefit fields
+
+# 2. Price your real Claude Code transcripts (~/.claude/projects/**/*.jsonl):
+fak cachevalue report --dev-sessions
+
+# 3. Watch the lever move on a live session (compaction on by default; 0 disables):
+fak guard --compact-history-budget 48000 -- claude
+#   → the per-turn `fak-turn …` line and the exit summary print what was shed.
+
+# 4. Inspect the live session's context budget (what THIS page witnessed):
+#   the fak_context_value MCP tool, exposed to a guarded child by default.
+```
+
+---
+
+## Related
+
+- [Claude Code / Anthropic API](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/claude.md) — the wiring, the subscription-by-default proof, and the four end-to-end checks.
+- [Context shedding](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/context-shedding.md) — the canonical mechanism and the full honesty framing (**primary source for Lever 1**).
+- [Long-session value: 100 / 200 / 300 turns](https://github.com/anthony-chaudhary/fak/blob/main/docs/long-session-value.md) — the modeled savings table, every number cited and labeled SIMULATED/OBSERVED.
+- [Cache-value roll-up](https://github.com/anthony-chaudhary/fak/blob/main/docs/cache-value-rollup.md) — the ongoing WITNESSED-vs-OBSERVED P&L (`fak cachevalue report`) and the #1066 marginal-over-warm-KV fence.
+- [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) — the number authority and the compaction double-count row.
 
 ---
 
@@ -18766,6 +19060,7 @@ status follows the witnessed [claims ledger](https://github.com/anthony-chaudhar
 | [Models](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/models.md) | Any model you front through the gateway, plus the architectures the in-kernel engine runs and proves bit-exact (Llama, Qwen2/Qwen3, Gemma, GLM-MoE, GPT-OSS, SmolLM2). |
 | [Features](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/features.md) | Every capability grouped by subsystem with its honest status — shipped, simulated, or stub — mirroring the claims ledger. |
 | [Clouds & hosted providers](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/clouds.md) | Anthropic, OpenAI, Gemini, and xAI as native provider wires, plus AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenRouter, Together, Groq, and Fireworks over the OpenAI-compatible wire. |
+| [DeepSeek V4](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/deepseek.md) | The three DeepSeek V4 routes (hosted OpenAI-compatible, Anthropic-compatible, self-hosted vLLM/SGLang/NIM), the thinking-mode caveats, the self-hosted GPU-node bring-up path, and the `deepseek-chat`/`deepseek-reasoner` alias-retirement warning. |
 | [APIs, wires & MCP](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/apis-and-protocols.md) | OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, Gemini, xAI; MCP over stdio and HTTP; the fak-native endpoints; and the honest interop stance on A2A, AG-UI, ACP, ANP. |
 | [Agent harnesses & frameworks](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/agent-harnesses.md) | Claude Code, Cursor, OpenAI Codex, OpenCode, Aider, Cline, Roo, Goose, Zed, and frameworks like LangChain, LlamaIndex, CrewAI, AutoGen, and the Vercel AI SDK. |
 | [Serving engines](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/engines.md) | The token engines fak fronts — Ollama, vLLM, SGLang, llm-d, llama.cpp, LM Studio — and the in-kernel reference engine. |
@@ -19211,6 +19506,7 @@ Each cloud below serves tokens behind an OpenAI Chat Completions endpoint. You f
 | Together AI | `--provider openai --base-url https://api.together.xyz/v1` | Yes | OpenAI-compatible chat / completions / embeddings. See the [matrix row](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/compatibility-matrix.md). |
 | Groq | `--provider openai --base-url https://api.groq.com/openai/v1` | Yes | OpenAI Chat Completions. See the [matrix row](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/compatibility-matrix.md). |
 | Fireworks AI | `--provider openai --base-url https://api.fireworks.ai/inference/v1` | Yes | OpenAI Chat Completions. See the [matrix row](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/compatibility-matrix.md). |
+| DeepSeek (V4) | `--provider openai --base-url https://api.deepseek.com` (or `--provider anthropic --base-url https://api.deepseek.com/anthropic`) | Yes | Reasoning model: `thinking` is default-on and `reasoning_effort` takes only `high`/`max`. See the dedicated [DeepSeek V4 page](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/deepseek.md) for all three routes and the alias-retirement warning. |
 
 Bedrock and Vertex are marked **Partial** because the repoint is templated and the auth is not a plain static key, exactly as the matrix caveats state. The other five expose a custom base URL outright.
 
@@ -20261,6 +20557,9 @@ fak superloop explain <name>        the five-property differentiation, super vs 
 fak superloop walk <name> [--json]  walk the members' status, fold the worst-first plan
 fak superloop drive <name> [--lane] walk, ENTER the one worst-first member through the
                                     same admission gate any spawn passes, then re-fold
+fak superloop drive <name> --batch N  ENTER up to N worst-first members whose regions
+                                    are mutually disjoint (and disjoint from live
+                                    leases), through the SAME gate; N<=0 = every member
 ```
 
 ## The drive rung
@@ -20277,6 +20576,22 @@ band-ladder discipline: B6 reaches the world only through B4's gates): a refused
 recorded on the loop ledger with the standing witness vocabulary
 (`admitted`/`refused`), and the drive **re-walks and folds** — the aggregate re-fold is
 the exit check, so a driven-but-unwitnessed member can never satisfy the intent.
+
+**Batch drive (`--batch N`).** `Drive` returns one member; `Walk` already produces a
+*fully-ranked* worklist, so a single invocation leaves the rest of the ranked work on
+the table. `--batch N` (`internal/superloop.DriveBatch`) offers the **top-N worst-first
+members** and admits each through the **same gate**, under a **member-scoped lease
+identity** so N holds coexist. Because each admitted lease stays held while the next is
+gated, the gate itself enforces the batch's **mutual disjointness** — a later member
+whose region overlaps one already admitted this batch refuses `COLLISION_RISK`, exactly
+as it refuses overlap with a live peer lease — so **throughput scales with the available
+non-colliding work** instead of one member per invocation. With no `--lane`/`--tree`,
+each member is scoped to its own region (distinct members run concurrently; a peer
+entering the *same* member is refused); an explicit operator region fences the whole
+batch to one tree (members serialize on it, by the operator's choice). Refused members
+**surface their token and are skipped** (no private spawn path); the drive **re-folds
+once** over the whole intent as the exit check. `--batch 1` (the default) is the
+historical single-member drive, unchanged.
 
 Honest fence: the drive keeps the **interior-node** property — it mutates nothing at
 its own altitude. The single action it takes is **surfacing the member's own front
@@ -20423,13 +20738,162 @@ syscall sits inside · [README](https://github.com/anthony-chaudhary/fak/blob/ma
 
 ---
 
+# Two runtimes, one binary: gateway vs agent runtime vs client
+
+> Source: `docs/explainers/runtime-vs-client.md`
+
+---
+title: "Two Runtimes, One Binary: Gateway vs Agent Runtime vs Client"
+description: "\"Put fak in front of your agent\" hides three roles the one binary plays: the gateway runtime that governs model traffic (fak serve), the agent application runtime that hosts and runs the loop (fak serve --native), and the client that a harness becomes when you wrap it (fak guard). serve and guard are not alternatives or layers — they are a runtime and a client. This is the naming that unblocks the first decision: what do I even run?"
+slug: runtime-vs-client
+keywords:
+  - agent runtime
+  - AI gateway
+  - inference gateway
+  - agent application runtime
+  - gateway runtime
+  - fak serve
+  - fak guard
+  - runtime vs client
+  - which do I run
+  - agent SDK
+  - managed agent runtime
+  - two runtimes one binary
+date: 2026-07-11
+---
+
+# Two runtimes, one binary — gateway vs agent runtime vs client
+
+> **TL;DR:** the one `fak` binary plays three roles that "put fak in front of your
+> agent" quietly conflates. **`fak serve`** is the **gateway runtime** — a long-lived
+> server that governs *model traffic* (routing, cost caps, policy, quarantine, audit).
+> **`fak serve --native`** is the **agent application runtime** — the same binary, but
+> now *hosting and running the agent loop itself* (sessions, tools, subagents, streaming,
+> resume), kernel-adjudicated. **`fak guard`** turns a harness you already run (Claude
+> Code, Codex) into a governed **client** of a runtime. `serve` and `guard` are not two
+> versions of the same thing and not two layers of a stack — they are a **runtime** and a
+> **client**.
+
+**Concept served:** the runtime/client naming spine (epic #3256, workstream A —
+disambiguation). This is the page the rest of the agent-runtime story hangs on.
+
+## Why this page exists
+
+The onboarding line — *"point your agent at `fak serve`"* — works right up until someone
+asks the obvious follow-up: **is `fak serve` an alternative to `fak guard`, a layer under
+it, or its server half?** Nothing on the front page answers that, so the first real
+decision — *what do I even run?* — stalls. Worse, "runtime" is doing double duty: the
+thing that governs your **model calls** and the thing that runs your **agent loop** are
+different servers, and the word alone doesn't tell them apart. This page names the three
+roles so the choice becomes mechanical.
+
+## The three roles
+
+| Role | What it is | fak surface | Maturity |
+|---|---|---|---|
+| **Gateway (inference) runtime** | a long-lived server governing *model traffic*: model routing, cost/context caps, the default-deny capability floor, result quarantine, the audit journal | **`fak serve`** | shipped — the primary path today |
+| **Agent application runtime** | a long-lived server that *hosts and executes the agent loop*: sessions, tool dispatch, subagents, streaming, resume — every step kernel-adjudicated | **`fak serve --native`** (drives the owned `agent.RunArm` loop) | shipping — the emerging first-class surface (workstream B) |
+| **Client** | the harness or app that *calls* a runtime: Claude Code, Codex, or your own backend over an SDK | **`fak guard`** turns a harness into a governed client; or repoint one base URL yourself | shipped — witnessed live in front of Claude Code, opencode, Codex |
+
+The load-bearing distinction is the first-vs-third row: a **gateway runtime** proxies the
+model calls your existing harness makes and adjudicates the tool calls it proposes — your
+harness still owns the loop. An **agent application runtime** owns the loop *itself*: it
+is the server that decides the next step, dispatches the tool, spawns the subagent, and
+streams the result, with the kernel on the call path for each one. `--native` is the flag
+that flips `fak serve` from the first to the second — from *proxying someone else's turn*
+to *running the turn itself*.
+
+## One binary, drawn out
+
+```text
+  CLIENTS                        ONE fak BINARY                      UPSTREAM
+  (call a runtime)               (plays two runtime roles)           (tokens)
+
+  ┌──────────────────┐
+  │ Claude Code      │           ┌──────────────────────────┐
+  │ Codex / Cursor   │──repoint──▶│  fak serve               │
+  │ your SDK backend │  base URL │  = GATEWAY runtime        │──▶ Anthropic / OpenAI
+  └──────────────────┘           │  routes + governs model  │    Gemini / xAI /
+        ▲                        │  traffic; adjudicates     │    Ollama / vLLM /
+        │ fak guard              │  each proposed tool call  │    SGLang / llama.cpp
+        │ wraps a harness        └──────────────────────────┘
+        │ into a governed CLIENT              │
+        │                                     │ add --native
+        │                                     ▼
+        │                        ┌──────────────────────────┐
+        └────────────────────────│  fak serve --native      │
+                                 │  = AGENT APPLICATION      │
+                                 │  runtime: owns the loop   │
+                                 │  (agent.RunArm), sessions,│
+                                 │  tools, subagents, resume │
+                                 └──────────────────────────┘
+```
+
+*The same static binary is the gateway runtime, the agent runtime (with `--native`), and —
+via `fak guard` — the wrapper that makes your existing harness a governed client of it.
+Nothing here is a second process or a separate install.*
+
+## Which do I run?
+
+| Your situation | Run | Which role |
+|---|---|---|
+| I already run Claude Code / Codex and want it cheaper + governed, no rewrite | `fak guard -- claude` | your harness becomes a **client**; guard starts a **gateway runtime** in-process |
+| I have my own backend/SDK and want to govern its model calls | `fak serve` + repoint the base URL | **gateway runtime**, your code is the **client** |
+| I want an always-on shared gateway for a fleet | `fak node` installs `fak serve` as a service | **gateway runtime** |
+| I want fak to *host and run the agent loop*, not just proxy my harness | `fak serve --native` | **agent application runtime** |
+| I just want to see the capability floor decide, no model | `fak preflight …` | neither — the offline adjudicator |
+
+If you are not sure, you want the **client + gateway** path (`fak guard`): it is the
+shipped default and changes nothing about how your agent is written. Reach for the
+**agent application runtime** (`--native`) when you want fak to own the loop itself.
+
+## The analogy you already have
+
+Readers coming from the LLM-infra world already hold this split under other names:
+
+- An **AI gateway** (Portkey, LiteLLM, an inference gateway) governs *model traffic* — that
+  is the **gateway runtime**, `fak serve`.
+- A **managed agent runtime / the Agent SDK** hosts and executes the *loop* — that is the
+  **agent application runtime**, `fak serve --native`.
+- The **app that drives them** is the **client** — for fak, a harness wrapped by
+  `fak guard`, or your own SDK code.
+
+fak's one contribution here is putting both runtimes behind **one static Go binary** with
+the same kernel on the call path, so the client-vs-runtime and gateway-vs-agent-runtime
+choices are flags, not separate stacks. → [One binary is the whole
+surface](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/one-binary-one-surface.md).
+
+## Honest scope
+
+- **The gateway runtime is the mature path.** `fak serve` / `fak guard` is what is
+  witnessed live today. Most adopters never leave the client-plus-gateway model, and that
+  is the intended default.
+- **The agent application runtime is emerging.** `fak serve --native` is real — it drives
+  the owned `agent.RunArm` loop on the live serve path — but it is the newer surface being
+  packaged into a first-class runtime under workstream B. Treat it as shipping, not
+  settled, and prefer the gateway path unless you specifically want fak to own the loop.
+- **"Client" is a role, not a product.** The same harness is a client of whichever runtime
+  it points at; `fak guard` is just the one-command way to make it a *governed* one.
+
+## Where to go deeper
+
+- Point your existing agent at the gateway runtime: [Run your agent through
+  fak](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/README.md) and the [Claude Code guide](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/claude.md).
+- Why one binary carries both runtimes: [One binary is the whole
+  surface](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/one-binary-one-surface.md).
+- What the kernel does on every call, in either runtime: [The tool call is a
+  syscall](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/tool-call-is-a-syscall.md).
+- The vocabulary, one line each: [the fak/DOS glossary](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/glossary.md).
+
+---
+
 # The fak/DOS glossary
 
 > Source: `docs/explainers/glossary.md`
 
 ---
-title: "The fak/DOS Glossary: 13 Terms in One Line Each"
-description: "Plain one-line definitions of the vocabulary a newcomer trips on — addressable KV cache, bit-exact eviction, prefix-cache discount, verdict, capability floor, quarantine, syscall boundary, fail-closed, witness, lease, refusal reason, recall re-verification, change data capture — each linked to its full explainer."
+title: "The fak/DOS Glossary: 17 Terms in One Line Each"
+description: "Plain one-line definitions of the vocabulary a newcomer trips on — addressable KV cache, bit-exact eviction, prefix-cache discount, verdict, capability floor, quarantine, syscall boundary, fail-closed, witness, lease, refusal reason, recall re-verification, change data capture, gateway runtime, agent application runtime, client, embed — each linked to its full explainer."
 slug: glossary
 keywords:
   - fak glossary
@@ -20447,11 +20911,18 @@ keywords:
 date: 2026-07-03
 ---
 
-# The fak/DOS glossary — 13 terms, one line each
+# The fak/DOS glossary — 17 terms, one line each
 
 The vocabulary a newcomer trips on, defined plainly. Each term links to the
 explainer that earns the definition. People can only repeat what they can
 name — this page is the naming.
+
+## The runtimes
+
+- **[Gateway (inference) runtime](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md)** — `fak serve`: a long-lived server that governs *model traffic* (routing, cost caps, the capability floor, quarantine, audit); your harness still owns the loop and calls it.
+- **[Agent application runtime](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md)** — `fak serve --native`: the same binary hosting and running *the agent loop itself* (sessions, tools, subagents, streaming, resume), every step kernel-adjudicated — not proxying someone else's turn but running the turn.
+- **[Client](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md)** — the harness or app that *calls* a runtime (Claude Code, Codex, your SDK backend); `fak guard` turns a harness you already run into a governed one.
+- **[Embed](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/one-binary-one-surface.md)** — running the kernel *in-process* rather than as a separate service: `fak guard` starts the gateway runtime inside the child's launch, and the one static binary is the whole surface, so there is no sidecar to deploy.
 
 ## The cache
 
@@ -21442,6 +21913,8 @@ keywords:
   - agent token cost
   - context re-send
   - cache discount
+  - agent cost reduction measured
+  - prompt cache savings
 date: 2026-07-03
 ---
 
@@ -21568,6 +22041,36 @@ the naive multiplier alone. The naive arm's ~19 hours is modeled from the prefil
 curve (validated within ~0.4%), not run live; the artifact and its fences are in
 [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md).
 
+## What it actually saved: the production ledger
+
+The worked example above is illustrative arithmetic, and the fleet result beneath it is a
+lab benchmark. Here is the third kind of evidence — what the mechanism did in
+**production**, folded from the real per-session cache-value ledger
+(`docs/nightrun/cache-savings.jsonl`) and printed by `fak cachevalue report`.
+
+Over **2026-07-01 to 2026-07-09** (8.33 days, **2,004** finished sessions), the ledger
+records **$8,558 of API cost avoided** against a no-cache counterfactual of $10,926 — a
+**78.3% net reduction** — while shedding **97.1M** context tokens. That number is *not*
+one blended cache claim. It is two labelled tracks kept side by side, exactly as the
+[honest boundary](#the-honest-boundary-fak-relays-the-providers-number) above requires:
+
+| Track | Owner | Evidence | Cost avoided (8.33d) | What it is |
+|---|---|---|---|---|
+| Provider prompt cache | provider (Anthropic / OpenAI) | **OBSERVED** — provider-relayed | **$7,706** | the provider's own `cache_read` discount; `fak` keeps the prefix byte-identical so it stays warm, but the discount is the provider's to give |
+| fak compaction shed | `fak` | **WITNESSED** — fak-authored | **$852** | the 97.1M context tokens `fak` dropped while holding the prefix intact, priced at the base input rate |
+
+`fak`'s own authored slice is the *smaller* one: **9.4%** of the token-equivalent saved is
+fak-authored, and the rest is provider prompt-cache economics that `fak` *preserves*
+rather than *creates*. That split is the honesty, not a footnote to it — `fak` reports the
+provider's number as the provider's, and claims only the tokens it actually shed.
+
+Two fences travel with the figure. It is a **dated snapshot** of a growing ledger, so run
+`fak cachevalue report --since 2026-07-01` for the current fold rather than trusting a
+number frozen in a doc. And **23 rows are dollar-blind** — a provider with no base price
+configured — so their tokens are counted in the token-equivalent total but contribute
+**$0** to the dollar figure. The dollar number is therefore a floor: understated by the
+unpriced rows, never inflated by a rate `fak` does not have.
+
 ## The one line to keep
 
 A long session is expensive because it re-sends everything, and the prompt cache is the
@@ -21583,7 +22086,7 @@ rather than claiming a saving it cannot force.
 - [The frozen-trajectory cache cliff](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/frozen-trajectory-cache-cliff.md) — why a long trajectory's cache-hit rate rises by construction, and why that is not the same as getting cheaper.
 - [O(1) context-window economics](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/o1-context-window-economics.md) — the accounting model underneath the per-turn cost.
 
-*Last updated: 2026-07-03*
+*Last updated: 2026-07-09*
 
 ---
 
@@ -23964,6 +24467,7 @@ in `internal/modelroute` guards every preset against rot.
 | [`guard-writes.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/routing-presets/guard-writes.json) | never ship a write unchecked | every `write_*` / `delete_*` tool call → a two-model `vote` ensemble; else a single default |
 | [`best-of-quality.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/routing-presets/best-of-quality.json) | best answer on hard work | hard aspects → a drafters + judge `best_of` ensemble; medium → medium; cheap → small |
 | [`scout-then-route.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/routing-presets/scout-then-route.json) | classify before you route | a cheap `scout` labels complexity first, then high → large / low → small |
+| [`dev-models.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/routing-presets/dev-models.json) | auto-decide the dev model | a `fable` scout classifies, then the tier ladder routes: destructive / `risk:high` / `min_complexity:high` → `opus-ultracode`; read/search/low/short-interactive → `fable`; medium and the default → `opus-4.8`. The security-release floor is ordered first, so a destructive call never drops to the cheap tier |
 
 ```bash
 go run ./cmd/fak route --check examples/routing-presets/cost-saver.json
@@ -32415,6 +32919,23 @@ go run ./cmd/fak operator brief --collect \
   --epics-from epics-with-counts.json
 ```
 
+## Compact by default, `--full` to expand
+
+The default human render is deliberately small: a header, a one-line load +
+attention summary, and one terse line per `human`/`agent`/`watch` item (just the
+source and title — no per-item detail or action, and none of the interpretation
+blocks). An operator scanning many briefs a day should not read a wall of text
+per item. When you want the whole explanation — per-item detail and action plus
+the `human_use`, `coherence`, `strengths`, `learning`, and generation-lane
+blocks — pass `--full`. Agents that consume the brief should keep using `--json`,
+which always carries the complete model.
+
+```bash
+go run ./cmd/fak operator brief --collect            # compact operator view
+go run ./cmd/fak operator brief --collect --full     # expanded explanation
+go run ./cmd/fak operator brief --collect --json     # full model for agents
+```
+
 The brief has four buckets:
 
 | Bucket | Meaning |
@@ -32498,18 +33019,18 @@ description: "fak's deterministic operator-heaviness scorecard: how heavy the re
 
 _Auto-generated by `fak operator heaviness --markdown`. Do not hand-edit; re-run the tool._
 
-**Grade C** - score 74.6 - heaviness_debt **0** - pressure 86 - 136 verbs - 49 front-door flags - 20 refusal reasons
+**Grade D** - value 0.655 - legacy score 65.5 - heaviness_debt **0** - pressure 207 - 114 verbs (20 frontdoor / 94 dev) - 71 front-door flags - 48 refusal reasons
 
-The law: keep the OPERATOR surface flat as the repo grows. heaviness_pressure sums how far over the comfortable lines the surface sits (verbs, front-door flags, refusal reasons, meta-verb share); a clean pass holds it flat, and a real consolidation drives it down. The only HARD debt is a steering surface the doc map hides or a missing in-product appeal channel.
+The law: keep the OPERATOR surface flat as the repo grows. heaviness_pressure sums how far over the comfortable lines the surface sits (verbs, front-door flags, refusal reasons, meta-verb share); a clean pass holds it flat, and a real consolidation drives it down. The only HARD debt is a steering surface the doc map hides or a missing in-product appeal channel. HONESTY FENCE (#2235): the verb surface splits into frontdoor_verbs (the product tier an operator FACES) and dev_verbs (the `fak dev` tooling tier), classified WITNESSED from internal/devindex and partitioning the flat count by construction (frontdoor_verbs + dev_verbs == verbs). A dev verb stays MEASURED in dev_verbs even after its bare spelling is gated behind `fak dev` -- hidden from the front door, not from the meter -- so the heaviness drop this buys must come from the frontdoor meter ONLY: a future "move verbs to dev to lower heaviness" commit must not move the headline unless the verb is actually deleted or product-simplified.
 
-| KPI | score | detail |
-|---|---|---|
-| docmap_covers_steering | 100 | 2/2 steering surface(s) discoverable from the doc map |
-| appeal_channel_wired | 100 | the in-product appeal channel (`fak complain`) is wired into the dispatch table |
-| cli_verb_count | 58 | 136 top-level subcommands (soft 90, hard ceiling 200) |
-| meta_verb_share | 82 | 15/136 top-level verbs are meta-scorecards/RSI (11%, soft 8%) |
-| front_door_flag_burden | 52 | 49 flags on the front-door verb `fak guard` (soft 20, hard ceiling 80) |
-| refusal_vocab_size | 56 | 20 structured refusal reasons in the vocabulary (soft 12) |
+| KPI | value | legacy score | detail |
+|---|---:|---:|---|
+| docmap_covers_steering | 1.000 | 100 | 2/2 steering surface(s) discoverable from a linked doc-map entry |
+| appeal_channel_wired | 1.000 | 100 | the in-product appeal channel (`fak complain`) is wired into the dispatch table |
+| cli_verb_count | 0.782 | 78 | 114 top-level subcommands (soft 90, hard ceiling 200) |
+| meta_verb_share | 1.000 | 100 | 1/114 top-level verbs are meta-scorecards/RSI (1%, soft 8%) |
+| front_door_flag_burden | 0.150 | 15 | 71 flags on the front-door verb `fak guard` (soft 20, hard ceiling 80) |
+| refusal_vocab_size | 0.000 | 0 | 48 structured refusal reasons in the vocabulary (soft 12) |
 
 ---
 
@@ -34056,14 +34577,25 @@ front page.
 
 ### Latest working notes
 
+- [Study-repo: querying across the local tree + sibling repos → fak (2026-07-09)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-STUDY-CROSS-REPO-QUERY-2026-07-09.md) — a `study-repo` pass over six code-query engines (GQL `3a76cfe` MIT, codesearch `19a36f3` Apache-2.0, zoekt `33f1f18` Apache-2.0, ast-grep `fc26e86` MIT, codebase-memory-mcp `20b1153` MIT, mergestat-lite `5858dca` MIT) asking one question: what lets fak query **across the local tree AND sibling local repos**, not just rank its own cards over a single root? Decisive witness: `internal/devindex` is architecturally single-root (`FindRoot` → one `dos.toml`), yet fak already ships the hard primitives (BM25 `ranker.go`, pure-Go inverted index `sessionsearch`, vector index `simhash.Index.TopK`, structural `clonescan`) — so the gap is **scope + modality**, not "an index." 6 parallel readers → 5 borrows filed, all `inspire` (Rust/C→Go clean-room): epic **#3434** + leaves **#3435** (multi-root fan-out + provenance · GQL), **#3436** (RRF fusion over the two arms fak already has · codesearch — highest ROI), **#3437** (trigram/regex index over tree+siblings · zoekt), **#3438** (AST shape-query with metavars over `go/ast` · ast-grep), **#3439** (code knowledge-graph + recursive-BFS · codebase-memory-mcp). **One rejection recorded**: SQL-over-git vtabs (mergestat) drag cgo + an 8 MB `sqlite3.c` amalgamation into a pure-Go tree — the exact C dep `sessionsearch` was built to avoid; its transferable idea is already L1. Cross-links #1494/#3161/#3162.
+- [DeepSeek V4 CSA/HCA sparse-attention — seam map to fak, and the prior-art baseline](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/DEEPSEEK-V4-ATTENTION-SEAM-MAP-2026-07-08.md) -- auto-indexed dated note.
+- [DeepSeek V4 FP4 expert weights + FP4 indexer path — quantization support plan](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/DEEPSEEK-V4-FP4-QUANT-PLAN-2026-07-08.md) -- auto-indexed dated note.
+- [DeepSeek V4 heterogeneous KV + on-disk prefix reuse — prototype plan](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/DEEPSEEK-V4-KV-LAYOUT-PLAN-2026-07-08.md) -- auto-indexed dated note.
+- [DeepSeek V4 Pro MoE dispatch + fused MegaMoE prior-art baseline](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/DEEPSEEK-V4-MOE-DISPATCH-BASELINE-2026-07-08.md) -- auto-indexed dated note.
+- [Concept: `scout-loop` — the research→backlog super-loop (2026-07-08)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-SCOUT-LOOP-2026-07-08.md) — the meta-skill that closes the seam between the outward crawler (`idea-scout`/`FleetIdeaScout`, which *feeds* a needs-triage queue) and the study pipeline (`/study-repo` → `/field-borrow`, which was only ever run by hand). One lead per pass: **CRAWL** the freshest signal → **SELECT** the highest-value repo-shaped lead → **STUDY** it via `/study-repo` → **WITNESS + FILE** each borrow via `/field-borrow` (PRESENT dropped, PARTIAL/ABSENT filed small) → **REGISTER** a dated note → **CADENCE** via `tools/register_scout_loop.ps1` (`FleetScoutLoop`, plan-by-default, `-Launch` the opt-in, no-DoS cap intact). Re-implements none of the tools — it orders them, and holds the honesty boundary (a crawl is not a borrow, a study is not a ship). Epic **#3357** + leaves **#3358–#3361**.
+- [Study-repo: NVIDIA dynamo → fak (2026-07-08)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-STUDY-DYNAMO-2026-07-08.md) — full clone of [ai-dynamo/dynamo](https://github.com/ai-dynamo/dynamo) @`be36b52396` (Apache-2.0), read as an orchestration reference (its M2/M3/M9/M10 map onto fak's), **not** the GPU/CUDA/NIXL code. 6 parallel readers → **29 candidates** grounded at verified `path:line@sha`, witnessed against fak (2 PRESENT, 27 PARTIAL, 0 ABSENT); all `inspire` (Rust/Py→Go). Decisive finding: fak already tracks the biggest clusters, so the routing cost-function + overlap-decay + tie-break, the DRR fair-share queue, and the 5-part session-affinity coordinator became **code-grounded enrichment comments** on **#2238 / #1913 / #2037** rather than re-filed monoliths. Filed the genuinely-absent track — epic **#3352** *fault-tolerant in-flight session migration* (M1) + leaves **#3353–#3356** (warm-continue replay-as-context, migratable-error classification, replay-safety precondition guard, silence-is-failure hung-worker detection). Broad follow-on then filed the rest under epic **#3365** (M9) → leaves **#3368–#3377**: autoscaler control-laws (two-timescale floor, consolidation scale-down veto, settle-before-redecide, dual-cadence pull), worker liveness/registration (lease-cascade-delete, soft-evict+reconciler, coalesced discovery watch, register-verify-rollback), and load-signal hygiene (change-gated publish, hysteretic overload latch).
 - [Study-repo: MinIO MemKV → fak (2026-07-08)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-STUDY-MINIO-MEMKV-2026-07-08.md) — the target (`min.io/product/memkv`) is a **closed-source product page, not a repo**, so the real study-repo pass ran against the open-source engines in its band — **Mooncake** @`c989668` + **NIXL** @`d9de2af` — with a full ticket-audit of the ~21 KV/serving/cache research docs against live GitHub. MemKV is a governance-free ride-candidate in fak's KV-transport/L3 band (validates the thesis, not a reimplement). 12 tickets filed **#3309–#3320** (deduped from 64 proposals; parents re-homed off closed #37/#79/#98/#134), incl. the Mooncake/NIXL `StageTransport` borrow (#3310), block-granularity (#3313), cost/token OBSERVED datapoint (#3314), brand positioning (#3315), and two untracked docs turned into epics — regenerable-KV (#3319) and agentic-caching planes (#3320).
 - [Field-borrow study: headroom → fak (2026-07-08)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-STUDY-HEADROOM-2026-07-08.md) — studied [headroomlabs-ai/headroom](https://github.com/headroomlabs-ai/headroom) @`38074888` (Apache-2.0) for borrowable techniques; 4 candidates → 2 filed, 2 dropped. Filed **#3307** (lower reasoning effort on mechanical tool-result continuations — the output-token sibling of `compactcohere`'s cache sensor) and **#3308** (cache-safe verbosity steering riding the `syspromptmmu` after-breakpoint overlay). Dropped C2 (fak's `compactcohere.Classify` is already a superset of headroom's cache-miss attribution) and C3 (fak's ≤1-breakpoint placement can't cause the >4 400). The witness step is the point: two plausible borrows dissolved against what fak already ships. **Second pass** (input/cache-side axis, `transforms/*` + `ccr/*`): 6 candidates → 5 filed **#3339–#3343**, 1 deferred (AST/tree-sitter code compression) — live read-lifecycle stale/superseded (#3339, an idea fak already measured at 13.37% stale on its own traffic but left in an offline reducer), cross-turn verbatim-span dedup (#3340), volatile-token classifier + operator warning (#3341), shadow-measured activity quiesce (#3342), budget-gated TOON row-drop (#3343).
+- [Study-repo: MartinLoop → fak (2026-07-08)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-STUDY-MARTINLOOP-2026-07-08.md) — studied [Keesan12/martin-loop](https://github.com/Keesan12/martin-loop) @`b06882f` (Apache-2.0), a governed-agent-run sibling of fak/DOS. Read the `packages/core` trust modules (leash, test-integrity, grounding, red-blue probes, context-integrity, hash-chained receipts) — **most of the trust core witnessed PRESENT and fak ahead** (chain-bound receipts `internal/agent/receipt.go`; WITNESSED/OBSERVED cost provenance; `EVIDENCE_BOUNDARY` ≈ dos `ABSTAIN`; live recall injection-screen `ctxmmu.ScreenBytes`). 3 genuine PARTIAL/ABSENT gaps survived an **adversarial pre-file verify** (which flipped two false-absents to dropped/rescoped) and filed as deny-by-structure primitives under epic **#2871**: patch-honesty adjudicator rungs (**#3362**), pre-apply diff-grounding scan (**#3363**), witnessed test-integrity keep-bit rung (**#3364**). All `inspire` (TS→Go clean-room).
+- [Study-repo: LMCache → fak (2026-07-08)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-STUDY-LMCACHE-2026-07-08.md) — full clone (whole repo + history) of [lmcache/lmcache](https://github.com/lmcache/lmcache) @`aaf7c0d3` (Apache-2.0), the KV-cache management layer for LLM inference, read one level up as fak's prompt/tool-page/session cache-management reference (its M2/M3/M1 + `agentic-serving` map on), **not** the CUDA/NIXL/tensor code. 9 parallel readers → ~56 candidates → **37 deduped**, each grounded at `path:line@sha` and witnessed against fak (`fak_feature_query`+`fak index`+grep): **9 PRESENT, 28 PARTIAL, 0 ABSENT** — 0-absent is the honest headline (fak's `cachevalue`/`vcache`/`radixkv`/`cachemeta`/`ctxmmu` surface is already deep). Filed epic **#3366** (mine LMCache) + **23 leaves #3378–#3399** across keying/tiering (prefix-hash-chain, cross-tier prefix assembly, non-blocking store, backpressure partial-store, multi-root sharder), eviction/pin (two-axis evictability, pin-timeout reaper, atomic batch-reserve, watermark ratio-evict), trust (audit-wrapper, CRC blob envelope), observability (cacheability-vs-realized, hit-rate histogram, token counter-ratio, shadow-map lifecycle, evict→reuse-gap, pipeline self-meter, bloom reuse-potential, offline projection, savings-vs-budget curve), and health/config (fleet degraded-mode, canary recovery, three-verdict config gate). 5 borrows became **enrichment comments** on #3143/#3144/#1469/#2853/#2211 (anti-re-file); 9 PRESENT dropped. All `inspire` (Py/Rust/C++→Go). Feeds the **#2236** superset ranking; sibling of #3236 (ZML), #2908/#2834 (Hermes).
+- [Windows handles, consoles, and spawn storms: which ceilings are real (2026-07-08)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RESEARCH-windows-handles-terminal-limits-2026-07-08.md) — deep research + a live probe of the agent host, answering "why is the Windows handles/terminal thing such an issue, and why isn't it tunable?" Three unrelated failures were conflated under one name. **Kernel handles are not the ceiling**: 16,711,680 per *process*, hard-coded with no registry knob, against 243,735 system-wide on this box — the `find` incident was a leak whose real risk is paged-pool exhaustion (`ERROR_NO_SYSTEM_RESOURCES` 1450), not a count cap. The **pwsh `0xE9` FailFast (#2170) is a ConPTY-chain fragility bug, not a limit** — there is no cap on consoles/pseudoconsoles and no tunable; pwsh treats `GetConsoleScreenBufferInfo` as infallible and calls `Environment.FailFast()` when the console peer dies. The **low-usage stall (#3153) is `CreateProcess` cost** (>20× Linux) plus soft-fault contention on the PFN/working-set locks, invisible to CPU/RAM/disk meters by construction. The knobs everyone reaches for — `GDIProcessHandleQuota`, `USERProcessHandleQuota`, `SharedSection` — *are* tunable and *are* red herrings (headless processes never touching user32 don't consume them); `MaxUserPort` is deprecated. Witnessed: **`WindowsTerminal` is the top handle *and* thread holder on this host (17,582 / 902)** — the same process that froze dispatch on 2026-07-01 — so the "terminal handles thing" is app-level accretion in the emulator, not an OS refusal. Names two gaps in our own tooling (`host_stall_mitigations.ps1` uses only `-ExclusionProcess`, which per MS Learn does *not* stop Defender scanning the executable image on each spawn; `internal/stallscan` carries no handle axis) and names **Job Objects** (`ActiveProcessLimit` + `KILL_ON_JOB_CLOSE`) as the unused kernel control surface for orphans and spawn admission. Ranked tune-now vs redesign vs do-not-touch.
 - [The savers stay on for our own automated sessions, not just a human at the keyboard](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/LAUNCHER-SAVER-PARITY-2026-07-08.md) -- auto-indexed dated note.
 - [Durable fix: guard out-of-tree-write arg-rules → positive containment](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/2026-07-07-guard-oot-write-positive-containment.md) -- auto-indexed dated note.
 - [Audit: the SECRET_EXFIL quarantine blinds a legitimate dev — five whys + warn-first fix](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/AUDIT-secret-quarantine-blinds-dev-five-whys-2026-07-07.md) -- auto-indexed dated note.
 - [Model-progress caching taxonomy — what state each family produces, and what of it is cacheable](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-MODEL-PROGRESS-CACHING-TAXONOMY-2026-07-07.md) -- auto-indexed dated note.
 - [compress default-on witness (2026-07-06)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/COMPRESS-DEFAULT-ON-WITNESS-2026-07-06.md) -- auto-indexed dated note.
 - [GLM-5.2 per-box baseline + next steps (GPU server 2 vs GPU server 3)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/GLM52-DGX-PER-BOX-BASELINE-AND-NEXT-STEPS-2026-07-06.md) -- auto-indexed dated note.
+- [GLM-5.2 night-fleet coordination marker (session 11ce8d1c)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/COORD-GLM52-NIGHT-FLEET-11ce8d1c-2026-07-09.md) -- which GPU-free perf levers this session's sub-agent fleet claimed for the 2026-07-09 overnight run, and the decision to stay off the peer-held resident GPU box.
 - [GLM-5.2 pure-fak performance: the true frontier, and what landed](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/GLM52-PURE-FAK-PERF-FRONTIER-AND-LANDED-2026-07-08.md) -- auto-indexed dated note.
 - [Related-repos & SOTA landscape (2026-07-07)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RESEARCH-related-repos-landscape-2026-07-07.md) -- auto-indexed dated note.
 - [The claim-space IS the disaggregation primitive — one partition algebra, two planes (2026-07-08)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-CLAIM-SPACE-IS-THE-DISAGGREGATION-PRIMITIVE-2026-07-08.md) — the through-line that fak's control-plane claim-space (`dos arbitrate` / `laneadmit` / `regionadmit` / `dispatchorder.Plan`, claiming file trees by tree-disjointness) and its compute-plane disaggregation (`NativePDCluster` P/D, `ExpertParallelPlan`, `TPPlan`, `kvmmu` tiers, `DistComm`, claiming compute regions by data-disjointness) are **one partition algebra at two granularities**: `dispatchorder.Candidate{Lane,Tree,Mode}` read fresh is a resource request, and disaggregation is that primitive at a finer grain — scale-free from phone/IoT (one-at-a-time) to a hyperscaler mesh (100s–1000s of claimable units). The gap is that the two planes don't share an admission kernel; the fusion advantage (`polymodel` co-residency split at the tool-call-as-syscall seam) is the split point. Tagged `[SHIPPED]`/`[SEAM-ONLY]`/`[GAP]`, asserts no benchmark number. Tracked as **epic #3259** (children #3268–#3271).
@@ -34094,6 +34626,7 @@ front page.
 - [Built-in compaction audit](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/BUILT-IN-COMPACTION-AUDIT-2026-07-06.md) -- auto-indexed dated note.
 - [NVIDIA NIM coding seats - 2026-07-06](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/NVIDIA-NIM-CODING-SEATS-2026-07-06.md) -- auto-indexed dated note.
 - [SOTA survey: agent session / tool-call analytics & observability (2026-07-06)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RESEARCH-SESSION-TOOL-ANALYTICS-SOTA-2026-07-06.md) -- auto-indexed dated note.
+- [Borrow study: trajectory query / replay / signals — agent-lens + Laminar (2026-07-09)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/BORROW-TRAJECTORY-QUERY-AGENTLENS-LAMINAR-2026-07-09.md) — deep-read `dreadnode/agent-lens`@9eab2b0 (ATIF interchange, shadow-git step→diff attribution, resample/replay, auto-judge) and `lmnr-ai/lmnr`@39a1e595 (content-addressed dedup, hardened SQL-over-traces sandbox, plain-English Signals) against fak's witnessed capture plane. Witnessed the read-side gaps and filed four net-new borrows: ATIF portable export #3440, shadow-git per-step write attribution #3441, plain-English behavioral signals #3442, SQL/MCP query-your-own-trajectory + scope-by-view-rewrite validator #3443; routed Laminar's blake3 canonical-JSON dedup to the existing #3340 rather than re-filing. Steers around #2822 (shape analytics).
 - [In-flight agents understanding each other: A2A claim-verification SOTA vs. fak's no-claimed-field invariant (2026-07-07)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RESEARCH-a2a-inflight-status-claim-verification-2026-07-07.md) — maps the July-2026 field (A2A v1.0 signed cards harden the *identity* layer; Pramana / "Market for Lemons" / the MCP-A2A-Agora-ANP threat models flag the unsolved *claim* layer) against fak's shipped claim-layer answer (`dos_status` no-`claimed`-field digest, `relay.VerifiedProgress`, the `a2achan` correction handshake, `dos_arbitrate`), then isolates one witnessed gap: the invariant is dropped at the A2A HTTP edge — `handleA2ASendMessage` (`internal/gateway/a2a.go:333`) hands a foreign peer a self-reported `completed/success:true`, and `a2aTask` (`:23`) has no verified-progress binding. Seam to close + parked issue body included.
 - [Research: OpenRouter — what to borrow, what fak already has (2026-07-07)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RESEARCH-openrouter-inspiration-2026-07-07.md) — maps OpenRouter's mechanisms (provider `max_price` / `data_collection` / `zdr`, the `/api/v1/models` catalog, live failover) against fak's routing spine, records what fak already mirrors with file:line seams (`internal/gateway/routing.go` tier router, `internal/modelroute` per-aspect spine, the residency floor), and ranks three shipped slices: a fail-closed `max_price` ceiling (`638c78fe`), OpenRouter `zdr`/`data_collection` retention knobs mapped onto the sensitive-remote floor (`246bf834`/`1fea2ecc`), and an OpenRouter-shaped model-catalog projection over `internal/modelscore` (`4d75a12f1`).
 - [GLM-5.2 GCP dogfood bring-up, 2026-07-05](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/GLM52-GCP-DOGFOOD-BRINGUP-2026-07-05.md) -- auto-indexed dated note.
@@ -34119,6 +34652,7 @@ front page.
 - [Pulling the project work apart: three layers, one verb each (2026-07-03)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/PROJECT-WORK-THREE-LAYERS-2026-07-03.md) -- auto-indexed dated note.
 - [Least privilege across fak — one principle, many enforcement axes](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/EXPLAINER-least-privilege-across-fak-2026-07-02.md) -- auto-indexed dated note.
 - [Worker-unit conservation: the leak map and its dispatch-ready backlog (2026-07-02)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/WORKER-UNIT-CONSERVATION-BACKLOG-2026-07-02.md) — the issue-dispatch worker lifecycle audited stage by stage against the conservation identity (`spent = shipped + graded refusals + leaked`): what shipped same-day (#2368/#2367 resume revival, the `tools/dispatch_conservation.py` meter with its first live reading — 0 resolve units spent in 24h while 225 distinct issues sat contract-held), and the three remaining holes (attempt-budget wiring for #1777's unwired leaf, SPAWN_FAILED lease early-release + probe blind spot, live-stall reap before the 30-min wall clock) parked as contract-validated ready-to-file issues (each `ready`, 100/100) because the auditing session's guard refuses direct `gh issue create`.
+- [Concept: anti-starvation dispatch aging — no ready unit waits forever (2026-07-11)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-DISPATCH-AGING-2026-07-11.md) — the missing feedback term in the issue→worker dispatch order: today `dispatchtick.OrderLaneCandidates` and `dispatchorder.Plan` rank ready work by base priority **absolutely** (age only breaks ties), so a light unit out-weighed by a steady drip of fresher high-priority arrivals is never picked — textbook priority starvation, which `dispatch-conservation` can only see *after the fact* as re-storm churn. `internal/dispatchaging` folds each unit's wait time into an **effective weight** (`base + aging_boost`, monotonic ⇒ eventually overtakes any fixed heavier tier) plus a **hard starvation deadline** (waited ≥ 6h ⇒ force-served this tick, bounding worst-case wait independent of the boost math); `Standing` is the closed `fresh|aging|starved` fairness verdict. **Shipped**: the pure fold + property tests (additive — zero `Params` reproduces the pre-aging order), and `fak dispatch-aging` as a read-only JSON diagnostic with a `--fail-on-starved` CI gate. **Gap**: the live picker doesn't yet consume the term (computed & reported, not enforced) — the first of five parked follow-ons, alongside a `dos.toml [dispatch.aging]` config, real `ReadySince` provenance, starvation observability, and cooldown-eligibility interaction.
 - [Durable handling of guard false positives: match on structure, not mention (2026-07-02)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-GUARD-FALSE-POSITIVE-DURABILITY-2026-07-02.md) — the reversibility classifier ([#2376](https://github.com/anthony-chaudhary/fak/issues/2376)) escalates commands that merely MENTION a trigger word (`git commit -m "...push"`, `grep "git push"`, `echo "rm -rf"`) and is simultaneously evadable by wrapping the same command in a script — one antipattern, matching on substring not call structure, wrong in both directions at once. Durable design in three layers: the structural-match doctrine (classify on the executed segment head / resolved target / egress host, never on payload mention; SQL and `dd` scans are the named payload-inspection whitelist), a growing false/true-positive corpus with a measured false-positive rate folded as a `guard-accuracy` scorecard, and a logged escape hatch (the shipped `29b98f26` in-band confirm recipe + a proposed `fak guard false-positive` ledger) so a routed-around escalation always leaves a trace. Names the second-order instance (the coarse `internal/adjudicator/**` hard-self glob firing on a non-self-grading preview classifier).
 - [One map for continual background work: dispatch, superloop, dos loop, and the rest (2026-07-02)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-CONTINUAL-WORK-LOOP-MAP-2026-07-02.md) — inventory + proposals for the six families of keep-work-happening machinery (issue-dispatch, `/super-loop` waves, the DOS loop skills, the `fak loop` substrate, the selector meta-loops, the maintenance/RSI loops and janitors): organizes them by role (timer / selector / executor / witness) with the rule that no two mechanisms hold the same role over one resource pool, names the name-collision table (worst: `fak superloop` the read-only intent walker vs `/super-loop` the fleet-spawning wave launcher), and proposes R1–R6 (rename the skill to `/wave-launch`, one spawn-admission authority, one closed loop registry with no-drift tests, the nightrun `{run, acceptance}` selector contract everywhere, declared work surfaces, promotion to a front-door loops-map page under docs/).
 - [Concept: memory in the loop — the loop reads, verifies, and writes memory by default](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-MEMORY-IN-THE-LOOP-2026-07-02.md) -- auto-indexed dated note.
@@ -34355,6 +34889,7 @@ front page.
 - [First-class connector concepts across fak's levels — a wide survey (2026-07-03)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONNECTOR-CONCEPTS-SURVEY-2026-07-03.md) — positioning survey, not a build plan: extracts the five-part recipe the repo's one shipped generic transfer primitive (KV-transfer — typed OK/MISS/FAULT outcome, content-addressed digest identity, a registered backend seam, control/data-path honesty, the G1-G8 gate set) already proves, then applies it across install-time backing stores (DuckDB `read_json_auto` over existing JSONL as the near-zero-effort win; a `StateBackend` seam as the durability move; the zero-`go.sum` constraint on any Postgres/DuckDB driver), processing-framework connectors (gate-native job adjudication + result quarantine, not a native Spark/Ray client — extending the D-006 tool-ecosystem decision), session-level agentic memory (`memq.Backend` and `WarmKVStore` as already-shipped templates), and four new server-level transfer-primitive candidates (tool-result CAS sharing, policy/config sync, ledger replication, session-envelope cross-node resume) with an effort/payoff priority table. Nothing here is built; every claim is file-cited or explicitly `[STUB]`.
 - [The shared-trunk compile-integrity gap: lease disjointness is not build isolation (2026-07-06)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/SHARED-TRUNK-COMPILE-INTEGRITY-GAP-2026-07-06.md) — a witnessed incident (a peer's uncommitted call to an undefined `runSuperloopDrive` broke every session's `cmd/fak` build) exposes a fourth axis the git-admin epic's three named gaps (#822/#834) do not cover. Disjoint file leases (`dos arbitrate`) guarantee ownership disjointness at *file* granularity; Go compiles at *package* granularity, so two agents with disjoint leases in one package still share one build graph — and on a shared dirty tree an agent cannot witness its own change, the one place the witness-not-self-report floor cannot stand. Shows neither `pre-commit` (7 content gates) nor `pre-push` (`dos review` + tier drift) compiles anything, so the runbook's archive-HEAD build stays manual. Proposes raising *atomic commit* from "coherent file set" to "coherent file set proven to compile against HEAD in isolation": a static self-containment rung at the commit seam (`COMMIT_NOT_SELF_CONTAINED`, no build) and an affected-scoped isolated build rung at the push seam (`TRUNK_WOULD_NOT_COMPILE`), both fail-closed with the standard block|warn|off ladder, reusing `affectedtests.Select` and the archive-HEAD technique. Design only; the hook change is park-by-default/sensitive and wants its own issue + warn-soak.
 - [RSI market-discovery epic: file a ticket the moment the market moves (2026-07-08)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/rsi-market-discovery-epic-2026-07-08.md) — a reviewable seed of 12 broad research tickets for the self-improving work-discovery loop, anchored on the just-shipped arXiv+GitHub+**Hacker News** `idea-scout` spine (HN via the public Algolia `search_by_date` API, newest-first — a trending front-page story becomes a candidate within moments of release). The tickets span five axes: fresh market-condition crawl (Reddit/X/new-release-firehose adapters, cross-source deep dedup + a durable seen-everything index), a minimum spine (a `Source` interface + conformance suite so new sources are cheap), domain-specific support (per-vertical topic packs + a "scout my domain" onramp for outside agent builders), operator-steerable superloops (a scheduled discovery loop + a super-meta loop that reweights topics from triage outcomes, and a single steer surface to pause/reweight/re-scope from above), and the honesty surface (concept-disambiguation of discovered ideas + an AEO explainer and a QA gate that every auto-filed issue body stays honest). Each ticket names a concrete first deliverable and a witness; only the HN/arXiv/GitHub spine is shipped, everything else is open research/build.
+- [Dispatch-worker context-budget trap: the derived-budget fix and its measured-baseline residual (2026-07-08)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/dispatch-worker-context-budget-trap-2026-07-08.md) — the tracking note commit `8a0fcffbb` referenced but never created. Records the #2972 crash-loop where the claude dispatch worker's guard `--context-budget-tokens` (a flat 48000) sat below the workers' ~62K irreducible turn-1 baseline prompt, so every worker was born over-budget and drained `BUDGET_CONTEXT_EXHAUSTED` on turn 1 (`DebitUsage` debits the FULL resident window each turn) → restarts burned → `CHILD_CRASH`, fleet ship rate 2–9%. Documents the shipped derived-budget fix (`min(claudeGuardBaselineTokens*2, HardContextCap−OutputReserve)` = `min(62000*2, 200000−32000)` = 124000, golden-pinned on the Go + Python sides) and the open residual: `claudeGuardBaselineTokens=62000` is a frozen hand-measured constant that nothing witnesses against the real launch prompt, so organic growth past 124000 re-introduces the trap silently. Names the next checkable step (runtime attribution — the guard already measures turn-1's window, so a turn-1 drain should emit a distinct `real_baseline>budget` reason instead of a generic crash) and rejects a static repo-file sum as a false-confidence non-fix (it sees only ~15–20K of the ~62K baseline).
 
 ---
 
