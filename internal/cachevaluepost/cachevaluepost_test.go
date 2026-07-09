@@ -46,25 +46,27 @@ func TestResolveTokenNeverLeaksLabToken(t *testing.T) {
 	}
 }
 
-func TestResolveChannelDefaultsToPublicCachevalueChannel(t *testing.T) {
+func TestResolveChannelDefaultsToPublicScoreboardChannel(t *testing.T) {
 	t.Setenv("FAK_CACHEVALUE_CHANNEL", "")
 	chdir(t, t.TempDir())
 	if got := ResolveChannel(); got != ChannelDefault {
-		t.Fatalf("ResolveChannel default = %q, want the public cache-value channel %q", got, ChannelDefault)
+		t.Fatalf("ResolveChannel default = %q, want the public #scoreboard channel %q", got, ChannelDefault)
 	}
-	if ChannelDefault != "C0BDSB81XDZ" {
-		t.Fatalf("ChannelDefault = %q, want the epic #1301 channel C0BDSB81XDZ", ChannelDefault)
+	if ChannelDefault != "C0BEF8B8KMW" {
+		t.Fatalf("ChannelDefault = %q, want the #scoreboard channel C0BEF8B8KMW", ChannelDefault)
 	}
 }
 
-func TestResolveChannelDoesNotInheritScoreboardChannel(t *testing.T) {
-	// FAK_SCOREBOARD_CHANNEL is the scoreboard CLI's #scoreboard default; a cache-value
-	// card must NOT misroute to it — the surface owns its own default.
+func TestResolveChannelDoesNotReadScoreboardChannelEnv(t *testing.T) {
+	// The default now EQUALS the #scoreboard channel, but the resolver must still not READ
+	// FAK_SCOREBOARD_CHANNEL: an operator who repoints #scoreboard via that env var must
+	// not silently drag the cache-value card along — it moves only when
+	// FAK_CACHEVALUE_CHANNEL says so.
 	t.Setenv("FAK_CACHEVALUE_CHANNEL", "")
-	t.Setenv("FAK_SCOREBOARD_CHANNEL", "C_SCOREBOARD_MUST_NOT_LEAK")
+	t.Setenv("FAK_SCOREBOARD_CHANNEL", "C_SCOREBOARD_OVERRIDE")
 	chdir(t, t.TempDir())
 	if got := ResolveChannel(); got != ChannelDefault {
-		t.Fatalf("ResolveChannel inherited the scoreboard channel: got %q, want %q", got, ChannelDefault)
+		t.Fatalf("ResolveChannel read FAK_SCOREBOARD_CHANNEL: got %q, want the cache default %q", got, ChannelDefault)
 	}
 }
 

@@ -6,8 +6,8 @@
 // internal/grafanapost, and internal/dojopost: a local agent or CI folds the rolled-up
 // cache-value report (internal/cachevaluereport) into ONE channel card.
 //
-// This is rung E (the notification output) of epic #1301 — the surface the channel
-// C0BDSB81XDZ exists for. The fold is PURE: a cachevaluereport.Report in, a Card out —
+// This is rung E (the notification output) of epic #1301 — the cache-value P&L surface.
+// The fold is PURE: a cachevaluereport.Report in, a Card out —
 // no clock, no I/O, no network — mirroring blockerpost.FoldIssues. The CLI
 // (cmd/fak/cachevalue.go) collects the report and posts the card via the shared
 // scoreboard chat.postMessage transport.
@@ -35,12 +35,15 @@
 //	                        then FALLBACK to the scoreboard token (FAK_SCOREBOARD_TOKEN)
 //	                        so one bot token serves both channels in a shared workspace.
 //	FAK_CACHEVALUE_CHANNEL  then a FAK_CACHEVALUE_CHANNEL= line in .env.slack.local,
-//	                        then the built-in #cache-value default (ChannelDefault).
+//	                        then the built-in #scoreboard default (ChannelDefault).
 //
 // Like blockers/grafana/dojo, the channel id is a PUBLIC, non-secret default — a channel
-// id, not a credential — so a local agent posts with zero config. It deliberately does
-// NOT inherit FAK_SCOREBOARD_CHANNEL (that is #scoreboard's own default; reusing it would
-// misroute a cache-value card there).
+// id, not a credential — so a local agent posts with zero config. The cache-value P&L now
+// rides in #scoreboard (the fleet's top-level status channel) alongside the scores rather
+// than in a side channel; the resolver still reads only FAK_CACHEVALUE_CHANNEL, never
+// FAK_SCOREBOARD_CHANNEL, so an operator who repoints #scoreboard does not drag the
+// cache-value card along — point FAK_CACHEVALUE_CHANNEL at a dedicated channel (e.g.
+// #cache-value C0BDSB81XDZ) to split it back out.
 package cachevaluepost
 
 import (
@@ -52,13 +55,17 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
 )
 
-// ChannelDefault is the #cache-value rollup channel in the scoreboard Slack workspace
-// (team T0BDEJF1HGB). It is a PUBLIC channel id (not a secret): the @agent bot is a
-// member and posts here with FAK_SCOREBOARD_TOKEN. Override with --channel or
-// FAK_CACHEVALUE_CHANNEL — NOT FAK_SCOREBOARD_CHANNEL, which is the scoreboard CLI's own
-// default (#scoreboard). This mirrors blockerpost/grafanapost/dojopost's posture: the
-// channel id is public, only the token is secret.
-const ChannelDefault = "C0BDSB81XDZ"
+// ChannelDefault is the #scoreboard channel in the scoreboard Slack workspace (team
+// T0BDEJF1HGB) — the fleet's top-level status channel, where the cache-value P&L now posts
+// by default so it rides alongside the scores instead of in a side channel. It is a PUBLIC
+// channel id (not a secret): the @agent bot is a member and posts here with
+// FAK_SCOREBOARD_TOKEN. Override with --channel or FAK_CACHEVALUE_CHANNEL — e.g. point it
+// at the dedicated #cache-value channel (C0BDSB81XDZ) to split the P&L back out. The
+// resolver reads only FAK_CACHEVALUE_CHANNEL, never FAK_SCOREBOARD_CHANNEL, so the two
+// surfaces stay independently overridable even though they now share a default channel.
+// This mirrors blockerpost/grafanapost/dojopost's posture: the channel id is public, only
+// the token is secret.
+const ChannelDefault = "C0BEF8B8KMW"
 
 // tokenEnvs / channelEnvs are the dedicated cache-value keys. The token resolver adds a
 // scoreboard fallback (below); the channel resolver falls back to the public default,
@@ -114,11 +121,12 @@ func ResolveToken() string {
 }
 
 // ResolveChannel returns the cache-value channel id from FAK_CACHEVALUE_CHANNEL, then a
-// FAK_CACHEVALUE_CHANNEL= line in .env.slack.local, then the public ChannelDefault. It
-// deliberately does NOT fall through to FAK_SCOREBOARD_CHANNEL — that env var is the
-// scoreboard CLI's default target (#scoreboard), so reusing it here would misroute a
-// cache-value card whenever an operator sources .env.slack.local. The surface owns its
-// own default, so it lands with zero config.
+// FAK_CACHEVALUE_CHANNEL= line in .env.slack.local, then the public ChannelDefault
+// (#scoreboard). It deliberately does NOT read FAK_SCOREBOARD_CHANNEL: even though the
+// default now equals the scoreboard channel, keeping the env keys separate means an
+// operator who repoints #scoreboard via FAK_SCOREBOARD_CHANNEL does not silently drag the
+// cache-value card along — the cache surface moves only when FAK_CACHEVALUE_CHANNEL says
+// so. The surface owns its own default, so it lands with zero config.
 func ResolveChannel() string {
 	for _, e := range channelEnvs {
 		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
