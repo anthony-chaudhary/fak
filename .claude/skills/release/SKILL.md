@@ -95,13 +95,13 @@ Skip on a clean tree — and skip on a hot/shared tree, where the dirty paths ar
 Preferred mechanical path:
 
 ```bash
-python tools/release_cut.py --json --limit-commits 300                       # no-mutation plan
-python tools/release_cut.py --execute --skip-dry-run --json --limit-commits 300
+python tools/release_cut.py --json --limit-commits 300             # no-mutation plan
+python tools/release_cut.py --execute --json --limit-commits 300   # runs the dry-run witness
 ```
 
-⚠ **`--skip-dry-run` is required.** The embedded dry-run witness runs the release-substrate suite on the just-bumped commit, and one test (`release_publish_test.py::test_live_cli_dry_run_no_mutation`) reads the live VERSION and asserts a matching tag EXISTS — but the tag is minted in Step 6, *after* the cut. So the witness can never pass on a real version bump and the cut auto-unwinds. `--skip-dry-run` bypasses it; the real witness is (a) CI already green on the content and (b) the post-tag suite.
+The `--execute` cut runs the embedded release-substrate dry-run witness on the just-bumped commit, and it **passes** on a real version bump: the witness (`release_publish_test.py::test_live_cli_dry_run_no_mutation`) reads the *latest existing tag*, not the live VERSION, so it no longer needs the not-yet-minted tag to exist. Let it run — do **not** pass `--skip-dry-run` on a normal cut. It is an emergency-only escape hatch now, not a required step.
 
-The cut refuses on **`dirty paths outside release cut`** — any path other than VERSION / the release note that is dirty. On a shared tree this is usually a peer's WIP. Do **not** stash peers' work; either wait for a clean window or cut in a **detached worktree** at origin tip:
+⚠ **The one residual manual-path gotcha (dirty tree).** The cut refuses on **`dirty paths outside release cut`** — any path other than VERSION / the release note that is dirty. On a shared tree this is usually a peer's WIP. Do **not** stash peers' work; either wait for a clean window or cut in a **detached worktree** at origin tip (this is exactly what `fak release ship` does for you):
 
 ```bash
 git worktree add --detach <path> origin/main
@@ -113,17 +113,17 @@ Verify the release commit touches ONLY `VERSION`, `docs/releases/vX.Y.Z.md`, any
 
 Manual fallback: compute the version, write `<release_notes_dir>/vX.Y.Z.md` mirroring the prior release's front-matter + theme shape, run `python <helpers.release_bump> X.Y.Z --date YYYY-MM-DD`, then `git add -- VERSION INSTALL.md server.json CITATION.cff docs/releases/vX.Y.Z.md` and `git commit -m "vX.Y.Z: <summary>" -- VERSION INSTALL.md server.json CITATION.cff docs/releases/vX.Y.Z.md`. Never `git add -A`. No `Co-Authored-By` line.
 
-## Step 6: Push the release commit FIRST, then tag
+## Step 6: Push the release commit, then tag
 
-⚠ `release_tag` checks `trunk_reachability` against the **local `refs/heads/main`** ref, not origin. The release commit must be reachable from local main before it'll tag — so push it first (it becomes trunk-reachable on origin, and local main catches up):
+`release_tag` checks `trunk_reachability` against the **local `refs/heads/main`** ref, not origin, so push the release commit first (it becomes trunk-reachable on origin, and local main catches up), then tag. This is plain sequencing — the helpers enforce it and `fak release ship` does it for you — not a chicken-egg trap:
 
 ```bash
 git push origin <release-sha>:main          # fast-forward; verify parent == origin tip first
-python tools/release_tag.py --version X.Y.Z --ref <release-sha> --skip-dry-run --json          # preview
-python tools/release_tag.py --version X.Y.Z --ref <release-sha> --skip-dry-run --execute --push --json
+python tools/release_tag.py --version X.Y.Z --ref <release-sha> --json          # preview (runs the dry-run witness)
+python tools/release_tag.py --version X.Y.Z --ref <release-sha> --execute --push --json
 ```
 
-`--skip-dry-run` for the same chicken-egg reason as Step 5. Confirm `ok: true` and every check passes; `trunk_reachability` is the one that lags until the commit is on local main. Verify the tag derefs to the release commit:
+No `--skip-dry-run`: the witness runs on the pushed commit and passes (it reads the latest existing tag; it re-witnesses the same commit the cut already checked, which is harmless). Confirm `ok: true` and every check passes; `trunk_reachability` is the one that lags until the commit is on local main. Verify the tag derefs to the release commit:
 
 ```bash
 git ls-remote --tags origin 'vX.Y.Z^{}'
@@ -131,16 +131,16 @@ git ls-remote --tags origin 'vX.Y.Z^{}'
 
 The `ci` check is advisory NO_SIGNAL until CI runs on the release commit; that's expected. If `git push` rejects (a peer pushed), fast-forward your single release commit on top — never force-push `main`. (`fak release ship` automates exactly this recovery on the same-trunk hot path: it re-cuts the VERSION+note commit onto the advanced trunk tip and retries the leased push up to `--push-retries` times, refusing only if trunk was rewritten rather than fast-forwarded.)
 
-## Step 7: Create the GitHub release page (do NOT skip), then artifacts
+## Step 7: Create the GitHub release page, then artifacts
 
-⚠ The tag push fires `release-artifacts.yml`, but that workflow only **decorates** an EXISTING release page — it fails with **`release not found`** on every build job if the page doesn't exist yet. Create the page from the committed note FIRST:
+The tag push fires `release-artifacts.yml`, which cross-compiles the binaries and **decorates** the release page. That workflow now **waits up to ~2 min for the page to appear** before uploading (it polls `gh release view` — issue #369), so the page and the artifacts run are no longer order-sensitive. Create the page from the committed note promptly all the same:
 
 ```bash
 python tools/release_publish.py --version X.Y.Z --json            # dry-run preview
 python tools/release_publish.py --version X.Y.Z --execute --json  # create the GH release
 ```
 
-Its JSON may report `github_release.status: "missing"` (the pre-check state) even on success — verify with ground truth: `gh release view vX.Y.Z --json tagName,assets`. If the tag-push artifacts run already failed on "release not found", re-dispatch it now that the page exists:
+Its JSON may report `github_release.status: "missing"` (the pre-check state) even on success — verify with ground truth: `gh release view vX.Y.Z --json tagName,assets`. Only if the artifacts run timed out waiting for the page (a gap wider than its ~2 min poll), re-dispatch it now that the page exists:
 
 ```bash
 gh workflow run release-artifacts.yml -f tag=vX.Y.Z
@@ -154,4 +154,4 @@ Print: version old → new; release tag + commit sha (short); GitHub release URL
 
 ## Notes on this repo's release machinery
 
-`release-cadence.yml` runs the same `release_decide → release_cut → release_tag` chain in CI on a schedule (scheduled ticks are dry-run-only readiness checks; a manual dispatch with `dry_run: false` arms the real cut). The four ⚠ gotchas above are the manual-path corrections — they exist because the helpers enforce ordering by refusing, and a hand-driven release hits each refusal in turn.
+`release-cadence.yml` runs the same `release_decide → release_cut → release_tag` chain in CI on a schedule (scheduled ticks are dry-run-only readiness checks; a manual dispatch with `dry_run: false` arms the real cut). Three of the four historical chicken-egg gotchas are now absorbed mechanically — the dry-run witness is tag-based and passes on a real bump (no `--skip-dry-run` dance), the push-before-tag ordering is plain sequencing the helpers and `fak release ship` enforce, and `release-artifacts.yml` waits for the release page instead of failing `release not found`. One residual manual-path correction remains: on a hot shared tree, cut in a detached worktree (Step 3–5) so a peer's dirty WIP can't block the cut — and `fak release ship` absorbs even that.
