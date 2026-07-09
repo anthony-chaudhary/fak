@@ -529,6 +529,71 @@ func TestSessionStopUnknownIDTypedError(t *testing.T) {
 	}
 }
 
+// TestSessionRunTerminalDurableRefused witnesses the already-terminal arm of #1199's
+// acceptance criterion #6 (unknown id / already-terminal transitions refuse without
+// panicking) AT THE DURABLE PATH: a transition on a STOPPED session must refuse
+// (ok=false, the route maps that to 409) AND must leave C1 (the persisted descriptor)
+// and C2 (the lease side-ref) exactly as the terminating stop left them — a refused
+// transition is not a write, so it may not re-stamp the registry or re-publish/re-remove
+// the side-ref. The unknown-id arm is covered above; the terminal-refusal arm had a
+// durable witness only at the non-durable applySessionControl layer, not through the
+// controlSession → applySessionControlDurable wiring the gateway route actually calls.
+func TestSessionRunTerminalDurableRefused(t *testing.T) {
+	const trace = "durable-terminal-refuse"
+	ctx := context.Background()
+	now := time.Date(2026, 7, 9, 9, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "registry.json")
+	leases := &fakeSessionLeasePublisher{}
+	installDurableSessionTest(t, path, &now, leases)
+
+	serveSessions.Restore(trace, session.State{
+		TraceID: trace,
+		Run:     session.Running,
+		Budget:  session.Budget{TurnsLeft: 2, TokensLeft: 20},
+		Rev:     2,
+	})
+	if err := registerServeSessionDurability(ctx, trace); err != nil {
+		t.Fatalf("register durable session: %v", err)
+	}
+
+	// Drive it terminal — this stop is a real write-through (C1 re-stamp + C2 remove).
+	now = now.Add(time.Second)
+	if _, ok, err := controlSession(ctx, trace, "run", gateway.SessionControlRequest{
+		Run: "stopped", Reason: session.ReasonStopped,
+	}); err != nil || !ok {
+		t.Fatalf("stop seed: ok=%v err=%v", ok, err)
+	}
+	pubAfterStop := len(leases.published)
+	remAfterStop := len(leases.removed)
+	stoppedDesc := readSessionDescriptor(t, path, trace)
+	if stoppedDesc.Run != session.Stopped {
+		t.Fatalf("descriptor after stop = %+v, want stopped", stoppedDesc)
+	}
+
+	// A second transition on the now-terminal (but KNOWN) session must refuse without
+	// panicking: ok=false, and NOT an unknown-id error (the id is known, just terminal).
+	now = now.Add(time.Second)
+	st, ok, err := controlSession(ctx, trace, "run", gateway.SessionControlRequest{Run: "running"})
+	if ok {
+		t.Fatalf("resuming a terminal session must refuse: st=%+v", st)
+	}
+	var unknown unknownSessionError
+	if errors.As(err, &unknown) {
+		t.Fatalf("terminal refusal must not be an unknown-id error (the id is known, just stopped): %v", err)
+	}
+
+	// A refused transition is not a write: C1 and C2 stay exactly as the stop left them.
+	if len(leases.published) != pubAfterStop || len(leases.removed) != remAfterStop {
+		t.Fatalf("terminal refusal touched C2: published %d->%d removed %d->%d",
+			pubAfterStop, len(leases.published), remAfterStop, len(leases.removed))
+	}
+	afterDesc := readSessionDescriptor(t, path, trace)
+	if afterDesc.Run != session.Stopped || afterDesc.Rev != stoppedDesc.Rev {
+		t.Fatalf("terminal refusal re-wrote C1: before rev=%d run=%v, after %+v",
+			stoppedDesc.Rev, stoppedDesc.Run, afterDesc)
+	}
+}
+
 type fakeSessionLeasePublisher struct {
 	published []leaseref.SessionDescriptor
 	removed   []string
