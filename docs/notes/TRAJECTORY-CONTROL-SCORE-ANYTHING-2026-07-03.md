@@ -1,3 +1,8 @@
+---
+title: "Trajectory control — score anything, steer by curve (2026-07-03)"
+description: "Design note for trajectory control: keep long-horizon sessions and sub-agent fleets on their declared objective by scoring progress and steering by curve."
+---
+
 # Trajectory control — score anything, steer by curve (2026-07-03)
 
 The design note for the **trajectory control** concept family: a first-class,
@@ -193,6 +198,30 @@ mitigation: [2505.02709](https://arxiv.org/abs/2505.02709),
   "unbounded scoring loop" is a named enemy of this epic, not a risk we accept).
 - **Scores gate harness actions only** — they never feed a model reward loop
   directly.
+
+## The meta loop, fenced at one level
+
+The doctrine turns on itself: a *scoring method* you want to improve is just
+another objective. The calibration meter (#2566) measures how well a base
+scorer's numbers track the W3 witnessed outcome; the meta loop (#2567) closes
+the circle by declaring **"raise scorer X's calibration"** as a first-class
+objective whose own W3 score is the meter's calibration *delta* — the base
+scorer's coefficient at declaration (the baseline) advanced toward
+well-calibrated. A scorer that was steering sessions wrong becomes a worst-first
+repair target the loop enters and measures like any other objective, with the
+`calibration-delta` method as its W3 scorer.
+
+The load-bearing constraint is that this is fenced at **exactly one level**. A
+scorer-improvement objective may target a *base* scorer, but nothing may target
+the meta scorer itself — there is no "raise the calibration of the scorer that
+scores the scorer." That regress is precisely the #2364 *unbounded scoring loop*
+the fences above name as an enemy. The fence is structural, enforced in three
+places that cannot drift apart: `MetaObjective` refuses to construct a level-2
+objective (`ErrMetaFence`); `Validate` refuses the same at the ledger boundary,
+so a hand-authored row cannot smuggle one past `Append`; and `Calibrate` skips
+the meta scorer's own rows, so it never appears as its own repair target and
+`WorstCalibrated` can only ever hand the loop a base scorer to raise. One level
+of "score the scorer" buys the self-improvement; the fence keeps it bounded.
 
 ## SOTA anchors
 
