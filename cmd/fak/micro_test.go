@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/metrics"
 	"github.com/anthony-chaudhary/fak/internal/microagent"
 )
 
@@ -89,7 +91,7 @@ func TestMicroRunEndToEndOnMock(t *testing.T) {
 	if cfg.Agents != 1 {
 		t.Fatalf("bare micro should default to 1 agent, got %d", cfg.Agents)
 	}
-	if err := runMicro(cfg, false, true); err != nil {
+	if err := runMicro(cfg, false, true, ""); err != nil {
 		t.Fatalf("runMicro (1 agent): %v", err)
 	}
 
@@ -98,7 +100,67 @@ func TestMicroRunEndToEndOnMock(t *testing.T) {
 	fleet.Agents = 5
 	fleet.Turns = 3
 	fleet.Seats = 2
-	if err := runMicro(fleet, true, true); err != nil {
+	if err := runMicro(fleet, true, true, ""); err != nil {
 		t.Fatalf("runMicro (fleet): %v", err)
+	}
+}
+
+// TestMicroTraceSeparableInHost is the #2031 acceptance witness: a fleet runs
+// interleaved in ONE host, each agent records its own structured span timeline, and
+// the trace store pulls exactly one agent's timeline out by id — separable even
+// though every agent ran concurrently in one process. The traces round-trip through
+// a JSONL file, the cross-process readout path behind `fak micro trace --trace-in`.
+func TestMicroTraceSeparableInHost(t *testing.T) {
+	cfg := defaultMicroConfig(true)
+	cfg.Agents = 6
+	cfg.Turns = 3
+	cfg.Seats = 2
+	_, tracer, results, err := driveMicro(cfg)
+	if err != nil {
+		t.Fatalf("driveMicro: %v", err)
+	}
+	if len(results) != cfg.Agents {
+		t.Fatalf("got %d results, want %d", len(results), cfg.Agents)
+	}
+	if got := len(tracer.IDs()); got != cfg.Agents {
+		t.Fatalf("got %d traces, want %d (one per agent)", got, cfg.Agents)
+	}
+	// Every agent's timeline is separable and complete: 3 legs (seat, step, verdict)
+	// per turn, all ALLOW, and a nonzero token count.
+	for i := 0; i < cfg.Agents; i++ {
+		id := fmt.Sprintf("micro-%03d", i)
+		tr, ok := tracer.Trace(id)
+		if !ok {
+			t.Fatalf("no trace for %s", id)
+		}
+		if want := cfg.Turns * 3; len(tr.Spans) != want {
+			t.Fatalf("%s: got %d spans, want %d", id, len(tr.Spans), want)
+		}
+		if tr.Tokens() <= 0 {
+			t.Fatalf("%s: want a nonzero token count, got %d", id, tr.Tokens())
+		}
+		if v := tr.Verdicts(); len(v) != 1 || v[0] != "ALLOW" {
+			t.Fatalf("%s: Verdicts()=%v, want [ALLOW]", id, v)
+		}
+	}
+
+	// Persist → reload: the readout survives a separate process.
+	path := filepath.Join(t.TempDir(), "traces.jsonl")
+	if err := writeTraceFile(path, tracer); err != nil {
+		t.Fatalf("writeTraceFile: %v", err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer f.Close()
+	reloaded, err := metrics.ReadTracesJSONL(f)
+	if err != nil {
+		t.Fatalf("ReadTracesJSONL: %v", err)
+	}
+	want, _ := tracer.Render("micro-000")
+	got, ok := reloaded.Render("micro-000")
+	if !ok || got != want {
+		t.Fatalf("reload render mismatch:\n got %q\nwant %q", got, want)
 	}
 }

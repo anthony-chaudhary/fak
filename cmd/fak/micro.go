@@ -49,6 +49,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/metrics"
 	"github.com/anthony-chaudhary/fak/internal/microagent"
 	"github.com/anthony-chaudhary/fak/internal/session"
 )
@@ -96,6 +97,14 @@ func (c microConfig) slots() int {
 }
 
 func cmdMicro(args []string) {
+	// `fak micro trace <id>` is the per-agent trace readout (#2031): it renders one
+	// microagent's structured timeline (legs, tokens, seat, verdicts) out of the
+	// interleaved single-process fleet, either from a persisted --trace-in JSONL or
+	// from a fresh deterministic Mock run.
+	if len(args) > 0 && args[0] == "trace" {
+		cmdMicroTrace(args[1:])
+		return
+	}
 	hostMode := false
 	if len(args) > 0 && args[0] == "host" {
 		hostMode = true
@@ -119,12 +128,15 @@ func cmdMicro(args []string) {
 		cfgFile     = fs.String("config", "", "load config from a JSON file (lowest non-default precedence)")
 		dryRun      = fs.Bool("dry-run", false, "resolve and print the plan (backends, seats, caps) without spending")
 		jsonOut     = fs.Bool("json", false, "emit JSON instead of a human-readable report")
+		traceOut    = fs.String("trace-out", "", "write per-agent structured traces to a JSONL file for a later `fak micro trace <id> --trace-in` readout (#2031)")
 	)
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: fak micro [host] [flags]")
 		fmt.Fprintln(os.Stderr, "  fak micro              run ONE microagent end-to-end on the Mock engine")
 		fmt.Fprintln(os.Stderr, "  fak micro host         boot the in-process host (M2) and run a small fleet")
+		fmt.Fprintln(os.Stderr, "  fak micro trace <id>   print ONE microagent's structured timeline (legs, tokens, seat, verdicts)")
 		fmt.Fprintln(os.Stderr, "  add --dry-run to print the resolved plan (backends, seats, caps) without spending")
+		fmt.Fprintln(os.Stderr, "  add --trace-out <file> to persist per-agent traces for a later `fak micro trace <id> --trace-in`")
 		fmt.Fprintln(os.Stderr, "\nconfig precedence: flags > env (FAK_MICRO_*) > file (--config) > defaults\nflags:")
 		fs.PrintDefaults()
 	}
@@ -190,7 +202,7 @@ func cmdMicro(args []string) {
 		fmt.Fprintf(os.Stderr, "fak micro: --engine %q not supported in-process yet (only \"mock\"); use --dry-run to inspect the plan\n", cfg.Engine)
 		os.Exit(2)
 	}
-	if err := runMicro(cfg, hostMode, *jsonOut); err != nil {
+	if err := runMicro(cfg, hostMode, *jsonOut, *traceOut); err != nil {
 		fmt.Fprintf(os.Stderr, "fak micro: %v\n", err)
 		os.Exit(1)
 	}
@@ -320,11 +332,13 @@ func microMode(hostMode bool) string {
 	return "run"
 }
 
-// runMicro drives the real microagent.Host over the Mock planner as the ONE shared
-// gateway seam, wrapped in the cooperative slot scheduler so the seat pool bounds
-// concurrent model calls. It spawns N agents, drains them, reaps the results, and
-// reports. This is the live end-to-end witness the acceptance names.
-func runMicro(cfg microConfig, hostMode, jsonOut bool) error {
+// driveMicro drives the real microagent.Host over the Mock planner as the ONE
+// shared gateway seam, wrapped in the cooperative slot scheduler so the seat pool
+// bounds concurrent model calls. It spawns N agents, each recording its structured
+// span timeline into ONE shared tracer keyed by agent id (#2031), drains them, and
+// reaps the results. The returned tracer is the multiplexed per-agent trace store —
+// separable by id even though every agent ran interleaved in one process.
+func driveMicro(cfg microConfig) (*microSink, *metrics.MicroTracer, []microagent.Result, error) {
 	// The ONE shared gateway: the deterministic offline Mock planner (the same Mock
 	// the offline demo path uses), wrapped in the slot scheduler so no more than
 	// `slots` model calls are ever in flight across the whole fleet.
@@ -334,6 +348,8 @@ func runMicro(cfg microConfig, hostMode, jsonOut bool) error {
 	gw := microagent.NewSchedulingGateway(base, sched)
 
 	sink := &microSink{counts: map[microagent.EventKind]int{}}
+	tracer := metrics.NewMicroTracer()
+	seat := fmt.Sprintf("slot-pool/%d", cfg.slots())
 	tbl := session.NewTable()
 	h, err := microagent.NewHost(gw, microagent.Config{
 		Workers:  cfg.Workers,
@@ -342,23 +358,39 @@ func runMicro(cfg microConfig, hostMode, jsonOut bool) error {
 		Audit:    sink,
 	})
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 	defer h.Close()
 
 	for i := 0; i < cfg.Agents; i++ {
 		id := fmt.Sprintf("micro-%03d", i)
-		if err := h.Spawn(id, &microTurnAgent{id: id, turns: cfg.Turns}); err != nil {
-			return fmt.Errorf("spawn %s: %w", id, err)
+		if err := h.Spawn(id, &microTurnAgent{id: id, turns: cfg.Turns, tracer: tracer, seat: seat}); err != nil {
+			return nil, nil, nil, fmt.Errorf("spawn %s: %w", id, err)
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	if err := h.Drain(ctx); err != nil {
-		return fmt.Errorf("drain: %w (live=%d)", err, h.Live())
+		return nil, nil, nil, fmt.Errorf("drain: %w (live=%d)", err, h.Live())
 	}
 	results := h.Reap()
 	sort.Slice(results, func(i, j int) bool { return results[i].ID < results[j].ID })
+	return sink, tracer, results, nil
+}
+
+// runMicro drives the fleet and reports. It optionally persists the per-agent
+// traces to a JSONL file (--trace-out) for a later `fak micro trace <id> --trace-in`
+// readout. This is the live end-to-end witness the acceptance names.
+func runMicro(cfg microConfig, hostMode, jsonOut bool, traceOut string) error {
+	sink, tracer, results, err := driveMicro(cfg)
+	if err != nil {
+		return err
+	}
+	if traceOut != "" {
+		if err := writeTraceFile(traceOut, tracer); err != nil {
+			return fmt.Errorf("write --trace-out %s: %w", traceOut, err)
+		}
+	}
 
 	done, failed := 0, 0
 	for _, r := range results {
@@ -413,6 +445,10 @@ func runMicro(cfg microConfig, hostMode, jsonOut bool) error {
 		fmt.Printf("  spawn=%d done=%d error=%d cancel=%d  |  %d done / %d failed\n",
 			sink.count(microagent.EventSpawn), sink.count(microagent.EventDone),
 			sink.count(microagent.EventError), sink.count(microagent.EventCancel), done, failed)
+		if traceOut != "" {
+			fmt.Printf("  traces:                    %d agent(s) written to %s  (read one: fak micro trace <id> --trace-in %s)\n",
+				len(tracer.IDs()), traceOut, traceOut)
+		}
 	}
 	if failed > 0 {
 		return fmt.Errorf("%d of %d agent(s) did not complete", failed, cfg.Agents)
@@ -423,19 +459,48 @@ func runMicro(cfg microConfig, hostMode, jsonOut bool) error {
 // microTurnAgent is one hosted agent that takes `turns` model turns through the
 // host-shared gateway and then retires — the minimal in-process agent loop (the
 // resumable internal/agent RunArm stepping is the still-open #2001 extraction).
+// Each turn it records its structured trace legs (seat → step → verdict) into the
+// shared tracer under its own id, so the interleaved fleet stays separable (#2031).
 type microTurnAgent struct {
-	id    string
-	turns int
-	took  int
+	id     string
+	turns  int
+	took   int
+	tracer *metrics.MicroTracer // nil ⇒ no tracing
+	seat   string               // the slot-pool seat this agent's calls draw from
 }
 
 func (a *microTurnAgent) Step(ctx context.Context, gw microagent.Gateway) (bool, error) {
 	a.took++
+	// Seat leg: every model call draws one seat from the shared slot pool (M6/M20).
+	a.trace(metrics.MicroSpan{Kind: metrics.SpanSeat, Label: "acquire", Seat: a.seat})
 	msg := []agent.Message{{Role: agent.RoleUser, Content: fmt.Sprintf("micro %s turn %d", a.id, a.took)}}
-	if _, err := gw.Complete(ctx, msg, nil); err != nil {
+	comp, err := gw.Complete(ctx, msg, nil)
+	if err != nil {
+		a.trace(metrics.MicroSpan{Kind: metrics.SpanStep, Label: fmt.Sprintf("turn %d", a.took), Verdict: "ERROR"})
 		return false, err
 	}
+	// Step leg: the model turn, with the tokens the completion reports. The Mock
+	// planner reports no usage, so fall back to a byte-count estimate of the prompt
+	// (a SIMULATED count — the real gateway usage flows in once #2030 wires it).
+	tokens := 0
+	if comp != nil {
+		tokens = comp.Usage.TotalTokens
+	}
+	if tokens == 0 {
+		tokens = len(msg[0].Content)
+	}
+	a.trace(metrics.MicroSpan{Kind: metrics.SpanStep, Label: fmt.Sprintf("turn %d", a.took), Tokens: tokens})
+	// Verdict leg: the Mock planner admits every call; the real adjudication verdict
+	// flows in on the served-gateway path (#2030).
+	a.trace(metrics.MicroSpan{Kind: metrics.SpanVerdict, Label: "mock-planner", Verdict: "ALLOW"})
 	return a.took >= a.turns, nil
+}
+
+// trace records one span for this agent, if tracing is on.
+func (a *microTurnAgent) trace(s metrics.MicroSpan) {
+	if a.tracer != nil {
+		a.tracer.Record(a.id, s)
+	}
 }
 
 // microSink is the host's ONE audit sink for the CLI run — it just tallies event
@@ -455,4 +520,113 @@ func (s *microSink) count(k microagent.EventKind) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.counts[k]
+}
+
+// writeTraceFile persists every per-agent trace as JSONL (one trace per line).
+func writeTraceFile(path string, tracer *metrics.MicroTracer) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	if err := tracer.WriteJSONL(f); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// parseMicroTraceArgs binds fs against args and peels out the single <id>
+// positional, accepting it before OR after the flags. Go's flag package stops at
+// the first non-flag token, so a lone Parse would reject `trace <id> --trace-in x`
+// — the very form the run summary prints. Loop-parse instead, consuming one
+// positional per pass, so both orderings resolve to the same id and flag values.
+func parseMicroTraceArgs(fs *flag.FlagSet, args []string) (string, error) {
+	var positionals []string
+	rest := args
+	for {
+		if err := fs.Parse(rest); err != nil {
+			return "", err
+		}
+		rest = fs.Args()
+		if len(rest) == 0 {
+			break
+		}
+		positionals = append(positionals, rest[0])
+		rest = rest[1:]
+	}
+	if len(positionals) != 1 {
+		return "", fmt.Errorf("want exactly one <id>, got %d", len(positionals))
+	}
+	return positionals[0], nil
+}
+
+// cmdMicroTrace implements `fak micro trace <id>` (#2031): the per-agent trace
+// readout. Without --trace-in it runs a fresh deterministic Mock fleet with tracing
+// on and renders agent <id>'s timeline; with --trace-in it reads a trace JSONL a
+// prior run persisted (--trace-out) — the cross-process separability path. Either
+// way the output is ONE agent's timeline pulled out of the interleaved fleet.
+func cmdMicroTrace(args []string) {
+	fs := flag.NewFlagSet("micro trace", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	var (
+		traceIn = fs.String("trace-in", "", "read a persisted trace JSONL (from `fak micro --trace-out`) instead of running a fresh fleet")
+		nAgents = fs.Int("n", microagent.DefaultWorkers, "fleet size to run when no --trace-in is given")
+		turns   = fs.Int("turns", 3, "turns per agent when no --trace-in is given")
+		jsonOut = fs.Bool("json", false, "emit the trace as JSON instead of a rendered timeline")
+	)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: fak micro trace <id> [flags]")
+		fmt.Fprintln(os.Stderr, "  print ONE microagent's structured timeline (legs, tokens, seat, verdicts)")
+		fmt.Fprintln(os.Stderr, "  with no --trace-in, runs a fresh deterministic Mock fleet (ids micro-000, micro-001, …)")
+		fs.PrintDefaults()
+	}
+	id, err := parseMicroTraceArgs(fs, args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak micro trace: %v\n", err)
+		fs.Usage()
+		os.Exit(2)
+	}
+
+	var tracer *metrics.MicroTracer
+	if *traceIn != "" {
+		f, err := os.Open(*traceIn)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fak micro trace: open --trace-in: %v\n", err)
+			os.Exit(1)
+		}
+		defer f.Close()
+		tracer, err = metrics.ReadTracesJSONL(f)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fak micro trace: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		cfg := defaultMicroConfig(true)
+		cfg.Agents = *nAgents
+		cfg.Turns = *turns
+		if err := validateMicroConfig(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "fak micro trace: %v\n", err)
+			os.Exit(2)
+		}
+		if _, tracer, _, err = driveMicro(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "fak micro trace: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	tr, ok := tracer.Trace(id)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "fak micro trace: no trace for %q (known ids: %s)\n", id, strings.Join(tracer.IDs(), ", "))
+		os.Exit(1)
+	}
+	if *jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(tr); err != nil {
+			fmt.Fprintf(os.Stderr, "fak micro trace: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+	fmt.Print(tr.Render())
 }
