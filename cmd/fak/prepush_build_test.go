@@ -1,6 +1,9 @@
 package main
 
 import (
+	"archive/tar"
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -149,6 +152,22 @@ func TestEvaluatePrePushBuildRevParseFailureFailsOpen(t *testing.T) {
 	}
 }
 
+// TestEvaluatePrePushBuildArchiveStallFailsOpen pins the #3432 contract at the gate level: when
+// materializing the tip cannot complete (a timed-out / wedged `git archive`), the gate must FAIL
+// OPEN (COULD_NOT_RUN, exit 2 → push allowed), never block and never hang. The archive itself is
+// bounded by prepushArchiveTimeout (see TestExtractArchivePipeHonorsDeadline); here we assert the
+// verdict the shell sees once that bound trips.
+func TestEvaluatePrePushBuildArchiveStallFailsOpen(t *testing.T) {
+	setupHappyPrepushSeams(t)
+	prepushExtractTip = func(string, string) (string, error) {
+		return "", fmt.Errorf("archive timed out after 2m0s (failing open): %w", context.DeadlineExceeded)
+	}
+	res, code := evaluatePrePushBuild("/repo", "", time.Minute, false)
+	if code != 2 || res.Verdict != "COULD_NOT_RUN" || res.OK {
+		t.Fatalf("a wedged/timed-out archive must fail open (exit 2, push allowed): verdict=%s code=%d ok=%v", res.Verdict, code, res.OK)
+	}
+}
+
 func contains(xs []string, want string) bool {
 	for _, x := range xs {
 		if x == want {
@@ -165,9 +184,11 @@ func contains(xs []string, want string) bool {
 // gate — run end-to-end through the REAL seams against the archived committed tip — refuses it.
 func TestPrePushBuildFixtureCatchesImporterBreak(t *testing.T) {
 	if testing.Short() {
-		t.Skip("integration: needs git+go+tar")
+		t.Skip("integration: needs git+go")
 	}
-	for _, tool := range []string{"git", "go", "tar"} {
+	// No `tar` here: the gate now untars in-process (the #3432 fix), so the fixture needs only
+	// git + go — and is no longer hostage to which tar flavor is first on PATH.
+	for _, tool := range []string{"git", "go"} {
 		if _, err := exec.LookPath(tool); err != nil {
 			t.Skipf("%s not on PATH: %v", tool, err)
 		}
@@ -221,6 +242,101 @@ func TestPrePushBuildFixtureCatchesImporterBreak(t *testing.T) {
 	res, code = evaluatePrePushBuild(repo, base4, time.Minute, false)
 	if code != 0 || res.Verdict != "NOOP" {
 		t.Fatalf("docs-only push must be NOOP, got verdict=%s code=%d", res.Verdict, code)
+	}
+}
+
+// TestExtractArchiveHonorsDeadline is the direct end-to-end witness for the #3432 fix: with a live
+// context `git archive` is untarred in-process to disk (a nested dir proves recursion); with an
+// ALREADY-EXPIRED deadline the extract must RETURN an error (the producer killed) rather than
+// hang — the exact property whose absence wedged every agent's trunk push for 14+ hours. Needs
+// only git now (extraction is in-process, no external tar), so it no longer depends on which
+// tar flavor is first on PATH — itself part of the #3432 fix.
+func TestExtractArchiveHonorsDeadline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: needs git")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not on PATH: %v", err)
+	}
+	repo := t.TempDir()
+	writeFile(t, repo, "f.txt", "hello\n")
+	writeFile(t, repo, "sub/dir/g.txt", "nested\n")
+	gitFixture(t, repo, "init", "-q")
+	gitFixture(t, repo, "config", "user.email", "t@t")
+	gitFixture(t, repo, "config", "user.name", "t")
+	gitFixture(t, repo, "add", ".")
+	gitFixture(t, repo, "commit", "-q", "-m", "seed")
+	sha := strings.TrimSpace(mustGitOut(t, repo, "rev-parse", "HEAD"))
+
+	// Happy path: a live context extracts the committed tip (top-level + nested) to disk.
+	dir := t.TempDir()
+	if err := extractArchive(context.Background(), repo, sha, dir); err != nil {
+		t.Fatalf("live extract failed: %v", err)
+	}
+	for _, rel := range []string{"f.txt", "sub/dir/g.txt"} {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
+			t.Fatalf("archived file %s missing after extract: %v", rel, err)
+		}
+	}
+
+	// No-wedge: an already-expired deadline must make the extract RETURN (producer killed), not
+	// hang. A generous watchdog fails loudly if the #3432 wedge ever regresses.
+	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(1, 0))
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- extractArchive(ctx, repo, sha, t.TempDir()) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expired-deadline extract must return an error, got nil")
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("extractArchive hung past an expired deadline — the #3432 wedge is not fixed")
+	}
+}
+
+// TestUntarIntoRoundTripAndTraversal exercises the in-process untar (no git/tar needed): a
+// hand-built tar stream with a dir + regular file round-trips to disk, and a `../` entry is
+// refused so the build gate can never write outside its throwaway dir.
+func TestUntarIntoRoundTripAndTraversal(t *testing.T) {
+	dir := t.TempDir()
+	var buf strings.Builder
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{Name: "pkg/", Typeflag: tar.TypeDir, Mode: 0o755}); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("package pkg\n")
+	if err := tw.WriteHeader(&tar.Header{Name: "pkg/a.go", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := untarInto(strings.NewReader(buf.String()), dir); err != nil {
+		t.Fatalf("untarInto round-trip failed: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "pkg", "a.go"))
+	if err != nil || string(got) != string(body) {
+		t.Fatalf("extracted file mismatch: err=%v got=%q", err, got)
+	}
+
+	// A traversal entry must be refused, not written above the root.
+	var evil strings.Builder
+	ew := tar.NewWriter(&evil)
+	payload := []byte("x")
+	if err := ew.WriteHeader(&tar.Header{Name: "../escape.txt", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(payload))}); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = ew.Write(payload)
+	_ = ew.Close()
+	if err := untarInto(strings.NewReader(evil.String()), dir); err == nil {
+		t.Fatal("untarInto must refuse a ../ traversal entry")
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "escape.txt")); err == nil {
+		t.Fatal("traversal entry escaped the extraction root")
 	}
 }
 

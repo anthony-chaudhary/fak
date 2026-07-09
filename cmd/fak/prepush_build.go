@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/tar"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -37,8 +39,9 @@ import (
 //   - resolve the range this push adds (origin/<branch> → origin/main → origin/master), take
 //     its committed changed .go files via `git diff --name-only <base>...HEAD` (three-dot:
 //     the merge-base range = "commits this push adds", NEVER the dirty working tree);
-//   - materialize the committed tip in a throwaway checkout (extractCommittedTip → `git
-//     archive HEAD | tar -x`), immune to peer WIP;
+//   - materialize the committed tip in a throwaway checkout (`git archive HEAD` untarred
+//     IN-PROCESS via extractArchive), immune to peer WIP, under a hard deadline so a stalled
+//     `git archive` can never wedge the push (the #3432 fix — see prepushArchiveTimeout);
 //   - build the import graph THERE (goListGraph in the archive dir) and select the changed
 //     packages PLUS their importer closure (affectedtests.Select) — the importer build is what
 //     surfaces the cross-package symbol break;
@@ -78,6 +81,17 @@ var (
 	prepushBuild        = goBuildPackages
 	prepushNow          = time.Now
 )
+
+// prepushArchiveTimeout bounds the whole-repo `git archive` + in-process untar (extractArchive).
+// The gate is fail-open BY DESIGN (see the file header), but the archive step had NO deadline, so
+// a `git archive` that stalled — the witnessed #3432 wedge: it blocked writing to a full stdout
+// pipe that a dead/early-exiting external `tar` stopped draining — hung every agent's trunk push
+// for 14+ hours at ~0 CPU with no bound. A deadline turns that silent forever-wedge into a bounded
+// COULD_NOT_RUN (exit 2 → push allowed), honoring the fail-open contract. A seam so a test can
+// shrink it. (goBuildPackages is deliberately left UNbounded: its (detail, ok) contract maps a
+// false to TRUNK_WOULD_NOT_COMPILE — a hard block — so a build timeout there would false-block a
+// slow-but-correct push, the opposite of fail-open. Bounding it needs a separate fail-open state.)
+var prepushArchiveTimeout = 2 * time.Minute
 
 // Host-wide advisory single-flight for the expensive trunk-build gate.
 //
@@ -321,35 +335,136 @@ func prepushGitRevParse(r, ref string) (string, error) {
 // prepushArchiveTip archives sha from repo r into a fresh temp dir (committed bytes only — `git
 // archive` never reads the working tree or index) and returns its path. A local twin of
 // ci_preflight's extractCommittedTip, kept here so the gate carries no cross-file dependency.
+//
+// Deadlock-proofing (#3432): the archive+extract runs under prepushArchiveTimeout, so `git
+// archive` can no longer wedge the push forever — the deadline kills it and the gate fails open.
+// On any error the temp dir is removed so a partial extraction never leaks.
 func prepushArchiveTip(r, sha string) (string, error) {
 	dir, err := os.MkdirTemp("", "fak-prepush-build-*")
 	if err != nil {
 		return "", err
 	}
-	ar := exec.Command("git", "-C", r, "archive", "--format=tar", sha)
-	windowgate.ConfigureBackgroundCommand(ar)
-	tar := exec.Command("tar", "-x", "-C", dir)
-	windowgate.ConfigureBackgroundCommand(tar)
-	pipe, err := ar.StdoutPipe()
-	if err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), prepushArchiveTimeout)
+	defer cancel()
+	if err := extractArchive(ctx, r, sha, dir); err != nil {
 		os.RemoveAll(dir)
 		return "", err
-	}
-	tar.Stdin = pipe
-	if err := tar.Start(); err != nil {
-		os.RemoveAll(dir)
-		return "", err
-	}
-	if err := ar.Run(); err != nil {
-		_ = tar.Wait()
-		os.RemoveAll(dir)
-		return "", fmt.Errorf("git archive: %w", err)
-	}
-	if err := tar.Wait(); err != nil {
-		os.RemoveAll(dir)
-		return "", fmt.Errorf("tar extract: %w", err)
 	}
 	return dir, nil
+}
+
+// extractArchive streams `git archive <sha>` from repo r and untars it into dir IN-PROCESS (Go's
+// archive/tar), under ctx. This is the load-bearing #3432 fix, and it closes the wedge in two
+// ways at once:
+//
+//   - No external `tar`. The old pipe shelled out to `tar -x`; on this host the first `tar` on
+//     PATH is MSYS GNU tar, which cannot open a native Windows `-C` path and exits immediately.
+//     A consumer that dies early stops draining, so `git archive` blocks writing to a full 64 KiB
+//     pipe at ~0 CPU — the witnessed 14-hour wedge (a small archive that fits the buffer merely
+//     surfaces the error; a real repo tip hangs). Draining the stream in-process removes both the
+//     tar-flavor fragility AND the "nobody drains the producer" deadlock class entirely, on every
+//     OS.
+//   - Hard deadline. Even a `git archive` that stalls on its own is now bounded: ctx expiry kills
+//     it and we return a diagnostic error, so the gate fails open (COULD_NOT_RUN, push allowed)
+//     rather than hanging. Factored out so the no-wedge contract is unit-testable with a
+//     pre-expired deadline.
+//
+// The producer's stdout is always read to EOF (or it is killed) before Wait, so Wait never races a
+// live read. git-only: no `tar` binary is required to push anymore.
+func extractArchive(ctx context.Context, r, sha, dir string) error {
+	ar := exec.CommandContext(ctx, "git", "-C", r, "archive", "--format=tar", sha)
+	windowgate.ConfigureBackgroundCommand(ar)
+	stdout, err := ar.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	var stderr strings.Builder
+	ar.Stderr = &stderr
+
+	if err := ar.Start(); err != nil {
+		return fmt.Errorf("git archive start: %w", err)
+	}
+	// Drain and extract in-process — this NEVER lets the producer block on a full pipe.
+	untarErr := untarInto(stdout, dir)
+	if untarErr != nil {
+		// Extraction bailed before EOF; the producer may still be writing, so kill it rather than
+		// let ar.Wait() block on a stream nobody is reading.
+		_ = ar.Process.Kill()
+	}
+	// Drain to EOF before Wait: tar.Reader.Next() stops at the logical end-of-archive marker, but
+	// `git archive` writes record padding AFTER it. Leaving that in the pipe lets git block on the
+	// write and never exit, so ar.Wait() would hang forever — the same #3432 wedge in a new guise.
+	// Reading to EOF also satisfies StdoutPipe's "all reads complete before Wait" contract.
+	_, _ = io.Copy(io.Discard, stdout)
+	waitErr := ar.Wait()
+
+	switch {
+	case ctx.Err() != nil:
+		return fmt.Errorf("archive timed out after %s (failing open): %w", prepushArchiveTimeout, ctx.Err())
+	case untarErr != nil:
+		return fmt.Errorf("untar archive: %w", untarErr)
+	case waitErr != nil:
+		return fmt.Errorf("git archive: %w (%s)", waitErr, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+// untarInto extracts a `git archive --format=tar` stream into dir using Go's archive/tar — no
+// external `tar` binary, so it is immune to the MSYS-vs-bsdtar path ambiguity that triggered the
+// #3432 wedge on Windows. It materializes directories and regular files (all a `go build`/`go
+// list` of the tip needs); pax global headers and non-regular entries (symlinks — absent from this
+// Go source tree) are skipped. Each entry name is confined under dir to refuse any `../` traversal.
+func untarInto(r io.Reader, dir string) error {
+	tr := tar.NewReader(r)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		target, err := safeArchiveJoin(dir, hdr.Name)
+		if err != nil {
+			return err
+		}
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(hdr.Mode)&0o777|0o600)
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(f, tr); err != nil {
+				_ = f.Close()
+				return err
+			}
+			if err := f.Close(); err != nil {
+				return err
+			}
+		default:
+			// pax_global_header, symlinks, etc. — nothing a compile check of a Go tip requires.
+			continue
+		}
+	}
+}
+
+// safeArchiveJoin joins a tar entry name under root and REFUSES any name that would escape it —
+// an absolute path or one whose cleaned form climbs past root via `..`. A defensive guard: `git
+// archive` emits clean repo-relative names, so a `..`/absolute entry is anomalous and a build gate
+// must reject it loudly rather than write outside its throwaway dir.
+func safeArchiveJoin(root, name string) (string, error) {
+	rel := filepath.Clean(filepath.FromSlash(name))
+	if filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("archive entry %q escapes extraction root", name)
+	}
+	return filepath.Join(root, rel), nil
 }
 
 // goBuildPackages runs `go build <pkgs>` in dir (the archive tip). Returns (detail, ok); on
