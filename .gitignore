@@ -102,8 +102,11 @@ tools/_walltime.*
 # Regen / run-artifact leaks that accumulate in the shared dogfood tree. None of these are
 # inputs to a build — they are per-session scratch (.regen-scratch/ holds regenerated copies
 # of the top-level docs), DOS run telemetry (dos.runs/*.json), a one-off lane-isolation
-# helper, or the .run.{err,out,log} sidecars that `fak sweep` already classifies as junk.
+# helper, transient .isoprobe-<n>/ isolation-probe checkouts (throwaway source copies a
+# lane-isolation probe drops at the repo root), or the .run.{err,out,log} sidecars that
+# `fak sweep` already classifies as junk.
 .regen-scratch/
+.isoprobe-*/
 dos.runs/
 /.split_reconstruct.py
 *.run.err
@@ -532,6 +535,13 @@ memqdemo-report.json
 #   /.tmp/     : root session scratch dir (fs dumps, pin-check checkout copies);
 #                tree-walking gates (refaudit, scorecards) prune gitignored paths,
 #                so an unignored .tmp reddens them with phantom findings
+#   /.tmp_overlay/ /.ovl/ : `go test -overlay` gate scratch — the overlay JSON, its
+#                stub replacements, and a `head/` git-archive of HEAD for the
+#                standalone build proof. Must live in-tree (the OUT_OF_TREE_WRITE
+#                guard refuses external writes), so it can't go to the scratchpad;
+#                ignore both names so a 100+MB checkout tree never re-leaks into
+#                `git status`. Prefer /.tmp_overlay/ (or a /_ovl/ under the /_* root
+#                namespace) for new runs rather than minting more dotted names.
 #   /*_msg_*.txt: `fak commit` message drops (commit_msg_*, docs_msg_*)
 #   /err.txt   : a bare stderr redirect drop
 /scratch_*
@@ -542,6 +552,7 @@ memqdemo-report.json
 /_tmp_*
 /.tmp/
 /.tmp_overlay/
+/.ovl/
 /*_msg_*.txt
 /err.txt
 
