@@ -1,6 +1,6 @@
 ---
 name: modularize
-description: One focused, repeatable pass that retires the code-quality scorecard's `architecture` debt — the god-files (>1500 lines) and god-functions (>200 lines) that /quality-score flags as RISKY and explicitly defers to "a focused pass". Splits a monolith along REAL concern seams via behavior-preserving code motion (the goimports recipe: hazard-check → plan boundaries with tools/godsplit_plan.py → sed-extract → goimports -w → gofmt → verify → prove → commit by explicit path), and extracts long functions into named helpers (linear flow → helper + struct-unpack) or a named state struct with methods (closure-soup). Re-measures to PROVE architecture-debt dropped, verifies behavior with go build + go vet + go test, and commits ONLY the touched packages by explicit path. The architecture-KPI focused pass /quality-score points to. Use when `architecture` is the heaviest KPI, to drive code-debt toward 0, or on a /loop cadence to keep the kernel from re-accreting monoliths.
+description: One focused, repeatable pass that retires the code-quality scorecard's `architecture` debt — the god-files (>1500 lines) and god-functions (>200 lines) that /quality-score flags as RISKY and explicitly defers to "a focused pass". Splits a monolith along REAL concern seams via behavior-preserving code motion (the goimports recipe: hazard-check → plan boundaries with tools/godsplit_plan.py → sed-extract → goimports -w → gofmt → prove-no-decl-dropped with tools/refactor_verify.py → verify → prove → commit by explicit path), and extracts long functions into named helpers (linear flow → helper + struct-unpack) or a named state struct with methods (closure-soup). Re-measures to PROVE architecture-debt dropped, verifies behavior with go build + go vet + go test, and commits ONLY the touched packages by explicit path. The architecture-KPI focused pass /quality-score points to. Use when `architecture` is the heaviest KPI, to drive code-debt toward 0, or on a /loop cadence to keep the kernel from re-accreting monoliths.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Write, Edit, Grep, Glob
@@ -27,9 +27,12 @@ behaviour review) → prove the drop → commit ONLY your packages by explicit p
 
 Moving a top-level declaration to another file **in the same package** is a *semantic
 no-op in Go* — package, not file, is the scope. So a god-file split can't change
-behavior, and `go build` + `go vet` + `go test` is a near-complete gate. There are
-exactly **three exceptions** that make code motion NOT a no-op; `tools/godsplit_plan.py`
-flags all three:
+behavior, and `go build` + `go vet` + `go test` is a *near*-complete gate. The residual
+`go build` cannot cover — a top-level decl **dropped** by an incomplete cut that happens
+to be unreferenced in-module (so no `undefined:`) — is what closes it from *near* to
+complete: `tools/refactor_verify.py` proves the declaration set was preserved (Step 4).
+There are exactly **three exceptions** that make code motion NOT a no-op;
+`tools/godsplit_plan.py` flags all three:
 
 1. **per-file build tags** (`//go:build …`) — moving a decl changes which file carries the constraint;
 2. **`func init()`** — init order is **filename-alphabetical** across a package, so moving an `init()` between files can silently reorder initialization;
@@ -132,6 +135,39 @@ code motion; redirect only to **in-tree** paths — the repo-guard PreToolUse ho
 
 ## Step 4 — Verify (behaviour is preserved — don't assume it, prove it)
 
+### 4.0 — Prove no definition was dropped (the check `go build` cannot do)
+
+A pure code-motion split preserves the package's top-level declaration set **exactly**.
+`go build` catches a *referenced* symbol that went missing (`undefined:`) and a *duplicated*
+one (`redeclared`) — but a decl that was **dropped** and happens to be unreferenced in-module
+(dead-but-real, or an exported symbol whose only consumers are out-of-tree or a JSON wire
+contract) compiles clean and vanishes silently. That is the "split a god-file, then a
+definition is missing" failure. Close it mechanically **first** — it is fast and catches what
+the toolchain structurally cannot:
+
+```bash
+python tools/refactor_verify.py --expect-motion <orig.go> <your new files>   # exit 1 on any drop
+```
+
+It diffs the package's decl multiset **before** (`HEAD`) vs **after** (working tree). For a
+pure in-package split the correct verdict is `clean`; `--expect-motion` makes **any** decl
+that left the package a hard failure. Read each finding:
+
+- **`DROPPED`** — a definition that exists **nowhere** after the cut. Either you missed a
+  `sed -n` range (the split is INCOMPLETE — go add it) or it is a genuine deletion, which does
+  **not** belong in a commit labelled "pure code motion" — split it into its own honest
+  `refactor(x): remove dead <name>` commit with the reason in the body.
+- **`RELOCATED`** — a decl moved to another package (a cross-package consolidation, not an
+  in-package split). Drop `--expect-motion`, include the destination package in scope, and
+  confirm each move is intended.
+- **`OVER-SPLIT`** — a new file carrying a single decl (see anti-gaming law #2).
+
+(Scope note: it is DECL-level — it proves no whole decl was dropped, not that a struct's
+FIELDS survived a `type Local = pkg.Remote` alias consolidation. For that, read the aliased
+type's fields by hand.)
+
+### 4.1 — Build, vet, test
+
 `go build` and `go vet` run natively; **run the tests under WSL** — per AGENTS.md, native
 `go test` is blocked by an OS Application-Control policy on freshly-compiled test binaries on
 this checkout (an OS quirk, not a code failure), and `/quality-score` validates the same way:
@@ -200,6 +236,10 @@ check the delegated diffs for behaviour-preservation before committing.
    concern (the loader, the rotary embedding, the eviction path) — not "lines 1–700 / 701–1400". A
    split that just chops a file in half to beat 1500 is gaming, not modularity.
 2. **Never create a file-per-function.** Over-splitting is its own debt; group related decls.
+   `refactor_verify.py` flags this mechanically as **`OVER-SPLIT`** — a *new* file carrying a
+   single top-level decl (per-OS build-tagged stubs and `func main` entrypoints excepted, since
+   those are one-decl by design). If it fires, your seams are too fine: merge the fragments into
+   one cohesive concern file.
 3. **Behaviour MUST be preserved — verify, don't assume.** Pure code motion is safe *only* once the
    three hazards (build tags, init order, aliases) are cleared; an extraction can silently change a
    captured variable. Build + vet + test (+ review for delegated work) is non-negotiable.
@@ -214,6 +254,7 @@ check the delegated diffs for behaviour-preservation before committing.
 - After a feature lands a 1500+-line file or a 200+-line function in a critical package.
 - On a `/loop` cadence to keep the kernel from re-accreting monoliths between releases.
 
-The scorecard and `godsplit_plan.py` are read-only; this skill's only writes are your genuine
-splits and the new concern files. It never edits the frozen ABI, never games a seam, and never
-commits a behaviour change it didn't verify.
+The scorecard, `godsplit_plan.py`, and `refactor_verify.py` are read-only; this skill's only
+writes are your genuine splits and the new concern files. It never edits the frozen ABI, never
+games a seam, and never commits a behaviour change it didn't verify — or a split it didn't prove
+declaration-complete.
