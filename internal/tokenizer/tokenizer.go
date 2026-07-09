@@ -313,6 +313,36 @@ func (t *Tokenizer) Decode(ids []int) (string, error) {
 	return text, nil
 }
 
+// TokenBytes returns the exact byte sequence token id decodes to, independent of
+// any surrounding context — the raw bytes Decode emits for the single-id slice
+// []int{id}. It is the id->bytes accessor the guided-decode logit-mask adapter
+// (internal/model, #26) needs to test a candidate token against the byte-level
+// guideddecode FSM: given a decoded prefix, a token may extend it only if its
+// TokenBytes keep the decode on a valid tool-call-envelope path.
+//
+// Determinism (why this is unambiguous). BPE merge ranks affect only ENCODING
+// (text->ids); the reverse id->bytes map is a plain per-token table lookup — the
+// GPT-2 ByteLevel rune->byte inverse for a normal piece, the literal UTF-8 content
+// bytes for a special token, or the SentencePiece byte-fallback / ▁->space mapping
+// in metaspace mode — so there is no merge ambiguity on the decode side. A special
+// token returns the bytes of its literal content (e.g. "<|im_end|>"), matching
+// Decode, which emits special content verbatim.
+//
+// TokenBytes returns nil for an out-of-range id, a missing/sparse vocab slot, or a
+// piece carrying a non-ByteLevel rune — i.e. any id that is not a decodable token.
+// Every real token yields at least one byte, so nil unambiguously means "not an
+// emittable token" (which the adapter masks out).
+func (t *Tokenizer) TokenBytes(id int) []byte {
+	decoded, err := t.decodeToken(id)
+	if err != nil {
+		return nil
+	}
+	if decoded.isSpecial {
+		return []byte(decoded.special)
+	}
+	return decoded.bytes
+}
+
 // Vocab returns the number of id slots in the tokenizer.
 func (t *Tokenizer) Vocab() int {
 	return len(t.idToToken)
