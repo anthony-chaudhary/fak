@@ -80,6 +80,7 @@ dispatch⇄replan cadence on one lane) and [`run-it-all-night`](run-it-all-night
 
 | Skill | What it does |
 |---|---|
+| [`commit-clean`](commit-clean/SKILL.md) | The everyday-ship pass: land YOUR finished paths on the shared trunk cleanly. Lint the subject with `fak commit --preview`, stage-and-commit EXACTLY your paths in one locked step via `fak commit --path …`, verify only your path-set + message landed, push when green. Mechanizes the "commit clean by default" mantra (trunk-only, explicit pathspec, DCO sign-off, bindable `(fak <leaf>)` stamp) and reads back the closed refusal vocabulary. The everyday counterpart of `release` (versioned cut). |
 | [`release`](release/SKILL.md) | Full versioned release: decide → bump VERSION → draft notes → commit → push → tag → create the GitHub release page. Wraps `tools/release_*.py`; encodes the ordering gotchas the helpers enforce by refusing. |
 | [`refresh-readme`](refresh-readme/SKILL.md) | Keep `README.md` current and honest: run the freshness auditor, fix every FAIL, apply the three front-page laws, re-stamp, commit only the README lane by explicit path. |
 | [`issue-triage`](issue-triage/SKILL.md) | Classify + rank the open GitHub issue backlog, propose mechanical gardening moves (mark-stale, close-dormant), apply only on approval. Read-only helper; writes are gated. |
