@@ -8,11 +8,13 @@ import (
 
 func TestBuildWorkerCommandMatchesBackends(t *testing.T) {
 	tests := []struct {
-		name     string
-		backend  string
-		model    string
-		fallback string
-		want     []string
+		name      string
+		backend   string
+		model     string
+		fallback  string
+		effort    string
+		ultracode bool
+		want      []string
 	}{
 		{
 			name:    "claude prompt, no fallback",
@@ -44,6 +46,34 @@ func TestBuildWorkerCommandMatchesBackends(t *testing.T) {
 			want:     []string{"claude", "-p", "--permission-mode", "bypassPermissions", "--model", "claude-sonnet-5", "--fallback-model", "claude-opus-4-8", "resolve it"},
 		},
 		{
+			// Per-issue tier uplift: --effort follows --model and precedes --fallback-model.
+			name:    "claude primary model with effort",
+			backend: "claude",
+			model:   "claude-fable-5",
+			effort:  "xhigh",
+			want:    []string{"claude", "-p", "--permission-mode", "bypassPermissions", "--model", "claude-fable-5", "--effort", "xhigh", "resolve it"},
+		},
+		{
+			// Ultracode supersedes a bare --effort: emit --settings, never --effort, even when
+			// both are set. --settings sits where --effort would, before --fallback-model.
+			name:      "claude ultracode supersedes effort",
+			backend:   "claude",
+			model:     "claude-opus-4-8",
+			effort:    "xhigh",
+			ultracode: true,
+			fallback:  "claude-sonnet-5",
+			want:      []string{"claude", "-p", "--permission-mode", "bypassPermissions", "--model", "claude-opus-4-8", "--settings", `{"ultracode":true}`, "--fallback-model", "claude-sonnet-5", "resolve it"},
+		},
+		{
+			// Effort/ultracode are Claude-only: opencode ignores both.
+			name:      "opencode ignores effort and ultracode",
+			backend:   "opencode",
+			model:     "glm-5.2",
+			effort:    "xhigh",
+			ultracode: true,
+			want:      []string{"opencode", "run", "--print-logs", "--dangerously-skip-permissions", "-m", "glm-5.2", OpencodePromptNotice},
+		},
+		{
 			// --fallback-model is Claude-only: opencode pins its own model with -m and never
 			// gets the Claude flag even when a fallback is passed.
 			name:     "opencode ignores claude fallback",
@@ -70,7 +100,12 @@ func TestBuildWorkerCommandMatchesBackends(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := BuildWorkerCommand(tt.backend, "resolve it", tt.model, tt.fallback)
+			got, err := BuildWorkerCommand(tt.backend, "resolve it", WorkerLaunch{
+				Model:     tt.model,
+				Fallback:  tt.fallback,
+				Effort:    tt.effort,
+				Ultracode: tt.ultracode,
+			})
 			if err != nil {
 				t.Fatalf("BuildWorkerCommand: %v", err)
 			}

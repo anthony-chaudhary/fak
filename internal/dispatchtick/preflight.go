@@ -91,16 +91,26 @@ type HostCheck struct {
 }
 
 type AccountCheck struct {
-	Available   bool     `json:"available"`
-	Tag         string   `json:"tag,omitempty"`
-	Dir         string   `json:"dir,omitempty"`
-	Tier        any      `json:"tier,omitempty"`
-	Model       string   `json:"model,omitempty"`
-	Reason      string   `json:"reason,omitempty"`
-	Error       string   `json:"error,omitempty"`
-	Blocked     []string `json:"blocked,omitempty"`
-	LoginStatus string   `json:"login_status,omitempty"`
-	CanServe    *bool    `json:"can_serve,omitempty"`
+	Available bool   `json:"available"`
+	Tag       string `json:"tag,omitempty"`
+	Dir       string `json:"dir,omitempty"`
+	Tier      any    `json:"tier,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	// Error is set ONLY when the account probe itself could not complete (the roster
+	// was unreadable / the scan timed out) -- as distinct from a scan that ran and
+	// found no free account. classifyPreflight routes a non-empty Error to
+	// REFUSE_INSPECT, never REFUSE_NO_ACCOUNT, so a failed probe is never misread as
+	// genuine pool saturation.
+	Error string `json:"error,omitempty"`
+	// Blocked is the flat list of blocked account tags (kept for back-compat).
+	Blocked []string `json:"blocked,omitempty"`
+	// BlockedAccounts carries the per-account block REASON (throttled / needs-login /
+	// at session cap), not just the tag -- so a REFUSE_NO_ACCOUNT verdict can name why
+	// each seat in the target tier was refused instead of only that it was.
+	BlockedAccounts []BlockedAccount `json:"blocked_accounts,omitempty"`
+	LoginStatus     string           `json:"login_status,omitempty"`
+	CanServe        *bool            `json:"can_serve,omitempty"`
 }
 
 type KernelCheck struct {
@@ -344,12 +354,21 @@ func classifyPreflight(in PreflightInput, capacity, live int, seatsDepleted bool
 		return PreflightRefuseAtCap, fmt.Sprintf("live workers %d >= cap %d (kernel alive=%s, os procs=%d, dos target=%s, host_cap=%s, max-workers=%d)",
 			live, capacity, ptrString(in.Kernel.Alive), in.OSWorkerProcs, ptrString(in.Kernel.Target), ptrString(hostCap), in.MaxWorkers)
 	case !in.Account.Available:
-		blocked := strings.Join(nonEmpty(in.Account.Blocked), ", ")
-		reason := "switcher has no available worker account at the requested tier"
-		if blocked != "" {
-			reason += " (blocked: " + blocked + ")"
+		// A failed account PROBE (roster unreadable / scan timed out) is not the same as
+		// a probe that ran and found the pool saturated. Refuse to INSPECT so a timed-out
+		// scan is never misread as "every account is busy" -- the operator needs to fix a
+		// broken probe, not wait for capacity that was never actually measured.
+		if detail := strings.TrimSpace(in.Account.Error); detail != "" {
+			return PreflightRefuseInspect, "account availability scan could not complete: " + detail + " - refusing on an unmeasured account pool (a probe failure, not saturation)"
 		}
-		if detail := firstNonEmpty(in.Account.Reason, in.Account.Error); detail != "" {
+		// Genuine no-account: the scan ran, there is spawn headroom (live<cap, checked
+		// above), but no account is free at the requested tier. Name the live/cap so this
+		// reads as "no free seat", not "at cap", and cite each blocked seat's REASON.
+		reason := fmt.Sprintf("switcher has no available worker account at the requested tier (live=%d, cap=%d)", live, capacity)
+		if blocked := blockedAccountsSummary(in.Account); blocked != "" {
+			reason += " [blocked: " + blocked + "]"
+		}
+		if detail := strings.TrimSpace(in.Account.Reason); detail != "" {
 			reason += ": " + detail
 		}
 		return PreflightRefuseNoAccount, reason
@@ -409,16 +428,17 @@ func (h HostCheck) Map() map[string]any {
 
 func (a AccountCheck) Map() map[string]any {
 	return map[string]any{
-		"available":    a.Available,
-		"tag":          a.Tag,
-		"dir":          a.Dir,
-		"tier":         a.Tier,
-		"model":        a.Model,
-		"reason":       a.Reason,
-		"error":        a.Error,
-		"blocked":      a.Blocked,
-		"login_status": a.LoginStatus,
-		"can_serve":    a.CanServe,
+		"available":        a.Available,
+		"tag":              a.Tag,
+		"dir":              a.Dir,
+		"tier":             a.Tier,
+		"model":            a.Model,
+		"reason":           a.Reason,
+		"error":            a.Error,
+		"blocked":          a.Blocked,
+		"blocked_accounts": a.BlockedAccounts,
+		"login_status":     a.LoginStatus,
+		"can_serve":        a.CanServe,
 	}
 }
 
@@ -442,7 +462,8 @@ func publicAccount(a AccountCheck) AccountCheck {
 	return AccountCheck{
 		Available: a.Available, Tag: a.Tag, Dir: a.Dir, Tier: a.Tier, Model: a.Model,
 		Reason: a.Reason, Error: a.Error, Blocked: append([]string(nil), a.Blocked...),
-		LoginStatus: a.LoginStatus, CanServe: a.CanServe,
+		BlockedAccounts: append([]BlockedAccount(nil), a.BlockedAccounts...),
+		LoginStatus:     a.LoginStatus, CanServe: a.CanServe,
 	}
 }
 
@@ -479,6 +500,35 @@ func ptrString(p *int) string {
 		return "<nil>"
 	}
 	return fmt.Sprint(*p)
+}
+
+// blockedAccountsSummary renders the per-account block reasons for a NO_ACCOUNT verdict
+// as "tag=reason" pairs (throttled / needs-login / at session cap), so the refusal names
+// WHY each seat in the target tier was turned away. It prefers the structured
+// BlockedAccounts and falls back to the flat tag list when only tags are available.
+func blockedAccountsSummary(a AccountCheck) string {
+	if len(a.BlockedAccounts) > 0 {
+		parts := make([]string, 0, len(a.BlockedAccounts))
+		for _, b := range a.BlockedAccounts {
+			tag := strings.TrimSpace(b.Tag)
+			if tag == "" {
+				tag = strings.TrimSpace(b.Account)
+			}
+			reason := strings.TrimSpace(b.Reason)
+			switch {
+			case tag != "" && reason != "":
+				parts = append(parts, tag+"="+reason)
+			case tag != "":
+				parts = append(parts, tag)
+			case reason != "":
+				parts = append(parts, reason)
+			}
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, "; ")
+		}
+	}
+	return strings.Join(nonEmpty(a.Blocked), ", ")
 }
 
 func nonEmpty(in []string) []string {

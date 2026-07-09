@@ -203,9 +203,20 @@ func joinDedupedChain(primary string, chain []string) string {
 	return strings.Join(out, ",")
 }
 
+// WorkerLaunch is the resolved launch configuration BuildWorkerCommand renders into a
+// backend argv. Model/Fallback are the historical knobs; Effort/Ultracode carry the
+// per-issue tier uplift. All four default to the zero value, so a WorkerLaunch{} yields
+// the exact pre-tier argv (byte-identical to the old model+fallback-only path).
+type WorkerLaunch struct {
+	Model     string // primary model to pin (Claude --model / opencode|codex -m)
+	Fallback  string // Claude-only comma-separated --fallback-model chain
+	Effort    string // Claude-only reasoning effort (--effort); ignored when Ultracode
+	Ultracode bool   // Claude-only: emit --settings ultracode (implies xhigh + workflow)
+}
+
 // BuildWorkerCommand returns the backend-specific issue-resolution worker argv.
 //
-// fallbackModel is the comma-separated Claude fallback CHAIN handed to `claude -p`
+// Fallback is the comma-separated Claude fallback CHAIN handed to `claude -p`
 // via --fallback-model: when the primary (seat-default) model is overloaded or
 // unavailable, Claude Code retries the same headless turn on the next model in the
 // list instead of failing the worker outright. It is Claude-specific and print-mode
@@ -216,18 +227,30 @@ func joinDedupedChain(primary string, chain []string) string {
 // headless counterpart of the interactive `fak accounts launch` fallback chain
 // (accounts_launch.go): unattended fleet work degrades gracefully to the fallback model
 // through a transient overload window instead of dying and re-dispatching the same model.
-func BuildWorkerCommand(backend, prompt, model, fallbackModel string) ([]string, error) {
+//
+// Effort and Ultracode are the Claude-only per-issue tier uplift (both ignored by
+// opencode/codex). They are mutually exclusive on emit: ultracode already runs at xhigh
+// PLUS multi-agent workflow orchestration, so it supersedes a bare --effort. Both default
+// off, so an unconfigured fleet stays byte-identical to today.
+func BuildWorkerCommand(backend, prompt string, launch WorkerLaunch) ([]string, error) {
 	switch backend {
 	case "claude":
 		cmd := []string{"claude", "-p", "--permission-mode", "bypassPermissions"}
 		// Un-blank the primary model (Layer 4): claude takes --model (not -m). Gated on
 		// non-empty so an unconfigured fleet is byte-identical to today (model==""), and
-		// emitted BEFORE --fallback-model to match the interactive launcher's ordering.
-		if strings.TrimSpace(model) != "" {
-			cmd = append(cmd, "--model", model)
+		// emitted BEFORE the effort/ultracode and --fallback-model flags to match the
+		// interactive launcher's ordering (accounts_launch.go).
+		if strings.TrimSpace(launch.Model) != "" {
+			cmd = append(cmd, "--model", launch.Model)
 		}
-		if strings.TrimSpace(fallbackModel) != "" {
-			cmd = append(cmd, "--fallback-model", fallbackModel)
+		switch {
+		case launch.Ultracode:
+			cmd = append(cmd, "--settings", UltracodeSettingsArg)
+		case strings.TrimSpace(launch.Effort) != "":
+			cmd = append(cmd, "--effort", launch.Effort)
+		}
+		if strings.TrimSpace(launch.Fallback) != "" {
+			cmd = append(cmd, "--fallback-model", launch.Fallback)
 		}
 		return append(cmd, prompt), nil
 	case "opencode":
@@ -235,14 +258,14 @@ func BuildWorkerCommand(backend, prompt, model, fallbackModel string) ([]string,
 		// failures such as GLM quota walls to its logger, and without this flag #1275
 		// degrades into a banner-only no-op log.
 		cmd := []string{"opencode", "run", "--print-logs", "--dangerously-skip-permissions"}
-		if strings.TrimSpace(model) != "" {
-			cmd = append(cmd, "-m", model)
+		if strings.TrimSpace(launch.Model) != "" {
+			cmd = append(cmd, "-m", launch.Model)
 		}
 		return append(cmd, OpencodePromptNotice), nil
 	case "codex":
 		cmd := []string{"codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"}
-		if strings.TrimSpace(model) != "" {
-			cmd = append(cmd, "-m", model)
+		if strings.TrimSpace(launch.Model) != "" {
+			cmd = append(cmd, "-m", launch.Model)
 		}
 		return append(cmd, "-"), nil
 	default:

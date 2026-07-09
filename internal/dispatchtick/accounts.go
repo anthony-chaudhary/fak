@@ -752,26 +752,35 @@ func blockedTierAccounts(rows []AccountRow, tier int) []AccountRow {
 	return out
 }
 
+// BlockedAccountFromRow projects a blocked AccountRow into the public BlockedAccount
+// shape (defaulting an empty block reason to "blocked"), so the dispatch preflight can
+// carry the SAME structured per-account block reason the wave allocator already
+// surfaces via publicBlockedAccounts -- instead of collapsing the pool to a bare list
+// of tags that hides WHY each seat was refused (throttled / needs-login / at-cap).
+func BlockedAccountFromRow(row AccountRow) BlockedAccount {
+	reason := strings.TrimSpace(row.BlockReason)
+	if reason == "" {
+		reason = "blocked"
+	}
+	return BlockedAccount{
+		Tag:         row.Tag,
+		Account:     row.Account,
+		Product:     row.Product,
+		ModelTier:   row.ModelTier,
+		Model:       row.Model,
+		Reason:      reason,
+		LoginStatus: row.LoginStatus,
+		CanServe:    row.CanServe,
+	}
+}
+
 func publicBlockedAccounts(rows []AccountRow, tier int) []BlockedAccount {
 	out := []BlockedAccount{}
 	for _, row := range rows {
 		if row.ModelTier != tier || row.Available {
 			continue
 		}
-		reason := strings.TrimSpace(row.BlockReason)
-		if reason == "" {
-			reason = "blocked"
-		}
-		out = append(out, BlockedAccount{
-			Tag:         row.Tag,
-			Account:     row.Account,
-			Product:     row.Product,
-			ModelTier:   row.ModelTier,
-			Model:       row.Model,
-			Reason:      reason,
-			LoginStatus: row.LoginStatus,
-			CanServe:    row.CanServe,
-		})
+		out = append(out, BlockedAccountFromRow(row))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Product != out[j].Product {

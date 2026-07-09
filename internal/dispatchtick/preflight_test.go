@@ -1,6 +1,9 @@
 package dispatchtick
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func roomyResources() HostResources {
 	return HostResources{Cores: IntPtr(64), FreeRAMMB: IntPtr(128000), TotalThreads: IntPtr(1000)}
@@ -323,6 +326,57 @@ func TestEvaluatePreflightBlockedPoolIsNoAccount(t *testing.T) {
 	got := EvaluatePreflight(in)
 	if got.Verdict != PreflightRefuseNoAccount {
 		t.Fatalf("verdict = %s, want REFUSE_NO_ACCOUNT", got.Verdict)
+	}
+}
+
+// A failed account PROBE (roster unreadable / scan timed out) must refuse to INSPECT,
+// never REFUSE_NO_ACCOUNT -- a timed-out scan measured nothing, so reporting saturation
+// would send the operator to wait for capacity that was never checked.
+func TestEvaluatePreflightAccountScanErrorIsInspectNotNoAccount(t *testing.T) {
+	in := preflightInput()
+	in.Kernel.Target = IntPtr(0)
+	in.Account = AccountCheck{Available: false, Error: "read account registry: context deadline exceeded"}
+	got := EvaluatePreflight(in)
+	if got.Verdict != PreflightRefuseInspect {
+		t.Fatalf("verdict = %s, want REFUSE_INSPECT for a failed account probe", got.Verdict)
+	}
+	if !strings.Contains(got.Reason, "deadline exceeded") || !strings.Contains(got.Reason, "not saturation") {
+		t.Fatalf("reason = %q, want the probe error surfaced and disambiguated from saturation", got.Reason)
+	}
+}
+
+// A genuine no-account refusal (the scan RAN, headroom exists, but no seat is free) must
+// name the live/cap and each blocked seat's REASON, not just its tag -- so "0 of N usable"
+// reads as "no free seat", not "at cap".
+func TestEvaluatePreflightNoAccountNamesBlockReasonsAndCap(t *testing.T) {
+	in := preflightInput()
+	in.MaxWorkers = 8
+	in.Kernel.Target = IntPtr(0)
+	in.Account = AccountCheck{
+		Available: false,
+		Blocked:   []string{"busy", "day26"},
+		BlockedAccounts: []BlockedAccount{
+			{Tag: "busy", Reason: "at session cap (3 live >= cap 3)"},
+			{Tag: "day26", Reason: "needs_login"},
+		},
+	}
+	got := EvaluatePreflight(in)
+	if got.Verdict != PreflightRefuseNoAccount {
+		t.Fatalf("verdict = %s, want REFUSE_NO_ACCOUNT", got.Verdict)
+	}
+	for _, want := range []string{"live=0", "cap=8", "busy=at session cap", "day26=needs_login"} {
+		if !strings.Contains(got.Reason, want) {
+			t.Fatalf("reason = %q, want it to contain %q", got.Reason, want)
+		}
+	}
+	// The structured per-account block reasons survive into the verdict JSON.
+	acct, ok := got.Map()["account"].(map[string]any)
+	if !ok {
+		t.Fatalf("account map missing: %#v", got.Map()["account"])
+	}
+	blocked, ok := acct["blocked_accounts"].([]BlockedAccount)
+	if !ok || len(blocked) != 2 || blocked[0].Reason == "" {
+		t.Fatalf("blocked_accounts = %#v, want 2 reasoned entries", acct["blocked_accounts"])
 	}
 }
 
