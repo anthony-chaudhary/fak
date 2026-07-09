@@ -503,3 +503,15 @@ func headValueIsVolatile(v json.RawMessage) bool {
 // token evidence (UUID/nonce, sub-day timestamp) the breakpoint planner above uses —
 // so the VOLATILE_SPAN skip is wired to the real volatility state, not a re-implementation.
 func HeadValueIsVolatile(v json.RawMessage) bool { return headValueIsVolatile(v) }
+
+// ClassifyVolatileHead is the NAMED counterpart to HeadValueIsVolatile (#3341): where the
+// bool only says a cache-prefix head IS volatile, this returns the per-CLASS diagnosis
+// (uuid / iso8601 / jwt / hex_hash counts) plus an operator warning line, so a silently
+// collapsed cache hit-rate surfaces as WHICH volatile class sits in the system prompt
+// rather than a bare `volatile_head` counter — and it names JWTs and hex hashes, which the
+// bool check misses. It scans the same raw head bytes and is read-only: it never rewrites
+// the head (the M2 anchor still owns reordering). An empty/absent value yields an empty,
+// stable report.
+func ClassifyVolatileHead(v json.RawMessage) cachemeta.VolatileReport {
+	return cachemeta.ClassifyVolatile(v)
+}

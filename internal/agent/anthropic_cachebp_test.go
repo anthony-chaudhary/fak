@@ -494,3 +494,24 @@ func TestHeadValueIsVolatileBoundaries(t *testing.T) {
 		}
 	}
 }
+
+// TestVolatileHeadClassify wires the NAMED classifier (#3341) end-to-end from the same head
+// bytes the bool check scans: a head with a UUID, a JWT, and a SHA-256 hash yields the
+// per-class diagnosis and one operator warning naming those classes. A stable head yields
+// an empty warning.
+func TestVolatileHeadClassify(t *testing.T) {
+	head := json.RawMessage(`{"system":"agent session=550e8400-e29b-41d4-a716-446655440000 ` +
+		`token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTYifQ.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9 ` +
+		`build=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}`)
+	rep := ClassifyVolatileHead(head)
+	if rep.Total() != 3 {
+		t.Fatalf("Total() = %d, want 3 (counts=%v)", rep.Total(), rep.Counts)
+	}
+	const wantWarn = "cache prefix unstable: uuid=1, jwt=1, hex_hash=1 — move dynamic values out of the system prompt"
+	if got := rep.Warning(); got != wantWarn {
+		t.Fatalf("Warning() =\n  %q\nwant\n  %q", got, wantWarn)
+	}
+	if w := ClassifyVolatileHead(json.RawMessage(`{"system":"today is 2026-06-26, be helpful"}`)).Warning(); w != "" {
+		t.Fatalf("stable head Warning() = %q, want empty", w)
+	}
+}
