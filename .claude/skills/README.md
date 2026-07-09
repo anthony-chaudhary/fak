@@ -17,7 +17,7 @@ flowchart TD
   MN --> Quality["code: quality-score"]
   MN --> Audit["read-mostly audit: bottleneck-map, trajectory-audit"]
   Pack --> DOS["DOS trust gates<br/>(witness, price, dispatch)"]
-  Pack --> Fleet["Fleet / bulk dispatch<br/>(super-loop launch + wave-harvest reconcile)"]
+  Pack --> Fleet["Fleet / bulk dispatch<br/>(scout-loop find + super-loop launch + wave-harvest reconcile)"]
 ```
 
 *The page's skill families — and, within Maintenance, the surface each skill tends.*
@@ -32,6 +32,7 @@ flowchart TD
 | [`memory-compact`](memory-compact/SKILL.md) | Keep a Claude Code auto-memory store under the harness load cap (200 lines / 25 KB), tier into hot/cold, prove it with the bundled `check_memory.py` witness. |
 | [`skill-lifecycle`](skill-lifecycle/SKILL.md) | Witnessed lifecycle for this skill pack — usage-telemetry sidecar, value/idle-driven auto-archive (never delete, restorable), pin-exemption, journaled reversible transitions. Bundled `skill_lifecycle_test.py` witness. |
 | [`field-borrow`](field-borrow/SKILL.md) | Turn an outward field idea into grounded backlog *without guessing whether fak already has it*: **dogfood the self-query surface** (`fak_feature_query` / `fak index`) to witness PRESENT/PARTIAL/ABSENT, ground each real gap at a file:line seam, and file epic-anchored issues carrying the named source + the dogfood witness + a first checkable step. The witness-first, human-curated counterpart to the automated `idea-scout`; the product/agent-capability counterpart of the inward `sota-check` (kernels) and outward `industry-score` (the competitive map). Worked instance: [`CONCEPT-FIELD-BORROW-QUERY-QUALITY-2026-07-08`](../../docs/notes/CONCEPT-FIELD-BORROW-QUERY-QUALITY-2026-07-08.md). |
+| [`study-repo`](study-repo/SKILL.md) | Turn "look at &lt;repo&gt;" into scoped, witnessed, license-clean backlog. Shallow-clone a specific GitHub repo into scratch (never the tree), **pin the commit SHA**, read the CODE not the pitch (load-bearing modules + tests + recent commits), extract candidate borrows each grounded at a real source `path:line@sha`, decide **borrow-vs-integrate** on the license, and — the heart — **decompose into many small independently-shippable tickets** (epic + leaves for a track), never one "adopt everything from repo X" monolith. The acquisition/exploration front-half that FEEDS `field-borrow`: study-repo starts from a repo URL and produces the candidates; field-borrow witnesses (PRESENT/PARTIAL/ABSENT) and files each. Distinct from the automated outward `idea-scout` and the kernel-only `sota-check`. |
 
 ## DOS trust gates
 
@@ -60,8 +61,16 @@ discipline (PLAN first, price the fan-out, respect the no-DoS cap).
 |---|---|
 | [`super-loop`](super-loop/SKILL.md) | Launch N detached `/goal` workers in bulk — tree-disjoint in one checkout (`issue_dispatch.py --wave`) or one-per-distinct-account for rate-limit headroom (`launch_wave_detached.ps1`). PLAN by default; prices collisions + account-distinctness before spawning; re-checks the preflight cap per spawn; holds the fan-out to the honesty boundary (a launch is not a ship — ancestry closes issues). Fuel: [`resolve-top-issue-witnessed`](../goal-prompts/resolve-top-issue-witnessed.md). |
 | [`wave-harvest`](wave-harvest/SKILL.md) | The closing half of a super loop: after a wave runs, witness what each worker *actually* shipped from git (not its log), re-queue the claimed-but-unshipped leaves, stop workers spinning without net gain, and surface any stranded lane. Read-mostly; never closes an issue by narration. |
+| [`scout-loop`](scout-loop/SKILL.md) | The research→backlog super loop: it CHAINS the outward crawler (`idea-scout`/`FleetIdeaScout`, which feeds a needs-triage queue) into the study pipeline (`/study-repo` → `/field-borrow`), on a cadence. One lead per pass — crawl the freshest signal → select the highest-value repo-shaped lead → study it at a pinned `@sha` → witness each borrow (PRESENT dropped, PARTIAL/ABSENT filed small) → register a dated note. Re-implements none of them; orders them, and holds the honesty boundary (a crawl is not a borrow, a study is not a ship). Set it running with [`register_scout_loop.ps1`](../../tools/register_scout_loop.ps1) (`FleetScoutLoop`, PLAN by default, `-Launch` opt-in). Fuel: [`scout-and-study-witnessed`](../goal-prompts/scout-and-study-witnessed.md). NOT `idea-scout` (the raw feed it consumes), NOT a single `/study-repo` (that's one lead by hand). |
+| [`question-loop`](question-loop/SKILL.md) | The super loop that ASKS instead of ships. Launches detached workers whose only job is to ask 5–10 hard questions — unasked / afraid / contrarian / steelman — about what we're doing, into a durable ledger (`docs/questions/asked.jsonl`); a SEPARATE next-step loop, in a SEPARATE context window, turns qualifying questions into `question-loop`-labeled gh tickets. Fuel: [`ask-hard-questions`](../goal-prompts/ask-hard-questions.md) + [`questions-to-tickets`](../goal-prompts/questions-to-tickets.md). NOT idea-scout (external feeds), NOT the Go `superloop.Super` interior node. |
 
 The pair is the full loop: `super-loop` launches, `wave-harvest` reconciles.
+`scout-loop` is the family's FINDING member — it runs *upstream* of the pair,
+turning the outward crawler's feed into studied, witnessed backlog for `super-loop`
+to then resolve; same detached-launcher + PLAN-by-default shape, but its workers
+produce *filed tickets*, not commits. `question-loop` is the family's ASKING member
+— same shape again, but its workers produce *questions*, not commits; it ships
+nothing but the ledger.
 Contrast with [`dos-dispatch-loop`](dos-dispatch-loop/SKILL.md) (an *in-session*
 dispatch⇄replan cadence on one lane) and [`run-it-all-night`](run-it-all-night/SKILL.md)
 (unattended *data collection*, not issue resolution).
