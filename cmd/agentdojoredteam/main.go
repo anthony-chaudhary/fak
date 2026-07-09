@@ -82,6 +82,11 @@ func main() {
 	// Allow (a MISS) is a negative. We record the full-stack outcome because that
 	// is the shipped defense the corpus trains the keep/revert gate against.
 	corpus := harvest.NewCorpus()
+	// This bench folds one row per attack over a FIXED battery and then digests /
+	// exports the whole corpus, so it opts out of the default recent-window bound —
+	// truncating to the most recent rows would change the digest and the class
+	// tallies. A long-lived attach point would instead keep the default bound.
+	corpus.SetMaxRows(-1)
 	folder := harvest.New(corpus)
 
 	rows := make([]outcomeRow, 0, len(battery))
