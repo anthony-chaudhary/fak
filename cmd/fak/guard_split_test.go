@@ -16,7 +16,7 @@ func lookPathOK(string) (string, error)   { return "wt", nil }
 func lookPathFail(string) (string, error) { return "", errors.New("not found") }
 
 func guardOverlayArgs() []string {
-	return []string{"info", "--gateway-url", "http://127.0.0.1:5000", "--interval", "2s"}
+	return []string{"info", "--gateway-url", "http://127.0.0.1:5000", "--interval", "2s", "--max-idle", "5m0s"}
 }
 
 func TestBuildGuardSplitPlanTmuxBottom(t *testing.T) {
@@ -28,11 +28,11 @@ func TestBuildGuardSplitPlanTmuxBottom(t *testing.T) {
 		t.Fatalf("host = %q, want tmux", plan.Host)
 	}
 	// -d keeps the agent pane active (the overlay never steals focus).
-	want := []string{"tmux", "split-window", "-v", "-d", "-l", "20%", "--", "fak", "info", "--gateway-url", "http://127.0.0.1:5000", "--interval", "2s"}
+	want := []string{"tmux", "split-window", "-v", "-d", "-l", "20%", "--", "fak", "info", "--gateway-url", "http://127.0.0.1:5000", "--interval", "2s", "--max-idle", "5m0s"}
 	if strings.Join(plan.Spawn, " ") != strings.Join(want, " ") {
 		t.Fatalf("spawn = %v\nwant   %v", plan.Spawn, want)
 	}
-	if got := strings.Join(plan.Overlay, " "); got != "fak info --gateway-url http://127.0.0.1:5000 --interval 2s" {
+	if got := strings.Join(plan.Overlay, " "); got != "fak info --gateway-url http://127.0.0.1:5000 --interval 2s --max-idle 5m0s" {
 		t.Fatalf("overlay = %q", got)
 	}
 }
@@ -61,7 +61,7 @@ func TestBuildGuardSplitPlanWindowsTerminalCurrentWindow(t *testing.T) {
 	}
 	// `; move-focus up` returns the cursor to the agent pane (above the bottom strip) after
 	// split-pane focuses the new overlay pane.
-	want := []string{"wt", "-w", "0", "split-pane", "-H", "-s", "0.2", "fak.exe", "info", "--gateway-url", "http://127.0.0.1:5000", "--interval", "2s", ";", "move-focus", "up"}
+	want := []string{"wt", "-w", "0", "split-pane", "-H", "-s", "0.2", "fak.exe", "info", "--gateway-url", "http://127.0.0.1:5000", "--interval", "2s", "--max-idle", "5m0s", ";", "move-focus", "up"}
 	if strings.Join(plan.Spawn, " ") != strings.Join(want, " ") {
 		t.Fatalf("spawn = %v\nwant   %v", plan.Spawn, want)
 	}
@@ -116,11 +116,13 @@ func TestBuildGuardSplitPlanInvalidWhere(t *testing.T) {
 }
 
 // TestGuardInfoPaneOverlayArgsSingleSource proves the pane's `fak info` argv carries the live
-// gateway URL and interval and nothing else — the single shape both the dry-run preview and
-// the live spawn read, so the two can never drift.
+// gateway URL, interval, and the #2340 --max-idle backstop and nothing else — the single shape
+// both the dry-run preview and the live spawn read, so the two can never drift. The --max-idle
+// arg is what stops an auto-spawned pane whose gateway never comes up from leaking a terminal
+// pane + threads (the WindowsTerminal thread-lag root cause).
 func TestGuardInfoPaneOverlayArgsSingleSource(t *testing.T) {
 	got := guardInfoPaneOverlayArgs("http://127.0.0.1:8080", 3*time.Second)
-	want := []string{"info", "--gateway-url", "http://127.0.0.1:8080", "--interval", "3s"}
+	want := []string{"info", "--gateway-url", "http://127.0.0.1:8080", "--interval", "3s", "--max-idle", "5m0s"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("overlay args = %v, want %v", got, want)
 	}

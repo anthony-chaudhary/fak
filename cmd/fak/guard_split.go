@@ -237,11 +237,21 @@ func openGuardInfoPane(stderr io.Writer, getenv func(string) string, where, gwUR
 	fmt.Fprintf(stderr, "fak guard: --split · opening a 20%% fak-info pane (%s) beside the agent ...\n", plan.Geometry)
 }
 
+// guardInfoPaneMaxIdle is the #2340 backstop applied to the AUTO-spawned split pane: if its
+// gateway never answers within this long, the pane self-exits instead of polling a dead URL
+// forever and leaking an OpenConsole pane + its threads into the WindowsTerminal host (measured
+// live: one host at 1576 threads / 31k handles because these panes never exited). It is safe to
+// set aggressively because the backstop ONLY fires for a pane that was NEVER healthy — a gateway
+// that came up and later died still gets the friendlier "session ended" close, and a healthy
+// dashboard pane runs indefinitely regardless of this value. Manual `fak info` keeps default 0.
+const guardInfoPaneMaxIdle = 5 * time.Minute
+
 // guardInfoPaneOverlayArgs is the single source of truth for the `fak info` child argv the
 // split pane runs, so the dry-run preview and the live spawn can never drift. Kept beside
-// openGuardInfoPane (which calls the same shape inline) so the two stay in lockstep.
+// openGuardInfoPane (which calls the same shape inline) so the two stay in lockstep. The
+// auto-spawned pane always carries the #2340 --max-idle backstop (see guardInfoPaneMaxIdle).
 func guardInfoPaneOverlayArgs(gwURL string, interval time.Duration) []string {
-	return []string{"info", "--gateway-url", gwURL, "--interval", interval.String()}
+	return []string{"info", "--gateway-url", gwURL, "--interval", interval.String(), "--max-idle", guardInfoPaneMaxIdle.String()}
 }
 
 // renderGuardInfoPaneDryRun resolves the split plan and renders it WITHOUT spawning anything —
