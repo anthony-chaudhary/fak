@@ -169,6 +169,12 @@ type PoolObjective struct {
 	KVUtilLow     float64
 	TTFTSLO       time.Duration
 	TPOTSLO       time.Duration
+	// ScaleDownSensitivity gates a consolidation-aware survivor-load veto. When
+	// >0, a below-low-water scale-down is refused if re-predicting the survivors'
+	// load (backlog scaled by current/survivors) would breach this fraction of
+	// the SLA high-water band, so a shrink that would instantly re-breach and
+	// flap back is held instead. 0 disables the veto.
+	ScaleDownSensitivity float64
 }
 
 // ServingAutoscalerConfig configures the split-pool scale controller.
@@ -596,9 +602,55 @@ func (o PoolObjective) target(current int, sig PoolSignals) (int, string) {
 		return clampInt(current+o.ScaleStep, o.MinReplicas, o.MaxReplicas), strings.Join(reasons, ",")
 	}
 	if current > o.MinReplicas && o.lowEnough(sig) {
+		if o.survivorWouldBreach(current, sig) {
+			return current, "survivor_load_veto"
+		}
 		return clampInt(current-o.ScaleStep, o.MinReplicas, o.MaxReplicas), "below_low_water"
 	}
 	return current, "within_band"
+}
+
+// survivorWouldBreach re-predicts the survivors' load after a N->N-step
+// scale-down by redistributing the pool's backlog onto the smaller survivor set
+// (consolidation = current/survivors) and reports whether that projected load
+// would breach a sensitivity-fraction of the SLA high-water band. This vetoes a
+// scale-down whose lone survivor would instantly re-breach and flap back up.
+func (o PoolObjective) survivorWouldBreach(current int, sig PoolSignals) bool {
+	if o.ScaleDownSensitivity <= 0 {
+		return false
+	}
+	survivors := clampInt(current-o.ScaleStep, o.MinReplicas, o.MaxReplicas)
+	if survivors <= 0 || survivors >= current {
+		return false
+	}
+	consolidation := float64(current) / float64(survivors)
+	projected := PoolSignals{
+		Goodput:       sig.Goodput,
+		QueueDepth:    int(float64(sig.QueueDepth) * consolidation),
+		KVUtilization: sig.KVUtilization * consolidation,
+		TTFT:          time.Duration(float64(sig.TTFT) * consolidation),
+		TPOT:          time.Duration(float64(sig.TPOT) * consolidation),
+	}
+	return o.breachesSensitivity(projected)
+}
+
+// breachesSensitivity reports whether a projected signal set crosses a
+// sensitivity-scaled fraction of any SLA high-water threshold.
+func (o PoolObjective) breachesSensitivity(sig PoolSignals) bool {
+	s := o.ScaleDownSensitivity
+	if o.QueueHigh > 0 && float64(sig.QueueDepth) >= s*float64(o.QueueHigh) {
+		return true
+	}
+	if o.KVUtilHigh > 0 && sig.KVUtilization >= s*o.KVUtilHigh {
+		return true
+	}
+	if o.TTFTSLO > 0 && sig.TTFT >= time.Duration(s*float64(o.TTFTSLO)) {
+		return true
+	}
+	if o.TPOTSLO > 0 && sig.TPOT >= time.Duration(s*float64(o.TPOTSLO)) {
+		return true
+	}
+	return false
 }
 
 func (o PoolObjective) highReasons(sig PoolSignals) []string {

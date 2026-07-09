@@ -351,3 +351,38 @@ func roleCounts(m *FleetMembership) map[WorkerRole]int {
 	}
 	return out
 }
+
+func TestPoolObjectiveConsolidationVetoesFlappingScaleDown(t *testing.T) {
+	// A pool that survives on 2 workers but whose backlog, once consolidated
+	// onto the lone survivor (N/(N-1) = 2x), would breach the SLA high-water
+	// band. The scale-down must be vetoed so it does not flap 2->1->2.
+	obj := PoolObjective{
+		MinReplicas:          1,
+		MaxReplicas:          4,
+		ScaleStep:            1,
+		QueueLow:             10,
+		QueueHigh:            16,
+		ScaleDownSensitivity: 1.0,
+	}.normalized()
+
+	// Backlog of 9 is below QueueLow (10) at N=2, so lowEnough triggers, but the
+	// survivor projection (9*2=18) exceeds QueueHigh (16) -> veto.
+	sig := PoolSignals{QueueDepth: 9}
+	target, reason := obj.target(2, sig)
+	if target != 2 || reason != "survivor_load_veto" {
+		t.Fatalf("expected survivor_load_veto holding at 2, got target=%d reason=%q", target, reason)
+	}
+
+	// Lighter backlog whose survivor projection stays under the band still
+	// scales down normally, proving the veto is not a blanket refusal.
+	target, reason = obj.target(2, PoolSignals{QueueDepth: 5})
+	if target != 1 || reason != "below_low_water" {
+		t.Fatalf("expected below_low_water scaling to 1, got target=%d reason=%q", target, reason)
+	}
+
+	// With the veto disabled (sensitivity 0) the same breaching load scales down.
+	obj.ScaleDownSensitivity = 0
+	if target, reason := obj.target(2, sig); target != 1 || reason != "below_low_water" {
+		t.Fatalf("veto should be off at sensitivity 0, got target=%d reason=%q", target, reason)
+	}
+}
